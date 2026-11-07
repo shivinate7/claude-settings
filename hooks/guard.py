@@ -148,7 +148,8 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        command words, also inside wrappers, `bash -c` and `$(...)`, so quoted text and a
                        heredoc body pass. (process-args-guard)
   merge-checks         deny. A merge while the head has a check pending or red, while another
-                       ready PR on the base runs CI, or when the read could not run. `--auto` too.
+                       ready PR on the base runs CI, or when the read could not run. `--auto` too, and the MCP
+                       merge_pull_request and enable_pr_auto_merge tools.
   merge-role-proof     deny. A merge-tool call with a role flag whose tier the session's own get_session
                        record (read from the transcript) does not show in its cs-build tags.
   merge-confirm-repo   deny. In a cloud session, a merge-tool call with --confirm whose checkout (the -C or
@@ -214,7 +215,8 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        deny. A SendMessage whose `to` is a string starting `session_`: that is no agent name, and the
                        hand-off could go missing. A missing or non-string `to`, an agent name, @parent and the
                        mcp__claude-code-remote__send_message tool pass. An override lifts it.
-  draft-pr             deny. A `gh pr create` without `--draft`. (draft-until-reviewed)
+  draft-pr             deny. A `gh pr create` without `--draft`, or an MCP create_pull_request without
+                       draft true. (draft-until-reviewed)
   gh-write-cloud       deny. In a cloud session, a gh write: `gh pr` create, merge, comment, edit, close, review or
                        ready; `gh issue` create, comment, edit or close; `gh api` with a write method, or with a field
                        or input flag and no method. Judged per segment from the command word. A read, `gh api` with an
@@ -584,7 +586,7 @@ while True:
             HOOK_BYPASS_REASON, conflict_markers_hit, hook_bypass_hit, octopus_push_hit, _push_calls, gh_call_of, gh_write_of, git_call_of, merge_call_of, merge_check, merge_check_reason, record_writer_hit,
             records_page_hit, repo_proof_hit, role_proof_hit,
             DEFAULT_RECORD_BRANCH, RECORD_REASON, settings_roots, TRUST_REASON, archive_hit, brief_hit, stamp_hit, trust_card_hit, written_time_hit,
-            undrafted_pr_create, uses_merge_tool, ready_page_hit, REVIEW_COMMENT_TOOL, review_record_hit, review_note, pr_call_target,
+            undrafted_pr_create, uses_merge_tool, ready_page_hit, CREATE_PR_TOOL, REVIEW_COMMENT_TOOL, review_record_hit, review_note, pr_call_target,
         )
         _loading = "guard_frozen"
         from guard_frozen import (
@@ -7042,7 +7044,7 @@ def judge(payload) -> None:
         refuse_ready_page(tool, tool_input, "", cwd)
 
     # The MCP create tool carries its own `draft` field.
-    if tool == "mcp__github__create_pull_request" and tool_input.get("draft") is not True:
+    if tool == CREATE_PR_TOOL and tool_input.get("draft") is not True:
         refuse(tool, "deny", "draft-pr", DRAFT_PR_REASON, "create_pull_request without draft")
 
     # A SendMessage addressed to a cloud session id (rule sendmessage-session-id).
