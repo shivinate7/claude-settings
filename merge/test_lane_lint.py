@@ -472,13 +472,13 @@ class LaneLint(CiJobStub, tm.CloudSession):
 
     # merge.laneTests: after the lint passes, the lane's head runs the suites its profile's select lists (contract: merge.lane_lint).
 
-    def use_lane_profile(self):
+    def use_lane_profile(self, select=None):
         """Register the fixture profile in mutate_guard.REPLAY_PROFILES for this case. Its select is tools/lane_select.py, in the
-        checkout; its suites are test_*.py files run with this interpreter; it installs nothing. The dict is patched in place, so a
-        name that bound it at import sees the entry too."""
+        checkout (or `select`, when a case names another argv); its suites are test_*.py files run with this interpreter; it installs
+        nothing. The dict is patched in place, so a name that bound it at import sees the entry too."""
         profile = {"code": r"^src/.*\.py$", "tests": r"(^|/)test_[^/]*\.py$", "argv": [sys.executable, "{suite}"],
                    "classify": "fail_line", "install": None, "sparse_skip": [],
-                   "select": [sys.executable, "tools/lane_select.py", "{path}"]}
+                   "select": select or [sys.executable, "tools/lane_select.py", "{path}"]}
         patch = unittest.mock.patch.dict(mutate_guard.REPLAY_PROFILES, {LANE_PROFILE: profile})
         patch.start()
         self.addCleanup(patch.stop)
@@ -501,24 +501,56 @@ class LaneLint(CiJobStub, tm.CloudSession):
         return head + end
 
     def lane_fixture(self, listed=(), suites=None, feat_suites=None, select_fails=False, laneTests=LANE_PROFILE,
-                     lane=None, select_prefix="src/"):
+                     lane=None, select_prefix="src/", base_files=None, lane_deletes=(), lane_renames=None,
+                     lane_listed=None, select_argv=None, config_text=None):
         """The laneTests fixture, one call per case. origin/main gets the repo's own parts: the config, with merge.laneTests `laneTests`
-        (None: the field is absent); tools/lane_select.py, the profile's select, which lists `listed` for a path under `select_prefix`
-        or exits 3 when `select_fails`; and `suites` ({path: mode}), suites the lane does not touch. origin/feat gets one commit on top:
-        `lane` ({path: text}, default src/p.py, the product file the lane changes) and `feat_suites` ({path: mode}), suites the lane
-        itself adds. A mode is "pass", "fail" or "crash"."""
+        (None: the field is absent, or `config_text` is written as the file), tools/lane_select.py, the profile's select, which lists
+        `listed` for a path under `select_prefix` or exits 3 when `select_fails`; `suites` ({path: mode}), suites the lane does not touch;
+        and `base_files` ({path: text}), product files the base holds. origin/feat gets one commit on top: `lane` ({path: text}, default
+        src/p.py, the product file the lane changes), `feat_suites` ({path: mode}), suites the lane itself adds, and `lane_listed`, a
+        selector the lane writes in place of the base's. Then `lane_deletes` (paths) and `lane_renames` ({old: new}) go in a second
+        commit. `select_argv` replaces the profile's select. A mode is "pass", "fail" or "crash"."""
         self.select_log = os.path.join(self.t, "select-calls.log")
         self.suite_log = os.path.join(self.t, "suite-runs.log")
-        self.use_lane_profile()
+        self.use_lane_profile(select_argv)
         main = {"tools/lane_select.py": self.select_text(listed, select_fails, select_prefix)}
-        if laneTests is not None:
+        if config_text is not None:
+            main[".github/stamp.json"] = config_text
+        elif laneTests is not None:
             main[".github/stamp.json"] = json.dumps(dict(tm.CONFIG, merge=dict(tm.CONFIG["merge"], laneTests=laneTests)))
+        main.update(base_files or {})
         main.update({path: self.suite_text(path, mode) for path, mode in (suites or {}).items()})
-        tm.RecordsEnv.on(self, "main", main, "main: the config, the selector and the suites it lists")
+        tm.RecordsEnv.on(self, "main", main, "main: the config, the selector, the product files and the suites it lists")
         tm.head_takes_base(self)  # the lane's head holds main's parts, as a lane that merged main does
-        feat = dict(lane if lane is not None else {"src/p.py": "VALUE = 1\n"})
+        feat = dict(lane if lane is not None else ({} if lane_deletes or lane_renames else {"src/p.py": "VALUE = 1\n"}))
+        if lane_listed is not None:
+            feat["tools/lane_select.py"] = self.select_text(lane_listed, False, select_prefix)
         feat.update({path: self.suite_text(path, mode) for path, mode in (feat_suites or {}).items()})
-        tm.RecordsEnv.on(self, "feat", feat, "feat: the lane's changes and the suites it adds")
+        if feat:
+            tm.RecordsEnv.on(self, "feat", feat, "feat: the lane's changes and the suites it adds")
+        if lane_deletes or lane_renames:
+            self.lane_moves(lane_deletes, lane_renames or {})
+
+    def lane_moves(self, deletes, renames):
+        """One more commit on origin/feat from the second clone, as a lane's own push would make it: `deletes` removed, and `renames`
+        ({old: new}) moved with git mv."""
+        o = self.other
+        tm.sh(o, "git", "fetch", "-q", "origin")
+        tm.sh(o, "git", "checkout", "-q", "-B", "feat", "origin/feat")
+        for rel in deletes:
+            tm.sh(o, "git", "rm", "-q", rel)
+        for old, new in renames.items():
+            os.makedirs(os.path.dirname(os.path.join(o, new)) or o, exist_ok=True)
+            tm.sh(o, "git", "mv", old, new)
+        tm.sh(o, "git", "commit", "-qm", "feat: the lane moves product files")
+        tm.sh(o, "git", "push", "-q", "origin", "feat")
+
+    def lane_status(self):
+        """-> {path: status letter} of the lane's own diff, origin/main...origin/feat, with renames read as a delete and an add (the lane
+        lint's reading)."""
+        tm.sh(self.co, "git", "fetch", "-q", "origin")
+        lines = tm.sh(self.co, "git", "diff", "--name-status", "--no-renames", "origin/main...origin/feat").splitlines()
+        return {line.split("\t")[1]: line[0] for line in lines}
 
     def assert_suite_is_selector_only(self, suite):
         """Scope before subject (P7): the suite is on origin/main and not in the lane's own diff, so only the selector reaches it,
@@ -646,6 +678,37 @@ class LaneLint(CiJobStub, tm.CloudSession):
         self.assertEqual(pass_lines(out), [], out)
         self.assertRegex(out, r"(?i)push")
         self.assertRegex(out, r"(?i)again")
+
+    def test_a_selected_suite_for_a_product_file_the_lane_deletes_runs_and_a_red_one_refuses_the_lane(self):
+        """Ruling (lane, 2026-11-07 16:13 CST): a delete is a change and goes to the selector. The lane deletes src/p.py, which the base
+        holds; the selector lists the red suite for src/p.py; the lane is refused."""
+        self.lane_fixture(listed=[SUITE], suites={SUITE: "fail"}, base_files={"src/p.py": "VALUE = 1\n"}, lane={},
+                          lane_deletes=["src/p.py"], select_prefix="src/p.py")
+        self.assertEqual(self.lane_status().get("src/p.py"), "D", "the fixture does not delete the product file in the lane")
+        self.use_ci_job(PASSING, 0)
+        rc, out = self.lint_run("--lane-lint", "7")
+        self.assertIn("src/p.py", self.select_paths(), "the selector was not asked about the deleted file: " + out)
+        self.assertIn(SUITE, self.suite_names(), "the selector's red suite did not run for the deleted file: " + out)
+        self.assertEqual(rc, 1, out)
+        self.assertTrue(any(SUITE in line and "FAIL" in line for line in out.splitlines()), "the refusal does not name the red suite: " + out)
+        self.assertEqual(pass_lines(out), [], out)
+        self.assertRegex(out, r"(?i)push")
+        self.assertRegex(out, r"(?i)again")
+
+    def test_a_selected_suite_for_a_product_file_the_lane_renames_away_runs_and_a_red_one_refuses_the_lane(self):
+        """Ruling (lane, 2026-11-07 16:13 CST): a rename removes its old path, which is a delete and goes to the selector. The lane moves
+        src/p.py to src/q.py. The selector lists the red suite for src/p.py only, so the lane is refused only if the old path is asked."""
+        self.lane_fixture(listed=[SUITE], suites={SUITE: "fail"}, base_files={"src/p.py": "VALUE = 1\n"}, lane={},
+                          lane_renames={"src/p.py": "src/q.py"}, select_prefix="src/p.py")
+        status = self.lane_status()
+        self.assertEqual((status.get("src/p.py"), status.get("src/q.py")), ("D", "A"), "the fixture does not rename the product file")
+        self.use_ci_job(PASSING, 0)
+        rc, out = self.lint_run("--lane-lint", "7")
+        self.assertIn("src/p.py", self.select_paths(), "the selector was not asked about the renamed-away file: " + out)
+        self.assertIn(SUITE, self.suite_names(), "the selector's red suite did not run for the renamed-away file: " + out)
+        self.assertEqual(rc, 1, out)
+        self.assertTrue(any(SUITE in line and "FAIL" in line for line in out.splitlines()), "the refusal does not name the red suite: " + out)
+        self.assertEqual(pass_lines(out), [], out)
 
     def test_every_red_selected_suite_is_named_and_a_green_one_is_not(self):
         listed = [SUITE, OTHER_SUITE, THIRD_SUITE]
