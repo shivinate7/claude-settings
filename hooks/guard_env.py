@@ -100,9 +100,10 @@ ENV_SCRIPT_COMMANDS = ("sed", "awk", "gawk", "mawk", "nawk")
 ENV_SCRIPT_VALUE_SHORT = "Fv"
 # Per-command flag letters, for the letters that differ between the search tools. `-f` takes a file
 # of patterns in grep and rg, and is a plain switch in ag and ack. `-t` and `-T` take a file type in
-# rg only: in ag `-t` is a switch, so a `t` in the shared letters would swallow a path.
+# rg only: in ag `-t` is a switch, so a `t` in the shared letters would swallow a path. jq's `-L`
+# takes a module directory, which is judged as a path.
 ENV_BOOLEAN_F_COMMANDS = ("ag", "ack")
-ENV_VALUE_SHORT_BY_COMMAND = {"rg": "tT"}
+ENV_VALUE_SHORT_BY_COMMAND = {"rg": "tT", "jq": "L"}
 # `jq`, `gojq` and `yq` take a program as the first plain word: a key path such as `.envs` is text.
 # Their file arguments stay judged. Their `-e` is an exit-status switch, not a pattern flag, and
 # `-f` / `--from-file` names a file of the program.
@@ -490,9 +491,11 @@ def _pattern_words(words, position: int, command: str):
                 break
         i += step
     if program and not given and plain:
-        # A yq subcommand leads the program, and is no path either.
+        # A yq subcommand leads the program, and is no path either. The program is skipped only
+        # when a file word follows it: a lone word reads stdin or is the file, so it is judged.
         lead = 1 if command == "yq" and words[plain[0]] in ENV_YQ_SUBCOMMANDS else 0
-        skip.update(plain[:lead + 1])
+        if len(plain) > lead + 1:
+            skip.update(plain[:lead + 1])
     elif not given and plain:
         skip.add(plain[0])
     return skip, glued
