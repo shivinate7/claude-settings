@@ -485,8 +485,9 @@ ANSWERED_SOURCE_RE = re.compile(
     r"https?://\S+|\bitem\s+\d+|\bpage:\d+|\bfb-\w+|\bsession_\w+|\b\d{1,2}:\d{2}\b", re.I)
 ANSWERED_REASON = (
     "Answered guard (rule answered-needs-source): each line below says \"answered\" and cites no source. Add "
-    "where the answer came from on the same line (a link, #<n>, a commit, a file path, item <n>, a session or "
-    "inbox id, or the time), or say what is meant in other words. Lines: ")
+    "the source on the same line (link, #<n>, commit, file path, item <n>, session or inbox id, or time), or "
+    "say what is meant in other words. A mention of the word, not a claim, can go in an inline code span. "
+    "Lines: ")
 
 
 def _has_path(line):
