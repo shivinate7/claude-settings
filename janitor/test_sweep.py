@@ -4192,12 +4192,12 @@ class AgentEndLogReadTests(unittest.TestCase):
         through the module's own _log_lock, so the wait is real. give_up_at is already past, so no case sleeps."""
         path = self.scoped_log_path()
         os.makedirs(os.path.dirname(path), exist_ok=True)
-        err = io.StringIO()
         with self.reap._log_lock(path, time.monotonic() + 5):
-            with contextlib.redirect_stderr(err):
+            with self.assertRaises(self.reap.LogWaitTimeout, msg="the lock is not held, so the case tested nothing"):
+                with self.reap._log_lock(path, time.monotonic() - 1):
+                    pass
+            with contextlib.redirect_stderr(io.StringIO()):
                 self.reap.log({"raw": "{}", "run": "timeout-run", "state": "done"}, give_up_at=time.monotonic() - 1)
-        self.assertIn("LogWaitTimeout", err.getvalue(),
-                      "the case did not reach a lock wait timeout: %r" % err.getvalue())
         row = self.assert_one_drop_row(path, "timeout-run")
         self.assertIn("LogWaitTimeout", row["error"],
                       "the drop row's error does not name the lock timeout: %r" % row["error"])
@@ -4205,11 +4205,11 @@ class AgentEndLogReadTests(unittest.TestCase):
     def test_a_failed_replace_writes_one_drop_row_with_its_run_id(self):
         """A replace refused with an error other than PermissionError drops the new row too."""
         path = self.scoped_log_path()
-        err = io.StringIO()
         refusal = OSError(5, "disk write refused (stand-in)")
-        with mock.patch.object(self.reap.os, "replace", side_effect=refusal), contextlib.redirect_stderr(err):
+        with mock.patch.object(self.reap.os, "replace", side_effect=refusal) as replace, \
+                contextlib.redirect_stderr(io.StringIO()):
             self.reap.log({"raw": "{}", "run": "write-run", "state": "done"})
-        self.assertIn("OSError", err.getvalue(), "the case did not reach a failed write: %r" % err.getvalue())
+        self.assertTrue(replace.called, "the replace never ran, so the case tested nothing")
         row = self.assert_one_drop_row(path, "write-run")
         self.assertIn("OSError", row["error"], "the drop row's error does not name the failed write: %r" % row["error"])
 
