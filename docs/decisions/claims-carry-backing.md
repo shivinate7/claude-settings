@@ -51,7 +51,17 @@ When an act contradicts a route row, the falsifier notes it: `hooks/refusal_note
 
 ## Model judge at merge
 
-`merge/merge.py` will call `invoke_model` (in `hooks/decision_watch.py`) on each line that the reverse map of `lint/stale_cites.py` selects. The reverse map (code to the prose lines that cite it) is planned. The judge is report-only until it is measured on the labelled set. No labelled set exists yet. An error from the model means UNKNOWN, never a pass.
+Built, report-only. `merge/merge.py` calls the model judge once per merge, after the `merge: #N merged as ...` line (test merge/test_merge.py::ProseJudge).
+
+Selection is `changed_sentences` in `lint/stale_cites.py`: each sentence of a governed Markdown paragraph that the PR adds a line to (test lint/test_stale_cites.py::SelectionTests).
+
+The judge is `merge_findings` in `hooks/prose_judge.py`. It makes one `invoke_model` call (read hooks/decision_watch.py:666), with the sentences, the route rows at the merged sha, and each repo file a sentence names, read at that sha. The prompt is capped at 200000 characters and says what it cut (test hooks/test_prose_judge.py::case_h_an_oversized_input_is_capped_and_the_prompt_says_what_it_cut).
+
+Output lines: `merge: #N prose judge: <path>:<line>: <why>` per finding; `merge: #N prose judge: no finding (report-only).`; `merge: #N prose judge: no changed prose to judge.` (no call made).
+
+The judge never refuses. A model error, timeout, odd answer or exception prints `merge: #N prose judge: unknown (<reason>).`, never a pass and never a hold. The merge lands either way (test merge/test_merge.py::ProseJudge).
+
+Flip to refusing: the owner's call, once findings show 10% or fewer false alarms over 20 real findings, the STALE005 threshold (coordinator pick Q3, 2026-11-06 11:47 CST, process-only). The labeller is the named reader: they read each finding from merge output and mark it real or false. No log is written.
 
 ## Re-measure on use
 
@@ -63,7 +73,9 @@ A route row is read as unmeasured when its `measured` date is more than N days o
 
 ## Cost
 
-No long-lived process and no timer. Planned cost: one `git diff -U0`-style diff replaces the name-status diff. One `cat-file` read happens only when a line is a claim candidate. A range that changes `hooks/route_rows.json` opens one `cat-file`. When a row id is removed, it also runs one `ls-tree` and reads each tracked `.md`. The merge judge (`judge_paragraph`, `lint/stale_cites.py`) judges each claim sentence that holds an added row. It selects by added row, not by claim line. Model starts: up to 3 per merge, planned and unmeasured. The judge code on this branch starts no model.
+No long-lived process and no timer. One `git diff -U0`-style diff replaces the name-status diff (read lint/stale_cites.py:72). One `cat-file` read happens only when a line is a claim candidate. A range that changes `hooks/route_rows.json` opens one `cat-file`. When a row id is removed, it also runs one `ls-tree` and reads each tracked `.md`. STALE005 (`judge_paragraph`) selects each claim sentence that holds an added row, not each claim line (read lint/stale_cites.py:709).
+
+The model judge starts one model per merge that adds governed prose, and none otherwise (test merge/test_merge.py::ProseJudge proves the count). It writes no file and leaves no process or timer running.
 
 ## Owner-only
 
@@ -71,9 +83,11 @@ No long-lived process and no timer. Planned cost: one `git diff -U0`-style diff 
 
 ## Status
 
-Planned. Nothing above is built on main, except part (v) layer (a), built in `lint/report_guard.py` (`hand_off_problem`) on this branch and not yet on main. `hooks/route_rows.json` is absent on main.
+Built on main. Part 1, route rows and falsifiers, is PR #1355 (read hooks/route_rows.json; read hooks/refusal_note.py). Part 2, STALE005, is PR #1328 (read lint/stale_cites.py:669). Part 3, the hand-off cite, is PR #1360 (read lint/report_guard.py:1461). The reply judge's route rows are on main too (read hooks/reply_judge.py:146).
 
-Planned, not built: the generator that fills the route-rows table in `docs/decisions/auto-mode-owner-acts.md` from `hooks/route_rows.json`.
+Part 4, the model judge at merge, is built on lane `prose-judge-at-merge` and is not on main yet (test merge/test_merge.py::ProseJudge).
+
+Not built: the generator that fills the route-rows table in `docs/decisions/auto-mode-owner-acts.md` from `hooks/route_rows.json`. No file in lint, hooks, bin, actions or merge names that page (measured 2026-11-07 on origin/main).
 
 Kind: build
 Plan: docs/plans/pointer-system.md#lanes (all)
