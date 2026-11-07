@@ -8181,3 +8181,28 @@ test("the phase head's text names its stalled and paused steps", async (t) => {
   const text = (await prog.locator(".sr").allTextContents()).join(" ").replace(/\s+/g, " ");
   assert.match(text, /3 stalled, 1 paused/, "the phase head's text does not name the stalled and paused steps: " + text);
 });
+// renderNow passes 0 for blocked to the Now card's bar, so a blocked step reads as to do there. The rail and the phase head already draw it.
+const blockedSteps = () => stepsOf([["c1", "cleanup", 1, "todo"], ["d1", "cleanup", 2, "done"], ["b2", "cleanup", 3, "blocked"], ["t3", "cleanup", 4, "todo"]]);
+const noStalled = { why: "", steps: [], paused: [], badPause: [], items: [], ...NO_ITEMS };
+test("the Now card's bar draws a blocked step as blocked, not as to do", async (t) => {
+  const page = await open(t, { pageHtml: withStalled(phasePage(blockedSteps()), noStalled) }); if (!page) return;
+  await openStatus(page);
+  assert.equal(await page.locator("#svNow .segbar").count(), 1, "the Now card has no phase bar (#svNow .segbar)");
+  assert.equal(await page.locator("#svNow .segbar > i.blk").count(), 1, "the Now card's bar draws the blocked step as to do: no blocked cell (i.blk)");
+});
+test("control: the rail's cleanup bar draws a blocked step as blocked", async (t) => {
+  const page = await open(t, { pageHtml: withStalled(phasePage(blockedSteps()), noStalled) }); if (!page) return;
+  await openStatus(page);
+  assert.equal(await page.locator('#svRail button[data-phase="cleanup"] .segbar').count(), 1, "the rail has no cleanup bar");
+  assert.equal(await page.locator('#svRail button[data-phase="cleanup"] .segbar > i.blk').count(), 1, "the rail's cleanup bar does not draw the blocked step as blocked");
+});
+// The Now card's count line (renderNow, line "N of M done, K in progress") names the stalled and paused steps, as notes item 3 says.
+test("the Now card's count line names the stalled and paused steps", async (t) => {
+  const page = await open(t, { pageHtml: barsPage() }); if (!page) return;
+  await openStatus(page);
+  // The first .lead of the Now card is the count line; the second is "Whole plan".
+  const lead = page.locator("#svNow > div:first-child > .lead");
+  assert.ok((await lead.count()) > 0, "the Now card has no count line (#svNow > div:first-child > .lead)");
+  const text = (await lead.first().textContent()).replace(/\s+/g, " ");
+  assert.match(text, /3 stalled, 1 paused/, "the Now card's count line does not name the stalled and paused steps: " + text);
+});
