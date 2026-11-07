@@ -59,6 +59,10 @@ Interface the hook must match:
   question a standing ruling already decides. Each case builds its own real git repo (make_repo), and a fixture
   ruling is found in the prompt with the call's JSON cut out. A search that cannot read a source prints one stderr
   line, `past-ruling search unknown:`, and never says clear.
+- Owner-question sends: a send_message or SendMessage whose message carries a Goal line and a Problem (<stake>) line
+  gets the past-ruling check (lint/report_guard.py past_ruling_problem, the one home) before it is sent, whoever the
+  target is. Any other send makes no model call and starts no subprocess. A refusal is rule `past-ruling` with the
+  relay remedy, and an `Unvetted:` line passes a check that could not run.
 """
 import atexit
 import json
@@ -189,10 +193,14 @@ _real_popen = subprocess.Popen
 
 
 class _CountingPopen(_real_popen):
-    # Records each git process start, so a case counts the git processes a judged call spawns.
+    # Records each git process start, so a case counts the git processes a judged call spawns. Every process start
+    # also goes to procs.log, so a case counts all the subprocesses a call spawns (the claude stub is not one).
     def __init__(self, args, *rest, **kwargs):
         argv = args if isinstance(args, (list, tuple)) else [args]
-        if argv and os.path.basename(str(argv[0])).lower() in ("git", "git.exe"):
+        name = os.path.basename(str(argv[0])).lower() if argv else ""
+        with open(os.path.join(os.environ["CJ_LOADED_DIR"], "procs.log"), "a", encoding="utf-8") as f:
+            f.write((name or "?") + "\n")
+        if name in ("git", "git.exe"):
             with open(os.path.join(os.environ["CJ_LOADED_DIR"], "git.log"), "a", encoding="utf-8") as f:
                 f.write("git\n")
         _real_popen.__init__(self, args, *rest, **kwargs)
@@ -242,6 +250,8 @@ class Run:
                 self.calls = [json.loads(line) for line in f if line.strip()]
         gitlog = os.path.join(base, "git.log")
         self.git = len(open(gitlog, encoding="utf-8").read().split()) if os.path.exists(gitlog) else 0
+        procs = os.path.join(base, "procs.log")
+        self.procs = len(open(procs, encoding="utf-8").read().split()) if os.path.exists(procs) else 0
         log = os.path.join(base, "config", "guard.log")
         self.log = open(log, encoding="utf-8").read() if os.path.exists(log) else ""
 
@@ -1228,8 +1238,9 @@ def case_settings_row():
         return
     entry, hook = rows[0]
     matcher = set((entry.get("matcher") or "").split("|"))
-    check("settings: its matcher is Agent, AskUserQuestion and ArtifactData",
-          matcher == {"Agent", "AskUserQuestion", "ArtifactData"}, entry.get("matcher"))
+    # Re-pointed for the owner-question sends: the one command hook also runs on the two send tools, and no other.
+    check("settings: its matcher is Agent, AskUserQuestion, ArtifactData and the two send tools",
+          matcher == {"Agent", "AskUserQuestion", "ArtifactData", SEND_MCP, SEND_BUILTIN}, entry.get("matcher"))
     check("settings: its timeout exceeds the longest model call (60 s)", hook.get("timeout", 0) > 60, hook)
     empty = os.path.join(ROOT, "empty-config")
     os.makedirs(empty, exist_ok=True)
@@ -1528,8 +1539,190 @@ def case_mid_reason_unlisted_id_is_a_plain_refusal():
           "Unvetted:" in r.reason(), detail(r))
 
 
+# ------------------------------------------------------------------ owner questions sent to a session (send tools)
+#
+# A send_message or SendMessage whose message carries a Goal line and a Problem (<stake>) line is an owner question. It
+# gets the past-ruling check, the one home lint/report_guard.py past_ruling_problem, before it is sent, whoever the target
+# is: the page writer is not special. Any other send makes no model call and starts no subprocess.
+SEND_MCP, SEND_BUILTIN = "mcp__claude-code-remote__send_message", "SendMessage"
+SEND_TOOLS = (SEND_MCP, SEND_BUILTIN)
+SEND_TARGET = "session_lane07"  # a lane, not the page writer: a send with the form is judged all the same
+REPORT_GUARD = os.path.join(REPO, "lint", "report_guard.py")
+# The two page items of 2026-11-07, verbatim. Inline on purpose: a test run reads no file outside the repo.
+INCIDENT_357 = "\n".join([
+    "Page item for the owner (from coordinator). Title: How should a merge free disk without losing a running agent's work?",
+    "Goal: a merge frees disk without losing a running agent's work.",
+    "Problem (risk): freeing a running agent's worktree loses its uncommitted files.",
+    "Based on (read): guard rule worktree-home already stops an agent whose worktree is gone, so it cannot write into main.",
+    "Departs from: main, where the merge frees any lock it finds. Each option adds a test before the free.",
+    "Options: a. Never free a running agent's lock; the worktree goes when the agent ends. b. Save, then free: copy "
+    "uncommitted changes to an archive ref, then remove the worktree. c. Both: a for running agents, b for finished ones "
+    "(recommended).",
+])
+INCIDENT_370 = "\n".join([
+    "Page item for the owner (from coordinator). Title: Should the guard catch a write into the main checkout from a "
+    "session that stands outside every checkout?",
+    "Goal: a write into the main checkout from a session that stands outside any checkout gets caught.",
+    'Problem (rule): the guard lets it pass, because a working folder in no checkout has no "other" checkout.',
+    "Based on (read): the notes sort found this gap.",
+    'Departs from: main, where a working folder in no checkout passes every write. Option b counts the main checkout as '
+    '"other" for such a session.',
+    'Options: a. Keep main (recommended until an incident names it). b. The main checkout counts as "other" for a session '
+    "outside every checkout.",
+])
+# One fixture ruling per incident. Each holds a marker the question never holds, so the prompt check finds it there.
+WORKTREE_SLUG, OUTSIDE_SLUG = "when-a-worktree-may-be-removed", "an-agent-outside-its-home-tree-must-stop"
+WORKTREE_MARK, OUTSIDE_MARK = "worktree-5e8a", "outside-2b7f"
+WORKTREE_RULING = ("Owner, 2026-10-30: a worktree goes only when it is clean and idle, and a running agent's lock is "
+                   "never freed. Marker " + WORKTREE_MARK + ".")
+OUTSIDE_RULING = ("Owner, 2026-10-30: each session writes only inside its own checkout, and an agent whose worktree is "
+                  "gone stops and reports. Marker " + OUTSIDE_MARK + ".")
+INCIDENT_REPO = make_repo("incidents", decisions={WORKTREE_SLUG: WORKTREE_RULING, OUTSIDE_SLUG: OUTSIDE_RULING})
+WORKTREE_OPTIONS = [
+    {"label": "Never free a running lock (Recommended)",
+     "description": "Gain: a running agent keeps its uncommitted files. Lose: the worktree stays until the agent ends."},
+    {"label": "Save, then free",
+     "description": "Gain: the worktree goes now. Lose: the archive ref must be cleaned up later."}]
+BASED_READ_357 = ("Based on (read): guard rule worktree-home already stops an agent whose worktree is gone, so it cannot "
+                  "write into main.")
+BASED_RULING_357 = ("Based on (ruling): decisions/%s says a worktree goes only when clean and idle. This case has a running "
+                    "agent, so the owner is asked again: the ruling does not name it." % WORKTREE_SLUG)
+# Sends that are no owner question. The last is a full-size message, near the 64 KiB send bound.
+NO_FORM = (
+    ("a status line", "Status: lane 4 is green on lint/test_stamp.py. Nothing needs your word."),
+    ("a lane brief with a Goal line and no Problem line",
+     "Lane brief: stamp-split. Topic: lint.\nGoal: split the stamp job in two.\nFiles: lint/stamp.py.\n"
+     "Check: python3 lint/test_stamp.py."),
+    ("a Goal line and a Based on line, no Problem line",
+     "Goal: know which rule owns the stamp.\nBased on (read): the stamp rule is in lint/stamp.py."),
+    ("an empty message", ""),
+    ("a full-size status, under the 64 KiB send bound", "Lane 4 log: ruff clean, no finding. " * 1700),
+)
+
+
+def ruled(slug):
+    # A canned refusal that cites the one record the model was shown, with its date, as item 8 asks.
+    return json.dumps({"ok": False, "reason": "decisions/%s: ruled 2026-10-30, so the owner is not asked again." % slug})
+
+
+def send_input(tool, message, cwd=INCIDENT_REPO, target=SEND_TARGET, session=SID_A):
+    """One send, as the harness sends it. The mcp tool names its target by session_id, SendMessage by to."""
+    if tool == SEND_MCP:
+        tool_input = {"session_id": target, "message": message}
+    else:
+        tool_input = {"to": target, "message": message, "summary": "owner question"}
+    return json.dumps({"session_id": session, "tool_name": tool, "tool_input": tool_input, "cwd": cwd})
+
+
+def guard_constant(path, name):
+    """One constant of a hook or lint file, read at test time and never copied. "" when the file or the name is absent,
+    so a check names the missing piece instead of crashing."""
+    try:
+        return getattr(load_file_module(path, "probe_" + name), name, "") or ""
+    except Exception:
+        return ""
+
+
+def relay_remedy():
+    """The remedy of the Stop hook's past-ruling refusal (lint/report_guard.py RELAY_RULE_REASON): its text from `Remedy:`."""
+    text = guard_constant(REPORT_GUARD, "RELAY_RULE_REASON")
+    return text[text.find("Remedy:"):] if "Remedy:" in text else ""
+
+
+def unvetted_marker(text):
+    """The backtick span an Unvetted remedy asks for: `Unvetted: <why it could not be checked>`."""
+    found = re.search(r"`Unvetted: [^`]*`", text or "")
+    return found.group(0) if found else ""
+
+
+def case_send_owner_question_is_judged_before_it_is_sent():
+    # Both incidents, through both send tools. Scope first: the model is called and its prompt holds the ruling record.
+    # Then the verdict: a deny, rule past-ruling, with the relay remedy.
+    import question_form  # the one form check (hooks/question_form.py)
+    remedy = relay_remedy()
+    for label, text, slug, mark in (("357", INCIDENT_357, WORKTREE_SLUG, WORKTREE_MARK),
+                                    ("370", INCIDENT_370, OUTSIDE_SLUG, OUTSIDE_MARK)):
+        check("send incident %s carries the form: a Goal line and a Problem line" % label,
+              bool(question_form.GOAL_LINE.search(text)) and bool(question_form.PROBLEM_LINE.search(text)), label)
+        for tool in SEND_TOOLS:
+            name = "send incident %s via %s" % (label, tool)
+            r = run_hook(send_input(tool, text), answer=ruled(slug))
+            check(name + ": the one model call is made before the send", len(r.calls) == 1, detail(r))
+            prompt = r.calls[0]["prompt"] if r.calls else ""
+            check(name + ": the prompt carries the ruling record", mark in prompt, detail(r))
+            check(name + ": the send is denied", (r.deny() or {}).get("permissionDecision") == "deny", detail(r))
+            check(name + ": the refusal rule is past-ruling", r.reason().startswith("past-ruling: "), r.reason()[:160])
+            check(name + ": the refusal carries the relay remedy", bool(remedy) and remedy in r.reason(),
+                  "remedy %r, reason %r" % (remedy[:40], r.reason()[-160:]))
+
+
+def case_question_box_with_the_same_ruling_is_refused_as_past_ruling():
+    # Control, green today: the same canned refusal on the same repo, through AskUserQuestion, is refused as past-ruling.
+    # So a red send case is the missing send route, and not a fixture or a repo that cannot refuse.
+    box = good_box(goal="Goal: a merge frees disk without losing a running agent's work.",
+                   problem="Problem (risk): freeing a running agent's worktree loses its uncommitted files.",
+                   based=("Based on (read): guard rule worktree-home already stops an agent whose worktree is gone.",),
+                   options=WORKTREE_OPTIONS)
+    r = run_hook(question_input(box=box, cwd=INCIDENT_REPO), answer=ruled(WORKTREE_SLUG))
+    check("control: a question box on the same ruling is refused as past-ruling",
+          (r.deny() or {}).get("permissionDecision") == "deny" and r.reason().startswith("past-ruling: "), detail(r))
+
+
+def case_send_with_a_based_on_ruling_line_is_sent():
+    # The incident with a Based on (ruling) line after its Based on (read) line, sent through both tools. A re-ask the
+    # ruling allows is not refused. The model's answer here is canned as ok, so the verdict is the answer, not the judge.
+    text = INCIDENT_357.replace(BASED_READ_357, BASED_READ_357 + "\n" + BASED_RULING_357, 1)
+    check("send based-on: the Based on ruling line follows the Based on read line", BASED_RULING_357 in text,
+          "the incident text lost its Based on read line")
+    for tool in SEND_TOOLS:
+        name = "send with a Based on ruling line via %s" % tool
+        r = run_hook(send_input(tool, text), answer=ALLOW)
+        check(name + ": the send is not refused", r.code == 0 and r.deny() is None, detail(r))
+        check(name + ": the one model call is made", len(r.calls) == 1, detail(r))
+        # Plumbing only: the judge reads the Based on line, so the prompt must carry it. The verdict is the canned answer.
+        prompt = r.calls[0]["prompt"] if r.calls else ""
+        check(name + ": the prompt carries the Based on ruling line", BASED_RULING_357 in prompt, detail(r))
+
+
+def case_send_without_the_form_makes_no_call_and_no_subprocess():
+    # A send that is no owner question passes with zero model calls and zero subprocesses. The canned answer would refuse
+    # it, so a call that was made shows as a deny. The cwd is the repo with the ruling, so an empty repo explains nothing.
+    import question_form
+    for label, message in NO_FORM:
+        check("send without the form (%s): no Goal and Problem pair" % label,
+              not (question_form.GOAL_LINE.search(message) and question_form.PROBLEM_LABEL.search(message)), label)
+        check("send without the form (%s): within the 64 KiB send bound" % label,
+              len(message.encode("utf-8")) < 65536, len(message.encode("utf-8")))
+        for tool in SEND_TOOLS:
+            name = "send without the form (%s) via %s" % (label, tool)
+            r = run_hook(send_input(tool, message), answer=ruled(WORKTREE_SLUG))
+            check(name + ": no model call", len(r.calls) == 0, detail(r))
+            check(name + ": no subprocess", r.procs == 0, detail(r))
+            check(name + ": not refused", r.code == 0 and r.deny() is None, detail(r))
+
+
+def case_send_model_error_refuses_as_unvetted_unless_marked():
+    # A check that could not run (the model failed) refuses the send as Unvetted. A marked question passes. The marker does
+    # not skip the check that can run: the model is still called, and it fails.
+    call_marker = unvetted_marker(guard_constant(HOOK, "UNVETTED_REMEDY"))
+    guard_marker = unvetted_marker(guard_constant(REPORT_GUARD, "UNVETTED_REASON"))
+    check("send unvetted: both Unvetted remedies name one marker form",
+          bool(call_marker) and call_marker == guard_marker, (call_marker, guard_marker))
+    marked = INCIDENT_357 + "\nUnvetted: the review could not run, so the owner reads this question unchecked."
+    for tool in SEND_TOOLS:
+        name = "send model error via %s" % tool
+        r = run_hook(send_input(tool, INCIDENT_357), model_fail=True)
+        check(name + ": the model is called and fails", len(r.calls) == 1, detail(r))
+        check(name + ": refused as Unvetted", (r.deny() or {}).get("permissionDecision") == "deny", detail(r))
+        check(name + ": the refusal names the Unvetted marker", bool(call_marker) and call_marker in r.reason(), detail(r))
+        check(name + ": the refusal names the cause, a check that could not run", "could not run" in r.reason(), detail(r))
+        r = run_hook(send_input(tool, marked), model_fail=True)
+        check(name + " with an Unvetted line: the model is called and fails", len(r.calls) == 1, detail(r))
+        check(name + " with an Unvetted line: not refused", r.code == 0 and r.deny() is None, detail(r))
+
+
 def main():
-    for case in (case_agent_refusal, case_spawn_prompt_bars_a_lane_waiting_page_write, case_agent_override, case_explore_row_is_vetoed,
+    for case in (case_agent_refusal,case_spawn_prompt_bars_a_lane_waiting_page_write, case_agent_override, case_explore_row_is_vetoed,
                  case_explore_remedy_names_marker, case_agent_fallback_names_marker, case_question,
                  case_question_departs, case_page_fixture_passes_the_form, case_page_reject_and_accept,
                  case_page_no_model_call, case_page_batch_one_call, case_page_override,
@@ -1550,7 +1743,12 @@ def main():
                  case_unvetted_not_for_closed_items, case_past_ruling_debt_candidates,
                  case_unshown_id_takes_the_unvetted_path, case_marker_does_not_skip_the_check,
                  case_unknown_names_the_claude_settings_records, case_cite_of_a_shown_record_is_not_bogus,
-                 case_page_task_gets_item_8_and_is_refused, case_mid_reason_unlisted_id_is_a_plain_refusal):
+                 case_page_task_gets_item_8_and_is_refused, case_mid_reason_unlisted_id_is_a_plain_refusal,
+                 case_send_owner_question_is_judged_before_it_is_sent,
+                 case_question_box_with_the_same_ruling_is_refused_as_past_ruling,
+                 case_send_with_a_based_on_ruling_line_is_sent,
+                 case_send_without_the_form_makes_no_call_and_no_subprocess,
+                 case_send_model_error_refuses_as_unvetted_unless_marked):
         try:
             case()
         except Exception as exc:
