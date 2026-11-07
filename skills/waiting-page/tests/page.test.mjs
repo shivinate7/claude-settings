@@ -4119,21 +4119,30 @@ test("two designs of one slug with different focus keep their own size, and the 
 // ---------------------------------------------------------------- the mockup draw width has one home
 // FIT_W is the width a mockup is laid out at. A CSS rule or a comment that repeats the number goes stale when FIT_W moves.
 const FIT_W_DECL = /const FIT_W = (\d+)/;
-// Each line of `src` that holds `num` as a number of its own, except the FIT_W declaration itself. Strings, comments and
-// templates are read as plain text: a restatement counts wherever it stands. 3900, 1390, a390, 0.390 and #390 (a hex
-// colour) are other values; 390px and "390 wide" are the same one.
+// A restatement is FIT_W's number as a width value: after width, max-width or min-width and a colon or equals sign, or
+// followed by the word wide. Strings, comments and templates are read as plain text, so a restatement counts wherever it
+// stands. A count, a font weight or a sibling number is not one: 3900, 1390, 0.390, a390, #390 (a hex colour) and "390 units".
+// A media or container condition is a breakpoint that CSS cannot read FIT_W in, so it is skipped.
+const WIDTH_BEFORE = /(?:^|[\s;{(,"'])(?:min-|max-)?width\s*[:=]\s*$/i, WIDE_AFTER = /^(?:px)?\s+wide\b/i, AT_RULE = /^\s*@(?:container|media)\b/;
 function restatements(src, num) {
   const decl = FIT_W_DECL.exec(src), own = decl ? decl.index + decl[0].length - decl[1].length : -1;
-  const lines = src.split("\n"), again = new RegExp(`(?<![\\w.#])${num}(?!\\d|\\.\\d)`, "g");
-  return [...new Set([...src.matchAll(again)].filter((m) => m.index !== own).map((m) => src.slice(0, m.index).split("\n").length))]
-    .map((n) => `line ${n}: ${lines[n - 1].trim().slice(0, 100)}`);
+  const lines = src.split("\n"), again = new RegExp(`(?<![\\w.#])${num}(?!\\d|\\.\\d)`, "g"), found = new Set();
+  for (const m of src.matchAll(again)) {
+    if (m.index === own) continue;
+    const n = src.slice(0, m.index).split("\n").length, start = src.lastIndexOf("\n", m.index - 1) + 1;
+    const width = WIDTH_BEFORE.test(src.slice(start, m.index)) || WIDE_AFTER.test(src.slice(m.index + num.length, m.index + num.length + 12));
+    if (width && !AT_RULE.test(lines[n - 1])) found.add(n);
+  }
+  return [...found].map((n) => `line ${n}: ${lines[n - 1].trim().slice(0, 100)}`);
 }
 
 test("the mockup draw width is written once in the page, in FIT_W", () => {
   const decl = FIT_W_DECL.exec(html);
   assert.ok(decl, "page.html has no `const FIT_W = <number>` declaration");
   const found = restatements(html, decl[1]);
-  assert.deepEqual(found, [], `page.html restates the draw width ${decl[1]} outside FIT_W. Read it from FIT_W or drop it:\n  ${found.join("\n  ")}`);
+  assert.deepEqual(found, [], `page.html restates the draw width ${decl[1]} as a width value outside FIT_W:\n  ${found.join("\n  ")}\n`
+    + "Remedy: if the number is the draw width, read FIT_W in its place. If it is another width that only equals FIT_W by chance, "
+    + "the scan has no exception for it: tell the owner, and do not write the number another way.");
 });
 
 test("the restatement scan finds a width behind a comment opener in a string, in a template and after a lone quote, and skips other numbers", () => {
