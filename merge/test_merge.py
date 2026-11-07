@@ -2715,6 +2715,35 @@ class ClaimSurvivesUnknown(Env):
         assert_unknown_stop_keeps_the_claim(self, rc, out, claimed[0] if claimed else None)
         self.assertFalse(getattr(self.host, "merged", False), "the PUT was made")
 
+    def test_a_debt_check_read_that_fails_after_the_claim_push_stops_unknown_and_keeps_the_claim(self):
+        import check_debt_retire  # the lint the merge tool's debt check runs; its read fails below, only after the claim push
+        claimed = []
+        self.host.on_wait = lambda: claimed.append(self.head())
+        real_check = check_debt_retire.check
+        def check_unknown(*a, **k):
+            if claimed:  # prove() runs the debt check after the claim push
+                raise check_debt_retire.Unknown("the debt history could not be read")
+            return real_check(*a, **k)
+        with unittest.mock.patch.object(check_debt_retire, "check", check_unknown):
+            rc, out = self.run_merge("7", "--confirm")
+        assert_unknown_stop_keeps_the_claim(self, rc, out, claimed[0] if claimed else None)
+        self.assertIn("could not read the history", out, "the stop does not name the failed history read")
+        self.assertFalse(getattr(self.host, "merged", False), "the PUT was made")
+
+    def test_a_holds_base_read_that_fails_after_the_claim_push_stops_unknown_and_keeps_the_claim(self):
+        claimed = []
+        self.host.on_wait = lambda: claimed.append(self.head())
+        real_ancestor = merge.ancestor
+        def ancestor_unknown(cwd, tip, base):
+            if claimed and base == claimed[0]:  # holds_base asks whether the claim holds the base tip: git cannot tell
+                return None
+            return real_ancestor(cwd, tip, base)
+        with unittest.mock.patch.object(merge, "ancestor", ancestor_unknown):
+            rc, out = self.run_merge("7", "--confirm")
+        assert_unknown_stop_keeps_the_claim(self, rc, out, claimed[0] if claimed else None)
+        self.assertIn("cannot read whether", out, "the stop does not name the unreadable base read")
+        self.assertFalse(getattr(self.host, "merged", False), "the PUT was made")
+
     def test_a_rerun_over_its_own_claim_resumes_and_claims_and_pushes_nothing(self):
         rc, out, claim = self.unknown_at_the_claim_wait(merge.NetStop("the read after the claim push failed"))
         self.assertEqual(rc, 1, out)  # precondition: the first run stopped and left its claim on feat
@@ -4205,6 +4234,14 @@ class GhHalf(Env):
         rc, out, claim = self.after_the_claim(minute=600)
         assert_unknown_stop_keeps_the_claim(self, rc, out, claim)
         self.assertIn("Still pending: checks", out)
+        self.assertNotIn(MERGE_CALL, self.calls())
+
+    def test_a_wait_deadline_while_github_still_shows_the_prior_head_stops_unknown_and_keeps_the_claim(self):
+        # GitHub still shows the head from before the push. Each poll is ten minutes of the fake clock, so the second read is past the deadline.
+        self.set(lag={"n": 1000, "prior": self.head()})
+        rc, out, claim = self.after_the_claim(minute=600)
+        assert_unknown_stop_keeps_the_claim(self, rc, out, claim)
+        self.assertIn("still shows the head before the push", out)
         self.assertNotIn(MERGE_CALL, self.calls())
 
     def test_a_merge_that_may_have_landed_with_an_unreadable_state_says_to_finish_by_hand(self):
