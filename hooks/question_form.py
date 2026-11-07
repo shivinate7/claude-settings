@@ -1150,7 +1150,7 @@ NONE_KEY_HIT = "option keyed none"
 
 
 def _open_decision(data) -> bool:
-    """True for the data of an open decision. A task, a note and a closed item are not judged. The one gate
+    """True for the data of an open decision. A task, a note and a closed item are not judged. The one filter
     of option_letter_hit and keyed_options_hit."""
     return isinstance(data, dict) and data.get("kind", "decision") == "decision" and data.get("status") != "closed"
 
