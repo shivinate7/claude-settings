@@ -91,6 +91,7 @@ STAMP_CITE = "(decision one-shared-record-stamp, the claim runs only on the defa
 RECORDS_CITE = "(decision records-index-at-merge, only the merge tool rebuilds the records page, before the branch goes ready)"
 UNDO_CITE = "(decision silent-undo-check-design, a branch that silently undoes earlier work does not merge)"
 DEBT_CITE = "(decision debt-close-runs-retire, a debt closes only when its Retire check passes on the head)"
+CODES_CITE = "(a lint code has one home: take the next free number from the base, lint/check_lint_codes.py)"
 RED_CITE = "(decision no-merge-onto-red-main, no batch merges onto a red base)"
 RERUN_IN_FLIGHT = "is a re-run still going"  # base_state words an unknown re-run with it; red_base reads it back to give the re-run its own headline
 DROP_CITE = "(decision merge-deletes-batch-lanes, a batch that drops a lane by a revert of its merge does not merge)"
@@ -325,6 +326,18 @@ def debt_check(wt, base_ref, host, info):
         raise Dropped(f"the debt-close check could not read the history: {e}\n{DEBT_CITE}")
     if found:
         raise Dropped("the branch closes a debt without proof that its Retire check holds:\n  " + "\n  ".join(f"{f.slug} [{f.kind}]: {f.text}" for f in found) + f"\n{DEBT_CITE}")
+
+def codes_check(wt, base_ref):
+    """The lint-code lint (lint/check_lint_codes.py): a code the branch adds must not already be defined at the base tip, and no tree defines one twice.
+    A finding refuses. An unreadable home or history refuses too. No reason flag lifts it. The base tip is read here because PR CI does not re-run when the base moves."""
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "lint"))
+    import check_lint_codes as codes
+    try:
+        found = codes.check(wt, base_ref)
+    except codes.Unknown as e:
+        raise Dropped(f"the lint-code check could not read the base or the branch: {e}\n{CODES_CITE}")
+    if found:
+        raise Dropped("the branch's lint codes collide:\n  " + "\n  ".join(found) + f"\n{CODES_CITE}")
 
 def say(*lines):
     text = "\n".join(lines)  # one line each: the preview is a list of indented lines, never one long line
@@ -2935,6 +2948,7 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
                 try:  # main may have moved during the wait: read the branch against the tip fetched just now
                     record_lift(lifts, UNDO_FLAG, undo_check(wt, base_ref, unknown_ok, info.get("body", "")))
                     debt_check(wt, base_ref, host, info)
+                    codes_check(wt, base_ref)
                 except Stop as e:
                     stop(str(e), Liftable if isinstance(e, Liftable) else Stop)
                 if not os.path.exists(os.path.join(wt, ".git")):
