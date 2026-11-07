@@ -339,7 +339,6 @@
 - unknown-stash-word-tree-only: a future git stash action that takes an entry would pass over a clean tree (hooks/guard_shared_tree.py)
 - until-note-unjudged: background-end accepts any non-empty until: text, such as until: n/a (hooks/guard_stream.py, hooks/stall_watch.py)
 - walk-curly-quotes-plain: PowerShell may take U+2018 to U+201E as quotes; the quote walk reads them as plain text and can hide a step (hooks/guard_core.py)
-- win-merge-shards-slice-on-pr: the Windows merge shard jobs (`checks-windows-merge-<i>`) have the same gap: a diff to the merge tool runs only the Windows merge slice on a PR, so a case outside it can fail on main first (.github/workflows/checks.yml). Not built in this lane.
 - win-slice-hides-skip-rows: nine guard cases skip on Windows but are outside the Windows slice, so a Windows PR run that does not touch the guard shows one SKIP row (hooks/test_guard.py)
 - win-split-min-jobs-untested: the MIN_JOBS branch has no case; a miss costs CI wall time only (lint/test_windows_split.py)
 - wsl-bare-bash-not-refused: a bare bash.exe -c is not refused and runs System32 bash when Git bash is not first on PATH (hooks/guard_wsl.py)
