@@ -389,10 +389,23 @@ class UnquotedStart:
     apostrophe shaped like a contraction is text, as in split_segments' second reading: a lone
     `don't` must not turn the rest of the line into one quote."""
 
-    def __init__(self, pattern):
+    def __init__(self, pattern, nested=False):
         self.pattern = pattern
+        self.nested = nested
 
     def search(self, text):
+        found = self._search_unquoted(text)
+        if found or not self.nested:
+            return found
+        # The script a shell, `eval` or `pwsh -Command` runs is quoted text, so it is read again as a command.
+        for segment in split_segments(text):
+            for script in inner_commands(segment_tokens(segment) or []):
+                found = self.search(script)
+                if found:
+                    return found
+        return None
+
+    def _search_unquoted(self, text):
         inside, quote, index = set(), "", 0
         while index < len(text):
             if not quote and text[index] == "'" and CONTRACTION.match(text, index):
@@ -411,12 +424,13 @@ RM_RAW = UnquotedStart(re.compile(
 
 
 DESTRUCTIVE_DELETE = (
-    re.compile(
+    UnquotedStart(re.compile(
         r"(?i)\b(?:remove-item|ri|rd|rmdir|del|erase|rm)\b"
+        r"(?![^\n;|&]*\s--cached\b)"   # the index-only form of `git rm`
         r"(?=[^\n;|&]*\s-r(?:ec(?:urse)?)?\b)"
         r"(?=[^\n;|&]*\s-f(?:o(?:rce)?)?\b)"
         r"[^\n;|&]*\s['\"]?" + WIDE_TARGET + r"['\"]?(?:\s|\)|$)"
-    ),
+    ), nested=True),
     # Recursion alone is enough for the PowerShell names. `rm` is read by tokens, not here. A match
     # that starts inside quotes is text (an echo, a commit message), so it is not read.
     UnquotedStart(re.compile(
@@ -479,14 +493,16 @@ def _in_group(args, tick=False):
 def _git_subcommands(words):
     """The indexes of the words that name a git subcommand, such as the `rm` of `git rm -r .`. Such
     a word is no command word. A force flag keeps the word read: `git rm` without one refuses to drop an edited
-    file, so git can restore what it removes, and `git rm -f` discards the edits."""
+    file, so git can restore what it removes, and `git rm -f` discards the edits. `--cached` removes from the
+    index only, so it names the subcommand whatever the other flags say."""
     found = set()
     for at, word in enumerate(words):
         if basename(word) in ("git", "git.exe"):
             sub = _git_subcommand_index(words, at)
             args = words[sub + 1:]
             args = args[:args.index("--")] if "--" in args else args
-            if not any(a == "--force" or (a[:1] == "-" and a[1:2] != "-" and "f" in a) for a in args):
+            if "--cached" in args or not any(
+                    a == "--force" or (a[:1] == "-" and a[1:2] != "-" and "f" in a) for a in args):
                 found.add(sub)
     return found
 

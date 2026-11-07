@@ -494,6 +494,9 @@ def _copy_reads(raw, predicate, cwd):
         if _NULL_REDIRECT.fullmatch(word):
             index += 1
             continue
+        if word == "&" and words[index + 1:index + 2] in ([">"], [">>"]):
+            index += 1   # the `&` of `&>` and `&>>` is the redirect's own, never a source
+            continue
         if _OPEN_REDIRECT.fullmatch(word) and words[index + 1:index + 2] and \
                 (words[index + 1].lower() in _NULL_TARGETS or re.fullmatch(_DESCRIPTOR, words[index + 1])):
             index += 2
@@ -687,17 +690,40 @@ def _join_path(head: str, tail: str) -> str:
     return head.rstrip("/") + "/" + tail if head else tail
 
 
+def _py_unknown_head(node, env):
+    """True when the first piece of a path expression is a folder the script cannot name: a variable
+    with no known value, or a call such as `tempfile.mkdtemp()`. `Path.cwd()`, `os.getcwd()` and
+    `__file__` are the working folder, so they are known."""
+    import ast
+    if isinstance(node, ast.Name):
+        return node.id != "__file__" and not env.get(node.id)
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Div):
+        return _py_unknown_head(node.left, env)
+    if isinstance(node, ast.Call):
+        func = node.func
+        name = func.id if isinstance(func, ast.Name) else func.attr if isinstance(func, ast.Attribute) else ""
+        if name in _PATH_CTORS or name == "join":
+            return bool(node.args) and _py_unknown_head(node.args[0], env)
+        if name in _PATH_PASS and isinstance(func, ast.Attribute):
+            return _py_unknown_head(func.value, env)
+        return name not in ("cwd", "getcwd")
+    return False
+
+
 def _py_paths(node, env):
     """The path strings an expression can hold: a string, `Path(...)`, `a / b`, `os.path.join`, a
     name bound to one of those, or a chain of path calls. A part it cannot tell (`Path.cwd()`,
     `os.getcwd()`, `__file__`) is left out, so the literal pieces still join: `Path.cwd() / 'tests'`
-    reads `tests`. Empty when no piece is known."""
+    reads `tests`. A join whose first piece is unknown (`_py_unknown_head`) holds no known path, since
+    the rest may sit anywhere. Empty when no piece is known."""
     import ast
     if isinstance(node, ast.Constant):
         return [node.value] if isinstance(node.value, str) else []
     if isinstance(node, ast.Name):
         return list(env.get(node.id, ()))
     if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Div):
+        if _py_unknown_head(node.left, env):
+            return []
         left, right = _py_paths(node.left, env), _py_paths(node.right, env)
         if not right:
             return left
@@ -705,7 +731,11 @@ def _py_paths(node, env):
     if isinstance(node, ast.Call):
         func = node.func
         name = func.id if isinstance(func, ast.Name) else func.attr if isinstance(func, ast.Attribute) else ""
+        if name in ("cwd", "getcwd"):
+            return [""]   # the working folder: the empty prefix, so a name bound to it stays known
         if name in _PATH_CTORS or name == "join":
+            if _py_unknown_head(node, env):
+                return []
             out = [""]
             for options in (_py_paths(arg, env) for arg in node.args):
                 if options:
