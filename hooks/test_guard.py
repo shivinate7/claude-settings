@@ -9109,6 +9109,15 @@ for _label, _tail in (
 ):
     sh("env: heredoc-r3: an env read in job.txt, run by " + _label + ", denies",
        "cat > job.txt <<'EOF'\ncat " + ENV + "\nEOF\n" + _tail, "deny", "env-file", cwd=NOGIT)
+# Round 3, must deny: the twin of the wrapper and xargs forms, with an env read in f.
+for _label, _last in (
+    ("bash -lc bash f", 'bash -lc "bash f"'),
+    ("sh -ec sh f", 'sh -ec "sh f"'),
+    ("xargs bash -c", "cat f | xargs -I{} bash -c {}"),
+    ("xargs sh -c", "cat f | xargs -I{} sh -c '{}'"),
+):
+    sh("env: heredoc-r3: an env read in f, run by " + _label + ", denies",
+       "cat > f <<'EOT'\ncat " + ENV + "\nEOT\n" + _last, "deny", "env-file", cwd=NOGIT)
 sh("env: normalized, glob, heredoc or depth, cat <<EOF, heredoc-r3: a single quote before an unquoted substitution, denies",
    "cat > n.md <<EOF\n'$(cat " + ENV + ")'\nEOF", "deny", "env-file", cwd=NOGIT)
 sh("env: normalized, glob, heredoc or depth, cat <<EOF | sh, heredoc-r4: a single quote before an unquoted substitution, denies",
@@ -9648,6 +9657,20 @@ sh("draft-pr: a body that runs part.txt by a path from $(dirname $0), run by bas
 sh("draft-pr: a run file read by eval through a substitution, is denied",
    "cat > f <<'OUT'\ngh pr create --title x\nOUT\neval \"$(cat f)\"", "deny", "draft-pr", cwd=NOGIT,
    carries=DRAFT_REMEDY, lacks=DRAFT_LACKS)
+# Round 3, must deny: f holds a pull request and a later command runs it through a wrapper, a shell that
+# takes a script on its arguments, a pipe into xargs, a subshell, or bash -s on stdin. Each denies on main.
+_R3_FIXTURE = "cat > f <<'EOT'\ngh pr create --title t --body b\nEOT\n"
+for _label, _last in (
+    ("bash -lc bash f", 'bash -lc "bash f"'),
+    ("sh -ec sh f", 'sh -ec "sh f"'),
+    ("xargs bash -c", "cat f | xargs -I{} bash -c {}"),
+    ("xargs sh -c", "cat f | xargs -I{} sh -c '{}'"),
+    ("a subshell piped into sh", "(cat f) | sh"),
+    ("a subshell that cds, piped into sh", "(cd d && cat f) | sh"),
+    ("cat piped into bash -s", "cat f | bash -s -- x"),
+):
+    sh("draft-pr: a pull request in f, run by " + _label + ", is denied", _R3_FIXTURE + _last, "deny", "draft-pr",
+       cwd=NOGIT, carries=DRAFT_REMEDY, lacks=DRAFT_LACKS)
 # Limits of the draft-pr rule (decision `draft-until-reviewed`), no case: `gh api -X POST .../pulls`,
 # `hub pull-request`, and short-flag clusters such as `-dt x` (refused, a rare false alarm).
 
