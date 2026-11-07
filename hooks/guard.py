@@ -3575,7 +3575,7 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
     # Cost: a few short `git` reads per commit or push segment, and none for a command with neither.
     # A push of a test commit with no Red-run line is refused here too (rule red-run): it shares the
     # push's range, and adds one `git log` per push.
-    kind, matched = conflict_markers_hit(stripped, cwd)
+    kind, matched = conflict_markers_hit(stripped, cwd, is_test_rel)
     if kind == "red-run":
         flagged, remedy = red_run_parts(matched)
         refuse(tool, "deny", "red-run", RED_RUN_PUSH_REASON.format(flagged=flagged, remedy=remedy),

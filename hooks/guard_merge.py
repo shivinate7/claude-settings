@@ -542,7 +542,8 @@ def records_page_hit(stripped: str, cwd: str) -> str:
 # nothing, `check_red_run.gaps` reads the accepted base up to the source in one `git log --no-merges
 # --numstat -z`, so a push costs one more `git log` and nothing else. Only a push that carries a gap costs
 # more: the rollout's `git ls-tree` (head, then each flagged commit's parent), the default base's reads
-# (once, in `memo`), and a second `git log` without the default base's commits.
+# (once, in `memo`), and a second `git log` without the default base's commits. The guard passes its own
+# `is_test_rel`, so the lazy import of check_red_run loads no second guard (the import measured 0.4 ms).
 CONFLICT_MARKERS_REASON = (
     "Rule (Git, conflict-markers; decision commit-refuses-conflict-markers): this commit would hold conflict markers in {file}. "
     "Remedy: resolve the markers in that file, re-stage it, then retry."
@@ -558,8 +559,7 @@ CONFLICT_MARKERS_CHAIN_REASON = (
 )
 RED_RUN_PUSH_REASON = (
     "Rule (Git, red-run; decision red-run-trailer-on-test-commits): this push would send test commits with no "
-    "valid Red-run line: {flagged}. Remedy: {remedy} For a flagged commit that is not the last, run "
-    "`python3 lint/check_red_run.py --base origin/main` for its replacement route."
+    "valid Red-run line: {flagged}. Remedy: {remedy}"
 )
 RED_RUN_SHOWN = 3   # flagged commits a red-run refusal lists, the rest counted
 
@@ -680,8 +680,8 @@ def _checked_range(where, source, tracking, memo):
 
 def _red_run_module():
     """lint/check_red_run.py, imported from the lint folder beside this file's folder, the one home of the
-    import. It waits for the first push that needs it: check_red_run imports guard, and guard imports this
-    file, so a top-level import would loop, and when guard runs as the hook it loads guard a second time."""
+    import. It waits for the first push that needs it, and raises ImportError in a copy of the hooks with no
+    lint folder beside it. The caller reads that as no hit."""
     lint = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "lint")
     if lint not in sys.path:
         sys.path.append(lint)
@@ -689,27 +689,36 @@ def _red_run_module():
     return check_red_run
 
 
-def _red_run_lines(where, source, base, memo):
+def _red_run_lines(where, source, base, memo, is_test_rel):
     """The check_red_run lines for the commits a push of `source` sends, from `base` (the one the conflict
     check accepted), else []. `gaps` reads them in one `git log --numstat`, and reads the source's tree for
-    the rollout. A push that carries a gap is read again without the commits the default base holds, which
-    are not the lane's: a merge or a rebase brings them in. The default base is read here only then, once
-    per push in `memo`. A failed read is no hit."""
-    check_red_run = _red_run_module()
+    the rollout. `is_test_rel` is the guard's own judge of a test path, so check_red_run imports no guard
+    here. A push that carries a gap is read again without the commits the default base holds, which are not
+    the lane's: a merge or a rebase brings them in. The default base is read here only then, once per push
+    in `memo`. A default base that cannot be read is no hit, for the push would judge main's commits. So is a
+    failed read in either pass, and a copy of the hooks with no check_red_run beside it."""
     try:
-        lines = check_red_run.gaps(where, base, source)
+        check_red_run = _red_run_module()
+    except ImportError:
+        return []
+    if is_test_rel is None:   # a caller with no judge of a test path reads no red-run hit
+        return []
+    try:
+        lines = check_red_run.gaps(where, base, source, is_test_rel=is_test_rel)
         if lines:
             if "default" not in memo:
                 memo["default"] = resolve_default_base(where) or ""
             default = memo["default"]
-            if default and default != base.removeprefix("refs/remotes/"):
-                lines = check_red_run.gaps(where, base, source, default)
+            if not default:
+                return []
+            if default != base.removeprefix("refs/remotes/"):
+                lines = check_red_run.gaps(where, base, source, default, is_test_rel=is_test_rel)
     except (check_red_run.Unknown, OSError):
         return []
     return lines
 
 
-def _push_hit(segment, stripped, cwd, args):
+def _push_hit(segment, stripped, cwd, args, is_test_rel):
     """Return `("push", file)` for the first file a `git push` would send with all three conflict markers,
     else `("red-run", lines)` for the first ref that sends a test commit with no valid Red-run line (the
     lines are check_red_run's), else `("", "")`. For each
@@ -738,7 +747,7 @@ def _push_hit(segment, stripped, cwd, args):
         name = _triplet_file(_kinds_of(done, where, source))
         if name:
             return "push", name
-        lines = _red_run_lines(where, source, base, memo)
+        lines = _red_run_lines(where, source, base, memo, is_test_rel)
         if lines:
             return "red-run", lines
     return "", ""
@@ -788,7 +797,7 @@ def _unresolved(specs):
     return any(set(spec) & set("$`()") for spec in specs)
 
 
-def conflict_markers_hit(stripped: str, cwd: str):
+def conflict_markers_hit(stripped: str, cwd: str, is_test_rel=None):
     """Return `(kind, file)` for the first commit or push that would carry all three conflict markers
     in one file, else `('', '')`. The kind is `commit`, `push`, or `chain` (a push after a commit the
     guard could not judge; the file is then `git push`). A push that carries no marker but sends a test
@@ -804,7 +813,7 @@ def conflict_markers_hit(stripped: str, cwd: str):
         if call is not None and call[0] == "push":
             if blind_commit and (blind_triplet or conflict_step):
                 return "chain", "git push"
-            kind, found = _push_hit(segment, stripped, cwd, call[1])
+            kind, found = _push_hit(segment, stripped, cwd, call[1], is_test_rel)
             if kind:
                 return kind, found
             readable = False

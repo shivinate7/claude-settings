@@ -19,7 +19,8 @@ judges (the one home), read from the install of this script, never from the repo
 the commits it brings in are.
 
 The guard calls `gaps` before a `git push` (`_push_hit` in hooks/guard_merge.py, rule red-run), with <head> the pushed
-source ref and an `exclude` revision, the default base, so the push judges the lane's own commits only.
+source ref, an `exclude` revision (the default base), so the push judges the lane's own commits only, and its own
+`is_test_rel`, so this file never imports guard there. The CLI passes `guard.is_test_rel`, imported in `main`.
 
 Limits: a pure rename of a test file reads as a delete and an add, so it needs `Red-run: none: <reason>`. A
 branch that merged a newer main carries main's commits in the range, and the CLI judges each like the rest. The
@@ -33,7 +34,6 @@ import re
 import sys
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "hooks"))
 import _nowindow  # noqa: E402  the one home of a no-window child start (hooks/_nowindow.py)
-import guard  # noqa: E402  is_test_rel is the one home of what a test path is (hooks/guard.py)
 
 SELF_REL = "lint/check_red_run.py"
 RED = re.compile(r"^Red-run: \S.*? -> (\d+) failed on [0-9a-fA-F]{7,64}\s*$")
@@ -77,10 +77,11 @@ def has_trailer(message):
     return False
 
 
-def commits(root, base, head="HEAD", exclude=""):
+def commits(root, base, head, exclude, is_test_rel):
     """The non-merge commits of base..head, minus those `exclude` holds, oldest first, as (sha, parent, subject,
-    message, test paths it adds). One `git log --numstat` reads the range and each commit's files. Raises Unknown
-    when git cannot read it, or when a revision starts with a dash, which git would read as an option."""
+    message, test paths it adds). `is_test_rel` says what a test path is (guard.is_test_rel, the one home).
+    One `git log --numstat` reads the range and each commit's files. Raises Unknown when git cannot read it,
+    or when a revision starts with a dash, which git would read as an option."""
     revs = [base + ".." + head] + (["^" + exclude] if exclude else [])
     if any(rev.startswith("-") or rev.startswith("^-") for rev in revs) or head.startswith("-"):
         raise Unknown("a revision starts with a dash: " + " ".join(revs))
@@ -97,7 +98,7 @@ def commits(root, base, head="HEAD", exclude=""):
         for entry in entries:
             if entry.strip("\n"):
                 added, _deleted, path = entry.lstrip("\n").split("\t", 2)
-                if added != "0" and guard.is_test_rel(path):  # "-" is a binary file: it adds content
+                if added != "0" and is_test_rel(path):  # "-" is a binary file: it adds content
                     paths.append(path)
         found.append((sha, parent, message.strip().split("\n", 1)[0], message, paths))
     return found
@@ -107,12 +108,13 @@ def check_landed(root, rev):
     return bool(git(root, "ls-tree", "--name-only", rev, "--", SELF_REL).strip())
 
 
-def gaps(root, base, head="HEAD", exclude=""):
+def gaps(root, base, head="HEAD", exclude="", *, is_test_rel):
     """One line per commit that adds test lines with no valid trailer. Raises Unknown when git cannot say.
-    The range is base..head without the commits `exclude` holds. The rollout reads head's tree."""
+    The range is base..head without the commits `exclude` holds. The rollout reads head's tree. `is_test_rel`
+    is the caller's judge of a test path: the guard passes its own, the CLI passes guard.is_test_rel."""
     lines = []
     rollout = None  # read at the first commit that could be a gap, so a range with none costs the log alone
-    for sha, parent, subject, message, paths in commits(root, base, head, exclude):
+    for sha, parent, subject, message, paths in commits(root, base, head, exclude, is_test_rel):
         if parent is None or not paths or REVERT.search(message) or has_trailer(message):
             continue
         if rollout is None:
@@ -139,8 +141,9 @@ def main(args):
     if not base:
         print("check_red_run: UNKNOWN, no base: pass --base <sha> or set BASE_SHA")
         return 2
+    import guard  # the CLI's judge of a test path: is_test_rel is the one home of what a test path is (hooks/guard.py)
     try:
-        bad = gaps(root, base)
+        bad = gaps(root, base, is_test_rel=guard.is_test_rel)
     except Unknown as err:
         print("check_red_run: UNKNOWN, " + str(err))
         return 2
