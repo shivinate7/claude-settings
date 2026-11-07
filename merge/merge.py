@@ -35,7 +35,7 @@
                           in that tree once the lint has passed, the suites the profile's selector lists for the lane's changed
                           files, plus the changed suites. A red suite, or one that dies with no verdict, refuses; a select or install
                           failure, or a suite timeout, is an unknown that --lint-unknown-ok lifts (the changed suites still run).
-                          The PASS line counts the suites run. Added cost: one selector run per changed product file, one install
+                          The PASS line counts the suites run. Added cost: one selector run per changed file, one install
                           (once, for a non-empty set), and the selected suites, each killed at 120 s. A repo without the field pays none.
   merge --idle-lanes --live FILE
                           one line per lane the roadmap's live file shows done and safe to archive, then a summary line. Reads
@@ -3326,7 +3326,7 @@ def main(argv, host=None, lock=None):
     p = argparse.ArgumentParser(prog="merge", description=__doc__.split("\n\n")[0])
     p.add_argument("pr", nargs="?", help="a pull request number; with --lane-lint, a number or a commit or ref")
     p.add_argument("--confirm", action="store_true")
-    p.add_argument("--lane-lint", action="store_true", help="lint the head of a lane (PR number, commit or ref) as the batch runner's lint does; takes no lock, merges nothing. With merge.laneTests in the config it also runs the selector's suites (cost: one selector run per changed product file, one install, the selected suites)")
+    p.add_argument("--lane-lint", action="store_true", help="lint the head of a lane (PR number, commit or ref) as the batch runner's lint does; takes no lock, merges nothing. With merge.laneTests in the config it also runs the selector's suites (cost: one selector run per changed file, one install, the selected suites)")
     p.add_argument("--base", default="", metavar="BRANCH", help="with --lane-lint on a commit or ref: the base branch to lint against (default main)")
     p.add_argument("--lint-unknown-ok", default="", metavar="REASON", help="with --lane-lint: go on when a lint step is unknown (never when one FAILs); logged")
     p.add_argument("--role", metavar="TIER", help="cloud only: record this session's merge role (batch-runner only)")

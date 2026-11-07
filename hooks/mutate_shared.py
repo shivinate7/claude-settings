@@ -1065,7 +1065,7 @@ def _select_suites(profile: dict, dest: str, path: str, suites, timeout: float, 
 def lane_suites(wt: str, head: str, base: str, profile: dict, deps_root: str, timeout: float = SUITE_TIMEOUT) -> dict:
     """The suites a lane's head owes its repo's selector, run in `wt` (a checkout of `head`). The lane's changes are the files
     of merge-base(`base`, `head`)...`head`, no deletes. Per profile part (a profile without "parts" is one part), for each
-    changed file that the part's `code` regex matches (and `code_not` does not), `_select_suites` lists the suites that test it;
+    changed file (the part's `code` regex does not filter), `_select_suites` lists the suites that test it;
     the changed files that its `tests` regex matches join the set. The install runs once when the set is non-empty. Each suite
     runs with the part's argv and classifier, up to `timeout` seconds.
     -> {"ran": suites run, "red": [(suite, kind)] for each "assert" or "crash", "unknown": [text]}. A select that fails or
@@ -1079,15 +1079,11 @@ def lane_suites(wt: str, head: str, base: str, profile: dict, deps_root: str, ti
         return result
     live = sorted(path for path, status in files.items() if status != "D")
     for part in (profile["parts"].values() if "parts" in profile else [profile]):
-        code_re, tests_re = re.compile(part["code"]), re.compile(part["tests"])
-        not_re = re.compile(part["code_not"]) if part.get("code_not") else None
+        tests_re = re.compile(part["tests"])
         suites = {path for path in live if tests_re.search(path) and _is_suite(wt, head, part, path)}
-        for path in live:
-            if not code_re.search(path) or (not_re and not_re.search(path)):
-                continue
-            if not part.get("select"):
-                result["unknown"].append("%s: the profile has no select, so the suites that test it are unknown" % path)
-                continue
+        if not part.get("select"):
+            result["unknown"].append("the profile has no select, so the suites that test the lane's files are unknown")
+        for path in live if part.get("select") else []:  # every changed file, not only product code: a selector may map a doc or a config to suites
             listed, note = _select_suites(part, wt, path, None, timeout)
             if listed is None:
                 result["unknown"].append(note or "%s: select gave no list" % path)
