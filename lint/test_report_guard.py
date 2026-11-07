@@ -853,6 +853,7 @@ NAMED_REPORT = "> **Done** BUILT the guard, PR #5 (%s)\n> **Next** Unstarted: no
 # its model is unknown (''). BUILDER_SONNET names its model.
 BUILDER_UNKNOWN = {"subagent_type": "builder", "prompt": "Round 1 of 3"}
 BUILDER_SONNET = {"subagent_type": "builder", "model": "sonnet", "prompt": "Round 2 of 3"}
+REVIEWER_HAIKU = {"subagent_type": "reviewer", "model": "haiku", "prompt": "Round 1 of 3"}
 
 
 def prior_records(earlier=()):
@@ -1044,6 +1045,28 @@ class DoneNamesModelsTests(unittest.TestCase):
         _, reads = run_spawn_reads(hook, subagent_env("sonnet"))
         self.assertTrue(reads, "the probe saw no spawn_models call")
         self.assertNotIn(len(records), reads, "the guard read the whole transcript for spawn models")
+
+    def test_dm_red_design_reviewer_is_not_a_reviewer(self):
+        # "design reviewer" names the design-reviewer agent. The haiku reviewer of the earlier window
+        # must not make it a reviewer pair to check.
+        out = self.verdict(NAMED_REPORT % "builder sonnet, design reviewer opus", [BUILDER_SONNET],
+                           earlier=[REVIEWER_HAIKU])
+        self.assertIsNone(out, (out or {}).get("reason"))
+
+    def test_dm_red_design_reviewer_with_dash_is_not_a_reviewer(self):
+        for name in ("design-reviewer opus", "design-reviewer: opus"):
+            with self.subTest(name=name):
+                out = self.verdict(NAMED_REPORT % ("builder sonnet, " + name), [BUILDER_SONNET],
+                                   earlier=[REVIEWER_HAIKU])
+                self.assertIsNone(out, (out or {}).get("reason"))
+
+    def test_dm_red_unknown_earlier_builder_names_no_empty_model(self):
+        # The earlier builder is unknown, so it excuses nothing. The block lists the models that ran,
+        # and an unknown one must not show as an empty entry.
+        out = self.verdict(NAMED_REPORT % "builder opus", [BUILDER_SONNET], earlier=[BUILDER_UNKNOWN],
+                           env_model=None)
+        assert_blocks(self, out, "'builder opus' matches no builder spawn")
+        self.assertNotIn("ran , ", out["reason"], "the block lists an empty model: " + out["reason"])
 
 
 class UnstartedItemsTests(unittest.TestCase):
@@ -1330,6 +1353,27 @@ class RewriteAfterMissingReportTests(unittest.TestCase):
         _, reads = run_spawn_reads(hook, subagent_env("sonnet"))
         self.assertTrue(reads, "the probe saw no spawn_models call")
         self.assertNotIn(len(records), reads, "the rewrite read the whole transcript for spawn models")
+
+    def test_rw_red_design_reviewer_is_not_a_reviewer(self):
+        self.missing_report_block(earlier=[REVIEWER_HAIKU], later=[BUILDER_SONNET])
+        out = self.stop(NAMED_REPORT % "builder sonnet, design reviewer opus", True,
+                        earlier=[REVIEWER_HAIKU], later=[BUILDER_SONNET])
+        self.assertIsNone(out, (out or {}).get("reason"))
+
+    def test_rw_red_design_reviewer_with_dash_is_not_a_reviewer(self):
+        for name in ("design-reviewer opus", "design-reviewer: opus"):
+            with self.subTest(name=name):
+                self.missing_report_block(earlier=[REVIEWER_HAIKU], later=[BUILDER_SONNET])
+                out = self.stop(NAMED_REPORT % ("builder sonnet, " + name), True,
+                                earlier=[REVIEWER_HAIKU], later=[BUILDER_SONNET])
+                self.assertIsNone(out, (out or {}).get("reason"))
+
+    def test_rw_red_unknown_earlier_builder_names_no_empty_model(self):
+        self.missing_report_block(earlier=[BUILDER_UNKNOWN], later=[BUILDER_SONNET], env_model=None)
+        out = self.stop(NAMED_REPORT % "builder opus", True, earlier=[BUILDER_UNKNOWN],
+                        later=[BUILDER_SONNET], env_model=None)
+        assert_blocks(self, out, "'builder opus' matches no builder spawn")
+        self.assertNotIn("ran , ", out["reason"], "the block lists an empty model: " + out["reason"])
 
 
 REPORT_NO_LINE = "> **Done** BUILT abc123\n> **Deviations** none\n> **Next** ship it"
