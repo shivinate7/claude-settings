@@ -518,7 +518,7 @@ def records_page_hit(stripped: str, cwd: str) -> str:
 # an earlier `git add` stages is not in `git diff HEAD`, so it is not read; a failed read, no HEAD, and an
 # unmerged index judged alone (git refuses that commit itself) are no hit.
 CONFLICT_MARKERS_REASON = (
-    "Rule (Git, conflict-markers; rule building-mistake-names-its-guard): this commit would hold conflict markers in {file}. "
+    "Rule (Git, conflict-markers; decision commit-refuses-conflict-markers): this commit would hold conflict markers in {file}. "
     "Remedy: resolve the markers in that file, re-stage it, then retry."
 )
 _CONFLICT_FINDING = re.compile(r"^(.+):(\d+): leftover conflict marker\s*$")

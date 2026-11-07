@@ -10994,7 +10994,7 @@ lazy_fixture([CMK_MERGE, CMK_STAGED, CMK_AM, CMK_CLEAN, CMK_WS, CMK_MDOK, CMK_MD
               CMK_LONE, CMK_TPL, CMK_OPEN], _build_conflict_markers)
 
 
-def cmk_deny(name, command, cwd):
+def cmk_refuse(name, command, cwd):
     sh("conflict-markers: %s is refused" % name, command, "deny", CMK_RULE, cwd=cwd)
 
 
@@ -11003,18 +11003,18 @@ def cmk_allow(name, command, cwd):
 
 
 # 1. The index: a real conflict left in the index, or markers staged. A plain commit holds the index.
-cmk_deny("a real merge conflict left in a file, then add -A and commit",
+cmk_refuse("a real merge conflict left in a file, then add -A and commit",
          VCS + " add -A && " + VCS + " commit -m x", CMK_MERGE)
-cmk_deny("a triplet staged in a source file, then commit", VCS + " commit -m x", CMK_STAGED)
-cmk_deny("a triplet staged, behind a false command in the chain", "false && " + VCS + " commit -m x", CMK_STAGED)
+cmk_refuse("a triplet staged in a source file, then commit", VCS + " commit -m x", CMK_STAGED)
+cmk_refuse("a triplet staged, behind a false command in the chain", "false && " + VCS + " commit -m x", CMK_STAGED)
 
 # 2. The working tree: an add in the chain, or a commit that names its file, holds that file's content.
-cmk_deny("commit -am with the triplet in a tracked, modified file", VCS + " commit -am x", CMK_AM)
-cmk_deny("add . and commit with the triplet in a tracked, modified file",
+cmk_refuse("commit -am with the triplet in a tracked, modified file", VCS + " commit -am x", CMK_AM)
+cmk_refuse("add . and commit with the triplet in a tracked, modified file",
          VCS + " add . && " + VCS + " commit -m x", CMK_AM)
-cmk_deny("add of the file and commit, the triplet in that file",
+cmk_refuse("add of the file and commit, the triplet in that file",
          VCS + " add src/app.py && " + VCS + " commit -m x", CMK_AM)
-cmk_deny("a commit by path that names the file with the triplet", VCS + " commit -m x src/app.py", CMK_AM)
+cmk_refuse("a commit by path that names the file with the triplet", VCS + " commit -m x src/app.py", CMK_AM)
 
 # 3. Scope: the commit holds what it names, and the markers in an unstaged file it does not name are no hit.
 cmk_allow("a commit with the triplet unstaged in another file, and a clean change staged",
@@ -11032,10 +11032,10 @@ cmk_allow("a markdown file with one marker line in a fence, and a setext underli
 cmk_allow("a staged triplet in a repository with no commits yet", VCS + " commit -m x", CMK_NOHEAD)
 
 # 5. A fence, a string, a comment or a template literal does not hide a full triplet.
-cmk_deny("a markdown file with a full triplet inside a fence", VCS + " commit -m x", CMK_MDFENCE)
-cmk_deny("a staged triplet after a lone apostrophe in text", VCS + " commit -m x", CMK_LONE)
-cmk_deny("a staged triplet inside a multi-line template literal", VCS + " commit -m x", CMK_TPL)
-cmk_deny("a staged triplet after a string holding comment openers", VCS + " commit -m x", CMK_OPEN)
+cmk_refuse("a markdown file with a full triplet inside a fence", VCS + " commit -m x", CMK_MDFENCE)
+cmk_refuse("a staged triplet after a lone apostrophe in text", VCS + " commit -m x", CMK_LONE)
+cmk_refuse("a staged triplet inside a multi-line template literal", VCS + " commit -m x", CMK_TPL)
+cmk_refuse("a staged triplet after a string holding comment openers", VCS + " commit -m x", CMK_OPEN)
 
 
 # =========================================================================== 6. frozen paths
