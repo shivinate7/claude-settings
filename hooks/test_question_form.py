@@ -40,6 +40,8 @@ Interface the module must match (the lane's form contract):
   pointer checkout's, or a sibling child's, each by its registry entry with role waiting-page and the same artifact id.
   A write to any other artifact is judged against no page and passes the none-key check. The cases run in the hermetic
   home of test_call_judge.pointer_fixture().
+- A file_path item's data is read against the write's cwd, the session's, not the hook process's: design_writes and
+  judged_item_writes take it as `cwd=`. The cases call them with it when they take one (with_cwd).
 
 Every case runs on the surfaces the contract names. A page write is judged twice, by question_form.item_hit
 and by guard.data_tool_hit, so a guard that does not delegate shows red. The same form lines are judged on
@@ -49,6 +51,7 @@ lint/test_find_copies.py proves once (decision test-temp-standard).
 """
 import contextlib
 import copy
+import inspect
 import io
 import json
 import os
@@ -1562,6 +1565,75 @@ def case_page_bare_home_passes_a_link_to_the_pointer_page():
         verdict("bare home, non-repo folder guard: the link write passes", guard_verdict, None)
 
 
+def with_cwd(fn, writes, cwd):
+    """fn(writes), or fn(writes, cwd=cwd) when fn takes a cwd: a file_path write is read against the session's cwd."""
+    if "cwd" in inspect.signature(fn).parameters:
+        return fn(writes, cwd=cwd)
+    return fn(writes)
+
+
+def seen_by_the_writes(name, tool_input, cwd):
+    """One page call from `cwd`, judged by page_item_hit (the scope first), then seen by design_writes and by
+    judged_item_writes: each sees the designed item, which carries a picture and options and context."""
+    hit, writes = question_form.page_item_hit(tool_input, cwd)
+    judged_against(name + ": the write is judged against the pointer page", writes, True)
+    designs = with_cwd(question_form.design_writes, writes, cwd)
+    judged = with_cwd(question_form.judged_item_writes, writes, cwd)
+    check(name + ": design_writes sees the designed item", len(designs) == 1, "got %d writes" % len(designs))
+    check(name + ": judged_item_writes sees the decision with options and context", len(judged) == 1,
+          "got %d writes" % len(judged))
+    return hit
+
+
+def case_file_path_item_is_read_against_the_session_cwd():
+    # The controls are green on main: the same designed item inline, and by an absolute path, is seen. The case is a
+    # relative file_path from the roadmap cwd. The hook process's cwd does not hold that file, so a read there sees nothing.
+    with tcj.hermetic_home() as fx:
+        session = fx["roadmap"]
+        seen_by_the_writes("control, inline data from the roadmap cwd",
+                           page_update(tcj.POINTER_PAGE_URL, tcj.designed_item(), doc_id="fp0"), session)
+        seen_by_the_writes("control, an absolute file_path from the roadmap cwd",
+                           {"action": "set", "url": tcj.POINTER_PAGE_URL, "collection": "items", "doc_id": "fp2",
+                            "file_path": os.path.join(session, tcj.FOREIGN_ITEM)}, session)
+        seen_by_the_writes("a relative file_path from the roadmap cwd",
+                           {"action": "set", "url": tcj.POINTER_PAGE_URL, "collection": "items", "doc_id": "fp1",
+                            "file_path": tcj.FOREIGN_ITEM}, session)
+
+
+def case_page_linked_worktree_refuses_a_link_to_its_main_checkouts_page():
+    # A linked worktree (a .git file and its commondir, no extras file) reaches the page of its main checkout, which
+    # holds its own waiting page and is not the pointer. Scope first: the main checkout is read from the worktree.
+    # Control: the same write from the main checkout is refused.
+    import layout  # the one layout (lint/layout.py)
+    with tcj.hermetic_home() as fx:
+        got = layout.main_checkout(fx["linked"])
+        check("linked worktree: its main checkout is the host checkout",
+              got is not None and os.path.realpath(got) == os.path.realpath(fx["host"]), repr(got))
+        hit, _writes, _guard = judged_from(page_update(tcj.HOST_PAGE_URL, LINK), fx["host"])
+        verdict("control, from the host checkout: a link write to its page is refused, naming the field", hit, LINK_REFUSED)
+        hit, writes, guard_verdict = judged_from(page_update(tcj.HOST_PAGE_URL, LINK), fx["linked"])
+        judged_against("linked worktree: the link write to its main checkout's page is judged against that page", writes, True)
+        verdict("linked worktree: the link write to its main checkout's page is refused, naming the field", hit, LINK_REFUSED)
+        verdict("linked worktree guard: the link write to its main checkout's page is refused, naming the field",
+                guard_verdict, LINK_REFUSED)
+
+
+REWORKED_REPLY = "options being reworked"  # `reply` is a field the page draws, so it is the item's own text
+
+
+def case_item_reply_saying_being_reworked_is_refused():
+    # rework-off-page reads an open item's own text, and reply is part of it: set and update are refused, a closed item
+    # passes. The str_replace of the same words is the control, refused on main.
+    page("an open item (set) whose reply says its options are being reworked is refused", "set",
+         entry_of(page_item(reply=REWORKED_REPLY)), ("rework-off-page", "reworked"))
+    page("an open item (update) whose reply says its options are being reworked is refused", "update",
+         entry_of({"reply": REWORKED_REPLY}), ("rework-off-page", "reworked"))
+    page("a closed item whose reply says its options are being reworked passes", "set",
+         entry_of(page_item(reply=REWORKED_REPLY, status="closed")), None)
+    page("control, a str_replace of reply to the same words is refused", "str_replace",
+         entry_of(None, field="reply", old_str="", new_str=REWORKED_REPLY), ("rework-off-page", "reworked"))
+
+
 def main():
     for case in (case_item_92, case_item_51_stray_field, case_form_lines, case_form_placeholders_on_edits,
                  case_options_state_gain_and_loss, case_older_rules_keep_their_ids,
@@ -1585,7 +1657,10 @@ def main():
                  case_page_non_repo_folder_refuses_a_link_to_the_pointer_page, case_page_unrelated_artifact_link_still_passes,
                  case_page_child_repo_judged_by_its_own_page, case_page_child_repo_refuses_a_link_to_the_pointer_page,
                  case_page_non_repo_folder_refuses_a_link_to_a_sibling_page,
-                 case_page_bare_home_passes_a_link_to_the_pointer_page):
+                 case_page_bare_home_passes_a_link_to_the_pointer_page,
+                 case_file_path_item_is_read_against_the_session_cwd,
+                 case_page_linked_worktree_refuses_a_link_to_its_main_checkouts_page,
+                 case_item_reply_saying_being_reworked_is_refused):
         try:
             case()
         except Exception as exc:
