@@ -1,0 +1,11 @@
+{
+  "title": "No role commits a merge whose conflicts span test and non-test files",
+  "phase": "now",
+  "status": "doing",
+  "order": 0.9,
+  "owner": "coordinator",
+  "why": "Coordinator, 13:51 CST Nov 7: filed as a step, not a note.",
+  "note": "",
+  "lane": "session_013NEJL2BusqrX6qy1CCAgoH",
+  "updatedAt": "2026-11-07T13:51:00-06:00"
+}
