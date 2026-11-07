@@ -7,6 +7,7 @@ A PR closes a debt when it deletes the debt file, or renames it out of `docs/deb
 - The shared merge tool reads the debt's Retire text at base. It runs each runnable check that text names, in preview and in confirm.
 - A runnable check is a backticked path in the Retire text, named like a test file: `test_*.py`, `*_test.py`, `*.test.mjs`, `test_*.mjs` or `test_*.sh`. Its extension sets the runner: `python3`, `node --test` or `bash`. No shell, no model call.
 - A backticked test-named path that head does not track is red.
+- A Retire names a test file of its own. A shared file proves less.
 - Each runnable check runs on two trees:
   - The PR head. The check must pass.
   - The debt's birth commit, the commit that added the debt file, with head's test files laid over that tree. The check must go red. A pass there counts as red: the test does not catch the defect.
@@ -22,7 +23,7 @@ Why: a docs-only PR skips review (decision `docs-only-prs-skip-review`, a docs-o
 
 Why the birth commit, not the merge-base: on a markdown-only close the fix already merged, so the merge-base is already green.
 
-Source: coordinator ruling 2026-11-06 13:00 CST (the `Retire-run:` form; a rename out of the folder counts as a close). Coordinator ruling 2026-11-06 13:35 CST (a rename inside the folder with a changed Retire is a close). Coordinator ruling 2026-11-07 15:06 CST (red on the birth commit; a pass there is red; an untracked test path is red; a reason clears an unknown only).
+Source: coordinator ruling 2026-11-06 13:00 CST (the `Retire-run:` form; a rename out of the folder counts as a close). Coordinator ruling 2026-11-06 13:35 CST (a rename inside the folder with a changed Retire is a close). Coordinator ruling 2026-11-07 15:06 CST (red on the birth commit; a pass there is red; an untracked test path is red; a reason clears an unknown only). Coordinator ruling 2026-11-07 15:40 CST (a Retire names a test file of its own; a shared file proves less).
 
 Kind: process
 Home: lint/check_debt_retire.py
