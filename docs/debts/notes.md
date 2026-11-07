@@ -65,7 +65,7 @@
 - git-env-set-indirect-forms: indirect sets (function wrapper, iex, EncodedCommand, run-time names) pass the git-env guard (hooks/guard_kill.py)
 - git-env-set-untested-forms: no case pins the PowerShell backtick escape, group-opener pattern or heredoc quote text (hooks/test_guard.py)
 - git-env-warn-session-start: the git env warning runs at session start only, so mid-session damage shows at next start (guard hooks)
-- gitlock-off-cloud-unmeasured: GitLock from a Mac or Windows checkout against GitHub is unmeasured. Tests use a local bare origin. Lock credentials now go through git, not gh (merge/merge.py default_lock). Fix: one real take and release from the Mac, then delete this note. Decision: merge-lock.
+- gitlock-off-cloud-unmeasured: GitLock from a Mac or Windows checkout against GitHub is unmeasured. Tests use a local bare origin. Lock credentials now go through git, not gh (merge/merge.py default_lock). A stderr warning on a good ls-remote (git merges stderr into the output) would give a bogus sha, so the run stops; it never removes a wrong lock (merge/merge.py GitLock.listed). Fix: one real take and release from the Mac, then delete this note. Decision: merge-lock.
 - glued-subshell-unread: (rm -rf .) and x=$(tail -f y) pass because the closing parenthesis is glued to the last word (guard_push_delete, guard_stream)
 - guard-abtests-test-path: native/ABTests/ reads as a test folder, so a builder cannot edit product code there (hooks/guard.py)
 - guard-audit-agent-stop-open: SubagentStop fails open on a missing guard module, on purpose, with one log line (hooks/guard.py)
