@@ -498,6 +498,7 @@ ARCHPAGE = os.path.join(ROOT, "archpage")      # the slug's pull request is on p
 ARCHNEAR_C10 = os.path.join(ROOT, "archnear-c10")      # an open head `c10`: contains the lane id `c1`, is not it
 ARCHNEAR_C10X = os.path.join(ROOT, "archnear-c10x")    # an open head `claude/c10-x1`: contains `c1`, is not it
 ARCHNEAR_CI = os.path.join(ROOT, "archnear-ci")        # an open head `claude/fix-ci-retry-x1`: contains `ci`, is not it
+ARCHOPEN_LANE = os.path.join(ROOT, "archopen-lane")    # the slug's pull request is open on the `lane/<slug>` head form
 # The containment read of an open lane pull request's head against main, by its status. Each fake holds one open
 # pull request on the slug, its head the slug's head sha; the read's answer is what the name says.
 ARCHDRAFT_BEHIND = os.path.join(ROOT, "archdraft-behind")      # an open draft, head behind main: its commits landed
@@ -507,6 +508,7 @@ ARCHDRAFT_DIVERGED = os.path.join(ROOT, "archdraft-diverged")  # an open draft, 
 ARCHREADY_BEHIND = os.path.join(ROOT, "archready-behind")      # an open ready (not draft) pull request, head behind main
 ARCHDRAFT_READFAIL = os.path.join(ROOT, "archdraft-readfail")  # an open draft whose containment read fails
 ARCHDRAFT_INTEG = os.path.join(ROOT, "archdraft-integ")        # an open draft based on integration/b1, not the default branch
+ARCHDRAFT_LANE_BEHIND = os.path.join(ROOT, "archdraft-lane-behind")  # an open draft on the lane/<slug> head, head behind main
 # THE POINTER CHECKOUT. `PTRCFG` is a config directory whose global rules file points at
 # `PTRMAIN`, which stands in for the machine's primary checkout: the one every session runs its
 # hooks and its lint from. `PTRWT` is a real linked worktree of it, which must stay allowed.
@@ -1323,6 +1325,8 @@ def build_fixtures():
     make_fake_gh(ARCHOPEN, "main", need=["o/r"], others=[slug_head])
     make_fake_gh(ARCHCLOSED, "main", need=["o/r"], others=[dict(slug_head, state="closed")])
     make_fake_gh(ARCHMERGED, "main", need=["o/r"], others=[dict(slug_head, state="closed", merged=True)])
+    # The same lane's pull request on the `lane/<slug>` head form (decision session-tiers names both forms).
+    make_fake_gh(ARCHOPEN_LANE, "main", need=["o/r"], others=[dict(slug_head, ref="lane/" + ARCHIVE_SLUG)])
     # Page two of the open list (two rows a page): the slug's pull request is the third row, so only a read of
     # every page sees it. The two rows before it name other lanes.
     make_fake_gh(ARCHPAGE, "main", need=["o/r"], page_cap=2, others=[
@@ -1348,6 +1352,9 @@ def build_fixtures():
     # its base is not the repo's default branch. A guard that compares against the base's name would release it here.
     make_fake_gh(ARCHDRAFT_INTEG, "main", need=["o/r"], others=[dict(slug_head, draft=True, base="integration/b1")],
                  compares={draft_pair: "behind", "integration/b1..." + slug_head["head"]: "behind"})
+    # An open draft on the `lane/<slug>` head form, its head behind main: released as the bare-slug draft is.
+    make_fake_gh(ARCHDRAFT_LANE_BEHIND, "main", need=["o/r"],
+                 others=[dict(slug_head, draft=True, ref="lane/" + ARCHIVE_SLUG)], compares={draft_pair: "behind"})
     os.makedirs(GHNONE, exist_ok=True)
     found = shutil.which("gh", path=GHNONE_PATH)
     if found:
@@ -9120,7 +9127,7 @@ add("merge-batch: the merge tool of the host is allowed past an ignored running 
     tool="mcp__github__merge_pull_request", cwd=STAMPIGNORE, pullNumber=1, repo="x", owner="y",
     env_path=GHRUNIGNORED + os.pathsep + PY_PATH)
 # A pinned merge.requiredChecks list is the required list: STAMPREPO pins `checks`, the protection says `gate`, so only the pin counts.
-add("merge-batch: a pinned merge.requiredChecks list is the required list, so a pending gate on pr 2 does not block", "allow",
+add("merge-batch: a pinned merge.requiredChecks list is the required list, so a pending `gate` check on pr 2 does not block", "allow",
     tool="mcp__github__merge_pull_request", cwd=STAMPREPO, pullNumber=1, repo="x", owner="y", env_path=GHPINNED + os.pathsep + PY_PATH)
 
 _BARE_GUARD = dict(env_path=GREEN_ON, config=MERGECFG)
@@ -9910,6 +9917,9 @@ archive_allow("an open draft lane pull request whose head is behind main is allo
               role_path("archive-lane"), fake_gh_path(ARCHDRAFT_BEHIND))
 archive_allow("an open draft lane pull request whose head is identical to main is allowed: its commits have landed",
               role_path("archive-lane"), fake_gh_path(ARCHDRAFT_IDENT))
+# The same release on the lane/<slug> head form: the draft's head is behind main, so the lane's commits have landed.
+archive_allow("an open draft on head lane/<slug> whose head is behind main is allowed: the lane/ head form releases too",
+              role_path("archive-lane"), fake_gh_path(ARCHDRAFT_LANE_BEHIND))
 archive_refuse("an open draft lane pull request whose head is ahead of main is refused: its commits have not landed",
                role_path("archive-lane"), fake_gh_path(ARCHDRAFT_AHEAD), carries=ARCHIVE_OPEN_PIN, lacks=ARCHIVE_READ_PIN)
 archive_refuse("an open draft lane pull request whose head diverged from main is refused",
@@ -9923,6 +9933,9 @@ archive_refuse("an open draft lane pull request whose containment read fails is 
 # This refusal also holds on main, which refuses every open lane pull request. It pins the base check for the release.
 archive_refuse("an open draft lane pull request based on integration/b1, not the default branch, is refused though its head is behind main",
                role_path("archive-lane"), fake_gh_path(ARCHDRAFT_INTEG), carries=ARCHIVE_OPEN_PIN, lacks=ARCHIVE_READ_PIN)
+# A lane's open pull request on the `lane/<slug>` head form is its own records pull request: refused, as the bare slug is.
+archive_refuse("a lane whose open pull request has head lane/<slug> is refused: the lane/ head form counts",
+               role_path("archive-lane"), fake_gh_path(ARCHOPEN_LANE), carries=ARCHIVE_OPEN_PIN, lacks=ARCHIVE_READ_PIN)
 # The wrapped record in the real shape: the closing tag carries the opening tag's nonce, so the lane's record is read
 # inside its wrapper and its open pull request refuses the archive.
 archive_refuse("a lane's record in the real wrapper, the nonce on both tags, is read: its open pull request refuses",
@@ -14681,7 +14694,7 @@ add("impeccable: bare name with polish is denied", "deny", "impeccable-review-on
 # refusal-vs-rule (impeccable-review-only, design-skills): the skill reads the FIRST word as its command
 # and the rest as target text. A `;` inside that target starts no second command, so a review with a
 # focus after the `;` loads. A non-review first word stays refused. A non-review verb after the `;` also
-# stays refused: the skill asks once when two commands fit, and the gate cannot tell that ask from a run.
+# stays refused: the skill asks once when two commands fit, and the guard cannot tell that ask from a run.
 add("impeccable: audit with a focus after a semicolon is allowed", "allow", tool="Skill", skill=IMP,
     args="audit the page; focus on a11y")
 add("impeccable: critique with a focus after a semicolon is allowed", "allow", tool="Skill", skill=IMP,
@@ -25935,7 +25948,7 @@ def cloud_name_check():
 
 
 def cloud_one_home_check():
-    """guard.py's brake gate holds guard_core's is_cloud: the cloud check has one home."""
+    """guard.py's brake guard holds guard_core's is_cloud: the cloud check has one home."""
     import importlib
     guard = _load_guard_module()
     core = importlib.import_module("guard_core")
@@ -25944,12 +25957,12 @@ def cloud_one_home_check():
         return False, "guard_core has no is_cloud: the cloud check has no one home yet"
     got = getattr(guard, "is_cloud", None)
     if got is not helper:
-        return False, "guard.py's brake gate does not hold guard_core.is_cloud (it holds %r)" % (got,)
+        return False, "guard.py's brake guard does not hold guard_core.is_cloud (it holds %r)" % (got,)
     return True, "guard.py holds guard_core.is_cloud"
 
 
 lb_add('cloud check: guard_core.is_cloud exists and is True only for exactly "true"', cloud_name_check)
-lb_add("cloud check: guard.py's brake gate holds guard_core.is_cloud, one home", cloud_one_home_check)
+lb_add("cloud check: guard.py's brake guard holds guard_core.is_cloud, one home", cloud_one_home_check)
 
 
 # A CLOUD SESSION. The brake is specific to local sessions: with CLAUDE_CODE_REMOTE "true" it skips every lane

@@ -1,0 +1,746 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>3D browser dummy</title>
+<style>
+/* Harness only: the toolbar and the frames around the drawn screen. The screen itself is #screencss and #screenjs, run inside each frame. */
+:root { --h-bg: #eef0f3; --h-ink: #161b22; --h-muted: #565f6b; --h-line: #cfd5dd; --h-btn: #ffffff; --h-on: #161b22; --h-on-ink: #ffffff; color-scheme: light; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --h-bg: #0c0f13; --h-ink: #e8ecf1; --h-muted: #a3adba; --h-line: #2c3440; --h-btn: #191e26; --h-on: #e8ecf1; --h-on-ink: #11151b; color-scheme: dark; } }
+:root[data-theme="dark"] { --h-bg: #0c0f13; --h-ink: #e8ecf1; --h-muted: #a3adba; --h-line: #2c3440; --h-btn: #191e26; --h-on: #e8ecf1; --h-on-ink: #11151b; color-scheme: dark; }
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--h-bg); color: var(--h-ink); font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
+.sample { background: #5b21b6; color: #fff; font-weight: 700; text-align: center; padding: 8px 16px; }
+.tool { display: grid; gap: 8px; padding: 12px 16px; border-bottom: 1px solid var(--h-line); }
+.tool h1 { margin: 0; font-size: 17px; }
+.tool .row { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.tool .row > span { color: var(--h-muted); font-size: 13px; min-width: 64px; }
+.tool button { min-height: 32px; padding: 4px 10px; border-radius: 8px; border: 1px solid var(--h-line); background: var(--h-btn); color: var(--h-ink); font: inherit; font-size: 13.5px; cursor: pointer; }
+.tool button[aria-pressed="true"] { background: var(--h-on); color: var(--h-on-ink); border-color: var(--h-on); }
+.tool button.hide { border-style: dashed; color: var(--h-muted); }
+.tool button.hide[aria-pressed="true"] { background: var(--h-btn); color: var(--h-muted); }
+.tool p { margin: 0; font-size: 13.5px; color: var(--h-muted); max-width: 90ch; }
+#stage { display: grid; gap: 24px; padding: 16px; justify-items: center; }
+.fr { display: grid; gap: 6px; width: 100%; justify-items: center; min-width: 0; }
+.fr > b { font-size: 13px; color: var(--h-muted); }
+.fw { overflow: hidden; border: 1px solid var(--h-line); border-radius: 8px; background: var(--h-btn); max-width: 100%; }
+.fw iframe { border: 0; display: block; transform-origin: 0 0; }
+</style>
+</head>
+<body>
+<div class="sample" id="sampleBanner">Sample. No figure on this page is real: items, steps, counts and times are a trimmed copy for drawing only.</div>
+<div class="tool">
+  <h1>3D browser dummy: the Cockpit's items and roadmap steps as a scene</h1>
+  <div class="row" id="stateRow"><span>State</span></div>
+  <div class="row" id="mapRow"><span>Mapping</span></div>
+  <div class="row" id="detRow"><span>Phone detail</span></div>
+  <div class="row"><span>Width</span>
+    <button type="button" data-w="390">Phone 390</button><button type="button" data-w="1440">Desktop 1440</button><button type="button" data-w="all">Both</button>
+  </div>
+  <div class="row"><span>Theme</span>
+    <button type="button" data-t="light">Light</button><button type="button" data-t="dark">Dark</button>
+    <button type="button" id="labBtn">Labels on</button>
+  </div>
+  <p>Deep links: <code>#s=pick-multi&amp;map=floors&amp;w=390&amp;t=dark</code>. Keys: s (state), map (floors, kinds), det (under, over), v (all, items, roadmap), w (390, 1440, all), t (light, dark), lab=off, hide (comma list of option ids). Inside a frame: drag sideways to turn, press a block or a row to pick it.</p>
+</div>
+<main id="stage"></main>
+
+<!-- Sample data: docs/plans/3d-browser-dummy/sample-data.json, compacted. One session link in item 254 is replaced with words. -->
+<script type="application/json" id="data">{"source":"roadmap branch, waiting/ export, read 2026-11-06. Trimmed static sample.","items":[{"n":281,"kind":"decision","status":"open","title":"The 10-message stop on your Mac is Claude Code's own limit. Ask Anthropic for a setting?","short":"10-message stop: ask Anthropic?","rank":4,"group":null,"added":"2026-11-06T18:49:30Z","options":["Live with it, and send feedback","Live with it only"],"steps":[],"pick":"a"},{"n":280,"kind":"decision","status":"open","title":"mailaudit: can a Reset be undone from the Recent list?","short":"mailaudit: undo a Reset from Recent?","rank":3,"group":null,"added":"2026-11-06T18:47:30Z","options":["Reset gets a Recent row","Keep Reset out of Recent"],"steps":[],"pick":"a"},{"n":279,"kind":"decision","status":"open","title":"Which ways of adding an independent agent that argues back should we adopt?","short":"Independent pushback: which to adopt","rank":3,"group":null,"added":"2026-11-06T18:43:00Z","options":["Blind reviewer brief","Replay cases for each judge","Guard fix check on sonnet","Blind plan refuter"],"steps":[],"pick":["a","b","c","d"]},{"n":278,"kind":"decision","status":"open","title":"Which auto-mode allow lines should land?","short":"Auto-mode allow lines","rank":3,"group":null,"added":"2026-11-06T18:40:00Z","options":["Cancel a CI run of your own","Delete a check-in of your own"],"steps":[],"pick":null},{"n":277,"kind":"decision","status":"open","title":"Which page should the first 3D test copy port: this Cockpit page, or another one?","short":"3D test copy: which page","rank":4,"group":null,"added":"2026-11-06T18:37:00Z","options":["The Cockpit page, as a separate test copy","Another page (say which in your note)"],"steps":[],"pick":"a"},{"n":276,"kind":"decision","status":"open","title":"Should every check fail in CI when it can't read its input, and should your stale-cites-at-merge ruling be rewritten to…","short":"One rule for an unknown read","rank":1,"group":null,"added":"2026-11-06T18:33:00Z","options":["Grant: one rule, and rewrite line 18","Keep line 18 as written"],"steps":[],"pick":"a"},{"n":275,"kind":"decision","status":"open","title":"Style lint: when it can't read the base commit, fail it, pass a shallow clone, or fetch the full history first?","short":"Style lint, unreadable base","rank":2,"group":null,"added":"2026-11-06T18:08:00Z","options":["Fail whenever the base can't be read","Pass a shallow clone, fail anything else","Fetch the full history once, then fail"],"steps":[],"pick":"c"},{"n":274,"kind":"decision","status":"open","title":"Who archives finished lane sessions: the batch runner, a janitor session, or the coordinator?","short":"Who archives lanes","rank":2,"group":null,"added":"2026-11-06T17:37:00Z","options":["The batch runner archives, from a worked-out list","A standing janitor session","The coordinator archives its own lanes"],"steps":[],"pick":"a"},{"n":272,"kind":"decision","status":"open","title":"Swift layout rule: add a check and narrow it, file debts, or retire it?","short":"Swift layout rule","rank":3,"group":null,"added":"2026-11-06T17:34:00Z","options":["Narrow it and add a check","Keep it as written, one debt per app","Retire the Swift section"],"steps":[],"pick":"a"},{"n":271,"kind":"decision","status":"open","title":"Does a fix check follow a FAIL in any review round, or only round 3?","short":"fix check: after round 3 only?","rank":3,"group":null,"added":"2026-11-05T22:12:00Z","options":["A fix check only after round 3","A fix check after any round's FAIL"],"steps":[],"pick":null},{"n":273,"kind":"task","status":"open","title":"Test whether sessions on your Mac, PC and the cloud can message each other","short":"Cross-machine message test","rank":3,"group":null,"added":"2026-11-06T17:36:00Z","options":[],"steps":["Turn on Remote Control on your Mac and on your PC: in the Claude desktop app, Settings, Claude Code…","On the Mac, in a Claude Code session, type /list-agents. Check that the PC session and at least one…","From the PC session, send the Mac session a message, and send one back.","From a cloud session, send the PC session a message (a cloud session uses send_message).","From the Mac, send a cloud session a message."],"pick":null},{"n":262,"kind":"task","status":"open","title":"Add the own-branch lease-push line to settings.json on GitHub","short":"settings: own-branch lease push","rank":2,"group":null,"added":"2026-11-05T13:55:00Z","options":[],"steps":["Open the settings.json edit link below.","Under \"autoMode\" → \"allow\", find the \"Archived Branch Delete\" entry and paste the line right after …","Press \"Commit changes\", choose \"Create a new branch and start a pull request\", and confirm.","Mark done."],"pick":null},{"n":240,"kind":"task","status":"open","title":"Republish the banchi, degen, home and mailaudit Cockpits from main, signed in to your other account","short":"Republish 4 Cockpits","rank":2,"group":null,"added":"2026-11-04T06:35:00Z","options":[],"steps":["Open a Claude Code session signed in to the account that owns these four pages.","Paste this prompt and send it: For each of these Cockpit pages, run the waiting-page skill's \"Keep …","Reply here when it reports, or let that session's report stand."],"pick":null},{"n":91,"kind":"task","status":"open","title":"Put your Apple account ids in the Mac account file","short":"","rank":2,"group":null,"added":"2026-10-30T00:49:00Z","options":[],"steps":["Open the Claude app on your Mac and start a local Claude Code session.","Paste this prompt and send it: Work in my degen checkout (clone shivinate7/degen if missing). Read …","Done when that session prints the five key names: team_id, device_udid, asc_key_id, asc_issuer_id, …"],"pick":null},{"n":269,"kind":"task","status":"closed","title":"Rebuild the cloud environment snapshot","short":"rebuild cloud env snapshot","rank":3,"group":null,"added":"2026-11-05T18:05:00Z","options":[],"steps":["In any cloud session, open the environment menu in the session's title bar.","Choose Edit, then Setup script.","Save with no change; that rebuilds the snapshot.","Mark done. It is done when a new session starts without the EXECPATH line."],"pick":null},{"n":267,"kind":"task","status":"closed","title":"Add the Relayed Grant line to settings.json on GitHub","short":"settings: Relayed Grant line","rank":2,"group":null,"added":"2026-11-05T16:27:00Z","options":[],"steps":["Open the settings.json edit link below.","Under \"autoMode\" → \"allow\", find the \"Archived Branch Delete\" entry and paste the line right after …","Press \"Commit changes\", choose \"Create a new branch and start a pull request\", and confirm.","Mark done."],"pick":null},{"n":263,"kind":"task","status":"closed","title":"Type your word in lane review-fix-check (232)","short":"type 232 a in 1 lane","rank":2,"group":null,"added":"2026-11-05T13:55:00Z","options":[],"steps":["Open lane review-fix-check (link below) and type: 232 a","Mark done."],"pick":null},{"n":257,"kind":"decision","status":"closed","title":"Lease pushes: auto mode refuses a lane's fix to its own branch. Allow it, leave it, or remove the cause?","short":"Lease push refusals: allow, leave, or fix cause?","rank":30,"group":null,"added":"2026-11-04T23:56:00Z","options":["Bash allow rule for the lease push (Goes against your ruling: a repo changes to…","Leave it as it is","Auto-mode prose allow entry (Goes against your ruling: a repo changes to fit a …","Remove the cause in the red-run check"],"steps":[],"pick":null},{"n":255,"kind":"decision","status":"closed","title":"When a fix after the last review round edits a guard or a check, does it owe the net-value test again?","short":"Post-round-3 guard fix: net-value again?","rank":3,"group":null,"added":"2026-11-04T13:59:30Z","options":["No: the fix check is enough","Yes: judge net value again on the fixed head"],"steps":[],"pick":"a"},{"n":254,"kind":"task","status":"closed","title":"Type go in lane review-fix-check","short":"Type go in lane review-fix-check","rank":1,"group":null,"added":"2026-11-04T13:58:30Z","options":[],"steps":["Open the lane's session (link on the Cockpit).","Type: go"],"pick":null}],"steps":[{"id":"craft-book","title":"shivpedia: what a session learns in one repo, the next repo starts with","phase":"cleanup","status":"doing","order":102.7},{"id":"c55","title":"The roadmap gets re-weighed as a whole, and notes stay short","phase":"cleanup","status":"todo","order":103.2},{"id":"local-folder-for-owner-acts","title":"A session on shiv's Mac runs the acts the cloud refuses: protection writes, branch deletes, closing his PRs","phase":"cleanup","status":"todo","order":103.21},{"id":"roadmap-live-check-true","title":"The roadmap's in-progress check sees every live lane","phase":"cleanup","status":"doing","order":103.21001},{"id":"roadmap-one-writer","title":"Only triage pushes to the roadmap branch","phase":"cleanup","status":"doing","order":103.21002},{"id":"question-checks-past-rulings","title":"Before a question reaches the owner, past rulings on it are found and cited","phase":"cleanup","status":"doing","order":103.21003},{"id":"install-log-offset","title":"install.sh and install.ps1 write log times with their UTC offset","phase":"cleanup","status":"doing","order":103.21004},{"id":"glossary-meets-owner-halfway","title":"Sessions read the owner's words by meaning and answer in the glossary term","phase":"cleanup","status":"doing","order":103.21005},{"id":"sim-machine-lock","title":"Every simulator boot on the Mac goes through one machine-wide lock","phase":"cleanup","status":"doing","order":103.21006},{"id":"sim-crash-loop-stop","title":"sim-test stops a simulator that is crash-looping","phase":"cleanup","status":"doing","order":103.21007},{"id":"inbox-roadmap-task-home","title":"The feedback inbox accepts a roadmap step as a task home","phase":"cleanup","status":"todo","order":103.21008},{"id":"comment-narration-patterns","title":"The comment check catches history phrases and lets dated or rounding why-comments pass","phase":"cleanup","status":"todo","order":103.21009},{"id":"merge-ignores-superseded-runs","title":"The merge tool judges each check by the newest run on the head","phase":"cleanup","status":"doing","order":103.2101},{"id":"merge-tool-stale-run-unknown","title":"The merge tool clears a cancelled scheduled run on an older main once a newer run passed","phase":"cleanup","status":"todo","order":103.210101},{"id":"red-main-same-sha-green","title":"The merge tool clears a red run on main when a newer run on the same commit passed","phase":"cleanup","status":"todo","order":103.210102},{"id":"time-pinned-tests-go","title":"Tests that pass or fail on clock speed become outcome checks, then CI caps return to measured","phase":"cleanup","status":"doing","order":103.21011},{"id":"handoff-checkpoint-before-cloud-compact","title":"The last handoff checkpoint comes before the cloud compacts","phase":"cleanup","status":"todo","order":103.21012},{"id":"cc-update-behavior-diff","title":"A Claude Code update that changes compaction is caught and reported","phase":"cleanup","status":"todo","order":103.21013},{"id":"c178","title":"home drops its uncalled copy of degen's LAN check","phase":"rollout","status":"done","order":304.6},{"id":"cloud-refresh-clone","title":"A cloud session on a child repo gets claude-settings with its git history, so compliance-check can name the p…","phase":"cleanup","status":"done","order":309.5},{"id":"r1","title":"Run compliance-check on each child repo","phase":"rollout","status":"done","order":310},{"id":"l2","title":"Add a second design opinion","phase":"later","status":"done","order":420},{"id":"c8","title":"Try the sandbox on your Mac","phase":"later","status":"done","order":450},{"id":"c9","title":"Optional: fail a guard rule with no test","phase":"later","status":"done","order":460}]}</script>
+
+<script type="text/plain" id="screencss">
+/* Tokens: the Cockpit's :root blocks (skills/waiting-page/page.html), copied as written. Fonts fall back to the system face, because the mockup loads nothing. */
+:root {
+  --surface: #ffffff; --ink: #161b22; --muted: #565f6b; --faint: #5b6470; --line: #d9dee5; --chip: #eef1f4;
+  --holds: var(--r-holds-l, #b3261e); --on-holds: var(--r-on-holds-l, #ffffff); --due: var(--r-due-l, #8a5300); --due-soft: #fbefd9; --calm: #56606e;
+  --good: var(--r-good-l, #1d7445); --good-soft: #e0f2e7; --gold-soft: #fbf3d6; --gold-ink: #6b5000;
+  --ground: var(--r-ground-l, #f3f4f6); --hdr: var(--r-hdr-l, #4b5a6b); --on-hdr: var(--r-on-hdr-l, #ffffff);
+  --acc: var(--r-ink-l, #4b5a6b); --on-acc: #ffffff; --acc-soft: var(--r-soft-l, #eceff3);
+  --body: "Atkinson Hyperlegible Next", "Atkinson Hyperlegible", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  --wm: system-ui, sans-serif; --wmw: 700; --wmls: -0.01em;
+  --r: 10px;
+  /* New: scene shades, made only from the tokens above. Light comes from above, so a top face is the lightest. */
+  --o-top: color-mix(in srgb, var(--acc) 30%, var(--surface)); --o-l: color-mix(in srgb, var(--acc) 68%, var(--surface)); --o-r: var(--acc);
+  --c-top: var(--chip); --c-l: color-mix(in srgb, var(--calm) 22%, var(--surface)); --c-r: color-mix(in srgb, var(--calm) 38%, var(--surface));
+  --d-top: color-mix(in srgb, var(--good) 45%, var(--surface)); --d-l: color-mix(in srgb, var(--good) 75%, var(--surface)); --d-r: var(--good);
+  --p-top: var(--ground); --p-side: var(--line); --edge: color-mix(in srgb, var(--ink) 22%, transparent);
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --surface: #191e26; --ink: #e8ecf1; --muted: #a3adba; --faint: #8b95a2; --line: #2c3440; --chip: #222a35;
+  --holds: var(--r-holds-d, #ff8b7f); --on-holds: var(--r-on-holds-d, #11151b); --due: var(--r-due-d, #f2b55c); --due-soft: #35270f; --calm: #a3adba;
+  --good: var(--r-good-d, #6fcf98); --good-soft: #15301f; --gold-soft: #2f2a14; --gold-ink: #ecd37a;
+  --ground: var(--r-ground-d, #11151b); --hdr: var(--r-hdr-d, #2b3440); --on-hdr: var(--r-on-hdr-d, #ffffff);
+  --acc: var(--r-ink-d, #9fb0c2); --on-acc: #11151b; --acc-soft: var(--r-soft-d, #222a35);
+  --o-top: var(--acc); --o-l: color-mix(in srgb, var(--acc) 62%, var(--surface)); --o-r: color-mix(in srgb, var(--acc) 40%, var(--surface));
+  --c-top: color-mix(in srgb, var(--calm) 34%, var(--surface)); --c-l: color-mix(in srgb, var(--calm) 20%, var(--surface)); --c-r: color-mix(in srgb, var(--calm) 12%, var(--surface));
+  --d-top: var(--good); --d-l: color-mix(in srgb, var(--good) 60%, var(--surface)); --d-r: color-mix(in srgb, var(--good) 38%, var(--surface));
+  --p-top: var(--ground); --p-side: var(--line); --edge: color-mix(in srgb, var(--ink) 18%, transparent);
+  color-scheme: dark } }
+:root[data-theme="dark"] {
+  --surface: #191e26; --ink: #e8ecf1; --muted: #a3adba; --faint: #8b95a2; --line: #2c3440; --chip: #222a35;
+  --holds: var(--r-holds-d, #ff8b7f); --on-holds: var(--r-on-holds-d, #11151b); --due: var(--r-due-d, #f2b55c); --due-soft: #35270f; --calm: #a3adba;
+  --good: var(--r-good-d, #6fcf98); --good-soft: #15301f; --gold-soft: #2f2a14; --gold-ink: #ecd37a;
+  --ground: var(--r-ground-d, #11151b); --hdr: var(--r-hdr-d, #2b3440); --on-hdr: var(--r-on-hdr-d, #ffffff);
+  --acc: var(--r-ink-d, #9fb0c2); --on-acc: #11151b; --acc-soft: var(--r-soft-d, #222a35);
+  --o-top: var(--acc); --o-l: color-mix(in srgb, var(--acc) 62%, var(--surface)); --o-r: color-mix(in srgb, var(--acc) 40%, var(--surface));
+  --c-top: color-mix(in srgb, var(--calm) 34%, var(--surface)); --c-l: color-mix(in srgb, var(--calm) 20%, var(--surface)); --c-r: color-mix(in srgb, var(--calm) 12%, var(--surface));
+  --d-top: var(--good); --d-l: color-mix(in srgb, var(--good) 60%, var(--surface)); --d-r: color-mix(in srgb, var(--good) 38%, var(--surface));
+  --p-top: var(--ground); --p-side: var(--line); --edge: color-mix(in srgb, var(--ink) 18%, transparent);
+  color-scheme: dark }
+
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+body { margin: 0; background: var(--ground); color: var(--ink); font: 16px/1.55 var(--body); }
+button { font: inherit; color: inherit; }
+a { color: var(--acc); }
+:focus-visible { outline: 2px solid var(--acc); outline-offset: 2px; }
+h1, h2, h3 { text-wrap: balance; margin: 0; }
+p { margin: 0; }
+.in { max-width: 1320px; margin: 0 auto; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+.sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap; }
+
+/* Today: the Cockpit's repo bar, as written. */
+.hdr { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 7; background: var(--hdr); color: var(--on-hdr); }
+.hdr .in { padding-block: 6px; min-height: 44px; display: flex; align-items: center; gap: 12px; }
+.mark { flex: none; width: 28px; height: 28px; border-radius: 7px; background: var(--on-hdr); color: var(--hdr); display: grid; place-items: center; font: 800 15px/1 var(--wm); }
+.who { min-width: 0; display: flex; align-items: baseline; gap: 10px; }
+.who .repo { margin: 0; font: var(--wmw) 18px/1.2 var(--wm); letter-spacing: var(--wmls); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.who .copy { flex: none; font-size: 13px; font-weight: 600; padding: 0 8px; border: 1.5px solid currentColor; border-radius: 999px; line-height: 20px; }
+/* Option files only: their own Sample banner, and #pickview, one column that holds the switch, scene and detail. */
+.sample { background: #5b21b6; color: #fff; font: 700 14px/1.4 system-ui, sans-serif; text-align: center; padding-block: 8px; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+.main3.wrapped { grid-template-columns: minmax(0, 1fr); grid-template-areas: none; }
+#pickview { display: grid; gap: 16px; min-width: 0; }
+/* !important: the area names on #scene, .detail and the rest come later and would put the column back on the frame grid. */
+#pickview > *, .main3.wrapped > * { grid-area: auto !important; }
+.lede { padding-block: 12px 4px; font-size: 14.5px; color: var(--muted); max-width: 70ch; }
+
+/* Today: the Cockpit's state shapes. New: doing and to-do shapes for roadmap steps. */
+.g { display: inline-block; flex: none; width: 12px; height: 12px; }
+.g.calm { border: 2px solid var(--calm); border-radius: 50%; }
+.g.done { background: var(--good); border-radius: 50%; position: relative; }
+.g.done::after { content: ""; position: absolute; left: 4px; top: 1.5px; width: 3px; height: 6px; border: solid var(--surface); border-width: 0 2px 2px 0; transform: rotate(45deg); }
+.g.doing { background: var(--acc); border-radius: 2px; }
+.g.todo { border: 2px dashed var(--calm); border-radius: 2px; }
+
+/* Frame: the scene column beside a fixed detail column on a wide screen; one column on a phone. */
+.main3 { padding-block: 12px 40px; display: grid; gap: 16px; grid-template-columns: minmax(0, 1fr) 360px; grid-template-areas: "bar detail" "scene detail" "legend detail" "list detail"; align-items: start; }
+.bar3 { grid-area: bar; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; min-width: 0; }
+#scene { grid-area: scene; }
+.legend { grid-area: legend; }
+.plain { grid-area: list; }
+.detail { grid-area: detail; position: sticky; top: calc(env(safe-area-inset-top, 0px) + 60px); min-width: 0; }
+@media (max-width: 960px) {
+  .main3 { grid-template-columns: minmax(0, 1fr); grid-template-areas: "bar" "scene" "detail" "legend" "list"; }
+  .detail { position: static; }
+}
+
+/* View switch: the Cockpit's .views look; the pressed button shows by a border, so it holds in forced colours. */
+.views { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 2px; padding: 3px; background: var(--chip); border-radius: 11px; min-width: 0; }
+@media (max-width: 400px) { .views button { padding-inline: 8px !important; } }
+.views button { min-height: 40px; padding: 4px 12px; font-size: 14.5px; border: 1px solid transparent; border-radius: 8px; background: transparent; color: var(--muted); font-weight: 600; cursor: pointer; white-space: nowrap; }
+.views button[aria-pressed="true"] { background: var(--surface); color: var(--ink); border-color: var(--line); }
+.btn { min-height: 44px; padding: 0 14px; border: 1.5px solid var(--line); border-radius: var(--r); background: var(--surface); color: var(--ink); font-weight: 600; font-size: 14.5px; cursor: pointer; }
+.btn:hover { border-color: var(--acc); }
+.btn.quiet { border-color: transparent; background: none; color: var(--acc); padding-inline: 4px; }
+
+/* The scene box. Its height fits the visible screen (ux-full-height-fits): vh first, svh after it. */
+#scene { position: relative; height: 62vh; height: clamp(420px, 62svh, 660px); background: var(--surface); border: 1px solid var(--line); border-radius: 14px; overflow: hidden; touch-action: pan-y; min-width: 0; }
+@media (max-width: 960px) { #scene { height: 56vh; height: clamp(320px, 56svh, 460px); } }
+#scene:focus-visible { outline-offset: -3px; }
+#scene svg { display: block; width: 100%; height: 100%; cursor: grab; user-select: none; }
+#scene svg.drag { cursor: grabbing; }
+.hint { position: absolute; left: 10px; bottom: 10px; max-width: calc(100% - 128px); padding: 4px 10px; border-radius: 8px; font-size: 13px; line-height: 1.4; color: var(--muted); background: color-mix(in srgb, var(--surface) 88%, transparent); border: 1px solid var(--line); pointer-events: none; }
+.hint .kb { display: none; }
+#scene:focus-visible .hint .kb { display: inline; }
+#scene:focus-visible .hint .pt { display: none; }
+.zoom { position: absolute; right: 10px; bottom: 10px; display: flex; gap: 6px; }
+.zoom button { width: 44px; height: 44px; border-radius: var(--r); border: 1.5px solid var(--line); background: var(--surface); color: var(--ink); font: 600 20px/1 var(--mono); cursor: pointer; }
+.zoom button:hover { border-color: var(--acc); }
+/* Scene objects. Each state shows by shape too: closed items and done steps carry a check, a doing step stands raised, a to-do tile is an outline. */
+.ob polygon, .ob path.f { stroke: var(--edge); stroke-width: .75; stroke-linejoin: round; }
+.ob.open .t { fill: var(--o-top); } .ob.open .l { fill: var(--o-l); } .ob.open .r { fill: var(--o-r); }
+.ob.doing .t { fill: var(--o-top); } .ob.doing .l { fill: var(--o-l); } .ob.doing .r { fill: var(--o-r); }
+.ob.closed .t { fill: var(--c-top); } .ob.closed .l { fill: var(--c-l); } .ob.closed .r { fill: var(--c-r); }
+.ob.done .t { fill: var(--d-top); } .ob.done .l { fill: var(--d-l); } .ob.done .r { fill: var(--d-r); }
+.ob.todo .t, .ob.todo .l, .ob.todo .r { fill: var(--surface); }
+.ob.todo polygon { stroke: var(--calm); stroke-width: 1.5; stroke-dasharray: 4 3; }
+.ob.plat .t { fill: var(--p-top); } .ob.plat .l, .ob.plat .r { fill: var(--p-side); }
+.ob.shelf .t { fill: var(--surface); } .ob.shelf .l, .ob.shelf .r { fill: var(--p-side); }
+.ob.shelf polygon.t { stroke: var(--calm); stroke-dasharray: 5 4; stroke-width: 1.25; }
+.ob.post .t, .ob.post .l, .ob.post .r { fill: var(--muted); }
+.ob .ck { fill: none; stroke: var(--good); stroke-width: 2.5; stroke-linecap: round; stroke-linejoin: round; }
+.ob.done .ck { stroke: var(--surface); }
+.ob.sel polygon, .ob.sel path.f { stroke: var(--ink); stroke-width: 2; stroke-dasharray: none; }
+.ob[data-id] { cursor: pointer; }
+.shadow { fill: color-mix(in srgb, var(--ink) 16%, transparent); stroke: var(--ink); stroke-width: 1.25; stroke-dasharray: 4 3; }
+.path { fill: none; stroke: color-mix(in srgb, var(--calm) 55%, var(--surface)); stroke-width: 2.5; stroke-dasharray: 1 5; stroke-linecap: round; stroke-linejoin: round; }
+.lb rect { fill: var(--surface); stroke: var(--line); }
+.lb text { fill: var(--ink); font: 600 12px var(--mono); }
+.lb.sel rect { fill: var(--ink); stroke: var(--ink); }
+.lb.sel text { fill: var(--surface); font: 700 13px var(--body); }
+.lb.sel line { stroke: var(--ink); stroke-width: 1.5; }
+.gt { fill: var(--muted); font: 700 12.5px var(--body); paint-order: stroke; stroke: var(--surface); stroke-width: 4px; stroke-linejoin: round; }
+.gt .ct { font: 600 12px var(--mono); }
+/* Notices over or in place of the scene. */
+.notice { position: absolute; inset: 0; display: grid; place-content: center; gap: 10px; padding: 24px; text-align: center; background: color-mix(in srgb, var(--surface) 72%, transparent); }
+.notice b { font-size: 17px; }
+.notice p { color: var(--muted); max-width: 42ch; font-size: 15px; }
+.notice .btn { justify-self: center; }
+#scene.dim svg { opacity: .35; }
+#scene.busy .zoom, #scene.busy .hint { display: none; }
+.bar3 button:disabled { opacity: .5; cursor: default; }
+#scene.nogl { height: auto; padding: 18px; display: grid; gap: 8px; border-style: dashed; }
+#scene.nogl b { font-size: 17px; }
+#scene.nogl p { color: var(--muted); max-width: 60ch; }
+.load i { justify-self: center; width: 160px; height: 6px; border-radius: 99px; background: var(--chip); overflow: hidden; display: block; position: relative; }
+.load i::after { content: ""; position: absolute; inset: 0 60% 0 0; background: var(--acc); border-radius: 99px; }
+
+/* Legend: one row per object type, drawn by the scene's own drawing code. */
+.legend { border: 1px solid var(--line); border-radius: 12px; background: var(--surface); min-width: 0; }
+.legend summary { cursor: pointer; min-height: 44px; display: flex; align-items: center; gap: 8px; padding: 0 14px; font-weight: 700; font-size: 15px; }
+.legend .lg { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 200px), 1fr)); gap: 4px 16px; padding: 4px 14px 14px; }
+.legend .lgi { display: flex; align-items: center; gap: 10px; font-size: 14px; min-width: 0; }
+.legend .lgi svg { flex: none; }
+.legend h3 { grid-column: 1 / -1; font: 600 13px var(--body); color: var(--muted); padding-top: 6px; }
+
+/* Plain list: the scene's text equivalent, and the whole page when there is no 3D. */
+.plain { display: grid; gap: 18px; min-width: 0; }
+.plain > h2 { font: 700 19px/1.25 var(--body); }
+.plain h3 { font: 700 16px var(--body); display: flex; align-items: center; gap: 8px; }
+.plain h3 .ct, .plain h4 .ct { font: 600 13px var(--mono); color: var(--muted); }
+.plain h4 { font: 600 14px var(--body); color: var(--muted); margin: 6px 0 0; display: flex; gap: 8px; }
+.grp { display: grid; gap: 6px; min-width: 0; }
+.rows { list-style: none; margin: 0; padding: 0; display: grid; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); overflow: hidden; }
+.rows li + li { border-top: 1px solid var(--line); }
+.row { width: 100%; min-height: 44px; display: grid; grid-template-columns: 14px 4.5ch minmax(0, 1fr) auto; gap: 10px; align-items: center; padding: 6px 12px; border: 0; background: none; text-align: left; cursor: pointer; font-size: 15px; }
+.row.step { grid-template-columns: 14px minmax(0, 1fr); }
+.row:hover { background: var(--acc-soft); }
+.row[aria-pressed="true"] { background: var(--acc-soft); box-shadow: inset 4px 0 0 var(--acc); border-left: 0; }
+.row .num { font: 600 14px var(--mono); color: var(--acc); font-variant-numeric: tabular-nums; }
+.row .tx { min-width: 0; overflow-wrap: anywhere; }
+.row .kd { font-size: 13px; color: var(--muted); }
+.row .id { display: block; font: 12.5px var(--mono); color: var(--muted); overflow-wrap: anywhere; }
+
+/* Today: the Cockpit's card, top row, title, options, pick box and steps, as written. */
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: clamp(16px, 2.4vw, 24px); display: grid; gap: 14px; align-content: start; min-width: 0; }
+.top { display: flex; flex-wrap: wrap; gap: 4px 14px; align-items: center; font-size: 14px; color: var(--muted); }
+.top .num { font: 600 15px var(--mono); color: var(--acc); }
+.top .st { display: inline-flex; align-items: center; gap: 6px; color: var(--ink); font-weight: 600; }
+.title { font: 700 clamp(19px, 2vw, 22px)/1.3 var(--body); max-width: 40ch; overflow-wrap: anywhere; }
+.opts { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; }
+.opt { display: grid; gap: 8px; padding: 14px; border: 1.5px solid var(--line); border-radius: var(--r); background: var(--surface); }
+.opt .head { display: flex; gap: 10px; align-items: flex-start; min-width: 0; }
+.key { flex: none; min-width: 26px; height: 26px; padding-inline: 6px; border-radius: 7px; border: 1.5px solid var(--line); text-align: center; font: 600 13px/23px var(--mono); color: var(--muted); }
+.opt .lab { min-width: 0; overflow-wrap: anywhere; font-weight: 700; line-height: 1.3; padding-top: 2px; }
+.opt .pick { display: grid; grid-template-columns: auto 1fr; align-items: start; gap: 8px; padding: 8px 10px; border-radius: 8px; background: var(--gold-soft); color: var(--ink); font-size: 14px; }
+.opt .pick b { display: inline-flex; padding-top: 1px; color: var(--gold-ink); }
+.multihint, .about { font-size: 14.5px; color: var(--muted); }
+ol.steps { margin: 0; padding-left: 22px; display: grid; gap: 4px; min-width: 0; overflow-wrap: anywhere; }
+.acts { display: flex; flex-wrap: wrap; gap: 8px; }
+.sum { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; font-size: 15px; }
+.sum li { display: flex; align-items: center; gap: 8px; }
+.sum b { font-variant-numeric: tabular-nums; }
+/* Option "Over the scene": on a phone the picked card sits over the lower part of the scene, and scrolls inside. */
+.over { position: absolute; left: 8px; right: 8px; bottom: 8px; max-height: 56%; overflow: auto; overscroll-behavior: contain; border-radius: 12px; box-shadow: 0 6px 24px color-mix(in srgb, var(--ink) 22%, transparent); border: 1.5px solid var(--ink); }
+.over .card { border: 0; }
+
+@media (forced-colors: active) { .row[aria-pressed="true"] { outline: 2px solid CanvasText; outline-offset: -2px; } }
+@media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto !important; } }
+
+/* Sample labels: dashed "Today:" for what exists on the Cockpit, "New:" for what the dummy adds (harness only, not for the builder). */
+[data-new], [data-today] { position: relative; outline: 2px dashed #7c3aed; outline-offset: 3px; }
+[data-today] { outline-color: #0f766e; }
+[data-new]::after, [data-today]::after { position: absolute; z-index: 6; left: 4px; top: -11px; max-width: calc(100% - 8px); overflow: hidden; text-overflow: ellipsis; padding: 1px 6px; border-radius: 4px; font: 600 11px/1.4 system-ui, sans-serif; color: #fff; white-space: nowrap; pointer-events: none; }
+[data-new]::after { content: "New: " attr(data-new); background: #6d28d9; }
+[data-today]::after { content: "Today: " attr(data-today); background: #0f766e; }
+html.nolab [data-new], html.nolab [data-today] { outline: none; }
+html.nolab [data-new]::after, html.nolab [data-today]::after { display: none; }
+/* The labels above set position: relative; the detail column keeps its own position, so a label never moves it. */
+.detail[data-today] { position: sticky; }
+#scene[data-new]::after, .hdr[data-today]::after { top: 4px; left: auto; right: 4px; }
+@media (max-width: 960px) { .detail[data-today] { position: relative; top: auto; } }
+</script>
+
+<script type="text/plain" id="screenjs">
+(() => {
+const D = JSON.parse(document.getElementById("data").textContent);
+const CFG = JSON.parse(document.getElementById("cfg").textContent);
+const $ = (s) => document.querySelector(s);
+const esc = (s) => String(s == null ? "" : s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const LETTERS = "abcdefghijklmnopqrstuvwxyz";
+
+/* ---------- Data: items in the Cockpit's order (rank first, then newest), steps by phase, then order ---------- */
+const byRank = (a, b) => a.rank - b.rank || b.n - a.n;
+const items = D.items.map((it) => ({ ...it, id: "i" + it.n, name: it.short || it.title }));
+const openD = items.filter((i) => i.status === "open" && i.kind === "decision").sort(byRank);
+const openT = items.filter((i) => i.status === "open" && i.kind === "task").sort(byRank);
+const closedD = items.filter((i) => i.status === "closed" && i.kind === "decision").sort(byRank);
+const closedT = items.filter((i) => i.status === "closed" && i.kind === "task").sort(byRank);
+const firstOrder = {};
+D.steps.forEach((s) => { firstOrder[s.phase] = Math.min(firstOrder[s.phase] ?? Infinity, s.order); });
+const PHASES = Object.keys(firstOrder).sort((a, b) => firstOrder[a] - firstOrder[b]);
+const steps = D.steps.slice().sort((a, b) => PHASES.indexOf(a.phase) - PHASES.indexOf(b.phase) || a.order - b.order).map((s, i) => ({ ...s, key: "s:" + s.id, idx: i, step: true }));
+const ORDER = [...openD, ...openT, ...closedD, ...closedT].map((i) => i.id).concat(steps.map((s) => s.key));
+const byId = {}; items.forEach((i) => (byId[i.id] = i)); steps.forEach((s) => (byId[s.key] = s));
+const STEPWORD = { done: "Done", doing: "Doing", todo: "To do" };
+
+const PICKS = { "pick-one": "i277", "pick-multi": "i279", "pick-none": "i278", "pick-task": "i273", "pick-closed": "i269", "pick-step": "s:roadmap-one-writer" };
+let sel = PICKS[CFG.s] || null;
+const phone = () => innerWidth <= 960;
+let view = CFG.v || (phone() ? "items" : "all");
+
+/* ---------- World: one place for every object. Units: an item's footprint is 1 x 1; a slab is one option or one step. ---------- */
+const SLAB = 0.3, GAP = 0.06, PITCH = 1.7;
+function stack(it, x, y, shape) {
+  const n = Math.max(1, it.options.length || it.steps.length);
+  return { id: it.id, x, y, w: 1, d: 1, z0: 0, slabs: n, shape, cls: it.status, lab: String(it.n) };
+}
+function plat(x0, y0, x1, y1, cls, text, count) {
+  return { x: x0, y: y0, w: x1 - x0, d: y1 - y0, z0: cls === "plat" ? -0.14 : -0.04, h: cls === "plat" ? 0.14 : 0.04, cls, tag: text ? { text, count } : null };
+}
+function road(ox, oy, perRow) {
+  const out = [], pts = [];
+  let prev = null;
+  steps.forEach((s, i) => {
+    const row = Math.floor(i / perRow), c = i % perRow, col = row % 2 ? perRow - 1 - c : c;
+    const x = ox + col * 1.2, y = oy + row * 1.7;
+    const h = s.status === "doing" ? 0.5 : s.status === "done" ? 0.14 : 0.06;
+    out.push({ id: s.key, x, y, w: 0.8, d: 0.8, z0: 0, h, cls: s.status, step: true });
+    pts.push([x + 0.4, y + 0.4]);
+    if (s.phase !== prev) {
+      const n = steps.filter((t) => t.phase === s.phase).length;
+      out.push({ x: x + (row % 2 ? 0.95 : -0.35), y: y - 0.35, w: 0.16, d: 0.16, z0: 0, h: 1.5, cls: "post", tag: { text: s.phase, count: n, top: true } });
+      prev = s.phase;
+    }
+  });
+  return { objs: out, pts };
+}
+function world(map) {
+  const objs = []; let pts;
+  if (map === "kinds") {
+    /* Kind floors: one floor for decisions, one for tasks. Open items stand on the floor; closed ones on a dashed shelf behind it. All stacks are square. */
+    objs.push(plat(-0.6, -0.6, 4 * PITCH + 1.6, PITCH + 1.6, "plat", "Decisions", openD.length + closedD.length));
+    objs.push(plat(-0.6, -3.0, 4 * PITCH + 1.6, -0.9, "shelf"));
+    objs.push(plat(9.6, -0.6, 10.2 + 3 * PITCH + 1.6, 1.6, "plat", "Tasks", openT.length + closedT.length));
+    objs.push(plat(9.6, -3.0, 10.2 + 3 * PITCH + 1.6, -0.9, "shelf"));
+    openD.forEach((it, i) => objs.push(stack(it, (i % 5) * PITCH, Math.floor(i / 5) * PITCH, "box")));
+    closedD.forEach((it, i) => objs.push(stack(it, i * PITCH, -2.4, "box")));
+    openT.forEach((it, i) => objs.push(stack(it, 10.2 + i * PITCH, 0, "box")));
+    closedT.forEach((it, i) => objs.push(stack(it, 10.2 + i * PITCH, -2.4, "box")));
+    const r = road(1.0, -10.0, 7); objs.push(...r.objs); pts = r.pts;
+  } else {
+    /* Status floors: open items on the raised floor in front, closed items on the dashed shelf behind. Shape gives the kind. */
+    const open = [...openD, ...openT], closed = [...closedD, ...closedT];
+    objs.push(plat(-0.6, -0.6, 4 * PITCH + 1.6, 2 * PITCH + 1.6, "plat", "Open", open.length));
+    objs.push(plat(-0.6, -6.6, 2 * PITCH + 1.6, -2.7, "shelf", "Closed", closed.length));
+    open.forEach((it, i) => objs.push(stack(it, (i % 5) * PITCH, Math.floor(i / 5) * PITCH, it.kind === "task" ? "cyl" : "box")));
+    closed.forEach((it, i) => objs.push(stack(it, (i % 3) * PITCH, -6.0 + Math.floor(i / 3) * PITCH, it.kind === "task" ? "cyl" : "box")));
+    const r = road(10.4, -5.6, 7); objs.push(...r.objs); pts = r.pts;
+  }
+  return { objs, pts };
+}
+
+/* ---------- Camera: a fixed tilt, a turn the person drags, and a zoom ---------- */
+const C30 = Math.cos(Math.PI / 6), S30 = 0.5;
+/* Screen point = middle + (scaled world point + pan) x zoom, so a zoom grows about the middle of the box. */
+const cam = { th: 0, zoom: 1, s: 30, cx: 0, cy: 0, offX: 0, offY: 0, hc: 250 };
+let W = 800, H = 500, WORLD = world(CFG.map);
+function P(x, y, z) {
+  const dx = x - cam.cx, dy = y - cam.cy, c = Math.cos(cam.th), s = Math.sin(cam.th);
+  const rx = dx * c - dy * s, ry = dx * s + dy * c;
+  return [W / 2 + ((rx - ry) * C30 * cam.s + cam.offX) * cam.zoom, cam.hc + ((rx + ry) * S30 * cam.s - z * cam.s + cam.offY) * cam.zoom, rx + ry];
+}
+const PP = P;
+const objH = (o) => (o.h != null ? o.h : o.slabs * (SLAB + GAP));
+function targets() {
+  return WORLD.objs.filter((o) => o.cls !== "tagonly" && (view === "all" || (view === "roadmap" ? o.step || o.cls === "post" : !(o.step || o.cls === "post"))));
+}
+function fit() {
+  const ts = targets();
+  let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
+  ts.forEach((o) => { x0 = Math.min(x0, o.x); y0 = Math.min(y0, o.y); x1 = Math.max(x1, o.x + o.w); y1 = Math.max(y1, o.y + o.d); });
+  cam.cx = (x0 + x1) / 2; cam.cy = (y0 + y1) / 2; cam.s = 1; cam.zoom = 1; cam.offX = 0; cam.offY = 0; cam.hc = 0;
+  let a = Infinity, b = -Infinity, c = Infinity, d = -Infinity;
+  ts.forEach((o) => [[o.x, o.y], [o.x + o.w, o.y], [o.x, o.y + o.d], [o.x + o.w, o.y + o.d]].forEach(([x, y]) => [0, objH(o)].forEach((z) => {
+    const p = P(x, y, z); a = Math.min(a, p[0] - W / 2); b = Math.max(b, p[0] - W / 2); c = Math.min(c, p[1]); d = Math.max(d, p[1]);
+  })));
+  /* Room for labels above, the hint below, and the zoom buttons on the right. */
+  const padX = 16, padR = 16, padTop = 52, padBot = 66;
+  cam.s = Math.min((W - padX - padR) / (b - a), (H - padTop - padBot) / (d - c));
+  cam.offX = -((a + b) / 2) * cam.s - (padR - padX) / 2;
+  cam.offY = -((c + d) / 2) * cam.s;
+  cam.hc = padTop + (H - padTop - padBot) / 2;
+}
+
+/* ---------- Drawing: boxes, round stacks and tiles from polygons; only faces that face the camera ---------- */
+const pts = (a) => a.map((p) => p[0].toFixed(1) + "," + p[1].toFixed(1)).join(" ");
+const SIDES = [[0, 1, 0, -1], [1, 2, 1, 0], [2, 3, 0, 1], [3, 0, -1, 0]];
+function boxSvg(x, y, w, d, z0, z1) {
+  const B = [[x, y], [x + w, y], [x + w, y + d], [x, y + d]];
+  const c = Math.cos(cam.th), s = Math.sin(cam.th);
+  let out = "";
+  SIDES.forEach(([i, j, nx, ny]) => {
+    const rx = nx * c - ny * s, ry = nx * s + ny * c;
+    if (rx + ry <= 0.001) return;
+    const f = [PP(B[i][0], B[i][1], z0), PP(B[j][0], B[j][1], z0), PP(B[j][0], B[j][1], z1), PP(B[i][0], B[i][1], z1)];
+    out += `<polygon class="${rx > ry ? "r" : "l"}" points="${pts(f)}"/>`;
+  });
+  out += `<polygon class="t" points="${pts(B.map(([a, b]) => PP(a, b, z1)))}"/>`;
+  return out;
+}
+function cylSvg(x, y, w, z0, z1) {
+  const S = cam.s * cam.zoom, r = w / 2, rx = Math.SQRT2 * r * C30 * S, ry = Math.SQRT2 * r * S30 * S;
+  const [cx, b] = PP(x + r, y + r, z0), t = PP(x + r, y + r, z1)[1];
+  const L = `M${cx - rx},${t} L${cx - rx},${b} A${rx},${ry} 0 0 0 ${cx},${b + ry} L${cx},${t + ry} Z`;
+  const R = `M${cx},${t + ry} L${cx},${b + ry} A${rx},${ry} 0 0 0 ${cx + rx},${b} L${cx + rx},${t} Z`;
+  return `<path class="f l" d="${L}"/><path class="f r" d="${R}"/><ellipse class="t f" cx="${cx}" cy="${t}" rx="${rx}" ry="${ry}" style="stroke:var(--edge);stroke-width:.75"/>`;
+}
+function checkSvg(o, z) {
+  const cx = o.x + o.w / 2, cy = o.y + o.d / 2, k = o.w * 0.22;
+  return `<polyline class="ck" points="${pts([PP(cx - k, cy, z), PP(cx - k * 0.2, cy + k * 0.8, z), PP(cx + k, cy - k * 0.9, z)])}"/>`;
+}
+function objSvg(o) {
+  const isSel = o.id && o.id === sel, lift = isSel ? 0.45 : 0;
+  let s = "";
+  if (isSel) { const [cx, cy] = PP(o.x + o.w / 2, o.y + o.d / 2, 0), S = cam.s * cam.zoom; s += `<ellipse class="shadow" cx="${cx}" cy="${cy}" rx="${o.w * 0.95 * C30 * S}" ry="${o.w * 0.95 * S30 * S}"/>`; }
+  let ztop = o.z0 + lift;
+  if (o.slabs) {
+    for (let k = 0; k < o.slabs; k++) {
+      const a = o.z0 + lift + k * (SLAB + GAP), b = a + SLAB;
+      s += o.shape === "cyl" ? cylSvg(o.x, o.y, o.w, a, b) : boxSvg(o.x, o.y, o.w, o.d, a, b);
+      ztop = b;
+    }
+  } else if (o.h) { ztop = o.z0 + lift + o.h; s += boxSvg(o.x, o.y, o.w, o.d, o.z0 + lift, ztop); }
+  if (o.cls === "closed" || o.cls === "done") s += checkSvg(o, ztop);
+  o._top = PP(o.x + o.w / 2, o.y + o.d / 2, ztop);
+  const name = o.id ? (byId[o.id].step ? byId[o.id].title : "No. " + byId[o.id].n + ", " + byId[o.id].name) : "";
+  return `<g class="ob ${o.cls}${isSel ? " sel" : ""}"${o.id ? ` data-id="${o.id}"` : ""}>${name ? `<title>${esc(name)}</title>` : ""}${s}</g>`;
+}
+let measure;
+function tw(text, font) { measure = measure || document.createElement("canvas").getContext("2d"); measure.font = font; return measure.measureText(text).width; }
+function pill(x, y, text, cls) {
+  const f = cls === "sel" ? "700 13px system-ui" : "600 12px ui-monospace, monospace", w = Math.ceil(tw(text, f)) + 14, h = cls === "sel" ? 26 : 20;
+  let lx = Math.round(x - w / 2), ly = Math.round(y - h - (cls === "sel" ? 26 : 8));
+  lx = Math.max(6, Math.min(W - w - 6, lx)); ly = Math.max(6, ly);
+  const lead = cls === "sel" ? `<line x1="${x}" y1="${y - 4}" x2="${Math.max(lx + 8, Math.min(lx + w - 8, x))}" y2="${ly + h}"/>` : "";
+  return `<g class="lb ${cls || ""}" aria-hidden="true">${lead}<rect x="${lx}" y="${ly}" width="${w}" height="${h}" rx="6"/><text x="${lx + 7}" y="${ly + h / 2 + 4.5}">${esc(text)}</text></g>`;
+}
+function trim(s, n) { return s.length > n ? s.slice(0, n - 1).trimEnd() + "…" : s; }
+function drawScene(svg) {
+  const box = $("#scene"); W = box.clientWidth; H = box.clientHeight;
+  svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+  const objs = WORLD.objs.slice();
+  objs.forEach((o) => { o._d = P(o.x + o.w / 2, o.y + o.d / 2, 0)[2]; });
+  const flat = objs.filter((o) => o.cls === "plat" || o.cls === "shelf");
+  const rest = objs.filter((o) => !flat.includes(o) && o.cls !== "tagonly").sort((a, b) => a._d - b._d || a.z0 - b.z0);
+  let s = flat.map(objSvg).join("");
+  s += `<polyline class="path" points="${pts(WORLD.pts.map(([x, y]) => PP(x, y, 0.01)))}"/>`;
+  s += rest.map(objSvg).join("");
+  /* Labels: group and phase names always; item numbers when the zoom leaves room; the picked object's name on top. */
+  const S = cam.s * cam.zoom;
+  objs.filter((o) => o.tag).forEach((o) => {
+    /* A floor's name sits under its left corner; the closed shelf's sits beside its right corner, clear of the number labels above its items. */
+    let p, dy = 18, anchor = "middle";
+    if (o.tag.top) { p = PP(o.x, o.y, o.h + 0.2); dy = -6; }
+    else {
+      const cs = [[o.x, o.y], [o.x + o.w, o.y], [o.x + o.w, o.y + o.d], [o.x, o.y + o.d]].map(([x, y]) => PP(x, y, 0));
+      if (o.cls === "shelf") {
+        p = cs.sort((a, b) => b[0] - a[0])[0];
+        /* Beside the right corner when it fits in the box; else under it, ending at the corner. */
+        if (p[0] + 8 + tw(o.tag.text + " 00", "700 12.5px system-ui") + 8 <= W) { p = [p[0] + 8, p[1]]; anchor = "start"; dy = 5; }
+        else { p = [p[0] - 4, p[1]]; anchor = "end"; dy = 22; }
+      } else { p = cs.sort((a, b) => a[0] - b[0])[0]; anchor = "start"; dy = 22; }
+    }
+    s += `<text class="gt" x="${p[0]}" y="${p[1] + dy}" text-anchor="${anchor}" aria-hidden="true">${esc(o.tag.text)}${o.tag.count != null ? ` <tspan class="ct">${o.tag.count}</tspan>` : ""}</text>`;
+  });
+  if (S >= 20) rest.filter((o) => o.lab && o.id !== sel).forEach((o) => { s += pill(o._top[0], o._top[1], o.lab); });
+  const so = rest.find((o) => o.id === sel);
+  if (so) { const it = byId[sel]; s += pill(so._top[0], so._top[1], it.step ? trim(it.title, phone() ? 34 : 52) : "No. " + it.n + "  " + trim(it.name, phone() ? 26 : 44), "sel"); }
+  svg.innerHTML = s;
+}
+
+/* ---------- Detail: the Cockpit's card look, read-only ---------- */
+const sparkle = '<b aria-label="My pick" title="My pick"><svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" focusable="false"><path d="M10 4c.7 4.6 2.9 6.8 7.5 7.5-4.6.7-6.8 2.9-7.5 7.5-.7-4.6-2.9-6.8-7.5-7.5C7.1 10.8 9.3 8.6 10 4z"/><path d="M19 2.5c.3 1.8 1 2.5 2.8 2.8-1.8.3-2.5 1-2.8 2.8-.3-1.8-1-2.5-2.8-2.8 1.8-.3 2.5-1 2.8-2.8z"/></svg></b>';
+function when(iso) {
+  const p = new Intl.DateTimeFormat("en-US", { timeZone: "America/Chicago", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", hourCycle: "h23", timeZoneName: "short" }).formatToParts(new Date(iso));
+  const g = (t) => (p.find((x) => x.type === t) || {}).value;
+  return g("month") + " " + g("day") + ", " + g("hour") + ":" + g("minute") + " " + g("timeZoneName");
+}
+function detailHtml() {
+  const acts = (center) => `<div class="acts">${center ? '<button class="btn" type="button" data-act="center">Center on it</button>' : ""}<button class="btn quiet" type="button" data-act="clear">Clear</button></div>`;
+  if (!sel) {
+    const st = (k) => steps.filter((s) => s.status === k).length;
+    return `<article class="card" aria-labelledby="dh"><h2 class="title" id="dh">Nothing picked</h2>
+      <ul class="sum">
+        <li><i class="g calm"></i><span><b>${openD.length + openT.length}</b> open items: ${openD.length} decisions, ${openT.length} tasks</span></li>
+        <li><i class="g done"></i><span><b>${closedD.length + closedT.length}</b> closed items</span></li>
+        <li><i class="g" aria-hidden="true"></i><span><b>${steps.length}</b> roadmap steps: ${st("done")} done, ${st("doing")} doing, ${st("todo")} to do</span></li>
+      </ul>
+      <p class="about">${nogl ? "Pick a row in the list to see it here." : "Press a block or a tile, or a row in the list, to see it here."}</p>
+      <div class="acts"><button class="btn" type="button" data-act="first">Show the top item</button></div></article>`;
+  }
+  const it = byId[sel];
+  if (it.step) {
+    const inPhase = steps.filter((s) => s.phase === it.phase), pos = inPhase.indexOf(it) + 1;
+    return `<article class="card" aria-labelledby="dh"><div class="top"><span class="num">${esc(it.id)}</span><span class="st"><i class="g ${it.status}"></i>${STEPWORD[it.status]}</span><span>Roadmap step</span></div>
+      <h2 class="title" id="dh">${esc(it.title)}</h2>
+      <p class="about">Step ${pos} of ${inPhase.length} in the ${esc(it.phase)} phase, and ${it.idx + 1} of ${steps.length} on the whole path.</p>${acts(true)}</article>`;
+  }
+  const picks = it.pick == null ? [] : Array.isArray(it.pick) ? it.pick : [it.pick];
+  const multi = Array.isArray(it.pick);
+  const top = `<div class="top"><span class="num">No. ${it.n}</span><span class="st"><i class="g ${it.status === "open" ? "calm" : "done"}"></i>${it.status === "open" ? "Open" : "Closed"}</span><span>${it.kind === "task" ? "Task" : "Decision"}</span><span>Added ${when(it.added)}</span></div>`;
+  let body = "";
+  if (it.kind === "decision") {
+    const hint = multi ? `<p class="multihint">More than one can be picked. My pick is ${picks.length === it.options.length ? "all " + ["", "one", "two", "three", "four", "five"][picks.length] : picks.map((k) => k.toUpperCase()).join(", ")}.</p>` : !picks.length ? '<p class="multihint">No pick from me on this one.</p>' : "";
+    body = hint + `<div class="opts">${it.options.map((o, i) => {
+      const k = LETTERS[i], pi = picks.indexOf(k);
+      return `<div class="opt"><div class="head"><span class="key">${k.toUpperCase()}</span><span class="lab">${esc(o)}</span></div>${pi >= 0 ? `<div class="pick">${sparkle}<span>${multi && pi > 0 ? "Also my pick." : "My pick."}</span></div>` : ""}</div>`;
+    }).join("")}</div>`;
+  } else {
+    body = `<ol class="steps">${it.steps.map((s) => `<li>${esc(s)}</li>`).join("")}</ol>`;
+  }
+  const foot = `<p class="about">${it.status === "open" ? "This copy only shows. Answer it on the Cockpit." : "Closed on the Cockpit. Kept here so the closed shelf has something on it."}</p>`;
+  return `<article class="card" aria-labelledby="dh">${top}<h2 class="title" id="dh">${esc(it.title)}</h2>${body}${foot}${acts(true)}</article>`;
+}
+
+/* ---------- Plain list: every object in the scene, as rows that pick ---------- */
+function listHtml() {
+  const irow = (i) => `<li><button class="row" type="button" data-id="${i.id}" aria-pressed="false"><i class="g ${i.status === "open" ? "calm" : "done"}"></i><span class="num">${i.n}</span><span class="tx">${esc(i.name)}</span><span class="kd">${i.kind === "task" ? "Task" : "Decision"}</span></button></li>`;
+  const srow = (s) => `<li><button class="row step" type="button" data-id="${s.key}" aria-pressed="false"><i class="g ${s.status}"></i><span class="tx">${esc(s.title)}<span class="id">${esc(s.id)} · ${STEPWORD[s.status]}</span></span></button></li>`;
+  const open = [...openD, ...openT], closed = [...closedD, ...closedT];
+  return `<h2 id="listH">Everything in the scene, as a list</h2>
+    <div class="grp"><h3>Items <span class="ct">${items.length}</span></h3>
+      <h4>Open <span class="ct">${open.length}</span></h4><ul class="rows">${open.map(irow).join("")}</ul>
+      <h4>Closed <span class="ct">${closed.length}</span></h4><ul class="rows">${closed.map(irow).join("")}</ul></div>
+    <div class="grp"><h3>Roadmap steps <span class="ct">${steps.length}</span></h3>
+      ${PHASES.map((p) => { const ss = steps.filter((s) => s.phase === p); return `<h4>${esc(p)} <span class="ct">${ss.length}</span></h4><ul class="rows">${ss.map(srow).join("")}</ul>`; }).join("")}</div>`;
+}
+
+/* ---------- Legend: drawn with the scene's own code, at a fixed small camera ---------- */
+function legendHtml() {
+  const save = { ...cam, W, H }; W = 52; H = 44; cam.th = 0; cam.zoom = 1; cam.s = 13; cam.offX = 0; cam.offY = 0; cam.hc = 26;
+  const mk = (o) => { cam.cx = o.x + o.w / 2; cam.cy = o.y + o.d / 2; const sv = `<svg width="52" height="44" viewBox="0 0 52 44" aria-hidden="true">${objSvg(o)}</svg>`; return sv; };
+  const floors = CFG.map !== "kinds";
+  const rows = [
+    ["Items", null],
+    [floors ? "Square stack: a decision" : "Stack: one item", { x: 0, y: 0, w: 1, d: 1, z0: -0.6, slabs: 2, shape: "box", cls: "open" }],
+    floors ? ["Round stack: a task", { x: 0, y: 0, w: 1, d: 1, z0: -0.6, slabs: 3, shape: "cyl", cls: "open" }] : null,
+    ["One slab: one option or step", { x: 0, y: 0, w: 1, d: 1, z0: -0.3, slabs: 1, shape: "box", cls: "open" }],
+    ["Grey with a check: closed", { x: 0, y: 0, w: 1, d: 1, z0: -0.6, slabs: 2, shape: "box", cls: "closed" }],
+    ["Roadmap steps", null],
+    ["Raised tile: doing", { x: 0, y: 0, w: 0.9, d: 0.9, z0: -0.3, h: 0.5, cls: "doing" }],
+    ["Dashed tile: to do", { x: 0, y: 0, w: 0.9, d: 0.9, z0: -0.1, h: 0.06, cls: "todo" }],
+    ["Tile with a check: done", { x: 0, y: 0, w: 0.9, d: 0.9, z0: -0.1, h: 0.14, cls: "done" }],
+    ["Post: a phase starts", { x: 0, y: 0, w: 0.16, d: 0.16, z0: -0.9, h: 1.5, cls: "post" }],
+  ].filter(Boolean);
+  const out = rows.map(([t, o]) => (o ? `<div class="lgi">${mk(o)}<span>${esc(t)}</span></div>` : `<h3>${t}</h3>`)).join("");
+  Object.assign(cam, save); W = save.W; H = save.H;
+  return `<details open><summary>What the shapes mean</summary><div class="lg">${out}</div></details>`;
+}
+
+/* ---------- Page ---------- */
+const st = CFG.s;
+const nogl = st === "nowebgl";
+/* CFG.banner: an option file's own Sample banner. CFG.wrap: an option file at phone width wraps the
+   view switch, scene and detail in #pickview, so one selector frames the part being decided. */
+const wrap = !!CFG.wrap;
+/* An option file carries a static #screen root holding its focus element, so a parse with no script
+   finds the focus; the screen renders into that root. The harness frames have no root: body is used. */
+(document.getElementById("screen") || document.body).innerHTML = `${CFG.banner ? `<div class="sample">${esc(CFG.banner)}</div>` : ""}
+<header class="hdr" data-today="Cockpit repo bar"><div class="in"><div class="mark" aria-hidden="true">c</div><div class="who"><h1 class="repo">claude-settings</h1><span class="copy">3D test copy</span></div></div></header>
+<div class="in"><p class="lede">The Cockpit's items and roadmap steps, drawn as objects you can turn and pick. This copy only shows. Answer items on the Cockpit. Read Nov 6, 2026.</p></div>
+<main class="in main3${wrap ? " wrapped" : ""}">${wrap ? `<div id="pickview">` : ""}
+  <div class="bar3"${nogl ? " hidden" : ""} data-new="view switch">
+    <div class="views" role="group" aria-label="Show in the scene"><button type="button" data-view="all">All</button><button type="button" data-view="items">Items</button><button type="button" data-view="roadmap">Roadmap</button></div>
+    <button class="btn" type="button" data-act="reset" aria-label="Reset view">Reset</button>
+  </div>
+  ${nogl
+    ? `<section id="scene" class="nogl" data-new="no-3D notice" aria-labelledby="nglH"><b id="nglH">No 3D view in this browser</b><p>WebGL is off or not supported here, so the scene can't be drawn. The list below holds every item and step. Pick a row to see its detail.</p><p><a href="https://get.webgl.org/">How to check and turn on WebGL</a></p></section>`
+    : `<section id="scene" tabindex="0" aria-label="3D view of ${items.length} items and ${steps.length} roadmap steps. Arrow keys move between objects. The list below holds the same." aria-describedby="listH" data-new="3D scene">
+      <svg aria-hidden="true" focusable="false"></svg>
+      <div class="zoom"><button type="button" data-act="in" aria-label="Zoom in">+</button><button type="button" data-act="out" aria-label="Zoom out">&minus;</button></div>
+      <p class="hint" aria-hidden="true"><span class="pt">Drag sideways to turn. Pinch, or Ctrl and scroll, to zoom.</span><span class="kb">Arrow keys move. [ and ] turn. + and &minus; zoom. Esc clears.</span></p>
+    </section>`}
+  <aside class="detail" aria-live="polite" aria-label="Picked object" data-today="Cockpit card look"></aside>${wrap ? "</div>" : ""}
+  <section class="legend"${nogl ? " hidden" : ""} data-new="legend">${legendHtml()}</section>
+  <section class="plain" aria-labelledby="listH" data-new="plain list">${listHtml()}</section>
+</main>`;
+const scene = $("#scene"), svg = scene.querySelector("svg"), detail = $(".detail");
+
+function paint() {
+  /* Detail: beside the scene on a wide screen; under it on a phone, or over it in the "Over the scene" option. */
+  const over = CFG.det === "over" && phone() && sel && !nogl;
+  let ov = scene.querySelector(".over");
+  if (over) {
+    if (!ov) { ov = document.createElement("div"); ov.className = "over"; scene.append(ov); }
+    ov.innerHTML = detailHtml(); detail.innerHTML = ""; detail.hidden = true;
+  } else { if (ov) ov.remove(); detail.hidden = false; detail.innerHTML = detailHtml(); }
+  document.querySelectorAll(".row").forEach((r) => r.setAttribute("aria-pressed", String(r.dataset.id === sel)));
+  document.querySelectorAll("[data-view]").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.view === view)));
+  /* With the card over the scene, the picked object moves into the strip above the card. */
+  if (over && svg) {
+    const o = WORLD.objs.find((x) => x.id === sel);
+    if (o) { const p = P(o.x + o.w / 2, o.y + o.d / 2, 0); cam.offX -= (p[0] - W / 2) / cam.zoom; cam.offY -= (p[1] - H * 0.32) / cam.zoom; }
+  }
+  if (svg && st !== "loading") drawScene(svg);
+}
+function pick(id) { sel = id; if (!id && CFG.det === "over" && phone() && svg) fit(); paint(); }
+function setView(v) { view = v; fit(); paint(); }
+
+if (!nogl) {
+  const r = scene.getBoundingClientRect(); W = r.width; H = r.height;
+  fit();
+  /* While the scene is loading or lost, the controls that move it are hidden or off, so no press does nothing. */
+  if (st === "loading" || st === "lost") { scene.classList.add("busy"); document.querySelectorAll(".bar3 button").forEach((b) => (b.disabled = true)); }
+  if (st === "loading") scene.insertAdjacentHTML("beforeend", `<div class="notice load" role="status"><b>Drawing the 3D view</b><i></i><p>The list below works now.</p></div>`);
+  if (st === "lost") { scene.classList.add("dim"); scene.insertAdjacentHTML("beforeend", `<div class="notice" role="alert"><b>The 3D view stopped</b><p>The graphics card dropped the scene. It comes back on its own when the card does. The list below still works.</p><button class="btn" type="button" data-act="restore">Draw it again</button></div>`); }
+}
+paint();
+
+/* Turning: a sideways drag turns the scene; an up-and-down swipe scrolls the page as usual. A short press picks. */
+let drag = null;
+if (svg) {
+  svg.addEventListener("pointerdown", (e) => { drag = { x: e.clientX, y: e.clientY, th: cam.th, moved: false }; });
+  svg.addEventListener("pointermove", (e) => {
+    if (!drag) return;
+    const dx = e.clientX - drag.x;
+    if (!drag.moved && Math.abs(dx) > 6 && Math.abs(dx) > Math.abs(e.clientY - drag.y)) { drag.moved = true; svg.setPointerCapture(e.pointerId); svg.classList.add("drag"); }
+    if (drag.moved) { cam.th = drag.th + dx * 0.008; drawScene(svg); }
+  });
+  const end = (e) => {
+    if (drag && !drag.moved) { const g = e.target.closest && e.target.closest("[data-id]"); if (g) pick(g.dataset.id); }
+    drag = null; svg.classList.remove("drag");
+  };
+  svg.addEventListener("pointerup", end); svg.addEventListener("pointercancel", () => { drag = null; svg.classList.remove("drag"); });
+  svg.addEventListener("wheel", (e) => { if (!e.ctrlKey && !e.metaKey) return; e.preventDefault(); cam.zoom = Math.max(0.5, Math.min(3, cam.zoom * (e.deltaY < 0 ? 1.1 : 0.9))); drawScene(svg); }, { passive: false });
+  scene.addEventListener("keydown", (e) => {
+    if (e.target !== scene) return;
+    const i = ORDER.indexOf(sel);
+    const go = { ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 }[e.key];
+    if (go) { e.preventDefault(); pick(ORDER[(i + go + ORDER.length) % ORDER.length] || ORDER[0]); }
+    else if (e.key === "Home") { e.preventDefault(); pick(ORDER[0]); }
+    else if (e.key === "End") { e.preventDefault(); pick(ORDER[ORDER.length - 1]); }
+    else if (e.key === "Escape") pick(null);
+    else if (e.key === "[" || e.key === "]") { cam.th += e.key === "]" ? 0.2 : -0.2; drawScene(svg); }
+    else if (e.key === "+" || e.key === "=") { cam.zoom = Math.min(3, cam.zoom * 1.15); drawScene(svg); }
+    else if (e.key === "-") { cam.zoom = Math.max(0.5, cam.zoom / 1.15); drawScene(svg); }
+  });
+}
+document.addEventListener("click", (e) => {
+  const b = e.target.closest("button"); if (!b) return;
+  if (b.dataset.view) setView(b.dataset.view);
+  else if (b.classList.contains("row")) pick(b.dataset.id);
+  else if (b.dataset.act === "clear") pick(null);
+  else if (b.dataset.act === "first") pick(ORDER[0]);
+  else if (b.dataset.act === "reset") { cam.th = 0; fit(); drawScene(svg); }
+  else if (b.dataset.act === "in" || b.dataset.act === "out") { cam.zoom = Math.max(0.5, Math.min(3, cam.zoom * (b.dataset.act === "in" ? 1.2 : 1 / 1.2))); drawScene(svg); }
+  else if (b.dataset.act === "restore") { scene.classList.remove("dim", "busy"); document.querySelectorAll(".bar3 button").forEach((x) => (x.disabled = false)); b.closest(".notice").remove(); drawScene(svg); }
+  else if (b.dataset.act === "center" && svg) {
+    /* Center on it: pan so the object sits in the middle, then zoom in about the middle. */
+    const o = WORLD.objs.find((x) => x.id === sel);
+    if (o) { const p = P(o.x + o.w / 2, o.y + o.d / 2, 0); cam.offX -= (p[0] - W / 2) / cam.zoom; cam.offY -= (p[1] - cam.hc) / cam.zoom; cam.zoom = Math.max(cam.zoom, 1.6); drawScene(svg); scene.scrollIntoView({ block: "nearest" }); }
+  }
+});
+addEventListener("resize", () => { if (!svg) return; const r = scene.getBoundingClientRect(); if (Math.abs(r.width - W) > 1 || Math.abs(r.height - H) > 1) { W = r.width; H = r.height; fit(); paint(); } });
+document.documentElement.dataset.ready = "1";
+})();
+</script>
+
+<script>
+/* ---------- Harness: state, mapping option, phone-detail option, width, theme and labels from the URL hash ---------- */
+const STATES = [
+  { id: "overview", name: "Nothing picked" },
+  { id: "pick-one", name: "Decision, one pick (277)" },
+  { id: "pick-multi", name: "Decision, four picks (279)" },
+  { id: "pick-none", name: "Decision, no pick (278)" },
+  { id: "pick-task", name: "Task (273)" },
+  { id: "pick-closed", name: "Closed task (269)" },
+  { id: "pick-step", name: "Roadmap step" },
+  { id: "loading", name: "Loading" },
+  { id: "nowebgl", name: "No WebGL" },
+  { id: "lost", name: "Scene lost" },
+];
+const MAPS = [{ id: "floors", name: "Status floors" }, { id: "kinds", name: "Kind floors" }];
+const DETS = [{ id: "under", name: "Under the scene" }, { id: "over", name: "Over the scene" }];
+const WIDTHS = [390, 1440], WNAME = { 390: "Phone", 1440: "Desktop" };
+const P = { s: "overview", map: "floors", det: "under", v: "", w: "all", t: "", lab: "on", hide: [] };
+function readHash() {
+  Object.assign(P, { s: "overview", map: "floors", det: "under", v: "", w: "all", t: "", lab: "on", hide: [] });
+  new URLSearchParams(location.hash.slice(1)).forEach((v, k) => { if (k === "hide") P.hide = v.split(",").filter(Boolean); else if (k in P) P[k] = v; });
+  if (!STATES.some((x) => x.id === P.s)) P.s = "overview";
+}
+function writeHash() {
+  const q = new URLSearchParams({ s: P.s, map: P.map, det: P.det, w: P.w });
+  if (P.v) q.set("v", P.v); if (P.t) q.set("t", P.t); if (P.lab === "off") q.set("lab", "off"); if (P.hide.length) q.set("hide", P.hide.join(","));
+  const h = "#" + q; if (location.hash !== h) history.replaceState(null, "", h);
+}
+const theme = () => P.t || (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+function docFor() {
+  const cfg = JSON.stringify({ s: P.s, map: P.map, det: P.det, v: P.v || null }).replace(/</g, "\\u003c");
+  const data = document.getElementById("data").textContent.replace(/</g, "\\u003c");
+  const js = document.getElementById("screenjs").textContent;
+  return `<!doctype html><html lang="en" data-theme="${theme()}" class="${P.lab === "off" ? "nolab" : ""}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Cockpit 3D test copy</title><style>${document.getElementById("screencss").textContent}</style></head><body><script type="application/json" id="data">${data}<\/script><script type="application/json" id="cfg">${cfg}<\/script><script>${js}<\/script></body></html>`;
+}
+function frame(w) {
+  const box = document.createElement("div"); box.className = "fr";
+  const cap = document.createElement("b"); cap.textContent = WNAME[w] + " " + w + ", " + theme();
+  const wrap = document.createElement("div"); wrap.className = "fw";
+  const f = document.createElement("iframe"); f.title = "3D test copy at " + w + " wide"; f.style.width = w + "px"; f.dataset.w = w; f.id = "f" + w;
+  wrap.append(f); box.append(cap, wrap); document.getElementById("stage").append(box);
+  const fit = () => {
+    const avail = Math.min(document.getElementById("stage").clientWidth - 32, w), sc = avail / w;
+    let hgt = 1200;
+    try { hgt = f.contentDocument.documentElement.scrollHeight; } catch (e) {}
+    f.style.height = hgt + "px"; f.style.transform = "scale(" + sc + ")";
+    wrap.style.width = Math.ceil(w * sc) + 2 + "px"; wrap.style.height = Math.ceil(hgt * sc) + 2 + "px";
+  };
+  /* The frame is 900 px tall while it lays out, so the scene's svh height reads a real screen, not the full page. */
+  f.style.height = (w === 390 ? 844 : 900) + "px";
+  f.addEventListener("load", () => { try { f.contentDocument.addEventListener("click", () => setTimeout(fit, 0)); } catch (e) {} setTimeout(fit, 60); });
+  f.srcdoc = docFor();
+  addEventListener("resize", fit);
+}
+function buttons(rowId, list, key, hideable) {
+  const row = document.getElementById(rowId);
+  list.forEach((x) => {
+    const b = document.createElement("button"); b.type = "button"; b.dataset[key] = x.id; b.textContent = x.name; row.append(b);
+    if (hideable) { const h = document.createElement("button"); h.type = "button"; h.className = "hide"; h.dataset.hide = x.id; h.dataset.name = x.name; row.append(h); }
+  });
+}
+buttons("stateRow", STATES, "s", false);
+buttons("mapRow", MAPS, "map", true);
+buttons("detRow", DETS, "det", true);
+function render() {
+  [["map", MAPS], ["det", DETS]].forEach(([k, list]) => { if (P.hide.includes(P[k])) { const v = list.find((x) => !P.hide.includes(x.id)); if (v) P[k] = v.id; } });
+  writeHash();
+  document.documentElement.dataset.theme = theme();
+  document.querySelectorAll("[data-s]").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.s === P.s)));
+  document.querySelectorAll("[data-map]").forEach((b) => { b.hidden = P.hide.includes(b.dataset.map); b.setAttribute("aria-pressed", String(b.dataset.map === P.map)); });
+  document.querySelectorAll("[data-det]").forEach((b) => { b.hidden = P.hide.includes(b.dataset.det); b.setAttribute("aria-pressed", String(b.dataset.det === P.det)); });
+  document.querySelectorAll("[data-hide]").forEach((b) => { const off = P.hide.includes(b.dataset.hide); b.textContent = (off ? "Show " : "Hide ") + b.dataset.name; b.setAttribute("aria-pressed", String(off)); });
+  document.querySelectorAll("[data-w]").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.w === P.w)));
+  document.querySelectorAll("[data-t]").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.t === theme())));
+  const lb = document.getElementById("labBtn"); lb.textContent = P.lab === "off" ? "Labels off" : "Labels on"; lb.setAttribute("aria-pressed", String(P.lab !== "off"));
+  document.getElementById("stage").replaceChildren();
+  (P.w === "all" ? WIDTHS : [Number(P.w) || 390]).forEach(frame);
+}
+document.querySelector(".tool").addEventListener("click", (e) => {
+  const b = e.target.closest("button"); if (!b) return;
+  if (b.dataset.s) P.s = b.dataset.s;
+  if (b.dataset.map) P.map = b.dataset.map;
+  if (b.dataset.det) P.det = b.dataset.det;
+  if (b.dataset.w) P.w = b.dataset.w;
+  if (b.dataset.t) P.t = b.dataset.t;
+  if (b.id === "labBtn") P.lab = P.lab === "off" ? "on" : "off";
+  if (b.dataset.hide) { const id = b.dataset.hide; P.hide = P.hide.includes(id) ? P.hide.filter((i) => i !== id) : [...P.hide, id]; }
+  render();
+});
+addEventListener("hashchange", () => { readHash(); render(); });
+matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => { if (!P.t) render(); });
+readHash(); render();
+</script>
+</body>
+</html>
