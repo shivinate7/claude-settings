@@ -1495,13 +1495,16 @@ def run_known_defects(repo: str, defects, profile: dict, deps: str, suite_timeou
     part claims the defect, the defect needs every install. A defect that needs a failed install is not run: it
     reads UNKNOWN and its reason names the install, because a suite whose package is missing can read CAUGHT or MISS for the
     wrong cause. Any other defect runs as usual. A failed link leaves the checkout unusable, so every defect reads UNKNOWN.
-    Each catcher run also carries a load hook (`_LOAD_HOOKS`): the top-level name of each module that fails to resolve, even
-    under a `try/except`, is appended to a log the run owns. When any install failed and the clean or the planted run's log
-    names a module, the defect reads UNKNOWN and its reason names the module and each failed install, because a fallback
-    may have caught the plant for the missing package. With every install passing, the log changes no verdict.
+    The load hook (`_LOAD_HOOKS`) runs only under a failed install. Each catcher run then carries it: it writes a start line
+    when it loads, then the top-level name of each module that fails to resolve, even under a `try/except` (an ESM import, a
+    CommonJS `require()` or a Python import), to a log the run owns. When the clean or the planted run's log names a module,
+    the defect reads UNKNOWN and its reason names the module and each failed install, because a fallback may have caught the
+    plant for the missing package. When a run's log has no start line (an argv that resets PYTHONPATH or NODE_OPTIONS, `-S`,
+    `env -i`, a failed log write), the defect reads UNKNOWN too: the load hook did not run. With every install passing,
+    there is no hook: no log, no PYTHONPATH or NODE_OPTIONS change.
     Cost: process starts added 0 (the hook loads inside the catcher's own interpreter); files written, the hook files once
-    per replay and one log per catcher run, all under the replay's own folder and removed with it; each log read once, after
-    its run. Nothing runs on a timer."""
+    per replay and one log per catcher run, and none when every install passed, all under the replay's own folder and
+    removed with it; each log read once, after its run. Nothing runs on a timer."""
     if not defects:
         return []
     sha = _git(repo, "rev-parse", "HEAD").strip()
@@ -1516,7 +1519,6 @@ def run_known_defects(repo: str, defects, profile: dict, deps: str, suite_timeou
     parts = profile["parts"] if "parts" in profile else {None: profile}
     try:
         _make_checkout(repo, sha, dest, set(), {}, None, {})
-        _write_load_hooks(own)
         for name, part in parts.items():
             folder, why = _ensure_deps(repo, sha, part, deps)
             if why:
@@ -1526,6 +1528,8 @@ def run_known_defects(repo: str, defects, profile: dict, deps: str, suite_timeou
                 _link_deps(dest, folder, part)
             except OSError as error:
                 return all_unknown("the install could not be linked into the checkout: %s" % error)
+        if failed:
+            _write_load_hooks(own)
         for defect in defects:
             needed = [name for name in _needed_parts(defect, parts) if name in failed]
             if needed:
@@ -1544,51 +1548,98 @@ def _install_failures(names, failed: dict) -> str:
                      for name in names)
 
 
-# The load hook of a known-defect catcher run: it records the top-level name of each module that fails to resolve, even when
-# the catcher catches the error, in the file named by MUTATE_MISSING_LOG. Python gets a `sitecustomize.py` on PYTHONPATH;
-# its finder sits last on sys.meta_path, so it is asked only for a name that no other finder found. Node gets the file as
-# `--import` in NODE_OPTIONS; it registers itself as the resolve hook of the loader thread. Both are written once per replay.
+# The load hook of a known-defect catcher run under a failed install: it records the top-level name of each module that
+# fails to resolve, even when the catcher catches the error, in the file named by MUTATE_MISSING_LOG. The first line it
+# writes is MISSING_LOG_START, when it loads: a log without it means the hook never ran in the catcher's interpreter. A
+# write that fails truncates the log, so the run reads as one the hook did not reach, never as clean. Python gets a
+# `sitecustomize.py` on PYTHONPATH; its finder sits last on sys.meta_path, so it is asked only for a name that no other
+# finder found. Node gets the file as `--import` in NODE_OPTIONS, which runs in the main thread: it patches the CommonJS
+# resolver there and registers itself as the resolve hook of the loader thread for ESM. All are written once per replay.
+MISSING_LOG_START = "#start"
 _LOAD_HOOKS = {
     "sitecustomize.py": r'''import os
 import sys
 from importlib.abc import MetaPathFinder
 
+LOG = os.environ.get("MUTATE_MISSING_LOG")
+
+
+def note(line):
+    try:
+        with open(LOG, "a", encoding="utf-8") as handle:
+            handle.write(line + "\n")
+    except OSError:
+        try:
+            open(LOG, "w", encoding="utf-8").close()
+        except OSError:
+            pass
+
 
 class MissingLogger(MetaPathFinder):
     def find_spec(self, name, path=None, target=None):
         # A standard-library name (msvcrt, probed under a try) is no install's to provide; usercustomize is tried by site.
-        if ("." not in name and name != "usercustomize" and name not in getattr(sys, "stdlib_module_names", ())
-                and os.environ.get("MUTATE_MISSING_LOG")):
-            try:
-                with open(os.environ["MUTATE_MISSING_LOG"], "a", encoding="utf-8") as handle:
-                    handle.write(name + "\n")
-            except OSError:
-                pass
+        if "." not in name and name != "usercustomize" and name not in getattr(sys, "stdlib_module_names", ()):
+            note(name)
         return None
 
 
-sys.meta_path.append(MissingLogger())
+if LOG:
+    note("@START@")
+    sys.meta_path.append(MissingLogger())
 ''',
-    "missing_hook.mjs": r'''import { appendFileSync } from "node:fs";
-import { register } from "node:module";
+    "missing_hook.mjs": r'''import { appendFileSync, existsSync, truncateSync } from "node:fs";
+import Module from "node:module";
+import { join } from "node:path";
 import { isMainThread } from "node:worker_threads";
 
-// The loader thread runs this file again, as the hooks module; only the main thread registers it.
-if (isMainThread) register(import.meta.url);
+const LOG = process.env.MUTATE_MISSING_LOG;
+
+function note(line) {
+  try {
+    appendFileSync(LOG, line + "\n");
+  } catch {
+    try { truncateSync(LOG, 0); } catch { /* no log left to mark */ }
+  }
+}
 
 // Not a bare specifier: relative, absolute, a URL or drive path (node:, file:, data:, C:), or a #imports name.
 const NOT_BARE = /^(?:\.{1,2}(?:\/|$)|\/|#|[A-Za-z][A-Za-z0-9+.-]*:)/;
+
+function topName(specifier) {
+  const parts = specifier.split("/");
+  return specifier.startsWith("@") ? parts.slice(0, 2).join("/") : parts[0];
+}
+
+// The loader thread runs this file again, as the hooks module; only the main thread patches and registers.
+if (LOG && isMainThread) {
+  note("@START@");
+  // ESM resolves in the loader thread (the resolve hook below); require() resolves here, in the main thread.
+  if (typeof Module.register === "function") Module.register(import.meta.url);
+  const original = Module._resolveFilename;
+  Module._resolveFilename = function (request, parent, ...rest) {
+    try {
+      return original.call(this, request, parent, ...rest);
+    } catch (error) {
+      // A package is not installed when no node_modules folder on the lookup path holds its folder; a package that is
+      // there with a file missing has its folder.
+      if (error && error.code === "MODULE_NOT_FOUND" && typeof request === "string" && !NOT_BARE.test(request)) {
+        const top = topName(request);
+        const folders = Module._resolveLookupPaths(request, parent) || [];
+        if (!folders.some((folder) => existsSync(join(folder, top)))) note(top);
+      }
+      throw error;
+    }
+  };
+}
 
 export async function resolve(specifier, context, nextResolve) {
   try {
     return await nextResolve(specifier, context);
   } catch (error) {
-    const log = process.env.MUTATE_MISSING_LOG;
     // "Cannot find package" is a package that is not installed; a package that is there with a file missing says "Cannot find module".
-    if (log && error && error.code === "ERR_MODULE_NOT_FOUND" && !NOT_BARE.test(specifier)
+    if (LOG && error && error.code === "ERR_MODULE_NOT_FOUND" && !NOT_BARE.test(specifier)
         && String(error.message).startsWith("Cannot find package")) {
-      const parts = specifier.split("/");
-      appendFileSync(log, (specifier.startsWith("@") ? parts.slice(0, 2).join("/") : parts[0]) + "\n");
+      note(topName(specifier));
     }
     throw error;
   }
@@ -1602,7 +1653,7 @@ def _write_load_hooks(own: str) -> None:
     folder = os.path.join(own, "hooks")
     os.makedirs(folder, exist_ok=True)
     for name, source in _LOAD_HOOKS.items():
-        _write(os.path.join(folder, name), source)
+        _write(os.path.join(folder, name), source.replace("@START@", MISSING_LOG_START))
 
 
 def _hook_env(own: str, log: str) -> dict:
@@ -1645,8 +1696,9 @@ def _unrun_defect(defect, reason: str) -> dict:
 
 
 def _known_defect(dest: str, defect: dict, suite_timeout: float, own: str, failed: dict) -> dict:
-    """One planted defect in checkout `dest`, which is left as it was found. Each catcher run is hooked (`_hook_env`), with
-    its log in the folder `own`. When an install in `failed` failed and a run's log names a module, the defect reads UNKNOWN."""
+    """One planted defect in checkout `dest`, which is left as it was found. When an install in `failed` failed, each catcher
+    run is hooked (`_hook_env`), with its log in the folder `own`: a log with no start line, or one that names a module,
+    reads UNKNOWN. With `failed` empty no run is hooked."""
     result = {"id": str(defect.get("id", "?")), "name": str(defect.get("name", "")), "verdict": "UNKNOWN", "reason": ""}
     try:
         file, old, new, argv = defect["file"], defect["old"], defect["new"], list(defect["argv"])
@@ -1661,35 +1713,42 @@ def _known_defect(dest: str, defect: dict, suite_timeout: float, own: str, faile
         return result
 
     def run_hooked():
-        """(the run's class, the modules it could not resolve), read once from its own log."""
+        """(the run's class, why its log cannot be trusted or ''), read once from its own log. Only a run under a failed
+        install has a log."""
+        if not failed:
+            return run_suite_file(dest, "", suite_timeout, argv=argv, classify=classify, cwd=dest)[0], ""
         handle, log = tempfile.mkstemp(prefix="missing_", suffix=".log", dir=own)
         os.close(handle)
         kind = run_suite_file(dest, "", suite_timeout, argv=argv, classify=classify, cwd=dest, env_extra=_hook_env(own, log))[0]
         with open(log, encoding="utf-8", errors="replace") as lines:
-            return kind, sorted(set(line.strip() for line in lines if line.strip()))
-
-    def missing_reason(modules):
-        return "the catcher could not resolve %s, which a failed install may provide: %s" % (
-            ", ".join(modules), _install_failures(failed, failed))
+            names = set(line.strip() for line in lines if line.strip())
+        if MISSING_LOG_START not in names:
+            return kind, "the load hook did not run in the catcher, so a missing package may have gone unseen: %s" % (
+                _install_failures(failed, failed))
+        names.discard(MISSING_LOG_START)
+        if names:
+            return kind, "the catcher could not resolve %s, which a failed install may provide: %s" % (
+                ", ".join(sorted(names)), _install_failures(failed, failed))
+        return kind, ""
 
     try:
-        control, modules = run_hooked()
-        if failed and modules:
-            result["reason"] = missing_reason(modules)
+        control, doubt = run_hooked()
+        if doubt:
+            result["reason"] = doubt
             return result
         if control != "pass":
             result["reason"] = "the suite is not green on the clean copy (%s)" % control
             return result
         apply_mutant(dest, old, new, [file])
         try:
-            kind, modules = run_hooked()
+            kind, doubt = run_hooked()
         finally:
             _write(path, text)
     except OSError as error:
         result["reason"] = "the suite did not run: %s" % error
         return result
-    if failed and modules:
-        result["reason"] = missing_reason(modules)
+    if doubt:
+        result["reason"] = doubt
         return result
     result["verdict"] = "CAUGHT" if kind == "assert" else "MISS"
     if kind != "assert":
