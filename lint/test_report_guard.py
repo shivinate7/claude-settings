@@ -4760,6 +4760,13 @@ class MistakeNamesGuardTests(unittest.TestCase):
     def test_mg_red_apostrophes_do_not_hide_admission_blocks(self):
         self.assert_blocked(mg_report("I didn't check; I clobbered the lane's notes."))
 
+    def test_mg_red_lone_apostrophe_does_not_hide_admission_blocks(self):
+        # A lone apostrophe with a space before it reads as an opening quote. The admission after it still counts.
+        for text in ("I waited 'til the lane ended, and I broke the batch.' Nothing else.",
+                     "I ran it 'cause the lane was slow, and I clobbered the notes.' Nothing else."):
+            with self.subTest(text=text):
+                self.assert_blocked(mg_report(text))
+
     # Green: each of these must pass.
     def test_mg_green_inbox_admission_with_fence_step_passes(self):
         self.assert_allowed(mg_report(MG_INBOX + " Queued as step:inbox-fence-check."))
@@ -4784,6 +4791,9 @@ class MistakeNamesGuardTests(unittest.TestCase):
 
     def test_mg_green_quoted_owner_phrase_passes(self):
         self.assert_allowed(mg_report('Owner said "I broke it, own up to a mistake".'))
+
+    def test_mg_green_single_quoted_owner_phrase_passes(self):
+        self.assert_allowed(mg_report("Owner said 'I broke it, own up to a mistake'."))
 
     def test_mg_green_admission_in_done_passes(self):
         self.assert_allowed(mg_report("none", done="> **Done** OTHER I broke my feedback inbox and restored it."))
