@@ -1,0 +1,31 @@
+{
+  "added": "2026-11-07T21:37:00Z",
+  "context": "Goal: closing a debt proves that its test catches the defect.\nProblem (rule): the close check runs the debt's named test file on the commit that made the debt, and needs it to fail. A shared test file (hooks/test_guard.py is named by two debts) can fail there for other reasons. Then the close passes whatever the named test does.\nBased on (read): a debt names its test by file path, and the check reads failures per file (lint debt-close code, the lane's read at 15:37 CST).\nBased on (ruling): a repo changes to fit a shared tool, never the tool to fit a repo. Asked again because this form is not for one repo. It makes the proof exact in every repo, so the ruling may not cover it.\nDeparts from: main, which judges a whole test file. Option a adds a path::Class.test_name form.",
+  "home": "lane silent-undo-session-url-footer (session_013NEJL2t7akPLp9rbWSVEeF)",
+  "id": "debt-close-test-span",
+  "kind": "decision",
+  "lane": "silent-undo-session-url-footer",
+  "n": 376,
+  "options": [
+    {
+      "gain": "The tool keeps one form.",
+      "key": "b",
+      "label": "Keep file paths only, and file a debt for the weak proof (recommended)",
+      "lose": "A debt that names a shared test file proves less than it seems to."
+    },
+    {
+      "gain": "A shared test file proves the right test.",
+      "key": "a",
+      "label": "Add a one-test form, and run only that test on both commits",
+      "lose": "A second form in a shared tool. Goes against your ruling: a repo changes to fit a shared tool, never the tool to fit a repo.",
+      "widens": true
+    }
+  ],
+  "owner": "lane silent-undo-session-url-footer (session_013NEJL2t7akPLp9rbWSVEeF)",
+  "rank": 2,
+  "ref": "step silent-undo-session-url-footer; lint debt-close",
+  "short": "Debt close: prove one test, or the whole file",
+  "status": "open",
+  "title": "May a debt name one test in a shared test file, so its close proves that test?",
+  "why": "Option a adds a second accepted form to a shared tool, which your ruling keeps for you. The lane works with file paths only until you pick."
+}
