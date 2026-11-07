@@ -4828,5 +4828,96 @@ class MistakeNamesGuardTests(unittest.TestCase):
         self.assert_allowed(mg_report("I broke the inbox. Debt filed: inbox-fence."))
 
 
+# The step check of the Fix field on a landed turn: each `Fix: step:<slug>` on a line the branch adds to the notes
+# file must name its step in Done. The notes file is the rolled-out one (docs/debts/notes.md), and each case builds
+# a git repo: origin/main holds the notes file as the base, and one branch commit adds to it.
+NOTES_REL = os.path.join("docs", "debts", "notes.md")
+NOTES_BASE = "# Notes: findings too unlikely to hit to be debts\n"
+STEP_NOTE = "- new-note: a gap. Fix: step:fix-alpha\n"
+NONE_NOTE = "- new-note: a gap. Fix: none — owner decides\n"
+DONE_STEP_NAMED = "> **Done** RECORDED abc1234 filed the note; its fix is step:fix-alpha\n> **Next** wait"
+DONE_STEP_UNNAMED = "> **Done** RECORDED abc1234 filed the note\n> **Next** wait"
+DONE_PREFIX_ONLY = "> **Done** RECORDED abc1234 filed the note; its fix is step:fix-alpha-two\n> **Next** wait"
+DONE_BUILT = "> **Done** BUILT abc1234 fixed the guard\n> **Next** wait"
+
+
+def git_in(folder, *args):
+    subprocess.run(["git", "-C", folder, *args], check=True, capture_output=True, text=True)
+
+
+def make_branch(folder, base=None, change=None):
+    """A git repo at `folder`, rolled out to the layout. origin/main holds the notes file as `base`, or no notes file
+    when base is None. HEAD, one commit on, holds the notes file as `change`, or only moves the README when change is None."""
+    os.makedirs(folder, exist_ok=True)
+    git_in(folder, "init", "-q", "-b", "main")
+    git_in(folder, "config", "user.email", "t@example.com")
+    git_in(folder, "config", "user.name", "t")
+    write_file(os.path.join(folder, ".claude", "layout-extras.json"), json.dumps({"kinds": {}, "rolled-out": True}))
+    write_file(os.path.join(folder, "README.md"), "# Repo\n")
+    if base is not None:
+        write_file(os.path.join(folder, NOTES_REL), base)
+    git_in(folder, "add", "-A")
+    git_in(folder, "commit", "-q", "-m", "base")
+    git_in(folder, "update-ref", "refs/remotes/origin/main", "HEAD")
+    if change is None:
+        write_file(os.path.join(folder, "README.md"), "# Repo\n\nA branch change.\n")
+    else:
+        write_file(os.path.join(folder, NOTES_REL), change)
+    git_in(folder, "add", "-A")
+    git_in(folder, "commit", "-q", "-m", "branch")
+    return folder
+
+
+class NotesFixTests(unittest.TestCase):
+    """The step check on a landed turn, in report_guard.py's Stop hook."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(dir=RUN_FOLDER)  # this run's folder, never the system temp dir (test-temp-standard)
+        self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
+        self.repo = os.path.join(self.tmp, "repo")
+
+    def stop(self, repo, done):
+        """Run the Stop guard on a landed turn in `repo` whose reply is `done`. Returns the decision, or None when quiet."""
+        records = [human("do the task"), tool_use_msg("Bash", {"command": "git commit -m x"}), tool_result_msg(),
+                   assistant_text(done)]
+        path = write_transcript(records, self.tmp)
+        hook = {"hook_event_name": "Stop", "transcript_path": path, "stop_hook_active": False, "cwd": repo}
+        run = run_guard(REPORT_GUARD, hook)
+        self.assertEqual(run.returncode, 0, run.stderr)
+        self.assertNotIn("Traceback", run.stderr)
+        return json.loads(run.stdout) if run.stdout.strip() else None
+
+    def test_step_absent_from_done_blocks(self):
+        make_branch(self.repo, base=NOTES_BASE, change=NOTES_BASE + STEP_NOTE)
+        out = self.stop(self.repo, DONE_STEP_UNNAMED)
+        self.assertIsNotNone(out)
+        self.assertEqual(out.get("decision"), "block")
+        self.assertIn("fix-alpha", out["reason"])
+
+    def test_step_named_in_done_passes(self):
+        make_branch(self.repo, base=NOTES_BASE, change=NOTES_BASE + STEP_NOTE)
+        self.assertIsNone(self.stop(self.repo, DONE_STEP_NAMED))
+
+    def test_fix_none_passes(self):
+        make_branch(self.repo, base=NOTES_BASE, change=NOTES_BASE + NONE_NOTE)
+        self.assertIsNone(self.stop(self.repo, DONE_STEP_UNNAMED))
+
+    def test_repo_with_no_notes_file_stays_quiet(self):
+        make_branch(self.repo)  # no notes file on either side of the branch
+        self.assertIsNone(self.stop(self.repo, DONE_STEP_UNNAMED))
+
+    def test_step_named_only_as_a_prefix_of_another_step_blocks(self):
+        # Done names fix-alpha-two. A substring match would read fix-alpha as named and pass.
+        make_branch(self.repo, base=NOTES_BASE, change=NOTES_BASE + STEP_NOTE)
+        out = self.stop(self.repo, DONE_PREFIX_ONLY)
+        self.assertIsNotNone(out)
+        self.assertEqual(out.get("decision"), "block")
+        self.assertIn("fix-alpha", out["reason"])
+
+    def test_build_only_done_does_not_run_the_step_check(self):
+        make_branch(self.repo, base=NOTES_BASE, change=NOTES_BASE + STEP_NOTE)
+        self.assertIsNone(self.stop(self.repo, DONE_BUILT))
+
+
 if __name__ == "__main__":
     unittest.main()
