@@ -45,16 +45,16 @@ def real(rel):
         return f.read()
 
 
-def stale_module(codes, note=(), tail=()):
+def stale_module(codes, note=(), tail=(), text="the line names a path the range deleted."):
     """A stand-in for lint/stale_cites.py: one table row per code, and two reader classes that both set
     code STALE002, as the real file does. `note` lines sit in the docstring above the rows; `tail`
-    lines follow the classes."""
+    lines follow the classes; `text` is the row text."""
     lines = ['#!/usr/bin/env python3',
              '"""The stale-prose merge check. Standard library only.', '',
              '    python3 lint/stale_cites.py --range <base>...<head>', '',
              'Refuses a range that leaves a tracked Markdown line naming a name the range removed.']
     lines += list(note)
-    lines += ["  %s  the line names a path the range deleted." % code for code in codes]
+    lines += ["  %s  %s" % (code, text) for code in codes]
     lines += ['"""', 'import re', '', '',
               'class StaleName:', '    """STALE002: a line that cites `file.py name`."""', '    code = "STALE002"', '', '',
               'class UnknownName:', '    """STALE002 unknown: a JavaScript name the range touched."""', '    code = "STALE002"', '']
@@ -88,9 +88,10 @@ def map_module(keys, top=()):
 
 
 def tree(stale=("STALE001", "STALE002"), ste=("STE001",), maps=("MAP1", "MAP2"),
-         stale_note=(), stale_tail=(), ste_top=(), map_top=()):
+         stale_note=(), stale_tail=(), stale_text=None, ste_top=(), map_top=()):
     """The three home files of one commit. Every fixture holds all three."""
-    return {STALE: stale_module(stale, stale_note, stale_tail),
+    text = {} if stale_text is None else {"text": stale_text}
+    return {STALE: stale_module(stale, stale_note, stale_tail, **text),
             STE: ste_module(ste, ste_top),
             MAP: map_module(maps, map_top)}
 
@@ -282,10 +283,18 @@ class CheckLintCodesTests(unittest.TestCase):
         self.assert_flags("STALE003", "a lone quote in the docstring hides a second STALE003 row")
 
     def test_comment_openers_in_a_string_do_not_hide_a_map_key_fails(self):
-        self.build(tree(), head=tree(maps=("MAP1", "MAP2", "MAP1"), map_top=['const NOTE = "/* not a comment";']))
-        self.assertIn('"/* not a comment"', self.git("show", "HEAD:" + MAP), "fixture: the opener is not in the file")
+        opener = 'const NOTE = "/* not a comment, // nor this, # or this";'
+        self.build(tree(), head=tree(maps=("MAP1", "MAP2", "MAP1"), map_top=[opener]))
+        self.assertIn(opener, self.git("show", "HEAD:" + MAP), "fixture: the openers are not in the file")
         self.assertEqual(self.git("show", "HEAD:" + MAP).count("    MAP1: () => {"), 2, "fixture: MAP1 is not twice in the body")
-        self.assert_flags("MAP1", "a comment opener inside a string hides a second MAP1 key")
+        self.assert_flags("MAP1", "comment openers inside a string hide a second MAP1 key")
+
+    def test_comment_openers_in_a_docstring_row_do_not_hide_a_second_row_fails(self):
+        text = 'the line names "#", "//" and "/*" in a path.'
+        self.build(tree(), head=tree(stale=("STALE001", "STALE002", "STALE003", "STALE003"), stale_text=text))
+        self.assertIn('"/*"', self.git("show", "HEAD:" + STALE), "fixture: the openers are not in the rows")
+        self.assertEqual(rows(self.git("show", "HEAD:" + STALE), "STALE003"), 2, "fixture: STALE003 is not twice in the table")
+        self.assert_flags("STALE003", "comment openers inside a docstring row hide a second STALE003 row")
 
     def test_lone_quote_in_a_comment_does_not_hide_a_map_key_added_to_ref_fails(self):
         top = ["// the check's body reads each key once."]
