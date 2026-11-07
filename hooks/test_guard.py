@@ -19102,6 +19102,7 @@ add("lane-repo-tag: a denied lane names the expected repo tag in its reason", "d
 # working directory. The guard reads that checkout's repo and allows the merge only when a tag of the own newest get_session record
 # names the same cs-repo repo. A flag value that cannot be read, and a record that cannot be read, are denied. Outside the cloud, and
 # --lane-lint (which merges nothing), are not judged.
+FAMILY = "merge"  # a merge rule: GUARD_FAMILY=merge selects this section's cases
 REPO_RULE = "merge-confirm-repo"
 REPO_A = os.path.join(ROOT, "repo-o-a")       # origin github.com/o/a
 REPO_B = os.path.join(ROOT, "repo-o-b")       # origin github.com/o/b
@@ -19197,12 +19198,23 @@ repo_case("a cd to the parent of this checkout, then -C naming this checkout, is
           f"cd {os.path.dirname(REPO_A)} && {MERGE_SHIM} -C {os.path.basename(REPO_A)} 5 --confirm", REPO_B, TX_A)
 repo_case("a cd to the parent of this checkout, then -C naming another checkout, is denied from this one", "deny",
           f"cd {os.path.dirname(REPO_A)} && {MERGE_SHIM} -C {os.path.basename(REPO_B)} 5 --confirm", REPO_A, TX_A)
+# A merge inside a subshell or a bash -c string takes the checkout its own segment names, as a bare one does. The record is
+# claude-settings's (TX_RUNNER), the tagged checkout is LANE_REPO, and REPO_B is the other checkout.
+repo_case("a cd into another checkout in a subshell, then a merge, is denied", "deny",
+          f"(cd {REPO_B} && {MERGE_SHIM} 5 --confirm)", LANE_REPO, TX_RUNNER)
+repo_case("a cd into another checkout inside bash -c, then a merge, is denied", "deny",
+          f"bash -c 'cd {REPO_B} && {MERGE_SHIM} 5 --confirm'", LANE_REPO, TX_RUNNER)
+repo_case("a -C naming another checkout inside bash -c is denied", "deny",
+          f"bash -c '{MERGE_SHIM} -C {REPO_B} 5 --confirm'", LANE_REPO, TX_RUNNER)
+repo_case("a merge in a subshell inside the tagged checkout is allowed", "allow",
+          f"({MERGE_SHIM} 5 --confirm)", LANE_REPO, TX_RUNNER)
 # Not judged: a merge named in quoted text, --lane-lint (no lock, no merge), and any session outside the cloud.
 repo_case("a merge named in a quoted echo is not judged", "allow", f"echo '{MERGE_SHIM} --repo-dir {REPO_B} 5 --confirm'", REPO_A, TX_A)
 repo_case("--lane-lint is not judged, whatever the record", "allow", f"{MERGE_SHIM} --lane-lint --repo-dir {REPO_B} 5", REPO_A, TX_NONE)
 repo_case("--lane-lint naming no git checkout is not judged", "allow", f"{MERGE_SHIM} --lane-lint --repo-dir {NOGIT} 5", REPO_A, TX_NONE)
 repo_case("outside the cloud a merge is not judged", "allow", f"{MERGE_SHIM} --repo-dir {REPO_B} 5 --confirm", REPO_A, TX_A,
           env=ROLE_ENV)
+FAMILY = "rule9"  # the cases after this section keep rule 9's family
 
 # ---- Cost. The rule starts one git process for a lane create_session, to read the origin, and none for any
 # other call. The probe counts each child process the judge starts (CountingPopen and the os seams). A child whose
