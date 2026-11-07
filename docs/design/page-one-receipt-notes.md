@@ -6,7 +6,7 @@ Deep links: `#s=today|after|todayzero|zero|chip`, `&w=all|390|800|1280`, `&t=lig
 Sizes: 390, 800 and 1280, which are page.html's bands (`layout.py devices` prints `unknown`). The rail is a side column at 961 and up, and a block above the list below it. Themes: light and dark.
 Ruling: coordinator, 2026-11-07 13:56 CST. Drop the rail's "N ready to send" line. Keep the track, its ready segment and "X of Y sent".
 
-## 1. Drop the ready line (ruled), states `after` and `zero`, focus `#railAfterProg`
+## 1. Drop the ready line (ruled), states `after` and `zero`, focus `#railAfter` (zero: `#railZero`)
 
 - The `.ov-prog .sub` line goes: its swatch `i.sw` and the words "N ready to send". The big line "X of Y sent" and the track stay as today.
 - The bar keeps "N ready." and the Send button keeps "Send N answers" (`renderBar`). That is the one count on the screen, as `ux-label-once` asks.
@@ -26,7 +26,7 @@ Ruling: coordinator, 2026-11-07 13:56 CST. Drop the rail's "N ready to send" lin
 - Gain: no new element, no new word. Loss: a reader who has never seen the page infers the light segment from the chips, not from a label.
   In light, the 55% tint reads grey beside the slate chip, so the chip keys it by hue family, not as an exact match.
 
-## 3. Ready segment in the chip's colour (hide: "track in the chip's colour"), state `chip`, focus `#railChipProg`. Not the pick
+## 3. Ready segment in the chip's colour (hide: "track in the chip's colour"), state `chip`, focus `#railChip`. Not the pick
 
 - `.track .r` takes the full accent, as a ready chip does, so the chip is an exact key.
 - Loss: the full accent sits too close to the green sent segment in lightness. Measured contrast between the two segments: 1.22 light and 1.17 dark.
