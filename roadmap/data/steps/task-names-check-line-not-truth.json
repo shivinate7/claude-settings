@@ -1,5 +1,5 @@
 {
-  "title": "A task names the check line that proves it, not a claim of truth",
+  "title": "A page task's check line is checked against the real check, through one shared route-rows reader",
   "phase": "now",
   "status": "doing",
   "order": 0.23,
@@ -7,5 +7,5 @@
   "why": "Coordinator, 14:31 CST Nov 7.",
   "note": "",
   "lane": "session_013NEJL1UMoM1VHADdYGDUZz",
-  "updatedAt": "2026-11-07T14:31:00-06:00"
+  "updatedAt": "2026-11-07T14:33:00-06:00"
 }
