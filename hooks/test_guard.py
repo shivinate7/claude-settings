@@ -2333,6 +2333,16 @@ sh("restore: staged alone only touches the index", VCS + " restore --staged src/
    "allow", cwd=NOGIT)
 sh("restore: the short staged flag alone only touches the index",
    VCS + " restore -S src/jobStore.ts", "allow", cwd=NOGIT)
+# A DISCARD INSIDE A SHELL WRAPPER IS THE SAME DISCARD. `sh -c`, `bash -lc` and `eval` run their argument as
+# a script, so a discard in it denies as the bare form does (rule 1). A soft reset discards nothing.
+sh("shell-wrap-discard: a hard reset inside sh -c denies, as the bare form does",
+   "sh -c \"" + VCS + " reset --hard\"", "deny", "shared-tree", cwd=NOGIT)
+sh("shell-wrap-discard: a checkout of the working directory inside bash -lc denies, as the bare form does",
+   "bash -lc \"" + VCS + " checkout .\"", "deny", "shared-tree", cwd=NOGIT)
+sh("shell-wrap-discard: a hard reset inside eval denies, as the bare form does",
+   "eval \"" + VCS + " reset --hard\"", "deny", "shared-tree", cwd=NOGIT)
+sh("shell-wrap-discard: a soft reset inside sh -c discards nothing and allows",
+   "sh -c \"" + VCS + " reset --soft HEAD~1\"", "allow", cwd=NOGIT)
 sh("checkout: a path after the double dash", VCS + " checkout -- app/src/50_engine.js", "deny",
    "shared-tree", cwd=NOGIT)
 sh("checkout: a start point and a path", VCS + " checkout HEAD app/src/50_engine.js", "deny",
