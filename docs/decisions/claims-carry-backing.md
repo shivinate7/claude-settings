@@ -25,6 +25,8 @@ Lane ruling, 2026-11-06 12:47 CST, process-only: the rows path has one home, `ro
 
 Coordinator, 2026-11-06 12:59 CST, process-only (option b of the coordinator's cite question): a "Why yours" line with a capability reason needs one of these cites. A capability reason uses a word such as can not, cannot, refuses, blocked or not available. The cites: `(route <id>)` with outcome refused or asks, a refusal from this session, or `(measured <date>, <check and result>)`. A choice, login or safety-kept reason needs no cite.
 
+Lane ruling, 2026-11-06 13:25 CST, process-only, under coordinator pick Q1 (b): a choice, login or safety phrase exempts the line. The capability verbs widen to refused, unable to, denied, forbidden, no access, not allowed or permitted, unavailable and 403. "blocked until" and "not available until" are dependencies, not capabilities. Layer (a) is built in `lint/report_guard.py` (`hand_off_problem`). It reads the reply text. It reads this session's refusals file and the route rows file only for a capability line that needs them.
+
 ## Incident
 
 `docs/decisions/session-tiers.md:64` said "The cloud cannot close a pull request". One fact sat in three places: that line, the 2026-10-30 refusals in `docs/decisions/auto-mode-owner-acts.md` (lines 79-82 on origin/main), and the grant "Acts the cloud refuses" in `.claude/CLAUDE.md:16-19`. It stayed on main with no check. Measured 2026-11-06 on origin/main (7975f6d8): a grep of `lint`, `hooks`, `merge` and `actions` finds no check that reads the phrase.
@@ -61,7 +63,7 @@ A route row is read as unmeasured when its `measured` date is more than N days o
 
 ## Cost
 
-No long-lived process and no timer. Planned cost: one `git diff -U0`-style diff replaces the name-status diff. One `cat-file` read happens only when a line is a claim candidate. A range that changes `hooks/route_rows.json` opens one `cat-file`. When a row id is removed, it also runs one `ls-tree` and reads each tracked `.md`.
+No long-lived process and no timer. Planned cost: one `git diff -U0`-style diff replaces the name-status diff. One `cat-file` read happens only when a line is a claim candidate. A range that changes `hooks/route_rows.json` opens one `cat-file`. When a row id is removed, it also runs one `ls-tree` and reads each tracked `.md`. The merge judge (`judge_paragraph`, `lint/stale_cites.py`) judges each claim sentence that holds an added row. It selects by added row, not by claim line. Model starts: up to 3 per merge, planned and unmeasured. The judge code on this branch starts no model.
 
 ## Owner-only
 
@@ -69,7 +71,7 @@ No long-lived process and no timer. Planned cost: one `git diff -U0`-style diff 
 
 ## Status
 
-Planned. Nothing above is built on main. `hooks/route_rows.json` is absent on main.
+Planned. Nothing above is built on main, except part (v) layer (a), built in `lint/report_guard.py` (`hand_off_problem`) on this branch and not yet on main. `hooks/route_rows.json` is absent on main.
 
 Planned, not built: the generator that fills the route-rows table in `docs/decisions/auto-mode-owner-acts.md` from `hooks/route_rows.json`.
 

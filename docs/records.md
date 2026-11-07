@@ -142,6 +142,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `config-watch-fast-exit` | Owner, 2026-10-20. | [`docs/decisions/config-watch-fast-exit.md`](../docs/decisions/config-watch-fast-exit.md) |
 | `copy-mode-overwrites-no-backup` | Owner: in copy mode, an installer overwrites its own old copy and keeps no backup. | [`docs/decisions/copy-mode-overwrites-no-backup.md`](../docs/decisions/copy-mode-overwrites-no-backup.md) |
 | `cull-rules` | Owner ruling, 2026-10-17 11:56 CDT. | [`docs/decisions/cull-rules.md`](../docs/decisions/cull-rules.md) |
+| `debt-close-runs-retire` | A PR closes a debt when it deletes the debt file, or renames it out of `docs/debts/`. | [`docs/decisions/debt-close-runs-retire.md`](../docs/decisions/debt-close-runs-retire.md) |
 | `decision-watch-mod-limits` | The decision watch runs as a mod on the app's own login, so an expired CLI login no longer silences it. | [`docs/decisions/decision-watch-mod-limits.md`](../docs/decisions/decision-watch-mod-limits.md) |
 | `decisions-reach-a-clickable-pick` | Roadmap step c118, 2026-10-27, rewritten under owner ruling 2026-11-01 23:31 CST (decision `questions-go-to-owner`, "Same turn to the page"). | [`docs/decisions/decisions-reach-a-clickable-pick.md`](../docs/decisions/decisions-reach-a-clickable-pick.md) |
 | `default-branch-read-order` | Owner, 2026-10-16: the branch-delete rule, the janitor sweep and the push guard read the default branch in this order. | [`docs/decisions/default-branch-read-order.md`](../docs/decisions/default-branch-read-order.md) |
@@ -298,6 +299,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `shell-scripts-check-out-lf` | Owner, 2026-10-21: `.gitattributes` forces LF on checkout for every file under `bin/` and `githooks/`, every `*.sh`, and `skills/impeccable/scripts/impeccable`. | [`docs/decisions/shell-scripts-check-out-lf.md`](../docs/decisions/shell-scripts-check-out-lf.md) |
 | `stale-cites-at-merge` | The ste-lint CI step refuses a pull request that leaves stale prose of one kind. | [`docs/decisions/stale-cites-at-merge.md`](../docs/decisions/stale-cites-at-merge.md) |
 | `stale-cites-whole-tree` | `lint/stale_cites.py --tree [REV]` reads every tracked Markdown file at REV. | [`docs/decisions/stale-cites-whole-tree.md`](../docs/decisions/stale-cites-whole-tree.md) |
+| `stalled-steps` | `doing` is derived from live work, not typed. | [`docs/decisions/stalled-steps.md`](../docs/decisions/stalled-steps.md) |
 
 ## Debts
 
@@ -333,6 +335,9 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `frozen-dup-in-subshell` | From a frozen working folder (the live pin `<clone>-live`, or `~/.claude/hooks`), the frozen-path rule still refuses `x=$(ls 2>&1)`, `(ls 2>&1)`, a backtick form, and `ls 2>&1&`. | [`docs/debts/frozen-dup-in-subshell.md`](../docs/debts/frozen-dup-in-subshell.md) |
 | `gitignore-skips-map-tests` | `ci-scope.sh` turns on only `code` for a `.gitignore` change. | [`docs/debts/gitignore-skips-map-tests.md`](../docs/debts/gitignore-skips-map-tests.md) |
 | `guard-stdin-not-utf8` | `_force_utf8_streams` reconfigures stdout and stderr only. | [`docs/debts/guard-stdin-not-utf8.md`](../docs/debts/guard-stdin-not-utf8.md) |
+| `handoff-choice-exempts-line` | "your call" exempts the whole "Why yours" line, so a false "can't" on that line passes with no cite. | [`docs/debts/handoff-choice-exempts-line.md`](../docs/debts/handoff-choice-exempts-line.md) |
+| `handoff-page-context-unread` | The "Why yours" line in a waiting-page task's `context` is not judged. | [`docs/debts/handoff-page-context-unread.md`](../docs/debts/handoff-page-context-unread.md) |
+| `handoff-verb-list-closed` | A capability line in these words passes with no cite: "do not have access", "no permission", "not able to", "could not", "only the owner can", "cant", "can not". | [`docs/debts/handoff-verb-list-closed.md`](../docs/debts/handoff-verb-list-closed.md) |
 | `heredoc-written-run-false-alarm` | The guard keeps a heredoc body in view when the file the body writes shares a pipeline with any runner word, even as a plain argument. | [`docs/debts/heredoc-written-run-false-alarm.md`](../docs/debts/heredoc-written-run-false-alarm.md) |
 | `hooks-to-mods-judges` | Plan step E has four parts. | [`docs/debts/hooks-to-mods-judges.md`](../docs/debts/hooks-to-mods-judges.md) |
 | `inbox-saves-other-notices` | The feedback inbox saves some prompts the owner did not type. | [`docs/debts/inbox-saves-other-notices.md`](../docs/debts/inbox-saves-other-notices.md) |
@@ -401,12 +406,15 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `short-copy-passes` | A child line that copies a claude-settings grant in under 12 words passes the restates group. | [`docs/debts/short-copy-passes.md`](../docs/debts/short-copy-passes.md) |
 | `skill-copy-no-typescript` | A copy of the skill folder outside the clone finds no `node_modules`, so `map-check.mjs` and `map-picture.mjs` cannot load `typescript` there. | [`docs/debts/skill-copy-no-typescript.md`](../docs/debts/skill-copy-no-typescript.md) |
 | `squash-lane-branch-kept` | A squash-merged lane has no merge commit parent. | [`docs/debts/squash-lane-branch-kept.md`](../docs/debts/squash-lane-branch-kept.md) |
+| `stale-draft-lane-head` | `stale_drafts` takes a draft as lane-owned only when its bare branch equals a live session step. | [`docs/debts/stale-draft-lane-head.md`](../docs/debts/stale-draft-lane-head.md) |
 | `stale005-quoted-text-alarm` | STALE005 reads a quoted old claim and a grant title as claims. | [`docs/debts/stale005-quoted-text-alarm.md`](../docs/debts/stale005-quoted-text-alarm.md) |
+| `stalled-count-reads-in-progress` | The phase's "N in progress" count and the Latest changes feed count a stalled step as in progress. | [`docs/debts/stalled-count-reads-in-progress.md`](../docs/debts/stalled-count-reads-in-progress.md) |
 | `stamp-shallow-depth-two` | `stamp.mjs --check` off the default branch needs `fetch-depth: 0`. | [`docs/debts/stamp-shallow-depth-two.md`](../docs/debts/stamp-shallow-depth-two.md) |
 | `start-detached-not-main` | hooks/session_start.sh counts a detached checkout as on main only when HEAD equals local `refs/heads/main`. | [`docs/debts/start-detached-not-main.md`](../docs/debts/start-detached-not-main.md) |
 | `step-shell-programs-partial` | Guard rule `command-in-item` reads a backtick span in a step as a shell line only when its first word is in a fixed program list. | [`docs/debts/step-shell-programs-partial.md`](../docs/debts/step-shell-programs-partial.md) |
 | `test-guard-no-progress-line` | `hooks/test_guard.py` prints nothing for minutes, so the stall watch cuts off a healthy full run. | [`docs/debts/test-guard-no-progress-line.md`](../docs/debts/test-guard-no-progress-line.md) |
 | `tests-for-misses-param-loads` | `--tests-for` reads a file load only when the path argument holds a `<stem>.py` literal, inline or through a name bound to one. | [`docs/debts/tests-for-misses-param-loads.md`](../docs/debts/tests-for-misses-param-loads.md) |
+| `unstarted-guard-held` | No check refuses a coordinator report whose `Unstarted:` line omits a step that is ready and not started (rule `reports-name-unstarted-items`). | [`docs/debts/unstarted-guard-held.md`](../docs/debts/unstarted-guard-held.md) |
 | `upgrade-strips-name-port` | The version 1 to 2 upgrade removes `:N` after a name whose extension is in `codeExtensions`. | [`docs/debts/upgrade-strips-name-port.md`](../docs/debts/upgrade-strips-name-port.md) |
 | `verdict-pipe-drops-line` | `verdict <cmd> \| tail` keeps only the last lines, and a wrapper watching the pipe can read a stalled or false exit. | [`docs/debts/verdict-pipe-drops-line.md`](../docs/debts/verdict-pipe-drops-line.md) |
 | `verdict-rewritten-xcode-output` | `verdict` needs a sign of a test run to fail a run with no test count. | [`docs/debts/verdict-rewritten-xcode-output.md`](../docs/debts/verdict-rewritten-xcode-output.md) |
@@ -430,6 +438,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `pointer-system` | Plan: the pointer system | [`docs/plans/pointer-system.md`](../docs/plans/pointer-system.md) |
 | `refusal-vs-rule` | Plan: each refusal matches its rule | [`docs/plans/refusal-vs-rule.md`](../docs/plans/refusal-vs-rule.md) |
 | `shared-merge-tool` | Plan: the shared merge tool | [`docs/plans/shared-merge-tool.md`](../docs/plans/shared-merge-tool.md) |
+| `stalled-steps` | Plan: stalled steps (lane doing-needs-live-lane) | [`docs/plans/stalled-steps.md`](../docs/plans/stalled-steps.md) |
 | `test-ci-standard` | Plan: how good tests and CI are made, how far the repos are, and how to close the gap | [`docs/plans/test-ci-standard.md`](../docs/plans/test-ci-standard.md) |
 | `time-pinned-tests` | Time-pinned tests: per-repo list | [`docs/plans/time-pinned-tests.md`](../docs/plans/time-pinned-tests.md) |
 | `trial-results` | Trial results: Ambition Lenses, blind grade | [`docs/plans/trial-results.md`](../docs/plans/trial-results.md) |

@@ -21,9 +21,10 @@ Each entry keeps `$defaults`, the classifier's built-in exceptions.
 | "Archived Branch Delete" (`settings.json` `autoMode.allow`) | A branch delete after its archive push, or of a merged branch | this record |
 | Merge confirm (`merge/cloud_allow.json`, cloud only) | `~/.claude/bin/merge ... --confirm` | mechanics in `session-tiers` |
 | "Owner PR Housekeeping" (`settings.json` `autoMode.allow`) | In a `shivinate7` repo: close a PR the coordinator or batch runner named in the visible conversation as replaced, empty or batched. Mark ready only an integration PR that the visible conversation names as such: the batch's or a lone lane's, named by the coordinator or batch runner, or the one PR of a solo or one-lane session that no coordinator started, named by that session | this record |
-| "Owner Session Message" (`settings.json` `autoMode.allow`) | `send_message` to a session in the owner's own account, asking only for acts the owner already granted. A coordinator may send a batch runner it created a merge go (owner, 2026-11-03 15:58 CST) | this record |
+| "Owner Session Message" (`settings.json` `autoMode.allow`) | `send_message` to a session in the owner's own account, including the session that started this one (its parent or coordinator). A message that asks for no act is covered. A message that asks is limited to acts the owner already granted. A coordinator may send a batch runner it created a merge go (owner, 2026-11-03 15:58 CST) | this record |
 | `mcp__claude-code-remote__add_repo` (`settings.json` `permissions.allow`) | Attach a GitHub repo to the session | this record |
 | `mcp__claude-code-remote__archive_session` (`settings.json` `permissions.allow`) | Archive a session in the owner's account | this record |
+| `mcp__claude-code-remote__send_message` (`settings.json` `permissions.allow`) | Any `send_message` call. No bound is checked (see Send message allow rule) | this record |
 
 This table states what each entry covers, not what the cloud does. What the cloud does with these acts is stated by route rows (`GLOSSARY.md`). The rows between the markers are planned to be generated from `hooks/route_rows.json`. No generator exists yet.
 
@@ -34,7 +35,24 @@ The merge confirm is a permission allow rule, not an `autoMode` entry. The class
 
 An allow rule for `merge --role` waits on the tag check of #878 (merge role reads the session tag).
 
-"Owner PR Housekeeping" never covers a merge, an approval, a review, or a title or body edit. Nor a change of a PR's base branch. Nor a branch or ref delete (`--delete-branch` included), a force push, a PR nobody named, or a repo outside `shivinate7`. Nor marking ready a lane PR that joins a batch, which stays draft, or a PR with auto-merge on, since that merges it. "Owner Session Message" never covers a request to change permissions, settings or overrides. Nor a merge ask, with one exception. A session tagged `cs-build:coordinator` may send a merge go for a named PR to a batch runner it created, with tags `cs-build:batch-runner` and the coordinator's own `cs-repo:` (decision `standing-merge-grant`: the batch runner runs every merge under the coordinator's grant). Nor a request to approve a PR. Nor `priority: now`, which interrupts the target's running turn. Nor a post people read, such as `visibility: posted_to_shared_channel`.
+"Owner PR Housekeeping" never covers a merge, an approval, a review, or a title or body edit. Nor a change of a PR's base branch. Nor a branch or ref delete (`--delete-branch` included), a force push, a PR nobody named, or a repo outside `shivinate7`. Nor marking ready a lane PR that joins a batch, which stays draft, or a PR with auto-merge on, since that merges it. "Owner Session Message" covers a message that only informs and asks for no act: a status note, a pull request number and head, batch heads, or a question about state. The limit to acts the owner already granted applies to a message that asks. A report that carries a request, such as `ready to merge` or `next: merge`, or that relays a grant or hands off an act, however phrased, is a message that asks. It never covers a request to change permissions, settings or overrides. Nor a merge ask, with one exception. A session tagged `cs-build:coordinator` may send a merge go for a named PR to a batch runner it created, with tags `cs-build:batch-runner` and the coordinator's own `cs-repo:` (decision `standing-merge-grant`: the batch runner runs every merge under the coordinator's grant). Nor a request to approve a PR. Nor `priority: now`, which interrupts the target's running turn. Nor a post people read, such as `visibility: posted_to_shared_channel`.
+
+### Sent messages sorted
+
+A scan of refused `send_message` calls on 2026-11-06 sorted them. Owner request: item 315 b on the owner's waiting page (lane brief judge-send-message-refusals, 2026-11-06 17:05 CST). This section holds no owner ruling.
+
+- Correct refusals:
+  - A message that carried a page grant the owner never typed in chat.
+  - An agent's mistaken send.
+  - A hand-off of a refused delete of a seed branch.
+- False alarms already fixed:
+  - Five merge-go sends refused on 2026-11-03. Pull request 1115, the merge-go carve-out, held. The sessions had stale settings.
+- Likely false alarm: two status or batch-heads sends in the same scan. The message text is unmeasured.
+- Stays refused even when phrased as a report: a message that relays a page grant the owner never typed, or hands off a refused act.
+
+Gap closed: a lane could not message its coordinator, since the target list named only sessions this session or its coordinator created. The entry now names the session that started this one. A message that asks for no act is covered, so a status note no longer meets the already-granted limit.
+
+Left to the coordinator: pull request 1372's blanket `permissions.allow` line for `send_message`. Drop it after this change merges.
 
 ### Merge go to a batch runner
 
@@ -67,15 +85,25 @@ Owner, 2026-11-01 19:19 CST, typed in the pr-acts-grant lane session: `when an o
 
 ### Remote tool allow rules
 
-Both are permission allow rules, not `autoMode` entries, so the classifier does not judge them. The docs say: "Actions matching your allow, ask, or deny rules resolve immediately, with these exceptions:" (https://code.claude.com/docs/en/permission-modes#how-the-classifier-evaluates-actions). This is documented, not measured here.
+All three (`add_repo`, `archive_session`, `send_message`) are permission allow rules, not `autoMode` entries, so the classifier does not judge them. The docs say: "Actions matching your allow, ask, or deny rules resolve immediately, with these exceptions:" (https://code.claude.com/docs/en/permission-modes#how-the-classifier-evaluates-actions). This is documented, not measured here.
 
-One exception that can apply: an MCP tool marked `requiresUserInteraction` prompts even when an allow rule matches. Unknown whether these two tools are marked so.
+One exception that can apply: an MCP tool marked `requiresUserInteraction` prompts even when an allow rule matches. Unknown whether these three tools are marked so.
 
 - Incident, coordinator-reported, not measured here. The coordinator session (session_013NEJL2pASwRjgJDnsvnpNe) relayed on 2026-11-01: the auto-mode classifier refused `archive_session` from 2026-10-31 on, and about 40 idle sessions stayed open. It refused `add_repo` in repo `degen` at 16:46 CST and in repo `joyous` at 17:14 CST, with the reason "Access Added As A Means".
 - `add_repo` loses nothing. It attaches a repo to the session and mints credentials for it.
 - `archive_session` fails the test "can be undone, or loses nothing". Unarchive gives a fresh container, so unpushed work in the old one is lost. The owner waives that test. Their typed go, 2026-11-01 17:37 CST, covers both tools. It is the verbatim grant: "add mcp__claude-code-remote__add_repo and mcp__claude-code-remote__archive_session to settings.json permissions.allow". The rule covers any session in the account.
 - Never covers `add_repo`: any other remote tool, or the server-level form.
 - Never covers `archive_session`: any other remote tool, or the server-level form.
+
+### Send message allow rule
+
+Owner, page item 301 a, 2026-11-06 15:24 CST: "yeah allow it, maybe we fix the judge itself for send messages though in genearl [sic] i think it's only blocked problematically". Built as #1364 (send_message allow, local session), rebuilt as #1372 (send_message allow, cloud).
+
+- Incidents: on 2026-11-06 auto mode refused `send_message` from the coordinator and from lanes. Earlier refusals: notes `auto-mode-refuses-page-grant` (coordinator refused on a page grant) and `agent-send-message-refused` (agent call refused in a lane).
+- It is a permission allow rule, so the classifier does not judge it (see Remote tool allow rules). This is documented, not measured here.
+- Gap: the rule stops the classifier from applying the "Owner Session Message" bounds to `send_message`: `priority: now`, a post to a shared channel, a target outside the owner's account. No hook checks these bounds. Owner, page item 315 b, 2026-11-06 17:00 CST: add no guard for them. Instead, step `judge-send-message-refusals` (fix the judge for send messages, run from the owner's laptop) fixes the cause in the judge's rules, in #1380 (the judge fix). Planned, not yet in that step: a follow-up after #1380 removes `send_message` from `permissions.allow` once the judge stops refusing ordinary messages.
+- Undo: remove the line from `settings.json`.
+- Never covers: any other remote tool, or the server-level form.
 
 ### Incidents for the owner PR and owner message entries
 
