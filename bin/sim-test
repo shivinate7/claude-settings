@@ -32,7 +32,7 @@
 # the lock is freed, on every exit, INT and TERM too. The take runs in the background and
 # this tool waits on it, so INT and TERM act at once. After the grant of an own-boot take it reads the booted list again, under
 # the lock, and reruns the reuse, cross-role and cap checks before the boot: a simulator a dead holder left booted is
-# reused (it keeps the lease just granted) or refused. A boot that fails shuts nothing down; a TERM during the boot still
+# reused or refused. A reused device of the slot just granted keeps that lease; one of another slot gets the lease given back and the `--reuse` lease of its own slot. A boot that fails shuts nothing down; a TERM during the boot still
 # records, then shuts it down.
 # Hold (--hold, no xcodebuild): takes the lock and a device as above, prints `sim-test: holding <UDID> as pid <PID> for
 # <S>s` on stdout, and exports SIM_TEST_UDID. --for S is the length: default 300, max 900 (the lock is held for all of
@@ -237,6 +237,11 @@ else
     booted_by_me=$udid
     xcrun simctl boot "$udid" || { booted_by_me=; exit 1; }
     record_boot
+  elif [ "$udid" != "$granted" ]; then
+    # The device found is of another slot than the lease just granted: give that lease back and take the lease of the slot
+    # that boots the device found, so `sim-lease status` names the device the run uses.
+    "$(dirname "$0")/sim-lease" give --pid $$
+    take_lease --reuse "$udid"
   fi
 fi
 # reset_device: before xcodebuild or the hold, put the phone in the known posture: light appearance and, for a Duo, a closed
