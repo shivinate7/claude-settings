@@ -12505,6 +12505,40 @@ def judge_lines(out, path, word):
     return [line for line in out.splitlines() if path in line and word in line]
 
 
+UNKNOWN_CAUSES = ("timed out", "model error", "no readable verdict", "past the call cap", "skipped by the reply")  # the fixed buckets, in the order a count line lists them
+
+
+def prose_unknown_lines(out):
+    """The merge's prose-judge UNKNOWN lines. Other steps of a merge print UNKNOWN too, so a case reads only these."""
+    return [line for line in out.splitlines() if "prose judge" in line and "UNKNOWN" in line]
+
+
+def per_file(answers):
+    """An answer routed by the file the prompt judges: `answers` maps a path to a function of the prompt. A prompt for a path that is not
+    in `answers` reads as a model error."""
+    def answer(prompt):
+        for path, reply in answers.items():
+            if "File: %s\n" % path in prompt:
+                return reply(prompt)
+        return None, "the test has no answer for this file"
+    return answer
+
+
+def stale_every_line(prompt):
+    """An answer that calls every line the prompt numbers `stale`, read from its `Line N:` rows."""
+    numbers = [int(n) for n in re.findall(r"^Line (\d+): ", prompt, re.M)]
+    return {"verdicts": [{"line": n, "verdict": "stale", "why": "the cited file says otherwise"} for n in numbers]}, None
+
+
+def timed_out(prompt):
+    return None, "model subprocess timed out"
+
+
+def cited_lines(n):
+    """A Markdown file of a heading and `n` lines that each cite src/widget.py:4, so every line is selected and judged."""
+    return "# Cloud notes\n\n" + "Cloud sessions cannot push to main (read src/widget.py:4).\n" * n
+
+
 REAL_INVOKE_MODEL = decision_watch.invoke_model  # captured at import, before the test base swaps in its stub
 REAL_RUN = decision_watch._nowindow.run  # captured at import, before the test base wraps it
 
@@ -12580,6 +12614,26 @@ class ProseJudge(Env):
             rc, out = self.run_capped()
         return stub, rc, out
 
+    def judge_default_cap(self, answer):
+        """The merge at the default PROSE_JUDGE_MAX_CALLS, with `answer` in place of invoke_model. -> (stub, rc, out)."""
+        stub = JudgeStub(answer)
+        with unittest.mock.patch.object(decision_watch, "invoke_model", stub):
+            rc, out = self.run_merge("7", "--confirm")
+        return stub, rc, out
+
+    def assert_unknown_count(self, out, k, causes):
+        """The merge's one prose-judge UNKNOWN line. It opens `merge: #7 prose judge UNKNOWN:`, reads K lines not judged, and lists
+        (count, cause) pairs in the fixed bucket order, with a zero bucket left out. The wording between those parts is not pinned."""
+        lines = prose_unknown_lines(out)
+        self.assertEqual(len(lines), 1, "prose-judge UNKNOWN lines: %d, want 1: one count line per merge\n%s" % (len(lines), out))
+        line = lines[0]
+        self.assertTrue(line.startswith("merge: #7 prose judge UNKNOWN:"), "the UNKNOWN line does not open the count line: %r" % line)
+        found_k = re.search(r"(\d+) lines not judged", line)
+        self.assertIsNotNone(found_k, "the UNKNOWN line has no `<K> lines not judged`: %r" % line)
+        self.assertEqual(int(found_k.group(1)), k, "lines not judged: %s, want %d: %r" % (found_k.group(1), k, line))
+        found = [(int(n), cause) for n, cause in re.findall(r"(\d+) (%s)\b" % "|".join(UNKNOWN_CAUSES), line)]
+        self.assertEqual(found, causes, "causes in the UNKNOWN line: %r, want %r: %r" % (found, causes, line))
+
     def real_judge(self, reply):
         """The merge through the real invoke_model and its parse, with `claude` answered in this process by `reply` as the result text.
         Every other program goes to the real runner, so git still runs. Call after setup_range. -> (claude starts, rc, out)."""
@@ -12654,8 +12708,7 @@ class ProseJudge(Env):
         sent = {p for p in names if any(p in prompt for prompt in stub.prompts)}
         unjudged = set(names) - sent
         self.assertEqual(len(unjudged), 1, "files not sent: %s, want one past the cap" % sorted(unjudged))
-        (skipped,) = unjudged
-        self.assertTrue(judge_lines(out, skipped, "UNKNOWN"), "no UNKNOWN line names %s, which the cap left unjudged" % skipped)
+        self.assert_unknown_count(out, 1, [(1, "past the call cap")])
         self.assertEqual(rc, 0, out)
 
     def test_a_stale_verdict_names_the_file_and_line(self):
@@ -12675,6 +12728,7 @@ class ProseJudge(Env):
         stub, rc, out = self.judge(verdict_for(3, "holds"))
         self.assertEqual(len(stub.prompts), 1, "model calls: %d, want 1 for one selected file" % len(stub.prompts))
         self.assertFalse([line for line in out.splitlines() if "%s:3" % PROSE in line], "the report names %s:3, which the model held" % PROSE)
+        self.assertEqual(prose_unknown_lines(out), [], "a held line added an UNKNOWN line: the merge has no unjudged line")
 
     def test_a_stale_verdict_never_refuses_the_merge(self):
         self.setup_range({PROSE: CITE_DOC}, {BACKING: BACKING_TEXT})
@@ -12687,7 +12741,8 @@ class ProseJudge(Env):
         self.setup_range({PROSE: CITE_DOC}, {BACKING: BACKING_TEXT})
         stub, rc, out = self.judge(raises(RuntimeError("model host unreachable")))
         self.assertEqual(len(stub.prompts), 1, "model calls: %d, want 1 for one selected file" % len(stub.prompts))
-        self.assertTrue(judge_lines(out, PROSE, "UNKNOWN"), "no UNKNOWN line names %s after the call raised" % PROSE)
+        self.assertNotIn("model host unreachable", out, "the report prints the raised error's text, not a cause\n" + out)
+        self.assert_unknown_count(out, 1, [(1, "model error")])
 
     def test_a_raised_error_never_refuses_the_merge(self):
         self.setup_range({PROSE: CITE_DOC}, {BACKING: BACKING_TEXT})
@@ -12698,9 +12753,9 @@ class ProseJudge(Env):
 
     def test_a_timeout_reads_unknown_and_never_refuses(self):
         self.setup_range({PROSE: CITE_DOC}, {BACKING: BACKING_TEXT})
-        stub, rc, out = self.judge(lambda prompt: (None, "model subprocess timed out"))
+        stub, rc, out = self.judge(timed_out)
         self.assertEqual(len(stub.prompts), 1, "model calls: %d, want 1 for one selected file" % len(stub.prompts))
-        self.assertTrue(judge_lines(out, PROSE, "UNKNOWN"), "no UNKNOWN line names %s after the timeout" % PROSE)
+        self.assert_unknown_count(out, 1, [(1, "timed out")])
         self.assertEqual(rc, 0, out)
 
     def test_a_stale_verdict_travels_through_the_real_invoke_model(self):
@@ -12719,9 +12774,9 @@ class ProseJudge(Env):
         self.setup_range({PROSE: TWO_CITE_DOC}, {BACKING: BACKING_TEXT})
         claude_calls, rc, out = self.real_judge(reply)
         self.assertEqual(len(claude_calls), 1, "claude starts: %d, want 1 for one selected file" % len(claude_calls))
-        for number in (3, 5):
-            self.assertTrue(judge_lines(out, "%s:%d" % (PROSE, number), "UNKNOWN"),
-                            "no UNKNOWN line at %s:%d for a reply in the wrong shape\n%s" % (PROSE, number, out))
+        # The real parse refuses this shape and returns an error, so invoke_model's error sets the bucket: a model error, not no readable verdict.
+        self.assertNotIn("was not a list", out, "the report prints the parse's error text, not a cause\n" + out)
+        self.assert_unknown_count(out, 2, [(2, "model error")])
         self.assertFalse([line for line in out.splitlines() if "prose judge" in line and PROSE in line and "UNKNOWN" not in line],
                          "a non-UNKNOWN prose judge line names %s, so the wrong-shape reply was read as a verdict\n%s" % (PROSE, out))
         self.assertEqual(rc, 0, out)
@@ -12767,7 +12822,8 @@ class ProseJudge(Env):
         stub, rc, out = self.judge(verdict_for(3, "stale"))
         self.assertEqual(stub.prompts, [], "model calls: %d, want 0: no line cites a changed file" % len(stub.prompts))
         self.assertEqual(rc, 0, out)
-        self.assertFalse(judge_lines(out, PROSE, "stale") or judge_lines(out, PROSE, "UNKNOWN"), "the report names %s with no call made" % PROSE)
+        self.assertFalse(judge_lines(out, PROSE, "stale"), "the report names %s with no call made" % PROSE)
+        self.assertEqual(prose_unknown_lines(out), [], "the merge made no call, yet printed an UNKNOWN line")
 
     def test_a_line_the_range_adds_to_governed_prose_is_judged_with_no_backing_change(self):
         # No backing file changes and the line has no cite, so only the diff base can select it: main holds the old line,
@@ -12798,6 +12854,8 @@ class ProseJudge(Env):
             rc, out = self.run_capped()
         self.assertEqual(len(reached), 1, "the base's rev-parse was reached %d times, want 1: the case did not hit its seam" % len(reached))
         self.assertIn("prose judge UNKNOWN: the base could not be read", out, "the report names no unreadable base\n" + out)
+        self.assertEqual(prose_unknown_lines(out), ["merge: #7 prose judge UNKNOWN: the base could not be read, so no line was judged."],
+                         "a plan-level failure is the only UNKNOWN line, so no other UNKNOWN line may print beside it\n" + out)
         self.assertEqual(rc, 0, out)
         self.assertTrue(getattr(self.host, "merged", False), "the merge did not land after the base could not be read")
 
@@ -12848,26 +12906,25 @@ class ProseJudge(Env):
         self.assertIn("invoke", events, "the model was never called, so the order is unknown: events %s" % events)
         self.assertIn("release", events[:events.index("invoke")], "the model call ran with the merge lock held: events %s" % events)
 
-    def test_a_timeout_on_a_long_doc_prints_at_most_the_line_cap(self):
-        # A timeout reads each selected line UNKNOWN. The report prints PROSE_JUDGE_MAX_LINES judge lines, then one count line.
-        doc = "# Cloud notes\n\n" + "Cloud sessions cannot push to main (read src/widget.py:4).\n" * 400
-        self.setup_range({PROSE: doc}, {BACKING: BACKING_TEXT})
-        stub, rc, out = self.judge(lambda prompt: (None, "model subprocess timed out"))
+    def test_a_timeout_on_a_long_doc_collapses_to_one_count_line(self):
+        # 400 timed-out lines are one UNKNOWN count line. UNKNOWNs take no finding slot, so no count of lines past a cap prints.
+        self.setup_range({PROSE: cited_lines(400)}, {BACKING: BACKING_TEXT})
+        stub, rc, out = self.judge(timed_out)
         self.assertEqual(len(stub.prompts), 1, "model calls: %d, want 1 for one selected file" % len(stub.prompts))
-        judged = [line for line in out.splitlines() if "prose judge" in line]
-        self.assertTrue(judged, "no judge line for the 400-line doc, so the cap is not seen")
-        self.assertLessEqual(len(judged), 21, "the report prints %d prose judge lines for a 400-line timeout, want at most 21" % len(judged))
-        self.assertIn("prose judge: 380 more lines not shown", out, "the report names no count line for the 380 lines past the cap")
+        self.assert_unknown_count(out, 400, [(400, "timed out")])
+        self.assertNotIn("more lines not shown", out, "a count of lines past a cap, but UNKNOWNs never take the finding cap\n" + out)
+        self.assertEqual(rc, 0, out)
 
     def test_the_line_cap_is_the_named_constant_twenty(self):
         self.assertEqual(getattr(merge, "PROSE_JUDGE_MAX_LINES", None), 20, "merge.PROSE_JUDGE_MAX_LINES is not the named cap of 20 judge lines")
 
-    def test_a_21_line_timeout_prints_20_lines_and_a_count_of_one(self):
-        doc = "# Cloud notes\n\n" + "Cloud sessions cannot push to main (read src/widget.py:4).\n" * 21
-        self.setup_range({PROSE: doc}, {BACKING: BACKING_TEXT})
-        stub, rc, out = self.judge(lambda prompt: (None, "model subprocess timed out"))
+    def test_a_21_line_timeout_collapses_to_one_count_line_of_21(self):
+        # 21 timed-out lines pass the finding cap of 20 and are still one UNKNOWN line: UNKNOWNs never take the cap.
+        self.setup_range({PROSE: cited_lines(21)}, {BACKING: BACKING_TEXT})
+        stub, rc, out = self.judge(timed_out)
         self.assertEqual(len(stub.prompts), 1, "model calls: %d, want 1 for one selected file" % len(stub.prompts))
-        self.assertIn("prose judge: 1 more lines not shown", out, "the report names no count line for the 1 line past the cap of 20")
+        self.assert_unknown_count(out, 21, [(21, "timed out")])
+        self.assertNotIn("more lines not shown", out, "a count of 1 line past the cap of 20: the UNKNOWN lines took the cap\n" + out)
 
     def malformed_reply(self, bad):
         """The merge with PROSE's reply replaced by `bad`, and OTHER_PROSE answered stale at line 3. -> (rc, out)."""
@@ -12882,8 +12939,7 @@ class ProseJudge(Env):
         # The merge reads what invoke_model hands it. A reply it cannot read is UNKNOWN for its file, every selected line, and
         # no verdict prints for that file. The other file's verdict still prints.
         rc, out = self.malformed_reply(bad)
-        self.assertTrue(judge_lines(out, "%s:3" % PROSE, "UNKNOWN"), "no UNKNOWN line at %s:3 after the reply was malformed" % PROSE)
-        self.assertTrue(judge_lines(out, "%s:5" % PROSE, "UNKNOWN"), "no UNKNOWN line at %s:5 after the reply was malformed" % PROSE)
+        self.assert_unknown_count(out, 2, [(2, "no readable verdict")])
         self.assertFalse([line for line in out.splitlines() if "prose judge" in line and PROSE in line and "UNKNOWN" not in line],
                          "a verdict printed for %s from a malformed reply" % PROSE)
         self.assertTrue(judge_lines(out, "%s:3" % OTHER_PROSE, "stale"), "the other file's stale line did not print after the malformed reply")
@@ -12952,8 +13008,8 @@ class ProseJudge(Env):
             rc, out = self.run_merge("7", "--confirm")
         self.assertEqual(len(stub.prompts), 3, "model calls: %d for 4 selected files, want the default cap of 3" % len(stub.prompts))
         sent = {p for p in names if any(p in prompt for prompt in stub.prompts)}
-        (skipped,) = set(names) - sent
-        self.assertTrue(judge_lines(out, skipped, "UNKNOWN"), "no UNKNOWN line names %s, which the default cap left unjudged" % skipped)
+        self.assertEqual(len(sent), 3, "files sent: %d, want 3 under the default cap" % len(sent))
+        self.assert_unknown_count(out, 1, [(1, "past the call cap")])
         self.assertEqual(rc, 0, out)
 
     def test_a_selected_line_the_model_skips_reads_unknown(self):
@@ -12961,8 +13017,78 @@ class ProseJudge(Env):
         self.setup_range({PROSE: TWO_CITE_DOC}, {BACKING: BACKING_TEXT})
         stub, rc, out = self.judge(verdict_for(3, "holds"))
         self.assertEqual(len(stub.prompts), 1, "model calls: %d, want 1 for one selected file" % len(stub.prompts))
-        self.assertTrue(judge_lines(out, "%s:5" % PROSE, "UNKNOWN"), "no UNKNOWN line at %s:5, which the reply skipped" % PROSE)
-        self.assertFalse(judge_lines(out, "%s:3" % PROSE, "UNKNOWN"), "%s:3 reads UNKNOWN, but the reply held it" % PROSE)
+        self.assert_unknown_count(out, 1, [(1, "skipped by the reply")])
+        self.assertFalse([line for line in out.splitlines() if "%s:3" % PROSE in line], "the report names %s:3, which the reply held" % PROSE)
+        self.assertEqual(rc, 0, out)
+
+    def test_five_prose_files_collapse_their_unknowns_into_one_count_line(self):
+        # The lane brief of 2026-11-07 03:01 CST: UNKNOWNs collapse to one count line with their causes, and findings print in full.
+        # Five governed files come in the range. The default cap of 3 sends a, b and c, so d and e are past it.
+        files = {LANE_A: THREE_CITE_DOC, LANE_B: THREE_CITE_DOC, LANE_C: TWO_CITE_DOC, LANE_D: TWO_CITE_DOC, LANE_E: TWO_CITE_DOC}
+        self.setup_range({"docs/notes/base.md": PLAIN_DOC}, {**files, BACKING: BACKING_TEXT})
+        answer = per_file({
+            # Line 7 is missing from the reply, so it is skipped.
+            LANE_A: lambda prompt: ({"verdicts": [{"line": 3, "verdict": "unbacked", "why": "no cited file backs it"},
+                                                   {"line": 5, "verdict": "stale", "why": "the cited file says otherwise"}]}, None),
+            LANE_B: timed_out,
+            LANE_C: lambda prompt: ({"ok": True, "findings": [{"line": 3, "verdict": "stale", "why": "x"}]}, None),  # a wrong shape
+        })
+        stub, rc, out = self.judge_default_cap(answer)
+        sent = {p for p in files if any("File: %s\n" % p in prompt for prompt in stub.prompts)}
+        self.assertEqual(sent, {LANE_A, LANE_B, LANE_C}, "the calls name %s, want a, b and c: the default cap sends three files" % sorted(sent))
+        self.assertEqual(len(stub.prompts), 3, "model calls: %d, want 3" % len(stub.prompts))
+        lines = out.splitlines()
+        findings = ["merge: #7 prose judge, %s:3 unbacked: no cited file backs it" % LANE_A,
+                    "merge: #7 prose judge, %s:5 stale: the cited file says otherwise" % LANE_A]
+        for finding in findings:
+            self.assertIn(finding, lines, "the finding is not printed in full: %r\n%s" % (finding, out))
+        self.assert_unknown_count(out, 10, [(3, "timed out"), (2, "no readable verdict"), (4, "past the call cap"), (1, "skipped by the reply")])
+        self.assertLess(max(lines.index(f) for f in findings), lines.index(prose_unknown_lines(out)[0]), "a finding prints after the UNKNOWN line\n" + out)
+        self.assertEqual(rc, 0, out)
+        self.assertTrue(getattr(self.host, "merged", False), "the merge did not land")
+
+    def test_21_findings_print_20_and_a_count_of_one_then_the_unknown_line(self):
+        # UNKNOWNs do not take the finding cap: 21 findings print 20 and one count line, and the timed-out file adds one UNKNOWN line.
+        self.setup_range({"docs/notes/base.md": PLAIN_DOC}, {LANE_A: cited_lines(21), LANE_B: CITE_DOC, BACKING: BACKING_TEXT})
+        stub, rc, out = self.judge_default_cap(per_file({LANE_A: stale_every_line, LANE_B: timed_out}))
+        self.assertEqual(len(stub.prompts), 2, "model calls: %d, want 2: two files are selected" % len(stub.prompts))
+        lines = out.splitlines()
+        findings = [line for line in lines if line.startswith("merge: #7 prose judge, %s:" % LANE_A)]
+        self.assertEqual(len(findings), 20, "finding lines: %d, want 20: the finding cap\n%s" % (len(findings), out))
+        self.assertEqual(re.findall(r"^merge: #7 prose judge: (\d+) more lines not shown$", out, re.M), ["1"],
+                         "the count line for the findings past the cap is not 1\n" + out)
+        self.assert_unknown_count(out, 1, [(1, "timed out")])
+        self.assertLess(lines.index(findings[-1]), lines.index(prose_unknown_lines(out)[0]), "a finding prints after the UNKNOWN line\n" + out)
+        self.assertEqual(rc, 0, out)
+
+    def test_unknown_lines_never_take_a_finding_slot(self):
+        # 20 findings and one timed-out file: all 20 findings print, no count line for findings appears, and the UNKNOWN line prints.
+        self.setup_range({"docs/notes/base.md": PLAIN_DOC}, {LANE_A: cited_lines(20), LANE_B: CITE_DOC, BACKING: BACKING_TEXT})
+        stub, rc, out = self.judge_default_cap(per_file({LANE_A: stale_every_line, LANE_B: timed_out}))
+        self.assertEqual(len(stub.prompts), 2, "model calls: %d, want 2: two files are selected" % len(stub.prompts))
+        findings = [line for line in out.splitlines() if line.startswith("merge: #7 prose judge, %s:" % LANE_A)]
+        self.assertEqual(len(findings), 20, "finding lines: %d, want all 20: the UNKNOWN line took a finding slot\n%s" % (len(findings), out))
+        self.assertNotIn("more lines not shown", out, "a count line for findings that all fit: the UNKNOWN line took a slot\n" + out)
+        self.assert_unknown_count(out, 1, [(1, "timed out")])
+        self.assertEqual(rc, 0, out)
+
+    def test_the_unknown_line_names_a_cause_never_the_raw_error_text(self):
+        # invoke_model's error text is never printed: the line names the bucket, model error, and the text stays out.
+        self.setup_range({PROSE: CITE_DOC}, {BACKING: BACKING_TEXT})
+        stub, rc, out = self.judge(lambda prompt: (None, "RAW-ERROR-7f3a: /home/user/secret/stderr"))
+        self.assertEqual(len(stub.prompts), 1, "model calls: %d, want 1 for one selected file" % len(stub.prompts))
+        self.assertNotIn("RAW-ERROR-7f3a", out, "the report prints the raw error text, not a cause\n" + out)
+        self.assert_unknown_count(out, 1, [(1, "model error")])
+        self.assertEqual(rc, 0, out)
+
+    def test_a_merge_with_every_line_judged_prints_no_unknown_line(self):
+        # The empty state: each selected line gets a verdict, so no UNKNOWN line prints and the stale finding prints in full.
+        self.setup_range({"docs/notes/base.md": PLAIN_DOC}, {LANE_A: CITE_DOC, LANE_B: CITE_DOC, BACKING: BACKING_TEXT})
+        stub, rc, out = self.judge_default_cap(per_file({LANE_A: verdict_for(3, "stale"), LANE_B: verdict_for(3, "holds")}))
+        self.assertEqual(len(stub.prompts), 2, "model calls: %d, want 2: two files are selected" % len(stub.prompts))
+        self.assertIn("merge: #7 prose judge, %s:3 stale: the cited file says otherwise" % LANE_A, out.splitlines(),
+                      "the stale finding is not printed in full\n" + out)
+        self.assertEqual(prose_unknown_lines(out), [], "every line was judged, yet an UNKNOWN line printed\n" + out)
         self.assertEqual(rc, 0, out)
 
 
@@ -12978,6 +13104,10 @@ class OrderLock(merge.GitLock):
 TWO_CITE_DOC = ("# Cloud notes\n\nCloud sessions cannot push to main (read src/widget.py:4).\n\n"
                 "Cloud sessions cannot push to main (read src/widget.py:2).\n")  # the cites are on lines 3 and 5
 OTHER_PROSE = "docs/notes/other.md"  # a second governed file, judged in the same merge
+LANE_A, LANE_B, LANE_C, LANE_D, LANE_E = ["docs/notes/%s.md" % c for c in "abcde"]  # five governed files one range adds, sorted a to e
+THREE_CITE_DOC = ("# Cloud notes\n\nCloud sessions cannot push to main (read src/widget.py:4).\n\n"
+                  "Cloud sessions cannot push to main (read src/widget.py:2).\n\n"
+                  "Cloud sessions cannot push to main (read src/widget.py:3).\n")  # the cites are on lines 3, 5 and 7
 C0_CONTROL = re.compile(r"[\x00-\x08\x0b-\x1f]")  # C0 control characters, but not tab (\x09) or newline (\x0a)
 
 
