@@ -1,15 +1,16 @@
 {
   "title": "page.html: copyText and renderRail are each defined twice",
   "phase": "now",
-  "status": "todo",
+  "status": "doing",
   "order": 103.3635,
   "why": "Owner ask ask-mw5ax2zb2j: improve the page as it grew.",
   "note": "Coordinator 12:37 CST, from page-growth-review (Sonnet Explore audit): S. Lines 1916/3017 and 2133/3265.",
-  "updatedAt": "2026-11-06T18:39:00Z",
+  "updatedAt": "2026-11-07T13:30:00-06:00",
   "paused": {
     "why": "Waits on step page-reply-uncollapse to merge.",
     "decides": "coordinator",
     "at": "2026-11-06T14:39:00-06:00",
     "by": "triage"
-  }
+  },
+  "lane": "session_013NEJL1fQaNp75QW37StZfW"
 }

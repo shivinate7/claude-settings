@@ -1,9 +1,10 @@
 {
   "title": "Re-cap CI jobs over 80% of their timeout, and set measured caps",
   "phase": "now",
-  "status": "todo",
+  "status": "doing",
   "order": 103.352,
   "why": "A job near its timeout fails at random on a slow day.",
   "note": "Coordinator 12:10 CST. Debt jobs-over-80pct-of-cap: windows-guard and windows-guard-2 at 99%, windows-merge* at 82-94%, checks-guard at 84%, shell-macos at 83%. checks-macos-b and checks-merge-install still have the provisional 60 min cap after 29-30 green runs. A verdict change, so it needs a review.",
-  "updatedAt": "2026-11-06T18:13:00Z"
+  "updatedAt": "2026-11-07T13:30:00-06:00",
+  "lane": "session_013NEJKzpnqotWqxGxrfi4Sa"
 }

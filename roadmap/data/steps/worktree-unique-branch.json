@@ -1,9 +1,10 @@
 {
   "title": "Each agent worktree gets its own branch, and no worktree is pruned mid-task",
   "phase": "now",
-  "status": "todo",
+  "status": "doing",
   "order": 103.5,
   "why": "Agents in a lane are not blocked or lose work through a shared branch or a pruned worktree.",
   "note": "Coordinator 22:21 CST Nov 6, from lane qmax-browser-main-red: 3 agents were blocked because two worktrees held one local branch, and 2 agent worktrees were pruned mid-task (cause unknown). Find the cause first: who names the branch, and what prunes a live worktree.",
-  "updatedAt": "2026-11-07T04:21:00Z"
+  "updatedAt": "2026-11-07T13:30:00-06:00",
+  "lane": "session_013NEJL3WkjDpDX48MYiGdbs"
 }

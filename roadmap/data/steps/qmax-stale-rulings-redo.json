@@ -3,8 +3,9 @@
   "why": "#970 (closed) rewrote stale rulings in place. 175 of its 219 decision-file edits target files main has not touched since its base 7f7bbd5ca, so those rulings are likely still stale (lane qmax-revive-idle).",
   "note": "Find them: git diff --name-only 7f7bbd5ca origin/claude/rework-round-a -- docs/decisions, kept to files with no commit in git log 7f7bbd5ca..origin/main. #970 also touched 36 rule and spec files. A lane redoes the work from main; branch claude/rework-round-a stays on origin for reference. Each rewrite follows q_max's rule that an entry changes only on a new ruling or for accuracy. Done: each listed file is rewritten or marked still true. Filed under pr-backlog-clear.",
   "phase": "now",
-  "status": "todo",
+  "status": "doing",
   "order": 0.26,
   "owner": "coordinator",
-  "updatedAt": "2026-11-07T12:45:00-06:00"
+  "updatedAt": "2026-11-07T13:30:00-06:00",
+  "lane": "session_013NEJKzrRZv5SSGTrTxnPPr"
 }

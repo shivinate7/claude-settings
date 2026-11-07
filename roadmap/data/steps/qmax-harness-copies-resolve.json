@@ -3,8 +3,9 @@
   "why": "#1006's leftover (lane qmax-revive-idle): q_max main still keeps its own copies of harness/import-reader.mjs (61 lines) and harness/source-text.mjs (201 lines), so two homes drift.",
   "note": "Read both through harness/map-skill.mjs, the one resolver, then delete the copies. Done: neither file exists in q_max main, and the checks that used them still pass. Filed under pr-backlog-clear.",
   "phase": "now",
-  "status": "todo",
+  "status": "doing",
   "order": 0.25,
   "owner": "coordinator",
-  "updatedAt": "2026-11-07T12:45:00-06:00"
+  "updatedAt": "2026-11-07T13:30:00-06:00",
+  "lane": "session_013NEJL34hZs3F4j8Tq4iVVx"
 }

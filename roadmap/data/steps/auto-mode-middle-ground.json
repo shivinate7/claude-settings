@@ -1,9 +1,10 @@
 {
   "title": "Cloud auto mode closer to desktop bypass: allow the safe acts",
   "phase": "now",
-  "status": "todo",
+  "status": "doing",
   "order": 103.3565,
   "why": "Cloud sessions stop to ask, or are refused, far more often than the owner's desktop bypass mode.",
-  "note": "Owner ask ask-mw5av97rcg (12:20 CST): \"a better middle ground\". List the acts most often asked about or refused (guard.log, refusal notes), then propose allow lines for the safe ones. The list goes to the owner for approval, because it changes what auto mode allows.",
-  "updatedAt": "2026-11-06T18:37:00Z"
+  "note": "Folded into lane relayed-yes-allow (coordinator, 13:40 CST Nov 7): one owner go, item 350.\nOwner ask ask-mw5av97rcg (12:20 CST): \"a better middle ground\". List the acts most often asked about or refused (guard.log, refusal notes), then propose allow lines for the safe ones. The list goes to the owner for approval, because it changes what auto mode allows.",
+  "updatedAt": "2026-11-07T13:30:00-06:00",
+  "lane": "session_013NEJKzw6Mmu5eviHC3vobt"
 }
