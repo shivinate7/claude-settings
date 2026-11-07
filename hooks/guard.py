@@ -229,8 +229,16 @@ Other tools, in `judge` order:
   simulator-boot-lease
                        deny. A simulator MCP `launch` of a shut-down device, lock or no lock: no session
                        holds a lease for it. The remedy is `sim-test`. Judged after the cap and twin
-                       rules. A launch of a booted device passes. An override lifts it.
+                       rules. A launch of a booted device is judged by simulator-drive-lease. An override lifts it.
                        (sim-test-is-the-one-boot-path)
+  simulator-drive-lease
+                       deny. A drive of a booted phone by a session with no live lease for it: a simulator
+                       MCP call that is not screenshot, describe or list (a launch of a booted device
+                       included), `hinge -d UDID open|close|half|<degrees>`, or `xcrun simctl <ui, openurl,
+                       install, uninstall, launch, terminate, push, privacy, status_bar, location, addmedia,
+                       keychain, pbcopy, spawn> UDID|booted`. Judged after the boot rules. The remedy names
+                       `sim-lease take` and `sim-test --hold`. Fails open with no simctl. An override lifts
+                       it. (sim-test-is-the-one-boot-path)
   builder-test-edit, test-author-scope, record-writer-scope, designer-scope
                        deny. A role's write outside its scope. (builders-cannot-edit-tests)
   env-file, frozen-path, config-edit, agent-model-cap
@@ -3959,13 +3967,20 @@ SIM_MCP = "mcp__Claude_Code_iOS_Simulator__control"
 SIM_BOOT_CAP = 2
 
 
+def _simctl_after(word: str, rest: list):
+    """The words after `simctl`, by the command word WORD (`xcrun` or `simctl`), or None when the command is no
+    `simctl` call. The one reader of a simctl call, for the boot and the drive rules."""
+    if word in ("xcrun", "simctl") and "simctl" in ([word] + rest):
+        return ([word] + rest)[([word] + rest).index("simctl") + 1:]
+    return None
+
+
 def _simctl_boot_args(word: str, rest: list):
     """The arguments after `simctl boot`, by the command word WORD (`xcrun` or `simctl`), or None when the
     command is no `simctl boot`. The list is empty when xargs feeds the device."""
-    if word in ("xcrun", "simctl") and "simctl" in ([word] + rest):
-        after = ([word] + rest)[([word] + rest).index("simctl") + 1:]
-        if after[:1] == ["boot"]:
-            return after[1:]
+    after = _simctl_after(word, rest)
+    if after is not None and after[:1] == ["boot"]:
+        return after[1:]
     return None
 
 
@@ -4093,8 +4108,8 @@ def _sim_route_remedy(rest: list) -> str:
 
 
 def sim_lease_holds(session: str, udids: list) -> bool:
-    """True when SESSION holds a live sim-lease whose slot maps to every UDID in UDIDS (decision
-    sim-test-is-the-one-boot-path, ruling 5). The slot map, the liveness test and the read live in bin/sim-lease,
+    """True when SESSION holds a live sim-lease that covers every UDID in UDIDS: a lease whose slot maps to it, or a
+    slot `other` lease whose `udid` field is it (decision sim-test-is-the-one-boot-path, rulings 5 and 12). The slot map, the liveness test and the read live in bin/sim-lease,
     loaded by path as it has no .py name. An empty session or UDIDS, or any failure to load or read, is False:
     the refusal stands. The read takes no lock and writes nothing, and no bytecode file is written for the load."""
     if not session or not udids:
@@ -4107,8 +4122,10 @@ def sim_lease_holds(session: str, udids: list) -> bool:
         spec = importlib.util.spec_from_loader("sim_lease", loader)
         lease = importlib.util.module_from_spec(spec)
         loader.exec_module(lease)
-        held = {lease.SLOT_UDID[e["slot"]].casefold() for e in lease.live_leases()
-                if session == e.get("session") and e.get("slot") in lease.SLOT_UDID}
+        held = {(lease.SLOT_UDID[e["slot"]] if e.get("slot") in lease.SLOT_UDID else e["udid"]).casefold()
+                for e in lease.live_leases()
+                if session == e.get("session") and (e.get("slot") in lease.SLOT_UDID
+                                                    or (e.get("slot") == "other" and e.get("udid")))}
     except Exception:
         return False
     finally:
@@ -4116,21 +4133,88 @@ def sim_lease_holds(session: str, udids: list) -> bool:
     return all(u.casefold() in held for u in udids)
 
 
-def sim_boot_refusal(tool: str, names: list, remedies: dict = None, session: str = "") -> None:
-    """Refuse a boot of any of NAMES when two devices are booted, or an idle twin is booted. After those two
-    rules, an `xcodebuild -destination` boot (REMEDIES maps a name to its remedy) is refused as
-    simulator-boot-route, and an MCP launch as simulator-boot-lease, unless SESSION holds a live sim-lease whose
-    slot is the launched device (sim_lease_holds)."""
+def _sim_read():
+    """(sweep module, device list) from the one `simctl list`, or (None, None) when the janitor is not beside this
+    file (a cloud copy), simctl is missing, or the list does not read. Every simulator rule fails open on None."""
     try:
         sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "janitor"))
         import sweep
     except Exception:
-        return  # fail open: no janitor beside this file (a cloud copy)
+        return None, None
     if not sweep.sim_available():
-        return
-    devices = sweep.sim_read_devices()
+        return None, None
+    return sweep, sweep.sim_read_devices()
+
+
+# Decision sim-test-is-the-one-boot-path, ruling 12. A drive is a call that changes a booted device. The read
+# sets are never judged: MCP screenshot, describe and list; `hinge` get and posture; `simctl io`, `list` and
+# `get_app_container`. Boot, shutdown and erase belong to the boot rules.
+SIM_READ_ACTIONS = frozenset({"screenshot", "describe", "list"})
+SIM_DRIVE_SIMCTL = frozenset({"ui", "openurl", "install", "uninstall", "launch", "terminate", "push", "privacy",
+                              "status_bar", "location", "addmedia", "keychain", "pbcopy", "spawn"})
+SIM_DRIVE_HINGE = frozenset({"open", "close", "half"})
+
+
+def _sim_drive_targets(segment: str) -> list:
+    """The device names, UDIDs or `booted` that each drive command of SEGMENT names (`hinge -d X open|close|half|N`,
+    `xcrun simctl <drive verb> X`). Found by `_sim_commands`, so a quoted text, a comment and a command named only
+    inside `sim-test` are no drive. A command that names no device is not judged."""
+    found = []
+    for command, rest in _sim_commands(segment):
+        word = basename(command)
+        if word == "hinge":
+            target, verb, i = "", "", 0
+            while i < len(rest):
+                if rest[i] in ("-d", "-t") and i + 1 < len(rest):
+                    target = rest[i + 1] if rest[i] == "-d" else target
+                    i += 2
+                    continue
+                verb = verb or rest[i].rstrip(")`")  # a `$(...)` closes on the last word
+                i += 1
+            if target and (verb in SIM_DRIVE_HINGE or re.fullmatch(r"-?[0-9]+(\.[0-9]+)?", verb)):
+                found.append(target)
+        elif (after := _simctl_after(word, rest)) is not None:
+            if after[:1] and after[0] in SIM_DRIVE_SIMCTL:
+                target = next((a for a in after[1:] if not a.startswith("-")), "").rstrip(")`")
+                if target:
+                    found.append(target)
+    return found
+
+
+def sim_drive_refusal(tool: str, names: list, session: str = "", devices: list = None) -> None:
+    """Refuse a drive of a booted device that SESSION holds no live lease for (rule simulator-drive-lease). NAMES
+    are the device names or UDIDs the call drives, or `booted` for every booted device. A name judges each
+    booted device it names; an unknown or shut-down device is the boot rules' job. DEVICES is the list the boot
+    rules already read, else it is read here. Fails open when simulators are unavailable or the list does not read."""
     if devices is None:
-        return
+        devices = _sim_read()[1]
+        if devices is None:
+            return
+    hit = {}
+    for name in names:
+        key = name.strip().casefold()
+        for d in devices:
+            if d["state"] == "Booted" and (key == "booted" or key == d["udid"].casefold()
+                                           or key == d["name"].strip().casefold()):
+                hit[d["udid"]] = d
+    if hit and not sim_lease_holds(session, list(hit)):
+        refuse(tool, "deny", "simulator-drive-lease",
+               "A drive of the booted simulator %s needs this session's own lease for it: the Mac shares "
+               "its phones across repos, and a drive without the lease spoils the holder's run. Take the "
+               "lease with `sim-lease take`, or run `sim-test --hold`, then drive. "
+               "(decision sim-test-is-the-one-boot-path)"
+               % "; ".join("%s (%s)" % (d["name"], d["udid"]) for d in hit.values()), ", ".join(names))
+
+
+def sim_boot_refusal(tool: str, names: list, remedies: dict = None, session: str = "") -> None:
+    """Refuse a boot of any of NAMES when two devices are booted, or an idle twin is booted. After those two
+    rules, an `xcodebuild -destination` boot (REMEDIES maps a name to its remedy) is refused as
+    simulator-boot-route, and an MCP launch as simulator-boot-lease, unless SESSION holds a live sim-lease whose
+    slot is the launched device (sim_lease_holds). Returns the device list it read, or None when none was read, so
+    the drive rule reads it once."""
+    sweep, devices = _sim_read()
+    if devices is None:
+        return None  # fail open: no janitor beside this file (a cloud copy), no simctl, or no list
     shut_down = []
     for name in names:
         name, os_ = name if isinstance(name, tuple) else (name, "")  # a destination's OS= picks a runtime
@@ -4171,6 +4255,7 @@ def sim_boot_refusal(tool: str, names: list, remedies: dict = None, session: str
             refuse(tool, "deny", "simulator-boot-route",
                    "`xcodebuild -destination` boots %s outside the `sim-test` lock. %s "
                    "(decision sim-test-is-the-one-boot-path)" % (name, remedies[name]), name)
+    return devices
 
 
 def worktree_home_hit(payload, tool: str, tool_input: dict, cwd: str) -> str:
@@ -4937,16 +5022,21 @@ def judge(payload) -> None:
                 for n, remedy in _sim_boots(seg):
                     names.append(n)
                     remedies.setdefault(n[0], remedy)
-            if names:
-                sim_boot_refusal(tool, names, remedies)
+            devices = sim_boot_refusal(tool, names, remedies) if names else None
+            drives = [t for seg in segments for t in _sim_drive_targets(seg)]
+            if drives:
+                sid = payload.get("session_id") if isinstance(payload, dict) else ""
+                sim_drive_refusal(tool, drives, sid if isinstance(sid, str) else "", devices)
         return
     if tool == SIM_MCP:
         # `udid` is an alias of `device`: judge each non-empty name, so one field hides no other.
         names = list(dict.fromkeys(v for v in map(tool_input.get, ("device", "udid"))
                                    if isinstance(v, str) and v))
-        if tool_input.get("action") == "launch" and names:
-            sid = payload.get("session_id") if isinstance(payload, dict) else ""
-            sim_boot_refusal(tool, names, None, sid if isinstance(sid, str) else "")
+        sid = payload.get("session_id") if isinstance(payload, dict) else ""
+        sid = sid if isinstance(sid, str) else ""
+        devices = sim_boot_refusal(tool, names, None, sid) if tool_input.get("action") == "launch" and names else None
+        if names and tool_input.get("action") not in SIM_READ_ACTIONS:
+            sim_drive_refusal(tool, names, sid, devices)
         return
 
     if tool not in WRITE_TOOLS:
