@@ -1139,7 +1139,8 @@ _STAMP_HEADER = re.compile(
 _STAMP_OFFSET_HOURS = {"CST": -6, "CDT": -5}
 STAMP_REASON = (
     "this message's header stamp is {off} minutes off the clock, and the limit is " + str(STAMP_LIMIT_MINUTES) + ". "
-    "The time is {now}: re-stamp the header with that time, then send it again."
+    "The time is {now}: re-stamp your own header with that time, then send it again. If the first line quotes "
+    "someone else's time in header form, open the message with your own label first."
 )
 
 
@@ -1159,12 +1160,12 @@ def stamp_hit(tool: str, tool_input):
         return None
     try:
         import local_time
-        now = local_time.clock()
+        now = local_time.clock().replace(second=0, microsecond=0)  # whole minutes: both forms compare one way
         zone = timezone(timedelta(hours=_STAMP_OFFSET_HOURS[found.group("zone")]))
         hour, minute = int(found.group("hour")), int(found.group("minute"))
         if found.group("date"):
             stamped = datetime.fromisoformat(found.group("date")).replace(hour=hour, minute=minute, tzinfo=zone)
-            off = abs(round((stamped - now).total_seconds() / 60))
+            off = abs(int((stamped - now).total_seconds() // 60))
         else:
             if hour > 23 or minute > 59:
                 return None
