@@ -24,44 +24,14 @@ from datetime import datetime, timedelta, timezone
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 GUARD = os.path.join(HERE, "guard.py")
+sys.path.insert(0, HERE)
+from git_bash import find_git_bash  # noqa: E402  the one home of the Git Bash lookup
 
 
-def _find_git_bash():
-    """Resolve the real Git-for-Windows bash by full path. Never hand subprocess a bare "bash".
-
-    Both this machine and the CI runner list `C:\\Windows\\System32` ahead of Git's
-    own `bin` folder on PATH. `System32\\bash.exe` is a WSL launcher stub, not Git
-    Bash. It mounts drives at "/mnt/c", never at "/c". `to_bash_path` below builds
-    the "/c" form. A path handed to that stub never resolves. `shutil.which("bash")`
-    does not help. It is a plain PATH scan. On this PATH order it returns the same
-    stub.
-
-    A bare "bash" prints "/mnt/c/Users/..." (the WSL stub). The full path to
-    Git's own bash.exe prints "C:/Users/..." (the real MINGW64 mount). The
-    `shell: bash` steps of `.github\\workflows\\checks.yml` already use that path.
-    """
-    if os.name != "nt":
-        return shutil.which("bash") or "bash"
-    for var in ("ProgramFiles", "ProgramFiles(x86)", "ProgramW6432"):
-        base = os.environ.get(var)
-        if base:
-            candidate = os.path.join(base, "Git", "bin", "bash.exe")
-            if os.path.isfile(candidate):
-                return candidate
-    # Fall back to a PATH scan that skips the System32 stub, in case Git sits
-    # somewhere else. Whatever PATH still finds beats a bare "bash".
-    system_root = os.path.normcase(os.path.join(
-        os.environ.get("SystemRoot", r"C:\Windows"), "System32"))
-    for folder in os.environ.get("PATH", "").split(os.pathsep):
-        if os.path.normcase(folder).startswith(system_root):
-            continue
-        candidate = os.path.join(folder, "bash.exe")
-        if os.path.isfile(candidate):
-            return candidate
-    return shutil.which("bash") or "bash"
-
-
-BASH = _find_git_bash()
+# Git Bash by full path, never a bare "bash" (hooks/git_bash.py says why). `to_bash_path` below builds the
+# "/c" form Git Bash mounts; the WSL launcher mounts "/mnt/c" instead. With no Git Bash found, PATH's
+# bash still beats a bare name.
+BASH = find_git_bash() or shutil.which("bash") or "bash"
 
 # FIXTURE_TMP is where the indirection fixtures below live: `tempfile.gettempdir()`, never a
 # literal "/tmp". On Windows, Python resolves "/tmp" to "C:\tmp". Bash (MSYS) resolves the

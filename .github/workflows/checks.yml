@@ -75,10 +75,9 @@ jobs:
   checks:
     runs-on: ubuntu-latest
     needs: scope
-    # Cap 52 min, a stopgap under the owner's 2026-11-01 18:44 CST ruling in decision ci-job-caps: slowest 35.4 min
-    # is 68% of it (range 25.2-35.4, median 28.9, n 16 green runs of 20, 2026-11-01 23:17 to 2026-11-02 08:33 UTC).
-    # Those figures are from before the merge and install suites moved to checks-merge-install: about 991 s fewer,
-    # projected from run 41730427997 and unmeasured.
+    # Cap 52 min, a stopgap under the owner's 2026-11-01 18:44 CST ruling in decision ci-job-caps: slowest 22.8 min
+    # is 44% of it (range 15.5-22.8, median 19.8, n 27 green runs, runs 42074654512 to 42263498384,
+    # 2026-11-05 17:26 to 2026-11-06 17:38 UTC), after the merge and install suites moved to checks-merge-install.
     timeout-minutes: 52
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
@@ -167,6 +166,9 @@ jobs:
       - name: Refusal note agent row suite
         run: python3 hooks/test_refusal_note_agent.py
 
+      - name: Refusal note route row suite
+        run: python3 hooks/test_refusal_note_route.py
+
       - name: Call judge fixture suite
         run: python3 hooks/test_call_judge.py
 
@@ -231,8 +233,17 @@ jobs:
       - name: Stop-hook guard fixture suite
         run: python3 lint/test_report_guard.py
 
+      - name: Stop-hook triage hold suite
+        run: python3 lint/test_report_guard_stalled.py
+
       - name: Stop-hook question route suite
         run: python3 lint/test_report_guard_route.py
+
+      - name: Stop-hook route row falsifier suite
+        run: python3 lint/test_report_guard_falsifier.py
+
+      - name: Stop-hook hand-off cite suite
+        run: python3 lint/test_report_guard_handoff.py
 
       - name: Stop-hook landing fixture suite
         run: python3 lint/test_report_guard_landing.py
@@ -451,6 +462,9 @@ jobs:
       - name: Silent undo fixture suite
         run: python3 lint/test_check_silent_undo.py
 
+      - name: Debt retire fixture suite
+        run: python3 lint/test_check_debt_retire.py
+
       - name: Silent undo check
         if: ${{ github.event_name == 'pull_request' }}
         env:
@@ -558,7 +572,8 @@ jobs:
   checks-merge-install:
     runs-on: ubuntu-latest
     needs: scope
-    # Cap 60 min, the provisional cap of a new job (decision ci-job-caps). Projected about 17 min, unmeasured.
+    # Cap 60 min, the provisional cap of a new job (decision ci-job-caps): slowest 20.6 min is 34% of it (range
+    # 14.8-20.6, median 19.0, n 30 green runs, same window as `checks`).
     timeout-minutes: 60 # provisional
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
@@ -599,6 +614,10 @@ jobs:
       - name: Lane lint fixture suite
         if: ${{ needs.scope.outputs.code == 'true' }}
         run: python3 merge/test_lane_lint.py
+
+      - name: Idle-lanes reader fixture suite
+        if: ${{ needs.scope.outputs.code == 'true' }}
+        run: python3 merge/test_idle_lanes.py
 
       - name: install_from_main suite
         if: ${{ needs.scope.outputs.code == 'true' }}
@@ -685,6 +704,12 @@ jobs:
         run: |
           python3 --version && git --version
           NODE_PATH="$PWD/.github/shoot/node_modules" node --test skills/waiting-page/tests/page.test.mjs skills/waiting-page/tests/test_check_designs.mjs
+
+      - name: roadmap page suite
+        if: ${{ needs.scope.outputs.shoot == 'true' || github.event_name != 'pull_request' }}
+        shell: bash
+        run: |
+          NODE_PATH="$PWD/.github/shoot/node_modules" node --test skills/roadmap/tests/page.test.mjs
 
   # Windows PowerShell 5.1 is the only shell where Set-Content -Encoding UTF8 writes a BOM.
   # On pwsh 7 the pointer test cannot go red on that defect, so it also runs here.
@@ -783,11 +808,10 @@ jobs:
   checks-macos:
     runs-on: macos-latest
     needs: scope
-    # Cap 55 min, a stopgap under the owner's 2026-11-01 18:44 CST ruling in decision ci-job-caps (the 80% target was
-    # already met): slowest 37.1 min is 67% of it (range 25.6-37.1, median 31.1, n 15 green runs of 20,
-    # 2026-11-01 23:17 to 2026-11-02 08:33 UTC). Those figures are from before the split into checks-macos and
-    # checks-macos-b: about 1180 s fewer, a projection from run 41730427997 and unmeasured. The pull request figure is
-    # unmeasured too: the moved steps carry the same `if:` on a push and a pull request, so no push/PR gap is assumed.
+    # Cap 55 min, a stopgap under the owner's 2026-11-01 18:44 CST ruling in decision ci-job-caps: slowest 30.5 min
+    # is 55% of it (range 14.3-30.5, median 19.4, n 30 green runs, same window as `checks`), after the split into
+    # checks-macos and checks-macos-b. A push runs the janitor sweep mutation test and a pull request does not:
+    # push median 20.5 min, pull request median 18.7 (n 13 each).
     timeout-minutes: 55
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
@@ -802,8 +826,8 @@ jobs:
         with:
           python-version: "3.11"
 
-      # Own cap, kept from the whole suite (slowest 16.62 min before the split). Each shard runs about half of the cases:
-      # its time is unmeasured. hooks/test_guard.py holds the shard switch.
+      # Own cap, kept from the whole suite (slowest 16.62 min before the split). Shard 1 measured slowest 13.23 min,
+      # median 9.33 (n 31 green steps, same window as `checks`). hooks/test_guard.py holds the shard switch.
       - name: Guard fixture suite (shard 1 of 2)
         if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() && needs.scope.outputs.code == 'true' }}
         timeout-minutes: 22
@@ -882,6 +906,10 @@ jobs:
         if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
         run: python3 hooks/test_refusal_note_agent.py
 
+      - name: Refusal note route row suite
+        if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
+        run: python3 hooks/test_refusal_note_route.py
+
       - name: Call judge fixture suite
         if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
         run: python3 hooks/test_call_judge.py
@@ -934,6 +962,14 @@ jobs:
         if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
         run: python3 lint/test_report_guard_route.py
 
+      - name: Stop-hook route row falsifier suite
+        if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
+        run: python3 lint/test_report_guard_falsifier.py
+
+      - name: Stop-hook hand-off cite suite
+        if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
+        run: python3 lint/test_report_guard_handoff.py
+
       - name: Stop-hook landing fixture suite
         if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
         run: python3 lint/test_report_guard_landing.py
@@ -975,14 +1011,15 @@ jobs:
         run: bash .github/scripts/mod-tests.sh
 
   # The second half of checks-macos, split off for wall time: that job took 40.6 min in run 41730427997. The guard suite runs
-  # in 2 shards, one per job, and the slow CI steps are shared out so each job takes about 20 min. Same scope flag, same `if:`
+  # in 2 shards, one per job, and the slow CI steps are shared out between the jobs. Same scope flag, same `if:`
   # on every CI step as checks-macos. Both jobs start on every pull request (`needs: scope` only); the scope flag gates
-  # their steps, not the jobs. Cost: a pull request with no macOS-scoped change, such as a docs-only one, now starts a
-  # second, idle macOS runner that it did not start before.
+  # their steps, not the jobs. Cost: a pull request with no macOS-scoped change, such as a docs-only one, starts a
+  # second, idle macOS runner that it did not start before. That cost is unmeasured: the window below had no such run.
   checks-macos-b:
     runs-on: macos-latest
     needs: scope
-    # Cap 60 min, the provisional cap of a new job (decision ci-job-caps). Projected about 20 min, unmeasured.
+    # Cap 60 min, the provisional cap of a new job (decision ci-job-caps): slowest 21.5 min is 36% of it (range
+    # 14.1-21.5, median 18.3, n 29 green runs, same window as `checks`).
     timeout-minutes: 60 # provisional
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
@@ -996,8 +1033,8 @@ jobs:
         with:
           python-version: "3.11"
 
-      # Own cap, kept from the whole suite (slowest 16.62 min before the split). Each shard runs about half of the cases:
-      # its time is unmeasured. hooks/test_guard.py holds the shard switch.
+      # Own cap, kept from the whole suite (slowest 16.62 min before the split). Shard 2 measured slowest 11.20 min,
+      # median 9.10 (n 31 green steps, same window as `checks`). hooks/test_guard.py holds the shard switch.
       - name: Guard fixture suite (shard 2 of 2)
         if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() && needs.scope.outputs.code == 'true' }}
         timeout-minutes: 22
@@ -1490,6 +1527,10 @@ jobs:
         if: ${{ (needs.scope.outputs.checks_windows_rest == 'true' || github.event_name != 'pull_request') && !cancelled() }}
         run: python hooks/test_refusal_note_agent.py
 
+      - name: Refusal note route row suite
+        if: ${{ (needs.scope.outputs.checks_windows_rest == 'true' || github.event_name != 'pull_request') && !cancelled() }}
+        run: python hooks/test_refusal_note_route.py
+
       - name: Call judge fixture suite
         if: ${{ (needs.scope.outputs.checks_windows_rest == 'true' || github.event_name != 'pull_request') && !cancelled() }}
         run: python hooks/test_call_judge.py
@@ -1557,6 +1598,14 @@ jobs:
       - name: Stop-hook question route suite
         if: ${{ (needs.scope.outputs.checks_windows_rest == 'true' || github.event_name != 'pull_request') && !cancelled() }}
         run: python lint/test_report_guard_route.py
+
+      - name: Stop-hook route row falsifier suite
+        if: ${{ (needs.scope.outputs.checks_windows_rest == 'true' || github.event_name != 'pull_request') && !cancelled() }}
+        run: python lint/test_report_guard_falsifier.py
+
+      - name: Stop-hook hand-off cite suite
+        if: ${{ (needs.scope.outputs.checks_windows_rest == 'true' || github.event_name != 'pull_request') && !cancelled() }}
+        run: python lint/test_report_guard_handoff.py
 
       - name: Stop-hook landing fixture suite
         if: ${{ (needs.scope.outputs.checks_windows_rest == 'true' || github.event_name != 'pull_request') && !cancelled() }}
