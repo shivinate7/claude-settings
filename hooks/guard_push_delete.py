@@ -655,18 +655,27 @@ def parent_delete_hit(segments, number: int, cwd: str):
 # other checkout's install. The rule reads the filesystem: a real folder, or none, is judged as it
 # always was. A bare `rm node_modules` removes only the link, so it stays allowed.
 # ponytail: `-w` and `--workspace` are not read; the install is judged against the working folder
-# alone, and `install-test` and its aliases are not listed.
-NPM_ALIASES = {
-    "ci": "ci", "clean-install": "ci", "install-clean": "ci", "ic": "ci", "cit": "ci",
-    "install": "install", "i": "install", "in": "install", "ins": "install", "isntall": "install",
-    "add": "install", "uninstall": "uninstall", "remove": "uninstall", "rm": "uninstall",
-    "r": "uninstall", "un": "uninstall", "update": "update", "up": "update", "upgrade": "update",
+# alone.
+# THE READ-ONLY LIST: every npm subcommand and alias that never rewrites node_modules, by the npm 10.9.9
+# list in lib/utils/cmd-list.js. A subcommand off this list is refused in a linked folder, so a new npm
+# command, a typo and an abbreviation fail closed. The list is a curated copy because the guard cannot
+# read npm's own at hook time.
+NPM_READ_ONLY = {
+    "access", "adduser", "add-user", "login", "logout", "audit", "bugs", "issues", "cache",
+    "completion", "config", "c", "get", "set", "deprecate", "diff", "dist-tag", "dist-tags", "docs",
+    "home", "doctor", "exec", "x", "explain", "why", "find-dupes", "fund", "help", "hlep",
+    "help-search", "hook", "ll", "la", "ls", "list", "org", "ogr", "outdated", "owner", "author",
+    "pack", "ping", "pkg", "prefix", "profile", "publish", "query", "repo", "root", "run-script",
+    "run", "rum", "urn", "sbom", "search", "s", "se", "find", "star", "stars", "unstar", "start",
+    "stop", "restart", "test", "t", "tst", "team", "token", "unpublish", "version", "verison", "view",
+    "v", "info", "show", "whoami",
 }
 # Global options that take the next word as their value, so that word is not the subcommand.
 NPM_VALUE_FLAGS = {
     "--loglevel", "--prefix", "--cache", "--registry", "--userconfig", "--globalconfig",
     "--workspace", "-w", "--tag", "--otp", "--scope", "--before", "--omit", "--include",
-    "--install-strategy", "--logs-dir",
+    "--install-strategy", "--logs-dir", "-C", "-L", "--location", "-c", "--call", "-m", "--message",
+    "--reg",
 }
 # Options after which the command changes nothing in the working folder's install.
 NPM_NO_CHANGE = {"-g", "--global", "--location=global", "--help", "-h", "--dry-run"}
@@ -741,11 +750,14 @@ def linked_nm_hit(segment: str, where: str) -> str:
             elif words[at].startswith("-"):
                 at += 1
             else:
-                subcommand = NPM_ALIASES.get(words[at].lower(), "")
+                word = words[at].lower()
+                # `audit` rewrites the install when `fix` follows it, after any flag.
+                if word not in NPM_READ_ONLY or (word == "audit" and "fix" in words[at + 1:]):
+                    subcommand = word
                 break
         if subcommand and not NPM_NO_CHANGE.intersection(words) and is_link(
                 os.path.join(npm_prefix(where), "node_modules")):
-            return "npm " + subcommand + " in a folder whose node_modules is a link"
+            return "an npm command that may change the install, in a folder whose node_modules is a link"
         return ""
 
     return _command_hit(segment, DELETE_WORDS, delete) or _command_hit(segment, ("npm", "npm.cmd"), install)
