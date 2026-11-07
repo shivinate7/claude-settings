@@ -1,0 +1,11 @@
+{
+  "title": "The time-stamp check also covers page item and roadmap step writes",
+  "phase": "now",
+  "status": "doing",
+  "order": 0.17,
+  "owner": "coordinator",
+  "why": "Triage 6 stamped page item 364 at 14:16 CST while the clock read 14:14 CST. #1447 checks send_message bodies only.",
+  "note": "Stacked on #1447.",
+  "lane": "message-time-matches-clock",
+  "updatedAt": "2026-11-07T14:15:00-06:00"
+}
