@@ -1,0 +1,11 @@
+{
+  "title": "A read-only role cannot create a session",
+  "phase": "now",
+  "status": "doing",
+  "order": 268.9,
+  "owner": "coordinator",
+  "lane": "session_013NEJL43eqNrRX5XxYjJonT",
+  "why": "An Explore agent in lane replay-profile-parts made a stray session through create_session (coordinator, 17:31 CST Nov 7).",
+  "note": "Overlaps step reviewer-no-session-tools, which denies the session tools to agent roles, Explore included; one home. Done check: a red test where a read-only role's create_session is refused, while the main session's create_session still passes.",
+  "updatedAt": "2026-11-07T17:31:00-06:00"
+}
