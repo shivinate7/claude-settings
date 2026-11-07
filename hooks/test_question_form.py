@@ -1467,9 +1467,6 @@ def case_press_link_links_not_a_list_on_an_option():
              entry_of(page_item(options=press)), ("press-link", "no link to the page"))
 
 
-WHY_REASON = TASK_WHY.split(": ", 1)[1]  # the text after the Why yours label
-
-
 def case_task_str_replace_removes_only_the_label():
     """A str_replace that removes only the Why yours label leaves a line with no label. It is refused as task-names-check."""
     page("a str_replace that removes only the Why yours label is refused as task-names-check", "str_replace",
@@ -1477,11 +1474,12 @@ def case_task_str_replace_removes_only_the_label():
          ("task-names-check", None))
 
 
-def case_task_str_replace_removes_only_the_reason():
-    """A str_replace that removes only the text after the Why yours label leaves the label with no reason. It is refused."""
-    page("a str_replace that removes only the text after Why yours is refused as task-names-check", "str_replace",
-         {"collection": "items", "doc_id": DOC, "field": "context", "old_str": WHY_REASON, "new_str": ""},
-         ("task-names-check", None))
+def case_str_replace_blank_prose_line_passes():
+    """A str_replace that blanks one plain prose line of a decision's context passes. The guard cannot read the stored
+    item, so a blank replacement that removes no Why yours line is no task-names-check fault."""
+    page("a str_replace that blanks one plain prose line in a decision's context passes", "str_replace",
+         {"collection": "items", "doc_id": DOC, "field": "context",
+          "old_str": "The lane merge-role-allow would do it.", "new_str": ""}, None)
 
 
 def case_task_str_replace_rewords_the_reason():
@@ -1504,8 +1502,8 @@ def test_task_str_replace_removing_only_the_label_is_refused():
     _judged(case_task_str_replace_removes_only_the_label)
 
 
-def test_task_str_replace_removing_only_the_reason_is_refused():
-    _judged(case_task_str_replace_removes_only_the_reason)
+def test_str_replace_blank_prose_line_in_a_decision_passes():
+    _judged(case_str_replace_blank_prose_line_passes)
 
 
 def test_task_str_replace_rewording_the_reason_passes():
@@ -1532,7 +1530,7 @@ def main():
                  case_past_rulings_skips_the_debt_notes_file,
                  case_roadmap_broken_pipe_not_a_repo_is_absent, case_roadmap_broken_pipe_other_stderr_stays_unreadable,
                  case_press_link_links_not_a_list_on_a_step, case_press_link_links_not_a_list_on_an_option,
-                 case_task_str_replace_removes_only_the_label, case_task_str_replace_removes_only_the_reason,
+                 case_task_str_replace_removes_only_the_label, case_str_replace_blank_prose_line_passes,
                  case_task_str_replace_rewords_the_reason):
         try:
             case()
