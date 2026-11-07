@@ -13213,6 +13213,21 @@ add("builder-test: a multi-line run under xvfb-run with a quoted -s value, delet
 add("builder-test: a multi-line bare test run, no wrapper, deleted from checks.yml is refused",
     "deny", rule=BT, tool="Edit", file_path=WF, old_string=LINT + BARE_BLOCK, new_string=LINT,
     carries=("test-author", "Report"), **B)
+# A backslash in a test path is a separator on Windows, and is_test_rel reads it as `/`. The run line must keep it:
+# shlex in POSIX mode reads an unquoted backslash as an escape, so `tests\test_a.py` loses its separator and reads as
+# no test. Each deletion below is refused on main, so a parse that drops the backslash is a regression.
+BACKSLASH_INLINE = "      - name: Win unit\n        run: python tests\\test_a.py\n"
+BACKSLASH_BLOCK = "      - name: Win unit\n        run: |\n          python tests\\test_a.py\n"
+BACKSLASH_NODE = "      - name: Win node\n        run: node tests\\run.js\n"
+add("builder-test: a bare python run with a backslash test path, deleted from checks.yml is refused",
+    "deny", rule=BT, tool="Edit", file_path=WF, old_string=LINT + BACKSLASH_INLINE, new_string=LINT,
+    carries=("test-author", "Report"), **B)
+add("builder-test: a multi-line python run with a backslash test path, deleted from checks.yml is refused",
+    "deny", rule=BT, tool="Edit", file_path=WF, old_string=LINT + BACKSLASH_BLOCK, new_string=LINT,
+    carries=("test-author", "Report"), **B)
+add("builder-test: a node run with a backslash test path, deleted from checks.yml is refused",
+    "deny", rule=BT, tool="Edit", file_path=WF, old_string=LINT + BACKSLASH_NODE, new_string=LINT,
+    carries=("test-author", "Report"), **B)
 
 # ---- test-path shapes: one table on the builder's early warning. Each row is one path, judged by
 # a Write, for one role (the builder). A test shape is refused, a near miss is allowed. Shapes, with
