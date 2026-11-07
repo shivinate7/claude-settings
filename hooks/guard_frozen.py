@@ -8,10 +8,11 @@ import re
 
 import guard_core
 from guard_core import (
-    HEREDOC_HEADER, PS_DOUBLE_QUOTES, PS_SINGLE_QUOTES, PS_STRAIGHT_QUOTES, REDIRECT, SCRIPT_HEADERS,
-    PowerShellScript, _expanded, _resolved, _split_heredocs, _strip_heredoc_bodies_unconditionally, basename,
-    dir_before_segment, heredoc_delimiter, interpreter_bodies, is_powershell, nested_script, norm, resolve_command,
-    segment_tokens, split_segments, strip_heredoc_bodies,
+    HEREDOC_HEADER, LOOP_KEYWORDS, PS_DOUBLE_QUOTES, PS_SINGLE_QUOTES, PS_STRAIGHT_QUOTES, REDIRECT,
+    SCRIPT_HEADERS, PowerShellScript, _expanded, _resolved, _split_heredocs,
+    _strip_heredoc_bodies_unconditionally, _walk_wrappers, basename, dir_before_segment, heredoc_delimiter,
+    interpreter_bodies, is_powershell, nested_script, norm, resolve_command, segment_tokens, split_segments,
+    strip_heredoc_bodies,
 )
 from guard_env import _quoted_words, _substitutions, script_spots
 
@@ -323,7 +324,9 @@ def writes_to(path: str, cmd: str, command=None, words=()) -> bool:
 # assignment in a pipeline stage or a background job (`D=x | cat`, `D=x &`) is kept here, though the
 # shell runs it in a subshell and keeps nothing, so a later `$D` can read a value the shell does not.
 # An escaped `\$D` in an unquoted heredoc body reads the parent's value, not the child's.
-# Fixing these needs a shell parser, not this one pass.
+# Fixing these needs a shell parser, not this one pass. The frozen, project-config and settings checks
+# leave a value from `$(...)`, backticks and a loop variable unresolved. The builder test check reads
+# those (`read_fed`, `_fed_command`).
 _WORD_STOP = frozenset(" \t\r\n;&|()`")
 _ASSIGN_WORD = re.compile(r"([A-Za-z_]\w*)(\+?)=")
 _VAR_USE = re.compile(r"\$(?:([A-Za-z_]\w*)|\{([A-Za-z_]\w*)\})")
@@ -1054,18 +1057,237 @@ def _holds_frozen(path: str, cwd: str) -> bool:
                for target, root in readings)
 
 
+# FED PATHS. A writer can take its paths from another command: `find tests | xargs sed -i ...`,
+# `find tests -exec sed -i ... {} +`, `for f in tests/*.py; do sed -i ... $f; done`, and
+# `sed -i ... $(grep -rl a tests)`. The word the writer shows is `{}`, `$f`, nothing, or a word with a
+# paren glued on, so no path in it can be judged. `_fed_command` rewrites each of those forms into the
+# plain command the shell would run, with the fed roots put in place, and `_shell_write_hit` judges
+# that with the same loop and predicate (`read_fed`). A root is a word that names where a command
+# reads, never a word that selects: a `-name` or `-path` value, a grep pattern. Roots are never
+# listed from disk (`_holds` does that), so a path that is not there yet is still a root.
+# ponytail: a `while read` loop, `find -delete`, a `$(...)` whose body holds a quoted paren, and a
+# root fed through a variable that a loop or an xargs itself assigns are not read.
+_MARK = "\0"
+_MARK_AT = re.compile("`\0`|\0")
+_FIND_EXEC = ("-exec", "-execdir", "-ok", "-okdir")
+_FIND_END = (";", "\\;", "+")
+_FIND_TEST_STARTS = ("(", "\\(", "!", "\\!")
+_GREP_COMMANDS = frozenset(("grep", "egrep", "fgrep", "rg", "ag", "ack"))
+_GREP_PATTERN_LETTERS = "ef"
+_GREP_VALUE_LETTERS = "efmABCdDgtTj"
+_GREP_PATTERN_FLAGS = frozenset(("--regexp", "--file"))
+_GREP_VALUE_FLAGS = _GREP_PATTERN_FLAGS | frozenset((
+    "--include", "--exclude", "--exclude-dir", "--include-dir", "--max-count", "--glob", "--iglob",
+    "--type", "--type-not", "--context", "--after-context", "--before-context", "--label",
+    "--max-depth", "--threads", "--replace", "--devices", "--directories", "--binary-files"))
+
+
+def _roots(words) -> list:
+    """The words of a segment that name where its command reads: for `find`, the words before the
+    first `-`, `(` or `!` (`.` when there are none); for grep and rg, the words after the pattern;
+    for any other command, its words that are not a flag, a redirect or a redirect's target."""
+    index = resolve_command(tuple(words))
+    if index is None:
+        return []
+    name, args = _name(words[index]), list(words[index + 1:])
+    if name == "find":
+        while args and (args[0] in ("-H", "-L", "-P") or re.fullmatch(r"-O\d", args[0])):
+            args.pop(0)
+        roots = []
+        for word in args:
+            if word.startswith("-") or word in _FIND_TEST_STARTS:
+                break
+            roots.append(word)
+        return roots or ["."]
+    grep = name in _GREP_COMMANDS
+    roots, skip, flags_over, has_pattern = [], False, False, False
+    for word in args:
+        if skip:
+            skip = False
+        elif (">" in word or "<" in word) and _is_redirect(word):
+            skip = True
+        elif not flags_over and word == "--":
+            flags_over = True
+        elif not flags_over and word.startswith("-") and len(word) > 1:
+            if grep and word.startswith("--"):
+                flag, glued, _value = word.partition("=")
+                has_pattern = has_pattern or flag in _GREP_PATTERN_FLAGS
+                skip = flag in _GREP_VALUE_FLAGS and not glued
+            elif grep:
+                for at, letter in enumerate(word[1:], 1):
+                    if letter in _GREP_VALUE_LETTERS:
+                        has_pattern = has_pattern or letter in _GREP_PATTERN_LETTERS
+                        skip = at == len(word) - 1
+                        break
+        else:
+            roots.append(word)
+    return roots[1:] if grep and not has_pattern else roots
+
+
+def _text_roots(text: str) -> list:
+    """The roots of every segment of a command text, in order, each once."""
+    ends = []
+    segments = split_segments(text, ends)
+    segments, _ends, _changed = _fed_segments(segments, ends)
+    roots = []
+    for segment in segments:
+        roots.extend(word for word in _roots(_quoted_words(segment)) if word not in roots)
+    return roots
+
+
+def _fed_substitutions(cmd: str) -> str:
+    """`cmd` with each `$(...)`, backtick pair and process substitution read as the roots of its inner
+    command. `_substitutions` lists the texts children first, siblings left to right, each parent
+    holding one mark per child, so a stack gives each mark its child."""
+    texts, too_deep = _substitutions(cmd, mark=_MARK)
+    if too_deep or len(texts) < 2:
+        return cmd
+    stack = []
+    for number, (text, _in_message) in enumerate(texts):
+        marks = len(_MARK_AT.findall(text))
+        if marks > len(stack):
+            return cmd
+        children = iter(stack[len(stack) - marks:])
+        del stack[len(stack) - marks:]
+        text = _MARK_AT.sub(lambda _mark: " ".join(next(children)), text)
+        if number == len(texts) - 1:
+            return text
+        stack.append(_text_roots(text))
+    return cmd
+
+
+def _fill_loop_variables(words, loops):
+    """`words` with each `$v` and `${v}` of an open `for v in LIST` loop put as one copy of the word
+    per list word. A single-quoted word is text."""
+    for name, items in loops:
+        if not name or not items:
+            continue
+        variable = re.compile(r"\$\{%s\}|\$%s(?!\w)" % (re.escape(name), re.escape(name)))
+        filled = []
+        for word in words:
+            if word.startswith("'") or not variable.search(word):
+                filled.append(word)
+            else:
+                filled.extend(variable.sub(lambda _m, item=item: item, word) for item in items)
+        words = filled
+    return words
+
+
+def _put_roots(words, mark, roots):
+    """`words` with `mark` in a word put as one copy of the word per root."""
+    return [part for word in words
+            for part in ([word.replace(mark, root) for root in roots] if mark in word else [word])]
+
+
+def _fed_segments(segments, ends):
+    """(segments, ends, changed): the segments with each `for` variable, xargs and `find -exec` put as
+    the plain command the shell runs. An xargs command takes the roots of the segments piped into it,
+    in the `-I` string's place, else as last words. A `find -exec` segment becomes its commands, with
+    `{}` put as the find roots. `_walk_wrappers` already reads the xargs flags."""
+    out, out_ends, out_words, loops, changed = [], [], [], [], False
+    for number, segment in enumerate(segments):
+        words = original = _quoted_words(segment)
+        lead = 0
+        while lead < len(words) and words[lead] in LOOP_KEYWORDS:
+            lead += 1
+        head = words[lead] if lead < len(words) else ""
+        if head == "for" and words[lead + 2:lead + 3] == ["in"]:
+            loops.append((words[lead + 1], words[lead + 3:]))
+        elif head in ("while", "until", "select"):
+            loops.append(("", []))
+        elif head == "done" and loops:
+            loops.pop()
+        words = _fill_loop_variables(words, loops)
+        rewritten = [words]
+        index, chain = _walk_wrappers(tuple(words))
+        xargs = next((flags for word, flags in chain if word == "xargs"), None)
+        if index is not None and xargs is not None:
+            roots, back = [], number - 1
+            while back >= 0 and out_ends[back] == "|":
+                roots = _roots(out_words[back]) + roots
+                back -= 1
+            replace = None
+            for flag, value in xargs:
+                if flag == "-I":
+                    replace = value
+                elif flag in ("-i", "--replace"):
+                    replace = value or "{}"
+            if roots:
+                command = words[index:]
+                rewritten = [command + roots if not replace else _put_roots(command, replace, roots)]
+        elif index is not None and _name(words[index]) == "find":
+            roots, commands, at = _roots(words), [], index + 1
+            while at < len(words):
+                if words[at] in _FIND_EXEC:
+                    stop = at + 1
+                    while stop < len(words) and words[stop] not in _FIND_END:
+                        stop += 1
+                    commands.append(_put_roots(words[at + 1:stop], "{}", roots))
+                    at = stop
+                at += 1
+            rewritten = commands or rewritten
+        for part, part_words in enumerate(rewritten):
+            made = part_words != original or len(rewritten) > 1
+            changed = changed or made
+            out.append(type(segment)(" ".join(part_words)) if made else segment)
+            out_ends.append(ends[number] if part == len(rewritten) - 1 else ";")
+            out_words.append(part_words)
+    return out, out_ends, changed
+
+
+def _fed_command(cmd: str):
+    """(text, segments, ends) of `cmd` as the shell runs it with the fed roots put in place, else
+    None when it holds no fed form or reads as PowerShell."""
+    if is_powershell(cmd):
+        return None
+    text = _fed_substitutions(cmd)
+    plain = _resolve_vars(text)
+    ends = []
+    segments = split_segments(plain, ends)
+    segments, ends, changed = _fed_segments(segments, ends)
+    return (plain, segments, ends) if changed or text != cmd else None
+
+
 def _shell_write_hit(cmd: str, cwd: str, predicate, holds=None, follow_cd=False,
-                     command_position=False, predicate_command=False, script_data=False) -> str:
+                     command_position=False, predicate_command=False, script_data=False,
+                     read_fed=False) -> str:
     """Return the path a shell command writes to that `predicate(path, cwd)` accepts, else ''.
     `holds(path, cwd)` tells a folder that holds such a path, for a linking `cp` (`_cp_link_source`).
     `follow_cd` hands `predicate` the folder a leading `cd` moved to (`dir_before_segment`), or `cwd`
     when that folder cannot be told. `predicate_command` also hands `predicate` the segment's command
     name as a third argument (`''` when none). `script_data` reads the script of a `python -c` or a
-    `node -e` as data, for a caller that reads its shell spots on its own (`shell_write_hit`)."""
+    `node -e` as data, for a caller that reads its shell spots on its own (`shell_write_hit`).
+    `read_fed` also reads a path that `find`, `xargs`, a `for` list or a substitution feeds to a
+    writer. Each substitution is then judged as a command of its own, with a mark in its place in
+    the text around it, so `cp $(find tests -name x) /tmp/` is a copy out of `tests`, not a flag
+    soup. The command is then judged once more as `_fed_command` rewrites it. Only the builder test
+    check asks for it, so no other caller's verdict moves."""
+    def scan(text, fed=None):
+        return _shell_write_scan(text, cwd, predicate, holds, follow_cd, command_position,
+                                 predicate_command, script_data, fed)
+
+    if not read_fed:
+        return scan(cmd)
+    texts, too_deep = _substitutions(cmd, powershell=is_powershell(cmd))
+    hit = ""
+    for text in ([cmd] if too_deep or len(texts) < 2 else [text for text, _in_message in texts]):
+        hit = hit or scan(text)
+    if hit:
+        return hit
+    fed = _fed_command(cmd)
+    return scan(fed[0], fed[1:]) if fed else ""
+
+
+def _shell_write_scan(cmd, cwd, predicate, holds, follow_cd, command_position, predicate_command,
+                      script_data=False, fed=None):
+    """`_shell_write_hit` for one text. `fed` is the (segments, ends) that `_fed_command` made of it."""
     holds = holds or (lambda path, where: _holds(path, where, predicate))
-    cmd = _resolve_vars(cmd)
-    ends = []
-    segments = split_segments(cmd, ends)
+    if fed:
+        segments, ends = fed
+    else:
+        cmd = _resolve_vars(cmd)
+        ends = []
+        segments = split_segments(cmd, ends)
     scans = [_scan(segment) for segment in segments]
     parsed = [[_typed(word, segment) for word in _quoted_words(segment)] for segment in segments]
     # The same words with a quoted newline kept, for a `sh -c` script read at its command positions only:
