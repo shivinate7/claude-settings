@@ -844,15 +844,98 @@ class DoneFormatAndCiteTests(unittest.TestCase):
         self.assertEqual(run_guard(REPORT_GUARD, hook).stdout.strip(), "")
 
 
+# The model-name cases use two reviewers. REVIEWER_PINNED has no model field, so it runs its
+# agents/reviewer.md pin (haiku). REVIEWER_SONNET is on sonnet. NAMED_REPORT's Done names roles by model.
+REVIEWER_PINNED = {"subagent_type": "reviewer", "prompt": "Round 1 of 3"}
+REVIEWER_SONNET = {"subagent_type": "reviewer", "model": "sonnet", "prompt": "Round 2 of 3"}
+NAMED_REPORT = "> **Done** BUILT the guard, PR #5 (%s)\n> **Next** Unstarted: none"
+# A builder with no model field and no pin runs on CLAUDE_CODE_SUBAGENT_MODEL. When that is unset,
+# its model is unknown (''). BUILDER_SONNET names its model.
+BUILDER_UNKNOWN = {"subagent_type": "builder", "prompt": "Round 1 of 3"}
+BUILDER_SONNET = {"subagent_type": "builder", "model": "sonnet", "prompt": "Round 2 of 3"}
+REVIEWER_HAIKU = {"subagent_type": "reviewer", "model": "haiku", "prompt": "Round 1 of 3"}
+# Reports for the Next waiver: Done is the test-author's OTHER line, and Next names the role still running.
+TEST_AUTHOR_DONE = "OTHER: the test-author wrote 31 cases, red on main, at b5c911b10 (test-author haiku)"
+TEST_AUTHOR_AND_BUILDER_DONE = (
+    "OTHER: the test-author wrote 31 cases, red on main, at b5c911b10 (test-author haiku, builder sonnet)")
+
+
+def waiver_report(next_line, done=TEST_AUTHOR_DONE):
+    return "> **Done**\n> - %s\n>\n> **Next**\n> - %s" % (done, next_line)
+
+
+def prior_records(earlier=()):
+    """The records before the window the model-name check reads. With `earlier` spawns, they come
+    first, then a report, then the Stop hook's feedback record. That record is a plain user text
+    record, so is_last_human reads it as a human message and the window starts after it."""
+    records = [human("do the task")]
+    if not earlier:
+        return records
+    for spawn in earlier:
+        records += [tool_use_msg("Agent", spawn), tool_result_msg()]
+    return records + [assistant_text("Round 1 is in."), human("Stop hook feedback: send the report")]
+
+
+def assert_blocks(case, out, cause):
+    """The guard blocked, and its reason names `cause`."""
+    case.assertIsNotNone(out, "the guard passed, but it should block with: " + cause)
+    case.assertEqual(out.get("decision"), "block", out)
+    case.assertIn(cause, out.get("reason", ""), "the block reason lacks: " + cause)
+
+
+def assert_no_model_block(case, out):
+    """The model-name check passed. Other guards may still speak, so only the model reason is checked."""
+    reason = (out or {}).get("reason", "")
+    case.assertNotIn("Model-name guard", reason, "the model-name check blocked: " + reason)
+
+
+def subagent_env(model):
+    """This process's environment with CLAUDE_CODE_SUBAGENT_MODEL set to `model`, or unset for None."""
+    env = dict(os.environ)
+    if model is None:
+        env.pop("CLAUDE_CODE_SUBAGENT_MODEL", None)
+    else:
+        env["CLAUDE_CODE_SUBAGENT_MODEL"] = model
+    return env
+
+
+# The Stop hook in a fresh process, with its spawn_models logged: each call records the length of the
+# transcript it was given. The module loads from its own path, then main() runs on stdin.
+SPAWN_READS_CODE = (
+    "import importlib.util, json, sys\n"
+    "spec = importlib.util.spec_from_file_location('report_guard', sys.argv[1])\n"
+    "guard = importlib.util.module_from_spec(spec)\n"
+    "spec.loader.exec_module(guard)\n"
+    "reads = []\n"
+    "real_spawn_models = guard.spawn_models\n"
+    "def logged(records, *args, **kwargs):\n"
+    "    reads.append(len(records))\n"
+    "    return real_spawn_models(records, *args, **kwargs)\n"
+    "guard.spawn_models = logged\n"
+    "guard.main()\n"
+    "print('READS ' + json.dumps(reads))\n"
+)
+
+
+def run_spawn_reads(hook, env):
+    """Return (the hook's stdout, the length of each transcript its spawn_models calls were given)."""
+    run = subprocess.run([sys.executable, "-c", SPAWN_READS_CODE, REPORT_GUARD], input=json.dumps(hook),
+                         capture_output=True, text=True, timeout=15, env=env)
+    out, mark, tail = run.stdout.rpartition("READS ")
+    if not mark:
+        raise AssertionError("the probe did not finish: %s" % run.stderr[-300:])
+    return out, json.loads(tail)
+
+
 class DoneNamesModelsTests(unittest.TestCase):
     """reports-done-names-models, in report_guard.py's Stop hook."""
 
     def setUp(self):
-        self.tmp = tempfile.TemporaryDirectory()
+        self.tmp = tempfile.TemporaryDirectory(dir=RUN_FOLDER)
         self.addCleanup(self.tmp.cleanup)
 
-    def verdict(self, reply, spawns, denied=()):
-        records = [human("do the task")]
+    def verdict(self, reply, spawns, denied=(), earlier=(), env_model="sonnet"):
+        records = prior_records(earlier)
         for spawn in spawns:
             records += [tool_use_msg("Agent", spawn), tool_result_msg()]
         for spawn in denied:
@@ -865,7 +948,7 @@ class DoneNamesModelsTests(unittest.TestCase):
                     assistant_text(reply)]
         path = write_transcript(records, self.tmp.name)
         hook = {"hook_event_name": "Stop", "transcript_path": path, "stop_hook_active": False}
-        env = dict(os.environ, CLAUDE_CODE_SUBAGENT_MODEL="sonnet")
+        env = subagent_env(env_model)
         run = run_guard(REPORT_GUARD, hook, env=env)
         self.assertEqual(run.returncode, 0)
         return json.loads(run.stdout) if run.stdout.strip() else None
@@ -929,6 +1012,97 @@ class DoneNamesModelsTests(unittest.TestCase):
         self.assertIsNone(self.verdict(
             "> **Done** BUILT the guard, PR #5\n> **Next** Unstarted: none",
             [{"subagent_type": "Explore", "prompt": "find x"}, {"subagent_type": "Plan", "prompt": "plan"}]))
+
+    def test_dm_red_pair_named_across_windows_passes(self):
+        # Done names both roles. The pinned reviewer ran in the earlier window, the sonnet one in this window.
+        out = self.verdict(NAMED_REPORT % "reviewer haiku, reviewer sonnet", [REVIEWER_SONNET],
+                           earlier=[REVIEWER_PINNED])
+        self.assertIsNone(out, (out or {}).get("reason"))
+
+    def test_dm_red_haiku_named_across_windows_passes(self):
+        # Scope first: with no haiku reviewer spawn anywhere, a haiku name still blocks.
+        assert_blocks(self, self.verdict(NAMED_REPORT % "reviewer haiku", [REVIEWER_SONNET]),
+                      "'reviewer haiku' matches no reviewer spawn")
+        out = self.verdict(NAMED_REPORT % "reviewer haiku", [REVIEWER_SONNET], earlier=[REVIEWER_PINNED])
+        self.assertIsNone(out, (out or {}).get("reason"))
+
+    def test_dm_green_pair_matching_no_spawn_still_blocks(self):
+        out = self.verdict(NAMED_REPORT % "reviewer opus", [REVIEWER_SONNET], earlier=[REVIEWER_PINNED])
+        assert_blocks(self, out, "'reviewer opus' matches no reviewer spawn")
+
+    def test_dm_green_window_role_unnamed_still_blocks(self):
+        out = self.verdict("> **Done** BUILT the guard, PR #5\n> **Next** Unstarted: none",
+                           [REVIEWER_SONNET], earlier=[REVIEWER_PINNED])
+        assert_blocks(self, out, "no model named for reviewer")
+
+    def test_dm_green_earlier_role_not_required_in_window(self):
+        # Only the builder spawned in this window, so Done names no reviewer. The earlier reviewer
+        # does not make Done name one.
+        out = self.verdict(NAMED_REPORT % "builder sonnet", [self.BUILDER], earlier=[REVIEWER_PINNED])
+        self.assertIsNone(out, (out or {}).get("reason"))
+
+    def test_dm_red_unknown_earlier_spawn_does_not_exempt_pair(self):
+        # The earlier builder is unknown: no model field, no pin, and CLAUDE_CODE_SUBAGENT_MODEL unset.
+        # An unknown spawn must not exempt Done's opus from the window's sonnet builder.
+        out = self.verdict(NAMED_REPORT % "builder opus", [BUILDER_SONNET], earlier=[BUILDER_UNKNOWN],
+                           env_model=None)
+        assert_blocks(self, out, "'builder opus' matches no builder spawn")
+
+    def test_dm_red_window_with_no_spawn_reads_no_whole_transcript(self):
+        # The window holds no spawn, so the check has nothing to compare. The earlier spawns must not
+        # be read: a whole-transcript read on every Stop costs a pass over the whole transcript.
+        records = prior_records([REVIEWER_PINNED]) + [
+            tool_use_msg("Bash", {"command": "git commit -m x"}), tool_result_msg(),
+            assistant_text(NAMED_REPORT % "reviewer haiku")]
+        path = write_transcript(records, self.tmp.name)
+        hook = {"hook_event_name": "Stop", "transcript_path": path, "stop_hook_active": False}
+        _, reads = run_spawn_reads(hook, subagent_env("sonnet"))
+        self.assertTrue(reads, "the probe saw no spawn_models call")
+        self.assertNotIn(len(records), reads, "the guard read the whole transcript for spawn models")
+
+    def test_dm_red_design_reviewer_is_not_a_reviewer(self):
+        # "design reviewer" names the design-reviewer agent. The haiku reviewer of the earlier window
+        # must not make it a reviewer pair to check.
+        out = self.verdict(NAMED_REPORT % "builder sonnet, design reviewer opus", [BUILDER_SONNET],
+                           earlier=[REVIEWER_HAIKU])
+        self.assertIsNone(out, (out or {}).get("reason"))
+
+    def test_dm_red_design_reviewer_with_dash_is_not_a_reviewer(self):
+        for name in ("design-reviewer opus", "design-reviewer: opus"):
+            with self.subTest(name=name):
+                out = self.verdict(NAMED_REPORT % ("builder sonnet, " + name), [BUILDER_SONNET],
+                                   earlier=[REVIEWER_HAIKU])
+                self.assertIsNone(out, (out or {}).get("reason"))
+
+    def test_dm_red_unknown_earlier_builder_names_no_empty_model(self):
+        # The earlier builder is unknown, so it excuses nothing. The block lists the models that ran,
+        # and an unknown one must not show as an empty entry.
+        out = self.verdict(NAMED_REPORT % "builder opus", [BUILDER_SONNET], earlier=[BUILDER_UNKNOWN],
+                           env_model=None)
+        assert_blocks(self, out, "'builder opus' matches no builder spawn")
+        self.assertNotIn("ran , ", out["reason"], "the block lists an empty model: " + out["reason"])
+
+    def test_dm_red_next_waives_the_running_builder(self):
+        # The builder runs in the background, so Done has no builder line, and Next names it.
+        out = self.verdict(waiver_report("The builder is running (sonnet). It builds the tree check."),
+                           [BUILDER_SONNET])
+        assert_no_model_block(self, out)
+
+    def test_dm_red_next_waives_the_running_reviewer(self):
+        out = self.verdict(waiver_report("The reviewer (haiku) is reading the diff. It reports next."),
+                           [REVIEWER_HAIKU])
+        self.assertIsNone(out, (out or {}).get("reason"))
+
+    def test_dm_green_unnamed_running_builder_still_blocks(self):
+        # Next names no role, so the builder spawned in the window is unnamed and blocks.
+        out = self.verdict(waiver_report("The tree check is next."), [BUILDER_SONNET])
+        assert_blocks(self, out, "no model named for builder")
+
+    def test_dm_green_next_pair_is_not_judged(self):
+        # Next's "builder opus" is not judged. Done names the sonnet builder that ran.
+        out = self.verdict(waiver_report("The builder opus builds the tree check.",
+                                         done=TEST_AUTHOR_AND_BUILDER_DONE), [BUILDER_SONNET])
+        assert_no_model_block(self, out)
 
 
 class UnstartedItemsTests(unittest.TestCase):
@@ -1070,26 +1244,28 @@ class RewriteAfterMissingReportTests(unittest.TestCase):
     GOOD = "> **Done** BUILT the guard, PR #5 (builder sonnet)\n> **Next** Unstarted: none"
 
     def setUp(self):
-        self.tmp = tempfile.TemporaryDirectory()
+        self.tmp = tempfile.TemporaryDirectory(dir=RUN_FOLDER)
         self.addCleanup(self.tmp.cleanup)
         self.sid = "rw-%d" % id(self)
 
-    def run_hook(self, records, active):
+    def run_hook(self, records, active, env_model="sonnet"):
         path = write_transcript(records, self.tmp.name)
         hook = {"hook_event_name": "Stop", "transcript_path": path, "stop_hook_active": active,
                 "session_id": self.sid}
-        run = run_guard(REPORT_GUARD, hook, env=dict(os.environ, CLAUDE_CODE_SUBAGENT_MODEL="sonnet"))
+        run = run_guard(REPORT_GUARD, hook, env=subagent_env(env_model))
         self.assertEqual(run.returncode, 0)
         return json.loads(run.stdout) if run.stdout.strip() else None
 
-    def stop(self, reply, active):
-        records = [human("do the task"), tool_use_msg("Agent", self.BUILDER), tool_result_msg(),
-                   tool_use_msg("Bash", {"command": "git commit -m x"}), tool_result_msg(),
-                   assistant_text(reply)]
-        return self.run_hook(records, active)
+    def stop(self, reply, active, earlier=(), later=(BUILDER,), env_model="sonnet"):
+        records = prior_records(earlier)
+        for spawn in later:
+            records += [tool_use_msg("Agent", spawn), tool_result_msg()]
+        records += [tool_use_msg("Bash", {"command": "git commit -m x"}), tool_result_msg(),
+                    assistant_text(reply)]
+        return self.run_hook(records, active, env_model)
 
-    def missing_report_block(self):
-        out = self.stop("All done.", False)
+    def missing_report_block(self, earlier=(), later=(BUILDER,), env_model="sonnet"):
+        out = self.stop("All done.", False, earlier, later, env_model)
         self.assertIn("Send the report now", out["reason"])
 
     def test_rw_red_rewrite_without_unstarted_blocks(self):
@@ -1159,6 +1335,104 @@ class RewriteAfterMissingReportTests(unittest.TestCase):
                    assistant_text("> **Done** BUILT the guard, PR #5\n> **Next** merge")]
         out = self.run_hook(records, True)
         self.assertIn("Unstarted guard", out["reason"])
+
+    def test_rw_red_pair_named_across_windows_passes(self):
+        self.missing_report_block(earlier=[REVIEWER_PINNED], later=[REVIEWER_SONNET])
+        out = self.stop(NAMED_REPORT % "reviewer haiku, reviewer sonnet", True,
+                        earlier=[REVIEWER_PINNED], later=[REVIEWER_SONNET])
+        self.assertIsNone(out, (out or {}).get("reason"))
+
+    def test_rw_red_haiku_named_across_windows_passes(self):
+        # Scope first: with no haiku reviewer spawn anywhere, a haiku name still blocks.
+        self.missing_report_block(later=[REVIEWER_SONNET])
+        assert_blocks(self, self.stop(NAMED_REPORT % "reviewer haiku", True, later=[REVIEWER_SONNET]),
+                      "'reviewer haiku' matches no reviewer spawn")
+        self.missing_report_block(earlier=[REVIEWER_PINNED], later=[REVIEWER_SONNET])
+        out = self.stop(NAMED_REPORT % "reviewer haiku", True,
+                        earlier=[REVIEWER_PINNED], later=[REVIEWER_SONNET])
+        self.assertIsNone(out, (out or {}).get("reason"))
+
+    def test_rw_green_pair_matching_no_spawn_still_blocks(self):
+        self.missing_report_block(earlier=[REVIEWER_PINNED], later=[REVIEWER_SONNET])
+        out = self.stop(NAMED_REPORT % "reviewer opus", True,
+                        earlier=[REVIEWER_PINNED], later=[REVIEWER_SONNET])
+        assert_blocks(self, out, "'reviewer opus' matches no reviewer spawn")
+
+    def test_rw_green_window_role_unnamed_still_blocks(self):
+        self.missing_report_block(earlier=[REVIEWER_PINNED], later=[REVIEWER_SONNET])
+        out = self.stop("> **Done** BUILT the guard, PR #5\n> **Next** Unstarted: none", True,
+                        earlier=[REVIEWER_PINNED], later=[REVIEWER_SONNET])
+        assert_blocks(self, out, "no model named for reviewer")
+
+    def test_rw_green_earlier_role_not_required_in_window(self):
+        self.missing_report_block(earlier=[REVIEWER_PINNED], later=[self.BUILDER])
+        out = self.stop(NAMED_REPORT % "builder sonnet", True,
+                        earlier=[REVIEWER_PINNED], later=[self.BUILDER])
+        self.assertIsNone(out, (out or {}).get("reason"))
+
+    def test_rw_red_unknown_earlier_spawn_does_not_exempt_pair(self):
+        # The earlier builder is unknown, as in the Stop-path case. The rewrite must still block the opus name.
+        self.missing_report_block(earlier=[BUILDER_UNKNOWN], later=[BUILDER_SONNET], env_model=None)
+        out = self.stop(NAMED_REPORT % "builder opus", True, earlier=[BUILDER_UNKNOWN],
+                        later=[BUILDER_SONNET], env_model=None)
+        assert_blocks(self, out, "'builder opus' matches no builder spawn")
+
+    def test_rw_red_window_with_no_spawn_reads_no_whole_transcript(self):
+        # The rewrite's window holds no spawn, so it must not read the whole transcript for spawn models.
+        self.missing_report_block(earlier=[REVIEWER_PINNED], later=[])
+        records = prior_records([REVIEWER_PINNED]) + [
+            tool_use_msg("Bash", {"command": "git commit -m x"}), tool_result_msg(),
+            assistant_text(NAMED_REPORT % "reviewer haiku")]
+        path = write_transcript(records, self.tmp.name)
+        hook = {"hook_event_name": "Stop", "transcript_path": path, "stop_hook_active": True,
+                "session_id": self.sid}
+        _, reads = run_spawn_reads(hook, subagent_env("sonnet"))
+        self.assertTrue(reads, "the probe saw no spawn_models call")
+        self.assertNotIn(len(records), reads, "the rewrite read the whole transcript for spawn models")
+
+    def test_rw_red_design_reviewer_is_not_a_reviewer(self):
+        self.missing_report_block(earlier=[REVIEWER_HAIKU], later=[BUILDER_SONNET])
+        out = self.stop(NAMED_REPORT % "builder sonnet, design reviewer opus", True,
+                        earlier=[REVIEWER_HAIKU], later=[BUILDER_SONNET])
+        self.assertIsNone(out, (out or {}).get("reason"))
+
+    def test_rw_red_design_reviewer_with_dash_is_not_a_reviewer(self):
+        for name in ("design-reviewer opus", "design-reviewer: opus"):
+            with self.subTest(name=name):
+                self.missing_report_block(earlier=[REVIEWER_HAIKU], later=[BUILDER_SONNET])
+                out = self.stop(NAMED_REPORT % ("builder sonnet, " + name), True,
+                                earlier=[REVIEWER_HAIKU], later=[BUILDER_SONNET])
+                self.assertIsNone(out, (out or {}).get("reason"))
+
+    def test_rw_red_unknown_earlier_builder_names_no_empty_model(self):
+        self.missing_report_block(earlier=[BUILDER_UNKNOWN], later=[BUILDER_SONNET], env_model=None)
+        out = self.stop(NAMED_REPORT % "builder opus", True, earlier=[BUILDER_UNKNOWN],
+                        later=[BUILDER_SONNET], env_model=None)
+        assert_blocks(self, out, "'builder opus' matches no builder spawn")
+        self.assertNotIn("ran , ", out["reason"], "the block lists an empty model: " + out["reason"])
+
+    def test_rw_red_next_waives_the_running_builder(self):
+        self.missing_report_block(later=[BUILDER_SONNET])
+        out = self.stop(waiver_report("The builder is running (sonnet). It builds the tree check."), True,
+                        later=[BUILDER_SONNET])
+        assert_no_model_block(self, out)
+
+    def test_rw_red_next_waives_the_running_reviewer(self):
+        self.missing_report_block(later=[REVIEWER_HAIKU])
+        out = self.stop(waiver_report("The reviewer (haiku) is reading the diff. It reports next."), True,
+                        later=[REVIEWER_HAIKU])
+        self.assertIsNone(out, (out or {}).get("reason"))
+
+    def test_rw_green_unnamed_running_builder_still_blocks(self):
+        self.missing_report_block(later=[BUILDER_SONNET])
+        out = self.stop(waiver_report("The tree check is next."), True, later=[BUILDER_SONNET])
+        assert_blocks(self, out, "no model named for builder")
+
+    def test_rw_green_next_pair_is_not_judged(self):
+        self.missing_report_block(later=[BUILDER_SONNET])
+        out = self.stop(waiver_report("The builder opus builds the tree check.",
+                                      done=TEST_AUTHOR_AND_BUILDER_DONE), True, later=[BUILDER_SONNET])
+        assert_no_model_block(self, out)
 
 
 REPORT_NO_LINE = "> **Done** BUILT abc123\n> **Deviations** none\n> **Next** ship it"
