@@ -674,6 +674,8 @@ def _roots(words) -> list:
             skip = False
         elif (">" in word or "<" in word) and _is_redirect(word):
             skip = True
+        elif word == "&":
+            continue   # the `&` of `&>`: `_quoted_words` splits it from the `>` that skips the target
         elif not flags_over and word == "--":
             flags_over = True
         elif not flags_over and word.startswith("-") and len(word) > 1:
@@ -693,23 +695,46 @@ def _roots(words) -> list:
 
 
 _GLOB_MARK = "\x02"   # starts a glob pathspec root: MARK folder MARK glob
+_SEGMENT_GLOB = "\x03"   # first char of a glob that a shell expands: `*` stays inside one path segment
 _GIT_LIST_FLAGS = frozenset(("--files-with-matches", "--name-only", "--files-without-match"))
+_GIT_LIST_PATTERN_FLAGS = frozenset(("-x", "--exclude"))   # `git ls-files` flags whose next word is a pattern
 
 
-def _glob_root(folder: str, word: str) -> str:
+def _glob_root(folder: str, word: str, shell: bool = False) -> str:
     """A pathspec word as a root: the word, or, for a glob (`'*.py'`), a marked root that `_dot_roots`
     reads as the tests under `folder` that the glob matches. A glob pathspec names tracked paths at
-    any depth, so it cannot be judged as the one path its spelling shows."""
+    any depth, so it cannot be judged as the one path its spelling shows. A leading `./` is dropped.
+    Pathspec magic (`:(glob)`, `:!`, `:^`) and a backslash escape are not read: they give the whole
+    of `folder`, which refuses when it holds any test (conservative). `shell` reads a glob that the
+    shell expands, whose `*` does not cross a `/` (`sed -i ... hooks/*.py`), and has no magic."""
     text = _unquoted(word)
-    return _GLOB_MARK + folder + _GLOB_MARK + text if re.search(r"[*?\[]", text) else word
+    if not shell and (text.startswith(":") or "\\" in text):
+        return _GLOB_MARK + folder + _GLOB_MARK
+    while text.startswith("./"):
+        text = text[2:]
+    if not re.search(r"[*?\[]", text):
+        return word
+    return _GLOB_MARK + folder + _GLOB_MARK + (_SEGMENT_GLOB if shell else "") + text
+
+
+def _pathspec_roots(folder: str, word: str) -> list:
+    """The roots one pathspec word stands for. A glob or magic word is one marked root (`_glob_root`).
+    Any other relative word is itself and, as a folder, `<word>/*`: the tests under it, which
+    `_dot_roots` reads from disk. A word that is a file matches nothing under it."""
+    root = _glob_root(folder, word)
+    text = _unquoted(word)
+    if root != word or text in ("", ".", "./") or text.startswith(("/", "~", "$")):
+        return [root]
+    return [word, _glob_root(folder, text.rstrip("/") + "/*")]
 
 
 def _git_listing_roots(args):
     """The roots of a `git ls-files` or `git grep -l` segment, which print tracked paths: its pathspecs
     (for `grep`, the words after the pattern), else `.`, the whole checkout, read as a `.` root is
-    (`_dot_roots`). A redirect and its target are not pathspecs, as in `_roots`; a glob pathspec is a
-    marked root (`_glob_root`). A `-C DIR` before the command is its folder. None for any other `git`
-    command, and for a `git grep` that prints matching lines, not paths."""
+    (`_dot_roots`). A redirect and its target are not pathspecs, as in `_roots`, and nor is the value
+    of `-x` or `--exclude`; a glob pathspec is a marked root, and a folder pathspec is read as the
+    tests under it (`_pathspec_roots`). A `-C DIR` before the command is its folder. None for any other
+    `git` command, and for a `git grep` that prints matching lines, not paths."""
     folder, at = ".", 0
     while at < len(args) and args[at].startswith("-"):
         if args[at] in ("-C", "-c") and at + 1 < len(args):
@@ -726,8 +751,12 @@ def _git_listing_roots(args):
                 skip = False
             elif (">" in word or "<" in word) and _is_redirect(word):
                 skip = True
+            elif word == "&":
+                continue   # the `&` of `&>`, as in `_roots`
             elif not flags_over and word == "--":
                 flags_over = True
+            elif not flags_over and word in _GIT_LIST_PATTERN_FLAGS:
+                skip = True
             elif flags_over or not word.startswith("-"):
                 roots.append(word)
     else:
@@ -735,7 +764,7 @@ def _git_listing_roots(args):
                    for word in rest):
             return None
         roots = _roots(["grep"] + rest)
-    roots = [_glob_root(folder, word) for word in roots]
+    roots = [root for word in roots for root in _pathspec_roots(folder, word)]
     return roots or [folder]
 
 
@@ -836,17 +865,26 @@ _TREE_LIMIT = 20000   # files read before the walk gives up
 
 def _first_test_under(where: str, predicate, glob: str = "") -> str:
     """The first path under the folder `where` (relative to it) that `predicate` accepts, else ''.
-    With `glob`, only a path whose relative spelling matches it (a pathspec glob: `*` crosses `/`).
-    Read from disk, top down, skipping hidden folders, `node_modules`, `venv` and `__pycache__`.
+    With `glob`, only a path whose relative spelling matches it (a pathspec glob: `*` crosses `/`; a
+    glob that starts with `_SEGMENT_GLOB`, one the shell expands: `*` stays in one segment). The glob
+    is tested against the name before `predicate` runs. Read from disk, top down, skipping hidden
+    folders, `node_modules`, `venv` and `__pycache__`.
     ponytail: a tree of more than `_TREE_LIMIT` files with no test found early reads as holding none."""
+    segmented = glob.startswith(_SEGMENT_GLOB)
+    glob = glob.removeprefix(_SEGMENT_GLOB)
     seen = 0
     for folder, names, files in os.walk(where):
         names[:] = sorted(name for name in names if not name.startswith(".") and name not in _TREE_SKIP)
+        prefix = os.path.relpath(folder, where).replace(os.sep, "/")
+        prefix = "" if prefix == "." else prefix + "/"
         for name in sorted(files):
             seen += 1
+            if glob:
+                rel = prefix + name
+                if (segmented and rel.count("/") != glob.count("/")) or not fnmatch.fnmatchcase(rel, glob):
+                    continue
             full = os.path.join(folder, name)
-            if predicate(full, where) and (
-                    not glob or fnmatch.fnmatchcase(os.path.relpath(full, where).replace(os.sep, "/"), glob)):
+            if predicate(full, where):
                 return os.path.relpath(full, where)
         if seen > _TREE_LIMIT:
             break
@@ -1058,6 +1096,8 @@ def _shell_write_scan(cmd, cwd, predicate, holds, follow_cd, command_position, p
             if runs_nowhere and (quiet or not to_file):
                 data = data | _data_words(kinds[number], raw)
         words, shown = [], []
+        at = (dir_before_segment(segments, number, cwd, ends) or cwd) if follow_cd else cwd
+        editor = command_position and not closed and _segment_command(raw)[0] in ("sed", "perl")
         for index, word in enumerate(raw):
             if index in data:
                 words.append('""')   # data, or a `cp` source: no redirect or `tee` in it runs
@@ -1071,10 +1111,11 @@ def _shell_write_scan(cmd, cwd, predicate, holds, follow_cd, command_position, p
                 shown.append("dup")
             else:
                 pieces = _words_of(word) if "'" in word or '"' in word else [word]
+                if editor:   # a glob file word of `sed -i` or `perl -pi` is the test it matches on disk
+                    pieces = [_shell_glob_test(word, at, predicate) or word] if len(pieces) == 1 else pieces
                 words.extend(pieces)
                 shown.extend(pieces)
         text = " ".join(shown)
-        at = (dir_before_segment(segments, number, cwd, ends) or cwd) if follow_cd else cwd
         verb = _segment_command(words)[0] if predicate_command else ""
         for word in words:
             if word.startswith("-") or REDIRECT.fullmatch(word):
@@ -1086,6 +1127,20 @@ def _shell_write_scan(cmd, cwd, predicate, holds, follow_cd, command_position, p
             if (predicate(word, at, verb) if predicate_command else predicate(word, at)) and writes_to(word, text, *(_segment_command(words) if command_position else ())):
                 return _from_cwd(word, at, cwd) if follow_cd else word
     return ""
+
+
+def _shell_glob_test(word: str, where: str, predicate) -> str:
+    """The first test path that a shell glob word expands to, read from disk in the folder `where`, else
+    ''. The word is split at its first glob segment: the folder before it and the glob after it go to
+    the one glob reader (`_glob_root`, `_dot_roots`), so no second globber. Only a plain word is read:
+    a quote, `$`, backtick, backslash, or leading `-`, `~` or `:` leaves it as it is."""
+    if not re.search(r"[*?\[]", word) or re.search(r"""['"`$\\]""", word) or word[0] in "-~:":
+        return ""
+    parts = word.split("/")
+    first = next(at for at, part in enumerate(parts) if re.search(r"[*?\[]", part))
+    folder = "/".join(parts[:first]) or ("/" if first else ".")
+    found = _dot_roots([_glob_root(folder, "/".join(parts[first:]), shell=True)], where, predicate)
+    return found[0] if found else ""   # a glob that matches no test is dropped
 
 
 def _from_cwd(word, at, cwd):
