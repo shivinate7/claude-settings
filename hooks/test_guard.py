@@ -13593,8 +13593,9 @@ def role_log_case():
     return (not problems), ("; ".join(problems) or "each unjudged stop is logged")
 
 
-def _diff_log_run(folder, repo, agent_type, agent_id, commit=True):
+def _diff_log_run(folder, repo, agent_type, agent_id, commit=True, env_path=None):
     """Run commit, push and stop for one agent in `repo`, or push and stop alone when `commit` is False.
+    `env_path`, when given, is the PATH the guard runs with (a git stand-in first, see make_failing_git).
     Returns (stdout seen, guard.log rows)."""
     materialize(repo)
     os.makedirs(folder, exist_ok=True)
@@ -13606,6 +13607,8 @@ def _diff_log_run(folder, repo, agent_type, agent_id, commit=True):
     env["CLAUDE_CONFIG_DIR"] = folder
     env.pop("CLAUDE_CODE_SESSION_ID", None)
     env["CLAUDE_GUARD_ROOT_PID"] = str(os.getpid())
+    if env_path:
+        env["PATH"] = env_path
     bodies = [{"tool_name": "Bash", "tool_input": {"command": c}, "cwd": repo,
                "agent_id": agent_id, "agent_type": agent_type} for c in ((COMMIT, PUSH) if commit else (PUSH,))]
     bodies.append({"hook_event_name": "SubagentStop", "cwd": repo, "agent_id": agent_id,
@@ -15096,6 +15099,131 @@ def stop_pair_case():
 
 LOG_CHECKS_EXTRA.append(("builder-refuse: a builder's first stop with a test change is blocked, and its "
                          "second stop is allowed and logs role-diff-unresolved", stop_pair_case))
+
+
+# ---- the own-test-commit gap. A failed diff read is the unread state: the guard allows the commit, push or
+# stop and logs role-diff-unread, so a builder's own test change passes whenever git cannot answer that read.
+# The stand-ins below fail one read per guard run, or every read. A rebase is the second gap: it replays a
+# test commit as a plain pick, the commit's own sha leaves HEAD's history, and the diff check stops judging it.
+# Every label in this block carries the token `own-test-commit`, so MUTATE_ONLY="own-test-commit" runs it.
+GITFAIL_ONCE = os.path.join(ROOT, "gitfail-once")    # a git stand-in: fails one diff read per guard run
+GITFAIL_EVERY = os.path.join(ROOT, "gitfail-every")  # a git stand-in: fails every diff read
+
+
+def make_failing_git(folder, every):
+    """A `git` stand-in for the guard's PATH. It fails the guard's diff read (a call with `diff` and `--name-only`,
+    the one diff_violation makes) and runs every other call on the real git, by its absolute path. `every` fails
+    each such call. Otherwise each guard run fails its first, so the commit, push and stop runs each meet one
+    failure: one marker per parent pid. Each failure is logged by parent pid in failures.log, which the checkers
+    read as their scope. A failed read reaches the same unread route as a timed-out one (git_names returns None
+    for both). A real timeout waits the guard's 10 s on the wall clock, which an assert must not do, so no case
+    times out."""
+    os.makedirs(folder, exist_ok=True)
+    log = os.path.join(folder, "failures.log")
+    fail = 'echo "$PPID" >> "%s"; echo "git stand-in: diff read failed" >&2; exit 1' % log
+    if every:
+        body = "    %s\n" % fail
+    else:
+        marker = os.path.join(folder, "marker-$PPID")
+        body = '    if [ ! -e "%s" ]; then : > "%s"; %s; fi\n' % (marker, marker, fail)
+    script = ("#!/bin/sh\n"
+              'case " $* " in\n'
+              '  *" diff "*--name-only*)\n' + body + "  ;;\n"
+              "esac\n"
+              'exec "%s" "$@"\n' % os.path.join(GIT_PATH, VCS))
+    path = os.path.join(folder, VCS)
+    write(path, script)
+    os.chmod(path, 0o755)
+
+
+def _stand_in_failures(folder):
+    """The parent pids of the failed reads a stand-in logged, as a set."""
+    log = os.path.join(folder, "failures.log")
+    return set(open(log, encoding="utf-8").read().split()) if os.path.exists(log) else set()
+
+
+def _clear_stand_in(folder):
+    """Forget the markers and failures an earlier checker left, so each checker starts from a fresh stand-in."""
+    for name in os.listdir(folder):
+        if name.startswith("marker-") or name == "failures.log":
+            os.remove(os.path.join(folder, name))
+
+
+def _rebased_onto_moved_main(rel, text):
+    """A builder's own commit on `rel`, then main moves on a product file, then the builder rebases onto main.
+    The rebase replays the commit as a plain pick, so the commit's own sha is no longer in HEAD's history."""
+    def build(w):
+        main = w + "-main"
+        write(os.path.join(w, rel), text)
+        _must(w, "add", "-A")
+        _must(w, *IDENT, "commit", "-q", "-m", "own change")
+        write(os.path.join(main, "src/product.py"), "p = 1\n")
+        _must(main, "add", "-A")
+        _must(main, *IDENT, "commit", "-q", "-m", "main moves")
+        _must(w, *IDENT, "rebase", "-q", "main")
+        # Scope: the fixture must hold the replayed commit, or a broken build would read as a pass.
+        steps = run_vcs(w, "reflog", "show", "--format=%gs", "HEAD").stdout
+        changed = run_vcs(w, "diff", "--name-only", "main", "HEAD").stdout.split()
+        if "rebase (pick)" not in steps or rel not in changed:
+            sys.exit("fixture setup failed: the rebase in %r did not replay %s as a pick: %r" % (w, rel, changed))
+    return build
+
+
+_bd_read_once = diff_repo("bd-read-once", _put(TEST_A, "pass\n"))
+_bd_rebased_test = diff_repo("bd-rebased-own-test", _rebased_onto_moved_main(TEST_A, "pass\n"))
+_bd_rebased_product = diff_repo("bd-rebased-product", _rebased_onto_moved_main("src/app.py", "x = 2\n"))
+if os.name != "nt":   # the stand-ins are POSIX shell scripts; CreateProcess does not run them (see make_blind_git)
+    make_failing_git(GITFAIL_ONCE, every=False)
+    make_failing_git(GITFAIL_EVERY, every=True)
+
+
+def unread_read_failed_once_case():
+    """A builder's own test change is judged at commit, push and stop, and each guard run meets one failed diff
+    read. All three are denied, so one failed read does not decide the verdict: the guard reads again first."""
+    if os.name == "nt":
+        return SKIP, NO_STAND_IN
+    _clear_stand_in(GITFAIL_ONCE)
+    out, rows = _diff_log_run(os.path.join(ROOT, "difflog-read-once"), os.path.join(DIFFROOT, "bd-read-once"),
+                              "builder", "bld1", env_path=GITFAIL_ONCE + os.pathsep + GIT_PATH)
+    if len(_stand_in_failures(GITFAIL_ONCE)) < 3:   # scope: a failed read in each of the three guard runs
+        return False, "the stand-in failed a read in fewer than 3 guard runs, so the case did not run"
+    answers = _guard_answers(out)
+    unread = [r for r in rows if len(r) > 3 and r[2] == "noted" and r[3] == "role-diff-unread"]
+    if len(answers) != 3 or any(BDIFF not in reason for _decision, reason in answers):
+        return False, ("expected a builder-diff deny at commit, push and stop, got %d deny(s) and %d "
+                       "role-diff-unread line(s): the failed read was allowed" % (len(answers), len(unread)))
+    return True, "denied at commit, push and stop after one failed diff read in each"
+
+
+def unread_read_failed_every_case():
+    """Every diff read fails. A builder's own test change is allowed at commit, push and stop, silently, and each
+    allow logs one role-diff-unread line: an unread state is allowed and logged, never a silent pass."""
+    if os.name == "nt":
+        return SKIP, NO_STAND_IN
+    _clear_stand_in(GITFAIL_EVERY)
+    out, rows = _diff_log_run(os.path.join(ROOT, "difflog-read-every"), os.path.join(DIFFROOT, "bd-read-once"),
+                              "builder", "bld1", env_path=GITFAIL_EVERY + os.pathsep + GIT_PATH)
+    problems = []
+    if len(_stand_in_failures(GITFAIL_EVERY)) < 3:   # scope: a failed read in each of the three guard runs
+        problems.append("the stand-in failed a read in fewer than 3 guard runs")
+    if out:
+        problems.append("expected silent allows, got %r" % out[:60])
+    unread = [r for r in rows if len(r) > 3 and r[2] == "noted" and r[3] == "role-diff-unread"]
+    if len(unread) != 3:
+        problems.append("expected 3 noted/role-diff-unread lines, found %d" % len(unread))
+    return (not problems), ("; ".join(problems) or
+                            "allowed silently at commit, push and stop, each logged role-diff-unread")
+
+
+LOG_CHECKS_EXTRA.append(("builder-refuse: own-test-commit, a diff read that fails once per guard run: "
+                         "commit, push and stop are each denied", unread_read_failed_once_case))
+LOG_CHECKS_EXTRA.append(("builder-refuse: own-test-commit, every diff read fails: commit, push and stop are "
+                         "allowed silently and each logs role-diff-unread", unread_read_failed_every_case))
+LOG_CHECKS_EXTRA.append(("builder-refuse: own-test-commit, a test commit rebased onto a moved main: push and "
+                         "the first stop are denied", refused_push_and_stop_case("bd-rebased-own-test")))
+LOG_CHECKS_EXTRA.append(("builder-refuse: own-test-commit control, a product commit rebased onto a moved main: "
+                         "allowed at commit, push and stop with no builder-diff line",
+                         clean_builder_case("bd-rebased-product")))
 
 
 # =========================================================================== failing open
