@@ -542,6 +542,9 @@ def case_override_not_the_first_word():
 # The override line is the last non-blank line, and it grants only when it stands alone: the bare word, `off`, or a
 # length. Any other word on that line grants nothing, and so does the word on a line that is not the last. The
 # Opus word on that line grants nothing either: no opus file is written. ov_pass_files covers state/override/opus/.
+# A closed block the app writes, then a blank line. Its shape is not the point: the grant must read the last line
+# after the block, and a block must never move the start grammar onto the owner's last line.
+LAST_LINE_BLOCK = "<system-reminder>\nLinked sessions now\n</system-reminder>\n\n"
 OV_LAST_LINE_NO_GRANT = [
     ("a reason after the length", "Linked sessions now\n- a: idle\n\noverride 12h please"),
     ("a reason after the bare word", "Linked sessions now\n- a: idle\n\noverride because tests"),
@@ -552,6 +555,10 @@ OV_LAST_LINE_NO_GRANT = [
      "Quoted from the log:\noverride 12h\nthen run the tests"),
     ("a pasted block whose last line is the form, before the closing tag",
      "<pasted_content>\nreport line\noverride 12h\n</pasted_content>"),
+    ("a closed block, then a reason on the last line", LAST_LINE_BLOCK + "override because tests"),
+    ("a closed block, then a trailing period after the length", LAST_LINE_BLOCK + "override 12h."),
+    ("a closed block, then the Opus word and a length with a trailing word", LAST_LINE_BLOCK + "override opus 2h please"),
+    ("a closed block, then the word with a line of other text after it", LAST_LINE_BLOCK + "override\nthen do X"),
 ]
 
 
@@ -572,6 +579,16 @@ def case_override_off_on_the_last_line():
     check("override: `override off` on the last line after a block removes the override",
           before is not None and proc is not None and ov_pass(cfg) is None and not ov_pass_files(cfg),
           "before %r, after %r, files %r" % (before, ov_pass(cfg), ov_pass_files(cfg)))
+
+
+def case_override_last_line_opus_judge_approved_writes_nothing():
+    # The judge approves the prompt, so only the last-line rule can keep an Opus override from being written.
+    cfg, calls, _, _ = opus_type(LAST_LINE_BLOCK + "opus 2h", answer={"ok": True})
+    got = opus_override(cfg)
+    took = take_spawn(cfg, "reviewer")
+    check("override: a closed block, then `opus 2h` on the last line writes no Opus override, judge approved",
+          got is None and not lifted(took) and not ov_pass_files(cfg),
+          "judge calls %d; got %r; files %r; reviewer spawn %r" % (len(calls), got, ov_files(cfg), took))
 
 
 def case_override_reason_goes_through_the_log_writer():
@@ -2124,6 +2141,7 @@ def main():
         case_override_not_the_first_word()
         case_override_last_line_no_grant()
         case_override_off_on_the_last_line()
+        case_override_last_line_opus_judge_approved_writes_nothing()
         case_override_corrupt_file_replaced()
         case_override_session_id_stays_inside()
         case_override_fail_open()
