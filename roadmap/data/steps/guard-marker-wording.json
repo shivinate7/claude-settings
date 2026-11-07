@@ -1,10 +1,11 @@
 {
   "title": "Five wording notes on the guard marker get fixed",
-  "phase": "next",
-  "status": "todo",
+  "phase": "now",
+  "status": "doing",
   "order": 267.8,
   "owner": "coordinator",
   "why": "Follow-up of step review-rounds-rework.",
   "note": "Named by lane review-rounds-rework in PR #1552 (coordinator, 16:33 CST Nov 7). The five notes are in PR #1552.",
-  "updatedAt": "2026-11-07T16:33:00-06:00"
+  "updatedAt": "2026-11-07T16:34:00-06:00",
+  "lane": "session_013NEJL2Vu74Q9bbbrv5anAi"
 }
