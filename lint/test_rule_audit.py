@@ -2260,13 +2260,21 @@ class RefusalCiteHelperTests(unittest.TestCase):
         body = '    try:\n        pass\n    except Stop as e:\n        fail(str(e))\n'
         self.assertEqual(status_of(body_src(body, FAIL), "merge:go", module="merge"), ["cited"])
 
-    def test_a_tuple_handler_holding_a_stop_re_raised_through_a_helper_is_read_as_cited(self):
-        # `except (X, Stop) as e` binds a Stop, so its text is printed by its origin, as for a bare `except Stop`.
-        for names in ("(OSError, Stop)", "(Stop, OSError)"):
+    def test_a_tuple_handler_with_a_non_stop_member_re_raised_through_a_helper_is_not_resolved(self):
+        # `except (X, Stop) as e` may bind an X, whose text no origin prints, so its text is not carried.
+        for names in ("(OSError, Stop)", "(Stop, OSError)", "(subprocess.TimeoutExpired, Stop)"):
+            with self.subTest(names=names):
+                body = '    try:\n        pass\n    except %s as e:\n        fail(str(e))\n' % names
+                self.assertEqual(status_of(body_src(body, FAIL), "merge:go", module="merge"), ["not resolved"],
+                                 "a tuple except with a member that is no Stop name reads as cited")
+
+    def test_a_tuple_handler_of_stop_names_re_raised_through_a_helper_is_read_as_cited(self):
+        # Every member is a Stop class, so the bound `e` is always a Stop: its text is printed by its origin.
+        for names in ("(Stop, NetStop)", "(NetStop, Dropped)"):
             with self.subTest(names=names):
                 body = '    try:\n        pass\n    except %s as e:\n        fail(str(e))\n' % names
                 self.assertEqual(status_of(body_src(body, FAIL), "merge:go", module="merge"), ["cited"],
-                                 "a tuple except that holds a Stop name reads as not resolved")
+                                 "a tuple except of Stop classes reads as not resolved")
 
     def test_a_tuple_handler_of_no_stop_re_raised_through_a_helper_is_not_resolved(self):
         body = '    try:\n        pass\n    except (OSError, ValueError) as e:\n        fail(str(e))\n'
