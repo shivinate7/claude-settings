@@ -909,6 +909,37 @@ class OneHomeInRepoTests(unittest.TestCase):
         self.assertEqual(sorted(set(os.listdir(self.tmp.name)) - {"events.json"}), before_tmp,
                          "a file or folder appeared in TMPDIR, such as a test temp root")
 
+    # Review round 2, F4: a gloss in parentheses after a backticked decision id is no copy, even where a rule sentence
+    # holds the same gloss words. The parent rule cites its own decision that way, as the rules do. Its id differs from
+    # its anchor, so the rule id never exempts a copy here.
+    GLOSS = ("**Review.** Decision `hold-unsafe-after-round-3` (net-value hold after round 3) holds the delete-only "
+             "change's one round, and the merge at zero or positive net value.<!-- rule:review-cap-three -->\n")
+    AFTER_GLOSS = "holds the delete-only change's one round, and the merge at zero or positive net value."
+
+    def gloss_parent(self):
+        write(self.parent, "CLAUDE.md", PARENT_RULES + self.GLOSS)
+
+    def test_a_gloss_after_a_decision_id_is_no_copy(self):
+        self.gloss_parent()
+        self.tracked({"agents/gloss.md": "We keep decision `hold-unsafe-after-round-3` (net-value hold after round 3) "
+                                         "in the review table here.\n"})
+        found, out = self.verdict_scan()
+        self.assertEqual(keyed(found), [CONTROL_FINDING], out)
+
+    def test_a_real_copy_on_the_next_line_of_a_gloss_paragraph_is_reported_on_its_line(self):
+        self.gloss_parent()
+        self.tracked({"agents/both.md": "We keep decision `hold-unsafe-after-round-3` (net-value hold after round 3)\n"
+                                        "here, and the rule reads: %s\n" % self.AFTER_GLOSS})
+        found, out = self.verdict_scan()
+        self.assertEqual(keyed(found), [("agents/both.md", 2, "COPY001"), CONTROL_FINDING], out)
+        self.assertIn(("agents/both.md", 2, "COPY001", "review-cap-three copied"), found, out)
+
+    def test_a_copy_in_parentheses_after_plain_words_is_still_reported(self):
+        self.gloss_parent()
+        self.tracked({"agents/paren.md": "The review reads (%s) at each cap.\n" % self.AFTER_GLOSS})
+        found, out = self.verdict_scan()
+        self.assertEqual(keyed(found), [CONTROL_FINDING, ("agents/paren.md", 1, "COPY001")], out)
+
 
 if __name__ == "__main__":
     try:
