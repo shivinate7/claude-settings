@@ -1051,14 +1051,16 @@ class DoneNamesModelsTests(unittest.TestCase):
         self.assertIsNone(out, (out or {}).get("reason"))
 
     def test_dm_red_built_item_without_a_pair_blocks_the_next_excuse(self):
-        # Catches: a BUILT item that names no role and model keeps the reviewer unexcused, so Next cannot back it.
+        # Catches: a BUILT item that names no role and model keeps the builder and reviewer unexcused, so Next
+        # cannot back either. The builder spawn makes the BUILT gate apply.
         out = self.verdict(
             "> **Done:**\n> - BUILT: x, PR #12\n>\n"
-            "> **Next:**\n> - The round 2 fix check is running (reviewer sonnet).",
-            [self.REVIEWER_R2])
-        self.assertIsNotNone(out, "the report passed: a BUILT item with no model let Next excuse the reviewer")
+            "> **Next:**\n> - Builder and reviewer running (builder sonnet, reviewer sonnet).\n"
+            "> - Unstarted: none.",
+            [self.BUILDER, self.REVIEWER_R2])
+        self.assertIsNotNone(out, "the report passed: a BUILT item with no model let Next excuse the builder and reviewer")
         self.assertEqual(out["decision"], "block")
-        self.assertIn("no model named for reviewer", out["reason"])
+        self.assertIn("no model named for builder, reviewer", out["reason"])
 
     def test_dm_red_reviewer_named_nowhere_blocks(self):
         # Catches: a spawned reviewer that neither Done nor Next names with a model must still block.
