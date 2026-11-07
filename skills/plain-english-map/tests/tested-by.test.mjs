@@ -27,7 +27,8 @@
 //   T6   a shell test loads the file when it runs it by a literal path from the root (T6a) or from its own folder (T6c, T6m), or by a
 //        variable anchor and a literal tail (T6i, T6m). A `#` in a string, a comment or heredoc with a lone quote, `$#`, and a string over
 //        two lines do not hide the call (T6e, T6g, T6h, T6l, T6o). A path only in a comment (T6d) or a heredoc body (T6f), no path (T6k),
-//        or a non-literal tail (T6n) fails as a read that does not load, not as an unknown read. A Ruby test stays an unknown read (T6j).
+//        or a non-literal tail (T6n), or a single-quoted word that stays literal (T6p), fails as a read that does not load, not as an
+//        unknown read. A `.zsh` test with a lone quote in its first-line comment is read as a shell test (T6q). A Ruby test stays an unknown read (T6j).
 //        With no python3 on PATH, a Python test fails as an unknown read, and with python3 it passes (T6b).
 //   T7   placement and form. A tested-by line under a table line (T7a), a screen line (T7b) or a home (T7c) fails. Unindented (T7d), with no
 //        backticks (T7e), or with a `;` separator (T7f), it fails. Under a map line after a decisions line (T7g), it passes.
@@ -434,6 +435,24 @@ test('T6o. a shell test with a double-quoted string over two lines, its second l
   soleTest(dir, 'src/retry_check.sh', '#!/bin/sh\necho "one\n# two"; python3 src/retry.py\n');
   // The scope first: the second line starts with #, and that # sits inside the string opened on the line before.
   assert.match(readAt(dir, 'src/retry_check.sh'), /^echo "one\n# two"; python3 src\/retry\.py$/m, 'the # must start a line inside a string that began on the line before');
+  mustPass(check(dir));
+});
+
+test("T6p. a shell test with `python3 '$ROOT/src/retry.py'` does not load the file: single quotes keep the text literal, so the word is not a path, and MAP11 fails as a read that does not load", () => {
+  needFile(REL);
+  const dir = scratchRepo();
+  soleTest(dir, 'src/retry_check.sh', "#!/bin/sh\npython3 '$ROOT/src/retry.py'\n");
+  // The scope first: the call is single-quoted, so no expansion of $ROOT takes place.
+  assert.match(readAt(dir, 'src/retry_check.sh'), /^python3 '\$ROOT\/src\/retry\.py'$/m, 'the shell test must run the file through single quotes');
+  mustNotLoad(check(dir), 'src/retry_check.sh');
+});
+
+test("T6q. a .zsh shell test whose first line is a comment with a lone quote, then `python3 src/retry.py`, passes: the shell reader reads .zsh", () => {
+  needFile(REL);
+  const dir = scratchRepo();
+  soleTest(dir, 'src/retry_check.zsh', "# don't\npython3 src/retry.py\n");
+  // The scope first: the lone quote is on the first line, in a comment, and the call follows it.
+  assert.match(readAt(dir, 'src/retry_check.zsh'), /^# don't\npython3 src\/retry\.py$/m, 'the lone quote must sit in a comment on the first line');
   mustPass(check(dir));
 });
 
