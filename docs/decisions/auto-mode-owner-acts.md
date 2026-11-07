@@ -19,7 +19,7 @@ Each entry keeps `$defaults`, the classifier's built-in exceptions.
 | Entry | Covers | Record |
 |---|---|---|
 | "Archived Branch Delete" (`settings.json` `autoMode.allow`) | A branch delete after its archive push, or of a merged branch | this record |
-| "Own Branch Lease Push" (planned, not yet in `settings.json` `autoMode.allow`) | A lease push to the session's own lane branch, after this session pushed that branch earlier. Two forms only: `--force-with-lease --force-if-includes origin <branch>`, or a lease pinned to the sha this session last pushed. Never a bare force, a `+refspec`, a delete, or the default branch | this record |
+| "Own Branch Lease Push" (`settings.json` `autoMode.allow`) | A lease push to the session's own lane branch, after this session pushed that branch earlier. Two forms only: `--force-with-lease --force-if-includes origin <branch>`, or a lease pinned to the sha this session last pushed. Never a bare force, a `+refspec`, a delete, or the default branch | this record |
 | Merge confirm (`merge/cloud_allow.json`, cloud only) | `~/.claude/bin/merge ... --confirm` | mechanics in `session-tiers` |
 | "Owner PR Housekeeping" (`settings.json` `autoMode.allow`) | In a `shivinate7` repo: close a PR the coordinator or batch runner named in the visible conversation as replaced, empty or batched. Mark ready only an integration PR that the visible conversation names as such: the batch's or a lone lane's, named by the coordinator or batch runner, or the one PR of a solo or one-lane session that no coordinator started, named by that session | this record |
 | "Owner Session Message" (`settings.json` `autoMode.allow`) | `send_message` to a session in the owner's own account, including the session that started this one (its parent or coordinator). A message that asks for no act is covered. A message that asks is limited to acts the owner already granted. A coordinator may send a batch runner it created a merge go (owner, 2026-11-03 15:58 CST) | this record |
@@ -76,7 +76,7 @@ Why: the guard's remedy (`guard_branch_worktree.BRANCH_DELETE_DENY_REASON`) hand
 
 ### Own Branch Lease Push
 
-Owner grant: pending, typed in lane lease-push-c-and-d.
+Owner grant, typed in lane lease-push-c-and-d, 2026-11-07 13:28 CST: `go: add the "Own Branch Lease Push" entry to settings.json autoMode.allow, as drafted in lane lease-push-c-and-d`.
 
 A lease push to the session's own lane branch loses nothing this session did not write. It is allowed only when this session pushed the same branch to the same remote earlier, and the push is one of:
 
@@ -90,7 +90,7 @@ It never covers a bare `--force` or `-f`, a `+refspec`, a lease with neither `--
 Why: the force-push guard's remedy (`PUSH_REASON` in `hooks/guard_push_delete.py`) names `--force-with-lease --force-if-includes`. The classifier's built-in "Git Destructive" rule still refused that form. Pull request #1255 (part d of the lease push roadmap step, `lease-push-c-and-d`) made the red-run check's remedy name no force push. This entry is part c.
 
 - Risk: named incident. 9 lease-push refusals and 8 replacement pull requests, 2026-11-02 to 2026-11-04 (count not measured here). Incident home: note `classifier-refuses-lease-push`. Owner's answer on the owner's waiting page, item 257, 2026-11-05 07:44 CST: "shouldn't it be c and d".
-- Check: `hooks/test_auto_mode_allow.py` must pin this entry once it lands in `settings.json`. No pin exists yet.
+- Check: `hooks/test_auto_mode_allow.py` pins this entry: it exists once, quotes both push forms and the guard remedy from `PUSH_REASON`, and its "Never covers" sentence names each refused act.
 - Gap: the classifier sees the command, not whether this session pushed the branch earlier. The guard still refuses a bare force.
 
 ### Marking a lone lane's PR ready
