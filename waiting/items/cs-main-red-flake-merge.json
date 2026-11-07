@@ -4,7 +4,11 @@
   "home": "batch runner 8 merges or holds; step dismiss-focus-root-cause",
   "id": "cs-main-red-flake-merge",
   "kind": "decision",
-  "lane": "coordinator",
+  "lastAnswer": {
+    "at": "2026-11-07T12:28:48.145Z",
+    "choice": "b",
+    "note": ""
+  },
   "n": 330,
   "options": [
     {
@@ -25,8 +29,9 @@
   "pick": "b",
   "rank": 1,
   "ref": "#1405; #1308; run 42357626483",
+  "reply": "Routed 06:30 CST to the coordinator. The merge queue holds until step dismiss-focus-root-cause finds and fixes the cause; #1406 does not merge on red main under --base-red-ok.",
   "short": "cs main red: merge #1405 or hold",
-  "status": "open",
+  "status": "closed",
   "title": "claude-settings main is red on a flaky test: merge #1405 onto it with --base-red-ok, or hold every merge?",
   "why": "Every claude-settings merge waits on this. Meanwhile the queue stays held and lane dismiss-focus-main-red finishes #1405's review round 2."
 }
