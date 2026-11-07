@@ -724,15 +724,16 @@ def invoke_model(prompt, model=MODEL, timeout=MODEL_TIMEOUT, shape=VERDICT_SHAPE
     text = envelope.get("result") if isinstance(envelope, dict) else None
     if not isinstance(text, str):
         return None, "model output carried no result text"
-    return parse_verdict(text, shape)
+    return parse_verdict(text, shape, scrub)
 
 
-def parse_verdict(text, shape=VERDICT_SHAPE):
+def parse_verdict(text, shape=VERDICT_SHAPE, scrub=None):
     """Return (verdict_dict, error) from the model's reply text. The one home of this parse:
-    `invoke_model` and the `--model-text` entry below both call it."""
+    `invoke_model` and the `--model-text` entry below both call it. `scrub`, when given, cleans the reply
+    text of the no-JSON error before its 120-character cut, as invoke_model does for stderr."""
     match = re.search(r"\{.*\}", text, re.DOTALL)
     if not match:
-        return None, "model result carried no JSON verdict"
+        return None, "model result carried no JSON verdict: " + (scrub(text) if scrub else text)[:120]
     try:
         verdict = json.loads(match.group(0))
     except Exception:
