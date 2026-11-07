@@ -142,6 +142,7 @@ class FakeHost:
         self.batch, self.batch_error, self.batch_calls = [], None, []  # batch: the blockers batch_running reports; batch_error: raised instead; batch_calls: each (n, base) read
         self.pr_calls = []  # each n the run read through pr(): a refusal before any host read leaves it empty
         self.readies, self.ready_refuse = [], None  # readies: each n a draft confirm asked to mark ready; ready_refuse: the reason the host refuses
+        self.files, self.files_error, self.file_reads = [], None, []  # files: what pr_files lists; files_error: raised instead; file_reads: each n read
 
     def pr(self, n):
         self.pr_calls.append(n)
@@ -152,6 +153,12 @@ class FakeHost:
 
     def required_names(self):
         return ["checks"]
+
+    def pr_files(self, n):  # the changed files of pull request n, as `pages("pulls/<n>/files")` lists them
+        self.file_reads.append(n)
+        if self.files_error:
+            raise merge.Stop(self.files_error)
+        return list(self.files)
 
     def batch_running(self, n, base, head=None):  # the other ready pull requests on base with a pending required check; a case sets batch
         self.batch_calls.append((n, base))
@@ -10888,9 +10895,10 @@ class PullsHost(merge.Host):
     `gh` also answers `pulls/<n>` from the open list, and the compare read of two heads: `compares` maps (base sha, head sha) to the status
     GitHub would answer. A pair not listed is "diverged", so unrelated heads never contain each other. The base branch's read,
     `compare/<base>...<head>`, is keyed ("main", head sha) in the same map. `compare_error` answers every compare read;
-    `base_compare_error` answers only the base branch's read."""
+    `base_compare_error` answers only the base branch's read. `files` maps a pull request number to the changed files its `pulls/<n>/files`
+    read lists (none for a number not listed), and `files_error` stops that read in the scripted mode."""
     def __init__(self, pulls, check_rows, pulls_error=None, required=("checks",), workflow_runs=None, ignore=None, compares=None, compare_error=None,
-                 base_compare_error=None, comments=(), comments_error=None, count_gh=False):
+                 base_compare_error=None, comments=(), comments_error=None, count_gh=False, files=None, files_error=None):
         super().__init__(list(required), base="main", minute=60, pause=lambda s: None, ignore=ignore)
         self.pulls, self.check_rows, self.pulls_error = pulls, check_rows, pulls_error
         self.comments, self.comments_error = list(comments), comments_error  # the repo-wide issue comments, oldest first
@@ -10899,6 +10907,7 @@ class PullsHost(merge.Host):
         self.reads = []
         self.list_calls = []
         self.count_gh, self.gh_calls = count_gh, []
+        self.files, self.files_error = files or {}, files_error
         if count_gh:  # the branch protection names the required checks, as a real repo does
             self.required, self.protection = "protection", list(required)
         self.compare_reads = []  # (first operand, second operand) of each compare read
@@ -10933,6 +10942,10 @@ class PullsHost(merge.Host):
             return json.dumps([self.pulls])
         if rel == "issues/comments":
             return json.dumps([self.comments])
+        fm = re.fullmatch(r"pulls/(\d+)/files", rel)
+        if fm:  # 100 files to a page, as GitHub pages them, so a full-size diff reads over several pages
+            found = self.files.get(int(fm.group(1)), [])
+            return json.dumps([found[i:i + 100] for i in range(0, len(found), 100)] or [[]])
         if rel == f"branches/{self.base}/protection/required_status_checks":
             return json.dumps(self.protection)
         if m and m.group(2) == "check-runs":
@@ -10954,6 +10967,11 @@ class PullsHost(merge.Host):
             if self.comments_error:
                 raise merge.Stop(self.comments_error)
             return self.comments
+        fm = re.fullmatch(r"pulls/(\d+)/files", rel)
+        if fm:
+            if self.files_error:
+                raise merge.Stop(self.files_error)
+            return self.files.get(int(fm.group(1)), [])
         m = re.fullmatch(r"commits/([^/]+)/check-runs", rel)
         if m:
             return self.check_rows.get(m.group(1), [])
@@ -11857,6 +11875,13 @@ def review_comment(cid, number, body, created="2026-10-02T00:00:00Z"):
     """A comment on issue or pull request `number`, as the repo-wide comment list gives it."""
     return {"id": cid, "created_at": created, "issue_url": f"https://api.github.com/repos/o/r/issues/{number}", "body": body}
 
+def file_row(path, additions=1, deletions=0, status="modified", previous=None):
+    """One changed file as `pulls/<n>/files` lists it. previous_filename is in the row for a rename only, as GitHub gives it."""
+    row = {"filename": path, "status": status, "additions": additions, "deletions": deletions}
+    if previous is not None:
+        row["previous_filename"] = previous
+    return row
+
 def list_line(test, out, n):
     """The one `merge --reviewed` line for pull request n."""
     lines = [l for l in out.splitlines() if l.startswith(f"#{n} ")]
@@ -12423,6 +12448,93 @@ class ReviewRecordWrite(ReviewEnv):
                 out, _err = self.assert_usage_error("7", "--review-record", "--kind", "normal", "--guard", "no", "--head", self.head(), "--round", rnd)
                 self.assertNotIn(REVIEW_MARKER, out)
 
+class ReviewGuardWrite(ReviewEnv):
+    """`merge <pr> --review-record` reads the changed files of a guard-no or delete-only record (decision pr-review-record, the limits). A guard
+    path, or a rename out of one, refuses a guard-no record; an added line refuses a delete-only one. A refusal exits 1, names each hit path on
+    stderr and prints no record. Guard or check yes reads no files. A failed read stops the run with exit 1."""
+
+    def write_host(self, files=(), files_error=None):
+        """A host whose pull request 7 is open at REVIEW_HEAD, with the changed files a case gives."""
+        return PullsHost([batch_pull(7, REVIEW_HEAD)], {}, files={7: list(files)}, files_error=files_error)
+
+    def write_args(self, kind="normal", guard="no"):
+        return ("7", "--review-record", "--head", REVIEW_HEAD, "--kind", kind, "--guard", guard, "--round", "1:reviewer:sonnet:PASS")
+
+    def assert_guard_refused(self, rc, out, err, path):
+        self.assertEqual(rc, 1, "the record was not refused with exit 1:\n" + out + err)
+        self.assertNotIn(REVIEW_MARKER, out, "a refused record still printed its body")
+        self.assertNotIn("Traceback", err)
+        self.assertIn(path, err, f"the refusal does not name {path}:\n" + err)
+
+    def test_guard_no_over_a_hook_path_is_refused_at_write(self):
+        host = self.write_host([file_row("hooks/x.py")])
+        rc, out, err = self.run_args(*self.write_args(), host=host)
+        self.assert_guard_refused(rc, out, err, "hooks/x.py")
+
+    def test_guard_no_over_settings_json_alone_is_refused_at_write(self):
+        host = self.write_host([file_row("settings.json")])
+        rc, out, err = self.run_args(*self.write_args(), host=host)
+        self.assert_guard_refused(rc, out, err, "settings.json")
+
+    def test_guard_no_over_a_rename_out_of_a_guard_path_is_refused_at_write(self):
+        # the new path is in docs/, the old path is the guard path, so the record is refused on the old path
+        host = self.write_host([file_row("docs/a.py", status="renamed", previous="hooks/a.py", additions=0)])
+        rc, out, err = self.run_args(*self.write_args(), host=host)
+        self.assert_guard_refused(rc, out, err, "hooks/a.py")
+
+    def test_guard_no_names_every_hit_path(self):
+        host = self.write_host([file_row("hooks/a.py"), file_row("docs/b.md"), file_row("lint/c.py")])
+        rc, out, err = self.run_args(*self.write_args(), host=host)
+        self.assert_guard_refused(rc, out, err, "hooks/a.py")
+        self.assertIn("lint/c.py", err, "the refusal does not name the second hit path:\n" + err)
+
+    def test_each_rule_dir_entry_refuses_a_guard_no_record_at_write(self):
+        # one home of the guard paths: every entry of lint/stale_cites.py RULE_DIRS refuses, settings.json as well as the folders
+        import stale_cites
+        for entry in stale_cites.RULE_DIRS:
+            path = entry + "probe.py" if entry.endswith("/") else entry
+            with self.subTest(path=path):
+                host = self.write_host([file_row(path)])
+                rc, out, err = self.run_args(*self.write_args(), host=host)
+                self.assert_guard_refused(rc, out, err, path)
+
+    def test_guard_no_over_docs_paths_reads_the_files_once_and_prints(self):
+        # the read is the claim under test: a guard-no record reads its files once, and an empty or docs-only diff prints its record
+        for files in ([], [file_row("docs/a.md"), file_row("docs/b/c.md")]):
+            with self.subTest(files=[f["filename"] for f in files]):
+                host = self.write_host(files)
+                rc, out, err = self.run_args(*self.write_args(), host=host)
+                self.assertEqual(rc, 0, out + err)
+                self.assertEqual(parse_text(self, posted_body(self, out))["guard"], "no")
+                self.assertEqual([rel for rel, _ in host.list_calls if rel == "pulls/7/files"], ["pulls/7/files"], "a guard-no record did not read its files once")
+
+    def test_guard_yes_reads_no_files(self):
+        # control: a guard-yes record never reads the files, so a diff it would refuse on still prints
+        host = self.write_host([file_row("hooks/x.py")])
+        rc, out, err = self.run_args(*self.write_args(guard="yes"), host=host)
+        self.assertEqual(rc, 0, out + err)
+        self.assertEqual(parse_text(self, posted_body(self, out))["guard"], "yes")
+        self.assertEqual([rel for rel, _ in host.list_calls if rel == "pulls/7/files"], [], "a guard-yes record read the changed files")
+
+    def test_delete_only_with_an_addition_is_refused_at_write(self):
+        host = self.write_host([file_row("docs/x.md", additions=2, deletions=1)])
+        rc, out, err = self.run_args(*self.write_args(kind="delete-only"), host=host)
+        self.assert_guard_refused(rc, out, err, "docs/x.md")
+
+    def test_delete_only_with_only_removals_prints_its_record(self):
+        # control: a removal alone is what delete-only allows
+        host = self.write_host([file_row("docs/x.md", additions=0, deletions=5, status="removed")])
+        rc, out, err = self.run_args(*self.write_args(kind="delete-only"), host=host)
+        self.assertEqual(rc, 0, out + err)
+        self.assertEqual(parse_text(self, posted_body(self, out))["kind"], "delete-only")
+
+    def test_a_failed_files_read_stops_a_guard_no_record_with_exit_one(self):
+        host = self.write_host(files_error="reading pulls/7/files from GitHub failed")
+        rc, out, err = self.run_args(*self.write_args(), host=host)
+        self.assertEqual(rc, 1, "a failed files read did not stop the record with exit 1:\n" + out + err)
+        self.assertNotIn(REVIEW_MARKER, out, "a failed files read still printed a record")
+        self.assertNotIn("Traceback", err)
+
 class ReviewFixFlag(ReviewEnv):
     """`--fix-check REVIEWED_HEAD:reviewer:MODEL:VERDICT` goes with --review-record and prints the fix check line after the rounds. A usage
     error prints no record. Each refusal sits beside the good value, which must exit 0, so a parser that never learned the flag fails here too."""
@@ -12602,7 +12714,8 @@ class ReviewedList(ReviewEnv):
     def test_the_list_reads_are_the_open_pulls_then_the_comments_once(self):
         pulls = [batch_pull(7, REVIEW_HEAD, created_at="2026-10-01T00:00:00Z"),
                  batch_pull(9, REVIEW_OLD_HEAD, draft=True, created_at="2026-10-05T00:00:00Z")]
-        host, rc, out, err = self.listing(pulls, [review_comment(1, 7, record_text(rounds=REVIEW_PASS))],
+        # guard yes: a guard-no record also reads its changed files, one more list read that this case does not count
+        host, rc, out, err = self.listing(pulls, [review_comment(1, 7, record_text(rounds=REVIEW_PASS, guard="yes"))],
                                           {REVIEW_HEAD: [batch_run("checks", "completed", "success")]})
         self.assertEqual(rc, 0, out + err)
         self.assertEqual([rel for rel, _ in host.list_calls if not rel.startswith("commits/")], ["pulls", "issues/comments"])
@@ -12633,8 +12746,9 @@ class ReviewedList(ReviewEnv):
         self.assertEqual(reads[0].get("since"), "2026-10-01T00:00:00Z")
 
     def test_one_ready_pr_with_a_record_costs_five_gh_calls(self):
-        # decision pr-review-record, the cost: the pull list, the comments, then for the head its check runs, its statuses and the branch protection
-        comments = [review_comment(1, 7, record_text(rounds=REVIEW_PASS))]
+        # decision pr-review-record, the cost: the pull list, the comments, then for the head its check runs, its statuses and the branch protection.
+        # guard yes: a guard-no record adds one read of its changed files (test_one_ready_pr_with_a_guard_no_record_costs_six_gh_calls)
+        comments = [review_comment(1, 7, record_text(rounds=REVIEW_PASS, guard="yes"))]
         host, rc, out, err = self.listing([batch_pull(7, REVIEW_HEAD)], comments, {REVIEW_HEAD: [batch_run("checks", "completed", "success")]},
                                           count_gh=True)
         self.assertEqual(rc, 0, out + err)
@@ -12642,8 +12756,25 @@ class ReviewedList(ReviewEnv):
         self.assertEqual(host.gh_calls, ["pulls", "issues/comments", f"commits/{REVIEW_HEAD}/check-runs", f"commits/{REVIEW_HEAD}/status",
                                          "branches/main/protection/required_status_checks"])
 
+    def test_one_ready_pr_with_a_guard_no_record_costs_six_gh_calls(self):
+        # decision pr-review-record, the cost: a guard-no record adds one read of the pull request's changed files to the five
+        comments = [review_comment(1, 7, record_text(rounds=REVIEW_PASS))]
+        host, rc, out, err = self.listing([batch_pull(7, REVIEW_HEAD)], comments, {REVIEW_HEAD: [batch_run("checks", "completed", "success")]},
+                                          count_gh=True)
+        self.assertEqual(rc, 0, out + err)
+        self.assertRegex(list_line(self, out, 7), r"CI green$")
+        want = [f"commits/{REVIEW_HEAD}/check-runs", f"commits/{REVIEW_HEAD}/status", "branches/main/protection/required_status_checks",
+                "pulls", "issues/comments", "pulls/7/files"]
+        self.assertEqual(sorted(host.gh_calls), sorted(want), "a guard-no record did not cost exactly six calls, the files read once")
+
+    def test_a_guard_no_record_reads_its_changed_files_once(self):
+        host, rc, out, err = self.listing([batch_pull(7, REVIEW_HEAD)], [review_comment(1, 7, record_text(rounds=REVIEW_PASS))])
+        self.assertEqual(rc, 0, out + err)
+        self.assertEqual([rel for rel, _ in host.list_calls if rel == "pulls/7/files"], ["pulls/7/files"], "a guard-no record did not read its files once")
+
     def test_a_draft_with_a_record_reads_no_head_checks(self):
-        host, rc, out, err = self.listing([batch_pull(9, REVIEW_HEAD, draft=True)], [review_comment(1, 9, record_text(n=9, rounds=REVIEW_PASS))],
+        # guard yes: a guard-no record reads its changed files, which this case does not count (the draft reads no head checks)
+        host, rc, out, err = self.listing([batch_pull(9, REVIEW_HEAD, draft=True)], [review_comment(1, 9, record_text(n=9, rounds=REVIEW_PASS, guard="yes"))],
                                           count_gh=True)
         self.assertEqual(rc, 0, out + err)
         self.assertEqual(host.gh_calls, ["pulls", "issues/comments"])
@@ -12660,6 +12791,86 @@ class ReviewedList(ReviewEnv):
         host, rc, out, err = self.listing([batch_pull(7, REVIEW_HEAD)], [review_comment(1, 7, older), review_comment(2, 7, newest)])
         self.assertEqual(rc, 0, out + err)
         self.assertRegex(list_line(self, out, 7), rf"^#7 feat7 {REVIEW_HEAD[:9]} done: ")
+
+    # The guard claims (decision pr-review-record, the limits): a record that says Guard or check no, or Kind delete-only, is read against the
+    # pull request's changed files. A guard path or a rename out of one makes a guard-no record bad; an addition makes a delete-only record bad.
+
+    def test_a_guard_no_record_over_a_guard_path_lists_as_bad(self):
+        host, rc, out, err = self.listing([batch_pull(7, REVIEW_HEAD)], [review_comment(1, 7, record_text(rounds=REVIEW_PASS))],
+                                          files={7: [file_row("hooks/x.py")]})
+        self.assertEqual(rc, 0, out + err)
+        line = list_line(self, out, 7)
+        self.assertRegex(line, rf"^#7 feat7 {REVIEW_HEAD[:9]} bad: ", "a guard-no record over hooks/ did not read bad:\n" + line)
+        self.assertRegex(line, r"(?i)guard or check", "the why does not name the claim:\n" + line)
+        self.assertIn("hooks/x.py", line, "the why does not name the path:\n" + line)
+
+    def test_each_rule_dir_entry_makes_a_guard_no_record_bad(self):
+        # one home of the guard paths: every entry of lint/stale_cites.py RULE_DIRS counts, settings.json as well as the folders
+        import stale_cites
+        for entry in stale_cites.RULE_DIRS:
+            path = entry + "probe.py" if entry.endswith("/") else entry
+            with self.subTest(path=path):
+                host, rc, out, err = self.listing([batch_pull(7, REVIEW_HEAD)], [review_comment(1, 7, record_text(rounds=REVIEW_PASS))],
+                                                  files={7: [file_row(path)]})
+                self.assertEqual(rc, 0, out + err)
+                self.assertRegex(list_line(self, out, 7), rf"^#7 feat7 {REVIEW_HEAD[:9]} bad: ", f"{path} did not make the guard-no record bad")
+
+    def test_a_rename_out_of_a_guard_path_makes_a_guard_no_record_bad(self):
+        host, rc, out, err = self.listing([batch_pull(7, REVIEW_HEAD)], [review_comment(1, 7, record_text(rounds=REVIEW_PASS))],
+                                          files={7: [file_row("docs/a.py", status="renamed", previous="hooks/a.py", additions=0)]})
+        self.assertEqual(rc, 0, out + err)
+        line = list_line(self, out, 7)
+        self.assertRegex(line, rf"^#7 feat7 {REVIEW_HEAD[:9]} bad: ", "a rename out of hooks/ did not read bad:\n" + line)
+        self.assertIn("hooks/a.py", line, "the why does not name the renamed file's old path:\n" + line)
+
+    def test_a_guard_no_record_with_only_docs_paths_stays_done(self):
+        host, rc, out, err = self.listing([batch_pull(7, REVIEW_HEAD)], [review_comment(1, 7, record_text(rounds=REVIEW_PASS))],
+                                          files={7: [file_row("docs/a.md"), file_row("docs/b/c.md")]})
+        self.assertEqual(rc, 0, out + err)
+        self.assertRegex(list_line(self, out, 7), rf"^#7 feat7 {REVIEW_HEAD[:9]} done: ", "a guard-no record over docs/ alone did not read done")
+
+    def test_a_delete_only_record_with_an_addition_lists_as_bad(self):
+        # decision hold-unsafe-after-round-3: a delete-only change adds nothing, so one added line makes its record bad
+        comments = [review_comment(1, 7, record_text(rounds=REVIEW_PASS, kind="delete-only", guard="no"))]
+        host, rc, out, err = self.listing([batch_pull(7, REVIEW_HEAD)], comments, files={7: [file_row("docs/x.md", additions=2, deletions=1)]})
+        self.assertEqual(rc, 0, out + err)
+        line = list_line(self, out, 7)
+        self.assertRegex(line, rf"^#7 feat7 {REVIEW_HEAD[:9]} bad: ", "a delete-only record with an addition did not read bad:\n" + line)
+        self.assertRegex(line, r"(?i)kind|delete-only", "the why does not name the claim:\n" + line)
+        self.assertIn("docs/x.md", line, "the why does not name the path:\n" + line)
+
+    def test_a_delete_only_record_that_says_guard_yes_still_reads_its_files(self):
+        # the changed files are read for every delete-only record, whatever its Guard or check says (the addition check needs them)
+        comments = [review_comment(1, 7, record_text(rounds=REVIEW_PASS, kind="delete-only", guard="yes"))]
+        host, rc, out, err = self.listing([batch_pull(7, REVIEW_HEAD)], comments, files={7: [file_row("docs/x.md", additions=0, deletions=3, status="removed")]})
+        self.assertEqual(rc, 0, out + err)
+        self.assertRegex(list_line(self, out, 7), rf"^#7 feat7 {REVIEW_HEAD[:9]} done: ")
+        self.assertEqual([rel for rel, _ in host.list_calls if rel == "pulls/7/files"], ["pulls/7/files"], "a delete-only record that says yes did not read its files once")
+
+    def test_a_stale_guard_no_record_reads_no_files(self):
+        # the files are read only for a record that names the live head: a stale record keeps its state and reads nothing
+        comments = [review_comment(1, 7, record_text(rounds=REVIEW_PASS, head=REVIEW_OLD_HEAD))]
+        host, rc, out, err = self.listing([batch_pull(7, REVIEW_HEAD)], comments, files={7: [file_row("hooks/x.py")]})
+        self.assertEqual(rc, 0, out + err)
+        self.assertRegex(list_line(self, out, 7), rf"^#7 feat7 {REVIEW_HEAD[:9]} stale: ")
+        self.assertEqual([rel for rel, _ in host.list_calls if rel == "pulls/7/files"], [], "a stale record read its changed files")
+
+    def test_a_guard_hit_on_the_last_page_of_a_full_size_diff_is_read(self):
+        # the files come 100 to a page, so a read of the first page alone misses the hit on the last one
+        big = [file_row(f"docs/n{i}.md") for i in range(250)] + [file_row("hooks/last.py")]
+        host, rc, out, err = self.listing([batch_pull(7, REVIEW_HEAD)], [review_comment(1, 7, record_text(rounds=REVIEW_PASS))],
+                                          files={7: big}, count_gh=True)
+        self.assertEqual(rc, 0, out + err)
+        line = list_line(self, out, 7)
+        self.assertRegex(line, rf"^#7 feat7 {REVIEW_HEAD[:9]} bad: ", "the hit on the last page did not make the guard-no record bad:\n" + line)
+        self.assertIn("hooks/last.py", line, "the why does not name the hit on the last page:\n" + line)
+        self.assertEqual(host.gh_calls.count("pulls/7/files"), 1, "the changed files were not read once across their pages")
+
+    def test_a_failed_files_read_exits_one_and_lists_nothing(self):
+        host, rc, out, err = self.listing([batch_pull(7, REVIEW_HEAD)], [review_comment(1, 7, record_text(rounds=REVIEW_PASS))],
+                                          files_error="reading pulls/7/files from GitHub failed")
+        self.assertEqual(rc, 1, out + err)
+        self.assertEqual(out.strip(), "", out)
 
 
 # The report-only model judge at merge. The merge reads each governed Markdown file at head, selects a file whose line

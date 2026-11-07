@@ -10,7 +10,7 @@ is one line, `path:line: CODE message`.
 A clean run prints `stale-cites: PASS` and exits 0.
 The report (decision stale-cites-at-merge) prints after the findings and never changes the exit code. It names
 each anchor whose sentence changed in CLAUDE.md or the output style, with its rule_mechanisms.json row and the changed
-files under hooks/, lint/, bin/, actions/ and .github/ (no touched or untouched verdict), and each changed code file
+files under hooks/, lint/, bin/, actions/, .github/ and settings.json (no touched or untouched verdict), and each changed code file
 with the decisions whose Home names it and the rows that name it.
 STALE005 (range mode only) reports an added governed line that states a capability by route with no backing. It is
 report only: the exit code does not change (RouteClaimTests).
@@ -2246,6 +2246,17 @@ class CitedExcerptTests(unittest.TestCase):
     def test_a_cite_that_names_no_backing_path_gives_none(self):
         shown = self.stale.cited_excerpt("read the top of the file", self.TEXT)
         self.assertIsNone(shown, "a read cite with no backing path gives %r, want None" % (shown,))
+
+
+class RuleDirsTests(unittest.TestCase):
+    """RULE_DIRS, the one home of the guard, check and CI step paths that merge.py reads for a guard-no review record. settings.json is one of them."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.stale = load_module_under_test()
+
+    def test_settings_json_is_a_rule_dir(self):
+        self.assertIn("settings.json", self.stale.RULE_DIRS, "RULE_DIRS lacks settings.json: %r" % (self.stale.RULE_DIRS,))
 
 
 if __name__ == "__main__":
