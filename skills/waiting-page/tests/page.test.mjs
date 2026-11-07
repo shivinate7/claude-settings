@@ -5482,14 +5482,19 @@ const LEAK = {
 };
 // The waiting collections are export_page.py's COLLECTIONS, the one home: read from the file, never copied here.
 const WAITING = (() => {
-  const tuple = /^COLLECTIONS\s*=\s*\(([^)]*)\)/m.exec(fs.readFileSync(path.join(HERE, "..", "export_page.py"), "utf8"));
-  assert.ok(tuple, "export_page.py has no COLLECTIONS tuple");
-  return [...tuple[1].matchAll(/"([^"]+)"/g)].map((m) => m[1]);
+  // The one line that starts COLLECTIONS, read up to any comment: the tuple must close before that comment. A tuple split
+  // over lines, or a paren inside a comment, then fails here rather than reading a part of the list.
+  const line = /^COLLECTIONS\s*=[^\n]*/m.exec(fs.readFileSync(path.join(HERE, "..", "export_page.py"), "utf8"));
+  assert.ok(line, "export_page.py has no one-line COLLECTIONS tuple, so its names cannot be read");
+  const tuple = /^COLLECTIONS\s*=\s*\(([^)]*)\)\s*$/.exec(line[0].split("#")[0].trimEnd());
+  assert.ok(tuple, "export_page.py's COLLECTIONS tuple does not close on its own line before any comment");
+  const names = [...tuple[1].matchAll(/"([^"]+)"/g)].map((m) => m[1]);
+  assert.ok(names.length > 0, "export_page.py's COLLECTIONS names no collection");
+  return names;
 })();
 // The status part reads steps, topics and meta other than page. A read of anything else is the waiting part's.
 const statusRead = (r) => r[0] === "steps" || r[0] === "topics" || (r[0] === "meta" && r[1] !== "page");
 test("the status part's reads match no waiting collection, whatever the list holds", () => {
-  assert.ok(WAITING.length > 0, "export_page.py's COLLECTIONS names no collection");
   for (const name of WAITING) {
     // meta's waiting doc is page; every other waiting collection is read by doc, and no doc of it is a status read.
     assert.equal(statusRead([name, name === "meta" ? "page" : "doc"]), false, name + " is read as the status part's");

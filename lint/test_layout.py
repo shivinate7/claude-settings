@@ -24,6 +24,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 LINT = os.path.abspath(os.environ.get("LAYOUT_LINT_UNDER_TEST") or HERE)
@@ -1435,6 +1436,29 @@ class WaitingCollections(unittest.TestCase):
         import export_page  # noqa: E402  the one home of the collection list
         self.assertIs(layout.WAITING_COLLECTIONS, export_page.COLLECTIONS,
                       "lint/layout.py WAITING_COLLECTIONS is a copy of the list, not export_page.COLLECTIONS")
+
+    def test_a_lint_copy_with_no_skill_folder_raises_a_layout_error_not_an_import_error(self):
+        """A copy of lint/ alone, as a fixture or an install without the skill makes it: the collection list is a
+        LayoutError that names export_page.py, and an attribute the layout does not have is still an AttributeError."""
+        copy = os.path.join(tempfile.mkdtemp(prefix="lint-copy-", dir=RUN_FOLDER), "lint")
+        os.makedirs(copy)
+        for name in ("layout.py", "layout.json"):
+            shutil.copy(os.path.join(LINT, name), copy)
+        # No export_page may be found: none in sys.modules, and no skill folder on sys.path (the case above put one there).
+        clean_path = [p for p in sys.path if "waiting-page" not in p]
+        with mock.patch.dict(sys.modules), mock.patch.object(sys, "path", clean_path):
+            sys.modules.pop("export_page", None)
+            layout = load("layout_no_skill", os.path.join(copy, "layout.py"))
+            try:
+                getattr(layout, "WAITING_COLLECTIONS")
+            except layout.LayoutError as err:
+                self.assertIn("export_page.py is missing", str(err), "the LayoutError does not name export_page.py")
+            except Exception as err:
+                self.fail("a missing export_page.py raised %s, not a LayoutError: %s" % (type(err).__name__, err))
+            else:
+                self.fail("a missing export_page.py gave the collection list with no error")
+            with self.assertRaises(AttributeError):
+                getattr(layout, "no_such_attribute")
 
 
 if __name__ == "__main__":

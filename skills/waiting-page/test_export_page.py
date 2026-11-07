@@ -185,6 +185,8 @@ def js_collection_calls(code):
         elif c == "`":
             stack.append("template")
             i += 1
+        elif c in "+-" and code.startswith(c + c, i):
+            prev, i = "value", i + 2  # n++ or n-- ends a value, so a slash after it divides; a name after ++ sets its own
         elif c == "/":
             end = None if prev in ("value", ")", "]") else _regex_end(code, i)
             if end is None:
@@ -741,6 +743,14 @@ class PageCollections(unittest.TestCase):
     def test_a_division_is_not_a_regex(self):
         self.assertReads('<script>const half = total / 2; const other = a / b; db.collection("groups");</script>', ["groups"],
                          "a division was read as the start of a regex literal")
+
+    def test_a_division_after_a_postfix_increment_is_not_a_regex(self):
+        self.assertReads('<script>n++ / 2; db.collection("items"); m / 3;</script>', ["items"],
+                         "a division after ++ was read as the start of a regex literal, which hid the call")
+
+    def test_a_division_after_a_postfix_decrement_is_not_a_regex(self):
+        self.assertReads('<script>n-- / 2; db.collection("items"); m / 3;</script>', ["items"],
+                         "a division after -- was read as the start of a regex literal, which hid the call")
 
 
 class Scan(Base):
