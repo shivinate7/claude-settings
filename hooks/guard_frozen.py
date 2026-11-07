@@ -235,6 +235,12 @@ def _mutates_as_command(command: str, words) -> bool:
     return bool(re.fullmatch(MUTATING_COMMAND, command))
 
 
+# An in-place edit of the file a command names: `sed -i`, `perl -pi` / `perl -i.bak`, `ruby -i`. Perl and
+# ruby take `-i` inside a cluster of bare switches (`-pi`, `-ni`), so the letters before it are the bare ones.
+IN_PLACE_COMMANDS = ("sed", "perl", "ruby")
+IN_PLACE = r"\b(?:sed\b[^\n;|&]*-i\b|(?:perl|ruby)\b[^\n;|&]*\s-[nplawsWtTuUcS]*i)[^\n;|&]*"
+
+
 def writes_to(path: str, cmd: str, command=None, words=()) -> bool:
     """True when the command looks like it writes to the path, rather than merely naming it.
 
@@ -252,12 +258,10 @@ def writes_to(path: str, cmd: str, command=None, words=()) -> bool:
     # `command` is the segment's resolved command name, given by a caller that reads a mutating
     # word only in command position (`grep -n install tests/x.py` reads, never writes).
     if command is not None and not _mutates_as_command(command, words):
-        return command == "sed" and bool(re.search(r"\bsed\b[^\n;|&]*-i\b[^\n;|&]*" + target, cmd))
+        return command in IN_PLACE_COMMANDS and bool(re.search(IN_PLACE + target, cmd))
     if re.search(MUTATING_COMMAND + r"[^\n;|&]*" + target, cmd):
         return True
-    if re.search(r"\bsed\b[^\n;|&]*-i\b[^\n;|&]*" + target, cmd):
-        return True
-    return False
+    return bool(re.search(IN_PLACE + target, cmd))
 
 
 # VARIABLE INDIRECTION. In `D=~/.claude/state/handoff/x.md; ...; cp "$S/handoff.md" "$D"` the parse
@@ -831,6 +835,24 @@ def _js_values(groups, env):
     return []
 
 
+# Perl and ruby are read as an unparsable python body is: a literal path beside a write call counts. Perl's
+# two-argument `open(F, ">path")` holds the mode in the literal, so its leading mode marks are cut.
+_PERL_RUBY_HEADER = re.compile(r"(?<![\w.-])(?:perl|ruby)[\d.]*(?:\.exe)?(?![\w.-])")
+_PERL_RUBY_WRITE_CALL = re.compile(
+    r"""\bopen\b[^;\n]*['"]\s*\+?>|\b(?:rename|copy|move)\s*\("""
+    r"""|\b(?:File|IO)\s*\.\s*(?:write|binwrite|rename)\b|\bFile\s*\.\s*open\s*\([^)]*['"][wa+]"""
+    r"""|\bFileUtils\s*\.\s*(?:cp|cp_r|copy|mv|move)\b""")
+
+
+def _perl_ruby_hit(body: str, cwd: str, predicate) -> str:
+    if _PERL_RUBY_WRITE_CALL.search(body):
+        for match in _STRING_LITERAL.finditer(body):
+            text = (match.group(1) or match.group(2)).lstrip("+<>| \t")
+            if text and predicate(text, cwd):
+                return text
+    return ""
+
+
 def _js_hit(body: str, cwd: str, predicate) -> str:
     env = {}
     for match in _JS_ASSIGN.finditer(body):
@@ -889,6 +911,8 @@ def _interpreter_write_hit(raw: str, cwd: str, predicate) -> str:
                     hit = _py_hit(body, cwd, predicate)
                 elif _NODE_HEADER.search(header):
                     hit = _js_hit(body, cwd, predicate)
+                elif _PERL_RUBY_HEADER.search(header):
+                    hit = _perl_ruby_hit(body, cwd, predicate)
                 else:
                     continue
                 if hit:

@@ -368,7 +368,7 @@ while True:
         )
         _loading = "guard_pointer"
         from guard_pointer import (
-            POINTER_HEAD_REASON, head_root, pointer_checkout, pointer_head_hit,
+            POINTER_HEAD_REASON, head_root, moves_head, pointer_checkout, pointer_head_hit,
         )
         _loading = "guard_push_delete"
         from guard_push_delete import (
@@ -3338,10 +3338,13 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
     # 1b. The pointer checkout's HEAD. Placed AFTER rule 1 on purpose: a `git checkout` that
     # names a path is a path operation, rule 1 already judges it, and this rule never sees it, so
     # the shared-tree clause keeps governing those calls unchanged.
-    head_where = head_root(stripped, cwd)
-    for segment in split_segments(stripped):
-        if not segment.strip():
+    head_ends = []
+    head_segments = split_segments(stripped, head_ends)
+    for number, segment in enumerate(head_segments):
+        if not segment.strip() or not moves_head(segment):
             continue
+        # each call is judged in the folder IT runs in: the cds before it, then its own -C
+        head_where = head_root(segment, dir_before_segment(head_segments, number, cwd, head_ends) or cwd)
         matched = pointer_head_hit(segment, head_where)
         if matched:
             refuse(tool, "deny", "pointer-head", POINTER_HEAD_REASON, matched)
@@ -3576,7 +3579,7 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
         refuse(tool, "deny", "conflict-markers", markers_reason.format(file=matched), matched)
 
     # 7. A frozen path.
-    matched = frozen_shell_hit(stripped, cwd)
+    matched = frozen_shell_hit(stripped, cwd) or interpreter_write_hit(raw, cwd, is_frozen)
     if matched:
         refuse(tool, "deny", "frozen-path", FROZEN_REASON, matched)
 
@@ -4746,6 +4749,7 @@ def never_lifted(payload, tool: str, tool_input: dict, cwd: str) -> bool:
         raw = tool_input.get("command", "") or ""
         stripped = strip_heredoc_bodies(raw)
         return bool(git_env_command_hit(raw, stripped) or frozen_shell_hit(stripped, cwd)
+                    or interpreter_write_hit(raw, cwd, is_frozen)
                     or any(t and kills_group_pid(t) for t in map(segment_tokens, split_segments(stripped)))
                     or (_shell_write_hit(stripped, cwd, is_settings_file) and cap_change(raw))
                     or (agent_role(payload) == BUILDER_ROLE and builder_shell_test_hit(raw, stripped, cwd)))

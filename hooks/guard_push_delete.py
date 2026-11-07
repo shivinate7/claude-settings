@@ -362,8 +362,10 @@ def push_ask_hit(args, cwd: str, overrides=None) -> str:
 # abbreviates parameter names, so `-r`, `-rec` and `-recurse` are one flag. The command text is
 # read with backslashes already turned into forward slashes, which is why a drive root reads
 # as `C:/`.
+# A user's home folder written out (`/home/x`, `/Users/x`, `C:/Users/x`) is wide for any user: the rule guards the folder.
 WIDE_TARGET = (
-    r"(?:/\*?|(?:~|\.|\$HOME|\$\{HOME\}|%USERPROFILE%|\$env:USERPROFILE)(?:/\*?)?|\*|[A-Za-z]:/?\*?)"
+    r"(?:/\*?|(?:~|\.|\$HOME|\$\{HOME\}|%USERPROFILE%|\$env:USERPROFILE)(?:/\*?)?|\*|[A-Za-z]:/?\*?"
+    r"|(?:/home|/Users|[A-Za-z]:/[Uu]sers)/[^/\s'\"*]+(?:/\*?)?)"
 )
 # The POSIX `rm -rf` form is read by TOKENS (`rm_delete_hit`), not by a pattern: a quoted `rm -rf /`
 # in an echo or a commit message is text. `RM_RAW` reads raw text only for a segment shlex cannot
@@ -431,6 +433,14 @@ DESTRUCTIVE_DELETE = (
 RM_WIDE_TARGET = re.compile(WIDE_TARGET)
 
 
+def _literal_home(target: str) -> bool:
+    """True when an absolute target is this user's home, a glob of it, or a folder above it: the
+    one matcher `_rm_target_bad` is, judged with no working folder (`/`). Imported late: guard_rm_var
+    comes after this file in the family order."""
+    from guard_rm_var import _rm_target_bad
+    return target.startswith("/") and _rm_target_bad(target, "/")
+
+
 def _rm_args_wide(args) -> str:
     """The first wide target of `rm`'s arguments when they hold a recursive flag, else ''. Long
     flags count, `--` ends the flags, and one letter cluster may hold R or r. Force is no part of it."""
@@ -446,7 +456,7 @@ def _rm_args_wide(args) -> str:
         else:
             recursive = recursive or "r" in arg or "R" in arg
     if recursive:
-        return next((t for t in targets if RM_WIDE_TARGET.fullmatch(t)), "")
+        return next((t for t in targets if RM_WIDE_TARGET.fullmatch(t) or _literal_home(t)), "")
     return ""
 
 
