@@ -1111,10 +1111,31 @@ class RolledOutMark(Tree):
         self.assertTrue(self.layout.rolled_out(self.tree))
         self.assertEqual(self.layout.path(self.tree, "decisions"), "docs/decisions")
 
-    def test_mark_false_or_not_true_is_not_rolled_out(self):
-        for mark in (False, "true", 1):
-            self.put(EXTRAS, json.dumps({"kinds": {}, "rolled-out": mark}))
-            self.assertFalse(self.layout.rolled_out(self.tree), mark)
+    def test_mark_false_is_not_rolled_out(self):
+        self.put(EXTRAS, json.dumps({"kinds": {}, "rolled-out": False}))
+        self.assertFalse(self.layout.rolled_out(self.tree))
+
+    def test_mark_true_false_and_absent_read_as_the_layout_says(self):
+        """The controls beside the unreadable marks: JSON true keeps docs/decisions; JSON false and no key keep decisions."""
+        for data, want in (({"kinds": {}, "rolled-out": True}, "docs/decisions"),
+                           ({"kinds": {}, "rolled-out": False}, "decisions"),
+                           ({"kinds": {}}, "decisions")):
+            with self.subTest(data=data):
+                self.put(EXTRAS, json.dumps(data))
+                self.assertEqual(self.layout.path(self.tree, "decisions"), want)
+
+    def test_a_mark_that_is_not_json_true_or_false_raises(self):
+        """A "rolled-out" that is a string, a number or null raises LayoutError from rolled_out() and path(). It never reads as
+        legacy, which would send the decision check to decisions/ and miss docs/decisions."""
+        for mark in ("true", "false", 1, None):
+            with self.subTest(mark=mark):
+                self.put(EXTRAS, json.dumps({"kinds": {}, "rolled-out": mark}))
+                with open(os.path.join(self.tree, *EXTRAS.split("/")), encoding="utf-8") as handle:
+                    self.assertEqual(json.load(handle).get("rolled-out", "absent"), mark, "the fixture does not hold the mark")  # the scope first
+                with self.assertRaises(self.layout.LayoutError):
+                    self.layout.rolled_out(self.tree)
+                with self.assertRaises(self.layout.LayoutError):
+                    self.layout.path(self.tree, "decisions")
 
     def test_other_keys_read_without_the_mark(self):
         self.put(EXTRAS, json.dumps({"kinds": {}, "kind": "ios", "visibility": "private"}))

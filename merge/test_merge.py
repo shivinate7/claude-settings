@@ -22056,7 +22056,7 @@ class ReviewDecisionKind(DecisionLayout, ReviewGuardEnv):
     def test_docs_only_with_an_unreadable_layout_refuses(self):
         extras = os.path.join(self.co, ".claude", "layout-extras.json")
         self.host.changed = [("docs/debts/a.md", "added")]
-        for text in ("{", json.dumps({"rolled-out": True})):  # not JSON, and JSON with no kinds object
+        for text in ("{", json.dumps({"rolled-out": True}), json.dumps({"kinds": {}, "rolled-out": "true"})):  # not JSON, JSON with no kinds object, and a string mark
             with self.subTest(extras=text):
                 put(extras, text)
                 with self.assertRaises(layout.LayoutError):  # the fixture: the layout really cannot be read
