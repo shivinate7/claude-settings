@@ -41,6 +41,8 @@
 //        T11g: an unknown compiler option is no unreadable tsconfig, so the alias loads home.ts. T11h, T11i, T11j: a test that loads the
 //        file by a relative import passes, even when the tsconfig is unreadable and the test also imports a package, `node:fs`, or a type
 //        from a package. T11k: an unreadable tsconfig with an alias-only test is unknown, and its message names `npm ci`.
+//        T11l: a test that reaches the file only through an index file whose import is an alias, under an unreadable tsconfig: the index read
+//        is unknown. T11m: a `paths` that is a string, with no baseUrl: the option error leaves no paths, so the alias read is unknown.
 //   C0   control, green on the old code: the import reader MAP11 uses reads the fixture's imports the way these cases assume.
 
 import { test } from 'node:test';
@@ -665,4 +667,45 @@ test('T11k. a tsconfig that extends a missing package, and an alias-only test: t
   const r = check(dir);
   mustFail(r, ALIAS);
   assert.match(map11(r), /unknown read: could not read src\/alias\.spec\.ts: .*npm ci/, `the unreadable tsconfig must make the alias read unknown, and its message must name npm ci\n${map11(r)}`);
+});
+
+const ALIAS_INDEX = 'src/alias/index.ts';
+const VIA_INDEX = 'src/viaindex.spec.ts';
+
+test('T11l. a test that reaches home.ts only through an index file whose import is an alias, with an unreadable tsconfig: the index read is unknown, so MAP11 FAILs with `unknown read: could not read src/alias/index.ts`', () => {
+  needFile(REL);
+  const dir = scratchRepo();
+  addTracked(dir, TSCONFIG, T11_TRUNCATED);
+  addTracked(dir, ALIAS_INDEX, "export { homeTitle } from '@/home';\n");
+  insertAfter(dir, CORE, '- `src/pkg/index.ts` ', '- `src/alias/index.ts` — Re-exports the home title through an alias.');
+  addTracked(dir, VIA_INDEX, "import { homeTitle } from './alias';\n\nexport const title = homeTitle;\n");
+  mapTest(dir, VIA_INDEX, 'Tests the home title through the alias index.');
+  setTestedBy(dir, 'src/home.ts', tested(VIA_INDEX));
+  // The scope first: the tsconfig does not parse, the index re-exports home.ts by an alias, and the test reaches the index by a relative import only.
+  assert.ok(existsSync(join(dir, TSCONFIG)), 'tsconfig.json must exist');
+  assert.ok(!parses(readAt(dir, TSCONFIG)), 'the tsconfig must not parse');
+  assert.ok(readAt(dir, ALIAS_INDEX).includes("from '@/home'"), 'the index must re-export home.ts by an alias');
+  assert.ok(readAt(dir, VIA_INDEX).includes("from './alias'"), 'the test must reach the index by a relative import');
+  const r = check(dir);
+  mustFail(r, CORE, VIA_INDEX, 'src/home.ts');
+  assert.match(map11(r), /unknown read: could not read src\/alias\/index\.ts: tsconfig\.json/, `the index file's unread alias must make its read unknown, and the message must name the index file and tsconfig.json\n${map11(r)}`);
+});
+
+const T11M_TSCONFIG = '{\n  "compilerOptions": {\n    "paths": "@/*"\n  }\n}\n';
+
+test('T11m. a tsconfig whose paths is a string, with no baseUrl: the option error leaves no paths, so the alias read is unknown and MAP11 FAILs with `unknown read: could not read src/alias.spec.ts: tsconfig.json cannot be parsed`', () => {
+  needFile(REL);
+  const dir = scratchRepo();
+  addTracked(dir, TSCONFIG, T11M_TSCONFIG);
+  writeAliasSpec(dir, '@/home');
+  setTestedBy(dir, 'src/home.ts', tested(ALIAS));
+  // The scope first: the tsconfig parses and declares paths as a string with no baseUrl, so the bad value is its only fault, and the test imports by the alias only.
+  assert.ok(existsSync(join(dir, TSCONFIG)), 'tsconfig.json must exist');
+  assert.ok(parses(readAt(dir, TSCONFIG)), 'the tsconfig must parse as JSON: the bad paths value is the fault');
+  assert.ok(readAt(dir, TSCONFIG).includes('"paths": "@/*"'), 'the tsconfig must declare paths as a string');
+  assert.ok(!readAt(dir, TSCONFIG).includes('baseUrl'), 'the tsconfig must declare no baseUrl');
+  importsBy(dir, ALIAS, '@/');
+  const r = check(dir);
+  mustFail(r, ALIAS);
+  assert.match(map11(r), /unknown read: could not read src\/alias\.spec\.ts: tsconfig\.json cannot be parsed: .*'paths'/, `the bad paths value must make the alias read unknown, and the message must name tsconfig.json and paths\n${map11(r)}`);
 });
