@@ -1126,7 +1126,7 @@ class All(Base):
         root, fetched, worktree = self.repo(), self.fetched_all(self.docs()), self.out("worktree")
         first = self.run_all(root, fetched, worktree)
         self.assertEqual(first.returncode, 0, shown(first))
-        self.assertVerdictOf(first, self.WAIT, r"changed\s+5\b")  # five docs, one per collection
+        self.assertVerdictOf(first, self.WAIT, r"changed\s+6\b")  # six docs: one per collection, the receipt included
         self.assertVerdictOf(first, self.QUEUE, r"changed\s+1\b")  # one item; the answers are not exported
         second = self.run_all(root, fetched, worktree)
         self.assertEqual(second.returncode, 0, shown(second))
