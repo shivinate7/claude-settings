@@ -1658,6 +1658,28 @@ def path_is_inside(path: str, root: str):
     return (p + os.sep).startswith(r + os.sep)
 
 
+def _checkout_root_by_stat(folder: str) -> str:
+    """The nearest folder at or above `folder` that holds a `.git` entry (a folder, or a linked
+    worktree's file), found by stat alone, else ''. No git is spawned."""
+    while folder:
+        if os.path.exists(os.path.join(folder, ".git")):
+            return folder
+        parent = os.path.dirname(folder)
+        if parent == folder:
+            return ""
+        folder = parent
+    return ""
+
+
+def layout_module():
+    """lint/layout.py, imported from the lint folder beside this file's folder. The one home of the import."""
+    lint = os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "lint")
+    if lint not in sys.path:
+        sys.path.append(lint)
+    import layout
+    return layout
+
+
 # A directory change that is the WHOLE call, as a recovery step: an agent whose shell cwd has left
 # its home must still be able to `cd` back, or it is stuck (the PowerShell tool keeps its cwd
 # between calls). Rule verification-recovery-independent-of-state. Any other word, any chained

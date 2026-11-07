@@ -108,6 +108,19 @@ FROZEN_REASON = (
 )
 
 
+PROTECTED_REASON = (
+    "Rule (protected path): this repo lists this path as one a session does not write. Why: {why}. "
+    "Remedy: change what produces it, or ask the owner to lift the entry in the repo's layout extras file "
+    "(decision protected-path)."
+)
+
+
+def protected_reason(path: str) -> str:
+    """The deny text for `path`, which `is_protected` matched: the entry's why, cleaned for one printed line."""
+    why = guard_core.cap_safe(protected_why(path), 300).strip().rstrip(".") or "the repo lists it"
+    return PROTECTED_REASON.format(why=why)
+
+
 def _literal_resolved(path: str, cwd: str) -> str:
     """Same reading as `_resolved`, but stops short of following a symlink: `..`, a trailing
     slash and case are normalized, the path's own leaf is not.
@@ -213,7 +226,7 @@ def is_project_config(path: str, cwd: str) -> bool:
 # The list holds the PowerShell cmdlets (`Set-Content`, `Out-File`, `Add-Content`, `Remove-Item`) as
 # well as the POSIX commands. Matching folds case, as PowerShell does.
 MUTATING_COMMAND = (
-    r"\b(?i:rm|mv|cp|chmod|truncate|tee|install|ln"
+    r"\b(?i:rm|mv|cp|chmod|truncate|touch|tee|install|ln"
     r"|set-content|add-content|clear-content|out-file|new-item|remove-item|move-item|copy-item"
     r"|rename-item|set-itemproperty|ri|rd|rmdir|del|erase|move|copy|ren)\b"
 )
@@ -658,6 +671,78 @@ def frozen_shell_hit(cmd: str, cwd: str) -> str:
 def project_config_shell_hit(cmd: str, cwd: str) -> str:
     """Return the project config path a shell command writes to, else ''."""
     return _shell_write_hit(cmd, cwd, is_project_config)
+
+
+# ------------------------------------------------------------------ the protected paths
+#
+# A repo lists, in its layout extras file, the files and folders a session may not write (lint/layout.py
+# protected_paths, decision protected-path). The list judged is that of the checkout that holds the TARGET, found by
+# walking up from the resolved target to the nearest `.git`, so a write from one repo into another is judged by the
+# other's list. One guard call is one process, so each checkout's list is read once, here: `_PROTECTED` maps a
+# checkout root to its entries, or to None for a list that could not be read (noted once, then allowed).
+_PROTECTED = {}
+_PROTECTED_WHY = {}   # the path text a predicate matched -> the why of the entry that matched it
+
+
+def _protected_entries(root: str):
+    """The entries of the checkout at `root`, [] for none. A list that cannot be read allows, and says so once."""
+    if root not in _PROTECTED:
+        try:
+            _PROTECTED[root] = guard_core.layout_module().protected_paths(root)
+        except Exception as err:
+            _PROTECTED[root] = []
+            guard_core.record("", "noted", "protected-path", guard_core.cap_safe("unread: %s" % err, 200))
+    return _PROTECTED[root]
+
+
+def _protected_why(reading: str) -> str:
+    """The why of the first entry of the holding checkout's list that `reading` (a normalised absolute path) sits under, else ''."""
+    root = guard_core._checkout_root_by_stat(reading)
+    if not root:
+        return ""
+    rel = norm(reading[len(root):]).strip("/")
+    if not rel:
+        return ""
+    for entry in _protected_entries(root):
+        listed = os.path.normcase(norm(entry["path"]))
+        while listed.startswith("./"):
+            listed = listed[2:]
+        folder = listed.endswith("/")
+        listed = listed.strip("/")
+        if not listed:
+            continue
+        if rel == listed or (folder and rel.startswith(listed + "/")):
+            return entry["why"]
+    return ""
+
+
+def is_protected(path: str, cwd: str) -> bool:
+    """True when the path is one the repo that holds it lists as protected. Both spellings are read, as `is_frozen`
+    reads them: the literal one (no symlink followed) and the resolved one. A backslash reads as a slash. A folder
+    entry matches the folder and what is under it, per path segment (`fixturesX/` is no part of `fixtures/`). The
+    entry's why is kept for `protected_why`."""
+    if not path:
+        return False
+    try:
+        spelled = norm(path)
+        for reading in (_literal_resolved(spelled, cwd), _resolved(spelled, cwd)):
+            why = _protected_why(reading)
+            if why:
+                _PROTECTED_WHY[path] = why
+                return True
+    except Exception:
+        return False
+    return False
+
+
+def protected_why(path: str) -> str:
+    """The why of the entry that `is_protected` matched for `path`, else ''."""
+    return _PROTECTED_WHY.get(path, "")
+
+
+def protected_shell_hit(cmd: str, cwd: str) -> str:
+    """Return the protected path a shell command writes to, else ''. A leading `cd` moves the folder the path is read from."""
+    return _shell_write_hit(cmd, cwd, is_protected, follow_cd=True)
 
 
 # ------------------------------------------------------------------ an interpreter's own writes

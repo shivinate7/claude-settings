@@ -302,6 +302,36 @@ def artifacts(root):
     return out
 
 
+PROTECTED_PATHS = "protected-paths"  # the extras key: a list of {path, why}, the paths a session may not write
+
+
+def protected_paths(root):
+    """[{path, why}] from the "protected-paths" key of `root`'s extras file, in order; [] for a repo with no
+    extras file or no key. `path` is a repo-relative POSIX prefix: a trailing slash names a folder, any other path
+    one file. `why` is the one line the guard quotes when it refuses a write (decision protected-path).
+    LayoutError, naming the key and the entry, for a list that is no list, an entry that is no object, a path
+    that is no non-empty string or lies outside the repo, or a missing or empty why."""
+    found = _repo_keys(root).get(PROTECTED_PATHS)
+    if found is None:
+        return []
+    where = _extras(root)
+    if not isinstance(found, list):
+        raise LayoutError("%s: %s is not a list" % (where, PROTECTED_PATHS))
+    out = []
+    for number, item in enumerate(found, 1):
+        shown = item.get("path") if isinstance(item, dict) else item
+        label = "%s: %s entry %d (%s)" % (where, PROTECTED_PATHS, number, shown)
+        if not isinstance(item, dict):
+            raise LayoutError("%s is not an object with a path and a why" % label)
+        entry_path, why = item.get("path"), item.get("why")
+        if not isinstance(entry_path, str) or not entry_path.strip("/\\"):
+            raise LayoutError("%s has no path" % label)
+        if not isinstance(why, str) or not why.strip():
+            raise LayoutError("%s has no why: say in one line why a session may not write it" % label)
+        out.append({"path": _safe(entry_path, label), "why": why})
+    return out
+
+
 def waiting_page(root):
     """The URL of the waiting page of `root` (skill waiting-page): the url of the registry entry whose role is
     "waiting-page", else the old "waiting-page" key, from its extras file, mark or not.
