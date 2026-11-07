@@ -55,9 +55,9 @@ Each open PR gets exactly one next act. The tool reads it from GitHub alone:
 - Based on, or stacked on, #N: blocked on #N.
 - None of these: `NO NEXT ACT` (red).
 
-The ledger reads no pull request's CI state. A batch line is a done record for the live head; `merge --lane-lint` gates the join, and the integration PR's CI run gates the merge. Its one CI read is main's latest run, for the main-red hold.
+The ledger reads no pull request's CI state. A batch line is a done record for the live head; `merge --lane-lint` gates the join, and the integration PR's CI run gates the merge. Its one CI read is one page of main's runs, judged per workflow, for the main-red hold.
 
-Each next act has an age limit, in one constant, `PR_STATE_AGE_HOURS` in merge/merge.py. Every limit is unmeasured (coordinator pick A, 12:30 CST Nov 7); the coordinator measures the real ages after the label rollout. For batch, the limit is one batch cycle. Blocked on #N takes #N's limit. A next act over its limit is red.
+Each next act has an age limit, in one constant, `PR_STATE_AGE_HOURS` in merge/merge.py. Every limit is unmeasured (coordinator pick A, 12:30 CST Nov 7); the coordinator measures the real ages after the label rollout. Batch is 24 h, a first guess at one batch cycle. Blocked on #N has no limit of its own and is red while #N is red. A next act over its limit is red.
 
 A main-red hold shows on each PR it holds.
 
@@ -94,7 +94,6 @@ Per rule `outcomes-mechanize-rules`:
 
 - Batch runner 8 activity from 2026-11-06 15:15 CST to 2026-11-07 05:00 CST: unknown.
 - The q_max PRs were not sampled.
-- Age limits for lane round n, a wait on an item or debt, and blocked on #N are not set yet. Lane `pr-state-is-on-the-pr` sets them before its red ships.
 - Dated by: a change to how the batch runner reads its queue, or to the next-act read in `merge --reviewed`. Either change rewrites this record.
 
 Kind: build
