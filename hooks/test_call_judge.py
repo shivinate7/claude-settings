@@ -66,6 +66,13 @@ Interface the hook must match:
 - Page item writes (ruled 14:38 CST): a judged item write gets the dedicated past-ruling call first (item 8 alone, Sonnet).
   A refusal denies with rule past-ruling and makes no form-judge call. Otherwise the form judge (Opus) runs, and its
   prompt carries no item 8.
+- Verdict claims in a send (roadmap step verdict-claim-needs-run, decision claims-carry-backing): a send_message or
+  SendMessage whose message holds a forecast word, a verdict word and a subject word (the lists VERDICT_* in the
+  verdict section below) is refused, unless the same turn ran that check's test (a Bash command, read from the
+  payload's transcript_path) or the claim carries a backing cite the backing parser reads (lint/stale_cites.py:
+  `(test path::name)` backs a claim only when the file exists at head). A past-tense report, a claim with no verdict
+  word, a quote inside a code fence and a send with no verdict word pass. Such a send makes no model call and reads
+  no transcript. The rule id is the hook's to pick: the cases check the deny, not the id.
 """
 import atexit
 import json
@@ -124,9 +131,10 @@ def git(repo, *args):
                           capture_output=True, text=True, env=GIT_ENV, check=True)
 
 
-def make_repo(name, decisions=None, steps=None, debts=None, page=PAGE_URL):
+def make_repo(name, decisions=None, steps=None, debts=None, page=PAGE_URL, files=None):
     """`page` is the repo's waiting-page url. None writes no page key: a repo with no page, which layout reads as unknown.
-    A name is cached, so a second call must name the same page: a different one would silently get the first repo."""
+    `files` maps a repo path to its text; they are committed at the end, so the files sit at head. A name is cached, so a
+    second call must name the same page: a different one would silently get the first repo."""
     if name in REPOS:
         if REPO_PAGES[name] != page:
             raise ValueError("make_repo %r was made with page %r, not %r" % (name, REPO_PAGES[name], page))
@@ -165,6 +173,13 @@ def make_repo(name, decisions=None, steps=None, debts=None, page=PAGE_URL):
         git(repo, "add", "roadmap")
         git(repo, "commit", "-q", "-m", "step notes")
         git(repo, "checkout", "-q", "-")
+    if files:
+        for rel, text in files.items():
+            os.makedirs(os.path.dirname(os.path.join(repo, rel)), exist_ok=True)
+            with open(os.path.join(repo, rel), "w", encoding="utf-8") as f:
+                f.write(text)
+        git(repo, "add", *files)
+        git(repo, "commit", "-q", "-m", "fixture files")
     REPOS[name] = repo
     return repo
 
@@ -238,6 +253,22 @@ class _WatchQuestionForm:
 
 
 sys.meta_path.insert(0, _WatchQuestionForm())
+
+
+import sys as _audit_sys
+_WATCHED = os.environ.get("CJ_TRANSCRIPT") or ""
+
+
+def _audit_open(event, args):
+    # Logs each open of the watched transcript, so a case reads whether the child read it. Inert unless CJ_TRANSCRIPT is set.
+    if event != "open" or not _WATCHED or not args or not isinstance(args[0], str):
+        return
+    if os.path.abspath(args[0]) == _WATCHED:
+        with open(os.path.join(os.environ["CJ_LOADED_DIR"], "transcript.log"), "a", encoding="utf-8") as f:
+            f.write("read\n")
+
+
+_audit_sys.addaudithook(_audit_open)
 '''
 
 
@@ -267,6 +298,7 @@ class Run:
         self.procs = len(open(procs, encoding="utf-8").read().split()) if os.path.exists(procs) else 0
         log = os.path.join(base, "config", "guard.log")
         self.log = open(log, encoding="utf-8").read() if os.path.exists(log) else ""
+        self.transcript_reads = read_count(base)
 
     def deny(self):
         if not self.out.strip():
@@ -278,8 +310,20 @@ class Run:
 
 
 def detail(r):
-    return "code=%s out=%r err=%r calls=%d git=%d loaded=%s imports=%s log=%r" % (
-        r.code, r.out[:200], r.err[-200:], len(r.calls), r.git, r.loaded, r.imports, r.log[-200:])
+    return "code=%s out=%r err=%r calls=%d git=%d loaded=%s imports=%s log=%r reads=%d" % (
+        r.code, r.out[:200], r.err[-200:], len(r.calls), r.git, r.loaded, r.imports, r.log[-200:], r.transcript_reads)
+
+
+def read_count(base):
+    """How many opens of the watched transcript the child logged in run folder `base`: one line per open."""
+    log = os.path.join(base, "transcript.log")
+    return len(open(log, encoding="utf-8").read().split()) if os.path.exists(log) else 0
+
+
+def write_stub():
+    os.makedirs(STUB_DIR, exist_ok=True)
+    with open(os.path.join(STUB_DIR, "sitecustomize.py"), "w", encoding="utf-8") as f:
+        f.write(STUB_SITE)
 
 
 def write_pass(cfg, session, body):
@@ -289,17 +333,16 @@ def write_pass(cfg, session, body):
         f.write(body if isinstance(body, str) else json.dumps(body))
 
 
-def run_hook(stdin_text, answer=ALLOW, model_fail=False, pass_=None, past=None, past_fail=False, form_fail=False):
+def run_hook(stdin_text, answer=ALLOW, model_fail=False, pass_=None, past=None, past_fail=False, form_fail=False,
+             watch=None):
     """One hook run. `answer` is the canned model answer. `past` is the dedicated past-ruling call's answer, and
     `past_fail` makes only that call fail; unset, the dedicated call takes `answer`. `form_fail` makes only the form call
-    fail."""
+    fail. `watch` is a transcript path whose opens the child logs (Run.transcript_reads)."""
     RUNS[0] += 1
     base = os.path.join(ROOT, "run-%03d" % RUNS[0])
     cfg = os.path.join(base, "config")
     os.makedirs(cfg)
-    os.makedirs(STUB_DIR, exist_ok=True)
-    with open(os.path.join(STUB_DIR, "sitecustomize.py"), "w", encoding="utf-8") as f:
-        f.write(STUB_SITE)
+    write_stub()
     if pass_ is not None:  # (session id, override file body): what the owner's prompt would write
         write_pass(cfg, *pass_)
     env = {k: v for k, v in os.environ.items() if not k.startswith("CJ_")}
@@ -313,6 +356,8 @@ def run_hook(stdin_text, answer=ALLOW, model_fail=False, pass_=None, past=None, 
         env["CJ_PAST_FAIL"] = "1"
     if form_fail:
         env["CJ_FORM_FAIL"] = "1"
+    if watch:
+        env["CJ_TRANSCRIPT"] = os.path.abspath(watch)
     proc = subprocess.run([sys.executable, HOOK], input=stdin_text, capture_output=True, text=True,
                           encoding="utf-8", errors="replace", env=env, timeout=120)
     return Run(proc, base)
@@ -1646,13 +1691,17 @@ def ruled(slug):
     return json.dumps({"ok": False, "reason": "decisions/%s: ruled 2026-10-30, so the owner is not asked again." % slug})
 
 
-def send_input(tool, message, cwd=INCIDENT_REPO, target=SEND_TARGET, session=SID_A):
-    """One send, as the harness sends it. The mcp tool names its target by session_id, SendMessage by to."""
+def send_input(tool, message, cwd=INCIDENT_REPO, target=SEND_TARGET, session=SID_A, transcript=None):
+    """One send, as the harness sends it. The mcp tool names its target by session_id, SendMessage by to. `transcript`
+    sets the payload's transcript_path, the owner's turn the send belongs to."""
     if tool == SEND_MCP:
         tool_input = {"session_id": target, "message": message}
     else:
         tool_input = {"to": target, "message": message, "summary": "owner question"}
-    return json.dumps({"session_id": session, "tool_name": tool, "tool_input": tool_input, "cwd": cwd})
+    payload = {"session_id": session, "tool_name": tool, "tool_input": tool_input, "cwd": cwd}
+    if transcript:
+        payload["transcript_path"] = transcript
+    return json.dumps(payload)
 
 
 def guard_constant(path, name):
@@ -2015,6 +2064,242 @@ def case_send_tool_names_come_from_shared_names():
         check("%s: imports SEND_TOOLS from shared_names" % label, imports_send_tools(path), label)
 
 
+# ------------------------------------------------------------------ verdict claims in a send (step verdict-claim-needs-run)
+#
+# A send_message or SendMessage whose message states what a named check, guard, hook, test or rule will (or would)
+# refuse, block, deny, catch, allow or pass is refused, unless (a) the same turn ran that check's test, a Bash call read
+# from the payload's transcript_path, or (b) the claim carries a backing cite (decision claims-carry-backing). The gate
+# is narrow, so a false alarm costs little: a past-tense report, a claim with no verdict word, a quote inside a code
+# fence and a send with no verdict word all pass. The backing parser is lint/stale_cites.py, and the turn reader is
+# lint/_transcript.py. The cases import them and build no copy.
+#
+# The word list that cases 1, 4 and 7 pin. A claim sentence holds a forecast word, a verdict word and a subject word.
+# Case 1 holds all three. Case 4 holds no forecast word (a report in the past tense). Case 7 holds a forecast and a
+# subject, and no verdict word. Each case reads its sentence against these lists before it asserts on the hook (P7).
+VERDICT_FORECAST_WORDS = ("will", "would")
+VERDICT_WORDS = ("refuse", "block", "deny", "catch", "allow", "pass")
+VERDICT_SUBJECT_WORDS = ("check", "guard", "hook", "test", "rule")
+# The named check is a test file, so a Bash call that runs it names the same path, and (a) needs no name mapping.
+CLAIM_CHECK = "hooks/test_call_judge.py"
+INCIDENT_SENTENCE = "#1516's check will refuse it without the stop."  # the incident, verbatim: its check has no path
+CLAIM = "The check " + CLAIM_CHECK + " will refuse it without the stop."  # the incident, its check named by path
+PAST_REPORT = "The check " + CLAIM_CHECK + " refused it at 16:20 without the stop."  # case 4
+NO_VERDICT = "The check " + CLAIM_CHECK + " will run in CI."  # case 7
+WOULD_CLAIM = "The check " + CLAIM_CHECK + " would refuse it without the stop."  # a negative: the forecast word "would"
+CITED_FILE = "hooks/test_claim_fixture.py"  # committed at head of the fixture repo, so a test cite to it backs a claim
+CITED = CLAIM[:-1] + " (test " + CITED_FILE + "::case_refuses_it)."  # case 3
+ABSENT_CITED = CLAIM[:-1] + " (test hooks/test_missing.py::case_refuses_it)."  # a negative: no such file at head
+VERDICT_REPO = make_repo("verdict", files={CITED_FILE: "def case_refuses_it():\n    assert True\n"})
+
+
+def has_word(text, words):
+    """True when one of `words` is a whole word of `text`, in any case."""
+    return any(re.search(r"\b%s\b" % re.escape(word), text, re.I) for word in words)
+
+
+def at_head(repo, rel):
+    """True when `rel` is a file in the HEAD tree of `repo`: one git read, in the test."""
+    return subprocess.run(["git", "-C", repo, "cat-file", "-e", "HEAD:" + rel], capture_output=True,
+                          env=GIT_ENV).returncode == 0
+
+
+def write_transcript(name, commands=(), earlier=()):
+    """A transcript of owner turns, in the record shape lint/_transcript.py reads: a user record with string content
+    opens each turn, and each Bash call is a tool_use followed by its tool_result. `earlier` holds the Bash commands of an
+    earlier turn, `commands` those of the current turn, which the send follows. No commands is a turn with no tool call."""
+    records = []
+
+    def turn(cmds):
+        records.append({"type": "user", "message": {"role": "user", "content": "Check the send gate and report."}})
+        for index, command in enumerate(cmds, 1):
+            tool_id = "toolu_%s_%d" % (name, index)
+            records.append({"type": "assistant", "message": {"role": "assistant", "content": [
+                {"type": "tool_use", "id": tool_id, "name": "Bash", "input": {"command": command}}]}})
+            records.append({"type": "user", "message": {"role": "user", "content": [
+                {"type": "tool_result", "tool_use_id": tool_id, "content": "ok", "is_error": False}]}})
+
+    if earlier:
+        turn(earlier)
+    turn(commands)
+    folder = os.path.join(ROOT, "transcripts")
+    os.makedirs(folder, exist_ok=True)
+    path = os.path.join(folder, name + ".jsonl")
+    with open(path, "w", encoding="utf-8") as f:
+        for record in records:
+            f.write(json.dumps(record) + "\n")
+    return path
+
+
+def turn_commands(path):
+    """The Bash commands of the turn the transcript ends in, read by the one turn reader (lint/_transcript.py)."""
+    import _transcript  # the one home of the turn reader
+    _, turn = _transcript.read_turn(path)
+    return [str((u.get("input") or {}).get("command", "")) for r in turn for u in _transcript.tool_uses(r)
+            if u.get("name") == "Bash"]
+
+
+def transcript_probe(path):
+    """Positive control for the transcript watch: a child that only opens `path` must log one read. Case 6's zero reads
+    mean something only when this reads one."""
+    RUNS[0] += 1
+    base = os.path.join(ROOT, "run-%03d" % RUNS[0])
+    os.makedirs(base)
+    write_stub()
+    env = {k: v for k, v in os.environ.items() if not k.startswith("CJ_")}
+    env.update({"PYTHONPATH": STUB_DIR, "CJ_LOADED_DIR": base, "CJ_TRANSCRIPT": os.path.abspath(path)})
+    subprocess.run([sys.executable, "-c", "open(%r, 'rb').read()" % os.path.abspath(path)], env=env,
+                   capture_output=True, timeout=120)
+    return read_count(base)
+
+
+def case_verdict_claim_without_run_or_cite_is_refused():
+    # Case 1, the red one. The incident sentence, verbatim and with its check named by path, in a turn with no tool call
+    # and no cite: refused. The verbatim form has no file to match a run to, so only the cite or a run could pass it.
+    transcript = write_transcript("case1")
+    for label, sentence in (("verbatim", INCIDENT_SENTENCE), ("path-named", CLAIM)):
+        check("verdict claim scope (%s): the sentence holds a forecast, a verdict and a subject word" % label,
+              has_word(sentence, VERDICT_FORECAST_WORDS) and has_word(sentence, VERDICT_WORDS)
+              and has_word(sentence, VERDICT_SUBJECT_WORDS), sentence)
+        for tool in SEND_TOOLS:
+            r = run_hook(send_input(tool, sentence, transcript=transcript), answer=ALLOW)
+            check("verdict claim (%s), no run and no cite, via %s: the send is refused" % (label, tool),
+                  (r.deny() or {}).get("permissionDecision") == "deny", detail(r))
+
+
+def case_verdict_claim_with_its_test_run_this_turn_passes():
+    # Case 2. The same sentence after a Bash call in the same turn that runs the named check's test: not refused.
+    transcript = write_transcript("case2", commands=["verdict python3 " + CLAIM_CHECK])
+    check("verdict claim run scope: the turn's Bash call names the check's test",
+          any(CLAIM_CHECK in command for command in turn_commands(transcript)), turn_commands(transcript))
+    for tool in SEND_TOOLS:
+        r = run_hook(send_input(tool, CLAIM, transcript=transcript), answer=ALLOW)
+        check("verdict claim, its test run this turn, via %s: the send is not refused" % tool,
+              r.code == 0 and r.deny() is None, detail(r))
+
+
+def case_verdict_claim_cited_to_an_existing_file_passes():
+    # Case 3. The same sentence with a (test path::name) cite to a file committed at head: not refused.
+    import stale_cites  # the one home of the cite parser (lint/stale_cites.py)
+    cites = stale_cites.paren_cites(CITED)
+    kind, rest = stale_cites.cite_kind(cites[-1]) if cites else ("", "")
+    check("verdict cite scope: the sentence's cite is a test cite to the fixture file",
+          stale_cites.backing_path(kind, rest) == CITED_FILE, cites)
+    check("verdict cite scope: the cited file is at head of the fixture repo", at_head(VERDICT_REPO, CITED_FILE),
+          CITED_FILE)
+    transcript = write_transcript("case3")
+    for tool in SEND_TOOLS:
+        r = run_hook(send_input(tool, CITED, transcript=transcript, cwd=VERDICT_REPO), answer=ALLOW)
+        check("verdict claim with an existing test cite, via %s: the send is not refused" % tool,
+              r.code == 0 and r.deny() is None, detail(r))
+
+
+def case_past_tense_report_passes():
+    # Case 4. "refused it at 16:20" reports a verdict that happened. It is no forecast: not refused.
+    check("past tense scope: the sentence holds a subject word and no forecast word",
+          has_word(PAST_REPORT, VERDICT_SUBJECT_WORDS) and not has_word(PAST_REPORT, VERDICT_FORECAST_WORDS),
+          PAST_REPORT)
+    transcript = write_transcript("case4")
+    for tool in SEND_TOOLS:
+        r = run_hook(send_input(tool, PAST_REPORT, transcript=transcript), answer=ALLOW)
+        check("past tense report, via %s: the send is not refused" % tool, r.code == 0 and r.deny() is None, detail(r))
+
+
+def case_quoted_claim_in_a_code_fence_passes():
+    # Case 5. A claim quoted inside a fence is a mention, not a claim: not refused.
+    import stale_cites  # the one home of the fence reader (lint/stale_cites.py)
+    message = "Quoting an earlier message for reference only:\n```\n" + CLAIM + "\n```\nNothing here needs your word."
+    rows = message.split("\n")
+    claim_row = rows.index(CLAIM) + 1
+    check("fenced claim scope: the claim row sits inside a code fence",
+          claim_row in stale_cites.fenced_lines(rows), claim_row)
+    transcript = write_transcript("case5")
+    for tool in SEND_TOOLS:
+        r = run_hook(send_input(tool, message, transcript=transcript), answer=ALLOW)
+        check("fenced verdict claim, via %s: the send is not refused" % tool, r.code == 0 and r.deny() is None,
+              detail(r))
+
+
+def case_send_with_no_verdict_word_reads_no_transcript_and_calls_no_model():
+    # Case 6. A send with no verdict word makes zero model calls and reads no transcript. A status line and a full-size
+    # one (P8). The probe first: a child that opens the transcript logs one read, so the zeros below are real.
+    messages = (("a status line", "Lane 4 is green on the stamp check. Nothing needs your word."),
+                ("a full-size status, under the 64 KiB send bound", "Lane 4 log: ruff clean, no finding. " * 1700))
+    transcript = write_transcript("case6", commands=["verdict python3 hooks/test_stamp.py"])
+    probe = transcript_probe(transcript)
+    check("no-verdict control: a child that opens the transcript logs one read", probe == 1, "reads=%d" % probe)
+    for label, message in messages:
+        check("no-verdict scope (%s): the message holds no verdict word" % label, not has_word(message, VERDICT_WORDS),
+              label)
+        for tool in SEND_TOOLS:
+            name = "no-verdict send (%s) via %s" % (label, tool)
+            r = run_hook(send_input(tool, message, transcript=transcript), answer=ALLOW, watch=transcript)
+            check(name + ": no model call", len(r.calls) == 0, detail(r))
+            check(name + ": no transcript read", r.transcript_reads == 0, detail(r))
+            check(name + ": not refused", r.code == 0 and r.deny() is None, detail(r))
+
+
+def case_forecast_without_a_verdict_word_passes():
+    # Case 7. "will run in CI" forecasts no verdict: not refused.
+    check("forecast-only scope: the sentence holds a forecast and a subject word, and no verdict word",
+          has_word(NO_VERDICT, VERDICT_FORECAST_WORDS) and has_word(NO_VERDICT, VERDICT_SUBJECT_WORDS)
+          and not has_word(NO_VERDICT, VERDICT_WORDS), NO_VERDICT)
+    transcript = write_transcript("case7")
+    for tool in SEND_TOOLS:
+        r = run_hook(send_input(tool, NO_VERDICT, transcript=transcript), answer=ALLOW)
+        check("forecast without a verdict word, via %s: the send is not refused" % tool,
+              r.code == 0 and r.deny() is None, detail(r))
+
+
+# The rule's own refusals, beyond cases 1 to 7 (P11): a claim the rule refuses stays refused when its run is not in the
+# turn, its cite names no file at head, or its forecast is "would".
+
+
+def case_verdict_claim_after_an_unrelated_bash_call_is_refused():
+    transcript = write_transcript("neg-unrelated", commands=["ls"])
+    check("unrelated Bash scope: the turn's only Bash call does not name the check",
+          turn_commands(transcript) == ["ls"], turn_commands(transcript))
+    for tool in SEND_TOOLS:
+        r = run_hook(send_input(tool, CLAIM, transcript=transcript), answer=ALLOW)
+        check("verdict claim after an unrelated Bash call, via %s: the send is refused" % tool,
+              (r.deny() or {}).get("permissionDecision") == "deny", detail(r))
+
+
+def case_verdict_claim_after_the_test_ran_in_an_earlier_turn_is_refused():
+    transcript = write_transcript("neg-earlier", earlier=["verdict python3 " + CLAIM_CHECK])
+    check("earlier-turn scope: the test ran in an earlier turn, and this turn has no Bash call",
+          ("verdict python3 " + CLAIM_CHECK) in open(transcript, encoding="utf-8").read()
+          and turn_commands(transcript) == [], turn_commands(transcript))
+    for tool in SEND_TOOLS:
+        r = run_hook(send_input(tool, CLAIM, transcript=transcript), answer=ALLOW)
+        check("verdict claim after its test ran in an earlier turn, via %s: the send is refused" % tool,
+              (r.deny() or {}).get("permissionDecision") == "deny", detail(r))
+
+
+def case_verdict_claim_cited_to_an_absent_file_is_refused():
+    import stale_cites  # the one home of the cite parser (lint/stale_cites.py)
+    cites = stale_cites.paren_cites(ABSENT_CITED)
+    kind, rest = stale_cites.cite_kind(cites[-1]) if cites else ("", "")
+    check("absent cite scope: the cited file is named by the cite and is not at head",
+          stale_cites.backing_path(kind, rest) == "hooks/test_missing.py"
+          and not at_head(VERDICT_REPO, "hooks/test_missing.py"), cites)
+    transcript = write_transcript("neg-absent")
+    for tool in SEND_TOOLS:
+        r = run_hook(send_input(tool, ABSENT_CITED, transcript=transcript, cwd=VERDICT_REPO), answer=ALLOW)
+        check("verdict claim cited to an absent file, via %s: the send is refused" % tool,
+              (r.deny() or {}).get("permissionDecision") == "deny", detail(r))
+
+
+def case_would_claim_is_refused():
+    check("would scope: the sentence holds the forecast word would, a verdict word and a subject word",
+          has_word(WOULD_CLAIM, ("would",)) and has_word(WOULD_CLAIM, VERDICT_WORDS)
+          and has_word(WOULD_CLAIM, VERDICT_SUBJECT_WORDS), WOULD_CLAIM)
+    transcript = write_transcript("neg-would")
+    for tool in SEND_TOOLS:
+        r = run_hook(send_input(tool, WOULD_CLAIM, transcript=transcript), answer=ALLOW)
+        check("verdict claim with would, via %s: the send is refused" % tool,
+              (r.deny() or {}).get("permissionDecision") == "deny", detail(r))
+
+
 def main():
     for case in (case_agent_refusal,case_spawn_prompt_bars_a_lane_waiting_page_write, case_agent_override, case_explore_row_is_vetoed,
                  case_explore_remedy_names_marker, case_agent_fallback_names_marker, case_question,
@@ -2052,7 +2337,16 @@ def main():
                  case_page_form_error_refuses_as_unvetted, case_send_gate_catches_the_markdown_and_bullet_forms,
                  case_send_over_the_cap_keeps_the_goal_and_problem,
                  case_send_with_the_form_only_in_a_fence_makes_no_call,
-                 case_send_tool_names_come_from_shared_names):
+                 case_send_tool_names_come_from_shared_names,
+                 case_verdict_claim_without_run_or_cite_is_refused,
+                 case_verdict_claim_with_its_test_run_this_turn_passes,
+                 case_verdict_claim_cited_to_an_existing_file_passes, case_past_tense_report_passes,
+                 case_quoted_claim_in_a_code_fence_passes,
+                 case_send_with_no_verdict_word_reads_no_transcript_and_calls_no_model,
+                 case_forecast_without_a_verdict_word_passes,
+                 case_verdict_claim_after_an_unrelated_bash_call_is_refused,
+                 case_verdict_claim_after_the_test_ran_in_an_earlier_turn_is_refused,
+                 case_verdict_claim_cited_to_an_absent_file_is_refused, case_would_claim_is_refused):
         try:
             case()
         except Exception as exc:
