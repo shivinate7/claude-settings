@@ -4445,7 +4445,8 @@ RED_RUN_ROOT_VERBS = ("cp",)
 def _own_red_run(payload, primary: str, path: str, root_ok: bool = True) -> bool:
     """True when PATH is inside the caller's own test-author red-run folder
     `<primary>/.claude/worktrees/agent-<its agent id>-<suffix>`. The one home for that test: the
-    `cd` act and the write act of other-checkout, and worktree-home's Write target, all ask it.
+    `cd` act and the write act of other-checkout, worktree-home's Write target, and test-author-scope's
+    write target all ask it.
     PRIMARY is the primary checkout alone, so a folder under a linked worktree never counts. The id and
     its dash match whole, so a sibling whose id only starts with this one does not pass. ROOT_OK False
     leaves the folder itself out: a write passes only strictly inside it, so a delete of the folder
