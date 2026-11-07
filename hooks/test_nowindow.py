@@ -100,6 +100,10 @@ class HelperContract(unittest.TestCase):
             self.h.run(["x"], input="data")
         self.assertNotIn("stdin", rec.call_args.kwargs)  # subprocess.run refuses stdin= beside input=
         self.assertEqual(rec.call_args.kwargs["input"], "data")
+        for given in ("", None):  # an empty input still sets stdin itself; check_output turns None into ""
+            with self.subTest(input=given), on_platform(True):
+                self.h.run(["x"], input=given)
+                self.assertNotIn("stdin", rec.call_args.kwargs)
 
     def test_posix_sets_no_creationflags_key(self):
         for name in WRAPPERS:

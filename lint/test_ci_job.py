@@ -135,7 +135,6 @@ class Steps(Job):
         self.assertFalse(os.path.exists(os.path.join(self.root, "planned.txt")))
 
 
-
 class Skips(Job):
     """A step that skips tests reads SKIP, never PASS, and never hides a FAIL (plan row S8, test-ci-standard plan)."""
 
