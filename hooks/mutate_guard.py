@@ -2772,10 +2772,15 @@ def _loads_module(source: str, stem: str) -> bool:
     directly or through a name bound to such an expression by an assignment in any scope of the file (module, function or
     class level; one name bound in two scopes pools both values). A path that arrives as a function parameter is followed
     to the calls of that function in the same file: a call by a bare name, with the argument by position or by keyword
-    for that parameter, counts as a binding of the parameter, read only inside its own `def` (two functions that share a
-    parameter name keep their calls apart). Not followed, so each reads False: a loader imported from another file, a
-    wrapper that is called through another wrapper's parameter, an attribute call such as `obj.load(..., "widget.py")`
-    or `self.load(...)`.
+    for that parameter, counts as a binding of the parameter, read only inside the def that owns the parameter. Two functions
+    with different names that share a parameter name keep their calls apart.
+    Not followed, so each reads False: a loader imported from another file, a wrapper that is called through another
+    wrapper's parameter, an attribute call such as `obj.load(..., "widget.py")` or `self.load(...)`, a path parameter whose
+    default holds the file when no call passes it (`def load(name, path=WIDGET)` called as `load("x")`), a lambda loader,
+    and a bare alias of the loader (`helper = load`).
+    Known false selections, so each reads True: a bare call `load(path=X)` also feeds a method `Loader.load` of the same
+    name in the file, as every def of that name takes the call, and a loader that reassigns its path before the load reads
+    the argument its calls pass, not the new value.
 
     It assumes module stems are unique across the repository, so a name match is a load of this file (only
     `test_action.py` repeats a stem today). A text that does not parse reads False."""
