@@ -1,0 +1,11 @@
+{
+  "title": "A guard refuses a background check piped through tail with no verdict",
+  "phase": "now",
+  "status": "doing",
+  "order": 266.2,
+  "owner": "coordinator",
+  "lane": "session_013NEJL3ZjZdzrS8tBezxY85",
+  "why": "A background check piped through tail loses its verdict (coordinator, 15:33 CST Nov 7). Rule tokens-run-through-verdict wants each check run through verdict.",
+  "note": "Done check: the guard refuses the piped form red on main, and allows the verdict form. The guard's verdict changes, so this is a build lane.",
+  "updatedAt": "2026-11-07T15:33:00-06:00"
+}
