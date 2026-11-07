@@ -5369,6 +5369,27 @@ class RestRoutes(Env):
                 self.assertNotIn(MERGE_CALL, self.calls())
         self.assertIsNone(self.gh_state("oid"))
 
+    def test_a_base_that_moves_after_the_take_sends_no_put_and_is_a_refusal(self):
+        sh(self.other, "git", "fetch", "-q", "origin")
+        sh(self.other, "git", "push", "-q", "origin", "origin/main:refs/heads/integ")
+        head = self.head()
+        host = self.gh_host()
+        host.pr(7)  # the take reads the base: main
+        self.set(base="integ")  # the pull request is retargeted after the take, before the merge call
+        commit, msg = host.merge(7, "merge", head)
+        self.assertIsNone(commit, msg)  # a proven refusal: confirm reverts the claim on it, and no merge lands on the new base
+        self.assertRegex(msg, "(?i)base changed")
+        self.assertNotIn(MERGE_CALL, self.calls())
+        self.assertIsNone(self.gh_state("oid"))
+
+    def test_a_base_that_holds_from_the_take_to_the_merge_call_is_merged(self):
+        head = self.head()
+        host = self.gh_host()
+        host.pr(7)  # the take reads the base: main, and nothing moves it
+        commit, msg = host.merge(7, "merge", head)
+        self.assertIsNotNone(commit, msg)
+        self.assertIn(MERGE_CALL, self.calls())
+
     def merged_in_state(self, state):
         head = self.head()
         self.set(pr_raw={"mergeable_state": state})
