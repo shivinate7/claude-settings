@@ -4195,10 +4195,9 @@ class PastRulingRelay(SameTurnWriter, unittest.TestCase):
 
 
 
-class AnsweredNeedsSourceTests(unittest.TestCase):
-    """The answered verdict, in report_guard.py's Stop hook. On any turn, each reply line that holds the
-    whole word "answered" must cite a source, outside code spans and fences. Incident F188 (decision
-    answered-needs-source)."""
+class ReplyGuardRuns:
+    """The one home of a Stop-hook run on a reply: the hook, the verdict, and the file and process probes.
+    The answered and posted classes both drive report_guard.py's main through it."""
 
     def hook(self, reply, landed=False, stop_hook_active=False):
         records = [human("ask the owner")]
@@ -4224,6 +4223,40 @@ class AnsweredNeedsSourceTests(unittest.TestCase):
     def assert_allowed(self, reply, **kw):
         out = self.verdict(reply, **kw)
         self.assertIsNone(out, "%r was blocked: %s" % (reply, out and out.get("reason")))
+
+    def guard_run(self, reply, probe_processes=False):
+        """Run report_guard.py's main here. Return (its stdout, every path it opened, the transcript path, the
+        process starts). Starts are the calls to subprocess.Popen and subprocess.run, recorded and not run;
+        they are [] unless probe_processes is set."""
+        import _transcript  # noqa: F401  imported before the watch, so its own load is not counted
+        import layout  # noqa: F401
+        import local_time  # noqa: F401
+        hook = self.hook(reply)
+        opened, real_open = [], open
+
+        def watch(path, mode="r", *args, **kwargs):
+            opened.append(str(path))
+            return real_open(path, mode, *args, **kwargs)
+        out = io.StringIO()
+        with contextlib.ExitStack() as stack:
+            stack.enter_context(mock.patch("builtins.open", watch))
+            stack.enter_context(mock.patch("sys.stdin", io.StringIO(json.dumps(hook))))
+            stack.enter_context(contextlib.redirect_stdout(out))
+            popen = stack.enter_context(mock.patch("subprocess.Popen")) if probe_processes else None
+            run = stack.enter_context(mock.patch("subprocess.run")) if probe_processes else None
+            runpy.run_path(REPORT_GUARD, run_name="__main__")
+        starts = popen.call_args_list + run.call_args_list if probe_processes else []
+        return out.getvalue().strip(), opened, hook["transcript_path"], starts
+
+    def guard_opens(self, reply):
+        out, opened, transcript, _ = self.guard_run(reply)
+        return out, opened, transcript
+
+
+class AnsweredNeedsSourceTests(ReplyGuardRuns, unittest.TestCase):
+    """The answered verdict, in report_guard.py's Stop hook. On any turn, each reply line that holds the
+    whole word "answered" must cite a source, outside code spans and fences. Incident F188 (decision
+    answered-needs-source)."""
 
     # Red: each case below fails until the verdict exists.
 
@@ -4452,23 +4485,6 @@ class AnsweredNeedsSourceTests(unittest.TestCase):
     # Cost: regex only, no file read beyond the transcript. The probe is builtins.open, the pattern
     # test_repo_colour.py uses. The guard runs in this process, so the watch can see its opens.
 
-    def guard_opens(self, reply):
-        """Run report_guard.py's main here and return (its stdout, every path it opened, the transcript path)."""
-        import _transcript  # noqa: F401  imported before the watch, so its own load is not counted
-        import layout  # noqa: F401
-        import local_time  # noqa: F401
-        hook = self.hook(reply)
-        opened, real_open = [], open
-
-        def watch(path, mode="r", *args, **kwargs):
-            opened.append(str(path))
-            return real_open(path, mode, *args, **kwargs)
-        out = io.StringIO()
-        with mock.patch("builtins.open", watch), mock.patch("sys.stdin", io.StringIO(json.dumps(hook))), \
-                contextlib.redirect_stdout(out):
-            runpy.run_path(REPORT_GUARD, run_name="__main__")
-        return out.getvalue().strip(), opened, hook["transcript_path"]
-
     def test_an_cost_no_word_opens_only_the_transcript(self):
         # Catches: the check reads a file, such as a glossary or a record, even when the reply has no "answered".
         for reply in ("Lane 4 is still running.", "The owner answers in chat.", "The lane is answering now."):
@@ -4482,6 +4498,203 @@ class AnsweredNeedsSourceTests(unittest.TestCase):
         out, opened, transcript = self.guard_opens("Answered: no permission rule can lift it.")
         self.assertEqual((json.loads(out) if out else {}).get("decision"), "block", out)
         self.assertEqual(set(opened), {transcript})
+
+
+class PostedNeedsCommentUrlTests(ReplyGuardRuns, unittest.TestCase):
+    """The posted verdict, in report_guard.py's Stop hook (rule posted-needs-comment-url). On any turn, a reply line
+    whose clause claims a posted PR comment or review record must cite that comment's URL on the same line, outside
+    code spans and fences. The replay is a lane reply at 14:54 CST that named a review record posted at 15:01 CST."""
+
+    NEEDLE = "Posted guard (rule posted-needs-comment-url)"
+    INCIDENT = ("> - OTHER: posted the round-1 review record on PR #1500 (button edges and tap height), head "
+                "3ff7b367e (builder sonnet, reviewer haiku FAIL; the design review is still running).")
+    CITED = "The review record was posted on PR #1500: https://github.com/o/r/pull/1500#issuecomment-123."
+
+    # Red: each refused case below fails until the verdict exists. Each green case sits beside a red twin.
+
+    def test_posted_relay_path_blocks_the_incident_line(self):
+        # Replay of the lane reply on an unlanded turn. Catches: a claim of a posted review record with no
+        # comment URL passes.
+        self.assert_blocked(self.INCIDENT, self.NEEDLE, "posted the round-1 review record on PR #1500")
+
+    def test_posted_red_claim_without_a_comment_url_blocks(self):
+        rows = [
+            # Catches: left a comment, with a PR ref and no URL, passes.
+            "I left a comment on #1500.",
+            # Catches: commented needs no noun, and a time is read as a source.
+            "The lane commented on #1500 at 15:01.",
+            # Catches: filed is not read as a past claim verb.
+            "The lane filed the review record on #1500.",
+            # Catches: a /pull/<n> URL with no anchor is read as a source.
+            "The review was posted on https://github.com/o/r/pull/1500.",
+            # Catches: a commit hash is read as a source.
+            "The review record was posted on PR #1500 in commit 3ff7b367e.",
+        ]
+        for line in rows:
+            with self.subTest(line=line):
+                self.assert_blocked(line, self.NEEDLE, line)
+
+    def test_posted_red_comment_url_for_another_pr_blocks(self):
+        # Catches: a comment URL on PR #1499 is read as the source for a claim about PR #1500.
+        line = "The review record was posted on #1500: https://github.com/o/r/pull/1499#issuecomment-1."
+        self.assert_blocked(line, self.NEEDLE, line)
+
+    def test_posted_green_claim_with_a_comment_url_passes(self):
+        rows = [
+            # Catches: an issue-comment anchor on the line's own PR is read as no source.
+            self.CITED,
+            # Catches: a discussion anchor is read as no source.
+            "The review comment was posted on PR #1500: https://github.com/o/r/pull/1500#discussion_r9.",
+            # Catches: a review anchor is read as no source.
+            "The review was posted on PR #1500: https://github.com/o/r/pull/1500#pullrequestreview-9.",
+            # Catches: an issues/ path with an anchor is read as no source.
+            "The review record was posted on #1500: https://github.com/o/r/issues/1500#issuecomment-5.",
+            # Catches: a comment URL on a line that names no #N is read as a mismatch.
+            "The review record was posted: https://github.com/o/r/pull/1499#issuecomment-1.",
+        ]
+        for line in rows:
+            with self.subTest(line=line):
+                self.assert_allowed(line)
+
+    def test_posted_green_exempt_claims_pass_beside_their_red_twins(self):
+        # Each green line differs from its twin only in the exempt word. The twin blocks first, so the pass
+        # shows the exemption, not a check that never reached the line.
+        pairs = [
+            # Catches: will before the verb is read as a claim.
+            ("The review record will be posted on PR #1500.", "The review record is posted on PR #1500."),
+            # Catches: would before the verb is read as a claim.
+            ("The review record would be posted on PR #1500.", "The review record is posted on PR #1500."),
+            # Catches: to be before the verb is read as a claim.
+            ("The review record is to be posted on #1500.", "The review record is posted on #1500."),
+            # Catches: once before the verb is read as a claim.
+            ("Once the review is posted on #1500, hand it to runner 8.",
+             "The review is posted on #1500, hand it to runner 8."),
+            # Catches: not yet before the verb is read as a claim.
+            ("Not yet posted the review on PR #1500.", "We posted the review on PR #1500."),
+            # Catches: no before the verb is read as a claim.
+            ("No review record was posted on PR #1500.", "The review record was posted on PR #1500."),
+            # Catches: never before the verb is read as a claim.
+            ("The lane never posted the review on PR #1500.", "The lane posted the review on PR #1500."),
+            # Catches: should before the verb is read as a claim.
+            ("The record should be posted on PR #1500 after the review.",
+             "The record is posted on PR #1500 after the review."),
+            # Catches: needs before the verb is read as a claim.
+            ("Runner 8 needs the review record posted on PR #1500.",
+             "Runner 8 has the review record posted on PR #1500."),
+            # Catches: until before the verb is read as a claim.
+            ("Wait until the review record is posted on PR #1500.", "The review record is posted on PR #1500."),
+            # Catches: when before the verb is read as a claim.
+            ("When the review record is posted on PR #1500, hand it over.",
+             "The review record is posted on PR #1500, hand it over."),
+            # Catches: after before the verb is read as a claim.
+            ("After the review record is posted on #1500, hand it over.",
+             "The review record is posted on #1500, hand it over."),
+            # Catches: may before the verb is read as a claim.
+            ("The lane may have posted the review record on PR #1500.",
+             "The lane has posted the review record on PR #1500."),
+            # Catches: can before the verb is read as a claim.
+            ("The review record can be posted on PR #1500.", "The review record is posted on PR #1500."),
+            # Catches: must before the verb is read as a claim.
+            ("The review record must be posted on PR #1500.", "The review record is posted on PR #1500."),
+        ]
+        for green, twin in pairs:
+            with self.subTest(line=green):
+                self.assert_blocked(twin, self.NEEDLE, twin)
+                self.assert_allowed(green)
+
+    def test_posted_green_question_passes_beside_its_statement(self):
+        # Catches: a question about whether the record was posted is read as a claim.
+        self.assert_blocked("Was the review record posted on PR #1500.", self.NEEDLE,
+                            "Was the review record posted on PR #1500.")
+        self.assert_allowed("Was the review record posted on PR #1500?")
+
+    def test_posted_green_fenced_claim_passes_beside_a_claim_outside(self):
+        # Catches: a claim inside a fence is read as a claim. The outside claim blocks first, so the scope is shown
+        # reached, and the fenced line is not listed.
+        outside = "The outside review record was posted on #1500."
+        for opener, closer in (("```", "```"), ("```text", "```"), ("~~~", "~~~")):
+            with self.subTest(opener=opener):
+                fenced = "posted the fenced review record on #1500"
+                out = self.assert_blocked("\n".join([opener, fenced, closer, outside]), self.NEEDLE, outside)
+                self.assertNotIn("fenced review record", out["reason"])
+                self.assert_allowed("\n".join([opener, fenced, closer]))
+
+    def test_posted_green_code_span_claim_passes_beside_a_claim_outside(self):
+        # Catches: a claim inside a code span is read as a claim. The outside claim blocks first.
+        spanned = "Log: `posted the spanned review record on #1500`."
+        outside = "The outside review record was posted on #1500."
+        out = self.assert_blocked("\n".join([spanned, outside]), self.NEEDLE, outside)
+        self.assertNotIn("spanned review record", out["reason"])
+        self.assert_allowed(spanned)
+
+    def test_posted_red_backtick_mid_line_opens_no_fence(self):
+        # Catches: a ``` inside a line, and not at its start, opens a fence that hides the lines after it.
+        first = "Typed ``` mid-line, and the review record was posted on #1500."
+        second = "The review record was posted on #1501."
+        self.assert_blocked("\n".join([first, second]), self.NEEDLE, first, second)
+
+    def test_posted_red_lone_quote_opens_no_quoted_phrase(self):
+        # Catches: a lone double quote opens a quoted phrase that hides the claim after it.
+        line = 'The 9" review record was posted on #1500.'
+        self.assert_blocked(line, self.NEEDLE, line)
+        # Catches: a quote on one line pairs with a quote on the next line, so the second line passes.
+        second = "The review record was posted on #1501."
+        self.assert_blocked('The lane wrote "no.\n' + second, self.NEEDLE, second)
+
+    def test_posted_green_rule_name_passes_beside_a_claim(self):
+        # Catches: the hyphen-joined rule name holds "posted" and "comment" and is read as a claim. The claim
+        # on the same line blocks first, so the scope is shown reached.
+        self.assert_blocked("We posted the review record on #1500, see posted-needs-comment-url.", self.NEEDLE,
+                            "We posted the review record on #1500")
+        for line in ("The rule posted-needs-comment-url holds.", "Guard posted-needs-comment-url refused the line."):
+            with self.subTest(line=line):
+                self.assert_allowed(line)
+
+    def test_posted_red_each_offending_line_is_listed_in_one_block(self):
+        # Full size: 25 bare claims and one cited claim. Catches: only the first claim is listed, a claim is
+        # listed twice, the block splits, or the cited line is listed with the red ones.
+        bare = ["The review record was posted on #%d." % (1500 + i) for i in range(25)]
+        out = self.assert_blocked("\n".join(bare + [self.CITED]), self.NEEDLE, bare[0], bare[-1])
+        self.assertNotIn(self.CITED, out["reason"])
+        self.assertEqual(out["reason"].count(self.NEEDLE), 1)
+
+    def test_posted_landed_turn_blocks_above_a_good_report(self):
+        # Catches: the check runs only on unlanded turns, or misses a line above the report.
+        self.assert_blocked(self.INCIDENT + "\n\n" + GOOD_REPORT, self.NEEDLE,
+                            "posted the round-1 review record on PR #1500", landed=True)
+
+    def test_posted_missing_report_block_joins_one_block(self):
+        # Catches: the posted line is dropped when the report is missing, or sent as a second block.
+        out = self.assert_blocked(self.INCIDENT + "\n\nAll done.", "Report-shape guard", self.NEEDLE, landed=True)
+        self.assertEqual(out["reason"].count(self.NEEDLE), 1)
+
+    def test_posted_rewrite_path_blocks_the_incident_line(self):
+        # Catches: a rewrite that keeps the claim passes, so the refusal can be routed around.
+        self.assert_blocked(self.INCIDENT, self.NEEDLE, "posted the round-1 review record on PR #1500",
+                            stop_hook_active=True)
+
+    def test_posted_green_rewrite_path_passes_a_cited_line(self):
+        # Catches: the rewrite check refuses a line that cites its comment URL.
+        self.assert_allowed(self.CITED, stop_hook_active=True)
+
+    # Cost: regex only. The probe is builtins.open, the pattern AnsweredNeedsSourceTests uses, plus subprocess.Popen
+    # and subprocess.run recorded, so a process start inside the check is counted.
+
+    def test_posted_cost_claim_line_opens_only_the_transcript_and_starts_no_process(self):
+        # Catches: the check reads a file, or starts a process, to judge a claim line.
+        out, opened, transcript, starts = self.guard_run(self.INCIDENT, probe_processes=True)
+        self.assertIn(self.NEEDLE, out)
+        self.assertEqual(set(opened), {transcript})
+        self.assertEqual(starts, [])
+
+    def test_posted_cost_no_claim_line_opens_only_the_transcript_and_starts_no_process(self):
+        # Catches: the check reads a file, or starts a process, for a reply with no claim and for a cited claim.
+        for reply in ("The lane is still running.", self.CITED):
+            with self.subTest(reply=reply):
+                out, opened, transcript, starts = self.guard_run(reply, probe_processes=True)
+                self.assertEqual(out, "")
+                self.assertEqual(set(opened), {transcript})
+                self.assertEqual(starts, [])
 
 
 class PendingRefusalTests(unittest.TestCase):
