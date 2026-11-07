@@ -7,8 +7,9 @@ Run it from the repository root:
     python3 hooks/test_route_match_cover.py
 
 Standard library only, and no test runner. The route-row fixture (route_row) comes from hooks/test_refusal_note.py,
-the one home, and is borrowed by name here, not copied. No case writes a file. The run folder that the borrowed
-harness makes at its import is removed in tearDownModule.
+the one home, and is borrowed by name here, not copied. No case writes a file, so this module owns no scratch. The
+run folder that the borrowed harness makes at its import is shared with hooks/test_refusal_note_route.py, which
+removes it, so this module never removes it.
 
 Contract the builder codes against. Each helper is in hooks/route_match.py:
 - act_texts(task) -> list of str. task is a waiting-page task dict. Its "command" is a string, or a dict of variant
@@ -18,7 +19,8 @@ Contract the builder codes against. Each helper is in hooks/route_match.py:
 - rows_covering(rows, texts) -> the row dicts on this surface (route_match.surface()) whose pattern matches any
   piece, in row order, through the matcher's _compile and MAX_* bounds. No outcome filter.
 - cite_covers(rid, rows, texts) -> "covers", "no" or "unknown". A cite covers when its row is in rows_covering.
-  It is "unknown" when texts is empty, when no row on this surface holds rid, or when that row has no pattern.
+  It is "unknown" when texts is empty, when no row on this surface holds rid, or when that row has no pattern or
+  its pattern does not compile.
   An alternate never covers: an alternate names another act.
 - matching_rows(rows, outcome, calls) keeps its behaviour: it matches the whole call target, not each piece.
 
@@ -28,7 +30,6 @@ Scanner rule (building-scanner-respects-strings): not applicable, the patterns a
 """
 import os
 import re
-import shutil
 import sys
 import unittest
 from unittest import mock
@@ -51,10 +52,6 @@ CAUSES = {
     "rows_covering": "no row whose pattern covers an act piece is found",
     "cite_covers": "a route cite is not judged against the act it names",
 }
-
-
-def tearDownModule():
-    shutil.rmtree(base.RUN, ignore_errors=True)  # the harness's run folder, made at its import
 
 
 class CoverTests(unittest.TestCase):
@@ -175,6 +172,16 @@ class CoverTests(unittest.TestCase):
         del row["pattern"]
         self.assertEqual(self.helper("cite_covers")("push-nopattern", [row], texts), "unknown",
                          "a cited row with no pattern is judged, not unknown")
+
+    def test_a_cited_row_whose_pattern_does_not_compile_is_unknown(self):
+        texts = self.repro_texts()
+        self.assertIsNone(route_match._compile("("),
+                          "scope: the pattern '(' compiles, so it is not an uncompilable pattern")
+        cite_covers = self.helper("cite_covers")
+        self.assertEqual(cite_covers("push-broken", [base.route_row("push-broken", "(", "asks")], texts), "unknown",
+                         "a cited row whose pattern does not compile is judged, not unknown")
+        self.assertEqual(cite_covers("push-other", [base.route_row("push-other", "^zzz", "asks")], texts), "no",
+                         "control: a compiling pattern that matches no act piece is not read as unknown")
 
     def test_a_row_only_on_the_other_surface_is_unknown(self):
         texts = self.repro_texts()
