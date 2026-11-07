@@ -1,11 +1,11 @@
 {
-  "title": "Lint every record for glossed cited ids and debt back-links, and rewrite the old records",
+  "title": "Every record glosses its ids and every debt links its decision",
   "phase": "now",
   "status": "doing",
   "order": 263.2,
   "owner": "coordinator",
   "why": "Owner, item 365, 14:41 CST: b, check every record and rewrite the old ones in one lane.",
-  "note": "Page item 365 closes on this lane's done report.",
+  "note": "Page item 365 closes on this lane's done report. Closes notes cites-lack-gloss-unchecked and debt-decision-link-unchecked.",
   "lane": "session_013NEJL1DTMYoLhbUX1pHGkU",
-  "updatedAt": "2026-11-07T14:51:00-06:00"
+  "updatedAt": "2026-11-07T14:52:00-06:00"
 }

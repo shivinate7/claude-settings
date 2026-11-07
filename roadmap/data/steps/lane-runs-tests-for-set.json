@@ -1,0 +1,11 @@
+{
+  "title": "A lane's test run uses the repo's own test selector for its changed files",
+  "phase": "now",
+  "status": "doing",
+  "order": 263.5,
+  "owner": "coordinator",
+  "why": "Incident 14:50 CST 2026-11-07: q_max batch PR #1081 went red on map-skill-same-output.test.mjs, which a hand-picked test list missed.",
+  "note": "Topic lane-checks.",
+  "lane": "session_013NEJL2tvhNJHroYMGnVvnc",
+  "updatedAt": "2026-11-07T14:52:00-06:00"
+}
