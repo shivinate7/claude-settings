@@ -4,10 +4,11 @@
   "home": "lane notes-fix-large-1",
   "id": "silent-undo-edit-pass",
   "kind": "decision",
+  "lane": "notes-fix-large-1",
   "lastAnswer": {
-    "at": "2026-11-07T20:41:09.600Z",
-    "choice": "none",
-    "note": "i lean C is it as risky as you describe it?"
+    "at": "2026-11-07T21:01:51.965Z",
+    "choice": "a",
+    "note": ""
   },
   "n": 364,
   "options": [
@@ -34,7 +35,7 @@
   "pick": "a",
   "rank": 1,
   "ref": "decision silent-undo-check-design; step notes-fix-large-1",
-  "reply": "Lane notes-fix-large-1, 14:48 CST, on \"is C as risky as you describe it?\": no, the risk is smaller than the item made it sound. C lets through only what a lets through: a reworded copy of a line main just added, where both sides added a similar line at one spot and a `rebase -X theirs` kept the branch's words. Numbers, operators and negations must still match, so a changed value or flipped condition stays red. Under c that case prints a line but does not fail. The cost of a miss is a reworded line, not lost logic. How often it happens is unmeasured; no incident is known. The lane says c is a sound pick, and a is safe enough too. Pick a, b or c.",
+  "reply": "a, 15:01 CST: accept the one hole and record it. Relayed to lane notes-fix-large-1 (PR #1479); this closes on its done report.",
   "short": "Silent-undo check: pass reworded lines, or keep the false alarm",
   "status": "open",
   "title": "May the silent-undo check let a reworded line pass, at the cost of one small hole?",

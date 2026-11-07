@@ -5,9 +5,9 @@
   "id": "page-answer-session-field",
   "kind": "decision",
   "lastAnswer": {
-    "at": "2026-11-07T20:41:09.600Z",
-    "choice": "none",
-    "note": "is there something already building a guard here?"
+    "at": "2026-11-07T21:01:51.965Z",
+    "choice": "a",
+    "note": ""
   },
   "n": 367,
   "options": [
@@ -28,9 +28,9 @@
   "pick": "b",
   "rank": 2,
   "ref": "skill waiting-page",
-  "reply": "Lane notes-keep-reverify, 14:48 CST, on \"is there something already building a guard here?\": no. Step answers-write-guard (todo) refuses a session's write to answers, which is a different act. The waiting-page skill says only the owning session reads its items (near line 433), but no hook enforces it, and no open PR names it. Pick a or b.",
+  "reply": "a, 15:01 CST: page answers get a session field, and a session reads only its own. Filed as step page-answer-session-field for the coordinator to start a lane.",
   "short": "Page answers: add a session field, or keep",
-  "status": "open",
+  "status": "closed",
   "title": "Should page answers carry a session, so a session reads only its own?",
   "why": "Lane notes-keep-reverify, from kept note inbox-page-note-other-session."
 }

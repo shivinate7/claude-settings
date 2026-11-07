@@ -5,9 +5,9 @@
   "id": "guard-python-git-discard",
   "kind": "decision",
   "lastAnswer": {
-    "at": "2026-11-07T20:41:09.600Z",
-    "choice": "none",
-    "note": "i feel like maybe we went down this way and then reverted? is that true or no "
+    "at": "2026-11-07T21:01:51.965Z",
+    "choice": "b",
+    "note": ""
   },
   "n": 366,
   "options": [
@@ -28,9 +28,9 @@
   "pick": "b",
   "rank": 2,
   "ref": "decision guard-guards-mistakes-only; rule shared-trees-no-destructive-git",
-  "reply": "Lane notes-keep-reverify, 14:48 CST, on \"did we go down this way and then revert?\": no. Nothing was built and reverted. From the guard's start (739412841, 2026-09-16) a test pinned this as a known hole: git stash inside a Python string was allowed. Commit 8ef6956b4 (2026-10-15) removed only that test case. The guard has never read Python bodies for git discards. Pick a or b.",
+  "reply": "b, 15:01 CST: the gap stays; Claude rarely runs git through Python. Relayed to lane notes-keep-reverify, which closes the note under this answer.",
   "short": "Shared-tree guard: read git reset inside Python, or keep the gap",
-  "status": "open",
+  "status": "closed",
   "title": "Should the shared-tree guard read git discards inside Python code?",
   "why": "Lane notes-keep-reverify, from kept note guard-heredoc-os-system."
 }
