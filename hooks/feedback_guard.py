@@ -74,7 +74,8 @@ a turn end in these cases:
     waiting page, or for an open page item. The cost case proves it;
   - chat-grant-needs-home. An owner block whose text, fenced text left out, holds a grant word
     (GRANT: approval, approve, approved, grant, granted, authorize, authorized, authorised, go ahead,
-    go-ahead, "permission to", "permissions to"; whole words, any case; a bare "permission" is none)
+    go-ahead, "permission to", "permissions to", "ok to merge", "you can merge", "fine to merge",
+    "merge away"; whole words, any case; a bare "permission", "ok" or "I can merge" is none)
     and an act or scope word (ACT: merge, push, delete, deploy, release, publish, always, standing,
     "from now on", and all, any or every right before repo, repos, PR, PRs, branch or branches) needs one real item line of these: a `[ruling]` item
     (its home gets the check above), an open `[page]` item (its send gets the check above), or
@@ -172,7 +173,8 @@ _ONE_ANSWER = r"\d+[ \t]*:?[ \t]*[a-hA-H]\.?(?:[ \t]*\([^)\n]*\))?"
 ANSWER = re.compile(r"%s(?:[ \t]*[,\n]\s*%s)*" % (_ONE_ANSWER, _ONE_ANSWER))
 # Whole words, any case. A bare "permission" is no grant word, so a pasted "Permission denied" passes.
 _WORD = r"(?<![A-Za-z0-9_])(?:%s)(?![A-Za-z0-9_])"
-GRANT = re.compile(_WORD % r"approval|approved?|grant(?:ed)?|authori[sz]ed?|go[ -]ahead|permissions? to",
+GRANT = re.compile(_WORD % r"approval|approved?|grant(?:ed)?|authori[sz]ed?|go[ -]ahead|permissions? to"
+                   r"|ok\s+to\s+merge|you\s+can\s+merge|fine\s+to\s+merge|merge\s+away",
                    re.IGNORECASE)
 # A grant word alone is no grant: the message also names an act or a scope.
 ACT = re.compile(_WORD % r"merge|push|delete|deploy|release|publish|always|standing|from now on"
