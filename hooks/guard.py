@@ -69,8 +69,9 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        (lane-by-slug)
   branch-slug-no-git   deny. A git act that creates a branch whose name has `git` as a whole part
                        (split on `- _ / .`, any case): switch -c|-C, checkout -b|-B, branch <new>,
-                       worktree add -b|-B. A rename, a delete, a listing and a switch to an existing
-                       branch pass. (branch-slug-no-git)
+                       branch -m|-M [<old>] <new> (the last name is the new one), worktree add -b|-B,
+                       and a path-only worktree add (the path's last part names the branch). A delete,
+                       a listing and a switch to an existing branch pass. (branch-slug-no-git)
   machine-wide-kill    deny. A kill by name or pattern, or of a pid that is not a descendant of
                        this session. (a-kill-by-pid-needs-an-owned-pid)
   detached-launch      deny. A command that starts a process and detaches it from the session.
@@ -891,20 +892,54 @@ def flagged_values(args, flags):
 
 
 def branch_new_name(args):
-    """The new name of a `git branch` call, else None for a list, delete, rename, copy or edit."""
-    words, ended = [], False
+    """The new name of a `git branch` call, else None for a list, delete, copy or edit. A rename
+    (`-m|-M [<old>] <new>`) names its new branch with its last word, so a lone word is the new name."""
+    words, ended, rename = [], False, False
     for arg in args:
         if ended or not arg.startswith("-") or arg == "-":
             words.append(arg)
         elif arg == "--":
             ended = True
+        elif arg in ("-m", "-M", "--move"):
+            rename = True
         elif arg.startswith("--track=") or arg in BRANCH_NEW_FLAGS:
             continue
         elif not arg.startswith("--") and set(arg[1:]) <= set("ftq"):
             continue
+        elif not arg.startswith("--") and set(arg[1:]) <= set("ftqmM") and set(arg[1:]) & set("mM"):
+            rename = True
         else:
             return None
-    return words[0] if words else None
+    if not words:
+        return None
+    return words[-1] if rename else words[0]
+
+
+# `worktree add` flags that take a value, and the flags that leave no branch named after the path.
+WORKTREE_VALUE_FLAGS = ("-b", "-B", "--reason")
+WORKTREE_NO_BRANCH_FLAGS = ("--detach", "--orphan")
+
+
+def worktree_path_branch(args):
+    """The branch a path-only `worktree add <path>` creates: the path's last part. None when the call
+    has a commit-ish, `-b|-B`, `--detach` or `--orphan`, or no path. The guard reads no refs, so any
+    path-only add counts as creating (decision branch-slug-no-git)."""
+    words, cursor, ended = [], 0, False
+    while cursor < len(args):
+        arg = args[cursor]
+        cursor += 1
+        if ended or not arg.startswith("-") or arg == "-":
+            words.append(arg)
+        elif arg == "--":
+            ended = True
+        elif arg in WORKTREE_NO_BRANCH_FLAGS:
+            return None
+        elif arg in WORKTREE_VALUE_FLAGS:
+            cursor += 1
+    if len(words) != 1:
+        return None
+    parts = [part for part in re.split(r"[/\\]", words[0]) if part]
+    return parts[-1] if parts else None
 
 
 def git_named_branch_hit(segment: str) -> str:
@@ -917,6 +952,9 @@ def git_named_branch_hit(segment: str) -> str:
             names, act = ([new] if new else []), subcommand
         elif subcommand == "worktree" and args and args[0] == "add":
             names, act = flagged_values(args[1:], ("-b", "-B")), "worktree add"
+            if not names:
+                path_branch = worktree_path_branch(args[1:])
+                names = [path_branch] if path_branch else []
         else:
             continue
         if any(git_named(name) for name in names):
