@@ -3,7 +3,8 @@
     "allow": [
       "Bash(~/.claude/bin/merge * --confirm)",
       "Bash(~/.claude/bin/merge * --confirm *)",
-      "Bash(~/.claude/bin/merge --role batch-runner)"
+      "Bash(~/.claude/bin/merge --role batch-runner)",
+      "Bash(~/.claude/bin/merge --role solo-owner)"
     ]
   }
 }
