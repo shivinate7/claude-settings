@@ -811,6 +811,22 @@ class ModuleLevelRuleNameTests(unittest.TestCase):
                 found = self.ids(src)  # a raise here is an error, not a pass
                 self.assertEqual(found, set(), "%s names an id with no module-level assignment" % label)
 
+    def test_a_name_bound_only_in_a_nested_function_does_not_shadow_the_outer_call(self):
+        src = ('TIMEOUT = "judge-timeout"\n'
+               'def outer():\n'
+               '    def helper():\n'
+               '        TIMEOUT = "other"\n'
+               '    record(t, "d", TIMEOUT, m)\n')
+        self.assertEqual(self.ids(src), {"judge-timeout"},
+                         "a name bound only inside a nested def hides the module constant from the outer call")
+
+    def test_a_parameter_named_like_the_module_constant_shadows_it(self):
+        src = ('TIMEOUT = "judge-timeout"\n'
+               'def f(TIMEOUT):\n'
+               '    record(t, "d", TIMEOUT, m)\n')
+        self.assertEqual(self.ids(src), set(),
+                         "a parameter of the calling function does not shadow the module constant")
+
     def test_a_name_assigned_twice_at_module_level_is_refused_at_its_call(self):
         src = 'R = "one-rule"\nR = "two-rule"\nrecord(t, "d", R, m)\n'
         with self.assertRaises(ValueError) as cm:
