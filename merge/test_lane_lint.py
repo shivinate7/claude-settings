@@ -5,8 +5,8 @@ Run: python3 merge/test_lane_lint.py
 The lint is bin/ci-job's `checks --lint`, reached through merge.CI_JOB. Each case points CI_JOB at a stub that
 prints scripted step lines and exits with a scripted code, so no real lint runs. The stub logs each call, so a
 case reads what the tool ran, in which tree, at which head. The repo builder, the fakes and the cloud-session
-fixture come from merge/test_merge.py: a case extends that fixture, it does not copy it. The draft step's ready gate
-(class ReadyGate) runs the same stub, through CiJobStub.
+fixture come from merge/test_merge.py: a case extends that fixture, it does not copy it. The draft step's ready check
+(class ReadyChecks) runs the same stub, through CiJobStub.
 The SIGTERM case runs merge in a subprocess through HARNESS, which names the same stub; it is the one case that does not patch CI_JOB.
 Temp files: this run's folder (lint/_test_temp.py), removed at exit.
 """
@@ -463,11 +463,11 @@ class LaneLint(CiJobStub, tm.CloudSession):
         self.assertFalse(os.path.exists(self.role_file), "a refused role wrote the role file")
 
 
-class ReadyGate(CiJobStub, tm.RecordsEnv):
-    """The ready gate of the draft step (merge.draft_step): before a draft goes ready, the repo's declared merge.readyChecks
+class ReadyChecks(CiJobStub, tm.RecordsEnv):
+    """The ready check of the draft step (merge.draft_step): before a draft goes ready, the repo's declared merge.readyChecks
     run through ci-job as `checks --step NAME ... --base origin/<base>`, on the tree that would be pushed. A FAIL or an
     unknown stops the draft: nothing pushed, no ready mark, and no unknown-ok flag. The stub logs each run. Each red case
-    asserts that run first, so a missing gate fails there by name. On main a declared key is refused as an unknown field
+    asserts that run first, so a missing check fails there by name. On main a declared key is refused as an unknown field
     before the draft step runs, so the red cases never reach the draft step on main."""
 
     def setUp(self):
@@ -506,7 +506,7 @@ class ReadyGate(CiJobStub, tm.RecordsEnv):
         self.use_ci_job([("FAIL", "check invariants")], 1)
         refs_before = self.refs()
         rc, out = self.draft_confirm()
-        self.assertEqual(len(self.lint_calls()), 1, "the ready gate did not run the declared step once: " + out)
+        self.assertEqual(len(self.lint_calls()), 1, "the ready check did not run the declared step once: " + out)
         self.assertEqual(rc, 1, out)
         self.assertEqual(self.refs(), refs_before, "a page was pushed on a red ready check")
         self.assertEqual(self.host.readies, [], "the pull request went ready on a red ready check")
@@ -520,15 +520,15 @@ class ReadyGate(CiJobStub, tm.RecordsEnv):
         before = self.head()
         rc, out = self.draft_confirm()
         runs = self.lint_calls()
-        self.assertEqual(len(runs), 1, "the ready gate ran ci-job %d times, want once: %s" % (len(runs), out))
-        self.assertNotEqual(runs[0]["head"], before, "the gate ran on the old head, not on the page commit it would push")
+        self.assertEqual(len(runs), 1, "the ready check ran ci-job %d times, want once: %s" % (len(runs), out))
+        self.assertNotEqual(runs[0]["head"], before, "the check ran on the old head, not on the page commit it would push")
         argv = runs[0]["argv"]
         self.assertEqual(argv[:1], ["checks"], out)
         self.assertNotIn("--lint", argv, out)
         self.assertEqual([argv[i + 1] for i, arg in enumerate(argv) if arg == "--step"], names, out)
         self.assertIn("--base", argv, out)
         self.assertEqual(argv[argv.index("--base") + 1], "origin/main", out)
-        self.assertEqual(runs[0]["head"], self.head(), "the gate checked a tree other than the one pushed")
+        self.assertEqual(runs[0]["head"], self.head(), "the ready check ran on a tree other than the one pushed")
         self.assertEqual(rc, 0, out)
         self.assertEqual(self.host.readies, [7], out)
         self.assertEqual(self.show("feat", merge.RECORDS_PAGE), tm.page("gap-one").strip())
@@ -540,8 +540,8 @@ class ReadyGate(CiJobStub, tm.RecordsEnv):
         before = self.head()
         rc, out = self.draft_confirm()
         runs = self.lint_calls()
-        self.assertEqual(len(runs), 1, "the ready gate ran ci-job %d times, want once: %s" % (len(runs), out))
-        self.assertEqual(runs[0]["head"], before, "the gate checked a tree other than the PR head")
+        self.assertEqual(len(runs), 1, "the ready check ran ci-job %d times, want once: %s" % (len(runs), out))
+        self.assertEqual(runs[0]["head"], before, "the ready check ran on a tree other than the PR head")
         self.assertEqual(rc, 0, out)
         self.assertEqual(self.host.readies, [7], out)
 
@@ -555,7 +555,7 @@ class ReadyGate(CiJobStub, tm.RecordsEnv):
         self.assertEqual(rc, 1, out)
         self.assertEqual(self.refs(), refs_before, "a page was pushed on an unknown ready check")
         self.assertEqual(self.host.readies, [], "the pull request went ready on an unknown ready check")
-        self.assertNotIn("--lint-unknown-ok", out, "the ready gate offers the lint's unknown-ok flag")
+        self.assertNotIn("--lint-unknown-ok", out, "the ready check offers the lint's unknown-ok flag")
         self.assertNotIn("ready after its draft run shows", out)
 
     def test_a_declared_step_that_fails_on_a_non_default_base_still_stops_the_draft(self):
@@ -563,10 +563,10 @@ class ReadyGate(CiJobStub, tm.RecordsEnv):
         self.use_ci_job([("FAIL", "check invariants")], 1)
         rc, out = self.draft_confirm()
         runs = self.lint_calls()
-        self.assertEqual(len(runs), 1, "the ready gate did not run on a non-default base: " + out)
+        self.assertEqual(len(runs), 1, "the ready check did not run on a non-default base: " + out)
         self.assertIn("--base", runs[0]["argv"], out)
         self.assertEqual(runs[0]["argv"][runs[0]["argv"].index("--base") + 1], "origin/integ", out)
-        self.assertEqual(runs[0]["head"], self.head("feat"), "the gate checked a tree other than the PR head")
+        self.assertEqual(runs[0]["head"], self.head("feat"), "the ready check ran on a tree other than the PR head")
         self.assertEqual(rc, 1, out)
         self.assertEqual(self.host.readies, [], out)
 
@@ -577,7 +577,7 @@ class ReadyGate(CiJobStub, tm.RecordsEnv):
         self.use_ci_job([("FAIL", "check invariants")], 1)
         refs_before = self.refs()
         rc, out = self.draft_confirm()
-        self.assertEqual(len(self.lint_calls()), 1, "the Record-claim head's ready gate did not run: " + out)
+        self.assertEqual(len(self.lint_calls()), 1, "the Record-claim head's ready check did not run: " + out)
         self.assertNotIn("ready by hand", out)
         self.assertEqual(rc, 1, out)
         self.assertEqual(self.refs(), refs_before, "a push on a red ready check")
