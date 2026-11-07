@@ -1572,8 +1572,6 @@ def write_marker(hook, idx):
 # A relayed question (spec past-rulings): a coordinator puts a lane's question in its reply, under Input Needed or as
 # a prose line that ends in `?`, so neither check in hooks/call_judge.py sees it. This Stop hook checks it, SYNC, with
 # the same candidates and the same item 8 as the question judge, and one more rule: option keys (question-keys).
-# Cost: one git process and one Sonnet call (15 s), or two on a timeout (15 s + 10 s, start-up unmeasured), on a Stop whose
-# reply asks something; none on any other Stop.
 RELAY_RULE_REASON = (
     "Past-ruling guard (rule past-ruling): %s Remedy: drop the question, or add a `Based on (ruling): <id>` line "
     "that names that ruling and says why the owner is asked again.")
@@ -1677,6 +1675,9 @@ def past_ruling_problem(asked, cwd):
               "it asks.\n8. " + call_judge.PAST_RULING_ITEM + "\nReply JSON only: {\"ok\": true} or {\"ok\": false, "
               "\"reason\": \"<the listed id, the ruling's date, and what it decides, one line>\"}."
               + question_form.candidates_block(candidates, unknown))
+    # Cost: one git process and one Sonnet call (15 s), or two on a timeout (15 s + 10 s), on a Stop whose reply asks
+    # something; none on any other Stop. The caps leave out this script's python start, the reads in past_rulings
+    # (10 s timeouts) and decision_watch._judge_isolation: unmeasured.
     verdict, error = call_judge.judge_question(prompt, call_judge.PAST_RULING_MODEL, call_judge.PAST_RULING_TIMEOUT,
                                                True, retry_timeout=call_judge.PAST_RULING_RETRY_TIMEOUT)
     if error:

@@ -130,7 +130,7 @@ PAST_RULING_ITEM = (
 )
 # The question-judge call of lint/report_guard.py (a Stop whose reply asks the owner something): Sonnet, 15 s.
 PAST_RULING_MODEL, PAST_RULING_TIMEOUT = SPAWN_MODEL, 15
-# The one retry of that call after a timeout (owner ask ask-mw6pwif5wv, coordinator pick 2026-11-07 13:00 CST). It is
+# The one retry of that call after a timeout (owner ask ask-mw6pwif5wv, coordinator pick, 2026-11-07 12:33 CST). It is
 # shorter than the first try so 15 + 10 plus an unmeasured start-up allowance fits the Stop hook's 35 s timeout.
 PAST_RULING_RETRY_TIMEOUT = 10
 # The seven items, then the eighth, a question to the owner is judged on: one text, for the chat box and the page.
