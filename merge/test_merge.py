@@ -12708,6 +12708,27 @@ def cited_lines(n):
     return "# Cloud notes\n\n" + "Cloud sessions cannot push to main (read src/widget.py:4).\n" * n
 
 
+TAGGED_FILLER = "and the reason is written out in full so that a reader can check it. " * 3  # a tagged line of about 360 bytes in the prompt
+
+
+def tagged_doc(tags):
+    """A Markdown file of a heading and one cited line per tag. Each line opens with its tag, so a case counts the lines a call holds by
+    tag: a line number repeats across files, a tag does not."""
+    rows = ["%s: cloud sessions cannot push to main. %s(read src/widget.py:4)." % (tag, TAGGED_FILLER) for tag in tags]
+    return "# Cloud notes\n\n" + "\n".join(rows) + "\n"
+
+
+def tags_in(prompt):
+    """The tag each numbered row of a judge prompt opens with, in order."""
+    return re.findall(r"^Line \d+: (\S+?): ", prompt, re.M)
+
+
+def holds_every_line(prompt):
+    """An answer that holds every line the prompt numbers, read from its `Line N:` rows."""
+    numbers = [int(n) for n in re.findall(r"^Line (\d+): ", prompt, re.M)]
+    return {"verdicts": [{"line": n, "verdict": "holds", "why": "the cited file agrees"} for n in numbers]}, None
+
+
 REAL_INVOKE_MODEL = decision_watch.invoke_model  # captured at import, before the test base swaps in its stub
 REAL_RUN = decision_watch._nowindow.run  # captured at import, before the test base wraps it
 
@@ -13367,6 +13388,72 @@ class ProseJudge(Env):
             self.assertLessEqual(len(got), 40, "the call carries %d lines of %s, want at most 40" % (len(got), path))
         size = len(prompt.encode("utf-8"))
         self.assertLess(size, 12 * 1024, "the prompt is %d bytes for three named paths, want under 12 KB" % size)
+
+    def test_five_small_files_fit_in_one_model_call(self):
+        # Five files of one cited line each are far under one call's budget, so one call judges them all. The per-file plan made three
+        # calls at the cap and counted two files past it.
+        tags = ["%s-l1" % x for x in "abcde"]
+        self.setup_range({"docs/notes/%s.md" % x: tagged_doc([tag]) for x, tag in zip("abcde", tags)}, {BACKING: BACKING_TEXT})
+        stub, rc, out = self.judge(holds_every_line, cap=None)
+        self.assertTrue(stub.prompts, "no model call: the five files were not selected")
+        self.assertEqual(len(stub.prompts), 1, "model calls: %d for five small files, want 1: the files pack into one call" % len(stub.prompts))
+        self.assertEqual(sorted(t for p in stub.prompts for t in tags_in(p)), sorted(tags), "the one call does not hold each file's line once")
+        self.assertEqual(prose_unknown_lines(out), [], "a line of the five files is not judged\n" + out)
+        self.assertEqual(rc, 0, out)
+
+    def test_a_file_past_one_call_budget_splits_across_two_calls_with_each_line_once(self):
+        # 92 lines of about 360 bytes are more than one call's budget. The file splits at a line boundary: two calls, each line in one.
+        tags = ["big-l%02d" % n for n in range(1, 93)]
+        self.setup_range({PROSE: tagged_doc(tags)}, {BACKING: BACKING_TEXT})
+        stub, rc, out = self.judge(holds_every_line, cap=None)
+        self.assertTrue(stub.prompts, "no model call: the file was not selected")
+        self.assertEqual(len(stub.prompts), 2, "model calls: %d for one file of 92 long lines, want 2: the file splits at a line boundary" % len(stub.prompts))
+        self.assertEqual(sorted(t for p in stub.prompts for t in tags_in(p)), sorted(tags), "the calls do not hold each line of the file exactly once")
+        self.assertEqual(prose_unknown_lines(out), [], "a line of the file is not judged\n" + out)
+        self.assertEqual(rc, 0, out)
+
+    def test_lines_no_call_holds_are_counted_on_the_past_cap_line(self):
+        # 400 lines of about 360 bytes are more than three calls hold. A line that fits no call is counted on the past-cap line, never dropped.
+        tags = ["cap-l%03d" % n for n in range(1, 401)]
+        self.setup_range({PROSE: tagged_doc(tags)}, {BACKING: BACKING_TEXT})
+        stub, rc, out = self.judge(holds_every_line, cap=None)
+        self.assertTrue(stub.prompts, "no model call: the file was not selected")
+        judged = [t for p in stub.prompts for t in tags_in(p)]
+        self.assertEqual(len(set(judged)), len(judged), "a line is in two calls")
+        self.assertLess(len(judged), len(tags), "all 400 lines went into calls, so none is counted on the past-cap line: the calls are not bounded")
+        unjudged = len(tags) - len(judged)
+        self.assert_unknown_count(out, unjudged, [(unjudged, "past the call cap")])
+        self.assertEqual(rc, 0, out)
+
+    def test_a_batch_55_shaped_merge_judges_every_line_within_the_cap(self):
+        # Three small files sort before one 92-line file, so the per-file plan sent the big file past the cap. Every line is judged within the cap.
+        small = {"docs/notes/%s-small.md" % x: tagged_doc(["%s-l1" % x, "%s-l2" % x]) for x in "abc"}
+        big = {"docs/notes/z-big.md": tagged_doc(["big-l%02d" % n for n in range(1, 93)])}
+        expected = sorted(["%s-l%d" % (x, n) for x in "abc" for n in (1, 2)] + ["big-l%02d" % n for n in range(1, 93)])
+        self.setup_range({**small, **big}, {BACKING: BACKING_TEXT})
+        stub, rc, out = self.judge(holds_every_line, cap=None)
+        self.assertTrue(stub.prompts, "no model call: the files were not selected")
+        self.assertLessEqual(len(stub.prompts), merge.PROSE_JUDGE_MAX_CALLS, "model calls: %d, want at most the cap of %d" % (len(stub.prompts), merge.PROSE_JUDGE_MAX_CALLS))
+        judged = sorted(t for p in stub.prompts for t in tags_in(p))
+        self.assertEqual(judged, expected, "lines judged: %d of %d, want all: the big file sits past the call cap" % (len(judged), len(expected)))
+        self.assertEqual(prose_unknown_lines(out), [], "a line is not judged\n" + out)
+        self.assertEqual(rc, 0, out)
+
+    def test_a_line_alone_over_one_call_budget_gets_a_call_of_its_own(self):
+        # One line of about 100 KB, with its excerpts, is over any one call's budget. It goes in a call of its own; the small lines
+        # are judged in calls that do not hold it.
+        huge = "huge-l1: cloud sessions cannot push to main. " + "the reason is written out in full, " * 3000 + "(read src/widget.py:4)."
+        small = ["small-l%d" % n for n in (1, 2, 3)]
+        doc = "# Cloud notes\n\n" + huge + "\n" + "\n".join("%s: cloud sessions cannot push to main. (read src/widget.py:4)." % t for t in small) + "\n"
+        self.setup_range({PROSE: doc}, {BACKING: BACKING_TEXT})
+        stub, rc, out = self.judge(holds_every_line, cap=None)
+        self.assertTrue(stub.prompts, "no model call: the file was not selected")
+        holding = [tags_in(p) for p in stub.prompts if "huge-l1" in tags_in(p)]
+        self.assertEqual(len(holding), 1, "calls holding the 100 KB line: %d, want 1" % len(holding))
+        self.assertEqual(holding[0], ["huge-l1"], "the call holding the 100 KB line also holds %d other lines, want the line alone: a line over one budget gets a call of its own" % (len(holding[0]) - 1))
+        self.assertEqual(sorted(t for p in stub.prompts for t in tags_in(p)), sorted(["huge-l1"] + small), "a line is not in exactly one call")
+        self.assertEqual(prose_unknown_lines(out), [], "a line is not judged\n" + out)
+        self.assertEqual(rc, 0, out)
 
 
 NAMED = "hooks/x.py"  # a tracked code path that a prose line names in backticks
