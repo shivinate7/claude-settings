@@ -4819,10 +4819,10 @@ class AgentEndFinishedTreeTests(_AgentEndFixture):
     14:43 CST: the agent's own SubagentStop row is in the payload log and is newer than its subagent
     transcript, the agent is not listed as running in the payload's background_tasks (a missing or
     malformed field keeps), `<transcript minus .jsonl>/subagents/agent-<id>.jsonl` has been idle 30 min
-    or more, and the tree is clean and pushed. The coordinator's pick B of 2026-11-07 15:05 CST sets
-    what follows: no process can be shown to be the agent's own, so the reaper stops nothing. A finished
-    tree with no process inside is unlocked and removed. A finished tree with any process inside keeps
-    both the tree and the process.
+    or more, and the tree is clean and pushed. Processes inside a finished tree are stopped only when each
+    holds the agent's CLAUDE_AGENT_ID, the call's own depth-0 bash excepted. These cases run unmarked, so no
+    process is proven the agent's own: a finished tree with no process inside is unlocked and removed, and
+    one with any process inside is kept with its process.
 
     The red case is a finished, host-locked tree with no process inside, which must be removed. Each keep
     case changes one check and leaves no process in its tree, so a builder that drops that check removes
@@ -5096,7 +5096,7 @@ class AgentEndFinishedTreeTests(_AgentEndFixture):
 
 
 class AgentEndProcessMarkerTests(_AgentEndFixture):
-    """The stop half of the agent-end reap (debt finished-agent-shells-keep-tree). A finished agent's tree is
+    """The stop half of the agent-end reap (decision when-a-worktree-may-be-removed). A finished agent's tree is
     removed only after the processes inside it are stopped, and only when each one is the agent's own. A
     process is the agent's own when its exec-time CLAUDE_AGENT_ID is the id in the tree's basename `agent-<id>`
     and that id is 17 hex characters. Every process inside must be marked, except a host child (depth 0),
