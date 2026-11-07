@@ -796,6 +796,10 @@ def decide_worktree(where: str, entry: dict, attended: bool = False, agent_rule:
     in the default branch (and idle 1 hour, unless attended), and with no BATCH nothing is
     proven, so it stays. OWN_LOCK_RULE (on by default) frees the calling session's own agent
     lock once the tree is clean, merged, idle 30 minutes and unused; the agent-end reap turns it off."""
+    if not attended:  # a person's run (attended) is theirs to judge
+        red_kept = _red_run_owner_keep(where, entry["path"])
+        if red_kept:
+            return red_kept
     lock_idle = None  # an agent lock's idle is read even when attended, and before any status
     if AGENT_LOCK_RE.match(entry.get("locked_reason") or ""):
         lock_idle = entry["idle"] if "idle" in entry else worktree_idle_seconds(entry["path"])
@@ -808,10 +812,6 @@ def decide_worktree(where: str, entry: dict, attended: bool = False, agent_rule:
         return {"path": path, "action": "keep", "reason": "unreadable-subject"}
     if dirty:
         return {"path": path, "action": "keep", "reason": "dirty"}
-    if not attended:  # a person's run (attended) is theirs to judge
-        red_kept = _red_run_owner_keep(where, path)
-        if red_kept:
-            return red_kept
     # The lock comes from the entry `parse_worktree_list` read once for the pass, not a fresh
     # `worktree list` per tree (measured: one of the reads that made a sweep outrun its 25 s).
     # `remove_worktree` still has git refuse a locked tree.
