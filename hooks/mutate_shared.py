@@ -1026,24 +1026,58 @@ def _head_copy(repo: str, rel: str, own: str):
     return found if os.path.isfile(found) else None
 
 
+def _place_head_copy(dest: str, part: str, staged: str):
+    """Copy the staged HEAD copy of select argv part `part` into checkout `dest`, as a hidden sibling of the folder the
+    commit lacks it in, so it sits at the same depth as the original would. Its own-folder default root is then the
+    checkout's, and its node module lookup walks up to the checkout's node_modules. Returns (path of the placed file,
+    the path to remove after the run)."""
+    folder, base = os.path.dirname(part), os.path.basename(part)
+    if not folder:
+        placed = os.path.join(dest, ".head-copy-" + base)
+        shutil.copy2(staged, placed)
+        return placed, placed
+    parent = os.path.join(dest, os.path.dirname(folder))
+    top = None  # the highest folder this call makes, removed with the copy
+    probe = parent
+    while not os.path.isdir(probe):
+        top, probe = probe, os.path.dirname(probe)
+    os.makedirs(parent, exist_ok=True)
+    target = tempfile.mkdtemp(prefix=".%s.head-" % os.path.basename(folder), dir=parent)
+    shutil.copytree(os.path.dirname(staged), target, dirs_exist_ok=True)
+    return os.path.join(target, base), top or target
+
+
 def _select_suites(profile: dict, dest: str, path: str, suites, timeout: float, head=None):
     """The changed `suites` that the profile's `select` lists for product file `path`, run in checkout `dest`:
     (suites or None, note). None means no list: select is missing from the profile, or failed, and the note says why
     for a failure. A suite name is a line of the output; any other line is ignored. With `suites` None, every
     listed line that the profile's `tests` regex matches and `dest` holds is a suite, changed or not.
     `head(part)` serves a select argv part that has a "/" and no `{` and that `dest` lacks (a script the commit
-    lacks): the absolute path of the copy at the clone's HEAD, or None. A bare command name is left to PATH.
-    The run stays in `dest`."""
+    lacks): the absolute path of the copy at the clone's HEAD, or None. The copy is placed inside `dest` for the run
+    and removed after it (`_place_head_copy`). A bare command name is left to PATH. The run stays in `dest`."""
     select = profile.get("select")
     if not select:
         return None, ""
-    argv = [head(part) or part if head and "/" in part and "{" not in part
-            and not os.path.exists(os.path.join(dest, part)) else part for part in select]
-    argv = [part.replace("{path}", path) for part in argv]
+    argv, placed = [], []
     try:
-        code, output, timed_out = run_in_group(argv, dest, timeout)
-    except OSError as error:
-        return None, "%s: select did not run (%s), every changed suite runs" % (path, error)
+        for part in select:
+            staged = (head(part) if head and "/" in part and "{" not in part
+                      and not os.path.exists(os.path.join(dest, part)) else None)
+            if staged:
+                use, remove = _place_head_copy(dest, part, staged)
+                placed.append(remove)
+                part = use
+            argv.append(part.replace("{path}", path))
+        try:
+            code, output, timed_out = run_in_group(argv, dest, timeout)
+        except OSError as error:
+            return None, "%s: select did not run (%s), every changed suite runs" % (path, error)
+    finally:
+        for remove in placed:
+            if os.path.isdir(remove):
+                shutil.rmtree(remove, ignore_errors=True)
+            elif os.path.exists(remove):
+                os.remove(remove)
     if timed_out or code != 0:
         return None, "%s: select %s, every changed suite runs" % (path, "timed out" if timed_out else "exited %d" % code)
     listed = {line.strip() for line in output.splitlines()}
