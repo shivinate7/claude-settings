@@ -11868,6 +11868,7 @@ def no_record_numbers(out):
     return {int(m) for l in out.splitlines() if l.startswith("no record:") for m in re.findall(r"#(\d+)", l)}
 
 REVIEW_FIX_PASS = (REVIEW_OLD_HEAD, "reviewer", "haiku", "PASS")  # the parsed fix check tuple: reviewed head, role, model, verdict
+REVIEW_FIX_PASS_SONNET = (REVIEW_OLD_HEAD, "reviewer", merge.REVIEW_FIX_GUARD_MODEL, "PASS")  # the same tuple on the model a guard or check change's fix check runs on
 REVIEW_FIX_FAIL = (REVIEW_OLD_HEAD, "reviewer", "haiku", "FAIL")
 
 def fix_state(test, fix, **kw):
@@ -12201,7 +12202,8 @@ class ReviewFixRules(unittest.TestCase):
             for guard in ("no", "yes"):
                 with self.subTest(verdict=verdict, guard=guard):
                     rounds = (f"Round 1: reviewer, sonnet, {verdict}",)
-                    state, why = fix_state(self, REVIEW_FIX_PASS, rounds=rounds, guard=guard, net="not owed")
+                    fix_pass = REVIEW_FIX_PASS_SONNET if guard == "yes" else REVIEW_FIX_PASS
+                    state, why = fix_state(self, fix_pass, rounds=rounds, guard=guard, net="not owed")
                     self.assertEqual(state, "done", f"a fix check PASS after round 1 {verdict}, guard {guard}, must read done: {why!r}")
 
     def test_a_fix_pass_after_round_two_is_done_whatever_round_two_said(self):
@@ -12210,7 +12212,8 @@ class ReviewFixRules(unittest.TestCase):
             for guard in ("no", "yes"):
                 with self.subTest(verdict=verdict, guard=guard):
                     rounds = ("Round 1: reviewer, sonnet, FAIL", f"Round 2: reviewer, sonnet, {verdict}")
-                    state, why = fix_state(self, REVIEW_FIX_PASS, rounds=rounds, guard=guard, net="not owed")
+                    fix_pass = REVIEW_FIX_PASS_SONNET if guard == "yes" else REVIEW_FIX_PASS
+                    state, why = fix_state(self, fix_pass, rounds=rounds, guard=guard, net="not owed")
                     self.assertEqual(state, "done", f"a fix check PASS after round 2 {verdict}, guard {guard}, must read done: {why!r}")
 
     def test_a_fix_pass_after_a_delete_only_round_one_with_guard_yes_is_done(self):
@@ -12218,7 +12221,7 @@ class ReviewFixRules(unittest.TestCase):
         for verdict in ("FAIL", "PASS"):
             with self.subTest(verdict=verdict):
                 rounds = (f"Round 1: reviewer, sonnet, {verdict}",)
-                state, why = fix_state(self, REVIEW_FIX_PASS, rounds=rounds, kind="delete-only", guard="yes")
+                state, why = fix_state(self, REVIEW_FIX_PASS_SONNET, rounds=rounds, kind="delete-only", guard="yes")
                 self.assertEqual(state, "done", f"a fix check PASS after a delete-only round 1 {verdict} with guard yes must read done: {why!r}")
 
     def test_a_fix_pass_before_round_three_with_a_design_hold_is_open_and_names_the_design_reviewer(self):
@@ -12248,7 +12251,7 @@ class ReviewFixRules(unittest.TestCase):
     def test_a_fix_pass_after_round_three_with_guard_yes_is_done_for_a_zero_or_positive_net_value(self):
         for net in ("zero", "positive"):
             with self.subTest(net=net):
-                state, why = fix_state(self, REVIEW_FIX_PASS, rounds=REVIEW_FAILED_THREE, guard="yes", net=net)
+                state, why = fix_state(self, REVIEW_FIX_PASS_SONNET, rounds=REVIEW_FAILED_THREE, guard="yes", net=net)
                 self.assertEqual(state, "done", f"round 3's net value {net} must carry through the fix check: {why!r}")
 
     def test_a_fix_pass_after_round_three_with_guard_yes_keeps_the_net_value_owed(self):
@@ -12274,7 +12277,8 @@ class ReviewFixRules(unittest.TestCase):
                  (("Round 1: reviewer, sonnet, FAIL",), "no", "not owed", "PASS", "done"))
         for rounds, guard, net, verdict, want in cases:
             with self.subTest(rounds=rounds, guard=guard, net=net, verdict=verdict):
-                text = record_text(rounds=rounds, guard=guard, net=net, fix=(fix_check_line(verdict=verdict),))
+                model = merge.REVIEW_FIX_GUARD_MODEL if guard == "yes" else "haiku"
+                text = record_text(rounds=rounds, guard=guard, net=net, fix=(fix_check_line(verdict=verdict, model=model),))
                 self.assertEqual(record_state(self, text), want)
 
     def test_a_fix_pass_after_a_failed_first_round_names_the_fail_and_the_fix_check(self):
