@@ -4767,6 +4767,16 @@ class MistakeNamesGuardTests(unittest.TestCase):
             with self.subTest(text=text):
                 self.assert_blocked(mg_report(text))
 
+    def test_mg_red_elided_opener_does_not_hide_admission_blocks(self):
+        # An elided word after an apostrophe ('em, 'round, 'tis, 'kay) is no opening quote, so the admission after it
+        # still counts. Each text holds one lone elision and a later apostrophe that could close a span.
+        for text in ("I told 'em to wait, then I broke the lanes' notes.",
+                     "I waited 'round the lanes, then I clobbered the notes.' Nothing else.",
+                     "The lane said 'tis fine, and I broke the batch.' Nothing else.",
+                     "I called it 'kay, then I overwrote the notes.' Nothing else."):
+            with self.subTest(text=text):
+                self.assert_blocked(mg_report(text))
+
     # Green: each of these must pass.
     def test_mg_green_inbox_admission_with_fence_step_passes(self):
         self.assert_allowed(mg_report(MG_INBOX + " Queued as step:inbox-fence-check."))
@@ -4794,6 +4804,10 @@ class MistakeNamesGuardTests(unittest.TestCase):
 
     def test_mg_green_single_quoted_owner_phrase_passes(self):
         self.assert_allowed(mg_report("Owner said 'I broke it, own up to a mistake'."))
+
+    def test_mg_green_elision_closed_at_once_stays_quoted_passes(self):
+        # 'em' closed at once is quoted text, so the quote after it pairs as usual and 'I broke it' stays quoted.
+        self.assert_allowed(mg_report("Owner said 'em' and 'I broke it'."))
 
     def test_mg_green_admission_in_done_passes(self):
         self.assert_allowed(mg_report("none", done="> **Done** OTHER I broke my feedback inbox and restored it."))
