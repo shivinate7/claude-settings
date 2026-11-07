@@ -521,8 +521,7 @@ def explained_path(tool: str, tool_input, cwd: str) -> str:
         raw = tool_input.get("command", "") or ""
         if not isinstance(raw, str) or not raw.strip():
             return ""
-        stripped = guard.strip_heredoc_bodies(raw)
-        hit = guard._shell_write_hit(stripped, cwd, guard.is_settings_file)
+        hit = guard.shell_write_hit(raw, cwd, guard.is_settings_file)
         if not hit:
             return ""
         if not guard.cap_change(raw):

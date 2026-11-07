@@ -7,4 +7,4 @@
   - Incident, Nov 1 2026 ~23:41 CST: a triage (session 5) Bash call wrote a roadmap JSON note through `python3 - "$W" <<'EOF'`. Python runs that body, so the guard kept the body and read it as shell. The python escape `\'` in a single-quoted python string flipped the shell's quote reading, so later prose naming a `.env` folder read as bare words. No env file was read or written.
 - **Where.** `hooks/guard_env.py` (the env-file guard) and `hooks/guard_core.py` (the shared guard code).
 - **Decision.** `env-file-stays-unread` (no session reads or writes an env file's contents; a quoted heredoc body is text).
-- **Retire.** Status: both causes are fixed on branch `lane/env-heredoc-false-alarm`. Each incident's call, run as a test, must pass the guard with no refusal. Each other form in What stays open until its own test passes.
+- **Retire.** Status: PR #1082 (the env heredoc fix) fixed incident 2 and incident 1's escaped-quote cause. PR #1186 (interpreter string data read at its shell spots) fixed a backtick or `$( )` inside a quoted python or node string. Each passes as a test. Each other form in What stays open until its own test passes.

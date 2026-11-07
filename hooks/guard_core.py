@@ -687,7 +687,6 @@ _SHELL_FIRST = _interpreter_header(_SHELLS)
 _INTERPRETERS = _SHELLS + "|python[\\d.]*|perl|ruby|node"
 _INTERPRETER_FIRST = _interpreter_header(_INTERPRETERS)
 
-
 def SHELL_HEREDOC(text: str) -> bool:
     return bool(_SHELL_FIRST(text) or _PIPED_SHELL(text) or _FED_SHELL(text))
 
@@ -755,7 +754,7 @@ def _split_heredocs(cmd: str, contractions_are_text: bool = False):
 
 
 def _walk_heredocs(cmd: str, contractions_are_text: bool = False, legacy: bool = False,
-                   kept_at: "list | None" = None):
+                   kept_at: "list | None" = None, spans: "list | None" = None):
     """Return (kept lines, [(quote, body, header)], unclosed): every header line kept, every body set apart,
     each body with the text of the header line that opened it (two headers share one line).
     The walk is bash's own reading, where a later `'` closes a contraction's mark. With
@@ -764,7 +763,8 @@ def _walk_heredocs(cmd: str, contractions_are_text: bool = False, legacy: bool =
     bash runs walks both.
     The one walk `_drop_heredoc_bodies` and the environment layer both need. A header is read as
     heredoc_heads reads it, so one in quoted text, a comment or a here-string strips nothing.
-    A caller that passes `kept_at` gets the line index of each kept line appended to it."""
+    A caller that passes `kept_at` gets the line index of each kept line appended to it, and one that
+    passes `spans` gets the (first, end) line indexes of each body."""
     lines = cmd.split("\n")
     last = -1 if contractions_are_text else max(
         (i for i, line in enumerate(lines) if "'" in line), default=-1)
@@ -785,6 +785,8 @@ def _walk_heredocs(cmd: str, contractions_are_text: bool = False, legacy: bool =
             while index < len(lines) and lines[index].strip() != delimiter:
                 index += 1
             bodies.append((quote, "\n".join(lines[start:index]), header_line))
+            if spans is not None:
+                spans.append((start, index))
             if index < len(lines):
                 index += 1  # drop the closing delimiter line too
             else:
@@ -792,18 +794,24 @@ def _walk_heredocs(cmd: str, contractions_are_text: bool = False, legacy: bool =
     return kept, bodies, unclosed
 
 
-def _drop_heredoc_bodies(cmd: str) -> str:
-    """Drop the body of every heredoc, keeping every header line. The one loop
-    `strip_heredoc_bodies` and `_strip_heredoc_bodies_unconditionally` both need: the first
+def _heredoc_walks(cmd: str):
+    """((line indexes the lane's walk keeps, line indexes main's walk keeps, the line span of each body),
+    the bodies of the lane's walk, whether its last body is unclosed)."""
+    lane_at, main_at, spans = [], [], []
+    _, bodies, unclosed = _walk_heredocs(cmd, kept_at=lane_at, spans=spans)
+    _walk_heredocs(cmd, legacy=True, kept_at=main_at)   # BANDAID: main's own walk, see _MAIN_HEADER
+    return (lane_at, main_at, spans), bodies, unclosed
+
+
+def _drop_heredoc_bodies(cmd: str, keep=(), walks=None) -> str:
+    """Drop the body of every heredoc, keeping every header line, and the bodies numbered in `keep`. The one
+    loop `strip_heredoc_bodies` and `_strip_heredoc_bodies_unconditionally` both need: the first
     guards it with the interpreter exception, the second never does, and neither re-implements
     the walk itself."""
-    lane_at, main_at = [], []
-    _walk_heredocs(cmd, kept_at=lane_at)
-    _walk_heredocs(cmd, legacy=True, kept_at=main_at)   # BANDAID: main's own walk, see _MAIN_HEADER
-    if lane_at != main_at:
-        keep = set(lane_at) | set(main_at)   # a line stays in view when either walk keeps it
-        return "\n".join(line for at, line in enumerate(cmd.split("\n")) if at in keep)
-    return "\n".join(_split_heredocs(cmd)[0])
+    lane_at, main_at, spans = walks or _heredoc_walks(cmd)[0]
+    # a line stays in view when either walk keeps it, or when its body is one in `keep`
+    show = set(lane_at) | set(main_at) | {at for number in keep for at in range(*spans[number])}
+    return "\n".join(line for at, line in enumerate(cmd.split("\n")) if at in show)
 
 
 # A file a heredoc header writes (`> f`, `>> f`, `>| f`, `&> f`, `tee -a f`), the words of the command, and a
@@ -811,53 +819,140 @@ def _drop_heredoc_bodies(cmd: str) -> str:
 # keep more bodies in view, never fewer.
 _WRITE_TARGET = re.compile(r"(?:>>?\|?(?!&)|(?<![\w-])tee(?:[ \t]+-[\w-]+)*[ \t])[ \t]*[\"']?([^\s;&|<>()\"'`]+)")
 _WORDS = re.compile(r"[^\s;&|<>()\"'`]+").findall
-_RUNNER = re.compile(r"(?:" + _INTERPRETERS + r"|source|\.|eval|exec|xargs|sudo|env|timeout|nohup|nice|command"
-                     r"|time|ssh)(?:\.exe|\.cmd)?").fullmatch
+# The commands that print their heredoc body or write it to a file, and run nothing in it.
+_DATA_SINKS = {"cat", "tee"}
+_WRAPPERS = r"source|\.|eval|exec|xargs|sudo|env|timeout|nohup|nice|command|time|ssh"
+_RUNNER = re.compile(r"(?:" + _INTERPRETERS + "|" + _WRAPPERS + r")(?:\.exe|\.cmd)?").fullmatch
+# The runners that read a file as shell lines: a shell or a wrapper, never a python, perl, ruby or node.
+_SHELL_RUNNER = re.compile(r"(?:" + _SHELLS + "|" + _WRAPPERS + r")(?:\.exe|\.cmd)?").fullmatch
+# The runners that read a file as a script of their own.
+_SCRIPT_RUNNER = re.compile(r"(?:python[\d.]*|perl|ruby|node|nodejs|bun|deno)(?:\.exe|\.cmd)?").fullmatch
 
 
 def _plain_words(words):
     return [word[2:] if word.startswith("./") else word for word in words if not re.match(r"\w+=", word)]
 
 
-def _runs_written_file(text: str, headers) -> bool:
-    """True when a file a heredoc writes is run later: its pipeline holds a shell, an interpreter or a runner
-    (`sh < f`, `cat f | sh`, `timeout 5 sh f`), or it is the command itself (`./f`). A read such as `wc -c f`
-    runs nothing. The word is compared as written, so `$HOME/f` matches only itself."""
+def _runs_written_file(text: str, headers, runner=_RUNNER) -> str:
+    """The word that runs a file a heredoc writes, else '': the first `runner` word of its pipeline (by default a
+    shell, an interpreter or a wrapper: `sh < f`, `cat f | sh`, `timeout 5 sh f`), or the file itself when it is
+    the command (`./f`). A read such as `wc -c f` runs nothing. The word is compared as written, so `$HOME/f`
+    matches only itself."""
     written = {word for header in headers for word in _plain_words(_WRITE_TARGET.findall(header))}
     for pipeline in re.split(r"\n|;|&&|\|\||&", _WRITE_TARGET.sub(" ", text)) if written else ():
         stages = [_plain_words(_WORDS(stage)) for stage in pipeline.split("|")]
-        runs = any(_RUNNER(word.rsplit("/", 1)[-1]) for words in stages for word in words)
-        if any(word in written and (runs or at == 0) for words in stages for at, word in enumerate(words)):
-            return True
-    return False
+        runs = next((word.rsplit("/", 1)[-1] for words in stages for word in words
+                     if runner(word.rsplit("/", 1)[-1])), "")
+        for words in stages:
+            for at, word in enumerate(words):
+                if word in written and (runs or at == 0):
+                    return runs or word
+    return ""
 
 
-def strip_heredoc_bodies(cmd: str, shells_only: bool = False) -> str:
+def _feeds_data(header: str, scripts: bool) -> bool:
+    """True when each heredoc on the header line feeds a command that only holds its body as data: a data
+    sink (`_DATA_SINKS`: `cat > n.md <<EOF`, `sudo tee n.md <<EOF`), or with `scripts` a python, node, perl or
+    ruby whose script `interpreter_bodies` reads. The command word is read at command position, as
+    `resolve_command` reads it. A heredoc piped onward, fed through xargs, or on a segment that cannot be
+    read feeds no data sink."""
+    ends = []
+    fed = False
+    for segment, end in zip(split_segments(header, ends), ends):
+        if not heredoc_heads(segment)[0]:
+            continue
+        tokens = segment_tokens(segment)
+        if end == "|" or not tokens:
+            return False
+        at, chain = _walk_wrappers(tuple(tokens))
+        word = basename(tokens[at]) if at is not None else ""
+        if any(wrapper == "xargs" for wrapper, _ in chain) or not (
+                word in _DATA_SINKS or (scripts and script_language(word))):
+            return False
+        fed = True
+    return fed
+
+
+def strip_heredoc_bodies(cmd: str, shells_only: bool = False, per_body: bool = False) -> str:
     """Drop the body of every heredoc, and keep every header line. `shells_only` keeps a body
-    only when a shell reads it, for a rule that judges shell lines."""
+    only when a shell reads it, for a rule that judges shell lines. One body that runs keeps every body in
+    view. With `per_body` that reading drops a body whose own header only feeds it to a data sink
+    (`_feeds_data`), unless the header names a shell or an interpreter, pipes it to a shell, or writes a file
+    that a later segment runs. Under `shells_only` a python, node, perl or ruby body drops too: it holds a
+    script, which `interpreter_bodies` gives to a rule that reads its shell spots. A caller that maps the
+    returned lines back to the command (`heredoc_offsets`) takes the default."""
     if "<<" not in cmd:
         return cmd  # no heredoc: nothing to drop
-    _, bodies, unclosed = _walk_heredocs(cmd)
+    walks, bodies, unclosed = _heredoc_walks(cmd)
     if unclosed:
         return cmd  # a body with no closer runs to the end of input: every line stays in view
+    # The header test reads the command with its bodies gone: a `bash <<EOF` line inside a data body
+    # is text, and no body line may make another body look run.
+    text = _without_message_values(_drop_heredoc_bodies(cmd, walks=walks))
+    headers = [_without_message_values(header) for _, _, header in bodies]
+    keep = []
+    # The per-body reading starts from main's whole-command test, which both its callers read before.
+    if (SHELL_HEREDOC if shells_only and not per_body else INTERPRETER_HEREDOC)(text) or _runs_written_file(
+            text, headers):
+        # The body may be executed, so keep it under inspection. With the two walks reading these headers
+        # differently, no body can be told apart from another; a heredoc that eval or source runs may open
+        # on a line before its header.
+        if not per_body or walks[0] != walks[1] or _FED_SHELL(text):
+            return cmd
+        first = _SHELL_FIRST if shells_only else _INTERPRETER_FIRST
+        runner = _SHELL_RUNNER if shells_only else _RUNNER
+        keep = [number for number, header in enumerate(headers)
+                if first(header) or _PIPED_SHELL(header) or _runs_written_file(text, [header], runner)
+                or not _feeds_data(header, shells_only)]
     # bash runs each substitution of an unquoted body while it writes the body, so those stay in view as
-    # lines of their own; the prose around them is data. A script body's header test below keeps it whole.
+    # lines of their own; the prose around them is data. A script body is the interpreter's own text, one
+    # command (`interpreter_bodies` gives it to a rule that reads its shell spots).
     runs = []
-    for quote, body, header in bodies:
-        if not quote and ("$(" in body or "`" in body) and not _INTERPRETER_FIRST(_without_message_values(header)):
+    for number, (quote, body, _header) in enumerate(bodies):
+        if (not quote and number not in keep and ("$(" in body or "`" in body)
+                and not _INTERPRETER_FIRST(headers[number])):
             from guard_env import _substitutions   # imported late: guard_env imports this file
             texts, too_deep = _substitutions(body, heredoc=True)
             if too_deep:
                 return cmd
-            runs += [text for text, _ in texts[:-1]]   # the last text is the body around them
-    dropped = _drop_heredoc_bodies(cmd)
-    # The header test reads the command with its bodies gone: a `bash <<EOF` line inside a data body
-    # is text, and no body line may make another body look run.
-    text = _without_message_values(dropped)
-    if (SHELL_HEREDOC if shells_only else INTERPRETER_HEREDOC)(text) or _runs_written_file(
-            text, [header for _, _, header in bodies]):
-        return cmd  # the body may be executed, so keep it under inspection
-    return "\n".join([dropped] + runs)
+            runs += [t for t, _ in texts[:-1]]   # the last text is the body around them
+    if len(keep) == len(bodies):
+        return cmd
+    return "\n".join([_drop_heredoc_bodies(cmd, keep, walks)] + runs)
+
+
+# The language a header names, by the header's own word.
+SCRIPT_HEADERS = {
+    "py": re.compile(r"(?<![\w.-])python[\d.]*(?:\.exe)?(?![\w.-])"),
+    "js": re.compile(r"(?<![\w.-])(?:node|nodejs|bun|deno)(?:\.exe)?(?![\w.-])"),
+    "perl": re.compile(r"(?<![\w.-])perl(?:\.exe)?(?![\w.-])"),
+    "ruby": re.compile(r"(?<![\w.-])ruby(?:\.exe)?(?![\w.-])"),
+}
+
+
+def script_language(header: str) -> str:
+    """"py", "js", "perl" or "ruby" for a header line that names that interpreter, else ''."""
+    return next((lang for lang, found in SCRIPT_HEADERS.items() if found.search(header)), "")
+
+
+def interpreter_bodies(cmd: str):
+    """[(language, body, quote)] for each heredoc body that python, node, perl or ruby reads as a script: the body
+    of a header that names one, and the body written to a file that a later segment runs with one, in the
+    language of the word that runs it (language '' for a file run as the command itself, `./f`).
+    `quote` is "'" for a quoted delimiter. A rule that judges shell lines reads these only at their shell spots
+    (guard_env.script_spots), and an unquoted body also at the substitutions bash runs in it."""
+    if "<<" not in cmd:
+        return []
+    walks, bodies, _ = _heredoc_walks(cmd)
+    text = _without_message_values(_drop_heredoc_bodies(cmd, walks=walks))
+    out = []
+    for quote, body, header in bodies:
+        header = _without_message_values(header)
+        runs = _runs_written_file(text, [header], _SCRIPT_RUNNER)
+        lang = script_language(header) or script_language(runs)
+        if lang or runs:
+            out.append((lang, body, quote))
+    return out
 
 
 # BANDAID (owner rule hold-unsafe-after-round-3: no safety hole that main lacks). This is main's header
