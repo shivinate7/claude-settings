@@ -25,7 +25,7 @@ CREATE_NO_WINDOW = 0x08000000  # subprocess has no such name on a non-Windows ru
 def _flags(kwargs):
     if sys.platform == "win32" or os.name == "nt":
         kwargs["creationflags"] = kwargs.get("creationflags", 0) | CREATE_NO_WINDOW
-        if "stdin" not in kwargs and "input" not in kwargs:  # check_output turns input=None into "" later
+        if "stdin" not in kwargs and kwargs.get("input") is None:
             # The child has no console, so an inherited console stdin is an invalid handle there, and its own
             # subprocess calls fail with WinError 6. An empty stdin is valid. input= sets stdin itself.
             kwargs["stdin"] = subprocess.DEVNULL
@@ -49,4 +49,6 @@ def check_call(*args, **kwargs):
 
 
 def check_output(*args, **kwargs):
+    if "input" in kwargs and kwargs["input"] is None:
+        del kwargs["input"]  # check_output turns input=None into "", which subprocess refuses beside a stdin
     return subprocess.check_output(*args, **_flags(kwargs))
