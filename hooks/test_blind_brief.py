@@ -562,13 +562,16 @@ class DesignerSteps(unittest.TestCase):
             return False
         return bool(re.search(r"\bskip\b|\b(?:not|never)\s+run\b|n't\s+run\b", sentence, re.I))
 
-    def test_every_designer_skips_impeccable_context_and_uses_the_launcher_fallback(self):
-        # The launcher is refused to a designer by the review-only guard, so every kind skips the call and uses the fallback.
+    def test_informed_or_directed_designer_skips_impeccable_context_and_uses_the_launcher_fallback(self):
+        # The review-only guard refuses the launcher to an informed or directed designer. A blind designer skips
+        # the fallback already, so the sentence names the other kinds and never the blind one.
         found = [s for step in self.steps(self.REPORT) for s in step
                  if re.search(r"impeccable context", s, re.I) and "Launcher unavailable" in s
+                 and re.search(r"\b(?:informed|directed)\b", s, re.I) and not re.search(r"\bblind\b", s, re.I)
                  and self.tells_skip_impeccable_context(s)]
-        self.assertTrue(found, "no sentence before the line starting %r tells every designer to skip "
-                        "`impeccable context` and use the \"Launcher unavailable\" fallback" % self.REPORT)
+        self.assertTrue(found, "no sentence before the line starting %r tells an informed or directed designer "
+                        "to skip `impeccable context` and use the \"Launcher unavailable\" fallback, "
+                        "without naming the blind kind" % self.REPORT)
 
 
 class Hook(unittest.TestCase):
