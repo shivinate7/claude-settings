@@ -42,10 +42,11 @@ def git_names(root, *args):
     return [name for name in r.stdout.split("\0") if name]
 
 
-def changes(root):
-    """(added, moved) files of `root` against its origin/main, from one process. `moved` holds (status, old, new) for
-    each delete, modify and rename; a rename names two paths. Raises Unknown when git cannot say."""
-    names = git_names(root, "diff", "--name-status", "-z", "origin/main...HEAD")
+def changes(root, base="origin/main", head="HEAD"):
+    """(added, moved) files of `root` from the merge base of `base` and `head` to `head`, from one process. `moved` holds
+    (status, old, new) for each delete, modify and rename; a rename names two paths. -M is explicit, so diff.renames in a
+    config never moves the verdict. Raises Unknown when git cannot say."""
+    names = git_names(root, "diff", "--name-status", "-z", "-M", f"{base}...{head}")
     added, moved, i = [], [], 0
     while i < len(names):
         status = names[i]
@@ -64,7 +65,12 @@ def added(root):
     return changes(root)[0]
 
 
-FEEL = re.compile(r"^(?:- )?\*\*Feel\.\*\*")
+def marker(name=None):
+    """The regex of a record's marker line: `**Name.**` at column one, or after `- `. With no name, any marker."""
+    return re.compile(r"^(?:- )?\*\*" + (re.escape(name) if name else r"[^*]+") + r"\.\*\*")
+
+
+FEEL = marker("Feel")
 TRIAL = re.compile(r"^(?:- )?\*\*Device check\.\*\*\s*(simulator|device)[,\s]+(\S+)\s*$")
 
 
@@ -87,18 +93,22 @@ def show(root, ref, path):
     return r.stdout.splitlines()
 
 
+def debt_file(root):
+    """A test of a path: is it a debt file of `root`? The folders are layout.candidates: the first one that exists, then the layout's own.
+    A repo that legacy-repos keeps its debts elsewhere has that one folder: the layout's own is not where its debts are.
+    The folder's README and notes file sit beside the debts but are not debts: never checked, never shown."""
+    kept = layout.unmoved(root).get("debts")
+    dirs = tuple(p + "/" for p in ((kept,) if kept else layout.candidates(root, "debts")))
+    not_debts = {d + "README.md" for d in dirs} | set(layout.candidates(root, "debt-notes"))
+    return lambda f: f.startswith(dirs) and f.endswith(".md") and f not in not_debts
+
+
 def unchecked_feel_debts(root, moved):
     """[(path, how)] for each debt whose origin/main text has a Feel line and no valid device-trial line, and that
     the branch deletes or renames out of the debt folder ("deleted"), or edits or renames inside it so the Feel
     line is gone ("dropped"). Markers count at line start, with an optional "- ". Raises Unknown when git cannot
     show a file."""
-    dirs = tuple(p + "/" for p in layout.candidates(root, "debts"))
-    # The folder's README and notes file sit beside the debts but are not debts: never checked, never shown.
-    not_debts = {d + "README.md" for d in dirs} | set(layout.candidates(root, "debt-notes"))
-
-    def debt(f):
-        return f.startswith(dirs) and f.endswith(".md") and f not in not_debts
-
+    debt = debt_file(root)
     out = []
     for status, old, new in moved:
         if not debt(old):
