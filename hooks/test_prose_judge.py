@@ -594,6 +594,25 @@ def case_h_an_oversized_input_is_capped_and_the_prompt_says_what_it_cut():
     check(name + " says what it cut", any(word in prompt.lower() for word in ("cut", "truncat", "omit")), prompt[-200:])
 
 
+def case_h_an_ok_answer_that_names_a_finding_is_an_odd_answer():
+    """{"ok": true, "findings": [one finding]} says no finding and names one. That is an odd answer: an error with no finding
+    printed. read_findings is the one reader of the answer; merge_findings reaches it through invoke_model."""
+    finding = {"path": "docs/notes/a.md", "line": 4, "why": "names a route it cannot show"}
+    reader = getattr(pj, "read_findings", None)
+    if reader is None:
+        check("prose_judge.read_findings is defined", False, "no read_findings in hooks/prose_judge.py")
+        return
+    findings, error = reader({"ok": True, "findings": [finding]})
+    check("h: an ok answer that names a finding is an error with no finding (read_findings)", findings == [] and bool(error),
+          "findings=%r error=%r" % (findings, error))
+    res = merge_call(SENTENCES, ROWS, FILES, ({"ok": True, "findings": [finding]}, None))
+    if res is None:
+        return
+    findings, error, _ = res
+    check("h: the same answer through merge_findings is an error with no finding", findings == [] and bool(error),
+          "findings=%r error=%r" % (findings, error))
+
+
 def main():
     for case in (case_a_other_paths_make_no_model_call, case_a_prose_named_in_a_ts_body_is_not_judged,
                  case_b_md_edit_calls_model_once_with_rule_and_change,
@@ -610,7 +629,8 @@ def main():
                  case_h_findings_are_read_from_the_reply, case_h_a_clean_reply_has_no_findings,
                  case_h_a_model_error_is_an_error_not_a_pass, case_h_an_odd_answer_is_an_error,
                  case_h_no_sentence_makes_no_model_call,
-                 case_h_an_oversized_input_is_capped_and_the_prompt_says_what_it_cut):
+                 case_h_an_oversized_input_is_capped_and_the_prompt_says_what_it_cut,
+                 case_h_an_ok_answer_that_names_a_finding_is_an_odd_answer):
         try:
             case()
         except Exception as exc:

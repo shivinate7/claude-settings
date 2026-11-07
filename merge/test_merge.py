@@ -15,6 +15,7 @@ import ctypes  # the Windows-branch test patches os.name; ctypes' own import wou
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import merge  # noqa: E402
+REAL_PROSE_JUDGE_CALL = getattr(merge, "prose_judge_call", None)  # the real seam body, read before any case patches it
 sys.path.append(os.path.join(os.path.dirname(HERE), "lint"))  # append: no lint module shadows one this suite imports
 import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py)
 import _test_temp  # noqa: E402  test-temp-standard: the run folder's one home (lint/_test_temp.py)
@@ -830,6 +831,35 @@ class ProseJudge(Env):
     def judge_lines(self, out):
         return [l for l in out.splitlines() if l.startswith(self.PREFIX)]
 
+    def after_merge_config(self, cmd="echo ran > after.txt"):
+        """Main gains a config that runs `cmd` after the merge, and the PR branch takes main (as the N1 case does)."""
+        cfg = dict(CONFIG, merge=dict(CONFIG["merge"], afterMerge=[cmd]))
+        sh(self.other, "git", "checkout", "-q", "main"); put(os.path.join(self.other, ".github/stamp.json"), json.dumps(cfg))
+        sh(self.other, "git", "commit", "-qam", "cfg"); sh(self.other, "git", "push", "-q", "origin", "main")
+        sh(self.co, "git", "pull", "-q", "--ff-only")
+        head_takes_base(self)
+
+    def steps_done(self):
+        """What the merge has done so far: afterMerge ran, local main holds origin's main (ff), and the head branch is gone from origin."""
+        sh(self.co, "git", "fetch", "-q", "origin")  # origin/main must be read fresh, or ff would look done before it is
+        return {"afterMerge": os.path.exists(os.path.join(self.co, "after.txt")),
+                "ff": sh(self.co, "git", "rev-parse", "main") == sh(self.co, "git", "rev-parse", "origin/main"),
+                "branch delete": "refs/heads/feat" not in self.refs()}
+
+    def recording_judge(self, raises=None):
+        """Replace merge.prose_judge_call with a fake that records steps_done() at its call, then returns a silent answer or raises
+        `raises`. -> the dict it fills: the steps as they stood when the judge ran."""
+        seen = {}
+
+        def fake(*, sentences, wt, sha):
+            seen.update(self.steps_done())
+            if raises is not None:
+                raise raises
+            return [], None
+        patch = unittest.mock.patch.object(merge, "prose_judge_call", fake, create=True)
+        patch.start(); self.addCleanup(patch.stop)
+        return seen
+
     def assert_merged_then_judged(self, rc, out):
         """The merge landed (rc 0, merged, lock free), and every judge line comes after the one merged-as line."""
         self.assertEqual(rc, 0, out)
@@ -859,11 +889,7 @@ class ProseJudge(Env):
         self.assertEqual(self.judge_lines(out), ["merge: #7 prose judge: unknown (model subprocess timed out)."], out)
 
     def test_a_judge_that_raises_prints_unknown_and_ff_afterMerge_and_the_branch_delete_still_run(self):
-        cfg = dict(CONFIG, merge=dict(CONFIG["merge"], afterMerge=["echo ran > after.txt"]))
-        sh(self.other, "git", "checkout", "-q", "main"); put(os.path.join(self.other, ".github/stamp.json"), json.dumps(cfg))
-        sh(self.other, "git", "commit", "-qam", "cfg"); sh(self.other, "git", "push", "-q", "origin", "main")
-        sh(self.co, "git", "pull", "-q", "--ff-only")
-        head_takes_base(self)
+        self.after_merge_config()
         self.pr_writes({"docs/notes/a.md": "Alpha holds.\n"})
         calls = self.stub_judge(raises=RuntimeError("boom"))
         rc, out = self.run_merge("7", "--confirm")
@@ -875,6 +901,55 @@ class ProseJudge(Env):
         self.assertEqual(sh(self.co, "git", "rev-parse", "main"), sh(self.co, "git", "rev-parse", "origin/main"), out)  # ff_main ran
         self.assertTrue(os.path.exists(os.path.join(self.co, "after.txt")), out)  # afterMerge ran
         self.assertNotIn("refs/heads/feat", self.refs(), out)  # cut_branch ran
+
+    def test_the_judge_runs_after_ff_afterMerge_and_the_branch_delete_and_prints_after_their_lines(self):
+        self.after_merge_config()
+        self.pr_writes({"docs/notes/a.md": "Alpha holds.\n"})
+        seen = self.recording_judge()
+        rc, out = self.run_merge("7", "--confirm")
+        self.assert_merged_then_judged(rc, out)
+        self.assertEqual(seen, {"afterMerge": True, "ff": True, "branch delete": True}, out)  # the judge ran after those steps
+        lines = out.splitlines()
+        judged = [i for i, l in enumerate(lines) if l.startswith(self.PREFIX)]
+        for prefix in ("merge: afterMerge `", "merge: origin/feat: "):
+            step = [i for i, l in enumerate(lines) if l.startswith(prefix)]
+            self.assertTrue(step, out)  # scope first: the step printed its line
+            self.assertTrue(all(i > step[0] for i in judged), out)  # every judge line comes after that step's line
+
+    def test_a_judge_that_exits_stops_no_step_after_the_merge_and_the_merge_lands(self):
+        self.after_merge_config()
+        self.pr_writes({"docs/notes/a.md": "Alpha holds.\n"})
+        self.recording_judge(raises=SystemExit(3))
+        try:
+            rc, out = self.run_merge("7", "--confirm")
+        except SystemExit as stop:
+            self.fail("the judge's SystemExit escaped merge.main, so the steps after the merge did not all run: code %r" % (stop.code,))
+        self.assert_merged_then_judged(rc, out)
+        self.assertEqual(self.steps_done(), {"afterMerge": True, "ff": True, "branch delete": True}, out)
+        judge = self.judge_lines(out)
+        self.assertEqual(len(judge), 1, out)
+        self.assertTrue(judge[0].startswith("merge: #7 prose judge: unknown (") and "SystemExit" in judge[0], out)
+
+    def test_the_real_seam_body_makes_one_model_call_with_the_timeout_and_prints_its_findings(self):
+        """The Env stub is lifted: the real merge.prose_judge_call runs, and only prose_judge.invoke_model is stubbed. Its one
+        call carries timeout 60, and the finding it returns prints as one judge line."""
+        import prose_judge  # hooks/prose_judge.py, on sys.path from the merge import
+        self.assertIsNotNone(REAL_PROSE_JUDGE_CALL, "merge.prose_judge_call is not defined")
+        self.pr_writes({"docs/notes/a.md": "Alpha holds.\n"})
+        calls = []
+
+        def model(prompt, *args, **kwargs):
+            calls.append(kwargs)
+            return {"ok": False, "findings": [{"path": "docs/notes/a.md", "line": 1, "why": "says it holds with no backing"}]}, None
+        model_patch = unittest.mock.patch.object(prose_judge, "invoke_model", model)
+        model_patch.start(); self.addCleanup(model_patch.stop)
+        real_patch = unittest.mock.patch.object(merge, "prose_judge_call", REAL_PROSE_JUDGE_CALL)
+        real_patch.start(); self.addCleanup(real_patch.stop)
+        rc, out = self.run_merge("7", "--confirm")
+        self.assert_merged_then_judged(rc, out)
+        self.assertEqual(len(calls), 1, out)  # one model call for the merge
+        self.assertEqual(calls[0].get("timeout"), 60, out)
+        self.assertEqual(self.judge_lines(out), ["merge: #7 prose judge: docs/notes/a.md:1: says it holds with no backing"], out)
 
     def test_one_judge_call_per_merge_for_prose_in_several_governed_files(self):
         self.pr_writes({"docs/notes/a.md": "Alpha holds. Beta holds. Gamma holds.\n", "docs/notes/b.md": "One stands. Two stands.\n"})
