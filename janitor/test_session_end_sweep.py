@@ -227,10 +227,12 @@ class RaisingOrHangingSweepFailsOpen(unittest.TestCase):
         """))
 
         cls.hanging_sweep = os.path.join(ROOT, "fake_sweep_hangs.py")
+        cls.hanging_started = os.path.join(ROOT, "fake_sweep_hangs.started")
         write(cls.hanging_sweep, textwrap.dedent("""\
             import time
+            open(%r, "w").close()  # the start marker: the hook really ran this sweep
             time.sleep(600)
-        """))
+        """) % cls.hanging_started)
 
     def test_raising_sweep_still_exits_0(self):
         result = run_hook(
@@ -240,17 +242,20 @@ class RaisingOrHangingSweepFailsOpen(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_hanging_sweep_still_exits_0_and_does_not_wait_out_the_hang(self):
-        # the fake sweep sleeps 600s; the hook's own internal timeout (set to 1s above) must cut it
-        # off. If it does not, run_capped's hang guard (20s) ends the hook first, and that is the
-        # named failure below.
+        # the fake sweep writes its start marker, then sleeps 600s. The fuse (3s, the hook's own sweep
+        # timeout) must cut it off. A fuse under MIN_USEFUL_SWEEP_SECONDS (2s) makes the hook skip the
+        # sweep, so the case would pass without ever testing the hang. If the hang is not cut off,
+        # run_capped's hang guard (20s) ends the hook first: that is the named failure below.
         try:
             result = run_hook(
                 {"hook_event_name": "SessionEnd", "cwd": self.repo},
-                env_extra={"JANITOR_SWEEP_PATH": self.hanging_sweep, "JANITOR_SWEEP_TIMEOUT": "1"},
+                env_extra={"JANITOR_SWEEP_PATH": self.hanging_sweep, "JANITOR_SWEEP_TIMEOUT": "3"},
                 timeout=20,
             )
         except AssertionError as hang:
             self.fail("hook did not honor its own sweep timeout: %s" % hang)
+        self.assertTrue(os.path.exists(self.hanging_started),
+                        "the hook never started the sweep, so the hang was never tested")
         self.assertEqual(result.returncode, 0, result.stderr)
 
 
