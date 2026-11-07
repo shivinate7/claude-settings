@@ -16,13 +16,14 @@
                           On a ready PR a stale records page with no claim to make or resume is refused before any push; only the draft step heals it.
   merge --unlock [branch] remove the merge lock on the branch (default: the default branch). Never checks the holder. A cloud run reads the lock first and skips one already released.
   merge <pr> --review-record --head SHA --kind K --guard yes|no [--round N:ROLE:MODEL:VERDICT ...]
-                          [--fix-check HEAD:reviewer:MODEL:PASS|FAIL|WIDE] [--net-value V]
+                          [--fix-check HEAD:reviewer:MODEL:PASS|FAIL|WIDE [--fix-base-record URL]] [--net-value V]
                           print the review record for the head SHA that was reviewed. Stops (exit 1) when the PR's live head is another
                           sha. Posts nothing: the lane posts it as a PR comment. --fix-check adds the optional `Fix check:` line after
                           the rounds; HEAD is the reviewed head the fix diff starts from, and differs from SHA. FAIL counts as the next
                           round; WIDE (a diff wider than its finding) counts none and needs a new lane at the first round. It refuses (exit 2)
-                          unless HEAD is the Head of the newest earlier record on the PR with no Fix check line, read from the
-                          PR's issue comments since the PR opened.
+                          unless the newest earlier record on the PR, read from its issue comments, has no Fix check line and its Head is
+                          HEAD or differs from HEAD by record or notes files only (one head an ancestor of the other). --fix-base-record
+                          names a record comment on another PR of this repo to stand in when this PR has none of its own.
   merge --reviewed        one line per open PR that has a review record comment, with its state (bad when the newest does not parse) and its
                           live CI; then the PRs with no record.
   merge --lane-lint <pr|ref> [--base BRANCH] [--lint-unknown-ok "REASON"]
