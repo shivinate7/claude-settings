@@ -1385,6 +1385,9 @@ function answerBody(it, d, at) {
   const typed = d.note != null ? d.note : "";
   if (d.act === "park") return { item: it.id, n: it.n, at, act: "park", note: typed };
   const body = { item: it.id, n: it.n, at, note: typed || (d.auto ? "accepted pick" : "") };
+  // The session that owns the item: its note capture reads only its own answers.
+  const own = typeof it.owner === "string" ? it.owner.match(/session_[A-Za-z0-9]+/) : null;
+  if (own) body.session = own[0];
   if (isRuling(it)) body.choice = OVERTURN; else if (it.kind === "decision") body.choice = d.choice || NONE; else if (d.done) body.done = true;
   return body;
 }

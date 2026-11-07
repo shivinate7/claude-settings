@@ -271,9 +271,16 @@ def page_note(raw):
             or inp.get("action") != "get" or inp.get("collection") != "answers"):
         return
     paths = inbox_paths(hook.get("session_id"))
+    try:
+        from override import remote_session_id  # lazy: override imports local_time inside a function
+        own = remote_session_id()
+    except ImportError:
+        own = None
     notes = []
     for doc_id, data in _documents(hook.get("tool_response")):
         note = data.get("note")
+        if isinstance(data.get("session"), str) and own is not None and data["session"] != own:
+            continue  # the note belongs to another session's item; that session captures it
         if data.get("parked") is True:
             continue  # a parked act's note is the entry's own text, not the owner's words
         if isinstance(note, str) and note.strip() and note.strip() != "accepted pick":
