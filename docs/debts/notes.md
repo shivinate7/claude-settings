@@ -1496,3 +1496,5 @@
 - pin-token-in-values: a pin-like token in a `with:` or `env:` value or a `name:` reads as a pin (a second one makes --step unknown). Fails toward unknown. Decision: lanes-run-no-full-ci-job (the lane-check decision).
 - pin-sweep-windows: the dead-run sweep of pinned trees never removes a tree on Windows (pid probe always alive there): a leak only. Decision: lanes-run-no-full-ci-job (the lane-check decision).
 - known-action-settings-x: ci-job's known_action pattern also matches an owner's `claude-settings-x/actions/...`. Pre-existing. Decision: lanes-run-no-full-ci-job (the lane-check decision).
+- plan-reads-local-tools: `ci-job --plan` (under --lint and --step) plans from the local tools, so a pinned tree that lacks a file shows `would run` while the real run is unknown. Harmless: merge reads the plan only after a real lint exits 0. Decision: lanes-run-no-full-ci-job (the lane-check decision).
+- local-ste-lint-ignores-pin: the local `$/actions/ste-lint` form runs ci-job's own `bin/ste-changed`, not the pinned tree's, under --step and --lint. Decision: lanes-run-no-full-ci-job (the lane-check decision).
