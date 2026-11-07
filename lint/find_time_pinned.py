@@ -9,11 +9,11 @@ three (no fixed sleep, no wall-clock bound); decision test-practices P5 covers t
 tool fixes none, and it writes nothing. Each finding has one category:
 - sleep: a real wait in a test file.
 - elapsed-assert: an assert that reads a wall-clock reading or a difference of two.
-- test-cap: a per-test or per-suite time limit.
-- wait-cap: a fixed time bound on a wait for a condition or a child process (a hang guard). Allowed
-  (owner ruling 2026-11-07 13:00 CST, decision test-practices P5): it is listed, never counted as
-  time-pinned, and never sets exit 1. Check that each cap sits well above the run, so it only stops a
-  hang and never decides a verdict by speed.
+- test-cap: a per-test or per-suite time limit (a hang guard, like wait-cap).
+- wait-cap: a fixed time bound on a wait for a condition or a child process (a hang guard). A hang guard
+  (test-cap or wait-cap) is allowed (owner ruling 2026-11-07 13:00 CST, decision test-practices P5): it
+  is listed, never counted as time-pinned, and never sets exit 1. Check that each cap sits well above
+  the run, so it only stops a hang and never decides a verdict by speed.
 - calendar: a read of the real date or zone with no time given (`datetime.now()`, `date.today()`,
   `time.localtime()`, `time.gmtime()`, `time.ctime()`, `time.asctime()`, `time.tzname`, `time.timezone`,
   JS `new Date()`, `new Date(<clock>)` where the argument reads `Date.now` or `performance.now` directly
@@ -51,8 +51,8 @@ hole are masked.
 Paths are relative to <root>. Output is one `<path>:<line>: <category>: <source line>` per finding
 (one per line and category), then `UNREAD <path>: <reason>` per file that could not be read, then a
 summary. A file that cannot be read or parsed is unread, never clean.
-Exit 0: no time-pinned finding, nothing unread (wait-cap rows do not count). Exit 1: a finding that is
-not a wait-cap. Exit 2: the root cannot be read, or nothing
+Exit 0: no time-pinned finding, nothing unread (hang-guard rows do not count). Exit 1: a finding that is
+not a hang guard. Exit 2: the root cannot be read, or nothing
 found but some file unread, so the result is unknown.
 Cost: one `git ls-files` (or one folder walk outside a git tree) and one read of each test file. No
 process stays running.
@@ -71,6 +71,7 @@ import _nowindow  # noqa: E402  the one home of a no-window child start (hooks/_
 
 MAX_BYTES = 1_000_000
 CATEGORIES = ("sleep", "elapsed-assert", "test-cap", "wait-cap", "calendar")
+HANG_GUARDS = ("test-cap", "wait-cap")  # the one home of the allowed, uncounted kinds
 WALK_SKIP = {".git", "node_modules", ".build", "DerivedData", "venv", ".venv"}
 JS_EXTS = (".js", ".mjs", ".cjs", ".jsx", ".ts", ".tsx", ".mts", ".cts")
 TEXT_MAX = 120
@@ -1237,13 +1238,13 @@ def main(argv=None):
             print(f"{f['path']}:{f['line']}: {f['category']}: {f['text']}")
         for u in unread:
             print(f"UNREAD {u['path']}: {u['reason']}")
-        pinned = [f for f in findings if f["category"] != "wait-cap"]
+        pinned = [f for f in findings if f["category"] not in HANG_GUARDS]
         nfiles = len({f["path"] for f in pinned})
-        print("%d time-pinned in %d files (sleep %d, elapsed-assert %d, test-cap %d, calendar %d); "
+        print("%d time-pinned in %d files (sleep %d, elapsed-assert %d, calendar %d); "
               "hang guards %d (allowed; check each cap sits well above the run); %d unread"
-              % (len(pinned), nfiles, counts["sleep"], counts["elapsed-assert"], counts["test-cap"],
-                 counts["calendar"], counts["wait-cap"], len(unread)))
-    if any(f["category"] != "wait-cap" for f in findings):
+              % (len(pinned), nfiles, counts["sleep"], counts["elapsed-assert"],
+                 counts["calendar"], sum(counts[c] for c in HANG_GUARDS), len(unread)))
+    if any(f["category"] not in HANG_GUARDS for f in findings):
         return 1
     return 2 if unread else 0
 
