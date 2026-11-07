@@ -12208,6 +12208,24 @@ for _key in ("CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL", "CLAUDE_CODE_WORKFLOW_SUBAGE
         "agent-model-cap", tool="Write", cwd=NOGIT, file_path=PROJ_LOCAL,
         content=json.dumps({"env": {_key: "opus"}}), carries=(_key + " = opus",))
 
+# A FOLDER THE SHELL NAMES WHEN IT RUNS THE WRITE. A command substitution (`cat f`, `dirname $x`) and the
+# directory-stack shorthands (`~+`, `~-`) name the folder only at run time, so such a folder is a possible
+# settings place and the write asks. The controls pin that a non-settings name in the same folder stays allowed.
+CAP_SHELL_FOLDERS = (
+    '"`cat f`/settings.json"',
+    '"`dirname $x`/settings.json"',
+    "~+/settings.json",
+    "~-/settings.json",
+)
+for _folder in CAP_SHELL_FOLDERS:
+    sh("cap: a shell write of an opus model to " + _folder + " asks",
+       "printf '%s' '" + cap_settings(compact=True) + "' > " + _folder,
+       "ask", "agent-model-cap", cwd=NOGIT, carries=(OPUS,))
+for _folder in ('"`cat f`/fixture.json"', "~+/fixture.json"):
+    sh("cap: a shell write of an opus model to " + _folder + " beside a non-settings name is allowed",
+       "printf '%s' '" + cap_settings(compact=True) + "' > " + _folder,
+       "allow", cwd=NOGIT)
+
 # THE EDIT LIST IS READ WHOLE, not the first 200 edits: the lift after 200 no-op edits still asks. This
 # case pins that boundary, so a count bound cannot come back unseen.
 CAP_NOOP_EDITS = [{"old_string": "line %d" % index, "new_string": "row %d" % index}
@@ -24127,6 +24145,76 @@ LOG_CHECKS_EXTRA.append(("override: a kill still denies with guard_core's veto s
 LOG_CHECKS_EXTRA.append(("override: a builder's test change still denies at commit with guard_core's veto setter gone",
                          ov_veto_setter_gone_case("builder", COMMIT, _bd_inc, BDIFF,
                                                   extra={"agent_id": "bld1", "agent_type": "builder"})))
+
+# A VETO SETTER THAT RAISES A RUNTIME ERROR (override-veto-setter-raises). veto_override catches every Exception from
+# the setter, so the error must still leave a guard-crash line for the call in guard.log. The refusal case pins that
+# a refused call stays refused when the setter raises: main()'s crash path fails open, so a catch narrowed to
+# AttributeError would allow the kill. Two cases, so each failure names one cause.
+VETO_RAISED = "veto setter raised for the test"
+
+
+def _veto_setter_raising_run(label, command, cwd, extra):
+    """The guard's run for one Bash call, with guard_core's veto setter replaced by one that raises a RuntimeError."""
+    folder = os.path.join(ROOT, "vetoraise-%s" % label)
+    os.makedirs(folder, exist_ok=True)
+    payload = json.dumps(dict({"tool_name": "Bash", "tool_input": {"command": command}, "cwd": cwd}, **extra))
+    code = ("import io, sys, importlib.util as u\n"
+            "spec = u.spec_from_file_location('g', %r)\n"
+            "g = u.module_from_spec(spec)\n"
+            "spec.loader.exec_module(g)\n"
+            "def _raises(veto):\n"
+            "    raise RuntimeError(%r)\n"
+            "sys.modules['guard_core'].set_override_veto = _raises\n"
+            "sys.stdin = io.StringIO(%r)\n"
+            "g.main()\n") % (GUARD, VETO_RAISED, payload)
+    env = dict(os.environ)
+    env["CLAUDE_CONFIG_DIR"] = folder
+    env.pop("CLAUDE_CODE_SESSION_ID", None)
+    env.pop("CLAUDE_CODE_REMOTE", None)
+    env["CLAUDE_GUARD_ROOT_PID"] = str(os.getpid())
+    return folder, subprocess.run([sys.executable, "-c", code], capture_output=True, text=True,
+                                  env=env, timeout=60)
+
+
+def ov_veto_setter_raises_case(label, command, cwd, rule, extra=None):
+    """One call that the guard must still deny by `rule` with guard_core's veto setter raising."""
+    def case():
+        materialize(cwd)
+        _folder, run = _veto_setter_raising_run(label, command, cwd, extra or {})
+        if "Traceback" in run.stderr:
+            return False, "a traceback with the setter raising: %r" % run.stderr.strip()[-160:]
+        decision, reason = _decision(run)
+        if decision != "deny" or rule not in reason:
+            return False, "the call with the setter raising is %r, want deny by %s" % (decision, rule)
+        return True, "denied by %s with the setter raising" % rule
+    return case
+
+
+def ov_veto_setter_error_logged_case(label, command, cwd, extra=None):
+    """One call judged with guard_core's veto setter raising: guard.log holds a guard-crash line for this call
+    that names the setter's error. The scope is read first, then the subject."""
+    def case():
+        materialize(cwd)
+        folder, _run = _veto_setter_raising_run(label, command, cwd, extra or {})
+        try:
+            with open(os.path.join(folder, "guard.log"), encoding="utf-8") as handle:
+                rows = [line.split("\t") for line in handle.read().splitlines()]
+        except OSError:
+            return False, "guard.log is not written with the setter raising"
+        own = [row for row in rows if len(row) > 3 and row[1] == "Bash"]
+        if not own:
+            return False, "guard.log holds no line for this call with the setter raising"
+        crashes = [row for row in own if row[3] == "guard-crash" and any(VETO_RAISED in cell for cell in row)]
+        if not crashes:
+            return False, "no guard-crash line for this call names the setter's error: the failure passed silently"
+        return True, "guard.log holds a guard-crash line for this call that names the setter's error"
+    return case
+
+
+LOG_CHECKS_EXTRA.append(("override: a kill still denies with guard_core's veto setter raising a RuntimeError",
+                         ov_veto_setter_raises_case("kill-raise", "pkill -f node", NOGIT, "machine-wide-kill")))
+LOG_CHECKS_EXTRA.append(("override: guard.log names a RuntimeError from guard_core's veto setter, not passed silently",
+                         ov_veto_setter_error_logged_case("kill-log", "pkill -f node", NOGIT)))
 
 
 # pkill and killall are refused by guard_kill through refuse(), which an override lifts. The settings.json
