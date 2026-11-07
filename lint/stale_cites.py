@@ -38,14 +38,22 @@ Refuses a range that leaves a tracked Markdown line naming a name the range remo
             as `stale-cites: report, path:line: STALE005 ...` and never changes the exit code, so it ships dark
             (decision source-prose-lint-ships-dark). A line marked `<!-- ste-disable-line STALE005 -->` is left out.
   STALE006  (range mode only, report only) a Markdown line anchors `path:N` or `path:N-M` on a file the range edits
-            in place (any type but Markdown), and the line itself is not added or edited in the range. The hunks of
-            the range's diff map the cited base lines to head: lines above them grew or shrank gives `cited lines
-            moved to path:N at head` (the new anchor), a hunk inside them gives `cited text changed in this range`,
-            and a deletion of all of them gives `cited lines removed in this range`. An edit below them is silent,
-            and so is an anchor already past the file's end at base. The anchor is read as STALE004 reads it
-            (`anchor_on`), except the path may have no folder part (`code.py:10`), and fences count as prose. It prints
-            as `stale-cites: report, path:line: STALE006 ...` after the STALE005 lines, never changes the exit code,
-            and a line marked `<!-- ste-disable-line STALE006 -->` is left out.
+            in place (any type but Markdown). The hunks of the range's diff map the cited base lines to head. For a
+            line the range leaves untouched: lines above them grew or shrank gives `cited lines moved to path:N at
+            head` (the new anchor), a hunk inside them gives `cited text changed in this range`, and a deletion of
+            all of them gives `cited lines removed in this range`. An edit below them is silent, and so is an anchor
+            already past the file's end at base.
+            A line the range ADDS is reported only when a writer who read pre-range numbers is likely: base lines
+            N..M equal head lines N'..M' with N' not N, and head lines N..M differ from base lines N..M. The message
+            says the anchor may use pre-range numbers and names `path:N'-M'`.
+            A line the range EDITS is read through its base version, which cites N_base (the base blob of that
+            Markdown file, paired by hunk position). A head anchor equal to N_base mapped forward through the hunks
+            was re-anchored, so nothing prints. A head anchor equal to N_base reads as an untouched line. Any other
+            head anchor reads as an added line. A line with no base version, or none that anchors that file, is added.
+            The anchor is read as STALE004 reads it (`anchor_on`), except the path may have no folder part
+            (`code.py:10`), and fences count as prose. It prints as `stale-cites: report, path:line: STALE006 ...`
+            after the STALE005 lines, never changes the exit code, and a line marked
+            `<!-- ste-disable-line STALE006 -->` is left out.
 A line already stale at base, for a name the range did not remove, never fires. Left out: docs/records.md,
 each file `.ste-lint-exclude` (and the EXCLUDE env of the ste-lint action) names, and a line marked
 `<!-- ste-disable-line STALE001 -->` (or STALE002, STALE003, STALE004). Fenced blocks count as prose.
@@ -91,8 +99,9 @@ look for. A touched .py also loads the py-facts script once, in-process (no star
 STALE006 starts no process of its own. A range that edits a non-Markdown file in place reads the tracked Markdown at head
 through the `cat-file --batch` the run opens (the trees of `rng.tree` when a read listed it, else walked through that
 same process, since an `ls-tree` here would be a second start), so a changed file that is no .py adds that one
-`cat-file` start, and a .py adds none. It builds one map (the file's hunks, already in the diff, and its base line
-count) for each changed file that an anchor names.
+`cat-file` start, and a .py adds none. It builds one map (the file's hunks, already in the diff, its base lines and its
+head lines) for each changed file that an anchor names, and reads the base blob of each edited Markdown file that anchors
+a changed file, once, through the same `cat-file`: no new process.
 The report adds, for a changed non-Markdown file, one `ls-tree` of the decisions folders and the mechanisms file (none
 when the run already listed the whole tree) and the `cat-file --batch`, which reads each decision record whole (a regex
 then takes its Home line) and the mechanisms file once. The decisions folder is the first of lint/layout.py
@@ -266,8 +275,8 @@ HUNK = re.compile(r"@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@")
 
 def read_patch(patch):
     """(lines, hunks) of a `-U0` patch. lines: {path: [(number, text)]}, each line the patch adds to a .md file, by its
-    line number at head. hunks: {path: [(old start, old count, new count)]}, each hunk of each file at its head path;
-    an old count of 0 is an insertion after line `old start`. A hunk's body is read by its counts, never by its first
+    line number at head. hunks: {path: [(old start, old count, new count, new start)]}, each hunk of each file at its head
+    path; an old count of 0 is an insertion after line `old start`. A hunk's body is read by its counts, never by its first
     character, so an added line that starts `+++ ` or `@@ ` is no header. A `\\ No newline` marker is no line."""
     found, hunks, path, rows, i = {}, {}, None, patch.split("\n"), 0
     while i < len(rows):
@@ -283,7 +292,7 @@ def read_patch(patch):
         gone = int(hunk.group(2)) if hunk.group(2) is not None else 1
         number, new = int(hunk.group(3)), int(hunk.group(4)) if hunk.group(4) is not None else 1
         if path is not None:
-            hunks.setdefault(path, []).append((int(hunk.group(1)), gone, new))
+            hunks.setdefault(path, []).append((int(hunk.group(1)), gone, new, number))
         while (gone or new) and i < len(rows):
             body = rows[i]
             i += 1
@@ -877,7 +886,7 @@ def drift_of(hunks, first, last):
     after line N sits above the lines when N is below `first`, inside them when N is `first` or more and below `last`,
     and below them otherwise."""
     shift, touched, deleted = 0, False, 0
-    for start, old, new in hunks:
+    for start, old, new, _ in hunks:
         if old == 0:
             if start < first:
                 shift += new
@@ -901,13 +910,28 @@ def anchor_text(home, first, last):
     return "%s:%d" % (home, first) + ("-%d" % last if last != first else "")
 
 
+def file_lines(data):
+    """The lines of a blob, without the line ends."""
+    lines = data.decode("utf-8", "replace").replace("\r\n", "\n").split("\n")
+    return lines[:-1] if lines and lines[-1] == "" else lines
+
+
+def base_line_of(hunks, number):
+    """The base line a head line `number` replaces, or None when the line is new. A hunk's i-th added line pairs with
+    its i-th removed line, so a hunk that adds more than it removes leaves the surplus lines new."""
+    for start, old, new, first in hunks:
+        if first <= number < first + new:
+            return start + (number - first) if number - first < old else None
+    return None
+
+
 class DriftReader:
     """STALE006: a Markdown line that anchors `path:N` or `path:N-M` on a file the range edits in place, where the range
     moves, changes or removes the cited lines. The anchor was written against the file at base, so the hunks of the
-    range map each cited base line to head. Report only, like STALE005. A line the range adds or edits is left out: its
-    author anchored it. A file of any type counts, except Markdown, whose anchors the Markdown cost class leaves unread.
-    An anchor already past the end of the file at base is no drift. The markdown files come from `rng.tree` when a read
-    listed it, else from the trees of the shared `cat-file`, so no git process starts for them."""
+    range map each cited base line to head. Report only, like STALE005. A file of any type counts, except Markdown, whose
+    anchors the Markdown cost class leaves unread. An anchor already past the end of the file at base is no drift. A line
+    the range adds or edits is judged by its writer's likely numbers (`judge`). The markdown files come from `rng.tree`
+    when a read listed it, else from the trees of the shared `cat-file`, so no git process starts for them."""
     code = "STALE006"
     scope = "range"
 
@@ -931,41 +955,98 @@ class DriftReader:
                     found.append(prefix + name)
         return sorted(found)
 
+    def anchors(self, line, folder, targets):
+        """[(home, first, last)] for each anchor of the line on a path of `targets`."""
+        found = []
+        if ":" not in line:
+            return found
+        for run in RUN_RE.finditer(line):
+            cite = run.group(0)
+            if not BARE_CITE.match(cite) or placeholder_adjacent(line, run.start(), run.end()):
+                continue
+            home = next((c for c in (cite, posixpath.normpath(posixpath.join(folder, cite))) if c in targets), None)
+            anchor = anchor_on(line, run, home, targets)
+            if anchor is not None:
+                found.append((home, int(anchor.group(1)), int(anchor.group(2) or anchor.group(1))))
+        return found
+
+    def texts(self, rng, home, cache):
+        """(base lines, head lines) of a changed file, each read once; None when either blob is absent."""
+        if home not in cache:
+            base, head = (rng.batch.get("%s:%s" % (rev, home)) for rev in (rng.base, rng.head))
+            cache[home] = None if base is None or head is None else (file_lines(base), file_lines(head))
+        return cache[home]
+
     def claims(self, rng, targets):
         """[(path, number, message)], one per Markdown line, its anchors' messages joined by "; "."""
-        found, maps = [], {}
+        found, texts, base_md = [], {}, {}
         for md in self.markdown(rng):
             added = {n for n, _ in rng.added_lines.get(md, ())}
             folder = posixpath.dirname(md)
             for number, line in enumerate(read_markdown(rng.batch, rng.head, md).split("\n"), 1):
-                if ":" not in line or number in added or ("ste-disable-line" in line and self.code in disabled(line)):
+                if ":" not in line or ("ste-disable-line" in line and self.code in disabled(line)):
                     continue
-                messages = []
-                for run in RUN_RE.finditer(line):
-                    cite = run.group(0)
-                    if not BARE_CITE.match(cite) or placeholder_adjacent(line, run.start(), run.end()):
-                        continue
-                    home = next((c for c in (cite, posixpath.normpath(posixpath.join(folder, cite))) if c in targets), None)
-                    anchor = anchor_on(line, run, home, targets)
-                    if anchor is None:
-                        continue
-                    first, last = int(anchor.group(1)), int(anchor.group(2) or anchor.group(1))
-                    if home not in maps:
-                        base = rng.batch.get("%s:%s" % (rng.base, home))
-                        maps[home] = None if base is None else line_count(base)
-                    if maps[home] is None or first < 1 or last < first or last > maps[home]:
-                        continue  # already no line of the file at base: STALE004's, never drift
-                    drift = drift_of(rng.hunks[home], first, last)
-                    cited = anchor_text(home, first, last)
-                    if drift is None:
-                        continue
-                    kind, shift = drift
-                    messages.append("%s, cited lines moved to %s at head" % (cited, anchor_text(home, first + shift, last + shift))
-                                    if kind == "moved" else "%s, cited text changed in this range" % cited
-                                    if kind == "changed" else "%s, cited lines removed in this range" % cited)
+                here = self.anchors(line, folder, targets)
+                if not here:
+                    continue
+                before = None  # the anchors of the base version of an edited line
+                if number in added:
+                    old = base_line_of(rng.hunks.get(md, ()), number)
+                    if old is not None:
+                        if md not in base_md:
+                            blob = rng.batch.get("%s:%s" % (rng.base, md))
+                            base_md[md] = None if blob is None else file_lines(blob)
+                        if base_md[md] is not None and old <= len(base_md[md]):
+                            before = self.anchors(base_md[md][old - 1], folder, targets)
+                messages = [m for m in (self.judge(rng, texts, home, first, last,
+                                                   None if number not in added else
+                                                   [(f, l) for h, f, l in before or () if h == home])
+                                        for home, first, last in here) if m]
                 if messages:
                     found.append((md, number, "; ".join(messages)))
         return found
+
+    def judge(self, rng, cache, home, first, last, base_anchors):
+        """The message for one anchor, or None. `base_anchors` is None for a line the range leaves untouched; for a
+        line it adds or edits, the (first, last) of each anchor its base version had on this file, none for an added line."""
+        both = self.texts(rng, home, cache)
+        if both is None:
+            return None
+        base, head = both
+        hunks = rng.hunks[home]
+
+        def valid(a, b):
+            return 1 <= a <= b <= len(base)  # an anchor with no such lines at base is STALE004's, never drift
+
+        def untouched(a, b):
+            drift = drift_of(hunks, a, b) if valid(a, b) else None
+            if drift is None:
+                return None
+            kind, shift = drift
+            cited = anchor_text(home, a, b)
+            if kind == "moved":
+                return "%s, cited lines moved to %s at head" % (cited, anchor_text(home, a + shift, b + shift))
+            return "%s, cited text changed in this range" % cited if kind == "changed" \
+                else "%s, cited lines removed in this range" % cited
+
+        if base_anchors is None:
+            return untouched(first, last)
+        for a, b in base_anchors or ():
+            if (first, last) == (a, b):
+                return untouched(a, b)
+            drift = drift_of(hunks, a, b) if valid(a, b) else None
+            if drift and drift[0] == "moved" and (first, last) == (a + drift[1], b + drift[1]):
+                return None  # the writer re-anchored the line after the range moved its lines
+        if not valid(first, last):
+            return None
+        drift = drift_of(hunks, first, last)
+        if drift is None or drift[0] != "moved":
+            return None
+        new_first, new_last = first + drift[1], last + drift[1]
+        if base[first - 1:last] == head[new_first - 1:new_last] and base[first - 1:last] != head[first - 1:last]:
+            return "%s may use pre-range numbers; the lines it cites moved to %s at head" % (
+                anchor_text(home, first, last), anchor_text(home, new_first, new_last))
+        return None
 
 
 def route_ids(rng, cache):
