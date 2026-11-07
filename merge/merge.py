@@ -34,7 +34,7 @@
                           --lint-unknown-ok gives a reason; it is then logged and no `PASS:` line prints. Takes no lock, merges
                           and pushes nothing; any session may run it, cloud included. Cost per call: one ci-job run (about 550 s,
                           measured once on one PR head), one worktree, plus ci-job's pinned worktree when the workflow pins one
-                          and a lint step runs (a git fetch only when the sha is absent, an npm ci only when that tree has a
+                          and a lint step is not skipped (a git fetch only when the sha is absent, an npm ci only when that tree has a
                           package-lock.json).
   merge --idle-lanes --live FILE
                           one line per lane the roadmap's live file shows done and safe to archive, then a summary line. Reads
