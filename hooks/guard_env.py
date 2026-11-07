@@ -237,7 +237,7 @@ def _substitutions(cmd: str, depth: int = 0, powershell: bool = False, heredoc: 
             i += 2
             continue
         if char == "#" and quote == "" and not (heredoc and len(stack) == 1) and (
-                not pieces or pieces[-1][-1] in " \t\n;|&("):
+                not pieces or pieces[-1] in (" ", "\t", "\n", ";", "|", "&", "(")):   # an escape pair is no boundary
             end = cmd.find("\n", i)
             end = n if end < 0 else end
             pieces.append(cmd[i:end])
@@ -290,7 +290,8 @@ def _substitutions(cmd: str, depth: int = 0, powershell: bool = False, heredoc: 
 def substitution_commands(raw: str, stripped: str, outer: bool = False):
     """The texts a shell runs INSIDE the command, each a command of its own: every `$(...)`, backtick
     and process substitution in `stripped`, plus those in an unquoted heredoc body of `raw`. A quoted
-    delimiter runs nothing. With `outer`, the command itself is last, its substitutions read as `x`
+    shell heredoc body runs nothing and is gone from `stripped`; an interpreter heredoc body stays in
+    `stripped` and is read as shell text, so a `$( )` in it can be a false alarm. With `outer`, the command itself is last, its substitutions read as `x`
     (`stripped` as it stands when the nest is too deep). A nest too deep to read gives no inner text:
     the env-file rule refuses it. The one home of this cut: judge_shell and git_env_command_hit call it.
     """
