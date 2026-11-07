@@ -2107,7 +2107,7 @@ test("a group with one new member is new as a whole, so a seen item in its tier 
 });
 
 // ---------------------------------------------------------------- a reply or a step since the last visit
-// Coordinator ruling, 2026-11-06. An item is new when its replied time is later than both the owner's last Send and the
+// An item is new when its replied time is later than both the owner's last Send and the
 // viewer's last visit (waiting.visit, an ISO time the page writes on load after it reads the marks). A roadmap step is new when
 // its updatedAt is later than that visit. Items and steps share the one visit time. A new answered card opens at load and
 // carries the mark; an owed card never folds. The mark uses the asks' green New answer style, so no case asserts a colour.
