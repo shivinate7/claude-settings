@@ -22,8 +22,15 @@
                           the rounds; HEAD is the reviewed head the fix diff starts from, and differs from SHA. It refuses (exit 2)
                           unless HEAD is the Head of the newest earlier record on the PR with no Fix check line, read from the
                           PR's issue comments since the PR opened.
-  merge --reviewed        one line per open PR that has a review record comment, with its state (bad when the newest does not parse) and its
-                          live CI; then the PRs with no record.
+  merge --reviewed        the ledger: one line per open PR, `#n branch act age`, with its one next act read from GitHub alone, first match wins:
+                          `batch` (a done review record for the live head), `lane round n` (an open record, or one for another head),
+                          `waits on debt:<slug>|page:<item id>` (a held, parked or replaced label and a `Waits on:` comment line),
+                          `blocked on #N` (its base is that PR's head branch), else `NO NEXT ACT`. A line past its limit
+                          (merge.PR_STATE_AGE_HOURS) or with no next act is RED. When the base's latest run is red, each batch line adds
+                          `held by main red <age>`. The last line: the longest wait since a done record, and the count with no next act.
+                          Exit 0 nothing red, 1 any red, 2 on a failed read, with no list printed. Cost: the open-pull list, the repo's
+                          comments since the oldest open PR (one read), one issue-events read per held PR, one read of the base's latest run.
+                          No GraphQL, no per-head check read, no timer, file or log.
   merge --lane-lint <pr|ref> [--base BRANCH] [--lint-unknown-ok "REASON"]
                           the lint a lane passes before it hands its head to the batch runner: `bin/ci-job checks --lint
                           --base origin/<base>` in a temporary detached worktree at the head. A PR gives its head and base; a
@@ -820,11 +827,15 @@ class Host:
         except (ValueError, KeyError, TypeError) as e:
             raise Stop(f"reading the run {url} from GitHub failed: {e} {DEBT_CITE}")
 
+    def issue_comments(self, since):
+        """-> every issue comment of the repo updated since `since`, oldest first: one list read (all pages). A failed read is a Stop."""
+        return self.pages("issues/comments", fields={"since": since, "sort": "created", "direction": "asc"})
+
     def review_comments(self, since):
         """-> {PR number: [review record bodies, oldest first]}: one list read of the repo's issue comments updated since `since`. A body counts only
         when the review record marker is its whole first line. The number comes from the comment's issue_url. A failed read is a Stop."""
         found = {}
-        for c in self.pages("issues/comments", fields={"since": since, "sort": "created", "direction": "asc"}):
+        for c in self.issue_comments(since):
             body, m = c.get("body") or "", re.search(r"/issues/(\d+)$", c.get("issue_url") or "")
             if m and body.splitlines()[:1] == [REVIEW_MARKER]:
                 found.setdefault(int(m.group(1)), []).append(body)
@@ -1177,6 +1188,7 @@ class Host:
             judged = [r for r in json.loads(out)["workflow_runs"] if (r["status"] == "completed" or (r.get("run_attempt") or 1) > 1)
                     and r["event"] in self.BASE_EVENTS and r["name"] not in self.ignore and r["path"].split("@")[0] in flows]
             red, unknown, read = [], [], {}
+            self.red_runs = []  # the runs behind `red`, for a reader that wants their age (reviewed_lines)
 
             def jobs_of(r):  # a run's jobs, read once per call
                 if r["id"] not in read:
@@ -1232,6 +1244,7 @@ class Host:
                 if jobs:
                     if not cleared(r):
                         red.append(f"{where}: " + "; ".join(jobs))
+                        self.red_runs.append(r)
                 elif any(b.startswith("timed out") for rows in got.values() for b, _ in rows):
                     continue
                 elif r["conclusion"] == "cancelled":
@@ -1239,6 +1252,7 @@ class Host:
                         unknown.append(f"{where} was cancelled with no red job")
                 else:
                     red.append(f"{where} ended {r['conclusion']} with no red job")
+                    self.red_runs.append(r)
         except (Stop, ValueError, KeyError, TypeError, AttributeError, ImportError) as e:
             return "unknown", " ".join(str(e).split())
         return ("red", " | ".join(red)) if red else ("unknown", " | ".join(unknown)) if unknown else ("green", "")
@@ -3028,7 +3042,7 @@ def default_lock(root):
 
 # The review record: a comment on the pull request (decision pr-review-record). This is the one home of its form.
 REVIEW_MARKER = "<!-- review-record -->"
-REVIEW_CI_LINE = "CI: read live by merge --reviewed"  # the comment never stores CI state
+REVIEW_CI_LINE = "CI: read live by merge --reviewed"  # the comment never stores CI state. The wording is the form's last line, kept as posted records carry it; --reviewed no longer reads CI per PR (it reads the base's latest run once)
 REVIEW_KINDS, REVIEW_GUARDS = ("normal", "delete-only", "docs-only"), ("yes", "no")
 REVIEW_ROLES, REVIEW_VERDICTS = ("reviewer", "design-reviewer"), ("PASS", "FAIL", "PARTIAL")
 REVIEW_NETS = ("not owed", "zero", "positive", "negative")
@@ -3137,25 +3151,108 @@ def review_state(rec, head):
         return "done", "docs-only change, no round owed"
     return "open", f"round {top} is not passed" if top else "no round is recorded"
 
-def reviewed_lines(h):
-    """-> the lines of `merge --reviewed`, built before any is printed so a failed read prints none. Two list reads (the open pull requests, then the
-    repo's comments since the oldest one) and, for each ready pull request that has a record, three `gh` calls: the check runs, the commit statuses and
-    the branch protection (decision pr-review-record, the cost). The comment list pages every comment of the repo since the oldest open pull request."""
+# The age limit of each next act, in hours; one home. A line past its limit is RED, so no wait runs unbounded.
+# Keys: the next acts (batch, lane round) and the hold labels (held, parked, replaced). The batch limit is unmeasured: 24 is a first guess,
+# not read from any run history. Move it when a measured wait says otherwise.
+PR_STATE_AGE_HOURS = {"batch": 24, "lane round": 72, "held": 168, "parked": 720, "replaced": 24}
+HOLD_LABELS = ("held", "parked", "replaced")  # the labels that take a Waits on line in place of a review record
+WAITS_ON_LINE = "Waits on:"
+
+def epoch_of(t):
+    """Epoch seconds of a clock reading: Host.now gives seconds, and a test host's fixed clock gives a datetime."""
+    return t.timestamp() if isinstance(t, datetime.datetime) else float(t)
+
+def github_epoch(text):
+    """Epoch seconds of a GitHub time, such as 2026-10-02T06:00:00Z."""
+    return datetime.datetime.fromisoformat(text.replace("Z", "+00:00")).timestamp()
+
+def waits_on_id(line):
+    """-> the id of a `Waits on: debt:<slug>` or `Waits on: page:<item id>` line, or None when the form is wrong. Only the form is checked, never
+    whether the debt or the page item exists. The slug limit is lint/check_record_slugs.MAX, its one home."""
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "lint"))
+    import check_record_slugs
+    m = re.fullmatch(rf"{WAITS_ON_LINE} ((debt):([a-z0-9]+(?:-[a-z0-9]+)*)|(page):([A-Za-z0-9][A-Za-z0-9_-]*))", line, re.ASCII)
+    if not m or (m.group(2) == "debt" and len(m.group(3)) > check_record_slugs.MAX):
+        return None
+    return m.group(1)
+
+def reviewed_lines(h, root):
+    """-> (lines, red) of `merge --reviewed`, built before any is printed so a failed read prints none (a Stop). Every open pull request gets one next
+    act, read from GitHub alone, first match wins: its newest review record is done for the live head, `batch`; the record is open or for another
+    head, `lane round n` (n the next round owed, at most 3); a label in HOLD_LABELS and a `Waits on: debt:<slug>` or `Waits on: page:<item id>`
+    comment line, `waits on <id>`; its base is another open pull request's head branch, `blocked on #N`; else `NO NEXT ACT`. A record that does
+    not parse, or whose net value holds the change, gives no act of its own, so the rules below it run. The line is `#n branch act age`, in whole
+    hours, since the record's comment (batch, lane round), the hold label's last labeled event (a hold), or the pull request's opening (the rest).
+    RED when the act is NO NEXT ACT, the age is past its PR_STATE_AGE_HOURS limit, or, for blocked (no limit of its own), the pull request it
+    waits on is red. When the base's latest run is red, each batch line adds `held by main red <age>`; an unreadable run is a Stop. The last line
+    gives the longest wait since a done record and the count with no next act. `red` is True when any line is RED.
+    Cost: the open-pull list, the repo's comments since the oldest open pull request (one list read), one `issues/<n>/events` list for each pull
+    request that reaches the hold rule, and, when a batch line exists, one `actions/runs` read of the base (its jobs too, only when its latest run
+    did not succeed: host.base_state). No GraphQL, no head or check read, no timer, file or log."""
     pulls = h.pages("pulls", fields={"state": "open"})
+    summary = lambda wait, none: f"longest wait since a done record: {wait}h; no next act: {none}"
     if not pulls:
-        return ["no open pull requests."]
-    records = h.review_comments(min(d["created_at"] for d in pulls))
-    lines, bare = [], []
+        return ["no open pull requests.", summary(0, 0)], False
+    now = epoch_of(h.now())
+    hours = lambda since: int(max(0.0, now - since) // 3600)
+    records, plain = {}, {}  # PR number -> [(time, body)], oldest first: its review records, and all its comments
+    for c in h.issue_comments(min(d["created_at"] for d in pulls)):
+        m = re.search(r"/issues/(\d+)$", c.get("issue_url") or "")
+        if m:
+            body, row = c.get("body") or "", (github_epoch(c["created_at"]), c.get("body") or "")
+            plain.setdefault(int(m.group(1)), []).append(row)
+            if body.splitlines()[:1] == [REVIEW_MARKER]:
+                records.setdefault(int(m.group(1)), []).append(row)
+    heads = {d["head"]["ref"]: d["number"] for d in pulls}
+    acts = {}  # n -> (branch, act text, kind or None for no next act, since, the number it is blocked on)
     for d in sorted(pulls, key=lambda d: d["number"]):
-        n, sha, bodies = d["number"], d["head"]["sha"], records.get(d["number"])
-        if not bodies:
-            bare.append(f"#{n}")
-            continue
-        rec = parse_review(bodies[-1])
-        state, why = review_state(rec if rec and rec["n"] == n else None, sha)
-        ci = "draft, no run" if d.get("draft") else h.head_state(n, sha=sha)
-        lines.append(f"#{n} {d['head']['ref']} {sha[:9]} {state}: {why}; CI {ci}")
-    return lines + ([f"no record: {', '.join(bare)}"] if bare else [])
+        n, sha, opened = d["number"], d["head"]["sha"], github_epoch(d["created_at"])
+        labels, act = {x["name"] for x in d.get("labels") or []}, None
+        if records.get(n):
+            at, body = records[n][-1]
+            rec = parse_review(body)
+            rec = rec if rec and rec["n"] == n else None
+            state = review_state(rec, sha)[0]
+            if state == "done":
+                act = ("batch", "batch", at, None)
+            elif state in ("open", "stale"):
+                owed = min(max((i for i, *_ in rec["rounds"]), default=0) + 1, REVIEW_LAST_ROUND)
+                act = (f"lane round {owed}", "lane round", at, None)
+        if act is None:
+            hold = next((k for k in HOLD_LABELS if k in labels), None)
+            waits = next((line for _, body in reversed(plain.get(n, [])) for line in reversed(body.splitlines()) if line.startswith(WAITS_ON_LINE)), None)
+            wid = hold and waits and waits_on_id(waits.rstrip())
+            if wid:  # the event list is read only here: the age of a hold is the age of its label
+                events = [e for e in h.pages(f"issues/{n}/events") if e.get("event") == "labeled" and (e.get("label") or {}).get("name") == hold]
+                act = (f"waits on {wid}", hold, github_epoch(events[-1]["created_at"]) if events else opened, None)
+        if act is None and heads.get(d["base"]["ref"], n) != n:
+            act = (f"blocked on #{heads[d['base']['ref']]}", "blocked", opened, heads[d["base"]["ref"]])
+        acts[n] = (d["head"]["ref"], *(act or ("NO NEXT ACT", None, opened, None)))
+    held = ""
+    if any(a[2] == "batch" for a in acts.values()):  # one read of the base's latest run, for the red-main text of each batch line
+        verdict, detail = base_verdict(root, h, h.base)
+        if verdict == "unknown":
+            raise Stop(f"{h.base}'s runs are unknown, so a batch line cannot say whether {h.base} is red: {detail}")
+        if verdict == "red":
+            times = [github_epoch(r.get("created_at") or r.get("run_started_at")) for r in h.red_runs if r.get("created_at") or r.get("run_started_at")]
+            held = f" held by main red {hours(min(times))}h" if times else " held by main red"
+
+    def red_of(n, seen=()):
+        _, _, kind, since, blocker = acts[n]
+        if kind is None:
+            return True
+        if kind == "blocked":  # no limit of its own: it inherits the red of the pull request it waits on
+            return blocker not in seen and red_of(blocker, (*seen, n))
+        return hours(since) > PR_STATE_AGE_HOURS[kind]
+    lines, reds = [], 0
+    for n in sorted(acts):
+        branch, act, kind, since, _ = acts[n]
+        red = red_of(n)
+        reds += red
+        lines.append(f"#{n} {branch} {act} {hours(since)}h" + (held if kind == "batch" else "") + (" RED" if red else ""))
+    done = [hours(a[3]) for a in acts.values() if a[2] == "batch"]
+    lines.append(summary(max(done, default=0), sum(a[2] is None for a in acts.values())))
+    return lines, bool(reds)
 
 def head_arg(text):
     """argparse type of --head: a full lowercase 40-hex sha, the one the review read."""
@@ -3265,7 +3362,7 @@ def main(argv, host=None, lock=None):
     p.add_argument("--config", default=".github/stamp.json")
     p.add_argument("--idle-lanes", action="store_true", help="list the lanes to archive from the roadmap's live file; takes no lock, merges and posts nothing")
     p.add_argument("--live", default=None, metavar="FILE", help="with --idle-lanes: the publisher's live-work file")
-    p.add_argument("--reviewed", action="store_true", help="list the open pull requests with their review record state and live CI")
+    p.add_argument("--reviewed", action="store_true", help="the ledger: each open pull request with its one next act and age; exit 1 when any line is RED")
     p.add_argument("--review-record", action="store_true", help="print the review record for the pull request's live head (posts nothing)")
     p.add_argument("--head", type=head_arg, metavar="SHA", help="with --review-record: the 40-hex head the review read; the live head must equal it")
     p.add_argument("--kind", choices=REVIEW_KINDS, help="with --review-record: the kind of change")
@@ -3365,8 +3462,13 @@ def main(argv, host=None, lock=None):
             if not host:
                 h.required, h.ignore = cfg["merge"]["requiredChecks"], ignore_checks(cfg)
                 h.refuse_pinned_mismatch()
-            say(*reviewed_lines(h))
-            return 0
+            try:
+                lines, red = reviewed_lines(h, root)
+            except Stop as e:  # a failed read lists nothing and exits 2: unknown, never clear
+                print(f"merge: {e}", file=sys.stderr)
+                return 2
+            say(*lines)
+            return 1 if red else 0
         if a.confirm and os.environ.get("CLAUDE_CODE_REMOTE") == "true" and cfg["merge"].get("standingGrant", True) is False:
             raise Stop("The owner's standing merge grant is off for this repo, so ask the owner to merge this PR. " + OFF_CITE)
         ignore = ignore_checks(cfg)
