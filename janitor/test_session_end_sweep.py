@@ -735,6 +735,9 @@ class SweepIsToldItsTimeLeftAsADeadline(unittest.TestCase):
                 self.assertIsNotNone(value, "the sweep got no --deadline-seconds: %r" % (calls[0],))
                 self.assertAlmostEqual(value, self.mod.remaining_sweep_timeout_seconds(elapsed))
                 # the hook's own subprocess timeout is the time left too: it is what cuts a hung sweep off
+                self.assertIsNotNone(self.sweep_timeouts[0],
+                                     "the hook gave the sweep no subprocess timeout (None), "
+                                     "so a hung sweep is never cut off")
                 self.assertAlmostEqual(self.sweep_timeouts[0], self.mod.remaining_sweep_timeout_seconds(elapsed),
                                        msg="the hook's own sweep timeout is not the time left")
 
