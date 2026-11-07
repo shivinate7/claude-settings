@@ -917,6 +917,7 @@ class DoneNamesModelsTests(unittest.TestCase):
     REVIEWER_R2 = {"subagent_type": "reviewer", "model": "sonnet", "prompt": "Round 2 of 3"}
     FIX_CHECK = {"subagent_type": "reviewer", "prompt": "Fix check of round 2"}  # no model: haiku
     REVIEWER_OPUS = {"subagent_type": "reviewer", "model": "opus", "prompt": "Round 1 of 3"}
+    TEST_AUTHOR = {"subagent_type": "test-author", "model": "haiku", "prompt": "Add the red cases"}
 
     def test_dm_red_builder_unnamed_blocks(self):
         out = self.verdict("> **Done** BUILT the guard, PR #5\n> **Next** Unstarted: none", [self.BUILDER])
@@ -1029,6 +1030,78 @@ class DoneNamesModelsTests(unittest.TestCase):
         self.assertIsNotNone(out, "the report passed: a builder opus name with a sonnet builder was not blocked")
         self.assertEqual(out["decision"], "block")
         self.assertIn("'builder opus' matches no builder spawn, which ran sonnet", out["reason"])
+
+    def test_dm_false_alarm_incident_next_names_reviewer_passes(self):
+        # Catches: a reviewer still running, named with its model in Next, blocks the report because Done names
+        # only the test-author and holds no BUILT item.
+        out = self.verdict(
+            "> **Done:**\n> - OTHER: Added a test ..., commit 8f42c4ebe. (test-author haiku)\n>\n"
+            "> **Next:**\n> - The round 2 fix check is running (reviewer sonnet), and so is lint on the record fix.\n"
+            "> - Unstarted: none.",
+            [self.TEST_AUTHOR, self.REVIEWER_R2])
+        self.assertIsNone(out, (out or {}).get("reason"))
+
+    def test_dm_false_alarm_inline_done_with_next_bullets_passes(self):
+        # Catches: the same excuse must read an inline Done line, not only Done bullets.
+        out = self.verdict(
+            "> **Done:** OTHER: Added a test ..., commit 8f42c4ebe. (test-author haiku)\n"
+            "> **Next:**\n> - The round 2 fix check is running (reviewer sonnet), and so is lint on the record fix.\n"
+            "> - Unstarted: none.",
+            [self.TEST_AUTHOR, self.REVIEWER_R2])
+        self.assertIsNone(out, (out or {}).get("reason"))
+
+    def test_dm_red_built_item_without_a_pair_blocks_the_next_excuse(self):
+        # Catches: a BUILT item that names no role and model keeps the reviewer unexcused, so Next cannot back it.
+        out = self.verdict(
+            "> **Done:**\n> - BUILT: x, PR #12\n>\n"
+            "> **Next:**\n> - The round 2 fix check is running (reviewer sonnet).",
+            [self.REVIEWER_R2])
+        self.assertIsNotNone(out, "the report passed: a BUILT item with no model let Next excuse the reviewer")
+        self.assertEqual(out["decision"], "block")
+        self.assertIn("no model named for reviewer", out["reason"])
+
+    def test_dm_red_reviewer_named_nowhere_blocks(self):
+        # Catches: a spawned reviewer that neither Done nor Next names with a model must still block.
+        out = self.verdict(
+            "> **Done:**\n> - OTHER: Added a test ..., commit 8f42c4ebe. (test-author haiku)\n>\n"
+            "> **Next:**\n> - The round 2 fix check is running, and so is lint on the record fix.\n"
+            "> - Unstarted: none.",
+            [self.TEST_AUTHOR, self.REVIEWER_R2])
+        self.assertIsNotNone(out, "the report passed: a reviewer that no line named was not blocked")
+        self.assertEqual(out["decision"], "block")
+        self.assertIn("no model named for reviewer", out["reason"])
+
+    def test_dm_red_next_names_reviewer_without_a_model_blocks(self):
+        # Catches: Next excuses a spawn only when it names the role with a model; a bare role name does not.
+        out = self.verdict(
+            "> **Done:**\n> - OTHER: Added a test ..., commit 8f42c4ebe. (test-author haiku)\n>\n"
+            "> **Next:**\n> - The round 2 fix check is running (reviewer), and so is lint on the record fix.\n"
+            "> - Unstarted: none.",
+            [self.TEST_AUTHOR, self.REVIEWER_R2])
+        self.assertIsNotNone(out, "the report passed: a bare reviewer name in Next excused the spawn")
+        self.assertEqual(out["decision"], "block")
+        self.assertIn("no model named for reviewer", out["reason"])
+
+    def test_dm_red_next_builder_opus_ran_sonnet_still_blocks(self):
+        # Catches: a Next pair the spawn does not back must still refuse. Main refuses on the unnamed builder;
+        # the Next pair check words it as a mismatch. Either refusal passes this test.
+        out = self.verdict(
+            "> **Done:**\n> - OTHER: Added a test ..., commit 8f42c4ebe. (test-author haiku)\n>\n"
+            "> **Next:**\n> - The builder is running (builder opus).\n> - Unstarted: none.",
+            [self.TEST_AUTHOR, self.BUILDER])
+        self.assertIsNotNone(out, "the report passed: a builder opus name in Next with a sonnet builder was not blocked")
+        self.assertEqual(out["decision"], "block")
+        causes = ("no model named for builder", "'builder opus' matches no builder spawn")
+        self.assertTrue(any(cause in out["reason"] for cause in causes), out["reason"])
+
+    def test_dm_green_done_names_both_roles_passes(self):
+        # Catches: a Done that names every spawned role, with the incident's spawns, must pass.
+        out = self.verdict(
+            "> **Done:**\n> - OTHER: Added a test ..., commit 8f42c4ebe. (test-author haiku, reviewer sonnet)\n>\n"
+            "> **Next:**\n> - The round 2 fix check is running, and so is lint on the record fix.\n"
+            "> - Unstarted: none.",
+            [self.TEST_AUTHOR, self.REVIEWER_R2])
+        self.assertIsNone(out, (out or {}).get("reason"))
 
 
 class UnstartedItemsTests(unittest.TestCase):
