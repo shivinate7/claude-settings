@@ -902,6 +902,39 @@ def case_command_in_item_spans():
          entry_of(task_item(["Check the output:\n```\ngrep x a | head\n```"])), ("command-in-item", "shell line"))
 
 
+# ------------------------------------------------------------------ a slash command is no file command
+
+def case_command_in_item_slash_command():
+    # `/doctor` is a slash command typed in Claude Code, not a shell command in a file. A step that runs one after
+    # a file step names no file for a command, so it passes. A step that sends the owner to a file for a command,
+    # or runs the command a file shows, is still refused with no `command` field on the item.
+    page("a step that runs the /doctor slash command after a file step passes", "set",
+         entry_of(task_item(["Read plans/x.md for the lane's notes.", "Run the /doctor command in Claude Code."])), None)
+    for name, steps in (("paste the command in plans/x.md", ["Paste the command in plans/x.md."]),
+                        ("run the command shown in plans/x.md",
+                         ["Read plans/x.md first.", "Run the command shown in plans/x.md."]),
+                        ("run the command from plans/x.md", ["Run the command from plans/x.md."])):
+        page("a step that sends the owner to a file for a command (%s) is refused" % name, "set",
+             entry_of(task_item(steps)), ("command-in-item", "file for a command"))
+
+
+# ------------------------------------------------------------------ a title names the page only when the steps name none
+
+def case_press_link_title_context():
+    # With no page in the steps, the task title is the page. A title that names a PR must not make "Press Copy" a
+    # press of that PR's web page, so it passes with no link. A press of Merge under the same title is still an
+    # owner press, and a press of Merge on GitHub under a title with no PR is one too: both are refused with no link.
+    page("a step that presses Copy, under a title that names PR #374, with no link passes", "set",
+         entry_of(task_item(["Press Copy, then paste the text in the chat."], title="Review the notes for PR #374")),
+         None)
+    page("a step that presses Merge, under a title that names PR #374, with no link is refused as press-link", "set",
+         entry_of(task_item(["Press Merge."], title="Merge PR #374")), ("press-link", None))
+    page("a step that presses Merge on GitHub, under a title with no PR, with no link is refused as press-link", "set",
+         entry_of(task_item(["Press Merge on GitHub."], title="Merge the batch")), ("press-link", None))
+    page("a step that presses Copy, under a title with no PR, with no link passes", "set",
+         entry_of(task_item(["Press Copy, then paste the text in the chat."], title="Review the notes")), None)
+
+
 # ------------------------------------------------------------------ a question says how it departs from main
 #
 # Rule question-departs: a question is asked only when the work departs from main. A line that restates
@@ -1441,6 +1474,7 @@ def main():
                  case_line_order_and_prose, case_chat_press_scan_skips_gain_and_lose, case_session_press_needs_no_link,
                  case_chat_reasons_name_a_remedy_and_no_page_field, case_page_reasons_are_one_table,
                  case_gh_login_hit_direct, case_gh_login_switch_on_the_page, case_command_in_item_spans,
+                 case_command_in_item_slash_command, case_press_link_title_context,
                  case_departs_missing, case_departs_empty_or_malformed, case_departs_restates_main,
                  case_departs_valid_passes, case_departs_out_of_scope_passes, case_departs_str_replace,
                  case_departs_ids_and_order, case_departs_reasons,
