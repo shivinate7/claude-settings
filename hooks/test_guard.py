@@ -9336,6 +9336,8 @@ ROLE_LINES = {
     "runner": role_call("g1", RUNNER_TAGS),
     "coordinator": role_call("g1", COORD_TAGS),
     "lane": role_call("g1", LANE_TAGS),
+    # An owner-started session: its own record carries no cs-build tag, so no coordinator set its role.
+    "solo": role_call("g1", ["cs-repo:o/r"], title="an owner-started session"),
     "lane-title": role_call("g1", LANE_TAGS, title="handed to cs-build:batch-runner"),
     "other-session": role_call("g1", RUNNER_TAGS, session=ROLE_OTHER),
     "near-miss": role_call("g1", ["cs-build:batch-runner-old", "cs-repo:o/r"]),
@@ -9841,6 +9843,51 @@ for _trust_tool in TRUST_TOOLS:
                _trust_tool, role_path("untagged-then-lane"))
 trust_allow("an unrelated remote tool (list_sessions) in a lane session allows", LIST_SESSIONS,
             role_path("lane"))
+
+# merge-role-raw (debt merge-role-skips-raw-merge; decision session-tiers: the coordinator never merges). A raw
+# `gh pr merge` and the host's merge tool are judged on CI alone, so a lane, a coordinator or a triage session can
+# merge a green head. Those tiers are refused on both paths. The batch runner and a session with no cs-build tag keep
+# today's verdicts, and a red head stays refused by merge-checks. The merge tool's own confirm is judged by the tool,
+# so this rule never fires on it.
+RAW_ROLE_RULE = "merge-role-raw"
+MCP_MERGE = "mcp__github__merge_pull_request"
+CLOUD_ROLE_ENV = dict(ROLE_ENV, CLAUDE_CODE_REMOTE="true")   # merge.py's role check runs in a cloud session
+
+for _raw_who, _raw_record in (
+    ("a lane", role_path("lane")),
+    ("a coordinator", role_path("coordinator")),
+    ("a triage session", role_path("triage")),
+):
+    # Today a raw merge in a repo that uses the merge tool asks, and the host's merge tool allows.
+    sh("merge-role-raw: gh pr merge in %s on a green head is refused" % _raw_who,
+       "gh pr merge 12 --squash", "deny", RAW_ROLE_RULE, cwd=STAMPREPO, env=CLOUD_ROLE_ENV,
+       transcript=_raw_record, **_BARE_GUARD)
+    add("merge-role-raw: the merge tool of the host in %s on a green head is refused" % _raw_who, "deny",
+        RAW_ROLE_RULE, tool=MCP_MERGE, cwd=NOGIT, pullNumber=12, repo="x", owner="y",
+        env_path=GREEN_ON, config=MERGECFG, env=CLOUD_ROLE_ENV, transcript=_raw_record)
+# A lane that runs locally, with its session id and no cloud flag, is refused on the raw path too. Drop this case
+# if the rule is limited to the cloud.
+sh("merge-role-raw: gh pr merge in a local lane session on a green head is refused",
+   "gh pr merge 12 --squash", "deny", RAW_ROLE_RULE, cwd=STAMPREPO, env=ROLE_ENV,
+   transcript=role_path("lane"), **_BARE_GUARD)
+
+for _kept_who, _kept_record in (
+    ("the batch runner", role_path("runner")),
+    ("a session with no cs-build tag", role_path("solo")),
+):
+    sh("merge-role-raw: gh pr merge in %s on a green head keeps its ask" % _kept_who,
+       "gh pr merge 12 --squash", "ask", BARE_MERGE, carries=BARE_SAYS, cwd=STAMPREPO, env=CLOUD_ROLE_ENV,
+       transcript=_kept_record, **_BARE_GUARD)
+    add("merge-role-raw: the merge tool of the host in %s on a green head allows" % _kept_who, "allow", silent=True,
+        tool=MCP_MERGE, cwd=NOGIT, pullNumber=12, repo="x", owner="y", env_path=GREEN_ON, config=MERGECFG,
+        env=CLOUD_ROLE_ENV, transcript=_kept_record)
+# Red CI still denies by merge-checks, whatever the tier: the role rule adds a refusal and takes none away.
+sh("merge-role-raw: gh pr merge in a lane on a pending head is still denied by merge-checks",
+   "gh pr merge 12 --squash", "deny", "merge-checks", carries="pending", cwd=STAMPREPO, env=CLOUD_ROLE_ENV,
+   transcript=role_path("lane"), env_path=GHPEND + os.pathsep + PY_PATH, config=MERGECFG)
+# The merge tool's own confirm is not a raw merge: the tool refuses a lane itself, so the guard lets the call run.
+sh("merge-role-raw: the merge tool's own confirm in a lane is left to the tool", "merge 12 --confirm", "allow",
+   silent=True, cwd=NOGIT, env=CLOUD_ROLE_ENV, transcript=role_path("lane"))
 
 
 # =========================================================================== 5g. archive of a lane
