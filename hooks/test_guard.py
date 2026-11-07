@@ -7702,7 +7702,8 @@ def nm_case(name, command, expected, cwd, tool="Bash"):
         add(name, expected, tool=tool, cwd=cwd, windows=True, command=command)
 
 
-# THE INSTALLS. Each is refused in a linked folder, and each is allowed in a real folder and an absent one.
+# THE INSTALLS, and the commands that rewrite node_modules too: prune, dedupe, rebuild, link and audit fix.
+# Each is refused in a linked folder, and each is allowed in a real folder and an absent one.
 NM_INSTALLS = (
     ("npm ci", "Bash"), ("npm ci", "PowerShell"),
     ("npm install", "Bash"), ("npm install left-pad", "Bash"),
@@ -7710,6 +7711,8 @@ NM_INSTALLS = (
     ("npm add", "Bash"), ("npm add left-pad", "Bash"),
     ("npm uninstall", "Bash"), ("npm uninstall left-pad", "Bash"),
     ("npm update", "Bash"), ("npm update left-pad", "Bash"),
+    ("npm prune", "Bash"), ("npm dedupe", "Bash"), ("npm rebuild", "Bash"), ("npm link", "Bash"),
+    ("npm audit fix", "Bash"), ("npm audit --json fix", "Bash"),
 )
 # THE RECURSIVE DELETES inside node_modules. A bare `rm -rf node_modules` names the link itself, not a
 # file inside it, so it is not pinned here.
@@ -7790,6 +7793,20 @@ nm_case("linked-nm: refuse npm --loglevel error ci (Bash) in a linked folder",
 nm_case("linked-nm: refuse npm --prefix . ci (Bash) in a linked folder",
         "npm --prefix . ci", "deny", NMLINKED)
 
+# THE OFF-LIST COMMANDS. The guard allows only the read-only commands it lists. Each of these is refused in a
+# linked folder: some rewrite node_modules, and the rest are not on the list. A real folder and a folder with
+# no node_modules allow each, since neither is a link.
+NM_OFF_LIST = (
+    "npm unlink x", "npm ddp", "npm rb", "npm ln x", "npm pru", "npm it", "npm install-test",
+    "npm install-ci-test", "npm sit", "npm edit x", "npm explore x", "npm init", "npm shrinkwrap",
+    "npm instal x", "npm -C . ci",
+)
+for _command in NM_OFF_LIST:
+    nm_case("linked-nm: refuse " + _command + " (Bash) in a linked folder", _command, "deny", NMLINKED)
+    nm_case("linked-nm: " + _command + " (Bash) in a real folder is allowed", _command, "allow", NMREAL)
+    nm_case("linked-nm: " + _command + " (Bash) in a folder with no node_modules is allowed",
+            _command, "allow", NMABSENT)
+
 # THE FALSE-ALARM CONTROLS in a linked folder. None of these changes the linked install, so none is refused.
 nm_case("linked-nm: npm i -g x (Bash) in a linked folder is allowed, a global install",
         "npm i -g x", "allow", NMLINKED)
@@ -7799,6 +7816,16 @@ nm_case("linked-nm: npm ci --dry-run (Bash) in a linked folder is allowed",
         "npm ci --dry-run", "allow", NMLINKED)
 nm_case("linked-nm: npm ci in a quoted echo, in a linked folder, is allowed",
         'echo "npm ci"', "allow", NMLINKED)
+
+# THE READ-ONLY CONTROLS in a linked folder. Each runs a command on the read-only list or a dry run, or
+# names no command (bare `npm`, `npm -v`), so none is refused.
+NM_READ_ONLY = (
+    "npm", "npm -v", "npm ls", "npm list", "npm -C . ls", "npm view x", "npm outdated", "npm audit",
+    "npm audit signatures", "npm explain x", "npm fund", "npm exec -- tsc", "npm config get registry",
+    "npm help install", "npm prune --dry-run", "npm audit fix --dry-run",
+)
+for _command in NM_READ_ONLY:
+    nm_case("linked-nm: " + _command + " (Bash) in a linked folder is allowed", _command, "allow", NMLINKED)
 
 # THE JUNCTION WITHOUT os.path.isjunction. Python 3.11, the CI interpreter, has no os.path.isjunction, so
 # the link test must read the junction itself. This case runs the guard with that function removed.
