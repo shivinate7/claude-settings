@@ -432,6 +432,86 @@ class LeaseExpiry(LeaseCase):
         self.assertEqual(grant(r), (0, "1"), "a lease granted at 1000 is 1801 s old at 2801, over the default 1800 s")
 
 
+class Renew(LeaseCase):
+    """A live holder renews its lease: `renew` stamps the grant time with now, so SIM_LEASE_MAX counts the silence since
+    the last renew (owner, 2026-11-07 13:00: a holder that stops answering loses its turn)."""
+
+    def clock(self, now, max_s=None):
+        extra = {"SIM_LEASE_NOW": str(now)}
+        if max_s is not None:
+            extra["SIM_LEASE_MAX"] = str(max_s)
+        return extra
+
+    def test_renew_keeps_a_lease_past_sim_lease_max(self):
+        holder, waiter = self.spawn(), self.spawn()
+        self.assertEqual(grant(self.take("duo", holder.pid, env=self.clock(1000, 100))), (0, "1"))
+        self.run_tool("renew", "--pid", str(holder.pid), env=self.clock(1080, 100))
+        r = self.take("duo", waiter.pid, wait=1, env=self.clock(1150, 100))
+        self.assertNotEqual(grant(r), (0, "1"),
+                            "the holder renewed at 1080, so at 1150 it is 70 s silent, under SIM_LEASE_MAX=100: "
+                            "slot 1 is not free")
+
+    def test_renew_of_a_pid_with_no_lease_exits_1(self):
+        holder, stranger = self.spawn(), self.spawn()
+        self.assertEqual(grant(self.take("duo", holder.pid, env=self.clock(1000, 100))), (0, "1"))
+        r = self.run_tool("renew", "--pid", str(stranger.pid), env=self.clock(1050, 100))
+        self.assertEqual(r.returncode, 1, "renew of a pid that holds no lease exits %d, not 1" % r.returncode)
+        lines = self.run_tool("status", env=self.clock(1050, 100)).stdout.splitlines()
+        self.assertTrue(any(line.startswith("lease slot 1 ") and mentions(line, holder.pid) for line in lines),
+                        "renew of a pid with no lease changed the holder's lease")
+
+
+class LiveLeases(LeaseCase):
+    """live_leases(), the guard's reader, treats a lease past SIM_LEASE_MAX as not live, on the same clock as the take."""
+
+    def live_leases(self, env):
+        code = ("import importlib.machinery, importlib.util, json, sys\n"
+                "loader = importlib.machinery.SourceFileLoader('sim_lease_under_test', sys.argv[1])\n"
+                "module = importlib.util.module_from_spec(importlib.util.spec_from_loader(loader.name, loader))\n"
+                "loader.exec_module(module)\n"
+                "print(json.dumps(sorted(e['pid'] for e in module.live_leases())))\n")
+        r = subprocess.run([sys.executable, "-c", code, SIM_LEASE], env=self.env(**env), capture_output=True,
+                           text=True, timeout=60)
+        self.assertEqual(r.returncode, 0, "live_leases raised: %s" % r.stderr.strip())
+        return json.loads(r.stdout)
+
+    def test_live_leases_drops_a_lease_past_sim_lease_max(self):
+        holder = self.spawn()
+        clock = {"SIM_LEASE_NOW": "1000", "SIM_LEASE_MAX": "100"}
+        self.assertEqual(grant(self.take("duo", holder.pid, env=clock)), (0, "1"))
+        self.assertEqual(self.live_leases(dict(clock, SIM_LEASE_NOW="1050")), [holder.pid],
+                         "a lease 50 s old is not live under SIM_LEASE_MAX=100")
+        self.assertEqual(self.live_leases(dict(clock, SIM_LEASE_NOW="1150")), [],
+                         "live_leases reports a lease 150 s old under SIM_LEASE_MAX=100")
+
+
+class PsError(LeaseCase):
+    """A `ps` that fails with an error (exit 2) is not a dead pid: it keeps the entry. Exit 1 is no such process."""
+
+    def use_ps_exiting(self, code):
+        path = os.path.join(self.shims, "ps")
+        with open(path, "w") as f:
+            f.write('#!/bin/sh\necho "ps: simulated failure" >&2\nexit %d\n' % code)
+        os.chmod(path, 0o755)
+
+    def test_a_ps_that_exits_2_does_not_reap_a_live_holder(self):
+        holder = self.spawn()
+        self.assertEqual(grant(self.take("duo", holder.pid)), (0, "1"), "the holder is not granted slot 1")
+        self.use_ps_exiting(2)
+        lines = self.status().stdout.splitlines()
+        self.assertTrue(any(line.startswith("lease slot 1 ") and mentions(line, holder.pid) for line in lines),
+                        "a ps that exits 2 reaped a live holder: status no longer lists it")
+
+    def test_a_ps_that_exits_1_for_a_dead_holder_still_reaps_it(self):
+        holder = self.spawn()
+        self.assertEqual(grant(self.take("duo", holder.pid)), (0, "1"), "the holder is not granted slot 1")
+        holder.kill()
+        holder.wait()
+        self.use_ps_exiting(1)
+        lines = self.status().stdout.splitlines()
+        self.assertFalse(any(mentions(line, holder.pid) for line in lines), "a dead holder is still listed")
+
+
 class Give(LeaseCase):
     def test_give_frees_the_lease_and_is_idempotent(self):
         holder, never, later = self.spawn(), self.spawn(), self.spawn()
