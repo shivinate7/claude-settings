@@ -117,9 +117,11 @@ def git(repo, *args):
                           capture_output=True, text=True, env=GIT_ENV, check=True)
 
 
-def make_repo(name, decisions=None, steps=None, debts=None, page=PAGE_URL):
+def make_repo(name, decisions=None, steps=None, debts=None, page=PAGE_URL, items=None):
     """`page` is the repo's waiting-page url. None writes no page key: a repo with no page, which layout reads as unknown.
-    A name is cached, so a second call must name the same page: a different one would silently get the first repo."""
+    `items` maps a doc id to its waiting-copy data, committed on the record branch and updated on origin/roadmap as
+    after a fetch. None writes no copy. A name is cached, so a second call must name the same page: a different one
+    would silently get the first repo."""
     if name in REPOS:
         if REPO_PAGES[name] != page:
             raise ValueError("make_repo %r was made with page %r, not %r" % (name, REPO_PAGES[name], page))
@@ -157,6 +159,21 @@ def make_repo(name, decisions=None, steps=None, debts=None, page=PAGE_URL):
                 json.dump({"title": "Step " + step_id, "phase": "test", "status": "done", "note": note, "why": ""}, f)
         git(repo, "add", "roadmap")
         git(repo, "commit", "-q", "-m", "step notes")
+        git(repo, "checkout", "-q", "-")
+    if items:
+        # The waiting copy as the record branch holds it, on origin/roadmap as after a fetch. Each doc sits at
+        # <waiting-data folder>/items/<doc_id>.json, the folder layout.path resolves, so no case names that folder.
+        import layout  # noqa: E402  lint/layout.py, on sys.path above
+        folder = layout.path(repo, "waiting-data")
+        git(repo, "checkout", "-q", "-b", "roadmap")
+        for doc_id, data in items.items():
+            target = os.path.join(repo, folder, "items", doc_id + ".json")
+            os.makedirs(os.path.dirname(target), exist_ok=True)
+            with open(target, "w", encoding="utf-8") as f:
+                json.dump(data, f, sort_keys=True, indent=2)
+        git(repo, "add", folder)  # the copy only: the extras file stays untracked, so main keeps its waiting page
+        git(repo, "commit", "-q", "-m", "waiting copy")
+        git(repo, "update-ref", "refs/remotes/origin/roadmap", "refs/heads/roadmap")
         git(repo, "checkout", "-q", "-")
     REPOS[name] = repo
     return repo
