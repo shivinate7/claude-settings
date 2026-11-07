@@ -20,6 +20,7 @@ import shutil
 import subprocess
 import tempfile
 import unittest
+from collections import Counter
 
 import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -68,26 +69,27 @@ def family_files():
 # Not followed: a join with a run-time root and literal segments. In a product module it is named in LOAD_EXCEPTIONS; in a
 # test module it is a fixture path inside a temp folder, and is not named. A loader path with no literal repo file is named.
 GUARD_SEEDS = ("hooks/guard.py", "hooks/test_guard.py")
-# Each load guard_closure finds but does not follow, as "file:line": why. A line that moves makes its entry stale.
+# Each load guard_closure finds but does not follow, as "file:scope:source": why. The scope is the enclosing function (or
+# <module>) and the source is the load's text as ast.unparse writes it, so a line added above a load keeps its entry.
 LOAD_EXCEPTIONS = {
-    "hooks/decision_watch.py:88": "GUARD_UNDER_TEST, a test override of guard.py's path (guard.py is in the closure by import)",
-    "hooks/guard_merge.py:169": "the merge tool at a clone root, MERGE_TOOL_REL (guard_merge.py:108): merge/merge.py is in the closure",
-    "hooks/guard_merge.py:239": "a stamp read from a clone root found by walking up: a fixture root in the suite, the checkout in a real run",
-    "hooks/precompact_handoff.py:152": "the installed prompt under config_dir(), the installer's copy, not the repo's file",
-    "hooks/test_guard.py:3345": "a sibling of GUARD, hooks/ by default: git_reads.py is in the closure by import",
-    "hooks/test_guard.py:4598": "a sibling of GUARD: guard_rm_var.py is in the closure by import",
-    "hooks/test_guard.py:13932": "a sibling of GUARD: own_session.py is in the closure by import",
-    "hooks/test_guard.py:19553": "GUARD itself: guard.py, or the GUARD_UNDER_TEST copy, which is in the closure by import",
-    "hooks/test_guard.py:25400": "READ_CHECK: reread_check.py by default, which is in the closure by import",
-    "hooks/test_guard.py:27508": "a sibling of GUARD: shared_names.py is in the closure by import",
-    "lint/check_silent_undo.py:581": "a checkout's hook_catalog.py, the oracle of the silent-undo check: in the closure by merge.py's import",
-    "lint/rule_audit.py:92": "ROOT, the repo root by definition, a fixture root in the suite: lint/rule_mechanisms.json is not in the closure",
-    "lint/rule_audit.py:93": "ROOT: .github/workflows/checks.yml, already a fail-safe path in ci-scope.sh",
-    "lint/rule_audit.py:405": "ROOT: hooks/config_watch.py is not in the closure",
-    "lint/stale_cites.py:293": "PY_FACTS: skills/plain-english-map/scripts/lib/py-facts.py is in the closure by a `..` load",
-    "merge/merge.py:1702": "the checkout's own workflow, .github/workflows/checks.yml, already a fail-safe path in ci-scope.sh",
-    "skills/waiting-page/stale_pages.py:259": "the user's ~/.claude/CLAUDE.md, not this repo's .claude/CLAUDE.md",
-    "merge/merge.py:3250": "IDLE_BUILD: skills/roadmap/build.py is in the closure by a `..` load",
+    "hooks/decision_watch.py:<module>:_GUARD_PATH": "GUARD_UNDER_TEST, a test override of guard.py's path (guard.py is in the closure by import)",
+    "hooks/guard_merge.py:merge_module:path": "the merge tool at a clone root, MERGE_TOOL_REL (guard_merge.py): merge/merge.py is in the closure",
+    "hooks/guard_merge.py:_merge_config_at:os.path.join(root, '.github', 'stamp.json')": "a stamp read from a clone root found by walking up: a fixture root in the suite, the checkout in a real run",
+    "hooks/precompact_handoff.py:prompt_path:os.path.join(config_dir(), 'hooks', 'precompact_handoff_prompt.md')": "the installed prompt under config_dir(), the installer's copy, not the repo's file",
+    "hooks/test_guard.py:_load_git_reads:os.path.join(os.path.dirname(GUARD), 'git_reads.py')": "a sibling of GUARD, hooks/ by default: git_reads.py is in the closure by import",
+    "hooks/test_guard.py:rm_var_taint_reader_case:path": "a sibling of GUARD: guard_rm_var.py is in the closure by import",
+    "hooks/test_guard.py:_load_own_session:os.path.join(os.path.dirname(GUARD), 'own_session.py')": "a sibling of GUARD: own_session.py is in the closure by import",
+    "hooks/test_guard.py:_load_guard_module:GUARD": "GUARD itself: guard.py, or the GUARD_UNDER_TEST copy, which is in the closure by import",
+    "hooks/test_guard.py:_hu_reread:READ_CHECK": "READ_CHECK: reread_check.py by default, which is in the closure by import",
+    "hooks/test_guard.py:_shared_names_under_test:os.path.join(os.path.dirname(GUARD), 'shared_names.py')": "a sibling of GUARD: shared_names.py is in the closure by import",
+    "lint/check_silent_undo.py:generated_page:os.path.join(base, 'lint', 'hook_catalog.py')": "a checkout's hook_catalog.py, the oracle of the silent-undo check: in the closure by merge.py's import",
+    "lint/rule_audit.py:<module>:os.path.join(ROOT, 'lint', 'rule_mechanisms.json')": "ROOT, the repo root by definition, a fixture root in the suite: lint/rule_mechanisms.json is not in the closure",
+    "lint/rule_audit.py:<module>:os.path.join(ROOT, '.github', 'workflows', 'checks.yml')": "ROOT: .github/workflows/checks.yml, already a fail-safe path in ci-scope.sh",
+    "lint/rule_audit.py:emitted_rule_ids:os.path.join(root, 'hooks', 'config_watch.py')": "ROOT: hooks/config_watch.py is not in the closure",
+    "lint/stale_cites.py:py_facts:PY_FACTS": "PY_FACTS: skills/plain-english-map/scripts/lib/py-facts.py is in the closure by a `..` load",
+    "merge/merge.py:hit_suites:os.path.join(root, '.github', 'workflows', 'checks.yml')": "the checkout's own workflow, .github/workflows/checks.yml, already a fail-safe path in ci-scope.sh",
+    "merge/merge.py:idle_lanes:IDLE_BUILD": "IDLE_BUILD: skills/roadmap/build.py is in the closure by a `..` load",
+    "skills/waiting-page/stale_pages.py:pointer_checkout:os.path.join(os.path.expanduser('~'), '.claude', 'CLAUDE.md')": "the user's ~/.claude/CLAUDE.md, not this repo's .claude/CLAUDE.md",
 }
 _CLOSURE = {}
 
@@ -168,9 +170,21 @@ def _join_file(f, call, tracked, own_names):
     return None, None
 
 
+def _key(node, parents):
+    """The key a load the derivation does not follow is listed under, after its file: the enclosing function (or <module>)
+    and the load's source as ast.unparse writes it. Neither holds a line number."""
+    scope, p = "<module>", node
+    while p in parents:
+        p = parents[p]
+        if isinstance(p, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            scope = p.name
+            break
+    return f"{scope}:{ast.unparse(node)}"
+
+
 def _refs(f, tree, tracked):
     """What one repo file loads, from its syntax tree: (module names it imports, repo files it loads by path, loader
-    targets, loads it does not follow as (line, what))."""
+    targets, loads it does not follow as (key, what))."""
     parents = {c: n for n in ast.walk(tree) for c in ast.iter_child_nodes(n)}
     own_names = {t.id for st in tree.body if isinstance(st, ast.Assign) and _uses_file(st.value)
                  for t in st.targets if isinstance(t, ast.Name)}
@@ -187,12 +201,12 @@ def _refs(f, tree, tracked):
                 if node.args and isinstance(node.args[0], ast.Constant) and isinstance(node.args[0].value, str):
                     modules.add(node.args[0].value.split(".")[0])
                 else:
-                    unfollowed.append((node.lineno, "importlib.import_module of a name built at run time"))
+                    unfollowed.append((_key(node, parents), "importlib.import_module of a name built at run time"))
             elif name == "os.path.join":
                 c, kind = _join_file(f, node, tracked, own_names)
                 if kind == "run-time":
                     if not test:  # a test's join under a run-time root is a fixture path, not a repo load
-                        unfollowed.append((node.lineno, f"os.path.join with a run-time root, then {c}"))
+                        unfollowed.append((_key(node, parents), f"os.path.join with a run-time root, then {c}"))
                 elif c:
                     paths.add(c)
             elif name.endswith("spec_from_file_location") or name.endswith("SourceFileLoader"):
@@ -202,18 +216,18 @@ def _refs(f, tree, tracked):
                     c, kind = _join_file(f, j, tracked, own_names)
                     if kind == "run-time":
                         named = True
-                        unfollowed.append((node.lineno, f"a loader path with a run-time root, then {c}"))
+                        unfollowed.append((_key(j, parents), f"a loader path with a run-time root, then {c}"))
                     elif c:
                         hits.append(c)
                 loads.update(hits)
                 if not hits and not named:
-                    unfollowed.append((node.lineno, "a loader path with no literal repo file"))
+                    unfollowed.append((_key(arg if arg is not None else node, parents), "a loader path with no literal repo file"))
     return modules, paths, loads, unfollowed
 
 
 def guard_closure():
     """-> (files, unfollowed): the repo files the guard suite loads, sorted, and the loads not followed, as
-    (file, line, what). Read from the code of GUARD_SEEDS (see above), once per run."""
+    (file, key, what). Read from the code of GUARD_SEEDS (see above), once per run."""
     if not _CLOSURE:
         tracked = set(_repo_files())
         by_name = {}
@@ -236,7 +250,7 @@ def guard_closure():
             todo += [(c, True) for m in modules for c in by_name.get(m, [])]
             todo += [(c, c.endswith(".py")) for c in paths]
             todo += [(c, True) for c in loads]
-            unfollowed += [(f, line, what) for line, what in here]
+            unfollowed += [(f, key, what) for key, what in here]
         _CLOSURE.update(files=sorted(files), unfollowed=sorted(unfollowed))
     return _CLOSURE["files"], _CLOSURE["unfollowed"]
 
@@ -249,6 +263,11 @@ def named_keys(f, src, tracked):
 def exceptions_of(f):
     """The LOAD_EXCEPTIONS keys of one file, sorted."""
     return sorted(k for k in LOAD_EXCEPTIONS if k.split(":")[0] == f)
+
+
+def source_of(f):
+    with open(os.path.join(REPO, f), encoding="utf-8") as handle:
+        return handle.read()
 
 
 def git(cwd, *a):
@@ -758,8 +777,8 @@ class GuardClosure(unittest.TestCase):
 
     def test_every_load_the_closure_does_not_follow_is_named_in_load_exceptions(self):
         _, unfollowed = guard_closure()
-        found = {f"{f}:{line}" for f, line, _ in unfollowed}
-        missing, stale = sorted(found - set(LOAD_EXCEPTIONS)), sorted(set(LOAD_EXCEPTIONS) - found)
+        found, named = Counter(f"{f}:{key}" for f, key, _ in unfollowed), Counter(LOAD_EXCEPTIONS.keys())
+        missing, stale = sorted((found - named).elements()), sorted((named - found).elements())
         self.assertEqual((missing, stale), ([], []),
                          f"LOAD_EXCEPTIONS is out of step: unnamed loads {missing}, entries with no such load {stale}")
 
@@ -778,7 +797,7 @@ class GuardClosure(unittest.TestCase):
         for f in sorted({key.split(":")[0] for key in LOAD_EXCEPTIONS}):
             with self.subTest(path=f):
                 self.assertIn(f, guard_closure()[0], f"scope: {f} is not in the guard closure")
-                keys = named_keys(f, "\n\n\n" + open(os.path.join(REPO, f), encoding="utf-8").read(), tracked)
+                keys = named_keys(f, "\n\n\n" + source_of(f), tracked)
                 self.assertEqual(len(keys), len(set(keys)), f"{f}: two named loads share a key: {keys}")
                 self.assertEqual(sorted(keys), exceptions_of(f), f"{f}: its named loads moved when blank lines went above them")
 
@@ -787,7 +806,7 @@ class GuardClosure(unittest.TestCase):
         tracked = set(_repo_files())
         for f in sorted({key.split(":")[0] for key in LOAD_EXCEPTIONS}):
             with self.subTest(path=f):
-                keys = named_keys(f, open(os.path.join(REPO, f), encoding="utf-8").read(), tracked)
+                keys = named_keys(f, source_of(f), tracked)
                 self.assertEqual(sorted(keys), exceptions_of(f), f"{f}: its named loads differ from its LOAD_EXCEPTIONS entries")
 
 
