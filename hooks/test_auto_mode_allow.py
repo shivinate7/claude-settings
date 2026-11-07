@@ -27,12 +27,15 @@ owner about a branch delete after the archive push that guard_branch_worktree's 
   checker itself, and its Never covers names each act in RELAYED_REFUSED (decision
   relayed-grant-read-from-page).
 - One "Relayed Merge Yes:" entry quotes the merge command derived from merge/cloud_allow.json's
-  one `--confirm` merge rule. Its Covers text names a session tagged cs-build:coordinator and the
-  pull request it names. Its Never covers names each act in RELAYED_MERGE_REFUSED (owner ruling,
-  2026-11-07).
+  one `--confirm` merge rule. Its Covers text names the coordinator that relays (cs-build:coordinator),
+  the batch runner that merges (cs-build:batch-runner), and the pull request the relay names. Its
+  Never covers names each act in RELAYED_MERGE_REFUSED, the reason flags, and a session not tagged
+  cs-build:batch-runner (owner ruling, 2026-11-07).
 - One "Batch Runner Merge:" entry quotes the same derived merge command in its Covers text. Its
-  Covers text names a session tagged cs-build:batch-runner and `merge go`. Its Never covers names
-  each act in BATCH_MERGE_REFUSED (owner ruling, 2026-11-07 13:27 CST).
+  Covers text names the coordinator that sends the merge go (cs-build:coordinator), the batch runner
+  (cs-build:batch-runner), `merge go`, and the pull request the merge go names. Its Never covers
+  names each act in BATCH_MERGE_REFUSED, the reason flags, and a merge go from a session not tagged
+  cs-build:coordinator (owner ruling, 2026-11-07 13:27 CST).
 AUTO_MODE_SETTINGS names another settings file to read (default: this repo's settings.json), so the
 same cases run against a copy with a clause removed and show red there.
 """
@@ -107,6 +110,9 @@ BATCH_MERGE_REFUSED = (("not tagged cs-build:batch-runner", "not tagged `cs-buil
                        ("review", "review"), ("admin", "admin"), ("force push", "force[- ]push"),
                        ("permissions", "permission"), ("settings", "setting"),
                        ("overrides", "override"), ("any other act", "any other act"))
+# The reason flags that lift a merge check (merge/merge.py); each entry's Never covers names both.
+REASON_FLAGS_REFUSED = (("--base-red-ok", "--base-red-ok"),
+                        ("--undo-check-unknown-ok", "--undo-check-unknown-ok"))
 MERGE_GO_REFUSED = (("any other session", "any other session"),
                     ("not a coordinator", "not a coordinator"))
 # The Covers text names the session that started this one, and the no-act report it lets through.
@@ -133,7 +139,12 @@ def remedy_commands():
 
 
 def merge_rules():
-    """The --confirm merge rules in merge/cloud_allow.json, as written there."""
+    """The --confirm merge rules in merge/cloud_allow.json, as written there.
+
+    The trailing-flag rule `Bash(~/.claude/bin/merge * --confirm *)` is left out on purpose. Its extra
+    arguments take the reason flags, which each Relayed or Batch entry's Never covers names, so an entry
+    quotes only the bare rule's command.
+    """
     with open(MERGE_CLOUD_ALLOW, encoding="utf-8") as handle:
         allow = json.load(handle).get("permissions", {}).get("allow", [])
     return [rule for rule in allow
@@ -251,16 +262,33 @@ class RelayedMergeYesIsAllowed(unittest.TestCase):
         self.assertIn("cs-build:coordinator", bounds_text(entry),
                       "Covers text must require a session tagged cs-build:coordinator")
 
-    def test_covers_names_the_pull_request(self):
+    def test_covers_names_the_pull_request_the_relay_names(self):
         entry = self.relayed_merge_entry()
-        self.assertRegex(bounds_text(entry), r"(?i)\b(named|names)\b",
-                         "Covers text must say the relay names the pull request")
+        self.assertIn("the pull request the relay names", bounds_text(entry),
+                      "Covers text must say the pull request the relay names")
+
+    def test_covers_names_the_batch_runner_that_merges(self):
+        entry = self.relayed_merge_entry()
+        self.assertIn("cs-build:batch-runner", bounds_text(entry),
+                      "Covers text must name cs-build:batch-runner as the session that merges")
+
+    def test_never_covers_names_a_batch_runner_not_tagged(self):
+        clause = never_covers(self.relayed_merge_entry())
+        self.assertIsNotNone(clause, "need a 'Never covers' sentence in the Relayed Merge Yes entry")
+        self.assertIn("not tagged `cs-build:batch-runner`", clause,
+                      "Never covers does not name a session not tagged cs-build:batch-runner")
 
     def test_never_covers_names_each_refused_act(self):
         clause = never_covers(self.relayed_merge_entry())
         self.assertIsNotNone(clause, "need a 'Never covers' sentence in the Relayed Merge Yes entry")
         missing = unnamed_terms(clause, RELAYED_MERGE_REFUSED)
         self.assertFalse(missing, "Never covers does not name %r" % missing)
+
+    def test_never_covers_names_the_reason_flags(self):
+        clause = never_covers(self.relayed_merge_entry())
+        self.assertIsNotNone(clause, "need a 'Never covers' sentence in the Relayed Merge Yes entry")
+        missing = unnamed_terms(clause, REASON_FLAGS_REFUSED)
+        self.assertFalse(missing, "Never covers does not name the reason flags %r" % missing)
 
 
 class BatchRunnerMergeIsAllowed(unittest.TestCase):
@@ -289,11 +317,33 @@ class BatchRunnerMergeIsAllowed(unittest.TestCase):
         entry = self.batch_merge_entry()
         self.assertIn("merge go", bounds_text(entry), "Covers text must name the merge go")
 
+    def test_covers_names_the_coordinator_as_sender(self):
+        entry = self.batch_merge_entry()
+        self.assertIn("cs-build:coordinator", bounds_text(entry),
+                      "Covers text must name cs-build:coordinator as the merge go's sender")
+
+    def test_covers_names_the_pull_request_the_merge_go_names(self):
+        entry = self.batch_merge_entry()
+        self.assertIn("the pull request the merge go names", bounds_text(entry),
+                      "Covers text must say the pull request the merge go names")
+
+    def test_never_covers_names_a_merge_go_from_a_non_coordinator(self):
+        clause = never_covers(self.batch_merge_entry())
+        self.assertIsNotNone(clause, "need a 'Never covers' sentence in the Batch Runner Merge entry")
+        self.assertIn("a merge go from a session not tagged `cs-build:coordinator`", clause,
+                      "Never covers does not name a merge go from a session not tagged cs-build:coordinator")
+
     def test_never_covers_names_each_refused_act(self):
         clause = never_covers(self.batch_merge_entry())
         self.assertIsNotNone(clause, "need a 'Never covers' sentence in the Batch Runner Merge entry")
         missing = unnamed_terms(clause, BATCH_MERGE_REFUSED)
         self.assertFalse(missing, "Never covers does not name %r" % missing)
+
+    def test_never_covers_names_the_reason_flags(self):
+        clause = never_covers(self.batch_merge_entry())
+        self.assertIsNotNone(clause, "need a 'Never covers' sentence in the Batch Runner Merge entry")
+        missing = unnamed_terms(clause, REASON_FLAGS_REFUSED)
+        self.assertFalse(missing, "Never covers does not name the reason flags %r" % missing)
 
 
 class OwnerPrHousekeepingIsAllowed(unittest.TestCase):
