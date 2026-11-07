@@ -405,6 +405,24 @@ test("a read but unfiled answer shows Read by the owner beside Change", async (t
   assert.match((await c.locator(".ans").textContent()).trim(), /^Filing pending, sent /);
 });
 
+// The day of a read is its US Central day. CST is UTC-6 after Nov 1, 2026. Each pair is a read and the clock it is seen at.
+// READ_EARLIER: read Nov 6 23:30 CST, seen Nov 7 00:30 CST. Both are the same UTC day, so a day taken from UTC drops it.
+// READ_TODAY: read Nov 6 17:30 CST, seen Nov 6 18:30 CST. The UTC days differ, so a day taken from UTC shows one here.
+const READ_EARLIER = { read: "2026-11-07T05:30:00Z", clock: "2026-11-07T06:30:00Z" };
+const READ_TODAY = { read: "2026-11-06T23:30:00Z", clock: "2026-11-07T00:30:00Z" };
+
+test("a receipt read on an earlier Central day shows its day", async (t) => {
+  const page = await open(t, { answers: SAVED_A, receipts: { [DECISION.id]: { read: READ_EARLIER.read } }, clock: READ_EARLIER.clock }); if (!page) return;
+  await mustHave(page, `#item-${DECISION.id} .receipt .read`, "the receipt's read line");
+  assert.equal((await card(page, DECISION).locator(".receipt .read").textContent()).trim(), "Read by test thread Nov 6, 23:30 CST", "the receipt's read line drops the day of a read on an earlier Central day");
+});
+
+test("a receipt read on the same Central day shows the time only", async (t) => {
+  const page = await open(t, { answers: SAVED_A, receipts: { [DECISION.id]: { read: READ_TODAY.read } }, clock: READ_TODAY.clock }); if (!page) return;
+  await mustHave(page, `#item-${DECISION.id} .receipt .read`, "the receipt's read line");
+  assert.equal((await card(page, DECISION).locator(".receipt .read").textContent()).trim(), "Read by test thread 17:30 CST", "the receipt's read line shows a day for a read on the same Central day");
+});
+
 test("a receipt older than the answer is ignored: a changed answer reads filing pending", async (t) => {
   const later = { [DECISION.id]: { ...SAVED_A[DECISION.id], at: "2026-10-26T04:00:00Z" } };
   const page = await open(t, { answers: later, receipts: { [DECISION.id]: { read: "2026-10-26T02:00:00Z", filed: "2026-10-26T03:00:00Z" } } }); if (!page) return;
@@ -3489,6 +3507,21 @@ test("dismiss: with no store, the list says it cannot be read and no Dismiss is 
 
 // The reach line of the ask row that holds the text, or "" when no row holds it. Reads the page, never waits.
 const reachOf = (page, text) => page.evaluate(([sel, t]) => { const li = [...document.querySelectorAll(sel)].find((c) => c.textContent.includes(t)); const s = li && li.querySelector(".astate"); return s ? s.textContent.trim() : ""; }, [ASK.ask, text]);
+
+// The read line of a waiting ask, read from its own row. READ_EARLIER and READ_TODAY are set with the receipt cases above.
+test("an ask read on an earlier Central day shows its day", async (t) => {
+  const ask = { id: "ask-rd1", text: "Asked before an earlier Central day", at: "2026-11-06T15:00:00Z", owner: "triage", read: READ_EARLIER.read };
+  const page = await open(t, { dbExtra: { asks: { [ask.id]: ask } }, clock: READ_EARLIER.clock }); if (!page) return;
+  await shownBox(page, ask.text);
+  assert.equal(await reachOf(page, ask.text), "Read by triage Nov 6, 23:30 CST. Waiting for its answer.", "the ask's read line drops the day of a read on an earlier Central day");
+});
+
+test("an ask read on the same Central day shows the time only", async (t) => {
+  const ask = { id: "ask-rd2", text: "Asked before the same Central day", at: "2026-11-06T15:00:00Z", owner: "triage", read: READ_TODAY.read };
+  const page = await open(t, { dbExtra: { asks: { [ask.id]: ask } }, clock: READ_TODAY.clock }); if (!page) return;
+  await shownBox(page, ask.text);
+  assert.equal(await reachOf(page, ask.text), "Read by triage 17:30 CST. Waiting for its answer.", "the ask's read line shows a day for a read on the same Central day");
+});
 
 test("Add to list stacks asks in typed order, past three, and nothing reaches the store until Send", async (t) => {
   const page = await open(t); if (!page) return;
