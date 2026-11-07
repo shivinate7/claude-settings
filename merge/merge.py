@@ -4137,6 +4137,11 @@ def review_body(n, head, kind, guard, rounds, net, fix=None, grant=None):
                       *([f"Fix check: {', '.join(fix)}"] if fix else []),
                       f"Net value: {net}", REVIEW_CI_LINE]) + "\n"
 
+def review_marked(text):
+    """True when the first line of `text` is exactly the review-record marker: the one test of whether a body is a record."""
+    return text.splitlines()[:1] == [REVIEW_MARKER]
+
+
 def parse_review(text):
     """-> {n, head, kind, guard, rounds, net, fix, grant}, or None when `text` is not a well-formed record: the marker is not the exact first line, a field is
     malformed or out of order, round numbers skip or start above 1, or a round is above REVIEW_LAST_ROUND. `grant` is None, or the text of the one
