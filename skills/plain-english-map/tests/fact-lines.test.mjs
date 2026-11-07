@@ -779,7 +779,7 @@ test('V8. cost: one map-check run starts git ls-files no more often than origin/
   assert.ok(n <= MAIN_LS_FILES_STARTS, `git ls-files must start at most ${MAIN_LS_FILES_STARTS} times, as on origin/main, and it started ${n} times`);
 });
 
-// ---- T11. A uses fact through a tsconfig path alias (decision map-facts-are-checked; debt map-import-alias-unread).
+// ---- T11. A uses fact through a tsconfig path alias (decision map-facts-are-checked).
 // A uses fact reads two things: that the file imports the cited file, and that it uses the symbol through that import. Both must hold through the alias.
 
 test('T11. a uses fact through an alias, import * as r from @/src/import-reader.mjs, with a matching tsconfig, reads as a use: MAP9 passes', () => {
