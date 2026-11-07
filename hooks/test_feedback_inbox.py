@@ -3725,6 +3725,21 @@ def case_guard_home_tracked_in_the_stop_repo_passes_when_the_sidecar_names_anoth
                   guard(cfg, sid, cwd=stop_repo))
 
 
+def case_guard_sidecar_in_no_git_folder_still_judges_the_stop_repo():
+    """A home is judged in every repo that resolves among the sidecar's repo and the Stop's cwd. The sidecar names a
+    folder in no git repo, so only the Stop's repo resolves, and an untracked home there blocks. The check stands
+    down only when neither resolves."""
+    plain = os.path.join(ROOT, "sidecar-no-git-folder")
+    os.makedirs(plain)
+    cwd = make_repo("sidecar-no-git-stop", tracked=("decisions/a-ruling.md",))
+    cfg, sid = new_cfg(), "r-sidecar-no-git"
+    write_file(sidecar_of(cfg, sid), plain)
+    write_file(inbox_of(cfg, sid), render_block("the rule is settled\nkeep it\nthanks",
+                                                items=("- fb-9 [ruling] -> decisions/untracked.md",)))
+    expect_block("sidecar in no git folder: an untracked home in the Stop's repo blocks",
+                 guard(cfg, sid, cwd=cwd), named=("fb-9",))
+
+
 CASES = (
     case_every_owner_message_is_captured,
     case_notices_are_never_captured,
@@ -3892,6 +3907,7 @@ CASES = (
     case_one_shot_home_does_not_pass_a_standing_grant,
     case_closed_once_note_is_no_home_for_a_grant,
     case_guard_home_tracked_in_the_stop_repo_passes_when_the_sidecar_names_another,
+    case_guard_sidecar_in_no_git_folder_still_judges_the_stop_repo,
 )
 
 
