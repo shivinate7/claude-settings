@@ -3,7 +3,8 @@
 
 Modes:
 - --hook: Before a background Bash command, wraps it so a watcher reports a stall after
-  300 seconds with no new output. The job keeps running.
+  300 seconds with no new output. The job keeps running. Before any agent's Bash call (a payload
+  with a valid agent_id: 17 lowercase hex), puts the agent tag ahead of the command.
 - --stop: At Stop, lists each open background job whose output file did not change for
   the quiet age.
 
@@ -35,6 +36,14 @@ Hook: stall_watch.py --hook
   Each log the original names (named_logs: `> F`, `>> F`, `&> F`, `>& F`, `tee F`, `--log F`)
   is passed as `--also F`.
   Cost: one append per heartbeat by the tool, and one read of BEAT on each 0.2 s loop pass in the watcher.
+
+  Agent tag: for a Bash call whose payload has a valid agent_id, the command (foreground: the
+  original; background: the wrapper above) gets `export CLAUDE_AGENT_ID=<id>` and a newline in front,
+  so each process the call execs holds the tag (name: proc_env.AGENT_TAG_NAME; read by
+  proc_env.entry_value). A foreground agent call gets updatedInput too; with no or a malformed
+  agent_id the output is as before. Windows is unchanged and unmarked (reads as unmarked, which
+  keeps a tree). Cost: no new process start, no file written; one string prepend per agent Bash call,
+  inside the hook process that already runs per Bash call.
 
   The original stays unquoted, as top-level shell code, so a settings deny rule still sees it.
   STALL_WATCH_QUIET overrides the default quiet time (for tests and proofs only).
@@ -89,6 +98,10 @@ try:
     import _nowindow  # the one home of a no-window child start (hooks/_nowindow.py)
 except ImportError:  # a hook never dies for a missing helper (it lands a moment after the hook in an install)
     _nowindow = subprocess
+try:
+    from proc_env import AGENT_TAG_NAME  # the one home of the agent tag's name
+except ImportError:  # without it the hook cannot mark an agent call: it leaves the call unmarked
+    AGENT_TAG_NAME = None
 try:
     from guard_stream import until_note  # the one parser of the `until:` note
 except ImportError:  # the Stop check is a recovery control: it runs without notes, never dies
@@ -330,17 +343,35 @@ def eof_backslash_literal():
         return False
 
 
+AGENT_ID = re.compile(r"[0-9a-f]{17}")  # an agent_id as the payload carries it
+
+
+def agent_export(call):
+    """`export CLAUDE_AGENT_ID=<id>` and a newline for a call whose payload has a valid agent_id, else ""."""
+    agent_id = call.get("agent_id")
+    if AGENT_TAG_NAME and isinstance(agent_id, str) and AGENT_ID.fullmatch(agent_id):
+        return "export %s=%s\n" % (AGENT_TAG_NAME, agent_id)
+    return ""
+
+
 def hook():
     # ponytail: posix only. The rewrite needs `&`, `$!` and `wait`, and Windows has no harness
-    # shell that matches. Returning nothing leaves a Windows background call unchanged.
+    # shell that matches. Returning nothing leaves a Windows call unchanged, unmarked: a process
+    # that reads unmarked keeps its tree (fail-safe).
     if os.name != "posix":
         return 0
     try:
         call = json.load(sys.stdin)
         inp = call["tool_input"]
-        if call.get("tool_name") != "Bash" or inp.get("run_in_background") is not True:
+        if call.get("tool_name") != "Bash":
             return 0
         original = inp["command"]
+        prefix = agent_export(call)
+        if inp.get("run_in_background") is not True:
+            if prefix:
+                print(json.dumps({"hookSpecificOutput": {
+                    "hookEventName": "PreToolUse", "updatedInput": dict(inp, command=prefix + original)}}))
+            return 0
     except Exception:
         return 0
     quiet = os.environ.get("STALL_WATCH_QUIET") or str(DEFAULT_QUIET)
@@ -372,7 +403,7 @@ def hook():
         + q(log) + " 8< " + q(beat)
     )
     print(json.dumps({"hookSpecificOutput": {
-        "hookEventName": "PreToolUse", "updatedInput": dict(inp, command=wrapped)}}))
+        "hookEventName": "PreToolUse", "updatedInput": dict(inp, command=prefix + wrapped)}}))
     return 0
 
 
