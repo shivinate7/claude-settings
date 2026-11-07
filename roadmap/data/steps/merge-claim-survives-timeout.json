@@ -1,0 +1,11 @@
+{
+  "title": "The merge tool keeps its record claim when a GitHub read times out",
+  "phase": "now",
+  "status": "doing",
+  "order": 260.0,
+  "owner": "coordinator",
+  "lane": "session_013NEJL2cKZU229mwVPY4TGu",
+  "why": "Owner, 15:10 CST Nov 7 (via the coordinator): a degen batch keeps failing to merge. Each GitHub check timeout made the merge tool undo its record claim, which moved the head and cost a new CI run.",
+  "note": "In merge/merge.py, a GitHub read that cannot run (timeout, 5xx, connection error) after the claim push keeps the claim and stops with \"unknown, rerun merge\"; only a check that answered no reverts it (decision standing-merge-grant: only a proven refusal reverts the claim). Retry the read, and reuse the claim on a rerun. Topic merge-tool. Red test first.",
+  "updatedAt": "2026-11-07T15:12:00-06:00"
+}
