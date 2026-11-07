@@ -234,6 +234,9 @@ def judge(args):
         raise not_counted("answer n %s is not the item's n %s: the answer is for another ask" % (n, item.get("n")))
     status = item.get("status", "open")  # absent is open, as the page reads it: it hides only "closed"
     if status != "open" and not (status == "closed" and item.get("arbiter") is True and answer.get("choice") == "overturn"):
+        if status != "closed":
+            raise not_counted("item status is %s: only an open item takes an answer, and only status closed can be a "
+                              "routed close" % json.dumps(status))
         closed = "item status is closed"
         home, last, lane = item.get("home"), item.get("lastAnswer"), item.get("lane")
         if not (isinstance(home, str) and home.strip()):
