@@ -8521,6 +8521,48 @@ sh("env: heredoc-r3: an unquoted body that runs ls in backticks and names a forc
    "cat > /tmp/n.md <<EOF\nrun `ls` then git push --force later\nEOF", "allow", cwd=NOGIT)
 
 
+# ---- flag-false-alarm: the env-file false-alarm debt (env-file-rule-false-alarms) names these refusals.
+# Each allow row reads no file's contents. The word after a boolean flag is a pattern, a glob that
+# excludes the name reads nothing, a jq or yq word is a key, and a folder named with the prefix is
+# only made or entered. The guard allows each one, so each allow row is red on main, which denies it.
+# Each deny row stays refused: the name is a path, a glob that includes it, a loader or in-place write
+# of it, or a folder that a commit or a printer reads. Decision env-file-stays-unread.
+FLAG_FALSE_ALARM_ALLOW = (
+    "ag -f " + ENV + " src",
+    "ack -f " + ENV,
+    "grep -r --exclude=" + ENV + " foo .",
+    "grep -r --exclude " + ENV + " foo .",
+    "rg -t py " + ENV,
+    "mkdir " + ENV + "s",
+    "cd " + ENV + "s",
+    "jq " + ENV + "ironment f.json",
+    "jq " + ENV + "From f.json",
+    "jq " + ENV + " f.json",
+    "yq " + ENV + "s f.yaml",
+    "yq e " + ENV + "s f.yaml",
+)
+FLAG_FALSE_ALARM_DENY = (
+    "cat " + ENV,
+    "jq . " + ENV,
+    "grep x " + ENV,
+    "grep --include=" + ENV + " -r K .",
+    "rg -g " + ENV + " K",
+    "jq --from-file " + ENV,
+    "jq -f " + ENV,
+    "jq --rawfile x " + ENV + " -n .",
+    "ag -f K " + ENV,
+    "ag -t K " + ENV,
+    "rg -tpy K " + ENV,
+    "yq -i .x=1 " + ENV,
+    VCS + " add " + ENV + "s",
+    "cat " + ENV + "s",
+)
+for _cmd in FLAG_FALSE_ALARM_ALLOW:
+    sh("env: flag-false-alarm: allowed, " + _cmd, _cmd, "allow", cwd=NOGIT)
+for _cmd in FLAG_FALSE_ALARM_DENY:
+    sh("env: flag-false-alarm: still refused, " + _cmd, _cmd, "deny", "env-file", cwd=NOGIT)
+
+
 def incident_write_strip_case():
     """strip_heredoc_bodies keeps no body line of the incident cat write.
 
