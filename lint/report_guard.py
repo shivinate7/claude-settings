@@ -18,6 +18,11 @@ the rewrite once for model names and the `Unstarted:` line only. A failure block
 Cost: one small file per missing-report block, written at that block, deleted at the next Stop with
 stop_hook_active; no process, timer or log. A correction block leaves no marker, so no loop follows.
 
+On landed turns whose report has the right shape, it also blocks a Deviations item that admits a mistake
+the writer made ("I broke ...", a first-person clause with a fault word and no negator before it) and names no
+guard: `step:<slug>`, the word debt, or a guard, check or hook word with a PR or commit ref
+(`building-mistake-names-its-guard`). Quoted text, fences and URLs never count as an admission.
+
 On the same landed turns it also blocks (one block, all reasons joined) when a Done item lacks
 BUILT, RECORDED, or OTHER or a PR or commit ref (`reports-done-format`), or when the reply holds
 a record id with no short gloss (`speak-cite-id-plus-gloss`), or when a builder, reviewer,
@@ -95,6 +100,15 @@ verdict is read from the log file verdict printed (a missing log reads as no ent
 transcript read of its own on a plain Stop (it shares main's read). Only when a Bash run of build.py is in it: the
 build module's import, and one log read for a verdict run. Only when an entry prints: the own-record read and one
 override read.
+
+Route-row flags (hooks/route_match.py holds the rows, the surface and the match): a refused call that a "works" row
+matches gets a `route_flag` in its refusals row (hooks/refusal_note.py), and a successful call of the turn that a
+"refused" row matches gets one here. Each flag rides in the systemMessage of the line this Stop prints and never
+changes its decision. The dedupe file <config dir>/state/route-flags/<session_id>.json holds the keys already
+shown. Cost: one small file per session, written only when a flag shows, read at Stop; its one reader and writer is
+_shown_flags, and a turn with no flag and no successful call reads no rows file. Cleanup: none. Nothing prunes
+state/ per session (janitor/session_end_sweep.py runs the branch and worktree sweep only), and a file holds a few
+short keys, so it stays as the refusals and reply-judge counter files do.
 """
 import json
 import os
@@ -628,8 +642,8 @@ QUOTED_RE = re.compile(r'(?<!\w)"[^"\n]*"(?!\w)|(?<!\w)\'[^\'\n]*\'(?!\w)|\u201c
 QUESTION_MARK_RE = re.compile(r"\?(?!\w)")
 
 
-def input_needed_section(text):
-    """The Input Needed item's text from the report block, else ''."""
+def report_section(text, label):
+    """The text of the report block's `label` item, else ''."""
     body = []
     inside = False
     for line in block_text(text, keep_indent=True).splitlines():
@@ -637,13 +651,18 @@ def input_needed_section(text):
         if m:
             if inside:
                 break
-            inside = m.group(1).strip().rstrip(":").strip() == "Input Needed"
+            inside = m.group(1).strip().rstrip(":").strip() == label
             if inside:
                 body.append(line[m.end():].lstrip(": "))
             continue
         if inside:
             body.append(line)
     return "\n".join(body)
+
+
+def input_needed_section(text):
+    """The Input Needed item's text from the report block, else ''."""
+    return report_section(text, "Input Needed")
 
 
 def offers_a_pick(text):
@@ -838,6 +857,64 @@ def departs_problem(text):
     if not miss:
         return ""
     return "Departs-from guard: the Input Needed pick has a problem (" + miss + "). " + question_form.DEPARTS_REASON
+
+
+# building-mistake-names-its-guard: a Deviations admission ("I broke ...") must name the guard that would
+# have stopped it. Quoted text, fences and URLs are blanked first so a report can quote the owner. A clause
+# admits only when a first-person word comes before its fault word, so "The test was wrong so I re-pointed it"
+# passes. A negator clears it only when at most MISTAKE_NEGATOR_GAP words sit between it and the fault word,
+# so a negator that governs an earlier verb ("I did not run the check and broke it") does not.
+# `step:<slug>` is checked for form only.
+MISTAKE_FIRST_PERSON_RE = re.compile(r"\bI\b|\b[Mm]y\b")
+MISTAKE_FAULT_RE = re.compile(
+    r"\b(?:wrong(?:ly)?|mistaken(?:ly)?|mistakes?|by accident|accidental(?:ly)?|broke|clobbered|overwrote|"
+    r"misread|forgot|trusted (?:a stale|an old|an outdated)|"
+    r"instead of checking)\b", re.I)
+MISTAKE_NEGATOR_RE = re.compile(r"\bnot\b|n't\b|\bnever\b|\bno\b|\bnothing\b", re.I)
+MISTAKE_NEGATOR_GAP = 3
+MISTAKE_SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?;])\s+|\n")
+MISTAKE_CLAUSE_SPLIT_RE = re.compile(
+    r"[,:;\u2014\u2013]|\s-{1,2}\s|\b(?:because|since|but|while|although)\b", re.I)
+MISTAKE_URL_RE = re.compile(r"https?://\S+")
+MISTAKE_STEP_RE = re.compile(r"\bstep:[a-z0-9][a-z0-9-]*")
+MISTAKE_DEBT_RE = re.compile(r"\bdebts?\b", re.I)
+MISTAKE_GUARD_WORD_RE = re.compile(r"\b(?:guard|check|hook)s?\b", re.I)
+MISTAKE_REASON = (
+    "Mistake guard: Deviations admits a mistake you made: %s. A mistake is a strong sign a guard or check is "
+    "missing. Name the guard that would have stopped it: built (PR or commit), `step:<slug>`, or a debt "
+    "(rule building-mistake-names-its-guard).")
+
+
+def _admitted_clause(deviations):
+    """The first clause of the Deviations text that admits a mistake the writer made, else ''."""
+    plain = QUOTED_RE.sub(" ", MISTAKE_URL_RE.sub(" ", FENCE_RE.sub(" ", deviations)))
+    for sentence in _sentences(plain):
+        for clause in MISTAKE_CLAUSE_SPLIT_RE.split(sentence):
+            for fault in MISTAKE_FAULT_RE.finditer(clause):
+                before = clause[:fault.start()]
+                # Split on whitespace only, so a contraction such as didn't stays one word.
+                near = " ".join(before.split()[-(MISTAKE_NEGATOR_GAP + 1):])
+                if MISTAKE_FIRST_PERSON_RE.search(before) and not MISTAKE_NEGATOR_RE.search(near):
+                    return clause.strip()
+    return ""
+
+
+def _sentences(text):
+    return [BULLET_RE.sub("", s.strip()) for s in MISTAKE_SENTENCE_SPLIT_RE.split(text)]
+
+
+def mistake_problem(text):
+    """The refusal text when Deviations admits a mistake and names no guard (rule
+    `building-mistake-names-its-guard`), else ''."""
+    deviations = report_section(text, "Deviations")
+    clause = _admitted_clause(deviations)
+    if not clause:
+        return ""
+    # A guard word and its ref must share a sentence, so a stray ref elsewhere does not clear the admission.
+    if (MISTAKE_STEP_RE.search(deviations) or MISTAKE_DEBT_RE.search(deviations)
+            or any(MISTAKE_GUARD_WORD_RE.search(s) and DONE_REF_RE.search(s) for s in _sentences(deviations))):
+        return ""
+    return MISTAKE_REASON % repr(clause[:80])
 
 
 def _own_lane_read(path, own_id):
@@ -1165,6 +1242,86 @@ def pending_refusals(hook, text):
 def hold_reason(entries):
     """The block reason for the triage hold, naming its `entries` (joined)."""
     return HOLD_REASON % entries
+
+
+def _shown_flags(hook, flags):
+    """The texts of `flags`, (key, text) pairs, that this session's Stop has not shown yet. It records their keys
+    in <config dir>/state/route-flags/<session_id>.json, so each shows once per session. [] when the session has
+    no plain id or the record cannot be written: a flag that cannot be counted would repeat on every Stop."""
+    if not flags:
+        return []
+    try:
+        sys.path.insert(0, os.path.join(HERE, "..", "hooks"))
+        import shared_names
+        path = shared_names.route_flags_path(hook.get("session_id"))
+        if path is None:
+            return []
+        try:
+            with open(path, encoding="utf-8") as f:
+                seen = json.load(f)
+            seen = [k for k in seen if isinstance(k, str)] if isinstance(seen, list) else []
+        except (OSError, ValueError):
+            seen = []
+        fresh = []
+        for key, text in flags:
+            if key not in seen:
+                seen.append(key)
+                fresh.append(text)
+        if fresh:
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump(seen, f)
+        return fresh
+    except Exception:
+        return []
+
+
+def refusal_route_flags(hook):
+    """The `route_flag` of each row in the session's refusals file that hooks/refusal_note.py wrote for a refusal a
+    route row contradicts, once each per session. Read before pending_refusals settles the file. This is the
+    named reader of those flags, so a flag is never written unread: it shows them and never refuses on one."""
+    try:
+        sys.path.insert(0, os.path.join(HERE, "..", "hooks"))
+        import shared_names
+        path = shared_names.refusals_path(hook.get("session_id"))
+        if path is None or not os.path.exists(path):
+            return []
+        flags = []
+        with open(path, encoding="utf-8") as f:
+            for line in f:
+                try:
+                    row = json.loads(line)
+                except Exception:
+                    continue
+                if isinstance(row, dict) and isinstance(row.get("route_flag"), str) and row["route_flag"]:
+                    flags.append(("refused:" + row["route_flag"], row["route_flag"]))
+        return _shown_flags(hook, flags)
+    except Exception:
+        return []
+
+
+def success_route_flags(hook, after):
+    """One flag per route row that says an act is refused, and that a call of the turn `after` matched and
+    succeeded in (a tool_result without is_error), once per row per session. The match and the surface are
+    hooks/route_match.py. Fails open: [] on any error."""
+    try:
+        failed = {b.get("tool_use_id") for r in after for b in tool_results(r) if b.get("is_error")}
+        answered = {b.get("tool_use_id") for r in after for b in tool_results(r)}
+        calls = [(u.get("name"), u.get("input")) for r in after for u in tool_uses(r)
+                 if u.get("id") in answered and u.get("id") not in failed]
+        sys.path.insert(0, os.path.join(HERE, "..", "hooks"))
+        if not calls:  # a turn with no successful call reads no rows file
+            return []
+        import route_match
+        flags = []
+        for row in route_match.matching_rows(route_match.load_rows(), "refused", calls):
+            key = "succeeded:%s" % row.get("id")
+            if all(key != k for k, _ in flags):
+                flags.append((key, "route row %s contradicted: it says this call is refused on %s, and it succeeded."
+                              % (row.get("id"), row.get("surface"))))
+        return _shown_flags(hook, flags)
+    except Exception:
+        return []
 
 
 def refusal_reason(tools, hold=""):
@@ -1583,13 +1740,23 @@ def main():
     except Exception:
         pass
 
+    # Route-row flags ride in the systemMessage of whichever line this Stop prints, and never change its decision.
+    # The refusals file is read for them before pending_refusals settles it.
+    route = refusal_route_flags(hook)
+
+    def finish(payload):
+        if route:
+            payload = dict(payload or {})
+            payload["systemMessage"] = " ".join(filter(None, [payload.get("systemMessage"), *route]))
+        if payload:
+            print(json.dumps(payload))
+
     # Every Stop, landed or not, settles the refusals file; the reason joins whichever block follows.
     pending = pending_refusals(hook, last_reply(hook))
     refusal = refusal_reason(pending, hold)  # the triage hold joins the refusals
 
     def stop_for_refusal():
-        if refusal:
-            print(json.dumps({"decision": "block", "reason": refusal_reason(pending, hold)}))
+        finish({"decision": "block", "reason": refusal} if refusal else None)
 
     if not path or not os.path.exists(path):
         return stop_for_refusal()
@@ -1609,6 +1776,7 @@ def main():
     incoming = last_incoming_index(records)
     turn = records if incoming is None else records[incoming + 1:]
     after = [] if last_human_idx is None else records[last_human_idx + 1:]
+    route += success_route_flags(hook, after)
     note = ""
     pick_reason = ""
     try:
@@ -1641,9 +1809,9 @@ def main():
             pick = [r for r in pick if r]
             if pick:
                 reason = " ".join(pick) + " (rule reports-order-of-labels)" + (CORRECTION_TAIL if report_shape_ok(text) and not hold else "")
-                print(json.dumps({"decision": "block", "reason": reason}))
-            elif note:
-                print(json.dumps({"systemMessage": note}))
+                finish({"decision": "block", "reason": reason})
+            else:
+                finish({"systemMessage": note} if note else None)
         except Exception:
             pass
         return
@@ -1669,6 +1837,13 @@ def main():
             reasons.append(departs)
     except Exception:
         pass
+    if shape_ok:
+        try:
+            mistake = mistake_problem(text)
+            if mistake:
+                reasons.append(mistake)
+        except Exception as exc:
+            print("mistake check failed open: %s: %s" % (type(exc).__name__, exc), file=sys.stderr)
     reasons += [r for r in relay if r]
     try:
         rewrite = rewrite_stamp_problem(text, records[last_human_idx].get("timestamp"), hook.get("cwd"))
@@ -1693,9 +1868,9 @@ def main():
         reason = " ".join(reasons) + " (rule reports-order-of-labels)" + (CORRECTION_TAIL if shape_ok and not hold else "")
         if not shape_ok:
             write_marker(hook, last_human_idx)
-        print(json.dumps({"decision": "block", "reason": reason}))
-    elif note:
-        print(json.dumps({"systemMessage": note}))
+        finish({"decision": "block", "reason": reason})
+    else:
+        finish({"systemMessage": note} if note else None)
 
 
 if __name__ == "__main__":

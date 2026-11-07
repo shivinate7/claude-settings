@@ -424,10 +424,10 @@ class Flow(Env):
 
     @windows_slice
     def test_afterMerge_runs_in_git_bash_not_the_wsl_stub(self):
-        """after_merge() (merge/merge.py:470) hands subprocess.run a bare "bash". On Windows,
-        CreateProcess searches C:\\Windows\\System32 before PATH, and that folder holds the WSL
-        launcher stub, not Git Bash (decision bare-bash-on-windows-can-resolve-to-the-wsl-stub;
-        the fix, _find_git_bash(), lives only in hooks/test_config_watch.py). A command that
+        """after_merge() runs its commands in resolve_program("bash"). On Windows, CreateProcess
+        searches C:\\Windows\\System32 before PATH, and that folder holds the WSL launcher stub,
+        not Git Bash (decision bare-bash-on-windows-can-resolve-to-the-wsl-stub; the lookup's one
+        home is hooks/git_bash.py). A command that
         prints $OSTYPE tells the two apart: Git Bash (MSYS/MINGW) says "msys" or "msys-...", the
         WSL stub says "linux-gnu". The redirect target is a bare relative name so this case does
         not also depend on the separate native-path-quoting defect above."""
@@ -4557,6 +4557,18 @@ class GhHalf(Env):
         self.assertIn("gh pr ready", text)
         self.assertIn("push", text)
         self.assertNotIn("gh workflow run", text)
+        # gh pr ready is GraphQL, refused in cloud: the remedy also names the cloud route and its table.
+        self.assertIn("update_pull_request", text)
+        self.assertIn("route pr-ready-mcp-cloud", text)
+
+    def test_the_stale_page_remedy_names_both_draft_routes_and_their_table(self):
+        # A cloud session returns a PR to draft by MCP update_pull_request (route pr-draft-mcp-cloud), so the remedy never hands it to the owner's computer.
+        for claim in ("", "c1"):
+            text = merge.stale_page_remedy(7, claim)
+            self.assertIn("update_pull_request", text)
+            self.assertIn("gh pr ready 7 --undo", text)
+            self.assertIn("route pr-draft-mcp-cloud", text)
+            self.assertNotIn("owner's computer", text)
 
     def test_a_draft_head_with_all_jobs_passed_required_stops_at_once_with_the_remedy(self):
         # The wait path. Every check and run skipped: red stops the wait on the first read, not at the 45 minute deadline.
@@ -5795,6 +5807,102 @@ class SilentUndo(Env):
         self.assertEqual(rc, 1)
         self.assertEqual(self.claims(), 0)
         self.assertFalse(getattr(self.host, "merged", False))
+
+
+DEBT_FIXTURE = "# Retire target\n\n- **What.** A fixture debt for the merge tests.\n- **Where.** None.\n- **Decision.** none\n- **Retire.** %s\n"
+RETIRE_TEST = "Delete the fixture. Check: `tests/test_retire_target.py`."
+PROSE_RETIRE = "Confirm it on a phone."  # names no runnable check: the close needs a cited run
+
+
+def names_kind(test, out, slug, kind):
+    """The printed line that names debt `slug` must also name its kind."""
+    line = printed(out, slug)
+    test.assertTrue(line, "no printed line names debt %s: %s" % (slug, out))
+    test.assertIn(kind, line, "the line for debt %s does not name its kind %s: %s" % (slug, kind, line))
+
+
+class DebtRetire(Env):
+    """A PR that closes a debt (deletes the debt file) runs that debt's Retire check on the PR head before preview or confirm
+    lets it through. The fixture debt names tests/test_retire_target.py, which exits with the code each case gives it."""
+
+    def pr_on_debt(self, test_exit, closes=True, retire=RETIRE_TEST, test_text=None):
+        """main gains a debt file. feat is cut from that main, adds the pending record and the test, and then either deletes
+        the debt (closes) or edits it in place. feat is cut from main after the debt lands, so no main commit is a reversal of it."""
+        o = self.other
+        sh(o, "git", "fetch", "-q", "origin")
+        sh(o, "git", "checkout", "-q", "-B", "main", "origin/main")
+        put(os.path.join(o, ".claude/layout-extras.json"), json.dumps({"kinds": {}, "rolled-out": True}))
+        put(os.path.join(o, "docs/debts/retire-target.md"), DEBT_FIXTURE % retire)
+        sh(o, "git", "add", "-A"); sh(o, "git", "commit", "-qm", "main: a debt"); sh(o, "git", "push", "-q", "origin", "main")
+        put(os.path.join(o, "main-moves.txt"), "main moves on\n")  # feat is cut from a later main, so the debt commit is not one it left
+        sh(o, "git", "add", "-A"); sh(o, "git", "commit", "-qm", "main: moves on"); sh(o, "git", "push", "-q", "origin", "main")
+        sh(o, "git", "checkout", "-q", "-B", "feat", "origin/main")
+        put(os.path.join(o, "docs/decisions/second.md"), record("pending", "second"))
+        put(os.path.join(o, "tests/test_retire_target.py"), test_text or "import sys\nsys.exit(%d)\n" % test_exit)
+        if closes:
+            sh(o, "git", "rm", "-q", "docs/debts/retire-target.md")
+        else:
+            put(os.path.join(o, "docs/debts/retire-target.md"), DEBT_FIXTURE % RETIRE_TEST + "\nEdited in this PR.\n")
+        sh(o, "git", "add", "-A"); sh(o, "git", "commit", "-qm", "feat: the pending record and the debt")
+        sh(o, "git", "push", "-q", "-f", "origin", "feat")
+        sh(self.co, "git", "fetch", "-q", "origin")
+
+    def test_preview_refuses_a_closed_debt_whose_retire_check_is_red(self):
+        self.pr_on_debt(1)
+        rc, out = self.run_merge("7")
+        self.assertEqual(rc, 1, out)
+        names_kind(self, out, "retire-target", "red")
+
+    def test_confirm_refuses_a_closed_debt_whose_retire_check_is_red_before_any_claim_or_push(self):
+        self.pr_on_debt(1)
+        before = self.refs()
+        rc, out = self.run_merge("7", "--confirm")
+        self.assertEqual(rc, 1, out)
+        names_kind(self, out, "retire-target", "red")
+        self.assertEqual(self.refs(), before, "a refused confirm pushed")
+        self.assertEqual(self.claims(), 0, "a refused confirm claimed a record number")
+        self.assertFalse(getattr(self.host, "merged", False), "a refused confirm merged")
+        self.assertFalse(self.lock_ref(), "a refused confirm kept the merge lock")
+
+    def test_preview_passes_a_closed_debt_whose_retire_check_is_green(self):
+        self.pr_on_debt(0)
+        rc, out = self.run_merge("7")
+        self.assertEqual(rc, 0, out)
+        self.assertIn("PREVIEW", out)
+        self.assertNotIn("BLOCKED", out)
+
+    def test_a_pr_that_closes_no_debt_previews_as_before(self):
+        rc, out = self.run_merge("7")
+        self.assertEqual(rc, 0, out)
+        self.assertIn("PREVIEW", out)
+        self.assertNotIn("retire", out.lower())
+
+    def test_an_edited_debt_is_not_a_close(self):
+        self.pr_on_debt(1, closes=False)
+        rc, out = self.run_merge("7")
+        self.assertEqual(rc, 0, out)
+        self.assertIn("PREVIEW", out)
+        self.assertNotIn("BLOCKED", out)
+
+    def test_confirm_with_a_claim_keeps_a_cited_run_on_the_pr_head(self):
+        """The claim commit goes on top of the PR head. The cited run is on that head, so the re-check after the claim must accept it."""
+        self.pr_on_debt(0, retire=PROSE_RETIRE)
+        run_head = self.head()  # the run was on this head; the claim pushes the branch past it
+        self.host.body = "Retire-run: retire-target -- https://github.com/fixture/repo/actions/runs/42\n"
+        self.host.cited_run = lambda url: ("success", run_head)
+        rc, out = self.run_merge("7", "--confirm")
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(self.claims(), 1, out)
+        self.assertTrue(getattr(self.host, "merged", False), out)
+
+    def test_confirm_claim_does_not_carry_a_file_the_retire_test_wrote(self):
+        """The Retire test runs in the merge worktree, before the claim's `git add -A`. A file the test leaves there is no part of the claim."""
+        self.pr_on_debt(0, test_text="import sys\nopen('junk-from-test.txt', 'w').write('x')\nsys.exit(0)\n")
+        rc, out = self.run_merge("7", "--confirm")
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(self.claims(), 1, out)
+        names = sh(self.co, "git", "log", "origin/main", "--format=", "--name-only")  # the claim is a parent of the merge: its files are in the log
+        self.assertNotIn("junk-from-test.txt", names, "the claim commit holds a file the Retire test wrote into the merge folder")
 
 
 class DraftPreview(Env):
@@ -8136,7 +8244,7 @@ class RecordsRebuild(RecordsEnv):
         # The real host's ready() always returns (False, why), so every draft step ends here. The push worked, so no line says "could not".
         self.kinds_off()
         self.on("feat", {"debts/gap-one.md": DEBT_TEXT})
-        self.host.ready_refuse = "GitHub marks a draft ready only through GraphQL, and this tool sends no GraphQL"
+        self.host.ready_refuse = merge.Host.ready(None, 1)[1]
         before = self.head()
         rc, out = self.draft_confirm()
         self.assertEqual(rc, 0, out)
