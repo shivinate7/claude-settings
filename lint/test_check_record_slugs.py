@@ -1051,7 +1051,8 @@ class RecordSlugsTests(unittest.TestCase):
         self.put(DEBT_NOTES, NOTES_HEAD)
         self.put(DEBT_README, "# Debts\n\nOne debt per file.\n")
         self.commit_base()
-        start = self.base_sha()
+        self.git("commit", "--allow-empty", "-q", "-m", "start")  # START is this empty commit: the base's debts came before it
+        start = self.head_sha()
         self.put("debts/fresh-debt.md", FIXED_DEBT_TEXT)  # opened
         self.delete("debts/retired-debt.md")  # closed
         self.put("debts/kept-debt.md", DEBT_NO_FIX + "\nMore detail, the same debt.\n")  # edited, neither opened nor closed
@@ -1072,7 +1073,8 @@ class RecordSlugsTests(unittest.TestCase):
         self.put("debts/kept.md", DEBT_NO_FIX)  # neither opened nor closed: it must not appear
         self.put(DEBT_NOTES, NOTES_HEAD)
         self.commit_base()
-        start = self.base_sha()
+        self.git("commit", "--allow-empty", "-q", "-m", "start")  # START is this empty commit: the base's debts came before it
+        start = self.head_sha()
         self.put("debts/opened-b.md", FIXED_DEBT_TEXT)
         self.put("debts/opened-a.md", FIXED_DEBT_TEXT)
         self.delete("debts/closed-one.md")
@@ -1095,6 +1097,7 @@ class RecordSlugsTests(unittest.TestCase):
         write_at(away, "debts/retired-cwd.md", FIXED_DEBT_TEXT)
         git_at(away, "add", "-A")
         git_at(away, "commit", "-q", "-m", "base")
+        git_at(away, "commit", "-q", "--allow-empty", "-m", "start")  # START is this empty commit: the base came before it
         start = git_at(away, "rev-parse", "HEAD")
         write_at(away, "debts/fresh-cwd.md", FIXED_DEBT_TEXT)
         os.remove(os.path.join(away, "debts", "retired-cwd.md"))
