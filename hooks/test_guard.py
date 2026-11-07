@@ -102,6 +102,7 @@ FAMILIES = {
     "lane-one-topic": "one lane, one topic: a send_message brief whose Topic differs from the lane's cs-topic, or names none, is refused; an older lane with no cs-topic is judged by its cs-step tags; a message without the marker passes unread",
     "records-page": "a lane commit of the generated records page: refused unless the page is the base's",
     "conflict-markers": "a git commit or --continue judged on the index and the files its adds or paths name, and a git push judged on the net change it sends: all three markers in one file's added lines are refused; a blind step before a commit, with a push after it, is refused only when the commit covers a triplet already in the tree; a chain that makes a conflict is refused, and a clean, whitespace-only, unstaged or half-marked file is allowed",
+    "red-run": "a git push judged on the test commits it sends: a test commit with no Red-run line, a malformed Red-run line (zero count, or no arrow and no sha), or a lane's own untrailered test commit beside main's is refused; a valid red-run or none line, a docs-only, deletion-only, merged-main, rebased-onto-main, pre-rollout or unreadable-range push passes",
     "cite": "cite by id",
     "frozen": "frozen paths",
     "model-cap": "the agent model cap",
@@ -11330,6 +11331,280 @@ cmk_refuse("a merge that conflicts on a clean tree, then add -A, commit and push
 # 8. A push judges the net change it sends: a triplet added and removed again is no hit.
 cmk_allow("two commits, the first adding a triplet and the second removing it, then a push",
           VCS + " push", R2_NET)
+
+
+# =========================================================================== 5e. red-run on a push
+#
+# `red-run`. A Bash `git push` is refused when a commit the push sends adds lines to a test path and carries
+# no valid `Red-run:` trailer. The judge is `gaps` in lint/check_red_run.py (decision
+# red-run-trailer-on-test-commits). The range is the one the conflict-markers push check reads: the
+# destination's remote-tracking tip, else the source's upstream, else the default base, up to the named
+# source ref. A test commit a lane takes from main is not the lane's, so the lane's own commits are judged
+# and main's are not. A merge, a deletion-only commit, a commit before the check landed in HEAD's tree and
+# a range git cannot read all pass. A malformed trailer is no trailer.
+#
+# Each fixture is a checkout beside a bare remote (`_cmk_pushed`). Basenames start with `rr-`, so no
+# remote folder collides with a conflict-markers one.
+FAMILY = "red-run"
+RR_RULE = "red-run"
+RR_TEST = "hooks/test_x.py"
+RR_TEST_TEXT = "def test_x():\n    assert 1 == 1\n"
+RR_SUBJECT = "add hooks/test_x.py"
+RR_CHECK_REL = "lint/check_red_run.py"
+RR_RED_LINE = "Red-run: python3 -m pytest x -> 1 failed on abc1234"
+RR_NONE_LINE = "Red-run: none: re-pointed fixture"
+RR_ZERO_LINE = "Red-run: pytest x -> 0 failed on abc1234"
+RR_NOARROW_LINE = "Red-run: pytest x failed"
+RRROOT = os.path.join(ROOT, "redrun")
+RR_PLAIN = os.path.join(RRROOT, "rr-plain")            # an unpushed commit adding hooks/test_x.py, no trailer
+RR_RED = os.path.join(RRROOT, "rr-red")                # the same commit, with a valid red-run line
+RR_NONE = os.path.join(RRROOT, "rr-none")              # the same commit, with a `none` line and a reason
+RR_ZERO = os.path.join(RRROOT, "rr-zero")              # the same commit, with a zero count
+RR_NOARROW = os.path.join(RRROOT, "rr-noarrow")        # the same commit, with no arrow and no sha
+RR_DOCS = os.path.join(RRROOT, "rr-docs")              # a docs file, a product file and a spec doc
+RR_MERGE = os.path.join(RRROOT, "rr-merge")            # topic merged origin/main, which holds an untrailered test commit
+RR_REBASE = os.path.join(RRROOT, "rr-rebase")          # topic rebased onto origin/main, which holds one
+RR_LANEMERGE = os.path.join(RRROOT, "rr-lanemerge")    # topic's own untrailered test commit, then a merge of origin/main with one
+RR_LANEREBASE = os.path.join(RRROOT, "rr-lanerebase")  # the same, then a rebase onto origin/main
+RR_FEAT = os.path.join(RRROOT, "rr-feat")              # feat holds an untrailered test commit, HEAD on a clean topic
+RR_CLEANREF = os.path.join(RRROOT, "rr-cleanref")      # HEAD holds an untrailered test commit, the push names clean
+RR_NOBASE = os.path.join(RRROOT, "rr-nobase")          # no remote, no tracking ref, no upstream, no default base
+RR_DELETE = os.path.join(RRROOT, "rr-delete")          # a commit that only deletes test lines and a test file
+RR_SIX = os.path.join(RRROOT, "rr-six")                # six test files added in one commit, none with a trailer
+RR_ROLLOLD = os.path.join(RRROOT, "rr-rollold")        # a test commit before the check landed, then the check lands
+RR_ROLLNEW = os.path.join(RRROOT, "rr-rollnew")        # the check is on main, then an untrailered test commit
+
+
+def _rr_run(where, *args):
+    """One git call that builds a red-run fixture. A failure stops the suite here, not in a case."""
+    done = run_vcs(where, *IDENT, *args)
+    if done.returncode != 0:
+        sys.exit("fixture setup failed in the red-run fixtures: %s %s in %r: %s"
+                 % (VCS, " ".join(args), where, done.stderr.strip()))
+    return done.stdout.strip()
+
+
+def _rr_read(where, *args):
+    """A git read in a red-run fixture, whole: the caller says what a failure means."""
+    return run_vcs(where, *args)
+
+
+def _rr_must(where, ok, what):
+    """Stop the suite unless the fixture holds `what`. A case reads its scope from the fixture, so the
+    scope is checked before any verdict is read (P7)."""
+    if not ok:
+        sys.exit("fixture setup failed in the red-run fixtures: %s does not hold in %r" % (what, where))
+
+
+def _rr_subjects(where, rng):
+    """The subjects of the non-merge commits in `rng`, oldest first."""
+    return _rr_read(where, "log", "--no-merges", "--reverse", "--format=%s", rng).stdout.splitlines()
+
+
+def _rr_merges(where, rng):
+    return _rr_read(where, "rev-list", "--merges", rng).stdout.strip()
+
+
+def _rr_added(where, *revs):
+    """Lines added by `git diff --numstat <revs>`. A binary file adds nothing here."""
+    rows = _rr_read(where, "diff", "--numstat", *revs).stdout.splitlines()
+    return sum(int(row.split("\t")[0]) for row in rows if row.split("\t")[0].isdigit())
+
+
+def _rr_commit(where, files, message):
+    """Write `files` (path -> text, or None to delete the path), then commit them with `message`."""
+    for rel, text in files.items():
+        if text is None:
+            _rr_run(where, "rm", "-q", rel)
+        else:
+            write(os.path.join(where, rel), text)
+    _rr_run(where, "add", "-A")
+    _rr_run(where, "commit", "-q", "-m", message)
+
+
+def _rr_msg(subject, trailer=None):
+    """A commit message: the subject, then the trailer line in its own paragraph when there is one."""
+    return subject if trailer is None else subject + "\n\n" + trailer
+
+
+def _build_red_run():
+    run, commit, must = _rr_run, _rr_commit, _rr_must
+
+    _cmk_pushed(RR_PLAIN, {"a.txt": "base\n"})
+    commit(RR_PLAIN, {RR_TEST: RR_TEST_TEXT}, _rr_msg(RR_SUBJECT))
+
+    _cmk_pushed(RR_RED, {"a.txt": "base\n"})
+    commit(RR_RED, {RR_TEST: RR_TEST_TEXT}, _rr_msg(RR_SUBJECT, RR_RED_LINE))
+
+    _cmk_pushed(RR_NONE, {"a.txt": "base\n"})
+    commit(RR_NONE, {RR_TEST: RR_TEST_TEXT}, _rr_msg(RR_SUBJECT, RR_NONE_LINE))
+
+    _cmk_pushed(RR_ZERO, {"a.txt": "base\n"})
+    commit(RR_ZERO, {RR_TEST: RR_TEST_TEXT}, _rr_msg(RR_SUBJECT, RR_ZERO_LINE))
+
+    _cmk_pushed(RR_NOARROW, {"a.txt": "base\n"})
+    commit(RR_NOARROW, {RR_TEST: RR_TEST_TEXT}, _rr_msg(RR_SUBJECT, RR_NOARROW_LINE))
+
+    _cmk_pushed(RR_DOCS, {"a.txt": "base\n"})
+    commit(RR_DOCS, {"docs/notes.md": "# Notes\n", "hooks/helper.py": "VALUE = 1\n",
+                     "docs/spec/api.md": "# API\n"}, "docs, a helper and a spec doc")
+
+    # Main gets an untrailered test commit and is pushed. The lane's own commit is clean. The merge and the
+    # rebase bring main's commit into the lane's range, and the push must not judge it.
+    _cmk_pushed(RR_MERGE, {"a.txt": "base\n"})
+    commit(RR_MERGE, {"b.txt": "lane\n"}, "lane change")
+    run(RR_MERGE, "checkout", "-q", "main")
+    commit(RR_MERGE, {RR_TEST: RR_TEST_TEXT}, RR_SUBJECT)
+    run(RR_MERGE, "push", "-q", "origin", "main")
+    run(RR_MERGE, "checkout", "-q", "topic")
+    run(RR_MERGE, "merge", "-q", "--no-edit", "origin/main")
+    must(RR_MERGE, _rr_merges(RR_MERGE, "origin/topic..HEAD") != "", "a merge commit in origin/topic..HEAD")
+    must(RR_MERGE, RR_SUBJECT in _rr_subjects(RR_MERGE, "origin/topic..HEAD"),
+         "main's untrailered test commit in origin/topic..HEAD")
+
+    _cmk_pushed(RR_REBASE, {"a.txt": "base\n"})
+    commit(RR_REBASE, {"b.txt": "lane\n"}, "lane change")
+    run(RR_REBASE, "checkout", "-q", "main")
+    commit(RR_REBASE, {RR_TEST: RR_TEST_TEXT}, RR_SUBJECT)
+    run(RR_REBASE, "push", "-q", "origin", "main")
+    run(RR_REBASE, "checkout", "-q", "topic")
+    run(RR_REBASE, "rebase", "origin/main")
+    must(RR_REBASE, _rr_merges(RR_REBASE, "origin/topic..HEAD") == "", "no merge commit after the rebase")
+    must(RR_REBASE, RR_SUBJECT in _rr_subjects(RR_REBASE, "origin/topic..HEAD"),
+         "main's untrailered test commit in origin/topic..HEAD")
+
+    # The lane's own commit is an untrailered test commit, and main's is too. The lane's must be refused.
+    _cmk_pushed(RR_LANEMERGE, {"a.txt": "base\n"})
+    commit(RR_LANEMERGE, {"hooks/test_lane.py": RR_TEST_TEXT}, "lane tests")
+    run(RR_LANEMERGE, "checkout", "-q", "main")
+    commit(RR_LANEMERGE, {RR_TEST: RR_TEST_TEXT}, RR_SUBJECT)
+    run(RR_LANEMERGE, "push", "-q", "origin", "main")
+    run(RR_LANEMERGE, "checkout", "-q", "topic")
+    run(RR_LANEMERGE, "merge", "-q", "--no-edit", "origin/main")
+    must(RR_LANEMERGE, "lane tests" in _rr_subjects(RR_LANEMERGE, "origin/topic..HEAD"),
+         "the lane's own test commit in origin/topic..HEAD")
+
+    _cmk_pushed(RR_LANEREBASE, {"a.txt": "base\n"})
+    commit(RR_LANEREBASE, {"hooks/test_lane.py": RR_TEST_TEXT}, "lane tests")
+    run(RR_LANEREBASE, "checkout", "-q", "main")
+    commit(RR_LANEREBASE, {RR_TEST: RR_TEST_TEXT}, RR_SUBJECT)
+    run(RR_LANEREBASE, "push", "-q", "origin", "main")
+    run(RR_LANEREBASE, "checkout", "-q", "topic")
+    run(RR_LANEREBASE, "rebase", "origin/main")
+    must(RR_LANEREBASE, _rr_merges(RR_LANEREBASE, "origin/topic..HEAD") == "", "no merge commit after the rebase")
+    must(RR_LANEREBASE, "lane tests" in _rr_subjects(RR_LANEREBASE, "origin/topic..HEAD"),
+         "the lane's own test commit in origin/topic..HEAD")
+
+    # Only feat holds the untrailered test commit. HEAD stays on topic, which is clean.
+    _cmk_pushed(RR_FEAT, {"a.txt": "base\n"})
+    run(RR_FEAT, "checkout", "-q", "-b", "feat", "main")
+    commit(RR_FEAT, {RR_TEST: RR_TEST_TEXT}, RR_SUBJECT)
+    run(RR_FEAT, "checkout", "-q", "topic")
+    must(RR_FEAT, run(RR_FEAT, "rev-parse", "--abbrev-ref", "HEAD") == "topic", "HEAD on topic")
+    must(RR_FEAT, RR_SUBJECT in _rr_subjects(RR_FEAT, "origin/main..feat"), "feat's test commit in origin/main..feat")
+    must(RR_FEAT, RR_SUBJECT not in _rr_subjects(RR_FEAT, "origin/main..HEAD"), "no test commit in HEAD's range")
+
+    # HEAD holds the untrailered test commit. The push names `clean`, which holds a clean commit only.
+    _cmk_pushed(RR_CLEANREF, {"a.txt": "base\n"})
+    commit(RR_CLEANREF, {RR_TEST: RR_TEST_TEXT}, RR_SUBJECT)
+    run(RR_CLEANREF, "checkout", "-q", "-b", "clean", "main")
+    commit(RR_CLEANREF, {"b.txt": "clean\n"}, "clean change")
+    run(RR_CLEANREF, "checkout", "-q", "topic")
+    must(RR_CLEANREF, _rr_subjects(RR_CLEANREF, "origin/topic..HEAD") == [RR_SUBJECT], "the test commit on HEAD")
+    must(RR_CLEANREF, _rr_subjects(RR_CLEANREF, "origin/main..clean") == ["clean change"], "a clean commit on clean")
+
+    # No remote, no tracking ref, no upstream, and no default base: git reads no range.
+    os.makedirs(RR_NOBASE, exist_ok=True)
+    run(RR_NOBASE, "init", "-q", "-b", "topic", ".")
+    commit(RR_NOBASE, {"a.txt": "base\n"}, "first")
+    commit(RR_NOBASE, {RR_TEST: RR_TEST_TEXT}, RR_SUBJECT)
+    must(RR_NOBASE, _rr_read(RR_NOBASE, "remote").stdout.strip() == "", "no remote")
+    must(RR_NOBASE, _rr_read(RR_NOBASE, "rev-parse", "--verify", "-q", "main").returncode != 0, "no local main")
+    must(RR_NOBASE, _rr_read(RR_NOBASE, "rev-parse", "--verify", "-q", "master").returncode != 0, "no local master")
+
+    _cmk_pushed(RR_DELETE, {"a.txt": "base\n",
+                            "hooks/test_old.py": "def test_a():\n    assert 1\n\ndef test_b():\n    assert 2\n",
+                            "hooks/test_gone.py": "def test_gone():\n    assert 3\n"})
+    commit(RR_DELETE, {"hooks/test_old.py": "def test_a():\n    assert 1\n", "hooks/test_gone.py": None},
+           "drop test_b and a test file")
+    must(RR_DELETE, _rr_added(RR_DELETE, "HEAD~1", "HEAD") == 0, "no added line in the deletion commit")
+
+    _cmk_pushed(RR_SIX, {"a.txt": "base\n"})
+    commit(RR_SIX, {"hooks/test_%d.py" % i: RR_TEST_TEXT for i in range(1, 7)}, "six test files")
+    must(RR_SIX, _rr_added(RR_SIX, "HEAD~1", "HEAD") == 6 * len(RR_TEST_TEXT.splitlines()),
+         "six test files added in the commit")
+
+    # Rollout. The check lands in HEAD's tree in the second commit, so the first commit's parent lacks it.
+    _cmk_pushed(RR_ROLLOLD, {"a.txt": "base\n"})
+    commit(RR_ROLLOLD, {RR_TEST: RR_TEST_TEXT}, RR_SUBJECT)
+    commit(RR_ROLLOLD, {RR_CHECK_REL: "# the check\n"}, "land the check")
+    must(RR_ROLLOLD, _rr_read(RR_ROLLOLD, "ls-tree", "--name-only", "HEAD~1", "--", RR_CHECK_REL).stdout.strip() == "",
+         "the check absent from the parent of the test commit")
+    must(RR_ROLLOLD, _rr_read(RR_ROLLOLD, "ls-tree", "--name-only", "HEAD", "--", RR_CHECK_REL).stdout.strip() != "",
+         "the check present in HEAD")
+
+    # The check is on main before the untrailered test commit, so that commit's parent holds the check.
+    _cmk_pushed(RR_ROLLNEW, {"a.txt": "base\n", RR_CHECK_REL: "# the check\n"})
+    commit(RR_ROLLNEW, {RR_TEST: RR_TEST_TEXT}, RR_SUBJECT)
+    must(RR_ROLLNEW, _rr_read(RR_ROLLNEW, "ls-tree", "--name-only", "HEAD~1", "--", RR_CHECK_REL).stdout.strip() != "",
+         "the check present in the parent of the test commit")
+
+
+lazy_fixture([RR_PLAIN, RR_RED, RR_NONE, RR_ZERO, RR_NOARROW, RR_DOCS, RR_MERGE, RR_REBASE, RR_LANEMERGE,
+              RR_LANEREBASE, RR_FEAT, RR_CLEANREF, RR_NOBASE, RR_DELETE, RR_SIX, RR_ROLLOLD, RR_ROLLNEW],
+             _build_red_run)
+
+
+def rr_refuse(name, command, cwd):
+    sh("red-run: %s is refused" % name, command, "deny", RR_RULE, cwd=cwd)
+
+
+def rr_allow(name, command, cwd):
+    sh("red-run: %s is allowed" % name, command, "allow", cwd=cwd)
+
+
+# 1. The done check: a push of a test commit with no Red-run line is refused.
+rr_refuse("an unpushed commit that adds hooks/test_x.py with no Red-run line", VCS + " push", RR_PLAIN)
+
+# 2. A valid trailer on that same commit lets the push through: a red run, or a `none` line with a reason.
+rr_allow("the same commit with Red-run: python3 -m pytest x -> 1 failed on abc1234", VCS + " push", RR_RED)
+rr_allow("the same commit with Red-run: none: re-pointed fixture", VCS + " push", RR_NONE)
+
+# 3. A push of commits that add no test path is not judged.
+rr_allow("a push of a docs file, a product file and a spec doc, none a test path", VCS + " push", RR_DOCS)
+
+# 4. Main's commits a lane merged or rebased onto are not judged. The lane's own commits are.
+rr_allow("a lane that merged origin/main, which holds an untrailered test commit", VCS + " push", RR_MERGE)
+rr_allow("a lane that rebased onto origin/main, which holds an untrailered test commit", VCS + " push", RR_REBASE)
+rr_refuse("a lane's own untrailered test commit, then a merge of origin/main that holds another",
+          VCS + " push", RR_LANEMERGE)
+rr_refuse("a lane's own untrailered test commit, then a rebase onto origin/main that holds another",
+          VCS + " push", RR_LANEREBASE)
+
+# 5. The named source ref is the range. A refspec other than HEAD is read, and HEAD is not read in its place.
+rr_refuse("git push origin feat:feat, where only feat holds an untrailered test commit and HEAD is clean",
+          VCS + " push origin feat:feat", RR_FEAT)
+rr_allow("git push origin clean:clean, where HEAD holds an untrailered test commit the push does not send",
+         VCS + " push origin clean:clean", RR_CLEANREF)
+
+# 6. A range git cannot read is no hit, as in conflict-markers.
+rr_allow("a push where git reads no base: no remote, no tracking ref, no upstream, no default base",
+         VCS + " push origin topic", RR_NOBASE)
+
+# 7. A commit that adds no test lines needs no trailer.
+rr_allow("a push of a commit that only deletes test lines and a test file", VCS + " push", RR_DELETE)
+
+# 8. A malformed trailer is no trailer: a zero count, or no arrow and no sha. Both are refused.
+rr_refuse("a test commit with Red-run: pytest x -> 0 failed on abc1234, a zero count", VCS + " push", RR_ZERO)
+rr_refuse("a test commit with Red-run: pytest x failed, no arrow and no sha", VCS + " push", RR_NOARROW)
+
+# Full size: six test files in one commit, none with a trailer. The commit names more paths than the judge lists.
+rr_refuse("a commit that adds six test files, none with a trailer", VCS + " push", RR_SIX)
+
+# Rollout: a test commit whose parent tree lacks the check is not judged. One whose parent holds it is.
+rr_allow("a test commit made before the check landed, then the commit that lands the check", VCS + " push",
+         RR_ROLLOLD)
+rr_refuse("a test commit made after the check landed, with no trailer", VCS + " push", RR_ROLLNEW)
 
 
 # =========================================================================== 6. frozen paths
