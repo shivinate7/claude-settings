@@ -742,6 +742,83 @@ class EmittedRuleIdsTests(unittest.TestCase):
         self.assertNotIn("watch-rule", ids)
 
 
+# ------------------------------------------------------------ guards section
+# rule_mechanisms.json gives each guard rule id its own row under `guards`, keyed by the id, and each
+# row names the test that proves that guard. The ids come from the guard source the same way the audit
+# reads them (guard_rule_names over hooks/guard*.py), never from a copy of the list kept here.
+
+GUARD_TEST = "lint/test_rule_audit.py::RuleAuditTests.test_single_mapped_rule_is_clean"
+
+
+def guards_map(ids, test=GUARD_TEST):
+    """GOOD_MAP plus a `guards` section: one row per id, each row naming `test`."""
+    return dict(GOOD_MAP, guards={i: {"test": test} for i in ids})
+
+
+class GuardsSectionTests(unittest.TestCase):
+    """Every guard rule id the guard source writes needs its own `guards` row, and each row needs a
+    test that resolves. A row for an id the guard no longer writes is stale."""
+
+    def fixture_ids(self):
+        return sorted(rule_audit.guard_rule_names(GUARD_SRC))
+
+    def real_guard_text(self):
+        return rule_audit.guard_text(rule_audit.ROOT)
+
+    def test_fixture_source_reads_the_three_ids_the_cases_use(self):
+        # Control: the ids the cases name are the ones the reader finds in GUARD_SRC.
+        self.assertEqual(self.fixture_ids(), ["agent-model-cap", "merge-main", "shared-tree"])
+
+    def test_guard_id_with_no_row_fails_and_names_it(self):
+        ids = [i for i in self.fixture_ids() if i != "merge-main"]
+        problems = run(rule_map=guards_map(ids))
+        self.assertTrue(any("merge-main" in p for p in problems), problems)
+
+    def test_no_guards_section_names_every_guard_id(self):
+        # The empty state: the map has its rules and no `guards` section at all.
+        problems = run()
+        for guard_id in self.fixture_ids():
+            with self.subTest(guard_id=guard_id):
+                self.assertTrue(any(guard_id in p for p in problems), problems)
+
+    def test_full_size_guards_section_names_the_one_missing_id(self):
+        guard = self.real_guard_text()
+        ids = sorted(rule_audit.guard_rule_names(guard))
+        missing = ids[-1]
+        problems = run(rule_map=guards_map([i for i in ids if i != missing]), guard=guard)
+        self.assertEqual(len(problems), 1, problems)
+        self.assertIn(missing, problems[0])
+
+    def test_guards_row_for_an_id_the_guard_no_longer_emits_fails_as_stale(self):
+        problems = run(rule_map=guards_map(self.fixture_ids() + ["retired-guard-rule"]))
+        stale = [p for p in problems if "retired-guard-rule" in p]
+        self.assertTrue(stale, problems)
+        self.assertIn("stale", stale[0].lower())
+
+    def test_guards_row_naming_a_test_that_does_not_exist_fails(self):
+        rule_map = guards_map(self.fixture_ids())
+        rule_map["guards"]["merge-main"] = {
+            "test": "lint/test_rule_audit.py::RuleAuditTests.test_no_such_thing"}
+        problems = run(rule_map=rule_map)
+        self.assertTrue(any("merge-main" in p and "test_no_such_thing" in p for p in problems),
+                        problems)
+
+    def test_guards_row_naming_no_test_fails(self):
+        rule_map = guards_map(self.fixture_ids())
+        rule_map["guards"]["merge-main"] = {}
+        problems = run(rule_map=rule_map)
+        self.assertTrue(any("merge-main" in p for p in problems), problems)
+
+    def test_complete_guards_section_passes(self):
+        problems = run(rule_map=guards_map(self.fixture_ids()))
+        self.assertEqual(problems, [])
+
+    def test_complete_full_size_guards_section_passes(self):
+        guard = self.real_guard_text()
+        problems = run(rule_map=guards_map(sorted(rule_audit.guard_rule_names(guard))), guard=guard)
+        self.assertEqual(problems, [])
+
+
 # ------------------------------------------------------------ refusal cites
 # A refusal prints a cite: `decision <slug>` for a file in docs/decisions/, or `rule <anchor>` for
 # a `<!-- rule:<anchor> -->` in CLAUDE.md or output-styles/*.md. Both sets are read live. A refusal
