@@ -1598,11 +1598,22 @@ def ruling_cite(reason, ids, strict=False) -> str:
     return "bogus" if strict else ""
 
 
-def reason_item(reason):
-    """The item number a form-judge refusal names ("Item 5: ..."), the first such number in the text, else None.
-    The prompt asks the judge for "the item that misses", so a reason that follows it names one."""
-    m = re.search(r"\bitem\s*#?(\d+)\b", reason, re.IGNORECASE)
-    return int(m.group(1)) if m else None
+_ITEM_SEP = r"(?:\s*,\s*(?:and\s+|or\s+)?|\s+and\s+|\s+or\s+|\s*&\s*)"
+ITEM_NUMBERS_RE = re.compile(r"\bitems?\s*#?(\d+(?:%s#?\d+)*)" % _ITEM_SEP, re.IGNORECASE)
+
+
+def item_numbers(reason):
+    """Every item number a form-judge refusal names, as a set: "Item 5 and item 8", "Items 2, 5 and 8",
+    "Item 1 passes. Item 8". The prompt asks the judge for "the item that misses", so a reason that follows
+    it names one or more. Empty when none is named."""
+    return {int(n) for m in ITEM_NUMBERS_RE.finditer(reason) for n in re.findall(r"\d+", m.group(1))}
+
+
+def unshown_records(reason, ids):
+    """The `decisions/..` or `debts/..` records a reason names that are not in `ids`, in either letter case."""
+    reason = re.sub(r"(?<=[\w-])\.md\b", "", re.sub(r"(?<![\w/-])docs/(?=(?:decisions|debts)/)", "", reason, flags=re.I))
+    shown = {i.lower() for i in ids}
+    return [r for r in re.findall(RECORD_REF.pattern, reason, re.I) if r.lower() not in shown]
 
 
 def _all_strings(value):

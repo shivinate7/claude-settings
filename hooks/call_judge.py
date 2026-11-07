@@ -505,7 +505,11 @@ def main():
         cite = question_form.ruling_cite(reason, ids) if tool == "AskUserQuestion" else ""
         # Only item 8 is the past-ruling rule: a refusal of items 1 to 7 may name a listed record in passing.
         # A reason that names no item number (the model ignored the reply shape) keeps the cite's label, as before.
-        if cite == "cited" and question_form.reason_item(reason) not in (None, PAST_RULING_ITEM_NUMBER):
+        items = question_form.item_numbers(reason) if tool == "AskUserQuestion" else set()  # question_form loads for the box only
+        if PAST_RULING_ITEM_NUMBER in items:
+            if question_form.unshown_records(reason, ids):
+                cite = "bogus"  # an item 8 verdict on a record the model was not shown is no usable verdict
+        elif cite == "cited" and items:
             cite = ""
         if cite == "bogus":  # the answer cites a record the model was not shown: no usable verdict
             return unvetted(payload, tool, args, rule, "the review cited a record that was not in the list", units)
