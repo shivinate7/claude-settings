@@ -4,7 +4,11 @@
   "home": "step sim-lease-gaps",
   "id": "sim-reuse-takes-lease",
   "kind": "decision",
-  "lane": "sim-lease-gaps",
+  "lastAnswer": {
+    "at": "2026-11-07T18:31:02Z",
+    "choice": "a",
+    "note": ""
+  },
   "n": 336,
   "options": [
     {
@@ -24,8 +28,9 @@
   "pick": "a",
   "rank": 1,
   "ref": "decision sim-lease-tool ruling 4; lint/test_sim_test.sh case 50; step sim-lease-gaps",
+  "reply": "You picked a: ruling 4 of sim-lease-tool is rewritten; a reuse takes the booted phone's lease. Sent to lane sim-lease-gaps at 12:35 CST; home: step sim-lease-gaps. Closed.",
   "short": "Shared phones: a reused phone takes the lease",
-  "status": "open",
+  "status": "closed",
   "title": "Shared iPhone simulators: may a run that reuses an already-booted phone take that phone's lease, which an old ruling forbids?",
   "why": "This is gap 1 from your Mac's notes (commit b7bc81da): two runs drove Duo 1 at once today, and the Home review lost 7 tries."
 }

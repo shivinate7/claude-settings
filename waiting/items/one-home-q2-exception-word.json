@@ -1,0 +1,30 @@
+{
+  "added": "2026-11-07T18:34:00Z",
+  "context": "Goal: one word means one thing.\nProblem (rule): a child repo that keeps its own version of a rule on purpose marks it with a comment. The brief used `override`, but GLOSSARY.md already uses 'override' for the word you type to let a refused act through.\nBased on (read): the plan, part c; GLOSSARY.md.\nDeparts from: main has no child-exception marker \u2014 adds `<!-- exempt: <rule-id> reason: <text> -->`.",
+  "home": "step one-home-check",
+  "id": "one-home-q2-exception-word",
+  "kind": "decision",
+  "n": 338,
+  "options": [
+    {
+      "gain": "'Override' keeps its one meaning, your typed word.",
+      "key": "a",
+      "label": "Yes: use 'exempt' (recommended)",
+      "lose": "Differs from the brief's wording."
+    },
+    {
+      "gain": "Matches the brief.",
+      "key": "b",
+      "label": "No: keep 'override'",
+      "lose": "One word for two things; a session may mistake a repo comment for your override."
+    }
+  ],
+  "owner": "coordinator",
+  "pick": "a",
+  "rank": 2,
+  "ref": "#1106 docs/plans/one-home-check.md, Input Needed 2",
+  "short": "One-home Q2 of 5: name a child repo's exception 'exempt'?",
+  "status": "open",
+  "title": "One-home check, question 2 of 5: should a child repo mark a deliberate rule copy with the word 'exempt' instead of 'override'?",
+  "why": "From plan PR #1106, at your request on 333."
+}

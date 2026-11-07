@@ -1,0 +1,30 @@
+{
+  "added": "2026-11-07T18:34:00Z",
+  "context": "Goal: each rule has one home; no stale copy of it lives on.\nProblem (rule): 8 agent files held a 5-word fragment of a rule sentence that had been reworded. After the fix, nothing stops the old fragment from being pasted back.\nBased on (read): the plan, part b; lint/test_retired_names.py fails any file that holds a listed phrase as a whole word, except GLOSSARY.md and docs/records.md.\nDeparts from: main lists no retired rule phrases \u2014 the old fragment joins the list.",
+  "home": "step one-home-check",
+  "id": "one-home-q1-retired-phrase",
+  "kind": "decision",
+  "n": 337,
+  "options": [
+    {
+      "gain": "The old wording can never return unnoticed.",
+      "key": "a",
+      "label": "Yes: ban it after the fixes (recommended)",
+      "lose": "A file that quotes it on purpose also fails, unless it is one of the two exempt files."
+    },
+    {
+      "gain": "No false alarm on a quote.",
+      "key": "b",
+      "label": "No: leave it unlisted",
+      "lose": "The old copy can creep back with no check to catch it."
+    }
+  ],
+  "owner": "coordinator",
+  "pick": "a",
+  "rank": 2,
+  "ref": "#1106 docs/plans/one-home-check.md, Input Needed 1",
+  "short": "One-home Q1 of 5: ban an old rule phrase once fixed?",
+  "status": "open",
+  "title": "One-home check, question 1 of 5: once the old copies of a moved rule are fixed, should their old wording be banned so it cannot come back?",
+  "why": "From plan PR #1106, at your request on 333."
+}

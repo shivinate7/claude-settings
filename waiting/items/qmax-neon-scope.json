@@ -4,7 +4,11 @@
   "home": "lane qmax-browser-main-red",
   "id": "qmax-neon-scope",
   "kind": "decision",
-  "lane": "qmax-browser-main-red",
+  "lastAnswer": {
+    "at": "2026-11-07T18:31:02Z",
+    "choice": "b",
+    "note": ""
+  },
   "n": 332,
   "options": [
     {
@@ -24,8 +28,9 @@
   "pick": "b",
   "rank": 1,
   "ref": "owner 12:04 CST Nov 7 (runner 9's chat); q_max harness/worktree-hook.mjs",
+  "reply": "You picked b: no session adds a Neon database, Mac sessions included. Sent to the coordinator and lane qmax-browser-main-red at 12:35 CST; home: q_max's record of your 12:04 ruling (PR #1068). Closed.",
   "short": "q_max: does 'never touch Neon' cover Mac sessions too?",
-  "status": "open",
+  "status": "closed",
   "title": "q_max: does your 'sessions never touch Neon' cover only cloud sessions, or Mac sessions too?",
   "why": "Your 12:04 ruling names no scope. On your Mac, each new q_max worktree gets its own Neon database."
 }

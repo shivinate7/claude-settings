@@ -1,0 +1,30 @@
+{
+  "added": "2026-11-07T18:34:00Z",
+  "context": "Goal: a child repo's CI catches a copied claude-settings rule.\nProblem (rule): the child's CI needs the parent's rule text to compare against.\nBased on (read): the plan, part c; the ste-lint already checks out claude-settings at a pinned sha (decision action-pins-follow-sessions).\nDeparts from: main gives child CI no copy check \u2014 adds a pinned checkout of claude-settings in child CI.",
+  "home": "step one-home-check",
+  "id": "one-home-q3-parent-pin",
+  "kind": "decision",
+  "n": 339,
+  "options": [
+    {
+      "gain": "One home for the rule ids; nothing copied into the child.",
+      "key": "a",
+      "label": "Yes: a pinned checkout, as the ste-lint does (recommended)",
+      "lose": "The pin must be bumped to see new rules (the same chore as today's pins)."
+    },
+    {
+      "gain": "No extra checkout in CI.",
+      "key": "b",
+      "label": "No: copy the rule ids into each child",
+      "lose": "The copy goes stale, and it breaks your rule that an allow list points at the constant, never a copy."
+    }
+  ],
+  "owner": "coordinator",
+  "pick": "a",
+  "rank": 2,
+  "ref": "#1106 docs/plans/one-home-check.md, Input Needed 3",
+  "short": "One-home Q3 of 5: child CI reads claude-settings at a pinned version?",
+  "status": "open",
+  "title": "One-home check, question 3 of 5: should a child repo's CI read claude-settings at a pinned version to find copied rules?",
+  "why": "From plan PR #1106, at your request on 333."
+}

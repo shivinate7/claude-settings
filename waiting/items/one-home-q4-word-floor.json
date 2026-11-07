@@ -1,0 +1,30 @@
+{
+  "added": "2026-11-07T18:34:00Z",
+  "context": "Goal: the check catches the copies that actually happened.\nProblem (rule): the real incident copies were 5-word fragments. An 8-word floor misses all of them.\nBased on (test): measured on main 5a5f081e: nine files hold a 5-word run of the old sentence, none an 8-word run.\nDeparts from: main has no reword check \u2014 adds one that counts runs of 5 words or more.",
+  "home": "step one-home-check",
+  "id": "one-home-q4-word-floor",
+  "kind": "decision",
+  "n": 340,
+  "options": [
+    {
+      "gain": "Catches the incident that started this.",
+      "key": "a",
+      "label": "Yes: 5 words (recommended)",
+      "lose": "More false alarms on short stock phrases; the rate on other sentences is unmeasured."
+    },
+    {
+      "gain": "Fewer false alarms.",
+      "key": "b",
+      "label": "No: 8 words",
+      "lose": "Misses the copies that actually happened."
+    }
+  ],
+  "owner": "coordinator",
+  "pick": "a",
+  "rank": 2,
+  "ref": "#1106 docs/plans/one-home-check.md, Input Needed 4",
+  "short": "One-home Q4 of 5: flag a removed rule fragment from 5 words?",
+  "status": "open",
+  "title": "One-home check, question 4 of 5: should the check flag a leftover fragment of removed rule text from 5 words long, not 8?",
+  "why": "From plan PR #1106, at your request on 333."
+}

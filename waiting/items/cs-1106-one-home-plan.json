@@ -4,6 +4,11 @@
   "home": "step one-home-check",
   "id": "cs-1106-one-home-plan",
   "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-07T18:31:02Z",
+    "choice": "none",
+    "note": "bring me all 6 questions here for me to answer each individually"
+  },
   "n": 333,
   "options": [
     {
@@ -23,8 +28,9 @@
   "pick": "a",
   "rank": 2,
   "ref": "claude-settings #1106; step one-home-check",
+  "reply": "Split at 12:35 CST into items 337-341, one per question, each yes or no. The plan's question 5 (does debt ste-into-agent-briefs close?) needs no answer: PR #1105 merged on Nov 2 and already closed that debt.",
   "short": "Idle PR #1106: the one-home check plan",
-  "status": "open",
+  "status": "closed",
   "title": "Idle plan PR #1106 (a check that each rule lives in one place): take its six recommendations, or close it?",
   "why": "It has sat as a draft since Nov 2, waiting on six answers from you that never reached the page."
 }

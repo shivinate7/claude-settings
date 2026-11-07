@@ -1,0 +1,30 @@
+{
+  "added": "2026-11-07T18:34:00Z",
+  "context": "Goal: each rule has one home.\nProblem (rule): the check finds word-for-word copies only. A child that rewords a rule is not caught.\nBased on (read): the plan, part c: paraphrase detection is out of scope. Your rule: a gap becomes a debt only after a real incident.\nDeparts from: main tracks no paraphrase gap \u2014 adds a note in the debt store.",
+  "home": "step one-home-check",
+  "id": "one-home-q6-paraphrase",
+  "kind": "decision",
+  "n": 341,
+  "options": [
+    {
+      "gain": "Ships the check now; no guessing at a hard problem.",
+      "key": "a",
+      "label": "Yes: a note now; a debt after a real incident (recommended)",
+      "lose": "A reworded copy can still slip through."
+    },
+    {
+      "gain": "Catches rewording too.",
+      "key": "b",
+      "label": "No: build paraphrase detection now",
+      "lose": "A model-judged check with false alarms, built before any incident shows the need."
+    }
+  ],
+  "owner": "coordinator",
+  "pick": "a",
+  "rank": 2,
+  "ref": "#1106 docs/plans/one-home-check.md, Input Needed 6",
+  "short": "One-home Q5 of 5: leave reworded copies to a note for now?",
+  "status": "open",
+  "title": "One-home check, question 5 of 5: should reworded copies of a rule (same meaning, new words) stay unchecked for now, as a note?",
+  "why": "From plan PR #1106, at your request on 333 (the plan's question 6)."
+}
