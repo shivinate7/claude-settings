@@ -1828,7 +1828,7 @@ test("with a ready draft the rail holds no ready line, while the bar keeps its r
   const page = await open(t); if (!page) return;
   await choose(page, DECISION, "a");
   await page.locator("#barStatus", { hasText: "1 ready." }).waitFor();
-  assert.equal(await page.locator(".ov-prog").count(), 1, "the rail has no progress block, so its ready line cannot be read");
+  assert.equal(await page.locator(".ov-prog").count(), 1, "the rail does not hold exactly one progress block, so the ready-line check below proves nothing");
   assert.doesNotMatch(await page.locator("#rail").innerText(), /ready to send/, "the rail still shows a ready line");
   assert.match(await page.locator("#barStatus").innerText(), /(^|\s)1 ready\./, "the bar lost its ready count");
   const seg = await page.locator(".ov-prog .track .r").evaluate((e) => e.getBoundingClientRect().width);
@@ -6762,6 +6762,30 @@ test("a saved answer whose choice was later dropped from options says the option
   const page = await open(t, { items: [it], answers: laSaved(it, "pinned") }); if (!page) return;
   const p = await receiptOf(page, it);
   assert.match(p, /You chose an option that is no longer listed\./, "the saved receipt does not say the choice is no longer listed: " + p);
+  assert.doesNotMatch(p, /pinned/, "the saved receipt shows the raw key: " + p);
+});
+
+test("receipt words for a saved answer with no choice say 'You chose an option.', never that the choice is no longer listed", async (t) => {
+  const it = mk("saved-nochoice", 1);
+  const page = await open(t, { items: [it], answers: laSaved(it, null) }); if (!page) return;
+  const p = await receiptOf(page, it);
+  assert.doesNotMatch(p, /no longer listed/, "the receipt says the choice is no longer listed, though none was saved: " + p);
+  assert.match(p, /You chose an option\./, "the receipt does not read 'You chose an option.': " + p);
+});
+
+test("receipt words for a card answered by its wait with a note and no choice say 'You chose an option.', never that the choice is no longer listed", async (t) => {
+  const it = no154({ lastAnswer: { note: "Why not green?", at: WT_AT }, waits: { repo: WT_REPO, run: WT_RUN } });
+  const page = await open(t, { items: [it] }); if (!page) return;
+  const p = await receiptOf(page, it);
+  assert.doesNotMatch(p, /no longer listed/, "the receipt says the choice is no longer listed, though none was made: " + p);
+  assert.match(p, /You chose an option\./, "the receipt does not read 'You chose an option.': " + p);
+});
+
+test("receipt words for a saved list whose picks are partly dropped from options say the options are no longer listed, and never show the key", async (t) => {
+  const it = multi("saved-multi-gone", 1);
+  const page = await open(t, { items: [it], answers: laSaved(it, ["a", "pinned"]) }); if (!page) return;
+  const p = await receiptOf(page, it);
+  assert.match(p, /You chose options that are no longer listed\./, "the saved receipt does not say the options are no longer listed: " + p);
   assert.doesNotMatch(p, /pinned/, "the saved receipt shows the raw key: " + p);
 });
 
