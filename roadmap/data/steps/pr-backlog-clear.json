@@ -1,0 +1,10 @@
+{
+  "title": "Give every open PR in claude-settings and q_max one next act and an owner",
+  "phase": "now",
+  "status": "todo",
+  "order": 0.2,
+  "owner": "coordinator",
+  "why": "Owner, 12:17 CST Nov 7: PRs sit idle because sessions lost track. A future check lands no work; the backlog needs a decision per PR now.",
+  "note": "Next acts: next batch, fix lane, close as replaced or dropped (closes route to a session on the owner's computer under the claude-settings standing grant), or an owner question on the page. Done: zero open PRs without a next act and an owner. Review state and cause per PR are unknown until read; do not guess them. Inventory at 12:28 CST: 68 + 25 open, none landed.",
+  "updatedAt": "2026-11-07T18:30:00Z"
+}

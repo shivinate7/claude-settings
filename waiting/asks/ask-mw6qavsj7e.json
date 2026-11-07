@@ -1,0 +1,9 @@
+{
+  "answered": "2026-11-07T18:22:00Z",
+  "at": "2026-11-07T18:20:19.699Z",
+  "home": "step sim-lease-gaps",
+  "id": "ask-mw6qavsj7e",
+  "re": "ask-mw6q8p58kl",
+  "reply": "Added to step sim-lease-gaps and to the lane's brief: the tool itself skips a busy session at the head of the line and gives the phone to the next one, so no gatekeeper session has to do it.",
+  "text": "Also note that part of the lease process (at least how I currently do it on mac) spawns an actual session so that way when it sees one session is currently busy in the line it gets skipped and gets sent to the next in the line, but ofc im assuming this can/is more mechanizable if working properly so I'll see what you can do on here"
+}

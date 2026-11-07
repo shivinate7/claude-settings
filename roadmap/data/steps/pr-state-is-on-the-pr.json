@@ -5,6 +5,6 @@
   "order": 0.0,
   "owner": "coordinator",
   "why": "Owner ask, 12:17 CST Nov 7: \"How many PRs are sitting idle that haven't merged because you lost track ... mechanize this better, this is an obvious gap.\" Measured by the coordinator at 12:24 CST: 36 open claude-settings PRs and 16 q_max PRs are named in neither its handoff nor runner 8's queue; #1371 (git mailbox, round 3 PASS Nov 6) is one.",
-  "note": "Each open PR carries a state label on GitHub (queue, held, parked, replaced), not in a session's handoff. A sweep at each coordinator and batch-runner wake lists open PRs with no state label, or a state older than its limit, and names them in the report. Done check: the sweep goes red on an unlabelled open PR and green when every one has a state.",
-  "updatedAt": "2026-11-07T18:25:00Z"
+  "note": "Waits on step pr-tracking-root-cause for its mechanism. Each open PR carries a state on GitHub (for example queue, held, parked, replaced), each state with an age limit. Done check: red when a PR's state is older than its limit (queued with no batch after one cycle; held or parked with no page item or debt), and red on a PR with no state; a label alone is not the test. Each coordinator and batch-runner report gives two numbers, gold 0: the longest wait from passed review to merge, and the count of open PRs with no next act. Also: a session's report lists an on-merge PR that has waited longer than one batch cycle under Deviations, never under Next.",
+  "updatedAt": "2026-11-07T18:30:00Z"
 }
