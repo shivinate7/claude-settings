@@ -388,6 +388,9 @@ PRESS_VERB = re.compile(r"\b(?:press(?!\s+on\b(?!\s+(?:the|this|that)\b))(?:es|e
 WEB_MARKER = re.compile(r"github|\bpr\b|\bprs\b|pull\s+requests?|" + _REF +
                         r"|(?-i:(?<![\w-])Settings\b(?!\.\w))|\bsettings\s+page\b", re.I)
 PRESS_REF = re.compile(_REF, re.I)
+# "Press Copy" is a button of the waiting page and of the chat, never a press in a web app. It is left out
+# of the press read only when the page is the task title, since the title says nothing of where Copy sits.
+TITLE_PAGE_COPY = re.compile(r"\b(?:press|click|tap)(?:es|ed|ing|s|ped|ping)?\s+(?:the\s+)?[\"'“‘]?copy\b", re.I)
 _FILE = (r"[\w./-]+\.(?:md|txt|sh|json|py|ps1|ya?ml|toml|html|log|csv)\b"
          r"|\b(?:plans|docs|notes)/[\w./-]+")
 COMMAND_FILE = re.compile(_FILE, re.I)
@@ -397,6 +400,8 @@ COMMAND_FILE = re.compile(_FILE, re.I)
 COMMAND_IN_FILE = re.compile(r"\bcommands?\s+(?:in|from|of|inside)\s+(?:the\s+|this\s+)?(?:file\s+)?(?:"
                              + _FILE + ")", re.I)
 COMMAND_ITS = re.compile(r"\bits\s+commands?\b", re.I)
+# "the /doctor command" names a slash command typed in Claude Code, not a command kept in a file.
+SLASH_COMMAND = re.compile(r"(?<![\w./-])/[a-z][\w-]*\s+commands?\b", re.I)
 _RUN_VERB = r"\b(?:run|runs|copy|paste|execute|use|type)\b"
 COMMAND_VERB = re.compile(_RUN_VERB + r"[^.\n]{0,40}\bcommands?\b(?!\s+below)"
                           r"|\bcommands?\s+(?:in|from|of|inside)\b", re.I)
@@ -492,9 +497,11 @@ def _press_field_ok(text, links, context="", press_text=None) -> bool:
     press verb is read in `press_text`, which is `text` unless the caller leaves out a press the
     session makes (_owner_press_text). The page, and each `#N` that needs a url with /pull/N or
     /issues/N at a number boundary, is read in `text`, or in `context` when `text` names no page."""
-    if not PRESS_VERB.search(text if press_text is None else press_text):
+    press = text if press_text is None else press_text
+    from_title = not WEB_MARKER.search(text)
+    if not PRESS_VERB.search(TITLE_PAGE_COPY.sub("", press) if from_title else press):
         return True
-    page = text if WEB_MARKER.search(text) else context
+    page = context if from_title else text
     if not WEB_MARKER.search(page):
         return True
     urls = [l["url"] for l in links or [] if isinstance(l, dict) and isinstance(l.get("url"), str)]
@@ -638,7 +645,7 @@ def command_in_item_hit(data) -> str:
     joined = "\n".join(texts)
     has_file = COMMAND_FILE.search(joined)
     if COMMAND_IN_FILE.search(joined) or (has_file and COMMAND_ITS.search(joined)) \
-            or (has_file and not has_command and COMMAND_VERB.search(joined)):
+            or (has_file and not has_command and COMMAND_VERB.search(SLASH_COMMAND.sub("", joined))):
         return "steps send the owner to a file for a command"
     if any(_shell_line(body, fenced or bool(SPAN_RUN_VERB.search(text[:start])))
            for text in texts for start, body, fenced in _code_spans(text)):

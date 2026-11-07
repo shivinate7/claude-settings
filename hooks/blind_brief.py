@@ -72,7 +72,7 @@ PATTERNS = {
         r"\b(?:current|existing|today'?s|present|old|live|shipped)\s+" + _NOUN + r"\b",
         r"\b(?:look\s+at|open|study|inspect|review|see|read|use)\s+(?:the\s+)?(?:web|native|ios|android|live)\s+"
         r"(?:app|site|version|client|screens?|pages?)\b",
-        r"\bthe\s+(?:web|native|ios|android)\s+(?:app|client|version)\b",
+        r"\bthe\s+(?:web|native|android)\s+(?:app|client|version)\b",
         r"\bas\s+it\s+(?:is|looks|works|stands)\s+(?:now|today)\b",
         r"\blooks?\s+like\s+(?:the\s+)?(?:current|existing|old|web|today)",
     ],
@@ -110,13 +110,18 @@ _SPACE_WORD = r"(?:spacing|gaps?|padding|margins?|gutters?|radius|radii|insets?)
 _COLOUR_WORD = r"(?:colou?rs?|accent|ink|background|surface|border|fill|brand|palette|tint|shade)"
 _ID_WORD = ("order", "lot", "bin", "invoice", "ticket", "id", "item", "box", "parcel", "package", "no.",
             "number", "ref")
-_NOT_ID = "".join(r"(?<!\b%s )" % w for w in _ID_WORD)  # "order #123456" is an id, not a colour
+# "order #123456", "ID: #123456" and "orders #123456" are ids, not colours
+_NOT_ID = "".join(r"(?<!\b%s%s )" % (w, tail) for w in _ID_WORD for tail in ("", ":", "s"))
 SPACING_EXEMPT = ("Device",)
+# A Device section may say the lane draws an iOS app: there it names the product being drawn. A free
+# section that says "the iOS app" may mean today's product, so it stays a `current` fault.
+IOS_APP_REF = re.compile(r"\bthe\s+ios\s+(?:app|client|version)\b", re.I)
+IOS_APP_EXEMPT = ("Device",)
 PATTERNS.update({
     "token-colour": [
         _NOT_ID + r"#(?=[0-9a-f]*[a-f])(?:[0-9a-f]{6}|[0-9a-f]{8})\b",
         _NOT_ID + r"#(?:\d{6}|\d{8})\b",
-        r"\b" + _COLOUR_WORD + r"\b\W+(?:\w+\W+){0,3}#[0-9a-f]{3,4}\b",
+        r"\b" + _COLOUR_WORD + r"\b\W+(?:\w+\W+){0,3}#(?:[0-9a-f]{3}|(?=\d*[a-f])[0-9a-f]{4})\b",
         r"\b(?:rgba?|hsla?|hwb|lch|oklab|oklch)\s?\(", r"\b(?:rgba?|hsla?)\s+\d+[ ,]+\d+[ ,]+\d+",
     ],
     "token-font": [
@@ -124,7 +129,7 @@ PATTERNS.update({
         r"\bmonospace\b", r"\bsystem-ui\b", r"-apple-system",
     ],
     "token-spacing": [
-        r"--space-\d", r"(?<![\w.])\d+(?:\.\d+)?\s?(?:px|rem|dp)\b",
+        r"--space-\d", r"(?<![\w.])\d+(?:\.\d+)?\s?(?:px|rem|dp|pixels?)\b",
         r"\b" + _SPACE_WORD + r"\b\W+(?:\w+\W+){0,3}(?<![\w.])\d+(?:\.\d+)?\s?(?:pt|em)\b",
         r"\b\d+[- ]?(?:point|pt)\s+(?:grid|baseline)\b", r"\bspacing\s+scale\b",
     ],
@@ -137,8 +142,8 @@ COMPILED["token-font"] += [re.compile(p) for p in (
     r"|Source Sans|IBM Plex|Fira Sans|Fira Code|JetBrains Mono|Playfair|Merriweather|Garamond|Verdana"
     r"|Tahoma|Segoe UI|Times New Roman|Manrope|DM Sans|Space Grotesk|Work Sans|Figtree|Fraunces|Satoshi"
     r"|General Sans)\b",
-    r"\b[Ff]onts?\b(?::|\s+(?:is|are))?\s+(?:(?:set )?in\s+)?[A-Z][A-Za-z]+\b(?!-)",
-    r"\b[Tt]ypefaces?\b(?::|\s+(?:is|are))?\s+(?:(?:set )?in\s+)?[A-Z][A-Za-z]+\b(?!-)")]
+    r"\b[Ff]onts?\b(?::|[ \t]+(?:is|are))?[ \t]+(?:(?:set )?in[ \t]+)?[A-Z][A-Za-z]+\b(?!-)",
+    r"\b[Tt]ypefaces?\b(?::|[ \t]+(?:is|are))?[ \t]+(?:(?:set )?in[ \t]+)?[A-Z][A-Za-z]+\b(?!-)")]
 IOS_SKILL = re.compile(r"(?<![\w-])ios-apps(?![\w-])", re.I)
 DUO_FOLDED, DUO_UNFOLDED = "iphone-duo-folded", "iphone-duo-unfolded"  # device ids in lint/layout.json
 TOKEN_SECTION = re.compile(r"palett|colou?r|fonts?\b|typograph|typeface|spacing|tokens?\b|brand|theme|style|radius", re.I)
@@ -334,6 +339,8 @@ def brief_faults(text, current=(), template=None, devices=None):
         for kind, pats in COMPILED.items():
             if kind == "token-spacing" and name in SPACING_EXEMPT:
                 continue
+            if kind == "current" and name not in IOS_APP_EXEMPT:
+                pats = pats + [IOS_APP_REF]
             for pat in pats:
                 hit = pat.search(body)
                 if hit:
