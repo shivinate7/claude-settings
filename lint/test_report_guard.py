@@ -854,6 +854,14 @@ NAMED_REPORT = "> **Done** BUILT the guard, PR #5 (%s)\n> **Next** Unstarted: no
 BUILDER_UNKNOWN = {"subagent_type": "builder", "prompt": "Round 1 of 3"}
 BUILDER_SONNET = {"subagent_type": "builder", "model": "sonnet", "prompt": "Round 2 of 3"}
 REVIEWER_HAIKU = {"subagent_type": "reviewer", "model": "haiku", "prompt": "Round 1 of 3"}
+# Reports for the Next waiver: Done is the test-author's OTHER line, and Next names the role still running.
+TEST_AUTHOR_DONE = "OTHER: the test-author wrote 31 cases, red on main, at b5c911b10 (test-author haiku)"
+TEST_AUTHOR_AND_BUILDER_DONE = (
+    "OTHER: the test-author wrote 31 cases, red on main, at b5c911b10 (test-author haiku, builder sonnet)")
+
+
+def waiver_report(next_line, done=TEST_AUTHOR_DONE):
+    return "> **Done**\n> - %s\n>\n> **Next**\n> - %s" % (done, next_line)
 
 
 def prior_records(earlier=()):
@@ -873,6 +881,12 @@ def assert_blocks(case, out, cause):
     case.assertIsNotNone(out, "the guard passed, but it should block with: " + cause)
     case.assertEqual(out.get("decision"), "block", out)
     case.assertIn(cause, out.get("reason", ""), "the block reason lacks: " + cause)
+
+
+def assert_no_model_block(case, out):
+    """The model-name check passed. Other guards may still speak, so only the model reason is checked."""
+    reason = (out or {}).get("reason", "")
+    case.assertNotIn("Model-name guard", reason, "the model-name check blocked: " + reason)
 
 
 def subagent_env(model):
@@ -1067,6 +1081,28 @@ class DoneNamesModelsTests(unittest.TestCase):
                            env_model=None)
         assert_blocks(self, out, "'builder opus' matches no builder spawn")
         self.assertNotIn("ran , ", out["reason"], "the block lists an empty model: " + out["reason"])
+
+    def test_dm_red_next_waives_the_running_builder(self):
+        # The builder runs in the background, so Done has no builder line, and Next names it.
+        out = self.verdict(waiver_report("The builder is running (sonnet). It builds the tree check."),
+                           [BUILDER_SONNET])
+        assert_no_model_block(self, out)
+
+    def test_dm_red_next_waives_the_running_reviewer(self):
+        out = self.verdict(waiver_report("The reviewer (haiku) is reading the diff. It reports next."),
+                           [REVIEWER_HAIKU])
+        self.assertIsNone(out, (out or {}).get("reason"))
+
+    def test_dm_green_unnamed_running_builder_still_blocks(self):
+        # Next names no role, so the builder spawned in the window is unnamed and blocks.
+        out = self.verdict(waiver_report("The tree check is next."), [BUILDER_SONNET])
+        assert_blocks(self, out, "no model named for builder")
+
+    def test_dm_green_next_pair_is_not_judged(self):
+        # Next's "builder opus" is not judged. Done names the sonnet builder that ran.
+        out = self.verdict(waiver_report("The builder opus builds the tree check.",
+                                         done=TEST_AUTHOR_AND_BUILDER_DONE), [BUILDER_SONNET])
+        assert_no_model_block(self, out)
 
 
 class UnstartedItemsTests(unittest.TestCase):
@@ -1374,6 +1410,29 @@ class RewriteAfterMissingReportTests(unittest.TestCase):
                         later=[BUILDER_SONNET], env_model=None)
         assert_blocks(self, out, "'builder opus' matches no builder spawn")
         self.assertNotIn("ran , ", out["reason"], "the block lists an empty model: " + out["reason"])
+
+    def test_rw_red_next_waives_the_running_builder(self):
+        self.missing_report_block(later=[BUILDER_SONNET])
+        out = self.stop(waiver_report("The builder is running (sonnet). It builds the tree check."), True,
+                        later=[BUILDER_SONNET])
+        assert_no_model_block(self, out)
+
+    def test_rw_red_next_waives_the_running_reviewer(self):
+        self.missing_report_block(later=[REVIEWER_HAIKU])
+        out = self.stop(waiver_report("The reviewer (haiku) is reading the diff. It reports next."), True,
+                        later=[REVIEWER_HAIKU])
+        self.assertIsNone(out, (out or {}).get("reason"))
+
+    def test_rw_green_unnamed_running_builder_still_blocks(self):
+        self.missing_report_block(later=[BUILDER_SONNET])
+        out = self.stop(waiver_report("The tree check is next."), True, later=[BUILDER_SONNET])
+        assert_blocks(self, out, "no model named for builder")
+
+    def test_rw_green_next_pair_is_not_judged(self):
+        self.missing_report_block(later=[BUILDER_SONNET])
+        out = self.stop(waiver_report("The builder opus builds the tree check.",
+                                      done=TEST_AUTHOR_AND_BUILDER_DONE), True, later=[BUILDER_SONNET])
+        assert_no_model_block(self, out)
 
 
 REPORT_NO_LINE = "> **Done** BUILT abc123\n> **Deviations** none\n> **Next** ship it"
