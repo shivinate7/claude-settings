@@ -3224,6 +3224,10 @@ sh("heredoc-indented-close: under <<-, a space-indented EOF does not close the b
    "cat <<-EOF\n  EOF\n" + VCS + " reset --hard origin/main\nEOF", "allow", cwd=NOGIT)
 sh("heredoc-indented-close: a lone apostrophe in the body, then an indented EOF, does not close the body",
    "cat <<EOF\ndon't\n  EOF\n" + VCS + " reset --hard origin/main\nEOF", "allow", cwd=NOGIT)
+sh("heredoc-indented-close: a comment opener in a quoted body line, then an indented EOF, does not close the body",
+   "cat <<EOF\necho \"# note\"\n  EOF\n" + VCS + " reset --hard origin/main\nEOF", "allow", cwd=NOGIT)
+sh("heredoc-indented-close: a quote that spans body lines, with an indented EOF inside it, does not close the body",
+   "cat <<EOF\necho \"first\n  EOF\nsecond\"\n" + VCS + " reset --hard origin/main\nEOF", "allow", cwd=NOGIT)
 # Controls: a tab-indented EOF under <<- does close, so the reset after it is a command, and an exact
 # EOF closes a body whose indented twin came before it.
 sh("heredoc-indented-close: under <<-, a tab-indented EOF closes the body, so a reset after it is refused",
