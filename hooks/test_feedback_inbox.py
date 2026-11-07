@@ -164,10 +164,13 @@ Guard: hooks/feedback_guard.py (env FEEDBACK_GUARD_UNDER_TEST overrides the path
     n (the Pages proof). Its item lines do not stand in for the send. Prose that merely holds a number
     passes, and so does a pick in a repo with no waiting page, and "1 y, 2 n", whose letters are no pick.
   - Grants (F47, F31). An owner block whose text holds a grant word (approval, approve, approved, grant,
-    granted, permission to, permissions to, authorize, authorized, authorised, go ahead, go-ahead, ok to merge,
-    you can merge, fine to merge, merge away; whole words, any case) and, in the same message outside any fence, an act or scope word (merge, push, delete,
+    granted, permission to, permissions to, authorize, authorized, authorised, go ahead, go-ahead; whole
+    words, any case), or a merge-form phrase (ok to merge, you can merge, fine to merge, merge away). A
+    merge-form phrase counts only in a sentence with no "?", not opening "is it" or "is this", and with no
+    "not", "never" or "n't" just before it (at most one word between). Sentences end at . ! ? or a newline.
+    The grant also needs, in the same message outside any fence, an act or scope word (merge, push, delete,
     deploy, release, publish, always, standing, from now on, and all, any or every before repo, repos, PR,
-    PRs, branch or branches) blocks unless
+    PRs, branch or branches), and blocks unless
     the block has a `[ruling]` item whose home passes, a `[page] -> page:<n>` item with its send, or a
     `[note] -> not-a-grant` item. A grant's `[ruling]` item may also name settings.json or .claude/CLAUDE.md
     at the repo root, each tracked; a plain ruling there still blocks. Bare "permission" is no grant word,
@@ -2184,16 +2187,20 @@ def case_grant_act_words_narrowed_passes():
                       homed(new_cfg(), "narrowed", (), text=text))
 
 
-# A grant with no grant word. Note grant-no-word-miss (a grant with no grant word): each row names an act and
-# grants it, and no word in the grant list is in it, so no check flags it today.
+# A grant with no grant word: each row names an act and grants it with a merge-form phrase. Each row with a
+# question in it still grants: the question sits in another sentence or another line, so the grant sentence
+# has no "?".
 WORDLESS_GRANTS = ("ok to merge the lane PRs once CI is green.", "you can merge anything green.",
-                   "fine to merge the green ones.", "merge away once CI is green.")
+                   "fine to merge the green ones.", "merge away once CI is green.",
+                   "Is CI done? ok to merge once green.", "ok to merge the lane\nAnything else?",
+                   "merge away. Is CI done?")
 # Owner messages with "ok", "can" or "merge" that grant nothing. A widened grant list must pass each one.
 NOT_GRANTS = ("Ok, I'll look at the merge conflict after lunch.", "Is the merge queue still stuck? Ok to wait.",
               "I can merge it myself later if you're busy.", "Ok, so the merge is still blocked by the red check.",
               "The checks went green, but the merge is still blocked on review.",
               "is it ok to merge main into the lane?", "Is it ok to merge the lane PRs?", "ok to merge?",
-              "you can merge main into the lane, right?", "I'm not ok to merge this yet")
+              "you can merge main into the lane, right?", "I'm not ok to merge this yet",
+              "is it ok to merge the lane PRs", "ok to merge, anything else?")
 
 
 def case_grant_without_a_grant_word_blocks():
@@ -2211,8 +2218,8 @@ def case_grant_without_a_grant_word_blocks():
 def case_grant_wordless_non_grants_pass():
     """Scope first: "approved, merge it" and "go ahead and merge" still block, so the silence below means "not a
     grant", not a guard that never read the block. Then each NOT_GRANTS row, with "ok", "can" or "merge" and no
-    grant, passes with no item. The question and negation rows flag on 7c730d862, the widened list, and stay red
-    until the list tells them apart from a grant."""
+    grant, passes with no item. A question or a negation in the sentence with a merge-form phrase makes it no
+    grant, so those rows pass."""
     for text in ("approved, merge it", "go ahead and merge"):
         p = homed(new_cfg(), "grant-control", (), text=text)
         expect_grant_block("grant home: %r still blocks with no item" % text, p, text)
