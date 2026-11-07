@@ -227,10 +227,12 @@ class RaisingOrHangingSweepFailsOpen(unittest.TestCase):
         """))
 
         cls.hanging_sweep = os.path.join(ROOT, "fake_sweep_hangs.py")
+        cls.hanging_started = os.path.join(ROOT, "fake_sweep_hangs.started")
         write(cls.hanging_sweep, textwrap.dedent("""\
             import time
+            open(%r, "w").close()  # the start marker: the hook really ran this sweep
             time.sleep(600)
-        """))
+        """) % cls.hanging_started)
 
     def test_raising_sweep_still_exits_0(self):
         result = run_hook(
@@ -240,17 +242,20 @@ class RaisingOrHangingSweepFailsOpen(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_hanging_sweep_still_exits_0_and_does_not_wait_out_the_hang(self):
-        # the fake sweep sleeps 600s; the hook's own internal timeout (set to 1s above) must cut it
-        # off. If it does not, run_capped's hang guard (20s) ends the hook first, and that is the
-        # named failure below.
+        # the fake sweep writes its start marker, then sleeps 600s. The fuse (3s, the hook's own sweep
+        # timeout) must cut it off. A fuse under MIN_USEFUL_SWEEP_SECONDS (2s) makes the hook skip the
+        # sweep, so the case would pass without ever testing the hang. If the hang is not cut off,
+        # run_capped's hang guard (20s) ends the hook first: that is the named failure below.
         try:
             result = run_hook(
                 {"hook_event_name": "SessionEnd", "cwd": self.repo},
-                env_extra={"JANITOR_SWEEP_PATH": self.hanging_sweep, "JANITOR_SWEEP_TIMEOUT": "1"},
+                env_extra={"JANITOR_SWEEP_PATH": self.hanging_sweep, "JANITOR_SWEEP_TIMEOUT": "3"},
                 timeout=20,
             )
         except AssertionError as hang:
             self.fail("hook did not honor its own sweep timeout: %s" % hang)
+        self.assertTrue(os.path.exists(self.hanging_started),
+                        "the hook never started the sweep, so the hang was never tested")
         self.assertEqual(result.returncode, 0, result.stderr)
 
 
@@ -730,6 +735,9 @@ class SweepIsToldItsTimeLeftAsADeadline(unittest.TestCase):
                 self.assertIsNotNone(value, "the sweep got no --deadline-seconds: %r" % (calls[0],))
                 self.assertAlmostEqual(value, self.mod.remaining_sweep_timeout_seconds(elapsed))
                 # the hook's own subprocess timeout is the time left too: it is what cuts a hung sweep off
+                self.assertIsNotNone(self.sweep_timeouts[0],
+                                     "the hook gave the sweep no subprocess timeout (None), "
+                                     "so a hung sweep is never cut off")
                 self.assertAlmostEqual(self.sweep_timeouts[0], self.mod.remaining_sweep_timeout_seconds(elapsed),
                                        msg="the hook's own sweep timeout is not the time left")
 
@@ -843,6 +851,13 @@ class SessionEndFetchThrottle(unittest.TestCase):
     def session_end(self, cwd):
         self.hook.handle({"hook_event_name": "SessionEnd", "cwd": cwd}, elapsed_seconds=0.0)
 
+    def pinned_clock(self):
+        """The sweep's wall clock, pinned to PINNED_WALL_CLOCK. A fixture stamped from that value and the
+        sweep that judges it read one instant, so a stall between the stamp and the judge cannot flip it."""
+        pinned = mock.MagicMock(wraps=time)
+        pinned.time.return_value = self.PINNED_WALL_CLOCK
+        return mock.patch.object(self.sweep, "time", pinned)
+
     def counts(self, repo):
         where = os.path.normcase(os.path.realpath(repo))
         mine = [kind for kind, path in self.calls if path == where]
@@ -866,9 +881,7 @@ class SessionEndFetchThrottle(unittest.TestCase):
     def test_first_session_end_fetches_and_records_the_time(self):
         repo = self.repo("throttle_first")
         # the sweep reads a pinned wall clock, so the record is checked against that value and not the real time
-        pinned = mock.MagicMock(wraps=time)
-        pinned.time.return_value = self.PINNED_WALL_CLOCK
-        with mock.patch.object(self.sweep, "time", pinned):
+        with self.pinned_clock():
             self.session_end(repo)
         fetches, listings = self.counts(repo)
         self.assertEqual(fetches, 1, "the first SessionEnd must fetch once")
@@ -888,27 +901,30 @@ class SessionEndFetchThrottle(unittest.TestCase):
 
     def test_a_record_just_inside_the_window_still_throttles(self):
         repo = self.repo("throttle_inside")
-        self.session_end(repo)
-        first = self.counts(repo)
-        self.set_records(repr(time.time() - (FETCH_THROTTLE_SECONDS - 60)))
-        self.session_end(repo)
+        with self.pinned_clock():
+            self.session_end(repo)
+            first = self.counts(repo)
+            self.set_records(repr(self.PINNED_WALL_CLOCK - (FETCH_THROTTLE_SECONDS - 60)))
+            self.session_end(repo)
         self.assertEqual(self.counts(repo), first)
 
     def test_after_10_minutes_it_fetches_again(self):
         repo = self.repo("throttle_after")
-        self.session_end(repo)
-        self.set_records(repr(time.time() - (FETCH_THROTTLE_SECONDS + 60)))
-        self.session_end(repo)
+        with self.pinned_clock():
+            self.session_end(repo)
+            self.set_records(repr(self.PINNED_WALL_CLOCK - (FETCH_THROTTLE_SECONDS + 60)))
+            self.session_end(repo)
         fetches, listings = self.counts(repo)
         self.assertEqual(fetches, 2, "a record older than 10 minutes must allow a new fetch")
         self.assertGreaterEqual(listings, 2)
 
     def test_the_fetch_after_the_window_renews_the_record(self):
         repo = self.repo("throttle_renew")
-        self.session_end(repo)
-        self.set_records(repr(time.time() - (FETCH_THROTTLE_SECONDS + 60)))
-        self.session_end(repo)
-        self.session_end(repo)
+        with self.pinned_clock():
+            self.session_end(repo)
+            self.set_records(repr(self.PINNED_WALL_CLOCK - (FETCH_THROTTLE_SECONDS + 60)))
+            self.session_end(repo)
+            self.session_end(repo)
         self.assertEqual(self.counts(repo)[0], 2, "the renewed record must throttle the third call")
 
     def test_two_repositories_each_get_their_own_fetch(self):
