@@ -11,11 +11,14 @@ Output names pinned (the `scope` job re-exports them as job outputs):
   STEP_FLAGS code, guard, sweep, mods, shoot (the suite flags; shoot turns on the whole checks-shoot job)
   GUARD_SPLIT guard_windows_full, guard_windows_slice (the Windows guard split; GuardWindowsSplit pins them)
   MERGE_SPLIT merge_windows_full, merge_windows_slice (the Windows merge split; MergeWindowsSplit pins them)
+  LIST_SPLIT guard_windows_shards, merge_windows_shards (the JSON leg lists each sharded suite's matrix reads;
+             WindowsShardLists pins them, and lint/test_windows_split.py holds the rule they must meet)
 
 Run with:  python3 lint/test_ci_scope.py -v
 """
 import ast
 import functools
+import json
 import os
 import posixpath
 import shutil
@@ -30,6 +33,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py)
 import _test_temp  # noqa: E402  test-temp-standard: every temp path comes from this run's folder (lint/_test_temp.py)
+import test_windows_split as windows_split  # noqa: E402  the one home of the shard list rule and the expected lists
 RUN_FOLDER = _test_temp.run_folder()
 SCRIPT = os.environ.get("CI_SCOPE") or os.path.join(HERE, "..", ".github", "scripts", "ci-scope.sh")
 REPO = os.path.abspath(os.path.join(HERE, ".."))
@@ -46,16 +50,21 @@ ALL = JOB_FLAGS + STEP_FLAGS
 GUARD_FULL = "guard_windows_full"
 GUARD_SLICE = "guard_windows_slice"
 GUARD_SPLIT = (GUARD_FULL, GUARD_SLICE)
-# The Windows merge split, the same shape: the full shards (checks-windows-merge's shard 1 and -2..-5) and the slice.
+# The Windows merge split, the same shape: the full shards (the matrix legs of checks-windows-merge) and the slice.
 MERGE_FULL = "merge_windows_full"
 MERGE_SLICE = "merge_windows_slice"
 MERGE_SPLIT = (MERGE_FULL, MERGE_SLICE)
+# The leg lists each sharded suite's matrix reads: ci-scope.sh writes them, and their names are one home in test_windows_split.py.
+GUARD_LIST = windows_split.MATRIX_OUT[windows_split.GUARD_JOB]
+MERGE_LIST = windows_split.MATRIX_OUT[windows_split.MERGE_JOB]
+LIST_SPLIT = (GUARD_LIST, MERGE_LIST)
+GUARD_LEGS, MERGE_LEGS, SLICE_ONLY = windows_split.GUARD_LEGS, windows_split.MERGE_LEGS, windows_split.SLICE_ONLY
 BASH = shutil.which("bash")
 
 
 def pre_split(got):
-    """The outputs the script wrote before the two splits: every output but GUARD_SPLIT and MERGE_SPLIT."""
-    return {n: v for n, v in got.items() if n not in GUARD_SPLIT + MERGE_SPLIT}
+    """The outputs the script wrote before the splits: every output but GUARD_SPLIT, MERGE_SPLIT and LIST_SPLIT."""
+    return {n: v for n, v in got.items() if n not in GUARD_SPLIT + MERGE_SPLIT + LIST_SPLIT}
 
 
 def family_files():
@@ -481,9 +490,9 @@ def run(paths, event="pull_request", base="auto", existing=(), landed=None, head
                    BASE_SHA=sha if base == "auto" else base)
         r = subprocess.run([BASH, os.path.abspath(SCRIPT)], cwd=d, env=env, capture_output=True, text=True)
         assert r.returncode == 0, r.stdout + r.stderr
-        lines = open(out).read().split()
+        lines = open(out).read().splitlines()  # one name=value line per output; a value may hold spaces (a JSON list)
         os.remove(out)
-        return dict(l.split("=", 1) for l in lines)
+        return dict(l.split("=", 1) for l in lines if l)
 
 
 @unittest.skipUnless(BASH, "bash not on PATH")
@@ -852,7 +861,7 @@ class Scope(unittest.TestCase):
 @unittest.skipUnless(BASH, "bash not on PATH")
 class GuardWindowsSplit(unittest.TestCase):
     """The Windows guard suite on a pull_request. guard_windows_full turns on the full shards (checks-windows-guard's shard 1
-    and checks-windows-guard-2). guard_windows_slice turns on the slice, which is guard on and full off, so the two never run
+    and its other legs). guard_windows_slice turns on the slice, which is guard on and full off, so the two never run
     together. Push, schedule, dispatch and the fail-safe paths turn full on and slice off."""
 
     def test_a_guard_family_pr_turns_the_full_windows_guard_on(self):
@@ -1165,7 +1174,7 @@ class GuardClosure(unittest.TestCase):
 @unittest.skipUnless(BASH, "bash not on PATH")
 class MergeWindowsSplit(unittest.TestCase):
     """The Windows merge suite on a pull_request. merge_windows_full turns on the full shards (checks-windows-merge's shard 1 and
-    checks-windows-merge-2 to -5). merge_windows_slice turns on the slice: checks_windows_merge on and full off, so the two never
+    and its other legs). merge_windows_slice turns on the slice: checks_windows_merge on and full off, so the two never
     run together. Push, schedule, dispatch and the fail-safe paths turn full on and slice off."""
 
     def test_a_merge_suite_file_outside_the_closure_runs_the_slice_and_not_the_full_shards(self):
@@ -1284,6 +1293,77 @@ class MutationReport(unittest.TestCase):
         self.assertEqual(batch["mutation_report"], "true", f"a pull request from batch-11: {batch}")
         push = run(["README.md"], event="push")
         self.assertEqual(push["mutation_report"], "true", f"a push: {push}")
+
+
+@unittest.skipUnless(BASH, "bash not on PATH")
+class WindowsShardLists(unittest.TestCase):
+    """The leg list each sharded suite's matrix reads (LIST_SPLIT). ci-scope.sh writes it as a JSON list. A full run lists the
+    suite's full legs (GUARD_LEGS, MERGE_LEGS: shards 1 to n, each once), and a run where the suite's job is on but its full flag
+    is off, or its job is off on a pull_request, lists the slice alone (SLICE_ONLY). Each list must pass shard_list_problems,
+    and the shard count lives in ci-scope.sh only: every full run writes the same list."""
+
+    def legs(self, got, name):
+        """The JSON list `name` holds in one run. The output must exist first, so a missing one names the cause."""
+        self.assertIn(name, got, f"ci-scope.sh writes no {name} output: the suite's matrix has no legs")
+        try:
+            values = json.loads(got[name])
+        except ValueError:
+            self.fail(f"{name} is not JSON: {got[name]!r}")
+        self.assertIsInstance(values, list, f"{name} is not a JSON list: {got[name]!r}")
+        return values
+
+    def assert_legs(self, got, name, want, label):
+        """`name` in one run is `want`, and it passes shard_list_problems (non-empty, covers 1 to n once each)."""
+        values = self.legs(got, name)
+        self.assertEqual(windows_split.shard_list_problems(values), [], f"{label}: {name} = {values}")
+        self.assertEqual(values, want, f"{label}: {name} is {values}, want {want}")
+
+    def test_a_guard_family_pr_lists_the_full_guard_shards(self):
+        for p in ["hooks/guard.py", "hooks/test_guard.py", "settings.json"] + family_files():
+            with self.subTest(path=p):
+                self.assert_legs(run([p]), GUARD_LIST, GUARD_LEGS, p)
+
+    def test_a_non_family_guard_hook_pr_lists_the_slice_alone(self):
+        self.assert_legs(run(["hooks/daily_note.py"]), GUARD_LIST, SLICE_ONLY, "hooks/daily_note.py")
+
+    def test_a_merge_closure_pr_lists_the_full_merge_shards(self):
+        self.assert_legs(run(["merge/merge.py"]), MERGE_LIST, MERGE_LEGS, "merge/merge.py")
+
+    def test_a_merge_file_outside_the_closure_lists_the_slice_alone(self):
+        # merge/test_launch.py is not shard-bound: the job runs it whole, on the slice leg.
+        self.assert_legs(run(["merge/test_launch.py"]), MERGE_LIST, SLICE_ONLY, "merge/test_launch.py")
+
+    def test_a_docs_only_pr_lists_the_slice_alone_for_both_suites(self):
+        got = run(["README.md", "docs/x.md"])
+        self.assert_legs(got, GUARD_LIST, SLICE_ONLY, "docs-only, guard")
+        self.assert_legs(got, MERGE_LIST, SLICE_ONLY, "docs-only, merge")
+
+    def test_a_full_size_guard_pr_lists_the_full_guard_shards_once(self):
+        # Every guard file in one pull_request: the list is the full legs once, not one copy per path.
+        self.assert_legs(run(["hooks/guard.py", "hooks/test_guard.py", "settings.json"] + family_files()),
+                         GUARD_LIST, GUARD_LEGS, "full-size guard pr")
+
+    def test_push_schedule_dispatch_and_an_unreadable_diff_list_the_full_shards(self):
+        runs = [(f"event {ev}", run(["README.md"], event=ev)) for ev in ("push", "schedule", "workflow_dispatch")]
+        runs.append(("an unreadable diff", run(["hooks/guard.py"], base="0" * 40)))
+        for label, got in runs:
+            with self.subTest(case=label):
+                self.assert_legs(got, GUARD_LIST, GUARD_LEGS, label)
+                self.assert_legs(got, MERGE_LIST, MERGE_LEGS, label)
+
+    def test_a_fail_safe_path_lists_the_full_shards(self):
+        for p in (".github/scripts/ci-scope.sh", ".github/workflows/checks.yml", ".gitattributes", "zz-unmapped/blob.bin"):
+            with self.subTest(path=p):
+                got = run([p])
+                self.assert_legs(got, GUARD_LIST, GUARD_LEGS, p)
+                self.assert_legs(got, MERGE_LIST, MERGE_LEGS, p)
+
+    def test_the_full_list_is_the_same_on_every_full_run(self):
+        # One home for the count: a full run on a push, a schedule, an unreadable diff or a fail-safe path writes the same list.
+        full = [run(["hooks/guard.py"], event="push"), run(["hooks/guard.py"], base="0" * 40), run([".gitattributes"])]
+        for got in full:
+            self.assertEqual(self.legs(got, GUARD_LIST), GUARD_LEGS, f"a full run lists {GUARD_LIST} other than GUARD_LEGS")
+            self.assertEqual(self.legs(got, MERGE_LIST), MERGE_LEGS, f"a full run lists {MERGE_LIST} other than MERGE_LEGS")
 
 
 if __name__ == "__main__":
