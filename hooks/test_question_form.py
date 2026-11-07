@@ -518,6 +518,12 @@ PAGE_BUTTON_OR_PAST_ACT = [
     "The session merges it after he has merged the base PR.",
     "The session merges it after the owner approved the plan.",
 ]
+# A Claude clause that names a press not yet made, as a noun or behind a possessive ("after your click", "after the
+# owner's click"), hands the press to the owner, so it is refused: the option needs a link.
+CLAUDE_NAMES_OWNER_PRESS = [
+    "Claude merges them after your click on Merge.",
+    "Claude merges them after the owner's click on Merge.",
+]
 
 
 def case_session_press_needs_no_link():
@@ -561,6 +567,11 @@ def case_session_press_needs_no_link():
         page("a session clause that hides an owner press, %r, with no link, is refused as press-link" % how, "set",
              entry_of(page_item(options=[dict(session, how=how), keep])), ("press-link", None))
         chat("a session clause that hides an owner press, %r, with no url, is refused as press-link" % how,
+             chat_box(options=[chat_of(dict(session, how=how)), chat_of(keep)]), ("press-link", None))
+    for how in CLAUDE_NAMES_OWNER_PRESS:
+        page("a Claude clause that names an owner press, %r, with no link, is refused as press-link" % how, "set",
+             entry_of(page_item(options=[dict(session, how=how), keep])), ("press-link", None))
+        chat("a Claude clause that names an owner press, %r, with no url, is refused as press-link" % how,
              chat_box(options=[chat_of(dict(session, how=how)), chat_of(keep)]), ("press-link", None))
     for how in SESSION_ONLY:
         page("a session clause with no press, %r, with no link, passes" % how, "set",
