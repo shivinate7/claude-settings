@@ -12705,13 +12705,8 @@ JUDGED_LABEL = re.compile(r"^(\S+?):(\d+)[: ]", re.M)  # `<path>:<N>` at a row's
 
 
 def judged_rows(prompt):
-    """(path, line) for each judged line of a judge prompt, in order. A row labelled `<path>:<N>` gives its own path. A prompt with no label
-    is one file: its `File:` header names the path, and its `Line N:` rows number the lines."""
-    labelled = JUDGED_LABEL.findall(prompt)
-    if labelled:
-        return [(path, int(number)) for path, number in labelled]
-    header = re.search(r"^File: (.+)$", prompt, re.M)
-    return [(header.group(1) if header else None, int(number)) for number in re.findall(r"^Line (\d+): ", prompt, re.M)]
+    """(path, line) for each judged line of a judge prompt, in order. Each row is labelled `<path>:<N>` at its start."""
+    return [(path, int(number)) for path, number in JUDGED_LABEL.findall(prompt)]
 
 
 def tags_in(prompt):
