@@ -38,11 +38,12 @@ const PAGES = {
 // (body.ready) and carries another, so the PNG and the .html can each tell the two apart.
 const LOOK = `body{margin:0;background:#fff;color:#111;font:48px sans-serif}body.ready{background:#000;color:#eee}`;
 Object.assign(PAGES, {
-  // load fires while the page says Connecting...; a timer swaps in the real content two seconds later,
-  // long enough that a slow runner still shoots the loading screen when no step waits.
+  // load fires while the page says Connecting...; a timer swaps in the real content two seconds later, for the wait step to see.
   "/connecting.html": `<!doctype html><style>${LOOK}</style><p id="status">Connecting...</p><main id="app"></main>
     <script>addEventListener("load", () => setTimeout(() => { document.body.className = "ready"; document.getElementById("status").remove();
       document.getElementById("app").innerHTML = "<h1 id='ready'>Fleet dashboard: 42 units online</h1>"; }, 2000));</script>`,
+  // The content never arrives. With no steps the shot is taken at load, so it holds this loading screen at any runner speed.
+  "/connecting-stuck.html": `<!doctype html><style>${LOOK}</style><p id="status">Connecting...</p><main id="app"></main>`,
   // The loading element is hidden, not removed, when the content arrives.
   "/spinner.html": `<!doctype html><style>${LOOK}</style><div id="spinner">Spinner turning</div><main id="app"></main>
     <script>setTimeout(() => { document.getElementById("spinner").style.display = "none"; document.body.className = "ready";
@@ -312,9 +313,9 @@ test("test-temp-standard: the run folder sweeps old sibling run folders and keep
   assert.ok(fs.existsSync(other), "a folder that is not named as a run folder was swept");
 });
 
-test("no steps: the shot holds the loading screen (the fixture's race is real)", async (t) => {
+test("no steps: the shot holds the loading screen, whatever the runner's speed", async (t) => {
   if (!(await chromium(t))) return;
-  const r = await run({ routes: [{ name: "connecting", path: "/connecting.html" }], ...ONE });
+  const r = await run({ routes: [{ name: "connecting", path: "/connecting-stuck.html" }], ...ONE });
   assert.equal(r.code, 0, r.out);
   assert.match(html(r, "connecting-820-light"), /Connecting\.\.\./);
 });
