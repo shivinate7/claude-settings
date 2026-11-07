@@ -522,7 +522,7 @@ def records_page_hit(stripped: str, cwd: str) -> str:
 # A push is judged on the commits it would send, which are real when the hook runs. For each ref it
 # names, the range runs from the merge base with the remote-tracking tip of the destination, else the
 # source's upstream, else the default base, up to the local source ref (HEAD for a bare push, and for a
-# source that does not resolve). It is read with `git diff --check` and the line kinds come from the
+# source that does not resolve). The range is one three-dot `git diff --check`, and the line kinds come from the
 # source ref's blob, so it judges the net change sent. Only the "leftover conflict marker" findings
 # count, never the exit code, so trailing whitespace passes.
 # A file is a hit when its findings hold all three kinds: a start, a lone mid and an end marker line.
@@ -532,8 +532,11 @@ def records_page_hit(stripped: str, cwd: str) -> str:
 # a failed read, no HEAD, no resolvable range, `--all`, `--mirror` and a deletion push are no hit; an
 # unmerged index judged alone (git refuses that commit itself) is no hit.
 # Cost: per commit, one `git diff --check` (plus one read per file with a finding, and one `git ls-files`
-# and up to _UNTRACKED_CAP `git diff --no-index` reads when an add reaches untracked files); per push, up
-# to four ref reads and one `git diff --check`. Nothing is read when the command holds neither.
+# and up to _UNTRACKED_CAP `git diff --no-index` reads when an add reaches untracked files); per push,
+# one `git diff --check` over `<tracking>...<source>`, built from the arguments with no spawn first (and
+# one read per file with a finding). Only when the remote-tracking ref is missing does it cost more:
+# a call per base tried (upstream, then default base), one `git rev-parse` of the source after the
+# first rejection, and the default base's own reads once. Nothing is read when the command holds neither.
 CONFLICT_MARKERS_REASON = (
     "Rule (Git, conflict-markers; decision commit-refuses-conflict-markers): this commit would hold conflict markers in {file}. "
     "Remedy: resolve the markers in that file, re-stage it, then retry."
@@ -555,13 +558,21 @@ _CONFLICT_FINDING = re.compile(r"^(.+):(\d+): leftover conflict marker\s*$")
 _MARKER_KINDS = {"<": "start", "=": "mid", ">": "end"}
 
 
+def _diff_check(where, diff_args):
+    """The finished `git diff --check` over `diff_args`, or None when git did not run."""
+    return _git(where, "-c", "core.quotepath=off", "diff", "--no-ext-diff", "--no-color", "--check", *diff_args)
+
+
 def _marker_findings(where, top, diff_args, source):
-    """Return {file: set of marker kinds} for the leftover conflict markers `git diff --check` reports.
+    """Return {file: set of marker kinds} for the leftover conflict markers `git diff --check` reports."""
+    done = _diff_check(where, diff_args)
+    return {} if done is None else _kinds_of(done, top, source)
+
+
+def _kinds_of(done, top, source):
+    """{file: set of marker kinds} for the leftover conflict markers in a finished `git diff --check`.
     A line's kind is read from the new side of the file: `source` None is the working-tree file, ''
-    the index blob, and a revision that revision's blob."""
-    done = _git(where, "-c", "core.quotepath=off", "diff", "--no-ext-diff", "--no-color", "--check", *diff_args)
-    if done is None:
-        return {}
+    the index blob, and a revision that revision's blob. Only a file with a finding costs a read."""
     wanted = {}
     for row in done.stdout.splitlines():
         found = _CONFLICT_FINDING.match(row)
@@ -596,6 +607,15 @@ def _triplet_file(found):
     return next((name for name, seen in found.items() if len(seen) == len(_MARKER_KINDS)), "")
 
 
+_UNPLAIN_REV = re.compile(r"[\s$`*?\[\\;()<>|&\"']|\.\.|^-")
+
+
+def _plain_source(source):
+    """The local ref a push refspec sends, as a revision git reads literally: HEAD for an empty or `@`
+    source, and for one with a substitution, a glob, an option dash or a range in it."""
+    return "HEAD" if source in ("", "@") or _UNPLAIN_REV.search(source) else source
+
+
 def _ref_sha(top, ref):
     """The commit a revision names, or '' when it names none."""
     if ref.startswith("-"):
@@ -604,47 +624,58 @@ def _ref_sha(top, ref):
     return done.stdout.strip() if done is not None and done.returncode == 0 else ""
 
 
+def _checked_range(where, source, tracking, memo):
+    """(finished `git diff --check <base>...<source>`, source) for the first base that git accepts, else
+    (None, source). The three dots make git find the merge base itself, so no ref is read first. The
+    bases are the destination's remote-tracking ref, the source's upstream, then the default base (read
+    once per push, in `memo`). Only a rejected base costs more. After the first rejection the source is
+    read once: one that does not resolve is read as HEAD, and the same base is tried again.
+    `--check` exits 2 on a finding."""
+    verified = source == "HEAD"
+    step = 0
+    while step < 3:
+        if step == 2 and "default" not in memo:
+            memo["default"] = resolve_default_base(where) or ""
+        base = (tracking, source + "@{upstream}", memo.get("default"))[step]
+        if base:
+            done = _diff_check(where, [base + "..." + source, "--"])
+            if done is None:
+                return None, source
+            if done.returncode in (0, 2):
+                return done, source
+            if not verified:
+                verified = True
+                if not _ref_sha(where, source):
+                    source = "HEAD"
+                    continue
+        step += 1
+    return None, source
+
+
 def _push_hit(segment, stripped, cwd, args):
     """Return the first file a `git push` would send with all three conflict markers, else ''. For each
-    ref the push names, the range is the merge base with the destination's remote-tracking tip, else the
-    source's upstream, else the default base, up to the local source ref. A source that does not resolve
-    (a `$(...)`, a backtick, a glob, a typo) is read as HEAD."""
+    ref the push names, the range is the merge base with the destination's remote-tracking tip
+    (`refs/remotes/<remote>/<dest>`, the named remote else origin), else the source's upstream, else the
+    default base, up to the local source ref. A source that does not resolve (a `$(...)`, a backtick, a
+    glob, a typo) is read as HEAD. The range comes from the arguments alone: in the usual case one
+    `git diff --check`, with no read of the top folder, the source or a base first."""
     named = push_refspecs(args)
     where, overrides = push_target(segment, stripped, cwd)
     if named is None or not where or not os.path.isdir(where):
         return ""
-    done = _git(where, "rev-parse", "--show-toplevel")
-    if done is None or done.returncode != 0 or not done.stdout.strip():
-        return ""
-    top = os.path.normpath(done.stdout.strip())
     specs = named[1] or [""]
     dests = push_destinations(args, where, overrides)
+    memo = {}
     for spec, dest in zip(specs, dests):
         source, colon, _target = spec.lstrip("+").partition(":")
         if colon and not source:
             continue
-        source = "HEAD" if source in ("", "@") else source
-        tip = _ref_sha(top, source)
-        if not tip:
-            source = "HEAD"
-            tip = _ref_sha(top, source)
-        if not tip:
+        source = _plain_source(source)
+        tracking = ("refs/remotes/%s/%s" % (named[0] or "origin", dest)) if dest else ""
+        done, source = _checked_range(where, source, tracking, memo)
+        if done is None:
             continue
-        remote = named[0]
-        if not remote:
-            current = _git(top, "symbolic-ref", "-q", "--short", "HEAD")
-            configured = _git(top, "config", "--get", "branch." + (current.stdout.strip() if current else "") + ".remote")
-            remote = configured.stdout.strip() if configured is not None and configured.returncode == 0 else ""
-        base = ""
-        for ref in ((("refs/remotes/%s/%s" % (remote or "origin", dest)) if dest else ""),
-                    source + "@{upstream}", resolve_default_base(top) or ""):
-            base = _ref_sha(top, ref) if ref else ""
-            if base:
-                break
-        merged = _git(top, "merge-base", base, tip) if base else None
-        if merged is None or merged.returncode != 0 or not merged.stdout.strip():
-            continue
-        name = _triplet_file(_marker_findings(top, top, [merged.stdout.strip(), tip], tip))
+        name = _triplet_file(_kinds_of(done, where, source))
         if name:
             return name
     return ""

@@ -189,12 +189,20 @@ def _push_dest(spec: str, bare: bool, cwd: str, overrides=None):
     return target
 
 
+_DESTINATIONS = {}   # (args, cwd, overrides) -> destinations, for the life of one hook process
+
+
 def push_destinations(args, cwd: str, overrides=None):
     """The branch names a `git push` with these arguments writes, `refs/heads/` cut off, a deletion
-    included. None stands for a destination it cannot resolve."""
-    plain = _push_parse(args)[-1]
-    found = [_push_dest(spec, not plain, cwd, overrides) for spec in plain or [""]]
-    return [t.removeprefix("refs/heads/") if t else t for t in found]
+    included. None stands for a destination it cannot resolve. One hook call is one process and reads
+    each push's destinations once, so the record-branch check and the conflict-markers check share the
+    reads (`git symbolic-ref`, `git config`) a HEAD or bare push needs."""
+    key = (tuple(args), cwd, tuple(sorted((overrides or {}).items())))
+    if key not in _DESTINATIONS:
+        plain = _push_parse(args)[-1]
+        found = [_push_dest(spec, not plain, cwd, overrides) for spec in plain or [""]]
+        _DESTINATIONS[key] = [t.removeprefix("refs/heads/") if t else t for t in found]
+    return _DESTINATIONS[key]
 
 
 def _colon_delete(delete, plain):
