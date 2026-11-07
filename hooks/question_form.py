@@ -448,10 +448,11 @@ def _flat_text(value) -> str:
 # act after it ("as the owner asked", "after Shivam's OK"), a past act ("after he approved it") and a
 # press of the page's own button ("after he hits Send") ask the owner for nothing.
 SESSION_PRESS = re.compile(r"^\s*(?:(?:the|a|this)\s+session|claude)\b", re.I)
-# A session clause that asks someone for something ("Claude asks the owner for a click on Merge") hands the
-# press on, so it is never excused. "as he asked" is a past act and asks for nothing.
-SESSION_ASKS = re.compile(r"\b(?:ask|asks|asking|request|requests|requesting|tell|tells|telling|remind|reminds"
-                          r"|reminding)\b", re.I)
+# A session clause that asks someone for something ("Claude asks the owner for a click on Merge"), or names a
+# press that is not past ("after your click on Merge", "after the owner's press"), hands the press on, so it is
+# never excused. "as he asked" and "after he clicked Approve" are past acts and ask for nothing.
+SESSION_HANDS_ON = re.compile(r"\b(?:ask|asks|asking|request|requests|requesting|tell|tells|telling|remind|reminds"
+                          r"|reminding|click|clicks|clicking|press|presses|pressing|tap|taps|tapping)\b", re.I)
 _CLAUSE_BREAK = re.compile(r",|;|:|\(|\s-\s|(?<=[.!?])\s+|\n|\b(?:then|and|but|so|or)\b", re.I)
 # The clauses left after the excused ones are joined with `;`: PRESS_VERB reads it as a clause start, so
 # "... but you approve it" stays a press, and mark ... ready reads across it, as across the cut break.
@@ -481,7 +482,7 @@ def _owner_press_text(label, how) -> tuple:
     text = label + ". " + how
     clauses = [c for c in _CLAUSE_BREAK.split(how) if c and c.strip()]
     session = [c for c in clauses if SESSION_PRESS.search(c) and not OWNER_YOU.search(c)
-               and not SESSION_ASKS.search(c) and not _owner_acts(c)]
+               and not SESSION_HANDS_ON.search(c) and not _owner_acts(c)]
     if not session:
         return text, text
     done = " ".join(session).lower()
