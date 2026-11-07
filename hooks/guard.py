@@ -1088,11 +1088,11 @@ def _settings_place(path: str, cwd: str) -> bool:
     folder = path[:len(path) - len(name)].rstrip("/\\")
     if not folder or basename(folder) == ".claude":
         return True
-    # The shell expands `$VAR`, `${VAR:-x}`, globs, `` `cmd` `` and the directory-stack shorthands `~+`
-    # and `~-` when the write runs, so the folder is known only then: a folder with such a spelling
-    # is a possible settings place.
+    # The shell expands `$VAR`, `${VAR:-x}`, globs, `` `cmd` `` and the directory-stack shorthands `~+`,
+    # `~-`, `~N`, `~+N` and `~-N` when the write runs, so the folder is known only then: a folder with
+    # such a spelling is a possible settings place.
     if any(ch in folder for ch in "${*?[`") or any(
-            part.startswith(("~+", "~-")) for part in re.split(r"[/\\]", folder)):
+            re.match(r"~[-+0-9]", part) for part in re.split(r"[/\\]", folder)):
         return True
     here = {os.path.normcase(os.path.realpath(guard_core.config_dir()))}
     if cwd:
@@ -2312,13 +2312,15 @@ def builder_diff_reason() -> str:
 
 def veto_override(check, tool: str = "") -> None:
     """Register the check that names the acts no override lifts. A guard_core without the setter has no
-    override either, so every refusal stands and the call is still judged. Any other error from the setter
-    is logged as guard-crash and the call is still judged: a raise here would reach main()'s fail-open
-    path and allow a call the guard refuses."""
+    override either, so every refusal stands; one guard-crash line names the missing setter and the call
+    is still judged. Any error from the setter is logged as guard-crash and the call is still judged: a
+    raise here would reach main()'s fail-open path and allow a call the guard refuses."""
+    setter = getattr(guard_core, "set_override_veto", None)
+    if setter is None:
+        record(tool, "crash", "guard-crash", "guard_core has no set_override_veto: judged without the override veto")
+        return
     try:
-        guard_core.set_override_veto(check)
-    except AttributeError:
-        pass
+        setter(check)
     except Exception as exc:
         record(tool, "crash", "guard-crash", cap_safe(type(exc).__name__ + ": " + str(exc), 200))
 
