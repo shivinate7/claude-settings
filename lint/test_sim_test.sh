@@ -1362,5 +1362,25 @@ release_slot1
 ARGS=(-scheme X)
 end_case "100 a booted Duo whose slot is leased, at 5-minute load 60: B waits in queue with no reuse, refused at the lease wait limit"
 
+# Cases 101 and 102: the time limit of a run (SIM_TEST_MAX_RUN, default 1800 s, unmeasured). A run whose xcodebuild child is
+# still running after the limit stops it, exits 124, and cleans up as a hold does: it shuts down the Duo it booted, gives its
+# lease back and frees the lock. The limit is small here, and the xcodebuild stub hangs longer than it.
+fresh; ARGS=(-scheme X); run SIM_TEST_MAX_RUN=1 STUB_HANG=1 STUB_HANG_SECS=8
+need "the run exits 124 when xcodebuild is still running after SIM_TEST_MAX_RUN" rc_is 124
+need "xcodebuild is stopped, so it never finishes" test ! -e "$work/xc_finished"
+need "the Duo the run booted is shut down" has_call "simctl shutdown $DUO1"
+need "the lease is given back" lease_released
+need "the lock folder is gone" test ! -d "$lockdir"
+ARGS=(-scheme X)
+end_case "101 a run past SIM_TEST_MAX_RUN: xcodebuild is stopped, exit 124, the booted Duo shut down, lease and lock released"
+
+# Control: a run inside its limit is not stopped. Its xcodebuild returns in 2 s, under a 6 s limit.
+fresh; ARGS=(-scheme X); run SIM_TEST_MAX_RUN=6 STUB_HANG=1 STUB_HANG_SECS=2
+need "a run inside its limit exits 0" rc_is 0
+need "xcodebuild finished on its own" test -e "$work/xc_finished"
+need "one xcodebuild call" test "$(grep -c ^xcodebuild "$calls")" -eq 1
+ARGS=(-scheme X)
+end_case "102 a run inside SIM_TEST_MAX_RUN is not stopped: exit 0, xcodebuild finishes"
+
 echo "sim-test suite: $pass_n passed, $fail_n failed${failed:+: $failed}"
 exit $fail
