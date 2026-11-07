@@ -87,8 +87,7 @@ output file is not found is listed as unknown. It prints `{"decision":"block","r
 where T is a head line plus every row. `reason` reaches the model and continues the turn. `systemMessage`
 reaches the user only. Source: note `stall-message-delivery-unproven`, and the Stop decision control in
 the hooks docs (https://code.claude.com/docs/en/hooks.md#stop-decision-control). Headless test on CLI
-2.1.319, 2026-11-07. It repeats at every Stop while a job stays quiet. No dedupe exists yet (open
-debt `stall-message-repeats-every-stop`).
+2.1.319, 2026-11-07.
 
 If the shared names module fails to load, the check prints nothing. A false "still running" alarm is
 worse than a missed stall, and the guard already refuses every call in that state (owner ruling,
@@ -108,7 +107,7 @@ time must be later than the previous Stop. Limit: a job whose output file existe
 is gone now is not listed. With no summary, or a summary with no readable timestamp,
 every quiet job is listed. The state is the transcript: no file is written and no process is started.
 Cost: one more JSON parse per `stop_hook_summary` line (one a Stop run), in the one pass that `scan_jobs`
-already makes, at each Stop.
+already makes, at each Stop. A Stop that lists a stall adds one model turn; its listed jobs share that turn.
 
 The hook exits 0. It blocks a Stop only when it lists a job. A crash prints nothing and blocks nothing,
 as advisory hooks stay fail-open (`guard-hooks-fail-closed`). It reuses the transcript parsing of the PreToolUse path, so that parsing has
