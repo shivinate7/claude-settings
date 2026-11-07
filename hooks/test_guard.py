@@ -462,7 +462,7 @@ GHRUNBLOCK = os.path.join(ROOT, "ghrunblock")    # pull request 2's workflow `ci
 GHRUNNONE = os.path.join(ROOT, "ghrunnone")      # pull request 2's workflow `ci-checks` is queued, and it has no check rows at all
 GHRUNDONE = os.path.join(ROOT, "ghrundone")      # pull request 2's workflow finished, and its required check passed
 GHRUNIGNORED = os.path.join(ROOT, "ghrunignored")  # pull request 2's only running workflow is `sync`, which STAMPIGNORE ignores
-# The draft-pr rule (owner ruling 2026-11-07 13:20 CST, coordinator ruling 2026-11-07 14:12 CST): a fake pull request
+# The draft-pr rule (owner ruling 2026-11-07 13:20 CST, decision cull-rules; coordinator ruling 2026-11-07 14:12 CST): a fake pull request
 # tool per head and label, read by one REST call of the pull request. The two literals stand for
 # shared_names.BATCH_LABEL and shared_names.INTEGRATION_BRANCH_PREFIX, which this base does not have: a test that
 # imports them would crash here, not turn red. A lane's own head is `lane/<slug>` (shared_names.lane_head_refs).
@@ -8921,7 +8921,7 @@ sh("draft-pr: a bash -c wrapper without --draft is refused",
    carries=DRAFT_REMEDY, lacks=DRAFT_LACKS)
 sh("draft-pr: --draft is allowed", "gh pr create --draft --title x", "allow", cwd=NOGIT)
 sh("draft-pr: -d is allowed", "gh pr create -d -t x", "allow", cwd=NOGIT)
-# A ready mark of a lane's pull request asks, in a lane session (owner ruling 2026-11-07 13:20 CST, coordinator ruling
+# A ready mark of a lane's pull request asks, in a lane session (owner ruling 2026-11-07 13:20 CST, decision cull-rules; coordinator ruling
 # 2026-11-07 14:12 CST; debt pr-ready-unguarded). Its cases need the lane session fixtures, so they sit in section 5e-3.
 sh("draft-pr: viewing a pull request is allowed", "gh pr view 12", "allow", cwd=NOGIT)
 sh("draft-pr: listing pull requests is allowed", "gh pr list", "allow", cwd=NOGIT)
@@ -9856,7 +9856,7 @@ trust_allow("an unrelated remote tool (list_sessions) in a lane session allows",
 # Rule draft-pr (decision draft-until-reviewed; debt pr-ready-unguarded). A ready mark of a pull request, `gh pr ready
 # <N>` or the MCP update_pull_request call with draft false, ASKS the owner in a lane session. It is allowed when (1)
 # the pull request carries the batch label, (2) its head ref starts with `batch-` (an older batch branch), or (3) the
-# session carries no cs-build:lane tag. A failed head read asks in a lane session. Owner ruling 2026-11-07 13:20 CST
+# session carries no cs-build:lane tag. A failed head read asks in a lane session. Owner ruling 2026-11-07 13:20 CST (decision cull-rules)
 # and coordinator ruling 2026-11-07 14:12 CST: the batch's integration pull request goes ready, a lane's pull request
 # stays draft.
 #
