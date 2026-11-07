@@ -1795,6 +1795,27 @@ def _build_branch():
         sys.exit("fixture setup failed in build_fixtures: pushing design-same failed. stderr: %s"
                  % same_push.stderr.strip())
     run_vcs(BRANCHREPO, "checkout", "-q", "main")
+    # design-forked is cut from main before main edits untouched.html, a mockup the branch never touches.
+    # The branch's own mockup, forked-own.html, gets the same bytes on main later, so it is identical to
+    # main's. Only the branch's change counts: main's later edit to untouched.html is not the branch's.
+    untouched = design + "/untouched.html"
+    write(os.path.join(BRANCHREPO, *untouched.split("/")), "before the fork\n")
+    run_vcs(BRANCHREPO, "add", untouched)
+    run_vcs(BRANCHREPO, *IDENT, "commit", "-q", "-m", "untouched.html is on main before the fork")
+    forked_own = design + "/forked-own.html"
+    run_vcs(BRANCHREPO, "checkout", "-q", "-b", "design-forked")
+    write(os.path.join(BRANCHREPO, *forked_own.split("/")), "the same bytes on main later\n")
+    run_vcs(BRANCHREPO, "add", forked_own)
+    run_vcs(BRANCHREPO, *IDENT, "commit", "-q", "-m", "design-forked's own mockup")
+    forked_push = run_vcs(BRANCHREPO, "push", "-q", "origin", "design-forked")
+    if forked_push.returncode != 0:
+        sys.exit("fixture setup failed in build_fixtures: pushing design-forked failed. stderr: %s"
+                 % forked_push.stderr.strip())
+    run_vcs(BRANCHREPO, "checkout", "-q", "main")
+    write(os.path.join(BRANCHREPO, *untouched.split("/")), "main edits it after the fork\n")
+    write(os.path.join(BRANCHREPO, *forked_own.split("/")), "the same bytes on main later\n")
+    run_vcs(BRANCHREPO, "add", untouched, forked_own)
+    run_vcs(BRANCHREPO, *IDENT, "commit", "-q", "-m", "main edits untouched.html and adds forked-own.html")
     # unmerged-work is made after main's last move. Then origin/main is an ancestor of it, so a
     # swapped ancestor test reads it as merged and allows the only copy; the rule must still refuse.
     run_vcs(BRANCHREPO, "checkout", "-q", "-b", "unmerged-work")
@@ -1892,6 +1913,23 @@ def _build_branch():
     for name in ("design-modified", "design-same"):
         if not rev(name) or rev(name) != rev("origin/" + name):
             sys.exit("fixture setup failed in build_fixtures: origin/%s is not the tip of %s" % (name, name))
+    # The forked-branch scope: design-forked is not on main, was cut before main's later edit to
+    # untouched.html, never changed that file, and its own mockup holds the bytes main holds.
+    if rev("origin/design-forked") != rev("design-forked"):
+        sys.exit("fixture setup failed in build_fixtures: origin/design-forked is not the tip of design-forked")
+    if run_vcs(BRANCHREPO, "merge-base", "--is-ancestor", "design-forked", "origin/main").returncode == 0:
+        sys.exit("fixture setup failed in build_fixtures: design-forked is an ancestor of origin/main, so "
+                 "main did not move past its fork")
+    fork = run_vcs(BRANCHREPO, "merge-base", "origin/main", "design-forked").stdout.strip()
+    if rev(fork + ":" + untouched) != rev("design-forked:" + untouched):
+        sys.exit("fixture setup failed in build_fixtures: design-forked changed untouched.html, so the "
+                 "branch would not leave it alone")
+    if rev("origin/main:" + untouched) == rev("design-forked:" + untouched):
+        sys.exit("fixture setup failed in build_fixtures: origin/main did not edit untouched.html after "
+                 "the fork, so the two-dot read would see no edit")
+    if listed(fork, forked_own) or rev("design-forked:" + forked_own) != rev("origin/main:" + forked_own):
+        sys.exit("fixture setup failed in build_fixtures: forked-own.html is not a file design-forked adds "
+                 "with main's bytes")
 
     # design-unseen is pushed, then this clone drops its tracking ref and local branch, as a clone
     # that fetched before the push has none. No ref here names it, so no read can list its tip.
@@ -3587,6 +3625,12 @@ sh("push: a --delete of a design branch that modifies a mockup main holds, with 
    carries="archive/", lacks=("design-modified",))
 sh("push: a --delete of a design branch whose mockup is identical to main's allows",
    VCS + " push origin --delete design-same", "allow", cwd=BRANCHREPO)
+# A BRANCH CUT BEFORE MAIN'S LATER EDIT ALLOWS. design-forked was cut from main before main changed
+# untouched.html, a mockup the branch never touched. Its own mockup, forked-own.html, holds main's bytes.
+# The read against main's tip sees main's later edit as a change and would refuse; the branch's own change
+# is judged alone, so it allows.
+sh("push: a --delete of a design branch cut before main edited a mockup it never touched allows",
+   VCS + " push origin --delete design-forked", "allow", cwd=BRANCHREPO)
 # A TAG IS NOT A BRANCH. v1.0 is a local tag and no branch of that name exists, so no tip resolves for
 # it. The design check judges origin's branches only, and a name that is only a tag keeps main's verdict,
 # which allows. Its control is the same no-tip read with no tag of that name: that still asks.
