@@ -1972,8 +1972,8 @@ def builder_shell_test_hit(raw: str, stripped: str, cwd: str) -> str:
 def role_write_hit(role: str, tool_input, target: str, cwd: str, session_id: str = "", payload=None) -> str:
     """The early warning for a write tool call: the target path a role may not change, else ''.
 
-    A test-author may also write its own session scratchpad and any path in no repository
-    (owner ruling 2026-10-13): only product code IN a repository is out of its scope. It may also
+    A test-author may also write its own session scratchpad and any path in no repository:
+    only product code IN a repository is out of its scope. It may also
     write strictly inside its own red-run folder, where it builds its mutants (decision
     test-practices, P3); `payload` names the author, and without it no folder passes."""
     rel = repo_rel(target, cwd)
