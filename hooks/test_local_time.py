@@ -1728,8 +1728,8 @@ def case_opus_scope_not_read_when_the_ask_names_a_role_or_length_is_unclear():
 
 
 # A plain ask that names builders and reviewers only to leave them out grants neither (decision owner-override). Each
-# form uses a word that NEGATIONS does not list: but, other, apart, aside, out, stay (debt
-# opus-ask-exclusion-words). The judge says yes, so the scope read alone decides which roles a grant names.
+# form uses a word that NEGATIONS does not list: but, other, apart, aside, out, stay. The judge says yes, so the scope
+# read alone decides which roles a grant names.
 EXCLUSION_ASKS = (
     "send opus on everything but builders and reviewers",
     "send opus on everything other than builders and reviewers",

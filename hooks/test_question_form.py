@@ -493,8 +493,8 @@ HIDDEN_OWNER_PRESS = [
     "The session merges PR #374 so you hit Merge on GitHub.",
     "The session merges PR #374 but you approve it on GitHub.",
     "The session merges PR #374: you approve it on GitHub.",
-    # A session clause that names no owner as subject of the press: no article, a passive, a possessive click, or a
-    # helper verb before the press. The owner presses in each, so each is refused (debt press-clause-hides-owner-press).
+    # A session clause can hide an owner press when it names no owner as subject: no article, a passive, a possessive
+    # click, or a helper verb before the press. The owner presses in each, so each is refused without a link.
     "The session merges PR #374 after clicking Approve.",
     "The session merges PR #374 after Approve is clicked.",
     "The session merges PR #374 after your Merge click.",
@@ -932,8 +932,8 @@ RESTATES = [
     "Departs from: lint/stamp.py:run_stamp — keeps the lint job",
     "Departs from: lint/stamp.py:run_stamp — STAYS in the lint job",
     "Departs from: lint/stamp.py:run_stamp — already in the lint job",
-    # Restatements with other words: remains, is still, no-op, not changed, and the ask is kept (debt
-    # departs-word-list-limits).
+    # A restatement in other words (remains, is still, no-op, not changed, the ask is kept) names no change, so it is
+    # refused.
     "Departs from: lint/stamp.py:run_stamp — remains as it is",
     "Departs from: lint/stamp.py:run_stamp — is still the same",
     "Departs from: lint/stamp.py:run_stamp — no-op",
@@ -959,7 +959,7 @@ VALID_LINES = [
     "Departs from: lint/stamp.py:run_stamp — nonetheless the stamp moves to the lint job",
     # Comment openers and a lone quote are plain text in the change side.
     "Departs from: lint/stamp.py:run_stamp — don't parse // or /* or # here, the stamp moves",
-    # A leading kept part or a no-change word in a later clause is a change: each passes (departs-word-list-limits).
+    # A change that opens with a kept part, or says no change only in a later clause, is a real change: each passes.
     "Departs from: Suspense cards — keeps Suspense cards and adds Reset",
     "Departs from: the screens — none of the existing screens change; adds a new tab",
     "Departs from: Suspense cards — Suspense cards stay in Suspense and a Reset button is added",
@@ -1362,8 +1362,8 @@ def case_key_overlap_similar_questions_clash():
           bool(fn(KEY_SIMILAR_NOW, [KEY_SIMILAR_EARLIER])), "a similar question with a and b passed")
 
 
-# An inline option key (`Q? a) x b) y`) is a key like one at a line start: a clash names it, in one reply or against
-# the replies since the last human message (debt bold-option-keys-missed). The lone inline pair is a control.
+# An inline option key (`Q? a) x b) y`) counts like one at a line start: a clash names it, in one reply or against
+# the replies since the last human message. The lone inline pair is a control.
 INLINE_SAME_REPLY = "> **Input Needed** Keep the apps? a) keep b) remove\n> b) under 80%"
 INLINE_ALONE = "> **Input Needed** Keep the apps? a) keep b) remove"
 INLINE_LATER = "> **Input Needed** Keep the caps?\n> b) under 80%"

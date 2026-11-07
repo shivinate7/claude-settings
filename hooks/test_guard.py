@@ -5773,7 +5773,7 @@ add("background-end: a server named in a comment line is not run, allowed", "all
     command="# start npm run dev later\necho ready", run_in_background=True)
 # A script part after `:` or `-` names a server only when it is the script's word, not a variant of a build or a test:
 # `build:dev` is a build that ends, `test-watch-ci` a one-shot test, and a flag's value before the verb is no verb:
-# `flask --app run db upgrade` is a migration that ends (debt bg-end-false-alarms). Each passes with no note.
+# `flask --app run db upgrade` is a migration that ends. Each passes with no note.
 add("background-end: npm run build:dev under run_in_background with no note is allowed, a build that ends",
     "allow", cwd=NOGIT, command="npm run build:dev", run_in_background=True)
 add("background-end: npm run test-watch-ci under run_in_background with no note is allowed, a one-shot test",
@@ -7941,7 +7941,7 @@ sh("trim: env: a quoted heredoc body with an apostrophe runs no substitution, al
    "cat <<'EOF'\ndon't\n$(cat " + ENV + ")\nEOF", "allow", cwd=NOGIT)
 # A file a heredoc writes is text when a checker, a reader or a pipe stage reads it as an argument: nothing runs it.
 # Its quoted body with an env read is data, and the one call (write, then run) is allowed. Each form below is a
-# runner word with the written file as its argument (debt heredoc-written-run-false-alarm).
+# runner word with the written file as its argument, and a checker that reads a file runs nothing.
 for _file, _run in (("brief.md", "python3 check.py brief.md"), ("cfg.json", "python3 -m json.tool cfg.json"),
                     ("f", "sudo cat f"), ("f", "timeout 5 wc f"), ("f", "ls f | xargs wc")):
     sh("trim: env: a quoted heredoc writes %s and %r reads it, with an env read in the body, is allowed" % (_file, _run),
@@ -10047,7 +10047,7 @@ step_refuse("a brief for topic colors to a lane on topic icons is refused, thoug
 step_refuse("a brief that names no topic, to a lane with a topic, is refused, and the steer names the topic",
             role_path("step-topic-lane"), "Lane brief: icon-a.", carries=TOPIC_STEER)
 # Refused, and the remedy is the fix: the brief is on topic, and its Topic line is unreadable. The reason puts the
-# Topic on the first line, and it does not send the sender to a new lane (debt brief-no-topic-wrong-steer).
+# Topic on the first line, and it does not send the sender to a new lane.
 TOPIC_FIRST_LINE = ("put `Topic: <slug>.` on the first line",)
 step_refuse("a brief with no Topic, to a lane with a topic, is refused with the remedy to put Topic on the first line",
             role_path("step-topic-lane"), "Lane brief: icon-a.", carries=TOPIC_FIRST_LINE)
@@ -24361,7 +24361,7 @@ def gs_verdict_check(name, files, spawn, want, ref=True):
 def gs_fork_check(name, record, files, refs, spawn, want):
     """A check in a fork: its extras file names `record` as the record branch (lint/layout.py record_branch). `files`
     hold the lane's step, and each name in `refs` is set as refs/remotes/origin/<name> at the checkout's commit. The
-    guard reads the fork's own record branch, never origin/roadmap, which is main's (debt fork-step-grants-read-roadmap)."""
+    guard reads the fork's own record branch, never origin/roadmap, which is main's."""
     def check():
         tree = dict(files)
         tree[".claude/layout-extras.json"] = json.dumps({"kinds": {}, "record-branch": record}) + "\n"
