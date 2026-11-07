@@ -228,9 +228,11 @@ SESSION_IMPERATIVES = frozenset((
 _UNIT_END = re.compile(r"(?<=[.!?;:,])\s+|\n+")
 _CONNECTORS = frozenset(("so", "then", "and", "but", "now", "first", "next", "also", "please"))
 _WORD = re.compile(r"[a-z][a-z'-]*")
-# A backtick span names a thing and holds no order. It may not cross a sentence end or a line, so a lone backtick
-# cannot pair with a later one and hide an order between them.
-_BACKTICK_SPAN = re.compile(r"`(?:[^`\n.!?;:]|[.!?;:](?!\s|$))*`")
+# A list of backtick spans ("refused `Agent`, `Write` this session") ends each unit but the last in span + comma. The
+# unit after it that opens with a span names the next item and holds no order. A span never crosses a comma, a
+# sentence mark or a line, so a lone backtick cannot pair with a later one and hide an order.
+_SPAN_COMMA_END = re.compile(r"`[^`\n.!?;:,]+`,$")
+_OPENS_WITH_SPAN = re.compile(r"(?:(?:%s)\s+)*`" % "|".join(sorted(_CONNECTORS)))
 # A modal that binds the reader: "you should send it", "the reply must end with the report".
 _MODAL = re.compile(r"\b(?:must|should|need to|needs to|have to|has to|ought to)\b", re.IGNORECASE)
 
@@ -238,12 +240,16 @@ _MODAL = re.compile(r"\b(?:must|should|need to|needs to|have to|has to|ought to)
 def session_wording(text):
     """The phrase in `text` that tells the session what to do, or '' when `text` holds facts only: a listed phrase,
     a clause that opens with an order word, or a modal ("must", "should")."""
-    text = _BACKTICK_SPAN.sub(" ", text)
     low = text.lower()
     for phrase in SESSION_PHRASES:
         if phrase in low:
             return phrase
+    previous = ""
     for unit in _UNIT_END.split(text):
+        is_list_item = bool(_OPENS_WITH_SPAN.match(unit.lower()) and _SPAN_COMMA_END.search(previous))
+        previous = unit.strip()
+        if is_list_item:
+            continue
         words = _WORD.findall(unit.lower())
         while words and words[0] in _CONNECTORS:
             words.pop(0)
