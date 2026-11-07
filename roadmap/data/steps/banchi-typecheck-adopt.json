@@ -1,0 +1,10 @@
+{
+  "title": "banchi uses the shared typecheck hook and drops its own",
+  "phase": "next",
+  "status": "todo",
+  "order": 267.1,
+  "owner": "coordinator",
+  "why": "banchi runs tsc twice today: once through its own scripts/typecheck-hook.py, and once through the shared hook that claude-settings #1612 (step repo-typecheck-hook) adds (coordinator, 16:23 CST Nov 7).",
+  "note": "Waits on #1612. After it merges, banchi adds a 'typecheck' entry to .claude/layout-extras.json with [\"node\",\"app/node_modules/typescript/bin/tsc\",...], and deletes scripts/typecheck-hook.py. The coordinator starts it on #1612's merge. Done check: one tsc run per edit in banchi.",
+  "updatedAt": "2026-11-07T16:22:00-06:00"
+}
