@@ -1480,7 +1480,7 @@ def case_page_filing_reads_the_record_branch_the_layout_names():
 
 def case_page_filing_needs_a_waiting_page_repo():
     """The filing check runs only in a repo that names a waiting page. A page item in a repo with none keeps the
-    send check alone: a send passes, with no filing message. Green today, and it pins the gate."""
+    send check alone: a send passes, with no filing message. Green today, and it pins the check."""
     p = page_run(new_cfg(), "page-no-waiting", [(NEUTRAL, (PAGE_ITEM,))], [owner_rec(NEUTRAL), send_rec(SENT)])
     expect_silent("page filing: a repo with no waiting page passes on its send alone", p)
 
