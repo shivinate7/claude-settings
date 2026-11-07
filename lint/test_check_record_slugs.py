@@ -6,6 +6,9 @@
 A record file that a change adds must have a slug of 32 characters or fewer. The check reads
 decisions/ and debts/ from the diff, or the files it is given.
 
+`--tree [--root R]` reads the decision and debt folders, CLAUDE.md and output-styles/*.md, and prints
+each finding as `path:line CODE id`. Its cases are the tree-mode cases at the end of RecordSlugsTests.
+
 Each case builds a temp tree: a copy of the module, and the records it checks. It runs the real
 script from that tree. The diff cases also make a temp git repo and set refs/remotes/origin/main,
 the base the script diffs against. RECORD_SLUGS_UNDER_TEST overrides the module path.
@@ -122,6 +125,13 @@ class RecordSlugsTests(unittest.TestCase):
 
     def decision(self, slug, text=None):
         self.put(self.rel("decisions", slug + ".md"), text or "# %s\n" % slug)
+
+    def bare_cite(self, slug="tap-lag", name="other.md"):
+        """Write a decision that cites `slug` with no gloss, and return the finding that cite gives."""
+        path = self.rel("decisions", name)
+        text = "# Other\n\nRule `%s` holds the text.\n" % slug
+        self.put(path, text)
+        return "%s:%d GLOSS001 %s" % (path, line_of(text, "`%s`" % slug), slug)
 
     def tree_run(self, root=None):
         """(rc, findings, out) of `--tree` over `root`, the temp tree by default."""
@@ -404,15 +414,12 @@ class RecordSlugsTests(unittest.TestCase):
         self.assertEqual(rc, 0, out)
 
     # Tree mode: `--tree [--root R]` reads each file of the decision and debt folders, CLAUDE.md and output-styles/*.md.
-    # Main has no tree mode, so each case below fails on its missing finding, not on a crash.
+    # Each case pins one finding, or one place the check must stay silent. Each holds a positive finding.
 
     def test_bare_first_cite_is_gloss001(self):
-        # The brief's red case. The folders are the legacy ones, and output-styles/ and CLAUDE.md are absent.
+        # A bare cite of a decision slug is GLOSS001. The tree has no CLAUDE.md and no output-styles/.
         self.decision("tap-lag")
-        other = self.rel("decisions", "other.md")
-        text = "# Other\n\nRule `tap-lag` holds the text.\n"
-        self.put(other, text)
-        self.assert_tree(["%s:%d GLOSS001 tap-lag" % (other, line_of(text, "`tap-lag`"))])
+        self.assert_tree([self.bare_cite()])
 
     def test_one_word_after_a_separator_is_not_a_gloss(self):
         # A gloss has two words or more. Each file's first cite is judged, so four files give four findings.
@@ -438,10 +445,7 @@ class RecordSlugsTests(unittest.TestCase):
         }
         for name, line in forms.items():
             self.put(self.rel("decisions", name + ".md"), "# %s\n\n%s\n" % (name, line))
-        bare = self.rel("decisions", "bare.md")
-        text = "# Bare\n\nRule `tap-lag` holds the text.\n"
-        self.put(bare, text)
-        self.assert_tree(["%s:%d GLOSS001 tap-lag" % (bare, line_of(text, "`tap-lag`"))])
+        self.assert_tree([self.bare_cite(name="bare.md")])  # the positive: the same cite with no gloss
 
     def test_only_the_first_cite_in_a_file_is_judged(self):
         self.decision("tap-lag")
@@ -476,10 +480,7 @@ class RecordSlugsTests(unittest.TestCase):
 
     def test_a_file_citing_its_own_slug_is_not_a_finding(self):
         self.decision("tap-lag", "# Tap lag\n\nRule `tap-lag` holds the text.\n")
-        other = self.rel("decisions", "other.md")
-        text = "# Other\n\nRule `tap-lag` holds the text.\n"
-        self.put(other, text)
-        self.assert_tree(["%s:%d GLOSS001 tap-lag" % (other, line_of(text, "`tap-lag`"))])
+        self.assert_tree([self.bare_cite()])  # the positive: another file's bare cite of the same slug
 
     def test_a_comment_opener_in_a_span_does_not_hide_a_cite(self):
         # The openers are `/*`, `//` and `#`, each in a span before the cite on the same line.
@@ -530,19 +531,13 @@ class RecordSlugsTests(unittest.TestCase):
     def test_a_plan_slug_is_an_id_and_plan_text_is_not_scanned(self):
         self.decision("tap-lag")
         self.put(self.rel("plans", "plan-z.md"), "# Plan\n\nRule `tap-lag` holds.\n")
-        other = self.rel("decisions", "other.md")
-        text = "# Other\n\nRule `plan-z` holds the text.\n"
-        self.put(other, text)
-        self.assert_tree(["%s:%d GLOSS001 plan-z" % (other, line_of(text, "`plan-z`"))])
+        self.assert_tree([self.bare_cite("plan-z")])
 
     def test_a_debt_slug_is_an_id(self):
         # The decision names the debt in a glossed cite, so the debt raises no DEBT finding.
         self.decision("tap-lag", "# Tap lag\n\nThe debt `debt-q` (its finding) waits.\n")
         self.put(self.rel("debts", "debt-q.md"), "# Debt\n\n**Decision.** `tap-lag` (a valid gloss).\n")
-        other = self.rel("decisions", "other.md")
-        text = "# Other\n\nRule `debt-q` holds the text.\n"
-        self.put(other, text)
-        self.assert_tree(["%s:%d GLOSS001 debt-q" % (other, line_of(text, "`debt-q`"))])
+        self.assert_tree([self.bare_cite("debt-q")])
 
     def test_an_anchor_outside_the_id_sources_is_not_an_id(self):
         self.decision("tap-lag")
@@ -558,10 +553,7 @@ class RecordSlugsTests(unittest.TestCase):
         for path in ("docs/records.md", "docs/catalog.md", self.rel("debts", "README.md"),
                      layout.path(self.tree, "debt-notes")):
             self.put(path, "# Skipped\n\nRule `tap-lag` holds.\n")
-        other = self.rel("decisions", "other.md")
-        text = "# Other\n\nRule `tap-lag` holds the text.\n"
-        self.put(other, text)
-        self.assert_tree(["%s:%d GLOSS001 tap-lag" % (other, line_of(text, "`tap-lag`"))])
+        self.assert_tree([self.bare_cite()])
 
     def test_a_debt_file_is_scanned_for_gloss(self):
         self.decision("a-eight")
@@ -651,7 +643,7 @@ class RecordSlugsTests(unittest.TestCase):
         self.assert_tree(["%s:3 DEBT004 d-nine" % path])
 
     def test_the_default_and_file_modes_do_not_read_the_gloss_or_debt_rules(self):
-        # Green on main, and it must stay green: only --tree reads these rules.
+        # Only --tree reads the gloss and debt rules. The other modes must not start to.
         self.decision("tap-lag")
         self.put(self.rel("decisions", "other.md"), "# Other\n\nRule `tap-lag` holds the text.\n")
         self.put(self.rel("debts", "d-one.md"), "# Debt\n\nWhat: a gap.\n")
@@ -665,18 +657,16 @@ class RecordSlugsTests(unittest.TestCase):
         self.assertNotIn("Traceback", out)
 
     def test_tree_findings_returns_the_findings_the_command_prints(self):
-        # A missing name fails the assert below, not the run: getattr, not a direct call.
+        # getattr: a missing name fails the assert below instead of raising.
         self.decision("tap-lag")
-        other = self.rel("decisions", "other.md")
-        text = "# Other\n\nRule `tap-lag` holds the text.\n"
-        self.put(other, text)
+        want = self.bare_cite()
         commit_all(self.tree)
         spec = importlib.util.spec_from_file_location("record_slugs_tree_probe", MODULE)
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
         fn = getattr(module, "tree_findings", None)
         self.assertIsNotNone(fn, "tree_findings(root) is not defined in lint/check_record_slugs.py")
-        self.assertEqual(sorted(fn(self.tree)), ["%s:%d GLOSS001 tap-lag" % (other, line_of(text, "`tap-lag`"))])
+        self.assertEqual(sorted(fn(self.tree)), [want])
 
 
 class ImportTests(unittest.TestCase):
