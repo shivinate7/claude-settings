@@ -38,6 +38,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -95,6 +96,8 @@ STREET = "123 Main Street"
 API_VALUE = "abcdefgh" + "12345678"
 SESSION_VALUE = "q9W8e7R6" + "t5Y4u3I2"
 CLIENT_VALUE = "Zx8Kp2Lm" + "9Qw4Rt7Y"
+# Seconds for one 20,000-character run of name characters: about 0.4 s with the name shape bounded, about 10 s without.
+LONG_RUN_BOUND = 2.0
 
 # (label, the note's value, the text that must never be printed). A dict or a list nests the secret.
 RED = [
@@ -154,6 +157,10 @@ RED = [
     ("PWD path with a second keyword after an ampersand", "PWD=/home/x&" + "password=" + "hunter2", "hunter2"),
     # Refused today, kept so that a fix which matches a prefix, or a lower-case path, goes red.
     ("password with a plain word and digits", "password: " + "none123", "none123"),
+    # A real password value stays refused when prose follows it on its line, and when it sits in backticks.
+    ("password with a colon and a value of letters and digits", "password: " + "hunter2xyz", "hunter2xyz"),
+    ("password with a real value before prose", "password: " + "hunter2xyz" + " for the guest.", "hunter2xyz"),
+    ("password assignment in backticks", "`password=" + "hunter2xyz" + "`", "hunter2xyz"),
     ("lower-case pwd with a path value", "pwd=" + "/Users/x", "/Users/x"),
     ("email address", "person.name" + "@" + "example.com", "person.name@example.com"),
     ("phone number", "+1 (555) 010-2345", "+1 (555) 010-2345"),
@@ -192,6 +199,9 @@ RED = [
     ("apikey with no separator", "apikey=" + API_VALUE, API_VALUE),
     ("authtoken with a colon", "authtoken: " + SESSION_VALUE, SESSION_VALUE),
     ("SECRET_KEY_BASE assignment", "SECRET_KEY_BASE=" + "w8Kd2Lp9" + "Vx4Qz7Mn", "w8Kd2Lp9" + "Vx4Qz7Mn"),
+    # A key word at the start of a name, after `_` or at a camelCase hump, still names a credential when its value has digits.
+    ("secret_key assignment with digits", "secret_key=" + "Yt6Nb3Kd" + "Hj9Pq2Wr", "Yt6Nb3Kd" + "Hj9Pq2Wr"),
+    ("GITHUB_TOKEN assignment with digits", "GITHUB_TOKEN=" + "Rt4Vb8Nm" + "Ls2Qw6Yp", "Rt4Vb8Nm" + "Ls2Qw6Yp"),
     ("API_KEY_V2 assignment", "API_KEY_V2=" + "Hk3Lm9Qp" + "Wz7Rt2Yc", "Hk3Lm9Qp" + "Wz7Rt2Yc"),
     ("clientSecret as a JSON pair", '"clientSecret": "' + CLIENT_VALUE + '"', CLIENT_VALUE),
     # A credential name set to a value of 12 or more characters is refused, digits or not. These values have no digit.
@@ -290,6 +300,9 @@ GREEN = [
     ("a time with PM and a street word in prose", "Due 5 PM. Way forward is clear"),
     ("a number before the word Park in prose", "Phase 2 Park the lane"),
     ("a key inside a longer word", "turnkey solution"),
+    # A key word inside a longer word is no credential name, even with a value of letters and digits after it.
+    ("a key word inside a longer word with a value", "monkey: Banana12345"),
+    ("a key word inside a longer word with a camel value", "hotkey: Ctrl1Shift2"),
     ("a keyboard label with a number", "keyboard: 104 keys"),
     # A shell variable, an ssh remote, a no-reply address, and the placeholders and masks: none names a secret.
     ("password word with optional", "password: " + "optional"),
@@ -314,6 +327,9 @@ GREEN = [
     ("single-quoted optional after a password word", "password: " + "'optional'"),
     ("parenthesized none after a password word", "password: " + "(none)"),
     ("none with a period after a password word", "password: " + "none."),
+    # A placeholder word with prose after it on the same line, and a backticked shell path, name no secret.
+    ("password word with optional and prose after it", "Set password: optional for the guest."),
+    ("backticked shell path after PWD", "`PWD=/Users/x`"),
     # Near misses of the three new shapes: a digit count, a tail length, a prefix inside a word, and a clock time pass.
     ("Telegram token with 11 digits before the colon", "12345678901:" + TG_TAIL),
     ("Telegram token with a 34-character tail", "123456789:" + TG_TAIL[:34]),
@@ -557,6 +573,20 @@ class Scan(Base):
                 self.assertFalse(says(r, "refused"), "%s: the scan refused a non-secret. Output:\n%s" % (label, shown(r)))
                 self.assertEqual(r.returncode, 0, "%s: the run failed without a refusal. Output:\n%s" % (label, shown(r)))
                 self.assertEqual(read_text(os.path.join(out, "items", "ok.json")), canonical(doc), label)
+
+    def test_a_long_run_of_name_characters_scans_within_the_bound(self):
+        # One run of 20,000 name characters with no keyword in it. An unbounded name prefix re-reads the run from each
+        # start position, so the scan grows with the square of the run's length.
+        run = "aB3_-" * 4000
+        fetched = self.fetch(items={"ok": {"id": "ok", "title": "Ok", "note": run}})
+        out = self.out("long-run")
+        start = time.perf_counter()
+        r = self.export(fetched, out)
+        took = time.perf_counter() - start
+        self.assertEqual(r.returncode, 0, "the run of name characters did not export (exit %d). Output:\n%s"
+                         % (r.returncode, shown(r)))
+        self.assertLess(took, LONG_RUN_BOUND,
+                        "the scan of a 20,000-character run took %.2f s, over the %.1f s bound" % (took, LONG_RUN_BOUND))
 
 
 class Mirror(Base):
