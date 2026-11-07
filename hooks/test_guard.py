@@ -10133,6 +10133,13 @@ PFR_LINES = {
     "gh-real-create": pfr_bash("toolu_pr1", "cd x && gh pr create --draft --title t",
                                "https://github.com/shivinate7/claude-settings/pull/1467\n")
                       + pfr_call("toolu_rev1", PFR_FAIL),
+    # An interpreter that runs a heredoc body opens the PR the body names.
+    "gh-heredoc-bash": pfr_bash("toolu_pr1", "bash <<'EOF'\ngh pr create --draft --title t\nEOF",
+                                "https://github.com/shivinate7/claude-settings/pull/1467\n")
+                       + pfr_call("toolu_rev1", PFR_FAIL),
+    "gh-heredoc-sh": pfr_bash("toolu_pr1", "sh <<EOF\ngh pr create --draft --title t\nEOF",
+                              "https://github.com/shivinate7/claude-settings/pull/1467\n")
+                     + pfr_call("toolu_rev1", PFR_FAIL),
     # A verdict in backticks or with a bold verb word is still the Done verdict.
     "fail-backtick": pfr_pr() + pfr_call("toolu_rev1", pfr_report("`%s`" % pfr_verdict("FAIL", 1, "claude-haiku-5-5"),
                                                                   PFR_FINDING)),
@@ -10269,6 +10276,10 @@ pfr_allow("gh pr create inside a quoted heredoc body, then an unrecorded FAIL, t
 # The control: a real create in a compound command opens the PR, so the same FAIL denies.
 pfr_refuse("a cd and a real gh pr create --draft, then an unrecorded FAIL, then the push", PFR_PUSH,
            pfr_path("gh-real-create"))
+pfr_refuse("a bash heredoc whose body is a gh pr create --draft, then an unrecorded FAIL, then the push", PFR_PUSH,
+           pfr_path("gh-heredoc-bash"))
+pfr_refuse("an sh heredoc whose body is a gh pr create --draft, then an unrecorded FAIL, then the push", PFR_PUSH,
+           pfr_path("gh-heredoc-sh"))
 # A Done line in backticks, or with a bold verb word, reads as its verdict: a FAIL with no record denies.
 pfr_refuse("a FAIL Done line in backticks with no record, then the push", PFR_PUSH, pfr_path("fail-backtick"))
 pfr_refuse("a FAIL Done line with a bold verb word and no record, then the push", PFR_PUSH, pfr_path("fail-bold-verb"))
