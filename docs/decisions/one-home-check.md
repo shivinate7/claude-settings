@@ -37,13 +37,18 @@ The plan offered two child paths: (a) the child CI checks out claude-settings at
 Paraphrase pass, `python3 lint/find_copies.py --measure lint/paraphrase_labelled.json`, run once on
 2026-11-07. Model `sonnet`, effort `high`. Sample: 51 labelled cases, 29 paraphrase and 22 distinct.
 
-- Precision 1.00: 25 of 25 flagged cases were paraphrases. No false positive.
+- Precision 1.00: 25 of 25 flagged cases were paraphrases. No false positive. On 25 flags, the
+  95% lower bound is about 0.87.
 - Recall 0.86: 25 of 29 paraphrases were flagged. Missed: p11, p26, p27, p28.
 - Precision was not under 0.9, so no second prompt was tried. There is one run.
 - Limits. The prompt was written after the set was read, so both figures lean high. 22 distinct cases
-  is a small base for a precision claim. The set measures the model alone. The lexical pre-filter (3
-  shared word stems) runs before it in `--paraphrase`: offline it passes 25 of 29 paraphrase cases
-  (misses p16, p20, p25, p27) and 5 of 22 distinct cases. Precision on a real child repo is unmeasured.
+  is a small base. The figures measure the model alone, on each case's own rule text; 8 cases carry
+  superseded rule text.
+- The lexical pre-filter (3 shared word stems) runs before the model in `--paraphrase`, against the
+  current rule text. Against current text it passes 11 of 21 paraphrase cases whose rule still
+  exists. So a live run misses about half of the paraphrases before the model sees them. A clean
+  run means "no candidate the pre-filter kept", not "no paraphrase". Precision on a real child repo
+  is unmeasured.
 - Cost per run: `--paraphrase` starts three processes, python, `git ls-files` and one `claude -p`;
   `--measure` starts two, python and one `claude -p`. Each run reads the tracked `*.md` files
   (`--paraphrase` only), makes at most one model call, and writes no file. `invoke_model` makes and
@@ -54,7 +59,7 @@ Paraphrase pass, `python3 lint/find_copies.py --measure lint/paraphrase_labelled
 ## The parts
 
 - In-repo copies: `python3 lint/find_copies.py --in-repo`, code COPY001, 8-word floor. On
-  2026-11-07 it found 84 copies in 43 files. Lane `one-home-check` cleared them all: each now
+  2026-11-07, on main 5cc641f78, it found 85 copies in 44 files. Lane `one-home-check` cleared them all: each now
   names its rule id.
 - Reworded rule text: `lint/stale_cites.py`, code STALE006, 5-word floor (item 340). It skips a
   rule sentence that only gained words.

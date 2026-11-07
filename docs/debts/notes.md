@@ -1492,3 +1492,5 @@
 - lane-lint-stop-no-log: lane_lint's non-liftable Stop (merge/merge.py) leaves out ci-job's log lines, so a timeout or an odd exit gives the reader no log path. The liftable branch prints them. Decision: lanes-run-no-full-ci-job (the lane-check decision).
 - draft-claim-line-no-ready-checks-test: the draft preview's claim line for a repo with no readyChecks has no test of its exact wording (merge/test_merge.py pins only "refuses"). Also on main. Decision: lanes-run-no-full-ci-job (the lane-check decision).
 - one-home-two-names-one-job: two differently named functions that do one job are not found; lint/find_copies.py reads text copies of rule sentences only. The item-field guard (rule item-field-rendered) covers one waiting-item case. Decision: one-home-check
+- one-home-exempt-whole-file: an `exempt` marker silences every copy of its rule in its file, not only the copy beside it (lint/find_copies.py). Decision: one-home-check
+- one-home-copy-bypasses: a copy with a digit for a number word, or with `<br>` or `<em>` inside it, passes `find_copies.py --in-repo`. Only an attacker writes these forms (`guard-guards-mistakes-only`). Decision: one-home-check
