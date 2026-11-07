@@ -118,7 +118,8 @@ a turn end in these cases:
     when a write is to the waiting page. All inside the Stop process; no process or file of its own (rule
     outcomes-mechanize-rules). Test S6 proves it.
 Repeats (decision owner-feedback-inbox, "Repeats"): on every Stop, `stop_hook_active` or not, the
-guard judges the well-formed, open items whose ids the turn state's `judged` list does not hold. A
+guard judges the well-formed, open items, except `[repo]` items (feedback for another repo), whose ids
+the turn state's `judged` list does not hold. A
 state file that predates the key counts every item there as judged. One model call per Stop covers
 all new items (`invoke_model`, model REPEAT_MODEL, REPEAT_TIMEOUT seconds, no effort). The model
 compares each item's owner message by meaning with at most REPEAT_MAX candidates (REPEAT_SHARES per
@@ -175,8 +176,9 @@ _WORD = r"(?<![A-Za-z0-9_])(?:%s)(?![A-Za-z0-9_])"
 GRANT = re.compile(_WORD % r"approval|approved?|grant(?:ed)?|authori[sz]ed?|go[ -]ahead|permissions? to",
                    re.IGNORECASE)
 # A grant word alone is no grant: the message also names an act or a scope.
-ACT = re.compile(_WORD % r"merge|push|delete|deploy|release|publish|always|standing|from now on"
-                 r"|(?:all|any|every)\s+(?:repos?|prs?|branch(?:es)?)", re.IGNORECASE)
+_STANDING_ACT = r"always|standing|from now on|(?:all|any|every)\s+(?:repos?|prs?|branch(?:es)?)"
+ACT = re.compile(_WORD % (r"merge|push|delete|deploy|release|publish|" + _STANDING_ACT), re.IGNORECASE)
+STANDING = re.compile(_WORD % _STANDING_ACT, re.IGNORECASE)  # a scope word: no one-shot home covers it
 CLOSED_TOKEN = re.compile(r"(?<!\S)\[closed\](?!\S)")
 # A grant's [ruling] home may also be one of these root files, when git tracks it on some branch.
 GRANT_ROOT_HOMES = ("settings.json", ".claude/CLAUDE.md")
@@ -376,6 +378,7 @@ class Homes:
     def __init__(self, cwd, worked_in=None):
         self.cwd, self.skip, self.skip_closed, self.skip_filing = cwd, None, None, None
         self.worked_in = worked_in  # the folder the inbox's sidecar binds: where the session worked
+        self._tops = None  # the repo tops of worked_in and cwd, read once per Stop
         self._filed = None  # (numbers or None, branch, folder), read once per Stop
         self._top = None  # (the cwd's repo top or None,), read once per Stop
 
@@ -383,35 +386,48 @@ class Homes:
         run = ruling_home._run_git(where, ["rev-parse", "--show-toplevel"])
         return os.path.realpath(run.stdout.strip()) if run.returncode == 0 and run.stdout.strip() else None
 
+    def _repos(self):
+        """The repo tops a relative home is judged in: the one the inbox sidecar binds (where the session worked)
+        and the Stop's cwd, each only when it is in a repo, the same repo once. Empty: neither resolves."""
+        if self._tops is None:
+            tops = []
+            for where in (self.worked_in, self.cwd):
+                top = self._root(where) if where and os.path.isdir(where) else None
+                if top is not None and top not in tops:
+                    tops.append(top)
+            self._tops = tops
+        return self._tops
+
     def _locate(self, found, closed=False):
-        """(root, rel, error) for the path a home names. `root` is None with `error` set when an absolute
-        path is in no git repo, and with no error when the session's folder is in none: the check stands down."""
+        """([(root, rel)], error) for the path a home names. An absolute path gives its own repo, or an error
+        when it is in no repo. A relative path gives one pair per repo of `_repos`; none, with no error,
+        when the session's folder and the Stop's cwd are both in none: the check stands down."""
         if os.path.isabs(found):
             parent = os.path.dirname(found)
             root = self._root(parent) if os.path.isdir(parent) else None
             if root is None:
-                return None, None, "names %s, which is in no git repo" % found
-            return root, os.path.relpath(os.path.realpath(found), root).replace(os.sep, "/"), None
-        where = self.worked_in if self.worked_in and os.path.isdir(self.worked_in) else self.cwd
-        start = where if where and os.path.isdir(where) else None
-        root = self._root(start) if start else None
-        if root is None:
+                return [], "names %s, which is in no git repo" % found
+            return [(root, os.path.relpath(os.path.realpath(found), root).replace(os.sep, "/"))], None
+        roots = self._repos()
+        if not roots:
             self._stand_down("the session's folder is in no git repo", closed)
-            return None, None, None
-        return root, os.path.normpath(found).replace(os.sep, "/"), None
+            return [], None
+        return [(root, os.path.normpath(found).replace(os.sep, "/")) for root in roots], None
 
     def _held(self, path, closed=False):
         """(error, held) for a repo-relative or absolute path: `held` is true when some branch's tree holds
-        it, or when the check stood down. `error` is set when an absolute path is in no git repo. The one
-        read behind a task's or a closed note's `step:<slug>` home and a closed note's file home."""
-        root, rel, err = self._locate(path, closed)
+        it in one of the repos, or when the check stood down. `error` is set when an absolute path is in no
+        repo. The one read behind a task's or a closed note's `step:<slug>` home and a closed note's
+        file home."""
+        places, err = self._locate(path, closed)
         if err:
             return err, False
-        return None, root is None or ruling_home.value_resolves(rel, root)
+        return None, not places or any(ruling_home.value_resolves(rel, root) for root, rel in places)
 
     def problem(self, item_id, kind, rest, grant=False):
-        """None when the home is good or the check stood down, else the reason text. `grant` is true in a
-        block that holds a grant word: a ruling may then name a GRANT_ROOT_HOMES file, if git tracks it."""
+        """None when the home is good in some repo or the check stood down, else the reason text (the first
+        repo's). `grant` is true in a block that holds a grant word: a ruling may then name a GRANT_ROOT_HOMES
+        file, if the repo tracks it."""
         try:
             import layout  # lint/layout.py, the one home of where each kind lives
         except ImportError as e:
@@ -424,26 +440,30 @@ class Homes:
                     return None
                 return "%s [task] %s" % (item_id, err) if err else (
                     "%s [task]: `step:%s` is no task home, as no branch holds its step file" % (item_id, step.group(1)))
-            root, rel, err = self._locate(home_path(rest))
+            places, err = self._locate(home_path(rest))
             if err:
                 return "%s [%s] %s" % (item_id, kind, err)
-            if root is None:
-                return None
-            if not (grant and kind == "ruling" and rel in GRANT_ROOT_HOMES):
-                homes = kind_homes(layout, root, kind)
-                keys = ", ".join(HOME_KINDS[kind])
-                if not homes:
-                    return ("%s [%s]: this repo has no %s home; none of the layout keys %s is in it"
-                            % (item_id, kind, kind, keys))
-                if not any(rel == h or rel.startswith(h + "/") for h in homes):
-                    return ("%s [%s]: %s is not a tracked %s home. %s homes: %s. The handoff and memory are no home%s"
-                            % (item_id, kind, rel, kind, kind.capitalize(), ", ".join(homes),
-                               ". A task may instead name `step:<slug>`" if kind == "task" else ""))
-            if not ruling_home.value_resolves(rel, root):
-                return "%s [%s]: its home is not a file that git tracks on any branch" % (item_id, kind)
-            return None
+            reasons = [self._judge(layout, item_id, kind, root, rel, grant) for root, rel in places]
+            return None if not reasons or None in reasons else reasons[0]
         except (layout.LayoutError, ruling_home._GitFailure) as e:
             return self._stand_down(e)
+
+    @staticmethod
+    def _judge(layout, item_id, kind, root, rel, grant):
+        """None when the home `rel` is good in the repo at `root`, else the reason text."""
+        if not (grant and kind == "ruling" and rel in GRANT_ROOT_HOMES):
+            homes = kind_homes(layout, root, kind)
+            keys = ", ".join(HOME_KINDS[kind])
+            if not homes:
+                return ("%s [%s]: this repo has no %s home; none of the layout keys %s is in it"
+                        % (item_id, kind, kind, keys))
+            if not any(rel == h or rel.startswith(h + "/") for h in homes):
+                return ("%s [%s]: %s is not a tracked %s home. %s homes: %s. The handoff and memory are no home%s"
+                        % (item_id, kind, rel, kind, kind.capitalize(), ", ".join(homes),
+                           ". A task may instead name `step:<slug>`" if kind == "task" else ""))
+        if not ruling_home.value_resolves(rel, root):
+            return "%s [%s]: its home is not a file that git tracks on any branch" % (item_id, kind)
+        return None
 
     def closed_problem(self, item_id, rest):
         """None when a closed note's home is a page, a not-a-grant verdict, a `step:<slug>` whose step file
@@ -796,18 +816,26 @@ def is_grant(text):
     return GRANT.search(plain) is not None and ACT.search(plain) is not None
 
 
+def once_home(it, text):
+    """True when the item is an open `[note] -> once:<act>` for a one-shot approval. A message with a standing
+    word is a standing grant, so no once: home covers it."""
+    word = home_word(it[1])
+    return (it[1].startswith("[note]") and not it[3] and word.startswith(ONCE_HOME)
+            and len(word) > len(ONCE_HOME) and STANDING.search(unfenced(text)) is None)
+
+
 def grant_problem(b, text, items):
     """The reason for a message that grants and has no home for it, else None. A home is a [ruling] item
-    (its own check judges the path), an open [page] item (its own check judges the send), or a
-    `[note] -> not-a-grant` item, or a `[note] -> once:<act>` item for a one-shot approval. `items` holds item() of each item line of the block."""
+    (its own check judges the path), an open [page] item (its own check judges the send), a
+    `[note] -> not-a-grant` item, or an open `[note] -> once:<act>` item when the message holds no standing
+    word. `items` holds item() of each item line of the block."""
     if not is_grant(text):
         return None
     for it in items:
         if it is None or not it[2]:
             continue
         if it[1].startswith("[ruling]") or (it[1].startswith("[page]") and not it[3]) or (
-                it[1].startswith("[note]") and (home_word(it[1]) == NOT_A_GRANT or (
-                    home_word(it[1]).startswith(ONCE_HOME) and len(home_word(it[1])) > len(ONCE_HOME)))):
+                it[1].startswith("[note]") and home_word(it[1]) == NOT_A_GRANT) or once_home(it, text):
             return None
     return ("the message at %s (%s) holds a grant word and has no home for it: add %s"
             % (b["stamp"], text.split("\n")[0][:40], GRANT_HOMES))
