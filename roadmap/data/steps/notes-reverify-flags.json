@@ -1,0 +1,11 @@
+{
+  "title": "Reproduce and fix the 13 kept notes flagged as likely real",
+  "phase": "now",
+  "status": "doing",
+  "order": 265.4,
+  "owner": "coordinator",
+  "lane": "session_013NEJL1PAG3NhmQAbveNQLo",
+  "why": "Coordinator, 15:13 CST: lane notes-keep-reverify flagged 13 kept notes as likely real gaps. Source: docs/plans/notes-sort/reverify-flag.tsv on branch claude/notes-keep-reverify, a1959b187.",
+  "note": "Each note is reproduced before its fix. Wave 7 (#1530) points its Fix lines at this step. Topic notes-backlog.",
+  "updatedAt": "2026-11-07T15:14:00-06:00"
+}
