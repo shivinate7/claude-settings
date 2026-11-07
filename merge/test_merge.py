@@ -2619,12 +2619,14 @@ class AfterPush(Env):
         self.assertTrue(lines[0].startswith("merge: "), lines[0])
 
     def test_the_tree_config_or_kinds_gone_at_the_base_check_stops_clean(self):
-        """The tree, the config or the kinds gone at the base check: one outcome, a stop with no claim left
-        behind. Each row is a fresh fixture, so subTest runs its own setUp."""
+        """The config or the kinds gone at the base check stop clean, with no claim left behind. The tree gone is a read that
+        could not run: unknown, and the claim stays (standing-merge-grant). Each row is a fresh fixture, so subTest runs its own setUp."""
+        claimed = []
         def tree_gone():
+            claimed.append(self.head())  # the claim is on origin when the base check runs
             shutil.rmtree(os.path.dirname(self.merge_tree()))
         cases = (
-            ("tree", tree_gone, self.assert_clean_stop),
+            ("tree", tree_gone, lambda rc, out: assert_unknown_stop_keeps_the_claim(self, rc, out, claimed[-1] if claimed else None)),
             ("config", lambda: self.base_loses(None), self.assert_base_lost),
             ("kinds", lambda: self.base_loses(json.dumps({k: v for k, v in CONFIG.items() if k != "kinds"})), self.assert_base_lost),
         )
