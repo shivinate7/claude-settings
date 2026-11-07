@@ -22,6 +22,8 @@
                           the rounds; HEAD is the reviewed head the fix diff starts from, and differs from SHA. It refuses (exit 2)
                           unless HEAD is the Head of the newest earlier record on the PR with no Fix check line, read from the
                           PR's issue comments since the PR opened.
+                          Rounds equal to an earlier record's are carried: it refuses (exit 1) when a guard or check path changed after
+                          the carried head, or when an earlier record on this PR cannot be read. A record naming another PR is skipped.
   merge --reviewed        one line per open PR that has a review record comment, with its state (bad when the newest does not parse) and its
                           live CI; then the PRs with no record.
   merge --lane-lint <pr|ref> [--base BRANCH] [--lint-unknown-ok "REASON"]
@@ -3198,15 +3200,13 @@ def reviewed_lines(h, root):
         rec = parse_review(bodies[-1])
         state, why = review_state(rec if rec and rec["n"] == n else None, sha)
         if state == "done":
-            earlier = [r if r and r["n"] == n else None for r in map(parse_review, bodies[:-1])]
-            h1 = carried_first_head(earlier, rec)
-            if h1:
-                try:
-                    reason = carried_refusal(root, d["base"]["ref"], h1, sha)
-                except Stop as e:  # fail closed: a check that could not run never reads done
-                    reason = str(e)
-                if reason:
-                    state, why = "open", reason
+            try:
+                h1 = carried_first_head(earlier_records(bodies[:-1], n), rec)
+                reason = carried_refusal(root, d["base"]["ref"], h1, sha) if h1 else None
+            except Stop as e:  # fail closed: a check that could not run never reads done
+                reason = str(e)
+            if reason:
+                state, why = "open", reason
         ci = "draft, no run" if d.get("draft") else h.head_state(n, sha=sha)
         lines.append(f"#{n} {d['head']['ref']} {sha[:9]} {state}: {why}; CI {ci}")
     return lines + ([f"no record: {', '.join(bare)}"] if bare else [])
@@ -3277,13 +3277,26 @@ def guard_hits(paths):
     import guard as hook_guard  # here, not at the top: it loads the whole guard set, and only the review record needs it
     return sorted(p for p in paths if (p.startswith(GUARD_PATHS) or p in GUARD_FILES) and not hook_guard.is_test_rel(p))
 
+def earlier_records(bodies, n):
+    """-> the parsed records of pull request `n` among `bodies`, oldest first, for the carried-run check. The one home of who may be a predecessor, for
+    `merge --reviewed` and for `--review-record`. A record that names another pull request is a stray paste, never a predecessor: it is skipped.
+    A record of this pull request that does not parse raises Stop, never skipped to an older record, because the run it carried cannot be read."""
+    out = []
+    for body in bodies:
+        rec = parse_review(body)
+        if rec is None:
+            raise Stop(f"the rounds carried to this head cannot be checked: a review record on #{n} could not be read")
+        if rec["n"] == n:
+            out.append(rec)
+    return out
+
 def carried_first_head(earlier, rec):
     """-> H1, the Head of the oldest record in the unbroken run that carries `rec`'s rounds, or None when `rec` carries nothing. A record carries the
     rounds of the one before it when its Round lines and Fix check equal that record's (decision pr-review-record, the limits). `earlier` is the
-    parsed records of the pull request before `rec`, oldest first; a body that does not parse is None and breaks the run."""
+    parsed records of the pull request before `rec`, oldest first (earlier_records)."""
     first, nxt = None, rec
     for prev in reversed(earlier):
-        if prev is None or (prev["rounds"], prev["fix"]) != (nxt["rounds"], nxt["fix"]):
+        if (prev["rounds"], prev["fix"]) != (nxt["rounds"], nxt["fix"]):
             break
         first, nxt = prev["head"], prev
     return first
@@ -3377,7 +3390,7 @@ def main(argv, host=None, lock=None):
     p.add_argument("--live", default=None, metavar="FILE", help="with --idle-lanes: the publisher's live-work file")
     p.add_argument("--reviewed", action="store_true", help="list the open pull requests with their review record state and live CI")
     p.add_argument("--review-record", action="store_true", help="print the review record for the pull request's live head (posts nothing)")
-    p.add_argument("--head", type=head_arg, metavar="SHA", help="with --review-record: the 40-hex head the review read; the live head must equal it")
+    p.add_argument("--head", type=head_arg, metavar="SHA", help="with --review-record: the 40-hex head the review read; the live head must equal it. Rounds carried from earlier records of this PR are checked against it; an unreadable earlier record refuses")
     p.add_argument("--kind", choices=REVIEW_KINDS, help="with --review-record: the kind of change")
     p.add_argument("--guard", choices=REVIEW_GUARDS, help="with --review-record: whether the change touches a guard or check")
     p.add_argument("--round", action="append", type=round_arg, default=[], metavar="N:ROLE:MODEL:VERDICT", help="with --review-record: one reviewer line; repeat it")
@@ -3465,13 +3478,17 @@ def main(argv, host=None, lock=None):
             misfits = kind_misfits(a.kind, files)
             if misfits:
                 raise Stop(f"Kind: the diff breaks --kind {a.kind} at " + ", ".join(misfits) + ". Write the record with the kind the diff has. " + REVIEW_CITE)
-            earlier = [parse_review(b) for b in h.review_comments(info.get("created") or "1970-01-01T00:00:00Z").get(a.pr, [])]  # the one comment read
+            bodies = h.review_comments(info.get("created") or "1970-01-01T00:00:00Z").get(a.pr, [])  # the one comment read
+            earlier = [r for r in map(parse_review, bodies) if r is None or r["n"] == a.pr]  # a record naming another PR is no predecessor; None is an unread one
             if a.fix_check:  # the fix diff starts from the head the newest earlier record reviewed, and a fix never follows a fix
                 last = earlier[-1] if earlier else None
                 if not last or last["head"] != a.fix_check[0] or last["fix"]:
                     print("merge: --fix-check: the reviewed head must be the Head of the newest earlier review record on this pull request, and that record must have no Fix check line. " + REVIEW_CITE, file=sys.stderr)
                     return 2
-            h1 = carried_first_head(earlier, {"rounds": a.round, "fix": a.fix_check})
+            try:
+                h1 = carried_first_head(earlier_records(bodies, a.pr), {"rounds": a.round, "fix": a.fix_check})
+            except Stop as e:
+                raise Stop(f"{e}. " + REVIEW_CITE)
             if h1:  # these rounds equal the earlier record's, so a guard or check path changed since its head was never read
                 reason = carried_refusal(root, info["base"], h1, a.head)
                 if reason:

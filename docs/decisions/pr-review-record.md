@@ -37,9 +37,9 @@ CI: read live by merge --reviewed
   PR as `CI draft, no run`, because a draft has no CI run.
 - A body is not a record when the marker is missing, a field is malformed, round numbers skip, or a round is above 3.
 - The newest record for a head counts. A record for an old head is stale.
-- `merge <pr> --review-record --head <40-hex sha>` prints the body for the head the review read. When the PR's live head is another sha, it stops with exit 1 and prints no body, so a record never names a head the review did not read. A later push can still reuse the rounds, as a new record for the new head with the same Round lines. The carried-run check in the limits covers that.
+- `merge <pr> --review-record --head <40-hex sha>` prints the body for the head the review read. When the PR's live head is another sha, it stops with exit 1 and prints no body, so a record never names a head the review did not read. A later push can still reuse the rounds, as a new record for the new head with the same Round lines. The carried-run check in the limits covers that, and refuses when an earlier record of this PR cannot be read.
 - A lane posts the body with the GitHub MCP comment tool after each round. `gh pr comment` uses GraphQL, which the cloud refuses (route graphql-gh-api-cloud).
-- The one home of the form is the merge tool (`merge/merge.py`). `review_body` writes the body, `parse_review` reads it, and `review_state` gives each record's state. `reviewed_lines` prints the `--reviewed` list, `carried_first_head` and `unreviewed_guard_paths` make the carried-run check, `round_arg` reads `--round`, and `Host.review_comments` makes the one list read.
+- The one home of the form is the merge tool (`merge/merge.py`). `review_body` writes the body, `parse_review` reads it, and `review_state` gives each record's state. `reviewed_lines` prints the `--reviewed` list, `earlier_records`, `carried_first_head` and `unreviewed_guard_paths` make the carried-run check, `round_arg` reads `--round`, and `Host.review_comments` makes the one list read.
 
 ## The done rules
 
@@ -83,6 +83,7 @@ Counted as real `gh` calls, one call per list read however many pages it pages.
   - Let through: a Fix check whose reviewed head is H1 (its Fix check line differs from the earlier one, so nothing is carried), and a new Round line (it breaks the run, so the run starts at that record).
   - Fail closed: when H1 cannot be fetched, `merge-tree` fails, or git is older than 2.38, `--review-record` refuses and `--reviewed` shows `open`.
   - A first record with no earlier record skips the check.
+  - Who is a predecessor (`earlier_records`, one helper for `--review-record` and `--reviewed`): a record that names another PR is a stray paste and is skipped, never a predecessor. A record of this PR that does not parse fails closed: `--review-record` refuses naming the PR and that its record could not be read, and `--reviewed` shows `open` with the same reason. It is never skipped to an older record.
   - Limit: a first record posted for a head nobody reviewed is unseen. No earlier record names an earlier head, so nothing is carried. A lane that posts a record for a head it did not review is a mistake the tool cannot see.
 - In another repo, a change under `hooks/`, `lint/`, `bin/`, `actions/`, `.github/`, `merge/` or `githooks/`, or to a root `settings.json`, must say Guard or check `yes`. It then owes the net-value test after round 3. A `.claude/settings.json` or `.claude/hooks/` path is not on the list.
 - The tool does not tell a record that files an owner ruling from other docs. Kind `normal` stays the lane's claim. Guards stop mistakes, not attackers (record `guard-guards-mistakes-only`).
