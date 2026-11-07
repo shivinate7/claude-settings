@@ -20089,18 +20089,20 @@ def session_is_live_backwards_clock_step_case():
     return (not problems), "; ".join(problems) if problems else "backwards-step direction reads unreadable"
 
 
-def _decide_full(tool, cwd, agent_id=None, process_cwd=None, session=None, temp=None, **tool_input):
+def _decide_full(tool, cwd, agent_id=None, process_cwd=None, session=None, temp=None, agent_type=None,
+                 **tool_input):
     """`decide`, but for a hand-built payload naming every key `decide` reads by index.
 
     `process_cwd` sets the GUARD PROCESS's own cwd, distinct from the payload `cwd` above: a
     relative `file_path` must resolve against the payload `cwd`, never against wherever the
     guard subprocess happens to run from. `session` is the payload's session_id. `temp` is the
     temp folder the guard run reads as its own (see TEMP_DIR), or None for the system temp.
+    `agent_type` is the payload's agent_type, which names the agent's role (agent_role), or None.
     """
     return decide({
         "raw": None, "tool": tool, "cwd": cwd, "session": session, "env_path": None,
-        "config": None, "agent_id": agent_id, "process_cwd": process_cwd, "temp": temp,
-        "tool_input": tool_input,
+        "config": None, "agent_id": agent_id, "agent_type": agent_type, "process_cwd": process_cwd,
+        "temp": temp, "tool_input": tool_input,
     })
 
 
@@ -20818,6 +20820,98 @@ def worktree_home_red_case_fold_case():
     if problems:
         return False, "; ".join(problems)
     return True, "a write into the red-run folder spelled in other letters of case passes"
+
+
+# A test-author builds its mutants of product code in its own red-run folder (test-practices P3). The
+# Edit and Write tools must pass that folder for the test-author as they do for the other rules, or a
+# refused mutant pushes the author to a shell write.
+RED_AUTHOR_PRODUCT = os.path.join("hooks", "guard.py")  # product code a test-author may not change
+
+
+def _red_author_fixture(name):
+    """A primary checkout with the test-author's own worktree, `agent-<id>`, which is its recorded home,
+    and three more worktrees beside it: its own red-run folder, a sibling agent's red-run folder and a
+    folder whose name only starts with its id. Returns (primary, home, red, sibling_red, prefix_trap)."""
+    primary, home, _, _ = _cross_checkout_fixture(
+        name, lanes=("agent-" + CD_AGENT_HOME, "agent-" + CD_AGENT_SIBLING))
+    red = sh_add_lane(primary, "agent-" + CD_AGENT_HOME + "-red")[0]
+    sibling_red = sh_add_lane(primary, "agent-" + CD_AGENT_SIBLING + "-red")[0]
+    prefix_trap = sh_add_lane(primary, "agent-" + CD_AGENT_HOME + "b-red")[0]
+    return primary, home, red, sibling_red, prefix_trap
+
+
+def _record_author_home(primary, home):
+    """The test-author's first call from its home, which records the home as the harness's first call
+    does. '' when it allows and writes the record, else the problem to report."""
+    got, reason = _decide_full("Bash", home, agent_id=CD_AGENT_HOME, agent_type="test-author",
+                               command="echo hi")
+    if got != "allow":
+        return "the test-author's recording call: want allow, got %s (%s)" % (got, reason[:120])
+    if not os.path.isfile(os.path.join(primary, ".git", "agent-homes", CD_AGENT_HOME)):
+        return "the test-author's recording call wrote no home record"
+    return ""
+
+
+def worktree_home_red_author_edit_case():
+    """Rule 0 and test-author-scope, the Edit tool: a test-author's Edit of product code strictly inside
+    its own red-run folder is allowed. The red-run folder is a checkout beside the author's home, and the
+    mutant is the one write the author makes there. Decision: test-practices, P3."""
+    primary, home, red, _, _ = _red_author_fixture("xcoauthoredit")
+    problem = _record_author_home(primary, home)
+    if problem:
+        return False, problem
+    write(os.path.join(red, RED_AUTHOR_PRODUCT), "base\n")
+    got, reason = _decide_full("Edit", home, agent_id=CD_AGENT_HOME, agent_type="test-author",
+                               file_path=os.path.join(red, RED_AUTHOR_PRODUCT),
+                               old_string="base", new_string="mutant")
+    if got != "allow":
+        return False, ("Edit of hooks/guard.py strictly inside the own red-run folder: want allow, got %s (%s)"
+                       % (got, reason[:160]))
+    return True, "a test-author's Edit of product code inside its own red-run folder passes"
+
+
+def worktree_home_red_author_write_case():
+    """Rule 0 and test-author-scope, the Write tool: a test-author's Write of product code strictly inside
+    its own red-run folder is allowed, as the Edit tool's is. Decision: test-practices, P3."""
+    primary, home, red, _, _ = _red_author_fixture("xcoauthorwrite")
+    problem = _record_author_home(primary, home)
+    if problem:
+        return False, problem
+    got, reason = _decide_full("Write", home, agent_id=CD_AGENT_HOME, agent_type="test-author",
+                               file_path=os.path.join(red, RED_AUTHOR_PRODUCT), content="mutant\n")
+    if got != "allow":
+        return False, ("Write of hooks/guard.py strictly inside the own red-run folder: want allow, got %s (%s)"
+                       % (got, reason[:160]))
+    return True, "a test-author's Write of product code inside its own red-run folder passes"
+
+
+def worktree_home_red_author_refuse_case():
+    """Rule 0 and test-author-scope, the Edit tool, the controls that must stay refused: a test-author's Edit
+    of product code in its own worktree (refused by test-author-scope, the author's rule for product code), in
+    another agent's red-run folder, and in a folder whose name only starts with the author's id. The red-run
+    exemption is the caller's own folder alone, so none of these passes. Decision: test-practices, P3."""
+    primary, home, _, sibling_red, prefix_trap = _red_author_fixture("xcoauthorrefuse")
+    problem = _record_author_home(primary, home)
+    if problem:
+        return False, problem
+    problems = []
+    for label, target in (
+        ("own worktree", os.path.join(home, RED_AUTHOR_PRODUCT)),
+        ("sibling red-run folder", os.path.join(sibling_red, RED_AUTHOR_PRODUCT)),
+        ("prefix-named folder", os.path.join(prefix_trap, RED_AUTHOR_PRODUCT)),
+    ):
+        got, reason = _decide_full("Edit", home, agent_id=CD_AGENT_HOME, agent_type="test-author",
+                                   file_path=target, old_string="base", new_string="mutant")
+        if got != "deny":
+            problems.append("Edit of product code in the %s: want deny, got %s (%s)"
+                            % (label, got, reason[:160]))
+        elif label == "own worktree" and "test-author-scope" not in reason:
+            problems.append("Edit of product code in the own worktree: the deny does not name "
+                            "test-author-scope (%s)" % reason[:160])
+    if problems:
+        return False, "; ".join(problems)
+    return True, ("a test-author's Edit of product code in its own worktree, a sibling's red-run folder, "
+                  "or a prefix-named folder is refused")
 
 
 # Text is not a move: a `cd` in a comment, in quotes or in a heredoc body is never run. A real `cd`
@@ -21755,6 +21849,12 @@ LOG_CHECKS = (
      "refused to a cd, a shell write and a Write", worktree_home_red_nested_case),
     ("worktree-home: a write into the own red-run folder spelled in other letters of case passes on "
      "Windows, and is a skip elsewhere", worktree_home_red_case_fold_case),
+    ("worktree-home: a test-author's Edit of product code strictly inside its own red-run folder is "
+     "allowed", worktree_home_red_author_edit_case),
+    ("worktree-home: a test-author's Write of product code strictly inside its own red-run folder is "
+     "allowed", worktree_home_red_author_write_case),
+    ("worktree-home: a test-author's Edit of product code in its own worktree, a sibling's red-run "
+     "folder, or a prefix-named folder is refused", worktree_home_red_author_refuse_case),
     ("worktree-home: a cd in a comment, in quotes or in a heredoc body is text, and a real cd after one "
      "is refused", worktree_home_cd_text_case),
     ("worktree-home: an owner override lifts a bare cd into another checkout",
@@ -28790,6 +28890,9 @@ LOG_RULE_FAMILY = (
     ("worktree-home: the own red-run folder's root", "worktree-home"),
     ("worktree-home: a red-run folder nested under another linked worktree", "worktree-home"),
     ("worktree-home: a write into the own red-run folder spelled", "worktree-home"),
+    ("worktree-home: a test-author's Edit of product code strictly inside", "worktree-home"),
+    ("worktree-home: a test-author's Write of product code strictly inside", "worktree-home"),
+    ("worktree-home: a test-author's Edit of product code in its own worktree", "worktree-home"),
     ("worktree-home: a cd in a comment, in quotes", "worktree-home"),
     ("worktree-home: an owner override lifts a bare cd", "worktree-home"),
     ("worktree-home: a later path field", "worktree-home"),
