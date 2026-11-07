@@ -731,6 +731,14 @@ class OneHomeInRepoTests(unittest.TestCase):
         found, out = self.verdict_scan()
         self.assertEqual(keyed(found), [CONTROL_FINDING], out)
 
+    def test_rule_id_in_a_fence_four_spaces_deep_under_a_list_item_exempts_the_copy(self):
+        # The fence sits in a list item, and the anchor is in that item's unit, so the copy is exempt. The bare copy is
+        # the control: with no anchor it is a copy, at its own line. This pins the verdict as it stands.
+        self.tracked({"agents/indented.md": "- Run the step:\n    ```text\n    %s <!-- rule:brief-contents -->\n    ```\n" % RULE,
+                      "agents/indented-bare.md": "- Run the step:\n    ```text\n    %s\n    ```\n" % RULE})
+        found, out = self.verdict_scan()
+        self.assertEqual(keyed(found), sorted([CONTROL_FINDING, ("agents/indented-bare.md", 3, "COPY001")]), out)
+
     def test_rule_id_in_the_same_blockquote_exempts_the_copy(self):
         self.tracked({"agents/quote.md": "> %s See brief-contents.\n" % RULE})
         found, out = self.verdict_scan()
