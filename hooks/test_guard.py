@@ -11817,6 +11817,38 @@ sh("frozen-perl-ruby-inline: perl -e opens a config hook for reading and writes 
    "perl -e 'open(F,\"<\",\"" + CFG_HOOK + "\")'", "allow", cwd=NOGIT)
 sh("frozen-perl-ruby-inline: ruby -e reads a config hook and writes nothing, allowed",
    "ruby -e 'print File.read(\"" + CFG_HOOK + "\")'", "allow", cwd=NOGIT)
+# perl-ruby-near-forms: a perl or ruby body that writes no frozen file is allowed, however it reads. A write
+# call in a `#` comment is no write, and an apostrophe or `/*` inside a string is text, not a comment.
+NEAR_SCRATCH = slash(os.path.join(ROOT, "near-scratch.txt"))
+sh("perl-ruby-near-forms: a perl heredoc reads a config hook and writes a scratch file, allowed",
+   "perl <<'EOF'\nopen(F, '<', '" + CFG_HOOK + "');\nopen(O, '>', '" + NEAR_SCRATCH + "');\nEOF",
+   "allow", cwd=NOGIT)
+sh("perl-ruby-near-forms: a ruby heredoc reads a config hook and writes a scratch file, allowed",
+   "ruby <<'EOF'\nputs File.read('" + CFG_HOOK + "')\nFile.write('" + NEAR_SCRATCH + "', 'x')\nEOF",
+   "allow", cwd=NOGIT)
+sh("perl-ruby-near-forms: a perl heredoc whose write call sits in a # comment is allowed",
+   "perl <<'EOF'\n# open(F, '>', '" + CFG_HOOK + "');\nprint \"ok\\n\";\nEOF", "allow", cwd=NOGIT)
+sh("perl-ruby-near-forms: a ruby heredoc whose File.write sits in a # comment is allowed",
+   "ruby <<'EOF'\n# File.write('" + CFG_HOOK + "', 'x')\nputs 'ok'\nEOF", "allow", cwd=NOGIT)
+sh("perl-ruby-near-forms: a lone apostrophe in the # comment that holds the write is allowed",
+   "perl <<'EOF'\n# don't open(F, '>', '" + CFG_HOOK + "');\nprint \"ok\\n\";\nEOF", "allow", cwd=NOGIT)
+sh("perl-ruby-near-forms: perl -e prints the -i switch and a config hook as text, allowed",
+   "perl -e 'print \" -i " + CFG_HOOK + "\"'", "allow", cwd=NOGIT)
+sh("perl-ruby-near-forms: a ruby heredoc File.read of a config hook, then a File.write elsewhere, is allowed",
+   "ruby <<'EOF'\nx = File.read('" + CFG_HOOK + "')\nFile.write('" + NEAR_SCRATCH + "', x)\nEOF",
+   "allow", cwd=NOGIT)
+sh("perl-ruby-near-forms: perl -e with a write call in a # comment is allowed",
+   "perl -e 'print 1; # open(F, \">\", \"" + CFG_HOOK + "\")'", "allow", cwd=NOGIT)
+# Controls, green today: the apostrophe and the /* are text inside the string, and the write after the string is real.
+sh("perl-ruby-near-forms: a /* and an apostrophe inside a perl string do not hide the write after it",
+   "perl <<'EOF'\nprint \"don't /* not a comment\";\nopen(O, '>', '" + CFG_HOOK + "');\nEOF",
+   "deny", "frozen-path", cwd=NOGIT)
+sh("perl-ruby-near-forms: a # line inside a multi-line perl string does not end the string before a write",
+   "perl <<'EOF'\nprint \"first line\n# not a comment\nlast line\";\nopen(O, '>', '" + CFG_HOOK + "');\nEOF",
+   "deny", "frozen-path", cwd=NOGIT)
+sh("perl-ruby-near-forms: a write call inside a perl string is text, and the real write is refused",
+   "perl <<'EOF'\nprint \"open(F, '>', '" + CFG_HOOK + "')\";\nopen(O, '>', '" + CFG_HOOK + "');\nEOF",
+   "deny", "frozen-path", cwd=NOGIT)
 sh("config-edit: rm of a project settings file is allowed", "rm " + PROJ_SETTINGS, "allow",
    cwd=NOGIT)
 sh("config-edit: mv of a project settings file is allowed",
