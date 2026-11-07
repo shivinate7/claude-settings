@@ -546,8 +546,8 @@ class LaneLint(CiJobStub, tm.CloudSession):
             return [line.rstrip("\n") for line in f if line.strip()]
 
     def test_a_selected_suite_the_lane_did_not_touch_that_fails_at_the_head_refuses_the_lane(self):
-        """The incident shape (batch PR 1081): the lane changes the product file, the selector lists a suite the lane did not touch,
-        and that suite fails at the head. The lane lint refuses, names the suite, and runs it in the head's tree, not the lane checkout."""
+        """The lane changes the product file, the selector lists a suite the lane did not touch, and that suite fails at the head.
+        The lane lint refuses, names the suite, and runs it in the head's tree, not the lane checkout."""
         self.lane_fixture(listed=[SUITE], suites={SUITE: "fail"})
         self.assert_suite_is_selector_only(SUITE)
         self.use_ci_job(PASSING, 0)
