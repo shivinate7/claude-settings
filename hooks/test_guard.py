@@ -13255,6 +13255,34 @@ add("builder-test: a bash -c test run rewritten to a bare pytest run in checks.y
     tool="Edit", file_path=WF,
     old_string=LINT + "      - name: Unit\n        run: bash -c 'pytest tests/test_a.py'\n",
     new_string=LINT + "      - name: Unit\n        run: pytest tests/test_a.py\n", **B)
+# A quoted test path with a space in its folder is still a test path, so each one in a run line is read as a path.
+# Dropping one of two such paths drops a test, and it is refused.
+QUOTED_SPACED_TWO = "      - name: Spaced\n        run: pytest 'tests/a b/test_x.py' 'tests/a b/test_y.py'\n"
+QUOTED_SPACED_ONE = "      - name: Spaced\n        run: pytest 'tests/a b/test_y.py'\n"
+add("builder-test: one of two quoted spaced test paths dropped from a pytest run in checks.yml is refused",
+    "deny", rule=BT, tool="Edit", file_path=WF, old_string=LINT + QUOTED_SPACED_TWO,
+    new_string=LINT + QUOTED_SPACED_ONE, carries=("test-author", "Report"), **B)
+add("builder-test: a python run of a quoted spaced test script, deleted from checks.yml is refused",
+    "deny", rule=BT, tool="Edit", file_path=WF,
+    old_string=LINT + "      - name: Script\n        run: python 'scripts/my dir/test_a.py'\n",
+    new_string=LINT, carries=("test-author", "Report"), **B)
+# A quoted message or folder name that holds the word test is not a test run, so editing or deleting it is allowed.
+for _label, _step, _edited in (
+    ("an echo of a quoted tests passed", "      - name: Note\n        run: echo 'tests passed'\n",
+     "      - name: Note\n        run: echo 'build passed'\n"),
+    ("an echo of a quoted test complete", "      - name: Done\n        run: echo 'test complete'\n",
+     "      - name: Done\n        run: echo 'build complete'\n"),
+    ("a mkdir of a quoted test results folder", "      - name: Dirs\n        run: mkdir -p 'test results'\n",
+     "      - name: Dirs\n        run: mkdir -p 'build output'\n"),
+):
+    add("builder-test: %s, edited in checks.yml, is allowed" % _label, "allow", tool="Edit", file_path=WF,
+        old_string=LINT + _step, new_string=LINT + _edited, **B)
+    add("builder-test: %s, deleted from checks.yml, is allowed" % _label, "allow", tool="Edit", file_path=WF,
+        old_string=LINT + _step, new_string=LINT, **B)
+add("builder-test: continue-on-error added to an echo step with a quoted message in checks.yml is allowed",
+    "allow", tool="Edit", file_path=WF,
+    old_string=LINT + "      - name: Note\n        run: echo 'tests passed'\n",
+    new_string=LINT + "      - name: Note\n        continue-on-error: true\n        run: echo 'tests passed'\n", **B)
 
 # ---- test-path shapes: one table on the builder's early warning. Each row is one path, judged by
 # a Write, for one role (the builder). A test shape is refused, a near miss is allowed. Shapes, with
