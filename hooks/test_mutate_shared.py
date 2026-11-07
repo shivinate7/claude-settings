@@ -20,6 +20,9 @@ or when MUTATE_FULL=1 asks for it.
 
 The fourth part pins the layout of a guard mutant's folder: its copy must import lint/layout.py from
 its own root, the folder beside its hooks/.
+
+The fifth part pins the clean-layout control: a target's mutants count as kills only after one full-suite
+run of the unmutated layout passes. A red control reads each mutant UNKNOWN, never KILLED.
 """
 import contextlib
 import io
@@ -229,6 +232,121 @@ class GuardMutantLayoutTests(unittest.TestCase):
             capture_output=True, text=True)
         self.assertEqual(result.returncode, 0,
                          "the copied guard cannot import lint/layout.py from its root: " + result.stderr[-300:])
+
+
+def tree_text(copy_path):
+    """Every module beside `copy_path`, joined: a mutant's new text lands in one of them."""
+    folder = os.path.dirname(copy_path)
+    texts = []
+    for name in sorted(os.listdir(folder)):
+        if name.endswith(".py"):
+            with open(os.path.join(folder, name), encoding="utf-8") as handle:
+                texts.append(handle.read())
+    return "\n".join(texts)
+
+
+def fail_result(*names):
+    lines = ["FAIL  allow (want deny) [Bash] " + name for name in names]
+    return 1, lines, list(lines), []
+
+
+def pass_result(*names):
+    lines = ["PASS  allow (want allow) [Bash] " + name for name in names]
+    return 0, [], lines, []
+
+
+class _FakeSuite:
+    """A stand-in for `mutate_guard.run_suite`, called as (suite, variable, copy_path, config_dir, only).
+
+    A call whose copy_path folder holds an entry's mutated text is that mutant's run: it FAILs the
+    entry's required case. Any other call is the clean-layout control, a full-suite run (`only` None)
+    on the unmutated tree. `control_passes` makes that control green (True) or red (False).
+    `calls` records each call as {"only", "tree", "mutant"}."""
+
+    def __init__(self, entries, control_passes):
+        self.mutated = {}
+        for entry in entries:
+            _label, _old, new, _target, required, _only_on = mutate_guard.mutation_parts(entry)
+            self.mutated[new] = required
+        self.required = list(self.mutated.values())
+        self.control_passes = control_passes
+        self.calls = []
+
+    def __call__(self, suite, variable, copy_path, config_dir, only=None):
+        tree = tree_text(copy_path)
+        hits = [required for new, required in self.mutated.items() if new in tree]
+        self.calls.append({"only": only, "tree": tree, "mutant": bool(hits)})
+        if hits:
+            return fail_result(hits[0])
+        if self.control_passes:
+            return pass_result(*self.required)
+        return fail_result(*self.required)
+
+
+class CleanLayoutControlTests(unittest.TestCase):
+    """A mutant's FAIL lines prove a kill only when the same layout, unmutated, passes the suite. Without
+    that control, a layout that crashes reads as a kill. Each target gets one full-suite control run on
+    the unmutated layout. A red control reads its mutants UNKNOWN, naming "clean layout", never KILLED."""
+
+    def setUp(self):
+        self.run = _test_temp.run_folder()
+        self.addCleanup(shutil.rmtree, self.run, True)
+
+    def guard_entries(self, *prefixes):
+        """The real guard entry whose label starts with each prefix, in the order given."""
+        return [next(e for e in mutate_guard.MUTATIONS if mutate_guard.mutation_parts(e)[0].startswith(prefix))
+                for prefix in prefixes]
+
+    def run_main(self, entries, suite):
+        """Run mutate_guard.main() over `entries` alone, with `suite` as run_suite. Return (exit code, stdout lines).
+        main's work folder is made under this test's run folder, not the system temp dir."""
+        out = io.StringIO()
+        real_mkdtemp = tempfile.mkdtemp
+
+        def mkdtemp_in_run(suffix=None, prefix=None, dir=None):
+            return real_mkdtemp(suffix=suffix, prefix=prefix, dir=self.run)
+
+        with mock.patch.object(mutate_guard, "MUTATIONS", entries), \
+                mock.patch.object(mutate_guard, "run_suite", side_effect=suite), \
+                mock.patch.object(tempfile, "mkdtemp", side_effect=mkdtemp_in_run), \
+                contextlib.redirect_stdout(out):
+            code = mutate_guard.main()
+        return code, out.getvalue().splitlines()
+
+    def test_a_red_clean_layout_reads_unknown_not_killed(self):
+        entries = self.guard_entries("role-model: Explore loses its audit exemption")
+        label = mutate_guard.mutation_parts(entries[0])[0]
+        code, lines = self.run_main(entries, _FakeSuite(entries, control_passes=False))
+        self.assertFalse([line for line in lines if line.startswith("KILLED")],
+                         "a red clean layout still reads the mutant as KILLED: %r" % lines)
+        self.assertTrue([line for line in lines
+                         if line.startswith("UNKNOWN") and label in line and "clean layout" in line],
+                        "no UNKNOWN line names the mutant and 'clean layout': %r" % lines)
+        self.assertEqual(code, 1, "a red clean layout must exit 1, not %r" % code)
+
+    def test_a_green_clean_layout_keeps_the_kill(self):
+        entries = self.guard_entries("role-model: Explore loses its audit exemption")
+        label = mutate_guard.mutation_parts(entries[0])[0]
+        code, lines = self.run_main(entries, _FakeSuite(entries, control_passes=True))
+        self.assertTrue([line for line in lines if line.startswith("KILLED") and label in line],
+                        "a green clean layout lost the kill of the mutant: %r" % lines)
+        self.assertFalse([line for line in lines if line.startswith("UNKNOWN")],
+                         "a green clean layout still reads a mutant UNKNOWN: %r" % lines)
+        self.assertEqual(code, 0, "a green clean layout with every mutant killed must exit 0, not %r" % code)
+
+    def test_the_control_runs_once_per_target_unmutated(self):
+        entries = self.guard_entries("work-tree: the tree option goes unread",
+                                     "pointer-head: the git directory option goes unread")
+        suite = _FakeSuite(entries, control_passes=True)
+        _code, lines = self.run_main(entries, suite)
+        controls = [call for call in suite.calls if not call["mutant"] and call["only"] is None]
+        self.assertEqual(len(controls), 1,
+                         "the target runs %d full-suite clean-layout controls, want one: %r" % (len(controls), lines))
+        tree = controls[0]["tree"]
+        for entry in entries:
+            label, old, new = mutate_guard.mutation_parts(entry)[:3]
+            self.assertIn(old, tree, "the control's tree is not the unmutated guard for: " + label)
+            self.assertNotIn(new, tree, "the control's tree holds the mutated text of: " + label)
 
 
 def scaffold_sources(**extra):
