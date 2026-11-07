@@ -1337,7 +1337,7 @@ SHOT_URL = "https://claude.ai/artifact/0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d/asse
 class MockupHomes(Tree):
     """The one mockup home of a repo is its design folder: a mockup is a repo path under it, and git holds it. The
     machine-home form ~/Developer/<repo name>-imports is refused. Two readers:
-    mockup_homes(root, home=None) names the folders, and mockup_home_problem(root, file, home=None) gives None for a
+    mockup_homes(root) names the folders, and mockup_home_problem(root, file, home=None) gives None for a
     file in the design folder and a sentence for any other file. The home is passed in, so no case reads or writes
     the real home. A missing name fails by name (not built yet)."""
 

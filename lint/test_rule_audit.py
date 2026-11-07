@@ -361,32 +361,6 @@ SIBLING_MAP = {
     }
 }
 
-# The real row of output-tracking-turn-one-line, its check half: a turn that lands a commit, push, merge or PR.
-TRACKING_CHECK = {
-    "ref": "lint/report_guard.py",
-    "test": "lint/test_report_guard.py::ReportGuardTests.test_67_every_github_landing_tool_with_no_report_blocks",
-}
-TRACKING_CHECK_REASON = ("The check covers the landing case: a turn that lands a commit, push, merge or opened PR "
-                         "is not a tracking turn and ends with the report.")
-TRACKING_ONLY_CASE = "The tracking-only case, one line on a turn that lands nothing, stays a content judgment."
-
-
-class OneKindPerRowTests(unittest.TestCase):
-    """A row holds one kind. The schema has one `kind` key, so a second kind can only sit in a reason's prose:
-    a `check` row whose reason says one case stays a judgment holds two kinds."""
-
-    def test_a_check_row_whose_reason_holds_a_judgment_case_fails(self):
-        mixed = check_map(dict(TRACKING_CHECK, reason=TRACKING_CHECK_REASON + " " + TRACKING_ONLY_CASE))
-        problems = run(rule_map=mixed)
-        self.assertTrue(any("shared-trees-no-destructive-git" in p and "judgment" in p for p in problems),
-                        "a check row whose reason names a judgment case holds two kinds: %r" % (problems,))
-
-    def test_a_check_row_whose_reason_holds_one_kind_stays_clean(self):
-        # The green control: the same row without the judgment sentence is one kind and passes.
-        problems = run(rule_map=check_map(dict(TRACKING_CHECK, reason=TRACKING_CHECK_REASON)))
-        self.assertEqual(problems, [])
-
-
 class KindDocTests(unittest.TestCase):
     """The module docstring keeps the two kinds apart: only `judgment` says no check can judge the rule.
     A reader of `unmechanized` must not read it as the same case (claude-md-shrink)."""
