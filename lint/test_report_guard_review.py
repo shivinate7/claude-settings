@@ -8,7 +8,7 @@ review record for its live head. Choices pinned here:
   is no claim. A PASS that a negation governs ("not PASS", "did not PASS") is no claim.
 - A history line is no claim: a PASS its clause places in the past, as stale or before a change ("was before the
   fix", "went stale after the push"). Clauses split on `,`, `;` and `--`, and the clause that holds the PASS decides,
-  so a history word in another clause does not hide a claim ("round 2 PASS on #12, superseding the stale round 1 FAIL").
+  so a history word in another clause does not hide a claim (a current PASS followed by ", superseding the stale FAIL").
 - The pull requests: each PR number on a claim line, as `#<n>`, `PR <n>`, a backticked `#<n>`, or a github pull URL,
   on the line. Each one is checked. A claim line with no PR is refused, and the reason asks for one.
 - The record: the newest comment whose first line is the review marker, read by merge/merge.py parse_review, that
@@ -356,8 +356,8 @@ class ReviewRecordTests(unittest.TestCase):
                 self.assertIn("PR #12", out["reason"], out)
 
     def test_reviewer_fail_beside_a_design_pass_in_one_round_blocks(self):
-        # Catches: a record read as passed because one line of round 1 says PASS. merge reads the whole round, so the
-        # reviewer's FAIL keeps round 1 open, whatever the design reviewer wrote in the same round.
+        # Catches: a record read as passed because one line of the first round says PASS. merge reads the whole round, so
+        # the reviewer's FAIL keeps that round open, whatever the design reviewer wrote in the same round.
         self.assert_record_blocks_claim(record(rounds=[(1, "reviewer", "sonnet", "FAIL"),
                                                        (1, "design-reviewer", "sonnet", "PASS")]))
 
