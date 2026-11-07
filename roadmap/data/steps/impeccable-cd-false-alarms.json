@@ -1,0 +1,11 @@
+{
+  "title": "The guard stops two false alarms that page-dup-helpers met",
+  "phase": "now",
+  "status": "doing",
+  "order": 265.9,
+  "owner": "coordinator",
+  "lane": "session_013NEJL1sFDSKJbG4VKzG2TY",
+  "why": "Lane page-dup-helpers met two guard false alarms (coordinator, 15:26 CST Nov 7). A guard that cries wolf is spent.",
+  "note": "The same lane's no-model reviewer gap went into lane spawn-model-cap-all-roles, and its branch-ref gap into lane two-worktrees-one-branch. Done check: each false alarm reproduced red, then allowed, with the guarded act still refused.",
+  "updatedAt": "2026-11-07T15:26:00-06:00"
+}

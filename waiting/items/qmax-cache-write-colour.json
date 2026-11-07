@@ -1,0 +1,36 @@
+{
+  "added": "2026-11-07T21:26:00Z",
+  "context": "Goal: the Jobs screen shows the prompt-cache figures the way the record says, so a cold start reads as a cold start.\nProblem (rule): D-173 (A read alone cannot tell a cold cache), section \"What is shown\", says the cache write shows in the warn colour, not the good one. src/components/screens/JobsScreen.tsx lines 179-180 and 1018 show Cache read and Cache written as plain counts with no colour.\nBased on (read): JobsScreen.tsx renders both cache columns as kind 'count', with no tone.\nBased on (read): D-173 rules the write in the warn colour. The lane found no later entry that lifts it.\nDeparts from: main (plain cache counts) \u2014 either the write column gains the warn colour, or D-173's colour sentence goes.\nMeanwhile the lane builds its items 1, 2, 3, 5, 6, 7 and 9, and leaves D-173 and JobsScreen.tsx alone.",
+  "home": "lane qmax-stale-claims-fix (session_013NEJL1hgEeFfeHssbMASim)",
+  "id": "qmax-cache-write-colour",
+  "kind": "decision",
+  "lane": "qmax-stale-claims-fix",
+  "n": 374,
+  "options": [
+    {
+      "gain": "A cold start stands out, as D-173 argues, and the record stays true.",
+      "key": "a",
+      "label": "Restore the colour in code (recommended)",
+      "lose": "A builder lane on JobsScreen.tsx, plus a designer pass on that screen."
+    },
+    {
+      "gain": "No code change.",
+      "key": "b",
+      "label": "Rewrite D-173 to match the code",
+      "lose": "The cold-start cue goes; you read the pair by number alone."
+    },
+    {
+      "gain": "No work now.",
+      "key": "c",
+      "label": "Leave both until a Jobs screen redesign",
+      "lose": "The entry stays false on main."
+    }
+  ],
+  "owner": "lane qmax-stale-claims-fix (session_013NEJL1hgEeFfeHssbMASim)",
+  "rank": 2,
+  "ref": "q_max D-173; q_max src/components/screens/JobsScreen.tsx",
+  "short": "q_max Jobs: colour the cache write, or drop the rule",
+  "status": "open",
+  "title": "Should q_max's Jobs screen show the cache write in the warn colour, as D-173 says?",
+  "why": "Lane qmax-stale-claims-fix found the code and the record disagree. Fixing either side changes a display choice, so it needs your word."
+}
