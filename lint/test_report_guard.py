@@ -2006,13 +2006,14 @@ class QuestionReachesPageTests(SameTurnWriter, unittest.TestCase):
         os.makedirs(self.home)
         self.repo = self.make_repo("repo")
 
-    def make_repo(self, name, page=True):
+    def make_repo(self, name, page=True, extras=None):
+        """A repo with a waiting page. `extras` replaces the default extras file, which names the page under the old key."""
         repo = os.path.join(self.run_dir, name)
         os.makedirs(os.path.join(repo, ".git"))
         if page:
             os.makedirs(os.path.join(repo, ".claude"))
             with open(os.path.join(repo, ".claude", "layout-extras.json"), "w") as f:
-                json.dump({"kinds": {}, "waiting-page": self.PAGE}, f)
+                json.dump(extras if extras is not None else {"kinds": {}, "waiting-page": self.PAGE}, f)
         return repo
 
     def reply(self, body):
@@ -2072,6 +2073,22 @@ class QuestionReachesPageTests(SameTurnWriter, unittest.TestCase):
         # Catches: an Input Needed sentence ending in "?" read as no question, so it never reaches the page.
         out = self.stop([human("decide"), assistant_text(self.reply(self.QUESTION))])
         self.assert_blocked(out, "Pick guard")
+
+    def test_qm_red_an_unreadable_layout_refuses_as_cannot_run(self):
+        # Catches: the owner-question check passing a question when the layout raises LayoutError. waiting_page() raises
+        # for a waiting-page URL that is no artifact link, and the check's own except passes the reply unchecked. It must
+        # refuse as cannot-run, as the past-ruling check does. The control is the same reply with a readable page.
+        import layout  # the scope first: the fixture makes the layout raise
+        broken = self.make_repo("broken", extras={"kinds": {}, "waiting-page": "https://example.com/x"})
+        with self.assertRaises(layout.LayoutError, msg="the fixture does not make the layout raise"):
+            layout.waiting_page(broken)
+        out = self.stop([human("decide"), assistant_text(self.reply(self.QUESTION))], repo=broken)
+        self.assertIsNotNone(out, "the question passed with an unreadable layout: the check swallowed the LayoutError")
+        self.assertEqual(out.get("decision"), "block", out)
+        self.assertIn("could not run", out.get("reason", ""), "the refusal does not say the check could not run: %s" % out)
+        readable = self.stop([human("decide"), assistant_text(self.reply(self.QUESTION))])
+        self.assert_blocked(readable, "Pick guard")
+        self.assertNotIn("could not run", readable.get("reason", ""), "the readable-page control named a cannot-run refusal")
 
     def test_qm_red_question_mark_rows_block(self):
         # Catches: a plain "X or Y?" ask with no box or send passing as a non-pick (spec v2.1).
