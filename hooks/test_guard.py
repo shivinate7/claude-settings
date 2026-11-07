@@ -10140,10 +10140,10 @@ PFR_LINES = {
     "gh-heredoc-sh": pfr_bash("toolu_pr1", "sh <<EOF\ngh pr create --draft --title t\nEOF",
                               "https://github.com/shivinate7/claude-settings/pull/1467\n")
                      + pfr_call("toolu_rev1", PFR_FAIL),
-    # A verdict in backticks or with a bold verb word is still the Done verdict.
+    # A verdict in backticks or with a verdict word is still the Done verdict.
     "fail-backtick": pfr_pr() + pfr_call("toolu_rev1", pfr_report("`%s`" % pfr_verdict("FAIL", 1, "claude-haiku-5-5"),
                                                                   PFR_FINDING)),
-    "fail-bold-verb": pfr_pr() + pfr_call("toolu_rev1", pfr_report("**FAIL**, round 1 of 3, m", PFR_FINDING)),
+    "fail-bold-verdict": pfr_pr() + pfr_call("toolu_rev1", pfr_report("**FAIL**, round 1 of 3, m", PFR_FINDING)),
     "pass-backtick-record": pfr_pr() + pfr_call("toolu_rev1", pfr_report(
         "`%s`" % pfr_verdict("PASS", 1, "claude-haiku-5-5"), PFR_FINDING)) + pfr_post("toolu_c1", PFR_PASS_RECORD),
     "empty": [],
@@ -10280,9 +10280,9 @@ pfr_refuse("a bash heredoc whose body is a gh pr create --draft, then an unrecor
            pfr_path("gh-heredoc-bash"))
 pfr_refuse("an sh heredoc whose body is a gh pr create --draft, then an unrecorded FAIL, then the push", PFR_PUSH,
            pfr_path("gh-heredoc-sh"))
-# A Done line in backticks, or with a bold verb word, reads as its verdict: a FAIL with no record denies.
+# A Done line in backticks, or with a verdict word, reads as its verdict: a FAIL with no record denies.
 pfr_refuse("a FAIL Done line in backticks with no record, then the push", PFR_PUSH, pfr_path("fail-backtick"))
-pfr_refuse("a FAIL Done line with a bold verb word and no record, then the push", PFR_PUSH, pfr_path("fail-bold-verb"))
+pfr_refuse("a FAIL Done line with a verdict word and no record, then the push", PFR_PUSH, pfr_path("fail-bold-verdict"))
 pfr_allow("a PASS Done line in backticks, with its PASS record posted, then the push", PFR_PUSH,
           pfr_path("pass-backtick-record"))
 
