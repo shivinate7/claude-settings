@@ -272,13 +272,21 @@ class Fences(unittest.TestCase):
                 code, out = run(files)
                 self.assertEqual(code, 0, out)
 
-    def test_a_four_space_or_tab_fence_hides_the_rows_inside_it_and_not_the_rows_after_it(self):
-        # The line is stripped before the fence test, so its indent does not decide the fence. Pinned so a change to the
-        # fence rule cannot start reading rows inside an indented fence.
+    def test_a_four_space_or_tab_fence_under_a_list_item_hides_the_rows_inside_it(self):
+        # Pin: in a list item the indented fence is a fence, so the row inside it is hidden and the row after it counts.
+        for opener in ("    ```", "\t```"):
+            with self.subTest(opener=opener):
+                lines = list(live_lines("- item\n%s\nhidden-row\n%s\nafter-row\n" % (opener, opener)))
+                self.assertEqual(lines, ["- item", "after-row"], "a row inside a list-item fence indented as %r must not count" % opener)
+
+    def test_a_top_level_four_space_or_tab_fence_hides_no_row(self):
+        # Red: at the top level a line indented four spaces, or led by a tab, is indented code, not a fence (CommonMark).
+        # So the row after it is read, and the row under it is read too.
         for opener in ("    ```", "\t```"):
             with self.subTest(opener=opener):
                 lines = list(live_lines("%s\nhidden-row\n%s\nafter-row\n" % (opener, opener)))
-                self.assertEqual(lines, ["after-row"], "rows inside a fence indented as %r must not count" % opener)
+                self.assertEqual(lines, [opener, "hidden-row", opener, "after-row"],
+                                 "a top-level line indented as %r is no fence, so it hides no row" % opener)
 
     def test_mid_line_comment_opener_hides_the_rows_it_wraps(self):
         # Red: "intro <!--" opens a multi-line comment on a prose line. The row inside must not count.
