@@ -261,12 +261,20 @@ def _pose_index(words, name, other):
     return next((i for i, word in enumerate(words) if word in pose), None)
 
 
+ORDER_FILLER = frozenset({"the", "a", "an", "duo", "iphone"})
+
+
 def _order_word_between(words, one, two):
-    """True when "after" sits between the two pose words, so the pose named first is drawn last. Only the
-    words between the poses relate them: "before" there, or "after" in front of both ("after the folded
-    pose, draw unfolded"), leaves the text order."""
-    between = words[min(one, two) + 1:max(one, two)]
-    return "after" in between
+    """True when "after" ties the two poses directly, so the pose named first is drawn last: every word from
+    the last "after" between the poses up to the second pose word is filler ("after the Duo unfolded").
+    Anything else there ("after the header, before the folded Duo", "after that, draw the Duo folded"), or
+    "after" in front of both poses, leaves the text order."""
+    low, high = min(one, two), max(one, two)
+    between = words[low + 1:high]
+    if "after" not in between:
+        return False
+    last = len(between) - 1 - between[::-1].index("after")
+    return all(word in ORDER_FILLER for word in between[last + 1:])
 
 
 def ios_skill_faults(text, devices):

@@ -787,7 +787,7 @@ def gh_login_hit(data) -> str:
 # (incident in the record): a waiting-page task handed the owner a job a session on his computer then
 # did. A task carries a "Why yours:" line naming the check that showed no session could do it.
 WHY_YOURS_LINE = re.compile(r"^\s*Why yours:[ \t]*\S", re.I | re.M)
-WHY_YOURS_LABEL = re.compile(r"\bWhy yours:", re.I)
+WHY_YOURS_LABEL = re.compile(r"^[ \t]*Why yours\b", re.I | re.M)
 TASK_REASON = ("A task is yours to hand over only when no session can do it. If the cloud refused the "
                "act, ask a session on the owner's computer first (list_computer_folders, then "
                "request_computer_folder). Then add a line to context that starts \"Why yours: "
