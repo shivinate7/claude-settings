@@ -425,10 +425,10 @@ class Flow(Env):
 
     @windows_slice
     def test_afterMerge_runs_in_git_bash_not_the_wsl_stub(self):
-        """after_merge() (merge/merge.py:470) hands subprocess.run a bare "bash". On Windows,
-        CreateProcess searches C:\\Windows\\System32 before PATH, and that folder holds the WSL
-        launcher stub, not Git Bash (decision bare-bash-on-windows-can-resolve-to-the-wsl-stub;
-        the fix, _find_git_bash(), lives only in hooks/test_config_watch.py). A command that
+        """after_merge() runs its commands in resolve_program("bash"). On Windows, CreateProcess
+        searches C:\\Windows\\System32 before PATH, and that folder holds the WSL launcher stub,
+        not Git Bash (decision bare-bash-on-windows-can-resolve-to-the-wsl-stub; the lookup's one
+        home is hooks/git_bash.py). A command that
         prints $OSTYPE tells the two apart: Git Bash (MSYS/MINGW) says "msys" or "msys-...", the
         WSL stub says "linux-gnu". The redirect target is a bare relative name so this case does
         not also depend on the separate native-path-quoting defect above."""
@@ -4558,6 +4558,18 @@ class GhHalf(Env):
         self.assertIn("gh pr ready", text)
         self.assertIn("push", text)
         self.assertNotIn("gh workflow run", text)
+        # gh pr ready is GraphQL, refused in cloud: the remedy also names the cloud route and its table.
+        self.assertIn("update_pull_request", text)
+        self.assertIn("route pr-ready-mcp-cloud", text)
+
+    def test_the_stale_page_remedy_names_both_draft_routes_and_their_table(self):
+        # A cloud session returns a PR to draft by MCP update_pull_request (route pr-draft-mcp-cloud), so the remedy never hands it to the owner's computer.
+        for claim in ("", "c1"):
+            text = merge.stale_page_remedy(7, claim)
+            self.assertIn("update_pull_request", text)
+            self.assertIn("gh pr ready 7 --undo", text)
+            self.assertIn("route pr-draft-mcp-cloud", text)
+            self.assertNotIn("owner's computer", text)
 
     def test_a_draft_head_with_all_jobs_passed_required_stops_at_once_with_the_remedy(self):
         # The wait path. Every check and run skipped: red stops the wait on the first read, not at the 45 minute deadline.
@@ -8137,7 +8149,7 @@ class RecordsRebuild(RecordsEnv):
         # The real host's ready() always returns (False, why), so every draft step ends here. The push worked, so no line says "could not".
         self.kinds_off()
         self.on("feat", {"debts/gap-one.md": DEBT_TEXT})
-        self.host.ready_refuse = "GitHub marks a draft ready only through GraphQL, and this tool sends no GraphQL"
+        self.host.ready_refuse = merge.Host.ready(None, 1)[1]
         before = self.head()
         rc, out = self.draft_confirm()
         self.assertEqual(rc, 0, out)

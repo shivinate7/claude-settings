@@ -2044,6 +2044,69 @@ class RouteClaimTests(StaleCase):
         _, out = self.run_tree(rng)
         self.assertEqual(stale005_hits(out), [], out)
 
+    def test_route_claim_is_silent_on_a_claim_in_straight_or_curly_double_quotes(self):
+        rows = [
+            ('- The old rule said "The cloud cannot close a pull request".', False),  # a quoted old claim
+            ("- The old rule said “The cloud cannot close a pull request”.", False),  # the same, in curly quotes
+            ('- The grant "Acts the cloud refuses" stays in force.', False),  # a quoted grant title
+            ('- The old rule said "The cloud cannot', False),  # a quote wrapped over two lines of one sentence
+            ('  close a pull request" and it is gone.', False),
+            ('- A lone " is no quote, and the cloud cannot push to main.', True),  # an unclosed quote opens nothing
+            ('- The "<!--" marker is quoted, and the cloud cannot push to main.', True),  # a comment opener in quotes
+        ]
+        rng, flagged = self.route_range(rows)
+        self.assert_route_claims(rng, flagged)
+
+    def test_route_claim_is_silent_on_a_file_path_that_holds_a_route_word_and_a_verb(self):
+        rows = [
+            ("- See docs/decisions/cloud-cannot-send.md for the ruling.", False),  # a bare path names a file, no claim
+            ("- The ruling docs/decisions/cloud-cannot-send.md is kept.", False),  # the same path mid-sentence
+            ("- See `docs/decisions/cloud-cannot-send.md` for the ruling.", False),  # a span, already silent
+            ("- See docs/decisions/cloud-cannot-send.md. The cloud cannot push to main.", True),  # a real claim fires
+        ]
+        rng, flagged = self.route_range(rows)
+        self.assert_route_claims(rng, flagged)
+
+    def test_route_claim_fires_on_an_unquoted_claim_beside_a_quote_and_a_verb_inside_a_quote_is_a_mention(self):
+        rows = [
+            ('- The cloud is the subject; the rule "cannot close a pull request" is old.', False),  # the verb is quoted
+            ('- The cloud cannot push to main; the rule "Acts the cloud refuses" is old.', True),  # the unquoted claim
+            ('- The old rule said "The cloud cannot close a pull request", and the cloud cannot push to main.', True),
+        ]
+        rng, flagged = self.route_range(rows)
+        self.assert_route_claims(rng, flagged)
+
+    def test_route_claim_apostrophe_opens_no_quote_so_a_claim_after_it_still_fires(self):
+        rows = [
+            ("- Don't rely on the cloud; it cannot push to main.", True),  # a straight apostrophe before the claim
+            ("- Don’t rely on the cloud; it cannot push to main.", True),  # a curly apostrophe before the claim
+            ("- Don't rely on the cloud; it cannot push to main. The cloud can't push either.", True),  # two apostrophes
+            ('- The old rule said "The cloud can\'t push to main".', False),  # an apostrophe inside a quote
+            ('- Don\'t cite "The cloud cannot close a pull request" as current.', False),  # a quote after an apostrophe
+        ]
+        rng, flagged = self.route_range(rows)
+        self.assert_route_claims(rng, flagged)
+
+    def test_route_claim_unclosed_quote_in_a_table_row_does_not_hide_the_next_row(self):
+        rows = [
+            ("| Route | Claim |", False),
+            ("|---|---|", False),
+            ('| a | "doesn\'t this mean |', False),  # an unclosed straight quote; its run ends at the next `|` row
+            ("| b | the auto-mode classifier refuses a tool call |", True),  # the claim the quote must not hide
+            ('| c | "quoted" |', False),  # a later quote, which an open run would pair with across rows
+        ]
+        rng, flagged = self.route_range(rows)
+        self.assert_route_claims(rng, flagged)
+
+    def test_route_claim_header_row_of_a_table_does_not_flag_for_a_claim_in_a_data_row(self):
+        rows = [
+            ("| Route | Claim |", False),  # a header row names columns; it states no claim
+            ("|---|---|", False),
+            ("| a | the auto-mode classifier refuses a tool call |", True),  # the claim is flagged on its own row
+        ]
+        rng, flagged = self.route_range(rows)
+        self.assert_route_claims(rng, flagged)
+
 
 class RouteClaimFixtureTests(unittest.TestCase):
     """The labelled route claims, hand-judged stale or true, that measure the judge's false alarms: one entry per labelled line.
