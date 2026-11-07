@@ -74,7 +74,7 @@ Applies to: guards and checks.
 
 P2 (red on a named old commit) is held by lint/check_red_run.py (decision red-run-trailer-on-test-commits).
 
-P12 (reproduce the incident first) is held by the review record's Reproduction line (merge/merge.py, parse_review and review_state). Not built yet.
+P12 (reproduce the incident first) is held by the review record's Reproduction line (merge/merge.py, parse_review and review_state).
 
 ### Checks that could hold these (not built)
 
