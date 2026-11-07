@@ -12,7 +12,7 @@ import guard_core
 from guard_core import (
     CMD_EXE_NAMES, GIT_OPT_WITH_VALUE, _absolute, _segment_cd_move, _segment_cd_target,
     _segment_git_c_target, shell_abs, CONTRACTION, quote_advance, _git_subcommand_index,
-    _strip_heredoc_bodies_unconditionally, bare_words, basename, command_indexes, inner_commands,
+    _strip_heredoc_bodies_unconditionally, strip_heredoc_bodies, bare_words, basename, command_indexes, inner_commands,
     is_powershell, norm, resolve_command, segment_tokens, split_segments, PowerShellScript,
 )
 from shared_names import MACHINE_TAGS, TASK_NOTIFICATION_TAG
@@ -874,11 +874,11 @@ _HAND_FRAMES = tuple(tag for tag in MACHINE_TAGS if "<agent-message" in tag)
 
 
 def _gh_pr_create_segment(command: str, tool: str, depth: int = 0) -> str:
-    """The segment of `command` that runs `gh pr create`, else ''. It reads the way the push path does: heredoc
-    bodies dropped, each segment tokenized (so a quoted mention, a `#` comment and a heredoc body run nothing),
-    each command word of a segment resolved, and the script a shell or runner gets read again. A PowerShell call
-    is read with PowerShell's rules."""
-    text = _strip_heredoc_bodies_unconditionally(command)
+    """The segment of `command` that runs `gh pr create`, else ''. It reads the way the push path does: the body of
+    a data heredoc is dropped and the body of a shell heredoc stays, each segment is tokenized (so a quoted mention
+    and a `#` comment run nothing), each command word of a segment is resolved, and the script a shell or runner
+    gets is read again. A PowerShell call is read with PowerShell's rules."""
+    text = strip_heredoc_bodies(command)
     if tool == "PowerShell":
         text = PowerShellScript(text)
     for segment in split_segments(text):

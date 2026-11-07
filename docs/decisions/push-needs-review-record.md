@@ -66,7 +66,7 @@ The cases are in `hooks/test_guard.py`, section 5f-2 (family `push-needs-review-
 - A PR opened by another session reads as no PR, because the session's own transcript shows no call that opened it.
 - A design-reviewer fix check is not read. A record holds a Fix check line for the reviewer only.
 - A fork's `head` of the form `owner:branch` is read as `branch`.
-- A `gh pr create` that a script file or an interpreter's heredoc body runs is not read as a PR opening (the heredoc body is dropped, a file is never opened).
+- A `gh pr create` that a script file runs is not read as a PR opening (a file is never opened).
 - A delete push of a fix-checked PR's head branch is denied too. Filed as a note: rare, and the cloud refuses branch deletes anyway.
 - A Bash record post whose command does not hold the record text (a body read from a file) is not a record.
 - A destination the guard cannot resolve never matches a known head, so that push passes.
