@@ -26,7 +26,7 @@ Screen: ____ Size: ____ Theme: ____
 - [ ] ux-haptics-feel-substantial: On a device with haptics, does each control that changes a value, such as a slider, stepper or toggle, give a haptic on a change? If not, does the design record say why? (Devices with haptics only.)
 - [ ] ux-works-when-script-fails: With JavaScript off, and with WebGL off, are the content and the main action reachable, or does the page say what is missing and lead on?
 - [ ] ux-lost-scene-recovers: After a forced context loss, does the canvas show words, and does a WebGL scene return on restore? A WebGPU scene needs the words only. (3D pages only.)
-- [ ] ux-still-scene-draws-nothing: After the first frame, while the scene rests, does the count stay 0? It counts `draw*` and `multiDraw*` calls on WebGL, including those on the `WEBGL_multi_draw` extension object, and `GPUQueue.submit` calls on WebGPU. (3D pages only.)
+- [ ] ux-still-scene-draws-nothing: After the first frame, while the scene rests, does the count stay 0? It counts `draw*` and `multiDraw*` calls on WebGL, including those on the object `getExtension` returns for `WEBGL_multi_draw`, and `GPUQueue.submit` calls on WebGPU. (3D pages only.)
 - [ ] ux-canvas-has-words: Does each canvas that carries information have a name, a text equivalent and keyboard acts? Is each other canvas hidden from assistive technology, with aria-hidden="true" in the DOM?
 - [ ] ux-scroll-stays-native: Do the wheel, trackpad, Space, Page Down and arrow keys each move the page by their usual step, with no section that holds the scroll? A modal's own scroll area, kept inside it with `overscroll-behavior`, passes.
 - [ ] ux-forced-colors-hold: In forced-colors mode, do each control, edge, focus ring and state show?

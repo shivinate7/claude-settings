@@ -188,10 +188,9 @@ Source: [MDN, WebGL best practices](https://developer.mozilla.org/en-US/docs/Web
 
 A 3D scene that does not move draws no frames, so it does not spend the person's battery.
 Check: before load, add an init script that wraps every method whose name starts with `draw` or
-`multiDraw` on both `WebGLRenderingContext` and `WebGL2RenderingContext`, and counts each call. Wrap
-the same way the object `getExtension('WEBGL_multi_draw')` returns, since the `multiDraw*` methods live
-there. Let the
-scene draw its first frame, then reset the counter and let the scene rest for five seconds. Pass when
+`multiDraw` on both `WebGLRenderingContext` and `WebGL2RenderingContext`, and counts each call. Also
+wrap `getExtension`, so the object it returns for `WEBGL_multi_draw` gets the same wrap: the
+`multiDraw*` methods live there. Let the scene draw its first frame, then reset the counter and let the scene rest for five seconds. Pass when
 the count stays 0 after the reset, and a camera move or a resize draws again. For a WebGPU scene, count
 `GPUQueue.submit` calls the same way. A DevTools trace is the human view.
 Source: [three.js manual, rendering on demand](https://threejs.org/manual/en/rendering-on-demand).

@@ -541,7 +541,7 @@ delete of `answers/<id>` wait for the done report. A Park is the exception (see 
 1. Write `receipts/<id>` with `read` set to now. Then move the answer to the item's home: the
    decision entry, the roadmap step or the PR, as rule `output-answer-has-a-home` (an answer has a
    home) says. When it is there, update the receipt with `filed` set to now. A `none` answer with a clear
-   direction becomes a step: a roadmap step, sent to triage, if the repo has a roadmap (its record branch exists:
+   direction becomes a roadmap step, or a todo record where there is no roadmap: the step is sent to triage, if the repo has a roadmap (its record branch exists:
    `record_branch()` in `lint/layout.py` names it, default `roadmap`). Otherwise it becomes a todo record
    (layout `todo` or `debts`). When the home is a roadmap step, the filed note cites `page item <n>`, which the
    roadmap upkeep row "page rulings not on their step" checks.
