@@ -79,7 +79,7 @@ fixture's `cwd_repo`. An entry with no
 when absent); without --all only active entries answer. The fixture key `workflow_list` ("error" or
 "garbage") fails that one call and no other.
 
-Draft run, then the real run (debt ci-wake-lists-runs-once): `gh pr create --draft` makes a run
+Draft run, then the real run: `gh pr create --draft` makes a run
 whose jobs all skip, and `gh pr ready` makes the real run seconds later. A hook that lists the head
 once waits on the draft run, reads it as skipped, and prints "CI red ...: workflow checks"
 (judge_runs' "skipped, no job ran") before the real run shows. The cases below use these rules:
@@ -89,12 +89,12 @@ once waits on the draft run, reads it as skipped, and prints "CI red ...: workfl
   No list comes after the deadline. A list made at the deadline after that pause is allowed.
 - A head with no real run at the deadline wakes with `CI unknown`, never red or green.
 - A real run that failed still reads red, with its own failing job names.
-- After a run is judged, the hook lists the head again, so a second real run that shows at a later list
-  is judged too (debt ci-wake-lists-runs-once).
+- After a run is judged, the hook lists the head again at once, so a second real run that shows at a
+  later list is judged too. The list that finds no new run ends the wait.
 
 Repo rules, each pinned by a case below:
 - A GH_REPO set in the command (`export GH_REPO=o/r`, `$env:GH_REPO = ...`) names the repo of the hook's
-  own gh calls, as a command prefix does (debt ci-wake-export-gh-repo-unread).
+  own gh calls, as a command prefix does.
 - Every gh call of a watch passes the PR's repo as -R, the same one each time. A watch that reads runs
   from the folder's repo finds none, and says "no run yet" for a PR whose CI passed.
 - A repo with no active workflow starts no watch: no output, exit 0, no run read. The hook asks
@@ -709,11 +709,12 @@ def expect_no_gh(label, res):
 
 def expect_watch(label, res, ids):
     """The status reads, as ids: one read per run for a run that is completed at its first read, and
-    one more id per read for a run still in progress (in_progress_reads). The run list is read once
-    (no polling), and there is no `gh run watch`."""
-    check("%s: status reads are %s, runs listed once, no run watch" % (label, ids),
+    one more id per read for a run still in progress (in_progress_reads). The run list is read at most
+    twice (no polling): one list, then the re-list after a judged run, which finds no new run. No
+    `gh run watch`."""
+    check("%s: status reads are %s, runs listed at most twice, no run watch" % (label, ids),
           sorted(watched(res)) == sorted(ids) and run_watches(res) == []
-          and count(res, "run", "list") <= 1, why(res))
+          and count(res, "run", "list") <= 2, why(res))
 
 
 def guard_silent(label, command, scen=None, tool=bash):
@@ -897,11 +898,11 @@ def case_draft_run_ending_skipped_is_no_run_yet():
 
 
 def case_second_real_run_after_the_first_ends_is_judged():
-    """Debt ci-wake-lists-runs-once: wait_for judges the first real run and returns, so a second real run
-    that shows at a later list is never read, and the hook says green while it goes on. The control lists
-    both runs at the first list, and main judges both (it passes). The red row lists the second run (a
-    different workflow name, so judge_runs keeps both) only at the second list, after the first run has
-    ended: main says green and never reads run 932. FAST_SLEEP_LAUNCHER: the pauses cost 0.05 s."""
+    """A hook that returns after its first judged run never reads a second real run that shows at a later
+    list, and says green while that run goes on. The control lists both runs at the first list, and passes
+    either way. The red row lists the second run (a different workflow name, so judge_runs keeps both) only
+    at the second list, after the first run has ended: a hook that returns early says green and never reads
+    run 932. FAST_SLEEP_LAUNCHER: the pauses cost 0.05 s."""
     fast = dict(launcher=FAST_SLEEP_LAUNCHER, extra={"CI_WAKE_DEADLINE": "15"})
     ready = bash("gh pr ready 12")
     together = run(932, "codeql", "failure", [job("scan", "failure")])
@@ -1251,10 +1252,29 @@ def list_times(calls):
     return [t for t, a in calls if a[:2] == ["run", "list"]]
 
 
-def lists_paced(times, deadline, gap=30):
-    """Each list is `gap` s or more after the one before it. The one list made at the deadline,
-    after the last pause was cut short, is the only exception."""
-    return all(b - a >= gap or abs(b - deadline) < 1e-6 for a, b in zip(times, times[1:]))
+def judged_read(args, runs):
+    """True for the jobs read (`run view <id> --json ...,jobs`) of a run that ran: the judgement that
+    wait_for makes before it lists again."""
+    if args[:2] != ["run", "view"] or "jobs" not in " ".join(args[3:]):
+        return False
+    hits = [r for r in runs if str(r["databaseId"]) == args[2]]
+    return bool(hits) and hits[0]["conclusion"] not in (None, "skipped")
+
+
+def lists_paced(calls, deadline, runs, gap=30):
+    """Each list is `gap` s or more after the last paced list. Two lists are exempt, and do not count as
+    the paced one: the list made at the deadline, after the last pause was cut short, and the re-list
+    made at once after a judged run (wait_for lists again at once, by design)."""
+    last, paced = None, True
+    for i, (t, a) in enumerate(calls):
+        if a[:2] != ["run", "list"]:
+            continue
+        if i and judged_read(calls[i - 1][1], runs):
+            continue
+        if last is not None and not (t - last >= gap or abs(t - deadline) < 1e-6):
+            paced = False
+        last = t
+    return paced
 
 
 def wait_detail(raised, clock, calls, deadline):
@@ -1267,12 +1287,13 @@ def case_wait_for_lists_again_until_a_real_run_shows():
     """wait_for: the real run (922) shows at list 3, after a draft run listed skipped. wait_for lists
     again, 30 s or more apart, and reads that run. Main lists twice, 20 s apart, and gives up."""
     label = "wait_for, draft run skipped, real run at the third list"
-    raised, clock, calls, deadline = wait_for_on_fakes(
-        [DRAFT_DONE, run(922, "checks", "success", [job("unit", "success")], appears_at_list=3)], 3600)
+    runs = [DRAFT_DONE, run(922, "checks", "success", [job("unit", "success")], appears_at_list=3)]
+    raised, clock, calls, deadline = wait_for_on_fakes(runs, 3600)
     times, detail = list_times(calls), wait_detail(raised, clock, calls, deadline)
     check("%s: returns, no exception" % label, raised is None, detail)
     check("%s: lists 3 times or more, the first at once" % label, len(times) >= 3 and times[0] == T0, detail)
-    check("%s: lists at least 30 s apart" % label, lists_paced(times, deadline), detail)
+    check("%s: lists at least 30 s apart (the re-list after the judged run is at once)" % label,
+          lists_paced(calls, deadline, runs), detail)
     check("%s: reads the real run (922)" % label,
           any(a[:3] == ["run", "view", "922"] for _, a in calls), detail)
 
@@ -1288,7 +1309,7 @@ def case_wait_for_lists_until_the_deadline_and_no_further():
         check("%s: ends at the deadline, not before it and not past it" % label,
               abs(clock.now - deadline) < 1e-6, detail)
         check("%s: no list after the deadline" % label, all(t <= deadline + 1e-6 for t in times), detail)
-        check("%s: lists at least 30 s apart" % label, lists_paced(times, deadline), detail)
+        check("%s: lists at least 30 s apart" % label, lists_paced(calls, deadline, [DRAFT_DONE]), detail)
         if budget == 100:
             check("%s: keeps listing until the deadline (3 lists or more)" % label, len(times) >= 3, detail)
 
@@ -1464,11 +1485,10 @@ def case_folder_without_workflows_still_watches_the_pr_repo():
 
 
 def case_exported_gh_repo_names_the_pr_repo():
-    """Debt ci-wake-export-gh-repo-unread: the hook reads GH_REPO only as a prefix of the `gh pr ready`
-    command. `export GH_REPO=o/r` (bash) and `$env:GH_REPO = "o/r"` (PowerShell) set it for gh in the shell,
-    not for the hook, so the hook's own reads go to the folder's repo, which holds no PR here, and it says
-    nothing. Controls: the prefix form, and a GH_REPO already in the hook's own environment (gh reads it for
-    every call). Both controls pass on main."""
+    """The hook reads GH_REPO only as a prefix of the `gh pr ready` command. `export GH_REPO=o/r` (bash) and
+    `$env:GH_REPO = "o/r"` (PowerShell) set it for gh in the shell, not for the hook. The hook's own gh calls
+    then go to the folder's repo, which holds no PR here, and it says nothing. Controls: the prefix form, and
+    a GH_REPO already in the hook's own environment (gh reads it for every call). Both controls pass either way."""
     fx = fixture([pr(214, repo=REPO_APP)], [in_repo(GREEN, REPO_APP)], cwd_repo=REPO_HOME,
                  workflows=[wf(repo=REPO_APP)])
     rows = (
@@ -1561,10 +1581,10 @@ def case_empty_selector_without_a_branch_is_unknown():
 
 
 def case_hash_number_selector_reads_the_number_route():
-    """Row ci-wake-hash-selector-misses: read_pr tests isdigit() on the selector before a `#` is stripped, so
-    a quoted "#12" takes the branch route (head=owner:#12), finds no PR, and starts no watch. The selector is
-    quoted on purpose: an unquoted `#` starts a shell comment, so neither the hook nor gh sees a selector there.
-    Each row checks the route first, then the verdict. `gh pr ready 12` is the control and passes on main."""
+    """read_pr must strip a `#` before it tests the selector for digits. Without that, a quoted "#12" takes
+    the branch route (head=owner:#12), finds no PR, and starts no watch. The selector is quoted on purpose:
+    an unquoted `#` starts a shell comment, so neither the hook nor gh sees a selector there. Each row checks
+    the route first, then the verdict. `gh pr ready 12` is the control."""
     rows = (
         ("gh pr ready 12 (control)", "gh pr ready 12", READY, [GREEN], "repos/{owner}/{repo}/pulls/12"),
         ('gh pr ready "#12"', 'gh pr ready "#12"', READY, [GREEN], "repos/{owner}/{repo}/pulls/12"),
@@ -1636,8 +1656,8 @@ def main():
           why(res))
     check("gh pr ready 12 && gh pr ready 13: reads the status of runs 901 and 911, one each, no run watch",
           sorted(watched(res)) == ["901", "911"] and run_watches(res) == [], why(res))
-    check("gh pr ready 12 && gh pr ready 13: run list read at most twice",
-          count(res, "run", "list") <= 2, why(res))
+    check("gh pr ready 12 && gh pr ready 13: run list read at most four times (one list and one re-list per PR)",
+          count(res, "run", "list") <= 4, why(res))
 
     # A push starts no watch, in any form, and makes no gh call.
     for command in PUSH_FORMS:
@@ -1795,7 +1815,7 @@ def main():
     case_watch_run_back_off_keeps_the_deadline_and_cuts_the_reads()
     case_watch_run_completed_wakes_on_the_next_read()
 
-    # A draft run that skips, then the real run (debt ci-wake-lists-runs-once).
+    # A draft run that skips, then the real run.
     case_draft_run_then_real_run()
     case_real_run_listed_late()
     case_real_failed_run_beside_a_draft_run_is_red()
