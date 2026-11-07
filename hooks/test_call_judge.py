@@ -1342,6 +1342,10 @@ def case_spawn_timeout_is_not_retried():
     check("retry spawn: the timeout fails open, exit 0 and no deny", r.code == 0 and r.out == "", detail(r))
     check("retry spawn: the fail-open line names the timeout",
           "call judge failed open" in r.err and decision_watch.MODEL_TIMEOUT_ERROR in r.err, detail(r))
+    # The log is for past-ruling timeouts only. Both selectors must find nothing: by the rule, and by the line's shape,
+    # so a renamed constant cannot make this check pass on nothing.
+    check("retry spawn: the timeout writes no judge-timeout line, by call_judge.TIMEOUT_LOG_RULE",
+          judge_timeout_rule_lines(r.log) == [] and timeout_lines(r.log) == [], detail(r))
 
 
 # ------------------------------------------------------------------ the judge-timeout log (coordinator ruling 2026-11-07 13:24 CST)
@@ -1353,7 +1357,8 @@ def case_spawn_timeout_is_not_retried():
 # their prompt_chars key, not by the rule name, so a missing constant fails a check by name and never crashes one.
 # Case 4 calls judge_question in the test process: a raising record() can only be made in-process.
 TIMEOUT_DECISION = "timeout"  # the decision column the ruling names: record(tool, "timeout", <rule>, matched)
-TIMEOUT_BOX_GOAL = GOAL_LINE + " é"  # one non-ASCII character: prompt_chars counts chars, not bytes
+TIMEOUT_PROMPT_MARK = "PROMPTMARK-7e4b"  # text of the question's Goal: it reaches the model, and no log line may carry it
+TIMEOUT_BOX_GOAL = GOAL_LINE + " " + TIMEOUT_PROMPT_MARK + " é"  # the é: prompt_chars counts chars, not bytes
 
 
 def timeout_lines(log_text):
@@ -1375,11 +1380,22 @@ def timeout_rule_of(line):
     return line.split("\t")[3]
 
 
+def judge_timeout_rule_lines(log_text):
+    """The guard.log lines that carry call_judge.TIMEOUT_LOG_RULE, read at test time. With no such constant, none."""
+    rule = call_judge_value("TIMEOUT_LOG_RULE")
+    return [line for line in log_text.splitlines() if rule is not None and timeout_rule_of(line) == rule]
+
+
 def check_timeout_line(label, r, line, number):
     """One timeout line against the model call of its try (number 1 or 2): the rule, the try, the model, the cap the
-    call ran under, and len(prompt) in chars. Each is its own check, named by its cause."""
+    call ran under, and len(prompt) in chars. Each is its own check, named by its cause. The question's marker is
+    checked in the model call first, so its absence from the line means something."""
     call = r.calls[number - 1] if len(r.calls) >= number else {}
     matched = timeout_matched(line)
+    check("%s: the model call carries the question's marker (scope for the next check)" % label,
+          TIMEOUT_PROMPT_MARK in call.get("prompt", ""), detail(r))
+    check("%s: no prompt text in the line: the question's marker is absent" % label,
+          TIMEOUT_PROMPT_MARK not in line, detail(r))
     check("%s: the line names the rule, call_judge.TIMEOUT_LOG_RULE" % label,
           timeout_rule_of(line) == call_judge_value("TIMEOUT_LOG_RULE"), detail(r))
     check("%s: the line names its try, %d" % (label, number), matched.get("try") == str(number), detail(r))
@@ -1402,7 +1418,7 @@ def case_timeout_log_line_then_ok():
 
 
 def case_timeout_log_two_lines_on_two_tries():
-    r = run_hook(question_input(), script=[TIMEOUT_REPLY, TIMEOUT_REPLY])
+    r = run_hook(question_input(box=good_box(goal=TIMEOUT_BOX_GOAL)), script=[TIMEOUT_REPLY, TIMEOUT_REPLY])
     check("timeout log, twice: two timeouts make two model calls", len(r.calls) == 2, detail(r))
     lines = timeout_lines(r.log)
     check("timeout log, twice: each timeout writes one line, two in all", len(lines) == 2, detail(r))
