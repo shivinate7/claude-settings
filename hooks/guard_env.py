@@ -100,14 +100,19 @@ ENV_SCRIPT_COMMANDS = ("sed", "awk", "gawk", "mawk", "nawk")
 ENV_SCRIPT_VALUE_SHORT = "Fv"
 # Per-command flag letters, for the letters that differ between the search tools. `-f` takes a file
 # of patterns in grep and rg, and is a plain switch in ag and ack. `-t` and `-T` take a file type in
-# rg only: in ag `-t` is a switch, so a `t` in the shared letters would swallow a path. jq's `-L`
-# takes a module directory, which is judged as a path.
+# rg only: in ag `-t` is a switch, so a `t` in the shared letters would swallow a path. The word
+# after rg `-t` or `-T` is a type name and no path, so it is skipped.
 ENV_BOOLEAN_F_COMMANDS = ("ag", "ack")
-ENV_VALUE_SHORT_BY_COMMAND = {"rg": "tT", "jq": "L"}
+ENV_VALUE_SHORT_BY_COMMAND = {"rg": "tT"}
+ENV_TYPE_SHORT_BY_COMMAND = {"rg": "tT"}
 # `jq`, `gojq` and `yq` take a program as the first plain word: a key path such as `.envs` is text.
 # Their file arguments stay judged. Their `-e` is an exit-status switch, not a pattern flag, and
 # `-f` / `--from-file` names a file of the program.
 ENV_PROGRAM_COMMANDS = ("jq", "gojq", "yq")
+# The program commands do not read flags as grep does: `-C` is a colour switch there, so a grep value
+# letter would swallow the next word and leave a file read as the program. Only jq's and gojq's `-L`
+# takes a value, a module directory, which is judged as a path. yq has no short value letter here.
+ENV_PROGRAM_VALUE_SHORT = {"jq": "L", "gojq": "L", "yq": ""}
 ENV_YQ_SUBCOMMANDS = ("e", "eval", "ea", "eval-all")
 # `cd`, `pushd` and `mkdir` take a folder. They read no contents, so an env-prefixed folder name
 # (`.envs`) is no read. `git add` and `cat` stay refused: they cannot tell a folder from a file.
@@ -442,9 +447,10 @@ def _pattern_words(words, position: int, command: str):
     which stays judged as a path, so an error here only ever judges a word and never hides one.
     """
     skip, glued, plain, given, ended = set(), {}, [], False, False
-    value_short = (ENV_VALUE_SHORT + ENV_VALUE_SHORT_BY_COMMAND.get(command, "")
-                   + (ENV_SCRIPT_VALUE_SHORT if command in ENV_SCRIPT_COMMANDS else ""))
     program = command in ENV_PROGRAM_COMMANDS
+    value_short = (ENV_PROGRAM_VALUE_SHORT[command] if program
+                   else ENV_VALUE_SHORT + ENV_VALUE_SHORT_BY_COMMAND.get(command, "")
+                   + (ENV_SCRIPT_VALUE_SHORT if command in ENV_SCRIPT_COMMANDS else ""))
     i = position + 1
     while i < len(words):
         word = words[i]
@@ -487,6 +493,8 @@ def _pattern_words(words, position: int, command: str):
                 step = 1 if rest else 2
                 break
             if letter in value_short:
+                if not rest and letter in ENV_TYPE_SHORT_BY_COMMAND.get(command, ""):
+                    skip.add(i + 1)  # a file type name, never a path
                 step = 1 if rest else 2
                 break
         i += step
