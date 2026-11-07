@@ -731,6 +731,8 @@ def npm_prefix_flag(words, where: str) -> str:
         elif word.startswith("--prefix="):
             value = word[len("--prefix="):]
     value = value.strip("\"'")
+    if "$" in value or "`" in value or value.startswith("~"):
+        return ""  # the shell fills these in, so the guard cannot name the folder: the walk from `where` decides
     return os.path.join(where, value) if value else ""
 
 
