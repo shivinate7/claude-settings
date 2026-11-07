@@ -103,7 +103,7 @@ Settled by the brief and the coordinator (Nov 6), not options here:
   load and clears on the next one; a reload counts as a visit. With no key (first visit, or storage blocked), no
   step is marked, and items use the last Send alone.
 - Not changed: `fresh()` ("updated today", the feed's time words). It is another meaning; the mark does not
-  replace it. Gap, not drawn: the owner sees a marked step on another pager page after paging there.
+  replace it. Gap, not drawn: a marked step on another pager page shows only when the owner pages there.
 - Rail chips on the Questions tab: no mark. The chip has states (open, ready, sent); a fourth look is noise.
 
 ## 8. Outside this folder, for the builder
