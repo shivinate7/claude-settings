@@ -82,7 +82,7 @@ The tool prints two numbers. Each one's target is 0:
 Readers:
 
 - Batch runner, at each wake. Its queue is the ledger. The ledger replaces its private list.
-- Triage, at each roadmap publish, from part 3b. `skills/roadmap/build.py` prints a `stalled pr:` line for each red PR. The line is red, like a stalled step. The Stop hook in `lint/report_guard.py` holds triage until each line is disposed. Triage disposes a `stalled pr:` line the way it disposes a stalled step (decision `stalled-steps`): it gives the PR a next act, or names it under Input Needed, which escalates it to the coordinator.
+- Triage, at each roadmap publish, from part 3b. `skills/roadmap/build.py` prints a `stalled pr:` line for each red PR. The line is red, like a stalled step. From part 4, the Stop hook in `lint/report_guard.py` holds triage until each line is disposed. Triage disposes a `stalled pr:` line the way it disposes a stalled step (decision `stalled-steps`): it gives the PR a next act, or names it under Input Needed, which escalates it to the coordinator.
 - Coordinator and batch runner reports carry the two numbers.
 - Lane side, part 2: `lint/report_guard.py` refuses a lane's final report that claims a round PASS with no review record for the live head.
 
@@ -92,18 +92,18 @@ Build order. Part 3b starts only after part 1 merges. This record sets no other 
 2. The lane check in `lint/report_guard.py`.
 3a. Ready and stalled steps get one next act in `skills/roadmap/build.py`, plus a ready count. Branch `ready-steps-next-act`.
 3b. After part 1 merges: `merge/merge.py` adds `--reviewed --json` and makes the stale-record act match this record. The publisher runs it inside the read it already makes and passes the result in the live file. `skills/roadmap/build.py` shows each PR's next act and prints the `stalled pr:` line; it starts no process.
-4. `lint/report_guard.py` checks the report's `Unstarted:` line against the ready list, the on-merge Deviations line, and the parser gaps on PR #1503. Per the 13:20 ruling, those gaps are fixed here, not filed as notes.
+4. `lint/report_guard.py` checks the report's `Unstarted:` line against the ready list, the on-merge Deviations line, and the parser gaps on PR #1503. It also holds triage until each `stalled pr:` line is disposed, as it does for `stalled step:` lines. Per the 13:20 ruling, those gaps are fixed here, not filed as notes.
 
 ## The cost
 
 Per rule `outcomes-mechanize-rules`:
 
-- Process starts: one `git fetch origin main` and one `git ls-tree` per run, and one `gh api` call per read. Files written: none. Timers: none. Logs: none.
+- Process starts: three git starts per run (`git rev-parse`, `git fetch origin main`, a `git ls-tree` of the config), a fourth `git ls-tree` of the workflows when a batch line exists, and one `gh api` call per read. Files written: none. Timers: none. Logs: none.
 - How often: at each batch runner wake. From part 3b, at each roadmap publish. At each lane Stop, the lane check (part 2).
 - Reads per `merge --reviewed` run, all from GitHub:
   - the open-PR list, and the repo's comments since the oldest open PR (one list each);
   - one `issues/<n>/events` list for each PR that reaches the hold rule with the `batch` label, or with a hold label and a valid `Waits on:` line;
-  - when a batch line exists, one page (50) of main's runs. A run's jobs are read only when that run did not succeed, plus two more reads for a clear candidate: its jobs and its workflow file.
+  - when a batch line exists, one page (50) of main's runs. A run's jobs are read only when that run did not succeed, plus up to two more reads for a clear candidate: its jobs and its workflow file.
   - The count per run is not measured yet.
 - Tests to write with the build, one per red: no review record; stale head; batch over its limit; hold with no item.
 
