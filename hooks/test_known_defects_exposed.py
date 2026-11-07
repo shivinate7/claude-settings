@@ -1,8 +1,8 @@
 """Known-defect replay: a defect whose catcher loads no package, under a profile whose install failed.
 
 The catcher runs a suite that imports only the product file it plants in, so the failed install is no reason to distrust
-its verdict. A profile with one install needs that install for every defect, so today the replay reads such a defect
-UNKNOWN. It must read CAUGHT: the failed install is not what the catcher needs.
+its verdict. The file pins that such a defect reads CAUGHT under a profile whose one install failed: the load hook logs no
+missing module for a catcher that loads no package, so the failed install is not what the catcher needs.
 
 The profiles are the real `REPLAY_PROFILES` entries, copied, with every install swapped for FAILING_INSTALL. Their
 regexes, argv, classifier and lockfile are read from the copy, never restated here.
