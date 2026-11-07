@@ -382,6 +382,17 @@ PUSH_REJECTED_LINE = re.compile(r"^\s*!\s*\[(?:remote )?rejected\]|^\s*(?:error|
 UNNAMED_HEAD = "no remote-tracking ref names the pushed head"
 
 
+PUSH_NEW_TAG_LINE = re.compile(r"^\s*\*?\s*\[new tag\]\s+\S+\s+->\s+(?:refs/tags/)?(\S+)", re.MULTILINE)
+
+
+def _reads_as_tag(name, bare, has_tag, has_branch):
+    """True when a short ref name a push gave with no ref line is a tag, so it names no head. Any local branch or
+    remote-tracking ref of the name makes it a branch, also when a local tag has the name too (a branch is checked).
+    With neither, a local tag makes it a tag, and so does a bare refspec (`git push origin v1.0`: no `:`), which
+    names no branch anywhere. A refspec with a `:` names its destination, so it stays a branch."""
+    return not has_branch and (has_tag or bare)
+
+
 def _heads_of_git_push(args, output, folder, ci_wake, budget):
     """-> [(sha, branch, why)] a push call updated; sha is None when the head could not be named, and why then says
     which read failed (the Unknown message of a spent budget or a failed branch read, or UNNAMED_HEAD); why is None
@@ -405,20 +416,27 @@ def _heads_of_git_push(args, output, folder, ci_wake, budget):
         except ci_wake.Unknown as unknown:
             return [(None, (refspecs[0].lstrip("+").split(":")[-1] if refspecs else "HEAD") or "HEAD", str(unknown))]
         seen = [(None, n) for n in names if n]
+    new_tags = set(PUSH_NEW_TAG_LINE.findall(output))
+    bare = {r.lstrip("+") for r in refspecs if ":" not in r and r.lstrip("+") != "HEAD"}
     heads = []
     for sha, branch in seen:
-        if "\n" in branch or branch.startswith("refs/tags/"):
+        if "\n" in branch or branch.startswith("refs/tags/") or branch in new_tags:
             continue
         branch = branch[len("refs/heads/"):] if branch.startswith("refs/heads/") else branch
         why = None
-        if sha is None and ":" not in remote:
+        if sha is None:
             try:
-                sha = ci_wake.commit_of("refs/remotes/%s/%s" % (remote, branch), folder, budget.next_timeout())
+                has_tag = bool(ci_wake.commit_read("refs/tags/" + branch, folder, budget.next_timeout()))
+                has_branch = bool(ci_wake.commit_read("refs/heads/" + branch, folder, budget.next_timeout()))
+                if ":" not in remote:
+                    sha = ci_wake.commit_read("refs/remotes/%s/%s" % (remote, branch), folder, budget.next_timeout())
             except ci_wake.Unknown as unknown:
                 heads.append((None, branch, str(unknown)))
                 continue
+            if _reads_as_tag(branch, branch in bare, has_tag, has_branch or bool(sha)):
+                continue
         if not sha:
-            # commit_of gives "" when no remote-tracking ref names a commit; a head left out here would pass the
+            # commit_read gives "" when no remote-tracking ref names a commit; a head left out here would pass the
             # report with no CI line, so it reads as unknown on the branch.
             sha, why = None, UNNAMED_HEAD
         heads.append((sha, branch, why))

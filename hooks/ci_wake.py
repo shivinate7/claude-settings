@@ -348,22 +348,33 @@ class Budget:
         return min(self.per_read, left)
 
 
-def commit_of(ref, cwd, timeout=HEAD_READ):
-    """The full commit hash `ref` names in the folder, or "" when the tool is missing, fails, or names no commit."""
+def commit_read(ref, cwd, timeout=HEAD_READ):
+    """The full commit hash `ref` names in the folder, "" when the read ran and no ref names a commit, and a raised
+    Unknown when the read itself failed (the tool is missing, timed out or could not start)."""
     try:
         import _nowindow
     except ImportError:
         _nowindow = subprocess
     exe = shutil.which("git")
     if exe is None:
-        return ""
+        raise Unknown("git read of %s failed: git is not on PATH" % ref)
     try:
         p = _nowindow.run([exe, "rev-parse", "--verify", "-q", ref + "^{commit}"], cwd=cwd,
                           stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=timeout)
-    except (OSError, subprocess.TimeoutExpired):
-        return ""
+    except subprocess.TimeoutExpired:
+        raise Unknown("git read of %s timed out" % ref)
+    except OSError as e:
+        raise Unknown("git read of %s failed: %s" % (ref, type(e).__name__))
     out = p.stdout.strip()
     return out if p.returncode == 0 and re.fullmatch(r"[0-9a-f]{40}", out) else ""
+
+
+def commit_of(ref, cwd, timeout=HEAD_READ):
+    """The full commit hash `ref` names in the folder, or "" when the tool is missing, fails, or names no commit."""
+    try:
+        return commit_read(ref, cwd, timeout)
+    except Unknown:
+        return ""
 
 
 def head_state(sha, branch, cwd, budget=None):
