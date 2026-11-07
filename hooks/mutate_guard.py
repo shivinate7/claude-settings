@@ -328,8 +328,8 @@ MUTATIONS = [
      '                remote, repo_next = value, not value',
      '                remote, repo_next = "", False', "guard", 'with --repo'),
     ("force-push: a colon-first refspec is not a delete",
-     '    delete = delete or any(spec.startswith(":") for spec in plain)',
-     '    delete = delete', "guard", 'a delete refspec'),
+     '    return delete or any(spec.startswith(":") for spec in plain)',
+     '    return delete', "guard", 'a delete refspec'),
     ("force-push: --delete is not a delete",
      '            elif name == "--delete":\n                delete = True',
      '            elif name == "--delete":\n                delete = False', "guard", 'with --delete'),
@@ -373,9 +373,9 @@ MUTATIONS = [
      '', "guard", 'a plain push to worktree-agent-x denies, unforced'),
     ("agent-branch-push: the call moves below the early return, so an unforced push passes",
      '    if not dry_run and _agent_branch_push(plain, delete, cwd, overrides):\n        return AGENT_PUSH_RULE\n'
-     '    delete = delete or any(spec.startswith(":") for spec in plain)\n'
+     '    delete = _colon_delete(delete, plain)\n'
      '    if not (force or leased or plus or mirror or delete):\n        return ""\n',
-     '    delete = delete or any(spec.startswith(":") for spec in plain)\n'
+     '    delete = _colon_delete(delete, plain)\n'
      '    if not (force or leased or plus or mirror or delete):\n        return ""\n'
      '    if not dry_run and _agent_branch_push(plain, delete, cwd, overrides):\n        return AGENT_PUSH_RULE\n',
      "guard", 'a plain push to worktree-agent-x denies, unforced'),
@@ -2219,8 +2219,8 @@ MUTATIONS = [
      '    if False:\n        return _push_bare_destination(cwd, overrides)', "guard",
      "a lane's bare push from the roadmap checkout is refused"),
     ("roadmap-one-writer: refs/heads/ is not cut off the destination",
-     '    return [t.removeprefix("refs/heads/") if t else t for t in found]',
-     '    return found', "guard", "a lane's push of a ref into refs/heads/roadmap is refused"),
+     '        _DESTINATIONS[key] = [t.removeprefix("refs/heads/") if t else t for t in found]',
+     '        _DESTINATIONS[key] = found', "guard", "a lane's push of a ref into refs/heads/roadmap is refused"),
     ("roadmap-one-writer: git -C does not move the push to its checkout",
      '            where, overrides = push_target(segment, script, cwd)\n            yield _command_words(args), where, overrides',
      '            where, overrides = cwd, {}\n            yield _command_words(args), where, overrides', "guard",
