@@ -10,9 +10,9 @@ Why: a full review of a change that simple is wasted. A record that files an own
 
 ## The round
 
-When the brief says the change files an owner ruling, round 1 checks two things only. It checks that the record matches the ruling's words, and that it contradicts no older ruling on the same question. The report stays under about 10 lines (the coordinator's brief for waiting-page item 205 b).
+When the brief says the change files an owner ruling, round 1 checks two things only. It checks that the record matches the ruling's words, and that it contradicts no older ruling on the same question. The report stays under about 10 lines (the coordinator's brief for waiting-page item 205 b). For a decision record removed or renamed out, round 1 checks instead that the PR names the ruling that withdraws it and that no record still cites its slug (lane pick, process-only; coordinator ruling 2026-11-07 15:17 CST, which makes a removal a change that takes this round).
 
-The review record is `Kind: normal`, `Guard or check: no`, with one `Round` line. It is never `docs-only`.
+The review record is `Kind: normal`, `Guard or check: no`, with one `Round` line. It is never `docs-only`, and a removal is never `delete-only`.
 
 A FAIL follows rule `roles-review-cap-three` (the three-round cap). A PR that also changes a rule, guard, check or code gets a full review, not this two-check round.
 

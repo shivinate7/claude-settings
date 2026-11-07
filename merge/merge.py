@@ -2954,11 +2954,11 @@ def kind_misfits(kind, files):
     return []
 
 def decision_paths(root, files):
-    """-> the sorted paths of the markdown records under the decisions folder of `root` that (path, status) pairs add, modify, rename or copy.
-    A removed path is skipped; any other status counts, so a status the diff reads as new cannot pass. layout.LayoutError when the folder
-    cannot be read: the caller stops, never passes."""
+    """-> the sorted paths of the markdown records under the decisions folder of `root` that (path, status) pairs name, under any status.
+    A removed path counts, and so does the old name of a rename: withdrawing a ruling changes it (coordinator ruling 2026-11-07 15:17 CST).
+    layout.LayoutError when the folder cannot be read: the caller stops, never passes."""
     folder = layout.path(root, "decisions")
-    return sorted(p for p, st in files if st != "removed" and layout.md_under(p, folder))
+    return sorted(p for p, _ in files if layout.md_under(p, folder))
 
 def main(argv, host=None, lock=None):
     p = argparse.ArgumentParser(prog="merge", description=__doc__.split("\n\n")[0])
@@ -3054,13 +3054,13 @@ def main(argv, host=None, lock=None):
             misfits = kind_misfits(a.kind, files)
             if misfits:
                 raise Stop(f"Kind: the diff breaks --kind {a.kind} at " + ", ".join(misfits) + ". Write the record with the kind the diff has. " + REVIEW_CITE)
-            if a.kind == "docs-only":  # a decision record is a ruling: its change takes a review round (decision docs-only-prs-skip-review)
+            if a.kind in ("docs-only", "delete-only"):  # a decision record is a ruling: its change, a withdrawal too, takes a review round (decision docs-only-prs-skip-review)
                 try:
                     rulings = decision_paths(root, files)
                 except layout.LayoutError as e:
-                    raise Stop(f"Kind: cannot tell whether the diff files a decision record, because {e}. " + REVIEW_CITE)
+                    raise Stop(f"Kind: cannot tell whether the diff changes a decision record, because {e}. " + REVIEW_CITE)
                 if rulings:
-                    raise Stop("Kind: the diff files a decision record at " + ", ".join(rulings) + ", so --kind docs-only is false. Post Kind normal with one round (decision docs-only-prs-skip-review). " + REVIEW_CITE)
+                    raise Stop("Kind: the diff changes a decision record at " + ", ".join(rulings) + f", so --kind {a.kind} is false. Post Kind normal with one round (decision docs-only-prs-skip-review). " + REVIEW_CITE)
             if a.fix_check:  # the fix diff starts from the head the newest earlier record reviewed, and a fix never follows a fix
                 earlier = [parse_review(b) for b in h.review_comments(info.get("created") or "1970-01-01T00:00:00Z").get(a.pr, [])]
                 last = earlier[-1] if earlier else None

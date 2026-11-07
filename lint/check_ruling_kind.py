@@ -8,8 +8,10 @@ Each ruling declares its kind, one line per item, outside fenced text:
     Plan: <path>#<slug> (<platform>)             Home: <path>      (an existing file)
 
 A build ruling has one Plan line per platform. `<slug>` is the GitHub slug of a heading in the
-plan file. Only records the diff adds or changes are checked. An old record is checked on its
-next touch, so the next touch brings its Kind line.
+plan file. The diff is read without rename detection, so a move is a delete of the old name and
+an add of the new one. Only a record the diff adds or edits is checked; a deleted name has no
+text to read. Removing a decision is the merge tool's to catch (merge --review-record), not this
+lint's. An old record is checked on its next touch, so the next touch brings its Kind line.
 
 NAMED LIMIT. The lint cannot know which platforms a ruling needs, so it cannot check that
 every platform has a Plan line. It checks each line that is there.
@@ -164,12 +166,14 @@ def home_problem(home, ids):
 
 
 def changed(base):
-    r = _nowindow.run(["git", "diff", "--name-only", "--diff-filter=d", base + "...HEAD"],
+    """-> (status, name) per path of the diff. --no-renames makes a move a D of the old name and an A of the new one."""
+    r = _nowindow.run(["git", "diff", "--name-status", "--no-renames", base + "...HEAD"],
                        cwd=ROOT, capture_output=True, encoding="utf-8", errors="replace")
     if r.returncode:
         print("check_ruling_kind: UNKNOWN, git diff failed: " + r.stderr.strip())
         sys.exit(1 if os.environ.get("CI") else 0)  # CI exit code is a verdict: unknown is red there
-    return r.stdout.split("\n")
+    rows = (line.split("\t", 1) for line in r.stdout.split("\n") if line)
+    return [(st[:1], name) for st, name in rows]
 
 
 # --opt=VALUE reads as --opt VALUE.
@@ -215,11 +219,13 @@ for a in args:  # an option left over is a typo: fail, never read it as a file n
     if a.startswith("-"):
         print("check_ruling_kind: FAIL: unknown option '%s'" % a)
         sys.exit(1)
-files = args or changed(base)
+files = [("M", a) for a in args] or changed(base)  # a file given on the command line is checked as a changed one
 bad = 0
-for f in files:
+for st, f in files:
     f = f.strip()
     if layout.md_under(os.path.normpath(f).replace("\\", "/"), DIR):
+        if st == "D":  # a deleted record has no text to check; the merge tool refuses its docs-only and delete-only kinds
+            continue
         for p in problems(os.path.normpath(f).replace("\\", "/")):
             bad = 1
             print("check_ruling_kind: FAIL: %s: %s" % (f, p))
