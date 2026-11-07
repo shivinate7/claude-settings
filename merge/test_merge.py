@@ -8842,6 +8842,40 @@ class ReadyRemedy(RecordsEnv):
         self.assertIn("update_pull_request", text, f"control: the remedy names no mark-ready route: {text}")
         self.assertNotIn("ready check", text, f"a repo with no merge.readyChecks is sent to run ready checks: {text}")
 
+    READY_STEP = 'bin/ci-job checks --step "check invariants" --base origin/main'  # the run ready_check_step names for the one declared check
+
+    def ready_head(self, declared=True):
+        """A host whose ready head's checks all skipped. `declared` sets the host's ready checks, as confirm reads them from the config."""
+        host = FakeReadsWaitHost(self.host, [REQUIRED_CHECK], self.SKIPPED)
+        host.ready_checks = ["check invariants"] if declared else None
+        self.on("feat", {merge.RECORDS_PAGE: page()})
+        return host
+
+    def preview(self, host):
+        """The preview's head line. FakeReadsWaitHost answers head_state with green, so this calls the real Host.head_state on it."""
+        return merge.Host.head_state(host, 7)
+
+    def assert_ready_step_before_mark_ready(self, text, where):
+        self.assertIn("no check ran on this head", text, f"control: the {where} read is not the all-skipped read: {text}")
+        self.assertIn(self.READY_STEP, text, f"the {where} read names no ready-check step: {text}")
+        mark = re.search(r"[Mm]ark (?:the PR )?ready", text)
+        self.assertIsNotNone(mark, f"control: the {where} read names no mark-ready route: {text}")
+        self.assertLess(text.find(self.READY_STEP), mark.start(), f"the {where} read names a mark-ready route before the ready-check step: {text}")
+
+    def test_head_state_names_the_ready_check_step_before_the_mark_ready_route(self):
+        self.assert_ready_step_before_mark_ready(self.preview(self.ready_head()), "head_state")
+
+    def test_head_read_names_the_ready_check_step_before_the_mark_ready_route(self):
+        verdict, text = self.ready_head().head_read(7)
+        self.assertEqual(verdict, "red", text)  # control: the guard's read reaches the all-skipped red
+        self.assert_ready_step_before_mark_ready(text, "head_read")
+
+    def test_control_a_repo_that_declares_no_ready_checks_names_no_ready_step_in_either_read(self):
+        host = self.ready_head(declared=False)
+        for text in (self.preview(host), host.head_read(7)[1]):
+            self.assertIn("no check ran on this head", text, f"control: the read is not the all-skipped read: {text}")
+            self.assertNotIn("bin/ci-job checks", text, f"a repo with no merge.readyChecks is sent to run ready checks: {text}")
+
 class MergeImport(unittest.TestCase):
     """merge.py imports the records generator when it loads. With that import blocked, the tool prints one clear line and
     exits non-zero, with no traceback."""
