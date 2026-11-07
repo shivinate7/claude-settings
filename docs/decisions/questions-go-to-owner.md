@@ -25,5 +25,8 @@ Owner, 2026-10-26: a session with a question brings it to the owner. The questio
 - **The report.** The labels are Done, Deviations, Input Needed, Next. `lint/report_guard.py` refuses any other label.
 - **The message check.** The two judges in `hooks/sendmessage_state.py` treat every receiver as a peer.
 
+Debts:
+- `wp-batch-reads-installed-copy` (page check reads installed copy): open debt.
+
 Kind: process
 Home: rule:questions-go-to-owner
