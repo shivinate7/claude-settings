@@ -278,7 +278,8 @@ def hook(name, args):
     if name == "subprocess.Popen" and isinstance(args[1], (list, tuple)):
         events.append(["proc", " ".join(str(a) for a in args[1])])
     elif name == "open" and isinstance(args[0], str):
-        events.append(["open", args[0], str(args[1])])
+        flags = args[2] if len(args) > 2 and isinstance(args[2], int) else -1
+        events.append(["open", args[0], "" if args[1] is None else str(args[1]), flags])
 
 
 out = open(events_path, "w")
@@ -294,6 +295,16 @@ finally:
     out.close()
 sys.exit(code)
 '''
+
+
+WRITE_FLAGS = os.O_WRONLY | os.O_RDWR | os.O_CREAT | os.O_APPEND | os.O_TRUNC
+
+
+def is_write(event):
+    """True when an `open` event of AUDIT_RUNNER asks for a write: a write mode, or os flags that write (os.open and
+    tempfile.mkstemp raise no mode). Flags of -1 mean the call gave none, so its mode decides."""
+    _, _, mode, flags = event
+    return any(c in mode for c in "wax+") or (flags >= 0 and bool(flags & WRITE_FLAGS))
 
 
 class OneHomeInRepoTests(unittest.TestCase):
@@ -432,13 +443,13 @@ class OneHomeInRepoTests(unittest.TestCase):
         self.assertIn(("agents/empty.md", 1, "EXEMPT001"), keyed(found), out)
 
     def test_exception_one_word_under_the_minimum_is_refused(self):
-        short = " ".join(["word"] * (REASON_MIN_WORDS - 1))
+        short = " ".join(REASON.split()[:REASON_MIN_WORDS - 1])  # distinct words: only the count differs
         self.tracked({"agents/short.md": "<!-- exempt: brief-contents reason: %s -->\nNothing copied here.\n" % short})
         found, out = self.verdict_scan()
         self.assertIn(("agents/short.md", 1, "EXEMPT001"), keyed(found), out)
 
     def test_exception_at_the_minimum_is_accepted(self):
-        exact = " ".join(["word"] * REASON_MIN_WORDS)
+        exact = " ".join(REASON.split()[:REASON_MIN_WORDS])  # distinct words, the minimum count
         self.tracked({"agents/exact.md": "<!-- exempt: brief-contents reason: %s -->\n%s\n" % (exact, RULE)})
         found, out = self.verdict_scan()
         self.assertEqual(keyed(found), [CONTROL_FINDING], out)
@@ -446,8 +457,10 @@ class OneHomeInRepoTests(unittest.TestCase):
     def test_exception_for_a_rule_the_parent_lacks_is_refused(self):
         self.tracked({"agents/gone.md": "<!-- exempt: no-such-rule reason: %s -->\n%s\n" % (REASON, RULE)})
         found, out = self.verdict_scan()
-        self.assertEqual(keyed(found), sorted([CONTROL_FINDING, ("agents/gone.md", 1, "EXEMPT002"),
-                                               ("agents/gone.md", 2, "COPY001")]), out)
+        # EXEMPT003 may follow as well, since the exception covers no copy of its own id. Membership only.
+        self.assertIn(("agents/gone.md", 1, "EXEMPT002"), keyed(found), out)
+        self.assertIn(("agents/gone.md", 2, "COPY001"), keyed(found), out)
+        self.assertIn(CONTROL_FINDING, keyed(found), out)
 
     def test_exception_with_no_copy_in_its_file_is_refused(self):
         self.tracked({"agents/unused.md": "<!-- exempt: brief-contents reason: %s -->\nNothing copied here.\n" % REASON})
@@ -508,6 +521,7 @@ class OneHomeInRepoTests(unittest.TestCase):
         module = os.path.join(scripts, "lint", "find_copies.py")
         events_path = os.path.join(self.tmp.name, "events.json")
         before = (sorted(os.walk(self.child)), sorted(os.walk(scripts)))
+        before_tmp = sorted(os.listdir(self.tmp.name))  # TMPDIR is this folder: a temp root the scan makes lands here
         env = dict(os.environ, TMPDIR=self.tmp.name)
         env.pop("PYTHONDONTWRITEBYTECODE", None)  # a set variable would hide a .pyc the scan writes
         env.pop("PYTHONPYCACHEPREFIX", None)
@@ -523,9 +537,11 @@ class OneHomeInRepoTests(unittest.TestCase):
         opened = collections.Counter(os.path.realpath(e[1]) for e in events if e[0] == "open")
         for rel in ("docs/a.md", "agents/copy.md"):
             self.assertEqual(opened[os.path.realpath(os.path.join(self.child, rel))], 1, rel)
-        writes = [e[1] for e in events if e[0] == "open" and any(c in e[2] for c in "wax+")]
+        writes = [e[1] for e in events if e[0] == "open" and is_write(e)]
         self.assertEqual(writes, [], "the scan opened a file for writing")
         self.assertEqual((sorted(os.walk(self.child)), sorted(os.walk(scripts))), before)
+        self.assertEqual(sorted(set(os.listdir(self.tmp.name)) - {"events.json"}), before_tmp,
+                         "a file or folder appeared in TMPDIR, such as a test temp root")
 
 
 if __name__ == "__main__":
