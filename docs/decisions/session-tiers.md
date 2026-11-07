@@ -135,6 +135,21 @@ Owner rulings, 2026-10-28 CDT unless dated. They name the session tiers and how 
   - Cost: one guard process start per `send_message`, from the PreToolUse matcher; one transcript read per `send_message` that carries the marker, none otherwise. No new file or timer.
   - Tests: family `lane-one-topic` in `hooks/test_guard.py`.
   - Landed at merge.
+- **Lane start overlap** (rule `lane-start-overlap`, guard rule that asks before a lane start or a new step overlaps an open lane). Risk kind: incident. Incident (coordinator, 2026-11-07 13:59 CST): the coordinator sent the step `qmax-main-map-ts` (the fix for q_max's 10 MAP failures) by `send_message` to the existing lane `qmax-verify-report-fixes`. Lane `qmax-map-format-skew` (started 13:45 CST) already owned those failures. Triage caught it. Harm: two lanes build one fix, and their pull requests clash.
+  - Key: the new start or step shares a non-home `cs-repo` with an open lane in the session's transcript, and either:
+    - the same `cs-topic`; or
+    - a step slug that differs, and a word shared with the lane's step slug or title, minus the words of the repo name.
+  - An exact re-start (same step and same topic) also asks. The same step on another topic passes: a deliberate split.
+  - Verdict: an ask, never a refusal, when a lane start or a new step overlaps an open lane.
+  - Measured, 2026-11-07 14:05 CST, 35 open lanes: the same `cs-topic` is shared by up to 5 open lanes, and the same `cs-step` by 3. So neither alone is the key. Word overlap with no repo filter hits 26 of 595 lane pairs. With the non-home repo filter, the only hits are the incident pair and the `qmax-browser-shard` split, which the same-step exception passes.
+  - Known misses:
+    - The brief at create time. Rule `lane-effort-pin` (a lane's `create_session` prompt must be `/effort medium`) leaves no brief in that call.
+    - Lanes not in this transcript, such as lanes in other sessions or from before compaction, unless a `list_sessions` or `get_session` result is read.
+    - Home-repo-only lanes, on both clauses. An exact re-start still asks.
+    - A step named in prose without the word "step".
+  - Cost: one transcript read per lane `create_session` and per step-naming `send_message`. No file, no timer.
+  - Not landed yet.
+  - Tests: family `lane-one-topic` in `hooks/test_guard.py`.
 
 ## How it works
 
