@@ -52,7 +52,8 @@ def verdict(relpath, model=None, closed=True, text=None, relative=False, name="x
         os.makedirs(os.path.dirname(path))
         with open(path, "w") as handle:
             if text is None:
-                head = "---\nname: %s\n%s" % (name, "model: %s\n" % model if pinned else "")
+                head = "---\nname: %s\ndisallowedTools: mcp__claude-code-remote__*\n%s" % (
+                    name, "model: %s\n" % model if pinned else "")
                 handle.write("%s%sbody\n" % (head, "---\n" if closed else ""))
             else:
                 handle.write(text)
@@ -160,7 +161,8 @@ class PinEqualsRow(unittest.TestCase):
                                 "%s: no line names the pin and the row: %r" % (label, out))
         # A comment after a haiku pin that names sonnet leaves the pin haiku, so the file passes.
         self.assertEqual(verdict("agents/reviewer.md",
-                                 text="---\nname: reviewer\nmodel: haiku  # sonnet is above the row\n---\nbody\n"),
+                                 text="---\nname: reviewer\ndisallowedTools: mcp__claude-code-remote__*\n"
+                                      "model: haiku  # sonnet is above the row\n---\nbody\n"),
                          (0, ""))
 
 
@@ -317,7 +319,8 @@ BARE_SLOT = "Under Done, the first line is PASS, FAIL, or PARTIAL, then the roun
 
 def agent_text(body, description=None):
     """A fixture agent file: a frontmatter block with a name, an optional description, then the body."""
-    keys = ["name: fixture"] + (["description: %s" % description] if description else [])
+    keys = ["name: fixture", "disallowedTools: mcp__claude-code-remote__*"] + (
+        ["description: %s" % description] if description else [])
     return "---\n%s\n---\n%s" % ("\n".join(keys), body)
 
 
