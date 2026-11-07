@@ -1,0 +1,11 @@
+{
+  "title": "Refuse `git checkout -B <current branch>` in an agent worktree; it left a stale index twice",
+  "phase": "now",
+  "status": "doing",
+  "order": 261.5,
+  "owner": "coordinator",
+  "why": "Coordinator 14:34 CST: `git checkout -B <current branch>` in an agent worktree left a stale index twice.",
+  "note": "A guard change, so a build lane (test-author, builder, reviewer). Done check: a red test on `git checkout -B <current branch>` in an agent worktree.",
+  "updatedAt": "2026-11-07T14:34:00-06:00",
+  "lane": "session_013NEJL1N3YkCMouc1pELXyu"
+}

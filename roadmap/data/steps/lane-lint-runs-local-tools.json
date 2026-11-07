@@ -1,11 +1,11 @@
 {
   "title": "`ci-job --lint` runs the pinned tools, not local ones",
   "phase": "now",
-  "status": "doing",
+  "status": "ready",
   "order": 0.97,
   "owner": "coordinator",
   "why": "Coordinator, 13:52 CST Nov 7.",
-  "note": "Stacked on #1417. Closes the debt of the same name.",
+  "note": "Stacked on #1417. Closes the debt of the same name. Built in #1461 (head 7e5812dc3), after #1417, with runner 8 (coordinator 14:34 CST).",
   "lane": "session_013NEJL1N3YkCMouc1pELXyu",
-  "updatedAt": "2026-11-07T13:51:00-06:00"
+  "updatedAt": "2026-11-07T14:34:00-06:00"
 }
