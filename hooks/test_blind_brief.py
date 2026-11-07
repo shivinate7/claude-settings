@@ -279,9 +279,24 @@ class BriefFaults(unittest.TestCase):
                 found = pairs(self.m.brief_faults(brief(job=JOB + "\n" + line)))
                 self.assertIn(("token-font", "Job"), found)
 
+    def test_font_word_then_a_line_break_then_a_font_name_is_refused(self):
+        # A font word, a line break, then a font name still names a font. The break does not hide the name.
+        for line in ("Font\nCooper Black", "use the font\nCooper Black here"):
+            with self.subTest(line=line):
+                found = pairs(self.m.brief_faults(brief(job=JOB + "\n" + line)))
+                self.assertIn(("token-font", "Job"), found)
+
     def test_colour_word_before_a_part_number_hash_is_no_colour(self):
-        # "ink cartridge #1234" names a part. A 4-digit hash after a colour word is an id here, not a hex colour.
+        # "ink cartridge #1234" names a part. A 4-digit hash after "ink cartridge" is an id, not a hex colour.
         self.assertEqual(self.m.brief_faults(brief(job=JOB + "\nReplace ink cartridge #1234.")), [])
+
+    def test_colour_word_with_a_word_or_two_before_a_four_digit_hash_is_refused(self):
+        # A colour word with a word or two before a 4-digit hash names a hex colour: "Brand blue #1234",
+        # "Accent teal #1234", "Surface colour for cards: #1234". The part number above stays an id.
+        for line in ("Brand blue #1234", "Accent teal #1234", "Surface colour for cards: #1234"):
+            with self.subTest(line=line):
+                found = pairs(self.m.brief_faults(brief(job=JOB + "\n" + line)))
+                self.assertIn(("token-colour", "Job"), found)
 
     def test_order_id_with_a_colon_before_the_hash_is_an_id(self):
         self.assertEqual(self.m.brief_faults(brief(job=JOB + "\nOrder ID: #123456 arrived.")), [])
@@ -334,6 +349,15 @@ class BriefFaults(unittest.TestCase):
 
     def test_this_lane_draws_the_ios_app_in_a_device_section_passes(self):
         self.assertEqual(self.m.brief_faults(brief(device=DEVICE + "\nThis lane draws the iOS app.")), [])
+
+    def test_draw_verb_before_the_ios_app_in_a_device_section_is_still_refused(self):
+        # A draw verb earlier in a sentence exempts "the iOS app" from `current`. Each of these sentences uses that
+        # product as the thing to match or copy, so each is refused as `current` in Device.
+        for line in ("Build the screen to match the iOS app.", "Draw a screen that matches the iOS app.",
+                     "Design the screens so they match the iOS app.", "Build it like the iOS app does today."):
+            with self.subTest(line=line):
+                found = pairs(self.m.brief_faults(brief(device=DEVICE + "\n" + line)))
+                self.assertIn(("current", "Device"), found)
 
     def test_today_product_named_as_the_web_app_or_as_it_is_now_is_still_refused(self):
         for where, line in (("job", "The web app has three tabs."), ("device", "The web app has three tabs."),
