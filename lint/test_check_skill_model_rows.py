@@ -44,7 +44,7 @@ FIXTURE_STEP = "Skill model rows fixture suite"
 
 sys.path.insert(0, HERE)
 from test_windows_split import all_jobs  # noqa: E402  one home for the checks.yml step parser
-from check_skill_model_rows import skill_names  # noqa: E402
+from check_skill_model_rows import live_lines, skill_names  # noqa: E402
 sys.path.insert(0, os.path.join(HERE, "..", "testing"))
 import tracked_tree  # noqa: E402  copies what git lists, so no fixture lists files (testing/tracked_tree.py)
 
@@ -271,6 +271,14 @@ class Fences(unittest.TestCase):
                 files[RECORD] = record([], extra=pattern % (row("alpha"), row("alpha")))
                 code, out = run(files)
                 self.assertEqual(code, 0, out)
+
+    def test_a_four_space_or_tab_fence_hides_the_rows_inside_it_and_not_the_rows_after_it(self):
+        # The line is stripped before the fence test, so its indent does not decide the fence. Pinned so a change to the
+        # fence rule cannot start reading rows inside an indented fence.
+        for opener in ("    ```", "\t```"):
+            with self.subTest(opener=opener):
+                lines = list(live_lines("%s\nhidden-row\n%s\nafter-row\n" % (opener, opener)))
+                self.assertEqual(lines, ["after-row"], "rows inside a fence indented as %r must not count" % opener)
 
     def test_mid_line_comment_opener_hides_the_rows_it_wraps(self):
         # Red: "intro <!--" opens a multi-line comment on a prose line. The row inside must not count.

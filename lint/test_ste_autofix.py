@@ -479,6 +479,13 @@ class ReviewRound2FixerTests(unittest.TestCase):
         inp = "1. Step one:\n\n    ```sh\n    run in order to win\n    ```\n"
         self.assertEqual(ste_lint.apply_fixes(inp)[0], inp)
 
+    def test_fence_line_indented_four_spaces_or_led_by_a_tab_at_top_level_is_code(self):
+        # CommonMark: at the top level such a line is indented code, not a fence, so the prose after it is fixed. The
+        # copy keeps its 0-3 space rule. word_runs.FENCE reads any indent and would leave that prose unfixed.
+        for opener in ("    ```", "\t```"):
+            with self.subTest(opener=opener):
+                self.assertEqual(ste_lint.apply_fixes("%s\nrun in order to win\n" % opener)[0], "%s\nrun to win\n" % opener)
+
     # F3 et al. and N.B. are left as written
     def test_r2_f3_et_al_unchanged(self):
         inp = "The paper is by Smith et al. The next section is done.\n"

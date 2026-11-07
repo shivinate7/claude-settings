@@ -1750,5 +1750,17 @@ class RealCellCap(unittest.TestCase):
             len(cut), saved[0], max(len(u["What it does"]) for u in full), "; ".join("%s %d chars" % (k, n) for n, k in sorted(cut, reverse=True))))
 
 
+class FenceLines(unittest.TestCase):
+    def test_top_level_four_space_or_tab_fence_is_indented_code_so_the_lines_after_it_are_read(self):
+        # CommonMark: at the top level a line indented four spaces, or led by a tab, is code, not a fence. The copy keeps
+        # its 0-3 space rule. word_runs.FENCE reads any indent and would hide the Kind line and the lines after it.
+        import hook_catalog as gen
+        for opener in ("    ```", "\t```"):
+            with self.subTest(opener=opener):
+                lines = [line for _n, line in gen.lines_outside_fences("%s\nKind: build\nafter\n" % opener) if line is not None]
+                self.assertIn("Kind: build", lines, "the Kind line under a top-level %r is no fence" % opener)
+                self.assertIn("after", lines, "the line after a top-level %r is no fence" % opener)
+
+
 if __name__ == "__main__":
     unittest.main()

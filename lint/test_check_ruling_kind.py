@@ -204,6 +204,14 @@ class RulingKindTests(unittest.TestCase):
                 self.put(REC, record(ruling))
                 self.assert_fails(REC, token)
 
+    def test_top_level_four_space_or_tab_fence_is_indented_code_so_the_kind_line_after_it_counts(self):
+        # CommonMark: at the top level a line indented four spaces, or led by a tab, is code, not a fence. The copy keeps
+        # its 0-3 space rule, so the Kind line after it counts. word_runs.FENCE reads any indent and would hide it.
+        for opener in ("    ```", "\t```"):
+            with self.subTest(opener=opener):
+                self.put(REC, record("%s\n%s" % (opener, BUILD_OK)))
+                self.assert_passes(REC)
+
     def test_heading_inside_a_fence_is_not_an_item(self):
         self.put(REC, record("Kind: build\nPlan: plans/build-plan.md#fake-item (mac)"))
         self.assert_fails(REC, "fake-item")
