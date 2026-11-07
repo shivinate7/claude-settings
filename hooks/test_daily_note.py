@@ -140,10 +140,14 @@ class NoteCase(unittest.TestCase):
         os.makedirs(path)
         return path
 
-    def long_path(self, length, prefix):
-        """A scratch folder whose absolute path is `length` characters long, padded from this case's root."""
+    def long_path(self, length, prefix, at_least=False):
+        """A scratch folder whose absolute path is `length` characters long, padded from this case's root.
+        at_least: a root already past `length` is kept, for a case whose claim holds at any longer path."""
         pad = length - len(os.path.join(self.root, prefix))
-        self.assertGreater(pad, 0, "control: the root is too long for a %d-character path" % length)
+        if at_least:
+            pad = max(pad, 1)
+        else:
+            self.assertGreater(pad, 0, "control: the root is too long for a %d-character path" % length)
         return self.scratch(prefix + "x" * pad)
 
     def require_file(self, path):
@@ -547,12 +551,13 @@ class AgentEndTests(NoteCase):
         self.assertEqual(lines[0], full if len(full) <= MAX_LINE else short, lines[0])
 
     def test_a_long_config_dir_keeps_the_agent_end_line_within_the_cap_with_its_whole_reader_tail(self):
-        self.config = self.long_path(LONG_CONFIG, "claude-config-")
+        self.config = self.long_path(LONG_CONFIG, "claude-config-", at_least=True)
         tail = "Read: " + self.payload_path()
-        self.assertLessEqual(len(tail), MAX_LINE, "control: the reader tail alone must fit the cap")
         self.write_payload([started_row(run_id(141, YESTERDAY_NOON))])
         line = self.assert_one_run_line(self.run_note(MORNING), 1)
-        self.assertLessEqual(len(line), MAX_LINE)
+        # Within the cap when the short head and the whole tail fit; past it, the short head and the whole tail.
+        self.assert_short_head_kept(line, "1 agent-end reap run(s) killed or crashed:", tail,
+                                    keep="1 agent-end reap run(s)")
 
     def test_a_config_dir_so_long_that_the_reader_tail_alone_is_past_the_cap_still_prints_the_whole_tail(self):
         self.config = self.long_path(TAIL_CONFIG, "claude-config-")
@@ -572,7 +577,7 @@ class AgentEndTests(NoteCase):
                                     keep="3 agent-end reap run(s)")
 
     def test_a_long_config_dir_keeps_the_unknown_lead_and_the_whole_tail_when_the_payload_log_is_unreadable(self):
-        self.config = self.long_path(175, "claude-config-")  # the tail is 212 characters: past the cap with any error
+        self.config = self.long_path(175, "claude-config-", at_least=True)  # a config of 175 or more: the line is past the cap
         os.makedirs(self.payload_path())  # a directory cannot be read as a log
         err = unreadable_error(self.payload_path())
         tail = "Read: " + self.payload_path()
