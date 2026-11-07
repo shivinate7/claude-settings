@@ -177,8 +177,11 @@ def units(text):
     while at < len(rows):
         line, number = rows[at], at + 1
         if at in fences:
-            flush()
-            out.append((number, "\n".join(rows[at:fences[at] + 1])))
+            if line[:1] in (" ", "\t") and kind in ("item", "prose"):  # indented: it continues the item or paragraph
+                current.extend((n + 1, rows[n]) for n in range(at, fences[at] + 1))
+            else:
+                flush()
+                out.append((number, "\n".join(rows[at:fences[at] + 1])))
             at = fences[at] + 1
             continue
         at += 1

@@ -1499,3 +1499,5 @@
 - one-home-long-gloss-flags: a gloss of 8 or more words that repeats a rule is flagged COPY001. Decision: one-home-check Fix: none — rare and harmless. Until: 2026-11-21
 - one-home-short-rule-gloss-hole: a copy of a rule under about 16 words passes when it drops or inserts a gloss of 7 words or fewer. Decision: one-home-check Fix: none — rare and harmless. Until: 2026-11-21
 - stale006-other-negators: NEGATORS omits but, instead, none and neither. Decision: one-home-check Fix: none — rare and harmless. Until: 2026-11-21
+- word-runs-unclosed-indented-fence: an unclosed indented fence runs to end of file, so later copies or removed runs pass unless the rule id is named later. Tracked *.md hold none today. Decision: one-home-check Fix: none — rare and harmless. Until: 2026-11-21
+- rule-index-unclosed-fence: an unclosed indented fence in CLAUDE.md drops every later rule anchor from the rule index (lint/rule_audit.py). Decision: one-home-check Fix: none — rare and harmless. Until: 2026-11-21
