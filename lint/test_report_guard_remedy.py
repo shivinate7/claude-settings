@@ -68,10 +68,11 @@ PHRASE_ONLY = "The fix would reach the owner before the review."
 PHRASE_PIN = "would reach the owner"
 # The order the past-ruling judge wrote into its reason in the boundary case, which must not reach the owner.
 JUDGE_ORDER = "Drop the question and send it again."
-# Fact texts with words in backtick spans. Each span's word is in SESSION_IMPERATIVES, so a split at a comma reads the
-# span as an order. The first has a comma between spans; the second has the comma inside one span.
+# A comma list of backticked words is a fact. Each span's word is in SESSION_IMPERATIVES, so the split at a comma must
+# not read the span as an order.
 TWO_TOOL_LIST = "The phrase list holds `add`, `send` and `post`."
-COMMA_IN_SPAN = "The classifier refused `Agent, Write` this session."
+# A comma ends a span, so the text after it is read as a unit: "Write` this session." opens with an order word.
+COMMA_IN_SPAN_ORDER = "The classifier refused `Agent, Write` this session."
 # Order controls: an order outside backticks is still flagged, and the exact unit comes back. In the lone-backtick text
 # the first backtick has no close before the order; a strip that pairs it with the later backtick would hide the order.
 ORDER_AFTER_SPAN = "The classifier refused `Agent`. Write the line. It also refused `Read`."
@@ -420,9 +421,8 @@ class RemedyReasons(trg.SameTurnWriter, unittest.TestCase):
         problem = RG.session_wording(TWO_TOOL_LIST)
         self.assertEqual(problem, "", "1a a comma list of words in backticks reads as an order: %r" % problem)
 
-    def test_1a_comma_inside_backtick_span_is_fact_only(self):
-        problem = RG.session_wording(COMMA_IN_SPAN)
-        self.assertEqual(problem, "", "1a a comma inside a backtick span reads as an order: %r" % problem)
+    def test_1a_control_comma_inside_span_order_is_flagged(self):
+        self.assert_order_flagged(COMMA_IN_SPAN_ORDER, "a comma inside a backtick span hides the order after it")
 
     def test_1a_control_order_after_span_is_flagged_exactly(self):
         found = RG.session_wording(ORDER_AFTER_SPAN)
