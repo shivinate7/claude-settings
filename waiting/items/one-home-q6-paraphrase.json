@@ -4,6 +4,11 @@
   "home": "step one-home-check",
   "id": "one-home-q6-paraphrase",
   "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-07T18:34:31Z",
+    "choice": "b",
+    "note": "i need a semantic meaning pass on this"
+  },
   "n": 341,
   "options": [
     {
@@ -23,8 +28,9 @@
   "pick": "a",
   "rank": 2,
   "ref": "#1106 docs/plans/one-home-check.md, Input Needed 6",
+  "reply": "You picked b, with a meaning-based pass. A model reads a child repo's rule text next to the claude-settings rules and flags a line that says the same thing in new words. Home: step one-home-check. It is a model check, so it is measured on a labelled set before it can block a merge, the same way the prose judge is. Closed 12:40 CST.",
   "short": "One-home Q5 of 5: leave reworded copies to a note for now?",
-  "status": "open",
+  "status": "closed",
   "title": "One-home check, question 5 of 5: should reworded copies of a rule (same meaning, new words) stay unchecked for now, as a note?",
   "why": "From plan PR #1106, at your request on 333 (the plan's question 6)."
 }

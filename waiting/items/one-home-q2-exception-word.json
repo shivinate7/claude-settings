@@ -4,6 +4,11 @@
   "home": "step one-home-check",
   "id": "one-home-q2-exception-word",
   "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-07T18:34:31Z",
+    "choice": "a",
+    "note": ""
+  },
   "n": 338,
   "options": [
     {
@@ -23,8 +28,9 @@
   "pick": "a",
   "rank": 2,
   "ref": "#1106 docs/plans/one-home-check.md, Input Needed 2",
+  "reply": "You picked a: a child marks a kept copy with `exempt`. Home: step one-home-check. Closed 12:40 CST.",
   "short": "One-home Q2 of 5: name a child repo's exception 'exempt'?",
-  "status": "open",
+  "status": "closed",
   "title": "One-home check, question 2 of 5: should a child repo mark a deliberate rule copy with the word 'exempt' instead of 'override'?",
   "why": "From plan PR #1106, at your request on 333."
 }

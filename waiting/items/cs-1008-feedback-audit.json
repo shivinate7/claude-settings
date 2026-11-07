@@ -4,6 +4,11 @@
   "home": "claude-settings #1008",
   "id": "cs-1008-feedback-audit",
   "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-07T18:32:37Z",
+    "choice": "b",
+    "note": ""
+  },
   "n": 334,
   "options": [
     {
@@ -23,8 +28,9 @@
   "pick": "b",
   "rank": 3,
   "ref": "claude-settings #1008",
+  "reply": "You picked b: a lane files the audit's 7 'filed not started' and 6 'unknown' rows as steps, then closes #1008. Sent to the coordinator at 12:38 CST; home: step pr-backlog-clear. Closed.",
   "short": "Idle PR #1008: the Nov 2 owner-feedback audit",
-  "status": "open",
+  "status": "closed",
   "title": "Idle PR #1008 (the Nov 2 audit of your 252 feedback items): merge it as a record, or close it?",
   "why": "It has sat as a draft since Nov 2. Its counts were true on Nov 2 and are now five days old."
 }

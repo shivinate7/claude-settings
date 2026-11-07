@@ -4,6 +4,11 @@
   "home": "step one-home-check",
   "id": "one-home-q1-retired-phrase",
   "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-07T18:34:31Z",
+    "choice": "a",
+    "note": ""
+  },
   "n": 337,
   "options": [
     {
@@ -23,8 +28,9 @@
   "pick": "a",
   "rank": 2,
   "ref": "#1106 docs/plans/one-home-check.md, Input Needed 1",
+  "reply": "You picked a: ban the old phrase after the fixes. Home: step one-home-check. Closed 12:40 CST.",
   "short": "One-home Q1 of 5: ban an old rule phrase once fixed?",
-  "status": "open",
+  "status": "closed",
   "title": "One-home check, question 1 of 5: once the old copies of a moved rule are fixed, should their old wording be banned so it cannot come back?",
   "why": "From plan PR #1106, at your request on 333."
 }

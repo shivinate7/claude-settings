@@ -4,6 +4,11 @@
   "home": "step one-home-check",
   "id": "one-home-q4-word-floor",
   "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-07T18:34:31Z",
+    "choice": "a",
+    "note": "i dont really understand this question"
+  },
   "n": 340,
   "options": [
     {
@@ -23,8 +28,9 @@
   "pick": "a",
   "rank": 2,
   "ref": "#1106 docs/plans/one-home-check.md, Input Needed 4",
+  "reply": "You picked a. Plainly: when a rule's wording changes, old copies of the old wording can stay behind in other files. The check looks for leftover runs of the old words. The question was how many words in a row must match before the check calls it a copy. The real copies that started this were only 5 words long, so a 5-word bar catches them, and an 8-word bar would miss them all. The cost of 5 is that a common short phrase may sometimes trip it. Home: step one-home-check. Closed 12:40 CST.",
   "short": "One-home Q4 of 5: flag a removed rule fragment from 5 words?",
-  "status": "open",
+  "status": "closed",
   "title": "One-home check, question 4 of 5: should the check flag a leftover fragment of removed rule text from 5 words long, not 8?",
   "why": "From plan PR #1106, at your request on 333."
 }

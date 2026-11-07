@@ -4,6 +4,11 @@
   "home": "step one-home-check",
   "id": "one-home-q3-parent-pin",
   "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-07T18:34:31Z",
+    "choice": "a",
+    "note": "isnt there a better way than both of these options tho"
+  },
   "n": 339,
   "options": [
     {
@@ -23,8 +28,9 @@
   "pick": "a",
   "rank": 2,
   "ref": "#1106 docs/plans/one-home-check.md, Input Needed 3",
+  "reply": "You picked a, and asked for a better way. Two are better. 1) Put the copy check inside the shared lint action that every child already pins. Then no new CI step is needed, and the bot that bumps pins keeps it current. This is a done better, and the lane builds it this way. 2) claude-settings scans every child repo at its latest version on a schedule, with no pin at all. It always uses the newest rules, but it finds a copy after it merges, not before. Your a stands, built as 1). Say 'parent scans' if you want 2) instead. Home: step one-home-check.",
   "short": "One-home Q3 of 5: child CI reads claude-settings at a pinned version?",
-  "status": "open",
+  "status": "closed",
   "title": "One-home check, question 3 of 5: should a child repo's CI read claude-settings at a pinned version to find copied rules?",
   "why": "From plan PR #1106, at your request on 333."
 }
