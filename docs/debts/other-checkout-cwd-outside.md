@@ -7,5 +7,3 @@
 **Decision.** `an-agent-outside-its-home-tree-must-stop`, an agent outside its home tree must stop (the `other-checkout` section).
 
 **Retire.** Add a case in `worktree_home_cross_checkout_case` with `cwd=<scratchpad>` and a write whose target lands in the primary. The call is refused, and the case goes red on the old guard.
-
-**Fix.** none — owner decides (waiting page, via triage, 2026-11-07 14:28 CST).
