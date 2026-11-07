@@ -5,6 +5,6 @@
   "order": 261.0,
   "owner": "coordinator",
   "why": "Incident, batch runner 9, 2026-11-07 05:28 CST, relayed by the coordinator 05:30 CST: q_max batch #1064 was pushed without check-invariants and went red on DOC3 (a bare decision cite). Gloss fix f607e5ed8 cleared it.",
-  "note": "Before the merge tool marks an integration PR ready, it runs the repo's declared fast checks on the batch head (for q_max: check-invariants, lint, narration). On a red it refuses to go ready. Each repo declares its list in config, in the home the merge tool already reads (stamp.json or layout-extras). Done check: a red test on a batch head that fails a declared check. A tool's verdict changes, so this is a build lane (test-author, builder, reviewer). No owner question. Lane merge-runs-repo-checks (session_013NEJKzoYwSrqzujL8TRKfT) started 2026-11-07 05:32 CST.",
-  "updatedAt": "2026-11-07T11:32:00Z"
+  "note": "Before the merge tool marks an integration PR ready, it runs the repo's declared fast checks on the batch head (for q_max: check-invariants, lint, narration). On a red it refuses to go ready. Each repo declares its list in config, in the home the merge tool already reads (stamp.json or layout-extras). Done check: a red test on a batch head that fails a declared check. A tool's verdict changes, so this is a build lane (test-author, builder, reviewer). No owner question. Lane merge-runs-repo-checks (session_013NEJKzoYwSrqzujL8TRKfT) started 2026-11-07 05:32 CST. Lane PR #1411 (5d59d298a), with runner 8. It files debt ready-checks-skipped-by-mcp: marking ready by MCP or gh skips the new ready checks.",
+  "updatedAt": "2026-11-07T14:25:00Z"
 }
