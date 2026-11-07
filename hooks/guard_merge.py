@@ -560,7 +560,7 @@ _MARKER_KINDS = {"<": "start", "=": "mid", ">": "end"}
 
 def _diff_check(where, diff_args):
     """The finished `git diff --check` over `diff_args`, or None when git did not run."""
-    return _git(where, "-c", "core.quotepath=off", "diff", "--no-ext-diff", "--no-color", "--check", *diff_args)
+    return _git(where, "-c", "core.quotepath=off", "-c", "diff.relative=false", "diff", "--no-ext-diff", "--no-color", "--check", *diff_args)
 
 
 def _marker_findings(where, top, diff_args, source):
@@ -607,7 +607,7 @@ def _triplet_file(found):
     return next((name for name, seen in found.items() if len(seen) == len(_MARKER_KINDS)), "")
 
 
-_UNPLAIN_REV = re.compile(r"[\s$`*?\[\\;()<>|&\"']|\.\.|^-")
+_UNPLAIN_REV = re.compile(r"[\s$`*?\[\\]|\.\.|^-")
 
 
 def _plain_source(source):
