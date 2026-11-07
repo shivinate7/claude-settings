@@ -100,6 +100,8 @@ STAMP_CFG_CITE = "(decision one-shared-record-stamp, each repo keeps its config 
 REFUSED_CITE = "(decision standing-merge-grant, only a proven refusal reverts the claim: a refusal reply with the pull request still OPEN)"
 READ_CITE = "(decision no-merge-during-batch-ci, a failed read refuses, and unknown is red)"
 GREEN_CITE = "(rule git-never-merge-failing-ci, a head whose checks are not green never merges)"
+WAIT_CITE = "(decision ci-wait-reads-run-status, each wait reads the run's status until the run ends or its deadline passes)"
+HEAD_CITE = "(decision standing-merge-grant, the required checks must pass on the head that merges)"
 UNKNOWN_CITE = "(rule verification-report-unknown-reads, a read that could not run is reported as unknown, never as clear)"
 # The two role cites name no tier: a lane must not learn which tier may claim a merge.
 ROLE_CITE = "(decision session-tiers, a session's tier decides whether it may merge)"
@@ -1044,13 +1046,13 @@ class Host:
             if info["head"] == prior and prior != sha:
                 progress("GitHub to show the pushed head")
                 if self.now() >= end:
-                    return False, f"the deadline of {deadline_minutes} minutes passed. GitHub still shows the head before the push. {GREEN_CITE}"
+                    return False, f"the deadline of {deadline_minutes} minutes passed. GitHub still shows the head before the push. {WAIT_CITE}"
                 self.pause(self.minute)
                 continue
             if info["base"] != base:
                 return False, f"the base of the pull request changed from {base} to {info['base']} during the wait {BASE_CITE}."
             if info["head"] != sha:
-                return False, f"the branch head moved to {info['head'][:9]} during the wait ({sha[:9]} was waited on). Run again. {GREEN_CITE}"
+                return False, f"the branch head moved to {info['head'][:9]} during the wait ({sha[:9]} was waited on). Run again. {HEAD_CITE}"
             if info["mergeable"] == "CONFLICTING" or info["merge_state"] == "DIRTY":
                 return False, f"the pull request went DIRTY during the wait {BASE_CITE}. Merge the base into the branch and run again."
             got = self.checks(n, sha=info["head"])
@@ -1271,7 +1273,7 @@ class Host:
         if live and not red and not pending and not any(b == "pass" for rows in live.values() for b, _ in rows):
             fix = ("Mark the PR ready, or push anew if the PR is ready" if DRAFT_SKIP_CHECK in names
                    else f"Run `gh workflow run checks.yml --ref {branch}`, or push anew after you mark the PR ready")
-            fix += f". {READY_ROUTES}"
+            fix += f". Before you mark it ready, run `merge <pr> --confirm` on the draft: it runs the repo's ready checks, which a mark by MCP or gh skips. {READY_ROUTES}"
             red = [f"no check ran on this head (every check skipped). {fix}"]
         if not red and DRAFT_SKIP_CHECK in names and live.get(DRAFT_SKIP_CHECK) and all(b == "skipping" for b, _ in live[DRAFT_SKIP_CHECK]):
             pending = sorted(set(pending) | {DRAFT_SKIP_CHECK})
@@ -2469,7 +2471,7 @@ def lane_lint(root, target, host, base="", unknown_ok=""):
         return 0
     head_line = f"the lint of {short} against {base} is unknown, not a pass:"
     if not liftable:  # a timeout or an odd exit says nothing about any step, so no flag lifts it
-        raise Stop("\n".join([head_line, *lines, LANE_LINT_REMEDY]))
+        raise Stop("\n".join([head_line, *lines, *log, LANE_LINT_REMEDY]))
     raise Liftable("\n".join([head_line, *lines, *log,
                               'Run it where the missing tool is present, or run again with --lint-unknown-ok "<reason>". ' + LANE_LINT_REMEDY]))
 
@@ -2894,7 +2896,7 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
                 except Stop as e:
                     ok, why = False, str(e)
                 if not ok:
-                    raise Stop("the head's own checks are not green, so nothing was claimed or pushed " + GREEN_CITE + ": " + why)
+                    raise Stop("the head's own checks are not green, so nothing was claimed or pushed: " + why)
                 claim_sha = commit_claim(wt, trailer)
                 push_branch(wt, branch)
                 say(f"merge: {trailer or 'the records page'} pushed to {branch} at {claim_sha[:9]}.")
