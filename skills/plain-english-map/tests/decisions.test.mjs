@@ -28,6 +28,7 @@
 //   S-*      scanner traps for JS and TS: an id in a string is no cite; `/*` and `//` in strings; a template literal; a lone quote in JSX.
 //   P-*      Python: `# D7` is a cite; an id in a Python string, and `# D18` inside a triple-quoted string, are no cite.
 //   SH-*     shell: `# D7` is a cite; an id in a double-quoted shell string is no cite.
+//   Z-cite   a .zsh file reads as shell: a lone quote in its comment does not hide the cite after it on that line.
 //   K-*      controls: the existing readers blank the comment and keep the string, as the scanner traps need.
 //   SK       with neither key, MAP10 prints a SKIP line that names the decision setting.
 //   F1       map-fix with no flag names the file and the id on one line, and writes no byte.
@@ -38,7 +39,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { HERE, SKILL, run, scratchRepo } from './helpers.mjs';
+import { HERE, SKILL, gitIn, run, scratchRepo } from './helpers.mjs';
 import { loadMapConfig } from '../scripts/lib/map-config.mjs';
 import { blankComments, blankShell } from '../scripts/lib/source-text.mjs';
 
@@ -271,6 +272,25 @@ test('SH-string. an id inside a double-quoted shell string, "# D18" included, is
   const dir = repo();
   assert.match(read(dir, 'src/run.sh'), /echo "# D18 is text"/, 'scope: the shell string holds # D18');
   assert.match(ten(runCheck(dir).out), /^\[PASS\] MAP10$/, 'MAP10 must pass: a # inside a shell string is no comment');
+});
+
+// ---- Zsh: a .zsh file reads as shell (the decision that moved .zsh to the shell scanner). The old reader read it as C-style code, where
+// the lone quote in the comment opened a string that hid the cite after it.
+test("Z-cite. a lone quote in a .zsh comment does not hide the # D7 cite on its line: without its decisions line MAP10 fails, and names the file and D7", () => {
+  const dir = repo();
+  const cfg = JSON.parse(read(dir, CONFIG));
+  writeConfig(dir, { ...cfg, codeExtensions: [...cfg.codeExtensions, 'zsh'] });
+  write(dir, 'src/run_zsh.zsh', "#!/bin/zsh\n# don't wait long: D7 keeps the retry wait\necho ok\n");
+  gitIn(dir, 'add', '-N', 'src/run_zsh.zsh');
+  // The new map line goes under run.sh, after that line's decisions line. The new file has no decisions line.
+  const ls = read(dir, MAP).split('\n');
+  ls.splice(mapIndexOf(ls, 'src/run.sh') + 2, 0, '- `src/run_zsh.zsh` — Runs a retry wait in zsh, with a comment.');
+  write(dir, MAP, ls.join('\n'));
+  assert.match(read(dir, 'src/run_zsh.zsh'), /^# don't wait long: D7/m, 'scope: the lone quote and the D7 cite share one comment line');
+  const line = ten(runCheck(dir).out);
+  assert.match(line, /^\[FAIL\] MAP10/, `MAP10 must fail: the .zsh comment cites D7, and its map line has no decisions line. A lone quote in the comment must not hide the cite\n${line}`);
+  assert.match(line, /src\/run_zsh\.zsh/, `the MAP10 failure must name src/run_zsh.zsh\n${line}`);
+  assert.match(line, /\bD7\b/, `the MAP10 failure must name the id D7\n${line}`);
 });
 
 // ---- Controls: the existing readers, which the traps above depend on. Each holds on the old code and the new.
