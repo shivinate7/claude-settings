@@ -3617,6 +3617,19 @@ sh("pointer: -C reaches the pointer checkout from anywhere",
    VCS + " -C " + slash(PTRMAIN) + " switch somebranch", "deny", "pointer-head", cwd=NOGIT,
    config=PTRCFG)
 
+# guard-cd-walk-extra-reading: the pointer checkout is the folder the switch RUNS in. A cd after the
+# switch moves nothing before it, so the switch is still a switch in the pointer checkout.
+sh("guard-cd-walk-extra-reading: a switch in the pointer checkout, then a cd out, is refused",
+   VCS + " switch other; cd " + slash(NOGIT), "deny", "pointer-head", cwd=PTRMAIN, config=PTRCFG)
+sh("guard-cd-walk-extra-reading: a switch in the pointer checkout, then an && cd out, is refused",
+   VCS + " switch other && cd " + slash(NOGIT), "deny", "pointer-head", cwd=PTRMAIN, config=PTRCFG)
+sh("guard-cd-walk-extra-reading: a switch in the pointer checkout, then a cd after a lone apostrophe, is refused",
+   VCS + " switch other\necho don't\ncd " + slash(NOGIT), "deny", "pointer-head", cwd=PTRMAIN,
+   config=PTRCFG)
+# The near form: a cd first moves the switch out of the pointer checkout, so it is no pointer act.
+sh("guard-cd-walk-extra-reading: a cd out, then a switch there, is allowed",
+   "cd " + slash(NOGIT) + " && " + VCS + " switch other", "allow", cwd=PTRMAIN, config=PTRCFG)
+
 # THE MOVE TO MAIN IS THE REPAIR. A deny there would wall off the one command that restores the
 # invariant this rule exists to protect.
 sh("pointer: a move back to main restores the invariant and passes",
