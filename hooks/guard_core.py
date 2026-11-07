@@ -52,13 +52,12 @@ def is_cloud() -> bool:
 # text wrapper, so a failure here leaves the old encoding rather than bricking the hook.
 def _force_utf8_streams() -> None:
     # Stdin keeps a byte that is no UTF-8 as a lone surrogate, so the call is still judged. Strict
-    # decoding would raise, and main() fails open on unreadable input.
-    for stream, errors in ((sys.stdin, "surrogateescape"), (sys.stdout, None), (sys.stderr, None)):
+    # decoding would raise, and main() fails open on unreadable input. The output streams print
+    # that surrogate as an escape: a strict write would raise inside refuse() and allow the call.
+    for stream, errors in ((sys.stdin, "surrogateescape"), (sys.stdout, "backslashreplace"),
+                           (sys.stderr, "backslashreplace")):
         try:
-            if errors:
-                stream.reconfigure(encoding="utf-8", errors=errors)
-            else:
-                stream.reconfigure(encoding="utf-8")
+            stream.reconfigure(encoding="utf-8", errors=errors)
         except Exception:
             pass
 
@@ -1455,7 +1454,7 @@ def record(tool: str, decision: str, rule: str, matched: str) -> None:
         if session is not None:
             fields.append(session)
         line = "\t".join(fields)
-        with open(os.path.join(folder, "guard.log"), "a", encoding="utf-8") as handle:
+        with open(os.path.join(folder, "guard.log"), "a", encoding="utf-8", errors="backslashreplace") as handle:
             locked = _log_lock(handle)
             try:
                 handle.write(line + "\n")

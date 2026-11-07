@@ -815,8 +815,9 @@ def hand_made_worktree_hit(segments, number: int, cwd: str, ends=()) -> str:
     """The new-tree path when `segments[number]` is a real worktree add whose tree lands
     outside `<primary>/.claude/worktrees/`, else "". The primary is the one of the repo the call
     runs in (`dir_before_segment`, then its own `-C`). A repo under the temp folder is a throwaway
-    and passes, so the repo is judged, never the target. A target with a variable is judged by the
-    folder before the variable. Any other unreadable part allows."""
+    and passes, so the repo is judged, never the target. A variable an earlier
+    segment assigned reads as its value. One with no readable value is judged by the folder before
+    it. Any other unreadable part allows."""
     tokens = segment_tokens(segments[number])
     index = resolve_command(tokens) if tokens else None
     if index is None or basename(tokens[index]) not in ("git", "git.exe"):
@@ -4505,7 +4506,7 @@ def _homeless_write_hit(targets, command: str, where: str, session_id: str, has_
             resolved = _resolved(target, at)
             if not has_agent and under_session_scratchpad(resolved, session_id):
                 return False
-            if own_home and path_is_inside(resolved, own_home) is True:
+            if own_home and os.path.isdir(own_home) and path_is_inside(resolved, own_home) is True:
                 return False
             if path_is_inside(resolved, temp) is True:
                 return False
