@@ -3667,6 +3667,13 @@ sh("pointer-failed-cd-walk: a cd into the pointer checkout, then a switch, is re
 sh("pointer-failed-cd-walk: a cd out of the pointer checkout, a failed cd, then a switch, is allowed",
    "cd " + slash(NOGIT) + "; cd " + POINTER_NONEXIST + "; " + VCS + " switch other",
    "allow", cwd=PTRMAIN, config=PTRCFG)
+# A mkdir earlier on the line may make the folder a cd then names. While that is open the folder is
+# unknown, so the switch is refused as a pointer act. Neither folder exists at judge time.
+sh("pointer-failed-cd-walk: a mkdir, then a cd into the folder it made, then a switch, is refused",
+   "mkdir sub && cd sub && " + VCS + " switch y", "deny", "pointer-head", cwd=PTRMAIN, config=PTRCFG)
+sh("pointer-failed-cd-walk: a mkdir, then a failed cd into a missing folder, then a switch, is refused",
+   "mkdir x; cd " + POINTER_NONEXIST + "; " + VCS + " switch y", "deny", "pointer-head", cwd=PTRMAIN,
+   config=PTRCFG)
 
 # guard-first-c-reads-wrong-tree: the pointer rule judges the checkout each git call RUNS in. A -C on
 # another call is that call's folder, so the first -C of the line does not decide for the switch.
