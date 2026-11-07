@@ -507,6 +507,20 @@ def case_task_why_cited_reds():
                   [{"op": "set", "collection": "items", "doc_id": DOC, "data": task_item(STEPS)},
                    {"op": "set", "collection": "items", "doc_id": "second",
                     "data": task_item(STEPS, context=CAP + ".")}], (WHY_RULE, None))
+        # A str_replace whose new_str holds only a cite, with no Why yours line: the cite must back on its own.
+        why_guard("a str_replace that swaps a works-row cite in for a refused one is refused", "str_replace",
+                  {"collection": "items", "doc_id": DOC, "field": "context", "old_str": "(route r-refused)",
+                   "new_str": "(route r-works)"}, (WHY_RULE, None))
+        why_guard("a str_replace that swaps an id no row holds in for a refused cite is refused", "str_replace",
+                  {"collection": "items", "doc_id": DOC, "field": "context", "old_str": "(route r-refused)",
+                   "new_str": "(route r-missing)"}, (WHY_RULE, None))
+        why_guard("a str_replace that drops the date from a measured cite is refused", "str_replace",
+                  {"collection": "items", "doc_id": DOC, "field": "context",
+                   "old_str": "(measured 2026-11-06, the proxy answered 403)",
+                   "new_str": "(measured, the proxy answered 403)"}, (WHY_RULE, None))
+        why_guard("a plain edit that adds a works-row cite is refused", "str_replace",
+                  {"collection": "items", "doc_id": DOC, "field": "context", "old_str": "Run the proxy check.",
+                   "new_str": "Run the proxy check (route r-works)."}, (WHY_RULE, None))
     with local_rows(rows_at("why-rows-empty.json", [])):
         why_guard("a cite of an id in an empty rows file is refused", "set",
                   entry_of(task_item(STEPS, context=CAP + " (route r-refused).")), (WHY_RULE, None))
@@ -533,6 +547,15 @@ def case_task_why_cited_greens():
         why_guard("a refused-row cite in a str_replace passes", "str_replace",
                   {"collection": "items", "doc_id": DOC, "field": "context", "old_str": TASK_WHY,
                    "new_str": CAP + " (route r-refused)."}, None)
+        why_guard("a str_replace that swaps an asks-row cite in for a refused one passes", "str_replace",
+                  {"collection": "items", "doc_id": DOC, "field": "context", "old_str": "(route r-asks)",
+                   "new_str": "(route r-refused)"}, None)
+        why_guard("a str_replace that swaps a dated measured cite in for a refused one passes", "str_replace",
+                  {"collection": "items", "doc_id": DOC, "field": "context", "old_str": "(route r-refused)",
+                   "new_str": "(measured 2026-11-06, the proxy answered 403)"}, None)
+        why_guard("a Based on (measured) premise line in a str_replace passes", "str_replace",
+                  {"collection": "items", "doc_id": DOC, "field": "context", "old_str": "Run the proxy check.",
+                   "new_str": "Based on (measured): the proxy refused the delete (403)."}, None)
         why_guard("a capability word outside the Why yours line passes", "set",
                   entry_of(task_item(STEPS, context="The cloud proxy refused the delete (403).\n" + TASK_WHY)), None)
         why_guard("a decision item with an uncited capability line passes, since the rule judges tasks", "set",
