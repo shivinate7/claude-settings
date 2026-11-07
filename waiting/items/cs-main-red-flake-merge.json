@@ -1,0 +1,31 @@
+{
+  "added": "2026-11-07T11:06:00Z",
+  "context": "Goal: claude-settings merges resume without hiding a real failure.\nProblem (rule): main's last push run is red on one page test (dismiss focus, from #1308) that passed 3 of 3 other runs on the same code. The merge tool refuses every batch on a red main; --base-red-ok is for \"the batch that carries the fix\". Fix PR #1405 does not fix the cause (unknown; the code moves focus at once). It makes the next failure name where focus went, and files step dismiss-focus-root-cause. Whether that counts as the fix batch is your call.\nBased on (test): main push run 42357626483 failed twice; schedule run 42363147772, the PR run and a branch dispatch passed.\nBased on (read): merge/merge.py RED_FLAG: --base-red-ok is \"the way out for the batch that carries the fix\".\nDeparts from: main lets only a batch that fixes the red merge onto it \u2014 this once, a batch that instruments a flaky test and files its follow-up may too.",
+  "home": "batch runner 8 merges or holds; step dismiss-focus-root-cause",
+  "id": "cs-main-red-flake-merge",
+  "kind": "decision",
+  "lane": "coordinator",
+  "n": 330,
+  "options": [
+    {
+      "gain": "About 10 waiting PRs move today; the next red names its cause.",
+      "key": "a",
+      "label": "Runner 8 merges #1405 alone with --base-red-ok; the queue resumes on main's next push run (recommended)",
+      "lose": "Main merges once onto a red run whose cause is unknown."
+    },
+    {
+      "gain": "The flag keeps its narrow meaning.",
+      "key": "b",
+      "label": "Hold the queue until the root cause is found and fixed",
+      "lose": "Every claude-settings merge waits, for an unmeasured time."
+    }
+  ],
+  "owner": "coordinator",
+  "pick": "a",
+  "rank": 1,
+  "ref": "#1405; #1308; run 42357626483",
+  "short": "cs main red: merge #1405 or hold",
+  "status": "open",
+  "title": "claude-settings main is red on a flaky test: merge #1405 onto it with --base-red-ok, or hold every merge?",
+  "why": "Every claude-settings merge waits on this. Meanwhile the queue stays held and lane dismiss-focus-main-red finishes #1405's review round 2."
+}
