@@ -940,6 +940,18 @@ class RecordSlugsTests(unittest.TestCase):
                 self.assertTrue(self.failed_about(out, rel), out)
         self.assertFalse(self.failed_about(out, FIXED_DEBT), out)
 
+    def test_an_edit_that_drops_a_seen_field_is_red(self):
+        # Decision notes-sightings-expiry (lane ruling 2026-11-07 15:58 CST): a note whose base line had a Seen field keeps
+        # one. An edit that drops it is red, whatever the date was.
+        self.put(DEBT_NOTES, NOTES_HEAD + "- kept-note: a gap. Seen: %s x1. Fix: none — owner decides. Until: 2026-11-20\n"
+                 % day(-1))
+        self.commit_base()
+        self.put(DEBT_NOTES, NOTES_HEAD + "- kept-note: a gap. Fix: none — owner decides. Until: 2026-11-20\n")
+        self.commit_change()
+        rc, out = self.lint()
+        self.assertEqual(rc, 1, out)
+        self.assertIn("kept-note", out, out)
+
     def test_debt_file_with_a_seen_date_in_the_future_is_red(self):
         self.put(DEBT_NOTES, NOTES_HEAD)
         self.commit_base()
@@ -1059,6 +1071,21 @@ class RecordSlugsTests(unittest.TestCase):
         self.assertNotIn("new-note-line", out, out)
         self.assertNotIn("README.md", out, out)
         self.assertNotIn("notes.md", out, out)
+
+    def test_debt_flow_counts_a_debt_added_in_the_start_commit(self):
+        # Decision notes-sightings-expiry (lane ruling 2026-11-07 15:58 CST): the window includes the START commit's own
+        # additions, so a debt that START adds and the end still holds is opened.
+        self.put("debts/early-debt.md", DEBT_NO_FIX)  # added in START itself
+        self.put(DEBT_NOTES, NOTES_HEAD)
+        self.commit_base()
+        start = self.head_sha()
+        self.put("debts/later-debt.md", FIXED_DEBT_TEXT)
+        self.commit_change()
+        rc, out = self.lint("--debt-flow", start, "HEAD")
+        self.assertEqual(rc, 0, "--debt-flow did not exit 0 (not built?): %s" % out)
+        lines = out.splitlines()
+        self.assertEqual(lines[:1], ["debts opened 2, closed 0"], out)
+        self.assertEqual(sorted(lines[1:]), ["+ early-debt", "+ later-debt"], out)
 
     def test_debt_flow_prints_the_count_line_then_one_plus_or_minus_line_per_debt(self):
         self.put("debts/closed-one.md", DEBT_NO_FIX)
