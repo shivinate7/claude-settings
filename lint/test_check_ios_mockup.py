@@ -120,6 +120,13 @@ class Faults(ModuleCase):
                ".screen { padding: env(safe-area-inset-top); }")
         self.assertEqual(self.codes(mockup(css=css)), {"system-font"})
 
+    def test_serif_h1_beside_a_system_body_font_fires_system_font(self):
+        # One system family elsewhere in the sheet must not clear a serif heading: every text rule names the system font.
+        css = ("body { font-family: -apple-system, sans-serif; }\nh1 { font-family: Georgia, serif; }\n"
+               ".screen { padding: env(safe-area-inset-top); }")
+        self.assertEqual(self.codes(mockup(css=css)), {"system-font"},
+                         "an h1 in Georgia beside a body in -apple-system must fault system-font")
+
     def test_font_and_safe_area_in_style_attributes_count(self):
         body = ('<main style="font-family: -apple-system, sans-serif; padding: env(safe-area-inset-top);">\n'
                 + FOLDED + "\n" + UNFOLDED + "\n</main>")
