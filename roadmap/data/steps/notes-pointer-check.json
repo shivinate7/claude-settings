@@ -1,10 +1,11 @@
 {
   "title": "Every path named in docs/debts/notes.md resolves",
-  "phase": "later",
-  "status": "todo",
+  "phase": "now",
+  "status": "doing",
   "order": 400.0,
   "owner": "coordinator",
   "why": "Item-355 best-practices agent, sent by the coordinator 13:58 CST Nov 7: 24 of 149 paths named in notes do not resolve, and 5 of them live in sibling repos.",
   "note": "Also revisit the expiry sweep on 2026-12-16.",
-  "updatedAt": "2026-11-07T13:58:00-06:00"
+  "updatedAt": "2026-11-07T15:28:00-06:00",
+  "lane": "session_013NEJL2pjRytKQdMCgTwxa6"
 }

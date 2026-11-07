@@ -1,0 +1,10 @@
+{
+  "title": "Fix the real stale cites that STALE009 finds",
+  "phase": "next",
+  "status": "todo",
+  "order": 266.0,
+  "owner": "coordinator",
+  "why": "Lane record-claim-cites-code measured 226 STALE009 hits on the full tree. A sample of 10 found 8 real, 1 borderline and 1 false (coordinator, 15:28 CST Nov 7).",
+  "note": "Waits on #1539. The coordinator starts the lane when #1539 merges. The sweep fixes the real cites only, and lists the false ones for the check's lane.",
+  "updatedAt": "2026-11-07T15:28:00-06:00"
+}

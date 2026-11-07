@@ -1,0 +1,36 @@
+{
+  "added": "2026-11-07T21:28:00Z",
+  "context": "Goal: a cloud session can run make harness and get a true verdict.\nProblem (rule): 6 T7 assertions always fail in a Claude Code cloud VM, for reasons that have nothing to do with the code. Changing what a test proves needs your word.\nBased on (measured): banchi main affcbb7, cloud VM as root, 15:20 CST. check_open_read_only (1 assertion) and check_open_read_only_race (3) in harness/tests/t7/store_core.py set a folder to read-only, and root ignores that. check_dual_stack_bind (2) in harness/tests/t7/server_hardening.py fails because the VM has no IPv6.\nBased on (measured): CI passes all 6. Main push runs 87, 81 and 77 were green with the full harness (non-root, IPv6). The Mac is unmeasured.\nBased on (read): harness/tests/t7/backup.py already skips one root case silently. scripts/ci-skip-count.sh counts only lines shaped '<name>: SKIPPED'.\nDeparts from: main, where those 6 assertions fail in the cloud. They print a named SKIP there instead, and T7 passes.",
+  "home": "lane banchi-t7-root-ipv6-skip (session_013NEJL46E7t1ZeTe57HjYPW)",
+  "id": "banchi-t7-cloud-skip",
+  "kind": "decision",
+  "lane": "banchi-t7-root-ipv6-skip",
+  "n": 375,
+  "options": [
+    {
+      "gain": "The cloud harness goes green and names each claim it did not prove. CI and the Mac do not change. backup.py's silent skip takes the same named form.",
+      "key": "a",
+      "label": "Named SKIP in the cloud (recommended, your pick)",
+      "lose": "In the cloud those 3 checks prove nothing."
+    },
+    {
+      "gain": "4 of 6 assertions still prove in the cloud.",
+      "key": "b",
+      "label": "Named SKIP for IPv6 only; the read-only checks drop root to a plain user",
+      "lose": "More test setup code in a race test, and 2 skips stay."
+    },
+    {
+      "gain": "No test change.",
+      "key": "c",
+      "label": "Leave as is",
+      "lose": "Cloud T7 stays red, and sessions learn to scroll past it."
+    }
+  ],
+  "owner": "lane banchi-t7-root-ipv6-skip (session_013NEJL46E7t1ZeTe57HjYPW)",
+  "rank": 2,
+  "ref": "ask ask-mw6vybwdb8; step banchi-t7-root-ipv6-skip",
+  "short": "banchi T7 in the cloud: named SKIP, or keep proving",
+  "status": "open",
+  "title": "How should banchi's T7 checks act in a cloud session, where they cannot pass?",
+  "why": "Your ask ask-mw6vybwdb8 part 2: bring options, with the named SKIP as the pick. The lane waits on your pick and builds nothing until then."
+}
