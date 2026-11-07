@@ -1,0 +1,11 @@
+{
+  "title": "The task-why-cited guard reads the stored item when a page edit changes only part of a cite",
+  "phase": "now",
+  "status": "doing",
+  "order": 265.7,
+  "owner": "coordinator",
+  "lane": "session_013NEJL1UMoM1VHADdYGDUZz",
+  "why": "Gap found by lane task-names-check-line-not-truth: on a waiting-page task, a str_replace that swaps only part of a cite token (the route id alone, the date alone) or removes the whole cite passes the task-why-cited guard, because the hook sees only old_str and new_str.",
+  "note": "Coordinator ruling, 15:19 CST: the guard reads the stored item once per page str_replace on a cite field, and only then. The cost goes in the record, with a test. A failed stored read reads unknown and asks; it never passes silently. Stacked PR on the lane's own PR, after the hand-off. Home: decision task-names-its-check, Known limit.",
+  "updatedAt": "2026-11-07T15:21:00-06:00"
+}
