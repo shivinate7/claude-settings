@@ -4795,7 +4795,7 @@ test("answered-sink: Undo of the Send that added the Answered row moves no card 
   await sinkUndoRailRow(t);
 });
 
-// Round 3. Scroll anchoring stays on in every case below. A Send is a script click, not a mouse press, since a press moves the focus to the Send button.
+// Scroll anchoring stays on in every case below. A Send is a script click, not a mouse press, since a press moves the focus to the Send button.
 const focusedId = (page) => page.evaluate(() => (document.activeElement && document.activeElement.id) || "");
 // A frame's load event does not reach the window in capture, so each frame counts its own load. A frame moved in the DOM reloads, and a new one is caught when it is added.
 const watchLoads = (page) => page.evaluate(() => {
@@ -7144,7 +7144,7 @@ test("a closed item with no arbiter flag stays hidden next to a closed arbiter i
   assert.equal(await overturn(page).count(), 1, "the page offers Overturn on more than the arbiter item");
 });
 
-// Round 2: an answer or a draft that is no overturn. A ruling was an open item once, so a saved answer or a draft under its id
+// An answer or a draft that is no overturn. A ruling was an open item once, so a saved answer or a draft under its id
 // may hold an option key ("a"). Only choice "overturn" is an overturn; any other record under a ruling's id is stale.
 const staleAnswer = { [ARBITER.id]: { item: ARBITER.id, n: 901, at: "2026-10-30T18:00:00Z", choice: "a", note: "" } };
 const staleDraft = { "waiting.draft": JSON.stringify({ [ARBITER.id]: { choice: "a" } }) };
