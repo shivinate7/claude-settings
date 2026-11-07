@@ -940,6 +940,46 @@ class OneHomeInRepoTests(unittest.TestCase):
         found, out = self.verdict_scan()
         self.assertEqual(keyed(found), [CONTROL_FINDING, ("agents/paren.md", 1, "COPY001")], out)
 
+    # One-home-long-gloss-hides: a gloss of the copy floor's words or more is text, so a rule sentence pasted as a gloss
+    # is a copy. A gloss one word under the floor stays a gap. The two words after it continue the rule, so a gap that
+    # read as text would join the rule's run: the control can fail.
+    GLOSS_WORDS = ("alpha bravo charlie delta echo foxtrot golf hotel india juliet kilo lima mike november oscar papa "
+                   "quebec romeo").split()
+
+    def copy_floor(self):
+        return load_module().COPY_FLOOR  # the floor the scan reads, through the module under test
+
+    def token_gloss_case(self, size):
+        """A child whose line glosses the first `size` words of a parent rule after a backticked id, then two more."""
+        write(self.parent, "CLAUDE.md", PARENT_RULES + "**Keep.** Keep `token-id` %s.<!-- rule:keep-token -->\n"
+              % " ".join(self.GLOSS_WORDS))
+        gloss, tail = " ".join(self.GLOSS_WORDS[:size]), " ".join(self.GLOSS_WORDS[size:size + 2])
+        self.tracked({"agents/token.md": "Keep `token-id` (%s) %s.\n" % (gloss, tail)})
+        return self.verdict_scan()
+
+    def test_a_rule_sentence_pasted_as_a_long_gloss_is_a_copy(self):
+        self.gloss_parent()
+        self.tracked({"agents/long.md": "We keep decision `hold-unsafe-after-round-3` (%s) in the review table here.\n"
+                                        % self.AFTER_GLOSS})
+        found, out = self.verdict_scan()
+        self.assertEqual(keyed(found), sorted([CONTROL_FINDING, ("agents/long.md", 1, "COPY001")]), out)
+        self.assertIn(("agents/long.md", 1, "COPY001", "review-cap-three copied"), found, out)
+
+    def test_a_long_gloss_after_a_comment_opener_span_is_still_read(self):
+        self.gloss_parent()
+        self.tracked({"agents/opener-long.md": "Write the `<!--` opener as text. We keep decision "
+                                               "`hold-unsafe-after-round-3` (%s) here.\n" % self.AFTER_GLOSS})
+        found, out = self.verdict_scan()
+        self.assertEqual(keyed(found), sorted([CONTROL_FINDING, ("agents/opener-long.md", 1, "COPY001")]), out)
+
+    def test_a_gloss_of_the_copy_floor_words_is_read(self):
+        found, out = self.token_gloss_case(self.copy_floor())
+        self.assertEqual(keyed(found), sorted([CONTROL_FINDING, ("agents/token.md", 1, "COPY001")]), out)
+
+    def test_a_gloss_one_word_under_the_copy_floor_stays_a_gap(self):
+        found, out = self.token_gloss_case(self.copy_floor() - 1)
+        self.assertEqual(keyed(found), [CONTROL_FINDING], out)
+
     # Review round 2, F3: word_runs.SPANS had no re.S, so a comment that runs over two lines was read as prose, and an
     # exception marker over two lines went unseen.
     def test_a_two_line_comment_is_not_read_as_prose(self):
