@@ -326,6 +326,8 @@ def set_waiting_page(root, url):
     _artifact_link(url, _extras(root))
     if not ARTIFACT_URL.fullmatch(url):
         raise LayoutError("%s: %s %r is not a claude.ai artifact link with an id" % (_extras(root), WAITING_PAGE, url))
+    if _common_dir(root) is None:  # a mistyped root must not get a new .claude folder
+        raise LayoutError("%s: not a git repository (a missing folder, or a folder with no .git)" % root)
     if has_extras(root):
         data = _read(_extras(root))
         held = next((e for e in artifacts(root) if e["role"] == WAITING_ROLE), None)
@@ -610,9 +612,13 @@ if __name__ == "__main__":
     # python3 lint/layout.py shared-resources <root>: the repo's shared machines as JSON, [] when none.
     # python3 lint/layout.py artifacts <root>: the repo's artifact registry as JSON, [] when none.
     # python3 lint/layout.py set-waiting-page <root> <url>: write the key once into the extras file of
-    # <root>. Exit 0 wrote it; 1 already set (prints the URL); 2 bad URL or unreadable or unwritable file.
+    # <root>. Exit 0 wrote it; 1 already set (prints the URL); 2 wrong argument count, bad URL, a root
+    # that is no git repo, or an unreadable or unwritable file.
     ROOT_VERBS = (WAITING_PAGE, "devices", "caution", SHARED_RESOURCES, ARTIFACTS)
-    if len(sys.argv) == 4 and sys.argv[1] == "set-waiting-page":
+    if len(sys.argv) >= 2 and sys.argv[1] == "set-waiting-page":
+        if len(sys.argv) != 4:
+            print("usage: layout.py set-waiting-page <root> <url>", file=sys.stderr)
+            sys.exit(2)
         try:
             here = os.path.abspath(sys.argv[2])
             if set_waiting_page(here, sys.argv[3]):

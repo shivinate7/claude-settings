@@ -3,10 +3,13 @@
 guard.py is the only entry point, and it runs these checks in its fixed order.
 Other files reach these names through `guard`.
 """
+import contextlib
 import fnmatch
+import io
 import json
 import os
 import re
+import sys
 
 from guard_core import (
     _absolute, _git, _git_subcommand_index, _segment_git_c_target, basename, cap_safe, command_root,
@@ -415,8 +418,48 @@ def _page_tracked(top):
 
 
 _GENERATOR = "hook_catalog.py"
-_GENERATOR_READS = {"--check", "--print"}   # the two modes that write no page
 _PYTHON_VALUE_FLAGS = {"-X", "-W"}
+
+
+def _generator_parser():
+    """The generator's own argparse parser (lint/hook_catalog.py build_parser, the one home of its options),
+    or None when it cannot be imported. The import is lazy: only a command that runs the generator pays it."""
+    try:
+        lint = os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "lint")
+        if lint not in sys.path:
+            sys.path.append(lint)
+        import hook_catalog
+        return hook_catalog.build_parser()
+    except Exception:   # a parser that cannot be read leaves the old rule: every run counts
+        return None
+
+
+def _generator_root(args):
+    """None when the generator's `args` write no page: -h or --help, --check, --print (each by any prefix
+    argparse accepts), or a command line argparse refuses. Else the --root it names, "" for none (the
+    generator then writes the repo it is in). The generator's own parser reads the arguments, so a prefix or a
+    `--root=` form is read as the generator reads it."""
+    parser = _generator_parser()
+    if parser is None:
+        return ""
+    with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+        try:
+            parsed = parser.parse_args(args)
+        except SystemExit:   # -h, --help, or a usage error: argparse exits before the generator writes
+            return None
+    if parsed.show or parsed.check:
+        return None
+    return parsed.root or ""
+
+
+def _root_is_repo(named, cwd, top):
+    """True when the --root `named`, read from `cwd`, is the repo whose top is `top`. A path that holds a shell
+    expansion cannot be read here, so it counts as this repo."""
+    if not named:
+        return True
+    if re.search(r"[$`*?\[]", named):
+        return True
+    return os.path.normcase(os.path.realpath(_absolute(named, cwd))) == os.path.normcase(os.path.realpath(top))
 
 
 def _is_python(word):
@@ -426,24 +469,25 @@ def _is_python(word):
 
 
 def _runs_generator(segment):
-    """True when the segment's command word is lint/hook_catalog.py, or a python interpreter whose
-    script argument is it, and it has neither `--check` nor `--print`. The caller passes no git call."""
+    """None when the segment is no run of lint/hook_catalog.py that writes a page. Else the --root the run
+    names, "" for none. A run is the command word being the generator, or a python interpreter whose script
+    argument is it, with arguments that `_generator_root` reads as a write. The caller passes no git call."""
     tokens = list(segment_tokens(segment) or [])
     index = resolve_command(tokens) if tokens else None
     if index is None:
-        return False
+        return None
     word, rest = basename(tokens[index]), tokens[index + 1:]
     if _is_python(word):
         while rest and rest[0].startswith("-"):
             flag = rest.pop(0)
             if flag in ("-c", "-m", "-"):
-                return False
+                return None
             if flag in _PYTHON_VALUE_FLAGS and rest:
                 rest.pop(0)
         if not rest:
-            return False
+            return None
         word, rest = basename(rest[0]), rest[1:]
-    return word == _GENERATOR and not _GENERATOR_READS & set(rest)
+    return _generator_root(rest) if word == _GENERATOR else None
 
 
 def _commit_page_id(top, working):
@@ -465,11 +509,14 @@ def _commit_page_id(top, working):
 def records_page_hit(stripped: str, cwd: str) -> str:
     """Return the commit when it would hold a records page that is none of HEAD's, the base tip's
     and origin/<base>'s, else ''. Each segment is judged from its own command word."""
-    staged = generated = False   # an earlier `git add` reaches the page / an earlier segment rewrites it
+    staged = False        # an earlier `git add` reaches the page
+    generated = []        # the --root of each earlier segment that runs the generator, "" for none
     for segment in split_segments(stripped):
         call = git_call_of(segment) if segment.strip() else None
         if call is None or call[0] not in ("add", "commit"):
-            generated = generated or (call is None and bool(segment.strip()) and _runs_generator(segment))
+            named = _runs_generator(segment) if call is None and segment.strip() else None
+            if named is not None:
+                generated.append(named)
             continue
         c_target = _segment_git_c_target(segment_tokens(segment) or [])
         root = command_root(stripped, cwd)
@@ -497,7 +544,7 @@ def records_page_hit(stripped: str, cwd: str) -> str:
         opens = _git(top, "cat-file", "-p", base_id)   # a hand-written page is no generated page: no hit
         if opens is None or opens.returncode != 0 or not opens.stdout.startswith(RECORDS_HEADER):
             continue
-        if generated and working:
+        if working and any(_root_is_repo(named, root, top) for named in generated):
             return "git commit " + RECORDS_PAGE
         page_id = _commit_page_id(top, working)
         if page_id is not None and page_id not in (head_id, base_id, origin_id):
