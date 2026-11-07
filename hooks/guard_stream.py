@@ -82,6 +82,7 @@ LIVE_STREAM_REASON = (
 NARRATING_COMMANDS = ("merge", "merge.cmd")
 NARRATING_SCRIPT_TAILS = ("merge/merge.py", "merge/launch.py")
 TRUNCATING_FILTERS = ("tail", "head")
+SCRIPT_INTERPRETERS = ("python", "python3", "py")
 
 
 def narrating_stage(segment: str) -> str:
@@ -102,6 +103,8 @@ def _roster_word(tokens, index: int) -> str:
     word = basename(tokens[index])
     if word in NARRATING_COMMANDS:
         return word
+    if word.removesuffix(".exe") not in SCRIPT_INTERPRETERS:
+        return ""   # `grep x merge/merge.py` only names the script; it does not run it
     for token in tokens[index:]:
         if token.replace("\\", "/").endswith(NARRATING_SCRIPT_TAILS):
             return word + " " + basename(token)
@@ -136,19 +139,22 @@ NARRATED_TAIL_REASON = (
 )
 
 
-# A BACKGROUNDED CHECK piped into `tail` or `head` (decision background-check-through-verdict). A filter
-# that keeps one end holds every byte until the command exits, then prints a few lines, so a background
-# job's one useful line, its verdict, can be cut off or never read. `verdict <cmd>` keeps the whole log and
-# prints the verdict itself. Only the named checks count, one entry per incident: `merge --lane-lint`
-# in each spelling of the roster above, and `ci-job`. Refusing every backgrounded `| tail` is the cry-wolf
-# guard (docs/decisions/guard-that-cries-wolf-is-spent.md). A foreground call is never refused.
+# A CHECK piped into `tail` or `head` (decision background-check-through-verdict). A filter that keeps
+# one end holds every byte until the command exits, then prints a few lines, so the one useful line, the
+# verdict, can be cut off or never read. `verdict <cmd>` keeps the whole log and prints the verdict
+# itself. Only named checks count, one entry per incident, because refusing every `| tail` is the
+# cry-wolf guard (docs/decisions/guard-that-cries-wolf-is-spent.md). The merge tool's verdict calls
+# (`--lane-lint`, `--review-record`, in each spelling of the roster above) are refused in the
+# foreground too. `merge --confirm` is narrated_tail_hit's, so it is left out here and never refused
+# twice. `ci-job` is refused in the background only.
 CHECK_COMMANDS = ("ci-job", "ci-job.cmd")
-CHECK_FLAG = "--lane-lint"
+CHECK_FLAGS = ("--lane-lint", "--review-record")
 VERDICT_WRAPPER = "verdict"
 
 
-def check_stage(segment: str) -> str:
-    """The command word when one segment runs a named verification command outside `verdict`, else ''."""
+def check_stage(segment: str, background: bool) -> str:
+    """The command word when one segment runs a named check outside `verdict`, else ''. `ci-job` counts
+    only in the background."""
     tokens = segment_tokens(segment)
     if not tokens:
         return ""
@@ -161,30 +167,51 @@ def check_stage(segment: str) -> str:
     if any(basename(token) == VERDICT_WRAPPER for token in tokens[:index]):
         return ""
     if basename(tokens[index]) in CHECK_COMMANDS:
-        return basename(tokens[index])
-    return _roster_word(tokens, index) if CHECK_FLAG in tokens else ""
-
-
-def background_check_tail_hit(stripped: str, background: bool) -> str:
-    """The matched text when a background call pipes a named check straight into `tail`/`head`."""
-    if not background:
+        return basename(tokens[index]) if background else ""
+    if "--confirm" in tokens or not any(flag in tokens for flag in CHECK_FLAGS):
         return ""
-    ends = []
-    segments = split_segments(stripped, ends)
-    for index in range(len(segments) - 1):
-        if ends[index] != "|":
+    return _roster_word(tokens, index)
+
+
+def _pipeline_hit(stages, background: bool) -> str:
+    """The matched text when a named check in one pipeline's stages reaches `tail`/`head`. A `tee`
+    between them keeps every byte, so it ends that check's reach."""
+    for first, segment in enumerate(stages):
+        stage = check_stage(segment, background)
+        if not stage:
             continue
-        stage = check_stage(segments[index])
-        tokens = segment_tokens(segments[index + 1]) if stage else None
-        at = resolve_command(tokens) if tokens else None
-        if at is not None and basename(tokens[at]) in TRUNCATING_FILTERS:
-            return stage + " | " + basename(tokens[at])
+        for later in stages[first + 1:]:
+            tokens = segment_tokens(later)
+            at = resolve_command(tokens) if tokens else None
+            if at is None:
+                continue
+            word = basename(tokens[at])
+            if word == "tee":
+                break
+            if word in TRUNCATING_FILTERS:
+                return stage + " | " + word
     return ""
 
 
-BACKGROUND_CHECK_TAIL_REASON = (
-    "this check runs in the background and its output goes straight into a filter that keeps "
-    "one end, so the filter holds everything until the check exits and the verdict can be lost "
+def check_tail_hit(stripped: str, background: bool) -> str:
+    """The matched text when a call pipes a named check into `tail`/`head`, directly or through other
+    filters. A pipeline ends at any separator other than `|`."""
+    ends = []
+    segments = split_segments(stripped, ends)
+    stages = []
+    for segment, end in zip(segments, ends):
+        stages.append(segment)
+        if end != "|":
+            hit = _pipeline_hit(stages, background)
+            if hit:
+                return hit
+            stages = []
+    return _pipeline_hit(stages, background)
+
+
+CHECK_TAIL_REASON = (
+    "this check's output goes into a filter that keeps one end, so the filter holds everything "
+    "until the check exits and the verdict can be lost "
     "(decision background-check-through-verdict). "
     "Remedy: run the check through verdict, as `verdict <cmd>`. It keeps the full log and "
     "prints the verdict itself."
