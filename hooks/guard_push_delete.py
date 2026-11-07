@@ -1578,6 +1578,19 @@ def _workspace_reify(words) -> bool:
     return reify
 
 
+def _has_positional(words) -> bool:
+    """True when `words` holds a word that is no option and no option's value: for `npm version`, the bump."""
+    at = 0
+    while at < len(words):
+        if words[at] in NPM_VALUE_FLAGS:
+            at += 2
+        elif words[at].startswith("-"):
+            at += 1
+        else:
+            return True
+    return False
+
+
 def linked_nm_hit(segment: str, where: str) -> str:
     """Return the matched text when one segment runs a dependency install in `where`, or a
     recursive delete of what is inside a `node_modules`, and that `node_modules` is a link, else ''."""
@@ -1601,11 +1614,12 @@ def linked_nm_hit(segment: str, where: str) -> str:
                 word = words[at].lower()
                 command = npm_deref(words[at])
                 # `npm version` takes npm's workspace path, and reifies the root, with a workspace flag or
-                # from a workspace folder, unless `workspaces-update` is off.
+                # from a workspace folder, unless `workspaces-update` is off. From a workspace folder, a
+                # bare `npm version` names no bump: npm only lists the versions and reifies nothing.
                 version_in_workspace = command == "version" and _workspace_reify(words) and (
                     any(flag in NPM_WORKSPACE_FLAGS or (
                         flag.startswith("--workspace") and not flag.startswith("--workspaces-update"))
-                        for flag in words) or npm_walk(where)[1])
+                        for flag in words) or (npm_walk(where)[1] and _has_positional(words[at + 1:])))
                 # `audit` rewrites the install when `fix` follows it, after any flag.
                 if command not in NPM_READ_ONLY or (command == "audit" and "fix" in words[at + 1:]) or (
                         version_in_workspace):
