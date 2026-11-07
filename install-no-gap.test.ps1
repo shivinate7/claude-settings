@@ -780,8 +780,9 @@ public static class FileIdentity
         Remove-Item Env:\CLAUDE_CONFIG_DIR, Env:\CLAUDE_SETTINGS_FORCE_COPY -ErrorAction SilentlyContinue
     }
     # ---- skillfail1: a skill folder that cannot be refreshed makes install.ps1 exit non-zero ----------
-    # The skills branch has no retry, so a failed skill refresh must set the exit code itself. A handle
-    # held on one landed skill file, with FileShare.Read, blocks the in-place refresh of its folder.
+    # A skill folder that still cannot be refreshed after the Resolve-Failures retries must make the run
+    # exit non-zero and name the folder. A handle held on one landed skill file, with FileShare.Read,
+    # blocks the in-place refresh of its folder on every retry.
     $Sf      = New-Scratch 'skill-fail' @('skills')
     Write-FixtureFile (Join-Path $Sf.Clone 'skills\failskill\SKILL.md') '# failskill v1'
     Write-FixtureFile (Join-Path $Sf.Clone 'skills\failskill\notes.md') '# notes v1'
