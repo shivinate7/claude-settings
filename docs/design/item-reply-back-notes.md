@@ -25,7 +25,7 @@ and opens a sunk card, as `replied` does today.
   - Lose: an owed card has two text boxes: the note, which answers, and the reply box, which does not. The hint names the difference.
 - Option "Answered cards only" (`#s=owed-off`, focus `#pick-answered-only`). Only an answered card with `reply` gets Reply.
   - Gain: one text box per owed card. Lose: a question back on an owed item still goes in as an answer.
-- Departs from: nothing on main. Both options are new controls. Not blocking.
+- Departs from the brief: it named answered items only. The pick adds owed cards. Not blocking.
 
 ## 2. Reply, the box and the hint
 
@@ -146,7 +146,7 @@ and opens a sunk card, as `replied` does today.
 - SKILL.md "The database", `asks/<id>`: it says asks are "never an item". Add `item`: written once at Send, never with `re`.
 - SKILL.md "Route an ask": an ask with `item` goes to that item's `owner`, or the writer takes it. It is answered with steps 1 and 2.
 - SKILL.md "Route and close": a writer never closes an item while one of its reply records has no `reply`. The page would hide that reply:
-  it has no Asks row and no orphan row. Input Needed.
+  it has no Asks row and no orphan row. Owner grant: yes.
 
 ## Checked
 
@@ -155,9 +155,10 @@ and opens a sunk card, as `replied` does today.
   - Every Reply, reply-box button, live Undo and fold control is 44 px or taller.
   - The check went red on a broken copy (a 900 px thread, a 30 px Reply): 1648 misses.
 - `check_designs.mjs` on main's page, with this mockup in `designData`. Each pick ran as a two-option item:
-  - Item 1 used `owed` / `#pick-owed` and `owed-off` / `#pick-answered-only`.
-  - Item 4 used `just-sent` / `#pick-under` and `line-inside` / `#pick-inside`.
+  - Pick 1's test item used `owed` / `#pick-owed` and `owed-off` / `#pick-answered-only`.
+  - Pick 4's test item used `just-sent` / `#pick-under` and `line-inside` / `#pick-inside`.
   - Both exited 0 with `problem: null`.
+- `label_once.py` on the frame HTML at 390 (labels off) of `closed`, `just-sent`, `answered`, `folded-waiting`, `owed` and `failed`: no hit.
 - impeccable critique ran single-context, because no agent tool was open. The guard refused the context launcher, so it read the docs directly.
   The detector found nothing, but it reads only the static markup, not the screen the script draws.
   - Fixed: a "New:" label on the small New reply mark was clipped to "a new …". It is now dropped, and the caption carries it.
