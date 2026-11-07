@@ -59,6 +59,10 @@ Interface the hook must match:
   or a page write with units) whose first try fails with decision_watch.MODEL_TIMEOUT_ERROR makes a second call, capped at
   QUESTION_RETRY_TIMEOUT. Any other model error makes one call and the Unvetted refusal. An Agent spawn makes one call.
   The cases are in the timeout-retry section.
+- The judge-timeout log (coordinator ruling 2026-11-07 13:24 CST): each model timeout that judge_question gets writes one
+  guard.log line, decision `timeout`, rule call_judge.TIMEOUT_LOG_RULE, whose matched field holds the try, the model, the cap
+  and len(prompt) in chars. A call that does not time out writes none, and a failed write never changes the verdict. The
+  cases are in the judge-timeout log section.
 - Past rulings (spec past-rulings): a judged AskUserQuestion or waiting-page item write also carries the decision
   records and the `roadmap` step rulings that question_form.past_rulings finds, and an eighth item that refuses a
   question a standing ruling already decides. Each case builds its own real git repo (make_repo), and a fixture
@@ -1340,6 +1344,141 @@ def case_spawn_timeout_is_not_retried():
           "call judge failed open" in r.err and decision_watch.MODEL_TIMEOUT_ERROR in r.err, detail(r))
 
 
+# ------------------------------------------------------------------ the judge-timeout log (coordinator ruling 2026-11-07 13:24 CST)
+#
+# Each model timeout that judge_question gets writes one guard.log line, so the timeout rate and its cause can be
+# measured. The matched field holds the try number, the model, the cap in seconds and len(prompt) in chars. A call that
+# does not time out writes nothing, and a failed write never changes the verdict. The rule name is
+# call_judge.TIMEOUT_LOG_RULE, read at test time and never copied here. The lines are found by their decision column and
+# their prompt_chars key, not by the rule name, so a missing constant fails a check by name and never crashes one.
+# Case 4 calls judge_question in the test process: a raising record() can only be made in-process.
+TIMEOUT_DECISION = "timeout"  # the decision column the ruling names: record(tool, "timeout", <rule>, matched)
+TIMEOUT_BOX_GOAL = GOAL_LINE + " é"  # one non-ASCII character: prompt_chars counts chars, not bytes
+
+
+def timeout_lines(log_text):
+    """The guard.log lines a model timeout wrote. A question's refusal line has another decision and no prompt_chars key."""
+    found = []
+    for line in log_text.splitlines():
+        fields = line.split("\t")
+        if len(fields) >= 5 and fields[2] == TIMEOUT_DECISION and "prompt_chars=" in fields[4]:
+            found.append(line)
+    return found
+
+
+def timeout_matched(line):
+    """The key=value words of one timeout line's matched field, as a dict."""
+    return dict(word.split("=", 1) for word in line.split("\t")[4].split() if "=" in word)
+
+
+def timeout_rule_of(line):
+    return line.split("\t")[3]
+
+
+def check_timeout_line(label, r, line, number):
+    """One timeout line against the model call of its try (number 1 or 2): the rule, the try, the model, the cap the
+    call ran under, and len(prompt) in chars. Each is its own check, named by its cause."""
+    call = r.calls[number - 1] if len(r.calls) >= number else {}
+    matched = timeout_matched(line)
+    check("%s: the line names the rule, call_judge.TIMEOUT_LOG_RULE" % label,
+          timeout_rule_of(line) == call_judge_value("TIMEOUT_LOG_RULE"), detail(r))
+    check("%s: the line names its try, %d" % (label, number), matched.get("try") == str(number), detail(r))
+    check("%s: the line names the model the call ran" % label,
+          matched.get("model") is not None and matched.get("model") == model_of(call.get("argv", [])), detail(r))
+    check("%s: the line names the cap the call ran under" % label,
+          matched.get("cap") is not None and matched.get("cap") == str(call.get("timeout")), detail(r))
+    check("%s: prompt_chars is len(prompt) in chars" % label,
+          matched.get("prompt_chars") is not None and matched.get("prompt_chars") == str(len(call.get("prompt", ""))),
+          detail(r))
+
+
+def case_timeout_log_line_then_ok():
+    r = run_hook(question_input(box=good_box(goal=TIMEOUT_BOX_GOAL)), script=[TIMEOUT_REPLY, ALLOW])
+    check("timeout log, then ok: the timeout is retried, so two model calls", len(r.calls) == 2, detail(r))
+    lines = timeout_lines(r.log)
+    check("timeout log, then ok: the one timeout writes exactly one judge-timeout line", len(lines) == 1, detail(r))
+    if len(lines) == 1:
+        check_timeout_line("timeout log, then ok", r, lines[0], 1)
+
+
+def case_timeout_log_two_lines_on_two_tries():
+    r = run_hook(question_input(), script=[TIMEOUT_REPLY, TIMEOUT_REPLY])
+    check("timeout log, twice: two timeouts make two model calls", len(r.calls) == 2, detail(r))
+    lines = timeout_lines(r.log)
+    check("timeout log, twice: each timeout writes one line, two in all", len(lines) == 2, detail(r))
+    if len(lines) == 2:
+        check_timeout_line("timeout log, twice, try 1", r, lines[0], 1)
+        check_timeout_line("timeout log, twice, try 2", r, lines[1], 2)
+
+
+def case_timeout_log_silent_without_timeout():
+    r = run_hook(question_input(), script=[ALLOW])
+    check("timeout log, ok: one model call, no retry", len(r.calls) == 1, detail(r))
+    check("timeout log, ok: no judge-timeout line is written", timeout_lines(r.log) == [], detail(r))
+    r = run_hook(question_input(), script=[EXIT_REPLY])
+    check("timeout log, other error: one model call, no retry", len(r.calls) == 1, detail(r))
+    check("timeout log, other error: no judge-timeout line is written", timeout_lines(r.log) == [], detail(r))
+
+
+def case_timeout_log_failure_keeps_the_verdict():
+    import decision_watch  # the one home of the timeout text (hooks/decision_watch.py)
+    import guard_core  # the one home of the log write, guard_core.record
+    attempts = []
+
+    def failing_record(*args, **kwargs):
+        attempts.append(args)
+        raise OSError("the log cannot be written")
+
+    case_dir = os.path.join(ROOT, "timeout-log-raises")
+    os.makedirs(case_dir)
+    saved_dir, real_record = os.environ.get("CLAUDE_CONFIG_DIR"), guard_core.record
+    os.environ["CLAUDE_CONFIG_DIR"] = case_dir
+    guard_core.record = failing_record
+    try:
+        mod = load_file_module(HOOK, "call_judge_log_probe")
+        replies = iter([(None, decision_watch.MODEL_TIMEOUT_ERROR), ({"ok": True}, None)])
+        mod.invoke_model = lambda *args, **kwargs: next(replies)
+        try:
+            verdict = mod.judge_question("the prompt", QUESTION_MODEL, call_judge_value("QUESTION_TIMEOUT"), True,
+                                         retry_timeout=call_judge_value("QUESTION_RETRY_TIMEOUT"))
+            escaped = None
+        except Exception as exc:
+            verdict, escaped = None, exc
+    finally:
+        guard_core.record = real_record
+        if saved_dir is None:
+            os.environ.pop("CLAUDE_CONFIG_DIR", None)
+        else:
+            os.environ["CLAUDE_CONFIG_DIR"] = saved_dir
+    check("timeout log, record raises: the timeout reaches the log write, once", len(attempts) == 1,
+          "attempts=%d" % len(attempts))
+    check("timeout log, record raises: no exception escapes judge_question", escaped is None, repr(escaped))
+    check("timeout log, record raises: the retry's ok verdict is returned unchanged",
+          verdict == ({"ok": True}, None), repr(verdict))
+
+
+def case_timeout_log_reader_lists_the_lines():
+    r = run_hook(question_input(), script=[TIMEOUT_REPLY, TIMEOUT_REPLY])
+    lines = timeout_lines(r.log)
+    check("timeout reader: two timeouts write two lines for the reader to list", len(lines) == 2, detail(r))
+    if len(lines) != 2:
+        return
+    rule = call_judge_value("TIMEOUT_LOG_RULE")
+    check("timeout reader: call_judge.TIMEOUT_LOG_RULE names the rule the lines carry",
+          rule is not None and rule == timeout_rule_of(lines[0]) == timeout_rule_of(lines[1]), detail(r))
+    if rule is None:
+        return
+    # The reader reads the rows of a window, so --rule needs --between: PAST and FUTURE bound it, with no clock.
+    env = dict(os.environ, CLAUDE_CONFIG_DIR=os.path.join(r.base, "config"))
+    proc = subprocess.run([sys.executable, os.path.join(REPO, "lint", "guard_log_report.py"),
+                           "--between", PAST, FUTURE, "--rule", rule],
+                          capture_output=True, text=True, encoding="utf-8", errors="replace", env=env, timeout=60)
+    rows = [row for row in proc.stdout.splitlines() if not row.startswith("unknown (")]
+    check("timeout reader: the reader exits 0", proc.returncode == 0, proc.stderr[-200:])
+    check("timeout reader: --rule lists exactly the two judge-timeout lines, not the refusal line",
+          rows == lines, "rows=%r lines=%r" % (rows, lines))
+
+
 # ------------------------------------------------------------------ past rulings (spec past-rulings)
 #
 # A judged question carries the decision records and the step rulings of the `roadmap` ref as candidates, and an eighth
@@ -1647,6 +1786,9 @@ def main():
                  case_fail_open, case_settings_row, case_timeout_retries_once_then_allows,
                  case_timeout_twice_refuses_unvetted, case_timeout_then_flag_denies,
                  case_model_error_is_not_retried, case_spawn_timeout_is_not_retried,
+                 case_timeout_log_line_then_ok, case_timeout_log_two_lines_on_two_tries,
+                 case_timeout_log_silent_without_timeout, case_timeout_log_failure_keeps_the_verdict,
+                 case_timeout_log_reader_lists_the_lines,
                  case_past_ruling_replay_item_145,
                  case_past_ruling_replay_item_133, case_past_ruling_cited_passes,
                  case_past_ruling_explained_premise, case_past_ruling_unknown_is_named,
