@@ -691,8 +691,10 @@ UI_BUNDLE = "bundle.ui-testing"
 # (`iPad Pro (12.9-inch)`), unless it closes a `$(` opened in the same quote.
 COMMAND_MARKS = {";", "|", "&", "$(", "(", ")", "`"}
 PULL_REQUEST = re.compile(r"^\s*(on:\s*\[?[^\n]*\bpull_request\b|pull_request\s*:)", re.M)
-XCODEBUILD_TEST_RE = re.compile(r"\bxcodebuild\b[^\n|;&]*\s(test|test-without-building)(?![-\w.])")
-NO_DIAGNOSE = re.compile(r"(?<![\w-])-collect-test-diagnostics\s+never(?![-\w.])")
+PRINTERS = {"echo", "printf"}  # a command that prints its words and runs none of them
+STEP_NAME = re.compile(r"^\s*(-\s+)?name\s*:")  # a workflow step's name is text, as in `- name: xcodebuild test (slow)`
+MAKE_VAR = re.compile(r"^([A-Za-z_][\w.-]*)\s*(?:[:?+]?=)\s*(.*)$")
+MAKE_REF = re.compile(r"\$[({]([A-Za-z_][\w.-]*)[)}]")
 DEV_TEAM = re.compile(r"\bDEVELOPMENT_TEAM\s*[:=]\s*[\"']?[A-Z0-9]")
 
 
@@ -755,15 +757,37 @@ def xcodebuild_runs(text):
     runs = []
     for line in text.splitlines():
         group = []
-        for word in shell_words(line) + [";"]:
+        for word in [] if STEP_NAME.match(line) else shell_words(line) + [";"]:
             if word in COMMAND_MARKS:
                 names = [w.rsplit("/", 1)[-1] for w in group]
-                if "xcodebuild" in names:
+                if "xcodebuild" in names and not PRINTERS & set(names[:names.index("xcodebuild")]):
                     runs.append(group[names.index("xcodebuild") + 1:])
                 group = []
             else:
                 group.append(word)
     return runs
+
+
+def expand_make_vars(text):
+    """`text` of a Makefile with each `$(NAME)` or `${NAME}` that the Makefile sets (`=`, `:=`, `?=`, `+=`) replaced
+    by its value, so a flag passed through a variable reads as the flag. Two passes resolve a variable in a variable."""
+    values = {}
+    for line in text.splitlines():
+        match = MAKE_VAR.match(line)
+        if match:
+            values[match.group(1)] = (values.get(match.group(1), "") + " " + match.group(2)).strip()
+    for _ in range(2):
+        text = MAKE_REF.sub(lambda m: values.get(m.group(1), m.group(0)), text)
+    return text
+
+
+def lacks_diagnostics(text):
+    """True when an `xcodebuild test` run in `text` (comments cut) has no `-collect-test-diagnostics never` pair."""
+    for run in xcodebuild_runs(text):
+        pairs = list(zip(run, run[1:]))
+        if TEST_ACTIONS & set(run) and ("-collect-test-diagnostics", "never") not in pairs:
+            return True
+    return False
 
 
 def compiles_app(text):
@@ -900,8 +924,8 @@ def probe_ios(root):
          "%s runs UI tests; they run once per batch on the Mac, through sim-test" % ", ".join(slow) if slow else "no UI suite in CI")
     # Each run of xcodebuild test, split at `&&`, `;` and `|`, needs the flag itself. sim-test adds its own.
     diag = [f for f in files if f == "Makefile" or f.endswith(".sh") or WORKFLOW.search(f)
-            if any(XCODEBUILD_TEST_RE.search(run) and not NO_DIAGNOSE.search(run)
-                   for line in uncommented(read(root, f) or "") for run in re.split(r"[;&|]+", line))]
+            if lacks_diagnostics("\n".join(uncommented(
+                expand_make_vars(read(root, f) or "") if f == "Makefile" else read(root, f) or "")))]
     item("test diagnostics", "gap" if diag else "pass",
          "%s runs xcodebuild test without -collect-test-diagnostics never" % ", ".join(diag) if diag
          else "every xcodebuild test run sets -collect-test-diagnostics never")

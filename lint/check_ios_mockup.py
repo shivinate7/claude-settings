@@ -9,7 +9,9 @@ stays with the design reviewer. Standard library only.
 
 Faults, one of each code at most per page:
 - system-font: no CSS font-family or font shorthand whose first family is -apple-system or system-ui
-  (or a WebKit Dynamic Type keyword such as -apple-system-body). One level of var() is resolved.
+  (or a WebKit Dynamic Type keyword such as -apple-system-body), or one such declaration whose first family
+  is another font (Georgia on an h1 beside a system body). inherit, initial, unset, revert and the ui-*
+  system designs (ui-monospace, ui-rounded) pass. One level of var() is resolved.
 - safe-area: no CSS env(safe-area-inset-...) call.
 - duo-frames: no element with data-device="iphone-duo-folded" and one with data-device="iphone-duo-unfolded",
   folded first in document order.
@@ -109,6 +111,12 @@ def _is_system(family):
     return family in SYSTEM_FONTS or family.startswith("-apple-system-")
 
 
+def _is_other_font(family):
+    """True when a declaration names a non-system font: not empty, not a CSS-wide keyword, not a system family."""
+    return bool(family) and not _is_system(family) and not family.startswith("ui-") \
+        and family not in ("inherit", "initial", "unset", "revert", "revert-layer")
+
+
 def _resolve(value, custom):
     """`value` with each var(--name, fallback) replaced by the custom property's value, one level deep, and
     with any `!important` removed."""
@@ -127,6 +135,10 @@ def faults(text):
     families += [_shorthand_family(_resolve(v, custom)) for v in FONT_SHORTHAND.findall(css)]
     if not any(_is_system(f) for f in families):
         found.append(("system-font", "no font-family starts with -apple-system or system-ui"))
+    else:
+        other = [f for f in families if _is_other_font(f)]
+        if other:
+            found.append(("system-font", "a font declaration starts with %s, not -apple-system or system-ui" % other[0]))
     if not SAFE_AREA.search(css):
         found.append(("safe-area", "no env(safe-area-inset-...) in the CSS"))
     frames = page.frames
