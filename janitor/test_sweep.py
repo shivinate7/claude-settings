@@ -4710,6 +4710,91 @@ class AgentEndOtherWorktreeTests(_AgentEndFixture):
             self.assertKept(lane)
 
 
+class AgentEndRedTreeTests(_AgentEndFixture):
+    """A red-run checkout is the test-author's `.claude/worktrees/agent-<id>-red` (agents/test-author.md).
+    Its owner is the running agent's tree `.claude/worktrees/agent-<id>`. While the owner tree is still
+    registered as a worktree, the agent-end reap KEEPS the red-run checkout, and its row names the owner
+    tree (when-a-worktree-may-be-removed). Once the owner tree is gone, the red-run checkout follows the
+    other-tree rules. A name that only looks like a red-run checkout follows those rules too. Each
+    red-shaped tree is clean, pushed, unlocked and idle 31 minutes, so only the owner check can keep it."""
+
+    OWNER = "own1"
+
+    def owner_path(self):
+        return os.path.join(self.primary, ".claude", "worktrees", "agent-" + self.OWNER)
+
+    def test_a_red_run_checkout_is_kept_while_its_owner_tree_is_registered(self):
+        ending = self.add("endnow")
+        owner = self.add(self.OWNER)
+        red = self.add(self.OWNER + "-red")
+        lookalike = self.add(self.OWNER + "-redx")
+        other = self.add("oth1")
+        require(run_vcs(self.primary, "worktree", "remove", other).returncode == 0,
+                "removing the other owner tree %s failed" % other)
+        other_red = self.add("oth1-red")
+        for path in (red, lookalike, other_red):
+            self.age_control(path)
+        # Scope first: the owner is registered and the other owner is not, when the hook runs.
+        self.assertIn(_norm_path(owner), self.listed(), "the owner tree is not registered before the hook runs")
+        self.assertNotIn(_norm_path(other), self.listed(), "the other owner tree is still registered")
+        self.fire("endnow", ending)
+        with self.subTest(case="owner tree, idle, registered"):
+            self.assertKept(owner)
+        with self.subTest(case="red-run checkout whose owner tree is registered"):
+            self.assertTrue(os.path.isdir(red),
+                            "red-run checkout %s was removed while its owner tree %s is still registered" % (red, owner))
+            row = self.row_for_tree(red)
+            self.assertIsNotNone(row, "the hook wrote no decision row for the red-run checkout %s" % red)
+            self.assertEqual(row.get("action"), "keep", "the red-run checkout row is not keep: %r" % row)
+            self.assertIn("agent-" + self.OWNER, str(row.get("reason")),
+                          "the keep reason does not name the owner tree: %r" % row.get("reason"))
+        with self.subTest(case="name only looks like red-run: agent-<owner>-redx"):
+            self.assertRemoved(lookalike, " (a lookalike name follows the other-tree rules)")
+        with self.subTest(case="red-run checkout of an owner tree that is gone"):
+            self.assertRemoved(other_red, " (its owner tree is gone, so today's rules)")
+
+    def test_the_owner_ending_keeps_its_red_run_checkout(self):
+        owner = self.add(self.OWNER)
+        red = self.add(self.OWNER + "-red")
+        control = self.add("ctl")
+        for path in (red, control):
+            self.age_control(path)
+        self.assertIn(_norm_path(owner), self.listed(), "the owner tree is not registered before the hook runs")
+        self.fire(self.OWNER, owner)
+        with self.subTest(case="control: a finished agent's clean, pushed tree, idle 31 min, is removed"):
+            self.assertRemoved(control)
+        self.assert_own_left(owner)
+        with self.subTest(case="red-run checkout whose owner tree is the ending agent's own tree"):
+            self.assertTrue(os.path.isdir(red),
+                            "red-run checkout %s was removed while its owner tree %s is still registered" % (red, owner))
+            row = self.row_for_tree(red)
+            self.assertIsNotNone(row, "the hook wrote no decision row for the red-run checkout %s" % red)
+            self.assertEqual(row.get("action"), "keep", "the red-run checkout row is not keep: %r" % row)
+            self.assertIn("agent-" + self.OWNER, str(row.get("reason")),
+                          "the keep reason does not name the owner tree: %r" % row.get("reason"))
+
+    def test_a_red_run_checkout_with_no_owner_tree_is_removed_as_today(self):
+        ending = self.add("endnow")
+        red = self.add(self.OWNER + "-red")
+        self.age_control(red)
+        # Control: no owner tree is registered, and none is on disk.
+        self.assertNotIn(_norm_path(self.owner_path()), self.listed(), "an owner tree is registered")
+        self.assertFalse(os.path.exists(self.owner_path()), "an owner tree is on disk")
+        self.fire("endnow", ending)
+        self.assertRemoved(red, " (no owner tree is registered, so today's rules remove it)")
+
+    def test_a_red_run_checkout_whose_owner_tree_was_removed_is_removed_as_today(self):
+        ending = self.add("endnow")
+        owner = self.add(self.OWNER)
+        red = self.add(self.OWNER + "-red")
+        require(run_vcs(self.primary, "worktree", "remove", owner).returncode == 0,
+                "removing the owner tree %s failed" % owner)
+        self.age_control(red)
+        self.assertNotIn(_norm_path(owner), self.listed(), "the removed owner tree is still registered")
+        self.fire("endnow", ending)
+        self.assertRemoved(red, " (its owner tree was removed, so today's rules remove it)")
+
+
 class AgentEndRulingTests(_AgentEndFixture):
     """Edge cases of the agent-end stage. Most cases run the hook in a subprocess (`fire`,
     `fire_under_host`). A fault that must land inside the stage (a faked cwd read, a lock taken
