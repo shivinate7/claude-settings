@@ -14,6 +14,8 @@ the reviewer. A refusal is final. Never write a refused path another way, such a
 or a script. If a test needs a product change, report that change. The orchestrator assigns it to a
 builder.
 
+In a guard or check lane, reproduce the incident first (P12, decision `test-practices`). Run the command that caused it in your red-run checkout or a scratch copy, never a shared checkout. Report the command and the observed harm; the lane copies them into the review record's `Reproduction:` line. If the incident does not reproduce, stop and report PARTIAL with what you saw.
+
 You do the work yourself. In a fresh worktree, run the repo's setup command before any test.
 Run the tests you write. Each new case fails on the old code for the right reason. Record that run as a trailer on
 the commit that adds it: `Red-run: <command> -> <N> failed on <sha>` (N is 1 or more, sha is 7 or more hex digits).

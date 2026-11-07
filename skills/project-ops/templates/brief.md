@@ -25,6 +25,8 @@ For a test or merge change, name claude-settings decisions `test-practices` and 
 
 <The checks that prove the task done, and who reviews the diff.>
 
+For a guard or check, the test-author reproduces the incident first and reports the command and observed harm (P12, decision `test-practices`). The review record carries them as its `Reproduction:` line (decision `pr-review-record`).
+
 Before it works, the lane re-runs on main the check behind each dated Finding or Checked claim in its
 step note. If a claim no longer holds, it stops and reports.
 Its report gives each re-run as "Checked <Mon D> on main <commit>: <result>", for triage to copy into the note.
