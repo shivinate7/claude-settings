@@ -164,9 +164,10 @@ def drops_failures(path, window):
     for text in rows:
         try:
             when = datetime.strptime(json.loads(text)["at"], "%Y-%m-%dT%H:%M:%S%z")
-        except (ValueError, KeyError, TypeError):
+            day = central_day(when)
+        except (ValueError, KeyError, TypeError, OverflowError, OSError):  # OverflowError: `at` near year 9999
             continue
-        if central_day(when) in days:
+        if day in days:
             count += 1
     if not count:
         return []
