@@ -605,7 +605,7 @@ def conflict_markers_hit(stripped: str, cwd: str) -> str:
 
 
 # ---- merge --role: the tier is read from this session's own get_session record
-ROLE_TIERS =("batch-runner",)
+ROLE_TIERS = ("batch-runner",)
 ROLE_TAG_PREFIX = "cs-build:"
 ROLE_REASON = (
     "merge-role-proof: this session's own record does not prove the merge tier it claims. "
