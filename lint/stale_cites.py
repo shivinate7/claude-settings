@@ -221,9 +221,11 @@ def exclude_patterns(root):
     try:
         with open(os.path.join(root, ".ste-lint-exclude"), encoding="utf-8") as f:
             lines += f.read().splitlines()
-    except FileNotFoundError:
-        pass  # no exclude file is a repo with no excludes
-    except OSError as exc:  # present but unreadable: the check cannot tell what it should leave out
+    except FileNotFoundError as exc:
+        if os.path.lexists(os.path.join(root, ".ste-lint-exclude")):  # a link whose target is gone
+            raise Unknown(".ste-lint-exclude cannot be read (%s)" % exc)
+        # no exclude file is a repo with no excludes
+    except (OSError, UnicodeDecodeError) as exc:  # present but unreadable: the check cannot tell what it should leave out
         raise Unknown(".ste-lint-exclude cannot be read (%s)" % exc)
     lines += os.environ.get("EXCLUDE", "").replace(",", "\n").splitlines()
     cleaned = (line.strip() for line in lines)
@@ -280,7 +282,7 @@ def added_markdown_lines(patch):
     return found
 
 
-def read_diff(diff_args, head=None):
+def read_diff(diff_args, head=None, base=None):
     """(removed, renamed, modified, added, lines) from one `git diff -M --raw -p -z -U0`: removed paths, {old: new},
     paths changed in place, added paths, and `added_markdown_lines`. The raw records come first, then one empty
     record, then the patch text. One start serves both, so the added lines cost no start of their own."""
@@ -288,8 +290,8 @@ def read_diff(diff_args, head=None):
         out = git("diff", "-M", "--raw", "-p", "-z", "-U0", "--no-ext-diff", "--src-prefix=a/", "--dst-prefix=b/",
                   *diff_args).decode("utf-8", "replace")
     except Unknown as exc:
-        if head is None or head_resolves(head):
-            raise BaseUnknown(str(exc))  # the head is there, so the base is the gap: a shallow clone
+        if head is None or (head_resolves(head) and (base is None or history_gap(base))):
+            raise BaseUnknown(str(exc))  # the head is there and the history is not: a shallow clone
         raise
     head, _, patch = out.partition("\0\0")
     tokens = head.split("\0")
@@ -1156,7 +1158,7 @@ def scan(range_text):
     """(found, unknowns, report): {(path, line, code): [messages]}, one text per read that could not run, and the
     report lines. The report adds no finding, and a report read that fails is one unknown."""
     diff_args, base, head = parse_range(range_text)
-    removed, renamed, modified, added, lines = read_diff(diff_args, head)
+    removed, renamed, modified, added, lines = read_diff(diff_args, head, base)
     batch = BlobReader()
     rng = Range(base, head, removed, renamed, modified, batch, added, lines)
     lines = []
