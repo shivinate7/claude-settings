@@ -654,6 +654,28 @@ MUTATIONS = [
      'AGENT_ID = re.compile(r"^[A-Za-z0-9_-]{1,64}$")',
      'AGENT_ID = re.compile(r"^.{1,64}$")',
      "test_an_unsafe_or_unknown_agent_id_names_nothing"),
+    # `_agent_worktree_child_keep` (when-a-worktree-may-be-removed): a tree `agent-<id>-<suffix>` is
+    # kept while the agent worktree `agent-<id>` is registered, on both routes that remove one unattended.
+    ("agent worktree child: the agent-end reap no longer asks the keep",
+     "sweep",
+     '    child_kept = _agent_worktree_child_keep(where, path)\n',
+     '    child_kept = None\n',
+     "test_a_red_run_checkout_is_kept_while_its_agent_worktree_is_registered"),
+    ("agent worktree child: the session-end sweep no longer asks the keep",
+     "sweep",
+     '        child_kept = _agent_worktree_child_keep(where, entry["path"])\n',
+     '        child_kept = None\n',
+     "test_the_session_end_sweep_keeps_a_red_run_checkout_while_its_agent_worktree_is_registered"),
+    ("agent worktree child: the keep reads only the red suffix, not every agent-<id>-<suffix> shape",
+     "sweep",
+     'os.path.normcase(agent_tree_prefix(agent_name[len("agent-"):])))):',
+     'os.path.normcase(agent_tree_prefix(agent_name[len("agent-"):]) + "red"))):',
+     "test_a_red_run_checkout_is_kept_while_its_agent_worktree_is_registered"),
+    ("agent worktree child: an unreadable worktree list no longer keeps",
+     "sweep",
+     '    if entries is None:\n        return {"path": path, "action": "keep", "reason": "unreadable-subject"}\n    own = ',
+     '    if entries is None:\n        return None\n    own = ',
+     "test_an_unreadable_worktree_list_keeps_a_red_run_checkout"),
     # `decide_listener`'s own three refusals, same shape as the branch/worktree refusals
     # above: each one is a keep this sweep must never lose, proven by mutating it out and
     # watching a REAL fixture listener (janitor/test_sweep.py's ListenerDecisionTests, a real

@@ -85,6 +85,14 @@ def repo_tag_names(tag: object, slug: str) -> bool:
     return isinstance(tag, str) and tag.startswith(REPO_TAG) and tag[len(REPO_TAG):].lower() == slug.lower()
 
 
+def agent_tree_prefix(agent_id: str) -> str:
+    """The name prefix of every tree that belongs to agent `agent_id` besides its own `agent-<id>` worktree, such as
+    the test-author's red-run checkout `agent-<id>-red`. The one home: the guard lets the agent write in a folder with
+    this prefix (`guard._own_red_run`), and the janitor keeps such a folder while `agent-<id>` is registered
+    (`sweep._agent_worktree_child_keep`)."""
+    return "agent-" + agent_id + "-"
+
+
 # The tool that reads and writes the waiting page's items (hooks/guard.py, hooks/call_judge.py).
 DATA_TOOL = "ArtifactData"
 

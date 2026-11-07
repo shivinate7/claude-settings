@@ -4,7 +4,7 @@
 
 Four idle limits. 30 min: agent-end reap. 1 h: unattended `--confirm`, a merged tree. 4 h: session-end agent rule. 24 h: unattended `--confirm`, a pushed tree that is not merged. Pushed is enough (HEAD need not be merged) for the agent-end reap and the `agent-*` rule only. A dirty tree is never reaped.
 
-A red-run checkout `agent-<id>-red` is kept while its owner tree `agent-<id>` is a registered worktree, on the agent-end reap and the session-end agent rule alike. The keep reason names the owner tree. A failed worktree list keeps it. Only the exact name `agent-<id>-red` counts. Once the owner tree is gone, it follows the other rules. Home: `sweep._red_run_owner_keep`. Why: a prune must not remove a tree another agent still uses.
+A tree `agent-<id>-<suffix>` is kept while the agent worktree `agent-<id>` is registered, on the agent-end reap and the session-end agent rule alike. The test-author's red-run checkout `agent-<id>-red` is one. The shape is the guard's own (`shared_names.agent_tree_prefix`). The keep reason names the agent worktree. A failed worktree list keeps it. A tree named exactly `agent-<id>` is not kept by this rule. Once the agent worktree is gone, the tree follows the other rules. Home: `sweep._agent_worktree_child_keep`. Why: a prune must not remove a tree another agent still uses.
 
 Four routes remove a worktree. One is the unattended `--confirm` run. Two remove a tree under `.claude/worktrees/agent-*` without both of its conditions: the agent-end reap and the session-end sweep's agent rule. No route runs a remover a repo supplies (decisions `the-janitor-is-one-machine-wide-sweep` and `uniform-over-variants`, owner 2026-10-27 12:51 CDT). The merge tool also removes the worktree that holds the branch it merged (owner, 2026-10-25, step c44). It calls the sweep's `--fast` judgment with `--attended` for that one tree, so there is no idle wait. The tree goes when it is clean and its HEAD is in the merged head. No lock, session or process may hold it, and it may not be the caller's cwd. A failed read keeps the tree, except one process whose cwd cannot be read: it is out of scope, not inside.
 
@@ -76,7 +76,7 @@ Owner ruling, 2026-10-14: the session-end sweep (`sweep.py --confirm`, no `--att
 
 A read that fails or cannot tell keeps the tree. The report line names its path and the reason `unreadable-subject`. The rule applies in every repo, whatever its `package.json` defines.
 
-Reason: a lane pushes `HEAD:<lane>` from a local branch of another name, so a branch-upstream read called many trees never pushed. The test-author makes its red-run checkout under `<repo>/.claude/worktrees/` and names it `agent-<something>`, so this rule covers it once its owner tree is gone. A checkout with another name under that folder is not covered.
+Reason: a lane pushes `HEAD:<lane>` from a local branch of another name, so a branch-upstream read called many trees never pushed. The test-author makes its red-run checkout under `<repo>/.claude/worktrees/` and names it `agent-<something>`, so this rule covers it once its agent worktree is gone. A checkout with another name under that folder is not covered.
 
 Kind: process
 Home: janitor/sweep.py

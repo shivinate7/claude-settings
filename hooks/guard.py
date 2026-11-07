@@ -2618,6 +2618,7 @@ ROLE_DEFAULT = "general-purpose"
 # ROLE_REVIEWER_FREE_ROUNDS, may run above its row; add "1" there to let a reviewer on its first marker run above its row.
 # An Explore may run Sonnet, above its Haiku row, or Opus (opus_spawn_hit), only when its brief's first non-blank line carries
 # EXPLORE_AUDIT_MARKER (decision agent-model-cap). Case-sensitive, so lowercase prose does not count. It counts on the first line, with anything ahead of it, as BRIEF_MARKERS says; marker_hits reads it.
+from shared_names import agent_tree_prefix  # noqa: E402  the one home of the agent-tree name shape, shared with janitor/sweep.py
 from shared_names import EXPLORE_AUDIT_MARKER  # noqa: E402  the one home, shared with the spawn judge (hooks/call_judge.py)
 from shared_names import REPO_TAG, repo_tag_names  # noqa: E402  the one home of the repo tag, shared with skills/roadmap/build.py
 EXPLORE_ROLE = "Explore"
@@ -4450,7 +4451,7 @@ def _own_red_run(payload, primary: str, path: str, root_ok: bool = True) -> bool
             return False
         if (path_is_inside(parent, holder) is True and path_is_inside(holder, parent) is True
                 and os.path.normcase(os.path.basename(folder)).startswith(
-                    os.path.normcase("agent-" + agent_id + "-"))):
+                    os.path.normcase(agent_tree_prefix(agent_id)))):
             return root_ok or folder != path
         folder = parent
 

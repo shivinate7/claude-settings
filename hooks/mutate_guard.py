@@ -1393,7 +1393,7 @@ MUTATIONS = [
      '                and False and os.path.normcase(os.path.basename(folder)).startswith(',
      "guard", "worktree-home: the cd exemptions pass"),
     ("other-checkout: the red-run exemption matches a prefix of the agent id",
-     '                    os.path.normcase("agent-" + agent_id + "-"))):',
+     '                    os.path.normcase(agent_tree_prefix(agent_id)))):',
      '                    os.path.normcase("agent-" + agent_id))):',
      "guard", "worktree-home: an agent's cd into a sibling agent tree"),
     # The write act's exemption: `worktree_home_red_write_case`.

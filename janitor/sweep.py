@@ -72,6 +72,7 @@ from datetime import datetime, timezone
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO_ROOT = os.path.dirname(HERE)
 sys.path.insert(0, os.path.join(REPO_ROOT, "hooks"))
+from shared_names import agent_tree_prefix  # noqa: E402  the one home of the agent-tree name shape, shared with hooks/guard.py
 import git_reads  # noqa: E402  (the preview cache patches the reads where they live; no guard module loads)
 try:
     import _nowindow  # the one home of a no-window child start (hooks/_nowindow.py)
@@ -720,30 +721,31 @@ def _is_agent_worktree(where: str, path: str) -> bool:
     return parent == norm(os.path.join(where, ".claude", "worktrees")) and name.startswith("agent-")
 
 
-_RED_RUN_NAME_RE = re.compile(r"^agent-(.+)-red$")
-
-
-def _red_run_owner_keep(where: str, path: str):
-    """A keep decision for a red-run checkout whose owner tree is still registered, else None
-    (when-a-worktree-may-be-removed). A red-run checkout is the test-author's
-    `.claude/worktrees/agent-<id>-red`; its owner tree is `.claude/worktrees/agent-<id>`. Exact
-    name match only: `agent-<id>-redx` and a checkout whose owner tree is gone follow the other
-    rules. A failed worktree list keeps. One home: the agent-end reap and the session-end sweep
-    both ask it."""
+def _agent_worktree_child_keep(where: str, path: str):
+    """A keep decision for a tree `.claude/worktrees/agent-<id>-<suffix>` while the agent worktree
+    `.claude/worktrees/agent-<id>` is registered, else None (when-a-worktree-may-be-removed). The
+    test-author's red-run checkout is one. The shape is the guard's own (`shared_names.agent_tree_prefix`,
+    the one home the guard's `_own_red_run` also reads). A tree named exactly `agent-<id>` is never
+    kept by this rule. The worktree list is read only for a name with a dash after `agent-`, since a
+    child's name holds the id, a dash and a suffix. A failed list keeps. One home: the agent-end reap
+    and the session-end sweep both ask it."""
     if not _is_agent_worktree(where, path):
         return None
-    named = _RED_RUN_NAME_RE.match(os.path.basename(os.path.normpath(path)))
-    if not named:
+    name = os.path.basename(os.path.normpath(path))
+    if "-" not in name[len("agent-"):]:
         return None
-    folder = os.path.dirname(os.path.normpath(path))
-    owner_name = "agent-" + named.group(1)
-    owner = os.path.normcase(os.path.realpath(os.path.join(folder, owner_name)))
     entries = parse_worktree_list(where)
     if entries is None:
         return {"path": path, "action": "keep", "reason": "unreadable-subject"}
-    if any(os.path.normcase(os.path.realpath(e["path"])) == owner for e in entries):
-        return {"path": path, "action": "keep",
-                "reason": "red-run checkout: owner tree %s is still registered" % owner_name}
+    own = os.path.normcase(os.path.realpath(path))
+    for entry in entries:
+        agent_name = os.path.basename(os.path.normpath(entry["path"]))
+        if (_is_agent_worktree(where, entry["path"])
+                and os.path.normcase(os.path.realpath(entry["path"])) != own
+                and os.path.normcase(name).startswith(
+                    os.path.normcase(agent_tree_prefix(agent_name[len("agent-"):])))):
+            return {"path": path, "action": "keep",
+                    "reason": "agent worktree %s is still registered" % agent_name}
     return None
 
 
@@ -796,10 +798,10 @@ def decide_worktree(where: str, entry: dict, attended: bool = False, agent_rule:
     in the default branch (and idle 1 hour, unless attended), and with no BATCH nothing is
     proven, so it stays. OWN_LOCK_RULE (on by default) frees the calling session's own agent
     lock once the tree is clean, merged, idle 30 minutes and unused; the agent-end reap turns it off."""
-    if not attended:  # a person's run (attended) is theirs to judge
-        red_kept = _red_run_owner_keep(where, entry["path"])
-        if red_kept:
-            return red_kept
+    if not attended:  # an attended run (a person's, or the merge tool's one named tree) judges its tree itself
+        child_kept = _agent_worktree_child_keep(where, entry["path"])
+        if child_kept:
+            return child_kept
     lock_idle = None  # an agent lock's idle is read even when attended, and before any status
     if AGENT_LOCK_RE.match(entry.get("locked_reason") or ""):
         lock_idle = entry["idle"] if "idle" in entry else worktree_idle_seconds(entry["path"])
@@ -903,9 +905,9 @@ def decide_agent_end_worktree(where: str, entry: dict, min_idle=None):
         if idle < min_idle:
             return {"path": path, "action": "keep",
                     "reason": "recently-active: git activity %d minutes ago" % (idle // 60)}
-    red_kept = _red_run_owner_keep(where, path)
-    if red_kept:
-        return red_kept
+    child_kept = _agent_worktree_child_keep(where, path)
+    if child_kept:
+        return child_kept
     _restore_cut_short(where, entry)
     decision = decide_worktree(where, entry, attended=True, own_lock_rule=False)
     if decision["action"] != "reap":
