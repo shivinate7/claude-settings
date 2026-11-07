@@ -2,7 +2,7 @@
 
 ## The ruling
 
-The `verdict-pipe` rule in `hooks/guard.py` refuses a Bash command that pipes the output of `verdict` into another command, such as `verdict <cmd> | tail`. It reads each segment whose command word is `verdict`, by any path.
+The `verdict-pipe` rule in `hooks/guard.py` refuses a shell command (Bash or PowerShell) that pipes the output of `verdict` into another command, such as `verdict <cmd> | tail`. It reads each segment whose command word is `verdict`, by any path.
 
 - Refused: `verdict <cmd> | <any command>`, with or without `2>&1`, after `cd x &&`, or after an env prefix.
 - Passes: `verdict <cmd>` alone, `verdict <cmd> && <next>`, `verdict <cmd> || <next>`, a redirect to a file, and a `|` inside a quoted argument.
@@ -15,6 +15,8 @@ On 2026-11-07 13:51 CST, a lane session ran `verdict <cmd> | tail` and read exit
 Harm: a red check reads as green, and a broken change merges.
 
 Why deny and not ask: a pipe after `verdict` adds nothing, because `verdict` already prints a short verdict. So no normal work needs the form.
+
+The retired debt asked for the verdict line printed last and a guard that asks. The deny meets the same outcome by a stronger path. No pipe can follow `verdict`, so no filter can mask its exit or cut its line. The line order then no longer matters.
 
 Kind: process
 Home: hooks/guard.py
