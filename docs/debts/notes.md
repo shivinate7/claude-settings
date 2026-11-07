@@ -1450,3 +1450,5 @@
 - lane-tag-copies: `hooks/guard.py` and `lint/report_guard.py` each keep their own `cs-build:lane` constant beside `hooks/shared_names.py` `LANE_TAG`. Decision: session-tiers.
 - draft-landed-two-homes: the roadmap's idle-lane test checks a draft head on main by merge-base on the local checkout; the archive guard checks it by GitHub's compare. The local test is stricter (a stale local main reads not landed). Decision: session-tiers.
 - idle-lane-mixed-bucket-forms: a live lane row whose status_bucket is not an enum name, beside a row that is, is skipped with no unknown entry (skills/roadmap/build.py idle_lanes). False negative only. Decision: session-tiers.
+- legacy-closed-lane-items: items closed on the old busy-lane path keep `lane` and `lastAnswer`, so `stale_pages.py --items` prints a lane line for each until triage drops `lane` on them. No migration step. Decision: questions-go-to-owner.
+- page-withdraw-gap: a routed item is closed, so the owner withdraws in chat; until the writer reopens it, `page_grant.py` still counts the kept answer. Ruled cost of option A. Decision: relayed-grant-read-from-page.
