@@ -33,6 +33,7 @@ RUN_FOLDER = None
 STEP = {"title": "t", "status": "todo", "phase": "cleanup", "order": 1, "note": "n", "updatedAt": "2026-10-26T00:00:00Z"}
 CONFLICT = "<<<<<<< HEAD\na\n=======\nb\n>>>>>>> 1234567 (other)\n"
 GIT_ENV = {"GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t", "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@t"}
+_NO_LANE = object()  # item(): the default, which leaves the row's lane key out
 # get_session's status_bucket as list_sessions returns it: the SESSION_STATUS_BUCKET_* enum names, measured on real rows.
 BUCKET_COMPLETED = "SESSION_STATUS_BUCKET_COMPLETED"
 BUCKET_REVIEW_READY = "SESSION_STATUS_BUCKET_REVIEW_READY"
@@ -63,7 +64,7 @@ TODAY_STUB = """<script>
 </script>
 """
 # sha256 of the roadmap branch's roadmap/page/index.html, the page the old script used.
-TODAY_TEMPLATE_SHA256 = "b6451344f00bcc1ce27fe378de2cf5b3aaa610954d6ecb1dd8050677627160c6"
+TODAY_TEMPLATE_SHA256 = "23bc9c5770e92a063db47619ce0dec0bf50a0d8972cfa973b7cf3b7ca07c32d2"
 BLOCK = re.compile(r"<!-- build:([a-z-]+) -->.*?<!-- /build:\1 -->\n?", re.S)
 
 
@@ -581,8 +582,8 @@ class UpkeepFixture(Fixture):
         self.write_live(value)
         return value
 
-    def out_with_live(self):
-        _, out = self.build_from_main("--live", str(self.live))
+    def out_with_live(self, expect=(0, None)):
+        _, out = self.build_from_main("--live", str(self.live), expect=expect)
         return out
 
     def summary_counts(self, out):
@@ -626,6 +627,46 @@ class UpkeepFixture(Fixture):
         """An ISO createdAt `minutes` before the live read, when that read was read_ago minutes before now."""
         return iso_ago(read_ago + minutes)
 
+    def session_in_repo(self, sid, status, *tags):
+        """A sessions row for this fixture repo, carrying the cs-repo tag the script checks."""
+        return session_row(sid, status, self.REPO, *tags)
+
+    def listed_ids(self, entries):
+        return re.findall(r"([^,()\s]+) \(set to ", entries)
+
+    def item(self, n, home="c153", status="closed", lane=_NO_LANE):
+        """One row of the --live file's items list, as the publisher copies it from the waiting page. lane=None writes
+        "lane": null (an answer with no lane); the default leaves the lane key out, so the row reads the items unknown."""
+        row = {"n": n, "status": status, "home": home}
+        if lane is not _NO_LANE:
+            row["lane"] = lane
+        return row
+
+    def stalled_block(self, page):
+        """The page's stalled block. Fails with a named cause when the page has none."""
+        info = build_info(page)
+        self.assertIn("stalled", info, "the page has no stalled block")
+        return info["stalled"]
+
+    def land(self, sid, pr, **fields):
+        """Write the step on the record branch, then land it on main as a merged PR's commit with a Step: trailer.
+        The step is doing unless the case says otherwise."""
+        fields.setdefault("status", "doing")
+        git(self.repo, "checkout", "-q", "roadmap")
+        self.commit_step(sid, **fields)
+        self.on_main()
+        (self.repo / ("landed-%s-%d.txt" % (sid, pr))).write_text("x", encoding="utf-8")
+        git(self.repo, "add", "-A")
+        git(self.repo, "commit", "-q", "-m", "landed (#%d)\n\nStep: %s" % (pr, sid))
+
+    def land_all(self, specs, first_pr):
+        """Land each step in specs ({step id: fields}), one PR each from first_pr. Returns {step id: PR number}."""
+        prs = {}
+        for pr, (sid, fields) in enumerate(specs.items(), start=first_pr):
+            self.land(sid, pr, **fields)
+            prs[sid] = pr
+        return prs
+
 
 class StaleInProgress(UpkeepFixture):
     """The upkeep row for each doing or active step with no live lane and no open PR. Its entries read
@@ -633,16 +674,9 @@ class StaleInProgress(UpkeepFixture):
 
     ROW = "in progress with no live lane or open PR"
 
-    def session_in_repo(self, sid, status, *tags):
-        """A sessions row for this fixture repo, carrying the cs-repo tag the script checks."""
-        return session_row(sid, status, self.REPO, *tags)
-
     def stale(self, out):
         """(count, entries) of the stale row. Fails when the output holds no such row."""
         return self.row(out, self.ROW)
-
-    def listed_ids(self, entries):
-        return re.findall(r"([^,()\s]+) \(set to ", entries)
 
     def test_doing_step_with_a_live_session_is_not_listed(self):
         self.commit_step("c1", status="doing")
@@ -651,21 +685,21 @@ class StaleInProgress(UpkeepFixture):
                        "SESSION_STATUS_REQUIRES_ACTION", "SESSION_STATUS_PENDING"):
             with self.subTest(status=status):
                 self.publish(sessions=[self.session_in_repo("session_test01", status, "cs-step:c1")])
-                count, entries = self.stale(self.out_with_live())
+                count, entries = self.stale(self.out_with_live(expect=(1,)))
                 self.assertEqual((count, self.listed_ids(entries)), (1, ["c2"]))
 
     def test_doing_step_whose_id_is_an_open_pull_branch_is_not_listed(self):
         self.commit_step("c1", status="doing")
         self.commit_step("c2", status="doing", order=2)  # control: listed
         self.publish(sessions=[], pulls=[{"number": 874, "title": "Lane c1", "branch": "c1"}])
-        count, entries = self.stale(self.out_with_live())
+        count, entries = self.stale(self.out_with_live(expect=(1,)))
         self.assertEqual((count, self.listed_ids(entries)), (1, ["c2"]))
 
     def test_doing_and_active_steps_with_neither_are_set_to_todo(self):
         self.commit_step("c1", status="doing")
         self.commit_step("c2", status="active", order=2)
         self.publish(sessions=[])
-        count, entries = self.stale(self.out_with_live())
+        count, entries = self.stale(self.out_with_live(expect=(1,)))
         self.assertEqual(count, 2)
         self.assertIn("c1 (set to todo)", entries)
         self.assertIn("c2 (set to todo)", entries)
@@ -673,13 +707,13 @@ class StaleInProgress(UpkeepFixture):
     def test_archived_session_does_not_keep_its_step_live(self):
         self.commit_step("c1", status="doing")
         self.publish(sessions=[self.session_in_repo("session_test01", "SESSION_STATUS_ARCHIVED", "cs-step:c1")])
-        self.assertEqual(self.stale(self.out_with_live()), (1, "c1 (set to todo)"))
+        self.assertEqual(self.stale(self.out_with_live(expect=(1,))), (1, "c1 (set to todo)"))
 
     def test_step_page_does_not_match_tag_or_branch_page_name_queue(self):
         self.commit_step("page", status="doing", note="Lane page-name-queue: draft PR #874")
         self.publish(sessions=[self.session_in_repo("session_test01", "SESSION_STATUS_RUNNING", "cs-step:page-name-queue")],
                      pulls=[{"number": 874, "title": "Page name queue", "branch": "page-name-queue"}])
-        self.assertEqual(self.stale(self.out_with_live()), (1, "page (set to todo)"))
+        self.assertEqual(self.stale(self.out_with_live(expect=(1,))), (1, "page (set to todo)"))
 
     def test_step_trailer_on_main_sets_the_step_to_done(self):
         self.commit_step("c1", status="doing")
@@ -688,7 +722,7 @@ class StaleInProgress(UpkeepFixture):
         git(self.repo, "add", "-A")
         git(self.repo, "commit", "-q", "-m", "landed (#12)\n\nStep: c1")
         self.publish(sessions=[])
-        self.assertEqual(self.stale(self.out_with_live()), (1, "c1 (set to done: landed in #12)"))
+        self.assertEqual(self.stale(self.out_with_live(expect=(1,))), (1, "c1 (set to done: landed in #12)"))
 
     def test_live_file_with_no_sessions_list_reads_the_row_unknown(self):
         self.commit_step("c1", status="doing")
@@ -715,7 +749,7 @@ class StaleInProgress(UpkeepFixture):
     def test_read_at_five_minutes_old_lists_normally(self):
         self.commit_step("c1", status="doing")
         self.publish(sessions=[])
-        self.assertEqual(self.stale(self.out_with_live()), (1, "c1 (set to todo)"))
+        self.assertEqual(self.stale(self.out_with_live(expect=(1,))), (1, "c1 (set to todo)"))
 
     def test_read_at_that_is_not_a_time_reads_the_row_unknown(self):
         self.commit_step("c1", status="doing")
@@ -742,7 +776,7 @@ class StaleInProgress(UpkeepFixture):
         self.commit_step("c3", status="todo", order=3)
         self.commit_step("c4", status="doing", order=4)  # control: listed, so an empty row cannot pass
         self.publish(sessions=[])
-        self.assertEqual(self.stale(self.out_with_live()), (1, "c4 (set to todo)"))
+        self.assertEqual(self.stale(self.out_with_live(expect=(1,))), (1, "c4 (set to todo)"))
 
     def test_no_live_file_reads_the_row_unknown(self):
         self.commit_step("c1", status="doing")
@@ -764,14 +798,14 @@ class StaleInProgress(UpkeepFixture):
         self.assertEqual(self.stale(self.out_with_live()), (1, "unknown (the live file's readAt is in the future)"))
         with self.subTest("two minutes ahead is within the tolerance"):
             self.publish(sessions=[], read_at=iso_ago(-2))
-            self.assertEqual(self.stale(self.out_with_live()), (1, "c1 (set to todo)"))
+            self.assertEqual(self.stale(self.out_with_live(expect=(1,))), (1, "c1 (set to todo)"))
 
     # Only archived ends a lane (session-tiers, Live-coordinator check), so an unseen status keeps its step live.
     def test_session_in_an_unseen_status_keeps_its_step_live(self):
         self.commit_step("c1", status="doing")
         self.commit_step("c2", status="doing", order=2)  # control: listed
         self.publish(sessions=[self.session_in_repo("session_test01", "SESSION_STATUS_SOMETHING_NEW", "cs-step:c1")])
-        count, entries = self.stale(self.out_with_live())
+        count, entries = self.stale(self.out_with_live(expect=(1,)))
         self.assertEqual((count, self.listed_ids(entries)), (1, ["c2"]))
 
     def test_session_counts_only_with_this_repos_cs_repo_tag(self):
@@ -788,7 +822,7 @@ class StaleInProgress(UpkeepFixture):
         for name, (row, listed) in rows.items():
             with self.subTest(name):
                 self.publish(sessions=[row])
-                count, entries = self.stale(self.out_with_live())
+                count, entries = self.stale(self.out_with_live(expect=(1,)))
                 self.assertEqual((count, sorted(self.listed_ids(entries))), (len(listed), listed))
         git(self.repo, "remote", "remove", "origin")
         self.publish(sessions=[self.session_in_repo("session_test01", "SESSION_STATUS_RUNNING", "cs-step:c1")])
@@ -805,7 +839,7 @@ class StaleInProgress(UpkeepFixture):
         self.commit_step("c1", status="waiting")
         self.commit_step("c2", status="doing", order=2)  # control: listed as todo
         self.publish(sessions=[])
-        count, entries = self.stale(self.out_with_live())
+        count, entries = self.stale(self.out_with_live(expect=(1,)))
         self.assertEqual(count, 2)
         self.assertIn('c1 (unknown status "waiting")', entries)
         self.assertIn("c2 (set to todo)", entries)
@@ -817,7 +851,7 @@ class StaleInProgress(UpkeepFixture):
         tagless = [{"id": "session_test02", "session_status": "SESSION_STATUS_IDLE"},
                    {"id": "session_test03", "session_status": "SESSION_STATUS_RUNNING", "tags": None}]
         self.publish(sessions=[self.session_in_repo("session_test01", "SESSION_STATUS_RUNNING", "cs-step:c1")] + tagless)
-        page, out = self.build_from_main("--live", str(self.live))
+        page, out = self.build_from_main("--live", str(self.live), expect=(1,))
         self.assertEqual(build_info(page)["live"]["skipped"], [])
         self.assertEqual(self.stale(out), (1, "c2 (set to todo)"))
         with self.subTest("a tags string is still skipped"):
@@ -831,7 +865,294 @@ class StaleInProgress(UpkeepFixture):
         self.commit_step("c1", status="doing")
         self.commit_step("c2", status="doing", order=2)  # control: listed
         self.publish(sessions=[session_row("session_test01", "SESSION_STATUS_RUNNING", "cs-repo:Owner/Fixture", "cs-step:c1")])
-        self.assertEqual(self.stale(self.out_with_live()), (1, "c2 (set to todo)"))
+        self.assertEqual(self.stale(self.out_with_live(expect=(1,))), (1, "c2 (set to todo)"))
+
+
+class StalledStep(UpkeepFixture):
+    """The stalled-step view (plan: stalled steps). A doing or active step with no live lane and no open PR is
+    stalled until it has a disposition: a valid `paused` field, which triage writes, or status done. A stalled
+    step prints `stalled step: <id> (resume, pause or done)`, or `stalled step: <id> (done: landed in #N)` when it
+    landed, and the build exits 1 after it writes the page. An unknown live read prints
+    `stalled step: unknown (<why>)`, lists no steps as [], and exits 0."""
+
+    PAUSE = {"why": "waits on the owner's call on the batch", "decides": "owner",
+             "at": "2026-11-06T11:00:00-06:00", "by": "triage"}
+    RESUME = "stalled step: c2 (resume, pause or done)"
+
+    def stalled_lines(self, out):
+        """The printed step lines, in print order. The unknown and item lines are not step lines."""
+        return re.findall(r"^stalled step: (?!unknown \(|items unknown \(|item \d).*$", out, re.M)
+
+    def stalled_ids(self, out):
+        return [re.match(r"stalled step: (\S+) \(", line).group(1) for line in self.stalled_lines(out)]
+
+    def test_doing_step_with_no_lane_exits_1_and_prints_one_stalled_line(self):
+        self.commit_step("c2", status="doing", order=2)
+        self.publish(sessions=[], items=[])
+        page, out = self.build_from_main("--live", str(self.live), expect=(0, 1))
+        self.stalled_block(page)
+        self.assertEqual(self.stalled_lines(out), [self.RESUME], "c2 has no lane, so it is the one stalled line")
+        self.assertEqual(self.code, 1, "a stalled step must exit 1")
+
+    def test_a_live_step_is_not_printed_beside_a_stalled_one(self):
+        self.commit_step("c1", status="doing")  # control: its live session keeps it off the lines
+        self.commit_step("c2", status="doing", order=2)
+        self.publish(sessions=[self.session_in_repo("session_test01", "SESSION_STATUS_RUNNING", "cs-step:c1")], items=[])
+        page, out = self.build_from_main("--live", str(self.live), expect=(0, 1))
+        self.stalled_block(page)
+        self.assertEqual(self.stalled_lines(out), [self.RESUME], "only c2 is stalled")
+        self.assertEqual(self.code, 1, "a stalled step must exit 1")
+
+    def test_page_is_written_before_exit_1_and_lists_the_stalled_ids(self):
+        self.commit_step("c1", status="doing")  # control: live, so not in the stalled ids
+        self.commit_step("c2", status="doing", order=2)
+        self.publish(sessions=[self.session_in_repo("session_test01", "SESSION_STATUS_RUNNING", "cs-step:c1")], items=[])
+        page, out = self.build_from_main("--live", str(self.live), expect=(0, 1))
+        stalled = self.stalled_block(page)
+        self.assertEqual([s["id"] for s in stalled["steps"]], ["c2"], "the page's stalled steps are c2 only")
+        self.assertEqual(self.code, 1, "a stalled step must exit 1")
+
+    def test_landed_doing_step_reads_done_with_its_pr(self):
+        self.commit_step("c1", status="doing")  # control: live, so not printed
+        self.land("c2", 12, order=2)  # landed on main with a Step: trailer, still doing, no lane
+        self.publish(sessions=[self.session_in_repo("session_test01", "SESSION_STATUS_RUNNING", "cs-step:c1")], items=[])
+        page, out = self.build_from_main("--live", str(self.live), expect=(0, 1))
+        self.stalled_block(page)
+        self.assertEqual(self.stalled_lines(out), ["stalled step: c2 (done: landed in #12)"])
+        self.assertEqual(self.code, 1, "a stalled step must exit 1")
+
+    def test_valid_paused_field_exits_0_and_lists_the_step_as_paused(self):
+        self.commit_step("c2", status="doing", order=2, paused=self.PAUSE)
+        self.publish(sessions=[], items=[])
+        page, out = self.build_from_main("--live", str(self.live))
+        stalled = self.stalled_block(page)
+        self.assertIn("c2", stalled["paused"], "a valid paused step is listed in paused")
+        self.assertEqual(stalled["steps"], [], "a paused step is not stalled, and a known read lists [] for none")
+        self.assertEqual(self.stalled_lines(out), [])
+
+    def test_bad_paused_field_keeps_the_step_stalled_and_lists_it_in_badPause(self):
+        bad = {
+            "no why": {k: v for k, v in self.PAUSE.items() if k != "why"},
+            "empty why": dict(self.PAUSE, why=""),
+            "decides not in the set": dict(self.PAUSE, decides="boss"),
+            "at with no zone": dict(self.PAUSE, at="2026-11-06T11:00:00"),
+        }
+        for name, paused in bad.items():
+            with self.subTest(name):
+                git(self.repo, "checkout", "-q", "roadmap")
+                self.commit_step("c2", status="doing", order=2, paused=paused)
+                self.publish(sessions=[], items=[])
+                page, out = self.build_from_main("--live", str(self.live), expect=(0, 1))
+                stalled = self.stalled_block(page)
+                self.assertEqual([b["id"] for b in stalled["badPause"]], ["c2"], "a wrong-shaped pause is listed")
+                self.assertEqual(self.stalled_lines(out), [self.RESUME], "and the step stays stalled")
+                self.assertEqual(self.code, 1, "a stalled step must exit 1")
+
+    def test_unknown_live_read_prints_unknown_with_steps_none_and_exits_0(self):
+        self.commit_step("c2", status="doing", order=2)
+        cases = {
+            "no --live file": None,
+            "readAt two hours old": dict(sessions=[], read_at=iso_ago(120), items=[]),
+            "no sessions list": dict(items=[]),
+        }
+        for name, live in cases.items():
+            with self.subTest(name):
+                args = ()
+                if live is not None:
+                    self.publish(**live)
+                    args = ("--live", str(self.live))
+                page, out = self.build_from_main(*args)
+                stalled = self.stalled_block(page)
+                self.assertIsNone(stalled["steps"], "an unknown read lists no steps, never []")
+                self.assertRegex(out, r"(?m)^stalled step: unknown \(", "the unknown line is missing")
+                self.assertEqual(self.code, 0, "an unknown read exits 0")
+
+    def test_landed_feel_fix_without_a_device_trial_is_not_stalled(self):
+        self.commit_step("c2", status="doing", order=2)  # control: a plain lane-less step is still stalled
+        self.land("c1", 12, feel=True)  # waits for a device trial: the device row lists it, not the stalled lines
+        self.publish(sessions=[], items=[])
+        page, out = self.build_from_main("--live", str(self.live), expect=(0, 1))
+        stalled = self.stalled_block(page)
+        self.assertEqual([s["id"] for s in stalled["steps"]], ["c2"], "the feel-fix is not stalled")
+        self.assertEqual(self.stalled_lines(out), [self.RESUME])
+        self.assertEqual(self.code, 1, "a stalled step must exit 1")
+
+    def test_todo_done_ready_and_unknown_status_steps_are_never_stalled(self):
+        self.commit_step("c2", status="doing", order=2)  # control: stalled
+        self.commit_step("c3", status="todo", order=3)
+        self.commit_step("c4", status="done", order=4)
+        self.commit_step("c5", status="todo", note="Brief is written. Ready.", order=5)  # a ready todo step
+        self.commit_step("c6", status="waiting", order=6)  # unknown status: the upkeep row lists it, the stall never does
+        self.publish(sessions=[], items=[])
+        page, out = self.build_from_main("--live", str(self.live), expect=(0, 1))
+        stalled = self.stalled_block(page)
+        self.assertEqual([s["id"] for s in stalled["steps"]], ["c2"])
+        self.assertEqual(self.stalled_lines(out), [self.RESUME])
+        self.assertEqual(self.code, 1, "a stalled step must exit 1")
+
+    def test_stalled_ids_are_the_in_progress_row_ids(self):
+        self.commit_step("c1", status="doing")  # control: live, in neither the row nor the stalled ids
+        self.commit_step("c2", status="doing", order=2)
+        self.commit_step("c3", status="active", order=3)
+        self.land("c4", 14, order=4)  # landed, so the row reads set to done
+        self.publish(sessions=[self.session_in_repo("session_test01", "SESSION_STATUS_RUNNING", "cs-step:c1")], items=[])
+        page, out = self.build_from_main("--live", str(self.live), expect=(0, 1))
+        stalled = self.stalled_block(page)
+        _, detail = self.row(out, StaleInProgress.ROW)
+        row_ids = sorted(self.listed_ids(detail))
+        self.assertEqual(row_ids, ["c2", "c3", "c4"], "the row lists the three lane-less steps")
+        self.assertEqual(sorted(s["id"] for s in stalled["steps"]), row_ids, "the page's ids are the row's ids")
+        self.assertEqual(sorted(self.stalled_ids(out)), row_ids, "the printed ids are the row's ids")
+        self.assertEqual(self.code, 1, "a stalled step must exit 1")
+
+    def test_no_stalled_step_reads_an_empty_list_not_unknown(self):
+        self.commit_step("c1", status="doing")  # live, so nothing is stalled
+        self.publish(sessions=[self.session_in_repo("session_test01", "SESSION_STATUS_RUNNING", "cs-step:c1")], items=[])
+        page, out = self.build_from_main("--live", str(self.live))
+        stalled = self.stalled_block(page)
+        self.assertEqual(stalled["steps"], [], "zero stalled steps is an empty list, not unknown")
+        self.assertEqual(stalled["items"], [], "an empty items list reads zero, not unknown")
+        self.assertEqual(self.stalled_lines(out), [])
+
+    def test_topic_session_does_not_keep_a_doing_step_live(self):
+        self.commit_step("c1", status="doing")  # control: its cs-step session keeps c1 live, so c1 is not stalled
+        self.commit_step("c2", status="doing", order=2)
+        topic = self.session_in_repo("session_test01", "SESSION_STATUS_RUNNING", "cs-step:c1", "cs-topic:c2")
+        self.publish(sessions=[topic], items=[])
+        page, out = self.build_from_main("--live", str(self.live), expect=(0, 1))
+        stalled = self.stalled_block(page)
+        self.assertIsNotNone(stalled["steps"], "the live read is known, so the steps list is a list")
+        self.assertNotIn("c1", [s["id"] for s in stalled["steps"]], "the cs-step:c1 session keeps c1 live")
+        self.assertEqual([s["id"] for s in stalled["steps"]], ["c2"], "a cs-topic tag never keeps a step live")
+        self.assertEqual(self.stalled_lines(out), [self.RESUME])
+        self.assertEqual(self.code, 1, "a stalled step must exit 1")
+
+    def test_open_pull_on_the_lane_slash_branch_clears_a_doing_step(self):
+        self.commit_step("c2", status="doing", order=2)
+        self.publish(sessions=[], pulls=[{"number": 7, "title": "Lane c2", "branch": "lane/c2"}], items=[])
+        page, out = self.build_from_main("--live", str(self.live), expect=(0, 1))
+        stalled = self.stalled_block(page)
+        self.assertIsNotNone(stalled["steps"], "the live read is known, so the steps list is a list")
+        self.assertEqual(stalled["steps"], [], "an open pull on lane/c2 keeps c2 live")
+        self.assertEqual(self.stalled_lines(out), [])
+        self.assertEqual(self.code, 0, "no stalled step exits 0")
+
+    def test_open_pull_on_a_longer_lane_branch_does_not_clear_a_doing_step(self):
+        self.commit_step("c2", status="doing", order=2)  # control: lane/c2x is another lane
+        self.publish(sessions=[], pulls=[{"number": 8, "title": "Lane c2x", "branch": "lane/c2x"}], items=[])
+        page, out = self.build_from_main("--live", str(self.live), expect=(0, 1))
+        stalled = self.stalled_block(page)
+        self.assertIsNotNone(stalled["steps"], "the live read is known, so the steps list is a list")
+        self.assertEqual([s["id"] for s in stalled["steps"]], ["c2"], "a pull on lane/c2x does not clear c2")
+        self.assertEqual(self.stalled_lines(out), [self.RESUME])
+        self.assertEqual(self.code, 1, "a stalled step must exit 1")
+
+
+class StalledItem(UpkeepFixture):
+    """A waiting-page item whose answer went to a lane that is gone. An open item (status not closed) whose `lane`
+    is set and not live prints `stalled step: item <n> (lane <slug>: re-route, close or resume)` and the build exits
+    1. A slug lane is live when an open pull's branch is the lane or lane/<slug>, or a live session in this repo
+    carries cs-step:<slug> or cs-topic:<slug>. A tier lane such as batch-runner is live when a live session in this repo carries
+    cs-build:<tier>. A row with no lane key reads the items unknown and exits 0."""
+
+    def item_lines(self, out):
+        return re.findall(r"^stalled step: item \d+ \(.*$", out, re.M)
+
+    def test_open_item_on_a_lane_that_is_gone_is_stalled(self):
+        self.publish(sessions=[], items=[self.item(12, status="open", lane="x")])
+        page, out = self.build_from_main("--live", str(self.live), expect=(0, 1))
+        stalled = self.stalled_block(page)
+        self.assertEqual(stalled["items"], [{"n": 12, "lane": "x"}], "item 12 answers lane x, which has no live work")
+        self.assertEqual(self.item_lines(out), ["stalled step: item 12 (lane x: re-route, close or resume)"])
+        self.assertEqual(self.code, 1, "a stalled item must exit 1")
+
+    def test_open_pull_on_the_lane_branch_clears_the_item(self):
+        self.publish(sessions=[], pulls=[{"number": 7, "title": "Lane x", "branch": "x"}],
+                     items=[self.item(12, status="open", lane="x"),
+                            self.item(13, status="open", lane="y")])  # control: lane y has no work
+        page, out = self.build_from_main("--live", str(self.live), expect=(0, 1))
+        stalled = self.stalled_block(page)
+        self.assertEqual(stalled["items"], [{"n": 13, "lane": "y"}], "only item 13 is stalled: lane x has a PR")
+        self.assertEqual(self.item_lines(out), ["stalled step: item 13 (lane y: re-route, close or resume)"])
+        self.assertEqual(self.code, 1, "a stalled item must exit 1")
+
+    def test_live_session_with_the_tier_tag_clears_the_tier_lane(self):
+        self.publish(sessions=[self.session_in_repo("session_test01", "SESSION_STATUS_RUNNING", "cs-build:batch-runner")],
+                     items=[self.item(12, status="open", lane="batch-runner"),
+                            self.item(13, status="open", lane="y")])  # control: lane y has no work
+        page, out = self.build_from_main("--live", str(self.live), expect=(0, 1))
+        stalled = self.stalled_block(page)
+        self.assertEqual(stalled["items"], [{"n": 13, "lane": "y"}], "only item 13 is stalled: batch-runner is live")
+        self.assertEqual(self.item_lines(out), ["stalled step: item 13 (lane y: re-route, close or resume)"])
+        self.assertEqual(self.code, 1, "a stalled item must exit 1")
+
+    def test_closed_item_is_never_listed(self):
+        self.publish(sessions=[], items=[self.item(12, status="closed", lane="x"),
+                                         self.item(13, status="open", lane="y")])  # control: open, so listed
+        page, out = self.build_from_main("--live", str(self.live), expect=(0, 1))
+        stalled = self.stalled_block(page)
+        self.assertEqual(stalled["items"], [{"n": 13, "lane": "y"}], "a closed item is never stalled")
+        self.assertEqual(self.item_lines(out), ["stalled step: item 13 (lane y: re-route, close or resume)"])
+        self.assertEqual(self.code, 1, "a stalled item must exit 1")
+
+    def test_item_rows_with_no_lane_key_read_the_items_unknown_and_exit_0(self):
+        self.publish(sessions=[], items=[self.item(12, status="open")])
+        page, out = self.build_from_main("--live", str(self.live))
+        stalled = self.stalled_block(page)
+        self.assertIsNone(stalled["items"], "a row with no lane reads the items unknown, never []")
+        self.assertRegex(out, r"(?m)^stalled step: items unknown \(", "the items unknown line is missing")
+        self.assertEqual(self.code, 0, "an unknown items read exits 0")
+
+    def test_live_topic_session_clears_the_item_lane(self):
+        topic = self.session_in_repo("session_test01", "SESSION_STATUS_RUNNING", "cs-topic:x")
+        self.publish(sessions=[topic], items=[self.item(12, status="open", lane="x"),
+                                             self.item(13, status="open", lane="y")])  # control: lane y has no work
+        page, out = self.build_from_main("--live", str(self.live), expect=(0, 1))
+        stalled = self.stalled_block(page)
+        self.assertIsNotNone(stalled["items"], "the live read is known, so the items list is a list")
+        self.assertEqual(stalled["items"], [{"n": 13, "lane": "y"}], "a live cs-topic:x session clears item 12")
+        self.assertEqual(self.item_lines(out), ["stalled step: item 13 (lane y: re-route, close or resume)"])
+        self.assertEqual(self.code, 1, "a stalled item must exit 1")
+
+    def test_archived_tier_session_does_not_keep_the_tier_lane_live(self):
+        archived = self.session_in_repo("session_test01", "SESSION_STATUS_ARCHIVED", "cs-build:batch-runner")
+        self.publish(sessions=[archived], items=[self.item(12, status="open", lane="batch-runner")])
+        page, out = self.build_from_main("--live", str(self.live), expect=(0, 1))
+        stalled = self.stalled_block(page)
+        self.assertIsNotNone(stalled["items"], "the live read is known, so the items list is a list")
+        self.assertEqual(stalled["items"], [{"n": 12, "lane": "batch-runner"}], "an archived session keeps no lane live")
+        self.assertEqual(self.item_lines(out), ["stalled step: item 12 (lane batch-runner: re-route, close or resume)"])
+        self.assertEqual(self.code, 1, "a stalled item must exit 1")
+
+    def test_tier_session_of_another_repo_does_not_keep_the_tier_lane_live(self):
+        other = session_row("session_test02", "SESSION_STATUS_RUNNING", "cs-repo:owner/other-repo", "cs-build:batch-runner")
+        self.publish(sessions=[other], items=[self.item(12, status="open", lane="batch-runner")])
+        page, out = self.build_from_main("--live", str(self.live), expect=(0, 1))
+        stalled = self.stalled_block(page)
+        self.assertIsNotNone(stalled["items"], "the live read is known, so the items list is a list")
+        self.assertEqual(stalled["items"], [{"n": 12, "lane": "batch-runner"}], "a session of another repo keeps no lane live")
+        self.assertEqual(self.item_lines(out), ["stalled step: item 12 (lane batch-runner: re-route, close or resume)"])
+        self.assertEqual(self.code, 1, "a stalled item must exit 1")
+
+    def test_open_pull_on_the_lane_slash_branch_clears_the_item(self):
+        self.publish(sessions=[], pulls=[{"number": 7, "title": "Lane x", "branch": "lane/x"}],
+                     items=[self.item(12, status="open", lane="x"),
+                            self.item(13, status="open", lane="y")])  # control: lane y has no work
+        page, out = self.build_from_main("--live", str(self.live), expect=(0, 1))
+        stalled = self.stalled_block(page)
+        self.assertIsNotNone(stalled["items"], "the live read is known, so the items list is a list")
+        self.assertEqual(stalled["items"], [{"n": 13, "lane": "y"}], "an open pull on lane/x clears item 12")
+        self.assertEqual(self.item_lines(out), ["stalled step: item 13 (lane y: re-route, close or resume)"])
+        self.assertEqual(self.code, 1, "a stalled item must exit 1")
+
+    def test_null_lane_reads_the_items_known_and_is_never_stalled(self):
+        self.publish(sessions=[], items=[self.item(12, status="open", lane=None)])
+        page, out = self.build_from_main("--live", str(self.live), expect=(0,))
+        stalled = self.stalled_block(page)
+        self.assertIsNotNone(stalled["items"], "a null lane is a known answer, so the items list is a list")
+        self.assertEqual(stalled["items"], [], "a null lane names no lane, so item 12 is not stalled")
+        self.assertNotRegex(out, r"(?m)^stalled step: items unknown \(", "a null lane must not read the items unknown")
+        self.assertEqual(self.code, 0, "a known read with no stalled item exits 0")
 
 
 class PageRulings(UpkeepFixture):
@@ -842,10 +1163,6 @@ class PageRulings(UpkeepFixture):
     ROW = "page rulings not on their step"
     CITE = "Ruling (page item 9): keep"
     UNKNOWN = r"unknown \((?:[^()]|\([^()]*\))*\)"  # one entry, with at most one level of parentheses inside
-
-    def item(self, n, home="c153", status="closed"):
-        """One row of the --live file's items list, as the publisher copies it from the waiting page."""
-        return {"n": n, "status": status, "home": home}
 
     def rulings(self, out):
         return self.row(out, self.ROW)
@@ -1199,29 +1516,10 @@ class FeelRows(UpkeepFixture):
         "list": ["simulator", "2026-11-01T11:44:00-06:00"],
     }
 
-    def land(self, sid, pr, **fields):
-        """Write the step on the record branch, then land it on main as a merged PR's commit with a Step: trailer.
-        The step is doing unless the case says otherwise."""
-        fields.setdefault("status", "doing")
-        git(self.repo, "checkout", "-q", "roadmap")
-        self.commit_step(sid, **fields)
-        self.on_main()
-        (self.repo / ("landed-%s-%d.txt" % (sid, pr))).write_text("x", encoding="utf-8")
-        git(self.repo, "add", "-A")
-        git(self.repo, "commit", "-q", "-m", "landed (#%d)\n\nStep: %s" % (pr, sid))
-
-    def land_all(self, specs, first_pr):
-        """Land each step in specs ({step id: fields}), one PR each from first_pr. Returns {step id: PR number}."""
-        prs = {}
-        for pr, (sid, fields) in enumerate(specs.items(), start=first_pr):
-            self.land(sid, pr, **fields)
-            prs[sid] = pr
-        return prs
-
-    def build_live(self):
+    def build_live(self, expect=(0, None)):
         """(page, out) of a build from main, with a live file that lists no sessions."""
         self.publish(sessions=[])
-        return self.build_from_main("--live", str(self.live))
+        return self.build_from_main("--live", str(self.live), expect=expect)
 
     def test_landed_feel_fix_without_a_check_is_listed_in_the_device_row(self):
         self.land("c1", 12, feel=True)
@@ -1245,7 +1543,7 @@ class FeelRows(UpkeepFixture):
     def test_landed_feel_fix_with_a_valid_check_reads_the_try_it_suffix(self):
         self.land_all({"sim": {"feel": True, "deviceCheck": self.CHECK},
                        "dev": {"feel": True, "deviceCheck": dict(self.CHECK, how="device")}}, 12)
-        _, out = self.build_live()
+        _, out = self.build_live(expect=(1,))
         count, detail = self.row(out, self.TRIAGE)
         self.assertEqual((count, self.entries(detail)),
                          (2, ["dev (#13; open a try-it item)", "sim (#12; open a try-it item)"]))
@@ -1262,7 +1560,7 @@ class FeelRows(UpkeepFixture):
 
     def test_absent_false_or_null_is_not_a_feel_fix(self):
         prs = self.land_all(self.NOT_FEEL, 30)
-        _, out = self.build_live()
+        _, out = self.build_live(expect=(1,))
         self.assertEqual(self.row(out, self.DEVICE), (0, ""))
         want = sorted("%s (#%d)" % (sid, pr) for sid, pr in prs.items())
         count, detail = self.row(out, self.TRIAGE)
@@ -1285,18 +1583,18 @@ class FeelRows(UpkeepFixture):
         self.land("c1", 12, feel=True)  # doing, no check: the device row lists it instead
         self.land("c2", 13, order=2)  # control: a plain landed step is still listed
         self.land("c3", 14, order=3, status="active", feel=True)  # active counts the same as doing
-        _, out = self.build_live()
+        _, out = self.build_live(expect=(1,))
         self.assertEqual(self.row(out, self.UNLANED), (1, "c2 (set to done: landed in #13)"))
 
     def test_landed_feel_fix_with_a_valid_check_is_still_listed_as_set_to_done(self):
         self.land("c1", 12, feel=True, deviceCheck=self.CHECK)
-        _, out = self.build_live()
+        _, out = self.build_live(expect=(1,))
         self.assertEqual(self.row(out, self.UNLANED), (1, "c1 (set to done: landed in #12)"))
 
     def test_feel_fix_not_yet_landed_still_reads_set_to_todo(self):
         git(self.repo, "checkout", "-q", "roadmap")
         self.commit_step("c1", status="doing", feel=True)
-        _, out = self.build_live()
+        _, out = self.build_live(expect=(1,))
         self.assertEqual(self.row(out, self.UNLANED), (1, "c1 (set to todo)"))
 
 
