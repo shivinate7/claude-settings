@@ -1,0 +1,36 @@
+{
+  "added": "2026-11-07T19:10:00Z",
+  "context": "Goal: reviews end, and a small fix stays cheap.\nProblem (rule): rule roles-review-cap-three says a failed fix check starts a new lane at round 1. That also resets the three-round cap, so fail, fix, fail could loop forever, and a one-line slip costs a whole fresh review.\nBased on (read): CLAUDE.md rule roles-review-cap-three, its last sentence; incident #1420 (the Windows fix), 13:03 CST.\nDeparts from: main, where a failed fix check restarts at round 1 in a new lane \u2014 a counts it as the next round within the cap; c adds one more fix check.",
+  "home": "rule roles-review-cap-three (CLAUDE.md)",
+  "id": "review-fix-check-round",
+  "kind": "decision",
+  "n": 347,
+  "options": [
+    {
+      "gain": "The cap really caps, and a slip needs no new lane.",
+      "key": "a",
+      "label": "A failed fix check counts as the next review round, inside the three-round cap (recommended)",
+      "lose": "A slip uses up one of the three rounds."
+    },
+    {
+      "gain": "No rule change.",
+      "key": "b",
+      "label": "Keep it as it is",
+      "lose": "The cap can be dodged, and small slips are expensive."
+    },
+    {
+      "gain": "Cheapest for slips.",
+      "key": "c",
+      "label": "Allow one more fix check before any full round",
+      "lose": "Weaker: a second fix check reads only the fix."
+    }
+  ],
+  "owner": "coordinator",
+  "pick": "a",
+  "rank": 2,
+  "ref": "claude-settings #1420",
+  "short": "Failed fix check: next round, or start over?",
+  "status": "open",
+  "title": "Should a failed fix check count as the next review round, instead of starting over at round 1?",
+  "why": "You asked in chat at 13:07 CST: \"is it a good idea that i have it built this way that it resets the run or nah\"."
+}
