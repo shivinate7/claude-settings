@@ -2264,6 +2264,11 @@ def unknown_counts(out, numbers):
     return {n: sum("%s:%d: " % (NOTES, n) in line for line in unknown_lines(out)) for n in numbers}
 
 
+def value_file(name, literal):
+    """A Python file that binds `name` to the literal text `literal` at module level, beside one def the check keeps."""
+    return "%s = %s\n\n\ndef keep():\n    return 1\n" % (name, literal)
+
+
 class ValueCiteTests(StaleCase):
     """STALE008 (decision stale-cites-at-merge): a Python value cite `file.py: NAME = literal` in backticks quotes the
     value the range changed or removed, or a line the range adds does not match the value at head. A JavaScript cite
@@ -2660,6 +2665,90 @@ class ValueCiteTests(StaleCase):
         flagged = {(path, line) for path, line, _, _ in parse(out)}
         loud = [row["cite"] for row, line in silent if (NOTES, line) in flagged]
         self.assertEqual(loud, [], "a silent parity row must not be flagged:\n%s" % out)
+
+    # Type and set cites. A value is compared by value, a boolean is no number, and a set cite pins no member order.
+    # py-facts reads a set as a sorted list, so a set cite compares to it as a set.
+
+    def added_cite_range(self, code, cite):
+        """A Markdown-only range: CONFIG holds `code` on main and on topic, and the topic adds one line on NOTES
+        line 3 that cites `cite`. No literal changes, so the check judges the added line alone."""
+        rng = self.value_range({CONFIG: code, NOTES: "# Notes\n\n"}, {NOTES: cite_page([cite])})
+        self.assertEqual(git(rng.repo, "diff", "--name-only", rng.base, rng.head), NOTES)  # scope: the range changes Markdown only
+        return rng
+
+    def assert_cite_flagged(self, rng, cause):
+        """Exactly one STALE008 finding, on NOTES line 3, and exit 1. A failure names `cause`."""
+        rc, out = self.run_check(rng)
+        self.assertEqual([(p, n, c) for p, n, c, _ in parse(out)], [(NOTES, 3, "STALE008")], "%s\n%s" % (cause, out))
+        self.assertEqual(rc, 1, out)
+
+    def assert_cite_matches(self, rng, cause):
+        """No finding and exit 0. A failure names `cause`."""
+        rc, out = self.run_check(rng)
+        self.assertEqual(parse(out), [], "%s\n%s" % (cause, out))
+        self.assertEqual(rc, 0, out)
+
+    def test_an_added_number_cite_of_a_true_value_is_flagged_on_its_line(self):
+        self.assertIs(module_value(value_file("LIMIT", "True"), "LIMIT"), True)  # scope: the code binds LIMIT to True
+        self.assertIs(type(json.loads("1")), int)  # scope: the cite reads as the number 1
+        self.assert_cite_flagged(self.added_cite_range(value_file("LIMIT", "True"), "hooks/config.py: LIMIT = 1"),
+                                 "the cite 1 matched the value True: a boolean is no number, so the cite must match its type")
+
+    def test_an_added_boolean_cite_of_a_number_value_is_flagged_on_its_line(self):
+        self.assertIs(type(module_value(value_file("LIMIT", "1"), "LIMIT")), int)  # scope: the code binds LIMIT to the int 1
+        self.assertIs(json.loads("true"), True)  # scope: the cite reads as the boolean true
+        self.assert_cite_flagged(self.added_cite_range(value_file("LIMIT", "1"), "hooks/config.py: LIMIT = true"),
+                                 "the cite true matched the value 1: a boolean is no number, so the cite must match its type")
+
+    def test_an_added_int_cite_of_an_int_value_passes(self):
+        self.assertIs(type(module_value(value_file("LIMIT", "1"), "LIMIT")), int)  # scope: the code binds LIMIT to an int
+        self.assertIs(type(json.loads("1")), int)  # scope: the cite is an int too
+        self.assert_cite_matches(self.added_cite_range(value_file("LIMIT", "1"), "hooks/config.py: LIMIT = 1"),
+                                 "the int cite 1 must match the int value 1")
+
+    def test_an_added_float_cite_of_a_float_value_passes(self):
+        self.assertIs(type(module_value(value_file("LIMIT", "1.0"), "LIMIT")), float)  # scope: the code binds LIMIT to a float
+        self.assertIs(type(json.loads("1.0")), float)  # scope: the cite is a float too
+        self.assert_cite_matches(self.added_cite_range(value_file("LIMIT", "1.0"), "hooks/config.py: LIMIT = 1.0"),
+                                 "the float cite 1.0 must match the float value 1.0")
+
+    def test_an_added_float_cite_of_an_int_value_is_flagged_on_its_line(self):
+        self.assertIs(type(module_value(value_file("LIMIT", "1"), "LIMIT")), int)  # scope: the code binds LIMIT to the int 1
+        self.assertIs(type(json.loads("1.0")), float)  # scope: the cite reads as the float 1.0
+        self.assert_cite_flagged(self.added_cite_range(value_file("LIMIT", "1"), "hooks/config.py: LIMIT = 1.0"),
+                                 "the float cite 1.0 matched the int value 1: the cite must match the type too")
+
+    def test_an_added_int_cite_of_a_float_value_is_flagged_on_its_line(self):
+        self.assertIs(type(module_value(value_file("LIMIT", "1.0"), "LIMIT")), float)  # scope: the code binds LIMIT to the float 1.0
+        self.assertIs(type(json.loads("1")), int)  # scope: the cite reads as the int 1
+        self.assert_cite_flagged(self.added_cite_range(value_file("LIMIT", "1.0"), "hooks/config.py: LIMIT = 1"),
+                                 "the int cite 1 matched the float value 1.0: the cite must match the type too")
+
+    def test_an_added_cite_of_a_float_with_a_trailing_zero_passes(self):
+        self.assertEqual(module_value(value_file("RATE", "0.9"), "RATE"), 0.9)  # scope: the code binds RATE to 0.9
+        self.assertEqual(json.loads("0.90"), 0.9)  # scope: the cite 0.90 reads as the same float
+        self.assert_cite_matches(self.added_cite_range(value_file("RATE", "0.9"), "hooks/config.py: RATE = 0.90"),
+                                 "0.90 is the float 0.9, so the cite must pass: a value is compared by value, not by text")
+
+    def test_an_added_set_cite_matches_a_set_value_in_any_member_order(self):
+        self.assertEqual(module_value(value_file("TAGS", '{"a", "b"}'), "TAGS"), {"a", "b"})  # scope: the code binds TAGS to a set
+        self.assertRaises(ValueError, json.loads, '{"b", "a"}')  # scope: a set is no JSON literal, so the cite takes the set form
+        self.assert_cite_matches(self.added_cite_range(value_file("TAGS", '{"a", "b"}'), 'hooks/config.py: TAGS = {"b", "a"}'),
+                                 'the set {"b", "a"} has the members of {"a", "b"}, so it must pass in any member order')
+
+    def test_an_added_set_cite_with_a_wrong_member_is_flagged_on_its_line(self):
+        self.assertEqual(module_value(value_file("TAGS", '{"a", "b"}'), "TAGS"), {"a", "b"})  # scope: the code binds TAGS to a set
+        self.assert_cite_flagged(self.added_cite_range(value_file("TAGS", '{"a", "b"}'), 'hooks/config.py: TAGS = {"a", "c"}'),
+                                 'the set {"a", "c"} holds c, which the set {"a", "b"} lacks: the cite must be flagged')
+
+    def test_an_added_set_cite_of_single_quoted_members_is_flagged_as_no_json_literal(self):
+        self.assertEqual(module_value(value_file("TAGS", '{"a", "b"}'), "TAGS"), {"a", "b"})  # scope: the code binds TAGS to a set
+        self.assertRaises(ValueError, json.loads, "['a', 'b']")  # scope: single-quoted members are no JSON
+        rc, out = self.run_check(self.added_cite_range(value_file("TAGS", '{"a", "b"}'), "hooks/config.py: TAGS = {'a', 'b'}"))
+        found = parse(out)
+        self.assertEqual([(p, n, c) for p, n, c, _ in found], [(NOTES, 3, "STALE008")], out)
+        self.assertIn("no JSON literal", found[0][3], "a set cite that is no JSON literal must print that reason: %s" % found[0][3])
+        self.assertEqual(rc, 1, out)
 
 
 if __name__ == "__main__":
