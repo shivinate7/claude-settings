@@ -31,8 +31,9 @@
   "pick": "a",
   "rank": 3,
   "ref": "item 221; plan PR #1049 at 2a36de88",
+  "reply": "Moved off the page (your 316 note): the work is tracked in PR #1350 (lane grant-reaches-lanes-build).",
   "short": "Grant a lane's spawns from the coordinator",
-  "status": "open",
+  "status": "closed",
   "title": "Should a grant you type in the coordinator let a named lane start its agents for a set time?",
   "why": "It removes the retyping, and the time limit bounds what one grant covers."
 }

@@ -32,9 +32,9 @@
   "pick": "a",
   "rank": 3,
   "ref": "step page-check-at-publish; item 292",
-  "reply": "Yes, both (14:20 CST). Export always saves the copy, prints each bad item, and blocks the republish. A --check mode runs the same checks before any republish. Sent to lane page-check-at-publish; closes when it merges.",
+  "reply": "Moved off the page (your 316 note): the work is tracked at step page-check-at-publish.",
   "short": "Item checks at export",
-  "status": "open",
+  "status": "closed",
   "title": "When the page backup finds a bad item, should it still save the copy?",
   "why": "Your ask, 13:58 CST: a bad picture item should be refused before the page goes out, not found by you."
 }

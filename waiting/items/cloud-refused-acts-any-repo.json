@@ -38,8 +38,9 @@
   "pick": "a",
   "rank": 19,
   "ref": "lane one-lane-one-step (PR #1136); .claude/CLAUDE.md, Standing grants",
+  "reply": "Moved off the page (your 316 note): the work is tracked at step one-lane-one-step.",
   "short": "Cloud-refused acts, any repo",
-  "status": "open",
+  "status": "closed",
   "title": "The cloud itself refuses two cleanup acts; should a session on your computer do them for claude-settings only, for every repo, or not at all?",
   "why": "Recommended: a. The refusals are real and still happen, so removing the grant sends every cleanup back to you."
 }

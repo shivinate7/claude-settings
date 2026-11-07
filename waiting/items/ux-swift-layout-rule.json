@@ -35,8 +35,9 @@
   "pick": "a",
   "rank": 3,
   "ref": "item 183 note; step ux-swift-same-intent-check",
+  "reply": "Done: the Swift layout rule landed in home #559 (12:20 CST), mailaudit #200 (12:23 CST) and degen #454 (17:58 CST, Nov 6).",
   "short": "Swift layout rule",
-  "status": "open",
+  "status": "closed",
   "title": "Swift layout rule: add a check and narrow it, file debts, or retire it?",
   "why": "Recommended: a. It keeps the intent you agreed to (the parent spaces its children) and drops the two demands that serve no one."
 }

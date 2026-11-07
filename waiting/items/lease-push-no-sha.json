@@ -31,8 +31,9 @@
   "pick": "b",
   "rank": 4,
   "ref": "items 262, 278; PR #1316; docs/debts/notes.md",
+  "reply": "Moved off the page (your 316 note): tracked in PR #1316.",
   "short": "Lease push: sha form only?",
-  "status": "open",
+  "status": "closed",
   "title": "Should a lane's own-branch force push have to name the commit it expects?",
   "why": "A session can always name the commit, so it should fit the line, not the other way round."
 }

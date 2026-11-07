@@ -30,8 +30,9 @@
   "pick": "a",
   "rank": 25,
   "ref": "deep audit 1102, q_max homes; coordinator message 2026-11-03 15:55 CST, oq-d017-review-style",
+  "reply": "Moved off the page (your 316 note): the work is tracked in q_max PR #1018.",
   "short": "Review style under PRs",
-  "status": "open",
+  "status": "closed",
   "title": "q_max: Reaffirm targeted review, new reason?",
   "why": "Recommended in the audit report (A)."
 }

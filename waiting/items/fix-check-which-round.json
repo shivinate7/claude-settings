@@ -30,8 +30,9 @@
   "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
   "rank": 3,
   "ref": "item 203 a; rule roles-review-cap-three; #1280",
+  "reply": "Moved off the page (your 316 note): tracked in decision hold-unsafe-after-round-3 and agents/reviewer.md.",
   "short": "fix check: after round 3 only?",
-  "status": "open",
+  "status": "closed",
   "title": "Does a fix check follow a FAIL in any review round, or only round 3?",
   "why": "Recommended: a. It matches your rule and the decision text, and keeps the Sonnet read on every guard change."
 }

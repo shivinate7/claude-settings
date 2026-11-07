@@ -31,9 +31,9 @@
   "pick": "b",
   "rank": 10,
   "ref": "Opus agent report via the coordinator, 2026-11-04 08:10 CST; degen debt batch-native-tests-manual; degen rule tests-once-per-batch",
-  "reply": "Your pick b is with the coordinator for a degen lane. The Mac run posts its own pass status on the exact commit, the UI tests run through sim-test, and the check narrows to Swift and Xcode commands. This item closes when that lane merges.",
+  "reply": "Moved off the page (your 316 note): the work is tracked at step child-guard-promotion.",
   "short": "degen native-run proof",
-  "status": "open",
+  "status": "closed",
   "title": "degen: how should the Mac prove its native (Swift) suite ran once per batch?",
   "why": "GitHub ties the pass to the exact commit, the open debt retires, and the UI tests finally run, with no paid CI minutes."
 }

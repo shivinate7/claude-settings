@@ -62,9 +62,9 @@
   ],
   "rank": 3,
   "ref": "step debate-coverage-audit; your ask ask-mw5b1v54gc",
-  "reply": "You're right about c. It just runs an existing check on a stronger model, and no new agent argues back, so it doesn't belong in this set. I've dropped it. Yes, there are more places: the audit looked only at hooks that call a model and at review. I've asked the coordinator for the full list of places where a verdict merges with no agent arguing back, and for one glossary word for that agent (step debate-glossary-word). Your a, b and d went to the coordinator.",
+  "reply": "Moved off the page (your 316 note): tracked as roadmap step debate-coverage-audit and the CLAUDE.md roles rules.",
   "short": "Independent pushback: which to adopt",
-  "status": "open",
+  "status": "closed",
   "title": "Which ways of adding an independent agent that argues back should we adopt?",
   "why": "Recommended: a, b and c, which cost little, then d. e adds a call to every round of every guard PR."
 }

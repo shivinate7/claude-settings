@@ -30,8 +30,9 @@
   "pick": "a",
   "rank": 24,
   "ref": "deep audit 1102, q_max homes; coordinator message 2026-11-03 15:55 CST, oq-borderline-band-bulk-ok",
+  "reply": "Moved off the page (your 316 note): the work is tracked in q_max PR #1018.",
   "short": "Bulk approve at 80 to 83",
-  "status": "open",
+  "status": "closed",
   "title": "q_max: Make bulk approve look at the 80-83 band?",
   "why": "Recommended in the audit report (A)."
 }

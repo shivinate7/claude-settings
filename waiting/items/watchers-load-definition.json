@@ -38,9 +38,9 @@
   "pick": "b",
   "rank": 4,
   "ref": "PR #1349 (lane watchers-one-rule), docs/plans/align-watchers.md",
-  "reply": "Routed 15:31 CST to the coordinator: one shared load definition, filed as roadmap step one-load-definition. Closes when it merges.",
+  "reply": "Moved off the page (your 316 note): the work is tracked in PR #1369.",
   "short": "One load definition?",
-  "status": "open",
+  "status": "closed",
   "title": "The guard and sim-lease each define \"the machine is loaded\" their own way. Merge them into one?",
   "why": "Low value: two definitions of load can disagree, but each one states its own today."
 }

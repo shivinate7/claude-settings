@@ -44,9 +44,9 @@
   "pick": "a",
   "rank": 3,
   "ref": "item 284; PR #1323",
-  "reply": "Answered: Sonnet for all three refuters, for now (your note, 13:59 CST). Sent to the coordinator to write into record debate-model-tiers, PR #1323. Closes when that merges. On your 15:29 CST note, that an answered card like this should fold and show it was taken: agreed, and that is step page-answered-sink, which I asked the coordinator at 15:37 CST to start next.",
+  "reply": "Moved off the page (your 316 note): tracked in PR #1323 (plan record debate-model-tiers).",
   "short": "Refuter models",
-  "status": "open",
+  "status": "closed",
   "title": "Which refuters run Opus?",
   "why": "Recommended a: the two verdicts nobody else reads get the strongest read, at the lowest extra cost."
 }

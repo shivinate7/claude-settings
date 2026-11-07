@@ -37,9 +37,9 @@
   "pick": "a",
   "rank": 21,
   "ref": "decision grant-reaches-lanes (PR #1049), plan section 3, Design A step 5; page item 152",
-  "reply": "Sent to the coordinator to check whether the lane still needs the lines. If it does, this turns into a task with the exact line to type. If not, it closes.",
+  "reply": "Moved off the page (your 316 note): the work is tracked at step grant-reaches-lanes.",
   "short": "Grant test: web and phone",
-  "status": "open",
+  "status": "closed",
   "title": "Type two test lines, one from the claude.ai web app and one from the phone app, so grants work from every client?",
   "why": "Two lines once, and grants then work wherever you type them."
 }

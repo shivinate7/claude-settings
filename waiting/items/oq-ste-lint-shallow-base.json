@@ -35,9 +35,9 @@
   "pick": "c",
   "rank": 2,
   "ref": "step ste-lint-diff-fail-closed; branch handoff/ste-lint-diff-fail-closed",
-  "reply": "Yes. The wider problem is that two rulings disagree on what a check does when it can't read its input. Decision ci-unknown-is-red says it fails. Line 18 of stale-cites-at-merge says it passes as \"unknown\". The coordinator settled this one case under the first ruling (fetch the full history, then fail), and that can be undone. The uniform fix is to make every check follow one rule for an unknown read. I've sent that to the coordinator as the real question. It comes back to you only if fixing it means rewriting your stale-cites-at-merge ruling.",
+  "reply": "Moved off the page (your 316 note): the work is tracked at lane ste-lint-diff-fail-closed.",
   "short": "Style lint, unreadable base",
-  "status": "open",
+  "status": "closed",
   "title": "Style lint: when it can't read the base commit, fail it, pass a shallow clone, or fetch the full history first?",
   "why": "Recommended: c. a is the default under ci-unknown-is-red, but c keeps child repos passing and still linted."
 }

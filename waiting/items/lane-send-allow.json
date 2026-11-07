@@ -32,9 +32,9 @@
   "pick": "a",
   "rank": 3,
   "ref": "item 287 scan; step auto-mode-refusal-survey",
-  "reply": "Your pick a needs a settings.json edit, which cloud sessions cannot make. Item 307 holds the exact prompt to paste into a Mac session. Your judge idea is roadmap step judge-send-message-refusals. Closes when the allow line merges.",
+  "reply": "Moved off the page (your 316 note): tracked as roadmap step judge-send-message-refusals (PR #1380).",
   "short": "Lane send_message allow",
-  "status": "open",
+  "status": "closed",
   "title": "Should lane sessions be allowed to message other sessions without an auto-mode check?",
   "why": "A refused hand-off message stalls the lane's work until someone moves it."
 }

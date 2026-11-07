@@ -38,8 +38,9 @@
   "pick": "a",
   "rank": 17,
   "ref": "step artifact-pages-other-account; lane artifact-lane (session_013NEJL4UZnwcbTxUfsYRPJa)",
+  "reply": "Moved off the page (your 316 note): the work is tracked at artifact-lane.",
   "short": "Pages in another account",
-  "status": "open",
+  "status": "closed",
   "title": "8 roadmap-linked pages live in your other Claude account, and their content is not in git: export them, or let them go?",
   "why": "Recommended: c. One export run while you are signed in to the other account puts all 8 in git."
 }

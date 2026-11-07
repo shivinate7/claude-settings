@@ -36,9 +36,9 @@
   "owner": "auto-mode-middle-ground lane (session_013NEJL1Cejen3sLS5Yn3sA6)",
   "rank": 3,
   "ref": "step auto-mode-middle-ground; your ask ask-mw5av97rcg",
-  "reply": "You're right, they don't go against it: that ruling is about one repo getting an exception, and these lines work the same in every repo. The mark was wrong, and step widening-rule-guideline (in a lane now) narrows it and softens \"never\".\n\nReplying: you're right that a question's reply has no reply box (asks have one since #1248). Filed as step item-reply-back. Until then, editing your answer works: I read the newest version.\n\nAre these all? PARTIAL answer, 13:16 CST, from the coordinator's scan of about 131 of 360 cloud sessions since Nov 2 (so the counts are floors). Auto mode refused 9 acts out of about 2,623 it judged (0.3%). The other 74 refusals came from your own hooks, not auto mode.\n- Recurs: only the force-push to a lane branch (4 refusals in 4 sessions). It hit the lease with a sha and --force-if-includes too, not only the bare lease. The lease line in PR #1316 is the fix, and step lease-sha-form-hint checks it covers both forms.\n- Seen once each: deleting a remote branch by refspec, an edit of .claude/CLAUDE.md, a session message that carried batch heads, a brief that pushes an archive probe branch, and a git rev-parse next to a refused push (likely a false alarm).\nNo new allow line is proposed, because none recurs except the push. Item 287 asks whether to finish the scan.",
+  "reply": "Moved off the page (your 316 note): the work is tracked in PR #1316 (decision auto-mode-owner-acts).",
   "short": "Auto-mode allow lines",
-  "status": "open",
+  "status": "closed",
   "title": "Which auto-mode allow lines should land?",
   "why": "No recommendation: each line widens what auto mode allows, so it's your call alone."
 }

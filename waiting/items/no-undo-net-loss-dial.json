@@ -31,8 +31,9 @@
   "pick": "b",
   "rank": 20,
   "ref": "decision no-undo-lane-commits (PR #1099); one Sonnet agent's verdict via lane lane-undo-check, 08:14 CST; page item 167",
+  "reply": "Moved off the page (your 316 note): the work is tracked in PR #1099 (decision silent-undo-check-design).",
   "short": "No-undo: past 6 lines, or any loss",
-  "status": "open",
+  "status": "closed",
   "title": "No-undo check: flag a lane's test-line loss past 6 lines, or flag any loss with one reason line?",
   "why": "Recommended: b, the check as built today. 6 is main's block size, not a measured tolerance, and a weakened test sat in the 1 to 6 line band."
 }

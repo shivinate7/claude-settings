@@ -39,9 +39,9 @@
   "pick": "a",
   "rank": 5,
   "ref": "deep audit 1102, report docs/plans/deep-audit/report.md on audit/deep-1102 (6b6a41f3), table 'claude-settings: homes', row stall-watch-timer-rule",
-  "reply": "The sub-questions were items 248 to 250. 249 (your pick b) and 250 (your pick a) were answered on Nov 4. Item 248 is still open, so it now sits beside this one in a group.",
+  "reply": "Moved off the page (your 316 note): tracked as roadmap step stall-watch.",
   "short": "watchers: one rule",
-  "status": "open",
+  "status": "closed",
   "title": "Which one rule should every watch, wake, sweep, reap and log follow?",
   "why": "Recommended: a. One rule covers every mechanism, and the three that break it become named, costed and tested instead of silent."
 }

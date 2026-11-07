@@ -30,8 +30,9 @@
   "pick": "a",
   "rank": 1,
   "ref": "item 275; step unknown-read-one-rule",
+  "reply": "Moved off the page (your 316 note): the work is tracked at lane unknown-read-one-rule (decision ci-unknown-is-red).",
   "short": "One rule for an unknown read",
-  "status": "open",
+  "status": "closed",
   "title": "Should every check fail in CI when it can't read its input, and should your stale-cites-at-merge ruling be rewritten to match?",
   "why": "Recommended: a. One rule ends the conflict, and the full-history fetch keeps what line 18 protected."
 }

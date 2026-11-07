@@ -1,0 +1,30 @@
+{
+  "added": "2026-11-06T23:59:00Z",
+  "context": "Goal: no page item is lost if a page goes.\nProblem (cannot undo): mailaudit's .claude/layout-extras.json names waiting page FBKSLCBLJsvfNGeePvDz13. This account gets \"artifact not found\" for it, and no copy was ever saved to mailaudit's roadmap branch, so its items can't be copied from here.\nBased on (read): lane mailaudit-waiting-copy, Artifact read at 17:57 CST.\nDeparts from: main names a page no cloud session here can open \u2014 the repo gets a new page, or points at the page as the account that can open it holds it.\nIf a: open the link. If it opens, tell triage which account you used; a session on that account then saves a copy. If it doesn't open, mailaudit makes a new page.\nMeanwhile: mailaudit's layout check stays red on main; nothing waits on it.\nLink: https://claude.ai/artifact/FBKSLCBLJsvfNGeePvDz13",
+  "home": "mailaudit .claude/layout-extras.json; decision waiting-data-in-repo",
+  "id": "mailaudit-old-page-copy",
+  "kind": "decision",
+  "n": 323,
+  "options": [
+    {
+      "gain": "No item is lost, if any exist.",
+      "key": "a",
+      "label": "I'll open the old page first",
+      "lose": "One click for you."
+    },
+    {
+      "gain": "Nothing for you to do.",
+      "key": "b",
+      "label": "Make a new mailaudit page now",
+      "lose": "Any items on the old page are lost."
+    }
+  ],
+  "owner": "coordinator",
+  "pick": "a",
+  "rank": 3,
+  "ref": "lane mailaudit-waiting-copy",
+  "short": "mailaudit's old page: open it or replace it?",
+  "status": "open",
+  "title": "mailaudit points at a waiting page this account can't open. Check it, or replace it?",
+  "why": "If that page holds items, they have no copy anywhere, so replacing it would lose them."
+}

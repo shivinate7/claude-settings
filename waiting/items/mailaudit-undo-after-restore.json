@@ -32,9 +32,9 @@
   "pick": "a",
   "rank": 3,
   "ref": "lane mailaudit-recent-log; item 288",
-  "reply": "Built in mailaudit #208 (lane mailaudit-recent-log, 17:10 CST). It stores no restore time: the phone app restores without a Recent log, so a stored time would miss those restores. The rule instead: after a restore, an old row can be undone only while the card still holds the count that row left. Test R4.5 shows a restore to 1 makes the 1-to-2 row read NOTHING TO UNDO. It failed on the first build and passes on #208. This closes when #208 merges.",
+  "reply": "Done: mailaudit #208 merged 18:27 CST Nov 6. After a restore, an old Recent row can be undone only while the card still holds the count that row left.",
   "short": "Undo after a restore",
-  "status": "open",
+  "status": "closed",
   "title": "mailaudit: after a restore, an undo can remove a check-in the restore brought back. Which test decides a Recent row is still live?",
   "why": "An undo that removes restored data loses a check-in you meant to keep."
 }

@@ -48,8 +48,9 @@
   "owner": "lane child-claude-md-dedupe (session_013NEJL3kSVHoSKgF2rJbbB4)",
   "rank": 3,
   "ref": "decision plain-prose-lint; draft PR #1105; child repos q_max, banchi, degen, joyous",
+  "reply": "Moved off the page (your 316 note): the work is tracked at step child-claude-md-dedupe.",
   "short": "STE in child repos",
-  "status": "open",
+  "status": "closed",
   "title": "Should the other repos' CLAUDE.md files also drop Simplified Technical English?",
   "why": "Your 13:22 CST ruling said \"everywhere\". q_max, banchi, degen and joyous still name STE in their own CLAUDE.md files, and changing them is work in other repos."
 }

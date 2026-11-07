@@ -1,0 +1,30 @@
+{
+  "added": "2026-11-06T23:54:00Z",
+  "context": "Goal: q_max's browser checks run fast, and the records say what CI really does.\nProblem (rule): q_max #1040 splits the browser suite into 7 groups that run at once: 21 min 35 s, against 3 h 15 min before (runs 42312090233 and 42274824088). It rewrites one sentence of D-542 (the browser tier runs on your dispatch): the 240-minute limit becomes the 7-group split. q_max's CLAUDE.md needs your look at a rewritten entry before it merges.\nBased on (measured): the two CI runs above.\nDeparts from: q_max main, D-542 states a 240-minute bound \u2014 changes to the 7-group split.\nAlso: 3 checks fail only in the split, probably from state shared across groups. They are listed in q_max specs/todo.md.",
+  "home": "q_max PR #1040",
+  "id": "qmax-1040-d542-edit",
+  "kind": "decision",
+  "n": 321,
+  "options": [
+    {
+      "gain": "The record matches the 21-minute CI.",
+      "key": "a",
+      "label": "Yes, OK the edit",
+      "lose": "Nothing."
+    },
+    {
+      "gain": "None.",
+      "key": "b",
+      "label": "No, keep the old sentence",
+      "lose": "The record states a time limit CI no longer has."
+    }
+  ],
+  "owner": "lane qmax-browser-shard",
+  "pick": "a",
+  "rank": 2,
+  "ref": "q_max #1040; D-542",
+  "short": "q_max #1040: OK the D-542 edit?",
+  "status": "open",
+  "title": "OK the one-sentence D-542 edit in q_max #1040?",
+  "why": "q_max's rules need your one look at any rewritten decision entry."
+}

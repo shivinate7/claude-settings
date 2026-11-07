@@ -31,8 +31,9 @@
   "pick": "a",
   "rank": 3,
   "ref": "mailaudit debt recent-log-unbuilt; items 193, 280; mailaudit #202",
+  "reply": "Moved off the page (your 316 note): the work is tracked at mailaudit debt recent-log-unbuilt.",
   "short": "mailaudit Recent log: Opus lane?",
-  "status": "open",
+  "status": "closed",
   "title": "Start the mailaudit Recent log build as an Opus lane?",
   "why": "It is the last open piece of item 193, and nothing blocks it now."
 }

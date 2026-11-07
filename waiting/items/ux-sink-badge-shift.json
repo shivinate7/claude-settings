@@ -24,9 +24,9 @@
   "pick": "a",
   "rank": 3,
   "ref": "item 313; PR #1375; PR #1374",
-  "reply": "Your a is with lane ux-order-rule-scope (17:20 CST): badge and header shifts from a sink are exempt too. This closes when its PR merges.",
+  "reply": "Moved off the page (your 316 note): your a is with lane ux-order-rule-scope (PR #1375).",
   "short": "Card sinks: may a badge shift?",
-  "status": "open",
+  "status": "closed",
   "title": "When a sent card sinks, may a count badge or section header shift too?",
   "why": "Your 313 a let rows move when a card sinks. A badge or header that shifts as a result still fails the rule."
 }

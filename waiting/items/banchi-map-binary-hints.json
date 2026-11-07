@@ -36,9 +36,9 @@
   "pick": "a",
   "rank": 3,
   "ref": "item 209 a; banchi #1063, #1064",
-  "reply": "It isn't limited to those. They were only examples: they're the kinds of file banchi's 8 lost hints point at (icons, the web manifest, an onnx model, the STE licence). Option a covers every file a decision or debt names, whatever its type: images, data, models, licences, config, anything. b would fix only banchi's 8. c leaves the gap.",
+  "reply": "Moved off the page (your 316 note): tracked in banchi docs/debts notes and skill plain-english-map.",
   "short": "map: files a record names",
-  "status": "open",
+  "status": "closed",
   "title": "Should the shared map list every file a decision or debt names, not only code files?",
   "why": "Recommended: a. It is the fix your note asks for, in the shared tool, so every repo gets it."
 }

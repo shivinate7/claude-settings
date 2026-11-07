@@ -31,8 +31,9 @@
   "pick": "a",
   "rank": 22,
   "ref": "deep audit 1102, q_max homes; coordinator message 2026-11-03 15:55 CST, oq-partly-replaced-entry",
+  "reply": "Moved off the page (your 316 note): the work is tracked in q_max PR #1014.",
   "short": "Partly replaced entries",
-  "status": "open",
+  "status": "closed",
   "title": "q_max: Rule 6, fold a partly replaced entry?",
   "why": "Recommended in the audit report (A)."
 }

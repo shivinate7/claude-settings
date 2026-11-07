@@ -39,8 +39,9 @@
   "pick": "a",
   "rank": 2,
   "ref": "item 180; step watcher-builtin-hook-survey; Opus audit 08:43 CST Nov 5 (coordinator)",
+  "reply": "Moved off the page (your 316 note): tracked as roadmap step watcher-builtin-hook-survey.",
   "short": "model-call hooks: keep or measure",
-  "status": "open",
+  "status": "closed",
   "title": "None of the six model-call hooks can move to a built-in prompt hook today. What now?",
   "why": "Recommended: b. The audit found no safe move today, and b keeps every check while it records the cost and the triggers that re-open the move."
 }

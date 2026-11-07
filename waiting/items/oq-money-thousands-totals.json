@@ -31,8 +31,9 @@
   "pick": "a",
   "rank": 21,
   "ref": "deep audit 1102, q_max homes; coordinator message 2026-11-03 15:55 CST, oq-money-thousands-totals",
+  "reply": "Moved off the page (your 316 note): the work is tracked at q_max lane qmax-totals-in-thousands.",
   "short": "Totals: $1,235K or $1,234,567?",
-  "status": "open",
+  "status": "closed",
   "title": "q_max: Show totals as $1,235K or as $1,234,567?",
   "why": "It follows your ruling on every screen."
 }

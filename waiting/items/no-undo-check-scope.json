@@ -48,8 +48,9 @@
   "owner": "lane lane-undo-check (session_013NEJL2Yi1iyx98kfwkRJxW)",
   "rank": 2,
   "ref": "step no-undo-lane-commits; decision silent-undo-check-design; inbox fb-1041-1",
+  "reply": "Moved off the page (your 316 note): the work is tracked in PR #1099 (lane lane-undo-check).",
   "short": "how wide the no-undo check reads",
-  "status": "open",
+  "status": "closed",
   "title": "Should the no-undo check flag any deleted line a lane added, or only the two shapes real undos take?",
   "why": "Your 10:41 CST words were: a test case or a line that an earlier lane commit added is deleted, refuse it. Read that way, the check goes red on 22 of the last 31 merged batches (84 findings). Most are not undos: 27 are the restore commits themselves, 13 are deliberate deletes of debt or record files, and the rest mix real undos with second-round fixes a reviewer asked for. A check that is red on most batches gets scrolled past."
 }

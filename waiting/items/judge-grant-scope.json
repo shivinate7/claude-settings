@@ -38,8 +38,9 @@
   "pick": "a",
   "rank": 3,
   "ref": "step prose-governance-workflow; hooks/override.py",
+  "reply": "Moved off the page (your 316 note): the work is tracked at step prose-governance-workflow.",
   "short": "Narrow the judge Opus grant",
-  "status": "open",
+  "status": "closed",
   "title": "Your Opus grant for workflow judges also covers every reviewer on that step. Narrow it?",
   "why": "Recommended a: the grant then means what you said, and other reviewers stay on Sonnet."
 }

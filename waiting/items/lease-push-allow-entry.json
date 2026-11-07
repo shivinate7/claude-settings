@@ -21,9 +21,9 @@
   "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
   "rank": 2,
   "ref": "your picks 239 a and 257 c (Nov 5 07:44-07:49 CST)",
-  "reply": "Done by you: your local session opened draft PR #1307. PR #1316 carries that commit unchanged, with two more allow lines and tests, and replaces #1307. Nothing more to do; this closes when #1316 merges.",
+  "reply": "Moved off the page (your 316 note): your line is in PR #1316, which replaces your #1307.",
   "short": "settings: own-branch lease push",
-  "status": "open",
+  "status": "closed",
   "steps": [
     "Open the settings.json edit link below.",
     "Under \"autoMode\" \u2192 \"allow\", find the \"Archived Branch Delete\" entry and paste the line right after it.",

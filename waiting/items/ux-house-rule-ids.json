@@ -103,9 +103,9 @@
   ],
   "rank": 7,
   "ref": "deep audit 1102, report docs/plans/deep-audit/report.md on audit/deep-1102 (6b6a41f3), table 'claude-settings: homes', row ux-house-rule-ids",
-  "reply": "What b protects: when you press something, nothing else on the screen moves or resizes. For example, a \"Copy\" button that turns into \"Copied\" keeps its width, and text that loads late doesn't push a button out from under your finger.\n\nIf b isn't a house rule: nothing built today breaks, because the page's Copy button and other screens already follow it. What goes is the check. Reviewers would no longer have to catch a screen where a press shifts things, so a later change could bring back jumps and mis-taps without anyone flagging it.\n\nIf you want b too, add it to your picks; otherwise the eight you picked go ahead.",
+  "reply": "Moved off the page (your 316 note): tracked as roadmap step ux-house-rules.",
   "short": "UX house rules: the last 12",
-  "status": "open",
+  "status": "closed",
   "title": "Which of these 12 UX rules should also be house rules?",
   "why": "Recommended: the first three. Each stops a harm a person feels (a broken screen, a mis-tap, lost typing). The rest stay as guidance until a screen shows the harm."
 }

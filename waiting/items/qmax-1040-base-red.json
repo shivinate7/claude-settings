@@ -1,0 +1,30 @@
+{
+  "added": "2026-11-06T23:55:00Z",
+  "context": "Goal: q_max browser runs are cheap enough to prove fixes.\nProblem (rule): q_max main's browser suite has been red on every run since Nov 4 (about 20 failures; run 42299820546). The merge tool refuses every q_max merge without your typed --base-red-ok. Lane qmax-browser-main-red has started on the red.\nBased on (measured): #1040's split run takes 21 min 35 s, against 1 h 43 min on main.\nDeparts from: main runs browser checks as one 1 h 43 min job \u2014 #1040 lands first, so the fix lane's proof runs take about 22 min.\nIf a: after #1040's review round 2 passes and item 321 is answered, type --base-red-ok once in batch runner 9's chat, for #1040 only.\nMeanwhile: runner 9 holds all q_max merges.",
+  "home": "q_max #1040; lane qmax-browser-main-red",
+  "id": "qmax-1040-base-red",
+  "kind": "decision",
+  "n": 322,
+  "options": [
+    {
+      "gain": "Every fix proof run is about 5 times faster.",
+      "key": "a",
+      "label": "Merge #1040 onto red main, once",
+      "lose": "One merge onto red main. The red is old, and #1040 does not cause it."
+    },
+    {
+      "gain": "No merge onto red.",
+      "key": "b",
+      "label": "Wait for main to go green first",
+      "lose": "The fix lane proves on 1 h 43 min runs."
+    }
+  ],
+  "owner": "coordinator",
+  "pick": "a",
+  "rank": 2,
+  "ref": "q_max #1040; item 321",
+  "short": "q_max #1040 onto red main?",
+  "status": "open",
+  "title": "Merge q_max #1040 (faster browser checks) before main's old red is fixed?",
+  "why": "q_max main's browser checks have been red since Nov 4, so every q_max merge needs your typed --base-red-ok."
+}

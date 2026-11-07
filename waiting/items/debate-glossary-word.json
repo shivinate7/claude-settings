@@ -38,8 +38,9 @@
   "pick": "a",
   "rank": 4,
   "ref": "item 279; step debate-glossary-word",
+  "reply": "Moved off the page (your 316 note): tracked as roadmap step debate-glossary-word.",
   "short": "Word for the agent that argues back",
-  "status": "open",
+  "status": "closed",
   "title": "What should we call an agent whose job is to argue against another agent's verdict?",
   "why": "Plain, and the lanes already use it, so it changes nothing."
 }

@@ -31,9 +31,9 @@
   "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB); also lane mutate-guard-cap (session_013NEJKysSpND2mEqWBs5KQs)",
   "rank": 2,
   "ref": "note classifier-refuses-lease-push; closed draft #1191; PR 1210 replaced by 1211; decision stale-safe-force-push",
-  "reply": "Your line is in PR #1316, which replaces your draft #1307. This closes when #1316 merges.",
+  "reply": "Moved off the page (your 316 note): your line is in PR #1316, which replaces your #1307.",
   "short": "Lease push to own lane branch",
-  "status": "open",
+  "status": "closed",
   "title": "Auto mode refuses a lane's force push to its own branch, so each fix leaves a stale branch. Allow that one form?",
   "why": "Recommended: b, by your question-form rule: an allow-list entry counts as widening a shared tool, and a widening option is never the recommendation. Option a is the coordinator's reading: it only brings auto mode in line with stale-safe-force-push. Meanwhile lanes keep making a new branch for each fix."
 }

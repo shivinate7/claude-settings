@@ -52,9 +52,9 @@
   "pick": "a",
   "rank": 2,
   "ref": "record session-messages, section \"Reach between the cloud and the owner's computer\" (commit ddc0f83c); step session-messaging-plan; draft PR #1051",
-  "reply": "Routed 15:30 CST to lane session-messaging-plan: build the git mailbox, read at turn start. b (Mac doorbell) and c (local relay) stay possible later additions. Closes when the lane's PR merges.",
+  "reply": "Moved off the page (your 316 note): the work is tracked in PR #1371 and step session-mailbox-followups.",
   "short": "Replace session messages",
-  "status": "open",
+  "status": "closed",
   "title": "Item 153's mailbox page cannot reach your Mac. Which path should replace it?",
   "why": "One path for cloud and computer, nothing extra running, and a 12-message test on your Mac before any build."
 }

@@ -1,0 +1,24 @@
+{
+  "added": "2026-11-06T23:45:00Z",
+  "command": {
+    "mac": "cd ~\ngrep -h 'override 12h' ~/.claude/projects/*/3b588136*.jsonl | head -2 | cut -c1-1500",
+    "powershell": "cd $HOME\nGet-ChildItem $HOME\\.claude\\projects -Recurse -Filter '3b588136*.jsonl' | Get-Content | Select-String 'override 12h' | ForEach-Object { $_.Line.Substring(0, [Math]::Min(1500, $_.Line.Length)) } | Select-Object -First 2"
+  },
+  "context": "Goal: a typed override works even when the app puts a status block in front of it (your note, 17:38 CST).\nWhy you: the block text is only in session 3b588136's log, on your computer. No cloud session can read it.\nSteps: on that computer, paste the command below (PowerShell on Windows, Terminal on a Mac). Copy what it prints into the note here, then press Done. It prints only the start of the two messages that held 'override 12h'.",
+  "home": "step override-strips-status-block",
+  "id": "override-block-sample",
+  "kind": "task",
+  "lastAnswer": {
+    "at": "2026-11-06T23:44:50Z",
+    "note": "why do you need the text to fix this? the problem occurs in a uniform way and u dont need to see it for the fix do u"
+  },
+  "n": 320,
+  "owner": "coordinator",
+  "rank": 2,
+  "ref": "ask-mw5m8up8g8; step override-strips-status-block",
+  "reply": "You're right. No sample needed: the fix now accepts 'override 12h' when it is the last line of your message, whatever the app puts above it.",
+  "short": "Paste the start of your 'override 12h' prompt",
+  "status": "closed",
+  "title": "Run one command on the computer that ran local session 3b588136, and paste what it prints",
+  "why": "The override fix needs the exact shape of the app's 'Linked sessions now' block. It lives only in that computer's session log."
+}

@@ -32,9 +32,9 @@
   "pick": "a",
   "rank": 3,
   "ref": "lane mailaudit-recent-log; item 288",
-  "reply": "Confirmed on the first build (c7902c26): check, uncheck, check X, then undo the uncheck gave X=2; undoing the first check gave X=0. mailaudit #208 fixes both (lane mailaudit-recent-log, 17:10 CST): a reversed row reads NOTHING TO UNDO, and an undo that raises a count stops at the row's before-count. Tests R4.6, R4.7, R5.4 and R5.4a pin it, and 40,000 random runs found no double count. This closes when #208 merges.",
+  "reply": "Done: mailaudit #208 merged 18:27 CST Nov 6. A reversed row reads NOTHING TO UNDO, and an undo never raises a count past the row's before-count.",
   "short": "Undo in any order",
-  "status": "open",
+  "status": "closed",
   "title": "mailaudit: undoing Recent rows in any order can count a copy twice. Limit which rows can be undone?",
   "why": "A double count shows a copy as checked in when it is not."
 }

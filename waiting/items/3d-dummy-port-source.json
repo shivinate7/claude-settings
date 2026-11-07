@@ -29,8 +29,9 @@
   "pick": "a",
   "rank": 4,
   "ref": "item 130; step 3d-browser-dummy",
+  "reply": "Moved off the page (your 316 note): tracked as roadmap step 3d-browser-dummy.",
   "short": "3D test copy: which page",
-  "status": "open",
+  "status": "closed",
   "title": "Which page should the first 3D test copy port: this Cockpit page, or another one?",
   "why": "Recommended: a. It's a page you know, and the copy lives at its own URL, never the live page."
 }

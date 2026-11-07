@@ -54,9 +54,9 @@
   "owner": "runner 9 (session_013NEJKymmzw37seAr3Qq5nv)",
   "rank": 1,
   "ref": "q_max PRs #1011 and #1008; q_max browser runs 40740294267 and 41377928751",
-  "reply": "Correction 07:31 CST Nov 5: #1011 is NOT ready to merge, and nothing here waits on you. Your pick a stands: merge only after a green browser run on main. The run on main (41861801325) ended RED, and #1011 is 22 commits behind main and conflicts. Next: the red fix q_max #1029 (item 260 decides its shape), then a lane merges main into #1011, then a fresh browser run. This item closes when #1011 merges.",
+  "reply": "Moved off the page (your 316 note): q_max merges are held by batch runner 9 under rule git-never-merge-failing-ci; see items 321 and 322.",
   "short": "q_max #1011 batch",
-  "status": "open",
+  "status": "closed",
   "title": "q_max #1011: run main's browser tests once first, or merge now past the unknown result?",
   "waits": {
     "pr": 1029,
