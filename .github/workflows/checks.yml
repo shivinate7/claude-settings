@@ -1256,10 +1256,9 @@ jobs:
   checks-windows-guard:
     runs-on: windows-latest
     needs: scope
-    # Full guard suite off pull_request, in 3 shards. In 2 shards, before the conflict-markers guard (run 42404373325),
-    # shard 1 took 18:42 and shard 2 13:25. After it (runs 42406480975, 42408558620), shard 2 took 19:31 and shard 1
-    # ran past 20:00 and was cancelled. The split came because shard 1 hit its cap; each of 3 shards takes a third of
-    # the cases (expected time unmeasured until the first full run). The cap stays 20 min.
+    # Full guard suite off pull_request, in 3 shards. A 2-shard split ran 19:31 and past 20:00 (cancelled) under this
+    # cap (runs 42406480975, 42408558620), so each of 3 shards takes a third of the cases. Per-shard time is unmeasured
+    # until a full run. The cap stays 20 min.
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
