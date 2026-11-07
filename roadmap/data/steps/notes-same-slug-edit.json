@@ -1,0 +1,10 @@
+{
+  "title": "A note with the same slug as an existing one is not read as an edit",
+  "phase": "next",
+  "status": "todo",
+  "order": 268.4,
+  "owner": "coordinator",
+  "why": "Lane notes-sightings-expiry found that #1516's code reads a note with the same slug as an edit (coordinator, 17:05 CST Nov 7).",
+  "note": "Waits on #1516 merging; the coordinator starts its lane then. Done check: a red test where a second note with the same slug is read as an edit.",
+  "updatedAt": "2026-11-07T17:05:00-06:00"
+}
