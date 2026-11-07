@@ -1441,7 +1441,7 @@ def _route_verdict(ids, texts=None):
         return "unknown", ("the route rows file did not read, so the route cite %s went unchecked"
                            % ", ".join(ids))
     here = route_match.surface()
-    kinds = []
+    kinds, uncovered, readable = [], [], False
     for rid in ids:
         held = [row for row in rows if row.get("id") == rid]
         row = next((r for r in held if r.get("surface") == here), None)
@@ -1452,12 +1452,20 @@ def _route_verdict(ids, texts=None):
         elif row["outcome"] == "works":
             kinds.append(("works", "route row %s says this act works on %s, so it is not the owner's to do. "
                           "Remedy: do it through the route %s" % (rid, here, row.get("route") or "that row names")))
-        elif route_match.cite_covers(rid, rows, texts or []) == "no":
-            kinds.append(("uncovered", "route row %s covers none of the act (%s). Remedy: cite the row of the act, "
-                          "or name the act's command" % (rid, "; ".join(texts)[:120])))
         else:
-            return "ok", ""
-    for kind in ("works", "dead", "uncovered", "unknown"):
+            cover = route_match.cite_covers(rid, rows, texts or [])
+            if cover == "covers":
+                return "ok", ""
+            readable = True
+            if cover == "no":
+                uncovered.append(("uncovered", "route row %s covers none of the act (%s). Remedy: cite the row of "
+                                  "the act, or name the act's command" % (rid, "; ".join(texts)[:120])))
+    # One covering cite passes the line; an unreadable cover alone never refuses.
+    if uncovered:
+        return uncovered[0]
+    if readable:
+        return "ok", ""
+    for kind in ("works", "dead", "unknown"):
         for found, text in kinds:
             if found == kind:
                 return kind, text

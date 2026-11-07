@@ -104,24 +104,34 @@ def matching_rows(rows, outcome, calls):
             if row.get("surface") == here and row.get("outcome") == outcome and row_matches(row, targets)]
 
 
-_ACT_SPLIT = re.compile(r"&&|;")
+_ACT_SPLIT = re.compile(r"&&|\|\||;")
+_ACT_PREFIX = re.compile(r"(?:env\s+)?(?:[A-Za-z_]\w*=\S*\s+)*")
 _BACKTICK_SPAN = re.compile(r"`([^`]+)`")
 
 
+class _Span(str):
+    """A backtick span of a task's context. Unlike a command piece it may be a button label, not an act, so
+    cite_covers counts it only when some row on this surface matches it."""
+
+
 def act_texts(task):
-    """The act pieces of a waiting-page task: each line of its "command" (a string, or each value of a dict of
-    variants) split at && and ;, then each backtick span of its "context". Empty pieces are dropped. A route
-    row names one act, and a command line chains several, so the cover reads each piece, not the whole line."""
+    """The act pieces of a waiting-page task. With a "command" (a string, or each value of a dict of variants): each
+    line split at &&, || and ;, with a leading env and NAME=value assignments dropped, since a route row names the
+    program. With no command: each backtick span of its "context". Empty pieces are dropped. A route row names one
+    act, and a command line chains several, so the cover reads each piece, not the whole line."""
     command = task.get("command")
     commands = list(command.values()) if isinstance(command, dict) else [command]
-    pieces = [piece.strip()
+    pieces = [_ACT_PREFIX.sub("", piece.strip(), count=1).strip()
               for text in commands if isinstance(text, str)
               for line in text.splitlines()
               for piece in _ACT_SPLIT.split(line)]
+    pieces = [piece for piece in pieces if piece]
+    if pieces:
+        return pieces
     context = task.get("context")
-    if isinstance(context, str):
-        pieces.extend(span.strip() for span in _BACKTICK_SPAN.findall(context))
-    return [piece for piece in pieces if piece]
+    if not isinstance(context, str):
+        return []
+    return [_Span(span.strip()) for span in _BACKTICK_SPAN.findall(context) if span.strip()]
 
 
 def rows_covering(rows, texts):
@@ -137,7 +147,9 @@ def rows_covering(rows, texts):
 def cite_covers(rid, rows, texts):
     """Whether the row `rid` covers the act `texts`: "covers", "no", or "unknown". Unknown: no act text, no row
     on this surface holds rid, or that row has no readable pattern, since a cite that cannot be judged is
-    never refused. A row's alternates name other acts and never cover."""
+    never refused. A span (see _Span) that no row on this surface matches is no known act, so it is left out. A
+    row's alternates name other acts and never cover."""
+    texts = [text for text in texts or [] if not isinstance(text, _Span) or rows_covering(rows, [text])]
     if not texts:
         return "unknown"
     here = surface()
