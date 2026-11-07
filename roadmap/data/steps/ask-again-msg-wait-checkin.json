@@ -1,0 +1,10 @@
+{
+  "title": "Ask again, with better options: may a session that waits on a reply set one timed check-in?",
+  "phase": "later",
+  "status": "todo",
+  "order": 91,
+  "owner": "triage",
+  "why": "Item 290, deferred. Owner 20:07 CST Nov 5: \"are these really the two options i should consider?\" Lane timer-rules-conflict.",
+  "note": "Re-ask with new options once the session mailbox (#1371) lands, since replies may then wake a session without a timer. Home record: docs/decisions/session-messages.md.",
+  "updatedAt": "2026-11-07T00:34:00Z"
+}
