@@ -750,6 +750,19 @@ def case_u3_a_bad_mark_does_not_fail_open_a_cleared_export():
         check("U3 (%s mark): a cleared export gives no note" % label, note is None, repr(note))
 
 
+def case_u4_a_stale_copy_under_a_bad_mark_blocks():
+    """A "rolled-out" that is not JSON true or false, with the page's copy older than its write and no export since:
+    the Stop blocks, as under a valid mark. The copy folder is `waiting` under either mark, so the bad mark must not
+    make the export check stand down with a note. The valid mark is the control."""
+    for label, mark in (("valid", True), ("bad", "yes")):
+        root = base_repo("u4-" + label, extras=registry(extra={"rolled-out": mark}))
+        check("U4 (%s mark) scope: the newest copy commit is the 17:00 one" % label,
+              newest_copy(root, FOLDER) == at(17), newest_copy(root, FOLDER))
+        p = run_stop("u4-" + label, root, [owner(at(18, 50))] + page_write(at(19)))
+        check("U4 (%s mark) scope: the guard prints a decision" % label, decision_of(p) != {}, p.desc())
+        expect_block("U4 (%s mark)" % label, p, (SCRIPT, SECTION))
+
+
 CASES.extend((
     case_s1_block_when_copy_is_older_than_the_write,
     case_s2_later_copy_commit_passes,
@@ -798,6 +811,7 @@ CASES.extend((
     case_u1_export_check_returns_the_reason,
     case_u2_git_failure_gives_a_note_and_no_reason,
     case_u3_a_bad_mark_does_not_fail_open_a_cleared_export,
+    case_u4_a_stale_copy_under_a_bad_mark_blocks,
 ))
 
 

@@ -978,6 +978,22 @@ def case_guard_unreadable_layout_fails_open_with_one_line():
     check("homes: no ruling or task item, no fail-open line", fail_open_line(p) == [], p.desc())
 
 
+def case_guard_home_check_under_a_bad_mark_refuses_unhomed_items():
+    """A "rolled-out" that is not JSON true or false: the home check reads the ruling and task keys under either
+    mark, so a ruling and a task homed to a tracked file outside their homes still block. Each repo tracks its
+    decision and debt folders at the layout path and at the legacy path, so a home is found under either reading.
+    The valid mark is the control."""
+    tracked = ("CLAUDE.md", "router.md", "decisions/r.md", "docs/decisions/r.md", "debts/x.md", "docs/debts/x.md")
+    items = ("- fb-12 [ruling] -> router.md", "- fb-13 [task] -> router.md")
+    for label, mark in (("valid", True), ("bad", "yes")):
+        sid = "home-%s-mark" % label
+        repo = make_repo(sid, tracked=tracked, extras=json.dumps({"kinds": {}, "rolled-out": mark}))
+        p = homed(new_cfg(), sid, items, cwd=repo)
+        check("homes (%s mark) scope: the guard prints a decision" % label, guard_json(p) is not None, p.desc())
+        expect_block("homes (%s mark): an unhomed ruling and task block" % label, p,
+                     named=("fb-12", "fb-13", "is not a tracked"))
+
+
 APPLE_STAMP = "2026-10-31 20:21 CDT (UTC-05:00)"
 APPLE_LATER = "2026-10-31 21:05 CDT (UTC-05:00)"
 APPLE_FIRST = "2026-10-31 20:10 CDT (UTC-05:00)"  # a jotted message that comes before the burst
@@ -1472,11 +1488,13 @@ NEUTRAL = "rename item 98 now"  # no pick: "98 n" is no answer letter, so only t
 SENT = "Ruling on item 98 now"  # a send that names 98 as a whole token
 
 
-def filing_extras(record_branch=None):
-    """The extras file of a waiting-page repo, with a record-branch key when `record_branch` is given."""
+def filing_extras(record_branch=None, extra=None):
+    """The extras file of a waiting-page repo, with a record-branch key when `record_branch` is given, and the
+    keys of `extra` merged in (a "rolled-out" mark, say)."""
     found = {"kinds": {}, "waiting-page": PAGE_URL}
     if record_branch is not None:
         found["record-branch"] = record_branch
+    found.update(extra or {})
     return json.dumps(found)
 
 
@@ -1560,6 +1578,21 @@ def case_page_unfiled_number_refuses_with_the_export_remedy():
     p = page_run(new_cfg(), "page-unfiled-closed", [(NEUTRAL, ("- fb-0958-7 [page] -> page:98 [closed]",))],
                  [owner_rec(NEUTRAL), said_rec("Noted.")], cwd=repo)
     expect_silent("page filing: a closed page item with an unfiled number is never checked", p)
+
+
+def case_page_unfiled_number_under_a_bad_mark_refuses():
+    """A "rolled-out" that is not JSON true or false: the filing check reads the copy at `waiting` under either
+    mark, so a page item whose number the copy does not hold is still refused, with its send there. The valid
+    mark is the control."""
+    for label, mark in (("valid", True), ("bad", "yes")):
+        repo = record_repo("filing-%s-mark" % label, copy_files(UNFILED),
+                           extras=filing_extras(extra={"rolled-out": mark}))
+        p = page_run(new_cfg(), "page-unfiled-%s-mark" % label, [(NEUTRAL, (PAGE_ITEM,))],
+                     [owner_rec(NEUTRAL), send_rec(SENT)], cwd=repo)
+        check("page filing (%s mark) scope: the guard prints a decision" % label, guard_json(p) is not None,
+              p.desc())
+        expect_unfiled("page filing (%s mark): n 98 not in the copy, with its send, refuses" % label, p,
+                       "fb-0958-7", "98")
 
 
 def case_page_unreadable_copy_is_unknown_and_checks_the_send():
@@ -4326,6 +4359,7 @@ CASES = (
     case_guard_tracked_homes_pass_without_the_handoff,
     case_guard_standing_homed_to_handoff_passes,
     case_guard_task_home_from_the_todo_kind,
+    case_guard_home_check_under_a_bad_mark_refuses_unhomed_items,
     case_guard_unreadable_layout_fails_open_with_one_line,
     case_guard_apple_tv_burst_names_where_items_go,
     case_guard_burst_heading_after_a_jotted_message_names_its_line,
@@ -4360,6 +4394,7 @@ CASES = (
     case_page_filed_number_passes,
     case_page_filed_number_still_needs_its_send,
     case_page_unfiled_number_refuses_with_the_export_remedy,
+    case_page_unfiled_number_under_a_bad_mark_refuses,
     case_page_unreadable_copy_is_unknown_and_checks_the_send,
     case_page_filing_reads_the_record_branch_the_layout_names,
     case_page_filing_needs_a_waiting_page_repo,
