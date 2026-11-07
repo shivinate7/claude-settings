@@ -1,10 +1,11 @@
 {
   "title": "Before a push, the guard checks the Red-run line on each test commit it sends",
   "phase": "next",
-  "status": "todo",
+  "status": "doing",
   "order": 260.9,
   "owner": "coordinator",
   "why": "Incident, lane page-reply-uncollapse, 2026-11-07 03:30 CST, relayed by the coordinator 03:27 CST: test-file commit 1f35b617 was pushed with no `Red-run:` line. The gap showed only at `merge --lane-lint`, after the push, so the only fix was a replacement PR for #1345.",
   "note": "Before a `git push`, the guard runs lint/check_red_run.py against the base for the commits the push sends. Cost: one git log and one diff read per push. Depends on step commit-refuses-conflict-markers, which builds the push-time check of the sent commits; this step extends that same home (building-one-home-per-capability). Done check: a red test on a push of a test commit with no Red-run line. The guard's verdict changes, so this is a build lane (test-author, builder, reviewer). No owner question.",
-  "updatedAt": "2026-11-07T09:27:00Z"
+  "updatedAt": "2026-11-07T13:37:00-06:00",
+  "lane": "session_013NEJKz8JXQTvhuGYo4UJpi"
 }
