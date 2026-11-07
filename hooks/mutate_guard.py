@@ -902,7 +902,7 @@ MUTATIONS = [
      'role-model: Explore on sonnet with Audit: on line 2 is denied (line 1 only counts)'),
     ("role-model: a reviewer round 2 or 3 loses its exemption, so it is denied on sonnet",
      'for kind, n in brief_markers(tool_input.get("prompt")))):',
-     'for kind, n in brief_markers("")))):', "guard", 'role-model: reviewer on sonnet with a Round 2 of 3 line is allowed'),
+     'for kind, n in brief_markers(""))):', "guard", 'role-model: reviewer on sonnet with a Round 2 of 3 line is allowed'),
     ("role-model: a reviewer round 1 is exempt too, so it walks past on sonnet",
      'kind.lower() == "round" and n in ROLE_REVIEWER_FREE_ROUNDS',
      'kind.lower() == "round" and n in ("1", "2", "3")', "guard",
