@@ -393,6 +393,14 @@ class HandoffCheck(TempDest):
             with self.subTest(items=items):
                 self.assertEqual(problems(handoff_text(items, [PAGE])), [])
 
+    def test_a_count_in_parentheses_beside_the_url_is_no_id(self):
+        # "(3 open)" counts the open items; it copies no id. A real id beside the URL is still caught.
+        self.assertEqual(problems(handoff_text(ITEMS, [PAGE])), [])
+        found = problems(handoff_text(f"{ITEMS} #123", [PAGE]))
+        self.assertEqual(len(found), 1, found)
+        self.assertRegex(found[0], r"(?i)\bids?\b")
+        self.assertEqual(problems(handoff_text(f"{ITEMS} (3 open)", [PAGE])), [])
+
     def test_a_placeholder_url_is_no_items_home(self):
         for items in BAD_WATCHES:
             with self.subTest(items=items):
