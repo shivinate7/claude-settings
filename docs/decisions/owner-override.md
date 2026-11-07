@@ -40,7 +40,7 @@ Orchestrator's call, not an owner grant:
 - `grant()` defers to it only for a first word `override` whose rest is no whole keyword form and holds a length. A judge no or error keeps main's result: a reason form stays one-act, and `override 15m please` grants nothing. A judge error never widens one-act to timed.
 - It shares the Opus ask's gates (one helper): the `source` check, a notice start, cut pasted and notice blocks (a `<cross-session-message>` block too), a fired-task block, a `promptSource` `system` record, and the cloud seed check. Its judge is `call_judge.override_ask`, the same fail-closed call as `opus_ask` with its own prompt head.
 - A pasted refusal line from `override.offer` grants nothing: the word counts only outside backtick code spans.
-- No judge call, and no grant, for: no whole word `override` outside backtick code spans, a `NEGATIONS` word or `off` within `NEGATION_SPAN` words of `override`, a `?`, two lengths, a decimal or compound length, or the whole word `opus` (the Opus route owns that prompt).
+- These get no judge call and no grant: no whole word `override` outside code spans, and a `NEGATIONS` word or `off` within `NEGATION_SPAN` words of it. So do a `?`, two lengths, a decimal or compound length, and the whole word `opus`, which the Opus route owns.
 - Cost: at most one model call per owner prompt, only for a prompt that holds the whole word `override` and passes the gates. None for any other prompt.
 
 ## The Opus override
