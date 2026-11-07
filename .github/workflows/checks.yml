@@ -261,6 +261,9 @@ jobs:
       - name: Stale prose check fixture suite
         run: python3 lint/test_stale_cites.py
 
+      - name: Word-run fence fixture suite
+        run: python3 lint/test_word_runs.py
+
       - name: Guard log report fixture suite
         run: python3 lint/test_guard_log_report.py
 
