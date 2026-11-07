@@ -421,6 +421,7 @@ RESOLVED = os.path.join(ROOT, "resolvedmerge")  # a merge in progress with every
 PICKED = os.path.join(ROOT, "pickconflict")  # a cherry-pick stopped on a product conflict
 REBASING = os.path.join(ROOT, "rebaseconflict")  # a rebase stopped on a product conflict
 OTHER = os.path.join(ROOT, "otherplain")  # a plain checkout with no merge, holding the same product path as MIXED
+MIXEDLINK = os.path.join(ROOT, "mixedlinked")  # a merge in progress in a linked worktree, as a lane runs (.git is a file)
 SUBJCLEAN = os.path.join(ROOT, "subjclean")  # a real checkout with a clean tree and no stash
 SUBJCLEANWT = os.path.join(ROOT, "subjcleanlane")  # a real, clean linked worktree of that one
 SUBJDIRTY = os.path.join(ROOT, "subjdirty")  # a real checkout with real uncommitted work
@@ -1638,21 +1639,25 @@ def _unmerged(where):
     return sorted({entry.split("\t", 1)[1] for entry in done.stdout.split("\0") if "\t" in entry})
 
 
-def _build_merge_fixture(where, resolve_all):
+def _build_merge_fixture(where, resolve_all, linked=False):
     """A merge of `feature` into `main` in `where`. It stops with MIX_UNMERGED unmerged and src/resolved.py
-    git-added. `resolve_all` resolves those too, so no path stays unmerged."""
-    make_repo(where, {**{path: "base\n" for path in MIX_CONFLICTED}, "src/theirs_only.py": "base\n"})
-    _must(where, "checkout", "-q", "-b", "feature")
+    git-added. `resolve_all` resolves those too, so no path stays unmerged. `linked` builds the two branches in
+    `where`-main and merges in a linked worktree of it: a lane's checkout, where `.git` is a file."""
+    main = where + "-main" if linked else where
+    make_repo(main, {**{path: "base\n" for path in MIX_CONFLICTED}, "src/theirs_only.py": "base\n"})
+    _must(main, "checkout", "-q", "-b", "feature")
     for path in MIX_CONFLICTED:
-        write(os.path.join(where, path), "feature\n")
-    write(os.path.join(where, "src/theirs_only.py"), "feature only\n")
-    _must(where, "add", "-A")
-    _must(where, *IDENT, "commit", "-q", "-m", "feature change")
-    _must(where, "checkout", "-q", "main")
+        write(os.path.join(main, path), "feature\n")
+    write(os.path.join(main, "src/theirs_only.py"), "feature only\n")
+    _must(main, "add", "-A")
+    _must(main, *IDENT, "commit", "-q", "-m", "feature change")
+    _must(main, "checkout", "-q", "main")
     for path in MIX_CONFLICTED:
-        write(os.path.join(where, path), "main\n")
-    _must(where, "add", "-A")
-    _must(where, *IDENT, "commit", "-q", "-m", "main change")
+        write(os.path.join(main, path), "main\n")
+    _must(main, "add", "-A")
+    _must(main, *IDENT, "commit", "-q", "-m", "main change")
+    if linked:
+        _must(main, "worktree", "add", "-q", "-b", "lane", where, "main")
     run_vcs(where, *IDENT, "merge", "feature")  # conflicts on MIX_CONFLICTED and stages src/theirs_only.py
     _require_conflict(where, "src/app.py")
     if _unmerged(where) != sorted(MIX_CONFLICTED):
@@ -1678,6 +1683,10 @@ def _build_mixed():
 
 def _build_resolved():
     _build_merge_fixture(RESOLVED, resolve_all=True)
+
+
+def _build_mixed_linked():
+    _build_merge_fixture(MIXEDLINK, resolve_all=False, linked=True)
 
 
 def _build_picked():
@@ -2311,6 +2320,7 @@ lazy_fixture([RESOLVED], _build_resolved)
 lazy_fixture([PICKED], _build_picked)
 lazy_fixture([REBASING], _build_rebasing)
 lazy_fixture([OTHER], _build_other)
+lazy_fixture([MIXEDLINK, MIXEDLINK + "-main"], _build_mixed_linked)
 lazy_fixture([BRANCHREMOTE, BRANCHREPO, BRANCHFALLBACKMAIN, BRANCHFALLBACKMASTER, BRANCHNOBASE],
              _build_branch)
 lazy_fixture([PUSHFEAT, PUSHMAIN, PUSHTRUNK, PUSHTRUNKLOCAL, PUSHNOHEAD, PUSHDETACHED, PUSHSAMETAG, PUSHDANGLING, PUSHNOHEADMAIN,
@@ -13195,6 +13205,16 @@ if LINKS_MADE:
     add("test-author: Edit through a symlink to a product file that merged clean is refused", "deny", rule=TA,
         tool="Edit", file_path=os.path.join(MIXED, "src", "alias_clean.py"), carries=MERGE_CARRIES,
         **_author_at(MIXED))
+# The merge is read from the target's own checkout: a checkout with no merge (OTHER) allows the unmerged path of MIXED.
+add("test-author: Edit of an unmerged product file in a checkout with no merge is allowed", "allow",
+    tool="Edit", file_path=os.path.join(MIXED, "src", "app.py"), **_author_at(OTHER))
+# A lane runs in a linked worktree, where `.git` is a file, not a directory.
+add("test-author: Edit of an unmerged product file in a linked worktree mid-merge is allowed", "allow",
+    tool="Edit", file_path=os.path.join(MIXEDLINK, "src", "app.py"), **_author_at(MIXEDLINK))
+if os.name != "nt":   # the blind git is a POSIX stand-in (make_blind_git), as in the subject cases above
+    add("test-author: Edit of an unmerged product file mid-merge is refused when git cannot read the index",
+        "deny", rule=TA, tool="Edit", file_path=os.path.join(MIXED, "src", "app.py"), carries=MERGE_CARRIES,
+        env_path=GITBLIND, **_author_at(MIXED))
 
 # ---- workflow test-run steps. A test-author may add or remove a whole test-run step in a workflow; nothing else there.
 # A builder may change any workflow line, except one that disables tests in a test-runner line. Each author row and
