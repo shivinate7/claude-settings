@@ -2221,7 +2221,9 @@ class DriftTests(StaleCase):
     """STALE006, range mode, report only. A Markdown line anchors `path:N` or `path:N-M` on a file the range edits in
     place. The anchor was written against the file at base, so the range shows where those lines went: moved (lines
     above them grew or shrank), changed (a line inside them differs) or removed. A Markdown line the range adds or edits
-    was anchored by its author, so it is never reported. Each report line starts
+    is reported only when its cited lines moved and the head lines at its numbers differ from the text it cited (for an
+    edited line, the text its base version cited): the sign of a writer who read pre-range numbers. A line whose cited
+    lines did not move, or whose numbers still read the cited text, is never reported. Each report line starts
     `stale-cites: report, path:line: STALE006`. The exit code never changes."""
 
     def drift(self, head_code, head_notes=None, base_notes=ANCHOR_NOTES, base_code=None):
@@ -2284,16 +2286,22 @@ class DriftTests(StaleCase):
         self.assertEqual(base_hunks(rng, "code.py"), [(14, 1)])  # scope: the one edit is below the span
         self.assert_no_stale006(rng)
 
-    def test_anchor_line_the_range_adds_is_never_reported(self):
+    def test_anchor_line_the_range_adds_is_never_reported_while_its_cited_lines_stay_put(self):
         self.assert_stale006(self.drift(insert_above_line_ten(source_lines())), 3, ["code.py:13"])  # control
-        rng = self.drift(insert_above_line_ten(source_lines()), head_notes=ANCHOR_NOTES, base_notes="# Notes\n")
+        lines = source_lines()
+        lines[13] = "v14 = 99"  # line 14, below the anchored line 10
+        rng = self.drift(lines, head_notes=ANCHOR_NOTES, base_notes="# Notes\n")
         self.assertEqual(base_hunks(rng, NOTES), [(1, 0)])  # scope: the range adds the anchoring line
+        self.assertEqual(base_hunks(rng, "code.py"), [(14, 1)])  # scope: the one edit is below line 10, which stays put
         self.assert_no_stale006(rng)
 
-    def test_anchor_line_the_range_edits_is_never_reported(self):
+    def test_anchor_line_the_range_edits_onto_the_text_it_cited_is_never_reported(self):
         self.assert_stale006(self.drift(insert_above_line_ten(source_lines())), 3, ["code.py:13"])  # control
-        rng = self.drift(insert_above_line_ten(source_lines()), head_notes="# Notes\n\n- the gate is `code.py:13`.\n")
+        head = insert_above_line_ten(source_lines())
+        self.assertEqual(head[12], source_lines()[9])  # scope: head line 13 holds the text base line 10 cited
+        rng = self.drift(head, head_notes="# Notes\n\n- the gate is `code.py:13`.\n")
         self.assertEqual(base_hunks(rng, NOTES), [(3, 1)])  # scope: line 3 is edited in place, re-anchored
+        self.assertEqual(base_hunks(rng, "code.py"), [(9, 0)])  # scope: the three lines above line 10 still go in
         self.assert_no_stale006(rng)
 
     def test_cited_lines_deleted_outright_report_cited_lines_removed(self):
