@@ -1,6 +1,6 @@
-# The linked node_modules rule judges the member folder for a workspace install
+# The -w flag and --no-workspaces are not read for a linked node_modules
 
-- **What.** `npm ci -w sub`, and a plain `npm ci` run inside a workspace member, write the root's `node_modules` (npm 10). The rule walks up only to the member's `package.json`, so a linked root `node_modules` passes (bypass).
-- **Where.** The `npm_prefix` walk in the `linked-node-modules` rule, `hooks/guard_push_delete.py`.
+- **What.** `-w` and `--workspace` change the folder npm works in, and the rule reads them for `npm version` only. `npm ci -w sub` writes the workspace root's `node_modules` and passes when that root's link is not the folder judged (bypass). `--no-workspaces` stops npm from moving the prefix up to a workspace root, and the rule still moves it (false alarm).
+- **Where.** The `npm_walk` walk and the `install` judge in the `linked-node-modules` rule, `hooks/guard_push_delete.py`.
 - **Decision.** `guard-linked-node-modules` (refuse an install or recursive delete through a linked node_modules).
-- **Retire.** Find the workspace root (a `package.json` above with a `workspaces` field that lists the member) and judge its `node_modules`. A test covers `-w sub` from the root and a plain install from a member.
+- **Retire.** Read `-w` and `--workspace` when it picks the folder, and read `--no-workspaces` when it stops the workspace walk. Tests for the cases above pass.

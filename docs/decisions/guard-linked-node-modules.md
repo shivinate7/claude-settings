@@ -8,7 +8,8 @@ Should the guard refuse npm installs and recursive deletes that would wipe a `no
 
 Yes. Rule `linked-node-modules`, in `hooks/guard_push_delete.py` and `hooks/guard.py`.
 
-- Every npm subcommand off a read-only allow list is judged in the folder `npm prefix` would use. So is `npm audit` with `fix` after it. The list (`NPM_READ_ONLY`, from npm 10.9.9) holds the commands that never rewrite `node_modules`. It fails closed: a new npm command, an abbreviation or a typo is refused, not passed. The guard finds the folder with the `npm_prefix` walk: up from the working folder to the first folder with a `package.json` or a `node_modules`. The rule refuses when that folder's `node_modules` is a link (a junction or a symlink). Owner rulings 2026-10-20 (the allow list) and 2026-11-07 13:20 CST.
+- Every npm subcommand off a read-only allow list is judged in the folder `npm prefix` would use. So is `npm audit` with `fix` after it. The list (`NPM_READ_ONLY`, from npm 10.9.9) holds the commands that never rewrite `node_modules`. It fails closed: a new npm command, an abbreviation or a typo is refused, not passed. The guard finds the folder with the `npm_walk` walk: up from the working folder to the first folder with a `package.json` or a `node_modules`. When that folder has a `package.json`, the walk goes on up, as npm does, to the first folder whose `workspaces` field lists it, and that root is the folder. The rule refuses when the folder's `node_modules` is a link (a junction or a symlink). Owner rulings 2026-10-20 (the allow list) and 2026-11-07 13:20 CST.
+- The guard reads a subcommand by npm's own name (`npm_deref`: an alias, an abbreviation or a camelCase spelling resolves as in npm 10.9.9). The read-only list still judges the typed word, so an abbreviation fails closed. The dereferenced name decides two things. `npm version`, by any spelling, is refused when it takes the workspace path: with `-w`, `-ws` or `--workspace`, or from a workspace folder. `--no-workspaces-update` or `--workspaces-update=false` turns that off, as npm then skips the reify. A `--dry-run` exempts only the commands on `NPM_DRY_RUN_SAFE` (install, ci, update, uninstall, dedupe, prune, link, install-test, install-ci-test, audit). `rebuild`, `edit`, `explore` and an unknown name are refused with it.
 - A recursive delete into a linked `node_modules` is refused.
 - A bare delete of the link itself is allowed. Measured: `Remove-Item` on a junction removes only the link, not the target.
 - The refusal names the real folder to make. It names neither `npm ci` nor `rm -rf`.
@@ -28,7 +29,7 @@ Home: hooks/guard_push_delete.py
 
 ## Safety holes, named
 
-- (b) `--prefix` is read: its folder is the one judged. `-w` or `--workspace` on every command but `npm version`, and a plain install run inside a workspace member, are not read: npm writes the root's `node_modules`, and the walk stops at the member's `package.json`. A bypass and a false alarm both. `npm version` with a workspace flag is refused. Debt: `linked-nm-prefix-workspace`.
+- (b) `--prefix` is read: its folder is the one judged. `-w` or `--workspace` on every command but `npm version` is not read, and `--no-workspaces` does not stop the workspace walk. A bypass and a false alarm both. `npm version` with a workspace flag is refused. Debt: `linked-nm-prefix-workspace`.
 - (d) `pnpm`, `yarn`, `bun`, `npx` and `npm.exe` are not judged. Note: `linked-nm-other-managers`.
 - (e) `find -delete`, `Get-ChildItem | Remove-Item`, `cmd rmdir /s`, `rimraf`, `cd node_modules && rm -rf x` and `-Recurse:$true` are not read as recursive deletes into the link. Note: `linked-nm-other-deletes`.
 - (f) An inner `cd` inside `bash -c` or `sh -c` is not tracked. Note: `linked-nm-shell-c-cd`.

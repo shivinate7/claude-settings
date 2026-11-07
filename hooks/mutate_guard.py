@@ -2614,7 +2614,7 @@ MUTATIONS = [
      "guard", 'linked-nm: rm -rf node_modules/ (Bash) in a real folder is allowed'),
     ('linked-node-modules: the walk never starts, so a sub folder is read as its own prefix',
      '    folder = where\n    while True:',
-     '    folder = where\n    return where\n    while True:',
+     '    folder = where\n    return where, False\n    while True:',
      "guard", 'linked-nm: walk: refuse npm ci two levels below a linked root'),
     ('linked-node-modules: the walk passes a folder with its own package.json',
      '("package.json", "node_modules")',
@@ -2629,8 +2629,8 @@ MUTATIONS = [
      'False):',
      "guard", 'linked-nm: refuse npm version patch -w a (Bash) in a linked folder'),
     ('linked-node-modules: a dry run is exempt again for rebuild, rb and edit',
-     'NPM_DRY_RUN_WRITERS = {"rebuild", "rb", "edit"}',
-     'NPM_DRY_RUN_WRITERS = set()',
+     '                if command not in NPM_DRY_RUN_SAFE:',
+     '                if False:',
      "guard", 'linked-nm: refuse npm rebuild --dry-run (Bash) in a linked folder'),
     # ---- the always-silent stub. A hook whose main() exits 0 with no output passes every
     # "nothing printed" case on its own. Each suite pairs that silence with a known-bad input in
