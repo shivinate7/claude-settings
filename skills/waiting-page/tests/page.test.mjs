@@ -118,7 +118,9 @@ function pageName() {
 }
 after(async () => { if (browser) await browser.close(); });
 
-async function open(t, { items = [DECISION, TASK], rawItems = {}, answers = {}, failDelete = false, failDeleteIn = "", failSet = false, failSetText = "", comments = { can: "available" }, storage = {}, meta = null, groups = {}, receipts = {}, holdReceipts = false, designData = null, dbExtra = {}, pageHtml = html, viewport = { width: 1280, height: 900 }, scheme = "light", errors = null, platform = null, noStore = false, hold = {}, failUpdate = false } = {}) {
+// clock: a fixed browser time (an ISO string), so a case reads the page's clock without the real one. keepStorage: each storage key is set
+// only when absent, so a reload keeps what the page wrote on the earlier load (a reload that resets storage would undo it).
+async function open(t, { items = [DECISION, TASK], rawItems = {}, answers = {}, failDelete = false, failDeleteIn = "", failSet = false, failSetText = "", comments = { can: "available" }, storage = {}, meta = null, groups = {}, receipts = {}, holdReceipts = false, designData = null, dbExtra = {}, pageHtml = html, viewport = { width: 1280, height: 900 }, scheme = "light", errors = null, platform = null, noStore = false, hold = {}, clock = null, keepStorage = false, failUpdate = false } = {}) {
   browser = browser || await needEnv(t, "chromium", async () => require("playwright").chromium.launch());
   if (!browser) return null;
   const page = await browser.newPage({ viewport });
@@ -133,9 +135,10 @@ async function open(t, { items = [DECISION, TASK], rawItems = {}, answers = {}, 
   await page.route("**/*", (r) => (r.request().url() === ORIGIN ? r.fulfill({ contentType: "text/html; charset=utf-8", body }) : r.abort()));
   await page.addInitScript(() => { new MutationObserver(() => { const w = document.querySelector(".dfitwrap"); if (w && window.__firstFit === undefined) window.__firstFit = w.getBoundingClientRect().height; }).observe(document, { childList: true, subtree: true }); });
   await page.addInitScript(stubDb, { items, rawItems, answers, failDelete, failDeleteIn, failSet, failSetText, failUpdate, comments, meta, groups, receipts, holdReceipts, dbExtra, noStore, hold });
-  await page.addInitScript((kv) => { for (const k in kv) localStorage.setItem(k, kv[k]); }, storage);
+  await page.addInitScript(({ kv, keep }) => { for (const k in kv) { if (keep && localStorage.getItem(k) !== null) continue; localStorage.setItem(k, kv[k]); } }, { kv: storage, keep: keepStorage });
   // platform: the OS a browser reports, as navigator.platform with no userAgentData (a Windows or a Mac browser).
   if (platform) await page.addInitScript((p) => { Object.defineProperty(navigator, "platform", { get: () => p }); Object.defineProperty(navigator, "userAgentData", { get: () => undefined }); }, platform);
+  if (clock) await page.clock.setFixedTime(new Date(clock));
   await page.goto(ORIGIN);
   // With no store there are no items to wait for: the page is loaded once its empty state is drawn.
   if (noStore) { await page.waitForFunction("state.loaded"); return page; }
@@ -163,6 +166,11 @@ const SAVED_A = { [DECISION.id]: { item: DECISION.id, n: 27, at: "2026-10-26T01:
 const opt = (key, label, design) => ({ key, label, how: "h", gain: "g", lose: "l", ...(design ? { design } : {}) });
 const DESIGNS = { s1: "<p>one</p>", s2: "<p>two</p>" };
 const optFrame = (it, key) => `label.opt[for="o-${it.id}-${key}"] iframe`;
+// SENT_MOVE, where a card sent on this visit goes: "sink" (the default) moves it to the Answered section, folded; "stay" keeps it in its tier.
+// page.html declares the switch as the one line below. A case sets the value by rewriting that line in the page source. On a page with no
+// such line the rewrite does nothing, so a case fails on its own assertion, never on a missing name. The "stay" value is today's order.
+const SENT_MOVE_LINE = 'const SENT_MOVE = "sink";';
+const withSentMove = (value) => html.replace(SENT_MOVE_LINE, `const SENT_MOVE = "${value}";`);
 
 // ---------------------------------------------------------------- the final design
 
@@ -296,7 +304,7 @@ test("the Undo button goes after 8 seconds", async (t) => {
 
 test("a card becomes a receipt in place, with Change", async (t) => {
   const items = [mk("above", 1), mk("target", 2), mk("below", 3, { context: LONG })];
-  const page = await open(t, { items }); if (!page) return;
+  const page = await open(t, { items, pageHtml: withSentMove("stay") }); if (!page) return;
   const before = await geo(page);
   await choose(page, items[1], "a");
   await send(page);
@@ -319,7 +327,7 @@ for (const withDesigns of [false, true]) for (const viewport of [{ width: 1280, 
       // The oldest blocking item sorts first, so a card above the first receipt gives the page room to scroll up.
       mk("lead", 6, { context: LONG, holds: "A lane waits.", added: "2026-10-01T00:00:00Z" }),
     ];
-    const page = await open(t, { items, viewport, designData: withDesigns ? DESIGNS : null }); if (!page) return;
+    const page = await open(t, { items, viewport, designData: withDesigns ? DESIGNS : null, pageHtml: withSentMove("stay") }); if (!page) return;
     await noAnchor(page);
     // With option designs, the in-card frames must be the same DOM nodes after each pick, so none reloads.
     let sent = false;
@@ -1932,51 +1940,43 @@ const tierIds = async (page, k) => (await order(page)).find((x) => x[0] === "tie
 const seenOf = (page, it) => card(page, it).getAttribute("data-seen");
 const optsShown = (page, it) => card(page, it).locator(".opts").isVisible();
 
-test("a seen decision sinks under a new one in Whenever, and its options fold until the owner unfolds it", async (t) => {
+// An item the owner still owes never folds: only an answered card folds. Its options show with no fold control.
+test("a seen, owed decision sinks under a new one in Whenever, and its options show with no fold press", async (t) => {
   const seen = mk("seen-old", 1, { added: at(5) }), fresh = mk("fresh-new", 2, { added: at(20) });
   const page = await open(t, { items: [seen, fresh, sentItem()] }); if (!page) return;
   assert.deepEqual(await tierIds(page, "calm"), ["fresh-new", "seen-old"]);
   assert.equal(await seenOf(page, seen), "true", "the seen item is not marked seen");
   assert.notEqual(await seenOf(page, fresh), "true", "the new item is marked seen");
   assert.equal(await optsShown(page, fresh), true, "a new item's options are hidden");
-  const unfold = card(page, seen).locator("button.unfold");
-  assert.equal(await unfold.getAttribute("aria-expanded"), "false");
-  assert.equal(await optsShown(page, seen), false, "a seen item's options show before the owner unfolds it");
-  await unfold.click();
-  assert.equal(await unfold.getAttribute("aria-expanded"), "true");
-  assert.equal(await optsShown(page, seen), true, "unfold did not show the options");
+  assert.equal(await card(page, seen).locator("button.unfold").count(), 0, "a seen, owed decision has a fold control");
+  assert.equal(await optsShown(page, seen), true, "a seen, owed decision's options are hidden until a fold press");
 });
 
-test("a seen task's steps and command fold behind its unfold button, and unfold shows them", async (t) => {
+// A seen, owed task has no fold control: its steps and its command show at once.
+test("a seen, owed task's steps and command show with no fold press", async (t) => {
   const seen = { ...TASK, id: "seen-task", n: 37, title: "Seen task", added: at(5), steps: ["Open a terminal", "Paste the command and run it"], command: "echo seen" };
   const page = await open(t, { items: [seen, sentItem()] }); if (!page) return;
   assert.equal(await seenOf(page, seen), "true", "the seen task is not marked seen");
-  const unfold = card(page, seen).locator("button.unfold");
-  assert.equal(await unfold.getAttribute("aria-expanded"), "false");
-  assert.equal(await card(page, seen).locator("ol.steps").isVisible(), false, "a seen task's steps show before the owner unfolds it");
-  assert.equal(await card(page, seen).locator(".cmd").isVisible(), false, "a seen task's command shows before the owner unfolds it");
-  await unfold.click();
-  assert.equal(await unfold.getAttribute("aria-expanded"), "true");
-  assert.equal(await card(page, seen).locator("ol.steps").isVisible(), true, "unfold did not show the steps");
-  assert.equal(await card(page, seen).locator(".cmd").isVisible(), true, "unfold did not show the command");
+  assert.equal(await card(page, seen).locator("button.unfold").count(), 0, "a seen, owed task has a fold control");
+  assert.equal(await card(page, seen).locator("ol.steps").isVisible(), true, "a seen, owed task's steps are hidden");
+  assert.equal(await card(page, seen).locator(".cmd").isVisible(), true, "a seen, owed task's command is hidden");
 });
 
-test("a withdraw pending on a seen card that was answered on the page keeps its fold control locked open", async (t) => {
+// A seen card answered on the page, then changed to an empty draft (a withdraw pending), has no fold control to lock: its options stay open.
+test("a withdraw pending on a seen card that was answered on the page leaves no fold to lock, and its options stay open", async (t) => {
   const seen = mk("seen-answered", 1, { added: at(5) });
-  const page = await open(t, { items: [seen, sentItem()] }); if (!page) return;
-  const c = card(page, seen), unfold = c.locator("button.unfold");
+  const page = await open(t, { items: [seen, sentItem()], pageHtml: withSentMove("stay") }); if (!page) return;
+  const c = card(page, seen);
   assert.equal(await seenOf(page, seen), "true", "the card is not seen");
-  await unfold.click();
+  assert.equal(await c.locator("button.unfold").count(), 0, "a seen, owed card has a fold control");
   await choose(page, seen, "a");
   await send(page);
   await page.waitForFunction((id) => !!window.__answers()[id], seen.id);
   await c.getByRole("button", { name: "Change" }).click();
   await choose(page, seen, "a"); // the owner empties the draft: Send will withdraw the saved answer
   assert.equal(await page.locator("#send").textContent(), "Withdraw answer");
-  assert.equal(await unfold.getAttribute("aria-disabled"), "true", "a pending withdraw leaves the fold control unlocked");
-  assert.equal(await unfold.getAttribute("aria-expanded"), "true", "a pending withdraw let the fold close");
-  await unfold.click({ force: true }); // a press on the locked control must not close it
-  assert.equal(await unfold.getAttribute("aria-expanded"), "true", "the owner closed the fold with a withdraw pending");
+  assert.equal(await c.locator("button.unfold").count(), 0, "a seen card changed on the page has a fold control");
+  assert.equal(await optsShown(page, seen), true, "a seen card changed on the page hides its options under a pending withdraw");
 });
 
 test("a group seen at load counts as new once a member is added after load, and sorts in the new part", async (t) => {
@@ -1993,11 +1993,15 @@ test("a group seen at load counts as new once a member is added after load, and 
   for (const it of [a, b, late]) assert.ok(ids.indexOf("item-" + it.id) < divider, `${it.id} sorts below the seen divider`);
 });
 
-// Fold ids come from the number, so two open items that share a number must still get their own.
-test("two open items with the same number get unique fold ids", async (t) => {
-  const items = [mk("same-n-a", 7, { added: at(5) }), mk("same-n-b", 7, { added: at(5) })];
-  const page = await open(t, { items: [...items, sentItem()] }); if (!page) return;
-  for (const it of items) {
+// Fold ids come from the number, so two items that share a number must still get their own. The owed pair draws no fold control;
+// the answered pair folds, and each fold id is on one element.
+test("two items with the same number: owed ones draw no fold, and answered ones get unique fold ids", async (t) => {
+  const owed = [mk("same-n-a", 7, { added: at(5) }), mk("same-n-b", 7, { added: at(5) })];
+  const sunk = [mk("same-n-c", 7, { added: at(6), reply: "Thanks, noted." }), mk("same-n-d", 7, { added: at(6), reply: "Thanks, noted." })];
+  const page = await open(t, { items: [...owed, ...sunk], answers: { ...answerOf(sunk[0]), ...answerOf(sunk[1]) } }); if (!page) return;
+  for (const it of owed) assert.equal(await card(page, it).locator("button.unfold").count(), 0, `${it.id}: an owed item has a fold control`);
+  for (const it of sunk) {
+    await need(card(page, it).locator("button.unfold"), `${it.id}: an answered item with a reply has no fold control`);
     const target = await card(page, it).locator("button.unfold").getAttribute("aria-controls");
     const count = await page.evaluate((id) => document.querySelectorAll('[id="' + id + '"]').length, target);
     assert.equal(count, 1, `${it.id}: fold id "${target}" is on ${count} elements`);
@@ -2028,26 +2032,39 @@ test("the seen divider reads Asked before, and never claims a card is not answer
   assert.doesNotMatch(words, /not answered/i, "the divider claims a seen card is not answered");
 });
 
-test("a seen decision with one option says Show the 1 option, not 1 options", async (t) => {
-  const seen = mk("seen-one-option", 1, { added: at(5), options: [opt("a", "Red")] });
-  const page = await open(t, { items: [seen, sentItem()] }); if (!page) return;
-  const show = (await card(page, seen).locator(".uf-show").textContent()).trim();
-  assert.equal(show, "Show the 1 option", `the fold label reads "${show}"`);
+// A sunk card taken to Change draws its fold with the label of its parts. Each case reads that label off the fold.
+// A sunk decision with one option labels its fold in the singular.
+test("a sunk decision with one option, taken to Change, labels its fold Show the 1 option", async (t) => {
+  const it = mk("sunk-one-option", 1, { added: at(5), options: [opt("a", "Red")] });
+  const page = await open(t, { items: [it], answers: answerOf(it) }); if (!page) return;
+  assert.equal(await sectionOf(page, it), "tier-answered", `No. ${it.n} is not in the Answered section`);
+  await card(page, it).getByRole("button", { name: "Change" }).click();
+  const fold = card(page, it).locator("button.unfold");
+  await need(fold, `No. ${it.n} has no fold control after Change`);
+  assert.equal((await fold.locator(".uf-show").textContent()).trim(), "Show the 1 option", `the fold label of No. ${it.n} is not "Show the 1 option"`);
 });
 
-test("a seen task with one step says Show the 1 step, not 1 steps", async (t) => {
-  const seen = { ...TASK, id: "seen-one-step", n: 41, title: "One step", added: at(5), steps: ["Open a terminal"] };
-  const page = await open(t, { items: [seen, sentItem()] }); if (!page) return;
-  const show = (await card(page, seen).locator(".uf-show").textContent()).trim();
-  assert.equal(show, "Show the 1 step", `the fold label reads "${show}"`);
+// A sunk task with one step labels its fold in the singular.
+test("a sunk task with one step, taken to Change, labels its fold Show the 1 step", async (t) => {
+  const it = { ...TASK, id: "sunk-one-step", n: 41, title: "One step", added: at(5), steps: ["Open a terminal"] };
+  const page = await open(t, { items: [it], answers: { [it.id]: { item: it.id, n: it.n, at: ANSWERED_AT, done: true, note: "" } } }); if (!page) return;
+  assert.equal(await sectionOf(page, it), "tier-answered", `No. ${it.n} is not in the Answered section`);
+  await card(page, it).getByRole("button", { name: "Change" }).click();
+  const fold = card(page, it).locator("button.unfold");
+  await need(fold, `No. ${it.n} has no fold control after Change`);
+  assert.equal((await fold.locator(".uf-show").textContent()).trim(), "Show the 1 step", `the fold label of No. ${it.n} is not "Show the 1 step"`);
 });
 
-test("a seen task with no steps and no command names what folds, not a command or a zero count", async (t) => {
-  const seen = { ...TASK, id: "seen-bare", n: 42, title: "Bare task", added: at(5), steps: [] };
-  const page = await open(t, { items: [seen, sentItem()] }); if (!page) return;
-  const show = (await card(page, seen).locator(".uf-show").textContent()).trim();
-  assert.doesNotMatch(show, /command/i, `the fold label reads "${show}"`);
-  assert.doesNotMatch(show, /\b0 steps\b/, `the fold label counts steps that do not exist: "${show}"`);
+// A sunk task with no steps and no command has no count to show, so its fold names its own parts and no zero count.
+test("a sunk task with no steps and no command, taken to Change, labels its fold Show Mark done and the note, not a zero count", async (t) => {
+  const it = { ...TASK, id: "sunk-bare", n: 42, title: "Bare task", added: at(5), steps: [] };
+  const page = await open(t, { items: [it], answers: { [it.id]: { item: it.id, n: it.n, at: ANSWERED_AT, done: true, note: "" } } }); if (!page) return;
+  assert.equal(await sectionOf(page, it), "tier-answered", `No. ${it.n} is not in the Answered section`);
+  await card(page, it).getByRole("button", { name: "Change" }).click();
+  const fold = card(page, it).locator("button.unfold");
+  await need(fold, `No. ${it.n} has no fold control after Change`);
+  assert.equal((await fold.locator(".uf-show").textContent()).trim(), "Show Mark done and the note", `the fold label of No. ${it.n} is not "Show Mark done and the note"`);
+  assert.doesNotMatch(await card(page, it).textContent(), /\b0 steps\b/, `the card of No. ${it.n} counts steps that do not exist`);
 });
 
 test("a seen item sinks below a new one even when the seen item holds the higher rank", async (t) => {
@@ -2094,6 +2111,181 @@ test("a group with one new member is new as a whole, so a seen item in its tier 
   assert.notEqual(await seenOf(page, newer), "true", "the new member is marked seen");
 });
 
+// ---------------------------------------------------------------- a reply or a step since the last visit
+// An item is new when its replied time is later than both the owner's last Send and the
+// viewer's last visit (waiting.visit, an ISO time the page writes on load after it reads the marks). A roadmap step is new when
+// its updatedAt is later than that visit. Items and steps share the one visit time. A new answered card opens at load and
+// carries the mark; an owed card never folds. The mark uses the asks' green New answer style, so no case asserts a colour.
+const VISIT_AT = "2026-10-27T00:00:00Z";
+const VISIT = { "waiting.visit": VISIT_AT };
+// The page's clock for the cases that load a page: fixed, so the visit the page writes is known without the real clock.
+const LOAD_AT = "2026-11-06T18:00:00Z";
+// Later than the last Send (ANSWERED_AT, 2026-10-26T01:00Z) and later than the visit.
+const REPLIED_AT = "2026-10-28T09:00:00Z";
+const NEW_MARK = "New reply since your last Send";
+// An answered item with a reply. Its fold holds the note and the reply, so the fold has parts to open.
+const repliedCard = (over = {}) => mk("reply-sunk", 1, { added: at(5), reply: "Thanks, noted.", replied: REPLIED_AT, ...over });
+// The mark's name as a reader hears it: its aria-label, else its words (hidden tail included). Null when the card draws no mark.
+const markName = async (page, it) => {
+  const m = card(page, it).locator(".newmark");
+  if ((await m.count()) === 0) return null;
+  return m.first().evaluate((el) => (el.getAttribute("aria-label") || el.textContent).replace(/\s+/g, " ").trim());
+};
+
+// Case 1: a reply newer than the last Send and the visit opens the answered card at load, and the card carries the mark.
+test("an answered item whose reply is newer than the last Send and the last visit opens at load, with the New reply mark", async (t) => {
+  const it = repliedCard();
+  const page = await open(t, { items: [it], answers: answerOf(it, "a", { note: "Kept the red one." }), storage: VISIT }); if (!page) return;
+  assert.equal(await sectionOf(page, it), "tier-answered", `No. ${it.n} is not in the Answered section`);
+  const fold = card(page, it).locator("button.unfold");
+  await need(fold, `No. ${it.n} has no fold control`);
+  assert.equal(await fold.getAttribute("aria-expanded"), "true", `No. ${it.n} is folded on load, though its reply is newer than the last Send and the visit`);
+  assert.equal(await card(page, it).locator(".rnote").isVisible(), true, `No. ${it.n} hides its note on load`);
+  assert.equal(await markName(page, it), NEW_MARK, `No. ${it.n} draws no New reply mark`);
+});
+
+// Case 2: Change on the reopened card locks its fold open and keeps the mark for the visit.
+test("a Change on a reopened card keeps its fold locked open, and the New reply mark stays shown", async (t) => {
+  const it = repliedCard();
+  const page = await open(t, { items: [it], answers: answerOf(it, "a", { note: "Kept the red one." }), storage: VISIT }); if (!page) return;
+  const c = card(page, it), fold = c.locator("button.unfold");
+  await c.getByRole("button", { name: "Change" }).click();
+  await need(fold, `No. ${it.n} has no fold control after Change`);
+  assert.equal(await fold.getAttribute("aria-expanded"), "true", "Change left the fold closed");
+  assert.equal(await fold.getAttribute("aria-disabled"), "true", "Change left the fold unlocked");
+  assert.equal(await markName(page, it), NEW_MARK, `Change dropped the New reply mark on No. ${it.n}`);
+});
+
+// A reply older than the last Send stays folded, with no mark.
+test("a reply older than the last Send stays folded, with no New reply mark", async (t) => {
+  const it = repliedCard({ replied: "2026-10-26T00:30:00Z" });
+  const page = await open(t, { items: [it], answers: answerOf(it, "a", { note: "Kept the red one." }), storage: VISIT }); if (!page) return;
+  const fold = card(page, it).locator("button.unfold");
+  await need(fold, `No. ${it.n} has no fold control`);
+  assert.equal(await fold.getAttribute("aria-expanded"), "false", `No. ${it.n} opens on load for a reply older than the last Send`);
+  assert.equal(await markName(page, it), null, `No. ${it.n} draws a New reply mark for a reply older than the last Send`);
+});
+
+// A reply later than the last Send but earlier than the last visit stays folded, with no mark.
+test("a reply later than the last Send but earlier than the last visit stays folded, with no New reply mark", async (t) => {
+  const it = repliedCard({ replied: "2026-10-26T12:00:00Z" });
+  const page = await open(t, { items: [it], answers: answerOf(it, "a", { note: "Kept the red one." }), storage: VISIT }); if (!page) return;
+  const fold = card(page, it).locator("button.unfold");
+  await need(fold, `No. ${it.n} has no fold control`);
+  assert.equal(await fold.getAttribute("aria-expanded"), "false", `No. ${it.n} opens on load for a reply earlier than the last visit`);
+  assert.equal(await markName(page, it), null, `No. ${it.n} draws a New reply mark for a reply earlier than the last visit`);
+});
+
+// Case 3: a sunk item whose lastAnswer holds the owner's own answer, with no replied time, stays folded and draws no mark after a
+// Send on the open page. lastAnswer alone is no reply.
+test("a sunk item with lastAnswer set and no replied time stays folded with no New reply mark after a Send", async (t) => {
+  const sunk = mk("sunk-same", 1, { added: at(5), lastAnswer: { choice: "a", at: ANSWERED_AT, note: "" } }), fresh = mk("send-fresh", 2, { added: NEW_ADDED });
+  const page = await open(t, { items: [sunk, fresh], answers: answerOf(sunk), storage: VISIT, clock: LOAD_AT }); if (!page) return;
+  assert.equal(await sectionOf(page, sunk), "tier-answered", `No. ${sunk.n} is not in the Answered section`);
+  const fold = card(page, sunk).locator("button.unfold");
+  await need(fold, `No. ${sunk.n} has no fold control`);
+  assert.equal(await fold.getAttribute("aria-expanded"), "false", `No. ${sunk.n} is folded open on load with no replied time`);
+  assert.equal(await markName(page, sunk), null, `No. ${sunk.n} draws a New reply mark with no replied time`);
+  await choose(page, fresh, "b");
+  await send(page);
+  await written(page);
+  assert.equal(await fold.getAttribute("aria-expanded"), "false", `a Send on the open page opened No. ${sunk.n}`);
+  assert.equal(await markName(page, sunk), null, `a Send on the open page drew a New reply mark on No. ${sunk.n}`);
+});
+
+// Case 4: a Send on the open page moves no card and no mark. The card layout and the New reply mark read the same after it.
+test("a Send on the open page moves no card and no New reply mark", async (t) => {
+  const reply = repliedCard(), fresh = mk("send-open", 2, { added: NEW_ADDED });
+  const page = await open(t, { items: [reply, fresh], answers: answerOf(reply, "a", { note: "Kept the red one." }), storage: VISIT, clock: LOAD_AT, pageHtml: withSentMove("stay") }); if (!page) return;
+  assert.equal(await sectionOf(page, reply), "tier-answered", `No. ${reply.n} is not in the Answered section`);
+  const before = await layout(page), markBefore = await markName(page, reply);
+  assert.equal(markBefore, NEW_MARK, `No. ${reply.n} draws no New reply mark before the Send`);
+  await choose(page, fresh, "b");
+  await send(page);
+  await written(page);
+  await card(page, fresh).locator(".receipt").waitFor();
+  assert.deepEqual(await layout(page), before, "a Send on the open page moved a card");
+  assert.equal(await markName(page, reply), markBefore, `a Send on the open page changed the mark on No. ${reply.n}`);
+});
+
+// Case 5: a step updated after the visit draws open, and its row names the update.
+test("a step updated after the last visit draws open, and its row says Updated since your last visit", async (t) => {
+  const steps = stepsOf([["c1", "v2", 1, "active"], ["a2", "v2", 2, "todo"]]);
+  steps.a2.updatedAt = REPLIED_AT;
+  const page = await open(t, { pageHtml: phasePage(steps), storage: VISIT }); if (!page) return;
+  await assertBaked(page, steps);
+  await openStatus(page);
+  const row = page.locator('button[data-row="a2"]');
+  await need(row, "the step a2 has no row in the phase list");
+  assert.equal(await row.getAttribute("aria-expanded"), "true", "a2 draws closed though it was updated after the last visit");
+  assert.match(await page.locator("#s-a2").getAttribute("class"), /\bopen\b/, "a2's row does not carry the open class");
+  const label = await row.getAttribute("aria-label");
+  assert.match(label, /\. Updated since your last visit$/, `the row label is "${label}"`);
+});
+
+// A step updated before the last visit stays closed, with no Updated words.
+test("a step updated before the last visit stays closed, with no Updated words", async (t) => {
+  const steps = stepsOf([["c1", "v2", 1, "active"], ["a2", "v2", 2, "todo"]]);
+  const page = await open(t, { pageHtml: phasePage(steps), storage: VISIT }); if (!page) return;
+  await assertBaked(page, steps);
+  await openStatus(page);
+  const row = page.locator('button[data-row="a2"]');
+  await need(row, "the step a2 has no row in the phase list");
+  assert.equal(await row.getAttribute("aria-expanded"), "false", "a2 draws open though it was last updated before the visit");
+  assert.doesNotMatch(await row.getAttribute("aria-label"), /Updated since your last visit/, "a2's row names an update before the visit");
+});
+
+// Case 6: a replied time moves no card. The same page with and without replied draws every card in the same section and order.
+test("card order is the same with and without replied", async (t) => {
+  const plain = [mk("order-seen", 1, { added: at(5) }), mk("order-new", 2, { added: NEW_ADDED }), mk("order-sunk", 3, { added: at(6), reply: "Thanks, noted." })];
+  const dated = plain.map((it) => ({ ...it, replied: REPLIED_AT }));
+  const answers = answerOf(plain[2]);
+  const before = await open(t, { items: plain, answers, storage: VISIT }); if (!before) return;
+  const layoutBefore = await layout(before);
+  assert.equal(layoutBefore.length, 3, "the page did not draw the three cards");
+  const after = await open(t, { items: dated, answers, storage: VISIT }); if (!after) return;
+  assert.deepEqual(await layout(after), layoutBefore, "a replied time moved a card");
+});
+
+// Case 7: after load, waiting.visit holds the load's time. The page's clock is fixed at LOAD_AT, so the time the page writes is
+// LOAD_AT. The stored visit starts at VISIT_AT, earlier than LOAD_AT, so a page that writes nothing fails here.
+test("after load, waiting.visit holds an ISO time no earlier than the load's start", async (t) => {
+  const page = await open(t, { storage: VISIT, clock: LOAD_AT }); if (!page) return;
+  const visit = await page.evaluate(() => localStorage.getItem("waiting.visit"));
+  assert.match(visit ?? "", /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z$/, `waiting.visit is "${visit}", not an ISO time`);
+  assert.ok(Date.parse(visit) >= Date.parse(LOAD_AT), `waiting.visit is "${visit}", earlier than the load's start ${LOAD_AT}`);
+});
+
+// Case 8: with storage kept, the first load marks the card and the step, and a reload after it marks neither. The first load's
+// checks run first, so a page that marks nothing fails there, not at the reload.
+test("a reload that keeps storage drops the first load's marks: the card and the step fold and close again", async (t) => {
+  const it = repliedCard();
+  const steps = stepsOf([["c1", "v2", 1, "active"], ["a2", "v2", 2, "todo"]]);
+  steps.a2.updatedAt = REPLIED_AT;
+  const page = await open(t, { pageHtml: phasePage(steps), items: [it], answers: answerOf(it, "a", { note: "Kept the red one." }), storage: VISIT, keepStorage: true, clock: LOAD_AT }); if (!page) return;
+  const fold = card(page, it).locator("button.unfold");
+  await need(fold, `No. ${it.n} has no fold control on the first load`);
+  assert.equal(await fold.getAttribute("aria-expanded"), "true", "the first load does not open the reply card");
+  assert.equal(await markName(page, it), NEW_MARK, `the first load draws no New reply mark on No. ${it.n}`);
+  await openStatus(page);
+  const row = page.locator('button[data-row="a2"]');
+  await need(row, "the step a2 has no row in the phase list");
+  assert.equal(await row.getAttribute("aria-expanded"), "true", "the first load does not open the updated step");
+  // The reload runs the page's load again, with the visit the first load wrote (storage is kept, not reset).
+  await page.reload();
+  await page.waitForFunction("state.items.length > 0");
+  await page.waitForSelector(`#item-${it.id}`);
+  assert.equal(await markName(page, it), null, `after a reload No. ${it.n} still draws the New reply mark`);
+  const again = card(page, it).locator("button.unfold");
+  await need(again, `No. ${it.n} has no fold control after a reload`);
+  assert.equal(await again.getAttribute("aria-expanded"), "false", "after a reload the reply card is open again");
+  await openStatus(page);
+  const rowAgain = page.locator('button[data-row="a2"]');
+  await need(rowAgain, "the step a2 has no row after a reload");
+  assert.equal(await rowAgain.getAttribute("aria-expanded"), "false", "after a reload the updated step is open again");
+  assert.doesNotMatch(await rowAgain.getAttribute("aria-label"), /Updated since your last visit/, "after a reload the updated step still says Updated");
+});
+
 // ---------------------------------------------------------------- answered sink
 
 // An answered item sinks to the Answered section: after the open tiers, before Arbiter rulings, folded to its answer line.
@@ -2112,6 +2304,146 @@ const sectionIds = (page) => page.evaluate(() => [...document.querySelectorAll("
 const layout = (page) => page.evaluate(() => [...document.querySelectorAll("article.card")].map((c) => [c.closest("section.tier")?.id ?? null, c.id]));
 // The href of the rail row that a chip sits in, or null.
 const railRowOf = (page, it) => page.evaluate((id) => { const c = document.getElementById("c-" + id); const row = c && c.closest(".ov-tier"); const a = row && row.querySelector("a.ov-head"); return a ? a.getAttribute("href") : null; }, it.id);
+
+// ---------------------------------------------------------------- answered sink: arrivals on top, and a card sent on this visit
+// The names start "answered-sink:", so `--test-name-pattern answered-sink:` runs this block. An arrival (an item not on the page at load)
+// goes to the top of its tier under either SENT_MOVE value. Cards that are open at load keep today's order.
+// The chip ids of a tier's rail row, in order; [] when the row is absent.
+const railChipsIn = (page, k) => page.evaluate((key) => {
+  const head = document.querySelector(`#rail a.ov-head[href="#tier-${key}"]`);
+  const row = head && head.closest(".ov-tier");
+  return row ? [...row.querySelectorAll(".chips-n .nchip")].map((c) => c.id.slice(2)) : [];
+}, k);
+// Resolves once the store holds an answer for each id.
+const waitAnswered = (page, ids) => page.waitForFunction((list) => list.every((id) => !!window.__answers()[id]), ids);
+
+// Case 1: three cards answered on this visit and one open card, all ranked at load. An item that arrives after load is first in its tier
+// and first in its tier's rail row, under each value. Only the arrival's place is asserted: the order of the load-time cards is SENT_MOVE's to set.
+for (const value of ["stay", "sink"]) {
+  test(`answered-sink: an item that arrives after load is first in its tier and in its rail row, above the cards answered on this visit (SENT_MOVE ${value})`, async (t) => {
+    const sent = [1, 2, 3].map((n) => mk("arr-sent-" + n, n, { added: at(n), rank: n }));
+    const open1 = mk("arr-open", 4, { added: at(4), rank: 4 });
+    const page = await open(t, { items: [...sent, open1], pageHtml: withSentMove(value) }); if (!page) return;
+    for (const it of sent) await choose(page, it, "a");
+    await send(page);
+    await waitAnswered(page, sent.map((it) => it.id));
+    const arrival = mk("arr-new", 9, { added: at(28) });
+    await page.evaluate((it) => window.__putItem(it), arrival);
+    await card(page, arrival).waitFor();
+    assert.equal(await sectionOf(page, arrival), "tier-calm", `No. ${arrival.n} is not in the open tier`);
+    assert.equal((await cardsIn(page, "#tier-calm"))[0], arrival.id, `No. ${arrival.n} is not first in its tier`);
+    assert.equal((await railChipsIn(page, "calm"))[0], arrival.id, `No. ${arrival.n}'s rail chip is not first in its tier's row`);
+  });
+}
+
+// Case 2, sink: a card sent on this visit moves to the Answered section, folded. The next open card takes its slot in the tier.
+test("answered-sink: a card sent on this visit moves to the Answered section, folded, and the open cards keep their order (SENT_MOVE sink)", async (t) => {
+  const sent = mk("send-sink", 1, { added: at(1) }), o1 = mk("send-open-1", 2, { added: at(2) }), o2 = mk("send-open-2", 3, { added: at(3) });
+  const page = await open(t, { items: [sent, o1, o2], pageHtml: withSentMove("sink") }); if (!page) return;
+  // A note gives the sunk card a fold with something in it; a fold with nothing to hide would say something false.
+  await choose(page, sent, "a");
+  await addNote(page, sent, "Kept it.");
+  await send(page);
+  await waitAnswered(page, [sent.id]);
+  await card(page, sent).locator(".receipt").waitFor();
+  assert.equal(await sectionOf(page, sent), "tier-answered", `No. ${sent.n} did not move to the Answered section after its Send`);
+  const fold = card(page, sent).locator("button.unfold");
+  await need(fold, `No. ${sent.n} has no fold control in the Answered section`);
+  assert.equal(await fold.getAttribute("aria-expanded"), "false", `No. ${sent.n} is not folded after its Send`);
+  assert.deepEqual(await cardsIn(page, "#tier-calm"), [o1.id, o2.id], `the open cards of the tier do not hold their order above the sent card`);
+  assert.deepEqual(await railChipsIn(page, "calm"), [o1.id, o2.id], "the open tier's rail chips do not follow its cards");
+  assert.ok((await railChipsIn(page, "answered")).includes(sent.id), `No. ${sent.n}'s rail chip is not in the Answered row`);
+});
+
+// Case 2, stay: a card sent on this visit keeps its place in its tier, and so do its rail chips. This is today's order.
+test("answered-sink: a card sent on this visit keeps its place in its tier, and its rail chips keep theirs (SENT_MOVE stay)", async (t) => {
+  const sent = mk("send-stay", 1, { added: at(1) }), o1 = mk("send-stay-1", 2, { added: at(2) }), o2 = mk("send-stay-2", 3, { added: at(3) });
+  const page = await open(t, { items: [sent, o1, o2], pageHtml: withSentMove("stay") }); if (!page) return;
+  const before = await layout(page), chipsBefore = await railChipsIn(page, "calm");
+  await choose(page, sent, "a");
+  await send(page);
+  await waitAnswered(page, [sent.id]);
+  await card(page, sent).locator(".receipt").waitFor();
+  assert.deepEqual(await layout(page), before, "a Send on the open page moved a card");
+  assert.deepEqual(await railChipsIn(page, "calm"), chipsBefore, "a Send moved a rail chip");
+});
+
+// Change on a card sent this visit (SENT_MOVE sink): the card reopens in place, in the Answered section, as a Change on a sunk card does.
+test("answered-sink: a Change on a card sent this visit reopens it in place in the Answered section, its fold locked open (SENT_MOVE sink)", async (t) => {
+  const sent = mk("change-sent", 1, { added: at(1) }), o1 = mk("change-open", 2, { added: at(2) });
+  const page = await open(t, { items: [sent, o1], pageHtml: withSentMove("sink") }); if (!page) return;
+  await choose(page, sent, "a");
+  await addNote(page, sent, "Kept it."); // a note gives the sunk card a fold, as in the case above
+  await send(page);
+  await waitAnswered(page, [sent.id]);
+  await card(page, sent).locator(".receipt").waitFor();
+  assert.equal(await sectionOf(page, sent), "tier-answered", `No. ${sent.n} did not move to the Answered section after its Send`);
+  const answeredBefore = await cardsIn(page, "#tier-answered");
+  const c = page.locator(`#tier-answered #item-${sent.id}`);
+  await c.getByRole("button", { name: "Change" }).click();
+  assert.equal(await sectionOf(page, sent), "tier-answered", `Change moved No. ${sent.n} out of the Answered section`);
+  assert.deepEqual(await cardsIn(page, "#tier-answered"), answeredBefore, "Change moved a card within the Answered section");
+  const fold = c.locator("button.unfold");
+  await need(fold, `No. ${sent.n} has no fold control after Change`);
+  assert.equal(await fold.getAttribute("aria-expanded"), "true", "Change left the fold closed");
+  assert.equal(await fold.getAttribute("aria-disabled"), "true", "Change left the fold unlocked");
+  assert.equal(await c.locator(".opts").isVisible(), true, "the options did not open under Change");
+});
+
+// Case 3: the arrival is first before a reload. After a reload with the same data it is in its normal rank and age place, and the cards
+// saved before the load sit in the Answered section.
+test("answered-sink: a reload with the same data puts the former arrival in its normal rank and age place, and the sunk cards in the Answered section", async (t) => {
+  const sent = [1, 2].map((n) => mk("rl-sent-" + n, n, { added: at(n) }));
+  const open1 = mk("rl-open", 3, { added: at(3), rank: 1 });
+  const page = await open(t, { items: [...sent, open1] }); if (!page) return;
+  for (const it of sent) await choose(page, it, "a");
+  await send(page);
+  await waitAnswered(page, sent.map((it) => it.id));
+  const arrival = mk("rl-arrival", 9, { added: at(28) });
+  await page.evaluate((it) => window.__putItem(it), arrival);
+  await card(page, arrival).waitFor();
+  assert.equal((await cardsIn(page, "#tier-calm"))[0], arrival.id, `No. ${arrival.n} is not first in its tier before the reload`);
+  const again = await open(t, { items: [...sent, open1, arrival], answers: await answers(page) }); if (!again) return;
+  for (const it of sent) assert.equal(await sectionOf(again, it), "tier-answered", `No. ${it.n}, saved before the load, is not in the Answered section`);
+  assert.deepEqual(await cardsIn(again, "#tier-calm"), [open1.id, arrival.id], "after the reload the former arrival is not in its normal rank and age place");
+});
+
+// Case 4 (regression): a saved card with a lane sinks at load, folded, with its Filing pending pill and "waits on lane" said once.
+// A sunk card with no note, last answer or reply has nothing to fold, so it draws no fold control.
+test("answered-sink: a sunk card with no note, last answer or reply shows no fold control", async (t) => {
+  const it = mk("bare-sunk", 1, { added: at(5) }), other = mk("bare-open", 2, { added: NEW_ADDED });
+  const page = await open(t, { items: [it, other], answers: answerOf(it) }); if (!page) return;
+  assert.equal(await sectionOf(page, it), "tier-answered", `No. ${it.n} is not in the Answered section`);
+  assert.equal(await card(page, it).locator("button.unfold").count(), 0, `No. ${it.n} draws a fold control with nothing to hide`);
+});
+
+test("answered-sink: a saved card with a lane sinks at load, folded, with its Filing pending pill and its lane said once", async (t) => {
+  const it = mk("lane-sunk", 1, { added: at(5), lane: "ci-done-comment" }), other = mk("lane-open", 2, { added: NEW_ADDED });
+  const page = await open(t, { items: [it, other], answers: answerOf(it, "a", { note: "Kept the red one." }) }); if (!page) return;
+  assert.equal(await sectionOf(page, it), "tier-answered", `No. ${it.n} is not in the Answered section`);
+  const c = card(page, it), fold = c.locator("button.unfold");
+  await need(fold, `No. ${it.n} has no fold control`);
+  assert.equal(await fold.getAttribute("aria-expanded"), "false", `No. ${it.n} is not folded at load`);
+  assert.match(flat(await c.locator(".top").innerText()), /Filing pending, sent .*waits on lane ci-done-comment$/, `No. ${it.n}'s top row is not Filing pending, sent, then the lane`);
+  const said = (await c.textContent()).split("waits on lane").length - 1;
+  assert.equal(said, 1, `No. ${it.n} says "waits on lane" ${said} times`);
+});
+
+// Case 5 (regression, #1345): a reply that arrives on a card sunk at load opens its fold in place. No card moves.
+test("answered-sink: a reply that arrives on a card sunk at load opens its fold in place, and no card moves", async (t) => {
+  const it = mk("live-reply", 1, { added: at(5) }), other = mk("live-open", 2, { added: NEW_ADDED });
+  const page = await open(t, { items: [it, other], answers: answerOf(it, "a", { note: "Kept the red one." }), storage: VISIT }); if (!page) return;
+  assert.equal(await sectionOf(page, it), "tier-answered", `No. ${it.n} is not in the Answered section`);
+  const fold = card(page, it).locator("button.unfold");
+  await need(fold, `No. ${it.n} has no fold control`);
+  assert.equal(await fold.getAttribute("aria-expanded"), "false", `No. ${it.n} is open before any reply`);
+  const before = await layout(page);
+  await page.evaluate((item) => window.__putItem(item), { ...it, reply: "Thanks, noted.", replied: REPLIED_AT });
+  await page.waitForFunction((id) => document.querySelector(`#item-${id} button.unfold`)?.getAttribute("aria-expanded") === "true", it.id).catch(() => {});
+  assert.equal(await fold.getAttribute("aria-expanded"), "true", `a reply that arrived on the open page did not open No. ${it.n}`);
+  assert.equal(await markName(page, it), NEW_MARK, `No. ${it.n} draws no New reply mark for its new reply`);
+  assert.deepEqual(await layout(page), before, "the reply moved a card");
+});
 
 test("an answered item sinks to the Answered section, after the open tiers and before Arbiter rulings, folded to its answer line", async (t) => {
   const ans = mk("sink-ans", 1, { added: at(5) }), open1 = mk("sink-open", 2, { added: NEW_ADDED });
@@ -2140,7 +2472,7 @@ test("an answered item already filed stays in the Answered section, with the fil
 
 test("an open card answered on the page stays in its tier until reload, and a fresh load sinks it to the Answered section", async (t) => {
   const it = mk("order-send", 1, { added: at(5) }), other = mk("order-other", 2, { added: NEW_ADDED });
-  const page = await open(t, { items: [it, other] }); if (!page) return;
+  const page = await open(t, { items: [it, other], pageHtml: withSentMove("stay") }); if (!page) return;
   await choose(page, it, "a");
   await send(page);
   await page.waitForFunction((id) => !!window.__answers()[id], it.id);
@@ -2264,7 +2596,7 @@ test("Answered section: with the section folded by its head, a rail chip of a su
 
 test("Answered section: a Send made before the first receipts snapshot keeps its card in its tier when the receipts arrive", async (t) => {
   const it = mk("window-send", 1, { added: at(5) }), other = mk("window-other", 2, { added: NEW_ADDED });
-  const page = await open(t, { items: [it, other], holdReceipts: true }); if (!page) return;
+  const page = await open(t, { items: [it, other], holdReceipts: true, pageHtml: withSentMove("stay") }); if (!page) return;
   await choose(page, it, "a");
   await send(page);
   await page.waitForFunction((id) => !!window.__answers()[id], it.id);
@@ -4247,8 +4579,9 @@ const anchorOf = (page, sent) => page.evaluate((ids) => {
   return null;
 }, sent.map((it) => "item-" + it.id));
 // Scroll anchoring stays off unless the case asks for it.
-const openSend = async (t, { items, width, height, scheme, anchored }) => {
-  const page = await open(t, { items, scheme, viewport: { width, height } });
+// sentMove names the SENT_MOVE value a case pins (see withSentMove); none keeps the page's own value.
+const openSend = async (t, { items, width, height, scheme, anchored, sentMove }) => {
+  const page = await open(t, { items, scheme, viewport: { width, height }, pageHtml: sentMove ? withSentMove(sentMove) : undefined });
   if (page && !anchored) await noAnchor(page);
   return page;
 };
@@ -4276,7 +4609,7 @@ function checkRise(pre, post, when, sentIt, anchorIt, belowIt) {
 async function sendBelowPartial(t, { width, scheme, anchored }) {
   // At 390 wide the sent card is taller than the phone's screen, so the viewport is taller to keep the card below on screen.
   const above = mk("above", 4), sent = mk("sent", 5), below = mk("below", 6);
-  const page = await openSend(t, { items: [...LEADS, above, sent, below, ...FILLER], width, height: width === 390 ? 1000 : 800, scheme, anchored }); if (!page) return;
+  const page = await openSend(t, { items: [...LEADS, above, sent, below, ...FILLER], width, height: width === 390 ? 1000 : 800, scheme, anchored, sentMove: "stay" }); if (!page) return;
   await choose(page, sent, "a");
   await settleAt(page, above, "bottom", 30);
   assert.equal(await anchorOf(page, [sent]), "item-above", "fixture: the card above is not the anchor");
@@ -4287,7 +4620,7 @@ async function sendBelowPartial(t, { width, scheme, anchored }) {
 // A card sent as the topmost card on screen, its top inside the band: its top stays, and the card below rises.
 async function sendTopOfBand(t, { scheme }) {
   const sent = mk("sent", 4, { context: LONG }), below = mk("below", 5);
-  const page = await openSend(t, { items: [...HOLDS, sent, below, ...FILLER], width: 1280, height: 800, scheme, anchored: false }); if (!page) return;
+  const page = await openSend(t, { items: [...HOLDS, sent, below, ...FILLER], width: 1280, height: 800, scheme, anchored: false, sentMove: "stay" }); if (!page) return;
   await choose(page, sent, "a");
   await settleAt(page, sent, "top", 20);
   assert.equal(await anchorOf(page, [sent]), "item-sent", "fixture: the sent card is not the topmost card on screen");
@@ -4298,7 +4631,7 @@ async function sendTopOfBand(t, { scheme }) {
 // Two cards sent together: the first is wholly above the band, the second starts inside it. The second keeps its top, and the card below rises by the second's drop.
 async function sendTwoOneAbove(t, { width, scheme }) {
   const wholly = mk("wholly-above", 4, { context: LONG }), visible = mk("visible", 5, { context: LONG }), below = mk("below", 6);
-  const page = await openSend(t, { items: [...LEADS, wholly, visible, below, ...FILLER], width, height: 800, scheme, anchored: false }); if (!page) return;
+  const page = await openSend(t, { items: [...LEADS, wholly, visible, below, ...FILLER], width, height: 800, scheme, anchored: false, sentMove: "stay" }); if (!page) return;
   await choose(page, wholly, "a");
   await choose(page, visible, "b");
   await settleAt(page, wholly, "bottom", -4);
@@ -4317,7 +4650,7 @@ async function sendTwoOneAbove(t, { width, scheme }) {
 // A tall card at 390 wide, its top above the band and its bottom inside it: the card below keeps its top, and the receipt lands just above it.
 async function sendTallOverBand(t, { scheme }) {
   const tall = mk("tall", 4, { context: LONG }), below = mk("below", 5);
-  const page = await openSend(t, { items: [...LEADS, tall, below, ...FILLER], width: 390, height: 800, scheme, anchored: false }); if (!page) return;
+  const page = await openSend(t, { items: [...LEADS, tall, below, ...FILLER], width: 390, height: 800, scheme, anchored: false, sentMove: "stay" }); if (!page) return;
   await choose(page, tall, "a");
   await settleAt(page, tall, "bottom", 60);
   assert.equal(await anchorOf(page, [tall]), "item-below", "fixture: the card below is not the anchor");
@@ -4334,7 +4667,7 @@ async function sendTallOverBand(t, { scheme }) {
 // A card sent with the card below it starting under the bar: the sent card keeps its top, and the card below rises.
 async function sendOverUnderBar(t, { scheme }) {
   const sent = mk("sent", 4, { context: LONG }), below = mk("under-bar", 5);
-  const page = await openSend(t, { items: [...HOLDS, sent, below, ...FILLER], width: 1280, height: 800, scheme, anchored: false }); if (!page) return;
+  const page = await openSend(t, { items: [...HOLDS, sent, below, ...FILLER], width: 1280, height: 800, scheme, anchored: false, sentMove: "stay" }); if (!page) return;
   await choose(page, sent, "a");
   await settleAt(page, sent, "top", 60);
   assert.equal(await anchorOf(page, [sent]), "item-sent", "fixture: the sent card is not the anchor");
@@ -4342,6 +4675,229 @@ async function sendOverUnderBar(t, { scheme }) {
   assert.ok(rd.pre["item-under-bar"].top >= rd.band.bottom - 1, `fixture: the card below starts above the bar: ${rd.pre["item-under-bar"].top} against ${rd.band.bottom}`);
   for (const [when, post] of reads(rd)) checkRise(rd.pre, post, when, sent, sent, below);
 }
+
+// Under SENT_MOVE "sink" a Send takes the card out of its tier, so nothing on screen may jump. Positions are viewport tops: the page may
+// scroll to keep its rail growth out of view, so the scroll position is not asserted. A card above the sent card keeps its viewport top,
+// and the open card below takes the sent card's top, or, when the sent card is last in its tier, the cards above it hold still.
+async function sinkSendInView(t, { width, anchored = false }) {
+  const sent = mk("sink-sent", 4, { context: LONG }), below = mk("sink-below", 5, { context: LONG });
+  const page = await openSend(t, { items: [...LEADS, sent, below, ...FILLER], width, height: 800, scheme: "light", anchored, sentMove: "sink" }); if (!page) return;
+  await choose(page, sent, "a");
+  await settleAt(page, sent, "top", 60);
+  const rd = await sendAndRead(page, [sent]);
+  const S = "item-sink-sent", B = "item-sink-below";
+  assert.ok(rd.pre[S].top >= rd.band.top && rd.pre[S].top < rd.band.bottom, `fixture: the sent card is not in view before Send at ${rd.pre[S].top}`);
+  const above = Object.keys(rd.pre).filter((id) => id !== S && rd.pre[id].top < rd.pre[S].top - 1);
+  assert.ok(above.length >= 3, `fixture: ${above.length} cards sit above the sent card`);
+  for (const [when, post] of reads(rd)) for (const id of above) assert.ok(Math.abs(post[id].top - rd.pre[id].top) <= 1, `${when}: ${id} moved on screen on Send: ${rd.pre[id].top} to ${post[id].top}`);
+  const took = reads(rd).map(([when, post]) => `${when} ${post[B].top}`).join(", ");
+  assert.ok(reads(rd).every(([, post]) => Math.abs(post[B].top - rd.pre[S].top) <= 2), `the open card below did not take the sent card's top ${rd.pre[S].top}: ${took}`);
+}
+async function sinkSendLastInTier(t, { width, anchored = false }) {
+  const sent = mk("sink-last", 4, { context: LONG });
+  // Nothing in a later tier: a stood pick there would go with the Send. The card is tall enough to scroll to the band.
+  const page = await openSend(t, { items: [...HOLDS, ...LEADS, sent], width, height: 800, scheme: "light", anchored, sentMove: "sink" }); if (!page) return;
+  await choose(page, sent, "a");
+  await settleAt(page, sent, "top", 60);
+  assert.equal(await sectionOf(page, sent), "tier-calm", "fixture: the sent card is not in the open tier");
+  const rd = await sendAndRead(page, [sent]);
+  const S = "item-sink-last";
+  assert.ok(rd.pre[S].top >= rd.band.top && rd.pre[S].top < rd.band.bottom, `fixture: the sent card is not in view before Send at ${rd.pre[S].top}`);
+  assert.equal(await sectionOf(page, sent), "tier-answered", `No. ${sent.n} did not move to the Answered section after its Send`);
+  const above = Object.keys(rd.pre).filter((id) => id !== S && rd.pre[id].top < rd.pre[S].top - 1);
+  assert.ok(above.length >= 3, `fixture: ${above.length} cards sit above the sent card`);
+  for (const [when, post] of reads(rd)) for (const id of above) assert.ok(Math.abs(post[id].top - rd.pre[id].top) <= 1, `${when}: ${id} moved on Send: ${rd.pre[id].top} to ${post[id].top}`);
+}
+for (const width of [1280, 390]) {
+  test(`answered-sink: a sent card in view: the open card below takes its top, and nothing above it moves on screen, at ${width} wide (SENT_MOVE sink)`, async (t) => {
+    await sinkSendInView(t, { width });
+  });
+  test(`answered-sink: a sent card last in its tier: nothing above it moves on screen, at ${width} wide (SENT_MOVE sink)`, async (t) => {
+    await sinkSendLastInTier(t, { width });
+  });
+}
+// The two 390 cases again with the browser's scroll anchoring on. The cases above keep it off, so they stay as they are.
+test("answered-sink: a sent card in view, with scroll anchoring on: the open card below takes its top, and nothing above it moves on screen, at 390 wide (SENT_MOVE sink)", async (t) => {
+  await sinkSendInView(t, { width: 390, anchored: true });
+});
+test("answered-sink: a sent card last in its tier, with scroll anchoring on: nothing above it moves on screen, at 390 wide (SENT_MOVE sink)", async (t) => {
+  await sinkSendLastInTier(t, { width: 390, anchored: true });
+});
+
+// Scroll anchoring stays on in the cases below: they test what a reader's browser does with the page's own compensation. A card in view
+// is one whose box overlaps the band the owner reads, from the header's bottom edge to the top of the bar.
+const inViewIds = (pre, band) => Object.keys(pre).filter((id) => pre[id].top < band.bottom && pre[id].bottom > band.top);
+const answeredRow = (page) => page.locator('#rail a.ov-head[href="#tier-answered"]').count();
+const SENT_TALL = LONG.repeat(3);
+
+// The first sink Send adds the rail's Answered row, which on a narrow screen sits above the list. The cards in view above the sent card keep
+// their viewport tops, and the open card below takes the sent card's top. A card below that one moves up by the sent card's leaving.
+async function sinkRailRowHolds(t, { width }) {
+  const sent = mk("rail-sent", 4, { context: LONG }), below = mk("rail-below", 5, { context: LONG });
+  const page = await openSend(t, { items: [...LEADS, sent, below, ...FILLER], width, height: 800, scheme: "light", anchored: true, sentMove: "sink" }); if (!page) return;
+  await choose(page, sent, "a");
+  await settleAt(page, sent, "top", 60);
+  const rd = await sendAndRead(page, [sent]);
+  const S = "item-rail-sent", B = "item-rail-below";
+  assert.ok(rd.pre[S].top >= rd.band.top && rd.pre[S].top < rd.band.bottom, `fixture: the sent card is not in view before Send at ${rd.pre[S].top}`);
+  assert.equal(await answeredRow(page), 1, "the Send did not add the Answered row to the rail");
+  const shift = rd.pre[B].top - rd.pre[S].top;
+  for (const [when, post] of reads(rd)) {
+    for (const id of inViewIds(rd.pre, rd.band)) {
+      if (id === S || id === B) continue;
+      const want = rd.pre[id].top < rd.pre[S].top ? rd.pre[id].top : rd.pre[id].top - shift;
+      assert.ok(Math.abs(post[id].top - want) <= 2, `${when}: ${id} moved on screen on Send: ${rd.pre[id].top} to ${post[id].top}`);
+    }
+    assert.ok(Math.abs(post[B].top - rd.pre[S].top) <= 2, `${when}: the open card below did not take the sent card's top ${rd.pre[S].top}: ${post[B].top}`);
+  }
+}
+
+// A card sent with its top above the screen's top edge, at a desktop width. The sent card leaves above the cards in view, so they keep their viewport tops.
+async function sinkSendPartlyAbove(t) {
+  const sent = mk("part-sent", 4, { context: SENT_TALL }), below = mk("part-below", 5, { context: LONG });
+  const page = await openSend(t, { items: [...LEADS, sent, below, ...FILLER], width: 1280, height: 800, scheme: "light", anchored: true, sentMove: "sink" }); if (!page) return;
+  await choose(page, sent, "a");
+  await settleAt(page, sent, "top", -300);
+  const rd = await sendAndRead(page, [sent]);
+  const S = "item-part-sent";
+  assert.ok(rd.pre[S].top < rd.band.top && rd.pre[S].bottom > rd.band.top + 100, `fixture: the sent card is not partly above the screen: top ${rd.pre[S].top}, bottom ${rd.pre[S].bottom}`);
+  for (const [when, post] of reads(rd)) for (const id of inViewIds(rd.pre, rd.band)) {
+    if (id === S) continue;
+    assert.ok(Math.abs(post[id].top - rd.pre[id].top) <= 2, `${when}: ${id} moved on screen on Send: ${rd.pre[id].top} to ${post[id].top}`);
+  }
+}
+
+// Undo of the Send that added the Answered row, on a phone. Once the row is gone, every card in view is back at its pre-Send viewport top.
+async function sinkUndoRailRow(t) {
+  const sent = mk("undo-sent", 4, { context: LONG }), below = mk("undo-below", 5, { context: LONG });
+  const page = await openSend(t, { items: [...LEADS, sent, below, ...FILLER], width: 390, height: 800, scheme: "light", anchored: true, sentMove: "sink" }); if (!page) return;
+  await choose(page, sent, "a");
+  await settleAt(page, sent, "top", 60);
+  const pre = await cardMap(page), band = await bandOf(page);
+  await send(page);
+  await card(page, sent).locator(".receipt").waitFor();
+  await page.locator("#sent .stamp").waitFor();
+  await frameWait(page, 2);
+  assert.equal(await answeredRow(page), 1, "the Send did not add the Answered row to the rail");
+  await page.locator("#undoBtn").click();
+  await page.waitForFunction(() => Object.keys(window.__answers()).length === 0);
+  await frameWait(page, 2);
+  assert.equal(await answeredRow(page), 0, "the Answered row stayed on the rail after Undo");
+  const back = await cardMap(page);
+  // The returning card goes back to its own slot, so only the cards it did not pass are checked.
+  const S = "item-undo-sent";
+  for (const id of inViewIds(pre, band)) {
+    if (id === S) continue;
+    assert.ok(Math.abs(back[id].top - pre[id].top) <= 2, `${id} moved on screen on Undo: ${pre[id].top} to ${back[id].top}`);
+  }
+}
+for (const width of [390, 800]) {
+  test(`answered-sink: the first Send that adds the rail's Answered row keeps the cards in view, with scroll anchoring on, at ${width} wide (SENT_MOVE sink)`, async (t) => {
+    await sinkRailRowHolds(t, { width });
+  });
+}
+test("answered-sink: a card sent with its top above the screen keeps the cards in view, with scroll anchoring on, at 1280 wide (SENT_MOVE sink)", async (t) => {
+  await sinkSendPartlyAbove(t);
+});
+test("answered-sink: Undo of the Send that added the Answered row moves no card in view, with scroll anchoring on, at 390 wide (SENT_MOVE sink)", async (t) => {
+  await sinkUndoRailRow(t);
+});
+
+// Scroll anchoring stays on in every case below. A Send is a script click, not a mouse press, since a press moves the focus to the Send button.
+const focusedId = (page) => page.evaluate(() => (document.activeElement && document.activeElement.id) || "");
+// A frame's load event does not reach the window in capture, so each frame counts its own load. A frame moved in the DOM reloads, and a new one is caught when it is added.
+const watchLoads = (page) => page.evaluate(() => {
+  window.__loads = 0;
+  const bump = () => { window.__loads++; };
+  const on = (f) => { if (f.tagName === "IFRAME") f.addEventListener("load", bump); };
+  const attach = (n) => { if (n.nodeType === 1) { on(n); n.querySelectorAll("iframe").forEach(on); } };
+  document.querySelectorAll("iframe").forEach(on);
+  new MutationObserver((ms) => ms.forEach((m) => m.addedNodes.forEach(attach))).observe(document.body, { childList: true, subtree: true });
+});
+
+// Focus on a radio of a card below the sent card (or above it, as a control), then a Send that sinks the sent card. Returns what the reader sees.
+async function sinkWithFocusBelow(t, { focusOn }) {
+  const sent = mk("rec-sent", 4), radio = mk("rec-radio", 5), frame = mk("rec-frame", 6, { designs: [{ slug: "s1", label: "Option a" }] });
+  const page = await open(t, { items: [...LEADS, sent, radio, frame, ...FILLER], designData: { s1: "<p>one</p>" }, viewport: { width: 1280, height: 800 }, pageHtml: withSentMove("sink") }); if (!page) return null;
+  await choose(page, sent, "a");
+  await settleAt(page, sent, "top", 60);
+  const target = focusOn === "above" ? LEADS[0] : radio, radioId = "o-" + target.id + "-a";
+  const frames = await page.locator("#item-rec-frame iframe.dframe").count();
+  await page.locator("#" + radioId).focus();
+  const focused = await focusedId(page);
+  await watchLoads(page);
+  await page.evaluate(() => document.getElementById("send").click());
+  await card(page, sent).locator(".receipt").waitFor();
+  await page.locator("#sent .stamp").waitFor();
+  await frameWait(page, 3);
+  return { frames, focused, radioId, active: await focusedId(page), loads: await page.evaluate(() => window.__loads) };
+}
+test("answered-sink: a Send that sinks a card keeps the focus on a radio below it, with scroll anchoring on, at 1280 wide (SENT_MOVE sink)", async (t) => {
+  const r = await sinkWithFocusBelow(t, { focusOn: "below" }); if (!r) return;
+  assert.equal(r.focused, r.radioId, "fixture: the radio below the sent card did not take the focus before Send");
+  assert.equal(r.active, r.radioId, `focus left the radio below the sent card on Send: now on "${r.active}"`);
+});
+test("answered-sink: a Send that sinks a card reloads no design frame below it, with scroll anchoring on, at 1280 wide (SENT_MOVE sink)", async (t) => {
+  const r = await sinkWithFocusBelow(t, { focusOn: "below" }); if (!r) return;
+  assert.equal(r.frames, 1, "fixture: the design frame below the sent card is not there");
+  assert.equal(r.loads, 0, "a design frame below the sent card reloaded on Send");
+});
+test("answered-sink: control: a Send that sinks a card keeps the focus on a radio above it, with scroll anchoring on, at 1280 wide (SENT_MOVE sink)", async (t) => {
+  const r = await sinkWithFocusBelow(t, { focusOn: "above" }); if (!r) return;
+  assert.equal(r.focused, r.radioId, "fixture: the radio above the sent card did not take the focus before Send");
+  assert.equal(r.active, r.radioId, `focus left the radio above the sent card on Send: now on "${r.active}"`);
+});
+
+// A sent card taller than the view, its top above the screen and its bottom below it. The next open card must take the sent card's old top,
+// and the view must not move to the card above. The control is a short card in view: the same rule, with nothing to hold.
+async function sinkSpanOrShort(t, { spanning }) {
+  // A long context folds after three lines, so the tall card carries many options instead.
+  const tallOpts = Array.from({ length: 24 }, (_, i) => opt(String.fromCharCode(97 + i), "Option " + (i + 1)));
+  const sent = mk("span-sent", 4, spanning ? { options: tallOpts } : {}), below = mk("span-below", 5, { context: LONG });
+  const page = await openSend(t, { items: [...LEADS, sent, below, ...FILLER], width: 390, height: 800, scheme: "light", anchored: true, sentMove: "sink" }); if (!page) return;
+  await choose(page, sent, "a");
+  await settleAt(page, sent, "top", spanning ? -300 : 60);
+  const rd = await sendAndRead(page, [sent]);
+  const S = "item-span-sent", B = "item-span-below";
+  if (spanning) assert.ok(rd.pre[S].top < 0 && rd.pre[S].bottom > 800 && rd.pre[S].h > 800, `fixture: the sent card does not span the view: top ${rd.pre[S].top}, bottom ${rd.pre[S].bottom}, height ${rd.pre[S].h}`);
+  for (const [when, post] of reads(rd)) assert.ok(Math.abs(post[B].top - rd.pre[S].top) <= 2, `${when}: the next open card is at ${post[B].top}, not at the sent card's old top ${rd.pre[S].top}`);
+}
+test("answered-sink: a sent card taller than the view, with scroll anchoring on: the next open card takes its top and the view stays, at 390 wide (SENT_MOVE sink)", async (t) => {
+  await sinkSpanOrShort(t, { spanning: true });
+});
+test("answered-sink: control: a sent card shorter than the view, with scroll anchoring on: the next open card takes its top, at 390 wide (SENT_MOVE sink)", async (t) => {
+  await sinkSpanOrShort(t, { spanning: false });
+});
+
+// Undo of a Send from a card whose top sits at `want` in the viewport. Undo returns the card, and it must come back at its pre-Send top.
+async function undoFromTop(t, { width, want }) {
+  const sent = mk("undo-top", 4, { context: LONG }), below = mk("undo-top-below", 5, { context: LONG });
+  const page = await openSend(t, { items: [...LEADS, sent, below, ...FILLER], width, height: 800, scheme: "light", anchored: true, sentMove: "sink" }); if (!page) return;
+  await choose(page, sent, "a");
+  const bt = (await bandOf(page)).top;
+  await settleAt(page, sent, "top", want - bt);
+  const S = "item-undo-top";
+  const pre = await cardMap(page);
+  assert.ok(Math.abs(pre[S].top - want) <= 2, `fixture: the sent card's top is ${pre[S].top}, not ${want}`);
+  await send(page);
+  await card(page, sent).locator(".receipt").waitFor();
+  await page.locator("#sent .stamp").waitFor();
+  await frameWait(page, 2);
+  await page.locator("#undoBtn").click();
+  await page.waitForFunction(() => Object.keys(window.__answers()).length === 0);
+  await frameWait(page, 3);
+  const back = await cardMap(page);
+  assert.ok(Math.abs(back[S].top - pre[S].top) <= 2, `the card came back at ${back[S].top}, not at its pre-Send top ${pre[S].top}`);
+}
+test("answered-sink: Undo of a Send from a card that starts above the screen returns it to its pre-Send top, with scroll anchoring on, at 390 wide (SENT_MOVE sink)", async (t) => {
+  await undoFromTop(t, { width: 390, want: -76 });
+});
+test("answered-sink: Undo of a Send from a card that starts above the screen returns it to its pre-Send top, with scroll anchoring on, at 1280 wide (SENT_MOVE sink)", async (t) => {
+  await undoFromTop(t, { width: 1280, want: -76 });
+});
+test("answered-sink: control: Undo of a Send from a card in view returns it to its pre-Send top, with scroll anchoring on, at 390 wide (SENT_MOVE sink)", async (t) => {
+  await undoFromTop(t, { width: 390, want: 60 });
+});
 
 // An answer that arrives without a Send, on a card in view: the card keeps its height while in view, and drops once wholly off the screen.
 async function answerWithoutSend(t, { width, scheme }) {
@@ -6596,7 +7152,7 @@ test("a closed item with no arbiter flag stays hidden next to a closed arbiter i
   assert.equal(await overturn(page).count(), 1, "the page offers Overturn on more than the arbiter item");
 });
 
-// Round 2: an answer or a draft that is no overturn. A ruling was an open item once, so a saved answer or a draft under its id
+// An answer or a draft that is no overturn. A ruling was an open item once, so a saved answer or a draft under its id
 // may hold an option key ("a"). Only choice "overturn" is an overturn; any other record under a ruling's id is stale.
 const staleAnswer = { [ARBITER.id]: { item: ARBITER.id, n: 901, at: "2026-10-30T18:00:00Z", choice: "a", note: "" } };
 const staleDraft = { "waiting.draft": JSON.stringify({ [ARBITER.id]: { choice: "a" } }) };
