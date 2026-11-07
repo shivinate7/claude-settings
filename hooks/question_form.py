@@ -1027,7 +1027,7 @@ def page_item_hit(tool_input, cwd=""):
         if hit[0]:
             return hit, writes
     for op, entry in metas:
-        hit = park_id_hit(op, entry, _write_data(entry))
+        hit = park_id_hit(op, entry, _write_data(entry, cwd))
         if hit:
             return (PARK_RULE, hit), writes
     return PASS, writes

@@ -15,7 +15,7 @@ A parked line is a `meta/page.parked` entry the owner can Unpark or Drop. The pa
   - Known limit: the pattern is compiled with `re.ASCII` so `\d` and `\w` match what JavaScript matches. A pattern without `^` and `$` anchors would let the guard (fullmatch) and the page (`test`) disagree; the block holds an anchored pattern (debt note `parked-id-pattern-anchors`).
   - Known limit: a bad block passes. The page tests and the real-page case in `hooks/test_question_form.py` go red on a dropped or changed block.
   - Known limit: it cannot see a stored line. A list written before the rule keeps its lines, and the page shows the same two acts off.
-- The writer adds a line in one update pinned with `if_version`, with `{id, ref, note}`: `id` a slug of the `ref`, 32 characters or fewer, unique in the list (skill `waiting-page`, "To park a line"). Before this record no step told a session to write an id.
+- The writer adds a line in one update pinned with `if_version`, with `{id, ref, note}`: `id` the item's id when it fullmatches the `parkId` pattern and is unique in the list, else a new slug of the `ref` that does (skill `waiting-page`, "Route and close", the Park step). Before this record no step told a session to write an id.
 
 Incident:
 
