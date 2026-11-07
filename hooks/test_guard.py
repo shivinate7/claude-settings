@@ -94,6 +94,7 @@ FAMILIES = {
     "stream": "live streams, narrating commands, ln -s, waiter loops and background end conditions",
     "write": "the silent write",
     "push-delete": "push and delete",
+    "push-needs-fail-record": "a shell git push refused when the session's transcript shows a PR known to the session and a newest reviewer or design-reviewer report with no posted record after it that parses and holds that report's role and verdict; a PR-less session, a dry run, a non-push command, and a missing or unreadable transcript are allowed",
     "linked-node-modules": "a dependency install or a recursive delete through a node_modules that is a link",
     "env": "environment files",
     "git-env": "a command that sets GIT_DIR, GIT_WORK_TREE or GIT_INDEX_FILE",
@@ -9842,6 +9843,280 @@ for _trust_tool in TRUST_TOOLS:
 trust_allow("an unrelated remote tool (list_sessions) in a lane session allows", LIST_SESSIONS,
             role_path("lane"))
 
+
+# =========================================================================== 5f-2. push needs a fail record
+#
+# Rule push-needs-fail-record. A shell `git push` is refused when the session's own transcript shows, in
+# order: a PR known to the session (a create_pull_request that succeeded, or a posted review record); then
+# a newest reviewer or design-reviewer report, of any verdict (its Done line: PASS, FAIL or PARTIAL, a round
+# or a fix check); and no posted review record after that report that parses, whose comment call returned
+# no error, and that holds a line with the report's role and verdict (a Round line, or the Fix check line for
+# a fix check). The report reads from the Agent result, from a later task-notification, or from a
+# queued_command attachment. Its verdict is the Done line, never a finding line. PR #1467 pushed its
+# round-1 fix before the FAIL record was posted; PR #1490 did the same with a round-1 PASS. A session with
+# no PR known is allowed: the first push is never blocked on a transcript that shows no PR (a known miss,
+# pinned below).
+FAMILY = "push-needs-fail-record"
+
+PFR_RULE = "push-needs-fail-record"
+PFR_BRANCH = "notes-delete-pass"   # the lane's branch: a refusal never names it (rule git-remedy-never-names-target)
+PFR_PUSH = VCS + " push origin HEAD:" + PFR_BRANCH
+PFR_MODEL = "claude-sonnet-5-5"
+PFR_FIX_SHA = "fedcba9876543210fedcba9876543210fedcba98"   # the reviewed head of a fix check, never the Head
+PFR_AGENT_ID = "a1b2c3d4e5f607182"                          # 17 characters, the agent_id an agent's call carries
+PFR_AGENT_TOOL = "Agent"
+PFR_CREATE_PR = "mcp__github__create_pull_request"
+PFR_ADD_COMMENT = "mcp__github__add_issue_comment"
+PFR_FINDING = "Finding: the guard would let the push through before the record is posted."
+PFR_DIR = os.path.join(ROOT, "failrec")
+PFR_UNREADABLE = os.path.join(PFR_DIR, "unreadable.jsonl")   # a folder, so the guard's open() fails on it
+
+
+def _load_merge():
+    """merge/merge.py, loaded by path. Its review_body writes the record form and its parse_review reads it
+    back, so no case names a copy of that form."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("merge_under_test", os.path.join(REPO, "merge", "merge.py"))
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+MERGE = _load_merge()
+
+
+def pfr_record(rounds=(), fix=None):
+    """A posted review record for PR 1467, written by merge's own form. A body the reader refuses is a fixture
+    error, so it stops the run here instead of turning a case red for the wrong cause."""
+    body = MERGE.review_body(1467, SHA, "normal", "no", list(rounds), "not owed", fix)
+    if MERGE.parse_review(body) is None:
+        sys.exit("fixture setup failed: merge.parse_review refuses the record body %r" % body[:60])
+    return body
+
+
+def pfr_pr():
+    """The lane opens its pull request: a create_pull_request call whose result is no error."""
+    return [role_use("toolu_pr1", PFR_CREATE_PR, {"owner": "shivinate7", "repo": "claude-settings",
+                                                  "head": PFR_BRANCH, "base": "main", "title": "notes delete pass"}),
+            role_result("toolu_pr1", '{"number": 1467}')]
+
+
+def pfr_report(verdict, *lines):
+    """A reviewer's report: the Done heading, its verdict line, then the body."""
+    return "\n".join(["Done", verdict, *lines])
+
+
+def pfr_verdict(verdict, n=1, model=PFR_MODEL):
+    """A Done line for round n: `FAIL, round 1 of 3, <model>`."""
+    return "%s, round %d of 3, %s" % (verdict, n, model)
+
+
+def pfr_fix_verdict(verdict, model=PFR_MODEL):
+    """A Done line for a fix check: `FAIL, fix check, <model>`."""
+    return "%s, fix check, %s" % (verdict, model)
+
+
+def pfr_call(tool_id, report, role="reviewer", blocks=False):
+    """An Agent call in the foreground: its result carries the report, as one string or as a list of text
+    blocks when `blocks` is set."""
+    call = role_use(tool_id, PFR_AGENT_TOOL, {"subagent_type": role, "description": "review round",
+                                              "prompt": "review the diff"})
+    if blocks:
+        return [call, role_result(tool_id, report)]
+    return [call, role_result_block(tool_id, content=report)]
+
+
+def pfr_background(tool_id, role="reviewer"):
+    """An Agent call in the background: its result is only the launch ack, and the report arrives later in a
+    notice that names this call."""
+    return [role_use(tool_id, PFR_AGENT_TOOL, {"subagent_type": role, "description": "review round",
+                                               "prompt": "review the diff", "run_in_background": True}),
+            role_result(tool_id, "Started in the background.")]
+
+
+def pfr_notice(tool_id, report, attachment=False):
+    """The completion notice for call `tool_id`: a user message with string content, or a queued_command
+    attachment record with the same text."""
+    text = ("<task-notification>\n<task-id>%s</task-id>\n<tool-use-id>%s</tool-use-id>\n"
+            "<status>completed</status>\n<summary>Agent \"review\" completed</summary>\n"
+            "<result>%s</result>\n</task-notification>" % (tool_id, tool_id, report))
+    if attachment:
+        return [json.dumps({"type": "attachment", "attachment": {"type": "queued_command", "prompt": text}})]
+    return [role_said(text)]
+
+
+def pfr_post(tool_id, body, error=False):
+    """A comment posted on the PR. An error result means the post did not happen."""
+    call = role_use(tool_id, PFR_ADD_COMMENT, {"owner": "shivinate7", "repo": "claude-settings",
+                                               "issue_number": 1467, "body": body})
+    if error:
+        return [call, role_result_block(tool_id, content="403 Forbidden", is_error=True)]
+    return [call, role_result(tool_id, '{"id": 9001}')]
+
+
+def pfr_filler(count):
+    """Unrelated reads, the transcript's bulk: each a call and its result, neither a report nor a PR."""
+    lines = []
+    for i in range(count):
+        lines.append(role_use("toolu_rd%d" % i, "Read", {"file_path": "notes/%d.md" % i}))
+        lines.append(role_result("toolu_rd%d" % i, "read"))
+    return lines
+
+
+PFR_FAIL = pfr_report(pfr_verdict("FAIL", 1), PFR_FINDING)           # a reviewer FAIL, round 1
+PFR_FAIL_RECORD = pfr_record([(1, "reviewer", PFR_MODEL, "FAIL")])    # a posted record that holds it
+PFR_PARTIAL = pfr_report(pfr_verdict("PARTIAL", 1), PFR_FINDING)     # a reviewer PARTIAL, round 1
+PFR_PARTIAL_RECORD = pfr_record([(1, "reviewer", PFR_MODEL, "PARTIAL")])
+PFR_PASS = pfr_report(pfr_verdict("PASS", 1), PFR_FINDING)          # a reviewer PASS, round 1
+PFR_PASS_RECORD = pfr_record([(1, "reviewer", PFR_MODEL, "PASS")])
+
+# The session's own files, one per case, each a list of JSON lines. An empty list is a zero-byte file.
+PFR_LINES = {
+    # The incident: the PR is open, the FAIL comes back in the foreground, then the push.
+    "incident": pfr_pr() + pfr_call("toolu_rev1", PFR_FAIL),
+    "incident-notice": pfr_pr() + pfr_background("toolu_rev1") + pfr_notice("toolu_rev1", PFR_FAIL),
+    "incident-attachment": pfr_pr() + pfr_background("toolu_rev1")
+                           + pfr_notice("toolu_rev1", PFR_FAIL, attachment=True),
+    "fix-check": pfr_pr() + pfr_call("toolu_rev1", pfr_report(pfr_fix_verdict("FAIL"), PFR_FINDING), blocks=True),
+    "partial": pfr_pr() + pfr_call("toolu_rev1", PFR_PARTIAL),
+    "design-fail": pfr_pr() + pfr_call("toolu_rev1", PFR_FAIL, role="design-reviewer"),
+    "design-partial": pfr_pr() + pfr_call("toolu_rev1", PFR_PARTIAL, role="design-reviewer"),
+    # The builder's push reads the parent file. Its own file holds a PASS with its record, which a guard that
+    # read the wrong file would take as clean.
+    "builder": pfr_pr() + pfr_call("toolu_rev1", PFR_FAIL),
+    "builder-clean": pfr_pr(),
+    # The #1490 shape: a reviewer PASS with the PR known and no record after it.
+    "pass-no-record": pfr_pr() + pfr_call("toolu_rev1", PFR_PASS),
+    "design-fail-reviewer-record": pfr_pr() + pfr_call("toolu_rev1", PFR_FAIL, role="design-reviewer")
+                                   + pfr_post("toolu_c1", PFR_FAIL_RECORD),
+    "pass-fail-record": pfr_pr() + pfr_call("toolu_rev1", PFR_PASS) + pfr_post("toolu_c1", PFR_FAIL_RECORD),
+    "fail-then-older-pass-record": pfr_pr() + pfr_call("toolu_rev1", pfr_report(pfr_verdict("FAIL", 2), PFR_FINDING))
+                                   + pfr_post("toolu_c1", pfr_record([(1, "reviewer", PFR_MODEL, "PASS")])),
+    "fail-then-errored-record": pfr_pr() + pfr_call("toolu_rev1", PFR_FAIL)
+                                + pfr_post("toolu_c1", PFR_FAIL_RECORD, error=True),
+    "fail-then-fail-record": pfr_pr() + pfr_call("toolu_rev1", PFR_FAIL) + pfr_post("toolu_c1", PFR_FAIL_RECORD),
+    "partial-then-partial-record": pfr_pr() + pfr_call("toolu_rev1", PFR_PARTIAL)
+                                   + pfr_post("toolu_c1", PFR_PARTIAL_RECORD),
+    "fix-check-record": pfr_pr() + pfr_call("toolu_rev1", pfr_report(pfr_fix_verdict("FAIL"), PFR_FINDING), blocks=True)
+                        + pfr_post("toolu_c1", pfr_record(fix=(PFR_FIX_SHA, "reviewer", PFR_MODEL, "FAIL"))),
+    # A round report is cleared by a Round line only; a Fix check line does not clear it.
+    "round-fail-fix-record": pfr_pr() + pfr_call("toolu_rev1", PFR_FAIL)
+                             + pfr_post("toolu_c1", pfr_record(fix=(PFR_FIX_SHA, "reviewer", PFR_MODEL, "FAIL"))),
+    "fail-then-comment": pfr_pr() + pfr_call("toolu_rev1", PFR_FAIL)
+                         + pfr_post("toolu_c1", "Round 1: reviewer, %s, FAIL\nNet value: not owed" % PFR_MODEL),
+    # The PR is known only from a posted record: the R1 FAIL record, then an R2 FAIL report, then the push.
+    "record-known-pr": pfr_call("toolu_rev0", PFR_FAIL) + pfr_post("toolu_c0", PFR_FAIL_RECORD)
+                       + pfr_call("toolu_rev1", pfr_report(pfr_verdict("FAIL", 2), PFR_FINDING)),
+    "bold-lead": pfr_pr() + pfr_call("toolu_rev1", pfr_report("**%s**" % pfr_verdict("FAIL", 1), PFR_FINDING)),
+    "long": pfr_pr() + pfr_call("toolu_rev1", PFR_FAIL) + pfr_filler(1500),
+    "fail-then-fail-pass": pfr_pr() + pfr_call("toolu_rev1", PFR_FAIL)
+                           + pfr_call("toolu_rev2", pfr_report(pfr_verdict("PASS", 2), PFR_FINDING)),
+    "fail-then-pass-record": pfr_pr() + pfr_call("toolu_rev1", PFR_FAIL)
+                             + pfr_call("toolu_rev2", pfr_report(pfr_verdict("PASS", 2), PFR_FINDING))
+                             + pfr_post("toolu_c1", pfr_record([(1, "reviewer", PFR_MODEL, "FAIL"),
+                                                                (2, "reviewer", PFR_MODEL, "PASS")])),
+    "pass-finding-says-fail": pfr_pr() + pfr_call("toolu_rev1", pfr_report(
+        pfr_verdict("PASS", 1), "Finding: the old guard would FAIL open on a missing file.",
+        "- " + pfr_verdict("FAIL", 1) + " (an earlier reading, now fixed)"))
+                              + pfr_post("toolu_c1", PFR_PASS_RECORD),
+    "no-review": pfr_pr(),
+    "no-pr-fail": pfr_call("toolu_rev1", PFR_FAIL),
+    "empty": [],
+}
+# An agent's own file, `<session>/subagents/agent-<id>.jsonl`, keyed by the session name it sits under.
+PFR_AGENT_LINES = {
+    "builder": pfr_call("toolu_rev9", PFR_PASS) + pfr_post("toolu_c9", PFR_PASS_RECORD),
+    "builder-clean": pfr_call("toolu_rev1", PFR_FAIL),
+}
+
+
+def pfr_path(name):
+    return os.path.join(PFR_DIR, name + ".jsonl")
+
+
+def pfr_agent_path(name):
+    return os.path.join(PFR_DIR, name, "subagents", "agent-" + PFR_AGENT_ID + ".jsonl")
+
+
+def write_pfr_transcripts():
+    """Each fixture as JSONL under this run's folder. `unreadable` is a folder, so the guard's open() fails on it."""
+    for name, lines in PFR_LINES.items():
+        write(pfr_path(name), "".join(line + "\n" for line in lines))
+    for name, lines in PFR_AGENT_LINES.items():
+        write(pfr_agent_path(name), "".join(line + "\n" for line in lines))
+    os.makedirs(PFR_UNREADABLE, exist_ok=True)
+
+
+lazy_fixture([pfr_path(name) for name in PFR_LINES] + [PFR_UNREADABLE], write_pfr_transcripts)
+
+
+def pfr_refuse(name, command, transcript, tool="Bash", agent_id=None):
+    """A push the guard refuses under push-needs-fail-record. The refusal names the rule, never the branch."""
+    sh("push-needs-fail-record: " + name, command, "deny", rule=PFR_RULE, lacks=PFR_BRANCH, tool=tool,
+       cwd=PUSHFEAT, agent_id=agent_id, transcript=transcript)
+
+
+def pfr_allow(name, command, transcript, agent_id=None):
+    """A command the guard lets through silently under push-needs-fail-record."""
+    sh("push-needs-fail-record: " + name, command, "allow", silent=True, cwd=PUSHFEAT, agent_id=agent_id,
+       transcript=transcript)
+
+
+pfr_refuse("the incident: a reviewer FAIL in the foreground result, then the push", PFR_PUSH, pfr_path("incident"))
+pfr_refuse("the incident: the FAIL read from a task-notification user record, then the push", PFR_PUSH,
+           pfr_path("incident-notice"))
+pfr_refuse("the incident: the FAIL read from a queued_command attachment, then the push", PFR_PUSH,
+           pfr_path("incident-attachment"))
+pfr_refuse("the incident from the PowerShell tool, then the push", PFR_PUSH, pfr_path("incident"), tool="PowerShell")
+pfr_refuse("a FAIL fix check report, then the push", PFR_PUSH, pfr_path("fix-check"))
+pfr_refuse("a reviewer PARTIAL round 1, then the push", PFR_PUSH, pfr_path("partial"))
+pfr_refuse("a design-reviewer FAIL round 1, then the push", PFR_PUSH, pfr_path("design-fail"))
+pfr_refuse("a design-reviewer PARTIAL round 1, then the push", PFR_PUSH, pfr_path("design-partial"))
+pfr_refuse("a builder push: the parent file holds the FAIL, the agent's own file a PASS, then the push", PFR_PUSH,
+           pfr_path("builder"), agent_id=PFR_AGENT_ID)
+pfr_refuse("a FAIL round 2, then a record for the older PASS round 1 only, then the push", PFR_PUSH,
+           pfr_path("fail-then-older-pass-record"))
+pfr_refuse("a FAIL round 1, then a record post that errored, then the push", PFR_PUSH,
+           pfr_path("fail-then-errored-record"))
+pfr_refuse("a FAIL round 1, then a comment that is no record, then the push", PFR_PUSH,
+           pfr_path("fail-then-comment"))
+pfr_refuse("the PR known only from a posted record: a FAIL record, a FAIL round 2, then the push", PFR_PUSH,
+           pfr_path("record-known-pr"))
+pfr_refuse("a FAIL round 1 with a bold lead on its Done line, then the push", PFR_PUSH, pfr_path("bold-lead"))
+pfr_refuse("a FAIL round 1, then 1500 later reads, then the push", PFR_PUSH, pfr_path("long"))
+# The incident of PR #1490: a round-1 PASS, pushed before its record was posted. Any verdict needs a record.
+pfr_refuse("the #1490 shape: a reviewer PASS round 1, the PR known, no record, then the push", PFR_PUSH,
+           pfr_path("pass-no-record"))
+pfr_refuse("a FAIL round 1, then a PASS round 2 with no PASS record after it, then the push", PFR_PUSH,
+           pfr_path("fail-then-fail-pass"))
+# A record clears a report only when it holds a line with that report's role and verdict.
+pfr_refuse("a design-reviewer FAIL cleared only by a reviewer record line, then the push", PFR_PUSH,
+           pfr_path("design-fail-reviewer-record"))
+pfr_refuse("a reviewer PASS cleared only by a FAIL record line, then the push", PFR_PUSH,
+           pfr_path("pass-fail-record"))
+pfr_refuse("a FAIL round 1 cleared only by a Fix check record line, then the push", PFR_PUSH,
+           pfr_path("round-fail-fix-record"))
+
+pfr_allow("a FAIL round 1, then a FAIL record posted, then the push", PFR_PUSH, pfr_path("fail-then-fail-record"))
+pfr_allow("a PARTIAL round 1, then a PARTIAL record posted, then the push", PFR_PUSH,
+          pfr_path("partial-then-partial-record"))
+pfr_allow("a fix check FAIL with its Fix check record posted, then the push", PFR_PUSH,
+          pfr_path("fix-check-record"))
+pfr_allow("a FAIL round 1, then a PASS round 2 with its record posted, then the push", PFR_PUSH,
+          pfr_path("fail-then-pass-record"))
+pfr_allow("a PASS whose findings mention FAIL, with its PASS record posted, then the push", PFR_PUSH,
+          pfr_path("pass-finding-says-fail"))
+pfr_allow("a PR open with no review yet, then the push", PFR_PUSH, pfr_path("no-review"))
+# A known miss, pinned: a FAIL with no PR known to the session is allowed, so the first push is never blocked.
+pfr_allow("a FAIL with no PR known to the session, then the push", PFR_PUSH, pfr_path("no-pr-fail"))
+pfr_allow("no transcript_path on the payload, then the push", PFR_PUSH, None)
+pfr_allow("an unreadable transcript, then the push", PFR_PUSH, PFR_UNREADABLE)
+pfr_allow("an empty transcript, then the push", PFR_PUSH, pfr_path("empty"))
+pfr_allow("a dry run beside a FAIL", VCS + " push --dry-run origin HEAD:" + PFR_BRANCH, pfr_path("incident"))
+pfr_allow("a git commit whose message says push, beside a FAIL", VCS + ' commit -m "push after the record"',
+          pfr_path("incident"))
+pfr_allow("a builder push: the parent holds no report, the agent's own file holds a FAIL", PFR_PUSH,
+          pfr_path("builder-clean"), agent_id=PFR_AGENT_ID)
 
 # =========================================================================== 5g. archive of a lane
 FAMILY = "lane-closes-after-records"
