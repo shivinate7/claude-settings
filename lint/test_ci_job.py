@@ -1378,6 +1378,7 @@ READ_PINNED = 'test "$(cat "$CLAUDE_SETTINGS_DIR/marker")" = pinned'
 READ_LOCAL = 'test "$(cat "$CLAUDE_SETTINGS_DIR/marker")" = local'
 ABSENT_SHA = "deadbeef" * 5  # forty hex digits that neither the fixture clone nor its origin holds
 CODE_CHECK_STUB = "import pathlib\npathlib.Path('pinned-code-check.txt').write_text('pinned\\n')\n"
+STE_CHANGED_STUB = "#!/bin/sh\necho pinned > ste-pinned.txt\n"
 
 
 def fixture_git(cwd, *args):
@@ -1390,13 +1391,16 @@ def fixture_rc(cwd, *args):
     return subprocess.run(["git", *args], cwd=cwd, capture_output=True, env=ENV).returncode
 
 
-def fixture_commit(cwd, files, message):
-    """Write each file (relative path -> text), commit them all, and return the new HEAD sha."""
+def fixture_commit(cwd, files, message, executable=()):
+    """Write each file (relative path -> text), commit them all, and return the new HEAD sha. A path in `executable`
+    is made runnable before the add, so git records it as 755."""
     for rel, text in files.items():
         path = os.path.join(cwd, rel)
         os.makedirs(os.path.dirname(path), exist_ok=True)
         with open(path, "w", encoding="utf-8", newline="\n") as f:
             f.write(text)
+        if rel in executable:
+            os.chmod(path, 0o755)
     fixture_git(cwd, "add", "-A")
     fixture_git(cwd, "commit", "-q", "-m", message)
     return fixture_git(cwd, "rev-parse", "HEAD")
@@ -1425,14 +1429,14 @@ class PinnedSettings(Job):
         with open(os.path.join(self.decoy, "marker"), "w", encoding="utf-8", newline="\n") as f:
             f.write("local\n")
 
-    def settings(self, *, fetch_only=False, extra=None):
+    def settings(self, *, fetch_only=False, extra=None, executable=()):
         """Build the fixture clone. Without fetch_only the clone is cloned from origin and holds A; with it the clone has
         its own history, so A is absent until ci-job fetches it. Scope first (P7): each marker reads what the case needs."""
         origin = os.path.join(self.fixture, "origin")
         self.clone = os.path.join(self.fixture, "clone")
         os.makedirs(origin)
         fixture_git(origin, "init", "-q", "-b", "main")
-        self.sha_a = fixture_commit(origin, {"marker": "pinned\n", **(extra or {})}, "pinned")
+        self.sha_a = fixture_commit(origin, {"marker": "pinned\n", **(extra or {})}, "pinned", executable)
         if fetch_only:
             os.makedirs(self.clone)
             fixture_git(self.clone, "init", "-q", "-b", "main")
@@ -1539,13 +1543,13 @@ class PinnedSettings(Job):
         self.settings()
         rc, lines, out = self.run_pinned(
             step("pin", uses=PIN_USES % self.sha_a),
-            step("record", 'echo "$CLAUDE_SETTINGS_DIR" > seen.txt\n' + READ_PINNED),
+            step("record", 'echo "$CLAUDE_SETTINGS_DIR" > seen.txt\ncp "$CLAUDE_SETTINGS_DIR/marker" held.txt'),
             args=("--step", "record"))
         seen_file = os.path.join(self.root, "seen.txt")
         seen = open(seen_file, encoding="utf-8").read().strip() if os.path.isfile(seen_file) else ""
-        marker = os.path.join(seen, "marker") if seen else ""
-        held = open(marker, encoding="utf-8").read().strip() if os.path.isfile(marker) else None
-        self.assertEqual(held, "pinned", "the step did not run in a pinned tree (CLAUDE_SETTINGS_DIR held %r):\n%s"
+        held_file = os.path.join(self.root, "held.txt")  # the marker, copied out during the run: the tree is gone after it
+        held = open(held_file, encoding="utf-8").read().strip() if os.path.isfile(held_file) else None
+        self.assertEqual(held, "pinned", "the step did not run in a pinned tree (its marker copy held %r):\n%s"
                          % (held, out))
         self.assertFalse(os.path.exists(seen), "the pinned tree is still on disk after the run: " + seen)
         listed = fixture_git(self.clone, "worktree", "list", "--porcelain")
@@ -1577,6 +1581,14 @@ class PinnedSettings(Job):
         local = os.path.join(CHECKOUT, "actions", "code-check", "code_check.py")
         self.assertNotEqual(os.path.realpath(found.group(1)), os.path.realpath(local),
                             "code_check.py ran from the local copy, not the pinned tree: " + line)
+
+    def test_a_remote_ste_lint_runs_the_pinned_trees_ste_changed(self):
+        self.settings(extra={"bin/ste-changed": STE_CHANGED_STUB}, executable=("bin/ste-changed",))
+        rc, lines, out = self.run_pinned(
+            step("ste lint", uses="shivinate7/claude-settings/actions/ste-lint@%s" % self.sha_a),
+            args=("--base", "origin/main", "--step", "ste lint"))
+        self.assertTrue(os.path.isfile(os.path.join(self.root, "ste-pinned.txt")),
+                        "the remote ste-lint ran ci-job's own bin/ste-changed, not the pinned tree's:\n" + out)
 
     def test_a_pin_missing_from_the_clone_is_fetched_from_its_origin(self):
         self.settings(fetch_only=True)
