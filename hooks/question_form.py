@@ -310,11 +310,15 @@ def _write_data(entry, cwd=""):
 WIDENS_TEXT = "Goes against your ruling: a repo changes to fit a shared tool, never the tool to fit a repo"
 WIDENS_REASON = ("A pick never names an option that widens what a shared tool accepts: the owner ruled that "
                  "a repo changes to fit a shared tool, never the tool to fit a repo. Make the pick an option "
-                 "where the repo changes to match the shared format, or leave pick out.")
+                 "where the repo changes to match the shared format, or leave pick out. A question whose only other "
+                 "option widens is already answered: the owner ruled this, so drop the question and do the "
+                 "recommended option. A Based on (ruling) line does not lift this refusal.")
 CHAT_WIDENS_REASON = ("A recommended option never widens what a shared tool accepts: the owner ruled that a "
                       "repo changes to fit a shared tool, never the tool to fit a repo. Recommend an option "
                       "where the repo changes to match the shared format, and give the widening option no "
-                      "(Recommended) label.")
+                      "(Recommended) label. A question whose only other option widens is already answered: the owner ruled "
+                      "this, so drop the question and do the recommended option. A Based on (ruling) line does "
+                      "not lift this refusal.")
 # Older sessions still write these words in chat; the mark keeps refusing them. No card, rule text or
 # reason carries them.
 LEGACY_WIDENS_TEXT = "Goes against your uniform ruling (t18)"
@@ -346,6 +350,43 @@ def widens_pick_hit(data) -> str:
     if any(isinstance(o, dict) and isinstance(o.get("key"), str) and o["key"] in keys
            and o.get(WIDENS_KEY) is True for o in options):
         return "pick names a widening option"
+    return ""
+
+
+ONLY_WIDENS_HIT = "the only option besides the recommended one widens a shared tool"
+
+
+def _only_alternative_widens(options, recommended, widening) -> bool:
+    """True when the question has exactly two options, one recommended and not widening (a recommended widening
+    option is the pick rule's hit) and the other widening. The owner's ruling (decision uniform-over-variants)
+    already answers such a question: the repo changes to fit the shared tool, so there is nothing to ask. A
+    third option, or a multi pick naming several options, is a real choice and passes."""
+    if len(options) != 2:
+        return False
+    first, second = options
+    return any(recommended(a) and not widening(a) and not recommended(b) and widening(b)
+               for a, b in ((first, second), (second, first)))
+
+
+def widens_only_alternative_hit(data) -> str:
+    """ONLY_WIDENS_HIT when this decision has two options, one recommended (the `pick`, a str or a list of
+    keys, or a label with "(recommended)") and the other marked `widens: true`. Like the pick rule,
+    a write with no `options` list cannot be judged and passes."""
+    if not isinstance(data, dict) or data.get("kind", "decision") != "decision":
+        return ""
+    options = data.get("options")
+    if not isinstance(options, list):
+        return ""
+    options = [o for o in options if isinstance(o, dict)]
+    pick = data.get("pick")
+    keys = {p for p in ([pick] if isinstance(pick, str) else pick if isinstance(pick, list) else [])
+            if isinstance(p, str)}
+    if _only_alternative_widens(
+            options,
+            lambda o: (isinstance(o.get("key"), str) and o["key"] in keys)
+            or bool(RECOMMENDED.search(_option_text(o, "label"))),
+            lambda o: o.get(WIDENS_KEY) is True):
+        return ONLY_WIDENS_HIT
     return ""
 
 
@@ -915,7 +956,7 @@ def item_hit(op, entry, cwd=""):
     hit = port_item_hit(op, data)
     if hit:
         return "port-question", hit
-    hit = widens_pick_hit(data)
+    hit = widens_pick_hit(data) or widens_only_alternative_hit(data)
     if hit:
         return "uniform-pick", hit
     hit = press_link_hit(op, data)
@@ -1306,6 +1347,10 @@ def _chat_question_hit(question, options):
         label, desc = _option_text(o, "label"), _option_text(o, "description")
         if RECOMMENDED.search(label) and WIDENS_MARK.search(label + " " + desc):
             return "uniform-pick", "recommended option goes against the uniform ruling"
+    if _only_alternative_widens(options, lambda o: bool(RECOMMENDED.search(_option_text(o, "label"))),
+                                lambda o: bool(WIDENS_MARK.search(_option_text(o, "label") + " "
+                                                                  + _option_text(o, "description")))):
+        return "uniform-pick", ONLY_WIDENS_HIT
     for o in options:
         label, desc = _option_text(o, "label"), _option_text(o, "description")
         links = [{"url": u} for u in CHAT_URL.findall(desc)]
