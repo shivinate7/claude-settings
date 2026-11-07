@@ -30,8 +30,9 @@ until it exits (decision `merge-reinstalls-from-main`: each merge reinstalls fro
   may take it. A release that fails prints one line. It stops nothing.
 - **Unlock.** `merge --unlock [branch]` removes the lock for the branch, or for the default branch when no
   branch is named. It removes the lock whether its holder is live or not, and even when its commit cannot be
-  read. The delete is a leased push on the sha it read, so a lock taken after the read stays. It prints
-  "removed", or "nothing to remove" when no lock is there or the lock is already released (expires 0).
+  read. The delete is a leased push on the sha it listed, so a lock taken after the listing stays. It prints
+  "removed", or "nothing to remove" when no lock is there or the lock is already released (expires 0). A
+  released lock whose commit cannot be read is released again, and it prints "removed".
   Where the delete is refused, it releases the lock to an expired commit instead, and it still prints
   "removed".
 
@@ -49,8 +50,8 @@ carries no such label. The code raises the exception named in each item.
   extension would pass 6 h, or the push failed.
 - Rate wait unextendable (sweep row `rate-wait-unextendable`; `NetStop`): a GitHub rate-limit wait needs
   the lock extended first, and the extension fails. Code: `retry_net`.
-- Unlock failed (sweep row `unlock-failed`; `Stop`): the delete push fails, and the released-commit push
-  fails too.
+- Unlock failed (sweep row `unlock-failed`; `Stop`): the delete push fails, the released-commit push
+  fails too, and the ref is still listed.
 
 Known gaps, in `docs/debts/notes.md`:
 
