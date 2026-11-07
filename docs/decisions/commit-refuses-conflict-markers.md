@@ -13,7 +13,7 @@ Rule `conflict-markers` in `hooks/guard.py` refuses a commit or a push that woul
 - `push --all`, `--mirror` and a tags-only push name no range, so they are not read.
 - A failed git read, or a repo with no commits, is no hit (`guard-that-cries-wolf-is-spent`). `sh -c` and `eval` are not read (`guard-guards-mistakes-only`).
 - Why not a git pre-commit hook: a global `core.hooksPath` replaces each repo's `.git/hooks`, and a repo that sets its own `core.hooksPath` (such as `scripts/githooks`) overrides the global one, by git-config's order (repository config over global). So it would either break a repo's hooks or skip the repo silently.
-- Cost: one `git diff --check` per judged commit, and one `git diff --check` over the sent range per push. No log, file or process.
+- Cost: one `git diff --check` per judged commit. Per push, one three-dot `git diff --check` against the remote-tracking ref, built from the arguments with no other spawn. Only when that ref is missing: one `git rev-parse` and up to two more diffs, against the upstream and then the default base. A `git show` runs only when a marker finding needs its line read. No log, file or process. `record_push_cost_case` in `hooks/test_guard.py` pins these counts (the coordinator, 2026-11-07 10:34 CST: cut the process starts, never raise the budget).
 
 Protected by the `conflict-markers` cases in `hooks/test_guard.py`, red before the rule landed.
 
