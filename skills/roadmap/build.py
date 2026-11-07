@@ -104,8 +104,8 @@ The upkeep list also prints one line per expired note (decision `notes-name-thei
 checkout's debt notes file whose `Fix: none` form carries an `Until: YYYY-MM-DD` before today, as
 `  expired note: <slug> (Until <date>) in <path>`. A checkout with no notes file, or no expired note, prints
 nothing. The grammar and the date (FIXED_TODAY, else the clock) come from lint/check_record_slugs.py, the one
-home; a fault reading them prints one `expired notes: unknown (<why>)` line, never silence, except a layout fault, which
-the build already warns of on stderr.
+home; a fault reading them prints one `expired notes: unknown (<why>)` line, never silence. A layout fault reads
+`unknown (the layout could not be read)`, with no file name.
 
 Before it builds, it refuses a record branch with git conflict markers (step c72) in any file under
 SCANNED, and writes no page.
@@ -1632,8 +1632,8 @@ def expired_note_lines(repo):
         return ["  expired note: %s (Until %s) in %s" % (slug, until, path)
                 for path, slug, until in check_record_slugs.expired_notes(str(repo), check_record_slugs.today())]
     except Exception as err:  # a read that could not run is unknown, never a clear list
-        if type(err).__name__ == "LayoutError":  # the layout fault is already warned of on stderr; no second report
-            return []
+        if type(err).__name__ == "LayoutError":  # the text names the extras file, which the build's stdout does not
+            return ["  expired notes: unknown (the layout could not be read)"]
         return ["  expired notes: unknown (%s)" % err]
     finally:
         if str(LINT) in sys.path:
