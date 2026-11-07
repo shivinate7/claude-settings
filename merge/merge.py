@@ -31,6 +31,12 @@
                           --lint-unknown-ok gives a reason; it is then logged and no `PASS:` line prints. Takes no lock, merges
                           and pushes nothing; any session may run it, cloud included. Cost per call: one ci-job run (about 550 s,
                           measured once on one PR head), one worktree.
+                          A repo whose config names merge.laneTests (a profile in REPLAY_PROFILES, hooks/mutate_guard.py) also runs,
+                          in that tree once the lint has passed, the suites the profile's selector lists for the lane's changed
+                          files, plus the changed suites. A red suite, or one that dies with no verdict, refuses; a select or install
+                          failure, or a suite timeout, is an unknown that --lint-unknown-ok lifts (the changed suites still run).
+                          The PASS line counts the suites run. Added cost: one selector run per changed product file, one install
+                          (once, for a non-empty set), and the selected suites, each killed at 120 s. A repo without the field pays none.
   merge --idle-lanes --live FILE
                           one line per lane the roadmap's live file shows done and safe to archive, then a summary line. Reads
                           skills/roadmap/build.py (the upkeep row `lanes to archive`). Takes no lock and no merge role, merges and
@@ -2202,7 +2208,7 @@ def after_merge(root, cmds):
 # ------------------------------------------------------------------ the flow
 
 MERGE_DEFAULTS = {"method": "merge", "deadlineMinutes": 45, "requiredChecks": "protection", "afterMerge": []}
-MERGE_FIELDS = set(MERGE_DEFAULTS) | {"deleteBranch", "ignoreChecks", "keepBranches", "readyChecks", "standingGrant"}
+MERGE_FIELDS = set(MERGE_DEFAULTS) | {"deleteBranch", "ignoreChecks", "keepBranches", "laneTests", "readyChecks", "standingGrant"}
 
 def host_default_branch(root):
     # time.sleep is looked up at call time, so a test's patch of it holds. No retry inside `shared_deadline`, as in Host.gh.
@@ -2342,6 +2348,7 @@ def load_config(root, base, path):
                   (isinstance(am, list) and all(map(ne, am)), "afterMerge"),
                   ("readyChecks" not in m or isinstance(m["readyChecks"], list) and m["readyChecks"] and all(map(ne, m["readyChecks"])), "readyChecks"),
                   (isinstance(m.get("keepBranches", []), list) and all(map(plain_name, m.get("keepBranches", []))), "keepBranches"),
+                  ("laneTests" not in m or ne(m["laneTests"]), "laneTests"),  # a profile name; whether it is one is read at the lane lint, where the registry loads
                   (rc == "protection" or isinstance(rc, list) and rc and all(map(ne, rc)), "requiredChecks")):
         if not ok:
             raise Stop(f"{path} on {ref}: merge.{k} is not valid: {m[k]!r}.")
@@ -2441,37 +2448,82 @@ def ci_job_run(wt, *args):
         return "unknown", [l.rstrip() for l in lines if l.startswith("unknown")] or [f"(no unknown line read; ci-job exit {c})"], log, True
     return "unknown", [f"ci-job exited {c}"], log, False
 
-def lane_lint(root, target, host, base="", unknown_ok=""):
+def lane_tests_profile(root, base, config):
+    """-> (name, profile) of the repo's merge.laneTests, read from origin/<base>, or None when the config or the field is absent.
+    A repo that names none reads no further, so its lane lint is as before. The profile is the one in REPLAY_PROFILES
+    (hooks/mutate_guard.py), the one home of a repo's test selector. A name that is no profile stops, naming the field and the name."""
+    c, out = git(root, "fetch", "-q", "origin", f"+refs/heads/{base}:refs/remotes/origin/{base}")
+    if c:
+        raise Stop(f"git fetch origin {base} failed: {out} {LANE_LINT_CITE}")
+    c, text = git(root, "show", f"origin/{base}:{config}")
+    try:
+        block = json.loads(text).get("merge") if not c else None
+    except (ValueError, AttributeError):
+        block = None  # a config that does not parse says no laneTests here; load_config refuses it where the merge reads it
+    if not isinstance(block, dict) or "laneTests" not in block:
+        return None
+    name = block["laneTests"]
+    if not isinstance(name, str) or not name.strip():
+        raise Stop(f"{config} on origin/{base}: merge.laneTests must be a profile name, not {name!r}. {LANE_LINT_CITE}")
+    import mutate_guard  # hooks/mutate_guard.py, on sys.path from the top of this file; heavy, so only a repo that names laneTests loads it
+    profile = mutate_guard.REPLAY_PROFILES.get(name)
+    if profile is None:
+        known = ", ".join(sorted(mutate_guard.REPLAY_PROFILES))
+        raise Stop(f"{config} on origin/{base}: merge.laneTests names {name!r}, which is no profile in REPLAY_PROFILES (hooks/mutate_guard.py). Known profiles: {known}. {LANE_LINT_CITE}")
+    return name, profile
+
+def lane_lint(root, target, host, base="", unknown_ok="", config=".github/stamp.json"):
     """The lint a lane passes before its head goes to the batch runner (decision lanes-run-no-full-ci-job): `ci-job checks --lint --base origin/<base>`
     in a temporary detached worktree at the head, removed on every exit. Takes no lock; merges and pushes nothing. -> 0 on a pass, else raises Stop.
     A target of digits is a PR number: its head and base come from the PR. Any other target is a commit or ref.
     ci-job's stderr (a `start: <step>` line per step, verdict's heartbeat) passes live to this process's stderr; only its stdout is read.
-    Exit 1 of ci-job (a FAIL) refuses always. Exit 2 (an unknown) refuses unless `unknown_ok` is a non-blank reason; it is then logged, with no PASS line."""
+    Exit 1 of ci-job (a FAIL) refuses always. Exit 2 (an unknown) refuses unless `unknown_ok` is a non-blank reason; it is then logged, with no PASS line.
+    A repo whose config names merge.laneTests also runs, in the same tree once the lint has passed (or its unknown is lifted), the suites that
+    profile's selector lists for the lane's changed files, plus the changed suites (`lane_suites`, hooks/mutate_shared.py). A red suite, or one
+    that dies with no verdict, refuses always. A select, install or suite timeout that gives no verdict is an unknown, lifted by `unknown_ok`;
+    the changed suites still ran, as a failed select leaves them to run."""
     if target.isdigit():
         info = (host or Host()).pr(int(target))
         head, base = info["head"], info["base"]
+        lane_tests = lane_tests_profile(root, base, config)  # before any worktree: an unknown profile name costs no lint run
         tmp, wt = open_worktree(root, info, base)
     else:
         head, base = lane_head_and_base(root, target, base)
+        lane_tests = lane_tests_profile(root, base, config)
         tmp, wt = add_worktree(root, head)
+    suites = None
     try:  # a SIGTERM reaches here as a SystemExit (release_on_signals in main), so this `finally` removes the tree
         state, lines, log, liftable = ci_job_run(wt, "checks", "--lint", "--base", f"origin/{base}")
+        if lane_tests and (state == "pass" or (state == "unknown" and liftable and unknown_ok.strip())):
+            import mutate_shared  # hooks/mutate_shared.py: the install, the selector and the suite run live there
+            suites = mutate_shared.lane_suites(wt, head, f"origin/{base}", lane_tests[1], os.path.join(tmp, "deps"))
     finally:
         drop_worktree(root, tmp, wt)
     short = head[:9]
-    if state == "pass":
-        say(f"PASS: lint of {short} against {base} passes. The batch runner may take this head, or join it to a batch.")
-        return 0
     if state == "fail":
         raise Stop("\n".join([f"the lint of {short} against {base} FAILs:", *lines, *log, LANE_LINT_REMEDY]))
-    if liftable and unknown_ok.strip():
+    if state == "unknown":
+        if not (liftable and unknown_ok.strip()):
+            head_line = f"the lint of {short} against {base} is unknown, not a pass:"
+            if not liftable:  # a timeout or an odd exit says nothing about any step, so no flag lifts it
+                raise Stop("\n".join([head_line, *lines, LANE_LINT_REMEDY]))
+            raise Liftable("\n".join([head_line, *lines, *log,
+                                      'Run it where the missing tool is present, or run again with --lint-unknown-ok "<reason>". ' + LANE_LINT_REMEDY]))
         say(f"merge: lint of {short} against {base} is unknown, not a pass. --lint-unknown-ok, reason: {unknown_ok.strip()}", *lines, *log)
+    if suites and suites["red"]:
+        red = [f"FAIL: {suite}: red at the head ({'an assertion failed' if kind == 'assert' else 'it died with no verdict'})" for suite, kind in suites["red"]]
+        raise Stop("\n".join([f"the suites {lane_tests[0]} selects for {short} against {base} FAIL:", *red, LANE_LINT_REMEDY]))
+    if suites and suites["unknown"]:
+        if unknown_ok.strip():
+            say(f"merge: the selected suites of {short} against {base} are unknown, not a pass. --lint-unknown-ok, reason: {unknown_ok.strip()}", *suites["unknown"])
+            return 0
+        raise Liftable("\n".join([f"the selected suites of {short} against {base} are unknown, not a pass:", *suites["unknown"],
+                                  'The changed suites ran. Run again where the selector and the install work, or with --lint-unknown-ok "<reason>". ' + LANE_LINT_REMEDY]))
+    if state == "unknown":
         return 0
-    head_line = f"the lint of {short} against {base} is unknown, not a pass:"
-    if not liftable:  # a timeout or an odd exit says nothing about any step, so no flag lifts it
-        raise Stop("\n".join([head_line, *lines, LANE_LINT_REMEDY]))
-    raise Liftable("\n".join([head_line, *lines, *log,
-                              'Run it where the missing tool is present, or run again with --lint-unknown-ok "<reason>". ' + LANE_LINT_REMEDY]))
+    count = f" {suites['ran']} selected suite{'' if suites['ran'] == 1 else 's'} ran green." if suites else ""
+    say(f"PASS: lint of {short} against {base} passes.{count} The batch runner may take this head, or join it to a batch.")
+    return 0
 
 PROSE_JUDGE_MAX_CALLS = 3  # model calls one merge makes; each may run MODEL_TIMEOUT s after the lock is released, so the count bounds how long the run waits before it ends. A file past it reads UNKNOWN
 PROSE_JUDGE_MAX_LINES = 20  # finding lines (stale, unbacked) one merge prints for the prose judge; the rest are one count line. UNKNOWN lines never count against it
@@ -3274,7 +3326,7 @@ def main(argv, host=None, lock=None):
     p = argparse.ArgumentParser(prog="merge", description=__doc__.split("\n\n")[0])
     p.add_argument("pr", nargs="?", help="a pull request number; with --lane-lint, a number or a commit or ref")
     p.add_argument("--confirm", action="store_true")
-    p.add_argument("--lane-lint", action="store_true", help="lint the head of a lane (PR number, commit or ref) as the batch runner's lint does; takes no lock, merges nothing")
+    p.add_argument("--lane-lint", action="store_true", help="lint the head of a lane (PR number, commit or ref) as the batch runner's lint does; takes no lock, merges nothing. With merge.laneTests in the config it also runs the selector's suites (cost: one selector run per changed product file, one install, the selected suites)")
     p.add_argument("--base", default="", metavar="BRANCH", help="with --lane-lint on a commit or ref: the base branch to lint against (default main)")
     p.add_argument("--lint-unknown-ok", default="", metavar="REASON", help="with --lane-lint: go on when a lint step is unknown (never when one FAILs); logged")
     p.add_argument("--role", metavar="TIER", help="cloud only: record this session's merge role (batch-runner only)")
@@ -3341,7 +3393,7 @@ def main(argv, host=None, lock=None):
             if c:
                 raise Stop("not in a git checkout " + LANE_LINT_CITE)
             with release_on_signals():  # a signal ends the run through lane_lint's `finally`, which removes the worktree
-                return lane_lint(root, a.pr, host, a.base, a.lint_unknown_ok)  # before the role check and any lock: it merges and pushes nothing
+                return lane_lint(root, a.pr, host, a.base, a.lint_unknown_ok, a.config)  # before the role check and any lock: it merges and pushes nothing
         if a.role is not None:
             write_merge_role(a.role)
             say(f"merge: merge role {a.role} recorded for this session.")

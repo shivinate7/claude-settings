@@ -736,6 +736,7 @@ def format_report(rows, gold=None) -> str:
 # each part and keeps the rows that hold something.
 
 INSTALL_TIMEOUT = 900
+SUITE_TIMEOUT = 120  # seconds before one suite run is killed: the replay's default, and the lane lint's (`lane_suites`)
 _MERGE_SUBJECT = re.compile(r"^Merge pull request #(\d+) from ")
 _ANSI = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
 _PW_FAILURE = re.compile(r"^\s*\d+\) .* ─{3,}\s*$", re.M)
@@ -906,6 +907,14 @@ def _ensure_deps(repo: str, sha: str, profile: dict, deps_root: str):
     return folder, ""
 
 
+def suite_argv(profile: dict, suite: str, folder) -> list:
+    """The command that runs `suite` (a repo path) under `profile`: its argv with {suite} (the path from the profile's cwd)
+    and {deps} (the install folder `folder`, or empty) filled in."""
+    cwd_rel = profile.get("cwd", "")
+    rel = os.path.relpath(suite, cwd_rel) if cwd_rel else suite
+    return [part.replace("{suite}", rel).replace("{deps}", folder or "") for part in profile["argv"]]
+
+
 def _make_checkout(repo: str, sha: str, dest: str, skip, overrides: dict, deps, profile: dict) -> None:
     """A detached worktree of `repo` at `sha` in `dest`, without the top folders in `skip`, holding
     `overrides` ({path: text}) and the install folder linked in beside the lockfile. The checkout is
@@ -955,7 +964,7 @@ def _replay_row(repo: str, sha: str) -> dict:
             "unusable": {}, "skipped": {}, "notes": []}
 
 
-def replay_pr(repo: str, sha: str, profile: dict, limit: int = 20, seed: int = 0, suite_timeout: float = 120,
+def replay_pr(repo: str, sha: str, profile: dict, limit: int = 20, seed: int = 0, suite_timeout: float = SUITE_TIMEOUT,
               jobs=None, deps=None, pr_budget=None, progress=None, base=None, select_all: bool = False,
               wall_deadline: bool = False) -> dict:
     """Score the suites the pull request merged at `sha` changed against mechanical mutants of the product
@@ -1053,6 +1062,60 @@ def _select_suites(profile: dict, dest: str, path: str, suites, timeout: float, 
     return [suite for suite in suites if suite in listed], ""
 
 
+def lane_suites(wt: str, head: str, base: str, profile: dict, deps_root: str, timeout: float = SUITE_TIMEOUT) -> dict:
+    """The suites a lane's head owes its repo's selector, run in `wt` (a checkout of `head`). The lane's changes are the files
+    of merge-base(`base`, `head`)...`head`, no deletes. Per profile part (a profile without "parts" is one part), for each
+    changed file that the part's `code` regex matches (and `code_not` does not), `_select_suites` lists the suites that test it;
+    the changed files that its `tests` regex matches join the set. The install runs once when the set is non-empty. Each suite
+    runs with the part's argv and classifier, up to `timeout` seconds.
+    -> {"ran": suites run, "red": [(suite, kind)] for each "assert" or "crash", "unknown": [text]}. A select that fails or
+    times out, an install that fails, a read of the diff that fails and a suite that times out are unknown, never red and never
+    a pass. A failed select leaves the changed suites of its part to run, as `_select_suites` says."""
+    result = {"ran": 0, "red": [], "unknown": []}
+    try:
+        files = _changed_files(wt, _git(wt, "merge-base", base, head).strip(), head)
+    except ValueError as error:
+        result["unknown"].append("cannot read the lane's diff: %s" % error)
+        return result
+    live = sorted(path for path, status in files.items() if status != "D")
+    for part in (profile["parts"].values() if "parts" in profile else [profile]):
+        code_re, tests_re = re.compile(part["code"]), re.compile(part["tests"])
+        not_re = re.compile(part["code_not"]) if part.get("code_not") else None
+        suites = {path for path in live if tests_re.search(path) and _is_suite(wt, head, part, path)}
+        for path in live:
+            if not code_re.search(path) or (not_re and not_re.search(path)):
+                continue
+            if not part.get("select"):
+                result["unknown"].append("%s: the profile has no select, so the suites that test it are unknown" % path)
+                continue
+            listed, note = _select_suites(part, wt, path, None, timeout)
+            if listed is None:
+                result["unknown"].append(note or "%s: select gave no list" % path)
+            else:
+                suites.update(name for name in listed if _is_suite(wt, head, part, name))
+        if not suites:
+            continue
+        folder, why = _ensure_deps(wt, head, part, deps_root)
+        if why:
+            result["unknown"].append("install failed, so %d suite(s) did not run: %s" % (len(suites), why))
+            continue
+        try:
+            _link_deps(wt, folder, part)
+        except OSError as error:
+            result["unknown"].append("install link failed, so %d suite(s) did not run: %s" % (len(suites), error))
+            continue
+        classify = CLASSIFIERS[part["classify"]]
+        for suite in sorted(suites):
+            kind, _seconds = run_suite_file(wt, suite, timeout, argv=suite_argv(part, suite, folder), classify=classify,
+                                            cwd=os.path.join(wt, part.get("cwd", "")))
+            result["ran"] += 1
+            if kind in ("assert", "crash"):
+                result["red"].append((suite, kind))
+            elif kind != "pass":
+                result["unknown"].append("%s: no verdict (%s after %d s)" % (suite, kind, timeout))
+    return result
+
+
 def _replay_in(repo, sha, profile, row, code, suites, base, own, limit, seed, suite_timeout, jobs, deps,
                deadline=None, progress=None, select_all=False, wall_deadline=False):
     """The body of `replay_pr`, inside the temp folder `own`."""
@@ -1095,8 +1158,7 @@ def _replay_in(repo, sha, profile, row, code, suites, base, own, limit, seed, su
     classify = CLASSIFIERS[profile["classify"]]
 
     def command(suite):
-        rel = os.path.relpath(suite, cwd_rel) if cwd_rel else suite
-        return [part.replace("{suite}", rel).replace("{deps}", folder or "") for part in profile["argv"]]
+        return suite_argv(profile, suite, folder)
 
     count = max(1, min(jobs, max(len(suites), len(mutants))))
     spare = queue.Queue()
@@ -1353,7 +1415,7 @@ def format_changed(rows) -> str:
     return "\n".join(lines)
 
 
-def run_known_defects(repo: str, defects, profile: dict, deps: str, suite_timeout: float = 120) -> list:
+def run_known_defects(repo: str, defects, profile: dict, deps: str, suite_timeout: float = SUITE_TIMEOUT) -> list:
     """Replay planted defects against a clone's HEAD. Each defect is {id, name, file, old, new, argv, classify}: `old` is the one
     text in `file` that the plant replaces with `new`, and `argv` is the catcher suite, read by the classifier `classify`.
     Returns [{id, name, verdict, reason}] with the verdict CAUGHT (the suite prints an assertion on the planted copy), MISS
