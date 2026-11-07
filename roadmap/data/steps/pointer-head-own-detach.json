@@ -1,0 +1,11 @@
+{
+  "title": "The pointer-head guard lets an agent detach in its own worktree",
+  "phase": "now",
+  "status": "doing",
+  "order": 268.7,
+  "owner": "coordinator",
+  "lane": "session_013NEJL1mEoRz2pudgzqgH58",
+  "why": "The pointer-head hook refused `git checkout --detach FETCH_HEAD` in an agent's own worktree on PR #1625, though briefs tell agents to detach (coordinator, 17:17 CST Nov 7). A false alarm on an act the briefs require.",
+  "note": "Done check: a red test on the detach in an agent-owned tree, with a detach in the main checkout still refused.",
+  "updatedAt": "2026-11-07T17:17:00-06:00"
+}
