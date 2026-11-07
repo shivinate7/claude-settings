@@ -358,6 +358,52 @@ class UdidTake(LeaseCase):
         self.assertEqual(r.stdout.strip(), "", "a refused take --udid prints a UDID")
 
 
+UNKNOWN_DUO_UDID = "AAAAAAAA-0000-4000-8000-000000000001"  # a Duo UDID that SLOT_UDID does not name
+
+
+class ReuseTake(LeaseCase):
+    """take --reuse UDID takes the lease of the slot that boots UDID: the lease a reuse of a booted Duo holds."""
+
+    def reuse(self, udid, pid, wait=1, env=None):
+        return self.run_tool("take", "--device", "duo", "--reuse", udid, "--pid", str(pid), "--wait", str(wait),
+                             env=env)
+
+    def lease_line(self, pid):
+        """The status line of pid's lease, or '' when status lists none."""
+        return next((line for line in self.status().stdout.splitlines()
+                     if line.startswith("lease ") and mentions(line, pid)), "")
+
+    def test_reuse_of_slot_1s_udid_takes_slot_1(self):
+        pid = self.spawn().pid
+        r = self.reuse(SLOT_UDID["1"], pid)
+        self.assertEqual(r.returncode, 0, "take --reuse of slot 1's UDID is not granted: exit %d" % r.returncode)
+        self.assertIn(" slot 1 ", self.lease_line(pid), "status does not show slot 1 held by the reuse's pid")
+
+    def test_reuse_at_a_1_minute_load_of_60_is_granted(self):
+        self.set_load("60.00", "0.50", "0.50")
+        pid = self.spawn().pid
+        r = self.reuse(SLOT_UDID["1"], pid)
+        self.assertEqual(r.returncode, 0, "take --reuse at a 1-minute load of 60 is refused: a reuse skips the load bars")
+
+    def test_reuse_waits_behind_a_live_slot_1_holder_then_exits_1(self):
+        holder, second = self.spawn(), self.spawn()
+        self.assertEqual(grant(self.take("duo", holder.pid)), (0, "1"), "the first duo take is not granted slot 1")
+        r = self.reuse(SLOT_UDID["1"], second.pid)
+        self.assertEqual(r.returncode, 1, "take --reuse of slot 1's UDID is not refused while slot 1 is held: exit %d"
+                         % r.returncode)
+        self.assertTrue(mentions(r.stderr, holder.pid), "the refusal does not name the slot 1 holder")
+
+    def test_reuse_of_a_duo_udid_outside_slot_udid_takes_slot_other_with_its_udid_in_status(self):
+        self.assertNotIn(UNKNOWN_DUO_UDID, SLOT_UDID.values(), "the unknown UDID is one of SLOT_UDID's")
+        pid = self.spawn().pid
+        r = self.reuse(UNKNOWN_DUO_UDID, pid)
+        self.assertEqual(r.returncode, 0, "take --reuse of a Duo UDID outside SLOT_UDID is refused: exit %d"
+                         % r.returncode)
+        line = self.lease_line(pid)
+        self.assertIn(" slot other ", line, "status does not show the lease as slot other")
+        self.assertIn("udid %s" % UNKNOWN_DUO_UDID, line, "status does not show the UDID of the slot other lease")
+
+
 class Usage(LeaseCase):
     def test_a_usage_error_exits_2(self):
         for label, args in (("a take with no device", ["take"]), ("a take with an unknown device",
@@ -392,6 +438,14 @@ class Status(LeaseCase):
         self.assertEqual(sum(mentions(line, head.pid) for line in lines), 1,
                          "the waiter is not on exactly one status line")
         self.assertIn("4.56", r.stdout, "status does not show the 5-minute load")
+
+    def test_status_lease_line_names_the_udid_of_the_slot(self):
+        pid = self.spawn().pid
+        self.assertEqual(grant(self.take("duo", pid, udid=True)), (0, SLOT_UDID["1"]),
+                         "take --udid is not granted slot 1's UDID")
+        line = next((ln for ln in self.status().stdout.splitlines() if ln.startswith("lease ") and mentions(ln, pid)),
+                    "")
+        self.assertIn("udid %s" % SLOT_UDID["1"], line, "status does not name the UDID of the lease")
 
 
 class NoOp(LeaseCase):

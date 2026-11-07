@@ -8,7 +8,8 @@
 #  - Flags first, all double-dash: --device duo|pro (default duo), --hold, --for S. The first argument it does not know
 #    starts xcodebuild's own arguments, which pass through unchanged. Any other --device value: one usage line on stderr,
 #    exit 2, no lock, no boot.
-#  - A booted Duo (its name contains "iPhone Duo") is reused by UDID: no boot, no shutdown, no lease. With two, the first
+#  - A booted Duo (its name contains "iPhone Duo") is reused by UDID: no boot, no shutdown. It takes the lease of its slot
+#    for the run (see the lease line below). With two, the first
 #    is used. An iPad is not an iPhone. pro reuses the first booted iPhone whose name does not contain "Duo".
 #  - Cross-role: a duo run with a non-Duo iPhone booted, or a pro run with a Duo booted, boots nothing, runs nothing,
 #    prints one stderr line naming the booted device, and exits 1. It shuts down no device it did not boot.
@@ -31,7 +32,8 @@
 #    over. A lock folder with no pid file counts as held for 60 s, then it is taken over.
 #  - Its own boot takes the lease for its role (`sim-lease take --device duo|pro --udid`) before simctl boot. At a 5-minute
 #    load of 100 or a 1-minute load of 60 it waits, then exits 1 with no boot. The lease is released on every exit, INT and
-#    TERM too. The reuse path takes no lease.
+#    TERM too. A reuse takes the lease of the slot that boots its UDID, held for the run; it skips the load bars, and a
+#    booted device whose UDID is not in SLOT_UDID is leased as slot `other`. So `sim-lease status` names every user.
 #  - Every xcodebuild call carries `-collect-test-diagnostics never`, so a failed UI test starts no simctl diagnose
 #    (up to 10 minutes). A caller's own `-collect-test-diagnostics VALUE` wins: its value stays, with no second copy.
 #  - A SpringBoard crash loop (3 new SpringBoard-*.ips reports during the run that name this run's UDID, or no device
@@ -48,6 +50,7 @@ set -uo pipefail
 root=$(cd "$(dirname "$0")/.." && pwd)
 script=${SIM_TEST:-$root/bin/sim-test}
 sim_lease=$(dirname "$script")/sim-lease
+export SIM_LEASE_BIN=$sim_lease # the xcodebuild stub reads `sim-lease status` through it during a run
 REAL_SLEEP=$(command -v sleep)
 LIMIT=20 # hard timeout per run, in seconds: a red case cannot hang the suite
 fail=0; pass_n=0; fail_n=0; failed=
@@ -114,6 +117,7 @@ if [ -d "$lock" ]; then
 fi
 lease="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/state/sim-lease/leases.json"
 [ -f "$lease" ] && cp "$lease" "$RUN/lease_at_xc"
+[ -n "${SIM_LEASE_BIN:-}" ] && "$SIM_LEASE_BIN" status > "$RUN/status_at_xc" 2>&1
 n=${STUB_CRASH:-0}
 if [ "$n" -gt 0 ]; then
   sleep 1
@@ -211,7 +215,7 @@ fresh() {
     "$work/lock_alive" "$work/lock_pid_seen" "$work/lock_simctl" "$work/devices.json" \
     "$work/cmd_udid" "$work/cmd_args" "$work/cmd_lock_seen" "$work/cmd_lock_pid"
   rm -rf "$work/home/.claude" "$crashdir" "$work/sweep_root"
-  rm -f "$work/lease_at_boot" "$work/lease_at_xc" "$work/loadavg" "$work/load_reads" "$work/boot_started" "$work/boot_release"
+  rm -f "$work/lease_at_boot" "$work/lease_at_xc" "$work/status_at_xc" "$work/loadavg" "$work/load_reads" "$work/boot_started" "$work/boot_release"
   /bin/mkdir -p "$crashdir" "$work/home"
 }
 # start_tool [VAR=value...]: starts the tool in its own process group, behind a hard timeout. Its stdout and stderr go
@@ -308,7 +312,12 @@ lease_slot() { python3 -I -c "$SLOT_CHECK" "$1" "$2" "$3"; }
 lease_at_boot_holds() { lease_holds "$work/lease_at_boot" "$tool_pid"; }
 lease_at_boot_slot() { lease_slot "$work/lease_at_boot" "$tool_pid" "$1"; }
 lease_at_xc_holds() { lease_holds "$work/lease_at_xc" "$tool_pid"; }
+lease_at_xc_slot() { lease_slot "$work/lease_at_xc" "$tool_pid" "$1"; }
 lease_not_held_at_xc() { ! lease_at_xc_holds; }
+# status_at_xc_has SLOT PID: the status the xcodebuild stub read during the run has a lease line for SLOT and PID. The
+# pid is a whole word: the space after it ends the number. status_at_xc_udid also names the UDID on that line.
+status_at_xc_has() { grep -Eq "^lease slot $1 pid $2 " "$work/status_at_xc" 2>/dev/null; }
+status_at_xc_udid() { grep -E "^lease slot $1 pid $2 " "$work/status_at_xc" 2>/dev/null | grep -Fq "udid $3"; }
 # lease_released: the state after the run holds no lease of this tool. Exit 1 is the only pass, so a broken file fails.
 lease_released() { lease_holds "$lease_file" "$tool_pid"; [ $? -eq 1 ]; }
 no_lease_file() { [ ! -e "$lease_file" ]; }
@@ -376,8 +385,8 @@ fresh; booted "iPhone Duo" $DUO1; run
 need "exit code" rc_is 0
 need "destination is the booted Duo" dest_is "$DUO1"
 need "steps are run only" steps_are "run "
-need "no lease taken" lease_not_held_at_xc
-end_case "1 booted Duo is reused by UDID: no boot, no shutdown, no lease"
+need "takes slot 1's lease" lease_at_xc_slot 1
+end_case "1 booted Duo is reused by UDID: no boot, no shutdown; takes slot 1's lease"
 
 fresh; booted "iPhone Duo" $DUO2; run
 need "exit code" rc_is 0
@@ -734,8 +743,9 @@ end_case "49 TERM during an own-boot run: the lease is held during xcodebuild, a
 fresh; booted "iPhone Duo" $DUO1; run
 need "exit code" rc_is 0
 need "steps are run only" steps_are "run "
-need "no lease held during xcodebuild" lease_not_held_at_xc
-end_case "50 reuse path: takes no lease"
+need "slot 1's lease is held during xcodebuild" lease_at_xc_slot 1
+need "the lease is released after the run" lease_released
+end_case "50 reuse path: takes slot 1's lease, held during xcodebuild and released after"
 
 # Duo slot 2: a live holder has slot 1, so the real sim-lease grants this take slot 2. Its UDID is booted, tested and shut
 # down. The take waits 2 s at most, so a take refused on the old code fails fast.
@@ -1009,6 +1019,40 @@ need "steps are boot run shutdown" steps_are "boot run shutdown "
 need "no sim-test.lock.dead.* folder is left" no_dead_folder
 need "no rmdir error on stderr" no_rmdir_error
 end_case "80 dead holder's lock folder with take.out: taken over, no dead folder left, no rmdir error"
+
+# Cases 81 to 84: a reuse takes the lease of the slot that boots its UDID, as an own boot does. Each run's status is read
+# by the xcodebuild stub, so the lease is checked while the run holds it.
+fresh; booted "iPhone Duo" $DUO1; run
+need "destination is the booted Duo" dest_is "$DUO1"
+need "steps are run only" steps_are "run "
+need "status during the run names slot 1 for this pid" status_at_xc_has 1 "$tool_pid"
+need "status during the run names the UDID" status_at_xc_udid 1 "$tool_pid" "$DUO1"
+need "exit code" rc_is 0
+need "no lease after the run" lease_released
+end_case "81 reuse: sim-lease status shows slot 1 for the sim-test pid, with its UDID, during the run; gone after"
+
+fresh; booted "iPhone Duo" $DUO1; set_load "{ 60.00 0.50 0.50 }"; run
+need "destination is the booted Duo" dest_is "$DUO1"
+need "exit code: the reuse is not refused at a 1-minute load of 60" rc_is 0
+need "slot 1's lease is held during the run at a 1-minute load of 60" lease_at_xc_slot 1
+end_case "82 reuse at a 1-minute load of 60: takes slot 1's lease and runs"
+
+# mentions_err PID: the pid is a whole word on stderr.
+mentions_err() { grep -Ewq -- "$1" "$work/run.err"; }
+fresh; hold_slot1; booted "iPhone Duo" $DUO1; run SIM_LEASE_WAIT=2
+need "exit 1 at the lease wait limit" rc_is 1
+need "no xcodebuild call" no_xcodebuild
+need "stderr names the pid that holds slot 1" mentions_err "$slot_holder"
+release_slot1
+end_case "83 reuse while another live pid holds slot 1: waits, exits 1 at the lease wait limit, runs no xcodebuild"
+
+fresh; booted "iPhone Duo" $OTHER; run
+need "destination is the other Duo's UDID" dest_is "$OTHER"
+need "steps are run only" steps_are "run "
+need "exit code" rc_is 0
+need "status during the run names slot other for this pid" status_at_xc_has other "$tool_pid"
+need "status during the run names that Duo's UDID" status_at_xc_udid other "$tool_pid" "$OTHER"
+end_case "84 reuse of a booted Duo not in SLOT_UDID: leased as slot other, its UDID shown in status"
 
 echo "sim-test suite: $pass_n passed, $fail_n failed${failed:+: $failed}"
 exit $fail
