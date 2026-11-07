@@ -34,7 +34,7 @@ the live file's "sessions" list is not archived (any other status counts) and ca
 the tag cs-repo:<this repo's GitHub name> and the tag cs-step:<step id>, or when an open pull request's
 branch equals the step id or lane/<step id>. The step id matches exactly; the GitHub name ignores case. A session row
 with no tags key, or null tags, has no tags. The cs-repo tag is needed because list_sessions is
-account-wide and step ids repeat across repos. A step whose status is none of todo, doing, active or
+account-wide and step ids repeat across repos. A step whose status is none of todo, ready, doing, active or
 done is listed as unknown status. The row reads one unknown entry, never an empty list, when the live
 file is missing or unreadable; its readAt is not an ISO time, has no time zone, is over STALE_LIVE_MINUTES
 old or is more than FUTURE_MINUTES ahead; it has no sessions list; the repo's GitHub name cannot be read;
@@ -119,6 +119,8 @@ STALE_DRAFT_HOURS = 12
 PAIR_LINE = "todo step with an open PR"
 # Every stalled line starts with this. An unknown read prints `<STALLED_LINE>: unknown (<why>)` and exits 0.
 STALLED_LINE = "stalled step"
+# Every ready line starts with this. It never changes the exit code.
+READY_LINE = "ready not started"
 # Who may decide a paused step (the `paused.decides` field, written by triage).
 PAUSE_DECIDES = ("owner", "coordinator", "triage")
 MOCKUP_LINE = "mockup with no file"
@@ -149,7 +151,9 @@ ITEMS_MISSING_WHY = "unknown (the live file has no items list)"
 IDLE_LANES_LINE = "lanes to archive"
 # A readAt this far past the build time is clock skew; further than that is a bad stamp.
 FUTURE_MINUTES = 5
-KNOWN_STATUS = ("todo", "doing", "active", "done")
+# `ready` reads as todo.
+TODO_STATUS = ("todo", "ready")
+KNOWN_STATUS = TODO_STATUS + ("doing", "active", "done")
 TOP = 5
 DATA = "roadmap/data"
 # roadmap.html is left out: this script rewrites it, so a conflict there is resolved by building.
@@ -810,11 +814,14 @@ def main(argv=None):
                            "read": info["live"]["read"]})
     info["panels"].insert(1, {"name": "Merges", "home": ref or args.main_branch,
                               "read": "unknown (%s)" % unread if unread else short(repo, ref) or "unknown (git could not name the commit)"})
+    info["ready"] = (ready_steps(data["steps"], info["live"]) if data else
+                     {"why": "unknown (steps unknown)", "steps": None})
     out.write_text(render_block(data, info) if args.block else render(data, info), encoding="utf-8")
     if data is None:
         print(f"{out.name}: steps unknown ({why})")
         print("%s: unknown (steps unknown)" % PAIR_LINE)
         print("\n".join(stalled_lines(info["stalled"])))
+        print("\n".join(ready_lines(info["ready"])))
         return
     print(f"{out.name}: {len(data['steps'])} steps, {len(data['topics'])} topics, {len(data['meta'])} meta")
     pairs = todo_pairs(data["steps"], info["live"])
@@ -830,6 +837,9 @@ def main(argv=None):
     upkeep(data["steps"], added_at(source), marks, strays if not unread else ["unknown (%s)" % unread], info["live"],
            slug, repo, args.main_branch, unread)
     lines = stalled_lines(info["stalled"])
+    if lines:
+        print("\n".join(lines))
+    lines = ready_lines(info["ready"])
     if lines:
         print("\n".join(lines))
     if pairs or misses or info["stalled"]["steps"] or info["stalled"]["items"]:
@@ -1030,17 +1040,22 @@ def todo_pairs(steps, work):
     """(id, pull number) for each todo step that an open pull names, or None when the pulls read is unknown."""
     if pair_why(work):
         return None
-    return [(k, p["number"]) for k, d in sorted(steps.items()) if d.get("status") == "todo"
+    return [(k, p["number"]) for k, d in sorted(steps.items()) if d.get("status") in TODO_STATUS
             for p in work["pulls"] if names_step(p, k)]
+
+
+def zoned_time(value):
+    """`value` as an aware datetime, or None when it is not a string or not ISO with a zone. device_check keeps an older copy of this parse."""
+    try:
+        at = datetime.datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except (AttributeError, ValueError):
+        return None
+    return at if at.tzinfo else None
 
 
 def created_at(pull):
     """The pull's createdAt as an aware datetime, or None when missing, not a string, or not ISO with a zone."""
-    try:
-        at = datetime.datetime.fromisoformat(pull["createdAt"].replace("Z", "+00:00"))
-    except (KeyError, AttributeError, ValueError):
-        return None
-    return at if at.tzinfo else None
+    return zoned_time(pull.get("createdAt"))
 
 
 def stale_drafts(work):
@@ -1122,11 +1137,7 @@ def pause_why(step):
         return "paused has no why"
     if p.get("decides") not in PAUSE_DECIDES:
         return "paused.decides is not one of %s" % ", ".join(PAUSE_DECIDES)
-    try:
-        at = datetime.datetime.fromisoformat(p["at"].replace("Z", "+00:00"))
-    except (KeyError, AttributeError, ValueError):
-        at = None
-    if at is None or at.tzinfo is None:
+    if zoned_time(p.get("at")) is None:
         return "paused.at is not an ISO time with a zone"
     if p.get("by") != "triage":
         return "paused.by is not triage"
@@ -1182,6 +1193,37 @@ def stalled_lines(block):
     return out
 
 
+def step_age(step, read):
+    """Whole hours from the step's updatedAt to `read`, at least 0, or None when updatedAt is missing or not ISO with a zone."""
+    at = zoned_time(step.get("updatedAt"))
+    return None if at is None else max(0, int((read - at).total_seconds() // 3600))
+
+
+def ready_steps(steps, work):
+    """The page's ready block: {"why", "steps": [{"id", "age"}] | None}. A step is listed when its status is todo or
+    ready, its phase is now, no live lane holds it, it has no valid `paused` field, and no open waiting-page item
+    homed to it lacks a lane (an unanswered item). `steps` is None only when `why` says the read is unknown, never []."""
+    _, why = stalled_items(work)  # live_why, then itemsWhy, then an open row with no lane key
+    if why:
+        return {"why": why, "steps": None}
+    unanswered = {item_home(r) for r in work["pageItems"] if r["status"] != "closed" and not r["lane"]}
+    read = datetime.datetime.fromisoformat(work["read"].replace("Z", "+00:00"))
+    out = []
+    for k, d in open_steps(steps):
+        if (d.get("status") in TODO_STATUS and d.get("phase") == "now" and not lane_live(work, k)
+                and pause_why(d) is not None and k not in unanswered):
+            out.append({"id": k, "age": step_age(d, read)})
+    return {"why": None, "steps": out}
+
+
+def ready_lines(block):
+    """The lines the build prints for a ready block. An unknown read prints one unknown line and no entry, never zero."""
+    if block["steps"] is None:
+        return ["%s: %s" % (READY_LINE, block["why"])]
+    return ["%s: %s (%s)" % (READY_LINE, s["id"], "age unknown" if s["age"] is None else "%dh" % s["age"])
+            for s in block["steps"]]
+
+
 CLAIM = re.compile(
     r"(?<![\w-])(?i:finding|checked)(?![\w-])[^.\n]{0,40}?"  # any case; no letter, digit or hyphen touches it
     r"(?:(?P<iso>\d{4}-\d{2}-\d{2})(?!\d)|"
@@ -1221,6 +1263,11 @@ def dated_claims(open_, today):
     return out
 
 
+def item_home(row):
+    """The step id a waiting-page item row is homed to: its `home` without a leading `step `, in any case."""
+    return re.sub(r"^step\s+", "", row["home"].strip(), flags=re.IGNORECASE)
+
+
 def unfiled(steps, work):
     """Entries `<step> (page item <n>)` for each closed page item whose open home step never cites it, or one unknown entry."""
     work = work or {"read": "unknown (no --live file)"}
@@ -1230,7 +1277,7 @@ def unfiled(steps, work):
         return [work["itemsWhy"]]
     out = []
     for row in work["pageItems"]:
-        home = re.sub(r"^step\s+", "", row["home"].strip(), flags=re.IGNORECASE)
+        home = item_home(row)
         step = steps.get(home)
         if row["status"] != "closed" or step is None or step.get("status") == "done":
             continue
@@ -1335,10 +1382,7 @@ def upkeep(steps, added, marks, strays, work=None, slug=None, repo=None, main_br
             continue
         if not note.strip():
             empty.append(k)
-        try:
-            at = datetime.datetime.fromisoformat(d.get("updatedAt", "").replace("Z", "+00:00"))
-        except ValueError:
-            at = None
+        at = zoned_time(d.get("updatedAt"))
         if at is None or (now - at).days >= STALE_DAYS:
             stale.append(k)
     jumped = [k for k, d in open_[:TOP]
@@ -1355,7 +1399,7 @@ def upkeep(steps, added, marks, strays, work=None, slug=None, repo=None, main_br
             closing.append("%s (%s; open a try-it item)" % (k, got))
         else:
             waiting.append("%s (%s%s)" % (k, got, "; device trial unreadable" if device_check(d) == "bad" else ""))
-    ready = [k for k, d in open_ if d.get("status") == "todo" and READY_SENTENCE.search(d.get("note") or "")]
+    ready = [k for k, d in open_ if d.get("status") in TODO_STATUS and READY_SENTENCE.search(d.get("note") or "")]
     rows = [("notes over %d words" % NOTE_WORDS, long_), ("untouched %d days in a live phase" % STALE_DAYS, stale),
             ("no note in a live phase", empty), ("new in top %d with no placement line" % TOP, jumped),
             ("in progress with no live lane or open PR", unlaned(open_, marks, work)),

@@ -60,11 +60,13 @@ disposes stalled steps at each publish); README.md.tmpl; GLOSSARY.md rows "stall
 
 ## Part 2: ready-not-started (coordinator scope add, 11:48 CST)
 
-- The same derived view shows READY-NOT-STARTED: status todo or doing, phase now, every question
-  answered, no live lane, no open PR, with its age at read time.
-- lint/report_guard.py (the coordinator's Stop report guard) refuses a report whose `Unstarted:`
-  line omits a ready step from the latest live read, unless it names a reason. Measure false
-  alarms on past reports before it refuses.
+- build.py prints `ready not started: <id> (<age>h)` for each step with status `todo` or `ready`,
+  phase `now`, no live lane, no valid `paused` field, and no open unanswered page item homed on
+  it. Age is whole hours from `updatedAt` to the live read. `info["ready"]` carries the list. The
+  lines never change the exit code. Doing steps stay with the stalled view.
+- `ready` is a known status, read as todo.
+- The `Unstarted:` refusal is held (coordinator pick A, 2026-11-06 14:38 CST): debt
+  `unstarted-guard-held` (the Unstarted guard waits on paused fields and a re-measure).
 
 ## Red run
 
