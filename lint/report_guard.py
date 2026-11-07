@@ -229,10 +229,10 @@ _UNIT_END = re.compile(r"(?<=[.!?;:,])\s+|\n+")
 _CONNECTORS = frozenset(("so", "then", "and", "but", "now", "first", "next", "also", "please"))
 _WORD = re.compile(r"[a-z][a-z'-]*")
 # A list of backtick spans ("refused `Agent`, `Write` this session") ends each unit but the last in span + comma. The
-# unit after it that opens with a span names the next item and holds no order. A span never crosses a comma, a
-# sentence mark or a line, so a lone backtick cannot pair with a later one and hide an order.
+# unit after it that opens directly with a span names the next item and holds no order. A connector before the span
+# ("`Next`, so `add` it") makes it an order, so the unit must open with the backtick itself. A span never crosses a
+# comma, a sentence mark or a line, so a lone backtick cannot pair with a later one and hide an order.
 _SPAN_COMMA_END = re.compile(r"`[^`\n.!?;:,]+`,$")
-_OPENS_WITH_SPAN = re.compile(r"(?:(?:%s)\s+)*`" % "|".join(sorted(_CONNECTORS)))
 # A modal that binds the reader: "you should send it", "the reply must end with the report".
 _MODAL = re.compile(r"\b(?:must|should|need to|needs to|have to|has to|ought to)\b", re.IGNORECASE)
 
@@ -246,7 +246,7 @@ def session_wording(text):
             return phrase
     previous = ""
     for unit in _UNIT_END.split(text):
-        is_list_item = bool(_OPENS_WITH_SPAN.match(unit.lower()) and _SPAN_COMMA_END.search(previous))
+        is_list_item = unit.lstrip().startswith("`") and bool(_SPAN_COMMA_END.search(previous))
         previous = unit.strip()
         if is_list_item:
             continue
