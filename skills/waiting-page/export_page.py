@@ -87,13 +87,13 @@ STATE_CODES = ("AL|AK|AZ|AR|CA|CO|CT|DE|DC|FL|GA|HI|ID|IL|IN|IA|KS|KY|LA|ME|MD|M
                "|OH|OK|OR|PA|RI|SC|SD|TN|TX|UT|VT|VA|WA|WV|WI|WY")
 # Each shape is a token or a value that names a person or opens an account. The lookbehinds keep a match
 # from starting inside a longer word ("risk-" and "btn-sk-" are not "sk-").
-# Words that join a key word with no separator and no hump, as in `apikey=` and `authtoken:`. A key word after any other
-# lower-case letters (`monkey`, `hotkey`) is part of an ordinary word.
-CREDENTIAL_PREFIXES = ("api", "auth", "access", "secret", "client", "private", "session", "refresh", "csrf")
+# Everyday words that end in `key`. A `key` right after the start of one of them is no key word, so `monkey: Banana12345`
+# passes. Any other `key`, `secret`, `token` or `cookie` in a name counts, however it is glued to the word before it.
+EVERYDAY_KEY_WORDS = ("monkey", "hotkey", "turkey", "turnkey", "donkey", "whiskey", "jockey", "hockey", "lackey")
+KEY_WORD = r"(?:secret|token|cookie|" + "".join("(?<!%s)" % w[:-3] for w in EVERYDAY_KEY_WORDS) + r"key)"
 # The letter and the digit of a random-looking value are looked for in its first characters only: a lookahead to the
 # end of a long run, from each key word in it (`key=key=...`), makes the scan quadratic.
 VALUE_LOOKAHEAD_MAX = 256
-NAME_SUFFIX_MAX = 40  # the most name characters taken after a key word; a longer name still matches at its key word
 SECRET_SHAPES = (
     ("github-token", re.compile(r"(?<![A-Za-z0-9])(?:gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,})")),
     ("api-key", re.compile(r"(?<![A-Za-z0-9_-])sk-[A-Za-z0-9_-]{20,}")),
@@ -120,19 +120,18 @@ SECRET_SHAPES = (
     # Bare "Bearer <token>" or "Basic <credential>" with no header name: 20 or more token characters, so prose such as
     # "Bearer tokens" or "Basic idea" passes.
     ("bearer", re.compile(r"(?<![A-Za-z0-9])(?:Bearer|Basic)[ \t]+[A-Za-z0-9._~+/=-]{20,}")),
-    # A name that holds secret, token, key or cookie in any case form (API_SECRET, X-API-Key, apiKey, authtoken,
+    # A name that holds secret, token, key or cookie in any case form (API_SECRET, X-API-Key, apiKey, authtoken, NPMTOKEN,
     # SECRET_KEY_BASE, "clientSecret") set to a literal that looks random: 8 or more characters with a letter and a
-    # digit. The key word must start a word, follow `_` or `-`, sit at a camelCase hump, or follow a known compound
-    # prefix (`apikey`, `authtoken`), so `monkey` and `hotkey` pass. The match starts at the key word and its name
-    # suffix is capped, so a long run scans in linear time. A number, a "$VAR" or "${{ ... }}" reference and a plain word
-    # pass, and so does a label with a word between, as in "token budget: 200000". A second branch takes a value with no
-    # digit: 12 or more of [A-Za-z_-] that end the value (end of line, a closing quote, `,`, `;` or `}`) and have no
-    # camelCase hump (3 lower-case letters then a capital; a hump after 1 or 2, as in `QwErTy`, is random), so
-    # `accessTokenValue`, `localStorage.getItem(` and prose such as "Token: Authorization needed" pass.
+    # digit. The key word may sit anywhere in the name; only the everyday words of EVERYDAY_KEY_WORDS are no key word.
+    # A match starts at a key word and takes name characters up to the next key word, so each name character is read
+    # once and a long name or a long run scans in linear time; the last key word of a name is the one that reaches the
+    # `=` or `:`. A number, a "$VAR" or "${{ ... }}" reference and a plain word pass, and so does a label with a word
+    # between, as in "token budget: 200000". A second branch takes a value with no digit: 12 or more of [A-Za-z_-] that
+    # end the value (end of line, a closing quote, `,`, `;` or `}`) and have no camelCase hump (3 lower-case letters
+    # then a capital; a hump after 1 or 2, as in `QwErTy`, is random), so `accessTokenValue`,
+    # `localStorage.getItem(` and prose such as "Token: Authorization needed" pass.
     ("credential-name", re.compile(
-        r"(?:(?<![A-Za-z0-9])|(?-i:(?<=[a-z0-9])(?=[A-Z])))"
-        r"(?:(?:" + "|".join(CREDENTIAL_PREFIXES) + r")(?=secret|token|key|cookie))?"
-        r"(?:secret|token|key|cookie)[A-Za-z0-9_-]{0," + str(NAME_SUFFIX_MAX) + r"}[\"']?[ \t]*[=:][ \t]*[\"']?(?:"
+        KEY_WORD + r"(?:(?!" + KEY_WORD + r")[A-Za-z0-9_-])*[\"']?[ \t]*[=:][ \t]*[\"']?(?:"
         r"(?=[A-Za-z0-9+/_.~%=-]{0," + str(VALUE_LOOKAHEAD_MAX) + r"}[A-Za-z])"
         r"(?=[A-Za-z0-9+/_.~%=-]{0," + str(VALUE_LOOKAHEAD_MAX) + r"}\d)[A-Za-z0-9+/_.~%=-]{8,}"
         r"|(?!(?-i:[A-Za-z_-]*[a-z]{3}[A-Z]))[A-Za-z_-]{12,}(?=[\"']?[ \t]*(?:[,;}\r\n]|\Z)))", re.I)),
