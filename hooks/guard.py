@@ -1807,8 +1807,12 @@ def workflow_command_tests(command: str) -> set:
     test path. A lint tool that is given a test folder (`ruff check tests/`) runs none."""
     found = set()
     for segment in WORKFLOW_COMMAND_SPLIT.split(command):
+        # A quoted value with a space is one word. No escape character, so a Windows `tests\x.py` keeps its
+        # backslash for `workflow_path` to turn into `/`.
+        lexer = shlex.shlex(segment, posix=True)
+        lexer.whitespace_split, lexer.commenters, lexer.escape = True, "", ""
         try:
-            tokens = shlex.split(segment, comments=False)   # a quoted value with a space is one word
+            tokens = list(lexer)
         except ValueError:
             tokens = [tok.strip("\"'") for tok in segment.split()]
         while tokens:
