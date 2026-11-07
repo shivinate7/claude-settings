@@ -7,7 +7,7 @@ question-form holds the ruling; rule `style-question-form` holds the text.
     item_hit(op, entry, cwd) -> (rule, matched)   one waiting-page write: set, update or str_replace
 
 ("", "") is a pass. hooks/call_judge.py calls chat_hit and page_item_hit; hooks/guard.py data_tool_hit calls
-page_item_hit, which filters the ArtifactData writes by collection and url and then calls item_hit; a write to another page gets only the check for an option keyed none. Nothing here writes a file. The only process it starts is the one git read of past_rulings, for a caller that makes a model call anyway.
+page_item_hit, which filters the ArtifactData writes by collection and url (a known waiting page, whatever the cwd, waiting_page_root) and then calls item_hit; a write to another artifact gets only the check for an option keyed none. Nothing here writes a file. The only process it starts is the one git read of past_rulings, for a caller that makes a model call anyway.
 
     past_rulings(text, repo_root) -> (candidates, unknown)   the decision, debt and step rulings the judge reads
     key_overlap(reply, earlier)   -> clashing option keys     lint/report_guard.py rule question-keys
@@ -951,14 +951,7 @@ ITEM_OPS = ("set", "update", "str_replace")
 
 
 def _git_root_of(cwd):
-    here = os.path.realpath(cwd or os.getcwd())
-    while True:
-        if os.path.exists(os.path.join(here, ".git")):
-            return here
-        parent = os.path.dirname(here)
-        if parent == here:
-            return None
-        here = parent
+    return _layout().git_root_of(cwd)
 
 
 def _layout():
@@ -971,11 +964,32 @@ def _layout():
 
 
 def waiting_page_root(tool_input, cwd):
-    """The git root of cwd's repo when the call's url is that repo's waiting page (lint/layout.py, the one
-    home), else None. A repo with no page reads as unknown; only the none-key check judges its calls."""
+    """The root of the checkout whose waiting page the call's url names, else None. It looks through the known roots
+    (lint/layout.py known_roots: the cwd's git root, that worktree's main checkout, the pointer checkout, and the
+    folders beside it that hold an extras file), so a write to claude-settings' page is checked whatever the cwd is.
+    A root matches by the artifact id of its registry entry with role waiting-page (layout.is_waiting_page_url); any
+    other artifact reads as unknown and only the none-key check judges it. A bad extras file in a root after the
+    cwd's reads as no page; the cwd's own raises LayoutError, as before.
+    Cost: file reads only, no process: ~/.claude/CLAUDE.md once (the pointer), one `.git` file and its commondir
+    file, one directory list, and each root's extras file until one matches. A call with no artifact url reads
+    nothing."""
     layout = _layout()
-    root = _git_root_of(cwd)
-    return root if root and layout.is_waiting_page_url(root, tool_input.get("url")) else None
+    if not layout.artifact_id(tool_input.get("url")):
+        return None
+    try:
+        import guard_pointer  # the one home of the pointer line
+        pointer = guard_pointer.pointer_checkout()
+    except Exception:
+        pointer = ""
+    first = _git_root_of(cwd)
+    for root in layout.known_roots(cwd or os.getcwd(), pointer):
+        try:
+            if layout.is_waiting_page_url(root, tool_input.get("url")):
+                return root
+        except layout.LayoutError:
+            if os.path.realpath(root) == first:
+                raise
+    return None
 
 
 def design_file_problems(writes, root):
@@ -1002,7 +1016,7 @@ def is_waiting_page(tool_input, cwd) -> bool:
 
 def page_item_hit(tool_input, cwd=""):
     """((rule, matched), writes) for one ArtifactData call. `writes` are the (op, entry) item writes of
-    this repo's waiting page, empty for a read, another collection or another page (such a write still gets the check for an option keyed none). The hit is the first
+    a known waiting page (waiting_page_root), empty for a read, another collection or another artifact (such a write still gets the check for an option keyed none). The hit is the first
     write that a rule refuses, else ("", "")."""
     if not isinstance(tool_input, dict):
         return PASS, []

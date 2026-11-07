@@ -336,13 +336,15 @@ def unvetted(payload, tool, args, rule, why, units):
     return refuse(payload, tool, args, rule, UNVETTED_REMEDY % why)
 
 
-def past_ruling_context(payload, units):
+def past_ruling_context(payload, units, root=None):
     """(prompt tail, candidate ids, unreadable sources) for the questions in `units`. Prints the one stderr line for
-    the sources not searched. The only process of a judged call besides the model runs here."""
+    the sources not searched. The only process of a judged call besides the model runs here. `root` is the checkout
+    whose records are searched: the matched waiting page's, for an item write from another cwd. Without it, the
+    cwd's repo."""
     import question_form
     cwd = payload.get("cwd") or ""
     candidates, unknown = question_form.past_rulings(" ".join(words for _, words in units),
-                                                     question_form._git_root_of(cwd) or cwd or os.getcwd())
+                                                     root or question_form._git_root_of(cwd) or cwd or os.getcwd())
     print(question_form.unknown_line(unknown), file=sys.stderr)
     return (question_form.candidates_block(candidates, unknown), question_form.candidate_ids(candidates),
             question_form.unreadable_sources(unknown))
@@ -359,6 +361,7 @@ def main():
         prompt, model, timeout, rule, fallback = JUDGES[tool]
         units = []  # (Unvetted marker text, words) of each question this call asks the owner
         reask = widening = False
+        page_root = None  # the checkout of the waiting page an item write names, for the past-ruling search
         if tool == "AskUserQuestion":
             import question_form
             code_rule, matched = question_form.chat_hit(args)
@@ -375,6 +378,7 @@ def main():
             judged = [] if hit[0] else question_form.judged_item_writes(writes)
             if not judged:  # guard.py refuses a hit; no write carries options, context or steps
                 return 0
+            page_root = question_form.waiting_page_root(args, payload.get("cwd") or "")
             shown = json.dumps(judged, ensure_ascii=False)
             units = question_form.page_units(judged)
             reask = any(is_reask(w) for w in judged)
@@ -383,7 +387,7 @@ def main():
             shown = json.dumps(args, ensure_ascii=False)
         tail, ids = "", []
         if units:
-            tail, ids, unreadable = past_ruling_context(payload, units)
+            tail, ids, unreadable = past_ruling_context(payload, units, page_root)
             if unreadable:
                 return unvetted(payload, tool, args, rule, "; ".join(unreadable), units)
         full = prompt % shown

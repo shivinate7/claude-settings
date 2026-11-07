@@ -235,10 +235,7 @@ def verdict(url, fetched, template):
 def default_roots():
     import layout  # batch mode only: single-page mode must run without lint/
     clone = hub_clone()
-    parent = os.path.dirname(clone)
-    extras = layout.layout()["extras"]
-    return [clone] + sorted(os.path.join(parent, d) for d in os.listdir(parent)
-                            if os.path.join(parent, d) != clone and os.path.isfile(os.path.join(parent, d, extras)))
+    return layout.known_roots("", pointer=clone)  # no cwd: the clone is the start, and its siblings follow
 
 
 def checkout_of(folder):
