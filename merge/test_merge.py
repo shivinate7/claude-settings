@@ -4568,6 +4568,16 @@ class GhHalf(Env):
         self.assertIn("update_pull_request", text)
         self.assertIn("route pr-ready-mcp-cloud", text)
 
+    def test_a_draft_head_with_all_jobs_passed_required_remedy_names_merge_confirm_before_the_mark_ready_routes(self):
+        # A session that marks the draft ready by MCP or gh skips merge.readyChecks. Only `merge <pr> --confirm` runs them, so the
+        # remedy names it before either route (debt ready-checks-skipped-by-mcp).
+        red, _, _ = merge.Host.classify({"all-jobs-passed": [("skipping", "")], "scope": [("skipping", "")]}, ["all-jobs-passed"])
+        text = " ".join(red)
+        routes = [text.find(r) for r in ("update_pull_request", "gh pr ready") if r in text]
+        self.assertTrue(routes, f"control: the remedy names no mark-ready route: {text}")
+        self.assertIn("--confirm", text, f"the remedy names no run of the ready checks: {text}")
+        self.assertLess(text.find("--confirm"), min(routes), f"a mark-ready route comes before merge --confirm, which runs the ready checks: {text}")
+
     def test_the_stale_page_remedy_names_both_draft_routes_and_their_table(self):
         # A cloud session returns a PR to draft by MCP update_pull_request (route pr-draft-mcp-cloud), so the remedy never hands it to the owner's computer.
         for claim in ("", "c1"):
