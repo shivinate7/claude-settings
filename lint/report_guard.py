@@ -71,12 +71,14 @@ refusal per turn lists the lines and joins any other reason. A rewrite after a m
 kind and incident: decision answered-needs-source. Cost: regex over the reply, no file, no process.
 
 The posted-comment check (rule `posted-needs-comment-url`): on any turn, landed or not, it refuses each line of the last
-reply whose clause claims a posted PR comment or review record, unless the same line cites that comment's URL. A claim is
-the verb posted, left, filed or commented, with a comment, review or record in the same clause (commented needs no noun;
-left needs the noun after it). The URL is a comment-anchored GitHub link (`/pull/<n>` or `/issues/<n>` with
-`#issuecomment-`, `#discussion_r` or `#pullrequestreview-`); a bare PR link, a `#<n>`, a hash or a time is no source, and a
-`#<n>` on the line that matches no URL number refuses. Fences, code spans, questions and negated or future clauses (not,
-no, never, will, should, once, until and the like) are exempt. One refusal per turn lists the lines and joins any other
+reply that names a PR (a `#<n>`, a github.com URL or the word PR) and claims a posted PR comment or review record,
+unless the same line cites that comment's URL. A claim is the verb posted, left, filed or commented, with a review
+record, review or comment in the same clause (commented needs no noun; left needs the noun after it and is exempt when
+unchanged, as is or alone follows). The URL is a comment-anchored GitHub link (`/pull/<n>` or `/issues/<n>` with
+`#issuecomment-`, `#discussion_r` or `#pullrequestreview-`); a bare PR link, a `#<n>`, a hash or a time is no source, and
+when the line's `#<n>` refs match no URL number it refuses. Fences, code spans and questions are exempt. So is a verb
+with a negator or modal in the auxiliary chain right before it, with a subordinator right before it or before a passive
+verb, or with no, nothing or a want-verb right before the noun. One refusal per turn lists the lines and joins any other
 reason; a rewrite after a missing-report refusal is checked too. Risk kind and incident: decision posted-needs-comment-url.
 Cost: regex over the reply, no file, no process. The URL is not resolved against GitHub: the guard makes no GitHub reads,
 and a resolve would start a new process.
@@ -487,8 +489,7 @@ def bare_cite(text):
 # nobody, never, cannot, yet to. A line that ends in `?` asks and claims nothing.
 ANSWERED_RE = re.compile(r"(?<![\w-])answered(?![\w-])", re.I)
 ANSWERED_INBOX_RE = re.compile(r"\[question\]\s*(?:->|\u2192)\s*answered\b", re.I)
-_NEGATOR = r"\bnot\b|n['\u2019]t\b|\bno(?:ne|thing|body)?\b|\bnever\b|\bcannot\b|\byet\s+to\b"
-ANSWERED_NEGATOR_RE = re.compile(_NEGATOR, re.I)
+ANSWERED_NEGATOR_RE = re.compile(r"\bnot\b|n['\u2019]t\b|\bno(?:ne|thing|body)?\b|\bnever\b|\bcannot\b|\byet\s+to\b", re.I)
 ANSWERED_CLAUSE_BREAK_RE = re.compile(r"[.;:!?,\u2014\u2013]|\s-{1,2}\s")
 ANSWERED_TOP_DIRS = {"docs", "hooks", "lint", "bin", "skills", "agents", "roadmap"}
 ANSWERED_FILE_RE = re.compile(
@@ -553,16 +554,27 @@ def answered_problem(text):
 
 
 # posted-needs-comment-url: a reply line that claims a posted PR comment or review record cites the comment's URL.
-# The verb is posted, left, filed or commented; the noun is comment, review or record, in the same clause (a clause
-# breaks as in answered). commented needs no noun. left needs the noun after it, so "two records left" is no claim.
-# The negator is the answered one plus modals and conditionals, since "will be posted" claims nothing yet. A URL is
-# cut out of the line before clauses are read, so its dots break nothing. The only source is a comment-anchored
-# GitHub URL. A `#<n>` on the line that matches no cited URL's number refuses: the URL is for another PR.
+# The verb is posted, left, filed or commented; the noun is review record, review or comment, in the same clause
+# (a clause breaks as in answered, but not at a colon, so a label before a colon is the noun). The line also holds
+# a PR ref: a #<n>, a github.com URL or the word PR. commented needs no noun. left needs the noun after it and
+# claims nothing when its object stays unchanged, as is or alone. A verb is exempt only where it is not claimed:
+# a negator or modal in the auxiliary chain directly before it (up to 3 words), a subordinator that directly
+# precedes it or that opens a passive verb, no/nothing or a want-verb right before the noun phrase.
+# A URL is cut out of the line before clauses are read, so its dots break nothing. The only source is a
+# comment-anchored GitHub URL. A `#<n>` on the line that matches no cited URL's number refuses.
 POSTED_VERB_RE = re.compile(r"(?<![\w-])(posted|left|filed|commented)(?![\w-])", re.I)
-POSTED_NOUN_RE = re.compile(r"(?<![\w-])(?:comments?|reviews?|records?)(?![\w-])", re.I)
-POSTED_NEGATOR_RE = re.compile(
-    _NEGATOR + r"|\b(?:will|would|should|shall|must|can|could|may|might|needs?|once|until|when|whenever|after"
-    r"|before|if|unless)\b|\bto\s+be\b", re.I)
+_POSTED_NOUN = r"(?<![\w-])(?:review\s+records?|reviews?|comments?)(?![\w-])"
+POSTED_NOUN_RE = re.compile(_POSTED_NOUN, re.I)
+POSTED_NOUN_EXEMPT_RE = re.compile(
+    r"(?<![\w-])(?:no|nothing|needs?|wants?|awaits?|waits\s+for)\s+(?:[\w-]+\s+){0,2}?" + _POSTED_NOUN, re.I)
+POSTED_CLAUSE_BREAK_RE = re.compile(r"[.;!?,\u2014\u2013]|\s-{1,2}\s")
+POSTED_PR_RE = re.compile(r"#\d+|github\.com|\bPRs?\b|\bpull request")
+POSTED_UNCHANGED_RE = re.compile(r"\b(?:unchanged|as\s+is|alone)\b", re.I)
+POSTED_CHAIN_STOP = {"not", "never", "yet", "will", "would", "should", "shall", "must", "can", "could", "may",
+                     "might", "to", "cannot"}
+POSTED_CHAIN_PASS = {"be", "been", "being", "have", "has", "had", "is", "are", "was", "were", "get", "gets"}
+POSTED_PASSIVE = {"be", "been", "being", "is", "are", "was", "were", "get", "gets"}
+POSTED_SUBORDINATORS = {"after", "when", "whenever", "until", "once", "before", "if", "unless"}
 POSTED_URL_RE = re.compile(r"https?://\S+", re.I)
 POSTED_SOURCE_RE = re.compile(
     r"https?://[^\s)>\]]*?/(?:pull|issues)/(\d+)#(?:issuecomment-\d+|discussion_r\d+|pullrequestreview-\d+)", re.I)
@@ -574,14 +586,45 @@ POSTED_REASON = (
     "Lines: ")
 
 
+def _posted_words(clause):
+    """The lowercase words of `clause`, edge punctuation stripped."""
+    words = (w.strip("()[]\"'.,;:*_").lower() for w in clause.split())
+    return [w for w in words if w]
+
+
+def _is_negator(word):
+    return word in POSTED_CHAIN_STOP or word.endswith(("n't", "n\u2019t"))
+
+
+def _posted_exempt(words):
+    """True when the words before a claim verb exempt it: a negator or modal in the auxiliary chain right
+    before the verb, a subordinator right before it, or a subordinator earlier in the clause with a passive verb."""
+    if not words:
+        return False
+    if words[-1] in POSTED_SUBORDINATORS:
+        return True
+    chain = []
+    for w in reversed(words[-3:]):
+        if not (_is_negator(w) or w in POSTED_CHAIN_PASS):
+            break
+        chain.append(w)
+    if any(_is_negator(w) for w in chain):
+        return True
+    return words[-1] in POSTED_PASSIVE and any(w in POSTED_SUBORDINATORS for w in words[:-1])
+
+
 def _claims_posted(plain):
-    """True when `plain` holds an unnegated posted-claim verb with its noun in the same clause."""
-    for m in _unnegated(plain, POSTED_VERB_RE, POSTED_NEGATOR_RE):
+    """True when `plain` holds a posted-claim verb that nothing exempts, with its noun in the same clause."""
+    for m in POSTED_VERB_RE.finditer(plain):
         verb = m.group(1).lower()
+        before = POSTED_CLAUSE_BREAK_RE.split(plain[:m.start()])[-1]
+        after = POSTED_CLAUSE_BREAK_RE.split(plain[m.end():])[0]
+        if _posted_exempt(_posted_words(before)) or POSTED_NOUN_EXEMPT_RE.search(before + m.group(0) + after):
+            continue
         if verb == "commented":
             return True
-        before = ANSWERED_CLAUSE_BREAK_RE.split(plain[:m.start()])[-1]
-        after = ANSWERED_CLAUSE_BREAK_RE.split(plain[m.end():])[0]
+        if verb == "left" and POSTED_UNCHANGED_RE.search(after):
+            continue
         if POSTED_NOUN_RE.search(after) or (verb != "left" and POSTED_NOUN_RE.search(before)):
             return True
     return False
@@ -603,7 +646,7 @@ def posted_problem(text):
     bad = []
     for body in _claim_lines(text):
         plain = POSTED_URL_RE.sub(" ", CODE_SPAN.sub(" ", body))
-        if not _claims_posted(plain):
+        if not POSTED_PR_RE.search(body) or not _claims_posted(plain):
             continue
         if _cites_comment_url(CODE_SPAN.sub(lambda m: m.group(2), body)):
             continue
