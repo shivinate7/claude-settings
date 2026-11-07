@@ -19,11 +19,14 @@ plan, or a `<!-- rule:x -->` anchor in CLAUDE.md or output-styles/*.md. It fails
     GLOSS001  the first cite of an id in a file, a backticked span that is exactly the id, has no short gloss. The
               gloss test is has_gloss in lint/report_guard.py, the one home that the cite-gloss guard also calls.
     DEBT001   a debt has no `**Decision.**` line.
-    DEBT002   the Decision line names no decision: its first slug is not a decision.
-    DEBT003   the Decision line names a decision that does not name the debt.
+    DEBT002   the Decision line is not a decision slug or `none` exactly: its first slug is not a decision, or `none`
+              runs on into prose. A hint line under the findings says so.
+    DEBT003   the Decision line names a decision that does not name the debt, by a code span that is exactly the debt's
+              slug or by the slug as a whole word in the decision.
     DEBT004   the Decision line says `none` while a decision names the debt.
 
-A cite inside a fenced block, an HTML comment or another code span is not a cite.
+A cite inside a fenced block, an HTML comment or another code span is not a cite. The decision slug that opens a debt's
+Decision line is a cite with or without backticks.
 
 The functions take a repo root, so lint/compliance_probes.py reads a child's records with them.
 """
@@ -185,14 +188,43 @@ def spans(text):
     return [(m.start(), m.end(), m.group(2)) for m in SPAN.finditer(text)]
 
 
-def first_cites(text, ids):
+def decision_line(clean):
+    """(offset, line) of the first Decision line of `clean`, which `unfenced` has already read, else None. The line is
+    stripped; the offset is where it starts in `clean`."""
+    offset = 0
+    for raw in clean.split("\n"):
+        line = raw.strip()
+        if DECISION.match(line):
+            return offset + len(raw) - len(raw.lstrip()), line
+        offset += len(raw) + 1
+    return None
+
+
+def bare_decision_cite(clean):
+    """[(start, end, slug)] for the slug that opens the Decision line of `clean` when it has no backticks, else []."""
+    found = decision_line(clean)
+    if not found:
+        return []
+    offset, line = found
+    at = DECISION.match(line).end()
+    at += len(line[at:]) - len(line[at:].lstrip())
+    m = SLUG_AT_START.match(line, at)
+    if not m or not m.group(2):
+        return []
+    return [(offset + m.start(2), offset + m.end(2), m.group(2))]
+
+
+def first_cites(text, ids, bare=False):
     """[(line, id, glossed)] for the first cite of each id of `ids` in `text`. A cite is a code span that is exactly
-    the id. The context for the gloss test is the text with every code span blanked, as the cite-gloss guard reads it."""
+    the id; with `bare`, also the slug that opens the Decision line when it has no backticks. The context for the gloss
+    test is the text with every code span blanked, as the cite-gloss guard reads it."""
     clean = unfenced(text)
     found = spans(clean)
     plain = clean
     for start, end, _ in reversed(found):
         plain = plain[:start] + blank(plain[start:end]) + plain[end:]
+    if bare:
+        found = sorted(found + bare_decision_cite(clean))
     seen, out = set(), []
     for start, end, content in found:
         if content in ids and content not in seen:
@@ -232,13 +264,17 @@ def tree_findings(root):
     scanned = [(f, slug) for slug, f in decisions.items()] + [(f, slug) for slug, f in debts.items()] + \
               [(f, None) for f in rule_files]
     for f, own in scanned:
-        for line, ident, glossed in first_cites(read(root, f), ids - {own}):
+        for line, ident, glossed in first_cites(read(root, f), ids - {own}, bare=f in debts.values()):
             if not glossed:
                 out.append("%s:%d GLOSS001 %s" % (f, line, ident))
     for slug, f in decisions.items():
-        for _, _, content in spans(unfenced(read(root, f))):
+        clean = unfenced(read(root, f))
+        for _, _, content in spans(clean):
             if content in debts:
                 naming.setdefault(content, set()).add(slug)
+        for debt in debts:
+            if re.search(r"(?<![\w-])%s(?![\w-])" % re.escape(debt), clean):
+                naming.setdefault(debt, set()).add(slug)
     for slug, f in debts.items():
         lines = [l.strip() for l in unfenced(read(root, f)).split("\n")]
         at = next((i for i, l in enumerate(lines, 1) if DECISION.match(l)), 0)
@@ -276,6 +312,8 @@ def main_tree(args):
         return 1 if os.environ.get("CI") else 0
     for line in found:
         print(line)
+    if any(" DEBT002 " in line for line in found):
+        print("DEBT002: the Decision line must be a decision slug or `none` exactly, with no prose after `none`.")
     return 1 if found else 0
 
 
