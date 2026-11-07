@@ -903,6 +903,31 @@ class GuardRuleIdReadTests(unittest.TestCase):
                                   "unchecked. Output: " + out.getvalue())
         self.assertIn(WATCH_ONLY, out.getvalue())
 
+    def listed(self, src):
+        """The ids the reader lists for `src`. A refusal here is a failure that names it, not an error."""
+        try:
+            return rule_audit.guard_rule_names(src, "hooks/guard.py")
+        except ValueError as why:
+            self.fail("the reader refused a def-local rule id: %s" % why)
+
+    def test_a_def_local_name_assigned_a_literal_lists_that_id(self):
+        # Scope first: the same call with the literal inline is read, so the local line is the only gap.
+        self.assertEqual(self.listed('def go():\n    refuse(tool, "deny", "zzz-local-new", R, m)\n'),
+                         {"zzz-local-new"})
+        self.assertEqual(self.listed('def go():\n    rid = "zzz-local-new"\n    refuse(tool, "deny", rid, R, m)\n'),
+                         {"zzz-local-new"})
+
+    def test_a_def_local_name_assigned_a_conditional_of_literals_lists_both_ids(self):
+        src = 'def go(c):\n    rid = "x-a" if c else "x-b"\n    refuse(tool, "deny", rid, R, m)\n'
+        self.assertEqual(self.listed(src), {"x-a", "x-b"})
+
+    def test_a_parameter_rule_id_stays_a_silent_pass(self):
+        self.assertEqual(self.listed('def go(rid):\n    refuse(tool, "deny", rid, R, m)\n'), set())
+
+    def test_a_tuple_unpacked_rule_id_stays_a_silent_pass(self):
+        self.assertEqual(self.listed('def go():\n    rid, why = pick()\n    refuse(tool, "deny", rid, why, m)\n'),
+                         set())
+
 
 # ------------------------------------------------------------ parse cache
 # `_parsed` keeps one tree per test file, keyed on its path, size and mtime. A file rewritten in place
