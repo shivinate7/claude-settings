@@ -865,6 +865,23 @@ class GuardClosure(unittest.TestCase):
         _, paths, loads, _ = _refs("janitor/zz_probe.py", ast.parse(src), tracked)
         self.assertNotIn("settings.json", paths | loads)
 
+    def test_a_pathlib_path_read_outside_a_loader_is_followed(self):
+        # A `/` load that no loader names: the settings path a module keeps as a constant and opens elsewhere.
+        tracked = set(_repo_files())
+        self.assertIn("settings.json", tracked, "scope: settings.json is not a repo file")
+        src = 'import pathlib\nSETTINGS = pathlib.Path(__file__).resolve().parents[1] / "settings.json"\n'
+        _, paths, loads, _ = _refs("janitor/zz_probe.py", ast.parse(src), tracked)
+        self.assertIn("settings.json", paths | loads, "the pathlib path read outside a loader is not followed")
+
+    def test_a_name_bound_twice_is_not_read_through(self):
+        # Control: the root is the repo by its first binding and a fixture folder by its second, so the name is not the repo.
+        tracked = set(_repo_files())
+        self.assertIn("settings.json", tracked, "scope: settings.json is not a repo file")
+        src = ('import os\nROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))\nROOT = "/fixture"\n'
+               'PATH = os.path.join(ROOT, "settings.json")\n')
+        _, paths, loads, _ = _refs("janitor/zz_probe.py", ast.parse(src), tracked)
+        self.assertNotIn("settings.json", paths | loads)
+
 
 @unittest.skipUnless(BASH, "bash not on PATH")
 class MutationReport(unittest.TestCase):
