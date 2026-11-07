@@ -5731,9 +5731,13 @@ def git_in(folder, *args):
     subprocess.run(["git", "-C", folder, *args], check=True, capture_output=True, text=True)
 
 
-def make_branch(folder, base=None, change=None):
-    """A git repo at `folder`, rolled out to the layout. origin/main holds the notes file as `base`, or no notes file
-    when base is None. HEAD, one commit on, holds the notes file as `change`, or only moves the README when change is None."""
+def git_out(folder, *args):
+    return subprocess.run(["git", "-C", folder, *args], check=True, capture_output=True, text=True).stdout.strip()
+
+
+def init_repo(folder, base=None):
+    """A git repo at `folder`, rolled out to the layout, whose origin/main holds the notes file as `base`, or no notes
+    file when base is None. Nothing is committed past origin/main."""
     os.makedirs(folder, exist_ok=True)
     git_in(folder, "init", "-q", "-b", "main")
     git_in(folder, "config", "user.email", "t@example.com")
@@ -5745,64 +5749,91 @@ def make_branch(folder, base=None, change=None):
     git_in(folder, "add", "-A")
     git_in(folder, "commit", "-q", "-m", "base")
     git_in(folder, "update-ref", "refs/remotes/origin/main", "HEAD")
-    if change is None:
-        write_file(os.path.join(folder, "README.md"), "# Repo\n\nA branch change.\n")
-    else:
-        write_file(os.path.join(folder, NOTES_REL), change)
-    git_in(folder, "add", "-A")
-    git_in(folder, "commit", "-q", "-m", "branch")
     return folder
 
 
+def commit_notes(folder, text, subject):
+    """Commit the notes file as `text`, or move the README when text is None. Returns the commit's short sha."""
+    if text is None:
+        write_file(os.path.join(folder, "README.md"), "# Repo\n\n%s\n" % subject)
+    else:
+        write_file(os.path.join(folder, NOTES_REL), text)
+    git_in(folder, "add", "-A")
+    git_in(folder, "commit", "-q", "-m", subject)
+    return git_out(folder, "rev-parse", "--short=7", "HEAD")
+
+
+def tool_result_text(text, tool_use_id="tu_1"):
+    """A tool result that holds `text`, as a command prints it: a commit prints `[branch sha] subject`."""
+    block = {"type": "tool_result", "tool_use_id": tool_use_id, "content": text}
+    return {"type": "user", "isSidechain": False, "message": {"role": "user", "content": [block]}}
+
+
 class NotesFixTests(unittest.TestCase):
-    """The step check on a landed turn, in report_guard.py's Stop hook."""
+    """The step check on a landed turn, in report_guard.py's Stop hook. A turn judges only the notes and debt lines that
+    its own commits added. A commit's `[branch sha] subject` line, printed in the turn's tool results, names those commits."""
 
     def setUp(self):
         self.tmp = tempfile.mkdtemp(dir=RUN_FOLDER)  # this run's folder, never the system temp dir (test-temp-standard)
         self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
         self.repo = os.path.join(self.tmp, "repo")
 
-    def stop(self, repo, done):
-        """Run the Stop guard on a landed turn in `repo` whose reply is `done`. Returns the decision, or None when quiet."""
-        records = [human("do the task"), tool_use_msg("Bash", {"command": "git commit -m x"}), tool_result_msg(),
-                   assistant_text(done)]
+    def stop(self, records):
+        """Run the Stop guard on `records` with cwd self.repo. Returns the decision, or None when the guard is quiet."""
         path = write_transcript(records, self.tmp)
-        hook = {"hook_event_name": "Stop", "transcript_path": path, "stop_hook_active": False, "cwd": repo}
+        hook = {"hook_event_name": "Stop", "transcript_path": path, "stop_hook_active": False, "cwd": self.repo}
         run = run_guard(REPORT_GUARD, hook)
         self.assertEqual(run.returncode, 0, run.stderr)
         self.assertNotIn("Traceback", run.stderr)
         return json.loads(run.stdout) if run.stdout.strip() else None
 
-    def test_step_absent_from_done_blocks(self):
-        make_branch(self.repo, base=NOTES_BASE, change=NOTES_BASE + STEP_NOTE)
-        out = self.stop(self.repo, DONE_STEP_UNNAMED)
+    def turn(self, subject, sha, done):
+        """One landed turn: a `git commit` that printed its `[main sha] subject` line, then the reply `done`."""
+        return [human("do " + subject), tool_use_msg("Bash", {"command": "git commit -m %s" % subject}),
+                tool_result_text("[main %s] %s\n 1 file changed" % (sha, subject)), assistant_text(done)]
+
+    def assert_blocks_naming(self, out, step):
         self.assertIsNotNone(out)
         self.assertEqual(out.get("decision"), "block")
-        self.assertIn("fix-alpha", out["reason"])
+        self.assertIn(step, out["reason"])
+
+    def test_step_absent_from_done_blocks(self):
+        init_repo(self.repo, base=NOTES_BASE)
+        sha = commit_notes(self.repo, NOTES_BASE + STEP_NOTE, "one")
+        self.assert_blocks_naming(self.stop(self.turn("one", sha, DONE_STEP_UNNAMED)), "fix-alpha")
 
     def test_step_named_in_done_passes(self):
-        make_branch(self.repo, base=NOTES_BASE, change=NOTES_BASE + STEP_NOTE)
-        self.assertIsNone(self.stop(self.repo, DONE_STEP_NAMED))
+        init_repo(self.repo, base=NOTES_BASE)
+        sha = commit_notes(self.repo, NOTES_BASE + STEP_NOTE, "one")
+        self.assertIsNone(self.stop(self.turn("one", sha, DONE_STEP_NAMED)))
 
     def test_fix_none_passes(self):
-        make_branch(self.repo, base=NOTES_BASE, change=NOTES_BASE + NONE_NOTE)
-        self.assertIsNone(self.stop(self.repo, DONE_STEP_UNNAMED))
+        init_repo(self.repo, base=NOTES_BASE)
+        sha = commit_notes(self.repo, NOTES_BASE + NONE_NOTE, "one")
+        self.assertIsNone(self.stop(self.turn("one", sha, DONE_STEP_UNNAMED)))
 
     def test_repo_with_no_notes_file_stays_quiet(self):
-        make_branch(self.repo)  # no notes file on either side of the branch
-        self.assertIsNone(self.stop(self.repo, DONE_STEP_UNNAMED))
+        init_repo(self.repo)  # no notes file on either side of the branch
+        sha = commit_notes(self.repo, None, "one")
+        self.assertIsNone(self.stop(self.turn("one", sha, DONE_STEP_UNNAMED)))
 
     def test_step_named_only_as_a_prefix_of_another_step_blocks(self):
         # Done names fix-alpha-two. A substring match would read fix-alpha as named and pass.
-        make_branch(self.repo, base=NOTES_BASE, change=NOTES_BASE + STEP_NOTE)
-        out = self.stop(self.repo, DONE_PREFIX_ONLY)
-        self.assertIsNotNone(out)
-        self.assertEqual(out.get("decision"), "block")
-        self.assertIn("fix-alpha", out["reason"])
+        init_repo(self.repo, base=NOTES_BASE)
+        sha = commit_notes(self.repo, NOTES_BASE + STEP_NOTE, "one")
+        self.assert_blocks_naming(self.stop(self.turn("one", sha, DONE_PREFIX_ONLY)), "fix-alpha")
 
     def test_build_only_done_does_not_run_the_step_check(self):
-        make_branch(self.repo, base=NOTES_BASE, change=NOTES_BASE + STEP_NOTE)
-        self.assertIsNone(self.stop(self.repo, DONE_BUILT))
+        init_repo(self.repo, base=NOTES_BASE)
+        sha = commit_notes(self.repo, NOTES_BASE + STEP_NOTE, "one")
+        self.assertIsNone(self.stop(self.turn("one", sha, DONE_BUILT)))
+
+    def test_a_fix_added_on_an_earlier_turn_does_not_block_a_later_turn(self):
+        # Turn one adds the step fix and names it in Done. Turn two commits a README change and omits the step.
+        init_repo(self.repo, base=NOTES_BASE)
+        first = commit_notes(self.repo, NOTES_BASE + STEP_NOTE, "one")
+        second = commit_notes(self.repo, None, "two")
+        self.assertIsNone(self.stop(self.turn("one", first, DONE_STEP_NAMED) + self.turn("two", second, DONE_STEP_UNNAMED)))
 
 
 if __name__ == "__main__":
