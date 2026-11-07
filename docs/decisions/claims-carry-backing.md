@@ -55,11 +55,11 @@ Built, report-only. `merge/merge.py` selects prose lines and sends each file to 
 
 - Selection: each line that cites a changed backing file, from `backed_lines`, the reverse map of code to the prose that cites it (read lint/stale_cites.py:611-628). Plus each non-heading line the range adds to a governed file (read merge/merge.py:2439-2445).
 - Call: `decision_watch.invoke_model` with the `LINE_VERDICTS` shape, which reads `holds`, `stale` or `unbacked` per line (read hooks/decision_watch.py:671; read merge/merge.py:2540).
-- Cap: 3 files per merge (read merge/merge.py:2412). A file past the cap reads UNKNOWN (read merge/merge.py:2507-2508). The report prints at most 20 lines (read merge/merge.py:2557-2558).
+- Cap: 3 files per merge (read merge/merge.py:2412). A file past the cap reads UNKNOWN (read merge/merge.py:2507-2508). The report prints at most 20 lines, then one count line (read merge/merge.py:2557-2558).
 - Errors: a model error, a timeout or an unreadable reply reads UNKNOWN, never a pass (read merge/merge.py:2539-2545).
 - Report only: the call runs after the lock is released and refuses nothing (read merge/merge.py:2526-2529).
 
-Scored. `lint/prove_route_judge.py` scores the judge on `lint/route_claims_labelled.json`. The file has 21 rows. Each row holds its line text and the commit it was judged at (read lint/route_claims_labelled.json:1-23). Only a `stale` verdict counts against the labels. A false alarm is a TRUE row judged stale. A hit is a STALE, PARTLY_STALE or HALF row judged stale (read lint/prove_route_judge.py:113-131). `unbacked` is counted apart, because no labelled row carries a backing cite. UNKNOWN and HISTORY rows are skipped, and so is a row with no rev (read lint/prove_route_judge.py:40, :115-116). Source: "only a 'stale' verdict scores against the labels; 'unbacked' is counted on its own" (lane pick, 2026-11-07 02:46 CST, process-only).
+Scored. `lint/prove_route_judge.py` scores the judge on `lint/route_claims_labelled.json`. The file has 21 rows. Each row holds its line text and the commit it was judged at (read lint/route_claims_labelled.json:1-23). Only a `stale` verdict counts against the labels. A false alarm is a TRUE row judged stale. A hit is a STALE, PARTLY_STALE or HALF row judged stale (read lint/prove_route_judge.py:113-131). `unbacked` is counted apart, because no labelled row carries a backing cite. UNKNOWN and HISTORY rows are skipped, and so is a row with no rev (read lint/prove_route_judge.py:39-40, :115-116). Source: "only a 'stale' verdict scores against the labels; 'unbacked' is counted on its own" (lane pick, 2026-11-07 02:46 CST, process-only).
 
 Result, in the record's backing form: `(measured 2026-11-07, lint/prove_route_judge.py: false alarms 0/13 (0.0%), hits 0/4, unbacked 12/17, unknown 4 (model result carried no JSON verdict), skipped 4)`.
 
@@ -82,7 +82,7 @@ No daemon and no timer.
 - The range scan starts one `git diff -M --raw -p -z -U0`. It carries the changed names and the added lines that STALE005 reads (read lint/stale_cites.py:1066; read lint/stale_cites.py:257-266).
 - Blob reads share one `git cat-file --batch` process. It starts on the first read and closes at the end of the run (read lint/stale_cites.py:150-175; read lint/stale_cites.py:1077).
 - The head blob of a file is read only when one of its added lines holds a verb or a route word (read lint/stale_cites.py:722-743).
-- A range that changes `hooks/route_rows.json` reads that blob once (read lint/stale_cites.py:828-846).
+- A range that changes `hooks/route_rows.json` reads it at base and at head (read lint/stale_cites.py:804-807). A sentence with a route cite reads the head blob once more (read lint/stale_cites.py:828-846).
 - When a row id is removed, one `git ls-tree` runs and each tracked `.md` is read (read lint/stale_cites.py:801-826; read lint/stale_cites.py:859-862).
 - STALE005's judge, `judge()`, is rule-based and starts no model (read lint/stale_cites.py:769-799).
 - The merge takes the changed names from a `--name-only` diff (read merge/merge.py:2859). The merge judge runs its own `git diff -U0` (read merge/merge.py:2436) and up to 3 model starts per merge (read merge/merge.py:2412). Its model starts are unmeasured.
