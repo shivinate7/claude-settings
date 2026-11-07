@@ -8013,7 +8013,7 @@ nm_case("linked-nm: workspace: cd packages/a, then npm install, under a root tha
 nm_case("linked-nm: workspace: cd packages/.hid, then npm install, under a linked root whose glob is packages/* is allowed",
         "cd packages/.hid && npm install", "allow", NMWS)
 
-# THE DRY RUN OF A VERSION BUMP. A dry run writes nothing, so it does not reify the linked root (npm 10.9.9: a real
+# THE DRY RUN OF A VERSION BUMP. A dry run does not reify the linked root (it still bumps package.json) (npm 10.9.9: a real
 # `npm version patch` creates the root's node_modules, a dry run creates none). The real runs stay refused above.
 nm_case("linked-nm: workspace: cd packages/a, then npm version patch --dry-run, under a linked workspace root is allowed",
         "cd packages/a && npm version patch --dry-run", "allow", NMWS)
