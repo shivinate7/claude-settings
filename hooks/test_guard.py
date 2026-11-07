@@ -10231,6 +10231,159 @@ mtc_refuse("a header quoting another label's time, Owner, 16:36 CST, is refused,
            "Owner, 16:36 CST: go", clock="2026-11-07T13:52:00-06:00", carries=("your own label",))
 
 
+# ---- the written values: ArtifactData `added`, a roadmap step's `updatedAt`, a literal `updatedAt` in Bash
+# The same rule on more tools. Only these written values are judged, as ISO-8601 instants with an offset (`Z` or
+# +-HH:MM): `added` in an ArtifactData write (set, update, each write of a batch) to collection `items`; `updatedAt`
+# in a Write (the content's JSON) or an Edit (the new_string) to a roadmap step file; and a literal `updatedAt` in a
+# Bash command, read as text, quoted or not. Any of them more than 3 minutes off the clock, either way, is refused.
+# Quoted times in prose and any other field pass. Incident (triage 6, 2026-11-07): `added` 20:16Z was written to
+# items at a clock of 20:14Z, and roadmap step files got a wrong `updatedAt`, in the shape 2026-11-07T14:15:00-06:00.
+MTC_WRITE_CLOCK = "2026-11-07T14:14:00-06:00"  # 14:14 CST, which is 20:14Z: the clock of every case below
+MTC_WRITE_CARRIES = ("14:14 CST", ("2026-11-07T14:14", "2026-11-07T20:14"))  # the reason prints the real time, both ways
+MTC_ITEM_URL = "https://claude.ai/artifact/mtcwrites"  # the page whose items the ArtifactData cases write
+MTC_STEP = os.path.join(NOGIT, "roadmap", "data", "steps", "silent-undo-edit-pass.json")  # a roadmap step file
+MTC_NOT_STEP = os.path.join(NOGIT, "docs", "silent-undo-edit-pass.json")  # a path that is not a step file
+MTC_OFF_STEP = '{"id": "silent-undo-edit-pass", "updatedAt": "2026-11-07T14:30:00-06:00"}\n'  # 16 minutes ahead
+
+
+def mtc_write(name, expected, tool, **tool_input):
+    """One case of the written-value rule: `tool_input`, run as `tool`, against the clock MTC_WRITE_CLOCK."""
+    if expected == "deny":
+        add("message-time-matches-clock: " + name, "deny", rule=MTC_RULE, tool=tool, cwd=NOGIT,
+            env=mtc_env(MTC_WRITE_CLOCK), carries=MTC_WRITE_CARRIES, **tool_input)
+    else:
+        add("message-time-matches-clock: " + name, "allow", tool=tool, cwd=NOGIT, silent=True,
+            env=mtc_env(MTC_WRITE_CLOCK), **tool_input)
+
+
+def mtc_set(name, expected, data, action="set", collection="items", doc_id="silent-undo-edit-pass"):
+    """An ArtifactData write of one document: `data` to `collection`, on the page the cases name."""
+    mtc_write(name, expected, "ArtifactData", url=MTC_ITEM_URL, action=action, collection=collection,
+              doc_id=doc_id, data=data)
+
+
+def mtc_batch(name, expected, writes):
+    """An ArtifactData batch of `writes`, each one a dict of op, collection, doc_id and data."""
+    mtc_write(name, expected, "ArtifactData", url=MTC_ITEM_URL, action="batch", writes=writes)
+
+
+def mtc_bash(name, expected, command):
+    """A Bash command whose text carries, or does not carry, a literal updatedAt value."""
+    mtc_write(name, expected, "Bash", command=command)
+
+
+# Refused: an `added` in items 4 minutes ahead. The limit is 3 minutes, so 4 is the first refused.
+mtc_set("an added 4 minutes ahead in items is refused", "deny",
+        {"id": "silent-undo-edit-pass", "added": "2026-11-07T20:18:00Z"})
+# Refused: an `added` 5 minutes behind. The limit holds both ways.
+mtc_set("an added 5 minutes behind in items is refused", "deny",
+        {"id": "silent-undo-edit-pass", "added": "2026-11-07T20:09:00Z"})
+# Refused: the offset form, 11 minutes ahead (14:25 CST is 20:25Z).
+mtc_set("an added 14:25 at -06:00, 11 minutes ahead, in items is refused", "deny",
+        {"id": "silent-undo-edit-pass", "added": "2026-11-07T14:25:00-06:00"})
+# Refused: 14:14 wall-clock digits at -05:00 are 60 minutes off. A reader that drops the offset sees 0 and allows it.
+mtc_set("an added of 14:14 at -05:00 in items is refused: 60 minutes off, the offset counts", "deny",
+        {"id": "silent-undo-edit-pass", "added": "2026-11-07T14:14:00-05:00"})
+# Refused: an update is judged as a set is.
+mtc_set("an update that sets an added 10 minutes behind in items is refused", "deny",
+        {"added": "2026-11-07T20:04:00Z"}, action="update")
+# Refused: each write of a batch is judged. The first is exact, the second 16 minutes ahead.
+mtc_batch("a batch whose second write sets an added 16 minutes ahead is refused", "deny", [
+    {"op": "set", "collection": "items", "doc_id": "silent-undo-edit-pass",
+     "data": {"id": "silent-undo-edit-pass", "added": "2026-11-07T20:14:00Z"}},
+    {"op": "set", "collection": "items", "doc_id": "silent-undo-edit-next",
+     "data": {"id": "silent-undo-edit-next", "added": "2026-11-07T20:30:00Z"}}])
+# Refused: a step Write, judged on the content's JSON, 16 minutes ahead.
+mtc_write("a roadmap step Write with updatedAt 14:30 at -06:00 is refused", "deny", "Write",
+          file_path=MTC_STEP, content=MTC_OFF_STEP)
+# Refused: the stamp sits after a full-size note. The whole content is read, however long it is.
+mtc_write("a roadmap step Write whose updatedAt follows a full-size note is refused, however long the content",
+          "deny", "Write", file_path=MTC_STEP,
+          content='{"id": "silent-undo-edit-pass", "note": "' + MTC_BODY + '", "updatedAt": "2026-11-07T14:30:00-06:00"}\n')
+# Refused: a step Edit, judged on its new_string. The old_string holds an exact time and is not the one judged.
+mtc_write("a roadmap step Edit whose new_string holds updatedAt 14:30 at -06:00 is refused", "deny", "Edit",
+          file_path=MTC_STEP, old_string='"updatedAt": "2026-11-07T14:14:00-06:00"',
+          new_string='"updatedAt": "2026-11-07T14:30:00-06:00"')
+# Refused: the literal form in a Bash heredoc, the shape the incident's writes took.
+mtc_bash("a Bash heredoc with updatedAt=\"2026-11-07T14:30:00-06:00\" is refused", "deny",
+         'cat > "$D/silent-undo-edit-pass.txt" <<\'EOF\'\nupdatedAt="2026-11-07T14:30:00-06:00"\nEOF')
+# Refused: the JSON form in a Bash heredoc.
+mtc_bash("a Bash heredoc of JSON with \"updatedAt\": 14:30 at -06:00 is refused", "deny",
+         'cat > "$D/silent-undo-edit-pass.json" <<\'EOF\'\n{"id": "silent-undo-edit-pass", "updatedAt": "2026-11-07T14:30:00-06:00"}\nEOF')
+# Refused: a comment opener, `#`, inside a double-quoted string does not hide the literal after it on the line.
+mtc_bash("a Bash literal after a # inside a double-quoted string is refused", "deny",
+         r"""echo "step #2 of 4"; printf '%s\n' 'updatedAt="2026-11-07T14:30:00-06:00"'""")
+# Refused: a lone apostrophe in unquoted text does not hide the literal, though a quote-aware reader would skip it.
+mtc_bash("a Bash literal after a lone apostrophe in unquoted text is refused", "deny",
+         r"""echo Owner's step; printf '%s\n' 'updatedAt="2026-11-07T14:30:00-06:00"'""")
+# Refused: an escaped JSON form in a double-quoted string is the same literal once the shell reads it.
+mtc_bash("an escaped JSON updatedAt 14:30 at -06:00 in a double-quoted string is refused", "deny",
+         r'''printf "%s\n" "{\"id\": \"silent-undo-edit-pass\", \"updatedAt\": \"2026-11-07T14:30:00-06:00\"}" > "$D/silent-undo-edit-pass.json"''')
+# Refused: a literal on the second line of a multi-line single-quoted string is still a literal in the command.
+mtc_bash("a Bash literal on line 2 of a multi-line single-quoted string is refused", "deny",
+         r"""printf '%s\n' 'step one
+updatedAt="2026-11-07T14:30:00-06:00"'""")
+
+# Passes: an `added` 2 minutes ahead is inside the limit. The incident's own value, 20:16Z, is that case.
+mtc_set("an added 20:16Z, 2 minutes ahead, in items is allowed: the incident value is inside the limit", "allow",
+        {"id": "silent-undo-edit-pass", "added": "2026-11-07T20:16:00Z"})
+# Passes: 14:14 CST exact, in each form. The Z form first.
+mtc_set("an added exactly 20:14Z in items is allowed", "allow",
+        {"id": "silent-undo-edit-pass", "added": "2026-11-07T20:14:00Z"})
+mtc_set("an added exactly 14:14 at -06:00 in items is allowed", "allow",
+        {"id": "silent-undo-edit-pass", "added": "2026-11-07T14:14:00-06:00"})
+# Passes: `added` is judged in collection items only. Answers and receipts are not judged, though 36 minutes off.
+mtc_set("an added 36 minutes ahead in answers is allowed: only collection items is judged", "allow",
+        {"id": "silent-undo-edit-pass", "added": "2026-11-07T20:50:00Z"}, collection="answers")
+mtc_set("an added 36 minutes ahead in receipts is allowed: only collection items is judged", "allow",
+        {"id": "silent-undo-edit-pass", "added": "2026-11-07T20:50:00Z"}, collection="receipts")
+# Passes: other fields are not judged. `replied` in answers and `ruled` in items are 3 hours off, and pass.
+mtc_set("a replied 3 hours off in answers is allowed: replied is not judged", "allow",
+        {"id": "silent-undo-edit-pass", "replied": "2026-11-07T23:14:00Z"}, collection="answers")
+mtc_set("a ruled 3 hours off in items is allowed: ruled is not judged", "allow",
+        {"id": "silent-undo-edit-pass", "ruled": "2026-11-07T17:14:00Z"})
+# Passes: a time in prose, HH:MM CST inside note or why, is not a written value.
+mtc_set("an HH:MM CST time inside note and why in items is allowed: quoted times in prose pass", "allow",
+        {"id": "silent-undo-edit-pass", "note": "Owner ruled at 13:40 CST: pick b.", "why": "Asked at 13:40 CST."})
+# Passes: a value with no offset is not judged.
+mtc_set("an added with no offset in items is allowed: a value with no offset is not judged", "allow",
+        {"id": "silent-undo-edit-pass", "added": "2026-11-07T14:30:00"})
+# Passes: an update that carries no added is not judged, the empty case of the field.
+mtc_set("an update that carries no added is allowed", "allow", {"status": "closed"}, action="update")
+# Passes: a batch of right writes, one of them in answers, is allowed.
+mtc_batch("a batch of right writes, one in answers 36 minutes off, is allowed", "allow", [
+    {"op": "set", "collection": "items", "doc_id": "silent-undo-edit-pass",
+     "data": {"id": "silent-undo-edit-pass", "added": "2026-11-07T20:14:00Z"}},
+    {"op": "set", "collection": "answers", "doc_id": "silent-undo-edit-pass",
+     "data": {"id": "silent-undo-edit-pass", "added": "2026-11-07T20:50:00Z"}}])
+# Passes: a step Write at 14:14 exact, in each form, and a step with no updatedAt at all.
+mtc_write("a roadmap step Write at 20:14Z exact is allowed", "allow", "Write", file_path=MTC_STEP,
+          content='{"id": "silent-undo-edit-pass", "updatedAt": "2026-11-07T20:14:00Z"}\n')
+mtc_write("a roadmap step Write at 14:14 at -06:00 exact is allowed", "allow", "Write", file_path=MTC_STEP,
+          content='{"id": "silent-undo-edit-pass", "updatedAt": "2026-11-07T14:14:00-06:00"}\n')
+mtc_write("a roadmap step Write with no updatedAt is allowed: the empty case", "allow", "Write",
+          file_path=MTC_STEP, content='{"id": "silent-undo-edit-pass"}\n')
+mtc_write("a roadmap step Write with an updatedAt that has no offset is allowed", "allow", "Write",
+          file_path=MTC_STEP, content='{"id": "silent-undo-edit-pass", "updatedAt": "2026-11-07T14:30:00"}\n')
+# Passes: a Write to a path that is not a step file is not judged, though its updatedAt is 16 minutes ahead.
+mtc_write("a Write to a non-step path holding updatedAt 14:30 at -06:00 is allowed", "allow", "Write",
+          file_path=MTC_NOT_STEP, content=MTC_OFF_STEP)
+# Passes: a step Edit at exact time, in each form.
+mtc_write("a roadmap step Edit whose new_string holds 20:14Z exact is allowed", "allow", "Edit", file_path=MTC_STEP,
+          old_string='"updatedAt": "2026-11-07T14:14:00-06:00"', new_string='"updatedAt": "2026-11-07T20:14:00Z"')
+mtc_write("a roadmap step Edit whose new_string holds 14:14 at -06:00 exact is allowed", "allow", "Edit",
+          file_path=MTC_STEP, old_string='"updatedAt": "2026-11-07T20:14:00Z"',
+          new_string='"updatedAt": "2026-11-07T14:14:00-06:00"')
+# Passes: the literal forms at exact time, in each form.
+mtc_bash("a Bash heredoc with updatedAt=\"2026-11-07T20:14:00Z\" exact is allowed", "allow",
+         'cat > "$D/silent-undo-edit-pass.txt" <<\'EOF\'\nupdatedAt="2026-11-07T20:14:00Z"\nEOF')
+mtc_bash("a Bash heredoc of JSON with updatedAt 14:14 at -06:00 exact is allowed", "allow",
+         'cat > "$D/silent-undo-edit-pass.json" <<\'EOF\'\n{"id": "silent-undo-edit-pass", "updatedAt": "2026-11-07T14:14:00-06:00"}\nEOF')
+# Passes: `updatedAt=$T` is a shell variable, not a literal, so the value the variable takes is not read.
+mtc_bash("a Bash updatedAt=$T from a shell variable is allowed: a variable is not a literal", "allow",
+         'T=$(date -u +%Y-%m-%dT%H:%M:%SZ); echo updatedAt=$T')
+
+
 # =========================================================================== 5d. cite by id
 FAMILY = "cite"
 #
