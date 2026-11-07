@@ -488,7 +488,7 @@ Busy-lane path. The routing session files the answer at once as a note on its st
 receiver. In the same turn it closes the item in one update: `status` `closed`, `home` the step or debt that carries the work,
 `lane` (the receiver's branch slug, or its tier, such as `batch-runner` from its `cs-build:` tag, when it has no branch), and
 `lastAnswer`. The close drops `waits`, so a routed item carries none. `answers/<id>` stays in place until the receiver's done
-report, so `page_grant.py` counts the relayed pick: it counts a closed item with a `home` and a `lastAnswer.at` equal to the
+report. So `page_grant.py` counts the relayed pick: it counts a closed item with a `home` and a `lastAnswer.at` equal to the
 answer's `at`. The routing session never sets `added` here: rule 5 of `page_grant.py` needs the answer's `at` later than `added`.
 A relay sends the receiver only the page URL, the item id and the act. On the receiver's done report the writer deletes
 `answers/<id>` and drops `lane`. The done report is status, never a grant. A `none` answer on this path gets no new options.
@@ -499,9 +499,9 @@ tells the receiver the act is withdrawn and then closes the item, with no done r
   already has `lane` and a `lastAnswer` with the same `at` is routed. Skip it until the done report.
 - Changed. A kept answer with no `act: "park"` and a new `at` is a new answer. Route it again, relay it with the new `at`,
   and rewrite `lastAnswer`.
-- Withdrawn. The page hides the item, so the owner withdraws a routed answer in chat, and that word, or the receiver's report
-  that it dropped the act, makes the writer reopen the item in one update (`status` `open`, `added` now, `lane` dropped with
-  `{"lane": {"__delete__": true}}`), delete `answers/<id>`, and tell the receiver the act is withdrawn.
+- Withdrawn. The owner withdraws a routed answer in chat, since the page hides the item, and the writer reopens it: `status` `open`,
+  `added` now, `lane` dropped with `{"lane": {"__delete__": true}}`. A receiver's report that it dropped the act does the same.
+  The writer also deletes `answers/<id>` and tells the receiver the act is withdrawn.
 - Chat answer. A chat answer closes the item (decision questions-go-to-owner, and the busy-lane rule), so no page answer
   can follow. Steps 2 to 4 skip their delete, and the writer sets `lastAnswer` from it. It has no `answers/<id>`, so
   `page_grant.py` can never count it for a receiver. The routing session tells the owner in its reply that the receiver needs
