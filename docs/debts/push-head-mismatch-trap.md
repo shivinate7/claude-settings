@@ -1,10 +1,10 @@
 # A push of HEAD to a branch of another name is not guarded
 
-**What.** `git push <remote> HEAD`, when the current branch tracks a branch of another name on that remote, pushes under the local branch's own name. It makes a stray branch on the remote, reports success, and leaves the tracked branch untouched. Banchi measured this (2026-09-12, `scripts/guard-shell.py`, push clause).
+**What.** `git push <remote> HEAD`, when the current branch tracks a branch of another name on that remote, pushes under the local branch's own name. It makes a stray branch on the remote, reports success, and leaves the tracked branch untouched. Banchi measured this (2026-09-12, `scripts/guard-shell.py`, push clause). See the Ruling below.
 
 **Where.** `hooks/guard.py`, the Bash push rules. No rule reads this case yet.
 
-- **Decision.** `none`. See the Ruling below.
+- **Decision.** `none`.
 
 **Retire.** Restore the rule, with its `push-head:` cases and mutants (fixtures `TRAPDIFF`, `TRAPSAME`, `TRAPCUT`), from commit 15e7b85 on branch `guard/banchi-shell-traps`. Design:
 
