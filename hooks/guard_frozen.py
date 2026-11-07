@@ -8,9 +8,9 @@ import re
 
 import guard_core
 from guard_core import (
-    REDIRECT, SCRIPT_HEADERS, _SHELLS, _WRITE_TARGET, _expanded, _plain_words, _resolved,
+    ASSIGNMENT, REDIRECT, SCRIPT_HEADERS, _SHELLS, _WRITE_TARGET, _expanded, _plain_words, _resolved,
     _split_heredocs, _strip_heredoc_bodies_unconditionally, basename, dir_before_segment, interpreter_bodies, norm, resolve_command,
-    script_language, segment_tokens, split_segments, strip_heredoc_bodies,
+    script_language, segment_tokens, split_segments, strip_heredoc_bodies, walk_quotes,
 )
 from guard_env import _quoted_words, _substitutions, script_spots
 
@@ -986,12 +986,14 @@ _JS_REGEX_AFTER_WORD = frozenset((
     "return", "typeof", "instanceof", "in", "of", "new", "delete", "void", "throw", "case", "do", "else",
     "yield", "await"))
 _JS_REGEX_AFTER_CHAR = "(,=:[!&|?{};+-*%<>~^"
+_JS_HEAD_WORDS = frozenset(("if", "while", "for", "with"))
 
 
-def _js_regex_may_start(body: str, at: int) -> bool:
+def _js_regex_may_start(body: str, at: int, ctrl_close: int = -1) -> bool:
     """True when the `/` at `at` sits where an operand is expected: at the start, after an opening bracket, a
-    separator, an operator or a word of `_JS_REGEX_AFTER_WORD`. After a name, a number, `)`, `]` or a string
-    it is division."""
+    separator, an operator, a word of `_JS_REGEX_AFTER_WORD`, or the `)` at `ctrl_close`, the one that closes
+    the head of an `if`, `while`, `for` or `with` (`if (ok) /x/.test(s)`). After a name, a number, any other
+    `)`, `]` or a string it is division."""
     back = at - 1
     while back >= 0 and body[back] in " \t\r\n":
         back -= 1
@@ -1002,7 +1004,21 @@ def _js_regex_may_start(body: str, at: int) -> bool:
         while start > 0 and (body[start - 1].isalnum() or body[start - 1] in "_$"):
             start -= 1
         return body[start:back + 1] in _JS_REGEX_AFTER_WORD
+    if body[back] == ")":
+        return back == ctrl_close
     return body[back] in _JS_REGEX_AFTER_CHAR
+
+
+def _js_paren_is_head(body: str, at: int) -> bool:
+    """True when the `(` at `at` opens the head of an `if`, `while`, `for` or `with`: a `)` that closes it is
+    followed by a statement, so a `/` there opens a regex. A word after a `.` is a property, not the keyword."""
+    back = at - 1
+    while back >= 0 and body[back] in " \t\r\n":
+        back -= 1
+    end = back + 1
+    while back >= 0 and (body[back].isalnum() or body[back] in "_$"):
+        back -= 1
+    return body[back + 1:end] in _JS_HEAD_WORDS and body[back:back + 1] != "."
 
 
 def _js_regex_end(body: str, at: int) -> int:
@@ -1030,12 +1046,14 @@ def _js_without_comments(body: str) -> str:
     r"""`body` with each `//` and `/* */` comment blanked (newlines kept), strings and regex literals left
     whole, so a path a comment names is no write and a `/*` in `/\/*$/` opens no comment. A `'` or `"` string
     ends at a newline, a backtick string runs on. A `/` opens a regex where an operand is expected
-    (`_js_regex_may_start`) and a `/` closes it on the same line; else it is division."""
+    (`_js_regex_may_start`, also after the head of an `if`) and a `/` closes it on the same line;
+    else it is division."""
     out, at, size = [], 0, len(body)
+    heads, ctrl_close = [], -1   # per open `(`: is it a statement head; where the last head closed
     while at < size:
         char, pair = body[at], body[at:at + 2]
         end = (_js_regex_end(body, at) if char == "/" and pair not in ("//", "/*")
-               and _js_regex_may_start(body, at) else -1)
+               and _js_regex_may_start(body, at, ctrl_close) else -1)
         if end > 0:
             out.append(body[at:end])
             at = end
@@ -1056,6 +1074,10 @@ def _js_without_comments(body: str) -> str:
             out.append("".join("\n" if c == "\n" else " " for c in body[at:end]))
             at = end
         else:
+            if char == "(":
+                heads.append(_js_paren_is_head(body, at))
+            elif char == ")" and heads and heads.pop():
+                ctrl_close = at
             out.append(char)
             at += 1
     return "".join(out)
@@ -1171,19 +1193,153 @@ def _kind_of(name: str) -> str:
     return lang if lang in ("py", "js") else "sh" if _SHELL_COMMAND(name) else ""
 
 
-def _script_operand(tokens, index: int, kind: str) -> str:
-    """The file word a `kind` command at `tokens[index]` runs, else ''."""
+_REDIRECT = re.compile(r"(\d*(?:>>|>&|<<<|<<|>\||[<>]))(.*)", re.S)
+_POWERSHELL_COMMAND = re.compile(r"(?:pwsh|powershell)(?:\.exe)?", re.I).fullmatch
+# PowerShell's flags, lower case: the ones that take a value of their own, the ones that make the next word code,
+# and the one that moves the shell, after which a relative file is no longer read soundly.
+_PWSH_VALUE_FLAGS = frozenset((
+    "-executionpolicy", "-ep", "-windowstyle", "-w", "-inputformat", "-if", "-outputformat", "-of",
+    "-configurationname", "-config", "-version", "-v", "-settingsfile", "-configurationfile", "-custompipename",
+    "-psconsolefile", "-encodedarguments"))
+_PWSH_NOT_FILE = frozenset(("-command", "-c", "-encodedcommand", "-e", "-ec", "-commandwithargs", "-cwa"))
+_PWSH_MOVES = frozenset(("-workingdirectory", "-wd"))
+# The `python` flags that need no value, so a cluster such as `-um` or `-Im` ends in the module flag.
+_PY_FLAG_CLUSTER = re.compile(r"-[bBdEiIOPqRsSuvVx]*m(.*)", re.S).fullmatch
+
+
+def _script_operand(tokens, index: int, kind: str):
+    """(what, word) for the file a `kind` command at `tokens[index]` runs: ("file", the file word), ("module",
+    the `python -m` module name), ("stdin", "") when the script comes in on stdin (`python3 -`, a bare `node`),
+    else ("", ""). A redirect word is no operand."""
+    power = kind == "sh" and _POWERSHELL_COMMAND(basename(tokens[index]))
     at = index + 1
     while at < len(tokens):
         word = tokens[at]
+        redirect = _REDIRECT.match(word)
+        if redirect:
+            at += 1 if redirect.group(2) else 2
+            continue
         if word == "--":
-            return tokens[at + 1] if at + 1 < len(tokens) else ""
-        if word == "-" or _SCRIPT_NOT_FILE[kind].match(word):
-            return ""
+            return ("file", tokens[at + 1]) if at + 1 < len(tokens) else ("", "")
+        if word == "-":
+            return "stdin", ""
+        if power:
+            flag = word.lower()
+            if flag in ("-file", "-f"):
+                return ("file", tokens[at + 1]) if at + 1 < len(tokens) else ("", "")
+            if flag in _PWSH_NOT_FILE or flag in _PWSH_MOVES:
+                return "", ""
+            if word.startswith("-"):
+                at += 2 if flag in _PWSH_VALUE_FLAGS else 1
+                continue
+            return "file", word
+        if kind == "py":
+            module = _PY_FLAG_CLUSTER(word)
+            if module:
+                found = module.group(1) or (tokens[at + 1] if at + 1 < len(tokens) else "")
+                return ("module", found) if found else ("", "")
+        if _SCRIPT_NOT_FILE[kind].match(word):
+            return "", ""
         if not word.startswith("-"):
-            return word
+            return "file", word
         at += 2 if word in _SCRIPT_VALUE_FLAGS[kind] else 1
+    return "stdin", ""
+
+
+def _stdin_file(tokens, start: int) -> str:
+    """The file word of a `< file` redirect in `tokens[start:]`, else ''. A heredoc, a here-string and a
+    process substitution are none."""
+    for at in range(start, len(tokens)):
+        word = tokens[at]
+        if word == "<":
+            return tokens[at + 1] if at + 1 < len(tokens) else ""
+        if word.startswith("<") and not word.startswith(("<<", "<(", "<&")):
+            return word[1:]
     return ""
+
+
+def _module_file(name: str, at: str) -> str:
+    """The file `python -m name` runs from the folder `at`, else '': `a/b.py`, or `a/b/__main__.py` for a
+    package. A package's own `__init__` runs first and is not read."""
+    parts = name.split(".")
+    if not all(part.isidentifier() for part in parts):
+        return ""
+    base = os.path.join(at, *parts)
+    if os.path.isfile(os.path.join(base, "__init__.py")):
+        candidates = (os.path.join(base, "__main__.py"),)
+    else:
+        candidates = (base + ".py", os.path.join(base, "__main__.py"))
+    return next((path for path in candidates if os.path.isfile(path)), "")
+
+
+# `uv run` and `poetry run` start the command after `run`. `uv run f.py` runs the file as python. A flag here
+# that moves the project or the folder leaves a relative file unread.
+_RUN_TOOLS = ("uv", "poetry")
+_RUN_VALUE_FLAGS = ("--with", "--with-requirements", "--with-editable", "--python", "-p", "--env-file", "--group",
+                    "--extra", "--package", "--index", "--default-index", "--isolated-env")
+_RUN_MOVES = ("--directory", "--project", "-C", "-P")
+
+
+def _runner_inner(tokens, index: int):
+    """(tokens, index) of the command that `uv run [flags] CMD` or `poetry run CMD` starts, else None."""
+    tool = basename(tokens[index])
+    if tool not in _RUN_TOOLS or index + 1 >= len(tokens) or tokens[index + 1] != "run":
+        return None
+    at = index + 2
+    while at < len(tokens) and tokens[at].startswith("-"):
+        word = tokens[at]
+        if word == "--":
+            at += 1
+            break
+        if word.split("=", 1)[0] in _RUN_MOVES:
+            return None
+        at += 2 if word in _RUN_VALUE_FLAGS else 1
+    rest = list(tokens[at:])
+    if tool == "uv" and rest and rest[0].endswith(".py"):
+        rest.insert(0, "python")
+    inner = resolve_command(rest) if rest else None
+    return (rest, inner) if inner is not None else None
+
+
+def _unparen(segment: str, tokens):
+    """`tokens` of a segment inside `( ... )` without the parenthesis glued to its first and last word:
+    `(python3 f.py)` reads as `python3 f.py`."""
+    marks = [char for _, char, quote in walk_quotes(segment) if not quote and char in "()"]
+    if not marks:
+        return tokens
+    tokens = list(tokens)
+    if marks.count("(") and len(tokens) > 1 and tokens[0].startswith("("):
+        tokens[0] = tokens[0].lstrip("(")
+    if marks.count(")") and "(" not in tokens[-1] and tokens[-1].rstrip(")"):
+        tokens[-1] = tokens[-1].rstrip(")")
+    return tokens
+
+
+def _assigned_before(segments, ends, number: int):
+    """The `NAME=value` and `export NAME=value` lines before segment `number` that the shell kept: a segment
+    that is nothing but assignments, run unconditionally (it follows a `;` or a newline, or it is first) and not
+    in a pipe or a `( )`. A name set twice, or to a value that holds `$` or a backtick, is left out."""
+    seen = {}
+    for at in range(number):
+        before = ends[at - 1] if 0 < at <= len(ends) else ""
+        after = ends[at] if at < len(ends) else ""
+        if (at and before not in (";", "\n")) or "|" in (before, after) or "(" in segments[at] or ")" in segments[at]:
+            continue
+        tokens = segment_tokens(segments[at])
+        words = tokens[1:] if tokens and tokens[0] == "export" else tokens
+        if words and all(ASSIGNMENT.match(word) for word in words):
+            for word in words:
+                name, _, value = word.partition("=")
+                seen.setdefault(name, []).append(value)
+    return {name: values[0] for name, values in seen.items()
+            if len(values) == 1 and not any(mark in values[0] for mark in "$`")}
+
+
+def _with_assigned(word: str, names) -> str:
+    """`word` with each `$NAME` and `${NAME}` that `names` holds replaced by its value."""
+    def value(match):
+        return names.get(match.group(1) or match.group(2), match.group(0))
+    return re.sub(r"\$(?:\{(\w+)\}|(\w+))", value, word) if names else word
 
 
 def _shebang_kind(text: str) -> str:
@@ -1208,26 +1364,35 @@ def _script_file_hit(raw: str, cwd: str, predicate, file_cap: int, written) -> s
     segments = split_segments(_strip_heredoc_bodies_unconditionally(raw), ends)
     for number, segment in enumerate(segments):
         tokens = segment_tokens(segment)
+        tokens = _unparen(segment, tokens) if tokens else tokens
         index = resolve_command(tokens) if tokens else None
         if index is None:
             continue
+        inner = _runner_inner(tokens, index)
+        if inner:
+            tokens, index = inner
         command = basename(tokens[index])
         if command in ("source", "."):
-            kind, operand = "sh", tokens[index + 1] if index + 1 < len(tokens) else ""
+            kind, what, operand = "sh", "file", tokens[index + 1] if index + 1 < len(tokens) else ""
         elif _kind_of(command):
             kind = _kind_of(command)
-            operand = _script_operand(tokens, index, kind)
+            what, operand = _script_operand(tokens, index, kind)
+            if what == "stdin":
+                what, operand = "file", _stdin_file(tokens, index + 1)
         elif "/" in tokens[index]:
-            kind, operand = "", tokens[index]   # run as the command itself: its `#!` line says which reading
+            kind, what, operand = "", "file", tokens[index]   # run as the command itself: its `#!` line says which reading
         else:
             continue
         if not operand or operand.startswith("-"):
             continue
-        if _plain_words([operand])[0] in written:
+        if what == "file" and _plain_words([operand])[0] in written:
             continue
         at = dir_before_segment(segments, number, cwd, ends) or cwd
-        path = _expanded(operand, at)
-        if predicate(path, at):
+        if what == "module":
+            path = _module_file(operand, at)
+        else:
+            path = _expanded(_with_assigned(operand, _assigned_before(segments, ends, number)), at)
+        if not path or predicate(path, at):
             continue
         try:
             if not os.path.isfile(path) or os.path.getsize(path) > file_cap:
@@ -1237,6 +1402,8 @@ def _script_file_hit(raw: str, cwd: str, predicate, file_cap: int, written) -> s
         except OSError:
             continue
         kind = kind or _shebang_kind(text)
+        if not kind and not text.startswith("#!") and os.access(path, os.X_OK):
+            kind = "sh"   # no `#!` line: bash runs the file as a shell script
         if kind == "py":
             hit = _py_hit(text, at, predicate)
         elif kind == "js":
