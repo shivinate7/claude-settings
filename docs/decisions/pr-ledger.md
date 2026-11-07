@@ -98,12 +98,12 @@ Build order. Part 3b starts only after part 1 merges. This record sets no other 
 
 Per rule `outcomes-mechanize-rules`:
 
-- Process starts: three git starts per run (`git rev-parse`, `git fetch origin main`, a `git ls-tree` of the config), a fourth `git ls-tree` of the workflows when a batch line exists, and one `gh api` call per read. Files written: none. Timers: none. Logs: none.
+- Process starts: one `gh api` call per read, and git starts for the checkout, a fetch of main, and reads of the config and main's workflow files (`git ls-tree` and `git show`). The git count grows with the number of workflow files and is not measured. Files written: none. Timers: none. Logs: none.
 - How often: at each batch runner wake. From part 3b, at each roadmap publish. At each lane Stop, the lane check (part 2).
 - Reads per `merge --reviewed` run, all from GitHub:
   - the open-PR list, and the repo's comments since the oldest open PR (one list each);
   - one `issues/<n>/events` list for each PR that reaches the hold rule with the `batch` label, or with a hold label and a valid `Waits on:` line;
-  - when a batch line exists, one page (50) of main's runs. A run's jobs are read only when that run did not succeed, plus up to two more reads for a clear candidate: its jobs and its workflow file.
+  - when a batch line exists, one page (50) of main's runs. A run's jobs are read only when that run did not succeed, plus, for each candidate run it examines, its jobs and, unless the red already stands, its workflow file.
   - The count per run is not measured yet.
 - Tests to write with the build, one per red: no review record; stale head; batch over its limit; hold with no item.
 
