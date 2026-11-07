@@ -361,7 +361,8 @@ def log_writer_paths(root: str) -> List[str]:
 
     Found by scanning, not from a fixed list: a hook that writes a guard.log id through a module
     constant (call_judge's judge-timeout) joins the --all-rules listing the day it lands, and a fixed
-    list would hide it from the never-fired cull until someone remembered to add it. Test files
+    list would hide it from the never-fired cull until someone remembered to add it. A file is read
+    for the ids it names by literal or module constant; an id passed through a variable lists nowhere. Test files
     (test_*.py, _test_*.py) call these names on fixtures, so their ids are not real rules."""
     paths = []
     for folder in ("hooks", "lint"):
@@ -395,20 +396,26 @@ _SCOPES = (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda, ast.ListComp, ast.
 
 
 def _bound_in(scope) -> set:
-    """Every name a function, lambda or comprehension binds for itself: parameters, stores, nested
-    defs, imports and `except ... as`. A Name in this set is not the module-level constant."""
+    """Every name a function, lambda or comprehension binds in its own scope: parameters, stores,
+    nested def and class names, imports and `except ... as`. It stops at a nested def, lambda,
+    comprehension or class, whose own bindings are not this scope's: a name bound only in a nested def
+    does not hide the module constant from a call in the outer function."""
     names = set()
-    for n in ast.walk(scope):
+    todo = list(ast.iter_child_nodes(scope))
+    while todo:
+        n = todo.pop()
         if isinstance(n, ast.arg):
             names.add(n.arg)
         elif isinstance(n, ast.Name) and not isinstance(n.ctx, ast.Load):
             names.add(n.id)
-        elif isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)) and n is not scope:
-            names.add(n.name)
         elif isinstance(n, (ast.Import, ast.ImportFrom)):
             names |= {(a.asname or a.name).split(".")[0] for a in n.names}
         elif isinstance(n, ast.ExceptHandler) and n.name:
             names.add(n.name)
+        if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            names.add(n.name)
+        if not isinstance(n, _SCOPES + (ast.ClassDef,)):
+            todo.extend(ast.iter_child_nodes(n))
     return names
 
 
@@ -519,8 +526,10 @@ def guard_rule_names(text: str, path: str = "<source>"):
 def emitted_rule_ids(root: str = ROOT) -> set:
     """Every rule id a hook can write to guard.log: the one home for that list.
     Ids come from the guard modules (hooks/guard*.py) and from every other non-test file under
-    hooks/ and lint/ that calls record(), refuse() or ask_command() (`log_writer_paths`): the judge
-    hooks, config_watch (it logs `agent-model-cap` reverts) and the rest. No hook writes an STE code now."""
+    hooks/ and lint/ that calls record(), refuse() or ask_command() (`log_writer_paths`), such as
+    config_watch (it logs `agent-model-cap` reverts), blind_brief, prose_judge, sendmessage_state, and
+    call_judge's `judge-timeout`. An id a call passes through a variable (call_judge's spawn-judge,
+    question-judge and past-ruling, reply_judge's reply-judge) does not list. No hook writes an STE code now."""
     ids = set()
     for path in sorted(set(guard_paths(root)) | set(log_writer_paths(root))):
         ids |= guard_rule_names(read(path), os.path.relpath(path, root))
