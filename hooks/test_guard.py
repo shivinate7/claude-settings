@@ -11832,13 +11832,12 @@ sh("frozen: default-word: - with CLAUDE_CONFIG_DIR empty keeps the empty value, 
    'printf x > "${CLAUDE_CONFIG_DIR-/tmp/elsewhere}/hooks/guard.py"', "allow", cwd=NOGIT, env=EMPTY)
 sh("frozen: default-word: - with CLAUDE_CONFIG_DIR empty does not take the frozen word, allowed",
    'printf x > "${CLAUDE_CONFIG_DIR-$HOME/.claude}/hooks/guard.py"', "allow", cwd=NOGIT, env=EMPTY)
-# Today's verdicts, recorded as expected. :+ with the variable set names a relative folder, which no
-# frozen path sits under. :? names the config dir when set, and stays allowed today: a residual gap
-# that frozen-path-resolves-shell-vars does not list by name.
+# :+ with the variable set names a relative folder, which no frozen path sits under, so it is allowed
+# as it is today. :? with the variable set expands to the config dir, so the write is refused.
 sh("frozen: default-word: :+ with CLAUDE_CONFIG_DIR set keeps today's verdict, allowed",
    'printf x > "${CLAUDE_CONFIG_DIR:+x}/hooks/guard.py"', "allow", cwd=NOGIT, env=HOME_ONLY)
-sh("frozen: default-word: :? with CLAUDE_CONFIG_DIR set keeps today's verdict, allowed (residual gap)",
-   'printf x > "${CLAUDE_CONFIG_DIR:?}/hooks/guard.py"', "allow", cwd=NOGIT, env=HOME_ONLY)
+sh("frozen: default-word: :? with CLAUDE_CONFIG_DIR set, a write to hooks/guard.py, is refused",
+   'printf x > "${CLAUDE_CONFIG_DIR:?}/hooks/guard.py"', "deny", "frozen-path", cwd=NOGIT, env=HOME_ONLY)
 # False alarm: a default folder outside the frozen set, with the variable unset, stays allowed.
 sh("frozen: default-word: a non-frozen :- default with CLAUDE_CONFIG_DIR unset is allowed",
    'printf x > "${CLAUDE_CONFIG_DIR:-/tmp/x}/notes.md"', "allow", cwd=NOGIT, env=UNSET)
