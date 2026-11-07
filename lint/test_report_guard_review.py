@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Cases for the review-record check of the Stop hook, lint/report_guard.py (part 2 of the coordinator design).
 
-A lane's reply that claims a review round PASS for a pull request is refused unless that pull request has a
+A lane's reply that claims a reviewer PASS for a pull request is refused unless that pull request has a
 review record for its live head. Choices pinned here:
 - The claim: a line of the reply, outside fenced blocks and inline code spans, with `round <N>` or `reviewer`
   (either case) and, later on that line, PASS in capitals. A test's "verdict PASS" is no claim.
