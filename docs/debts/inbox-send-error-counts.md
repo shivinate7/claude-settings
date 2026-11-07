@@ -6,4 +6,4 @@
 
 **Decision.** owner-feedback-inbox (owner feedback goes to an inbox before the turn ends).
 
-**Retire.** The guard now rejects a send or page write whose paired `tool_result`, matched by `tool_use_id`, has `is_error: true` (`Pages._uses_after`, lane nfp-inbox-guard); a test feeds a send with an error result and asserts the guard blocks. Still open: measure on real transcripts whether a failed `send_message` sets `is_error: true`, or returns only error text. If it sets no flag, the guard must read the error text instead. Closed when that is measured and, if needed, the text read is built.
+**Retire.** The guard now rejects a send or page write whose paired `tool_result`, matched by `tool_use_id`, has `is_error: true` (`Pages._uses_after`, lane nfp-inbox-guard). A test feeds a send with an error result and asserts the guard blocks. Still open: measure on real transcripts whether a failed `send_message` sets `is_error: true`, or returns only error text. If it sets no flag, the guard must read the error text instead. Closed when that is measured and, if needed, the text read is built.
