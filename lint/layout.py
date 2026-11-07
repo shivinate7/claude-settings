@@ -22,7 +22,8 @@ repo's GitHub name, rolled out or not, and that repo's extras file may repeat it
 Cause: each repo moves its own files in its own roll-out (owner, Oct 17). The last roll-out deletes
 "legacy", "legacy-repos", `legacy()`, `legacy_repos()`, `unmoved()`, `candidates()` and the branches in `path()`.
 
-Standard library only, and safe to import: it reads files only when a function is called.
+Safe to import: it reads files only when a function is called. It needs the standard library and
+hooks/git_reads.py, which `repo_name` imports on first use.
 """
 import json
 import ntpath
@@ -104,8 +105,10 @@ def legacy(name):
 
 
 # An origin repo_name may read: github.com in https, ssh and scp form, a port after the host allowed, or the
-# /git/<owner>/<name> path of a cloud session's git proxy. The owner/name comes from git_reads.origin_slug.
-GITHUB = re.compile(r"(?:^|[/@])github\.com(?::\d+)?(?:[:/]|$)|/git/[^/\s]+/[^/\s]+?(?:\.git)?/*$")
+# /git/<owner>/<name> path of a cloud session's git proxy. The path is exactly owner/name, `.git` and trailing
+# slashes optional; git_reads.origin_slug reads the owner/name.
+GITHUB = re.compile(
+    r"(?:^|[/@])github\.com(?::\d+)?[:/]+[^/\s]+/[^/\s]+?(?:\.git)?/*$|/git/[^/\s]+/[^/\s]+?(?:\.git)?/*$")
 
 
 def _origin_slug(url):
