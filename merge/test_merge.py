@@ -12602,23 +12602,18 @@ class ProseJudge(Env):
             sh(o, "git", "add", "-A"); sh(o, "git", "commit", "-qm", "feat: add lines to the prose")
             sh(o, "git", "push", "-q", "origin", "feat")
 
-    def run_capped(self):
-        """The merge with the cap at PROSE_CAP. -> (rc, out)."""
-        with unittest.mock.patch.object(merge, CAP_NAME, PROSE_CAP):  # no create=True: a renamed constant fails here, not passes
+    def run_capped(self, cap=PROSE_CAP):
+        """The merge with the cap at `cap`, or at the default PROSE_JUDGE_MAX_CALLS when `cap` is None. -> (rc, out)."""
+        if cap is None:
+            return self.run_merge("7", "--confirm")
+        with unittest.mock.patch.object(merge, CAP_NAME, cap):  # no create=True: a renamed constant fails here, not passes
             return self.run_merge("7", "--confirm")
 
-    def judge(self, answer):
-        """The merge with `answer` in place of invoke_model. -> (stub, rc, out)."""
+    def judge(self, answer, cap=PROSE_CAP):
+        """The merge with `answer` in place of invoke_model, at `cap` model calls (None: the default). -> (stub, rc, out)."""
         stub = JudgeStub(answer)
         with unittest.mock.patch.object(decision_watch, "invoke_model", stub):
-            rc, out = self.run_capped()
-        return stub, rc, out
-
-    def judge_default_cap(self, answer):
-        """The merge at the default PROSE_JUDGE_MAX_CALLS, with `answer` in place of invoke_model. -> (stub, rc, out)."""
-        stub = JudgeStub(answer)
-        with unittest.mock.patch.object(decision_watch, "invoke_model", stub):
-            rc, out = self.run_merge("7", "--confirm")
+            rc, out = self.run_capped(cap)
         return stub, rc, out
 
     def assert_unknown_count(self, out, k, causes):
@@ -13003,9 +12998,7 @@ class ProseJudge(Env):
         # Four selected files under the default cap make three calls. The fourth file must read UNKNOWN, not pass silently. The test reads the real default, not a patched one.
         names = ("docs/notes/a.md", "docs/notes/b.md", "docs/notes/c.md", "docs/notes/d.md")
         self.setup_range({p: CITE_DOC for p in names}, {BACKING: BACKING_TEXT})
-        stub = JudgeStub(verdict_for(3, "holds"))
-        with unittest.mock.patch.object(decision_watch, "invoke_model", stub):
-            rc, out = self.run_merge("7", "--confirm")
+        stub, rc, out = self.judge(verdict_for(3, "holds"), cap=None)
         self.assertEqual(len(stub.prompts), 3, "model calls: %d for 4 selected files, want the default cap of 3" % len(stub.prompts))
         sent = {p for p in names if any(p in prompt for prompt in stub.prompts)}
         self.assertEqual(len(sent), 3, "files sent: %d, want 3 under the default cap" % len(sent))
@@ -13033,7 +13026,7 @@ class ProseJudge(Env):
             LANE_B: timed_out,
             LANE_C: lambda prompt: ({"ok": True, "findings": [{"line": 3, "verdict": "stale", "why": "x"}]}, None),  # a wrong shape
         })
-        stub, rc, out = self.judge_default_cap(answer)
+        stub, rc, out = self.judge(answer, cap=None)
         sent = {p for p in files if any("File: %s\n" % p in prompt for prompt in stub.prompts)}
         self.assertEqual(sent, {LANE_A, LANE_B, LANE_C}, "the calls name %s, want a, b and c: the default cap sends three files" % sorted(sent))
         self.assertEqual(len(stub.prompts), 3, "model calls: %d, want 3" % len(stub.prompts))
@@ -13050,7 +13043,7 @@ class ProseJudge(Env):
     def test_21_findings_print_20_and_a_count_of_one_then_the_unknown_line(self):
         # UNKNOWNs do not take the finding cap: 21 findings print 20 and one count line, and the timed-out file adds one UNKNOWN line.
         self.setup_range({"docs/notes/base.md": PLAIN_DOC}, {LANE_A: cited_lines(21), LANE_B: CITE_DOC, BACKING: BACKING_TEXT})
-        stub, rc, out = self.judge_default_cap(per_file({LANE_A: stale_every_line, LANE_B: timed_out}))
+        stub, rc, out = self.judge(per_file({LANE_A: stale_every_line, LANE_B: timed_out}), cap=None)
         self.assertEqual(len(stub.prompts), 2, "model calls: %d, want 2: two files are selected" % len(stub.prompts))
         lines = out.splitlines()
         findings = [line for line in lines if line.startswith("merge: #7 prose judge, %s:" % LANE_A)]
@@ -13064,7 +13057,7 @@ class ProseJudge(Env):
     def test_unknown_lines_never_take_a_finding_slot(self):
         # 20 findings and one timed-out file: all 20 findings print, no count line for findings appears, and the UNKNOWN line prints.
         self.setup_range({"docs/notes/base.md": PLAIN_DOC}, {LANE_A: cited_lines(20), LANE_B: CITE_DOC, BACKING: BACKING_TEXT})
-        stub, rc, out = self.judge_default_cap(per_file({LANE_A: stale_every_line, LANE_B: timed_out}))
+        stub, rc, out = self.judge(per_file({LANE_A: stale_every_line, LANE_B: timed_out}), cap=None)
         self.assertEqual(len(stub.prompts), 2, "model calls: %d, want 2: two files are selected" % len(stub.prompts))
         findings = [line for line in out.splitlines() if line.startswith("merge: #7 prose judge, %s:" % LANE_A)]
         self.assertEqual(len(findings), 20, "finding lines: %d, want all 20: the UNKNOWN line took a finding slot\n%s" % (len(findings), out))
@@ -13084,7 +13077,7 @@ class ProseJudge(Env):
     def test_a_merge_with_every_line_judged_prints_no_unknown_line(self):
         # The empty state: each selected line gets a verdict, so no UNKNOWN line prints and the stale finding prints in full.
         self.setup_range({"docs/notes/base.md": PLAIN_DOC}, {LANE_A: CITE_DOC, LANE_B: CITE_DOC, BACKING: BACKING_TEXT})
-        stub, rc, out = self.judge_default_cap(per_file({LANE_A: verdict_for(3, "stale"), LANE_B: verdict_for(3, "holds")}))
+        stub, rc, out = self.judge(per_file({LANE_A: verdict_for(3, "stale"), LANE_B: verdict_for(3, "holds")}), cap=None)
         self.assertEqual(len(stub.prompts), 2, "model calls: %d, want 2: two files are selected" % len(stub.prompts))
         self.assertIn("merge: #7 prose judge, %s:3 stale: the cited file says otherwise" % LANE_A, out.splitlines(),
                       "the stale finding is not printed in full\n" + out)
