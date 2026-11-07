@@ -18,7 +18,7 @@
 //     `os.path.dirname` (T10m). The rule's list of known anchors names neither. Both are Assumed, and Input Needed: a strict reading turns each to FAIL.
 //   - the known places of T11 (the ESM and Python forms below) are the brief's direction. The rule's list names none of them, so the
 //     decision must name them before the builder merges, or a strict reading turns each should-name case to FAIL. A file is a place too
-//     (T11j, T11aa, T11ab). Input Needed.
+//     (T11j, T11aa, T11ab, T11af). Input Needed.
 //
 // Cases:
 //   T1   the clean fixture passes. T1b: no tested-by line at all passes. T1c, T1d: full size, 40 tests on one line, all pass; one that does not load the file fails.
@@ -47,7 +47,7 @@
 //        `fileURLToPath(new URL('.', import.meta.url))`, or a bare `dirname` from 'node:path' (T11a to T11f, T11t); a relative URL literal
 //        on the file's own URL, `fileURLToPath(new URL('../src', import.meta.url))` (T11x); a file, from
 //        `fileURLToPath(import.meta.url)` (T11j); a Python folder from `os.path.normpath` (T11l), `Path(__file__).resolve().parents[1]`
-//        (T11m) or `Path(__file__).parents[1]` (T11u); a file, from `os.path.join(__file__, ...)` (T11aa, T11ab); a folder from
+//        (T11m) or `Path(__file__).parents[1]` (T11u); a file, from `os.path.join(__file__, ...)` (T11aa, T11ab, T11af); a folder from
 //        `Path(__file__).parent.parent` (T11ac). The repo pairs read this repository's own files through readFacts: the loads fact of
 //        skills/waiting-page/tests/page.test.mjs names its page (T11v), and that of lint/test_stale_cites.py names bin/ste-changed (T11w).
 //        T11n is a control, green on main: realpath and abspath already keep a known place.
@@ -857,7 +857,7 @@ def test_wait():
 // or `fileURLToPath(new URL('<literal>', import.meta.url))` with a relative literal, which is that literal from the file's folder (T11x).
 // A Python folder is `os.path.normpath(...)` of a known place, `Path(__file__).resolve().parents[n]` with a literal n, or
 // `Path(__file__).parent.parent` (T11ac). A file (`__filename`, `import.meta.filename`, `fileURLToPath(import.meta.url)`, Python's `__file__`)
-// is a place too: a join from it resolves from the file's path, so two `..` reach the folder above the test's folder (T11j, T11aa, T11ab).
+// is a place too: a join from it resolves from the file's path, so each `..` climbs past the file's own name first (T11j, T11aa, T11ab, T11af).
 // A negative index is no known place (T11ad).
 // Each allow case (T11g to T11i, T11k, T11o to T11s, T11y, T11z, T11ad, T11ae) is the twin of a should-name form, with the anchor unbound, shadowed,
 // rebound, a temp folder, a foreign function, a function-local name, outside the repository, on another URL base (T11y), a `file:` scheme (T11z),
@@ -1282,11 +1282,11 @@ export const page = path.join(SRC, 'home.ts');
   mustNotLoad(check(dir), CORE, testFile, 'src/home.ts', 'a file: literal is an absolute URL, so the anchor is no place of the repository and the join is no load');
 });
 
-// T11aa to T11ae. The Python forms. A join from `__file__` resolves from the file's own path, so two `..` reach the root (T11aa), and the same
+// T11aa to T11af. The Python forms. A join from `__file__` resolves from the file's own path, so two `..` reach the root (T11aa), and the same
 // join wrapped in abspath and normpath is the same place (T11ab). `Path(__file__).parent.parent` is the folder above the test's folder (T11ac).
 // A negative index is no known place (T11ad), and neither is a normpath of a parameter (T11ae).
-// A bare sibling, `os.path.join(__file__, "..", "x.py")`, cannot be pinned here: a plain "x.py" string in the test's folder already names
-// the file (namedFiles), so the case would stay green without the join. T11aa pins the same join with two `..` instead.
+// A sibling join, `os.path.join(__file__, "..", "x.py")`, is masked in the test's own folder: a plain "x.py" string there already names
+// the file (namedFiles), so the case would stay green without the join. T11af pins the one-`..` join from the root, where no literal names it.
 test('T11aa. os.path.join(__file__, "..", "..", "src", "retry.py") loads src/retry.py: a join from __file__ resolves from the file path, so two ".." reach the root: MAP11 passes', () => {
   needFile(REL);
   const testFile = 'tests/join_file.py';
@@ -1360,4 +1360,17 @@ def test_wait(root):
   assert.match(text, /os\.path\.normpath\(root\)/, 'the test must normpath the parameter itself');
   const dir = pieceCase(testFile, text, 'src/retry.py', ['src', 'retry.py']);
   mustNotLoad(check(dir), CORE, testFile, 'src/retry.py', 'normpath of a parameter is still no known place, so the join is no load');
+});
+
+test('T11af. os.path.join(__file__, "..", "src", "retry.py") in a test at the repository root loads src/retry.py: a join from __file__ resolves from the file path, so one ".." reaches the folder beside the file: MAP11 passes', () => {
+  needFile(REL);
+  const testFile = 'join_beside.py';
+  const dir = pieceCase(testFile, `import os
+
+
+def test_wait():
+    path = os.path.join(__file__, "..", "src", "retry.py")
+    assert os.path.isfile(path)
+`, 'src/retry.py', ['src', 'retry.py']);
+  mustLoad(check(dir), testFile, 'src/retry.py', 'the anchor is __file__ at the root, and one ".." joins src and retry.py beside it');
 });
