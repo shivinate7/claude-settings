@@ -1066,10 +1066,9 @@ def stale_drafts(work):
     read = datetime.datetime.fromisoformat(work["read"].replace("Z", "+00:00"))
     out = []
     for p in work["pulls"]:
-        # A lane is a live session step equal to the branch, bare or as lane/<id>, as unlaned counts it.
-        branch = p.get("branch") or ""
-        if p.get("draft") is not True or (branch and (branch in work["sessionSteps"]
-                                                      or branch.removeprefix("lane/") in work["sessionSteps"])):
+        # A lane is a live session step whose head refs (lane_head_refs: bare or lane/<id>) hold the branch.
+        branch = p.get("branch")
+        if p.get("draft") is not True or (branch and any(branch in lane_head_refs(s) for s in work["sessionSteps"])):
             continue
         at = created_at(p)
         if at is None:
