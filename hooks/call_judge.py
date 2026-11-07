@@ -363,7 +363,7 @@ def main():
             import question_form
             code_rule, matched = question_form.chat_hit(args)
             if code_rule:
-                reason = "%s (%s)" % (question_form.CHAT_REASONS[code_rule], matched)
+                reason = "%s (%s)" % (question_form.chat_reason(code_rule, matched), matched)
                 return refuse(payload, tool, args, code_rule, reason)
             shown = json.dumps(args, ensure_ascii=False)
             units = question_form.chat_units(args)

@@ -310,15 +310,15 @@ def _write_data(entry, cwd=""):
 WIDENS_TEXT = "Goes against your ruling: a repo changes to fit a shared tool, never the tool to fit a repo"
 WIDENS_REASON = ("A pick never names an option that widens what a shared tool accepts: the owner ruled that "
                  "a repo changes to fit a shared tool, never the tool to fit a repo. Make the pick an option "
-                 "where the repo changes to match the shared format, or leave pick out. A question whose only other "
-                 "option widens is already answered: the owner ruled this, so drop the question and do the "
-                 "recommended option. A Based on (ruling) line does not lift this refusal.")
+                 "where the repo changes to match the shared format, or leave pick out.")
+ONLY_WIDENS_REASON = ("A question whose only option besides the recommended one widens a shared tool is already "
+                      "answered: the owner ruled that a repo changes to fit a shared tool, never the tool to fit a "
+                      "repo, so drop the question and do the recommended option. A Based on (ruling) re-ask line "
+                      "does not lift this refusal.")
 CHAT_WIDENS_REASON = ("A recommended option never widens what a shared tool accepts: the owner ruled that a "
                       "repo changes to fit a shared tool, never the tool to fit a repo. Recommend an option "
                       "where the repo changes to match the shared format, and give the widening option no "
-                      "(Recommended) label. A question whose only other option widens is already answered: the owner ruled "
-                      "this, so drop the question and do the recommended option. A Based on (ruling) line does "
-                      "not lift this refusal.")
+                      "(Recommended) label.")
 # Older sessions still write these words in chat; the mark keeps refusing them. No card, rule text or
 # reason carries them.
 LEGACY_WIDENS_TEXT = "Goes against your uniform ruling (t18)"
@@ -369,15 +369,19 @@ def _only_alternative_widens(options, recommended, widening) -> bool:
 
 
 def widens_only_alternative_hit(data) -> str:
-    """ONLY_WIDENS_HIT when this decision has two options, one recommended (the `pick`, a str or a list of
-    keys, or a label with "(recommended)") and the other marked `widens: true`. Like the pick rule,
-    a write with no `options` list cannot be judged and passes."""
-    if not isinstance(data, dict) or data.get("kind", "decision") != "decision":
+    """The matched text for an open decision with a widening option the pick rule misses. Two shapes:
+    an option labelled (Recommended) that carries `widens: true`, whatever the `pick` says (the box already
+    refuses it), and ONLY_WIDENS_HIT, two options where one is recommended (the `pick`, a str or a list of
+    keys, or a label with "(recommended)") and the other marked `widens: true`. A closed item, a task or a
+    write with no `options` list is not judged."""
+    if not _open_decision(data):
         return ""
     options = data.get("options")
     if not isinstance(options, list):
         return ""
     options = [o for o in options if isinstance(o, dict)]
+    if any(o.get(WIDENS_KEY) is True and RECOMMENDED.search(_option_text(o, "label")) for o in options):
+        return "recommended option widens"
     pick = data.get("pick")
     keys = {p for p in ([pick] if isinstance(pick, str) else pick if isinstance(pick, list) else [])
             if isinstance(p, str)}
@@ -1385,6 +1389,20 @@ CHAT_STAKE_REASON = ("A question is the owner's only when he can judge it. Write
                      % ", ".join(OWNER_STAKES))
 CHAT_REASONS = {"uniform-pick": CHAT_WIDENS_REASON, "press-link": CHAT_PRESS_LINK_REASON,
                 FORM_RULE: CHAT_FORM_REASON, STAKE_RULE: CHAT_STAKE_REASON, DEPARTS_RULE: DEPARTS_REASON}
+
+
+def page_reason(rule, matched) -> str:
+    """The page reason for a hit. Rule uniform-pick has two reasons: the pick's, and the only-alternative hit's."""
+    if rule == "uniform-pick" and matched == ONLY_WIDENS_HIT:
+        return ONLY_WIDENS_REASON
+    return PAGE_REASONS[rule]
+
+
+def chat_reason(rule, matched) -> str:
+    """The box reason for a hit, chosen by the matched text as page_reason is."""
+    if rule == "uniform-pick" and matched == ONLY_WIDENS_HIT:
+        return ONLY_WIDENS_REASON
+    return CHAT_REASONS[rule]
 
 
 # ------------------------------------------------------------------ past rulings: the owner is never asked twice
