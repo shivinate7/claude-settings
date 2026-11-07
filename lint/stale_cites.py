@@ -63,7 +63,10 @@ line starts `stale-cites: report, `. It has two halves, and STALE005 lines first
   Anchors   for each `<!-- rule:id -->` anchor whose sentence changed in a RULE_FILES file (a real anchor; one in a
             code span is a mention): the row in lint/rule_mechanisms.json (kind, ref, test), then the files this range
             changed under RULE_DIRS, or "none". It gives no verdict; the reviewer judges. A repo with no
-            lint/rule_mechanisms.json prints no anchor line and no error.
+            lint/rule_mechanisms.json prints no anchor line and no error. The same holds when a range changes only
+            RULE_FILES and the mechanisms blob is missing (a partial clone): the tree is not listed, so the file reads
+            as absent. The run prints no anchor line and no unknown, and exits 0. A changed non-Markdown file lists
+            the tree, and then a listed file with no blob prints unknown.
   Home      for each changed non-Markdown file (added, changed, removed or renamed): each decision whose Home line
             names it, each mechanism row whose ref or test is it, and each decision prose line whose `(test ...)`
             or `(read ...)` backing points at it (`backed_lines`, the selector a prose judge calls).
