@@ -843,7 +843,7 @@ class KnownDefectsTests(unittest.TestCase):
 
     def test_an_optional_import_fallback_planted_after_a_failed_install_reads_unknown_never_caught(self):
         # The fallback asserts 3 when kb_oracle is missing. The plant makes add(1, 2) return -1, so the fallback catches it
-        # with no package. A defect that needs the failed install still reads UNKNOWN, never CAUGHT.
+        # with no package. The load hook logs kb_oracle, so the defect still reads UNKNOWN, never CAUGHT.
         probe = ("import os\n"
                  "import sys\n\n"
                  "HERE = os.path.dirname(os.path.abspath(__file__))\n"
@@ -863,8 +863,8 @@ class KnownDefectsTests(unittest.TestCase):
         defects = [defect("kb-probe", "return a + b", "return a - b", "test_probe.py")]
         code, out, err = known_run(defects, repo, profile=profile)
         self.assertEqual(verdicts_of(out), {"kb-probe": "UNKNOWN"},
-                         "a defect that needs a failed install never reads CAUGHT, even when its fallback catches the "
-                         "plant\n" + out + err)
+                         "a catcher the load hook saw miss a module reads UNKNOWN, never CAUGHT, even when its fallback "
+                         "catches the plant\n" + out + err)
         line = [text for text in out.splitlines() if text.startswith("UNKNOWN kb-probe")]
         self.assertEqual(len(line), 1, "one UNKNOWN line for kb-probe:\n" + out)
         self.assertIn("install", line[0], "the UNKNOWN reason must name the failed install: " + line[0])
@@ -962,23 +962,6 @@ class KnownDefectsTests(unittest.TestCase):
         self.assertEqual(len(lines), 1, "one error line and no other output:\n" + out + err)
         self.assertTrue(lines[0].startswith("ERROR "), "the one line is an ERROR line: " + lines[0])
         self.assertIn("code of the profile is no regex", lines[0], "the error names the bad key: " + lines[0])
-
-    def test_a_code_not_exclusion_leaves_a_selftest_to_the_part_whose_tests_regex_claims_it(self):
-        repo = defect_repo(extra_files={"scripts/x_selftest.py": CALC_BASE,
-                                        "harness/tests/t1_x.py": add_catcher(("..", "..", "scripts", "x_selftest.py")),
-                                        APP_LOCK: LOCK_TEXT, ROOT_LOCK: LOCK_TEXT})
-        profile = {"parts": {
-            "ts": {"install": FAILING_INSTALL, "lockfile": APP_LOCK, "code": r"^scripts/.*\.py$",
-                   "code_not": r"^scripts/[^/]*selftest\.py$", "tests": r"^app/tests/unit/[^/]+\.unit\.ts$"},
-            "py": {"install": PASSING_INSTALL, "lockfile": ROOT_LOCK, "code": r"^(?!harness/tests/).*\.py$",
-                   "code_not": r"^scripts/[^/]*selftest\.py$", "tests": r"^harness/tests/(t\d+_[^/]*|t7/[^/]+)\.py$"}}}
-        defects = [defect("kb-selftest", "return a + b", "return a - b", "harness/tests/t1_x.py",
-                          file="scripts/x_selftest.py")]
-        code, out, err = known_run(defects, repo, profile=profile)
-        self.assertEqual(verdicts_of(out), {"kb-selftest": "CAUGHT"},
-                         "ts's code_not excludes scripts/x_selftest.py, so only py, whose tests regex claims the catcher, "
-                         "needs an install: with ts failed, the defect runs and reads CAUGHT\n" + out + err)
-        self.assertEqual(code, 0, "all defects caught must exit 0: exit %d\n%s%s" % (code, out, err))
 
     def test_a_part_with_no_regex_does_not_hold_back_a_defect_whose_catcher_loads_no_missing_module(self):
         # Part c has no regex, which no longer routes anything. The defect in x/1.py is loaded by its catcher with no import,
