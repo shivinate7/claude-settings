@@ -1131,14 +1131,14 @@ def brief_hit(tool: str, tool_input, transcript: str):
 
 
 # ---- send_message: a header stamp matches the clock (rule message-time-matches-clock)
-STAMP_LIMIT_MINUTES = 3  # a header stamp this far off the clock, ahead or behind, passes; one more minute is refused
+STAMP_LIMIT_MINUTES = 1  # a header stamp this far ahead of the clock passes; one more minute ahead is refused. A stamp behind always passes
 # A header is a label of 1 to 3 words, `,` or `:`, an optional date, then `HH:MM CST|CDT`. Anything may follow.
 _STAMP_HEADER = re.compile(
     _MARKDOWN_LEAD + r"[^\s,:]+(?:\s+[^\s,:]+){0,2}[,:]\s*(?:(?P<date>\d{4}-\d{2}-\d{2})\s+)?"
     r"(?P<hour>\d{2}):(?P<minute>\d{2})\s+(?P<zone>CST|CDT)\b")
 _STAMP_OFFSET_HOURS = {"CST": -6, "CDT": -5}
 STAMP_REASON = (
-    "this message's header stamp is {off} minutes off the clock, and the limit is " + str(STAMP_LIMIT_MINUTES) + ". "
+    "this message's header stamp is {off} minutes ahead of the clock, and the limit is " + str(STAMP_LIMIT_MINUTES) + ". "
     "The time is {now}: re-stamp your own header with that time, then send it again. If the first line quotes "
     "someone else's time in header form, open the message with your own label first."
 )
@@ -1146,8 +1146,9 @@ STAMP_REASON = (
 
 def stamp_hit(tool: str, tool_input):
     """Return (matched, reason) when this send_message opens with a header stamp more than STAMP_LIMIT_MINUTES
-    off the clock, else None. Only the first non-blank line is read, and only its header stamp. A dated stamp is
-    compared as an instant with its zone's offset; an undated one as minute of day modulo 1440, in its own zone.
+    ahead of the clock, else None. A stamp behind the clock passes. Only the first non-blank line is read, and only
+    its header stamp. A dated stamp is compared as an instant with its zone's offset; an undated one as a signed
+    minute-of-day offset modulo 1440 in [-720, 720), in its own zone.
     The clock is local_time.clock(), and the reason's time comes from local_time.central_hhmm: one home of the
     clock and its DST rule. Cost: one clock read, no transcript, no file, no process. Fails open: the stamp is
     advice about a time, so a missing clock module or an impossible date lets the message through."""
@@ -1165,13 +1166,12 @@ def stamp_hit(tool: str, tool_input):
         hour, minute = int(found.group("hour")), int(found.group("minute"))
         if found.group("date"):
             stamped = datetime.fromisoformat(found.group("date")).replace(hour=hour, minute=minute, tzinfo=zone)
-            off = abs(int((stamped - now).total_seconds() // 60))
+            off = int((stamped - now).total_seconds() // 60)
         else:
             if hour > 23 or minute > 59:
                 return None
             there = now.astimezone(zone)
-            gap = abs(hour * 60 + minute - (there.hour * 60 + there.minute)) % 1440
-            off = min(gap, 1440 - gap)
+            off = (hour * 60 + minute - (there.hour * 60 + there.minute) + 720) % 1440 - 720
         if off <= STAMP_LIMIT_MINUTES:
             return None
         return "header stamp " + found.group(0).strip(), STAMP_REASON.format(off=off, now=local_time.central_hhmm(now))

@@ -121,9 +121,9 @@ Shell tools (Bash, PowerShell), in judge_shell order:
   message-time-matches-clock
                        deny. A send_message whose first non-blank line opens with a header stamp: a label of 1 to 3 words,
                        `,` or `:`, an optional date, then `HH:MM CST|CDT`, after optional markdown lead characters. The
-                       refusal fires when the stamp is more than 3 minutes off the clock (local_time.clock), ahead or
-                       behind. A dated stamp is an instant with its zone's offset; an undated one is minute of day mod
-                       1440. The reason prints the real time. No transcript, file or process; a missing clock module
+                       refusal fires when the stamp is more than 1 minute ahead of the clock (local_time.clock); a stamp
+                       behind passes. A dated stamp is an instant with its zone's offset; an undated one is a signed
+                       minute-of-day offset mod 1440. The reason prints the real time. No transcript, file or process; a missing clock module
                        passes the message. An override lifts it.
   draft-pr             deny. A `gh pr create` without `--draft`. (draft-until-reviewed)
   records-page         deny. A `git commit` whose docs/records.md differs from the base's page.
