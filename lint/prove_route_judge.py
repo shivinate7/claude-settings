@@ -8,15 +8,18 @@ Run it in the git repo that holds the rows' revs. Each file is read at its row's
 tree, and so is each cited backing file. The prompt is merge.prose_judge_prompt's, the call is decision_watch.invoke_model,
 and the reply is parsed there by parse_verdict.
 
-Labels: TRUE rows hold. STALE, PARTLY_STALE and HALF rows are flagged rows. UNKNOWN and HISTORY rows are skipped, and a
-group of skipped rows makes no call. A line span such as "16-20" is one row, judged under its first line number. The
-model flags a row when it says stale or unbacked.
+Labels: TRUE rows hold. STALE, PARTLY_STALE and HALF rows are stale-family rows. UNKNOWN and HISTORY rows, and a row with
+a null rev, are skipped, and a group of skipped rows makes no call. A line span such as "16-20" is one row, judged under
+its first line number. Only the verdict "stale" is scored: a false alarm is a TRUE row judged stale, a hit is a
+stale-family row judged stale. The verdict "unbacked" is counted in its own field, out of all scored rows, and is neither.
 
 A row the model could not judge is UNKNOWN, never a pass: a failed call, a malformed reply, a line the reply leaves out,
 a file or line missing at the rev, or a group past --max-calls. It stays in its label's denominator and in neither
-numerator.
+numerator. When a call failed, or its reply was not JSON, the unknown field carries the first line of that error text.
 
-The one output line: false alarms (holds rows flagged), hits (flagged rows flagged), unknown, skipped.
+The one output line:
+    false alarms 1/13 (7.7%), hits 3/4, unbacked 5/17, unknown 0, skipped 4
+or, with a failed call, `unknown 17 (model error: <first line of the error>)`.
 """
 import argparse
 import json
@@ -83,48 +86,55 @@ def judged(rows, text):
 
 
 def judge_group(rev, path, rows):
-    """-> {id(row): the verdict word, or None for UNKNOWN} for one (rev, file) group, with one model call."""
+    """-> ({id(row): the verdict word, or None for UNKNOWN}, the first line of the call's error or None) for one (rev, file)
+    group, with one model call."""
     out = {id(r): None for r in rows}
     text = read_at(rev, path)
     if text is None:
-        return out
+        return out, None
     by_row, by_line, _ = judged(rows, text)
     if not by_line:
-        return out
+        return out, None
     prompt = merge.prose_judge_prompt(os.getcwd(), path, by_line, read=reader_at(rev))
     try:
-        verdict, _error = decision_watch.invoke_model(prompt, shape=decision_watch.LINE_VERDICTS)
-    except Exception:
-        return out
+        verdict, error = decision_watch.invoke_model(prompt, shape=decision_watch.LINE_VERDICTS)
+    except Exception as exc:
+        return out, (str(exc).splitlines() or [type(exc).__name__])[0]
     entries = merge.readable_verdicts(verdict) if verdict is not None else None
     if entries is None:
-        return out
+        return out, (str(error).splitlines() or [None])[0] if error else None
     said = {e["line"]: e["verdict"] for e in entries}
     for number, group in by_row.items():
         for r in group:
             out[id(r)] = said.get(number)
-    return out
+    return out, None
 
 
 def score(rows, max_calls):
     """The verdict line for the labelled `rows`."""
-    scored = [r for r in rows if r["label"] in HOLDS + FLAGGED]
+    scored = [r for r in rows if r["label"] in HOLDS + FLAGGED and r.get("rev")]
     skipped = len(rows) - len(scored)
     groups = {}
     for r in scored:
         groups.setdefault((r["rev"], r["file"]), []).append(r)
-    said = {}
+    said, first_error = {}, None
     for calls, ((rev, path), group) in enumerate(groups.items()):
-        said.update({id(r): None for r in group} if max_calls is not None and calls >= max_calls
-                    else judge_group(rev, path, group))
+        if max_calls is not None and calls >= max_calls:
+            said.update({id(r): None for r in group})
+            continue
+        verdicts, error = judge_group(rev, path, group)
+        said.update(verdicts)
+        first_error = first_error or error
     holds = [r for r in scored if r["label"] in HOLDS]
     flagged = [r for r in scored if r["label"] in FLAGGED]
-    alarms = sum(1 for r in holds if said[id(r)] not in (None, "holds"))
-    hits = sum(1 for r in flagged if said[id(r)] not in (None, "holds"))
+    alarms = sum(1 for r in holds if said[id(r)] == "stale")
+    hits = sum(1 for r in flagged if said[id(r)] == "stale")
+    unbacked = sum(1 for r in scored if said[id(r)] == "unbacked")
     unknown = sum(1 for r in scored if said[id(r)] is None)
+    unknown_text = "%d (model error: %s)" % (unknown, first_error) if unknown and first_error else str(unknown)
     rate = "%.1f%%" % (100.0 * alarms / len(holds)) if holds else "n/a"
-    return "false alarms %d/%d (%s), hits %d/%d, unknown %d, skipped %d" % (alarms, len(holds), rate, hits, len(flagged),
-                                                                           unknown, skipped)
+    return "false alarms %d/%d (%s), hits %d/%d, unbacked %d/%d, unknown %s, skipped %d" % (
+        alarms, len(holds), rate, hits, len(flagged), unbacked, len(scored), unknown_text, skipped)
 
 
 def main(argv=None):
