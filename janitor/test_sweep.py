@@ -4106,15 +4106,10 @@ class AgentEndLogReadTests(unittest.TestCase):
                          os.path.normcase(folder), "the payload log path %r is outside the run folder" % path)
         return path
 
-    def test_a_refused_read_of_the_payload_log_keeps_its_rows(self):
-        """A read of the payload log that raises PermissionError must not make log() rewrite the log without
-        the rows it could not read. The seeded log is the largest one that a rewrite with the new row keeps
-        whole (MAX_LOG_LINES - 1 prior rows), so the row cap cannot drop a seed by itself."""
-        path = self.scoped_log_path()
-        seeded = ["seed-%d" % n for n in range(self.reap.MAX_LOG_LINES - 1)]
-        os.makedirs(os.path.dirname(path), exist_ok=True)
-        with io.open(path, "w", encoding="utf-8") as handle:
-            handle.writelines(json.dumps({"raw": "{}", "run": run, "state": "done"}) + "\n" for run in seeded)
+    @contextlib.contextmanager
+    def refused_log_reads(self, path):
+        """Every read of the payload log at PATH raises PermissionError, as a log held by another process
+        would. Yields the list of refused reads, so a case can assert that the refusal happened."""
         real_open = io.open
         refused = []
 
@@ -4125,6 +4120,46 @@ class AgentEndLogReadTests(unittest.TestCase):
             return real_open(file, mode, *args, **kwargs)
 
         with mock.patch.object(self.reap, "open", new=refuse_log_read, create=True):
+            yield refused
+
+    def drops_file(self, path):
+        """The drops file beside the payload log at PATH. The name is built here, not taken from
+        agent_end_reap.drops_path(), so a build without that name fails on an assert, not on a crash."""
+        return os.path.join(os.path.dirname(path), "agent-end-drops.jsonl")
+
+    def read_drops(self, path):
+        """The rows of the drops file, or [] when it does not exist, so a missing file fails a count, not a read."""
+        drops = self.drops_file(path)
+        if not os.path.exists(drops):
+            return []
+        with io.open(drops, encoding="utf-8") as handle:
+            return [json.loads(line) for line in handle.read().splitlines()]
+
+    def assert_one_drop_row(self, path, run):
+        """Exactly one drop row, for RUN, with the keys log() writes and an `at` in the log's own time format,
+        which carries a UTC offset. Returns the row."""
+        rows = self.read_drops(path)
+        self.assertEqual(len(rows), 1, "the drops file holds %d row(s), want 1 for the dropped row: %r" % (len(rows), rows))
+        row = rows[0]
+        self.assertEqual(set(row), {"at", "run", "error"},
+                         "the drop row's keys are %r, want at, run and error" % sorted(row))
+        self.assertEqual(row["run"], run, "the drop row names run %r, want %r" % (row["run"], run))
+        try:
+            datetime.strptime(row["at"], "%Y-%m-%dT%H:%M:%S%z")
+        except (TypeError, ValueError):
+            self.fail("the drop row's at %r is not a log time with a UTC offset" % (row["at"],))
+        return row
+
+    def test_a_refused_read_of_the_payload_log_keeps_its_rows(self):
+        """A read of the payload log that raises PermissionError must not make log() rewrite the log without
+        the rows it could not read. The seeded log is the largest one that a rewrite with the new row keeps
+        whole (MAX_LOG_LINES - 1 prior rows), so the row cap cannot drop a seed by itself."""
+        path = self.scoped_log_path()
+        seeded = ["seed-%d" % n for n in range(self.reap.MAX_LOG_LINES - 1)]
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with io.open(path, "w", encoding="utf-8") as handle:
+            handle.writelines(json.dumps({"raw": "{}", "run": run, "state": "done"}) + "\n" for run in seeded)
+        with self.refused_log_reads(path) as refused:
             self.reap.log({"raw": "{}", "run": "new-run", "state": "done"})
         with io.open(path, encoding="utf-8") as handle:
             kept = [json.loads(line).get("run") for line in handle.read().splitlines()]
@@ -4141,6 +4176,51 @@ class AgentEndLogReadTests(unittest.TestCase):
         with io.open(path, encoding="utf-8") as handle:
             kept = [json.loads(line).get("run") for line in handle.read().splitlines()]
         self.assertEqual(kept, ["first-run"], "a missing payload log did not start with just the new row")
+
+    def test_a_refused_read_writes_one_drop_row_with_its_run_id(self):
+        """A refused read drops the new row. The drop goes to the drops file, with its run id, so a reader sees it."""
+        path = self.scoped_log_path()
+        with self.refused_log_reads(path) as refused:
+            self.reap.log({"raw": "{}", "run": "refused-run", "state": "done"})
+        self.assertTrue(refused, "the forced PermissionError never reached the log read, so the case tested nothing")
+        row = self.assert_one_drop_row(path, "refused-run")
+        self.assertIn("PermissionError", row["error"],
+                      "the drop row's error does not name the refused read: %r" % row["error"])
+
+    def test_a_forced_lock_timeout_writes_one_drop_row_with_its_run_id(self):
+        """A lock wait that runs past give_up_at drops the new row as LogWaitTimeout. Another run holds the lock
+        through the module's own _log_lock, so the wait is real. give_up_at is already past, so no case sleeps."""
+        path = self.scoped_log_path()
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        err = io.StringIO()
+        with self.reap._log_lock(path, time.monotonic() + 5):
+            with contextlib.redirect_stderr(err):
+                self.reap.log({"raw": "{}", "run": "timeout-run", "state": "done"}, give_up_at=time.monotonic() - 1)
+        self.assertIn("LogWaitTimeout", err.getvalue(),
+                      "the case did not reach a lock wait timeout: %r" % err.getvalue())
+        row = self.assert_one_drop_row(path, "timeout-run")
+        self.assertIn("LogWaitTimeout", row["error"],
+                      "the drop row's error does not name the lock timeout: %r" % row["error"])
+
+    def test_a_failed_replace_writes_one_drop_row_with_its_run_id(self):
+        """A replace refused with an error other than PermissionError drops the new row too."""
+        path = self.scoped_log_path()
+        err = io.StringIO()
+        refusal = OSError(5, "disk write refused (stand-in)")
+        with mock.patch.object(self.reap.os, "replace", side_effect=refusal), contextlib.redirect_stderr(err):
+            self.reap.log({"raw": "{}", "run": "write-run", "state": "done"})
+        self.assertIn("OSError", err.getvalue(), "the case did not reach a failed write: %r" % err.getvalue())
+        row = self.assert_one_drop_row(path, "write-run")
+        self.assertIn("OSError", row["error"], "the drop row's error does not name the failed write: %r" % row["error"])
+
+    def test_a_successful_write_writes_no_drop_row(self):
+        """The green control: a write that lands drops no row, so the drops file is never made."""
+        path = self.scoped_log_path()
+        self.reap.log({"raw": "{}", "run": "ok-run", "state": "done"})
+        with io.open(path, encoding="utf-8") as handle:
+            kept = [json.loads(line).get("run") for line in handle.read().splitlines()]
+        self.assertEqual(kept, ["ok-run"], "control: the successful write did not land its row: %r" % kept)
+        self.assertFalse(os.path.exists(self.drops_file(path)), "a successful write created the drops file")
 
 
 class AgentEndReapBatchTests(unittest.TestCase):
