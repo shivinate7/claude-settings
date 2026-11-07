@@ -1294,6 +1294,19 @@ def case_parse_verdict_is_the_one_home():
                   got == want, (got, want))
 
 
+def case_parse_verdict_no_json_error_names_the_reply_head():
+    # A reply with no JSON reads as an error that keeps the first 120 characters of the reply, so the report's UNKNOWN line
+    # says what came back. Nothing past the first 120 characters is kept.
+    reply = ("This is prose and not the verdict object the judge asked for. The first one hundred and twenty characters of it "
+             "reach the report, and this tail must not. TAIL-MARK-7731")
+    v, e = dw.parse_verdict(reply)
+    check("parse_verdict no JSON: gives no verdict and an error", v is None and bool(e), (v, e))
+    check("parse_verdict no JSON: the error names the first 120 characters of the reply",
+          isinstance(e, str) and reply[:120] in e, e)
+    check("parse_verdict no JSON: the error holds nothing past the first 120 characters",
+          isinstance(e, str) and "TAIL-MARK-7731" not in e, e)
+
+
 def case_invoke_model_custom_shape_end_to_end():
     # invoke_model with reply_judge's shape, through a fake subprocess.
     shape = {"ok": (True, False)}
@@ -1941,6 +1954,7 @@ def main():
         case_parse_verdict_default_shape,
         case_parse_verdict_honours_a_custom_shape,
         case_parse_verdict_is_the_one_home,
+        case_parse_verdict_no_json_error_names_the_reply_head,
         case_invoke_model_custom_shape_end_to_end,
         case_argv_bad_combinations_fall_back_to_invoke_model,
         case_bad_flag_runs_the_default_model_call,

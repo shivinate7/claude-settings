@@ -12778,6 +12778,116 @@ class ProseJudge(Env):
         self.assertFalse(judge_lines(out, "%s:3" % PROSE, "UNKNOWN"), "%s:3 reads UNKNOWN, but the reply held it" % PROSE)
         self.assertEqual(rc, 0, out)
 
+    def test_a_named_path_line_with_no_cite_sends_its_excerpt_in_one_call(self):
+        # The line is added by the range and cites nothing. It names hooks/x.py and run_all in backticks, so the one call carries
+        # the lines of hooks/x.py around run_all, read at head.
+        self.setup_range({SIDE_PROSE: PLAIN_DOC}, {PROSE: NAMED_DOC, NAMED: numbered_source("xs", 30, named={12})})
+        stub, rc, out = self.judge(verdict_for(3, "holds"))
+        self.assertEqual(len(stub.prompts), 1, "model calls: %d, want 1 for one selected file" % len(stub.prompts))
+        self.assertIn("Line 3: The runner is `%s` `run_all`" % NAMED, stub.prompts[0], "scope: the call does not carry the named line")
+        got = tokens(stub.prompts[0], "xs")
+        self.assertEqual(got, ["xs%03d" % n for n in range(9, 16)],
+                         "the call carries the lines %s of %s, want lines 9 to 15 around run_all" % (got, NAMED))
+
+    def test_three_named_paths_make_one_call_under_twelve_kilobytes(self):
+        # The cost pin: one prose file is one model call, and three named paths of full size keep its prompt under 12 KB.
+        files = {"hooks/a.py": "pa", "hooks/b.py": "pb", "hooks/c.py": "pc"}
+        feat = {PROSE: THREE_NAMED_DOC}
+        for path, tag in files.items():
+            feat[path] = numbered_source(tag, 200, named=range(1, 201))
+        self.setup_range({SIDE_PROSE: PLAIN_DOC}, feat)
+        holds = lambda prompt: ({"verdicts": [{"line": n, "verdict": "holds", "why": "w"} for n in (3, 5, 7)]}, None)
+        stub, rc, out = self.judge(holds)
+        self.assertEqual(len(stub.prompts), 1, "model calls: %d, want 1: one prose file is one call" % len(stub.prompts))
+        prompt = stub.prompts[0]
+        for path, tag in files.items():
+            got = tokens(prompt, tag)
+            self.assertGreater(len(got), 0, "the call carries no lines of %s" % path)
+            self.assertLessEqual(len(got), 40, "the call carries %d lines of %s, want at most 40" % (len(got), path))
+        size = len(prompt.encode("utf-8"))
+        self.assertLess(size, 12 * 1024, "the prompt is %d bytes for three named paths, want under 12 KB" % size)
+
+
+NAMED = "hooks/x.py"  # a tracked code path that a prose line names in backticks
+NAMED_DOC = "# Named notes\n\nThe runner is `hooks/x.py` `run_all` and returns 3.\n"  # the named line is line 3
+THREE_NAMED_DOC = ("# Named notes\n\nThe runner is `hooks/a.py` `run_all` and returns 3.\n\n"
+                   "The runner is `hooks/b.py` `run_all` and returns 3.\n\nThe runner is `hooks/c.py` `run_all` and returns 3.\n")  # lines 3, 5, 7
+SIDE_PROSE = "docs/notes/side.md"  # governed prose on main, so the range has a base to diff against
+
+
+def numbered_source(tag, count, named=()):
+    """A source file of `count` lines, each `<tag><NNN> = <n>`. A line in `named` calls run_all as well. Each token such as
+    `xs012` is unique in the file, so a case finds a line by its token, never by its place in the prompt."""
+    return "\n".join(f"{tag}{n:03d} = run_all({n})" if n in named else f"{tag}{n:03d} = {n}" for n in range(1, count + 1)) + "\n"
+
+
+def tokens(text, tag):
+    """The distinct `<tag><NNN>` tokens in `text`, in the order they first appear."""
+    return list(dict.fromkeys(re.findall(r"\b%s\d{3}\b" % tag, text)))
+
+
+class ProseJudgePrompt(unittest.TestCase):
+    """merge.prose_judge_prompt for a line that cites nothing and names a path and a name in backticks. No git and no model:
+    the `read` hook serves the text of each path it knows, and every other path reads as missing. The tree is not on disk, so
+    the excerpt can only come through the hook."""
+    WT = os.path.join(os.sep, "no-such-tree-for-prose-judge")
+
+    def prompt(self, by_line, served):
+        reads = []
+
+        def read(wt, backing):
+            reads.append((wt, backing))
+            return served.get(backing)
+        text = merge.prose_judge_prompt(self.WT, "docs/notes/named.md", by_line, read=read)
+        return text, reads
+
+    def test_a_named_path_with_no_cite_gets_the_lines_around_the_name(self):
+        line = "`hooks/x.py` `run_all` returns 3"
+        text, reads = self.prompt({5: (line, [])}, {NAMED: numbered_source("xs", 30, named={12})})
+        self.assertIn("Line 5: " + line, text, "scope: the prompt does not carry the named line")
+        got = tokens(text, "xs")
+        self.assertEqual(got, ["xs%03d" % n for n in range(9, 16)],
+                         "the excerpt of %s is %s, want lines 9 to 15 around the line that holds run_all" % (NAMED, got))
+
+    def test_the_excerpt_is_read_through_the_read_hook_for_the_named_path(self):
+        line = "`hooks/x.py` `run_all` returns 3"
+        text, reads = self.prompt({5: (line, [])}, {NAMED: numbered_source("xs", 30, named={12})})
+        self.assertIn((self.WT, NAMED), reads, "the read hook was never asked for %s at the judged tree: asked for %s" % (NAMED, reads))
+        self.assertTrue(tokens(text, "xs"), "no excerpt of %s came through the read hook" % NAMED)
+
+    def test_an_excerpt_is_at_most_forty_lines_per_path(self):
+        line = "`hooks/x.py` `run_all` returns 3"
+        text, reads = self.prompt({5: (line, [])}, {NAMED: numbered_source("xs", 200, named=range(1, 201))})
+        got = tokens(text, "xs")
+        self.assertGreater(len(got), 0, "no excerpt of %s, so the cap is not seen" % NAMED)
+        self.assertLessEqual(len(got), 40, "the excerpt of %s has %d lines, want at most 40" % (NAMED, len(got)))
+
+    def test_a_named_path_that_is_missing_or_empty_adds_no_excerpt_and_no_error(self):
+        line = "`hooks/missing.py` `hooks/empty.py` `hooks/x.py` `run_all` returns 3"
+        served = {"hooks/empty.py": "", NAMED: numbered_source("xs", 30, named={12})}  # hooks/missing.py is not served at all
+        text, reads = self.prompt({5: (line, [])}, served)
+        self.assertIn("Line 5: " + line, text, "scope: the prompt does not carry the named line")
+        got = tokens(text, "xs")
+        self.assertEqual(got, ["xs%03d" % n for n in range(9, 16)],
+                         "the excerpt of %s is %s, want lines 9 to 15 next to the missing and empty paths" % (NAMED, got))
+
+    def test_a_path_the_line_cites_gets_no_second_excerpt(self):
+        line = "`src/widget.py` `hooks/x.py` `run_all` returns 3 (read src/widget.py:4)"
+        served = {"src/widget.py": numbered_source("ws", 30, named={12}), NAMED: numbered_source("xs", 30, named={12})}
+        text, reads = self.prompt({5: (line, ["read src/widget.py:4"])}, served)
+        self.assertIn("Line 5: " + line, text, "scope: the prompt does not carry the named line")
+        self.assertEqual(tokens(text, "xs"), ["xs%03d" % n for n in range(9, 16)],
+                         "scope: the named excerpt of %s is missing, so the cited path cannot be compared" % NAMED)
+        self.assertIn("ws004 = 4", text, "the cited line ws004 of src/widget.py:4 is missing")
+        self.assertEqual(tokens(text, "ws"), ["ws004"],
+                         "src/widget.py has %s in the prompt, want only its cited line ws004" % tokens(text, "ws"))
+
+    def test_the_stale_verdict_counts_the_code_or_text_shown_below(self):
+        text, reads = self.prompt({3: ("A note with no cite.", [])}, {})
+        self.assertIn("the code or text shown below says otherwise (stale)", text,
+                      "the verdict wording does not count a shown excerpt as text the line can be stale against")
+        self.assertNotIn("the cited text now says otherwise", text, "the verdict wording still names only the cited text")
+
 
 class OrderLock(merge.GitLock):
     """A GitLock that appends "release" to `events` on each release, so a case can order a model call against it."""
