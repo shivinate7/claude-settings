@@ -382,8 +382,10 @@ class ReaderPathTests(NoteCase):
         tail = "Read: python " + reader_path(os.path.join(layout, "hooks"))
         lines = self.failure_lines(self.run_note(MORNING, script=os.path.join(layout, "hooks", "daily_note.py")))
         self.assertEqual(len(lines), 1, "want one unknown line, got %r" % lines)
-        self.assert_short_head_kept(lines[0], "guard.log cannot be read (%s):" % err, tail,
-                                    keep="cannot be read (%s)" % err)
+        self.assertIn("unknown", lines[0], "the line dropped unknown: %r" % lines[0])
+        # Past the cap the line is the short head plus the whole Read: tail, and the head still says unknown.
+        short = "guard.log cannot be read (%s): its state is unknown." % err
+        self.assert_short_head_kept(lines[0], short, tail, keep="unknown")
 
 
 class CrashTests(NoteCase):
