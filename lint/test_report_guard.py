@@ -91,7 +91,7 @@ def human(text):
 
 
 def task_notice(task_id="a1"):
-    """The three records a real transcript holds when a subagent finishes, in order: a system-reminder
+    """The three records a real transcript holds when an agent finishes, in order: a system-reminder
     record (isMeta), the peer hand-back (isMeta, origin peer), and the queued task notice (an attachment,
     which is_last_human never reads). None of them is the owner's message."""
     reminder = {"type": "user", "isMeta": True, "isSidechain": False,
@@ -100,8 +100,8 @@ def task_notice(task_id="a1"):
     hand_back = {"type": "user", "isMeta": True, "isSidechain": False,
                  "origin": {"kind": "peer", "from": task_id, "name": "test-author", "handback": True},
                  "message": {"role": "user", "content": "Another Claude session sent a message:\n"
-                             '<agent-message from="%s">\n[Subagent hand-back] The text below is the final report '
-                             'of a subagent this session delegated to.\n</agent-message>' % task_id}}
+                             '<agent-message from="%s">\n[Agent hand-back] The text below is the final report '
+                             'of an agent this session delegated to.\n</agent-message>' % task_id}}
     notice = {"type": "attachment", "isSidechain": False,
               "attachment": {"type": "queued_command", "prompt": "%s\n<task-id>%s</task-id>\n<status>completed</status>"
                              "\n</task-notification>" % (shared_names.TASK_NOTIFICATION_TAG, task_id),
