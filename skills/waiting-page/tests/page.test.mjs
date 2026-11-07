@@ -44,9 +44,11 @@ const ASKED_AFTER_SEND = "2026-10-30T00:00:00Z";
 // [collection, id or null]; window.__uses lists every window.claude.use(capability) call.
 // noStore: the page gets no database (a view that cannot reach the store), so use("db") gives null.
 // failSetText: a write to asks whose text holds it is refused with code denied, so one ask of a batch fails and the rest save.
+// failSetIn: every write into that collection is refused with code denied. A usage write is kept in window.__usage, not window.__log,
+// so the cases that assert what the page wrote to answers and asks stay true when a counter is written too. A refused write is in window.__refused.
 // hold: { set: n } or { delete: n }. An asks write or delete after the first n waits at the hold until window.__release() runs; window.__held counts the calls waiting.
 // A case disarms it with window.__hold = null, since the init script arms it again on every load (a reload).
-function stubDb({ items, rawItems, answers, failDelete, failDeleteIn, failSet, failSetText = "", failUpdate = false, comments, meta, groups, receipts, holdReceipts, holdAsks = false, dbExtra = {}, noStore = false, hold = {}, keepItems = false }) {
+function stubDb({ items, rawItems, answers, failDelete, failDeleteIn, failSet, failSetText = "", failSetIn = "", failUpdate = false, comments, meta, groups, receipts, holdReceipts, holdAsks = false, dbExtra = {}, noStore = false, hold = {}, keepItems = false }) {
   const { meta: metaExtra, ...otherExtra } = dbExtra;
   const data = { items: { ...Object.fromEntries(items.map((i) => [i.id, i])), ...rawItems }, answers: { ...answers }, meta: { ...(meta ? { page: meta } : {}), ...metaExtra }, groups: { ...groups }, receipts: { ...receipts }, ...otherExtra };
   window.__reads = []; window.__uses = [];
@@ -61,7 +63,7 @@ function stubDb({ items, rawItems, answers, failDelete, failDeleteIn, failSet, f
   if (keepItems) { try { const kept = JSON.parse(localStorage.getItem("__stub.items")); if (kept) data.items = kept; } catch (e) {} }
   const keepItemsStore = () => { if (!keepItems) return; try { localStorage.setItem("__stub.items", JSON.stringify(data.items || {})); } catch (e) {} };
   const subs = {}, docSubs = {};
-  window.__log = [];
+  window.__log = []; window.__usage = []; window.__refused = [];
   const snap = (name) => ({ docs: Object.entries(data[name] || {}).map(([id, v]) => ({ id, data: () => v })) });
   const dsnap = (name, id) => ({ exists: !!(data[name] || {})[id], data: () => (data[name] || {})[id] || null });
   const fire = (name, id) => {
@@ -83,7 +85,7 @@ function stubDb({ items, rawItems, answers, failDelete, failDeleteIn, failSet, f
       orderBy: () => ({ onSnapshot: (cb) => listen(name, cb) }),
       doc: (id) => ({
         get: async () => { window.__reads.push([name, id]); return dsnap(name, id); },
-        set: async (body) => { if (name === "asks") await holdFor("set"); if (failSet || (name === "asks" && failSetText && String(body.text).includes(failSetText))) throw { code: "denied" }; window.__log.push(["set", name, id, body]); (data[name] = data[name] || {})[id] = body; if (name === "asks") keepAsks(); setTimeout(() => fire(name, id), 0); },
+        set: async (body) => { if (name === "asks") await holdFor("set"); if (failSet || failSetIn === name || (name === "asks" && failSetText && String(body.text).includes(failSetText))) { window.__refused.push([name, id]); throw { code: "denied" }; } if (name === "usage") window.__usage.push([id, body]); else window.__log.push(["set", name, id, body]); (data[name] = data[name] || {})[id] = body; if (name === "asks") keepAsks(); setTimeout(() => fire(name, id), 0); },
         // A merge write, as the runtime's update: the fields given are set, the rest of the record stays. It is refused when the record is gone.
         // failUpdate refuses every asks update with permission-denied, as a store that cannot write does.
         update: async (body) => { if (failUpdate && name === "asks") throw { code: "permission-denied" }; if (!(data[name] || {})[id]) throw { code: "not-found" }; window.__log.push(["update", name, id, body]); data[name][id] = { ...data[name][id], ...body }; if (name === "asks") keepAsks(); if (name === "items") keepItemsStore(); setTimeout(() => fire(name, id), 0); },
@@ -124,7 +126,7 @@ after(async () => { if (browser) await browser.close(); });
 
 // clock: a fixed browser time (an ISO string), so a case reads the page's clock without the real one. keepStorage: each storage key is set
 // only when absent, so a reload keeps what the page wrote on the earlier load (a reload that resets storage would undo it).
-async function open(t, { items = [DECISION, TASK], rawItems = {}, answers = {}, failDelete = false, failDeleteIn = "", failSet = false, failSetText = "", comments = { can: "available" }, storage = {}, meta = null, groups = {}, receipts = {}, holdReceipts = false, holdAsks = false, designData = null, dbExtra = {}, pageHtml = html, viewport = { width: 1280, height: 900 }, hasTouch = false, scheme = "light", errors = null, platform = null, noStore = false, hold = {}, clock = null, keepStorage = false, failUpdate = false, keepItems = false } = {}) {
+async function open(t, { items = [DECISION, TASK], rawItems = {}, answers = {}, failDelete = false, failDeleteIn = "", failSet = false, failSetText = "", failSetIn = "", comments = { can: "available" }, storage = {}, meta = null, groups = {}, receipts = {}, holdReceipts = false, holdAsks = false, designData = null, dbExtra = {}, pageHtml = html, viewport = { width: 1280, height: 900 }, hasTouch = false, scheme = "light", errors = null, platform = null, noStore = false, hold = {}, clock = null, keepStorage = false, failUpdate = false, keepItems = false } = {}) {
   browser = browser || await needEnv(t, "chromium", async () => require("playwright").chromium.launch());
   if (!browser) return null;
   // hasTouch: a touch device, so the page's pointer: coarse rules apply.
@@ -139,7 +141,7 @@ async function open(t, { items = [DECISION, TASK], rawItems = {}, answers = {}, 
   // Every other request (the fonts) is refused.
   await page.route("**/*", (r) => (r.request().url() === ORIGIN ? r.fulfill({ contentType: "text/html; charset=utf-8", body }) : r.abort()));
   await page.addInitScript(() => { new MutationObserver(() => { const w = document.querySelector(".dfitwrap"); if (w && window.__firstFit === undefined) window.__firstFit = w.getBoundingClientRect().height; }).observe(document, { childList: true, subtree: true }); });
-  await page.addInitScript(stubDb, { items, rawItems, answers, failDelete, failDeleteIn, failSet, failSetText, failUpdate, comments, meta, groups, receipts, holdReceipts, holdAsks, dbExtra, noStore, hold, keepItems });
+  await page.addInitScript(stubDb, { items, rawItems, answers, failDelete, failDeleteIn, failSet, failSetText, failSetIn, failUpdate, comments, meta, groups, receipts, holdReceipts, holdAsks, dbExtra, noStore, hold, keepItems });
   await page.addInitScript(({ kv, keep }) => { for (const k in kv) { if (keep && localStorage.getItem(k) !== null) continue; localStorage.setItem(k, kv[k]); } }, { kv: storage, keep: keepStorage });
   // platform: the OS a browser reports, as navigator.platform with no userAgentData (a Windows or a Mac browser).
   if (platform) await page.addInitScript((p) => { Object.defineProperty(navigator, "platform", { get: () => p }); Object.defineProperty(navigator, "userAgentData", { get: () => undefined }); }, platform);
@@ -9636,3 +9638,164 @@ for (const width of [390, 1280]) {
     assert.deepEqual([...bad, ...fineBad], []);
   });
 }
+
+// ---------------------------------------------------------------- usage counters (step page-usage-counters)
+// A counted press writes one document of the store's usage collection, keyed by the press: { n, at }, where n is the prior n
+// plus one (1 with no prior) and at is the page's clock. The stub keeps those sets in window.__usage as [key, body]. Each case
+// reads them back by key, and compares `at` as a time, so the format of the string is the page's own choice.
+const USAGE_AT = "2026-11-07T12:00:00.000Z";
+const USAGE_T = Date.parse(USAGE_AT);
+const usageSince = async (page, from = 0) => (await page.evaluate((i) => window.__usage.slice(i), from)).map(([key, body]) => ({ key, n: body.n, t: Date.parse(body.at) }));
+const usageOf = async (page, key) => (await usageSince(page)).filter((u) => u.key === key);
+const counted = (key, n) => ({ key, n, t: USAGE_T });
+const usageReads = (page) => page.evaluate(() => window.__reads.filter((r) => r[0] === "usage"));
+// Waits until `want` writes of `key` have landed. A press that comes next waits for this, since two writes that read one prior both say n 1.
+// A wait that times out is left to the assert after it, so a red run names the cause and not a timeout.
+const landed = (page, key, want) => page.waitForFunction(([k, w]) => window.__usage.filter((u) => u[0] === k).length >= w, [key, want]).catch(() => {});
+// A press that must write nothing is checked after this one, which must write. The page's writes run in press order, so a write
+// the silent press would have made lands before the sentinel's. The Records view tab is the sentinel: no case here uses it otherwise.
+const sentinel = async (page) => { await page.click("#vt-rec"); await landed(page, "view-rec", 1); };
+// A phase with one metric that has a rule: its tile is a button, data-tile "<phase>:0".
+const RULED_PHASE = { metrics: [{ label: "Lanes open", value: "2", rule: "A lane counts while it is open." }] };
+
+test("usage: a load reads and writes no counter, and each Add to list writes ask-add with n counting up", async (t) => {
+  const page = await open(t, { clock: USAGE_AT }); if (!page) return;
+  assert.deepEqual(await usageReads(page), [], "a load read a usage counter");
+  assert.deepEqual(await usageSince(page), [], "a load wrote a usage counter");
+  await page.fill("#askText", "First ask");
+  await page.click("#askAdd");
+  await landed(page, "ask-add", 1);
+  assert.deepEqual(await usageSince(page), [counted("ask-add", 1)], "Add to list did not write ask-add once, with n 1");
+  await page.fill("#askText", "Second ask");
+  await page.click("#askAdd");
+  await landed(page, "ask-add", 2);
+  assert.deepEqual(await usageSince(page), [counted("ask-add", 1), counted("ask-add", 2)], "a second Add to list did not write ask-add with n 2");
+});
+
+test("usage: Send ask writes ask-send once, and n counts on from the prior the store holds", async (t) => {
+  const page = await open(t, { clock: USAGE_AT, dbExtra: { usage: { "ask-send": { n: 4, at: "2026-11-06T09:00:00.000Z" } } } }); if (!page) return;
+  await page.fill("#askText", "Can I see the lane queue?");
+  await page.click("#askSend");
+  await landed(page, "ask-send", 1);
+  assert.deepEqual(await usageSince(page), [counted("ask-send", 5)], "Send ask did not write ask-send once, counting on from the stored n 4 to n 5");
+});
+
+test("usage: each Send answers writes answers-send, and the second send counts on to n 2", async (t) => {
+  const second = mk("usage-second", 9);
+  const page = await open(t, { clock: USAGE_AT, items: [DECISION, second] }); if (!page) return;
+  await takePick(page, DECISION);
+  await send(page);
+  await landed(page, "answers-send", 1);
+  assert.deepEqual(await usageOf(page, "answers-send"), [counted("answers-send", 1)], "Send answers did not write answers-send once, with n 1");
+  await takePick(page, second);
+  await send(page);
+  await landed(page, "answers-send", 2);
+  assert.deepEqual(await usageOf(page, "answers-send"), [counted("answers-send", 1), counted("answers-send", 2)], "the second Send answers did not write answers-send with n 2");
+});
+
+test("usage: Copy answers writes copy-answers on each press, after a save the store refused", async (t) => {
+  const page = await open(t, { clock: USAGE_AT, failSetIn: "answers" }); if (!page) return;
+  await takePick(page, DECISION);
+  await send(page);
+  const shown = await page.locator("#copy").waitFor({ state: "visible" }).then(() => true, () => false);
+  assert.equal(shown, true, "after a refused save, Copy answers is not shown");
+  await page.click("#copy");
+  await landed(page, "copy-answers", 1);
+  assert.deepEqual(await usageOf(page, "copy-answers"), [counted("copy-answers", 1)], "Copy answers did not write copy-answers once, with n 1");
+  await page.click("#copy");
+  await landed(page, "copy-answers", 2);
+  assert.deepEqual(await usageOf(page, "copy-answers"), [counted("copy-answers", 1), counted("copy-answers", 2)], "a second Copy answers did not write copy-answers with n 2");
+});
+
+test("usage: opening Status from Questions writes status-tab, a press while Status shows writes nothing, and a reopen is n 2", async (t) => {
+  const page = await open(t, { clock: USAGE_AT, pageHtml: mergedPage() }); if (!page) return;
+  await page.click("#tabStatus");
+  await landed(page, "status-tab", 1);
+  assert.deepEqual(await usageOf(page, "status-tab"), [counted("status-tab", 1)], "opening Status from Questions did not write status-tab once, with n 1");
+  await page.click("#tabStatus");
+  await sentinel(page);
+  assert.deepEqual(await usageOf(page, "status-tab"), [counted("status-tab", 1)], "a press on Status while it shows wrote status-tab");
+  await page.click("#tabQ");
+  await page.click("#tabStatus");
+  await landed(page, "status-tab", 2);
+  assert.deepEqual(await usageOf(page, "status-tab"), [counted("status-tab", 1), counted("status-tab", 2)], "reopening Status did not write status-tab with n 2");
+});
+
+test("usage: a Status view counts a press that switches to a view not shown, and a press on the shown view writes nothing", async (t) => {
+  const page = await open(t, { clock: USAGE_AT, pageHtml: mergedPage() }); if (!page) return;
+  await page.click("#tabStatus");
+  await page.click("#vt-log");
+  await landed(page, "view-log", 1);
+  assert.deepEqual(await usageOf(page, "view-log"), [counted("view-log", 1)], "switching to Changes did not write view-log once, with n 1");
+  await page.click("#vt-log");
+  await sentinel(page);
+  assert.deepEqual(await usageOf(page, "view-log"), [counted("view-log", 1)], "a press on Changes while it shows wrote view-log");
+  await page.click("#vt-log");
+  await landed(page, "view-log", 2);
+  assert.deepEqual(await usageOf(page, "view-log"), [counted("view-log", 1), counted("view-log", 2)], "switching back to Changes did not write view-log with n 2");
+});
+
+test("usage: a tile that opens writes tile-v2_0 with n 1, its close writes nothing, and a reopen is n 2", async (t) => {
+  const steps = stepsOf([["c1", "v2", 1, "active"]]);
+  const page = await open(t, { clock: USAGE_AT, pageHtml: phasePage(steps, { v2: RULED_PHASE }) }); if (!page) return;
+  await assertBaked(page, steps);
+  await openStatus(page);
+  const tile = page.locator('[data-tile="v2:0"]');
+  assert.equal(await tile.count(), 1, "the phase shows no tile with data-tile v2:0");
+  assert.equal(await tile.getAttribute("aria-expanded"), "false", "the tile starts open");
+  await tile.click();
+  assert.equal(await tile.getAttribute("aria-expanded"), "true", "a press did not open the tile");
+  await landed(page, "tile-v2_0", 1);
+  assert.deepEqual(await usageOf(page, "tile-v2_0"), [counted("tile-v2_0", 1)], "opening the tile did not write tile-v2_0 once, with n 1");
+  await tile.click();
+  assert.equal(await tile.getAttribute("aria-expanded"), "false", "a second press did not close the tile");
+  await sentinel(page);
+  assert.deepEqual(await usageOf(page, "tile-v2_0"), [counted("tile-v2_0", 1)], "closing the tile wrote tile-v2_0");
+  await page.click("#vt-plan");
+  await tile.click();
+  await landed(page, "tile-v2_0", 2);
+  assert.deepEqual(await usageOf(page, "tile-v2_0"), [counted("tile-v2_0", 1), counted("tile-v2_0", 2)], "reopening the tile did not write tile-v2_0 with n 2");
+});
+
+test("usage: a tile's counter key is its data-tile, lowercased, with each character outside a-z, 0-9 and - written as _", async (t) => {
+  const steps = stepsOf([["c1", "Ph.A", 1, "active"]]);
+  const page = await open(t, { clock: USAGE_AT, pageHtml: phasePage(steps, { "Ph.A": RULED_PHASE }) }); if (!page) return;
+  await assertBaked(page, steps);
+  await openStatus(page);
+  const tile = page.locator('[data-tile="Ph.A:0"]');
+  assert.equal(await tile.count(), 1, "the phase shows no tile with data-tile Ph.A:0");
+  await tile.click();
+  await landed(page, "tile-ph_a_0", 1);
+  const tiles = (await usageSince(page)).filter((u) => u.key.startsWith("tile-"));
+  assert.deepEqual(tiles, [counted("tile-ph_a_0", 1)], "the tile of data-tile Ph.A:0 did not write tile-ph_a_0 once, with n 1");
+});
+
+test("usage: with a store a press writes its counter, and with no store the same presses write none and throw nothing", async (t) => {
+  const stored = await open(t, { clock: USAGE_AT, pageHtml: mergedPage() }); if (!stored) return;
+  await stored.click("#tabStatus");
+  await landed(stored, "status-tab", 1);
+  assert.deepEqual(await usageOf(stored, "status-tab"), [counted("status-tab", 1)], "with a store, opening Status did not write status-tab once, with n 1");
+  const errors = [];
+  const page = await open(t, { clock: USAGE_AT, pageHtml: mergedPage(), noStore: true, errors }); if (!page) return;
+  await page.click("#tabStatus");
+  await page.locator("#sPanel").waitFor({ state: "visible" });
+  await page.click("#vt-log");
+  await page.locator("#v-log").waitFor({ state: "visible" });
+  await page.click("#copy");
+  const copied = await page.waitForFunction(() => /Copied|Select and copy/.test(document.getElementById("barStatus").textContent)).then(() => true, () => false);
+  assert.equal(copied, true, "with no store, Copy answers did not act: its result never showed");
+  assert.deepEqual(await usageReads(page), [], "a view with no store read a usage counter");
+  assert.deepEqual(await page.evaluate(() => window.__usage), [], "a view with no store wrote a usage counter");
+  assert.deepEqual(errors, [], "a press with no store threw: " + errors.join("; "));
+});
+
+test("usage: a usage write the store refuses does not stop the press it counts, and the bar does not say Not saved", async (t) => {
+  const page = await open(t, { clock: USAGE_AT, failSetIn: "usage" }); if (!page) return;
+  await takePick(page, DECISION);
+  await send(page);
+  const tried = await page.waitForFunction(() => window.__refused.some((r) => r[0] === "usage" && r[1] === "answers-send")).then(() => true, () => false);
+  assert.equal(tried, true, "Send answers made no attempt at its usage counter");
+  const saved = await page.waitForFunction((id) => !!window.__answers()[id], DECISION.id).then(() => true, () => false);
+  assert.equal(saved, true, "a refused usage write stopped the answer from being saved");
+  assert.doesNotMatch(await page.locator("#barStatus").textContent(), /Not saved/, "a refused usage write showed Not saved in the bar");
+});
