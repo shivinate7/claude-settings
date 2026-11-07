@@ -1261,5 +1261,16 @@ need "exit code" rc_is 0
 need "no simctl uninstall or erase in a run that resets" no_uninstall_or_erase
 end_case "94 control: a run that resets appearance and fold calls no simctl uninstall or erase"
 
+# Case 95: the duo run's own boot is granted slot 1, then the rescan finds Duo 2 booted and free, so the run reuses Duo 2. The
+# lease the run holds during xcodebuild is Duo 2's slot, 2: status names slot 2 with Duo 2's UDID, and not slot 1.
+no_status_slot1() { ! status_at_xc_has 1 "$tool_pid"; }
+pro_dies_during_duo_wait duo
+need "exit code" rc_is 0
+need "steps are run only" steps_are "run "
+need "destination is Duo 2" dest_is "$DUO2"
+need "status during the run names slot 2 for this pid, with Duo 2's UDID" status_at_xc_udid 2 "$tool_pid" "$DUO2"
+need "status during the run does not name slot 1 for this pid" no_status_slot1
+end_case "95 duo run granted slot 1, then Duo 2 found booted by the rescan: holds slot 2 during the run, named in status with Duo 2's UDID"
+
 echo "sim-test suite: $pass_n passed, $fail_n failed${failed:+: $failed}"
 exit $fail
