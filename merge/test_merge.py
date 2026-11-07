@@ -13149,9 +13149,25 @@ class UnreviewedGuardEnv(ReviewEnv):
         """The line reads done for `sha`. `cause` names what should let the carried rounds stand."""
         self.assertRegex(line, rf"^#7 feat7 {sha[:9]} done: ", f"{cause}:\n{line}")
 
+    def assert_open(self, line, sha, cause):
+        """The line reads open for `sha`. `cause` names what should have kept the carried rounds from standing."""
+        self.assertRegex(line, rf"^#7 feat7 {sha[:9]} open: ", f"{cause}:\n{line}")
+
+    def git_stubbed(self, stub):
+        """merge.git with `stub` in front. `stub(args, run_real)` returns (rc, out) to stand in for the git call with args `args`, or None to let
+        git run. `run_real()` runs that call for real, so a stub changes only what it tests. -> the patch, to enter with `with`."""
+        real = merge.git
+        def git_with_stub(cwd, *args, **kw):
+            def run_real():
+                return real(cwd, *args, **kw)
+            reply = stub(args, run_real)
+            return run_real() if reply is None else reply
+        return unittest.mock.patch.object(merge, "git", git_with_stub)
+
 class UnreviewedGuardRefused(UnreviewedGuardEnv):
     """A carried record for a head that changed a guard or check path after the first head of its run reads open. The reason names that first
-    head and the path. A first head that cannot be fetched reads open too, and fails closed."""
+    head and the path. A first head that cannot be fetched reads open too, and fails closed. So does an unparsed record between the first head and
+    the carried record."""
 
     def test_a_one_parent_commit_on_a_guard_path_after_the_reviewed_head_reads_open(self):
         h1 = self.lane_commit("docs/lane.md", "reviewed\n", "lane: docs, reviewed")
@@ -13173,6 +13189,18 @@ class UnreviewedGuardRefused(UnreviewedGuardEnv):
                          f"the carried rounds read done, though their first head {UNFETCHABLE[:7]} cannot be fetched, so the check fails open:\n{line}")
         self.assertIn(UNFETCHABLE[:7], line, f"the open reason does not name {UNFETCHABLE[:7]}, the first head that cannot be fetched:\n{line}")
         self.assertRegex(line, r"fetch", f"the open reason does not say the first head cannot be fetched:\n{line}")
+
+    def test_a_malformed_record_between_the_reviewed_head_and_the_carried_record_reads_open(self):
+        h0 = self.lane_commit("docs/lane.md", "reviewed\n", "lane: docs, reviewed")
+        h1 = self.lane_commit("lint/check_x.py", "x = 1\n", "lane: guard change, never reviewed")
+        h2 = self.lane_commit("docs/after.md", "after\n", "lane: docs after the guard change")
+        bad_body = record_text(head=h1, net="sometimes")  # the net value is not in REVIEW_NETS, so the record does not parse
+        self.assertEqual(bad_body.splitlines()[0], REVIEW_MARKER, "the malformed body lacks the marker line, so review_comments drops it before the walk")
+        self.assertIsNone(review_fn(self, "parse_review")(bad_body), "the malformed body parses, so this case does not test an unparsed record")
+        first, carried = review_comment(1, 7, record_text(head=h0)), review_comment(3, 7, record_text(head=h2))
+        self.assert_open(self.reviewed_line(h2, first, carried), h2, "control: with no record between them, the guard change after the reviewed head should read open")
+        line = self.reviewed_line(h2, first, review_comment(2, 7, bad_body), carried)
+        self.assert_open(line, h2, "the carried rounds read done, though an unparsed record sits between the reviewed head and the carried record, so the guard change after the reviewed head went unread")
 
 class UnreviewedGuardAllowed(UnreviewedGuardEnv):
     """A carried record stays done when nothing unread changed. A clean merge of main brings only main's own change. A fix check names the first
@@ -13228,6 +13256,69 @@ class UnreviewedGuardWriter(UnreviewedGuardEnv):
         self.assertEqual(out, "", "a refused record was printed")
         self.assertIn(h1[:7], err, f"the refusal does not name {h1[:7]}, the head the carried rounds were read at:\n" + err)
         self.assertIn("lint/check_x.py", err, f"the refusal does not name lint/check_x.py, the guard path changed after {h1[:7]}:\n" + err)
+
+    def test_a_guard_yes_record_carried_past_a_malformed_record_is_refused(self):
+        h0 = self.lane_commit("docs/lane.md", "reviewed\n", "lane: docs, reviewed")
+        h1 = self.lane_commit("lint/check_x.py", "x = 1\n", "lane: guard change, never reviewed")
+        h2 = self.lane_commit("docs/after.md", "after\n", "lane: docs after the guard change")
+        files = [pr_file("docs/lane.md"), pr_file("lint/check_x.py"), pr_file("docs/after.md")]
+        bad_body = record_text(head=h1, net="sometimes")  # the net value is not in REVIEW_NETS, so the record does not parse
+        self.assertEqual(bad_body.splitlines()[0], REVIEW_MARKER, "the malformed body lacks the marker line, so review_comments drops it before the walk")
+        self.assertIsNone(review_fn(self, "parse_review")(bad_body), "the malformed body parses, so this case does not test an unparsed record")
+        first = review_comment(1, 7, record_text(head=h0))
+
+        def write_record(*comments):
+            host = PullsHost([batch_pull(7, h2)], {}, comments=list(comments), files=files)
+            return self.run_args("7", "--review-record", "--head", h2, "--kind", "normal", "--guard", "yes", "--round", "1:reviewer:sonnet:PASS", host=host)
+
+        rc, out, err = write_record(first)
+        self.assertEqual(rc, 1, "control: with no record between them, the writer should refuse the carried rounds across lint/check_x.py:\n" + out + err)
+        rc, out, err = write_record(first, review_comment(2, 7, bad_body))
+        self.assertEqual(rc, 1, "the writer printed a record whose carried rounds cross lint/check_x.py, though an unparsed record sits between the reviewed head and this one:\n" + out + err)
+        self.assertEqual(out, "", "a refused record was printed")
+
+class UnreviewedGuardFailsClosed(UnreviewedGuardEnv):
+    """A carried run the carried-run check cannot read reads open. Each case makes one git call of the check fail and keeps the rest real. The
+    run adds only a docs change, so the real check reads done: that is the control in each case, and removing the stubbed branch reads done too."""
+
+    def clean_carried_run(self):
+        """A carried run whose second head adds only a docs change. -> (h2, the first record, the second record)."""
+        h1 = self.lane_commit("docs/lane.md", "reviewed\n", "lane: docs, reviewed")
+        h2 = self.lane_commit("docs/after.md", "after\n", "lane: docs after the review")
+        return h2, review_comment(1, 7, record_text(head=h1)), review_comment(2, 7, record_text(head=h2))
+
+    def assert_fails_closed(self, stub_for, cause, reason):
+        """With the stub `stub_for(h2)` in front of git, the run reads open and its reason names `reason`. Without it, the run reads done."""
+        h2, first, second = self.clean_carried_run()
+        self.assert_done(self.reviewed_line(h2, first, second), h2, "control: a docs-only carried run should read done while git answers")
+        with self.git_stubbed(stub_for(h2)):
+            line = self.reviewed_line(h2, first, second)
+        self.assert_open(line, h2, cause)
+        self.assertIn(reason, line, f"the open reason does not name {reason!r}, so the open may come from another stop:\n{line}")
+
+    def test_git_older_than_2_38_reads_open(self):
+        def stub_for(h2):
+            return lambda args, run_real: (0, "git version 2.37.0") if args == ("--version",) else None
+        self.assert_fails_closed(stub_for, "git older than 2.38 read the carried run as done, so the merge-tree check never ran", "2.38")
+
+    def test_a_merge_tree_error_reads_open(self):
+        def stub_for(h2):
+            def merge_tree_fails(args, run_real):
+                if args[:1] != ("merge-tree",):
+                    return None
+                _rc, tree = run_real()  # a clean merge prints the tree and exits 0, so only the exit code shows the error
+                return 128, tree
+            return merge_tree_fails
+        self.assert_fails_closed(stub_for, "a merge-tree error read the carried run as done", "merge-tree")
+
+    def test_an_unfetchable_second_head_reads_open(self):
+        def stub_for(h2):
+            def fetch_fails(args, run_real):
+                if args[:1] == ("fetch",) and h2 in args:
+                    return 128, f"fatal: couldn't find remote ref {h2}"
+                return None
+            return fetch_fails
+        self.assert_fails_closed(stub_for, "a second head that cannot be fetched read the carried run as done", "cannot be fetched")
 
 # The report-only model judge at merge. The merge reads each governed Markdown file at head, selects a file whose line
 # cites a changed backing file (lint/stale_cites.py backed_lines), and sends it to decision_watch.invoke_model once. The
