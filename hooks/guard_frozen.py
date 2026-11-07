@@ -268,7 +268,9 @@ def writes_to(path: str, cmd: str, command=None, words=()) -> bool:
 # single quotes do not expand. An unassigned variable stays unresolved and allowed. `$HOME` reads
 # as `~`: `os.path.expandvars` leaves it literal when HOME is unset (the Windows default), so a
 # literal `$HOME/.claude/...` target was allowed.
-# RESIDUAL GAP: a value from `$(...)`, backticks, `read`, `${D:-x}`, a loop variable, `eval`, or an
+# `${D:-word}`, `${D-word}` and `${D:?}` read through `guard_core.expand_default_words`: from this table
+# for a variable the command assigned, else from the environment in `_expanded`. `${D:+word}` is not read.
+# RESIDUAL GAP: a value from `$(...)`, backticks, `read`, `${D:+x}`, a loop variable, `eval`, or an
 # interpreter (`python -c`) is not resolved, nor is a variable set in a different tool call.
 # Fixing that needs a shell parser, not a regex.
 _VAR_TOKEN = re.compile(
@@ -276,6 +278,7 @@ _VAR_TOKEN = re.compile(
     r"""|(?<![\w$.\-/:])(?P<n>[A-Za-z_]\w*)=(?!=)(?P<v>"[^"]*"|'[^']*'|[^\s;&|"'`)}]*)"""
     r"""|\$(?P<pn>[A-Za-z_]\w*)[ \t]*=(?!=)[ \t]*(?P<pv>"[^"]*"|'[^']*'|[^\s;&|"'`)}]*)"""
     r"""|\bunset\s+(?P<u>\w+)"""
+    r"""|\$\{(?P<dn>[A-Za-z_]\w*)(?P<dop>:-|-|:\?)(?P<dw>[^{}]*)\}"""
     r"""|\$(?:(?P<x>[A-Za-z_]\w*)|\{(?P<y>[A-Za-z_]\w*)\})""")
 
 
@@ -298,6 +301,11 @@ def _resolve_vars(cmd: str) -> str:
             else:
                 table[name] = value
             return m.group(0)
+        if m.group("dn"):
+            # `${D:-word}`: the word's own `$HOME` reads as `~` first. A variable the command assigned
+            # takes its value here; any other stays as written, for `_expanded` to read from the env.
+            form = "${%s%s%s}" % (m.group("dn"), m.group("dop"), _VAR_TOKEN.sub(step, m.group("dw")))
+            return guard_core.expand_default_words(form, table.get) if m.group("dn") in table else form
         return use(m) if (m.group("x") or m.group("y")) else m.group(0)
 
     return _VAR_TOKEN.sub(step, cmd)
@@ -688,15 +696,21 @@ def _join_path(head: str, tail: str) -> str:
 
 
 def _py_paths(node, env):
-    """The path strings an expression can hold: a string, `Path(...)`, `a / b`, `os.path.join`, a
-    name bound to one of those, or a chain of path calls. A part it cannot tell (`Path.cwd()`,
-    `os.getcwd()`, `__file__`) is left out, so the literal pieces still join: `Path.cwd() / 'tests'`
-    reads `tests`. Empty when no piece is known."""
+    """The path strings an expression can hold: a string, `Path(...)`, `a / b`, `a + b`, `str(a)`,
+    `os.path.join`, a name bound to one of those, or a chain of path calls. The working folder
+    (`Path.cwd()`, `os.getcwd()`) reads as `.`, so `os.getcwd() + '/tests/x.py'` reads `./tests/x.py`.
+    A part it cannot tell (`__file__`, `tempfile.mkdtemp()`) is left out of a `/` or a join, so the
+    literal pieces still join: `Path(base) / 'tests'` reads `tests`. A `+` with an unknown side reads as
+    no path: `tmpdir + '/tests/x.py'` would otherwise read as the absolute `/tests/x.py`, or as a
+    relative `tests/x.py` under the checkout. Empty when no piece is known."""
     import ast
     if isinstance(node, ast.Constant):
         return [node.value] if isinstance(node.value, str) else []
     if isinstance(node, ast.Name):
         return list(env.get(node.id, ()))
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
+        left, right = _py_paths(node.left, env), _py_paths(node.right, env)
+        return [a + b for a in left for b in right]
     if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Div):
         left, right = _py_paths(node.left, env), _py_paths(node.right, env)
         if not right:
@@ -705,6 +719,10 @@ def _py_paths(node, env):
     if isinstance(node, ast.Call):
         func = node.func
         name = func.id if isinstance(func, ast.Name) else func.attr if isinstance(func, ast.Attribute) else ""
+        if name in ("getcwd", "cwd") and not node.args:
+            return ["."]
+        if name == "str" and len(node.args) == 1:
+            return _py_paths(node.args[0], env)
         if name in _PATH_CTORS or name == "join":
             out = [""]
             for options in (_py_paths(arg, env) for arg in node.args):

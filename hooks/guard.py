@@ -132,7 +132,8 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        runs merge, pull, rebase, cherry-pick, stash pop or apply, or am.
                        (commit-refuses-conflict-markers)
   frozen-path          deny. A write to the settings, hooks or global CLAUDE.md under
-                       `${CLAUDE_CONFIG_DIR:-$HOME/.claude}`. (frozen-path-resolves-shell-vars)
+                       `${CLAUDE_CONFIG_DIR:-$HOME/.claude}`, also when the path is written with a
+                       `${VAR:-word}`, `${VAR-word}` or `${VAR:?}` form. (frozen-path-resolves-shell-vars)
   config-edit          noted. A write to a project's own settings or hooks. See below.
   agent-model-cap   ask. A write to a settings file that sets or changes
                        `CLAUDE_CODE_SUBAGENT_MODEL`, `CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL` or the `_FORCE` form.

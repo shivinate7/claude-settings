@@ -1294,11 +1294,32 @@ def worktree_prune_subject(args, where: str):
 from shared_names import config_dir  # noqa: E402  the one home, shared with the config watch
 
 
+_DEFAULT_WORD = re.compile(r"\$\{([A-Za-z_]\w*)(:-|-|:\?)([^{}]*)\}")
+
+
+def expand_default_words(text: str, lookup=os.environ.get) -> str:
+    """Read `${VAR:-word}`, `${VAR-word}` and `${VAR:?word}` as the shell would, `lookup(VAR)` giving
+    the value or None. `:-` takes the word when VAR is unset or empty, `-` only when it is unset, `:?`
+    takes the value and never the word. A `:?` form with VAR unset or empty stays as written: the shell
+    stops there, so no write follows. The word is expanded too, `~` and env vars included. `:+` and a
+    word that holds braces stay as written. `os.path.expandvars` reads none of these forms, so this is
+    the one home for them; `guard_frozen._resolve_vars` calls it with its command-local table."""
+    def read(m):
+        value = lookup(m.group(1))
+        if m.group(2) == ":?":
+            return m.group(0) if value in (None, "") else value
+        if value is None or (value == "" and m.group(2) == ":-"):
+            return os.path.expandvars(os.path.expanduser(expand_default_words(m.group(3), lookup)))
+        return value
+    return _DEFAULT_WORD.sub(read, text)
+
+
 def _expanded(path: str, cwd: str) -> str:
-    """`~`, env vars, a Git-Bash drive spelling and a relative path resolved against `cwd`. No
-    symlink is followed here, and nothing is realpath'd: see `_resolved` and `_literal_resolved`.
+    """`~`, env vars (default-word forms too), a Git-Bash drive spelling and a relative path resolved
+    against `cwd`. No symlink is followed here, and nothing is realpath'd: see `_resolved` and
+    `_literal_resolved`.
     """
-    target = os.path.expandvars(os.path.expanduser(path.strip("'\"")))
+    target = os.path.expandvars(expand_default_words(os.path.expanduser(path.strip("'\""))))
     if re.match(r"^/[a-zA-Z]/", target):  # Git Bash `/c/Users/...` to `C:/Users/...`
         target = target[1].upper() + ":" + target[2:]
     if not os.path.isabs(target) and cwd:
