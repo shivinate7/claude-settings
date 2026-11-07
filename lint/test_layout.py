@@ -81,6 +81,13 @@ class Tree(unittest.TestCase):
         self.tree = tempfile.mkdtemp(prefix="layout_", dir=RUN_FOLDER)
         self.addCleanup(tracked_tree.rm_tree, self.tree)
 
+    def fn(self, name):
+        """The lint/layout.py name `name` (a function or a constant) of self.layout, or a failed case that says it is missing (not built yet)."""
+        found = getattr(self.layout, name, None)
+        if found is None:
+            self.fail("lint/layout.py has no %s yet" % name)
+        return found
+
     def put(self, rel, text="# Record\n"):
         path = os.path.join(self.tree, *rel.split("/"))
         os.makedirs(os.path.dirname(path), exist_ok=True)
@@ -1576,12 +1583,6 @@ class MockupHomes(Tree):
         self.home = os.path.join(self.tree, "home")
         os.makedirs(self.home)
 
-    def fn(self, name):
-        found = getattr(self.layout, name, None)
-        if found is None:
-            self.fail("lint/layout.py has no %s yet" % name)
-        return found
-
     def judge(self, file, home=None):
         return self.fn("mockup_home_problem")(self.tree, file, home=self.home if home is None else home)
 
@@ -1657,6 +1658,29 @@ class MockupHomes(Tree):
 
     def test_the_design_folder_itself_is_refused(self):
         self.refuses("docs/design")
+
+
+class MdUnder(Tree):
+    """layout.md_under(rel, folder): a path is in the folder when it ends in .md and sits under the folder at any depth, the scope that
+    lint/check_ruling_kind.py reads. A folder given with or without a trailing slash is the same folder. Only whole path parts match."""
+
+    def setUp(self):
+        super().setUp()
+        self.layout = load("layout_under_test", os.path.join(LINT, "layout.py"))
+
+    def test_an_md_file_under_the_folder_is_in_at_any_depth(self):
+        md_under = self.fn("md_under")
+        for folder in ("docs/decisions", "docs/decisions/"):
+            with self.subTest(folder=folder):
+                self.assertTrue(md_under("docs/decisions/a.md", folder))
+                self.assertTrue(md_under("docs/decisions/sub/a.md", folder))
+
+    def test_anything_else_is_out(self):
+        md_under = self.fn("md_under")
+        for rel in ("docs/decisions/a.txt", "docs/decisionsx/a.md", "docs/decisions.md", "docs/debts/a.md", "decisions/a.md",
+                    "a/docs/decisions/a.md"):
+            with self.subTest(rel=rel):
+                self.assertFalse(md_under(rel, "docs/decisions"))
 
 
 if __name__ == "__main__":
