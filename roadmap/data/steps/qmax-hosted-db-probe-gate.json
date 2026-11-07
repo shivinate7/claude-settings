@@ -1,0 +1,11 @@
+{
+  "title": "q_max: probes read as not runnable when DATABASE_URL is hosted",
+  "phase": "now",
+  "status": "doing",
+  "order": 269.4,
+  "owner": "coordinator",
+  "lane": "session_013NEJL13dWYVYGiPZQen1wS",
+  "why": "q_max's session_start_deps.py lists the probes as runnable even when DATABASE_URL is hosted, which risks ruling 332 b (cloud sessions stay off Neon) (coordinator, 17:40 CST Nov 7).",
+  "note": "The lane also judges worktree-env.mjs's .env scrub against decision env-file-stays-unread. Done check: a red test where a hosted DATABASE_URL makes the probes read as not runnable.",
+  "updatedAt": "2026-11-07T17:39:00-06:00"
+}
