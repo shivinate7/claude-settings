@@ -2319,6 +2319,17 @@ class RewordTests(RewordCase):
         rc, out = self.run_check(rng)
         self.assertEqual(self.listed(out), [(path, 1) for path in NINE_PATHS], out)
 
+    def test_a_removed_run_quoted_in_a_four_space_fence_under_a_list_item_is_listed_without_the_rule_id(self):
+        # The fence sits in a list item. With no rule id in it the removed run is listed at its own line, and the same
+        # fence with the id is exempt. This pins the verdict as it stands.
+        bare = "- Run the step:\n    ```text\n    that does not apply. %s. Start with the point.\n    ```\n" % OLD_STE
+        named = ("- Run the step:\n    ```text\n    that does not apply. %s. <!-- rule:output-write-in-ste -->\n"
+                 "    ```\n" % OLD_STE)
+        rng = self.reworded(copies=False, extra={"agents/bare.md": bare, "agents/named.md": named})
+        rc, out = self.run_check(rng)
+        self.assertEqual(self.listed(out), [("agents/bare.md", 3)], out)
+        self.assertEqual(rc, 1, out)
+
     def test_a_change_to_a_file_outside_the_rule_files_is_no_trigger(self):
         rng = self.make_range(base_files(NINE[NOTES] % OLD_STE, extra={"CLAUDE.md": NEW_RULE}), lambda repo: (
             write(repo, NOTES, "# Notes\n\n- the debt is closed\n"), commit(repo)))
