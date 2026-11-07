@@ -1,0 +1,36 @@
+{
+  "added": "2026-11-07T21:06:00Z",
+  "context": "Goal: q_max's harness reads the two source readers from the map skill, with no copies of its own.\nProblem (rule): #1089 rewrites a standing choice in place, the entry the-map-build-is-a-skill, and q_max lets that merge only on your word.\nBased on (read): #1089 deletes harness/source-text.mjs and harness/import-reader.mjs and reads the map skill's readers instead (claude-settings decision child-cites-not-copies). Its tests were red first and are green.\nBased on (read): the entry's paragraph that said harness/ keeps its own copies of the two readers now names only lazy-typescript.mjs. Both measured figures stay (2026-11-05: 94 files; 2026-11-07: 22 files).\nDeparts from: main, where the entry says harness/ keeps copies of both readers. #1089 says it keeps only lazy-typescript.mjs.\nCost the PR accepts: every q_max harness run now needs a claude-settings checkout; CI and cloud sessions already have one.",
+  "home": "runner 9 (session_013NEJKymmzw37seAr3Qq5nv)",
+  "id": "qmax-1089-entry-look",
+  "kind": "decision",
+  "links": [
+    {
+      "label": "q_max PR #1089",
+      "url": "https://github.com/shivinate7/q_max/pull/1089"
+    }
+  ],
+  "n": 373,
+  "options": [
+    {
+      "gain": "q_max loses two copied readers, and the entry matches the code.",
+      "key": "a",
+      "label": "Merge as rewritten (recommended)",
+      "lose": "A harness run needs a claude-settings checkout."
+    },
+    {
+      "gain": "You can reword the entry first.",
+      "key": "b",
+      "label": "Hold #1089 for changes to the entry",
+      "lose": "#1089 waits, and the copies stay."
+    }
+  ],
+  "owner": "runner 9 (session_013NEJKymmzw37seAr3Qq5nv)",
+  "pick": "a",
+  "rank": 2,
+  "ref": "q_max #1089; q_max entry the-map-build-is-a-skill; step qmax-harness-copies-resolve",
+  "short": "q_max #1089: merge the rewritten entry, or hold",
+  "status": "open",
+  "title": "May q_max #1089 merge with its rewritten map-build entry?",
+  "why": "q_max's CLAUDE.md lets a rewritten decision entry merge only on your named act. Runner 9 holds #1089 until you look."
+}

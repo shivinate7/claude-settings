@@ -1,0 +1,11 @@
+{
+  "title": "The spawn guard caps the model of every role, not only builders",
+  "phase": "now",
+  "status": "doing",
+  "order": 264.9,
+  "lane": "session_013NEJL2B1oRJaBTe16wm1VG",
+  "why": "Incident 15:04 CST Nov 7: in lane notes-fix-reverify-large, test-authors ran on Opus, above the model-per-role table.",
+  "note": "Topic agent-models. Guard change, full review rounds. Red test first.",
+  "owner": "coordinator",
+  "updatedAt": "2026-11-07T15:06:00-06:00"
+}
