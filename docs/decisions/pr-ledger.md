@@ -10,7 +10,7 @@ Owner, 2026-11-07 12:22 CST, in chat to the coordinator. Quote:
 
 > "the fact that PRs slipped everyone's radar itself despite us having them be part of our triage/status/plans/goals/handoffs means there's a mechanical failure here and you need to solve that"
 
-Coordinator, 2026-11-07 12:56 CST: the proposal is accepted as written (the owner asked to solve it; it can be undone).
+Coordinator, 2026-11-07 12:33 CST: the proposal is accepted as written (the owner asked to solve it; it can be undone).
 
 The intake rule rests on owner ruling 113 a (waiting-page item 113 a, 2026-11-01 04:26 CST, decision `pr-review-record`, a PR carries its review record on the PR): no merge message; the batch runner finds reviewed, green PRs itself. The coordinator's ruling:
 
