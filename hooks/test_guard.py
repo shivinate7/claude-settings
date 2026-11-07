@@ -128,6 +128,7 @@ FAMILIES = {
     "mask-script": "mask_script lexemes",
     "simulator": "the simulator boot and hold rules",
     "rm-var": "every case named rm-var, wherever it sits",
+    "git-after-cd": "a git write after a cd: a ;, a newline or a || reopens the path a failed cd takes, so the write is refused; a && chain, -C with an absolute path, and reads pass",
     "session-log": "the session id column of guard.log",
     "fail-closed": "a missing sibling module refuses the call, and never allows it",
     "reload-stamp": "a hook file broken, missing or mis-stamped: the guard waits and reloads, then refuses, never allows",
@@ -4843,6 +4844,57 @@ sh("rm-var: a hash inside a word is no comment, the delete after a cd is refused
    "cd /tmp/w; rm -rf fix#3", "deny", "rm-after-cd", cwd=NOGIT)
 sh("rm-var: an apostrophe in a comment after the rm does not hide it",
    "cd /tmp/w; rm -rf out # the driver's shape", "deny", "rm-after-cd", cwd=NOGIT)
+
+# A GIT WRITE AFTER A CD. Decision git-after-cd-joins-with-and: once a cd is seen, a `;`, a newline
+# or `||` reopens the path a failed cd takes, so every git write after it is refused. A chain joined
+# only by `&&` passes, and so does `-C <absolute path>`; the cd's scope ends at the `)` of a subshell.
+FAMILY = "git-after-cd"
+sh("git-after-cd: the 2026-11-07 incident, a cd joined by && then ; git writes, is refused",
+   "cd /tmp/w/b-int && %s status --short; %s fetch origin; "
+   "%s checkout -B claude/int-batch-banchi-1107b origin/main; %s merge --no-ff claude/lane-a"
+   % ((VCS,) * 4), "deny", "git-after-cd", cwd=NOGIT, carries=("&&", "-C"))
+sh("git-after-cd: a cd then ; then a git push is refused",
+   "cd /tmp/w; %s push" % VCS, "deny", "git-after-cd", cwd=NOGIT, carries=("&&", "-C"))
+sh("git-after-cd: a cd then a newline then a git merge is refused",
+   "cd /tmp/w\n%s merge claude/lane-a" % VCS, "deny", "git-after-cd", cwd=NOGIT,
+   carries=("&&", "-C"))
+sh("git-after-cd: a cd then || then a git commit is refused",
+   "cd /tmp/w || %s commit -m m" % VCS, "deny", "git-after-cd", cwd=NOGIT, carries=("&&", "-C"))
+sh("git-after-cd: a cd and && make, then ; then a git reset --soft is refused",
+   "cd /tmp/w && make; %s reset --soft HEAD~1" % VCS, "deny", "git-after-cd", cwd=NOGIT,
+   carries=("&&", "-C"))
+sh("git-after-cd: a cd in a subshell, then ; then a git push inside it is refused",
+   "(cd /tmp/w; %s push)" % VCS, "deny", "git-after-cd", cwd=NOGIT, carries=("&&", "-C"))
+sh("git-after-cd: a cd then ; then a git branch -f is refused",
+   "cd /tmp/w; %s branch -f main HEAD" % VCS, "deny", "git-after-cd", cwd=NOGIT,
+   carries=("&&", "-C"))
+sh("git-after-cd: a hash inside a word is no comment, the push after a cd is refused",
+   "cd /tmp/w; %s push origin fix#3" % VCS, "deny", "git-after-cd", cwd=NOGIT,
+   carries=("&&", "-C"))
+sh("git-after-cd: an apostrophe in a comment after the push does not hide it",
+   "cd /tmp/w; %s push # the driver's shape" % VCS, "deny", "git-after-cd", cwd=NOGIT,
+   carries=("&&", "-C"))
+sh("git-after-cd: a cd and && then a git checkout passes",
+   "cd /tmp/w && %s checkout lane-a" % VCS, "allow", cwd=NOGIT)
+sh("git-after-cd: a cd joined by && all the way to a git push passes",
+   "cd /tmp/w && %s status && %s push" % (VCS, VCS), "allow", cwd=NOGIT)
+sh("git-after-cd: a git push with -C an absolute path passes",
+   "%s -C /tmp/x push" % VCS, "allow", cwd=NOGIT)
+sh("git-after-cd: a cd then ; then a git push with -C an absolute path passes",
+   "cd /tmp/w; %s -C /tmp/x push" % VCS, "allow", cwd=NOGIT)
+sh("git-after-cd: a cd then ; then ls passes",
+   "cd /tmp/w; ls", "allow", cwd=NOGIT)
+sh("git-after-cd: a cd then ; then git status and git log pass",
+   "cd /tmp/w; %s status; %s log" % (VCS, VCS), "allow", cwd=NOGIT)
+sh("git-after-cd: a subshell's cd ends at its ), so the git commit after it passes",
+   "(cd /tmp/w && %s push); %s commit -m m" % (VCS, VCS), "allow", cwd=NOGIT)
+sh("git-after-cd: a cd then ; then git branch -l, a read, passes",
+   "cd /tmp/w; %s branch -l" % VCS, "allow", cwd=NOGIT)
+sh("git-after-cd: a git push after a comment opener on the cd line is in the comment and passes",
+   "cd /tmp/w # it's; %s push" % VCS, "allow", cwd=NOGIT)
+sh("git-after-cd: an echo of a cd then ; then git push, inside quotes, passes",
+   'echo "cd /tmp/w; %s push"' % VCS, "allow", cwd=NOGIT)
+FAMILY = "kill"  # the family the cases after this section have always run in
 
 sh("playwright: the bare PowerShell read is allowed", "$env:PLAYWRIGHT_BROWSERS_PATH", "allow",
    tool="PowerShell", cwd=NOGIT)
