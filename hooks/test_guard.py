@@ -10129,8 +10129,9 @@ def rr_path(name):
 
 
 def rr_session(*parts):
-    """A transcript: the owner's message, then the records of each part in order."""
-    return [RR_HUMAN] + [line for part in parts for line in part]
+    """A lane's transcript: the owner's message, the lane's own get_session record (tags cs-build:lane), then the
+    records of each part in order. ROLE_ENV names the same session, so the rule reads it as a lane."""
+    return [RR_HUMAN] + role_call("g0", LANE_TAGS) + [line for part in parts for line in part]
 
 
 def rr_spawn(tool_id, subagent_type, tool="Agent"):
@@ -10169,6 +10170,7 @@ RR_TRANSCRIPTS = {
     "unmarked": rr_session(rr_spawn("r1", "reviewer"), rr_comment("c1", "Looks good to me. See the diff.")),
     "round-two": rr_session(rr_spawn("r1", "reviewer"), rr_comment("c1", rr_record()), rr_spawn("r2", "reviewer")),
     "long": rr_session(rr_spawn("r1", "reviewer"), RR_FILLER),
+    "owner-turn": rr_session(rr_spawn("r1", "reviewer"), [RR_HUMAN]),
 }
 
 
@@ -10192,13 +10194,13 @@ lazy_fixture([rr_path(name) for name in RR_TRANSCRIPTS] + [rr_path("unreadable")
 def rr_deny(name, tool, tool_input, transcript, agent_id=None):
     """A call the guard refuses for the rule: the reason names the rule, the remedy and the decision."""
     add("review-record-after-round: " + name, "deny", rule=RR_RULE, tool=tool, cwd=NOGIT, transcript=transcript,
-        carries=RR_CARRIES, agent_id=agent_id, **tool_input)
+        carries=RR_CARRIES, agent_id=agent_id, env=ROLE_ENV, **tool_input)
 
 
 def rr_allow(name, tool, tool_input, transcript, agent_id=None):
     """A call the guard lets through silently."""
     add("review-record-after-round: " + name, "allow", tool=tool, cwd=NOGIT, transcript=transcript, silent=True,
-        agent_id=agent_id, **tool_input)
+        agent_id=agent_id, env=ROLE_ENV, **tool_input)
 
 
 # Refused: a builder, test-author or handoff after a reviewer spawn that has no record after it.
@@ -10220,6 +10222,8 @@ rr_deny("round two: the round-one record does not cover a second reviewer spawn,
         "Agent", RR_BUILDER, rr_path("round-two"))
 rr_deny("a reviewer spawn far up a long transcript still counts: a builder spawn with no record after it is refused",
         "Agent", RR_BUILDER, rr_path("long"))
+rr_deny("a reviewer spawn in an earlier turn still counts: an owner message after it does not reset the check",
+        "Agent", RR_BUILDER, rr_path("owner-turn"))
 # Allowed: no reviewer spawn, a record after the last one, an agent's own call, a spawn the rule does not judge,
 # and a transcript that is missing or unreadable.
 rr_allow("a builder spawn before any reviewer spawn is allowed",
@@ -10242,7 +10246,7 @@ def rr_cost_case():
     """The refusal starts no child process and makes no network call. The probe counts both on this run. The deny
     is asserted first, so the check passes only when the rule reached its record read."""
     got, reason, side = lb_run("Agent", {"mode": "judge", "reading": LB_NORMAL, "network": True}, RR_BUILDER,
-                               transcript=rr_session(rr_spawn("c1", "reviewer")))
+                               own_env=ROLE_ENV, transcript=rr_session(rr_spawn("c1", "reviewer")))
     if got == "error":
         return False, reason
     if got != "deny" or RR_RULE not in reason:
