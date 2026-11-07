@@ -432,8 +432,8 @@ class PushCheckTests(unittest.TestCase):
                       "a push turn whose guard module did not load passed with no UNKNOWN note")
 
     def test_failed_branch_read_names_the_branch_read_not_the_budget(self):
-        # A detached HEAD makes the branch read raise (ci_wake.current_branch: "no branch is checked out"). The block
-        # reason must name that failure, not a read budget that was never spent.
+        # A detached HEAD makes the branch read raise. The block reason must carry that read's own message, not a
+        # read budget that was never spent.
         folder = self.case_folder()
         git_commit(folder, detach=True)
         steps = push("", command="git push")
@@ -442,8 +442,10 @@ class PushCheckTests(unittest.TestCase):
         self.assertEqual(decision, "block", "a bare push whose branch read failed passed with no CI line")
         self.assertNotIn("read budget", reason,
                          "a failed branch read is reported as a read budget run-out: " + reason)
-        self.assertIn("no branch is checked out", reason,
-                      "the block does not name the branch read's failure: " + reason)
+        with self.assertRaises(ci_wake.Unknown) as raised:
+            ci_wake.current_branch(folder)
+        self.assertIn(str(raised.exception), reason,
+                      "the block does not name the branch read's failure (%s): %s" % (raised.exception, reason))
 
     def test_push_with_no_remote_tracking_ref_reads_unknown_not_silent(self):
         # The pushed branch has no remote-tracking ref, so the head cannot be named (commit_of gives ""). The turn
@@ -459,6 +461,8 @@ class PushCheckTests(unittest.TestCase):
         self.assertEqual(decision, "block", "a push with no remote-tracking ref for %s passed with no CI line: the "
                          "head was dropped" % BRANCH)
         self.assertIn("CI unknown on " + BRANCH, reason, "the block does not name the push as unknown: " + reason)
+        self.assertNotIn("read budget", reason,
+                         "a push with no remote-tracking ref is reported as a read budget run-out: " + reason)
         decision, _, _ = self.stop(turn(UNKNOWN_BRANCH, steps), fixture_, folder=folder)
         self.assertIsNone(decision, "a report that holds the unknown line was blocked")
 
@@ -651,6 +655,19 @@ class BudgetTests(unittest.TestCase):
                           "fails open and passes the turn: %s: %s" % (type(exc).__name__, exc))
             reason = report_guard.push_ci_problem(REPORT, states)
             self.assertIn("CI unknown", reason, "a budget spent during the remote-ref read passed with no CI line")
+            self.assertIn("budget", reason,
+                          "a budget spent during the remote-ref read is not reported as the budget: " + reason)
+        with self.subTest(read="the branch read of a bare push, head not yet named"):
+            clock = StepClock([0.0, 25.0])  # the total is spent when the branch read asks for its timeout
+            budget = ci_wake.Budget(total=20, per_read=8, clock=clock)
+            records = turn(REPORT, push("", command="git push"))[1:]
+            states = report_guard.push_ci_states(records, hook, budget=budget)
+            reason = report_guard.push_ci_problem(REPORT, states)
+            self.assertIn("CI unknown on HEAD", reason,
+                          "a budget spent during a bare push's branch read is not named CI unknown on HEAD: %s"
+                          % states)
+            self.assertIn("budget", reason,
+                          "a budget spent during a bare push's branch read is not reported as the budget: " + reason)
 
     def test_every_gh_read_is_capped_at_the_per_read_timeout(self):
         clock = StepClock([0.0])
