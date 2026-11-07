@@ -316,8 +316,12 @@ def grant_override(raw, at):
     override.grant_opus_ask, the plain Opus ask (`send opus judges`): one model call, only for an owner prompt
     that carries the word `opus`, none otherwise. An ask that names no role also reads the owner's earlier typed
     prompts for the roles they name: one more model call, only after a yes and only when such a prompt exists; no
-    role named means every role (decision owner-override). Those calls are why the
-    settings.json row has "timeout": 30. Any failure is one stderr line, no override."""
+    role named means every role (decision owner-override). A prompt neither grants goes last to
+    override.grant_override_ask, the plain override ask (`yes override that`): one model call, only for an owner
+    prompt that holds the whole word `override` outside code spans and passes its gates, none otherwise. It also gives
+    the result of a first-word `override` prompt that grant() deferred because its rest holds a length. At most one
+    judge call per prompt. Those calls are why the settings.json row has "timeout": 30. Any failure is one stderr
+    line, no override."""
     try:
         hook = json.loads(raw.decode("utf-8"))
         import override
@@ -326,6 +330,10 @@ def grant_override(raw, at):
             result = override.grant_opus_ask(hook.get("session_id"), hook.get("prompt"), at,
                                              transcript=hook.get("transcript_path"),
                                              source=hook.get("source"))
+        if result is None:
+            result = override.grant_override_ask(hook.get("session_id"), hook.get("prompt"), at,
+                                                 transcript=hook.get("transcript_path"),
+                                                 source=hook.get("source"))
         if result:
             print(override_line(result))
     except (ValueError, AttributeError):
