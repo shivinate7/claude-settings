@@ -243,9 +243,9 @@ const joinedStrings = (sf, file, files) => {
       if (urlFns.has(callee)) {
         if (importMeta(arg, 'url')) return file;
         const url = ts.isNewExpression(arg) && ts.isIdentifier(arg.expression) && arg.expression.text === 'URL' && !counts.has('URL') && arg.arguments?.length === 2 ? arg.arguments : null;
-        // A relative URL with no scheme, query or escape is a plain path from the file's folder.
+        // A relative URL with no scheme, query or escape is a plain path from the file's folder. The empty one is the file itself.
         if (url && isStringPiece(url[0]) && importMeta(url[1], 'url') && !/^[a-z][a-z0-9+.-]*:|^[/\\]|[?#%\\]/i.test(url[0].text))
-          return inside(path.posix.join(folder, url[0].text).replace(/\/+$/, '') || '.');
+          return url[0].text === '' ? file : inside(path.posix.join(folder, url[0].text).replace(/\/+$/, '') || '.');
       }
       return null;
     }

@@ -164,8 +164,8 @@ def code_strings(tree):
 PATH_FUNCS = {
     "os.path.join": "join", "posixpath.join": "join",
     "os.path.dirname": "dirname", "posixpath.dirname": "dirname",
-    "os.path.abspath": "same", "posixpath.abspath": "same", "os.path.realpath": "same", "posixpath.realpath": "same",
-    "os.path.normpath": "same", "posixpath.normpath": "same",
+    "os.path.abspath": "wrap", "posixpath.abspath": "wrap", "os.path.realpath": "wrap", "posixpath.realpath": "wrap",
+    "os.path.normpath": "wrap", "posixpath.normpath": "wrap",
     "pathlib.Path": "same",
 }
 
@@ -252,50 +252,64 @@ def joined_strings(tree, parent):
         out = [p.value for p in pieces]
         return None if any(t.startswith("/") for t in out) else out
 
-    def place(node, seen):
+    def place(node, seen, wrapped=False):
         """("file" or "dir", repo-relative path) for an expression that names a place of the repository by static reading, or None.
         `__file__` is the file. `dirname(x)` and `x.parent` go up one folder. `abspath(x)`, `realpath(x)`, `Path(x)`, `x.resolve()` and
         `x.absolute()` keep x, and so does `normpath(x)`. `x.parents[n]` with a literal n goes up n + 1 folders. A join of a folder with
-        literal pieces is a folder. A join call from the file itself resolves as path normalization does, the file name being one segment, so
-        `os.path.join(__file__, "..", x)` is `x` beside the file; a `/` chain does not, since pathlib keeps `..` as written. A name bound once
-        in the file, at module level, is the place its value names. Anything else (a parameter, an import, a call to a helper, a name bound
-        in a function) is no known place."""
+        literal pieces is a folder. A join (call or `/` chain) from a FILE place (`__file__`, `abspath(__file__)`, `Path(__file__)` or a
+        name bound to one) is a folder only when `wrapped` is true, that is when normpath, abspath or realpath wraps the join: both
+        `os.path.join` and pathlib keep `..` as written, so `<file>/../x` is no path that opens, and the bare join names nothing. A name
+        bound once in the file, at module level, is the place its value names. Anything else (a parameter, an import, a call to a helper,
+        a name bound in a function) is no known place."""
         if isinstance(node, ast.Name):
             if node.id == "__file__":
                 return None if counts.get(node.id) else ("file", parent)
             if star or node.id in seen or counts.get(node.id) != 1 or top.get(node.id) is None:
                 return None
-            return place(top[node.id], seen | {node.id})
+            return place(top[node.id], seen | {node.id}, wrapped)
         if isinstance(node, ast.Attribute) and node.attr == "parent":
-            got = place(node.value, seen)
+            got = place(node.value, seen, wrapped)
             up = got and inside(got[1] + "/..")
             return ("dir", up) if up else None
         if isinstance(node, ast.Subscript) and isinstance(node.value, ast.Attribute) and node.value.attr == "parents":
             index = node.slice
             if isinstance(index, ast.Constant) and isinstance(index.value, int) and not isinstance(index.value, bool) and index.value >= 0:
-                got = place(node.value.value, seen)
+                got = place(node.value.value, seen, wrapped)
                 up = got and inside(got[1] + "/.." * (index.value + 1))
                 return ("dir", up) if up else None
             return None
         if isinstance(node, ast.Call) and not node.keywords:
             if isinstance(node.func, ast.Attribute) and node.func.attr in ("resolve", "absolute") and not node.args:
-                return place(node.func.value, seen)
+                return place(node.func.value, seen, wrapped)
             does = callees.get(dotted_name(node.func))
-            if does in ("dirname", "same") and len(node.args) == 1 and not isinstance(node.args[0], ast.Starred):
-                got = place(node.args[0], seen)
-                if got is None or does == "same":
+            if does in ("dirname", "same", "wrap") and len(node.args) == 1 and not isinstance(node.args[0], ast.Starred):
+                got = place(node.args[0], seen, wrapped or does == "wrap")
+                if got is None or does != "dirname":
                     return got
                 up = inside(got[1] + "/..")
                 return ("dir", up) if up else None
         parts = split(node)
         if parts is None:
             return None
-        got, tail = place(parts[0], seen), texts(parts[1])
-        if got is None or tail is None or (got[0] == "file" and not isinstance(node, ast.Call)):
+        got, tail = place(parts[0], seen, wrapped), texts(parts[1])
+        if got is None or tail is None or (got[0] == "file" and not wrapped):
             return None
         joined = inside(posixpath.join(got[1], *tail))
         return ("dir", joined) if joined else None
 
+    def keeps(call):
+        """The one argument of a call that normpath, abspath, realpath or Path wraps around a path, or None."""
+        ok = isinstance(call, ast.Call) and len(call.args) == 1 and not call.keywords and not isinstance(call.args[0], ast.Starred)
+        return call.args[0] if ok and callees.get(dotted_name(call.func)) in ("same", "wrap") else None
+
+    # The expressions that a normalizing call wraps, straight or through Path(...): the joins among them resolve their `..`.
+    wrapped_ids = set()
+    for n in ast.walk(tree):
+        if isinstance(n, ast.Call) and callees.get(dotted_name(n.func)) == "wrap":
+            inner_arg = keeps(n)
+            while inner_arg is not None:
+                wrapped_ids.add(id(inner_arg))
+                inner_arg = keeps(inner_arg)
     inner = {id(n.left) for n in ast.walk(tree) if isinstance(n, ast.BinOp) and isinstance(n.op, ast.Div)}
     strings, places = [], []
     for node in ast.walk(tree):
@@ -307,7 +321,7 @@ def joined_strings(tree, parent):
             if tail is not None:
                 strings.append("/".join(tail))
         else:
-            got = place(node, frozenset())
+            got = place(node, frozenset(), id(node) in wrapped_ids)
             if got:
                 places.append(got[1])
     return strings, places
