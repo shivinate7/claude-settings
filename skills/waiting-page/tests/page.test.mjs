@@ -4136,20 +4136,30 @@ test("the mockup draw width is written once in the page, in FIT_W", () => {
   assert.deepEqual(found, [], `page.html restates the draw width ${decl[1]} outside FIT_W. Read it from FIT_W or drop it:\n  ${found.join("\n  ")}`);
 });
 
-test("the restatement scan finds a number behind a comment opener in a string, in a template and after a lone quote, and skips other numbers", () => {
+test("the restatement scan finds a width behind a comment opener in a string, in a template and after a lone quote, and skips other numbers", () => {
   const src = [
     "const FIT_W = 390;",
-    "const u = 'http://x/390px';",
-    'const c = "/* 390 */";',
-    'const h = "# 390";',
+    "const u = 'style=\"width:390px\"';",
+    'const c = "/* width: 390 */";',
+    'const h = "# width=390";',
     "const t = `a",
-    "b 390 c`;",
+    "b width: 390 c`;",
     "<p>Don't</p> 390 wide",
     "const other = 3900 + 1390 + 0.390 + 390.5 + a390 + #390;",
   ].join("\n");
   assert.deepEqual(restatements(src, "390"), [
-    "line 2: const u = 'http://x/390px';", 'line 3: const c = "/* 390 */";', 'line 4: const h = "# 390";', "line 6: b 390 c`;", "line 7: <p>Don't</p> 390 wide",
+    "line 2: const u = 'style=\"width:390px\"';", 'line 3: const c = "/* width: 390 */";', 'line 4: const h = "# width=390";', "line 6: b width: 390 c`;", "line 7: <p>Don't</p> 390 wide",
   ]);
+});
+
+test("the restatement scan skips a number equal to FIT_W that is not a width value: a count, a font weight, a breakpoint", () => {
+  const src = [
+    "const FIT_W = 390;",
+    "const rows = 390; // the count of rows",
+    '<td>390 units</td> <i style="font-weight: 390"></i>',
+    "@container (min-width: 390px) { .pk { gap: 16px } }",
+  ].join("\n");
+  assert.deepEqual(restatements(src, "390"), []);
 });
 
 test("a mockup frame is laid out at the width FIT_W holds", async (t) => {
