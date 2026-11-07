@@ -4,7 +4,6 @@
   "home": "ux-house-rules",
   "id": "ux-house-rule-ids",
   "kind": "decision",
-  "lane": "coordinator",
   "lastAnswer": {
     "at": "2026-11-06T19:11:33.356Z",
     "choice": [
@@ -103,7 +102,7 @@
   ],
   "rank": 7,
   "ref": "deep audit 1102, report docs/plans/deep-audit/report.md on audit/deep-1102 (6b6a41f3), table 'claude-settings: homes', row ux-house-rule-ids",
-  "reply": "Moved off the page (your 316 note): tracked as roadmap step ux-house-rules.",
+  "reply": "Moved off the page (your 316 note). Home: record ux-house-rules (docs/decisions/ux-house-rules.md). Picks a, c, e, f, h, j, k, l; b (a press moves nothing) not picked, so it is not a house rule.",
   "short": "UX house rules: the last 12",
   "status": "closed",
   "title": "Which of these 12 UX rules should also be house rules?",
