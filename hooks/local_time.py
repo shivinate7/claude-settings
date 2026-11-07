@@ -362,8 +362,8 @@ def main(argv):
         print(text)
         if not agent:
             raw = sys.stdin.buffer.read()
-            grant_override(raw, now)
             capture(raw, stamp[len("Local time: "):])
+            grant_override(raw, now)
     except Exception as e:  # advisory hook: fail open; one stderr line shows in --debug
         print("local_time: %s" % e, file=sys.stderr)
     return 0
