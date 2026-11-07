@@ -270,15 +270,17 @@ def run_dir(label):
     return path
 
 
-def run_stop(label, cwd, records, stop_active=False, count_git=False, writer=SESSION, extra_env=None):
+def run_stop(label, cwd, records, stop_active=False, count_git=False, writer=SESSION, extra_env=None,
+             session=SESSION):
     """One Stop of the guard in `cwd`, with the transcript `records`. `writer` is the session the transcript
-    names as the page writer (None: unknown). `extra_env` adds variables for this run. No inbox file is written."""
+    names as the page writer (None: unknown), exactly as the page's meta/page get holds it. `extra_env` adds
+    variables for this run. `session` is the hook's session id. No inbox file is written."""
     folder = run_dir(label)
     records = with_writer(records, writer)
     cfg, home = os.path.join(folder, "cfg"), os.path.join(folder, "home")
     os.makedirs(cfg)
     os.makedirs(home)
-    payload = {"hook_event_name": "Stop", "session_id": SESSION, "stop_hook_active": stop_active,
+    payload = {"hook_event_name": "Stop", "session_id": session, "stop_hook_active": stop_active,
                "cwd": cwd, "transcript_path": transcript(folder, records)}
     if not os.path.exists(PROBE_PATH):
         write_file(PROBE_PATH, PROBE_SOURCE)
@@ -660,6 +662,41 @@ def case_n17_writer_write_by_path_to_items_blocks():
     expect_block("N17", run_stop("n17", base_repo("n17"), records), (SCRIPT,))
 
 
+def case_n18_label_naming_this_session_blocks():
+    """The page names its writer as a label that holds the id: "Triage (session_9f)". The id is this session's,
+    so this session is the writer, and its stale write blocks."""
+    p = run_stop("n18", base_repo("n18"), [owner(at(18, 50))] + page_write(at(19)),
+                 session="session_9f", writer="Triage (session_9f)")
+    expect_block("N18", p, (SCRIPT,))
+
+
+def case_n19_label_naming_the_remote_session_id_blocks():
+    """The label holds session_9f, and this run's env names it as cse_9f, which override.remote_session_id maps
+    back to session_9f. This session's own id is another, so only the remote id names this session."""
+    p = run_stop("n19", base_repo("n19"), [owner(at(18, 50))] + page_write(at(19)),
+                 writer="Triage (session_9f)", extra_env={REMOTE_ENV: "cse_9f"})
+    expect_block("N19", p, (SCRIPT,))
+
+
+def case_n20_label_naming_a_longer_session_id_is_not_this_session():
+    """Whole-token match: the label holds session_9f, and this session is session_9fa. A prefix match would
+    call this session the writer. Scope first: the same records with the bare id session_9f block, so the
+    transcript does reach the writer check."""
+    scope = run_stop("n20s", base_repo("n20s"), [owner(at(18, 50))] + page_write(at(19)),
+                     session="session_9f", writer="session_9f")
+    expect_block("N20 scope", scope, (SCRIPT,))
+    p = run_stop("n20", base_repo("n20"), [owner(at(18, 50))] + page_write(at(19)),
+                 session="session_9fa", writer="Triage (session_9f)")
+    expect_pass("N20", p)
+
+
+def case_n21_bare_id_still_names_the_writer():
+    """Control, green today: a bare writer id equal to this session still names the writer."""
+    p = run_stop("n21", base_repo("n21"), [owner(at(18, 50))] + page_write(at(19)),
+                 session="session_9f", writer="session_9f")
+    expect_block("N21", p, (SCRIPT,))
+
+
 # --------------------------------------------------------------------------- unit cases
 
 def guard_module():
@@ -747,6 +784,10 @@ CASES.extend((
     case_n15_writer_set_of_receipts_passes,
     case_n16_writer_write_by_path_to_receipts_passes,
     case_n17_writer_write_by_path_to_items_blocks,
+    case_n18_label_naming_this_session_blocks,
+    case_n19_label_naming_the_remote_session_id_blocks,
+    case_n20_label_naming_a_longer_session_id_is_not_this_session,
+    case_n21_bare_id_still_names_the_writer,
     case_u1_export_check_returns_the_reason,
     case_u2_git_failure_gives_a_note_and_no_reason,
 ))

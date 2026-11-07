@@ -1580,6 +1580,35 @@ def case_mid_reason_unlisted_id_is_a_plain_refusal():
           "Unvetted:" in r.reason(), detail(r))
 
 
+# ------------------------------------------------------------------ a form item that names a listed record
+#
+# Only item 8 is the past-ruling rule. A refusal of items 1 to 7 that names a listed record is rule question-judge:
+# the record is named mid-reason, so ruling_cite reads it as a cite, and the rule must follow the item, not the cite.
+ITEM_5_REASON = "Item 5: context names decisions/%s with no plain gloss; explain it in plain words." % APPS_SLUG
+ITEM_8_REASON = "Item 8: decisions/%s (2026-10-28) already decides this, so the owner is not asked again." % APPS_SLUG
+
+
+def case_form_item_naming_a_listed_id_is_question_judge():
+    # Case (a). Item 5 (no unexplained ids) refuses a box that names a listed record. The judge saw the record (scope
+    # first), and the refusal is rule question-judge.
+    box = good_box(goal=APPS_GOAL, problem=APPS_PROBLEM, based=APPS_BASED, options=APPS_OPTIONS)
+    r = run_hook(question_input(box=box, cwd=DECISIONS_REPO), answer=json.dumps({"ok": False, "reason": ITEM_5_REASON}))
+    prompt = r.calls[0]["prompt"] if r.calls else ""
+    check("form item 5: scope, the listed record reaches the judge's prompt",
+          len(r.calls) == 1 and APPS_SLUG in without_call(prompt, box), detail(r))
+    check("form item 5: the box is denied", (r.deny() or {}).get("permissionDecision") == "deny", detail(r))
+    check("form item 5: the rule is question-judge, not past-ruling",
+          r.reason().startswith("question-judge: ") and r.log.count("\tdeny\tquestion-judge\t") == 1, detail(r))
+
+
+def case_past_item_8_naming_a_listed_id_stays_past_ruling():
+    # Control, green today: item 8 is the past-ruling rule, and its refusal names the listed record.
+    box = good_box(goal=APPS_GOAL, problem=APPS_PROBLEM, based=APPS_BASED, options=APPS_OPTIONS)
+    r = run_hook(question_input(box=box, cwd=DECISIONS_REPO), answer=json.dumps({"ok": False, "reason": ITEM_8_REASON}))
+    check("item 8 control: the refusal is rule past-ruling",
+          (r.deny() or {}).get("permissionDecision") == "deny" and r.reason().startswith("past-ruling: "), detail(r))
+
+
 # ------------------------------------------------------------------ owner questions sent to a session (send tools)
 #
 # A send_message or SendMessage whose message carries a Goal line and a Problem (<stake>) line is an owner question. It
@@ -1828,6 +1857,24 @@ def case_page_past_ruling_ok_then_the_form_judge_without_item_8():
     check("page past B: the write is allowed, with no deny", r.code == 0 and r.out == "" and r.deny() is None, detail(r))
 
 
+ITEM_5_WORKTREE = "Item 5: context names decisions/%s with no plain gloss; explain it in plain words." % WORKTREE_SLUG
+
+
+def case_page_form_item_naming_a_listed_id_is_question_judge():
+    # Case (c). The dedicated call answers ok and lists the record. The form judge's item 5 names it, and a page write
+    # has no cite, so the rule is question-judge. Scope first: the dedicated call holds the record.
+    page_item_passes_the_form("form item 5")
+    r = run_hook(page_input("set", WORKTREE_PAGE_ITEM, cwd=INCIDENT_REPO),
+                 answer=json.dumps({"ok": False, "reason": ITEM_5_WORKTREE}), past=ALLOW)
+    dedicated = past_calls(r)
+    check("page form item 5: scope, the dedicated call lists the record",
+          len(dedicated) == 1 and WORKTREE_SLUG in dedicated[0]["prompt"], detail(r))
+    check("page form item 5: the form judge runs after the dedicated call", len(form_calls(r)) == 1, detail(r))
+    check("page form item 5: the write is denied", (r.deny() or {}).get("permissionDecision") == "deny", detail(r))
+    check("page form item 5: the rule is question-judge, not past-ruling",
+          r.reason().startswith("question-judge: "), r.reason()[:160])
+
+
 def case_page_past_ruling_error_is_unvetted_unless_marked():
     # Case C. A model error in the dedicated call refuses the write as Unvetted, and no form call follows. A context with
     # an Unvetted: line passes after the attempt, and the form judge then runs (its canned answer is ok).
@@ -2038,6 +2085,7 @@ def main():
                  case_unshown_id_takes_the_unvetted_path, case_marker_does_not_skip_the_check,
                  case_unknown_names_the_claude_settings_records, case_cite_of_a_shown_record_is_not_bogus,
                  case_page_task_gets_item_8_and_is_refused, case_mid_reason_unlisted_id_is_a_plain_refusal,
+                 case_form_item_naming_a_listed_id_is_question_judge, case_past_item_8_naming_a_listed_id_stays_past_ruling,
                  case_send_owner_question_is_judged_before_it_is_sent,
                  case_question_box_with_the_same_ruling_is_refused_as_past_ruling,
                  case_send_with_a_based_on_ruling_line_is_sent,
@@ -2045,6 +2093,7 @@ def main():
                  case_send_model_error_refuses_as_unvetted_unless_marked,
                  case_page_past_ruling_refuses_before_the_form_judge,
                  case_page_past_ruling_ok_then_the_form_judge_without_item_8,
+                 case_page_form_item_naming_a_listed_id_is_question_judge,
                  case_page_past_ruling_error_is_unvetted_unless_marked,
                  case_non_item_and_non_judged_writes_make_no_model_call,
                  case_page_batch_passes_every_write_to_the_dedicated_call,
