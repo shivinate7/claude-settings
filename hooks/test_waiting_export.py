@@ -660,6 +660,48 @@ def case_n17_writer_write_by_path_to_items_blocks():
     expect_block("N17", run_stop("n17", base_repo("n17"), records), (SCRIPT,))
 
 
+# --------------------------------------------------------------------------- writer named by a label
+# The live meta/page names its writer as "<role> (session_<x>)", and a cloud hook knows itself only as
+# cse_<x> in REMOTE_ENV. Incident: the export check never fired for the roadmap's triage writer, Nov 6.
+LABEL_ID = "013LabelWriter"
+LABEL_ENV = {REMOTE_ENV: "cse_" + LABEL_ID}
+
+
+def case_l1_writer_named_by_label_blocks():
+    """meta/page names "Triage (session_<x>)" and the env names cse_<x>: this session is the writer."""
+    records = [owner(at(18, 50))] + page_write(at(19))
+    expect_block("L1", run_stop("l1", base_repo("l1"), records, writer="Triage (session_%s)" % LABEL_ID,
+                                extra_env=LABEL_ENV), (SCRIPT,))
+
+
+def case_l2_label_naming_another_session_passes():
+    """The label names another session: receipts and answers are not this session's to export."""
+    records = [owner(at(18, 50))] + page_write(at(19))
+    expect_pass("L2", run_stop("l2", base_repo("l2"), records, writer="Triage (session_013Other)",
+                               extra_env=LABEL_ENV))
+
+
+def case_l3_label_whose_id_only_starts_with_ours_passes():
+    """The label's id has this session's id as a prefix: a different session, so no match."""
+    records = [owner(at(18, 50))] + page_write(at(19))
+    expect_pass("L3", run_stop("l3", base_repo("l3"), records, writer="Triage (session_%sX)" % LABEL_ID,
+                               extra_env=LABEL_ENV))
+
+
+def case_l4_labelled_writer_that_only_read_passes():
+    """The labelled writer read the page and wrote nothing: nothing to export."""
+    records = [owner(at(18, 50))]
+    expect_pass("L4", run_stop("l4", base_repo("l4"), records, writer="Triage (session_%s)" % LABEL_ID,
+                               extra_env=LABEL_ENV))
+
+
+def case_l5_labelled_writer_that_exported_passes():
+    """The labelled writer wrote, then an export run said `same`: already exported."""
+    records = [owner(at(18, 50))] + page_write(at(19)) + export_run(at(19, 5))
+    expect_pass("L5", run_stop("l5", base_repo("l5"), records, writer="Triage (session_%s)" % LABEL_ID,
+                               extra_env=LABEL_ENV))
+
+
 # --------------------------------------------------------------------------- unit cases
 
 def guard_module():
@@ -749,6 +791,11 @@ CASES.extend((
     case_n17_writer_write_by_path_to_items_blocks,
     case_u1_export_check_returns_the_reason,
     case_u2_git_failure_gives_a_note_and_no_reason,
+    case_l1_writer_named_by_label_blocks,
+    case_l2_label_naming_another_session_passes,
+    case_l3_label_whose_id_only_starts_with_ours_passes,
+    case_l4_labelled_writer_that_only_read_passes,
+    case_l5_labelled_writer_that_exported_passes,
 ))
 
 
