@@ -59,6 +59,7 @@ of one commit, one process.
     python3 lint/check_record_slugs.py [file ...]
         # files given: check those, skip git
     python3 lint/check_record_slugs.py --next-debt
+        # (this and --debt-flow read the git repo of the current directory, never the repo that holds the script)
         # prints the slug of the open debt to fix next: the highest Seen count, then the oldest Seen date (a debt with no
         # Seen line is x1 with no date, after the dated ones), then the slug. The notes file and the README are no debts
     python3 lint/check_record_slugs.py --debt-flow START END
@@ -655,11 +656,28 @@ def too_long(files, dirs):
             and f.endswith(".md") and len(os.path.basename(f.replace("\\", "/"))[:-3]) > MAX]
 
 
+def cwd_root():
+    """The top of the git repo of the current directory, never the repo that holds this script. Raises Unknown outside
+    a repo or when git cannot run."""
+    return os.path.normpath(git_text(os.getcwd(), "rev-parse", "--show-toplevel").strip())
+
+
 def report_command(args):
-    """The exit code of `--next-debt` or `--debt-flow START END` when `args` is one of them, else None."""
-    if args[:1] == ["--next-debt"] and len(args) == 1:
+    """The exit code of `--next-debt` or `--debt-flow START END` when `args` is one of them, else None. Both read the
+    repo of the current directory, so the installed copy under ~/.claude reads the repo a session works in; outside any
+    repo they print UNKNOWN and exit 1."""
+    next_flag = args[:1] == ["--next-debt"] and len(args) == 1
+    flow_flag = args[:1] == ["--debt-flow"] and len(args) == 3 and not any(a.startswith("-") for a in args[1:])
+    if not (next_flag or flow_flag):
+        return None
+    try:
+        root = cwd_root()
+    except (Unknown, OSError) as err:
+        print("check_record_slugs: UNKNOWN, no git repo at the current directory (%s)" % err)
+        return 1
+    if next_flag:
         try:
-            slug = next_debt(ROOT)
+            slug = next_debt(root)
         except layout.LayoutError as err:
             print("check_record_slugs: FAIL: " + str(err))
             return 1
@@ -668,9 +686,9 @@ def report_command(args):
         else:
             print(slug)
         return 0
-    if args[:1] == ["--debt-flow"] and len(args) == 3 and not any(a.startswith("-") for a in args[1:]):
+    if flow_flag:
         try:
-            opened, closed = debt_flow(ROOT, args[1], args[2])
+            opened, closed = debt_flow(root, args[1], args[2])
         except layout.LayoutError as err:
             print("check_record_slugs: FAIL: " + str(err))
             return 1
@@ -683,7 +701,6 @@ def report_command(args):
         for slug in closed:
             print("- " + slug)
         return 0
-    return None
 
 
 def main(args):
