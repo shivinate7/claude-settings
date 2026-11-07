@@ -31,6 +31,7 @@ sys.path.insert(0, os.path.join(REPO, "lint"))
 import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py)
 import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (lint/_test_temp.py)
 sys.path.insert(0, HERE)
+import test_call_judge as tcj  # noqa: E402  the pointer fixture: the hermetic home and the checkouts the page lookup reads
 
 ROOT = _test_temp.run_folder()
 GUARD_PATH = os.environ.get("FEEDBACK_GUARD_UNDER_TEST") or os.path.join(HERE, "feedback_guard.py")
@@ -690,6 +691,21 @@ def case_u1_export_check_returns_the_reason():
     check("U1: a clean block gives no note", note is None, repr(note))
 
 
+def case_u3_pointer_page_write_gives_the_reason_from_a_roadmap_or_a_folder_in_no_repo():
+    """A page write to the pointer checkout's page, from a repo with no page or a folder in no repo, gives the reason, as
+    the same write from the pointer checkout does. The check reads that page's own copy, on its origin record branch."""
+    fn = export_check_of(guard_module(), "U3")  # before the hermetic block: guard_module sets CLAUDE_CONFIG_DIR
+    if fn is None:
+        return
+    tpath = transcript(run_dir("u3"), with_writer([owner(at(18, 50))] + page_write(at(19), url=tcj.POINTER_PAGE_URL)))
+    with tcj.hermetic_home() as fx:
+        for label, cwd in (("the pointer checkout", fx["settings"]), ("a roadmap repo", fx["roadmap"]),
+                           ("a folder in no repo", fx["loose"])):
+            reason, _note = fn(cwd, tpath, SESSION)
+            check("U3 from %s: a page write gives the export reason" % label,
+                  reason is not None and SCRIPT in reason, repr(reason)[:200])
+
+
 def case_u2_git_failure_gives_a_note_and_no_reason():
     """A git read that raises (the binary is missing): unknown, so no reason and a note."""
     fn = export_check_of(guard_module(), "U2")
@@ -749,6 +765,7 @@ CASES.extend((
     case_n17_writer_write_by_path_to_items_blocks,
     case_u1_export_check_returns_the_reason,
     case_u2_git_failure_gives_a_note_and_no_reason,
+    case_u3_pointer_page_write_gives_the_reason_from_a_roadmap_or_a_folder_in_no_repo,
 ))
 
 
