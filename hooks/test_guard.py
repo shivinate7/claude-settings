@@ -90,6 +90,7 @@ FAMILIES = {
     "session-home": "rule session-home: a session whose worktree is gone is refused a write into the primary checkout; its record and its cost",
     "pointer": "the pointer HEAD checkout",
     "hand-made-worktree": "a worktree made by hand outside the agent home folder",
+    "branch-slug-no-git": "a git act that creates a branch or worktree whose name holds git as a whole word: switch -c, checkout -b, branch <new>, worktree add -b, in Bash and PowerShell, and quoted text is not an act",
     "kill": "machine-wide kills and detached launches",
     "stream": "live streams, narrating commands, ln -s, waiter loops and background end conditions",
     "write": "the silent write",
@@ -3875,6 +3876,103 @@ def pointer_remedy_names_enter_worktree_case():
     if ENTER_WORKTREE_SHAPE not in reason:
         return False, "the pointer remedy does not say %s: %s" % (ENTER_WORKTREE_SHAPE, reason[:90])
     return True, "the pointer remedy names EnterWorktree, its call shape, and no 'worktree add'"
+
+
+# =========================================================================== 1d. a new branch named git
+FAMILY = "branch-slug-no-git"
+#
+# THE NAME RULE. A git act that CREATES a branch whose name holds `git` as a whole word is denied.
+# A part of the name, split on `-`, `_`, `/` and `.`, that is exactly `git` (any case) counts; `digit`
+# and `github` do not. The acts: `switch -c|-C`, `checkout -b|-B`, `branch <new>` (not -d, -D, -m,
+# --list or a bare listing), and `worktree add -b|-B`. Claude Code's isolation check refuses an
+# agent's git command that names git twice, so such a branch could not be pushed or opened from an
+# agent's worktree.
+#
+# EVERY RED CASE HAS A GREEN TWIN in the same cwd with only the name changed, so a red fails because
+# of this rule and not another. The command word is VCS, as elsewhere in this file. The scanner
+# cases hold quoted text, a comment and a heredoc body: data, never an act, and an act after them counts.
+BSLUG = "branch-slug-no-git"
+BSLUG_LANE = slash(os.path.join(HMMAIN, ".claude", "worktrees", "lane"))  # a folder under HMMAIN's own worktrees
+
+# RED: each act naming a git-named branch is denied.
+sh("branch-slug-no-git: switch -c to a git-named branch is denied",
+   VCS + " switch -c git-push-after-failed-commit", "deny", BSLUG, cwd=NOGIT)
+sh("branch-slug-no-git: twin, switch -c to a digit-named branch is allowed",
+   VCS + " switch -c digit-parse", "allow", cwd=NOGIT)
+sh("branch-slug-no-git: checkout -b to a slash name with a git part is denied",
+   VCS + " checkout -b fix/git-hooks", "deny", BSLUG, cwd=NOGIT)
+sh("branch-slug-no-git: twin, checkout -b to a slash name with no git part is allowed",
+   VCS + " checkout -b fix/digit-hooks", "allow", cwd=NOGIT)
+sh("branch-slug-no-git: branch <new> at a commit, git part after an underscore, is denied",
+   VCS + " branch git_x 1234abc", "deny", BSLUG, cwd=NOGIT)
+sh("branch-slug-no-git: twin, branch <new> at a commit with no git part is allowed",
+   VCS + " branch digit_x 1234abc", "allow", cwd=NOGIT)
+sh("branch-slug-no-git: worktree add -b to a git-named branch is denied",
+   VCS + " worktree add -b lane-git " + BSLUG_LANE + " main", "deny", BSLUG, cwd=HMMAIN)
+sh("branch-slug-no-git: twin, worktree add -b to a digit-named branch is allowed",
+   VCS + " worktree add -b digit-lane " + BSLUG_LANE + " main", "allow", cwd=HMMAIN)
+sh("branch-slug-no-git: -C dir with switch -C to a git-named branch is denied",
+   VCS + " -C /r switch -C Git-x", "deny", BSLUG, cwd=NOGIT)
+sh("branch-slug-no-git: twin, -C dir with switch -C to a digit-named branch is allowed",
+   VCS + " -C /r switch -C digit-x", "allow", cwd=NOGIT)
+sh("branch-slug-no-git: PowerShell switch -c to a git-named branch is denied",
+   VCS + " switch -c git-push-after-failed-commit", "deny", BSLUG, tool="PowerShell", cwd=NOGIT)
+sh("branch-slug-no-git: twin, PowerShell switch -c to a digit-named branch is allowed",
+   VCS + " switch -c digit-parse", "allow", tool="PowerShell", cwd=NOGIT)
+sh("branch-slug-no-git: checkout -B to a dotted name with a git part is denied",
+   VCS + " checkout -B wip.git", "deny", BSLUG, cwd=NOGIT)
+sh("branch-slug-no-git: twin, checkout -B to a dotted name with gitignore, not git, is allowed",
+   VCS + " checkout -B wip.gitignore", "allow", cwd=NOGIT)
+sh("branch-slug-no-git: worktree add -B to a git-named branch is denied",
+   VCS + " worktree add -B lane-git " + BSLUG_LANE + " main", "deny", BSLUG, cwd=HMMAIN)
+sh("branch-slug-no-git: twin, worktree add -B to a digit-named branch is allowed",
+   VCS + " worktree add -B digit-lane " + BSLUG_LANE + " main", "allow", cwd=HMMAIN)
+
+# The scanner cases. A quoted `#` or `don't` does not end the quote, so the act after it still counts.
+sh("branch-slug-no-git: a quoted # before a git-named switch -c is denied",
+   'echo "#" && ' + VCS + " switch -c git-x", "deny", BSLUG, cwd=NOGIT)
+sh("branch-slug-no-git: twin, a quoted # before a digit-named switch -c is allowed",
+   'echo "#" && ' + VCS + " switch -c digit-x", "allow", cwd=NOGIT)
+sh("branch-slug-no-git: a lone quote in text before a git-named switch -c is denied",
+   'echo "don\'t" && ' + VCS + " switch -c git-x", "deny", BSLUG, cwd=NOGIT)
+sh("branch-slug-no-git: twin, a lone quote in text before a digit-named switch -c is allowed",
+   'echo "don\'t" && ' + VCS + " switch -c digit-x", "allow", cwd=NOGIT)
+sh("branch-slug-no-git: a multi-line quote, then a git-named switch -c, is denied",
+   'echo "one\n' + VCS + ' switch -c digit-x two"; ' + VCS + " switch -c git-y", "deny", BSLUG,
+   cwd=NOGIT)
+sh("branch-slug-no-git: twin, a multi-line quote, then a digit-named switch -c, is allowed",
+   'echo "one\n' + VCS + ' switch -c digit-x two"; ' + VCS + " switch -c digit-y", "allow",
+   cwd=NOGIT)
+
+# GREEN: acts that use an existing branch, or that are not creations, stay allowed.
+sh("branch-slug-no-git: switch -c to a git-free name is allowed",
+   VCS + " switch -c github-actions-pin", "allow", cwd=NOGIT)
+sh("branch-slug-no-git: switch to an existing git-named branch is allowed",
+   VCS + " switch git-push-after-failed-commit", "allow", cwd=NOGIT)
+sh("branch-slug-no-git: checkout -b to a git-free name is allowed",
+   VCS + " checkout -b legit-name", "allow", cwd=NOGIT)
+sh("branch-slug-no-git: switch -c to a dotted name whose part is gitignore is allowed",
+   VCS + " switch -c fix.gitignore", "allow", cwd=NOGIT)
+sh("branch-slug-no-git: deleting a git-named branch is not a creation",
+   VCS + " branch -D git-old", "allow", cwd=BRANCHREPO)
+sh("branch-slug-no-git: listing branches with a git glob is not a creation",
+   VCS + " branch --list git*", "allow", cwd=NOGIT)
+sh("branch-slug-no-git: a bare branch listing is not a creation",
+   VCS + " branch", "allow", cwd=NOGIT)
+sh("branch-slug-no-git: renaming a branch to a git-named one is not a creation under the brief's list",
+   VCS + " branch -m old-name git-new", "allow", cwd=NOGIT)
+sh("branch-slug-no-git: pushing HEAD to an existing git-named remote branch is allowed",
+   VCS + " push origin HEAD:git-push-after-failed-commit", "allow", cwd=PUSHFEAT)
+sh("branch-slug-no-git: fetching a git-named branch is allowed",
+   VCS + " fetch origin git-push-after-failed-commit", "allow", cwd=PUSHFEAT)
+sh("branch-slug-no-git: quoted text holding a git-named switch -c is not an act",
+   'echo "' + VCS + ' switch -c git-x"', "allow", cwd=NOGIT)
+sh("branch-slug-no-git: a shell comment holding a git-named switch -c is not an act",
+   "# " + VCS + " switch -c git-x", "allow", cwd=NOGIT)
+sh("branch-slug-no-git: a heredoc body holding a git-named switch -c is not an act",
+   "cat <<'EOF'\n" + VCS + " switch -c git-x\nEOF", "allow", cwd=NOGIT)
+sh("branch-slug-no-git: a multi-line quote holding a git-named switch -c is not an act",
+   'echo "one\n' + VCS + ' switch -c git-x two"', "allow", cwd=NOGIT)
 
 
 # =========================================================================== 2. machine-wide kills
