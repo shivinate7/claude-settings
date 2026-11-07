@@ -5851,6 +5851,14 @@ class SilentUndo(Env):
 
 DEBT_FIXTURE = "# Retire target\n\n- **What.** A fixture debt for the merge tests.\n- **Where.** None.\n- **Decision.** none\n- **Retire.** %s\n"
 RETIRE_TEST = "Delete the fixture. Check: `tests/test_retire_target.py`."
+RETIRE_SCRIPT = ("import unittest\n"  # a unittest, so a failing assertion reads as failing on the birth commit, not as an error
+                 "class Retire(unittest.TestCase):\n"
+                 "    def test_retire(self):\n"
+                 "        %s\n"
+                 "if __name__ == '__main__':\n"
+                 "    unittest.main()\n")
+RETIRE_PASSES = "self.assertEqual(open('app/value.txt').read(), 'good\\n')"  # passes on the fix, fails on the defect
+RETIRE_FAILS = "self.fail('the fixture fails on purpose')"
 PROSE_RETIRE = "Confirm it on a phone."  # names no runnable check: the close needs a cited run
 
 
@@ -5863,22 +5871,26 @@ def names_kind(test, out, slug, kind):
 
 class DebtRetire(Env):
     """A PR that closes a debt (deletes the debt file) runs that debt's Retire check on the PR head before preview or confirm
-    lets it through. The fixture debt names tests/test_retire_target.py, which exits with the code each case gives it."""
+    lets it through. The fixture debt names tests/test_retire_target.py, which exits with the code each case gives it on the fix.
+    The debt's birth commit holds the defect (app/value.txt is bad); main's next commit holds the fix, so the test catches it there."""
 
     def pr_on_debt(self, test_exit, closes=True, retire=RETIRE_TEST, test_text=None):
-        """main gains a debt file. feat is cut from that main, adds the pending record and the test, and then either deletes
-        the debt (closes) or edits it in place. feat is cut from main after the debt lands, so no main commit is a reversal of it."""
+        """main gains a debt file on a defect. Main moves on with the fix. feat is cut from that main, adds the pending record and
+        the test, and then either deletes the debt (closes) or edits it in place. feat is cut from main after the fix lands, so no main
+        commit is a reversal of it."""
         o = self.other
         sh(o, "git", "fetch", "-q", "origin")
         sh(o, "git", "checkout", "-q", "-B", "main", "origin/main")
         put(os.path.join(o, ".claude/layout-extras.json"), json.dumps({"kinds": {}, "rolled-out": True}))
         put(os.path.join(o, "docs/debts/retire-target.md"), DEBT_FIXTURE % retire)
+        put(os.path.join(o, "app/value.txt"), "bad\n")  # the defect, at the debt's birth commit
         sh(o, "git", "add", "-A"); sh(o, "git", "commit", "-qm", "main: a debt"); sh(o, "git", "push", "-q", "origin", "main")
         put(os.path.join(o, "main-moves.txt"), "main moves on\n")  # feat is cut from a later main, so the debt commit is not one it left
+        put(os.path.join(o, "app/value.txt"), "good\n")  # the fix lands on main before feat is cut
         sh(o, "git", "add", "-A"); sh(o, "git", "commit", "-qm", "main: moves on"); sh(o, "git", "push", "-q", "origin", "main")
         sh(o, "git", "checkout", "-q", "-B", "feat", "origin/main")
         put(os.path.join(o, "docs/decisions/second.md"), record("pending", "second"))
-        put(os.path.join(o, "tests/test_retire_target.py"), test_text or "import sys\nsys.exit(%d)\n" % test_exit)
+        put(os.path.join(o, "tests/test_retire_target.py"), test_text or RETIRE_SCRIPT % (RETIRE_PASSES if test_exit == 0 else RETIRE_FAILS))
         if closes:
             sh(o, "git", "rm", "-q", "docs/debts/retire-target.md")
         else:
@@ -5937,7 +5949,7 @@ class DebtRetire(Env):
 
     def test_confirm_claim_does_not_carry_a_file_the_retire_test_wrote(self):
         """The Retire test runs in the merge worktree, before the claim's `git add -A`. A file the test leaves there is no part of the claim."""
-        self.pr_on_debt(0, test_text="import sys\nopen('junk-from-test.txt', 'w').write('x')\nsys.exit(0)\n")
+        self.pr_on_debt(0, test_text=RETIRE_SCRIPT % ("open('junk-from-test.txt', 'w').write('x'); " + RETIRE_PASSES))
         rc, out = self.run_merge("7", "--confirm")
         self.assertEqual(rc, 0, out)
         self.assertEqual(self.claims(), 1, out)
