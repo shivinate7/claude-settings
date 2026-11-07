@@ -354,13 +354,16 @@ def branch_on_remote(where: str, branch: str, pattern: str = "refs/remotes"):
 
 
 def design_files(where: str, tip: str, folder: str, base=None):
-    """The files under `folder` that `tip` holds and `base` lacks (every one when `base` is None),
-    as a list; None when the read failed. One `diff` (or one `ls-tree` with no base) start. The
-    diff folds the folder's case; `ls-tree` takes the folder as the layout spells it."""
+    """The files under `folder` that `tip` holds, as a list (every file when `base` is None); None
+    when the read failed. With a base, a file counts when `base` lacks it or holds other bytes at
+    that path (`--diff-filter=AM`): a mockup the branch changed is as much the only copy as one it
+    added, and a blob identical to the base's does not count. One `diff` (or one `ls-tree` with no
+    base) start. The diff folds the folder's case; `ls-tree` takes the folder as the layout spells
+    it."""
     if base is None:
         answer = _git(where, "ls-tree", "-r", "--name-only", tip, "--", folder + "/")
     else:
-        answer = _git(where, "diff", "--name-only", "--no-renames", "--diff-filter=A", base, tip,
+        answer = _git(where, "diff", "--name-only", "--no-renames", "--diff-filter=AM", base, tip,
                       "--", ":(icase)" + folder + "/")
     if answer is None or answer.returncode != 0:
         return None

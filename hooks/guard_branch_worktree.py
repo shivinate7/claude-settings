@@ -96,9 +96,12 @@ def _is_tag(where: str, name: str) -> bool:
 def design_branch_delete_ask(args, where: str, folder) -> bool:
     """True when a `git branch -d/-D` names a branch whose tip holds a design file, no remote ref
     holds that tip, and the default branch is unreadable. Callers send only a call whose subject
-    read came back unreadable. A read that fails here is False: the unread note stays."""
+    read came back unreadable. An unread design folder (FOLDER None) asks for any named branch,
+    since no design file can be told from none. A read that fails here is False: the unread note
+    stays."""
     if not folder:
-        return False
+        # An unread design folder cannot tell a design file from none: it asks, never allows.
+        return bool(branch_delete_names(args))
     for name in branch_delete_names(args):
         tip = _tip_of(where, "refs/heads/" + name)
         if tip is None:
@@ -113,13 +116,21 @@ def design_push_delete_verdict(where: str, remote: str, names, folder) -> str:
     """'deny', 'ask' or '' for a push that deletes `names` on `remote`. A name counts when its tip
     (the remote-tracking ref, else the local branch) is not on the default branch, holds a file
     under `folder` that the default branch lacks, and no `archive/*` ref on the remote holds the
-    tip. A tip that does not resolve, a failed read of the design files or of the archive refs, and
-    an unreadable default branch each ask: the delete removes origin's copy, so an unread tip never
+    tip. A tip that does not resolve, a failed read of the design files or of the archive refs, an
+    unreadable default branch and an unread design folder (FOLDER None) each ask: the delete removes origin's copy, so an unread tip never
     allows. Only a delete pushed to `origin` is judged; another remote keeps the other push rules.
     A name with no tip that is a local tag is skipped: a tag is not a branch. The default branch is
     read at the first resolved tip, so a name with no tip starts no git beyond the tip and tag
     lookups."""
-    if not folder or remote != "origin":
+    if remote != "origin":
+        return ""
+    if not folder:
+        # An unread design folder cannot tell a design file from none: it asks, never allows. A name
+        # that is only a local tag is not a branch, so it alone does not ask.
+        for name in names:
+            tip = _tip_of(where, "refs/remotes/%s/%s" % (remote, name), "refs/heads/" + name)
+            if tip is not None or not _is_tag(where, name):
+                return "ask"
         return ""
     base = None
     base_read = False

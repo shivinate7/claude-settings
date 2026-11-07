@@ -3528,7 +3528,8 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
                 elif kind == "stray":
                     ask_command("push-stray-branch", PUSH_STRAY_REASON, "git push " + " ".join(args),
                                 "push to a stray branch")
-            if subcommand == "push":
+            if subcommand == "push" and not read_verb("push", args):
+                # A dry run deletes nothing, so it passes the design check as it passes the asks above.
                 remote, names = push_delete_names(args, where, overrides)
                 design = design_push_delete_verdict(where, remote, names, design_folder()) if names else ""
                 if design == "ask":

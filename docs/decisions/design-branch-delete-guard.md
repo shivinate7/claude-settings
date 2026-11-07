@@ -17,16 +17,18 @@ Home: hooks/guard_branch_worktree.py
 `git push origin --delete <b>` and `git push origin :<b>` remove origin's copy. Origin only, tags skipped: a delete pushed to another remote keeps the other push rules, and a name that is only a local tag is not judged. The guard reads the branch tip: the remote-tracking ref, else the local branch. It refuses the delete when all of these hold:
 
 - The tip is not an ancestor of origin's default branch.
-- The tip holds a file under the layout's `design` folder that the default branch lacks.
+- The tip holds a file under the layout's `design` folder that the default branch lacks, or holds other bytes at that path than the default branch does. A mockup the branch modified counts as the only copy, as an added one does; a blob identical to the default branch's does not.
 - No `archive/*` ref on origin holds the tip. Any archive name counts, not only `archive/<b>`, because the rule allows a new archive name when the first is taken.
 
-It asks, never allows, when a read cannot answer: no tip resolves (no tracking ref, no local branch, or a name such as `$B`), the design-file read fails, the archive-ref read fails, or the default branch is unreadable.
+It asks, never allows, when a read cannot answer: no tip resolves (no tracking ref, no local branch, or a name such as `$B`), the design-file read fails, the archive-ref read fails, the default branch is unreadable, or the layout's `design` folder is unread (no readable layout file). A dry run (`--dry-run`, `-n`) removes nothing and is not judged, as main's push asks skip it.
 
 ### A local delete
 
-`git branch -d/-D` leaves origin's copy. It stays allowed while any origin ref holds the tip. It asks only when its subject read is already unreadable (the default branch cannot be read), the tip holds a design file, and no origin ref holds the tip.
+`git branch -d/-D` leaves origin's copy. It stays allowed while any origin ref holds the tip. It asks only when its subject read is already unreadable (the default branch cannot be read), the tip holds a design file, and no origin ref holds the tip. It also asks when the `design` folder is unread, for any branch named on that unreadable-subject path.
 
 ## Cost
+
+The design-file read still starts one `diff`; the filter widening from added to added-or-modified changes no start count, only the diff's own work (it compares blobs of files that differ, which it already did to list them). A dry run starts none of this. An unread design folder asks after at most 2 starts per name (tip lookup, tag read).
 
 A call that deletes nothing runs none of this.
 
