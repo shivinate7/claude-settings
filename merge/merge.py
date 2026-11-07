@@ -10,7 +10,7 @@
                           gets them run first: `bin/ci-job checks --step NAME ... --base origin/<base>` in a temporary worktree on the tree
                           the step would push, before any push and before the ready mark, on every path (default base, other base,
                           Record-claim head). A FAIL or an unknown stops the step with the step lines and the log: nothing pushed, not
-                          marked ready, and no flag lifts it. A repo with no list keeps today's behaviour and one line says so.
+                          marked ready, and no flag lifts it. A repo with no list runs no ready check, and one line says so.
                           Cost per draft-step ready: one ci-job run and one worktree; the run time is unmeasured for a step subset
                           (the 1200 s lint bound applies). No new file but ci-job's own log.
                           On a ready PR a stale records page with no claim to make or resume is refused before any push; only the draft step heals it.
