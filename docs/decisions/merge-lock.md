@@ -46,8 +46,12 @@ carries no such label. The code raises the exception named in each item.
 - Unlock failed (sweep row `unlock-failed`; `Stop`): the delete push fails, and the released-commit push
   fails too.
 
-Known gap, in `docs/debts/notes.md`: `lock-retake-stale-reread`. A stale `ls-remote` after a rival's take
-reads as `Stop`, not `Held`. Unmeasured.
+Known gaps, in `docs/debts/notes.md`:
+
+- `lock-retake-stale-reread`: a stale `ls-remote` after a rival's take reads as `Stop`, not `Held`.
+  Unmeasured.
+- `lock-read-error-never-expires`: a lock read that fails for a reason other than the network reads as
+  a lock that never expires.
 
 Why: a claim, a check wait and a merge must not race another run on the same base. The claim runs under
 the lock (`records-index-at-merge`, the records index rebuilt at merge time).
