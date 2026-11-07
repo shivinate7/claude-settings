@@ -3861,6 +3861,9 @@ def hand_made_refusal_text_case():
     return True, "holds 'Rule (hand-made worktree)', names isolation, EnterWorktree, its shape and the layer"
 
 
+POINTER_OWN_WORKTREE_HINT = "If you already have a worktree, run `git -C <that worktree> ...`"
+
+
 def pointer_remedy_names_enter_worktree_case():
     """The pointer refusal sends Claude to EnterWorktree, so it never contradicts the rule above."""
     got, reason = decide({
@@ -3874,7 +3877,11 @@ def pointer_remedy_names_enter_worktree_case():
         return False, "the pointer remedy does not name EnterWorktree: %s" % reason[:90]
     if ENTER_WORKTREE_SHAPE not in reason:
         return False, "the pointer remedy does not say %s: %s" % (ENTER_WORKTREE_SHAPE, reason[:90])
-    return True, "the pointer remedy names EnterWorktree, its call shape, and no 'worktree add'"
+    # An agent already in its own worktree hits this rule when its shell cwd resets to the pointer
+    # checkout, so the remedy also says how to aim git at the worktree it already has.
+    if POINTER_OWN_WORKTREE_HINT not in reason:
+        return False, "the pointer remedy does not say %r: %s" % (POINTER_OWN_WORKTREE_HINT, reason[-120:])
+    return True, "the pointer remedy names EnterWorktree, its call shape, the git -C hint, and no 'worktree add'"
 
 
 # =========================================================================== 2. machine-wide kills

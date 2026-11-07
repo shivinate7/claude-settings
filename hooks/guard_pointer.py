@@ -77,7 +77,10 @@ POINTER_HEAD_REASON = (
     "(decision recovery-independent-of-state, a recovery control must not depend on the state it recovers). "
     "Remedy: build the change in a worktree of your own. Call the EnterWorktree tool to make one "
     "on a new branch, with a `name` and no `path`, because git refuses a worktree for a branch "
-    "this checkout already holds."
+    "this checkout already holds. "
+    # An agent already in its own worktree lands here when its shell cwd resets to this checkout.
+    "If you already have a worktree, run `git -C <that worktree> ...`, because this shell runs in "
+    "the pointer checkout."
 )
 
 
