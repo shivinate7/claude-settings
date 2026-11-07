@@ -3770,7 +3770,7 @@ def mockup_home_hit(writes, tool_input, cwd):
     import question_form
     try:
         root = question_form.waiting_page_root(tool_input, cwd)
-        found = question_form.design_file_problems(writes, root) if root else []
+        found = question_form.design_file_problems(writes, root, cwd) if root else []
     except Exception as err:
         record(DATA_TOOL, "noted", "mockup-home", "unknown: " + cap_safe(type(err).__name__ + ": " + str(err), 100))
         return None
@@ -3788,7 +3788,7 @@ def page_design_hit(writes, tool_input, cwd):
     on any unread state."""
     import question_form
     pictured = []
-    for op, doc_id, data in question_form.design_writes(writes):
+    for op, doc_id, data in question_form.design_writes(writes, cwd):
         if op == "update" and not (data.get("options") and data.get("designs")):
             record(DATA_TOOL, "noted", "page-item-design",
                    "partial: an update of item %s carries only %s, so its picture is not checked"

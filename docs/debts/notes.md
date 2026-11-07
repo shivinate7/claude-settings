@@ -1500,3 +1500,8 @@
 - base-pin-interrupt-skips-ff: a KeyboardInterrupt or SystemExit in the base rev-parse before ff_main (merge/merge.py:2885-2889) skips ff_main, afterMerge and the cuts. The merge has landed by then. Fix: pin the base in the pre-merge names read. Decision: claims-carry-backing (the claim-backing record).
 - lane-lint-stop-no-log: lane_lint's non-liftable Stop (merge/merge.py) leaves out ci-job's log lines, so a timeout or an odd exit gives the reader no log path. The liftable branch prints them. Decision: lanes-run-no-full-ci-job (the lane-check decision).
 - draft-claim-line-no-ready-checks-test: the draft preview's claim line for a repo with no readyChecks has no test of its exact wording (merge/test_merge.py pins only "refuses"). Also on main. Decision: lanes-run-no-full-ci-job (the lane-check decision).
+- known-roots-later-error-silent: a LayoutError in a root after the cwd's reads as no page, with no note. Decision: none.
+- pointer-import-error-silent: question_form swallows a guard_pointer import error, so the pointer root is left out with no note. Decision: none.
+- pointer-symlink-siblings: known_roots lists siblings of the realpath, so a symlinked pointer misses children beside the spelled path. Decision: none.
+- page-lookup-on-publish: page_stale_hit runs the root lookup on every publish with url and file_path, at about 0.75 ms, file reads only. Decision: none.
+- artifact-id-not-decoded: layout.artifact_id does not trim or percent-decode a url. Decision: none.

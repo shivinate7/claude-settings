@@ -12,7 +12,7 @@ check, the override line and the guard.log line. The rules are `spawn-judge` and
 
 An ArtifactData call exits first unless its action is set, update, str_replace or batch, before any heavy import.
 A call with no write on collection `items` exits before importing question_form.
-For the rest, question_form.page_item_hit picks the item writes of this repo's waiting page. A write
+For the rest, question_form.page_item_hit picks the item writes of a known waiting page (question_form.waiting_page_root: the cwd's repo, its main checkout, the pointer checkout and its siblings). A write
 that item_hit refuses gets no model call: guard.py refuses it. The writes that pass and carry options,
 context or steps (question_form.judged_item_writes) go into one prompt, so the call makes one model call, however
 many writes a batch holds. A write that is a re-ask (new `options` plus a `lastAnswer` note) adds NONE_DIRECTION_RULE
@@ -375,7 +375,7 @@ def main():
                 return 0
             import question_form
             hit, writes = question_form.page_item_hit(args, payload.get("cwd") or "")
-            judged = [] if hit[0] else question_form.judged_item_writes(writes)
+            judged = [] if hit[0] else question_form.judged_item_writes(writes, payload.get("cwd") or "")
             if not judged:  # guard.py refuses a hit; no write carries options, context or steps
                 return 0
             page_root = question_form.waiting_page_root(args, payload.get("cwd") or "")

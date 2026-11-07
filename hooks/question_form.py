@@ -967,7 +967,8 @@ def waiting_page_root(tool_input, cwd):
     """The root of the checkout whose waiting page the call's url names, else None. It looks through the known roots
     (lint/layout.py known_roots: the cwd's git root, that worktree's main checkout, the pointer checkout, and the
     folders beside it that hold an extras file), so a write to claude-settings' page is checked whatever the cwd is.
-    A root matches by the artifact id of its registry entry with role waiting-page (layout.is_waiting_page_url); any
+    A root matches by the artifact id of its waiting page (layout.is_waiting_page_url: the registry entry with role
+    waiting-page, else the legacy "waiting-page" key); any
     other artifact reads as unknown and only the none-key check judges it. A bad extras file in a root after the
     cwd's reads as no page; the cwd's own raises LayoutError, as before.
     Cost: file reads only, no process: ~/.claude/CLAUDE.md once (the pointer), one `.git` file and its commondir
@@ -992,14 +993,15 @@ def waiting_page_root(tool_input, cwd):
     return None
 
 
-def design_file_problems(writes, root):
+def design_file_problems(writes, root, cwd=""):
     """[(doc_id, slug, sentence)] for each `designs` entry in `writes` (design_writes' picture writes) that has no
     `file`, or whose `file` lint/layout.py mockup_home_problem refuses against this machine's home. The sentence names
     the design folder and the field, never the refused path. An entry that is no dict has no file. Judges the shape
-    only: it does not ask origin, and starts no process (rule mockup-home)."""
+    only: it does not ask origin, and starts no process (rule mockup-home). A relative `file_path` item is read
+    against `cwd`, the session's."""
     layout = _layout()
     found = []
-    for _op, doc_id, data in design_writes(writes):
+    for _op, doc_id, data in design_writes(writes, cwd):
         designs = data.get("designs")
         for entry in designs if isinstance(designs, list) else []:
             entry = entry if isinstance(entry, dict) else {}
@@ -1054,13 +1056,13 @@ def keyed_options_hit(writes, cwd=""):
     return PASS
 
 
-def design_writes(writes):
+def design_writes(writes, cwd=""):
     """The (op, doc_id, data) of each set or update in `writes` whose data carries a picture: a non-empty
     `designs` list, or an option with a `design`. Rule page-item-design reads only these, so a write with no
-    picture never starts the checker."""
+    picture never starts the checker. A relative `file_path` item is read against `cwd`, the session's."""
     found = []
     for op, entry in writes:
-        data = _write_data(entry) if op in ("set", "update") else None
+        data = _write_data(entry, cwd) if op in ("set", "update") else None
         if not isinstance(data, dict) or data.get("status") == "closed":  # a closed item is not drawn
             continue
         options = data.get("options")
@@ -1076,14 +1078,14 @@ def _judged_fragment(field):
     return field in ("context", "options") or str(field).startswith("options.")
 
 
-def judged_item_writes(writes):
+def judged_item_writes(writes, cwd=""):
     """The writes of a page item that the model review reads. A set or update is read as
     {"op", "doc_id", "data"} when it is not closed and either writes a decision (an update with no kind is
     read, as decision_form_hit cannot see the stored kind) that carries `options` or `context`, or writes a
     task that carries `context`, `steps` or `options`. A task is kind task, or any write that carries
     `steps`, since steps are task-only. A str_replace on `context` or `options` (a subfield too) is
     read as {"op", "doc_id", "field", "new_str"}: its new_str alone, never old_str, because the rest of the
-    item is unseen."""
+    item is unseen. A relative `file_path` item is read against `cwd`, the session's."""
     judged = []
     for op, entry in writes:
         if op == "str_replace":
@@ -1091,7 +1093,7 @@ def judged_item_writes(writes):
                 judged.append({"op": op, "doc_id": entry.get("doc_id"), "field": entry.get("field"),
                                "new_str": entry["new_str"]})
             continue
-        data = _write_data(entry)
+        data = _write_data(entry, cwd)
         if op not in ("set", "update") or not isinstance(data, dict) or data.get("status") == "closed":
             continue
         if data.get("kind") == "task" or data.get("steps"):
@@ -1225,7 +1227,8 @@ def rework_off_page_hit(data) -> str:
     """The matched text when this write puts "being reworked" in the item's text with no status closed."""
     if not isinstance(data, dict) or data.get("status") == "closed":
         return ""
-    return reworked_hit(_item_text_fields(data))
+    reply = data.get("reply")  # the item's text fields leave reply out for the other readers; this check reads it
+    return reworked_hit(_item_text_fields(data) + ([reply] if isinstance(reply, str) else []))
 
 
 # ------------------------------------------------------------------ an item field the page renders

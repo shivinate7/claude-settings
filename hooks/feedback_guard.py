@@ -1192,26 +1192,28 @@ def export_check(cwd, transcript_path, session_id):
     if not is_writer:
         return None, None  # receipts and answers are not this session's to export
     try:
-        root = Homes(cwd)._cwd_root()
-        if root is None:
-            return None, None
-        is_page = {url: layout.is_waiting_page_url(root, url) for url in {w[2] for w in writes}}
-        wrote = [w[0] for w in writes if is_page[w[2]]]
-        if not wrote:
-            return None, None
-        newest = max(wrote)
-        waiting = [e for e in layout.artifacts(root) if e["role"] == layout.WAITING_ROLE]
-        if _cleared(exports, results, newest, waiting[0]["id"] if waiting else ""):
-            return None, None
-        branch, folder = waiting_copy(layout, root)
-        run = ruling_home._run_git(root, ["log", "-1", "--format=%ct", "refs/remotes/origin/" + branch,
-                                          "--", folder + "/"])
+        import question_form  # the one home of "which known root holds this page" (layout.known_roots)
+        by_root = {}  # root -> [epoch of each write to its page]
+        for url in {w[2] for w in writes}:
+            root = question_form.waiting_page_root({"url": url}, cwd)
+            if root is not None:
+                by_root.setdefault(root, []).extend(w[0] for w in writes if w[2] == url)
+        for root, wrote in by_root.items():
+            newest = max(wrote)
+            waiting = [e for e in layout.artifacts(root) if e["role"] == layout.WAITING_ROLE]
+            if _cleared(exports, results, newest, waiting[0]["id"] if waiting else ""):
+                continue
+            branch, folder = waiting_copy(layout, root)
+            run = ruling_home._run_git(root, ["log", "-1", "--format=%ct", "refs/remotes/origin/" + branch,
+                                              "--", folder + "/"])
+            out = run.stdout.strip()
+            if run.returncode != 0 or (out and not out.isdigit()):
+                return None, FAIL_OPEN_EXPORT % ("origin/%s cannot be read" % branch)
+            if int(out or 0) < newest:
+                return EXPORT_REASON % (branch, folder), None
     except (layout.LayoutError, ruling_home._GitFailure) as e:
         return None, FAIL_OPEN_EXPORT % (" ".join(str(e).split()) or type(e).__name__)
-    out = run.stdout.strip()
-    if run.returncode != 0 or (out and not out.isdigit()):
-        return None, FAIL_OPEN_EXPORT % ("origin/%s cannot be read" % branch)
-    return (None, None) if int(out or 0) >= newest else (EXPORT_REASON % (branch, folder), None)
+    return None, None
 
 
 def main():
