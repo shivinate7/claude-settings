@@ -57,9 +57,9 @@ malformed `waits`; also an item past the WAIT_CAP-th call, which is not asked). 
 --answers, with --items, names the answers the session saved with `ArtifactData list answers`, in the same two shapes, read by the same
 loader (a list entry names its item in `item`; a folder doc by its file name). After the wait and lane lines, one line per closed item,
 in item order, whose answer is still kept: `kept-answer: item <n> (<id>) is closed and answers/<id> is kept`, then the remedy (delete
-the answer, or reopen the item with `lane` and `lastAnswer`). Never named: an open item or one with no status, an item with `arbiter`,
+the answer, or reopen the item with `lane` and `lastAnswer`). Never named: an open item or one with no status, an item with `waits` or `arbiter`,
 a park answer (`park.<id>`, `parked: true` or `act: "park"`), an answer with no item. An unreadable file, a folder without the marker,
-unreadable items, or --answers without --items print one `kept-answer: unknown (...)` line, with no other kept-answer line.
+unreadable items, an items folder without the marker, or --answers without --items print one `kept-answer: unknown (...)` line, with no other kept-answer line.
 The folder loader is export_page.docs_in, the one home of reading that folder.
 Session-start mode, run by hooks/session_start.sh in a repo whose extras name a waiting page:
 
@@ -83,7 +83,7 @@ file, a file of the wrong shape (meta not an object, items or answers not a list
 Cost: one python process, reads 3 files, writes none, starts no git, no timer.
 
 Cost: one python process, at most one read-only git process (no fetch, no network, 30 s cap), no
-extra process for --answers (it reads one more file), no
+extra process for --answers (it reads one more file, a folder one per answer), no
 file written without --write, no timer, thread or child left running. Single-page mode never imports `layout`; batch and session-line modes do.
 Without --items: 0 gh processes. With it: one gh process per open item with a `waits` field, at most WAIT_CAP, each
 run to its end or its 30 s cap before the next (a lane line starts none); no file written, no timer, no process left running.
@@ -519,10 +519,12 @@ def wait_lines(items, complete=True):
 
 
 def kept_answer_lines(items, answers, complete=True):
-    """One line per closed item, in item order, whose answer is still kept: a missed delete (SKILL.md, "Route and close", step 2). Never an open item, an
-    arbiter ruling (its overturn answer is meant to stay), a park answer or an answer with no item. With complete False, one unknown line."""
+    """One line per closed item, in item order, whose answer is still kept: the writer re-reads answers/<id>, then deletes it or reopens the item
+    (SKILL.md, "Route and close"). `items` and `answers` are (doc id, data) pairs from load_docs. Never an open item, an item with `waits` (no delete
+    happens during a wait), an arbiter ruling (its overturn answer is meant to stay), a park answer or an answer with no item.
+    With `complete` False (the items folder may be cut short), one unknown line."""
     if not complete:
-        return ["kept-answer: unknown (the answers folder has no .complete marker, so its list may be cut short)"]
+        return ["kept-answer: unknown (the items folder has no .complete marker, so its list may be cut short)"]
     kept = {}
     for doc_id, data in answers:
         if not isinstance(data, dict):
@@ -532,10 +534,13 @@ def kept_answer_lines(items, answers, complete=True):
                 and data.get("act") != "park"):
             kept[doc_id] = data
     lines = []
-    for item in items:
-        if isinstance(item, dict) and item.get("status") == "closed" and not item.get("arbiter") and item.get("id") in kept:
-            lines.append('kept-answer: item %s (%s) is closed and answers/%s is kept; delete answers/%s, or reopen the item with lane and lastAnswer '
-                         '(SKILL.md, "Route and close")' % (item.get("n", item["id"]), item["id"], item["id"], item["id"]))
+    for doc_id, item in items:
+        if not isinstance(item, dict):
+            continue
+        item_id = doc_id if doc_id is not None else item.get("id")  # the file name is the doc id, as for the answers
+        if item.get("status") == "closed" and "waits" not in item and not item.get("arbiter") and item_id in kept:
+            lines.append('kept-answer: item %s (%s) is closed and answers/%s is kept; re-read answers/%s, then delete it, or reopen the item with '
+                         'lane and lastAnswer (SKILL.md, "Route and close")' % (item.get("n", item_id), item_id, item_id, item_id))
     return lines
 
 
@@ -554,15 +559,16 @@ def single_page(argv):
     code = page_verdict(args)
     if args.items is not None:
         try:
-            items, complete = load_docs(args.items)
-            lines = wait_lines(items, complete)
+            items, complete = load_docs(args.items, keyed=True)
+            lines = wait_lines([data for _, data in items], complete)
         except ValueError as err:
             items, lines = None, ["wait: the items cannot be read: unknown (%s)" % err]
         if args.answers is not None:
             try:
                 if items is None:
                     raise ValueError("the items cannot be read")
-                lines += kept_answer_lines(items, *load_docs(args.answers, "answers", keyed=True))
+                answers, answers_complete = load_docs(args.answers, "answers", keyed=True)
+                lines += kept_answer_lines(items, answers, complete and answers_complete)
             except ValueError as err:
                 lines.append("kept-answer: unknown (%s)" % err)
         for line in lines:

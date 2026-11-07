@@ -280,7 +280,7 @@ repo's waiting page from a file behind main is refused, and its reason repeats s
 publish of main's page stamps main's page version, and the next session start says when the page is behind.
 
 Cost: on demand, inside a wake already running. One `Artifact read`, one python process, at most
-one short read-only git process, with no fetch, and one gh call per open item with `waits`. It writes `<out>` only, and no file without
+one short read-only git process, with no fetch, and one gh call per open item with `waits`, and with `--answers` one more `ArtifactData list answers` read. It writes `<out>` only, and no file without
 `--write`. No timer, no watcher. `test_stale_pages.py` proves the file count.
 
 ## Keep a copy in the repo
@@ -522,8 +522,9 @@ report (see the park branch below). A `none` answer on this path gets no new opt
   `page_grant.py` can never count it for a receiver. The routing session tells the owner in its reply that the receiver needs
   the owner's grant typed in the receiver's own session.
 
-The writer reads each `kept-answer:` line at its wake ("Keep the page on main's code", step 2). It means step 2's delete was missed:
-delete `answers/<id>` (pinned to its version), or, when the act is not done, reopen the item with `lane` and `lastAnswer`.
+The writer reads each `kept-answer:` line at its wake ("Keep the page on main's code", step 2). The item is closed and its answer is still kept:
+re-read `answers/<id>`, then delete it (pinned to its version), or, when the act is not done, reopen the item with `lane` and `lastAnswer`.
+An item with `waits` is never named: no delete happens during a wait.
 A `kept-answer: unknown` line means the check did not run: fetch again.
 
 Never-ending wait. The owning session checks the receiver at each turn start while it holds a lane item. It reads every page
