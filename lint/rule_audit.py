@@ -41,6 +41,9 @@ THE MAP. lint/rule_mechanisms.json holds one row per anchor. A row's mechanism i
       - `setting`: `{"file": "settings.json", "path": "env.NAME", "equals": "v"}` or
         `"contains": "v"`. The value is read from the parsed JSON, never the name. `[*]` in a
         path fans out over a list.
+  - The `guards` section is a second map, keyed by guard rule id: one row per id hooks/guard*.py
+    writes (guard_rule_names), each row naming a `test` that resolves as a `check` row's does. An id
+    with no row, a row for an id no longer written, and a row with no resolving test all fail.
   - `ci`: a CI step name that appears in a `- name:` line of .github/workflows/checks.yml.
   - `unmechanized`: the literal token, paired with a `reason` of real length. A rule a check
     could still cover needs a row saying so, and saying why.
@@ -412,6 +415,34 @@ def ci_step_names(text: str):
     return {m.group(1).strip().strip('"').strip("'") for m in CI_STEP_RE.finditer(text)}
 
 
+def guards_section_problems(rule_map: dict, guard_names: set) -> List[str]:
+    """Each rule id the guard emits needs one row under `guards`, and each row names a test that
+    resolves. A row for an id no longer emitted is stale. `guard_names` comes from
+    guard_rule_names, so the ids are never a copy."""
+    problems: List[str] = []
+    guards = rule_map.get("guards") if isinstance(rule_map, dict) else None
+    if guards is None:
+        guards = {}
+    if not isinstance(guards, dict):
+        return ["lint/rule_mechanisms.json \"guards\" is not an object keyed by guard rule id."]
+    for gid in sorted(guard_names - guards.keys()):
+        problems.append(f"guard rule `{gid}` has no row under \"guards\" in lint/rule_mechanisms.json.")
+    for gid in sorted(guards.keys() - guard_names):
+        problems.append(
+            f"lint/rule_mechanisms.json guards row `{gid}` names a rule id hooks/guard*.py no "
+            f"longer writes. Stale row. Remove it.")
+    for gid in sorted(guards.keys() & guard_names):
+        row = guards[gid]
+        test = row.get("test") if isinstance(row, dict) else None
+        if not test:
+            problems.append(f"guards row `{gid}` names no \"test\".")
+            continue
+        why = citation_problem(test)
+        if why:
+            problems.append(f"guards row `{gid}` cites test `{test}` that does not resolve: {why}")
+    return problems
+
+
 def check(
     claude_text: str,
     rule_map: dict,
@@ -534,6 +565,8 @@ def check(
                     f"row `{slug}` names CI step {ref!r}, which is not a step name in "
                     f".github/workflows/checks.yml any more. Stale row."
                 )
+
+    problems.extend(guards_section_problems(rule_map, guard_names))
 
     if unmechanized_count != unmechanized_expected:
         direction = "more" if unmechanized_count > unmechanized_expected else "fewer"
