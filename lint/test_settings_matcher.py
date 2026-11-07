@@ -3,7 +3,11 @@
 Run: python3 lint/test_settings_matcher.py. Without Workflow and start_session in the matcher,
 the guard's agent-model-floor never sees those calls.
 """
-import ast, glob, json, os, re, sys, unittest
+import ast, glob, importlib.util, json, os, re, shutil, sys, unittest
+
+import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (the one home, lint/_test_temp.py)
+
+RUN_FOLDER = _test_temp.run_folder()
 
 SETTINGS = os.environ.get("SETTINGS_UNDER_TEST") or os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "settings.json")
 
@@ -656,6 +660,86 @@ class GuardToolScan(unittest.TestCase):
 
     def test_an_empty_source_has_no_strings(self):
         self.assertEqual(mcp_strings(""), [])
+
+
+# The runtime walk. The source scan cannot see a name joined from parts in another module and imported by name, so the
+# check also reads the guard module's globals after it loads. A global counts when it holds a whole tool name, or holds
+# one in a tuple, list, set or frozenset. A prefix alone is no tool name and is skipped. GUARD_UNDER_TEST points the
+# walk at another copy of the guard, as SETTINGS_UNDER_TEST does.
+GUARD_UNDER_TEST = os.environ.get("GUARD_UNDER_TEST") or os.path.join(GUARD_DIR, "guard.py")
+
+
+def load_module(path, name):
+    spec = importlib.util.spec_from_file_location(name, path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def temp_module(source, name):
+    """Write `source` as a module in this run's folder and load it. The folder is removed at teardown."""
+    path = os.path.join(RUN_FOLDER, name + ".py")
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(source)
+    return load_module(path, name)
+
+
+def guard_global_names(module):
+    """(global, tool name) for each whole tool name a module global holds, directly or as a container member."""
+    found = []
+    for attr, value in vars(module).items():
+        members = value if isinstance(value, (tuple, list, set, frozenset)) else (value,)
+        found.extend((attr, m) for m in members if isinstance(m, str) and TOOL_NAME.fullmatch(m))
+    return found
+
+
+def unmatched_global_names(module, matchers):
+    return [(attr, name) for attr, name in guard_global_names(module)
+            if not any(re.fullmatch(m, name) for m in matchers)]
+
+
+class GuardRuntimeNames(unittest.TestCase):
+    def test_the_walk_reads_the_guard_module(self):
+        # Scope first: a walk that finds no global would pass the coverage case below for nothing.
+        module = load_module(GUARD_UNDER_TEST, "guard_under_test")
+        self.assertTrue(guard_global_names(module), "the walk found no mcp__ global in %s" % GUARD_UNDER_TEST)
+
+    def test_every_guard_global_tool_name_is_matched(self):
+        matchers = guard_matchers()
+        self.assertTrue(matchers)
+        module = load_module(GUARD_UNDER_TEST, "guard_under_test")
+        for attr, name in guard_global_names(module):
+            with self.subTest(attr=attr, tool=name):
+                self.assertTrue(any(re.fullmatch(m, name) for m in matchers),
+                                "guard global %s holds %s, and no guard matcher in settings.json covers it" % (attr, name))
+
+
+# Walk self-tests. Each case builds a module in the run folder and checks what the walk collects from it.
+class GuardRuntimeWalk(unittest.TestCase):
+    def test_a_global_built_by_a_join_is_collected(self):
+        module = temp_module("PREFIX = 'mcp__github__'\nMERGE = PREFIX + 'merge_pull_request'\n", "join_global")
+        self.assertEqual(guard_global_names(module), [("MERGE", "mcp__github__merge_pull_request")])
+
+    def test_members_of_a_container_are_collected(self):
+        module = temp_module(
+            "A = ('mcp__github__tuple_one', 'Bash')\n"
+            "B = ['mcp__github__list_one']\n"
+            "C = {'mcp__github__set_one'}\n"
+            "D = frozenset(['mcp__github__frozen_one', 3])\n"
+            "E = 'mcp__github__plain_one'\n"
+            "F = ('mcp__github__', 'Bash')\n", "containers")
+        self.assertEqual(sorted(name for _, name in guard_global_names(module)),
+                         ["mcp__github__frozen_one", "mcp__github__list_one", "mcp__github__plain_one",
+                          "mcp__github__set_one", "mcp__github__tuple_one"])
+
+    def test_a_joined_global_the_matcher_misses_fails(self):
+        module = temp_module("MISSED = 'mcp__github__' + 'no_such_tool'\n", "missed_global")
+        self.assertEqual(unmatched_global_names(module, guard_matchers()),
+                         [("MISSED", "mcp__github__no_such_tool")])
+
+
+def tearDownModule():
+    shutil.rmtree(RUN_FOLDER, ignore_errors=True)  # test-temp-standard: teardown removes the run folder
 
 
 if __name__ == "__main__":
