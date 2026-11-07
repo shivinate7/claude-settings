@@ -17,8 +17,8 @@ Case 1a checks that no reason holds a session phrase or an order to the session.
 Case 1c checks that the first sentence names the check. Case 2 checks that each path still blocks, and that a clean
 report is not blocked. Case 3 checks that the record holds a step heading for each check name that report_guard
 passes to owner_line, and a step line under each heading. Controls pin session_wording on fact sentences, on plain
-and mid-clause orders, on the phrase list, and on backtick spans: a span holds a fact, and an order outside a span is
-still flagged. A judge reason that carries an order is checked at the Stop boundary:
+and mid-clause orders, on the phrase list, and on backtick spans: a span holds a fact, and an order outside a span
+or one a span hides is still flagged. A judge reason that carries an order is checked at the Stop boundary:
 the block still fires, the ruling id stays, and the order does not reach the owner word for word.
 
 Run it as:
@@ -77,6 +77,17 @@ COMMA_IN_SPAN = "The classifier refused `Agent, Write` this session."
 ORDER_AFTER_SPAN = "The classifier refused `Agent`. Write the line. It also refused `Read`."
 ORDER_AFTER_LONE_BACKTICK = "The `Agent tool was refused. Write the line. Keep `add` in view."
 ORDER_UNIT = "Write the line."
+# Each order below must be flagged. A backtick span names a thing and holds no order, so an order word or phrase inside
+# a span, or an order after a comma that a lone backtick pairs across, is still an order.
+SPAN_VERB_ORDER = "Next, `send` the report again."
+SPAN_CAPITAL_ORDER = "Then `Write` the line."
+SPAN_PHRASE_ORDER = "Please `send it again`."
+LONE_BACKTICK_COMMA_ORDER = "The `Agent was refused, so write the line and keep `add` in view."
+DOT_SPAN_ORDER = "Then `write.` the line."
+# Controls, flagged on the old code too. A fix that let a span cross a newline would hide the order inside it.
+NEWLINE_SPAN_BEFORE_ORDER = "The `Agent\ntool` was refused. Send the line."
+NEWLINE_SPAN_ORDER = "The `Agent\nwrite` the line."
+DOT_SPAN_BEFORE_ORDER = "The `v1.2` release is in. Send the line again."
 # A step line is a bullet or a numbered item. A section ends at the next ## or ### heading.
 STEP_LINE = re.compile(r"(?m)^\s*(?:[-*+]|\d+[.)])\s+\S")
 SECTION_END = re.compile(r"(?m)^#{2,3} ")
@@ -164,6 +175,7 @@ class RemedyReasons(trg.SameTurnWriter, unittest.TestCase):
     LANE_ID = trg.QuestionReachesPageTests.LANE_ID  # read by lane_record below, which takes self
     ARCHIVE = "mcp__claude-code-remote__archive_session"
     TWO_TOOLS = ("Agent", "Write")  # two refused tools; "Write" is an imperative word in SESSION_IMPERATIVES
+    THREE_TOOLS = ("Agent", "Write", "Send")  # three refused tools; "Write" and "Send" open with an imperative word
     REFUSAL_SID = "remedy-refusal"
     PICK = ("> **Done** OTHER read the code\n> **Input Needed** Two ways:\n> A (my pick): fold the guard\n"
             "> B: add a second hook\n> **Next** wait")
@@ -420,6 +432,48 @@ class RemedyReasons(trg.SameTurnWriter, unittest.TestCase):
     def test_1a_control_order_after_lone_backtick_is_flagged_exactly(self):
         found = RG.session_wording(ORDER_AFTER_LONE_BACKTICK)
         self.assertEqual(found, ORDER_UNIT, "control: an order after a lone backtick is hidden or cut: %r" % found)
+
+    def assert_order_flagged(self, text, cause):
+        """session_wording flags `text`. The scope comes first: the same words with no backticks are an order, so a miss
+        on `text` is the span's doing, not the detector's."""
+        self.assertNotEqual(RG.session_wording(text.replace("`", "")), "",
+                            "1a scope: the words with no backticks are not an order: %r" % text)
+        self.assertNotEqual(RG.session_wording(text), "", "1a %s: %r" % (cause, text))
+
+    def test_1a_order_verb_in_span_is_flagged(self):
+        self.assert_order_flagged(SPAN_VERB_ORDER, "an order word inside a backtick span is not flagged")
+
+    def test_1a_order_capital_verb_in_span_is_flagged(self):
+        self.assert_order_flagged(SPAN_CAPITAL_ORDER, "an order word inside a backtick span is not flagged")
+
+    def test_1a_order_phrase_in_span_is_flagged(self):
+        self.assert_order_flagged(SPAN_PHRASE_ORDER, "an order phrase inside a backtick span is not flagged")
+
+    def test_1a_order_after_comma_past_lone_backtick_is_flagged(self):
+        self.assert_order_flagged(LONE_BACKTICK_COMMA_ORDER, "a lone backtick pairs across a comma and hides the order")
+
+    def test_1a_order_inside_dot_span_is_flagged(self):
+        self.assert_order_flagged(DOT_SPAN_ORDER, "an order inside a backtick span with a dot is not flagged")
+
+    def test_1a_control_newline_span_before_order_is_flagged(self):
+        self.assert_order_flagged(NEWLINE_SPAN_BEFORE_ORDER,
+                                  "control: an order after a span with a newline is not flagged")
+
+    def test_1a_control_order_inside_newline_span_is_flagged(self):
+        self.assert_order_flagged(NEWLINE_SPAN_ORDER, "control: an order inside a span with a newline is not flagged")
+
+    def test_1a_control_dot_span_before_order_is_flagged(self):
+        self.assert_order_flagged(DOT_SPAN_BEFORE_ORDER, "control: an order after a span with a dot is not flagged")
+
+    def test_1a_three_tool_refusal_reason_is_fact_only(self):
+        # Three refused tools, two of them opening with an imperative word. The scope is pinned first: the three names
+        # must sit in that order, and "send" must still be an imperative word, or the case passes for the wrong reason.
+        reason = RG.refusal_reason(list(self.THREE_TOOLS))
+        self.assertIn("`Agent`, `Write`, `Send`", reason,
+                      "1a scope: the three-tool list is not in the reason: %r" % reason)
+        self.assertIn("send", RG.SESSION_IMPERATIVES, "1a scope: 'send' is no longer an imperative word")
+        problem = RG.session_wording(reason)
+        self.assertEqual(problem, "", "1a the three-tool refusal reason reads as an order to the session: %r" % problem)
 
     def test_3_record_has_a_step_heading_and_step_line_for_each_owner_line_check(self):
         # The names come from report_guard.py's own source, the one place each owner_line call is written.
