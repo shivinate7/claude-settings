@@ -52,7 +52,8 @@ change touched. It is opt-in (the ste-lint input `tree-cites`). It needs no base
 --tree and --range are exclusive.
 
 Output: `path:line: CODE message`, then `stale-cites: PASS` or `stale-cites: FAIL`. Exit 0 pass, 1 findings,
-2 a read that could not run, except a base that does not resolve (a shallow clone): that prints
+2 a read that could not run (a base that names nothing in a full clone, an unreadable .ste-lint-exclude), except
+a gap in the history (a shallow clone, or a base with no merge base with the head): that prints
 `stale-cites: unknown, ...` naming fetch-depth 0 and exits 0, so a repo that pins the ste-lint action and
 checks out shallow is not red at its pin move. A touched .py that does not parse at base or head is unknown
 the same way: `stale-cites: unknown, <file> ...`, and it alone never makes the exit non-zero.
@@ -147,6 +148,17 @@ def head_resolves(head):
     return done.returncode == 0
 
 
+def history_gap(base):
+    """True when a failed merge-base is a gap in the history, not a base that names nothing: `base` resolves to a
+    commit (shallow clone, or no shared history), or the clone is shallow (its base sha is cut away). False for a
+    base that does not resolve in a full clone. Run only after merge-base failed, so it costs nothing otherwise."""
+    done = _nowindow.run(["git", "rev-parse", "--verify", "--quiet", base + "^{commit}"], capture_output=True)
+    if done.returncode == 0:
+        return True
+    shallow = _nowindow.run(["git", "rev-parse", "--is-shallow-repository"], capture_output=True)
+    return shallow.stdout.strip() == b"true"
+
+
 def git(*args, on_fail=Unknown):
     done = _nowindow.run(["git", *args], capture_output=True)
     if done.returncode != 0:
@@ -225,8 +237,8 @@ def parse_range(text):
         try:
             base = git("merge-base", left, right).decode().strip()
         except Unknown as exc:
-            if head_resolves(right):
-                raise BaseUnknown(str(exc))  # the head is there, so the history is not: a shallow clone
+            if head_resolves(right) and history_gap(left):
+                raise BaseUnknown(str(exc))  # the head is there and the history is not: a shallow clone or an orphan base
             raise
         return [text], base, right
     if ".." in text:
@@ -1125,14 +1137,18 @@ def report(rng):
     return lines + (home_report(rng, rules, entries, folders) if code else [])
 
 
-def claim_lines(rng):
+def claim_states(rng):
+    """[(reader, state)] for each reader that reads added lines and has work. A read it cannot make (an unreadable
+    `.ste-lint-exclude`) raises Unknown: `scan` calls this outside the report's try, so the run exits 2."""
+    return [(reader, state) for reader in READERS if getattr(reader, "scope", "tree") == "added"
+            for state in [reader.prepare(rng)] if state is not None]
+
+
+def claim_lines(rng, states):
     """The report lines of each reader that reads added lines, sorted by file and line."""
     found = []
-    for reader in READERS:
-        if getattr(reader, "scope", "tree") == "added":
-            state = reader.prepare(rng)
-            if state is not None:
-                found += [(path, number, reader.code, message) for path, number, message in reader.claims(rng, state)]
+    for reader, state in states:
+        found += [(path, number, reader.code, message) for path, number, message in reader.claims(rng, state)]
     return ["%s%s:%d: %s %s" % (REPORT, path, number, code, message) for path, number, code, message in sorted(found)]
 
 
@@ -1146,8 +1162,9 @@ def scan(range_text):
     lines = []
     try:
         found = find_stale(rng)
+        states = claim_states(rng)
         try:
-            lines = claim_lines(rng) + report(rng)
+            lines = claim_lines(rng, states) + report(rng)
         except (Unknown, OSError, ValueError, layout.LayoutError) as exc:  # LayoutError: a layout or extras file that does not read
             rng.unknowns.append("report not read, %s" % exc)
     finally:
