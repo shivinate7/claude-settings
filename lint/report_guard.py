@@ -210,6 +210,45 @@ def owner_line(check, wrong):
     return check + ": " + wrong + " (" + REMEDY_CITE + ")."
 
 
+# Wording that tells the session what to do. A block reason reaches the owner in chat, so it holds facts only.
+# `session_wording` is the one detector; the remedy suite imports it. A phrase here is matched case-insensitively.
+SESSION_PHRASES = (
+    "send it again", "send the report", "post only", "never send", "add the line", "remedy:",
+    "do not write it again", "keep the reply", "would reach the owner", "as the next thing you write",
+    "send it now", "send the questions again",
+)
+# A unit that opens with one of these words (after a connector such as "so") is an order to the session. "Pick" is
+# left out on purpose: "Pick guard" is the check name of an owner line.
+SESSION_IMPERATIVES = frozenset((
+    "add", "send", "post", "keep", "write", "drop", "give", "name", "move", "run", "never", "do", "don't", "resend",
+    "rewrite", "mark", "resume", "pause", "fix", "ship", "wait", "reply", "put", "cite", "check", "answer", "close",
+    "open", "update", "remove", "include", "set", "make", "stop", "let", "tell", "ask", "see", "read", "dispose",
+))
+# A unit ends at a sentence mark, a clause mark (; : ,) or a line break, so an order after a clause is seen too.
+_UNIT_END = re.compile(r"(?<=[.!?;:,])\s+|\n+")
+_CONNECTORS = frozenset(("so", "then", "and", "but", "now", "first", "next", "also", "please"))
+_WORD = re.compile(r"[a-z][a-z'-]*")
+# A modal that binds the reader: "you should send it", "the reply must end with the report".
+_MODAL = re.compile(r"\b(?:must|should|need to|needs to|have to|has to|ought to)\b", re.IGNORECASE)
+
+
+def session_wording(text):
+    """The phrase in `text` that tells the session what to do, or '' when `text` holds facts only: a listed phrase,
+    a clause that opens with an order word, or a modal ("must", "should")."""
+    low = text.lower()
+    for phrase in SESSION_PHRASES:
+        if phrase in low:
+            return phrase
+    for unit in _UNIT_END.split(text):
+        words = _WORD.findall(unit.lower())
+        while words and words[0] in _CONNECTORS:
+            words.pop(0)
+        if words and words[0] in SESSION_IMPERATIVES:
+            return unit.strip()
+    found = _MODAL.search(text)
+    return found.group(0) if found else ""
+
+
 BLOCK_REASON = owner_line(
     "Report-shape guard",
     "this turn landed a commit, push, or merge, and the reply does not end with the report in one blockquote "
@@ -1670,6 +1709,10 @@ def past_ruling_problem(asked, cwd):
     reason = reason.strip() if isinstance(reason, str) and reason.strip() else "a past ruling settles this."
     if question_form.ruling_cite(reason, question_form.candidate_ids(candidates), strict=True) != "cited":
         return cannot_run(asked, "the review cited a record that was not in the list")
+    if session_wording(reason):
+        # The judge's reason holds an order to the session. The owner reads it in chat, so only the ruling id stays.
+        cited = [i for i in question_form.candidate_ids(candidates) if i in reason or i.split("/", 1)[-1] in reason]
+        reason = "a past ruling settles this (%s)." % ", ".join(cited[:3]) if cited else "a past ruling settles this."
     return RELAY_RULE_REASON % reason
 
 
