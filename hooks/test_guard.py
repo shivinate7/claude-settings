@@ -199,6 +199,8 @@ NO_STAND_IN = "a POSIX stand-in git does not reach CreateProcess, so this case d
 NO_ORPHAN = "needs a PPID-1 orphan from ps, which this host does not give"
 NO_SIMULATOR = "the simulator fakes are POSIX shell scripts, and Windows has no xcrun or ps to fake"
 NO_EXEC_BIT = "Windows git ignores the exec bit (core.filemode is false), so a chmod makes no mode change here"
+NO_LATIN_NAME = ("this platform's file names cannot hold a byte that is not UTF-8, so the Latin-1 mockup "
+                 "cannot be made here")
 
 
 def skip_case(label, reason):
@@ -546,6 +548,23 @@ BRANCHREPO = os.path.join(ROOT, "branchrepo")
 BRANCHFALLBACKMAIN = os.path.join(ROOT, "branchfallbackmain")
 BRANCHFALLBACKMASTER = os.path.join(ROOT, "branchfallbackmaster")
 BRANCHNOBASE = os.path.join(ROOT, "branchnobase")
+
+
+def _latin_name_makeable():
+    """True when this platform's file system makes a file whose name holds a byte that is not UTF-8.
+    Windows names are UTF-16, so the name cannot be made there and the probe answers False. The probe
+    makes one empty file under ROOT and removes it."""
+    try:
+        probe = os.path.join(ROOT, os.fsdecode(b"probe-caf\xe9"))
+        with open(probe, "w"):
+            pass
+        os.remove(probe)
+        return True
+    except (OSError, UnicodeError):
+        return False
+
+
+LATIN_NAME_OK = _latin_name_makeable()
 
 # The push cases. Each is a real checkout, so the default branch is read from git and never
 # guessed. PUSHFEAT sits on `feat` with origin/HEAD naming main, PUSHMAIN sits on main, PUSHTRUNK
@@ -1964,6 +1983,37 @@ def _build_branch():
             or run_vcs(BRANCHREPO, "diff", "--name-only", "origin/main", torn).returncode == 0):
         sys.exit("fixture setup failed in build_fixtures: design-torn's tree reads, so the design "
                  "read would not fail")
+
+    # design-latin: its only mockup's name holds a byte that is not UTF-8, and no archive holds its tip. git
+    # prints the name's bytes as they are. design-latin-archived is the control: the same mockup name, with
+    # an archive of its tip under its own name. Both branches are cut from main, where HEAD is now.
+    if LATIN_NAME_OK:
+        latin = design + "/" + os.fsdecode(b"caf\xe9.html")
+        design_branch("design-latin", latin, "a mockup whose name is not UTF-8\n")
+        design_branch("design-latin-archived", latin, "archived by its own push\n")
+        latin_archive = run_vcs(BRANCHREPO, "push", "-q", "origin",
+                                "design-latin-archived:refs/heads/archive/design-latin-archived")
+        if latin_archive.returncode != 0:
+            sys.exit("fixture setup failed in build_fixtures: archiving design-latin-archived failed. "
+                     "stderr: %s" % latin_archive.stderr.strip())
+        # The Latin-1 scope, read with git before any case relies on it: each branch's origin copy is its
+        # tip, its mockup is on the branch and not on origin's default branch, and only the control has an
+        # archive of its tip.
+        for name in ("design-latin", "design-latin-archived"):
+            if not rev(name) or rev(name) != rev("origin/" + name):
+                sys.exit("fixture setup failed in build_fixtures: origin/%s is not the tip of %s" % (name, name))
+        if not rev("design-latin:" + latin):
+            sys.exit("fixture setup failed in build_fixtures: design-latin holds no mockup under its Latin-1 name")
+        if rev("origin/main:" + latin):
+            sys.exit("fixture setup failed in build_fixtures: origin/main holds design-latin's mockup, so the "
+                     "branch would not be the only copy")
+        if rev("origin/archive/design-latin"):
+            sys.exit("fixture setup failed in build_fixtures: origin holds an archive of design-latin, so its "
+                     "delete would not be the no-archive case")
+        if not rev("origin/archive/design-latin-archived") or \
+                rev("origin/archive/design-latin-archived") != rev("design-latin-archived"):
+            sys.exit("fixture setup failed in build_fixtures: archive/design-latin-archived is not the tip of "
+                     "design-latin-archived")
 
     # v1.0 is a local tag and the name of no branch: no local or origin branch holds it, so the design
     # read finds no tip for the name. A tag is not a branch, so its delete keeps main's verdict.
@@ -3631,6 +3681,22 @@ sh("push: a --delete of a design branch whose mockup is identical to main's allo
 # is judged alone, so it allows.
 sh("push: a --delete of a design branch cut before main edited a mockup it never touched allows",
    VCS + " push origin --delete design-forked", "allow", cwd=BRANCHREPO)
+# A MOCKUP NAME THAT IS NOT UTF-8. git prints a file name's bytes as they are, and the guard decodes git's output
+# with replacement, so a Latin-1 byte in the name reads as U+FFFD: a path no tree holds. The design check then
+# finds no mockup and allows. design-latin's only mockup has such a name and no archive holds its tip, so its
+# remote delete denies. The control, design-latin-archived, holds the same mockup name and an archive of its tip.
+if LATIN_NAME_OK:
+    sh("push: a --delete of a design branch whose only mockup has a Latin-1 name, with no archive, denies",
+       VCS + " push origin --delete design-latin", "deny", ARCHIVE_RULE, cwd=BRANCHREPO,
+       carries="archive/", lacks=("design-latin",))
+    sh("push: a --delete of a design branch whose only mockup has a Latin-1 name, with an archive "
+       "holding its tip, allows",
+       VCS + " push origin --delete design-latin-archived", "allow", cwd=BRANCHREPO)
+else:
+    skip_case("push: a --delete of a design branch whose only mockup has a Latin-1 name, with no archive, denies",
+              NO_LATIN_NAME)
+    skip_case("push: a --delete of a design branch whose only mockup has a Latin-1 name, with an archive holding "
+              "its tip, allows", NO_LATIN_NAME)
 # A TAG IS NOT A BRANCH. v1.0 is a local tag and no branch of that name exists, so no tip resolves for
 # it. The design check judges origin's branches only, and a name that is only a tag keeps main's verdict,
 # which allows. Its control is the same no-tip read with no tag of that name: that still asks.
