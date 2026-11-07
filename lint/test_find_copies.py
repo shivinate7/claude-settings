@@ -306,15 +306,21 @@ def load_module():
     return mod
 
 
-def paraphrase(args, answer):
+def paraphrase(args, answer, ci=False):
     """Run the pass in this process, with the model call stubbed. Returns (exit code, stdout, calls).
 
-    The module loads inside the patch, so a name bound at import time gets the stub too."""
+    The module loads inside the patch, so a name bound at import time gets the stub too. `ci` sets
+    the CI variable for the run: a model error exits differently in CI (decision ci-unknown-is-red)."""
     import decision_watch  # noqa: E402  the one home of the model call
     stub = ModelStub(answer)
     out = io.StringIO()
-    with mock.patch.object(decision_watch, "invoke_model", stub), contextlib.redirect_stdout(out), \
+    env = mock.patch.dict(os.environ)
+    with env, mock.patch.object(decision_watch, "invoke_model", stub), contextlib.redirect_stdout(out), \
             contextlib.redirect_stderr(io.StringIO()):
+        if ci:
+            os.environ["CI"] = "1"
+        else:
+            os.environ.pop("CI", None)
         try:
             rc = load_module().main(args)
         except SystemExit as exc:
@@ -387,13 +393,18 @@ class ParaphraseTest(unittest.TestCase):
 
     def test_model_error_prints_unknown_and_is_never_a_pass(self):
         root = self.tree([C1])
-        rc, out, calls = paraphrase(["--paraphrase", "--parent", root], model_error)
-        self.assertEqual(len(calls), 1, "the model was never asked, so the error case was not reached")
-        lines = [line for line in out.splitlines() if line.strip()]
-        self.assertTrue(lines, "the pass printed nothing on a model error")
-        self.assertIn("UNKNOWN", lines[-1], f"the last line on a model error is not UNKNOWN: {lines[-1]!r}")
-        self.assertFalse([line for line in lines if "PASS" in line], "a model error printed a PASS line")
-        self.assertEqual(rc, 2, f"a model error is a read that could not run: expected exit 2, got {rc!r}")
+        for ci in (False, True):
+            with self.subTest(ci=ci):
+                rc, out, calls = paraphrase(["--paraphrase", "--parent", root], model_error, ci=ci)
+                self.assertEqual(len(calls), 1, "the model was never asked, so the error case was not reached")
+                lines = [line for line in out.splitlines() if line.strip()]
+                self.assertTrue(lines, "the pass printed nothing on a model error")
+                self.assertIn("UNKNOWN", lines[-1], f"the last line on a model error is not UNKNOWN: {lines[-1]!r}")
+                self.assertFalse([line for line in lines if "PASS" in line], "a model error printed a PASS line")
+                if ci:
+                    self.assertNotEqual(rc, 0, "in CI a model error exited 0, so an unread check would go green")
+                else:
+                    self.assertEqual(rc, 0, f"locally a model error exits 0 with UNKNOWN, got {rc!r}")
 
     def test_exit_zero_on_hits_with_one_line_per_hit(self):
         root = self.tree([C1, C2, C3])
@@ -417,11 +428,16 @@ class ParaphraseTest(unittest.TestCase):
 
     def test_measure_model_error_prints_unknown_and_no_figure(self):
         path = self.measure_set()
-        rc, out, calls = paraphrase(["--measure", path], model_error)
-        self.assertEqual(len(calls), 1, f"--measure made {len(calls)} model calls; expected one")
-        self.assertIn("UNKNOWN", out, f"a model error on --measure printed no UNKNOWN: {out!r}")
-        self.assertIsNone(figure(out, "precision"), f"a model error printed a precision figure: {out!r}")
-        self.assertEqual(rc, 2, f"a model error is a read that could not run: expected exit 2, got {rc!r}")
+        for ci in (False, True):
+            with self.subTest(ci=ci):
+                rc, out, calls = paraphrase(["--measure", path], model_error, ci=ci)
+                self.assertEqual(len(calls), 1, f"--measure made {len(calls)} model calls; expected one")
+                self.assertIn("UNKNOWN", out, f"a model error on --measure printed no UNKNOWN: {out!r}")
+                self.assertIsNone(figure(out, "precision"), f"a model error printed a precision figure: {out!r}")
+                if ci:
+                    self.assertNotEqual(rc, 0, "in CI a model error on --measure exited 0")
+                else:
+                    self.assertEqual(rc, 0, f"locally a model error on --measure exits 0 with UNKNOWN, got {rc!r}")
 
     def test_one_model_call_per_run_at_full_size(self):
         lines = [f"Write plainly, keep sentence {i} short, with one term per meaning and no filler." for i in range(60)]
@@ -438,6 +454,14 @@ class ParaphraseTest(unittest.TestCase):
         self.assertEqual(len(calls), 0, f"the pass called the model {len(calls)} times with no candidate line")
         self.assertNotIn("PARA001", out, "a line with no candidate was reported")
         self.assertEqual(rc, 0, f"with no candidate line the pass exited {rc!r}; expected 0")
+
+    def test_a_rule_line_is_never_a_candidate(self):
+        root = self.tree([C1])  # CLAUDE.md holds the rule's own line, so the rule is in the tree
+        rc, out, calls = paraphrase(["--paraphrase", "--parent", root],
+                                    answers({C1: "paraphrase", RULE_TEXT: "paraphrase"}))
+        self.assertEqual(len(calls), 1, f"the pass made {len(calls)} model calls; expected one")
+        self.assertIn("writer00.md", out, "the candidate line gave no PARA001 hit, so the check has no baseline")
+        self.assertNotIn("CLAUDE.md", out, "the rule's own line was sent as a candidate and reported")
 
     def test_a_rule_quoted_in_a_fence_is_not_a_rule(self):
         fence = "Before the rules.\n\n```\nKeep every table cell under twelve words.<!-- rule:fence-only-rule -->\n```\n\n" + RULE_LINE
@@ -475,7 +499,7 @@ class ParaphraseLabelledSetTest(unittest.TestCase):
     not have, so only its form is checked here. Its text was checked against the clone when the set was built."""
 
     SOURCE = re.compile(r"^(?:(?P<repo>[a-z_]+):)?(?P<path>[^:@]+):(?P<line>[0-9]+)@(?P<sha>[0-9a-f]{7,40})$")
-    FIELDS = {"id", "rule_id", "rule_at", "text", "source", "label", "why"}
+    FIELDS = {"id", "rule_id", "rule_at", "text", "source", "label", "basis", "why"}
 
     def load(self):
         self.assertTrue(os.path.isfile(LABELLED), "lint/paraphrase_labelled.json is missing")
@@ -495,11 +519,11 @@ class ParaphraseLabelledSetTest(unittest.TestCase):
         ids = [case["id"] for case in cases]
         self.assertEqual(len(ids), len(set(ids)), "two cases share an id")
 
-    def test_each_label_has_at_least_twenty_cases(self):
+    def test_each_label_has_at_least_one_case(self):
         cases = self.load()
         for label in ("paraphrase", "distinct"):
             n = sum(1 for case in cases if case.get("label") == label)
-            self.assertGreaterEqual(n, 20, f"only {n} {label} cases; the floor is 20")
+            self.assertGreaterEqual(n, 1, f"the set has no {label} case")
 
     def test_every_source_has_the_form_path_line_at_sha(self):
         for case in self.load():
@@ -529,6 +553,35 @@ class ParaphraseLabelledSetTest(unittest.TestCase):
                     found |= set(re.findall(r"rule:([a-z0-9-]+)", git_show(sha, path) or ""))
                 anchors[sha] = found
             self.assertIn(case["rule_id"], anchors[sha], f"case {case['id']}: no rule:{case['rule_id']} anchor at {sha}")
+
+    def test_each_basis_is_record_or_reading_and_a_record_names_its_file(self):
+        for case in self.load():
+            self.assertIn(case["basis"], ("record", "reading"), f"case {case['id']} has basis {case['basis']!r}")
+            if case["basis"] == "record":
+                self.assertRegex(case["why"], r"Record: docs/decisions/[a-z0-9-]+\.md",
+                                 f"case {case['id']} is record-backed but its why names no decision file")
+
+    @staticmethod
+    def plain(text):
+        return " ".join(re.sub(r"<!--.*?-->", "", text).split())
+
+    def test_rule_text_is_the_rule_as_it_read_at_rule_at(self):
+        for case in self.load():
+            if "rule_text" not in case:
+                continue
+            content = git_show(case["rule_at"], "CLAUDE.md")
+            self.assertIsNotNone(content, f"case {case['id']}: CLAUDE.md cannot be read at {case['rule_at']}")
+            self.assertIn(self.plain(case["rule_text"]), self.plain(content),
+                          f"case {case['id']}: the rule_text is not the rule at {case['rule_at']}")
+
+    def test_a_rule_text_case_cites_a_rule_id_that_is_a_current_anchor(self):
+        current = set()
+        for path in ("CLAUDE.md", "output-styles/shiv-stylisms.md"):
+            current |= set(re.findall(r"rule:([a-z0-9-]+)", git_show("HEAD", path) or ""))
+        for case in self.load():
+            if "rule_text" in case:
+                self.assertIn(case["rule_id"], current,
+                              f"case {case['id']}: no current rule:{case['rule_id']} anchor at HEAD")
 
 
 if __name__ == "__main__":

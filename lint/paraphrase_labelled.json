@@ -6,7 +6,9 @@
     "text": "that does not apply. Write in Simplified Technical English. Start with the point. No preamble.",
     "source": "agents/builder.md:64@5a5f081e",
     "label": "paraphrase",
-    "why": "Restates the STE rule as it read before 9d577ab4, as a closing instruction. A copy of retired wording."
+    "basis": "record",
+    "why": "Record: docs/decisions/one-home-check.md item 337 retires this fragment. Restates the STE rule as it read before 9d577ab4, as a closing instruction.",
+    "rule_text": "Write in Simplified Technical English by default, to me and between agents, unless told otherwise."
   },
   {
     "id": "p02",
@@ -15,7 +17,9 @@
     "text": "Report once. Start with the point. Write in Simplified Technical English. Report in under 25",
     "source": "agents/claude-code-guide.md:23@5a5f081e",
     "label": "paraphrase",
-    "why": "Restates the STE rule as it read before 9d577ab4, as a closing instruction. A copy of retired wording."
+    "basis": "record",
+    "why": "Record: docs/decisions/one-home-check.md item 337 retires this fragment. Restates the STE rule as it read before 9d577ab4, as a closing instruction.",
+    "rule_text": "Write in Simplified Technical English by default, to me and between agents, unless told otherwise."
   },
   {
     "id": "p03",
@@ -24,7 +28,9 @@
     "text": "Input Needed, list each `Owner grant: yes` item. Write in Simplified Technical English. Report in",
     "source": "agents/designer.md:88@5a5f081e",
     "label": "paraphrase",
-    "why": "Restates the STE rule as it read before 9d577ab4, as a closing instruction. A copy of retired wording."
+    "basis": "record",
+    "why": "Record: docs/decisions/one-home-check.md item 337 retires this fragment. Restates the STE rule as it read before 9d577ab4, as a closing instruction.",
+    "rule_text": "Write in Simplified Technical English by default, to me and between agents, unless told otherwise."
   },
   {
     "id": "p04",
@@ -33,7 +39,9 @@
     "text": "Report once. Start with the point. Write in Simplified Technical English. Report in under 25",
     "source": "agents/explore.md:22@5a5f081e",
     "label": "paraphrase",
-    "why": "Restates the STE rule as it read before 9d577ab4, as a closing instruction. A copy of retired wording."
+    "basis": "record",
+    "why": "Record: docs/decisions/one-home-check.md item 337 retires this fragment. Restates the STE rule as it read before 9d577ab4, as a closing instruction.",
+    "rule_text": "Write in Simplified Technical English by default, to me and between agents, unless told otherwise."
   },
   {
     "id": "p05",
@@ -42,7 +50,9 @@
     "text": "Report once. Start with the point. Write in Simplified Technical English. Report in under 25",
     "source": "agents/plan.md:32@5a5f081e",
     "label": "paraphrase",
-    "why": "Restates the STE rule as it read before 9d577ab4, as a closing instruction. A copy of retired wording."
+    "basis": "record",
+    "why": "Record: docs/decisions/one-home-check.md item 337 retires this fragment. Restates the STE rule as it read before 9d577ab4, as a closing instruction.",
+    "rule_text": "Write in Simplified Technical English by default, to me and between agents, unless told otherwise."
   },
   {
     "id": "p06",
@@ -51,7 +61,9 @@
     "text": "now). Write in Simplified Technical English.",
     "source": "agents/record-writer.md:18@5a5f081e",
     "label": "paraphrase",
-    "why": "Restates the STE rule as it read before 9d577ab4, as a closing instruction. A copy of retired wording."
+    "basis": "record",
+    "why": "Record: docs/decisions/one-home-check.md item 337 retires this fragment. Restates the STE rule as it read before 9d577ab4, as a closing instruction.",
+    "rule_text": "Write in Simplified Technical English by default, to me and between agents, unless told otherwise."
   },
   {
     "id": "p07",
@@ -60,7 +72,9 @@
     "text": "label that does not apply. Write in Simplified Technical English. Start with the point. No",
     "source": "agents/reviewer.md:68@5a5f081e",
     "label": "paraphrase",
-    "why": "Restates the STE rule as it read before 9d577ab4, as a closing instruction. A copy of retired wording."
+    "basis": "record",
+    "why": "Record: docs/decisions/one-home-check.md item 337 retires this fragment. Restates the STE rule as it read before 9d577ab4, as a closing instruction.",
+    "rule_text": "Write in Simplified Technical English by default, to me and between agents, unless told otherwise."
   },
   {
     "id": "p08",
@@ -69,7 +83,9 @@
     "text": "that does not apply. Write in Simplified Technical English. Start with the point. No preamble.",
     "source": "agents/test-author.md:49@5a5f081e",
     "label": "paraphrase",
-    "why": "Restates the STE rule as it read before 9d577ab4, as a closing instruction. A copy of retired wording."
+    "basis": "record",
+    "why": "Record: docs/decisions/one-home-check.md item 337 retires this fragment. Restates the STE rule as it read before 9d577ab4, as a closing instruction.",
+    "rule_text": "Write in Simplified Technical English by default, to me and between agents, unless told otherwise."
   },
   {
     "id": "p09",
@@ -78,6 +94,7 @@
     "text": "Before you name a new file, function, record or term, check `GLOSSARY.md` beside the global `CLAUDE.md`. Use its term, never a name from its \"Not\" cell.",
     "source": "agents/builder.md:11@5a5f081e",
     "label": "paraphrase",
+    "basis": "reading",
     "why": "Restates GLOSSARY use: check the glossary, use its term, never a name from its Not cell."
   },
   {
@@ -87,6 +104,7 @@
     "text": "Check each new name in the plan against `GLOSSARY.md` beside the global `CLAUDE.md`. Use its term, never a name from its \"Not\" cell.",
     "source": "agents/plan.md:18@5a5f081e",
     "label": "paraphrase",
+    "basis": "reading",
     "why": "Restates the glossary rule as a plan check: each name matches the glossary term."
   },
   {
@@ -96,6 +114,7 @@
     "text": "Check each new name in the diff against `GLOSSARY.md` beside the global `CLAUDE.md`. Report a name from its \"Not\" cell, or a second name for one of its terms.",
     "source": "agents/reviewer.md:17@5a5f081e",
     "label": "paraphrase",
+    "basis": "reading",
     "why": "Restates the glossary rule as a review check: a name from the Not cell is reported."
   },
   {
@@ -105,6 +124,7 @@
     "text": "One home per shared piece (`building-one-home-per-capability`).",
     "source": "agents/builder.md:13@5a5f081e",
     "label": "paraphrase",
+    "basis": "reading",
     "why": "Restates the one-home rule in its own words, before the builder builds a shared piece."
   },
   {
@@ -114,6 +134,7 @@
     "text": "On a port or redesign, the existing app's behaviour is the default (`building-port-keeps-behaviour`). Cite file and symbol for each choice. Ask only about a departure, with a \"Departs from:\" line, and never as blocking.",
     "source": "agents/builder.md:24@5a5f081e",
     "label": "paraphrase",
+    "basis": "reading",
     "why": "Restates the port rule: the existing behaviour is the default, cited by file and symbol."
   },
   {
@@ -123,6 +144,7 @@
     "text": "Prove your change once: show the test-author's new cases green on your code.",
     "source": "agents/builder.md:52@5a5f081e",
     "label": "paraphrase",
+    "basis": "reading",
     "why": "Restates the each-layer-proves-once rule for the builder."
   },
   {
@@ -132,6 +154,7 @@
     "text": "Report once, with the labels from CLAUDE.md in order: Done, Deviations, Input Needed, Next.",
     "source": "agents/builder.md:61@5a5f081e",
     "label": "paraphrase",
+    "basis": "reading",
     "why": "Restates the report label order: Done, Deviations, Input Needed, Next."
   },
   {
@@ -141,6 +164,7 @@
     "text": "Rule `shared-trees-no-machine-wide-kill` says to kill only your own processes.",
     "source": "docs/decisions/a-kill-by-pid-needs-an-owned-pid.md:5@8e665fd2d",
     "label": "paraphrase",
+    "basis": "reading",
     "why": "Restates Kill only yours in other words, then adds the guard's local cases."
   },
   {
@@ -150,6 +174,7 @@
     "text": "a session that waits on CI sets a `send_later` check-in when it starts to wait, and again after each red job, each wider apart",
     "source": "docs/decisions/ci-wait-reads-run-status.md:33@8e665fd2d",
     "label": "paraphrase",
+    "basis": "reading",
     "why": "Restates the CI wait rule (timed check-in, again after each red job, each wider apart)."
   },
   {
@@ -159,6 +184,7 @@
     "text": "A solo, one-lane or lane session fans its own work out to agents, each in its own worktree (`parallelism-each-own-checkout`, each agent in its own checkout).",
     "source": "docs/decisions/lanes-start-as-agents.md:9@8e665fd2d",
     "label": "paraphrase",
+    "basis": "reading",
     "why": "Restates each agent in its own checkout, beside the rule id."
   },
   {
@@ -168,6 +194,7 @@
     "text": "A Degen session works only in its own worktree, under global rule `parallelism-each-own-checkout` (each lane has its own checkout).",
     "source": "degen:CLAUDE.md:12@19def78",
     "label": "paraphrase",
+    "basis": "reading",
     "why": "Child restates the own-checkout rule in its own words, beside the rule id."
   },
   {
@@ -177,6 +204,7 @@
     "text": "A Degen session cleans up after itself, under global rules `shared-trees-no-machine-wide-kill` (kill only its own processes) and `shared-trees-archive-then-delete` (archive an unmerged branch, then delete it locally).",
     "source": "degen:CLAUDE.md:13@19def78",
     "label": "paraphrase",
+    "basis": "reading",
     "why": "Child restates kill only yours as kill only its own processes, with local cleanup rules after it."
   },
   {
@@ -186,6 +214,7 @@
     "text": "A Degen session cleans up after itself, under global rules `shared-trees-no-machine-wide-kill` (kill only its own processes) and `shared-trees-archive-then-delete` (archive an unmerged branch, then delete it locally).",
     "source": "degen:CLAUDE.md:13@19def78",
     "label": "paraphrase",
+    "basis": "reading",
     "why": "Child restates archive then delete locally in its own words."
   },
   {
@@ -195,6 +224,7 @@
     "text": "Record file names and numbers follow global rule `git-slug-then-claim-number` (a slug first, the number claimed at merge).",
     "source": "degen:CLAUDE.md:27@19def78",
     "label": "paraphrase",
+    "basis": "reading",
     "why": "Child restates slug first, number claimed at merge, beside the rule id."
   },
   {
@@ -204,6 +234,7 @@
     "text": "`git-slug-then-claim-number` (a slug name first, the number claimed at merge).",
     "source": "joyous:CLAUDE.md:26@e801e9a",
     "label": "paraphrase",
+    "basis": "reading",
     "why": "Child restates slug name first and the number claimed at merge, beside the rule id."
   },
   {
@@ -213,6 +244,7 @@
     "text": "Never allocate a decision number on a branch",
     "source": "q_max:CLAUDE.md:99@58cad3b",
     "label": "paraphrase",
+    "basis": "reading",
     "why": "Child restates Never allocate a numbered record on a branch, with decision for numbered."
   },
   {
@@ -222,6 +254,7 @@
     "text": "**Never weaken a check to make it",
     "source": "q_max:CLAUDE.md:146@58cad3b",
     "label": "paraphrase",
+    "basis": "reading",
     "why": "Child restates never weaken a test to reach green, as never weaken a check to make it pass."
   },
   {
@@ -231,25 +264,28 @@
     "text": "Strip comments and strings before a source-text search.",
     "source": "q_max:CLAUDE.md:154@58cad3b",
     "label": "paraphrase",
+    "basis": "reading",
     "why": "Child restates the scanner rule: parse or strip strings and comments before a source-text search."
   },
   {
     "id": "p27",
-    "rule_id": "speak-cite-id-plus-gloss",
-    "rule_at": "8e665fd2d",
-    "text": "Cite an entry by id plus a short gloss",
-    "source": "q_max:CLAUDE.md:162@58cad3b",
-    "label": "paraphrase",
-    "why": "Child restates give every id a short plain name: cite by id plus a gloss."
-  },
-  {
-    "id": "p28",
     "rule_id": "building-one-home-per-capability",
     "rule_at": "8e665fd2d",
     "text": "A gap has one home, so a gap that becomes a debt leaves `specs/todo.md` and `docs/gaps/`.",
     "source": "q_max:CLAUDE.md:40@58cad3b",
     "label": "paraphrase",
+    "basis": "reading",
     "why": "Child applies the one-home rule to gaps in its own words, with local paths after it."
+  },
+  {
+    "id": "p28",
+    "rule_id": "git-integration-branch-merge",
+    "rule_at": "8e665fd2d",
+    "text": "a lone lane's PR is its own integration PR",
+    "source": "home:CLAUDE.md:38@87e6833",
+    "label": "paraphrase",
+    "basis": "record",
+    "why": "Record: docs/decisions/child-cites-not-copies.md:36 names this line as a copy of root rule text that the check misses."
   },
   {
     "id": "p29",
@@ -258,6 +294,7 @@
     "text": "(`tokens-never-load-whole-doc`: one record or section at a time).",
     "source": "mailaudit:CLAUDE.md:22@1f00c08",
     "label": "paraphrase",
+    "basis": "reading",
     "why": "Child restates never load a long document whole: read one record or section at a time."
   },
   {
@@ -267,6 +304,7 @@
     "text": "The rule has no check. Its row in `lint/rule_mechanisms.json` (the mechanism",
     "source": "docs/plans/one-home-check.md:35@8e665fd2d",
     "label": "distinct",
+    "basis": "reading",
     "why": "Names the one-home rule and its mechanism row, adds the local status. No rule text restated."
   },
   {
@@ -276,6 +314,7 @@
     "text": "- The old sentence has 15 words. In the old file it wrapped across two lines.",
     "source": "docs/plans/one-home-check.md:22@8e665fd2d",
     "label": "distinct",
+    "basis": "reading",
     "why": "Describes the old sentence's length and wrap. Local history, no rule text restated."
   },
   {
@@ -285,6 +324,7 @@
     "text": "The STE output rule (`output-write-in-ste`) was reworded in commit 9d577ab4 (the plain-prose",
     "source": "docs/plans/one-home-check.md:14@8e665fd2d",
     "label": "distinct",
+    "basis": "reading",
     "why": "Names the rule and its reword commit. Local history, no rule content restated."
   },
   {
@@ -294,6 +334,7 @@
     "text": "On origin/main 5a5f081e, eight files in `agents/` still hold the old phrase, as a 5-word",
     "source": "docs/plans/one-home-check.md:23@8e665fd2d",
     "label": "distinct",
+    "basis": "reading",
     "why": "Counts the agent copies at a commit. A measurement, not a restatement."
   },
   {
@@ -303,6 +344,7 @@
     "text": "The 8-word floor (a sentence must hold 8 words before it counts) misses the incident.",
     "source": "docs/plans/one-home-check.md:58@8e665fd2d",
     "label": "distinct",
+    "basis": "reading",
     "why": "Describes the copy finder's word floor and its miss. Local measurement."
   },
   {
@@ -312,6 +354,7 @@
     "text": "Measured: the 8 agent files hold a 5-word run of the old sentence, and no",
     "source": "docs/plans/one-home-check.md:59@8e665fd2d",
     "label": "distinct",
+    "basis": "reading",
     "why": "A measured count of old-sentence runs. Local measurement."
   },
   {
@@ -321,6 +364,7 @@
     "text": "`lint/find_copies.py` (the copy finder) compares a child repo with the parent. It has no",
     "source": "docs/plans/one-home-check.md:41@8e665fd2d",
     "label": "distinct",
+    "basis": "reading",
     "why": "Names the copy finder and what it lacks. Local tool description."
   },
   {
@@ -330,6 +374,7 @@
     "text": "Item 337, pick a: the old STE sentence fragment joins the retired-names list once the copies are",
     "source": "docs/decisions/one-home-check.md:10@8e665fd2d",
     "label": "distinct",
+    "basis": "reading",
     "why": "An owner ruling on the old fragment's list entry. Local ruling content."
   },
   {
@@ -339,6 +384,7 @@
     "text": "The rule reads the whole call, so a kill anywhere in it refuses the `lsof -t`: through a `head` pipe, a `while read` loop, a `for` header, or a file written and read later.",
     "source": "docs/decisions/a-kill-by-pid-needs-an-owned-pid.md:16@8e665fd2d",
     "label": "distinct",
+    "basis": "reading",
     "why": "Describes how the guard reads a call. Names the rule's topic, restates nothing from it."
   },
   {
@@ -348,6 +394,7 @@
     "text": "Guard rule `roles-third-round-steps-up` reads the `Round N of 3` marker in",
     "source": "docs/decisions/agent-model-cap.md:137@8e665fd2d",
     "label": "distinct",
+    "basis": "reading",
     "why": "Names the rule and the guard's marker read. Local mechanism."
   },
   {
@@ -357,6 +404,7 @@
     "text": "- Opus is a standing grant for both roles, a class-level exception to `roles-sonnet-is-the-ceiling`,",
     "source": "docs/decisions/design-agents.md:42@8e665fd2d",
     "label": "distinct",
+    "basis": "reading",
     "why": "Names the ceiling rule as the exception a standing grant makes. Local grant content."
   },
   {
@@ -366,6 +414,7 @@
     "text": "Owner ruling, 2026-10-17 11:56 CDT. The deletion fast path and the notes tier live in `roles-review-cap-three` and `roles-findings-are-debts-or-notes`. The rest:",
     "source": "docs/decisions/cull-rules.md:9@8e665fd2d",
     "label": "distinct",
+    "basis": "reading",
     "why": "Names the notes-tier rule where a deletion fast path lives. Local ruling content."
   },
   {
@@ -375,6 +424,7 @@
     "text": "STE lint skips `skills/impeccable/`: it is third-party prose (Apache 2.0), and third-party skills need not follow our writing rule `output-write-in-ste`",
     "source": "docs/decisions/design-skills.md:31@8e665fd2d",
     "label": "distinct",
+    "basis": "reading",
     "why": "Names the STE rule to say a third-party skill is out of scope. Local licence reason."
   },
   {
@@ -384,105 +434,87 @@
     "text": "`roles-solo-reviews-logic-diffs-only` says the same for solo mode.",
     "source": "docs/decisions/docs-only-prs-skip-review.md:9@8e665fd2d",
     "label": "distinct",
+    "basis": "reading",
     "why": "Cites the rule for its scope. Names it, restates no content."
   },
   {
     "id": "d15",
-    "rule_id": "roles-review-cap-three",
-    "rule_at": "8e665fd2d",
-    "text": "A FAIL follows rule `roles-review-cap-three` (the three-round cap).",
-    "source": "docs/decisions/docs-only-prs-skip-review.md:17@8e665fd2d",
-    "label": "distinct",
-    "why": "Cites the rule with a three-word label. No rule content restated."
-  },
-  {
-    "id": "d16",
     "rule_id": "speak-rewrite-superseded-in-place",
     "rule_at": "8e665fd2d",
     "text": "- The Edit and Write judge on `docs/decisions/` is a command hook, `hooks/prose_judge.py`, at Haiku `xhigh`. It judges `speak-rewrite-superseded-in-place` and `rulings-declare-kind`.",
     "source": "docs/decisions/haiku-prompt-hooks.md:15@8e665fd2d",
     "label": "distinct",
+    "basis": "reading",
     "why": "Names the rule a command hook judges. Local hook mechanism."
   },
   {
-    "id": "d17",
+    "id": "d16",
     "rule_id": "parallelism-no-mid-task-talk",
     "rule_at": "8e665fd2d",
     "text": "- The SendMessage wording judge is a command hook, `hooks/sendmessage_state.py`, so an override can lift it. It judges `parallelism-no-mid-task-talk` by wording alone.",
     "source": "docs/decisions/haiku-prompt-hooks.md:14@8e665fd2d",
     "label": "distinct",
+    "basis": "reading",
     "why": "Names the rule a wording judge checks. Local hook mechanism."
   },
   {
-    "id": "d18",
+    "id": "d17",
     "rule_id": "roles-one-role-per-agent",
     "rule_at": "8e665fd2d",
     "text": "- A prompt hook sees only the event's input, never the chat. So no hook judges `style-question-inside-box` or `roles-one-role-per-agent`.",
     "source": "docs/decisions/haiku-prompt-hooks.md:16@8e665fd2d",
     "label": "distinct",
+    "basis": "reading",
     "why": "Names the role rule as one a prompt hook cannot judge. Local mechanism."
   },
   {
-    "id": "d19",
+    "id": "d18",
     "rule_id": "building-allow-list-is-the-constant",
     "rule_at": "8e665fd2d",
     "text": "- `building-allow-list-is-the-constant` does not govern it: a transcript helper is not a permit list.",
     "source": "docs/decisions/hooks-share-the-transcript-reader.md:9@8e665fd2d",
     "label": "distinct",
+    "basis": "reading",
     "why": "Names the allow-list rule to say it does not apply. Local scope note."
   },
   {
-    "id": "d20",
-    "rule_id": "parallelism-each-own-checkout",
-    "rule_at": "8e665fd2d",
-    "text": "If its worktree is gone, it makes a new one from origin/main on its own branch.",
-    "source": "degen:CLAUDE.md:12@19def78",
-    "label": "distinct",
-    "why": "Child adds its recovery step for a lost worktree. Local content, no rule text restated."
-  },
-  {
-    "id": "d21",
-    "rule_id": "shared-trees-archive-then-delete",
-    "rule_at": "8e665fd2d",
-    "text": "The batch runner archives each session whose work is on main.",
-    "source": "degen:CLAUDE.md:13@19def78",
-    "label": "distinct",
-    "why": "Child names its batch runner's archive step. Local role, no rule text restated."
-  },
-  {
-    "id": "d22",
+    "id": "d19",
     "rule_id": "verification-checked-reader-for-numbers",
     "rule_at": "8e665fd2d",
     "text": "Every relative link and every claimed repo path in the README, CLAUDE.md and the owner steps resolves.",
     "source": "degen:CLAUDE.md:18@19def78",
     "label": "distinct",
+    "basis": "reading",
     "why": "Child names its own paths check. Local content, the check is in the child."
   },
   {
-    "id": "d23",
+    "id": "d20",
     "rule_id": "building-one-home-per-capability",
     "rule_at": "5a5f081e",
     "text": "`lint/test_find_copies.py` builds one parent tree, and each case adds only its own child files.",
     "source": "agents/test-author.md:35@5a5f081e",
     "label": "distinct",
+    "basis": "reading",
     "why": "Describes one parent tree that each case extends. Local fixture note."
   },
   {
-    "id": "d24",
+    "id": "d21",
     "rule_id": "verification-screens-verdict",
     "rule_at": "5a5f081e",
     "text": "If the repo has screens, load `frontend-design` by name before styling a new screen, or in a repo with no design yet.",
     "source": "agents/builder.md:26@5a5f081e",
     "label": "distinct",
+    "basis": "reading",
     "why": "Repeats the screen trigger, then adds a local skill load. Local action, no check restated."
   },
   {
-    "id": "d25",
+    "id": "d22",
     "rule_id": "verification-screens-verdict",
     "rule_at": "5a5f081e",
     "text": "If the repo has screens, the orchestrator runs design-review after a screen change.",
     "source": "agents/reviewer.md:63@5a5f081e",
     "label": "distinct",
+    "basis": "reading",
     "why": "Repeats the screen trigger, then adds a local design-review step. Local action."
   }
 ]
