@@ -1350,26 +1350,11 @@ MUTATIONS = [
      '    if contains is None or contains.returncode != 0:',
      '    if False:',
      "test_h_keeps_a_tree_when_the_remote_reach_read_fails_and_logs_it"),
-    ("agent rule: the repo's own remover no longer turns the rule off",
+    ("agent rule: forced off, so no finished agent tree is removed by the rule in any repo",
      "sweep",
-     'return decide_worktree(root, entry, attended, agent_rule, batch, mode == "fast")',
-     'return decide_worktree(root, entry, attended, True, batch, mode == "fast")',
-     "test_g_runs_the_repos_remover_with_remove_and_removes_nothing_itself"),
-    ("agent rule: the repo's own remover is never run",
-     "sweep",
-     '            elif confirm:\n                result["reaper"] = run_repo_reaper(root) or "ran"',
-     '            elif False:\n                result["reaper"] = run_repo_reaper(root) or "ran"',
-     "test_g_runs_the_repos_remover_with_remove_and_removes_nothing_itself"),
-    ("agent rule: the repo's remover runs without --remove",
-     "sweep",
-     '[npm, "run", REAPER_SCRIPT, "--", "--remove"]',
-     '[npm, "run", REAPER_SCRIPT]',
-     "test_g_runs_the_repos_remover_with_remove_and_removes_nothing_itself"),
-    ("agent rule: the repo's remover runs outside the repo",
-     "sweep",
-     'cwd=root, capture_output=True,',
-     'cwd=os.path.dirname(root), capture_output=True,',
-     "test_g_runs_the_repos_remover_with_remove_and_removes_nothing_itself"),
+     '    agent_rule = mode == "full" and not attended\n',
+     '    agent_rule = False\n',
+     "test_g_the_agent_rule_removes_the_tree_despite_a_repo_package_json_script"),
     # ---- the simulator tier (decisions/sweep-shuts-down-idle-simulators.md) ----
     ("simulator: a device booted under an hour ago is shut down",
      "sweep",
@@ -1484,11 +1469,10 @@ def build_scaffold(scaffold: str, sources: dict, mutated_target: str, mutated_te
     lint_dir = os.path.join(scaffold, "lint")
     os.makedirs(lint_dir, exist_ok=True)
     shutil.copy(os.path.join(REPO_ROOT, "lint", "_test_git.py"), lint_dir)  # test_sweep.py imports it; never mutated
-    shutil.copy(os.path.join(REPO_ROOT, "hooks", "_nowindow.py"), hooks_dir)  # sweep.py imports it; never mutated
-    shutil.copy(os.path.join(REPO_ROOT, "hooks", "shared_names.py"), hooks_dir)  # guard_core.py imports it; never mutated
-    # sweep.py and guard_core.py import it. The loop below replaces this copy when `sources` holds
-    # the target's own text for it (the mutated one, or the real one).
-    shutil.copy(GIT_READS, hooks_dir)
+    # Every hooks module, so a new hooks module cannot be left out. A lint/ module that hooks import
+    # lazily is not covered. The loop
+    # below replaces the guard family and git_reads.py with the target's text (mutated or real).
+    mutate_shared.guard_tree(hooks_dir)
     shutil.copy(os.path.join(HERE, "temp_sweep.py"), janitor_dir)  # sweep.py imports it; never mutated
 
     sweep_text = mutated_text if mutated_target == "sweep" else sources["sweep"]
@@ -1530,7 +1514,8 @@ CASE_LINE = re.compile(r"^\w+ \([\w.]+\)")
 
 
 def run_suite(suite_path: str, config_dir: str, only=None):
-    """Run one scaffold's test_sweep.py. Return (exit code, FAIL lines from stdout+stderr, case lines).
+    """Run one scaffold's test_sweep.py. Return (exit code, FAIL lines from stdout+stderr, case lines,
+    ERROR lines from `mutate_shared.diagnostic_lines`).
 
     janitor/test_sweep.py is a plain `unittest.main(verbosity=2)`, which writes its per-case
     progress and its failure headings to STDERR by default -- unlike hooks/test_guard.py's own
@@ -1552,12 +1537,12 @@ def run_suite(suite_path: str, config_dir: str, only=None):
     lines = (result.stdout + result.stderr).splitlines()
     red = [line for line in lines if "FAIL" in line]
     ran = [line for line in lines if CASE_LINE.match(line)]
-    return result.returncode, red, ran
+    return result.returncode, red, ran, mutate_shared.diagnostic_lines("\n".join(lines))
 
 
 def run_mutant(sources, work: str, index: int, entry):
     """Apply one mutation in its own scaffold, run the suite there, and return
-    (label, code, FAIL lines, required, skip).
+    (label, code, FAIL lines, required, skip, ERROR lines).
 
     `skip`, when not None, is why this mutant did not run on this platform at all: its one
     proving case cannot be driven here (see `skip_reason`). The caller reports it and counts it
@@ -1573,9 +1558,9 @@ def run_mutant(sources, work: str, index: int, entry):
     try:
         build_scaffold(scaffold, sources, target, mutated_text)
         suite_path = os.path.join(scaffold, "janitor", SUITE_FOR_TARGET[target])
-        code, red = mutate_shared.staged_suite(
+        code, red, seen = mutate_shared.staged_suite_seen(
             lambda only: run_suite(suite_path, config_dir, only), required)
-        return label, code, red, required, None
+        return label, code, red, required, None, seen
     finally:
         shutil.rmtree(scaffold, ignore_errors=True)
 

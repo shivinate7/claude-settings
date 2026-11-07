@@ -24,6 +24,7 @@ SKILL = os.path.dirname(HERE)
 sys.path.insert(0, os.path.join(SKILL, "scripts"))
 sys.path.insert(1, os.path.join(SKILL, "..", "..", "lint"))
 import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (the one home, lint/_test_temp.py)
+import protect  # noqa: E402
 import scaffold  # noqa: E402
 
 try:
@@ -133,11 +134,11 @@ class Scaffold(TempDest):
         text = tree(SKILL)["templates/operating-model.md"]
         bullet = re.search(r"- \*\*Triage\.\*\*.*?(?=\n- \*\*)", text, re.S).group(0)
         flat = " ".join(bullet.split())  # a line wrap must not split a phrase
-        # The roadmap is a block of the repo's one page, which the waiting-page writer publishes (skill roadmap).
+        # The roadmap is a block of the repo's one page, which the page writer publishes (skill roadmap).
         self.assertRegex(flat, r"builds? the roadmap block", "triage must build the roadmap block")
         self.assertIn("--block", flat)
         self.assertIn("--live", flat)
-        self.assertNotRegex(flat, r"(?i)roadmap page", "the roadmap is no page of its own: triage builds a block, the waiting-page writer publishes it")
+        self.assertNotRegex(flat, r"(?i)roadmap page", "the roadmap is no page of its own: triage builds a block, the page writer publishes it")
 
     def assertInOrder(self, flat, clauses):
         at = [flat.find(x) for x in clauses]
@@ -178,9 +179,47 @@ class Scaffold(TempDest):
         self.assertEqual(flat.count("coordinator starts the successor from"), 1,
                          "one hand-off, one bullet")
         self.assertIn("external_metadata.context_usage", flat)
-        self.assertIn("<triage limit>", flat)
-        self.assertIn("<batch runner limit>", flat)
+        # session-tiers (owner): no usage limit. A standing session runs until autocompact.
+        self.assertNotIn("<triage limit>", flat, "the rotation section still names the triage limit")
+        self.assertNotIn("<batch runner limit>", flat, "the rotation section still names the batch runner limit")
         self.assertIn("The coordinator never hands its own sessions to a successor", flat)
+
+    def rotation_flat(self):
+        """The rotation section, flattened. The scope comes first: a missing section fails here, once."""
+        text = tree(SKILL)["templates/operating-model.md"]
+        self.assertIn("## Rotation of standing sessions", text, "the operating model has no rotation section")
+        return " ".join(rotation_rule(text).split())
+
+    def test_rotation_follows_the_no_limit_ruling(self):
+        # session-tiers (owner): no usage limit. A standing session runs until
+        # autocompact, and the coordinator rotates it only when it goes stale or breaks.
+        flat = self.rotation_flat()
+        for clause in ("session-tiers", "goes stale or breaks", "runs until autocompact"):
+            with self.subTest(clause=clause):
+                self.assertIn(clause, flat, f"the rotation section does not say {clause!r}")
+        with self.subTest(clause="arbiter"):
+            self.assertRegex(flat, r"\barbiter\b", "the rotation section does not name the arbiter")
+
+    def test_rotation_names_no_limit_or_exemption(self):
+        # session-tiers (owner): no usage limit, so no limit to be at or to exempt from.
+        flat = self.rotation_flat()
+        self.assertIn("The coordinator never hands its own sessions to a successor", flat,
+                      "the rotation section lost its coordinator rule, so a cut-off section would pass")
+        for stale in ("<triage limit>", "<batch runner limit>", "at its limit", "phase change", "exempt"):
+            with self.subTest(stale=stale):
+                self.assertNotIn(stale, flat.lower(), f"the rotation section still names {stale!r}")
+
+    def test_roster_has_no_exemptions_line(self):
+        # session-tiers (owner): no usage limit, so the roster has no exemption line.
+        text = tree(SKILL)["templates/roster.md"]
+        self.assertIn("## Standing sessions", text, "the roster has no standing sessions section")
+        self.assertNotRegex(text, r"(?m)^Exemptions:", "the roster still has an Exemptions line")
+
+    def test_skill_names_no_usage_tally(self):
+        # session-tiers (owner): rotation runs until autocompact, not by a usage tally.
+        flat = " ".join(tree(SKILL)["SKILL.md"].split())
+        self.assertIn("name: project-ops", flat, "SKILL.md has no project-ops name")
+        self.assertNotRegex(flat, r"(?i)usage tally", "SKILL.md still names a usage tally")
 
     def test_handoff_template_has_the_open_items_and_watch_lines(self):
         # The two fixed forms that scripts/check_handoff.py reads. A placeholder stands in for the values.
@@ -455,10 +494,12 @@ class HandoffCheck(TempDest):
 
 
 class Protect(unittest.TestCase):
-    """c189 part 4: adopting a repo sets branch protection with its required checks, so no repo starts with none. A fake `gh` records each call."""
+    """c189 part 4: adopting a repo sets branch protection with its one required check (the rollup), so no repo starts with none. A fake `gh` records each call."""
+
+    def required(self):
+        return protect.REQUIRED_CHECK  # the one home of the name (protect.py): no case copies it
 
     def run_protect(self, *argv, existing=None, other_rules=False):
-        import protect
         calls = []
 
         def gh(args, body=None):
@@ -470,36 +511,43 @@ class Protect(unittest.TestCase):
                     return 1, "HTTP 404: Required status checks not enabled" if other_rules else "HTTP 404: Branch not protected"
                 return (0, '{"required_pull_request_reviews": {"required_approving_review_count": 1},"enforce_admins": {"enabled": true}}') if other_rules else (1, "HTTP 404: Branch not protected")
             return 0, "{}"
-        out = io.StringIO()
-        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(out):
+        out, err = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
             code = protect.main(list(argv), gh=gh)
-        return code, out.getvalue(), calls
+        self.last_stderr = err.getvalue()  # what a refusal printed to stderr, alone
+        return code, out.getvalue() + err.getvalue(), calls
+
+    def test_the_required_check_is_the_rollup(self):
+        self.assertEqual(protect.REQUIRED_CHECK, "all-jobs-passed")  # the one literal of the name in this file
 
     def test_preview_changes_nothing_and_names_the_call(self):
-        code, out, calls = self.run_protect("--repo", "acme/widgets", "--check", "checks", "--check", "lint")
+        code, out, calls = self.run_protect("--repo", "acme/widgets", "--check", self.required())
         self.assertEqual(code, 0, out)
         self.assertFalse([c for c in calls if "GET" not in c[0]], calls)
-        self.assertIn("checks", out)
+        self.assertIn(self.required(), out)
         self.assertIn("--confirm", out)
 
     def test_an_unprotected_branch_gets_protection_with_the_checks(self):
-        code, out, calls = self.run_protect("--repo", "acme/widgets", "--check", "checks", "--check", "lint", "--confirm")
+        code, out, calls = self.run_protect("--repo", "acme/widgets", "--check", self.required(), "--confirm")
         self.assertEqual(code, 0, out)
         puts = [c for c in calls if "PUT" in c[0]]
         self.assertEqual(len(puts), 1, calls)
         self.assertIn("repos/acme/widgets/branches/main/protection", puts[0][0])
-        self.assertEqual(puts[0][1]["required_status_checks"]["contexts"], ["checks", "lint"])
+        self.assertEqual(puts[0][1]["required_status_checks"]["contexts"], [self.required()])
+        body = puts[0][1]
+        self.assertIs(body["required_status_checks"]["strict"], False, "the PUT must set strict to False")
+        self.assertIs(body["enforce_admins"], True, "the PUT must set enforce_admins to True (admins are included)")
 
     def test_a_protected_branch_gets_its_checks_set_in_place(self):
-        code, out, calls = self.run_protect("--repo", "acme/widgets", "--check", "checks", "--confirm", existing=["old"])
+        code, out, calls = self.run_protect("--repo", "acme/widgets", "--check", self.required(), "--confirm", existing=["old"])
         self.assertEqual(code, 0, out)
         patches = [c for c in calls if "PATCH" in c[0]]
         self.assertEqual(len(patches), 1, calls)
-        self.assertEqual(patches[0][1]["contexts"], ["checks"])
+        self.assertEqual(patches[0][1]["contexts"], [self.required()])
         self.assertFalse([c for c in calls if "PUT" in c[0]], calls)
 
     def test_checks_already_set_change_nothing(self):
-        code, out, calls = self.run_protect("--repo", "acme/widgets", "--check", "b", "--check", "a", "--confirm", existing=["a", "b"])
+        code, out, calls = self.run_protect("--repo", "acme/widgets", "--check", self.required(), "--confirm", existing=[self.required()])
         self.assertEqual(code, 0, out)
         self.assertFalse([c for c in calls if "GET" not in c[0]], calls)
 
@@ -509,17 +557,50 @@ class Protect(unittest.TestCase):
             self.assertEqual(code, 2, out)
             self.assertEqual(calls, [])
 
-    def test_a_matrix_name_with_a_comma_stays_one_check(self):
-        code, out, calls = self.run_protect("--repo", "acme/widgets", "--check", "test (ubuntu, 3.11)", "--confirm")
+    def test_a_check_other_than_the_rollup_is_refused_before_any_gh_call(self):
+        # a name off by a matrix part or a suffix is another check too: only the rollup may reach a PUT
+        for name in ("checks", "test (ubuntu, 3.11)", f"{self.required()} (ubuntu)"):
+            for confirm in ([], ["--confirm"]):
+                with self.subTest(name=name, confirm=bool(confirm)):
+                    code, out, calls = self.run_protect("--repo", "acme/widgets", "--check", name, *confirm)
+                    self.assertEqual(code, 2, f"--check {name!r}: exit 2 expected\n{out}")
+                    self.assertEqual(calls, [], f"--check {name!r}: no gh call expected, not even a GET")
+
+    def test_a_refused_check_names_the_rollup(self):
+        for confirm in ([], ["--confirm"]):
+            with self.subTest(confirm=bool(confirm)):
+                code, out, _ = self.run_protect("--repo", "acme/widgets", "--check", "checks", *confirm)
+                self.assertEqual(code, 2, f"--check checks: exit 2 expected\n{out}")
+                self.assertIn(self.required(), self.last_stderr, "--check checks: stderr must name the required check")
+
+    def test_two_checks_are_refused_before_any_gh_call(self):
+        for confirm in ([], ["--confirm"]):
+            with self.subTest(confirm=bool(confirm)):
+                code, out, calls = self.run_protect("--repo", "acme/widgets", "--check", self.required(), "--check", f"{self.required()} (ubuntu)", *confirm)
+                self.assertEqual(code, 2, "two --check names: exit 2 expected\n" + out)
+                self.assertEqual(calls, [], "two --check names: no gh call expected, not even a GET")
+                self.assertRegex(self.last_stderr, r"(?i)only one (--)?check", "two --check names: stderr must say only one check is allowed")
+
+    def test_an_empty_check_name_is_not_counted(self):
+        code, out, calls = self.run_protect("--repo", "acme/widgets", "--check", "", "--check", self.required(), "--confirm")
         self.assertEqual(code, 0, out)
-        self.assertEqual([c for c in calls if "PUT" in c[0]][0][1]["required_status_checks"]["contexts"], ["test (ubuntu, 3.11)"])
+        puts = [c for c in calls if "PUT" in c[0]]
+        self.assertEqual(len(puts), 1, calls)
+        self.assertEqual(puts[0][1]["required_status_checks"]["contexts"], [self.required()])
+
+    def test_the_same_name_twice_is_one_check(self):
+        code, out, calls = self.run_protect("--repo", "acme/widgets", "--check", self.required(), "--check", f" {self.required()}\t", "--confirm")
+        self.assertEqual(code, 0, "the same name twice is one check: exit 0 expected\n" + out)
+        puts = [c for c in calls if "PUT" in c[0]]
+        self.assertEqual(len(puts), 1, "the same name twice: one PUT expected\n" + str(calls))
+        self.assertEqual(puts[0][1]["required_status_checks"]["contexts"], [self.required()], "the same name twice: contexts must hold the name once")
 
     def test_the_patch_leaves_strict_alone(self):
-        _, _, calls = self.run_protect("--repo", "acme/widgets", "--check", "checks", "--confirm", existing=["old"])
+        _, _, calls = self.run_protect("--repo", "acme/widgets", "--check", self.required(), "--confirm", existing=["old"])
         self.assertNotIn("strict", [c for c in calls if "PATCH" in c[0]][0][1])
 
     def test_a_branch_protected_without_a_check_rule_is_refused_not_replaced(self):  # a PUT would drop its review rule and restrictions
-        code, out, calls = self.run_protect("--repo", "acme/widgets", "--check", "checks", "--confirm", other_rules=True)
+        code, out, calls = self.run_protect("--repo", "acme/widgets", "--check", self.required(), "--confirm", other_rules=True)
         self.assertEqual(code, 1, out)
         self.assertFalse([c for c in calls if "GET" not in c[0]], calls)
         self.assertIn("required_pull_request_reviews", out)

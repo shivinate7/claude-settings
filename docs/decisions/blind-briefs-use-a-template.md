@@ -6,7 +6,7 @@ Owner, 2026-10-26 22:58 CDT, on the mailaudit Duo mockups: "not a single one of 
 the mold". Roadmap step c109 (a blind design brief cannot carry today's screen) set the fix.
 
 - Skill `design-explore` builds each blind brief from `skills/design-explore/blind-brief.md`: a
-  `Lane kind: blind` line, a `Lane:` line, the free sections Job and Device, and the fixed
+  `Designer kind: blind` line, a `Designer:` line, the free sections Job and Device, and the fixed
   sections House rules and Deliver, word for word. There is no Palette section (below, d4). The Deliver text asks for at least two concepts that
   differ at the root, and one deliberately bold one.
 - A free section names none of these: the current product or a view of it, a screenshot or mockup, a
@@ -15,17 +15,18 @@ the mold". Roadmap step c109 (a blind design brief cannot carry today's screen) 
 - A blind brief has no Palette section. The blind designer takes colour, type and spacing from the house
   `tokens.md` only, and `agents/designer.md` bars it from `repo-colours.json`, the rest of
   `~/.claude/docs/design/` and the repo's token files. The 4 px step and 8 px radius in `tokens.md` are
-  house defaults (`ux-house-rules`), so a blind lane may use them. A repo name in a house file is a
+  house defaults (`ux-house-rules`), so a blind designer may use them. A repo name in a house file is a
   credit, not a place to look.
-- An explore run keeps at least one blind lane. Each informed and directed brief says so in a
-  `Blind lanes: <n>` line, or carries `Blind lanes: none, owner: "<the owner's words>"`.
+- An explore run keeps at least one blind designer. Each informed and directed brief says so in a
+  `Blind designers: <n>` line, or carries `Blind designers: none, owner: "<the owner's words>"`.
 - `hooks/blind_brief.py` holds the check. Skill `design-explore` runs it with `--run` over the folder of
   the run's briefs, with today's view names. As a PreToolUse hook on Agent and Task, it refuses a
   designer spawn whose brief fails, with rule `blind-brief`. A designer brief with no kind line is a
-  small change outside the skill, and passes.
+  small change outside the skill, and passes. A brief that opens with the retired kind header (the
+  one before the designer rename) is refused, and the refusal names `Designer kind:`.
 - Skill `design-review`, Mockup set check: a design reviewer gives each mockup a structure verdict,
   `same` or `new`. A set that is all `same` is flagged to the owner, with an offer of one more round of
-  blind lanes.
+  blind designers.
 - An iOS repo is a repo whose device list (`lint/layout.py devices`) holds both iPhone Duo poses. There,
   the hook also refuses a blind brief whose Device section does not name the unfolded pose
   (`duo-unfolded`), or names it before the folded pose (`duo-order`). It refuses a brief of any kind that
@@ -37,7 +38,7 @@ the mold". Roadmap step c109 (a blind design brief cannot carry today's screen) 
   repo. It is not a CI check over a design folder, because older mockups would go red. The design
   reviewer gives each iOS screen one line, `native` or `web-like`.
 
-Why: the session that drew the Duo mockups ran no blind lane. Its one brief said "Duo layouts must keep
+Why: the session that drew the Duo mockups ran no blind designer. Its one brief said "Duo layouts must keep
 that look", sent the designer to the web app first, and asked for options for each existing view. The
 designer kept today's views, so every mockup copied the current app. The prose rule of
 `design-agents` could not stop it, because nothing read the brief.
@@ -51,15 +52,15 @@ much a web app with no proportions", and the designer did not read the current i
 the Duo. The Duo, `ios-skill` and mockup-check rules land in roadmap step c192, 2026-10-28.
 
 Limits: the designer's reads are barred by its own instruction, not by a hook: the guard `designer-scope`
-limits writes only, and no hook knows the lane kind of a read. A designer that opens a barred file is
+limits writes only, and no hook knows the designer kind of a read. A designer that opens a barred file is
 caught only by the orchestrator's hex check of the finished mockup. The value patterns catch hex, rgb and
 hsl colours, named fonts and font-family words. They also catch a px, rem or dp value anywhere in the Job.
 They miss a paraphrase such as "Banchi blue" with no hex. They miss a font that is not on the list and
 is not named after the word font. They miss a short hex such as #fff with no colour word before it. The
 word lists catch the common forms of a keep rule and of a current-view name, not every
 paraphrase. The check refuses a view name only when the orchestrator passes it with `--current`.
-The spawn hook does not know view names. The `Blind lanes:` line is the orchestrator's own
-count, not a count of spawned lanes. The Duo rules read the first whole word that names each pose, so a
+The spawn hook does not know view names. The `Blind designers:` line is the orchestrator's own
+count, not a count of spawned designers. The Duo rules read the first whole word that names each pose, so a
 paraphrase with neither word misses them. `ios-skill` asks only that the brief names the skill, not that
 the designer reads it. The mockup check sees only that a part is there: a page with a system font, one
 inset and two frames can still look like a web page. That taste verdict stays with the design reviewer.

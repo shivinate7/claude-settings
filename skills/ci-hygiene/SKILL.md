@@ -1,6 +1,6 @@
 ---
 name: ci-hygiene
-description: Use when a session creates or edits CI config (GitHub Actions, workflow files, .github/workflows, other CI files), or when the user says CI is slow, queued, or flaky, or says "ci-hygiene". Not for ordinary code edits. Keeps CI fast, cheap, and trusted.
+description: Use when a session creates or edits CI config (GitHub Actions, workflow files, .github/workflows, other CI files), or when the user says CI is slow, queued, or flaky, or says "ci-hygiene", or when a session batches lane PRs into one integration branch, or a batch's integration run is red. Not for ordinary code edits. Keeps CI fast, cheap, and trusted.
 ---
 
 Written for GitHub Actions. The same ideas apply to other CI systems. Commands and YAML are in
@@ -51,19 +51,40 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
    `verification-newest-that-passes`, take the newest version that passes). zizmor 1.30.0 added the
    `self-repository` audit. It flags each local `uses: ./...` call, an action such as `./actions/a`
    too, not only a workflow. A floating version once turned a PR red.
-   Pins of claude-settings' `ste-lint` action follow the session's tools (decision
-   `action-pins-follow-sessions`). `bin/ste-changed` reads that pin. It prints drift and exits 3. The
+   Pins of claude-settings' `ste-lint` and `zizmor` actions follow the session's tools (decision
+   `action-pins-follow-sessions`). `bin/ste-changed` reads those pins. It prints drift and exits 3. The
    session then moves the pin in a lane of its own. No bot and no schedule moves it. That tool reads
-   only the `ste-lint` pin. Other claude-settings pins can drift unseen.
+   only the `ste-lint` and `zizmor` pins. Other claude-settings pins can drift unseen.
    Other pins keep full-SHA pinning. Which bot, if any, bumps them is set per repo.
 8. **Batch lanes.** Batch lanes into one integration branch and one integration PR. A batch runs one
    CI run (rule `git-integration-branch-merge`, one CI run per batch). Only the integration PR goes
    ready. Each lane PR stays a draft until the integration PR merges. A lane runs
    `~/.claude/bin/merge --lane-lint <pr>` before it hands off, and the batch runner runs it again on
-   each lane head before the join. A red lane does not join. A lane never runs a whole CI job
+   each lane head before the join. A red lane does not join. Before it marks the integration PR
+   ready, the batch runner runs `~/.claude/bin/merge --lane-lint <integration branch>` on the batch
+   head. A FAIL keeps it a draft. A hand list of checks never stands in for that run: `bin/ci-job`
+   reads its steps from the workflow, so it cannot miss one. A lane never runs a whole CI job
    (decision `lanes-run-no-full-ci-job`, a lane runs no full CI job).
    Never push to a ready PR while its CI run can still go green. A late lane joins the next batch.
-   Once a job is red, push the lane drop or the lane fix at once. The push cancels the old run.
+   Once a job is red, push the lane drop or the lane fix at once. The push cancels the old run, and
+   the new run is the re-run. A lone lane is its own integration PR. When the integration PR merges,
+   each lane PR closes as replaced.
+   When the integration run is red, read the failing job. Find the lane whose files it touches. Drop
+   that lane and any lane that depends on it. Rebuild the branch from main without them. Never
+   revert. A lane dropped by a revert re-applies its diff after it merges main, and checks that each
+   file is there. A job that ends at its cap with no red CI step is re-capped or split. That is not a
+   reason to drop the lane.
+   A lane that is red on form (record format, version bump, lint), not on a behaviour test, is fixed
+   and re-merged instead. Do that for a fix of a few lines in its own files, and only for its
+   first such fix in this batch. A second red drops the lane.
+   A lint red that `bin/ste-changed` passes, while it blames an old `ste-lint` pin, is not a strike
+   (decision `action-pins-follow-sessions`, CI pins follow the session's tools). The session moves
+   that pin to claude-settings main in a lane of its own, with no question. That lane's reviewer
+   checks only that it changes pin lines alone, to a main commit that descends from the old pin.
+   Put the fix on the lane branch, never on the integration branch. Run CI again, once, and merge the
+   rest. Fix the dropped lane in its own lane. It joins the next batch after its fix. A held lane
+   (rule `roles-review-cap-three`, three review rounds) is the exception. Drop it and park it. It
+   gets no fix lane until the owner decides.
    No merge to main while a batch's run is in progress. The owner is included. Decision
    `no-merge-during-batch-ci` (no merge while a batch runs) holds the rule. A merge needs a green
    run on the current base (decision `merge-needs-current-base`). A head that lacks the base tip is
@@ -72,23 +93,18 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
    no line was lost either. Run `lint/check_silent_undo.py` before the merge.
    GitHub's merge queue needs an organization-owned repo. A personal repo batches by hand or through
    the merge tool.
-   Batch across sessions too. Before you open a PR, list the repo's open PRs. When another session's
-   lane passes its local checks at about the same time, offer one integration branch. A repo may
-   name one session to batch PRs and run each merge, on the owner's grant.
+   Batch across sessions too (`git-integration-branch-merge`).
 9. **Wait without loops.** Wait for the CI-wake notice that follows `gh pr ready`. A push starts no
-   notice. Never run `gh run watch`. One watch made 131 API calls in one minute (decision
+   notice. In cloud, mark ready by MCP `update_pull_request` `draft: false` (route
+   pr-ready-mcp-cloud); it sends no wake, so wait on the PR subscription and a check-in. Never run `gh run watch`. One watch made 131 API calls in one minute (decision
    `ci-wait-reads-run-status`, CI waits read the run status). Never poll with a sleep loop. Repeated
    `gh run view` or `gh pr checks` calls are a poll. To wait for any other condition, use the
    Monitor tool (decision `agents-wait-with-monitor`, agents wait with the Monitor tool). See
    `snippets.md`, section 9.
-   A cloud session waits on its PR subscription. At the start of a wait, it sets a `send_later`
-   check-in. It sets another after each red job, each wider apart. A run with a red job sends no
-   "all checks done" wake. Rule `git-ci-wait-checks-in` (a timed check-in while a run waits) holds
-   that rule. A red run posts one PR comment from its last job, the `ci-done-comment` template. That
-   comment wakes the session that watches the PR. Rule `git-ci-done-comment-wakes` (a red run's
-   comment wakes the watcher) holds that rule.
-10. **Prove each new check red once.** Break the check's target on a scratch copy. Watch the check
-    fail. Restore the target. A check you did not see go red is not proven. A pipe hides a check's
+   A cloud session waits on its PR subscription, with a `send_later` check-in (`git-ci-wait-checks-in`).
+   A red run's `ci-done-comment`, from the last job, wakes it (`git-ci-done-comment-wakes`).
+10. **Prove each new check red once** (`verification-trust-guard-after-red`; recipe: skill `fresh-prose`,
+    Proof). A pipe hides a check's
     exit code. `lint | tail -1` exits 0 when lint fails. So a commit after it runs on a red check.
     Decide on the command's own exit code. See `snippets.md`, section 10.
 11. **No CI on a draft.** Run the PR workflow on `opened`, `synchronize`, `reopened` and
@@ -100,7 +116,7 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
     A workflow that also has `on: push` for all branches still runs on a draft branch.
     `gh pr create --draft` then `gh pr ready` fires two runs. Keep the draft state in the concurrency
     group (step 4). Otherwise the skipped draft run cancels an in-progress ready run.
-    Run `gh pr ready` only after the draft run shows in `gh run list`. A ready sent seconds after the
+    Mark ready (`gh pr ready`, or in cloud MCP `update_pull_request`) only after the draft run shows in `gh run list`. A ready sent seconds after the
     PR opens can give both runs `draft=false`. One then cancels the other. Its cancelled check runs
     can stop the merge, even for an admin (PR 381, Sonnet prompt judges).
     After `gh pr ready`, a run of only skipped jobs proves nothing. Wait for a run on the head that
@@ -117,7 +133,7 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
     `cache: npm`. Measure the CI step before and after.
 15. **Split the slowest job for wall time.** Use it where minutes are free, as in a public repo.
     Step 13 saves money, not time. Split the slowest serial job into parallel jobs.
-    `lint/test_windows_split.py` checks that each suite runs in exactly one job.
+    `lint/test_windows_split.py` checks that each suite runs in exactly one job, for the Windows, Linux and macOS splits.
 16. **Pin every suite in a split-job guard.** The guard must pin each suite's CI step `if:`,
     `shell:` and `!cancelled()`, with no env override. The `MERGE_TESTS` gap, found in review of
     PR 293 (the Windows merge-test slice), is the case for it. A CI step's `if:` names only its own
@@ -199,8 +215,12 @@ The seven opt-in templates of that decision:
   from a weekly schedule, never per PR. `open-issue: true` opens or updates one issue.
 - `ruling-kind`: fails a PR that adds or edits a record with no valid Kind line. The caller needs
   checkout at `fetch-depth: 0`. It fails closed when the base cannot be read.
+- `claude-md-cites`: fails a run when a unit of the caller's `CLAUDE.md` files or `.claude/**/*.md` copies
+  claude-settings record text instead of naming the record. The caller needs checkout first.
 - `githooks/main-ref`: refuses a local move of main to a commit that origin lacks. Run
-  `sh githooks/main-ref/install.sh` in each clone.
+  `sh githooks/main-ref/install.sh` in each clone. `sh githooks/main-ref/install.sh --check` writes
+  nothing and compares each armed copy to main; the shared pre-commit runs it and refuses a commit
+  while a copy is missing or behind main.
 - `testing/skip-locally-fail-in-ci.mjs`: wrap an env-dependent probe in `needEnv`. It skips locally,
   and fails when `CI` is set.
 
@@ -208,6 +228,8 @@ The other composite actions in `actions/`, in the same home:
 
 - `code-check`: one type check and one lint for defects per language. The caller needs checkout at
   `fetch-depth: 0` and setup-python.
+- `zizmor`: audits the caller's workflows and actions with one pinned zizmor (input `paths`, default
+  `.github/`). The caller needs checkout and pipx on PATH. `run.sh` holds the pin.
 - `playwright-setup`: installs the Playwright that a lockfile pins, and its browsers. No apt step by
   default.
 - `ste-lint`: runs `lint/ste_lint.py` on changed Markdown, or on every file with `scope: all`.
@@ -221,7 +243,9 @@ n/a where an item says so. A no is a finding. A read that cannot run is unknown,
 
 1. Does a job named `all-jobs-passed` exist? Read `.github/workflows/*.yml`.
 2. Does that job list every other job in `needs:`, except `ci-done`, with `if:` holding `always()` and
-   the draft guard? Read its job block.
+   the draft guard? Read its job block. A job skipped by design may stay off `needs:` when its own
+   job-level `if:` skips it on every `pull_request` event, such as a nightly-only or push-only job. A
+   PR can then never turn it red. Read that job's `if:`. A job off `needs:` that can run on a PR is a no.
 3. Does branch protection require exactly one check, `all-jobs-passed`? Read
    `gh api repos/<owner>/<repo>/branches/main/protection`, and count `required_status_checks.checks`.
    A 403 is unknown.
@@ -251,5 +275,8 @@ n/a where an item says so. A no is a finding. A read that cannot run is unknown,
     `grep -nE "\| *(tail|head)" .github/workflows/*.yml`. Read each hit. A version print that decides
     no verdict is not a finding.
 15. Does an audit step run in CI, with a pinned version? Run
-    `grep -n "zizmor" .github/workflows/*.yml`. A version given as `zizmor==<x.y.z>` is a yes. No
-    version is a no.
+    `grep -n "zizmor" .github/workflows/*.yml`, then read each zizmor step to the next `- ` step line. A
+    version given as `zizmor==<x.y.z>`, or as that step's own `with:` input such as `version: <x.y.z>`,
+    is a yes. A `version:` in another step is not the zizmor pin. A step
+    that runs the shared action (`actions/zizmor@<sha>` or `$/actions/zizmor`) is also a yes: its
+    `run.sh` holds the pin. No version and no shared action is a no.

@@ -7,6 +7,8 @@ Readers: each one finds the records of a fixture repo laid out under docs/ (a ro
 an extras file), and of a repo still at its legacy root folders. Extras: a repo's extras file adds
 its own kind. Constant check: a mutant that puts a record path literal back in one reader, or
 moves the guard's literal, is red; a kind name, a docstring and a comment are not.
+Waiting copy: a repo whose extras file names a waiting page must hold its `waiting/` folder on its record branch,
+and an unreadable branch is unknown. Cases run the child-repo probe on git fixtures.
 Identity: check_layout.py reads the readers of claude-settings itself, so it gives no verdict
 elsewhere. A child repo's tree, an installed copy and a stray folder get one refusal line that points
 to `compliance_probes.py layout <root>`; a worktree, a subfolder and a symlinked path of a checkout pass.
@@ -28,6 +30,7 @@ LINT = os.path.abspath(os.environ.get("LAYOUT_LINT_UNDER_TEST") or HERE)
 REPO = os.path.dirname(LINT)
 sys.path.insert(0, os.path.join(HERE, "..", "testing"))
 sys.path.insert(0, HERE)
+import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py)
 import _test_temp  # noqa: E402  test-temp-standard: every temp path comes from this run's folder
 import tracked_tree  # noqa: E402  copies what git lists, so no fixture lists files (testing/tracked_tree.py)
 RUN_FOLDER = _test_temp.run_folder()  # test-temp-standard (one run folder per test run; its sweep is proved in test_find_copies.py)
@@ -97,9 +100,15 @@ class LayoutFile(Tree):
         want = {"claude-md": "CLAUDE.md", "agents-md": "AGENTS.md", "rules": ".claude/rules",
                 "decisions": "docs/decisions", "debts": "docs/debts", "debt-notes": "docs/debts/notes.md",
                 "plans": "docs/plans", "specs": "docs/specs", "records-index": "docs/records.md",
-                "todo": "docs/todo.md", "map": "docs/map", "scorecard": "docs/health/compliance.md", "design": "docs/design", "tokens": "tokens/tokens.json", "shots": "shots"}
+                "todo": "docs/todo.md", "map": "docs/map", "scorecard": "docs/health/compliance.md", "design": "docs/design", "tokens": "tokens/tokens.json", "shots": "shots",
+                "waiting-data": "waiting"}
         self.assertEqual({k: v["path"] for k, v in kinds.items()}, want)
         self.assertEqual(self.layout.layout()["extras"], EXTRAS)
+
+    def test_waiting_data_is_a_waiting_kind_not_core(self):
+        kinds = self.layout.kinds()
+        self.assertIn("waiting-data", kinds, "no waiting-data kind in the layout")  # scope: the layout
+        self.assertEqual(kinds["waiting-data"].get("set"), "waiting", "waiting-data is not set waiting")
 
     def test_rolled_out_repo_reads_docs(self):
         self.roll_out()
@@ -369,6 +378,128 @@ class RecordBranch(Tree):
                     self.layout.record_branch(self.tree)
 
 
+class WaitingCopy(Tree):
+    """The waiting page's copy lives in `waiting/` on the record branch (decision waiting-data-in-repo). A repo whose
+    extras file names a waiting page must hold that folder there. The child-repo layout probe runs the check, and it
+    reads the branch that record_branch() names, the local ref first, then origin's. A branch that cannot be read is
+    unknown: exit 2, never a pass and never a fail (a shallow CI clone holds no record branch)."""
+    URL = "https://claude.ai/artifact/abc123"
+    COPY = {"waiting/items/a.json": '{"id": "a"}\n'}
+    BRIEF = {"briefs/a.md": "# Brief\n"}
+
+    def setUp(self):
+        super().setUp()
+        self.layout = load("layout_under_test", os.path.join(LINT, "layout.py"))
+        self.git("init", "-q")
+        self.git("symbolic-ref", "HEAD", "refs/heads/main")
+        for name, kind in self.layout.layout()["kinds"].items():
+            # The probe flags a missing core kind, so each one holds a file. The copy is not on main, so its kind is skipped.
+            if kind.get("set") == "core" and name != "waiting-data":
+                path = kind["path"]
+                self.put(path if "." in os.path.basename(path) else path + "/a.md")
+        self.git("add", "-A", "-f")
+        self.git("commit", "-q", "-m", "base")
+
+    def git(self, *args, input=None, env=None):
+        """One git step of the fixture repo. Commit signing is off for the run (lint/_test_git.py)."""
+        done = subprocess.run(["git", "-C", self.tree, "-c", "user.name=test", "-c", "user.email=test@example.invalid", *args],
+                              capture_output=True, text=True, input=input, env=env, timeout=30, check=True)
+        return done.stdout
+
+    def extras(self, keys):
+        data = {"kinds": {}, "rolled-out": True}
+        data.update(keys)
+        self.put(EXTRAS, json.dumps(data))
+
+    def record(self, branch, files):
+        """A record branch whose one commit holds `files` ({path: text}). Plumbing only: no checkout moves."""
+        env = dict(os.environ, GIT_INDEX_FILE=os.path.join(self.tree, ".git", "index-" + branch))
+        self.git("read-tree", "--empty", env=env)
+        for rel, text in files.items():
+            blob = self.git("hash-object", "-w", "--stdin", input=text, env=env).strip()
+            self.git("update-index", "--add", "--cacheinfo", "100644," + blob + "," + rel, env=env)
+        tree = self.git("write-tree", env=env).strip()
+        commit = self.git("commit-tree", tree, "-m", "record", env=env).strip()
+        self.git("update-ref", "refs/heads/" + branch, commit)
+
+    def ref_exists(self, ref):
+        return subprocess.run(["git", "-C", self.tree, "rev-parse", "--verify", "-q", ref], capture_output=True).returncode == 0
+
+    def origin_only(self, branch):
+        """The branch on a bare origin, with no local ref: what a fetch leaves behind."""
+        bare = tempfile.mkdtemp(prefix="origin-", dir=RUN_FOLDER)
+        self.addCleanup(tracked_tree.rm_tree, bare)
+        subprocess.run(["git", "init", "-q", "--bare", bare], check=True, capture_output=True)
+        self.git("remote", "add", "origin", bare)
+        self.git("push", "-q", "origin", branch)
+        self.git("update-ref", "-d", "refs/heads/" + branch)
+        self.assertTrue(self.ref_exists("refs/remotes/origin/" + branch), "the fixture lost origin's ref")  # scope: the fixture
+        self.assertFalse(self.ref_exists("refs/heads/" + branch), "the fixture kept the local ref")
+
+    def probe(self):
+        return run([os.path.join(LINT, "compliance_probes.py"), "layout", self.tree], self.tree)
+
+    def test_a_waiting_page_with_no_copy_on_its_record_branch_is_flagged(self):
+        self.extras({"waiting-page": self.URL})
+        self.record("roadmap", self.BRIEF)
+        code, out = self.probe()
+        self.assertEqual(code, 1, out)
+        self.assertNotIn("in shape", out)
+        self.assertIn("waiting", out, "the finding does not name the waiting folder")
+
+    def test_a_copy_on_the_record_branch_passes(self):
+        self.extras({"waiting-page": self.URL})
+        self.record("roadmap", dict(self.BRIEF, **self.COPY))
+        code, out = self.probe()
+        self.assertEqual((code, out.strip()), (0, "layout: in shape"), out)
+
+    def test_a_repo_with_no_waiting_page_is_not_asked_for_a_copy(self):
+        self.extras({})
+        self.record("roadmap", self.BRIEF)
+        code, out = self.probe()
+        self.assertEqual((code, out.strip()), (0, "layout: in shape"), out)
+
+    def test_the_record_branch_the_layout_names_is_the_one_read(self):
+        self.extras({"waiting-page": self.URL, "record-branch": "roadmap-fork"})
+        self.record("roadmap", self.COPY)
+        self.record("roadmap-fork", self.BRIEF)
+        code, out = self.probe()
+        self.assertEqual(code, 1, out)
+        self.assertNotIn("in shape", out)
+
+    def test_a_copy_on_origin_only_is_read(self):
+        self.extras({"waiting-page": self.URL})
+        self.record("roadmap", self.COPY)
+        self.origin_only("roadmap")
+        code, out = self.probe()
+        self.assertEqual((code, out.strip()), (0, "layout: in shape"), out)
+
+    def test_origin_without_the_copy_is_flagged(self):
+        self.extras({"waiting-page": self.URL})
+        self.record("roadmap", self.BRIEF)
+        self.origin_only("roadmap")
+        code, out = self.probe()
+        self.assertEqual(code, 1, out)
+        self.assertNotIn("in shape", out)
+
+    def test_a_record_branch_that_cannot_be_read_is_unknown_not_a_pass(self):
+        self.extras({"waiting-page": self.URL})
+        self.assertFalse(self.ref_exists("refs/heads/roadmap"), "the fixture has a local roadmap")  # scope: the fixture
+        self.assertFalse(self.ref_exists("refs/remotes/origin/roadmap"), "the fixture has an origin roadmap")
+        code, out = self.probe()
+        self.assertEqual(code, 2, out)
+        self.assertIn("unknown", out)
+        self.assertNotIn("in shape", out)
+
+    def test_a_waiting_page_not_rolled_out_with_no_copy_to_read_is_unknown(self):
+        self.extras({"waiting-page": self.URL, "rolled-out": False})
+        self.assertFalse(self.ref_exists("refs/heads/roadmap"), "the fixture has a local roadmap")  # scope: the fixture
+        code, out = self.probe()
+        self.assertEqual(code, 2, out)
+        self.assertIn("unknown", out)
+        self.assertNotIn("preview finding", out, "an unread copy reads as a clear preview")
+
+
 class SetWaitingPage(Tree):
     """Triage makes a repo's waiting page when the repo has none (decision session-tiers). It writes
     only the "waiting-page" key, never marks the repo rolled out, and never overwrites a key already set."""
@@ -518,6 +649,167 @@ class SetWaitingPage(Tree):
         self.assertEqual(code, 2, out)
         self.assertNotIn("Traceback", out)
         self.assertTrue(out.strip(), "the failure printed nothing")
+
+
+class Registry(Tree):
+    """The artifacts registry: each claude.ai artifact a repo holds is one entry under "artifacts" in its extras file.
+    The waiting page is the entry whose role is "waiting-page". The old "waiting-page" key stays a fallback after it."""
+    PAGE = "https://claude.ai/artifact/page01"
+    OLD = "https://claude.ai/artifact/old001"
+    QUEUE = "https://claude.ai/code/artifact/queue02"
+
+    def setUp(self):
+        super().setUp()
+        self.layout = load("layout_under_test", os.path.join(LINT, "layout.py"))
+
+    def registry(self, entries, key=None):
+        data = {"kinds": {}, "artifacts": entries}
+        if key is not None:
+            data["waiting-page"] = key
+        self.put(EXTRAS, json.dumps(data))
+
+    def page_entry(self, **changes):
+        return dict({"id": "page01", "url": self.PAGE, "role": "waiting-page", "account": "work"}, **changes)
+
+    def queue_entry(self, **changes):
+        return dict({"id": "queue02", "url": self.QUEUE, "role": "queue-page", "account": "work",
+                     "collections": ["items"]}, **changes)
+
+    def external_entry(self, entry_id="ext001", **changes):
+        """An artifact the repo holds and does not export (`export` false): a page in an account this one cannot read."""
+        return dict({"id": entry_id, "url": "https://claude.ai/artifact/" + entry_id, "role": "page",
+                     "account": "other-account", "export": False}, **changes)
+
+    def read_registry(self, what):
+        """layout.artifacts() of the fixture repo. A refusal fails the case with its cause, never as a crash."""
+        try:
+            return self.artifacts()
+        except self.layout.LayoutError as err:
+            self.fail("%s was refused: %s" % (what, err))
+
+    def artifacts(self):
+        self.assertTrue(hasattr(self.layout, "artifacts"), "layout.artifacts(root) is absent: the artifacts registry is not read")
+        return self.layout.artifacts(self.tree)
+
+    def assertReported(self, entry_id, cause):
+        """layout.artifacts() refuses the registry, and its message names the entry by id."""
+        with self.assertRaises(self.layout.LayoutError, msg="%s was not reported" % cause) as caught:
+            self.artifacts()
+        self.assertIn(entry_id, str(caught.exception), "the report for %s does not name entry %s" % (cause, entry_id))
+
+    def test_artifacts_reads_each_registry_entry_in_order(self):
+        self.registry([self.page_entry(), self.queue_entry()])
+        found = self.artifacts()
+        self.assertEqual([e["id"] for e in found], ["page01", "queue02"], "the registry entries were not read in order")
+        self.assertEqual([e["role"] for e in found], ["waiting-page", "queue-page"], "an entry's role was not read")
+        self.assertEqual([e["url"] for e in found], [self.PAGE, self.QUEUE], "an entry's url was not read")
+
+    def test_a_repo_with_no_extras_file_has_no_artifacts(self):
+        self.assertEqual(self.artifacts(), [], "a repo with no extras file was given registry entries")
+
+    def test_the_waiting_page_is_the_waiting_page_role_entry(self):
+        self.registry([self.queue_entry(), self.page_entry()])
+        self.assertEqual(self.layout.waiting_page(self.tree), self.PAGE, "the waiting-page role entry was not read as the page")
+
+    def test_the_waiting_page_role_entry_beats_the_old_key(self):
+        self.registry([self.page_entry()], key=self.OLD)
+        self.assertEqual(self.layout.waiting_page(self.tree), self.PAGE, "the old key won over the waiting-page role entry")
+
+    def test_the_old_key_is_the_fallback_when_no_role_entry_is_set(self):
+        self.registry([self.queue_entry()], key=self.OLD)
+        self.assertEqual(self.layout.waiting_page(self.tree), self.OLD, "the old key was not read as the fallback page")
+
+    def test_a_queue_page_entry_is_not_the_waiting_page(self):
+        self.registry([self.queue_entry()])
+        self.assertEqual(self.layout.waiting_page(self.tree), "unknown", "a queue-page entry was read as the waiting page")
+
+    def test_a_waiting_page_role_entry_whose_url_is_not_an_artifact_link_is_an_error(self):
+        self.registry([self.page_entry(url="https://example.com/x")])
+        with self.assertRaises(self.layout.LayoutError, msg="a role entry that is not an artifact link was not an error"):
+            self.layout.waiting_page(self.tree)
+
+    def test_an_email_as_account_is_reported_by_its_entry(self):
+        self.registry([self.page_entry(account="someone@example.com")])
+        self.assertReported("page01", "an email as account")
+
+    def test_a_duplicate_id_is_reported_by_its_entry(self):
+        self.registry([self.page_entry(), self.queue_entry(id="page01")])
+        self.assertReported("page01", "a duplicate id")
+
+    def test_an_id_over_32_characters_is_reported_by_its_entry(self):
+        long_id = "a" * 33
+        self.registry([self.page_entry(id=long_id, url="https://claude.ai/artifact/" + long_id)])
+        self.assertReported(long_id, "an id of 33 characters")
+
+    def test_an_id_of_32_characters_is_accepted(self):
+        long_id = "b" * 32
+        self.registry([self.page_entry(id=long_id, url="https://claude.ai/artifact/" + long_id)])
+        self.assertEqual([e["id"] for e in self.artifacts()], [long_id], "an id of 32 characters was refused")
+
+    def test_set_waiting_page_writes_the_old_key_and_keeps_the_registry(self):
+        self.registry([self.queue_entry()])
+        self.assertTrue(self.layout.set_waiting_page(self.tree, self.OLD), "set_waiting_page did not write the key")
+        with open(os.path.join(self.tree, *EXTRAS.split("/")), encoding="utf-8") as handle:
+            data = json.load(handle)
+        self.assertEqual(data.get("waiting-page"), self.OLD, "set_waiting_page did not write the old key")
+        self.assertEqual(data.get("artifacts"), [self.queue_entry()], "set_waiting_page dropped the registry")
+
+    def test_an_export_false_entry_is_read_with_no_export_path(self):
+        self.registry([self.external_entry()])
+        found = self.read_registry("an entry with export false")
+        self.assertEqual([e["id"] for e in found], ["ext001"], "the export false entry was not read")
+        self.assertFalse(found[0].get("export"), "the export false entry was given an export path")
+
+    def test_a_full_registry_of_nine_reads_in_order_and_the_waiting_page_stays_readable(self):
+        ids = ["ext%03d" % n for n in range(1, 9)]
+        self.registry([self.page_entry()] + [self.external_entry(i) for i in ids])
+        found = self.read_registry("a registry of nine entries, eight with export false")
+        self.assertEqual([e["id"] for e in found], ["page01"] + ids, "the nine registry entries were not read in order")
+        try:
+            page = self.layout.waiting_page(self.tree)
+        except self.layout.LayoutError as err:
+            self.fail("the waiting page was refused beside the export false entries: %s" % err)
+        self.assertEqual(page, self.PAGE, "the waiting page was not read beside the export false entries")
+
+    def test_an_export_false_entry_still_refuses_a_bad_url_and_an_email_as_account(self):
+        """Control: export false skips only the collections and the export path. The other checks still refuse."""
+        for label, changes in (("a url that is not an artifact link", {"url": "https://example.com/x"}),
+                               ("an email as account", {"account": "someone@example.com"})):
+            with self.subTest(check=label):
+                self.registry([self.external_entry(**changes)])
+                self.assertReported("ext001", label)
+
+    def test_an_export_that_is_true_or_empty_is_still_refused_and_names_its_entry(self):
+        """Control: export is false or a path. True and an empty value stay refused, and the refusal names the entry."""
+        for value in (True, ""):
+            with self.subTest(export=value):
+                self.registry([self.external_entry(export=value, collections=["items"])])
+                with self.assertRaises(self.layout.LayoutError, msg="export %r was not refused" % (value,)) as caught:
+                    self.artifacts()
+                self.assertIn("export", str(caught.exception), "the refusal of export %r does not name export" % (value,))
+                self.assertIn("ext001", str(caught.exception), "the refusal of export %r does not name its entry" % (value,))
+
+    def test_an_entry_with_no_export_key_still_needs_collections(self):
+        """Control: export false is opt-in. An entry with neither collections nor export is still refused."""
+        self.registry([{"id": "ext001", "url": "https://claude.ai/artifact/ext001", "role": "page", "account": "other-account"}])
+        with self.assertRaises(self.layout.LayoutError, msg="an entry with no collections and no export was not refused") as caught:
+            self.artifacts()
+        self.assertIn("collections", str(caught.exception), "the refusal does not name the missing collections")
+        self.assertIn("ext001", str(caught.exception), "the refusal does not name its entry")
+
+    def test_an_export_path_entry_keeps_its_path(self):
+        """Control: an entry with a path exports to that path, as it does today."""
+        self.registry([self.queue_entry(export="artifacts/custom")])
+        found = self.artifacts()
+        self.assertEqual(len(found), 1, "the entry with a path was not read")
+        self.assertEqual(found[0]["export"], "artifacts/custom", "an entry's export path was not kept")
+
+    def test_a_waiting_page_entry_with_export_false_is_refused_and_named(self):
+        """The waiting page is always exported to the waiting-data folder, so export false on its role is refused, not held."""
+        self.registry([self.page_entry(export=False)])
+        with self.assertRaises(self.layout.LayoutError, msg="a waiting-page entry with export false was accepted") as caught:
+            self.artifacts()
+        self.assertIn("page01", str(caught.exception), "the refusal of a waiting-page entry with export false does not name its entry")
 
 
 class WaitingPageBranding(Tree):
@@ -1024,6 +1316,112 @@ class Identity(Tree):
         script = os.path.join(worktree, "lint", "check_layout.py")
         self.assertEqual(run([script], worktree), (0, ""))
         self.assertEqual(run([script], os.path.join(worktree, "lint")), (0, ""))
+
+
+# The mockup homes of a repo (rule building-allow-list-is-the-constant). The repo is "fixture", from its origin, so
+# its machine home is <home>/Developer/fixture-imports: the name segment of owner/name, never the owner.
+MACHINE = "fixture-imports"
+ORIGIN = "git@github.com:owner/fixture.git"
+WIN_HOME = "C:\\Users\\x"  # a Windows owner's home, given as the judge's home
+APP_SUPPORT = "~/Library/Application Support/Claude-Work/side-session-notes/abc123/a.html"
+SHOT_URL = "https://claude.ai/artifact/0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d/asset/shot.png"
+
+
+class MockupHomes(Tree):
+    """The one mockup home of a repo is its design folder: a mockup is a repo path under it, and git holds it. The
+    machine-home form ~/Developer/<repo name>-imports is refused. Two readers:
+    mockup_homes(root, home=None) names the folders, and mockup_home_problem(root, file, home=None) gives None for a
+    file in the design folder and a sentence for any other file. The home is passed in, so no case reads or writes
+    the real home. A missing name fails by name (not built yet)."""
+
+    def setUp(self):
+        super().setUp()
+        self.layout = load("layout_under_test", os.path.join(LINT, "layout.py"))
+        self.put(".git/config", '[remote "origin"]\n\turl = %s\n' % ORIGIN)
+        self.home = os.path.join(self.tree, "home")
+        os.makedirs(self.home)
+
+    def fn(self, name):
+        found = getattr(self.layout, name, None)
+        if found is None:
+            self.fail("lint/layout.py has no %s yet" % name)
+        return found
+
+    def judge(self, file, home=None):
+        return self.fn("mockup_home_problem")(self.tree, file, home=self.home if home is None else home)
+
+    def passes(self, file, home=None):
+        problem = self.judge(file, home)
+        self.assertIsNone(problem, "the judge refused %r: %s" % (file, problem))
+
+    def refuses(self, file, home=None):
+        problem = self.judge(file, home)
+        self.assertIsInstance(problem, str, "the judge passed %r, want a refusal" % (file,))
+        self.assertTrue(problem.strip(), "the judge refused %r with no sentence" % (file,))
+
+    def test_the_only_home_is_the_design_folder(self):
+        homes = [str(h) for h in self.fn("mockup_homes")(self.tree) if h]
+        design = os.path.join(self.tree, *self.layout.path(self.tree, "design").split("/"))
+        self.assertEqual(homes, [design], "mockup_homes names a home other than the design folder")
+
+    def test_item_file_under_the_machine_home_is_refused(self):
+        self.refuses(os.path.join(self.home, "Developer", MACHINE, "item48", "a.html"))
+
+    def test_tilde_machine_home_form_is_refused(self):
+        self.refuses("~/Developer/%s/item48/a.html" % MACHINE)
+
+    def test_windows_owner_machine_home_file_is_refused(self):
+        self.refuses("C:\\Users\\x\\Developer\\%s\\item48\\a.html" % MACHINE, home=WIN_HOME)
+
+    def test_design_folder_file_passes_when_repo_relative(self):
+        self.passes("docs/design/item48/a.html")
+
+    def test_design_folder_file_passes_when_absolute_in_the_checkout(self):
+        self.passes(os.path.join(self.tree, "docs", "design", "item48", "a.html"))
+
+    def test_application_support_path_with_spaces_fails(self):
+        self.refuses(APP_SUPPORT)
+
+    def test_windows_appdata_mockup_fails(self):
+        self.refuses("C:\\Users\\x\\AppData\\Roaming\\Claude-Work\\side-session-notes\\abc123\\a.html", home=WIN_HOME)
+
+    def test_dotdot_escape_out_of_the_design_folder_fails(self):
+        self.refuses("docs/design/../../escape/a.html")
+
+    def test_http_url_fails(self):
+        self.refuses("https://example.com/shot.png")
+
+    def test_claude_artifact_asset_url_fails(self):
+        self.refuses(SHOT_URL)
+
+    def test_missing_file_fails(self):
+        self.refuses(None)
+
+    def test_empty_file_fails(self):
+        self.refuses("")
+
+    def test_file_directly_in_the_imports_folder_fails(self):
+        self.refuses("~/Developer/%s/a.html" % MACHINE)
+
+    def test_checkout_file_outside_the_design_folder_fails(self):
+        self.refuses(os.path.join(self.tree, "scratch", "a.html"))
+
+    def test_relative_file_outside_the_design_folder_fails(self):
+        self.refuses("scratch/a.html")
+
+    def test_the_refusal_names_the_design_folder_and_not_the_machine_home(self):
+        problem = self.judge(APP_SUPPORT)
+        self.assertIn(self.layout.path(self.tree, "design"), problem, "the refusal does not name the design folder")
+        self.assertNotIn(MACHINE, problem, "the refusal names the machine home, which no longer holds a mockup")
+
+    def test_a_folder_path_with_a_trailing_slash_is_refused(self):
+        self.refuses("docs/design/item48/")
+
+    def test_a_folder_path_with_a_trailing_backslash_is_refused(self):
+        self.refuses("docs\\design\\item48\\")
+
+    def test_the_design_folder_itself_is_refused(self):
+        self.refuses("docs/design")
 
 
 if __name__ == "__main__":

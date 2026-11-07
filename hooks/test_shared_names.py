@@ -290,6 +290,42 @@ def case_the_run_folder_sweep_removes_an_old_sibling_and_keeps_a_new_one():
     return left == [True, False, True], "own, old, new kept: %s, want [True, False, True]" % left
 
 
+def case_lane_head_refs_pinned():
+    """lane_head_refs(slug) is the one home of the head refs a lane's pull request may carry: the bare step slug and
+    `lane/<slug>`. Both forms are real (a pull request on `lane/reviewer-spawn-model` exists). A missing name is a
+    failed case, not a crash, so the report names the cause."""
+    shared = _shared()
+    fn = getattr(shared, "lane_head_refs", None)
+    if not callable(fn):
+        return False, "shared_names.lane_head_refs is absent"
+    got = fn("lane-x")
+    return (isinstance(got, (tuple, list)) and tuple(got) == ("lane-x", "lane/lane-x"),
+            "lane_head_refs('lane-x')=%r" % (got,))
+
+
+def case_one_home_for_lane_heads():
+    """build.py and the archive guard (hooks/guard_merge.py) import lane_head_refs from shared_names. Neither defines
+    its own copy, and neither holds the `lane/` prefix as a literal, so the two forms cannot drift apart."""
+    problems = []
+    for rel in ("hooks/guard_merge.py", "skills/roadmap/build.py"):
+        with open(os.path.join(HERE, "..", rel), encoding="utf-8") as handle:
+            tree = ast.parse(handle.read())
+        imported = any(isinstance(node, ast.ImportFrom) and node.module == "shared_names"
+                       and any(alias.name == "lane_head_refs" for alias in node.names)
+                       for node in ast.walk(tree))
+        copied = [node.lineno for node in ast.walk(tree)
+                  if isinstance(node, ast.FunctionDef) and node.name == "lane_head_refs"]
+        literal = [node.lineno for node in ast.walk(tree)
+                   if isinstance(node, ast.Constant) and node.value == "lane/"]
+        if not imported:
+            problems.append("%s does not import lane_head_refs from shared_names" % rel)
+        if copied:
+            problems.append("%s defines its own lane_head_refs at line %d" % (rel, copied[0]))
+        if literal:
+            problems.append("%s holds the literal 'lane/' at line %d" % (rel, literal[0]))
+    return not problems, "; ".join(problems) or "both read the one home"
+
+
 CASES = [
     ("(a) shared_names.py exists", case_module_exists),
     ("(a) shared_names.py imports only the standard library", case_stdlib_only),
@@ -312,6 +348,9 @@ CASES = [
      case_local_time_fails_open_on_bad_shared_names),
     ("(p) the run folder sweep removes an old sibling and keeps a new one",
      case_the_run_folder_sweep_removes_an_old_sibling_and_keeps_a_new_one),
+    ("(k) shared_names holds lane_head_refs: the bare step slug and lane/<slug>", case_lane_head_refs_pinned),
+    ("(k2) build.py and the archive guard import lane_head_refs, with no copy of it or the lane/ prefix",
+     case_one_home_for_lane_heads),
 ]
 
 

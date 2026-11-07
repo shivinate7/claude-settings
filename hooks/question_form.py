@@ -4,10 +4,10 @@ chat question box (AskUserQuestion) and a write of a waiting-page item (Artifact
 question-form holds the ruling; rule `style-question-form` holds the text.
 
     chat_hit(tool_input) -> (rule, matched)   an AskUserQuestion input; judges each question with 2+ options
-    item_hit(op, entry)  -> (rule, matched)   one waiting-page write: set, update or str_replace
+    item_hit(op, entry, cwd) -> (rule, matched)   one waiting-page write: set, update or str_replace
 
 ("", "") is a pass. hooks/call_judge.py calls chat_hit and page_item_hit; hooks/guard.py data_tool_hit calls
-page_item_hit, which filters the ArtifactData writes by url and collection and then calls item_hit. Nothing here writes a file. The only process it starts is the one git read of past_rulings, for a caller that makes a model call anyway.
+page_item_hit, which filters the ArtifactData writes by collection and url and then calls item_hit; a write to another page gets only the check for an option keyed none. Nothing here writes a file. The only process it starts is the one git read of past_rulings, for a caller that makes a model call anyway.
 
     past_rulings(text, repo_root) -> (candidates, unknown)   the decision, debt and step rulings the judge reads
     key_overlap(reply, earlier)   -> clashing option keys     lint/report_guard.py rule question-keys
@@ -110,7 +110,8 @@ CHAT_FORM_REASON = FORM_REASON + (" In the question box the lines go in the ques
 STAKE_REASON = ("A decision is the owner's only when he can judge it. Write the Problem line as "
                 "\"Problem (<stake>): <the problem, and why it needs his word>\", where stake is one of %s. "
                 "A stood pick may write \"Problem: <text>\". If no stake fits, take your own pick and set "
-                "stands: true." % ", ".join(OWNER_STAKES))
+                "stands: true. (decision owner-judge-test, a decision reaches the owner only when he can judge it)"
+                % ", ".join(OWNER_STAKES))
 
 
 def _lines_hit(text, stands=False):
@@ -285,13 +286,14 @@ def port_item_hit(op: str, data) -> str:
     return ""
 
 
-def _write_data(entry):
-    """The data of one write: `data`, else the JSON in `file_path`. None when neither reads."""
+def _write_data(entry, cwd=""):
+    """The data of one write: `data`, else the JSON in `file_path`, a relative path read against the
+    payload's `cwd` (the hook process's own cwd is not the session's). None when neither reads."""
     data = entry.get("data")
     path = entry.get("file_path")
     if data is None and isinstance(path, str) and path:
         try:
-            with open(path, encoding="utf-8") as f:
+            with open(os.path.join(cwd, path) if cwd else path, encoding="utf-8") as f:
                 data = json.load(f)
         except Exception:
             return None
@@ -327,6 +329,9 @@ WIDENS_MARK = re.compile("|".join(_words_pattern(t) for t in (WIDENS_TEXT, LEGAC
 RECOMMENDED = re.compile(r"\(Recommended\)", re.I)
 
 
+WIDENS_KEY = "widens"  # the Python home of the mark's key; call_judge.WIDENING_RULE names it too, and skills/waiting-page/page.html reads the literal in JS
+
+
 def widens_pick_hit(data) -> str:
     """The matched text when this write's `pick` (a str, or a list of keys) names an option it marks
     `widens: true`. An update that carries `pick` without `options` cannot see the stored options and passes."""
@@ -339,7 +344,7 @@ def widens_pick_hit(data) -> str:
         return ""  # an absent or null pick picks nothing, so it never matches a keyless option
     keys = {p for p in pick if isinstance(p, str)}
     if any(isinstance(o, dict) and isinstance(o.get("key"), str) and o["key"] in keys
-           and o.get("widens") is True for o in options):
+           and o.get(WIDENS_KEY) is True for o in options):
         return "pick names a widening option"
     return ""
 
@@ -879,9 +884,9 @@ def form_str_replace_hit(entry):
     return PASS
 
 
-def item_hit(op, entry):
+def item_hit(op, entry, cwd=""):
     """(rule, matched) for one write of a waiting item that a rule refuses, else ("", "")."""
-    data = _write_data(entry)
+    data = _write_data(entry, cwd)
     hit = item_field_hit(op, entry, data)
     if hit:
         return "item-field-rendered", hit
@@ -956,15 +961,38 @@ def _git_root_of(cwd):
         here = parent
 
 
-def waiting_page_root(tool_input, cwd):
-    """The git root of cwd's repo when the call's url is that repo's waiting page (lint/layout.py, the one
-    home), else None. A repo with no page reads as unknown, and its calls are not judged."""
+def _layout():
+    """lint/layout.py, the one home of the layout and the mockup home."""
     lint = os.path.join(HERE, "..", "lint")
     if lint not in sys.path:
         sys.path.append(lint)
     import layout
+    return layout
+
+
+def waiting_page_root(tool_input, cwd):
+    """The git root of cwd's repo when the call's url is that repo's waiting page (lint/layout.py, the one
+    home), else None. A repo with no page reads as unknown; only the none-key check judges its calls."""
+    layout = _layout()
     root = _git_root_of(cwd)
     return root if root and layout.is_waiting_page_url(root, tool_input.get("url")) else None
+
+
+def design_file_problems(writes, root):
+    """[(doc_id, slug, sentence)] for each `designs` entry in `writes` (design_writes' picture writes) that has no
+    `file`, or whose `file` lint/layout.py mockup_home_problem refuses against this machine's home. The sentence names
+    the design folder and the field, never the refused path. An entry that is no dict has no file. Judges the shape
+    only: it does not ask origin, and starts no process (rule mockup-home)."""
+    layout = _layout()
+    found = []
+    for _op, doc_id, data in design_writes(writes):
+        designs = data.get("designs")
+        for entry in designs if isinstance(designs, list) else []:
+            entry = entry if isinstance(entry, dict) else {}
+            problem = layout.mockup_home_problem(root, entry.get("file"))
+            if problem:
+                found.append((doc_id, str(entry.get("slug") or "?"), problem))
+    return found
 
 
 def is_waiting_page(tool_input, cwd) -> bool:
@@ -974,7 +1002,7 @@ def is_waiting_page(tool_input, cwd) -> bool:
 
 def page_item_hit(tool_input, cwd=""):
     """((rule, matched), writes) for one ArtifactData call. `writes` are the (op, entry) item writes of
-    this repo's waiting page, empty for a read, another collection or another page. The hit is the first
+    this repo's waiting page, empty for a read, another collection or another page (such a write still gets the check for an option keyed none). The hit is the first
     write that a rule refuses, else ("", "")."""
     if not isinstance(tool_input, dict):
         return PASS, []
@@ -983,13 +1011,33 @@ def page_item_hit(tool_input, cwd=""):
     else:
         entries = [(tool_input.get("action"), tool_input)]
     writes = [(op, e) for op, e in entries if op in ITEM_OPS and e.get("collection") == WAITING_ITEMS]
-    if not writes or not is_waiting_page(tool_input, cwd):  # a read or another collection loads nothing more
+    if not writes:  # a read or another collection loads nothing more
         return PASS, []
+    if not is_waiting_page(tool_input, cwd):
+        # The cwd's page is unknown, or the url is another's: only the option-key check still reads the
+        # write, and refuses only a key none. No writes return, so no other check or model review follows.
+        return keyed_options_hit(writes, cwd), []
     for op, entry in writes:
-        hit = item_hit(op, entry)
+        hit = item_hit(op, entry, cwd)
         if hit[0]:
             return hit, writes
     return PASS, writes
+
+
+def keyed_options_hit(writes, cwd=""):
+    """(rule, matched) for the first of `writes` that has the waiting-page decision shape (an `options`
+    list) and an option keyed none, else ("", ""). Only the key none: the page reserves it, so it blocks the
+    item. Judged whatever page the call names, since the page cannot be named reliably (another checkout's
+    page, or a repo with no page key). Any other key, and any other shape, is no waiting-page item to this
+    check, so it passes. A task, a note and a closed item pass, as in option_letter_hit."""
+    for op, entry in writes:
+        if op == "str_replace":  # carries no options: its shape, and so its page, is unseen
+            continue
+        data = _write_data(entry, cwd)
+        options = data.get("options") if _open_decision(data) else None
+        if isinstance(options, list) and any(_keyed_none(o) for o in options):
+            return "option-letter-keys", NONE_KEY_HIT
+    return PASS
 
 
 def design_writes(writes):
@@ -1098,14 +1146,26 @@ def key_named_hit(texts) -> str:
     return ""
 
 
+NONE_KEY_HIT = "option keyed none"
+
+
+def _open_decision(data) -> bool:
+    """True for the data of an open decision. A task, a note and a closed item are not judged. The one filter
+    of option_letter_hit and keyed_options_hit."""
+    return isinstance(data, dict) and data.get("kind", "decision") == "decision" and data.get("status") != "closed"
+
+
+def _keyed_none(option) -> bool:
+    """True for an option keyed none, the key the page reserves for its own "none of these"."""
+    return isinstance(option, dict) and option.get("key") == OPTION_NONE_KEY
+
+
 def option_letter_hit(op: str, data) -> str:
     """The matched text when this write of a waiting-page decision keys an option by anything but its
     position's letter, has a label that opens with another letter's tag, or names an option in its text by a
     letter-and-digit key. A task, a note and a
     closed item pass; an update that carries no `options` has no keys to judge."""
-    if not isinstance(data, dict) or data.get("kind", "decision") != "decision":
-        return ""
-    if data.get("status") == "closed":
+    if not _open_decision(data):
         return ""
     options = data.get("options")
     if isinstance(options, list):
@@ -1114,8 +1174,8 @@ def option_letter_hit(op: str, data) -> str:
             key = o.get("key") if isinstance(o, dict) else None
             if not isinstance(key, str):
                 return "option with no string key"
-            if key == OPTION_NONE_KEY:
-                return "option keyed none"
+            if _keyed_none(o):
+                return NONE_KEY_HIT
             if key in seen:
                 return "option key that repeats"
             seen.add(key)
@@ -1165,7 +1225,8 @@ ITEM_FIELDS_PAGE = os.path.join(HERE, "..", "skills", "waiting-page", "page.html
 ITEM_FIELD_REASON = ("The waiting page draws only the top-level item fields that its itemFields block "
                      "lists (skills/waiting-page/page.html). Draw the field on the page and add it to "
                      "that block, or leave it out of the write. An update may remove a stored field "
-                     "with {\"__delete__\": true}.")
+                     "with {\"__delete__\": true}. "
+                     "(decision item-field-rendered, a waiting item names only fields the page draws)")
 
 
 def _item_fields(path):
@@ -1274,7 +1335,8 @@ PAGE_REASONS = {"port-question": PORT_REASON, "uniform-pick": WIDENS_REASON, "pr
                 DEPARTS_RULE: PAGE_DEPARTS_REASON,
                 "option-letter-keys": LETTER_KEYS_REASON, "rework-off-page": REWORK_REASON}
 CHAT_STAKE_REASON = ("A question is the owner's only when he can judge it. Write the Problem line as "
-                     "\"Problem (<stake>): <the problem, and why it needs his word>\", where stake is one of %s."
+                     "\"Problem (<stake>): <the problem, and why it needs his word>\", where stake is one of %s. "
+                     "(decision owner-judge-test, a decision reaches the owner only when he can judge it)"
                      % ", ".join(OWNER_STAKES))
 CHAT_REASONS = {"uniform-pick": CHAT_WIDENS_REASON, "press-link": CHAT_PRESS_LINK_REASON,
                 FORM_RULE: CHAT_FORM_REASON, STAKE_RULE: CHAT_STAKE_REASON, DEPARTS_RULE: DEPARTS_REASON}

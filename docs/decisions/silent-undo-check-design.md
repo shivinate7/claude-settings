@@ -86,8 +86,10 @@ changed lines are a new edit, so the reversal dial stays at one line until a mea
 **Unknown is red in CI.** No upstream, a shallow clone, a merge of three or more parents, an old git, or a
 failed git read prints UNKNOWN. Locally it exits 0. With env `CI` or `--strict` it exits 1
 (ci-unknown-is-red). `merge.py` refuses on unknown, because its merge cannot be taken back. The
-way out that does not depend on the check is the owner flag
-`merge <pr> --confirm --undo-check-unknown-ok "<reason>"`. It is logged and never excuses a finding.
+way out that does not depend on the check is the reason flag
+`merge <pr> --confirm --undo-check-unknown-ok "<reason>"`. Claude may type it, with a reason (owner
+ruling, Cockpit item 178 a, 2026-11-03 22:31 CST). Each lift is printed and written to the merge
+commit message as `Reason flag: --undo-check-unknown-ok: <reason>`. It never excuses a finding.
 
 Kind: process
 Home: lint/check_silent_undo.py

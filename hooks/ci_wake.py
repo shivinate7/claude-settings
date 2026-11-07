@@ -3,7 +3,8 @@
 
 PostToolUse hook for the Bash and PowerShell tools, registered with `asyncRewake: true`. Only
 `gh pr ready <N>` starts a watch, and each one in a command gets its own, in this one process.
-A push starts none. Per PR it reads the head once. It lists that head's runs until a run that
+A push starts none. Neither does MCP `update_pull_request`, the cloud's ready route: the hook's matcher
+sees only Bash and PowerShell, and `gh pr ready` gets 403 in cloud (route pr-ready-gh-cli-cloud; debt ci-wake-misses-mcp-ready). Per PR it reads the head once. It lists that head's runs until a run that
 ran has ended (a skipped draft run is no run), waits on it, and prints one line:
 
     CI <green|red|cancelled> on <sha7>: <failing job names>
@@ -289,8 +290,8 @@ def current_branch(cwd):
 
 
 def read_pr(selector, repo, cwd):
-    """The PR a `gh pr ready` selector names, by REST: `gh pr view` is GraphQL, which the cloud proxy
-    refuses. selector: a number, a PR url, a branch, or "" for the folder's branch. repo is
+    """The PR a `gh pr ready` selector names, by REST: `gh pr view` is GraphQL, which the cloud proxy (route
+    graphql-gh-api-cloud) refuses. selector: a number, a PR url, a branch, or "" for the folder's branch. repo is
     [HOST/]OWNER/REPO, else gh fills {owner}/{repo} from the folder. NoPR when none is found."""
     m = PR_URL.match(selector)
     if m:
