@@ -725,11 +725,36 @@ class RecordSlugsTests(unittest.TestCase):
         self.put(path, text)
         self.assert_tree(["%s:%d GLOSS001 session-tiers" % (path, line_of(text, "session-tiers"))])
 
-    def test_a_bare_prose_cite_with_a_gloss_passes(self):
+    def test_a_gloss_in_another_file_does_not_clear_a_bare_prose_cite(self):
         self.decision("session-tiers")
         self.put(self.rel("decisions", "glossed.md"), "# Glossed\n\nSee session-tiers (the session shapes).\n")
         path = self.rel("decisions", "bare.md")  # the positive: the same cite with no gloss
         text = "# Bare\n\nSee session-tiers for more.\n"
+        self.put(path, text)
+        self.assert_tree(["%s:%d GLOSS001 session-tiers" % (path, line_of(text, "session-tiers"))])
+
+    def test_a_capitalised_bare_prose_cite_is_a_cite_printed_in_lower_case(self):
+        # The id matches in any case. The finding prints the slug as the decision names it, in lower case.
+        self.decision("session-tiers")
+        starts = self.rel("decisions", "starts.md")
+        starts_text = "# S\n\nSession-tiers hold the shapes.\n"
+        self.put(starts, starts_text)
+        mid = self.rel("decisions", "mid.md")
+        mid_text = "# M\n\nRule Session-tiers holds.\n"
+        self.put(mid, mid_text)
+        self.put(self.rel("decisions", "glossed.md"), "# G\n\nSession-tiers (the session shapes) hold.\n")  # no finding
+        self.assert_tree(["%s:%d GLOSS001 session-tiers" % (starts, line_of(starts_text, "Session-tiers")),
+                          "%s:%d GLOSS001 session-tiers" % (mid, line_of(mid_text, "Session-tiers"))])
+
+    def test_a_bold_or_italic_cite_takes_its_gloss_and_a_bare_bold_cite_is_a_finding(self):
+        # The gloss test reads past the markup around a cite. An underscore is a word character, so `_x_` is never a
+        # cite: its case passes without the gloss test.
+        self.decision("session-tiers")
+        self.put(self.rel("decisions", "bold.md"), "# B\n\n**session-tiers**: the session shapes\n")
+        self.put(self.rel("decisions", "star.md"), "# I\n\n*session-tiers*: the session shapes\n")
+        self.put(self.rel("decisions", "under.md"), "# I\n\n_session-tiers_ (the session shapes)\n")
+        path = self.rel("decisions", "bare.md")  # the positive: a bold cite with no gloss
+        text = "# B\n\n**session-tiers** holds.\n"
         self.put(path, text)
         self.assert_tree(["%s:%d GLOSS001 session-tiers" % (path, line_of(text, "session-tiers"))])
 
