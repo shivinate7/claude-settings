@@ -5,7 +5,7 @@
   "order": 0.7,
   "owner": "coordinator",
   "why": "Coordinator, 13:48 CST Nov 7: page_grant.py prints \"not counted: item status is closed\" for an answer on an item that triage closed after routing it. So a lane that reads its own answer after the close can never pass the check. Lane review-fix-check-round hit this on item 356 at 13:43 CST. Triage closes at routing (owner, item 316), so every routed answer hits it.",
-  "note": "Done check: a red test where an answer saved before the close is counted after the close. An answer saved after the close is still refused. The guard's verdict changes, so this is a build lane.",
-  "updatedAt": "2026-11-07T13:52:00-06:00",
+  "note": "Done check: a red test where an answer saved before the close is counted after the close. An answer saved after the close is still refused. The guard's verdict changes, so this is a build lane. Coordinator pick, 13:48 CST Nov 7 (undoable): the lane builds a stale_pages.py check that flags a kept answer on a closed item, not a page_grant change. Cause: triage closed relayed items with no lane and no lastAnswer, skipping the busy-lane path in skills/waiting-page/SKILL.md. Triage repaired items 343, 344, 346, 347, 348 and 356 to that shape at 13:55 CST.",
+  "updatedAt": "2026-11-07T13:55:00-06:00",
   "lane": "session_013NEJL47DQRUhMUMYHumgq6"
 }
