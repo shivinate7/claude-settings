@@ -325,12 +325,9 @@ class _FakeSuite:
                 self.release[key].set()
 
 
-class CleanLayoutControlTests(unittest.TestCase):
-    """A mutant's FAIL lines prove a kill only when the same layout, unmutated, passes the suite. Without
-    that control, a layout that crashes reads as a kill. Each target gets one full-suite control run on
-    the unmutated layout. A red control reads its mutants UNKNOWN, naming "clean layout", never KILLED.
-    The control runs inside the MUTATE_JOBS cap, never holds a job slot the other targets need, and a
-    control that raises reads its own mutants UNKNOWN instead of crashing the run."""
+class MainRunHarness:
+    """Runs mutate_guard.main() over a chosen list of mutations, with the suite and the work folder stubbed. Mixed
+    into each class that drives main, so the one run helper is shared, not copied."""
 
     def setUp(self):
         self.run = _test_temp.run_folder()
@@ -349,11 +346,12 @@ class CleanLayoutControlTests(unittest.TestCase):
             raise error
         return code, lines
 
-    def run_main_outcome(self, entries, suite, jobs=None):
+    def run_main_outcome(self, entries, suite, jobs=None, shard=None, run_mutants=None):
         """As run_main, but return what main raised, with the lines it printed before, as (exit code or None,
         stdout lines, exception or None). main runs on its own thread, so a run that does not return reads as a
         TimeoutError here, not as a hang. main's work folder is made under this test's run folder, not the system
-        temp dir."""
+        temp dir. `shard` sets MUTATE_SHARD; None leaves it unset, whatever the developer's environment holds.
+        `run_mutants`, when given, replaces mutate_shared.run_mutants, so a case reads what main hands it."""
         out = io.StringIO()
         real_mkdtemp = tempfile.mkdtemp
         outcome = {}
@@ -368,11 +366,17 @@ class CleanLayoutControlTests(unittest.TestCase):
                 outcome["error"] = caught
 
         env = {} if jobs is None else {"MUTATE_JOBS": str(jobs)}
+        stub_mutants = (mock.patch.object(mutate_shared, "run_mutants", side_effect=run_mutants)
+                        if run_mutants is not None else contextlib.nullcontext())
         with mock.patch.dict(os.environ, env), \
                 mock.patch.object(mutate_guard, "MUTATIONS", entries), \
                 mock.patch.object(mutate_guard, "run_suite", side_effect=suite), \
                 mock.patch.object(tempfile, "mkdtemp", side_effect=mkdtemp_in_run), \
+                stub_mutants, \
                 contextlib.redirect_stdout(out):
+            os.environ.pop("MUTATE_SHARD", None)
+            if shard is not None:
+                os.environ["MUTATE_SHARD"] = shard
             runner = threading.Thread(target=call_main, daemon=True)
             runner.start()
             runner.join(RUN_LIMIT)
@@ -380,6 +384,13 @@ class CleanLayoutControlTests(unittest.TestCase):
         if runner.is_alive():
             error = TimeoutError("main did not return within %s s: the run stalled or deadlocked" % RUN_LIMIT)
         return outcome.get("code"), out.getvalue().splitlines(), error
+
+
+class CleanLayoutControlTests(MainRunHarness, unittest.TestCase):
+    """A mutant's FAIL lines prove a kill only when the same layout, unmutated, passes the suite. Without
+    that control, a layout that crashes reads as a kill. Each target gets one full-suite control run on
+    the unmutated layout. A red control reads its mutants UNKNOWN, naming "clean layout", never KILLED. The control
+    runs inside the MUTATE_JOBS cap, never holds a job slot the other targets need, and a control that raises reads its own mutants UNKNOWN instead of crashing the run."""
 
     def test_a_red_clean_layout_reads_unknown_not_killed(self):
         entries = self.guard_entries("role-model: Explore loses its audit exemption")
