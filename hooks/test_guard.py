@@ -11891,7 +11891,7 @@ sh("perl-ruby-near-forms: a # line inside a multi-line perl string does not end 
 sh("perl-ruby-near-forms: a write call inside a perl string is text, and the real write is refused",
    "perl <<'EOF'\nprint \"open(F, '>', '" + CFG_HOOK + "')\";\nopen(O, '>', '" + CFG_HOOK + "');\nEOF",
    "deny", "frozen-path", cwd=NOGIT)
-# Controls: a # or a ruby #{...} on the write's own line is text, so the write beside it is still refused.
+# Controls: a # in a string or a ruby #{...} on the write's own line is not a comment, so the write beside it is still refused.
 sh("perl-ruby-near-forms: a # inside a perl heredoc string, on the write's own line, does not hide the write",
    "perl <<'EOF'\nprint \"#\"; open(O, '>', '" + CFG_HOOK + "');\nEOF", "deny", "frozen-path", cwd=NOGIT)
 sh("perl-ruby-near-forms: a ruby #{...} interpolation, on the write's own line, does not hide File.write",
