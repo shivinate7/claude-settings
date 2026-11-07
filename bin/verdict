@@ -31,7 +31,7 @@ def test_argv(argv):  # read from the argv as typed, before which() rewrites arg
     return (exe == "xcodebuild" and any(a in ("test", "test-without-building") for a in argv[1:])) or (exe == "swift" and argv[1:2] == ["test"] and not SWIFT_INFO.intersection(argv[2:]))
 HUGE = 10 ** 9  # the count for a run of 10 or more digits; any such count still means skips
 def count(digits): return int(digits) if len(digits) < 10 else HUGE
-SKIP_LINE = re.compile(rb"^(?:" + SGR + rb")*SKIP(?:" + SGR + rb")*(?: |PED)", re.M)  # a runner may print one such line per skip, with or without a summary
+SKIP_LINE = re.compile(rb"^(?:" + SGR + rb")*SKIP(?:" + SGR + rb")*(?: |PED|:(?! *\d))", re.M)  # a runner may print one such line per skip, with or without a summary; `SKIP: <case>` counts, a `SKIP: N check(s)` summary does not
 TAIL = 1 << 20  # read at most the last 1 MiB of this run's output for the excerpt
 def prune(folder, own):
     try:

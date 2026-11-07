@@ -650,8 +650,9 @@ PARENT_TARGETS = {"@parent", "parent"}
 # A "?" ends a question unless a word character follows it, so a URL query (a?b=1) never counts. Quoted
 # text, backticked text and a blockquoted line are past words, never a question asked now. A straight
 # quote, double or single, opens and closes only at a non-word edge, so a lone quote or an apostrophe
-# (Don't) cannot span to the next quote.
-QUOTED_RE = re.compile(r'(?<!\w)"[^"\n]*"(?!\w)|(?<!\w)\'[^\'\n]*\'(?!\w)|\u201c[^\u201d\n]*\u201d|`[^`\n]*`')
+# (Don't) cannot span to the next quote. A word that opens with an elided apostrophe ('til, 'cause) is no
+# opening quote either: the space before it looks like one, but the apostrophe stands for dropped letters.
+QUOTED_RE = re.compile(r'(?<!\w)"[^"\n]*"(?!\w)|(?<!\w)\'(?!(?:til|till|cause|bout)\b)[^\'\n]*\'(?!\w)|\u201c[^\u201d\n]*\u201d|`[^`\n]*`')
 QUESTION_MARK_RE = re.compile(r"\?(?!\w)")
 
 
