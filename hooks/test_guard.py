@@ -24768,6 +24768,13 @@ for _command in ("echo x >> docs/todo.md",
                  'echo "first\nsecond > README.md"', "echo \"it's > README.md\"",
                  "cat > docs/todo.md <<'EOF'\n# heading > README.md\nEOF"):
     cs_shell("shell_write_allowed", "allow", _command)
+# A `>` inside the double quotes of a `gh` comment body is text, not a redirect: a coordinator posts "Round 2 -> pass" and
+# writes no file. The control is a real redirect to a product path, which stays refused.
+for _command in ('gh pr comment 5 --body "Round 2 -> pass"',
+                 'gh pr comment 5 --body "> quoted text"',
+                 'gh pr comment 5 --body "CI is green (3 > 2 jobs)"'):
+    cs_shell("gh_comment_body_quoted_gt_allowed", "allow", _command)
+cs_shell("gh_comment_body_control_redirect_denied", "deny", "echo x > hooks/x.py", "x.py")
 
 # ---- `sed -i`: the script is code, and the file operands that follow it are what it writes. A script that holds `|`, `;`,
 # `&`, `#`, `//`, a lone quote or a line break must not be judged as a path (a false deny) and must not hide the file
@@ -24945,6 +24952,50 @@ cs("record_branch_commit_allowed: the staged brief and hand-off note", "allow", 
 cs_write("main_checkout_briefs_denied", "deny", os.path.join(CS_RECORD_MAIN, "briefs", "s-slug.md"), "Write", cwd=CS_RECORD_MAIN)
 cs_write("main_checkout_product_denied", "deny", os.path.join(CS_RECORD_MAIN, "src", "app.py"), "Write", cwd=CS_RECORD_MAIN)
 cs_write("record_checkout_other_path_denied", "deny", os.path.join(CS_RECORD, "src", "app.py"), "Write", cwd=CS_RECORD)
+
+# 2b. The waiting page's copy on the record branch. Decision session-tiers ("Where triage runs", owner 2026-11-02 14:02 CST):
+# with no triage, the coordinator writes the waiting page. Decision waiting-data-in-repo: the page writer's copy lives on the
+# record branch, under `waiting/` (the page and its items) and `artifacts/<id>/` (each registered artifact's export). So a
+# coordinator's write and commit of those paths in a record checkout pass. A product path beside them stays refused, and so
+# does the same folder in a checkout of main, which is no record branch.
+CS_WAITING_FILES = ("waiting/items/a.json", "waiting/page/page.html", "artifacts/x/f.json")
+CS_RECORD_WAITING = os.path.join(DIFFROOT, "cs-record-waiting")  # a record clone: the three files staged
+CS_RECORD_MIXED = os.path.join(DIFFROOT, "cs-record-mixed")      # the same, with a product file staged beside them
+
+
+def _cs_clone_record(where, staged):
+    """A clone of the record checkout, on the record branch, with the files in `staged` written and staged. A clone holds
+    the committed skeleton only, so the staged state is each case's own and the shared record checkout is left as it is."""
+    materialize(CS_RECORD)
+    cloned = run_vcs(DIFFROOT, "clone", "-q", "-b", "roadmap", CS_RECORD, where)
+    if cloned.returncode != 0:
+        sys.exit("fixture setup failed: the record clone %s: %s" % (where, cloned.stderr.strip()))
+    for rel in staged:
+        write(os.path.join(where, *rel.split("/")), "page copy\n")
+    run_vcs(where, "add", "-A")
+
+
+def _cs_build_waiting_clone():
+    _cs_clone_record(CS_RECORD_WAITING, CS_WAITING_FILES)
+
+
+def _cs_build_mixed_clone():
+    _cs_clone_record(CS_RECORD_MIXED, CS_WAITING_FILES + ("hooks/x.py",))
+
+
+lazy_fixture([CS_RECORD_WAITING], _cs_build_waiting_clone)
+lazy_fixture([CS_RECORD_MIXED], _cs_build_mixed_clone)
+for _rel in CS_WAITING_FILES:
+    cs_write("record_checkout_waiting_copy_allowed", "allow", os.path.join(CS_RECORD, *_rel.split("/")), "Write", cwd=CS_RECORD)
+cs_write("record_clone_briefs_allowed (the control: the clone is a record checkout)", "allow",
+         os.path.join(CS_RECORD_WAITING, "briefs", "s-slug.md"), "Write", cwd=CS_RECORD_WAITING)
+cs("record_checkout_waiting_commit_allowed: the page writer's three staged files", "allow", command=COMMIT, cwd=CS_RECORD_WAITING)
+cs_write("record_checkout_product_denied, a waiting copy beside it", "deny", os.path.join(CS_RECORD_WAITING, "hooks", "x.py"),
+         "Write", cwd=CS_RECORD_WAITING)
+cs("commit_waiting_copy_with_product_file_denied: hooks/x.py staged beside the three files", "deny", command=COMMIT,
+   cwd=CS_RECORD_MIXED, lacks=("x.py",))
+cs_write("main_checkout_waiting_denied", "deny", os.path.join(CS_RECORD_MAIN, "waiting", "items", "a.json"), "Write",
+         cwd=CS_RECORD_MAIN)
 
 # 3. A kind a repo keeps where the layout's "legacy-repos" says (lint/layout.py, unmoved(): by the repo's origin). The
 # file is the source, so no repo name or path is copied here. The same path in a checkout whose origin is another

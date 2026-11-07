@@ -953,6 +953,24 @@ class LaneUndo(unittest.TestCase):
         self.assertEqual(self.lane(), [e, c])
         assert_finding(self, r.verdict(), "tests/card.txt", c, e)
 
+    def test_a_net_loss_of_one_line_from_an_eight_line_test_block_is_red(self):
+        """Owner, 2026-11-04 17:44 CST, page item 220, pick b: a net loss of one line counts, with no line-count floor."""
+        r = self.r
+        e = r.commit("E: add eight lines to a test", tests__card_txt=self.EIGHT)
+        c = r.commit("C: remove one of the lines", tests__card_txt=self.EIGHT.replace("eight test line 3\n", ""))
+        self.assertEqual(self.lane(), [e, c])  # scope: C is the second commit
+        self.assertEqual(len(r.sh("show", c + ":tests/card.txt").splitlines()), 7)  # scope: the block goes from 8 lines to 7
+        assert_finding(self, r.verdict(), "tests/card.txt", c, e)
+
+    def test_a_net_loss_of_two_adjacent_lines_from_an_eight_line_test_block_is_red(self):
+        """Owner, 2026-11-04 17:44 CST, page item 220, pick b: the net loss has no line-count floor, so two lines count too."""
+        r = self.r
+        e = r.commit("E: add eight lines to a test", tests__card_txt=self.EIGHT)
+        c = r.commit("C: remove two adjacent lines", tests__card_txt=self.EIGHT.replace("eight test line 3\neight test line 4\n", ""))
+        self.assertEqual(self.lane(), [e, c])  # scope: C is the second commit
+        self.assertEqual(len(r.sh("show", c + ":tests/card.txt").splitlines()), 6)  # scope: the block goes from 8 lines to 6
+        assert_finding(self, r.verdict(), "tests/card.txt", c, e)
+
     def test_an_eight_line_test_block_moved_from_one_test_file_to_another_over_two_commits_is_green(self):
         r = self.r
         e = r.commit("E: add a test block to test_a", tests__test_a_txt=self.EIGHT)
@@ -1562,6 +1580,22 @@ class CallBound(unittest.TestCase):
         self.assertEqual(found5, [])
         self.assertLessEqual(len(c20) - len(c5), 3, "git calls: N=5 %d, N=20 %d, probes at N=20 %d" % (len(c5), len(c20), len(probes(c20))))
         self.assertLessEqual(len(probes(c20)), 3, "probes at N=20: %d of %d git calls" % (len(probes(c20)), len(c20)))
+
+
+class LaneUndoCost(unittest.TestCase):
+    """The lane undo read's git calls grow with the lane's commits. Measured on this head: 37 calls at 10 commits on distinct
+    files, 57 at 20, 97 at 40. Only the 10-commit bound is pinned, at the measured 37, so one more git call per commit fails here."""
+
+    def test_ten_lane_commits_on_distinct_files_cost_at_most_37_git_calls(self):
+        r = base_repo()
+        r.sh("checkout", "-q", "-b", "lane")
+        for i in range(10):
+            r.commit("L%d: add file %d" % (i, i), **{"f%d_txt" % i: "lane file %d line 1\nlane file %d line 2\n" % (i, i)})
+        head = r.sh("rev-parse", "HEAD")
+        self.assertEqual(len(r.sh("rev-list", "--no-merges", "origin/main..HEAD").split()), 10)  # scope: ten lane commits
+        (found, notes), calls = git_calls(lambda: C.check(r.dir, "origin/main", head))
+        self.assertEqual(found, [])  # scope: the ten commits undo nothing
+        self.assertLessEqual(len(calls), 37, "git calls for 10 lane commits on distinct files: %d, the bound is 37" % len(calls))
 
 
 class Scanner(unittest.TestCase):
