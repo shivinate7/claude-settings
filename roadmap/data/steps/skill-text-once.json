@@ -1,11 +1,11 @@
 {
   "title": "waiting-page SKILL.md: generate the field and guard table, and state each rule once",
   "phase": "now",
-  "status": "doing",
+  "status": "ready",
   "order": 103.3625,
   "why": "Owner ask ask-mw5ax2zb2j: improve the page as it grew.",
-  "note": "Coordinator 12:37 CST, from page-growth-review (Sonnet Explore audit): M. Generate it from itemFields and the guard rules. The 8-second Undo is stated 3 times, and \"the guard cannot see the stored field\" 5 times.",
-  "updatedAt": "2026-11-07T13:30:00-06:00",
+  "note": "Coordinator 12:37 CST, from page-growth-review (Sonnet Explore audit): M. Generate it from itemFields and the guard rules. The 8-second Undo is stated 3 times, and \"the guard cannot see the stored field\" 5 times. Built in #1441 (head 3dc4ed5c4), with runner 8 to merge (coordinator, 14:10 CST Nov 7).",
+  "updatedAt": "2026-11-07T14:10:00-06:00",
   "paused": {
     "why": "Waits on step page-reply-uncollapse to merge.",
     "decides": "coordinator",
