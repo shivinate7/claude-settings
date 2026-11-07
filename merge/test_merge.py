@@ -12682,8 +12682,9 @@ PROSE_CAP = 2
 class ReviewFixSonnetOnGuard(ReviewEnv):
     """The fix check of a change that touches a guard or check runs on Sonnet (owner, 2026-11-07 14:44 CST, item 351 a). A Haiku fix
     check PASS on a record with Guard or check yes reads open, and `--review-record` refuses to write one, with a remedy that names sonnet.
-    A Sonnet fix check reads as it always has, and a Haiku fix check on a change with no guard or check is unchanged. Records are built with
-    record_text() and read with record_verdict(); the write path runs through merge.main, so each case reaches the rule in the real code."""
+    A Sonnet fix check, whatever its letter case, reads as it always has, and a Haiku fix check on a change with no guard or check is
+    unchanged. Records are built with record_text() and read with record_verdict(); the write path runs through merge.main, so each case
+    reaches the rule in the real code."""
 
     def guard_yes_verdict(self, rounds, fix_model, net="not owed"):
         return record_verdict(self, record_text(rounds=rounds, guard="yes", net=net, fix=(fix_check_line(model=fix_model),)))
@@ -12732,6 +12733,21 @@ class ReviewFixSonnetOnGuard(ReviewEnv):
         rc, out, err = self.run_args("7", "--review-record", *self.guard_flags("haiku", guard="no"), host=self.earlier_host())
         self.assertEqual(rc, 0, "a Haiku fix check on a change with no guard or check was refused:\n" + out + err)
         self.assertIn(fix_check_line(model="haiku"), posted_body(self, out).splitlines())
+
+    # The model in the spelling a person may type. Built from the constant, so the cases follow the model name when it changes.
+    MIXED_CASE_MODEL = merge.REVIEW_FIX_GUARD_MODEL.capitalize()
+
+    def test_a_mixed_case_sonnet_fix_pass_on_a_guard_change_reads_done_like_lowercase(self):
+        rounds = ("Round 1: reviewer, sonnet, FAIL",)
+        lower_state, lower_why = self.guard_yes_verdict(rounds, merge.REVIEW_FIX_GUARD_MODEL)  # control: the lowercase model reads done
+        self.assertEqual(lower_state, "done", f"a lowercase fix check PASS on a guard or check change must read done: {lower_why!r}")
+        state, why = self.guard_yes_verdict(rounds, self.MIXED_CASE_MODEL)
+        self.assertEqual(state, "done", f"a {self.MIXED_CASE_MODEL} fix check PASS on a guard or check change must read done, as lowercase does: {why!r}")
+
+    def test_a_mixed_case_sonnet_fix_check_on_a_guard_change_is_accepted_and_printed(self):
+        rc, out, err = self.run_args("7", "--review-record", *self.guard_flags(self.MIXED_CASE_MODEL), host=self.earlier_host())
+        self.assertEqual(rc, 0, f"--review-record refused a {self.MIXED_CASE_MODEL} fix check on a guard or check change:\n" + out + err)
+        self.assertIn(fix_check_line(model=self.MIXED_CASE_MODEL), posted_body(self, out).splitlines())
 
 class JudgeStub:
     """Stands in for decision_watch.invoke_model. `answer(prompt)` gives (verdict, error), or raises. Each call's prompt is
