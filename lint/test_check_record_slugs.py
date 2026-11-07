@@ -49,6 +49,26 @@ DEBT_NOTES = "debts/notes.md"  # the folder's notes file: it is not a debt eithe
 README_FEEL_TEXT = "# Debts\n\nOne debt per file.\n\n- **Feel.** a marker shown as an example, not a debt\n"
 NOTES_FEEL_TEXT = "# Notes\n\n- **Feel.** a note that is not a debt\n"
 FIXED_DEBT_TEXT = "# Long slug\n\nWhat. A gap with a fix named.\n\nFix: none — owner decides\n"  # a valid Fix line
+# The Fix field of a notes line and of a debt file. origin/roadmap holds the step alpha-beta, never alpha.
+STEP_JSON = '{"id": "alpha-beta"}\n'  # a roadmap step file: the check reads only that it exists
+ALPHA_STEP = "roadmap/data/steps/alpha.json"  # a step file on HEAD only, not on origin/roadmap
+NOTES_HEAD = "# Notes: findings too unlikely to hit to be debts\n"
+OLD_NOTE = "- old-note: an old gap. Fix: pin the base.\n"  # a line the base holds before the branch
+NEW_NO_FIX = "- new-note: a gap nobody named.\n"
+NEW_PROSE_FIX = "- new-note: a gap. Fix: pin the base.\n"
+NEW_ABSENT_STEP = "- new-note: a gap. Fix: step:alpha\n"
+NEW_BAD_REASON = "- new-note: a gap. Fix: none — someday\n"
+NEW_VALID_STEP = "- new-note: a gap. Fix: step:alpha-beta\n"
+NEW_VALID_NONE = "- new-note: a gap. Fix: none — owner decides\n"
+VALID_LINES = (  # every form that passes: a step, both dashes, and each reason on the list
+    "- step-note: a gap. Fix: step:alpha-beta\n",
+    "- owner-note: a gap. Fix: none — owner decides\n",
+    "- mac-note: a gap. Fix: none -- needs the Mac\n",
+    "- rare-note: a gap. Fix: none — rare and harmless\n",
+)
+NEW_DEBT = "debts/new-debt.md"  # a new debt file with no Fix line
+FIXED_DEBT = "debts/fixed-debt.md"  # a new debt file with a valid Fix line, beside NEW_DEBT in the same diff
+DEBT_NO_FIX = "# New debt\n\nWhat. A gap with no fix named.\n"
 
 RUN_FOLDER = None  # made in setUpModule, so an import leaks no folder
 
@@ -125,6 +145,33 @@ class RecordSlugsTests(unittest.TestCase):
         sha = subprocess.run(["git", "-C", self.tree, "rev-parse", "origin/main:" + ref_path],
                              capture_output=True, text=True, check=True).stdout.strip()
         return os.path.join(self.tree, ".git", "objects", sha[:2], sha[2:])
+
+    def roadmap(self, *slugs):
+        """Point refs/remotes/origin/roadmap at a commit that holds one step file for each slug. The commit is built
+        in a temp index, so HEAD and the working tree do not move."""
+        env = dict(os.environ, GIT_INDEX_FILE=os.path.join(self.tree, ".git", "roadmap-index"),
+                   GIT_AUTHOR_NAME="test", GIT_AUTHOR_EMAIL="test@example.com",
+                   GIT_COMMITTER_NAME="test", GIT_COMMITTER_EMAIL="test@example.com")
+
+        def run(*args, stdin=None):
+            out = subprocess.run(["git", "-C", self.tree, *args], check=True, capture_output=True, text=True,
+                                 env=env, input=stdin)
+            return out.stdout.strip()
+
+        run("read-tree", "--empty")
+        for slug in slugs:
+            blob = run("hash-object", "-w", "--stdin", stdin=STEP_JSON)
+            run("update-index", "--add", "--cacheinfo", "100644,%s,roadmap/data/steps/%s.json" % (blob, slug))
+        run("update-ref", "refs/remotes/origin/roadmap", run("commit-tree", run("write-tree"), "-m", "roadmap"))
+
+    def base_sha(self):
+        return subprocess.run(["git", "-C", self.tree, "rev-parse", "origin/main"], check=True,
+                              capture_output=True, text=True).stdout.strip()
+
+    def failed_about(self, out, *needles):
+        """True when a FAIL line of the check names one of `needles`."""
+        return any(line.startswith("check_record_slugs: FAIL:") and any(n in line for n in needles)
+                   for line in out.splitlines())
 
     # Positive controls first: a red case means nothing if the clean case fails.
 
@@ -354,6 +401,123 @@ class RecordSlugsTests(unittest.TestCase):
         rc, out = self.lint()
         self.assertNotIn("UNKNOWN", out)
         self.assertEqual(rc, 0, out)
+
+    # Each line a branch adds to the notes file, and each new debt file, needs a Fix field: step:<slug> on
+    # origin/roadmap, none with a listed reason, or already fixed on main with a sha. A missing read fails.
+
+    def test_new_notes_line_without_a_fix_is_red(self):
+        self.put(DEBT_NOTES, NOTES_HEAD)
+        self.commit_base()
+        self.put(DEBT_NOTES, NOTES_HEAD + NEW_NO_FIX)
+        self.commit_change()
+        rc, out = self.lint()
+        self.assertEqual(rc, 1, out)
+        self.assertTrue(self.failed_about(out, "new-note", DEBT_NOTES), out)
+
+    def test_new_notes_line_with_a_prose_fix_is_red(self):
+        self.put(DEBT_NOTES, NOTES_HEAD)
+        self.commit_base()
+        self.put(DEBT_NOTES, NOTES_HEAD + NEW_PROSE_FIX)
+        self.commit_change()
+        rc, out = self.lint()
+        self.assertEqual(rc, 1, out)
+        self.assertTrue(self.failed_about(out, "new-note", DEBT_NOTES), out)
+
+    def test_step_fix_naming_a_step_absent_from_origin_roadmap_is_red(self):
+        # HEAD holds alpha.json, so a check that reads the working tree would pass. origin/roadmap holds alpha-beta only.
+        self.put(ALPHA_STEP, STEP_JSON)
+        self.put(DEBT_NOTES, NOTES_HEAD)
+        self.commit_base()
+        self.roadmap("alpha-beta")
+        self.put(DEBT_NOTES, NOTES_HEAD + NEW_ABSENT_STEP)
+        self.commit_change()
+        rc, out = self.lint()
+        self.assertEqual(rc, 1, out)
+        self.assertTrue(self.failed_about(out, "new-note", DEBT_NOTES), out)
+
+    def test_none_reason_outside_the_list_is_red(self):
+        self.put(DEBT_NOTES, NOTES_HEAD)
+        self.commit_base()
+        self.put(DEBT_NOTES, NOTES_HEAD + NEW_BAD_REASON)
+        self.commit_change()
+        rc, out = self.lint()
+        self.assertEqual(rc, 1, out)
+        self.assertTrue(self.failed_about(out, "new-note", DEBT_NOTES), out)
+
+    def test_edited_old_notes_line_with_the_same_slug_passes(self):
+        self.put(DEBT_NOTES, NOTES_HEAD + OLD_NOTE)
+        self.commit_base()
+        self.put(DEBT_NOTES, NOTES_HEAD + "- old-note: an old gap, reworded. Fix: pin the base.\n")
+        self.commit_change()
+        self.assert_passes()
+
+    def test_untouched_old_notes_lines_pass(self):
+        # A full base: 40 old lines, each with a prose Fix. The branch adds one valid line, and only that line is read.
+        old = "".join("- old-note-%02d: an old gap. Fix: pin the base.\n" % n for n in range(40))
+        self.put(DEBT_NOTES, NOTES_HEAD + old)
+        self.commit_base()
+        self.put(DEBT_NOTES, NOTES_HEAD + old + NEW_VALID_NONE)
+        self.commit_change()
+        self.assert_passes()
+
+    def test_valid_step_and_none_forms_pass(self):
+        self.put(DEBT_NOTES, NOTES_HEAD)
+        self.commit_base()
+        self.roadmap("alpha-beta")
+        self.put(DEBT_NOTES, NOTES_HEAD + "".join(VALID_LINES))
+        self.commit_change()
+        self.assert_passes()
+
+    def test_new_debt_file_without_a_fix_line_is_red(self):
+        self.put(DEBT_NOTES, NOTES_HEAD)
+        self.commit_base()
+        self.put(NEW_DEBT, DEBT_NO_FIX)
+        self.put(FIXED_DEBT, FIXED_DEBT_TEXT)  # the control: a valid Fix line in the same diff
+        self.commit_change()
+        rc, out = self.lint()
+        self.assertEqual(rc, 1, out)
+        self.assertEqual(flagged(out), [NEW_DEBT], out)
+
+    def test_roadmap_read_failure_exits_nonzero_and_says_the_read_did_not_run(self):
+        # No origin/roadmap ref: a step fix cannot be checked, so the check fails. It never passes.
+        self.put(DEBT_NOTES, NOTES_HEAD)
+        self.commit_base()
+        self.put(DEBT_NOTES, NOTES_HEAD + NEW_VALID_STEP)
+        self.commit_change()
+        rc, out = self.lint()
+        self.assertNotEqual(rc, 0, out)
+        self.assertIn("did not run", out)
+        self.assertNotIn("Traceback", out)
+
+    def test_already_fixed_on_main_with_a_sha_passes(self):
+        self.put(DEBT_NOTES, NOTES_HEAD)
+        self.commit_base()
+        sha = self.base_sha()[:7]
+        self.put(DEBT_NOTES, NOTES_HEAD + "- fixed-note: a gap. Fix: already fixed on main %s\n" % sha)
+        self.commit_change()
+        self.assert_passes()
+
+    def test_already_fixed_on_main_with_no_sha_is_red(self):
+        self.put(DEBT_NOTES, NOTES_HEAD)
+        self.commit_base()
+        self.put(DEBT_NOTES, NOTES_HEAD + "- fixed-note: a gap. Fix: already fixed on main\n")
+        self.commit_change()
+        rc, out = self.lint()
+        self.assertEqual(rc, 1, out)
+        self.assertTrue(self.failed_about(out, "fixed-note", DEBT_NOTES), out)
+
+    def test_lone_quote_and_comment_opener_in_the_note_text_do_not_hide_the_fix(self):
+        # The apostrophe and the comment openers are text. The valid line passes; the prose line is red.
+        self.put(DEBT_NOTES, NOTES_HEAD)
+        self.commit_base()
+        self.put(DEBT_NOTES, NOTES_HEAD
+                 + "- quote-ok: Don't drop the lock (see #12 and /* the old block */). Fix: none — owner decides\n"
+                 + "- quote-prose: Don't drop the lock, see // the old block. Fix: pin the base.\n")
+        self.commit_change()
+        rc, out = self.lint()
+        self.assertEqual(rc, 1, out)
+        self.assertTrue(self.failed_about(out, "quote-prose", DEBT_NOTES), out)
+        self.assertFalse(self.failed_about(out, "quote-ok"), out)
 
 
 class ImportTests(unittest.TestCase):
