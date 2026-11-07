@@ -730,7 +730,7 @@ CARRY_FORMS = {
 # `issue <n>`, `issue #<n>`, a github.com link. A bare `#<n>` is no source. The hex has 7 to 40 characters and holds
 # a digit, so a word such as "commit defaced" names no source.
 SOURCE_RE = re.compile(r"\b(?:git|page|digest)\b|\b(?:commits?|sha)(?::\s*|\s+)`?(?=[0-9a-f]*\d)[0-9a-f]{7,40}\b"
-                       r"|\b(?:PR|pull(?:\s+request)?|issue)\s*#?\d+\b|\bgithub\.com/\S", re.I)
+                       r"|\b(?:PR|issue)\s*#?\d+\b|\bpull(?:\s+request)?\s*#\d+\b|\bgithub\.com/\S", re.I)
 NONE_ITEM_RE = re.compile(r"(?:none|nothing)\b", re.I)
 
 
