@@ -11600,6 +11600,34 @@ sh("frozen dup: cp from a dup before a frozen settings file stays frozen",
 sh("frozen dup: tee after a dup onto a frozen settings file stays frozen",
    "echo x | tee 2>&1 " + CFG_SETTINGS, "deny", "frozen-path", cwd=NOGIT)
 
+# --------------------------------------------------------------------------- frozen word: a mutating word as an argument
+#
+# `mkdir` and `touch` are mutating commands, so a frozen path after one of them is a write. That holds
+# only when the word is the command: `grep -rn mkdir <path>` and `cat x/touch.py x/b.py` read their
+# paths, and the shell check reads a mutating word in command position alone (`command_position`). So
+# each READ below is allowed beside a frozen path, and each WRITE stays refused.
+# Run only this block: MUTATE_ONLY="frozen word:" python3 hooks/test_guard.py (the name filter).
+LIVE_HOOKS = slash(os.path.join(LIVE_PIN, "hooks"))
+# READS, ALLOWED. Each names a frozen path as an argument of a reader.
+sh("frozen word: grep -rn mkdir naming a hook in the live pin is allowed",
+   "grep -rn mkdir " + LIVE_HOOKS + "/guard.py", "allow", cwd=NOGIT)
+sh("frozen word: cat of touch.py and b.py in the live pin is allowed",
+   "cat " + LIVE_HOOKS + "/touch.py " + LIVE_HOOKS + "/b.py", "allow", cwd=NOGIT)
+sh("frozen word: grep -rn touch naming a config hook is allowed",
+   "grep -rn touch " + CFG_HOOK, "allow", cwd=NOGIT)
+# The same shape for `install`, a word main already listed: a reader naming a frozen path after it.
+sh("frozen word: grep -rn install naming a hook in the live pin is allowed",
+   "grep -rn install " + LIVE_HOOKS + "/x", "allow", cwd=NOGIT)
+# WRITES, REFUSED. A mutating command that writes a frozen path, or a redirect after a reader, stays refused.
+sh("frozen word: mkdir of a folder in the live pin is refused",
+   "mkdir " + slash(os.path.join(LIVE_PIN, "x")), "deny", "frozen-path", cwd=NOGIT)
+sh("frozen word: touch of a file in the config hooks folder is refused",
+   "touch " + slash(os.path.join(CFG, "hooks", "x")), "deny", "frozen-path", cwd=NOGIT)
+sh("frozen word: mkdir after && into the live pin is refused",
+   "ls && mkdir " + slash(os.path.join(LIVE_PIN, "x")), "deny", "frozen-path", cwd=NOGIT)
+sh("frozen word: grep -rn mkdir redirected onto a frozen settings file is refused",
+   "grep -rn mkdir " + LIVE_HOOKS + "/guard.py > " + CFG_SETTINGS, "deny", "frozen-path", cwd=NOGIT)
+
 add("config-edit: Edit of a project local settings file is allowed", "allow", tool="Edit",
     cwd=NOGIT, file_path=PROJ_LOCAL)
 add("config-edit: Edit of a project hook is allowed", "allow", tool="Edit", cwd=NOGIT,
