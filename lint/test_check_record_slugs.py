@@ -11,6 +11,7 @@ script from that tree. The diff cases also make a temp git repo and set refs/rem
 the base the script diffs against. RECORD_SLUGS_UNDER_TEST overrides the module path.
 """
 import contextlib
+import datetime
 import importlib.util
 import io
 import os
@@ -74,6 +75,7 @@ PINNED_TODAY = "2026-11-07"  # the date the suite pins: the check reads FIXED_TO
 KEPT_NOTE = "- kept-note: a gap. Fix: already fixed on main 1a2b3c4\n"  # a bullet with a new-grammar Fix
 THIRD_NOTE = "- third-note: a gap. Fix: already fixed on main 1a2b3c4\n"
 
+FAR_PAST_DAYS = 3650  # a Seen this many days old is past any window the decision allows, so it is red whatever the window is
 RUN_FOLDER = None  # made in setUpModule, so an import leaks no folder
 
 
@@ -90,6 +92,24 @@ def flagged(out):
     """The paths the check named as FAIL: each FAIL line ends with its path."""
     return [line.rsplit(" ", 1)[1] for line in out.splitlines()
             if line.startswith("check_record_slugs: FAIL:")]
+
+
+def day(offset):
+    """The ISO date `offset` days from PINNED_TODAY. A negative offset is in the past."""
+    return (datetime.date.fromisoformat(PINNED_TODAY) + datetime.timedelta(days=offset)).isoformat()
+
+
+def load_module():
+    """The module under test, loaded in this process. Importing it runs no check (ImportTests pins that)."""
+    spec = importlib.util.spec_from_file_location("record_slugs_under_test", MODULE)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def module_value(name):
+    """The value `name` has in the module under test, or None when the module has none."""
+    return getattr(load_module(), name, None)
 
 
 class RecordSlugsTests(unittest.TestCase):
@@ -716,6 +736,295 @@ class RecordSlugsTests(unittest.TestCase):
         self.put(DEBT_NOTES, NOTES_HEAD + old + "- new-note: a gap. Fix: already fixed on main %s\n" % sha)
         self.commit_change()
         self.assert_passes()
+
+    # Sightings (decision notes-sightings-expiry). A notes line the branch adds carries `Seen: YYYY-MM-DD xN` before its
+    # Fix field: N is 1 or more, and the date is today or earlier and no older than SEEN_EXPIRY_DAYS. N of 2 or more
+    # fails, because the note is a debt now. An edit may not lower the count below the merge base. Old lines never turn red.
+
+    def window(self):
+        days = module_value("SEEN_EXPIRY_DAYS")
+        self.assertIsInstance(days, int, "lint/check_record_slugs.py has no SEEN_EXPIRY_DAYS, so the Seen window is not built")
+        return days
+
+    def cap(self):
+        days = module_value("UNTIL_CAP_DAYS")
+        self.assertIsInstance(days, int, "lint/check_record_slugs.py has no UNTIL_CAP_DAYS")
+        return days
+
+    def fail_line(self, out, needle):
+        """The first FAIL line of the check that names `needle`, or '' when none does."""
+        return next((line for line in out.splitlines()
+                     if line.startswith("check_record_slugs: FAIL:") and needle in line), "")
+
+    def test_added_note_without_seen_is_red(self):
+        self.add_note("- unseen-note: a gap. Fix: none — owner decides. Until: %s\n" % day(6))
+        rc, out = self.lint()
+        self.assertEqual(rc, 1, out)
+        self.assertIn("Seen", self.fail_line(out, "unseen-note"), out)
+
+    def test_added_note_with_a_valid_seen_passes(self):
+        # The control for the case above, in the step form and the none form. Seen sits before the Fix field.
+        self.put(DEBT_NOTES, NOTES_HEAD)
+        self.commit_base()
+        self.roadmap("alpha-beta")
+        self.put(DEBT_NOTES, NOTES_HEAD
+                 + "- seen-step: a gap. Seen: %s x1. Fix: step:alpha-beta\n" % day(0)
+                 + "- seen-none: a gap. Seen: %s x1. Fix: none — owner decides. Until: %s\n" % (day(0), day(6)))
+        self.commit_change()
+        self.assert_passes()
+
+    def test_seen_older_than_the_window_is_red(self):
+        old = day(-FAR_PAST_DAYS)
+        self.add_note("- stale-note: a gap. Seen: %s x1. Fix: none — owner decides. Until: %s\n" % (old, day(6)))
+        rc, out = self.lint()
+        self.assertEqual(rc, 1, out)
+        self.assertTrue(self.fail_line(out, "stale-note"), out)
+
+    def test_seen_in_the_future_is_red(self):
+        self.add_note("- early-note: a gap. Seen: %s x1. Fix: none — owner decides. Until: %s\n" % (day(1), day(6)))
+        rc, out = self.lint()
+        self.assertEqual(rc, 1, out)
+        self.assertTrue(self.fail_line(out, "early-note"), out)
+
+    def test_seen_at_the_window_edge_passes(self):
+        # "No more than SEEN_EXPIRY_DAYS old": the edge is still valid.
+        self.add_note("- edge-note: a gap. Seen: %s x1. Fix: none — owner decides. Until: %s\n"
+                      % (day(-self.window()), day(6)))
+        self.assert_passes()
+
+    def test_malformed_seen_on_an_added_note_is_red(self):
+        # Four lines, each with one malformed field: no count, a count of 0, a date that is not one, and a word for a date.
+        fields = {
+            "no-count-note": "Seen: %s." % day(0),
+            "zero-count-note": "Seen: %s x0." % day(0),
+            "bad-date-note": "Seen: 2026-13-45 x1.",
+            "word-date-note": "Seen: soon x1.",
+        }
+        self.add_note("".join("- %s: a gap. %s Fix: none — owner decides. Until: %s\n" % (slug, field, day(6))
+                              for slug, field in fields.items()))
+        rc, out = self.lint()
+        self.assertEqual(rc, 1, out)
+        for slug in fields:
+            with self.subTest(slug=slug):
+                self.assertTrue(self.fail_line(out, slug), out)
+
+    def test_last_seen_on_a_line_counts(self):
+        # The first Seen is valid and the last is far past the window, so the line is red.
+        old = day(-FAR_PAST_DAYS)
+        self.add_note("- two-seen-note: a gap. Seen: %s x1. Seen: %s x1. Fix: none — owner decides. Until: %s\n"
+                      % (day(0), old, day(6)))
+        rc, out = self.lint()
+        self.assertEqual(rc, 1, out)
+        self.assertTrue(self.fail_line(out, "two-seen-note"), out)
+
+    def test_added_note_at_two_sightings_is_red_and_says_file_it_as_a_debt(self):
+        self.add_note("- twice-note: a gap. Seen: %s x2. Fix: none — owner decides. Until: %s\n" % (day(0), day(6)))
+        rc, out = self.lint()
+        self.assertEqual(rc, 1, out)
+        self.assertIn("debt", self.fail_line(out, "twice-note"), out)
+
+    def test_repeat_sighting_that_raises_a_note_to_two_is_red(self):
+        # The base holds the note at one sighting. The branch raises it to two: a second sighting makes it a debt.
+        self.put(DEBT_NOTES, NOTES_HEAD + "- repeat-note: a gap. Seen: %s x1. Fix: none — owner decides. Until: %s\n"
+                 % (day(-1), day(6)))
+        self.commit_base()
+        self.put(DEBT_NOTES, NOTES_HEAD + "- repeat-note: a gap. Seen: %s x2. Fix: none — owner decides. Until: %s\n"
+                 % (day(0), day(6)))
+        self.commit_change()
+        rc, out = self.lint()
+        self.assertEqual(rc, 1, out)
+        self.assertIn("debt", self.fail_line(out, "repeat-note"), out)
+
+    def test_edit_that_drops_the_count_below_the_base_is_red(self):
+        self.put(DEBT_NOTES, NOTES_HEAD + "- counted-note: a gap. Seen: %s x3. Fix: none — owner decides. Until: %s\n"
+                 % (day(-1), day(6)))
+        self.commit_base()
+        self.put(DEBT_NOTES, NOTES_HEAD + "- counted-note: a gap. Seen: %s x1. Fix: none — owner decides. Until: %s\n"
+                 % (day(0), day(6)))
+        self.commit_change()
+        rc, out = self.lint()
+        self.assertEqual(rc, 1, out)
+        self.assertTrue(self.fail_line(out, "counted-note"), out)
+
+    def test_edit_that_keeps_the_count_and_moves_the_date_passes(self):
+        self.put(DEBT_NOTES, NOTES_HEAD + "- kept-count: a gap. Seen: %s x1. Fix: none — owner decides. Until: %s\n"
+                 % (day(-1), day(6)))
+        self.commit_base()
+        self.put(DEBT_NOTES, NOTES_HEAD + "- kept-count: a gap. Seen: %s x1. Fix: none — owner decides. Until: %s\n"
+                 % (day(0), day(6)))
+        self.commit_change()
+        self.assert_passes()
+
+    def test_old_note_without_seen_passes_when_edited(self):
+        # Old lines never turn red: an edit that adds no Seen field to an old line is judged on its Until only.
+        self.put(DEBT_NOTES, NOTES_HEAD + "- old-bare: an old gap. Fix: none — owner decides. Until: %s\n" % day(6))
+        self.commit_base()
+        self.put(DEBT_NOTES, NOTES_HEAD + "- old-bare: an old gap, reworded. Fix: none — owner decides. Until: %s\n"
+                 % day(6))
+        self.commit_change()
+        self.assert_passes()
+
+    # Pins: a sighting is an edit, so it carries the Until rule with it. Each case here is red or green on the base
+    # already, because the Until rule judges every edited line. The cases stop a Seen change from skipping that rule.
+
+    def test_raising_seen_on_an_old_none_note_with_a_past_until_is_red(self):
+        self.put(DEBT_NOTES, NOTES_HEAD + "- old-none: a gap. Fix: none — owner decides. Until: %s\n" % day(-1))
+        self.commit_base()
+        self.put(DEBT_NOTES, NOTES_HEAD + "- old-none: a gap. Seen: %s x1. Fix: none — owner decides. Until: %s\n"
+                 % (day(0), day(-1)))
+        self.commit_change()
+        rc, out = self.lint()
+        self.assertEqual(rc, 1, out)
+        self.assertTrue(self.fail_line(out, "old-none"), out)
+
+    def test_raising_seen_on_an_old_none_note_with_a_fresh_until_passes(self):
+        # The base line's Until is past. The sighting refreshes it, so the edit passes.
+        self.put(DEBT_NOTES, NOTES_HEAD + "- old-none: a gap. Fix: none — owner decides. Until: %s\n" % day(-1))
+        self.commit_base()
+        self.put(DEBT_NOTES, NOTES_HEAD + "- old-none: a gap. Seen: %s x1. Fix: none — owner decides. Until: %s\n"
+                 % (day(0), day(6)))
+        self.commit_change()
+        self.assert_passes()
+
+    def test_raising_seen_on_a_none_note_past_the_until_cap_is_red(self):
+        self.put(DEBT_NOTES, NOTES_HEAD + "- old-none: a gap. Fix: none — owner decides. Until: %s\n" % day(6))
+        self.commit_base()
+        self.put(DEBT_NOTES, NOTES_HEAD + "- old-none: a gap. Seen: %s x1. Fix: none — owner decides. Until: %s\n"
+                 % (day(0), day(self.cap() + 1)))
+        self.commit_change()
+        rc, out = self.lint()
+        self.assertEqual(rc, 1, out)
+        self.assertTrue(self.fail_line(out, "old-none"), out)
+
+    def test_seen_before_the_fix_leaves_parse_fix_and_until_of_unchanged(self):
+        # Pinned invariant for the step form and the none form: a Seen field before Fix moves neither reading.
+        check = load_module()
+        cases = [
+            ("- step-note: a gap. Fix: step:alpha-beta", ("step", "alpha-beta"), None),
+            ("- none-note: a gap. Fix: none — owner decides. Until: %s" % day(6), ("none", "owner decides"),
+             datetime.date.fromisoformat(day(6))),
+        ]
+        for line, fix, until in cases:
+            seen = line.replace(". Fix:", ". Seen: %s x1. Fix:" % day(0), 1)
+            with self.subTest(line=line):
+                self.assertNotEqual(seen, line, "the fixture line has no Fix field to put Seen before")
+                self.assertEqual(check.parse_fix(seen), fix, seen)
+                self.assertEqual(check.parse_fix(seen), check.parse_fix(line), seen)
+                self.assertEqual(check.until_of(seen), until, seen)
+
+    # Debt files: a Seen line at column one, or after one leading "- ", must be valid when it is present.
+
+    def test_debt_file_with_a_malformed_seen_line_is_red(self):
+        fix = "\nFix: none — owner decides\n"
+        bad = {
+            "debts/seen-no-count.md": "Seen: %s\n" % day(0),
+            "debts/seen-zero.md": "- Seen: %s x0\n" % day(0),
+            "debts/seen-bad-date.md": "Seen: 2026-13-45 x2\n",
+            "debts/seen-word.md": "- Seen: often x2\n",
+        }
+        self.put(DEBT_NOTES, NOTES_HEAD)
+        self.commit_base()
+        for rel, line in bad.items():
+            self.put(rel, "# Debt\n\nWhat. A gap with a fix named.\n" + line + fix)
+        self.put(FIXED_DEBT, FIXED_DEBT_TEXT)  # the control: a valid Fix and no Seen, in the same diff
+        self.commit_change()
+        rc, out = self.lint()
+        self.assertEqual(rc, 1, out)
+        for rel in bad:
+            with self.subTest(debt=rel):
+                self.assertTrue(self.failed_about(out, rel), out)
+        self.assertFalse(self.failed_about(out, FIXED_DEBT), out)
+
+    def test_debt_file_with_a_valid_seen_line_passes(self):
+        self.put(DEBT_NOTES, NOTES_HEAD)
+        self.commit_base()
+        self.put(NEW_DEBT, "# New debt\n\nWhat. A gap with a fix named.\n\nSeen: %s x2\nFix: none — owner decides\n"
+                 % day(0))
+        self.put("debts/bullet-seen.md", "# Bullet\n\nWhat. A gap.\n\n- Seen: %s x1\n- Fix: none — owner decides\n"
+                 % day(-2))
+        self.commit_change()
+        self.assert_passes()
+
+    def test_lone_quote_and_comment_opener_do_not_hide_the_seen_field(self):
+        # The apostrophe and the comment openers are text. The first line passes; the second is red for its count.
+        self.put(DEBT_NOTES, NOTES_HEAD)
+        self.commit_base()
+        self.put(DEBT_NOTES, NOTES_HEAD
+                 + "- quote-seen: Don't drop the lock (see /* the old block */). Seen: %s x1. "
+                   "Fix: none — owner decides. Until: %s\n" % (day(0), day(6))
+                 + "- quote-twice: Don't // drop it, say \"again\". Seen: %s x2. "
+                   "Fix: none — owner decides. Until: %s\n" % (day(0), day(6)))
+        self.commit_change()
+        rc, out = self.lint()
+        self.assertEqual(rc, 1, out)
+        self.assertIn("debt", self.fail_line(out, "quote-twice"), out)
+        self.assertFalse(self.failed_about(out, "quote-seen"), out)
+
+    # --next-debt: the highest-Seen debt slug. Ties go to the oldest date, then the slug. A debt with no Seen line is x1.
+
+    def put_debt(self, slug, seen_line=None):
+        body = "# %s\n\nWhat. A gap with a fix named.\n\nFix: none — owner decides\n" % slug
+        if seen_line:
+            body += seen_line + "\n"
+        self.put("debts/%s.md" % slug, body)
+
+    def assert_next_debt(self, expected):
+        rc, out = self.lint("--next-debt")
+        self.assertEqual(rc, 0, "--next-debt did not exit 0 (not built?): %s" % out)
+        self.assertEqual(out.strip(), expected, out)
+
+    def test_next_debt_names_the_highest_count(self):
+        self.put_debt("alpha", "Seen: %s x2" % day(-30))
+        self.put_debt("beta", "- Seen: %s x5" % day(-1))  # a bullet form, and the highest count
+        self.put_debt("gamma", "Seen: %s x3" % day(-60))
+        self.assert_next_debt("beta")
+
+    def test_next_debt_breaks_a_count_tie_by_the_oldest_date(self):
+        self.put_debt("aaa-later", "Seen: %s x3" % day(-1))  # the alphabet would pick this one
+        self.put_debt("zzz-earlier", "Seen: %s x3" % day(-20))
+        self.assert_next_debt("zzz-earlier")
+
+    def test_next_debt_breaks_a_date_tie_by_the_slug(self):
+        self.put_debt("zeta", "Seen: %s x3" % day(-5))
+        self.put_debt("alpha", "Seen: %s x3" % day(-5))
+        self.assert_next_debt("alpha")
+
+    def test_next_debt_counts_a_debt_with_no_seen_line_as_one(self):
+        self.put_debt("quiet")
+        self.put_debt("twice", "Seen: %s x2" % day(-1))
+        self.assert_next_debt("twice")  # x2 beats the x1 that a debt with no Seen line counts as
+        self.delete("debts/twice.md")
+        self.assert_next_debt("quiet")  # alone, a debt with no Seen line is still the one to fix
+
+    def test_next_debt_ignores_the_notes_file_and_the_readme(self):
+        self.put(DEBT_NOTES, NOTES_HEAD + "- loud-note: a gap. Seen: %s x9. Fix: step:alpha-beta\n" % day(-1))
+        self.put(DEBT_README, "# Debts\n\nSeen: %s x9\n" % day(-1))
+        self.put_debt("small", "Seen: %s x1" % day(-1))
+        self.assert_next_debt("small")
+
+    # --debt-flow START END: the debts opened and closed between two refs. The notes file and the README are not debts.
+
+    def test_debt_flow_names_the_debts_opened_and_closed_and_nothing_else(self):
+        self.put("debts/retired-debt.md", DEBT_NO_FIX)
+        self.put("debts/kept-debt.md", DEBT_NO_FIX)
+        self.put(DEBT_NOTES, NOTES_HEAD)
+        self.put(DEBT_README, "# Debts\n\nOne debt per file.\n")
+        self.commit_base()
+        start = self.base_sha()
+        self.put("debts/fresh-debt.md", FIXED_DEBT_TEXT)  # opened
+        self.delete("debts/retired-debt.md")  # closed
+        self.put("debts/kept-debt.md", DEBT_NO_FIX + "\nMore detail, the same debt.\n")  # edited, neither opened nor closed
+        self.put(DEBT_NOTES, NOTES_HEAD + "- new-note-line: a gap. Seen: %s x1. Fix: step:alpha-beta\n" % day(0))
+        self.put(DEBT_README, "# Debts\n\nOne debt per file, as before.\n")
+        self.commit_change()
+        rc, out = self.lint("--debt-flow", start, "HEAD")
+        self.assertEqual(rc, 0, "--debt-flow did not exit 0 (not built?): %s" % out)
+        self.assertIn("fresh-debt", out, out)
+        self.assertIn("retired-debt", out, out)
+        self.assertNotIn("kept-debt", out, out)
+        self.assertNotIn("new-note-line", out, out)
+        self.assertNotIn("README.md", out, out)
+        self.assertNotIn("notes.md", out, out)
 
 
 class ImportTests(unittest.TestCase):
