@@ -6012,7 +6012,7 @@ test("page-item-waits-on: No. 154 open, with a lane and a wait, shows one span, 
   const inner = spans.first().locator("a");
   await need(inner, "the span has no link");
   assert.equal(await inner.getAttribute("href"), WT_PR_URL(1011), "the span's link is not PR #1011");
-  assert.match(await linkWords(inner), /^PR #1011( in q_max)?$/, "the link holds more than PR #1011");
+  assert.match(await linkWords(inner), PR_COPY(1011), "the link does not read 'waits on PR #1011', as an item with no lane does");
 });
 
 test("page-item-waits-on: No. 154 with waits and no lastAnswer stays an open ask in its tier, with the wait span and an open chip", async (t) => {
