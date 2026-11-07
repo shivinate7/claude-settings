@@ -1,0 +1,11 @@
+{
+  "title": "install.ps1 fails when a skill copy fails",
+  "phase": "now",
+  "status": "doing",
+  "order": 263.3,
+  "owner": "coordinator",
+  "why": "Owner, item 368, 14:41 CST: a. Closes note install-skill-fail-exits-0 (a skill copy failure has no retry and exits 0).",
+  "note": "Page item 368 closes on this lane's done report.",
+  "lane": "session_013NEJL3kdQhQRttX7boZUwM",
+  "updatedAt": "2026-11-07T14:51:00-06:00"
+}

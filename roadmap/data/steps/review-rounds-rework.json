@@ -1,10 +1,11 @@
 {
   "title": "Measure what each review round catches, then propose models and prompts per round",
-  "phase": "next",
-  "status": "todo",
+  "phase": "now",
+  "status": "doing",
   "order": 261.0,
   "owner": "coordinator",
   "why": "Owner question on item 356, 13:41 CST Nov 7: \"should we also consider reworking our 3 round program in terms of what models they use what prompts etc?\" Answered yes in the item's reply.",
-  "note": "First measure, from review records: the findings per round, and how many were real. Then propose a model and prompt per round. A change to rule roles-review-cap-three or agent-model-cap needs the owner's word. 13:45 CST: the coordinator's read-only audit agent is measuring past rounds (verdict, model, and how often findings came back). 13:51 CST: the audit is done. Its three choices are page item 359. Owner, item 359, 14:41 CST: a, b and c: round 1 on Sonnet for guard and check diffs; skip round 3 unless the change touches a guard or check or round 2 failed; label findings blocker, should-fix or wording, and only a blocker FAILs.",
-  "updatedAt": "2026-11-07T14:47:00-06:00"
+  "note": "First measure, from review records: the findings per round, and how many were real. Then propose a model and prompt per round. A change to rule roles-review-cap-three or agent-model-cap needs the owner's word. 13:45 CST: the coordinator's read-only audit agent is measuring past rounds (verdict, model, and how often findings came back). 13:51 CST: the audit is done. Its three choices are page item 359. Owner, item 359, 14:41 CST: a, b and c: round 1 on Sonnet for guard and check diffs; skip round 3 unless the change touches a guard or check or round 2 failed; label findings blocker, should-fix or wording, and only a blocker FAILs. Lane started 14:49 CST, builds 359 a+b+c.",
+  "updatedAt": "2026-11-07T14:51:00-06:00",
+  "lane": "session_013NEJKzfcSeBe5Ym9pCtxHn"
 }

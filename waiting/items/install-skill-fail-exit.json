@@ -1,10 +1,10 @@
 {
   "added": "2026-11-07T20:25:00Z",
   "context": "Goal: a failed install is never reported as success.\nProblem (risk): in install.ps1, a failed skill install sets only $AgentFailed and is never retried, so the script exits 0 (install.ps1 line 821; the exit reads $StillFailed). It bites in copy mode, and install-manifest-prunes.md line 14 put your PC in copy mode on 2026-11-01.\nBased on (code): install.ps1, Install-Dir and Resolve-Failures.\nDeparts from: main exits 0 on a failed skill copy. Option a exits non-zero.",
-  "home": "lane notes-keep-reverify",
+  "home": "step install-skill-fail-exit (lane session_013NEJL3kdQhQRttX7boZUwM)",
   "id": "install-skill-fail-exit",
   "kind": "decision",
-  "lane": "notes-keep-reverify",
+  "lane": "install-skill-fail-exit",
   "lastAnswer": {
     "at": "2026-11-07T20:41:09.600Z",
     "choice": "a",
