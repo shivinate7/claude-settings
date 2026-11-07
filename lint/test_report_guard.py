@@ -3744,37 +3744,38 @@ class UICopyRoundTwoTests(unittest.TestCase):
                                              "launch</button>;\n"), ["STE011"])
 
     def test_114_many_generics_lint_in_linear_time(self):
-        # Growth, in one process: the generic-heavy text at 600 blocks and at 2400 blocks, best of
-        # three each, the two sizes alternated inside the loop so load hits both alike. Linear lint
-        # quadruples with its input (ratio near 4); a quadratic scan grows sixteenfold (near 16). The
-        # bound 8 sits between them.
-        import time
+        # Work steps, not time: the copy events the scanner emits (a tag start, a text node, a tag end),
+        # counted at 50 blocks and at 200 blocks. Each block holds one generic and one <p>, so the scan
+        # emits 3 events per block, plus 3 for the last <p>: linear, bounded by 4x the small count plus 8.
+        # A scan that re-reads the text for each generic re-emits the events of every later block, so its
+        # count grows with the square of the size and breaks the bound.
 
         def text_with(blocks):
             lines = []
             for i in range(blocks):
                 lines.append("const f%d = <T extends X>(a: T): T => a;" % i)
+                lines.append("const p%d = <p>Go now.</p>;" % i)
                 lines.extend(["const v%d_%d = %d;" % (i, j, j) for j in range(7)])
             lines.append("const y = <p>In order to go.</p>;")
             return "\n".join(lines) + "\n"
 
-        def timed(text):
-            started = time.perf_counter()
-            codes = self.check("a.tsx", text)
-            return time.perf_counter() - started, codes
+        def events(text):
+            with contextlib.ExitStack() as stack:
+                counters = [stack.enter_context(mock.patch.object(
+                                ste_lint._UICopy, name, autospec=True,
+                                side_effect=getattr(ste_lint._UICopy, name)))
+                            for name in ("start", "text", "end")]
+                codes = self.check("a.tsx", text)
+            return codes, sum(counter.call_count for counter in counters)
 
-        text = text_with(600)
-        self.assertGreaterEqual(text.count("\n"), 4800)
-        longer = text_with(2400)
-        once = quadrupled = float("inf")
-        for _ in range(3):
-            elapsed, codes = timed(text)
-            once = min(once, elapsed)
-            quadrupled = min(quadrupled, timed(longer)[0])
-        self.assertEqual(codes, ["STE011"])
-        self.assertLess(quadrupled / once, 8.0,
-                        "generic-heavy text of %d lines takes %.1fx as long as %d lines"
-                        % (longer.count("\n"), quadrupled / once, text.count("\n")))
+        small_codes, small = events(text_with(50))
+        self.assertEqual(small_codes, ["STE011"])
+        self.assertGreater(small, 0)
+        big_codes, big = events(text_with(200))
+        self.assertEqual(big_codes, ["STE011"])
+        self.assertLessEqual(big, 4 * small + 8,
+                             "200 blocks emit %d copy events, over 4x the %d of 50 blocks plus 8"
+                             % (big, small))
 
 
 class TurnReaderTests(unittest.TestCase):

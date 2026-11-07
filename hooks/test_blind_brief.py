@@ -279,30 +279,29 @@ class BriefFaults(unittest.TestCase):
             with self.subTest(header=header):
                 self.assertIn("outside", codes(self.m.brief_faults(brief(header=header))))
 
-    def test_long_digit_run_is_fast(self):
-        # Growth, in one process: a 20000-digit run and an 80000-digit run, best of three each, the two
-        # sizes alternated inside the loop so load hits both alike. Linear work quadruples (ratio near 4);
-        # quadratic work grows sixteenfold (near 16). The bound 8 sits between them. The same-length dot
-        # filler keeps the claim that digits are no slower than other text (measured 1.0 to 1.1).
-        import time
+    def test_digit_runs_keep_their_guard_in_the_token_spacing_patterns(self):
+        # A digit run is scanned from its first digit only. Each token-spacing pattern that starts a digit
+        # run must keep a guard before its first \d+: the lookbehind (?<![\w.]) or a \b. Without it the
+        # pattern restarts at every digit of the run, and the scan grows as the square of the run's length.
+        # The patterns are read from the module, so this holds no copy of them.
+        unguarded = []
+        for pat in self.m.COMPILED["token-spacing"]:
+            text = pat.pattern
+            at = text.find("\\d+")
+            if at < 0:
+                continue
+            before = text[:at]
+            if not (before.endswith("(?<![\\w.])") or before.endswith("\\b")):
+                unguarded.append(text)
+        self.assertEqual(unguarded, [],
+                         "token-spacing digit-run pattern lost its guard (?<![\\w.]) before \\d+: %s"
+                         % unguarded)
 
-        def timed(text):
-            start = time.perf_counter()
-            self.m.brief_faults(text)
-            return time.perf_counter() - start
-
-        small_text = brief(job=JOB + "\n" + "1" * 20000)
-        big_text = brief(job=JOB + "\n" + "1" * 80000)
-        small = big = float("inf")
-        for _ in range(3):
-            small = min(small, timed(small_text))
-            big = min(big, timed(big_text))
-        self.assertLess(big / small, 8.0,
-                        "an 80000-digit run takes %.1fx as long as a 20000-digit run" % (big / small))
-        filler_text = brief(job=JOB + "\n" + "." * 20000)
-        filler = min(timed(filler_text) for _ in range(3))
-        self.assertLess(small / filler, 3.0,
-                        "a 20000-digit run takes %.1fx as long as a same-length filler" % (small / filler))
+    def test_long_digit_run_gives_the_right_verdict(self):
+        # The verdict, not the time: a long run of digits is no fault, and the same run with a unit is a
+        # spacing value.
+        self.assertEqual(self.m.brief_faults(brief(job=JOB + "\n" + "1" * 5000)), [])
+        self.assertIn("token-spacing", codes(self.m.brief_faults(brief(job=JOB + "\n" + "1" * 5000 + " px"))))
 
     def test_device_written_sizes_pass(self):
         line = "iPhone Duo, 1114 x 705 pt open, 540 x 720 px per screen."
