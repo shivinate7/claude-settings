@@ -531,8 +531,10 @@ def answered_problem(text):
 # reports-done-names-models: a Done item that agents built or reviewed names each one's role
 # and model, as "(builder sonnet, reviewer sonnet)". Only these roles build or review; an Explore
 # search or a Plan spawn needs no name. A Workflow agent() is unseen: its model can sit in a variable.
-# A spawn still running is named under Next instead: that excuses it from Done, but only when every
-# BUILT item names a role and model, so a finished build cannot hide behind a running reviewer.
+# A role missing from Done is excused when Next names it with every model it ran, since a spawn may
+# run on past the report. Next pairs are never mismatch-checked: a Next line can plan a later spawn on
+# another model. The excuse applies only when no builder, test-author or record-writer spawned, or
+# every BUILT Done item names a role and model, so a finished build is not excused by what Next names.
 NAMED_ROLES = {"builder", "reviewer", "test-author", "record-writer"}
 SPAWN_TOOLS = {"Agent", "Task"}
 MODEL_FAMILIES = ("haiku", "sonnet", "opus", "fable")
@@ -618,11 +620,16 @@ def done_models_problem(text, spawned):
     named = _role_models(" ".join(items))
     next_named = _role_models(report_section(text, "Next"))
     missing = sorted(r for r in spawned if not any(nr == r for nr, _ in named))
-    if missing and all(ROLE_MODEL_RE.search(i) for i in items if "BUILT" in DONE_KIND_RE.findall(i)):
-        missing = [r for r in missing if not any(nr == r for nr, _ in next_named)]
+    builds = spawned.keys() & {"builder", "test-author", "record-writer"}
+    if missing and (not builds or all(ROLE_MODEL_RE.search(i) for i in items if "BUILT" in DONE_KIND_RE.findall(i))):
+        def named_next(role):
+            ran = spawned[role] - {""}
+            models = {m for r, m in next_named if r == role}
+            return bool(models) and ran <= models
+        missing = [r for r in missing if not named_next(r)]
     if missing:
         return "no model named for " + ", ".join(missing)
-    for role, model in sorted(named | next_named):
+    for role, model in sorted(named):
         ran = spawned.get(role)
         if ran is not None and "" not in ran and model not in ran:
             return f"'{role} {model}' matches no {role} spawn, which ran " + ", ".join(sorted(ran))
