@@ -567,12 +567,21 @@ class Scope(unittest.TestCase):
             with self.subTest(path=p):
                 self.assertEqual(self.true_set(run([p], existing=[p])), {"shell_macos", "code"})
 
-    # bin/sim-test and its suite run in the shell-macos job only, like bin/ios-ship. The suite runs the real bin/sim-lease
-    # beside the script, so an edit to bin/sim-lease turns the same job on.
-    def test_sim_test_edit_turns_on_only_the_macos_shell_job(self):
-        for p in ("bin/sim-test", "lint/test_sim_test.sh", "bin/sim-lease"):
+    # bin/sim-test and bin/sim-lease are loaded by the guard suite (GuardClosure derives both), so an edit to either also
+    # turns on `guard`, the full Windows guard shards and the checks-guard job. The suite script, lint/test_sim_test.sh,
+    # is not loaded by it: its edit turns on the macOS shell job and nothing else.
+    def test_sim_test_and_sim_lease_edit_turns_on_the_guard_suite_and_the_suite_script_does_not(self):
+        for p in ("bin/sim-test", "bin/sim-lease"):
             with self.subTest(path=p):
-                self.assertEqual(self.true_set(run([p], existing=[p])), {"shell_macos", "code"})
+                got = run([p], existing=[p])
+                self.assertEqual(self.true_set(got), {"shell_macos", "code", "guard"}, f"{p}: {got}")
+                self.assertEqual(got[GUARD_FULL], "true", f"{GUARD_FULL} for {p}: {got}")
+                self.assertEqual(got["checks_guard"], "true", f"checks_guard for {p}: {got}")
+        with self.subTest(path="lint/test_sim_test.sh"):
+            got = run(["lint/test_sim_test.sh"], existing=["lint/test_sim_test.sh"])
+            self.assertEqual(self.true_set(got), {"shell_macos", "code"}, f"lint/test_sim_test.sh: {got}")
+            self.assertEqual(got[GUARD_FULL], "false", f"{GUARD_FULL} for lint/test_sim_test.sh: {got}")
+            self.assertEqual(got["checks_guard"], "false", f"checks_guard for lint/test_sim_test.sh: {got}")
 
     # bin/shoot's suite installs a browser, so its own paths and the browser installers turn `shoot` on. An edit sets
     # `code` and `shoot` and no other flag in true_set (checks_guard is outside ALL; the cases below pin it).
