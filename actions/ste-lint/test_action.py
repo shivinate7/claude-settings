@@ -910,4 +910,34 @@ with scratch("one-home-step") as d:
     check("one-home step, control: a child with no copy passes the step with no COPY001",
           rc == 0 and "COPY001" not in out, out)
 
+# Review round 2, F1: in claude-settings itself the step runs the copy check too, and a copy fails the step. A child
+# still only prints (above). So the parent gate sits in this same step, with no new CI step.
+def own_step(d, brief):
+    """A claude-settings clone under d whose tracked agents/brief.md holds `brief`."""
+    cs = one_home_clone(d)
+    write(cs, "agents/brief.md", brief)
+    git(cs, "add", "-A")
+    git(cs, "commit", "-qm", "brief")
+    return cs
+
+
+with scratch("one-home-own-copy") as d:
+    cs = own_step(d, "# Brief\n\n%s\n" % ONE_HOME_RULE)
+    direct = subprocess.run([sys.executable, os.path.join(cs, "lint", "find_copies.py"), "--in-repo"], cwd=cs,
+                            capture_output=True, text=True)
+    check("one-home own step, fixture: the finder run in the clone prints the COPY001 line and copies: FAIL",
+          direct.returncode == 1 and "agents/brief.md:3: COPY001 brief-contents copied" in direct.stdout
+          and "copies: FAIL" in direct.stdout, direct.stdout + direct.stderr)
+    rc, out = run_clone_step(d, cs, cs)
+    check("one-home own step: a copy of a rule sentence in claude-settings fails the step (rc != 0)",
+          rc != 0, out)
+    check("one-home own step: the step prints the COPY001 line and the verdict copies: FAIL",
+          "agents/brief.md:3: COPY001 brief-contents copied" in out and "copies: FAIL" in out, out)
+
+with scratch("one-home-own-clean") as d:
+    cs = own_step(d, "# Brief\n\nKeep briefs short.\n")
+    rc, out = run_clone_step(d, cs, cs)
+    check("one-home own step, control: a copy-free claude-settings passes the step and prints copies: PASS",
+          rc == 0 and "copies: PASS" in out, out)
+
 sys.exit(1 if failed else 0)
