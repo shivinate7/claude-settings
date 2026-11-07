@@ -3589,6 +3589,15 @@ test("reply to an answer: a refused reply keeps focus in the reply form", async 
   assert.ok([`rt-${RPL_ROOT}`, `rs-${RPL_ROOT}`].includes(active), "after the refused reply focus is on " + active + ", not the reply form");
 });
 
+test("reply to an answer: an answered reply in an ask thread has its header read 'Answer from <owner>', not an array index", async (t) => {
+  const page = await open(t, { dbExtra: { asks: { [RPL_ROOT]: ASK_ANSWERED, [RPL_DEEP.id]: RPL_DEEP } }, storage: RPL_NEW }); if (!page) return;
+  // The answer's header follows the reply's box in the thread (askMine), so it is the next sibling. The reply's box is there first, so an absent header is the defect.
+  await mustHave(page, `#${RPL_DEEP.id}`, "the answered reply in the thread of " + RPL_ROOT);
+  await mustHave(page, `#${RPL_DEEP.id} + p.lhead`, "the answer header of the reply " + RPL_DEEP.id);
+  const head = (await page.locator(`#${RPL_DEEP.id} + p.lhead`).textContent()) ?? "";
+  assert.ok(head.trim().startsWith("Answer from lane tier-fold"), "the answer header of " + RPL_DEEP.id + " reads " + JSON.stringify(head.trim()) + ", not Answer from lane tier-fold");
+});
+
 // ---------------------------------------------------------------- reply to an item (step item-reply-back)
 // Contract: docs/design/item-reply-back-notes.md, sections 1-8 and 10; the mockup is docs/design/item-reply-back.html.
 // An item reply is one new asks/<id> record {id, text, at, item}, with no re. It shares the ask reply's box, Send, Undo, lock and wake comment.
@@ -3756,6 +3765,31 @@ test("reply to an item, case 9: an item reply whose item is no longer on the pag
   const lineText = (await line.count()) ? (await line.first().textContent()).trim() : "";
   assert.equal(lineText, "Re: an item no longer on this page", "the row of the closed item's reply has the line " + JSON.stringify(lineText));
   assert.equal((await page.textContent("#askCount")).trim(), "1", "the ask count does not count the closed item's reply while it has no reply");
+});
+
+test("reply to an item, case 10:a folded sunk card shows its waiting reply line outside the fold, and its fold words read 'the reply and your reply'", async (t) => {
+  const wait = { id: "ask-irp-fwait", text: IRP_TEXT, at: "2026-10-30T08:00:00Z", item: IRP_ANS.id };
+  const page = await open(t, { items: [IRP_ANS], answers: answerOf(IRP_ANS, "a", { note: "Kept the red one." }), dbExtra: { asks: { [wait.id]: wait } }, storage: VISIT }); if (!page) return;
+  await irpCard(page, IRP_ANS);
+  const fold = card(page, IRP_ANS).locator("button.unfold");
+  await need(fold, `No. ${IRP_ANS.n} has no fold control`);
+  assert.equal(await fold.getAttribute("aria-expanded"), "false", `No. ${IRP_ANS.n} is not folded at load`);
+  // The waiting reply is a direct child of the card, beside the fold and not in its body, so it shows with the fold shut.
+  await mustHave(page, `#item-${IRP_ANS.id} > p.fwait`, "waiting reply line outside the fold of No. " + IRP_ANS.n);
+  assert.equal(await page.locator(`#item-${IRP_ANS.id} > p.fwait`).first().isVisible(), true, "the waiting reply line is not shown with the fold shut, in No. " + IRP_ANS.n);
+  const show = (await fold.locator(".uf-show").textContent()).trim();
+  assert.equal(show, "Show your note, the reply and your reply", "the fold words of No. " + IRP_ANS.n + " are " + JSON.stringify(show));
+});
+
+test("reply to an item, case 11: once the item's reply has its answer, the fold words read 'the replies and your reply'", async (t) => {
+  // answered before the visit, so the answer is not new and the fold stays shut: only the words change.
+  const rec = { id: "ask-irp-fans", text: IRP_TEXT, at: "2026-10-25T08:00:00Z", item: IRP_ANS.id, owner: "lane tier-fold", answered: IRP_OLD, reply: "Option C is in the review." };
+  const page = await open(t, { items: [IRP_ANS], answers: answerOf(IRP_ANS, "a", { note: "Kept the red one." }), dbExtra: { asks: { [rec.id]: rec } }, storage: VISIT }); if (!page) return;
+  await irpCard(page, IRP_ANS);
+  const fold = card(page, IRP_ANS).locator("button.unfold");
+  await need(fold, `No. ${IRP_ANS.n} has no fold control`);
+  const show = (await fold.locator(".uf-show").textContent()).trim();
+  assert.equal(show, "Show your note, the replies and your reply", "the fold words of No. " + IRP_ANS.n + " are " + JSON.stringify(show));
 });
 
 // ---------------------------------------------------------------- Mark read on an answered ask (step ask-dismiss)
