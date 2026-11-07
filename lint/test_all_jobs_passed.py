@@ -4,7 +4,8 @@
 Branch protection requires that one check (actions/all-jobs-passed). It fails on a needed job that failed, was
 cancelled or was skipped, so every job all-jobs-passed needs must run on a non-draft pull_request. This file proves:
 all-jobs-passed needs exactly the jobs that run there, derived from the file and not from a copied list; only the shard
-jobs (test_windows_split.SHARD_VAR) stay off it; no needed job has a job-level if, since each scope condition sits in
+jobs stay off it, and there are none: each sharded suite is one matrix job (test_windows_split.matrix_problems); no needed job
+has a job-level if, since each scope condition sits in
 its steps (test_windows_split.job_check_problems); the job's shape, its own if (non-draft pull_request only) and its
 checkout pin; scope skips only a draft PR; and ci-done needs all-jobs-passed.
 
@@ -55,10 +56,13 @@ GOOD = """jobs:
       - name: Mac's step
         if: ${{ needs.scope.outputs.checks_macos == 'true' }}
         run: echo mac
-  checks-windows-guard-2:
+  checks-windows-guard:
     runs-on: windows-latest
     needs: scope
-    if: ${{ github.event_name != 'pull_request' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: ${{ fromJSON(needs.scope.outputs.guard_windows_shards) }}
     steps:
       - run: echo shard
   all-jobs-passed:
@@ -69,6 +73,7 @@ GOOD = """jobs:
       - scope
       # - retired-job
       - checks # the lint job
+      - checks-windows-guard
       - checks-macos
     steps:
       - uses: actions/checkout@@PIN@ # v5.0.0
@@ -83,7 +88,7 @@ GOOD = """jobs:
       - scope
       - checks
       - checks-macos
-      - checks-windows-guard-2
+      - checks-windows-guard
       - all-jobs-passed
     steps:
       - run: echo done
@@ -99,8 +104,8 @@ MUTATIONS = [
      "    if: ${{ needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request' }}\n"),
     ("a non-shard job turned off by an event if", "  checks-macos:\n    runs-on: macos-latest\n",
      "  checks-macos:\n    runs-on: macos-latest\n    if: ${{ github.event_name != 'pull_request' }}\n"),
-    ("a job that is off on a pull_request added to all-jobs-passed's needs", "      - checks-macos\n    steps:\n      - uses: actions/checkout",
-     "      - checks-macos\n      - checks-windows-guard-2\n    steps:\n      - uses: actions/checkout"),
+    ("all-jobs-passed lists a job twice", "      - checks-macos\n    steps:\n      - uses: actions/checkout",
+     "      - checks-macos\n      - checks-windows-guard\n    steps:\n      - uses: actions/checkout"),
     ("all-jobs-passed's always() dropped", "if: ${{ always() && github.event_name == 'pull_request' && !github.event.pull_request.draft }}",
      "if: ${{ github.event_name == 'pull_request' && !github.event.pull_request.draft }}"),
     ("the old if runs all-jobs-passed on push too", "if: ${{ always() && github.event_name == 'pull_request' && !github.event.pull_request.draft }}",
@@ -114,8 +119,8 @@ MUTATIONS = [
      "      - checks-macos\n      - ci-done\n    steps:\n      - uses: actions/checkout"),
     ("the action is commented out", "      - uses: $/actions/all-jobs-passed\n", "      # - uses: $/actions/all-jobs-passed\n"),
     ("ci-done does not need all-jobs-passed", "      - all-jobs-passed\n    steps:\n      - run: echo done", "    steps:\n      - run: echo done"),
-    ("an empty needs list", "    needs:\n      - scope\n      # - retired-job\n      - checks # the lint job\n      - checks-macos\n"
-     "    steps:\n      - uses: actions/checkout", "    needs: []\n    steps:\n      - uses: actions/checkout"),
+    ("an empty needs list", "    needs:\n      - scope\n      # - retired-job\n      - checks # the lint job\n      - checks-windows-guard\n"
+     "      - checks-macos\n    steps:\n      - uses: actions/checkout", "    needs: []\n    steps:\n      - uses: actions/checkout"),
     ("a needed job commented out of all-jobs-passed's needs", "      - checks-macos\n    steps:\n      - uses: actions/checkout",
      "      # - checks-macos\n    steps:\n      - uses: actions/checkout"),
     ("scope runs on a draft PR", "|| !github.event.pull_request.draft }}", "|| github.event.pull_request.draft }}"),
@@ -154,47 +159,50 @@ class AllJobsPassedJob(unittest.TestCase):
         self.assertEqual(ci_done_problems(self.text), [])
 
 
-class GuardShardInNeeds(unittest.TestCase):
-    """checks-windows-guard-2 runs on a ready pull_request (its steps decide, on guard_windows_full), so all-jobs-passed needs it.
-    ci-done needs every job, guard-2 included."""
+class GuardMatrixInNeeds(unittest.TestCase):
+    """checks-windows-guard is one matrix job. It runs on a ready pull_request (its legs decide), so all-jobs-passed needs it, and
+    ci-done needs it. Re-pointed from GuardShardInNeeds (checks-windows-guard-2, the second of two shard jobs)."""
 
     def setUp(self):
         with open(CHECKS, encoding="utf-8") as f:
             self.text = f.read()
         self.needs = needs_of(job_block(self.text, ALL_JOBS_PASSED_JOB)) or []
 
-    def test_all_jobs_passed_needs_the_guard_shard_2(self):
-        # Named failure: a red full guard shard on a ready pull_request would not block the merge.
-        self.assertIn("checks-windows-guard-2", self.needs, f"{ALL_JOBS_PASSED_JOB} does not need checks-windows-guard-2: {self.needs}")
+    def test_all_jobs_passed_needs_the_guard_matrix_job(self):
+        # Named failure: a red guard leg on a ready pull_request would not block the merge.
+        self.assertIn("checks-windows-guard", self.needs, f"{ALL_JOBS_PASSED_JOB} does not need checks-windows-guard: {self.needs}")
 
-    def test_ci_done_needs_the_guard_shard_2(self):
-        # Control: ci-done needs every job that runs on a pull_request, guard-2 included.
-        self.assertIn("checks-windows-guard-2", needs_of(job_block(self.text, FAN_IN)) or [], f"{FAN_IN} does not need checks-windows-guard-2")
+    def test_all_jobs_passed_names_no_guard_shard_job(self):
+        # Named failure: a leftover checks-windows-guard-<i> job, a runner the matrix replaced, that all-jobs-passed still needs.
+        self.assertEqual([n for n in self.needs if n.startswith("checks-windows-guard-")], [],
+                         f"{ALL_JOBS_PASSED_JOB} needs a shard job of the guard suite")
+
+    def test_ci_done_needs_the_guard_matrix_job(self):
+        # Control: ci-done needs every job that runs on a pull_request, the guard matrix job included.
+        self.assertIn("checks-windows-guard", needs_of(job_block(self.text, FAN_IN)) or [], f"{FAN_IN} does not need checks-windows-guard")
 
 
-class MergeShardInNeeds(unittest.TestCase):
-    """checks-windows-merge-2 to -5 run on a ready pull_request (their steps decide, on merge_windows_full), so all-jobs-passed needs
-    each one, as it needs checks-windows-guard-2. ci-done needs every job, the merge shards included."""
+class MergeMatrixInNeeds(unittest.TestCase):
+    """checks-windows-merge is one matrix job, needed by all-jobs-passed and ci-done for the same reason as the guard matrix job.
+    Re-pointed from MergeShardInNeeds (checks-windows-merge-2 to -5, the shard jobs)."""
 
     def setUp(self):
         with open(CHECKS, encoding="utf-8") as f:
             self.text = f.read()
         self.needs = needs_of(job_block(self.text, ALL_JOBS_PASSED_JOB)) or []
 
-    def test_all_jobs_passed_needs_the_merge_shards(self):
-        # Named failure: a red full merge shard on a ready pull_request would not block the merge.
-        for n in range(2, 6):
-            name = f"checks-windows-merge-{n}"
-            with self.subTest(job=name):
-                self.assertIn(name, self.needs, f"{ALL_JOBS_PASSED_JOB} does not need {name}: {self.needs}")
+    def test_all_jobs_passed_needs_the_merge_matrix_job(self):
+        # Named failure: a red merge leg on a ready pull_request would not block the merge.
+        self.assertIn("checks-windows-merge", self.needs, f"{ALL_JOBS_PASSED_JOB} does not need checks-windows-merge: {self.needs}")
 
-    def test_ci_done_needs_the_merge_shards(self):
-        # Control: ci-done needs every job that runs on a pull_request, the merge shards included.
-        needs = needs_of(job_block(self.text, FAN_IN)) or []
-        for n in range(2, 6):
-            name = f"checks-windows-merge-{n}"
-            with self.subTest(job=name):
-                self.assertIn(name, needs, f"{FAN_IN} does not need {name}: {needs}")
+    def test_all_jobs_passed_names_no_merge_shard_job(self):
+        # Named failure: a leftover checks-windows-merge-<i> job, which starts a runner per shard, is still needed.
+        self.assertEqual([n for n in self.needs if n.startswith("checks-windows-merge-")], [],
+                         f"{ALL_JOBS_PASSED_JOB} needs a shard job of the merge suite")
+
+    def test_ci_done_needs_the_merge_matrix_job(self):
+        # Control: ci-done needs every job that runs on a pull_request, the merge matrix job included.
+        self.assertIn("checks-windows-merge", needs_of(job_block(self.text, FAN_IN)) or [], f"{FAN_IN} does not need checks-windows-merge")
 
 
 class AllJobsPassedFixtures(unittest.TestCase):
@@ -212,18 +220,20 @@ class AllJobsPassedFixtures(unittest.TestCase):
                 self.assertTrue(all_problems(GOOD.replace(old, new, 1)), label)
 
 
-# The shape checks-windows-guard-2 takes on a ready pull_request: its job-level if holds the draft guard only, and
-# all-jobs-passed needs it. Each variant below changes GOOD in one place, and the anchors must match, so a moved line is named.
-GUARD2_OFF = ("  checks-windows-guard-2:\n    runs-on: windows-latest\n    needs: scope\n"
-              "    if: ${{ github.event_name != 'pull_request' }}\n")
-GUARD2_NONE = "  checks-windows-guard-2:\n    runs-on: windows-latest\n    needs: scope\n"
-GUARD2_DRAFT = ("  checks-windows-guard-2:\n    runs-on: windows-latest\n    needs: scope\n"
-                "    if: ${{ !github.event.pull_request.draft }}\n")
-GUARD2_FLAG = ("  checks-windows-guard-2:\n    runs-on: windows-latest\n    needs: scope\n"
-               "    if: ${{ needs.scope.outputs.guard == 'true' }}\n")
-MERGE2 = ("  checks-windows-merge-2:\n    runs-on: windows-latest\n    needs: scope\n"
-          "    if: ${{ github.event_name != 'pull_request' }}\n    steps:\n      - run: echo shard\n")
-MERGE2_NONE = "  checks-windows-merge-2:\n    runs-on: windows-latest\n    needs: scope\n    steps:\n      - run: echo shard\n"
+# The shape a sharded suite's matrix job takes on a ready pull_request: one job, no job-level if, needed by all-jobs-passed. Each
+# variant changes one place in the matrix, and the anchors must match, so a moved line is named.
+GUARD_MATRIX = ("  checks-windows-guard:\n    runs-on: windows-latest\n    needs: scope\n"
+                "    strategy:\n      fail-fast: false\n      matrix:\n"
+                "        shard: ${{ fromJSON(needs.scope.outputs.guard_windows_shards) }}\n"
+                "    steps:\n      - run: echo shard\n")
+GUARD_MATRIX_DRAFT = GUARD_MATRIX.replace("    strategy:", "    if: ${{ !github.event.pull_request.draft }}\n    strategy:", 1)
+GUARD_MATRIX_FLAG = GUARD_MATRIX.replace("    strategy:", "    if: ${{ needs.scope.outputs.guard == 'true' }}\n    strategy:", 1)
+MERGE_MATRIX = GUARD_MATRIX.replace("checks-windows-guard", "checks-windows-merge").replace("guard_windows_shards", "merge_windows_shards")
+MERGE_MATRIX_EVENT = MERGE_MATRIX.replace("    strategy:", "    if: ${{ github.event_name != 'pull_request' }}\n    strategy:", 1)
+# A leftover -<i> shard job. The matrix replaced these: a job that has one is refused, whether it is needed or off a pull_request.
+STRAY_GUARD_SHARD = "  checks-windows-guard-2:\n    runs-on: windows-latest\n    needs: scope\n    steps:\n      - run: echo shard\n"
+STRAY_MERGE_SHARD_OFF = ("  checks-windows-merge-2:\n    runs-on: windows-latest\n    needs: scope\n"
+                         "    if: ${{ github.event_name != 'pull_request' }}\n    steps:\n      - run: echo shard\n")
 NEEDS_END = "      - checks-macos\n    steps:\n      - uses: actions/checkout"
 
 
@@ -234,37 +244,47 @@ def in_needs(text, name):
     return text.replace(NEEDS_END, f"      - checks-macos\n      - {name}\n    steps:\n      - uses: actions/checkout", 1)
 
 
-class GuardShardInNeedsFixtures(unittest.TestCase):
-    """The rules on a fixture. A guard shard that runs on a ready pull_request is needed, and its job-level if may hold the draft
-    guard only. Red controls: a needed merge shard that keeps the event-only if, and a needed guard shard whose job-level if reads a flag."""
+class GuardMatrixInNeedsFixtures(unittest.TestCase):
+    """The rules on a fixture. A matrix job that runs on a ready pull_request is needed, and has no job-level if. Red controls: a
+    job-level if on a needed matrix job, and a leftover -<i> shard job (needed, or off a pull_request). Re-pointed from
+    GuardShardInNeedsFixtures and its guard-2 and merge-2 variants."""
 
-    def test_a_needed_guard_shard_with_no_job_level_if_is_green(self):
-        self.assertIn(GUARD2_OFF, GOOD, "the fixture lost checks-windows-guard-2's job-level if")
-        text = in_needs(GOOD.replace(GUARD2_OFF, GUARD2_NONE, 1), "checks-windows-guard-2")
-        self.assertEqual(all_problems(text), [], "a needed guard shard with no job-level if is refused")
+    def test_a_needed_guard_matrix_with_no_job_level_if_is_green(self):
+        self.assertIn(GUARD_MATRIX, GOOD, "the fixture lost the guard matrix job")
+        self.assertEqual(all_problems(GOOD), [], "a needed guard matrix job with no job-level if is refused")
 
-    def test_a_needed_guard_shard_with_a_draft_guard_if_is_red(self):
-        # The draft guard as a job-level if: a guard shard has none, so all-jobs-passed refuses it.
-        self.assertIn(GUARD2_OFF, GOOD, "the fixture lost checks-windows-guard-2's job-level if")
-        text = in_needs(GOOD.replace(GUARD2_OFF, GUARD2_DRAFT, 1), "checks-windows-guard-2")
-        self.assertTrue(all_problems(text), "a needed guard shard with the draft guard as its job-level if is accepted")
+    def test_a_needed_guard_matrix_with_a_draft_guard_if_is_red(self):
+        self.assertIn(GUARD_MATRIX, GOOD, "the fixture lost the guard matrix job")
+        self.assertTrue(all_problems(GOOD.replace(GUARD_MATRIX, GUARD_MATRIX_DRAFT, 1)),
+                        "a needed guard matrix job with the draft guard as its job-level if is accepted")
 
-    def test_a_needed_merge_shard_with_no_job_level_if_is_green(self):
-        # The merge shards 2 to 5 take the guard shard's shape: no job-level if, and their steps decide on the full flag.
+    def test_a_needed_merge_matrix_with_no_job_level_if_is_green(self):
         self.assertIn("  all-jobs-passed:\n", GOOD, "the fixture lost the all-jobs-passed job")
-        text = in_needs(GOOD.replace("  all-jobs-passed:\n", MERGE2_NONE + "  all-jobs-passed:\n", 1), "checks-windows-merge-2")
-        self.assertEqual(all_problems(text), [], "a needed merge shard with no job-level if is refused")
+        text = in_needs(GOOD.replace("  all-jobs-passed:\n", MERGE_MATRIX + "  all-jobs-passed:\n", 1), "checks-windows-merge")
+        self.assertEqual(all_problems(text), [], "a needed merge matrix job with no job-level if is refused")
 
-    def test_a_needed_merge_shard_with_the_event_only_if_is_red(self):
-        # The event-only if skips the shard on a ready pull_request, so all-jobs-passed would read its skip as red.
+    def test_a_needed_merge_matrix_with_the_event_only_if_is_red(self):
+        # The event-only if skips the job on a ready pull_request, so all-jobs-passed would read its skip as red.
         self.assertIn("  all-jobs-passed:\n", GOOD, "the fixture lost the all-jobs-passed job")
-        text = in_needs(GOOD.replace("  all-jobs-passed:\n", MERGE2 + "  all-jobs-passed:\n", 1), "checks-windows-merge-2")
-        self.assertTrue(all_problems(text), "a merge shard with the event-only if in all-jobs-passed's needs is accepted")
+        text = in_needs(GOOD.replace("  all-jobs-passed:\n", MERGE_MATRIX_EVENT + "  all-jobs-passed:\n", 1), "checks-windows-merge")
+        self.assertTrue(all_problems(text), "a needed merge matrix job with the event-only if is accepted")
 
-    def test_a_needed_guard_shard_whose_if_reads_a_flag_is_red(self):
-        self.assertIn(GUARD2_OFF, GOOD, "the fixture lost checks-windows-guard-2's job-level if")
-        text = in_needs(GOOD.replace(GUARD2_OFF, GUARD2_FLAG, 1), "checks-windows-guard-2")
-        self.assertTrue(all_problems(text), "a needed guard shard with a flag in its job-level if is accepted")
+    def test_a_needed_guard_matrix_whose_if_reads_a_flag_is_red(self):
+        self.assertIn(GUARD_MATRIX, GOOD, "the fixture lost the guard matrix job")
+        self.assertTrue(all_problems(GOOD.replace(GUARD_MATRIX, GUARD_MATRIX_FLAG, 1)),
+                        "a needed guard matrix job with a flag in its job-level if is accepted")
+
+    def test_a_leftover_guard_shard_job_is_red_even_when_needed(self):
+        # Named failure: a checks-windows-guard-2 that all-jobs-passed needs, so a runner starts per leftover shard.
+        self.assertIn(GUARD_MATRIX, GOOD, "the fixture lost the guard matrix job")
+        text = in_needs(GOOD.replace(GUARD_MATRIX, GUARD_MATRIX + STRAY_GUARD_SHARD, 1), "checks-windows-guard-2")
+        self.assertTrue(all_problems(text), "a leftover checks-windows-guard-2 job, needed by all-jobs-passed, is accepted")
+
+    def test_a_leftover_merge_shard_job_off_all_jobs_passed_is_red(self):
+        # Named failure: a leftover checks-windows-merge-2 with the event-only if: a runner that the matrix replaced.
+        self.assertIn("  all-jobs-passed:\n", GOOD, "the fixture lost the all-jobs-passed job")
+        text = GOOD.replace("  all-jobs-passed:\n", STRAY_MERGE_SHARD_OFF + "  all-jobs-passed:\n", 1)
+        self.assertTrue(all_problems(text), "a leftover checks-windows-merge-2 job off all-jobs-passed is accepted")
 
 
 # A child repo's workflow: the generic rules, read through `--workflow PATH`. CHILD_GOOD passes them and each
