@@ -4635,6 +4635,11 @@ def session_home_keep(payload, tool: str, cwd: str) -> None:
             if held and os.path.isdir(held):
                 os.remove(record)
             return
+        if not lane and held and os.path.isdir(held):
+            # The session came back to the primary while its visited lane still stands: that visit
+            # was no home. A record whose folder is gone stays, and the guard keeps judging.
+            os.remove(record)
+            return
         if not lane or held == lane or session_home_agent_tree(lane):
             return
         import tempfile   # lazy: only a first or changed record reaches here
