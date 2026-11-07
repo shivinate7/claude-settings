@@ -673,6 +673,28 @@ class GuardRuleNamesTests(unittest.TestCase):
                'refuse(tool, "deny", "after-quote", NOTE, "m")\n')
         self.assertEqual(self.ids(src), {"after-quote"})
 
+    def test_a_logged_rules_shown_in_a_comment_or_a_string_names_nothing(self):
+        cases = {
+            "a comment": '# LOGGED_RULES = (GHOST,)\n',
+            "a string holding a comment opener": 'NOTE = "# LOGGED_RULES = (GHOST,)"\n',
+            "a lone quote in a comment": "# don't list it\n# LOGGED_RULES = (GHOST,)\n",
+            "a multi-line string": 'DOC = """\nLOGGED_RULES = (GHOST,)\n"""\n',
+        }
+        for label, src in cases.items():
+            with self.subTest(label):
+                self.assertEqual(self.ids(src), set(), "%s names a LOGGED_RULES entry the code does not hold" % label)
+
+    def test_a_logged_rules_after_a_string_that_holds_an_opener_or_a_quote_is_still_read(self):
+        heads = {
+            "a comment opener in a string": 'NOTE = "# not a comment /* nor this"\n',
+            "a lone quote in a string": 'NOTE = "it\'s"\n',
+            "a multi-line string": 'DOC = """\nLOGGED_RULES = (GHOST,)\n"""\n',
+        }
+        for label, head in heads.items():
+            with self.subTest(label):
+                src = head + 'A = "a-rule"\nLOGGED_RULES = (A,)\n'
+                self.assertEqual(self.ids(src), {"a-rule"}, "the LOGGED_RULES entry after %s is not listed" % label)
+
     def found_or_loud(self, src, wanted):
         """A call the reader cannot place by position is found, or the reader refuses it. It is never
         dropped without a word: a rule that can fire but is not listed hides from a never-fired cull."""
@@ -749,20 +771,21 @@ class EmittedRuleIdsTests(unittest.TestCase):
 # A guard may write its id through a module-level constant (`TIMEOUT_LOG_RULE = "judge-timeout"`),
 # so the reader resolves a Name rule argument against the file's own top-level string assignment.
 
-# The ids emitted_rule_ids() listed before this change (at ab5b48cbe). A new id may join the list;
+# The ids emitted_rule_ids() listed at 2428f36c5 (86). A new id may join the list;
 # an id on this list may not drop unless its rule is removed.
 LISTED_BEFORE = (
     "agent-model-cap", "agent-model-floor", "agent-role-model", "agent-role-model-unread", "ask-alone",
-    "author-diff", "background-end", "bare-merge", "builder-diff", "builder-test-edit", "cite-by-id",
+    "author-diff", "background-end", "bare-merge", "blind-brief", "builder-diff", "builder-test-edit", "cite-by-id",
     "command-in-item", "config-edit", "designer-diff", "designer-scope", "destructive-delete",
     "detached-launch", "draft-pr", "env-file", "force-push", "frozen-path", "gh-login-switch",
     "git-env-set", "guard-crash", "hand-made-worktree", "handoff-unread", "impeccable-review-only",
-    "item-field-rendered", "lane-by-slug", "lane-closes-after-records", "lane-effort-pin",
+    "item-field-rendered", "judge-timeout", "lane-by-slug", "lane-closes-after-records", "lane-effort-pin",
     "lane-one-topic", "lane-repo-tag", "linked-node-modules", "live-stream", "ln-over-directory",
     "load-brake", "machine-wide-kill", "merge-checks", "merge-role-proof", "mockup-home",
     "option-letter-keys", "other-checkout", "owner-judge", "page-item-design", "page-stale",
+    "parallelism-no-mid-task-talk",
     "playwright-browsers-path", "playwright-install", "pointer-head", "port-question", "press-link",
-    "push-main", "push-stray-branch", "question-departs", "question-form", "record-writer-scope",
+    "prose-judge", "push-main", "push-stray-branch", "question-departs", "question-form", "record-writer-scope",
     "records-page", "rework-off-page", "rm-after-cd", "rm-var-unguarded", "roadmap-one-writer",
     "role-diff-main-checkout", "role-diff-unread", "role-diff-unresolved", "roles-third-round-steps-up",
     "session-home", "shared-tree", "silent-write", "simulator-boot-bypass", "simulator-boot-cap",
@@ -841,19 +864,59 @@ class ModuleLevelRuleNameTests(unittest.TestCase):
         self.assertIn("hooks/x.py:2", str(cm.exception),
                       "a name assigned a non-string is not refused with the call's path:line")
 
-    def test_the_real_all_rules_listing_has_the_id_call_judge_writes(self):
-        sys.path.insert(0, os.path.join(rule_audit.ROOT, "hooks"))
-        import call_judge  # read from the module, never copied here
+    def test_a_logged_rules_tuple_lists_each_constant_it_names(self):
+        with self.subTest("two constants"):
+            self.assertEqual(self.ids('A = "a-rule"\nB = "b-rule"\nLOGGED_RULES = (A, B)\n'), {"a-rule", "b-rule"},
+                             "a LOGGED_RULES tuple's constants are not listed")
+        with self.subTest("an empty tuple"):
+            self.assertEqual(self.ids("LOGGED_RULES = ()\n"), set(), "an empty LOGGED_RULES tuple names an id")
+
+    def test_a_logged_rules_entry_that_cannot_be_resolved_is_refused_at_its_line(self):
+        cases = {
+            "an unbound name": 'X = 1\nLOGGED_RULES = (UNKNOWN,)\n',
+            "a name bound to a non-string": 'N = 5\nLOGGED_RULES = (N,)\n',
+        }
+        for label, src in cases.items():
+            with self.subTest(label):
+                with self.assertRaises(ValueError) as cm:
+                    self.ids(src, "hooks/x.py")
+                self.assertIn("hooks/x.py:2", str(cm.exception),
+                              "a LOGGED_RULES entry that cannot be resolved is not refused with its path:line")
+
+    def all_rules_listing(self):
+        """The ids the --all-rules table lists for the real repo: the one reader of that table here."""
         import guard_log_report
-        rule = call_judge.TIMEOUT_LOG_RULE
-        self.assertIsInstance(rule, str)
         log = os.path.join(tempfile.mkdtemp(dir=RUN_FOLDER), "guard.log")
         open(log, "w").close()  # an empty log: every listed id shows with zero counts
         out = io.StringIO()
         with contextlib.redirect_stdout(out):
             guard_log_report.main(["--all-rules", "--days", "all", "--log", log])
-        listed = {line.split("|")[1].strip() for line in out.getvalue().splitlines() if line.startswith("| ")}
-        self.assertIn(rule, listed, "the --all-rules listing has no row for the id call_judge writes to guard.log")
+        return {line.split("|")[1].strip() for line in out.getvalue().splitlines() if line.startswith("| ")}
+
+    def test_the_real_all_rules_listing_has_the_id_call_judge_writes(self):
+        sys.path.insert(0, os.path.join(rule_audit.ROOT, "hooks"))
+        import call_judge  # read from the module, never copied here
+        rule = call_judge.TIMEOUT_LOG_RULE
+        self.assertIsInstance(rule, str)
+        self.assertIn(rule, self.all_rules_listing(),
+                      "the --all-rules listing has no row for the id call_judge writes to guard.log")
+
+    def test_the_real_all_rules_listing_has_the_four_ids_logged_through_variables(self):
+        sys.path.insert(0, os.path.join(rule_audit.ROOT, "hooks"))
+        import call_judge  # the expected strings are read from the modules, never copied here
+        import question_form
+        import reply_judge
+        listed = self.all_rules_listing()
+        self.assertIn(call_judge.TIMEOUT_LOG_RULE, listed,  # scope first: the listing has the constant-named rows
+                      "the --all-rules listing has no row even for judge-timeout, a constant-named id")
+        for where, rule in (("call_judge.SPAWN_RULE", call_judge.SPAWN_RULE),
+                            ("call_judge.QUESTION_RULE", call_judge.QUESTION_RULE),
+                            ("question_form.PAST_RULING_RULE", question_form.PAST_RULING_RULE),
+                            ("reply_judge.JUDGE_RULE", reply_judge.JUDGE_RULE)):
+            with self.subTest(where):
+                self.assertIsInstance(rule, str)
+                self.assertIn(rule, listed,
+                              "the --all-rules listing has no row for %s, which is logged through a variable" % where)
 
     def test_every_id_listed_before_this_change_is_still_listed(self):
         missing = sorted(set(LISTED_BEFORE) - rule_audit.emitted_rule_ids())

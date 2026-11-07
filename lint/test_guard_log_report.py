@@ -1213,6 +1213,19 @@ class EmittedRuleReaderTests(unittest.TestCase):
     def test_a_variable_rule_names_no_id(self):
         self.assertEqual(emitted_guard_rules("record(tool, decision, rule, matched)\n"), set())
 
+    def test_a_logged_rules_tuple_lists_each_entry_it_names(self):
+        sys.path.insert(0, os.path.join(REPO_ROOT, "hooks"))
+        import question_form  # the expected id is read from the module, never copied here
+        cases = {
+            "module-level constants": ('A = "a-rule"\nB = "b-rule"\nLOGGED_RULES = (A, B)\n', {"a-rule", "b-rule"}),
+            "a literal tuple unpack": ('A, B = "a-rule", "b-rule"\nLOGGED_RULES = (A, B)\n', {"a-rule", "b-rule"}),
+            "a module.CONST from a repo module": ('import question_form\nLOGGED_RULES = (question_form.PAST_RULING_RULE,)\n',
+                                                  {question_form.PAST_RULING_RULE}),
+        }
+        for label, (src, want) in cases.items():
+            with self.subTest(label):
+                self.assertEqual(emitted_guard_rules(src), want, "a LOGGED_RULES entry of this form is not read")
+
 
 def run_cli(argv):
     """Run main(argv); return (exit code, stdout, stderr). A refused flag exits 2 and is a result."""
