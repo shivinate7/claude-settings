@@ -61,7 +61,7 @@ def in_order(short, long):
 
 
 def run_index(owners, size):
-    """{run of `size` words: [owner, ...]} for `owners`, a {owner: [word list, ...]}. An owner's word list under
+    """{run of `size` words: [owner, ...]} for `owners`, a {owner: [word list, ...]}. Each owner's list of words under
     `size` words holds no run, so it is never a match."""
     index = {}
     for owner, lists in owners.items():
