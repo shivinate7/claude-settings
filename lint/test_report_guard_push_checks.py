@@ -12,7 +12,8 @@ item may not claim a pending head.
 
 Each case runs the real Stop hook as a subprocess. The gh stand-in leads its PATH (setUpModule of
 lint/test_report_guard.py, which takes the stand-in's program from hooks/test_ci_wake.py) and answers
-the fixture the case writes. No real gh runs, no network is reached and no clock is read.
+the fixture the case writes. No real gh runs, no network is reached and no clock is read. The budget
+cases run in process with a fake clock.
 
 Cost, proved by the stand-in's call log: a turn with no push, and a Stop with stop_hook_active, make no
 gh call. A push reads at most 2 gh calls for its head: the PR read and the run list.
@@ -30,6 +31,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+import uuid
 from unittest import mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -37,6 +39,7 @@ sys.path.insert(0, HERE)
 import test_report_guard as trg  # noqa: E402  the Stop-hook harness and the gh stand-in seam (one home)
 import ci_wake  # noqa: E402  the read budget, ci_wake.Budget (hooks/ci_wake.py; on sys.path from the harness import)
 import report_guard  # noqa: E402  push_ci_states and push_ci_problem, read in process
+import local_time  # noqa: E402  the missing-report marker path (hooks/local_time.py)
 
 HEAD = "9f3c2a1b7d4e5f60718293a4b5c6d7e8f9012345"  # the head a case pushes
 HEAD7 = HEAD[:7]
@@ -44,8 +47,11 @@ MID = "5e6f7a8b9c0d1e2f30415263748596a7b8c9d0e1"  # the head between two pushes 
 MID7 = MID[:7]
 OLD = "1a2b3c4d5e6f708192a3b4c5d6e7f80910111213"  # the head before the first push
 OLD7 = OLD[:7]
+OTHER = "7a8b9c0d1e2f30415263748596a7b8c9d0e1f2a3"  # the head of a second branch pushed in the same turn
+OTHER7 = OTHER[:7]
 BRANCH = "push-report-checks"
-PR_URL = "https://github.com/shivinate7/claude-settings/pull/1430"
+OTHER_BRANCH = "other-branch"
+REJECTED_BRANCH = "fix/rejected-items"
 REPORT = trg.GOOD_REPORT  # a report of the right shape that holds no CI line
 NO_REPORT = "Pushed it."
 RUNNING = "> **Done** BUILT abc123\n> **Next** CI running on %s" % HEAD7
@@ -54,9 +60,9 @@ UNKNOWN = "> **Done** BUILT abc123\n> **Next** CI unknown on %s" % HEAD7
 DONE_CLAIMS_HEAD = "> **Done** BUILT %s\n> **Next** CI running on %s" % (HEAD7, HEAD7)
 
 
-def pr_entry(draft=False):
-    return {"number": 1430, "isDraft": draft, "headRefName": BRANCH, "headRefOid": HEAD,
-            "state": "OPEN", "url": PR_URL}
+def pr_entry(draft=False, branch=BRANCH, sha=HEAD, number=1430):
+    return {"number": number, "isDraft": draft, "headRefName": branch, "headRefOid": sha,
+            "state": "OPEN", "url": "https://github.com/shivinate7/claude-settings/pull/%d" % number}
 
 
 def run_entry(conclusion, sha=HEAD, run_id=501, status="completed"):
@@ -68,14 +74,19 @@ def run_entry(conclusion, sha=HEAD, run_id=501, status="completed"):
 
 PENDING = run_entry(None, status="in_progress")
 PENDING_MID = run_entry(None, sha=MID, run_id=502, status="in_progress")
+PENDING_OTHER = run_entry(None, sha=OTHER, run_id=503, status="in_progress")
 GREEN = run_entry("success")
 RED_RUN = run_entry("failure")
 SKIPPED = run_entry("skipped")
 
 
-def answers(prs=(), runs=(), mode="ok"):
-    """The stand-in's fixture. mode "error" fails every call; "garbage" prints non-JSON."""
-    return {"mode": mode, "prs": list(prs), "runs": list(runs)}
+def answers(prs=(), runs=(), mode="ok", workflows=None):
+    """The stand-in's fixture. mode "error" fails every call; "garbage" prints non-JSON. workflows, when
+    given, is the `gh workflow list` answer: [] is a repo with no active workflow."""
+    out = {"mode": mode, "prs": list(prs), "runs": list(runs)}
+    if workflows is not None:
+        out["workflows"] = list(workflows)
+    return out
 
 
 def call(name, tool_input, use_id):
@@ -128,6 +139,39 @@ def block_of(done):
     return out.get("decision"), out.get("reason") or ""
 
 
+GIT_IDENTITY = {"GIT_AUTHOR_NAME": "test", "GIT_AUTHOR_EMAIL": "test@example.invalid",
+                "GIT_COMMITTER_NAME": "test", "GIT_COMMITTER_EMAIL": "test@example.invalid"}
+
+
+def git_commit(folder):
+    """Make `folder` a git repo with one empty commit, and its remote-tracking ref for BRANCH at that commit.
+    -> the full hash. Local git only."""
+    env = dict(os.environ, **GIT_IDENTITY)
+
+    def run_git(*args):
+        return subprocess.run(["git", *args], cwd=folder, env=env, capture_output=True, text=True,
+                              check=True, timeout=30).stdout.strip()
+
+    run_git("init", "-q")
+    run_git("commit", "-q", "--allow-empty", "-m", "x")
+    head = run_git("rev-parse", "HEAD")
+    run_git("update-ref", "refs/remotes/origin/" + BRANCH, head)
+    return head
+
+
+class StepClock:
+    """A clock that answers each call with the next of `values`, then keeps answering the last one, so a test
+    sets when each budget read lands and no read runs past the script."""
+
+    def __init__(self, values):
+        self.values = list(values)
+
+    def __call__(self):
+        if len(self.values) > 1:
+            return self.values.pop(0)
+        return self.values[0]
+
+
 def setUpModule():
     trg.setUpModule()
 
@@ -137,10 +181,14 @@ def tearDownModule():
 
 
 class PushCheckTests(unittest.TestCase):
-    def stop(self, records, answers_=None, stop_active=False, no_gh=False):
+    def case_folder(self):
+        return tempfile.mkdtemp(prefix="push-", dir=trg.RUN_FOLDER)
+
+    def stop(self, records, answers_=None, stop_active=False, no_gh=False, folder=None, session_id=None):
         """Run the Stop hook over `records`, with the stand-in answering `answers_`. no_gh: the guard's PATH
-        holds no gh at all. -> (decision, reason, gh calls), the calls read from the stand-in's log."""
-        folder = tempfile.mkdtemp(prefix="push-", dir=trg.RUN_FOLDER)
+        holds no gh at all. folder: the case's folder (its call log and fixture), new when None. session_id:
+        the hook's session, which names the missing-report marker. -> (decision, reason, gh calls)."""
+        folder = folder or self.case_folder()
         transcript = trg.write_transcript(records, folder)
         fixture_path = os.path.join(folder, "fixture.json")
         with open(fixture_path, "w", encoding="utf-8") as f:
@@ -152,6 +200,8 @@ class PushCheckTests(unittest.TestCase):
             os.makedirs(path)
         hook = {"hook_event_name": "Stop", "transcript_path": transcript, "cwd": folder,
                 "stop_hook_active": stop_active}
+        if session_id is not None:
+            hook["session_id"] = session_id
         try:
             done = trg.run_guard(trg.REPORT_GUARD, hook, env=trg.gh_env(fixture_path, log, path))
         except subprocess.TimeoutExpired:
@@ -229,7 +279,89 @@ class PushCheckTests(unittest.TestCase):
         self.assertIn("CI running on " + HEAD7, reason, "the block does not name the newest head")
         self.assertNotIn(MID7, reason, "the block names the older head of the turn")
 
+    def test_built_done_item_naming_a_red_head_blocks(self):
+        reply = "> **Done** BUILT %s\n> **Next** CI red on %s" % (HEAD7, HEAD7)
+        decision, _, _ = self.stop(turn(reply, push(push_out(HEAD7))), answers(prs=[pr_entry()], runs=[RED_RUN]))
+        self.assertEqual(decision, "block", "a Done item named a red head as built and the guard passed it")
+
+    def test_branch_named_with_rejected_is_checked(self):
+        steps = push(push_out(HEAD7, dst=REJECTED_BRANCH), command="git push origin HEAD:%s" % REJECTED_BRANCH)
+        fixture_ = answers(prs=[pr_entry(branch=REJECTED_BRANCH)], runs=[PENDING])
+        decision, _, _ = self.stop(turn(NO_REPORT, steps), fixture_)
+        self.assertEqual(decision, "block", "a push to %s was not treated as a landing (scope check)" % REJECTED_BRANCH)
+        decision, reason, _ = self.stop(turn(REPORT, steps), fixture_)
+        self.assertEqual(decision, "block", "a push to %s was skipped: the word rejected in the branch name "
+                         "read as a rejected push" % REJECTED_BRANCH)
+        self.assertIn("CI running on " + HEAD7, reason, "the push to %s was not named running" % REJECTED_BRANCH)
+
+    def test_multi_ref_push_checks_the_accepted_head_past_a_rejected_ref(self):
+        output = " ! [rejected]        HEAD -> main (fetch first)\n   %s..%s  HEAD -> %s\n" % (OLD7, HEAD7, BRANCH)
+        steps = push(output, command="git push origin HEAD:main HEAD:%s" % BRANCH)
+        fixture_ = answers(prs=[pr_entry()], runs=[PENDING])
+        decision, _, _ = self.stop(turn(NO_REPORT, steps), fixture_)
+        self.assertEqual(decision, "block", "a multi-ref push was not treated as a landing (scope check)")
+        decision, reason, _ = self.stop(turn(REPORT, steps), fixture_)
+        self.assertEqual(decision, "block", "a multi-ref push with one rejected ref skipped the accepted head")
+        self.assertIn("CI running on " + HEAD7, reason, "the accepted head was not named running")
+
+    def test_cd_then_push_reads_the_head_in_that_checkout(self):
+        folder = self.case_folder()
+        other = os.path.join(folder, "other")
+        os.makedirs(other)
+        head = git_commit(other)
+        steps = bash("cd %s && git push origin HEAD:%s" % (other, BRANCH), "")
+        fixture_ = answers(prs=[pr_entry(sha=head)], runs=[run_entry(None, sha=head, status="in_progress")])
+        decision, _, _ = self.stop(turn(NO_REPORT, steps), fixture_, folder=folder)
+        self.assertEqual(decision, "block", "a report-less cd-and-push turn was not blocked (scope check)")
+        decision, reason, _ = self.stop(turn(REPORT, steps), fixture_, folder=folder)
+        self.assertEqual(decision, "block", "a push after cd into another checkout was not checked: the head was "
+                         "read in the hook's repo, not that checkout")
+        self.assertIn("CI running on " + head[:7], reason, "the head in the other checkout was not named running")
+
+    def test_rewrite_after_a_missing_report_block_reads_no_gh_and_marker_carries_each_head(self):
+        sid = "push-marker-" + uuid.uuid4().hex
+        folder = self.case_folder()
+        steps = [push(push_out(HEAD7), command="git push origin HEAD:%s" % BRANCH, use_id="tu_1"),
+                 push(push_out(OTHER7, dst=OTHER_BRANCH), command="git push origin HEAD:%s" % OTHER_BRANCH,
+                      use_id="tu_2")]
+        fixture_ = answers(prs=[pr_entry(), pr_entry(branch=OTHER_BRANCH, sha=OTHER, number=1431)],
+                           runs=[PENDING, PENDING_OTHER])
+        decision, _, _ = self.stop(turn(NO_REPORT, *steps), fixture_, folder=folder, session_id=sid)
+        self.assertEqual(decision, "block", "a report-less two-push turn was not blocked (scope check)")
+        marker = local_time.report_marker_path(sid)
+        self.assertIsNotNone(marker, "no missing-report marker path for this session")
+        self.assertTrue(os.path.exists(marker), "the missing-report block left no marker")
+        with open(marker, encoding="utf-8") as f:
+            marker_lines = f.read().split("\n")
+        for sha7 in (HEAD7, OTHER7):
+            self.assertTrue(any(line.startswith("%s pending" % sha7) for line in marker_lines),
+                            "the marker does not carry %s's pending state: %r" % (sha7, marker_lines))
+        before = len(trg.GH_STUB.read_log(os.path.join(folder, "gh.log")))
+        self.assertGreaterEqual(before, 1, "the first Stop read no CI, so the marker has no state to carry")
+        reply = "> **Done** BUILT abc123\n> **Next** CI running on %s; CI running on %s" % (HEAD7, OTHER7)
+        decision, reason, _ = self.stop(turn(reply, *steps), fixture_, stop_active=True, folder=folder,
+                                        session_id=sid)
+        after = len(trg.GH_STUB.read_log(os.path.join(folder, "gh.log")))
+        self.assertEqual(after, before, "the rewrite after a missing-report block read gh again")
+        self.assertIsNone(decision, "the rewrite that holds each head's running line was blocked: " + reason)
+
     # Green controls: each passes on the old code and on the new.
+
+    def test_no_workflows_repo_needs_no_ci_line_for_a_ready_pr_push(self):
+        steps = push(push_out(HEAD7))
+        fixture_ = answers(prs=[pr_entry()], runs=[], workflows=[])
+        decision, _, _ = self.stop(turn(NO_REPORT, steps), fixture_)
+        self.assertEqual(decision, "block", "a report-less push turn was not blocked (scope check)")
+        decision, reason, _ = self.stop(turn(REPORT, steps), fixture_)
+        self.assertIsNone(decision, "a push to a ready PR in a repo with no workflows was blocked for CI: " + reason)
+
+    def test_no_workflows_repo_needs_no_ci_line_for_a_push_to_main(self):
+        steps = push(push_out(HEAD7, dst="main"), command="git push origin HEAD:main")
+        fixture_ = answers(runs=[], workflows=[])
+        decision, _, _ = self.stop(turn(NO_REPORT, steps), fixture_)
+        self.assertEqual(decision, "block", "a report-less push to main was not blocked (scope check)")
+        decision, reason, _ = self.stop(turn(REPORT, steps), fixture_)
+        self.assertIsNone(decision, "a push to main in a repo with no workflows was blocked for CI: " + reason)
 
     def test_green_run_on_ready_pr_passes(self):
         decision, reason, _ = self.stop(turn(REPORT, push(push_out(HEAD7))),
@@ -319,16 +451,6 @@ class PushCheckTests(unittest.TestCase):
         self.assertLessEqual(len(calls), 2, "a push read more than two gh calls for its head: %s" % calls)
 
 
-class FakeClock:
-    """A clock the test moves by hand, read where Budget would read time.monotonic."""
-
-    def __init__(self, now):
-        self.now = now
-
-    def __call__(self):
-        return self.now
-
-
 class BudgetTests(unittest.TestCase):
     """The read budget of one Stop (ci_wake.Budget): the per-read cap and the spent total, on a fake clock.
     No real time passes. The gh reads run through the stand-in on PATH, with this case's fixture."""
@@ -344,9 +466,8 @@ class BudgetTests(unittest.TestCase):
         self.addCleanup(patch.stop)
 
     def test_spent_total_reads_ci_unknown_with_no_gh_call(self):
-        clock = FakeClock(0.0)
+        clock = StepClock([0.0, 25.0])  # the 20 s total is spent before any read
         budget = ci_wake.Budget(total=20, per_read=8, clock=clock)
-        clock.now = 25.0  # the 20 s total is spent before any read
         records = turn(REPORT, push(push_out(HEAD7)))[1:]
         states = report_guard.push_ci_states(records, {"cwd": self.folder}, budget=budget)
         self.assertEqual([(sha7, state) for sha7, state, _ in states], [(HEAD7, "unknown")],
@@ -355,8 +476,28 @@ class BudgetTests(unittest.TestCase):
         self.assertIn("CI unknown on " + HEAD7, reason, "a spent budget is not named CI unknown")
         self.assertEqual(trg.GH_STUB.read_log(self.log), [], "a spent budget still read gh")
 
+    def test_spent_budget_during_the_branch_read_is_unknown_not_a_silent_pass(self):
+        hook = {"cwd": self.folder}
+        with self.subTest(read="the branch's PR read, head named by the push output"):
+            clock = StepClock([0.0, 25.0])  # the total is spent when the PR read asks for its timeout
+            budget = ci_wake.Budget(total=20, per_read=8, clock=clock)
+            records = turn(REPORT, push(push_out(HEAD7)))[1:]
+            states = report_guard.push_ci_states(records, hook, budget=budget)
+            reason = report_guard.push_ci_problem(REPORT, states)
+            self.assertIn("CI unknown on " + HEAD7, reason,
+                          "a budget spent during the branch's PR read was not named CI unknown: %s" % states)
+        with self.subTest(read="the branch's remote-ref read, head not yet named"):
+            clock = StepClock([0.0, 25.0])  # the total is spent when the remote-ref read asks for its timeout
+            budget = ci_wake.Budget(total=20, per_read=8, clock=clock)
+            records = turn(REPORT, push(""))[1:]  # no ref line in the output: the head is read from the ref
+            try:
+                report_guard.push_ci_states(records, hook, budget=budget)
+            except Exception as exc:  # the Stop hook catches this and passes the turn
+                self.fail("a budget spent during the branch's remote-ref read escaped the push check, which then "
+                          "fails open and passes the turn: %s: %s" % (type(exc).__name__, exc))
+
     def test_every_gh_read_is_capped_at_the_per_read_timeout(self):
-        clock = FakeClock(0.0)
+        clock = StepClock([0.0])
         budget = ci_wake.Budget(total=20, per_read=8, clock=clock)
         real_gh = ci_wake.gh
         timeouts = []
