@@ -7738,7 +7738,7 @@ nm_case("linked-nm: cd into a folder with no node_modules, then npm ci, is allow
         "cd " + slash(NMABSENT) + " && npm ci", "allow", NMLINKED)
 
 # THE CONTROLS IN A LINKED FOLDER. Each is the job of a linked folder, and none is refused.
-for _command, _tool in (("npm run setup", "Bash"), ("npm run build", "Bash"), ("npm test", "Bash"),
+for _command, _tool in (("npm run setup", "Bash"),
                         ("rm node_modules", "Bash"), ("Remove-Item node_modules", "PowerShell")):
     nm_case("linked-nm: " + _command + " (" + _tool + ") in a linked folder is allowed",
             _command, "allow", NMLINKED, _tool)
@@ -7841,7 +7841,7 @@ NM_READ_ONLY = (
     "npm", "npm -v", "npm ls", "npm list", "npm -C . ls", "npm view x", "npm outdated", "npm audit",
     "npm audit signatures", "npm explain x", "npm fund", "npm exec -- tsc", "npm config get registry",
     "npm help install", "npm prune --dry-run", "npm audit fix --dry-run", "npm version patch",
-    "npm rebuild --help",
+    "npm rebuild --help", "npm run build", "npm test",
 )
 for _command in NM_READ_ONLY:
     nm_case("linked-nm: " + _command + " (Bash) in a linked folder is allowed", _command, "allow", NMLINKED)
