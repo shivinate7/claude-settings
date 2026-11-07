@@ -12328,6 +12328,17 @@ sh("cap: a grep for the variable in a settings file is not a write",
 sh("cap: reading a settings file into another file is not a write to it",
    "cat " + PROJ_SETTINGS + " > /tmp/copy.json", "allow", cwd=NOGIT)
 
+# THE ASK NAMES THE LIFT FIELD. The owner lifts a cap by setting `_agentCapUntil`, so the ask that opens a
+# cap must say where that field is. Each write shape reads the same template, so each shape is pinned.
+sh("cap-until: a shell write of the cap asks, and the ask names the lift field",
+   "printf '%s' '" + cap_settings(compact=True) + "' > settings.local.json", "ask", "agent-model-cap",
+   cwd=PROJ, carries="_agentCapUntil")
+add("cap-until: a Write of a cap setting asks, and the ask names the lift field", "ask",
+    "agent-model-cap", tool="Write", cwd=NOGIT, file_path=PROJ_LOCAL, content=cap_settings(),
+    carries=("_agentCapUntil",))
+sh("cap-until: a grep that reads the cap key from a settings file allows",
+   "grep -n " + CAP_KEY + " settings.local.json", "allow", cwd=PROJ)
+
 # THE DATA HALF. A settings write named INSIDE text is not a write: a quoted argument, or text piped into
 # a pure printer. A heredoc body fed to an interpreter is code, not data, and stays in view. So is text
 # piped into an interpreter: the interpreter may run it, so a pipe into one fails closed. Incident
