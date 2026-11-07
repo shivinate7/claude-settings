@@ -1,0 +1,10 @@
+{
+  "title": "A guard refuses `| tail` on `merge --lane-lint` or `verdict`, which hides the result",
+  "phase": "next",
+  "status": "todo",
+  "order": 267.0,
+  "owner": "coordinator",
+  "why": "Twice on Nov 7 a `| tail` on `merge --lane-lint` or `verdict` hid the result (lane fix-check-after-notes-commit, 16:22 CST). verdict-pipe in PR #1515 covers verdict only.",
+  "note": "Same guard home as step bg-tail-loses-verdict, which may take it. Also the coordinator's brief-template step: run the lane lint before each fix check. Done check: the piped lane-lint form is red on main, then refused.",
+  "updatedAt": "2026-11-07T16:21:00-06:00"
+}
