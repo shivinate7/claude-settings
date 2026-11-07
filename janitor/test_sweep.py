@@ -9269,25 +9269,33 @@ class ExpireNotesTests(unittest.TestCase):
 
     def test_a_line_whose_blame_commit_is_a_shallow_boundary_is_unknown_and_stays(self):
         # The line was last touched in a commit the shallow clone does not hold. Its blame lands on the boundary commit.
+        # The clone holds origin/main and checks out feature, so --confirm runs for real: it deletes the known expired
+        # line and keeps the UNKNOWN one.
         old = expiry_day(-FAR_PAST_DAYS)
         origin_repo = self.repo("repo", [
             (note("shallow-blame"), git_stamp(old), git_stamp(old)),
             (note("shallow-other", expiry_day(-1)), git_stamp(EXPIRY_TODAY), git_stamp(EXPIRY_TODAY)),
+            (note("shallow-old", old), git_stamp(EXPIRY_TODAY), git_stamp(EXPIRY_TODAY)),
         ])
         clone = os.path.join(self.base, "clone")
-        cloned = subprocess.run([VCS, "clone", "-q", "--depth", "1", "--branch", "feature",
+        cloned = subprocess.run([VCS, "clone", "-q", "--depth", "1", "--no-single-branch", "--branch", "feature",
                                  "file://" + origin_repo + "-origin.git", clone],
                                 capture_output=True, text=True, timeout=120)
         require(cloned.returncode == 0, "fixture setup failed: the shallow clone failed: %s" % cloned.stderr.strip())
         shallow = run_vcs(clone, "rev-parse", "--is-shallow-repository").stdout.strip()
         require(shallow == "true", "fixture setup failed: the clone is not shallow: %r" % shallow)
+        default = run_vcs(clone, "rev-parse", "--verify", "-q", "origin/main")
+        require(default.returncode == 0, "fixture setup failed: the clone holds no origin/main ref")
         rc, out = self.expire(clone)
         self.assertEqual(rc, 0, "--expire-notes did not preview (not built?): %s" % out)
         self.assertIn("UNKNOWN", out, "a line with no true date is not reported UNKNOWN: %s" % out)
         for line in out.splitlines():
             if "shallow-blame" in line:
                 self.assertIn("UNKNOWN", line, "a line with no true date is listed as known: %s" % line)
-        self.expire(clone, "--confirm")
+        rc, out = self.expire(clone, "--confirm")
+        self.assertEqual(rc, 0, "--confirm did not run on the feature branch: %s" % out)
+        self.assertNotIn("refused", out, "--confirm was refused, so nothing about UNKNOWN lines was proved: %s" % out)
+        self.assertNotIn("- shallow-old:", self.notes(clone), "--confirm did not delete the known expired line")
         self.assertIn("- shallow-blame:", self.notes(clone), "an UNKNOWN line was deleted")
 
 
