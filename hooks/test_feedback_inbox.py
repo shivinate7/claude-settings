@@ -2191,7 +2191,9 @@ WORDLESS_GRANTS = ("ok to merge the lane PRs once CI is green.", "you can merge 
 # Owner messages with "ok", "can" or "merge" that grant nothing. A widened grant list must pass each one.
 NOT_GRANTS = ("Ok, I'll look at the merge conflict after lunch.", "Is the merge queue still stuck? Ok to wait.",
               "I can merge it myself later if you're busy.", "Ok, so the merge is still blocked by the red check.",
-              "The checks went green, but the merge is still blocked on review.")
+              "The checks went green, but the merge is still blocked on review.",
+              "is it ok to merge main into the lane?", "Is it ok to merge the lane PRs?", "ok to merge?",
+              "you can merge main into the lane, right?", "I'm not ok to merge this yet")
 
 
 def case_grant_without_a_grant_word_blocks():
@@ -2209,7 +2211,8 @@ def case_grant_without_a_grant_word_blocks():
 def case_grant_wordless_non_grants_pass():
     """Scope first: "approved, merge it" and "go ahead and merge" still block, so the silence below means "not a
     grant", not a guard that never read the block. Then each NOT_GRANTS row, with "ok", "can" or "merge" and no
-    grant, passes with no item. Green now; a widened grant list must keep them green."""
+    grant, passes with no item. The question and negation rows flag on 7c730d862, the widened list, and stay red
+    until the list tells them apart from a grant."""
     for text in ("approved, merge it", "go ahead and merge"):
         p = homed(new_cfg(), "grant-control", (), text=text)
         expect_grant_block("grant home: %r still blocks with no item" % text, p, text)
