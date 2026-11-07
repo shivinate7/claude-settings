@@ -1586,9 +1586,14 @@ DESIGNER_SCOPE_REASON = (
 )
 
 
+PYTHON_CACHE_DIRS = ("__pycache__", ".pytest_cache")
+
+
 def is_test_rel(rel: str) -> bool:
     """True when a repository-relative path is a test path (see the block comment above)."""
     parts = [part for part in norm(rel).split("/") if part]
+    if any(part in PYTHON_CACHE_DIRS for part in parts):
+        return False   # a Python cache folder holds no test source, so clearing it is no test change
     return bool(parts) and (
         bool(TEST_BASENAME.match(parts[-1].lower())) or bool(JAVA_TEST.match(parts[-1]))
         or bool(SWIFT_TEST.match(parts[-1])) or any(XCODE_TEST_DIR.match(p) for p in parts)
