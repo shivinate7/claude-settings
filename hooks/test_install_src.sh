@@ -4949,6 +4949,65 @@ caseM7() {
   ok "$name"
 }
 
+# ---- caseM11-M13: a cloud install leaves a clean, detached checkout alone while an operation is stopped on it ----
+# A rebase or a bisect stopped on the checkout holds HEAD there. The install must not move HEAD off that commit.
+# op_move_check NAME MARK: one cloud install in $co, which holds an operation's state. MARK is the state path under the
+# git dir (rebase-merge, BISECT_LOG). The checkout must be clean and detached first, so the install's move is the only test.
+op_move_check() {
+  op_gd=$(git -C "$co" rev-parse --absolute-git-dir)
+  if [ ! -e "$op_gd/$2" ]; then bad "$1" "FIXTURE no $2 under the git dir: the operation did not stop"; return; fi
+  if [ -n "$(git -C "$co" status --porcelain)" ] || git -C "$co" symbolic-ref -q HEAD >/dev/null; then
+    bad "$1" "FIXTURE the checkout is not clean and detached under the stopped operation"; return
+  fi
+  mid=$(git -C "$co" rev-parse HEAD)
+  move_install
+  if [ $rc -ne 0 ]; then bad "$1" "install.sh exited $rc: $(install_problems)"; return; fi
+  if [ "$(git -C "$co" rev-parse HEAD)" != "$mid" ]; then
+    bad "$1" "the install moved the clean, detached checkout from $mid to $(git -C "$co" rev-parse HEAD) while $2 was present"; return
+  fi
+  ok "$1"
+}
+
+# caseM11: control. With no operation stopped on it, the same clean, detached checkout moves to origin/main. Green on the old code.
+caseM11() {
+  name="caseM11: control: with no operation stopped on it, a clean, detached checkout moves to origin/main"
+  if ! command -v jq >/dev/null 2>&1; then skip "$name" "jq not found"; return; fi
+  move_fixture m11
+  if [ "$(git -C "$co" rev-parse HEAD)" != "$old" ] || git -C "$co" symbolic-ref -q HEAD >/dev/null \
+     || [ -n "$(git -C "$co" status --porcelain)" ]; then
+    bad "$name" "FIXTURE the checkout is not a clean detached checkout at old"; return
+  fi
+  move_install
+  if [ $rc -ne 0 ]; then bad "$name" "install.sh exited $rc: $(install_problems)"; return; fi
+  if [ "$(git -C "$co" rev-parse HEAD)" != "$want" ]; then
+    bad "$name" "the checkout is not at origin/main [$want]: $(git -C "$co" rev-parse HEAD)"; return
+  fi
+  ok "$name"
+}
+
+# caseM12: a rebase stopped before its first pick. Its todo is one `break`, so HEAD sits on the rebase base (fixture main,
+# an ancestor of origin/main) with rebase-merge present and the tree clean.
+caseM12() {
+  name="caseM12: a clean, detached checkout with a rebase stopped on it is not moved to origin/main"
+  if ! command -v jq >/dev/null 2>&1; then skip "$name" "jq not found"; return; fi
+  move_fixture m12
+  printf 'break\n' > "$work/caseM12-todo"
+  rb_out=$(GIT_SEQUENCE_EDITOR="cp $work/caseM12-todo" git -C "$co" -c user.email=t@example.com -c user.name=t rebase -i HEAD~1 2>&1) \
+    || { bad "$name" "FIXTURE git rebase -i did not stop: $rb_out"; return; }
+  op_move_check "$name" rebase-merge
+}
+
+# caseM13: a bisect started with one bad commit (old) and no good one yet. The checkout stays at old, detached and clean,
+# with BISECT_LOG present, so the install must leave HEAD at old.
+caseM13() {
+  name="caseM13: a clean, detached checkout with a bisect stopped on it is not moved to origin/main"
+  if ! command -v jq >/dev/null 2>&1; then skip "$name" "jq not found"; return; fi
+  move_fixture m13
+  bs_out=$(git -C "$co" bisect start 2>&1 && git -C "$co" bisect bad HEAD 2>&1) \
+    || { bad "$name" "FIXTURE git bisect did not start: $bs_out"; return; }
+  op_move_check "$name" BISECT_LOG
+}
+
 # m8_check LABEL: after the install named LABEL, the mirror is at main ($want), refreshed in place (the sentinel survives),
 # the install's source is the mirror, the installed files match main, and the checkout keeps its branch and head. Prints the
 # first failure and returns 1. Reads mirror, want, co_head and co_branch from caseM8.
@@ -5281,6 +5340,9 @@ run caseM7
 run caseM8
 run caseM9
 run caseM10
+run caseM11
+run caseM12
+run caseM13
 run pinmove1
 run pinmove2
 run pinmove3
