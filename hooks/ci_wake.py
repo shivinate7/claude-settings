@@ -160,6 +160,21 @@ def ready_call(rest, env_repo=""):
     return (pos[0] if pos else ""), repo
 
 
+def exported_repo(tokens):
+    """The GH_REPO a segment sets for the shell: `export GH_REPO=o/r` (bash) or `$env:GH_REPO = o/r`
+    (PowerShell, any case), else ""."""
+    if tokens[:1] == ["export"]:
+        vals = [t[8:] for t in tokens[1:] if t.startswith("GH_REPO=")]
+        return vals[-1] if vals else ""
+    if tokens[:1] and tokens[0].lower().startswith("$env:gh_repo"):
+        head = tokens[0][len("$env:gh_repo"):]
+        if head.startswith("="):
+            return head[1:]
+        if head == "" and tokens[1:2] == ["="]:
+            return tokens[2] if len(tokens) > 2 else ""
+    return ""
+
+
 def triggers(command, powershell):
     """-> [(selector, repo)], one per `gh pr ready` in the command. Reads the text only. A heredoc
     body, quoted text and text after `#` is no command (split_segments drops comments and keeps
@@ -172,13 +187,16 @@ def triggers(command, powershell):
     guard_core.POWERSHELL_CALL[0] = powershell
     text = APOSTROPHE.sub("\x01", guard_core.strip_heredoc_bodies(command))
     found = []
+    exported = ""   # GH_REPO set earlier in the command text, for every later gh call
     for segment in (p for s in guard_core.split_segments(text) for p in _ampersand_split(s)):
         rest = gh_call_of(segment)
+        tokens = segment_tokens(segment) or []
         call = None
         if rest is not None:
-            tokens = segment_tokens(segment) or []
             env = [t[8:] for t in tokens[:resolve_command(tokens) or 0] if t.startswith("GH_REPO=")]
-            call = ready_call(rest, env[-1] if env else "")
+            call = ready_call(rest, env[-1] if env else exported)
+        else:
+            exported = exported_repo(tokens) or exported
         if call:
             found.append(call)
     return found
@@ -207,21 +225,26 @@ def wait_for(sha, cwd, deadline, repo=""):
     """List the head's runs, watch each one (not a cancelled twin), then read each with its jobs.
     A run that ends skipped is no run: the draft PR's run skips, and the run of `gh pr ready`
     comes after it. While no run that ran is judged, list again, `pauses` apart; the last
-    pause ends at the deadline, with one list there. Once a run that ran is judged, return it:
-    later runs are not waited on (debt ci-wake-lists-runs-once)."""
+    pause ends at the deadline, with one list there. After a list that held a new run that ran,
+    list again at once and judge any run not yet read; return when a list holds no new run."""
     extra = ["-R", repo] if repo else []
     list_args = ["run", "list", "--commit", sha, "--limit", "100", *extra, "--json", RUN_FIELDS]
     gaps = pauses()
+    seen, viewed = set(), []
     while True:
         runs = [r for r in gh_json(list_args, cwd) if r["conclusion"] != "skipped"]
         live = {r["name"] for r in runs if r["conclusion"] != "cancelled"}
-        for r in runs:
-            if r["conclusion"] == "cancelled" and r["name"] in live:
-                continue   # a cancelled twin: judge_runs reads the run that ran
+        fresh = [r for r in runs if r["databaseId"] not in seen
+                 and not (r["conclusion"] == "cancelled" and r["name"] in live)]   # a cancelled twin: judge_runs reads the run that ran
+        for r in fresh:
             watch_run(r["databaseId"], cwd, deadline, repo)
-        viewed = [gh_json(["run", "view", str(r["databaseId"]), *extra, "--json", "databaseId,name,status,conclusion,jobs"], cwd)
-                  for r in runs]
-        viewed = [r for r in viewed if r.get("conclusion") != "skipped"]   # it ended skipped: no run
+        got = [gh_json(["run", "view", str(r["databaseId"]), *extra, "--json", "databaseId,name,status,conclusion,jobs"], cwd)
+               for r in fresh]
+        seen.update(r["databaseId"] for r in fresh)
+        ran = [r for r in got if r.get("conclusion") != "skipped"]   # it ended skipped: no run
+        viewed.extend(ran)
+        if ran and deadline - time.monotonic() > 0:
+            continue   # a run was judged: list again for a later one
         if viewed:
             return viewed
         left = deadline - time.monotonic()
@@ -300,6 +323,8 @@ def read_pr(selector, repo, cwd):
     host, slug = (parts[0], "/".join(parts[1:])) if len(parts) == 3 else ("", repo or "{owner}/{repo}")
     tail = ["--hostname", host] if host else []
     base = "repos/%s/pulls" % slug
+    if selector[:1] == "#" and selector[1:].isdigit():
+        selector = selector[1:]   # `gh pr ready "#12"` names PR 12, as gh reads it
     if selector.isdigit():
         return pr_fields(gh_json(["api", base + "/" + selector, *tail], cwd, gone="http 404"))
     head = selector or current_branch(cwd)
