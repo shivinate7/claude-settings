@@ -1,0 +1,10 @@
+{
+  "title": "q_max By Year: refusals with the same words name their rates once",
+  "phase": "later",
+  "status": "todo",
+  "order": 300.0,
+  "owner": "coordinator",
+  "why": "Lane qmax-revive-idle, 16:06 CST Nov 7: when one year row holds refusals of several rates with the same words, each rate repeats the whole sentence (Rates 24 and 25 show the same 3 sentences). q_max D-709 (UI text says it once) argues for grouping, such as 'Rates 24, 25: ...'.",
+  "note": "#700's design-reviewed choice keeps one item per rate, and its browser check PAST-RATES-BY-YEAR-REFUSED-OWN pins that. The #700 port keeps that behaviour (building-port-keeps-behaviour). A change departs from #700, so it goes to the owner as a page question, with mockups, once the port lands. Not blocking.",
+  "updatedAt": "2026-11-07T16:07:00-06:00"
+}
