@@ -716,20 +716,28 @@ class GitLock(Lock):
     def __init__(self, root, now=time.time, pause=time.sleep):
         self.root, self.now, self.pause = root, now, pause
 
+    def listed(self, ref):
+        """The sha the remote lists for `ref`, or None when there is no ref. Reads no commit."""
+        c, out, _ = retry_net(lambda: git(self.root, "ls-remote", "origin", ref), self.pause, what=f"the lock read {ref}")
+        if c:
+            raise (NetStop if is_net(c, out) else Stop)("cannot read the merge lock " + LOCK_CITE + ": " + out)
+        return out.split()[0] if out else None
+
+    def commit_text(self, ref, sha):
+        """-> (code, text): the message of the listed `sha`, or a non-zero code when it cannot be read. NetStop on a network error."""
+        c, fetched, _ = retry_net(lambda: git(self.root, "fetch", "-q", "origin", ref), self.pause, what=f"the lock fetch {ref}")
+        if c and is_net(c, fetched):  # an unread expiry is no lock that never expires
+            raise NetStop("cannot read the merge lock commit " + LOCK_CITE + ": " + fetched)
+        # The listed sha names the message: the ref may have moved since the listing, and FETCH_HEAD then holds another run's commit.
+        return (c, fetched) if c else git(self.root, "log", "-1", "--format=%B", sha)
+
     def read(self, b, ref=None):
         ref = ref or lock_ref(b)
         for _ in range(2):
-            c, out, _ = retry_net(lambda: git(self.root, "ls-remote", "origin", ref), self.pause, what=f"the lock read {ref}")
-            if c:
-                raise (NetStop if is_net(c, out) else Stop)("cannot read the merge lock " + LOCK_CITE + ": " + out)
-            if not out:
+            sha = self.listed(ref)
+            if not sha:
                 return None
-            sha = out.split()[0]
-            c, fetched, _ = retry_net(lambda: git(self.root, "fetch", "-q", "origin", ref), self.pause, what=f"the lock fetch {ref}")
-            if c and is_net(c, fetched):  # an unread expiry is no lock that never expires
-                raise NetStop("cannot read the merge lock commit " + LOCK_CITE + ": " + fetched)
-            # The listed sha names the message: the ref may have moved since the listing, and FETCH_HEAD then holds another run's commit.
-            c, msg = (c, fetched) if c else git(self.root, "log", "-1", "--format=%B", sha)
+            c, msg = self.commit_text(ref, sha)
             if not c:
                 return (sha, expiry_of(msg), msg)
             # A lock commit has no parent, so a moved ref leaves the listed sha out of the fetch: the first miss lists again and reads what the ref holds now.
@@ -798,12 +806,18 @@ class GitLock(Lock):
 
     def unlock(self, b):
         """-> True when it removed or expired a lock, False when no lock was there."""
-        cur = self.read(b)
-        if not cur or cur[1] <= 0:  # no ref, or a lock already released to expires 0
+        ref = lock_ref(b)
+        sha = self.listed(ref)
+        if not sha:
             return False
-        c, out = self.delete(b, cur[0])  # leased on the sha read: a lock taken since stays
+        # Unlock recovers a lock no run can read, so it needs only the listed sha (verification-recovery-independent-of-state).
+        # The message is read only to skip a lock already released to expires 0; a lock whose message cannot be read is removed.
+        c, msg = self.commit_text(ref, sha)
+        if not c and expiry_of(msg) <= 0:
+            return False
+        c, out = self.delete(b, sha)  # leased on the listed sha: a lock taken since the listing stays
         if c:
-            if not self.read(b):  # gone since the read: nothing left to remove
+            if not self.listed(ref):  # gone since the listing: nothing left to remove
                 return False
             raise Stop("unlock failed " + LOCK_CITE + ": " + out)
         return True
