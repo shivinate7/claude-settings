@@ -1,0 +1,30 @@
+{
+  "added": "2026-11-07T19:33:00Z",
+  "context": "Goal: the three-round cap holds, and a gap is fixed, not filed.\nProblem (risk): now that a failed fix check counts as a round (your 347 a), a run of failed fix checks on a change that touches no guard or check reaches round 3 sooner. Under the cap as written it then merges on green, with the open finding filed as a debt.\nBased on (ruling): decision hold-unsafe-after-round-3 (owner, 2026-10-15 12:00 CDT): an unfinished change merges at zero or positive net value, and a change that touches no guard merges on green. Asked again because of your 13:28 CST question, and because 347 a lets failed fix checks reach round 3 faster.\nDeparts from: main, where a round-3 FAIL on a change with no guard merges on green with its finding filed \u2014 a holds it, and the finding becomes a new lane at round 1.",
+  "home": "lane review-fix-check-round (session_013NEJL1PyP6demZ4Pyj8fYX)",
+  "id": "round3-fail-holds",
+  "kind": "decision",
+  "n": 356,
+  "options": [
+    {
+      "gain": "No change merges with a known open defect. The finding becomes a new lane at round 1, with the finding as its brief.",
+      "key": "a",
+      "label": "A round-3 FAIL holds the change until the finding is fixed (recommended)",
+      "lose": "Some changes take more rounds."
+    },
+    {
+      "gain": "The cap is a hard stop.",
+      "key": "b",
+      "label": "Follow the cap as written",
+      "lose": "Known defects merge as debts, which is the backlog source you asked about at 13:28 CST."
+    }
+  ],
+  "owner": "coordinator",
+  "pick": "a",
+  "rank": 1,
+  "ref": "item 347; decision hold-unsafe-after-round-3",
+  "short": "Round-3 FAIL: hold, or merge with a debt",
+  "status": "open",
+  "title": "Should a failed review at round 3 hold the change until the finding is fixed?",
+  "why": "Your 13:28 CST question: \"is it caused by my rule that after a third reviewer round it just leaves a debt and gets sent forward?\""
+}

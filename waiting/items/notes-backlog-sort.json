@@ -1,0 +1,36 @@
+{
+  "added": "2026-11-07T19:33:00Z",
+  "context": "Goal: every gap a lane finds gets fixed or removed, not filed and forgotten.\nProblem (rule): claude-settings main holds 1,501 notes lines and 121 debt files. Rule roles-findings-are-debts-or-notes sends each finding Claude is unlikely to hit to notes.md, and a note becomes work only after a real incident. So notes never get a lane. Only 28 lines mention the round-3 cap, so that rule is a small part of it.\nBased on (measured): `git show origin/main:docs/debts/notes.md | grep -c '^- '` = 1501, 13:33 CST.\nBased on (ruling): rule roles-findings-are-debts-or-notes. Asked again because your 13:20 and 13:28 CST questions challenge what it leaves behind.\nDeparts from: main, where a note waits for an incident \u2014 every note carries a fix or a reason (step notes-name-their-fix), and the backlog is sorted.",
+  "home": "coordinator; step notes-name-their-fix",
+  "id": "notes-backlog-sort",
+  "kind": "decision",
+  "n": 355,
+  "options": [
+    {
+      "gain": "Each one is fixed (it becomes a step with a lane), deleted (already fixed or stale), or kept with a `Fix: none` reason. The backlog empties into real work or nothing.",
+      "key": "a",
+      "label": "One sort lane over all 1,501 lines and 121 debts (recommended)",
+      "lose": "One big lane, plus the fix lanes it starts."
+    },
+    {
+      "gain": "Nothing is skipped.",
+      "key": "b",
+      "label": "A lane for every line",
+      "lose": "About 1,600 lanes, many for stale or trivial lines."
+    },
+    {
+      "gain": "No cost now.",
+      "key": "c",
+      "label": "Leave the backlog; only new lines must name a fix",
+      "lose": "1,501 gaps stay unread."
+    }
+  ],
+  "owner": "coordinator",
+  "pick": "a",
+  "rank": 1,
+  "ref": "rule roles-findings-are-debts-or-notes",
+  "short": "Notes backlog: sort it, a lane each, or leave it",
+  "status": "open",
+  "title": "Sort the 1,501 notes lines and 121 debts into fix, delete, or keep-with-reason?",
+  "why": "You asked at 13:20 CST \"why not fix it then\" and at 13:28 CST \"should we send a lane on all of them?\"."
+}

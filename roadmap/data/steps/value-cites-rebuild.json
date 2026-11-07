@@ -6,6 +6,6 @@
   "owner": "coordinator",
   "lane": "session_013NEJKzUBbzTDv3nW4wAhS2",
   "why": "Owner, chat 12:47 CST Nov 7: b, rebuild from main. #1175 (the check) and #1176 (records use it) are held after review round 3 (decision hold-unsafe-after-round-3), and main now uses STALE004 for another check, with 5 conflicts in core lint.",
-  "note": "Done: the check is on main, and #1175 and #1176 are closed as replaced. The branches stay on origin for reference.",
-  "updatedAt": "2026-11-07T12:50:00-06:00"
+  "note": "Coordinator picks, 13:32 CST Nov 7 (undoable): a JS value cite prints \"unknown\" on added lines as well as on whole-tree reads; a non-literal head value prints \"unknown\" (STALE008), not silence.\nDone: the check is on main, and #1175 and #1176 are closed as replaced. The branches stay on origin for reference.",
+  "updatedAt": "2026-11-07T13:35:00-06:00"
 }
