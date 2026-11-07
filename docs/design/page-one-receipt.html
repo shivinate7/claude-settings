@@ -974,6 +974,8 @@ button.tile:hover { background: color-mix(in srgb, var(--chip) 60%, var(--surfac
 [data-new], [data-today] { position: relative; outline: 2px dashed #7c3aed; outline-offset: 3px; }
 [data-today] { outline-color: #0f766e; }
 [data-new]::after, [data-today]::after { position: absolute; z-index: 6; left: 4px; top: -11px; padding: 1px 6px; border-radius: 4px; font: 600 11px/1.4 system-ui, sans-serif; color: #fff; white-space: nowrap; pointer-events: none; max-width: calc(100% - 8px); overflow: hidden; text-overflow: ellipsis; }
+/* The rail's top block and the bar's words have no room inside: their tag sits above the outline, so it covers no words. */
+.ov-prog[data-new]::after, .ov-prog[data-today]::after, #barStatus[data-today]::after { top: -21px; }
 [data-new]::after { content: "New: " attr(data-new); background: #6d28d9; }
 [data-today]::after { content: "Today: " attr(data-today); background: #0f766e; }
 html.nolab [data-new], html.nolab [data-today] { outline: none; }

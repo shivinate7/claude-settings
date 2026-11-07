@@ -24,6 +24,7 @@ Ruling: coordinator, 2026-11-07 13:56 CST. Drop the rail's "N ready to send" lin
 - No visible legend: a "ready" word by the track brings back the double that the ruling removes (`ux-label-once`).
 - No `aria-label` on the track: a screen reader would hear the ready count twice.
 - Gain: no new element, no new word. Loss: a reader who has never seen the page infers the light segment from the chips, not from a label.
+  In light, the 55% tint reads grey beside the slate chip, so the chip keys it by hue family, not as an exact match.
 
 ## 3. Ready segment in the chip's colour (hide: "track in the chip's colour"), state `chip`, focus `#railChipProg`. Not the pick
 
