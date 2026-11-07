@@ -29,9 +29,9 @@
   "pick": "a",
   "rank": 3,
   "ref": "q_max branch claude/browser-geom-diag (1905c25dd)",
-  "reply": "Reworded 12:17 CST from your note: the block is your q_max rule, not the cloud.",
+  "reply": "Answered by you at 12:27 CST in runner 9's chat: a lane may start q_max browser.yml as a debug run, with a debater agent auditing it for efficiency. Home: a scoped exception to D-542 in q_max, written by lane qmax-browser-debug-run (step qmax-browser-shard). The 1px diagnosis runs that way. Closed 12:30 CST.",
   "short": "q_max: who may start browser.yml for a diagnosis",
-  "status": "open",
+  "status": "closed",
   "title": "May a session start q_max's browser workflow on a non-main branch to diagnose a CI-only failure?",
   "why": "Your note asked why this cannot run in the cloud. It can, but your q_max rule keeps the start with you."
 }

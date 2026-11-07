@@ -4,7 +4,8 @@
   "status": "doing",
   "order": 2,
   "why": "q_max's browser run is one job; its last finished run took 3 h 15 min.",
-  "note": "Owner, 16:52 CST Nov 6 (chat, to the coordinator): why are q_max's browser runs still long? Lane session_013NEJL2G7t13GZshXoFjnqu splits browser.yml into parallel shards balanced by measured check times, and reports the wall-clock before and after.",
+  "note": "Owner, 16:52 CST Nov 6 (chat, to the coordinator): why are q_max's browser runs still long? Lane session_013NEJL2G7t13GZshXoFjnqu splits browser.yml into parallel shards balanced by measured check times, and reports the wall-clock before and after. Owner ruling 12:27 CST Nov 7 (runner 9 chat): a lane may start q_max browser.yml as a debug run, audited for efficiency by a debater agent; home is a scoped exception to D-542 in q_max, written by lane qmax-browser-debug-run (session_013NEJL1hanvkquCBRfwoFQV). Page item 329 closed by it.",
   "owner": "coordinator",
-  "updatedAt": "2026-11-06T22:57:00Z"
+  "updatedAt": "2026-11-07T18:30:00Z",
+  "lane": "session_013NEJL1hanvkquCBRfwoFQV"
 }
