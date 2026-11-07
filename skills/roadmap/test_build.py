@@ -1439,6 +1439,176 @@ class ReadyNotStarted(ReadyFixture):
                          "with no steps, the build prints one unknown ready line")
 
 
+# The age limit of a ready step (READY_AGE_LIMIT_HOURS in build.py). Read with getattr, so a missing name fails the one
+# constant case by name and every other case still goes red on its behaviour, not as an import error.
+LIMIT_HOURS = getattr(build, "READY_AGE_LIMIT_HOURS", 24)
+# The one home of the exact text of the next-act lines. `count unknown` takes the ready block's why, which already reads
+# `unknown (<why>)`, as the ready-not-started line does.
+READY_LINE_FORMATS = {
+    "over": "ready over limit: {id} (start lane; owner {owner}; age {age}h)",
+    "count": "ready with no lane: {n}",
+    "count unknown": "ready with no lane: {why}",
+}
+NEXT_ACT_KEYS = ("id", "act", "owner", "age")  # the keys a doing entry and a ready entry share
+
+
+def ready_line(kind, **fields):
+    """The exact text of one next-act line of `kind`, from READY_LINE_FORMATS."""
+    return READY_LINE_FORMATS[kind].format(**fields)
+
+
+def over_lines(out):
+    return re.findall(r"^ready over limit: .*$", out, re.M)
+
+
+def count_lines(out):
+    return re.findall(r"^ready with no lane: .*$", out, re.M)
+
+
+class ReadyNextAct(ReadyFixture):
+    """The next act, owner and age limit of the ready steps (the PR-ledger design, part 3a). A ready step's next act is
+    `start lane`. A doing or active step with no lane takes its act from the same next-act function, so the stalled
+    entries and the ready entries carry the same keys. A ready step more than LIMIT_HOURS whole hours past its
+    updatedAt prints one `ready over limit` line and the build exits 1. The build always prints `ready with no lane: <N>`,
+    zero included, or `ready with no lane: <why>` when the read is unknown. Each exclusion case also holds an over-limit
+    control step, so the case goes red on the old code where the control's line is missing."""
+
+    def aged(self, hours):
+        """An updatedAt `hours` whole hours before the live read: ten minutes past the hour, so the floor reads hours."""
+        return self.before(hours * 60 + 10)
+
+    def test_the_age_limit_is_one_constant_of_24_hours(self):
+        self.assertTrue(hasattr(build, "READY_AGE_LIMIT_HOURS"), "build.py has no READY_AGE_LIMIT_HOURS constant")
+        self.assertEqual(build.READY_AGE_LIMIT_HOURS, 24, "the ready age limit is 24 whole hours")
+
+    def test_a_ready_step_over_the_limit_prints_one_red_line_and_exits_1(self):
+        self.ready_step("c2", order=2, updatedAt=self.aged(LIMIT_HOURS + 1))  # over the limit
+        self.ready_step("c3", order=3, updatedAt=self.aged(LIMIT_HOURS - 1))  # inside it: listed, no red line
+        self.known_read()
+        page, out = self.build_from_main("--live", str(self.live), expect=(0, 1))
+        self.assertEqual(self.ready_ids(self.ready_block(page)), ["c2", "c3"], "both ready steps are listed")
+        self.assertEqual(over_lines(out), [ready_line("over", id="c2", owner="coordinator", age=LIMIT_HOURS + 1)],
+                         "one red line for the step over the limit, none for the one inside it")
+        self.assertEqual(self.code, 1, "a ready step over the limit exits 1")
+
+    def test_a_ready_step_over_the_limit_names_its_owner_and_an_absent_owner_reads_coordinator(self):
+        self.ready_step("c2", order=2, updatedAt=self.aged(LIMIT_HOURS + 1), owner="triage")
+        self.ready_step("c3", order=3, updatedAt=self.aged(LIMIT_HOURS + 1))  # no owner field
+        self.known_read()
+        page, out = self.build_from_main("--live", str(self.live), expect=(0, 1))
+        self.assertEqual(over_lines(out), [ready_line("over", id="c2", owner="triage", age=LIMIT_HOURS + 1),
+                                           ready_line("over", id="c3", owner="coordinator", age=LIMIT_HOURS + 1)],
+                         "the owner field names the owner; an absent one reads coordinator")
+        self.assertEqual([s.get("owner") for s in self.ready_block(page)["steps"]], ["triage", "coordinator"],
+                         "the ready entries carry the same owners")
+
+    def test_a_ready_entry_carries_the_next_act_start_lane(self):
+        self.ready_step("c2", order=2)  # 3 h, inside the limit
+        self.known_read()
+        page, _ = self.build_from_main("--live", str(self.live))
+        self.assertEqual([s.get("act") for s in self.ready_block(page)["steps"]], ["start lane"],
+                         "a ready step's one next act is start lane")
+
+    def test_a_doing_entry_and_a_ready_entry_share_one_shape(self):
+        git(self.repo, "checkout", "-q", "roadmap")
+        self.commit_step("c2", status="doing", order=2, updatedAt=self.aged(3))  # no lane: stalled
+        self.ready_step("c3", order=3, updatedAt=self.aged(3))  # ready, inside the limit
+        self.known_read()
+        page, _ = self.build_from_main("--live", str(self.live), expect=(0, 1))
+        stalled = self.stalled_block(page)["steps"]
+        ready = self.ready_block(page)["steps"]
+        self.assertEqual([s["id"] for s in stalled], ["c2"], "the doing step is the stalled entry")
+        self.assertEqual([s["id"] for s in ready], ["c3"], "the todo step is the ready entry")
+        for name, entries in (("stalled", stalled), ("ready", ready)):
+            for entry in entries:
+                self.assertEqual([k for k in NEXT_ACT_KEYS if k not in entry], [],
+                                 "the %s entry %s lacks a next-act key" % (name, entry.get("id")))
+        self.assertEqual(stalled[0]["act"], "resume, pause or done", "a doing step with no lane is resumed, paused or done")
+        self.assertEqual(ready[0]["act"], "start lane", "a ready step's next act is start lane")
+        self.assertEqual([stalled[0]["owner"], ready[0]["owner"]], ["coordinator", "coordinator"],
+                         "an absent owner reads coordinator on both")
+        self.assertEqual([stalled[0]["age"], ready[0]["age"]], [3, 3], "age is whole hours from updatedAt, on both")
+
+    def test_an_excluded_step_prints_no_red_line_even_when_it_is_old(self):
+        live_session = [self.session_in_repo("session_test01", "SESSION_STATUS_RUNNING", "cs-step:c2")]
+        open_item = [self.item(4, home="step c2", status="open", lane=None)]
+        cases = {  # name: (fields for c2, arguments of known_read)
+            "live cs-step lane": ({}, {"sessions": live_session}),
+            "valid pause": ({"paused": StalledStep.PAUSE}, {}),
+            "later phase": ({"phase": "next"}, {}),
+            "open unanswered item": ({}, {"items": open_item}),
+        }
+        for name, (fields, live) in cases.items():
+            with self.subTest(name):
+                git(self.repo, "checkout", "-q", "roadmap")
+                self.ready_step("c2", order=2, updatedAt=self.aged(LIMIT_HOURS + 5), note=name, **fields)
+                self.ready_step("c3", order=3, updatedAt=self.aged(LIMIT_HOURS + 1), note="control " + name)  # over, not excluded
+                self.known_read(**live)
+                page, out = self.build_from_main("--live", str(self.live), expect=(0, 1))
+                self.assertEqual(over_lines(out), [ready_line("over", id="c3", owner="coordinator", age=LIMIT_HOURS + 1)],
+                                 "%s: the control prints its red line" % name)
+                self.assertEqual(self.ready_ids(self.ready_block(page)), ["c3"], "%s: c2 is excluded from the ready list" % name)
+
+    def test_a_ready_step_with_no_age_prints_no_red_line(self):
+        self.ready_step("c2", order=2, updatedAt=_ABSENT)  # no age, so nothing shows it over the limit
+        self.ready_step("c3", order=3, updatedAt=self.aged(LIMIT_HOURS + 1))  # control: over
+        self.known_read()
+        page, out = self.build_from_main("--live", str(self.live), expect=(0, 1))
+        self.assertEqual(over_lines(out), [ready_line("over", id="c3", owner="coordinator", age=LIMIT_HOURS + 1)],
+                         "the control prints its red line; c2 with no age prints none")
+        self.assertEqual(self.ready_ids(self.ready_block(page)), ["c2", "c3"], "c2 is still listed, with age unknown")
+
+    def test_a_doing_step_over_the_limit_stays_stalled_and_prints_no_ready_red_line(self):
+        git(self.repo, "checkout", "-q", "roadmap")
+        self.commit_step("c2", status="doing", order=2, updatedAt=self.aged(LIMIT_HOURS + 5))  # no lane: stalled by its status
+        self.ready_step("c3", order=3, updatedAt=self.aged(LIMIT_HOURS + 1))  # control: over, a ready red line
+        self.known_read()
+        _, out = self.build_from_main("--live", str(self.live), expect=(0, 1))
+        self.assertEqual(over_lines(out), [ready_line("over", id="c3", owner="coordinator", age=LIMIT_HOURS + 1)],
+                         "the control is the only ready red line")
+        self.assertIn(StalledStep.RESUME, out.splitlines(), "the doing step stays a stalled line")
+
+    def test_the_count_line_is_the_number_of_listed_ready_steps(self):
+        self.ready_step("c2", order=2)  # inside the limit
+        self.ready_step("c3", order=3, updatedAt=self.aged(LIMIT_HOURS + 1))  # over the limit
+        self.known_read()
+        _, out = self.build_from_main("--live", str(self.live), expect=(0, 1))
+        self.assertEqual(count_lines(out), [ready_line("count", n=2)], "two listed ready steps, one of them over, count 2")
+
+    def test_the_count_line_reads_zero_when_no_step_is_ready(self):
+        self.known_read()  # the fixture's c1 is in phase cleanup, so nothing is ready
+        _, out = self.build_from_main("--live", str(self.live))
+        self.assertEqual(count_lines(out), [ready_line("count", n=0)], "zero ready steps prints 0, not no line")
+
+    def test_the_count_line_reads_unknown_never_zero_when_the_read_is_unknown(self):
+        self.ready_step("c2", order=2, updatedAt=self.aged(LIMIT_HOURS + 1))  # over, so a known read would print red
+        self.publish(sessions=None, items=[], read_at=self.read_at)  # no sessions list
+        page, out = self.build_from_main("--live", str(self.live))
+        why = self.ready_block(page)["why"]
+        self.assertTrue(str(why).startswith("unknown ("), "the ready block says why the read is unknown")
+        self.assertEqual(count_lines(out), [ready_line("count unknown", why=why)], "an unknown read prints unknown, never 0")
+        self.assertEqual(over_lines(out), [], "an unknown read prints no red line")
+        self.assertEqual(self.code, 0, "an unknown read exits 0")
+
+    def test_the_count_line_reads_unknown_when_the_steps_are_unknown(self):
+        self.on_main()
+        _, out = run_build("--repo", str(self.repo), "--record-branch", "no-such-branch", "--out", str(self.out))
+        self.assertEqual(count_lines(out), [ready_line("count unknown", why="unknown (steps unknown)")],
+                         "with no steps, the count is unknown, never 0")
+
+    def test_every_over_the_limit_step_prints_its_own_red_line_at_full_size(self):
+        git(self.repo, "checkout", "-q", "roadmap")
+        for n in range(1, 26):
+            self.write_step("r%02d" % n, dict(STEP, status="todo", phase="now", order=n, updatedAt=self.aged(LIMIT_HOURS + 1)))
+        git(self.repo, "add", "-A")
+        git(self.repo, "commit", "-q", "-m", "25 over-limit ready steps")
+        self.known_read()
+        _, out = self.build_from_main("--live", str(self.live), expect=(0, 1))
+        self.assertEqual(over_lines(out), [ready_line("over", id="r%02d" % n, owner="coordinator", age=LIMIT_HOURS + 1)
+                                           for n in range(1, 26)], "one red line per step, in step order")
+        self.assertEqual(count_lines(out), [ready_line("count", n=25)], "the count is 25")
+
+
 class UntouchedInLivePhase(UpkeepFixture):
     """The upkeep row `untouched 5 days in a live phase`: each open step in a phase that holds an active step, whose
     updatedAt is STALE_DAYS old or more, or cannot be read. A zoneless, null or int updatedAt lists the step; it never
