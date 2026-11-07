@@ -1609,6 +1609,38 @@ def case_past_item_8_naming_a_listed_id_stays_past_ruling():
           (r.deny() or {}).get("permissionDecision") == "deny" and r.reason().startswith("past-ruling: "), detail(r))
 
 
+def case_item_8_refusal_naming_a_listed_id_is_past_ruling_whatever_the_items_say():
+    # A refusal that names item 8 with a listed record is past-ruling, even when a form item is named first or with it.
+    # The label follows item 8, so the first item number in the reason is no rule.
+    box = good_box(goal=APPS_GOAL, problem=APPS_PROBLEM, based=APPS_BASED, options=APPS_OPTIONS)
+    for label, reason in (
+        ("items 5 and 8", "Item 5 and item 8: decisions/%s (2026-10-28) already decides this." % APPS_SLUG),
+        ("item 1 passes, item 8", "Item 1 passes. Item 8: decisions/%s (2026-10-28) already decides this." % APPS_SLUG),
+        ("items 2 and 8", "Items 2 and 8: decisions/%s (2026-10-28) already decides this." % APPS_SLUG),
+    ):
+        r = run_hook(question_input(box=box, cwd=DECISIONS_REPO),
+                     answer=json.dumps({"ok": False, "reason": reason}))
+        check("box %s: the refusal is rule past-ruling" % label,
+              (r.deny() or {}).get("permissionDecision") == "deny" and r.reason().startswith("past-ruling: "),
+              detail(r))
+
+
+def case_item_8_naming_an_unshown_id_takes_the_unvetted_path():
+    # Expected (coordinator, round 2): an item 8 refusal that cites a record the judge was not shown has no usable
+    # verdict, so it takes the Unvetted path, not a plain refusal. Scope first: the listed record is shown.
+    box = good_box(goal=APPS_GOAL, problem=APPS_PROBLEM, based=APPS_BASED, options=APPS_OPTIONS)
+    for label, reason in (
+        ("decisions/", "Item 8: decisions/no-such-record (2026-10-28) already decides this."),
+        ("Decisions/", "Item 8: Decisions/no-such-record (2026-10-28) already decides this."),
+    ):
+        r = run_hook(question_input(box=box, cwd=DECISIONS_REPO),
+                     answer=json.dumps({"ok": False, "reason": reason}))
+        prompt = r.calls[0]["prompt"] if r.calls else ""
+        check("unshown item 8 %s: scope, the listed record is shown and the cited one is not" % label,
+              APPS_SLUG in without_call(prompt, box) and "no-such-record" not in without_call(prompt, box), detail(r))
+        check("unshown item 8 %s: the refusal takes the Unvetted path" % label, "Unvetted:" in r.reason(), detail(r))
+
+
 # ------------------------------------------------------------------ owner questions sent to a session (send tools)
 #
 # A send_message or SendMessage whose message carries a Goal line and a Problem (<stake>) line is an owner question. It
@@ -2086,6 +2118,8 @@ def main():
                  case_unknown_names_the_claude_settings_records, case_cite_of_a_shown_record_is_not_bogus,
                  case_page_task_gets_item_8_and_is_refused, case_mid_reason_unlisted_id_is_a_plain_refusal,
                  case_form_item_naming_a_listed_id_is_question_judge, case_past_item_8_naming_a_listed_id_stays_past_ruling,
+                 case_item_8_refusal_naming_a_listed_id_is_past_ruling_whatever_the_items_say,
+                 case_item_8_naming_an_unshown_id_takes_the_unvetted_path,
                  case_send_owner_question_is_judged_before_it_is_sent,
                  case_question_box_with_the_same_ruling_is_refused_as_past_ruling,
                  case_send_with_a_based_on_ruling_line_is_sent,

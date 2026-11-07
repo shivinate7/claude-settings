@@ -2127,6 +2127,27 @@ class QuestionReachesPageTests(SameTurnWriter, unittest.TestCase):
                                  assistant_text(self.reply(self.PICK))])
                 self.assertIsNone(out)
 
+    def test_qm_green_labelled_writer_send_after_the_question_passes(self):
+        # Catches: a writer label "Triage (session_X)" whose send to session_X, made after the Input Needed question,
+        # not read as the send. Scope first: the bare writer id passes the same turn.
+        bare = self.stop([human("decide"), *self.writer_read(self.WRITER), assistant_text(self.reply(self.PICK)),
+                          *self.send(session_id=self.WRITER)])
+        self.assertIsNone(bare, "scope: a bare writer id and a send after the question pass")
+        labelled = self.stop([human("decide"), *self.writer_read("Triage (%s)" % self.WRITER),
+                              assistant_text(self.reply(self.PICK)), *self.send(session_id=self.WRITER)])
+        self.assertIsNone(labelled, "a writer label and a send to its id after the question pass")
+
+    def test_qm_red_send_to_a_longer_id_after_the_question_blocks(self):
+        # Catches: a send to session_XY read as the send to the labelled writer session_X (a prefix match). Scope
+        # first: the send to session_X itself passes the same turn.
+        label = "Triage (%s)" % self.WRITER
+        exact = self.stop([human("decide"), *self.writer_read(label), assistant_text(self.reply(self.PICK)),
+                           *self.send(session_id=self.WRITER)])
+        self.assertIsNone(exact, "scope: the send to session_X passes")
+        out = self.stop([human("decide"), *self.writer_read(label), assistant_text(self.reply(self.PICK)),
+                         *self.send(session_id=self.WRITER + "x")])
+        self.assert_blocked(out, "Pick guard", self.WRITER)
+
     def test_qm_red_send_to_another_session_blocks(self):
         # Catches: a send to a session that is not the writer passing as the question's send.
         out = self.stop([human("decide"), *self.writer_read(self.WRITER),
