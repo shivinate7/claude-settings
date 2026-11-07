@@ -22,10 +22,12 @@
     }
   ],
   "owner": "lane silent-undo-session-url-footer (session_013NEJL2t7akPLp9rbWSVEeF)",
+  "pick": "b",
   "rank": 2,
   "ref": "step silent-undo-session-url-footer; lint debt-close",
+  "reply": "Withdrawn at 15:41 CST. You need not answer: decision uniform-over-variants (owner, 2026-10-27 12:51 CDT) already decides it, because the shared tool never grows a second accepted form. The lane took b: debts name test files only, and a debt records the weaker proof for shared files.",
   "short": "Debt close: prove one test, or the whole file",
-  "status": "open",
+  "status": "closed",
   "title": "May a debt name one test in a shared test file, so its close proves that test?",
   "why": "Option a adds a second accepted form to a shared tool, which your ruling keeps for you. The lane works with file paths only until you pick."
 }
