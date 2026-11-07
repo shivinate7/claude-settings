@@ -1,0 +1,147 @@
+#!/usr/bin/env python3
+# claude-settings githooks/pre-commit
+"""Shared pre-commit hook: no staged env file, no staged symlink that is absolute or leaves the repo.
+
+Why a hook: the guard in hooks/guard_env.py sees only the command line, so `git add -A` and
+`git add .` take an env file it never reads by name. The index is where that stage shows. An
+absolute or outside symlink commits a path on one machine; on another it points at nothing, or
+at a mirror that a later clean deletes through the link.
+
+Reads: the staged paths (added, copied, modified, renamed, type-changed) and the index modes. Staged deletions
+are never read, so a file committed earlier can still be removed.
+When the repo root holds githooks/main-ref/install.sh, it runs `sh <it> --check`: a commit is refused
+while the armed reference-transaction copy is missing or behind main, and allowed with an "unknown" line
+when the check cannot read. Cost: one sh and 5 git reads plus one per armed copy per commit, no files written.
+Env: CLAUDE_HOOKS_DIR (default ~/.claude/hooks) holds guard_env, the one home of the env-file
+name rule. PRE_COMMIT_GUARD=off is the escape hatch. A guard_env that cannot be imported refuses,
+because a hook that waves everything through on its own fault guards nothing.
+"""
+import os
+import posixpath
+import shlex
+import subprocess
+import sys
+
+HATCH = "PRE_COMMIT_GUARD=off"
+SYMLINK_MODE = "120000"
+MAIN_REF_INSTALLER = "githooks/main-ref/install.sh"
+MAIN_REF_MARKER = "main-ref-check: 1"
+
+
+def git(*args):
+    out = subprocess.run(["git", *args], check=True, capture_output=True).stdout
+    return out.decode("utf-8", "surrogateescape")
+
+
+def refuse(lines):
+    sys.stderr.write("pre-commit: commit refused.\n")
+    for line in lines:
+        sys.stderr.write(f"  {line}\n")
+    sys.stderr.write(f"  Override for one commit only, with your own decision: {HATCH} git commit ...\n")
+    sys.exit(1)
+
+
+def load_name_rule():
+    hooks_dir = os.path.expanduser(os.environ.get("CLAUDE_HOOKS_DIR") or "~/.claude/hooks")
+    sys.path.insert(0, hooks_dir)
+    try:
+        from guard_env import names_env_file
+    except Exception as err:  # any import fault: the rule is unavailable, so fail closed
+        refuse([
+            f"rule env-file-check: cannot import guard_env from {hooks_dir} ({type(err).__name__}).",
+            "Remedy: point CLAUDE_HOOKS_DIR at the folder that holds guard_env.py.",
+        ])
+    return names_env_file
+
+
+def staged_paths():
+    raw = git("diff", "--cached", "--name-only", "-z", "--diff-filter=ACMRT")
+    return [p for p in raw.split("\0") if p]
+
+
+def staged_symlinks(paths):
+    wanted = set(paths)
+    links = []
+    for entry in git("ls-files", "-s", "-z").split("\0"):
+        meta, _, path = entry.partition("\t")
+        if path in wanted and meta.split(" ", 1)[0] == SYMLINK_MODE:
+            links.append(path)
+    return links
+
+
+def symlink_fault(path):
+    target = git("cat-file", "-p", f":{path}")
+    if target.startswith("/"):
+        return "symlink-absolute", f"points at the absolute path {target}"
+    # Resolve from the link's own folder: `sub/l -> ../x` stays inside, `up -> ../x` does not.
+    resolved = posixpath.normpath(posixpath.join(posixpath.dirname(path), target))
+    if resolved == ".." or resolved.startswith("../"):
+        return "symlink-outside", f"points at {target}, which leaves the repo"
+    return None
+
+
+def check_armed_copy():
+    """Hold a repo that ships githooks/main-ref to main: refuse a missing or stale armed copy."""
+    try:
+        root = git("rev-parse", "--show-toplevel").strip()
+    except (subprocess.CalledProcessError, OSError) as fault:
+        sys.stderr.write(f"main-ref check: unknown: cannot find the repo root ({type(fault).__name__}).\n")
+        return
+    installer = os.path.join(root, MAIN_REF_INSTALLER)
+    if not os.path.isfile(installer):
+        return
+    # An installer from before --check would re-arm the copy instead of checking it, so run only one
+    # that carries the marker.
+    try:
+        with open(installer, encoding="utf-8", errors="replace") as fh:
+            has_check = MAIN_REF_MARKER in fh.read()
+    except OSError:
+        has_check = False
+    if not has_check:
+        sys.stderr.write(f"main-ref check: unknown: {MAIN_REF_INSTALLER} has no --check; not run.\n")
+        return
+    try:
+        run = subprocess.run(["sh", installer, "--check"], cwd=root, capture_output=True)
+        code, err = run.returncode, run.stderr.decode("utf-8", "surrogateescape")
+    except OSError as fault:
+        code, err = 2, f"main-ref check: unknown: cannot run {installer} ({fault})\n"
+    lines = [line for line in err.splitlines() if line.strip()]
+    if code == 1:
+        refuse(lines)
+    if code != 0 and not any("unknown" in line for line in lines):
+        lines.append(f"main-ref check: unknown: the check exited {code}.")
+    sys.stderr.write("".join(f"{line}\n" for line in lines))
+
+
+def main():
+    if os.environ.get("PRE_COMMIT_GUARD") == "off":
+        return
+    check_armed_copy()
+    names_env_file = load_name_rule()
+    try:
+        paths = staged_paths()
+        links = staged_symlinks(paths)
+        found = []
+        for path in paths:
+            if names_env_file(posixpath.basename(path)):
+                found.append((path, "env-file", "is an environment file; it holds secrets"))
+        for path in links:
+            fault = symlink_fault(path)
+            if fault:
+                found.append((path, fault[0], fault[1]))
+    except (subprocess.CalledProcessError, OSError) as err:
+        refuse([f"rule index-read: cannot read the index ({err}).", "Remedy: run git status and fix the repo state."])
+    if not found:
+        return
+    lines = [f"{path}: rule {rule}: {why}." for path, rule, why in found]
+    for path, rule, _ in found:
+        unstage = f"unstage it with `git rm --cached -- {shlex.quote(path)}`"
+        if rule == "env-file":
+            lines.append(f"Remedy for {path}: {unstage} and list it in .gitignore.")
+        else:
+            lines.append(f"Remedy for {path}: {unstage}, then link to a path inside the repo with a relative target.")
+    refuse(lines)
+
+
+if __name__ == "__main__":
+    main()

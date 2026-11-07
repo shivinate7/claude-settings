@@ -2,17 +2,18 @@
 
 ## The ruling
 
-Seven templates any repo can adopt live in one home and one shape: a composite action under
+Eight templates any repo can adopt live in one home and one shape: a composite action under
 `actions/<name>/`, or a plain file where the template is no CI step.
 
 | Template | Home |
 | --- | --- |
 | All-jobs-passed check | `actions/all-jobs-passed` |
 | CI done comment on a red run | `actions/ci-done-comment` |
-| Nightly CI alarm | `actions/ci-alarm` (also holds `issue.sh`, the one open-or-comment helper) |
+| Nightly CI alarm | `actions/ci-alarm` (also holds `issue.sh`, the one open-or-comment helper; opt-in `dropped-start` flags a pull request whose check run never started) |
 | Weekly README link check | `actions/readme-links` (calls `ci-alarm/issue.sh`) |
 | Ruling kind check on a pull request | `actions/ruling-kind` (runs `lint/check_ruling_kind.py` on the caller's checkout) |
 | Main-ref refusal hook | `githooks/main-ref` (its `install.sh` copies it) |
+| Pre-commit secrets and symlink hook | `githooks/pre-commit` (its `install.sh` copies it) |
 | Skip locally, fail in CI | `testing/skip-locally-fail-in-ci.mjs` |
 
 Why composite, not `workflow_call`:
@@ -24,9 +25,11 @@ Why composite, not `workflow_call`:
 
 The main-ref hook lets local main move only to a commit origin already has. `gh pr merge` runs on GitHub and moves no local ref.
 
-`checks.yml` runs the seven tests. It calls one template, `ci-done-comment`, because this repo's own sessions wait on its CI (decision ci-wait-reads-run-status, "The cloud wake"). CI templates are opt-in per repo, so a repo with no CI is never stuck on red checks. The nightly alarm is not enabled.
+The pre-commit hook reads the index. It refuses a staged environment file, which a wildcard stage (`git add -A`, `git add .`) takes in, and a symlink that is absolute or points outside the repo. The mistake: a wildcard stage commits secrets to a public repo, and an outside symlink lets a later write or delete reach past the repo (banchi decision D47, 2026-08-29: a symlink lost a 133 MB mirror; source: the child-guard-promotion plan, banchi row 20, PR #1119). The env name test is `names_env_file` in `hooks/guard_env.py`, read from the installed hooks. `PRE_COMMIT_GUARD=off` lets one commit through.
 
-Each template ships a test that goes red on its defect (`test_action.sh`, `test_comment.py`, `test_readme_links.py`, `test_hook.sh`, `skip-locally-fail-in-ci.test.mjs`).
+`checks.yml` runs the eight tests. It calls one template, `ci-done-comment`, because this repo's own sessions wait on its CI (decision ci-wait-reads-run-status, "The cloud wake"). CI templates are opt-in per repo, so a repo with no CI is never stuck on red checks. The nightly alarm is not enabled.
+
+Each template ships a test that goes red on its defect (`test_action.sh`, `test_comment.py`, `test_readme_links.py`, `test_hook.sh`, `test_pre_commit.sh`, `skip-locally-fail-in-ci.test.mjs`).
 
 Kind: process
 Home: rule:building-one-home-per-capability

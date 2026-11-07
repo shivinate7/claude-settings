@@ -24,7 +24,7 @@ Known false alarms: debt `env-file-rule-false-alarms` (the env-file false-alarm 
 
 Why: the user's own secrets must not enter the session. `.envrc` is in the scope for the same reason. The guard stops Claude's mistakes, not an attacker's form (`guard-guards-mistakes-only`, a guard stops mistakes, not an attacker).
 
-Risk: likely risk (`building-guard-needs-incident`: a rule needs a named incident, a measured risk or a likely risk). A session would likely read a `.env` or `.envrc` file while it debugs. No incident is on record. Landed 2026-09-16, the env-file rule. The guard_env module has held the rule since 2026-10-13.
+Risk: likely risk (`building-guard-needs-incident`: a guard or check needs a mistake Claude has made or is likely to make in normal work). A session would likely read a `.env` or `.envrc` file while it debugs. No incident is on record. Landed 2026-09-16, the env-file rule. The guard_env module has held the rule since 2026-10-13.
 
 Kind: process
 Home: hooks/guard_env.py

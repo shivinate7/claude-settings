@@ -675,6 +675,18 @@ class Registry(Tree):
         return dict({"id": "queue02", "url": self.QUEUE, "role": "queue-page", "account": "work",
                      "collections": ["items"]}, **changes)
 
+    def external_entry(self, entry_id="ext001", **changes):
+        """An artifact the repo holds and does not export (`export` false): a page in an account this one cannot read."""
+        return dict({"id": entry_id, "url": "https://claude.ai/artifact/" + entry_id, "role": "page",
+                     "account": "other-account", "export": False}, **changes)
+
+    def read_registry(self, what):
+        """layout.artifacts() of the fixture repo. A refusal fails the case with its cause, never as a crash."""
+        try:
+            return self.artifacts()
+        except self.layout.LayoutError as err:
+            self.fail("%s was refused: %s" % (what, err))
+
     def artifacts(self):
         self.assertTrue(hasattr(self.layout, "artifacts"), "layout.artifacts(root) is absent: the artifacts registry is not read")
         return self.layout.artifacts(self.tree)
@@ -741,6 +753,63 @@ class Registry(Tree):
             data = json.load(handle)
         self.assertEqual(data.get("waiting-page"), self.OLD, "set_waiting_page did not write the old key")
         self.assertEqual(data.get("artifacts"), [self.queue_entry()], "set_waiting_page dropped the registry")
+
+    def test_an_export_false_entry_is_read_with_no_export_path(self):
+        self.registry([self.external_entry()])
+        found = self.read_registry("an entry with export false")
+        self.assertEqual([e["id"] for e in found], ["ext001"], "the export false entry was not read")
+        self.assertFalse(found[0].get("export"), "the export false entry was given an export path")
+
+    def test_a_full_registry_of_nine_reads_in_order_and_the_waiting_page_stays_readable(self):
+        ids = ["ext%03d" % n for n in range(1, 9)]
+        self.registry([self.page_entry()] + [self.external_entry(i) for i in ids])
+        found = self.read_registry("a registry of nine entries, eight with export false")
+        self.assertEqual([e["id"] for e in found], ["page01"] + ids, "the nine registry entries were not read in order")
+        try:
+            page = self.layout.waiting_page(self.tree)
+        except self.layout.LayoutError as err:
+            self.fail("the waiting page was refused beside the export false entries: %s" % err)
+        self.assertEqual(page, self.PAGE, "the waiting page was not read beside the export false entries")
+
+    def test_an_export_false_entry_still_refuses_a_bad_url_and_an_email_as_account(self):
+        """Control: export false skips only the collections and the export path. The other checks still refuse."""
+        for label, changes in (("a url that is not an artifact link", {"url": "https://example.com/x"}),
+                               ("an email as account", {"account": "someone@example.com"})):
+            with self.subTest(check=label):
+                self.registry([self.external_entry(**changes)])
+                self.assertReported("ext001", label)
+
+    def test_an_export_that_is_true_or_empty_is_still_refused_and_names_its_entry(self):
+        """Control: export is false or a path. True and an empty value stay refused, and the refusal names the entry."""
+        for value in (True, ""):
+            with self.subTest(export=value):
+                self.registry([self.external_entry(export=value, collections=["items"])])
+                with self.assertRaises(self.layout.LayoutError, msg="export %r was not refused" % (value,)) as caught:
+                    self.artifacts()
+                self.assertIn("export", str(caught.exception), "the refusal of export %r does not name export" % (value,))
+                self.assertIn("ext001", str(caught.exception), "the refusal of export %r does not name its entry" % (value,))
+
+    def test_an_entry_with_no_export_key_still_needs_collections(self):
+        """Control: export false is opt-in. An entry with neither collections nor export is still refused."""
+        self.registry([{"id": "ext001", "url": "https://claude.ai/artifact/ext001", "role": "page", "account": "other-account"}])
+        with self.assertRaises(self.layout.LayoutError, msg="an entry with no collections and no export was not refused") as caught:
+            self.artifacts()
+        self.assertIn("collections", str(caught.exception), "the refusal does not name the missing collections")
+        self.assertIn("ext001", str(caught.exception), "the refusal does not name its entry")
+
+    def test_an_export_path_entry_keeps_its_path(self):
+        """Control: an entry with a path exports to that path, as it does today."""
+        self.registry([self.queue_entry(export="artifacts/custom")])
+        found = self.artifacts()
+        self.assertEqual(len(found), 1, "the entry with a path was not read")
+        self.assertEqual(found[0]["export"], "artifacts/custom", "an entry's export path was not kept")
+
+    def test_a_waiting_page_entry_with_export_false_is_refused_and_named(self):
+        """The waiting page is always exported to the waiting-data folder, so export false on its role is refused, not held."""
+        self.registry([self.page_entry(export=False)])
+        with self.assertRaises(self.layout.LayoutError, msg="a waiting-page entry with export false was accepted") as caught:
+            self.artifacts()
+        self.assertIn("page01", str(caught.exception), "the refusal of a waiting-page entry with export false does not name its entry")
 
 
 class WaitingPageBranding(Tree):
@@ -1247,6 +1316,112 @@ class Identity(Tree):
         script = os.path.join(worktree, "lint", "check_layout.py")
         self.assertEqual(run([script], worktree), (0, ""))
         self.assertEqual(run([script], os.path.join(worktree, "lint")), (0, ""))
+
+
+# The mockup homes of a repo (rule building-allow-list-is-the-constant). The repo is "fixture", from its origin, so
+# its machine home is <home>/Developer/fixture-imports: the name segment of owner/name, never the owner.
+MACHINE = "fixture-imports"
+ORIGIN = "git@github.com:owner/fixture.git"
+WIN_HOME = "C:\\Users\\x"  # a Windows owner's home, given as the judge's home
+APP_SUPPORT = "~/Library/Application Support/Claude-Work/side-session-notes/abc123/a.html"
+SHOT_URL = "https://claude.ai/artifact/0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d/asset/shot.png"
+
+
+class MockupHomes(Tree):
+    """The one mockup home of a repo is its design folder: a mockup is a repo path under it, and git holds it. The
+    machine-home form ~/Developer/<repo name>-imports is refused. Two readers:
+    mockup_homes(root, home=None) names the folders, and mockup_home_problem(root, file, home=None) gives None for a
+    file in the design folder and a sentence for any other file. The home is passed in, so no case reads or writes
+    the real home. A missing name fails by name (not built yet)."""
+
+    def setUp(self):
+        super().setUp()
+        self.layout = load("layout_under_test", os.path.join(LINT, "layout.py"))
+        self.put(".git/config", '[remote "origin"]\n\turl = %s\n' % ORIGIN)
+        self.home = os.path.join(self.tree, "home")
+        os.makedirs(self.home)
+
+    def fn(self, name):
+        found = getattr(self.layout, name, None)
+        if found is None:
+            self.fail("lint/layout.py has no %s yet" % name)
+        return found
+
+    def judge(self, file, home=None):
+        return self.fn("mockup_home_problem")(self.tree, file, home=self.home if home is None else home)
+
+    def passes(self, file, home=None):
+        problem = self.judge(file, home)
+        self.assertIsNone(problem, "the judge refused %r: %s" % (file, problem))
+
+    def refuses(self, file, home=None):
+        problem = self.judge(file, home)
+        self.assertIsInstance(problem, str, "the judge passed %r, want a refusal" % (file,))
+        self.assertTrue(problem.strip(), "the judge refused %r with no sentence" % (file,))
+
+    def test_the_only_home_is_the_design_folder(self):
+        homes = [str(h) for h in self.fn("mockup_homes")(self.tree) if h]
+        design = os.path.join(self.tree, *self.layout.path(self.tree, "design").split("/"))
+        self.assertEqual(homes, [design], "mockup_homes names a home other than the design folder")
+
+    def test_item_file_under_the_machine_home_is_refused(self):
+        self.refuses(os.path.join(self.home, "Developer", MACHINE, "item48", "a.html"))
+
+    def test_tilde_machine_home_form_is_refused(self):
+        self.refuses("~/Developer/%s/item48/a.html" % MACHINE)
+
+    def test_windows_owner_machine_home_file_is_refused(self):
+        self.refuses("C:\\Users\\x\\Developer\\%s\\item48\\a.html" % MACHINE, home=WIN_HOME)
+
+    def test_design_folder_file_passes_when_repo_relative(self):
+        self.passes("docs/design/item48/a.html")
+
+    def test_design_folder_file_passes_when_absolute_in_the_checkout(self):
+        self.passes(os.path.join(self.tree, "docs", "design", "item48", "a.html"))
+
+    def test_application_support_path_with_spaces_fails(self):
+        self.refuses(APP_SUPPORT)
+
+    def test_windows_appdata_mockup_fails(self):
+        self.refuses("C:\\Users\\x\\AppData\\Roaming\\Claude-Work\\side-session-notes\\abc123\\a.html", home=WIN_HOME)
+
+    def test_dotdot_escape_out_of_the_design_folder_fails(self):
+        self.refuses("docs/design/../../escape/a.html")
+
+    def test_http_url_fails(self):
+        self.refuses("https://example.com/shot.png")
+
+    def test_claude_artifact_asset_url_fails(self):
+        self.refuses(SHOT_URL)
+
+    def test_missing_file_fails(self):
+        self.refuses(None)
+
+    def test_empty_file_fails(self):
+        self.refuses("")
+
+    def test_file_directly_in_the_imports_folder_fails(self):
+        self.refuses("~/Developer/%s/a.html" % MACHINE)
+
+    def test_checkout_file_outside_the_design_folder_fails(self):
+        self.refuses(os.path.join(self.tree, "scratch", "a.html"))
+
+    def test_relative_file_outside_the_design_folder_fails(self):
+        self.refuses("scratch/a.html")
+
+    def test_the_refusal_names_the_design_folder_and_not_the_machine_home(self):
+        problem = self.judge(APP_SUPPORT)
+        self.assertIn(self.layout.path(self.tree, "design"), problem, "the refusal does not name the design folder")
+        self.assertNotIn(MACHINE, problem, "the refusal names the machine home, which no longer holds a mockup")
+
+    def test_a_folder_path_with_a_trailing_slash_is_refused(self):
+        self.refuses("docs/design/item48/")
+
+    def test_a_folder_path_with_a_trailing_backslash_is_refused(self):
+        self.refuses("docs\\design\\item48\\")
+
+    def test_the_design_folder_itself_is_refused(self):
+        self.refuses("docs/design")
 
 
 if __name__ == "__main__":

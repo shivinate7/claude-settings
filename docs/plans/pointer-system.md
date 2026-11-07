@@ -6,24 +6,30 @@ when a cite no longer matches the code. Each lane below adds one kind of cite.
 
 ## Status
 
-- Built on this branch: `stale-names-bound` and `stale-flags`.
-- Planned: `value-cites`, `cited-by-report`, and the records-only lane for value cites.
+- Built on main: `stale-names-bound` (STALE002, range mode) and `stale-flags` (STALE007, range mode). Tree mode, opt-in through the ste-lint input
+  `tree-cites`, with the dead-path check (STALE003) and the bad-anchor check (STALE004), per decision
+  `stale-cites-whole-tree` (the whole-tree record). The cited-by report, per the Report step of decision
+  `stale-cites-at-merge` (the range check record).
+- Planned: `value-cites`, the route-claim check, and the records-only lane for value cites.
+- New codes start at STALE005, which the route-claim check takes (decision `claims-carry-backing`, the
+  route-row record). `stale-flags` is STALE007; `value-cites` claims the next free code when it is built.
 
 ## Lanes
 
-Work order, in words: `stale-names-bound`, then `stale-flags`, then `value-cites`, then
-`cited-by-report`, then the records-only lane. The source notes numbered these steps L1 to L4. The
-slugs replace the numbers.
+Work order of the planned lanes, in words: `value-cites`, then the records-only lane.
+The built lanes are `stale-names-bound`, `stale-flags` and `cited-by-report`. The source notes numbered these steps L1
+to L4. The slugs replace the numbers.
 
 | Lane | What it checks | Status |
 |---|---|---|
-| `stale-names-bound` | A cited Python name that the pull request removed (STALE002) | Built on this branch |
-| `stale-flags` | A cited command-line flag that the pull request removed (STALE003) | Built on this branch |
-| `value-cites` | A cited value that the pull request changed (STALE004) | Planned |
-| `cited-by-report` | A report of the checks that hold each rule | Planned |
+| `stale-names-bound` | A cited Python name that the pull request removed (STALE002) | Built on main |
+| `stale-flags` | A cited command-line flag that the pull request removed (STALE007) | Built on main |
+| `value-cites` | A cited value that the pull request changed | Planned. Next free code when built. |
+| `cited-by-report` | A report of the checks that hold each rule | Built on main (the Report step of decision `stale-cites-at-merge`) |
+| Route-claim check (no slug yet) | A changed line that states a capability by route with no backing (STALE005) | Planned (decision `claims-carry-backing`, the route-row record) |
 | Records-only lane for value cites (no slug yet) | The GLOSSARY.md row "value cite" | Planned |
 
-### stale-names-bound (built on this branch)
+### stale-names-bound (built on main)
 
 - Fires when the pull request removes a module-level name that a line cites as "`file.py` `name`" or
   "(file.py name)".
@@ -37,7 +43,7 @@ slugs replace the numbers.
 - Cost: no new process and no new file read. The decision `stale-cites-at-merge` has the full cost line.
 - Known gaps: the `stale-cites-*` notes in `docs/debts/notes.md`.
 
-### stale-flags (built on this branch)
+### stale-flags (built on main)
 
 - Cite: a script path and a `--flag` inside one backticked code span.
 - Flag set: for a `.py` script, the `add_argument` string literals, read with `ast`. For shell, a
@@ -47,7 +53,7 @@ slugs replace the numbers.
   a flag in another script's span; a shim path (`bin/merge`, whose flags live in `merge/merge.py`).
 - A flag that another touched `.py` file declares as an `add_argument` literal at head, or another touched
   `.sh` file holds as a whole word, moved there and does not fire.
-- Cost: no new process beyond the one `cat-file`, and no `ls-tree` unless a flag was removed. A touched `.py`
+- Cost: no new process beyond the one `cat-file`, and no `ls-tree` of the Markdown tree unless a flag was removed. A touched `.py`
   or `.sh` adds that `cat-file`; the flag reader reads blobs through it. The decision `stale-cites-at-merge`
   has the full cost line and the named limits.
 
@@ -66,13 +72,13 @@ slugs replace the numbers.
   not fire. A new wrong line fires.
 - Cost: a tracked `.md` is read only when a module-level literal changed.
 
-### cited-by-report (planned)
+### cited-by-report (built on main)
 
 - Report only. The exit code never changes. `lint/stale_cites.py` prints to stdout, and
   `actions/ste-lint/run.sh` adds the report to the step summary.
 - Anchor section: each rule anchor (`<!-- rule:id -->`) whose sentence changed between base and head
   in RULE_FILES. For each, it lists the anchor's row in `lint/rule_mechanisms.json` (kind, ref, test)
-  and whether the pull request touched that holder.
+  and the files the range changed under RULE_DIRS, or "none".
 - Code section: each changed code file. For each, it lists the decisions whose Home line names that
   file, and the rows whose ref or test is that file.
 - A child repo with no `rule_mechanisms.json` gets the Home part only, with no error.

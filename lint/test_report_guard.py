@@ -33,6 +33,7 @@ import ste_lint  # noqa: E402
 import test_call_judge as tcj  # noqa: E402  the model stub and git fixtures (one home)
 import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py)
 import _test_temp  # noqa: E402  test-temp-standard: one run folder per test run (lint/_test_temp.py)
+import test_refusal_note as hook_base  # noqa: E402  the route-rows seam name and fixture (one home, hooks/test_refusal_note.py)
 
 GOOD_REPORT = "> **Done** BUILT abc123\n> **Next** ship it"
 RUN_FOLDER = _test_temp.run_folder()  # the new cases take their temp folders from it, never from the system temp dir
@@ -58,6 +59,9 @@ def setUpModule():
     os.environ.update(CJ_LOADED_DIR=stub, CJ_RECORD=os.path.join(stub, "calls.jsonl"),
                       CJ_ANSWER=tcj.ALLOW)
     os.environ.pop("CJ_MODEL_FAIL", None)
+    # The route-rows seam points at a missing file, so no old case reads a real rows file.
+    _ISOLATION["rows"] = os.environ.get(hook_base.ROUTE_ROWS_ENV)
+    os.environ[hook_base.ROUTE_ROWS_ENV] = os.path.join(_ISOLATION["dir"], "no-route-rows.json")
 
 
 def tearDownModule():
@@ -71,8 +75,14 @@ def tearDownModule():
             os.environ.pop(key, None)
         else:
             os.environ[key] = value
+    rows = _ISOLATION.pop("rows")
+    if rows is None:
+        os.environ.pop(hook_base.ROUTE_ROWS_ENV, None)
+    else:
+        os.environ[hook_base.ROUTE_ROWS_ENV] = rows
     shutil.rmtree(_ISOLATION.pop("dir"), ignore_errors=True)
     shutil.rmtree(RUN_FOLDER, ignore_errors=True)
+    shutil.rmtree(hook_base.RUN, ignore_errors=True)  # the hook harness's run folder, made at its import
 
 
 def human(text):
@@ -212,6 +222,16 @@ CONFIG_REPORT_CODE = (
 def run_config_report(hook, env=None):
     return subprocess.run([sys.executable, "-c", CONFIG_REPORT_CODE], input=json.dumps(hook),
                           capture_output=True, text=True, timeout=15, env=env)
+
+
+# The one home of the landing-turn drive: one human message, one Bash call (a git write unless the
+# caller names another command), then the reply, run through main() as the Stop hook.
+def landed_run(folder, reply, command="git commit -m x"):
+    records = [human("do the task"), tool_use_msg("Bash", {"command": command}), tool_result_msg(),
+               assistant_text(reply)]
+    path = write_transcript(records, folder)
+    hook = {"hook_event_name": "Stop", "transcript_path": path, "stop_hook_active": False}
+    return run_guard(REPORT_GUARD, hook)
 
 
 class ReportGuardTests(unittest.TestCase):
@@ -692,15 +712,7 @@ class DoneFormatAndCiteTests(unittest.TestCase):
         self.addCleanup(self.tmp.cleanup)
 
     def verdict(self, reply):
-        records = [
-            human("do the task"),
-            tool_use_msg("Bash", {"command": "git commit -m x"}),
-            tool_result_msg(),
-            assistant_text(reply),
-        ]
-        path = write_transcript(records, self.tmp.name)
-        hook = {"hook_event_name": "Stop", "transcript_path": path, "stop_hook_active": False}
-        run = run_guard(REPORT_GUARD, hook)
+        run = landed_run(self.tmp.name, reply)
         self.assertEqual(run.returncode, 0)
         return json.loads(run.stdout) if run.stdout.strip() else None
 
@@ -1029,6 +1041,7 @@ class NoResendTests(unittest.TestCase):
                 self.assertIn("never send the report again", reason)
                 self.assertNotIn("send the report now", reason)
                 self.assertEqual(reason.count("post only the corrected lines"), 1)
+                self.assertIn("rule reports-order-of-labels", reason)
 
     def test_nr_missing_report_block_keeps_the_reply(self):
         out = self.verdict("All done.")
@@ -1085,6 +1098,7 @@ class RewriteAfterMissingReportTests(unittest.TestCase):
         self.assertEqual(out["decision"], "block")
         self.assertIn("Unstarted guard", out["reason"])
         self.assertIn("post only the corrected lines", out["reason"].lower())
+        self.assertIn("rule reports-order-of-labels", out["reason"])
 
     def test_rw_red_rewrite_with_wrong_model_blocks(self):
         for reply in ("> **Done** BUILT the guard, PR #5 (builder opus)\n> **Next** Unstarted: none",
@@ -1639,14 +1653,14 @@ class PickGuardTests(unittest.TestCase):
 
     def test_pk_red_pick_with_no_control_blocks(self):
         # Catches: the Oct 27 incident, a pick as report text only, on an unlanded and a landed turn.
+        # Catches: the refusal offering the question box in a repo with a waiting page. The writer is the route.
         for landed in (False, True):
             with self.subTest(landed=landed):
                 out = self.verdict(self.PICK, landed=landed)
                 self.assertEqual(out["decision"], "block")
                 self.assertIn("Pick guard", out["reason"])
-                self.assertIn("question box", out["reason"])
-                # Catches: the refusal dropping the box's nothing-running condition (spec v2 block text).
-                self.assertRegex(out["reason"], r"nothing running[^.]*question box")
+                self.assertIn("writer", out["reason"])
+                self.assertNotRegex(out["reason"], r"\bbox\b")
 
     def test_pk_red_option_forms_block(self):
         rows = [
@@ -1689,10 +1703,16 @@ class PickGuardTests(unittest.TestCase):
             with self.subTest(calls=calls):
                 self.assertIsNotNone(self.verdict(reply, calls))
 
+    def no_page_repo(self):
+        """A repo with no waiting page. The question box counts there, and nowhere else."""
+        bare = os.path.join(self.tmp.name, "bare")
+        if not os.path.isdir(bare):
+            os.makedirs(os.path.join(bare, ".git"))
+        return bare
+
     def test_pk_green_unknown_page_box_and_write_pass(self):
         # With no waiting page, the box or the writer's items write still passes (spec v2, "No page").
-        bare = os.path.join(self.tmp.name, "bare")
-        os.makedirs(os.path.join(bare, ".git"))
+        bare = self.no_page_repo()
         self.assertIsNone(self.verdict(self.PICK + "\n" + self.PAGE, [self.page_set()], repo=bare))
         self.assertIsNone(self.verdict(self.PICK, [("AskUserQuestion", {}, False)], repo=bare))
 
@@ -1708,7 +1728,8 @@ class PickGuardTests(unittest.TestCase):
         self.assertIsNotNone(self.verdict(self.PICK, [other]))
 
     def test_pk_green_controls_pass(self):
-        self.assertIsNone(self.verdict(self.PICK, [("AskUserQuestion", {}, False)]))
+        # The box passes only in a repo with no waiting page; in a page repo the writer's write is the route.
+        self.assertIsNone(self.verdict(self.PICK, [("AskUserQuestion", {}, False)], repo=self.no_page_repo()))
         self.assertIsNone(self.verdict(self.PICK + "\n\nSee " + self.PAGE, [self.page_set()]))
 
     def assert_pick_blocked(self, reply, repo=None):
@@ -1860,39 +1881,47 @@ class PickGuardTests(unittest.TestCase):
         hyphen = self.PICK_BARE.replace("> **Next** wait",
                                         "> Departs from: lint/report_guard.py pick check - it also needs a line\n"
                                         "> **Next** wait")
+        # The Departs from check is judged on its own; the box is the route only where no page exists.
+        bare = self.no_page_repo()
+        box = ("AskUserQuestion", {}, False)
         for landed in (False, True):
             with self.subTest(landed=landed):
-                self.assertIsNone(self.verdict(self.PICK, [("AskUserQuestion", {}, False)], landed=landed))
+                self.assertIsNone(self.verdict(self.PICK, [box], landed=landed, repo=bare))
                 self.assertIsNone(self.verdict(self.PICK_LINKED, [self.page_set()], landed=landed))
-        self.assertIsNone(self.verdict(hyphen, [("AskUserQuestion", {}, False)]))
+        self.assertIsNone(self.verdict(hyphen, [box], repo=bare))
 
     def test_dp_green_no_pick_needs_no_line(self):
         # Catches: an Input Needed item with no pick refused for its missing line (out of scope).
+        bare = self.no_page_repo()
         rows = ("> **Done** OTHER read it\n> **Input Needed** Should the guard also cover Codex? I wait.\n> **Next** wait",
                 "> **Done** OTHER read it\n> **Input Needed** You picked A on Oct 26; I went with it.\n> **Next** wait")
         for row in rows:
             for landed in (False, True):
                 with self.subTest(row=row, landed=landed):
-                    # The "?" row is a question under spec v2.1, so it carries the box to pass.
-                    self.assertIsNone(self.verdict(row, [("AskUserQuestion", {}, False)], landed=landed))
+                    # The "?" row is a question under spec v2.1. With no waiting page, the box passes it.
+                    self.assertIsNone(self.verdict(row, [("AskUserQuestion", {}, False)], landed=landed, repo=bare))
 
     def test_dp_one_predicate_for_the_report_and_the_chat_box(self):
         # Catches: a report copy of the rule that judges a line the chat box does not. Both read question_form.
+        # The line is judged in a repo with no waiting page, where the box is the route, so the Departs from
+        # check is what refuses it.
         import question_form  # the one home of the rule (hooks/ is on sys.path)
+        bare = self.no_page_repo()
         bad = ["> Departs from:", "> Departs from: agent-model-cap — Opus above the row stays the existing ask"]
         for line in bad:
             with self.subTest(line=line):
                 reply = self.PICK_BARE.replace("> **Next** wait", line + "\n> **Next** wait")
-                out = self.verdict(reply, [("AskUserQuestion", {}, False)])
+                out = self.verdict(reply, [("AskUserQuestion", {}, False)], repo=bare)
                 box = {"questions": [{"question": "\n".join(self.FORM_LINES + [line[2:]]), "header": "Ship",
                                       "multiSelect": False,
                                       "options": [{"label": "Keep it", "description": "Gain: a. Lose: b."},
                                                   {"label": "Drop it", "description": "Gain: c. Lose: d."}]}]}
                 self.assertEqual(question_form.chat_hit(box)[0], "question-departs")
                 self.assertIsNotNone(out, "the report passed a line the chat box refuses")
+                self.assertRegex(out["reason"], r"(?i)departs from")
         good = "> " + self.DEPARTS_LINE
         self.assertIsNone(self.verdict(self.PICK_BARE.replace("> **Next** wait", good + "\n> **Next** wait"),
-                                       [("AskUserQuestion", {}, False)]))
+                                       [("AskUserQuestion", {}, False)], repo=bare))
 
     def test_dp_no_copy_the_report_imports_question_form(self):
         # A presence check only: the verdict cases above pin the behaviour. The report reads the form's
@@ -1918,11 +1947,12 @@ class PickGuardTests(unittest.TestCase):
         # Catches: a Departs from line written as a bullet or a bold label refused as missing. A bold label
         # reads as a new report label, which ends the Input Needed item at that line.
         text = "lint/report_guard.py pick check — it also needs a Departs from line"
+        bare = self.no_page_repo()  # the box is the route here: the question has no waiting page to reach
         for line in ("> - Departs from: " + text, "> **Departs from:** " + text, "> * Departs from: " + text):
             for landed in (False, True):
                 with self.subTest(line=line, landed=landed):
                     reply = self.PICK_BARE.replace("> **Next** wait", line + "\n> **Next** wait")
-                    self.assertIsNone(self.verdict(reply, [("AskUserQuestion", {}, False)], landed=landed))
+                    self.assertIsNone(self.verdict(reply, [("AskUserQuestion", {}, False)], landed=landed, repo=bare))
 
 
 import itertools
@@ -2021,11 +2051,14 @@ class QuestionReachesPageTests(SameTurnWriter, unittest.TestCase):
         return self.call("mcp__claude-code-remote__get_session", {"session_id": self.LANE_ID},
                          result=json.dumps({"ccr": ccr}))
 
-    def stop(self, records, env_id=None, repo=None, stop_active=False):
-        """Run the Stop hook on `records`. env_id is this session's remote id (a lane sets it); None is owner-facing."""
+    def stop(self, records, env_id=None, repo=None, stop_active=False, session_id=None):
+        """Run the Stop hook on `records`. env_id is this session's remote id (a lane sets it); None is owner-facing.
+        session_id, when given, is the hook's own session id: an override file is named by it."""
         path = write_transcript(records, self.run_dir)
         hook = {"hook_event_name": "Stop", "transcript_path": path, "stop_hook_active": stop_active,
                 "cwd": repo or self.repo}
+        if session_id:
+            hook["session_id"] = session_id
         env = dict(os.environ, CLAUDE_CONFIG_DIR=self.cfg, HOME=self.home)
         env.pop("CLAUDE_CODE_REMOTE_SESSION_ID", None)
         if env_id:
@@ -2075,7 +2108,9 @@ class QuestionReachesPageTests(SameTurnWriter, unittest.TestCase):
         self.assertEqual(self.written_files(), [])
 
     def test_qm_green_box_in_the_turn_passes(self):
-        out = self.stop([human("decide"), *self.box(), assistant_text(self.reply(self.PICK))])
+        # Catches: a box in the turn refused in a repo with no waiting page, where the box is the route.
+        bare = self.make_repo("bare", page=False)
+        out = self.stop([human("decide"), *self.box(), assistant_text(self.reply(self.PICK))], repo=bare)
         self.assertIsNone(out)
 
     def test_qm_red_sidechain_box_does_not_count(self):
@@ -2204,9 +2239,11 @@ class QuestionReachesPageTests(SameTurnWriter, unittest.TestCase):
                                      *self.send(session_id=self.WRITER), assistant_text(self.reply(self.PICK))]))
 
     def test_qm_green_own_record_without_a_lane_tag_is_owner_facing(self):
-        # Catches: a session record with no lane tag and no parent read as a lane, which would refuse the box.
+        # Catches: a session record with no lane tag and no parent read as a lane. A lane refuses the box, so a
+        # pass in a repo with no waiting page shows the record reads as owner-facing.
+        bare = self.make_repo("bare", page=False)
         out = self.stop([human("decide"), *self.lane_record(tags=("coordinator",), parent=None), *self.box(),
-                         assistant_text(self.reply(self.PICK))], env_id=self.LANE_ENV)
+                         assistant_text(self.reply(self.PICK))], env_id=self.LANE_ENV, repo=bare)
         self.assertIsNone(out)
 
     def test_qm_red_peer_only_session_with_no_lane_record_gets_the_owner_rule(self):
@@ -2249,12 +2286,13 @@ class QuestionReachesPageTests(SameTurnWriter, unittest.TestCase):
         out = self.stop([human("decide"), assistant_text(self.reply(["Don't merge it? Pick 'main'."]))])
         self.assert_blocked(out, "Pick guard")
 
-    def test_qm_green_owner_session_with_no_record_sends_to_parent_passes(self):
-        # Catches: a session with no own record whose question goes to its parent, refused as if it had no route.
+    def test_qm_red_owner_session_with_no_record_sends_to_parent_blocks(self):
+        # Catches: an owner-facing session (no own record, so no lane evidence) whose question goes to @parent
+        # passing as if @parent were a route. An owner-facing session has no parent, so the question still blocks.
         for label, send in (("@parent", self.send(session_id="@parent")), ("to parent", self.send(to="parent"))):
             with self.subTest(form=label):
                 out = self.stop([human("decide"), *send, assistant_text(self.reply(self.PICK))])
-                self.assertIsNone(out)
+                self.assert_blocked(out, "Pick guard")
 
     FRESH_QUESTION_CODE = (
         "import json, sys; sys.path.insert(0, %r); import report_guard; data = json.load(sys.stdin); "
@@ -4518,6 +4556,7 @@ class PendingRefusalTests(unittest.TestCase):
                 self.assertIsNotNone(out, "the Stop passed with a pending refusal")
                 self.assertEqual(out.get("decision"), "block")
                 self.assertIn(self.ARCHIVE, out["reason"])
+                self.assertIn("decision refusals-reach-the-owner", out["reason"], "the joined refusal lost its owner cite")
                 self.assertIn("Input Needed", out["reason"])
                 self.assertIn("notes.md", out["reason"])
                 self.assertEqual(self.pending_tools(), [self.ARCHIVE], "a blocked Stop cleared the entry")
@@ -4557,6 +4596,7 @@ class PendingRefusalTests(unittest.TestCase):
         self.assertIsNotNone(out, "a name in Done passed as the answer to the refusal")
         self.assertEqual(out.get("decision"), "block")
         self.assertIn(self.ARCHIVE, out["reason"])
+        self.assertIn("decision refusals-reach-the-owner", out["reason"], "the joined refusal lost its owner cite")
         self.assertEqual(self.pending_tools(), [self.ARCHIVE])
 
     def test_k_a_plain_word_in_input_needed_does_not_clear_a_built_in_tool(self):
@@ -4595,6 +4635,7 @@ class PendingRefusalTests(unittest.TestCase):
         self.assertIsNotNone(out, "the short name cleared the full MCP name")
         self.assertEqual(out.get("decision"), "block")
         self.assertIn("`%s`" % self.ARCHIVE, out["reason"], "the block reason does not quote the full name")
+        self.assertIn("decision refusals-reach-the-owner", out["reason"], "the joined refusal lost its owner cite")
         self.assertEqual(self.pending_tools(), [self.ARCHIVE])
         # The reason quotes the full name, so one rewrite that names it clears the entry.
         reply = ("> **Done** OTHER read the state\n> **Deviations** none\n"
@@ -4602,6 +4643,19 @@ class PendingRefusalTests(unittest.TestCase):
         run = self.stop(reply, active=True)
         self.assertEqual(run.stdout.strip(), "", "the rewrite that names the full name blocked: %s" % run.stdout)
         self.assertEqual(self.pending_tools(), [], "the rewrite left the entry in the file")
+
+    def test_k_pending_refusal_with_no_transcript_refuses_and_cites_the_owner_rule(self):
+        # The refusal alone blocks when the transcript is missing, and its reason cites the owner rule.
+        self.write_refusals([self.ARCHIVE])
+        hook = {"hook_event_name": "Stop", "stop_hook_active": False, "session_id": self.SID, "cwd": self.scratch}
+        run = run_guard(REPORT_GUARD, hook, env=dict(os.environ, CLAUDE_CONFIG_DIR=self.cfg))
+        self.assertEqual(run.returncode, 0, run.stderr)
+        out = self.blocked(run)
+        self.assertIsNotNone(out, "the Stop passed with a pending refusal and no transcript")
+        self.assertEqual(out.get("decision"), "block")
+        self.assertIn(self.ARCHIVE, out["reason"])
+        self.assertEqual(out["reason"].count("decision refusals-reach-the-owner"), 1, out["reason"])
+        self.assertEqual(self.pending_tools(), [self.ARCHIVE], "a blocked Stop cleared the entry")
 
     def test_f_stop_hook_active_does_not_block_on_a_refusal(self):
         rows = (("unlanded", False, self.PROSE), ("landed", True, self.LANDED_OTHER_ASK))
@@ -4631,6 +4685,147 @@ class PendingRefusalTests(unittest.TestCase):
             handle.write("not json\n")
         run = self.stop(self.PROSE)
         self.assertEqual(run.stdout.strip(), "", "an unreadable refusals file blocked the Stop: %s" % run.stdout)
+
+
+# building-mistake-names-its-guard (decision mistake-means-missing-guard): a Deviations admission of a
+# mistake the agent made names the guard for it. Every case is one landing turn read through main().
+MG_RULE = "building-mistake-names-its-guard"
+MG_DONE = "> **Done** OTHER read the audit"
+MG_INBOX = "I broke my feedback inbox: a sed -i deleted its closing fence, not its last item."
+
+
+def mg_report(deviations, done=MG_DONE, nxt="> **Next** none"):
+    return "%s\n> **Deviations** %s\n%s" % (done, deviations, nxt)
+
+
+class MistakeNamesGuardTests(unittest.TestCase):
+    """building-mistake-names-its-guard, in report_guard.py's Stop hook: an admission in Deviations names its guard."""
+
+    def setUp(self):
+        self.folder = tempfile.mkdtemp(dir=RUN_FOLDER)
+        self.addCleanup(shutil.rmtree, self.folder, True)
+
+    def verdict(self, reply, landed=True):
+        run = landed_run(self.folder, reply, "git commit -m x" if landed else "git status")
+        self.assertEqual(run.returncode, 0, run.stderr[-300:])
+        return json.loads(run.stdout) if run.stdout.strip() else None
+
+    def assert_blocked(self, reply):
+        out = self.verdict(reply)
+        self.assertIsNotNone(out, "no block: a Deviations admission with no guard named passed: " + reply)
+        self.assertEqual(out.get("decision"), "block", out)
+        self.assertIn(MG_RULE, out.get("reason", ""), "the block does not name the rule: %s" % out)
+
+    def assert_allowed(self, reply, landed=True):
+        out = self.verdict(reply, landed)
+        self.assertIsNone(out, "a control blocked, but must pass: %s" % out)
+
+    # Red: an admission that names no guard blocks.
+    def test_mg_red_inbox_admission_blocks(self):
+        self.assert_blocked(mg_report(MG_INBOX))
+
+    def test_mg_red_stale_decision_blocks(self):
+        self.assert_blocked(mg_report("I trusted a stale decision line and called a lane idle while its PR was open."))
+
+    def test_mg_red_wrong_short_sha_blocks(self):
+        self.assert_blocked(mg_report("My first message to the batch runner gave a wrong short sha."))
+
+    def test_mg_red_clobbered_notes_blocks(self):
+        self.assert_blocked(mg_report("I clobbered the lane's notes file by mistake."))
+
+    def test_mg_red_outdated_record_blocks(self):
+        self.assert_blocked(mg_report("I trusted an outdated record and skipped the check."))
+
+    # Red twins: each one fails if a green control's clearing rule is read too loosely.
+    def test_mg_red_guard_word_without_ref_blocks(self):
+        self.assert_blocked(mg_report("I broke the inbox; a guard would catch it."))
+
+    def test_mg_red_split_ref_and_guard_word_blocks(self):
+        self.assert_blocked(mg_report("I wrongly sent commit 3c2d1d97f; the CI check passed on it."))
+
+    def test_mg_red_negator_in_another_clause_blocks(self):
+        self.assert_blocked(mg_report("I did not test it, and I broke the build."))
+
+    # A negator clears only within 3 words before the fault word: four words between them still block.
+    def test_mg_red_negator_four_words_before_fault_blocks(self):
+        self.assert_blocked(mg_report("I did not run the check and broke the build."))
+
+    def test_mg_red_never_four_words_before_fault_blocks(self):
+        self.assert_blocked(mg_report("I never read the diff and clobbered the notes."))
+
+    def test_mg_red_admission_in_second_bullet_blocks(self):
+        self.assert_blocked(
+            "%s\n> **Deviations**\n> - the audit ran twice\n> - %s\n> **Next** none" % (MG_DONE, MG_INBOX))
+
+    def test_mg_red_apostrophes_do_not_hide_admission_blocks(self):
+        self.assert_blocked(mg_report("I didn't check; I clobbered the lane's notes."))
+
+    # Green: each of these must pass.
+    def test_mg_green_inbox_admission_with_fence_step_passes(self):
+        self.assert_allowed(mg_report(MG_INBOX + " Queued as step:inbox-fence-check."))
+
+    def test_mg_green_inbox_admission_with_debt_passes(self):
+        self.assert_allowed(mg_report(MG_INBOX + " A debt records it."))
+
+    def test_mg_green_inbox_admission_with_guard_ref_passes(self):
+        self.assert_allowed(mg_report(MG_INBOX + " The guard is built in #1300."))
+
+    def test_mg_green_did_not_break_anything_passes(self):
+        self.assert_allowed(mg_report("I never broke anything."))
+
+    def test_mg_green_nothing_i_did_passes(self):
+        self.assert_allowed(mg_report("Nothing I did broke the build."))
+
+    def test_mg_green_repointed_test_passes(self):
+        self.assert_allowed(mg_report("The test was wrong; I re-pointed it."))
+
+    def test_mg_green_worktree_refusal_passes(self):
+        self.assert_allowed(mg_report("I routed around the refusal because the guard was wrong about the worktree."))
+
+    def test_mg_green_quoted_owner_phrase_passes(self):
+        self.assert_allowed(mg_report('Owner said "I broke it, own up to a mistake".'))
+
+    def test_mg_green_admission_in_done_passes(self):
+        self.assert_allowed(mg_report("none", done="> **Done** OTHER I broke my feedback inbox and restored it."))
+
+    def test_mg_green_admission_in_next_passes(self):
+        self.assert_allowed(mg_report("none", nxt="> **Next** I trusted a stale decision line and will re-check it."))
+
+    def test_mg_green_admission_on_unlanded_turn_passes(self):
+        self.assert_allowed(mg_report(MG_INBOX), landed=False)
+
+    def test_mg_green_empty_deviations_passes(self):
+        self.assert_allowed(mg_report("none"))
+
+    def test_mg_green_lost_race_passes(self):
+        self.assert_allowed(mg_report("I lost the race to another lane."))
+
+    def test_mg_green_wiped_cache_passes(self):
+        self.assert_allowed(mg_report("I wiped the cache to reproduce the failure."))
+
+    def test_mg_green_trusted_verdict_passes(self):
+        self.assert_allowed(mg_report("I trusted the reviewer's verdict; it was correct."))
+
+    # A first-person word after the fault word in its clause is not the admission's subject.
+    def test_mg_green_i_after_fault_word_in_clause_passes(self):
+        self.assert_allowed(mg_report("The test was wrong so I re-pointed it."))
+
+    def test_mg_green_wrong_file_then_i_used_passes(self):
+        self.assert_allowed(mg_report("The brief named the wrong file and I used foo.py."))
+
+    # "corrupted" is not a fault word, so a regenerated corrupted fixture is not an admission.
+    def test_mg_green_regenerated_corrupted_fixture_passes(self):
+        self.assert_allowed(mg_report("I regenerated the corrupted fixture."))
+
+    # A guard, check or debt named in a later sentence of the same Deviations item clears the admission.
+    def test_mg_green_guard_built_in_pr_sentence_passes(self):
+        self.assert_allowed(mg_report("I broke the inbox. Guard built in PR #1300."))
+
+    def test_mg_green_check_added_in_sentence_passes(self):
+        self.assert_allowed(mg_report("I broke the inbox. Check added in #1300."))
+
+    def test_mg_green_debt_filed_sentence_passes(self):
+        self.assert_allowed(mg_report("I broke the inbox. Debt filed: inbox-fence."))
 
 
 if __name__ == "__main__":

@@ -14,7 +14,8 @@ your scratchpad.
 
 You are not blind. You read the repo's design spec, tokens and design decisions, so you never take
 the place of a blind reviewer in `skills/design-review` (Reviewer A or B). The orchestrator spawns
-you only after the blind findings list is complete (decision design-skills, blind then compare).
+you only after the blind findings list is complete (decision design-skills, blind then compare). In a
+second design read (decision design-agents), your brief names the round-1 blind list and the new head.
 
 Your brief names the changed screens, the screenshots or the routes, the mockup in the design
 folder (the `design` kind in `~/.claude/lint/layout.json`), and the blind findings list. A text-only change has no mockup: its brief names the screenshots of the
@@ -50,6 +51,8 @@ iPhone app does not, and is a finding.
 In a Mockup set check (skill `design-review`), your brief names a set of mockups and today's screens
 of the same job. Give each mockup one structure verdict, `same` or `new`, as that section defines, and
 name the parts that decide it. Build no verdict table of sizes and themes for it.
+
+Before the final report, stop every Monitor and background task you started with `TaskStop`, and start none after it.
 
 Report once, with the labels from CLAUDE.md in order: Done, Deviations, Input Needed, Next. Under
 Done, the first line is PASS, FAIL, or PARTIAL. Then give the verdict table, then each finding with

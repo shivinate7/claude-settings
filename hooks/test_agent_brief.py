@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Cases for hooks/agent_brief.py, a SubagentStart hook. Standard library only.
+"""Cases for hooks/agent_brief.py, a SubagentStart hook. Standard library only, plus hooks/guard.py,
+which reads the agent frontmatter.
 
 Run it from the repository root:
 
@@ -12,8 +13,11 @@ the hook prints one JSON object on stdout and exits 0:
   input (builder, test-author, reviewer, Explore, record-writer, designer, design-reviewer), the general scope line for any
   other or missing type, and fewer than 20 lines in all. Each scope line is pinned in full.
 - The push line, the commit-trailer line and the record-path line appear for builder,
-  test-author, record-writer and any other type; never for reviewer, Explore, Plan or
-  claude-code-guide, which only read.
+  test-author, record-writer, designer and any other type; never for reviewer, Explore, Plan,
+  claude-code-guide or design-reviewer, which only read.
+- The staged-diff line holds `git diff --cached --stat`. It appears once for each type that
+  commits (builder, test-author, record-writer, designer and any other type) and never for a
+  read-only type. Decision lanes-start-in-tool-worktrees.
 - A plugin-namespaced type (`my-plugin:builder`) gets the scope of its bare name. The match ignores
   case: `Builder` and `explore` get the scope and the line set of their role.
 - When the payload's cwd holds a .github/stamp.json whose cite.form is set, one brief line
@@ -28,6 +32,7 @@ Override the module under test with the env var AGENT_BRIEF_UNDER_TEST.
 """
 import json
 import os
+import importlib.util
 import shutil
 import subprocess
 import sys
@@ -35,6 +40,9 @@ import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 HOOK = os.environ.get("AGENT_BRIEF_UNDER_TEST") or os.path.join(HERE, "agent_brief.py")
+sys.path.insert(0, HERE)
+import guard  # noqa: E402  the one reader of agent frontmatter keys (guard.frontmatter_keys), not a copy of it here
+from tool_lists_test import tokens, unread_list  # noqa: E402  the one reader of tool lists (hooks/tool_lists_test.py)
 
 CWD = "/tmp/agent-brief-test"
 MISSING = object()  # payload() leaves agent_type out of the JSON when this is passed
@@ -48,7 +56,7 @@ SCOPE_LINE = {
     "Explore": "- Scope: Explore. Never edit. Read and search only.",
     "record-writer": "- Scope: record-writer. Edit Markdown (*.md) files only. Report any other change needed.",
     "designer": "- Scope: designer. Edit files in the repo's design folder only. Report any other change needed. "
-                "Your brief names your lane kind: blind, informed or directed. In a blind lane, never read "
+                "Your brief names your designer kind: blind, informed or directed. In a blind designer, never read "
                 "the current screen, its code, its screenshots, its mockups, or the repo's design spec and tokens.",
     "design-reviewer": "- Scope: design-reviewer. Never edit, write, stage, commit, or push. Read and render only.",
 }
@@ -56,8 +64,10 @@ GENERAL_LINE = ("- Scope: do only what your brief names. A builder never edits t
                 "a test-author never edits product code; a reviewer and Explore never edit; "
                 "a record-writer edits Markdown only.")
 STASH_LINE = "- Never run git stash, git reset, git checkout <path>, or git restore."
-# Non-scope lines in hook order. Builder, test-author, record-writer and any unknown type commit
-# and push; reviewer, Explore, Plan and claude-code-guide do not, so they get the shorter set.
+STAGED_KEY = "git diff --cached --stat"  # the stable fragment of the staged-diff line; the wording may change
+# Non-scope lines in hook order, after the scope line. Builder, test-author, record-writer, designer and any
+# unknown type commit and push; reviewer, Explore, Plan, claude-code-guide and design-reviewer do not, so they
+# get the shorter set. The staged-diff line is not in this list: line_set_check(staged=True) leaves it out.
 WRITER_RULES = [
     "Standing rules for this agent:",
     STASH_LINE,
@@ -270,10 +280,13 @@ for _label, _parts in RULES:
     add(_label, "context", payload("builder"), rule_check(_parts))
 
 
-def line_set_check(expected):
-    """Build a check: the non-scope lines equal `expected`, in order."""
+def line_set_check(expected, staged=False):
+    """Build a check: the non-scope lines equal `expected`, in order. With `staged`, the staged-diff line is
+    left out first: its place in the brief is not pinned here, and staged_check pins that it appears once."""
     def check(text):
         rules = [line for line in text.split("\n") if not line.startswith("- Scope")]
+        if staged:
+            rules = [line for line in rules if STAGED_KEY not in line]
         if rules == expected:
             return None
         if len(rules) != len(expected):
@@ -286,12 +299,12 @@ def line_set_check(expected):
 
 
 for _t in ["builder", "test-author", "record-writer", "designer"]:
-    add("line set: %s gets the nine-line set" % _t, "context", payload(_t),
-        line_set_check(WRITER_RULES))
-add("line set: a general (unknown) type gets the nine-line set", "context",
-    payload("some-new-agent"), line_set_check(WRITER_RULES))
-add("line set: a missing agent type gets the nine-line set", "context", payload(),
-    line_set_check(WRITER_RULES))
+    add("line set: %s gets the writer set" % _t, "context", payload(_t),
+        line_set_check(WRITER_RULES, staged=True))
+add("line set: a general (unknown) type gets the writer set", "context",
+    payload("some-new-agent"), line_set_check(WRITER_RULES, staged=True))
+add("line set: a missing agent type gets the writer set", "context", payload(),
+    line_set_check(WRITER_RULES, staged=True))
 for _t in ["reviewer", "Explore", "Plan", "claude-code-guide", "design-reviewer"]:
     add("line set: %s gets the five-line set" % _t, "context", payload(_t),
         line_set_check(READER_RULES))
@@ -481,6 +494,218 @@ add("cite form: a repo stamp.json with cite.form adds a brief line that carries 
     "custom", fn=cite_form_check)
 add("cite form: a repo stamp.json with cite.pattern and no cite.form adds no cite line",
     "custom", fn=cite_form_absent_check)
+
+
+# STAGED: the staged-diff step has one home, agent_brief's COMMON (decision lanes-start-in-tool-worktrees). A
+# committing type's brief holds it once, a read-only type's brief holds none, and no agent file keeps a copy.
+AGENTS_DIR = os.path.join(os.path.dirname(HERE), "agents")
+REPO_ROOT = os.path.dirname(HERE)
+
+
+def load_read_only():
+    """(lowercased READ_ONLY names, None) from the hook under test, or (None, problem) when it does not load.
+    A missing or broken hook is a red case, never a crash at import."""
+    try:
+        spec = importlib.util.spec_from_file_location("agent_brief_under_test", HOOK)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return {name.lower() for name in module.READ_ONLY}, None
+    except Exception as exc:  # the cases report it
+        return None, "agent_brief's READ_ONLY set does not load: %s" % exc
+
+
+WRITE_TOOLS = {"Edit", "Write"}
+
+
+def write_names(raw):
+    """The tool names in a frontmatter list value, comment stripped, each scope dropped: `Edit(src/**)` reads as Edit."""
+    return {item.split("(", 1)[0] for item in tokens(raw.split("#", 1)[0])}
+
+
+def can_write(keys):
+    """True when an agent may write, read from its frontmatter keys alone: its `tools` allowlist, when it has one,
+    lists Edit or Write, and its `disallowedTools` lists neither. Raises ValueError when a list sits below its key,
+    which the shared reader does not read, so the answer is never a guess."""
+    field = unread_list(keys)
+    if field:
+        raise ValueError("the %s list sits below its key, which the reader does not read" % field)
+    if "tools" in keys and not WRITE_TOOLS & write_names(keys["tools"]):
+        return False
+    return not WRITE_TOOLS & write_names(keys.get("disallowedTools", ""))
+
+
+# The write verdict of an agent's frontmatter, one case per form the lint reader reads: a comma list, a bracket list,
+# quoted names, a scoped entry such as Edit(src/**), a comment, and an absent key. A list below its key fails loudly.
+WRITE_FORMS = (
+    ("a comma tools list that names Edit", {"tools": "Read, Edit"}, True),
+    ("a comma tools list that names no write tool", {"tools": "Read, Grep"}, False),
+    ("a comma disallowedTools list that names Edit", {"disallowedTools": "Edit, Bash"}, False),
+    ("a bracket tools list that names Edit", {"tools": "[Read, Edit]"}, True),
+    ("a bracket disallowedTools list that names Edit and Write", {"disallowedTools": "[Edit, Write]"}, False),
+    ("a quoted tools list that names Edit", {"tools": "\"Read\", 'Edit'"}, True),
+    ("a quoted disallowedTools list that names Write", {"disallowedTools": "\"Write\""}, False),
+    ("a scoped tools entry Edit(src/**)", {"tools": "Read, Edit(src/**)"}, True),
+    ("a scoped disallowedTools entry Write(**)", {"disallowedTools": "Write(**)"}, False),
+    ("a tools list with a comment after it that names Edit", {"tools": "Read, Edit  # writes"}, True),
+    ("no tools or disallowedTools key", {"name": "x"}, True),
+)
+
+
+def write_form_check(keys, want):
+    """A case: can_write answers `want` for the frontmatter `keys`."""
+    def check():
+        got = can_write(keys)
+        if got != want:
+            return "can_write answers %s for %s; want %s" % (got, keys, want)
+        return None
+    return check
+
+
+def unread_list_check(keys, field):
+    """A case: can_write raises ValueError naming `field` when its list sits below the key, never a misjudged answer."""
+    def check():
+        try:
+            got = can_write(keys)
+        except ValueError as exc:
+            if field in str(exc):
+                return None
+            return "can_write raised, but its message does not name %s: %s" % (field, exc)
+        return "can_write answers %s for an empty %s key; want a loud failure" % (got, field)
+    return check
+
+
+for form_name, form_keys, form_want in WRITE_FORMS:
+    add("can_write: %s" % form_name, "custom", fn=write_form_check(form_keys, form_want))
+add("can_write: an empty tools key with its list on the lines below fails loudly, naming tools",
+    "custom", fn=unread_list_check({"tools": ""}, "tools"))
+add("can_write: an empty disallowedTools key with its list on the lines below fails loudly, naming disallowedTools",
+    "custom", fn=unread_list_check({"disallowedTools": ""}, "disallowedTools"))
+
+
+def agent_entries():
+    """(entries, problem): one (name, can_write) pair per agents/*.md file, from guard.role_agent_keys, the one
+    reader of agent frontmatter. The problem counts the files, so an agent file the reader skips cannot pass unseen."""
+    try:
+        files = [name for name in os.listdir(AGENTS_DIR) if name.endswith(".md")]
+        keys = list(guard.role_agent_keys(REPO_ROOT))
+    except OSError as exc:
+        return [], "agents/ cannot be read: %s" % exc
+    entries, unread = [], []
+    for key in keys:
+        name = key.get("name", "").split("#", 1)[0].strip().strip("'\"")
+        try:
+            entries.append((name, can_write(key)))
+        except ValueError as exc:
+            unread.append(str(exc))
+    named = [(name, writes) for name, writes in entries if name]
+    if unread:
+        return named, "; ".join(unread)
+    if not files or len(keys) != len(files) or len(named) != len(files):
+        return named, ("want a name from each of the %d agent files; %d have frontmatter, %d have a name"
+                       % (len(files), len(keys), len(named)))
+    return named, None
+
+
+READ_ONLY, READ_ONLY_PROBLEM = load_read_only()
+AGENT_ENTRIES, NAMES_PROBLEM = agent_entries()
+AGENT_NAMES = [name for name, _writes in AGENT_ENTRIES]
+
+
+def staged_check(name, writes):
+    """Build a check for one agent. A committing agent's brief holds exactly one staged-diff line; a read-only
+    agent's brief holds none. `writes` is the agent's frontmatter verdict (can_write), not the hook's READ_ONLY set,
+    so a writer filed into READ_ONLY still has to show its line."""
+    def check():
+        text, problem = context_for(payload(name))
+        if problem:
+            return problem
+        hits = [line for line in text.split("\n") if STAGED_KEY in line]
+        if not writes:
+            if hits:
+                return "a read-only type gets the staged-diff line: %r" % hits[0][:90]
+            return None
+        if len(hits) != 1:
+            return "want one line that holds %r, got %d" % (STAGED_KEY, len(hits))
+        return None
+    return check
+
+
+def agent_list_check():
+    """The agent list is whole: every agent file names itself, and committing and read-only types are both present,
+    so the per-agent cases cannot pass on an empty or partial list."""
+    if NAMES_PROBLEM:
+        return NAMES_PROBLEM
+    if READ_ONLY_PROBLEM:
+        return READ_ONLY_PROBLEM
+    writers = [name for name in AGENT_NAMES if name.lower() not in READ_ONLY]
+    readers = [name for name in AGENT_NAMES if name.lower() in READ_ONLY]
+    if not writers or not readers:
+        return "want committing and read-only agents, got %d and %d" % (len(writers), len(readers))
+    return None
+
+
+def copies_check():
+    """No agent file carries its own copy of the staged-diff step."""
+    copies = []
+    try:
+        for name in sorted(os.listdir(AGENTS_DIR)):
+            if name.endswith(".md"):
+                with open(os.path.join(AGENTS_DIR, name), encoding="utf-8") as handle:
+                    if STAGED_KEY in handle.read():
+                        copies.append("agents/" + name)
+    except OSError as exc:
+        return "agents/ cannot be read: %s" % exc
+    if copies:
+        return "own copy of %r in %s; the one home is agent_brief's COMMON" % (STAGED_KEY, ", ".join(copies))
+    return None
+
+
+add("staged-diff step: agents/ names every agent, with committing and read-only types both present",
+    "custom", fn=agent_list_check)
+for _name, _writes in AGENT_ENTRIES:
+    add("staged-diff step, agent %s: one line if it commits, none if it is read-only" % _name,
+        "custom", fn=staged_check(_name, _writes))
+add("staged-diff step: no agents/*.md file carries its own copy of it", "custom", fn=copies_check)
+
+
+def staged_once_check(agent_type):
+    """Build a check: the brief for `agent_type` holds the staged-diff line exactly once. A general type and a
+    missing type take the general scope line and the writer set, so each holds the line too."""
+    def check():
+        text, problem = context_for(payload(agent_type))
+        if problem:
+            return problem
+        hits = [line for line in text.split("\n") if STAGED_KEY in line]
+        if len(hits) != 1:
+            return "want one line that holds %r, got %d" % (STAGED_KEY, len(hits))
+        return None
+    return check
+
+
+add("staged-diff step: a general type (general-purpose) holds the staged-diff line exactly once", "custom",
+    fn=staged_once_check("general-purpose"))
+add("staged-diff step: a missing agent type holds the staged-diff line exactly once", "custom",
+    fn=staged_once_check(MISSING))
+
+
+def read_only_set_check():
+    """agent_brief's READ_ONLY set names exactly the agents whose frontmatter says they cannot write. A failure names
+    one agent and the way it disagrees."""
+    if NAMES_PROBLEM:
+        return NAMES_PROBLEM
+    if READ_ONLY_PROBLEM:
+        return READ_ONLY_PROBLEM
+    for name, writes in AGENT_ENTRIES:
+        listed = name.lower() in READ_ONLY
+        if writes and listed:
+            return "%s can write by its frontmatter, but agent_brief's READ_ONLY lists it" % name
+        if not writes and not listed:
+            return "%s cannot write by its frontmatter, but agent_brief's READ_ONLY does not list it" % name
+    return None
+
+
+add("staged-diff step: agent_brief's READ_ONLY set names exactly the agents whose frontmatter cannot write",
+    "custom", fn=read_only_set_check)
 
 
 def main():
