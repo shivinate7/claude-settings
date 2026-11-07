@@ -2184,3 +2184,4 @@
 - load-sections-skips-non-py-silently: `load_sections` in `hooks/test_guard.py` skips non-.py files with no message. Found in PR 2635. Decision: roles-findings-are-debts-or-notes.
 - tests-for-silent-empty: `tests_for_main` in `hooks/mutate_guard.py` prints nothing on a runner parse error or a non-static SECTION_DIR. Found in PR 2635. Decision: roles-findings-are-debts-or-notes.
 - scratchpad-rm-rf-unguarded: no guard refuses `rm -rf` on a scratchpad folder that another agent of the session wrote. A builder deleted one. Queued as a debt. Decision: scratchpad-owner (the pattern).
+- prose-lines-indent-four: QUOTE_PREFIX strips up to 3 leading spaces before INDENTED_CODE is tested, so a 4-space indented block reads as prose; a tab works. Cost: one Sonnet call on a send or Stop that quotes a form in indented code, never a refusal (lint/report_guard.py `prose_lines`). Decision: question-form
