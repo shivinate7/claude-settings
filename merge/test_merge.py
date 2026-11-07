@@ -12801,6 +12801,36 @@ class ProseJudge(Env):
         self.assertEqual(rc, 0, out)
         self.assertTrue(getattr(self.host, "merged", False), "the merge did not land after the base could not be read")
 
+    def test_a_base_read_that_times_out_still_lands_the_merge(self):
+        # The base read in confirm raises TimeoutExpired, and only that read: the merge's other steps run. The try around the read
+        # holds the merge: ff_main, afterMerge and the branch cut all run, the report names the unreadable base, and rc is 0.
+        cfg = dict(CONFIG, merge=dict(CONFIG["merge"], afterMerge=["echo ran > after.txt"]))
+        put_base_config(self, json.dumps(cfg))
+        old = "# Cloud notes\n\nAn old line on main.\n"
+        self.setup_range({PROSE: old}, {}, later={PROSE: old + "\nCloud sessions run in a container.\n"})
+        before = self.head("main")
+        real_git, reached = merge.git, []
+
+        def base_times_out(cwd, *a, **kw):
+            if sys._getframe(1).f_code.co_name == "confirm" and a == ("rev-parse", "--verify", "-q", "origin/main^{commit}"):
+                reached.append(a)
+                raise subprocess.TimeoutExpired(cmd=list(a), timeout=1)
+            return real_git(cwd, *a, **kw)
+        out, err = io.StringIO(), io.StringIO()
+        with unittest.mock.patch.object(merge, "git", base_times_out), unittest.mock.patch.object(merge, CAP_NAME, PROSE_CAP):
+            try:
+                rc, _ = self.run_merge("7", "--confirm", stdout=out, stderr=err)
+            except subprocess.TimeoutExpired:  # a read that escapes confirm: the asserts below read the state it left
+                rc = None
+        text = out.getvalue() + err.getvalue()
+        self.assertEqual(len(reached), 1, "the base read was reached %d times, want 1: the case did not hit its seam\n%s" % (len(reached), text))
+        self.assertNotEqual(self.head("main"), before, "origin main did not move: the merge did not land after the base read timed out\n" + text)
+        self.assertEqual(sh(self.co, "git", "rev-parse", "main"), self.head("main"), "local main did not move to the merge commit: ff_main did not run\n" + text)
+        self.assertTrue(os.path.exists(os.path.join(self.co, "after.txt")), "afterMerge did not run after the base read timed out\n" + text)
+        self.assertNotIn("refs/heads/feat", self.refs(), "origin feat is still there: the branch was not cut after the base read timed out\n" + text)
+        self.assertIn("prose judge UNKNOWN: the base could not be read", text, "the report names no unreadable base\n" + text)
+        self.assertEqual(rc, 0, text)
+
     def test_the_model_call_runs_after_the_merge_lock_is_released(self):
         # confirm holds the lock from acquire until the release in its finally. A model call waits up to MODEL_TIMEOUT, so it
         # must come after that release. Building the prompt under the lock is allowed.
