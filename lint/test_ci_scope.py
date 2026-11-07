@@ -66,9 +66,9 @@ def family_files():
 # The files the guard suite loads, derived from the code of GUARD_SEEDS, not listed by hand. A file is in the closure when
 # a file in it imports it, or loads it by a path (_refs reads each file's syntax tree):
 #   import x, from x import y, importlib.import_module("x"): x is the basename of a repo .py file;
-#   a run-time root that is a folder of the repo (_path_of reads __file__ and the os.path or pathlib calls on it, and a
-#   module-level name bound once to one of these), then one literal, as os.path.join(root, "lit") or root / "lit": the
-#   file at that folder plus the literal (_repo_load);
+#   a run-time root that is a folder of the repo (_path_of reads __file__ and the os.path or pathlib calls on it, .parent,
+#   and a module-level name bound once to one of these), then its literals, as os.path.join(root, "lit") or a `/` chain,
+#   root / "a" / "b": the file at that folder plus the literals (_repo_load);
 #   os.path.join whose literal segments have a `..`, or whose run-time root is the file's own folder (__file__, _HERE):
 #     the file of that name in that folder;
 #   os.path.join of literal segments with no run-time root: a repo path, from the repo root;
@@ -189,7 +189,7 @@ def _bound_names(tree):
 
 def _path_of(node, f, bound, depth=0):
     """The absolute path a path expression reads to, or None. Only these are read: __file__ (the loading file), the os.path
-    functions dirname, abspath, realpath, normpath and join, pathlib.Path(...), .resolve(), .parents[N], a `/` with a
+    functions dirname, abspath, realpath, normpath and join, pathlib.Path(...), .resolve(), .parent, .parents[N], a `/` with a
     literal, and a module-level name bound once to one of these. Nothing is called beyond them: no environment, no read."""
     if depth > 20:
         return None
@@ -197,6 +197,9 @@ def _path_of(node, f, bound, depth=0):
         if node.id == "__file__":
             return os.path.realpath(os.path.join(REPO_REAL, f))
         return _path_of(bound[node.id], f, bound, depth + 1) if node.id in bound else None
+    if isinstance(node, ast.Attribute) and node.attr == "parent":
+        p = _path_of(node.value, f, bound, depth + 1)
+        return None if p is None else os.path.dirname(p)
     if isinstance(node, ast.Subscript) and isinstance(node.value, ast.Attribute) and node.value.attr == "parents" \
             and isinstance(node.slice, ast.Constant) and isinstance(node.slice.value, int):
         p = _path_of(node.value.value, f, bound, depth + 1)
@@ -230,19 +233,29 @@ def _is_test(f):
     return posixpath.basename(f).startswith("test_")
 
 
+def _div_chain(expr):
+    """The root of a pathlib `/` chain and its literal segments in order: root / "a" / "b" -> (root, ["a", "b"]). The chain
+    ends at the first `/` whose right side is not a literal."""
+    lits = []
+    while isinstance(expr, ast.BinOp) and isinstance(expr.op, ast.Div) and _is_str(expr.right):
+        lits.insert(0, expr.right.value)
+        expr = expr.left
+    return expr, lits
+
+
 def _repo_load(f, expr, tracked, bound):
     """The repo file a load reads when a run-time root that is a folder of the repo comes before its literals, as
-    os.path.join(root, "lit") or root / "lit": the file at root plus the literals, when it is a repo file. None otherwise.
-    A product module reads one literal; a test module's join reads any number, since its REPO is the real checkout. A
-    literal root, or a `/` chain of several literals, is not read here."""
+    os.path.join(root, "lit") or a `/` chain, root / "a" / "b": the file at root plus the literals, when it is a repo file.
+    None otherwise. A product module's join reads one literal; a test module's join reads any number, since its REPO is the
+    real checkout. A `/` chain reads all its literals. A literal root is not read here."""
     if isinstance(expr, ast.Call) and _callee(expr) == "os.path.join" and len(expr.args) >= 2 \
             and all(_is_str(a) for a in expr.args[1:]) and (_is_test(f) or len(expr.args) == 2):
         root, lits = expr.args[0], [a.value for a in expr.args[1:]]
     elif isinstance(expr, ast.BinOp) and isinstance(expr.op, ast.Div) and _is_str(expr.right):
-        root, lits = expr.left, [expr.right.value]
+        root, lits = _div_chain(expr)
     else:
         return None
-    if _is_str(root) or (isinstance(root, ast.BinOp) and _is_str(root.right)):
+    if _is_str(root):
         return None
     base = _path_of(root, f, bound)
     if base is None:
