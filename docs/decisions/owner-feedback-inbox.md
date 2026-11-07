@@ -15,8 +15,8 @@ store: cloud sessions share no `~/.claude`, so a file under it would not reach t
 - **Capture.** The UserPromptSubmit hook appends each owner message verbatim, with its Central time,
   to `~/.claude/handoffs/<session_id>.inbox.md`. The file is outside git. A note typed on a
   waiting-page card is captured the same way. A PostToolUse
-  hook on `ArtifactData` (`local_time.py --page-note`) acts on a `get` of `answers` only: the routing
-  session's re-read of `answers/<id>`, so an undone or withdrawn answer is never saved. Each answer
+  hook on `ArtifactData` (`local_time.py --page-note`) acts on a `get`, `list` or `query` of `answers` only: the routing
+  session's read of `answers`, just before it routes, so an undone or withdrawn answer is never saved. Each answer
   whose `data.note` is non-empty and not `accepted pick`, and that is not a parked-line act
   (`parked: true`, whose note is the entry's own text), is appended as one block, except an answer whose `session` names another session than the reader's
   (env `CLAUDE_CODE_REMOTE_SESSION_ID`) is skipped; an unknown id on either side saves as before. The block is stamped with the
@@ -24,7 +24,7 @@ store: cloud sessions share no `~/.claude`, so a file under it would not reach t
   The label leaves out a missing n or item.
   The label adds no line, so a note is a burst by the Burst bullet's own test. The file `<session_id>.inbox.pagenotes` holds
   one key `<url>|<doc_id>|<at>` per saved note, and a repeat read saves nothing. Cost: one process
-  start per `ArtifactData` call. Files are written only when a read of `answers` returns a new note:
+  start per `ArtifactData` call, as before: a get, list or query of `answers` starts no new process and no new file. Files are written only when a read of `answers` returns a new note:
   the inbox and the key file. A failed save tells the session to jot the note by hand.
 - **Notices.** A message that starts with a tag in `shared_names.MACHINE_TAGS` is agent or system
   text. It is never captured, and it does not count toward a burst. Hand-backs and the

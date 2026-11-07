@@ -30,9 +30,8 @@ messages need items, is feedback_guard.py. LOCAL_TIME_NOW (ISO-8601 with an offs
 clock; tests set it.
 
 `--page-note` is the waiting page's capture (PostToolUse, matcher ArtifactData). It acts only on a
-`get` of collection `answers`: the routing session's re-read of `answers/<id>`, just before it routes
-the answer, so an undone or withdrawn answer is never saved. A `list`, `query`, write or other tool
-saves nothing. It collects every string in `tool_response` (a str, content blocks, nested dicts). A
+`get`, `list` or `query` of collection `answers`: the routing session's read of `answers`, just before it
+routes an answer, so an undone or withdrawn answer is never saved. A write or other tool saves nothing. It collects every string in `tool_response` (a str, content blocks, nested dicts). A
 line that loads as a JSON object with a dict `data` is a document. Only one-line JSON documents in
 text are read: a dict-shaped or pretty-printed document saves nothing. A document with `data.parked` true (a
 parked-line act, `answers/park.<id>`) saves nothing: its note is the entry's own text, not the owner's words. An answer whose `data.session` names another session than the reader's (env
@@ -44,7 +43,7 @@ answer's `data.at` in Central (the clock when `at` does not parse), with the tex
 line. A read with `out_dir` returns file paths only, so it saves nothing. Each saved note leaves a key
 `<url>|<doc_id>|<at>` in `<session_id>.inbox.pagenotes`, and a key already there saves nothing. A failed
 save prints a PostToolUse `additionalContext` saying the note was not saved. Cost: one process start
-per ArtifactData call. Files are written only when a read of `answers` returns a new note: the inbox
+per ArtifactData call (a get, list or query of `answers` adds no process). Files are written only when a read of `answers` returns a new note: the inbox
 and the pagenotes file.
 """
 import json
@@ -228,7 +227,7 @@ def _strings(obj):
 
 
 def _documents(response):
-    """The (doc_id, data) of each document in a get's text: a line that loads as a JSON object with a
+    """The (doc_id, data) of each document in a get, list or query response's text: a line that loads as a JSON object with a
     dict `data`. Banner lines are not documents."""
     for text in _strings(response):
         for ln in text.split("\n"):  # not splitlines(): U+2028 and U+0085 inside a note must not split it
@@ -264,12 +263,12 @@ def page_note_text(data):
 
 
 def page_note(raw):
-    """PostToolUse on ArtifactData: saves the note of each new answer a `get` of `answers` returned.
-    Saves nothing for any other call. Prints a PostToolUse additionalContext JSON when a save fails."""
+    """PostToolUse on ArtifactData: saves the note of each new answer a `get`, `list` or `query` of `answers`
+    returned. Saves nothing for any other call. Prints a PostToolUse additionalContext JSON when a save fails."""
     hook = json.loads(raw.decode("utf-8"))
     inp = hook.get("tool_input")
     if (hook.get("tool_name") != "ArtifactData" or not isinstance(inp, dict)
-            or inp.get("action") != "get" or inp.get("collection") != "answers"):
+            or inp.get("action") not in ("get", "list", "query") or inp.get("collection") != "answers"):
         return
     paths = inbox_paths(hook.get("session_id"))
     try:
