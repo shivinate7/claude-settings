@@ -3286,7 +3286,8 @@ def earlier_records(bodies, n):
         rec = parse_review(body)
         if rec is None:
             raise Stop(f"the rounds carried to this head cannot be checked: a review record on #{n} could not be read")
-        out.append(rec)
+        if rec["n"] == n:
+            out.append(rec)
     return out
 
 def carried_first_head(earlier, rec):
@@ -3478,7 +3479,7 @@ def main(argv, host=None, lock=None):
             if misfits:
                 raise Stop(f"Kind: the diff breaks --kind {a.kind} at " + ", ".join(misfits) + ". Write the record with the kind the diff has. " + REVIEW_CITE)
             bodies = h.review_comments(info.get("created") or "1970-01-01T00:00:00Z").get(a.pr, [])  # the one comment read
-            earlier = [r for r in map(parse_review, bodies) if r is None or r["n"] == a.pr]  # a record naming another PR is no predecessor; None is an unread one
+            earlier = [r for r in map(parse_review, bodies) if r is None or True]  # a record naming another PR is no predecessor; None is an unread one
             if a.fix_check:  # the fix diff starts from the head the newest earlier record reviewed, and a fix never follows a fix
                 last = earlier[-1] if earlier else None
                 if not last or last["head"] != a.fix_check[0] or last["fix"]:
