@@ -9,7 +9,7 @@ These cases pin the gaps the check had:
 
 - a sender's second message after a send's ack, which starts a turn
   (test_rt_red_lane_message_after_the_ack_starts_a_turn);
-- a target's first reply that asks a question, which is an answer and starts a turn, not an ack;
+- a target's first reply that asks a question, which is a plain reply and starts a turn, not an ack;
 - an owner-facing session, with its own record, whose question goes to @parent, which reaches no one there;
 - a question box alone in a repo that has a waiting page, with or without a remote id.
 
@@ -98,6 +98,16 @@ class RouteTests(RouteFixture, unittest.TestCase):
                          assistant_text(self.reply(self.QUESTION))])
         self.assert_blocked(out, "Pick guard", self.WRITER)
 
+    def test_rt_red_asker_plain_reply_after_ask_is_no_ack(self):
+        # Catches: the parent's plain reply after its asking reply read as an ack of the send that reply already
+        # used up. The send to the writer made before it then keeps the turn, and a question with no new send passes.
+        out = self.lane(peer_msg("pick?"), *self.send(session_id="@parent"),
+                        peer_msg("Which repo?", from_session=self.PARENT),
+                        *self.writer_read(self.WRITER), *self.send(session_id=self.WRITER),
+                        peer_msg("ok", from_session=self.PARENT),
+                        assistant_text(self.reply(self.QUESTION)))
+        self.assert_blocked(out, "Lane pick guard", "@parent")
+
     def test_rt_green_first_ack_then_a_question_keeps_the_turn(self):
         # Catches: the first ack starting a turn of its own, which hides the send the question rides on.
         # Two shapes: the lane's input alone, and a human message before it.
@@ -127,7 +137,7 @@ class RouteTests(RouteFixture, unittest.TestCase):
         self.assertIsNone(out, "a question sent in its own turn was blocked")
 
     def test_rt_green_ack_question_in_quotes_keeps_the_turn(self):
-        # Catches: a "?" inside quotes, backticks or a blockquote read as an answer. The ack would then start a
+        # Catches: a "?" inside quotes, backticks or a blockquote read as a plain reply. The ack would then start a
         # turn that leaves out the send the question rides on. A false-alarm control, green on main by design.
         for label, body in (("quotes", 'got it: "Close #969?"'), ("backticks", "noted `pick?`"),
                             ("blockquote", "> pick?\nrecorded")):
@@ -138,7 +148,7 @@ class RouteTests(RouteFixture, unittest.TestCase):
                 self.assertIsNone(out, "an ack with a ? in quotes, backticks or a blockquote ended the turn")
 
     def test_rt_green_asking_reply_then_own_send_passes(self):
-        # Catches: a fix that reads the parent's asking reply to a send as an answer, then drops the send the lane
+        # Catches: a fix that reads the parent's asking reply to a send as a plain reply, then drops the send the lane
         # made after it. The reply follows a send, so it is the ack's position. A false-alarm control, green on main.
         out = self.lane(peer_msg("pick?"), *self.send(session_id="@parent"),
                         peer_msg("Which repo, a or b?", from_session=self.PARENT),
@@ -158,7 +168,7 @@ class RouteTests(RouteFixture, unittest.TestCase):
         self.assertIsNone(out, "the writer's ack ended the turn and dropped the question's send")
 
     def test_rt_green_empty_body_reply_is_an_ack(self):
-        # Catches: an empty reply read as an answer, which starts a turn that leaves out the send the question rides on.
+        # Catches: an empty reply read as a plain reply, which starts a turn that leaves out the send the question rides on.
         out = self.lane(peer_msg("pick?"), *self.send(session_id="@parent"),
                         peer_msg("", from_session=self.PARENT),
                         assistant_text(self.reply(self.QUESTION)))
