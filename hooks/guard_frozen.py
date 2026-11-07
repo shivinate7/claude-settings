@@ -984,7 +984,7 @@ def _js_values(groups, env):
 # operand is expected and the `/` opens a regex literal.
 _JS_REGEX_AFTER_WORD = frozenset((
     "return", "typeof", "instanceof", "in", "of", "new", "delete", "void", "throw", "case", "do", "else",
-    "yield", "await"))
+    "yield", "await", "default"))
 _JS_REGEX_AFTER_CHAR = "(,=:[!&|?{};+-*%<>~^"
 _JS_HEAD_WORDS = frozenset(("if", "while", "for", "with"))
 
@@ -1281,6 +1281,7 @@ _RUN_MOVES = ("--directory", "--project", "-C", "-P")
 
 
 def _runner_inner(tokens, index: int):
+    # Local on purpose: in guard_core COMMAND_WRAPPERS (see guard_core.py:1910) `uv run` would change every rule's reading.
     """(tokens, index) of the command that `uv run [flags] CMD` or `poetry run CMD` starts, else None."""
     tool = basename(tokens[index])
     if tool not in _RUN_TOOLS or index + 1 >= len(tokens) or tokens[index + 1] != "run":
@@ -1308,11 +1309,12 @@ def _unparen(segment: str, tokens):
     if not marks:
         return tokens
     tokens = list(tokens)
-    if marks.count("(") and len(tokens) > 1 and tokens[0].startswith("("):
+    if marks.count("(") and len(tokens) > 1 and tokens[0].startswith("(") and tokens[0].lstrip("("):
         tokens[0] = tokens[0].lstrip("(")
     if marks.count(")") and "(" not in tokens[-1] and tokens[-1].rstrip(")"):
         tokens[-1] = tokens[-1].rstrip(")")
-    return tokens
+    # A spaced `( cmd )` leaves a lone `(` or `)` token: drop it, so the runner is the first word again.
+    return [token for token in tokens if token not in ("(", ")") or len(tokens) == 1]
 
 
 def _assigned_before(segments, ends, number: int):
@@ -1385,7 +1387,7 @@ def _script_file_hit(raw: str, cwd: str, predicate, file_cap: int, written) -> s
             continue
         if not operand or operand.startswith("-"):
             continue
-        if what == "file" and _plain_words([operand])[0] in written:
+        if what == "file" and (_plain_words([operand]) or [""])[0] in written:
             continue
         at = dir_before_segment(segments, number, cwd, ends) or cwd
         if what == "module":
@@ -1402,8 +1404,8 @@ def _script_file_hit(raw: str, cwd: str, predicate, file_cap: int, written) -> s
         except OSError:
             continue
         kind = kind or _shebang_kind(text)
-        if not kind and not text.startswith("#!") and os.access(path, os.X_OK):
-            kind = "sh"   # no `#!` line: bash runs the file as a shell script
+        if not kind and not text.startswith("#!") and os.access(path, os.X_OK) and "\0" not in text[:4096]:
+            kind = "sh"   # no `#!` line: bash runs the file as a shell script; a binary (NUL bytes) is not one
         if kind == "py":
             hit = _py_hit(text, at, predicate)
         elif kind == "js":
