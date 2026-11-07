@@ -1162,12 +1162,9 @@ class StalledItem(UpkeepFixture):
         self.assertEqual(self.code, 0, "a known read with no stalled item exits 0")
 
 
-class ReadyNotStarted(UpkeepFixture):
-    """The ready-not-started view (plan: stalled steps, Part 2). A todo or ready step in phase now is listed in the
-    page's ready block when no live lane holds it (no cs-step session, no open pull on its id or lane/<id>), it has
-    no valid `paused` field, and no open waiting-page item homed to it has a lane. Its age is whole hours from its
-    updatedAt to the live read, or None. The build prints `ready not started: <id> (<age>h)` per step, or one
-    `ready not started: <why>` when the read is unknown. Ready lines never change the exit code."""
+class ReadyFixture(UpkeepFixture):
+    """The helpers of the ready view, one home for every ready class: a live read at a fixed time, todo steps committed
+    at chosen ages, and the readers of the ready block and its lines. It holds no tests."""
 
     def setUp(self):
         super().setUp()
@@ -1206,6 +1203,14 @@ class ReadyNotStarted(UpkeepFixture):
         self.assertTrue(why.startswith(prefix), "the why reads %r, not %r" % (why, prefix))
         self.assertIsNone(ready.get("steps"), "an unknown read lists no steps, never []")
         self.assertEqual(self.ready_lines(out), ["ready not started: %s" % why], "the unknown read prints one line")
+
+class ReadyNotStarted(ReadyFixture):
+    """The ready-not-started view (plan: stalled steps, Part 2). A todo or ready step in phase now is listed in the
+    page's ready block when no live lane holds it (no cs-step session, no open pull on its id or lane/<id>), it has
+    no valid `paused` field, and no open waiting-page item homed to it has a lane. Its age is whole hours from its
+    updatedAt to the live read, or None. The build prints `ready not started: <id> (<age>h)` per step, or one
+    `ready not started: <why>` when the read is unknown. A listed step inside the age limit never changes the exit
+    code; one over it does (ReadyNextAct)."""
 
     def test_todo_step_in_phase_now_with_no_lane_is_listed(self):
         self.ready_step("c2", order=2)
@@ -1356,9 +1361,9 @@ class ReadyNotStarted(UpkeepFixture):
 
     def test_age_is_whole_hours_from_updated_at_to_the_live_read(self):
         self.ready_step("c2", order=2)  # 3 h 10 min before the read: age 3
-        self.ready_step("c3", order=3, updatedAt=self.before(26 * 60 + 10))  # age 26
+        self.ready_step("c3", order=3, updatedAt=self.before(26 * 60 + 10))  # age 26: over the 24 h limit, so exit 1
         self.known_read()
-        page, _ = self.build_from_main("--live", str(self.live))
+        page, _ = self.build_from_main("--live", str(self.live), expect=(0, 1))
         ready = self.ready_block(page)
         self.assertEqual(self.ready_ids(ready), ["c2", "c3"])
         self.assertEqual([s["age"] for s in ready["steps"]], [3, 26], "age is whole hours from updatedAt to the read")
@@ -1381,7 +1386,7 @@ class ReadyNotStarted(UpkeepFixture):
         self.assertEqual(self.ready_lines(out), ["ready not started: c2 (3h)", "ready not started: c3 (age unknown)"],
                          "one line per listed step, with its age")
 
-    def test_ready_lines_never_change_the_exit_code(self):
+    def test_ready_lines_inside_the_limit_never_change_the_exit_code(self):
         self.ready_step("c2", order=2)
         with self.subTest("ready only"):
             self.known_read()
