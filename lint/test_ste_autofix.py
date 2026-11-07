@@ -486,6 +486,16 @@ class ReviewRound2FixerTests(unittest.TestCase):
             with self.subTest(opener=opener):
                 self.assertEqual(ste_lint.apply_fixes("%s\nrun in order to win\n" % opener)[0], "%s\nrun to win\n" % opener)
 
+    def test_fence_line_indented_four_spaces_at_top_level_leaves_prose_after_it_a_finding(self):
+        # Pin: the findings path reads the same top-level line as indented code, so the prose after it is flagged.
+        self.assertTrue(_findings("    ```\nrun in order to win\n"), "prose after a top-level four-space line is no fence")
+
+    def test_fence_line_indented_four_spaces_in_a_list_item_is_a_fence_for_findings(self):
+        # Red: under a list item, CommonMark makes the four-space line a fence, so its text is code and no finding names
+        # it. The copy reads 0-3 spaces, so the findings path flags that text today.
+        self.assertEqual(_findings("1. Step one:\n\n    ```sh\n    run in order to win\n    ```\n"), [],
+                         "text inside a list-item fence indented four spaces is read as prose")
+
     # F3 et al. and N.B. are left as written
     def test_r2_f3_et_al_unchanged(self):
         inp = "The paper is by Smith et al. The next section is done.\n"

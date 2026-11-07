@@ -31,8 +31,15 @@ class FenceLineTests(unittest.TestCase):
 
 
 class OneFenceHomeTests(unittest.TestCase):
-    def test_stale_cites_and_compliance_probes_read_word_runs_fence_and_hold_no_fence_pattern_of_their_own(self):
-        for module in (stale_cites, compliance_probes):
+    def test_fence_readers_on_the_one_home_hold_no_fence_pattern_of_their_own(self):
+        # check_skill_model_rows and feedback_guard move onto the one fence line. Their imports are here, not at the top,
+        # so the other readers stay importable when a hook's import fails.
+        hooks = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "hooks")
+        if hooks not in sys.path:
+            sys.path.insert(0, hooks)
+        import check_skill_model_rows
+        import feedback_guard
+        for module in (stale_cites, compliance_probes, check_skill_model_rows, feedback_guard):
             with self.subTest(module=module.__name__):
                 # The scope first: the module exposes FENCE at all. Then the subject: that name is the one home.
                 self.assertTrue(hasattr(module, "FENCE"), "%s exposes no FENCE; alias word_runs.FENCE" % module.__name__)
@@ -42,23 +49,10 @@ class OneFenceHomeTests(unittest.TestCase):
                 renamed = [name for name, value in vars(module).items() if isinstance(value, re.Pattern)
                            and value is not word_runs.FENCE and any(value.match(line) for line in DEEP_FENCES)]
                 self.assertEqual(renamed, [], "%s holds a fence pattern of its own under another name" % module.__name__)
-
-
-class MovedFenceCopiesTests(unittest.TestCase):
-    def test_each_moved_fence_copy_is_word_runs_fence(self):
-        # check_skill_model_rows and feedback_guard read the one fence line. The other copies keep their own
-        # 0-3 space rule (see their pins), so they are not listed here.
-        hooks = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "hooks")
-        if hooks not in sys.path:
-            sys.path.insert(0, hooks)
-        import check_skill_model_rows
-        import feedback_guard
-        for module in (check_skill_model_rows, feedback_guard):
-            with self.subTest(module=module.__name__):
-                # The scope first: the module exposes FENCE at all. Then the subject: that name is the one home.
-                self.assertTrue(hasattr(module, "FENCE"), "%s exposes no FENCE; alias word_runs.FENCE" % module.__name__)
-                self.assertIs(module.FENCE, word_runs.FENCE,
-                              "%s holds its own FENCE regex; it must read word_runs.FENCE" % module.__name__)
+        # ste_lint's FENCE is read nowhere. It goes as a delete, or as an alias of the one home; never as its own pattern.
+        import ste_lint
+        self.assertIs(getattr(ste_lint, "FENCE", word_runs.FENCE), word_runs.FENCE,
+                      "ste_lint holds a FENCE of its own that nothing reads; delete it")
 
 
 if __name__ == "__main__":

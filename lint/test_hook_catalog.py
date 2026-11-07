@@ -1761,6 +1761,14 @@ class FenceLines(unittest.TestCase):
                 self.assertIn("Kind: build", lines, "the Kind line under a top-level %r is no fence" % opener)
                 self.assertIn("after", lines, "the line after a top-level %r is no fence" % opener)
 
+    def test_a_fence_line_indented_four_spaces_in_a_list_item_is_a_fence(self):
+        # Red: under a list item the four-space line opens a fence, so the marker inside it is example text. The copy
+        # reads 0-3 spaces and yields the marker as a line of the record today.
+        import hook_catalog as gen
+        text = "1. Example list\n\n    ```\n    <!-- rule:example-only -->\n    ```\nafter\n"
+        self.assertEqual([line for n, line in gen.lines_outside_fences(text) if n == 4], [None],
+                         "a marker inside a list-item fence indented four spaces is example text, not a record line")
+
 
 if __name__ == "__main__":
     unittest.main()
