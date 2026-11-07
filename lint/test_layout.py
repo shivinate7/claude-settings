@@ -97,6 +97,15 @@ class Tree(unittest.TestCase):
     def roll_out(self, kinds=None):
         self.put(EXTRAS, json.dumps({"kinds": kinds or {}, "rolled-out": True}))
 
+    def origin(self, url, worktree=False):
+        """A repo whose origin is `url`, read from git's config file as git writes it."""
+        common = os.path.join(self.tree, "main.git") if worktree else os.path.join(self.tree, ".git")
+        self.put(os.path.relpath(os.path.join(common, "config"), self.tree).replace(os.sep, "/"),
+                 '[core]\n\tbare = false\n[remote "origin"]\n\turl = %s\n\tfetch = +refs/heads/*:refs/remotes/origin/*\n' % url)
+        if worktree:  # a linked worktree: .git is a file naming its git dir, which names the common dir
+            self.put("main.git/worktrees/lane/commondir", "../..\n")
+            self.put(".git", "gitdir: %s\n" % os.path.join(self.tree, "main.git", "worktrees", "lane"))
+
 
 class LayoutFile(Tree):
     def setUp(self):
@@ -178,15 +187,6 @@ class LayoutFile(Tree):
                 self.roll_out({"x": {"path": bad}})
                 with self.assertRaises(self.layout.LayoutError):
                     self.layout.kinds(self.tree)
-
-    def origin(self, url, worktree=False):
-        """A repo whose origin is `url`, read from git's config file as git writes it."""
-        common = os.path.join(self.tree, "main.git") if worktree else os.path.join(self.tree, ".git")
-        self.put(os.path.relpath(os.path.join(common, "config"), self.tree).replace(os.sep, "/"),
-                 '[core]\n\tbare = false\n[remote "origin"]\n\turl = %s\n\tfetch = +refs/heads/*:refs/remotes/origin/*\n' % url)
-        if worktree:  # a linked worktree: .git is a file naming its git dir, which names the common dir
-            self.put("main.git/worktrees/lane/commondir", "../..\n")
-            self.put(".git", "gitdir: %s\n" % os.path.join(self.tree, "main.git", "worktrees", "lane"))
 
     def test_todo_sits_at_docs_todo_in_a_repo_with_no_entry(self):
         self.origin("https://github.com/shivinate7/degen.git")
@@ -1144,6 +1144,28 @@ class RolledOutMark(Tree):
 
     def test_the_layout_repo_itself_is_marked(self):
         self.assertTrue(self.layout.rolled_out(REPO))
+
+    def bad_mark(self):
+        """Extras whose "rolled-out" is the string "true": unreadable, so neither rolled out nor legacy. Scope first: rolled_out() raises."""
+        self.put(EXTRAS, json.dumps({"kinds": {}, "rolled-out": "true"}))
+        with self.assertRaises(self.layout.RolledOutMarkError, msg="the fixture's mark reads as a valid mark"):
+            self.layout.rolled_out(self.tree)
+
+    def test_a_bad_mark_raises_for_a_record_check_and_any_mark_reads_both_homes(self):
+        """A record check (no any_mark) fails closed under a bad mark. The feedback guard and the waiting copy pass any_mark=True
+        and read both homes of the kind: the layout path and the legacy path."""
+        self.bad_mark()
+        with self.assertRaises(self.layout.RolledOutMarkError, msg="candidates() picked a folder under a bad mark instead of raising"):
+            self.layout.candidates(self.tree, "decisions")
+        self.assertCountEqual(self.layout.candidates(self.tree, "decisions", any_mark=True), ("docs/decisions", "decisions"),
+                              "any_mark=True does not read both homes of decisions under a bad mark")
+
+    def test_a_bad_mark_in_a_legacy_repo_any_mark_reads_the_place_legacy_repos_keeps(self):
+        """Under a bad mark, a repo with a legacy-repos entry gets the one place that entry keeps, not the layout path."""
+        self.origin("https://github.com/shivinate7/home")  # legacy-repos keeps home's todo at records
+        self.bad_mark()
+        self.assertEqual(self.layout.candidates(self.tree, "todo", any_mark=True), ("records",),
+                         "any_mark=True does not read the legacy-repos place of todo under a bad mark")
 
 
 class RepoKindAndCaution(Tree):
