@@ -4123,11 +4123,11 @@ const FIT_W_DECL = /const FIT_W = (\d+)/;
 // A restatement is FIT_W's number as a width value: after width, min-width, max-width, minWidth or maxWidth and a colon or
 // equals sign, or followed by the word wide. The width may be an attribute (width="390"), a dotted style property
 // (el.style.width = "390px", el.style.maxWidth = "390px"), the second argument of setAttribute("width", 390), or any argument
-// of calc(, min(, max( or clamp(, with one level of brackets inside it: min(calc(100% - 20px), 390px) counts. Strings, comments
+// of calc(, min(, max( or clamp(, quoted or not, with one level of brackets inside it: min(calc(100% - 20px), 390px) counts. Strings, comments
 // and templates are read as plain text, so a restatement counts wherever it stands. A count, a font weight, a height, a gap or
 // a sibling number is not one: 3900, 1390, 0.390, a390, #390 (a hex colour), "390 units", gap: min(100%, 390px).
 // A media or container condition is a breakpoint that CSS cannot read FIT_W in, so it is skipped.
-const WIDTH_BEFORE = /(?:^|[\s;{(,"'.])(?:(?:min|max)-?)?width(?:["']?\s*[:=]\s*|["']\s*,\s*)(?:(?:calc|min|max|clamp)\((?:[^();{}]|\([^();{}]*\))*)?["']?$/i, WIDE_AFTER = /^(?:px)?\s+wide\b/i, AT_RULE = /^\s*@(?:container|media)\b/;
+const WIDTH_BEFORE = /(?:^|[\s;{(,"'.])(?:(?:min|max)-?)?width(?:["']?\s*[:=]\s*|["']\s*,\s*)(?:["']?(?:calc|min|max|clamp)\((?:[^();{}]|\([^();{}]*\))*)?["']?$/i, WIDE_AFTER = /^(?:px)?\s+wide\b/i, AT_RULE = /^\s*@(?:container|media)\b/;
 function restatements(src, num) {
   const decl = FIT_W_DECL.exec(src), own = decl ? decl.index + decl[0].length - decl[1].length : -1;
   const lines = src.split("\n"), again = new RegExp(`(?<![\\w.#])${num}(?!\\d|\\.\\d)`, "g"), found = new Set();
