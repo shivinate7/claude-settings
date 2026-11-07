@@ -93,7 +93,7 @@ it its this that these those there here which who whom whose what when where why
 any all both can could may might must shall should will would do does did done have has had having you your we our they
 their them he she his her i me my us one per also only more most other into onto over under about after before again
 never always""".split())
-COPY_FLOOR = 8  # words in a row of a rule sentence that make a copy; a stock phrase under it passes
+COPY_FLOOR = word_runs.COPY_FLOOR  # the one home is word_runs, which reads a long gloss by it
 EXEMPT_RE = re.compile(r"<!--\s*exempt:\s*([a-z0-9][a-z0-9-]*)\s+reason:(.*?)-->", re.S)
 DEFAULT_PARENT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 

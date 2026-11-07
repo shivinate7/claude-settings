@@ -29,6 +29,7 @@ COMMENT = re.compile(r"<!--.*?-->", re.S)
 # such as "(e.g. read hooks/x.py:2)" stays in one sentence.
 SENTENCE_END = re.compile(r"(?<!\be\.g)(?<!\bi\.e)(?<!\bvs)(?<!\bcf)[.!?](?=\s|\Z)")
 GAP = " \0 "
+COPY_FLOOR = 8  # words in a row of a rule sentence that make a copy; a stock phrase under it passes. Also the length at which a gloss is text
 ID_SPAN = re.compile(r"[\w.:/-]+\Z")  # a code span that is one id; "`hold-unsafe-x` (net-value hold)" glosses an id
 NUMBERED = re.compile(r"\S*\d\S*")
 LINK = re.compile(r"\[([^\]\n]*)\]\([^)\n]*\)")
@@ -47,13 +48,15 @@ def _blank_keeping_lines(match):
 
 
 def _copy_form_span(match):
-    """The copy form of a span: a comment goes, a code span keeps its text, and the gloss of an id becomes GAP, because a
-    rule cites its own decision that way and the gloss is no sentence of the rule. GAP is a word no text holds, so a run
-    of words never crosses it, and a gap on both sides still matches itself."""
+    """The copy form of a span: a comment goes, a code span keeps its text, and the gloss of an id under COPY_FLOOR words
+    becomes GAP, because a rule cites its own decision that way and the gloss is no sentence of the rule. A gloss of
+    COPY_FLOOR words or more is text, so a rule sentence pasted as a gloss is a copy. GAP is a word no text holds, so a
+    run of words never crosses it, and a gap on both sides still matches itself."""
     if not match.group("tick"):
         return _blank_keeping_lines(match)
     inner, gloss = match.group("inner"), match.group("gloss") or ""
-    return inner + (GAP if gloss and ID_SPAN.match(inner) else gloss)
+    short = len(re.findall(r"[a-z0-9]+", gloss.lower())) < COPY_FLOOR
+    return inner + (GAP if gloss and short and ID_SPAN.match(inner) else gloss)
 
 
 def tokens(text, keep=False):

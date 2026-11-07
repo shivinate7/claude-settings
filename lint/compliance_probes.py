@@ -404,7 +404,8 @@ KNOWN_EXEMPTION = re.compile(r"\bknown exemptions?\b", re.I)
 RULE_REF = re.compile(r"\brule:([a-z0-9][a-z0-9-]*)")
 ANCHOR_COMMENT = word_runs.COMMENT
 # Not word_runs.FENCE: that one reads a fence indented up to 3 spaces, and this one any indent, so a fence nested in a list
-# item still opens. Folding them would change which rows count as fenced.
+# item still opens. Folding them would change which rows count as fenced. Pinned by test_compliance_probes:
+# test_a_departure_in_a_fence_four_spaces_deep_under_a_list_item_is_not_read.
 FENCE = re.compile(r"^\s*(`{3,}|~{3,})(.*)$")
 # Each of these lines starts a unit of its own, so one bullet's exemption never passes another bullet's departure.
 LIST_ITEM = re.compile(r"^\s*(?:[-*+]|\d{1,9}[.)])\s")
