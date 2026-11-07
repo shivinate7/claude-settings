@@ -94,7 +94,7 @@ FAMILIES = {
     "stream": "live streams, narrating commands, ln -s, waiter loops and background end conditions",
     "write": "the silent write",
     "push-delete": "push and delete",
-    "push-needs-fail-record": "a shell git push refused when the session's transcript shows a PR known to the session and a newest reviewer or design-reviewer report with no posted record after it that parses and holds that report's role and verdict; a PR-less session, a dry run, a non-push command, and a missing or unreadable transcript are allowed",
+    "push-needs-fail-record": "a shell git push refused when the session's transcript shows a PR known to the session and a reviewer or design-reviewer report (a notice, a hand-back, or a foreground result) with no posted record after it that parses and holds that report's role and verdict; a PR-less session, a dry run, a non-push command, and a missing or unreadable transcript are allowed",
     "linked-node-modules": "a dependency install or a recursive delete through a node_modules that is a link",
     "env": "environment files",
     "git-env": "a command that sets GIT_DIR, GIT_WORK_TREE or GIT_INDEX_FILE",
@@ -9848,14 +9848,16 @@ trust_allow("an unrelated remote tool (list_sessions) in a lane session allows",
 #
 # Rule push-needs-fail-record. A shell `git push` is refused when the session's own transcript shows, in
 # order: a PR known to the session (a create_pull_request that succeeded, or a posted review record); then
-# a newest reviewer or design-reviewer report, of any verdict (its Done line: PASS, FAIL or PARTIAL, a round
-# or a fix check); and no posted review record after that report that parses, whose comment call returned
-# no error, and that holds a line with the report's role and verdict (a Round line, or the Fix check line for
-# a fix check). The report reads from the Agent result, from a later task-notification, or from a
-# queued_command attachment. Its verdict is the Done line, never a finding line. PR #1467 pushed its
-# round-1 fix before the FAIL record was posted; PR #1490 did the same with a round-1 PASS. A session with
-# no PR known is allowed: the first push is never blocked on a transcript that shows no PR (a known miss,
-# pinned below).
+# every reviewer or design-reviewer report, of any verdict (its Done line: PASS, FAIL or PARTIAL, a round or
+# a fix check), that has no later posted review record clearing it. A record clears a report only when it
+# parses, its comment call returned no error, and it holds a line with that report's role and verdict (a Round
+# line, or the Fix check line for a fix check). One record that holds all the lines clears every report before
+# it. A report reads from the Agent result, from a later task-notification, from a queued_command attachment,
+# or from a hand-back (a user message that opens with the frame, names the agent in its tag, and indents the
+# report). Its verdict is the Done line, never a finding line, and the Done line still matches when indented.
+# PR #1467 pushed its round-1 fix before the FAIL record was posted; PR #1490 did the same with a round-1 PASS.
+# A session with no PR known is allowed: the first push is never blocked on a transcript that shows no PR (a
+# known miss, pinned below). The round number is not checked against the report's round (a known miss).
 FAMILY = "push-needs-fail-record"
 
 PFR_RULE = "push-needs-fail-record"
@@ -9945,6 +9947,21 @@ def pfr_notice(tool_id, report, attachment=False):
     return [role_said(text)]
 
 
+def pfr_call_handback(tool_id, agent_id, role="reviewer"):
+    """A background Agent call whose result names its agentId. Its report comes back as a hand-back, not a notice."""
+    return [role_use(tool_id, PFR_AGENT_TOOL, {"subagent_type": role, "description": "review round",
+                                               "prompt": "review the diff", "run_in_background": True}),
+            role_result(tool_id, "Started in the background.\nagentId: %s" % agent_id)]
+
+
+def pfr_handback(agent_id, report):
+    """A report as the harness hands it back: a user message whose string content opens with the frame, then the
+    agent-message tag that names the agent, then the report indented by the harness (hooks/shared_names.py)."""
+    indented = "\n".join("    " + line for line in report.split("\n"))
+    return [role_said("%s\n<agent-message from=\"%s\">\n[Subagent hand-back]\n%s\n</agent-message>"
+                      % (PFR_HAND_FRAME, agent_id, indented))]
+
+
 def pfr_post(tool_id, body, error=False):
     """A comment posted on the PR. An error result means the post did not happen."""
     call = role_use(tool_id, PFR_ADD_COMMENT, {"owner": "shivinate7", "repo": "claude-settings",
@@ -9969,6 +9986,10 @@ PFR_PARTIAL = pfr_report(pfr_verdict("PARTIAL", 1), PFR_FINDING)     # a reviewe
 PFR_PARTIAL_RECORD = pfr_record([(1, "reviewer", PFR_MODEL, "PARTIAL")])
 PFR_PASS = pfr_report(pfr_verdict("PASS", 1), PFR_FINDING)          # a reviewer PASS, round 1
 PFR_PASS_RECORD = pfr_record([(1, "reviewer", PFR_MODEL, "PASS")])
+PFR_DESIGN_PASS_RECORD = pfr_record([(1, "design-reviewer", PFR_MODEL, "PASS")])
+PFR_BOTH_RECORD = pfr_record([(1, "reviewer", PFR_MODEL, "FAIL"), (1, "design-reviewer", PFR_MODEL, "PASS")])
+PFR_HAND_AGENT = "b3c9d0e1f2a34b5c6"                      # the agentId the Agent call's result names
+PFR_HAND_FRAME = "Another Claude session sent a message:"  # the frame before an <agent-message> tag
 
 # The session's own files, one per case, each a list of JSON lines. An empty list is a zero-byte file.
 PFR_LINES = {
@@ -9990,6 +10011,20 @@ PFR_LINES = {
     "design-fail-reviewer-record": pfr_pr() + pfr_call("toolu_rev1", PFR_FAIL, role="design-reviewer")
                                    + pfr_post("toolu_c1", PFR_FAIL_RECORD),
     "pass-fail-record": pfr_pr() + pfr_call("toolu_rev1", PFR_PASS) + pfr_post("toolu_c1", PFR_FAIL_RECORD),
+    # An unrecorded reviewer FAIL, then a design-reviewer PASS. The record holds one line, or both.
+    "mixed-unrecorded-reviewer": pfr_pr() + pfr_call("toolu_rev1", PFR_FAIL)
+                                 + pfr_call("toolu_dsn1", PFR_PASS, role="design-reviewer")
+                                 + pfr_post("toolu_c1", PFR_DESIGN_PASS_RECORD),
+    "mixed-both-recorded": pfr_pr() + pfr_call("toolu_rev1", PFR_FAIL)
+                           + pfr_call("toolu_dsn1", PFR_PASS, role="design-reviewer")
+                           + pfr_post("toolu_c1", PFR_BOTH_RECORD),
+    # Hand-back: the report comes back as a user message, not a notice. The agentId names the Agent call.
+    "handback-fail": pfr_pr() + pfr_call_handback("toolu_rev1", PFR_HAND_AGENT)
+                     + pfr_handback(PFR_HAND_AGENT, PFR_FAIL),
+    "handback-pass": pfr_pr() + pfr_call_handback("toolu_rev1", PFR_HAND_AGENT)
+                     + pfr_handback(PFR_HAND_AGENT, PFR_PASS),
+    "handback-fail-record": pfr_pr() + pfr_call_handback("toolu_rev1", PFR_HAND_AGENT)
+                            + pfr_handback(PFR_HAND_AGENT, PFR_FAIL) + pfr_post("toolu_c1", PFR_FAIL_RECORD),
     "fail-then-older-pass-record": pfr_pr() + pfr_call("toolu_rev1", pfr_report(pfr_verdict("FAIL", 2), PFR_FINDING))
                                    + pfr_post("toolu_c1", pfr_record([(1, "reviewer", PFR_MODEL, "PASS")])),
     "fail-then-errored-record": pfr_pr() + pfr_call("toolu_rev1", PFR_FAIL)
@@ -10096,6 +10131,12 @@ pfr_refuse("a reviewer PASS cleared only by a FAIL record line, then the push", 
            pfr_path("pass-fail-record"))
 pfr_refuse("a FAIL round 1 cleared only by a Fix check record line, then the push", PFR_PUSH,
            pfr_path("round-fail-fix-record"))
+# Every report needs its own clearing record: an older unrecorded FAIL is not cleared by a newer recorded PASS.
+pfr_refuse("an unrecorded reviewer FAIL, then a design-reviewer PASS whose record holds only its own line, then the push",
+           PFR_PUSH, pfr_path("mixed-unrecorded-reviewer"))
+# A hand-back is a report too: the Done line is read through the indent, and its record clears it.
+pfr_refuse("a reviewer FAIL handed back with no record, then the push", PFR_PUSH, pfr_path("handback-fail"))
+pfr_refuse("a reviewer PASS handed back with no record, then the push", PFR_PUSH, pfr_path("handback-pass"))
 
 pfr_allow("a FAIL round 1, then a FAIL record posted, then the push", PFR_PUSH, pfr_path("fail-then-fail-record"))
 pfr_allow("a PARTIAL round 1, then a PARTIAL record posted, then the push", PFR_PUSH,
@@ -10106,6 +10147,10 @@ pfr_allow("a FAIL round 1, then a PASS round 2 with its record posted, then the 
           pfr_path("fail-then-pass-record"))
 pfr_allow("a PASS whose findings mention FAIL, with its PASS record posted, then the push", PFR_PUSH,
           pfr_path("pass-finding-says-fail"))
+pfr_allow("an unrecorded reviewer FAIL, then a design-reviewer PASS whose one record holds both lines, then the push",
+          PFR_PUSH, pfr_path("mixed-both-recorded"))
+pfr_allow("a reviewer FAIL handed back, with its record posted, then the push", PFR_PUSH,
+          pfr_path("handback-fail-record"))
 pfr_allow("a PR open with no review yet, then the push", PFR_PUSH, pfr_path("no-review"))
 # A known miss, pinned: a FAIL with no PR known to the session is allowed, so the first push is never blocked.
 pfr_allow("a FAIL with no PR known to the session, then the push", PFR_PUSH, pfr_path("no-pr-fail"))
