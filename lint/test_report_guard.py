@@ -1426,6 +1426,16 @@ class CompactionCarryTests(unittest.TestCase):
                 reply = report_lines("Recovered: " + item, "Handoff gave: none")
                 self.assertIsNone(self.stop(self.compacted_turn(reply)), "a sourced Recovered item blocks: " + item)
 
+    def test_cc_green_pull_commits_sha_and_issue_forms_pass(self):
+        # Catches: the source forms "pull request #<n>", "pull #<n>", "commits <hex>", "sha <hex>" and "issue <n>"
+        # (no #) are refused as sourceless. "issue #5" is the pinned edge that already passes.
+        items = ["ruling X from pull request #978", "ruling X from pull #978", "ruling X from commits abc1234",
+                 "ruling X from sha abc1234", "ruling X from issue 12", "ruling X from issue #5"]
+        for item in items:
+            with self.subTest(item=item):
+                reply = report_lines("Recovered: " + item, "Handoff gave: none")
+                self.assertIsNone(self.stop(self.compacted_turn(reply)), "a sourced Recovered item blocks: " + item)
+
     def test_cc_red_bare_hash_number_is_no_source(self):
         # Catches: a bare "#<n>" passes as a source. "#3 of my notes" names no PR, commit or page.
         items = ["ruling X from #3 of my notes", "ruling X (#1 priority)", "ruling X from memory (#2)"]
@@ -1436,8 +1446,10 @@ class CompactionCarryTests(unittest.TestCase):
                 self.assertEqual(out["decision"], "block", item)
 
     def test_cc_red_recovered_item_with_no_source_still_blocks_with_the_new_forms(self):
-        # Catches: a widened source form passes an item with no source, such as a bare word "commit" or "memory".
-        items = ["ruling X", "ruling X from memory", "ruling X from a commit"]
+        # Catches: a widened source form passes an item with no source: a bare word "commit" or "memory", "commit"
+        # with a non-hex word, or a 6-character hex (a sha or commit needs 7 or more).
+        items = ["ruling X", "ruling X from memory", "ruling X from a commit", "ruling X from commit defaced",
+                 "ruling X from commit abc123", "ruling X from sha abc123"]
         for item in items:
             with self.subTest(item=item):
                 out = self.stop(self.compacted_turn(report_lines("Recovered: " + item, "Handoff gave: none")))
