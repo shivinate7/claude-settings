@@ -494,8 +494,8 @@ def _copy_reads(raw, predicate, cwd):
         if _NULL_REDIRECT.fullmatch(word):
             index += 1
             continue
-        if word == "&" and words[index + 1:index + 2] in ([">"], [">>"]):
-            # `&>` and `&>>` are one redirect: its `&` is no source, and a file it opens is no destination
+        if words[index:index + 2] in (["&", ">"], ["&", ">>"], [">", "&"]):
+            # `&>`, `&>>` and `>&` are one redirect: its `&` is no source, and a file it opens is no destination
             # unless it is unsafe or the predicate hits it. Any other redirect leaves the segment judged.
             out = words[index + 2:index + 3]
             if out and (out[0].lower() in _NULL_TARGETS or re.fullmatch(_DESCRIPTOR, out[0]) or not (
@@ -630,8 +630,8 @@ def _shell_write_hit(cmd: str, cwd: str, predicate, holds=None, follow_cd=False,
             if index in data:
                 words.append('""')   # data, or a `cp` source: no redirect or `tee` in it runs
                 shown.append('""')
-            elif word == "&" and raw[index + 1:index + 2] in ([">"], [">>"]):
-                continue   # the `&` of `&>` ends no command, so the text reads `> PATH` whole
+            elif word == "&" and (raw[index + 1:index + 2] in ([">"], [">>"]) or raw[index - 1:index] == [">"]):
+                continue   # the `&` of `&>` or `>&` ends no command, so the text reads `> PATH` whole
             elif index and re.fullmatch(_DESCRIPTOR, word) and _is_redirect(raw[index - 1]):
                 # Never judged as a path. `dup` stays in the text so `2> PATH` is not read as `> PATH`.
                 # The raw word is unquoted: a quoted "&1" is a file and is judged.
@@ -711,17 +711,21 @@ def _py_call_name(node):
 
 def _py_temp_head(node, env):
     """True when the first piece of a path expression is a folder a temp call made: the call itself, a
-    name bound to one, or a join or `/` that starts with one. Any other head, such as `sys.argv[1]` or
-    `Path(__file__).parents[1]`, may name a folder of the repo, so it is no temp head."""
+    name bound to one, its `.name`, or a join or `/` that starts with one. Any other head, such as
+    `sys.argv[1]` or `Path(__file__).parents[1]`, may name a folder of the repo, so it is no temp head.
+    A temp call given a folder (`dir=`, a third argument, `*args` or `**kwargs`) may make it in the repo."""
     import ast
     if isinstance(node, ast.Name):
         return env.get(node.id) == [_PY_TEMP]
+    if isinstance(node, ast.Attribute) and node.attr == "name":   # `TemporaryDirectory().name`
+        return _py_temp_head(node.value, env)
     if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Div):
         return _py_temp_head(node.left, env)
     if isinstance(node, ast.Call):
         name = _py_call_name(node)
         if name in _PY_TEMP_CALLS:
-            return True
+            return len(node.args) < 3 and not any(isinstance(arg, ast.Starred) for arg in node.args) \
+                and not any(keyword.arg in ("dir", None) for keyword in node.keywords)
         if name in _PATH_CTORS or name == "join":
             return bool(node.args) and _py_temp_head(node.args[0], env)
         if name in _PATH_PASS and isinstance(node.func, ast.Attribute):

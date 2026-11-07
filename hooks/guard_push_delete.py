@@ -400,17 +400,46 @@ def _substitution_end(text, index):
     return -1
 
 
+_TEXT_COMMANDS = ("echo", "printf", "write-host", "write-output")
+_LIVE_UNQUOTED = re.compile(r"\$\(|`|[<>]\(")
+
+
+def _quotes_are_text(segment):
+    """True when a segment only prints its quoted words or stores them as a commit message: its
+    command is a printer or `git commit`, with no substitution outside single quotes. Any other
+    command may run a quoted word (`parallel`, `script -c`, `watch`, `runuser -c`)."""
+    if _LIVE_UNQUOTED.search(re.sub(r"'[^']*'", "", segment)):
+        return False
+    words = [word for word in segment_tokens(segment) or () if not re.match(r"[A-Za-z_]\w*=", word)]
+    if not words:
+        return False
+    if words[0].lower() in _TEXT_COMMANDS:
+        return True
+    return words[0] in ("git", "git.exe") and words[_git_subcommand_index(words, 0):][:1] == ["commit"]
+
+
 class UnquotedStart:
     """A compiled pattern whose `search` skips a match that starts inside quotes. It has a
     pattern's own `search`, so a caller loops over it without knowing the difference. An
     apostrophe shaped like a contraction is text, as in split_segments' second reading: a lone
-    `don't` must not turn the rest of the line into one quote."""
+    `don't` must not turn the rest of the line into one quote. `printers_only` skips quotes only in
+    a segment whose quoted words are text (`_quotes_are_text`) and not piped on; elsewhere it reads
+    the raw text."""
 
-    def __init__(self, pattern, nested=False):
+    def __init__(self, pattern, nested=False, printers_only=False):
         self.pattern = pattern
         self.nested = nested
+        self.printers_only = printers_only
 
     def search(self, text):
+        if self.printers_only:
+            ends = []
+            for segment, end in zip(split_segments(text, ends), ends):
+                text_only = end != "|" and _quotes_are_text(segment)
+                found = self._search_unquoted(segment) if text_only else self.pattern.search(segment)
+                if found:
+                    return found
+            return None
         found = self._search_unquoted(text)
         if found or not self.nested:
             return found
@@ -449,7 +478,7 @@ DESTRUCTIVE_DELETE = (
         r"(?=[^\n;|&]*\s-r(?:ec(?:urse)?)?\b)"
         r"(?=[^\n;|&]*\s-f(?:o(?:rce)?)?\b)"
         r"[^\n;|&]*\s['\"]?" + WIDE_TARGET + r"['\"]?(?:\s|\)|$)"
-    ), nested=True),
+    ), printers_only=True),
     # Recursion alone is enough for the PowerShell names. `rm` is read by tokens, not here. A match
     # that starts inside quotes is text (an echo, a commit message), so it is not read.
     UnquotedStart(re.compile(
