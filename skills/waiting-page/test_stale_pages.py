@@ -1177,6 +1177,25 @@ class CarriesData(unittest.TestCase):
         self.assertTrue(load_stale_pages().carries_data(PAGE, set_body(PAGE, MOCK_BODY)), "a live mockup is not counted as data")
 
 
+class DefaultRoots(unittest.TestCase):
+    """default_roots() lists the clone first, then each folder beside it that holds an extras file (lint/layout.py
+    known_roots), so the batch check reads each waiting page the family holds, not the clone's alone. A folder beside
+    the clone with no extras file is not listed."""
+
+    def test_a_folder_beside_the_clone_with_an_extras_file_is_listed(self):
+        base = os.path.join(RUN_FOLDER, "default-roots")
+        clone, sibling, bare = (os.path.join(base, name) for name in ("clone", "sibling", "bare"))
+        for folder in (clone, sibling):
+            write_text(os.path.join(folder, ".claude", "layout-extras.json"), '{"kinds": {}}\n')
+        os.makedirs(bare)
+        stale = load_stale_pages()
+        with mock.patch.object(stale, "hub_clone", return_value=clone):
+            roots = [os.path.realpath(root) for root in stale.default_roots()]
+        self.assertEqual(roots[:1], [os.path.realpath(clone)], "the clone is not the first root: %r" % roots)
+        self.assertIn(os.path.realpath(sibling), roots, "the folder beside the clone with an extras file is not listed: %r" % roots)
+        self.assertNotIn(os.path.realpath(bare), roots, "a folder beside the clone with no extras file is listed: %r" % roots)
+
+
 # --parked: the on-demand pass over the parked block (waiting-page SKILL.md, the parked branch). It reads three saved
 # files in one folder and writes none. Each list file holds [{"id", "data"}] entries, the shape an ArtifactData list
 # returns for a collection (one entry per doc). meta.json holds the data of meta/page alone, not an entry:
