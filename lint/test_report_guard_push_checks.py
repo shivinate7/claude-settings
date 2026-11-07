@@ -395,7 +395,7 @@ class PushCheckTests(unittest.TestCase):
         other = os.path.join(folder, "other")
         os.makedirs(other)
         head = git_commit(other)
-        steps = bash("cd %s && git push origin HEAD:%s" % (other, BRANCH), "")
+        steps = bash("cd '%s' && git push origin HEAD:%s" % (other.replace("\\", "/"), BRANCH), "")
         fixture_ = answers(prs=[pr_entry(sha=head)], runs=[run_entry(None, sha=head, status="in_progress")])
         decision, _, _ = self.stop(turn(NO_REPORT, steps), fixture_, folder=folder)
         self.assertEqual(decision, "block", "a report-less cd-and-push turn was not blocked (scope check)")
@@ -590,8 +590,7 @@ class PushCheckTests(unittest.TestCase):
     # case builds its refs in a real repo and runs the Stop hook, as the cases above do.
 
     def test_bare_name_with_a_local_branch_and_its_remote_ref_names_the_head(self):
-        # Green on the old code. The mutant of _reads_as_tag that reads any bare name as a tag drops this push, so it
-        # goes red here.
+        # Green on the old code. The remote-tracking ref names the head, so the name is a branch and no tag read runs.
         folder = self.case_folder()
         head = git_commit(folder, remote_branch=FEAT, on_branch=FEAT)
         steps = push("", command="git push origin %s" % FEAT)
@@ -606,7 +605,7 @@ class PushCheckTests(unittest.TestCase):
 
     def test_bare_name_with_only_a_remote_tracking_ref_reads_as_a_branch(self):
         # Green on the old code. The local branch is gone: only origin/feat names a commit, so the name is a branch and
-        # its head is read. The mutant that reads any bare name as a tag drops this push, so it goes red here.
+        # its head is read from that ref.
         folder = self.case_folder()
         head = git_commit(folder, remote_branch=FEAT)
         steps = push("", command="git push origin %s" % FEAT)
@@ -641,7 +640,7 @@ class PushCheckTests(unittest.TestCase):
 
     def test_bare_name_with_a_tag_and_a_branch_with_its_remote_ref_names_the_branch_head(self):
         # Green on the old code. The tag sits on an older commit than the branch's head, so the head named must be the
-        # branch's own. The mutant that reads a bare name as a tag whenever a tag has it drops this push.
+        # branch's own. The remote-tracking ref is read first, so the tag is never read as the name.
         folder = self.case_folder()
         git_commit(folder, remote_branch=None, tag=FEAT)
         head = git_commit(folder, remote_branch=FEAT, on_branch=FEAT)
