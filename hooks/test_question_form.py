@@ -36,7 +36,8 @@ Interface the module must match (the lane's form contract):
   that removes a Goal, Problem or Based on line is refused.
 - A waiting-page task's Why yours line (rule task-why-cited, decision claims-carry-backing part (v)): a
   capability reason needs a cite that holds on this surface, a `(route <id>)` whose row says refused or asks, or a
-  dated `(measured <date>, ...)`. The page reads no refusals file. Cases: case_task_why_cited_reds and _greens.
+  dated `(measured <date>, ...)`. The page reads no refusals file. Cases: case_task_why_cited_reds and _greens, and
+  for the widened capability verbs, case_task_why_cited_widened_reds and _greens.
 - hooks/call_judge.py refuses an AskUserQuestion that fails chat_hit before any model call, with the rule
   chat_hit names; the model sees only a box that passes.
 
@@ -582,6 +583,42 @@ def case_task_why_cited_greens():
                   entry_of(task_item(STEPS, context="Why yours: this needs your login.")), None)
     check("task why cited: a Why yours line with no route cite never reads the rows file", not reads,
           "the rows file was read %d times" % len(reads))
+
+
+# Widened capability verbs (rule task-why-cited, lint/report_guard.py CAPABILITY_RE): "could not", "couldn't", a rejected
+# push, request, token, call or credential, a remote's rejection and a bare 401. The red lines below carry no cite and no
+# word the sibling's CAPABILITY_RE caught, so the widening alone turns them red.
+WIDENED_REDS = (
+    ("could not is refused, with no cite", "Why yours: this session could not reach the remote."),
+    ("couldn't is refused, with no cite", "Why yours: I couldn't push to the remote."),
+    ("a rejected push is refused, with no cite", "Why yours: the remote rejected the push."),
+    ("a bare 401 is refused, with no cite", "Why yours: the push got a 401 from the remote."),
+)
+WIDENED_GREENS = (
+    ("a PR rejected by review passes, since no push, request, token, call or credential was rejected",
+     "Why yours: the PR was rejected by review, so pick the form."),
+    ("PR #401 passes, since a #-numbered 401 is no status code", "Why yours: PR #401 needs your review."),
+    ("a fix that could not be simpler passes, since a comparative is no capability", "Why yours: the fix could not be simpler."),
+    ("a widened verb with a refused-row cite passes", "Why yours: the remote rejected the push (route r-refused)."),
+)
+
+
+def case_task_why_cited_widened_reds():
+    """Each case here is refused as task-why-cited, with the cause "no cite". On 2b1f080d8 (the page check before the
+    widening) each one passes, since none of its words is a capability verb there, so each is red on it."""
+    rows = rows_at("why-rows-widened.json", WHY_ROWS)
+    with local_rows(rows):
+        for name, context in WIDENED_REDS:
+            why_guard(name, "set", entry_of(task_item(STEPS, context=context)), (WHY_RULE, "no cite"))
+
+
+def case_task_why_cited_widened_greens():
+    """Each case here passes on 2b1f080d8 and on the widened check. The false alarms are the phrases the narrowed forms
+    keep out. The last is the cite-backed form of a widened verb, which the widened check must still pass."""
+    rows = rows_at("why-rows-widened.json", WHY_ROWS)
+    with local_rows(rows):
+        for name, context in WIDENED_GREENS:
+            why_guard(name, "set", entry_of(task_item(STEPS, context=context)), None)
 
 
 # ------------------------------------------------------------------ chat only
@@ -1637,7 +1674,8 @@ def main():
                  case_key_overlap_resend_and_fact_lists, case_key_overlap_similar_questions_clash,
                  case_past_rulings_skips_the_debt_notes_file,
                  case_roadmap_broken_pipe_not_a_repo_is_absent, case_roadmap_broken_pipe_other_stderr_stays_unreadable,
-                 case_task_why_cited_reds, case_task_why_cited_greens):
+                 case_task_why_cited_reds, case_task_why_cited_greens,
+                 case_task_why_cited_widened_reds, case_task_why_cited_widened_greens):
         try:
             case()
         except Exception as exc:
