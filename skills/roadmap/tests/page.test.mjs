@@ -364,3 +364,31 @@ test("the Now card's count line names the stalled and paused steps", async (t) =
   const sub = (await page.locator("#now > div:first-child > .sub").first().textContent()).replace(/\s+/g, " ");
   assert.match(sub, /· 1 stalled · 1 paused/, "the count line does not name the stalled and paused steps: " + sub);
 });
+test("the Now card's count line names the blocked step when the Now bar draws one", async (t) => {
+  const page = await open(t, builtPage({ steps: barFixtureBlocked(), live: BAR_LIVE, stalled: STALLED_S3_P4 })); if (!page) return;
+  assert.equal(await page.locator("#now .bar > i.blk").count(), 1, "the Now card's bar draws no blocked cell (i.blk)");
+  assert.ok((await page.locator("#now > div:first-child > .sub").count()) > 0, "the Plan page has no where-you-are count line (#now > div:first-child > .sub)");
+  const sub = (await page.locator("#now > div:first-child > .sub").first().textContent()).replace(/\s+/g, " ");
+  assert.match(sub, /· 1 blocked/, "the count line does not name the blocked step: " + sub);
+});
+
+// A phase with no steps has a head bar with no words. The bar must not read as an image with an empty name.
+test("the phase head's bar of a phase with no steps is not an image with an empty label", async (t) => {
+  const page = await open(t, builtPage({ steps: { c1: stepOf("Step c1", "todo", 1) } })); if (!page) return;
+  await page.locator('#rail button[data-phase="organize"]').click();
+  const head = page.locator("#phases .ph-head");
+  assert.equal(await head.count(), 1, "the Plan page draws no phase head (#phases .ph-head)");
+  assert.equal((await head.locator("h2").textContent()).trim(), "Organize", "the phase head does not show Organize after its rail button is pressed");
+  assert.equal((await head.locator(".prog .num").textContent()).trim(), "0/0", "the Organize phase head does not read 0/0");
+  const bar = head.locator(".prog .bar");
+  assert.equal(await bar.count(), 1, "the Organize phase head has no bar (.prog .bar)");
+  const role = await bar.getAttribute("role");
+  const label = ((await bar.getAttribute("aria-label")) || "").trim();
+  assert.ok(role !== "img" || label !== "", `the bar of the phase with no steps is role img with an empty aria-label: "${label}"`);
+});
+test("control: the phase head's bar of a phase with steps is labelled with its words", async (t) => {
+  const page = await open(t, builtPage({ steps: { c1: stepOf("Step c1", "todo", 1) } })); if (!page) return;
+  const bar = page.locator("#phases .ph-head .prog .bar");
+  assert.equal(await bar.count(), 1, "the Plan page draws no phase head bar (#phases .ph-head .prog .bar)");
+  assert.equal(await bar.getAttribute("aria-label"), "1 to do", "the phase head's bar is not labelled with its words");
+});

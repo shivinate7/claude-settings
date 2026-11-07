@@ -8218,3 +8218,12 @@ test("the Now card's count line names the stalled and paused steps", async (t) =
   const text = (await lead.first().textContent()).replace(/\s+/g, " ");
   assert.match(text, /3 stalled, 1 paused/, "the Now card's count line does not name the stalled and paused steps: " + text);
 });
+test("the Now card's count line names the blocked step when the Now card's bar draws one", async (t) => {
+  const page = await open(t, { pageHtml: barsBlockedPage() }); if (!page) return;
+  await openStatus(page);
+  assert.equal(await page.locator("#svNow .segbar > i.blk").count(), 1, "the Now card's bar draws no blocked cell (i.blk)");
+  const lead = page.locator("#svNow > div:first-child > .lead");
+  assert.ok((await lead.count()) > 0, "the Now card has no count line (#svNow > div:first-child > .lead)");
+  const text = (await lead.first().textContent()).replace(/\s+/g, " ");
+  assert.match(text, /, 1 blocked/, "the Now card's count line does not name the blocked step: " + text);
+});
