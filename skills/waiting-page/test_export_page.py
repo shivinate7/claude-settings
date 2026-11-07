@@ -96,6 +96,8 @@ STREET = "123 Main Street"
 API_VALUE = "abcdefgh" + "12345678"
 SESSION_VALUE = "q9W8e7R6" + "t5Y4u3I2"
 CLIENT_VALUE = "Zx8Kp2Lm" + "9Qw4Rt7Y"
+GLUED_VALUE = "Yt6Nb3Kd9Hj2" + "Pq7W"  # a credential value of letters and digits, built from parts
+NPM_VALUE = "npm_Ab3Cd5Ef7Gh9Ij1Kl3" + "Mn5"  # an npm token shape, built from parts
 # Seconds for one 20,000-character run of name characters: about 0.4 s with the name shape bounded, about 10 s without.
 LONG_RUN_BOUND = 2.0
 
@@ -202,6 +204,15 @@ RED = [
     # A key word at the start of a name, after `_` or at a camelCase hump, still names a credential when its value has digits.
     ("secret_key assignment with digits", "secret_key=" + "Yt6Nb3Kd" + "Hj9Pq2Wr", "Yt6Nb3Kd" + "Hj9Pq2Wr"),
     ("GITHUB_TOKEN assignment with digits", "GITHUB_TOKEN=" + "Rt4Vb8Nm" + "Ls2Qw6Yp", "Rt4Vb8Nm" + "Ls2Qw6Yp"),
+    # A key word glued to the word before it, with no `_` and no camelCase hump, still names a credential.
+    ("CI_NPMTOKEN with an npm token value", "CI_NPMTOKEN=" + NPM_VALUE, NPM_VALUE),
+    ("DEPLOY_GITHUBTOKEN with digits", "DEPLOY_GITHUBTOKEN=" + GLUED_VALUE, GLUED_VALUE),
+    ("MYAPPSECRET with digits", "MYAPPSECRET=" + GLUED_VALUE, GLUED_VALUE),
+    ("NPMTOKEN with digits", "NPMTOKEN=" + GLUED_VALUE, GLUED_VALUE),
+    ("dbkey with digits", "dbkey=" + GLUED_VALUE, GLUED_VALUE),
+    # A long name that ends in a key word is a credential name however long it runs before the word.
+    ("a long name ending in token with digits",
+     "token_for_the_production_environment_of_the_billing_service=" + GLUED_VALUE, GLUED_VALUE),
     ("API_KEY_V2 assignment", "API_KEY_V2=" + "Hk3Lm9Qp" + "Wz7Rt2Yc", "Hk3Lm9Qp" + "Wz7Rt2Yc"),
     ("clientSecret as a JSON pair", '"clientSecret": "' + CLIENT_VALUE + '"', CLIENT_VALUE),
     # A credential name set to a value of 12 or more characters is refused, digits or not. These values have no digit.
@@ -303,6 +314,11 @@ GREEN = [
     # A key word inside a longer word is no credential name, even with a value of letters and digits after it.
     ("a key word inside a longer word with a value", "monkey: Banana12345"),
     ("a key word inside a longer word with a camel value", "hotkey: Ctrl1Shift2"),
+    # The same holds for other words that end in key, with a value of letters and digits.
+    ("turkey with a value", "turkey: Gobble2024"),
+    ("donkey with a value", "donkey: Kong1981"),
+    ("whiskey with a value", "whiskey: Jameson12"),
+    ("jockey with a value", "jockey: Rider123"),
     ("a keyboard label with a number", "keyboard: 104 keys"),
     # A shell variable, an ssh remote, a no-reply address, and the placeholders and masks: none names a secret.
     ("password word with optional", "password: " + "optional"),
