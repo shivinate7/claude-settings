@@ -246,7 +246,7 @@ def tree_findings(root):
             out.append("%s:1 DEBT001 %s" % (f, slug))
             continue
         rest = lines[at - 1][DECISION.match(lines[at - 1]).end():].strip()
-        if re.fullmatch(r"none\.?", rest, re.I):
+        if re.fullmatch(r"(?:`none`|none)\.?", rest, re.I):
             if naming.get(slug):
                 out.append("%s:%d DEBT004 %s" % (f, at, slug))
             continue
