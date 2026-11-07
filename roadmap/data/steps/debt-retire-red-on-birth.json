@@ -1,0 +1,11 @@
+{
+  "title": "A debt's Retire test must fail on the commit that added the debt",
+  "phase": "now",
+  "status": "doing",
+  "order": 265.0,
+  "owner": "coordinator",
+  "lane": "session_013NEJL2t7akPLp9rbWSVEeF",
+  "why": "Coordinator ruling, 15:06 CST: check_debt_retire must prove a debt's Retire test catches the defect, not only that it passes now.",
+  "note": "Run each Retire test on the debt's birth commit, with head's test laid over it; it must fail. An import or collection error counts as unknown, and unknown refuses unless a Retire-run cite clears it. A missing named test file is refused. Decision debt-close-runs-retire is rewritten in place. Tightens a check; can be undone. Same lane as silent-undo-session-url-footer.",
+  "updatedAt": "2026-11-07T15:09:00-06:00"
+}

@@ -35,9 +35,9 @@
   "pick": "a",
   "rank": 2,
   "ref": "q_max #1089; q_max entry the-map-build-is-a-skill; step qmax-harness-copies-resolve",
-  "reply": "a, 15:06 CST: #1089 merges with the rewritten entry. Relayed to runner 9, which merges it in its next q_max batch; this closes on its merge report.",
+  "reply": "a, 15:06 CST: #1089 merges with the rewritten entry. Runner 9 counted it at 15:08 CST, and #1089 joins its next q_max batch, with this answer cited in the PR body.",
   "short": "q_max #1089: merge the rewritten entry, or hold",
-  "status": "open",
+  "status": "closed",
   "title": "May q_max #1089 merge with its rewritten map-build entry?",
   "why": "q_max's CLAUDE.md lets a rewritten decision entry merge only on your named act. Runner 9 holds #1089 until you look."
 }
