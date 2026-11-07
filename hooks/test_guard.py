@@ -15270,6 +15270,69 @@ diff_repo("bd-rebased-wt-test", _rebased_product_then_test_edit)
 diff_repo("bd-dropped-test-commit", _own_test_commit_main_takes_too)
 
 
+def _pulled_onto_moved_main(rel, text):
+    """A builder's own commit on `rel`, then main moves on a product file and is pushed to origin, then the builder runs
+    `git pull --rebase origin main`. The pull replays the commit as a pick, and the reflog subject of that pick carries
+    the pull's own words: `pull --rebase origin main (pick)`, not `rebase (pick)`."""
+    def build(w):
+        main = w + "-main"
+        origin = w + "-origin.git"
+        _must(w, "init", "-q", "--bare", origin)
+        _must(main, "remote", "add", "origin", origin)
+        _must(main, "push", "-q", "origin", "main")
+        write(os.path.join(w, rel), text)
+        _must(w, "add", "-A")
+        _must(w, *IDENT, "commit", "-q", "-m", "own change")
+        write(os.path.join(main, "src/product.py"), "p = 1\n")
+        _must(main, "add", "-A")
+        _must(main, *IDENT, "commit", "-q", "-m", "main moves")
+        _must(main, "push", "-q", "origin", "main")
+        _must(w, *IDENT, "pull", "--rebase", "origin", "main")
+        # Scope: the fixture must hold the replayed commit, or a broken build would read as a pass.
+        steps = run_vcs(w, "reflog", "show", "--format=%gs", "HEAD").stdout
+        changed = run_vcs(w, "diff", "--name-only", "main", "HEAD").stdout.split()
+        if "pull --rebase origin main (pick)" not in steps or rel not in changed:
+            sys.exit("fixture setup failed: the pull in %r did not replay %s as a pick: %r" % (w, rel, changed))
+    return build
+
+
+def _numbered_test(changes=None):
+    """A 30-line test file, `line N` on each line, with the lines of `changes` (by line number) replaced."""
+    changes = changes or {}
+    return "".join(changes.get(n, "line %d" % n) + "\n" for n in range(1, 31))
+
+
+NEAR_FILES = dict(BASE_FILES)
+NEAR_FILES[TEST_A] = _numbered_test()
+
+
+def _rebased_edit_beside_main_edit(w):
+    """A builder's own test commit edits line 10 of a 30-line test file. Main then edits line 12 of the same file, and
+    the builder rebases onto main. The rebase is clean and replays the commit as a pick, but the replayed patch differs:
+    the line main changed is now context of the builder's hunk. So `git cherry` reads the replay `+`, not `-`."""
+    main = w + "-main"
+    write(os.path.join(w, TEST_A), _numbered_test({10: "CHANGED"}))
+    _must(w, "add", "-A")
+    _must(w, *IDENT, "commit", "-q", "-m", "own test change")
+    own = run_vcs(w, "rev-parse", "HEAD").stdout.strip()
+    write(os.path.join(main, TEST_A), _numbered_test({12: "MAIN"}))
+    _must(main, "add", "-A")
+    _must(main, *IDENT, "commit", "-q", "-m", "main edits a nearby line")
+    _must(w, *IDENT, "rebase", "-q", "main")
+    # Scope: the commit must be gone from HEAD and replayed, with a changed patch, or the case never reaches the
+    # replay veto it probes.
+    steps = run_vcs(w, "reflog", "show", "--format=%gs", "HEAD").stdout
+    reached = run_vcs(w, "merge-base", "--is-ancestor", own, "HEAD").returncode == 0
+    held = ("- " + own) in run_vcs(w, "cherry", "HEAD", own).stdout.splitlines()
+    if "rebase (pick): own test change" not in steps or reached or held:
+        sys.exit("fixture setup failed: the rebase in %r did not replay %s with a changed patch" % (w, own))
+
+
+diff_repo("bd-pulled-own-test", _pulled_onto_moved_main(TEST_A, "pass\n"))
+diff_repo("bd-pulled-product", _pulled_onto_moved_main("src/app.py", "x = 2\n"))
+diff_repo("bd-rebased-edit-beside-main", _rebased_edit_beside_main_edit, files=NEAR_FILES)
+
+
 def refused_with_cherry_failing_case(label, commit=False):
     """refused_push_and_stop_case with `git cherry` failing on every call the guard makes. The replay check cannot
     read the rebased commit, so the builder's test change must still be refused: each guard run that reaches the
@@ -15312,14 +15375,25 @@ def _subagent_stop_budget():
     sys.exit("fixture setup failed: no SubagentStop guard hook in settings.json")
 
 
-def _stop_reads_run(reflog_times_out):
+# The reflog of a builder whose three own commits were each replayed by a rebase pick, newest first as git prints it.
+# `_stop_reads_run` answers the reflog read with it when a case asks for `cherry`.
+REPLAY_SHAS = ["%040x" % n for n in range(1, 4)]     # the builder's own commits, no longer reached from HEAD
+PICK_SHAS = ["%040x" % n for n in range(101, 104)]   # their replays, the commits HEAD reaches
+REPLAY_REFLOG = "".join("%s rebase (pick): test change %d\n" % (PICK_SHAS[n - 1], n) for n in (3, 2, 1)) + "".join(
+    "%s commit: test change %d\n" % (REPLAY_SHAS[n - 1], n) for n in (3, 2, 1))
+
+
+def _stop_reads_run(reflog_times_out, cherry=None):
     """One builder SubagentStop judged in-process by judge_stop, with every git call answering at once (rc 128)
-    except the reflog read, which times out when `reflog_times_out`. The guard has no timeout knob, so no clock runs:
-    a timed-out call returns at once, and the caller sums the timeouts requested, which is the wait a real call
-    would take. Returns (the timeouts requested, the reflog reads made, the guard.log rows)."""
+    except the reads a case names. The reflog read times out when `reflog_times_out`. `cherry`, when given, is how each
+    `git cherry` answers, "timeout" or "fails"; with it the reflog holds REPLAY_REFLOG, so the guard runs one cherry
+    per replayed commit. The guard has no timeout knob, so no clock runs: a timed-out call returns at once, and the
+    caller sums the timeouts requested, which is the wait a real call would take. A fix must cut those requested
+    waits, not only the elapsed time. Returns (the timeouts requested, the reflog reads made, the guard.log rows)."""
     import importlib.util
     import _nowindow
-    folder = os.path.join(ROOT, "stop-budget-" + ("timeout" if reflog_times_out else "fast"))
+    name = "cherry-" + cherry if cherry else ("timeout" if reflog_times_out else "fast")
+    folder = os.path.join(ROOT, "stop-budget-" + name)
     os.makedirs(folder, exist_ok=True)
     log = os.path.join(folder, "guard.log")
     if os.path.exists(log):
@@ -15332,6 +15406,19 @@ def _stop_reads_run(reflog_times_out):
             if reflog_times_out:
                 waits.append(kwargs.get("timeout"))
                 raise subprocess.TimeoutExpired(cmd, kwargs.get("timeout"))
+            if cherry:
+                return subprocess.CompletedProcess(cmd, 0, REPLAY_REFLOG, "")
+        if cherry and "cherry" in cmd and cherry == "timeout":
+            waits.append(kwargs.get("timeout"))
+            raise subprocess.TimeoutExpired(cmd, kwargs.get("timeout"))
+        if cherry and "rev-list" in cmd:   # the three own commits are not reached from HEAD
+            return subprocess.CompletedProcess(cmd, 0, "".join(sha + "\n" for sha in REPLAY_SHAS), "")
+        if cherry and "rev-parse" in cmd:  # no merge in progress: MERGE_HEAD does not verify
+            if "--verify" in cmd:
+                return subprocess.CompletedProcess(cmd, 1, "", "")
+            return subprocess.CompletedProcess(cmd, 0, folder, "")
+        if cherry and ("diff" in cmd or "ls-files" in cmd):   # the working tree is clean
+            return subprocess.CompletedProcess(cmd, 0, "", "")
         return subprocess.CompletedProcess(cmd, 128, "", "")
 
     spec = importlib.util.spec_from_file_location("guard_stop_budget_under_test", GUARD)
@@ -15377,6 +15464,38 @@ def stop_read_fast_case():
     return True, "a read that answers at once waits for no timeout and logs role-diff-unread"
 
 
+def stop_cherry_timeout_case():
+    """A builder's SubagentStop whose `git cherry` times out on each of three replayed commits. Each timed-out read
+    waits its 10 s, so the three wait 30 s, past the 20 s hook budget, and the host kills the guard before it logs. The
+    guard must request less than its budget in waits and still log role-diff-unread."""
+    budget = _subagent_stop_budget()
+    waits, reflogs, rows = _stop_reads_run(reflog_times_out=False, cherry="timeout")
+    if not reflogs:  # scope: the guard reached its reflog read on the SubagentStop path
+        return False, "the guard made no reflog read on the SubagentStop path, so the case did not run"
+    unread = [r for r in rows if len(r) > 3 and r[1] == "SubagentStop" and r[2] == "noted" and r[3] == "role-diff-unread"]
+    if sum(waits) >= budget:
+        return False, ("a SubagentStop requested %d s of waits on timed-out cherry reads, past its %d s hook budget: "
+                       "the host can stop the guard before it logs" % (sum(waits), budget))
+    if not unread:
+        return False, "expected a role-diff-unread line on SubagentStop, found none"
+    return True, ("timed-out cherry reads on SubagentStop requested %d s, under its %d s budget, and logged "
+                  "role-diff-unread" % (sum(waits), budget))
+
+
+def stop_cherry_fast_case():
+    """Control for stop_cherry_timeout_case: the same SubagentStop with each `git cherry` failing at once. The guard
+    requests no timeout, and logs role-diff-unread for the replayed commits it could not read."""
+    waits, reflogs, rows = _stop_reads_run(reflog_times_out=False, cherry="fails")
+    if not reflogs:  # scope: the guard reached its reflog read on the SubagentStop path
+        return False, "the guard made no reflog read on the SubagentStop path, so the case did not run"
+    unread = [r for r in rows if len(r) > 3 and r[1] == "SubagentStop" and r[2] == "noted" and r[3] == "role-diff-unread"]
+    if waits:
+        return False, "a cherry that fails at once should request no timeout, got %r" % waits
+    if not unread:
+        return False, "expected a role-diff-unread line on SubagentStop, found none"
+    return True, "a cherry that fails at once requests no timeout and logs role-diff-unread"
+
+
 LOG_CHECKS_EXTRA.append(("builder-refuse: own-test-commit, a builder's test change is refused at push and the first stop "
                          "when git cherry fails on a replayed commit",
                          refused_with_cherry_failing_case("bd-rebased-own-test")))
@@ -15390,6 +15509,20 @@ LOG_CHECKS_EXTRA.append(("builder-refuse: own-test-commit, a SubagentStop whose 
                          "its hook budget and logs role-diff-unread", stop_read_timeout_case))
 LOG_CHECKS_EXTRA.append(("builder-refuse: own-test-commit control, a SubagentStop whose reads answer at once waits for no "
                          "timeout and logs role-diff-unread", stop_read_fast_case))
+# The pull and the nearby-edit cases are checked at push and the first stop, not at commit: a rebase leaves a clean
+# tree, so a commit judges nothing. The shape is the one `bd-rebased-own-test` already checks.
+LOG_CHECKS_EXTRA.append(("builder-refuse: own-test-commit, a test commit that git pull --rebase origin main replays: "
+                         "push and the first stop are denied", refused_push_and_stop_case("bd-pulled-own-test")))
+LOG_CHECKS_EXTRA.append(("builder-refuse: own-test-commit control, a product commit that git pull --rebase origin main "
+                         "replays: allowed at commit, push and stop with no builder-diff line",
+                         clean_builder_case("bd-pulled-product")))
+LOG_CHECKS_EXTRA.append(("builder-refuse: own-test-commit, a test commit rebased beside a nearby main edit, which changes "
+                         "its patch: push and the first stop are denied",
+                         refused_push_and_stop_case("bd-rebased-edit-beside-main")))
+LOG_CHECKS_EXTRA.append(("builder-refuse: own-test-commit, a SubagentStop whose three git cherry reads time out requests "
+                         "less than its hook budget and logs role-diff-unread", stop_cherry_timeout_case))
+LOG_CHECKS_EXTRA.append(("builder-refuse: own-test-commit control, a SubagentStop whose git cherry reads fail at once "
+                         "requests no timeout and logs role-diff-unread", stop_cherry_fast_case))
 
 
 # =========================================================================== failing open
