@@ -1480,10 +1480,21 @@ def park_seam(path=None):
             os.environ[PARK_ID_SEAM] = old
 
 
-def meta_write(parked_value, doc_id=META_DOC, collection=META):
-    """An ArtifactData set of the waiting page's meta doc whose data holds `parked_value`."""
-    return {"url": PAGE_URL, "action": "set", "collection": collection, "doc_id": doc_id,
-            "data": {"parked": parked_value}}
+def meta_write(parked_value=None, doc_id=META_DOC, collection=META, file_path=None):
+    """An ArtifactData set of the waiting page's meta doc whose data holds `parked_value`. With `file_path` the write
+    carries no data: the hook reads that file, which the case writes under the call's cwd (write_parked_file)."""
+    write = {"url": PAGE_URL, "action": "set", "collection": collection, "doc_id": doc_id}
+    if file_path is None:
+        write["data"] = {"parked": parked_value}
+    else:
+        write["file_path"] = file_path
+    return write
+
+
+def write_parked_file(path, parked_value):
+    """The JSON file a meta write names by file_path: its data is {"parked": parked_value}."""
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump({"parked": parked_value}, f)
 
 
 def parked_judge(tool_input, cwd=PAGE_REPO):
@@ -1580,6 +1591,23 @@ def case_parked_in_a_batch():
     check("parked-line-id: a lone meta write returns no item writes", lone == [], "writes %r" % (lone,))
 
 
+def case_parked_relative_file_is_read_against_the_call_cwd():
+    """A meta write whose data is a relative file_path is judged on the file under the call's cwd, as inline data is.
+    The call's cwd is PAGE_REPO, a folder under the run folder and not the test process's cwd, so a file that exists
+    only there is found only when the path is joined to the call's cwd. The same write by an absolute file_path is the
+    green control: it is refused on main, so the relative read is the cause of the red."""
+    relative, absolute = "parked-relative-line.json", "parked-absolute-line.json"
+    check("parked-line-id: the relative file is absent from the test process cwd",
+          not os.path.exists(os.path.join(os.getcwd(), relative)), "%s is in the process cwd" % relative)
+    no_id = [{"label": "a line with no id"}]
+    write_parked_file(os.path.join(PAGE_REPO, relative), no_id)
+    parked("a relative file_path, read against the call's cwd, with a line that has no id is refused",
+           meta_write(file_path=relative), PARK_RULE)
+    write_parked_file(os.path.join(PAGE_REPO, absolute), no_id)
+    parked("control: an absolute file_path with a line that has no id is refused",
+           meta_write(file_path=os.path.join(PAGE_REPO, absolute)), PARK_RULE)
+
+
 def case_parked_reason_names_park_id():
     """The rule's reason is in PAGE_REASONS and names the parkId block, and the guard prints that text for a refused
     meta write, so a refusal reads the table, not a copy."""
@@ -1663,7 +1691,8 @@ def case_page_holds_the_park_id_block():
 
 def main():
     for case in (case_item_92, case_item_51_stray_field, case_parked_refused_forms, case_parked_valid_lists_pass,
-                 case_parked_writes_outside_the_rule_pass, case_parked_in_a_batch, case_parked_reason_names_park_id,
+                 case_parked_writes_outside_the_rule_pass, case_parked_in_a_batch,
+                 case_parked_relative_file_is_read_against_the_call_cwd, case_parked_reason_names_park_id,
                  case_parked_seam_sets_the_pattern, case_parked_seam_without_a_block_passes,
                  case_parked_block_read_respects_strings, case_page_holds_the_park_id_block,
                  case_form_lines, case_form_placeholders_on_edits,
