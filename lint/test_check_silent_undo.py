@@ -437,6 +437,34 @@ class PrBodyEscape(unittest.TestCase):
         self.assert_nothing_excused(["Summary.\n\n%s\n\n%s\n" % (L, U),  # no attribution above it
                                      "Summary.\n\n%s\n\n%s\n\nClosing prose.\n\n%s\n" % (L, A, U)])  # not directly above it
 
+    # A fence or a comment that drops out can leave an empty paragraph. That must not crash, and the paragraph
+    # that counts is the prose above it.
+    def last_of(self, body):
+        try:
+            return C.last_paragraph(body)
+        except Exception as e:  # a crash is a failed assert, and the message names the cause
+            self.fail("last_paragraph raised %s on %r" % (type(e).__name__, body))
+
+    def test_a_fence_above_the_attribution_and_session_link_gives_the_prose_above_it(self):
+        body = "Summary.\n\nTest plan:\n\n```\ncode\n```\n\n%s\n\n%s\n" % (self.ATTR, self.URL)
+        self.assertEqual(self.last_of(body), "Test plan:")
+
+    def test_a_comment_above_the_attribution_and_session_link_gives_the_prose_above_it(self):
+        body = "Summary.\n\nTest plan:\n\n<!-- note -->\n\n%s\n\n%s\n" % (self.ATTR, self.URL)
+        self.assertEqual(self.last_of(body), "Test plan:")
+
+    def test_a_trailer_above_a_fence_then_the_attribution_and_session_link_excuses_its_path(self):
+        # The fence drops out, so once the attribution and the link are skipped the trailer is the last paragraph.
+        L, A, U = self.LINE, self.ATTR, self.URL
+        body = "Summary.\n\n%s\n\n```\ncode\n```\n\n%s\n\n%s\n" % (L, A, U)
+        self.assertEqual(self.last_of(body), L)
+        ok, why = self.excused(body)
+        self.assertTrue(ok, why)
+
+    def test_a_fence_above_the_attribution_alone_gives_the_prose_above_it(self):
+        body = "Summary.\n\nTest plan:\n\n```\ncode\n```\n\n%s\n" % self.ATTR
+        self.assertEqual(self.last_of(body), "Test plan:")
+
 
 BLOCK = "alpha one\nbeta two\ngamma three\ndelta four\nepsilon five\nzeta six\n"
 
