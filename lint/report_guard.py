@@ -388,17 +388,19 @@ DONE_REF_RE = re.compile(
 BULLET_RE = re.compile(r"^(?:[-*+]|\d+[.)])\s+")
 
 
-def done_items(block):
-    """Return the Done label's items from `block_text` output: its bullets, else its one inline text."""
+def label_items(block, label):
+    """Return `label`'s items from `block_text` output: its bullets, else its one inline text.
+    Done's inline text counts beside its bullets only when it holds a BUILT/RECORDED/OTHER word;
+    any other label keeps its inline text."""
     body = []
     inside = False
     for line in block.splitlines():
         m = LABEL_RE.match(line)
         if m:
-            label = m.group(1).strip().rstrip(":").strip()
+            name = m.group(1).strip().rstrip(":").strip()
             if inside:
                 break
-            inside = label == "Done"
+            inside = name == label
             if inside:
                 body.append(line[m.end():].lstrip(": "))
             continue
@@ -422,14 +424,15 @@ def done_items(block):
         elif items and not in_detail:
             items[-1] += " " + text
     if items:
-        return ([inline] if DONE_KIND_RE.search(inline) else []) + items
+        keep = inline and (label != "Done" or DONE_KIND_RE.search(inline))
+        return ([inline] if keep else []) + items
     text = " ".join(l.strip() for l in body if l.strip())
     return [text] if text else []
 
 
 def done_format_problem(text):
     """Name the first Done item lacking a BUILT/RECORDED/OTHER word or a PR/commit ref, else ''."""
-    for item in done_items(block_text(text, keep_indent=True)):
+    for item in label_items(block_text(text, keep_indent=True), "Done"):
         kinds = set(DONE_KIND_RE.findall(item))
         if not kinds or (kinds & {"BUILT", "RECORDED"} and not DONE_REF_RE.search(item)):
             return item[:60]
@@ -602,7 +605,9 @@ def done_models_problem(text, spawned, records=None):
     `spawned` holds the spawns since the last report; a role in it must be named in Done. A named
     pair passes when its model is in the set of any spawn of that role in `records`, the whole
     transcript (a reviewer in an earlier window may be named beside this window's), or when this
-    window's set for that role holds '' (a spawn whose model is unknown). An earlier unknown spawn
+    window's set for that role holds '' (a spawn whose model is unknown). A spawned role that the Next
+    label names is still running and is reported there, so its missing Done model is waived; Next's
+    pairs are never judged. An earlier unknown spawn
     excuses nothing. A named role with no spawn anywhere is skipped. `records` defaults to the
     window, so `spawned` alone is judged by itself.
     Cost: a window with no spawn returns at once. Otherwise one more spawn_models pass over records
@@ -612,10 +617,12 @@ def done_models_problem(text, spawned, records=None):
     if not spawned:
         return ""
     all_spawned = spawn_models(records) if records is not None else spawned
-    done = " ".join(done_items(block_text(text, keep_indent=True)))
+    block = block_text(text, keep_indent=True)
+    done = " ".join(label_items(block, "Done"))
+    running = {r.lower() for r in ROLE_RE.findall(" ".join(label_items(block, "Next")))}
     named = {(r.lower(), m.lower()) for roles, m in ROLE_MODEL_RE.findall(done)
              for r in ROLE_RE.findall(roles) if r.lower() in NAMED_ROLES}
-    missing = sorted(r for r in spawned if not any(nr == r for nr, _ in named))
+    missing = sorted(r for r in spawned if r not in running and not any(nr == r for nr, _ in named))
     if missing:
         return "no model named for " + ", ".join(missing)
     for role, model in sorted(named):
