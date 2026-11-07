@@ -13,7 +13,7 @@ as the guard keys it. A file with no pin, or a name with no row, is not flagged 
 Every agent file that can run Bash names TaskStop in its body, and its tools: allowlist lists it (debt
 agent-reports-with-live-watcher). The test reads each agents/*.md file, not a list of names.
 An agent body must not state the agent's own model in fixed text: a sentence with `your ... model` and a model name
-in it, or a backticked PASS/FAIL/PARTIAL header that names a model. A body whose report header has a model slot
+in it, or a backticked PASS/FAIL/PARTIAL/WIDE header that names a model. A body whose report header has a model slot
 (`the model` or `<model>`) must also name the line that gives the model: `powered by the model named`. Each failure
 names its file and line as file:line.
 """
@@ -359,14 +359,15 @@ class OwnModelInBody(unittest.TestCase):
                         "the failure does not name the sentence's lines as fixture.md:N: %r" % out)
 
     def test_report_header_naming_a_model_is_flagged(self):
-        for header in ("`PASS, fix check, haiku`", "`FAIL, round 2 of 3, sonnet`", "`PARTIAL, round 1 of 3, Opus`"):
+        for header in ("`PASS, fix check, haiku`", "`FAIL, round 2 of 3, sonnet`", "`PARTIAL, round 1 of 3, Opus`", "`WIDE, fix check, haiku`"):
             with self.subTest(header=header):
                 self.assertFlagged("Under Done, the first line is %s.\n" % header, header)
 
     def test_report_header_wrapped_onto_its_model_is_flagged(self):
         # The header span crosses a line break before its model word, so a match on one line misses it.
         for header, start in (("`FAIL, round 2 of 3,\nhaiku`", "FAIL, round 2 of 3,"),
-                              ("`PASS, fix check,\nsonnet`", "PASS, fix check,")):
+                              ("`PASS, fix check,\nsonnet`", "PASS, fix check,"),
+                              ("`WIDE, fix check,\nhaiku`", "WIDE, fix check,")):
             with self.subTest(header=header):
                 text = agent_text("Under Done, the first line is %s.\n" % header)
                 first = line_of(text, start)
@@ -433,6 +434,18 @@ class ModelSlot(unittest.TestCase):
                          "a <model> placeholder header with the phrase in the body is flagged")
         self.assertEqual(self.check(PHRASE_LINE + "\n\n" + BARE_SLOT + "\n"), (0, ""),
                          "a `the model` header with the phrase in the body is flagged")
+
+    def test_wide_model_slot_header_needs_the_phrase_too(self):
+        # WIDE is a header word now, so a WIDE header with a model slot needs the source line like a PASS one does
+        wide_slot = "Under Done, the first line is `WIDE, fix check, <model>`."
+        text = agent_text(wide_slot + "\n")
+        numbers = line_of(text, wide_slot)
+        self.assertEqual(len(numbers), 1, "fixture error: the header is not on one line")
+        code, out = verdict("agents/fixture.md", text=text)
+        self.assertEqual(code, 1, "a WIDE model-slot header passes with no `powered by the model named` line")
+        self.assertTrue(names_line(out, "fixture.md", numbers), "the failure does not name fixture.md:%d: %r" % (numbers[0], out))
+        self.assertEqual(self.check(PHRASE_LINE + "\n\n" + wide_slot + "\n"), (0, ""),
+                         "a WIDE model-slot header with the phrase in the body is flagged")
 
     def test_header_without_a_model_slot_needs_no_phrase(self):
         self.assertEqual(self.check("Under Done, the first line is `PASS, fix check`.\n"), (0, ""),
