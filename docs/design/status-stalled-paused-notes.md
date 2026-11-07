@@ -59,6 +59,14 @@ stalled mark is already red.
 - Departs from: `renderNow` passes 0 for blocked to `segs`, so the Now card bar draws a blocked step
   as to do. The rail and phase head draw it red. The mockup keeps that. Not blocking.
 
+## Critique (impeccable, single context: no sub-agent tool in a designer)
+
+The detector found nothing. It reads the harness, not the screen in the frames.
+- Fixed: the harness labels on the Now card covered the phase name. They now sit at the card's foot.
+- Open: in a rail chip at 390 with 30 steps, the paused ring reads as a grey line. The phase head
+  keeps both shapes (measured at 3x).
+- Open: Tint (item 2) fails in dark. It stays only so the owner can cull it.
+
 ## Seen, outside this lane
 
 - A stalled row keeps the `.active` blue tint under its red edge. A paused row keeps the tint and the

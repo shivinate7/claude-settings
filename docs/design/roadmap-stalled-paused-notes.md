@@ -70,6 +70,16 @@ Deep links: `#s=mixed|dense`, `&o=hatch|tint`, `&c=on|off`, `&w=all|390|1280`, `
   head bars draw a blocked step as to do. Only the rail draws it red. The mockup keeps that. Passing
   the blocked count in both would match the rail. Not blocking.
 
+## Critique (impeccable, single context: no sub-agent tool in a designer)
+
+The detector found nothing. It reads the harness, not the screen in the frames.
+- Fixed: the harness labels on the Now card covered the phase name. They now sit at the card's
+  foot. At 390 the label still covers part of "Whole plan"; Labels off clears it.
+- Open: nothing on the screen teaches that stripes mean stalled and a ring means paused, except the
+  bar's `title` on hover. The count words (item 4) carry it in the Now card. The phase head has no
+  words. A question for the owner, not blocking: is the stalled band's red mark enough of a key?
+- Open: Tint (item 3) fails in dark. It stays only so the owner can cull it.
+
 ## Seen, outside this lane
 
 - A stalled or paused row keeps `.st.active`: a blue tint and a blue edge, as an in-progress row. The

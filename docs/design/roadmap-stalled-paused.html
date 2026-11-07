@@ -422,7 +422,8 @@ html{scrollbar-gutter:stable;overflow-y:scroll;overflow-x:hidden}
 [data-today]::after { content: "Today: " attr(data-today); background: #0f766e; }
 .bar[data-new], .segbar[data-new] { overflow: visible; }
 .bar[data-new]::after, .segbar[data-new]::after { left: auto; right: 0; top: 10px; }
-#pick-count[data-new]::after { left: auto; right: 0; }
+.nowlab[data-new] { outline-offset: -3px; }
+.nowlab[data-new]::after { top: auto; bottom: 3px; left: auto; right: 6px; }
 .rail[data-new]::after, .prail[data-new]::after { left: auto; right: 4px; }
 .kind[data-new]::after, .kind[data-today]::after { top: -15px; }
 html.nolab [data-new], html.nolab [data-today] { outline: none; }
@@ -509,10 +510,10 @@ function screen(sid, opt, cnt) {
 
   // Today renderNow passes 0 for blocked; the mockup keeps that and adds stalled and paused.
   const now = `<section class="now" id="now" aria-label="Where you are">
-  <div><h2>Phase <span class="num">${PH.indexOf(cur) + 1}/${PH.length}</span></h2>
+  <div class="nowlab"${lab("new", (words ? "counts in words, " : "") + barLab)}><h2>Phase <span class="num">${PH.indexOf(cur) + 1}/${PH.length}</span></h2>
     <div class="big">${esc(cur.n)}</div>
-    <div class="sub" id="pick-count"${cnt && words ? lab("new", "stalled and paused counted") : ""}><span class="num">${c.d}</span> of <span class="num">${c.n}</span> done${c.a ? ` · <span class="num">${c.a}</span> in progress` : ""}${words}</div>
-    <div class="bar" style="margin-top:7px" role="img" aria-label="${segName(c.d, c.a, c.t, c.p, 0, c.n)}" title="${segName(c.d, c.a, c.t, c.p, 0, c.n)}"${lab("new", barLab)}>${segs(c.d, c.a, c.t, c.p, 0, c.n)}</div>
+    <div class="sub" id="pick-count"><span class="num">${c.d}</span> of <span class="num">${c.n}</span> done${c.a ? ` · <span class="num">${c.a}</span> in progress` : ""}${words}</div>
+    <div class="bar" style="margin-top:7px" role="img" aria-label="${segName(c.d, c.a, c.t, c.p, 0, c.n)}" title="${segName(c.d, c.a, c.t, c.p, 0, c.n)}">${segs(c.d, c.a, c.t, c.p, 0, c.n)}</div>
     <div class="sub" style="margin-top:6px;color:var(--muted)">Whole plan <span class="num">${tdone}/${tot}</span> done</div>
   </div>
   <div><h2>Doing now</h2><ul>${active.map((s) => `<li>${s.shown === "active" ? glyph("active") : `<span class="g" role="img" aria-label="${LABEL[s.shown]}">${GLYPH[s.shown]}</span>`}<span class="id">${s.id}</span><button class="tx">${esc(s.title)}</button></li>`).join("")}</ul></div>

@@ -970,7 +970,8 @@ button.tile:hover { background: color-mix(in srgb, var(--chip) 60%, var(--surfac
 [data-today]::after { content: "Today: " attr(data-today); background: #0f766e; }
 .bar[data-new], .segbar[data-new] { overflow: visible; }
 .bar[data-new]::after, .segbar[data-new]::after { left: auto; right: 0; top: 10px; }
-#pick-count[data-new]::after { left: auto; right: 0; }
+.nowlab[data-new] { outline-offset: -3px; }
+.nowlab[data-new]::after { top: auto; bottom: 3px; left: auto; right: 6px; }
 .rail[data-new]::after, .prail[data-new]::after { left: auto; right: 4px; }
 .kind[data-new]::after, .kind[data-today]::after { top: -15px; }
 html.nolab [data-new], html.nolab [data-today] { outline: none; }
@@ -1050,9 +1051,9 @@ function screen(sid, opt, cnt) {
 
   // Today renderNow passes 0 for blocked; the mockup keeps that and adds stalled and paused.
   const now = `<section class="now" id="svNow" aria-label="Where the plan stands">
-  <div><h3>Phase <span class="num">${PH.indexOf(cur) + 1}/${PH.length}</span></h3><div class="ph">${esc(cur.n)}</div>
-    <div class="lead" id="pick-count"${words ? lab("new", "stalled and paused counted") : ""}><span class="num">${c.d}</span> of <span class="num">${c.n}</span> done${c.a ? `, <span class="num">${c.a}</span> in progress` : ""}${words}</div>
-    <div class="segbar" aria-hidden="true"${lab("new", barLab)}>${segs(c.d, c.a, c.t, c.p, 0, c.n)}</div>
+  <div class="nowlab"${lab("new", (words ? "counts in words, " : "") + barLab)}><h3>Phase <span class="num">${PH.indexOf(cur) + 1}/${PH.length}</span></h3><div class="ph">${esc(cur.n)}</div>
+    <div class="lead" id="pick-count"><span class="num">${c.d}</span> of <span class="num">${c.n}</span> done${c.a ? `, <span class="num">${c.a}</span> in progress` : ""}${words}</div>
+    <div class="segbar" aria-hidden="true">${segs(c.d, c.a, c.t, c.p, 0, c.n)}</div>
     <div class="lead">Whole plan <span class="num">${tdone}/${tot}</span> done</div></div>
   <div><h3>Doing now</h3><ul>${active.map((s) => `<li>${s.shown === "active" ? rg("active") : rgl(s.shown)}<span class="id">${s.id}</span><button class="tx" type="button">${esc(s.title)}</button></li>`).join("")}</ul></div>
   <div><h3>Up next <span style="font-weight:400">in work order</span></h3><ol>${nu.map((s, i) => `<li><span class="ix">${i + 1}</span><span class="id">${s.id}</span><button class="tx" type="button">${esc(s.title)}</button></li>`).join("")}</ol></div>
