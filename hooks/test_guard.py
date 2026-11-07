@@ -13329,6 +13329,22 @@ SHELL_TEST_WRITES = (
      "cp --target-directory=$(find tests -type d) x"),
     ("cp -t with a backtick find over tests as the target directory",
      "cp -t`find tests -type d` x"),
+    # The variable is set from a list of tests, so the sed -i target it names is a test.
+    ("variable from ls of tests/*.py, sed -i on the file it names",
+     "f=$(ls tests/*.py); sed -i s/a/b/ $f"),
+    # A loop that copies a test into tests, or a source file into tests, writes a test path.
+    ("for loop over tests/*.py, cp of $f into tests/bak_$f",
+     "for f in tests/*.py; do cp \"$f\" \"tests/bak_$f\"; done"),
+    ("for loop over src/*.py, cp of $f into tests/",
+     "for f in src/*.py; do cp \"$f\" tests/; done"),
+    # The path a writer names, or a path that find or xargs feeds it, is judged as a test.
+    ("sed --in-place on tests/a.py", "sed --in-place s/a/b/ tests/a.py"),
+    ("perl -pi on tests/a.py", "perl -pi -e s/a/b/ tests/a.py"),
+    ("xargs -I{} cp of tests found by find, to {}.bak",
+     "find tests -name '*.py' | xargs -I{} cp {} {}.bak"),
+    # A substitution glued to a destination stays refused, as main reads it.
+    ("cp of a into /tmp/$(basename tests/a.py)", "cp a /tmp/$(basename tests/a.py)"),
+    ("cp of src/x into tests/$(date)", "cp src/x tests/$(date)"),
 )
 for _name, _command in SHELL_TEST_WRITES:
     sh("builder-test: shell write, %s, is refused" % _name, _command, "deny", rule=BT,
@@ -13374,6 +13390,25 @@ SHELL_TEST_ALLOWS = (
     # src/app.py is judged alone.
     ("find over tests piped to wc, its count in a sed -i over src/app.py",
      "x=$(find tests | wc -l); sed -i \"s/N/$x/\" src/app.py"),
+    # A variable set from a count or a text read of tests is a value, not a path. The sed -i that
+    # reads it writes a product file.
+    ("variable from cat of tests/a.py, sed -i on src/app.py",
+     "x=$(cat tests/a.py); sed -i \"s/N/$x/\" src/app.py"),
+    ("variable from grep -c over tests, sed -i on README.md",
+     "n=$(grep -c \"def test\" tests/*.py | tail -1); sed -i \"s/N/$n/\" README.md"),
+    ("variable from wc -l of tests/a.py, sed -i on src/app.py",
+     "x=$(wc -l tests/a.py); sed -i \"s/N/$x/\" src/app.py"),
+    # A loop copies each test out to a destination outside tests. The test is read, and nothing in
+    # tests is written.
+    ("for loop over tests/*.py, cp of \"$f\" to /tmp/backup/$f",
+     "for f in tests/*.py; do cp \"$f\" \"/tmp/backup/$f\"; done"),
+    ("for loop over tests/*.py, cp of $f to /tmp/bak_$(basename $f)",
+     "for f in tests/*.py; do cp $f /tmp/bak_$(basename $f); done"),
+    # A whole substitution that reads tests is a read when it is the cp source: quoted, in backticks,
+    # or as a process substitution.
+    ("cp of a quoted find over tests into /tmp/x/", "cp \"$(find tests -name a.py)\" /tmp/x/"),
+    ("cp of a backtick find over tests into /tmp/x/", "cp `find tests -name a.py` /tmp/x/"),
+    ("cp of a process substitution over tests into /tmp/x/", "cp <(find tests -name a.py) /tmp/x/"),
 )
 for _name, _command in SHELL_TEST_ALLOWS:
     sh("builder-test: shell %s is allowed" % _name, _command, "allow", **BR)
@@ -13408,6 +13443,32 @@ sh("builder-test: shell pathlib write to a test under Path.cwd() is refused",
 sh("builder-test: shell open-write to a test under os.getcwd() is refused",
    "python3 - <<'EOF'\nimport os\nopen(os.path.join(os.getcwd(), 'tests', 'x.py'), 'w').write('x')\nEOF",
    "deny", rule=BT, carries=("test-author",), **BR)
+
+# ---- a `.` or `./` root in a checkout whose root holds a tests folder. GITMAIN holds none (its `.`
+# case above stays allowed), so these cases get their own checkout, built on first use.
+DOTROOT = os.path.join(ROOT, "dotroot")
+
+
+def _build_dotroot():
+    make_repo(DOTROOT, {"tests/test_a.py": "def test_a():\n    assert True\n",
+                        "src/app.py": "x = 1\n", "README.md": "base\n"})
+
+
+lazy_fixture([DOTROOT], _build_dotroot)
+DR = dict(B, cwd=DOTROOT)
+DOT_ROOT_WRITES = (
+    ("grep -rl over . piped to xargs, sed -i", "grep -rl old . | xargs sed -i s/a/b/"),
+    ("grep -rl over ./ piped to xargs, sed -i", "grep -rl old ./ | xargs sed -i s/a/b/"),
+    ("find . for test_*.py piped to xargs, sed -i", "find . -name 'test_*.py' | xargs sed -i s/a/b/"),
+    ("find ./ for test_*.py piped to xargs, sed -i", "find ./ -name 'test_*.py' | xargs sed -i s/a/b/"),
+    ("find . for test_*.py, -exec sed -i", "find . -name 'test_*.py' -exec sed -i s/a/b/ {} +"),
+)
+for _name, _command in DOT_ROOT_WRITES:
+    sh("builder-test: shell write, %s, is refused" % _name, _command, "deny", rule=BT,
+       carries=("test-author",), **DR)
+# A root with no tests in it is still allowed, in the same checkout.
+sh("builder-test: shell write, grep -rl over src piped to xargs, sed -i, is allowed",
+   "grep -rl old src | xargs sed -i s/a/b/", "allow", **DR)
 
 # ---- the diff, judged at commit, push and SubagentStop
 FAMILY = "diff"
