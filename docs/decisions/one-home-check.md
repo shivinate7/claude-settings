@@ -73,8 +73,8 @@ Paraphrase pass, `python3 lint/find_copies.py --measure lint/paraphrase_labelled
 - Paraphrase pass: see Measured. Report-only, never in CI.
 - Code lines have one home, `word_runs.code_mask` (17:01 CST): true for a line in a fenced block or an indented
   code block. A line indented four columns or more is a fence only inside a list item. At the top level it starts
-  indented code (after a blank line or at the start, not in a list item). No reader walks fences, calls `is_fence`
-  or toggles on a fence mark.
+  indented code (after a blank line or at the start, not in a list item). The eight word-run readers walk no fences,
+  call no `is_fence` and toggle on no fence mark. Five other readers still do; step `fence-readers-one-home` moves them.
 
 Kind: process
 Home: rule:building-one-home-per-capability
