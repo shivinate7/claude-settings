@@ -10,6 +10,7 @@ single-profile fallback. These cover the cross-part fallback, a green control, a
 LoadHookTests covers the load hook: the runs it must not trust under a failed install, the names it must not log, and
 what it costs.
 """
+import importlib.util
 import os
 import sys
 import unittest
@@ -157,20 +158,29 @@ COUNT_WRAPPER = ("import os\n"
                  "os.execv(sys.executable, [sys.executable] + sys.argv[2:])\n")
 
 
-def hook_stat_catcher(sidecar):
-    """A catcher that appends the inode and mtime of the load hook it runs under to `sidecar`, then asserts on the
-    plant."""
-    return ("import os\n"
-            "import sys\n"
+# Appended to the load hook by the first catcher run that finds it unmarked. A rewrite of the hook drops it.
+HOOK_MARKER = "# replay marker: the load hook was written once for this replay\n"
+
+
+def hook_marker_catcher(sidecar):
+    """A catcher that appends 'marked' or 'unmarked' to `sidecar` for the load hook it runs under, marks the hook when
+    it is unmarked, then asserts on the plant. One replay logs one 'unmarked' and then only 'marked' when the hook is
+    written once."""
+    return ("import sys\n"
             "import sitecustomize\n"
             "from calc import add\n\n"
-            "st = os.stat(sitecustomize.__file__)\n"
+            "hook = sitecustomize.__file__\n"
+            "with open(hook, encoding='utf-8') as handle:\n"
+            "    marked = %r in handle.read()\n"
             "with open(%r, 'a', encoding='utf-8') as handle:\n"
-            "    handle.write('%%d %%d\\n' %% (st.st_ino, st.st_mtime_ns))\n"
+            "    handle.write('marked\\n' if marked else 'unmarked\\n')\n"
+            "if not marked:\n"
+            "    with open(hook, 'a', encoding='utf-8') as handle:\n"
+            "        handle.write(%r)\n"
             "if add(1, 2) != 3:\n"
             "    print('FAIL: add(1, 2) is not 3')\n"
             "    sys.exit(1)\n"
-            "print('ok')\n") % (sidecar,)
+            "print('ok')\n") % (HOOK_MARKER, sidecar, HOOK_MARKER)
 
 
 def probe_catcher(sidecar):
@@ -328,7 +338,7 @@ class LoadHookTests(unittest.TestCase):
         defects = [dict(ci.defect("kb-cjs", "return a + b", "return a - b", CJS_CATCHER, file=CJS_MODULE),
                         argv=["node", CJS_CATCHER])]
         code, out, err = ci.known_run(defects, repo, profile=cross_part_profile(ci.FAILING_INSTALL))
-        self.assert_unknown(code, out, err, "kb-cjs", "part extra")
+        self.assert_unknown(code, out, err, "kb-cjs", MISSING_NODE, "part extra")
 
     def test_a_python_dotted_import_of_a_missing_top_package_reads_unknown_naming_the_package(self):
         # Green on the old code: importing kb_pkg.sub first asks for kb_pkg, which the hook logs by name.
@@ -353,7 +363,11 @@ class LoadHookTests(unittest.TestCase):
                            "with every install passing, the catcher's environment carries no load hook")
 
     def test_a_stdlib_optional_import_under_a_failed_install_reads_caught_because_no_install_owes_it(self):
-        # Green pin: the hook skips a standard-library name, so no install is blamed for msvcrt.
+        # Green pin: the hook skips a standard-library name, so no install is blamed for msvcrt. The scope is checked
+        # first: msvcrt is a standard-library name and this platform lacks it, so the catcher takes its fallback. The CI
+        # job that runs this file is ubuntu-latest.
+        self.assertIn("msvcrt", sys.stdlib_module_names, "msvcrt must be a standard-library name for this pin")
+        self.assertIsNone(importlib.util.find_spec("msvcrt"), "msvcrt must be absent here, so the import fails")
         repo = python_repo(STDLIB_FALLBACK_CATCHER)
         defects = [ci.defect("kb-stdlib", "return a + b", "return a - b", CATCHER, file="calc.py")]
         code, out, err = ci.known_run(defects, repo, profile=cross_part_profile(ci.FAILING_INSTALL))
@@ -378,17 +392,17 @@ class LoadHookTests(unittest.TestCase):
                            "a present package's missing subpath is no failed install's gap")
 
     def test_the_load_hook_file_is_written_once_for_two_defects_in_one_replay(self):
-        sidecar = os.path.join(ci.fresh(), "hook_stats.txt")
-        repo = python_repo(hook_stat_catcher(sidecar))
+        sidecar = os.path.join(ci.fresh(), "hook_marks.txt")
+        repo = python_repo(hook_marker_catcher(sidecar))
         defects = [ci.defect("kb-cost-a", "return a + b", "return a - b", CATCHER, file="calc.py"),
                    ci.defect("kb-cost-b", "return a + b", "return a - b", CATCHER, file="calc.py")]
         code, out, err = ci.known_run(defects, repo, profile=cross_part_profile(ci.FAILING_INSTALL))
         self.assertEqual(ci.verdicts_of(out), {"kb-cost-a": "CAUGHT", "kb-cost-b": "CAUGHT"},
                          "the two defects are caught, so the replay ran both:\n" + out + err)
-        stats = lines_of(sidecar)
-        self.assertEqual(len(stats), 4, "one clean and one planted run per defect logs its hook: %s" % stats)
-        self.assertEqual(len(set(stats)), 1, "the load hook file changed between runs of one replay, so it was written "
-                         "more than once: %s" % stats)
+        marks = lines_of(sidecar)
+        self.assertEqual(marks, ["unmarked", "marked", "marked", "marked"],
+                         "one clean and one planted run per defect, all under one hook: the hook was rewritten between "
+                         "runs of one replay, so it was written more than once: %s" % marks)
 
     def test_a_replay_starts_one_catcher_process_per_clean_and_planted_run(self):
         wrapper = os.path.join(ci.fresh(), "count_starts.py")
