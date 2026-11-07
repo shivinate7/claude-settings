@@ -978,12 +978,15 @@ class All(Base):
     WAIT, QUEUE = "page01", "queue02"
     VERDICT = r"\b(changed\s+\d+|same|refused|unknown)\b"
 
-    def repo(self):
+    def repo(self, mark=None):
+        """The fixture repo. `mark` sets the extras file's "rolled-out" value when given, such as a bad mark."""
         root = os.path.join(self.tmp.name, "repo")
         registry = {"kinds": {}, "artifacts": [
             {"id": self.WAIT, "url": "https://claude.ai/artifact/" + self.WAIT, "role": "waiting-page", "account": "work"},
             {"id": self.QUEUE, "url": "https://claude.ai/artifact/" + self.QUEUE, "role": "queue-page", "account": "work",
              "collections": ["items"]}]}
+        if mark is not None:
+            registry["rolled-out"] = mark
         write_text(os.path.join(root, ".claude", "layout-extras.json"), json.dumps(registry))
         return root
 
@@ -1038,6 +1041,22 @@ class All(Base):
         queue = self.export_folder(worktree, self.QUEUE)
         self.assertEqual(read_text(os.path.join(queue, "items", "q1.json")), canonical(item(2)), "the queue's item did not land")
         self.assertFalse(os.path.exists(os.path.join(queue, "answers")), "an artifact exported a collection its entry does not list")
+
+    def test_a_bad_rolled_out_mark_still_exports_the_waiting_page_to_waiting(self):
+        """A "rolled-out" that is not JSON true or false: the export reads the waiting folder under either mark, so the
+        waiting page still exports to waiting/ and the queue to artifacts/<id>/. The valid mark is the control."""
+        for label, mark in (("valid", True), ("bad", "yes")):
+            with self.subTest(mark=label):
+                worktree = self.out("worktree-%s" % label)
+                r = self.run_all(self.repo(mark), self.fetched_all(self.docs()), worktree)
+                self.assertEqual(r.returncode, 0, shown(r))
+                self.assertVerdictOf(r, self.WAIT, r"changed\s+5\b")  # five docs, one per collection
+                waiting = self.export_folder(worktree, self.WAIT)
+                self.assertEqual(read_text(os.path.join(waiting, "items", "i1.json")), canonical(item(1)),
+                                 "under a %s mark the waiting page's item did not land in waiting/" % label)
+                queue = self.export_folder(worktree, self.QUEUE)
+                self.assertEqual(read_text(os.path.join(queue, "items", "q1.json")), canonical(item(2)),
+                                 "under a %s mark the queue's item did not land in artifacts/" % label)
 
     def test_each_artifact_gets_one_verdict_line_with_its_verdict(self):
         root, fetched, worktree = self.repo(), self.fetched_all(self.docs()), self.out("worktree")
