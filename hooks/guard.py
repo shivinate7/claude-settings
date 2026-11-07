@@ -3846,9 +3846,12 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
         refuse(tool, "deny", "roadmap-one-writer", RECORD_REASON, matched)
 
     # 6b. A pull request opened without --draft.
-    for text, _in_message in _substitutions(stripped)[0]:
-        if any(undrafted_pr_create(seg) for seg in split_segments(text) if seg.strip()):
-            refuse(tool, "deny", "draft-pr", DRAFT_PR_REASON, "gh pr create")
+    # The lines a shell reads (shell_line_texts), each walked for its substitutions: a python body that
+    # quotes the call in a string is text, `echo $(gh pr create)` and `bash -c '...'` are not.
+    for line_text in shell_line_texts(raw):
+        for text, _in_message in _substitutions(line_text)[0]:
+            if any(undrafted_pr_create(seg) for seg in split_segments(text) if seg.strip()):
+                refuse(tool, "deny", "draft-pr", DRAFT_PR_REASON, "gh pr create")
 
     # 6c. A lane commit of the generated records page (decision records-index-at-merge).
     matched = records_page_hit(stripped, cwd)
@@ -4228,6 +4231,18 @@ def impeccable_shell_hit(segment: str) -> str:
 _HERE_STRING = re.compile(r"@(['\"])[ \t]*\r?\n(.*?)\r?\n\1@", re.S)
 
 
+def shell_line_texts(raw: str) -> list:
+    """The texts of a command that a shell reads: its lines with every heredoc body a shell does not read
+    dropped, and the `$(...)` and backticks an unquoted heredoc body runs. A Python, Node, Perl or Ruby
+    body no shell reads is not in them. The one reader for each rule that judges shell lines."""
+    texts = [strip_heredoc_bodies(raw, shells_only=True)]
+    if "<<" in raw:
+        for quote, body, _ in _split_heredocs(raw)[1]:
+            if not quote:
+                texts.extend(t for t, _ in _substitutions(body, heredoc=True)[0][:-1])
+    return texts
+
+
 def impeccable_command_hit(raw: str) -> str:
     """Judge a whole command for impeccable. Only a body a shell reads is judged as shell lines,
     and an unquoted heredoc body or an expandable here-string is judged by the `$(...)` and
@@ -4241,11 +4256,7 @@ def impeccable_command_hit(raw: str) -> str:
                                                           heredoc=True)[0][:-1])
             return "x"
         raw = _HERE_STRING.sub(cut, raw)
-    texts.append(strip_heredoc_bodies(raw, shells_only=True))
-    if "<<" in raw:
-        for quote, body, _ in _split_heredocs(raw)[1]:
-            if not quote:
-                texts.extend(t for t, _ in _substitutions(body, heredoc=True)[0][:-1])
+    texts.extend(shell_line_texts(raw))
     for text in texts:
         for segment in split_segments(text):
             matched = impeccable_shell_hit(segment)
