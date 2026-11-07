@@ -1410,11 +1410,14 @@ class CompactionCarryTests(unittest.TestCase):
                 self.assertBlocksNaming(self.stop(self.compacted_turn(reply)), *([name] if name else []))
 
     def test_cc_green_recovered_item_naming_a_commit_pr_or_url_passes(self):
-        # Catches: a Recovered item sourced as "commit <hex>", "PR <n>", "GitHub PR <n>" or a github.com URL is
-        # refused as sourceless. Each names where the fact came from.
+        # Catches: a Recovered item sourced as "commit <hex>" (with or without backticks or a colon), "PR <n>",
+        # "PR#<n>", "GitHub PR <n>" or a github.com URL is refused as sourceless. Each names where the fact came from.
         items = [
             "ruling X from commit abc1234",
+            "ruling X from commit `abc1234`",
+            "ruling X from commit: abc1234",
             "ruling X from PR #978",
+            "ruling X from PR#978",
             "ruling X from GitHub PR 978",
             "ruling X from https://github.com/shivinate7/claude-settings/pull/978",
         ]
@@ -1422,6 +1425,15 @@ class CompactionCarryTests(unittest.TestCase):
             with self.subTest(item=item):
                 reply = report_lines("Recovered: " + item, "Handoff gave: none")
                 self.assertIsNone(self.stop(self.compacted_turn(reply)), "a sourced Recovered item blocks: " + item)
+
+    def test_cc_red_bare_hash_number_is_no_source(self):
+        # Catches: a bare "#<n>" passes as a source. "#3 of my notes" names no PR, commit or page.
+        items = ["ruling X from #3 of my notes", "ruling X (#1 priority)", "ruling X from memory (#2)"]
+        for item in items:
+            with self.subTest(item=item):
+                out = self.stop(self.compacted_turn(report_lines("Recovered: " + item, "Handoff gave: none")))
+                self.assertIsNotNone(out, "a bare #<n> passes as a source: " + item)
+                self.assertEqual(out["decision"], "block", item)
 
     def test_cc_red_recovered_item_with_no_source_still_blocks_with_the_new_forms(self):
         # Catches: a widened source form passes an item with no source, such as a bare word "commit" or "memory".

@@ -341,6 +341,24 @@ class WaitingPage(Tree):
             with self.subTest(url=url):
                 self.assertFalse(self.layout.is_waiting_page_url(self.tree, url))
 
+    def test_a_bare_id_or_a_url_that_is_no_artifact_link_is_not_the_page(self):
+        # Catches: the last path segment of any URL counts as an id, so a bare id, another site's or a chat's URL
+        # that ends in the page's id, or an artifact URL with an extra segment, names the page.
+        self.set_page(self.URL)
+        for url in ("abc123", "https://example.com/abc123", "https://claude.ai/chat/abc123",
+                    "https://claude.ai/artifact/zzz/abc123"):
+            with self.subTest(url=url):
+                self.assertFalse(self.layout.is_waiting_page_url(self.tree, url), "%s names the page" % url)
+                self.assertEqual(self.layout.artifact_id(url), "", "%s has an artifact id" % url)
+
+    def test_a_real_artifact_link_with_a_query_or_slash_is_the_page(self):
+        # A control: the forms that must keep counting once a bare id stops counting.
+        self.set_page(self.URL)
+        for url in ("https://claude.ai/artifact/abc123", "https://claude.ai/code/artifact/abc123",
+                    "https://claude.ai/code/artifact/abc123/?x=1"):
+            with self.subTest(url=url):
+                self.assertTrue(self.layout.is_waiting_page_url(self.tree, url), "%s does not name the page" % url)
+
     def test_a_repo_with_no_page_has_no_page_url(self):
         self.assertFalse(self.layout.is_waiting_page_url(self.tree, self.URL))
         self.roll_out()
