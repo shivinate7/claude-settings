@@ -864,6 +864,8 @@ BRANCH_SLUG_REASON = (
     "isolated agent's command that names git twice, so a branch like that cannot be pushed or "
     "opened from a lane's worktree. "
     "Remedy: name the branch with a slug that has no \"git\" part, such as \"push-after-failed-commit\". "
+    "For a worktree add that names no branch, pass `-b <slug>`, or end the path with a folder name "
+    "that has no \"git\" part. "
     "Existing branches keep their names: push one with `HEAD:<branch>` and fetch with the default "
     "refspec. (decision branch-slug-no-git, a new branch name has no git part)"
 )
@@ -891,6 +893,12 @@ def flagged_values(args, flags):
     return values
 
 
+def long_prefix(arg, full, least):
+    """True when `arg` is `full` or an unambiguous prefix of it that git accepts, `least` characters
+    or more. `least` is the shortest prefix no sibling long option shares."""
+    return arg.startswith("--") and len(arg) >= least and full.startswith(arg)
+
+
 def branch_new_name(args):
     """The new name of a `git branch` call, else None for a list, delete, copy or edit. A rename
     (`-m|-M [<old>] <new>`) names its new branch with its last word, so a lone word is the new name."""
@@ -900,13 +908,13 @@ def branch_new_name(args):
             words.append(arg)
         elif arg == "--":
             ended = True
-        elif arg in ("-m", "-M", "--move"):
+        elif arg in ("-m", "-M") or long_prefix(arg, "--move", 4):
             rename = True
         elif arg.startswith("--track=") or arg in BRANCH_NEW_FLAGS:
             continue
         elif not arg.startswith("--") and set(arg[1:]) <= set("ftq"):
             continue
-        elif not arg.startswith("--") and set(arg[1:]) <= set("ftqmM") and set(arg[1:]) & set("mM"):
+        elif not arg.startswith("--") and set(arg[1:]) <= set("ftqvmM") and set(arg[1:]) & set("mM"):
             rename = True
         else:
             return None
@@ -915,15 +923,15 @@ def branch_new_name(args):
     return words[-1] if rename else words[0]
 
 
-# `worktree add` flags that take a value, and the flags that leave no branch named after the path.
-WORKTREE_VALUE_FLAGS = ("-b", "-B", "--reason")
-WORKTREE_NO_BRANCH_FLAGS = ("--detach", "--orphan")
+# `worktree add` flags that take a value in the next word. `--detach` (`-d`) is the one flag that makes
+# no branch. `--orphan` makes one, named after the path, so it stays judged like a plain path-only add.
+WORKTREE_VALUE_FLAGS = ("-b", "-B")
 
 
 def worktree_path_branch(args):
     """The branch a path-only `worktree add <path>` creates: the path's last part. None when the call
-    has a commit-ish, `-b|-B`, `--detach` or `--orphan`, or no path. The guard reads no refs, so any
-    path-only add counts as creating (decision branch-slug-no-git)."""
+    has a commit-ish, `-b|-B`, `--detach` (or `-d`, or a prefix such as `--det`), or no path. The guard
+    reads no refs, so any path-only add counts as creating (decision branch-slug-no-git)."""
     words, cursor, ended = [], 0, False
     while cursor < len(args):
         arg = args[cursor]
@@ -932,9 +940,9 @@ def worktree_path_branch(args):
             words.append(arg)
         elif arg == "--":
             ended = True
-        elif arg in WORKTREE_NO_BRANCH_FLAGS:
+        elif arg == "-d" or long_prefix(arg, "--detach", 3):
             return None
-        elif arg in WORKTREE_VALUE_FLAGS:
+        elif arg in WORKTREE_VALUE_FLAGS or long_prefix(arg, "--reason", 5):
             cursor += 1
     if len(words) != 1:
         return None

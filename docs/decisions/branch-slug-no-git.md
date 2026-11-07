@@ -7,7 +7,7 @@ Coordinator, 2026-11-07 14:51 CST: a new branch name has no `git` part. Existing
 - A part is a piece of the name split on `-`, `_`, `/` and `.`. A part counts when it is exactly `git`, in any case. `git-push-fix`, `fix/git-hooks`, `git_x`, `wip.git` and `Git-x` are refused. `github-pin`, `digit-parse` and `fix.gitignore` pass.
 - The acts: `switch -c|-C`, `checkout -b|-B`, `branch <new>`, `branch -m|-M [<old>] <new>`, `worktree add -b|-B`, and a path-only `worktree add <path>`. A `branch` call with a delete, list or edit flag, or no name, is not a creation and passes. A copy (`branch -c|-C`) creates a branch, but the rule does not read it (see Misses).
 - A rename names its new branch with its last name argument, as git's usage `(-m|-M) [<old>] <new>` says. A lone argument is the new name. `branch -m old git-new` and `branch -m git-new` are refused. `branch -m git-old new` passes.
-- A `worktree add` with no `-b|-B` and no commit-ish names its new branch after the path's last part. The guard reads no refs, so it treats any path-only add as creating, even when a branch of that name exists. A commit-ish, `-b|-B` or `--detach` ends that reading.
+- A `worktree add` with no `-b|-B` and no commit-ish names its new branch after the path's last part. The guard reads no refs, so it treats any path-only add as creating, even when a branch of that name exists. `--orphan` names its branch the same way, so it counts too. A commit-ish, `-b|-B` or `--detach` (`-d`, or a prefix such as `--det`) ends that reading.
 - A switch to an existing git-named branch passes.
 - Bash and PowerShell are judged the same way. Quoted text, a comment and a heredoc body are not an act.
 - The remedy names a slug with no `git` part and never prints the refused name.
@@ -18,7 +18,7 @@ Workaround for an old branch: push with `HEAD:<branch>`, and fetch with the defa
 
 Misses, by design: a branch made by `git push` to a new remote name, and `create_session`'s `outcome_branch`.
 
-Misses, not by design, tracked in debt `branch-slug-no-git-forms` (rare and harmless, until 2026-11-21): a copy (`branch -c|-C`), `--orphan`, short flags bundled with the create flag (`-qb`, `-fc`), and a name held in a shell variable.
+Misses, not by design, tracked in note `branch-slug-no-git-forms` (rare and harmless, until 2026-11-21): a copy (`branch -c|-C`), short flags bundled with the create flag (`-qb`, `-fc`), and a name held in a shell variable.
 
 Cost: no git read and no file. A text check on calls that already parse git (`git_calls`), once per segment.
 
