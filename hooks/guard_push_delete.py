@@ -654,8 +654,8 @@ def parent_delete_hit(segments, number: int, cwd: str):
 # Through that link a hand-run `npm ci`, or a recursive delete of what is inside it, empties the
 # other checkout's install. The rule reads the filesystem: a real folder, or none, is judged as it
 # always was. A bare `rm node_modules` removes only the link, so it stays allowed.
-# ponytail: `-w` and `--workspace` are not read; the install is judged against the working folder
-# alone.
+# `--prefix` is not read; the install is judged against the working folder alone. A workspace flag is
+# read for `npm version` only (NPM_WORKSPACE_FLAGS).
 # THE READ-ONLY LIST: every npm subcommand and alias that never rewrites node_modules, by the npm 10.9.9
 # list in lib/utils/cmd-list.js. A subcommand off this list is refused in a linked folder, so a new npm
 # command, a typo and an abbreviation fail closed. The list is a curated copy because the guard cannot
@@ -679,6 +679,11 @@ NPM_VALUE_FLAGS = {
 }
 # Options after which the command changes nothing in the working folder's install.
 NPM_NO_CHANGE = {"-g", "--global", "--location=global", "--help", "-h", "--dry-run"}
+# Subcommands that run install scripts even with --dry-run, so a dry run is no exemption for them.
+NPM_DRY_RUN_WRITERS = {"rebuild", "rb", "edit"}
+# With one of these, `npm version` reifies the linked root, so it changes the install. Without one it
+# only rewrites package.json.
+NPM_WORKSPACE_FLAGS = {"-w", "-ws"}
 DELETE_WORDS = ("rm", "remove-item", "ri", "del", "erase", "rd", "rmdir")
 
 
@@ -751,9 +756,14 @@ def linked_nm_hit(segment: str, where: str) -> str:
                 at += 1
             else:
                 word = words[at].lower()
+                version_in_workspace = word == "version" and any(
+                    flag in NPM_WORKSPACE_FLAGS or flag.startswith("--workspace") for flag in words)
                 # `audit` rewrites the install when `fix` follows it, after any flag.
-                if word not in NPM_READ_ONLY or (word == "audit" and "fix" in words[at + 1:]):
+                if word not in NPM_READ_ONLY or (word == "audit" and "fix" in words[at + 1:]) or (
+                        version_in_workspace):
                     subcommand = word
+                if word in NPM_DRY_RUN_WRITERS:
+                    words = [flag for flag in words if flag != "--dry-run"]
                 break
         if subcommand and not NPM_NO_CHANGE.intersection(words) and is_link(
                 os.path.join(npm_prefix(where), "node_modules")):
