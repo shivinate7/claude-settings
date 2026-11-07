@@ -883,13 +883,16 @@ def role_proof_hit(stripped: str, transcript: str) -> str:
 RAW_ROLE_REASON = (
     "merge-role-raw: this session's own record does not prove a tier that may merge. In a cloud session only the "
     "batch runner merges, and the merge tool refuses every other tier before a confirm; a raw `gh pr merge` or the "
-    "host's merge tool gets the same refusal. If this session is the batch runner: run get_session (no argument) alone in "
-    "its own turn, then retry. Any other session: post the review record on the PR for your branch; the batch runner "
-    "finds it (list_sessions, tag cs-build:batch-runner, same cs-repo, names the runner). "
+    "host's merge tool gets the same refusal. To gain the merge role, the batch runner starts with `merge --role "
+    "batch-runner`. A lane, coordinator or triage session hands its PR to the batch runner instead: post the review "
+    "record on the PR for your branch; the batch runner finds it (list_sessions, tag cs-build:batch-runner, same "
+    "cs-repo, names the runner). "
     "(decision session-tiers, the coordinator never merges; decision merge-practices)"
 )
 
 
+# Ruling tier-boundaries-enforced (2026-11-01): solo and one-lane sessions keep merging their own work, so an untagged
+# session keeps today's ask here while merge.py's file check is stricter.
 def raw_role_hit(transcript: str) -> bool:
     """True when a raw merge in a cloud session comes from a session the merge tool would refuse. Local sessions are never
     refused here: the tool's role check runs in the cloud only. A role the tool records for this session
