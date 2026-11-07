@@ -1210,7 +1210,7 @@ class ReadyNotStarted(ReadyFixture):
     no valid `paused` field, and no open waiting-page item homed to it has a lane. Its age is whole hours from its
     updatedAt to the live read, or None. The build prints `ready not started: <id> (<age>h)` per step, or one
     `ready not started: <why>` when the read is unknown. A listed step inside the age limit never changes the exit
-    code; one over it does (ReadyNextAct)."""
+    code; one over it does (ReadyNextAct). The limit and its exit 1 follow coordinator 12:56 and 13:40 CST Nov 7, part 3a."""
 
     def test_todo_step_in_phase_now_with_no_lane_is_listed(self):
         self.ready_step("c2", order=2)
@@ -1363,7 +1363,8 @@ class ReadyNotStarted(ReadyFixture):
         self.ready_step("c2", order=2)  # 3 h 10 min before the read: age 3
         self.ready_step("c3", order=3, updatedAt=self.before(26 * 60 + 10))  # age 26: over the 24 h limit, so exit 1
         self.known_read()
-        page, _ = self.build_from_main("--live", str(self.live), expect=(0, 1))
+        # Coordinator 12:56 and 13:40 CST Nov 7, part 3a: a ready step over the limit exits 1, so only 1 is accepted.
+        page, _ = self.build_from_main("--live", str(self.live), expect=(1,))
         ready = self.ready_block(page)
         self.assertEqual(self.ready_ids(ready), ["c2", "c3"])
         self.assertEqual([s["age"] for s in ready["steps"]], [3, 26], "age is whole hours from updatedAt to the read")
