@@ -2995,24 +2995,27 @@ const rplLast = async (page) => (await rplKeys(page)).at(-1);
 // Whether the page sends a wake comment with these words, once it has or at 3 s. Never throws, so a missing comment fails by name.
 const wakeHas = (page, words) => page.waitForFunction((w) => window.__sent.some((s) => String(s.text).includes(w)), words, { timeout: 3000 }).then(() => true, () => false);
 // Whether the line under the reply's thread holds the words, once it shows them or at 3 s. Never throws.
-const rplLineHas = (page, words) => page.waitForFunction((w) => { const l = document.querySelector(".replyend .sline"); return !!l && l.textContent.includes(w); }, words, { timeout: 3000 }).then(() => true, () => false);
-// Presses Reply on the answered ask and waits for its box. A Reply that is not there fails by name.
+// scope: the holder of the line, such as `.replyend[data-end="item.<id>"]`. The default is the first thread's end.
+const rplLineHas = (page, words, scope = ".replyend") => page.waitForFunction(([w, s]) => { const l = document.querySelector(s + " .sline"); return !!l && l.textContent.includes(w); }, [words, scope], { timeout: 3000 }).then(() => true, () => false);
+// A reply box's id selector. A root ask id has no dot; an item's thread key, "item.<id>", has one, so each dot is escaped.
+const rplSel = (pre, root) => "#" + pre + String(root).replace(/[^A-Za-z0-9_-]/g, (c) => "\\" + c);
+// Presses Reply on a thread (its root ask id, or "item.<id>") and waits for its box. A Reply that is not there fails by name.
 async function openReply(page, root) {
-  await mustHave(page, `#reply-${root}`, "Reply control on the answered ask");
-  await page.click(`#reply-${root}`);
-  await mustHave(page, `#rt-${root}`, "reply box");
+  await mustHave(page, rplSel("reply-", root), "Reply control for " + root);
+  await page.click(rplSel("reply-", root));
+  await mustHave(page, rplSel("rt-", root), "reply box");
 }
 // Presses Send reply in the open box, then waits for its write. The button must be on, so a press that cannot go fails by name.
 async function sendReply(page, root) {
-  await mustHave(page, `#rs-${root}`, "Send reply button");
-  assert.equal(await page.locator(`#rs-${root}`).isDisabled(), false, "Send reply is off with the reply typed");
+  await mustHave(page, rplSel("rs-", root), "Send reply button");
+  assert.equal(await page.locator(rplSel("rs-", root)).isDisabled(), false, "Send reply is off with the reply typed");
   const before = (await askWrites(page)).length;
-  await page.click(`#rs-${root}`);
+  await page.click(rplSel("rs-", root));
   await waitAskWrites(page, before + 1);
 }
 async function replyTo(page, root, text) {
   await openReply(page, root);
-  await page.fill(`#rt-${root}`, text);
+  await page.fill(rplSel("rt-", root), text);
   await sendReply(page, root);
 }
 
@@ -3232,6 +3235,175 @@ test("reply to an answer: a refused reply keeps focus in the reply form", async 
   assert.equal(refused, true, "the refused reply's hint does not say Not saved");
   const active = await page.evaluate(() => { const a = document.activeElement; return a && a !== document.body ? a.id || a.tagName : "BODY"; });
   assert.ok([`rt-${RPL_ROOT}`, `rs-${RPL_ROOT}`].includes(active), "after the refused reply focus is on " + active + ", not the reply form");
+});
+
+// ---------------------------------------------------------------- reply to an item (step item-reply-back)
+// Contract: docs/design/item-reply-back-notes.md, sections 1-8 and 10; the mockup is docs/design/item-reply-back.html.
+// An item reply is one new asks/<id> record {id, text, at, item}, with no re. It shares the ask reply's box, Send, Undo, lock and wake comment.
+// Its thread key is "item." + the item id, so its controls are #reply-item.<id>, #rt-item.<id> and so on. rplSel escapes the dot.
+const IRP_TEXT = "Please add option C to the rail guard review";
+const IRP_DRAFT = "Half a thought about the rail guard";
+// Before the visit (VISIT_AT) and after the last answer (ANSWERED_AT): a reply that is not new, so its card stays folded at load.
+const IRP_OLD = "2026-10-26T12:00:00Z";
+// An owed item: open, no answer, with the session's reply. An owed card never folds, so its Reply is in view at load.
+const IRP_OWED = mk("irp-owed", 2, { added: at(6), reply: "I added option C. Pick again." });
+// An answered item with the session's reply, folded at load.
+const IRP_ANS = mk("irp-ans", 1, { added: at(5), reply: "Thanks, noted.", replied: IRP_OLD });
+// An open item with no reply: no thread, so no Reply.
+const IRP_NONE = mk("irp-none", 3, { added: at(7) });
+const irpKey = (it) => "item." + it.id;
+const irpCard = (page, it) => mustHave(page, `#item-${it.id}`, `the card of No. ${it.n}`);
+// Whether a control shows: visible once it is, or at 3 s. A folded card's Reply is in the DOM but hidden, so only visibility counts.
+const irpShows = (page, sel) => page.locator(sel).first().waitFor({ state: "visible", timeout: 3000 }).then(() => true, () => false);
+// Whether a control shows now, with no wait. For a control that must not show.
+const irpShownNow = (page, sel) => page.locator(sel).isVisible();
+
+test("reply to an item, case 1: Reply shows on an owed item and on an answered item once its fold opens, and never on an item with no reply", async (t) => {
+  const page = await open(t, { items: [IRP_OWED, IRP_ANS, IRP_NONE], answers: answerOf(IRP_ANS, "a", { note: "Kept the red one." }), storage: VISIT }); if (!page) return;
+  // Each card is on the page before its Reply is looked for, so an absent Reply is a missing one.
+  await irpCard(page, IRP_OWED);
+  assert.equal(await irpShows(page, rplSel("reply-", irpKey(IRP_OWED))), true, `Reply does not show on the owed No. ${IRP_OWED.n}`);
+  await irpCard(page, IRP_ANS);
+  assert.equal(await irpShownNow(page, rplSel("reply-", irpKey(IRP_ANS))), false, `Reply shows on the folded answered No. ${IRP_ANS.n}`);
+  const fold = card(page, IRP_ANS).locator("button.unfold");
+  await need(fold, `No. ${IRP_ANS.n} has no fold control`);
+  await fold.click();
+  assert.equal(await irpShows(page, rplSel("reply-", irpKey(IRP_ANS))), true, `Reply does not show on the answered No. ${IRP_ANS.n} once its fold opens`);
+  await irpCard(page, IRP_NONE);
+  assert.equal(await page.locator(rplSel("reply-", irpKey(IRP_NONE))).count(), 0, `Reply shows on No. ${IRP_NONE.n}, which has no reply`);
+});
+
+test("reply to an item, case 2: Send reply writes one asks record {id, text, at, item} with no re, and the item record is never written", async (t) => {
+  const page = await open(t, { items: [IRP_OWED], storage: VISIT }); if (!page) return;
+  await irpCard(page, IRP_OWED);
+  await replyTo(page, irpKey(IRP_OWED), IRP_TEXT);
+  const log = await page.evaluate(() => window.__log);
+  const writes = log.filter((l) => l[0] === "set" || l[0] === "update" || l[0] === "delete");
+  assert.deepEqual(writes.map((l) => [l[0], l[1]]), [["set", "asks"]], "Send reply made these writes: " + JSON.stringify(writes.map((l) => [l[0], l[1]])));
+  const [, , key, body] = writes[0];
+  assert.match(key, /^ask-[0-9a-z]+$/, "the key is not ask-<id>: " + key);
+  assert.deepEqual(Object.keys(body).sort(), ["at", "id", "item", "text"], "the record holds " + Object.keys(body).join(", "));
+  assert.equal(body.id, key, "the id field is not the key");
+  assert.equal(body.text, IRP_TEXT, "the text is not the owner's words");
+  assert.equal(body.item, IRP_OWED.id, "item is " + JSON.stringify(body.item) + ", not the item " + IRP_OWED.id);
+  assert.match(body.at, RPL_ISO, "at is not an ISO time: " + body.at);
+  assert.equal(log.some((l) => l[2] === IRP_OWED.id), false, "the item record was written or deleted");
+});
+
+test("reply to an item, case 3: the wake comment reads 'Replied on the waiting page. Writer: <writer>. Ask <id> on item No. <n>, owned by <owner>: <text>.'", async (t) => {
+  const page = await open(t, { items: [IRP_OWED], storage: VISIT }); if (!page) return;
+  await irpCard(page, IRP_OWED);
+  await replyTo(page, irpKey(IRP_OWED), IRP_TEXT);
+  const key = await rplLast(page);
+  const words = `Replied on the waiting page. Writer: triage. Ask ${key} on item No. ${IRP_OWED.n}, owned by ${IRP_OWED.owner}: ${IRP_TEXT}.`;
+  assert.equal(await wakeHas(page, words), true, "no wake comment with the words " + JSON.stringify(words) + "; sent: " + JSON.stringify((await sent(page)).map((s) => s.text)));
+});
+
+test("reply to an item, case 4: while its item is on the page, an item reply is not in the Asks list, the ask count, or an orphan row", async (t) => {
+  const rec = { id: "ask-irp-rec", text: IRP_TEXT, at: "2026-10-30T08:00:00Z", item: IRP_OWED.id, owner: IRP_OWED.owner };
+  const plain = { id: "ask-irp-plain", text: "A plain question still waiting", at: "2026-10-31T08:00:00Z" };
+  const page = await open(t, { items: [IRP_OWED], dbExtra: { asks: { [rec.id]: rec, [plain.id]: plain } }, storage: VISIT }); if (!page) return;
+  // Its item is on the page before the Asks list is read, so an absent record is the rule and not a missing card.
+  await irpCard(page, IRP_OWED);
+  await mustHave(page, `#row-${plain.id}`, "row of the plain ask, so the Asks list is drawn");
+  assert.equal(await page.locator("#askList").getByText(IRP_TEXT).count(), 0, "the Asks list shows the item reply " + rec.id);
+  assert.equal((await page.textContent("#askCount")).trim(), "1", "the ask count is " + (await page.textContent("#askCount")).trim() + ", not 1: it counts the item reply");
+  assert.equal(await page.getByText("Re: an item no longer on this page").count(), 0, "an orphan row shows for the item reply " + rec.id + " while its item is on the page");
+});
+
+test("reply to an item, case 5: the item reply shows in its thread as a your-reply inset after the item's Reply, and the session's answer follows it", async (t) => {
+  // The answer's owner differs from the item's owner, so the words name the session that answered.
+  const rec = { id: "ask-irp-thr", text: IRP_TEXT, at: "2026-10-29T08:00:00Z", item: IRP_OWED.id, owner: "lane tier-fold", answered: "2026-10-29T09:00:00Z", reply: "Option C joins the rail guard review." };
+  const page = await open(t, { items: [IRP_OWED], dbExtra: { asks: { [rec.id]: rec } }, storage: VISIT }); if (!page) return;
+  await irpCard(page, IRP_OWED);
+  await mustHave(page, `#item-${IRP_OWED.id} .myreply`, `your-reply inset in the thread of No. ${IRP_OWED.n}`);
+  const order = await page.evaluate((id) => {
+    const rp = document.getElementById("rp-" + id), mine = document.querySelector("#item-" + id + " .myreply");
+    return { after: !!rp && !!mine && !!(rp.compareDocumentPosition(mine) & Node.DOCUMENT_POSITION_FOLLOWING), mine: mine ? mine.textContent : "", card: document.getElementById("item-" + id).innerText };
+  }, IRP_OWED.id);
+  assert.ok(order.mine.includes(IRP_TEXT), "the your-reply inset does not hold the words: " + JSON.stringify(order.mine));
+  assert.equal(order.after, true, "your reply does not follow the item's Reply in No. " + IRP_OWED.n);
+  const at = order.card.indexOf("Option C joins the rail guard review.");
+  assert.ok(at >= 0, "the session's answer does not show in No. " + IRP_OWED.n);
+  assert.ok(at > order.card.indexOf(IRP_TEXT), "the session's answer does not follow your reply in No. " + IRP_OWED.n);
+  assert.ok(order.card.includes("Reply from lane tier-fold"), "the answer's words do not say Reply from lane tier-fold");
+});
+
+test("reply to an item, case 6: a new answer on an item's reply marks the sunk card New reply and opens its folded fold", async (t) => {
+  const rec = { id: "ask-irp-new", text: IRP_TEXT, at: "2026-10-30T08:00:00Z", item: IRP_ANS.id, owner: "lane tier-fold", answered: "2026-10-31T09:00:00Z", reply: "Option C is in the review." };
+  const page = await open(t, { items: [IRP_ANS], answers: answerOf(IRP_ANS, "a", { note: "Kept the red one." }), dbExtra: { asks: { [rec.id]: rec } }, storage: VISIT }); if (!page) return;
+  await irpCard(page, IRP_ANS);
+  assert.equal(await markName(page, IRP_ANS), NEW_MARK, `No. ${IRP_ANS.n} draws no New reply mark for the new answer to its reply`);
+  const fold = card(page, IRP_ANS).locator("button.unfold");
+  await need(fold, `No. ${IRP_ANS.n} has no fold control`);
+  assert.equal(await fold.getAttribute("aria-expanded"), "true", `No. ${IRP_ANS.n} stays folded for the new answer to its reply`);
+});
+
+test("reply to an item, case 7: Undo deletes only the item's reply record and puts the words back in the reopened box", async (t) => {
+  const page = await open(t, { items: [IRP_OWED], storage: VISIT }); if (!page) return;
+  await irpCard(page, IRP_OWED);
+  await replyTo(page, irpKey(IRP_OWED), IRP_TEXT);
+  const key = await rplLast(page);
+  await mustHave(page, "#askUndo", "Undo control on the item reply's line");
+  await page.click("#askUndo");
+  await waitAskDeletes(page, 1);
+  const dels = await page.evaluate(() => window.__log.filter((l) => l[0] === "delete").map((l) => [l[1], l[2]]));
+  assert.deepEqual(dels, [["asks", key]], "Undo deleted " + JSON.stringify(dels) + ", not only the reply " + key);
+  await mustHave(page, rplSel("rt-", irpKey(IRP_OWED)), "reply box after Undo");
+  assert.equal(await page.inputValue(rplSel("rt-", irpKey(IRP_OWED))), IRP_TEXT, "Undo did not put the words back in the reply box");
+  assert.equal(await rplLineHas(page, "Undone. Your reply is back in the box, not sent.", `.replyend[data-end="${irpKey(IRP_OWED)}"]`), true, "the item's line does not say it was undone");
+  assert.equal(await wakeHas(page, `Undone on the waiting page. Ask ${key} is withdrawn.`), true, "no withdrawn wake for the item reply " + key);
+});
+
+test("reply to an item, case 7: an item reply's Undo count holds Send ask off, with the hint that says so", async (t) => {
+  const page = await open(t, { items: [IRP_OWED], storage: VISIT }); if (!page) return;
+  await irpCard(page, IRP_OWED);
+  await replyTo(page, irpKey(IRP_OWED), IRP_TEXT);
+  await mustHave(page, ASK.box, "Ask box");
+  await page.fill(ASK.box, ASK_TEXT);
+  await mustHave(page, ASK.send, "Send ask button");
+  assert.equal(await page.locator(ASK.send).isDisabled(), true, "Send ask is on while the item reply's Undo count runs");
+  assert.match((await page.textContent("#askHint")) ?? "", /Send turns on when the Undo count ends\./, "the Ask box does not say why Send ask is off");
+});
+
+test("reply to an item, case 7: an ask's Undo count holds the item's Send reply off, with the reply's hint that says so", async (t) => {
+  const page = await open(t, { items: [IRP_OWED], storage: VISIT }); if (!page) return;
+  await irpCard(page, IRP_OWED);
+  await sendTyped(page, ASK_TEXT);
+  await openReply(page, irpKey(IRP_OWED));
+  await page.fill(rplSel("rt-", irpKey(IRP_OWED)), IRP_TEXT);
+  await mustHave(page, rplSel("rs-", irpKey(IRP_OWED)), "Send reply button");
+  assert.equal(await page.locator(rplSel("rs-", irpKey(IRP_OWED))).isDisabled(), true, "Send reply is on while the ask's Undo count runs");
+  assert.match((await page.textContent(rplSel("rh-", irpKey(IRP_OWED)))) ?? "", /Send reply turns on when the Undo count ends\./, "the item's reply box does not say why Send reply is off");
+});
+
+test("reply to an item, case 8: a reply closed as a draft keeps its words under waiting.replyDraft.item.<id>, and after a reload", async (t) => {
+  const page = await open(t, { items: [IRP_OWED], storage: VISIT }); if (!page) return;
+  await irpCard(page, IRP_OWED);
+  const key = irpKey(IRP_OWED);
+  await openReply(page, key);
+  await page.fill(rplSel("rt-", key), IRP_DRAFT);
+  await mustHave(page, rplSel("rx-", key), "Close button of the item's reply box");
+  await page.click(rplSel("rx-", key));
+  const draftKey = "waiting.replyDraft.item." + IRP_OWED.id;
+  const kept = await page.evaluate((k) => localStorage.getItem(k), draftKey);
+  assert.equal(kept, IRP_DRAFT, "Close did not keep the words under " + draftKey + ": " + JSON.stringify(kept));
+  await page.reload();
+  await page.waitForFunction("state.items.length > 0");
+  await openReply(page, key);
+  assert.equal(await page.inputValue(rplSel("rt-", key)), IRP_DRAFT, "the draft did not survive the reload");
+});
+
+test("reply to an item, case 9: an item reply whose item is no longer on the page is its own row, 'Re: an item no longer on this page', and counts while it has no reply", async (t) => {
+  const gone = { id: "ask-irp-gone", text: IRP_TEXT, at: "2026-10-30T08:00:00Z", item: "closed-item-x", owner: "test thread" };
+  const page = await open(t, { items: [IRP_OWED], dbExtra: { asks: { [gone.id]: gone } }, storage: VISIT }); if (!page) return;
+  // The open item is on the page, so the closed item is the only one missing from it.
+  await irpCard(page, IRP_OWED);
+  await mustHave(page, `#row-${gone.id}`, "row of the item reply whose item is closed");
+  const line = page.locator(`#row-${gone.id} .reline`);
+  const lineText = (await line.count()) ? (await line.first().textContent()).trim() : "";
+  assert.equal(lineText, "Re: an item no longer on this page", "the row of the closed item's reply has the line " + JSON.stringify(lineText));
+  assert.equal((await page.textContent("#askCount")).trim(), "1", "the ask count does not count the closed item's reply while it has no reply");
 });
 
 // ---------------------------------------------------------------- Dismiss on an answered ask (step ask-dismiss)
