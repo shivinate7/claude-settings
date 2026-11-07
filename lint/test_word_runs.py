@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""Fixture test for the one fence pattern of lint/word_runs.py. Run: python3 lint/test_word_runs.py -v
+"""Fixture test for the one fence reader of lint/word_runs.py. Run: python3 lint/test_word_runs.py -v
 
-word_runs.FENCE is the one home of a fence line. Each check that reads fences uses it, and none holds a copy of its
-own. A fence line indented four spaces or more under a list item is a fence too. Stdlib unittest; no file is read or
-written. Rule building-one-home-per-capability.
+word_runs is the one home of what a fence is. A fence line indented four spaces or more is a fence only under a list
+item; at the top level such a line is indented code (CommonMark), and so is the block it opens. Each check that reads
+fences calls the one home and holds no fence walk of its own. Stdlib unittest; no file is read or written. Rule
+building-one-home-per-capability.
 """
 import ast
 import os
@@ -18,6 +19,14 @@ import word_runs
 DEEP_FENCES = ("    ```", "    ~~~", "        ```text", "      ~~~")  # four spaces or more, backtick or tilde
 SHALLOW_FENCES = ("```", "   ~~~")  # at most three spaces: read before and after the change
 NOT_FENCES = ("    text", "    ``")  # a fence needs three marks, and an indented line of text is no fence
+# A top-level block opened by an indented fence line, with a row inside it indented the same way (CommonMark code).
+TOP_LEVEL_BLOCKS = (("    ```", "    hidden text"), ("\t```", "\thidden text"), ("    ~~~", "    hidden text"))
+
+# The modules that read fences. Each reads its rows through word_runs.code_mask, and none asks is_fence line by line.
+FENCE_CALLERS = ("ste_lint.py", "check_ruling_kind.py", "hook_catalog.py", "find_copies.py", "stale_cites.py",
+                 "compliance_probes.py", "check_skill_model_rows.py", os.path.join("..", "hooks", "feedback_guard.py"))
+FENCE_CALLS = ("compile", "match", "fullmatch", "search", "sub", "finditer")
+FENCE_MARKS = ("```", "~~~")
 
 
 class FenceLineTests(unittest.TestCase):
@@ -33,7 +42,7 @@ class FenceLineTests(unittest.TestCase):
 
 class OneFenceHomeTests(unittest.TestCase):
     def test_fence_readers_on_the_one_home_hold_no_fence_pattern_of_their_own(self):
-        # check_skill_model_rows and feedback_guard move onto the one fence line. Their imports are here, not at the top,
+        # check_skill_model_rows and feedback_guard read the one fence line. Their imports are here, not at the top,
         # so the other readers stay importable when a hook's import fails.
         hooks = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "hooks")
         if hooks not in sys.path:
@@ -42,10 +51,10 @@ class OneFenceHomeTests(unittest.TestCase):
         import feedback_guard
         for module in (stale_cites, compliance_probes, check_skill_model_rows, feedback_guard):
             with self.subTest(module=module.__name__):
-                # The scope first: the module exposes FENCE at all. Then the subject: that name is the one home.
-                self.assertTrue(hasattr(module, "FENCE"), "%s exposes no FENCE; alias word_runs.FENCE" % module.__name__)
-                self.assertIs(module.FENCE, word_runs.FENCE,
-                              "%s holds its own FENCE regex; it must read word_runs.FENCE" % module.__name__)
+                # An alias of the one home is allowed and may be dropped; a FENCE of its own is not.
+                alias = getattr(module, "FENCE", word_runs.FENCE)
+                self.assertIs(alias, word_runs.FENCE,
+                              "%s holds its own FENCE regex; it may only alias word_runs.FENCE" % module.__name__)
                 # A fence pattern under another name is a copy too.
                 renamed = [name for name, value in vars(module).items() if isinstance(value, re.Pattern)
                            and value is not word_runs.FENCE and any(value.match(line) for line in DEEP_FENCES)]
@@ -56,16 +65,9 @@ class OneFenceHomeTests(unittest.TestCase):
                       "ste_lint holds a FENCE of its own that nothing reads; delete it")
 
 
-# The copies that take the list-aware fence test (ruling A). Each drops its own fence regex and asks is_fence.
-LIST_AWARE_COPIES = ("ste_lint.py", "check_ruling_kind.py", "hook_catalog.py", "find_copies.py", "stale_cites.py",
-                     "compliance_probes.py", os.path.join("..", "hooks", "feedback_guard.py"))
-FENCE_CALLS = ("compile", "match", "fullmatch", "search", "sub", "finditer")
-NOT_BUILT = "word_runs has no is_fence; the list-aware fence test is not built"
-
-
 class ListAwareFenceTests(unittest.TestCase):
     def test_is_fence_four_spaces_is_a_fence_only_inside_a_list_item(self):
-        self.assertTrue(hasattr(word_runs, "is_fence"), NOT_BUILT)  # the scope first, so a missing name is an assert
+        self.assertTrue(hasattr(word_runs, "is_fence"), "word_runs has no is_fence")  # the scope first
         with self.subTest(case="top level, four spaces"):
             self.assertFalse(word_runs.is_fence("    ```", in_list_item=False),
                              "a top-level four-space fence line is indented code, not a fence")
@@ -78,7 +80,7 @@ class ListAwareFenceTests(unittest.TestCase):
             self.assertFalse(word_runs.is_fence("    text", in_list_item=True), "an indented line of text is no fence")
 
     def test_is_fence_up_to_three_spaces_is_a_fence_either_way(self):
-        self.assertTrue(hasattr(word_runs, "is_fence"), NOT_BUILT)
+        self.assertTrue(hasattr(word_runs, "is_fence"), "word_runs has no is_fence")
         for line in ("```", "   ```", "~~~", "   ~~~"):
             for in_item in (False, True):
                 with self.subTest(line=line, in_list_item=in_item):
@@ -101,24 +103,94 @@ class ListAwareFenceTests(unittest.TestCase):
             self.assertIn("After the fence.", word_runs.mask_fences(listed), "the prose after a list-item fence is read")
 
 
-class ListAwareCopiesTests(unittest.TestCase):
-    def test_the_fence_copies_call_is_fence_and_hold_no_fence_regex(self):
+class TopLevelIndentedBlockTests(unittest.TestCase):
+    def test_a_top_level_indented_fence_block_hides_the_rows_inside_it(self):
+        # CommonMark: a top-level block indented four spaces or led by a tab is code. A fence on main hid these rows, so
+        # the same rows hide in mask_fences now. The prose after the block is read.
+        for opener, row in TOP_LEVEL_BLOCKS:
+            with self.subTest(opener=opener):
+                text = "Prose before.\n\n%s\n%s\n%s\n\nProse after.\n" % (opener, row, opener)
+                masked = word_runs.mask_fences(text)
+                self.assertNotIn(row.strip(), masked,
+                                 "a top-level block opened by %r is indented code and must hide its rows" % opener)
+                self.assertIn("Prose after.", masked, "the prose after a top-level %r block is read" % opener)
+
+    def test_a_top_level_indented_block_is_its_own_unit(self):
+        # The prose after the block is not part of it: a rule id in that prose must not exempt a copy inside the block.
+        text = "Prose before.\n\n    ```\n    hidden text\n    ```\nAfter the block.\n"
+        with_block = [unit for _, unit in word_runs.units(text) if "hidden text" in unit]
+        self.assertTrue(with_block, "the block's rows are in no unit")
+        self.assertTrue(all("After the block." not in unit for unit in with_block),
+                        "the prose after a top-level indented block is read as part of the block's unit")
+        # Control: the same prose after a list-item fence is no part of that fence either.
+        listed = "1. Step one:\n\n    ```sh\n    hidden text\n    ```\nAfter the block.\n"
+        listed_units = [unit for _, unit in word_runs.units(listed) if "hidden text" in unit]
+        with self.subTest(case="control, list item"):
+            self.assertTrue(listed_units and all("After the block." not in unit for unit in listed_units),
+                            "the prose after a list-item fence is read as part of the fence's unit")
+
+
+class FenceCallersTests(unittest.TestCase):
+    def test_each_fence_caller_reads_its_rows_through_code_mask(self):
+        # Not built yet: word_runs.code_mask is the claim the callers read through (R1). Each caller is one subtest.
         lint = os.path.dirname(os.path.abspath(__file__))
-        for name in LIST_AWARE_COPIES:
+        for name in FENCE_CALLERS:
             with self.subTest(module=name):
-                with open(os.path.join(lint, name), encoding="utf-8") as handle:
-                    tree = ast.parse(handle.read(), name)
-                # The scope first: the module asks word_runs.is_fence about a line. Then the subject: no regex of its own.
-                calls = [node for node in ast.walk(tree) if isinstance(node, ast.Call)
-                         and ((isinstance(node.func, ast.Attribute) and node.func.attr == "is_fence")
-                              or (isinstance(node.func, ast.Name) and node.func.id == "is_fence"))]
-                self.assertTrue(calls, "%s does not call word_runs.is_fence" % name)
+                tree = _tree(lint, name)
+                self.assertTrue(_calls(tree, "code_mask"), "%s does not call word_runs.code_mask" % name)
+
+    def test_no_fence_caller_asks_is_fence_line_by_line(self):
+        lint = os.path.dirname(os.path.abspath(__file__))
+        for name in FENCE_CALLERS:
+            with self.subTest(module=name):
+                lines = _calls(_tree(lint, name), "is_fence")
+                self.assertEqual(lines, [], "%s asks word_runs.is_fence line by line at lines %s; read word_runs.code_mask "
+                                            "instead" % (name, lines))
+
+    def test_no_fence_caller_toggles_a_fence_on_a_startswith_of_a_fence_mark(self):
+        # The indent rule is lost in a startswith on the stripped line: it reads a four-space fence line as a fence.
+        lint = os.path.dirname(os.path.abspath(__file__))
+        for name in FENCE_CALLERS:
+            with self.subTest(module=name):
+                lines = _fence_toggles(_tree(lint, name))
+                self.assertEqual(lines, [], "%s toggles a fence on startswith of a fence mark at lines %s; use "
+                                            "word_runs.code_mask" % (name, lines))
+
+    def test_no_fence_caller_holds_a_fence_regex_of_its_own(self):
+        lint = os.path.dirname(os.path.abspath(__file__))
+        for name in FENCE_CALLERS:
+            with self.subTest(module=name):
                 # A fence pattern carries a tilde, so a backtick-only pattern (feedback_guard's closer check) is no copy.
-                regexes = [node.lineno for node in ast.walk(tree) if isinstance(node, ast.Call)
+                regexes = [node.lineno for node in ast.walk(_tree(lint, name)) if isinstance(node, ast.Call)
                            and isinstance(node.func, ast.Attribute) and node.func.attr in FENCE_CALLS
                            and node.args and isinstance(node.args[0], ast.Constant) and isinstance(node.args[0].value, str)
                            and "~" in node.args[0].value and any(mark in node.args[0].value for mark in ("{3,}", "```", "~~~"))]
                 self.assertEqual(regexes, [], "%s holds a fence regex of its own, on the lines listed" % name)
+
+
+def _tree(lint, name):
+    with open(os.path.join(lint, name), encoding="utf-8") as handle:
+        return ast.parse(handle.read(), name)
+
+
+def _calls(tree, name):
+    """Line numbers of each call of `name`, as an attribute or a bare name."""
+    return [node.lineno for node in ast.walk(tree) if isinstance(node, ast.Call)
+            and ((isinstance(node.func, ast.Attribute) and node.func.attr == name)
+                 or (isinstance(node.func, ast.Name) and node.func.id == name))]
+
+
+def _fence_toggles(tree):
+    """Line numbers of each startswith or endswith call whose argument is a fence mark, or a tuple holding one."""
+    def holds_mark(node):
+        if isinstance(node, ast.Constant) and isinstance(node.value, str):
+            return any(mark in node.value for mark in FENCE_MARKS)
+        if isinstance(node, ast.Tuple):
+            return any(holds_mark(elt) for elt in node.elts)
+        return False
+    return [node.lineno for node in ast.walk(tree) if isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute) and node.func.attr in ("startswith", "endswith")
+            and node.args and holds_mark(node.args[0])]
 
 
 if __name__ == "__main__":

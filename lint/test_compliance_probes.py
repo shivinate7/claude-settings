@@ -1541,8 +1541,8 @@ class Supersede(unittest.TestCase):
         self.assertEqual(out.splitlines()[1:], ["  departs, no exemption: CLAUDE.md:%d: The designation is never inherited." % first[3]], out)
 
     def test_a_departure_in_a_fence_four_spaces_deep_under_a_list_item_is_not_read(self):
-        # Any indent opens a fence in this group, so the departure inside the list item's fence is no unit. The departure
-        # after it is read, at its own line. This pins the verdict as it stands.
+        # The fence sits under a list item, so the departure inside it is no unit. The departure after it is read, at its
+        # own line.
         paragraphs = ("- Run the step:\n    ```text\n    The designation is never inherited.\n    ```",
                       "The designation is never inherited.")
         first = self.starts(*paragraphs)
@@ -2249,6 +2249,19 @@ class RestatesFixtures(unittest.TestCase):
 
 def tearDownModule():
     shutil.rmtree(RUN_FOLDER, ignore_errors=True)  # test-temp-standard: teardown removes the run folder
+
+
+class FencedParagraphTests(unittest.TestCase):
+    def test_the_text_inside_a_top_level_indented_fence_block_is_no_paragraph(self):
+        # Red: at the top level the four-space fence is indented code, a block of its own, so the text inside it is no
+        # paragraph of the record. Main reads it so. The paragraph after the block is read (the control).
+        import compliance_probes
+        found = compliance_probes.paragraphs(
+            "Paragraph.\n\n    ```\n    The designation is never inherited.\n    ```\n\nAfter the block.\n", "x.md")
+        texts = [text for _, text in found]
+        self.assertEqual([t for t in texts if "designation" in t], [],
+                         "the text inside a top-level indented fence block is read as a paragraph")
+        self.assertIn("After the block.", texts, "the paragraph after the block is read")
 
 
 if __name__ == "__main__":

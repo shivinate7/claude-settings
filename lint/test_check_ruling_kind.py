@@ -205,16 +205,23 @@ class RulingKindTests(unittest.TestCase):
                 self.assert_fails(REC, token)
 
     def test_top_level_four_space_or_tab_fence_is_indented_code_so_the_kind_line_after_it_counts(self):
-        # CommonMark: at the top level a line indented four spaces, or led by a tab, is code, not a fence. The copy keeps
-        # its 0-3 space rule, so the Kind line after it counts. word_runs.FENCE reads any indent and would hide it.
+        # CommonMark: at the top level a line indented four spaces, or led by a tab, is code, not a fence. So the Kind line
+        # after it counts, and the record still passes.
         for opener in ("    ```", "\t```"):
             with self.subTest(opener=opener):
                 self.put(REC, record("%s\n%s" % (opener, BUILD_OK)))
                 self.assert_passes(REC)
 
+    def test_a_top_level_indented_fence_hides_its_marker_from_the_rule_ids(self):
+        # Red: at the top level the four-space fence is indented code, and main masks it, so the marker in it is example
+        # text, not a rule. A process ruling homed on that marker fails.
+        self.put("CLAUDE.md", "# Rules\n\nParagraph.\n\n    ```\n    <!-- rule:example-only -->\n    ```\n")
+        self.put(REC, record("Owner ruling, 2026-10-12. Process only.\n\nKind: process\nHome: rule:example-only"))
+        self.assert_fails(REC, "example-only")
+
     def test_rule_marker_inside_a_list_item_fence_is_no_rule_to_home_on(self):
-        # Red: under a list item the four-space line opens a fence, so the marker in it is example text, not a rule.
-        # The copy reads 0-3 spaces and counts the marker, so a process ruling homed on it passes today.
+        # Pin: under a list item the four-space line opens a fence, so the marker in it is example text, not a rule, and a
+        # process ruling homed on it fails.
         self.put("CLAUDE.md", "# Rules\n\n1. Example list\n\n    ```\n    <!-- rule:example-only -->\n    ```\n")
         self.put(REC, record("Owner ruling, 2026-10-12. Process only.\n\nKind: process\nHome: rule:example-only"))
         self.assert_fails(REC, "example-only")

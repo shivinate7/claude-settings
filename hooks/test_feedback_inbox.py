@@ -3627,6 +3627,19 @@ def case_guard_reads_top_level_indented_and_no_break_space_fence_lines_as_prose(
           "hidden line" in kept and "shown line" not in kept, repr(kept))
 
 
+def case_top_level_indented_block_holds_no_grant():
+    import feedback_guard  # the guard's own is_grant(), so the fence rule is read from its one home
+    # Red: a grant written in a top-level block indented four spaces, or led by a tab, is code (CommonMark), so the guard
+    # holds it out of the grant check, as main does for a fence. The grant in plain prose and the grant in a column-0
+    # fence are the controls.
+    for opener, row in (("    ```", "    approved: merge"), ("\t```", "\tapproved: merge")):
+        text = "Plain text.\n\n%s\n%s\n%s\n" % (opener, row, opener)
+        check("a grant inside a top-level %r block is no grant" % opener, not feedback_guard.is_grant(text), repr(text))
+    check("control: a grant in plain prose is a grant", feedback_guard.is_grant("Plain text.\n\napproved: merge\n"))
+    check("control: a grant inside a column-0 fence is no grant",
+          not feedback_guard.is_grant("Plain text.\n\n```\napproved: merge\n```\n"))
+
+
 CASES = (
     case_every_owner_message_is_captured,
     case_notices_are_never_captured,
@@ -3787,6 +3800,7 @@ CASES = (
     case_repeat_cap_keeps_the_open_roadmap_steps,
     case_repeat_list_ids_and_refs_do_not_cost_the_valid_hit,
     case_guard_reads_top_level_indented_and_no_break_space_fence_lines_as_prose,
+    case_top_level_indented_block_holds_no_grant,
 )
 
 

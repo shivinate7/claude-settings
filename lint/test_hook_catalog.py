@@ -1752,8 +1752,8 @@ class RealCellCap(unittest.TestCase):
 
 class FenceLines(unittest.TestCase):
     def test_top_level_four_space_or_tab_fence_is_indented_code_so_the_lines_after_it_are_read(self):
-        # CommonMark: at the top level a line indented four spaces, or led by a tab, is code, not a fence. The copy keeps
-        # its 0-3 space rule. word_runs.FENCE reads any indent and would hide the Kind line and the lines after it.
+        # CommonMark: at the top level a line indented four spaces, or led by a tab, is code, not a fence. So the Kind line
+        # and the lines after it are read.
         import hook_catalog as gen
         for opener in ("    ```", "\t```"):
             with self.subTest(opener=opener):
@@ -1762,8 +1762,8 @@ class FenceLines(unittest.TestCase):
                 self.assertIn("after", lines, "the line after a top-level %r is no fence" % opener)
 
     def test_a_fence_line_indented_four_spaces_in_a_list_item_is_a_fence(self):
-        # Red: under a list item the four-space line opens a fence, so the marker inside it is example text. The copy
-        # reads 0-3 spaces and yields the marker as a line of the record today.
+        # Pin: under a list item the four-space line opens a fence, so the marker inside it is example text, not a line of
+        # the record.
         import hook_catalog as gen
         text = "1. Example list\n\n    ```\n    <!-- rule:example-only -->\n    ```\nafter\n"
         self.assertEqual([line for n, line in gen.lines_outside_fences(text) if n == 4], [None],

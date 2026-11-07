@@ -747,12 +747,38 @@ class OneHomeInRepoTests(unittest.TestCase):
         found, out = self.verdict_scan()
         self.assertEqual(keyed(found), sorted([CONTROL_FINDING, ("agents/item-bare.md", 3, "COPY001")]), out)
 
-    def test_rule_id_on_a_prose_line_exempts_a_copy_in_a_four_space_fence_under_it(self):
-        # The anchor sits on a prose line above the fence four spaces deep. The bare copy in the same shape is the control.
+    def test_rule_id_on_a_prose_line_exempts_a_copy_in_indented_lines_that_continue_the_paragraph(self):
+        # The four-space fence line follows the prose line with no blank line between, so CommonMark reads it as paragraph
+        # text, not a fence: the anchor and the copy share one paragraph. The bare copy in the same shape is the control.
         self.tracked({"agents/prose-line.md": "Run the step: <!-- rule:brief-contents -->\n    ```text\n    %s\n    ```\n" % RULE,
                       "agents/prose-bare.md": "Run the step:\n    ```text\n    %s\n    ```\n" % RULE})
         found, out = self.verdict_scan()
         self.assertEqual(keyed(found), sorted([CONTROL_FINDING, ("agents/prose-bare.md", 3, "COPY001")]), out)
+
+    def test_copy_under_a_list_item_fence_and_a_top_level_indented_fence_after_it_is_flagged_as_on_main(self):
+        # Pin of main's verdict. The brief expected no COPY001 here, but main flags line 7, so the measured verdict is kept.
+        # A fenced copy is a candidate in both trees, so this fixture does not tell list context apart: a weak pin.
+        self.tracked({"agents/f1.md": "- item\n    ```\n    x\n    ```\n\n    ```\n    %s\n    ```\n" % RULE})
+        found, out = self.verdict_scan()
+        self.assertEqual(keyed(found), sorted([CONTROL_FINDING, ("agents/f1.md", 7, "COPY001")]), out)
+
+    def test_rule_id_on_the_prose_after_a_top_level_indented_fence_does_not_exempt_a_copy_inside_it(self):
+        # Red: at the top level the four-space fence is indented code, a unit of its own, so the anchor in the prose after
+        # it is in another unit. The copy inside the block is a copy at its own line (4), as on main. The control has the
+        # anchor inside the block, so the copy there is exempt.
+        self.tracked({"agents/f1r.md": "Paragraph here.\n\n    ```\n    %s\n    ```\nSee it <!-- rule:brief-contents -->\n" % RULE,
+                      "agents/f1r-named.md": "Paragraph here.\n\n    ```\n    %s <!-- rule:brief-contents -->\n    ```\n" % RULE})
+        found, out = self.verdict_scan()
+        self.assertEqual(keyed(found), sorted([CONTROL_FINDING, ("agents/f1r.md", 4, "COPY001")]), out)
+
+    def test_an_exception_comment_inside_a_top_level_indented_tilde_block_is_no_exception(self):
+        # Red: the comment sits in indented code, which holds no exception (main masks it), so the copy in the paragraph
+        # above is a copy at line 1. The control is the same comment in prose, which covers the copy.
+        self.tracked({"agents/f2.md": "Run the step: %s\n\n    ~~~\n    <!-- exempt: brief-contents reason: %s -->\n    ~~~\n"
+                      % (RULE, REASON),
+                      "agents/f2-prose.md": "Run the step: %s\n\n<!-- exempt: brief-contents reason: %s -->\n" % (RULE, REASON)})
+        found, out = self.verdict_scan()
+        self.assertEqual(keyed(found), sorted([CONTROL_FINDING, ("agents/f2.md", 1, "COPY001")]), out)
 
     def test_rule_id_in_the_same_blockquote_exempts_the_copy(self):
         self.tracked({"agents/quote.md": "> %s See brief-contents.\n" % RULE})

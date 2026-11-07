@@ -480,8 +480,7 @@ class ReviewRound2FixerTests(unittest.TestCase):
         self.assertEqual(ste_lint.apply_fixes(inp)[0], inp)
 
     def test_fence_line_indented_four_spaces_or_led_by_a_tab_at_top_level_is_code(self):
-        # CommonMark: at the top level such a line is indented code, not a fence, so the prose after it is fixed. The
-        # copy keeps its 0-3 space rule. word_runs.FENCE reads any indent and would leave that prose unfixed.
+        # CommonMark: at the top level such a line is indented code, not a fence, so the prose after it is fixed.
         for opener in ("    ```", "\t```"):
             with self.subTest(opener=opener):
                 self.assertEqual(ste_lint.apply_fixes("%s\nrun in order to win\n" % opener)[0], "%s\nrun to win\n" % opener)
@@ -491,8 +490,7 @@ class ReviewRound2FixerTests(unittest.TestCase):
         self.assertTrue(_findings("    ```\nrun in order to win\n"), "prose after a top-level four-space line is no fence")
 
     def test_fence_line_indented_four_spaces_in_a_list_item_is_a_fence_for_findings(self):
-        # Red: under a list item, CommonMark makes the four-space line a fence, so its text is code and no finding names
-        # it. The copy reads 0-3 spaces, so the findings path flags that text today.
+        # Pin: under a list item, CommonMark makes the four-space line a fence, so its text is code and no finding names it.
         self.assertEqual(_findings("1. Step one:\n\n    ```sh\n    run in order to win\n    ```\n"), [],
                          "text inside a list-item fence indented four spaces is read as prose")
 

@@ -1717,8 +1717,8 @@ class RouteClaimTests(StaleCase):
         self.assert_route_claims(rng, flagged)
 
     def test_route_claim_in_a_fence_four_spaces_deep_under_a_list_item_is_silent(self):
-        # Any indent opens a fence in this module, so the claim inside the four-space fence is no claim. The claim after
-        # the fence is read: the scope control. This pins the verdict as it stands.
+        # The fence sits under a list item, so the claim inside it is no claim. The claim after the fence is read: the scope
+        # control.
         rows = [
             ("- Run the step:", False),
             ("    ```", False),
@@ -1731,7 +1731,7 @@ class RouteClaimTests(StaleCase):
 
     def test_route_claim_in_a_tilde_fence_four_spaces_deep_under_a_list_item_is_silent(self):
         # CODE_SPAN pairs backtick rows across lines and blanks the claim between them, so a backtick fence pins nothing
-        # about FENCE. A tilde fence has no such pairing: only FENCE keeps its claim out of the scan.
+        # about the fence reader. A tilde fence has no such pairing: only the fence reader keeps its claim out of the scan.
         rows = [
             ("- Run the step:", False),
             ("    ~~~", False),
@@ -2340,8 +2340,9 @@ class RewordTests(RewordCase):
         rc, out = self.run_check(rng)
         self.assertEqual(self.listed(out), [("agents/item-bare.md", 3)], out)
 
-    def test_a_removed_run_in_a_four_space_fence_under_a_prose_line_with_the_rule_id_is_not_listed(self):
-        # The id sits on a prose line above the fence four spaces deep. The same shape with no id is the control.
+    def test_a_removed_run_in_indented_lines_that_continue_a_prose_line_with_the_rule_id_is_not_listed(self):
+        # The id sits on a prose line, and the four-space fence line after it has no blank line between: CommonMark reads
+        # it as paragraph text, so the id and the run share one paragraph. The same shape with no id is the control.
         prose = ("Run the step: <!-- rule:output-write-in-ste -->\n    ```text\n"
                  "    that does not apply. %s. Start with the point.\n    ```\n" % OLD_STE)
         bare = "Run the step:\n    ```text\n    that does not apply. %s. Start with the point.\n    ```\n" % OLD_STE
@@ -2447,6 +2448,18 @@ class RewordSkipTests(RewordCase):
     def test_a_rule_grown_by_without_is_not_a_reword(self):
         # Owner ruling 15:00 CST: "without" is no negator, so growth by it skips the reword check like other growth.
         self.assert_passes(self.reword(BRIEF_BASE, BRIEF_WITHOUT, BRIEF_LINE))
+
+
+class FencedLinesTests(unittest.TestCase):
+    def test_a_top_level_indented_fence_block_is_the_fenced_rows_of_the_removed_run_scan(self):
+        # Red: at the top level the four-space fence is indented code, a block of its own, so its rows are the rows inside
+        # it. The row after the block is prose, which the control pins.
+        spec = importlib.util.spec_from_file_location("stale_cites_fenced_lines", MODULE)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        rows = ["Paragraph.", "", "    ```", "    x", "    ```", "After."]
+        self.assertEqual(sorted(module.fenced_lines(rows)), [3, 4, 5],
+                         "the rows of a top-level four-space fence block are the rows inside the block")
 
 
 if __name__ == "__main__":
