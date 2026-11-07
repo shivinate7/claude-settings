@@ -425,19 +425,71 @@ def _module_bindings(tree, base_dir, seen):
     return out
 
 
-def _local_names(tree):
-    """{id(call): names bound by the def that holds it: parameters and assigned names}."""
-    held = {}
-    for fn in ast.walk(tree):
-        if isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
-            a = fn.args
-            names = {x.arg for x in a.posonlyargs + a.args + a.kwonlyargs}
-            names |= {x.arg for x in (a.vararg, a.kwarg) if x}
-            names |= {n.id for n in ast.walk(fn) if isinstance(n, ast.Name) and isinstance(n.ctx, ast.Store)}
-            for n in ast.walk(fn):
-                if isinstance(n, ast.Call):
-                    held[id(n)] = held.get(id(n), set()) | names
+_SCOPES = (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)
+_PASS = object()  # a binding the reader does not follow: a parameter or a tuple-unpack element
+
+
+def _call_scopes(tree):
+    """{id(call): the defs and lambdas that hold it, innermost first}. Iterative, so a deep
+    expression such as a long string concatenation cannot hit the recursion limit."""
+    held, todo = {}, [(tree, ())]
+    while todo:
+        node, stack = todo.pop()
+        for child in ast.iter_child_nodes(node):
+            if isinstance(child, ast.Call):
+                held[id(child)] = stack
+            todo.append((child, (child,) + stack if isinstance(child, _SCOPES) else stack))
     return held
+
+
+def _scope_bindings(fn):
+    """{name: [binding]} for the names `fn` binds in its own scope; a nested def, lambda or class
+    is another scope. A binding is the value of a plain assignment to the bare name (`=`, an
+    annotated `=`, `:=`), `_PASS` for a parameter or a tuple-unpack element, or else the binding
+    node itself (a loop or with target, `+=`, an import), which the reader cannot resolve."""
+    a = fn.args
+    out = {x.arg: [_PASS] for x in a.posonlyargs + a.args + a.kwonlyargs + [a.vararg, a.kwarg] if x}
+    unpacked = set()
+    todo = list(fn.body) if isinstance(fn.body, list) else [fn.body]
+    while todo:
+        n = todo.pop()
+        if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            out.setdefault(n.name, []).append(n)
+            continue
+        if isinstance(n, ast.Lambda):
+            continue
+        todo.extend(ast.iter_child_nodes(n))
+        if isinstance(n, ast.Assign):
+            for t in n.targets:
+                if isinstance(t, ast.Name):
+                    out.setdefault(t.id, []).append(n.value)
+                    unpacked.add(id(t))
+                elif isinstance(t, (ast.Tuple, ast.List)):
+                    for e in ast.walk(t):
+                        if isinstance(e, ast.Name):
+                            out.setdefault(e.id, []).append(_PASS)
+                            unpacked.add(id(e))
+        elif isinstance(n, (ast.AnnAssign, ast.NamedExpr)) and isinstance(n.target, ast.Name):
+            if n.value is not None:
+                out.setdefault(n.target.id, []).append(n.value)
+            unpacked.add(id(n.target))
+        elif isinstance(n, ast.Name) and isinstance(n.ctx, ast.Store) and id(n) not in unpacked:
+            out.setdefault(n.id, []).append(n)
+        elif isinstance(n, (ast.Import, ast.ImportFrom)):
+            for alias in n.names:
+                out.setdefault((alias.asname or alias.name).split(".")[0], []).append(n)
+    return out
+
+
+def _literal_ids(value):
+    """The ids a local's assigned value names: a string literal, or a conditional whose branches
+    are each one of these. None for anything else."""
+    if isinstance(value, ast.Constant) and isinstance(value.value, str):
+        return {value.value}
+    if isinstance(value, ast.IfExp):
+        body, orelse = _literal_ids(value.body), _literal_ids(value.orelse)
+        return None if body is None or orelse is None else body | orelse
+    return None
 
 
 def guard_rule_names(text: str, path: str = "<source>", base_dir=None):
@@ -446,15 +498,25 @@ def guard_rule_names(text: str, path: str = "<source>", base_dir=None):
     record() (third argument) or ask_command() (first), by position or as `rule=`; the table in
     diff_rule(); and the `code, why = {...}` role-scope table.
     A module-level string constant resolves to its value, also one imported from a module under
-    `base_dir`. A name that is a parameter or local of the enclosing def (or bound nowhere in the
-    source) is a pass-through: the ids come from the call sites and tables read here. Anything else
-    cannot be listed, so it raises ValueError naming `path:line`: a rule that can fire but is not
-    listed would hide from a never-fired cull. That covers an f-string, a name bound at module
-    level to anything but a string constant, and any other expression but the diff_rule() call."""
+    `base_dir`. A name bound in the innermost def or lambda that holds the call lists the string
+    literals assigned to it there, both branches of a conditional included. A parameter or a
+    tuple-unpack element there is a pass-through, as is a name bound only in an outer def or bound
+    nowhere: the ids come from the call sites and tables read here. Anything else cannot be
+    listed, so it raises ValueError naming `path:line`: a rule that can fire but is not listed
+    would hide from a never-fired cull. That covers an f-string, a name bound at module level to
+    anything but a string constant, a local with any other binding, and any other expression but
+    the diff_rule() call."""
     tree = ast.parse(text)
     ids = set()
     bound = _module_bindings(tree, base_dir, set())
-    local = _local_names(tree)
+    scopes = _call_scopes(tree)
+    held = {}
+
+    def bindings(fn):  # a def's own-scope bindings, read once per def
+        if id(fn) not in held:
+            held[id(fn)] = _scope_bindings(fn)
+        return held[id(fn)]
+
     for node in ast.walk(tree):
         if isinstance(node, ast.Call):
             name = node.func.id if isinstance(node.func, ast.Name) else getattr(node.func, "attr", "")
@@ -469,9 +531,16 @@ def guard_rule_names(text: str, path: str = "<source>", base_dir=None):
                     ids.add(arg.value)
                     continue
                 if isinstance(arg, ast.Name):
-                    if arg.id in local.get(id(node), ()) or arg.id not in bound:
+                    defs = scopes.get(id(node), ())
+                    own = bindings(defs[0]) if defs else {}
+                    if arg.id in own:
+                        found = [_PASS if b is _PASS else _literal_ids(b) for b in own[arg.id]]
+                        if None not in found:
+                            ids.update(*[f for f in found if f is not _PASS])
+                            continue
+                    elif any(arg.id in bindings(f) for f in defs[1:]) or arg.id not in bound:
                         continue
-                    if bound[arg.id] is not None:
+                    elif bound[arg.id] is not None:
                         ids.add(bound[arg.id])
                         continue
                 elif (isinstance(arg, ast.Call) and isinstance(arg.func, ast.Name)
@@ -479,7 +548,8 @@ def guard_rule_names(text: str, path: str = "<source>", base_dir=None):
                     continue
                 what = "an f-string" if isinstance(arg, ast.JoinedStr) else "a rule id the reader cannot resolve"
                 raise ValueError(f"{path}:{node.lineno}: {name}() takes {what}; "
-                                 "pass a string literal or a module-level string constant so the id can be listed")
+                                 "pass a string literal, a module-level string constant, or a local assigned only "
+                                 "string literals, so the id can be listed")
         elif isinstance(node, ast.FunctionDef) and node.name == "diff_rule":
             for stmt in node.body:  # a docstring is a bare string statement: it names no id
                 if not (isinstance(stmt, ast.Expr) and isinstance(stmt.value, ast.Constant)):
