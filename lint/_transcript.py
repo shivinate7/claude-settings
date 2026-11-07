@@ -61,6 +61,14 @@ def is_incoming(rec):
     return False
 
 
+def _flat_text(content):
+    """A message's text: a str as is, a block list as its text blocks joined, else the input."""
+    if isinstance(content, list):
+        return "\n".join(b["text"] for b in content if isinstance(b, dict) and b.get("type") == "text"
+                         and isinstance(b.get("text"), str))
+    return content
+
+
 def owner_text(rec, notice_tags=()):
     """The text of an owner message record, or None for any other record.
 
@@ -79,20 +87,28 @@ def owner_text(rec, notice_tags=()):
         text = att.get("prompt")
     else:
         return None
-    if isinstance(text, list):
-        text = "\n".join(b["text"] for b in text if isinstance(b, dict) and b.get("type") == "text"
-                         and isinstance(b.get("text"), str))
+    text = _flat_text(text)
     if not isinstance(text, str) or (notice_tags and text.strip().startswith(tuple(notice_tags))):
         return None
     return text
 
 
-def last_owner_index(records, notice_tags=()):
-    """Index of the last user record that owner_text reads as the owner's own words, or None.
-    Unlike is_last_human, a machine notice (a task-notification) does not count."""
+def last_owner_index(records, notice_tags=(), peer_tags=()):
+    """Index of the last main-session user record that starts a task, or None.
+
+    A task start is an owner message (not isMeta, and owner_text reads text from it) or a peer
+    brief (text starts with one of `peer_tags`, shared_names._PEER_FRAME_TAGS). A peer brief is
+    isMeta and sits in MACHINE_TAGS, so only `peer_tags` lets it count. Other isMeta records
+    (stop-hook feedback, system reminders) never count. owner_text skips a machine notice only
+    when `notice_tags` is passed."""
     idx = None
     for i, rec in enumerate(records):
-        if rec.get("type") == "user" and owner_text(rec, notice_tags) is not None:
+        if rec.get("type") != "user" or rec.get("isSidechain"):
+            continue
+        text = _flat_text((rec.get("message") or {}).get("content"))
+        if peer_tags and isinstance(text, str) and text.strip().startswith(tuple(peer_tags)):
+            idx = i
+        elif not rec.get("isMeta") and owner_text(rec, notice_tags) is not None:
             idx = i
     return idx
 
