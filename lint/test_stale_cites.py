@@ -1041,16 +1041,22 @@ class CostTests(StaleCase):
                          "STALE006 does not add exactly one cat-file start for a non-.py range\n")
 
     def test_a_non_py_range_in_a_repo_with_decision_records_adds_no_git_start_for_its_markdown_read(self):
-        """The decision records' read already opens the cat-file that the Markdown read uses, so the start is not extra."""
+        """The decision record's read already opens the cat-file that the Markdown read uses, so the start is not extra.
+        The record is read once more by STALE006, and the page once, so each governed Markdown file is read once by it."""
+        decision = "docs/decisions/tool-home-record.md"
         extra = decisions(("tool-home-record", "config/tool.toml"))
+        extra["config/tool.toml"] = "mode = 1\n"  # the file exists at base, so the range modifies it
 
         def change(repo):
             write(repo, "config/tool.toml", "mode = 2\n")
             commit(repo)
         rng = self.make_range(base_files(extra=extra), change)
-        self.assertEqual(touched(rng), {"config/tool.toml"})  # scope: one non-.py file changes, and a decision names it
-        _, subs = self.scan_counts(rng, "git-trace-with.txt")
-        _, subs_without = self.scan_counts(rng, "git-trace-without.txt", without=("STALE006",))
+        self.assertEqual(touched(rng), {"config/tool.toml"})  # scope: one existing non-.py file changes, and a decision names it
+        with_drift, subs = self.scan_counts(rng, "git-trace-with.txt")
+        without, subs_without = self.scan_counts(rng, "git-trace-without.txt", without=("STALE006",))
+        self.assertEqual(self.markdown_of(with_drift - without),
+                         collections.Counter({"%s:%s" % (rng.head, NOTES): 1, "%s:%s" % (rng.head, decision): 1}),
+                         "STALE006 does not read each governed Markdown file at head exactly once\n")
         self.assertEqual(sorted(subs), sorted(subs_without), "STALE006 starts a git process a decision record did not start\n")
 
     def run_tree_traced(self, rng):
