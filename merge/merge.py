@@ -82,6 +82,12 @@ class Unproven(NetStop):
 class Dropped(Stop):
     """The silent-undo check found a dropped line."""
 
+class Unread(Dropped):
+    """A history read of a check could not run: no finding, so no refusal. After the claim push it stops as Unproven."""
+
+class UnreadText(str):
+    """The text of a `holds_base` answer that could not be read. A caller that keeps a claim tells it from a refusal by this class."""
+
 class Held(Stop):
     pass
 
@@ -326,7 +332,7 @@ def debt_check(wt, base_ref, host, info):
     try:
         found = debt.check(wt, base_ref, info["head"], pr_body=info.get("body", ""), run_state=lambda url: host.cited_run(url), isolate=True)
     except debt.Unknown as e:
-        raise Dropped(f"the debt-close check could not read the history: {e}\n{DEBT_CITE}")
+        raise Unread(f"the debt-close check could not read the history: {e}\n{DEBT_CITE}")
     if found:
         raise Dropped("the branch closes a debt without proof that its Retire check holds:\n  " + "\n  ".join(f"{f.slug} [{f.kind}]: {f.text}" for f in found) + f"\n{DEBT_CITE}")
 
@@ -1022,7 +1028,7 @@ class Host:
 
     def wait_checks(self, n, sha, deadline_minutes, prior=None):
         """Wait until every required check on `sha` has finished and none failed. -> (ok, why). `ok` is None when the deadline passed with a required
-        check still pending: no answer, not a red one. `prior` is the head before this run's push.
+        check still pending, or with GitHub still showing the head before the push: no answer, not a red one. `prior` is the head before this run's push.
         Each pass reads the pull request first: a third head, DIRTY or CONFLICTING ends the wait. A head
         that still reads as `prior` is GitHub lagging the push: keep waiting. Any red check or run, required or not,
         ends the wait. Only a pending check named in the required list holds the wait, or a pending workflow run that
@@ -1049,7 +1055,7 @@ class Host:
             if info["head"] == prior and prior != sha:
                 progress("GitHub to show the pushed head")
                 if self.now() >= end:
-                    return False, f"the deadline of {deadline_minutes} minutes passed. GitHub still shows the head before the push. {GREEN_CITE}"
+                    return None, f"the deadline of {deadline_minutes} minutes passed. GitHub still shows the head before the push. {GREEN_CITE}"
                 self.pause(self.minute)
                 continue
             if info["base"] != base:
@@ -1865,8 +1871,8 @@ def holds_base(wt, base_ref, sha, before_run=None):
         base = base_ref.split("/", 1)[-1]
         return (f"{sha[:9]} does not hold {base_ref} at {tip}, so no run on it tested the current {base}. "
                 f"Merge {base} into the branch, push, and run again. The green run cannot stand: {why}. {BASE_CITE}"), None
-    return (f"cannot read whether {sha[:9]} holds {base_ref}, so the run cannot be proved current: git could not "
-            f"tell (an unreadable revision, or a shallow clone: run `git fetch --unshallow`). {BASE_CITE}"), None
+    return UnreadText(f"cannot read whether {sha[:9]} holds {base_ref}, so the run cannot be proved current: git could not "
+                      f"tell (an unreadable revision, or a shallow clone: run `git fetch --unshallow`). {BASE_CITE}"), None
 
 def push_branch(wt, branch):
     """A plain push. Never force: a moved branch refuses it, and nothing reaches origin."""
@@ -2954,8 +2960,8 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
                 try:  # main may have moved during the wait: read the branch against the tip fetched just now
                     record_lift(lifts, UNDO_FLAG, undo_check(wt, base_ref, unknown_ok, info.get("body", "")))
                     debt_check(wt, base_ref, host, info)
-                except Liftable as e:  # undo_check could not read the history; a finding is Dropped, and refuses
-                    unproven("the silent-undo check could not read the history", str(e))
+                except (Liftable, Unread) as e:  # a history read that could not run; a finding is Dropped, and refuses
+                    unproven("a check could not read the history", str(e))
                 except Stop as e:
                     stop(str(e))
                 try:  # the config is the base tip's, read just after the fetch
@@ -2982,6 +2988,8 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
                 if proof == "stale":
                     stop(f"the records page is stale for the merge result: {base_ref} gained a record after the rebuild (a push that did not use the tool). Nothing was merged. Run again. {RECORDS_CITE}")
                 stale, stands = holds_base(wt, base_ref, sha, host.before_wait)  # the base moved during the wait: the green run did not test it
+                if isinstance(stale, UnreadText):
+                    unproven("the base read could not run", stale)
                 if stale:
                     stop(stale)
                 if stands:
