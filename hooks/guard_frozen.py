@@ -220,14 +220,29 @@ MUTATING_COMMAND = (
 
 
 # A command that hands its arguments to another program, so a mutating word in them may run.
-_RUNS_ITS_ARGUMENTS = {"find", "eval", "exec", "pwsh", "powershell", "cmd"}
+_RUNS_ITS_ARGUMENTS = {"find", "eval", "exec", "pwsh", "powershell", "cmd", "iex", "invoke-expression"}
+# An interpreter runs the program text its inline flag carries (`python -c`, `node -e`). Run on a
+# file, it reads its path words like any reader.
+_PYTHON_INLINE = re.compile(r"-[A-Za-z]*c[A-Za-z]*")
+_OTHER_INLINE = re.compile(r"-[A-Za-z]*[ceEp][A-Za-z]*")
+
+
+def _runs_inline_text(command: str, words) -> bool:
+    if re.fullmatch(r"python[\d.]*", command):
+        flag = _PYTHON_INLINE
+    elif command in ("node", "perl", "ruby", "php", "deno", "bun"):
+        flag = _OTHER_INLINE
+    else:
+        return False
+    return any(flag.fullmatch(word) for word in words)
 
 
 def _mutates_as_command(command: str, words) -> bool:
     """True when the segment's own command (`command`, its resolved name) changes the files it names:
     a word of MUTATING_COMMAND or a `mv` or `rm` of the version control tool. A command that runs its
     arguments counts too, as it always did, so a shell `-c "rm x"` and `find -exec rm` stay seen."""
-    if command in _RUNS_ITS_ARGUMENTS or command in guard_core.INLINE_SCRIPT_SHELLS:
+    if (command in _RUNS_ITS_ARGUMENTS or command in guard_core.INLINE_SCRIPT_SHELLS
+            or _runs_inline_text(command, words)):
         return True
     if command == "git":
         rest = [word for word in words if not word.startswith("-")]
@@ -602,6 +617,9 @@ def _shell_write_hit(cmd: str, cwd: str, predicate, holds=None, follow_cd=False,
     kinds = ["" if closed else _kind(words, plain) for words, (_u, plain) in zip(parsed, scans)]
     quiet = all(kind in ("printer", "cd") or not words for kind, words in zip(kinds, parsed))
     for number, raw in enumerate(parsed):
+        # A printer piped on to a program hands that program its text, so a mutating word in the text
+        # may run. Only a segment nothing runs the text of is read by its command word alone.
+        piped_to_a_runner = False
         linked = _cp_link_source(raw, holds, cwd)
         if linked:
             return linked
@@ -612,6 +630,7 @@ def _shell_write_hit(cmd: str, cwd: str, predicate, holds=None, follow_cd=False,
                 last += 1
             chain = range(number, last + 1)
             runs_nowhere = all(kinds[k] == "printer" for k in chain[1:])
+            piped_to_a_runner = not runs_nowhere
             to_file = any(_writes_a_file(parsed[k]) for k in chain)
             if runs_nowhere and (quiet or not to_file):
                 data = data | _data_words(kinds[number], raw)
@@ -631,12 +650,16 @@ def _shell_write_hit(cmd: str, cwd: str, predicate, holds=None, follow_cd=False,
         text = " ".join(shown)
         at = (dir_before_segment(segments, number, cwd, ends) or cwd) if follow_cd else cwd
         verb = _segment_command(words)[0] if predicate_command else ""
+        # A group, a substitution or a `{}` block nests a second command in the segment, so its text is
+        # read whole.
+        nested = bool(_GROUP_MARK.search(_FD_DUP.sub("", scans[number][1])))
+        narrow = command_position and not closed and not piped_to_a_runner and not nested
         for word in words:
             if word.startswith("-") or REDIRECT.fullmatch(word):
                 continue
             if not word or word in (">", ">>"):
                 continue
-            if (predicate(word, at, verb) if predicate_command else predicate(word, at)) and writes_to(word, text, *(_segment_command(words) if command_position else ())):
+            if (predicate(word, at, verb) if predicate_command else predicate(word, at)) and writes_to(word, text, *(_segment_command(words) if narrow else ())):
                 return word
     return ""
 
@@ -652,12 +675,12 @@ def _segment_command(words):
 
 def frozen_shell_hit(cmd: str, cwd: str) -> str:
     """Return the frozen (config-dir) path a shell command writes to, else ''."""
-    return _shell_write_hit(cmd, cwd, is_frozen, _holds_frozen)
+    return _shell_write_hit(cmd, cwd, is_frozen, _holds_frozen, command_position=True)
 
 
 def project_config_shell_hit(cmd: str, cwd: str) -> str:
     """Return the project config path a shell command writes to, else ''."""
-    return _shell_write_hit(cmd, cwd, is_project_config)
+    return _shell_write_hit(cmd, cwd, is_project_config, command_position=True)
 
 
 # ------------------------------------------------------------------ an interpreter's own writes

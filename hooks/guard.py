@@ -3599,7 +3599,7 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
     # and rule 1 strips it. A command that writes a settings file and names the cap variable
     # somewhere else on the line is asked too: an over-trigger of one prompt, inside a scope this
     # narrow, beats a bypass by a second segment.
-    matched = _shell_write_hit(stripped, cwd, is_settings_file)
+    matched = _shell_write_hit(stripped, cwd, is_settings_file, command_position=True)
     if matched:
         change = cap_change(raw)
         if change:
@@ -4556,7 +4556,8 @@ def other_checkout_hit(tool: str, tool_input: dict, cwd: str, session_id: str = 
         if elsewhere(move, where) and not _own_red_run(payload, roots[0], move):
             return (OTHER_CLONE_CD_DETAIL if clone_hit.get(move) else OTHER_CHECKOUT_CD_DETAIL) + move
     if targets is None:
-        hit = _shell_write_hit(command, where, elsewhere, follow_cd=True, predicate_command=True) if writes else ""
+        hit = _shell_write_hit(command, where, elsewhere, follow_cd=True, predicate_command=True,
+                               command_position=True) if writes else ""
         if not hit:
             # A git verb that changes files, run in a separate clone or from a stranded cwd. The one
             # reader of such verbs is session_home_git_hit; only the folder test differs.
@@ -4750,7 +4751,7 @@ def session_home_hit(payload, tool: str, tool_input: dict, cwd: str) -> str:
         verb = session_home_git_hit(command, where, in_primary)
         if verb:
             return "git " + verb + " in the primary checkout"
-        hit = _shell_write_hit(command, where, in_primary, follow_cd=True) if writes else ""
+        hit = _shell_write_hit(command, where, in_primary, follow_cd=True, command_position=True) if writes else ""
         return "shell write into the primary checkout: " + hit if hit else ""
     for target in targets:
         if in_primary(target, where):
@@ -4773,7 +4774,7 @@ def never_lifted(payload, tool: str, tool_input: dict, cwd: str) -> bool:
         stripped = strip_heredoc_bodies(raw)
         return bool(git_env_command_hit(raw, stripped) or frozen_shell_hit(stripped, cwd)
                     or any(t and kills_group_pid(t) for t in map(segment_tokens, split_segments(stripped)))
-                    or (_shell_write_hit(stripped, cwd, is_settings_file) and cap_change(raw))
+                    or (_shell_write_hit(stripped, cwd, is_settings_file, command_position=True) and cap_change(raw))
                     or (agent_role(payload) == BUILDER_ROLE and builder_shell_test_hit(raw, stripped, cwd)))
     role = agent_role(payload)
     for target in write_targets(tool_input) if tool in WRITE_TOOLS else ():
