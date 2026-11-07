@@ -35,7 +35,7 @@
   "pick": "a",
   "rank": 1,
   "ref": "decision silent-undo-check-design; step notes-fix-large-1",
-  "reply": "a, 15:01 CST: accept the one hole and record it. Relayed to lane notes-fix-large-1 (PR #1479); this closes on its done report.",
+  "reply": "a, 15:01 CST: accept the one hole and record it. Lane notes-fix-large-1 builds it as its row 6, once PR #1099 (refuse a lane commit that undoes its own lane's work) merges; that PR is still a draft. This closes on the lane's done report.",
   "short": "Silent-undo check: pass reworded lines, or keep the false alarm",
   "status": "open",
   "title": "May the silent-undo check let a reworded line pass, at the cost of one small hole?",

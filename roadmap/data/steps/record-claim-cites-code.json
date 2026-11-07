@@ -1,0 +1,11 @@
+{
+  "title": "A record's claim about what a tool reads or costs cites the code line that states it",
+  "status": "todo",
+  "phase": "next",
+  "order": 270.0,
+  "lane": "",
+  "why": "Incident 15:00 CST Nov 7, lane pr-state-is-on-the-pr: a record-writer added \"the ledger reads no CI state\" to decision pr-ledger (#1419), while the code on that branch reads main's latest CI run. Caught by reading; no check compares a record's claim about a tool's reads with the tool's code.",
+  "note": "Candidate: each record that claims a tool's reads or cost cites the docstring line that states it, as fresh-prose binds claims to checks. Done step prose-governance-workflow bound prose to code in general; this is the gap it left for read and cost claims. Coordinator to judge scope: fold into the fresh-prose skill or a lint.",
+  "owner": "coordinator",
+  "updatedAt": "2026-11-07T15:04:00-06:00"
+}

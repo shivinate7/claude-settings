@@ -1,0 +1,11 @@
+{
+  "title": "A guard lane's test-author reproduces the incident and records it before writing refusal cases",
+  "status": "doing",
+  "order": 264.6,
+  "lane": "session_013NEJKzxNVwYRpqaGSyiXos",
+  "why": "Coordinator, 15:03 CST, topic guard-quality: a guard built without reproducing its incident can guard the wrong shape (for example draft-pr-guard-heredoc, where the lane's first guess at the shape did not reproduce).",
+  "note": "The test-author records the command and the observed harm before refusal cases; no reproduction stops the lane. Homes: agents/test-author.md, the guard part of the brief rules, and a check in the merge tool or lane-lint that refuses a review record with `Guard or check: yes` and no reproduction line.",
+  "owner": "coordinator",
+  "phase": "now",
+  "updatedAt": "2026-11-07T15:04:00-06:00"
+}

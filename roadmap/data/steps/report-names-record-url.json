@@ -1,0 +1,11 @@
+{
+  "title": "The report guard refuses a claim of a posted review record or PR comment that gives no comment URL",
+  "status": "doing",
+  "order": 264.5,
+  "lane": "session_013NEJL45afxTyvacTQtAEwZ",
+  "why": "Incident: lane notes-fix-page reported at 14:54 CST Nov 7 that the round-1 review record for #1500 was posted; it was posted at 15:01 CST. Harm: a runner trusts a record that does not exist.",
+  "note": "lint/report_guard.py refuses such a line. Topic report-guard. Red test first.",
+  "owner": "coordinator",
+  "phase": "now",
+  "updatedAt": "2026-11-07T15:04:00-06:00"
+}
