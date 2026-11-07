@@ -2962,6 +2962,22 @@ def lay_out(sources, work: str, target: str, name: str, old: str, new: str) -> s
         # it the role-model table reads as unread and every role-model arm passes unjudged.
         shutil.copytree(os.path.join(HERE, "..", "lint"), os.path.join(root, "lint"),
                         ignore=shutil.ignore_patterns("__pycache__"))
+        # guard_merge.py loads ../merge/merge.py (MERGE_TOOL_REL). Without it every merge-batch arm reads
+        # "check reader could not be loaded" and fails, whatever was mutated: the clean-layout control caught this.
+        os.makedirs(os.path.join(root, "merge"), exist_ok=True)
+        shutil.copy(os.path.join(HERE, "..", "merge", "merge.py"), os.path.join(root, "merge"))
+        # merge.py reads ../actions/ci-alarm/events.json when it loads (ALARM_EVENTS).
+        os.makedirs(os.path.join(root, "actions", "ci-alarm"), exist_ok=True)
+        shutil.copy(os.path.join(HERE, "..", "actions", "ci-alarm", "events.json"),
+                    os.path.join(root, "actions", "ci-alarm"))
+        # The guard family reads two skills from ../skills: IMPECCABLE_SKILL_FILE (guard.py), and the waiting-page
+        # folder (question_form.py's page.html; guard.py's stale_pages.py, splice.py and check_designs.mjs).
+        os.makedirs(os.path.join(root, "skills", "impeccable"), exist_ok=True)
+        shutil.copy(os.path.join(HERE, "..", "skills", "impeccable", "SKILL.md"),
+                    os.path.join(root, "skills", "impeccable"))
+        shutil.copytree(os.path.join(HERE, "..", "skills", "waiting-page"),
+                        os.path.join(root, "skills", "waiting-page"),
+                        ignore=shutil.ignore_patterns("__pycache__", "test_*", "tests"))
     else:
         copy_path = os.path.join(work, "%s_%s.py" % (stem, mutate_shared.safe_name(name)))
         mutated = sources[target].replace(old, new, 1)
