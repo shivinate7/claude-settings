@@ -2078,6 +2078,7 @@ def case_send_tool_names_come_from_shared_names():
 # subject, and no verdict word. Each case reads its sentence against these lists before it asserts on the hook (P7).
 # The lists are the product's constants, imported and never copied (rule building-allow-list-is-the-constant).
 from call_judge import VERDICT_FORECAST_WORDS, VERDICT_WORDS, VERDICT_SUBJECT_WORDS  # noqa: E402
+from call_judge import VERDICT_CLAIM_RULE, PAST_RULING_RULE_NAME  # noqa: E402  the two refusal rule ids (hooks/call_judge.py)
 # The named check is a test file, so a Bash call that runs it names the same path, and (a) needs no name mapping.
 CLAIM_CHECK = "hooks/test_call_judge.py"
 INCIDENT_SENTENCE = "#1516's check will refuse it without the stop."  # the incident, verbatim: its check has no path
@@ -2088,7 +2089,8 @@ WOULD_CLAIM = "The check " + CLAIM_CHECK + " would refuse it without the stop." 
 CITED_FILE = "hooks/test_claim_fixture.py"  # committed at head of the fixture repo, so a test cite to it backs a claim
 CITED = CLAIM[:-1] + " (test " + CITED_FILE + "::case_refuses_it)."  # case 3
 ABSENT_CITED = CLAIM[:-1] + " (test hooks/test_missing.py::case_refuses_it)."  # a negative: no such file at head
-VERDICT_REPO = make_repo("verdict", files={CITED_FILE: "def case_refuses_it():\n    assert True\n"})
+VERDICT_REPO = make_repo("verdict", files={CITED_FILE: "def case_refuses_it():\n    assert True\n",
+                                           "README.md": "# Fixture\n"})  # README: a read cite that exists at head
 
 
 def has_word(text, words):
@@ -2311,6 +2313,164 @@ def case_would_claim_is_refused():
               (r.deny() or {}).get("permissionDecision") == "deny", detail(r))
 
 
+# ------------------------------------------------------------------ verdict claim, round 2 (red on de7d56500)
+#
+# Each group below is the rule the builder implements for round 2, and each group is red on the head this round starts
+# from. A forecast needs a check subject (a check, guard, hook, test, rule, CI, or a PR number) and a future or modal
+# verdict verb whose object is it, this, that, them, the send, the change or a PR, or else the verb is passive. A run
+# before the newest peer message (a cross-session message record) does not clear a claim after it. A test cite clears
+# only when its name is defined in its file. A read cite clears only when its path is a file the claim names, or one
+# that defines the named rule. A send that fails both the verdict claim and the owner question gets one refusal that
+# names both rules.
+ROUND2_REFUSED = (
+    ("a plural check subject", "checks will refuse it."),
+    ("the modal should", "the check should refuse it."),
+    ("the contraction 'll", "the check'll refuse it."),
+    ("the contraction won't", "the guard won't let it through."),
+    ("a passive verb, by a file", "it will be refused by guard.py."),
+    ("the verb reject", "the check will reject it."),
+    ("a PR number as the subject", "PR #1516 will refuse it."),
+    ("CI as the subject", "CI will catch it."),
+    ("a claim split across lines", "#1516's check\nwill refuse it."),
+)
+ROUND2_ALLOWED = (
+    ("pass, with the test results as object", "I will pass the test results to the parent."),
+    ("catch, with OSError as object", "The hook will catch OSError."),
+    ("allow, with a fix as object", "The rule will allow a fix under 40 lines."),
+    ("block, with the merge as object", "I will block the merge until the test is green."),
+    ("refuse, with PRs as object", "Add a guard that will refuse empty PRs."),
+)
+
+
+def owner_record(text="Check the send gate and report."):
+    return {"type": "user", "message": {"role": "user", "content": text}}
+
+
+def peer_record(text):
+    """A cross-session message: a user record whose origin is a peer, so the turn reader never takes it as the owner's."""
+    return {"type": "user", "origin": {"kind": "peer"}, "message": {"role": "user", "content": text}}
+
+
+def bash_records(tool_id, command):
+    """One Bash call and its result, in the record shape lint/_transcript.py reads."""
+    return [
+        {"type": "assistant", "message": {"role": "assistant", "content": [
+            {"type": "tool_use", "id": tool_id, "name": "Bash", "input": {"command": command}}]}},
+        {"type": "user", "message": {"role": "user", "content": [
+            {"type": "tool_result", "tool_use_id": tool_id, "content": "ok", "is_error": False}]}},
+    ]
+
+
+def write_records(name, records):
+    folder = os.path.join(ROOT, "transcripts")
+    os.makedirs(folder, exist_ok=True)
+    path = os.path.join(folder, name + ".jsonl")
+    with open(path, "w", encoding="utf-8") as f:
+        for record in records:
+            f.write(json.dumps(record) + "\n")
+    return path
+
+
+def deny_lines(r):
+    """The PreToolUse deny decisions the child printed: one JSON object per output line."""
+    found = []
+    for line in r.out.splitlines():
+        if not line.strip():
+            continue
+        try:
+            body = json.loads(line).get("hookSpecificOutput") or {}
+        except ValueError:
+            continue
+        if body.get("permissionDecision") == "deny":
+            found.append(body)
+    return found
+
+
+def case_round2_refused_claims_are_refused():
+    transcript = write_transcript("r2-refused")
+    for label, sentence in ROUND2_REFUSED:
+        for tool in SEND_TOOLS:
+            r = run_hook(send_input(tool, sentence, transcript=transcript), answer=ALLOW)
+            check("round 2 refused (%s), via %s: the send is refused" % (label, tool),
+                  (r.deny() or {}).get("permissionDecision") == "deny", detail(r))
+
+
+def case_round2_allowed_claims_pass():
+    transcript = write_transcript("r2-allowed")
+    for label, sentence in ROUND2_ALLOWED:
+        for tool in SEND_TOOLS:
+            r = run_hook(send_input(tool, sentence, transcript=transcript), answer=ALLOW)
+            check("round 2 allowed (%s), via %s: the send is not refused" % (label, tool),
+                  r.code == 0 and r.deny() is None, detail(r))
+
+
+def case_run_before_a_peer_message_does_not_clear_a_later_claim():
+    # The round 2 turn bound. The run is in the owner's turn both times, so the reader's scope is the same; only the
+    # peer message's place differs. A run before the peer message is refused. After it, it clears (the green control).
+    before = write_records("r2-peer-before", [owner_record(), *bash_records("b1", "cat " + CLAIM_CHECK),
+                                              peer_record("Peer note: the lane is up.")])
+    after = write_records("r2-peer-after", [owner_record(), peer_record("Peer note: the lane is up."),
+                                            *bash_records("b2", "cat " + CLAIM_CHECK)])
+    for label, path in (("before", before), ("after", after)):
+        check("peer turn scope (run %s the peer message): the reader sees the run" % label,
+              any(CLAIM_CHECK in command for command in turn_commands(path)), turn_commands(path))
+    for tool in SEND_TOOLS:
+        r = run_hook(send_input(tool, CLAIM, transcript=before), answer=ALLOW)
+        check("round 2 turn bound, run before a peer message, via %s: the send is refused" % tool,
+              (r.deny() or {}).get("permissionDecision") == "deny", detail(r))
+        r = run_hook(send_input(tool, CLAIM, transcript=after), answer=ALLOW)
+        check("round 2 turn bound, run after a peer message (control), via %s: the send is not refused" % tool,
+              r.code == 0 and r.deny() is None, detail(r))
+
+
+def case_round2_cite_bar():
+    # A cite clears a claim only as the cite bar says. Each red cite is at head, so today it clears the claim, and the
+    # green control names a defined test in its file.
+    import stale_cites  # the one home of the cite parser (lint/stale_cites.py)
+    check("cite bar scope: the README is at head of the fixture repo", at_head(VERDICT_REPO, "README.md"), "README.md")
+    fixture = subprocess.run(["git", "-C", VERDICT_REPO, "show", "HEAD:" + CITED_FILE], capture_output=True, text=True,
+                             env=GIT_ENV).stdout
+    check("cite bar scope: the fixture file defines case_refuses_it and not no_such_test",
+          stale_cites.defined_line(fixture, "case_refuses_it") > 0 and stale_cites.defined_line(fixture, "no_such_test") == 0,
+          fixture)
+    red = (("a read cite to README.md, which names no rule", "(read README.md)"),
+           ("a test cite to a name the file does not define", "(test " + CITED_FILE + "::no_such_test)"),
+           ("a read cite to a file the claim does not name", "(read " + CITED_FILE + ")"))
+    transcript = write_transcript("r2-cite")
+    for label, cite in red:
+        sentence = INCIDENT_SENTENCE[:-1] + " " + cite + "."
+        for tool in SEND_TOOLS:
+            r = run_hook(send_input(tool, sentence, transcript=transcript, cwd=VERDICT_REPO), answer=ALLOW)
+            check("round 2 cite bar (%s), via %s: the send is refused" % (label, tool),
+                  (r.deny() or {}).get("permissionDecision") == "deny", detail(r))
+    green = INCIDENT_SENTENCE[:-1] + " (test " + CITED_FILE + "::case_refuses_it)."
+    for tool in SEND_TOOLS:
+        r = run_hook(send_input(tool, green, transcript=transcript, cwd=VERDICT_REPO), answer=ALLOW)
+        check("round 2 cite bar, a defined test cite (control), via %s: the send is not refused" % tool,
+              r.code == 0 and r.deny() is None, detail(r))
+
+
+def case_verdict_and_question_failures_give_one_refusal_naming_both():
+    # A send that fails the verdict claim and the owner question (the ruling of WORKTREE_SLUG refuses it) gets one refusal,
+    # and the reason names both rules. The question check still runs: its one model call carries the ruling record.
+    import question_form  # the one form check (hooks/question_form.py)
+    message = INCIDENT_357 + "\nThe check " + CLAIM_CHECK + " will refuse it without the stop."
+    check("both failures scope: the message holds the Goal and Problem lines of an owner question",
+          bool(question_form.GOAL_LINE.search(message)) and bool(question_form.PROBLEM_LINE.search(message)),
+          "the form lines")
+    for tool in SEND_TOOLS:
+        r = run_hook(send_input(tool, message), answer=ruled(WORKTREE_SLUG))
+        denies = deny_lines(r)
+        check("both failures, via %s: one refusal, not two" % tool, len(denies) == 1, detail(r))
+        reason = denies[0].get("permissionDecisionReason", "") if len(denies) == 1 else ""
+        check("both failures, via %s: the refusal names the verdict claim rule" % tool, VERDICT_CLAIM_RULE in reason,
+              reason[:200])
+        check("both failures, via %s: the refusal names the owner question rule" % tool,
+              PAST_RULING_RULE_NAME in reason, reason[:200])
+        check("both failures, via %s: the question check ran, one model call with the ruling record" % tool,
+              len(r.calls) == 1 and WORKTREE_MARK in r.calls[0]["prompt"], detail(r))
+
+
 def main():
     for case in (case_agent_refusal,case_spawn_prompt_bars_a_lane_waiting_page_write, case_agent_override, case_explore_row_is_vetoed,
                  case_explore_remedy_names_marker, case_agent_fallback_names_marker, case_question,
@@ -2358,7 +2518,10 @@ def main():
                  case_forecast_without_a_verdict_word_passes,
                  case_verdict_claim_after_an_unrelated_bash_call_is_refused,
                  case_verdict_claim_after_the_test_ran_in_an_earlier_turn_is_refused,
-                 case_verdict_claim_cited_to_an_absent_file_is_refused, case_would_claim_is_refused):
+                 case_verdict_claim_cited_to_an_absent_file_is_refused, case_would_claim_is_refused,
+                 case_round2_refused_claims_are_refused, case_round2_allowed_claims_pass,
+                 case_run_before_a_peer_message_does_not_clear_a_later_claim, case_round2_cite_bar,
+                 case_verdict_and_question_failures_give_one_refusal_naming_both):
         try:
             case()
         except Exception as exc:
