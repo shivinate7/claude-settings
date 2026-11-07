@@ -1,0 +1,11 @@
+{
+  "title": "q_max main has no TypeScript errors",
+  "phase": "now",
+  "status": "doing",
+  "order": 0.12,
+  "owner": "coordinator",
+  "why": "Coordinator, 13:59 CST Nov 7: q_max main has 33 TypeScript errors.",
+  "note": "Renamed from qmax-main-map-ts at 14:00 CST. The MAP part stays with step qmax-map-format-skew (coordinator, 14:00 CST).",
+  "lane": "session_013NEJKzRCmwHVEerq6qBgSn",
+  "updatedAt": "2026-11-07T14:00:00-06:00"
+}
