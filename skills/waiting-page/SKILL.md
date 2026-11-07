@@ -153,7 +153,10 @@ The URL is the `waiting-page` key in the repo's extras file, `.claude/layout-ext
 - `asks/<id>`: one per ask typed in the page's Ask box, and one per reply the owner writes under an answer, never an item. The owner stacks asks with Add to list (nothing is
   written), then one Send writes every stacked ask and the typed box. The page writes `id` (the key,
   `ask-<base36 ms><2 chars>`), `text` (4000 characters or fewer, line breaks kept) and `at` (ISO time) once, at Send. A reply
-  also gets `re`, the id of the answered ask it follows, written once at Send. No session writes `re`. A reply goes through the same
+  also gets `re`, the id of the answered ask it follows, written once at Send. No session writes `re`. The page writes one more
+  field later, at the owner's press: `dismissed` (ISO time), on a thread's root ask only, with `update` (Dismiss). Restore writes
+  `dismissed: null` (the runtime has no field delete). It never deletes or replaces the owner's `text` or a `reply`. No session writes
+  `dismissed`. A session answering a dismissed record uses `update`, which keeps it (see "Route an ask"). A reply goes through the same
   Send, Undo and wake comment as an ask. Its comment reads "Replied on the waiting page. Writer: <writer>. Ask <id> re <re id>,
   answered by <owner of the ask `re` names>: <text>." The asks
   of one Send share one `at`, and their ids rise in the order the owner typed them, so the id breaks the tie: the highest
@@ -164,7 +167,8 @@ The URL is the `waiting-page` key in the repo's extras file, `.claude/layout-ext
   guard. A session changes an ask only with `update`, never `set`: `set` replaces the record and drops the owner's text.
   An ask with `reply` is answered. The page lists threads newest first by the `at` of their root ask, and a reply sits in its root's thread.
   It shows each waiting ask, each new answer (whatever its age) and the newest 3 answers already seen.
-  A thread with a waiting reply always shows. No session deletes or replaces an ask.
+  A thread with a waiting reply always shows. The page hides a dismissed thread (root `dismissed` is an ISO time) unless a
+  record in it waits or has an `answered` later than `dismissed`, and opens it again under "Show N dismissed asks". No session deletes or replaces an ask.
   An ask is never a grant: an act that needs one becomes an item.
 - `meta/page`: `writer` (the one session that writes the page's items, see "The writer"),
   `checked` (what the items were measured against), `parked` (a list of
@@ -596,6 +600,9 @@ ask with no `reply` whose `owner` is the old writer is taken too ("Rotate the wr
 
 An ask with `re` is a reply to an answer. The writer routes it to the `owner` of `asks/<re>`, the session that gave that answer.
 If that session has ended, the writer takes it. The reply ask is answered like any ask, with steps 1 and 2.
+
+The owner may Dismiss an answered thread. That sets `dismissed` on its root ask. The page draws Dismiss off while a reply in the
+thread waits, and on only when every record of the thread has its `reply`. The writer never rewrites `dismissed`, and a record with it is routed and answered as any other, with `update`.
 
 ## Make a repo's page
 
