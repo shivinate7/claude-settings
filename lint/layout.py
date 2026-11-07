@@ -208,8 +208,9 @@ WAITING_PAGE = "waiting-page"  # the extras key that holds the repo's waiting pa
 ARTIFACT_LINK = ("https://claude.ai/artifact/", "https://claude.ai/code/artifact/")
 # What a write accepts. A read keeps the looser ARTIFACT_LINK prefix: other repos hold keys written before this.
 ARTIFACT_URL = re.compile(r"https://claude\.ai/(?:code/)?artifact/[A-Za-z0-9_-]+")
-# A real artifact link as artifact_id reads it: the id in group 1, then an optional slash, query and fragment.
-ARTIFACT_URL_ID = re.compile(r"https://claude\.ai/(?:code/)?artifact/([A-Za-z0-9_-]+)/?(?:\?[^#]*)?(?:#.*)?")
+# A real artifact link as artifact_id reads it: leading padding, an optional scheme (http or https) and www. in any
+# letter case, the id in group 1, then an optional slash, query and fragment.
+ARTIFACT_URL_ID = re.compile(r"\s*(?i:(?:https?://)?(?:www\.)?claude\.ai/(?:code/)?artifact/)([A-Za-z0-9_-]+)/?(?:\?[^#]*)?(?:#.*)?")
 
 
 def _artifact_link(found, where):
@@ -221,8 +222,8 @@ def _artifact_link(found, where):
 
 def artifact_id(url):
     """The artifact id of a claude.ai artifact link (claude.ai/artifact/<id> or claude.ai/code/artifact/<id>), with a
-    trailing slash, a query and a fragment ignored. "" when `url` is no string or no such link: a bare id, another
-    host, a chat link, a bare `.../artifact/` or a link with an extra path segment. The one home of "same artifact",
+    trailing slash, a query and a fragment ignored. "" when `url` is no string or no such link (the scheme, `www.` and letter case of the host
+    are free, leading spaces are ignored): a bare id, another host, a chat link, a bare `.../artifact/` or a link with an extra path segment. The one home of "same artifact",
     so the /artifact/ and /code/artifact/ forms of one page compare equal."""
     found = ARTIFACT_URL_ID.fullmatch(url) if isinstance(url, str) else None
     return found.group(1) if found else ""
