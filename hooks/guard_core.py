@@ -827,7 +827,15 @@ _RUNNER = re.compile(r"(?:" + _INTERPRETERS + r"|source|\.|eval|exec|xargs|sudo|
 # A runner that reads its operand as a script. The others (`sudo`, `timeout`, `xargs` ...) run the command after
 # them, so a flag before it may take a value (`sudo -u root f`).
 _SCRIPT_RUNNER = re.compile(r"(?:" + _INTERPRETERS + r"|source|\.|eval)(?:\.exe|\.cmd)?").fullmatch
+_INTERPRETER = re.compile(r"(?:" + _INTERPRETERS + r")(?:\.exe|\.cmd)?").fullmatch
 _LEADING_KEYWORDS = {"if", "then", "else", "elif", "do", "while", "until", "!", "{"}
+# Wrappers that run the command after them, and the commands that only read a file named after them.
+_WRAPPERS = {"sudo", "env", "timeout", "nohup", "nice", "command", "time", "xargs", "exec"}
+_READERS = {"cat", "wc", "head", "tail", "less", "grep", "jq", "diff"}
+# An interpreter flag that takes a value which is no script, and a flag whose value is code, not a file.
+_VALUE_FLAGS = {"-W", "-X", "-r", "--require", "-o", "-O"}
+_CODE_FLAGS = {"-c", "-e"}
+_SHELL_SCRIPT = re.compile(r"\.(?:sh|bash|zsh)$").search
 _STDIN_FILE = re.compile(r"(?<![<\d&])<(?![<(])[ \t]*[\"']?([^\s;&|<>()\"'`]+)")
 _SUBSTITUTION = re.compile(r"\$\(|<\(|`")
 
@@ -840,14 +848,22 @@ def _basename_word(word: str) -> str:
     return word.rsplit("/", 1)[-1]
 
 
-def _stage_runs(words):
-    """(the words a stage runs, whether it reads a script on stdin): the command word, and the first operand
-    after the flags of each runner in the chain from it (`bash f`, `timeout 5 sh f`, `source f`). A wrapper such
-    as `sudo` also counts the word after a flag's possible value. A later operand is data
-    (`python3 check.py f`), and a runner past the chain is an argument (`grep node f`)."""
+def _is_flag(word: str) -> bool:
+    return word.startswith("-") and len(word) > 1
+
+
+def _command_start(words) -> int:
     start = 0
     while start < len(words) and words[start] in _LEADING_KEYWORDS:
         start += 1
+    return start
+
+
+def _stage_runs(words):
+    """(the command word of a stage, whether it reads a script on stdin). A script runner in the chain from the
+    command word (`sh`, `sudo bash`, `timeout 5 sh`) reads stdin when it has no operand after its flags, or
+    `-`. The word after a wrapper's flag may be the flag's value (`sudo -u root sh`)."""
+    start = _command_start(words)
     ran = words[start:start + 1]
     stdin = False
     at = start
@@ -860,13 +876,12 @@ def _stage_runs(words):
         picked = []
         end = at
         for end in range(at + 1, len(words)):
-            if words[end].startswith("-") and len(words[end]) > 1:
+            if _is_flag(words[end]):
                 flags.append(words[end])
                 continue
             picked.append(words[end])
             if script or not flags or len(picked) == 2:
                 break
-        ran += picked
         if script and name != "eval":
             stdin = not picked or picked[0] == "-"
         if script and name != "eval" and "-c" not in flags:
@@ -876,12 +891,50 @@ def _stage_runs(words):
     return ran, stdin
 
 
+def _reads_only(words) -> bool:
+    """True when the command of a stage, through its wrappers (`sudo cat f`, `timeout 5 wc f`, `xargs wc`), is a
+    pure reader: the words after it are files it reads, and none runs. Any other command, `ssh host cat f`
+    too, is not."""
+    at = _command_start(words)
+    while at < len(words):
+        name = _basename_word(words[at])
+        if name in _READERS:
+            return True
+        if name not in _WRAPPERS:
+            return False
+        at += 1
+        while at < len(words) and _is_flag(words[at]):
+            at += 1
+        if at < len(words) and _basename_word(words[at]) not in _READERS and not _RUNNER(_basename_word(words[at])):
+            at += 1   # a value of the wrapper or of its flag (`timeout 5 wc`, `sudo -u root cat`)
+    return False
+
+
+def _data_positions(words) -> set:
+    """The positions of the operands a script interpreter takes after its script (`python3 check.py f`,
+    `python3 -m json.tool f`, `bash run.sh f`): data, not a file it runs. An interpreter given code (`-c`, `-e`)
+    has none, as its code may run a file."""
+    data = set()
+    for at, word in enumerate(words):
+        if not _INTERPRETER(_basename_word(word)):
+            continue
+        step = at + 1
+        code = False
+        while step < len(words) and _is_flag(words[step]):
+            code = code or words[step] in _CODE_FLAGS
+            step += 2 if words[step] in _VALUE_FLAGS else 1
+        if not code:
+            data.update(range(step + 1, len(words)))   # `step` is the script
+    return data
+
+
 def _run_files(text: str, written) -> set:
-    """The files of WRITTEN that a command in TEXT runs: as the command word (`./f`), as the first operand of a
-    runner after its flags (`python3 p.py`, `timeout 5 sh f`, `bash $HOME/f`, `source f`, `. f`), as a runner's
-    stdin (`sh < f`), piped into a runner (`cat f | sh`), or read by a runner through a substitution
-    (`eval "$(cat f)"`). A read such as `wc -c f`, or a later operand such as `python3 check.py f`, runs
-    nothing. The word is compared as written, so `$HOME/f` matches only itself."""
+    """The files of WRITTEN that a command in TEXT runs: as the command word (`./f`), as a runner's stdin
+    (`sh < f`), piped into a runner (`cat f | sh`), read by a runner through a substitution (`eval "$(cat f)"`),
+    or named in a pipeline that holds a runner (`bash f`, `ssh host < f`, `find -exec bash`, `kubectl exec p --
+    bash f`, as main). Not run: an operand of a pure reader (`wc -c f`, `sudo cat f`, `ls f | xargs wc`), and an
+    operand after the script of an interpreter (`python3 check.py f`). The word is compared as written, so
+    `$HOME/f` matches only itself."""
     ran = set()
     for line in _WRITE_TARGET.sub(" ", text).split("\n") if written else ():
         line_words = _plain_words(_WORDS(line))
@@ -890,23 +943,32 @@ def _run_files(text: str, written) -> set:
         for pipeline in re.split(r";|&&|\|\||&", line):
             stages = pipeline.split("|")
             words = [_plain_words(_WORDS(stage)) for stage in stages]
-            for at, (stage, stage_words) in enumerate(zip(stages, words)):
+            reads = [_reads_only(stage_words) for stage_words in words]
+            holds_runner = any(not only and any(_RUNNER(_basename_word(word)) for word in stage_words)
+                               for only, stage_words in zip(reads, words))
+            for at, (stage, stage_words, only) in enumerate(zip(stages, words, reads)):
                 runs, stdin = _stage_runs(stage_words)
                 ran.update(written.intersection(runs))
                 if stdin:
                     ran.update(written.intersection(_plain_words(_STDIN_FILE.findall(stage))))
                     ran.update(written.intersection(word for earlier in words[:at] for word in earlier))
+                if holds_runner and not only:
+                    data = _data_positions(stage_words)
+                    ran.update(word for place, word in enumerate(stage_words)
+                               if word in written and place not in data)
     return ran
 
 
 def _kept_bodies(text: str, bodies, body_at) -> set:
-    """The header line indices of the bodies to keep in view: each body whose written file a command runs, and
-    each body whose written file a kept body names (`a.sh` sources `b.sh`, `p.py` opens `c.txt`)."""
+    """The header line indices of the bodies to keep in view: each body written to a shell script (`*.sh`,
+    `*.bash`, `*.zsh`, which a later call may run), each body whose written file a command runs, and each body
+    whose written file a kept body names, by its basename (`a.sh` sources `b.sh`, `bash "$(dirname $0)/part.txt"`)."""
     writes = [set(_plain_words(_WRITE_TARGET.findall(header))) for _, _, header in bodies]
     ran = _run_files(text, set().union(*writes))
-    keep = {at for at, written in enumerate(writes) if written & ran}
+    keep = {at for at, written in enumerate(writes) if written & ran or any(map(_SHELL_SCRIPT, written))}
+    writes = [written | {_basename_word(word) for word in written} for written in writes]
     while True:
-        named = {word for at in keep for word in _plain_words(_WORDS(bodies[at][1]))}
+        named = {_basename_word(word) for at in keep for word in _plain_words(_WORDS(bodies[at][1]))}
         more = {at for at, written in enumerate(writes) if at not in keep and written & named}
         if not more:
             return {body_at[at] for at in keep}
