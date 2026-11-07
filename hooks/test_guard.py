@@ -11421,6 +11421,9 @@ sh("frozen: cp FROM a frozen hook with stderr sent to /dev/null is a read",
    "cp " + CFG_HOOK + " /tmp/g 2>/dev/null", "allow", cwd=NOGIT)
 sh("frozen: cp FROM a frozen hook, with a redirect onto a frozen hook, still denies",
    "cp " + CFG_HOOK + " /tmp/g > " + CFG_HOOK, "deny", "frozen-path", cwd=NOGIT)
+# A sed -i that names a config hook as its target stays refused, whatever its script says.
+sh("frozen: sed-script-not-target control: sed -i on a config hook is refused",
+   "sed -i 's/a/b/' " + CFG_HOOK, "deny", "frozen-path", cwd=NOGIT)
 
 # THE LIVE PINNED CHECKOUT IS FROZEN. Owner ruling (decision merge-reinstalls-from-main, ruling 1:
 # no work runs in the pinned checkout). The pin is `<clone>-live`, and each move leaves a stamped
@@ -13462,6 +13465,38 @@ sh("builder-test: shell pathlib write to a test under Path.cwd() is refused",
 sh("builder-test: shell open-write to a test under os.getcwd() is refused",
    "python3 - <<'EOF'\nimport os\nopen(os.path.join(os.getcwd(), 'tests', 'x.py'), 'w').write('x')\nEOF",
    "deny", rule=BT, carries=("test-author",), **BR)
+
+# ---- sed reads its script as text. A word in an s/// or -e script names no file, so a sed -i on a
+# workflow file stays allowed when the script holds the word test. A # inside a script is text too, and
+# a lone quote or a second line must not hide the target after them. The controls keep a sed -i that
+# names a test file refused, whatever the script says.
+SED_SCRIPT_TEXT_ALLOWS = (
+    ("a # beat test s/// on checks.yml", "sed -i 's/# beat test/# beat check/' .github/workflows/checks.yml"),
+    ("two -e scripts, one with test, on checks.yml",
+     "sed -i -e 's/a/b/' -e 's/test/check/' .github/workflows/checks.yml"),
+    ("an s|| naming a test file on checks.yml",
+     "sed -i 's|hooks/test_guard_beat.py|hooks/test_guard_beat.py -q|' .github/workflows/checks.yml"),
+    ("double-quoted old test / new test on checks.yml",
+     'sed -i "s/old test/new test/" .github/workflows/checks.yml'),
+    ("cd . then a test phrase in s/// on checks.yml", "cd . && sed -i 's/a test step/a check step/' .github/workflows/checks.yml"),
+    ("a lone apostrophe inside an echo string, then test in s/// on checks.yml",
+     "echo \"don't\"; sed -i 's/a test/a check/' .github/workflows/checks.yml"),
+    ("a two-line script whose # line names test, on checks.yml",
+     "sed -i 's/a test/a check/\n# test note' .github/workflows/checks.yml"),
+)
+for _name, _command in SED_SCRIPT_TEXT_ALLOWS:
+    sh("builder-test: sed-script-not-target: sed -i, %s, is allowed" % _name, _command, "allow", **BR)
+SED_TEST_TARGET_DENIES = (
+    ("sed -i s/a/b/ on tests/test_x.py", "sed -i 's/a/b/' tests/test_x.py"),
+    ("sed -i -e s/a/b/ on tests/test_x.py", "sed -i -e 's/a/b/' tests/test_x.py"),
+    ("sed -i on checks.yml and tests/test_x.py together", "sed -i 's/a/b/' .github/workflows/checks.yml tests/test_x.py"),
+    ("sed -i -f a script file on tests/test_x.py", "sed -i -f fix.sed tests/test_x.py"),
+    ("a lone apostrophe inside an echo string, then sed -i on tests/test_x.py",
+     "echo \"don't\"; sed -i 's/a/b/' tests/test_x.py"),
+)
+for _name, _command in SED_TEST_TARGET_DENIES:
+    sh("builder-test: sed-script-not-target control: %s, is refused" % _name, _command, "deny", rule=BT,
+       carries=("test-author",), **BR)
 
 # ---- a `.` or `./` root in a checkout whose root holds a tests folder. GITMAIN holds none (its `.`
 # case above stays allowed), so these cases get their own checkout, built on first use.
