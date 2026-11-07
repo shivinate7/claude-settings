@@ -1344,19 +1344,21 @@ def parent_delete_hit(segments, number: int, cwd: str):
 # `--prefix` is read (npm_prefix_flag): its folder is the one judged. A workspace flag is read for
 # `npm version` only (NPM_WORKSPACE_FLAGS). From a workspace folder, the walk goes on to the
 # workspace root, as npm does (npm_walk).
-# THE READ-ONLY LIST: every npm subcommand and alias that never rewrites node_modules, by the npm 10.9.9
-# list in lib/utils/cmd-list.js. A subcommand off this list is refused in a linked folder, so a new npm
-# command, a typo and an abbreviation fail closed. The list is a curated copy because the guard cannot
-# read npm's own at hook time.
+# THE READ-ONLY LIST: the canonical name (as `npm_deref` resolves a typed word) of every npm command that never
+# rewrites node_modules, by the npm 10.9.9 list in lib/utils/cmd-list.js. A typed word is judged by what
+# `npm_deref` makes of it, so an alias or an abbreviation of a listed name is read-only too, and `npm_deref` is
+# the one home of the alias tables. A command off this list, a new npm command, a typo that names no command
+# and an ambiguous abbreviation are refused in a linked folder: the list fails closed. The list is a curated
+# copy because the guard cannot read npm's own at hook time.
 NPM_READ_ONLY = {
-    "access", "adduser", "add-user", "login", "logout", "audit", "bugs", "issues", "cache",  # glossary-ok: "bugs" is npm's own subcommand name
-    "completion", "config", "c", "get", "set", "deprecate", "diff", "dist-tag", "dist-tags", "docs",
-    "home", "doctor", "exec", "x", "explain", "why", "find-dupes", "fund", "help", "hlep",
-    "help-search", "hook", "ll", "la", "ls", "list", "org", "ogr", "outdated", "owner", "author",
+    "access", "adduser", "login", "logout", "audit", "bugs", "cache",  # glossary-ok: "bugs" is npm's own subcommand name
+    "completion", "config", "get", "set", "deprecate", "diff", "dist-tag", "docs",
+    "doctor", "exec", "explain", "find-dupes", "fund", "help",
+    "help-search", "hook", "ll", "ls", "org", "outdated", "owner",
     "pack", "ping", "pkg", "prefix", "profile", "publish", "query", "repo", "root", "run-script",
-    "run", "rum", "urn", "sbom", "search", "s", "se", "find", "star", "stars", "unstar", "start",
-    "stop", "restart", "test", "t", "tst", "team", "token", "unpublish", "version", "verison", "view",
-    "v", "info", "show", "whoami",
+    "sbom", "search", "star", "stars", "unstar", "start",
+    "stop", "restart", "test", "team", "token", "unpublish", "version", "view",
+    "whoami",
 }
 # Global options that take the next word as their value, so that word is not the subcommand.
 NPM_VALUE_FLAGS = {
@@ -1372,7 +1374,7 @@ NPM_NO_CHANGE = {"-g", "--global", "--location=global", "--help", "-h", "--dry-r
 # with --dry-run, and `explore` opens a shell, so none is listed; an unknown name is not listed either.
 NPM_DRY_RUN_SAFE = {
     "install", "ci", "update", "uninstall", "dedupe", "prune", "link", "install-test",
-    "install-ci-test", "audit",
+    "install-ci-test", "audit", "version",
 }
 # With one of these, `npm version` reifies the linked root, so it changes the install. Without one it
 # only rewrites package.json. `--workspaces-update=false` or `--no-workspaces-update` turns that reify off.
@@ -1460,6 +1462,28 @@ def npm_deref(word: str):
     return found
 
 
+def _brace_expand(pattern: str):
+    """The patterns a minimatch brace set stands for: `packages/{a,b}` is `packages/a` and `packages/b`.
+    Braces nest. A set with no comma (`{a}`) or an unclosed brace stays literal."""
+    depth, start, commas = 0, -1, []
+    for at, char in enumerate(pattern):
+        if char == "{":
+            if depth == 0:
+                start, commas = at, []
+            depth += 1
+        elif char == "," and depth == 1:
+            commas.append(at)
+        elif char == "}" and depth:
+            depth -= 1
+            if depth == 0 and commas:
+                cuts = [start] + commas + [at]
+                head, tail = pattern[:start], pattern[at + 1:]
+                return [done for lo, hi in zip(cuts, cuts[1:])
+                        for body in _brace_expand(pattern[lo + 1:hi])
+                        for done in _brace_expand(head + body + tail)]
+    return [pattern]
+
+
 def _workspace_member(root: str, folder: str) -> bool:
     """True when the package.json in `root` lists `folder` in its `workspaces` (a list, or an object
     with `packages`), as npm maps it: `*` stays inside one folder name, `**` crosses folders, and a
@@ -1479,18 +1503,23 @@ def _workspace_member(root: str, folder: str) -> bool:
         if at == len(pattern):
             return taken == len(parts)
         if pattern[at] == "**":
-            return any(matches(pattern, at + 1, skip) for skip in range(taken, len(parts) + 1))
-        return taken < len(parts) and fnmatch.fnmatch(parts[taken], pattern[at]) and matches(
+            # `**` crosses folders but not a dot folder, as minimatch reads it.
+            return any(matches(pattern, at + 1, skip) for skip in range(taken, len(parts) + 1)
+                       if not any(part.startswith(".") for part in parts[taken:skip]))
+        if parts[taken:taken + 1] and parts[taken].startswith(".") and not pattern[at].startswith("."):
+            return False
+        return taken < len(parts) and fnmatch.fnmatchcase(parts[taken], pattern[at]) and matches(
             pattern, at + 1, taken + 1)
 
+    # The last entry that matches decides, as npm reads the list in order: a `!` entry removes the folder,
+    # a later plain entry adds it back.
     member = False
     for entry in workspaces:
         if isinstance(entry, str):
-            pattern = entry.lstrip("!").replace("\\", "/").removeprefix("./").strip("/").split("/")
-            if matches(pattern):
-                if entry.startswith("!"):
-                    return False
-                member = True
+            negated = entry.startswith("!")
+            for expanded in _brace_expand(entry.lstrip("!")):
+                if matches(expanded.replace("\\", "/").removeprefix("./").strip("/").split("/")):
+                    member = not negated
     return member
 
 
@@ -1578,7 +1607,7 @@ def linked_nm_hit(segment: str, where: str) -> str:
                         flag.startswith("--workspace") and not flag.startswith("--workspaces-update"))
                         for flag in words) or npm_walk(where)[1])
                 # `audit` rewrites the install when `fix` follows it, after any flag.
-                if word not in NPM_READ_ONLY or (word == "audit" and "fix" in words[at + 1:]) or (
+                if command not in NPM_READ_ONLY or (command == "audit" and "fix" in words[at + 1:]) or (
                         version_in_workspace):
                     subcommand = word
                 if command not in NPM_DRY_RUN_SAFE:
