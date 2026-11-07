@@ -8514,16 +8514,17 @@ class NoGuardAtImportTests(unittest.TestCase):
 
 
 class OwnAgentLockTests(unittest.TestCase):
-    """A lock whose pid N is the sweep process or one of its ancestors (the calling session's own
-    Claude process) may be freed, and only when every one of these holds: the tree is clean, HEAD
-    is in the default branch, the tree is idle 30 minutes (read even under --attended), no process
-    has a cwd inside it, and no live session holds it. Any other lock keeps. An unreadable
-    ancestor read keeps. Each case builds its own real repository, worktree and lock."""
+    """A lock whose host is alive keeps, even when the host is an ancestor of the sweep (the calling
+    session's own Claude process). Owner ruling, waiting-page item 357 (2026-11-07 13:41 CST): a
+    merge never frees the lock of an agent that is still alive. A lock whose host is dead goes as a
+    stale agent lock, and a tree with no lock is judged on its own: clean, merged, idle. Each case
+    builds its own real repository, worktree and lock."""
 
-    def own_lock_tree(self, name, pid, prepare=None, check=None, age=2 * 60 * 60):
-        """A clean, pushed, merged worktree locked by `claude agent agent-<name> (pid PID start ...)`
-        with PID's real start time. PREPARE runs before the lock, CHECK after it, and the admin
-        files are aged last, so a git read in CHECK cannot make the tree look active."""
+    def own_lock_tree(self, name, pid, prepare=None, check=None, age=2 * 60 * 60, reason=None, locked=True):
+        """A clean, pushed, merged worktree. Unless LOCKED is False, it is locked by REASON when given,
+        else by `claude agent agent-<name> (pid PID start ...)` with PID's real start time. PREPARE runs
+        before the lock, CHECK after it, and the admin files are aged last, so a git read in CHECK
+        cannot make the tree look active."""
         root = os.path.join(ROOT, "own-lock-" + name)
         make_repo(root, {"f.txt": "base\n"})
         give_remote(root)
@@ -8532,12 +8533,14 @@ class OwnAgentLockTests(unittest.TestCase):
                 "worktree add %s failed" % name)
         if prepare is not None:
             prepare(path)
-        start = guard._process_start_ms(pid)
-        require(isinstance(start, int), "could not read the start time of pid %d" % pid)
-        stamp = time.strftime("%a %b %e %H:%M:%S %Y", time.gmtime(start / 1000))
-        reason = "claude agent agent-%s (pid %d start %s)" % (name, pid, stamp)
-        require(run_vcs(root, "worktree", "lock", path, "--reason", reason).returncode == 0,
-                "lock of %s failed" % name)
+        if locked and reason is None:
+            start = guard._process_start_ms(pid)
+            require(isinstance(start, int), "could not read the start time of pid %d" % pid)
+            stamp = time.strftime("%a %b %e %H:%M:%S %Y", time.gmtime(start / 1000))
+            reason = "claude agent agent-%s (pid %d start %s)" % (name, pid, stamp)
+        if locked:
+            require(run_vcs(root, "worktree", "lock", path, "--reason", reason).returncode == 0,
+                    "lock of %s failed" % name)
         if check is not None:
             check(root, path)
         _age_admin_files(path, age)
@@ -8550,36 +8553,80 @@ class OwnAgentLockTests(unittest.TestCase):
         require(found[0].get("locked_reason") is not None, "worktree %s is not locked" % path)
         return found[0]
 
-    def test_own_lock_on_a_live_ancestor_on_a_clean_merged_idle_tree_is_freed(self):
-        # The test process's parent is a live ancestor of the sweep (this process). Red today:
-        # every locked tree is kept as "locked: ...".
+    def test_own_lock_on_a_live_ancestor_on_a_clean_merged_idle_tree_keeps(self):
+        # Ruling: waiting-page item 357 (2026-11-07 13:41 CST). The test process's parent is a live
+        # ancestor of the sweep, so the lock is the calling session's own. Red today: the tree is freed.
         root, path = self.own_lock_tree("ancestor", os.getppid())
         entry = self.entry_for(root, path)
+        self.assertIs(sweep.stale_agent_lock_verdict(entry["locked_reason"]), False, "the host is not alive")
+        self.assertIs(sweep.own_agent_lock_verdict(entry["locked_reason"]), True, "the lock is not the own lock")
         with self.subTest(arm="decide_worktree"):
             decision = sweep.decide_worktree(root, entry)
-            self.assertEqual(decision["action"], "reap", "kept: %s" % decision["reason"])
-            self.assertTrue(decision.get("unlock"), "the own lock was not marked for unlock")
-        with self.subTest(arm="--confirm main run removes the tree"):
-            refused, results, calls = _run_main(root, ["--confirm"], hours=2)
-            self.assertIsNone(refused, REFUSED % refused)
-            self.assertTrue(results, "the sweep reported no repository")
-            decided = [d for r in results for d in r["worktrees"] if _norm_path(d["path"]) == _norm_path(path)]
-            self.assertTrue(decided, "the sweep made no decision for the tree")
-            self.assertEqual(decided[0]["action"], "reap", "kept: %s" % decided[0]["reason"])
-            self.assertNotEqual(_removals_of(calls, path), [], "the sweep never tried to remove the tree")
-            self.assertFalse(os.path.isdir(path), "the tree is still on disk")
+            self.assertEqual(decision["action"], "keep", "reaped a live agent's locked tree: %s" % decision["reason"])
+            self.assertTrue(decision["reason"].startswith("locked:"), "kept for another reason: %s" % decision["reason"])
+            self.assertFalse(decision.get("unlock"), "the live lock was marked for unlock")
+        # One tree per run: a removal on the red code would leave the next run nothing to judge.
+        for i, flags in enumerate((["--confirm"], ["--confirm", "--session-end"], ["--attended", "--confirm"],
+                                   ["--attended", "--fast", "--confirm"])):
+            with self.subTest(arm="main run " + " ".join(flags)):
+                root, path = self.own_lock_tree("ancestor-main-%d" % i, os.getppid())
+                refused, results, calls = _run_main(root, flags, hours=2)
+                self.assertIsNone(refused, REFUSED % refused)
+                self.assertTrue(results, "the sweep reported no repository")
+                decided = [d for r in results for d in r["worktrees"] if _norm_path(d["path"]) == _norm_path(path)]
+                self.assertTrue(decided, "the sweep made no decision for the tree")
+                self.assertEqual(decided[0]["action"], "keep", "reaped a live agent's locked tree: %s" % decided[0]["reason"])
+                self.assertTrue(decided[0]["reason"].startswith("locked:"), "kept for another reason: %s" % decided[0]["reason"])
+                self.assertEqual(_removals_of(calls, path), [], "the sweep tried to remove a tree a live agent holds")
+                self.assertTrue(os.path.isdir(path), "the tree is gone from disk")
 
-    def test_own_lock_on_a_live_ancestor_is_freed_under_attended_fast(self):
-        # Red today: the locked tree is kept as "locked: ...", so no removal is tried.
-        root, path = self.own_lock_tree("fast", os.getppid())
-        refused, results, calls = _run_main(root, ["--attended", "--fast", "--confirm"], hours=2)
-        self.assertIsNone(refused, REFUSED % refused)
-        self.assertTrue(results, "the sweep reported no repository")
-        decided = [d for r in results for d in r["worktrees"] if _norm_path(d["path"]) == _norm_path(path)]
-        self.assertTrue(decided, "the sweep made no decision for the tree")
-        self.assertEqual(decided[0]["action"], "reap", "kept: %s" % decided[0]["reason"])
-        self.assertNotEqual(_removals_of(calls, path), [], "the sweep never tried to remove the tree")
-        self.assertFalse(os.path.isdir(path), "the tree is still on disk")
+    def test_a_live_own_lock_with_no_start_time_keeps(self):
+        # Ruling: waiting-page item 357 (2026-11-07 13:41 CST). The second lock form, `(pid N)`, has no
+        # start time to check; its host is alive, so it keeps too. Red today: the tree is freed.
+        host = os.getppid()
+        root, path = self.own_lock_tree("nostart", host, reason="claude agent agent-nostart (pid %d)" % host)
+        entry = self.entry_for(root, path)
+        self.assertIs(sweep.stale_agent_lock_verdict(entry["locked_reason"]), False, "the host is not alive")
+        self.assertIs(sweep.own_agent_lock_verdict(entry["locked_reason"]), True, "the lock is not the own lock")
+        decision = sweep.decide_worktree(root, entry)
+        self.assertEqual(decision["action"], "keep", "reaped a live agent's locked tree: %s" % decision["reason"])
+        self.assertFalse(decision.get("unlock"), "the live lock was marked for unlock")
+
+    def test_the_unlock_step_keeps_a_live_own_lock_it_is_handed(self):
+        # Ruling: waiting-page item 357 (2026-11-07 13:41 CST). `_lock_unlockable` is the last read before
+        # `git worktree unlock`. Handed a decision to unlock a live own lock, it must keep the tree.
+        # Red today: it reads the same live own lock and says the unlock may go ahead.
+        root, path = self.own_lock_tree("unlock", os.getppid())
+        entry = self.entry_for(root, path)
+        self.assertIs(sweep.own_agent_lock_verdict(entry["locked_reason"]), True, "the lock is not the own lock")
+        decision = {"path": path, "action": "reap", "reason": "removable: own agent lock",
+                    "unlock": True, "lock_reason": entry["locked_reason"]}
+        self.assertFalse(sweep._lock_unlockable(root, path, decision), "the unlock went ahead on a live lock")
+        self.assertEqual(decision["action"], "keep", "the live lock stayed a reap: %s" % decision["reason"])
+
+    def test_a_dead_host_lock_on_a_clean_merged_idle_tree_is_removable(self):
+        # Green today: a dead host is a stale agent lock, which is not the own-lock arm.
+        child = subprocess.Popen([sys.executable, "-c", "pass"], stdin=subprocess.DEVNULL,
+                                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        child.wait(timeout=30)
+        dead = child.pid
+        reason = "claude agent agent-dead (pid %d start Thu Jan 01 00:00:00 2015)" % dead
+        root, path = self.own_lock_tree("dead", dead, reason=reason)
+        entry = self.entry_for(root, path)
+        self.assertIs(sweep.stale_agent_lock_verdict(entry["locked_reason"]), True, "the host is not dead")
+        decision = sweep.decide_worktree(root, entry)
+        self.assertEqual(decision["action"], "reap", "kept a dead host's lock: %s" % decision["reason"])
+        self.assertTrue(decision.get("unlock"), "the stale lock was not marked for unlock")
+
+    def test_an_unlocked_clean_merged_idle_tree_is_removable(self):
+        # Green today: no lock, so the tree is judged on its own: clean, merged and idle.
+        root, path = self.own_lock_tree("nolock", os.getppid(), locked=False)
+        found = [e for e in sweep.parse_worktree_list(root) if _norm_path(e["path"]) == _norm_path(path)]
+        self.assertEqual(len(found), 1, "worktree %s is not listed once" % path)
+        self.assertIsNone(found[0].get("locked_reason"), "the tree is locked: %s" % found[0].get("locked_reason"))
+        decision = sweep.decide_worktree(root, found[0])
+        self.assertEqual(decision["action"], "reap", "kept an unlocked clean merged idle tree: %s" % decision["reason"])
+        self.assertFalse(decision.get("unlock"), "an unlocked tree was marked for unlock")
 
     def test_own_lock_on_an_unmerged_pushed_tree_keeps(self):
         # Green today: the lock keeps. The rule must keep it too, because HEAD is not in main.
@@ -8638,18 +8685,17 @@ class OwnAgentLockTests(unittest.TestCase):
         self.assertEqual(decision["action"], "keep")
         self.assertTrue(decision["reason"].startswith("locked:"), "kept for another reason: %s" % decision["reason"])
 
-    def test_an_unreadable_ancestor_read_keeps_the_own_lock(self):
-        # Red on the positive arm today (kept as "locked: ..."). The negative arm keeps today, but the
-        # read itself does not exist yet: `sweep._parent_pid` is the name the new walk must use.
+    def test_a_live_own_lock_keeps_whether_or_not_the_ancestor_read_works(self):
+        # Ruling: waiting-page item 357 (2026-11-07 13:41 CST). The ancestor walk decides nothing for a live
+        # host, so a read that works and one that fails both keep. Red today: the working read frees the tree.
         root, path = self.own_lock_tree("unreadable", os.getppid())
         entry = self.entry_for(root, path)
         with self.subTest(arm="the ancestor read works"):
             decision = sweep.decide_worktree(root, entry)
-            self.assertEqual(decision["action"], "reap", "kept: %s" % decision["reason"])
+            self.assertEqual(decision["action"], "keep", "reaped a live agent's locked tree: %s" % decision["reason"])
         with self.subTest(arm="the ancestor read fails"):
-            with mock.patch.object(sweep, "_parent_pid", create=True, return_value=None) as read:
+            with mock.patch.object(sweep, "_parent_pid", create=True, return_value=None):
                 decision = sweep.decide_worktree(root, entry)
-            self.assertTrue(read.called, "the ancestor read was never made")
             self.assertEqual(decision["action"], "keep", "reaped on an unreadable ancestor: %s" % decision["reason"])
 
 

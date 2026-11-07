@@ -1484,11 +1484,18 @@ class CutBranchTree(Env):
         sh(self.co, "git", "merge", "-q", "--ff-only", "origin/main")
         return sh(self.co, "git", "rev-parse", "origin/main")
 
-    def worktree(self):
-        """A worktree on local feat, at origin/feat. Returns nothing; the caller edits it."""
+    def worktree(self, idle_seconds=None):
+        """A worktree on local feat, at origin/feat. IDLE_SECONDS, when given, ages the tree's own git admin
+        files that long, so the janitor reads it that quiet. Returns nothing; the caller edits it."""
         sh(self.co, "git", "branch", "feat", "origin/feat")
         sh(self.co, "git", "worktree", "add", "-q", self.wt, "feat")
         self.assertTrue(tree_listed(self.co, self.wt), "subject: the worktree must exist first")
+        if idle_seconds is not None:
+            admin = sh(self.wt, "git", "rev-parse", "--absolute-git-dir")
+            then = time.time() - idle_seconds
+            for name in ("index", "HEAD", os.path.join("logs", "HEAD")):
+                if os.path.exists(os.path.join(admin, name)):
+                    os.utime(os.path.join(admin, name), (then, then))
 
     def cut(self, merged):
         out = io.StringIO()
@@ -1513,8 +1520,10 @@ class CutBranchTree(Env):
         self.assertTrue(tree_listed(self.co, self.wt), self.listed())
         self.assertTrue(self.exists(), f"the branch was deleted; out: {out!r}")
 
-    def assert_clean_tree_removed(self, merged):
+    def assert_clean_tree_removed(self, merged, lock_reason=None):
         self.worktree()
+        if lock_reason is not None:
+            sh(self.co, "git", "worktree", "lock", "--reason", lock_reason, self.wt)
         out = self.cut(merged)
         self.assertFalse(os.path.exists(self.wt), f"the worktree folder is still there; out: {out!r}")
         self.assertFalse(tree_listed(self.co, self.wt), self.listed())
@@ -1566,6 +1575,39 @@ class CutBranchTree(Env):
             out = self.cut(merged)
         self.assertFalse(remove.called, f"the sweep removed a tree its own lock rule keeps; out: {out!r}")
         self.assertKept(out, r"feat kept here: .*locked: claude agent agent-x")
+
+    def test_tree_locked_by_a_live_own_agent_is_kept(self):
+        # Ruling: waiting-page item 357 (2026-11-07 13:41 CST). The host is this test's parent, a live ancestor
+        # of the merge, so the lock is the calling session's own. The tree is clean, merged and 2 hours idle:
+        # the case the own-lock arm frees today. A merge never frees the lock of an agent that is still alive.
+        sys.path.insert(0, os.path.join(HERE, "..", "hooks"))  # the process-start read the lock's verdict uses
+        sys.path.insert(0, os.path.join(HERE, "..", "janitor"))
+        import git_reads
+        import sweep  # janitor/sweep.py, the module merge.remove_held_tree imports
+        host = os.getppid()
+        started = git_reads._process_start_ms(host)
+        self.assertIsInstance(started, int, "could not read the host's start time")
+        merged = self.merged_feat()
+        self.worktree(idle_seconds=2 * 60 * 60)
+        stamp = time.strftime("%a %b %d %H:%M:%S %Y", time.gmtime(started / 1000))
+        reason = f"claude agent agent-own (pid {host} start {stamp})"
+        sh(self.co, "git", "worktree", "lock", "--reason", reason, self.wt)
+        self.assertIs(sweep.stale_agent_lock_verdict(reason), False, "the host is not alive")
+        self.assertIs(sweep.own_agent_lock_verdict(reason), True, "the lock is not the own lock")
+        with unittest.mock.patch.object(sweep, "remove_worktree", wraps=sweep.remove_worktree) as remove:
+            out = self.cut(merged)
+        self.assertFalse(remove.called, f"the merge removed a tree whose own agent lock is still live; out: {out!r}")
+        self.assertKept(out, r"feat kept here: .*locked: claude agent agent-own")
+
+    def test_tree_locked_by_a_dead_agent_is_removed(self):
+        # Green today: a dead host's lock is a stale agent lock, so the merge removes the tree and its branch.
+        sys.path.insert(0, os.path.join(HERE, "..", "janitor"))
+        import sweep  # janitor/sweep.py, the module merge.remove_held_tree imports
+        child = subprocess.Popen([sys.executable, "-c", "pass"])
+        child.wait(timeout=30)
+        reason = f"claude agent agent-dead (pid {child.pid} start Thu Jan 01 00:00:00 2015)"
+        self.assertIs(sweep.stale_agent_lock_verdict(reason), True, "the host is not dead")
+        self.assert_clean_tree_removed(self.merged_feat(), lock_reason=reason)
 
 # ------------------------------------------------------------------ the lanes of a batch
 # One line per lane, pinned here and nowhere else. A merge deletes the lane branches its batch took in.
