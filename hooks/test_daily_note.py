@@ -536,10 +536,15 @@ class AgentEndTests(NoteCase):
 
     def test_a_payload_log_that_cannot_be_read_is_reported_as_unknown(self):
         os.makedirs(self.payload_path())  # a directory cannot be read as a log
+        err = unreadable_error(self.payload_path())
+        tail = "Read: " + self.payload_path()
+        full = "agent-end payload log cannot be read (%s): its state is unknown. %s" % (err, tail)
+        short = "agent-end payload log cannot be read (%s): %s" % (err, tail)
         lines = self.failure_lines(self.run_note(MORNING))
         self.assertEqual(len(lines), 1, "want one unknown line, got %r" % lines)
-        self.assertIn("unknown", lines[0].lower())
-        self.assertTrue(lines[0].endswith("Read: " + self.payload_path()), lines[0])
+        # The full line says unknown when it fits MAX_LINE. Past it the note keeps the short head, which
+        # names what failed, and the whole Read: tail. A long temp root takes the short form.
+        self.assertEqual(lines[0], full if len(full) <= MAX_LINE else short, lines[0])
 
     def test_a_long_config_dir_keeps_the_agent_end_line_within_the_cap_with_its_whole_reader_tail(self):
         self.config = self.long_path(LONG_CONFIG, "claude-config-")
