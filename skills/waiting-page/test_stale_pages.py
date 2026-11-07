@@ -1298,7 +1298,7 @@ class Stale(unittest.TestCase):
                 self.assert_page_word(r, "current", 0)
 
     def test_pin_an_answers_folder_with_no_complete_marker_prints_one_unknown_kept_answer_line(self):
-        # Pin: passes on 3d78e1a25. The answers folder's missing marker already reads unknown, and this keeps it so.
+        # Pin: an answers folder with no marker may be cut short, so it reads as one unknown kept-answer line and names no item.
         current, _ = self.current_and_behind()
         items = self.items_file([INCIDENT])
         answers = self.docs_folder({INCIDENT_ID: INCIDENT_ANSWER}, "answers")
