@@ -159,7 +159,8 @@
 - liveness-windows-arm-unproven: the Windows liveness arm is proven only with a stubbed ctypes.windll, not a real kernel32 call (hooks/git_reads.py _process_start_ms)
 - local-time-hard-coded-dst: the US DST rule is coded in the hook; a US rule change needs an edit; zoneinfo upgrade not built (hooks/local_time.py)
 - local-time-line-cost-unmeasured: the token cost of one local time line per prompt is unmeasured (hooks/local_time.py)
-- lock-read-error-never-expires: GitLock.read returns an infinite expiry when the fetch fails for a non-network reason, or the log of the listed sha fails, so the lock stops every run until `merge --unlock` (merge/merge.py GitLock.read). Decision: merge-lock.
+- lock-push-429-stops: git's `returned error: 429` line is not a network error to is_net (merge/merge.py is_net). A GitLock push, ls-remote or fetch that gets it is not retried and stops the run. An `error: RPC failed; HTTP 429` line is a network error there. The deleted API lock waited on 429. Unmeasured whether git ever prints either. Fix: measure first. Decision: merge-lock.
+- lock-read-error-never-expires: GitLock.read returns an infinite expiry when a fetch fails for a non-network reason, or a log fails other than by a missing sha. So the lock stops each run whose read fails (merge/merge.py GitLock.read). Decision: merge-lock.
 - marker-writeback-loses-deletion: after a failed remove, agent-end write-back can drop a person's uncommitted deletion; needs prior failed remove (janitor/sweep.py)
 - merge-by-button-stale-page: merging by GitHub button or auto-merge skips the page rebuild, so main's records page can be stale (merge/merge.py)
 - merge-head-any-check-licenses: any passing check licenses a skipped required job, not only scope (merge/merge.py)
