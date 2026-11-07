@@ -110,7 +110,8 @@ def last_paragraph(pr_body):
     A paragraph of only a session link is skipped with the attribution paragraph directly above it, never alone."""
     prose = re.sub(r"^ {0,3}(```|~~~).*?(?:^ {0,3}\1[^\n]*|\Z)", "", pr_body, flags=re.M | re.S)  # an unclosed fence runs to the end
     prose = re.sub(r"<!--.*?(?:-->|\Z)", "", prose, flags=re.S)
-    paras = re.split(r"\n[ \t]*\n", prose.replace("\r\n", "\n").strip())
+    # a fence or comment can leave a blank paragraph; dropped here, the loop below never reads an empty one
+    paras = [q for q in map(str.strip, re.split(r"\n[ \t]*\n", prose.replace("\r\n", "\n"))) if q] or [""]
     while len(paras) > 1:
         lines = [n for n in map(norm, paras[-1].splitlines()) if n]
         if lines == ["---", lines[-1]] and POSTED_BY.fullmatch(lines[-1]):
