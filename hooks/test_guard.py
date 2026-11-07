@@ -9706,9 +9706,9 @@ def record_push_cost_case():
     (decision commit-refuses-conflict-markers) runs one `git diff --check` for each base it reads, in
     order: the remote-tracking ref, then the upstream, then the default base (a three-dot range, so git
     finds the merge base itself). A push with a tracking ref reads one base. A push with no tracking ref
-    and no upstream reads three, re-reads the source with one more `git rev-parse`, and reads the default
-    base with one `git symbolic-ref`. A `git show` runs only when a marker finding needs its line read.
-    The layout and extras files
+    and no upstream reads three, and the third, the default base, costs one `git symbolic-ref` for
+    origin/HEAD and one `git rev-parse --verify` per candidate branch tried, until one exists. A `git show`
+    runs only when a marker finding needs its line read. The layout and extras files
     are read once each. A spawn log cannot show a file read, so that cost is unmeasured here. The
     transcript is read only when the push reaches the record branch: a push to another branch passes
     with an unreadable transcript, and a push to the record branch with one is refused. A stand-in git
@@ -11070,6 +11070,8 @@ CMK_RT = os.path.join(CMKPUSH, "remotetrip")   # a triplet already on the remote
 CMK_CLT = os.path.join(CMKPUSH, "cltriplet")   # a.txt holding a triplet, tracked and not staged
 CMK_SEQ = os.path.join(CMKPUSH, "seqclean")    # a.txt and b.txt edited, not staged, both clean
 CMK_SEQB = os.path.join(CMKPUSH, "seqtriplet")  # as seqclean, with b.txt holding a triplet
+CMK_REL = os.path.join(CMKPUSH, "relative")    # diff.relative set; a triplet unpushed in sub/f.txt
+CMK_PAREN = os.path.join(CMKPUSH, "fixparen")  # an unpushed triplet on branch fix(x); HEAD on clean topic
 
 
 def _cmk_commit(where, rel, text, msg):
@@ -11156,8 +11158,18 @@ def _build_conflict_markers_push():
         write(os.path.join(path, "a.txt"), "a2\n")         # modified, not staged
         write(os.path.join(path, "b.txt"), b_text)
 
+    _cmk_pushed(CMK_REL, {"f.txt": "base\n", "sub/f.txt": "base\n"})
+    run(CMK_REL, "config", "diff.relative", "true")
+    commit(CMK_REL, "sub/f.txt", CM_TRIPLET, "triplet in sub, unpushed")
 
-lazy_fixture([CMK_PU, CMK_RB, CMK_MP, CMK_NF, CMK_CL, CMK_RT, CMK_CLT, CMK_SEQ, CMK_SEQB],
+    _cmk_pushed(CMK_PAREN, {"a.txt": "base\n"})
+    run(CMK_PAREN, "checkout", "-q", "-b", "fix(x)")
+    commit(CMK_PAREN, "a.txt", CM_TRIPLET, "triplet on fix(x), unpushed")
+    run(CMK_PAREN, "checkout", "-q", "topic")
+    run(CMK_PAREN, "branch", "fixy", "fix(x)")             # the same commit, under a plain name
+
+
+lazy_fixture([CMK_PU, CMK_RB, CMK_MP, CMK_NF, CMK_CL, CMK_RT, CMK_CLT, CMK_SEQ, CMK_SEQB, CMK_REL, CMK_PAREN],
              _build_conflict_markers_push)
 
 # A commit that cannot be judged, with no push after it in the call, is no hit. The sed and the fix script
@@ -11203,6 +11215,22 @@ cmk_allow("two clean commits, each after an add, then a push",
 cmk_refuse("two commits, each after an add, the second holding a triplet, then a push",
            VCS + " add a.txt && " + VCS + " commit -m a && " + VCS + " add b.txt && " + VCS + " commit -m b && "
            + VCS + " push", CMK_SEQB)
+
+# A push from a subdirectory with `diff.relative` set: `git diff --check` prints each path relative to that
+# directory, so the file it names is read at the top of the tree, under the wrong path. The root push is a
+# green control: the same triplet, pushed from the root, is refused today and stays refused.
+cmk_refuse("a push from sub/ of a triplet in sub/f.txt, with diff.relative set and a clean f.txt at the top",
+           VCS + " push origin topic", os.path.join(CMK_REL, "sub"))
+cmk_refuse("a push from the root of the same repo, the triplet in sub/f.txt, with diff.relative set",
+           VCS + " push origin topic", CMK_REL)
+
+# A refspec that is no plain name, `fix(x)`, is read as HEAD, so the commit it names is never judged. The
+# same commit under the plain name fixy is the green control: it has no tracking ref, so it is judged
+# against the default base, and that base holds the triplet.
+cmk_refuse("a push of a branch named fix(x) holding a triplet, with HEAD on a clean branch",
+           VCS + ' push origin "fix(x)"', CMK_PAREN)
+cmk_refuse("a push of the same commit under the plain name fixy, with HEAD on a clean branch",
+           VCS + " push origin fixy", CMK_PAREN)
 
 
 # A commit or a --continue is judged on what it covers. A blind step before a commit (one that can
