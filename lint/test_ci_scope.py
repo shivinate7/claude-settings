@@ -33,7 +33,7 @@ RUN_FOLDER = _test_temp.run_folder()
 SCRIPT = os.environ.get("CI_SCOPE") or os.path.join(HERE, "..", ".github", "scripts", "ci-scope.sh")
 REPO = os.path.abspath(os.path.join(HERE, ".."))
 REPO_REAL = os.path.realpath(REPO)  # the root the derivation reads paths against: __file__ resolves to this too
-JOB_FLAGS =["checks_windows", "checks_windows_merge", "checks_windows_rest", "checks_macos", "shell_macos", "pointer_windows"]
+JOB_FLAGS = ["checks_windows", "checks_windows_merge", "checks_windows_rest", "checks_macos", "shell_macos", "pointer_windows"]
 STEP_FLAGS = ["code", "guard", "sweep", "mods", "shoot"]
 # Flags derived from others, kept out of JOB_FLAGS so the exact-set cases below stay about the base flags:
 # checks_windows_sweep is set with checks_windows_rest. checks_guard is set when both `code` and `guard` are set, or
