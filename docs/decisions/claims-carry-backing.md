@@ -105,7 +105,7 @@ Built:
 
 Not built:
 
-- The generator that fills the route-rows table in `docs/decisions/auto-mode-owner-acts.md` from `hooks/route_rows.json`. The table is empty between its markers (read docs/decisions/auto-mode-owner-acts.md:31-32).
+- The generator that fills the route-rows table in `docs/decisions/auto-mode-owner-acts.md` from `hooks/route_rows.json`. The table is empty between its markers (read auto-mode-owner-acts (which acts auto mode allows), lines 31-32).
 - The row-age reader (see Unmeasured).
 - The judge is unmeasured beyond the run above (see Model judge at merge).
 
@@ -117,5 +117,5 @@ Debts:
 - `stale005-quoted-text-alarm` (STALE005 reads quoted text as claims): open debt.
 
 Kind: build
-Plan: docs/plans/pointer-system.md#lanes (all)
+Plan: pointer-system (the pointer system, lanes) (all)
 Home: lint/stale_cites.py

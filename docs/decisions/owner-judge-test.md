@@ -24,4 +24,4 @@ Incident:
 - 2026-10-28 13:40 CDT, waiting item 34 (roadmap step c95, step 2): a decision asked which CI job runs a check. It turned on CI internals in which the owner has no stake. He saved option b with the note "i really can't figure out how to decide". The session could have taken its own pick.
 
 Kind: process
-Home: rule:questions-go-to-owner
+Home: rule:questions-go-to-owner (questions go to the owner)

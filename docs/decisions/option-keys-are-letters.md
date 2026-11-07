@@ -45,4 +45,4 @@ Incident:
 - 2026-10-28 12:47 CDT, waiting item 44: an option keyed `none` hid the page's own "none of these" answer.
 
 Kind: process
-Home: rule:questions-go-to-owner
+Home: rule:questions-go-to-owner (questions go to the owner)

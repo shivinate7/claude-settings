@@ -19,4 +19,4 @@ Incident:
 - 2026-10-28, item 39: the cloud proxy refused branch deletes (403). A waiting-page task then handed the owner a Mac job. Its steps, reconstructed from the item's shape and not read from the lost record, were "open plans/c152-stale-branch-deletes.md" and "run its command". A session on his Windows PC then did all of it. The task handed him work a session could do. The item's exact record is lost; the guard test builds its fixture from this shape.
 
 Kind: process
-Home: rule:output-never-hand-off-doable-step
+Home: rule:output-never-hand-off-doable-step (never hand off doable steps)

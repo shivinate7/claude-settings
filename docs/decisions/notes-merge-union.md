@@ -14,7 +14,7 @@ The rule takes effect only once it is on main. A lane branched before it merges 
 
 Known cost: union never removes a line that one side kept. When two lanes rewrite the same note, both
 versions stay. A note that one lane deletes or reverts can come back when another lane appends. No
-incident yet, so no check (rule building-guard-needs-incident). `lint/test_notes_union_merge.py` pins
+incident yet, so no check (rule building-guard-needs-incident (build guards against mistakes)). `lint/test_notes_union_merge.py` pins
 the rewrite case.
 
 Scope: this repo only. Another repo with its own notes file adds the same line to its own

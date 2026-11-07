@@ -7,5 +7,5 @@ Owner, 2026-10-17 11:40 CDT (guard audit, finding 7): the guard refuses `git com
 Reason: a message file may cite a record by its path. The same command often writes the file, so the guard cannot read it yet, cannot check the cite, and an allow would let that cite through.
 
 Kind: process
-Home: rule:git-cite-by-id
+Home: rule:git-cite-by-id (an id, not a path)
 Home: hooks/guard.py

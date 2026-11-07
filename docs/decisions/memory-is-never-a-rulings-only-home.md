@@ -7,7 +7,7 @@ ruling. It may never be the ruling's only home. Reason: a ruling that only memor
 to the repo (`rule:building-land-design-or-abandon` had no mechanism).
 
 `hooks/ruling_home.py`, a Stop hook, enforces it. It keys on an act, not on prose
-(predicate-is-the-act).
+(predicate-is-the-act (the predicate is the act)).
 
 - Each section of a memory file that this session wrote needs a `home:` line. The value is
   `process-only`, or a repo-relative path to a file that the tree of some branch holds now. A brief is
@@ -15,7 +15,7 @@ to the repo (`rule:building-land-design-or-abandon` had no mechanism).
 - The hook checks only that the value resolves. It never compares text, so a paraphrase cannot
   make it cry wolf.
 - When git or the transcript cannot be read, the hook stands down with no refusal
-  (recovery-independent-of-state).
+  (recovery-independent-of-state (recovery must not depend on state)).
 
 Process state stays in memory with `home: process-only`: merge order, which agent holds which
 branch, a merge grant for one act, a personal preference. `lint/ruling_census.py` counts those lines.

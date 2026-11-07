@@ -172,5 +172,5 @@ Debts:
 
 Kind: process
 Home: docs/decisions/session-tiers.md
-Home: rule:roles-pick-mode-from-request
-Home: rule:style-wrong-tier-one-line
+Home: rule:roles-pick-mode-from-request (pick the session's shape)
+Home: rule:style-wrong-tier-one-line (wrong tier gets one line)

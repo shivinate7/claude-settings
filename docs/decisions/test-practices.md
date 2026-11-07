@@ -17,7 +17,7 @@ P2. Prove red first on a named old commit, with a green control beside it.
 Applies to: every test that adds or changes a case.
 
 P3. A red counts only when an assert fails for the named cause; a crash, import error, timeout or "not built yet" is not a red. For a new feature, a crash on a missing name is not a red. After the build, the test-author makes a mutant of the built code and records the named case going red.
-- claude-settings decision mutation-report-scores-suites — "A crash is not a kill."
+- claude-settings decision mutation-report-scores-suites (mutation report scores suites on demand) — "A crash is not a kill."
 - mailaudit decision testing-mutant-dies-check-cause — a mutant "kill" came from an unrelated guard.
 - claude-settings 06fe84c0b — the recorded red run was 14 AttributeErrors on missing symbols: it shows the test runs, not that it tells good code from bad.
 Applies to: every test.
@@ -68,7 +68,7 @@ P11. A check enforces its rule's outcome, not a stricter or looser reading of it
 - joyous PR 63 — the merge tool refused it while a ready batch that contained it ran CI. The owner ruled the refusal stricter than its rule, which only keeps main still under a running batch (2026-11-01 20:57 CST, relayed by the coordinator).
 Applies to: guards and checks.
 
-P2 (red on a named old commit) is held by lint/check_red_run.py (decision red-run-trailer-on-test-commits).
+P2 (red on a named old commit) is held by lint/check_red_run.py (decision red-run-trailer-on-test-commits (test commits carry their red run)).
 
 ### Checks that could hold these (not built)
 

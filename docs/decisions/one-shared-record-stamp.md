@@ -25,5 +25,5 @@ Debts:
 - `sharables-adopts-the-stamp` (claude-sharables keeps its own claim tool): open debt.
 
 Kind: process
-Home: rule:git-slug-then-claim-number
+Home: rule:git-slug-then-claim-number (never allocate a numbered record)
 Home: actions/stamp/stamp.mjs

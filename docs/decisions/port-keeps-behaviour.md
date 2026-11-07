@@ -36,7 +36,7 @@ Incidents:
 
 - 2026-10-27 15:32 CDT: in the Duo "Card in Hand" port of Manifest's web app to the phone app, a session marked its plan blocked on what happens to Suspense cards when Card in Hand closes. The web app already answers it. Earlier the same work invented an "end of mail day" the app does not have.
 - 2026-10-27 15:51 CDT: an orchestrator asked the owner to merge although its repo held a standing merge grant, and asked about a "Take all" detail a reviewer had held.
-- 2026-10-30: a lane's "departures" said "Opus above a role's row stays the existing ask", which restates decision agent-model-cap.
+- 2026-10-30: a lane's "departures" said "Opus above a role's row stays the existing ask", which restates decision agent-model-cap (each agent role's model and effort).
 
 Debts:
 - `departs-word-list-limits` (Departs from word list misses restatements): open debt.

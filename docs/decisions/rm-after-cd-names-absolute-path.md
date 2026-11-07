@@ -13,4 +13,4 @@ Rule `rm-after-cd` in `hooks/guard.py` refuses a recursive `rm` (`-r`, `-R`, `--
 Risk kind: likely risk. A scratch cleanup of the shape `cd $S; rm -rf dl/*` was written in normal work. Seen 2026-10-27, on the owner's screen.
 
 Kind: process
-Home: rule:shared-trees-delete-names-absolute-path
+Home: rule:shared-trees-delete-names-absolute-path (deletes name an absolute path)

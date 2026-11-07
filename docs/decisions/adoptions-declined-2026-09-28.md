@@ -17,4 +17,4 @@ The owner declined each candidate below. A session that proposes one again first
 | A per-tool cost-logging hook | A hook sees tool calls, not token counts. Transcripts hold the per-reply usage. | A question the transcripts cannot answer. |
 
 Kind: process
-Home: rule:outcomes-decision-is-argument
+Home: rule:outcomes-decision-is-argument (decisions are arguments, not laws)

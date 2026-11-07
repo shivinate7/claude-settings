@@ -26,4 +26,4 @@ Owner answer, 2026-10-17 12:53 CDT: a lane may reword a line when the result has
 The tree carries more records than a session can read. A cull keeps the rulings in force and drops the rest. The protected outcome: a session finds the current ruling fast, and no stale text misleads it.
 
 Kind: process
-Home: rule:speak-rewrite-superseded-in-place
+Home: rule:speak-rewrite-superseded-in-place (rewrite superseded text in place)

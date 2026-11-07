@@ -31,7 +31,7 @@ lock for one base at once. Code: `confirm` in `merge/merge.py`.
   branch is named. It removes the lock whether its holder is live or not. It prints "removed", or "nothing
   to remove" when no lock is there.
 
-Stops, by name. Each name is a row label of the refusal-vs-rule sweep, a plan record. The code
+Stops, by name. Each name is a row label of the refusal-vs-rule (each refusal matches its rule) sweep, a plan record. The code
 carries no such label. The code raises the exception named in each item.
 
 - `Held` (sweep row `lock-held`): a live lock whose holder is not dead, a live lock under the old name

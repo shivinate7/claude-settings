@@ -22,4 +22,4 @@ Owner interview, 2026-10-17 (00:44 to 01:55 CDT), per rule:
 Why not every guarded rule: `CLAUDE.md` loads in every repo, and a check that is only a test or a CI step here enforces nothing in another repo. Several guards cover only part of their sentence. `RULE_FLOOR` in `lint/rule_audit.py` is the anchor count. Update it when a rule is removed on purpose.
 
 Kind: process
-Home: rule:outcomes-mechanize-rules
+Home: rule:outcomes-mechanize-rules (rules become hooks or checks)

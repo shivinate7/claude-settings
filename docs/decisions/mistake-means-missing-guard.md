@@ -34,4 +34,4 @@ False-alarm measure, 2026-11-06, on head d96d8821a: 41 real reports with a Devia
 The lane `state-file-parse-check` (a parse check after each edit to a state file, such as an inbox fence or a JSON file) owns the guard for the inbox incident. This lane does not build it.
 
 Kind: process
-Home: rule:building-mistake-names-its-guard
+Home: rule:building-mistake-names-its-guard (mistake signals a missing guard)

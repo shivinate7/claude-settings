@@ -4,7 +4,7 @@
 
 Each repo sets up the untracked state (node_modules, venv, caches) of a worktree itself. claude-settings
 ships no worktree-setup hook. Reason: a worktree made mid-session gets no setup, because a SessionStart
-hook runs only when a session starts in it. Dev-server ports are in reuse-needs-checkout-proof.
+hook runs only when a session starts in it. Dev-server ports are in reuse-needs-checkout-proof (test server reuse needs checkout proof).
 
 Facts a repo needs:
 

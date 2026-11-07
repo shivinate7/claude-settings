@@ -20,4 +20,4 @@ Incident:
 - 2026-10-30 15:40 CDT, waiting item 97: its options were being reworked, yet it stayed open and answerable. The owner answered it and asked "if so, why am i able to answer?".
 
 Kind: process
-Home: rule:questions-go-to-owner
+Home: rule:questions-go-to-owner (questions go to the owner)

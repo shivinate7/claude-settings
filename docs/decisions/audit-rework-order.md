@@ -20,6 +20,6 @@ Terms, by the orchestrator's call:
 - Central home: the CLAUDE.md rule, or the one decision, that owns the question.
 
 Kind: process
-Home: rule:speak-cite-id-plus-gloss
-Home: rule:git-cite-by-id
-Home: rule:outcomes-judge-by-outcome
+Home: rule:speak-cite-id-plus-gloss (ids get plain names)
+Home: rule:git-cite-by-id (an id, not a path)
+Home: rule:outcomes-judge-by-outcome (judge rules by outcome)

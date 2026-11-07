@@ -23,4 +23,4 @@ Debts:
 - `mockup-cost-test-miss-path-only` (mockup cost test covers miss path): open debt.
 
 Kind: process
-Home: rule:questions-go-to-owner
+Home: rule:questions-go-to-owner (questions go to the owner)

@@ -26,4 +26,4 @@ Reason: a guard on the recovered state is silent on the day of loss. The princip
 which recorded three incidents of it. This repo has no such defect.
 
 Kind: process
-Home: rule:verification-recovery-independent-of-state
+Home: rule:verification-recovery-independent-of-state (recovery avoids its own state)

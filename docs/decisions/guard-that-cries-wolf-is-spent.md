@@ -13,4 +13,4 @@ CLAUDE.md: "Trust a guard only once it goes red on the defect it guards." The ot
 The guard's worktree-remove rulings are in `agent-worktree-discard-is-noted` (a discard or remove in a worktree).
 
 Kind: process
-Home: rule:verification-cry-wolf-guard-is-spent
+Home: rule:verification-cry-wolf-guard-is-spent (a false-alarm guard is spent)

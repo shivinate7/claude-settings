@@ -5,7 +5,7 @@
 `main` of shivinate7/claude-settings requires one check: `all-jobs-passed`, the job in
 `.github/workflows/checks.yml` that runs the shared action `actions/all-jobs-passed`. Owner ruling,
 2026-10-30 15:03 CDT (waiting-page item 87): branch protection requires that one check. Record
-same-check-kinds (PR #877) holds the ruling for every repo.
+same-check-kinds (same kinds of checks) (PR #877) holds the ruling for every repo.
 `.github/stamp.json` `merge.requiredChecks` is `"protection"`, so the `merge` tool reads the name from the
 protection. GitHub's branch protection setting is the owner's to change.
 

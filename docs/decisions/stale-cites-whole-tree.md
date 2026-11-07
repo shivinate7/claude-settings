@@ -1,6 +1,6 @@
 # An opt-in run checks every tracked cite, not only the range
 
-Owner ask, 2026-11-03 15:58 CST, through the coordinator: promote the child repos' guards up to claude-settings. The promotion plan, lane 1 (prose-path-check-whole-tree), sits on origin/child-guard-promotion until that branch merges.
+Owner ask, 2026-11-03 15:58 CST, through the coordinator: promote the child repos' guards up to claude-settings. The promotion plan, lane 1 (prose-path-check-whole-tree), sits on `origin/child-guard-promotion` until that branch merges.
 
 ## The ruling
 

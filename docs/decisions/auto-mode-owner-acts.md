@@ -126,4 +126,4 @@ Other classifier refusals that day: unknown. The coordinator's transcript could 
 - Gap: the classifier sees the command, not who named the PR. A close on a misread task is still allowed when the conversation shows the PR named as replaced, empty or batched. A closed PR can be reopened.
 
 Kind: process
-Home: rule:parallelism-keep-going
+Home: rule:parallelism-keep-going (queued work starts at lane end)

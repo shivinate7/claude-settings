@@ -12,7 +12,7 @@ Rule `playwright-install` in `hooks/guard.py`:
    another project's browser build. The guard does not check this.
 
 Reason: parallel agent installs under Node 26.11 hung, fought over the shared `__dirlock` and
-blocked other projects. The Node 26 hang is measured in playwright-browsers-path.
+blocked other projects. The Node 26 hang is measured in playwright-browsers-path (command may not set browser path).
 
 Kind: process
 Home: hooks/guard.py

@@ -23,4 +23,4 @@ The rule has copies: the style file serves replies, and the GLOSSARY.md header s
 Why: the owner should not have to learn the vocabulary. The glossary stays one name per thing.
 
 Kind: process
-Home: rule:speak-one-name-per-thing
+Home: rule:speak-one-name-per-thing (one name per thing)

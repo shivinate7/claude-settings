@@ -25,4 +25,4 @@ Incident:
 - 2026-10-30 13:10 CDT, triage: 37 live waiting items carried a `reply` field. The page did not draw it, so the owner never read a reply. Nothing refused the write.
 
 Kind: process
-Home: rule:building-one-home-per-capability
+Home: rule:building-one-home-per-capability (each capability gets one home)
