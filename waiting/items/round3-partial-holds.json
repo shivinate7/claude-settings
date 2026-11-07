@@ -29,9 +29,9 @@
   "pick": "b",
   "rank": 1,
   "ref": "item 356; PR #1440",
-  "reply": "b, 14:41 CST: a round-3 PARTIAL holds too. Relayed to lane review-fix-check-round (PR #1440); this closes on its done report.",
+  "reply": "b, 14:41 CST: a round-3 PARTIAL holds too. Filed in PR #1440 (lane review-fix-check-round). Round 3 passed on head 0adb1740b with positive net value, and runner 8 has it (coordinator, 16:29 CST).",
   "short": "Round-3 PARTIAL: hold, or old rules",
-  "status": "open",
+  "status": "closed",
   "title": "Does a round-3 PARTIAL hold the change too, like a FAIL?",
   "why": "Lane review-fix-check-round (PR #1440), sent by the coordinator at 14:07 CST. It refines your pick of 356 a."
 }

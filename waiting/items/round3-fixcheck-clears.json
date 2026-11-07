@@ -29,9 +29,9 @@
   "pick": "b",
   "rank": 1,
   "ref": "item 356; PR #1440",
-  "reply": "b, 14:41 CST: a passing fix check clears the hold. Relayed to lane review-fix-check-round (PR #1440); this closes on its done report.",
+  "reply": "b, 14:41 CST: a passing fix check clears the hold. Filed in PR #1440 (lane review-fix-check-round). Round 3 passed on head 0adb1740b with positive net value, and runner 8 has it. The lane also filed debts floor-why-hides-fix-why and delete-only-refix-floor (coordinator, 16:29 CST).",
   "short": "Round-3 hold: a fix check clears it, or a new lane",
-  "status": "open",
+  "status": "closed",
   "title": "After a round-3 FAIL, does a passing fix check clear the hold?",
   "why": "Lane review-fix-check-round (PR #1440), sent by the coordinator at 14:07 CST. It refines your pick of 356 a."
 }
