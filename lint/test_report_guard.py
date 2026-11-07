@@ -1427,14 +1427,25 @@ class CompactionCarryTests(unittest.TestCase):
                 self.assertIsNone(self.stop(self.compacted_turn(reply)), "a sourced Recovered item blocks: " + item)
 
     def test_cc_green_pull_commits_sha_and_issue_forms_pass(self):
-        # Catches: the source forms "pull request #<n>", "pull #<n>", "commits <hex>", "sha <hex>" and "issue <n>"
-        # (no #) are refused as sourceless. "issue #5" is the pinned edge that already passes.
+        # Catches: the source forms "pull request #<n>", "pull #<n>", "commits <hex>", "sha <hex>", "issue <n>" (no #)
+        # and "PR <n>" (no #) are refused as sourceless. "issue #5" is the pinned edge that already passes.
         items = ["ruling X from pull request #978", "ruling X from pull #978", "ruling X from commits abc1234",
-                 "ruling X from sha abc1234", "ruling X from issue 12", "ruling X from issue #5"]
+                 "ruling X from sha abc1234", "ruling X from issue 12", "ruling X from issue #5",
+                 "ruling X from PR 978"]
         for item in items:
             with self.subTest(item=item):
                 reply = report_lines("Recovered: " + item, "Handoff gave: none")
                 self.assertIsNone(self.stop(self.compacted_turn(reply)), "a sourced Recovered item blocks: " + item)
+
+    def test_cc_red_pull_without_a_hash_is_no_source(self):
+        # Catches: the one "#" optional across PR, pull and issue passes "pull <n>" and "pull request <n>" as a source.
+        # The records list "pull #<n>" and "pull request #<n>" only.
+        items = ["ruling X from pull 978", "ruling X from pull request 978"]
+        for item in items:
+            with self.subTest(item=item):
+                out = self.stop(self.compacted_turn(report_lines("Recovered: " + item, "Handoff gave: none")))
+                self.assertIsNotNone(out, "a bare pull <n> passes as a source: " + item)
+                self.assertEqual(out["decision"], "block", item)
 
     def test_cc_red_bare_hash_number_is_no_source(self):
         # Catches: a bare "#<n>" passes as a source. "#3 of my notes" names no PR, commit or page.
