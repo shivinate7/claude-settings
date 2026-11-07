@@ -61,6 +61,8 @@ NO_REPORT = "Pushed it."
 RUNNING = "> **Done** BUILT abc123\n> **Next** CI running on %s" % HEAD7
 RED = "> **Done** BUILT abc123\n> **Next** CI red on %s" % HEAD7
 UNKNOWN = "> **Done** BUILT abc123\n> **Next** CI unknown on %s" % HEAD7
+UNKNOWN_HEAD = "> **Done** BUILT abc123\n> **Next** CI unknown on HEAD"  # a push whose branch read failed
+UNKNOWN_BRANCH = "> **Done** BUILT abc123\n> **Next** CI unknown on %s" % BRANCH  # a push that named no head
 DONE_CLAIMS_HEAD = "> **Done** BUILT %s\n> **Next** CI running on %s" % (HEAD7, HEAD7)
 PUSH_UNKNOWN_NOTE = "Push-CI guard: UNKNOWN, the check did not run"  # the note of a push check that did not run
 
@@ -148,9 +150,11 @@ GIT_IDENTITY = {"GIT_AUTHOR_NAME": "test", "GIT_AUTHOR_EMAIL": "test@example.inv
                 "GIT_COMMITTER_NAME": "test", "GIT_COMMITTER_EMAIL": "test@example.invalid"}
 
 
-def git_commit(folder):
-    """Make `folder` a git repo with one empty commit, and its remote-tracking ref for BRANCH at that commit.
-    -> the full hash. Local git only."""
+def git_commit(folder, remote_branch=BRANCH, on_branch=None, detach=False):
+    """Make `folder` a git repo with one empty commit. -> the full hash. Local git only.
+    on_branch: the local branch the commit lands on, made from the current HEAD when it is new (None keeps the
+    default branch). remote_branch: the branch whose remote-tracking ref is set to the commit (None sets none).
+    detach: HEAD is left detached at the commit, so no branch is checked out."""
     env = dict(os.environ, **GIT_IDENTITY)
 
     def run_git(*args):
@@ -158,9 +162,14 @@ def git_commit(folder):
                               check=True, timeout=30).stdout.strip()
 
     run_git("init", "-q")
+    if on_branch:
+        run_git("checkout", "-q", "-B", on_branch)
     run_git("commit", "-q", "--allow-empty", "-m", "x")
     head = run_git("rev-parse", "HEAD")
-    run_git("update-ref", "refs/remotes/origin/" + BRANCH, head)
+    if remote_branch:
+        run_git("update-ref", "refs/remotes/origin/" + remote_branch, head)
+    if detach:
+        run_git("checkout", "-q", "--detach")
     return head
 
 
@@ -422,7 +431,80 @@ class PushCheckTests(unittest.TestCase):
         self.assertIn(PUSH_UNKNOWN_NOTE, note,
                       "a push turn whose guard module did not load passed with no UNKNOWN note")
 
+    def test_failed_branch_read_names_the_branch_read_not_the_budget(self):
+        # A detached HEAD makes the branch read raise (ci_wake.current_branch: "no branch is checked out"). The block
+        # reason must name that failure, not a read budget that was never spent.
+        folder = self.case_folder()
+        git_commit(folder, detach=True)
+        steps = push("", command="git push")
+        fixture_ = answers(prs=[pr_entry()], runs=[PENDING])
+        decision, reason, _ = self.stop(turn(REPORT, steps), fixture_, folder=folder)
+        self.assertEqual(decision, "block", "a bare push whose branch read failed passed with no CI line")
+        self.assertNotIn("read budget", reason,
+                         "a failed branch read is reported as a read budget run-out: " + reason)
+        self.assertIn("no branch is checked out", reason,
+                      "the block does not name the branch read's failure: " + reason)
+
+    def test_push_with_no_remote_tracking_ref_reads_unknown_not_silent(self):
+        # The pushed branch has no remote-tracking ref, so the head cannot be named (commit_of gives ""). The turn
+        # must read as unknown on the branch, never pass with the head dropped.
+        folder = self.case_folder()
+        git_commit(folder, remote_branch=None)
+        steps = push("", command="git push origin HEAD:%s" % BRANCH)
+        fixture_ = answers(prs=[pr_entry()], runs=[PENDING])
+        decision, _, _ = self.stop(turn(NO_REPORT, steps), fixture_, folder=folder)
+        self.assertEqual(decision, "block", "a report-less push with no remote-tracking ref was not blocked "
+                         "(scope check)")
+        decision, reason, _ = self.stop(turn(REPORT, steps), fixture_, folder=folder)
+        self.assertEqual(decision, "block", "a push with no remote-tracking ref for %s passed with no CI line: the "
+                         "head was dropped" % BRANCH)
+        self.assertIn("CI unknown on " + BRANCH, reason, "the block does not name the push as unknown: " + reason)
+        decision, _, _ = self.stop(turn(UNKNOWN_BRANCH, steps), fixture_, folder=folder)
+        self.assertIsNone(decision, "a report that holds the unknown line was blocked")
+
     # Green controls: each passes on the old code and on the new.
+
+    # Coverage of the branch read of a push with no ref line (report_guard._heads_of_git_push). Each passes on the
+    # old code. Each kills one mutant of that read: a read that gives [] on a failed read, and a read that names one
+    # constant branch whatever is checked out.
+
+    def test_bare_push_names_the_checked_out_branch_head(self):
+        for command in ("git push", "git push origin HEAD"):
+            for branch in (BRANCH, OTHER_BRANCH):
+                with self.subTest(command=command, branch=branch):
+                    other = OTHER_BRANCH if branch == BRANCH else BRANCH
+                    folder = self.case_folder()
+                    git_commit(folder, remote_branch=other)  # origin/<other> at a commit of its own
+                    head = git_commit(folder, remote_branch=branch, on_branch=branch)  # HEAD on <branch>
+                    fixture_ = answers(prs=[pr_entry(branch=branch, sha=head)],
+                                       runs=[run_entry(None, sha=head, status="in_progress")])
+                    steps = push("", command=command)
+                    decision, _, _ = self.stop(turn(NO_REPORT, steps), fixture_, folder=folder)
+                    self.assertEqual(decision, "block", "a report-less %r turn on %s was not blocked (scope check)"
+                                     % (command, branch))
+                    decision, reason, _ = self.stop(turn(REPORT, steps), fixture_, folder=folder)
+                    self.assertEqual(decision, "block", "%r with no ref line, on %s, read no head: the check passed "
+                                     "it with no CI line" % (command, branch))
+                    self.assertIn("CI running on " + head[:7], reason,
+                                  "%r on %s did not name the checked-out branch's head: %s"
+                                  % (command, branch, reason))
+
+    def test_failed_branch_read_on_a_bare_push_reads_unknown_on_head(self):
+        for command in ("git push", "git push origin HEAD"):
+            with self.subTest(command=command):
+                folder = self.case_folder()
+                git_commit(folder, detach=True)
+                steps = push("", command=command)
+                fixture_ = answers(prs=[pr_entry()], runs=[PENDING])
+                decision, _, _ = self.stop(turn(NO_REPORT, steps), fixture_, folder=folder)
+                self.assertEqual(decision, "block", "a report-less %r turn was not blocked (scope check)" % command)
+                decision, reason, _ = self.stop(turn(REPORT, steps), fixture_, folder=folder)
+                self.assertEqual(decision, "block", "%r whose branch read failed passed with no CI line: the push "
+                                 "was dropped, not read unknown" % command)
+                self.assertIn("CI unknown on HEAD", reason, "%r whose branch read failed is not named unknown on "
+                              "HEAD: %s" % (command, reason))
+                decision, _, _ = self.stop(turn(UNKNOWN_HEAD, steps), fixture_, folder=folder)
+                self.assertIsNone(decision, "a report that holds the unknown line on HEAD was blocked")
 
     def test_green_run_on_ready_pr_passes(self):
         decision, reason, _ = self.stop(turn(REPORT, push(push_out(HEAD7))),
