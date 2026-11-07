@@ -18,6 +18,17 @@ the rewrite once for model names and the `Unstarted:` line only. A failure block
 Cost: one small file per missing-report block, written at that block, deleted at the next Stop with
 stop_hook_active; no process, timer or log. A correction block leaves no marker, so no loop follows.
 
+On a turn that pushed a branch head (git push, not a dry run, a delete or a tag push; or the GitHub MCP push_files,
+create_or_update_file or delete_file), it reads that head's CI state once through hooks/ci_wake.py head_state and
+holds the report until it names it (decision ci-wait-reads-run-status, section "A report after a push"). Pending:
+`CI running on <sha7>` under Next and no BUILT or RECORDED Done item that names the head. Red: `CI red on <sha7>`.
+A read that failed or ran out of budget: `CI unknown on <sha7>`. Green, a draft PR and a branch with no PR need no
+line. Only the newest head of each branch counts. Cost: only on a Stop after a push that is not a stop_hook_active
+Stop, at most 2 gh processes per head (the branch's open PR, then the head's runs), plus 1 git process for a head the
+push output does not give or a short head on main; 8 s for each read and 20 s for all, under the Stop timeout in
+settings.json (the seam is ci_wake.Budget, passed to push_ci_states). No timer, no new long-lived process. The
+missing-report marker also holds each head's state (a line each), so the rewrite makes no second read.
+
 On landed turns whose report has the right shape, it also blocks a Deviations item that admits a mistake
 the writer made ("I broke ...", a first-person clause with a fault word and no negator before it) and names no
 guard: `step:<slug>`, the word debt, or a guard, check or hook word with a PR or commit ref
@@ -126,13 +137,14 @@ import datetime
 import json
 import os
 import re
+import subprocess
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 from _transcript import (  # noqa: E402
     ARTIFACT_DATA, is_last_human, items_write, last_incoming_index, last_reply, page_writer_id, peer_sender,
-    read_transcript, records_after_last_human, send_targets, tool_results, tool_uses)
+    read_transcript, records_after_last_human, result_text, send_targets, tool_results, tool_uses)
 import layout  # noqa: E402
 
 # guard.py owns the one shell parser this repo trusts: quote-aware segment splitting,
@@ -300,6 +312,193 @@ def turn_landed(records):
             elif name in LANDING_TOOLS:
                 return True
     return False
+
+
+# The CI check after a push (decision ci-wait-reads-run-status, section "A report after a push"). A turn that
+# pushed a head holds its report until that head's CI state is known. Merges are out: merge-checks covers them.
+PUSH_TOOLS = LANDING_TOOLS - {"mcp__github__merge_pull_request", "mcp__github__create_pull_request",
+                              "mcp__github__enable_pr_auto_merge"}
+# Per state the guard names, the word of the report line `CI <word> on <sha7>`.
+CI_WORDS = {"pending": "running", "red": "red", "unknown": "unknown"}
+# A git push option that takes the next word as its value.
+PUSH_VALUE_FLAGS = {"-o", "--push-option", "--repo", "--receive-pack", "--exec"}
+PUSH_REF_LINE = re.compile(r"^\s*[+*!=\- ]?\s*(?:([0-9a-f]{7,40})\.\.\.?([0-9a-f]{7,40})|\[new branch\])\s+\S+\s+->\s+(\S+)")
+
+
+def _push_call(args):
+    """-> (remote, refspecs, flags) of a `git push` call's args, or None when it pushes no branch head: a dry run,
+    a delete, or a call that gives no way to name a head. Refspecs come after the remote. An empty list means the
+    call named none (a bare push, or a push of --tags, --all or --mirror, which flags reports)."""
+    flags, words, skip = [], [], False
+    for arg in args:
+        if skip:
+            skip = False
+        elif arg in PUSH_VALUE_FLAGS:
+            skip = True
+        elif arg.startswith("--"):
+            flags.append(arg.split("=", 1)[0])
+        elif arg.startswith("-") and len(arg) > 1:
+            flags.extend("-" + letter for letter in arg[1:])
+        else:
+            words.append(arg)
+    if {"--dry-run", "-n", "--delete", "-d"} & set(flags) or any(w.startswith(":") for w in words[1:]):
+        return None
+    return (words[0] if words else ""), words[1:], flags
+
+
+def _push_folder(segment, cwd):
+    """The folder a segment's `git -C <dir>` runs in, else cwd."""
+    tokens = guard.guard_core.segment_tokens(segment) or []
+    folder = cwd
+    for i, token in enumerate(tokens[:-1]):
+        if token == "-C" and cwd is not None:
+            folder = os.path.join(folder, tokens[i + 1])
+    return folder
+
+
+def _branch_of(refspec, folder):
+    """The remote branch a push refspec updates, or "" for a tag or a ref it does not name."""
+    dst = refspec.lstrip("+").split(":")[-1]
+    if refspec.lstrip("+") == "HEAD":
+        dst = _symbolic_branch(folder)
+    dst = dst[len("refs/heads/"):] if dst.startswith("refs/heads/") else dst
+    return "" if not dst or dst.startswith("refs/") or dst == "HEAD" else dst
+
+
+def _heads_of_git_push(args, output, folder, ci_wake, budget):
+    """-> [(sha, branch)] a `git push` call updated. Read from the ref lines of its output (`old..new src -> dst`);
+    a new branch line, and a call whose output holds none (a verdict wrapper prints no ref line), read the remote-tracking
+    ref. A rejected push or an up-to-date one updated nothing."""
+    call = _push_call(args)
+    if call is None:
+        return []
+    remote, refspecs, flags = call
+    if re.search(r"rejected|error:|fatal:|Everything up-to-date", output):
+        return []
+    remote = remote or "origin"
+    seen = [(m.group(2), m.group(3)) for m in map(PUSH_REF_LINE.match, output.splitlines()) if m]
+    if not seen and set(flags) & {"--tags", "--all", "--mirror", "--prune"}:
+        return []
+
+    if not seen:
+        names = [_branch_of(r, folder) for r in refspecs] if refspecs else [_symbolic_branch(folder)]
+        seen = [(None, n) for n in names if n]
+    heads = []
+    for sha, branch in seen:
+        if "\n" in branch or branch.startswith("refs/tags/"):
+            continue
+        branch = branch[len("refs/heads/"):] if branch.startswith("refs/heads/") else branch
+        if sha is None and ":" not in remote:
+            sha = ci_wake.commit_of("refs/remotes/%s/%s" % (remote, branch), folder, budget.next_timeout())
+        if sha:
+            heads.append((sha, branch))
+    return heads
+
+
+def _symbolic_branch(folder):
+    """The branch the folder has checked out, or "" for a detached HEAD or a failed read."""
+    try:
+        done = subprocess.run(["git", "symbolic-ref", "--short", "-q", "HEAD"], cwd=folder, capture_output=True,
+                              text=True, timeout=5, stdin=subprocess.DEVNULL)
+    except (OSError, subprocess.TimeoutExpired):
+        return ""
+    return done.stdout.strip() if done.returncode == 0 else ""
+
+
+def _mcp_head(name, tool_input, text):
+    """-> (sha, branch) of a GitHub MCP push tool call, or None. The sha is the result's `sha`, else `commit.sha`,
+    else `object.sha` (the shape of push_files is unmeasured here; the case file assumes `sha`)."""
+    branch = tool_input.get("branch") if isinstance(tool_input, dict) else None
+    if name not in PUSH_TOOLS or not isinstance(branch, str) or not branch:
+        return None
+    try:
+        body = json.loads(text)
+    except ValueError:
+        return None
+    if not isinstance(body, dict):
+        return None
+    for holder in (body, body.get("commit"), body.get("object")):
+        sha = holder.get("sha") if isinstance(holder, dict) else None
+        if isinstance(sha, str) and re.fullmatch(r"[0-9a-f]{40}", sha):
+            return sha, branch
+    return None
+
+
+def pushed_heads(after, cwd, budget, ci_wake):
+    """-> [(sha, branch, folder)]: the newest head of each branch this turn pushed, in the order of each branch's last push."""
+    results = {}
+    for rec in after:
+        for block in tool_results(rec):
+            results[block.get("tool_use_id")] = result_text(block)
+    found = {}
+
+    def record(sha, branch, folder):
+        found.pop((folder, branch), None)
+        found[(folder, branch)] = sha
+
+    for rec in after:
+        for use in tool_uses(rec):
+            name, tool_input = use.get("name"), use.get("input") or {}
+            output = results.get(use.get("id"), "")
+            if name == "Bash":
+                command = tool_input.get("command")
+                if not isinstance(command, str) or not command.strip():
+                    continue
+                for segment in guard.split_segments(guard.strip_heredoc_bodies(command)):
+                    for subcommand, args in guard.git_calls(segment):
+                        if subcommand != "push":
+                            continue
+                        folder = _push_folder(segment, cwd)
+                        for sha, branch in _heads_of_git_push(args, output, folder, ci_wake, budget):
+                            record(sha, branch, folder)
+            elif name in PUSH_TOOLS:
+                head = _mcp_head(name, tool_input, output)
+                if head:
+                    record(head[0], head[1], cwd)
+    return [(sha, branch, folder) for (folder, branch), sha in found.items()]
+
+
+def push_ci_states(after, hook, budget=None):
+    """-> [(sha7, state, detail)], one per branch the turn pushed (ci_wake.head_state states), [] when it pushed none.
+    budget: a ci_wake.Budget, shared by every read of this Stop; the seam a test uses to move the clock.
+    Fails open on a read that cannot start: a head that cannot be named is not checked."""
+    if guard is None:
+        _load_guard()
+    if guard is None:
+        return []
+    sys.path.insert(0, os.path.join(HERE, "..", "hooks"))
+    import ci_wake
+    budget = budget or ci_wake.Budget()
+    cwd = hook.get("cwd") if isinstance(hook.get("cwd"), str) else None
+    states = []
+    for sha, branch, folder in pushed_heads(after, cwd, budget, ci_wake):
+        state, detail = ci_wake.head_state(sha, branch, folder, budget)
+        states.append((sha[:7], state, detail))
+    return states
+
+
+def push_ci_problem(text, states):
+    """The block reason for a pushed head whose state the report does not name, or "". Pending needs `CI running on
+    <sha7>` under Next and no BUILT or RECORDED Done item that names the head; red needs `CI red on <sha7>`, an
+    unknown read `CI unknown on <sha7>`, anywhere in the reply. Green and no CI need nothing."""
+    reasons = []
+    for sha7, state, detail in states:
+        if state not in CI_WORDS:
+            continue
+        line = "CI %s on %s" % (CI_WORDS[state], sha7)
+        holder = report_section(text, "Next") if state == "pending" else text
+        if line.lower() not in holder.lower():
+            reasons.append("Push-CI guard: this turn pushed %s and its CI is %s (%s). Add the line `%s`%s, as a "
+                           "short correction." % (sha7, CI_WORDS[state], detail or "no detail", line,
+                                                    " under Next" if state == "pending" else ""))
+        elif state == "pending":
+            claim = [i for i in report_section(text, "Done").splitlines()
+                     if sha7 in i and re.search(r"\b(?:BUILT|RECORDED)\b", i)]
+            if claim:
+                reasons.append("Push-CI guard: a Done item names %s as built while its CI is still running. Cite the "
+                               "PR or an earlier commit in Done, and keep the head in `%s` under Next."
+                               % (sha7, line))
+    return " ".join(reasons)
 
 
 def find_block_start(lines):
@@ -1523,7 +1722,8 @@ def rewrite_problems(hook):
         if marker is None:
             return []
         with open(marker, encoding="utf-8") as f:
-            idx = int(f.read().strip())
+            lines = f.read().split("\n")
+        idx = int(lines[0].strip())
         os.remove(marker)
         path = hook.get("transcript_path")
         if not path or not os.path.exists(path):
@@ -1553,18 +1753,34 @@ def rewrite_problems(hook):
         recovered = recovered_problem(records, text) if report_shape_ok(text) else ""
         if recovered:
             reasons.append(recovered)
+        ci = push_ci_problem(text, marker_states(lines[1:]))
+        if ci:
+            reasons.append(ci)
         return reasons
     except Exception:
         return []
 
 
-def write_marker(hook, idx):
+def marker_states(lines):
+    """The CI states a marker holds, one `<sha7> <state> <detail>` line each (write_marker), as push_ci_states returns them."""
+    states = []
+    for line in lines:
+        parts = line.split(" ", 2)
+        if len(parts) >= 2 and parts[1] in CI_WORDS:
+            states.append((parts[0], parts[1], parts[2] if len(parts) > 2 else ""))
+    return states
+
+
+def write_marker(hook, idx, states=()):
+    """The marker holds the turn's human index, then each pushed head's CI state, so the rewrite makes no second gh read."""
     try:
         marker = _marker_path(hook)
         if marker is not None:
             os.makedirs(os.path.dirname(marker), exist_ok=True)
+            lines = [str(idx)] + ["%s %s %s" % (sha7, state, " ".join(detail.split())) for sha7, state, detail in states
+                                  if state in CI_WORDS]
             with open(marker, "w", encoding="utf-8") as f:
-                f.write(str(idx))
+                f.write("\n".join(lines))
     except Exception:
         pass
 
@@ -2009,6 +2225,14 @@ def main():
         reasons.append(MODELS_REASON + models + ".")
     if shape_ok and unstarted_problem(text, spawned):
         reasons.append(UNSTARTED_REASON)
+    states = []
+    try:
+        states = push_ci_states(after, hook)
+        ci = push_ci_problem(text, states)
+        if ci:
+            reasons.append(ci)
+    except Exception as exc:  # a read that could not run is no block: the check fails open
+        print("push CI check failed open: %s: %s" % (type(exc).__name__, exc), file=sys.stderr)
     if pick_reason:
         reasons.append(pick_reason)
     try:
@@ -2049,7 +2273,7 @@ def main():
     if reasons:
         reason = " ".join(reasons) + " (rule reports-order-of-labels)" + (CORRECTION_TAIL if shape_ok and not hold else "")
         if not shape_ok:
-            write_marker(hook, last_human_idx)
+            write_marker(hook, last_human_idx, states)
         finish({"decision": "block", "reason": reason})
     else:
         finish({"systemMessage": note} if note else None)

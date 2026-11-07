@@ -18,6 +18,13 @@ gaps that grow to 120 s (`pauses`). It never loops on a red run.
 Seams: CI_WAKE_DEADLINE, the watch budget in seconds (default DEFAULT_DEADLINE, under the hook
 timeout in settings.json). CI_WAKE_LOCK_DIR, the folder of the per-PR lock files.
 The cancelled-twin rule is merge.py's `Host.judge_runs`, loaded through guard_merge.merge_module.
+
+The Stop-side read (`head_state`, for lint/report_guard.py after a push): one read of a pushed head's CI state,
+in a Stop hook that is already running. It starts no watch, timer or process of its own. Cost per head: at most 2
+gh processes (the open PR of the branch, then the head's runs), plus 1 local process to name a short head on main.
+Budget: HEAD_READ seconds for each read, HEAD_TOTAL for all of a Stop's reads, under the Stop hook timeout in
+settings.json. The seam is `Budget(total, per_read, clock)`: a test passes a clock it controls, so the budget is
+proved without real time.
 """
 import json
 import os
@@ -41,6 +48,9 @@ STATUS_PAUSE = 30         # seconds between two reads in the first BACKOFF_FLAT 
 BACKOFF_FLAT = 240        # seconds the gap stays STATUS_PAUSE
 BACKOFF_CAP = 120         # seconds, the longest gap
 READ_TIMEOUT = 60         # seconds for each gh read
+HEAD_READ = 8             # seconds for each read of head_state
+HEAD_TOTAL = 20           # seconds for every read of one Stop, under the Stop hook's 35 s timeout
+MAIN_BRANCHES = ("main", "master")   # a push here has no PR to read: the head's runs are read direct
 RUN_FIELDS = "databaseId,name,status,conclusion,workflowName,headSha,event"
 GOOD = ("success", "skipped", "neutral")
 REPO_FLAGS = ("-R", "--repo")
@@ -91,9 +101,9 @@ def gh(args, cwd, timeout=READ_TIMEOUT):
     return p.returncode, out.decode("utf-8", "replace"), err.decode("utf-8", "replace")
 
 
-def gh_json(args, cwd, gone=""):
+def gh_json(args, cwd, gone="", timeout=READ_TIMEOUT):
     """-> the JSON gh prints. gone: text in a failed read's output that means the PR does not exist (NoPR)."""
-    rc, out, err = gh(args, cwd)
+    rc, out, err = gh(args, cwd, timeout)
     if rc != 0:
         if gone and gone in (out + err).lower():
             raise NoPR()
@@ -289,7 +299,7 @@ def current_branch(cwd):
     return p.stdout.strip()
 
 
-def read_pr(selector, repo, cwd):
+def read_pr(selector, repo, cwd, timeout=READ_TIMEOUT):
     """The PR a `gh pr ready` selector names, by REST: `gh pr view` is GraphQL, which the cloud proxy (route
     graphql-gh-api-cloud) refuses. selector: a number, a PR url, a branch, or "" for the folder's branch. repo is
     [HOST/]OWNER/REPO, else gh fills {owner}/{repo} from the folder. NoPR when none is found."""
@@ -301,13 +311,13 @@ def read_pr(selector, repo, cwd):
     tail = ["--hostname", host] if host else []
     base = "repos/%s/pulls" % slug
     if selector.isdigit():
-        return pr_fields(gh_json(["api", base + "/" + selector, *tail], cwd, gone="http 404"))
+        return pr_fields(gh_json(["api", base + "/" + selector, *tail], cwd, gone="http 404", timeout=timeout))
     head = selector or current_branch(cwd)
     if ":" not in head:
         head = slug.split("/")[0] + ":" + head
     # Fields, not a query string: a `&` in an argument is a command separator to cmd.exe behind a .cmd
     # launcher. -F fills a {owner} placeholder inside its value; -f does not.
-    found = gh_json(["api", "-X", "GET", base, "-F", "head=" + head, "-f", "state=open", *tail], cwd)
+    found = gh_json(["api", "-X", "GET", base, "-F", "head=" + head, "-f", "state=open", *tail], cwd, timeout=timeout)
     if not found:
         raise NoPR()
     return pr_fields(found[0])
@@ -317,6 +327,83 @@ def repo_of_url(url):
     """The `[HOST/]OWNER/REPO` of a pull request url, for -R; "" when the url names none."""
     m = PR_URL.match(url or "")
     return "" if m is None else m.group(2) if m.group(1) == "github.com" else m.group(1) + "/" + m.group(2)
+
+
+class Budget:
+    """The time one Stop may spend on gh reads: `per_read` seconds for each, `total` for all, counted on `clock`
+    (default time.monotonic). A test passes a clock it moves by hand. `next_timeout` is the timeout of the next
+    read; it raises Unknown once the total is spent, so a spent budget is an unknown read, never green."""
+
+    def __init__(self, total=HEAD_TOTAL, per_read=HEAD_READ, clock=time.monotonic):
+        self.total, self.per_read, self.clock = total, per_read, clock
+        self.end = clock() + total
+
+    def next_timeout(self):
+        left = self.end - self.clock()
+        if left <= 0:
+            raise Unknown("the %g s read budget is spent" % self.total)
+        return min(self.per_read, left)
+
+
+def commit_of(ref, cwd, timeout=HEAD_READ):
+    """The full commit hash `ref` names in the folder, or "" when the tool is missing, fails, or names no commit."""
+    try:
+        import _nowindow
+    except ImportError:
+        _nowindow = subprocess
+    exe = shutil.which("git")
+    if exe is None:
+        return ""
+    try:
+        p = _nowindow.run([exe, "rev-parse", "--verify", "-q", ref + "^{commit}"], cwd=cwd,
+                          stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=timeout)
+    except (OSError, subprocess.TimeoutExpired):
+        return ""
+    out = p.stdout.strip()
+    return out if p.returncode == 0 and re.fullmatch(r"[0-9a-f]{40}", out) else ""
+
+
+def head_state(sha, branch, cwd, budget=None):
+    """-> (state, detail) for a head pushed to `branch`; sha may be short. One read, no wait.
+    state: "none" (no CI to wait for: no open PR, a draft PR, or a head the PR has moved past), "green",
+    "pending" (a run has not ended, or a ready PR has no run yet), "red" (a run ended not green), or "unknown"
+    (a read failed or ran out of budget). A push to main reads the head's runs direct. A ready PR's runs drop
+    skipped ones as `wait_for` does, then judge_runs judges the rest (the cancelled-twin rule is its own)."""
+    budget = budget or Budget()
+    try:
+        full, main = sha, branch in MAIN_BRANCHES
+        if main:
+            full = commit_of(sha, cwd, budget.next_timeout()) or sha
+        else:
+            try:
+                pr = read_pr(branch, "", cwd, budget.next_timeout())
+            except NoPR:
+                return "none", "no open PR"
+            if pr.get("isDraft"):
+                return "none", "draft PR"
+            if not pr["headRefOid"].startswith(sha):
+                return "none", "the PR head has moved past %s" % sha[:7]
+            full = pr["headRefOid"]
+        args = ["run", "list", "--commit", full, "--limit", "100", "--json", RUN_FIELDS]
+        runs = [r for r in gh_json(args, cwd, timeout=budget.next_timeout()) if r["conclusion"] != "skipped"]
+        if not runs:
+            return ("unknown", "no run is listed for a push to %s" % branch) if main else ("pending", "no run yet")
+        from guard_merge import merge_module
+        merge = merge_module()
+        if merge is None:
+            raise Unknown("the merge tool (judge_runs) could not be loaded")
+        red, pending = merge.Host.judge_runs(runs)
+        if red:
+            return "red", ", ".join(red)
+        if pending:
+            return "pending", ", ".join(pending)
+        return "green", ""
+    except NoPR:
+        return "none", "no open PR"
+    except Unknown as e:
+        return "unknown", str(e)
+    except Exception as e:
+        return "unknown", "%s: %s" % (type(e).__name__, e)
 
 
 def watch_pr(selector, repo, cwd, deadline, lock_dir):
