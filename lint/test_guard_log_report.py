@@ -1434,6 +1434,15 @@ class EmittedRuleReaderTests(unittest.TestCase):
                '    record("Stop", "noted", rule, "m")\n')
         self.assertEqual(emitted_guard_rules(src), {"judge-const"})
 
+    def test_a_minimum_of_a_comprehension_over_a_literal_tuple_names_its_elements(self):
+        # reply_judge's log_finding: the rule is the element of the literal tuple that the reason names, `min(found)[1]`.
+        src = ('JUDGED = ("alpha-judged", "beta-judged")\n'
+               'def go(reason):\n'
+               '    found = [(reason.find(r), r) for r in JUDGED if r in reason]\n'
+               '    rule = min(found)[1] if found else "fallback-rule"\n'
+               '    record("Stop", "noted", rule, "m")\n')
+        self.assertEqual(emitted_guard_rules(src), {"alpha-judged", "beta-judged", "fallback-rule"})
+
 
 def run_cli(argv):
     """Run main(argv); return (exit code, stdout, stderr). A refused flag exits 2 and is a result."""
