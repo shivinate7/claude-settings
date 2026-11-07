@@ -37,7 +37,7 @@ A definitive claim in prose carries one of these backings:
 
 - `(KIND source)`, with KIND from `PREMISE_KINDS` (the kinds list in `hooks/precompact_handoff.py`). The weak kinds `notes` and `assumed` do not back a claim.
 - `(route <id>)`, citing a route row.
-- `(test path::name)` or `(read path:line)`. Either backs a claim only if the file exists at head.
+- `(test path::name)`, `(read path::name)` or `(read path:line)`. Each backs a claim only if the file exists at head.
 
 A code span used as a claim's subject still counts as a claim. A claim with no backing is unbacked.
 
@@ -51,11 +51,11 @@ When an act contradicts a route row, the falsifier notes it: `hooks/refusal_note
 
 ## Model judge at merge
 
-Built, report-only. `merge/merge.py` calls the model judge once per merge, after the `merge: #N merged as ...` line (test merge/test_merge.py::ProseJudge).
+Built, report-only. `merge/merge.py` calls the model judge once per merge, after the `merge: #N merged as ...` line and before the ff (read merge/merge.py::prose_judge_report) (test merge/test_merge.py::ProseJudge). Planned, not built: the call moves after the `deleteBranch` block (after ff, afterMerge, the branch delete and `cut_lanes`), still after the merged-as line and inside the merge lock. The model call waits at most 60 s (read hooks/prose_judge.py::MERGE_TIMEOUT) while the lock is held.
 
-Selection is `changed_sentences` in `lint/stale_cites.py`: each sentence of a governed Markdown paragraph that the PR adds a line to (test lint/test_stale_cites.py::SelectionTests).
+Selection is `changed_sentences` in `lint/stale_cites.py`: each sentence of a governed Markdown paragraph that the PR adds a line to. It takes paragraphs with `touched_paragraphs` and splits them with `sentence_spans` (read lint/stale_cites.py::touched_paragraphs) (read lint/stale_cites.py::sentence_spans) (test lint/test_stale_cites.py::SelectionTests).
 
-The judge is `merge_findings` in `hooks/prose_judge.py`. It makes one `invoke_model` call (read hooks/decision_watch.py:666), with the sentences, the route rows at the merged sha, and each repo file a sentence names, read at that sha. The prompt is capped at 200000 characters and says what it cut (test hooks/test_prose_judge.py::case_h_an_oversized_input_is_capped_and_the_prompt_says_what_it_cut).
+The judge is `merge_findings` in `hooks/prose_judge.py` (read hooks/prose_judge.py::merge_findings). It makes one `invoke_model` call (read hooks/decision_watch.py::invoke_model), with the sentences, the route rows at the merged sha, and each repo file a sentence names, read at that sha. The prompt is capped at 200000 characters (read hooks/prose_judge.py::PROMPT_CAP) and says what it cut (test hooks/test_prose_judge.py::case_h_an_oversized_input_is_capped_and_the_prompt_says_what_it_cut).
 
 Output lines: `merge: #N prose judge: <path>:<line>: <why>` per finding; `merge: #N prose judge: no finding (report-only).`; `merge: #N prose judge: no changed prose to judge.` (no call made).
 
@@ -73,9 +73,9 @@ A route row is read as unmeasured when its `measured` date is more than N days o
 
 ## Cost
 
-No long-lived process and no timer. One `git diff -U0`-style diff replaces the name-status diff (read lint/stale_cites.py:72). One `cat-file` read happens only when a line is a claim candidate. A range that changes `hooks/route_rows.json` opens one `cat-file`. When a row id is removed, it also runs one `ls-tree` and reads each tracked `.md`. STALE005 (`judge_paragraph`) selects each claim sentence that holds an added row, not each claim line (read lint/stale_cites.py:709).
+No long-lived process and no timer. One `git diff -M --raw -p -U0` gives the paths and the added lines (read lint/stale_cites.py::read_diff). One `cat-file` read happens only when a line is a claim candidate. A range that changes `hooks/route_rows.json` opens one `cat-file`. When a row id is removed, it also runs one `ls-tree` and reads each tracked `.md`. STALE005 (`judge_paragraph`) selects each claim sentence that holds an added row, not each claim line (read lint/stale_cites.py::judge_paragraph).
 
-The model judge starts one model per merge that adds governed prose, and none otherwise (test merge/test_merge.py::ProseJudge proves the count). It writes no file and leaves no process or timer running.
+The model judge starts one model per merge that adds governed prose, and none otherwise (test merge/test_merge.py::ProseJudge). Each call copies the login credential file into a temp dir when one exists, and deletes that dir after the call (read hooks/decision_watch.py::_judge_isolation) (read hooks/decision_watch.py::invoke_model). Git starts on every merge: `merge-base` and `diff` (read lint/stale_cites.py::changed_sentences). When there is changed prose, add one `cat-file --batch` once a governed Markdown file gets added lines, one `git show` of the route rows file at the merged sha, and one `git show` per distinct repo path a sentence names, while fewer than 40 are read (read merge/merge.py::PROSE_FILES_MAX). A path missing at the merged sha starts again each time a sentence names it (read merge/merge.py::prose_judge_call). The prompt is capped at 200000 characters, not the reads (read hooks/prose_judge.py::PROMPT_CAP). It leaves no process or timer running (read hooks/decision_watch.py::invoke_model).
 
 ## Owner-only
 
@@ -83,11 +83,11 @@ The model judge starts one model per merge that adds governed prose, and none ot
 
 ## Status
 
-Built on main. Part 1, route rows and falsifiers, is PR #1355 (read hooks/route_rows.json; read hooks/refusal_note.py). Part 2, STALE005, is PR #1328 (read lint/stale_cites.py:669). Part 3, the hand-off cite, is PR #1360 (read lint/report_guard.py:1461). The reply judge's route rows are on main too (read hooks/reply_judge.py:146).
+Built on main. Part 1, route rows and falsifiers, is PR #1355 (read hooks/route_rows.json; read hooks/refusal_note.py). Part 2, STALE005, is PR #1328 (read lint/stale_cites.py::RouteClaimReader). Part 3, the hand-off cite, is PR #1360 (read lint/report_guard.py:1461). The reply judge's route rows are on main too (read hooks/reply_judge.py:146).
 
 Part 4, the model judge at merge, is built on lane `prose-judge-at-merge` and is not on main yet (test merge/test_merge.py::ProseJudge).
 
-Not built: the generator that fills the route-rows table in `docs/decisions/auto-mode-owner-acts.md` from `hooks/route_rows.json`. No file in lint, hooks, bin, actions or merge names that page (measured 2026-11-07 on origin/main).
+Not built: the generator that fills the route-rows table in `docs/decisions/auto-mode-owner-acts.md` from `hooks/route_rows.json`. No file in lint, hooks, bin, actions or merge names that page path (measured 2026-11-07, git grep on origin/main 2c67fc4b0). Only `hooks/test_auto_mode_allow.py` names the decision, `auto-mode-owner-acts`, and it is a test, not a generator (read hooks/test_auto_mode_allow.py).
 
 Kind: build
 Plan: docs/plans/pointer-system.md#lanes (all)
