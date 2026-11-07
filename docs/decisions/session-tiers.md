@@ -141,13 +141,16 @@ Owner rulings, 2026-10-28 CDT unless dated. They name the session tiers and how 
     - a step slug that differs, and a word shared with the lane's step slug or title, minus the words of the repo name.
   - An exact re-start (same step and same topic) also asks. The same step on another topic passes: a deliberate split.
   - Verdict: an ask, never a refusal, when a lane start or a new step overlaps an open lane.
+  - Triggers: a `send_message` reads a step only from the `Lane brief: <step>.` marker, or from prose `as step <slug>`, `new step <slug>`, or a line `Step: <slug>`. A prose step that an open lane already carries is a reference, not an overlap.
   - Measured, 2026-11-07 14:05 CST, 35 open lanes: the same `cs-topic` is shared by up to 5 open lanes, and the same `cs-step` by 3. So neither alone is the key. Word overlap with no repo filter hits 26 of 595 lane pairs. With the non-home repo filter, the only hits are the incident pair and the `qmax-browser-shard` split, which the same-step exception passes.
   - Known misses:
     - The brief at create time. Rule `lane-effort-pin` (a lane's `create_session` prompt must be `/effort medium`) leaves no brief in that call.
     - Lanes not in this transcript, such as lanes in other sessions or from before compaction, unless a `list_sessions` or `get_session` result is read.
     - Home-repo-only lanes, on both clauses. An exact re-start still asks.
     - A step named in prose without the word "step".
-  - Cost: one transcript read per lane `create_session` and per step-naming `send_message`. No file, no timer.
+    - A lane archived in the UI counts as open until a later `get_session` or `list_sessions` read shows it archived. Remedy: read `list_sessions` first.
+    - A session whose home repo is the work's repo, such as a q_max-home session with q_max-only lanes, is never checked, since the home repo is filtered out. This is the incident's own repo shape for such a session.
+  - Cost: one transcript read per lane `create_session`. A `send_message` that names a step reads the transcript once; a marker brief reads it twice (rule `lane-one-topic`, then this rule). A step-naming `send_message` also reads the roadmap extras file and may start one git process for the home repo. No file written, no timer.
   - Not landed yet.
   - Tests: family `lane-one-topic` in `hooks/test_guard.py`.
 
