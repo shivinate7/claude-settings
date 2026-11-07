@@ -698,13 +698,14 @@ class JudgeStub:
 
 
 def opus_type(prompt, answer=None, error=None, at=OV_NOW, transcript=None, remote=None, extra=None, cfg=None,
-              override=None):
+              override=None, drop_judge=False):
     """The owner types `prompt` into the prompt hook's grant, with the model stood in. Returns (config dir, judge
     calls, stdout, stderr). The grant's files and guard.log land in the config dir, a new one unless `cfg` names it.
     `transcript` is the payload's transcript_path (no key when None). `remote` is CLAUDE_CODE_REMOTE_SESSION_ID for
     the grant (unset when None). `extra` holds more keys of the hook payload, such as `source`, merged in as given
     (none when None). `override` stands in for the plain override judge, call_judge.override_ask, for the grant only:
-    a JudgeRecorder, or a judge that answers no when None. The real name, when the module has one, comes back after."""
+    a JudgeRecorder, or a judge that answers no when None. `drop_judge` removes that name instead, so the import of
+    call_judge.override_ask fails. The real name, when the module has one, comes back after."""
     _, decision_watch = hooks_modules()
     call_judge = call_judge_module()
     cfg = cfg or ov_cfg()
@@ -721,7 +722,10 @@ def opus_type(prompt, answer=None, error=None, at=OV_NOW, transcript=None, remot
     out, err = io.StringIO(), io.StringIO()
     try:
         decision_watch.invoke_model = stub
-        call_judge.override_ask = override if override is not None else JudgeRecorder(False)
+        if drop_judge:
+            vars(call_judge).pop("override_ask", None)
+        else:
+            call_judge.override_ask = override if override is not None else JudgeRecorder(False)
         with config_dir_env(cfg), remote_env(remote), contextlib.redirect_stdout(out), \
                 contextlib.redirect_stderr(err):
             local_time_under_test().grant_override(raw, at)
@@ -2138,7 +2142,8 @@ def ask_type(prompt, answer=True, error=None, opus_answer=None, **kwargs):
 
 def ask_grants(name, prompt, kind, length, **kwargs):
     """The judge answers yes: it is asked once, and the grant is a `kind` override that ends `length` after the grant.
-    The judge count comes first, so a grant read after a judge that was never asked proves nothing."""
+    The judge count comes first, so a grant read after a judge that was never asked proves nothing. Returns the config
+    dir, so a case can read guard.log after the grant."""
     cfg, judge, _, _, err = ask_type(prompt, **kwargs)
     check("override ask: %s: the judge is asked once" % name, len(judge.texts) == 1,
           "judge calls %d; stderr %r" % (len(judge.texts), err.strip()[-120:]))
@@ -2146,6 +2151,7 @@ def ask_grants(name, prompt, kind, length, **kwargs):
     check("override ask: %s: grants a %s override that ends %d minutes after the grant"
           % (name, kind, int(length.total_seconds() // 60)),
           ends_after(got, kind, length), "got %r; files %r" % (got, ov_pass_files(cfg)))
+    return cfg
 
 
 def ask_no_grant(name, prompt, allowed, **kwargs):
@@ -2363,6 +2369,45 @@ def case_override_ask_grant_defers_a_length():
                   "grant returned %r" % (got,))
 
 
+def case_override_ask_bare_number_reads_the_raw_first_word():
+    # A code span before `override` is the prompt's first word, not `override`, so a bare number after it is no minutes:
+    # the judge says yes, and the grant is a one-act override. The control is `override 15 please` in OV_ASK_GRANTS,
+    # where the same number is 15 minutes.
+    for name, prompt in (("`x` override 15", "`x` override 15"), ("`x` override 15 please", "`x` override 15 please")):
+        ask_grants(name, prompt, "once", OV_ONCE)
+
+
+def case_override_ask_judge_import_failure_keeps_main_result():
+    # The import of call_judge.override_ask fails (drop_judge): the ask keeps main's result, as decision owner-override
+    # says. `override that for 15 minutes please` is main's one-act override, and its reason is logged once. `yes
+    # override that` is no keyword form, so it grants nothing. The stderr check proves the import failed in each case.
+    cfg, _, _, err = opus_type("override that for 15 minutes please", drop_judge=True)
+    check("override ask: an import failure: the import of override_ask fails for `override that for 15 minutes please`",
+          "cannot import name 'override_ask'" in err, "stderr %r" % err.strip()[-160:])
+    got = ov_pass(cfg)
+    check("override ask: an import failure: `override that for 15 minutes please` grants a once override, 10 minutes",
+          ends_after(got, "once", OV_ONCE), "got %r; files %r" % (got, ov_pass_files(cfg)))
+    hits = [line for line in ov_log(cfg) if "that for 15 minutes please" in line]
+    check("override ask: an import failure: the reason of `override that for 15 minutes please` is logged once",
+          len(hits) == 1, "log %r" % (ov_log(cfg),))
+    cfg, _, _, err = opus_type("yes override that", drop_judge=True)
+    check("override ask: an import failure: the import of override_ask fails for `yes override that`",
+          "cannot import name 'override_ask'" in err, "stderr %r" % err.strip()[-160:])
+    check("override ask: an import failure: `yes override that` grants nothing", ov_pass(cfg) is None,
+          "files %r" % (ov_pass_files(cfg),))
+
+
+def case_override_ask_plain_one_act_logs_its_words_once():
+    # A plain one-act ask writes its words to guard.log once, as the keyword once does. A plain timed ask logs nothing.
+    cfg = ask_grants("yes override that", "yes override that", "once", OV_ONCE)
+    hits = [line for line in ov_log(cfg) if "yes override that" in line]
+    check("override ask: `yes override that` logs its words to guard.log once", len(hits) == 1,
+          "log %r" % (ov_log(cfg),))
+    timed = "go ahead and override that for 15 minutes please"
+    cfg = ask_grants(timed, timed, "timed", timedelta(minutes=15))
+    check("override ask: a plain timed ask, `%s`, logs none" % timed, ov_log(cfg) == [], "log %r" % (ov_log(cfg),))
+
+
 def main():
     try:
         case_table_in_process()
@@ -2466,6 +2511,9 @@ def main():
         case_override_ask_pasted_block_is_cut_before_the_judge()
         case_override_ask_scanner_edges()
         case_override_ask_grant_defers_a_length()
+        case_override_ask_bare_number_reads_the_raw_first_word()
+        case_override_ask_judge_import_failure_keeps_main_result()
+        case_override_ask_plain_one_act_logs_its_words_once()
     finally:
         shutil.rmtree(ROOT, ignore_errors=True)
     if FAILED:
