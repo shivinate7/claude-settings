@@ -3683,6 +3683,14 @@ sh("two-worktrees: the incident shape, checkout -B with a start point, is refuse
    VCS + " checkout -B x origin/x", "deny", TWO_RULE, cwd=TWACT)
 sh("two-worktrees: switch -C with a start point is refused",
    VCS + " switch -C x origin/x", "deny", TWO_RULE, cwd=TWACT)
+# THE LONG SPELLING. `--force-create` is `switch -C` written out: a value after it, or after `=`. Git 2.43
+# takes all three forms, and the guard reads each as the same branch, so each is refused.
+sh("two-worktrees: switch --force-create of a branch another worktree holds is refused",
+   VCS + " switch --force-create x", "deny", TWO_RULE, cwd=TWACT)
+sh("two-worktrees: switch --force-create with a start point is refused",
+   VCS + " switch --force-create x origin/x", "deny", TWO_RULE, cwd=TWACT)
+sh("two-worktrees: switch --force-create=x, the equals spelling, is refused",
+   VCS + " switch --force-create=x", "deny", TWO_RULE, cwd=TWACT)
 sh("two-worktrees: checkout --ignore-other-worktrees of a held branch is refused",
    VCS + " checkout --ignore-other-worktrees x", "deny", TWO_RULE, cwd=TWACT)
 sh("two-worktrees: switch --ignore-other-worktrees of a held branch is refused",
@@ -3761,6 +3769,10 @@ sh("two-worktrees: checkout -fB of a branch no worktree holds is allowed",
    VCS + " checkout -fB y", "allow", cwd=TWACT)
 sh("two-worktrees: switch -fC of a branch no worktree holds is allowed",
    VCS + " switch -fC y", "allow", cwd=TWACT)
+# THE LONG SPELLING, ALLOWED. A new-branch name that no worktree holds passes, so the refused cases above
+# are the held branch and not the spelling.
+sh("two-worktrees: switch --force-create of a branch no worktree holds is allowed",
+   VCS + " switch --force-create y", "allow", cwd=TWACT)
 
 # THE FALSE ALARM. `-d` is --detach for worktree add (git 2.43 reads it), so a forced add with -d takes
 # no branch, and the guard must not read the held name `x` as one. The long spelling is the control.
