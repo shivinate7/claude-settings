@@ -1145,6 +1145,60 @@ def _own_nodes(scope):
     return out
 
 
+def _literal_tuples(bindings):
+    """{name: [text]} for each top-level name bound once, to a tuple of string literals."""
+    out = {}
+    for name, vs in bindings.items():
+        if len(vs) == 1 and isinstance(vs[0], ast.Tuple) and all(_text(e) is not None for e in vs[0].elts):
+            out[name] = [_text(e) for e in vs[0].elts]
+    return out
+
+
+class _Bound:
+    """What one def binds a name to: the rule ids the name can hold, and for a tuple-valued name the ids in each
+    column."""
+
+    def __init__(self):
+        self.ids, self.columns = set(), {}
+
+
+class _Chain:
+    """What the names visible at one call hold: the nearest def that binds a name, else the module."""
+
+    def __init__(self, reader, scopes):
+        self.reader, self.scopes = reader, scopes
+
+    def _bound(self, name):
+        for scope in self.scopes:
+            names = self.reader.bound_in(scope)
+            if name in names:
+                return names[name]
+        return None
+
+    def name(self, name):
+        found = self._bound(name)
+        return found.ids if found is not None else self.reader.module_ids(name)
+
+    def column(self, name, index):
+        found = self._bound(name)
+        return found.columns.get(index, set()) if found is not None else set()
+
+
+class _Local:
+    """The names a def binds while its own assigned values are read: a name reads as the module's constant, and a
+    tuple-valued name reads the columns that the first pass has read from its comprehension."""
+
+    def __init__(self, reader, bound):
+        self.reader, self.bound = reader, bound
+
+    def name(self, name):
+        return self.reader.module_ids(name)
+
+    def column(self, name, index):
+        found = self.bound.get(name)
+        return found.columns.get(index, set()) if found is not None else set()
+
+
 class _Reader:
     """One hook module's rule ids. A value it cannot place holds no id, so a call that passes one names nothing, as
     a variable always has (test_a_variable_rule_names_no_id). Read from the source with `ast`, never from rule_audit."""
@@ -1153,10 +1207,12 @@ class _Reader:
         self.tree = ast.parse(source)
         bindings = _module_bindings(self.tree)
         self.constants, self.tables = _constants(bindings), _tables(bindings)
+        self.literal_tuples = _literal_tuples(bindings)
         self.defs = {n.name: n for n in self.tree.body if isinstance(n, ast.FunctionDef)}
         self.chains = _scope_chains(self.tree)
         self.base_dir = base_dir
         self.siblings = self._sibling_imports()
+        self.module = _Chain(self, ())
         self.sibling_cache, self.scope_names = {}, {}
 
     def _sibling_imports(self):
@@ -1182,16 +1238,28 @@ class _Reader:
     def module_ids(self, name):
         return {self.constants[name]} if name in self.constants else set()
 
-    def ids(self, expr, lookup):
-        """The ids an expression can hold: a string literal, what `lookup` gives a name, the branches of a
-        conditional, or a sibling module's constant. Anything else holds none."""
+    def bound_in(self, scope):
+        """{name: _Bound} for the names a def or lambda binds, read once per scope."""
+        if id(scope) not in self.scope_names:
+            self.scope_names[id(scope)] = self._bind(scope)
+        return self.scope_names[id(scope)]
+
+    def ids(self, expr, ctx):
+        """The ids an expression can hold, read through `ctx`: a string literal, a name, a conditional's branches,
+        the element of min() or max() over a tuple-valued name, or a sibling module's constant. Anything else holds
+        none."""
         text = _text(expr)
         if text is not None:
             return {text}
         if isinstance(expr, ast.Name):
-            return lookup(expr.id)
+            return ctx.name(expr.id)
         if isinstance(expr, ast.IfExp):
-            return self.ids(expr.body, lookup) | self.ids(expr.orelse, lookup)
+            return self.ids(expr.body, ctx) | self.ids(expr.orelse, ctx)
+        if isinstance(expr, ast.Subscript) and isinstance(expr.slice, ast.Constant) \
+                and isinstance(expr.slice.value, int) and isinstance(expr.value, ast.Call) \
+                and isinstance(expr.value.func, ast.Name) and expr.value.func.id in ("min", "max") \
+                and len(expr.value.args) == 1 and isinstance(expr.value.args[0], ast.Name):
+            return ctx.column(expr.value.args[0].id, expr.slice.value)
         if isinstance(expr, ast.Attribute) and isinstance(expr.value, ast.Name):
             const = self.sibling_constant(expr.value.id, expr.attr)
             return {const} if const is not None else set()
@@ -1202,65 +1270,68 @@ class _Reader:
         found = set()
         for row in table.values:
             if isinstance(row, ast.Tuple) and len(row.elts) > index:
-                found |= self.ids(row.elts[index], self.module_ids)
+                found |= self.ids(row.elts[index], self.module)
         return found
 
-    def assign(self, target, value, names):
+    def comprehension_columns(self, comp):
+        """{index: ids} for a comprehension whose element is a tuple: an element that is the loop variable over a
+        literal tuple of the module holds that tuple's strings in its column."""
+        columns = {}
+        if not isinstance(comp.elt, ast.Tuple):
+            return columns
+        for gen in comp.generators:
+            if isinstance(gen.target, ast.Name) and isinstance(gen.iter, ast.Name) \
+                    and gen.iter.id in self.literal_tuples:
+                for index, elt in enumerate(comp.elt.elts):
+                    if isinstance(elt, ast.Name) and elt.id == gen.target.id:
+                        columns.setdefault(index, set()).update(self.literal_tuples[gen.iter.id])
+        return columns
+
+    def assign(self, target, value, bound, ctx):
         """Add the ids that a value gives each name it is assigned to."""
         if isinstance(target, ast.Name):
-            names[target.id] |= self.ids(value, self.module_ids)
+            bound[target.id].ids |= self.ids(value, ctx)
         elif isinstance(target, (ast.Tuple, ast.List)):
             if isinstance(value, (ast.Tuple, ast.List)) and len(value.elts) == len(target.elts):
                 for t, v in zip(target.elts, value.elts):
-                    self.assign(t, v, names)
+                    self.assign(t, v, bound, ctx)
             elif isinstance(value, ast.Subscript) and isinstance(value.value, ast.Name) \
                     and value.value.id in self.tables:
                 for index, t in enumerate(target.elts):
                     if isinstance(t, ast.Name):
-                        names[t.id] |= self.column(self.tables[value.value.id], index)
-
-    def names_of(self, scope):
-        """{name: ids} for the names a def or lambda binds. A parameter, a loop target, an import, or a name unpacked
-        from a call binds a name to no id, so that name shadows a module constant of the same name."""
-        if id(scope) not in self.scope_names:
-            self.scope_names[id(scope)] = self._bind(scope)
-        return self.scope_names[id(scope)]
+                        bound[t.id].ids |= self.column(self.tables[value.value.id], index)
 
     def _bind(self, scope):
-        names, args = {}, scope.args
+        bound, args = {}, scope.args
         for arg in args.posonlyargs + args.args + args.kwonlyargs + [args.vararg, args.kwarg]:
             if arg is not None:
-                names[arg.arg] = set()
+                bound[arg.arg] = _Bound()
         own = _own_nodes(scope)
         for node in own:
             if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
-                names.setdefault(node.name, set())
+                bound.setdefault(node.name, _Bound())
             elif isinstance(node, (ast.Import, ast.ImportFrom)):
                 for alias in node.names:
-                    names.setdefault((alias.asname or alias.name).split(".")[0], set())
+                    bound.setdefault((alias.asname or alias.name).split(".")[0], _Bound())
             elif isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store):
-                names.setdefault(node.id, set())
+                bound.setdefault(node.id, _Bound())
             elif isinstance(node, ast.ExceptHandler) and node.name:
-                names.setdefault(node.name, set())
+                bound.setdefault(node.name, _Bound())
+        # The first pass reads each name bound to a comprehension, so that the second pass can read its columns.
+        for node in own:
+            if isinstance(node, ast.Assign) and isinstance(node.value, (ast.ListComp, ast.GeneratorExp)):
+                for target in node.targets:
+                    if isinstance(target, ast.Name):
+                        bound[target.id].columns.update(self.comprehension_columns(node.value))
+        local = _Local(self, bound)
         for node in own:
             if isinstance(node, ast.Assign):
                 for target in node.targets:
-                    self.assign(target, node.value, names)
+                    self.assign(target, node.value, bound, local)
             elif isinstance(node, (ast.AnnAssign, ast.NamedExpr)) and isinstance(node.target, ast.Name) \
                     and node.value is not None:
-                names[node.target.id] |= self.ids(node.value, self.module_ids)
-        return names
-
-    def lookup_from(self, chain):
-        """The ids a name holds at a call inside the defs `chain` lists: the nearest def that binds it, else the
-        module's own constant."""
-        def lookup(name):
-            for scope in chain:
-                names = self.names_of(scope)
-                if name in names:
-                    return names[name]
-            return self.module_ids(name)
-        return lookup
+                bound[node.target.id].ids |= self.ids(node.value, local)
+        return bound
 
     def forwarded(self, helper):
         """The position of the helper's parameter that one of its guard calls takes as the rule, or None."""
@@ -1290,7 +1361,7 @@ class _Reader:
             if isinstance(node, ast.Call):
                 at = self.rule_position(node)
                 if at is not None and len(node.args) > at:
-                    ids |= self.ids(node.args[at], self.lookup_from(self.chains.get(id(node), ())))
+                    ids |= self.ids(node.args[at], _Chain(self, self.chains.get(id(node), ())))
             elif isinstance(node, ast.FunctionDef) and node.name == "diff_rule":
                 for stmt in node.body:  # a docstring is a bare string statement: it names no id
                     if not (isinstance(stmt, ast.Expr) and isinstance(stmt.value, ast.Constant)):
