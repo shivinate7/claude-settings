@@ -6,8 +6,10 @@ extra kind may not replace a layout kind. The mark that the repo has rolled out 
 its own key in that file, "rolled-out": true (ROLLED_OUT; decision one-layout-every-repo). An
 extras file with no mark does not roll a repo out. Its keys that are not about folder placement
 ("waiting-page", "waiting-page-colour", "waiting-page-icon", "kind", "caution", "visibility",
-"devices", "shared-resources", "roadmap", "record-branch", "artifacts") read whenever the file exists (`has_extras()`). The
+"devices", "shared-resources", "roadmap", "record-branch", "artifacts", "typecheck") read whenever the file exists (`has_extras()`). The
 "artifacts" key is the registry of the claude.ai artifacts the repo holds (`artifacts()`, decision waiting-data-in-repo).
+The "typecheck" key lists the checks that the PostToolUse watch runs after an edit (`typecheck()`, `match_globs()`,
+hooks/repo_typecheck.py).
 The "waiting-page" key holds the URL of the repo's waiting page (`waiting_page()`, skill waiting-page), the fallback after
 the registry entry whose role is "waiting-page";
 "waiting-page-colour" (#rrggbb) and "waiting-page-icon" (an .svg or .png path in the repo) are its
@@ -598,6 +600,59 @@ def mockup_home_problem(root, file, home=None):
 def folders(root, flag):
     """The paths in `root` of each kind whose `flag` (record, listed) is true, in layout order."""
     return tuple(path(root, name) for name, kind in kinds(root).items() if kind.get(flag))
+
+
+TYPECHECK = "typecheck"  # the extras key: a list of {globs, command, timeout}, the checks to run after an edit
+
+
+def typecheck(root):
+    """The "typecheck" entries of the repo at `root`: [{globs, command, timeout}] in file order, [] when the repo
+    has no extras file or no key. `globs` are repo-relative patterns for `match_globs`; `command` is an argv run
+    from the repo root with no shell; `timeout` is a positive number of seconds. LayoutError on any other shape,
+    so the hook that reads it stays silent rather than run a command it cannot trust."""
+    found = _repo_keys(root).get(TYPECHECK)
+    if found is None:
+        return []
+    where = "%s: %s" % (_extras(root), TYPECHECK)
+    if not isinstance(found, list):
+        raise LayoutError("%s is not a list" % where)
+    entries = []
+    for item in found:
+        if not isinstance(item, dict):
+            raise LayoutError("%s: an entry is not an object" % where)
+        globs, command, timeout = item.get("globs"), item.get("command"), item.get("timeout")
+        if not isinstance(globs, list) or not globs or not all(isinstance(g, str) and g for g in globs):
+            raise LayoutError("%s: \"globs\" is not a non-empty list of strings" % where)
+        for glob in globs:
+            _safe(glob, where)
+        if not isinstance(command, list) or not command or not all(isinstance(c, str) and c for c in command):
+            raise LayoutError("%s: \"command\" is not a non-empty list of strings" % where)
+        if isinstance(timeout, bool) or not isinstance(timeout, (int, float)) or timeout <= 0:
+            raise LayoutError("%s: \"timeout\" is not a positive number" % where)
+        entries.append({"globs": list(globs), "command": list(command), "timeout": timeout})
+    return entries
+
+
+def _glob_regex(glob):
+    """The regex for one glob: `*` and `?` stay inside a folder name, and a `**` folder holds zero or more folders."""
+    parts = glob.replace("\\", "/").split("/")
+    last = len(parts) - 1
+    out = []
+    for i, part in enumerate(parts):
+        if part == "**":
+            out.append(".*" if i == last else "(?:[^/]+/)*")
+            continue
+        out.append("".join("[^/]*" if c == "*" else "[^/]" if c == "?" else re.escape(c) for c in part))
+        if i != last:
+            out.append("/")
+    return re.compile("".join(out) + r"\Z")
+
+
+def match_globs(rel_path, globs):
+    """True when the repo-relative `rel_path` matches any of `globs`. `**` matches zero or more folders, which
+    neither fnmatch nor PurePath.match does. Backslashes in the path read as slashes."""
+    path = rel_path.replace("\\", "/")
+    return any(_glob_regex(glob).match(path) for glob in globs)
 
 
 if __name__ == "__main__":

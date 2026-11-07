@@ -4,14 +4,15 @@
 Modes:
 - PostToolUse: After a write or shell call, checks the agent model cap in each watched
   settings file. Reverts a cap change that the guard did not ask about, or a raise past its
-  expiry time.
+  expiry time. Also runs the repo's declared typecheck after an edit (hooks/repo_typecheck.py).
 - Stop: At the end of the turn, checks the agent model cap in each watched settings file.
   Reverts a cap change that no tool call explains, or a raise past its expiry time.
 
 Claude Code runs this file after every tool call that matches, and again when the turn ends:
 
   stdin  : one JSON object with tool_name, tool_input, cwd and session_id
-  stdout : one JSON object with a systemMessage, or nothing
+  stdout : one JSON object with a systemMessage and, after a failed typecheck, decision "block" with
+           its reason, or nothing
   exit   : always 0
 
 It reads a content hash of the file, never the shell text (decision `predicate-is-the-act`).
@@ -735,6 +736,26 @@ def _test_clock():
     return clock
 
 
+def _typecheck(payload):
+    """The repo typecheck report for this payload, or None. hooks/repo_typecheck.py holds the logic."""
+    try:
+        import repo_typecheck
+        return repo_typecheck.run(payload)
+    except Exception:
+        return None  # a fault in the typecheck never changes the cap watch
+
+
+def _emit(report, messages) -> None:
+    """Print the one stdout object: a block holding the typecheck report, the cap watch's systemMessage, or both."""
+    out = {}
+    if report:
+        out.update({"decision": "block", "reason": report})
+    if messages:
+        out["systemMessage"] = " ".join(messages)
+    if out:
+        print(json.dumps(out))
+
+
 def main() -> None:
     try:
         payload = json.load(sys.stdin)
@@ -742,20 +763,22 @@ def main() -> None:
         sys.exit(0)  # fail open on unreadable input
     if not isinstance(payload, dict):
         sys.exit(0)  # fail open on a payload that is not an object
+    report = _typecheck(payload)  # before the fast exit: an unchanged settings file says nothing about this edit
     try:
         fast_exit = unchanged(payload, _test_clock())
     except Exception:
         fast_exit = False  # a fault in the fast check runs the full check, never a silent exit
     if fast_exit:
+        _emit(report, [])
         sys.exit(0)
     try:
         _load_guard()
         guard._force_utf8_streams()
         messages = sweep(payload, _test_clock())
     except Exception:
+        _emit(report, [])
         sys.exit(0)  # fail open on a watch defect
-    if messages:
-        print(json.dumps({"systemMessage": " ".join(messages)}))
+    _emit(report, messages)
     sys.exit(0)
 
 
