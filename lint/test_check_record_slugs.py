@@ -55,25 +55,25 @@ FIXED_DEBT_TEXT = "# Long slug\n\nWhat. A gap with a fix named.\n\nFix: none —
 STEP_JSON = '{"id": "alpha-beta"}\n'  # a roadmap step file: the check reads only that it exists
 ALPHA_STEP = "roadmap/data/steps/alpha.json"  # a step file on HEAD only, not on origin/roadmap
 NOTES_HEAD = "# Notes: findings too unlikely to hit to be debts\n"
+PINNED_TODAY = "2026-11-07"  # the date the suite pins: the check reads FIXED_TODAY, so no case reads the clock
 OLD_NOTE = "- old-note: an old gap. Fix: pin the base.\n"  # a line the base holds before the branch
-NEW_NO_FIX = "- new-note: a gap nobody named.\n"
-NEW_PROSE_FIX = "- new-note: a gap. Fix: pin the base.\n"
-NEW_ABSENT_STEP = "- new-note: a gap. Fix: step:alpha\n"
-NEW_BAD_REASON = "- new-note: a gap. Fix: none — someday. Until: 2026-11-20\n"
-NEW_VALID_STEP = "- new-note: a gap. Fix: step:alpha-beta\n"
-NEW_VALID_NONE = "- new-note: a gap. Fix: none — owner decides. Until: 2026-11-20\n"
+NEW_NO_FIX = "- new-note: a gap nobody named. Seen: %s x1.\n" % PINNED_TODAY
+NEW_PROSE_FIX = "- new-note: a gap. Seen: %s x1. Fix: pin the base.\n" % PINNED_TODAY
+NEW_ABSENT_STEP = "- new-note: a gap. Seen: %s x1. Fix: step:alpha\n" % PINNED_TODAY
+NEW_BAD_REASON = "- new-note: a gap. Seen: %s x1. Fix: none — someday. Until: 2026-11-20\n" % PINNED_TODAY
+NEW_VALID_STEP = "- new-note: a gap. Seen: %s x1. Fix: step:alpha-beta\n" % PINNED_TODAY
+NEW_VALID_NONE = "- new-note: a gap. Seen: %s x1. Fix: none — owner decides. Until: 2026-11-20\n" % PINNED_TODAY
 VALID_LINES = (  # every form that passes: a step, both dashes, and each reason on the list
-    "- step-note: a gap. Fix: step:alpha-beta\n",
-    "- owner-note: a gap. Fix: none — owner decides. Until: 2026-11-20\n",
-    "- mac-note: a gap. Fix: none -- needs the Mac. Until: 2026-11-20\n",
-    "- rare-note: a gap. Fix: none — rare and harmless. Until: 2026-11-20\n",
+    "- step-note: a gap. Seen: %s x1. Fix: step:alpha-beta\n" % PINNED_TODAY,
+    "- owner-note: a gap. Seen: %s x1. Fix: none — owner decides. Until: 2026-11-20\n" % PINNED_TODAY,
+    "- mac-note: a gap. Seen: %s x1. Fix: none -- needs the Mac. Until: 2026-11-20\n" % PINNED_TODAY,
+    "- rare-note: a gap. Seen: %s x1. Fix: none — rare and harmless. Until: 2026-11-20\n" % PINNED_TODAY,
 )
 NEW_DEBT = "debts/new-debt.md"  # a new debt file with no Fix line
 FIXED_DEBT = "debts/fixed-debt.md"  # a new debt file with a valid Fix line, beside NEW_DEBT in the same diff
 DEBT_NO_FIX = "# New debt\n\nWhat. A gap with no fix named.\n"
-PINNED_TODAY = "2026-11-07"  # the date the suite pins: the check reads FIXED_TODAY, so no case reads the clock
-KEPT_NOTE = "- kept-note: a gap. Fix: already fixed on main 1a2b3c4\n"  # a bullet with a new-grammar Fix
-THIRD_NOTE = "- third-note: a gap. Fix: already fixed on main 1a2b3c4\n"
+KEPT_NOTE = "- kept-note: a gap. Seen: %s x1. Fix: already fixed on main 1a2b3c4\n" % PINNED_TODAY  # a bullet with a new-grammar Fix
+THIRD_NOTE = "- third-note: a gap. Seen: %s x1. Fix: already fixed on main 1a2b3c4\n" % PINNED_TODAY
 
 FAR_PAST_DAYS = 3650  # a Seen this many days old is past any window the decision allows, so it is red whatever the window is
 RUN_FOLDER = None  # made in setUpModule, so an import leaks no folder
@@ -533,14 +533,14 @@ class RecordSlugsTests(unittest.TestCase):
         self.put(DEBT_NOTES, NOTES_HEAD)
         self.commit_base()
         sha = self.base_sha()[:7]
-        self.put(DEBT_NOTES, NOTES_HEAD + "- fixed-note: a gap. Fix: already fixed on main %s\n" % sha)
+        self.put(DEBT_NOTES, NOTES_HEAD + "- fixed-note: a gap. Seen: %s x1. Fix: already fixed on main %s\n" % (day(0), sha))
         self.commit_change()
         self.assert_passes()
 
     def test_already_fixed_on_main_with_no_sha_is_red(self):
         self.put(DEBT_NOTES, NOTES_HEAD)
         self.commit_base()
-        self.put(DEBT_NOTES, NOTES_HEAD + "- fixed-note: a gap. Fix: already fixed on main\n")
+        self.put(DEBT_NOTES, NOTES_HEAD + "- fixed-note: a gap. Seen: %s x1. Fix: already fixed on main\n" % day(0))
         self.commit_change()
         rc, out = self.lint()
         self.assertEqual(rc, 1, out)
@@ -550,7 +550,7 @@ class RecordSlugsTests(unittest.TestCase):
         # 1234567 is hex, so the grammar reads it. No commit on main has it, so the Fix names no real commit.
         self.put(DEBT_NOTES, NOTES_HEAD)
         self.commit_base()
-        self.put(DEBT_NOTES, NOTES_HEAD + "- fixed-note: a gap. Fix: already fixed on main 1234567\n")
+        self.put(DEBT_NOTES, NOTES_HEAD + "- fixed-note: a gap. Seen: %s x1. Fix: already fixed on main 1234567\n" % day(0))
         self.commit_change()
         rc, out = self.lint()
         self.assertEqual(rc, 1, out)
@@ -563,7 +563,7 @@ class RecordSlugsTests(unittest.TestCase):
         self.put("branch-only.txt", "only on the branch\n")
         self.commit_change()
         sha = self.head_sha()
-        self.put(DEBT_NOTES, NOTES_HEAD + "- fixed-note: a gap. Fix: already fixed on main %s\n" % sha)
+        self.put(DEBT_NOTES, NOTES_HEAD + "- fixed-note: a gap. Seen: %s x1. Fix: already fixed on main %s\n" % (day(0), sha))
         self.commit_change()
         rc, out = self.lint()
         self.assertEqual(rc, 1, out)
@@ -578,7 +578,7 @@ class RecordSlugsTests(unittest.TestCase):
         self.git("add", "-A")
         self.git("commit", "-q", "-m", "later")
         self.git("update-ref", "refs/remotes/origin/main", "HEAD")
-        self.put(DEBT_NOTES, NOTES_HEAD + "- fixed-note: a gap. Fix: already fixed on main %s\n" % older)
+        self.put(DEBT_NOTES, NOTES_HEAD + "- fixed-note: a gap. Seen: %s x1. Fix: already fixed on main %s\n" % (day(0), older))
         self.commit_change()
         self.assert_passes()
 
@@ -607,7 +607,7 @@ class RecordSlugsTests(unittest.TestCase):
         # A reason the coordinator added: a Windows run. Red until the check lists it.
         self.put(DEBT_NOTES, NOTES_HEAD)
         self.commit_base()
-        self.put(DEBT_NOTES, NOTES_HEAD + "- win-note: a gap. Fix: none — needs a Windows run Until: 2026-11-20\n")
+        self.put(DEBT_NOTES, NOTES_HEAD + "- win-note: a gap. Seen: %s x1. Fix: none — needs a Windows run Until: 2026-11-20\n" % day(0))
         self.commit_change()
         self.assert_passes()
 
@@ -616,9 +616,10 @@ class RecordSlugsTests(unittest.TestCase):
         self.put(DEBT_NOTES, NOTES_HEAD)
         self.commit_base()
         self.put(DEBT_NOTES, NOTES_HEAD
-                 + "- quote-ok: Don't drop the lock (see #12 and /* the old block */). Fix: none — owner decides. "
-                   "Until: 2026-11-20\n"
-                 + "- quote-prose: Don't drop the lock, see // the old block. Fix: pin the base.\n")
+                 + ("- quote-ok: Don't drop the lock (see #12 and /* the old block */). Seen: %s x1. "
+                    "Fix: none — owner decides. Until: 2026-11-20\n") % day(0)
+                 + ("- quote-prose: Don't drop the lock, see // the old block. Seen: %s x1. "
+                    "Fix: pin the base.\n") % day(0))
         self.commit_change()
         rc, out = self.lint()
         self.assertEqual(rc, 1, out)
@@ -638,7 +639,7 @@ class RecordSlugsTests(unittest.TestCase):
         # Only a step line reads origin/roadmap. With no origin/roadmap ref, these two forms still pass.
         self.put(DEBT_NOTES, NOTES_HEAD)
         self.commit_base()
-        fixed = "- fixed-note: a gap. Fix: already fixed on main %s\n" % self.base_sha()[:7]
+        fixed = "- fixed-note: a gap. Seen: %s x1. Fix: already fixed on main %s\n" % (day(0), self.base_sha()[:7])
         self.put(DEBT_NOTES, NOTES_HEAD + NEW_VALID_NONE + fixed)
         self.commit_change()
         self.assert_passes()
@@ -685,27 +686,27 @@ class RecordSlugsTests(unittest.TestCase):
     # today. Today is PINNED_TODAY, injected through FIXED_TODAY. An already-fixed line needs no date.
 
     def test_none_note_without_until_is_red(self):
-        self.add_note("- new-note: a gap. Fix: none — owner decides\n")
+        self.add_note("- new-note: a gap. Seen: %s x1. Fix: none — owner decides\n" % day(0))
         rc, out = self.lint()
         self.assertEqual(rc, 1, out)
         self.assertTrue(self.failed_about(out, "new-note", DEBT_NOTES), out)
 
     def test_none_note_with_a_past_until_is_red(self):
-        self.add_note("- new-note: a gap. Fix: none — owner decides. Until: 2026-11-06\n")
+        self.add_note("- new-note: a gap. Seen: %s x1. Fix: none — owner decides. Until: 2026-11-06\n" % day(0))
         rc, out = self.lint()
         self.assertEqual(rc, 1, out)
         self.assertTrue(self.failed_about(out, "new-note", DEBT_NOTES), out)
 
     def test_none_note_dated_today_passes(self):
-        self.add_note("- new-note: a gap. Fix: none — owner decides. Until: 2026-11-07\n")
+        self.add_note("- new-note: a gap. Seen: %s x1. Fix: none — owner decides. Until: 2026-11-07\n" % day(0))
         self.assert_passes()
 
     def test_none_note_at_the_cap_passes(self):
-        self.add_note("- new-note: a gap. Fix: none — owner decides. Until: 2026-12-07\n")  # 30 days after today
+        self.add_note("- new-note: a gap. Seen: %s x1. Fix: none — owner decides. Until: 2026-12-07\n" % day(0))  # 30 days after today
         self.assert_passes()
 
     def test_none_note_past_the_cap_is_red(self):
-        self.add_note("- new-note: a gap. Fix: none — owner decides. Until: 2026-12-08\n")  # 31 days after today
+        self.add_note("- new-note: a gap. Seen: %s x1. Fix: none — owner decides. Until: 2026-12-08\n" % day(0))  # 31 days after today
         rc, out = self.lint()
         self.assertEqual(rc, 1, out)
         self.assertTrue(self.failed_about(out, "new-note", DEBT_NOTES), out)
@@ -724,7 +725,7 @@ class RecordSlugsTests(unittest.TestCase):
         self.put(DEBT_NOTES, NOTES_HEAD + old)
         self.commit_base()
         sha = self.base_sha()[:7]  # a real commit on origin/main, so the new line's Fix is valid
-        self.put(DEBT_NOTES, NOTES_HEAD + old + "- new-note: a gap. Fix: already fixed on main %s\n" % sha)
+        self.put(DEBT_NOTES, NOTES_HEAD + old + "- new-note: a gap. Seen: %s x1. Fix: already fixed on main %s\n" % (day(0), sha))
         self.commit_change()
         self.assert_passes()
 
