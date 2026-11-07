@@ -12635,7 +12635,20 @@ class ReviewGuardRefusal(ReviewGuardEnv):
         self.assertEqual(rc, 0, out + err)
         self.assertEqual(parse_text(self, posted_body(self, out))["kind"], "delete-only")
 
-class ReviewGuardFiles(ReviewGuardEnv):
+class DecisionLayout:
+    """The one home of the decisions folder for a case: use_layout(rolled) writes the extras file of the checkout (rolled out: docs/decisions) or
+    removes it (legacy: decisions), and asserts the folder layout.path gives before the case reads it."""
+
+    def use_layout(self, rolled):
+        extras = os.path.join(self.co, ".claude", "layout-extras.json")
+        if rolled:
+            put(extras, json.dumps({"kinds": {}, "rolled-out": True}))
+        elif os.path.exists(extras):
+            os.remove(extras)
+        folder = "docs/decisions" if rolled else "decisions"
+        self.assertEqual(layout.path(self.co, "decisions"), folder, "the fixture did not set the decisions folder")
+
+class ReviewGuardFiles(DecisionLayout, ReviewGuardEnv):
     """The guard and the kind read the files through the real Host.pr_files, so a rename counts by both its names and every page of the list is
     read. These cases run merge over PullsHost in count mode: its gh answers the REST routes that the real Host reads."""
 
@@ -12664,6 +12677,18 @@ class ReviewGuardFiles(ReviewGuardEnv):
 
     def test_a_docs_only_rename_of_md_files_prints_the_record(self):
         rc, out, err = self.run_record([pr_file("docs/new.md", previous="docs/old.md", status="renamed")], kind="docs-only")
+        self.assertEqual(rc, 0, out + err)
+        self.assertEqual(parse_text(self, posted_body(self, out))["kind"], "docs-only")
+
+    def test_a_docs_only_rename_out_of_the_decisions_folder_refuses_by_its_old_name(self):
+        # coordinator ruling 2026-11-07 15:17 CST: a decision renamed out counts, and its old name is the path that names it
+        self.use_layout(True)
+        self.assert_refused(*self.run_record([pr_file("docs/moved.md", previous="docs/decisions/x.md", status="renamed")], kind="docs-only"),
+                            "docs/decisions/x.md", holds="decision record")
+
+    def test_a_docs_only_rename_out_of_the_debts_folder_prints_the_record(self):
+        self.use_layout(True)
+        rc, out, err = self.run_record([pr_file("docs/moved.md", previous="docs/debts/x.md", status="renamed")], kind="docs-only")
         self.assertEqual(rc, 0, out + err)
         self.assertEqual(parse_text(self, posted_body(self, out))["kind"], "docs-only")
 
@@ -12757,7 +12782,18 @@ class ReviewGuardHostFiles(unittest.TestCase):
 
 class ReviewGuardCost(ReviewEnv):
     """`--review-record` without --fix-check makes exactly two gh reads, the pull request and then its files list. They are counted at the one seam
-    every call goes through (PullsHost in count mode), as ReviewedList counts its reads."""
+    every call goes through (PullsHost in count mode), as ReviewedList counts its reads. A delete-only record makes the same two: its decision check
+    reads the layout from the checkout, never from gh."""
+
+    def test_a_delete_only_record_makes_two_gh_reads(self):
+        for guard in ("no", "yes"):
+            with self.subTest(guard=guard):
+                host = PullsHost([batch_pull(7, REVIEW_HEAD)], {}, count_gh=True, files=[pr_file("docs/a.md", status="removed")])
+                rc, out, err = self.run_args("7", "--review-record", "--head", REVIEW_HEAD, "--kind", "delete-only", "--guard", guard,
+                                             "--round", "1:reviewer:sonnet:PASS", host=host)
+                self.assertEqual(rc, 0, out + err)
+                self.assertEqual(parse_text(self, posted_body(self, out))["guard"], guard)
+                self.assertEqual(host.gh_calls, ["pulls/7", "pulls/7/files"], "the delete-only record's gh reads, in order")
 
     def test_the_record_makes_two_gh_reads(self):
         for guard in ("no", "yes"):
@@ -12769,23 +12805,10 @@ class ReviewGuardCost(ReviewEnv):
                 self.assertEqual(parse_text(self, posted_body(self, out))["guard"], guard)
                 self.assertEqual(host.gh_calls, ["pulls/7", "pulls/7/files"], "the record's gh reads, in order")
 
-class DecisionLayout:
-    """The one home of the decisions folder for a case: use_layout(rolled) writes the extras file of the checkout (rolled out: docs/decisions) or
-    removes it (legacy: decisions), and asserts the folder layout.path gives before the case reads it."""
-
-    def use_layout(self, rolled):
-        extras = os.path.join(self.co, ".claude", "layout-extras.json")
-        if rolled:
-            put(extras, json.dumps({"kinds": {}, "rolled-out": True}))
-        elif os.path.exists(extras):
-            os.remove(extras)
-        folder = "docs/decisions" if rolled else "decisions"
-        self.assertEqual(layout.path(self.co, "decisions"), folder, "the fixture did not set the decisions folder")
-
 class ReviewDecisionKind(DecisionLayout, ReviewGuardEnv):
-    """A docs-only record over a decision record is refused on Kind: a decision record is a ruling, so its change takes Kind normal with one round
-    (decision docs-only-prs-skip-review). A decision record counts when the diff adds, modifies or renames it under the decisions folder; a removed
-    path does not. A layout that cannot be read stops the record, and is never a pass. Each refusal has a control beside it."""
+    """A docs-only or delete-only record over a decision record is refused on Kind: a decision record is a ruling, so its change takes Kind normal
+    with one round (decision docs-only-prs-skip-review). A decision record counts under any status, removed included: withdrawing a ruling changes
+    it (coordinator ruling 2026-11-07 15:17 CST). A layout that cannot be read stops the record, and is never a pass. Each refusal has a control beside it."""
 
     def test_docs_only_over_a_decision_record_refuses(self):
         self.use_layout(True)
@@ -12802,60 +12825,74 @@ class ReviewDecisionKind(DecisionLayout, ReviewGuardEnv):
         self.host.changed = [("docs/decisions/y.md", "renamed"), ("docs/x.md", "removed")]
         self.assert_refused(*self.run_args(*self.review_argv("docs-only")), "docs/decisions/y.md", holds="decision record")
 
-    def test_docs_only_with_an_unreadable_layout_refuses(self):
+    def test_a_record_over_an_unreadable_layout_refuses_as_docs_only_or_delete_only(self):
         extras = os.path.join(self.co, ".claude", "layout-extras.json")
-        self.host.changed = [("docs/debts/a.md", "added")]
-        for text in ("{", json.dumps({"rolled-out": True})):  # not JSON, and JSON with no kinds object
-            with self.subTest(extras=text):
-                put(extras, text)
-                with self.assertRaises(layout.LayoutError):  # the fixture: the layout really cannot be read
-                    layout.path(self.co, "decisions")
-                rc, out, err = self.run_args(*self.review_argv("docs-only"))
-                self.assertEqual(rc, 1, "a docs-only record passed over an unreadable layout:\n" + out + err)
-                self.assertEqual(out, "", "a record was printed over an unreadable layout")
-                self.assertIn("layout-extras.json", err)
+        for kind, changed in (("docs-only", ("docs/debts/a.md", "added")), ("delete-only", ("docs/debts/a.md", "removed"))):
+            self.host.changed = [changed]
+            for text in ("{", json.dumps({"rolled-out": True})):  # not JSON, and JSON with no kinds object
+                with self.subTest(kind=kind, extras=text):
+                    put(extras, text)
+                    with self.assertRaises(layout.LayoutError):  # the fixture: the layout really cannot be read
+                        layout.path(self.co, "decisions")
+                    rc, out, err = self.run_args(*self.review_argv(kind))
+                    self.assertEqual(rc, 1, f"a {kind} record passed over an unreadable layout:\n" + out + err)
+                    self.assertEqual(out, "", f"a {kind} record was printed over an unreadable layout")
+                    self.assertIn("layout-extras.json", err)
 
-    def test_normal_over_a_decision_record_is_accepted(self):
+    def test_normal_over_a_decision_record_of_any_status_is_accepted(self):
         for rolled, path in ((True, "docs/decisions/x.md"), (False, "decisions/x.md")):
-            with self.subTest(rolled=rolled):
-                self.use_layout(rolled)
-                self.host.changed = [(path, "modified")]
-                rc, out, err = self.run_args(*self.review_argv("normal"))
-                self.assertEqual(rc, 0, out + err)
-                self.assertEqual(parse_text(self, posted_body(self, out))["kind"], "normal")
+            for status in ("modified", "removed"):  # a control: the Kind check of a removed record is docs-only and delete-only only
+                with self.subTest(rolled=rolled, status=status):
+                    self.use_layout(rolled)
+                    self.host.changed = [(path, status)]
+                    rc, out, err = self.run_args(*self.review_argv("normal"))
+                    self.assertEqual(rc, 0, out + err)
+                    self.assertEqual(parse_text(self, posted_body(self, out))["kind"], "normal")
 
-    def test_a_decision_record_shown_as_removed_or_renamed_out_is_accepted(self):
+    def test_a_decision_record_removed_or_renamed_out_refuses_docs_only(self):
+        # re-pointed from "is accepted": coordinator ruling 2026-11-07 15:17 CST, a decision removed or renamed out also counts
         self.use_layout(True)
         for changed in ([("docs/decisions/x.md", "removed")], [("docs/moved.md", "renamed"), ("docs/decisions/x.md", "removed")]):
             with self.subTest(changed=changed):
                 self.host.changed = changed
-                rc, out, err = self.run_args(*self.review_argv("docs-only"))
-                self.assertEqual(rc, 0, out + err)
-                self.assertEqual(parse_text(self, posted_body(self, out))["kind"], "docs-only")
+                self.assert_refused(*self.run_args(*self.review_argv("docs-only")), "docs/decisions/x.md", holds="decision record")
 
-    def test_docs_only_over_a_debt_is_accepted(self):
+    def test_delete_only_over_a_removed_decision_record_refuses(self):
+        # coordinator ruling 2026-11-07 15:17 CST: delete-only is no exception, because withdrawing a ruling changes it
+        for rolled, path in ((True, "docs/decisions/x.md"), (False, "decisions/x.md")):
+            with self.subTest(rolled=rolled):
+                self.use_layout(rolled)
+                self.host.changed = [(path, "removed")]
+                self.assert_refused(*self.run_args(*self.review_argv("delete-only")), path, holds="decision record")
+
+    def test_a_debt_is_accepted_as_docs_only_or_as_removed_for_delete_only(self):
         self.use_layout(True)
-        self.host.changed = [("docs/debts/a.md", "added")]
-        rc, out, err = self.run_args(*self.review_argv("docs-only"))
-        self.assertEqual(rc, 0, out + err)
-        self.assertEqual(parse_text(self, posted_body(self, out))["kind"], "docs-only")
+        for kind, changed in (("docs-only", ("docs/debts/a.md", "added")), ("delete-only", ("docs/debts/a.md", "removed"))):
+            with self.subTest(kind=kind):
+                self.host.changed = [changed]
+                rc, out, err = self.run_args(*self.review_argv(kind))
+                self.assertEqual(rc, 0, out + err)
+                self.assertEqual(parse_text(self, posted_body(self, out))["kind"], kind)
 
 class ReviewDecisionPaths(DecisionLayout, Env):
-    """merge.decision_paths(root, files): the sorted paths of the markdown records that a diff adds, modifies, renames or copies under the decisions
-    folder of `root` (layout.path). A removed path is skipped; any other status counts, so a status the diff reads as new cannot slip past. An
-    empty diff names nothing."""
+    """merge.decision_paths(root, files): the sorted paths of the markdown records that a diff adds, modifies, renames, copies or removes under the
+    decisions folder of `root` (layout.path). Every status counts, removed included: a withdrawn ruling changes the decision set (coordinator ruling
+    2026-11-07 15:17 CST). An empty diff names nothing."""
 
     def test_an_empty_diff_names_no_record(self):
         self.use_layout(True)
         self.assertEqual(review_fn(self, "decision_paths")(self.co, []), [])
 
-    def test_names_each_added_modified_renamed_or_copied_record_sorted_and_skips_removed(self):
+    def test_names_each_record_of_any_status_under_the_folder_sorted(self):
+        # re-pointed from "skips removed": coordinator ruling 2026-11-07 15:17 CST, a removed decision record counts too
         self.use_layout(True)
         files = [("docs/decisions/b.md", "modified"), ("docs/decisions/a.md", "added"), ("docs/decisions/old.md", "removed"),
                  ("docs/decisions/moved.md", "renamed"), ("docs/decisions/copy.md", "copied"), ("docs/decisions/sub/c.md", "added"),
                  ("docs/decisions/note.txt", "added"), ("docs/debts/d.md", "added"), ("decisions/x.md", "added")]
         self.assertEqual(review_fn(self, "decision_paths")(self.co, files),
-                         ["docs/decisions/a.md", "docs/decisions/b.md", "docs/decisions/copy.md", "docs/decisions/moved.md", "docs/decisions/sub/c.md"])
+                         ["docs/decisions/a.md", "docs/decisions/b.md", "docs/decisions/copy.md", "docs/decisions/moved.md",
+                          "docs/decisions/old.md", "docs/decisions/sub/c.md"],
+                         "a removed decision record was not named")
 
     def test_a_legacy_checkout_counts_the_decisions_folder_it_has(self):
         self.use_layout(False)
