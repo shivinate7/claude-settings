@@ -19,6 +19,15 @@ the source moved on and the mutation no longer proves anything. That must fail
 loudly, not be skipped, so it exits 1 with an error line instead of counting the
 mutation either way.
 
+SHARDS. `MUTATE_SHARD=<i>/<n>` runs leg i of n (CI: checks-mutate-guard, -2, -3). Every anchor, required-name and path
+check still reads the whole list, so a stale or colliding mutant fails whichever leg holds it. A leg runs only its own
+mutants and only the clean-layout controls of its own targets (`shard_entries`). Each mutant is in exactly one leg: a target
+other than guard stays whole in one leg, filled in order of first appearance, and guard's mutants go round-robin. Unset runs
+every mutant. A malformed value exits 1 with an ERROR line before any suite runs.
+
+THE GUARD SUITES. The guard, override and simlease targets run every hooks/test_guard*.py, one process per file, test_guard.py
+first (`guard_suites`). A FAIL line from any file is red for the mutant, so a case in test_guard_load_os.py can kill one.
+
 The mutants run IN PARALLEL, one suite process per mutant, up to the CPU count at once
 (MUTATE_JOBS overrides). Each mutant gets its own guard copy and its own config directory, so
 the runs share nothing but the read-only fixture tree the suite builds under its own temp
@@ -51,7 +60,9 @@ catcher suite: `CAUGHT`, `MISS` or `UNKNOWN` per defect. With `--base`, each id 
 
 import contextlib
 import functools
+import glob
 import os
+import re
 import shutil
 import signal
 import subprocess
@@ -64,7 +75,17 @@ import _nowindow  # noqa: E402  the one home of a no-window child start (hooks/_
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 GUARD = os.path.join(HERE, "guard.py")
-SUITE = os.path.join(HERE, "test_guard.py")
+
+
+def guard_suites(folder=HERE):
+    """Every test_guard*.py in `folder`, sorted, test_guard.py first. The guard, override and simlease targets run
+    all of them, so a case in any one file can kill a mutant, and a new test_guard_*.py joins the run with no edit here."""
+    found = sorted(glob.glob(os.path.join(folder, "test_guard*.py")))
+    first = os.path.join(folder, "test_guard.py")
+    return [first] + [path for path in found if path != first] if first in found else found
+
+
+SUITE = guard_suites()
 WATCH = os.path.join(HERE, "config_watch.py")
 WATCH_SUITE = os.path.join(HERE, "test_config_watch.py")
 DECISION = os.path.join(HERE, "decision_watch.py")
@@ -2870,13 +2891,29 @@ def tests_for_main(argv) -> int:
     return 0
 
 
-def run_suite(suite: str, variable: str, copy_path: str, config_dir: str, only=None):
-    """Run one fixture suite against one mutated copy. Return (exit code, FAIL lines, case lines,
-    ERROR lines from `mutate_shared.diagnostic_lines`).
+def run_suite(suite, variable: str, copy_path: str, config_dir: str, only=None):
+    """Run one fixture suite, or a list of them (`guard_suites`), against one mutated copy: one process per file, one
+    after another. Return (exit code, FAIL lines, case lines, ERROR lines from `mutate_shared.diagnostic_lines`). The
+    exit code is the first nonzero one, so a red file in any position fails the run, and the lists join every file's.
 
     The case lines are one per case run, passed or failed: `mutate_shared.staged_suite` reads them
     to know whether stage 1 ran the required case."""
+    suites = [suite] if isinstance(suite, str) else list(suite)
+    code, red, ran, seen = 0, [], [], []
+    for path in suites:
+        file_code, file_red, file_ran, file_seen = run_suite_file(path, variable, copy_path, config_dir, only)
+        code = code or file_code
+        red += file_red
+        ran += file_ran
+        seen += file_seen
+    return code, red, ran, seen
+
+
+def run_suite_file(suite: str, variable: str, copy_path: str, config_dir: str, only=None):
+    """Run one suite file once. `run_suite` joins these."""
     env = dict(os.environ)
+    for shard in ("MUTATE_SHARD", "GUARD_SHARD", "MERGE_SHARD"):
+        env.pop(shard, None)  # a leg's own value must not shard the suites its mutants run
     env.pop("GUARD_UNDER_TEST", None)
     env.pop("WATCH_UNDER_TEST", None)
     env.pop("DECISION_WATCH_UNDER_TEST", None)
@@ -2927,6 +2964,34 @@ def mutation_parts(entry):
     required = entry[4] if len(entry) > 4 else None
     only_on = entry[5] if len(entry) > 5 else None
     return label, old, new, target, required, only_on
+
+
+def parse_shard(value):
+    """Read MUTATE_SHARD: (i, n) for `i/n` with 1 <= i <= n, None for unset or blank. Anything else raises ValueError."""
+    if value is None or not value.strip():
+        return None
+    match = re.fullmatch(r"([0-9]+)/([0-9]+)", value.strip())
+    if match is None or not 1 <= int(match.group(1)) <= int(match.group(2)):
+        raise ValueError("MUTATE_SHARD=%r is not <i>/<n> with 1 <= i <= n" % value)
+    return int(match.group(1)), int(match.group(2))
+
+
+def shard_entries(entries, i, n):
+    """The entries of leg i of n (1-based): each entry in exactly one leg. A target other than guard stays whole in one leg,
+    by its place among those targets in order of first appearance, modulo n. Guard's entries go round-robin by their place
+    among guard's. A leg then pays only for the controls of the targets it holds (`run_controls`)."""
+    other_targets = []
+    legs, guard_seen = [], 0
+    for entry in entries:
+        target = mutation_parts(entry)[3]
+        if target == "guard":
+            legs.append(guard_seen % n + 1)
+            guard_seen += 1
+        else:
+            if target not in other_targets:
+                other_targets.append(target)
+            legs.append(other_targets.index(target) % n + 1)
+    return [entry for entry, leg in zip(entries, legs) if leg == i]
 
 
 def lay_out_guard_reads(root: str) -> None:
@@ -3097,6 +3162,11 @@ def main() -> int:
         return known_defects_main(sys.argv[1:])
     if "--tests-for" in sys.argv[1:]:
         return tests_for_main(sys.argv[1:])
+    try:
+        shard = parse_shard(os.environ.get("MUTATE_SHARD"))
+    except ValueError as error:
+        print("ERROR %s" % error)
+        return 1
     sources = {}
     for name, (path, _suite, _variable, _stem) in TARGETS.items():
         with open(path, encoding="utf-8") as handle:
@@ -3183,10 +3253,13 @@ def main() -> int:
                     ignore=shutil.ignore_patterns("__pycache__"))
     lay_out_guard_reads(work)  # the override copies' ../merge, ../actions and ../skills
 
+    entries = MUTATIONS if shard is None else shard_entries(MUTATIONS, *shard)
+    if shard is not None:
+        print("shard %d/%d: %d of %d mutants" % (shard[0], shard[1], len(entries), len(MUTATIONS)))
     try:
         return mutate_shared.run_mutants(
-            MUTATIONS, lambda entry: run_mutant(sources, work, entry),
-            controls=run_controls(sources, work, MUTATIONS), control_of=lambda entry: mutation_parts(entry)[3])
+            entries, lambda entry: run_mutant(sources, work, entry),
+            controls=run_controls(sources, work, entries), control_of=lambda entry: mutation_parts(entry)[3])
     finally:
         shutil.rmtree(work, ignore_errors=True)
 
