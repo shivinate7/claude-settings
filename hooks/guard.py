@@ -4932,6 +4932,13 @@ def judge(payload) -> None:
             unseen = page_design_hit(item_writes, tool_input, cwd)
             if unseen:
                 refuse(tool, "deny", "page-item-design", unseen[0], unseen[1])
+            # The stored line a context str_replace leaves, read from the session transcript (rule task-why-cited).
+            import question_form
+            decision, matched = question_form.stored_why_writes(item_writes, tool_input, payload.get("transcript_path"))
+            if decision == "deny":
+                refuse(tool, "deny", "task-why-cited", question_form.PAGE_REASONS["task-why-cited"], matched)
+            if decision == "ask":
+                refuse(tool, "ask", "task-why-cited", question_form.ASK_REASONS["task-why-cited"], matched)
         return
 
     if tool == PAGE_TOOL:

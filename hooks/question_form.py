@@ -804,13 +804,16 @@ WHY_CITED_REASON = ("A Why yours line that says a session cannot do the act must
 WHY_CAUSES = {"none": "no cite", "undated": "undated measured", "works": "works row", "dead": "unknown id"}
 
 
-def _report_guard():
-    """lint/report_guard.py, loaded here and not at import, as hooks/reply_judge.py loads it."""
+def _lint_module(name):
+    """A module of lint/, loaded here and not at import, as hooks/reply_judge.py loads report_guard."""
     lint = os.path.join(HERE, "..", "lint")
     if lint not in sys.path:
         sys.path.append(lint)
-    import report_guard
-    return report_guard
+    return __import__(name)
+
+
+def _report_guard():
+    return _lint_module("report_guard")
 
 
 def why_cited_hit(text: str, fragments: bool = False) -> str:
@@ -864,6 +867,123 @@ def task_str_replace_hit(entry):
         return "task-names-check", "context edit that removes the Why yours line"
     cause = why_cited_hit(new, fragments=True)
     return (WHY_RULE, cause) if cause else PASS
+
+
+# The stored line (rule task-why-cited, decision claims-carry-backing, part (v)). A str_replace on `context` carries
+# the edit, not the item, so the line it leaves is read from this session's transcript: no hook can reach the store.
+# Source 1 is the newest get of the item whose version is the write's `if_version`. Source 2 is this session's own
+# successful earlier write to the item that returned that version, replayed onto the text it was pinned to. Either
+# kind of record counts from a subagent too. Anything not found asks, never allows. Cost: one transcript open per
+# page context str_replace, no other read, no process start. The write result's shape (one line, {"id", "version"})
+# is unmeasured against a real transcript, so a result with no parseable version asks.
+WHY_ASK_REASON = ("This edit changes the Why yours line of a stored item, and the guard cannot read the stored text "
+                  "to judge the line it leaves. Read the item first (an ArtifactData get of items/<doc_id> with no "
+                  "out_dir), then write the edit pinned to the version that get returned (if_version), so the guard "
+                  "can find the text in this session. (decision claims-carry-backing, part (v), rule task-why-cited)")
+
+
+def _apply_edit(text, old, new, replace_all):
+    """`text` with old_str replaced: every match with replace_all, else only when old_str occurs exactly once. None
+    when it does not apply."""
+    count = text.count(old) if old else 0
+    if count == 0 or (count > 1 and not replace_all):
+        return None
+    return text.replace(old, new) if replace_all else text.replace(old, new, 1)
+
+
+def _stored_texts(records, url, doc_id):
+    """{str(version): the item's context text} for each version of items/<doc_id> on `url` that this session's
+    transcript shows: from a get (feedback_guard._reads_items, so a read with out_dir does not count, and
+    local_time._records, which reads the document lines), then from a successful write whose result carries one
+    version, replayed onto the text its if_version names. Records run oldest first, so a newer text wins."""
+    import feedback_guard
+    import local_time
+    transcript = _lint_module("_transcript")
+    results = {b["tool_use_id"]: b for r in records if r.get("type") == "user"
+               for b in transcript.tool_results(r) if isinstance(b.get("tool_use_id"), str)}
+    texts = {}
+    for rec in records:
+        if rec.get("type") != "assistant":
+            continue
+        for use in transcript.tool_uses(rec):
+            tool_input, result = use.get("input"), results.get(use.get("id"))
+            if (not isinstance(tool_input, dict) or not str(use.get("name") or "").startswith(transcript.ARTIFACT_DATA)
+                    or tool_input.get("url") != url or tool_input.get("doc_id") != doc_id
+                    or tool_input.get("collection") != WAITING_ITEMS
+                    or not isinstance(result, dict) or result.get("is_error") is True):
+                continue
+            action = tool_input.get("action")
+            shown = [(v, d) for i, v, d in local_time._records(result.get("content")) if i == doc_id and v is not None]
+            if action == "get":
+                if feedback_guard._reads_items(use):
+                    for version, data in shown:
+                        if data is not None:
+                            texts[str(version)] = str(data.get("context") or "")
+            elif action in ITEM_OPS and len(shown) == 1:
+                texts_after = _replayed(action, tool_input, texts)
+                if texts_after is not None:
+                    texts[str(shown[0][0])] = texts_after
+    return texts
+
+
+def _replayed(action, tool_input, texts):
+    """The context text a successful write leaves, or None when it cannot be known: a set carries the whole item, an
+    update or a str_replace is pinned to the version whose text it changes."""
+    data = tool_input.get("data")
+    if action == "set":
+        return str(data.get("context") or "") if isinstance(data, dict) else None
+    pinned = tool_input.get("if_version")
+    base = texts.get(str(pinned)) if pinned is not None else None
+    if base is None:
+        return None
+    if action == "update":
+        return str(data["context"]) if isinstance(data, dict) and isinstance(data.get("context"), str) else base
+    if action == "str_replace":
+        if tool_input.get("field") != "context":
+            return base
+        return _apply_edit(base, str(tool_input.get("old_str") or ""), str(tool_input.get("new_str") or ""),
+                           tool_input.get("replace_all") is True)
+    return None
+
+
+def stored_why_hit(entry, url, transcript_path):
+    """(decision, matched) for one str_replace on `context` of a waiting-page item: ("deny", cause) when the Why yours
+    line the edit leaves in the stored text gives a capability reason its cite does not back (the cause as
+    why_cited_hit gives it), ("ask", reason) when the stored text cannot be found or the edit does not apply to it,
+    else ("", ""). The transcript is opened once, before any other read, and is the only file read."""
+    if not transcript_path:
+        return "ask", "unreadable transcript"
+    try:
+        records = _lint_module("_transcript").read_transcript(transcript_path)
+    except (OSError, ValueError):
+        return "ask", "unreadable transcript"
+    version = entry.get("if_version")
+    if version is None:
+        return "ask", "no if_version"
+    texts = _stored_texts(records, url, entry.get("doc_id"))
+    if not texts:
+        return "ask", "no matching read"
+    stored = texts.get(str(version))
+    if stored is None:
+        return "ask", "version mismatch"
+    applied = _apply_edit(stored, str(entry.get("old_str") or ""), str(entry.get("new_str") or ""),
+                          entry.get("replace_all") is True)
+    if applied is None:
+        return "ask", "old_str not found"
+    cause = why_cited_hit(applied)
+    return ("deny", cause) if cause else PASS
+
+
+def stored_why_writes(writes, tool_input, transcript_path):
+    """The first (decision, matched) that stored_why_hit gives for a str_replace on `context` in `writes` (the
+    page's item writes), else ("", ""). A call with no such write opens nothing."""
+    url = tool_input.get("url")
+    for op, entry in writes:
+        if op == "str_replace" and entry.get("field") == "context":
+            hit = stored_why_hit(entry, url, transcript_path if isinstance(transcript_path, str) else "")
+            if hit[0]:
+                return hit
+    return PASS
 
 
 # ------------------------------------------------------------------ a page decision states the form
@@ -1385,6 +1505,8 @@ PAGE_REASONS = {"port-question": PORT_REASON, "uniform-pick": WIDENS_REASON, "pr
                 FORM_RULE: PAGE_FORM_REASON, STAKE_RULE: STAKE_REASON, "item-field-rendered": ITEM_FIELD_REASON,
                 DEPARTS_RULE: PAGE_DEPARTS_REASON,
                 "option-letter-keys": LETTER_KEYS_REASON, "rework-off-page": REWORK_REASON}
+# The asks, one table: guard.py prints an ask from here, as it prints a deny from PAGE_REASONS.
+ASK_REASONS = {WHY_RULE: WHY_ASK_REASON}
 CHAT_STAKE_REASON = ("A question is the owner's only when he can judge it. Write the Problem line as "
                      "\"Problem (<stake>): <the problem, and why it needs his word>\", where stake is one of %s. "
                      "(decision owner-judge-test, a decision reaches the owner only when he can judge it)"

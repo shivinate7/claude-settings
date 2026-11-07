@@ -226,9 +226,10 @@ def _strings(obj):
             yield from _strings(v)
 
 
-def _documents(response):
-    """The (doc_id, data) of each document in a get's text: a line that loads as a JSON object with a
-    dict `data`. Banner lines are not documents."""
+def _records(response):
+    """The (doc_id, version, data) of each document line in a get's or write's text: a line that loads as a JSON
+    object. `data` is the dict under "data", or None when the line has none (a write's result carries only the id
+    and the version). Banner lines are not documents."""
     for text in _strings(response):
         for ln in text.split("\n"):  # not splitlines(): U+2028 and U+0085 inside a note must not split it
             ln = ln.strip()
@@ -238,8 +239,16 @@ def _documents(response):
                 doc = json.loads(ln)
             except ValueError:
                 continue
-            if isinstance(doc, dict) and isinstance(doc.get("data"), dict):
-                yield doc.get("id"), doc["data"]
+            if isinstance(doc, dict):
+                yield doc.get("id"), doc.get("version"), doc["data"] if isinstance(doc.get("data"), dict) else None
+
+
+def _documents(response):
+    """The (doc_id, data) of each document in a get's text: a line that loads as a JSON object with a
+    dict `data`. Banner lines are not documents."""
+    for doc_id, _version, data in _records(response):
+        if data is not None:
+            yield doc_id, data
 
 
 def _at_clock(at):
