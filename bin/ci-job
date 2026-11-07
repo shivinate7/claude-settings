@@ -393,7 +393,7 @@ def pin_of(text):
 
 
 STALE_TREE = re.compile(r"[/\\]ci-job-pin-(\d+)-[^/\\]+[/\\]tree$")  # a pinned tree's path: its temp folder names the pid that owns it
-LIVE = []  # the step process now running: a SIGTERM ends it before the tree it runs in goes
+LIVE = []  # the bin/verdict process of the step now running: a SIGTERM ends it, not the step it started
 
 
 def pid_alive(pid):
@@ -479,8 +479,9 @@ def pinned_tree(sha, clone):
 
 
 def end_on_sigterm(stack):
-    """Make a SIGTERM end the run through its `finally`s, as merge.py's release_on_signals does: the running step is ended
-    first, a second signal is ignored, and the handler is put back when `stack` closes. Off the main thread nothing changes."""
+    """Make a SIGTERM end the run through its `finally`s, as merge.py's release_on_signals does: the running step's
+    bin/verdict is ended first, but the step it started gets no signal and may keep running. A second signal is ignored,
+    and the handler is put back when `stack` closes. Off the main thread nothing changes."""
     def stop(sig, frame):
         signal.signal(sig, signal.SIG_IGN)
         for proc in LIVE:
