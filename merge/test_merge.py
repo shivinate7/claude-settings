@@ -10146,10 +10146,14 @@ LINKS_WORKFLOW = "\n".join([
 ]) + "\n"
 
 
-def main_run(id_, conclusion, status="completed", name="checks", event="push", path=".github/workflows/checks.yml", sha=None, run_attempt=1):
-    """One run on main, as `GET actions/runs` lists it. Its head is `sha`, or a sha of its own id. A re-run keeps its id, at `run_attempt` 2 or more."""
-    return {"id": id_, "name": name, "path": path, "event": event, "status": status, "conclusion": conclusion if status == "completed" else None,
-            "head_sha": sha or f"{id_:040x}", "html_url": f"https://github.com/o/r/actions/runs/{id_}", "run_attempt": run_attempt}
+def main_run(id_, conclusion, status="completed", name="checks", event="push", path=".github/workflows/checks.yml", sha=None, run_attempt=1, created=None):
+    """One run on main, as `GET actions/runs` lists it. Its head is `sha`, or a sha of its own id. A re-run keeps its id, at `run_attempt` 2 or more.
+    `created` (a GitHub time) sets created_at, updated_at and run_started_at to that one instant, so each field a reader may use gives the same age."""
+    run = {"id": id_, "name": name, "path": path, "event": event, "status": status, "conclusion": conclusion if status == "completed" else None,
+           "head_sha": sha or f"{id_:040x}", "html_url": f"https://github.com/o/r/actions/runs/{id_}", "run_attempt": run_attempt}
+    if created is not None:
+        run.update(created_at=created, updated_at=created, run_started_at=created)
+    return run
 
 
 def main_job(name, conclusion, minutes=1):
@@ -10872,9 +10876,11 @@ N63_SHA = "476f456c" + "0" * 32  # head of #63, the pull request that merges
 P65_SHA = "b8416ca" + "1" * 33  # head of #65, which holds N63_SHA
 Q66_SHA = "c0ffee0" + "2" * 33  # head of #66, which does not hold N63_SHA
 
-def batch_pull(number, sha, base="main", draft=False, created_at="2026-10-01T00:00:00Z"):
-    """An open pull request as `pages("pulls")` lists it, with the fields batch_running reads and created_at, which the review list reads."""
-    return {"number": number, "draft": draft, "created_at": created_at, "base": {"ref": base}, "head": {"ref": "feat%d" % number, "sha": sha}}
+def batch_pull(number, sha, base="main", draft=False, created_at="2026-10-01T00:00:00Z", labels=()):
+    """An open pull request as `pages("pulls")` lists it, with the fields batch_running reads, created_at, which the review list reads, and the
+    names of its `labels`, as GitHub lists them."""
+    return {"number": number, "draft": draft, "created_at": created_at, "base": {"ref": base}, "head": {"ref": "feat%d" % number, "sha": sha},
+            "labels": [{"name": name} for name in labels]}
 
 def batch_run(name, status="in_progress", conclusion=None):
     """A check run of a head as `pages("commits/<sha>/check-runs")` lists it. Pending unless its status is completed."""
@@ -10890,9 +10896,14 @@ class PullsHost(merge.Host):
     `compare/<base>...<head>`, is keyed ("main", head sha) in the same map. `compare_error` answers every compare read;
     `base_compare_error` answers only the base branch's read."""
     def __init__(self, pulls, check_rows, pulls_error=None, required=("checks",), workflow_runs=None, ignore=None, compares=None, compare_error=None,
-                 base_compare_error=None, comments=(), comments_error=None, count_gh=False):
-        super().__init__(list(required), base="main", minute=60, pause=lambda s: None, ignore=ignore)
+                 base_compare_error=None, comments=(), comments_error=None, count_gh=False, now=None, events=None, events_error=None,
+                 main_runs=(), main_runs_error=None, jobs=None):
+        clock = (lambda: now) if now is not None else time.time  # a case that gives `now` fixes every age it reads
+        super().__init__(list(required), base="main", minute=60, now=clock, pause=lambda s: None, ignore=ignore)
         self.pulls, self.check_rows, self.pulls_error = pulls, check_rows, pulls_error
+        self.events, self.events_error = events or {}, events_error  # issue number -> its events, oldest first; `issues/<n>/events`
+        self.main_runs, self.main_runs_error = list(main_runs), main_runs_error  # the base branch's runs, newest first; `actions/runs`
+        self.jobs = jobs or {}  # run id -> its jobs; `actions/runs/<id>/jobs`
         self.comments, self.comments_error = list(comments), comments_error  # the repo-wide issue comments, oldest first
         self.workflow_runs = workflow_runs or {}  # sha -> the workflow runs `gh run list --commit <sha>` answers
         self.compares, self.compare_error, self.base_compare_error = compares or {}, compare_error, base_compare_error  # the (code, output) of a failed read
@@ -10906,11 +10917,16 @@ class PullsHost(merge.Host):
     def gh(self, args, cwd=None):
         if args[:2] == ["run", "list"]:
             return 0, json.dumps(self.workflow_runs.get(args[args.index("--commit") + 1], []))
+        route = args[1] if args[:1] == ["api"] else ""
+        if route.endswith("/actions/runs"):  # the base branch's run list, which the red-main check reads (Host.base_state), in either mode
+            self.gh_calls.append("actions/runs")
+            if self.main_runs_error:
+                return 1, self.main_runs_error
+            return 0, json.dumps({"total_count": len(self.main_runs), "workflow_runs": self.main_runs})
         if self.count_gh and args[0] == "api":
             rel = args[1].split("/", 3)[-1]  # repos/{owner}/{repo}/<rel>
             self.gh_calls.append(rel)
             return 0, self.answer(rel)
-        route = args[1] if args[:1] == ["api"] else ""
         m = re.search(r"/pulls/(\d+)$", route)
         if m:
             found = [d for d in self.pulls if d["number"] == int(m.group(1))]
@@ -10939,6 +10955,9 @@ class PullsHost(merge.Host):
             return json.dumps([{"check_runs": self.check_rows.get(m.group(1), [])}])
         if m:
             return json.dumps([{"statuses": []}])
+        ev = re.fullmatch(r"issues/(\d+)/events", rel)
+        if ev:
+            return json.dumps([self.events.get(int(ev.group(1)), [])])
         raise AssertionError("unexpected route: " + rel)
 
     def pages(self, rel, key=None, fields=None):
@@ -10959,6 +10978,14 @@ class PullsHost(merge.Host):
             return self.check_rows.get(m.group(1), [])
         if re.fullmatch(r"commits/[^/]+/status", rel):
             return []
+        ev = re.fullmatch(r"issues/(\d+)/events", rel)
+        if ev:
+            if self.events_error:
+                raise merge.Stop(self.events_error)
+            return self.events.get(int(ev.group(1)), [])
+        jobs = re.fullmatch(r"actions/runs/(\d+)/jobs", rel)
+        if jobs:
+            return self.jobs.get(int(jobs.group(1)), [])
         raise AssertionError("unexpected read: " + rel)
 
 class BatchRunningReads(unittest.TestCase):
@@ -11863,10 +11890,6 @@ def list_line(test, out, n):
     test.assertEqual(len(lines), 1, f"want one line for #{n}:\n" + out)
     return lines[0]
 
-def no_record_numbers(out):
-    """The pull request numbers named on the `no record:` line."""
-    return {int(m) for l in out.splitlines() if l.startswith("no record:") for m in re.findall(r"#(\d+)", l)}
-
 REVIEW_FIX_PASS = (REVIEW_OLD_HEAD, "reviewer", "haiku", "PASS")  # the parsed fix check tuple: reviewed head, role, model, verdict
 REVIEW_FIX_FAIL = (REVIEW_OLD_HEAD, "reviewer", "haiku", "FAIL")
 
@@ -12540,12 +12563,12 @@ class ReviewFixBase(ReviewEnv):
         self.assert_refused(rc, out, err)
 
 class ReviewedList(ReviewEnv):
-    """`merge --reviewed` over scripted reads. PullsHost serves the open pulls, the check runs of each head and the repo-wide comments. The
-    record parse, the newest-record rule and the states are the real code. Output: one line per open pull request whose newest record parses,
-    then one `no record:` line for the rest."""
+    """`merge --reviewed` over scripted reads. PullsHost serves the open pulls, the check runs of each head and the repo-wide comments, at the
+    fixed clock LEDGER_NOW. The record parse, the newest-record rule and the next act are the real code. Output: one line per open pull request
+    (`ReviewedLedger` has the rules), then the summary line."""
 
     def listing(self, pulls, comments=(), check_rows=None, **reads):
-        host = PullsHost(pulls, check_rows or {}, comments=comments, **reads)
+        host = PullsHost(pulls, check_rows or {}, comments=comments, now=LEDGER_NOW, **reads)
         rc, out, err = self.run_args("--reviewed", host=host)
         return host, rc, out, err
 
@@ -12553,56 +12576,53 @@ class ReviewedList(ReviewEnv):
         comments = [review_comment(1, 7, record_text(rounds=("Round 1: reviewer, sonnet, FAIL",))), review_comment(2, 7, record_text(rounds=REVIEW_PASS))]
         host, rc, out, err = self.listing([batch_pull(7, REVIEW_HEAD)], comments)
         self.assertEqual(rc, 0, out + err)
-        self.assertRegex(list_line(self, out, 7), rf"^#7 feat7 {REVIEW_HEAD[:9]} done: ")
+        self.assertEqual(list_line(self, out, 7), "#7 feat7 batch 6h")
 
-    def test_a_record_for_an_older_head_is_stale(self):
+    def test_a_record_for_an_older_head_is_lane_round_two(self):
         comments = [review_comment(1, 7, record_text(rounds=REVIEW_PASS, head=REVIEW_OLD_HEAD))]
-        host, rc, out, err = self.listing([batch_pull(7, REVIEW_HEAD)], comments)
+        host, rc, out, err = self.listing([batch_pull(7, REVIEW_HEAD, created_at="2026-10-02T00:00:00Z")], comments)
         self.assertEqual(rc, 0, out + err)
-        self.assertRegex(list_line(self, out, 7), rf"^#7 feat7 {REVIEW_HEAD[:9]} stale: ")
+        self.assertEqual(list_line(self, out, 7), "#7 feat7 lane round 2 6h")
 
-    def test_a_pr_with_no_record_is_named_on_the_no_record_line(self):
+    def test_a_pr_with_no_record_has_no_next_act_and_is_red(self):
         comments = [review_comment(1, 7, record_text(rounds=REVIEW_PASS))]
         host, rc, out, err = self.listing([batch_pull(7, REVIEW_HEAD), batch_pull(8, REVIEW_OLD_HEAD)], comments)
-        self.assertEqual(rc, 0, out + err)
-        self.assertIn(8, no_record_numbers(out), out)
-        self.assertFalse([l for l in out.splitlines() if l.startswith("#8 ")], out)
-        list_line(self, out, 7)
+        self.assertEqual(rc, 1, out + err)
+        self.assertEqual(list_line(self, out, 7), "#7 feat7 batch 6h")
+        self.assertRegex(list_line(self, out, 8), r"^#8 feat8 NO NEXT ACT \d+h RED$")
+        self.assertNotIn("no record:", out)
 
     def test_a_comment_without_the_marker_is_not_a_record(self):
         comments = [review_comment(1, 7, record_text(rounds=REVIEW_PASS)), review_comment(2, 7, "LGTM")]
         host, rc, out, err = self.listing([batch_pull(7, REVIEW_HEAD)], comments)
         self.assertEqual(rc, 0, out + err)
-        self.assertRegex(list_line(self, out, 7), r"done: ")
+        self.assertEqual(list_line(self, out, 7), "#7 feat7 batch 6h")
 
     def test_a_record_on_a_pr_that_is_not_open_is_not_listed(self):
         host, rc, out, err = self.listing([batch_pull(7, REVIEW_HEAD)], [review_comment(1, 99, record_text(n=99, rounds=REVIEW_PASS))])
-        self.assertEqual(rc, 0, out + err)
+        self.assertEqual(rc, 1, out + err)  # #7 has no record of its own
         self.assertNotIn("99", out)
-        self.assertEqual(no_record_numbers(out), {7}, out)
+        self.assertRegex(list_line(self, out, 7), r"^#7 feat7 NO NEXT ACT \d+h RED$")
 
-    def test_a_draft_is_listed_with_no_ci_read(self):
+    def test_a_draft_is_listed_with_no_head_read(self):
         host, rc, out, err = self.listing([batch_pull(9, REVIEW_HEAD, draft=True)], [review_comment(1, 9, record_text(n=9, rounds=REVIEW_PASS))])
         self.assertEqual(rc, 0, out + err)
-        self.assertRegex(list_line(self, out, 9), rf"^#9 feat9 {REVIEW_HEAD[:9]} done: .*; CI draft, no run$")
+        self.assertEqual(list_line(self, out, 9), "#9 feat9 batch 6h")
         self.assertEqual([rel for rel, _ in host.list_calls if rel.startswith("commits/")], [], "a draft's head was read")
 
-    def test_a_ready_pr_gets_its_live_ci_state(self):
+    def test_a_ready_pr_line_carries_no_ci_state_and_reads_no_head(self):
+        # The line names the act only. A red head run changes nothing here: merge reads CI when it merges.
         comments = [review_comment(1, 7, record_text(rounds=REVIEW_PASS))]
-        runs = ((batch_run("checks", "completed", "success"), "CI green$"),
-                (batch_run("checks", "in_progress"), "CI pending"),
-                (batch_run("checks", "completed", "failure"), "CI red"))
-        for run, want in runs:
-            with self.subTest(want=want):
-                host, rc, out, err = self.listing([batch_pull(7, REVIEW_HEAD)], comments, {REVIEW_HEAD: [run]})
-                self.assertEqual(rc, 0, out + err)
-                self.assertRegex(list_line(self, out, 7), want)
-                self.assertIn(f"commits/{REVIEW_HEAD}/check-runs", [rel for rel, _ in host.list_calls])
+        host, rc, out, err = self.listing([batch_pull(7, REVIEW_HEAD)], comments, {REVIEW_HEAD: [batch_run("checks", "completed", "failure")]})
+        self.assertEqual(rc, 0, out + err)
+        self.assertEqual(list_line(self, out, 7), "#7 feat7 batch 6h")
+        self.assertEqual([rel for rel, _ in host.list_calls if rel.startswith("commits/")], [], "a ready head was read")
 
     def test_the_list_reads_are_the_open_pulls_then_the_comments_once(self):
         pulls = [batch_pull(7, REVIEW_HEAD, created_at="2026-10-01T00:00:00Z"),
                  batch_pull(9, REVIEW_OLD_HEAD, draft=True, created_at="2026-10-05T00:00:00Z")]
-        host, rc, out, err = self.listing(pulls, [review_comment(1, 7, record_text(rounds=REVIEW_PASS))],
+        comments = [review_comment(1, 7, record_text(rounds=REVIEW_PASS)), review_comment(2, 9, record_text(n=9, rounds=REVIEW_PASS))]
+        host, rc, out, err = self.listing(pulls, comments,
                                           {REVIEW_HEAD: [batch_run("checks", "completed", "success")]})
         self.assertEqual(rc, 0, out + err)
         self.assertEqual([rel for rel, _ in host.list_calls if not rel.startswith("commits/")], ["pulls", "issues/comments"])
@@ -12611,14 +12631,14 @@ class ReviewedList(ReviewEnv):
         self.assertEqual((reads[0].get("since"), reads[0].get("sort"), reads[0].get("direction")),
                          ("2026-10-01T00:00:00Z", "created", "asc"), "since the oldest open pull request, oldest first")
 
-    def test_a_failed_pulls_read_exits_one_and_lists_nothing(self):
+    def test_a_failed_pulls_read_exits_two_and_lists_nothing(self):
         host, rc, out, err = self.listing([], pulls_error="reading pulls from GitHub failed")
-        self.assertEqual(rc, 1, out + err)
+        self.assertEqual(rc, 2, out + err)
         self.assertEqual(out.strip(), "", out)
 
-    def test_a_failed_comments_read_exits_one_and_lists_nothing(self):
+    def test_a_failed_comments_read_exits_two_and_lists_nothing(self):
         host, rc, out, err = self.listing([batch_pull(7, REVIEW_HEAD)], comments_error="reading issue comments from GitHub failed")
-        self.assertEqual(rc, 1, out + err)
+        self.assertEqual(rc, 2, out + err)
         self.assertEqual(out.strip(), "", out)
 
     def test_review_comments_reads_one_list_from_since_oldest_first(self):
@@ -12632,25 +12652,25 @@ class ReviewedList(ReviewEnv):
         self.assertEqual(len(reads), 1)
         self.assertEqual(reads[0].get("since"), "2026-10-01T00:00:00Z")
 
-    def test_one_ready_pr_with_a_record_costs_five_gh_calls(self):
-        # decision pr-review-record, the cost: the pull list, the comments, then for the head its check runs, its statuses and the branch protection
+    def test_one_ready_pr_with_a_record_costs_three_gh_calls(self):
+        # the cost: the pull list, the comments, then the base branch's run list, which the batch line reads. No head is read.
         comments = [review_comment(1, 7, record_text(rounds=REVIEW_PASS))]
         host, rc, out, err = self.listing([batch_pull(7, REVIEW_HEAD)], comments, {REVIEW_HEAD: [batch_run("checks", "completed", "success")]},
                                           count_gh=True)
         self.assertEqual(rc, 0, out + err)
-        self.assertRegex(list_line(self, out, 7), r"CI green$")
-        self.assertEqual(host.gh_calls, ["pulls", "issues/comments", f"commits/{REVIEW_HEAD}/check-runs", f"commits/{REVIEW_HEAD}/status",
-                                         "branches/main/protection/required_status_checks"])
+        self.assertEqual(list_line(self, out, 7), "#7 feat7 batch 6h")
+        self.assertEqual(host.gh_calls, ["pulls", "issues/comments", "actions/runs"])
 
     def test_a_draft_with_a_record_reads_no_head_checks(self):
         host, rc, out, err = self.listing([batch_pull(9, REVIEW_HEAD, draft=True)], [review_comment(1, 9, record_text(n=9, rounds=REVIEW_PASS))],
                                           count_gh=True)
         self.assertEqual(rc, 0, out + err)
-        self.assertEqual(host.gh_calls, ["pulls", "issues/comments"])
+        self.assertEqual(host.gh_calls, ["pulls", "issues/comments", "actions/runs"])
 
     def test_a_ready_pr_with_no_record_reads_no_head_checks(self):
+        # no batch line, so the base branch's run list is not read either
         host, rc, out, err = self.listing([batch_pull(8, REVIEW_HEAD)], [], count_gh=True)
-        self.assertEqual(rc, 0, out + err)
+        self.assertEqual(rc, 1, out + err)
         self.assertEqual(host.gh_calls, ["pulls", "issues/comments"])
 
     def test_a_newest_record_with_the_attribution_footer_lists_as_done(self):
@@ -12659,7 +12679,292 @@ class ReviewedList(ReviewEnv):
         newest = record_text(rounds=REVIEW_PASS).rstrip("\n") + REVIEW_FOOTER
         host, rc, out, err = self.listing([batch_pull(7, REVIEW_HEAD)], [review_comment(1, 7, older), review_comment(2, 7, newest)])
         self.assertEqual(rc, 0, out + err)
-        self.assertRegex(list_line(self, out, 7), rf"^#7 feat7 {REVIEW_HEAD[:9]} done: ")
+        self.assertEqual(list_line(self, out, 7), "#7 feat7 batch 6h")
+
+
+# The ledger: `merge --reviewed` gives every open pull request one next act, read from GitHub alone. Ages come from one clock, LEDGER_NOW, so no
+# case reads the real one. A limit is read by name from merge.py's one constant, PR_STATE_AGE_HOURS, and never retyped here.
+LEDGER_NOW = datetime(2026, 10, 2, 6, 0, 0, tzinfo=timezone.utc)  # the clock of every review-list case
+LEDGER_ACT = {"batch": "batch", "lane round": "lane round 2", "held": "waits on debt:await-held",
+              "parked": "waits on debt:await-parked", "replaced": "waits on debt:await-replaced"}  # the act each kind's fixture gives
+
+def ago(hours):
+    """A GitHub time `hours` before LEDGER_NOW, as created_at reads it. A negative count is a time after it."""
+    return (LEDGER_NOW - timedelta(hours=hours)).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+def age_limit(kind):
+    """The age limit of `kind` in hours, from merge.py's one constant. Before merge.py names it the limit reads 0, so a case fails on the line it
+    asserts, never on the missing name."""
+    return getattr(merge, "PR_STATE_AGE_HOURS", {}).get(kind, 0)
+
+def inside(kind):
+    """One hour inside the limit of `kind`: green."""
+    return age_limit(kind) - 1
+
+def past(kind):
+    """One hour past the limit of `kind`: red."""
+    return age_limit(kind) + 1
+
+def ledger_record(cid, n, hours, head=REVIEW_HEAD, **kw):
+    """The review record comment of pull request n, written `hours` before LEDGER_NOW. `kw` goes to record_text (rounds, kind, guard, net)."""
+    return review_comment(cid, n, record_text(n=n, head=head, **kw), created=ago(hours))
+
+def waits_comment(cid, n, hours, line):
+    """A plain comment on pull request n that holds `line`, written `hours` before LEDGER_NOW."""
+    return review_comment(cid, n, f"Holding this pull request.\n{line}\n", created=ago(hours))
+
+def label_event(name, hours):
+    """The `labeled` event of label `name`, applied `hours` before LEDGER_NOW, as the issue events list gives it."""
+    return {"event": "labeled", "label": {"name": name}, "created_at": ago(hours)}
+
+def kind_case(kind, n, hours, cid):
+    """-> (pulls, comments, events) for pull request n, whose act is LEDGER_ACT[kind] and whose age is `hours`. A batch has a done record. A lane
+    has a record for an older head, and its own open time equals the record's time, so both readings of a lane's age agree. A hold has its
+    label, a Waits on line, and its labeled event. `cid` is the comment id of the record or the Waits on line."""
+    if kind == "batch":
+        return [batch_pull(n, REVIEW_HEAD, created_at=ago(hours + 100))], [ledger_record(cid, n, hours, rounds=REVIEW_PASS)], {}
+    if kind == "lane round":
+        return ([batch_pull(n, REVIEW_HEAD, created_at=ago(hours))],
+                [ledger_record(cid, n, hours, head=REVIEW_OLD_HEAD, rounds=REVIEW_PASS)], {})
+    return ([batch_pull(n, REVIEW_HEAD, created_at=ago(hours + 100), labels=(kind,))],
+            [waits_comment(cid, n, hours, f"Waits on: debt:await-{kind}")], {n: [label_event(kind, hours)]})
+
+def summary_numbers(test, out):
+    """The two numbers on the last line of `out`, in order: the longest wait since a done record in hours, then the count with no next act."""
+    lines = [l for l in out.splitlines() if l.strip()]
+    numbers = [int(x) for x in re.findall(r"\d+", lines[-1])] if lines else []
+    test.assertEqual(len(numbers), 2, "the last line holds no two summary numbers:\n" + out)
+    return numbers
+
+class ReviewedLedger(ReviewEnv):
+    """`merge --reviewed` as a ledger. Every open pull request gets one next act, first match wins:
+    1. a review record for the live head that is done: batch;
+    2. an open record, or a record for another head: lane round n, n the next round owed;
+    3. a hold label (held, parked or replaced) and a `Waits on: debt:<slug>` or `Waits on: page:<item id>` line: waits on that id;
+    4. a base that is the head of another open pull request #N: blocked on #N;
+    5. else NO NEXT ACT.
+    A line is `#n <branch> <act> <age>` in whole hours, plus RED when the act is NO NEXT ACT or the age is past the act's limit. Blocked has no
+    limit. The last line holds the longest wait since a done record and the count with no next act. Exit 0 when nothing is red, 1 when something
+    is, 2 on a failed read, with nothing printed."""
+
+    def ledger(self, pulls, comments=(), events=None, main_runs=(), jobs=None, **reads):
+        """-> (host, rc, out, err) of `merge --reviewed` over the scripted reads, at LEDGER_NOW."""
+        host = PullsHost(pulls, {}, comments=comments, now=LEDGER_NOW, events=events, main_runs=main_runs, jobs=jobs, **reads)
+        rc, out, err = self.run_args("--reviewed", host=host)
+        return host, rc, out, err
+
+    # The four required reds: each fails on the line or the exit it asserts, on main.
+
+    def test_a_pr_with_no_record_and_no_label_has_no_next_act_and_is_red(self):
+        host, rc, out, err = self.ledger([batch_pull(7, REVIEW_HEAD, created_at=ago(2))])
+        self.assertEqual(rc, 1, out + err)
+        self.assertRegex(list_line(self, out, 7), r"^#7 feat7 NO NEXT ACT \d+h RED$")
+        self.assertEqual(summary_numbers(self, out)[1], 1, out)
+
+    def test_a_hold_label_with_no_waits_on_line_has_no_next_act_and_is_red(self):
+        pulls = [batch_pull(7, REVIEW_HEAD, created_at=ago(200), labels=("held",))]
+        host, rc, out, err = self.ledger(pulls, events={7: [label_event("held", 10)]})
+        self.assertEqual(rc, 1, out + err)
+        self.assertRegex(list_line(self, out, 7), r"^#7 feat7 NO NEXT ACT \d+h RED$")
+        self.assertEqual(summary_numbers(self, out)[1], 1, out)
+
+    def test_a_record_for_an_older_head_is_lane_round_n_with_n_the_next_round_owed(self):
+        pulls = [batch_pull(7, REVIEW_HEAD, created_at=ago(6)), batch_pull(9, REVIEW_HEAD, created_at=ago(4))]
+        comments = [ledger_record(1, 7, 6, head=REVIEW_OLD_HEAD, rounds=REVIEW_PASS),
+                    ledger_record(2, 9, 4, head=REVIEW_OLD_HEAD, rounds=("Round 1: reviewer, sonnet, FAIL", "Round 2: reviewer, sonnet, FAIL"))]
+        host, rc, out, err = self.ledger(pulls, comments)
+        self.assertEqual(rc, 0, out + err)
+        self.assertEqual(list_line(self, out, 7), "#7 feat7 lane round 2 6h")
+        self.assertEqual(list_line(self, out, 9), "#9 feat9 lane round 3 4h")
+
+    def test_a_done_batch_over_its_limit_is_red(self):
+        pulls, comments, events = kind_case("batch", 7, past("batch"), 1)
+        host, rc, out, err = self.ledger(pulls, comments, events=events)
+        self.assertEqual(rc, 1, out + err)
+        self.assertEqual(list_line(self, out, 7), f"#7 feat7 batch {past('batch')}h RED")
+
+    # The greens, with the control beside them.
+
+    def test_a_done_record_for_the_live_head_within_its_limit_is_batch_and_exits_zero(self):
+        pulls, comments, events = kind_case("batch", 7, inside("batch"), 1)
+        host, rc, out, err = self.ledger(pulls, comments, events=events)
+        self.assertEqual(rc, 0, out + err)
+        self.assertEqual(list_line(self, out, 7), f"#7 feat7 batch {inside('batch')}h")
+
+    def test_a_hold_with_a_waits_on_line_within_its_limit_waits_on_that_id(self):
+        pulls, comments, events = kind_case("held", 7, inside("held"), 1)
+        host, rc, out, err = self.ledger(pulls, comments, events=events)
+        self.assertEqual(rc, 0, out + err)
+        self.assertEqual(list_line(self, out, 7), f"#7 feat7 waits on debt:await-held {inside('held')}h")
+
+    def test_a_pr_whose_base_is_another_open_head_is_blocked_on_that_pr(self):
+        pulls = [batch_pull(7, REVIEW_HEAD, created_at=ago(50)), batch_pull(8, REVIEW_OLD_HEAD, base="feat7", created_at=ago(40))]
+        host, rc, out, err = self.ledger(pulls, [ledger_record(1, 7, 3, rounds=REVIEW_PASS)])
+        self.assertEqual(rc, 0, out + err)
+        self.assertEqual(list_line(self, out, 7), "#7 feat7 batch 3h")
+        self.assertRegex(list_line(self, out, 8), r"^#8 feat8 blocked on #7 \d+h$")
+
+    def test_control_a_listed_pr_is_one_line_led_by_its_number_and_branch(self):
+        # passes on main too: the fixture reaches the per-pull-request line, so the reds above fail on the act, not on setup
+        host, rc, out, err = self.ledger([batch_pull(7, REVIEW_HEAD, created_at=ago(50))], [ledger_record(1, 7, 2, rounds=REVIEW_PASS)])
+        self.assertEqual(rc, 0, out + err)
+        self.assertTrue(list_line(self, out, 7).startswith("#7 feat7 "), out)
+
+    def test_an_open_record_on_the_live_head_is_lane_round_n(self):
+        pulls = [batch_pull(7, REVIEW_HEAD, created_at=ago(3))]
+        host, rc, out, err = self.ledger(pulls, [ledger_record(1, 7, 3, rounds=("Round 1: reviewer, sonnet, FAIL",))])
+        self.assertEqual(rc, 0, out + err)
+        self.assertEqual(list_line(self, out, 7), "#7 feat7 lane round 2 3h")
+
+    # The limits: one hour inside is green, one hour past is red, for each kind, in one listing per kind.
+
+    def test_each_age_limit_is_green_one_hour_inside_and_red_one_hour_past(self):
+        for kind in LEDGER_ACT:
+            with self.subTest(kind=kind):
+                p7, c7, e7 = kind_case(kind, 7, inside(kind), 1)
+                p9, c9, e9 = kind_case(kind, 9, past(kind), 2)
+                host, rc, out, err = self.ledger(p7 + p9, c7 + c9, events={**e7, **e9})
+                self.assertEqual(rc, 1, out + err)
+                self.assertEqual(list_line(self, out, 7), f"#7 feat7 {LEDGER_ACT[kind]} {inside(kind)}h")
+                self.assertEqual(list_line(self, out, 9), f"#9 feat9 {LEDGER_ACT[kind]} {past(kind)}h RED")
+
+    def test_blocked_has_no_age_limit_so_an_old_blocked_pr_is_not_red(self):
+        pulls = [batch_pull(7, REVIEW_HEAD, created_at=ago(50)), batch_pull(8, REVIEW_OLD_HEAD, base="feat7", created_at=ago(24 * 400))]
+        host, rc, out, err = self.ledger(pulls, [ledger_record(1, 7, 3, rounds=REVIEW_PASS)])
+        self.assertEqual(rc, 0, out + err)
+        self.assertRegex(list_line(self, out, 8), r"^#8 feat8 blocked on #7 \d+h$")
+
+    # The precedence: the first match wins.
+
+    def test_a_done_record_beats_a_hold_label(self):
+        pulls = [batch_pull(7, REVIEW_HEAD, created_at=ago(200), labels=("held",))]
+        host, rc, out, err = self.ledger(pulls, [ledger_record(1, 7, 3, rounds=REVIEW_PASS)], events={7: [label_event("held", 10)]})
+        self.assertEqual(rc, 0, out + err)
+        self.assertEqual(list_line(self, out, 7), "#7 feat7 batch 3h")
+
+    def test_an_open_record_beats_a_hold_label_that_has_its_waits_on_line(self):
+        pulls = [batch_pull(7, REVIEW_HEAD, created_at=ago(3), labels=("held",))]
+        comments = [ledger_record(1, 7, 3, rounds=("Round 1: reviewer, sonnet, FAIL",)), waits_comment(2, 7, 2, "Waits on: debt:await-held")]
+        host, rc, out, err = self.ledger(pulls, comments, events={7: [label_event("held", 10)]})
+        self.assertEqual(rc, 0, out + err)
+        self.assertEqual(list_line(self, out, 7), "#7 feat7 lane round 2 3h")
+
+    def test_a_stale_record_beats_blocked_on(self):
+        pulls = [batch_pull(7, REVIEW_HEAD, created_at=ago(50)), batch_pull(8, REVIEW_HEAD, base="feat7", created_at=ago(4))]
+        comments = [ledger_record(1, 7, 3, rounds=REVIEW_PASS), ledger_record(2, 8, 4, head=REVIEW_OLD_HEAD, rounds=REVIEW_PASS)]
+        host, rc, out, err = self.ledger(pulls, comments)
+        self.assertEqual(rc, 0, out + err)
+        self.assertEqual(list_line(self, out, 8), "#8 feat8 lane round 2 4h")
+
+    # The Waits on id: its form is checked, never whether the debt or page exists.
+
+    def test_a_waits_on_id_is_checked_for_its_form_not_for_an_existing_record(self):
+        for line in ("Waits on: debt:no-such-debt-anywhere", "Waits on: page:ab12cd34"):
+            with self.subTest(line=line):
+                pulls = [batch_pull(7, REVIEW_HEAD, created_at=ago(200), labels=("held",))]
+                host, rc, out, err = self.ledger(pulls, [waits_comment(1, 7, 2, line)], events={7: [label_event("held", 10)]})
+                self.assertEqual(rc, 0, out + err)
+                self.assertEqual(list_line(self, out, 7), f"#7 feat7 waits on {line[len('Waits on: '):]} 10h")
+
+    def test_a_waits_on_id_of_a_bad_form_has_no_next_act(self):
+        import check_record_slugs  # the record slug limit, one home (lint/check_record_slugs.py)
+        too_long = "debt:" + "a" * (check_record_slugs.MAX + 1)
+        bad = ("Waits on: debt:", "Waits on: debt:Bad Slug", "Waits on: debt:Bad_Slug", f"Waits on: {too_long}",
+               "Waits on: page:", "Waits on: page:item.one", "Waits on: page:items/one",
+               "Waits on debt:merge-ledger-gap")  # the last one lacks the colon, so it is no Waits on line
+        for line in bad:
+            with self.subTest(line=line):
+                pulls = [batch_pull(7, REVIEW_HEAD, created_at=ago(200), labels=("held",))]
+                host, rc, out, err = self.ledger(pulls, [waits_comment(1, 7, 2, line)], events={7: [label_event("held", 10)]})
+                self.assertEqual(rc, 1, out + err)
+                self.assertRegex(list_line(self, out, 7), r"^#7 feat7 NO NEXT ACT \d+h RED$")
+
+    def test_a_waits_on_line_on_another_pr_does_not_count(self):
+        pulls = [batch_pull(7, REVIEW_HEAD, created_at=ago(200), labels=("held",)), batch_pull(9, REVIEW_OLD_HEAD, created_at=ago(5))]
+        host, rc, out, err = self.ledger(pulls, [waits_comment(1, 9, 2, "Waits on: debt:await-held")], events={7: [label_event("held", 10)]})
+        self.assertEqual(rc, 1, out + err)
+        self.assertRegex(list_line(self, out, 7), r"^#7 feat7 NO NEXT ACT \d+h RED$")
+
+    # The red-main line: a batch line says so, with the age of main's red run. The exit is not read here.
+
+    def test_a_batch_line_is_held_by_a_red_main_with_the_age_of_its_run(self):
+        push_base(self, {".github/workflows/checks.yml": MAIN_WORKFLOW})  # the workflow file the red-main check judges the run by
+        pulls, comments = [batch_pull(7, REVIEW_HEAD, created_at=ago(60))], [ledger_record(1, 7, 3, rounds=REVIEW_PASS)]
+        host, rc, out, err = self.ledger(pulls, comments, main_runs=[main_run(901, "failure", created=ago(5))],
+                                         jobs={901: [main_job("checks", "failure", 20)]})
+        self.assertRegex(list_line(self, out, 7), r"^#7 feat7 batch 3h held by main red 5h$")
+
+    def test_a_green_main_adds_no_held_text_to_a_batch_line(self):
+        push_base(self, {".github/workflows/checks.yml": MAIN_WORKFLOW})
+        pulls, comments = [batch_pull(7, REVIEW_HEAD, created_at=ago(60))], [ledger_record(1, 7, 3, rounds=REVIEW_PASS)]
+        host, rc, out, err = self.ledger(pulls, comments, main_runs=[main_run(901, "success", created=ago(5))],
+                                         jobs={901: [main_job("checks", "success", 20)]})
+        self.assertEqual(rc, 0, out + err)
+        self.assertEqual(list_line(self, out, 7), "#7 feat7 batch 3h")
+
+    # The failed reads: exit 2, nothing printed.
+
+    def test_a_failed_read_exits_two_and_prints_nothing(self):
+        cases = {
+            "events": dict(pulls=[batch_pull(8, REVIEW_HEAD, created_at=ago(200), labels=("held",))],
+                           comments=[waits_comment(1, 8, 2, "Waits on: debt:await-held")], events_error="reading issue events from GitHub failed"),
+            "the base's runs": dict(pulls=[batch_pull(7, REVIEW_HEAD, created_at=ago(60))], comments=[ledger_record(1, 7, 3, rounds=REVIEW_PASS)],
+                                    main_runs_error="reading actions/runs from GitHub failed"),
+        }
+        for name, kw in cases.items():
+            with self.subTest(read=name):
+                host, rc, out, err = self.ledger(**kw)
+                self.assertEqual(rc, 2, out + err)
+                self.assertEqual(out.strip(), "", out)
+
+    # The summary, and the gold state: every age 0 and no next act reads 0 0.
+
+    def test_the_summary_gives_the_longest_done_wait_and_the_count_of_no_next_act(self):
+        pulls = [batch_pull(7, REVIEW_HEAD, created_at=ago(100)), batch_pull(8, REVIEW_OLD_HEAD, created_at=ago(30)),
+                 batch_pull(9, REVIEW_HEAD, created_at=ago(100))]
+        comments = [ledger_record(1, 7, 5, rounds=REVIEW_PASS), ledger_record(2, 9, 12, rounds=REVIEW_PASS)]
+        host, rc, out, err = self.ledger(pulls, comments)
+        self.assertEqual(rc, 1, out + err)
+        self.assertEqual(summary_numbers(self, out), [12, 1], out)
+
+    def test_an_all_green_list_exits_zero_and_its_summary_reads_zero(self):
+        p7, c7, _ = kind_case("batch", 7, 0, 1)
+        p8, c8, e8 = kind_case("held", 8, 0, 2)
+        p9 = [batch_pull(9, REVIEW_OLD_HEAD, base="feat7", created_at=ago(0))]
+        host, rc, out, err = self.ledger(p7 + p8 + p9, c7 + c8, events=e8)
+        self.assertEqual(rc, 0, out + err)
+        self.assertEqual(list_line(self, out, 7), "#7 feat7 batch 0h")
+        self.assertEqual(list_line(self, out, 8), "#8 feat8 waits on debt:await-held 0h")
+        self.assertRegex(list_line(self, out, 9), r"^#9 feat9 blocked on #7 \d+h$")
+        self.assertEqual(summary_numbers(self, out), [0, 0], out)
+
+    def test_no_open_pull_request_exits_zero_with_both_summary_numbers_zero(self):
+        host, rc, out, err = self.ledger([])
+        self.assertEqual(rc, 0, out + err)
+        self.assertEqual(summary_numbers(self, out), [0, 0], out)
+
+    # The read cost: one comment list, no head read, and at most one event list for each held pull request.
+
+    def test_reads_one_comment_list_no_head_and_at_most_one_event_list_per_held_pr(self):
+        p8, c8, e8 = kind_case("held", 8, 10, 3)
+        pulls = [batch_pull(7, REVIEW_HEAD, created_at=ago(103)), *p8,
+                 batch_pull(9, REVIEW_HEAD, created_at=ago(4), labels=("held",)),
+                 batch_pull(10, REVIEW_HEAD, created_at=ago(120), labels=("held",))]
+        comments = [ledger_record(1, 7, 3, rounds=REVIEW_PASS), *c8, ledger_record(4, 9, 4, rounds=("Round 1: reviewer, sonnet, FAIL",)),
+                    ledger_record(5, 10, 2, rounds=REVIEW_PASS)]
+        events = {**e8, 9: [label_event("held", 4)], 10: [label_event("held", 50)]}
+        host, rc, out, err = self.ledger(pulls, comments, events=events)
+        self.assertEqual(rc, 0, out + err)
+        self.assertEqual(list_line(self, out, 7), "#7 feat7 batch 3h")
+        self.assertEqual(list_line(self, out, 8), "#8 feat8 waits on debt:await-held 10h")
+        self.assertEqual(list_line(self, out, 9), "#9 feat9 lane round 2 4h")
+        self.assertEqual(list_line(self, out, 10), "#10 feat10 batch 2h")
+        reads = [rel for rel, _ in host.list_calls]
+        self.assertEqual(reads.count("issues/comments"), 1, reads)
+        self.assertNotIn("issues/7/events", reads, "a pull request with no label read its events")
+        for n in (8, 9, 10):
+            self.assertLessEqual(reads.count(f"issues/{n}/events"), 1, reads)
+        self.assertEqual([rel for rel in reads if rel.startswith("commits/")], [], "a head was read")
 
 
 # The report-only model judge at merge. The merge reads each governed Markdown file at head, selects a file whose line
