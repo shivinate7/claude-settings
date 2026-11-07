@@ -258,6 +258,19 @@ class RulingKindTests(unittest.TestCase):
         self.assertIn("check_ruling_kind: FAIL:", out)
         self.assertIn(OLD, out)
 
+    def test_diff_that_moves_a_decision_out_of_the_folder_passes(self):
+        # Without --no-renames git prints "R100<TAB>old<TAB>new". The name then reads as a record
+        # that does not exist, and the lint fails on "cannot read the record".
+        moved = "archive/old-rule.md"
+        self.put(OLD, record(BUILD_OK))
+        self.commit_base()
+        os.makedirs(os.path.join(self.tree, "archive"))
+        self.git("mv", OLD, moved)
+        self.commit_change()
+        rc, out = self.lint("--base", "main")
+        self.assertEqual(rc, 0, out)
+        self.assertNotIn("FAIL", out)
+
     def test_fence_closer_must_match_the_opener(self):
         cases = [
             # a 3-backtick line does not close a 4-backtick fence, so the Kind line stays inside
