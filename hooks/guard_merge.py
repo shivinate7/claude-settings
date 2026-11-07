@@ -508,8 +508,8 @@ def records_page_hit(stripped: str, cwd: str) -> str:
 # ---- conflict-markers: a Bash `git commit` or `git push` that would carry a leftover conflict marker
 #
 # The hook runs before the chain, so it cannot see what an earlier segment does to the tree. A commit is
-# judged only when every earlier segment is a git add, a git read (status, diff, log, show), `true` or
-# `false`; any other earlier segment gives no hit at commit. A judged commit with pathspecs holds those
+# judged only when every earlier segment is a git add, a git commit (judged on its own), a git read
+# (status, diff, log, show), `true`, `false` or `cd`; any other earlier segment gives no hit at commit. A judged commit with pathspecs holds those
 # working-tree files. `commit -a` and an earlier whole-tree `git add` hold the whole working tree. An
 # earlier `git add <paths>` holds those paths from the working tree, and the rest from the index. Any
 # other commit holds the index. Each is read against HEAD with `git diff --check`.
@@ -635,13 +635,14 @@ def _push_hit(segment, stripped, cwd, args):
 
 def _chain_safe(segment):
     """True when the segment cannot change the tree a later commit reads: a git add, a git read,
-    `true` or `false`."""
+    `true`, `false` or `cd` (the root already resolves through a cd). A commit is judged on its own, so
+    the caller never asks about one."""
     call = git_call_of(segment)
     if call is not None:
         return call[0] == "add" or call[0] in _READ_VERBS
     tokens = segment_tokens(segment) or []
     index = resolve_command(tokens) if tokens else None
-    return index is not None and basename(tokens[index]) in ("true", "false")
+    return index is not None and basename(tokens[index]) in ("true", "false", "cd")
 
 
 def conflict_markers_hit(stripped: str, cwd: str):
@@ -674,7 +675,6 @@ def conflict_markers_hit(stripped: str, cwd: str):
         where = _absolute(c_target, root) if c_target is not None else root
         done = _git(where, "rev-parse", "--show-toplevel") if where and os.path.isdir(where) else None
         if done is None or done.returncode != 0 or not done.stdout.strip():
-            readable = readable and call[0] == "add"
             continue
         top = os.path.normpath(done.stdout.strip())
         if call[0] == "add":
@@ -684,18 +684,19 @@ def conflict_markers_hit(stripped: str, cwd: str):
             elif specs:
                 add_specs.append((where, top, specs))
             continue
-        readable = False
+        wholes, adds = whole_tops, add_specs   # this commit takes the adds so far; the next starts clean
+        whole_tops, add_specs = set(), []
         all_flag, specs = _commit_shape(call[1])
         head = _git(top, "rev-parse", "--verify", "-q", "HEAD")   # no HEAD: `git diff` would read an empty tree
         if head is None or head.returncode != 0:
             continue
         if specs:
             found = _marker_findings(where, top, ["HEAD", "--", *specs], None)
-        elif all_flag or top in whole_tops:
+        elif all_flag or top in wholes:
             found = _marker_findings(top, top, ["HEAD"], None)
         else:
             found = _marker_findings(top, top, ["--cached"], "")
-            for add_where, add_top, add_paths in add_specs:
+            for add_where, add_top, add_paths in adds:
                 if add_top != top:
                     continue
                 for name in _covered_by(add_where, add_paths):
