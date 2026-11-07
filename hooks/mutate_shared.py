@@ -1371,9 +1371,12 @@ def run_known_defects(repo: str, defects, profile: dict, deps: str, suite_timeou
     CommonJS `require()` or a Python import), to a log the run owns. When the clean or the planted run's log names a module,
     the defect reads UNKNOWN and its reason names the module and each failed install, because a suite whose package is missing
     can read CAUGHT or MISS for the wrong cause (a fallback may catch the plant). A catcher that loads no missing module reads
-    as usual, the failed install notwithstanding. When a run's log has no start line (an argv that resets PYTHONPATH or
-    NODE_OPTIONS, `-S`, `env -i`, a failed log write), the defect reads UNKNOWN too: the load hook did not run. With every
-    install passing, there is no hook: no log, no PYTHONPATH or NODE_OPTIONS change.
+    as usual, the failed install notwithstanding. When a run's log has no start line and its argv can start Python or Node
+    (`_starts_hooked`: a whitespace-split word of an argv element whose last path part is `python`, `python` with digits and
+    dots, or `node`), the defect reads UNKNOWN too: the load hook did not run (an argv that resets PYTHONPATH or NODE_OPTIONS,
+    `-S`, `env -i`, a failed log write). Any other argv, such as `sh -c "grep ..."` or `bash t.sh`, owes no start line. The
+    argv is read as the defect lists it. With every install passing, there is no hook: no log, no PYTHONPATH or NODE_OPTIONS
+    change.
     Cost: process starts added 0 (the hook loads inside the catcher's own interpreter); files written, the hook files once
     per replay and one log per catcher run, and none when every install passed, all under the replay's own folder and
     removed with it; each log read once, after its run. Nothing runs on a timer."""
@@ -1422,6 +1425,7 @@ def _install_failures(names, failed: dict) -> str:
 # finder found. Node gets the file as `--import` in NODE_OPTIONS, which runs in the main thread: it patches the CommonJS
 # resolver there and registers itself as the resolve hook of the loader thread for ESM. All are written once per replay.
 MISSING_LOG_START = "#start"
+_HOOKED_PROGRAM = re.compile(r"python[0-9.]*|node")  # the programs that load `_LOAD_HOOKS`, as a path's last part
 _LOAD_HOOKS = {
     "sitecustomize.py": r'''import os
 import sys
@@ -1522,6 +1526,13 @@ def _write_load_hooks(own: str) -> None:
         _write(os.path.join(folder, name), source.replace("@START@", MISSING_LOG_START))
 
 
+def _starts_hooked(argv) -> bool:
+    """True when a whitespace-split word of an element of `argv` names Python or Node (`_HOOKED_PROGRAM`) by its last path
+    part, so the run may load the load hook and owes its start line: `env -i python3 x` and `sh -c "python3 t.py"` do,
+    `sh -c "grep ..."` and `bash t.sh` do not."""
+    return any(_HOOKED_PROGRAM.fullmatch(os.path.basename(word)) for item in argv for word in str(item).split())
+
+
 def _hook_env(own: str, log: str) -> dict:
     """The variables that load the hooks of `own` into a catcher run and point them at `log`. An existing PYTHONPATH or
     NODE_OPTIONS keeps its value, after the hook's."""
@@ -1547,8 +1558,8 @@ def _unrun_defect(defect, reason: str) -> dict:
 
 def _known_defect(dest: str, defect: dict, suite_timeout: float, own: str, failed: dict) -> dict:
     """One planted defect in checkout `dest`, which is left as it was found. When an install in `failed` failed, each catcher
-    run is hooked (`_hook_env`), with its log in the folder `own`: a log with no start line, or one that names a module,
-    reads UNKNOWN. With `failed` empty no run is hooked."""
+    run is hooked (`_hook_env`), with its log in the folder `own`: a log that names a module reads UNKNOWN, and so does a log
+    with no start line when the argv can start Python or Node (`_starts_hooked`). With `failed` empty no run is hooked."""
     result = {"id": str(defect.get("id", "?")), "name": str(defect.get("name", "")), "verdict": "UNKNOWN", "reason": ""}
     try:
         file, old, new, argv = defect["file"], defect["old"], defect["new"], list(defect["argv"])
@@ -1562,6 +1573,8 @@ def _known_defect(dest: str, defect: dict, suite_timeout: float, own: str, faile
         result["reason"] = str(error)
         return result
 
+    owes_start = _starts_hooked(argv)
+
     def run_hooked():
         """(the run's class, why its log cannot be trusted or ''), read once from its own log. Only a run under a failed
         install has a log."""
@@ -1572,7 +1585,7 @@ def _known_defect(dest: str, defect: dict, suite_timeout: float, own: str, faile
         kind = run_suite_file(dest, "", suite_timeout, argv=argv, classify=classify, cwd=dest, env_extra=_hook_env(own, log))[0]
         with open(log, encoding="utf-8", errors="replace") as lines:
             names = set(line.strip() for line in lines if line.strip())
-        if MISSING_LOG_START not in names:
+        if MISSING_LOG_START not in names and owes_start:
             return kind, "the load hook did not run in the catcher, so a missing package may have gone unseen: %s" % (
                 _install_failures(failed, failed))
         names.discard(MISSING_LOG_START)
