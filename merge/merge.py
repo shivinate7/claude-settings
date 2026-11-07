@@ -2880,7 +2880,8 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
             say(f"merge: #{n} the rule-file check could not run: git diff failed. Read the PR's files yourself.")
         for x in rule_files or []:
             say(f"merge: #{n} changes {x}, a rule file every session loads.")
-        judge = prose_judge_plan(wt, sha, base_ref, names if c == 0 else None, n)  # report-only: the merge has landed, whatever it says; the model calls wait for the lock's release
+        tip_c, tip = git(wt, "rev-parse", "--verify", "-q", base_ref + "^{commit}")  # ff_main's fetch moves origin/<base> onto the merge, which would empty the plan's diff
+        plan_base = tip.strip() if tip_c == 0 else base_ref
         ok = True
         try:
             ff_main(root, base, commit)
@@ -2892,6 +2893,7 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
             cut_branch(root, branch, sha)
             if lanes:
                 cut_lanes(root, lanes, commit, host, base, {cfg["defaultBranch"], base, branch}, m.get("keepBranches", []), dropped)
+        judge = prose_judge_plan(wt, sha, plan_base, names if c == 0 else None, n)  # report-only: the merge has landed, whatever it says; the model calls wait for the lock's release. Last, so an interrupt in the tree read leaves the ff, afterMerge and the cuts done. `wt` is detached, so no cut removes it
         code = 0 if ok else 1  # the merge landed either way; a failed ff or afterMerge exits non-zero
     finally:
         if wt:
