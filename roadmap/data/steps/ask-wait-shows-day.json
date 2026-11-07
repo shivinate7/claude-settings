@@ -1,0 +1,11 @@
+{
+  "title": "askWaitWords shows the day for a read on an earlier day",
+  "phase": "now",
+  "status": "doing",
+  "order": 0.99,
+  "owner": "coordinator",
+  "why": "Coordinator, 13:57 CST Nov 7.",
+  "note": "",
+  "lane": "session_013NEJL1kQxGCtbbcv6xGfeE",
+  "updatedAt": "2026-11-07T13:57:00-06:00"
+}
