@@ -52,16 +52,18 @@ The URL is the `waiting-page` key in the repo's extras file, `.claude/layout-ext
     `answers/<id>`, and was `added` before the owner's last Send (the newest `answers/<id>.at` or
     `lastAnswer.at` on any item, closed ones too). A group is seen only when every member is; a ruling is
     never seen. The page works this out once at load and keeps it, so a Send re-sorts nothing; a reload
-    works it out again. A seen card folds every answer part behind one control (options, or steps, command and
-    links; the ready line; Mark done; None of these; the note box), under a divider that reads "Asked before".
-    An item that arrives after load is new, and so is any group that gains a member after load. A card that holds a draft, a stood pick or a pending withdraw stays open.
+    works it out again. A seen card keeps every answer part open (options, or steps, command and links; the ready
+    line; Mark done; None of these; the note box), under a divider that reads "Asked before". An item the owner
+    still owes never folds. It folds only once answered (see "Answered" below).
+    An item that arrives after load is new, and so is any group that gains a member after load.
   - An item answered at or before load (`answers/<id>` exists, filed or not) sits in the
     "Answered" section, after the open tiers and before "Arbiter rulings", newest answer first. A group sits there only
     when every member is answered, as one frame headed by its group title, or "Answered together" when it has none, at its newest member's time. A group with an
     open member stays whole in its tier. The page works this out once, when the items and answers have loaded, and keeps
     it: an answer sent on the open page, or a receipt that arrives later, moves no card until a reload. The section is open on load, each card folded
-    to its top row, title and answer line; one control holds the owner's note, last answer and reply. A Change keeps
-    the card in the section, open, until reload. With no answered item the page draws no section and no rail row.
+    to its top row, title and answer line; one control holds the owner's note, last answer and reply. A card with a
+    new reply (see `replied`) opens at load and carries the mark "New reply", in place. A Change keeps
+    the card in the section, open, until reload. A card that holds a draft, a stood pick or a pending withdraw stays open. With no answered item the page draws no section and no rail row.
   - `group` (a slug) puts the item in one frame with the other items of that group. See `groups/<slug>`.
   - `port: true` marks a question about a port or redesign of an existing app. Set `port: false` on an item
     whose text uses the word port for another meaning. Such an item needs a line in `context` that starts
@@ -108,6 +110,10 @@ The URL is the `waiting-page` key in the repo's extras file, `.claude/layout-ext
     The writer refuses a task with no such line (guard rule `task-names-check`).
   - `reply` (a string) is what the session says back to a comment or a note. The card shows it as "Reply: <text>".
     A reply over 220 characters folds to three lines, with a "More of the reply" button.
+  - `replied` (an ISO time) is when the writer last wrote `reply` or changed `waits`. The writer sets it to now in the same update. A write of `lastAnswer` alone never sets it, because it copies the owner's own answer. Dropping `lane` sets none. The page
+    marks an item "New reply" when `replied` is later than both the owner's last Send (the same time that decides seen) and the owner's last visit
+    (`waiting.visit` in the browser, which the page writes on each load; with none, the last Send alone decides). The page reads both once at load, so a Send or a
+    visit on the open page moves no mark. A roadmap step is marked "Updated" the same way, when its `updatedAt` is later than the last visit; with no visit, no step is marked. An answered card with a new reply opens in place, and no card moves. Write no `replied` for any other change.
   - `lastAnswer` (`{choice, note, at}` on a decision, `{done, note, at}` on a task, `{act: "park", note, at}` on an item the owner parked and then unparked) is the owner's last answer to this item.
     The card shows it above the reply, as "Your last answer, <time>". The writer copies it from `answers/<id>` before it
     deletes that record (steps 2 to 4 of "Route and close"), and from a chat answer. When the writer rewrites `options`,
@@ -115,12 +121,12 @@ The URL is the `waiting-page` key in the repo's extras file, `.claude/layout-ext
   - `lane` (the receiver's branch slug, or its tier, such as `batch-runner` from its `cs-build:` tag, when it has no branch) is set when an answer
     takes the busy-lane path. The card shows "waits on lane <slug>" in its top row. The item stays open until the receiver
     reports the act done, and then the owning session closes it and deletes `answers/<id>` (see "Route and close", the busy-lane path).
-  - `waits` (`{repo, run}` or `{repo, pr}`: a CI run id or a PR number) is set while the item waits on that run or PR. `run` and
+  - `waits` (`{repo, run}` or `{repo, pr}`: a CI run id or a PR number) is set while the item waits on that run or PR. Setting or dropping it also sets `replied` to now. `run` and
     `pr` are a whole number above zero, or a string of digits with no leading zero; any other value reads as no wait. An item
     with `waits` and `lastAnswer` reads as answered on the page.
     `stale_pages.py --items` names each open item's wait `ended`, `waiting` or `unknown` (see "Route and close").
-  - Before writing `reply`, `lastAnswer`, `lane` or `waits`, the writer checks that the page is current with `stale_pages.py`, the same
-    check as `multi` and `ranked` (see "Update a repo's pages"). An older page draws none of the four.
+  - Before writing `reply`, `replied`, `lastAnswer`, `lane` or `waits`, the writer checks that the page is current with `stale_pages.py`, the same
+    check as `multi` and `ranked` (see "Update a repo's pages"). An older page draws none of the five.
   - The page draws only the top-level fields that its `itemFields` block lists (`page.html`). A write that names another
     top-level field is refused (guard rule `item-field-rendered`), and a stored item that carries one shows a warning on its card.
     To add a field, draw it on the page and add its name to that block. A key inside `options` or `steps` is not judged.
@@ -524,7 +530,7 @@ the item open, so the page shows it. There is no age threshold.
 
 While an item has `waits`, steps 2 to 4 and the busy-lane path never delete `answers/<id>`. End of a wait: when the
 `--items` line for the item says `ended` ("Keep the page on main's code", step 2), the writer, in that wake, drops
-`waits` (`ArtifactData update items/<id> {"waits": {"__delete__": true}}`). With `lane` set, that is all: the close and the
+`waits` (`ArtifactData update items/<id> {"waits": {"__delete__": true}, "replied": "<now>"}`). With `lane` set, that is all: the close and the
 delete of `answers/<id>` wait for the done report. A Park is the exception (see the park branch). Otherwise it then closes or rewrites the item and deletes `answers/<id>`.
 
 1. Write `receipts/<id>` with `read` set to now. Then move the answer to the item's home: the
