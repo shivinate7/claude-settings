@@ -563,10 +563,12 @@ class Ios(unittest.TestCase):
 
     def test_a_make_comment_is_cut_from_a_variable_value(self):
         # Make cuts `# x` from F's value, so F is `-quiet` and the run's own flag after $(F) is not in the comment.
+        recipe = "xcodebuild test $(F) -collect-test-diagnostics never"
         self.assertEqual(self.grade(self.flagged("F = -quiet # x\n", "xcodebuild test $(F)"), "test diagnostics"), "gap",
                          "scope: the run is read, and no diagnostics flag is in it")
-        self.assertEqual(self.grade(self.flagged("F = -quiet # x\n", "xcodebuild test $(F) -collect-test-diagnostics never"),
-                                    "test diagnostics"), "pass",
+        self.assertEqual(self.grade(self.flagged("F = -quiet\n", recipe), "test diagnostics"), "pass",
+                         "control: no comment, so $(F) expands and the run keeps its flag")
+        self.assertEqual(self.grade(self.flagged("F = -quiet # x\n", recipe), "test diagnostics"), "pass",
                          "the comment ends at F's value, so the run keeps its own diagnostics flag")
 
     def test_a_quoted_hash_in_a_recipe_beside_a_make_variable_is_no_gap(self):
