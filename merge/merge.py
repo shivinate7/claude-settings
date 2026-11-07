@@ -2488,8 +2488,8 @@ def lane_lint(root, target, host, base="", unknown_ok="", config=".github/stamp.
     Exit 1 of ci-job (a FAIL) refuses always. Exit 2 (an unknown) refuses unless `unknown_ok` is a non-blank reason; it is then logged, with no PASS line.
     A repo whose config names merge.laneTests also runs, in the same tree once the lint has passed (or its unknown is lifted), the suites that
     profile's selector lists for the lane's changed files, plus the changed suites (`lane_suites`, hooks/mutate_shared.py). A red suite, or one
-    that dies with no verdict, refuses always. A select, install or suite timeout that gives no verdict is an unknown, lifted by `unknown_ok`;
-    the changed suites still ran, as a failed select leaves them to run."""
+    that dies with no verdict, refuses always. A select, install or suite timeout that gives no verdict is an unknown, lifted by `unknown_ok`.
+    A failed select leaves the changed suites to run; a failed install runs no suite of its part."""
     if target.isdigit():
         info = (host or Host()).pr(int(target))
         head, base = info["head"], info["base"]
@@ -2524,8 +2524,9 @@ def lane_lint(root, target, host, base="", unknown_ok="", config=".github/stamp.
         if unknown_ok.strip():
             say(f"merge: the selected suites of {short} against {base} are unknown, not a pass. --lint-unknown-ok, reason: {unknown_ok.strip()}", *suites["unknown"])
             return 0
+        ran = f"{suites['ran']} suite{'' if suites['ran'] == 1 else 's'} ran." if suites["ran"] else "No suite ran."
         raise Liftable("\n".join([f"the selected suites of {short} against {base} are unknown, not a pass:", *suites["unknown"],
-                                  'The changed suites ran. Run again where the selector and the install work, or with --lint-unknown-ok "<reason>". ' + LANE_LINT_REMEDY]))
+                                  f'{ran} Run again where the selector and the install work, or with --lint-unknown-ok "<reason>". ' + LANE_LINT_REMEDY]))
     if state == "unknown":
         return 0
     count = f" {suites['ran']} selected suite{'' if suites['ran'] == 1 else 's'} ran green." if suites else ""

@@ -1035,20 +1035,19 @@ def _head_copy(repo: str, rel: str, own: str, ref: str = "HEAD"):
     return found if os.path.isfile(found) else None
 
 
-def _select_suites(profile: dict, dest: str, path: str, suites, timeout: float, head=None, prefer_head=False):
+def _select_suites(profile: dict, dest: str, path: str, suites, timeout: float, head=None):
     """The changed `suites` that the profile's `select` lists for product file `path`, run in checkout `dest`:
     (suites or None, note). None means no list: select is missing from the profile, or failed, and the note says why
     for a failure. A suite name is a line of the output; any other line is ignored. With `suites` None, every
     listed line that the profile's `tests` regex matches and `dest` holds is a suite, changed or not.
-    `head(part)` serves a select argv part that has a "/" and no `{` and that `dest` lacks (a script the commit
-    lacks): the absolute path of the copy at the clone's HEAD, or None. With `prefer_head`, `head` serves each such part even
-    when `dest` holds it: the lane path runs the base's selector, never the lane's own. A bare command name is left to PATH.
-    The run stays in `dest`."""
+    `head(part)` serves a select argv part (`_select_scripts`) that `dest` lacks (a script the commit lacks): the absolute
+    path of the copy at the clone's HEAD, or None. A bare command name is left to PATH. The run stays in `dest`."""
     select = profile.get("select")
     if not select:
         return None, ""
-    argv = [head(part) or part if head and "/" in part and "{" not in part
-            and (prefer_head or not os.path.exists(os.path.join(dest, part))) else part for part in select]
+    scripts = _select_scripts(profile)
+    argv = [head(part) or part if head and part in scripts and not os.path.exists(os.path.join(dest, part)) else part
+            for part in select]
     argv = [part.replace("{path}", path) for part in argv]
     try:
         code, output, timed_out = run_in_group(argv, dest, timeout)
@@ -1070,16 +1069,62 @@ def run_profile_suite(dest: str, profile: dict, suite: str, folder, timeout: flo
                           cwd=os.path.join(dest, profile.get("cwd", "")))
 
 
+def _select_scripts(part: dict) -> list:
+    """The select argv parts of profile part `part` that name a script in the checkout: a "/" and no "{"."""
+    return [arg for arg in part.get("select") or [] if "/" in arg and "{" not in arg]
+
+
+def _put_base_scripts(wt: str, base: str, scripts) -> dict:
+    """Write `base`'s copy of each repo-relative script in `scripts` into checkout `wt` at its own path, where `wt` holds other
+    bytes. The selector then runs in place, so its relative imports and the linked install resolve, and the base decides, never
+    the lane's own script. A script `base` lacks stays as `wt` holds it.
+    -> {path: the bytes `wt` held, or None for no file}, for `_restore_scripts`."""
+    held = {}
+    for rel in scripts:
+        try:
+            data = _file_at(wt, base, rel)
+        except ValueError:
+            continue
+        path = os.path.join(wt, rel)
+        old = None
+        if os.path.isfile(path):
+            with open(path, "rb") as handle:
+                old = handle.read()
+        if old == data:
+            continue
+        held[rel] = old
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "wb") as handle:
+            handle.write(data)
+        if _git(wt, "ls-tree", base, "--", rel).startswith("100755"):
+            os.chmod(path, 0o755)
+    return held
+
+
+def _restore_scripts(wt: str, held: dict) -> None:
+    """Put back what `_put_base_scripts` replaced, so the suites run against the lane's own files."""
+    for rel, old in held.items():
+        path = os.path.join(wt, rel)
+        if old is None:
+            os.remove(path)
+        else:
+            with open(path, "wb") as handle:
+                handle.write(old)
+
+
 def lane_suites(wt: str, head: str, base: str, profile: dict, deps_root: str, timeout: float = SUITE_TIMEOUT) -> dict:
-    """The suites a lane's head owes its repo's selector, run in `wt` (a checkout of `head`). The lane's changes are the files
-    of merge-base(`base`, `head`)...`head`: a delete is a change, and a rename is a delete and an add. Per profile part (a profile
-    without "parts" is one part), `_select_suites` lists the suites that test each changed file (the part's `code` regex does not
-    filter); the changed files that still exist and that its `tests` regex matches join the set. The selector runs from `base`'s
-    copy of its script, never the lane's own. The install runs once when the set is non-empty. Each suite runs as
+    """The suites a lane's head owes its repo's selector, run in `wt` (a throwaway checkout of `head`). The lane's changes are the
+    files of merge-base(`base`, `head`)...`head`: a delete is a change, and a rename is a delete and an add. Per profile part (a
+    profile without "parts" is one part), `_select_suites` lists the suites that test each changed file (the part's `code` regex
+    does not filter); the changed files that still exist and that its `tests` regex matches join the set. The install runs and is
+    linked into `wt` once per part: before the selector when the part has a select and the lane changed anything, else when the
+    set is non-empty. The selector runs in place in `wt`, so its relative imports and the install resolve, with `base`'s copy of
+    each select script written over the lane's (`_put_base_scripts`) and put back before the suites run. Each suite runs as
     `run_profile_suite` says, up to `timeout` seconds.
     -> {"ran": suites run, "red": [(suite, kind)] for each "assert" or "crash", "unknown": [text]}. A select that fails or
     times out, an install that fails, a read of the diff that fails and a suite that times out are unknown, never red and never
-    a pass. A failed select leaves the changed suites of its part to run, as `_select_suites` says."""
+    a pass. A failed select leaves the changed suites of its part to run, as `_select_suites` says. A failed install runs neither
+    the selector nor any suite of its part."""
     result = {"ran": 0, "red": [], "unknown": []}
     try:
         files = _changed_files(wt, _git(wt, "merge-base", base, head).strip(), head)
@@ -1088,46 +1133,42 @@ def lane_suites(wt: str, head: str, base: str, profile: dict, deps_root: str, ti
         return result
     changed = sorted(files)
     live = [path for path in changed if files[path] != "D"]
-    own = tempfile.mkdtemp(prefix="lane_select_")
-    base_copies = {}  # select argv part -> its copy at `base` (None when `base` has none), read once per call
-
-    def from_base(part):
-        if part not in base_copies:
-            base_copies[part] = _head_copy(wt, part, own, base)
-        return base_copies[part]
-
-    try:
-        for part in (profile["parts"].values() if "parts" in profile else [profile]):
-            tests_re = re.compile(part["tests"])
-            suites = {path for path in live if tests_re.search(path) and _is_suite(wt, head, part, path)}
-            if not part.get("select"):
-                result["unknown"].append("the profile has no select, so the suites that test the lane's files are unknown")
-            for path in changed if part.get("select") else []:  # every changed file, deleted ones too: a selector may map a doc or a config to suites
-                listed, note = _select_suites(part, wt, path, None, timeout, from_base, prefer_head=True)
-                if listed is None:
-                    result["unknown"].append(note or "%s: select gave no list" % path)
-                else:
-                    suites.update(name for name in listed if _is_suite(wt, head, part, name))
-            if not suites:
-                continue
-            folder, why = _ensure_deps(wt, head, part, deps_root)
-            if why:
-                result["unknown"].append("install failed, so %d suite(s) did not run: %s" % (len(suites), why))
-                continue
+    for part in (profile["parts"].values() if "parts" in profile else [profile]):
+        tests_re = re.compile(part["tests"])
+        suites = {path for path in live if tests_re.search(path) and _is_suite(wt, head, part, path)}
+        select = bool(part.get("select")) and bool(changed)
+        if not part.get("select"):
+            result["unknown"].append("the profile has no select, so the suites that test the lane's files are unknown")
+        if not suites and not select:
+            continue
+        what = "the selector and every suite of this part" if select else "%d suite(s)" % len(suites)
+        folder, why = _ensure_deps(wt, head, part, deps_root)
+        if why:
+            result["unknown"].append("install failed, so %s did not run: %s" % (what, why))
+            continue
+        try:
+            _link_deps(wt, folder, part)
+        except OSError as error:
+            result["unknown"].append("install link failed, so %s did not run: %s" % (what, error))
+            continue
+        if select:
+            held = _put_base_scripts(wt, base, _select_scripts(part))
             try:
-                _link_deps(wt, folder, part)
-            except OSError as error:
-                result["unknown"].append("install link failed, so %d suite(s) did not run: %s" % (len(suites), error))
-                continue
-            for suite in sorted(suites):
-                kind, _seconds = run_profile_suite(wt, part, suite, folder, timeout)
-                result["ran"] += 1
-                if kind in ("assert", "crash"):
-                    result["red"].append((suite, kind))
-                elif kind != "pass":
-                    result["unknown"].append("%s: no verdict (%s after %d s)" % (suite, kind, timeout))
-    finally:
-        shutil.rmtree(own, ignore_errors=True)
+                for path in changed:  # every changed file, deleted ones too: a selector may map a doc or a config to suites
+                    listed, note = _select_suites(part, wt, path, None, timeout)
+                    if listed is None:
+                        result["unknown"].append(note or "%s: select gave no list" % path)
+                    else:
+                        suites.update(name for name in listed if _is_suite(wt, head, part, name))
+            finally:
+                _restore_scripts(wt, held)
+        for suite in sorted(suites):
+            kind, _seconds = run_profile_suite(wt, part, suite, folder, timeout)
+            result["ran"] += 1
+            if kind in ("assert", "crash"):
+                result["red"].append((suite, kind))
+            elif kind != "pass":
+                result["unknown"].append("%s: no verdict (%s after %d s)" % (suite, kind, timeout))
     return result
 
 
