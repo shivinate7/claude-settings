@@ -173,9 +173,15 @@ _ONE_ANSWER = r"\d+[ \t]*:?[ \t]*[a-hA-H]\.?(?:[ \t]*\([^)\n]*\))?"
 ANSWER = re.compile(r"%s(?:[ \t]*[,\n]\s*%s)*" % (_ONE_ANSWER, _ONE_ANSWER))
 # Whole words, any case. A bare "permission" is no grant word, so a pasted "Permission denied" passes.
 _WORD = r"(?<![A-Za-z0-9_])(?:%s)(?![A-Za-z0-9_])"
-GRANT = re.compile(_WORD % r"approval|approved?|grant(?:ed)?|authori[sz]ed?|go[ -]ahead|permissions? to"
-                   r"|ok\s+to\s+merge|you\s+can\s+merge|fine\s+to\s+merge|merge\s+away",
+GRANT = re.compile(_WORD % r"approval|approved?|grant(?:ed)?|authori[sz]ed?|go[ -]ahead|permissions? to",
                    re.IGNORECASE)
+# Grant phrases with no grant word. Each also reads as a question or a refusal, so one counts only in a
+# sentence that is neither (see is_grant).
+MERGE_FORM = re.compile(_WORD % r"ok\s+to\s+merge|you\s+can\s+merge|fine\s+to\s+merge|merge\s+away",
+                        re.IGNORECASE)
+SENTENCE = re.compile(r"[^.!?\n]+[.!?]*")
+QUESTION_OPENER = re.compile(r"\s*is\s+(?:it|this)\b", re.IGNORECASE)
+NEGATION_BEFORE = re.compile(r"(?:\bnot|\bnever|n't)\s+(?:\w+\s+)?$", re.IGNORECASE)
 # A grant word alone is no grant: the message also names an act or a scope.
 ACT = re.compile(_WORD % r"merge|push|delete|deploy|release|publish|always|standing|from now on"
                  r"|(?:all|any|every)\s+(?:repos?|prs?|branch(?:es)?)", re.IGNORECASE)
@@ -781,7 +787,16 @@ def unfenced(text):
 def is_grant(text):
     """True when the message, fenced text left out, holds a grant word and an act or scope word."""
     plain = unfenced(text)
-    return GRANT.search(plain) is not None and ACT.search(plain) is not None
+    if ACT.search(plain) is None:
+        return False
+    return GRANT.search(plain) is not None or any(_grants_by_form(sent) for sent in SENTENCE.findall(plain))
+
+
+def _grants_by_form(sentence):
+    """True when the sentence holds a MERGE_FORM phrase and is no question and does not negate it."""
+    if "?" in sentence or QUESTION_OPENER.match(sentence):
+        return False
+    return any(NEGATION_BEFORE.search(sentence[:m.start()]) is None for m in MERGE_FORM.finditer(sentence))
 
 
 def grant_problem(b, text, items):
