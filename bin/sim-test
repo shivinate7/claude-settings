@@ -7,10 +7,13 @@
 # It keeps no UDID: `sim-lease take --device <role> --udid` grants one (SLOT_UDID in bin/sim-lease is the one home).
 # Reuse: duo reuses the first booted device whose name contains "iPhone Duo" and whose slot no other pid's live lease holds
 # (`sim-lease status`); with every booted Duo leased, it takes a fresh lease (slot 2 under the load bars) and boots that
-# slot. Pro reuses the first booted iPhone whose name does not. A reuse takes the lease of the booted device's slot (below) and shuts nothing down. It never shuts down a simulator it did not boot.
+# slot. When every booted device is a Duo and another live pid leases each one (the cap is reached), a duo run does not stop
+# at the cap check: it queues with one `sim-lease take --udid --reuse U1 --reuse U2`, takes whichever Duo's slot frees first,
+# and the re-scan after the grant reuses that Duo, or boots it if its holder shut it down. At SIM_LEASE_WAIT it exits 1
+# with no boot and no xcodebuild. Pro reuses the first booted iPhone whose name does not. A reuse takes the lease of the booted device's slot (below) and shuts nothing down. It never shuts down a simulator it did not boot.
 # Cross-role (13:51 CST: never a Duo and the 18 Pro booted together): a duo run with only a non-Duo iPhone booted, or a pro
 # run with only a Duo booted, boots nothing, runs nothing, names the booted device on stderr and exits 1.
-# Before its own boot it counts every booted device, owner-booted too. At the cap it boots nothing, runs no tests,
+# Before its own boot it counts every booted device, owner-booted too. At the cap (except the all-leased Duos above) it boots nothing, runs no tests,
 # names the booted devices and exits 1: the guard sees only the command word, not the boot inside this tool. A simctl
 # list that fails exits 1 with no boot.
 # Lock: one lock per Mac, the folder ${CLAUDE_CONFIG_DIR:-$HOME/.claude}/state/sim-test.lock with the holder's pid in
@@ -214,7 +217,8 @@ first_unleased() {
   done <<< "$1"
 }
 scan() {
-  local listing duo_line pro_line mine other count leased
+  local listing duo_line pro_line mine other count leased duos
+  queued=
   listing=$(xcrun simctl list devices booted) || { echo "sim-test: simctl list failed; booted nothing, ran nothing." >&2; exit 1; }
   booted=$(printf '%s\n' "$listing" | sed -n 's/^ *\(.*\) (\([0-9A-F-]\{36\}\)) (Booted).*/\1 (\2)/p')
   duo_line=$(printf '%s\n' "$booted" | grep 'iPhone Duo' | head -1)
@@ -234,6 +238,13 @@ scan() {
     exit 1
   fi
   count=$(printf '%s\n' "$booted" | grep -c .)
+  duos=$(printf '%s\n' "$booted" | grep -c 'iPhone Duo')
+  if [ "$role" = duo ] && [ "$count" -ge "$CAP" ] && [ "$duos" -eq "$count" ]; then
+    # Every booted device is a Duo and another pid's lease holds each one: the run queues for whichever frees first. The
+    # holder shuts its Duo down before it gives the lease, so the grant is followed by the re-scan, which boots it if it is down.
+    queued=$(printf '%s\n' "$booted" | udid_of)
+    return 0
+  fi
   if [ "$count" -ge "$CAP" ]; then
     echo "sim-test: $count simulators are already booted, the cap is $CAP:" >&2
     printf '%s\n' "$booted" | sed 's/^/  /' >&2
@@ -261,7 +272,11 @@ if [ -n "$udid" ]; then
   # is held for the run and given back by the cleanup. A no-op lease (CI, not macOS) leaves the reuse running with none.
   take_lease --reuse "$udid"
 else
-  take_lease --udid
+  # Every booted device is a Duo that another pid leases (queued, set by scan): one take waits in queue order for whichever
+  # Duo's slot frees first. Otherwise it is an own-boot take.
+  lease_args=(--udid)
+  for u in $queued; do lease_args+=(--reuse "$u"); done
+  take_lease "${lease_args[@]}"
   if [ -z "$granted" ] || [ "$granted" = none ]; then
     echo "sim-test: no lease was taken (CI, or not macOS), so no simulator is booted. Booted nothing, ran nothing." >&2
     exit 1

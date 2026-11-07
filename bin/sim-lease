@@ -2,7 +2,7 @@
 """sim-lease: the one Mac-wide queue and lease for phone simulators (decision sim-lease-tool).
 
 Usage:
-  sim-lease take --device duo|pro --pid PID [--session ID] [--wait S] [--udid] [--reuse UDID]
+  sim-lease take --device duo|pro --pid PID [--session ID] [--wait S] [--udid] [--reuse UDID]...
   sim-lease give --pid PID
   sim-lease status
 
@@ -11,7 +11,9 @@ take  queues PID and waits for its turn. Granted: prints the slot, `1`, `2` or `
       the queue. --reuse UDID is a reuse of a device that is already booted: it takes the lease of the slot whose
       SLOT_UDID entry is UDID (a UDID not in SLOT_UDID is slot `other`), skips the load bars, and waits only while
       another live pid holds that slot (a held `other` lease also blocks a pro, as any lease does). It is still granted in queue
-      order, and given back with `give`. The lease records the UDID, and status prints it. The wait is --wait, else SIM_LEASE_WAIT (default 300) seconds. The state is read again every
+      order, and given back with `give`. The lease records the UDID, and status prints it. --reuse may repeat: the take then
+      waits for whichever of those devices' slots frees first, tries them in the order given, and the lease records the UDID
+      it got (with --udid it prints that UDID). One queue entry holds all of them, so the order of waiters is unchanged. The wait is --wait, else SIM_LEASE_WAIT (default 300) seconds. The state is read again every
       SIM_LEASE_POLL (default 2) seconds. --pid is required on take and give: without it, or with any other bad argument, one usage line goes to stderr and the
       exit is 2. --session defaults to $CLAUDE_CODE_SESSION_ID.
 give  frees PID's lease and its queue place. It is idempotent and always exits 0.
@@ -192,11 +194,11 @@ def stamp(now):
     return int(now) if now.is_integer() else now
 
 
-def lease_of_entry(entry, slot, now):
-    """The lease record for a queue entry granted slot: the entry without its queue-only fields, with slot, device UDID and
-    the grant time."""
-    rec = {k: v for k, v in entry.items() if k not in ("reuse", "seen")}
-    return dict(rec, slot=slot, udid=entry.get("reuse") or SLOT_UDID[slot], granted=stamp(now))
+def lease_of_entry(entry, slot, udid, now):
+    """The lease record for a queue entry granted slot: the entry without its queue-only fields, with slot, device UDID (udid
+    is the reused device, None for an own boot) and the grant time."""
+    rec = {k: v for k, v in entry.items() if k not in ("reuse", "reuse_any", "seen")}
+    return dict(rec, slot=slot, udid=udid or SLOT_UDID[slot], granted=stamp(now))
 
 
 def first_fresh(queue, now, skip):
@@ -204,31 +206,40 @@ def first_fresh(queue, now, skip):
     return next((e for e in queue if e.get("seen") is None or now - e["seen"] <= skip), None)
 
 
+def reuse_udids(entry):
+    """The devices a reuse entry may take, in the order given: `reuse_any` when several, else the one `reuse`."""
+    return entry.get("reuse_any") or ([entry["reuse"]] if entry.get("reuse") else [])
+
+
 def decide(data, entry, load, now, skip):
-    """The slot for entry (`1`, `2`, `pro` or, for a reuse of an unknown device, `other`) when it may be granted now, else None."""
+    """(slot, udid) for entry when it may be granted now, else None. The slot is `1`, `2`, `pro` or, for a reuse of an
+    unknown device, `other`. The udid is the device a reuse takes, None for an own boot."""
     first = first_fresh(data["queue"], now, skip)
     if first is None or first["pid"] != entry["pid"]:
         return None
     held = {e["slot"] for e in data["leases"]}
     if entry.get("reuse"):
         # A reuse skips the load bars: the phone is booted already. It waits only for its own slot, and a pro excludes the rest.
-        slot = slot_of(entry["reuse"])
-        if slot in held or (entry["device"] == "pro" and held) or (entry["device"] != "pro" and "pro" in held):
-            return None
-        return slot
+        # With several devices it takes the first whose slot is free: the one grant logic for one or many.
+        for udid in reuse_udids(entry):
+            slot = slot_of(udid)
+            if slot in held or (entry["device"] == "pro" and held) or (entry["device"] != "pro" and "pro" in held):
+                continue
+            return slot, udid
+        return None
     if load is None:
         return None
     one, five = float(load[0]), float(load[1])
     if five >= MAX_5MIN or one >= MAX_1MIN:
         return None
     if entry["device"] == "pro":
-        return None if held else "pro"
+        return None if held else ("pro", None)
     if "pro" in held:
         return None
     if "1" not in held:
-        return "1"
+        return "1", None
     if "2" not in held and five < SLOT2_5MIN:
-        return "2"
+        return "2", None
     return None
 
 
@@ -263,7 +274,9 @@ def cmd_take(args):
         return 2
     entry = {"pid": pid, "start": started, "device": args.device, "session": session}
     if args.reuse:
-        entry["reuse"] = args.reuse
+        entry["reuse"] = args.reuse[0]  # the first, a string: a reader of one reuse (queue_state in the tests) keeps working
+        if len(args.reuse) > 1:
+            entry["reuse_any"] = list(args.reuse)
     # A TERM or INT while waiting leaves through the finally block, which drops the queue place.
     signal.signal(signal.SIGTERM, lambda *_: sys.exit(143))
     deadline = time.monotonic() + wait
@@ -284,10 +297,10 @@ def cmd_take(args):
                     if e["pid"] == pid:
                         e["seen"] = stamp(now)
                 load = read_load()
-                slot = decide(st.data, entry, load, now, skip)
-                if slot:
+                pick = decide(st.data, entry, load, now, skip)
+                if pick:
                     st.data["queue"] = [e for e in st.data["queue"] if e["pid"] != pid]
-                    lease = lease_of_entry(entry, slot, now)
+                    lease = lease_of_entry(entry, pick[0], pick[1], now)
                     st.data["leases"].append(lease)
                     granted = True
                     print(shown(lease, args))
@@ -334,7 +347,7 @@ class OneLineParser(argparse.ArgumentParser):
     """A bad argument prints one usage line on stderr and exits 2 (argparse's own text is two lines)."""
 
     def error(self, message):
-        print("usage: sim-lease take --device duo|pro --pid PID [--session ID] [--wait S] [--udid] [--reuse UDID] | give --pid PID | status;"
+        print("usage: sim-lease take --device duo|pro --pid PID [--session ID] [--wait S] [--udid] [--reuse UDID]... | give --pid PID | status;"
               " %s" % message.replace("\n", " "), file=sys.stderr)
         sys.exit(2)
 
@@ -348,7 +361,7 @@ def main():
     t.add_argument("--session")
     t.add_argument("--wait", type=float)
     t.add_argument("--udid", action="store_true")
-    t.add_argument("--reuse", metavar="UDID")
+    t.add_argument("--reuse", metavar="UDID", action="append")
     g = sub.add_parser("give")
     g.add_argument("--pid", type=int, required=True)
     sub.add_parser("status")
