@@ -12711,7 +12711,7 @@ class ReviewFixBase(ReviewEnv):
 
     def orders(self):
         """The two orders of a fix base beside the newest record's Head, as (label, record Head, base). The compare reads the files between the two
-        heads in both: the record Head newer than the base (the PR 1515 shape, the base an ancestor), then the record Head older."""
+        heads in both: the record Head newer than the base (a notes commit after the base, the base an ancestor), then the record Head older."""
         return (("record head newer", self.NOTES_HEAD, REVIEW_OLD_HEAD), ("record head older", REVIEW_OLD_HEAD, self.NOTES_HEAD))
 
     def test_a_base_equal_to_the_newest_earlier_record_head_prints_the_record(self):
@@ -12776,7 +12776,7 @@ class ReviewFixBase(ReviewEnv):
         self.assert_refused(rc, out, err)
 
     def test_a_notes_commit_after_the_fix_base_is_allowed(self):
-        # the shape that broke PR 1515: the newest earlier record names a notes commit, and the fix check reads from the head before that commit
+        # the newest earlier record names a notes commit, and the fix check reads from the head before that commit
         newest = review_comment(1, 7, record_text(head=self.NOTES_HEAD, rounds=REVIEW_PASS))
         diffs = {(REVIEW_OLD_HEAD, self.NOTES_HEAD): compare_of("ahead", file_entry("docs/debts/notes.md"))}
         rc, out, err = self.review_with_base(REVIEW_OLD_HEAD, self.record_host(newest, diffs=diffs))
@@ -13054,7 +13054,7 @@ class ReviewFixBaseRecord(ReviewEnv):
         self.assert_refused(rc, out, err)
 
     def test_the_source_record_sets_the_round_floor(self):
-        # the source reached round 3, so this record may not end below it: a last round of 2 is refused, and a record that reaches 3 is allowed
+        # the source's last round is the third, so this record may not end below it: a last round of 2 is refused, and the third is allowed
         host = self.record_host(self.source(rounds=REVIEW_PASSED_THREE), head=REVIEW_HEAD)
         low = ("1:reviewer:sonnet:FAIL", "2:reviewer:sonnet:FAIL")
         rc, out, err = self.run_args("7", "--review-record", "--head", REVIEW_HEAD, "--kind", "normal", "--guard", "no",

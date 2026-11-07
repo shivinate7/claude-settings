@@ -841,7 +841,7 @@ class Host:
             d = json.loads(out)
             return {"body": d["body"] or "", "issue_number": int(re.search(r"/issues/(\d+)$", d["issue_url"]).group(1)), "created_at": d["created_at"]}
         except (ValueError, KeyError, TypeError, AttributeError) as e:
-            raise Stop(f"reading comment {comment_id} from GitHub failed: {e}")
+            raise Stop(f"reading comment {comment_id} from GitHub failed {READ_CITE}: {e}")
 
     def open_heads(self):
         """-> {head branch name: (head sha, PR base)} of the open pull requests, every page. A failed read raises Stop: never an empty set,
