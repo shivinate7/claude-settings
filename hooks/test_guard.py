@@ -10008,8 +10008,8 @@ def pfr_gh_post(tool_id, body, form="comment", n=1467):
                     % (n, body), '{"id": 9001}')
 
 
-# A verdict quoted in a code fence above the report's real Done line. Lines inside a fence are never a verdict.
-PFR_FENCE_SAMPLE = "A sample of an earlier verdict, quoted in a fence:\n```\nFAIL, round 1 of 3, x\n```\n"
+# A Done-shaped sample in a code fence above the report's real Done line. Lines inside a fence are never a verdict.
+PFR_FENCE_SAMPLE = "A sample of an earlier verdict, quoted in a fence:\n```\nDone\nFAIL, round 1 of 3, x\n```\n"
 PFR_PASS_FENCED = PFR_FENCE_SAMPLE + pfr_report(pfr_verdict("PASS", 1), PFR_FINDING)
 PFR_FAIL = pfr_report(pfr_verdict("FAIL", 1), PFR_FINDING)           # a reviewer FAIL, read from its Done line
 PFR_FAIL_RECORD = pfr_record([(1, "reviewer", PFR_MODEL, "FAIL")])    # a posted record that holds it
