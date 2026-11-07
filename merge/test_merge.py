@@ -12769,9 +12769,9 @@ class ProseJudge(Env):
         self.setup_range({PROSE: TWO_CITE_DOC}, {BACKING: BACKING_TEXT})
         claude_calls, rc, out = self.real_judge(reply)
         self.assertEqual(len(claude_calls), 1, "claude starts: %d, want 1 for one selected file" % len(claude_calls))
-        # The real parse refuses this shape and returns an error, so invoke_model's error sets the bucket: a model error, not no readable verdict.
+        # The real parse refuses this shape and returns a "model result" error, which reads as no readable verdict.
         self.assertNotIn("was not a list", out, "the report prints the parse's error text, not a cause\n" + out)
-        self.assert_unknown_count(out, 2, [(2, "model error")])
+        self.assert_unknown_count(out, 2, [(2, "no readable verdict")])
         self.assertFalse([line for line in out.splitlines() if "prose judge" in line and PROSE in line and "UNKNOWN" not in line],
                          "a non-UNKNOWN prose judge line names %s, so the wrong-shape reply was read as a verdict\n%s" % (PROSE, out))
         self.assertEqual(rc, 0, out)
@@ -13048,10 +13048,12 @@ class ProseJudge(Env):
         lines = out.splitlines()
         findings = [line for line in lines if line.startswith("merge: #7 prose judge, %s:" % LANE_A)]
         self.assertEqual(len(findings), 20, "finding lines: %d, want 20: the finding cap\n%s" % (len(findings), out))
-        self.assertEqual(re.findall(r"^merge: #7 prose judge: (\d+) more lines not shown$", out, re.M), ["1"],
-                         "the count line for the findings past the cap is not 1\n" + out)
+        counts = [line for line in lines if re.match(r"^merge: #7 prose judge: \d+ more lines not shown$", line)]
+        self.assertEqual(counts, ["merge: #7 prose judge: 1 more lines not shown"], "the count line for the findings past the cap is not 1\n" + out)
         self.assert_unknown_count(out, 1, [(1, "timed out")])
-        self.assertLess(lines.index(findings[-1]), lines.index(prose_unknown_lines(out)[0]), "a finding prints after the UNKNOWN line\n" + out)
+        unknown = prose_unknown_lines(out)[0]
+        self.assertLess(lines.index(findings[-1]), lines.index(counts[0]), "the count line does not follow the last finding\n" + out)
+        self.assertLess(lines.index(counts[0]), lines.index(unknown), "the count line does not come before the UNKNOWN line\n" + out)
         self.assertEqual(rc, 0, out)
 
     def test_unknown_lines_never_take_a_finding_slot(self):
@@ -13072,6 +13074,14 @@ class ProseJudge(Env):
         self.assertEqual(len(stub.prompts), 1, "model calls: %d, want 1 for one selected file" % len(stub.prompts))
         self.assertNotIn("RAW-ERROR-7f3a", out, "the report prints the raw error text, not a cause\n" + out)
         self.assert_unknown_count(out, 1, [(1, "model error")])
+        self.assertEqual(rc, 0, out)
+
+    def test_a_call_with_no_verdict_and_no_error_reads_no_readable_verdict(self):
+        # The ruling of 03:20 CST: a None verdict with no error has no readable verdict, so it is not a model error.
+        self.setup_range({PROSE: CITE_DOC}, {BACKING: BACKING_TEXT})
+        stub, rc, out = self.judge(lambda prompt: (None, None))
+        self.assertEqual(len(stub.prompts), 1, "model calls: %d, want 1 for one selected file" % len(stub.prompts))
+        self.assert_unknown_count(out, 1, [(1, "no readable verdict")])
         self.assertEqual(rc, 0, out)
 
     def test_a_merge_with_every_line_judged_prints_no_unknown_line(self):
