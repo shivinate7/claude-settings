@@ -8521,12 +8521,12 @@ sh("env: heredoc-r3: an unquoted body that runs ls in backticks and names a forc
    "cat > /tmp/n.md <<EOF\nrun `ls` then git push --force later\nEOF", "allow", cwd=NOGIT)
 
 
-# ---- flag-false-alarm: the env-file false-alarm debt (env-file-rule-false-alarms) names these refusals.
+# ---- flag-false-alarm: env-file forms that read no file's contents, and the controls. Decision env-file-stays-unread.
 # Each allow row reads no file's contents. The word after a boolean flag is a pattern, a glob that
 # excludes the name reads nothing, a jq or yq word is a key, and a folder named with the prefix is
 # only made or entered. The guard allows each one, so each allow row is red on main, which denies it.
 # Each deny row stays refused: the name is a path, a glob that includes it, a loader or in-place write
-# of it, or a folder that a commit or a printer reads. Decision env-file-stays-unread.
+# of it, or a folder that a commit or a printer reads.
 FLAG_FALSE_ALARM_ALLOW = (
     "ag -f " + ENV + " src",
     "ack -f " + ENV,
@@ -8554,6 +8554,12 @@ FLAG_FALSE_ALARM_DENY = (
     "ag -t K " + ENV,
     "rg -tpy K " + ENV,
     "yq -i .x=1 " + ENV,
+    "yq " + ENV,
+    "yq e " + ENV,
+    "yq -i " + ENV,
+    "yq e -i " + ENV,
+    "yq -i e " + ENV,
+    "jq -L " + ENV + " .",
     VCS + " add " + ENV + "s",
     "cat " + ENV + "s",
 )
