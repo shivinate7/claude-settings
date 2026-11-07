@@ -390,7 +390,6 @@ lease_at_boot_holds() { lease_holds "$work/lease_at_boot" "$tool_pid"; }
 lease_at_boot_slot() { lease_slot "$work/lease_at_boot" "$tool_pid" "$1"; }
 lease_at_xc_holds() { lease_holds "$work/lease_at_xc" "$tool_pid"; }
 lease_at_xc_slot() { lease_slot "$work/lease_at_xc" "$tool_pid" "$1"; }
-lease_not_held_at_xc() { ! lease_at_xc_holds; }
 # status_at_xc_has SLOT PID: the status the xcodebuild stub read during the run has a lease line for SLOT and PID. The
 # pid is a whole word: the space after it ends the number. status_at_xc_udid also names the UDID on that line.
 status_at_xc_has() { grep -Eq "^lease slot $1 pid $2 " "$work/status_at_xc" 2>/dev/null; }
@@ -884,11 +883,12 @@ need "shuts down nothing" no_shutdown
 need "stderr names the booted Duo" grep -Fq "iPhone Duo" "$work/run.err"
 end_case "60 pro run with a Duo booted: refused, boots and runs nothing, exit 1"
 
-# Control: the pro role reuses the booted 18 Pro, as it did before the role flag existed.
+# Control: the pro role reuses the booted 18 Pro, as it did before the role flag existed. The reuse takes the pro lease
+# (owner, 2026-11-07 12:31 CST, page item 336).
 fresh; booted "iPhone 18 Pro" $PRO; ARGS=(--device pro -scheme X); run; ARGS=(-scheme X)
 need "exit code" rc_is 0
 need "steps are run only" steps_are "run "
-need "takes no lease" lease_not_held_at_xc
+need "takes the pro lease" lease_at_xc_slot pro
 end_case "61 control: pro run with the 18 Pro booted reuses it, with no boot"
 
 fresh; run CI=true
@@ -1066,14 +1066,14 @@ need "the Duo's boot is recorded" record_names "$DUO1"
 end_case "77 TERM to the tool during a slow simctl boot: the Duo still comes up, and is shut down and recorded"
 
 # Case 78: a Duo booted during the wait, then the pro holder dies: the queued duo run reuses that Duo after its grant, and
-# gives the lease back before xcodebuild.
+# holds the lease of its slot during xcodebuild (owner, 2026-11-07 12:31 CST, page item 336).
 pro_dies_during_duo_wait duo
 need "exit code" rc_is 0
 need "steps are run only" steps_are "run "
 need "destination is the booted Duo" dest_is "$DUO2"
-need "lease not held during xcodebuild" lease_not_held_at_xc
+need "lease held during xcodebuild" lease_at_xc_holds
 need "no shutdown" no_shutdown
-end_case "78 a Duo booted during the wait, then the pro holder dies: the queued run reuses it, and the lease goes back before xcodebuild"
+end_case "78 a Duo booted during the wait, then the pro holder dies: the queued run reuses it and holds its lease through xcodebuild"
 
 # Case 79: a failed own boot shuts nothing down. The boot fails, so the tool clears its boot mark before it exits, and its
 # cleanup has no simulator of its own to shut down.
