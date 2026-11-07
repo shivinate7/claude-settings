@@ -43,15 +43,25 @@ SWIFT_CLOCKS = [
     "ContinuousClock.now", "SuspendingClock.now",
     "start.timeIntervalSinceNow", "start.duration(to: .now)",
 ]
-def summary_line(total, files, sleep=0, elapsed=0, test_cap=0, calendar=0, hang_guards=0, unread=0):
-    """The one summary line. A hang guard is its own count and is never added to the total (owner ruling
-    2026-11-07 13:00 CST, test-practices P5)."""
-    return ("%d time-pinned in %d files (sleep %d, elapsed-assert %d, test-cap %d, calendar %d); "
+def summary_line(total, files, sleep=0, elapsed=0, calendar=0, hang_guards=0, unread=0):
+    """The one summary line. A hang guard (test-cap or wait-cap) is its own count: it is never added to the
+    total or the file count, and it is not a kind in the parenthesised list (test-practices P5)."""
+    return ("%d time-pinned in %d files (sleep %d, elapsed-assert %d, calendar %d); "
             "hang guards %d (allowed; check each cap sits well above the run); %d unread"
-            % (total, files, sleep, elapsed, test_cap, calendar, hang_guards, unread))
+            % (total, files, sleep, elapsed, calendar, hang_guards, unread))
 
 
 SUMMARY_ZERO = summary_line(0, 0)
+
+
+def assert_summary(case, stdout, expected):
+    """The summary is the last line. The total and the file count come first, so a hang guard counted there
+    fails with that cause alone. Then the whole line, so a changed kinds list or hang guards count fails
+    with the summary-form cause alone."""
+    last = (stdout.splitlines() or [""])[-1]
+    case.assertEqual(last.split(" (", 1)[0], expected.split(" (", 1)[0],
+                     "a hang guard or test-cap is counted in the time-pinned total or files")
+    case.assertEqual(last, expected, "the summary line is not the pinned form")
 
 
 def src(*lines):
@@ -1144,15 +1154,12 @@ class OutputTest(FinderCase):
         self.assertIn(
             "tests/test_x.py:%d: wait-cap: subprocess.run(cmd, timeout=5)" % lineno(text, "subprocess.run"),
             lines)
-        self.assertEqual(
-            lines[-1],
-            summary_line(1, 1, sleep=1, hang_guards=1),
-            "a hang guard is counted in the time-pinned total or files")
+        assert_summary(self, proc.stdout, summary_line(1, 1, sleep=1, hang_guards=1))
 
     def test_summary_line_for_an_empty_root(self):
         proc = run(self.root)
         self.assertEqual(proc.returncode, 0, proc.stderr)
-        self.assertEqual(proc.stdout.splitlines()[-1], SUMMARY_ZERO, "the summary line lacks the hang guards count")
+        assert_summary(self, proc.stdout, SUMMARY_ZERO)
 
     def test_summary_counts_each_category(self):
         text = src(
@@ -1174,9 +1181,7 @@ class OutputTest(FinderCase):
         self.assertEqual(out["counts"], {"sleep": 1, "elapsed-assert": 1, "test-cap": 1, "wait-cap": 1, "calendar": 0},
                          "calendar not listed in the counts")
         proc = run(self.root)
-        self.assertEqual(proc.stdout.splitlines()[-1],
-                         summary_line(3, 1, sleep=1, elapsed=1, test_cap=1, hang_guards=1),
-                         "a hang guard is counted in the time-pinned total")
+        assert_summary(self, proc.stdout, summary_line(2, 1, sleep=1, elapsed=1, hang_guards=2))
 
     def test_line_text_is_trimmed_and_capped_at_120(self):
         long_line = "    time.sleep(1)  # " + "x" * 200
@@ -1237,7 +1242,7 @@ class ExitCodeTest(FinderCase):
         self.assertIn("UNREAD tests/test_bad.py: ", proc.stdout)
 
 
-# ---- a hang guard is listed, never counted (owner ruling 2026-11-07 13:00 CST, test-practices P5) ----
+# ---- a hang guard (wait-cap or test-cap) is listed, never counted (test-practices P5) ----
 
 HANG_GUARD = src(
     "import subprocess",
@@ -1246,10 +1251,34 @@ HANG_GUARD = src(
     "    subprocess.run(cmd, timeout=5)",
 )
 SLEEP_FILE = src("import time", "", "def test_wait():", "    time.sleep(1)")
+TEST_CAP = src(
+    "import pytest",
+    "",
+    "pytestmark = pytest.mark.timeout(10)",
+    "",
+    "@pytest.mark.timeout(5)",
+    "def test_run():",
+    "    pass",
+)
 
 
 def hang_row(path="tests/test_run.py"):
     return "%s:%d: wait-cap: subprocess.run(cmd, timeout=5)" % (path, lineno(HANG_GUARD, "subprocess.run"))
+
+
+def cap_rows(path="tests/test_run.py"):
+    """The two text rows of TEST_CAP: the per-suite pytestmark and the per-test decorator."""
+    return {
+        "%s:%d: test-cap: pytestmark = pytest.mark.timeout(10)" % (path, lineno(TEST_CAP, "pytestmark")),
+        "%s:%d: test-cap: @pytest.mark.timeout(5)" % (path, lineno(TEST_CAP, "@pytest.mark.timeout(5)")),
+    }
+
+
+def assert_cap_rows_listed(case, stdout):
+    """Scope first (P7): the test-cap rows are listed and the fixture was read."""
+    missing = sorted(row for row in cap_rows() if row not in stdout.splitlines())
+    case.assertFalse(missing, "scope: the test-cap was not found: %s" % missing)
+    case.assertNotIn("UNREAD", stdout, "scope: the fixture was not read")
 
 
 class HangGuardTest(FinderCase):
@@ -1266,8 +1295,7 @@ class HangGuardTest(FinderCase):
         proc = run(self.root)
         self.assertIn(hang_row(), proc.stdout.splitlines(), "scope: the hang guard was not found")
         self.assertNotIn("UNREAD", proc.stdout, "scope: the fixture was not read")
-        self.assertEqual(proc.stdout.splitlines()[-1], summary_line(0, 0, hang_guards=1),
-                         "a hang guard is counted in the time-pinned total or files")
+        assert_summary(self, proc.stdout, summary_line(0, 0, hang_guards=1))
 
     def test_hang_guard_file_is_not_a_time_pinned_file(self):
         self.put("tests/test_run.py", HANG_GUARD)
@@ -1277,8 +1305,7 @@ class HangGuardTest(FinderCase):
         self.assertIn(hang_row(), lines, "scope: the hang guard was not found")
         self.assertIn("tests/test_wait.py:%d: sleep: time.sleep(1)" % lineno(SLEEP_FILE, "time.sleep(1)"), lines,
                       "scope: the sleep was not found")
-        self.assertEqual(lines[-1], summary_line(1, 1, sleep=1, hang_guards=1),
-                         "a file whose only finding is a hang guard is counted as a time-pinned file")
+        assert_summary(self, proc.stdout, summary_line(1, 1, sleep=1, hang_guards=1))
 
     def test_hang_guard_stays_listed_in_text(self):
         self.put("tests/test_run.py", HANG_GUARD)
@@ -1291,6 +1318,44 @@ class HangGuardTest(FinderCase):
         self.assertEqual(self.rows(out), {("tests/test_run.py", lineno(HANG_GUARD, "subprocess.run"), "wait-cap")},
                          "the JSON rows lost the wait-cap finding")
         self.assertEqual(out["counts"]["wait-cap"], 1, "the JSON counts lost the wait-cap")
+
+    def test_test_cap_alone_exits_0(self):
+        self.put("tests/test_run.py", TEST_CAP)
+        proc = run(self.root)
+        assert_cap_rows_listed(self, proc.stdout)
+        self.assertEqual(proc.returncode, 0,
+                         "a file whose only finding is a test-cap exits %d, not 0" % proc.returncode)
+
+    def test_test_cap_is_not_counted_in_the_summary(self):
+        self.put("tests/test_run.py", TEST_CAP)
+        proc = run(self.root)
+        assert_cap_rows_listed(self, proc.stdout)
+        assert_summary(self, proc.stdout, summary_line(0, 0, hang_guards=2))
+
+    def test_test_cap_file_is_not_a_time_pinned_file(self):
+        self.put("tests/test_run.py", TEST_CAP)
+        self.put("tests/test_wait.py", SLEEP_FILE)
+        proc = run(self.root)
+        assert_cap_rows_listed(self, proc.stdout)
+        self.assertIn("tests/test_wait.py:%d: sleep: time.sleep(1)" % lineno(SLEEP_FILE, "time.sleep(1)"),
+                      proc.stdout.splitlines(), "scope: the sleep was not found")
+        assert_summary(self, proc.stdout, summary_line(1, 1, sleep=1, hang_guards=2))
+
+    def test_test_cap_stays_listed_in_text(self):
+        self.put("tests/test_run.py", TEST_CAP)
+        proc = run(self.root)
+        missing = sorted(row for row in cap_rows() if row not in proc.stdout.splitlines())
+        self.assertFalse(missing, "a test-cap is no longer listed in the text output: %s" % missing)
+
+    def test_json_keeps_test_cap_rows(self):
+        self.put("tests/test_run.py", TEST_CAP)
+        code, out = self.report()
+        self.assertEqual(self.rows(out), pinned(
+            "tests/test_run.py", TEST_CAP,
+            ("pytestmark = pytest.mark.timeout(10)", "test-cap"), ("@pytest.mark.timeout(5)", "test-cap"),
+        ), "the JSON rows lost a test-cap finding or its category")
+        self.assertEqual(out["counts"]["test-cap"], 2, "the JSON counts lost a test-cap")
+        self.assertEqual(code, 0, "a file whose only findings are test-caps exits %d, not 0" % code)
 
 
 # ---- helper taint, assert arguments, a Playwright wait, an unlistable folder --------------
