@@ -114,7 +114,7 @@ The URL is the `waiting-page` key in the repo's extras file, `.claude/layout-ext
     it writes `lastAnswer` again without `choice`: the old key may now name another option.
   - `lane` (the receiver's branch slug, or its tier, such as `batch-runner` from its `cs-build:` tag, when it has no branch) is set
     in the update that closes an item whose answer takes the busy-lane path. The page draws nothing for it. It stays, with
-    `lastAnswer` and `answers/<id>`, until the receiver reports the act done. Then the writer deletes `answers/<id>` and
+    `lastAnswer` and `answers/<id>`, until the receiver reports the act done. Then the owning session deletes `answers/<id>` and
     drops `lane` (see "Route and close", the busy-lane path).
   - `waits` (`{repo, run}` or `{repo, pr}`: a CI run id or a PR number) is set while an open item waits on that run or PR. `run` and
     `pr` are a whole number above zero, or a string of digits with no leading zero; any other value reads as no wait. An item
@@ -247,8 +247,8 @@ is main's `page.html` with the live `designData` and roadmap blocks kept, never 
    compares the page's code outside `designData` with `skills/waiting-page/page.html` on
    claude-settings main, and prints one line: `current`, `behind` or `unknown`, with the source it
    read. Code outside main's page, other than the host's document skeleton, is `behind`. Then it prints one
-   `wait:` line per open item with `waits` (`ended`, `waiting` or `unknown`), and one `waiting` lane line per closed item with
-   `lane`, `lastAnswer` and `home` and no `waits`. The exit code stays the page's.
+   `wait:` line per open item with `waits` (`ended`, `waiting` or `unknown`), and one `waiting` lane line per item, open or
+   closed, with `lane` and `lastAnswer` and no `waits`. The exit code stays the page's.
 3. Keep a copy of the page in the repo, from the same file ("Keep a copy in the repo"). Do it before any
    republish, so the copy holds the page as it was.
 4. `behind`: republish `<out>` to the same URL with the capabilities `db` and `{comments: {}}`.
@@ -488,9 +488,9 @@ Busy-lane path. The routing session files the answer at once as a note on its st
 receiver. In the same turn it closes the item in one update: `status` `closed`, `home` the step or debt that carries the work,
 `lane` (the receiver's branch slug, or its tier, such as `batch-runner` from its `cs-build:` tag, when it has no branch), and
 `lastAnswer`. The close drops `waits`, so a routed item carries none. `answers/<id>` stays in place until the receiver's done
-report. So `page_grant.py` counts the relayed pick: it counts a closed item with a `home` and a `lastAnswer.at` equal to the
+report. So `page_grant.py` counts the relayed pick: it counts a closed item with `lane` and `home` set and a `lastAnswer.at` equal to the
 answer's `at`. The routing session never sets `added` here: rule 5 of `page_grant.py` needs the answer's `at` later than `added`.
-A relay sends the receiver only the page URL, the item id and the act. On the receiver's done report the writer deletes
+A relay sends the receiver only the page URL, the item id and the act. On the receiver's done report the owning session deletes
 `answers/<id>` and drops `lane`. The done report is status, never a grant. A `none` answer on this path gets no new options.
 A Park is the exception: on an item with `lane` (one routed by the older path, before the close at routing), the writer
 tells the receiver the act is withdrawn and then closes the item, with no done report (see the park branch below).

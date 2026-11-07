@@ -47,9 +47,9 @@ start git, the verdict is unknown: the installed copy never stands in for main.
 number above zero, or a string of digits with no leading zero; anything else reads `unknown`. For each open item (status not `closed`) with a `waits` field, `{repo, run}`
 or `{repo, pr}`, one gh call runs through the program named by WAITING_PAGE_GH (default `gh`):
 `run view <id> --repo <repo> --json status,conclusion` or `pr view <n> --repo <repo> --json state,mergedAt`.
-Each such item prints one line after the verdict line, `wait: item <n> (<what>): <word> (<detail>)`. A closed item with a
-non-empty string `lane` and `home`, and a `lastAnswer` object but no `waits`, prints `wait: item <n> (lane <slug>): waiting (answered <lastAnswer.at>)`
-(`answered at unknown` when `at` is missing or not a string) instead: a routed answer whose receiver has not reported the act done. An open item with a `lane` prints no line. It starts no gh process and does not count against WAIT_CAP.
+Each such item prints one line after the verdict line, `wait: item <n> (<what>): <word> (<detail>)`. An item, open or closed, with a
+non-empty string `lane` and a `lastAnswer` object but no `waits`, prints `wait: item <n> (lane <slug>): waiting (answered <lastAnswer.at>)`
+(`answered at unknown` when `at` is missing or not a string) instead: a routed answer whose receiver has not reported the act done. It starts no gh process and does not count against WAIT_CAP.
 An item with `waits` keeps its one line. The word is
 `ended` (the run completed with any conclusion; the PR merged; the PR closed unmerged, which its line says),
 `waiting` (the run or PR is still going), or `unknown` (gh missing, non-zero, timed out, not JSON, or a
@@ -474,21 +474,20 @@ def wait_word(argv, answer):
 
 def wait_lines(items, complete=True):
     """One line per open item with a `waits` field, in order; at most WAIT_CAP gh calls. With complete False, none: every wait reads unknown.
-    A closed item with a `lane`, a `lastAnswer` and a `home` and no `waits` gets one lane line, built from the item: no gh call, not counted in WAIT_CAP."""
+    An item, open or closed, with a `lane`, a `lastAnswer` and no `waits` gets one lane line, built from the item: no gh call, not counted in WAIT_CAP."""
     lines, calls = [], 0
     for item in items:
         if not isinstance(item, dict):
             lines.append("wait: an items entry is not an object: unknown")
             continue
-        if item.get("status") == "closed":
-            answer, lane, home = item.get("lastAnswer"), item.get("lane"), item.get("home")
-            if "waits" not in item and isinstance(answer, dict) and isinstance(lane, str) and lane \
-                    and isinstance(home, str) and home:
+        if "waits" not in item:
+            answer, lane = item.get("lastAnswer"), item.get("lane")
+            if isinstance(answer, dict) and isinstance(lane, str) and lane:
                 at = answer.get("at")
                 lines.append("wait: item %s (lane %s): waiting (answered %s)" % (item.get("n", item.get("id", "?")), lane,
                                                                                 at if isinstance(at, str) and at else "at unknown"))
             continue
-        if "waits" not in item:
+        if item.get("status") == "closed":
             continue
         name, label = "item %s" % item.get("n", item.get("id", "?")), json.dumps(item["waits"])
         try:
@@ -507,8 +506,8 @@ def wait_lines(items, complete=True):
 
 def single_page(argv):
     """Exit 0 current, 1 behind, 2 unknown for one fetched page. Writes a file only with --write, never on unknown.
-    With --items, prints after the verdict line one wait line per open item with a `waits` field, and one lane line per closed
-    item with a `lane`, a `home` and a `lastAnswer` and no `waits`; the exit code stays the verdict's."""
+    With --items, prints after the verdict line one wait line per open item with a `waits` field, and one lane line per item,
+    open or closed, with a `lane` and a `lastAnswer` and no `waits`; the exit code stays the verdict's."""
     ap = argparse.ArgumentParser(prog="stale_pages.py", allow_abbrev=False)
     ap.add_argument("--page", required=True)
     ap.add_argument("--write")
