@@ -4566,6 +4566,16 @@ class PendingRefusalTests(unittest.TestCase):
         except FileNotFoundError:
             return []
 
+    def write_route_rows(self, rows, sid=SID):
+        """Refusal rows as hooks/refusal_note.py writes them: (tool, route_flag or None) per row."""
+        os.makedirs(os.path.dirname(self.refusals_file(sid)), exist_ok=True)
+        with open(self.refusals_file(sid), "w", encoding="utf-8") as handle:
+            for tool, flag in rows:
+                row = {"ts": "2026-11-01T10:00:00-05:00", "tool_name": tool, "reason": "refused"}
+                if flag is not None:
+                    row["route_flag"] = flag
+                handle.write(json.dumps(row) + "\n")
+
     def stop(self, reply, landed=False, active=False, sid=SID, cwd=None):
         records = [human("do the task")]
         if landed:
@@ -4582,6 +4592,27 @@ class PendingRefusalTests(unittest.TestCase):
     def blocked(run):
         """The block decision the guard printed, or None when the Stop passed."""
         return json.loads(run.stdout) if run.stdout.strip() else None
+
+    ROUTE_FLAG = "route row rt-7 contradicted: it says this call works on local, and the classifier refused it"
+
+    def test_r_a_route_flag_on_a_refusal_row_is_shown_by_stop(self):
+        # Catches: the Stop read drops the route_flag of a refusal row, so a refused call that a route row says
+        # works reaches the owner with no flag. The flag rides in systemMessage; the decision is not judged here.
+        self.write_route_rows([("Bash", self.ROUTE_FLAG)])
+        self.assertEqual(self.pending_tools(), ["Bash"], "scope: the refusal row with its route_flag was not written")
+        run = self.stop(self.PROSE)
+        self.assertEqual(run.returncode, 0, run.stderr)
+        out = json.loads(run.stdout) if run.stdout.strip() else {}
+        self.assertIn(self.ROUTE_FLAG, out.get("systemMessage", ""),
+                      "Stop did not show the route_flag of the refusal row: %r" % run.stdout[-300:])
+
+    def test_r_green_a_refusal_row_with_no_route_flag_shows_no_flag(self):
+        # Control: a refusal row without a route_flag adds no flag to what Stop shows.
+        self.write_route_rows([("Bash", None)])
+        run = self.stop(self.PROSE)
+        self.assertEqual(run.returncode, 0, run.stderr)
+        out = json.loads(run.stdout) if run.stdout.strip() else {}
+        self.assertNotIn("contradicted", out.get("systemMessage", ""), "Stop showed a flag with no route_flag: %r" % run.stdout[-300:])
 
     def test_d_pending_refusal_not_named_under_input_needed_blocks(self):
         rows = (("unlanded prose reply", False, self.PROSE),
