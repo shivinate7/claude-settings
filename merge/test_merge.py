@@ -8828,6 +8828,17 @@ class ConfirmWaitCites(RecordsEnv):
         self.assertIn("no-merge-during-batch-ci", out, f"a failed read in the first wait carries no read cite: {out}")
         self.assertFalse(getattr(self.host, "merged", False), out)
 
+class PagesReadCite(unittest.TestCase):
+    """A list read that fails is a Stop, never an empty list (Host.pages). Its message names the path and carries the read cite (decision no-merge-during-batch-ci, a failed read refuses)."""
+    def test_a_failed_list_read_names_its_path_and_carries_the_read_cite(self):
+        host = merge.Host(required=["checks"], base="main", minute=60, now=lambda: 0, pause=lambda s: None)
+        host.api = lambda rel, *a, **k: (1, "gh: connection reset by peer")  # the list read's one call fails
+        with self.assertRaises(merge.Stop) as cm:
+            host.pages("commits/abc/check-runs", key="check_runs")
+        why = str(cm.exception)
+        self.assertIn("reading commits/abc/check-runs from GitHub failed", why)  # control: the failed read is the one reached
+        self.assertIn("no-merge-during-batch-ci", why, f"a failed list read carries no read cite: {why}")
+
 class ReadyRemedy(RecordsEnv):
     """The all-skipped remedy a ready head's refusal prints (merge.Host.classify, read by the real wait). It opens with the ready-check
     step only in a repo that declares merge.readyChecks, names no `merge <pr> --confirm` (the command that refused: git-remedy-never-names-target),
