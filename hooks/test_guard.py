@@ -101,6 +101,7 @@ FAMILIES = {
     "lane-closes-after-records": "archive_session of a lane: refused while the lane's repo has an open pull request on its step slug, or when the lane's record cannot be read",
     "lane-one-topic": "one lane, one topic: a send_message brief whose Topic differs from the lane's cs-topic, or names none, is refused; an older lane with no cs-topic is judged by its cs-step tags; a message without the marker passes unread",
     "records-page": "a lane commit of the generated records page: refused unless the page is the base's",
+    "conflict-markers": "a Bash git commit whose commit would hold a leftover conflict marker: refused when the index, or the files an earlier add or the commit names, hold all three markers in one file's added lines; a clean, whitespace-only, unstaged or half-marked file is allowed",
     "cite": "cite by id",
     "frozen": "frozen paths",
     "model-cap": "the agent model cap",
@@ -10885,6 +10886,157 @@ records_allow("a commit of a staged page edit where the base page is hand-writte
               REC_PLAIN_LANES["staged"])
 records_allow("a chain that runs the generator, then add -A and commit, where the base page is hand-written",
               GEN + " --records-only && " + ADD_A + " && " + COMMIT_X, REC_PLAIN_LANES["product"])
+
+# =========================================================================== 5d. conflict markers
+#
+# `conflict-markers`. A Bash `git commit` is refused when the commit would hold a git conflict marker:
+# one file's added lines hold all three of a `<<<<<<< ` line, a line of exactly `=======`, and a
+# `>>>>>>> ` line. Only the leftover-marker findings of `git diff --check` count, never its whitespace
+# findings. Incident: a conflict-fix script failed, and the next command in its chain
+# (`fix && git add -A && git commit`) committed the markers.
+#
+# THE SEAM. The hook runs BEFORE the shell chain, so it judges what the commit will hold. A plain commit
+# holds the index (staged diff against HEAD). An earlier `add -A`, `add .` or `add <path>` in the chain,
+# `commit -a`, and `commit <path>` hold the working-tree files they name, read against HEAD. A fence does
+# not exempt a full triplet. A read that fails (no HEAD yet) is no hit.
+#
+# NO CONTEXT SKIPS A MARKER. Git writes a marker inside a string, a comment or a template literal too, so
+# a lone apostrophe, a multi-line template literal and a comment opener inside a string do not hide one
+# (building-scanner-respects-strings).
+FAMILY = "conflict-markers"
+# Marker lines are assembled, so this file never holds one at the start of a line.
+CM_START = "<" * 7 + " HEAD\n"
+CM_MID = "=" * 7 + "\n"
+CM_END = ">" * 7 + " topic\n"
+CM_TRIPLET = CM_START + "ours line\n" + CM_MID + "theirs line\n" + CM_END
+MD_FENCE = "`" * 3
+CMK_RULE = "conflict-markers"
+CMKROOT = os.path.join(ROOT, "cmk")
+CMK_MERGE = os.path.join(CMKROOT, "merge")      # a real conflicting merge, left unresolved
+CMK_STAGED = os.path.join(CMKROOT, "staged")    # the triplet staged in a source file
+CMK_AM = os.path.join(CMKROOT, "am")            # the triplet in a tracked file, unstaged; a clean change staged
+CMK_CLEAN = os.path.join(CMKROOT, "clean")      # a clean change staged
+CMK_WS = os.path.join(CMKROOT, "ws")            # a staged change that adds trailing whitespace only
+CMK_MDOK = os.path.join(CMKROOT, "mdok")        # one marker line in a fence, and a setext underline
+CMK_MDFENCE = os.path.join(CMKROOT, "mdfence")  # a full triplet inside a fence
+CMK_NOHEAD = os.path.join(CMKROOT, "nohead")    # no commit yet, the triplet staged
+CMK_LONE = os.path.join(CMKROOT, "lone")        # a lone apostrophe in text, then a staged triplet
+CMK_TPL = os.path.join(CMKROOT, "tpl")          # a staged triplet inside a multi-line template literal
+CMK_OPEN = os.path.join(CMKROOT, "open")        # a string holding comment openers, then a staged triplet
+
+
+def _cmk_run(where, *args):
+    done = run_vcs(where, *IDENT, *args)
+    if done.returncode != 0:
+        sys.exit("fixture setup failed in the conflict-markers fixtures: %s %s in %r: %s"
+                 % (VCS, " ".join(args), where, done.stderr.strip()))
+    return done.stdout.strip()
+
+
+def _cmk_topic(where, files):
+    """A checkout whose base commit holds `files`, moved onto branch `topic`, so the commit under test is
+    no commit on main."""
+    make_repo(where, files)
+    _cmk_run(where, "checkout", "-q", "-b", "topic")
+
+
+def _cmk_stage(where, rel, text):
+    write(os.path.join(where, rel), text)
+    _cmk_run(where, "add", rel)
+
+
+def _build_conflict_markers():
+    run, stage = _cmk_run, _cmk_stage
+    # `theirs` and `topic` both change src/app.py, so merging `theirs` into `topic` leaves a real conflict.
+    _cmk_topic(CMK_MERGE, {"src/app.py": "x = 1\n"})
+    run(CMK_MERGE, "checkout", "-q", "-b", "theirs", "main")
+    write(os.path.join(CMK_MERGE, "src", "app.py"), "x = 2\n")
+    run(CMK_MERGE, "commit", "-q", "-am", "theirs change")
+    run(CMK_MERGE, "checkout", "-q", "topic")
+    write(os.path.join(CMK_MERGE, "src", "app.py"), "x = 3\n")
+    run(CMK_MERGE, "commit", "-q", "-am", "topic change")
+    run_vcs(CMK_MERGE, *IDENT, "merge", "-q", "--no-edit", "theirs")   # conflicts: MERGE_HEAD set, file unmerged
+    _require_conflict(CMK_MERGE, "src/app.py")
+
+    _cmk_topic(CMK_STAGED, {"src/app.py": "x = 1\n"})
+    stage(CMK_STAGED, "src/app.py", "x = 1\n" + CM_TRIPLET)
+
+    _cmk_topic(CMK_AM, {"src/app.py": "x = 1\n", "src/other.py": "y = 1\n"})
+    write(os.path.join(CMK_AM, "src", "app.py"), "x = 1\n" + CM_TRIPLET)   # tracked, modified, unstaged
+    stage(CMK_AM, "src/other.py", "y = 2\n")                                # a clean change, staged
+
+    _cmk_topic(CMK_CLEAN, {"src/app.py": "x = 1\n"})
+    stage(CMK_CLEAN, "src/app.py", "x = 2\n")
+
+    _cmk_topic(CMK_WS, {"src/app.py": "x = 1\n"})
+    stage(CMK_WS, "src/app.py", "x = 2   \n")                               # trailing whitespace only
+
+    _cmk_topic(CMK_MDOK, {"docs/notes.md": "# Notes\n"})
+    stage(CMK_MDOK, "docs/notes.md", "# Notes\n\nSetext heading\n" + CM_MID + "\n" + MD_FENCE + "text\n"
+          + CM_START + MD_FENCE + "\n")
+
+    _cmk_topic(CMK_MDFENCE, {"docs/notes.md": "# Notes\n"})
+    stage(CMK_MDFENCE, "docs/notes.md", "# Notes\n\n" + MD_FENCE + "text\n" + CM_TRIPLET + MD_FENCE + "\n")
+
+    os.makedirs(CMK_NOHEAD, exist_ok=True)
+    run(CMK_NOHEAD, "init", "-q", "-b", "topic", ".")
+    stage(CMK_NOHEAD, "src/app.py", "x = 1\n" + CM_TRIPLET)
+
+    _cmk_topic(CMK_LONE, {"src/view.jsx": "export const a = 1;\n"})
+    stage(CMK_LONE, "src/view.jsx", "export const a = 1;\n<p>Don't</p>\n" + CM_TRIPLET)
+    _cmk_topic(CMK_TPL, {"src/tpl.js": "const a = 1;\n"})
+    stage(CMK_TPL, "src/tpl.js", "const a = 1;\nconst doc = `\n" + CM_TRIPLET + "`;\n")
+    _cmk_topic(CMK_OPEN, {"src/opener.py": "x = 1\n"})
+    stage(CMK_OPEN, "src/opener.py", 'x = 1\nNOTE = "/* // #"\n' + CM_TRIPLET)
+
+
+lazy_fixture([CMK_MERGE, CMK_STAGED, CMK_AM, CMK_CLEAN, CMK_WS, CMK_MDOK, CMK_MDFENCE, CMK_NOHEAD,
+              CMK_LONE, CMK_TPL, CMK_OPEN], _build_conflict_markers)
+
+
+def cmk_deny(name, command, cwd):
+    sh("conflict-markers: %s is refused" % name, command, "deny", CMK_RULE, cwd=cwd)
+
+
+def cmk_allow(name, command, cwd):
+    sh("conflict-markers: %s is allowed" % name, command, "allow", cwd=cwd)
+
+
+# 1. The index: a real conflict left in the index, or markers staged. A plain commit holds the index.
+cmk_deny("a real merge conflict left in a file, then add -A and commit",
+         VCS + " add -A && " + VCS + " commit -m x", CMK_MERGE)
+cmk_deny("a triplet staged in a source file, then commit", VCS + " commit -m x", CMK_STAGED)
+cmk_deny("a triplet staged, behind a false command in the chain", "false && " + VCS + " commit -m x", CMK_STAGED)
+
+# 2. The working tree: an add in the chain, or a commit that names its file, holds that file's content.
+cmk_deny("commit -am with the triplet in a tracked, modified file", VCS + " commit -am x", CMK_AM)
+cmk_deny("add . and commit with the triplet in a tracked, modified file",
+         VCS + " add . && " + VCS + " commit -m x", CMK_AM)
+cmk_deny("add of the file and commit, the triplet in that file",
+         VCS + " add src/app.py && " + VCS + " commit -m x", CMK_AM)
+cmk_deny("a commit by path that names the file with the triplet", VCS + " commit -m x src/app.py", CMK_AM)
+
+# 3. Scope: the commit holds what it names, and the markers in an unstaged file it does not name are no hit.
+cmk_allow("a commit with the triplet unstaged in another file, and a clean change staged",
+          VCS + " commit -m x", CMK_AM)
+cmk_allow("a commit by path that names only the clean file, the triplet unstaged in another",
+          VCS + " commit -m x src/other.py", CMK_AM)
+cmk_allow("an add of the clean file and commit, the triplet unstaged in another",
+          VCS + " add src/other.py && " + VCS + " commit -m x", CMK_AM)
+
+# 4. Content that is no conflict marker, and a commit with no HEAD to read.
+cmk_allow("a clean staged change", VCS + " commit -m x", CMK_CLEAN)
+cmk_allow("a staged change that adds trailing whitespace only", VCS + " commit -m x", CMK_WS)
+cmk_allow("a markdown file with one marker line in a fence, and a setext underline of =======",
+          VCS + " commit -m x", CMK_MDOK)
+cmk_allow("a staged triplet in a repository with no commits yet", VCS + " commit -m x", CMK_NOHEAD)
+
+# 5. A fence, a string, a comment or a template literal does not hide a full triplet.
+cmk_deny("a markdown file with a full triplet inside a fence", VCS + " commit -m x", CMK_MDFENCE)
+cmk_deny("a staged triplet after a lone apostrophe in text", VCS + " commit -m x", CMK_LONE)
+cmk_deny("a staged triplet inside a multi-line template literal", VCS + " commit -m x", CMK_TPL)
+cmk_deny("a staged triplet after a string holding comment openers", VCS + " commit -m x", CMK_OPEN)
+
 
 # =========================================================================== 6. frozen paths
 FAMILY = "frozen"
