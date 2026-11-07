@@ -50,11 +50,17 @@ the model was not shown), the question is refused with the Unvetted remedy, unle
 
 Verdict claim (rule `verdict-claim-needs-run`, decision claims-carry-backing): a send whose message forecasts what a
 named check, guard, hook, test or rule will or would refuse, block, deny, catch, allow or pass is refused, unless
-(a) the current turn (payload transcript_path, read by lint/_transcript.py read_turn and tool_uses) holds a Bash call that
-names a file the claim names, or (b) the claim carries a backing cite that lint/stale_cites.py reads (paren_cites,
-cite_kind, backing_path) to a file at head. A claim that names no file, such as one that names a check only by pull
-request number, needs the cite: no run can clear it. Fenced text (stale_cites.fenced_lines) and past tense pass. A send
-with none of VERDICT_WORDS exits before any import, transcript read or model call. The refusal goes through refuse(),
+(a) the current turn (payload transcript_path, read by lint/_transcript.py read_turn with peers_start_turn, so a peer
+message starts a turn, and tool_uses) holds a Bash call that names a file the claim names, or (b) the claim carries a
+backing cite that lint/stale_cites.py reads (paren_cites, cite_kind, backing_path): `(test path::name)` backs it when
+`name` is defined in that file at head, `(read path)` when the path is a file the claim names or one that defines a rule
+the claim names. A claim is a check subject (check, guard, hook, test, rule, CI or a PR number) and a future or modal
+verdict verb (will, would, should, 'll, won't) that acts on it, this, that, them, the send, the change or a PR, or is
+passive. "The hook will catch OSError" is no claim. A claim that names no file, such as one that names a check only by
+pull request number, needs the cite: no run can clear it. Prose lines of a paragraph are joined before sentences are
+split. Fenced text (stale_cites.fenced_lines) and past tense pass. A send that also fails the owner-question check
+is refused once, naming both rules, and both checks run before that refusal. A send
+with no forecast word and verdict word exits before any import, transcript read or model call. The refusal goes through refuse(),
 so the owner override lifts it. A source that cannot be read allows, with one stderr line.
 
 Fail open. Any other model error, odd answer or unreadable input allows, with one stderr line.
@@ -64,10 +70,11 @@ no process and make no model call. A send with the form: one git process (questi
 call. A judged item write: one git process, the dedicated Sonnet call, and then the form judge's Opus call, so one more
 Sonnet call than before. A chat box: one git process and one Opus call, as before. Nothing is written but the
 guard.log line of a refusal. test_call_judge.py counts the processes and the calls.
-Cost of the verdict claim rule: a send with no verdict word costs one regex pass, with no import, no process and no
-model call. A send with one reads the transcript's turn (one file read) and imports lint/stale_cites.py; a cite to a
-file costs one `git cat-file` process per cited file. It makes no model call and writes nothing but a refusal's guard.log
-line.
+Cost of the verdict claim rule: a send without both a forecast word and a verdict word costs two regex passes, with no
+import, no process and no model call. A send with both imports lint/stale_cites.py and, for a claim with no cite, reads
+the transcript's turn (one file read); each cite to a file costs one `git show` process. It makes no model call of its
+own and writes nothing but a refusal's guard.log line. An owner question that also holds a claim makes its one
+past-ruling call before the refusal, as before.
 
 One exception, opus_ask(): the owner's plain Opus ask (decision owner-override, the Opus word) fails CLOSED. It grants
 an override, so a model error, a timeout or an odd answer grants nothing, with one stderr line. override.grant_opus_ask
@@ -103,9 +110,13 @@ VERDICT_CLAIM_RULE = "verdict-claim-needs-run"
 VERDICT_CLAIM_CITE = "(decision claims-carry-backing, a forecast of a check's verdict needs its run or a cite)"
 # The words of a verdict claim: a sentence holds one of each list. Whole words, in any case: past tense ("refused")
 # is no forecast. These lists are the one home; hooks/test_call_judge.py reads them from here.
-VERDICT_FORECAST_WORDS = ("will", "would")
-VERDICT_WORDS = ("refuse", "block", "deny", "catch", "allow", "pass")
-VERDICT_SUBJECT_WORDS = ("check", "guard", "hook", "test", "rule")
+VERDICT_FORECAST_WORDS = ("will", "would", "should", "won't", "'ll")
+VERDICT_WORDS = ("refuse", "block", "deny", "catch", "reject", "allow", "pass", "let through")
+VERDICT_PASSIVE_WORDS = ("refused", "blocked", "denied", "caught", "rejected", "allowed", "passed", "let through")
+VERDICT_SUBJECT_WORDS = ("check", "checks", "guard", "guards", "hook", "hooks", "test", "tests", "rule", "rules", "CI")
+# What the verdict verb acts on: a send, a change, a PR, or a pronoun for one. "will catch OSError" acts on an error
+# class, so it is no forecast about a verdict. A passive verb ("will be refused") needs no object.
+VERDICT_OBJECTS = r"(?:it|this|that|them|the send|the change|(?:the |a )?PRs?)\b"
 VERDICT_CLAIM_REMEDY = (
     "this message forecasts what a check will refuse, block, deny, catch, allow or pass, and the turn did not run "
     "it. Run the check first (a command that names the file the claim names), or add a backing cite "
@@ -451,32 +462,74 @@ def send_question(message):
     return asked, question_form.has_unvetted(message)
 
 
+def _word_re(word):
+    """The pattern of one listed word: whole word, any case; a contraction tail such as 'll follows a word character."""
+    return (r"(?<=\w)" + re.escape(word) + r"\b") if word.startswith("'") else (r"\b" + re.escape(word) + r"\b")
+
+
+def _any_re(words):
+    return "(?:" + "|".join(_word_re(w) for w in words) + ")"
+
+
 def _has_word(text, words):
-    return any(re.search(r"\b%s\b" % re.escape(word), text, re.I) for word in words)
+    return re.search(_any_re(words), text, re.I) is not None
 
 
-SENTENCE_END = re.compile(r"(?<=[.!?])\s+|\n")
+_FORECAST = _any_re(VERDICT_FORECAST_WORDS)
+_NOT = r"(?:\s+not\b)?"
+_ACTIVE = re.compile(_FORECAST + _NOT + r"\s+(?:%s)\s+%s" % ("|".join(re.escape(w) for w in VERDICT_WORDS if " " not in w),
+                                                           VERDICT_OBJECTS), re.I)
+_LET = re.compile(_FORECAST + _NOT + r"\s+let\s+%s\s+through\b" % VERDICT_OBJECTS, re.I)
+_PASSIVE = re.compile(_FORECAST + _NOT + r"\s+(?:be|get)\s+(?:%s)\b" % "|".join(VERDICT_PASSIVE_WORDS), re.I)
+_SUBJECT = re.compile(r"(?i:%s)|\bCI\b|(?:\bPRs?\s*#?|#)\d+" % _any_re([w for w in VERDICT_SUBJECT_WORDS if w != "CI"]))
+_LET_ANY = re.compile(r"\blet\s+(?:\w+\s+){1,2}through\b", re.I)  # "let it through": the verb split by its object
+_BULLET = re.compile(r"\s*(?:[-*+]\s|\d+[.)]\s|#|>)")
+SENTENCE_END = re.compile(r"(?<=[.!?])\s+")
+CITE_GROUP = re.compile(r"\([^()]*\)")
+
+
+def is_verdict_claim(sentence):
+    """A forecast about a check's verdict: a check subject (a check, guard, hook, test, rule, CI or a PR number) and a
+    future or modal verdict verb that acts on a send, a change or a PR (or is passive)."""
+    return bool(_SUBJECT.search(sentence)) and any(rx.search(sentence) for rx in (_ACTIVE, _LET, _PASSIVE))
+
+
+def prose_units(message):
+    """The message's prose outside code fences, as paragraphs: the lines of a paragraph are joined with a space, so a
+    claim split across lines reads whole. A blank line, a fence, a list bullet or a heading starts a new unit.
+    Needs lint/ on sys.path."""
+    import stale_cites  # the one home of what is fenced
+    rows = message.split("\n")
+    fenced = stale_cites.fenced_lines(rows)
+    units, current = [], []
+    for number, row in enumerate(rows, 1):
+        if number in fenced or not row.strip() or (current and _BULLET.match(row)):
+            if current:
+                units.append(" ".join(current))
+            current = []
+        if number not in fenced and row.strip():
+            current.append(row.strip())
+    if current:
+        units.append(" ".join(current))
+    return units
 
 
 def verdict_claims(message):
-    """The sentences of `message` that forecast a verdict, outside code fences: each holds a forecast word, a verdict word
-    and a subject word. Plain regex first, so a send with no verdict word imports nothing. Needs lint/ on sys.path."""
-    if not isinstance(message, str) or not _has_word(message, VERDICT_WORDS):
+    """The sentences of `message` that forecast a verdict, outside code fences. A message with no forecast word and no
+    verdict word is read by plain regex alone, so such a send imports nothing."""
+    if not isinstance(message, str) or not _has_word(message, VERDICT_FORECAST_WORDS) \
+            or not (_has_word(message, VERDICT_WORDS + VERDICT_PASSIVE_WORDS) or _LET_ANY.search(message)):
         return []
-    import stale_cites  # the one home of what is fenced and of what a backing looks like
-    rows = message.split("\n")
-    fenced = stale_cites.fenced_lines(rows)
-    prose = "\n".join(row for number, row in enumerate(rows, 1) if number not in fenced)
-    return [sentence for sentence in SENTENCE_END.split(prose)
-            if _has_word(sentence, VERDICT_FORECAST_WORDS) and _has_word(sentence, VERDICT_WORDS)
-            and _has_word(sentence, VERDICT_SUBJECT_WORDS)]
+    return [sentence for unit in prose_units(message) for sentence in SENTENCE_END.split(unit)
+            if is_verdict_claim(sentence)]
 
 
 def named_files(sentence):
-    """The file paths a sentence names, each cut of its `:line` or `::name` tail. A bare `#1516` names none."""
+    """The file paths a sentence names outside its cites, each cut of its `:line` or `::name` tail. A bare `#1516`
+    names none."""
     import stale_cites
     found = []
-    for word in re.split(r"[\s,;()`]+", sentence):
+    for word in re.split(r"[\s,;()`]+", CITE_GROUP.sub(" ", sentence)):
         word = word.rstrip(".:")
         if ("." in word.split("/")[-1] or "/" in word) and stale_cites.SOURCE.match(word):
             found.append(re.split(r"::?\d*", word, maxsplit=1)[0])
@@ -484,26 +537,53 @@ def named_files(sentence):
 
 
 def file_at_head(cwd, path):
-    """True when `path` is a file in the HEAD tree of the repo at `cwd`: one git process."""
+    """The text of `path` at HEAD of the repo at `cwd`, or None when it is no file there: one git process."""
     import _nowindow
-    done = _nowindow.run(["git", "-C", cwd or ".", "cat-file", "-e", "HEAD:" + path], capture_output=True)
-    return done.returncode == 0
+    done = _nowindow.run(["git", "-C", cwd or ".", "show", "HEAD:" + path], capture_output=True)
+    return done.stdout.decode("utf-8", "replace") if done.returncode == 0 else None
+
+
+def defines_name(text, name):
+    """True when `name` is defined in `text`: a def or class for Python (stale_cites.defined_line, by the AST), else a
+    whole-word match."""
+    import stale_cites
+    line = stale_cites.defined_line(text, name)
+    return line > 0 if line is not None else re.search(r"\b%s\b" % re.escape(name), text) is not None
+
+
+def defines_rule(text, slug):
+    """True when `text` defines the rule `slug`: its anchor comment, or the id as a quoted string."""
+    return ("<!-- rule:%s -->" % slug) in text or ('"%s"' % slug) in text or ("'%s'" % slug) in text
 
 
 def cite_backs(sentence, cwd):
-    """True when a paren cite of `sentence` is a test or read cite to a file at head (stale_cites, the one parser)."""
+    """True when a paren cite of `sentence` backs it (stale_cites, the one cite parser). A `test path::name` cite backs
+    it when `name` is defined in the file at head. A `read path` cite backs it when the file at head is one the claim
+    names, or defines a rule the claim names."""
     import stale_cites
+    bare = CITE_GROUP.sub(" ", sentence)
     for cite in stale_cites.paren_cites(sentence):
-        path = stale_cites.backing_path(*stale_cites.cite_kind(cite))
-        if path and file_at_head(cwd, path):
+        kind, rest = stale_cites.cite_kind(cite)
+        path = stale_cites.backing_path(kind, rest)
+        if not path or kind not in ("test", "read"):
+            continue
+        text = file_at_head(cwd, path)
+        if text is None:
+            continue
+        if kind == "test":
+            if defines_name(text, rest.split("::")[-1]):
+                return True
+        elif path in named_files(bare) or any(
+                defines_rule(text, slug) for slug in re.findall(r"(?<![\w/.-])[a-z][a-z0-9]*(?:-[a-z0-9]+)+(?![\w/.-])", bare)):
             return True
     return False
 
 
 def turn_commands(transcript_path):
-    """The Bash commands of the current turn, read by lint/_transcript.py (the one turn reader)."""
+    """The Bash commands of the current turn, read by lint/_transcript.py (the one turn reader). A peer message starts
+    a turn here, so a run made before the newest one clears no later claim."""
     import _transcript
-    _, turn = _transcript.read_turn(transcript_path)
+    _, turn = _transcript.read_turn(transcript_path, peers_start_turn=True)
     return [str((use.get("input") or {}).get("command", "")) for rec in turn for use in _transcript.tool_uses(rec)
             if use.get("name") == "Bash"]
 
@@ -536,23 +616,27 @@ def verdict_claim_problem(payload, message):
 
 
 def judge_send(payload, tool, args):
-    """A send that forecasts a check's verdict needs its run or a cite. An owner question sent by a send tool gets the
-    dedicated past-ruling call before it goes."""
+    """A send that forecasts a check's verdict needs its run or a cite, and an owner question sent by a send tool gets
+    the dedicated past-ruling call before it goes. Both are computed first, and a send that fails both is refused
+    once, naming both rules, so an owner override that lifts the refusal never skips the second check."""
     try:
-        problem = verdict_claim_problem(payload, args.get("message"))
+        verdict = verdict_claim_problem(payload, args.get("message"))
     except Exception as exc:
         print("call judge failed open: %s" % " ".join(("%s: %s" % (type(exc).__name__, exc)).split()),
               file=sys.stderr)
-        problem = None
-    if problem:
-        return refuse(payload, tool, args, VERDICT_CLAIM_RULE, problem)
+        verdict = None
+    found = None
     try:
         question = send_question(args.get("message"))
         found = past_ruling_check(payload, question[0], question[1]) if question else None
     except Exception as exc:
         print("call judge failed open: %s" % " ".join(("%s: %s" % (type(exc).__name__, exc)).split()),
               file=sys.stderr)
-        return 0
+    if verdict and found:
+        return refuse(payload, tool, args, VERDICT_CLAIM_RULE,
+                      "%s Also rule %s: %s" % (verdict, found[0], found[1]))
+    if verdict:
+        return refuse(payload, tool, args, VERDICT_CLAIM_RULE, verdict)
     return refuse(payload, tool, args, found[0], found[1]) if found else 0
 
 

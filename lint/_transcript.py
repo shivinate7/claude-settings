@@ -193,12 +193,17 @@ def tail_records(path, limit):
             yield rec
 
 
-def read_turn(path):
+def read_turn(path, peers_start_turn=False):
     """Return (last human record or None, the records after it), read from the END.
 
     The same answer as `records_after_last_human(read_transcript(path))`, for the cost of
     this turn's records alone. Raises OSError when the file cannot be read.
+
+    `peers_start_turn` makes a cross-session peer message a turn start too (is_incoming, not
+    is_last_human): the turn then holds only the records after the newest peer message, and the
+    first element is that message. Off by default, so every other caller reads the owner's turn.
     """
+    starts = is_incoming if peers_start_turn else is_last_human
     after = []
     for line in _lines_backwards(path):
         try:
@@ -207,7 +212,7 @@ def read_turn(path):
             continue
         if not isinstance(rec, dict):
             continue
-        if is_last_human(rec):
+        if starts(rec):
             return rec, after[::-1]
         after.append(rec)
     return None, []
