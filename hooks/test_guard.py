@@ -13493,6 +13493,105 @@ for _name, _command in (
 ):
     sh("builder-test: script-file, %s, is allowed" % _name, _command, "allow", **SR)
 
+# The glued input redirect, `)<`, and a digit before it, `)0<`. `_GLUED_REDIRECT` has no `<`, so the `)` stays on the
+# script word: the operand reads `gen.py)<in`, names no file, and the write is not read. The spaced form is the control.
+# Each allow twin runs the same form on a script that writes product code.
+for _name, _command in (
+    ("glued input, (python3 gen.py)<in, writes tests/x.py", "(python3 gen.py)<in"),
+    ("glued input, (python3 gen.py)0<in, a digit before the redirect, writes tests/x.py", "(python3 gen.py)0<in"),
+):
+    sh("builder-test: script-file, %s, is refused" % _name, _command, "deny", rule=BT,
+       carries=("test-author",), **SR)
+sh("builder-test: script-file, glued input control, spaced (python3 gen.py) <in, writes tests/x.py, is refused",
+   "(python3 gen.py) <in", "deny", rule=BT, carries=("test-author",), **SR)
+for _name, _command in (
+    ("glued input, (python3 gen_ok.py)<in, writes src/app.py", "(python3 gen_ok.py)<in"),
+    ("glued input, (python3 gen_ok.py)0<in, a digit before the redirect, writes src/app.py",
+     "(python3 gen_ok.py)0<in"),
+):
+    sh("builder-test: script-file, %s, is allowed" % _name, _command, "allow", **SR)
+
+
+# `_unparen` re-splits a segment whose `)` is glued to a redirect, and the re-split must keep the segment's script type.
+# The guard calls `_unparen` only when the segment's own tokens are truthy. The checks below pin POWERSHELL_CALL off: a
+# plain str reads as POSIX there, so only the script type keeps a PowerShell group read as PowerShell.
+def _unparen_of(core, frozen, text, script_type):
+    """(own tokens, `_unparen` of them, error) for `text` as a segment of `script_type`, read as the guard's segment loop
+    reads it. The error is what `_unparen` raised, or None: a raise is a named result, never a crash of the run."""
+    segment = script_type(text)
+    own = core.segment_tokens(segment)
+    if not own:
+        return own, own, None
+    try:
+        return own, frozen._unparen(segment, own), None
+    except Exception as exc:
+        return own, None, exc
+
+
+def unparen_glued_no_raise_case():
+    """A PowerShell group whose `)>` is glued and ends in one backslash, `(python3 gen.py)>\\`, reads as PowerShell and
+    does not raise. The re-split read it as POSIX: shlex rejects the trailing escape, segment_tokens gives None, and
+    `list(None)` raised TypeError. The spaced group is the control, and the glued group must read as it does."""
+    _load_guard_module()
+    core = sys.modules["guard_core"]
+    frozen = sys.modules["guard_frozen"]
+    script_type = getattr(core, "PowerShellScript", None)
+    if script_type is None or not hasattr(frozen, "_unparen"):
+        return False, "guard_core has no PowerShellScript tag, or guard_frozen has no _unparen"
+    glued = "(python3 gen.py)>\\"
+    reading = ["python3", "gen.py", ">\\"]
+    if not glued.endswith("\\") or glued.endswith("\\\\"):
+        return False, "fixture: the glued group must end in exactly one backslash"
+    core.POWERSHELL_CALL[0] = False
+    try:
+        own, _, _ = _unparen_of(core, frozen, glued, script_type)
+        if not own:
+            return False, "scope: the guard would not call _unparen on this group, its own tokens are empty"
+        _, want, control_error = _unparen_of(core, frozen, "(python3 gen.py) >\\", script_type)
+        if control_error is not None or want != reading:
+            return False, "control: the spaced PowerShell group reads as %r, want %r" % (want, reading)
+        _, got, error = _unparen_of(core, frozen, glued, script_type)
+    finally:
+        core.POWERSHELL_CALL[0] = False
+    if error is not None:
+        return False, ("_unparen raised %s on a glued PowerShell group ending in a backslash: the re-split dropped "
+                       "the script type (%s)" % (type(error).__name__, error))
+    if got != want:
+        return False, "_unparen read the glued PowerShell group as %r, want %r" % (got, want)
+    return True, "the glued PowerShell group reads as the spaced one does, and nothing raises"
+
+
+def unparen_glued_keeps_path_case():
+    """A PowerShell group whose `)>` is glued keeps its reading of a backslash path: `C:\\tmp\\gen.py` keeps its
+    backslashes. The re-split read the group as POSIX, where a backslash is an escape, so the path read as `C:tmpgen.py`.
+    The spaced group is the control: it never re-splits."""
+    _load_guard_module()
+    core = sys.modules["guard_core"]
+    frozen = sys.modules["guard_frozen"]
+    script_type = getattr(core, "PowerShellScript", None)
+    if script_type is None or not hasattr(frozen, "_unparen"):
+        return False, "guard_core has no PowerShellScript tag, or guard_frozen has no _unparen"
+    glued = "(python3 C:\\tmp\\gen.py)>out.txt"
+    reading = ["python3", "C:\\tmp\\gen.py", ">out.txt"]
+    core.POWERSHELL_CALL[0] = False
+    try:
+        own, _, _ = _unparen_of(core, frozen, glued, script_type)
+        if not any("C:\\tmp\\gen.py" in token for token in own or []):
+            return False, "scope: the glued group's own tokens lost the backslashes of its path: %r" % (own,)
+        _, want, control_error = _unparen_of(core, frozen, "(python3 C:\\tmp\\gen.py) >out.txt", script_type)
+        if control_error is not None or want != reading:
+            return False, "control: the spaced PowerShell group reads as %r, want %r" % (want, reading)
+        _, got, error = _unparen_of(core, frozen, glued, script_type)
+    finally:
+        core.POWERSHELL_CALL[0] = False
+    if error is not None:
+        return False, "_unparen raised %s on a glued PowerShell group with a path: %s" % (type(error).__name__, error)
+    if got != want:
+        return False, ("_unparen dropped the PowerShell type on the glued re-split: the path reads as %r, want %r"
+                       % (got, want))
+    return True, "the glued PowerShell group keeps its backslash path, as the spaced one does"
+
+
 # An assignment as the script operand. `NAME=value` is no file name, so the reader has nothing to read from it, and
 # the guard allows the whole call. The control has a readable first segment and shows the second one is read.
 for _name, _command in (
@@ -13896,6 +13995,17 @@ BASE_COPY_COST_LABEL = ("base copies: the pushed-copy read on the incident tree 
                         "starts and writes no file")
 LOG_CHECKS_EXTRA.append((BASE_COPY_COST_LABEL, base_copies_read_cost_case))
 LOG_FAMILY[BASE_COPY_COST_LABEL] = "branch-worktree"
+# The two direct `_unparen` checks sit beside the glued-input cases above. They are registered here, where
+# LOG_CHECKS_EXTRA exists, and take the paths family by hand, as BASE_COPY_COST does. Neither builds a fixture.
+for _label, _check in (
+    ("paths: glued input, _unparen reads a PowerShell group ending in a backslash after )> without raising",
+     unparen_glued_no_raise_case),
+    ("paths: glued input, _unparen keeps the PowerShell reading of a backslash path after )>",
+     unparen_glued_keeps_path_case),
+):
+    LOG_CHECKS_EXTRA.append((_label, _check))
+    LOG_FAMILY[_label] = "paths"
+    FIXTURELESS_CHECKS.add(_check)
 for _name, _change in BUILDER_GREEN:
     if getattr(_change, "needs_link", False) and not LINKS_MADE:
         continue
