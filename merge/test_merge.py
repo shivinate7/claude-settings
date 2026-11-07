@@ -12774,6 +12774,7 @@ class ReviewGuardCost(ReviewEnv):
 # `--review-record` already refuses `--guard no` for a diff that holds a guard path, but `--reviewed` trusts a posted record.
 
 UNFETCHABLE = "9c" * 20  # a head that no clone and no origin holds
+REVIEW_PASS_TWICE = ("Round 1: reviewer, sonnet, PASS", "Round 2: reviewer, sonnet, PASS")  # two rounds, both passed
 
 class UnreviewedGuardEnv(ReviewEnv):
     """The carried-run cases' one home: a lane branch in co whose commits are pushed to origin, so each head is fetchable, and the main commits
@@ -12891,6 +12892,32 @@ class UnreviewedGuardAllowed(UnreviewedGuardEnv):
         h2 = self.lane_commit("merge/test_lane.py", "def test_lane():\n    pass\n")
         line = self.reviewed_line(h2, review_comment(1, 7, record_text(head=h1)), review_comment(2, 7, record_text(head=h2)))
         self.assert_done(line, h2, "a test path is no guard change, so the carried rounds should stand")
+
+    def test_a_new_round_line_moves_the_first_head_past_an_earlier_guard_commit(self):
+        # The guard commit lies before the newer run's first head, so the newer run never owes it.
+        h1 = self.lane_commit("docs/lane.md", "reviewed\n", "lane: docs, reviewed")
+        self.lane_commit("lint/check_x.py", "x = 1\n", "lane: guard change, before the second round")
+        n = self.lane_commit("docs/more.md", "second round\n", "lane: docs, reviewed with a second round")
+        h2 = self.lane_commit("docs/after.md", "after\n", "lane: docs after the second round")
+        line = self.reviewed_line(h2, review_comment(1, 7, record_text(head=h1)), review_comment(2, 7, record_text(head=n, rounds=REVIEW_PASS_TWICE)),
+                                  review_comment(3, 7, record_text(head=h2, rounds=REVIEW_PASS_TWICE)))
+        self.assert_done(line, h2, "a new Round line breaks the carried run at the second record, so the guard commit before it is not owed, and the line should read done")
+
+class UnreviewedGuardWriter(UnreviewedGuardEnv):
+    """`--review-record` with Guard or check yes writes no record for a head that carries the rounds of an earlier record across a guard path
+    the earlier record never read. The refusal names the first head and the path."""
+
+    def test_a_guard_yes_record_carrying_rounds_across_a_guard_commit_is_refused(self):
+        h1 = self.lane_commit("docs/lane.md", "reviewed\n", "lane: docs, reviewed")
+        h2 = self.lane_commit("lint/check_x.py", "x = 1\n", "lane: guard change after the review")
+        host = PullsHost([batch_pull(7, h2)], {}, comments=[review_comment(1, 7, record_text(head=h1))],
+                         files=[pr_file("docs/lane.md"), pr_file("lint/check_x.py")])
+        rc, out, err = self.run_args("7", "--review-record", "--head", h2, "--kind", "normal", "--guard", "yes",
+                                     "--round", "1:reviewer:sonnet:PASS", host=host)
+        self.assertEqual(rc, 1, "the writer printed a record whose carried rounds cross lint/check_x.py, which no reviewer read:\n" + out + err)
+        self.assertEqual(out, "", "a refused record was printed")
+        self.assertIn(h1[:7], err, f"the refusal does not name {h1[:7]}, the head the carried rounds were read at:\n" + err)
+        self.assertIn("lint/check_x.py", err, f"the refusal does not name lint/check_x.py, the guard path changed after {h1[:7]}:\n" + err)
 
 if __name__ == "__main__":
     if len(sys.argv) == 3 and sys.argv[1] == "--sigchild":
