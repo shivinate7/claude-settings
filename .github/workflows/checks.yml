@@ -341,6 +341,9 @@ jobs:
       - name: Record slug fixture suite
         run: python3 lint/test_check_record_slugs.py
 
+      - name: Lint code fixture suite
+        run: python3 lint/test_check_lint_codes.py
+
       - name: Red-run trailer fixture suite
         run: python3 lint/test_check_red_run.py
 
