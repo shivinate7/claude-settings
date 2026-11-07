@@ -928,6 +928,25 @@ class GuardRuleIdReadTests(unittest.TestCase):
         self.assertEqual(self.listed('def go():\n    rid, why = pick()\n    refuse(tool, "deny", rid, why, m)\n'),
                          set())
 
+    def test_a_def_local_name_assigned_a_call_raises_with_path_and_line(self):
+        src = 'def go():\n    rid = make()\n    refuse(tool, "deny", rid, R, m)\n'
+        with self.assertRaisesRegex(
+                ValueError, r"hooks/guard\.py:3: refuse\(\) takes a rule id the reader cannot resolve"):
+            rule_audit.guard_rule_names(src, "hooks/guard.py")
+
+    def test_a_def_local_with_a_literal_and_a_call_assignment_raises_with_path_and_line(self):
+        src = ('def go(c):\n    rid = "x-a"\n    if c:\n        rid = make()\n'
+               '    refuse(tool, "deny", rid, R, m)\n')
+        with self.assertRaisesRegex(
+                ValueError, r"hooks/guard\.py:5: refuse\(\) takes a rule id the reader cannot resolve"):
+            rule_audit.guard_rule_names(src, "hooks/guard.py")
+
+    def test_a_name_bound_only_in_an_outer_def_stays_a_silent_pass(self):
+        # The outer binding is a call, so a reader that looked past the innermost def would raise here.
+        src = ('def outer():\n    rid = make()\n    def inner():\n        refuse(tool, "deny", rid, R, m)\n'
+               '    return inner\n')
+        self.assertEqual(self.listed(src), set())
+
 
 # ------------------------------------------------------------ parse cache
 # `_parsed` keeps one tree per test file, keyed on its path, size and mtime. A file rewritten in place
