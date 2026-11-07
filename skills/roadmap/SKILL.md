@@ -131,8 +131,7 @@ build.py also exits 1 on a stalled step. A `doing` or `active` step with no live
 stalled until it has a disposition (the same test as the in-progress upkeep row, so the two never
 disagree). It prints `stalled step: <id> (resume, pause or done)`, or `stalled step: <id> (done: landed in
 #N)` when a `Step:` trailer is on main, writes the page, then exits 1. A landed feel-fix with no valid
-device trial is not stalled; the device row lists it. A step is live by `cs-step:<id>` on
-a live session of this repo, or an open pull whose branch is the id or `lane/<id>`. A `cs-topic:` tag never
+device trial is not stalled; the device row lists it. A step is live when a session tagged `cs-step:<step id>` is working or blocked, not `review_ready`, `completed` or idle. An open pull request on branch `<step id>` or `lane/<step id>` is live only while its ledger next act is within its age limit (decision `pr-ledger`, the PR ledger). A `cs-topic:` tag never
 keeps a step live. The page's stalled block lists the ids.
 
 An open waiting-page item whose `lane` is a non-empty text and has no live work is stalled too. It

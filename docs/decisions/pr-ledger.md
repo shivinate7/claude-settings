@@ -50,12 +50,12 @@ Each open PR gets exactly one next act. The tool reads it from GitHub alone:
 
 - Done review record for the live head: batch.
 - Review record open: lane round n.
-- Review record stale: a fix check when the newest review record has no Fix check line and the change is a small fix to a named finding; else lane round n (decision `pr-review-record`; rule `roles-review-cap-three`).
+- Review record stale, newest record has no Fix check line: fix check. Stale, it has one: new lane at round 1 (decision `pr-review-record`; rule `roles-review-cap-three`).
 - Label `held`, `parked` or `replaced`, with a waiting-page item or debt id: waits on that item or debt.
 - Based on, or stacked on, #N: blocked on #N.
 - None of these: `NO NEXT ACT` (red).
 
-Each next act has an age limit. For batch, the limit is one batch cycle. A next act over its limit is red.
+Each next act has an age limit. For batch, the limit is one batch cycle. A next act over its limit is red. A next act with no set limit reads live. The build lane (lane `pr-state-is-on-the-pr`) sets the limit for lane round n, for a wait on an item or debt, and for blocked on #N. Each limit lands in this record before its red ships.
 
 A main-red hold shows on each PR it holds.
 
@@ -92,6 +92,7 @@ Per rule `outcomes-mechanize-rules`:
 
 - Batch runner 8 activity from 2026-11-06 15:15 CST to 2026-11-07 05:00 CST: unknown.
 - The q_max PRs were not sampled.
+- Age limits for lane round n, a wait on an item or debt, and blocked on #N are not set yet. Lane `pr-state-is-on-the-pr` sets them before its red ships.
 - Dated by: a change to how the batch runner reads its queue, or to the next-act read in `merge --reviewed`. Either change rewrites this record.
 
 Kind: build
