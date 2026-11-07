@@ -112,6 +112,21 @@ def module_value(name):
     return getattr(load_module(), name, None)
 
 
+def write_at(root, rel, text):
+    """Write `text` to `rel` under `root`, making its folders. `rel` uses slashes on every platform."""
+    path = os.path.join(root, *rel.split("/"))
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w", encoding="utf-8", newline="\n") as f:
+        f.write(text)
+
+
+def git_at(where, *args):
+    """Run git in `where` with a test identity, and return its stdout. Raises when git fails."""
+    done = subprocess.run(["git", "-C", where, "-c", "user.name=test", "-c", "user.email=test@example.com", *args],
+                          capture_output=True, text=True, check=True)
+    return done.stdout.strip()
+
+
 class RecordSlugsTests(unittest.TestCase):
     def setUp(self):
         self.assertTrue(os.path.isfile(MODULE), "module absent: lint/check_record_slugs.py")
@@ -121,17 +136,15 @@ class RecordSlugsTests(unittest.TestCase):
         shutil.copyfile(MODULE, os.path.join(self.tree, "lint", "check_record_slugs.py"))
 
     def put(self, rel, text="# Record\n"):
-        path = os.path.join(self.tree, *rel.split("/"))
-        os.makedirs(os.path.dirname(path), exist_ok=True)
-        with open(path, "w", encoding="utf-8", newline="\n") as f:
-            f.write(text)
+        write_at(self.tree, rel, text)
 
-    def lint(self, *args):
+    def lint(self, *args, cwd=None):
+        """Run the copy of the script in the temp tree, from `cwd` (the tree when none is given)."""
         env = dict(os.environ)
         env.pop("CI", None)  # CI turns an unknown diff into red; these cases run locally
         env["FIXED_TODAY"] = PINNED_TODAY  # the check's date comes from here, never from the clock
         cmd = [sys.executable, os.path.join(self.tree, "lint", "check_record_slugs.py"), *args]
-        r = subprocess.run(cmd, cwd=self.tree, env=env, capture_output=True, text=True,
+        r = subprocess.run(cmd, cwd=cwd or self.tree, env=env, capture_output=True, text=True,
                            encoding="utf-8", errors="replace")
         return r.returncode, r.stdout + r.stderr
 
@@ -1017,6 +1030,34 @@ class RecordSlugsTests(unittest.TestCase):
         self.assertNotIn("new-note-line", out, out)
         self.assertNotIn("README.md", out, out)
         self.assertNotIn("notes.md", out, out)
+
+    def test_next_debt_and_debt_flow_read_the_repo_of_the_current_directory(self):
+        # Decision notes-sightings-expiry: both read the repo of the current directory, never the repo that holds the
+        # script. The script copy sits in a folder that is no repo, and it holds a debt that would win if it were read.
+        self.put_debt("script-debt", "Seen: %s x9" % day(-1))
+        away = tempfile.mkdtemp(prefix="cwd_", dir=RUN_FOLDER)
+        self.addCleanup(shutil.rmtree, away, True)
+        git_at(away, "init", "-q")
+        write_at(away, "debts/cwd-debt.md", "# Debt\n\nWhat. A gap with a fix named.\n\nSeen: %s x3\n"
+                 "Fix: none — owner decides\n" % day(-1))
+        write_at(away, "debts/retired-cwd.md", FIXED_DEBT_TEXT)
+        git_at(away, "add", "-A")
+        git_at(away, "commit", "-q", "-m", "base")
+        start = git_at(away, "rev-parse", "HEAD")
+        write_at(away, "debts/fresh-cwd.md", FIXED_DEBT_TEXT)
+        os.remove(os.path.join(away, "debts", "retired-cwd.md"))
+        git_at(away, "add", "-A")
+        git_at(away, "commit", "-q", "-m", "change")
+        with self.subTest(command="--next-debt"):
+            rc, out = self.lint("--next-debt", cwd=away)
+            self.assertEqual(rc, 0, "--next-debt did not exit 0 in the current directory's repo: %s" % out)
+            self.assertEqual(out.strip(), "cwd-debt", "--next-debt read a repo other than the current directory's: %s"
+                             % out)
+        with self.subTest(command="--debt-flow"):
+            rc, out = self.lint("--debt-flow", start, "HEAD", cwd=away)
+            self.assertEqual(rc, 0, "--debt-flow did not exit 0 in the current directory's repo: %s" % out)
+            self.assertEqual(out.splitlines(), ["debts opened 1, closed 1", "+ fresh-cwd", "- retired-cwd"],
+                             "--debt-flow read a repo other than the current directory's: %s" % out)
 
 
 class ImportTests(unittest.TestCase):
