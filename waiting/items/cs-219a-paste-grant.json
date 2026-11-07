@@ -1,0 +1,17 @@
+{
+  "added": "2026-11-07T18:42:00Z",
+  "context": "Goal: your Nov 4 ruling (item 219 a) lands on main, so any repo's coordinator can ask a Mac session for the two acts the cloud refuses.\nWhy you: auto mode refuses every session's edit of a CLAUDE.md file, and you chose at 12:38 CST to keep that default (item 335 b). So only you can make this edit.\nDeparts from: main's bullet (claude-settings coordinator only; three acts, closing PRs included) \u2014 any repo's coordinator; two acts (branch protection; delete a branch whose last commit is on the default branch or an archive branch).\nSteps: open the link. Replace lines 16-19 (the bullet that starts \"Acts the cloud refuses\") with the text below. Press Commit changes, pick \"Create a new branch\", then Propose changes. Runner 8 merges it. Then press Done here.\n\n- **Acts the cloud refuses** (owner, 2026-10-30 16:20 CDT; changed by Cockpit item 219 a,\n  2026-11-04 17:44 CST, and its follow-up pick a, 17:55 CST; until withdrawn). When any repo's\n  coordinator asks, a session on Shivam's computer may do two acts. It may set branch protection to\n  the shared form, with only the all-jobs-passed check required. It may delete a branch whose last\n  commit is on the default branch or on an archive branch. A request for any other act needs his word.",
+  "holds": "Any repo's coordinator asking a Mac session for branch protection or a merged-branch delete.",
+  "home": "claude-settings #1247",
+  "id": "cs-219a-paste-grant",
+  "kind": "task",
+  "link": "https://github.com/shivinate7/claude-settings/edit/main/.claude/CLAUDE.md",
+  "n": 342,
+  "owner": "coordinator",
+  "rank": 2,
+  "ref": "item 335; item 219; claude-settings #1247",
+  "short": "Paste the 219 a bullet",
+  "status": "open",
+  "title": "Paste the 219 a grant into .claude/CLAUDE.md",
+  "why": "Your 12:38 CST answer to item 335: you paste it yourself, through a web-edit PR."
+}
