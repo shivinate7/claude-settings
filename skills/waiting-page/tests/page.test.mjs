@@ -8125,3 +8125,59 @@ test("a view that cannot reach the store says to paste its answers in chat, and 
   assert.match(text, /in chat/, "the no-store empty state does not say to paste in chat: " + JSON.stringify(text));
   assert.doesNotMatch(text, NO_THREAD, "the no-store empty state names a thread: " + JSON.stringify(text));
 });
+
+// ---------------------------------------------------------------- the bars and the words: stalled and paused (lane nfp-stalled-kind-color)
+// The Status tab's bars draw a stalled step and a paused step as their own cells, in the roadmap's order. barsStalled is the stalled
+// fixture with 24 to-do steps: a full phase of 30 steps, and a to-do cell to compare with. c1, a2, a5 stalled; a3 paused; a4, d6 in progress.
+const barsStalled = () => ({ ...stalledFixture(), ...stepsOf(Array.from({ length: 24 }, (_, i) => ["t" + (i + 7), "cleanup", i + 7, "todo"])) });
+const barsPage = () => withStalled(phasePage(barsStalled()), STALLED);
+const BARS_W = [["the Now card's bar", "#svNow .segbar"], ["the rail's cleanup bar", '#svRail button[data-phase="cleanup"] .segbar'], ["the phase head's bar", "#svPhases .ph-head .segbar"]];
+const W_ORDER = ["act", "act", "stl", "stl", "stl", "pzd", ...Array(24).fill("")];
+const wCellKinds = (page, scope) => page.locator(`${scope} > i`).evaluateAll((els) => els.map((e) => e.className));
+test("the bars draw a stalled and a paused step as their own cells, in the order done, in progress, stalled, paused, to do", async (t) => {
+  const page = await open(t, { pageHtml: barsPage() }); if (!page) return;
+  await openStatus(page);
+  for (const [name, scope] of BARS_W) {
+    assert.equal(await page.locator(scope).count(), 1, `${name} is missing (${scope})`);
+    assert.deepEqual(await wCellKinds(page, scope), W_ORDER, `${name} does not draw a stalled or paused step as its own cell, in order`);
+  }
+});
+test("a stalled cell and a paused cell look different from a to-do cell in each bar", async (t) => {
+  const page = await open(t, { pageHtml: barsPage() }); if (!page) return;
+  await openStatus(page);
+  const look = (loc) => loc.evaluate((el) => { const s = getComputedStyle(el); return [s.backgroundImage, s.backgroundColor, s.boxShadow].join(" | "); });
+  for (const [name, scope] of BARS_W) {
+    const todo = page.locator(`${scope} > i:not([class])`);
+    const plainCount = await todo.count();
+    assert.equal(plainCount, 24, `${name} draws ${plainCount} to-do cells, not 24: a stalled or paused step is drawn as to do`);
+    const plain = await look(todo.first());
+    assert.equal(await page.locator(`${scope} > i.stl`).count(), 3, `${name} draws no stalled cell (i.stl) for the three stalled steps`);
+    assert.equal(await page.locator(`${scope} > i.pzd`).count(), 1, `${name} draws no paused cell (i.pzd)`);
+    assert.notEqual(await look(page.locator(`${scope} > i.stl`).first()), plain, `${name}: the stalled cell looks like a to-do cell`);
+    assert.notEqual(await look(page.locator(`${scope} > i.pzd`)), plain, `${name}: the paused cell looks like a to-do cell`);
+  }
+});
+test("control: a phase with nothing stalled or paused draws no stalled or paused cell in any bar", async (t) => {
+  const steps = stepsOf([["d6", "cleanup", 1, "doing"], ["c1", "cleanup", 2, "todo"]]);
+  const page = await open(t, { pageHtml: withStalled(phasePage(steps), { why: "", steps: [], paused: [], badPause: [], items: [], ...NO_ITEMS }) }); if (!page) return;
+  await openStatus(page);
+  for (const [name, scope] of BARS_W) {
+    assert.equal(await page.locator(scope).count(), 1, `${name} is missing (${scope})`);
+    assert.deepEqual(await wCellKinds(page, scope), ["act", ""], `${name} draws a stalled or paused cell with none stalled or paused`);
+  }
+});
+test("the rail's cleanup button names its stalled and paused steps in its label", async (t) => {
+  const page = await open(t, { pageHtml: barsPage() }); if (!page) return;
+  await openStatus(page);
+  const btn = page.locator('#svRail button[data-phase="cleanup"]');
+  assert.equal(await btn.count(), 1, "the rail has no cleanup button");
+  assert.match((await btn.getAttribute("aria-label")) || "", /3 stalled, 1 paused/, "the rail's cleanup label does not name the stalled and paused steps");
+});
+test("the phase head's text names its stalled and paused steps", async (t) => {
+  const page = await open(t, { pageHtml: barsPage() }); if (!page) return;
+  await openStatus(page);
+  const prog = page.locator("#svPhases .ph-head .prog");
+  assert.equal(await prog.count(), 1, "the phase head has no progress part (.prog)");
+  const text = (await prog.locator(".sr").allTextContents()).join(" ").replace(/\s+/g, " ");
+  assert.match(text, /3 stalled, 1 paused/, "the phase head's text does not name the stalled and paused steps: " + text);
+});
