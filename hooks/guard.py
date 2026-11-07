@@ -243,7 +243,9 @@ Other tools, in `judge` order:
                        rules. A launch of a booted device passes. An override lifts it.
                        (sim-test-is-the-one-boot-path)
   builder-test-edit, test-author-scope, record-writer-scope, designer-scope
-                       deny. A role's write outside its scope. (builders-cannot-edit-tests)
+                       deny. A role's write outside its scope. A test-author's Edit or Write strictly inside
+                       its own red-run folder passes, where it builds its mutants; the folder root and any
+                       other agent's folder do not. (builders-cannot-edit-tests)
   env-file, frozen-path, config-edit, agent-model-cap
                        the write-tool forms of the rules above. Every deny runs over all path
                        fields of a call before any ask.
@@ -1967,14 +1969,22 @@ def builder_shell_test_hit(raw: str, stripped: str, cwd: str) -> str:
             or interpreter_write_hit(raw, cwd, builder_test_path))
 
 
-def role_write_hit(role: str, tool_input, target: str, cwd: str, session_id: str = "") -> str:
+def role_write_hit(role: str, tool_input, target: str, cwd: str, session_id: str = "", payload=None) -> str:
     """The early warning for a write tool call: the target path a role may not change, else ''.
 
     A test-author may also write its own session scratchpad and any path in no repository
-    (owner ruling 2026-10-13): only product code IN a repository is out of its scope."""
+    (owner ruling 2026-10-13): only product code IN a repository is out of its scope. It may also
+    write strictly inside its own red-run folder, where it builds its mutants (decision
+    test-practices, P3); `payload` names the author, and without it no folder passes."""
     rel = repo_rel(target, cwd)
     if rel is None:
         return ""
+    if role == AUTHOR_ROLE and payload is not None:
+        try:
+            if _own_red_run(payload, session_home_place(cwd)[0], _resolved(target, cwd), False):
+                return ""
+        except Exception:
+            pass
     if role in (AUTHOR_ROLE, DESIGNER_ROLE):
         full = _expanded(target, cwd)
         ok = author_path_ok if role == AUTHOR_ROLE else designer_path_ok
@@ -4752,7 +4762,7 @@ def never_lifted(payload, tool: str, tool_input: dict, cwd: str) -> bool:
                     or (agent_role(payload) == BUILDER_ROLE and builder_shell_test_hit(raw, stripped, cwd)))
     role = agent_role(payload)
     for target in write_targets(tool_input) if tool in WRITE_TOOLS else ():
-        if (is_frozen(target, cwd) or (role and role_write_hit(role, tool_input, target, cwd, session_id_of(payload)))
+        if (is_frozen(target, cwd) or (role and role_write_hit(role, tool_input, target, cwd, session_id_of(payload), payload))
                 or (is_settings_file(target, cwd) and cap_change_parts(write_content_parts(tool_input)))):
             return True
     return False
@@ -4981,7 +4991,7 @@ def judge(payload) -> None:
         # 0b. The early warning for a builder, test-author, record-writer or designer write (see BUILDER_ROLE). A read is allowed.
         role = agent_role(payload)
         if role and tool in WRITE_TOOLS:
-            matched = role_write_hit(role, tool_input, target, cwd, session_id_of(payload))
+            matched = role_write_hit(role, tool_input, target, cwd, session_id_of(payload), payload)
             if matched:
                 code, why = {AUTHOR_ROLE: ("test-author-scope", AUTHOR_SCOPE_REASON),
                              WRITER_ROLE: ("record-writer-scope", WRITER_SCOPE_REASON),

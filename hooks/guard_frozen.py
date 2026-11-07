@@ -278,7 +278,7 @@ _VAR_TOKEN = re.compile(
     r"""|(?<![\w$.\-/:])(?P<n>[A-Za-z_]\w*)=(?!=)(?P<v>"[^"]*"|'[^']*'|[^\s;&|"'`)}]*)"""
     r"""|\$(?P<pn>[A-Za-z_]\w*)[ \t]*=(?!=)[ \t]*(?P<pv>"[^"]*"|'[^']*'|[^\s;&|"'`)}]*)"""
     r"""|\bunset\s+(?P<u>\w+)"""
-    r"""|\$\{(?P<dn>[A-Za-z_]\w*)(?P<dop>:-|-|:\?)(?P<dw>[^{}]*)\}"""
+    r"|" + guard_core.DEFAULT_WORD_PATTERN +
     r"""|\$(?:(?P<x>[A-Za-z_]\w*)|\{(?P<y>[A-Za-z_]\w*)\})""")
 
 
@@ -700,17 +700,21 @@ def _py_paths(node, env):
     `os.path.join`, a name bound to one of those, or a chain of path calls. The working folder
     (`Path.cwd()`, `os.getcwd()`) reads as `.`, so `os.getcwd() + '/tests/x.py'` reads `./tests/x.py`.
     A part it cannot tell (`__file__`, `tempfile.mkdtemp()`) is left out of a `/` or a join, so the
-    literal pieces still join: `Path(base) / 'tests'` reads `tests`. A `+` with an unknown side reads as
-    no path: `tmpdir + '/tests/x.py'` would otherwise read as the absolute `/tests/x.py`, or as a
-    relative `tests/x.py` under the checkout. Empty when no piece is known."""
+    literal pieces still join: `Path(base) / 'tests'` reads `tests`. A `+` with an unknown
+    right side keeps the left pieces, as `/` and a join do, so `os.getcwd() + '/tests/' + sys.argv[1]`
+    reads `./tests/`. A `+` with an unknown LEFT side reads as no path: `tmpdir + '/tests/x.py'` would
+    otherwise read as `/tests/x.py`. Empty when no piece is known."""
     import ast
     if isinstance(node, ast.Constant):
         return [node.value] if isinstance(node.value, str) else []
     if isinstance(node, ast.Name):
         return list(env.get(node.id, ()))
+    if isinstance(node, ast.JoinedStr):   # an f-string reads as its constant parts
+        text = "".join(v.value for v in node.values if isinstance(v, ast.Constant))
+        return [text] if text else []
     if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
         left, right = _py_paths(node.left, env), _py_paths(node.right, env)
-        return [a + b for a in left for b in right]
+        return [a + b for a in left for b in right] if right else left
     if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Div):
         left, right = _py_paths(node.left, env), _py_paths(node.right, env)
         if not right:

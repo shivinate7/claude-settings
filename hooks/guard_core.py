@@ -1294,7 +1294,10 @@ def worktree_prune_subject(args, where: str):
 from shared_names import config_dir  # noqa: E402  the one home, shared with the config watch
 
 
-_DEFAULT_WORD = re.compile(r"\$\{([A-Za-z_]\w*)(:-|-|:\?)([^{}]*)\}")
+# The `${VAR:-word}` syntax, as a pattern with named groups so `guard_frozen._VAR_TOKEN` embeds the
+# same text: `dn` the name, `dop` the operator, `dw` the word.
+DEFAULT_WORD_PATTERN = r"\$\{(?P<dn>[A-Za-z_]\w*)(?P<dop>:-|-|:\?)(?P<dw>[^{}]*)\}"
+_DEFAULT_WORD = re.compile(DEFAULT_WORD_PATTERN)
 
 
 def expand_default_words(text: str, lookup=os.environ.get) -> str:
@@ -1305,11 +1308,11 @@ def expand_default_words(text: str, lookup=os.environ.get) -> str:
     word that holds braces stay as written. `os.path.expandvars` reads none of these forms, so this is
     the one home for them; `guard_frozen._resolve_vars` calls it with its command-local table."""
     def read(m):
-        value = lookup(m.group(1))
-        if m.group(2) == ":?":
+        value = lookup(m.group("dn"))
+        if m.group("dop") == ":?":
             return m.group(0) if value in (None, "") else value
-        if value is None or (value == "" and m.group(2) == ":-"):
-            return os.path.expandvars(os.path.expanduser(expand_default_words(m.group(3), lookup)))
+        if value is None or (value == "" and m.group("dop") == ":-"):
+            return os.path.expandvars(os.path.expanduser(expand_default_words(m.group("dw"), lookup)))
         return value
     return _DEFAULT_WORD.sub(read, text)
 

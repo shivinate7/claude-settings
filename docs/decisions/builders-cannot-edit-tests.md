@@ -35,6 +35,7 @@ The payload must carry an `agent_id`. The main session, reviewers, Explore, and 
 
 - `builder`: refused at commit, push and stop when the diff holds a test path. The write tool and the shell check refuse it too. A test conflict mid-merge is refused. The route is `git merge --abort`, then report to the orchestrator.
 - `test-author`: the inverse. Logged when the diff holds anything but a test path, test config, a dev dependency list or a whole workflow test step (`author-diff`). Never refused at commit, push or stop.
+  - The write tool lets a test-author write strictly inside its own red-run folder, where it builds its mutants (`test-practices`, P3). `_own_red_run` in `hooks/guard.py` judges it, the same test that `worktree-home` and `other-checkout` ask. The folder root, another agent's folder and a folder whose name only starts with its id are still refused (`test-author-scope`). Its shell writes to product code are not judged (a note, `author-shell-product-write`).
 - `record-writer`: may change only `*.md` files: records, README, CLAUDE.md-style docs, agent files, skills and output styles. It never changes product code, tests, CI or config. The write tool refuses any other path (`record-writer-scope`). At commit, push and stop, a diff that holds one is logged only (`writer-diff`).
   - Reason: a role name is only a label on the spawn. With no path limit, a Haiku `record-writer` is a Haiku builder under a new name, and the floor means nothing (`agent-model-cap`).
 - `designer`: at commit, push and stop, an offence is logged only (`designer-diff`).
