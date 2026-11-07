@@ -455,7 +455,7 @@ The writer also sets `lastAnswer` from the chat answer, with the time the owner 
 - Never reply in a comment thread: a rebuilt page drops its threads (decision
   questions-go-to-owner, "Answer on the page, not in a comment thread"). When a comment or an
   answer's note adds something to an item, rewrite that item with what the reply would have said.
-  Do it as "Route and close" says: the busy-lane rule for a `none` note with a clear direction (file the note as a step), step 3 for other new options (or a close when they are not ready), or step 4 (context). With no answer, there is no
+  Do it as "Route and close" says: the busy-lane rule for a `none` note with a clear direction (file the note as a roadmap step, or a todo record where there is no roadmap), step 3 for other new options (or a close when they are not ready), or step 4 (context). With no answer, there is no
   `answers/<id>` to delete. Republish the page only when the item's design changed (see "Add a
   design"). Say in one terminal line what changed.
 - The send must follow the owner's own click. How long that holds on a slow store is unmeasured.
@@ -470,10 +470,10 @@ The writer also sets `lastAnswer` from the chat answer, with the time the owner 
   answer's note to your feedback inbox (`local_time.py --page-note`), so jot it like a chat message.
 - `choice: "none"` asks for new options, unless its note gives a clear direction. It never picks an option.
   With a clear direction (see "A decision answer is clear only when"), it is a clear answer: the note becomes
-  a step, routed by the busy-lane rule in "Route and close". The owner is not asked again. Otherwise treat it as step 3 of
+  a roadmap step (a todo record where there is no roadmap), routed by the busy-lane rule in "Route and close". The owner is not asked again. Otherwise treat it as step 3 of
   "Route and close" says. Who judges: the routing session decides when it reads the answer. The page judge
   (`hooks/call_judge.py`, whose rule name is `question-judge`) also checks a re-ask write: one that gives the
-  item new `options` and carries a `lastAnswer` note. It refuses that write when the note already names a
+  item new `options` and carries a `lastAnswer` note with no picked choice (`choice` absent or `none`). It refuses that write when the note already names a
   clear direction (decision `question-reviewer-agent-hook`, the judge's record). In the terminal, "27 none of these (note)" is the same
   answer for item 27. On a `multi` item the terminal form of a list is "31 a+c": the keys joined by
   `+`, in rank order when `ranked`.

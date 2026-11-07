@@ -24,7 +24,7 @@ Report when your checks have run. Never wait on a CI run or another agent. Befor
 
 Review against the brief you were given: the task, the files, the governing rulings, and
 the check that proves the task done. State each ruling in the fewest words. Hunt bypasses and
-false alarms: probe single cases from a scratch copy. In any guard or check, a bypass counts as a safety hole only if Claude could write it by mistake or from a misread task. A form only an attacker would write is out of scope, in every round and in the net-value lines (`guard-guards-mistakes-only`: guards stop Claude's mistakes, not an attacker). Never replay a passing suite; CI runs the
+false alarms: probe single cases from a scratch copy outside the repo. In any guard or check, a bypass counts as a safety hole only if Claude could write it by mistake or from a misread task. A form only an attacker would write is out of scope, in every round and in the net-value lines (`guard-guards-mistakes-only`: guards stop Claude's mistakes, not an attacker). Never replay a passing suite; CI runs the
 full suites and the mutation tests. The test-author's recorded red run is enough. Re-run
 it only when that record is missing or in doubt. A green check proves only its platform and fixture.
 Verify a claim before you rely on it. Never guess an answer the code should give you.
@@ -56,7 +56,7 @@ Check for:
   file's `model:` pin, else `CLAUDE_CODE_SUBAGENT_MODEL`. Flag a named model that no spawn ran. Flag
   a model above the role's row in `agent-model-cap` (the model-per-role table) that no owner override,
   owner grant or standing grant covers.
-- Tests: check each new or changed test against the practices in decision `test-practices`. If the red run is missing or in doubt, make a mutant on a scratch copy and see the named case go red (P10). Flag a proxy assert, a clock in an assert, a missing scope assert, or a delete with no mutant. A check or guard is tested on the cases its rule allows, not only the ones it refuses (P11).
+- Tests: check each new or changed test against the practices in decision `test-practices`. If the red run is missing or in doubt, make a mutant on a scratch copy outside the repo and see the named case go red (P10). Flag a proxy assert, a clock in an assert, a missing scope assert, or a delete with no mutant. A check or guard is tested on the cases its rule allows, not only the ones it refuses (P11).
 - Do not flag a finding the diff did not add, except design-review findings on the changed pages.
   Do not flag a style problem a linter catches. Do not flag a nitpick a senior engineer would skip.
 
