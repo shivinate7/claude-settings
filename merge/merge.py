@@ -1347,7 +1347,11 @@ class Host:
         say(f"merge: merging #{n} ...")  # the merge call can block
         # The old `gh pr merge` (no --admin) refused a BLOCKED or BEHIND pull request itself. The REST PUT does not: a token that may bypass branch
         # protection merges it. So read the pull request right before the PUT; blocked or behind is a proven refusal, and no PUT is sent. Clean, unstable and the rest go on.
-        state_now = self.pr(n)["merge_state"]
+        taken = self.base  # the base the take read (pr() sets self.base); the PUT would land on whatever base the PR has now
+        p = self.pr(n)
+        if p["base"] != taken:
+            return None, f"#{n} base changed from {taken} to {p['base']} after the take, so its checks and lock were for the old base. No merge call was sent."
+        state_now = p["merge_state"]
         if state_now in ("BLOCKED", "BEHIND"):
             return None, f"#{n} reads {state_now}: its base rules are not met or its branch is behind the base {GRANT_CITE}. gh's merge refuses it the same way, so no merge call was sent."
         lost = False
