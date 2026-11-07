@@ -1178,13 +1178,16 @@ def case_page_without_a_send_blocks():
 
 
 def case_page_send_missing_names_the_closed_way_out():
-    """The block for a page item with no send names `[closed]` as the way out, for a writer that cannot be sent to
-    (such as a dead writer): the item is closed instead."""
+    """The block for a page item with no send names the inbox line, says the ruling did not reach the writer, and
+    names `[closed]` as the way out, for a writer that cannot be sent to (such as a dead writer). Decision
+    owner-feedback-inbox: an item closes when its inbox line gains `[closed]`."""
     p = page_run(new_cfg(), "page-closed-hint", [("98: a", (PAGE_ITEM,))],
                  [owner_rec("98: a"), said_rec("Noted.")])
     expect_send_missing("page: a page item with no send", p, "fb-0958-7", "98")
     reason = block_reason(p) or ""
     check("page: the block names [closed] as a way out", "[closed]" in reason, reason)
+    check("page: the block names the inbox line %r" % PAGE_ITEM, PAGE_ITEM in reason, reason)
+    check("page: the block says the ruling did not reach the writer", "did not reach the writer" in reason, reason)
 
 
 def case_page_send_before_the_owner_record_blocks():
@@ -1699,23 +1702,46 @@ def case_page_unfiled_remedy_offers_the_read_back():
           "read item 98 back from the page" in reason and "ArtifactData" in reason, reason)
 
 
+SELF = "page-close-writer"  # the session under test; the writer cases name it as the page writer
+OTHER_WRITER = "page-close-other-writer"  # a page writer that is not the session under test
+
+
+def writer_names(writer):
+    """The page's writer as page_writer_id reads it: one get of meta/page whose result names `writer`."""
+    return [used_rec("ArtifactData", {"action": "get", "collection": "meta", "doc_id": "page", "url": PAGE_URL},
+                     tool_id="meta1"),
+            result_rec("meta1", response_of([("page", {"writer": writer})]))]
+
+
+def read_back_of_98():
+    """A read of items/disk-cleanup on the page, and its result: item 98, with n 98."""
+    return [used_rec("ArtifactData", tool_input("get", collection="items", doc_id="disk-cleanup"), tool_id="rb1"),
+            result_rec("rb1", response_of([ITEM_98]))]
+
+
+def close_on_page(url=None):
+    """An update that closes items/disk-cleanup at page `url`, the waiting page when None, with no n."""
+    return used_rec("ArtifactData", {"action": "update", "url": url or PAGE_URL, "doc_id": "items/disk-cleanup",
+                                     "data": {"status": "closed"}})
+
+
 def case_page_closed_update_after_read_back_passes():
-    """A writer reads item 98 back, and the result returns n 98. It then closes items/disk-cleanup with an update
-    that holds no n. The read-back ties the close to n 98, so the close counts as the send. Both forms of the update
-    name the same item. The control is the same close with n 98 in its data, which passes on main, so the red is the
-    missing n alone."""
-    read = used_rec("ArtifactData", tool_input("get", collection="items", doc_id="disk-cleanup"), tool_id="rb1")
+    """The page writer reads item 98 back on the page, and the result returns n 98. It then closes items/disk-cleanup
+    on the same page with an update that holds no n. The page names this session as its writer, so the close counts
+    as the send. Both forms of the update name the same item. The control is the same close with n 98 in its data."""
     for label, target in (
             ("doc_id items/disk-cleanup", {"doc_id": "items/disk-cleanup"}),
             ("collection items, doc_id disk-cleanup", {"collection": "items", "doc_id": "disk-cleanup"})):
-        close = dict(target, action="update", data={"status": "closed"})
-        answer = result_rec("rb1", response_of([ITEM_98]))
-        p = page_run(new_cfg(), "page-close-readback", [(NEUTRAL, (PAGE_ITEM,))],
-                     [owner_rec(NEUTRAL), read, answer, used_rec("ArtifactData", close)])
-        expect_silent("page: a close of item 98 after its read-back, no n in the update (%s), passes" % label, p)
+        close = dict(target, action="update", url=PAGE_URL, data={"status": "closed"})
+        p = page_run(new_cfg(), SELF, [(NEUTRAL, (PAGE_ITEM,))],
+                     [owner_rec(NEUTRAL)] + writer_names(SELF) + read_back_of_98()
+                     + [used_rec("ArtifactData", close)])
+        expect_silent("page: a writer's close of item 98 on the same page after its read-back, no n (%s), passes"
+                      % label, p)
         control = dict(close, data={"n": 98, "status": "closed"})
-        p = page_run(new_cfg(), "page-close-control", [(NEUTRAL, (PAGE_ITEM,))],
-                     [owner_rec(NEUTRAL), read, answer, used_rec("ArtifactData", control)])
+        p = page_run(new_cfg(), SELF, [(NEUTRAL, (PAGE_ITEM,))],
+                     [owner_rec(NEUTRAL)] + writer_names(SELF) + read_back_of_98()
+                     + [used_rec("ArtifactData", control)])
         expect_silent("page: control, the same close with n 98 in its data (%s), passes" % label, p)
 
 
@@ -1740,6 +1766,35 @@ def case_page_closed_update_of_another_item_still_blocks():
                                             "data": {"status": "closed"}})])
     expect_send_missing("page: a close of items/other-item after a read-back of item 98 still blocks", p,
                         "fb-0958-7", "98")
+
+
+def case_page_close_by_a_session_that_is_not_the_writer_blocks():
+    """The page names another session as its writer. This session reads item 98 and closes it on the same page, so
+    the close is not the writer's and sends nothing to the writer. The same records with this session as the writer
+    pass (case_page_closed_update_after_read_back_passes)."""
+    p = page_run(new_cfg(), SELF, [(NEUTRAL, (PAGE_ITEM,))],
+                 [owner_rec(NEUTRAL)] + writer_names(OTHER_WRITER) + read_back_of_98() + [close_on_page()])
+    expect_send_missing("page: a close by a session the page does not name as its writer still blocks", p,
+                        "fb-0958-7", "98")
+
+
+def case_page_close_before_its_read_back_blocks():
+    """The close comes before the read of item 98 that returns it. The read-back is what ties the close to n 98, so
+    a close that comes first sends nothing. This session is the writer and the url matches, so only the order is
+    missing."""
+    p = page_run(new_cfg(), SELF, [(NEUTRAL, (PAGE_ITEM,))],
+                 [owner_rec(NEUTRAL)] + writer_names(SELF) + [close_on_page()] + read_back_of_98())
+    expect_send_missing("page: a close of item 98 that comes before its read-back still blocks", p,
+                        "fb-0958-7", "98")
+
+
+def case_page_close_with_another_page_url_blocks():
+    """The read of item 98 is on the waiting page, and the close is on another page. The close does not carry the
+    read's page, so it sends nothing to this page's writer. This session is the writer and the order is right, so
+    only the url is missing."""
+    p = page_run(new_cfg(), SELF, [(NEUTRAL, (PAGE_ITEM,))],
+                 [owner_rec(NEUTRAL)] + writer_names(SELF) + read_back_of_98() + [close_on_page(OTHER_PAGE_URL)])
+    expect_send_missing("page: a close of item 98 on another page's url still blocks", p, "fb-0958-7", "98")
 
 
 def case_page_send_with_an_error_result_does_not_count():
@@ -3794,6 +3849,9 @@ CASES = (
     case_page_closed_update_after_read_back_passes,
     case_page_closed_update_without_read_back_still_blocks,
     case_page_closed_update_of_another_item_still_blocks,
+    case_page_close_by_a_session_that_is_not_the_writer_blocks,
+    case_page_close_before_its_read_back_blocks,
+    case_page_close_with_another_page_url_blocks,
     case_page_send_with_an_error_result_does_not_count,
     case_page_artifactdata_write_with_an_error_result_does_not_count,
     case_send_with_a_good_result_still_counts,
