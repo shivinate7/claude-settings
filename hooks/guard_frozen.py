@@ -1302,7 +1302,8 @@ def _runner_inner(tokens, index: int):
     return (rest, inner) if inner is not None else None
 
 
-_GLUED_REDIRECT = re.compile(r"\d*>|&>")
+# An input redirect is glued too (`)<in`, `)0<in`); `<<` (heredoc) and `<(` (process substitution) are not.
+_GLUED_REDIRECT = re.compile(r"\d*>|&>|\d*<(?![<(])")
 
 
 def _unparen(segment: str, tokens):
@@ -1313,13 +1314,17 @@ def _unparen(segment: str, tokens):
     if not marks:
         return tokens
     # `)` is a shell metacharacter, so a redirect glued to it (`)>f`, `)>>f`, `)2>&1`, `)&>f`) is a word of its
-    # own. The tokenizer keeps it on the script word; a space after each unquoted such `)` splits it off.
+    # own. The tokenizer keeps it on the script word; a space after each unquoted such `)` splits it off. The
+    # re-split keeps the segment's script type: a PowerShell group reads its backslashes as path separators.
     glued = [at + 1 for at, char, quote in walked
              if not quote and char == ")" and _GLUED_REDIRECT.match(segment, at + 1)]
     if glued:
+        script_type = type(segment)
         for at in reversed(glued):
-            segment = segment[:at] + " " + segment[at:]
+            segment = script_type(segment[:at] + " " + segment[at:])
         tokens = segment_tokens(segment)
+        if tokens is None:   # the shell text cannot be parsed: judge nothing, as the caller's own read did
+            return tokens
     tokens = list(tokens)
     if marks.count("(") and len(tokens) > 1 and tokens[0].startswith("(") and tokens[0].lstrip("("):
         tokens[0] = tokens[0].lstrip("(")
