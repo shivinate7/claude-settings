@@ -7,7 +7,8 @@ Run it from the repository root:
 
 Design under test: the Stop hook runs `stall_watch.py --stop`. The mode reads the Stop JSON on
 stdin, scans the session transcript for background shells, and prints ONE JSON line
-`{"systemMessage": "..."}` that lists each stale job, or prints nothing.
+`{"decision": "block", "reason": "..."}` that lists each stale job, or prints nothing. The reason is the
+text the model reads: a systemMessage shows only to the owner, so the model never sees it.
 
 - A job is a Bash call that a background run began. Its id is the `backgroundTaskId` in the
   record's structured `toolUseResult`. Text that quotes a result does not make a job.
@@ -31,6 +32,8 @@ stdin, scans the session transcript for background shells, and prints ONE JSON l
   started it, to the end of that line. The note sits on the job's own line, and the message asks
   whether it is met. A job whose call holds no `until:` text is still listed, with no note.
 - When guard_stream cannot be imported, --stop still lists each stale job, with no note.
+- A Stop with rows blocks: its reason holds the same listing. A Stop with no row, a Stop with
+  stop_hook_active true, or a failed run prints nothing, so no block is sent and no loop starts.
 - Any error prints nothing and exits 0.
 
 Seams: STALL_WATCH_NOW (epoch seconds, the clock), STALL_WATCH_OUTPUT_BASE (a folder that
@@ -279,21 +282,46 @@ def run_stop(transcript_path, base=None, stop_hook_active=False, quiet=None, std
     return proc.returncode, proc.stdout.decode("utf-8", "replace"), proc.stderr.decode("utf-8", "replace")
 
 
-def system_message(out, problems):
-    """Return the systemMessage of the one JSON line the mode prints, or '' when it printed nothing."""
+def stop_payload(out, problems):
+    """The one JSON object the mode printed, or {} when it printed nothing. A problem is added when the
+    output is not one JSON object on one line."""
     if out.strip() == "":
-        return ""
+        return {}
     if len(out.strip().splitlines()) != 1:
         problems.append(f"stop output is not one line: {out[:200]!r}")
     try:
-        msg = json.loads(out)["systemMessage"]
-    except (ValueError, KeyError, TypeError):
-        problems.append(f"stop output is not a systemMessage JSON object: {out[:200]!r}")
+        body = json.loads(out)
+    except ValueError:
+        problems.append(f"stop output is not a JSON object: {out[:200]!r}")
+        return {}
+    if not isinstance(body, dict):
+        problems.append(f"stop output is not a JSON object: {out[:200]!r}")
+        return {}
+    return body
+
+
+def system_message(out, problems):
+    """The alarm text the mode printed: its reason when it blocks the Stop, else its systemMessage. ''
+    when it printed nothing. The listing cases read it, so they need not know which key carries it."""
+    body = stop_payload(out, problems)
+    if not body:
         return ""
+    key = "reason" if body.get("decision") == "block" else "systemMessage"
+    if key not in body:
+        problems.append(f"stop output has no {key}: {out[:200]!r}")
+        return ""
+    msg = body[key]
     if not isinstance(msg, str):
-        problems.append("systemMessage is not a string")
+        problems.append(f"{key} is not a string")
         return ""
     return msg
+
+
+def block_reason(out, problems):
+    """The reason of the decision block the mode printed, or '' when it printed none. The decision itself
+    is checked by its own case, so a failure here names the reason, not the decision."""
+    reason = stop_payload(out, problems).get("reason")
+    return reason if isinstance(reason, str) else ""
 
 
 def listed_once(msg, job_id):
@@ -389,6 +417,7 @@ def no_job_prints_nothing_and_quoted_result_is_not_a_job():
     return problems
 
 
+@case
 def missing_or_unreadable_transcript_prints_nothing():
     """S6a. transcript path missing, or a folder: exit 0, nothing printed. Control: a readable
     transcript lists its stale job"""
@@ -407,6 +436,7 @@ def missing_or_unreadable_transcript_prints_nothing():
     return problems
 
 
+@case
 def bad_stop_payload_prints_nothing():
     """S6b. stdin that is not JSON, or empty: exit 0, nothing printed. Control: a good payload
     lists the stale job"""
@@ -1361,6 +1391,101 @@ def C5_newest_summary_with_a_bad_timestamp_fails_open():
                at(prompt("next"), 500), at(assistant_text("ok"), 450)])
     problems, msg = stop_listing(recs, base)
     return problems + listed_once(msg, "bbad")
+
+
+@case
+def stale_stop_is_a_block_decision():
+    """D1. a quiet job: the Stop prints a decision block with a text reason, so the model is told to act.
+    Scope first: the job is listed in the alarm text the Stop printed"""
+    base = new_dir()
+    output_file(base, "bblk600", 600)
+    rc, out, err = run_stop(transcript(moved("bblk600")), base)
+    problems = expect(rc == 0, f"exit {rc}, want 0: {err.strip()[:200]}")
+    problems += listed_once(system_message(out, problems), "bblk600")
+    body = stop_payload(out, problems)
+    problems += expect(body.get("decision") == "block", f"the Stop printed no decision block: {out[:200]!r}")
+    if body.get("decision") == "block":  # the reason is judged only once the Stop blocks
+        problems += expect(isinstance(body.get("reason"), str), f"the decision block has no text reason: {body!r}")
+    return problems
+
+
+@case
+def block_reason_says_stop_or_tell_owner_names_the_job_and_its_age():
+    """D2. a quiet job: the reason, the text the model reads, says to stop the shell or tell the owner,
+    names the job once, and gives the job's age"""
+    base = new_dir()
+    output_file(base, "bres600", 600)
+    rc, out, err = run_stop(transcript(moved("bres600")), base)
+    problems = expect(rc == 0, f"exit {rc}, want 0: {err.strip()[:200]}")
+    reason = block_reason(out, problems)
+    problems += expect(ADVICE in reason.lower(), f"the reason does not say {ADVICE!r}: {reason!r}")
+    problems += listed_once(reason, "bres600")
+    problems += expect("600s" in reason, f"age 600s is not in the reason: {reason!r}")
+    return problems
+
+
+@case
+def block_reason_carries_the_until_note_and_asks_if_met():
+    """D3. a quiet job whose call holds `until: <condition>`: the reason puts the condition on the job's own
+    line, and asks the model whether it is met"""
+    base = new_dir()
+    output_file(base, "bdnote600", 600)
+    recs = flagged("bdnote600", desc="Serve q_max files on 3202. until: round 1 bids are served")
+    rc, out, err = run_stop(transcript(recs), base)
+    problems = expect(rc == 0, f"exit {rc}, want 0: {err.strip()[:200]}")
+    reason = block_reason(out, problems)
+    problems += expect("round 1 bids are served" in line_of(reason, "bdnote600"),
+                       f"the note is not on the job's own line in the reason: {reason!r}")
+    problems += expect(re.search(r"\bmet\b", reason.lower()) is not None,
+                       f"the reason does not ask whether the condition is met: {reason!r}")
+    return problems
+
+
+@case
+def block_reason_lists_every_row_at_full_size():
+    """D4. twelve quiet jobs and one job with no output file: the alarm text lists each quiet job once, the
+    reason lists each the same way, and the unknown job's line says unknown. Full size: no row is cut"""
+    base = new_dir()
+    quiet = ["bfull%02d" % i for i in range(12)]
+    recs = []
+    for job in quiet:
+        output_file(base, job, 600)
+        recs += moved(job)
+    recs += moved("bfullnone")  # no output file: its row is unknown
+    rc, out, err = run_stop(transcript(recs), base)
+    problems = expect(rc == 0, f"exit {rc}, want 0: {err.strip()[:200]}")
+    alarm = system_message(out, problems)
+    for job in quiet:
+        problems += listed_once(alarm, job)  # scope: each quiet job is listed at all
+    reason = block_reason(out, problems)
+    for job in quiet:
+        problems += listed_once(reason, job)
+    problems += expect("unknown" in line_of(reason, "bfullnone").lower(),
+                       f"the unknown job's line in the reason does not say unknown: {reason!r}")
+    return problems
+
+
+@case
+def stop_with_open_jobs_and_no_row_prints_nothing_not_an_empty_block():
+    """D5. a Stop with open jobs and no row prints nothing at all, so no empty block is sent: a job whose
+    output changed 10 s ago, and a job that an earlier Stop already listed, whose stall crossed before that
+    Stop. Control: a stale job in the same transcript is listed"""
+    base = new_dir()
+    output_file(base, "bdfresh10", 10)
+    rc, out, err = run_stop(transcript(moved("bdfresh10")), base)
+    problems = expect(rc == 0, f"exit {rc}, want 0: {err.strip()[:200]}")
+    problems += expect(out.strip() == "", f"a fresh job with no row printed {out.strip()[:120]!r}, want nothing")
+    output_file(base, "bdprev1400", 1400)  # its stall crossed 1100 s ago, before the summary 900 s ago
+    prev = ([at(prompt("first"), 1500)] + stamped(moved("bdprev1400"), 1490)
+            + [at(assistant_text("first answer"), 1000), stop_summary(900),
+               at(prompt("next"), 800), at(assistant_text("started"), 700)])
+    rc, out, err = run_stop(transcript(prev), base)
+    problems += expect(rc == 0, f"the run after the previous Stop: exit {rc}, want 0: {err.strip()[:200]}")
+    problems += expect(out.strip() == "", f"a job the previous Stop listed printed {out.strip()[:120]!r}, want nothing")
+    output_file(base, "bdctl600", 600)  # the control: a stale job in the same transcript is listed
+    rc, out, err = run_stop(transcript(prev + stamped(moved("bdctl600"), 650)), base)
+    problems += listed_once(system_message(out, problems), "bdctl600")
+    return problems
 
 
 if __name__ == "__main__":
