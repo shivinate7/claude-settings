@@ -18,7 +18,7 @@ a file or line missing at the rev, or a group past --max-calls. It stays in its 
 numerator. When a call failed, or its reply was not JSON, the unknown field carries the first line of that error text.
 
 The one output line:
-    false alarms 1/13 (7.7%), hits 3/4, unbacked 5/17, unknown 0, skipped 4
+    false alarms A/B (P%), hits C/D, unbacked E/F, unknown G, skipped H
 or, with a failed call, `unknown 17 (model error: <first line of the error>)`.
 """
 import argparse
