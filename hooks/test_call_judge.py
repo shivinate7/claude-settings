@@ -2073,12 +2073,11 @@ def case_send_tool_names_come_from_shared_names():
 # fence and a send with no verdict word all pass. The backing parser is lint/stale_cites.py, and the turn reader is
 # lint/_transcript.py. The cases import them and build no copy.
 #
-# The word list that cases 1, 4 and 7 pin. A claim sentence holds a forecast word, a verdict word and a subject word.
+# The word lists that cases 1, 4 and 7 pin. A claim sentence holds a forecast word, a verdict word and a subject word.
 # Case 1 holds all three. Case 4 holds no forecast word (a report in the past tense). Case 7 holds a forecast and a
 # subject, and no verdict word. Each case reads its sentence against these lists before it asserts on the hook (P7).
-VERDICT_FORECAST_WORDS = ("will", "would")
-VERDICT_WORDS = ("refuse", "block", "deny", "catch", "allow", "pass")
-VERDICT_SUBJECT_WORDS = ("check", "guard", "hook", "test", "rule")
+# The lists are the product's constants, imported and never copied (rule building-allow-list-is-the-constant).
+from call_judge import VERDICT_FORECAST_WORDS, VERDICT_WORDS, VERDICT_SUBJECT_WORDS  # noqa: E402
 # The named check is a test file, so a Bash call that runs it names the same path, and (a) needs no name mapping.
 CLAIM_CHECK = "hooks/test_call_judge.py"
 INCIDENT_SENTENCE = "#1516's check will refuse it without the stop."  # the incident, verbatim: its check has no path
@@ -2174,6 +2173,18 @@ def case_verdict_claim_with_its_test_run_this_turn_passes():
     for tool in SEND_TOOLS:
         r = run_hook(send_input(tool, CLAIM, transcript=transcript), answer=ALLOW)
         check("verdict claim, its test run this turn, via %s: the send is not refused" % tool,
+              r.code == 0 and r.deny() is None, detail(r))
+
+
+def case_read_of_the_claimed_file_in_this_turn_clears_the_claim():
+    # Pinned as allowed. A known limit, accepted: the gate counts a Bash call that names the claimed file as a run, and a
+    # read (`cat`) names it too. So a read clears the claim as a run, though it runs no test.
+    transcript = write_transcript("case-read", commands=["cat " + CLAIM_CHECK])
+    check("read clears the claim scope: the turn's Bash call is a cat of the claimed file",
+          any(command == "cat " + CLAIM_CHECK for command in turn_commands(transcript)), turn_commands(transcript))
+    for tool in SEND_TOOLS:
+        r = run_hook(send_input(tool, CLAIM, transcript=transcript), answer=ALLOW)
+        check("verdict claim, its file read this turn, via %s: the send is not refused" % tool,
               r.code == 0 and r.deny() is None, detail(r))
 
 
@@ -2341,6 +2352,7 @@ def main():
                  case_verdict_claim_without_run_or_cite_is_refused,
                  case_verdict_claim_with_its_test_run_this_turn_passes,
                  case_verdict_claim_cited_to_an_existing_file_passes, case_past_tense_report_passes,
+                 case_read_of_the_claimed_file_in_this_turn_clears_the_claim,
                  case_quoted_claim_in_a_code_fence_passes,
                  case_send_with_no_verdict_word_reads_no_transcript_and_calls_no_model,
                  case_forecast_without_a_verdict_word_passes,
