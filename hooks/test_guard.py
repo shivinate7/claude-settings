@@ -11798,6 +11798,13 @@ sh("perl-ruby-bodies-unread: perl -ne reads a config hook and writes nothing, al
    "perl -ne 'print' " + CFG_HOOK, "allow", cwd=NOGIT)
 sh("perl-ruby-bodies-unread: perl -pi -e on a file that is not frozen is allowed",
    "perl -pi -e 's/a/b/' notes.txt", "allow", cwd=NOGIT)
+# frozen-digit-switch: perl takes its switches in a cluster, and a digit may come before the `i`: `-0pi`
+# sets the record separator, then edits in place. The in-place switch reads that cluster as perl does.
+sh("frozen-digit-switch: perl -0pi -e on a config hook is refused, as perl -pi is",
+   "perl -0pi -e 's/a/b/' " + CFG_HOOK, "deny", "frozen-path", cwd=NOGIT)
+# The near form: the same digit cluster with no in-place letter reads the hook and writes nothing.
+sh("frozen-digit-switch: perl -0ne reads a config hook and writes nothing, allowed",
+   "perl -0ne 'print' " + CFG_HOOK, "allow", cwd=NOGIT)
 sh("config-edit: rm of a project settings file is allowed", "rm " + PROJ_SETTINGS, "allow",
    cwd=NOGIT)
 sh("config-edit: mv of a project settings file is allowed",
