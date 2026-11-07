@@ -3,11 +3,11 @@
 Copy this list once for each changed screen, at each size and theme it ships in. Mark each line
 pass or fail. A fail is a finding. Give the rule id, the screen, the size and the theme. The rules
 and their checks are in `principles.md`. A line marked (guidance) is advice: its fail is a note, not a
-finding.
+finding. A line marked (not adopted) is no rule: skip it, and file nothing.
 
 Screen: ____ Size: ____ Theme: ____
 
-- [ ] ux-press-moves-nothing: Do all other elements keep their place and size on each press and load?
+- [ ] ux-press-moves-nothing (not adopted): Do all other elements keep their place and size on each press and load?
 - [ ] ux-order-holds-still (guidance): After an act on one row, do the other rows stay in the open list and keep their order? If that row left, did the next open row, if any, take its slot?
 - [ ] ux-unknown-is-not-empty: Do a failed read and an unknown state each show their own words? Is each empty state one sentence and one control? With no data, are filters hidden? After a filter empties the list, do filters show with a clear control?
 - [ ] ux-statements-are-true (guidance): Is each promise in the copy true of the product now?
