@@ -3124,7 +3124,7 @@ pinned_wt1() {
 }
 
 # ---- pinoff cases: the pinned checkout <clone>-live is off-main only when it is not at main ----
-# Decision merge-reinstalls-from-main: the ~/.claude links point at <clone>-live,
+# Decision install-refuses-linked-tree: the ~/.claude links point at <clone>-live,
 # a detached worktree at main's commit. session_start.sh must not print an off-main line for that
 # checkout, and must print one for a pin at any other commit. pinoff1: at main's commit with
 # origin/main 2 ahead, the freshness line fires once and no off-main line. pinoff2: a pin one
@@ -3633,7 +3633,7 @@ logoffset1() {
 }
 
 # ---- pinlive cases: <clone>-live is the one linked worktree allowed, and only at local main ----
-# Decision merge-reinstalls-from-main: the path <clone>-live is not enough. A linked
+# Decision install-refuses-linked-tree: the path <clone>-live is not enough. A linked
 # worktree at that path is allowed only when it is detached at the clone's local main commit.
 # pinlive1: a -live worktree on a lane branch is refused. pinlive2: a -live worktree detached at a
 # commit that is not main is refused. pinned_wt1 keeps the other side: detached at main passes.
