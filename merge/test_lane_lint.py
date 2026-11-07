@@ -42,10 +42,10 @@ while time.time() < end and os.getppid() == PARENT:
     time.sleep(0.05)
 lines = ["%-15s %s: stub step" % (state, name) for state, name in STEPS]
 print("\\n".join(lines))
-if RC == 1:
+if RC != 0:  # a run that does not pass ends with its log line: the refusal reads it as the run's log
     with open(STEP_LOG, "w", encoding="utf-8") as f:
         f.write("\\n".join(lines) + "\\n")
-    print("log=" + STEP_LOG)  # the last line: the refusal reads it as the failing run's log
+    print("log=" + STEP_LOG)
 sys.exit(RC)
 '''
 
@@ -434,6 +434,22 @@ class LaneLint(CiJobStub, tm.CloudSession):
     def test_a_failed_lint_refusal_shows_the_ci_job_log_line(self):
         self.use_ci_job(FAILING, 1)
         rc, out = self.lint_run("--lane-lint", "7")
+        self.assertEqual(rc, 1, out)
+        self.assertTrue(os.path.exists(self.step_log), "the stub wrote no step log")
+        self.assertIn("log=" + self.step_log, out.splitlines(), out)
+
+    def test_an_unknown_refusal_keeps_the_ci_job_log_line(self):  # the control: the liftable branch already prints it
+        self.use_ci_job(UNKNOWN, 2)
+        rc, out = self.lint_run("--lane-lint", "7")
+        self.assertEqual(rc, 1, out)
+        self.assertIn("log=" + self.step_log, out.splitlines(), out)
+
+    def test_an_odd_exit_refusal_keeps_the_ci_job_log_line(self):
+        # ci_job_run reads the log line of any run. The non-liftable Stop of an odd exit (no FAIL, no unknown) drops it, so the
+        # reader gets no path to the run's log. Ci-job's own exits are 0, 1 and 2; this is the contract for any other exit.
+        self.use_ci_job(PASSING, 3)
+        rc, out = self.lint_run("--lane-lint", "7")
+        self.assertIn("ci-job exited 3", out, out)
         self.assertEqual(rc, 1, out)
         self.assertTrue(os.path.exists(self.step_log), "the stub wrote no step log")
         self.assertIn("log=" + self.step_log, out.splitlines(), out)
