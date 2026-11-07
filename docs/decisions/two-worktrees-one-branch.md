@@ -6,7 +6,7 @@ Coordinator, 2026-11-07 14:29 CST, under lane override-plain-ask: the incident b
 
 The guard rule `two-worktrees-one-branch` refuses a git command that checks out a branch another worktree of the clone already holds. The forms are:
 
-- `git checkout -B <branch>` and `git switch -C <branch>`. Git 2.43 lets them through with no warning.
+- `git checkout -B <branch>`, and `git switch -C <branch>` or `--force-create <branch>`. Git 2.43 lets them through with no warning.
 - `git checkout --ignore-other-worktrees` and `git switch --ignore-other-worktrees`, with any branch.
 - `git worktree add -f` (or `--force`) for a branch.
 
