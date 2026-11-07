@@ -12834,9 +12834,10 @@ class ReviewFixBase(ReviewEnv):
                 self.assertNotIn("Traceback", err)
 
     def test_a_legacy_folder_name_is_code_in_a_rolled_out_repo(self):
-        # a rolled-out repo keeps each kind at its layout path, so plans/, decisions/, debts/ and records/ hold code there; docs/plans still counts
+        # a rolled-out repo keeps each kind at its layout path, so Markdown under plans/, decisions/, debts/ and records/ is not a record there;
+        # docs/plans still counts. The names are Markdown, so only the legacy names decide the case, not the file type.
         self.roll_out()
-        for path in ("plans/engine.py", "decisions/engine.py", "debts/engine.py", "records/engine.py"):
+        for path in ("plans/engine.md", "decisions/engine.md", "debts/engine.md", "records/engine.md"):
             with self.subTest(path=path):
                 newest = review_comment(1, 7, record_text(head=REVIEW_OLD_HEAD, rounds=REVIEW_PASS))
                 diffs = {(REVIEW_OLD_HEAD, self.NOTES_HEAD): compare_of("ahead", file_entry(path))}
