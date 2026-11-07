@@ -5,7 +5,8 @@ what really happened and note a contradiction, never refuse on it:
 - hooks/refusal_note.py (PermissionDenied): a refused call that a "works" row matches.
 - lint/report_guard.py (Stop): a successful call that a "refused" row matches, and each `route_flag` the
   first hook wrote.
-lint/report_guard.py also reads a row by id for the hand-off cite: a "Why yours" line must cite `(route <id>)`.
+lint/report_guard.py also reads a row by id for the hand-off cite: a "Why yours" line must cite `(route <id>)`,
+and judges with cite_covers that the cited row covers the act the page task names (act_texts, rows_covering).
 
 Rows file: {"rows": [{id, act, route, surface, outcome, measured, cc_version, evidence, by, pattern,
 alternates?}]}, at hooks/route_rows.json. The env GUARD_ROUTE_ROWS overrides the path, as
@@ -16,7 +17,8 @@ does not read), for the reader that must report an unread file as UNKNOWN.
 
 Cost: one file read per hook run that already runs, no process, no write. It never writes the rows file. A match
 runs each row's pattern once per call target, over at most MAX_TARGET_CHARS of it, and skips a pattern longer than
-MAX_PATTERN_CHARS.
+MAX_PATTERN_CHARS. The cite cover is the same match over the pieces of one task's act text, so it costs no more
+than a call with that many targets.
 The surface is guard_core.is_cloud, the one home of the cloud check.
 """
 import json
@@ -83,6 +85,14 @@ def call_target(tool_name, tool_input):
     return tool_name if isinstance(tool_name, str) else ""
 
 
+def row_matches(row, targets):
+    """True when the row's pattern matches at least one of `targets` (strings the caller has already cut to
+    MAX_TARGET_CHARS). A row with no readable pattern matches nothing. The one regex path of every match here."""
+    pattern = row.get("pattern")
+    compiled = _compile(pattern) if isinstance(pattern, str) else None
+    return compiled is not None and any(compiled.search(target) for target in targets)
+
+
 def matching_rows(rows, outcome, calls):
     """The rows of `outcome` on this surface that match at least one of `calls`, each a (tool_name,
     tool_input) pair, in the order of the rows. A row with no readable pattern matches nothing."""
@@ -90,14 +100,48 @@ def matching_rows(rows, outcome, calls):
         return []
     here = surface()
     targets = [call_target(name, tool_input)[:MAX_TARGET_CHARS] for name, tool_input in calls]
-    found = []
-    for row in rows:
-        pattern = row.get("pattern")
-        if row.get("surface") != here or row.get("outcome") != outcome or not isinstance(pattern, str):
-            continue
-        compiled = _compile(pattern)
-        if compiled is None:
-            continue
-        if any(compiled.search(target) for target in targets):
-            found.append(row)
-    return found
+    return [row for row in rows
+            if row.get("surface") == here and row.get("outcome") == outcome and row_matches(row, targets)]
+
+
+_ACT_SPLIT = re.compile(r"&&|;")
+_BACKTICK_SPAN = re.compile(r"`([^`]+)`")
+
+
+def act_texts(task):
+    """The act pieces of a waiting-page task: each line of its "command" (a string, or each value of a dict of
+    variants) split at && and ;, then each backtick span of its "context". Empty pieces are dropped. A route
+    row names one act, and a command line chains several, so the cover reads each piece, not the whole line."""
+    command = task.get("command")
+    commands = list(command.values()) if isinstance(command, dict) else [command]
+    pieces = [piece.strip()
+              for text in commands if isinstance(text, str)
+              for line in text.splitlines()
+              for piece in _ACT_SPLIT.split(line)]
+    context = task.get("context")
+    if isinstance(context, str):
+        pieces.extend(span.strip() for span in _BACKTICK_SPAN.findall(context))
+    return [piece for piece in pieces if piece]
+
+
+def rows_covering(rows, texts):
+    """The rows on this surface whose pattern matches any of the act pieces `texts`, in row order, whatever
+    their outcome."""
+    if not rows or not texts:
+        return []
+    here = surface()
+    targets = [text[:MAX_TARGET_CHARS] for text in texts]
+    return [row for row in rows if row.get("surface") == here and row_matches(row, targets)]
+
+
+def cite_covers(rid, rows, texts):
+    """Whether the row `rid` covers the act `texts`: "covers", "no", or "unknown". Unknown: no act text, no row
+    on this surface holds rid, or that row has no readable pattern, since a cite that cannot be judged is
+    never refused. A row's alternates name other acts and never cover."""
+    if not texts:
+        return "unknown"
+    here = surface()
+    cited = [row for row in rows if row.get("id") == rid and row.get("surface") == here]
+    if not any(isinstance(row.get("pattern"), str) and _compile(row["pattern"]) for row in cited):
+        return "unknown"
+    return "covers" if any(row.get("id") == rid for row in rows_covering(cited, texts)) else "no"
