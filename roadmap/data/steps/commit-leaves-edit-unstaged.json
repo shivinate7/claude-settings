@@ -1,0 +1,11 @@
+{
+  "title": "A commit that stages a git rm asks when it leaves a tracked edit in the same folder unstaged",
+  "phase": "now",
+  "status": "doing",
+  "order": 269.0,
+  "owner": "coordinator",
+  "lane": "session_013NEJL49gUhQAEPTctz3JHn",
+  "why": "Lane replay-profile-parts: commit 7ba74efd9 staged a git rm and left a tracked edit in the same folder unstaged (coordinator, 17:31 CST Nov 7).",
+  "note": "Follows this lane's stale-tree PR (step resumed-agent-stale-tree), same commit-time home. Done check: a red test where the commit asks, and an unstaged edit in another folder still passes.",
+  "updatedAt": "2026-11-07T17:32:00-06:00"
+}
