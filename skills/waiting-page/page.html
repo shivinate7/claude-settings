@@ -1124,6 +1124,10 @@ function fmt(iso, withDay = true) {
   const g = (t) => (p.find((x) => x.type === t) || {}).value;
   return (withDay ? g("month") + " " + g("day") + ", " : "") + g("hour") + ":" + g("minute") + " " + g("timeZoneName");
 }
+const CT = "America/Chicago";
+const dayKey = (d) => d.toLocaleDateString("en-CA", { timeZone: CT });
+// A time read today shows the clock only; an earlier US Central day adds its day.
+const fmtRecent = (iso) => { const d = new Date(iso); return isNaN(d) ? "" : fmt(iso, dayKey(d) !== dayKey(new Date())); };
 const span = (ms) => { const hrs = Math.round(Math.abs(ms) / 36e5); if (hrs < 1) return "under an hour"; if (hrs < 24) return hrs + (hrs === 1 ? " hour" : " hours"); const d = Math.round(hrs / 24); return d + (d === 1 ? " day" : " days"); };
 const validT = (iso) => !isNaN(Date.parse(iso));
 const waited = (iso) => (validT(iso) ? "waited " + span(Date.now() - Date.parse(iso)) : "");
@@ -1518,7 +1522,7 @@ function receipt(it, noNote) {
   else { const o = (it.options || []).find((x) => x.key === sv.choice); what = "You chose " + (o ? letterOf(it, o.key) + ": " + o.label : "an option"); }
   return h("div", { class: "receipt" },
     h("div", { class: "line" }, glyph("done"), h("b", {}, picks ? what : what + "."),
-      rc.read && !rc.filed ? h("span", { class: "read" }, "Read by " + it.owner + " " + fmt(rc.read, false)) : null,
+      rc.read && !rc.filed ? h("span", { class: "read" }, "Read by " + it.owner + " " + fmtRecent(rc.read)) : null,
       h("button", { class: "btn quiet changebtn", type: "button", onclick: () => { state.changing[it.id] = true; edited(); setDraft(it, sv.act === "park" ? { act: "park", note: sv.note || "" } : { choice: Array.isArray(sv.choice) ? sv.choice.slice() : sv.choice, note: sv.note || "", done: !!sv.done }); repaint(it); } }, "Change")),
     picks,
     !noNote && sv.note && sv.note !== "accepted pick" ? h("p", { class: "rnote" }, "Note: " + sv.note) : null);
@@ -2587,7 +2591,7 @@ function renderAskList() {
 }
 // What a record that waits says: not read yet, or read by the session that holds it.
 const askWaitWords = (a) => (typeof a.owner === "string" && a.owner.trim() && validT(a.read)
-  ? ["Read by " + askOwner(a) + " ", h("span", { class: "t" }, fmt(a.read, false)), ". Waiting for its answer."]
+  ? ["Read by " + askOwner(a) + " ", h("span", { class: "t" }, fmtRecent(a.read)), ". Waiting for its answer."]
   : ["Waiting for " + askWriter() + " to read it."]);
 // A session's answer to a record: who, when, the words, and where it was filed.
 function askAnswer(a) {
@@ -3040,8 +3044,6 @@ const num = (n) => (typeof n === "number" ? n.toLocaleString("en-US") : n == nul
 const isNum = (v) => typeof v === "number" && isFinite(v);
 const when = (iso) => { const d = iso ? new Date(iso) : null; return d && !isNaN(d) ? d : null; };
 // Days and times are US Central, as the rest of the page (fmt).
-const CT = "America/Chicago";
-const dayKey = (d) => d.toLocaleDateString("en-CA", { timeZone: CT });
 const dayLabel = (d) => d.toLocaleDateString("en-US", { timeZone: CT, weekday: "short", month: "short", day: "numeric" });
 const timeLabel = (d) => fmt(d.toISOString(), false);
 const ago = (iso) => { const d = when(iso); if (!d) return ""; const hrs = (Date.now() - d) / 36e5; if (hrs < 1) return "just now"; if (hrs < 24) return Math.round(hrs) + "h ago"; return Math.round(hrs / 24) + "d ago"; };
