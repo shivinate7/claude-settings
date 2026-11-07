@@ -899,7 +899,8 @@ class Stale(unittest.TestCase):
 
     def test_prune_names_a_closed_items_mockup_by_designs_and_an_open_items_mockup_by_option(self):
         designs = {"closed-by-designs-only": "<p>a</p>", "open-by-option-only": "<p>b</p>"}
-        items = [look_item(47, "closed", designs=["closed-by-designs-only"], options=()),  # names its mockup only in designs
+        # Item 47 also lists the open item's slug in designs, so only the open item's option keeps that slug on OUT.
+        items = [look_item(47, "closed", designs=["closed-by-designs-only", "open-by-option-only"], options=()),
                  look_item(48, "open", designs=None, options=["open-by-option-only"])]  # names its mockup only in options
         got, _, _ = self.prune_out(designs, items)
         self.assertEqual(got.get("open-by-option-only"), "<p>b</p>",
