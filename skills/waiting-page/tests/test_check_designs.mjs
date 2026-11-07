@@ -189,3 +189,43 @@ test("an item with a saved answer, given with --answers, is not judged: problem 
   assert.equal(got.json.problem, null, "the checker judged an item the page draws as answered");
   assert.equal(got.code, 0, `exit code (problem: ${JSON.stringify(got.json.problem)})`);
 });
+
+// The page draws an item with `waits` and a `lastAnswer` as answered by its wait, with no saved answer. The guard passes no
+// answers, so the checker must still judge that item: its bad focus is a miss. The first assert is the control: with an
+// answers file that holds {}, the same item is answered by its wait and passes, so the page reads this shape as answered.
+const WAIT_ANSWER = { waits: { repo: "owner/repo", run: 12 }, lastAnswer: { at: "2026-10-02T10:00:00Z", note: "Synthetic wait" } };
+
+test("guard path, no --answers: an item answered by its wait is still judged, so its bad focus is refused", async (t) => {
+  if ((await needEnv(t, "chromium", chromium)) === null) return;
+  const page = write("guard-wait.html", pageWith(MOCKS));
+  const itemFile = write("guard-wait.json", JSON.stringify(item({ focus: "#fill" }, WAIT_ANSWER)));
+  const empty = write("guard-wait-answers.json", "{}");
+  const control = check(page, itemFile, ["--answers", empty]);
+  assert.equal(control.code, 0, `control: with --answers {} the item is answered by its wait and passes (problem: `
+    + `${JSON.stringify(control.json?.problem)}, stderr: ${control.stderr.slice(0, 200)})`);
+  const got = check(page, itemFile);
+  assert.ok(got.json && "problem" in got.json, `no {"problem": ...} JSON line; exit ${got.code}: ${got.stderr.slice(0, 200)}`);
+  assert.equal(got.code, 1, "the guard path passed a bad picture with no --answers: the checker skipped the item that the page "
+    + `draws as answered by its wait (problem: ${JSON.stringify(got.json.problem)})`);
+  assert.match(got.json.problem, /option A/);
+  assert.match(got.json.problem, /focus/);
+});
+
+// A page published before its isAnswered (commit 052707c4a) has no such function. Renaming the name everywhere on the page
+// gives a page that still renders, with only the checker's call to isAnswered missing. The control is the page as it is:
+// the same bad item is a miss there.
+test("guard path on a page with no isAnswered: the bad item is a miss, exit 1, not unknown", async (t) => {
+  if ((await needEnv(t, "chromium", chromium)) === null) return;
+  const full = pageWith(MOCKS);
+  const renamed = full.replace(/\bisAnswered\b/g, "drawnAnswered");
+  assert.ok(full.match(/\bisAnswered\b/g), "scope: page.html holds isAnswered, so the rename below changes the page");
+  assert.equal(renamed.match(/\bisAnswered\b/), null, "scope: the rename left isAnswered on the page");
+  const itemFile = write("no-answered.json", JSON.stringify(item({ focus: "#fill" })));
+  const control = check(write("with-answered.html", full), itemFile);
+  assert.equal(control.code, 1, `control: the bad item is a miss on the page that holds isAnswered (stderr: `
+    + `${control.stderr.slice(0, 200)})`);
+  const got = check(write("no-answered.html", renamed), itemFile);
+  assert.ok(got.json && "problem" in got.json, `no {"problem": ...} JSON line; exit ${got.code}: ${got.stderr.slice(0, 200)}`);
+  assert.equal(got.code, 1, `a page with no isAnswered gave exit ${got.code} on the bad item, not a miss: ${got.stderr.slice(0, 200)}`);
+  assert.match(got.json.problem, /option A/);
+});
