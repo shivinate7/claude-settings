@@ -3630,6 +3630,21 @@ sh("guard-cd-walk-extra-reading: a switch in the pointer checkout, then a cd aft
 sh("guard-cd-walk-extra-reading: a cd out, then a switch there, is allowed",
    "cd " + slash(NOGIT) + " && " + VCS + " switch other", "allow", cwd=PTRMAIN, config=PTRCFG)
 
+# guard-first-c-reads-wrong-tree: the pointer rule judges the checkout each git call RUNS in. A -C on
+# another call is that call's folder, so the first -C of the line does not decide for the switch.
+sh("guard-first-c-reads-wrong-tree: a status of another folder, then a switch -C of the pointer checkout, is refused",
+   VCS + " -C " + slash(NOGIT) + " status; " + VCS + " -C " + slash(PTRMAIN) + " switch other",
+   "deny", "pointer-head", cwd=NOGIT, config=PTRCFG)
+sh("guard-first-c-reads-wrong-tree: a status of the pointer checkout, then a switch in its linked worktree, is allowed",
+   VCS + " -C " + slash(PTRMAIN) + " status; " + VCS + " -C " + slash(PTRWT) + " switch other",
+   "allow", cwd=NOGIT, config=PTRCFG)
+sh("guard-first-c-reads-wrong-tree: a status of another folder, then a switch in the linked worktree, is allowed",
+   VCS + " -C " + slash(NOGIT) + " status; " + VCS + " -C " + slash(PTRWT) + " switch other",
+   "allow", cwd=NOGIT, config=PTRCFG)
+sh("guard-first-c-reads-wrong-tree: a status of a clean checkout, then a reset -C of a dirty one, is refused",
+   VCS + " -C " + slash(SUBJCLEAN) + " status; " + VCS + " -C " + slash(SUBJDIRTY) + " reset --hard",
+   "deny", "shared-tree", cwd=NOGIT)
+
 # THE MOVE TO MAIN IS THE REPAIR. A deny there would wall off the one command that restores the
 # invariant this rule exists to protect.
 sh("pointer: a move back to main restores the invariant and passes",
