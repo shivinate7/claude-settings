@@ -7719,6 +7719,14 @@ PUSHSEQ_LINES = {
                   seq_result("toolu_ls", True)],
     "quoted-commit": [seq_use("msg_A", "toolu_echo", 'echo "' + VCS + ' commit -m x"'),
                       seq_use("msg_A", PUSH_SEQ_ID, PUSH_SEQ_CMD), seq_result("toolu_echo", True)],
+    # Siblings that name a commit without making one: a dry run, a help page, and a heredoc whose body names one.
+    # Each errored, so only the read check keeps the push from being refused.
+    "dry-run-commit": [seq_use("msg_A", "toolu_dry", VCS + " commit --dry-run -m x"),
+                       seq_use("msg_A", PUSH_SEQ_ID, PUSH_SEQ_CMD), seq_result("toolu_dry", True)],
+    "help-commit": [seq_use("msg_A", "toolu_help", VCS + " commit --help"),
+                    seq_use("msg_A", PUSH_SEQ_ID, PUSH_SEQ_CMD), seq_result("toolu_help", True)],
+    "heredoc-commit": [seq_use("msg_A", "toolu_heredoc", "cat <<'EOF' > notes.txt\n" + VCS + " commit -m x\nEOF"),
+                       seq_use("msg_A", PUSH_SEQ_ID, PUSH_SEQ_CMD), seq_result("toolu_heredoc", True)],
     "empty": [],
     "push-seq-probe": INCIDENT,
 }
@@ -7795,6 +7803,13 @@ push_seq("a failed commit in an earlier response, the push in a later one", "all
 push_seq("a push alone in its response", "allow", push_seq_path("push-alone"))
 push_seq("a failed ls beside the push is not a commit", "allow", push_seq_path("failed-ls"))
 push_seq("a failed echo that quotes a commit is not a commit", "allow", push_seq_path("quoted-commit"))
+# The read_verb skip (guard_push_delete._has_commit): a dry run and a help page are reads, not commits.
+push_seq("a dry-run commit that errored beside the push is a read, not a commit", "allow",
+         push_seq_path("dry-run-commit"))
+push_seq("a commit --help that errored beside the push is a read, not a commit", "allow",
+         push_seq_path("help-commit"))
+push_seq("a heredoc that only names a commit, errored beside the push, is text", "allow",
+         push_seq_path("heredoc-commit"))
 push_seq("an empty transcript", "allow", push_seq_path("empty"))
 push_seq("a missing transcript", "allow", PUSHSEQ_MISSING)
 push_seq("an unreadable transcript", "allow", PUSHSEQ_UNREADABLE)
