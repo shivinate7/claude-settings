@@ -452,24 +452,41 @@ def _module_bindings(tree) -> dict:
     return bindings
 
 
+def _local_wrappers(tree) -> set:
+    """Names of record/refuse/ask_command that this file defines at top level with a parameter other
+    than `rule` where the id would sit. blind_brief's refuse(payload, tool, reason, matched) is one:
+    its third argument is the message, so a bare call to it names no id (the wrapped guard_core call
+    is read on its own). guard.py's ask_command(rule, ...) and guard_core's record(..., rule, ...) keep
+    `rule` in place, so they are the real writers and stay read."""
+    out = set()
+    for n in tree.body:
+        if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) and n.name in GUARD_RULE_ARG:
+            params = [a.arg for a in n.args.posonlyargs + n.args.args]
+            at = GUARD_RULE_ARG[n.name]
+            if len(params) <= at or params[at] != "rule":
+                out.add(n.name)
+    return out
+
+
 def guard_rule_names(text: str, path: str = "<source>"):
     """The rule ids Python source writes to guard.log, read with `ast` so a comment or a string
     that shows a call names nothing. Three shapes write an id: a string literal in refuse() or
     record() (third argument) or ask_command() (first), by position or as `rule=`; the table in
     diff_rule(); and the `code, why = {...}` role-scope table. A Name in that argument position
     lists the string its module-level `NAME = "..."` holds (a module constant, such as call_judge's
-    TIMEOUT_LOG_RULE). A Name with no module-level binding in this file (a parameter, a local, or one
+    TIMEOUT_LOG_RULE). A bare call to a local wrapper of those names (see `_local_wrappers`) names no id. A Name with no module-level binding in this file (a parameter, a local, or one
     an enclosing function rebinds) names no id. An f-string id, a Name bound twice at module level,
     and a Name bound to anything but a string literal cannot be listed, so each raises ValueError
     naming `path:line`: a rule that can fire but is not listed would hide from a never-fired cull."""
     tree = ast.parse(text)
     bindings = _module_bindings(tree)
+    wrappers = _local_wrappers(tree)
     ids = set()
     for node, shadow in _scoped_nodes(tree):
         if isinstance(node, ast.Call):
             name = node.func.id if isinstance(node.func, ast.Name) else getattr(node.func, "attr", "")
             at = GUARD_RULE_ARG.get(name)
-            if at is None:
+            if at is None or (name in wrappers and isinstance(node.func, ast.Name)):
                 continue
             args = [kw.value for kw in node.keywords if kw.arg == "rule"]
             if len(node.args) > at:
