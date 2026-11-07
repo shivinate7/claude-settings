@@ -680,7 +680,7 @@ class LaneLint(CiJobStub, tm.CloudSession):
         self.assertRegex(out, r"(?i)again")
 
     def test_a_selected_suite_for_a_product_file_the_lane_deletes_runs_and_a_red_one_refuses_the_lane(self):
-        """Ruling (lane, 2026-11-07 16:13 CST): a delete is a change and goes to the selector. The lane deletes src/p.py, which the base
+        """A delete is a change, so it goes to the selector. The lane deletes src/p.py, which the base
         holds; the selector lists the red suite for src/p.py; the lane is refused."""
         self.lane_fixture(listed=[SUITE], suites={SUITE: "fail"}, base_files={"src/p.py": "VALUE = 1\n"}, lane={},
                           lane_deletes=["src/p.py"], select_prefix="src/p.py")
@@ -696,7 +696,7 @@ class LaneLint(CiJobStub, tm.CloudSession):
         self.assertRegex(out, r"(?i)again")
 
     def test_a_selected_suite_for_a_product_file_the_lane_renames_away_runs_and_a_red_one_refuses_the_lane(self):
-        """Ruling (lane, 2026-11-07 16:13 CST): a rename removes its old path, which is a delete and goes to the selector. The lane moves
+        """A rename removes its old path, which is a delete and goes to the selector. The lane moves
         src/p.py to src/q.py. The selector lists the red suite for src/p.py only, so the lane is refused only if the old path is asked."""
         self.lane_fixture(listed=[SUITE], suites={SUITE: "fail"}, base_files={"src/p.py": "VALUE = 1\n"}, lane={},
                           lane_renames={"src/p.py": "src/q.py"}, select_prefix="src/p.py")
