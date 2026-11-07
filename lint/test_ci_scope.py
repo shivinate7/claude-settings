@@ -21,11 +21,14 @@ import subprocess
 import tempfile
 import unittest
 from collections import Counter
+from unittest import mock
 
 import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py)
+import _test_temp  # noqa: E402  test-temp-standard: every temp path comes from this run's folder (lint/_test_temp.py)
+RUN_FOLDER = _test_temp.run_folder()
 SCRIPT = os.environ.get("CI_SCOPE") or os.path.join(HERE, "..", ".github", "scripts", "ci-scope.sh")
 REPO = os.path.abspath(os.path.join(HERE, ".."))
 REPO_REAL = os.path.realpath(REPO)  # the root the derivation reads paths against: __file__ resolves to this too
@@ -1082,6 +1085,19 @@ class GuardClosure(unittest.TestCase):
         _, paths, loads, unfollowed = _refs("lint/zz_probe.py", ast.parse(src), tracked)
         self.assertEqual((paths | loads, unfollowed), (set(), []))
 
+    def test_a_worktree_git_file_is_not_a_repo_file(self):
+        # A worktree's .git is a file, not a folder. The walk skips .git folders only, so the file is listed as a repo file.
+        with tempfile.TemporaryDirectory(dir=RUN_FOLDER) as tmp:
+            os.makedirs(os.path.join(tmp, "lint"))
+            with open(os.path.join(tmp, ".git"), "w", encoding="utf-8") as f:
+                f.write("gitdir: /elsewhere/.git/worktrees/x\n")
+            with open(os.path.join(tmp, "lint", "x.py"), "w", encoding="utf-8") as f:
+                f.write("\n")
+            with mock.patch.object(sys.modules[__name__], "REPO", tmp):
+                files = _repo_files()
+        self.assertIn("lint/x.py", files, "scope: the walk does not list a plain repo file")
+        self.assertNotIn(".git", files, "a worktree's .git file is listed as a repo file")
+
 
 @unittest.skipUnless(BASH, "bash not on PATH")
 class MutationReport(unittest.TestCase):
@@ -1099,4 +1115,7 @@ class MutationReport(unittest.TestCase):
 
 
 if __name__ == "__main__":
-    unittest.main()
+    try:
+        unittest.main()
+    finally:
+        shutil.rmtree(RUN_FOLDER, ignore_errors=True)
