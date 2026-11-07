@@ -228,7 +228,7 @@ Source: [MDN, forced-colors](https://developer.mozilla.org/en-US/docs/Web/CSS/@m
 ## ux-full-height-fits
 
 A full-height region fits the visible phone screen, with the browser bars shown or hidden, so its bottom content and actions are never under the bars.
-Check: grep the changed CSS for a `vh` or `lvh` value (`[0-9]l?vh`). Pass when each hit has an `svh`
+Check: find each `vh` or `lvh` value in the changed CSS with `grep -E '[0-9]l?vh'`. Pass when each hit has an `svh`
 or `dvh` declaration on the same property, declared after the hit, which overrides it. An `svh` or
 `dvh` value needs no check: it is the fix.
 Source: [web.dev, the large, small and dynamic viewport units](https://web.dev/blog/viewport-units).

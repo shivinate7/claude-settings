@@ -30,7 +30,7 @@ Screen: ____ Size: ____ Theme: ____
 - [ ] ux-canvas-has-words: Does each canvas that carries information have a name, a text equivalent and keyboard acts? Is each other canvas hidden from assistive technology, with aria-hidden="true" in the DOM?
 - [ ] ux-scroll-stays-native: Do the wheel, trackpad, Space, Page Down and arrow keys each move the page by their usual step, with no section that holds the scroll? A modal's own scroll area, kept inside it with `overscroll-behavior`, passes.
 - [ ] ux-forced-colors-hold: In forced-colors mode, do each control, edge, focus ring and state show?
-- [ ] ux-full-height-fits: Does each `vh` or `lvh` value in the changed CSS have an `svh` or `dvh` declaration on the same property, after it?
+- [ ] ux-full-height-fits: Does each `vh` or `lvh` value in the changed CSS, found with `grep -E '[0-9]l?vh'`, have an `svh` or `dvh` declaration on the same property, after it?
 - [ ] ux-vitals-measured: In a mobile lab trace, are LCP, INP (or Total Blocking Time) and CLS "good"? Where field data at the 75th percentile exists, is it "good" too?
 - [ ] ux-feature-baseline-or-fallback: Does each new feature that the browser target does not cover sit behind a feature test, with a fallback seen working?
 - [ ] ux-gap-on-parent: Does each flex or grid parent space its children with `gap`, with no child margin between siblings? A `margin-inline: auto` or other one-item offset passes. Prose and flow margins outside flex or grid pass.
