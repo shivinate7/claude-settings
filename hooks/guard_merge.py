@@ -423,7 +423,8 @@ def _commit_shape(args):
 
 def _add_shape(args):
     """Return (whole_tree, pathspecs) of a `git add` call. Whole tree: `-A`, `--all`, `-u` or
-    `--update` with no pathspec."""
+    `--update` with no pathspec. A redirect is no pathspec."""
+    args = _strip_redirects(args)
     flags = [a for a in args if a.startswith("-") and a != "--"]
     specs = [a for a in args if not a.startswith("-") and a != "--"]
     whole = any(f in _ADD_ALL_FLAGS or (not f.startswith("--") and set(f[1:]) & set("Au")) for f in flags)
