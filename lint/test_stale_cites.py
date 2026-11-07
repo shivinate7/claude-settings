@@ -2330,6 +2330,25 @@ class RewordTests(RewordCase):
         self.assertEqual(self.listed(out), [("agents/bare.md", 3)], out)
         self.assertEqual(rc, 1, out)
 
+    def test_a_removed_run_in_a_four_space_fence_under_a_list_item_with_the_rule_id_is_not_listed(self):
+        # The id sits on the item's line, and the fence four spaces under it holds the removed run. The item is one unit,
+        # so the id exempts the run. The same shape with no id is the control: listed at its own line.
+        item = ("- Run the step: <!-- rule:output-write-in-ste -->\n    ```text\n"
+                "    that does not apply. %s. Start with the point.\n    ```\n" % OLD_STE)
+        bare = "- Run the step:\n    ```text\n    that does not apply. %s. Start with the point.\n    ```\n" % OLD_STE
+        rng = self.reworded(copies=False, extra={"agents/item-line.md": item, "agents/item-bare.md": bare})
+        rc, out = self.run_check(rng)
+        self.assertEqual(self.listed(out), [("agents/item-bare.md", 3)], out)
+
+    def test_a_removed_run_in_a_four_space_fence_under_a_prose_line_with_the_rule_id_is_not_listed(self):
+        # The id sits on a prose line above the fence four spaces deep. The same shape with no id is the control.
+        prose = ("Run the step: <!-- rule:output-write-in-ste -->\n    ```text\n"
+                 "    that does not apply. %s. Start with the point.\n    ```\n" % OLD_STE)
+        bare = "Run the step:\n    ```text\n    that does not apply. %s. Start with the point.\n    ```\n" % OLD_STE
+        rng = self.reworded(copies=False, extra={"agents/prose-line.md": prose, "agents/prose-bare.md": bare})
+        rc, out = self.run_check(rng)
+        self.assertEqual(self.listed(out), [("agents/prose-bare.md", 3)], out)
+
     def test_a_change_to_a_file_outside_the_rule_files_is_no_trigger(self):
         rng = self.make_range(base_files(NINE[NOTES] % OLD_STE, extra={"CLAUDE.md": NEW_RULE}), lambda repo: (
             write(repo, NOTES, "# Notes\n\n- the debt is closed\n"), commit(repo)))
