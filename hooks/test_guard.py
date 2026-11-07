@@ -16477,8 +16477,8 @@ def wp_write(name, expected, rule, item, action="set", doc_id=WP_DOC, **extra):
 
 # A str_replace on context is judged on the stored text it edits (hooks/question_form.py stored_why_hit): the
 # write is pinned to a version with if_version, and the session's transcript holds a get of that version whose
-# text the edit's old_str applies to. Each such case names the text the item held before the edit (coordinator
-# ruling 2026-11-07 15:19 CST). The transcript records are the same shape role_use and role_result write.
+# text the edit's old_str applies to. Each such case names the text the item held before the edit (decision
+# task-names-its-check: a stored text that cannot be found asks). The transcript records are the same shape role_use and role_result write.
 STORED_VERSION = 3
 STORED_READS = {}  # (doc_id, context) -> the transcript that shows the item at STORED_VERSION with that context
 

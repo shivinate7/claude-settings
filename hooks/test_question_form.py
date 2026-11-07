@@ -815,7 +815,7 @@ def case_stored_line_reds():
                 get_of(3, STORED), REFUSE)
     stored_case("a stored cite swapped for a bare premise label is denied", edit("(route r-refused)", "(measured)"),
                 get_of(3, STORED), REFUSE)
-    stored_case("a subagent read at the write's version is the stored text, so a false edit is denied",
+    stored_case("an agent read at the write's version is the stored text, so a false edit is denied",
                 edit("r-refused", "r-works"), get_of(3, STORED, sidechain=True), REFUSE)
 
 
