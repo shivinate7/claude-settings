@@ -215,57 +215,65 @@ const shellWords = (text) => {
   return { code, words };
 };
 
-// The test's own folder as a shell file names it: `$(dirname "$0")`, `$(cd "$(dirname "$0")" && pwd)` (or `pwd -P`), `${0%/*}`, and each
-// with `BASH_SOURCE[0]` or `BASH_SOURCE` for `$0`; then literal `/..` or `/sub` pieces.
+// A place expression in a shell binding: a base, then literal `/..` or `/sub` pieces. A base is the test's own folder as the file names
+// it, `$(dirname "$0")` (or `dirname --`), or `${0%/*}`, each with `BASH_SOURCE[0]` or `BASH_SOURCE` for `$0`; or `$NAME` or `${NAME}`. A
+// `$(cd "<base><pieces>" && pwd)` (or `pwd -P`) is the same place. A piece holds no `/`, so each `/` starts one piece and a failed match
+// does not backtrack.
 const SELF = '(?:\\$0|\\$\\{BASH_SOURCE(?:\\[0\\])?\\}|\\$BASH_SOURCE)';
-const DIRNAME = `\\$\\(dirname "?${SELF}"?\\)`;
-const PIECES = '((?:/[^\\s"\'$\\\\`;&|()<>*?]+)*)';
-const HERE_FORMS = [
-  new RegExp(`^"?\\$\\(cd "?${DIRNAME}${PIECES}"? && pwd(?: -P)?\\)"?${PIECES}"?$`),
-  new RegExp(`^"?${DIRNAME}"?${PIECES}"?$`),
-  new RegExp(`^"?\\$\\{(?:0|BASH_SOURCE(?:\\[0\\])?)%/\\*\\}"?${PIECES}"?$`),
-];
-const OTHER_FORM = new RegExp(`^"?\\$(?:(\\w+)|\\{(\\w+)\\})${PIECES}"?$`);
+const HERE = `(?:\\$\\(dirname (?:-- )?"?${SELF}"?\\)|\\$\\{(?:0|BASH_SOURCE(?:\\[0\\])?)%/\\*\\})`;
+const SELF_FOLDER = new RegExp(`^${HERE}$`);
+const BASE = `(?:${HERE}|\\$[A-Za-z_]\\w*|\\$\\{[A-Za-z_]\\w*\\})`;
+const PIECES = '((?:/[^/\\s"\'$\\\\`;&|()<>*?]*)*)';
+const PLACE = new RegExp(`^"?(?:\\$\\(cd "?(${BASE})"?${PIECES}"? && pwd(?: -P)?\\)|(${BASE}))"?${PIECES}"?$`);
+// `${NAME:-$OTHER/tail}` with OTHER bound: the default resolves from OTHER's place, as Python's `os.environ.get(...) or join(HERE, ...)` does.
+const DEFAULT = /^"?\$\{[A-Za-z_]\w*:-(\$(?:[A-Za-z_]\w*|\{[A-Za-z_]\w*\})\/[^}]*)\}"?$/;
 
 const fromPlace = (place, pieces) => path.posix.normalize(path.posix.join(place, ...pieces.split('/').filter(Boolean)));
 
-// The repository path that a `NAME=value` binds NAME to, or null when the value is no such folder. `known` holds the places bound so far.
-const boundPlace = (value, folder, known) => {
-  for (const re of HERE_FORMS) {
-    const m = re.exec(value);
-    if (m) return fromPlace(folder, m.slice(1).join(''));
-  }
-  const m = OTHER_FORM.exec(value);
-  const base = m && known.get(m[1] ?? m[2]);
-  return m && base != null && m[3] ? fromPlace(base, m[3]) : null;
+// The repository path that a binding's value names, or null when it names no known place. `placeOf(NAME)` gives a bound name's place.
+const boundPlace = (value, folder, placeOf) => {
+  const m = PLACE.exec(value.replace(DEFAULT, '$1'));
+  if (!m) return null;
+  const base = m[1] ?? m[3];
+  const place = SELF_FOLDER.test(base) ? folder : placeOf(base.replace(/^\$\{?|\}$/g, ''));
+  return place == null ? null : fromPlace(place, (m[2] ?? '') + m[4]);
 };
 
-// The tracked files that a shell file's words name, from the file's folder or the repository root. A leading `NAME=` is dropped. A word
-// with a `\`, a newline or a leading `/` is skipped. A word with no `$` must equal the path after normalization. A word `$NAME/tail` or
-// `${NAME}/tail`, its tail with no `$`, counts only when an earlier top-level `NAME=` binds NAME to a folder (`boundPlace`); the tail
-// then resolves from that place alone. Any other NAME yields nothing.
+// The tracked files that a shell file's words name, from the file's folder or the repository root. A leading `NAME=` is dropped, and a
+// word `${NAME:-$OTHER/tail}` is read as its default. A word with a `\`, a newline or a leading `/` is skipped. A word with no `$` must
+// equal the path after normalization. A word `$NAME/tail` or `${NAME}/tail`, its tail with no `$`, counts only when the file binds NAME
+// before the word, and every binding of NAME names one place (`boundPlace`); the tail then resolves from that place alone. A binding is a
+// line's `NAME=`, `export NAME=` or `readonly NAME=`. A name with two places, or with a binding to no known place, counts for nothing.
 const shellLoads = (req, text, files) => {
   const folder = path.posix.dirname(req.file);
   const { code, words } = shellWords(text);
   const starts = new Set(words.map(({ at }) => at));
-  const known = new Map();
   const bindings = [];
-  for (const m of code.matchAll(/(?:^|;)[ \t]*([A-Za-z_]\w*)=([^\n;]*)/gm)) {
+  for (const m of code.matchAll(/(?:^|;)[ \t]*(?:(?:export|readonly)[ \t]+)?([A-Za-z_]\w*)=([^\n;]*)/gm)) {
     const at = m.index + m[0].length - m[2].length - m[1].length - 1;
-    if (!starts.has(at)) continue;
-    const place = boundPlace(m[2].trim(), folder, known);
-    known.set(m[1], place);
-    bindings.push({ name: m[1], at, place });
+    if (starts.has(at)) bindings.push({ name: m[1], at, value: m[2].trim() });
   }
+  const bound = (name, before) => bindings.some((b) => b.name === name && b.at < before);
+  const places = new Map();
+  const placeOf = (name) => {
+    if (places.has(name)) return places.get(name);
+    places.set(name, null);
+    const found = new Set(bindings.filter((b) => b.name === name)
+      .map((b) => boundPlace(b.value, folder, (other) => (bound(other, b.at) ? placeOf(other) : null))));
+    const place = found.size === 1 ? [...found][0] : null;
+    places.set(name, place);
+    return place;
+  };
   const out = new Set();
   for (const { w: raw, at } of words) {
-    const w = raw.replace(/^[A-Za-z_]\w*=/, '');
+    const w = raw.replace(/^[A-Za-z_]\w*=/, '').replace(DEFAULT, '$1');
     if (!w || /[\\\n]/.test(w) || w.startsWith('/')) continue;
     const anchored = /^\$(?:([A-Za-z_]\w*)|\{([A-Za-z_]\w*)\})\/(.+)$/.exec(w);
     const s = anchored ? anchored[3] : w;
     if (s.includes('$')) continue;
-    const places = anchored ? [bindings.findLast((b) => b.name === (anchored[1] ?? anchored[2]) && b.at < at)?.place] : [folder, '.'];
-    for (const place of places) {
+    const name = anchored && (anchored[1] ?? anchored[2]);
+    const roots = anchored ? [bound(name, at) ? placeOf(name) : null] : [folder, '.'];
+    for (const place of roots) {
       if (place == null) continue;
       const c = path.posix.normalize(path.posix.join(place, s));
       if (c !== req.file && files.has(c)) out.add(c);
