@@ -1281,7 +1281,7 @@ _RUN_MOVES = ("--directory", "--project", "-C", "-P")
 
 
 def _runner_inner(tokens, index: int):
-    # Local on purpose: in guard_core COMMAND_WRAPPERS (see guard_core.py:1910) `uv run` would change every rule's reading.
+    # Local on purpose: as a guard_core COMMAND_WRAPPERS entry (see `bare_words`), `uv run` would change every rule's reading.
     """(tokens, index) of the command that `uv run [flags] CMD` or `poetry run CMD` starts, else None."""
     tool = basename(tokens[index])
     if tool not in _RUN_TOOLS or index + 1 >= len(tokens) or tokens[index + 1] != "run":
@@ -1311,8 +1311,13 @@ def _unparen(segment: str, tokens):
     tokens = list(tokens)
     if marks.count("(") and len(tokens) > 1 and tokens[0].startswith("(") and tokens[0].lstrip("("):
         tokens[0] = tokens[0].lstrip("(")
-    if marks.count(")") and "(" not in tokens[-1] and tokens[-1].rstrip(")"):
-        tokens[-1] = tokens[-1].rstrip(")")
+    if marks.count(")"):
+        # The `)` that closes the group sits on the first word that ends in one, bar a glued `&` or `;`; a
+        # redirect may follow it as the next word.
+        close = next((at for at, token in enumerate(tokens)
+                      if token.rstrip("&;").endswith(")") and "(" not in token and token.rstrip("&;)")), None)
+        if close is not None:
+            tokens[close] = tokens[close].rstrip("&;").rstrip(")")
     # A spaced `( cmd )` leaves a lone `(` or `)` token: drop it, so the runner is the first word again.
     return [token for token in tokens if token not in ("(", ")") or len(tokens) == 1]
 
