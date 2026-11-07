@@ -3,13 +3,13 @@
   "context": "Goal: the 3D copy of the Cockpit shows at a glance what waits on you (step 3d-browser-dummy, your item 277 a).\nProblem (goal): the scene can group items by status or by kind, and which you see first changes what the scene is for.\nBased on (read): lane notes docs/design/3d-browser-dummy-notes.md, section 1 (branch 3d-browser-dummy, 78a27bce): an item is a stack, one slab per option or step; rank sets the order on the floor, not the height.\nDeparts from: main \u2014 adds a 3D scene of the page's items, laid out as you pick.\nMeanwhile: the lane builds on a.",
   "designs": [
     {
-      "file": "docs/design/3d-browser-dummy/layout-a.html",
+      "file": "docs/design/3d-browser-dummy-layout-a.html",
       "focus": "#scene",
       "label": "a: status floors",
       "slug": "3d-layout-a"
     },
     {
-      "file": "docs/design/3d-browser-dummy/layout-b.html",
+      "file": "docs/design/3d-browser-dummy-layout-b.html",
       "focus": "#scene",
       "label": "b: kind floors",
       "slug": "3d-layout-b"

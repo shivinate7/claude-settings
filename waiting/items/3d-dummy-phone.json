@@ -3,13 +3,13 @@
   "context": "Goal: on a phone, you can read an item's detail and still see where it sits in the scene.\nProblem (goal): a 390-wide screen fits the scene or the panel well, not both at full size.\nBased on (read): lane notes item 11 (branch 3d-browser-dummy, 78a27bce); both drawn at 390, light and dark checked.\nDeparts from: main \u2014 adds a phone detail panel for the 3D scene.\nMeanwhile: the lane builds on a.",
   "designs": [
     {
-      "file": "docs/design/3d-browser-dummy/phone-a.html",
+      "file": "docs/design/3d-browser-dummy-phone-a.html",
       "focus": "#pickview",
       "label": "a: under the scene",
       "slug": "3d-phone-a"
     },
     {
-      "file": "docs/design/3d-browser-dummy/phone-b.html",
+      "file": "docs/design/3d-browser-dummy-phone-b.html",
       "focus": "#pickview",
       "label": "b: over the scene",
       "slug": "3d-phone-b"
