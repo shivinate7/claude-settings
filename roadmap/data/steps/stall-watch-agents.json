@@ -1,0 +1,11 @@
+{
+  "title": "Stall watch sees a stalled agent, not only Bash jobs",
+  "phase": "now",
+  "status": "doing",
+  "order": 50,
+  "owner": "coordinator",
+  "lane": "session_013NEJKzPiiVLh3Sr1Jdoj76",
+  "why": "A round-3 reviewer on #1186 stalled 1 h 54 min unseen, because stall_watch reads Bash jobs only.",
+  "note": "Done check: a red test where --stop lists a running agent with a quiet transcript. Filed from coordinator 17:58 CST Nov 7.",
+  "updatedAt": "2026-11-07T17:58:00-06:00"
+}
