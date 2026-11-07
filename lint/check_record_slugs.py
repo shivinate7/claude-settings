@@ -530,8 +530,8 @@ def unseen_notes(root, now):
 
 
 def debt_dirs(root):
-    """The debt folders of `root`, as debt_file reads them: the repo's own when legacy-repos keeps them, else the
-    layout's candidates."""
+    """The debt folders of `root`, the one home of the list debt_file tests against: the repo's own when legacy-repos
+    keeps them, else the layout's candidates."""
     kept = layout.unmoved(root).get("debts")
     return (kept,) if kept else layout.candidates(root, "debts")
 
@@ -619,8 +619,7 @@ def debt_file(root):
     """A test of a path: is it a debt file of `root`? The folders are layout.candidates: the first one that exists, then the layout's own.
     A repo that legacy-repos keeps its debts elsewhere has that one folder: the layout's own is not where its debts are.
     The folder's README and notes file sit beside the debts but are not debts: never checked, never shown."""
-    kept = layout.unmoved(root).get("debts")
-    dirs = tuple(p + "/" for p in ((kept,) if kept else layout.candidates(root, "debts")))
+    dirs = tuple(p + "/" for p in debt_dirs(root))
     not_debts = {d + "README.md" for d in dirs} | set(layout.candidates(root, "debt-notes"))
     return lambda f: f.startswith(dirs) and f.endswith(".md") and f not in not_debts
 
