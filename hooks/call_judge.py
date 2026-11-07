@@ -64,7 +64,25 @@ from shared_names import EXPLORE_AUDIT_MARKER  # noqa: E402
 from shared_names import DATA_TOOL  # noqa: E402  stdlib only: the one home of the tool name
 
 OK_SHAPE = {"ok": (True, False)}
-SPAWN_RULE, QUESTION_RULE = "spawn-judge", "question-judge"
+SPAWN_RULE = "spawn-judge"
+QUESTION_RULE = "question-judge"
+
+
+class _Declared:
+    """Stands in for a repo module that LOGGED_RULES names for the rule audit but this hook does not import at
+    start-up: question_form costs about 15 ms to import, and an Agent spawn never loads it. Reading an attribute gives
+    its dotted name; nothing reads LOGGED_RULES at run time."""
+    def __init__(self, module):
+        self._module = module
+
+    def __getattr__(self, name):
+        return "%s.%s" % (self._module, name)
+
+
+question_form = _Declared("question_form")
+# The rule audit lists the ids a call passes through a variable, but only those named here (lint/rule_audit.py).
+LOGGED_RULES = (SPAWN_RULE, QUESTION_RULE, question_form.PAST_RULING_RULE)
+del question_form  # each function below imports the real module itself
 TIMEOUT_LOG_RULE = "judge-timeout"  # the guard.log rule of a past-ruling model timeout; the one home of the name
 # The record each refusal cites. The spawn judge has its own; every other rule here (the model's question verdict
 # and the code rules question_form.chat_hit names) is the question reviewer's.

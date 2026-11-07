@@ -362,7 +362,7 @@ def log_writer_paths(root: str) -> List[str]:
     Found by scanning, not from a fixed list: a hook that writes a guard.log id through a module
     constant (call_judge's judge-timeout) joins the --all-rules listing the day it lands, and a fixed
     list would hide it from the never-fired cull until someone remembered to add it. A file is read
-    for the ids it names by literal or module constant; an id passed through a variable lists nowhere. Test files
+    for the ids it names by literal or module constant, plus the entries of its LOGGED_RULES tuple. Test files
     (test_*.py, _test_*.py) call these names on fixtures, so their ids are not real rules."""
     paths = []
     for folder in ("hooks", "lint"):
@@ -475,11 +475,36 @@ def _local_wrappers(tree) -> set:
     return out
 
 
-def guard_rule_names(text: str, path: str = "<source>"):
+def _logged_entry(entry, bindings: dict, path: str, root: str) -> str:
+    """The id one LOGGED_RULES entry names. A Name is a constant this file binds once, to a string literal. An
+    Attribute `module.NAME` is that kind of constant in the module-level code of hooks/module.py or
+    lint/module.py under root. Anything else raises ValueError naming `path:line`: an id that cannot be
+    read would hide from a never-fired cull."""
+    where = f"{path}:{entry.lineno}"
+    if isinstance(entry, ast.Name):
+        name, found = entry.id, bindings.get(entry.id, [])
+    elif isinstance(entry, ast.Attribute) and isinstance(entry.value, ast.Name):
+        name = f"{entry.value.id}.{entry.attr}"
+        sources = [os.path.join(root, folder, entry.value.id + ".py") for folder in ("hooks", "lint")]
+        source = next((s for s in sources if os.path.isfile(s)), None)
+        if source is None:
+            raise ValueError(f"{where}: LOGGED_RULES entry {name} names a module that is not under hooks/ or lint/")
+        found = _module_bindings(ast.parse(read(source))).get(entry.attr, [])
+    else:
+        raise ValueError(f"{where}: LOGGED_RULES takes a constant name or module.NAME, so the id can be listed")
+    if len(found) != 1 or not (isinstance(found[0], ast.Constant) and isinstance(found[0].value, str)):
+        raise ValueError(f"{where}: LOGGED_RULES entry {name} is not bound once to a string literal "
+                         "at module level, so the id cannot be listed")
+    return found[0].value
+
+
+def guard_rule_names(text: str, path: str = "<source>", root: str = ROOT):
     """The rule ids Python source writes to guard.log, read with `ast` so a comment or a string
-    that shows a call names nothing. Three shapes write an id: a string literal in refuse() or
+    that shows a call names nothing. Four shapes write an id: a string literal in refuse() or
     record() (third argument) or ask_command() (first), by position or as `rule=`; the table in
-    diff_rule(); and the `code, why = {...}` role-scope table. A Name in that argument position
+    diff_rule(); the `code, why = {...}` role-scope table; and a module-level `LOGGED_RULES = (...)` tuple, which
+    lists each entry's string (see `_logged_entry`). A writer that logs ids through variables declares that tuple.
+    A Name in that argument position
     lists the string its module-level `NAME = "..."` holds (a module constant, such as call_judge's
     TIMEOUT_LOG_RULE). A bare call to a local wrapper of those names (see `_local_wrappers`) names no id. A Name with no module-level binding in this file (a parameter, a local, or one
     an enclosing function rebinds) names no id. An f-string id, a Name bound twice at module level,
@@ -489,6 +514,11 @@ def guard_rule_names(text: str, path: str = "<source>"):
     bindings = _module_bindings(tree)
     wrappers = _local_wrappers(tree)
     ids = set()
+    for node in tree.body:  # LOGGED_RULES is module-level: only the tuple a writer declares counts
+        if isinstance(node, ast.Assign) and any(getattr(t, "id", "") == "LOGGED_RULES" for t in node.targets):
+            if not isinstance(node.value, ast.Tuple):
+                raise ValueError(f"{path}:{node.lineno}: LOGGED_RULES is not a tuple, so its ids cannot be listed")
+            ids |= {_logged_entry(e, bindings, path, root) for e in node.value.elts}
     for node, shadow in _scoped_nodes(tree):
         if isinstance(node, ast.Call):
             name = node.func.id if isinstance(node.func, ast.Name) else getattr(node.func, "attr", "")
@@ -528,11 +558,11 @@ def emitted_rule_ids(root: str = ROOT) -> set:
     Ids come from the guard modules (hooks/guard*.py) and from every other non-test file under
     hooks/ and lint/ that calls record(), refuse() or ask_command() (`log_writer_paths`), such as
     config_watch (it logs `agent-model-cap` reverts), blind_brief, prose_judge, sendmessage_state, and
-    call_judge's `judge-timeout`. An id a call passes through a variable (call_judge's spawn-judge,
-    question-judge and past-ruling, reply_judge's reply-judge) does not list. No hook writes an STE code now."""
+    call_judge's `judge-timeout`. An id a call passes through a variable lists only when the writer names its constant in
+    LOGGED_RULES (call_judge's spawn-judge, question-judge and past-ruling, reply_judge's reply-judge). No hook writes an STE code now."""
     ids = set()
     for path in sorted(set(guard_paths(root)) | set(log_writer_paths(root))):
-        ids |= guard_rule_names(read(path), os.path.relpath(path, root))
+        ids |= guard_rule_names(read(path), os.path.relpath(path, root), root)
     return ids
 
 

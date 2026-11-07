@@ -72,6 +72,7 @@ JUDGED_RULES = ("output-start-with-point", "style-cut-narration",
                 "style-table-gold-column", "questions-go-to-owner",
                 "style-limits-kept-silently", "style-question-form")
 JUDGE_RULE = "reply-judge"  # the guard.log rule when the reason names none of JUDGED_RULES
+LOGGED_RULES = (JUDGE_RULE,)  # the rule audit lists the ids a call passes through a variable
 REPLY_MAX = 12000  # the prompt rides stdin, so no argv cap; the clip bounds cost and latency only (unmeasured)
 
 # The gh login clause of output-never-hand-off-doable-step (decision act-in-place): a gh command runs as
