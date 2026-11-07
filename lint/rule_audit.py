@@ -654,8 +654,14 @@ def guard_rule_names(text: str, path: str = "<source>", base_dir=None):
             src = b.src
             if isinstance(src, (ast.Tuple, ast.List)) and len(src.elts) == b.size:
                 return of(src.elts[b.index], defs, depth + 1)
+            rows = rows_for(src, defs)
+            looped = isinstance(src, _Each) or (  # `for hit in T: a, b = hit` walks T's rows too
+                isinstance(src, ast.Name) and defs and any(isinstance(o, _Each) for o in bindings(defs[0]).get(src.id, [])))
+            if looped and (rows is None or any(
+                    not (isinstance(r, (ast.Tuple, ast.List)) and len(r.elts) == b.size) for r in rows)):
+                return None  # a loop over rows the reader cannot read would list no id: an id could hide
             out = set()
-            for row in rows_for(src, defs) or []:  # a row or an element the reader cannot place names no id
+            for row in rows or []:  # a table row or an element the reader cannot place names no id
                 if isinstance(row, (ast.Tuple, ast.List)) and len(row.elts) == b.size:
                     out |= of(row.elts[b.index], (), depth + 1) or set()
             return out
