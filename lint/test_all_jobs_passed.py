@@ -21,9 +21,10 @@ import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
-from test_windows_split import CHECKS  # noqa: E402  the one home of the checks.yml path
-from all_jobs_passed_rules import (all_problems, child_problems, ci_done_problems, needs_problems,  # noqa: E402  the one home of the rules
-                                   off_problems, scope_if_problems, shape_problems, steps_problems)
+from test_windows_split import ALL_JOBS_PASSED_JOB, CHECKS  # noqa: E402  the one home of the checks.yml path
+from all_jobs_passed_rules import (FAN_IN, all_problems, child_problems, ci_done_problems, needs_of,  # noqa: E402  the one home of the rules
+                                   needs_problems, off_problems, scope_if_problems, shape_problems, steps_problems)
+from workflow_steps import job_block  # noqa: E402  the one home of the step parser
 import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (lint/_test_temp.py)
 sys.path.insert(0, os.path.join(HERE, "..", "testing"))
 import tracked_tree  # noqa: E402  test-temp-standard: teardown removes the run folder (testing/tracked_tree.py)
@@ -98,7 +99,7 @@ MUTATIONS = [
      "    if: ${{ needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request' }}\n"),
     ("a non-shard job turned off by an event if", "  checks-macos:\n    runs-on: macos-latest\n",
      "  checks-macos:\n    runs-on: macos-latest\n    if: ${{ github.event_name != 'pull_request' }}\n"),
-    ("a shard added to all-jobs-passed's needs", "      - checks-macos\n    steps:\n      - uses: actions/checkout",
+    ("a job that is off on a pull_request added to all-jobs-passed's needs", "      - checks-macos\n    steps:\n      - uses: actions/checkout",
      "      - checks-macos\n      - checks-windows-guard-2\n    steps:\n      - uses: actions/checkout"),
     ("all-jobs-passed's always() dropped", "if: ${{ always() && github.event_name == 'pull_request' && !github.event.pull_request.draft }}",
      "if: ${{ github.event_name == 'pull_request' && !github.event.pull_request.draft }}"),
@@ -141,8 +142,9 @@ class AllJobsPassedJob(unittest.TestCase):
     def test_all_jobs_passed_is_a_pinned_checkout_then_the_action(self):
         self.assertEqual(steps_problems(self.text), [])
 
-    def test_only_shard_jobs_stay_off_and_no_needed_job_has_a_job_level_if(self):
-        # Named failure: a job-level if skips a needed job, and all-jobs-passed reads the skip as red.
+    def test_only_shard_jobs_stay_off_and_a_needed_job_keeps_at_most_the_draft_guard_as_if(self):
+        # Named failure: a job-level if skips a needed job, and all-jobs-passed reads the skip as red. A needed job may keep
+        # the draft guard alone, as scope does: a draft pull_request skips all-jobs-passed too.
         self.assertEqual(off_problems(self.text), [])
 
     def test_scope_skips_only_a_draft_pr(self):
@@ -150,6 +152,30 @@ class AllJobsPassedJob(unittest.TestCase):
 
     def test_ci_done_needs_all_jobs_passed(self):
         self.assertEqual(ci_done_problems(self.text), [])
+
+
+class GuardShardInNeeds(unittest.TestCase):
+    """checks-windows-guard-2 runs on a ready pull_request (its steps decide, on guard_windows_full), so all-jobs-passed needs it.
+    The merge shards run off pull_request only, so all-jobs-passed never needs them. ci-done needs every job, guard-2 included."""
+
+    def setUp(self):
+        with open(CHECKS, encoding="utf-8") as f:
+            self.text = f.read()
+        self.needs = needs_of(job_block(self.text, ALL_JOBS_PASSED_JOB)) or []
+
+    def test_all_jobs_passed_needs_the_guard_shard_2(self):
+        # Named failure: a red full guard shard on a ready pull_request would not block the merge.
+        self.assertIn("checks-windows-guard-2", self.needs, f"{ALL_JOBS_PASSED_JOB} does not need checks-windows-guard-2: {self.needs}")
+
+    def test_all_jobs_passed_needs_no_merge_shard(self):
+        for n in range(2, 6):
+            name = f"checks-windows-merge-{n}"
+            with self.subTest(job=name):
+                self.assertNotIn(name, self.needs, f"{ALL_JOBS_PASSED_JOB} needs {name}, which runs off pull_request only")
+
+    def test_ci_done_needs_the_guard_shard_2(self):
+        # Control: ci-done needs every job that runs on a pull_request, guard-2 included.
+        self.assertIn("checks-windows-guard-2", needs_of(job_block(self.text, FAN_IN)) or [], f"{FAN_IN} does not need checks-windows-guard-2")
 
 
 class AllJobsPassedFixtures(unittest.TestCase):
@@ -165,6 +191,46 @@ class AllJobsPassedFixtures(unittest.TestCase):
             with self.subTest(defect=label):
                 self.assertIn(old, GOOD, label)  # a mutation that matches nothing proves nothing
                 self.assertTrue(all_problems(GOOD.replace(old, new, 1)), label)
+
+
+# The shape checks-windows-guard-2 takes on a ready pull_request: its job-level if holds the draft guard only, and
+# all-jobs-passed needs it. Each variant below changes GOOD in one place, and the anchors must match, so a moved line is named.
+GUARD2_OFF = ("  checks-windows-guard-2:\n    runs-on: windows-latest\n    needs: scope\n"
+              "    if: ${{ github.event_name != 'pull_request' }}\n")
+GUARD2_DRAFT = ("  checks-windows-guard-2:\n    runs-on: windows-latest\n    needs: scope\n"
+                "    if: ${{ !github.event.pull_request.draft }}\n")
+GUARD2_FLAG = ("  checks-windows-guard-2:\n    runs-on: windows-latest\n    needs: scope\n"
+               "    if: ${{ needs.scope.outputs.guard == 'true' }}\n")
+MERGE2 = ("  checks-windows-merge-2:\n    runs-on: windows-latest\n    needs: scope\n"
+          "    if: ${{ github.event_name != 'pull_request' }}\n    steps:\n      - run: echo shard\n")
+NEEDS_END = "      - checks-macos\n    steps:\n      - uses: actions/checkout"
+
+
+def in_needs(text, name):
+    """`text` with `name` added to all-jobs-passed's needs. The needs anchor must be in `text`, or the fixture proves nothing."""
+    if NEEDS_END not in text:
+        raise AssertionError(f"the all-jobs-passed needs anchor is not in the fixture, so {name} cannot be added")
+    return text.replace(NEEDS_END, f"      - checks-macos\n      - {name}\n    steps:\n      - uses: actions/checkout", 1)
+
+
+class GuardShardInNeedsFixtures(unittest.TestCase):
+    """The rules on a fixture. A guard shard that runs on a ready pull_request is needed, and its job-level if may hold the draft
+    guard only. Red controls: a merge shard in needs, and a needed guard shard whose job-level if reads a flag."""
+
+    def test_a_needed_guard_shard_with_the_draft_guard_only_is_green(self):
+        self.assertIn(GUARD2_OFF, GOOD, "the fixture lost checks-windows-guard-2's job-level if")
+        text = in_needs(GOOD.replace(GUARD2_OFF, GUARD2_DRAFT, 1), "checks-windows-guard-2")
+        self.assertEqual(all_problems(text), [], "a needed guard shard with the draft guard only is refused")
+
+    def test_a_merge_shard_in_needs_is_red(self):
+        self.assertIn("  all-jobs-passed:\n", GOOD, "the fixture lost the all-jobs-passed job")
+        text = in_needs(GOOD.replace("  all-jobs-passed:\n", MERGE2 + "  all-jobs-passed:\n", 1), "checks-windows-merge-2")
+        self.assertTrue(all_problems(text), "a merge shard in all-jobs-passed's needs is accepted")
+
+    def test_a_needed_guard_shard_whose_if_reads_a_flag_is_red(self):
+        self.assertIn(GUARD2_OFF, GOOD, "the fixture lost checks-windows-guard-2's job-level if")
+        text = in_needs(GOOD.replace(GUARD2_OFF, GUARD2_FLAG, 1), "checks-windows-guard-2")
+        self.assertTrue(all_problems(text), "a needed guard shard with a flag in its job-level if is accepted")
 
 
 # A child repo's workflow: the generic rules, read through `--workflow PATH`. CHILD_GOOD passes them and each
