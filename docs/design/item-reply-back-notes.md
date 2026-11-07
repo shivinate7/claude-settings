@@ -11,8 +11,9 @@ This extends the ask reply (ask-reply-back-notes) to item cards. It is one home:
 
 Settled by the brief (not options here): an item reply is a new `asks/<id>` record `{id, text, at, item}`, with no `re`.
 The writer routes it to the item's `owner`, or takes it when that session has ended. The session answers on that ask record
-(`reply`, `answered`), never on the item's `reply`. The record never shows in the Asks list, never counts in the ask pill,
-and never makes a "Re: an ask not on this page" row. Dismiss stays ask-only. A new answer marks the card "New reply"
+(`reply`, `answered`), never on the item's `reply`. While its item is on the page, the record shows only on the item's card. It is not in the Asks list, it does not count in the ask pill,
+and it makes no "Re: an ask not on this page" row. The writer holds the item's close for at most 7 days while a reply waits. After that the item is
+gone, and the reply is its own Asks row, marked "Re: an item no longer on this page". Dismiss works on that row, as on any ask row. A new answer marks the card "New reply"
 and opens a sunk card, as `replied` does today.
 
 ## 1. Which cards get Reply. Owner grant: yes
@@ -104,9 +105,7 @@ and opens a sunk card, as `replied` does today.
   - Builder: `newReply(it)` also reads the newest `answered` of the item's reply records, against the same baseline.
 - Not drawn: an answer that arrives while the card is folded by a press this visit. `.fwait` turns to the check and "Reply from <owner>, <time>.
   Show <fold words> to read it." The press wins for the visit, as today.
-- Known gap: `newReply` needs `state.sendAt !== null`. An owner who has never pressed Send answers gets no mark on any card, from either source.
-  This is today's rule, not new.
-- The Asks list and the ask pill are unchanged. `waiting` and `folded-waiting` label the list: an item reply never shows or counts there.
+- The Asks list and the ask pill are unchanged. `waiting` and `folded-waiting` label the list: a reply on a card that is still on the page never shows or counts there.
 
 ## 7. Failure
 
@@ -145,8 +144,8 @@ and opens a sunk card, as `replied` does today.
   - Ctrl+Enter in the box and the answer bar ignore the item reply.
 - SKILL.md "The database", `asks/<id>`: it says asks are "never an item". Add `item`: written once at Send, never with `re`.
 - SKILL.md "Route an ask": an ask with `item` goes to that item's `owner`, or the writer takes it. It is answered with steps 1 and 2.
-- SKILL.md "Route and close": a writer never closes an item while one of its reply records has no `reply`. The page would hide that reply:
-  it has no Asks row and no orphan row. Owner grant: yes.
+- SKILL.md "Route and close": a writer never closes an item while one of its reply records has no `reply`. The close hold lasts at most 7 days. Until then
+  the reply stays on its item's card. After that, a reply whose item is gone is its own Asks row. Owner grant: yes.
 
 ## Checked
 
