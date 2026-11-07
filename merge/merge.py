@@ -14,7 +14,7 @@
                           Cost per draft-step ready: one ci-job run and one worktree; the run time is unmeasured for a step subset
                           (the 1200 s lint bound applies). No new file but ci-job's own log.
                           On a ready PR a stale records page with no claim to make or resume is refused before any push; only the draft step heals it.
-  merge --unlock [branch] remove the merge lock on the branch (default: the default branch). Never checks the holder. A cloud run reads the lock first and skips one already released.
+  merge --unlock [branch] remove the merge lock on the branch (default: the default branch). Never checks the holder. It reads the lock first and skips one already released.
   merge <pr> --review-record --head SHA --kind K --guard yes|no [--round N:ROLE:MODEL:VERDICT ...]
                           [--fix-check HEAD:reviewer:MODEL:PASS|FAIL] [--net-value V]
                           print the review record for the head SHA that was reviewed. Stops (exit 1) when the PR's live head is another
@@ -42,8 +42,8 @@ Git half: the merge lock, the temporary worktree, the claim, the push, the rever
 local base branch, afterMerge and the branch delete. GitHub half (`Host`): required checks, the wait,
 the minute read and the merge with its head guard. Every read is a `gh api` REST call: a Claude Code cloud session answers GraphQL with HTTP 403 (route graphql-gh-api-cloud).
 `gh` 2.48 or newer is needed (`--paginate --slurp`); an older gh fails closed.
-A cloud session runs the whole flow (c53): its proxy passes `gh api` reads, PUT pulls/N/merge and a push to refs/heads, so the lock is a
-git push there (default_lock). Its proxy refuses a ref delete: the lock is released by an expired commit, and the branch deletes print "not deleted".
+Every host runs the whole flow (c53): the cloud proxy passes `gh api` reads, PUT pulls/N/merge and a push to refs/heads, so the lock is a
+git push everywhere (default_lock). The cloud proxy refuses a ref delete: the lock is released by an expired commit, and the branch deletes print "not deleted".
 """
 import argparse, ast, contextlib, datetime, functools, json, math, os, pathlib, re, shutil, posixpath, signal, socket, subprocess, sys, tempfile, threading, time, uuid
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "hooks"))
@@ -337,7 +337,7 @@ def say(*lines):
 # ------------------------------------------------------------------ the merge lock
 # A lock is a commit that a ref points at. The commit message holds the expiry. The ref is
 # refs/heads/merge-lock/<defaultBranch>: a branch, because the cloud proxy refuses a push to any ref outside refs/heads.
-# Two backends, one interface: acquire, release, unlock. A Claude Code cloud session uses GitLock (default_lock).
+# One backend, GitLock (default_lock): acquire, release, unlock. Its create-only or leased push is the arbiter, so two runs never both hold a lock.
 
 SESSION_MAX = 80  # characters of --session kept; the spec names no cap
 LOCK_MARGIN = 300  # seconds: before a rate wait of W s the lock's expiry moves to now + W + this
@@ -348,10 +348,9 @@ def lock_ref(b):
     return f"refs/heads/merge-lock/{b}"
 
 def old_lock_ref(b):
-    """The lock name before c53. A Mac run of older merge.py still takes it, so a GitLock (cloud) take refuses while it is live.
-    One way only: an old run never reads the new name, so it can take the old name while a cloud run holds the new one. Only the Mac's
-    reinstall from main at each merge closes that. GhLock skips this read for the same reason. Delete this and its read once no install
-    runs a merge.py older than c53."""
+    """The lock name before c53. A run of older merge.py still takes it, so a GitLock take refuses while it is live.
+    One way only: an old run never reads the new name, so it can take the old name while a new run holds the new one. Only a reinstall
+    from main at each merge closes that. Delete this and its read once no install runs a merge.py older than c53."""
     return f"refs/merge-lock/{b}"
 
 def refuse_old_lock(b, old, now):
@@ -486,9 +485,9 @@ def release_on_signals():
             signal.signal(n, h)
 
 class Lock:
-    """What both backends share: a release that reports and never raises (it runs in a `finally`)."""
+    """What a lock backend shares: a release that reports and never raises (it runs in a `finally`)."""
     until = holder = began = tree = message = None  # holder: set by confirm before acquire; a dict of pr, branch, session. until: the published expiry, set once the lock is held
-    mine = frozenset()  # the lock commits this run made: the take, then one per extension, added before its push or PATCH
+    mine = frozenset()  # the lock commits this run made: the take, then one per extension, added before its push
 
     def _take(self, b, sha, tree, message, now):
         """The one place a take is recorded. The expiry is read back from the published text, so `until` and the text cannot differ."""
@@ -544,10 +543,13 @@ class GitLock(Lock):
             raise (NetStop if is_net(c, out) else Stop)("cannot read the merge lock " + LOCK_CITE + ": " + out)
         if not out:
             return None
-        if git(self.root, "fetch", "-q", "origin", ref)[0]:
-            return out.split()[0], float("inf"), ""
-        msg = git(self.root, "log", "-1", "--format=%B", "FETCH_HEAD")[1]
-        return out.split()[0], expiry_of(msg), msg
+        sha = out.split()[0]
+        c, fetched, _ = retry_net(lambda: git(self.root, "fetch", "-q", "origin", ref), self.pause, what=f"the lock fetch {ref}")
+        if c and is_net(c, fetched):  # an unread expiry is no lock that never expires
+            raise NetStop("cannot read the merge lock commit " + LOCK_CITE + ": " + fetched)
+        # The listed sha names the message: the ref may have moved since the listing, and FETCH_HEAD then holds another run's commit.
+        c, msg = (c, "") if c else git(self.root, "log", "-1", "--format=%B", sha)
+        return (sha, float("inf"), "") if c else (sha, expiry_of(msg), msg)
 
     def acquire(self, b, ttl):
         ref = lock_ref(b)
@@ -566,7 +568,13 @@ class GitLock(Lock):
         lease = f"--force-with-lease={ref}:{cur[0] if cur else ''}"
         c, out = git(self.root, "push", "-q", lease, "origin", f"{sha}:{ref}")
         if c:
-            now_cur = self.read(b)  # a moved ref is another run's take. An unchanged ref is a push the remote refused.
+            try:
+                now_cur = self.read(b)  # a moved ref is another run's take. An unchanged ref is a push the remote refused.
+            except Stop as e:  # the push output is the only account of why the take failed
+                raise type(e)(f"{e}\nthe push said: {out}") from e
+            if now_cur and now_cur[0] == sha:  # the push landed and its reply was lost: the lock is this run's
+                self._take(b, sha, tree, msg, now)
+                return sha
             if (now_cur[0] if now_cur else None) != (cur[0] if cur else None):
                 raise Held("another run took the merge lock first " + LOCK_CITE)
             if is_net(c, out):  # the call never reached the remote: that is no refusal
@@ -617,97 +625,6 @@ class GitLock(Lock):
             if c2:
                 raise Stop("unlock failed " + LOCK_CITE + ": " + out + "\n" + out2)
         return True
-
-class GhLock(Lock):
-    """Real use: the GitHub API. The API refuses a ref that exists, so one run wins."""
-    def __init__(self, now=time.time, pause=time.sleep):
-        self.now, self.pause = now, pause
-
-    def api(self, *a, once=False):
-        """The one home of every lock `gh api` call. A network error or rate limit is retried NET_RETRIES times with `self.pause`
-        (the ladder or GitHub's reset time on a rate limit), then the last (code, output) returns: the caller raises NetStop when is_net says so.
-        Every call asks for the headers (-i), and retry_net drops the block. Once this run holds the lock, extend_for pushes the expiry past each rate wait.
-        `once`: no retry and no wait at all. The extension calls and the delete of an expired lock use it: a retry could land after another run's take.
-        ponytail: no retry inside `shared_deadline`, as in Host.gh. Before the lock is held, a rate wait follows the ladder: 60 + 300 + 900 s = 21 minutes per call at most, and the lock is not yet ours to extend."""
-        path = next((x for x in a if x.startswith("repos/")), " ".join(a))
-        retries = NET_RETRIES if _READ_DEADLINE is None and not once else 0
-        c, out, _ = retry_net(lambda: sh(["gh", "api", "-i", *a]), self.pause, retries, f"the lock call {path}", self.now, self.extend_for)
-        return c, out
-
-    def read(self, b):
-        c, sha = self.api(f"repos/{{owner}}/{{repo}}/git/ref/{lock_ref(b)[5:]}", "--jq", ".object.sha")
-        if c:
-            if is_net(c, sha):  # first: a 5xx reply whose url holds "404" is no proof the lock is gone
-                raise NetStop("cannot read the merge lock " + LOCK_CITE + ": " + sha)
-            if "404" in sha or "Not Found" in sha:
-                return None
-            raise Stop("cannot read the merge lock " + LOCK_CITE + ": " + sha)
-        c, out = self.api(f"repos/{{owner}}/{{repo}}/git/commits/{sha}", "--jq", ".message")
-        if is_net(c, out):  # an unread expiry is no lock that never expires
-            raise NetStop("cannot read the merge lock commit " + LOCK_CITE + ": " + out)
-        return (sha, expiry_of(out), out) if not c else (sha, float("inf"), "")
-
-    def acquire(self, b, ttl):
-        cur = self.read(b)
-        if cur and cur[1] > self.now():
-            refuse_or_take_over(b, cur, self.now())
-        if cur:  # ponytail: the API cannot delete "only if the ref is still X". Window: from this run's read of the expired lock (or of a live lock whose holder is dead) to its delete. If another run breaks the lock and creates a live one inside that window, this delete removes the live lock, and the create below then succeeds, so both runs hold it. The window is a few API calls. Close it with a lock backend that has compare-and-swap.
-            c, out = self.api("-X", "DELETE", f"repos/{{owner}}/{{repo}}/git/{lock_ref(b)}", once=True)  # never retried or waited: a late delete could remove another run's fresh lock
-            if c and not self.gone(out):
-                raise (NetStop if is_net(c, out) else Stop)("cannot remove the expired merge lock " + LOCK_CITE + ": " + out)
-        c, head = self.api(f"repos/{{owner}}/{{repo}}/git/ref/heads/{b}", "--jq", ".object.sha")
-        c2, tree = self.api(f"repos/{{owner}}/{{repo}}/git/commits/{head}", "--jq", ".tree.sha") if not c else (c, head)
-        if c2:
-            raise (NetStop if is_net(c2, tree) else Stop)("cannot read the base branch " + LOCK_CITE + ": " + tree)
-        now = self.now()  # read once: the text and `until` come from this one value
-        msg = lock_message(ttl, now, self.holder)
-        c, sha = self.api("-X", "POST", "repos/{owner}/{repo}/git/commits", "-f", f"message={msg}", "-f", f"tree={tree}", "--jq", ".sha")
-        if c:
-            raise (NetStop if is_net(c, sha) else Stop)("cannot make the lock commit " + LOCK_CITE + ": " + sha)
-        c, out = self.api("-X", "POST", "repos/{owner}/{repo}/git/refs", "-f", f"ref={lock_ref(b)}", "-f", f"sha={sha}")
-        if c:
-            if is_net(c, out):
-                raise NetStop("cannot take the merge lock " + LOCK_CITE + ": " + out)
-            if "already exists" not in out:  # 422 "Reference already exists" is the race; any other text is the refusal itself
-                raise Stop("cannot take the merge lock " + LOCK_CITE + ": " + out)
-            raise Held("another run took the merge lock first " + LOCK_CITE)
-        self._take(b, sha, tree, msg, now)
-        return sha
-
-    def swap(self, b, msg):
-        """A new lock commit with the text `msg`, then the ref moved to it. -> its sha, or Stop. No retry, no wait (api once).
-        ponytail: the ref update is not compare-and-swap. Window: the read of the ref to the PATCH. The API has no lease; a backend with compare-and-swap closes it."""
-        ref = f"repos/{{owner}}/{{repo}}/git/{lock_ref(b)}"
-        c, cur = self.api(f"repos/{{owner}}/{{repo}}/git/ref/{lock_ref(b)[5:]}", "--jq", ".object.sha", once=True)
-        if c or cur.strip() != self.sha:
-            raise Stop("the lock is not this run's any more " + LOCK_CITE if not c else "cannot read the lock " + LOCK_CITE + ": " + cur)
-        c, sha = self.api("-X", "POST", "repos/{owner}/{repo}/git/commits", "-f", f"message={msg}", "-f", f"tree={self.tree}", "--jq", ".sha", once=True)
-        if c:
-            raise Stop("cannot make the lock commit " + LOCK_CITE + ": " + sha)
-        self.mine |= {sha.strip()}  # this run's before the PATCH: a PATCH that lands with a lost reply still leaves a lock release can delete
-        c, out = self.api("-X", "PATCH", ref, "-f", f"sha={sha.strip()}", "-F", "force=true", once=True)
-        if c:
-            raise Stop("cannot move the lock " + LOCK_CITE + ": " + out)
-        return sha.strip()
-
-    @staticmethod
-    def gone(out):
-        """The ref is not there: a delete that finds this has nothing left to do (a retry after a lost reply lands here).
-        A network error or rate limit is never "gone", though its text may hold "404" (a user id, a request id)."""
-        return not is_net(1, out) and ("404" in out or "Not Found" in out or "does not exist" in out)
-
-    def delete(self, b, token):
-        c, out = self.api("-X", "DELETE", f"repos/{{owner}}/{{repo}}/git/{lock_ref(b)}")
-        return (0, out) if c and self.gone(out) else (c, out)
-
-    def unlock(self, b):
-        """-> True when it removed the lock, False when no lock was there."""
-        c, out = self.api("-X", "DELETE", f"repos/{{owner}}/{{repo}}/git/{lock_ref(b)}")
-        if c and is_net(c, out):
-            raise NetStop("unlock failed " + LOCK_CITE + ", still failing after the retries. Run again: " + out)
-        if c and not self.gone(out):
-            raise Stop("unlock failed " + LOCK_CITE + ": " + out)
-        return not c
 
 # ------------------------------------------------------------------ the GitHub half (the seam)
 
@@ -3044,9 +2961,10 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
     return code
 
 def default_lock(root):
-    """A Claude Code cloud session (CLAUDE_CODE_REMOTE=true) gets GitLock: its proxy refuses the REST writes GhLock makes (HTTP 403 on
-    POST git/commits and git/refs, PATCH and DELETE git/refs; measured c53) and passes a push to refs/heads. Elsewhere GhLock, as before."""
-    return GitLock(root) if os.environ.get("CLAUDE_CODE_REMOTE") == "true" else GhLock()
+    """GitLock on every host. A leased push swaps an expired lock only while the ref still holds the commit that was read, so a rival's live
+    lock is never removed. The REST ref calls have no such lease, and the cloud proxy refuses them (HTTP 403 on POST git/commits and git/refs,
+    PATCH and DELETE git/refs; measured c53)."""
+    return GitLock(root)
 
 # The review record: a comment on the pull request (decision pr-review-record). This is the one home of its form.
 REVIEW_MARKER = "<!-- review-record -->"
