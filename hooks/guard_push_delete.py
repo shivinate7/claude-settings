@@ -383,6 +383,23 @@ def delete_text(segment):
         lambda m: m.group(0) if m.group(1) in ("'", '"') else "/" + norm(m.group(1)), segment))
 
 
+def _substitution_end(text, index):
+    """Where the command substitution that opens at `text[index]` ends, else -1. `$(` ends at its
+    matching `)` and a backtick at the next one; an unclosed one runs to the end of the text.
+    PowerShell has `$( )` only, as a backtick is its escape."""
+    if text.startswith("$(", index):
+        depth = 0
+        for at in range(index + 1, len(text)):
+            depth += (text[at] == "(") - (text[at] == ")")
+            if depth == 0:
+                return at
+        return len(text)
+    if text[index] == "`" and not is_powershell(text):
+        close = text.find("`", index + 1)
+        return len(text) if close < 0 else close
+    return -1
+
+
 class UnquotedStart:
     """A compiled pattern whose `search` skips a match that starts inside quotes. It has a
     pattern's own `search`, so a caller loops over it without knowing the difference. An
@@ -406,13 +423,15 @@ class UnquotedStart:
         return None
 
     def _search_unquoted(self, text):
-        inside, quote, index = set(), "", 0
+        inside, quote, index, live_to = set(), "", 0, -1
         while index < len(text):
+            if quote == '"' and index > live_to:
+                live_to = max(live_to, _substitution_end(text, index))   # `$( )` and backticks run in double quotes
             if not quote and text[index] == "'" and CONTRACTION.match(text, index):
                 width, after = 1, ""
             else:
                 width, after = quote_advance(text, index, quote)
-            if quote:
+            if quote and index >= live_to:
                 inside.update(range(index, index + width))
             quote, index = after, index + width
         return next((m for m in self.pattern.finditer(text) if m.start() not in inside), None)
@@ -437,7 +456,7 @@ DESTRUCTIVE_DELETE = (
         r"(?i)\b(?:remove-item|ri|rd|rmdir|del|erase)\b"
         r"(?=[^\n;|&]*\s-r(?:ec(?:urse)?)?\b)"
         r"[^\n;|&]*\s['\"]?" + WIDE_TARGET + r"['\"]?(?:\s|\)|$)"
-    )),
+    ), nested=True),
 )
 # The one set of wide targets, read by the pattern fallbacks and, by tokens, by `rm -rf`: a root, a
 # home, the working directory or a glob of one, with an optional trailing slash and `*`. `.*` and
