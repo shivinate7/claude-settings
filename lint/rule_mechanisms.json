@@ -71,7 +71,7 @@
     "roles-one-role-per-agent": {
       "mechanism": {
         "kind": "unmechanized",
-        "reason": "No prompt hook judges it. A prompt hook sees only the event input, never what an agent did, and no check sees whether an agent took a second role. The guard's floor_hit reads only each spawn's subagent_type, to judge its model."
+        "reason": "No prompt hook judges it. A prompt hook sees only the event input, never what an agent did, and no check sees whether an agent took a second role. The guard's floor_hit reads each spawn's subagent_type, or a Workflow agent's agentType, only to judge its model."
       }
     },
     "roles-model-per-role-table": {
