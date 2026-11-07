@@ -34,7 +34,8 @@ Open items: <items collection URL> or none
 
 <The URL of the page's items collection, where each open item this role owns is listed, or `none`.
 Never copy item ids here: a copy goes stale. The successor rewrites `owner` on each open item in
-that collection to itself.>
+that collection to itself. The page-note capture skips an inherited answer whose `session` names
+the old owner, so the successor jots that note by hand, like a chat message.>
 
 Watch: <page URL>
 
