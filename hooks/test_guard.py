@@ -13340,6 +13340,22 @@ sh("builder-test: shell grep of tests/test_guard.py for a mutating word is allow
    "grep -n install tests/test_guard.py", "allow", **BR)
 sh("builder-test: shell pytest -k with a mutating word is allowed",
    "python3 -m pytest -k copy tests/test_guard.py", "allow", **BR)
+# A `bash -c` script is read at its command position, as the shell reads it: a mutating word that is only an
+# argument of a test run inside it reads as a read. A write to a test inside the script stays refused, whether
+# the write is the script's first command or a later one after `;`.
+sh("builder-test: bash -c pytest -k with a mutating word on a test is allowed",
+   'bash -c "pytest -k install tests/test_x.py"', "allow", **BR)
+sh("builder-test: timeout around bash -c pytest -k with a mutating word on a test is allowed",
+   'timeout 300 bash -c "pytest -k move tests/x.py"', "allow", **BR)
+sh("builder-test: bash -c echo redirect onto a test is refused",
+   'bash -c "echo x > tests/test_x.py"', "deny", rule=BT, carries=("test-author",), **BR)
+sh("builder-test: bash -c cp onto a test is refused",
+   'bash -c "cp /tmp/a tests/test_x.py"', "deny", rule=BT, carries=("test-author",), **BR)
+sh("builder-test: bash -c install onto a test is refused",
+   'bash -c "install -m 644 /tmp/a tests/test_x.py"', "deny", rule=BT, carries=("test-author",), **BR)
+sh("builder-test: bash -c pytest read, then a cp onto a test after the semicolon, is refused",
+   'bash -c "pytest -k install tests/test_x.py; cp /tmp/a tests/test_x.py"', "deny", rule=BT,
+   carries=("test-author",), **BR)
 sh("builder-test: python heredoc that reads tests/x.py, rebinds the name, then writes src/app.py is allowed",
    "python3 - <<'EOF'\np='tests/x.py'\nprint(open(p).read())\np='src/app.py'\nopen(p,'w').write('x')\nEOF",
    "allow", **BR)
