@@ -1757,25 +1757,30 @@ function releaseSent() {
 // One home for holding the cards in view still across a render that moves cards (Send, Undo) or changes the rail above the list. It works with the browser's scroll anchoring on or off:
 // it measures one anchor before the render and scrolls by the anchor's viewport-top change after it, and the forced layout of that read has already taken any scroll the browser made.
 // The anchor is the list's top, which moves only with the rail (the Answered row appears or goes). If the first card to move starts above the viewport, its leaving would shift the
-// cards in view, so the anchor is the first card after it that stays in view. `ids` are the cards that move.
+// cards in view, so the anchor is the first card after it that is in view. A card wholly below the view is no anchor: a sent card taller than the view leaves the list top as
+// the anchor, so the next card takes the sent card's top. `ids` are the cards that move. The returned function carries `tops`: each moving card's viewport top now, kept by a Send.
+// `back` (Undo) is that map from the Send. A card that left from above the band comes back to its old top: the first such card in page order is the anchor.
 // It holds nothing under SENT_MOVE "stay" (no card moves), and not while the rail is in view above the list: the owner sees the rail change, so the list below it follows.
-function holdView(ids) {
-  const none = () => {};
+function holdView(ids, back) {
+  const tops = new Map(), none = Object.assign(() => {}, { tops });
   if (SENT_MOVE !== "sink") return none;
   const band0 = document.querySelector(".hdr").getBoundingClientRect().bottom, el = (id) => document.getElementById("item-" + id);
   const rail = $("rail").getBoundingClientRect();
   const cardsNow = [...document.querySelectorAll("#list article.card")], movers = cardsNow.filter((c) => ids.includes(c.id.slice(5)));
+  movers.forEach((c) => tops.set(c.id.slice(5), c.getBoundingClientRect().top));
+  const returns = back ? ids.filter((id) => back.has(id) && back.get(id) < band0) : [];
   let key = null, a0 = $("list").getBoundingClientRect().top;
   const first = movers[0];
-  if (first && !first.closest("#tier-answered") && first.getBoundingClientRect().top < band0) {
-    const c = cardsNow.find((x) => !movers.includes(x) && first.compareDocumentPosition(x) & Node.DOCUMENT_POSITION_FOLLOWING && x.getBoundingClientRect().bottom > band0);
+  if (!returns.length && first && !first.closest("#tier-answered") && first.getBoundingClientRect().top < band0) {
+    const c = cardsNow.find((x) => { const r = x.getBoundingClientRect(); return !movers.includes(x) && first.compareDocumentPosition(x) & Node.DOCUMENT_POSITION_FOLLOWING && r.bottom > band0 && r.top < innerHeight; });
     if (c) { key = c.id.slice(5); a0 = c.getBoundingClientRect().top; }
   }
-  if (!key && rail.bottom <= a0 + 1 && rail.bottom > band0) return none;
-  return () => {
-    const a = (key && el(key)) || $("list"), d = a.getBoundingClientRect().top - a0;
+  if (!returns.length && !key && rail.bottom <= a0 + 1 && rail.bottom > band0) return none;
+  return Object.assign(() => {
+    const ret = returns.map(el).filter(Boolean).sort((x, y) => x.compareDocumentPosition(y) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1)[0];
+    const a = ret || (key && el(key)) || $("list"), d = a.getBoundingClientRect().top - (ret ? back.get(ret.id.slice(5)) : a0);
     if (Math.abs(d) > 0.5) window.scrollBy(0, d);
-  };
+  }, { tops });
 }
 const hourBucket = () => Math.floor(Date.now() / 36e5);
 function signature(it) {
@@ -1826,9 +1831,12 @@ function cardFor(it) {
   patch(rec.el, nu); rec.sig = sig; return rec.el;
 }
 function repaint() { render(); }
+// A child that stays is never detached: leavers go first, so the kept children are already in order and the loop inserts only the new ones.
+// A move would drop the focus inside a card and reload a live design preview.
 function reconcile(parent, want) {
+  const keep = new Set(want);
+  [...parent.children].forEach((c) => { if (!keep.has(c)) c.remove(); });
   want.forEach((n, i) => { if (parent.children[i] !== n) parent.insertBefore(n, parent.children[i] || null); });
-  while (parent.children.length > want.length) parent.lastElementChild.remove();
 }
 const tierEls = {}, bundleEls = {}, seenHeads = {};
 // Not "not answered": a seen card answered by a Send stays below the divider until reload.
@@ -2120,6 +2128,7 @@ async function sendAll() {
     if (wrote.length) openSent(wrote, at);
     sentNow = wrote.filter((w) => !w.withdrawn).map((w) => w.it.id);
     const hold = holdView(wrote.map((w) => w.it.id));
+    wrote.forEach((w) => { if (w.sank && hold.tops.has(w.it.id)) w.top = hold.tops.get(w.it.id); });
     render();
     hold();
     if (entries.length) {
@@ -2180,7 +2189,7 @@ async function undoSend() {
   }
   if (late.length) { late.sort((x, y) => x - y); state.barNote = "Too late to undo " + nList(late) + "."; }
   undone.forEach(unsinkSent);
-  const hold = holdView(undone.map((w) => w.it.id));
+  const hold = holdView(undone.map((w) => w.it.id), new Map(undone.filter((w) => w.top != null).map((w) => [w.it.id, w.top])));
   saveDraft(); closeSent(); render();
   hold();
   const told = undone.filter((w) => !w.withdrawn); // a withdraw told no session, so its undo tells none
