@@ -1132,9 +1132,10 @@ class GuardClosure(unittest.TestCase):
         self.assertIn("skills/roadmap/page/index.html", paths | loads, "the chain through .parent is not followed")
 
     def test_a_home_config_chain_is_neither_read_nor_named(self):
-        # Control: a path under the user's home is not a repo file, so the chain reads nothing and names nothing.
+        # Control: a path under the user's home is not a repo file, so the chain reads nothing and names nothing. Its target is
+        # the repo's .claude/CLAUDE.md: if that file leaves the repo, the scope line fails, rather than the control passing empty.
         tracked = set(_repo_files())
-        self.assertIn("settings.json", tracked, "scope: settings.json is a repo file, so the probe names a real repo path")
+        self.assertIn(".claude/CLAUDE.md", tracked, "scope: .claude/CLAUDE.md is not a repo file, so this control probes nothing")
         src = 'import pathlib\nUSER_CLAUDE = pathlib.Path.home() / ".claude" / "CLAUDE.md"\n'
         _, paths, loads, unfollowed = _refs("lint/zz_probe.py", ast.parse(src), tracked)
         self.assertEqual((paths | loads, unfollowed), (set(), []))
