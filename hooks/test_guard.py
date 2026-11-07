@@ -473,6 +473,9 @@ GHREADYLANE = os.path.join(ROOT, "ghreadylane")    # a lane's pull request: its 
 GHREADYCOUNT = os.path.join(ROOT, "ghreadycount")  # the same, counted: one line per gh call
 GHREADYBATCH = os.path.join(ROOT, "ghreadybatch")  # an older batch branch's pull request
 GHREADYLABEL = os.path.join(ROOT, "ghreadylabel")  # a lane's pull request, the batch label among two labels
+GHREADYPAIR = os.path.join(ROOT, "ghreadypair")    # pull request 12 is batch-57, 13 a lane's: each answers by its number
+GHREADYBOTH = os.path.join(ROOT, "ghreadyboth")    # pull requests 12 and 13 are both batch heads, batch-57 and batch-58
+PR_BATCH_HEAD_TWO = "batch-58"
 DRAFT_CALLS = "calls.log"  # the counted fake's log, beside its state (GHREADYCOUNT)
 
 
@@ -1020,7 +1023,14 @@ else:
     rows_of = {head: (state["checks"], state["statuses"])}  # the head's own rows; each other open pull request's head has its own
     rows_of.update({o["head"]: (o.get("checks", []), o.get("statuses", [])) for o in state["others"]})
     if re.fullmatch(r"pulls/\d+", rel):
-        print(json.dumps(dict(state["pr"], number=int(rel.split("/")[1]))))
+        number = int(rel.split("/")[1])
+        row = next((o for o in state["others"] if o["number"] == number), None) if state.get("by_number") else None
+        if row is not None:   # by_number: another open pull request answers with its own head ref and labels
+            print(json.dumps(dict(state["pr"], number=number, draft=row.get("draft", False),
+                                  head={"ref": row.get("ref", "feat%d" % number), "sha": row["head"]},
+                                  labels=[{"name": name} for name in row.get("labels", ())])))
+        else:
+            print(json.dumps(dict(state["pr"], number=number)))
     elif rel == "pulls":
         others = [dict(state["pr"], number=o["number"], draft=o.get("draft", False), head={"ref": o.get("ref", "feat%d" % o["number"]), "sha": o["head"]},
                        base={"ref": o.get("base", "main"), "repo": {"default_branch": o.get("default_branch", "main")}},
@@ -1063,11 +1073,15 @@ else:
 
 def make_fake_gh(folder, base, delay=0, delay_s=0, checks=None, runs=None, broken=False, need=(),
                  cwd_name="", statuses=None, page_cap=100, others=(), required=("checks",), protection=None,
-                 count_file=None, compares=None, head_ref="feat", labels=()):
+                 count_file=None, compares=None, head_ref="feat", labels=(), by_number=False):
     """Put a stand-in for the pull request tool in its own folder on PATH.
 
     `head_ref` is the head ref of the pull request, and `labels` its label names: a read of the pull
     request answers both. A case that names neither keeps the defaults, `feat` and no label.
+
+    `by_number`, when True, makes a numbered read (pulls/<n>) of an `others` row answer that row's head
+    ref and labels, so one case can name two pull requests with two heads. Only a case that names two
+    pull requests sets it; every other fake answers the base pull request for any number, as before.
 
     `count_file`, when given, is a path the stand-in appends one line to per call (the call's argv as
     JSON), before it answers. Only a case that counts calls names one; every other fake writes nothing.
@@ -1134,6 +1148,7 @@ def make_fake_gh(folder, base, delay=0, delay_s=0, checks=None, runs=None, broke
         "need": list(need),   # words every call must carry, or it answers as a broken tool does
         "delay_s": delay_s,   # seconds to sleep in-process before answering; see the delay_s note above
         "count_file": count_file,  # None: no call log; a path: one line per call (see the docstring)
+        "by_number": by_number,  # True: a numbered read of an `others` row answers that row's head and labels
     }
     write(os.path.join(folder, "state.json"), json.dumps(state))
     write(os.path.join(folder, "ghfake.py"), FAKE_GH_PY)
@@ -1307,6 +1322,10 @@ def build_fixtures():
     make_fake_gh(GHREADYCOUNT, "main", head_ref=PR_LANE_HEAD, count_file=os.path.join(GHREADYCOUNT, DRAFT_CALLS))
     make_fake_gh(GHREADYBATCH, "main", head_ref=PR_BATCH_HEAD)
     make_fake_gh(GHREADYLABEL, "main", head_ref=PR_LANE_HEAD, labels=["ci", PR_BATCH_LABEL])
+    make_fake_gh(GHREADYPAIR, "main", head_ref=PR_BATCH_HEAD, by_number=True,
+                 others=[{"number": 13, "head": "pr-lane-thirteen", "ref": PR_LANE_HEAD, "draft": True}])
+    make_fake_gh(GHREADYBOTH, "main", head_ref=PR_BATCH_HEAD, by_number=True,
+                 others=[{"number": 13, "head": "pr-batch-thirteen", "ref": PR_BATCH_HEAD_TWO}])
     # merge.py's shared_deadline splits one budget across the read's calls (c53: four on REST: the pull request, the check
     # runs, the commit statuses, the workflow runs), so a delay only a little past the per-call figure that used to be the
     # cutoff no longer exhausts it. 20s per call outruns the whole shared budget on its own, whichever call absorbs the
@@ -9854,11 +9873,13 @@ trust_allow("an unrelated remote tool (list_sessions) in a lane session allows",
 # =========================================================================== 5e-3. the integration pull request
 #
 # Rule draft-pr (decision draft-until-reviewed; debt pr-ready-unguarded). A ready mark of a pull request, `gh pr ready
-# <N>` or the MCP update_pull_request call with draft false, ASKS the owner in a lane session. It is allowed when (1)
-# the pull request carries the batch label, (2) its head ref starts with `batch-` (an older batch branch), or (3) the
-# session carries no cs-build:lane tag. A failed head read asks in a lane session. Owner ruling 2026-11-07 13:20 CST (decision cull-rules)
-# and coordinator ruling 2026-11-07 14:12 CST: the batch's integration pull request goes ready, a lane's pull request
-# stays draft.
+# <N>` or the MCP update_pull_request call with draft false, ASKS the owner. It is allowed when (1) the pull request
+# carries the batch label, (2) its head ref starts with `batch-` (an older batch branch), or (3) the session is proven
+# no lane. A failed head read asks. Owner ruling 2026-11-07 13:20 CST (decision cull-rules) and coordinator ruling
+# 2026-11-07 14:12 CST (option b): the batch's integration pull request goes ready, a lane's pull request stays draft.
+# Option b reads "proven no lane" as: no cs-build:lane tag, proven by a read record, the trust-card precedent (decision
+# session-tiers, Trust card). So no record, no transcript, a transcript that names no file, no env id, or a
+# set_session_tags call on the own id after the newest own read, asks: the session is unproven.
 #
 # Each allow has an ask beside it: the same pull request in a lane session asks, so the session alone does not allow.
 # An allow that holds is then the head's, the label's or the session's own doing. The session is this run's own record
@@ -9875,16 +9896,17 @@ MCP_READY = {"owner": "y", "repo": "x", "pullNumber": 12, "draft": False}  # the
 BASH_READY = "gh pr ready 12"
 
 
-def ready_case(name, expected, fake, transcript, tool="Bash", **tool_input):
+def ready_case(name, expected, fake, transcript, tool="Bash", env=ROLE_ENV, **tool_input):
     """One ready-mark case, judged in the session `transcript` names, against the fake pull request tool at `fake`.
-    An ask names its rule and the integration PR; an allow names neither."""
+    `env` is the environment the run gets, and None names no session id. An ask names its rule and the integration
+    PR; an allow names neither."""
     ask = expected == "ask"
     add("draft-pr: " + name, expected, rule=DRAFT_PR_RULE if ask else None, tool=tool, cwd=NOGIT,
-        env_path=fake + os.pathsep + PY_PATH, env=dict(ROLE_ENV), transcript=transcript,
+        env_path=fake + os.pathsep + PY_PATH, env=None if env is None else dict(env), transcript=transcript,
         carries=("integration PR",) if ask else (), **tool_input)
 
 
-# The ask. A lane's pull request asks, by either form; a read that fails in a lane session asks too.
+# The ask. A lane's pull request asks, by either form; a read that fails asks too.
 ready_case("marking a lane's pull request ready asks the owner, in a lane session", "ask", GHREADYLANE, PR_LANE,
            command=BASH_READY)
 ready_case("an MCP update with draft false on a lane's pull request asks the owner, in a lane session", "ask",
@@ -9893,6 +9915,35 @@ ready_case("a failed head read asks, marking a lane's pull request ready", "ask"
            command=BASH_READY)
 ready_case("a failed head read asks, an MCP update with draft false", "ask", GHBROKEN, PR_LANE, tool=MCP_UPDATE,
            **MCP_READY)
+
+# Not a lane must be proven (option b, see the header). Each shape below leaves the session unproven, so a lane's
+# pull request asks. The untagged transcript is the proof when the env names the session: PR_UNTAGGED allows with the
+# env (a control below) and asks without it.
+PR_NO_RECORD = role_path("no-record")            # a Bash call only: no get_session record of the own session
+PR_NOT_JSON = role_path("not-json")              # the own get_session result is not a record
+PR_OTHER_UNTAGGED = role_path("other-untagged")  # only another session's untagged record: the own one is unread
+PR_MISSING = role_path("missing")                # a transcript_path that names no file
+PR_TAGS_AFTER = role_path("untagged-then-tags")  # the own read is untagged, then set_session_tags names the own id
+ready_case("marking a lane's pull request ready asks, when the own record is unread", "ask", GHREADYLANE, PR_NO_RECORD,
+           command=BASH_READY)
+ready_case("marking a lane's pull request ready asks, when the own get_session result is not JSON", "ask", GHREADYLANE,
+           PR_NOT_JSON, command=BASH_READY)
+ready_case("marking a lane's pull request ready asks, when only another session's record is read", "ask", GHREADYLANE,
+           PR_OTHER_UNTAGGED, command=BASH_READY)
+ready_case("marking a lane's pull request ready asks, when the payload has no transcript_path", "ask", GHREADYLANE,
+           None, command=BASH_READY)
+ready_case("an MCP update asks, when the payload has no transcript_path", "ask", GHREADYLANE, None, tool=MCP_UPDATE,
+           **MCP_READY)
+ready_case("marking a lane's pull request ready asks, when the transcript_path names no file", "ask", GHREADYLANE,
+           PR_MISSING, command=BASH_READY)
+ready_case("marking a lane's pull request ready asks, when the env names no session id", "ask", GHREADYLANE, PR_UNTAGGED,
+           env=None, command=BASH_READY)
+ready_case("an MCP update asks, when the env names no session id", "ask", GHREADYLANE, PR_UNTAGGED, env=None,
+           tool=MCP_UPDATE, **MCP_READY)
+ready_case("marking a lane's pull request ready asks, after set_session_tags on the own id", "ask", GHREADYLANE,
+           PR_TAGS_AFTER, command=BASH_READY)
+ready_case("an MCP update asks, after set_session_tags on the own id", "ask", GHREADYLANE, PR_TAGS_AFTER,
+           tool=MCP_UPDATE, **MCP_READY)
 
 # The allow. Each one names the head, the label or the session that lets it through.
 ready_case("a batch-57 head is allowed, marking ready", "allow", GHREADYBATCH, PR_LANE, command=BASH_READY)
@@ -9913,6 +9964,48 @@ ready_case("an MCP update with no draft key is allowed", "allow", GHREADYLANE, P
            owner="y", repo="x", pullNumber=12)
 ready_case("an MCP update with draft true is allowed", "allow", GHREADYLANE, PR_LANE, tool=MCP_UPDATE,
            owner="y", repo="x", pullNumber=12, draft=True)
+
+
+# A session proven no lane: its own record is read with no cs-build:lane tag. A set_session_tags call on another session
+# leaves that read current, as the trust-card precedent reads it. Both allow, beside the asks above.
+ready_case("marking a pull request ready is allowed, in a session proven not a lane", "allow", GHREADYLANE,
+           PR_UNTAGGED, command=BASH_READY)
+ready_case("marking a pull request ready is allowed, after set_session_tags on another session", "allow", GHREADYLANE,
+           role_path("untagged-then-other-tags"), command=BASH_READY)
+
+# A ready mark named by URL or by branch reads the same pull request as the number does, so each form is judged alike.
+# These hold already; they pin that the selector forms stay judged like the number.
+ready_case("a URL selector of a lane's pull request asks", "ask", GHREADYLANE, PR_LANE,
+           command="gh pr ready https://github.com/y/x/pull/12")
+ready_case("a URL selector of a batch-57 pull request is allowed", "allow", GHREADYBATCH, PR_LANE,
+           command="gh pr ready https://github.com/y/x/pull/12")
+ready_case("a branch selector of a lane's pull request asks", "ask", GHREADYLANE, PR_LANE,
+           command="gh pr ready " + PR_LANE_HEAD)
+ready_case("a branch selector of a batch-57 pull request is allowed", "allow", GHREADYBATCH, PR_LANE,
+           command="gh pr ready " + PR_BATCH_HEAD)
+
+# A chained command. A lane's ready mark that asks runs alone (rule ask-alone), so a chain that holds one is denied
+# with draft-pr named as the asking rule. A bare trailing `&` with no pid captured is refused by detached-launch first,
+# so each shape below ends in `& echo $!`: that rule reads the captured pid and lets the command through, and the ready
+# mark is then judged here alone. Each pull request is read by its own number: 13 is a lane's pull request in
+# GHREADYPAIR and a batch head in GHREADYBOTH. A mark this judge does not read lets the whole chain through.
+def ready_chained(name, fake, command):
+    """A chained ready mark in the lane session: the mark asks, so ask-alone denies the chain, and the reason names draft-pr."""
+    add("draft-pr: " + name, "deny", rule="ask-alone", tool="Bash", cwd=NOGIT,
+        env_path=fake + os.pathsep + PY_PATH, env=dict(ROLE_ENV), transcript=PR_LANE,
+        carries=("draft-pr",), command=command)
+
+
+ready_chained("a lane's mark after `true &`, with a pid captured, is denied as a chain", GHREADYLANE,
+              "true & " + BASH_READY + " & echo $!")
+ready_chained("a lane's mark before `&`, with a pid captured, is denied as a chain", GHREADYLANE,
+              BASH_READY + " & echo $!")
+ready_chained("`gh pr ready 12 & gh pr ready 13 & echo $!` is denied as a chain, when 13 is a lane's pull request",
+              GHREADYPAIR, "gh pr ready 12 & gh pr ready 13 & echo $!")
+ready_chained("`gh pr ready 13 & gh pr ready 12 & echo $!` is denied as a chain, when 13 is a lane's pull request",
+              GHREADYPAIR, "gh pr ready 13 & gh pr ready 12 & echo $!")
+ready_case("`gh pr ready 12 & gh pr ready 13 & echo $!` is allowed, when both are batch heads", "allow", GHREADYBOTH,
+           PR_LANE, command="gh pr ready 12 & gh pr ready 13 & echo $!")
 
 
 def ready_counted(command, fake, transcript=PR_LANE):
