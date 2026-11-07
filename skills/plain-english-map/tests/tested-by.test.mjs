@@ -32,7 +32,7 @@
 //   T8   one hop. Through `src/pkg/index.ts`, the test passes (T8a). Without the re-export, it fails (T8b). Two hops fail (T8c).
 //        Through `src/pkgpy/__init__.py`, the test passes (T8d). Without the re-export, it fails (T8e).
 //   T10  a join of literal pieces loads the file: os.path.join and pathlib (T10a to T10c), path.join and resolve (T10d, T10e). Red on main for
-//        those five, since MAP11 does not read a join yet. A non-literal piece (T10f) and an array join (T10g) stay FAILs, green on main.
+//        those five, since MAP11 does not read a join yet. A non-literal piece (T10f), an array join (T10g) and a join to an untracked nested path (T10h) stay FAILs, green on main.
 //   C0   control, green on the old code: the import reader MAP11 uses reads the fixture's imports the way these cases assume.
 
 import { test } from 'node:test';
@@ -551,4 +551,19 @@ test("T10g. control, green on main: ['..', 'src', 'home.ts'].join('/') is an arr
   const dir = pieceCase(testFile, `export const page = ['..', 'src', 'home.ts'].join('/');
 `, 'src/home.ts', ['..', 'src', 'home.ts', '/']);
   mustNotLoad(check(dir), CORE, testFile, 'src/home.ts');
+});
+
+test('T10h. control, green on main: os.path.join(ROOT, "vendor", "src", "retry.py") with no tracked vendor/src/retry.py does not load src/retry.py: MAP11 fails and names the page, the test and the file', () => {
+  needFile(REL);
+  const testFile = 'tests/join_deep.py';
+  const dir = pieceCase(testFile, `import os
+
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
+def test_wait():
+    path = os.path.join(ROOT, "vendor", "src", "retry.py")
+    assert os.path.isfile(path)
+`, 'src/retry.py', ['vendor', 'src', 'retry.py']);
+  mustNotLoad(check(dir), CORE, testFile, 'src/retry.py');
 });
