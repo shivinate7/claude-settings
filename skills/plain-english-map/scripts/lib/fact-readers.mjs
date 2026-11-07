@@ -5,7 +5,8 @@
 //   any other extension    a line regex over the text with comments AND strings blanked. It is no parser: a stated limit.
 // A request is { file, symbol } for a value. Internal callers add `op`: 'defines' (is the symbol bound at module level)
 // 'uses' (does `file` import the tracked file `target`, and refer to `symbol`) or 'loads' (the tracked files that `file` loads at runtime, as
-// { imports, named }: the files it imports without a type-only import, and the files a string in its code equals, from its folder or the root).
+// { imports, named }: the files it imports without a type-only import, and the files a string in its code equals, from its folder or the root.
+// A path.join, path.resolve or path.posix.join call whose pieces after the first are string literals counts as one such string).
 // A result is { file, symbol, ok: true, value } or { file, symbol, ok: false, reason, gone? }. `gone: true` means the file was
 // read and the symbol is not in it. A failure without `gone` is unknown: the caller must never read it as a pass.
 import { spawnSync } from 'node:child_process';
@@ -90,22 +91,30 @@ const moduleBindings = (sf) => {
 // The local names that hold the whole module of `target`: `import * as ns`, a default `import lib`, `import m = require(...)`,
 // `const m = require(...)` and `const m = await import(...)`. Each specifier goes through the import reader's resolver, so an
 // alias of any other module is no alias of `target`.
-const targetAliases = (sf, file, target, tracked) => {
+// With `target` PATH_MODULE the specifier test is `path` or `node:path`, and `named`, when given, collects each named binding of the
+// module as local name -> imported name: `import { join as j } from 'path'` and `const { join: j } = require('path')`.
+const PATH_MODULE = Symbol('node:path');
+const PATH_SPECIFIERS = new Set(['path', 'node:path']);
+const targetAliases = (sf, file, target, tracked, named = null) => {
   const aliases = new Set();
-  const namesTarget = (spec) => ts.isStringLiteralLike(spec) && resolveSpecifier(file, spec.text, tracked) === target;
+  const namesTarget = (spec) => ts.isStringLiteralLike(spec) && (target === PATH_MODULE ? PATH_SPECIFIERS.has(spec.text) : resolveSpecifier(file, spec.text, tracked) === target);
   const visit = (n) => {
     if (ts.isImportDeclaration(n) && n.importClause && namesTarget(n.moduleSpecifier)) {
       const { name, namedBindings } = n.importClause;
       if (name) aliases.add(name.text);
       if (namedBindings && ts.isNamespaceImport(namedBindings)) aliases.add(namedBindings.name.text);
+      if (named && namedBindings && ts.isNamedImports(namedBindings)) for (const e of namedBindings.elements) named.set(e.name.text, (e.propertyName ?? e.name).text);
     } else if (ts.isImportEqualsDeclaration(n) && ts.isExternalModuleReference(n.moduleReference) && namesTarget(n.moduleReference.expression)) {
       aliases.add(n.name.text);
-    } else if (ts.isVariableDeclaration(n) && ts.isIdentifier(n.name) && n.initializer) {
+    } else if (ts.isVariableDeclaration(n) && (ts.isIdentifier(n.name) || (named && ts.isObjectBindingPattern(n.name))) && n.initializer) {
       let x = n.initializer;
       while (ts.isParenthesizedExpression(x) || ts.isAwaitExpression(x)) x = x.expression;
       const callee = ts.isCallExpression(x) && x.arguments.length === 1 ? x.expression : null;
       const loads = callee && (callee.kind === ts.SyntaxKind.ImportKeyword || (ts.isIdentifier(callee) && callee.text === 'require'));
-      if (loads && namesTarget(x.arguments[0])) aliases.add(n.name.text);
+      if (loads && namesTarget(x.arguments[0])) {
+        if (ts.isIdentifier(n.name)) aliases.add(n.name.text);
+        else for (const e of n.name.elements) if (ts.isIdentifier(e.name) && !e.dotDotDotToken) named.set(e.name.text, ((e.propertyName && ts.isIdentifier(e.propertyName)) ? e.propertyName : e.name).text);
+      }
     }
     ts.forEachChild(n, visit);
   };
@@ -143,23 +152,54 @@ const identifiers = (sf, aliases) => {
   return names;
 };
 
+const dottedText = (x) => {
+  if (ts.isIdentifier(x)) return x.text;
+  return ts.isPropertyAccessExpression(x) && ts.isIdentifier(x.name) ? ((d) => (d === null ? null : `${d}.${x.name.text}`))(dottedText(x.expression)) : null;
+};
+const isStringPiece = (x) => ts.isStringLiteral(x) || ts.isNoSubstitutionTemplateLiteral(x);
+
+// The path that each join call names, as one string: `path.join`, `path.resolve` and `path.posix.join` on a binding of 'path' or 'node:path',
+// and a bare `join` or `resolve` imported from it. Only the first argument (the anchor) may be anything but a plain string literal. A literal
+// anchor is the first piece. A later piece that is no literal (a name, a template with a substitution, a spread) drops the call, and so does a
+// piece that starts with `/`, and so does a call with no piece after the anchor.
+const joinedStrings = (sf, file, files) => {
+  const named = new Map();
+  const modules = targetAliases(sf, file, PATH_MODULE, files, named);
+  const callees = new Set();
+  for (const m of modules) for (const f of ['join', 'resolve', 'posix.join']) callees.add(`${m}.${f}`);
+  for (const [local, imported] of named) if (imported === 'join' || imported === 'resolve') callees.add(local);
+  const out = [];
+  const visit = (n) => {
+    if (ts.isCallExpression(n) && n.arguments.length > 1 && callees.has(dottedText(n.expression))) {
+      const [anchor, ...rest] = n.arguments;
+      const pieces = isStringPiece(anchor) ? [anchor, ...rest] : rest;
+      if (pieces.every(isStringPiece) && !pieces.some((p) => p.text.startsWith('/'))) out.push(pieces.map((p) => p.text).join('/'));
+    }
+    ts.forEachChild(n, visit);
+  };
+  if (callees.size) visit(sf);
+  return out;
+};
+
 // The tracked files that a string in the code equals, from the file's folder or the repository root. A module specifier of an import or
 // an export is no code string, and neither is a type: `import type x from './a.ts'` names a file and loads none.
+// The path of a join (joinedStrings) is one such string.
 const namedFiles = (sf, file, files) => {
   const folder = path.posix.dirname(file);
   const out = new Set();
+  const consider = (s) => {
+    if (s && !s.includes('\n') && !s.startsWith('/'))
+      for (const c of [path.posix.normalize(path.posix.join(folder, s)), path.posix.normalize(s)]) if (c !== file && files.has(c)) out.add(c);
+  };
   const visit = (n) => {
     if (ts.isLiteralTypeNode(n) || ts.isImportTypeNode(n)) return;
     if ((ts.isImportDeclaration(n) || ts.isExportDeclaration(n)) && n.moduleSpecifier) return;
     if (ts.isExternalModuleReference(n)) return;
-    if (ts.isStringLiteral(n) || ts.isNoSubstitutionTemplateLiteral(n)) {
-      const s = n.text;
-      if (s && !s.includes('\n') && !s.startsWith('/'))
-        for (const c of [path.posix.normalize(path.posix.join(folder, s)), path.posix.normalize(s)]) if (c !== file && files.has(c)) out.add(c);
-    }
+    if (ts.isStringLiteral(n) || ts.isNoSubstitutionTemplateLiteral(n)) consider(n.text);
     ts.forEachChild(n, visit);
   };
   visit(sf);
+  for (const s of joinedStrings(sf, file, files)) consider(s);
   return [...out].sort();
 };
 

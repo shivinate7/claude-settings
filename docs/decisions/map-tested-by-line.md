@@ -14,6 +14,7 @@ Lane `map-tested-by-line`, 2026-11-05. Banchi's retired `docs/map.py` held `test
   - It imports the file, through the import reader that MAP9 uses. A type-only import does not count.
   - Or it imports one `__init__.py` or `index.*` that re-exports the file (one hop).
   - Or a string in its code is the file's path, from the test's folder or the repository root. This covers a test that runs the file as a subprocess. Comments and docstrings never count (rule `building-scanner-respects-strings`).
+  - Or a join call builds that path (lane `map11-path-joins`, 2026-11-07). The callee is `os.path.join` or `posixpath.join` (Python, named through the file's imports), a pathlib `/` chain, or in JS `path.join`, `path.resolve`, `path.posix.join`, or a bare `join` or `resolve` imported from `path` or `node:path`. Only the first argument, the anchor, may be a name or an expression. Every later piece is a plain string literal: no spread, no star, no substitution. A piece that starts with `/` drops the call, and so does a call with no literal after the anchor. A literal anchor is the first piece. The pieces after the anchor are joined with `/` and tried from the test's folder, then the root. The match is exact, never a suffix. The hole it opens: an anchor that is really a temp or fixture folder, whose joined tail equals a root path, names the wrong file, and MAP11 passes.
   - A Python import of a package loads its `__init__.py`. MAP9 `uses` facts read the same way.
   - A test in another language, or a run with no `python3`, is an unknown read and fails.
 - **No new config key.** The line names its tests.
@@ -38,7 +39,6 @@ No new process. MAP11's reads join the one `readFacts` call of a check run, so o
 Debts:
 - `map-tested-by-no-shell` (MAP11 cannot read a shell test, so a tested-by line naming one fails).
 - `map-import-alias-unread` (a test that imports by a path alias, such as `@/src/y`, fails MAP11).
-- `map-tested-by-path-pieces` (a test that builds the path by `os.path.join` or `path.join` fails MAP11).
 - `map-py-base-name-match` (a test with stdlib `import queue` passes for a mapped `jobs/queue.py`; MAP9 shares the reader).
 
 Kind: process

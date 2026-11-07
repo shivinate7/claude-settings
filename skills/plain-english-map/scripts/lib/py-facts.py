@@ -8,7 +8,8 @@ A request is {"file", "op", "symbol", "target"}:
   op "uses"    whether `file` imports the tracked file `target`, and whether it refers to `symbol`
   op "loads"   the tracked files `file` loads at runtime: {"imports": [path], "named": [path]}. `imports` leaves out an import under
                `if TYPE_CHECKING:`. `named` holds each tracked file that a string in the code equals, from the file's folder or the root.
-               A docstring or a bare string statement is no code string.
+               A docstring or a bare string statement is no code string. A join counts as one string: `os.path.join` or `posixpath.join` (named
+               through the file's imports) and a `/` chain, whose pieces after the anchor are plain string literals (see `joined_strings`).
 A result is {"ok": true, "value": v} or {"ok": false, "reason": str, "gone": bool}.
 `gone` is true when the file was read and the symbol is not there. Any other failure is unknown, so it has no `gone`.
 The module imports only the standard library and reads files as text, so it runs under `python3 -I`.
@@ -158,12 +159,67 @@ def code_strings(tree):
     return [n.value for n in ast.walk(tree) if isinstance(n, ast.Constant) and isinstance(n.value, str) and id(n) not in skip]
 
 
-def named_files(tree, parent, tracked):
-    """The tracked files that a string in the code equals, from the parent's folder or from the root."""
+JOINS = ("os.path.join", "posixpath.join")
+
+
+def join_callees(tree):
+    """Each dotted name that holds `os.path.join` or `posixpath.join` in the file, read from its imports:
+    `import os`, `import os.path as p`, `from os import path`, `from os.path import join as pj`, `import posixpath`."""
+    names = set()
+    for module, held in import_bindings(tree, types=False):
+        if not held:
+            continue
+        for join in JOINS:
+            if join == module:
+                names.add(held)
+            elif join.startswith(module + "."):
+                names.add(held + join[len(module):])
+    return names
+
+
+def is_literal_string(node):
+    return isinstance(node, ast.Constant) and isinstance(node.value, str)
+
+
+def joined_strings(tree):
+    """The path that each join call or `/` chain names, as one string. Only the first argument (the anchor) may be anything but a plain
+    string literal. A literal anchor is the first piece. A piece after it that is not a literal (a name, an f-string, a star) drops the call,
+    and so does a piece that starts with `/`, and so does a call with no piece after the anchor."""
+    callees = join_callees(tree)
+    inner = {id(n.left) for n in ast.walk(tree) if isinstance(n, ast.BinOp) and isinstance(n.op, ast.Div)}
+    out = []
+    for node in ast.walk(tree):
+        pieces = None
+        if isinstance(node, ast.Call) and callees and dotted_name(node.func) in callees:
+            args = node.args
+            if args and not node.keywords and not any(isinstance(a, ast.Starred) for a in args) and len(args) > 1:
+                pieces = [args[0]] + args[1:]
+                anchor = args[0]
+        elif isinstance(node, ast.BinOp) and isinstance(node.op, ast.Div) and id(node) not in inner:
+            chain, anchor = [], node
+            while isinstance(anchor, ast.BinOp) and isinstance(anchor.op, ast.Div):
+                chain.append(anchor.right)
+                anchor = anchor.left
+            pieces = [anchor] + chain[::-1]
+        if pieces is None:
+            continue
+        if not all(is_literal_string(p) for p in pieces[1:]):
+            continue
+        texts = [p.value for p in pieces[1:]]
+        if is_literal_string(anchor):
+            texts.insert(0, anchor.value)
+        if any(t.startswith("/") for t in texts):
+            continue
+        out.append("/".join(texts))
+    return out
+
+
+def named_files(tree, parent, tracked, joined=()):
+    """The tracked files that a string in the code equals, from the parent's folder or from the root. `joined` holds the strings that joins name."""
     found = set(tracked)
     folder = parent.rsplit("/", 1)[0] if "/" in parent else ""
     out = set()
-    for s in code_strings(tree):
+    for s in code_strings(tree) + list(joined):
         if not s or "\n" in s or s.startswith("/"):
             continue
         for c in (posixpath.normpath(posixpath.join(folder, s)), posixpath.normpath(s)):
@@ -178,7 +234,7 @@ def answer(req, tree, tracked):
         imports = {resolve(m, req["file"], tracked) for m in imported_modules(tree, types=False)}
         imports.discard(None)
         imports.discard(req["file"])
-        return {"ok": True, "value": {"imports": sorted(imports), "named": named_files(tree, req["file"], tracked)}}
+        return {"ok": True, "value": {"imports": sorted(imports), "named": named_files(tree, req["file"], tracked, joined_strings(tree))}}
     if op == "uses":
         target = req["target"]
         imports = any(resolve(m, req["file"], tracked) == target for m in imported_modules(tree))
