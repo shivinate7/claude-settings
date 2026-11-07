@@ -1486,5 +1486,5 @@
 - prove-judge-label-typo-skipped: a label outside the known set is skipped, not refused. Decision: claims-carry-backing (the claim-backing record).
 - prove-judge-all-unknown-rate: an all-failed run prints false alarms 0/N (0.0%) next to its unknown count. Decision: claims-carry-backing (the claim-backing record).
 - prove-judge-one-error-line: one first error line is attached to every unknown, whatever its cause. Decision: claims-carry-backing (the claim-backing record).
-- prove-judge-text-not-rechecked: a row's text is never compared with the line at its rev, at run time or in the test; the test checks only that texts are distinct and revs exist (lint/prove_route_judge.py; lint/test_prove_route_judge.py:223-233). Decision: claims-carry-backing (the claim-backing record).
+- prove-judge-text-not-rechecked: a row's text is never compared with its line at the rev, at run time or in the test. The test checks only that texts are distinct and revs exist (lint/prove_route_judge.py; lint/test_prove_route_judge.py:223-233). Decision: claims-carry-backing (the claim-backing record).
 - prove-judge-no-json-unknown: in the first real run, 4 rows came back unknown because the model result carried no JSON verdict; the group is not named. Decision: claims-carry-backing (the claim-backing record).
