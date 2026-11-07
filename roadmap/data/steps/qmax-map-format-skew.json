@@ -1,0 +1,11 @@
+{
+  "title": "q_max map formatVersion matches the plain-english-map skill",
+  "phase": "now",
+  "status": "doing",
+  "order": 0.6,
+  "owner": "coordinator",
+  "why": "Coordinator, 13:45 CST Nov 7: q_max main fails invariants MAP1-MAP10, because the map has formatVersion 4 and the skill reads 5.",
+  "note": "Done check: `node harness/check-invariants.mjs` on q_max passes MAP1-MAP10.",
+  "updatedAt": "2026-11-07T13:48:00-06:00",
+  "lane": "session_013NEJL1dp5Gks9NWgNMJ7Jw"
+}

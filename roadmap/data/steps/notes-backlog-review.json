@@ -1,10 +1,11 @@
 {
   "title": "A Sonnet workflow reviews the notes and debts backlog, and an agent writes how to work around it",
   "phase": "now",
-  "status": "todo",
+  "status": "doing",
   "order": 0.5,
   "owner": "coordinator",
   "why": "Owner answer to item 355, 13:41 CST Nov 7: \"send a sonnet workflow to review through them. separately have an agent consider best practices around developing around them\". Main holds 1,501 notes lines and 121 debt files (measured 13:33 CST).",
-  "note": "Two parts. 1: a Sonnet workflow reads each notes line and debt and gives a verdict: fix, delete, or keep with a reason. 2: a separate agent proposes best practices for working with the backlog. Lane qmax-debts-one-home's 58 q_max \"Holes, named\" decisions wait on this. Done check: each line has a verdict in the report.",
-  "updatedAt": "2026-11-07T13:46:00-06:00"
+  "note": "Two parts. 1: a Sonnet workflow reads each notes line and debt and gives a verdict: fix, delete, or keep with a reason. 2: a separate agent proposes best practices for working with the backlog. Lane qmax-debts-one-home's 58 q_max \"Holes, named\" decisions wait on this. Done check: each line has a verdict in the report. Running at 13:45 CST: a Sonnet workflow of 9 agents, plus one best-practices agent (coordinator). The best-practices agent's finding is page item 358.",
+  "updatedAt": "2026-11-07T13:48:00-06:00",
+  "lane": "coordinator"
 }
