@@ -10,6 +10,7 @@ Output names pinned (the `scope` job re-exports them as job outputs):
              checks_windows_rest, checks_macos, shell_macos, pointer_windows
   STEP_FLAGS code, guard, sweep, mods, shoot (the suite flags; shoot turns on the whole checks-shoot job)
   GUARD_SPLIT guard_windows_full, guard_windows_slice (the Windows guard split; GuardWindowsSplit pins them)
+  MERGE_SPLIT merge_windows_full, merge_windows_slice (the Windows merge split; MergeWindowsSplit pins them)
 
 Run with:  python3 lint/test_ci_scope.py -v
 """
@@ -41,12 +42,16 @@ ALL = JOB_FLAGS + STEP_FLAGS
 GUARD_FULL = "guard_windows_full"
 GUARD_SLICE = "guard_windows_slice"
 GUARD_SPLIT = (GUARD_FULL, GUARD_SLICE)
+# The Windows merge split, the same shape: the full shards (checks-windows-merge's shard 1 and -2..-5) and the slice.
+MERGE_FULL = "merge_windows_full"
+MERGE_SLICE = "merge_windows_slice"
+MERGE_SPLIT = (MERGE_FULL, MERGE_SLICE)
 BASH = shutil.which("bash")
 
 
 def pre_split(got):
-    """The outputs the script wrote before the guard split: every output but GUARD_SPLIT."""
-    return {n: v for n, v in got.items() if n not in GUARD_SPLIT}
+    """The outputs the script wrote before the two splits: every output but GUARD_SPLIT and MERGE_SPLIT."""
+    return {n: v for n, v in got.items() if n not in GUARD_SPLIT + MERGE_SPLIT}
 
 
 def family_files():
@@ -75,9 +80,14 @@ def family_files():
 # fixture path in a temp folder. A run-time root that is not a folder of the repo is not read. A loader path with no literal
 # repo file is named. A string or a comment holds no load: the syntax tree is read.
 GUARD_SEEDS = ("hooks/guard.py", "hooks/test_guard.py")
+# The merge suite's closure has one seed, its own file. merge/test_merge.py imports decision_watch, which imports guard, so the
+# merge closure holds the guard closure's files too (closure_of reads them from the code, once per seed set).
+MERGE_SEEDS = ("merge/test_merge.py",)
 # Each load guard_closure finds but does not follow, as "file:scope:source": why. The scope is the enclosing function (or
 # <module>) and the source is the load's text as ast.unparse writes it, so a line added above a load keeps its entry.
+# An entry names a load of either closure (the guard's or the merge suite's), so the check reads the union of both.
 LOAD_EXCEPTIONS = {
+    "hooks/config_watch.py:_load_guard:path": "GUARD_UNDER_TEST, a test override of guard.py's path, as decision_watch's (guard.py is in the closure by import)",
     "hooks/decision_watch.py:<module>:_GUARD_PATH": "GUARD_UNDER_TEST, a test override of guard.py's path (guard.py is in the closure by import)",
     "hooks/guard_merge.py:merge_module:path": "the merge tool at a clone root, MERGE_TOOL_REL (guard_merge.py): merge/merge.py is in the closure",
     "hooks/guard_merge.py:_merge_config_at:os.path.join(root, '.github', 'stamp.json')": "a stamp read from a clone root found by walking up: a fixture root in the suite, the checkout in a real run",
@@ -95,7 +105,7 @@ LOAD_EXCEPTIONS = {
     "merge/merge.py:hit_suites:os.path.join(root, '.github', 'workflows', 'checks.yml')": "the checkout's own workflow, .github/workflows/checks.yml, already a fail-safe path in ci-scope.sh",
     "skills/waiting-page/stale_pages.py:pointer_checkout:os.path.join(os.path.expanduser('~'), '.claude', 'CLAUDE.md')": "the user's ~/.claude/CLAUDE.md, not this repo's .claude/CLAUDE.md",
 }
-_CLOSURE = {}
+_CLOSURE = {}  # closure_of's cache: seed tuple -> (files, unfollowed)
 
 
 def _repo_files():
@@ -339,21 +349,22 @@ def _refs(f, tree, tracked):
     return modules, paths, loads, unfollowed
 
 
-def guard_closure():
-    """-> (files, unfollowed): the repo files the guard suite loads, sorted, and the loads not followed, as
-    (file, key, what). Read from the code of GUARD_SEEDS (see above), once per run."""
-    if not _CLOSURE:
+def closure_of(seeds):
+    """-> (files, unfollowed) for the seeds: the repo files the suite they start loads, sorted, and the loads not followed, as
+    (file, key, what). Read from the code of the seeds, once per run and per seed set."""
+    key = tuple(seeds)
+    if key not in _CLOSURE:
         tracked = set(_repo_files())
         by_name = {}
         for p in tracked:
             if p.endswith(".py"):
                 by_name.setdefault(posixpath.basename(p)[:-3], []).append(p)
         files, unfollowed, parsed = set(), [], set()
-        todo = [(s, True) for s in GUARD_SEEDS]
+        todo = [(s, True) for s in seeds]
         while todo:
             f, is_python = todo.pop()
             if f not in tracked:
-                raise AssertionError(f"{f} is a guard seed or a load target, and the repo does not have it")
+                raise AssertionError(f"{f} is a seed or a load target, and the repo does not have it")
             files.add(f)
             if f in parsed or not is_python:
                 continue
@@ -364,9 +375,19 @@ def guard_closure():
             todo += [(c, True) for m in modules for c in by_name.get(m, [])]
             todo += [(c, c.endswith(".py")) for c in paths]
             todo += [(c, True) for c in loads]
-            unfollowed += [(f, key, what) for key, what in here]
-        _CLOSURE.update(files=sorted(files), unfollowed=sorted(unfollowed))
-    return _CLOSURE["files"], _CLOSURE["unfollowed"]
+            unfollowed += [(f, key_, what) for key_, what in here]
+        _CLOSURE[key] = (sorted(files), sorted(unfollowed))
+    return _CLOSURE[key]
+
+
+def guard_closure():
+    """The guard suite's closure: closure_of(GUARD_SEEDS)."""
+    return closure_of(GUARD_SEEDS)
+
+
+def merge_closure():
+    """The merge suite's closure: closure_of(MERGE_SEEDS). The same derivation as the guard's, with its root at merge/test_merge.py."""
+    return closure_of(MERGE_SEEDS)
 
 
 def named_keys(f, src, tracked):
@@ -467,7 +488,9 @@ class Scope(unittest.TestCase):
             self.assertEqual(got[n], "false", f"{n}: {got}")
 
     def test_docs_only_pr_turns_every_job_off(self):
-        got = run(["README.md", "decisions/some-record.md"])
+        # README.md is not here: the merge suite reads it (LockProseStatesTheCode), so it is in the merge closure and turns the
+        # merge job on (MergeClosure). A docs file outside every closure keeps every job off.
+        got = run(["docs/some-record.md", "decisions/some-record.md"])
         self.assertFlags(got, want_false=ALL)
 
     def test_merge_change_turns_the_merge_job_on(self):
@@ -890,8 +913,11 @@ class GuardClosure(unittest.TestCase):
                                  f"{GUARD_FULL} is {got.get(GUARD_FULL)!r} for {p}, want 'true': the guard suite loads it")
 
     def test_every_load_the_closure_does_not_follow_is_named_in_load_exceptions(self):
-        _, unfollowed = guard_closure()
-        found, named = Counter(f"{f}:{key}" for f, key, _ in unfollowed), Counter(LOAD_EXCEPTIONS.keys())
+        # The guard's loads and the merge suite's: a load in both is one entry. Counter | keeps the larger count per key.
+        found = Counter()
+        for closure in (guard_closure, merge_closure):
+            found |= Counter(f"{f}:{key}" for f, key, _ in closure()[1])
+        named = Counter(LOAD_EXCEPTIONS.keys())
         missing, stale = sorted((found - named).elements()), sorted((named - found).elements())
         self.assertEqual((missing, stale), ([], []),
                          f"LOAD_EXCEPTIONS is out of step: unnamed loads {missing}, entries with no such load {stale}")
@@ -910,7 +936,7 @@ class GuardClosure(unittest.TestCase):
         tracked = set(_repo_files())
         for f in sorted({key.split(":")[0] for key in LOAD_EXCEPTIONS}):
             with self.subTest(path=f):
-                self.assertIn(f, guard_closure()[0], f"scope: {f} is not in the guard closure")
+                self.assertIn(f, guard_closure()[0] + merge_closure()[0], f"scope: {f} is in neither closure")
                 keys = named_keys(f, "\n\n\n" + source_of(f), tracked)
                 self.assertEqual(len(keys), len(set(keys)), f"{f}: two named loads share a key: {keys}")
                 self.assertEqual(sorted(keys), exceptions_of(f), f"{f}: its named loads moved when blank lines went above them")
@@ -1025,6 +1051,115 @@ class GuardClosure(unittest.TestCase):
         _, paths, loads, unfollowed = _refs("hooks/test_zz_probe.py", ast.parse(src), tracked)
         self.assertNotIn("skills/waiting-page/page.html", paths | loads)
         self.assertEqual(unfollowed, [])
+
+
+@unittest.skipUnless(BASH, "bash not on PATH")
+class MergeWindowsSplit(unittest.TestCase):
+    """The Windows merge suite on a pull_request. merge_windows_full turns on the full shards (checks-windows-merge's shard 1 and
+    checks-windows-merge-2 to -5). merge_windows_slice turns on the slice: checks_windows_merge on and full off, so the two never
+    run together. Push, schedule, dispatch and the fail-safe paths turn full on and slice off."""
+
+    def test_a_merge_suite_file_outside_the_closure_runs_the_slice_and_not_the_full_shards(self):
+        # merge/test_launch.py and merge/test_cmd.py are not shard-bound: checks-windows-merge runs each whole on every run. The
+        # closure leaves them out, so their pull_request runs the slice only.
+        for p in ("merge/test_launch.py", "merge/test_cmd.py"):
+            with self.subTest(path=p):
+                got = run([p])
+                self.assertEqual(got["checks_windows_merge"], "true", f"scope: checks_windows_merge is off for {p}")
+                self.assertEqual(got.get(MERGE_SLICE), "true", f"{MERGE_SLICE} is {got.get(MERGE_SLICE)!r} for {p}, want 'true'")
+                self.assertEqual(got.get(MERGE_FULL), "false", f"{MERGE_FULL} is {got.get(MERGE_FULL)!r} for {p}, want 'false'")
+
+    def test_a_non_family_hook_pr_runs_neither_merge_split_flag(self):
+        got = run(["hooks/daily_note.py"])
+        self.assertEqual(got["checks_windows_merge"], "false", "scope: checks_windows_merge is on for hooks/daily_note.py")
+        for name in MERGE_SPLIT:
+            with self.subTest(output=name):
+                self.assertEqual(got.get(name), "false", f"{name} is {got.get(name)!r} for hooks/daily_note.py, want 'false'")
+
+    def test_a_docs_only_pr_turns_both_merge_split_flags_off(self):
+        got = run(["docs/some-record.md", "decisions/some-record.md"])
+        for name in MERGE_SPLIT:
+            with self.subTest(output=name):
+                self.assertEqual(got.get(name), "false", f"{name} is {got.get(name)!r} on a docs-only pull_request, want 'false'")
+
+    def test_the_merge_split_on_every_kind_of_path(self):
+        # One path of each kind, with its flags on a pull_request as absolute values: a closure file, a file outside the closure,
+        # a non-family hook, and a docs file. A push turns the full shards on and the slice off, for each path.
+        want = {  # path: (checks_windows_merge, merge_windows_full, merge_windows_slice) on a pull_request
+            "merge/merge.py": ("true", "true", "false"),
+            "hooks/guard.py": ("true", "true", "false"),
+            "merge/test_launch.py": ("true", "false", "true"),
+            "hooks/daily_note.py": ("false", "false", "false"),
+            "docs/some-record.md": ("false", "false", "false"),
+        }
+        for p, (merge, full, slice_) in want.items():
+            with self.subTest(path=p, event="pull_request"):
+                got = run([p])
+                self.assertEqual((got.get("checks_windows_merge"), got.get(MERGE_FULL), got.get(MERGE_SLICE)), (merge, full, slice_),
+                                 f"checks_windows_merge, {MERGE_FULL}, {MERGE_SLICE} for {p} on a pull_request")
+            with self.subTest(path=p, event="push"):
+                got = run([p], event="push")
+                self.assertEqual((got.get(MERGE_FULL), got.get(MERGE_SLICE)), ("true", "false"),
+                                 f"{MERGE_FULL}, {MERGE_SLICE} for {p} on a push")
+
+    def test_push_schedule_dispatch_and_an_unreadable_diff_run_the_full_merge_and_not_the_slice(self):
+        runs = [(f"event {ev}", run(["docs/some-record.md"], event=ev)) for ev in ("push", "schedule", "workflow_dispatch")]
+        runs.append(("an unreadable diff", run(["merge/merge.py"], base="0" * 40)))
+        for label, got in runs:
+            with self.subTest(case=label):
+                self.assertEqual(got.get(MERGE_FULL), "true", f"{MERGE_FULL} is {got.get(MERGE_FULL)!r} for {label}, want 'true'")
+                self.assertEqual(got.get(MERGE_SLICE), "false",
+                                 f"{MERGE_SLICE} is {got.get(MERGE_SLICE)!r} for {label}, want 'false': the slice would run beside the full shards")
+
+    def test_a_fail_safe_path_runs_the_full_merge_and_not_the_slice(self):
+        for p in (".github/scripts/ci-scope.sh", ".github/workflows/checks.yml", ".gitattributes", "zz-unmapped/blob.bin"):
+            with self.subTest(path=p):
+                got = run([p])
+                self.assertEqual(got.get(MERGE_FULL), "true", f"{MERGE_FULL} is {got.get(MERGE_FULL)!r} for {p}, want 'true'")
+                self.assertEqual(got.get(MERGE_SLICE), "false", f"{MERGE_SLICE} is {got.get(MERGE_SLICE)!r} for {p}, want 'false'")
+
+    def test_a_full_size_merge_pr_turns_the_full_merge_on_once(self):
+        # Every closure file in one pull_request: the full state of the split, not one file at a time.
+        got = run(merge_closure()[0])
+        self.assertEqual(got.get(MERGE_FULL), "true", f"{MERGE_FULL} is {got.get(MERGE_FULL)!r} for the full closure, want 'true'")
+        self.assertEqual(got.get(MERGE_SLICE), "false", f"{MERGE_SLICE} is {got.get(MERGE_SLICE)!r} for the full closure, want 'false'")
+
+
+@unittest.skipUnless(BASH, "bash not on PATH")
+class MergeClosure(unittest.TestCase):
+    """The files the merge suite loads (merge_closure, read from merge/test_merge.py) turn the full Windows merge shards on for a
+    pull_request. Each such file also turns on checks_windows_merge and code: the shards' checkouts and shard 1's job run only on
+    those flags, and the full flag implies them, as the guard closure's full flag implies guard and code."""
+
+    def test_every_file_the_merge_suite_loads_turns_the_full_windows_merge_on(self):
+        files, _ = merge_closure()
+        self.assertIn("merge/test_merge.py", files, "scope: the merge suite's own file is not in its closure")
+        for p in files:
+            with self.subTest(path=p):
+                got = run([p])
+                self.assertEqual(got.get(MERGE_FULL), "true",
+                                 f"{MERGE_FULL} is {got.get(MERGE_FULL)!r} for {p}, want 'true': the merge suite loads it")
+
+    def test_every_file_the_merge_suite_loads_also_turns_on_the_merge_job_and_code(self):
+        for p in merge_closure()[0]:
+            with self.subTest(path=p):
+                got = run([p])
+                self.assertEqual(got.get("checks_windows_merge"), "true",
+                                 f"checks_windows_merge is {got.get('checks_windows_merge')!r} for {p}: its shards would start without their job")
+                self.assertEqual(got.get("code"), "true", f"code is {got.get('code')!r} for {p}: the shard steps read it")
+
+    def test_the_merge_closure_reads_each_kind_of_load(self):
+        # Control, green on the derivation as it stands: one named load of each kind, so a derivation that finds nothing fails here.
+        files, _ = merge_closure()
+        for p in ("merge/merge.py",            # an import: test_merge imports merge
+                  "hooks/decision_watch.py",   # an import, and through it hooks/guard.py: the guard closure is in this one
+                  "lint/test_rule_audit.py",   # an import of a test module, by the lint folder on sys.path
+                  "testing/shallow_clone.py",  # an import, by the testing folder on sys.path
+                  "skills/roadmap/build.py",   # a pathlib name read by a loader in merge.py
+                  "merge/cloud_allow.json",    # a literal path in merge.py
+                  "README.md"):                # a test module's join under the repo: LockProseStatesTheCode reads its prose
+            with self.subTest(path=p):
+                self.assertIn(p, files, f"the merge closure lacks {p}")
 
 
 @unittest.skipUnless(BASH, "bash not on PATH")
