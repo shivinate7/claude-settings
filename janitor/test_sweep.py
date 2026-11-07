@@ -4712,112 +4712,141 @@ class AgentEndOtherWorktreeTests(_AgentEndFixture):
 
 class AgentEndRedTreeTests(_AgentEndFixture):
     """A red-run checkout is the test-author's `.claude/worktrees/agent-<id>-red` (agents/test-author.md).
-    Its owner is the running agent's tree `.claude/worktrees/agent-<id>`. While the owner tree is still
-    registered as a worktree, the agent-end reap and the session-end sweep KEEP the red-run checkout, and
-    the keep names the owner tree (when-a-worktree-may-be-removed). Once the owner tree is gone, the red-run checkout follows the
-    other-tree rules. A name that only looks like a red-run checkout follows those rules too. Each
-    red-shaped tree is clean, pushed, unlocked and idle 31 minutes, so only the owner check can keep it."""
+    A tree named `agent-<id>-<suffix>` has the same shape, and the guard gives it write access. While the
+    agent worktree `.claude/worktrees/agent-<id>` is registered as a worktree, the agent-end reap and the
+    session-end sweep KEEP `agent-<id>-<suffix>` and name the agent worktree in the reason
+    (when-a-worktree-may-be-removed). Once the agent worktree is gone, the tree follows the other-tree
+    rules. The agent worktree itself is never kept by this rule. Each tree here is clean, pushed,
+    unlocked and idle 31 minutes, so only the agent worktree check can keep it."""
 
-    OWNER = "own1"
+    AGENT = "own1"
+    SUFFIXES = ("red", "redx", "red2", "red-2", "scratch")
 
-    def owner_path(self):
-        return os.path.join(self.primary, ".claude", "worktrees", "agent-" + self.OWNER)
+    def agent_worktree_path(self):
+        return os.path.join(self.primary, ".claude", "worktrees", "agent-" + self.AGENT)
 
-    def test_a_red_run_checkout_is_kept_while_its_owner_tree_is_registered(self):
+    def test_a_red_run_checkout_is_kept_while_its_agent_worktree_is_registered(self):
         ending = self.add("endnow")
-        owner = self.add(self.OWNER)
-        red = self.add(self.OWNER + "-red")
-        lookalike = self.add(self.OWNER + "-redx")
+        agent = self.add(self.AGENT)
+        trees = {suffix: self.add(self.AGENT + "-" + suffix) for suffix in self.SUFFIXES}
         other = self.add("oth1")
         require(run_vcs(self.primary, "worktree", "remove", other).returncode == 0,
-                "removing the other owner tree %s failed" % other)
+                "removing the other agent worktree %s failed" % other)
         other_red = self.add("oth1-red")
-        for path in (red, lookalike, other_red):
+        for path in list(trees.values()) + [other_red]:
             self.age_control(path)
-        # Scope first: the owner is registered and the other owner is not, when the hook runs.
-        self.assertIn(_norm_path(owner), self.listed(), "the owner tree is not registered before the hook runs")
-        self.assertNotIn(_norm_path(other), self.listed(), "the other owner tree is still registered")
+        # Scope first: the agent worktree is registered and the other one is not, when the hook runs.
+        self.assertIn(_norm_path(agent), self.listed(), "the agent worktree is not registered before the hook runs")
+        self.assertNotIn(_norm_path(other), self.listed(), "the other agent worktree is still registered")
         self.fire("endnow", ending)
-        with self.subTest(case="owner tree, idle, registered"):
-            self.assertKept(owner)
-        with self.subTest(case="red-run checkout whose owner tree is registered"):
-            self.assertTrue(os.path.isdir(red),
-                            "red-run checkout %s was removed while its owner tree %s is still registered" % (red, owner))
-            row = self.row_for_tree(red)
-            self.assertIsNotNone(row, "the hook wrote no decision row for the red-run checkout %s" % red)
-            self.assertEqual(row.get("action"), "keep", "the red-run checkout row is not keep: %r" % row)
-            self.assertIn("agent-" + self.OWNER, str(row.get("reason")),
-                          "the keep reason does not name the owner tree: %r" % row.get("reason"))
-        with self.subTest(case="name only looks like red-run: agent-<owner>-redx"):
-            self.assertRemoved(lookalike, " (a lookalike name follows the other-tree rules)")
-        with self.subTest(case="red-run checkout of an owner tree that is gone"):
-            self.assertRemoved(other_red, " (its owner tree is gone, so today's rules)")
+        with self.subTest(case="agent worktree, idle, registered"):
+            self.assertKept(agent)
+        for suffix, path in trees.items():
+            with self.subTest(case="agent-<id>-%s while the agent worktree is registered" % suffix):
+                self.assertTrue(os.path.isdir(path),
+                                "tree %s was removed while agent worktree %s is registered" % (path, agent))
+                row = self.row_for_tree(path)
+                self.assertIsNotNone(row, "the hook wrote no decision row for %s" % path)
+                self.assertEqual(row.get("action"), "keep", "%s row is not keep: %r" % (path, row))
+                self.assertIn("agent-" + self.AGENT, str(row.get("reason")),
+                              "the keep reason does not name the agent worktree: %r" % row.get("reason"))
+        with self.subTest(case="agent-<other>-red, agent worktree absent: today's rules"):
+            self.assertRemoved(other_red, " (its agent worktree is gone, so today's rules)")
 
-    def test_the_owner_ending_keeps_its_red_run_checkout(self):
-        owner = self.add(self.OWNER)
-        red = self.add(self.OWNER + "-red")
+    def test_the_agent_worktree_ending_keeps_its_red_run_checkout(self):
+        agent = self.add(self.AGENT)
+        red = self.add(self.AGENT + "-red")
         control = self.add("ctl")
         for path in (red, control):
             self.age_control(path)
-        self.assertIn(_norm_path(owner), self.listed(), "the owner tree is not registered before the hook runs")
-        self.fire(self.OWNER, owner)
+        self.assertIn(_norm_path(agent), self.listed(), "the agent worktree is not registered before the hook runs")
+        self.fire(self.AGENT, agent)
         with self.subTest(case="control: a finished agent's clean, pushed tree, idle 31 min, is removed"):
             self.assertRemoved(control)
-        self.assert_own_left(owner)
-        with self.subTest(case="red-run checkout whose owner tree is the ending agent's own tree"):
+        self.assert_own_left(agent)
+        with self.subTest(case="agent-<id>-red while its own agent worktree is ending"):
             self.assertTrue(os.path.isdir(red),
-                            "red-run checkout %s was removed while its owner tree %s is still registered" % (red, owner))
+                            "red-run checkout %s was removed while agent worktree %s is registered" % (red, agent))
             row = self.row_for_tree(red)
             self.assertIsNotNone(row, "the hook wrote no decision row for the red-run checkout %s" % red)
             self.assertEqual(row.get("action"), "keep", "the red-run checkout row is not keep: %r" % row)
-            self.assertIn("agent-" + self.OWNER, str(row.get("reason")),
-                          "the keep reason does not name the owner tree: %r" % row.get("reason"))
+            self.assertIn("agent-" + self.AGENT, str(row.get("reason")),
+                          "the keep reason does not name the agent worktree: %r" % row.get("reason"))
 
-    def test_the_session_end_sweep_keeps_a_red_run_checkout_while_its_owner_tree_is_registered(self):
+    def test_the_session_end_sweep_keeps_a_red_run_checkout_while_its_agent_worktree_is_registered(self):
         """The session-end route (decide_worktree, attended False) with a 5 h idle read: the same
-        clean, pushed, merged, unlocked tree that the other-tree rules would remove."""
-        owner = self.add(self.OWNER)
-        red = self.add(self.OWNER + "-red")
-        lookalike = self.add(self.OWNER + "-redx")
-        self.assertIn(_norm_path(owner), self.listed(), "the owner tree is not registered before the sweep decides")
+        clean, pushed, merged, unlocked trees that the other-tree rules would remove."""
+        agent = self.add(self.AGENT)
+        trees = {suffix: self.add(self.AGENT + "-" + suffix) for suffix in self.SUFFIXES}
+        other = self.add("oth1")
+        require(run_vcs(self.primary, "worktree", "remove", other).returncode == 0,
+                "removing the other agent worktree %s failed" % other)
+        other_red = self.add("oth1-red")
+        self.assertIn(_norm_path(agent), self.listed(), "the agent worktree is not registered before the sweep decides")
+        self.assertNotIn(_norm_path(other), self.listed(), "the other agent worktree is still registered")
         rows = {_norm_path(e["path"]): e for e in sweep.parse_worktree_list(self.primary)}
 
         def entry_for(path):
             return dict(rows[_norm_path(path)], idle=5 * 3600)
 
-        with self.subTest(case="red-run checkout whose owner tree is registered, session-end route"):
-            decision = sweep.decide_worktree(self.primary, entry_for(red))
-            self.assertEqual(decision["action"], "keep",
-                             "red-run checkout %s was not kept while its owner tree %s is registered: %s"
-                             % (red, owner, decision["reason"]))
-            self.assertIn("agent-" + self.OWNER, decision["reason"],
-                          "the keep reason does not name the owner tree: %r" % decision["reason"])
-        with self.subTest(case="name only looks like red-run: agent-<owner>-redx gets today's verdict"):
-            decision = sweep.decide_worktree(self.primary, entry_for(lookalike))
+        for suffix, path in trees.items():
+            with self.subTest(case="agent-<id>-%s while the agent worktree is registered, session-end route" % suffix):
+                decision = sweep.decide_worktree(self.primary, entry_for(path))
+                self.assertEqual(decision["action"], "keep",
+                                 "tree %s was not kept while agent worktree %s is registered: %s"
+                                 % (path, agent, decision["reason"]))
+                self.assertIn("agent-" + self.AGENT, decision["reason"],
+                              "the keep reason does not name the agent worktree: %r" % decision["reason"])
+        with self.subTest(case="the agent worktree itself is not kept by this rule"):
+            decision = sweep.decide_worktree(self.primary, entry_for(agent))
+            self.assertEqual(decision["action"], "reap",
+                             "agent worktree %s did not get today's verdict (reap): %s" % (agent, decision["reason"]))
+        with self.subTest(case="agent-<other>-red, agent worktree absent, session-end route: today's rules"):
+            decision = sweep.decide_worktree(self.primary, entry_for(other_red))
             self.assertEqual(decision["action"], "reap",
                              "%s did not get today's verdict (reap) on the session-end route: %s"
-                             % (lookalike, decision["reason"]))
+                             % (other_red, decision["reason"]))
 
-    def test_a_red_run_checkout_with_no_owner_tree_is_removed_as_today(self):
+    def test_a_red_run_checkout_with_no_agent_worktree_is_removed_as_today(self):
         ending = self.add("endnow")
-        red = self.add(self.OWNER + "-red")
+        red = self.add(self.AGENT + "-red")
         self.age_control(red)
-        # Control: no owner tree is registered, and none is on disk.
-        self.assertNotIn(_norm_path(self.owner_path()), self.listed(), "an owner tree is registered")
-        self.assertFalse(os.path.exists(self.owner_path()), "an owner tree is on disk")
+        # Control: no agent worktree is registered, and none is on disk.
+        self.assertNotIn(_norm_path(self.agent_worktree_path()), self.listed(), "an agent worktree is registered")
+        self.assertFalse(os.path.exists(self.agent_worktree_path()), "an agent worktree is on disk")
         self.fire("endnow", ending)
-        self.assertRemoved(red, " (no owner tree is registered, so today's rules remove it)")
+        self.assertRemoved(red, " (no agent worktree is registered, so today's rules remove it)")
 
-    def test_a_red_run_checkout_whose_owner_tree_was_removed_is_removed_as_today(self):
+    def test_a_red_run_checkout_whose_agent_worktree_was_removed_is_removed_as_today(self):
         ending = self.add("endnow")
-        owner = self.add(self.OWNER)
-        red = self.add(self.OWNER + "-red")
-        require(run_vcs(self.primary, "worktree", "remove", owner).returncode == 0,
-                "removing the owner tree %s failed" % owner)
+        agent = self.add(self.AGENT)
+        red = self.add(self.AGENT + "-red")
+        require(run_vcs(self.primary, "worktree", "remove", agent).returncode == 0,
+                "removing the agent worktree %s failed" % agent)
         self.age_control(red)
-        self.assertNotIn(_norm_path(owner), self.listed(), "the removed owner tree is still registered")
+        self.assertNotIn(_norm_path(agent), self.listed(), "the removed agent worktree is still registered")
         self.fire("endnow", ending)
-        self.assertRemoved(red, " (its owner tree was removed, so today's rules remove it)")
+        self.assertRemoved(red, " (its agent worktree was removed, so today's rules remove it)")
+
+    def test_an_unreadable_worktree_list_keeps_a_red_run_checkout(self):
+        """The fail-safe: when the worktree list cannot be read, the red-run rule keeps with reason
+        unreadable-subject, on both the session-end route and the agent-end route."""
+        agent = self.add(self.AGENT)
+        red = self.add(self.AGENT + "-red")
+        self.assertIn(_norm_path(agent), self.listed(), "the agent worktree is not registered before the decision")
+        rows = {_norm_path(e["path"]): e for e in sweep.parse_worktree_list(self.primary)}
+        entry = dict(rows[_norm_path(red)], idle=5 * 3600)
+        with mock.patch.object(sweep, "parse_worktree_list", return_value=None) as read:
+            session_end = sweep.decide_worktree(self.primary, dict(entry))
+            agent_end = sweep.decide_agent_end_worktree(self.primary, dict(entry), sweep.AGENT_END_IDLE_SECONDS)
+        self.assertTrue(read.called, "the worktree list was never read, so the fail-safe was not reached")
+        for route, decision in (("session-end", session_end), ("agent-end", agent_end)):
+            with self.subTest(case="%s route, worktree list unreadable" % route):
+                self.assertEqual(decision["action"], "keep",
+                                 "tree %s was reaped on the %s route with the worktree list unreadable: %s"
+                                 % (red, route, decision["reason"]))
+                self.assertIn("unreadable", decision["reason"],
+                              "the keep reason does not say the read failed: %r" % decision["reason"])
 
 
 class AgentEndRulingTests(_AgentEndFixture):
