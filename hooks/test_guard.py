@@ -15140,6 +15140,73 @@ LOG_CHECKS_EXTRA.append(("builder-refuse: a test-author's merge commit that edit
                          author_silent_case(TA_MERGE_TEST, "ta-merge-test-edit")))
 
 
+# ---- the test-author's merge route covers the product paths a merge left conflicted, in a merge that has a test
+# conflict (decision builders-cannot-edit-tests). A merge with no test path conflicted gives no path that route, and
+# a conflicted workflow keeps its content check. `src/app.py` is the only conflict in the product-only merge.
+def _product_mid_merge(w):
+    """Cut at main. The lane changes src/app.py, and main changes the same line. No test path is in the merge.
+    Main is merged in and the merge is left in progress with src/app.py conflicted."""
+    main = w + "-main"
+    _test_author_lane(w, "src/app.py", "x = 6\n")
+    _must(w, "reset", "-q", "--hard", "lane")
+    _put_commit(main, [("src/app.py", "x = 9\n")], "main moves")
+    merged = run_vcs(w, *IDENT, "merge", "--no-edit", "main")
+    if merged.returncode == 0:
+        sys.exit("fixture setup failed: the merge in %r did not conflict" % w)
+    _require_conflict(w, "src/app.py")
+
+
+def _product_merge_commit(w):
+    """`_product_mid_merge`, resolved by hand and committed: src/app.py takes a text neither side holds."""
+    _product_mid_merge(w)
+    write(os.path.join(w, "src/app.py"), "x = 7\n")
+    _must(w, "add", "-A")
+    _must(w, *IDENT, "commit", "-q", "--no-edit")
+
+
+CI = ".github/workflows/ci.yml"
+CI_LINT = "      - name: Lint\n        run: python3 lint/ste_lint.py\n"
+CI_BASE = "on: push\njobs:\n  check:\n    steps:\n" + CI_LINT
+CI_FILES = {**MIXED_FILES, CI: CI_BASE}
+
+
+def _mixed_workflow_mid_merge(w):
+    """Cut at main. The lane changes the test file and the lint step's run line in ci.yml. Main changes the same two
+    (a conflict in each). The merge is left in progress with both conflicted."""
+    main = w + "-main"
+    _test_author_lane(w, TEST_A, LANE_TEXT, more=((CI, CI_BASE.replace("ste_lint.py", "lane_lint.py")),))
+    _must(w, "reset", "-q", "--hard", "lane")
+    _put_commit(main, [(TEST_A, BASE_FILES[TEST_A] + "# main's newer case\n"),
+                       (CI, CI_BASE.replace("ste_lint.py", "main_lint.py"))], "main moves")
+    merged = run_vcs(w, *IDENT, "merge", "--no-edit", "main")
+    if merged.returncode == 0:
+        sys.exit("fixture setup failed: the merge in %r did not conflict" % w)
+    _require_conflict(w, TEST_A)
+    _require_conflict(w, CI)
+
+
+PROD_MID = diff_repo("ta-prod-mid", _product_mid_merge, files=MIXED_FILES)
+PROD_DONE = diff_repo("ta-prod-done", _product_merge_commit, files=MIXED_FILES)
+CI_MID = diff_repo("ta-ci-mixed-mid", _mixed_workflow_mid_merge, files=CI_FILES)
+AUTH_PROD = dict(agent_id="auth1", agent_type="test-author", cwd=PROD_MID)
+AUTH_CI = dict(agent_id="auth1", agent_type="test-author", cwd=CI_MID)
+# Case 9 (red on 2add0d3cf; main refuses it): a product-only merge. The test-author's Edit of the conflicted product
+# file is refused, because no test path is conflicted and the merge route has no product path to give.
+add("test-author: Edit of a product file its merge conflicts, with no test path conflicted, is refused", "deny",
+    rule=TA, tool="Edit", file_path=os.path.join(PROD_MID, "src/app.py"), new_string="x = 7\n",
+    carries=("builder", "Report"), **AUTH_PROD)
+# Case 10 (red on 2add0d3cf; main logs it): the same product-only merge, resolved in the test-author's merge commit,
+# logs author-diff for the product path.
+LOG_CHECKS_EXTRA.append(("builder-refuse: a test-author's merge commit that resolves a product-only conflict logs "
+                         "author-diff",
+                         logged_case("ta-prod-done", "test-author", "auth1", "author-diff")))
+# Case 11 (red on 2add0d3cf; main refuses it): a mixed merge that conflicts a test file and ci.yml. An Edit of ci.yml
+# that changes a non-test step is refused. The merge route covers product paths only: a workflow keeps its content check.
+add("test-author: Edit of a workflow that changes a non-test step in a mixed merge is refused", "deny", rule=TA,
+    tool="Edit", file_path=os.path.join(CI_MID, CI), old_string=CI_LINT,
+    new_string=CI_LINT.replace("ste_lint.py", "other_lint.py"), carries=("builder", "Report"), **AUTH_CI)
+
+
 def refused_push_and_stop_case(label):
     """A builder's own commit holds a test change. Push and the first stop are each denied, and each denial
     writes a builder-diff line. The commit check is left out: the row names push and stop only."""
