@@ -1,0 +1,11 @@
+{
+  "title": "The guard's matcher names every tool the guard handles, MCP GitHub tools included",
+  "phase": "now",
+  "status": "doing",
+  "order": 258.5,
+  "owner": "coordinator",
+  "lane": "session_013NEJL1BcjeYCubrQhUmWKz",
+  "why": "Lane review-record-from-render found that no mcp__github__* tool is in the guard's PreToolUse matcher, so the guard code for MCP merges and draft PRs never ran (coordinator, 17:15 CST Nov 7). A merge through the MCP tool skips the merge guard.",
+  "note": "Done check: a check that fails when a guard handles a tool name the matcher misses, red on main.",
+  "updatedAt": "2026-11-07T17:15:00-06:00"
+}
