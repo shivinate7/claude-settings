@@ -9855,7 +9855,7 @@ trust_allow("an unrelated remote tool (list_sessions) in a lane session allows",
 # it. A report reads from the Agent result, from a later task-notification, from a queued_command attachment,
 # or from a hand-back (a user message that opens with the frame, names the agent in its tag, and indents the
 # report). Its verdict is the Done line, never a finding line, and the Done line still matches when indented.
-# PR #1467 pushed its round-1 fix before the FAIL record was posted; PR #1490 did the same with a round-1 PASS.
+# A PASS needs its own record as much as a FAIL does: a push waits for the record of every report.
 # A session with no PR known is allowed: the first push is never blocked on a transcript that shows no PR (a
 # known miss, pinned below). The round number is not checked against the report's round (a known miss).
 FAMILY = "push-needs-fail-record"
@@ -9888,7 +9888,7 @@ MERGE = _load_merge()
 
 
 def pfr_record(rounds=(), fix=None):
-    """A posted review record for PR 1467, written by merge's own form. A body the reader refuses is a fixture
+    """A posted review record, written by merge's own form. A body the reader refuses is a fixture
     error, so it stops the run here instead of turning a case red for the wrong cause."""
     body = MERGE.review_body(1467, SHA, "normal", "no", list(rounds), "not owed", fix)
     if MERGE.parse_review(body) is None:
@@ -9909,7 +9909,7 @@ def pfr_report(verdict, *lines):
 
 
 def pfr_verdict(verdict, n=1, model=PFR_MODEL):
-    """A Done line for round n: `FAIL, round 1 of 3, <model>`."""
+    """The Done line of a report for round n: its verdict, its round and its model."""
     return "%s, round %d of 3, %s" % (verdict, n, model)
 
 
@@ -9980,11 +9980,11 @@ def pfr_filler(count):
     return lines
 
 
-PFR_FAIL = pfr_report(pfr_verdict("FAIL", 1), PFR_FINDING)           # a reviewer FAIL, round 1
+PFR_FAIL = pfr_report(pfr_verdict("FAIL", 1), PFR_FINDING)           # a reviewer FAIL, read from its Done line
 PFR_FAIL_RECORD = pfr_record([(1, "reviewer", PFR_MODEL, "FAIL")])    # a posted record that holds it
-PFR_PARTIAL = pfr_report(pfr_verdict("PARTIAL", 1), PFR_FINDING)     # a reviewer PARTIAL, round 1
+PFR_PARTIAL = pfr_report(pfr_verdict("PARTIAL", 1), PFR_FINDING)     # a reviewer PARTIAL, read from its Done line
 PFR_PARTIAL_RECORD = pfr_record([(1, "reviewer", PFR_MODEL, "PARTIAL")])
-PFR_PASS = pfr_report(pfr_verdict("PASS", 1), PFR_FINDING)          # a reviewer PASS, round 1
+PFR_PASS = pfr_report(pfr_verdict("PASS", 1), PFR_FINDING)          # a reviewer PASS, read from its Done line
 PFR_PASS_RECORD = pfr_record([(1, "reviewer", PFR_MODEL, "PASS")])
 PFR_DESIGN_PASS_RECORD = pfr_record([(1, "design-reviewer", PFR_MODEL, "PASS")])
 PFR_BOTH_RECORD = pfr_record([(1, "reviewer", PFR_MODEL, "FAIL"), (1, "design-reviewer", PFR_MODEL, "PASS")])
@@ -10119,7 +10119,7 @@ pfr_refuse("the PR known only from a posted record: a FAIL record, a FAIL round 
            pfr_path("record-known-pr"))
 pfr_refuse("a FAIL round 1 with a bold lead on its Done line, then the push", PFR_PUSH, pfr_path("bold-lead"))
 pfr_refuse("a FAIL round 1, then 1500 later reads, then the push", PFR_PUSH, pfr_path("long"))
-# The incident of PR #1490: a round-1 PASS, pushed before its record was posted. Any verdict needs a record.
+# A PASS with no record is refused like a FAIL with none: the verdict does not change the rule.
 pfr_refuse("the #1490 shape: a reviewer PASS round 1, the PR known, no record, then the push", PFR_PUSH,
            pfr_path("pass-no-record"))
 pfr_refuse("a FAIL round 1, then a PASS round 2 with no PASS record after it, then the push", PFR_PUSH,
