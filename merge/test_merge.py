@@ -15,6 +15,8 @@ import ctypes  # the Windows-branch test patches os.name; ctypes' own import wou
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import merge  # noqa: E402
+from required_check import REQUIRED_CHECK  # noqa: E402  the one home of the required check's name (hooks/required_check.py)
+import decision_watch  # noqa: E402  the one model caller (hooks/decision_watch.py); merge.py puts hooks on sys.path
 sys.path.append(os.path.join(os.path.dirname(HERE), "lint"))  # append: no lint module shadows one this suite imports
 import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py)
 import _test_temp  # noqa: E402  test-temp-standard: the run folder's one home (lint/_test_temp.py)
@@ -435,10 +437,10 @@ class Flow(Env):
 
     @windows_slice
     def test_afterMerge_runs_in_git_bash_not_the_wsl_stub(self):
-        """after_merge() (merge/merge.py:470) hands subprocess.run a bare "bash". On Windows,
-        CreateProcess searches C:\\Windows\\System32 before PATH, and that folder holds the WSL
-        launcher stub, not Git Bash (decision bare-bash-on-windows-can-resolve-to-the-wsl-stub;
-        the fix, _find_git_bash(), lives only in hooks/test_config_watch.py). A command that
+        """after_merge() runs its commands in resolve_program("bash"). On Windows, CreateProcess
+        searches C:\\Windows\\System32 before PATH, and that folder holds the WSL launcher stub,
+        not Git Bash (decision bare-bash-on-windows-can-resolve-to-the-wsl-stub; the lookup's one
+        home is hooks/git_bash.py). A command that
         prints $OSTYPE tells the two apart: Git Bash (MSYS/MINGW) says "msys" or "msys-...", the
         WSL stub says "linux-gnu". The redirect target is a bare relative name so this case does
         not also depend on the separate native-path-quoting defect above."""
@@ -4487,13 +4489,16 @@ class GhHalf(Env):
             self.assertEqual(rc, 0, out)
             self.assertIn(want, out)
 
-    def test_banchi_604_a_pending_check_that_is_not_required_goes_red_after_the_required_are_green(self):
-        # The head reads green on `checks`, `design` still pending, then red. The wait must not end on the green required check.
+    def test_banchi_604_a_pending_check_that_is_not_required_is_not_waited_on_and_its_red_still_refuses(self):
+        """A pending check that is not required does not hold the wait, and its red still refuses. Ruling: step merge-waits-required-only, wait only on the required check."""
+        # The head reads green on `checks`, `design` still pending, then red. A pending check that is not required does not hold a minute;
+        # the red it turns into is seen on the settle re-read and refuses.
         before = self.head()
         self.set(checks_seq=[[("checks", "pass", ""), ("design", "pending", "")], [("checks", "pass", ""), ("design", "fail", "")]])
         rc, out = self.go()
         self.assertEqual(rc, 1)
         self.assertIn("a check is red: design: fail", out)
+        self.assertNotIn(60, self.paused)  # no minute-long wait for `design`
         self.assertEqual(self.head(), before)  # stopped at the head wait: nothing claimed
         self.assertNotIn(MERGE_CALL, self.calls())
 
@@ -4506,11 +4511,13 @@ class GhHalf(Env):
         self.assertNotIn(MERGE_CALL, self.calls())
         self.assertTrue(self.reverted())
 
-    def test_a_pending_check_that_is_not_required_is_waited_on_then_merges_on_green(self):
-        self.set(checks_seq=[[("checks", "pass", ""), ("design", "pending", "")], [("checks", "pass", ""), ("design", "pass", "")]])
+    def test_a_pending_check_that_is_not_required_is_not_waited_on_and_merges_on_green(self):
+        """A pending check that is not required is not waited on, and one line names it. Ruling: step merge-waits-required-only, wait only on the required check."""
+        self.set(checks_seq=[[("checks", "pass", ""), ("design", "pending", "")]])
         rc, out = self.go()
         self.assertEqual(rc, 0, out)
-        self.assertGreaterEqual(self.paused.count(60), 1)
+        self.assertNotIn(60, self.paused)  # no minute-long wait for a check that is not required
+        self.assertTrue(any("design" in l for l in out.splitlines() if l.startswith("merge:")), out)  # the one line names what was not waited on
         self.assertIn(MERGE_CALL, self.calls())
 
     def test_skipped_and_neutral_count_as_passed(self):
@@ -4568,6 +4575,18 @@ class GhHalf(Env):
         self.assertIn("gh pr ready", text)
         self.assertIn("push", text)
         self.assertNotIn("gh workflow run", text)
+        # gh pr ready is GraphQL, refused in cloud: the remedy also names the cloud route and its table.
+        self.assertIn("update_pull_request", text)
+        self.assertIn("route pr-ready-mcp-cloud", text)
+
+    def test_the_stale_page_remedy_names_both_draft_routes_and_their_table(self):
+        # A cloud session returns a PR to draft by MCP update_pull_request (route pr-draft-mcp-cloud), so the remedy never hands it to the owner's computer.
+        for claim in ("", "c1"):
+            text = merge.stale_page_remedy(7, claim)
+            self.assertIn("update_pull_request", text)
+            self.assertIn("gh pr ready 7 --undo", text)
+            self.assertIn("route pr-draft-mcp-cloud", text)
+            self.assertNotIn("owner's computer", text)
 
     def test_a_draft_head_with_all_jobs_passed_required_stops_at_once_with_the_remedy(self):
         # The wait path. Every check and run skipped: red stops the wait on the first read, not at the 45 minute deadline.
@@ -4760,11 +4779,21 @@ class GhHalf(Env):
         self.assertIn(f"b: {t}", red)
         self.assertFalse([e for e in red if "cancel" in e], red)
 
-    def test_a_workflow_run_in_progress_holds_the_wait_though_no_job_is_listed(self):
+    def test_a_pending_run_of_a_workflow_without_the_required_job_does_not_hold_the_wait(self):
+        """A pending run of a workflow that does not define a required job does not hold the wait. Ruling: step merge-waits-required-only, wait only on the required check."""
+        push_base(self, {".github/workflows/ci.yml": workflow_text("ci", "ci")})  # a readable folder whose one workflow has no required job
         self.set(runs_seq=[[("ci", "in_progress", "")], [("ci", "completed", "success")]])
         rc, out = self.go()
         self.assertEqual(rc, 0, out)
-        self.assertGreaterEqual(self.paused.count(60), 1)
+        self.assertNotIn(60, self.paused)  # the run did not hold a minute
+
+    def test_a_pending_run_of_the_workflow_that_defines_the_required_job_holds_the_wait(self):
+        # The folder defines the required job `checks`, so its pending run holds the wait until the next read sees it complete.
+        push_base(self, {".github/workflows/checks.yml": workflow_text("checks", "checks")})
+        self.set(runs_seq=[[("checks", "in_progress", "")], [("checks", "completed", "success")]])
+        rc, out = self.go()
+        self.assertEqual(rc, 0, out)
+        self.assertIn("merge: waiting on workflow checks", out, "the pending run of the workflow that defines the required job did not hold the wait")
 
     def test_a_failed_workflow_run_stops_the_run_and_an_ignored_one_does_not(self):
         before = self.head()
@@ -5160,16 +5189,17 @@ class RestRoutes(Env):
 
     # ---- the checks of a head are the check runs AND the commit statuses
 
-    def test_one_green_check_run_and_one_pending_status_is_not_green(self):
+    def test_one_green_check_run_and_one_pending_status_is_pending_in_the_preview_and_not_waited_on(self):
+        """The preview shows a pending status that is not required; the wait does not hold on it. Ruling: step merge-waits-required-only, wait only on the required check."""
         self.set(checks_seq=[[("checks", "pass", ""), ("deploy", "pending", "https://x/s", "status")]], runs_seq=[[("checks", "completed", "success")]])
-        verdict, detail = self.gh_host().head_read(7)
+        verdict, detail = self.gh_host().head_read(7)  # the preview reads every check: the pending status shows
         self.assertEqual(verdict, "pending", detail)
         self.assertIn("deploy", detail)
-        rc, out = self.go()
-        self.assertEqual(rc, 1, out)
-        self.assertIn("Still pending: deploy", out)
-        self.assertNotIn(MERGE_CALL, self.calls())
-        self.assertFalse(self.lock_ref())
+        rc, out = self.go()  # the wait holds on the required checks only
+        self.assertEqual(rc, 0, out)
+        self.assertNotIn("Still pending", out)
+        self.assertNotIn(60, self.paused)
+        self.assertIn(MERGE_CALL, self.calls())
 
     def test_a_failed_or_errored_status_is_red(self):
         for bucket in ("fail", "error"):  # the status states failure and error
@@ -5671,6 +5701,28 @@ class ConfigFile(Env):
                 rc, out = self.run_merge("7")
                 self.assertEqual(rc, 0, out)
 
+    def test_ready_checks_is_a_merge_field(self):  # decision: merge.readyChecks names the ready checks of the draft step
+        self.assertIn("readyChecks", merge.MERGE_FIELDS)
+
+    def test_ready_checks_has_no_default(self):  # the control: a repo that declares nothing keeps today's merge block
+        self.assertNotIn("readyChecks", merge.MERGE_DEFAULTS)
+
+    def test_a_bad_readyChecks_is_refused_at_preview_as_not_valid(self):
+        """A non-empty list of non-blank step names. Each bad value stops at preview with one line saying the key is not
+        valid. Until the key joins MERGE_FIELDS, main refuses it as an unknown field, which this case does not accept."""
+        for value in ("checks", True, [], [""], ["  "], ["ok", " "], [7]):
+            with self.subTest(value=value):
+                self.setUp()
+                self.refused_at_preview(self.config_text({"readyChecks": value}), "merge.readyChecks is not valid")
+
+    def test_a_valid_ready_checks_list_is_accepted_at_preview(self):
+        for names in (["check invariants"], ["check invariants", "records page"]):  # one name, then two
+            with self.subTest(names=names):
+                self.setUp()
+                put_base_config(self, self.config_text({"readyChecks": names}))
+                rc, out = self.run_merge("7")
+                self.assertEqual(rc, 0, out)
+
     def test_an_unknown_merge_field_stops_with_one_line_naming_it(self):
         put_base_config(self, json.dumps({"merge": {"methd": "squash"}}))
         rc, out = self.run_merge("7")
@@ -5806,6 +5858,102 @@ class SilentUndo(Env):
         self.assertEqual(rc, 1)
         self.assertEqual(self.claims(), 0)
         self.assertFalse(getattr(self.host, "merged", False))
+
+
+DEBT_FIXTURE = "# Retire target\n\n- **What.** A fixture debt for the merge tests.\n- **Where.** None.\n- **Decision.** none\n- **Retire.** %s\n"
+RETIRE_TEST = "Delete the fixture. Check: `tests/test_retire_target.py`."
+PROSE_RETIRE = "Confirm it on a phone."  # names no runnable check: the close needs a cited run
+
+
+def names_kind(test, out, slug, kind):
+    """The printed line that names debt `slug` must also name its kind."""
+    line = printed(out, slug)
+    test.assertTrue(line, "no printed line names debt %s: %s" % (slug, out))
+    test.assertIn(kind, line, "the line for debt %s does not name its kind %s: %s" % (slug, kind, line))
+
+
+class DebtRetire(Env):
+    """A PR that closes a debt (deletes the debt file) runs that debt's Retire check on the PR head before preview or confirm
+    lets it through. The fixture debt names tests/test_retire_target.py, which exits with the code each case gives it."""
+
+    def pr_on_debt(self, test_exit, closes=True, retire=RETIRE_TEST, test_text=None):
+        """main gains a debt file. feat is cut from that main, adds the pending record and the test, and then either deletes
+        the debt (closes) or edits it in place. feat is cut from main after the debt lands, so no main commit is a reversal of it."""
+        o = self.other
+        sh(o, "git", "fetch", "-q", "origin")
+        sh(o, "git", "checkout", "-q", "-B", "main", "origin/main")
+        put(os.path.join(o, ".claude/layout-extras.json"), json.dumps({"kinds": {}, "rolled-out": True}))
+        put(os.path.join(o, "docs/debts/retire-target.md"), DEBT_FIXTURE % retire)
+        sh(o, "git", "add", "-A"); sh(o, "git", "commit", "-qm", "main: a debt"); sh(o, "git", "push", "-q", "origin", "main")
+        put(os.path.join(o, "main-moves.txt"), "main moves on\n")  # feat is cut from a later main, so the debt commit is not one it left
+        sh(o, "git", "add", "-A"); sh(o, "git", "commit", "-qm", "main: moves on"); sh(o, "git", "push", "-q", "origin", "main")
+        sh(o, "git", "checkout", "-q", "-B", "feat", "origin/main")
+        put(os.path.join(o, "docs/decisions/second.md"), record("pending", "second"))
+        put(os.path.join(o, "tests/test_retire_target.py"), test_text or "import sys\nsys.exit(%d)\n" % test_exit)
+        if closes:
+            sh(o, "git", "rm", "-q", "docs/debts/retire-target.md")
+        else:
+            put(os.path.join(o, "docs/debts/retire-target.md"), DEBT_FIXTURE % RETIRE_TEST + "\nEdited in this PR.\n")
+        sh(o, "git", "add", "-A"); sh(o, "git", "commit", "-qm", "feat: the pending record and the debt")
+        sh(o, "git", "push", "-q", "-f", "origin", "feat")
+        sh(self.co, "git", "fetch", "-q", "origin")
+
+    def test_preview_refuses_a_closed_debt_whose_retire_check_is_red(self):
+        self.pr_on_debt(1)
+        rc, out = self.run_merge("7")
+        self.assertEqual(rc, 1, out)
+        names_kind(self, out, "retire-target", "red")
+
+    def test_confirm_refuses_a_closed_debt_whose_retire_check_is_red_before_any_claim_or_push(self):
+        self.pr_on_debt(1)
+        before = self.refs()
+        rc, out = self.run_merge("7", "--confirm")
+        self.assertEqual(rc, 1, out)
+        names_kind(self, out, "retire-target", "red")
+        self.assertEqual(self.refs(), before, "a refused confirm pushed")
+        self.assertEqual(self.claims(), 0, "a refused confirm claimed a record number")
+        self.assertFalse(getattr(self.host, "merged", False), "a refused confirm merged")
+        self.assertFalse(self.lock_ref(), "a refused confirm kept the merge lock")
+
+    def test_preview_passes_a_closed_debt_whose_retire_check_is_green(self):
+        self.pr_on_debt(0)
+        rc, out = self.run_merge("7")
+        self.assertEqual(rc, 0, out)
+        self.assertIn("PREVIEW", out)
+        self.assertNotIn("BLOCKED", out)
+
+    def test_a_pr_that_closes_no_debt_previews_as_before(self):
+        rc, out = self.run_merge("7")
+        self.assertEqual(rc, 0, out)
+        self.assertIn("PREVIEW", out)
+        self.assertNotIn("retire", out.lower())
+
+    def test_an_edited_debt_is_not_a_close(self):
+        self.pr_on_debt(1, closes=False)
+        rc, out = self.run_merge("7")
+        self.assertEqual(rc, 0, out)
+        self.assertIn("PREVIEW", out)
+        self.assertNotIn("BLOCKED", out)
+
+    def test_confirm_with_a_claim_keeps_a_cited_run_on_the_pr_head(self):
+        """The claim commit goes on top of the PR head. The cited run is on that head, so the re-check after the claim must accept it."""
+        self.pr_on_debt(0, retire=PROSE_RETIRE)
+        run_head = self.head()  # the run was on this head; the claim pushes the branch past it
+        self.host.body = "Retire-run: retire-target -- https://github.com/fixture/repo/actions/runs/42\n"
+        self.host.cited_run = lambda url: ("success", run_head)
+        rc, out = self.run_merge("7", "--confirm")
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(self.claims(), 1, out)
+        self.assertTrue(getattr(self.host, "merged", False), out)
+
+    def test_confirm_claim_does_not_carry_a_file_the_retire_test_wrote(self):
+        """The Retire test runs in the merge worktree, before the claim's `git add -A`. A file the test leaves there is no part of the claim."""
+        self.pr_on_debt(0, test_text="import sys\nopen('junk-from-test.txt', 'w').write('x')\nsys.exit(0)\n")
+        rc, out = self.run_merge("7", "--confirm")
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(self.claims(), 1, out)
+        names = sh(self.co, "git", "log", "origin/main", "--format=", "--name-only")  # the claim is a parent of the merge: its files are in the log
+        self.assertNotIn("junk-from-test.txt", names, "the claim commit holds a file the Retire test wrote into the merge folder")
 
 
 class DraftPreview(Env):
@@ -7132,19 +7280,17 @@ class WaitProgress(unittest.TestCase):
         self.assertTrue(ok, why)
         self.assert_gaps_within(lines, 0.0, end)
 
-    def test_a_change_in_the_pending_set_prints_at_once(self):
+    def test_a_pending_check_that_is_not_required_is_never_printed_as_waited_on(self):
+        """A pending check that is not required is never named as waited on. Ruling: step merge-waits-required-only, wait only on the required check."""
         def checks_at(t):
-            if t < 60:
-                return {"checks": [("pending", "")]}
             if t < 300:
                 return {"checks": [("pending", "")], "design": [("pending", "")]}
             return {"checks": [("pass", "")], "design": [("pass", "")]}
         host = ClockedHost(checks_at)
         ok, why, _, waits, _ = self.wait(host, 15)
         self.assertTrue(ok, why)
-        design = [t for t, l in waits if "design" in l]
-        # The change is first read at about 64 s (a read costs 2 s, the loop pauses 60 s). It must print before the next 60 s pass.
-        self.assertTrue(design and design[0] < 120, f"a new pending check named at {design[:1]}; lines at {[round(t) for t, _ in waits]}")
+        self.assertTrue(waits, "no `merge: waiting on` line while the required check was pending")
+        self.assertEqual([l for _, l in waits if "design" in l], [], f"the wait named a check that is not required: {waits}")
 
     def test_a_wait_that_is_green_on_the_first_read_prints_no_waiting_line(self):
         host = ClockedHost(lambda t: {"checks": [("pass", "")]})
@@ -7159,6 +7305,33 @@ class WaitProgress(unittest.TestCase):
         self.assertTrue(ok, why)
         self.assertTrue(lines and lines[0][0] < READ_SECONDS, f"no line before the first read; lines {lines}")
         self.assertIn("checks", lines[0][1])
+
+def workflow_text(name, *jobs):
+    """A workflow file whose top-level name is `name`, with one job per id in `jobs`, one step each."""
+    lines = [f"name: {name}", "on: push", "jobs:"]
+    for job in jobs:
+        lines += [f"  {job}:", "    runs-on: ubuntu-latest", "    steps:", "      - run: echo ok"]
+    return "\n".join(lines) + "\n"
+
+
+def pending_run(name, run_id=101):
+    """A workflow run still in progress, with the fields `gh run list --json` gives it that the wait reads."""
+    return {"databaseId": run_id, "name": name, "workflowName": name, "workflowDatabaseId": run_id, "status": "in_progress", "conclusion": ""}
+
+
+def workflow_folder(test, files=None, git=False):
+    """A checkout root under this run's folder, removed at cleanup. Its .github/workflows holds `files` (name -> text); with `files` None there is
+    no such folder, and `files` {} is an empty .github/workflows. `git` makes the root a checkout, so the walk up for a workflow folder stops there."""
+    root = os.path.realpath(tempfile.mkdtemp(prefix="required-only-", dir=run_folder()))
+    test.addCleanup(shutil.rmtree, root, True)
+    if git:
+        os.mkdir(os.path.join(root, ".git"))
+    if files is not None:
+        os.makedirs(os.path.join(root, ".github", "workflows"))
+    for name, text in (files or {}).items():
+        put(os.path.join(root, ".github", "workflows", name), text)
+    return root
+
 
 class AbsentRequiredCheck(unittest.TestCase):
     """c189 part 2: a required check no run reports ends the wait at once, once every reported check has ended (#746: the pinned checks* names)."""
@@ -7186,11 +7359,14 @@ class AbsentRequiredCheck(unittest.TestCase):
         ok, why, *_ = self.wait(host, 55)
         self.assertTrue(ok, why)
 
-    def test_a_pending_workflow_run_keeps_the_wait_going(self):
-        host = self.host(lambda t: {"checks": [("pass", "")], **({"needed": [("pass", "")]} if t >= 400 else {})})
-        host.runs = lambda sha: [{"name": "ci", "status": "in_progress" if host.clock[0] < 400 else "completed", "conclusion": None if host.clock[0] < 400 else "success"}]
-        ok, why, *_ = self.wait(host, 55)
+    def test_a_pending_run_of_another_workflow_does_not_keep_the_wait_going(self):
+        """A pending run of a workflow that does not define a required job does not keep the wait going. Ruling: step merge-waits-required-only, wait only on the required check."""
+        host = ClockedHost(lambda t: {"checks": [("pass", "")], "needed": [("pass", "")]})
+        host.required, host.cwd = ["checks", "needed"], workflow_folder(self, {"ci.yml": workflow_text("ci", "ci")})
+        host.runs = lambda sha: [pending_run("ci")]  # a run of a workflow that does not define the required job: it is not waited on
+        ok, why, _, _, end = self.wait(host, 55)
         self.assertTrue(ok, why)
+        self.assertLess(end, 55 * 60, f"the wait ran to {end:.0f} s for a run that is not required")
 
     def test_a_required_check_created_late_inside_the_settle_pause_is_waited_for(self):
         host = self.host(lambda t: {"checks": [("pass", "")], **({"needed": [("pass", "")]} if t >= 20 else {})})
@@ -7202,6 +7378,123 @@ class AbsentRequiredCheck(unittest.TestCase):
         ok, why, _, _, end = self.wait(host, 5)
         self.assertFalse(ok)
         self.assertIn("deadline of 5 minutes", why)
+
+class RequiredOnlyWait(unittest.TestCase):
+    """merge-waits-required-only: the wait holds on the required check names. A pending run holds only when its workflow file defines a
+    required job, or when no workflow folder can be read. A pending check or run that is not required never holds the wait, and one line on
+    success names what was not waited for. A red check, required or not, still refuses.
+    Ruling: step merge-waits-required-only, wait only on the required check."""
+    wait = WaitProgress.wait
+
+    def host(self, checks_at, runs=lambda sha: [], folder=None, required=(REQUIRED_CHECK,)):
+        host = ClockedHost(checks_at)
+        host.required, host.cwd, host.runs = list(required), folder, runs
+        return host
+
+    def test_a_pending_check_that_is_not_required_does_not_hold_a_green_required_check(self):
+        host = self.host(lambda t: {REQUIRED_CHECK: [("pass", "")], "design": [("pending", "")]})
+        ok, why, _, _, end = self.wait(host, 15)
+        self.assertTrue(ok, why)
+        self.assertLess(end, 15 * 60, f"waited {end:.0f} s for a check that is not required")
+
+    def test_a_pending_required_check_still_holds_to_the_deadline(self):
+        host = self.host(lambda t: {REQUIRED_CHECK: [("pending", "")]})
+        ok, why, _, _, end = self.wait(host, 5)
+        self.assertFalse(ok)
+        self.assertIn("deadline of 5 minutes", why)
+        self.assertGreaterEqual(end, 5 * 60)
+
+    def test_a_red_required_check_refuses_at_once(self):
+        host = self.host(lambda t: {REQUIRED_CHECK: [("fail", "")]})
+        ok, why, _, _, end = self.wait(host, 15)
+        self.assertFalse(ok)
+        self.assertIn(f"{REQUIRED_CHECK}: fail", why)
+        self.assertLess(end, 60, f"a red required check waited {end:.0f} s")
+
+    def test_on_success_one_line_names_the_pending_check_and_run_it_did_not_wait_for(self):
+        folder = workflow_folder(self, {"docs.yml": workflow_text("docs", "docs")})
+        host = self.host(lambda t: {REQUIRED_CHECK: [("pass", "")], "design": [("pending", "")]},
+                         runs=lambda sha: [pending_run("docs")], folder=folder)
+        ok, why, lines, _, _ = self.wait(host, 15)
+        self.assertTrue(ok, why)
+        named = [l for _, l in lines if "design" in l or "docs" in l]
+        self.assertEqual(len(named), 1, f"want one line naming what was not waited for: {lines}")
+        self.assertIn("design", named[0])
+        self.assertIn("docs", named[0])
+
+    def test_a_pending_run_of_the_workflow_that_defines_the_required_job_holds_past_an_old_pass(self):
+        folder = workflow_folder(self, {"checks.yml": workflow_text("checks", "checks", REQUIRED_CHECK)})
+        host = self.host(lambda t: {REQUIRED_CHECK: [("pass", "")]}, runs=lambda sha: [pending_run("checks")], folder=folder)
+        ok, why, *_ = self.wait(host, 5)  # the pass row is the old run's: the re-run of the workflow is pending on this head
+        self.assertFalse(ok, why)
+        self.assertIn("deadline of 5 minutes", why)
+
+    def test_a_red_check_that_is_not_required_still_refuses(self):
+        host = self.host(lambda t: {REQUIRED_CHECK: [("pass", "")], "design": [("fail", "")]})
+        ok, why, _, _, end = self.wait(host, 15)
+        self.assertFalse(ok, why)
+        self.assertIn("design: fail", why)
+        self.assertLess(end, 60, f"a red check that is not required waited {end:.0f} s")
+
+    def test_a_pending_run_of_a_workflow_without_the_required_job_does_not_hold_a_green_required_check(self):
+        folder = workflow_folder(self, {"docs.yml": workflow_text("docs", "docs")})
+        host = self.host(lambda t: {REQUIRED_CHECK: [("pass", "")]}, runs=lambda sha: [pending_run("docs")], folder=folder)
+        ok, why, _, _, end = self.wait(host, 15)
+        self.assertTrue(ok, why)
+        self.assertLess(end, 15 * 60, f"waited {end:.0f} s for a run whose workflow does not define the required job")
+
+    def test_a_pending_run_holds_when_no_workflow_folder_can_be_read(self):  # the fallback: unknown holds, so a folder that is not read never lets a run through
+        folder = workflow_folder(self, None, git=True)
+        host = self.host(lambda t: {REQUIRED_CHECK: [("pass", "")]}, runs=lambda sha: [pending_run("docs")], folder=folder)
+        ok, why, *_ = self.wait(host, 5)
+        self.assertFalse(ok, why)
+        self.assertIn("deadline of 5 minutes", why)
+
+    def test_a_pending_run_whose_name_matches_no_local_workflow_holds_over_a_stale_pass(self):
+        # The head renamed the workflow's `name:`, so the run's name maps to no local file. A name no file maps to is unknown, and it holds.
+        folder = workflow_folder(self, {"checks.yml": workflow_text("checks-renamed", REQUIRED_CHECK)})
+        host = self.host(lambda t: {REQUIRED_CHECK: [("pass", "")]}, runs=lambda sha: [pending_run("checks")], folder=folder)
+        ok, why, *_ = self.wait(host, 5)
+        self.assertFalse(ok, "a pending run that maps to no local workflow file was dropped, and the stale pass let the wait pass")
+        self.assertIn("deadline of 5 minutes", why)
+
+    def test_a_pending_run_of_the_file_that_defines_a_pinned_required_job_holds_over_a_stale_pass(self):
+        # The wait holds on every required name. A pinned `lint` is required, and its file defines the job `lint`.
+        folder = workflow_folder(self, {"lint.yml": workflow_text("lint", "lint")})
+        host = self.host(lambda t: {"lint": [("pass", "")]}, runs=lambda sha: [pending_run("lint")], folder=folder, required=("lint",))
+        ok, why, *_ = self.wait(host, 5)
+        self.assertFalse(ok, "a pending run of the file that defines the pinned required job `lint` was dropped, and the stale pass let the wait pass")
+        self.assertIn("deadline of 5 minutes", why)
+
+    def test_an_empty_workflow_folder_holds_a_pending_run(self):
+        # No file is shown to define the run's job, so the run is unknown and it holds.
+        folder = workflow_folder(self, {})
+        host = self.host(lambda t: {REQUIRED_CHECK: [("pass", "")]}, runs=lambda sha: [pending_run("docs")], folder=folder)
+        ok, why, *_ = self.wait(host, 5)
+        self.assertFalse(ok, "a pending run in an empty workflow folder was dropped, and the wait passed")
+        self.assertIn("deadline of 5 minutes", why)
+
+    def test_a_workflow_file_whose_line_scan_finds_no_job_holds_its_pending_run(self):
+        # A 4-space indent or a flow-style `jobs:` gives the line scan no job. A file with no job found is unknown, so its run holds.
+        texts = {"indent.yml": "name: docs\non: push\njobs:\n    docs:\n        runs-on: ubuntu-latest\n",
+                 "flow.yml": "name: docs\non: push\njobs: {docs: {runs-on: ubuntu-latest}}\n"}
+        for name, text in texts.items():
+            with self.subTest(file=name):
+                folder = workflow_folder(self, {name: text})
+                host = self.host(lambda t: {REQUIRED_CHECK: [("pass", "")]}, runs=lambda sha: [pending_run("docs")], folder=folder)
+                ok, why, *_ = self.wait(host, 5)
+                self.assertFalse(ok, "a workflow file whose line scan finds no job dropped its pending run, and the wait passed")
+                self.assertIn("deadline of 5 minutes", why)
+
+    def test_a_pending_check_that_is_not_required_does_not_clear_a_no_job_ran_red(self):
+        # A pending check that is not required is not waited on, so it cannot hold back the red that no job ran. That red still refuses.
+        skipped = {"databaseId": 102, "name": "lint", "workflowName": "lint", "workflowDatabaseId": 102, "status": "completed", "conclusion": "skipped"}
+        host = self.host(lambda t: {"lint": [("skipping", "")], "design": [("pending", "")]}, runs=lambda sha: [skipped], required=("lint",))
+        ok, why, _, _, end = self.wait(host, 15)
+        self.assertFalse(ok, "a pending check that is not required cleared the no-job-ran red, and the wait passed")
+        self.assertTrue(any(s in why for s in ("no job ran", "no check ran")), why)
+        self.assertLess(end, 60, f"the skipped required job waited {end:.0f} s before it was refused")
+
 
 class SilentWait(Env):
     """Silence: merge printed only the launch line for minutes. A long step printed
@@ -7488,6 +7781,14 @@ def put_lf(path, text):
 
 class RecordsEnv(Env):
     """Helpers for the records-page cases. Holds no test."""
+    def use_fake_records(self):
+        """Patch merge.RECORDS to the fake generator (FAKE_RECORDS) for this case. Sets self.calls (its log) and self.prog."""
+        self.calls, self.prog = os.path.join(self.t, "records-calls.log"), os.path.join(self.t, "records.py")
+        put(self.prog, FAKE_RECORDS)
+        for p in (unittest.mock.patch.object(merge, "RECORDS", self.prog, create=True),  # create: a missing name is a failure, not an error
+                  unittest.mock.patch.dict(os.environ, {"RECORDS_CALLS": self.calls})):
+            p.start(); self.addCleanup(p.stop)
+
     def kinds_off(self):
         """The base holds claude-settings' own config: no stamp kinds, so no claim."""
         self.on("main", {".github/stamp.json": json.dumps(dict(CONFIG, kinds=[]))}, "no stamp kinds")
@@ -7649,11 +7950,7 @@ class RecordsRebuild(RecordsEnv):
     """
     def setUp(self):
         super().setUp()
-        self.calls, self.prog = os.path.join(self.t, "records-calls.log"), os.path.join(self.t, "records.py")
-        put(self.prog, FAKE_RECORDS)
-        for p in (unittest.mock.patch.object(merge, "RECORDS", self.prog, create=True),  # create: a missing name is a failure, not an error
-                  unittest.mock.patch.dict(os.environ, {"RECORDS_CALLS": self.calls})):
-            p.start(); self.addCleanup(p.stop)
+        self.use_fake_records()
 
     def test_a_pr_that_adds_a_debt_gets_the_page_in_the_claim_commit(self):
         self.on("feat", {"debts/gap-one.md": DEBT_TEXT})
@@ -8143,11 +8440,20 @@ class RecordsRebuild(RecordsEnv):
         self.assertNotEqual(rc, 0, out)
         self.assertEqual(self.head(), before, "pushed on a refusal")
 
+    def test_the_draft_preview_of_a_claim_head_with_ready_checks_says_run_the_draft_first(self):
+        block = dict(CONFIG["merge"], readyChecks=["check invariants"])
+        put_base_config(self, json.dumps(dict(CONFIG, merge=block)))  # the config first: a merge after the claim would hide its trailer
+        self.claim_head()
+        out = self.draft_preview()
+        claim = self.preview_line(out, "claim")
+        self.assertIn("already claimed (D-002)", claim, out)  # precondition: the head holds the claim
+        self.assertIn("--confirm` on the draft first", claim, out)
+
     def test_prepare_a_pushed_page_with_a_refused_ready_does_not_read_as_a_failure(self):
         # The real host's ready() always returns (False, why), so every draft step ends here. The push worked, so no line says "could not".
         self.kinds_off()
         self.on("feat", {"debts/gap-one.md": DEBT_TEXT})
-        self.host.ready_refuse = "GitHub marks a draft ready only through GraphQL, and this tool sends no GraphQL"
+        self.host.ready_refuse = merge.Host.ready(None, 1)[1]
         before = self.head()
         rc, out = self.draft_confirm()
         self.assertEqual(rc, 0, out)
@@ -12755,10 +13061,11 @@ class ReviewGuardHostFiles(unittest.TestCase):
             fn(7, 1)
 
 class ReviewGuardCost(ReviewEnv):
-    """`--review-record` without --fix-check makes exactly two gh reads, the pull request and then its files list. They are counted at the one seam
-    every call goes through (PullsHost in count mode), as ReviewedList counts its reads."""
+    """`--review-record` without --fix-check makes exactly three gh reads: the pull request, its files list, then the repo's issue comments once,
+    for the carried-run check (decision pr-review-record, the cost). Its git fetch and local git reads are not gh calls and are not counted here.
+    They are counted at the one seam every call goes through (PullsHost in count mode), as ReviewedList counts its reads."""
 
-    def test_the_record_makes_two_gh_reads(self):
+    def test_the_record_makes_three_gh_reads(self):
         for guard in ("no", "yes"):
             with self.subTest(guard=guard):
                 host = PullsHost([batch_pull(7, REVIEW_HEAD)], {}, count_gh=True)
@@ -12766,7 +13073,7 @@ class ReviewGuardCost(ReviewEnv):
                                              "--round", "1:reviewer:sonnet:PASS", host=host)
                 self.assertEqual(rc, 0, out + err)  # the record printed, so the reads ran to the end
                 self.assertEqual(parse_text(self, posted_body(self, out))["guard"], guard)
-                self.assertEqual(host.gh_calls, ["pulls/7", "pulls/7/files"], "the record's gh reads, in order")
+                self.assertEqual(host.gh_calls, ["pulls/7", "pulls/7/files", "issues/comments"], "the record's gh reads, in order")
 
 # The carried-run check of `--reviewed` (decision pr-review-record). A record whose Round lines and Fix check equal the newest earlier record's
 # carries those rounds, and they were read at the first head of that run, H1. A guard or check path that changed between H1 and the newest
@@ -12919,6 +13226,938 @@ class UnreviewedGuardWriter(UnreviewedGuardEnv):
         self.assertIn(h1[:7], err, f"the refusal does not name {h1[:7]}, the head the carried rounds were read at:\n" + err)
         self.assertIn("lint/check_x.py", err, f"the refusal does not name lint/check_x.py, the guard path changed after {h1[:7]}:\n" + err)
 
+# The report-only model judge at merge. The merge reads each governed Markdown file at head, selects a file whose line
+# cites a changed backing file (lint/stale_cites.py backed_lines), and sends it to decision_watch.invoke_model once. The
+# report names each line the model judges stale or unbacked. A model error or timeout reads UNKNOWN. Nothing it says
+# refuses a merge. The named cap constant is merge.PROSE_JUDGE_MAX_CALLS; a case patches it to PROSE_CAP.
+PROSE = "docs/notes/cloud.md"  # governed prose outside the decision folder, so only a read of every file at head finds it
+CITE_DOC = "# Cloud notes\n\nCloud sessions cannot push to main (read src/widget.py:4).\n"  # the cite is on line 3
+PLAIN_DOC = "# Plain notes\n\nA note with no cite.\n"
+BACKING = "src/widget.py"
+BACKING_TEXT = "a = 1\nb = 2\nc = 3\nd = 4\n"
+CAP_NAME = "PROSE_JUDGE_MAX_CALLS"
+PROSE_CAP = 2
+
+
+class JudgeStub:
+    """Stands in for decision_watch.invoke_model. `answer(prompt)` gives (verdict, error), or raises. Each call's prompt is
+    kept, so a case reads what the judge sent as well as what it got back."""
+    def __init__(self, answer):
+        self.answer, self.prompts = answer, []
+
+    def __call__(self, prompt, *args, **kwargs):
+        self.prompts.append(prompt)
+        return self.answer(prompt)
+
+
+def verdict_for(line, verdict, why="the cited file says otherwise"):
+    """An answer that judges one line of the prose file, in the JSON shape the judge asks for."""
+    return lambda prompt: ({"verdicts": [{"line": line, "verdict": verdict, "why": why}]}, None)
+
+
+def raises(exc):
+    def answer(prompt):
+        raise exc
+    return answer
+
+
+def replies_with(stdout, returncode=0, stderr=""):
+    """A `claude` start that exits with `returncode` and the given output, as the subprocess result invoke_model reads."""
+    def answer(args):
+        return types.SimpleNamespace(returncode=returncode, stdout=stdout, stderr=stderr)
+    return answer
+
+
+def judge_lines(out, path, word):
+    """The output lines that name `path` and carry `word`. A case pins a verdict on the line that names the file."""
+    return [line for line in out.splitlines() if path in line and word in line]
+
+
+UNKNOWN_CAUSES = ("timed out", "model error", "no readable verdict", "past the call cap", "skipped by the reply")  # the fixed buckets, in the order a count line lists them
+
+
+def prose_unknown_lines(out):
+    """The merge's prose-judge UNKNOWN lines. Other steps of a merge print UNKNOWN too, so a case reads only these."""
+    return [line for line in out.splitlines() if "prose judge" in line and "UNKNOWN" in line]
+
+
+def per_file(answers):
+    """An answer routed by the file the prompt judges: `answers` maps a path to a function of the prompt. A prompt for a path that is not
+    in `answers` reads as a model error."""
+    def answer(prompt):
+        for path, reply in answers.items():
+            if "File: %s\n" % path in prompt:
+                return reply(prompt)
+        return None, "the test has no answer for this file"
+    return answer
+
+
+def stale_every_line(prompt):
+    """An answer that calls every line the prompt numbers `stale`, read from its `Line N:` rows."""
+    numbers = [int(n) for n in re.findall(r"^Line (\d+): ", prompt, re.M)]
+    return {"verdicts": [{"line": n, "verdict": "stale", "why": "the cited file says otherwise"} for n in numbers]}, None
+
+
+def timed_out(prompt):
+    return None, "model subprocess timed out"
+
+
+def cited_lines(n):
+    """A Markdown file of a heading and `n` lines that each cite src/widget.py:4, so every line is selected and judged."""
+    return "# Cloud notes\n\n" + "Cloud sessions cannot push to main (read src/widget.py:4).\n" * n
+
+
+REAL_INVOKE_MODEL = decision_watch.invoke_model  # captured at import, before the test base swaps in its stub
+REAL_RUN = decision_watch._nowindow.run  # captured at import, before the test base wraps it
+
+
+def base_model_stub(prompt, *args, **kwargs):
+    """decision_watch.invoke_model for every test, unless the test opts back in to REAL_INVOKE_MODEL: no subprocess, and the merge
+    reads the call as UNKNOWN."""
+    return None, "stubbed by the test base"
+
+
+class ModelStarted(BaseException):
+    """Raised when a test would start `claude -p`. A BaseException, so the judge's `except Exception` cannot turn it into UNKNOWN."""
+
+
+def guarded_run(args, **kwargs):
+    """decision_watch._nowindow.run with `claude` refused: a test that tries it fails with ModelStarted."""
+    if args and os.path.splitext(os.path.basename(str(args[0])))[0] == "claude":
+        raise ModelStarted("a test started `claude -p`: patch decision_watch.invoke_model, or opt in to REAL_INVOKE_MODEL")
+    return REAL_RUN(args, **kwargs)
+
+
+def install_model_guard():
+    """The test base: every test in this file gets base_model_stub and guarded_run, whatever its base class. setUpModule calls it, and so
+    do the two child-process branches under __main__, which run merge.main with no unittest run."""
+    unittest.mock.patch.object(decision_watch, "invoke_model", base_model_stub).start()
+    unittest.mock.patch.object(decision_watch._nowindow, "run", guarded_run).start()
+    unittest.addModuleCleanup(unittest.mock.patch.stopall)
+
+
+def setUpModule():
+    install_model_guard()
+
+
+class ProseJudge(Env):
+    def setup_range(self, main_files, feat_files, links=None, later=None):
+        """main gains `main_files` ({path: text}), so their lines are in no added line. Then feat removes the pending record
+        (second.md, governed prose with no cite) and changes `feat_files`, and makes each `links` ({path: target}) a symlink to
+        target. Feat then takes main's base, and `later` ({path: text}) is one more feat commit after that: the lines it adds to
+        a prose file are selected through the diff base, and a cited line through the backing file it cites."""
+        o = self.other
+        sh(o, "git", "fetch", "-q", "origin")
+        sh(o, "git", "checkout", "-q", "-B", "main", "origin/main")
+        for path, text in main_files.items():
+            put(os.path.join(o, path), text)
+        sh(o, "git", "add", "-A"); sh(o, "git", "commit", "-qm", "prose on main"); sh(o, "git", "push", "-q", "origin", "main")
+        sh(o, "git", "checkout", "-q", "-B", "feat", "origin/feat")
+        sh(o, "git", "rm", "-q", "docs/decisions/second.md")
+        for path, text in feat_files.items():
+            put(os.path.join(o, path), text)
+        for path, target in (links or {}).items():
+            os.makedirs(os.path.dirname(os.path.join(o, path)), exist_ok=True)
+            os.symlink(target, os.path.join(o, path))
+        sh(o, "git", "add", "-A"); sh(o, "git", "commit", "-qm", "feat: drop the pending record, change the backing")
+        sh(o, "git", "push", "-q", "origin", "feat")
+        head_takes_base(self)
+        if later:  # after the base is taken: a prose file that main and feat both add would conflict in head_takes_base's merge
+            sh(o, "git", "fetch", "-q", "origin")
+            sh(o, "git", "checkout", "-q", "-B", "feat", "origin/feat")
+            for path, text in later.items():
+                put(os.path.join(o, path), text)
+            sh(o, "git", "add", "-A"); sh(o, "git", "commit", "-qm", "feat: add lines to the prose")
+            sh(o, "git", "push", "-q", "origin", "feat")
+
+    def run_capped(self, cap=PROSE_CAP):
+        """The merge with the cap at `cap`, or at the default PROSE_JUDGE_MAX_CALLS when `cap` is None. -> (rc, out)."""
+        if cap is None:
+            return self.run_merge("7", "--confirm")
+        with unittest.mock.patch.object(merge, CAP_NAME, cap):  # no create=True: a renamed constant fails here, not passes
+            return self.run_merge("7", "--confirm")
+
+    def judge(self, answer, cap=PROSE_CAP):
+        """The merge with `answer` in place of invoke_model, at `cap` model calls (None: the default). -> (stub, rc, out)."""
+        stub = JudgeStub(answer)
+        with unittest.mock.patch.object(decision_watch, "invoke_model", stub):
+            rc, out = self.run_capped(cap)
+        return stub, rc, out
+
+    def assert_unknown_count(self, out, k, causes):
+        """The merge's one prose-judge UNKNOWN line. It opens `merge: #7 prose judge UNKNOWN:`, reads K lines not judged, and lists
+        (count, cause) pairs in the fixed bucket order, with a zero bucket left out. The wording between those parts is not pinned."""
+        lines = prose_unknown_lines(out)
+        self.assertEqual(len(lines), 1, "prose-judge UNKNOWN lines: %d, want 1: one count line per merge\n%s" % (len(lines), out))
+        line = lines[0]
+        self.assertTrue(line.startswith("merge: #7 prose judge UNKNOWN:"), "the UNKNOWN line does not open the count line: %r" % line)
+        found_k = re.search(r"(\d+) lines not judged", line)
+        self.assertIsNotNone(found_k, "the UNKNOWN line has no `<K> lines not judged`: %r" % line)
+        self.assertEqual(int(found_k.group(1)), k, "lines not judged: %s, want %d: %r" % (found_k.group(1), k, line))
+        found = [(int(n), cause) for n, cause in re.findall(r"(\d+) (%s)\b" % "|".join(UNKNOWN_CAUSES), line)]
+        self.assertEqual(found, causes, "causes in the UNKNOWN line: %r, want %r: %r" % (found, causes, line))
+
+    def real_judge(self, reply=None, claude=None, isolation=None):
+        """The merge through the real invoke_model and its parse. Each `claude` start is answered in this process: by `claude(args)` when
+        given, a function that returns a result or raises, else by an envelope whose result text is `reply`. `isolation`, when given,
+        stands in for _judge_isolation: a function of no arguments that returns (cwd, env) or raises. Every other program goes to the
+        real runner, so git still runs. Call after setup_range. -> (claude starts, rc, out)."""
+        answer = claude or replies_with(json.dumps({"result": reply}))
+        real_run, claude_calls = decision_watch._nowindow.run, []
+
+        def run(args, **kwargs):
+            if args and args[0] == "claude":
+                claude_calls.append(args)
+                return answer(args)
+            return real_run(args, **kwargs)
+
+        scratch = tempfile.mkdtemp(dir=self.t)  # the real invoke_model removes its own scratch folder; this one is inside the case's folder
+        with unittest.mock.patch.object(decision_watch, "invoke_model", REAL_INVOKE_MODEL), \
+                unittest.mock.patch.object(decision_watch, "_judge_isolation", isolation or (lambda: (scratch, {}))), \
+                unittest.mock.patch.object(decision_watch._nowindow, "run", run):
+            rc, out = self.run_capped()
+        return claude_calls, rc, out
+
+    def merge_interrupted(self, where, exc):
+        """The merge with afterMerge set, and `exc` raised where `where` names: "model" is the model call, "plan" is the judge's plan
+        read under the merge lock. -> (times the raise was reached, origin main before the merge, output)."""
+        cfg = dict(CONFIG, merge=dict(CONFIG["merge"], afterMerge=["echo ran > after.txt"]))
+        put_base_config(self, json.dumps(cfg))
+        self.setup_range({PROSE: CITE_DOC}, {BACKING: BACKING_TEXT})
+        reached = []
+
+        def interrupt(*args, **kwargs):
+            reached.append(args)
+            raise exc
+        owner, name = (decision_watch, "invoke_model") if where == "model" else (merge, "prose_judge_lines")
+        before, out, err = self.head("main"), io.StringIO(), io.StringIO()
+        with unittest.mock.patch.object(owner, name, interrupt):
+            try:
+                self.run_merge("7", "--confirm", stdout=out, stderr=err)
+            except (SystemExit, KeyboardInterrupt):  # the interrupt left merge.main: the case reads the state it left behind
+                pass
+        return len(reached), before, out.getvalue() + err.getvalue()
+
+    def assert_interrupt_leaves_merge_whole(self, where, exc):
+        reached, before, out = self.merge_interrupted(where, exc)
+        self.assertEqual(reached, 1, "the %s interrupt was reached %d times, want 1: the case did not hit its seam\n%s" % (where, reached, out))
+        self.assertNotEqual(self.head("main"), before, "origin main did not move: the merge did not land before the interrupt\n" + out)
+        self.assertEqual(sh(self.co, "git", "rev-parse", "main"), self.head("main"),
+                         "local main did not move to the merge commit: the interrupt came before ff_main\n" + out)
+        self.assertTrue(os.path.exists(os.path.join(self.co, "after.txt")), "afterMerge did not run: the interrupt came before it\n" + out)
+        self.assertNotIn("refs/heads/feat", self.refs(), "origin feat is still there: the interrupt came before cut_branch\n" + out)
+        self.assertFalse(self.lock_ref(), "the merge lock is still held after the interrupt\n" + out)
+
+    def test_a_changed_backing_file_selects_the_line_that_cites_it(self):
+        self.setup_range({PROSE: CITE_DOC}, {BACKING: BACKING_TEXT})
+        stub, rc, out = self.judge(verdict_for(3, "holds"))
+        self.assertEqual(len(stub.prompts), 1, "model calls: %d, want 1: one prose file cites the changed %s" % (len(stub.prompts), BACKING))
+        self.assertIn(PROSE, stub.prompts[0], "the call does not name %s" % PROSE)
+        self.assertIn("cannot push to main", stub.prompts[0], "the call does not carry the cited line")
+        self.assertIn("read %s:4" % BACKING, stub.prompts[0], "the call does not carry what the line cites")
+
+    def test_one_model_call_per_selected_file(self):
+        names = ("docs/notes/a.md", "docs/notes/b.md")
+        plain = "docs/notes/plain.md"  # no cite: never selected
+        self.setup_range({names[0]: CITE_DOC, names[1]: CITE_DOC, plain: PLAIN_DOC}, {BACKING: BACKING_TEXT})
+        stub, rc, out = self.judge(verdict_for(3, "holds"))
+        self.assertEqual(len(stub.prompts), 2, "model calls: %d, want 2: two prose files are selected" % len(stub.prompts))
+        sent = {p for p in names + (plain,) if any(p in prompt for prompt in stub.prompts)}
+        self.assertEqual(sent, set(names), "the calls name %s, want the two selected files only" % sorted(sent))
+
+    def test_past_the_cap_the_rest_read_unknown(self):
+        names = ("docs/notes/a.md", "docs/notes/b.md", "docs/notes/c.md")
+        self.setup_range({p: CITE_DOC for p in names}, {BACKING: BACKING_TEXT})
+        stub, rc, out = self.judge(verdict_for(3, "holds"))
+        self.assertEqual(len(stub.prompts), PROSE_CAP, "model calls: %d for 3 selected files, want the cap %d" % (len(stub.prompts), PROSE_CAP))
+        sent = {p for p in names if any(p in prompt for prompt in stub.prompts)}
+        unjudged = set(names) - sent
+        self.assertEqual(len(unjudged), 1, "files not sent: %s, want one past the cap" % sorted(unjudged))
+        self.assert_unknown_count(out, 1, [(1, "past the call cap")])
+        self.assertEqual(rc, 0, out)
+
+    def test_a_stale_verdict_names_the_file_and_line(self):
+        self.setup_range({PROSE: CITE_DOC}, {BACKING: BACKING_TEXT})
+        stub, rc, out = self.judge(verdict_for(3, "stale"))
+        self.assertEqual(len(stub.prompts), 1, "model calls: %d, want 1 for one selected file" % len(stub.prompts))
+        self.assertTrue(judge_lines(out, "%s:3" % PROSE, "stale"), "the report names no stale line at %s:3" % PROSE)
+
+    def test_an_unbacked_verdict_names_the_file_and_line(self):
+        self.setup_range({PROSE: CITE_DOC}, {BACKING: BACKING_TEXT})
+        stub, rc, out = self.judge(verdict_for(3, "unbacked"))
+        self.assertEqual(len(stub.prompts), 1, "model calls: %d, want 1 for one selected file" % len(stub.prompts))
+        self.assertTrue(judge_lines(out, "%s:3" % PROSE, "unbacked"), "the report names no unbacked line at %s:3" % PROSE)
+
+    def test_a_holds_verdict_is_not_named(self):
+        self.setup_range({PROSE: CITE_DOC}, {BACKING: BACKING_TEXT})
+        stub, rc, out = self.judge(verdict_for(3, "holds"))
+        self.assertEqual(len(stub.prompts), 1, "model calls: %d, want 1 for one selected file" % len(stub.prompts))
+        self.assertFalse([line for line in out.splitlines() if "%s:3" % PROSE in line], "the report names %s:3, which the model held" % PROSE)
+        self.assertEqual(prose_unknown_lines(out), [], "a held line added an UNKNOWN line: the merge has no unjudged line")
+
+    def test_a_stale_verdict_never_refuses_the_merge(self):
+        self.setup_range({PROSE: CITE_DOC}, {BACKING: BACKING_TEXT})
+        stub, rc, out = self.judge(verdict_for(3, "stale"))
+        self.assertEqual(len(stub.prompts), 1, "model calls: %d, want 1 for one selected file" % len(stub.prompts))
+        self.assertEqual(rc, 0, out)
+        self.assertTrue(getattr(self.host, "merged", False), "the merge did not land after a stale verdict")
+
+    def test_a_raised_error_reads_unknown(self):
+        self.setup_range({PROSE: CITE_DOC}, {BACKING: BACKING_TEXT})
+        stub, rc, out = self.judge(raises(RuntimeError("model host unreachable")))
+        self.assertEqual(len(stub.prompts), 1, "model calls: %d, want 1 for one selected file" % len(stub.prompts))
+        self.assertNotIn("model host unreachable", out, "the report prints the raised error's text, not a cause\n" + out)
+        self.assert_unknown_count(out, 1, [(1, "model error")])
+
+    def test_a_raised_error_never_refuses_the_merge(self):
+        self.setup_range({PROSE: CITE_DOC}, {BACKING: BACKING_TEXT})
+        stub, rc, out = self.judge(raises(RuntimeError("model host unreachable")))
+        self.assertEqual(len(stub.prompts), 1, "model calls: %d, want 1 for one selected file" % len(stub.prompts))
+        self.assertEqual(rc, 0, out)
+        self.assertTrue(getattr(self.host, "merged", False), "the merge did not land after the call raised")
+
+    def test_a_timeout_reads_unknown_and_never_refuses(self):
+        self.setup_range({PROSE: CITE_DOC}, {BACKING: BACKING_TEXT})
+        stub, rc, out = self.judge(timed_out)
+        self.assertEqual(len(stub.prompts), 1, "model calls: %d, want 1 for one selected file" % len(stub.prompts))
+        self.assert_unknown_count(out, 1, [(1, "timed out")])
+        self.assertEqual(rc, 0, out)
+
+    def test_a_stale_verdict_travels_through_the_real_invoke_model(self):
+        # The stub above stops at invoke_model. This case runs the real invoke_model and its parse: `claude` is answered in
+        # this process, and every other program goes to the real runner, so git still runs. The child-process seams in
+        # hooks/test_reply_judge.py and hooks/test_call_judge.py cannot reach the merge's own process.
+        reply = json.dumps({"verdicts": [{"line": 3, "verdict": "stale", "why": "the cited file says otherwise"}]})
+        self.setup_range({PROSE: CITE_DOC}, {BACKING: BACKING_TEXT})
+        claude_calls, rc, out = self.real_judge(reply)
+        self.assertEqual(len(claude_calls), 1, "claude starts: %d, want 1 for one selected file" % len(claude_calls))
+        self.assertTrue(judge_lines(out, "%s:3" % PROSE, "stale"), "the report names no stale line at %s:3 through the real parse" % PROSE)
+
+    def test_a_reply_in_the_wrong_shape_reads_every_selected_line_unknown(self):
+        # The reply carries `findings` and `ok`, not `verdicts`. The real parse must refuse it, or its stale line reads through.
+        reply = json.dumps({"ok": True, "findings": [{"line": 3, "verdict": "stale", "why": "x"}]})
+        self.setup_range({PROSE: TWO_CITE_DOC}, {BACKING: BACKING_TEXT})
+        claude_calls, rc, out = self.real_judge(reply)
+        self.assertEqual(len(claude_calls), 1, "claude starts: %d, want 1 for one selected file" % len(claude_calls))
+        # The real parse refuses this shape and returns a "model result" error, which reads as no readable verdict.
+        self.assertNotIn("was not a list", out, "the report prints the parse's error text, not a cause\n" + out)
+        self.assert_unknown_count(out, 2, [(2, "no readable verdict")])
+        self.assertFalse([line for line in out.splitlines() if "prose judge" in line and PROSE in line and "UNKNOWN" not in line],
+                         "a non-UNKNOWN prose judge line names %s, so the wrong-shape reply was read as a verdict\n%s" % (PROSE, out))
+        self.assertEqual(rc, 0, out)
+
+    # Each case below is one error that decision_watch.invoke_model returns or raises, read through its real parse and the merge's bucket.
+    def test_a_non_json_reply_from_claude_reads_no_readable_verdict(self):
+        self.setup_range({PROSE: CITE_DOC}, {BACKING: BACKING_TEXT})
+        claude_calls, rc, out = self.real_judge(claude=replies_with("not json at all"))
+        self.assertEqual(len(claude_calls), 1, "claude starts: %d, want 1 for one selected file" % len(claude_calls))
+        self.assert_unknown_count(out, 1, [(1, "no readable verdict")])
+        self.assertEqual(rc, 0, out)
+
+    def test_an_envelope_with_no_result_text_reads_no_readable_verdict(self):
+        self.setup_range({PROSE: CITE_DOC}, {BACKING: BACKING_TEXT})
+        claude_calls, rc, out = self.real_judge(claude=replies_with(json.dumps({"type": "result", "subtype": "success"})))
+        self.assertEqual(len(claude_calls), 1, "claude starts: %d, want 1 for one selected file" % len(claude_calls))
+        self.assert_unknown_count(out, 1, [(1, "no readable verdict")])
+        self.assertEqual(rc, 0, out)
+
+    def test_a_result_text_with_no_json_reads_no_readable_verdict(self):
+        self.setup_range({PROSE: CITE_DOC}, {BACKING: BACKING_TEXT})
+        claude_calls, rc, out = self.real_judge("I cannot give a verdict on this line.")
+        self.assertEqual(len(claude_calls), 1, "claude starts: %d, want 1 for one selected file" % len(claude_calls))
+        self.assert_unknown_count(out, 1, [(1, "no readable verdict")])
+        self.assertEqual(rc, 0, out)
+
+    def test_a_non_zero_claude_exit_reads_model_error(self):
+        self.setup_range({PROSE: CITE_DOC}, {BACKING: BACKING_TEXT})
+        claude_calls, rc, out = self.real_judge(claude=replies_with("", returncode=1, stderr="claude: upstream exploded"))
+        self.assertEqual(len(claude_calls), 1, "claude starts: %d, want 1 for one selected file" % len(claude_calls))
+        self.assertNotIn("upstream exploded", out, "the report prints claude's stderr, not a cause\n" + out)
+        self.assert_unknown_count(out, 1, [(1, "model error")])
+        self.assertEqual(rc, 0, out)
+
+    def test_a_claude_start_that_raises_reads_model_error(self):
+        self.setup_range({PROSE: CITE_DOC}, {BACKING: BACKING_TEXT})
+        claude_calls, rc, out = self.real_judge(claude=raises(OSError("no such file: claude")))
+        self.assertEqual(len(claude_calls), 1, "claude starts: %d, want 1 for one selected file" % len(claude_calls))
+        self.assertNotIn("no such file", out, "the report prints the start error's text, not a cause\n" + out)
+        self.assert_unknown_count(out, 1, [(1, "model error")])
+        self.assertEqual(rc, 0, out)
+
+    def test_an_unreadable_token_file_reads_model_error(self):
+        self.setup_range({PROSE: CITE_DOC}, {BACKING: BACKING_TEXT})
+        isolated = []
+
+        def unreadable():
+            isolated.append(1)
+            raise decision_watch.TokenUnreadable()
+        claude_calls, rc, out = self.real_judge(isolation=unreadable)
+        self.assertEqual(len(isolated), 1, "isolation reads: %d, want 1: the real invoke_model did not reach the token read" % len(isolated))
+        self.assertEqual(claude_calls, [], "claude starts: %d, want 0: no model runs when the token cannot be read" % len(claude_calls))
+        self.assert_unknown_count(out, 1, [(1, "model error")])
+        self.assertEqual(rc, 0, out)
+
+    def test_a_claude_timeout_reads_timed_out(self):
+        self.setup_range({PROSE: CITE_DOC}, {BACKING: BACKING_TEXT})
+        claude_calls, rc, out = self.real_judge(claude=raises(subprocess.TimeoutExpired(["claude"], 1)))
+        self.assertEqual(len(claude_calls), 1, "claude starts: %d, want 1 for one selected file" % len(claude_calls))
+        self.assert_unknown_count(out, 1, [(1, "timed out")])
+        self.assertEqual(rc, 0, out)
+
+    def test_a_system_exit_from_the_model_leaves_the_merge_whole(self):
+        self.assert_interrupt_leaves_merge_whole("model", SystemExit(3))
+
+    def test_a_keyboard_interrupt_from_the_model_leaves_the_merge_whole(self):
+        self.assert_interrupt_leaves_merge_whole("model", KeyboardInterrupt())
+
+    def test_a_system_exit_in_the_plan_leaves_the_merge_whole(self):
+        self.assert_interrupt_leaves_merge_whole("plan", SystemExit(3))
+
+    def test_a_keyboard_interrupt_in_the_plan_leaves_the_merge_whole(self):
+        self.assert_interrupt_leaves_merge_whole("plan", KeyboardInterrupt())
+
+    def test_the_default_model_stub_is_in_place_in_every_test(self):
+        # Without the test base, decision_watch.invoke_model is the real function, and a merge reaching it would start `claude -p`.
+        # The first two asserts read identity only, so a red run starts no program.
+        self.assertIs(decision_watch.invoke_model, base_model_stub,
+                      "decision_watch.invoke_model is not the test base's stub, so a merge could start claude -p")
+        self.assertIs(decision_watch._nowindow.run, guarded_run, "decision_watch._nowindow.run is not the claude guard")
+        self.assertEqual(decision_watch.invoke_model("probe"), (None, "stubbed by the test base"), "the test base's stub does not read UNKNOWN")
+
+    def test_the_guard_refuses_a_claude_start_and_runs_other_programs(self):
+        # Scope first: a program that is not claude runs through the guard. Then the refusal: a claude start never reaches
+        # the runner. REAL_RUN is a recorder for that half, so a red run (refusal removed) starts no program.
+        ran = decision_watch._nowindow.run([sys.executable, "-c", "print('ran')"], capture_output=True, text=True)
+        self.assertEqual((ran.returncode, ran.stdout.strip()), (0, "ran"), "a program that is not claude did not run through the guard")
+        started = []
+
+        def recorder(args, **kwargs):
+            started.append(list(args))
+            return types.SimpleNamespace(returncode=0, stdout="", stderr="")
+        with unittest.mock.patch.object(sys.modules[__name__], "REAL_RUN", recorder):
+            with self.assertRaises(ModelStarted):
+                decision_watch._nowindow.run(["claude", "-p"])
+        self.assertEqual(started, [], "the refused claude start still reached the runner")
+
+    def test_no_backed_line_and_no_added_prose_makes_no_model_call(self):
+        # The range changes code only, and the prose on main cites a file the range does not change.
+        self.setup_range({PROSE: "# Cloud notes\n\nCloud sessions cannot push to main (read src/other.py:4).\n"}, {BACKING: BACKING_TEXT})
+        stub, rc, out = self.judge(verdict_for(3, "stale"))
+        self.assertEqual(stub.prompts, [], "model calls: %d, want 0: no line cites a changed file" % len(stub.prompts))
+        self.assertEqual(rc, 0, out)
+        self.assertFalse(judge_lines(out, PROSE, "stale"), "the report names %s with no call made" % PROSE)
+        self.assertEqual(prose_unknown_lines(out), [], "the merge made no call, yet printed an UNKNOWN line")
+
+    def test_a_line_the_range_adds_to_governed_prose_is_judged_with_no_backing_change(self):
+        # No backing file changes and the line has no cite, so only the diff base can select it: main holds the old line,
+        # and feat adds line 5. The old line on main is in no added line, so the call must not carry it.
+        old = "# Cloud notes\n\nAn old line on main.\n"
+        self.setup_range({PROSE: old}, {}, later={PROSE: old + "\nCloud sessions run in a container.\n"})
+        stub, rc, out = self.judge(verdict_for(5, "unbacked", "no cited file backs the line"))
+        self.assertEqual(len(stub.prompts), 1, "model calls: %d, want 1: the range adds one prose line with no cite" % len(stub.prompts))
+        self.assertIn("File: %s" % PROSE, stub.prompts[0], "the call does not name %s" % PROSE)
+        self.assertIn("Line 5: Cloud sessions run in a container.", stub.prompts[0], "the call does not carry the line the range adds, at line 5")
+        self.assertNotIn("An old line on main", stub.prompts[0], "the call carries a line that main holds, not one the range adds")
+        self.assertTrue(judge_lines(out, "%s:5" % PROSE, "unbacked"), "the report names no unbacked line at %s:5" % PROSE)
+        self.assertEqual(rc, 0, out)
+
+    def test_an_unreadable_base_reads_unknown_and_never_holds_the_merge(self):
+        # The base's rev-parse fails in confirm, and only that call fails: the merge's other git reads run. The report names the
+        # unreadable base, and the merge still lands with rc 0.
+        old = "# Cloud notes\n\nAn old line on main.\n"
+        self.setup_range({PROSE: old}, {}, later={PROSE: old + "\nCloud sessions run in a container.\n"})
+        real_git, reached = merge.git, []
+
+        def base_unreadable(cwd, *a, **kw):
+            if sys._getframe(1).f_code.co_name == "confirm" and a == ("rev-parse", "--verify", "-q", "origin/main^{commit}"):
+                reached.append(a)
+                return 1, ""
+            return real_git(cwd, *a, **kw)
+        with unittest.mock.patch.object(merge, "git", base_unreadable):
+            rc, out = self.run_capped()
+        self.assertEqual(len(reached), 1, "the base's rev-parse was reached %d times, want 1: the case did not hit its seam" % len(reached))
+        self.assertIn("prose judge UNKNOWN: the base could not be read", out, "the report names no unreadable base\n" + out)
+        self.assertEqual(prose_unknown_lines(out), ["merge: #7 prose judge UNKNOWN: the base could not be read, so no line was judged."],
+                         "a plan-level failure is the only UNKNOWN line, so no other UNKNOWN line may print beside it\n" + out)
+        self.assertEqual(rc, 0, out)
+        self.assertTrue(getattr(self.host, "merged", False), "the merge did not land after the base could not be read")
+
+    def test_a_base_read_that_times_out_still_lands_the_merge(self):
+        # The base read in confirm raises TimeoutExpired, and only that read: the merge's other steps run. The try around the read
+        # holds the merge: ff_main, afterMerge and the branch cut all run, the report names the unreadable base, and rc is 0.
+        cfg = dict(CONFIG, merge=dict(CONFIG["merge"], afterMerge=["echo ran > after.txt"]))
+        put_base_config(self, json.dumps(cfg))
+        old = "# Cloud notes\n\nAn old line on main.\n"
+        self.setup_range({PROSE: old}, {}, later={PROSE: old + "\nCloud sessions run in a container.\n"})
+        before = self.head("main")
+        real_git, reached = merge.git, []
+
+        def base_times_out(cwd, *a, **kw):
+            if sys._getframe(1).f_code.co_name == "confirm" and a == ("rev-parse", "--verify", "-q", "origin/main^{commit}"):
+                reached.append(a)
+                raise subprocess.TimeoutExpired(cmd=list(a), timeout=1)
+            return real_git(cwd, *a, **kw)
+        out, err = io.StringIO(), io.StringIO()
+        with unittest.mock.patch.object(merge, "git", base_times_out), unittest.mock.patch.object(merge, CAP_NAME, PROSE_CAP):
+            try:
+                rc, _ = self.run_merge("7", "--confirm", stdout=out, stderr=err)
+            except subprocess.TimeoutExpired:  # a read that escapes confirm: the asserts below read the state it left
+                rc = None
+        text = out.getvalue() + err.getvalue()
+        self.assertEqual(len(reached), 1, "the base read was reached %d times, want 1: the case did not hit its seam\n%s" % (len(reached), text))
+        self.assertNotEqual(self.head("main"), before, "origin main did not move: the merge did not land after the base read timed out\n" + text)
+        self.assertEqual(sh(self.co, "git", "rev-parse", "main"), self.head("main"), "local main did not move to the merge commit: ff_main did not run\n" + text)
+        self.assertTrue(os.path.exists(os.path.join(self.co, "after.txt")), "afterMerge did not run after the base read timed out\n" + text)
+        self.assertNotIn("refs/heads/feat", self.refs(), "origin feat is still there: the branch was not cut after the base read timed out\n" + text)
+        self.assertIn("prose judge UNKNOWN: the base could not be read", text, "the report names no unreadable base\n" + text)
+        self.assertEqual(rc, 0, text)
+
+    def test_the_model_call_runs_after_the_merge_lock_is_released(self):
+        # confirm holds the lock from acquire until the release in its finally. A model call waits up to MODEL_TIMEOUT, so it
+        # must come after that release. Building the prompt under the lock is allowed.
+        self.setup_range({PROSE: CITE_DOC}, {BACKING: BACKING_TEXT})
+        events = []
+        lock = OrderLock(self.co, now=lambda: self.now, pause=lambda s: None)
+        lock.events = events
+        answer = verdict_for(3, "holds")
+
+        def timed(prompt):
+            events.append("invoke")
+            return answer(prompt)
+        with unittest.mock.patch.object(decision_watch, "invoke_model", JudgeStub(timed)):
+            rc, out = self.run_merge("7", "--confirm", lock=lock)
+        self.assertIn("invoke", events, "the model was never called, so the order is unknown: events %s" % events)
+        self.assertIn("release", events[:events.index("invoke")], "the model call ran with the merge lock held: events %s" % events)
+
+    def test_a_timeout_on_a_long_doc_collapses_to_one_count_line(self):
+        # 400 timed-out lines are one UNKNOWN count line. UNKNOWNs take no finding slot, so no count of lines past a cap prints.
+        self.setup_range({PROSE: cited_lines(400)}, {BACKING: BACKING_TEXT})
+        stub, rc, out = self.judge(timed_out)
+        self.assertEqual(len(stub.prompts), 1, "model calls: %d, want 1 for one selected file" % len(stub.prompts))
+        self.assert_unknown_count(out, 400, [(400, "timed out")])
+        self.assertNotIn("more lines not shown", out, "a count of lines past a cap, but UNKNOWNs never take the finding cap\n" + out)
+        self.assertEqual(rc, 0, out)
+
+    def test_the_line_cap_is_the_named_constant_twenty(self):
+        self.assertEqual(getattr(merge, "PROSE_JUDGE_MAX_LINES", None), 20, "merge.PROSE_JUDGE_MAX_LINES is not the named cap of 20 judge lines")
+
+    def test_a_21_line_timeout_collapses_to_one_count_line_of_21(self):
+        # 21 timed-out lines pass the finding cap of 20 and are still one UNKNOWN line: UNKNOWNs never take the cap.
+        self.setup_range({PROSE: cited_lines(21)}, {BACKING: BACKING_TEXT})
+        stub, rc, out = self.judge(timed_out)
+        self.assertEqual(len(stub.prompts), 1, "model calls: %d, want 1 for one selected file" % len(stub.prompts))
+        self.assert_unknown_count(out, 21, [(21, "timed out")])
+        self.assertNotIn("more lines not shown", out, "a count of 1 line past the cap of 20: the UNKNOWN lines took the cap\n" + out)
+
+    def malformed_reply(self, bad):
+        """The merge with PROSE's reply replaced by `bad`, and OTHER_PROSE answered stale at line 3. -> (rc, out)."""
+        self.setup_range({PROSE: TWO_CITE_DOC, OTHER_PROSE: CITE_DOC}, {BACKING: BACKING_TEXT})
+        stale = {"verdicts": [{"line": 3, "verdict": "stale", "why": "the cited file says otherwise"}]}
+        stub = JudgeStub(lambda prompt: (bad, None) if ("File: %s" % PROSE) in prompt else (stale, None))
+        with unittest.mock.patch.object(decision_watch, "invoke_model", stub):
+            rc, out = self.run_capped()
+        return rc, out
+
+    def assert_malformed_reads_unknown(self, bad):
+        # The merge reads what invoke_model hands it. A reply it cannot read is UNKNOWN for its file, every selected line, and
+        # no verdict prints for that file. The other file's verdict still prints.
+        rc, out = self.malformed_reply(bad)
+        self.assert_unknown_count(out, 2, [(2, "no readable verdict")])
+        self.assertFalse([line for line in out.splitlines() if "prose judge" in line and PROSE in line and "UNKNOWN" not in line],
+                         "a verdict printed for %s from a malformed reply" % PROSE)
+        self.assertTrue(judge_lines(out, "%s:3" % OTHER_PROSE, "stale"), "the other file's stale line did not print after the malformed reply")
+        self.assertEqual(rc, 0, out)
+
+    def test_a_reply_whose_verdicts_are_not_a_list_reads_unknown(self):
+        self.assert_malformed_reads_unknown({"verdicts": "stale"})
+
+    def test_a_reply_with_a_string_line_reads_unknown(self):
+        self.assert_malformed_reads_unknown({"verdicts": [{"line": "3", "verdict": "stale", "why": "w"}, {"line": 5, "verdict": "stale", "why": "w"}]})
+
+    def test_a_reply_with_a_float_line_reads_unknown(self):
+        self.assert_malformed_reads_unknown({"verdicts": [{"line": 3.0, "verdict": "stale", "why": "w"}, {"line": 5, "verdict": "stale", "why": "w"}]})
+
+    def test_a_reply_with_a_verdict_outside_the_three_reads_unknown(self):
+        self.assert_malformed_reads_unknown({"verdicts": [{"line": 3, "verdict": "maybe", "why": "w"}, {"line": 5, "verdict": "stale", "why": "w"}]})
+
+    def test_a_symlinked_backing_file_is_not_read_into_the_prompt(self):
+        # A backing path that is a symlink names a file outside the repo, so its text never goes into the prompt.
+        marker = "OUTSIDE-MARKER-4c1e"
+        outside = os.path.join(self.t, "outside.txt")
+        put(outside, "".join("%s line %d\n" % (marker, n) for n in range(1, 8)))  # long enough that the cited line 4 exists
+        try:
+            os.symlink(outside, os.path.join(self.t, "probe-link"))
+        except (OSError, NotImplementedError) as e:
+            self.skipTest("this host cannot make a symlink: %s" % e)
+        self.setup_range({PROSE: CITE_DOC}, {}, links={BACKING: outside})
+        stub, rc, out = self.judge(verdict_for(3, "holds"))
+        self.assertEqual(len(stub.prompts), 1, "model calls: %d, want 1: the line cites the changed %s" % (len(stub.prompts), BACKING))
+        self.assertIn("cited text of %s" % BACKING, stub.prompts[0], "scope: the prompt has no cited-text section for %s" % BACKING)
+        self.assertNotIn(marker, stub.prompts[0], "the prompt carries text read through the symlink %s to a file outside the repo" % BACKING)
+
+    def test_a_control_character_in_the_prose_line_is_not_sent(self):
+        prose = "# Cloud notes\n\nCloud sessions\x1b[31m cannot push to main (read src/widget.py:4).\n"
+        self.setup_range({PROSE: prose}, {BACKING: BACKING_TEXT})
+        stub, rc, out = self.judge(verdict_for(3, "holds"))
+        self.assertEqual(len(stub.prompts), 1, "model calls: %d, want 1 for one selected file" % len(stub.prompts))
+        self.assertIn("cannot push to main", stub.prompts[0], "scope: the prompt does not carry the prose line")
+        self.assertEqual(controls(stub.prompts[0]), [], "the prompt carries control characters from the prose line: %r" % controls(stub.prompts[0]))
+
+    def test_a_control_character_in_the_cited_text_is_not_sent(self):
+        cited = "a = 1\nb = 2\nc = 3\nd\t=\t4\x07\n"  # the tabs are the control: they survive, and only the bell goes
+        self.setup_range({PROSE: CITE_DOC}, {BACKING: cited})
+        stub, rc, out = self.judge(verdict_for(3, "holds"))
+        self.assertEqual(len(stub.prompts), 1, "model calls: %d, want 1 for one selected file" % len(stub.prompts))
+        self.assertIn("d\t=\t4", stub.prompts[0], "scope: the prompt does not carry the cited line")
+        self.assertEqual(controls(stub.prompts[0]), [], "the prompt carries control characters from the cited text: %r" % controls(stub.prompts[0]))
+
+    def test_a_control_character_in_why_is_not_reported(self):
+        self.setup_range({PROSE: CITE_DOC}, {BACKING: BACKING_TEXT})
+        stub, rc, out = self.judge(verdict_for(3, "stale", "the cited file says \x1b[31motherwise\x07"))
+        lines = judge_lines(out, "%s:3" % PROSE, "stale")
+        self.assertTrue(lines, "scope: no stale line at %s:3" % PROSE)
+        self.assertEqual(controls("\n".join(lines)), [], "the report carries control characters from why: %r" % controls("\n".join(lines)))
+
+    def test_the_default_cap_is_three_model_calls(self):
+        # Pins the default cap on judge model calls per merge, so a change to the default fails here. The test reads the real default, not a patched one.
+        self.assertEqual(merge.PROSE_JUDGE_MAX_CALLS, 3, "the default cap on model calls per merge is not 3")
+
+    def test_the_default_cap_sends_three_files_and_reads_the_fourth_unknown(self):
+        # Four selected files under the default cap make three calls. The fourth file must read UNKNOWN, not pass silently. The test reads the real default, not a patched one.
+        names = ("docs/notes/a.md", "docs/notes/b.md", "docs/notes/c.md", "docs/notes/d.md")
+        self.setup_range({p: CITE_DOC for p in names}, {BACKING: BACKING_TEXT})
+        stub, rc, out = self.judge(verdict_for(3, "holds"), cap=None)
+        self.assertEqual(len(stub.prompts), 3, "model calls: %d for 4 selected files, want the default cap of 3" % len(stub.prompts))
+        sent = {p for p in names if any(p in prompt for prompt in stub.prompts)}
+        self.assertEqual(len(sent), 3, "files sent: %d, want 3 under the default cap" % len(sent))
+        self.assert_unknown_count(out, 1, [(1, "past the call cap")])
+        self.assertEqual(rc, 0, out)
+
+    def test_a_selected_line_the_model_skips_reads_unknown(self):
+        # Confirm reads a selected line that gets no verdict as UNKNOWN, so no skipped line passes silently. The held line still prints nothing.
+        self.setup_range({PROSE: TWO_CITE_DOC}, {BACKING: BACKING_TEXT})
+        stub, rc, out = self.judge(verdict_for(3, "holds"))
+        self.assertEqual(len(stub.prompts), 1, "model calls: %d, want 1 for one selected file" % len(stub.prompts))
+        self.assert_unknown_count(out, 1, [(1, "skipped by the reply")])
+        self.assertFalse([line for line in out.splitlines() if "%s:3" % PROSE in line], "the report names %s:3, which the reply held" % PROSE)
+        self.assertEqual(rc, 0, out)
+
+    def test_five_prose_files_collapse_their_unknowns_into_one_count_line(self):
+        # UNKNOWNs collapse to one count line with their causes, and findings print in full.
+        # Five governed files come in the range. The default cap of 3 sends a, b and c, so d and e are past it.
+        files = {LANE_A: THREE_CITE_DOC, LANE_B: THREE_CITE_DOC, LANE_C: TWO_CITE_DOC, LANE_D: TWO_CITE_DOC, LANE_E: TWO_CITE_DOC}
+        self.setup_range({"docs/notes/base.md": PLAIN_DOC}, {**files, BACKING: BACKING_TEXT})
+        answer = per_file({
+            # Line 7 is missing from the reply, so it is skipped.
+            LANE_A: lambda prompt: ({"verdicts": [{"line": 3, "verdict": "unbacked", "why": "no cited file backs it"},
+                                                   {"line": 5, "verdict": "stale", "why": "the cited file says otherwise"}]}, None),
+            LANE_B: timed_out,
+            LANE_C: lambda prompt: ({"ok": True, "findings": [{"line": 3, "verdict": "stale", "why": "x"}]}, None),  # a wrong shape
+        })
+        stub, rc, out = self.judge(answer, cap=None)
+        sent = {p for p in files if any("File: %s\n" % p in prompt for prompt in stub.prompts)}
+        self.assertEqual(sent, {LANE_A, LANE_B, LANE_C}, "the calls name %s, want a, b and c: the default cap sends three files" % sorted(sent))
+        self.assertEqual(len(stub.prompts), 3, "model calls: %d, want 3" % len(stub.prompts))
+        lines = out.splitlines()
+        findings = ["merge: #7 prose judge, %s:3 unbacked: no cited file backs it" % LANE_A,
+                    "merge: #7 prose judge, %s:5 stale: the cited file says otherwise" % LANE_A]
+        for finding in findings:
+            self.assertIn(finding, lines, "the finding is not printed in full: %r\n%s" % (finding, out))
+        self.assert_unknown_count(out, 10, [(3, "timed out"), (2, "no readable verdict"), (4, "past the call cap"), (1, "skipped by the reply")])
+        self.assertLess(max(lines.index(f) for f in findings), lines.index(prose_unknown_lines(out)[0]), "a finding prints after the UNKNOWN line\n" + out)
+        self.assertEqual(rc, 0, out)
+        self.assertTrue(getattr(self.host, "merged", False), "the merge did not land")
+
+    def test_21_findings_print_20_and_a_count_of_one_then_the_unknown_line(self):
+        # UNKNOWNs do not take the finding cap: 21 findings print 20 and one count line, and the timed-out file adds one UNKNOWN line.
+        self.setup_range({"docs/notes/base.md": PLAIN_DOC}, {LANE_A: cited_lines(21), LANE_B: CITE_DOC, BACKING: BACKING_TEXT})
+        stub, rc, out = self.judge(per_file({LANE_A: stale_every_line, LANE_B: timed_out}), cap=None)
+        self.assertEqual(len(stub.prompts), 2, "model calls: %d, want 2: two files are selected" % len(stub.prompts))
+        lines = out.splitlines()
+        findings = [line for line in lines if line.startswith("merge: #7 prose judge, %s:" % LANE_A)]
+        self.assertEqual(len(findings), 20, "finding lines: %d, want 20: the finding cap\n%s" % (len(findings), out))
+        counts = [line for line in lines if re.match(r"^merge: #7 prose judge: \d+ more lines not shown$", line)]
+        self.assertEqual(counts, ["merge: #7 prose judge: 1 more lines not shown"], "the count line for the findings past the cap is not 1\n" + out)
+        self.assert_unknown_count(out, 1, [(1, "timed out")])
+        unknown = prose_unknown_lines(out)[0]
+        self.assertLess(lines.index(findings[-1]), lines.index(counts[0]), "the count line does not follow the last finding\n" + out)
+        self.assertLess(lines.index(counts[0]), lines.index(unknown), "the count line does not come before the UNKNOWN line\n" + out)
+        self.assertEqual(rc, 0, out)
+
+    def test_unknown_lines_never_take_a_finding_slot(self):
+        # 20 findings and one timed-out file: all 20 findings print, no count line for findings appears, and the UNKNOWN line prints.
+        self.setup_range({"docs/notes/base.md": PLAIN_DOC}, {LANE_A: cited_lines(20), LANE_B: CITE_DOC, BACKING: BACKING_TEXT})
+        stub, rc, out = self.judge(per_file({LANE_A: stale_every_line, LANE_B: timed_out}), cap=None)
+        self.assertEqual(len(stub.prompts), 2, "model calls: %d, want 2: two files are selected" % len(stub.prompts))
+        findings = [line for line in out.splitlines() if line.startswith("merge: #7 prose judge, %s:" % LANE_A)]
+        self.assertEqual(len(findings), 20, "finding lines: %d, want all 20: the UNKNOWN line took a finding slot\n%s" % (len(findings), out))
+        self.assertNotIn("more lines not shown", out, "a count line for findings that all fit: the UNKNOWN line took a slot\n" + out)
+        self.assert_unknown_count(out, 1, [(1, "timed out")])
+        self.assertEqual(rc, 0, out)
+
+    def test_the_unknown_line_names_a_cause_never_the_raw_error_text(self):
+        # invoke_model's error text is never printed: the line names the bucket, model error, and the text stays out.
+        self.setup_range({PROSE: CITE_DOC}, {BACKING: BACKING_TEXT})
+        stub, rc, out = self.judge(lambda prompt: (None, "RAW-ERROR-7f3a: /home/user/secret/stderr"))
+        self.assertEqual(len(stub.prompts), 1, "model calls: %d, want 1 for one selected file" % len(stub.prompts))
+        self.assertNotIn("RAW-ERROR-7f3a", out, "the report prints the raw error text, not a cause\n" + out)
+        self.assert_unknown_count(out, 1, [(1, "model error")])
+        self.assertEqual(rc, 0, out)
+
+    def test_a_call_with_no_verdict_and_no_error_reads_no_readable_verdict(self):
+        # The ruling of 03:20 CST: a None verdict with no error has no readable verdict, so it is not a model error.
+        self.setup_range({PROSE: CITE_DOC}, {BACKING: BACKING_TEXT})
+        stub, rc, out = self.judge(lambda prompt: (None, None))
+        self.assertEqual(len(stub.prompts), 1, "model calls: %d, want 1 for one selected file" % len(stub.prompts))
+        self.assert_unknown_count(out, 1, [(1, "no readable verdict")])
+        self.assertEqual(rc, 0, out)
+
+    def test_a_merge_with_every_line_judged_prints_no_unknown_line(self):
+        # The empty state: each selected line gets a verdict, so no UNKNOWN line prints and the stale finding prints in full.
+        self.setup_range({"docs/notes/base.md": PLAIN_DOC}, {LANE_A: CITE_DOC, LANE_B: CITE_DOC, BACKING: BACKING_TEXT})
+        stub, rc, out = self.judge(per_file({LANE_A: verdict_for(3, "stale"), LANE_B: verdict_for(3, "holds")}), cap=None)
+        self.assertEqual(len(stub.prompts), 2, "model calls: %d, want 2: two files are selected" % len(stub.prompts))
+        self.assertIn("merge: #7 prose judge, %s:3 stale: the cited file says otherwise" % LANE_A, out.splitlines(),
+                      "the stale finding is not printed in full\n" + out)
+        self.assertEqual(prose_unknown_lines(out), [], "every line was judged, yet an UNKNOWN line printed\n" + out)
+        self.assertEqual(rc, 0, out)
+
+    def test_a_selection_that_raises_is_the_only_unknown_line(self):
+        # A plan-level failure: the selection raises before any call, so one UNKNOWN line stands for the merge and no count line follows.
+        self.setup_range({PROSE: CITE_DOC}, {BACKING: BACKING_TEXT})
+        stub = JudgeStub(verdict_for(3, "holds"))
+        with unittest.mock.patch.object(merge, "prose_judge_lines", side_effect=RuntimeError("selection broke")), \
+                unittest.mock.patch.object(decision_watch, "invoke_model", stub):
+            rc, out = self.run_merge("7", "--confirm")
+        self.assertEqual(stub.prompts, [], "model calls: %d, want 0: the selection failed before any call" % len(stub.prompts))
+        unknown = prose_unknown_lines(out)
+        self.assertEqual(len(unknown), 1, "UNKNOWN lines: %d, want 1: the selection failure is the only one\n%s" % (len(unknown), out))
+        self.assertIn("could not run", unknown[0], "the UNKNOWN line does not name a run that could not run: %r" % unknown[0])
+        self.assertNotIn("lines not judged", out, "a count line printed beside a plan-level failure\n" + out)
+        self.assertEqual(rc, 0, out)
+
+    def test_a_named_path_line_with_no_cite_sends_its_excerpt_in_one_call(self):
+        # The line is added by the range and cites nothing. It names hooks/x.py and run_all in backticks, so the one call carries
+        # the lines of hooks/x.py around run_all, read at head.
+        self.setup_range({SIDE_PROSE: PLAIN_DOC}, {PROSE: NAMED_DOC, NAMED: numbered_source("xs", 30, named={12})})
+        stub, rc, out = self.judge(verdict_for(3, "holds"))
+        self.assertEqual(len(stub.prompts), 1, "model calls: %d, want 1 for one selected file" % len(stub.prompts))
+        self.assertIn("Line 3: The runner is `%s` `run_all`" % NAMED, stub.prompts[0], "scope: the call does not carry the named line")
+        got = tokens(stub.prompts[0], "xs")
+        self.assertEqual(got, ["xs%03d" % n for n in range(9, 16)],
+                         "the call carries the lines %s of %s, want lines 9 to 15 around run_all" % (got, NAMED))
+
+    def test_three_named_paths_make_one_call_under_twelve_kilobytes(self):
+        # The cost pin: one prose file is one model call, and three named paths keep its prompt under 12 KB. Each file has 2000-character
+        # rows and names run_all on one line, so the excerpt is one 7-row window per path. Each file is 200 KB, under the 256 KB size skip.
+        # Full-length rows make the bound depend on the per-row cut: uncut, the three windows alone are about 42 KB.
+        files = {"hooks/a.py": "pa", "hooks/b.py": "pb", "hooks/c.py": "pc"}
+        feat = {PROSE: THREE_NAMED_DOC}
+        for path, tag in files.items():
+            feat[path] = numbered_source(tag, 100, named={50}, width=2000)
+        self.setup_range({SIDE_PROSE: PLAIN_DOC}, feat)
+        holds = lambda prompt: ({"verdicts": [{"line": n, "verdict": "holds", "why": "w"} for n in (3, 5, 7)]}, None)
+        stub, rc, out = self.judge(holds)
+        self.assertEqual(len(stub.prompts), 1, "model calls: %d, want 1: one prose file is one call" % len(stub.prompts))
+        prompt = stub.prompts[0]
+        for path, tag in files.items():
+            got = tokens(prompt, tag)
+            self.assertGreater(len(got), 0, "the call carries no lines of %s" % path)
+            self.assertLessEqual(len(got), 40, "the call carries %d lines of %s, want at most 40" % (len(got), path))
+        size = len(prompt.encode("utf-8"))
+        self.assertLess(size, 12 * 1024, "the prompt is %d bytes for three named paths, want under 12 KB" % size)
+
+
+NAMED = "hooks/x.py"  # a tracked code path that a prose line names in backticks
+NAMED_DOC = "# Named notes\n\nThe runner is `hooks/x.py` `run_all` and returns 3.\n"  # the named line is line 3
+THREE_NAMED_DOC = ("# Named notes\n\nThe runner is `hooks/a.py` `run_all` and returns 3.\n\n"
+                   "The runner is `hooks/b.py` `run_all` and returns 3.\n\nThe runner is `hooks/c.py` `run_all` and returns 3.\n")  # lines 3, 5, 7
+SIDE_PROSE = "docs/notes/side.md"  # governed prose on main, so the range has a base to diff against
+
+
+def numbered_source(tag, count, named=(), width=0):
+    """A source file of `count` lines, each `<tag><NNN> = <n>`, padded with `z` to `width` characters when it is shorter. A line in
+    `named` calls run_all as well. Each token such as `xs012` is unique in the file, so a case finds a line by its token, never by
+    its place in the prompt."""
+    rows = (f"{tag}{n:03d} = run_all({n})" if n in named else f"{tag}{n:03d} = {n}" for n in range(1, count + 1))
+    return "\n".join(row.ljust(width, "z") for row in rows) + "\n"
+
+
+def tokens(text, tag):
+    """The distinct `<tag><NNN>` tokens in `text`, in the order they first appear."""
+    return list(dict.fromkeys(re.findall(r"\b%s\d{3}\b" % tag, text)))
+
+
+def excerpt_rows(text, path):
+    """The rows under the excerpt header that names `path`, in order, each without its indent. An excerpt ends at the first
+    line with no indent. [] when the prompt has no such header."""
+    lines = text.split("\n")
+    start = next((i for i, line in enumerate(lines) if line.startswith("  lines of %s " % path)), None)
+    if start is None:
+        return []
+    rows = []
+    for line in lines[start + 1:]:
+        if not line.startswith("    "):
+            break
+        rows.append(line[4:])
+    return rows
+
+
+class ProseJudgePrompt(unittest.TestCase):
+    """merge.prose_judge_prompt for a line that cites nothing and names a path and a name in backticks. No git and no model:
+    the `read` hook serves the text of each path it knows, and every other path reads as missing. The tree is not on disk, so
+    the excerpt can only come through the hook."""
+    WT = os.path.join(os.sep, "no-such-tree-for-prose-judge")
+
+    def prompt(self, by_line, served):
+        reads = []
+
+        def read(wt, backing):
+            reads.append((wt, backing))
+            return served.get(backing)
+        text = merge.prose_judge_prompt(self.WT, "docs/notes/named.md", by_line, read=read)
+        return text, reads
+
+    def test_a_named_path_with_no_cite_gets_the_lines_around_the_name(self):
+        line = "`hooks/x.py` `run_all` returns 3"
+        text, reads = self.prompt({5: (line, [])}, {NAMED: numbered_source("xs", 30, named={12})})
+        self.assertIn("Line 5: " + line, text, "scope: the prompt does not carry the named line")
+        got = tokens(text, "xs")
+        self.assertEqual(got, ["xs%03d" % n for n in range(9, 16)],
+                         "the excerpt of %s is %s, want lines 9 to 15 around the line that holds run_all" % (NAMED, got))
+
+    def test_the_excerpt_is_read_through_the_read_hook_for_the_named_path(self):
+        line = "`hooks/x.py` `run_all` returns 3"
+        text, reads = self.prompt({5: (line, [])}, {NAMED: numbered_source("xs", 30, named={12})})
+        self.assertIn((self.WT, NAMED), reads, "the read hook was never asked for %s at the judged tree: asked for %s" % (NAMED, reads))
+        self.assertTrue(tokens(text, "xs"), "no excerpt of %s came through the read hook" % NAMED)
+
+    def test_an_excerpt_is_at_most_forty_lines_per_path(self):
+        line = "`hooks/x.py` `run_all` returns 3"
+        text, reads = self.prompt({5: (line, [])}, {NAMED: numbered_source("xs", 200, named=range(1, 201))})
+        got = tokens(text, "xs")
+        self.assertGreater(len(got), 0, "no excerpt of %s, so the cap is not seen" % NAMED)
+        self.assertLessEqual(len(got), 40, "the excerpt of %s has %d lines, want at most 40" % (NAMED, len(got)))
+
+    def test_a_named_path_that_is_missing_or_empty_adds_no_excerpt_and_no_error(self):
+        line = "`hooks/missing.py` `hooks/empty.py` `hooks/x.py` `run_all` returns 3"
+        served = {"hooks/empty.py": "", NAMED: numbered_source("xs", 30, named={12})}  # hooks/missing.py is not served at all
+        text, reads = self.prompt({5: (line, [])}, served)
+        self.assertIn("Line 5: " + line, text, "scope: the prompt does not carry the named line")
+        got = tokens(text, "xs")
+        self.assertEqual(got, ["xs%03d" % n for n in range(9, 16)],
+                         "the excerpt of %s is %s, want lines 9 to 15 next to the missing and empty paths" % (NAMED, got))
+
+    def test_a_path_the_line_cites_gets_no_second_excerpt(self):
+        line = "`src/widget.py` `hooks/x.py` `run_all` returns 3 (read src/widget.py:4)"
+        served = {"src/widget.py": numbered_source("ws", 30, named={12}), NAMED: numbered_source("xs", 30, named={12})}
+        text, reads = self.prompt({5: (line, ["read src/widget.py:4"])}, served)
+        self.assertIn("Line 5: " + line, text, "scope: the prompt does not carry the named line")
+        self.assertEqual(tokens(text, "xs"), ["xs%03d" % n for n in range(9, 16)],
+                         "scope: the named excerpt of %s is missing, so the cited path cannot be compared" % NAMED)
+        self.assertIn("ws004 = 4", text, "the cited line ws004 of src/widget.py:4 is missing")
+        self.assertEqual(tokens(text, "ws"), ["ws004"],
+                         "src/widget.py has %s in the prompt, want only its cited line ws004" % tokens(text, "ws"))
+
+    def test_the_stale_verdict_counts_the_code_or_text_shown_below(self):
+        text, reads = self.prompt({3: ("A note with no cite.", [])}, {})
+        self.assertIn("the code or text shown below says otherwise (stale)", text,
+                      "the verdict wording does not count a shown excerpt as text the line can be stale against")
+        self.assertNotIn("the cited text now says otherwise", text, "the verdict wording still names only the cited text")
+
+    def test_an_excerpt_row_longer_than_200_characters_is_cut_to_200_with_a_marker(self):
+        # A one-line file of 250 KB, under the size skip, names run_all on its only line. The row keeps its first 200 characters,
+        # then a marker, and the prompt stays under 12 KB. assertTrue, not assertIn, so a failure does not print the whole prompt.
+        source = "run_all " + "y" * (250 * 1024)
+        line = "`hooks/x.py` `run_all` returns 3"
+        text, reads = self.prompt({5: (line, [])}, {NAMED: source})
+        self.assertTrue(("    1: " + source[:200]) in text, "the excerpt row of %s does not start with the first 200 characters of its line" % NAMED)
+        self.assertFalse(("y" * 201) in text, "the excerpt of %s carries more than 200 characters of its one line" % NAMED)
+        rows = [r for r in excerpt_rows(text, NAMED) if r.startswith("1: ")]
+        self.assertEqual(len(rows), 1, "the excerpt of %s has %d rows for line 1, want one" % (NAMED, len(rows)))
+        self.assertGreater(len(rows[0]), len("1: ") + 200, "the cut row of %s has no marker after its 200 characters" % NAMED)
+        self.assertLess(len(rows[0]), len("1: ") + 200 + 80, "the cut row of %s carries more than a 200-character cut and a marker" % NAMED)
+        size = len(text.encode("utf-8"))
+        self.assertLess(size, 12 * 1024, "the prompt is %d bytes for one 250 KB line, want under 12 KB" % size)
+
+    def test_a_named_file_over_256_kilobytes_gets_no_excerpt_and_a_one_line_note(self):
+        # A one-line file of 2 MB names run_all. Its excerpt is skipped for size, one line of the prompt says so, and the prompt stays under 12 KB.
+        line = "`hooks/x.py` `run_all` returns 3"
+        text, reads = self.prompt({5: (line, [])}, {NAMED: "run_all " + "y" * (2 * 1024 * 1024)})
+        self.assertIn("Line 5: " + line, text, "scope: the prompt does not carry the named line")
+        self.assertFalse(("lines of %s " % NAMED) in text, "the prompt carries an excerpt of %s, a file over 256 KB" % NAMED)
+        notes = [n for n in text.split("\n") if "skipped" in n and "size" in n and NAMED in n]
+        self.assertEqual(len(notes), 1, "the prompt has %d lines that say %s was skipped for size, want one" % (len(notes), NAMED))
+        size = len(text.encode("utf-8"))
+        self.assertLess(size, 12 * 1024, "the prompt is %d bytes for a 2 MB file, want under 12 KB" % size)
+
+    def test_a_named_file_at_256_kilobytes_is_still_excerpted(self):
+        # The size skip starts above 256 KB, so a file of exactly 256 KB keeps its excerpt.
+        line = "`hooks/x.py` `run_all` returns 3"
+        text, reads = self.prompt({5: (line, [])}, {NAMED: "run_all " + "y" * (256 * 1024 - len("run_all "))})
+        self.assertTrue(("lines of %s " % NAMED) in text, "no excerpt of %s, though the file is exactly 256 KB" % NAMED)
+
+    def test_a_path_named_by_many_lines_is_read_once(self):
+        # Three lines name hooks/x.py and two name a path that is not served. Each path is read once in the one prompt build,
+        # and the excerpt of hooks/x.py still reaches the prompt.
+        line = "`hooks/x.py` `run_all` returns 3"
+        missing = "`hooks/missing.py` `run_all` returns 3"
+        by_line = {5: (line, []), 7: (line, []), 9: (line, []), 11: (missing, []), 13: (missing, [])}
+        text, reads = self.prompt(by_line, {NAMED: numbered_source("xs", 30, named={12})})
+        self.assertEqual(reads.count((self.WT, NAMED)), 1,
+                         "the read hook was asked for %s %d times for three lines that name it, want once" % (NAMED, reads.count((self.WT, NAMED))))
+        self.assertEqual(reads.count((self.WT, "hooks/missing.py")), 1,
+                         "the read hook was asked for hooks/missing.py %d times for two lines that name it, want once"
+                         % reads.count((self.WT, "hooks/missing.py")))
+        self.assertEqual(tokens(text, "xs"), ["xs%03d" % n for n in range(9, 16)],
+                         "the excerpt of %s is %s, want lines 9 to 15" % (NAMED, tokens(text, "xs")))
+
+    def test_an_excerpt_cut_by_the_row_cap_ends_with_a_marker_line(self):
+        # Every tenth line of a 200-line file names run_all. The windows do not touch, so the 40-row cap drops the later ones,
+        # and the excerpt ends with a line that says more matches were left out.
+        line = "`hooks/x.py` `run_all` returns 3"
+        text, reads = self.prompt({5: (line, [])}, {NAMED: numbered_source("xs", 200, named=range(10, 201, 10))})
+        rows = excerpt_rows(text, NAMED)
+        numbered = [r for r in rows if re.match(r"\d+: ", r)]
+        self.assertGreater(len(numbered), 0, "no excerpt rows of %s" % NAMED)
+        self.assertLessEqual(len(numbered), 40, "the excerpt of %s has %d numbered rows, want at most 40" % (NAMED, len(numbered)))
+        last = rows[-1] if rows else None
+        self.assertTrue(last is not None and not re.match(r"\d+: ", last) and last != "...",
+                        "the excerpt of %s ends with %r, want a marker line after its last row" % (NAMED, last))
+        self.assertIn("left out", last or "", "the marker line %r does not say more matches were left out" % last)
+
+    def test_an_excerpt_that_fits_the_cap_has_no_marker_line(self):
+        # Ten rows fit under the cap, so the excerpt ends at its last numbered row and no marker follows.
+        line = "`hooks/x.py` `run_all` returns 3"
+        text, reads = self.prompt({5: (line, [])}, {NAMED: numbered_source("xs", 30, named={12})})
+        self.assertEqual(excerpt_rows(text, NAMED)[-1:], ["15: xs015 = 15"], "the excerpt of %s does not end at its last numbered row" % NAMED)
+        self.assertFalse("left out" in text, "the prompt has a marker line though no row of %s was left out" % NAMED)
+
+
+class OrderLock(merge.GitLock):
+    """A GitLock that appends "release" to `events` on each release, so a case can order a model call against it."""
+    events = None
+
+    def release(self, b, token):
+        self.events.append("release")
+        return super().release(b, token)
+
+
+TWO_CITE_DOC = ("# Cloud notes\n\nCloud sessions cannot push to main (read src/widget.py:4).\n\n"
+                "Cloud sessions cannot push to main (read src/widget.py:2).\n")  # the cites are on lines 3 and 5
+OTHER_PROSE = "docs/notes/other.md"  # a second governed file, judged in the same merge
+LANE_A, LANE_B, LANE_C, LANE_D, LANE_E = ["docs/notes/%s.md" % c for c in "abcde"]  # five governed files one range adds, sorted a to e
+THREE_CITE_DOC = ("# Cloud notes\n\nCloud sessions cannot push to main (read src/widget.py:4).\n\n"
+                  "Cloud sessions cannot push to main (read src/widget.py:2).\n\n"
+                  "Cloud sessions cannot push to main (read src/widget.py:3).\n")  # the cites are on lines 3, 5 and 7
+C0_CONTROL = re.compile(r"[\x00-\x08\x0b-\x1f]")  # C0 control characters, but not tab (\x09) or newline (\x0a)
+
+
+def controls(text):
+    """The C0 control characters in `text`, in order."""
+    return C0_CONTROL.findall(text)
+
+
 if __name__ == "__main__":
     if len(sys.argv) == 3 and sys.argv[1] == "--sigchild":
         # A run waiting on its checks for a minute, for a signal to reach. It prints READY once it holds the lock.
@@ -12927,6 +14166,7 @@ if __name__ == "__main__":
                 print("READY", flush=True)
                 time.sleep(60)
                 return True, ""
+        install_model_guard()
         os.chdir(sys.argv[2])
         sys.exit(merge.main(["7", "--confirm"], host=Sleep(sys.argv[2], None), lock=merge.GitLock(sys.argv[2])))
     if len(sys.argv) == 3 and sys.argv[1] == "--child":
@@ -12936,6 +14176,7 @@ if __name__ == "__main__":
                 if prior is not None:  # the wait after the claim push; the head's own wait comes first
                     os._exit(9)
                 return True, ""
+        install_model_guard()
         os.chdir(sys.argv[2])
         sys.exit(merge.main(["7", "--confirm"], host=Die(sys.argv[2], None), lock=merge.GitLock(sys.argv[2])))
     class Slicer(unittest.TestLoader):

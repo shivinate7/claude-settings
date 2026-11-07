@@ -17,7 +17,7 @@ This change changes no behaviour. It fixes stale prose in Markdown records and i
 - **Read on main, hooks.** `settings.json` gives every hook row and timeout. Also `hooks/stall_watch.py`,
   `hooks/ci_wake.py`, `hooks/guard_stream.py`, `hooks/guard_core.py`, `hooks/git_reads.py`,
   `hooks/sendmessage_state.py`, `hooks/question_form.py`, `hooks/mutate_shared.py`, `hooks/decision_watch.py`.
-- **Read on main, lint and janitor.** `lint/report_guard.py`, `lint/md_sweep.py`, `lint/ste_gate.py`,
+- **Read on main, lint and janitor.** `lint/report_guard.py`,
   `lint/check_hook_stubs.py`; `janitor/sweep.py`, `janitor/session_end_sweep.py`,
   `janitor/install_launchd.py`, `janitor/install_schtasks.py`, `janitor/GUIDE.md`.
 - **Read on main, other.** `merge/merge.py`; `bin/ci-job`, `bin/verdict`; `mods/decision-watch/hooks/register.mjs`;
@@ -113,8 +113,6 @@ Nothing here is deleted before its owner question is ruled. Each delete names it
 - **`janitor-runs.jsonl`.** `janitor/sweep.py` line 2238 writes it. Its reader is unchecked. Q5.
 - **Loose-process tier in the hook run.** It reports only. The hook sends its output to DEVNULL (line 257).
   So the run has no reader for it. Its scan cost is unchecked. Q4.
-- **`lint/md_sweep.py` and `lint/ste_gate.py`.** Both are exit-0 stubs. Each stays until
-  `lint/check_hook_stubs.py` allows its removal (checked).
 - **Stall watcher.** Q1. Not in this list until ruled.
 
 ## 5. Lanes, smallest first

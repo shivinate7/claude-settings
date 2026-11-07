@@ -166,6 +166,9 @@ jobs:
       - name: Refusal note agent row suite
         run: python3 hooks/test_refusal_note_agent.py
 
+      - name: Refusal note route row suite
+        run: python3 hooks/test_refusal_note_route.py
+
       - name: Call judge fixture suite
         run: python3 hooks/test_call_judge.py
 
@@ -227,8 +230,17 @@ jobs:
       - name: Stop-hook guard fixture suite
         run: python3 lint/test_report_guard.py
 
+      - name: Stop-hook triage hold suite
+        run: python3 lint/test_report_guard_stalled.py
+
       - name: Stop-hook question route suite
         run: python3 lint/test_report_guard_route.py
+
+      - name: Stop-hook route row falsifier suite
+        run: python3 lint/test_report_guard_falsifier.py
+
+      - name: Stop-hook hand-off cite suite
+        run: python3 lint/test_report_guard_handoff.py
 
       - name: Stop-hook landing fixture suite
         run: python3 lint/test_report_guard_landing.py
@@ -248,6 +260,9 @@ jobs:
 
       - name: Stale prose check fixture suite
         run: python3 lint/test_stale_cites.py
+
+      - name: Route judge measure fixture suite
+        run: python3 lint/test_prove_route_judge.py
 
       - name: Guard log report fixture suite
         run: python3 lint/test_guard_log_report.py
@@ -447,6 +462,9 @@ jobs:
       - name: Silent undo fixture suite
         run: python3 lint/test_check_silent_undo.py
 
+      - name: Debt retire fixture suite
+        run: python3 lint/test_check_debt_retire.py
+
       - name: Silent undo check
         if: ${{ github.event_name == 'pull_request' }}
         env:
@@ -597,6 +615,10 @@ jobs:
         if: ${{ needs.scope.outputs.code == 'true' }}
         run: python3 merge/test_lane_lint.py
 
+      - name: Idle-lanes reader fixture suite
+        if: ${{ needs.scope.outputs.code == 'true' }}
+        run: python3 merge/test_idle_lanes.py
+
       - name: install_from_main suite
         if: ${{ needs.scope.outputs.code == 'true' }}
         run: sh merge/test_install_from_main.sh
@@ -682,6 +704,12 @@ jobs:
         run: |
           python3 --version && git --version
           NODE_PATH="$PWD/.github/shoot/node_modules" node --test skills/waiting-page/tests/page.test.mjs skills/waiting-page/tests/test_check_designs.mjs
+
+      - name: roadmap page suite
+        if: ${{ needs.scope.outputs.shoot == 'true' || github.event_name != 'pull_request' }}
+        shell: bash
+        run: |
+          NODE_PATH="$PWD/.github/shoot/node_modules" node --test skills/roadmap/tests/page.test.mjs
 
   # Windows PowerShell 5.1 is the only shell where Set-Content -Encoding UTF8 writes a BOM.
   # On pwsh 7 the pointer test cannot go red on that defect, so it also runs here.
@@ -878,6 +906,10 @@ jobs:
         if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
         run: python3 hooks/test_refusal_note_agent.py
 
+      - name: Refusal note route row suite
+        if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
+        run: python3 hooks/test_refusal_note_route.py
+
       - name: Call judge fixture suite
         if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
         run: python3 hooks/test_call_judge.py
@@ -929,6 +961,14 @@ jobs:
       - name: Stop-hook question route suite
         if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
         run: python3 lint/test_report_guard_route.py
+
+      - name: Stop-hook route row falsifier suite
+        if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
+        run: python3 lint/test_report_guard_falsifier.py
+
+      - name: Stop-hook hand-off cite suite
+        if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
+        run: python3 lint/test_report_guard_handoff.py
 
       - name: Stop-hook landing fixture suite
         if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
@@ -1487,6 +1527,10 @@ jobs:
         if: ${{ (needs.scope.outputs.checks_windows_rest == 'true' || github.event_name != 'pull_request') && !cancelled() }}
         run: python hooks/test_refusal_note_agent.py
 
+      - name: Refusal note route row suite
+        if: ${{ (needs.scope.outputs.checks_windows_rest == 'true' || github.event_name != 'pull_request') && !cancelled() }}
+        run: python hooks/test_refusal_note_route.py
+
       - name: Call judge fixture suite
         if: ${{ (needs.scope.outputs.checks_windows_rest == 'true' || github.event_name != 'pull_request') && !cancelled() }}
         run: python hooks/test_call_judge.py
@@ -1554,6 +1598,14 @@ jobs:
       - name: Stop-hook question route suite
         if: ${{ (needs.scope.outputs.checks_windows_rest == 'true' || github.event_name != 'pull_request') && !cancelled() }}
         run: python lint/test_report_guard_route.py
+
+      - name: Stop-hook route row falsifier suite
+        if: ${{ (needs.scope.outputs.checks_windows_rest == 'true' || github.event_name != 'pull_request') && !cancelled() }}
+        run: python lint/test_report_guard_falsifier.py
+
+      - name: Stop-hook hand-off cite suite
+        if: ${{ (needs.scope.outputs.checks_windows_rest == 'true' || github.event_name != 'pull_request') && !cancelled() }}
+        run: python lint/test_report_guard_handoff.py
 
       - name: Stop-hook landing fixture suite
         if: ${{ (needs.scope.outputs.checks_windows_rest == 'true' || github.event_name != 'pull_request') && !cancelled() }}
