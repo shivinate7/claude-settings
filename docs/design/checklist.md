@@ -3,7 +3,7 @@
 Copy this list once for each changed screen, at each size and theme it ships in. Mark each line
 pass or fail. A fail is a finding. Give the rule id, the screen, the size and the theme. The rules
 and their checks are in `principles.md`. A line marked (guidance) is advice: its fail is a note, not a
-finding.
+finding. A line marked (not adopted) is no rule: skip it, and file nothing.
 
 Screen: ____ Size: ____ Theme: ____
 
