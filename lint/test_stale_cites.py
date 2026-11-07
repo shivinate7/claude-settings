@@ -1716,6 +1716,19 @@ class RouteClaimTests(StaleCase):
         rng, flagged = self.route_range(rows)
         self.assert_route_claims(rng, flagged)
 
+    def test_route_claim_in_a_fence_four_spaces_deep_under_a_list_item_is_silent(self):
+        # Any indent opens a fence in this module, so the claim inside the four-space fence is no claim. The claim after
+        # the fence is read: the scope control. This pins the verdict as it stands.
+        rows = [
+            ("- Run the step:", False),
+            ("    ```", False),
+            ("    The cloud cannot push to main.", False),  # inside a fence four spaces deep
+            ("    ```", False),
+            ("- The cloud cannot push to main.", True),  # the scope control: the same claim outside the fence
+        ]
+        rng, flagged = self.route_range(rows)
+        self.assert_route_claims(rng, flagged)
+
     def test_route_claim_fires_on_a_code_span_used_as_the_subject_and_skips_only_a_span_holding_the_whole_claim(self):
         rows = [
             ("- `gh` cannot close a pull request.", True),  # the span is the subject; the claim is outside the span

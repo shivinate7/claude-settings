@@ -1540,6 +1540,17 @@ class Supersede(unittest.TestCase):
         self.assertEqual((code, head(out)), (1, "supersede: out - 1 line(s) to read in 1 file(s)"), out)
         self.assertEqual(out.splitlines()[1:], ["  departs, no exemption: CLAUDE.md:%d: The designation is never inherited." % first[3]], out)
 
+    def test_a_departure_in_a_fence_four_spaces_deep_under_a_list_item_is_not_read(self):
+        # Any indent opens a fence in this group, so the departure inside the list item's fence is no unit. The departure
+        # after it is read, at its own line. This pins the verdict as it stands.
+        paragraphs = ("- Run the step:\n    ```text\n    The designation is never inherited.\n    ```",
+                      "The designation is never inherited.")
+        first = self.starts(*paragraphs)
+        code, out = self.child(*paragraphs).run("supersede")
+        self.assertEqual((code, head(out)), (1, "supersede: out - 1 line(s) to read in 1 file(s)"), out)
+        self.assertEqual(out.splitlines()[1:],
+                         ["  departs, no exemption: CLAUDE.md:%d: The designation is never inherited." % first[1]], out)
+
     def test_a_child_lint_exemption_is_not_ours(self):
         # "known exemption" with no rule id is flagged only beside departure wording: a child's own lint exemption is not ours.
         code, out = self.child("`legacy/` is a known exemption from the no-print check.").run("supersede")
