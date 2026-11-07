@@ -1,0 +1,732 @@
+<title>Cockpit 3D Test Copy</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible+Next:wght@400;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<script type="importmap">
+{ "imports": {
+  "three": "https://cdnjs.cloudflare.com/ajax/libs/three.js/0.186.0/three.module.min.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.186.0/examples/jsm/"
+} }
+</script>
+<style>
+/* Layout: a header bar, then the 3D scene beside a fixed detail column on a wide screen; one column on a phone.
+   Tokens are the Cockpit's :root blocks (skills/waiting-page/page.html) plus scene shades made only from them. */
+:root {
+  --surface: #ffffff; --ink: #161b22; --muted: #565f6b; --faint: #5b6470; --line: #d9dee5; --chip: #eef1f4;
+  --holds: var(--r-holds-l, #b3261e); --on-holds: var(--r-on-holds-l, #ffffff); --due: var(--r-due-l, #8a5300); --due-soft: #fbefd9; --calm: #56606e;
+  --good: var(--r-good-l, #1d7445); --good-soft: #e0f2e7; --gold-soft: #fbf3d6; --gold-ink: #6b5000;
+  --ground: var(--r-ground-l, #f3f4f6); --hdr: var(--r-hdr-l, #4b5a6b); --on-hdr: var(--r-on-hdr-l, #ffffff);
+  --acc: var(--r-ink-l, #4b5a6b); --on-acc: #ffffff; --acc-soft: var(--r-soft-l, #eceff3);
+  --body: "Atkinson Hyperlegible Next", "Atkinson Hyperlegible", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  --wm: system-ui, sans-serif; --wmw: 700; --wmls: -0.01em;
+  --r: 10px;
+  /* Scene shades. Light comes from above, so a top face is the lightest in light mode. */
+  --o-top: color-mix(in srgb, var(--acc) 30%, var(--surface)); --o-l: color-mix(in srgb, var(--acc) 68%, var(--surface)); --o-r: var(--acc);
+  --c-top: var(--chip); --c-l: color-mix(in srgb, var(--calm) 22%, var(--surface)); --c-r: color-mix(in srgb, var(--calm) 38%, var(--surface));
+  --d-top: color-mix(in srgb, var(--good) 45%, var(--surface)); --d-l: color-mix(in srgb, var(--good) 75%, var(--surface)); --d-r: var(--good);
+  --p-top: var(--ground); --p-side: var(--line); --edge: color-mix(in srgb, var(--ink) 22%, transparent);
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --surface: #191e26; --ink: #e8ecf1; --muted: #a3adba; --faint: #8b95a2; --line: #2c3440; --chip: #222a35;
+  --holds: var(--r-holds-d, #ff8b7f); --on-holds: var(--r-on-holds-d, #11151b); --due: var(--r-due-d, #f2b55c); --due-soft: #35270f; --calm: #a3adba;
+  --good: var(--r-good-d, #6fcf98); --good-soft: #15301f; --gold-soft: #2f2a14; --gold-ink: #ecd37a;
+  --ground: var(--r-ground-d, #11151b); --hdr: var(--r-hdr-d, #2b3440); --on-hdr: var(--r-on-hdr-d, #ffffff);
+  --acc: var(--r-ink-d, #9fb0c2); --on-acc: #11151b; --acc-soft: var(--r-soft-d, #222a35);
+  --o-top: var(--acc); --o-l: color-mix(in srgb, var(--acc) 62%, var(--surface)); --o-r: color-mix(in srgb, var(--acc) 40%, var(--surface));
+  --c-top: color-mix(in srgb, var(--calm) 34%, var(--surface)); --c-l: color-mix(in srgb, var(--calm) 20%, var(--surface)); --c-r: color-mix(in srgb, var(--calm) 12%, var(--surface));
+  --d-top: var(--good); --d-l: color-mix(in srgb, var(--good) 60%, var(--surface)); --d-r: color-mix(in srgb, var(--good) 38%, var(--surface));
+  --p-top: var(--ground); --p-side: var(--line); --edge: color-mix(in srgb, var(--ink) 18%, transparent);
+  color-scheme: dark } }
+:root[data-theme="dark"] {
+  --surface: #191e26; --ink: #e8ecf1; --muted: #a3adba; --faint: #8b95a2; --line: #2c3440; --chip: #222a35;
+  --holds: var(--r-holds-d, #ff8b7f); --on-holds: var(--r-on-holds-d, #11151b); --due: var(--r-due-d, #f2b55c); --due-soft: #35270f; --calm: #a3adba;
+  --good: var(--r-good-d, #6fcf98); --good-soft: #15301f; --gold-soft: #2f2a14; --gold-ink: #ecd37a;
+  --ground: var(--r-ground-d, #11151b); --hdr: var(--r-hdr-d, #2b3440); --on-hdr: var(--r-on-hdr-d, #ffffff);
+  --acc: var(--r-ink-d, #9fb0c2); --on-acc: #11151b; --acc-soft: var(--r-soft-d, #222a35);
+  --o-top: var(--acc); --o-l: color-mix(in srgb, var(--acc) 62%, var(--surface)); --o-r: color-mix(in srgb, var(--acc) 40%, var(--surface));
+  --c-top: color-mix(in srgb, var(--calm) 34%, var(--surface)); --c-l: color-mix(in srgb, var(--calm) 20%, var(--surface)); --c-r: color-mix(in srgb, var(--calm) 12%, var(--surface));
+  --d-top: var(--good); --d-l: color-mix(in srgb, var(--good) 60%, var(--surface)); --d-r: color-mix(in srgb, var(--good) 38%, var(--surface));
+  --p-top: var(--ground); --p-side: var(--line); --edge: color-mix(in srgb, var(--ink) 18%, transparent);
+  color-scheme: dark }
+
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+body { margin: 0; background: var(--ground); color: var(--ink); font: 16px/1.55 var(--body); }
+button { font: inherit; color: inherit; }
+a { color: var(--acc); }
+:focus-visible { outline: 2px solid var(--acc); outline-offset: 2px; }
+h1, h2, h3 { text-wrap: balance; margin: 0; }
+p { margin: 0; }
+.in { max-width: 1320px; margin: 0 auto; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+
+/* Repo bar, as on the Cockpit. */
+.hdr { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 7; background: var(--hdr); color: var(--on-hdr); }
+.hdr .in { padding-block: 6px; min-height: 44px; display: flex; align-items: center; gap: 12px; }
+.mark { flex: none; width: 28px; height: 28px; border-radius: 7px; background: var(--on-hdr); color: var(--hdr); display: grid; place-items: center; font: 800 15px/1 var(--wm); }
+.who { min-width: 0; display: flex; align-items: baseline; gap: 10px; }
+.who .repo { margin: 0; font: var(--wmw) 18px/1.2 var(--wm); letter-spacing: var(--wmls); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.who .copy { flex: none; font-size: 13px; font-weight: 600; padding: 0 8px; border: 1.5px solid currentColor; border-radius: 999px; line-height: 20px; }
+.lede { padding-block: 12px 4px; font-size: 14.5px; color: var(--muted); max-width: 70ch; }
+
+/* State shapes: the Cockpit's, plus doing and to-do for roadmap steps. */
+.g { display: inline-block; flex: none; width: 12px; height: 12px; }
+.g.calm { border: 2px solid var(--calm); border-radius: 50%; }
+.g.done { background: var(--good); border-radius: 50%; position: relative; }
+.g.done::after { content: ""; position: absolute; left: 4px; top: 1.5px; width: 3px; height: 6px; border: solid var(--surface); border-width: 0 2px 2px 0; transform: rotate(45deg); }
+.g.doing { background: var(--acc); border-radius: 2px; }
+.g.todo { border: 2px dashed var(--calm); border-radius: 2px; }
+
+.main3 { padding-block: 12px 40px; display: grid; gap: 16px; grid-template-columns: minmax(0, 1fr) 360px; grid-template-areas: "bar detail" "scene detail" "legend detail" "list detail"; align-items: start; }
+.bar3 { grid-area: bar; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; min-width: 0; }
+#scene { grid-area: scene; }
+.legend { grid-area: legend; }
+.plain { grid-area: list; }
+.detail { grid-area: detail; position: sticky; top: calc(env(safe-area-inset-top, 0px) + 60px); scroll-margin-top: calc(env(safe-area-inset-top, 0px) + 60px); min-width: 0; }
+@media (max-width: 960px) {
+  .main3 { grid-template-columns: minmax(0, 1fr); grid-template-areas: "bar" "scene" "detail" "legend" "list"; }
+  .detail { position: static; }
+}
+
+/* View switch. The pressed button shows by a border, so it holds in forced colours. */
+.views { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 2px; padding: 3px; background: var(--chip); border-radius: 11px; min-width: 0; }
+@media (max-width: 400px) { .views button { padding-inline: 8px !important; } }
+.views button { min-height: 40px; padding: 4px 12px; font-size: 14.5px; border: 1px solid transparent; border-radius: 8px; background: transparent; color: var(--muted); font-weight: 600; cursor: pointer; white-space: nowrap; }
+.views button[aria-pressed="true"] { background: var(--surface); color: var(--ink); border-color: var(--line); }
+.btn { min-height: 44px; padding: 0 14px; border: 1.5px solid var(--line); border-radius: var(--r); background: var(--surface); color: var(--ink); font-weight: 600; font-size: 14.5px; cursor: pointer; }
+.btn:hover { border-color: var(--acc); }
+.btn.quiet { border-color: transparent; background: none; color: var(--acc); padding-inline: 4px; }
+
+/* The scene box. Its height fits the visible screen: vh first, svh after it. */
+#scene { position: relative; height: 62vh; height: clamp(420px, 62svh, 660px); background: var(--surface); border: 1px solid var(--line); border-radius: 14px; overflow: hidden; min-width: 0; }
+@media (max-width: 960px) { #scene { height: 56vh; height: clamp(320px, 56svh, 460px); } }
+#scene:focus-visible { outline-offset: -3px; }
+#scene canvas { display: block; width: 100%; height: 100%; touch-action: pan-y; user-select: none; cursor: grab; }
+#scene canvas.drag { cursor: grabbing; }
+#scene canvas.over { cursor: pointer; }
+.hint { position: absolute; left: 10px; bottom: 10px; max-width: calc(100% - 128px); padding: 4px 10px; border-radius: 8px; font-size: 13px; line-height: 1.4; color: var(--muted); background: color-mix(in srgb, var(--surface) 88%, transparent); border: 1px solid var(--line); pointer-events: none; }
+.hint .kb { display: none; }
+#scene:focus-visible .hint .kb { display: inline; }
+#scene:focus-visible .hint .pt { display: none; }
+.zoom { position: absolute; right: 10px; bottom: 10px; display: flex; gap: 6px; }
+.zoom button { width: 44px; height: 44px; border-radius: var(--r); border: 1.5px solid var(--line); background: var(--surface); color: var(--ink); font: 600 20px/1 var(--mono); cursor: pointer; }
+.zoom button:hover { border-color: var(--acc); }
+
+/* Labels drawn over the canvas. They are for sighted use only; the list below holds the same words. */
+.labels { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
+.lb { position: absolute; left: 0; top: 0; white-space: nowrap; will-change: transform; }
+.lb.pill { font: 600 12px/20px var(--mono); padding: 0 7px; background: var(--surface); color: var(--ink); border: 1px solid var(--line); border-radius: 6px; font-variant-numeric: tabular-nums; }
+.lb.sel { font: 700 13px/24px var(--body); padding: 0 9px; background: var(--ink); color: var(--surface); border: 1px solid var(--ink); border-radius: 6px; max-width: calc(100% - 12px); overflow: hidden; text-overflow: ellipsis; }
+.lb.lead { width: 1.5px; background: var(--ink); }
+.lb.gt { font: 700 12.5px/1.2 var(--body); color: var(--muted); text-shadow: 0 0 3px var(--surface), 0 0 3px var(--surface), 0 0 3px var(--surface), 0 0 3px var(--surface); }
+.lb.gt .ct { font: 600 12px var(--mono); }
+
+/* Notices over or in place of the scene. */
+.notice { position: absolute; inset: 0; display: grid; place-content: center; gap: 10px; padding: 24px; text-align: center; background: color-mix(in srgb, var(--surface) 72%, transparent); }
+.notice b { font-size: 17px; }
+.notice p { color: var(--muted); max-width: 42ch; font-size: 15px; }
+.notice .btn { justify-self: center; }
+#scene.dim canvas { opacity: .35; }
+#scene.busy .zoom, #scene.busy .hint, #scene.busy .labels { display: none; }
+.bar3 button:disabled { opacity: .5; cursor: default; }
+#scene.nogl { height: auto; padding: 18px; display: grid; gap: 8px; border-style: dashed; }
+#scene.nogl b { font-size: 17px; }
+#scene.nogl p { color: var(--muted); max-width: 60ch; }
+.load i { justify-self: center; width: 160px; height: 6px; border-radius: 99px; background: var(--chip); overflow: hidden; display: block; position: relative; }
+.load i::after { content: ""; position: absolute; inset: 0 60% 0 0; background: var(--acc); border-radius: 99px; }
+@media (prefers-reduced-motion: no-preference) { .load i::after { animation: slide 1.2s ease-in-out infinite alternate; } }
+@keyframes slide { to { inset: 0 0 0 60%; } }
+
+/* Legend: one row per object type, small isometric pictures that follow the theme. */
+.legend { border: 1px solid var(--line); border-radius: 12px; background: var(--surface); min-width: 0; }
+.legend summary { cursor: pointer; min-height: 44px; display: flex; align-items: center; gap: 8px; padding: 0 14px; font-weight: 700; font-size: 15px; }
+.legend .lg { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 200px), 1fr)); gap: 4px 16px; padding: 4px 14px 14px; }
+.legend .lgi { display: flex; align-items: center; gap: 10px; font-size: 14px; min-width: 0; }
+.legend .lgi svg { flex: none; }
+.legend h3 { grid-column: 1 / -1; font: 600 13px var(--body); color: var(--muted); padding-top: 6px; }
+.ob polygon, .ob path.f, .ob ellipse { stroke: var(--edge); stroke-width: .75; stroke-linejoin: round; }
+.ob.open .t, .ob.doing .t { fill: var(--o-top); } .ob.open .l, .ob.doing .l { fill: var(--o-l); } .ob.open .r, .ob.doing .r { fill: var(--o-r); }
+.ob.closed .t { fill: var(--c-top); } .ob.closed .l { fill: var(--c-l); } .ob.closed .r { fill: var(--c-r); }
+.ob.done .t { fill: var(--d-top); } .ob.done .l { fill: var(--d-l); } .ob.done .r { fill: var(--d-r); }
+.ob.todo .t, .ob.todo .l, .ob.todo .r { fill: var(--surface); }
+.ob.todo polygon { stroke: var(--calm); stroke-width: 1.5; stroke-dasharray: 4 3; }
+.ob.post .t, .ob.post .l, .ob.post .r { fill: var(--muted); }
+.ob .ck { fill: none; stroke: var(--good); stroke-width: 2.5; stroke-linecap: round; stroke-linejoin: round; }
+.ob.done .ck { stroke: var(--surface); }
+
+/* Plain list: the scene's text equivalent, and the whole page when there is no 3D. */
+.plain { display: grid; gap: 18px; min-width: 0; }
+.plain > h2 { font: 700 19px/1.25 var(--body); }
+.plain h3 { font: 700 16px var(--body); display: flex; align-items: center; gap: 8px; }
+.plain h3 .ct, .plain h4 .ct { font: 600 13px var(--mono); color: var(--muted); }
+.plain h4 { font: 600 14px var(--body); color: var(--muted); margin: 6px 0 0; display: flex; gap: 8px; }
+.grp { display: grid; gap: 6px; min-width: 0; }
+.rows { list-style: none; margin: 0; padding: 0; display: grid; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); overflow: hidden; }
+.rows li + li { border-top: 1px solid var(--line); }
+.row { width: 100%; min-height: 44px; display: grid; grid-template-columns: 14px 4.5ch minmax(0, 1fr) auto; gap: 10px; align-items: center; padding: 6px 12px; border: 0; background: none; text-align: left; cursor: pointer; font-size: 15px; }
+.row.step { grid-template-columns: 14px minmax(0, 1fr); }
+.row:hover { background: var(--acc-soft); }
+.row[aria-pressed="true"] { background: var(--acc-soft); box-shadow: inset 4px 0 0 var(--acc); }
+.row .num { font: 600 14px var(--mono); color: var(--acc); font-variant-numeric: tabular-nums; }
+.row .tx { min-width: 0; overflow-wrap: anywhere; }
+.row .kd { font-size: 13px; color: var(--muted); }
+.row .id { display: block; font: 12.5px var(--mono); color: var(--muted); overflow-wrap: anywhere; }
+
+/* The Cockpit's card, read-only. */
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: clamp(16px, 2.4vw, 24px); display: grid; gap: 14px; align-content: start; min-width: 0; }
+.top { display: flex; flex-wrap: wrap; gap: 4px 14px; align-items: center; font-size: 14px; color: var(--muted); }
+.top .num { font: 600 15px var(--mono); color: var(--acc); }
+.top .st { display: inline-flex; align-items: center; gap: 6px; color: var(--ink); font-weight: 600; }
+.title { font: 700 clamp(19px, 2vw, 22px)/1.3 var(--body); max-width: 40ch; overflow-wrap: anywhere; }
+.opts { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; }
+.opt { display: grid; gap: 8px; padding: 14px; border: 1.5px solid var(--line); border-radius: var(--r); background: var(--surface); }
+.opt .head { display: flex; gap: 10px; align-items: flex-start; min-width: 0; }
+.key { flex: none; min-width: 26px; height: 26px; padding-inline: 6px; border-radius: 7px; border: 1.5px solid var(--line); text-align: center; font: 600 13px/23px var(--mono); color: var(--muted); }
+.opt .lab { min-width: 0; overflow-wrap: anywhere; font-weight: 700; line-height: 1.3; padding-top: 2px; }
+.opt .pick { display: grid; grid-template-columns: auto 1fr; align-items: start; gap: 8px; padding: 8px 10px; border-radius: 8px; background: var(--gold-soft); color: var(--ink); font-size: 14px; }
+.opt .pick b { display: inline-flex; padding-top: 1px; color: var(--gold-ink); }
+.multihint, .about { font-size: 14.5px; color: var(--muted); }
+ol.steps { margin: 0; padding-left: 22px; display: grid; gap: 4px; min-width: 0; overflow-wrap: anywhere; }
+.acts { display: flex; flex-wrap: wrap; gap: 8px; }
+.sum { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; font-size: 15px; }
+.sum li { display: flex; align-items: center; gap: 8px; }
+.sum b { font-variant-numeric: tabular-nums; }
+
+@media (forced-colors: active) { .row[aria-pressed="true"] { outline: 2px solid CanvasText; outline-offset: -2px; } }
+@media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto !important; } }
+</style>
+
+<header class="hdr"><div class="in"><div class="mark" aria-hidden="true">c</div><div class="who"><h1 class="repo">claude-settings</h1><span class="copy">3D test copy</span></div></div></header>
+<div class="in"><p class="lede">The Cockpit's items and roadmap steps, drawn as objects you can turn and pick. This copy only shows. Answer items on the Cockpit. Read Nov 6, 2026.</p></div>
+<noscript><div class="in"><p class="lede">This page needs JavaScript to draw the scene and the list.</p></div></noscript>
+<main class="in main3" id="app"></main>
+
+<script type="application/json" id="data">{"source":"roadmap branch, waiting/ export, read 2026-11-06. Trimmed static sample.","items":[{"n":281,"kind":"decision","status":"open","title":"The 10-message stop on your Mac is Claude Code's own limit. Ask Anthropic for a setting?","short":"10-message stop: ask Anthropic?","rank":4,"group":null,"added":"2026-11-06T18:49:30Z","options":["Live with it, and send feedback","Live with it only"],"steps":[],"pick":"a"},{"n":280,"kind":"decision","status":"open","title":"mailaudit: can a Reset be undone from the Recent list?","short":"mailaudit: undo a Reset from Recent?","rank":3,"group":null,"added":"2026-11-06T18:47:30Z","options":["Reset gets a Recent row","Keep Reset out of Recent"],"steps":[],"pick":"a"},{"n":279,"kind":"decision","status":"open","title":"Which ways of adding an independent agent that argues back should we adopt?","short":"Independent pushback: which to adopt","rank":3,"group":null,"added":"2026-11-06T18:43:00Z","options":["Blind reviewer brief","Replay cases for each judge","Guard fix check on sonnet","Blind plan refuter"],"steps":[],"pick":["a","b","c","d"]},{"n":278,"kind":"decision","status":"open","title":"Which auto-mode allow lines should land?","short":"Auto-mode allow lines","rank":3,"group":null,"added":"2026-11-06T18:40:00Z","options":["Cancel a CI run of your own","Delete a check-in of your own"],"steps":[],"pick":null},{"n":277,"kind":"decision","status":"open","title":"Which page should the first 3D test copy port: this Cockpit page, or another one?","short":"3D test copy: which page","rank":4,"group":null,"added":"2026-11-06T18:37:00Z","options":["The Cockpit page, as a separate test copy","Another page (say which in your note)"],"steps":[],"pick":"a"},{"n":276,"kind":"decision","status":"open","title":"Should every check fail in CI when it can't read its input, and should your stale-cites-at-merge ruling be rewritten to…","short":"One rule for an unknown read","rank":1,"group":null,"added":"2026-11-06T18:33:00Z","options":["Grant: one rule, and rewrite line 18","Keep line 18 as written"],"steps":[],"pick":"a"},{"n":275,"kind":"decision","status":"open","title":"Style lint: when it can't read the base commit, fail it, pass a shallow clone, or fetch the full history first?","short":"Style lint, unreadable base","rank":2,"group":null,"added":"2026-11-06T18:08:00Z","options":["Fail whenever the base can't be read","Pass a shallow clone, fail anything else","Fetch the full history once, then fail"],"steps":[],"pick":"c"},{"n":274,"kind":"decision","status":"open","title":"Who archives finished lane sessions: the batch runner, a janitor session, or the coordinator?","short":"Who archives lanes","rank":2,"group":null,"added":"2026-11-06T17:37:00Z","options":["The batch runner archives, from a worked-out list","A standing janitor session","The coordinator archives its own lanes"],"steps":[],"pick":"a"},{"n":272,"kind":"decision","status":"open","title":"Swift layout rule: add a check and narrow it, file debts, or retire it?","short":"Swift layout rule","rank":3,"group":null,"added":"2026-11-06T17:34:00Z","options":["Narrow it and add a check","Keep it as written, one debt per app","Retire the Swift section"],"steps":[],"pick":"a"},{"n":271,"kind":"decision","status":"open","title":"Does a fix check follow a FAIL in any review round, or only round 3?","short":"fix check: after round 3 only?","rank":3,"group":null,"added":"2026-11-05T22:12:00Z","options":["A fix check only after round 3","A fix check after any round's FAIL"],"steps":[],"pick":null},{"n":273,"kind":"task","status":"open","title":"Test whether sessions on your Mac, PC and the cloud can message each other","short":"Cross-machine message test","rank":3,"group":null,"added":"2026-11-06T17:36:00Z","options":[],"steps":["Turn on Remote Control on your Mac and on your PC: in the Claude desktop app, Settings, Claude Code…","On the Mac, in a Claude Code session, type /list-agents. Check that the PC session and at least one…","From the PC session, send the Mac session a message, and send one back.","From a cloud session, send the PC session a message (a cloud session uses send_message).","From the Mac, send a cloud session a message."],"pick":null},{"n":262,"kind":"task","status":"open","title":"Add the own-branch lease-push line to settings.json on GitHub","short":"settings: own-branch lease push","rank":2,"group":null,"added":"2026-11-05T13:55:00Z","options":[],"steps":["Open the settings.json edit link below.","Under \"autoMode\" → \"allow\", find the \"Archived Branch Delete\" entry and paste the line right after …","Press \"Commit changes\", choose \"Create a new branch and start a pull request\", and confirm.","Mark done."],"pick":null},{"n":240,"kind":"task","status":"open","title":"Republish the banchi, degen, home and mailaudit Cockpits from main, signed in to your other account","short":"Republish 4 Cockpits","rank":2,"group":null,"added":"2026-11-04T06:35:00Z","options":[],"steps":["Open a Claude Code session signed in to the account that owns these four pages.","Paste this prompt and send it: For each of these Cockpit pages, run the waiting-page skill's \"Keep …","Reply here when it reports, or let that session's report stand."],"pick":null},{"n":91,"kind":"task","status":"open","title":"Put your Apple account ids in the Mac account file","short":"","rank":2,"group":null,"added":"2026-10-30T00:49:00Z","options":[],"steps":["Open the Claude app on your Mac and start a local Claude Code session.","Paste this prompt and send it: Work in my degen checkout (clone shivinate7/degen if missing). Read …","Done when that session prints the five key names: team_id, device_udid, asc_key_id, asc_issuer_id, …"],"pick":null},{"n":269,"kind":"task","status":"closed","title":"Rebuild the cloud environment snapshot","short":"rebuild cloud env snapshot","rank":3,"group":null,"added":"2026-11-05T18:05:00Z","options":[],"steps":["In any cloud session, open the environment menu in the session's title bar.","Choose Edit, then Setup script.","Save with no change; that rebuilds the snapshot.","Mark done. It is done when a new session starts without the EXECPATH line."],"pick":null},{"n":267,"kind":"task","status":"closed","title":"Add the Relayed Grant line to settings.json on GitHub","short":"settings: Relayed Grant line","rank":2,"group":null,"added":"2026-11-05T16:27:00Z","options":[],"steps":["Open the settings.json edit link below.","Under \"autoMode\" → \"allow\", find the \"Archived Branch Delete\" entry and paste the line right after …","Press \"Commit changes\", choose \"Create a new branch and start a pull request\", and confirm.","Mark done."],"pick":null},{"n":263,"kind":"task","status":"closed","title":"Type your word in lane review-fix-check (232)","short":"type 232 a in 1 lane","rank":2,"group":null,"added":"2026-11-05T13:55:00Z","options":[],"steps":["Open lane review-fix-check (link below) and type: 232 a","Mark done."],"pick":null},{"n":257,"kind":"decision","status":"closed","title":"Lease pushes: auto mode refuses a lane's fix to its own branch. Allow it, leave it, or remove the cause?","short":"Lease push refusals: allow, leave, or fix cause?","rank":30,"group":null,"added":"2026-11-04T23:56:00Z","options":["Bash allow rule for the lease push (Goes against your ruling: a repo changes to…","Leave it as it is","Auto-mode prose allow entry (Goes against your ruling: a repo changes to fit a …","Remove the cause in the red-run check"],"steps":[],"pick":null},{"n":255,"kind":"decision","status":"closed","title":"When a fix after the last review round edits a guard or a check, does it owe the net-value test again?","short":"Post-round-3 guard fix: net-value again?","rank":3,"group":null,"added":"2026-11-04T13:59:30Z","options":["No: the fix check is enough","Yes: judge net value again on the fixed head"],"steps":[],"pick":"a"},{"n":254,"kind":"task","status":"closed","title":"Type go in lane review-fix-check","short":"Type go in lane review-fix-check","rank":1,"group":null,"added":"2026-11-04T13:58:30Z","options":[],"steps":["Open the lane's session (link on the Cockpit).","Type: go"],"pick":null}],"steps":[{"id":"craft-book","title":"shivpedia: what a session learns in one repo, the next repo starts with","phase":"cleanup","status":"doing","order":102.7},{"id":"c55","title":"The roadmap gets re-weighed as a whole, and notes stay short","phase":"cleanup","status":"todo","order":103.2},{"id":"local-folder-for-owner-acts","title":"A session on shiv's Mac runs the acts the cloud refuses: protection writes, branch deletes, closing his PRs","phase":"cleanup","status":"todo","order":103.21},{"id":"roadmap-live-check-true","title":"The roadmap's in-progress check sees every live lane","phase":"cleanup","status":"doing","order":103.21001},{"id":"roadmap-one-writer","title":"Only triage pushes to the roadmap branch","phase":"cleanup","status":"doing","order":103.21002},{"id":"question-checks-past-rulings","title":"Before a question reaches the owner, past rulings on it are found and cited","phase":"cleanup","status":"doing","order":103.21003},{"id":"install-log-offset","title":"install.sh and install.ps1 write log times with their UTC offset","phase":"cleanup","status":"doing","order":103.21004},{"id":"glossary-meets-owner-halfway","title":"Sessions read the owner's words by meaning and answer in the glossary term","phase":"cleanup","status":"doing","order":103.21005},{"id":"sim-machine-lock","title":"Every simulator boot on the Mac goes through one machine-wide lock","phase":"cleanup","status":"doing","order":103.21006},{"id":"sim-crash-loop-stop","title":"sim-test stops a simulator that is crash-looping","phase":"cleanup","status":"doing","order":103.21007},{"id":"inbox-roadmap-task-home","title":"The feedback inbox accepts a roadmap step as a task home","phase":"cleanup","status":"todo","order":103.21008},{"id":"comment-narration-patterns","title":"The comment check catches history phrases and lets dated or rounding why-comments pass","phase":"cleanup","status":"todo","order":103.21009},{"id":"merge-ignores-superseded-runs","title":"The merge tool judges each check by the newest run on the head","phase":"cleanup","status":"doing","order":103.2101},{"id":"merge-tool-stale-run-unknown","title":"The merge tool clears a cancelled scheduled run on an older main once a newer run passed","phase":"cleanup","status":"todo","order":103.210101},{"id":"red-main-same-sha-green","title":"The merge tool clears a red run on main when a newer run on the same commit passed","phase":"cleanup","status":"todo","order":103.210102},{"id":"time-pinned-tests-go","title":"Tests that pass or fail on clock speed become outcome checks, then CI caps return to measured","phase":"cleanup","status":"doing","order":103.21011},{"id":"handoff-checkpoint-before-cloud-compact","title":"The last handoff checkpoint comes before the cloud compacts","phase":"cleanup","status":"todo","order":103.21012},{"id":"cc-update-behavior-diff","title":"A Claude Code update that changes compaction is caught and reported","phase":"cleanup","status":"todo","order":103.21013},{"id":"c178","title":"home drops its uncalled copy of degen's LAN check","phase":"rollout","status":"done","order":304.6},{"id":"cloud-refresh-clone","title":"A cloud session on a child repo gets claude-settings with its git history, so compliance-check can name the p…","phase":"cleanup","status":"done","order":309.5},{"id":"r1","title":"Run compliance-check on each child repo","phase":"rollout","status":"done","order":310},{"id":"l2","title":"Add a second design opinion","phase":"later","status":"done","order":420},{"id":"c8","title":"Try the sandbox on your Mac","phase":"later","status":"done","order":450},{"id":"c9","title":"Optional: fail a guard rule with no test","phase":"later","status":"done","order":460}]}</script>
+<script type="module">
+/* ============================================================
+   Data: items in the Cockpit's order (rank first, then newest), steps by phase, then order.
+   ============================================================ */
+const D = JSON.parse(document.getElementById("data").textContent);
+const $ = (s, r = document) => r.querySelector(s);
+const esc = (s) => String(s == null ? "" : s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const LETTERS = "abcdefghijklmnopqrstuvwxyz";
+const byRank = (a, b) => a.rank - b.rank || b.n - a.n;
+const items = D.items.map((it) => ({ ...it, id: "i" + it.n, name: it.short || it.title }));
+const openD = items.filter((i) => i.status === "open" && i.kind === "decision").sort(byRank);
+const openT = items.filter((i) => i.status === "open" && i.kind === "task").sort(byRank);
+const closedD = items.filter((i) => i.status === "closed" && i.kind === "decision").sort(byRank);
+const closedT = items.filter((i) => i.status === "closed" && i.kind === "task").sort(byRank);
+const firstOrder = {};
+D.steps.forEach((s) => { firstOrder[s.phase] = Math.min(firstOrder[s.phase] ?? Infinity, s.order); });
+const PHASES = Object.keys(firstOrder).sort((a, b) => firstOrder[a] - firstOrder[b]);
+const steps = D.steps.slice().sort((a, b) => PHASES.indexOf(a.phase) - PHASES.indexOf(b.phase) || a.order - b.order).map((s, i) => ({ ...s, key: "s:" + s.id, idx: i, step: true }));
+const ORDER = [...openD, ...openT, ...closedD, ...closedT].map((i) => i.id).concat(steps.map((s) => s.key));
+const byId = {}; items.forEach((i) => (byId[i.id] = i)); steps.forEach((s) => (byId[s.key] = s));
+const STEPWORD = { done: "Done", doing: "Doing", todo: "To do" };
+const phone = () => innerWidth <= 960;
+let sel = null;
+let view = phone() ? "items" : "all";
+
+/* ============================================================
+   World: one place for every object. x and y are the floor; z is up. An item's footprint is 1 x 1;
+   one slab is one option (decision) or one step (task). Status floors: open items stand on a raised
+   floor in front, closed ones on a dashed shelf behind it. Shape gives the kind.
+   ============================================================ */
+const SLAB = 0.3, GAP = 0.06, PITCH = 1.7;
+function stack(it, x, y, shape) {
+  const n = Math.max(1, it.options.length || it.steps.length);
+  return { id: it.id, x, y, w: 1, d: 1, z0: 0, slabs: n, shape, cls: it.status, lab: String(it.n) };
+}
+function plat(x0, y0, x1, y1, cls, text, count) {
+  return { x: x0, y: y0, w: x1 - x0, d: y1 - y0, z0: cls === "plat" ? -0.14 : -0.04, h: cls === "plat" ? 0.14 : 0.04, cls, tag: text ? { text, count } : null };
+}
+function road(ox, oy, perRow) {
+  const out = [], pts = [];
+  let prev = null;
+  steps.forEach((s, i) => {
+    const row = Math.floor(i / perRow), c = i % perRow, col = row % 2 ? perRow - 1 - c : c;
+    const x = ox + col * 1.2, y = oy + row * 1.7;
+    const h = s.status === "doing" ? 0.5 : s.status === "done" ? 0.14 : 0.06;
+    out.push({ id: s.key, x, y, w: 0.8, d: 0.8, z0: 0, h, cls: s.status, step: true });
+    pts.push([x + 0.4, y + 0.4]);
+    if (s.phase !== prev) {
+      const n = steps.filter((t) => t.phase === s.phase).length;
+      out.push({ x: x + (row % 2 ? 0.95 : -0.35), y: y - 0.35, w: 0.16, d: 0.16, z0: 0, h: 1.5, cls: "post", tag: { text: s.phase, count: n, top: true } });
+      prev = s.phase;
+    }
+  });
+  return { objs: out, pts };
+}
+function buildWorld() {
+  const objs = [];
+  const open = [...openD, ...openT], closed = [...closedD, ...closedT];
+  objs.push(plat(-0.6, -0.6, 4 * PITCH + 1.6, 2 * PITCH + 1.6, "plat", "Open", open.length));
+  objs.push(plat(-0.6, -6.6, 2 * PITCH + 1.6, -2.7, "shelf", "Closed", closed.length));
+  open.forEach((it, i) => objs.push(stack(it, (i % 5) * PITCH, Math.floor(i / 5) * PITCH, it.kind === "task" ? "cyl" : "box")));
+  closed.forEach((it, i) => objs.push(stack(it, (i % 3) * PITCH, -6.0 + Math.floor(i / 3) * PITCH, it.kind === "task" ? "cyl" : "box")));
+  const r = road(10.4, -5.6, 7); objs.push(...r.objs);
+  return { objs, pts: r.pts };
+}
+const WORLD = buildWorld();
+const objH = (o) => (o.h != null ? o.h : o.slabs * (SLAB + GAP) - GAP);
+
+/* ============================================================
+   Detail card, read-only, and the plain list. Both work with no WebGL.
+   ============================================================ */
+const sparkle = '<b aria-label="My pick" title="My pick"><svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" focusable="false"><path d="M10 4c.7 4.6 2.9 6.8 7.5 7.5-4.6.7-6.8 2.9-7.5 7.5-.7-4.6-2.9-6.8-7.5-7.5C7.1 10.8 9.3 8.6 10 4z"/><path d="M19 2.5c.3 1.8 1 2.5 2.8 2.8-1.8.3-2.5 1-2.8 2.8-.3-1.8-1-2.5-2.8-2.8 1.8-.3 2.5-1 2.8-2.8z"/></svg></b>';
+let nogl = false;
+function when(iso) {
+  const p = new Intl.DateTimeFormat("en-US", { timeZone: "America/Chicago", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", hourCycle: "h23", timeZoneName: "short" }).formatToParts(new Date(iso));
+  const g = (t) => (p.find((x) => x.type === t) || {}).value;
+  return g("month") + " " + g("day") + ", " + g("hour") + ":" + g("minute") + " " + g("timeZoneName");
+}
+function detailHtml() {
+  const acts = (center) => `<div class="acts">${center && !nogl ? '<button class="btn" type="button" data-act="center">Center on it</button>' : ""}<button class="btn quiet" type="button" data-act="clear">Clear</button></div>`;
+  if (!sel) {
+    const st = (k) => steps.filter((s) => s.status === k).length;
+    return `<article class="card" aria-labelledby="dh"><h2 class="title" id="dh">Nothing picked</h2>
+      <ul class="sum">
+        <li><i class="g calm"></i><span><b>${openD.length + openT.length}</b> open items: ${openD.length} decisions, ${openT.length} tasks</span></li>
+        <li><i class="g done"></i><span><b>${closedD.length + closedT.length}</b> closed items</span></li>
+        <li><i class="g" aria-hidden="true"></i><span><b>${steps.length}</b> roadmap steps: ${st("done")} done, ${st("doing")} doing, ${st("todo")} to do</span></li>
+      </ul>
+      <p class="about">${nogl ? "Pick a row in the list to see it here." : "Press a block or a tile, or a row in the list, to see it here."}</p>
+      <div class="acts"><button class="btn" type="button" data-act="first">Show the top item</button></div></article>`;
+  }
+  const it = byId[sel];
+  if (it.step) {
+    const inPhase = steps.filter((s) => s.phase === it.phase), pos = inPhase.indexOf(it) + 1;
+    return `<article class="card" aria-labelledby="dh"><div class="top"><span class="num">${esc(it.id)}</span><span class="st"><i class="g ${it.status}"></i>${STEPWORD[it.status]}</span><span>Roadmap step</span></div>
+      <h2 class="title" id="dh">${esc(it.title)}</h2>
+      <p class="about">Step ${pos} of ${inPhase.length} in the ${esc(it.phase)} phase, and ${it.idx + 1} of ${steps.length} on the whole path.</p>${acts(true)}</article>`;
+  }
+  const picks = it.pick == null ? [] : Array.isArray(it.pick) ? it.pick : [it.pick];
+  const multi = Array.isArray(it.pick);
+  const top = `<div class="top"><span class="num">No. ${it.n}</span><span class="st"><i class="g ${it.status === "open" ? "calm" : "done"}"></i>${it.status === "open" ? "Open" : "Closed"}</span><span>${it.kind === "task" ? "Task" : "Decision"}</span><span>Added ${when(it.added)}</span></div>`;
+  let body = "";
+  if (it.kind === "decision") {
+    const hint = multi ? `<p class="multihint">More than one can be picked. My pick is ${picks.length === it.options.length ? "all " + ["", "one", "two", "three", "four", "five"][picks.length] : picks.map((k) => k.toUpperCase()).join(", ")}.</p>` : !picks.length ? '<p class="multihint">No pick from me on this one.</p>' : "";
+    body = hint + `<div class="opts">${it.options.map((o, i) => {
+      const k = LETTERS[i], pi = picks.indexOf(k);
+      return `<div class="opt"><div class="head"><span class="key">${k.toUpperCase()}</span><span class="lab">${esc(o)}</span></div>${pi >= 0 ? `<div class="pick">${sparkle}<span>${multi && pi > 0 ? "Also my pick." : "My pick."}</span></div>` : ""}</div>`;
+    }).join("")}</div>`;
+  } else {
+    body = `<ol class="steps">${it.steps.map((s) => `<li>${esc(s)}</li>`).join("")}</ol>`;
+  }
+  const foot = `<p class="about">${it.status === "open" ? "This copy only shows. Answer it on the Cockpit." : "Closed on the Cockpit. Kept here so the closed shelf has something on it."}</p>`;
+  return `<article class="card" aria-labelledby="dh">${top}<h2 class="title" id="dh">${esc(it.title)}</h2>${body}${foot}${acts(true)}</article>`;
+}
+function listHtml() {
+  const irow = (i) => `<li><button class="row" type="button" data-id="${i.id}" aria-pressed="false"><i class="g ${i.status === "open" ? "calm" : "done"}"></i><span class="num">${i.n}</span><span class="tx">${esc(i.name)}</span><span class="kd">${i.kind === "task" ? "Task" : "Decision"}</span></button></li>`;
+  const srow = (s) => `<li><button class="row step" type="button" data-id="${s.key}" aria-pressed="false"><i class="g ${s.status}"></i><span class="tx">${esc(s.title)}<span class="id">${esc(s.id)} · ${STEPWORD[s.status]}</span></span></button></li>`;
+  const open = [...openD, ...openT], closed = [...closedD, ...closedT];
+  return `<h2 id="listH">Everything in the scene, as a list</h2>
+    <div class="grp"><h3>Items <span class="ct">${items.length}</span></h3>
+      <h4>Open <span class="ct">${open.length}</span></h4><ul class="rows">${open.map(irow).join("")}</ul>
+      <h4>Closed <span class="ct">${closed.length}</span></h4><ul class="rows">${closed.map(irow).join("")}</ul></div>
+    <div class="grp"><h3>Roadmap steps <span class="ct">${steps.length}</span></h3>
+      ${PHASES.map((p) => { const ss = steps.filter((s) => s.phase === p); return `<h4>${esc(p)} <span class="ct">${ss.length}</span></h4><ul class="rows">${ss.map(srow).join("")}</ul>`; }).join("")}</div>`;
+}
+
+/* Legend: small isometric pictures drawn as SVG with the scene's own token classes, so they follow the theme with no WebGL. */
+function legendHtml() {
+  const C30 = Math.cos(Math.PI / 6), S = 13, HC = 26;
+  const P = (o, x, y, z) => { const dx = x - (o.x + o.w / 2), dy = y - (o.y + o.d / 2); return [26 + (dx - dy) * C30 * S, HC + ((dx + dy) * 0.5 - z) * S]; };
+  const pts = (a) => a.map((p) => p[0].toFixed(1) + "," + p[1].toFixed(1)).join(" ");
+  const box = (o, z0, z1) => {
+    const B = [[o.x, o.y], [o.x + o.w, o.y], [o.x + o.w, o.y + o.d], [o.x, o.y + o.d]];
+    const f = (i, j, cls) => `<polygon class="${cls}" points="${pts([P(o, B[i][0], B[i][1], z0), P(o, B[j][0], B[j][1], z0), P(o, B[j][0], B[j][1], z1), P(o, B[i][0], B[i][1], z1)])}"/>`;
+    return f(1, 2, "r") + f(2, 3, "l") + `<polygon class="t" points="${pts(B.map(([a, b]) => P(o, a, b, z1)))}"/>`;
+  };
+  const cyl = (o, z0, z1) => {
+    const r = o.w / 2, [cx, b] = P(o, o.x + r, o.y + r, z0), t = P(o, o.x + r, o.y + r, z1)[1];
+    const rx = Math.SQRT2 * r * C30 * S, ry = Math.SQRT2 * r * 0.5 * S;
+    return `<path class="f l" d="M${cx - rx},${t} L${cx - rx},${b} A${rx},${ry} 0 0 0 ${cx},${b + ry} L${cx},${t + ry} Z"/><path class="f r" d="M${cx},${t + ry} L${cx},${b + ry} A${rx},${ry} 0 0 0 ${cx + rx},${b} L${cx + rx},${t} Z"/><ellipse class="t" cx="${cx}" cy="${t}" rx="${rx}" ry="${ry}"/>`;
+  };
+  const draw = (o) => {
+    let s = "", top = o.z0;
+    if (o.slabs) for (let k = 0; k < o.slabs; k++) { const a = o.z0 + k * (SLAB + GAP); top = a + SLAB; s += o.shape === "cyl" ? cyl(o, a, top) : box(o, a, top); }
+    else { top = o.z0 + o.h; s += box(o, o.z0, top); }
+    if (o.cls === "closed" || o.cls === "done") { const k = o.w * 0.22, cx = o.x + o.w / 2, cy = o.y + o.d / 2; s += `<polyline class="ck" points="${pts([P(o, cx - k, cy, top), P(o, cx - k * 0.2, cy + k * 0.8, top), P(o, cx + k, cy - k * 0.9, top)])}"/>`; }
+    return `<svg width="52" height="44" viewBox="0 0 52 44" aria-hidden="true"><g class="ob ${o.cls}">${s}</g></svg>`;
+  };
+  const rows = [
+    ["Items", null],
+    ["Square stack: a decision", { x: 0, y: 0, w: 1, d: 1, z0: -0.6, slabs: 2, shape: "box", cls: "open" }],
+    ["Round stack: a task", { x: 0, y: 0, w: 1, d: 1, z0: -0.6, slabs: 3, shape: "cyl", cls: "open" }],
+    ["One slab: one option or step", { x: 0, y: 0, w: 1, d: 1, z0: -0.3, slabs: 1, shape: "box", cls: "open" }],
+    ["Grey with a check: closed", { x: 0, y: 0, w: 1, d: 1, z0: -0.6, slabs: 2, shape: "box", cls: "closed" }],
+    ["Roadmap steps", null],
+    ["Raised tile: doing", { x: 0, y: 0, w: 0.9, d: 0.9, z0: -0.3, h: 0.5, cls: "doing" }],
+    ["Dashed tile: to do", { x: 0, y: 0, w: 0.9, d: 0.9, z0: -0.1, h: 0.06, cls: "todo" }],
+    ["Tile with a check: done", { x: 0, y: 0, w: 0.9, d: 0.9, z0: -0.1, h: 0.14, cls: "done" }],
+    ["Post: a phase starts", { x: 0, y: 0, w: 0.16, d: 0.16, z0: -0.9, h: 1.5, cls: "post" }],
+  ];
+  return `<details open><summary>What the shapes mean</summary><div class="lg">${rows.map(([t, o]) => (o ? `<div class="lgi">${draw(o)}<span>${esc(t)}</span></div>` : `<h3>${t}</h3>`)).join("")}</div></details>`;
+}
+
+/* ============================================================
+   Page shell
+   ============================================================ */
+$("#app").innerHTML = `
+  <div class="bar3">
+    <div class="views" role="group" aria-label="Show in the scene"><button type="button" data-view="all">All</button><button type="button" data-view="items">Items</button><button type="button" data-view="roadmap">Roadmap</button></div>
+    <button class="btn" type="button" data-act="reset" aria-label="Reset view">Reset</button>
+  </div>
+  <section id="scene" tabindex="0" aria-label="3D view of ${items.length} items and ${steps.length} roadmap steps. Arrow keys move between objects. The list below holds the same." aria-describedby="listH">
+    <div class="notice load" role="status"><b>Drawing the 3D view</b><i></i><p>The list below works now.</p></div>
+  </section>
+  <aside class="detail" aria-live="polite" aria-label="Picked object"></aside>
+  <section class="legend">${legendHtml()}</section>
+  <section class="plain" aria-labelledby="listH">${listHtml()}</section>`;
+const scene = $("#scene"), detail = $(".detail");
+
+/* The 3D side registers what it can do here. With no WebGL these stay empty and the page still works. */
+const gl3 = { ready: false, restore() {}, sync() {}, draw() {}, fit() {}, center() {}, zoomBy() {}, turn() {}, reset() {} };
+function paint(opts = {}) {
+  detail.innerHTML = detailHtml();
+  document.querySelectorAll(".row").forEach((r) => r.setAttribute("aria-pressed", String(r.dataset.id === sel)));
+  document.querySelectorAll("[data-view]").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.view === view)));
+  gl3.sync();
+  if (opts.reveal) detail.scrollIntoView({ block: "nearest", behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
+}
+function pick(id, opts) { sel = id; paint(opts); }
+function setView(v) { view = v; gl3.fit(); paint(); }
+paint();
+
+document.addEventListener("click", (e) => {
+  const b = e.target.closest("button"); if (!b) return;
+  if (b.dataset.view) setView(b.dataset.view);
+  else if (b.classList.contains("row")) pick(b.dataset.id, { reveal: true });
+  else if (b.dataset.act === "clear") pick(null);
+  else if (b.dataset.act === "first") pick(ORDER[0]);
+  else if (b.dataset.act === "reset") gl3.reset();
+  else if (b.dataset.act === "in") gl3.zoomBy(1.2);
+  else if (b.dataset.act === "out") gl3.zoomBy(1 / 1.2);
+  else if (b.dataset.act === "center") gl3.center();
+  else if (b.dataset.act === "restore") gl3.restore();
+});
+
+/* No WebGL, or the library did not load: the notice takes the scene's place and the list carries the page. */
+function goNoGL(why) {
+  nogl = true;
+  $(".bar3").hidden = true; $(".legend").hidden = true;
+  scene.className = "nogl"; scene.removeAttribute("tabindex");
+  scene.setAttribute("aria-labelledby", "nglH"); scene.removeAttribute("aria-label"); scene.removeAttribute("aria-describedby");
+  scene.innerHTML = `<b id="nglH">No 3D view in this browser</b><p>${esc(why)} The list below holds every item and step. Pick a row to see its detail.</p><p><a href="https://get.webgl.org/">How to check and turn on WebGL</a></p>`;
+  document.documentElement.dataset.nogl = "1";
+  paint();
+}
+
+/* ============================================================
+   The 3D scene (three.js). Drawn on demand only: a still scene draws nothing.
+   ============================================================ */
+async function boot3d() {
+  let T, OrbitControls, renderer;
+  try {
+    T = await import("three");
+    ({ OrbitControls } = await import("three/addons/controls/OrbitControls.js"));
+    renderer = new T.WebGLRenderer({ antialias: true });
+  } catch (err) {
+    goNoGL(T ? "WebGL is off or not supported here, so the scene can't be drawn." : "The 3D library did not load, so the scene can't be drawn.");
+    return;
+  }
+  const canvas = renderer.domElement, glCtx = renderer.getContext(), loseExt = glCtx.getExtension("WEBGL_lose_context");
+  canvas.setAttribute("aria-hidden", "true");
+  scene.insertAdjacentElement("afterbegin", canvas);
+  scene.insertAdjacentHTML("beforeend", `<div class="zoom"><button type="button" data-act="in" aria-label="Zoom in">+</button><button type="button" data-act="out" aria-label="Zoom out">&minus;</button></div>
+    <p class="hint" aria-hidden="true"><span class="pt">Drag sideways to turn. Pinch, or Ctrl and scroll, to zoom.</span><span class="kb">Arrow keys move. [ and ] turn. + and &minus; zoom. Esc clears.</span></p>`);
+
+  /* Colours come from the page's tokens, so light, dark and a repo colour reach the scene too. */
+  const probe = document.createElement("span"); probe.style.cssText = "position:absolute;visibility:hidden;pointer-events:none;forced-color-adjust:none"; /* forced colours would swap every token read here for a system colour */ document.body.append(probe);
+  const px = document.createElement("canvas"); px.width = px.height = 1; const pcx = px.getContext("2d", { willReadFrequently: true });
+  const TOKENS = ["surface", "ink", "muted", "calm", "line", "good", "o-top", "o-l", "o-r", "c-top", "c-l", "c-r", "d-top", "d-l", "d-r", "p-top", "p-side", "edge"];
+  const pal = {};
+  function tok(name) {
+    probe.style.color = ""; probe.style.color = `var(--${name})`;
+    pcx.clearRect(0, 0, 1, 1); pcx.fillStyle = "#000"; pcx.fillStyle = getComputedStyle(probe).color; pcx.fillRect(0, 0, 1, 1);
+    const [r, g, b, a] = pcx.getImageData(0, 0, 1, 1).data;
+    return { color: new T.Color().setRGB(r / 255, g / 255, b / 255, T.SRGBColorSpace), alpha: a / 255 };
+  }
+
+  /* One material for every face: a top colour, and a left and a right colour picked by which way the side faces on screen. Light stays above. */
+  const faceMat = () => new T.ShaderMaterial({
+    uniforms: { top: { value: new T.Color() }, l: { value: new T.Color() }, r: { value: new T.Color() } },
+    vertexShader: "varying vec3 vWN; varying vec3 vVN; void main(){ vWN = normalize(mat3(modelMatrix) * normal); vVN = normalize(normalMatrix * normal); gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }",
+    fragmentShader: "uniform vec3 top; uniform vec3 l; uniform vec3 r; varying vec3 vWN; varying vec3 vVN; void main(){ vec3 c = vWN.y > 0.5 ? top : (vVN.x > 0.0 ? r : l); gl_FragColor = vec4(c, 1.0);\n#include <colorspace_fragment>\n}",
+  });
+  const MAT_KEYS = { open: ["o-top", "o-l", "o-r"], doing: ["o-top", "o-l", "o-r"], closed: ["c-top", "c-l", "c-r"], done: ["d-top", "d-l", "d-r"], todo: ["surface", "surface", "surface"], plat: ["p-top", "p-side", "p-side"], shelf: ["surface", "p-side", "p-side"], post: ["muted", "muted", "muted"] };
+  const mats = {}; Object.keys(MAT_KEYS).forEach((k) => (mats[k] = faceMat()));
+  const edgeMat = new T.LineBasicMaterial({ transparent: true });
+  const dashMat = new T.LineDashedMaterial({ dashSize: 0.14, gapSize: 0.1 });
+  const ringMat = new T.LineDashedMaterial({ dashSize: 0.14, gapSize: 0.1 });
+  const inkMat = new T.MeshBasicMaterial({ side: T.BackSide });
+  const discMat = new T.MeshBasicMaterial({ transparent: true, opacity: 0.16, depthWrite: false });
+  const ckClosed = new T.MeshBasicMaterial(), ckDone = new T.MeshBasicMaterial();
+  const pathMat = new T.PointsMaterial({ size: 3.5, sizeAttenuation: false });
+  const scn = new T.Scene();
+  function applyPalette() {
+    TOKENS.forEach((k) => (pal[k] = tok(k)));
+    Object.entries(MAT_KEYS).forEach(([k, [t, l, r]]) => { const u = mats[k].uniforms; u.top.value.copy(pal[t].color); u.l.value.copy(pal[l].color); u.r.value.copy(pal[r].color); });
+    edgeMat.color.copy(pal.ink.color); edgeMat.opacity = pal.edge.alpha || 0.2;
+    dashMat.color.copy(pal.calm.color); ringMat.color.copy(pal.ink.color); inkMat.color.copy(pal.ink.color); discMat.color.copy(pal.ink.color);
+    ckClosed.color.copy(pal.good.color); ckDone.color.copy(pal.surface.color);
+    pathMat.color.copy(pal.calm.color).lerp(pal.surface.color, 0.45);
+    scn.background = pal.surface.color;
+  }
+  applyPalette();
+
+  /* Build the objects once; the camera and the pick change, the objects do not. */
+  const hits = [], objs = {};
+  const FLOAT = 0.45;
+  const segs = (geo, mat, deg = 30) => new T.LineSegments(new T.EdgesGeometry(geo, deg), mat);
+  const dashed = (line) => { line.computeLineDistances(); return line; };
+  function slabMesh(o, a, b) {
+    const hgt = b - a;
+    if (o.shape === "cyl") {
+      const geo = new T.CylinderGeometry(0.66, 0.66, hgt, 32), m = new T.Mesh(geo, mats[o.cls]);
+      m.position.set(o.x + o.w / 2, a + hgt / 2, o.y + o.d / 2); m.add(segs(geo, edgeMat)); return m;
+    }
+    const geo = new T.BoxGeometry(o.w, hgt, o.d), m = new T.Mesh(geo, mats[o.cls]);
+    m.position.set(o.x + o.w / 2, a + hgt / 2, o.y + o.d / 2);
+    m.add(o.cls === "todo" ? dashed(segs(geo, dashMat)) : segs(geo, edgeMat));
+    return m;
+  }
+  function checkMesh(o, y) {
+    const g = new T.Group(), k = o.w * 0.22, mat = o.cls === "done" ? ckDone : ckClosed;
+    const bar = (x0, z0, x1, z1) => {
+      const len = Math.hypot(x1 - x0, z1 - z0) + 0.07, m = new T.Mesh(new T.BoxGeometry(len, 0.012, 0.07), mat);
+      m.position.set((x0 + x1) / 2, y + 0.008, (z0 + z1) / 2); m.rotation.y = -Math.atan2(z1 - z0, x1 - x0); return m;
+    };
+    const cx = o.x + o.w / 2, cz = o.y + o.d / 2;
+    g.add(bar(cx - k, cz, cx - k * 0.2, cz + k * 0.8), bar(cx - k * 0.2, cz + k * 0.8, cx + k, cz - k * 0.9));
+    return g;
+  }
+  WORLD.objs.forEach((o) => {
+    const g = new T.Group(), z1 = o.z0 + objH(o);
+    o._ztop = z1;
+    if (o.slabs) for (let k = 0; k < o.slabs; k++) { const a = o.z0 + k * (SLAB + GAP); g.add(slabMesh(o, a, a + SLAB)); }
+    else {
+      const geo = new T.BoxGeometry(o.w, z1 - o.z0, o.d), m = new T.Mesh(geo, mats[o.cls]);
+      m.position.set(o.x + o.w / 2, (o.z0 + z1) / 2, o.y + o.d / 2);
+      m.add(o.cls === "todo" ? dashed(segs(geo, dashMat)) : segs(geo, edgeMat)); g.add(m);
+      if (o.cls === "shelf") {
+        const y = z1 + 0.004, c = [[o.x, o.y], [o.x + o.w, o.y], [o.x + o.w, o.y + o.d], [o.x, o.y + o.d]].map(([x, z]) => new T.Vector3(x, y, z));
+        g.add(dashed(new T.LineLoop(new T.BufferGeometry().setFromPoints(c), dashMat)));
+      }
+    }
+    if (o.cls === "closed" || o.cls === "done") g.add(checkMesh(o, z1));
+    if (o.id) {
+      /* An invisible box over the whole stack or tile is the target for a press, so the gaps between slabs do not miss. */
+      const hit = new T.Mesh(new T.BoxGeometry(o.w, z1 - o.z0, o.d), new T.MeshBasicMaterial({ visible: false }));
+      hit.position.set(o.x + o.w / 2, (o.z0 + z1) / 2, o.y + o.d / 2); hit.userData.id = o.id; g.add(hit); hits.push(hit);
+    }
+    scn.add(g); o._g = g; if (o.id) objs[o.id] = o;
+  });
+  const dots = [], pp = WORLD.pts;
+  for (let i = 0; i + 1 < pp.length; i++) {
+    const [ax, az] = pp[i], [bx, bz] = pp[i + 1], n = Math.max(1, Math.round(Math.hypot(bx - ax, bz - az) / 0.2));
+    for (let k = 0; k < n; k++) dots.push(ax + ((bx - ax) * k) / n, 0.012, az + ((bz - az) * k) / n);
+  }
+  scn.add(new T.Points(new T.BufferGeometry().setAttribute("position", new T.Float32BufferAttribute(dots, 3)), pathMat));
+
+  /* Pick: the object lifts and gets a dark outline, and a dashed ring on the ground (a shape cue, not only colour). */
+  let selExtras = [];
+  function syncSelection() {
+    selExtras.forEach(([parent, ch]) => parent.remove(ch)); selExtras = [];
+    Object.values(objs).forEach((o) => (o._g.position.y = 0));
+    const o = objs[sel]; if (!o) return;
+    o._g.position.y = FLOAT;
+    const z1 = o._ztop, pad = 0.07;
+    const hull = o.shape === "cyl" ? new T.Mesh(new T.CylinderGeometry(0.66 + pad, 0.66 + pad, z1 + pad * 2, 32), inkMat) : new T.Mesh(new T.BoxGeometry(o.w + pad * 2, z1 - o.z0 + pad * 2, o.d + pad * 2), inkMat);
+    hull.position.set(o.x + o.w / 2, (o.z0 + z1) / 2, o.y + o.d / 2); if (o.shape === "cyl") hull.position.y = z1 / 2;
+    o._g.add(hull); selExtras.push([o._g, hull]);
+    const cx = o.x + o.w / 2, cz = o.y + o.d / 2, ring = [];
+    for (let i = 0; i < 48; i++) ring.push(new T.Vector3(cx + Math.cos((i / 48) * Math.PI * 2) * 0.95, 0.03, cz + Math.sin((i / 48) * Math.PI * 2) * 0.95));
+    const loop = dashed(new T.LineLoop(new T.BufferGeometry().setFromPoints(ring), ringMat));
+    const disc = new T.Mesh(new T.CircleGeometry(0.95, 40).rotateX(-Math.PI / 2), discMat); disc.position.set(cx, 0.02, cz);
+    scn.add(loop, disc); selExtras.push([scn, loop], [scn, disc]);
+  }
+
+  /* Camera: true isometric tilt locked, a turn about the vertical axis, a zoom. Pan is off. */
+  const F = 8, POLAR = Math.acos(1 / Math.sqrt(3)), DIST = 60, AZ0 = Math.PI / 4;
+  const camera = new T.OrthographicCamera(-F, F, F, -F, 0.1, 400);
+  let W = 800, H = 500, zoomRel = 1, baseZoom = 1;
+  const PAD = { x: 16, r: 16, top: 52, bot: 66 };
+  function place(az, target) {
+    camera.position.set(target.x + DIST * Math.sin(POLAR) * Math.cos(az), target.y + DIST * Math.cos(POLAR), target.z + DIST * Math.sin(POLAR) * Math.sin(az));
+    controls.target.copy(target); controls.update();
+  }
+  const controls = new OrbitControls(camera, canvas);
+  controls.enablePan = false; controls.enableZoom = false; controls.enableDamping = false; controls.rotateSpeed = 0.55;
+  controls.minPolarAngle = controls.maxPolarAngle = POLAR;
+  canvas.style.touchAction = "pan-y"; /* OrbitControls sets none; a vertical swipe must still scroll the page (ux-scroll-stays-native). */
+  const shift = (dx, dy) => { camera.setViewOffset(W, H, -dx, -dy, W, H); };
+  function setZoom() { camera.zoom = baseZoom * zoomRel; camera.updateProjectionMatrix(); }
+  const targets = () => WORLD.objs.filter((o) => view === "all" || (view === "roadmap" ? o.step || o.cls === "post" : !(o.step || o.cls === "post")));
+  const curAz = () => { const dx = camera.position.x - controls.target.x, dz = camera.position.z - controls.target.z; return dx || dz ? Math.atan2(dz, dx) : AZ0; };
+  function fit() {
+    const ts = targets();
+    let x0 = Infinity, x1 = -Infinity, z0 = Infinity, z1 = -Infinity;
+    ts.forEach((o) => { x0 = Math.min(x0, o.x); z0 = Math.min(z0, o.y); x1 = Math.max(x1, o.x + o.w); z1 = Math.max(z1, o.y + o.d); });
+    const az = curAz();
+    camera.clearViewOffset(); zoomRel = 1; baseZoom = 1; setZoom();
+    place(az, new T.Vector3((x0 + x1) / 2, 0, (z0 + z1) / 2));
+    camera.updateMatrixWorld();
+    let a = Infinity, b = -Infinity, c = Infinity, d = -Infinity;
+    const v = new T.Vector3();
+    ts.forEach((o) => [o.x, o.x + o.w].forEach((x) => [o.y, o.y + o.d].forEach((z) => [Math.min(o.z0, 0), o._ztop + FLOAT * 0].forEach((y) => {
+      v.set(x, y, z).project(camera); a = Math.min(a, v.x); b = Math.max(b, v.x); c = Math.min(c, v.y); d = Math.max(d, v.y);
+    }))));
+    const wpx = ((b - a) / 2) * W, hpx = ((d - c) / 2) * H;
+    baseZoom = Math.min((W - PAD.x - PAD.r) / wpx, (H - PAD.top - PAD.bot) / hpx); setZoom();
+    /* Slide the picture so the content sits between the labels above and the hint below. */
+    const curX = ((a + b) / 2) * baseZoom * (W / 2), curY = (-(c + d) / 2) * baseZoom * (H / 2);
+    shift(-curX + (PAD.x - PAD.r) / 2, -curY + (PAD.top - PAD.bot) / 2);
+    draw();
+  }
+
+  /* Labels over the canvas. Floor and phase names always show; item numbers when there is room; the picked object's name on top. */
+  const labels = document.createElement("div"); labels.className = "labels"; labels.setAttribute("aria-hidden", "true"); scene.append(labels);
+  const mk = (cls, html) => { const e = document.createElement("div"); e.className = "lb " + cls; if (html != null) e.innerHTML = html; labels.append(e); return e; };
+  const tags = WORLD.objs.filter((o) => o.tag).map((o) => ({ o, el: mk("gt", `${esc(o.tag.text)} <span class="ct">${o.tag.count}</span>`) }));
+  const pills = WORLD.objs.filter((o) => o.lab).map((o) => ({ o, el: mk("pill", esc(o.lab)) }));
+  const selEl = mk("sel", ""), leadEl = mk("lead", null);
+  const V = new T.Vector3();
+  const toPx = (x, y, z) => { V.set(x, y, z).project(camera); return [(V.x * 0.5 + 0.5) * W, (-V.y * 0.5 + 0.5) * H]; };
+  const trim = (s, n) => (s.length > n ? s.slice(0, n - 1).trimEnd() + "…" : s);
+  const place2 = (el, x, y) => { el.style.transform = `translate(${x.toFixed(1)}px, ${y.toFixed(1)}px)`; };
+  function updateLabels() {
+    camera.updateMatrixWorld();
+    const ppu = (H / (2 * F)) * camera.zoom, roomy = ppu / 1.2247 >= 20; /* 20 px per world unit, as drawn in the mockup */
+    /* A label whose object is off the scene is hidden; one that is near an edge slides in so it stays whole. */
+    const inside = (p) => p[0] >= 0 && p[0] <= W && p[1] >= 0 && p[1] <= H;
+    const put = (el, p, x, y) => { el.hidden = !inside(p); if (el.hidden) return; place2(el, Math.max(6, Math.min(W - el.offsetWidth - 6, x)), y); };
+    const shown = (isStepSide) => view === "all" || (view === "roadmap") === isStepSide; /* the other group is only a sliver at the edge, so its labels stay off */
+    tags.forEach(({ o, el }) => {
+      if (!shown(!!o.tag.top)) { el.hidden = true; return; }
+      if (o.tag.top) { const p = toPx(o.x, o.h + 0.2, o.y); put(el, p, p[0] - el.offsetWidth / 2, p[1] - 6 - el.offsetHeight); return; }
+      const cs = [[o.x, o.y], [o.x + o.w, o.y], [o.x + o.w, o.y + o.d], [o.x, o.y + o.d]].map(([x, z]) => toPx(x, 0, z));
+      if (o.cls === "shelf") { const p = cs.sort((m, n) => n[0] - m[0])[0]; put(el, p, p[0] + 8, p[1] - el.offsetHeight / 2); }
+      else { const p = cs.sort((m, n) => m[0] - n[0])[0]; put(el, p, p[0], p[1] + 8); }
+    });
+    pills.forEach(({ o, el }) => {
+      if (!roomy || o.id === sel || !shown(false)) { el.hidden = true; return; }
+      const p = toPx(o.x + o.w / 2, o._ztop + o._g.position.y, o.y + o.d / 2);
+      put(el, p, p[0] - el.offsetWidth / 2, Math.max(6, p[1] - 8 - 20));
+    });
+    const so = objs[sel], sp = so && toPx(so.x + so.w / 2, so._ztop + so._g.position.y, so.y + so.d / 2);
+    selEl.hidden = leadEl.hidden = !so || !inside(sp); /* an object off the scene gets no label pointing at nothing; the detail still names it */
+    if (!selEl.hidden) {
+      const it = byId[sel], p = sp;
+      selEl.textContent = it.step ? trim(it.title, phone() ? 34 : 52) : "No. " + it.n + "  " + trim(it.name, phone() ? 26 : 44);
+      const w = selEl.offsetWidth, h = selEl.offsetHeight, lx = Math.max(6, Math.min(W - w - 6, p[0] - w / 2)), ly = Math.max(6, p[1] - h - 26);
+      place2(selEl, lx, ly);
+      leadEl.style.height = Math.max(0, p[1] - 4 - (ly + h)) + "px"; place2(leadEl, p[0], ly + h);
+    }
+  }
+
+  /* Drawing, on demand. */
+  let raf = 0, lost = false;
+  function draw() {
+    raf = 0; if (lost) return;
+    renderer.render(scn, camera); updateLabels();
+    if (!gl3.ready) { gl3.ready = true; scene.querySelector(".load")?.remove(); document.documentElement.dataset.ready = "1"; }
+  }
+  const request = () => { if (!raf) raf = requestAnimationFrame(draw); };
+  controls.addEventListener("change", request);
+  function resize() {
+    const r = scene.getBoundingClientRect(); if (!r.width || !r.height) return;
+    if (Math.abs(r.width - W) < 1 && Math.abs(r.height - H) < 1 && gl3.ready) return;
+    W = r.width; H = r.height;
+    renderer.setPixelRatio(Math.min(devicePixelRatio || 1, 2)); renderer.setSize(W, H, false);
+    const asp = W / H; camera.left = -F * asp; camera.right = F * asp; camera.top = F; camera.bottom = -F;
+    fit();
+  }
+  new ResizeObserver(resize).observe(scene);
+
+  /* Pressing: a short press with no drag picks the object under the pointer. A pinch zooms. */
+  const ray = new T.Raycaster(), ndc = new T.Vector2();
+  function hitAt(e) {
+    const r = canvas.getBoundingClientRect(); ndc.set(((e.clientX - r.left) / r.width) * 2 - 1, -(((e.clientY - r.top) / r.height) * 2 - 1));
+    ray.setFromCamera(ndc, camera); const h = ray.intersectObjects(hits, false)[0]; return h ? h.object.userData.id : null;
+  }
+  const ptrs = new Map(); let press = null, pinch = 0;
+  canvas.addEventListener("pointerdown", (e) => {
+    ptrs.set(e.pointerId, [e.clientX, e.clientY]);
+    if (ptrs.size === 1) press = { id: e.pointerId, x: e.clientX, y: e.clientY, moved: false };
+    else { press = null; pinch = Math.hypot(...[...ptrs.values()].reduce((a, p) => [a[0] - p[0], a[1] - p[1]], [0, 0])); }
+  });
+  canvas.addEventListener("pointermove", (e) => {
+    if (ptrs.has(e.pointerId)) ptrs.set(e.pointerId, [e.clientX, e.clientY]);
+    if (ptrs.size === 2) {
+      const [p, q] = [...ptrs.values()], d = Math.hypot(p[0] - q[0], p[1] - q[1]);
+      if (pinch) { zoomBy(d / pinch); } pinch = d; return;
+    }
+    if (press && press.id === e.pointerId && Math.hypot(e.clientX - press.x, e.clientY - press.y) > 6) { press.moved = true; canvas.classList.add("drag"); }
+    if (e.pointerType === "mouse" && !press) canvas.classList.toggle("over", !!hitAt(e));
+  });
+  const up = (e) => {
+    const hadPress = press && press.id === e.pointerId && !press.moved && e.type === "pointerup";
+    if (hadPress) { const id = hitAt(e); if (id) pick(id); }
+    ptrs.delete(e.pointerId); if (ptrs.size < 2) pinch = 0; if (!ptrs.size) press = null; canvas.classList.remove("drag");
+  };
+  canvas.addEventListener("pointerup", up); canvas.addEventListener("pointercancel", up);
+  canvas.addEventListener("wheel", (e) => { if (!e.ctrlKey && !e.metaKey) return; e.preventDefault(); zoomBy(e.deltaY < 0 ? 1.1 : 0.9); }, { passive: false });
+
+  function zoomBy(f) { zoomRel = Math.max(0.5, Math.min(3, zoomRel * f)); setZoom(); request(); }
+  function turn(d) { const off = camera.position.clone().sub(controls.target).applyAxisAngle(new T.Vector3(0, 1, 0), d); camera.position.copy(controls.target).add(off); controls.update(); request(); }
+  scene.addEventListener("keydown", (e) => {
+    if (e.target !== scene) return;
+    const i = ORDER.indexOf(sel), go = { ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 }[e.key];
+    if (go) { e.preventDefault(); pick(ORDER[(i + go + ORDER.length) % ORDER.length] || ORDER[0]); }
+    else if (e.key === "Home") { e.preventDefault(); pick(ORDER[0]); }
+    else if (e.key === "End") { e.preventDefault(); pick(ORDER[ORDER.length - 1]); }
+    else if (e.key === "Escape") pick(null);
+    else if (e.key === "[" || e.key === "]") turn(e.key === "]" ? 0.2 : -0.2);
+    else if (e.key === "+" || e.key === "=") zoomBy(1.15);
+    else if (e.key === "-") zoomBy(1 / 1.15);
+  });
+
+  /* The scene lost: words over the dimmed scene, the list still works, and "Draw it again" restores it. */
+  const setBusy = (on) => { scene.classList.toggle("busy", on); scene.classList.toggle("dim", on); document.querySelectorAll(".bar3 button").forEach((b) => (b.disabled = on)); };
+  canvas.addEventListener("webglcontextlost", (e) => {
+    e.preventDefault(); lost = true; setBusy(true);
+    if (!scene.querySelector(".notice")) scene.insertAdjacentHTML("beforeend", `<div class="notice" role="alert"><b>The 3D view stopped</b><p>The graphics card dropped the scene. It comes back on its own when the card does. The list below still works.</p><button class="btn" type="button" data-act="restore">Draw it again</button></div>`);
+  });
+  function restore() { lost = false; setBusy(false); scene.querySelector(".notice")?.remove(); resize(); draw(); }
+  canvas.addEventListener("webglcontextrestored", restore);
+
+  /* A change of theme redraws with the new token colours. */
+  const retheme = () => { applyPalette(); syncSelection(); request(); };
+  matchMedia("(prefers-color-scheme: dark)").addEventListener("change", retheme);
+  new MutationObserver(retheme).observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+
+  Object.assign(gl3, {
+    sync() { syncSelection(); request(); },
+    fit, zoomBy, turn,
+    center() {
+      const o = objs[sel]; if (!o) return;
+      camera.updateMatrixWorld(); place(curAz(), new T.Vector3(o.x + o.w / 2, o._ztop / 2, o.y + o.d / 2));
+      shift(0, (PAD.top - PAD.bot) / 2); zoomRel = Math.max(zoomRel, 1.6); setZoom(); request(); scene.scrollIntoView({ block: "nearest" });
+    },
+    reset() { place(AZ0, controls.target); fit(); },
+    restore() {
+      /* The extension is read at start, because a lost context hands out none. With no way to ask, the notice stays until the browser restores the context itself. */
+      if (!glCtx.isContextLost()) restore(); else if (loseExt) loseExt.restoreContext();
+    },
+  });
+
+  /* Hooks for the check script (docs/plans/3d-browser-dummy/check.mjs). The page itself does not use them. */
+  window.__cockpit3d = {
+    renderer, canvas, info: renderer.info, render: draw,
+    setView, ids: () => ORDER.slice(),
+    screenPos(id) { const o = objs[id]; if (!o) return null; camera.updateMatrixWorld(); const p = toPx(o.x + o.w / 2, o._ztop * 0.6 + o._g.position.y, o.y + o.d / 2), r = canvas.getBoundingClientRect(); return { x: r.left + p[0], y: r.top + p[1] }; },
+    loseContext() { loseExt?.loseContext(); },
+  };
+  resize(); draw();
+}
+boot3d();
+</script>
