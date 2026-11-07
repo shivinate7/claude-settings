@@ -162,3 +162,48 @@ test("a live doing step still reads In progress in the Changes log", async (t) =
   assert.equal(await row.count(), 1, "step a has no row in the Changes log");
   assert.equal((await row.locator(".kind").textContent()).trim(), "In progress", "the Changes log row of the live doing step does not read In progress");
 });
+
+// ---------------------------------------------------------------- paused: a paused step is not in progress in any of the three places
+// A paused step keeps status active, as a stalled one does. Paused is its own state in the count, the feed and the log.
+const PAUSED_A3 = { why: "", steps: [], paused: ["a3"], badPause: [], items: [], ...NO_ITEMS };
+test("the where-you-are line does not count a paused step as in progress", async (t) => {
+  const steps = { a3: stepOf("Step a3", "doing", 3) };
+  const page = await open(t, builtPage({ steps, stalled: PAUSED_A3 })); if (!page) return;
+  await assertRowReads(page, "a3", "Paused");
+  assert.ok((await page.locator("#now > div:first-child > .sub").count()) > 0, "the Plan page has no where-you-are line (#now > div:first-child > .sub)");
+  const sub = (await page.locator("#now > div:first-child > .sub").first().textContent()).replace(/\s+/g, " ");
+  assert.doesNotMatch(sub, /in progress/, "the where-you-are line counts the paused step as in progress: " + sub);
+});
+test("the Latest changes row of a paused step reads Paused, not In progress", async (t) => {
+  const steps = { a3: stepOf("Step a3", "doing", 3) };
+  const page = await open(t, builtPage({ steps, stalled: PAUSED_A3 })); if (!page) return;
+  await assertRowReads(page, "a3", "Paused");
+  const row = page.locator("#side .feed li", { has: page.locator('button[data-go="a3"]') });
+  assert.equal(await row.count(), 1, "step a3 has no row in Latest changes");
+  const kind = (await row.locator(".kind").textContent()).trim();
+  assert.doesNotMatch(kind, /In progress/, "the Latest changes row of paused step a3 reads In progress");
+  assert.match(kind, /Paused/, `the Latest changes row of paused step a3 reads "${kind}", not Paused`);
+});
+test("the Changes log row of a paused step reads Paused, not In progress", async (t) => {
+  const steps = { a3: stepOf("Step a3", "doing", 3) };
+  const page = await open(t, builtPage({ steps, stalled: PAUSED_A3 })); if (!page) return;
+  await assertRowReads(page, "a3", "Paused");
+  const row = page.locator("#days .ev", { has: page.locator('button[data-go="a3"]') });
+  assert.equal(await row.count(), 1, "step a3 has no row in the Changes log");
+  const kind = (await row.locator(".kind").textContent()).trim();
+  assert.doesNotMatch(kind, /In progress/, "the Changes log row of paused step a3 reads In progress");
+  assert.match(kind, /Paused/, `the Changes log row of paused step a3 reads "${kind}", not Paused`);
+});
+test("a live doing step reads In progress in all three places", async (t) => {
+  const steps = { a: stepOf("Step a", "doing", 2) };
+  // Step a has an open pull request on its branch a, which makes it a live lane.
+  const live = { readAt: new Date().toISOString(), threads: [], pulls: [{ number: 7, title: "Step a", branch: "a" }], branches: [], sessions: [] };
+  const page = await open(t, builtPage({ steps, live })); if (!page) return;
+  assert.ok((await page.locator("#now > div:first-child > .sub").count()) > 0, "the Plan page has no where-you-are line (#now > div:first-child > .sub)");
+  const sub = (await page.locator("#now > div:first-child > .sub").first().textContent()).replace(/\s+/g, " ");
+  assert.match(sub, /\b1 in progress/, "the where-you-are line does not count the live doing step: " + sub);
+  const feed = page.locator("#side .feed li", { has: page.locator('button[data-go="a"]') });
+  assert.equal((await feed.locator(".kind").textContent()).trim(), "In progress", "the Latest changes row of the live doing step does not read In progress");
+  const log = page.locator("#days .ev", { has: page.locator('button[data-go="a"]') });
+  assert.equal((await log.locator(".kind").textContent()).trim(), "In progress", "the Changes log row of the live doing step does not read In progress");
+});
