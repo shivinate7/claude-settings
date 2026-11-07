@@ -13187,6 +13187,10 @@ SR = dict(B, cwd=SCRIPTREPO)
 TEST_WRITE_PY = "open('tests/x.py', 'w').write('x = 1\\n')\n"
 SRC_WRITE_PY = "open('src/app.py', 'w').write('x = 3\\n')\n"
 NODE_WRITE = "require('fs').writeFileSync('web/a.test.js', 'x')\n"
+# A JS regex literal right after the `)` of an `if`: that `/` starts a regex, so `/\/*/` is a pattern and not a
+# comment opener, and the write after it runs. The `const` line names the variables, so node would run the script.
+JS_NAMES = "const ok = true, s = 'x';\n"
+REGEX_WRITE_JS = "if (ok) /\\/*/.test(s) && require('fs').writeFileSync('%s', 'x')\n"
 # The node reader keeps a string, a template literal and a regex literal whole, and blanks a `//` or `/*` comment.
 # So a comment opener inside one of them must not blank the write after it. Each text puts the write on the same
 # line as the opener, or after a template's closing backtick, so a reader that blanks the opener's rest of its
@@ -13246,6 +13250,14 @@ def _build_scriptrepo():
         "zsh_write.sh": "echo x > tests/x.py\n",
         **NODE_STRING_TEXTS,
         "x/keep": "keep\n",
+        # The forms the reader missed on 8de06735b, each with an allow twin: a module under a package, a script with
+        # no `#!` line (bash runs it under sh), and a JS regex after `)`.
+        "pkg/mod.py": TEST_WRITE_PY,
+        "pkg/src_mod.py": SRC_WRITE_PY,
+        "gen_bare": "echo x > tests/x.py\n",
+        "bare_src": "echo x > src/app.py\n",
+        "gen_regex.js": JS_NAMES + REGEX_WRITE_JS % "tests/x.js",
+        "gen_regex_ok.js": JS_NAMES + REGEX_WRITE_JS % "src/app.js",
     })
     # The regex cases must hold the regex bytes they name, so an escaping slip fails here, not as another red.
     for name, literal in (("re_star.js", r"p.replace(/\/*$/, '')"), ("re_slashes.js", r"p.replace(/\/\//g, '')")):
@@ -13253,6 +13265,8 @@ def _build_scriptrepo():
             if literal not in handle.read():
                 sys.exit("fixture setup failed in _build_scriptrepo: %r lacks the regex literal %r" % (name, literal))
     os.chmod(os.path.join(SCRIPTREPO, "gen_shebang"), 0o755)
+    for name in ("gen_bare", "bare_src"):   # run as `./name`, with no `#!` line
+        os.chmod(os.path.join(SCRIPTREPO, name), 0o755)
     for name, total in (("at_cap.py", cap), ("over_cap.py", cap + 1)):
         lead = "#" * (total - len(TEST_WRITE_PY) - 1) + "\n"   # a comment line that fills the file, then the write
         with open(os.path.join(SCRIPTREPO, name), "wb") as handle:
@@ -13356,6 +13370,39 @@ sh("builder-test: script-file, pwsh runs pwsh_src.ps1, Set-Content onto src/app.
    "pwsh pwsh_src.ps1", "allow", **SR)
 sh("builder-test: script-file, zsh runs zsh_write.sh, echo redirect onto tests/x.py, is refused",
    "zsh zsh_write.sh", "deny", rule=BT, carries=("test-author",), **SR)
+
+# The forms the reader missed on 8de06735b. Each refusal runs a script that writes a test path. Each allow twin
+# runs the same form on a script that writes product code, so the form itself is not what gets refused.
+for _name, _command in (
+    ("uv run gen.py runs the file as python, writes tests/x.py", "uv run gen.py"),
+    ("poetry run python gen.py, writes tests/x.py", "poetry run python gen.py"),
+    ("subshell (cd x && python3 ../gen.py), writes tests/x.py", "(cd x && python3 ../gen.py)"),
+    ("subshell (python3 gen.py), no cd, writes tests/x.py", "(python3 gen.py)"),
+    ("python3 - < gen.py, the script comes in on stdin, writes tests/x.py", "python3 - < gen.py"),
+    ("./gen_bare, no #! line, bash runs it under sh, echo redirect onto tests/x.py", "./gen_bare"),
+    ("python3 -m pkg.mod, the module file pkg/mod.py, writes tests/x.py", "python3 -m pkg.mod"),
+    ("pwsh -ExecutionPolicy Bypass -File pwsh_write.ps1, Set-Content onto tests/x.ps1",
+     "pwsh -ExecutionPolicy Bypass -File pwsh_write.ps1"),
+    ("FX set in the same command, python3 $FX/gen.py, writes tests/x.py", "FX=%s; python3 $FX/gen.py" % SCRIPTREPO),
+    ("node gen_regex.js, a JS regex right after the ) of an if, writes tests/x.js", "node gen_regex.js"),
+):
+    sh("builder-test: script-file, %s, is refused" % _name, _command, "deny", rule=BT,
+       carries=("test-author",), **SR)
+for _name, _command in (
+    ("uv run gen_ok.py, writes src/app.py", "uv run gen_ok.py"),
+    ("poetry run python gen_ok.py, writes src/app.py", "poetry run python gen_ok.py"),
+    ("subshell (cd x && python3 ../gen_ok.py), writes src/app.py", "(cd x && python3 ../gen_ok.py)"),
+    ("subshell (python3 gen_ok.py), no cd, writes src/app.py", "(python3 gen_ok.py)"),
+    ("python3 - < gen_ok.py, writes src/app.py", "python3 - < gen_ok.py"),
+    ("./bare_src, no #! line, writes src/app.py", "./bare_src"),
+    ("python3 -m pkg.src_mod, writes src/app.py", "python3 -m pkg.src_mod"),
+    ("pwsh -ExecutionPolicy Bypass -File pwsh_src.ps1, Set-Content onto src/app.ps1",
+     "pwsh -ExecutionPolicy Bypass -File pwsh_src.ps1"),
+    ("FX set in the same command, python3 $FX/gen_ok.py, writes src/app.py",
+     "FX=%s; python3 $FX/gen_ok.py" % SCRIPTREPO),
+    ("node gen_regex_ok.js, a JS regex after the ) of an if, writes src/app.js", "node gen_regex_ok.js"),
+):
+    sh("builder-test: script-file, %s, is allowed" % _name, _command, "allow", **SR)
 
 # ---- the diff, judged at commit, push and SubagentStop
 FAMILY = "diff"
