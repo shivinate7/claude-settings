@@ -12746,6 +12746,21 @@ class ProseJudge(Env):
         self.assertIs(decision_watch._nowindow.run, guarded_run, "decision_watch._nowindow.run is not the claude guard")
         self.assertEqual(decision_watch.invoke_model("probe"), (None, "stubbed by the test base"), "the test base's stub does not read UNKNOWN")
 
+    def test_the_guard_refuses_a_claude_start_and_runs_other_programs(self):
+        # Scope first: a program that is not claude runs through the guard. Then the refusal: a claude start never reaches
+        # the runner. REAL_RUN is a recorder for that half, so a red run (refusal removed) starts no program.
+        ran = decision_watch._nowindow.run([sys.executable, "-c", "print('ran')"], capture_output=True, text=True)
+        self.assertEqual((ran.returncode, ran.stdout.strip()), (0, "ran"), "a program that is not claude did not run through the guard")
+        started = []
+
+        def recorder(args, **kwargs):
+            started.append(list(args))
+            return types.SimpleNamespace(returncode=0, stdout="", stderr="")
+        with unittest.mock.patch.object(sys.modules[__name__], "REAL_RUN", recorder):
+            with self.assertRaises(ModelStarted):
+                decision_watch._nowindow.run(["claude", "-p"])
+        self.assertEqual(started, [], "the refused claude start still reached the runner")
+
     def test_no_backed_line_and_no_added_prose_makes_no_model_call(self):
         # The range changes code only, and the prose on main cites a file the range does not change.
         self.setup_range({PROSE: "# Cloud notes\n\nCloud sessions cannot push to main (read src/other.py:4).\n"}, {BACKING: BACKING_TEXT})
