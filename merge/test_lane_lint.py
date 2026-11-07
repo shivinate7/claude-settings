@@ -11,7 +11,7 @@ The SIGTERM case runs merge in a subprocess through HARNESS, which names the sam
 The merge.laneTests cases register their own profile in mutate_guard.REPLAY_PROFILES, for that case only, and their select is a script in the fixture.
 Temp files: this run's folder (lint/_test_temp.py), removed at exit.
 """
-import atexit, json, os, shutil, signal, subprocess, sys, tempfile, time, unittest, unittest.mock, uuid
+import atexit, json, os, re, shutil, signal, subprocess, sys, tempfile, time, unittest, unittest.mock, uuid
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -483,13 +483,13 @@ class LaneLint(CiJobStub, tm.CloudSession):
         patch.start()
         self.addCleanup(patch.stop)
 
-    def select_text(self, listed, fails):
-        """The fixture selector. It logs each path it is asked about, then prints `listed` for a src/ path, or exits 3 when `fails`."""
+    def select_text(self, listed, fails, prefix="src/"):
+        """The fixture selector. It logs each path it is asked about, then prints `listed` for a path under `prefix`, or exits 3 when `fails`."""
         head = "import sys\nwith open(%r, 'a', encoding='utf-8') as log:\n    log.write(sys.argv[1] + '\\n')\n" % self.select_log
         if fails:
             return head + "sys.exit(3)\n"
         body = "".join("    print(%r)\n" % name for name in listed) or "    pass\n"
-        return head + "if sys.argv[1].startswith('src/'):\n" + body
+        return head + "if sys.argv[1].startswith(%r):\n" % prefix + body
 
     def suite_text(self, name, mode):
         """A fixture suite. It logs its path and its folder first, then passes ("pass"), prints a FAIL line and exits 1 ("fail"),
@@ -500,24 +500,25 @@ class LaneLint(CiJobStub, tm.CloudSession):
                "crash": "raise RuntimeError('the suite died')\n"}[mode]
         return head + end
 
-    def lane_fixture(self, listed=(), suites=None, feat_suites=None, select_fails=False, laneTests=LANE_PROFILE):
-        """The laneTests fixture, one call per case. origin/main gets the config, with merge.laneTests `laneTests` (None: the field
-        is absent), and `suites` ({path: mode}), suites the lane does not touch. origin/feat gets one commit on top: src/p.py, the
-        product file the lane changes; tools/lane_select.py, the profile's select, which lists `listed` for a src/ path or exits 3
-        when `select_fails`; and `feat_suites` ({path: mode}), suites the lane itself adds. A mode is "pass", "fail" or "crash"."""
+    def lane_fixture(self, listed=(), suites=None, feat_suites=None, select_fails=False, laneTests=LANE_PROFILE,
+                     lane=None, select_prefix="src/"):
+        """The laneTests fixture, one call per case. origin/main gets the repo's own parts: the config, with merge.laneTests `laneTests`
+        (None: the field is absent); tools/lane_select.py, the profile's select, which lists `listed` for a path under `select_prefix`
+        or exits 3 when `select_fails`; and `suites` ({path: mode}), suites the lane does not touch. origin/feat gets one commit on top:
+        `lane` ({path: text}, default src/p.py, the product file the lane changes) and `feat_suites` ({path: mode}), suites the lane
+        itself adds. A mode is "pass", "fail" or "crash"."""
         self.select_log = os.path.join(self.t, "select-calls.log")
         self.suite_log = os.path.join(self.t, "suite-runs.log")
         self.use_lane_profile()
-        main = {}
+        main = {"tools/lane_select.py": self.select_text(listed, select_fails, select_prefix)}
         if laneTests is not None:
             main[".github/stamp.json"] = json.dumps(dict(tm.CONFIG, merge=dict(tm.CONFIG["merge"], laneTests=laneTests)))
         main.update({path: self.suite_text(path, mode) for path, mode in (suites or {}).items()})
-        if main:
-            tm.RecordsEnv.on(self, "main", main, "main: the config and the suites the selector lists")
-            tm.head_takes_base(self)  # the lane's head holds main's suites, as a lane that merged main does
-        feat = {"src/p.py": "VALUE = 1\n", "tools/lane_select.py": self.select_text(listed, select_fails)}
+        tm.RecordsEnv.on(self, "main", main, "main: the config, the selector and the suites it lists")
+        tm.head_takes_base(self)  # the lane's head holds main's parts, as a lane that merged main does
+        feat = dict(lane if lane is not None else {"src/p.py": "VALUE = 1\n"})
         feat.update({path: self.suite_text(path, mode) for path, mode in (feat_suites or {}).items()})
-        tm.RecordsEnv.on(self, "feat", feat, "feat: the product file, the selector and the lane's own suites")
+        tm.RecordsEnv.on(self, "feat", feat, "feat: the lane's changes and the suites it adds")
 
     def assert_suite_is_selector_only(self, suite):
         """Scope before subject (P7): the suite is on origin/main and not in the lane's own diff, so only the selector reaches it,
@@ -625,6 +626,26 @@ class LaneLint(CiJobStub, tm.CloudSession):
         self.assertIn(SUITE, self.suite_names(), "the selected suite did not run at the head: " + out)
         self.assertNotEqual(rc, 0, "a selected suite that died read as a pass: " + out)
         self.assertEqual(pass_lines(out), [], out)
+
+    def test_a_selected_suite_for_a_non_code_file_the_lane_changes_runs_and_a_red_one_refuses_the_lane(self):
+        """Contract item 4: every file the lane adds or changes goes to the selector, not only the files the profile's code regex
+        matches. The lane here changes only a non-code file. The selector lists a suite for it; the suite is red; the lane is refused."""
+        self.lane_fixture(listed=[SUITE], suites={SUITE: "fail"}, lane={"docs/map/x.md": "# map note\n"}, select_prefix="docs/map/")
+        tm.sh(self.co, "git", "fetch", "-q", "origin")
+        changed = tm.sh(self.co, "git", "diff", "--name-only", "origin/main...origin/feat").splitlines()
+        code = re.compile(mutate_guard.REPLAY_PROFILES[LANE_PROFILE]["code"])
+        self.assertIn("docs/map/x.md", changed, "the fixture does not change the non-code file")
+        self.assertEqual([path for path in changed if code.search(path)], [],
+                         "a changed file matches the profile's code regex, so the case would test a code file")
+        self.use_ci_job(PASSING, 0)
+        rc, out = self.lint_run("--lane-lint", "7")
+        self.assertIn("docs/map/x.md", self.select_paths(), "the selector was not asked about the lane's non-code file: " + out)
+        self.assertIn(SUITE, self.suite_names(), "the suite the selector lists for the non-code file did not run: " + out)
+        self.assertEqual(rc, 1, out)
+        self.assertTrue(any(SUITE in line and "FAIL" in line for line in out.splitlines()), "the refusal does not name the red suite: " + out)
+        self.assertEqual(pass_lines(out), [], out)
+        self.assertRegex(out, r"(?i)push")
+        self.assertRegex(out, r"(?i)again")
 
     def test_every_red_selected_suite_is_named_and_a_green_one_is_not(self):
         listed = [SUITE, OTHER_SUITE, THIRD_SUITE]
