@@ -1495,3 +1495,7 @@
 - one-home-exempt-whole-file: an `exempt` marker silences every copy of its rule in its file, not only the copy beside it (lint/find_copies.py). Decision: one-home-check
 - one-home-copy-bypasses: a copy with a digit for a number word, or with `<br>` or `<em>` inside it, passes `find_copies.py --in-repo`. Only an attacker writes these forms (`guard-guards-mistakes-only`). Decision: one-home-check
 - one-home-comment-over-blank-line: an HTML comment that spans a blank line is read as prose by `lint/word_runs.py`, because units split at a blank line. Decision: one-home-check
+- one-home-two-fence-regexes: lint/compliance_probes.py and lint/stale_cites.py each keep a FENCE regex (any indent) beside lint/word_runs.py FENCE (3 spaces). A shared any-indent FENCE would end it. Decision: one-home-check
+- one-home-long-gloss-hides: a parenthesised gloss of 8 or more words after a backticked id is not read for copies, so a rule sentence pasted as a gloss passes. Decision: one-home-check
+- stale006-rename-and-reword: a rule renamed and reworded in one change finds no head sentence under its old id, so STALE006 lists its old runs. Owner edits only. Decision: one-home-check
+- stale006-exception-words: NEGATORS omits unless, except and without, so a growth that adds an exception skips the reword check. Owner edits only. Decision: one-home-check
