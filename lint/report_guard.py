@@ -1917,15 +1917,16 @@ def main():
             print(json.dumps(payload))
 
     # The hand-off cite reads the refusals file before pending_refusals settles it away.
+    reply = last_reply(hook)  # one read of the reply for the hand-off cite, the refusals and the report checks
     hand_off, hand_note = "", ""
     try:
         sys.path.insert(0, os.path.join(HERE, "..", "hooks"))
-        hand_off, hand_note = hand_off_problem(hook, last_reply(hook))
+        hand_off, hand_note = hand_off_problem(hook, reply)
     except Exception as err:  # a read that could not run is UNKNOWN, never clear
         hand_note = "Hand-off guard: UNKNOWN, the check did not run (%s)." % type(err).__name__
 
     # Every Stop, landed or not, settles the refusals file; the reason joins whichever block follows.
-    pending = pending_refusals(hook, last_reply(hook))
+    pending = pending_refusals(hook, reply)
     refusal = refusal_reason(pending, hold)  # the triage hold joins the refusals
 
     def stop_for_refusal():
@@ -1942,7 +1943,7 @@ def main():
         if is_last_human(rec):
             last_human_idx = i
 
-    text = last_reply(hook)
+    text = reply
     # The pick check reads the turn after the last incoming message, a peer's included (a lane's input),
     # and runs whether or not the transcript holds a human record. Landing and the report's shape still
     # anchor on the last human message.
