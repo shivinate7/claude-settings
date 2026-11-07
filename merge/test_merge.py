@@ -15,6 +15,7 @@ import ctypes  # the Windows-branch test patches os.name; ctypes' own import wou
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import merge  # noqa: E402
+from required_check import REQUIRED_CHECK  # noqa: E402  the one home of the required check's name (hooks/required_check.py)
 sys.path.append(os.path.join(os.path.dirname(HERE), "lint"))  # append: no lint module shadows one this suite imports
 import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py)
 import _test_temp  # noqa: E402  test-temp-standard: the run folder's one home (lint/_test_temp.py)
@@ -4476,13 +4477,15 @@ class GhHalf(Env):
             self.assertEqual(rc, 0, out)
             self.assertIn(want, out)
 
-    def test_banchi_604_a_pending_check_that_is_not_required_goes_red_after_the_required_are_green(self):
-        # The head reads green on `checks`, `design` still pending, then red. The wait must not end on the green required check.
+    def test_banchi_604_a_pending_check_that_is_not_required_is_not_waited_on_and_its_red_still_refuses(self):
+        # The head reads green on `checks`, `design` still pending, then red. A pending check that is not required does not hold a minute;
+        # the red it turns into is seen on the settle re-read and refuses.
         before = self.head()
         self.set(checks_seq=[[("checks", "pass", ""), ("design", "pending", "")], [("checks", "pass", ""), ("design", "fail", "")]])
         rc, out = self.go()
         self.assertEqual(rc, 1)
         self.assertIn("a check is red: design: fail", out)
+        self.assertNotIn(60, self.paused)  # no minute-long wait for `design`
         self.assertEqual(self.head(), before)  # stopped at the head wait: nothing claimed
         self.assertNotIn(MERGE_CALL, self.calls())
 
@@ -4495,11 +4498,12 @@ class GhHalf(Env):
         self.assertNotIn(MERGE_CALL, self.calls())
         self.assertTrue(self.reverted())
 
-    def test_a_pending_check_that_is_not_required_is_waited_on_then_merges_on_green(self):
-        self.set(checks_seq=[[("checks", "pass", ""), ("design", "pending", "")], [("checks", "pass", ""), ("design", "pass", "")]])
+    def test_a_pending_check_that_is_not_required_is_not_waited_on_and_merges_on_green(self):
+        self.set(checks_seq=[[("checks", "pass", ""), ("design", "pending", "")]])
         rc, out = self.go()
         self.assertEqual(rc, 0, out)
-        self.assertGreaterEqual(self.paused.count(60), 1)
+        self.assertNotIn(60, self.paused)  # no minute-long wait for a check that is not required
+        self.assertTrue(any("design" in l for l in out.splitlines() if l.startswith("merge:")), out)  # the one line names what was not waited on
         self.assertIn(MERGE_CALL, self.calls())
 
     def test_skipped_and_neutral_count_as_passed(self):
@@ -4761,11 +4765,12 @@ class GhHalf(Env):
         self.assertIn(f"b: {t}", red)
         self.assertFalse([e for e in red if "cancel" in e], red)
 
-    def test_a_workflow_run_in_progress_holds_the_wait_though_no_job_is_listed(self):
+    def test_a_pending_run_of_a_workflow_without_the_required_job_does_not_hold_the_wait(self):
+        push_base(self, {".github/workflows/ci.yml": workflow_text("ci", "ci")})  # a readable folder whose one workflow has no required job
         self.set(runs_seq=[[("ci", "in_progress", "")], [("ci", "completed", "success")]])
         rc, out = self.go()
         self.assertEqual(rc, 0, out)
-        self.assertGreaterEqual(self.paused.count(60), 1)
+        self.assertNotIn(60, self.paused)  # the run did not hold a minute
 
     def test_a_failed_workflow_run_stops_the_run_and_an_ignored_one_does_not(self):
         before = self.head()
@@ -5161,16 +5166,16 @@ class RestRoutes(Env):
 
     # ---- the checks of a head are the check runs AND the commit statuses
 
-    def test_one_green_check_run_and_one_pending_status_is_not_green(self):
+    def test_one_green_check_run_and_one_pending_status_is_pending_in_the_preview_and_not_waited_on(self):
         self.set(checks_seq=[[("checks", "pass", ""), ("deploy", "pending", "https://x/s", "status")]], runs_seq=[[("checks", "completed", "success")]])
-        verdict, detail = self.gh_host().head_read(7)
+        verdict, detail = self.gh_host().head_read(7)  # the preview reads every check: the pending status shows
         self.assertEqual(verdict, "pending", detail)
         self.assertIn("deploy", detail)
-        rc, out = self.go()
-        self.assertEqual(rc, 1, out)
-        self.assertIn("Still pending: deploy", out)
-        self.assertNotIn(MERGE_CALL, self.calls())
-        self.assertFalse(self.lock_ref())
+        rc, out = self.go()  # the wait holds on the required checks only
+        self.assertEqual(rc, 0, out)
+        self.assertNotIn("Still pending", out)
+        self.assertNotIn(60, self.paused)
+        self.assertIn(MERGE_CALL, self.calls())
 
     def test_a_failed_or_errored_status_is_red(self):
         for bucket in ("fail", "error"):  # the status states failure and error
@@ -7229,19 +7234,16 @@ class WaitProgress(unittest.TestCase):
         self.assertTrue(ok, why)
         self.assert_gaps_within(lines, 0.0, end)
 
-    def test_a_change_in_the_pending_set_prints_at_once(self):
+    def test_a_pending_check_that_is_not_required_is_never_printed_as_waited_on(self):
         def checks_at(t):
-            if t < 60:
-                return {"checks": [("pending", "")]}
             if t < 300:
                 return {"checks": [("pending", "")], "design": [("pending", "")]}
             return {"checks": [("pass", "")], "design": [("pass", "")]}
         host = ClockedHost(checks_at)
         ok, why, _, waits, _ = self.wait(host, 15)
         self.assertTrue(ok, why)
-        design = [t for t, l in waits if "design" in l]
-        # The change is first read at about 64 s (a read costs 2 s, the loop pauses 60 s). It must print before the next 60 s pass.
-        self.assertTrue(design and design[0] < 120, f"a new pending check named at {design[:1]}; lines at {[round(t) for t, _ in waits]}")
+        self.assertTrue(waits, "no `merge: waiting on` line while the required check was pending")
+        self.assertEqual([l for _, l in waits if "design" in l], [], f"the wait named a check that is not required: {waits}")
 
     def test_a_wait_that_is_green_on_the_first_read_prints_no_waiting_line(self):
         host = ClockedHost(lambda t: {"checks": [("pass", "")]})
@@ -7256,6 +7258,31 @@ class WaitProgress(unittest.TestCase):
         self.assertTrue(ok, why)
         self.assertTrue(lines and lines[0][0] < READ_SECONDS, f"no line before the first read; lines {lines}")
         self.assertIn("checks", lines[0][1])
+
+def workflow_text(name, *jobs):
+    """A workflow file whose top-level name is `name`, with one job per id in `jobs`, one step each."""
+    lines = [f"name: {name}", "on: push", "jobs:"]
+    for job in jobs:
+        lines += [f"  {job}:", "    runs-on: ubuntu-latest", "    steps:", "      - run: echo ok"]
+    return "\n".join(lines) + "\n"
+
+
+def pending_run(name, run_id=101):
+    """A workflow run still in progress, with the fields `gh run list --json` gives it that the wait reads."""
+    return {"databaseId": run_id, "name": name, "workflowName": name, "workflowDatabaseId": run_id, "status": "in_progress", "conclusion": ""}
+
+
+def workflow_folder(test, files=None, git=False):
+    """A checkout root under this run's folder, removed at cleanup. Its .github/workflows holds `files` (name -> text); with `files` None there is
+    no such folder. `git` makes the root a checkout, so the walk up for a workflow folder stops there."""
+    root = os.path.realpath(tempfile.mkdtemp(prefix="required-only-", dir=run_folder()))
+    test.addCleanup(shutil.rmtree, root, True)
+    if git:
+        os.mkdir(os.path.join(root, ".git"))
+    for name, text in (files or {}).items():
+        put(os.path.join(root, ".github", "workflows", name), text)
+    return root
+
 
 class AbsentRequiredCheck(unittest.TestCase):
     """c189 part 2: a required check no run reports ends the wait at once, once every reported check has ended (#746: the pinned checks* names)."""
@@ -7283,11 +7310,13 @@ class AbsentRequiredCheck(unittest.TestCase):
         ok, why, *_ = self.wait(host, 55)
         self.assertTrue(ok, why)
 
-    def test_a_pending_workflow_run_keeps_the_wait_going(self):
-        host = self.host(lambda t: {"checks": [("pass", "")], **({"needed": [("pass", "")]} if t >= 400 else {})})
-        host.runs = lambda sha: [{"name": "ci", "status": "in_progress" if host.clock[0] < 400 else "completed", "conclusion": None if host.clock[0] < 400 else "success"}]
-        ok, why, *_ = self.wait(host, 55)
+    def test_a_pending_run_of_another_workflow_does_not_keep_the_wait_going(self):
+        host = ClockedHost(lambda t: {"checks": [("pass", "")], "needed": [("pass", "")]})
+        host.required, host.cwd = ["checks", "needed"], workflow_folder(self, {"ci.yml": workflow_text("ci", "ci")})
+        host.runs = lambda sha: [pending_run("ci")]  # a run of a workflow that does not define the required job: it is not waited on
+        ok, why, _, _, end = self.wait(host, 55)
         self.assertTrue(ok, why)
+        self.assertLess(end, 55 * 60, f"the wait ran to {end:.0f} s for a run that is not required")
 
     def test_a_required_check_created_late_inside_the_settle_pause_is_waited_for(self):
         host = self.host(lambda t: {"checks": [("pass", "")], **({"needed": [("pass", "")]} if t >= 20 else {})})
@@ -7299,6 +7328,77 @@ class AbsentRequiredCheck(unittest.TestCase):
         ok, why, _, _, end = self.wait(host, 5)
         self.assertFalse(ok)
         self.assertIn("deadline of 5 minutes", why)
+
+class RequiredOnlyWait(unittest.TestCase):
+    """merge-waits-required-only: the wait holds on the required check names. A pending run holds only when its workflow file defines the
+    required job, or when no workflow folder can be read. A pending check or run that is not required never holds the wait, and one line on
+    success names what was not waited for. A red check, required or not, still refuses."""
+    wait = WaitProgress.wait
+
+    def host(self, checks_at, runs=lambda sha: [], folder=None):
+        host = ClockedHost(checks_at)
+        host.required, host.cwd, host.runs = [REQUIRED_CHECK], folder, runs
+        return host
+
+    def test_a_pending_check_that_is_not_required_does_not_hold_a_green_required_check(self):
+        host = self.host(lambda t: {REQUIRED_CHECK: [("pass", "")], "design": [("pending", "")]})
+        ok, why, _, _, end = self.wait(host, 15)
+        self.assertTrue(ok, why)
+        self.assertLess(end, 15 * 60, f"waited {end:.0f} s for a check that is not required")
+
+    def test_a_pending_required_check_still_holds_to_the_deadline(self):
+        host = self.host(lambda t: {REQUIRED_CHECK: [("pending", "")]})
+        ok, why, _, _, end = self.wait(host, 5)
+        self.assertFalse(ok)
+        self.assertIn("deadline of 5 minutes", why)
+        self.assertGreaterEqual(end, 5 * 60)
+
+    def test_a_red_required_check_refuses_at_once(self):
+        host = self.host(lambda t: {REQUIRED_CHECK: [("fail", "")]})
+        ok, why, _, _, end = self.wait(host, 15)
+        self.assertFalse(ok)
+        self.assertIn(f"{REQUIRED_CHECK}: fail", why)
+        self.assertLess(end, 60, f"a red required check waited {end:.0f} s")
+
+    def test_on_success_one_line_names_the_pending_check_and_run_it_did_not_wait_for(self):
+        folder = workflow_folder(self, {"docs.yml": workflow_text("docs", "docs")})
+        host = self.host(lambda t: {REQUIRED_CHECK: [("pass", "")], "design": [("pending", "")]},
+                         runs=lambda sha: [pending_run("docs")], folder=folder)
+        ok, why, lines, _, _ = self.wait(host, 15)
+        self.assertTrue(ok, why)
+        named = [l for _, l in lines if "design" in l or "docs" in l]
+        self.assertEqual(len(named), 1, f"want one line naming what was not waited for: {lines}")
+        self.assertIn("design", named[0])
+        self.assertIn("docs", named[0])
+
+    def test_a_pending_run_of_the_workflow_that_defines_the_required_job_holds_past_an_old_pass(self):
+        folder = workflow_folder(self, {"checks.yml": workflow_text("checks", "checks", REQUIRED_CHECK)})
+        host = self.host(lambda t: {REQUIRED_CHECK: [("pass", "")]}, runs=lambda sha: [pending_run("checks")], folder=folder)
+        ok, why, *_ = self.wait(host, 5)  # the pass row is the old run's: the re-run of the workflow is pending on this head
+        self.assertFalse(ok, why)
+        self.assertIn("deadline of 5 minutes", why)
+
+    def test_a_red_check_that_is_not_required_still_refuses(self):
+        host = self.host(lambda t: {REQUIRED_CHECK: [("pass", "")], "design": [("fail", "")]})
+        ok, why, _, _, end = self.wait(host, 15)
+        self.assertFalse(ok, why)
+        self.assertIn("design: fail", why)
+        self.assertLess(end, 60, f"a red check that is not required waited {end:.0f} s")
+
+    def test_a_pending_run_of_a_workflow_without_the_required_job_does_not_hold_a_green_required_check(self):
+        folder = workflow_folder(self, {"docs.yml": workflow_text("docs", "docs")})
+        host = self.host(lambda t: {REQUIRED_CHECK: [("pass", "")]}, runs=lambda sha: [pending_run("docs")], folder=folder)
+        ok, why, _, _, end = self.wait(host, 15)
+        self.assertTrue(ok, why)
+        self.assertLess(end, 15 * 60, f"waited {end:.0f} s for a run whose workflow does not define the required job")
+
+    def test_a_pending_run_holds_when_no_workflow_folder_can_be_read(self):  # the fallback: unknown holds, so a folder that is not read never lets a run through
+        folder = workflow_folder(self, None, git=True)
+        host = self.host(lambda t: {REQUIRED_CHECK: [("pass", "")]}, runs=lambda sha: [pending_run("docs")], folder=folder)
+        ok, why, *_ = self.wait(host, 5)
+        self.assertFalse(ok, why)
+        self.assertIn("deadline of 5 minutes", why)
+
 
 class SilentWait(Env):
     """Silence: merge printed only the launch line for minutes. A long step printed
