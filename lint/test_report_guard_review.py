@@ -6,19 +6,22 @@ review record for its live head. Choices pinned here:
 - The claim: a line of the reply, outside fenced blocks, with `round <N>` or `reviewer` (either case) and the
   word PASS or PASSED in capitals, in either order. A PASS in an inline code span counts. A test's "verdict PASS"
   is no claim. A PASS that a negation governs ("not PASS", "did not PASS") is no claim.
-- A history line is no claim: a PASS the line places in the past, as stale or before a change ("was before the
-  fix", "went stale after the push").
+- A history line is no claim: a PASS its clause places in the past, as stale or before a change ("was before the
+  fix", "went stale after the push"). Clauses split on `,`, `;` and `--`, and the clause that holds the PASS decides,
+  so a history word in another clause does not hide a claim ("round 2 PASS on #12, superseding the stale round 1 FAIL").
 - The pull requests: each PR number on a claim line, as `#<n>`, `PR <n>`, a backticked `#<n>`, or a github pull URL,
   on the line. Each one is checked. A claim line with no PR is refused, and the reason asks for one.
 - The record: the newest comment whose first line is the review marker, read by merge/merge.py parse_review, that
-  names the pull request (PR: #N) and the live head, and whose rounds hold a PASS. The newest record decides.
+  names the pull request (PR: #N) and the live head, and that merge/merge.py review_state calls done for that head.
+  The newest record decides. The check takes merge's verdict, never a PASS word of its own.
 - The reads: the live head (pulls/<n>) and the comments (issues/<n>/comments), two REST reads per PR, made only for
   such a claim in a lane. A failed read, or an exception in the check, never blocks: the reply gets a systemMessage
   with UNKNOWN, never "clear".
 - The remedy names `merge <n> --review-record` and never the live head sha: a record must name the head the
   reviewer read, and the refusal cannot know which head that was.
 - The installed layout: the script is a symlink in the config folder, with no merge/ beside lint/. The check still
-  finds merge/merge.py, and a claim with no record still blocks.
+  finds merge/merge.py, and a claim with no record still blocks. The copied layout (cloud) is the same, with regular
+  files: the check finds merge/merge.py through the checkout the global rules file names.
 
 A lane is a session whose own get_session record is tagged cs-build:lane or names a parent. A session with no
 such record is owner-facing, and is never read for this check.
@@ -168,9 +171,9 @@ def report(done):
     return "\n".join(["> **Done** " + done, "> **Deviations** none", "> **Input Needed** none", "> **Next** wait"])
 
 
-def record(head=LIVE, n=PR):
-    """A review record comment, in merge/merge.py's own form."""
-    return merge_mod.review_body(n, head, "normal", "no", ROUNDS, "not owed")
+def record(head=LIVE, n=PR, rounds=ROUNDS, fix=None):
+    """A review record comment, in merge/merge.py's own form: Kind normal, Guard or check no, Net value not owed."""
+    return merge_mod.review_body(n, head, "normal", "no", rounds, "not owed", fix)
 
 
 def setUpModule():
@@ -216,17 +219,47 @@ class ReviewRecordTests(unittest.TestCase):
         with open(self.count, encoding="utf-8") as handle:
             return [json.loads(line) for line in handle if line.strip()]
 
-    def install_layout(self):
-        """The installer's landing: each file of lint/ and hooks/ is a symlink in the config folder, and there is
-        no merge/ beside lint/. Returns the script's path in the config folder."""
+    def install_layout(self, copy=False):
+        """The installer's landing: each file of lint/ and hooks/ is a symlink in the config folder, or with copy a
+        regular file (the cloud landing, install.sh's copy mode). There is no merge/ beside lint/ either way.
+        Returns the script's path in the config folder."""
         for src_dir, dst_dir in ((LINT_DIR, os.path.join(self.cfg, "lint")),
                                  (HOOKS_DIR, os.path.join(self.cfg, "hooks"))):
             os.makedirs(dst_dir)
             for name in os.listdir(src_dir):
                 src = os.path.join(src_dir, name)
                 if os.path.isfile(src):
-                    os.symlink(src, os.path.join(dst_dir, name))
+                    if copy:
+                        shutil.copyfile(src, os.path.join(dst_dir, name))
+                    else:
+                        os.symlink(src, os.path.join(dst_dir, name))
         return os.path.join(self.cfg, "lint", "report_guard.py")
+
+    def point_rules_at_checkout(self):
+        """The global rules file: one `@<path>/CLAUDE.md` line naming this real checkout, with merge/merge.py."""
+        clone = os.path.dirname(os.path.realpath(HERE))
+        with open(os.path.join(self.cfg, "CLAUDE.md"), "w", encoding="utf-8") as handle:
+            handle.write("@%s/CLAUDE.md\n" % clone)
+
+    def assert_record_blocks_claim(self, body):
+        """The record is open to merge/merge.py, so a PASS claim on its PR is refused. The fixture is checked first."""
+        self.assertEqual(merge_mod.review_state(merge_mod.parse_review(body), LIVE)[0], "open",
+                         "fixture: merge/merge.py does not call this record open")
+        self.serve(comments=[body])
+        out = self.stop(self.lane_turn(report(CLAIM)))
+        self.assert_reads_of(PR)
+        self.assertIsNotNone(out, "merge calls this record open, but the check let the PASS claim through")
+        self.assert_blocked(out)
+        self.assertIn("PR #12", out["reason"], out)
+
+    def assert_record_satisfies_claim(self, body):
+        """The record is done to merge/merge.py, so a PASS claim on its PR passes on two reads. Fixture checked first."""
+        self.assertEqual(merge_mod.review_state(merge_mod.parse_review(body), LIVE)[0], "done",
+                         "fixture: merge/merge.py does not call this record done")
+        self.serve(comments=[body])
+        out = self.stop(self.lane_turn(report(CLAIM)))
+        self.assert_two_rest_reads()
+        self.assertIsNone(out, out)
 
     def stop(self, records, env_id=True, script=None, block=()):
         """Run the Stop hook on `records`. env_id is this session's remote id (a lane sets it). The stand-in
@@ -322,6 +355,22 @@ class ReviewRecordTests(unittest.TestCase):
                 self.assert_blocked(out)
                 self.assertIn("PR #12", out["reason"], out)
 
+    def test_reviewer_fail_beside_a_design_pass_in_one_round_blocks(self):
+        # Catches: a record read as passed because one line of round 1 says PASS. merge reads the whole round, so the
+        # reviewer's FAIL keeps round 1 open, whatever the design reviewer wrote in the same round.
+        self.assert_record_blocks_claim(record(rounds=[(1, "reviewer", "sonnet", "FAIL"),
+                                                       (1, "design-reviewer", "sonnet", "PASS")]))
+
+    def test_round_passed_then_failed_in_a_later_round_blocks(self):
+        # Catches: a PASS in an earlier round passing the record, though the last round failed.
+        self.assert_record_blocks_claim(record(rounds=[(1, "reviewer", "sonnet", "PASS"),
+                                                       (2, "reviewer", "sonnet", "FAIL")]))
+
+    def test_fix_pass_with_no_round_blocks(self):
+        # Catches: a fix check PASS passing a record with no round recorded. The fix re-reviews a round, so it needs
+        # one. The fix names an earlier head, so its diff is not empty.
+        self.assert_record_blocks_claim(record(rounds=[], fix=(OLD, "reviewer", "sonnet", "PASS")))
+
     def test_lane_pass_naming_no_pr_blocks_and_asks_for_the_pr(self):
         # Catches: a claim with no pull request on its line passing, or refused without asking for one. The live
         # record is on the comments, so only the missing PR can block here.
@@ -409,6 +458,34 @@ class ReviewRecordTests(unittest.TestCase):
         self.assert_reads_of(PR)
         self.assertIn("PR #12", out["reason"], out)
 
+    def test_copied_layout_pass_claim_without_a_record_blocks(self):
+        # Catches: the review check finding merge/ only beside the script's own folder. Copied in (cloud), lint/ and
+        # hooks/ are regular files with no merge/ beside lint/, so `import merge` fails and the claim reads UNKNOWN.
+        # The global rules file names this checkout, whose merge/merge.py the check can load.
+        script = self.install_layout(copy=True)
+        self.point_rules_at_checkout()
+        self.assertFalse(os.path.islink(script), "the copied script is a symlink, so this is not the copy layout")
+        self.assertFalse(os.path.exists(os.path.join(self.cfg, "merge")), "a merge/ beside lint/ hides the copy layout")
+        self.assertTrue(os.path.isfile(os.path.join(os.path.dirname(os.path.realpath(HERE)), "merge", "merge.py")),
+                        "fixture: the rules file names a checkout with no merge/merge.py")
+        self.serve()
+        out = self.stop(self.lane_turn(report(CLAIM)), script=script)
+        self.assertNotIn("UNKNOWN", (out or {}).get("systemMessage", ""),
+                         "copied layout: the check read UNKNOWN, because merge/merge.py was not found beside lint/")
+        self.assert_reads_of(PR)
+        self.assert_blocked(out)
+        self.assertIn("PR #12", out["reason"], out)
+
+    def test_copied_layout_with_no_rules_pointer_reads_unknown_not_a_block(self):
+        # Control: copied in with no merge/ and no rules pointer, the check cannot load the merge tool, so the claim
+        # reads UNKNOWN, never a block. A fix must not turn that unread into a block.
+        script = self.install_layout(copy=True)
+        self.assertFalse(os.path.exists(os.path.join(self.cfg, "CLAUDE.md")), "fixture: a rules pointer is present")
+        self.serve()
+        out = self.stop(self.lane_turn(report(CLAIM)), script=script)
+        self.assertNotEqual((out or {}).get("decision"), "block", out)
+        self.assertIn("UNKNOWN", (out or {}).get("systemMessage", ""), out)
+
     def test_exception_in_the_lane_check_emits_unknown_not_silence(self):
         # Catches: an exception in the lane check, from the override import or the own-lane read, ending the check
         # with no word. The claim is not blocked, and the reply says the check read unknown.
@@ -435,6 +512,12 @@ class ReviewRecordTests(unittest.TestCase):
         out = self.stop(self.lane_turn(report(CLAIM)))
         self.assert_two_rest_reads()
         self.assertIsNone(out, out)
+
+    def test_round_fail_then_a_fix_pass_satisfies_the_claim(self):
+        # Control: merge calls this record done, because the fix check passed the round. The check takes merge's
+        # verdict, so the claim passes on the two reads.
+        self.assert_record_satisfies_claim(record(rounds=[(1, "reviewer", "sonnet", "FAIL")],
+                                                  fix=(OLD, "reviewer", "sonnet", "PASS")))
 
     # Controls: no block, and no read, where the check does not apply.
 
@@ -472,11 +555,25 @@ class ReviewRecordTests(unittest.TestCase):
     def test_history_line_is_not_a_claim(self):
         # Catches: a PASS that the line places in the past, as stale or before a change, blocking the reply.
         for line in ("OTHER: round 1 PASS on PR 12 was before the fix; round 2 is owed.",
+                     "OTHER: Round 1 PASS on #12 was before the fix.",
                      "OTHER: round 1 PASS on #12 went stale after the push."):
             with self.subTest(line=line):
                 self.serve()
                 out = self.stop(self.lane_turn(report(line)))
                 self.assertNotEqual((out or {}).get("decision"), "block", "history line blocked: %s" % line)
+
+    def test_history_word_in_another_clause_does_not_hide_a_pass_claim(self):
+        # Catches: a history word anywhere on the line hiding a PASS that sits in another clause. The clause that holds
+        # the PASS decides, and clauses split on `,`, `;` and `--`.
+        for line in ("OTHER: round 2 PASS on #12, superseding the stale round 1 FAIL.",
+                     "OTHER: round 2 PASS on #12 -- previously FAIL, now PASS.",
+                     "OTHER: reviewer PASS on #12; no longer blocked by CI."):
+            with self.subTest(line=line):
+                self.serve()
+                out = self.stop(self.lane_turn(report(line)))
+                self.assertNotEqual(self.gh_calls(), [], "the PASS claim was read as history: no PR was read")
+                self.assert_reads_of(PR)
+                self.assert_blocked(out)
 
     def test_fence_claim_is_not_a_claim(self):
         # Catches: a claim quoted in a fenced block, which is example text, read as a claim made now.
