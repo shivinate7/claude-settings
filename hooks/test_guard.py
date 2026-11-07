@@ -13511,6 +13511,32 @@ for _name, _command in (
 ):
     sh("builder-test: script-file, %s, is allowed" % _name, _command, "allow", **SR)
 
+# The glued heredoc, `)<<` and `)<<-`, and the glued here-string, `)<<<`. `_GLUED_REDIRECT` does not match a `<` that
+# begins `<<` or `<(`, so the `)` stays on the script word: the operand reads `gen.py)<<EOF`, names no file, and the
+# write is not read. Each refusal runs a script that writes a test path. The stdin forms, `(cat)<<EOF` and
+# `(python3 -)<<EOF`, are the controls: they read as they do today. Each allow twin runs the same form on a script that
+# writes product code.
+for _name, _command in (
+    ("glued input, (python3 gen.py)<<EOF, a glued heredoc, writes tests/x.py", "(python3 gen.py)<<EOF\nx\nEOF\n"),
+    ("glued input, (python3 gen.py)<<-EOF, a glued tab-stripping heredoc, writes tests/x.py",
+     "(python3 gen.py)<<-EOF\nx\nEOF\n"),
+    ("glued input, (python3 gen.py)<<<x, a glued here-string, writes tests/x.py", "(python3 gen.py)<<<x"),
+):
+    sh("builder-test: script-file, %s, is refused" % _name, _command, "deny", rule=BT,
+       carries=("test-author",), **SR)
+for _name, _command in (
+    ("glued input control, (cat)<<EOF, a glued heredoc to cat, which reads no script, is allowed",
+     "(cat)<<EOF\nx\nEOF\n"),
+    ("glued input control, (python3 -)<<EOF, the stdin form, is allowed", "(python3 -)<<EOF\nx = 1\nEOF\n"),
+):
+    sh("builder-test: script-file, %s" % _name, _command, "allow", **SR)
+for _name, _command in (
+    ("glued input, (python3 gen_ok.py)<<EOF, writes src/app.py", "(python3 gen_ok.py)<<EOF\nx\nEOF\n"),
+    ("glued input, (python3 gen_ok.py)<<-EOF, writes src/app.py", "(python3 gen_ok.py)<<-EOF\nx\nEOF\n"),
+    ("glued input, (python3 gen_ok.py)<<<x, writes src/app.py", "(python3 gen_ok.py)<<<x"),
+):
+    sh("builder-test: script-file, %s, is allowed" % _name, _command, "allow", **SR)
+
 
 # `_unparen` re-splits a segment whose `)` is glued to a redirect, and the re-split must keep the segment's script type.
 # The guard calls `_unparen` only when the segment's own tokens are truthy. The checks below pin POWERSHELL_CALL off: a
