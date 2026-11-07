@@ -16475,6 +16475,44 @@ def wp_write(name, expected, rule, item, action="set", doc_id=WP_DOC, **extra):
         **{"url": PQ_URL, **kw})
 
 
+# A str_replace on context is judged on the stored text it edits (hooks/question_form.py stored_why_hit): the
+# write is pinned to a version with if_version, and the session's transcript holds a get of that version whose
+# text the edit's old_str applies to. Each such case names the text the item held before the edit (coordinator
+# ruling 2026-11-07 15:19 CST). The transcript records are the same shape role_use and role_result write.
+STORED_VERSION = 3
+STORED_READS = {}  # (doc_id, context) -> the transcript that shows the item at STORED_VERSION with that context
+
+
+def stored_read_writer(path, doc_id, context):
+    """The build of one transcript: a get of items/<doc_id> on PQ_URL, whose result is the item at STORED_VERSION."""
+    def build():
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        doc = {"id": doc_id, "version": STORED_VERSION, "updatedAt": "2026-11-07T15:00:00Z",
+               "data": {"kind": "decision", "context": context}}
+        get = {"action": "get", "url": PQ_URL, "collection": "items", "doc_id": doc_id}
+        lines = [role_use("toolu_get", "ArtifactData", get),
+                 role_result("toolu_get", json.dumps(doc, ensure_ascii=False))]
+        with open(path, "w", encoding="utf-8") as handle:
+            handle.write("\n".join(lines) + "\n")
+    return build
+
+
+def stored_read(doc_id, context):
+    """The path of the transcript that holds one get of items/<doc_id> at STORED_VERSION, showing `context`. Built on
+    first use, as a lazy fixture."""
+    key = (doc_id, context)
+    if key not in STORED_READS:
+        path = os.path.join(ROOT, "stored", "read-%d.jsonl" % len(STORED_READS))
+        STORED_READS[key] = path
+        lazy_fixture([path], stored_read_writer(path, doc_id, context))
+    return STORED_READS[key]
+
+
+def stored_fields(doc_id, context):
+    """The fields that pin a str_replace on context to the stored text `context`, read from its own transcript."""
+    return {"if_version": STORED_VERSION, "transcript": stored_read(doc_id, context)}
+
+
 def pl(name, expected, item, **extra):
     wp_write("press link: " + name, expected, "press-link", item, **extra)
 
@@ -17001,21 +17039,24 @@ tn("a bare Why yours line with nothing after the colon is denied", "deny",
    tn_task(context=TN_CTX + "\nWhy yours:   "))
 
 
-def tn_replace(name, expected, field, old, new):
-    """One str_replace on a field of the task. The rule judges the text that replaces old_str."""
+def tn_replace(name, expected, field, old, new, stored=None):
+    """One str_replace on a field of the task. The rule judges the text that replaces old_str. `stored` is the context
+    the task held before the edit (see stored_fields); None when the case needs no stored text."""
+    extra = stored_fields("stale-branch-deletes", stored) if stored is not None else {}
     add("task names its check: " + name, expected, "task-names-check" if expected == "deny" else None,
         tool="ArtifactData", cwd=PQ_REPO, url=PQ_URL, action="str_replace", collection="items",
-        doc_id="stale-branch-deletes", field=field, old_str=old, new_str=new)
+        doc_id="stale-branch-deletes", field=field, old_str=old, new_str=new, **extra)
 
 
 tn_replace("a str_replace that drops the Why yours line from context is denied", "deny", "context",
            TN_CTX + "\n" + TN_WHY, TN_CTX)
 tn_replace("a str_replace that keeps the Why yours line in context is allowed", "allow", "context",
-           TN_CTX + "\n" + TN_WHY, "The cloud proxy refused the branch deletes (403) again.\n" + TN_WHY)
+           TN_CTX + "\n" + TN_WHY, "The cloud proxy refused the branch deletes (403) again.\n" + TN_WHY,
+           stored=TN_CTX + "\n" + TN_WHY)
 tn_replace("a str_replace on the title is allowed", "allow", "title",
            "Delete the stale branches", "Delete the old branches")
 tn_replace("a str_replace whose old_str holds no Why yours line is allowed", "allow", "context",
-           TN_CTX, "The cloud proxy refused the branch deletes (403), twice.")
+           TN_CTX, "The cloud proxy refused the branch deletes (403), twice.", stored=TN_CTX + "\n" + TN_WHY)
 # Rule task-why-cited (decision claims-carry-backing, part (v)). hooks/test_question_form.py judges the rule in-process;
 # this case runs the real guard, so a rule the guard does not dispatch would show here as an allow.
 add("task why cited: a Why yours line with a capability reason and no cite is denied by the guard", "deny",
@@ -17080,10 +17121,12 @@ def oj(name, expected, item, rule=OJ_RULE, **extra):
     wp_write("owner judge: " + name, expected, rule, item, doc_id=OJ_DOC, **extra)
 
 
-def oj_replace(name, expected, field, old, new, rule=OJ_RULE):
-    """One str_replace on a field of the decision. The rule judges a context edit that takes a form line out."""
+def oj_replace(name, expected, field, old, new, rule=OJ_RULE, stored=None):
+    """One str_replace on a field of the decision. The rule judges a context edit that takes a form line out. `stored`
+    is the context the decision held before the edit (see stored_fields); None when the case needs no stored text."""
+    extra = stored_fields(OJ_DOC, stored) if stored is not None else {}
     oj("a str_replace " + name, expected, None, rule=rule, action="str_replace", field=field, old_str=old,
-       new_str=new)
+       new_str=new, **extra)
 
 
 def oj_write(data, op="set", collection="items"):
@@ -17227,11 +17270,11 @@ oj_replace("that drops the only Based on line from context is denied", "deny", "
 oj_replace("that swaps the Problem line for a stake outside the set is denied", "deny", "context", OJ_STAKE,
            "Problem (internals): which job runs the check", rule=OJ_PROBLEM_RULES)
 oj_replace("that keeps every form line in context is allowed", "allow", "context", OJ_GOOD,
-           oj_ctx(tail="The stamp check runs in the test job today."))
+           oj_ctx(tail="The stamp check runs in the test job today."), stored=OJ_GOOD)
 oj_replace("that swaps the Problem line for another stake is allowed", "allow", "context", OJ_STAKE,
-           "Problem (money): the test job costs more runner time, so it needs your word")
+           "Problem (money): the test job costs more runner time, so it needs your word", stored=OJ_GOOD)
 oj_replace("whose old_str holds no form line is allowed", "allow", "context", OJ_CTX,
-           "The stamp check runs in the test job today.")
+           "The stamp check runs in the test job today.", stored=OJ_GOOD)
 oj_replace("on the title is allowed", "allow", "title", "Which CI job runs the stamp check?",
            "Which CI job runs the format check?")
 oj_replace("on why is not judged", "allow", "why", OJ_STAKE, "The lint job is shorter.")
@@ -17365,20 +17408,23 @@ wp_write("question departs: a widening pick with no line is refused as uniform-p
          qd_item(context=oj_ctx(departs=None), options=[UP_WIDE, UP_MATCH], pick="a"), doc_id=QD_DOC)
 
 
-def qd_replace(name, expected, old, new, field="context"):
+def qd_replace(name, expected, old, new, field="context", stored=None):
+    """One str_replace on a field of the decision. `stored` is the context the decision held before the edit (see
+    stored_fields); None when the case needs no stored text."""
+    extra = stored_fields(QD_DOC, stored) if stored is not None else {}
     add("question departs: " + name, expected, "question-departs" if expected == "deny" else None,
         tool="ArtifactData", cwd=PQ_REPO, url=PQ_URL, action="str_replace", collection="items", doc_id=QD_DOC,
-        field=field, old_str=old, new_str=new)
+        field=field, old_str=old, new_str=new, **extra)
 
 
 qd_replace("a str_replace that drops the Departs from line from context is denied", "deny", QD_LINE, "")
 qd_replace("a str_replace that drops the line and keeps the form is denied", "deny", oj_ctx(), oj_ctx(departs=None))
 qd_replace("a str_replace that swaps the line for another valid line is allowed", "allow", QD_LINE,
-           "Departs from: lint/stamp.py:run_stamp — the stamp check moves to the test job")
+           "Departs from: lint/stamp.py:run_stamp — the stamp check moves to the test job", stored=oj_ctx())
 qd_replace("a str_replace that keeps the line and changes the prose is allowed", "allow", oj_ctx(),
-           oj_ctx(tail="The stamp check runs in the test job today."))
+           oj_ctx(tail="The stamp check runs in the test job today."), stored=oj_ctx())
 qd_replace("a str_replace whose old_str holds no Departs from line is allowed", "allow", OJ_CTX,
-           "The stamp check runs in the test job today.")
+           "The stamp check runs in the test job today.", stored=oj_ctx())
 qd_replace("a str_replace on the title is not judged", "allow", QD_LINE, "", field="title")
 
 add("question departs: a batch with a decision that has no line is denied", "deny", "question-departs",
@@ -17451,8 +17497,11 @@ def ifr_seam(name, expected, page, item, action="set", **extra):
     CASES[-1]["env"] = {IF_SEAM: page}
 
 
-def ifr_replace(name, expected, field):
-    ifr("a str_replace " + name, expected, None, action="str_replace", field=field, old_str="blue", new_str="green")
+def ifr_replace(name, expected, field, stored=None):
+    """`stored` is the context the item held before the edit (see stored_fields); None when the case needs none."""
+    extra = stored_fields(IF_DOC, stored) if stored is not None else {}
+    ifr("a str_replace " + name, expected, None, action="str_replace", field=field, old_str="blue", new_str="green",
+        **extra)
 
 
 def ifr_batch(name, expected, writes):
@@ -17497,7 +17546,7 @@ ifr("an unlisted key inside a listed field is not judged", "allow", {"reply": {I
 
 ifr_replace("on a field the page does not render is denied", "deny", IF_BOGUS)
 ifr_replace("on reply is allowed once the page lists it", "allow", "reply")
-ifr_replace("on context is allowed", "allow", "context")
+ifr_replace("on context is allowed", "allow", "context", stored="Brand colours differ: the blue mark.")
 ifr_replace("on the title is allowed", "allow", "title")
 
 # A batch is judged entry by entry, whatever the entry's position or op.
@@ -18300,9 +18349,11 @@ ol("a whole-item set of a closed item whose context says option e2 won is allowe
 ol("a str_replace that adds Option e2 wins. to context is denied", "deny", None, action="str_replace",
    field="context", old_str="The test job could run it too.", new_str="Option e2 wins.")
 ol("a str_replace that adds Option b wins. to context is allowed", "allow", None, action="str_replace",
-   field="context", old_str="The test job could run it too.", new_str="Option b wins.")
+   field="context", old_str="The test job could run it too.", new_str="Option b wins.",
+   **stored_fields(OL_DOC, OL_CTX))
 ol("a str_replace that takes option e2 out of context is allowed", "allow", None, action="str_replace",
-   field="context", old_str="Option e2 wins.", new_str="Option a wins.")
+   field="context", old_str="Option e2 wins.", new_str="Option a wins.",
+   **stored_fields(OL_DOC, "The stamp check runs in the lint job today. Option e2 wins."))
 
 # Kind: an item with no kind is a decision. A task and a note are not judged.
 ol("an item with no kind is judged as a decision and denied", "deny",
@@ -18464,7 +18515,7 @@ add("rework off page: a str_replace that adds the phrase to context is denied", 
 rw("a str_replace that adds the phrase in capitals is denied", "deny", None, action="str_replace",
    field="context", old_str="Options are open.", new_str="Options BEING REWORKED.")
 rw("a str_replace that takes the phrase out of context is allowed", "allow", None, action="str_replace",
-   field="context", old_str=RW_TEXT, new_str="Options are ready.")
+   field="context", old_str=RW_TEXT, new_str="Options are ready.", **stored_fields(RW_DOC, RW_TEXT))
 
 # Item text other than context: title, why and an option's own text. The same write with status closed is allowed.
 RW_QUIET = "The options are open."
