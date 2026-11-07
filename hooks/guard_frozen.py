@@ -1302,12 +1302,24 @@ def _runner_inner(tokens, index: int):
     return (rest, inner) if inner is not None else None
 
 
+_GLUED_REDIRECT = re.compile(r"\d*>|&>")
+
+
 def _unparen(segment: str, tokens):
     """`tokens` of a segment inside `( ... )` without the parenthesis glued to its first and last word:
     `(python3 f.py)` reads as `python3 f.py`."""
-    marks = [char for _, char, quote in walk_quotes(segment) if not quote and char in "()"]
+    walked = list(walk_quotes(segment))
+    marks = [char for _, char, quote in walked if not quote and char in "()"]
     if not marks:
         return tokens
+    # `)` is a shell metacharacter, so a redirect glued to it (`)>f`, `)>>f`, `)2>&1`, `)&>f`) is a word of its
+    # own. The tokenizer keeps it on the script word; a space after each unquoted such `)` splits it off.
+    glued = [at + 1 for at, char, quote in walked
+             if not quote and char == ")" and _GLUED_REDIRECT.match(segment, at + 1)]
+    if glued:
+        for at in reversed(glued):
+            segment = segment[:at] + " " + segment[at:]
+        tokens = segment_tokens(segment)
     tokens = list(tokens)
     if marks.count("(") and len(tokens) > 1 and tokens[0].startswith("(") and tokens[0].lstrip("("):
         tokens[0] = tokens[0].lstrip("(")
