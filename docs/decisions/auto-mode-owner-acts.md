@@ -78,19 +78,19 @@ Why: the guard's remedy (`guard_branch_worktree.BRANCH_DELETE_DENY_REASON`) hand
 
 Owner grant, typed in lane lease-push-c-and-d, 2026-11-07 13:28 CST: `go: add the "Own Branch Lease Push" entry to settings.json autoMode.allow, as drafted in lane lease-push-c-and-d`.
 
-A lease push to the session's own lane branch loses nothing this session did not write. It is allowed only when this session pushed the same branch to the same remote earlier, and the push is one of:
+A lease push to a branch this session pushed earlier loses nothing this session did not write. The entry's Covers text says "a lane's own branch"; its real bound is the earlier push, so a batch branch the session pushed is also covered. It is allowed only when this session pushed the same branch to the same remote earlier, and the push is one of:
 
 - `git push --force-with-lease --force-if-includes origin <branch>`
 - `git push --force-with-lease=<branch>:<sha> origin <branch>`, where `<sha>` is the tip this session last pushed.
 
-It can be undone: the old tip stays on the pull request's timeline and in the reflog.
+It can be undone: the old tip stays on the pull request's timeline, and in the reflog of the clone that pushed it.
 
 It never covers a bare `--force` or `-f`, a `+refspec`, a lease with neither `--force-if-includes` nor a named sha, the default branch, an `archive/` ref, `roadmap`, `merge-lock`, a branch this session did not push earlier, `--mirror`, `--all`, or a delete.
 
-Why: the force-push guard's remedy (`PUSH_REASON` in `hooks/guard_push_delete.py`) names `--force-with-lease --force-if-includes`. The classifier's built-in "Git Destructive" rule still refused that form. Pull request #1255 (part d of the lease push roadmap step, `lease-push-c-and-d`) made the red-run check's remedy name no force push. This entry is part c.
+Why: the force-push guard's remedy (`PUSH_REASON` in `hooks/guard_push_delete.py`) names `--force-with-lease --force-if-includes`. The classifier's built-in "Git Destructive" rule still refused that form. Pull request #1255 (part d of the lease push roadmap step, `lease-push-c-and-d`) made the Red-run trailer check's remedy name no force push. This entry is part c.
 
-- Risk: named incident. 9 lease-push refusals and 8 replacement pull requests, 2026-11-02 to 2026-11-04 (count not measured here). Incident home: note `classifier-refuses-lease-push`. Owner's answer on the owner's waiting page, item 257, 2026-11-05 07:44 CST: "shouldn't it be c and d".
-- Check: `hooks/test_auto_mode_allow.py` pins this entry: it exists once, quotes both push forms and the guard remedy from `PUSH_REASON`, and its "Never covers" sentence names each refused act.
+- Risk: named incident. The entry quotes 9 lease-push refusals and 8 replacement pull requests, 2026-11-02 to 2026-11-04, from the roadmap step. A survey of `docs/debts/notes.md` on main (lane relayed-yes-allow, 2026-11-07 13:38 CST) counts 11 refused lease pushes in that span, of both forms. The entry keeps 9, the text the owner granted. Incident home: note `classifier-refuses-lease-push`. Owner's answer on the owner's waiting page, item 257, 2026-11-05 07:44 CST: "shouldn't it be c and d".
+- Check: `hooks/test_auto_mode_allow.py` pins this entry: it exists once, quotes both push forms and the guard remedy from `PUSH_REASON`, and its Covers text binds the sha to the tip this session last pushed, and its "Never covers" sentence names each refused act, including a lease with neither `--force-if-includes` nor a named sha.
 - Gap: the classifier sees the command, not whether this session pushed the branch earlier. The guard still refuses a bare force.
 
 ### Marking a lone lane's PR ready
