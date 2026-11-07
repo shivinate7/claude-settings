@@ -205,8 +205,8 @@ Other tools, in `judge` order:
                        transcript that the `to` names (by agentId or by `name`), and its model is the
                        spawn's `model`, else the role's agents/*.md pin, else CLAUDE_CODE_SUBAGENT_MODEL.
                        A model the guard cannot read, a target no spawn holds, an unreadable transcript
-                       and a `session_...` target pass. The remedy names a fresh spawn, because a resume
-                       keeps its model. Cost: only a message with the marker reads the transcript, once.
+                       and a `session_...` target pass. The remedy names a fresh spawn whose brief carries the
+                       marker, because a resume keeps its model. Cost: only a message with the marker reads the transcript, once.
                        The Workflow scan is static. It reads string-literal `model` and
                        `agentType` keys, and a literal prompt, in each `agent()` call. A template
                        prompt reads its static text only. A step-up call whose prompt or model is
@@ -2657,12 +2657,14 @@ def step_up_reason(prompt: str, role, model) -> str:
 # transcript whose result names the agentId `to`, or whose `name` input is `to`; its model is the spawn's `model`, else its
 # role's agents/*.md pin, else CLAUDE_CODE_SUBAGENT_MODEL ("inherit" counts as unset). A model the guard cannot read, a target
 # no spawn holds, a transcript it cannot read and a cross-session `to` pass. Cost: only a message that carries a third-round
-# marker reads anything, and then one pass over the transcript, one file read of the agents folder at most and no process.
-# It is a rare call, so the cost is one transcript read per such message. Nothing is written.
+# marker reads anything: one pass over the transcript and, for a spawn with no model, the agents/*.md files in file order
+# until one names the role (role_agent_keys). No process starts and nothing is written.
 RESUME_TOOL = "SendMessage"
 RESUME_AGENT_ID = re.compile(r"\bagentId:\s*([A-Za-z0-9_-]+)")
 RESUME_CROSS_SESSION = "session_"
-RESUME_REMEDY = "A resume keeps the agent's old model (%s). Spawn a fresh %s with model"
+# A resume keeps the old model, so the remedy is a fresh spawn. Its brief carries the marker, or the Opus ceiling refuses an Opus spawn.
+RESUME_REMEDY = ("A resume keeps the agent's old model (%s). Spawn a fresh %s with model %s, and open its brief with "
+                 "the `Round 3 of 3` marker, which the Opus ceiling reads.")
 
 
 def step_up_resume_reason(tool_input, payload) -> str:
@@ -2682,20 +2684,24 @@ def step_up_resume_reason(tool_input, payload) -> str:
         return ""
     role = spawn.get("subagent_type")
     model = str(spawn.get("model") or "").strip()
+    if model.lower() == "inherit":  # inherit is unset: the pin and the env default still run
+        model = ""
     if not model:
         pointer = pointer_checkout()  # with no pointer checkout there is no agents folder to read, so no pin
         model = role_pinned_model(pointer, str(role or ROLE_DEFAULT)) if pointer else ""
         if model is None:  # the agents folder cannot be read, so the model is unknown
             return ""
         model = model.split("#")[0].strip().strip("'\"")
+        if model.lower() == "inherit":
+            model = ""
     if not model and model_env_names_one(ROLE_MODEL_ENV):
         model = os.environ[ROLE_MODEL_ENV].strip()
-    if not model or model.lower() == "inherit":  # the parent's model, which the guard cannot read here
+    if not model or model.lower() == "inherit":  # no model named anywhere: the parent's, which the guard cannot read
         return ""
     reason = step_up_reason(message, role, model)
     if not reason:
         return ""
-    return reason.replace("Spawn it with model", RESUME_REMEDY % (model, role))
+    return re.sub(r"Spawn it with model (\w+)\.", lambda hit: RESUME_REMEDY % (model, role, hit.group(1)), reason)
 
 
 def resume_target_spawn(transcript, to):
