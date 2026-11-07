@@ -21,6 +21,7 @@ COMMON = [
     (True, "- Report in 25 lines or fewer unless the brief sets a cap. Order: Done, Deviations, Input Needed, Next."),
     (False, "- End each commit message with: Co-Authored-By: <model> <noreply@anthropic.com>"),
     (False, "- Name no record path in a commit message. The only exception is the Drops-lines: trailer."),
+    (False, "- Before each commit, run `git diff --cached --stat`; if it names a file you did not change this round, commit nothing and report it (decision `lanes-start-in-tool-worktrees`: lanes start only in the tool's own worktrees)."),
     (False, "- Before you end, stop each server you started, by the $! from the same call or through the harness."),
 ]
 READ_ONLY = {"reviewer", "Explore", "Plan", "claude-code-guide", "design-reviewer"}
@@ -32,7 +33,7 @@ SCOPE = {
     "Explore": "Scope: Explore. Never edit. Read and search only.",
     "record-writer": "Scope: record-writer. Edit Markdown (*.md) files only. Report any other change needed.",
     "designer": ("Scope: designer. Edit files in the repo's design folder only. Report any other change needed. "
-                 "Your brief names your lane kind: blind, informed or directed. In a blind lane, never read "
+                 "Your brief names your designer kind: blind, informed or directed. In a blind designer, never read "
                  "the current screen, its code, its screenshots, its mockups, or the repo's design spec and tokens."),
     "design-reviewer": "Scope: design-reviewer. Never edit, write, stage, commit, or push. Read and render only.",
 }

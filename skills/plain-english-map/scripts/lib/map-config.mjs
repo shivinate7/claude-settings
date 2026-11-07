@@ -22,7 +22,7 @@ export const boundSeamReader = () => seamReader;
 export const OPTIONAL_KEYS = Object.freeze(['screenKeys', 'modelSeam', 'workerStage', 'migrationsDir']);
 
 /** The map format this skill reads and writes. `map.config.json` holds `formatVersion`, and a missing key means version 1. Raise it with one step in `map-upgrade.mjs`. */
-export const MAP_FORMAT_VERSION = 3;
+export const MAP_FORMAT_VERSION = 5;
 
 /** The format version of a parsed config. A value that is no whole number, or a version newer than the skill, is an error. It never answers a version the skill cannot read. */
 export const readFormatVersion = (cfg) => {
@@ -45,8 +45,9 @@ const posix = (p) => p.split(/[\\/]/).filter((s) => s && s !== '.').join('/');
 /**
  * Checks the whole shape of one parsed config, and the repo it names. It returns a frozen, normalized copy, or throws an error that
  * names `map.config.json` and the dotted key. Every reader that takes a config takes this object, and no reader checks a key again.
+ * With `{ git: false }` the checks that list tracked files do not run, so no git starts. That result is never marked valid.
  */
-export const validateMapConfig = (cfg, root = process.cwd()) => {
+export const validateMapConfig = (cfg, root = process.cwd(), { git = true } = {}) => {
   if (VALID.has(cfg)) return cfg;
   const bad = (msg) => { throw new Error(`map.config.json ${msg}`); };
   const text = (obj, key, label) => { if (typeof obj[key] !== 'string' || !obj[key]) bad(`"${label}" must be a non-empty string`); };
@@ -74,7 +75,7 @@ export const validateMapConfig = (cfg, root = process.cwd()) => {
   if (!isObject(cfg)) bad('is not an object: the top level must be a JSON object');
   // The version first: a newer map may hold keys this skill does not know, and the refusal must say "update the skill", not "unknown key".
   if (readFormatVersion(cfg) < MAP_FORMAT_VERSION) bad(`"formatVersion" is ${readFormatVersion(cfg)}, and this skill reads version ${MAP_FORMAT_VERSION}. Run node <skill>/scripts/map-upgrade.mjs from the repository root, then run this command again.`);
-  known(cfg, ['formatVersion', 'title', 'codeExtensions', 'mapPaths', ...OPTIONAL_KEYS, 'requireAllKeys']);
+  known(cfg, ['formatVersion', 'title', 'codeExtensions', 'mapPaths', ...OPTIONAL_KEYS, 'decisionsDir', 'decisionIdPattern', 'requireAllKeys']);
   text(cfg, 'title', 'title');
   if ('requireAllKeys' in cfg && typeof cfg.requireAllKeys !== 'boolean') bad('"requireAllKeys" must be true or false');
   // With the flag on, a left-out optional key is an error, so a deleted key goes red and never skips in silence.
@@ -92,6 +93,16 @@ export const validateMapConfig = (cfg, root = process.cwd()) => {
       return posix(p) + (/[\\/]$/.test(p) ? '/' : '');
     });
     withGit.push(() => { for (const p of mapPaths) if (!trackedFiles().some((f) => f.startsWith(p))) bad(`"mapPaths" names ${p}, and no tracked file starts with it`); });
+  }
+  // The two decision keys go together. Neither is in `OPTIONAL_KEYS`: a repo with no decision records needs no key, and `requireAllKeys` never asks for one.
+  for (const [k, other] of [['decisionsDir', 'decisionIdPattern'], ['decisionIdPattern', 'decisionsDir']])
+    if (k in cfg && !(other in cfg)) bad(`has "${k}" and no "${other}": set both or neither`);
+  if ('decisionsDir' in cfg) {
+    text(cfg, 'decisionsDir', 'decisionsDir');
+    place(cfg.decisionsDir, 'decisionsDir', 'folder');
+    text(cfg, 'decisionIdPattern', 'decisionIdPattern');
+    try { new RegExp(cfg.decisionIdPattern); } catch (e) { bad(`"decisionIdPattern" is no regular expression: ${e.message}`); }
+    if (new RegExp(`^(?:${cfg.decisionIdPattern})$`).test('')) bad('"decisionIdPattern" matches the empty text, so it names no id');
   }
   const readTracked = (f) => readFileSync(path.join(root, f), 'utf8');
   if ('screenKeys' in cfg) {
@@ -128,7 +139,7 @@ export const validateMapConfig = (cfg, root = process.cwd()) => {
     withGit.push(() => { const sites = seamReader; if (sites && !seamHasCallSite(posix(cfg.modelSeam.file), trackedFiles(), readTracked, sites))
       bad(`"modelSeam.file" names ${cfg.modelSeam.file}, and no tracked code file calls a model through it`); });
   }
-  for (const run of withGit) run();
+  if (git) for (const run of withGit) run();
   const out = Object.freeze({
     formatVersion: MAP_FORMAT_VERSION,
     title: cfg.title,
@@ -139,13 +150,14 @@ export const validateMapConfig = (cfg, root = process.cwd()) => {
     ...('modelSeam' in cfg && { modelSeam: Object.freeze({ file: posix(cfg.modelSeam.file) }) }),
     ...('workerStage' in cfg && { workerStage: Object.freeze({ ...cfg.workerStage }) }),
     ...('migrationsDir' in cfg && { migrationsDir: `${posix(cfg.migrationsDir)}/` }),
+    ...('decisionsDir' in cfg && { decisionsDir: `${posix(cfg.decisionsDir)}/`, decisionIdPattern: cfg.decisionIdPattern }),
   });
-  VALID.add(out);
+  if (git) VALID.add(out);
   return out;
 };
 
-/** Reads and validates one config file. A missing, broken or malformed file is an error that names the file, never an empty config. */
-export const loadMapConfig = (file, root = process.cwd()) => {
+/** Reads and validates one config file. `opts` goes to `validateMapConfig`. A missing, broken or malformed file is an error that names the file, never an empty config. */
+export const loadMapConfig = (file, root = process.cwd(), opts) => {
   file ??= path.join(root, 'map.config.json');
   let text, cfg;
   try {
@@ -155,6 +167,7 @@ export const loadMapConfig = (file, root = process.cwd()) => {
     throw new Error(`map.config.json cannot be read (${file}): ${e.message}`);
   }
   // The file is read on every call. The deep checks run again only when its text, its path or the root changes.
+  if (opts?.git === false) return validateMapConfig(cfg, root, opts);
   const key = `${root}\0${file}`, hit = LOADED.get(key);
   if (hit?.text === text) return hit.out;
   const out = validateMapConfig(cfg, root);

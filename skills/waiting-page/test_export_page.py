@@ -5,6 +5,29 @@ cases run red against a checkout that lacks it.
 
 Secret-shaped values are joined at run time from parts. No token-shaped literal sits in this source, so a
 secret scanner that reads the committed text finds none.
+
+Contract the page cases assume (the builder builds to it):
+  --page FILE, one export. The page's bytes land at <out>/page/page.html, byte-identical (CRLF and non-ASCII
+    kept). designData still lands at page/designData.json. The page is scanned as text with the same shapes as
+    the docs, before any write. A find refuses the whole export: `refused - N find(s)`, exit 1, nothing written.
+    A CDN script tag such as react@18.3.1 is not a find; an email address in the text is.
+    A second run with the same page prints `same` and rewrites no file (the mtime stays).
+    A page changed outside designData, with the same designData, prints `changed 1`.
+    A mockup change writes two files, designData.json and page.html, so it prints `changed 2`.
+    A page with no designData block, or two, stays `unknown`, exit 2.
+  --all. Each entry folder's page.html, for any role, lands at <export path>/page/page.html. Its files/<path>
+    land byte-identical at <export path>/page/files/<path>. The waiting page exports to waiting/, any other
+    artifact to artifacts/<id>/. Each file written counts one in `changed N`. A find in an artifact's page, or in a
+    supporting file's name or text, refuses only that artifact: exit 1, its copy unchanged, and the other artifacts
+    still export. A supporting file that is not UTF-8 is scanned as cp1252 text, so a cp1252 note holding an email
+    refuses. A file is binary only with a NUL byte, whatever its name: a binary file with no shape in it exports, and a
+    text file under an image or font name is scanned.
+  Retina names are not emails: `logo@2x.png`, as a file name or in page text, exports; `jane@2x.com` refuses.
+  Digit-led domains are emails: jane@1st.example.com, jane@12.34.example.com and jane@1.2.3.com refuse in page text.
+  URL credentials refuse on an IP host as on a host name: postgres://app:<password>@10.0.0.5:5432/db refuses; an IP
+    host with no credentials passes.
+  Verdict words: `changed N`, `same`, `refused` (exit 1), `unknown` (exit 2), and a crash (exit 3, one line).
+  Not pinned here: whether a supporting file no longer fetched is deleted.
 """
 import collections
 import glob
@@ -28,16 +51,50 @@ MARKER = ".complete"  # the session touches it in each collection folder after t
 ARTIFACT = "https://claude.ai/artifact/RddcgXbB6SvTrFZHPmsvFx"
 SENTINEL = 1000000000  # a fixed mtime for a file a run must not rewrite; no clock is read
 TAIL = "aB3" * 12  # 36 characters, the body of a GitHub token
+TG_TAIL = "aB3" * 11 + "Qz"  # 35 characters, the body of a Telegram bot token
+# A line of base64 in an armored PGP key block, built from parts. A key block's header is what the scan keys on; the body
+# is only the line after it, with no shape of its own.
+PGP_BODY = "mQINBFa3pQ8BEADk7Yq2Rv9Lw1Tn5Hs8" + "Jb4Ke6Fa0Pd3Gu7Mi2Oz5Xr9Ct1Vw8Ny4Qe6Lm"
+# Letters only, built from parts: a credential value with no digit. The length rule counts characters, digits or not.
+LETTERS_11 = "QwErTyUi" + "OpA"  # one short of the credential length
+LETTERS_12 = LETTERS_11 + "s"  # the credential length
+LETTERS_14 = "lkjhgfds" + "amnbvc"  # lower case
+LETTERS_16 = "xKqPzLmR" + "tWbNvYcH"
+CLIENT_LETTERS_16 = "BnMvCxZl" + "KjHgFdSa"
+HUMP_AFTER_TWO_16 = "abCdefgh" + "ijklmnop"  # a capital after two lower-case letters: random, not a camelCase word
 DESIGN = re.compile(r'(<script type="application/json" id="designData">)(.*?)(</script>)', re.S)
 DESIGN_BODY = '{"a": "\\u003cp>mockup\\u003c/p>", "b": "<i>raw</i>"}'
 META = {"title": "Queue", "version": 1}
 DEEP = "[" * 5000 + "]" * 5000  # nests past the interpreter's recursion limit: a crash, not a verdict
 RUN_FOLDER = None  # made in setUpModule
+TOKEN = "ghp_" + TAIL  # a GitHub-token shape, built at run time
+MAIL = "person.name" + "@" + "example.com"  # a personal-email shape, built at run time
+PASSWORD = "hunter2"  # a password value; the URLs below join it at run time, so no credential URL is a literal here
+DB_IP_URL = "postgres://app:" + PASSWORD + "@10.0.0.5:5432/db"  # credentials on an IP host, with a port
+BUILD_IP_URL = "https://svc:" + PASSWORD + "@10.0.0.5/build"  # credentials on an IP host, with no port
+DB_NAME_URL = "postgres://app:" + PASSWORD + "@db.example.com:5432/db"  # the control: a host name refuses today
+IP_LINK_SNIPPET = '<a href="https://10.0.0.5:5432/db">db</a>\n'  # an IP host with no credentials is not a secret
 
 with open(os.path.join(HERE, "page.html"), encoding="utf-8") as f:
     PAGE = f.read()
 assert len(DESIGN.findall(PAGE)) == 1, "page.html must hold one designData block: the fixture's shape"
 DESIGN_ELEMENT = DESIGN.search(PAGE).group(0)
+# The fixture page as bytes with a CRLF line and non-ASCII text, so a copy that normalizes either goes red.
+PAGE_BYTES = PAGE.replace("<style>", "<!-- café — über -->\r\n<style>", 1).encode("utf-8")
+REVISED_PAGE = PAGE.replace("<style>", "<!-- revised note -->\n<style>", 1).encode("utf-8")  # changed outside designData
+QUEUE_PAGE = ("<!doctype html>\r\n<html><head><meta charset=\"utf-8\"><title>Queue café</title></head>\r\n"
+              "<body><p>Queue page</p></body></html>\r\n").encode("utf-8")  # a page with no designData block
+BIG_PAGE = (PAGE + "".join("<p>Row %d of the synthetic page.</p>\n" % n for n in range(1, 25001))).encode("utf-8")  # about 1.2 MB
+CDN_SNIPPET = ('<script src="https://cdn.jsdelivr.net/npm/react@18.3.1/umd/react.production.min.js"></script>\n'
+               '<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js"></script>\n')
+PROSE_SNIPPET = ("<p>Don't use /* or // or # here.</p>\n<!-- a note for the reader -->\n"
+                 "<script>\nconst s = `line one\nline two`;\n</script>\n")
+
+# Parts of the postal-address and credential-name rows. A credential value is joined from parts, as TAIL is.
+STREET = "123 Main Street"
+API_VALUE = "abcdefgh" + "12345678"
+SESSION_VALUE = "q9W8e7R6" + "t5Y4u3I2"
+CLIENT_VALUE = "Zx8Kp2Lm" + "9Qw4Rt7Y"
 
 # (label, the note's value, the text that must never be printed). A dict or a list nests the secret.
 RED = [
@@ -54,9 +111,22 @@ RED = [
     ("Slack token", "xoxb-" + "123456789012-abcdefABCDEF", "xoxb-" + "123456789012-abcdefABCDEF"),
     ("Google API key", "AIzaSy" + "aB3" * 11, "AIzaSy" + "aB3" * 11),
     ("Stripe live key", "sk_live_" + "aB3" * 8, "sk_live_" + "aB3" * 8),
+    ("Stripe test key", "sk_test_" + "aB3" * 6, "sk_test_" + "aB3" * 6),
+    ("Stripe restricted test key", "rk_test_" + "aB3" * 6, "rk_test_" + "aB3" * 6),
+    ("Stripe test key of 16 characters", "sk_test_" + "aB3" * 5 + "a", "sk_test_" + "aB3" * 5 + "a"),
+    ("Docker Hub PAT", "dckr_pat_" + "aB3" * 7, "dckr_pat_" + "aB3" * 7),
+    ("Docker Hub PAT of 20 characters", "dckr_pat_" + "aB3" * 6 + "aB", "dckr_pat_" + "aB3" * 6 + "aB"),
+    # A Telegram token is digits, a colon and 35 characters. In the bot API URL the digits follow `bot` with no word boundary.
+    ("Telegram bot token of 10 digits", "1234567890:" + TG_TAIL, "1234567890:" + TG_TAIL),
+    ("Telegram bot token after a label", "Bot token: " + "12345678:" + TG_TAIL, "12345678:" + TG_TAIL),
+    ("Telegram bot API URL", "https://api.telegram.org/bot" + "123456789:" + TG_TAIL + "/getMe",
+     "123456789:" + TG_TAIL),
     ("GitLab token", "glpat-" + "aB3" * 6 + "Qz", "glpat-" + "aB3" * 6 + "Qz"),
     ("PEM private key header", "-----BEGIN " + "RSA " + "PRIVATE KEY-----", "-----BEGIN " + "RSA " + "PRIVATE KEY-----"),
     ("PEM OpenSSH key header", "-----BEGIN " + "OPENSSH " + "PRIVATE KEY-----", "-----BEGIN " + "OPENSSH " + "PRIVATE KEY-----"),
+    # A PGP header has BLOCK between KEY and the dashes, so a shape that ends at PRIVATE KEY----- misses it.
+    ("PGP private key block header with a body line",
+     "-----BEGIN " + "PGP PRIVATE KEY BLOCK-----" + "\n" + PGP_BODY, "-----BEGIN " + "PGP PRIVATE KEY BLOCK-----"),
     ("JWT", "eyJ" + "hbGciOiJIUzI1NiJ9" + "." + "eyJzdWIiOiJ1c3IifQ" + "." + "c2lnbmF0dXJl",
      "eyJ" + "hbGciOiJIUzI1NiJ9" + "." + "eyJzdWIiOiJ1c3IifQ" + "." + "c2lnbmF0dXJl"),
     ("Authorization Bearer header", "Authorization: Bearer " + "xq7Lp2Vw9Rt4Ys8Zn1Mh", "xq7Lp2Vw9Rt4Ys8Zn1Mh"),
@@ -73,6 +143,18 @@ RED = [
     ("env-style password assignment", "DB_PASSWORD=" + "hunter2", "hunter2"),
     ("password with a colon", "password: " + "hunter2", "hunter2"),
     ("pwd with spaces around the sign", "pwd = " + "hunter2", "hunter2"),
+    # A placeholder or a plain word is no secret only as the whole value. A secret after a placeholder, or a second
+    # keyword after a shell path, is one.
+    ("password with an angle-bracket value", "password: " + "<hunter2>", "hunter2"),
+    ("password with a placeholder before a secret", "password: " + "<x>" + "hunter2", "hunter2"),
+    ("password with a brace placeholder", "password: " + "${hunter2}", "hunter2"),
+    ("password with a dollar name", "password: " + "$Tr0ub4dor", "Tr0ub4dor"),
+    ("password with a percent name", "password: " + "%Hunter2%", "Hunter2"),
+    ("PWD path with a second keyword after a semicolon", "PWD=/home/x;" + "password=" + "hunter2", "hunter2"),
+    ("PWD path with a second keyword after an ampersand", "PWD=/home/x&" + "password=" + "hunter2", "hunter2"),
+    # Refused today, kept so that a fix which matches a prefix, or a lower-case path, goes red.
+    ("password with a plain word and digits", "password: " + "none123", "none123"),
+    ("lower-case pwd with a path value", "pwd=" + "/Users/x", "/Users/x"),
     ("email address", "person.name" + "@" + "example.com", "person.name@example.com"),
     ("phone number", "+1 (555) 010-2345", "+1 (555) 010-2345"),
     ("phone number with dots", "555" + "." + "010" + "." + "2345", "555.010.2345"),
@@ -85,6 +167,69 @@ RED = [
     ("token after a comment opener", "see /* " + "ghp_" + TAIL, "ghp_" + TAIL),
     ("token after a lone quote", "Don't paste " + "ghp_" + TAIL, "ghp_" + TAIL),
     ("token in a multi-line string", "first line\nsecond line " + "ghp_" + TAIL + "\nthird line", "ghp_" + TAIL),
+    ("street address", STREET, STREET),
+    ("PO box", "PO BOX 1234", "PO BOX 1234"),
+    ("P.O. box", "P.O. Box 1234", "P.O. Box 1234"),
+    ("city, state and ZIP", "AUSTIN, TX 78701", "AUSTIN, TX 78701"),
+    ("city, state and ZIP+4", "Austin, TX 78701-1234", "Austin, TX 78701-1234"),
+    ("street address in a full line", "Send it to " + STREET + ", Austin, TX 78701", STREET),
+    ("API_SECRET assignment", "API_SECRET=" + API_VALUE, API_VALUE),
+    ("SESSION_TOKEN assignment", "SESSION_TOKEN=" + SESSION_VALUE, SESSION_VALUE),
+    ("CLIENT_SECRET assignment with a colon", "CLIENT_SECRET: " + CLIENT_VALUE, CLIENT_VALUE),
+    ("cf_clearance cookie value", "cf_clearance=" + "c3c3c3c3" + "c3c3c3c3", "c3c3c3c3" + "c3c3c3c3"),
+    ("sessionid cookie value", "sessionid=" + "abcdef0123" + "456789abcd", "abcdef0123" + "456789abcd"),
+    ("SESSION_COOKIE assignment", "SESSION_COOKIE=" + "abcdefgh" + "12345678", "abcdefgh" + "12345678"),
+    ("bare Bearer token with no header name", "Bearer " + "abcdefghijkl" + "mnopqrstuvwx", "abcdefghijkl" + "mnopqrstuvwx"),
+    ("TCG_TRACKING_KEY assignment", "TCG_TRACKING_KEY=" + "k9Qx7vLm" + "2Npw4Rt8", "k9Qx7vLm" + "2Npw4Rt8"),
+    ("X-API-Key header", "X-API-Key: " + "abcdef" + "1234567890", "abcdef" + "1234567890"),
+    ("secret: value", "secret: " + "abcd1234" + "efgh", "abcd1234" + "efgh"),
+    ("token: value", "token: " + "abcd1234" + "efgh", "abcd1234" + "efgh"),
+    ("bare Basic credential", "Basic " + "abcdefghij" + "klmnopqrst", "abcdefghij" + "klmnopqrst"),
+    ("csrftoken cookie value", "csrftoken=" + "a1b2c3d4" + "e5f6g7h8", "a1b2c3d4" + "e5f6g7h8"),
+    ("sid cookie value", "sid=" + "a1b2c3d4" + "e5f6g7h8", "a1b2c3d4" + "e5f6g7h8"),
+    ("apiKey camelCase name", "apiKey: " + "abcd1234" + "efgh5678", "abcd1234" + "efgh5678"),
+    ("clientSecret camelCase name", "clientSecret: " + CLIENT_VALUE, CLIENT_VALUE),
+    ("apikey with no separator", "apikey=" + API_VALUE, API_VALUE),
+    ("authtoken with a colon", "authtoken: " + SESSION_VALUE, SESSION_VALUE),
+    ("SECRET_KEY_BASE assignment", "SECRET_KEY_BASE=" + "w8Kd2Lp9" + "Vx4Qz7Mn", "w8Kd2Lp9" + "Vx4Qz7Mn"),
+    ("API_KEY_V2 assignment", "API_KEY_V2=" + "Hk3Lm9Qp" + "Wz7Rt2Yc", "Hk3Lm9Qp" + "Wz7Rt2Yc"),
+    ("clientSecret as a JSON pair", '"clientSecret": "' + CLIENT_VALUE + '"', CLIENT_VALUE),
+    # A credential name set to a value of 12 or more characters is refused, digits or not. These values have no digit.
+    ("API_KEY assignment of 12 letters", "API_KEY=" + LETTERS_12, LETTERS_12),
+    ("GITHUB_TOKEN assignment of 16 letters", "GITHUB_TOKEN=" + LETTERS_16, LETTERS_16),
+    ("CLIENT_SECRET with a colon and 16 letters", "CLIENT_SECRET: " + CLIENT_LETTERS_16, CLIENT_LETTERS_16),
+    ("lower-case api_key in quotes of 14 letters", 'api_key = "' + LETTERS_14 + '"', LETTERS_14),
+    # Raw JSON text: the closing quote of the name sits before the separator, so the name is not followed by = or :.
+    ("raw JSON api_key pair of 16 letters", '"api_key": "' + LETTERS_16 + '"', LETTERS_16),
+    ("raw JSON GITHUB_TOKEN pair of 16 letters", '"GITHUB_TOKEN": "' + LETTERS_16 + '"', LETTERS_16),
+    # The letters-only branch of the credential-name shape, at the ends of its value: a comma, a newline, a semicolon, a
+    # hump after two letters. Each value has no digit, so the digit branch does not refuse it.
+    ("raw JSON api_key pair followed by a comma and a number", '{"api_key": "' + LETTERS_16 + '", "n": 1}', LETTERS_16),
+    ("API_KEY of 12 letters before a newline", "API_KEY=" + LETTERS_12 + "\nOTHER=1", LETTERS_12),
+    ("API_KEY of 12 letters before a CRLF", "API_KEY=" + LETTERS_12 + "\r\nOTHER=1", LETTERS_12),
+    ("api_key in quotes followed by a semicolon", 'api_key = "' + LETTERS_14 + '";', LETTERS_14),
+    ("api_key with a hump after only two lower-case letters", "api_key: " + HUMP_AFTER_TWO_16, HUMP_AFTER_TWO_16),
+    ("street with the suffix Park", "1400 Lakeshore Park", "1400 Lakeshore Park"),
+    ("street with the suffix Trail", "2500 Maple Trail", "2500 Maple Trail"),
+    ("street with the suffix Cir", "1200 Oak Cir", "1200 Oak Cir"),
+    ("street with the suffix Ter", "400 Pine Ter", "400 Pine Ter"),
+    # Over-widening guard: a placeholder or a tool value must not open these real-looking values.
+    ("password with a real-looking value", "password: " + "S3cr3t!x9", "S3cr3t!x9"),
+    ("pwd assignment with a real-looking value", "pwd=" + "hunter2x", "hunter2x"),
+    ("personal address with a dotted name", "jane.doe" + "@" + "example.com", "jane.doe@example.com"),
+    ("personal address on a personal host", "jane" + "@" + "myhost.example.com", "jane@myhost.example.com"),
+    ("personal ssh-form remote on a personal host", "jane" + "@" + "myhost.example.com:notes.git",
+     "jane@myhost.example.com:notes.git"),
+    # A mask is no secret only as the whole value. A no-reply name is no person only as the whole local part, and an
+    # ssh remote of a public git host is no person only when its local part is `git`.
+    ("password with asterisks before a secret", "password: " + "***" + "hunter2", "hunter2"),
+    ("personal name in the ssh form of a public git host", "jane" + "@" + "github.com:x", "jane@github.com:x"),
+    ("no-reply name before a personal name", "noreply-jane" + "@" + "x.com", "noreply-jane@x.com"),
+    ("no-reply name after a personal name", "jane.noreply" + "@" + "x.com", "jane.noreply@x.com"),
+    # A plain word is no secret only as the whole value. A secret after one, with or without a comma or quotes, is one.
+    ("password with a plain word before a secret", "password: " + "none hunter2", "hunter2"),
+    ("password with a plain word and a comma before a secret", "password: " + "none, hunter2", "hunter2"),
+    ("password with a quoted plain word before a secret", "password: " + '"none" hunter2', "hunter2"),
 ]
 
 # (label, the note's value). Words, a URL, a time, an id and a number that are not secrets pass.
@@ -92,6 +237,8 @@ GREEN = [
     ("token budget", "token budget"),
     ("password manager", "password manager"),
     ("private key rotation", "rotate the private key"),
+    # A public key block is not a secret. A fix that drops PRIVATE from the shape would refuse it.
+    ("PGP public key block header with a body line", "-----BEGIN " + "PGP PUBLIC KEY BLOCK-----" + "\n" + PGP_BODY),
     ("owner's first name", "Shivam"),
     ("comment openers and a lone quote", "Don't use /* or // or # here"),
     ("multi-line text", "line one\nline two"),
@@ -112,6 +259,83 @@ GREEN = [
     ("u_ id of 24 characters", "u_Qm4xT7bR2nKs9LfW0aZcYe"),
     ("a key named token", {"token": "budget"}),
     ("a number with 14 digits, not a string", {"n": 20261102110400, "note": "budget"}),
+    # Near misses of the address and credential shapes: a street word, a state code before a five-digit number, a rule name.
+    ("step number of three digits", "step 123"),
+    ("a street name with no number", "Main Street"),
+    ("PR number before the word lane", "PR 1167 batch lane"),
+    ("a digit before the word road", "step 3 on the road map"),
+    ("a digit before the word way", "a 2 way merge"),
+    ("a digit before a hyphenated word", "lane 4 drive-by fix"),
+    ("PR with a five-digit number", "merged, PR 12345"),
+    ("OK with a five-digit number", "done, OK 12345"),
+    ("a bare rule name in caps with TOKEN", "TOKEN_BUDGET"),
+    ("a TOKENS setting with a number", "CLAUDE_CODE_MAX_OUTPUT_TOKENS=64000"),
+    ("a MAX_TOKENS setting with a number", "MAX_TOKENS=200000"),
+    ("a model setting", "CLAUDE_CODE_SUBAGENT_MODEL=sonnet"),
+    ("a CI secret reference", "GITHUB_TOKEN=${{ secrets.GITHUB_TOKEN }}"),
+    ("an env-var reference in a secret name", "API_SECRET=$API_SECRET"),
+    ("a rule anchor name", "rule roles-review-cap-three"),
+    ("a count of records", "3 records in place"),
+    ("a count of cards", "5 cards in this lane"),
+    ("a join key label with a colon", "join key:"),
+    ("a JSX key prop", "key={item.id}"),
+    ("a token label with a plain word", "token: budget"),
+    ("a secret label with no value", "secret: none"),
+    ("the word Basic in prose", "Basic idea: keep it short"),
+    ("the word sid in prose", "sid is the session id"),
+    ("a token budget label with a number", "token budget: 200000"),
+    ("a KEY label with prose", "KEY: see the record"),
+    # Prose with a time or a number before a street word or a key word is no address and no credential name, so it passes.
+    ("a time and a street word in prose", "Meeting 13:44 CDT. Lane 2 is open"),
+    ("a time with PM and a street word in prose", "Due 5 PM. Way forward is clear"),
+    ("a number before the word Park in prose", "Phase 2 Park the lane"),
+    ("a key inside a longer word", "turnkey solution"),
+    ("a keyboard label with a number", "keyboard: 104 keys"),
+    # A shell variable, an ssh remote, a no-reply address, and the placeholders and masks: none names a secret.
+    ("password word with optional", "password: " + "optional"),
+    ("shell working-dir variable", "PWD" + "=" + "/Users/x"),
+    ("ssh remote of a public host", "git" + "@" + "github.com:" + "owner/repo.git"),
+    ("no-reply address", "noreply" + "@" + "anthropic.com"),
+    ("password placeholder none", "password: " + "none"),
+    ("password mask", "password: " + "*" * 8),
+    ("password template placeholder", "Password: " + "<your-password>"),
+    ("env var from a template", "POSTGRES_" + "PASSWORD=" + "${DB_PASSWORD}"),
+    # A placeholder or a plain word inside quotes, brackets or parentheses, and a quoted shell path, name no secret.
+    ("quoted optional after a password word", "password: " + '"optional"'),
+    ("plain word in parentheses after a password word", "(password: none)"),
+    ("bracketed optional after a password word", "password: " + "[optional]"),
+    ("quoted shell path after PWD", 'PWD="/home/x"'),
+    # A placeholder, a mask or a plain word after a password word is no secret when it is the whole value.
+    ("password word with a shell variable", "password: " + "$DB_PASSWORD"),
+    ("password word with a brace template", "password: " + "{{DB_PASSWORD}}"),
+    ("password word with a percent template", "password: " + "%DB_PASSWORD%"),
+    ("password word with xxx", "password: " + "xxx"),
+    ("password word with a bullet mask", "password: " + "•" * 3),
+    ("single-quoted optional after a password word", "password: " + "'optional'"),
+    ("parenthesized none after a password word", "password: " + "(none)"),
+    ("none with a period after a password word", "password: " + "none."),
+    # Near misses of the three new shapes: a digit count, a tail length, a prefix inside a word, and a clock time pass.
+    ("Telegram token with 11 digits before the colon", "12345678901:" + TG_TAIL),
+    ("Telegram token with a 34-character tail", "123456789:" + TG_TAIL[:34]),
+    ("Telegram token with a 36-character tail", "123456789:" + TG_TAIL + "x"),
+    ("a clock time", "standup at 10:30"),
+    ("Docker Hub PAT with 19 characters", "dckr_pat_" + "aB3" * 6 + "a"),
+    ("Stripe test key with 15 characters", "sk_test_" + "aB3" * 5),
+    ("a word that holds the Stripe test prefix", "risk_test_coverage_plan"),
+    ("a word that holds the Stripe test prefix before a long body", "risk_test_" + "aB3" * 7),
+    # A credential name below 12 characters, a placeholder, a variable reference, a plain word and prose pass.
+    ("API_KEY with 11 letters", "API_KEY=" + LETTERS_11),
+    ("API_KEY set to a placeholder", "API_KEY=<your-api-key>"),
+    ("API_KEY set to a long variable reference", "API_KEY=${MY_LONG_API_KEY_NAME}"),
+    ("MY_TOKEN set to a plain word", "MY_TOKEN=optional"),
+    ("MY_TOKEN set to a long placeholder", "MY_TOKEN=<your-long-token-here>"),
+    ("prose with the word secret before a name", "the secret santa list"),
+    # The names that do not count under the rule (bare token, camelCase, a hyphenated or a non-credential name) pass.
+    # These four are false alarms today: each refuses on its value's length, so they are red on the builder's head.
+    ("destructured token alias", "const { token: accessTokenValue } = await getSession();"),
+    ("camelCase accessToken key with a call", "accessToken: localStorage.getItem('accessToken')"),
+    ("CSS custom property ending in token", "--color-token: rgba(0,0,0,0.5);"),
+    ("prose with Token before a sentence", "Token: Authorization needed before we continue"),
 ]
 
 
@@ -130,6 +354,40 @@ def write_text(path, text):
 def read_text(path):
     with open(path, encoding="utf-8") as f:
         return f.read()
+
+
+def write_bytes(path, data):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "wb") as f:
+        f.write(data)
+    return path
+
+
+def read_bytes(path):
+    with open(path, "rb") as f:
+        return f.read()
+
+
+def page_with(snippet):
+    """The fixture page with `snippet` before its designData block, so the snippet's text sits outside the block."""
+    return PAGE.replace(DESIGN_ELEMENT, snippet + DESIGN_ELEMENT, 1)
+
+
+def page_snippets():
+    """(label, snippet, secret): a secret-shaped value in page text outside designData, at each shape of text a scanner
+    could misread: a comment opener inside a string, a multi-line template literal, a lone quote, and an email."""
+    return (
+        ("token in a paragraph", "<p>Token: %s</p>\n" % TOKEN, TOKEN),
+        ("token after a comment opener in a CSS string", '<style>.x::before { content: "/* %s"; }</style>\n' % TOKEN, TOKEN),
+        ("token after // in a JS string", '<script>const a = "// %s";</script>\n' % TOKEN, TOKEN),
+        ("token in a multi-line template literal", "<script>\nconst t = `first line\nsecond line %s\nthird line`;\n</script>\n" % TOKEN,
+         TOKEN),
+        ("token after a lone quote in text", "<p>Don't paste %s</p>\n" % TOKEN, TOKEN),
+        ("email address in text", "<p>Contact %s</p>\n" % MAIL, MAIL),
+        ("URL credentials on an IP host with a port", "<p>Database: %s</p>\n" % DB_IP_URL, PASSWORD),
+        ("URL credentials on an IP host with no port", "<p>Build: %s</p>\n" % BUILD_IP_URL, PASSWORD),
+        ("URL credentials on a host name, the control", "<p>Database: %s</p>\n" % DB_NAME_URL, PASSWORD),
+    )
 
 
 def snapshot(folder):
@@ -296,8 +554,8 @@ class Scan(Base):
                 doc = {"id": "ok", "title": "Ok", "note": value}
                 out = self.out("waiting-%d" % index)
                 r = self.export(self.fetch(items={"ok": doc}), out)
-                self.assertEqual(r.returncode, 0, "%s: a non-secret was refused or failed. Output:\n%s" % (label, shown(r)))
-                self.assertFalse(says(r, "refused"), label)
+                self.assertFalse(says(r, "refused"), "%s: the scan refused a non-secret. Output:\n%s" % (label, shown(r)))
+                self.assertEqual(r.returncode, 0, "%s: the run failed without a refusal. Output:\n%s" % (label, shown(r)))
                 self.assertEqual(read_text(os.path.join(out, "items", "ok.json")), canonical(doc), label)
 
 
@@ -461,7 +719,8 @@ class Page(Base):
         self.assertNotIn(TAIL, r.stdout + r.stderr, "the matched value was printed")
         self.assertEqual(snapshot(out), before, "a refused page changed the copy")
 
-    def test_a_mockup_change_alone_counts_one(self):
+    def test_a_mockup_change_counts_designdata_and_the_page_html(self):
+        # designData.json and page.html both hold the mockup, so one mockup change writes two files.
         first = write_text(os.path.join(self.tmp.name, "page-first.html"), DESIGN.sub(lambda m: m.group(1) + DESIGN_BODY + m.group(3), PAGE, count=1))
         second = write_text(os.path.join(self.tmp.name, "page-second.html"),
                             DESIGN.sub(lambda m: m.group(1) + '{"a": "changed mockup"}' + m.group(3), PAGE, count=1))
@@ -469,8 +728,136 @@ class Page(Base):
         out = self.out()
         self.assertEqual(self.export(fetched, out, page=first).returncode, 0)
         r = self.export(fetched, out, page=second)
+        self.assertChanged(r, 2)
+        self.assertEqual(r.returncode, 0, shown(r))
+
+    def test_the_page_lands_at_page_html_byte_identical(self):
+        page = write_bytes(os.path.join(self.tmp.name, "page.html"), PAGE_BYTES)
+        out = self.out()
+        r = self.export(self.fetch(meta={"page": META}), out, page=page)
+        self.assertVerdict(r, "changed")
+        self.assertEqual(r.returncode, 0, shown(r))
+        landed = os.path.join(out, "page", "page.html")
+        self.assertTrue(os.path.isfile(landed), "page/page.html was not written. Output:\n" + shown(r))
+        self.assertEqual(read_bytes(landed), PAGE_BYTES, "page/page.html is not byte-identical to the page (CRLF or non-ASCII changed)")
+
+    def test_a_full_size_page_lands_byte_identical_with_its_full_database(self):
+        page = write_bytes(os.path.join(self.tmp.name, "page.html"), BIG_PAGE)
+        out = self.out()
+        r = self.export(self.fetch(**full_size()), out, page=page)
+        self.assertVerdict(r, "changed")
+        self.assertEqual(r.returncode, 0, shown(r))
+        landed = os.path.join(out, "page", "page.html")
+        self.assertTrue(os.path.isfile(landed), "page/page.html was not written for the full-size page")
+        self.assertEqual(read_bytes(landed), BIG_PAGE, "the full-size page/page.html is not byte-identical")
+
+    def test_an_empty_database_still_lands_its_page(self):
+        page = write_bytes(os.path.join(self.tmp.name, "page.html"), PAGE_BYTES)
+        out = self.out()
+        r = self.export(self.fetch(), out, page=page)
+        self.assertVerdict(r, "changed")
+        self.assertEqual(r.returncode, 0, shown(r))
+        self.assertTrue(os.path.isfile(os.path.join(out, "page", "page.html")), "page/page.html was not written with an empty database")
+        self.assertEqual(read_bytes(os.path.join(out, "page", "page.html")), PAGE_BYTES)
+
+    def test_a_second_run_with_the_same_page_is_same_and_rewrites_nothing(self):
+        page = write_bytes(os.path.join(self.tmp.name, "page.html"), PAGE_BYTES)
+        fetched = self.fetch(meta={"page": META})
+        out = self.out()
+        self.assertEqual(self.export(fetched, out, page=page).returncode, 0)
+        landed = os.path.join(out, "page", "page.html")
+        self.assertTrue(os.path.isfile(landed), "page/page.html was not written by the first run")
+        os.utime(landed, (SENTINEL, SENTINEL))
+        before = snapshot(out)
+        r = self.export(fetched, out, page=page)
+        self.assertVerdict(r, "same")
+        self.assertEqual(r.returncode, 0, shown(r))
+        self.assertEqual(os.stat(landed).st_mtime, SENTINEL, "an unchanged page/page.html was rewritten")
+        self.assertEqual(snapshot(out), before, "a second run with the same page wrote into the copy")
+
+    def test_a_changed_page_counts_in_changed_n(self):
+        first = write_bytes(os.path.join(self.tmp.name, "page-first.html"), PAGE_BYTES)
+        second = write_bytes(os.path.join(self.tmp.name, "page-second.html"), REVISED_PAGE)
+        fetched = self.fetch(meta={"page": META})
+        out = self.out()
+        self.assertEqual(self.export(fetched, out, page=first).returncode, 0)
+        r = self.export(fetched, out, page=second)
         self.assertChanged(r, 1)
         self.assertEqual(r.returncode, 0, shown(r))
+        self.assertEqual(read_bytes(os.path.join(out, "page", "page.html")), REVISED_PAGE, "the changed page did not land")
+
+
+class PageScan(Base):
+    """The page's HTML is scanned as text with the docs' shapes, before any write."""
+
+    def test_a_secret_in_the_page_text_refuses_the_export_and_writes_nothing(self):
+        for index, (label, snippet, secret) in enumerate(page_snippets()):
+            with self.subTest(label=label):
+                html = page_with(snippet)
+                self.assertEqual(html.count(secret), 1, "fixture: the secret must sit once in the page")
+                self.assertNotIn(secret, DESIGN_ELEMENT, "fixture: the secret must sit outside the designData block")
+                page = write_text(os.path.join(self.tmp.name, "page-%d.html" % index), html)
+                out = self.out("refused-%d" % index)
+                r = self.export(self.fetch(meta={"page": META}), out, page=page)
+                self.assertVerdict(r, "refused", [secret])
+                self.assertEqual(r.returncode, 1, "%s: refused must exit 1. Output:\n%s" % (label, shown(r, [secret])))
+                self.assertNotIn(secret, r.stdout + r.stderr, "%s: the matched value was printed" % label)
+                self.assertEqual(snapshot(out), {}, "%s: a refused page wrote into the copy" % label)
+
+    def test_a_refused_page_keeps_the_old_copy(self):
+        out = self.out()
+        clean = write_bytes(os.path.join(self.tmp.name, "page-clean.html"), PAGE_BYTES)
+        self.assertEqual(self.export(self.fetch(meta={"page": META}), out, page=clean).returncode, 0)
+        before = snapshot(out)
+        leaky = write_text(os.path.join(self.tmp.name, "page-leaky.html"), page_with("<p>Token: %s</p>\n" % TOKEN))
+        r = self.export(self.fetch(meta={"page": META}, items={"a": {"id": "a", "n": 2}}), out, page=leaky)
+        self.assertVerdict(r, "refused", [TOKEN])
+        self.assertEqual(r.returncode, 1, shown(r, [TOKEN]))
+        self.assertNotIn(TOKEN, r.stdout + r.stderr, "the matched value was printed")
+        self.assertEqual(snapshot(out), before, "a refused page changed the old copy")
+
+    def test_cdn_script_tags_and_prose_punctuation_are_not_refused(self):
+        cases = (("CDN script tags", CDN_SNIPPET), ("comment openers and a lone quote in prose", PROSE_SNIPPET),
+                 ("an IP host with no credentials", IP_LINK_SNIPPET))
+        for index, (label, snippet) in enumerate(cases):
+            with self.subTest(label=label):
+                page = write_text(os.path.join(self.tmp.name, "green-%d.html" % index), page_with(snippet))
+                r = self.export(self.fetch(meta={"page": META}), self.out("green-%d" % index), page=page)
+                self.assertFalse(says(r, "refused"), "%s: the page was refused. Output:\n%s" % (label, shown(r)))
+                self.assertVerdict(r, "changed")
+                self.assertEqual(r.returncode, 0, "%s: a non-secret page failed. Output:\n%s" % (label, shown(r)))
+
+    def test_digit_led_email_domains_in_the_page_text_still_refuse(self):
+        for index, address in enumerate(("jane@1st.example.com", "jane@12.34.example.com", "jane@1.2.3.com")):
+            with self.subTest(address=address):
+                page = write_text(os.path.join(self.tmp.name, "digit-%d.html" % index), page_with("<p>Contact %s</p>\n" % address))
+                out = self.out("digit-%d" % index)
+                r = self.export(self.fetch(meta={"page": META}), out, page=page)
+                self.assertVerdict(r, "refused", [address])
+                self.assertEqual(r.returncode, 1, "%s: a personal email was not refused. Output:\n%s" % (address, shown(r, [address])))
+                self.assertNotIn(address, r.stdout + r.stderr, "%s: the address was printed" % address)
+                self.assertEqual(snapshot(out), {}, "%s: a refused page wrote into the copy" % address)
+
+    def test_retina_names_in_the_page_text_are_not_emails(self):
+        srcset = '<img srcset="logo@2x.png 2x" src="icon@3x.png" alt="">\n'
+        want = page_with(srcset).encode("utf-8")
+        page = write_bytes(os.path.join(self.tmp.name, "page-retina.html"), want)
+        out = self.out()
+        r = self.export(self.fetch(meta={"page": META}), out, page=page)
+        self.assertFalse(says(r, "refused"), "retina names in the page text were refused as emails. Output:\n" + shown(r))
+        self.assertEqual(r.returncode, 0, shown(r))
+        self.assertVerdict(r, "changed")
+        self.assertEqual(read_bytes(os.path.join(out, "page", "page.html")), want, "the page with retina names is not byte-identical")
+
+    def test_an_email_at_a_retina_looking_domain_still_refuses(self):
+        address = "jane@2x.com"
+        page = write_text(os.path.join(self.tmp.name, "page-2x.html"), page_with("<p>Contact %s</p>\n" % address))
+        out = self.out()
+        r = self.export(self.fetch(meta={"page": META}), out, page=page)
+        self.assertVerdict(r, "refused", [address])
+        self.assertEqual(r.returncode, 1, "jane@2x.com was not refused as an email. Output:\n" + shown(r, [address]))
+        self.assertNotIn(address, r.stdout + r.stderr, "the address was printed")
+        self.assertEqual(snapshot(out), {}, "a refused page wrote into the copy")
 
 
 class Rebuild(Base):
@@ -606,11 +993,17 @@ class All(Base):
                                 groups={"g1": {"name": "Group"}}, asks={"k1": {"item": "i1"}}, meta={"page": META}),
                 self.QUEUE: dict(items={"q1": item(2)}, answers={"qa1": {"item": "q1", "pick": "b"}})}
 
-    def fetched_all(self, docs):
-        """One fetched folder per artifact id, each shaped as a single fetch is."""
+    def fetched_all(self, docs, pages=None, files=None):
+        """One fetched folder per artifact id, each shaped as a single fetch is. `pages` maps an id to its page.html
+        bytes; `files` maps an id to {path under files/: bytes}, the page's supporting files."""
         root = tempfile.mkdtemp(prefix="fetched-all-", dir=self.tmp.name)
         for artifact_id, parts in docs.items():
-            os.rename(self.fetch(**parts), os.path.join(root, artifact_id))
+            folder = self.fetch(**parts)
+            if pages and artifact_id in pages:
+                write_bytes(os.path.join(folder, "page.html"), pages[artifact_id])
+            for rel, data in ((files or {}).get(artifact_id) or {}).items():
+                write_bytes(os.path.join(folder, "files", *rel.split("/")), data)
+            os.rename(folder, os.path.join(root, artifact_id))
         return root
 
     def export_folder(self, worktree, artifact_id):
@@ -684,6 +1077,265 @@ class All(Base):
                 self.assertEqual(snapshot(self.export_folder(worktree, leaky)), before, "a refused artifact changed its copy")
                 self.assertTrue(os.path.isfile(os.path.join(self.export_folder(worktree, clean), "items", "fresh.json")),
                                 "the clean artifact was held back by the refused one")
+
+    def test_each_artifact_page_html_lands_under_its_export_path(self):
+        pages = {self.WAIT: PAGE_BYTES, self.QUEUE: QUEUE_PAGE}  # the waiting page, and a page of another role
+        worktree = self.out("worktree")
+        r = self.run_all(self.repo(), self.fetched_all(self.docs(), pages=pages), worktree)
+        self.assertEqual(r.returncode, 0, shown(r))
+        for artifact_id, want in pages.items():
+            with self.subTest(artifact=artifact_id):
+                self.verdict_of(r, artifact_id)  # the scope: the artifact's own verdict line
+                landed = os.path.join(self.export_folder(worktree, artifact_id), "page", "page.html")
+                self.assertTrue(os.path.isfile(landed), "%s: page/page.html was not exported. Output:\n%s" % (artifact_id, shown(r)))
+                self.assertEqual(read_bytes(landed), want, "%s: page/page.html is not byte-identical" % artifact_id)
+
+    def test_supporting_files_land_under_the_page_folder_of_their_artifact(self):
+        files = {self.QUEUE: {"assets/app.js": b'console.log("ready");\n', "img/mark.bin": b"\x00\x01\xfe\xff"}}
+        worktree = self.out("worktree")
+        r = self.run_all(self.repo(), self.fetched_all(self.docs(), pages={self.QUEUE: QUEUE_PAGE}, files=files), worktree)
+        self.assertEqual(r.returncode, 0, shown(r))
+        self.verdict_of(r, self.QUEUE)  # the scope: the artifact's own verdict line
+        base = os.path.join(self.export_folder(worktree, self.QUEUE), "page", "files")
+        for rel, want in files[self.QUEUE].items():
+            with self.subTest(file=rel):
+                landed = os.path.join(base, *rel.split("/"))
+                self.assertTrue(os.path.isfile(landed), "%s was not exported under page/files/. Output:\n%s" % (rel, shown(r)))
+                self.assertEqual(read_bytes(landed), want, "%s is not byte-identical" % rel)
+        self.assertVerdictOf(r, self.QUEUE, r"changed\s+4\b")  # one item, the page, and the two files: one count per file
+
+    def test_an_artifact_with_no_docs_still_exports_its_page(self):
+        docs = self.docs()
+        docs[self.QUEUE] = dict(items={}, answers={})  # the empty state of a new page, with its page already made
+        worktree = self.out("worktree")
+        r = self.run_all(self.repo(), self.fetched_all(docs, pages={self.QUEUE: QUEUE_PAGE}), worktree)
+        self.assertEqual(r.returncode, 0, shown(r))
+        self.verdict_of(r, self.QUEUE)  # the scope: the artifact's own verdict line
+        landed = os.path.join(self.export_folder(worktree, self.QUEUE), "page", "page.html")
+        self.assertTrue(os.path.isfile(landed), "the empty artifact's page/page.html was not exported. Output:\n" + shown(r))
+        self.assertEqual(read_bytes(landed), QUEUE_PAGE, "the empty artifact's page/page.html is not byte-identical")
+        self.assertVerdictOf(r, self.QUEUE, r"changed\s+1\b")
+
+    def test_a_secret_in_an_artifacts_page_refuses_only_that_artifact(self):
+        root, worktree = self.repo(), self.out("worktree")
+        pages = {self.WAIT: PAGE_BYTES, self.QUEUE: QUEUE_PAGE}
+        self.assertEqual(self.run_all(root, self.fetched_all(self.docs(), pages=pages), worktree).returncode, 0,
+                         "the clean first run failed")
+        before = snapshot(self.export_folder(worktree, self.QUEUE))
+        leaky = QUEUE_PAGE + ("<p>Token: %s</p>\r\n" % TOKEN).encode("utf-8")
+        docs = self.docs()
+        docs[self.WAIT]["items"]["fresh"] = item(10)  # the clean artifact has a new doc, so it must still export
+        held = dict(pages)
+        held[self.QUEUE] = leaky
+        r = self.run_all(root, self.fetched_all(docs, pages=held), worktree)
+        self.assertVerdictOf(r, self.QUEUE, r"\brefused\b")
+        self.assertEqual(r.returncode, 1, "a find in one artifact's page must exit 1. Output:\n" + shown(r, [TOKEN]))
+        self.assertNotIn(TOKEN, r.stdout + r.stderr, "the matched value was printed")
+        self.assertEqual(snapshot(self.export_folder(worktree, self.QUEUE)), before, "a refused page changed its artifact's copy")
+        self.assertVerdictOf(r, self.WAIT, r"changed\s+1\b")
+        self.assertTrue(os.path.isfile(os.path.join(self.export_folder(worktree, self.WAIT), "items", "fresh.json")),
+                        "the clean artifact was held back by the refused page")
+
+    def assert_supporting_file_refused(self, label, rel, data, secrets):
+        """A clean run first. Then a run whose QUEUE supporting file is `rel` with `data`: QUEUE is refused, exits 1,
+        prints no secret and changes nothing; WAIT still exports its new doc."""
+        root, worktree = self.repo(), self.out("worktree-" + label)
+        pages = {self.WAIT: PAGE_BYTES, self.QUEUE: QUEUE_PAGE}
+        clean = self.run_all(root, self.fetched_all(self.docs(), pages=pages), worktree)
+        self.assertEqual(clean.returncode, 0, "%s: the clean first run failed. Output:\n%s" % (label, shown(clean)))
+        before = snapshot(self.export_folder(worktree, self.QUEUE))
+        docs = self.docs()
+        docs[self.WAIT]["items"]["fresh"] = item(10)  # the clean artifact has a new doc, so it must still export
+        r = self.run_all(root, self.fetched_all(docs, pages=pages, files={self.QUEUE: {rel: data}}), worktree)
+        self.assertVerdictOf(r, self.QUEUE, r"\brefused\b")
+        self.assertEqual(r.returncode, 1, "%s: a find in a supporting file must exit 1. Output:\n%s" % (label, shown(r, secrets)))
+        for secret in secrets:
+            self.assertNotIn(secret, r.stdout + r.stderr, "%s: the matched value was printed" % label)
+        self.assertEqual(snapshot(self.export_folder(worktree, self.QUEUE)), before, "%s: a refused artifact changed its copy" % label)
+        self.assertVerdictOf(r, self.WAIT, r"changed\s+1\b")
+
+    def test_a_token_or_email_in_a_supporting_text_file_refuses_that_artifact(self):
+        cases = (("token-text", b"token: " + TOKEN.encode("ascii"), [TOKEN]),
+                 ("email-text", b"mail: " + MAIL.encode("ascii"), [MAIL]))
+        for label, data, secrets in cases:
+            with self.subTest(label=label):
+                self.assert_supporting_file_refused(label, "notes.txt", data, secrets)
+
+    def test_a_token_or_email_in_a_supporting_file_name_refuses_that_artifact(self):
+        cases = (("token-name", "assets/" + TOKEN + ".txt", [TOKEN]),
+                 ("email-name", "assets/" + MAIL + ".txt", [MAIL]))
+        for label, rel, secrets in cases:
+            with self.subTest(label=label):
+                self.assert_supporting_file_refused(label, rel, b"fine\n", secrets)
+
+    def test_a_cp1252_supporting_text_file_with_an_email_refuses_that_artifact(self):
+        self.assert_supporting_file_refused("cp1252-email", "notes/cafe.txt", b"caf\xe9 " + MAIL.encode("ascii"), [MAIL])
+
+    def test_url_credentials_on_an_ip_host_in_a_supporting_text_file_refuse_that_artifact(self):
+        self.assert_supporting_file_refused("ip-url", "notes/db.txt", ("Database: %s\n" % DB_IP_URL).encode("ascii"), [PASSWORD])
+
+    def test_a_text_file_under_an_image_or_font_name_is_scanned(self):
+        cases = (("font-password", "fonts/x.woff", ("password = " + PASSWORD).encode("ascii"), [PASSWORD]),
+                 ("image-email", "img/logo.png", ("Contact " + MAIL + "\n").encode("ascii"), [MAIL]))
+        for label, rel, data, secrets in cases:
+            with self.subTest(label=label):
+                self.assert_supporting_file_refused(label, rel, data, secrets)
+
+    def test_a_real_binary_under_an_image_or_font_name_exports_unscanned(self):
+        """The control for the case above: a file with a NUL byte is binary, whatever its name. Its bytes are not scanned,
+        so email- and password-shaped bytes in it still export."""
+        cases = (("png", "img/photo.png", b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR " + MAIL.encode("ascii")),
+                 ("woff", "fonts/real.woff", b"wOFF\x00\x01\x00\x00password = " + PASSWORD.encode("ascii")))
+        for label, rel, data in cases:
+            with self.subTest(label=label):
+                worktree = self.out("worktree-" + label)
+                files = {self.QUEUE: {rel: data}}
+                r = self.run_all(self.repo(), self.fetched_all(self.docs(), pages={self.QUEUE: QUEUE_PAGE}, files=files), worktree)
+                self.verdict_of(r, self.QUEUE)  # the scope: the artifact's own verdict line
+                self.assertEqual(r.returncode, 0, "%s: a real binary was refused. Output:\n%s" % (label, shown(r)))
+                landed = os.path.join(self.export_folder(worktree, self.QUEUE), "page", "files", *rel.split("/"))
+                self.assertTrue(os.path.isfile(landed), "%s was not exported under page/files/. Output:\n%s" % (rel, shown(r)))
+                self.assertEqual(read_bytes(landed), data, "%s is not byte-identical" % rel)
+                self.assertVerdictOf(r, self.QUEUE, r"changed\s+3\b")  # one item, the page, and the file
+
+    def test_a_retina_file_name_is_not_an_email(self):
+        png = b"\x89PNG\r\n\x1a\n"  # not UTF-8, so it is read as latin-1 and scanned; no shape is in these bytes, only in the name
+        worktree = self.out("worktree")
+        files = {self.QUEUE: {"img/logo@2x.png": png}}
+        r = self.run_all(self.repo(), self.fetched_all(self.docs(), pages={self.QUEUE: QUEUE_PAGE}, files=files), worktree)
+        self.assertEqual(r.returncode, 0, "img/logo@2x.png was refused as an email. Output:\n" + shown(r))
+        self.verdict_of(r, self.QUEUE)  # the scope: the artifact's own verdict line
+        landed = os.path.join(self.export_folder(worktree, self.QUEUE), "page", "files", "img", "logo@2x.png")
+        self.assertTrue(os.path.isfile(landed), "img/logo@2x.png was not exported under page/files/. Output:\n" + shown(r))
+        self.assertEqual(read_bytes(landed), png, "img/logo@2x.png is not byte-identical")
+        self.assertVerdictOf(r, self.QUEUE, r"changed\s+3\b")  # one item, the page, and the file
+
+    def test_the_switch_steps_out_dir_fetch_exports_each_artifact_changed(self):
+        # Step 2 of "Before you switch Claude accounts" names out_dir and the marker's path in backticks. ArtifactData
+        # writes each doc to <out_dir>/<collection>/<doc_id>.json. The marker is touched where the step names it, and an
+        # empty collection gets a folder only where the step says to make one by hand. The text is read from SKILL.md,
+        # never copied here, so a change to that step is what this case checks.
+        sections = read_text(os.path.join(HERE, "SKILL.md")).split("## Before you switch Claude accounts", 1)
+        self.assertEqual(len(sections), 2, "SKILL.md has no 'Before you switch Claude accounts' section")
+        steps = sections[1].split("\n## ", 1)[0].split("\n2. ", 1)
+        self.assertEqual(len(steps), 2, "the 'Before you switch Claude accounts' section has no step 2")
+        step2 = steps[1].split("\n3. ", 1)[0]
+        found = re.search(r"`out_dir`\s+(?:set\s+to|=)\s*`([^`]+)`", step2)
+        self.assertTrue(found, "step 2 names no out_dir path, so the fetch layout cannot be read from the skill")
+        template = found.group(1)
+        self.assertTrue("<folder>" in template and "<id>" in template,
+                        "step 2's out_dir %r lacks <folder> or <id>" % template)
+        marked = re.search(r"`([^`]*/\.complete)`", step2)
+        self.assertTrue(marked, "step 2 names no backticked path ending in /.complete, so the marker's place cannot be read")
+        marker = marked.group(1)
+        by_hand = re.search(r"\bmake\b[^.]*\bby\s+hand\b", step2, re.I)
+
+        def place(text, artifact_id, collection):
+            names = {"folder": fetched, "id": artifact_id, "collection": collection}
+            return re.sub(r"<(folder|id|collection)>", lambda m: names[m.group(1)], text)
+
+        root = self.repo()
+        registry = json.loads(read_text(os.path.join(root, ".claude", "layout-extras.json")))["artifacts"]
+        pages = {self.WAIT: PAGE_BYTES, self.QUEUE: QUEUE_PAGE}
+        docs = self.docs()
+        docs[self.WAIT]["groups"] = {}  # an empty collection: the tool writes no file for it
+        fetched = os.path.join(self.tmp.name, "switch")
+        for entry in registry:
+            artifact_id = entry["id"]
+            for collection in entry.get("collections", COLLECTIONS):
+                out_dir = place(template, artifact_id, collection)
+                for doc_id, data in (docs[artifact_id].get(collection) or {}).items():
+                    write_text(os.path.join(out_dir, collection, doc_id + ".json"), canonical(data))
+                folder = os.path.dirname(place(marker, artifact_id, collection))
+                if by_hand and not os.path.isdir(folder):
+                    os.makedirs(folder)  # the step makes the folder of a collection the tool wrote nothing to
+                if os.path.isdir(folder):
+                    write_text(place(marker, artifact_id, collection), "")  # touch: a missing folder cannot be touched
+            write_bytes(os.path.join(fetched, artifact_id, "page.html"), pages[artifact_id])
+
+        worktree = self.out("worktree")
+        r = self.run_all(root, fetched, worktree)
+        for entry in registry:
+            artifact_id = entry["id"]
+            line = self.verdict_of(r, artifact_id)  # the scope: the artifact's own verdict line
+            self.assertRegex(line, r"changed\s+\d+",
+                             "%s: not changed after the switch step's out_dir %r and marker %r. Its line:\n%s"
+                             % (artifact_id, template, marker, line))
+        self.assertEqual(r.returncode, 0, shown(r))
+
+
+class NoExport(Base):
+    """`"export": false` (decision waiting-data-in-repo): an artifact the repo holds and does not export, such as a page in
+    an account this session cannot read. `--all` prints `<id>: skipped - no export` for it, exits 0 for it and needs no
+    fetched folder for it. The other artifacts export as in class All."""
+    WAIT = "page01"
+    EXTERNAL = ["ext%03d" % n for n in range(1, 9)]  # the eight pages of the other account, with synthetic ids
+
+    def waiting(self):
+        return {"id": self.WAIT, "url": "https://claude.ai/artifact/" + self.WAIT, "role": "waiting-page", "account": "work"}
+
+    def external(self, entry_id, **changes):
+        return dict({"id": entry_id, "url": "https://claude.ai/artifact/" + entry_id, "role": "page",
+                     "account": "other-account", "export": False}, **changes)
+
+    def repo(self, entries):
+        root = os.path.join(self.tmp.name, "repo")
+        write_text(os.path.join(root, ".claude", "layout-extras.json"), json.dumps({"kinds": {}, "artifacts": entries}))
+        return root
+
+    def fetched_waiting(self):
+        """The fetched folder a session makes when the other account cannot be read: the waiting page's folder only."""
+        root = tempfile.mkdtemp(prefix="fetched-all-", dir=self.tmp.name)
+        fetched = self.fetch(items={"i1": item(1)}, answers={"a1": {"item": "i1", "pick": "a"}},
+                             groups={"g1": {"name": "Group"}}, asks={"k1": {"item": "i1"}}, meta={"page": META})
+        os.rename(fetched, os.path.join(root, self.WAIT))
+        return root
+
+    def run_all(self, root, fetched, worktree):
+        return self.run_cmd("--all", root, "--fetched", fetched, "--worktree", worktree)
+
+    def test_each_export_false_entry_prints_skipped_and_the_run_exits_0(self):
+        root = self.repo([self.waiting()] + [self.external(i) for i in self.EXTERNAL])
+        r = self.run_all(root, self.fetched_waiting(), self.out("worktree"))
+        self.assertEqual(r.returncode, 0, "a run whose export false entries are skipped must exit 0. Output:\n" + shown(r))
+        for entry_id in self.EXTERNAL:
+            self.assertIn("%s: skipped - no export" % entry_id, verdict_lines(r),
+                          "%s has no `skipped - no export` line. Output:\n%s" % (entry_id, shown(r)))
+
+    def test_a_skipped_entry_holds_back_no_other_artifact_and_writes_nothing(self):
+        worktree = self.out("worktree")
+        root = self.repo([self.waiting(), self.external(self.EXTERNAL[0])])
+        r = self.run_all(root, self.fetched_waiting(), worktree)
+        self.assertIn("%s: changed 5" % self.WAIT, verdict_lines(r),
+                      "the waiting page was held back by a skipped entry. Output:\n" + shown(r))
+        self.assertFalse(os.path.exists(os.path.join(worktree, "artifacts", self.EXTERNAL[0])),
+                         "a skipped entry wrote its artifacts folder")
+
+    def test_a_registry_of_only_export_false_entries_exits_0(self):
+        fetched = self.out("fetched")
+        os.makedirs(fetched)
+        root = self.repo([self.external(i) for i in self.EXTERNAL[:2]])
+        r = self.run_all(root, fetched, self.out("worktree"))
+        self.assertEqual(r.returncode, 0, "a registry of only export false entries must exit 0. Output:\n" + shown(r))
+        for entry_id in self.EXTERNAL[:2]:
+            self.assertIn("%s: skipped - no export" % entry_id, verdict_lines(r),
+                          "%s has no `skipped - no export` line. Output:\n%s" % (entry_id, shown(r)))
+
+    def test_an_export_that_is_true_stays_unknown_and_the_run_exits_2(self):
+        """Control: an export that is neither false nor a path is refused, so the registry is unknown: exit 2, as today."""
+        root = self.repo([self.waiting(), self.external(self.EXTERNAL[0], export=True, collections=["items"])])
+        r = self.run_all(root, self.fetched_waiting(), self.out("worktree"))
+        self.assertEqual(r.returncode, 2, "an export of true must make the run unknown with exit 2. Output:\n" + shown(r))
+        self.assertTrue(says(r, "unknown"), "no unknown verdict printed. Output:\n" + shown(r))
+
+    def test_a_waiting_page_entry_with_export_false_is_unknown_not_skipped(self):
+        """The waiting page is never held: export false on its role makes the registry unknown, exit 2, as a refused entry does."""
+        root = self.repo([dict(self.waiting(), export=False)])
+        r = self.run_all(root, self.fetched_waiting(), self.out("worktree"))
+        self.assertEqual(r.returncode, 2, "a waiting-page entry with export false must make the run unknown with exit 2. Output:\n" + shown(r))
+        self.assertTrue(says(r, "unknown"), "no unknown verdict printed for a waiting-page entry with export false. Output:\n" + shown(r))
+        self.assertNotIn("%s: skipped - no export" % self.WAIT, verdict_lines(r),
+                         "the waiting page was skipped instead of refused. Output:\n" + shown(r))
 
 
 if __name__ == "__main__":

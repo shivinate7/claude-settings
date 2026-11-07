@@ -586,12 +586,13 @@ def _holds_frozen(path: str, cwd: str) -> bool:
 
 
 def _shell_write_hit(cmd: str, cwd: str, predicate, holds=None, follow_cd=False,
-                     command_position=False, script_data=False) -> str:
+                     command_position=False, predicate_command=False, script_data=False) -> str:
     """Return the path a shell command writes to that `predicate(path, cwd)` accepts, else ''.
     `holds(path, cwd)` tells a folder that holds such a path, for a linking `cp` (`_cp_link_source`).
     `follow_cd` hands `predicate` the folder a leading `cd` moved to (`dir_before_segment`), or `cwd`
-    when that folder cannot be told. `script_data` reads the script of a `python -c` or a `node -e` as
-    data, for a caller that reads its shell spots on its own (`shell_write_hit`)."""
+    when that folder cannot be told. `predicate_command` also hands `predicate` the segment's command
+    name as a third argument (`''` when none). `script_data` reads the script of a `python -c` or a
+    `node -e` as data, for a caller that reads its shell spots on its own (`shell_write_hit`)."""
     holds = holds or (lambda path, where: _holds(path, where, predicate))
     cmd = _resolve_vars(cmd)
     ends = []
@@ -637,12 +638,13 @@ def _shell_write_hit(cmd: str, cwd: str, predicate, holds=None, follow_cd=False,
                 shown.extend(pieces)
         text = " ".join(shown)
         at = (dir_before_segment(segments, number, cwd, ends) or cwd) if follow_cd else cwd
+        verb = _segment_command(words)[0] if predicate_command else ""
         for word in words:
             if word.startswith("-") or REDIRECT.fullmatch(word):
                 continue
             if not word or word in (">", ">>"):
                 continue
-            if predicate(word, at) and writes_to(word, text, *(_segment_command(words) if command_position else ())):
+            if (predicate(word, at, verb) if predicate_command else predicate(word, at)) and writes_to(word, text, *(_segment_command(words) if command_position else ())):
                 return word
     for text in inner:
         hit = _shell_write_hit(text, cwd, predicate, holds, follow_cd, command_position)
