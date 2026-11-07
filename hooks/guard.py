@@ -4476,12 +4476,13 @@ def _own_red_run(payload, primary: str, path: str, root_ok: bool = True) -> bool
 
 
 def _homeless_write_hit(targets, command: str, where: str, session_id: str, has_agent: bool,
-                        temp: str, writes: bool) -> str:
+                        temp: str, writes: bool, payload=None) -> str:
     """The log detail when a write from a cwd in no checkout lands in a checkout of the home clone,
     else ''. TARGETS is a write tool's targets; None means the shell COMMAND. The home clone is the
     one that holds CLAUDE_PROJECT_DIR; unset or in no clone, it is unknown and nothing is refused.
-    The temp folder (scratchpads, scratch clones), a top-level call's own scratchpad and the clone's
-    common `.git` directory pass. Stat and small file reads only: no git is spawned."""
+    The temp folder (scratchpads, scratch clones), a top-level call's own scratchpad, the folder its
+    session-home record names (the session's own lane) and the clone's common `.git` directory pass.
+    Stat and small file reads only: no git is spawned."""
     home = os.environ.get("CLAUDE_PROJECT_DIR", "")
     try:
         top = _checkout_root_by_stat(os.path.realpath(home)) if home else ""
@@ -4490,11 +4491,21 @@ def _homeless_write_hit(targets, command: str, where: str, session_id: str, has_
         return ""
     if not home_common:
         return ""
+    own_home = ""
+    sid = payload.get("session_id") if isinstance(payload, dict) else None
+    if not has_agent and isinstance(sid, str) and SESSION_ID_RE.match(sid):
+        try:
+            with open(os.path.join(home_common, SESSION_HOME_DIR, sid), encoding="utf-8") as handle:
+                own_home = handle.read().strip()
+        except OSError:
+            own_home = ""
 
     def in_home_clone(target, at, verb=""):
         try:
             resolved = _resolved(target, at)
             if not has_agent and under_session_scratchpad(resolved, session_id):
+                return False
+            if own_home and path_is_inside(resolved, own_home) is True:
                 return False
             if path_is_inside(resolved, temp) is True:
                 return False
@@ -4523,7 +4534,7 @@ def other_checkout_hit(tool: str, tool_input: dict, cwd: str, session_id: str = 
     valid `session_id`; a caller that omits `has_agent` gets no exemption. An unreadable git
     state is unknown and passes. A cwd in no checkout reads no `cd` and no git verb, but a write
     from it into a checkout of the home clone (the one CLAUDE_PROJECT_DIR names) is refused
-    (`_homeless_write_hit`); with that variable unset it passes. One git read per call that can
+    (`_homeless_write_hit`), except into the session's own recorded home; with that variable unset it passes. One git read per call that can
     write, and none from a cwd in no checkout.
     A shell `cd`, `pushd` or `Set-Location` that moves into another checkout is refused too, unless
     `payload` marks the target as the caller's own home or red-run folder (a write strictly inside that red-run
@@ -4566,7 +4577,7 @@ def other_checkout_hit(tool: str, tool_input: dict, cwd: str, session_id: str = 
         if not where or _checkout_root_by_stat(os.path.realpath(where)):
             return ""
         return _homeless_write_hit(targets, command if targets is None else "", where, session_id,
-                                   has_agent, temp, writes)
+                                   has_agent, temp, writes, payload)
     tops, common, stranded = _clone_scope(roots, own)
     clone_hit = {}   # target -> True when the hit was a separate clone, not a checkout of this one
 
