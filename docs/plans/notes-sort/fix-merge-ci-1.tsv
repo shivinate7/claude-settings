@@ -1,0 +1,26 @@
+where	slug	verdict	size	reason
+L19	bare-merge-skips-host-merge-tool	fix	small	guard.py:4863 MCP merge has no bare-merge ask; add one
+L100	guard-untied-from-rule-map	fix	small	rule_mechanisms.json has no merge-checks or draft-pr row
+L109	ci-scope-line5-too-long	fix	small	Line 5 is now ~410 chars; the 140 figure is wrong
+L179	mods-check-mjs-skipped	fix	small	mod-tests.sh globs *.test.mjs only; check.mjs never runs in CI
+L200	override-veto-no-mutants	fix	small	No mutant names never_lifted or the veto path in mutate_guard.py
+L523	linked-tree-cites-old-decision	fix	small	install.sh/ps1 and tests still cite merge-reinstalls-from-main, which lacks the rule
+L609	ci-wake-hash-selector-misses	fix	small	read_pr still lacks # strip before isdigit test (hooks/ci_wake.py)
+L674	press-link-own-acts	fix	small	false refusal on Claude's own merge option
+L738	install-move-mid-operation	fix	small	install.sh has no rebase/bisect skip; still true
+L835	merge-conflict-reason-inferred	fix	small	record claims refusal names test-author; it does not
+L836	merge-conflict-case-pin	fix	small	test case does not pin test-author like siblings
+L865	pin-name-fifth-copy	fix	small	install.sh:131 says four copies and omits install.ps1
+L878	branch-fetch-keep-comment	fix	small	install.sh:447 comment still wrong for branch checkouts
+L1220	run-header-comment-false-fail	fix	small	run_body returns '| # why'; bin/ci-job false FAIL. Reuse step_map comment drop.
+L1224	ci-hygiene-step16-env-override	fix	small	SKILL.md step 16 says no env override; shards pin GUARD_SHARD.
+L1225	checks-macos-b-idle-runner	fix	small	checks-macos-b (checks.yml:1018) has no job if; idle macOS runner on docs PRs.
+L1242	review-cite-open-only	fix	small	merge.py cites open-PR-only; pr-review-record decision does not state it.
+L1243	green-cite-misplaced	fix	small	merge.py:1047,1053 print GREEN_CITE for unrelated refusals; wrong rule cited.
+L1444	guard-merge-tag-literals	fix	small	guard_merge.py:801 keeps literal; import shared_names (one home)
+L1458	mistake-check-plain-fault-words	fix	small	refuses plain 'I broke the batch'; false alarm, one refusal per turn
+L1501	lane-lint-stop-no-log	fix	small	non-liftable Stop omits ci-job log path; print as liftable branch does
+bash-c-read-false-alarm.md	bash-c-read-false-alarm	fix	small	_mutates_as_command treats any shell -c as writing; no test for pytest -k install.
+ci-wake-export-gh-repo-unread.md	ci-wake-export-gh-repo-unread	fix	small	ci_wake reads GH_REPO only as command prefix; hook env unread.
+ci-wake-lists-runs-once.md	ci-wake-lists-runs-once	fix	small	wait_for returns after first judged run; its docstring cites this debt.
+gitignore-skips-map-tests.md	gitignore-skips-map-tests	fix	small	ci-scope.sh:78 still maps .gitignore to code only.

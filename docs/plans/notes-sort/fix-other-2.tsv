@@ -1,0 +1,17 @@
+where	slug	verdict	size	reason
+L1457	quoted-re-lone-opener	fix	small	QUOTED_RE pairs lone apostrophe; false alarm on 'til
+bg-end-false-alarms.md	bg-end-false-alarms	fix	small	server_script still splits on : and -, so build:dev reads as a server.
+bold-option-keys-missed.md	bold-option-keys-missed	fix	small	Bold keys fixed; inline 'Q? a) x b) y' still unread by OPTION_KEY.
+brief-no-topic-wrong-steer.md	brief-no-topic-wrong-steer	fix	small	brief_hit gives BRIEF_TOPIC_REASON for an unparsed Topic; steer still says start a new lane.
+comment-check-changed-from.md	comment-check-changed-from	fix	small	check_comment_narration still flags 'changed from the previous'.
+departs-word-list-limits.md	departs-word-list-limits	fix	small	NO_CHANGE still lacks remains/still; still leads on keeps/stays.
+fork-step-grants-read-roadmap.md	fork-step-grants-read-roadmap	fix	small	override.py STEP_REF still fixed to origin/roadmap.
+heredoc-written-run-false-alarm.md	heredoc-written-run-false-alarm	fix	small	_runs_written_file still treats any runner word in the pipeline as a run.
+mockup-cost-test-miss-path-only.md	mockup-cost-test-miss-path-only	fix	small	test_build.py:2573 still builds five all-miss entries; no on-origin case.
+opus-ask-exclusion-words	opus-ask-exclusion-words	fix	small	override.py NEGATIONS still lacks but, other, apart, aside
+press-clause-hides-owner-press	press-clause-hides-owner-press	fix	small	_owner_press_text still excuses actorless owner press in session clause
+route-match-limits-untested	route-match-limits-untested	fix	small	No test names MAX_TARGET_CHARS or MAX_PATTERN_CHARS; constants unchanged
+ruling-kind-vacuous-local-pass	ruling-kind-vacuous-local-pass	fix	small	check_ruling_kind.py prints no count; zero-file run exits 0 silently
+stale-draft-lane-head	stale-draft-lane-head	fix	small	build.py stale_drafts line 1070 checks bare branch only, not lane/<id>
+start-detached-not-main	start-detached-not-main	fix	small	session_start.sh line 185 compares HEAD to local main only, not origin/main
+verdict-skip-colon-line	verdict-skip-colon-line	fix	small	bin/verdict SKIP_LINE needs space or PED after SKIP, so SKIP: not counted

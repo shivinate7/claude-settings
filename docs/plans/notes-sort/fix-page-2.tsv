@@ -1,0 +1,3 @@
+where	slug	verdict	size	reason
+stalled-count-reads-in-progress	stalled-count-reads-in-progress	fix	small	roadmap index.html line 553 and waiting page.html line 3267 count active as in progress
+step-shell-programs-partial	step-shell-programs-partial	fix	small	SHELL_PROGRAMS in question_form.py is still a fixed list

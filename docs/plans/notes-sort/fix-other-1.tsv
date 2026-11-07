@@ -1,0 +1,26 @@
+where	slug	verdict	size	reason
+L486	stall-watch-test-scratch	fix	small	test_stall_watch.py:106 still uses tempfile.mkdtemp, not run-folder standard
+L668	ios-mockup-any-system-family	fix	small	check_ios_mockup passes on any one system family; unchanged
+L671	ios-duo-order-word-window	fix	small	false duo-order alarm; two-word window
+L684	press-link-links-not-list	fix	small	bad links value fails open and logs a crash
+L685	ios-probe-diag-false-gap	fix	small	probe gives false gap on Make variable or quoted never
+L696	task-names-check-partial-str-replace	fix	small	partial str_replace passes the task check
+L735	shoot-loading-race-2s	fix	small	2 s swap can turn test red with no defect
+L745	wp-fit-w-scan-equal-value	fix	small	false alarm on equal number; message lacks remedy
+L899	still-scene-multidraw-ext	fix	small	principles.md:190 still wraps context prototypes only
+L900	lost-scene-webgpu-wording	fix	small	principles.md:181 still says scene returns for WebGPU
+L902	full-height-lvh-grep	fix	small	principles.md:229 still greps [0-9]vh, skipping lvh
+L922	tracking-turn-mixed-row	fix	small	One mechanism row holds two kinds in rule_mechanisms.json
+L934	extras-path-literal-unpinned	fix	small	git_reads.py:260 literal still unpinned in check_layout.py
+L966	opus-override-confirm-says-ask	fix	small	local_time.py:108 still says Opus goes through without the ask
+L1013	none-direction-bare-step	fix	small	Bare step wording; small edit across named files
+L1015	none-direction-doc-drift	fix	small	Docs omit no-picked-choice condition that is_reask requires
+L1045	new-feature-mutant-no-return-step	fix	small	test-practices P3 still has no return step or scratch-copy rule
+L1047	reviewer-scratch-copy-outside-repo	fix	small	test-practices P10 still says scratch copy, not outside the repo
+L1204	layout-test-docstring-home-none	fix	small	test_layout.py:1333 docstring still says home=None; mockup_homes takes root only.
+L1252	text-only-decision-wrapping-wide	fix	small	design-agents.md:35 says wrapping unqualified; agent file narrows it.
+L1312	ask-undo-window-real-clock	fix	small	test uses real clock; slow runner goes red falsely; use fake clock
+L1315	scan-key-quadratic	fix	small	same regex prefix unbounded; bound it with the anchor fix
+L1371	lock-retake-reread-hides-push	fix	small	GitLock.acquire still loses push output when re-read fails
+L1381	session-end-flag-text	fix	small	test comments and --session-end help misstate flag scope
+L1404	daily-note-unknown-long-root	fix	small	test goes red past 116-char temp root; cloud paths are long

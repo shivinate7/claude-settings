@@ -1,0 +1,26 @@
+where	slug	verdict	size	reason
+L4	wsl-bracket-glob	fix	small	guard_wsl.py:68 excludes only *?; add [] with refusal case
+L11	ask-alone-echo-amp-overdeny	fix	small	Reproduced: quoted & in echo tail denies ask-alone
+L12	ask-alone-empty-segment-refuses	fix	small	Reproduced: trailing ; after echo tail denies ask-alone
+L13	ask-alone-ps-backslash-refuses	fix	small	Reproduced: echo "C:\x\" tail denies ask-alone
+L25	builder-join-unresolved-refused	fix	small	guard_frozen.py:708-713 drops unresolved part; false alarm confirmed
+L28	cap-basename-false-alarm	fix	small	Live guard refused my settings.json fixture heredoc; false alarm
+L66	git-env-set-false-alarms	fix	small	Reproduced: try{$env:GIT_DIR=$null} and Write-Host {..} denied
+L150	lane-slug-part-code-refused	fix	small	Reproduced: commit message 'part N12' denied as lane number
+L199	override-veto-core-unwrapped	fix	small	guard.py:4776 calls set_override_veto unwrapped; wrap like line 5038
+L214	pointer-detach-false-alarm	fix	small	guard_pointer.py:208 refuses any detach; session_start.sh:179 allows main
+L319	stash-export-comment-stale	fix	small	test_guard.py:2464 comment still says not git subcommands; reword
+L473	git-rm-cached-false-alarm	fix	small	git rm -rf --cached still refused: -f flag counted; only index touched
+L502	waiter-watch-false-alarms	fix	small	echo {sleep} still refused by waiter_verdict; --watch=false now allowed (note stale in part)
+L525	measured-statements-no-home	fix	small	guard_env.py:476 and guard_kill.py:993 still hold measurements with no decision home
+L548	delete-rule-quoted-text	fix	small	first DESTRUCTIVE_DELETE pattern lacks UnquotedStart; quoted echo still refused
+L653	blind-brief-token-edge-refusals	fix	small	hook refuses plain job text; PATTERNS unchanged
+L670	blind-brief-current-refuses-ios-app	fix	small	false refusal of 'the iOS app' in blind brief
+L675	command-in-item-broad	fix	small	refuses harmless 'Run the /doctor command' text
+L682	press-link-title-context	fix	small	title naming a PR gives false press-link refusal
+L732	ste-changed-no-checkout-msg	fix	small	bin/ste-changed:32 swallows ImportError and blames pointer
+L861	frozen-copy-read-amp-redirect	fix	small	cp with &> allowed against frozen dest; Claude could write it
+L875	mirror-name-copies-unchecked	fix	small	guard_frozen.py:100 says copies must match; no check ties them
+L893	test-guard-new-constant-comment	fix	small	test_guard.py:26800 still says constant is new; needs a builder
+L965	role-key-not-sole-normaliser	fix	small	Docstring claim wrong; role_has_model_pin still separate (guard.py:2728)
+L980	builders-cherry-pick-unlogged	fix	small	guard.py:2011 ENTRY_RESOLVED \b after ) never matches
