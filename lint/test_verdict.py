@@ -428,7 +428,7 @@ def plant(folder, name, age_days, header=True):
 class StdinClosed(unittest.TestCase):
     """The command reads an empty stdin, never verdict's own. On Windows verdict starts the command with no
     console window, so an inherited console stdin is an invalid handle there, and each subprocess call under it
-    failed with WinError 6 (owner's PC run, 2026-11-07). An empty stdin is a valid handle on every OS."""
+    failed with WinError 6. An empty stdin is a valid handle on every OS."""
 
     def test_the_command_reads_no_input_from_verdicts_stdin(self):
         with tempfile.TemporaryDirectory(dir=RUN_FOLDER) as d:

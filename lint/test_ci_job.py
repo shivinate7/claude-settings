@@ -137,7 +137,7 @@ class Steps(Job):
 
 class StdinClosed(Job):
     """A step reads an empty stdin, as on GitHub's runner. On Windows an inherited console stdin is an invalid
-    handle in the no-window step, so each subprocess call in it failed with WinError 6 (owner's PC, 2026-11-07)."""
+    handle in the no-window step, so each subprocess call in it failed with WinError 6."""
 
     def test_a_step_reads_no_input_from_ci_jobs_stdin(self):
         argv, env = self.job_call(step("reads", "test -z \"$(cat)\""))
