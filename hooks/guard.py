@@ -148,7 +148,7 @@ Other tools, in `judge` order:
   worktree-home        deny. A call from an agent whose shell cwd or write target is outside its
                        own recorded worktree. Read and Grep pass, so a stranded agent can report.
                        A Write or Edit strictly inside the caller's own `agent-<id>-<suffix>`
-                       red-run folder passes.
+                       red-run folder passes, and so does a Bash call whose cwd is there.
                        No record (a non-isolated agent, or the orchestrator) allows everything.
                        No override lifts it. (an-agent-outside-its-home-tree-must-stop)
   other-checkout       deny. Any session's write whose target sits in a checkout of this clone
@@ -4209,7 +4209,10 @@ def worktree_home_hit(payload, tool: str, tool_input: dict, cwd: str) -> str:
         return ""
     if tool in SHELL_TOOLS:
         # The one allowed call is a lone `cd` back into the home (a recovery step).
+        # A cwd inside the caller's own red-run folder is the test-author's second home: the call
+        # passes here, and the other rules still judge what it writes.
         if (path_is_inside(home_cwd, home) is False
+                and not _own_red_run(payload, home_primary, home_cwd)
                 and not is_move_into(tool, str(tool_input.get("command", "")), home_cwd, home)):
             return "shell cwd outside recorded agent home"
     elif tool in WRITE_TOOLS:
