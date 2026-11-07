@@ -1,0 +1,11 @@
+{
+  "title": "session_wording strips backtick spans before it splits at commas, with a two-tool control",
+  "note": "",
+  "lane": "session_013NEJL28p5zwNuUCG1kkJmF",
+  "phase": "now",
+  "status": "doing",
+  "order": 0.9,
+  "owner": "coordinator",
+  "why": "Coordinator, 13:50 CST Nov 7.",
+  "updatedAt": "2026-11-07T14:00:00-06:00"
+}

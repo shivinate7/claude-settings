@@ -1,0 +1,11 @@
+{
+  "title": "rule_audit resolves module-level string constants and scans hooks/call_judge.py",
+  "note": "PR 4 stacked on #1431.",
+  "lane": "session_013NEJKzQsAzQkvsohtkLuJP",
+  "phase": "now",
+  "status": "doing",
+  "order": 0.8,
+  "owner": "coordinator",
+  "why": "Coordinator, 13:50 CST Nov 7.",
+  "updatedAt": "2026-11-07T14:00:00-06:00"
+}
