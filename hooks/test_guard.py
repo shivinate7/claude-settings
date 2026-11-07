@@ -471,7 +471,7 @@ PR_BATCH_HEAD = "batch-57"
 PR_BATCH_LABEL = "batch"
 GHREADYLANE = os.path.join(ROOT, "ghreadylane")    # a lane's pull request: its own head, no label
 GHREADYCOUNT = os.path.join(ROOT, "ghreadycount")  # the same, counted: one line per gh call
-GHREADYBATCH = os.path.join(ROOT, "ghreadybatch")  # an older batch branch's pull request
+GHREADYBATCH = os.path.join(ROOT, "ghreadybatch")  # an older integration branch's pull request
 GHREADYLABEL = os.path.join(ROOT, "ghreadylabel")  # a lane's pull request, the batch label among two labels
 GHREADYPAIR = os.path.join(ROOT, "ghreadypair")    # pull request 12 is batch-57, 13 a lane's: each answers by its number
 GHREADYBOTH = os.path.join(ROOT, "ghreadyboth")    # pull requests 12 and 13 are both batch heads, batch-57 and batch-58
@@ -9874,7 +9874,7 @@ trust_allow("an unrelated remote tool (list_sessions) in a lane session allows",
 #
 # Rule draft-pr (decision draft-until-reviewed; debt pr-ready-unguarded). A ready mark of a pull request, `gh pr ready
 # <N>` or the MCP update_pull_request call with draft false, ASKS the owner. It is allowed when (1) the pull request
-# carries the batch label, (2) its head ref starts with `batch-` (an older batch branch), or (3) the session is proven
+# carries the batch label, (2) its head ref starts with `batch-` (an older integration branch), or (3) the session is proven
 # no lane. A failed head read asks. Owner ruling 2026-11-07 13:20 CST (decision cull-rules) and coordinator ruling
 # 2026-11-07 14:12 CST (option b): the batch's integration pull request goes ready, a lane's pull request stays draft.
 # Option b reads "proven no lane" as: no cs-build:lane tag, proven by a read record, the trust-card precedent (decision
