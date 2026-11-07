@@ -26,6 +26,7 @@ actions/ste-lint/run.sh with the step's env. TMPDIR is the case folder, so temp 
 import ast
 import atexit
 import collections
+import importlib.util
 import json
 import os
 import re
@@ -2126,6 +2127,58 @@ class RouteClaimFixtureTests(unittest.TestCase):
         self.assertEqual(collections.Counter(row["label"] for row in rows),
                          collections.Counter({"STALE": 2, "PARTLY_STALE": 1, "HALF": 1, "TRUE": 13,
                                               "HISTORY": 1, "UNKNOWN": 3}))
+
+
+def load_module_under_test():
+    """The module under test, loaded from MODULE, so STALE_CITES_UNDER_TEST can point a run at another copy."""
+    spec = importlib.util.spec_from_file_location("stale_cites_under_test", MODULE)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+class CitedExcerptTests(unittest.TestCase):
+    """cited_excerpt: the numbered lines of a backing file that a cite points at. A prose judge sends them beside the line."""
+    TEXT = "a = 1\nb = 2\nc = 3\nd = 4\ne = 5\n"
+
+    @classmethod
+    def setUpClass(cls):
+        cls.stale = load_module_under_test()
+
+    def test_a_line_range_gives_those_lines(self):
+        shown = self.stale.cited_excerpt("read src/widget.py:2-3", self.TEXT)
+        self.assertEqual(shown, "2: b = 2\n3: c = 3", "a read cite of lines 2-3 gives those two lines, numbered")
+
+    def test_a_test_cite_starts_at_the_def_of_its_name(self):
+        text = "import os\n\n\ndef helper():\n    pass\n\n\ndef test_add():\n    assert 1\n"
+        shown = self.stale.cited_excerpt("test tests/test_widget.py::test_add", text)
+        self.assertEqual(shown.split("\n")[0], "8: def test_add():", "a test cite does not start at the def of its name")
+
+    def test_a_lone_quote_in_a_comment_does_not_move_the_start(self):
+        # The def scan reads source text. A quote in a comment is text, and must not move where the scan starts.
+        text = "# don't touch this\ndef target():\n    return 1\n"
+        shown = self.stale.cited_excerpt("test lint/widget.py::target", text)
+        self.assertEqual(shown.split("\n")[0], "2: def target():", "a lone quote in a comment moved the start off the def")
+
+    def test_a_def_name_inside_a_string_literal_is_not_the_start(self):
+        # The string opens with '#', so a scan that drops comments first would still see a def name inside it.
+        text = 'MSG = "# see def target below"\n\ndef target():\n    return 1\n'
+        shown = self.stale.cited_excerpt("test lint/widget.py::target", text)
+        self.assertEqual(shown.split("\n")[0], "3: def target():", "the excerpt starts at a string that names the def, not at the def")
+
+    def test_a_def_name_inside_a_docstring_is_not_the_start(self):
+        text = '"""\nNotes: def target() moved.\n"""\ndef target():\n    return 1\n'
+        shown = self.stale.cited_excerpt("test lint/widget.py::target", text)
+        self.assertEqual(shown.split("\n")[0], "4: def target():", "the excerpt starts inside a docstring that names the def, not at the def")
+
+    def test_a_def_name_in_a_comment_is_not_the_start(self):
+        text = "# def target moved below\n\ndef target():\n    return 1\n"
+        shown = self.stale.cited_excerpt("test lint/widget.py::target", text)
+        self.assertEqual(shown.split("\n")[0], "3: def target():", "the excerpt starts at a comment that names the def, not at the def")
+
+    def test_a_cite_that_names_no_backing_path_gives_none(self):
+        shown = self.stale.cited_excerpt("read the top of the file", self.TEXT)
+        self.assertIsNone(shown, "a read cite with no backing path gives %r, want None" % (shown,))
 
 
 if __name__ == "__main__":
