@@ -244,7 +244,8 @@ def wait_for(sha, cwd, deadline, repo=""):
     A run that ends skipped is no run: the draft PR's run skips, and the run of `gh pr ready`
     comes after it. While no run that ran is judged, list again, `pauses` apart; the last
     pause ends at the deadline, with one list there. After the first run that ran is judged,
-    list once more at once and judge any run not yet read there, then return. The runs come back
+    list once more at once, even when the deadline has passed, and judge any run not yet read there, then
+    return. A run still going at the re-list reads as pending, so Unknown. The runs come back
     newest first, as judge_runs reads them: the re-list's runs go ahead of the runs read before,
     so a newer run of a name outranks the older one. A refused re-list returns the runs already
     judged only when they judge red: a red run stays red. Otherwise it raises Unknown, as a refused first
@@ -271,9 +272,9 @@ def wait_for(sha, cwd, deadline, repo=""):
         seen.update(r["databaseId"] for r in fresh)
         ran = [r for r in got if r.get("conclusion") != "skipped"]   # it ended skipped: no run
         viewed = ran + viewed   # newest first: gh lists newest first, and a later list shows newer runs
-        if ran and not relisted and deadline - time.monotonic() > 0:
+        if ran and not relisted:
             relisted = True
-            continue   # the first judged run: list once more at once for a later one
+            continue   # the first judged run: list once more at once for a later one, even at the deadline
         if viewed:
             return viewed
         left = deadline - time.monotonic()
