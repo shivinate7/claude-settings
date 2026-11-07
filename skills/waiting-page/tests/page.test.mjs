@@ -1822,6 +1822,19 @@ test("the count digit matches the rest of its line", async (t) => {
   assert.doesNotMatch(m.v, /slashed-zero/);
 });
 
+// Ruling (coordinator, 2026-11-07 13:56 CST): the rail drops its "N ready to send" line. The track keeps its ready segment,
+// and the bar keeps the ready count (docs/design/page-one-receipt-notes.md, section 1).
+test("with a ready draft the rail holds no ready line, while the bar keeps its ready count and the track its ready segment", async (t) => {
+  const page = await open(t); if (!page) return;
+  await choose(page, DECISION, "a");
+  await page.locator("#barStatus", { hasText: "1 ready." }).waitFor();
+  assert.equal(await page.locator(".ov-prog").count(), 1, "the rail has no progress block, so its ready line cannot be read");
+  assert.doesNotMatch(await page.locator("#rail").innerText(), /ready to send/, "the rail still shows a ready line");
+  assert.match(await page.locator("#barStatus").innerText(), /(^|\s)1 ready\./, "the bar lost its ready count");
+  const seg = await page.locator(".ov-prog .track .r").evaluate((e) => e.getBoundingClientRect().width);
+  assert.ok(seg > 0, "the track's ready segment has no width: " + seg);
+});
+
 for (const width of [1440, 390]) {
   test(`each list entry carries its item's title, at ${width} wide`, async (t) => {
     const items = [mk("first-q", 1, { title: "Where does the price history show" }), { ...TASK, id: "second-q", n: 2, title: "Plug in the Mac" }];
@@ -6718,6 +6731,38 @@ test("a last answer that names a key no longer in options never shows the key, f
   assert.match(q, /You chose options that are no longer listed\./);
   assert.doesNotMatch(q, /pinned|Red/, "the raw key shows, or the one valid pick is listed: " + q);
   assert.equal(await laPanel(page, list).locator("li").count(), 0, "a list that holds a lost key is still drawn as picks");
+});
+
+// ---------------------------------------------------------------- one home for "what you chose": the receipt agrees with the last answer
+// Ruling (coordinator, 2026-11-07 13:56 CST): a key no longer listed reads the same on a receipt as in the last answer above
+// (docs/design/page-one-receipt-notes.md, section 5). The lastAnswer cases above stay as they are.
+const receiptOf = async (page, it) => {
+  assert.equal(await card(page, it).locator(".receipt").count(), 1, `${it.id}: no single receipt on the card`);
+  return flat(await card(page, it).locator(".receipt").innerText());
+};
+
+test("a card answered by its wait whose choice is no longer listed says so in its receipt, and never shows the key", async (t) => {
+  const it = no154({ lastAnswer: { choice: "pinned", at: WT_AT }, waits: { repo: WT_REPO, run: WT_RUN } });
+  const page = await open(t, { items: [it] }); if (!page) return;
+  const p = await receiptOf(page, it);
+  assert.match(p, /You chose an option that is no longer listed\./, "the receipt does not say the choice is no longer listed: " + p);
+  assert.doesNotMatch(p, /pinned/, "the receipt shows the raw key: " + p);
+});
+
+test("a card answered by its wait whose picks are no longer listed says the options are no longer listed, and never shows the key", async (t) => {
+  const it = multi("wt-multi-gone", 170, { lastAnswer: { choice: ["a", "pinned"], at: WT_AT }, waits: { repo: WT_REPO, pr: 1011 } });
+  const page = await open(t, { items: [it] }); if (!page) return;
+  const p = await receiptOf(page, it);
+  assert.match(p, /You chose options that are no longer listed\./, "the receipt does not say the options are no longer listed: " + p);
+  assert.doesNotMatch(p, /pinned/, "the receipt shows the raw key: " + p);
+});
+
+test("a saved answer whose choice was later dropped from options says the option is no longer listed, and never shows the key", async (t) => {
+  const it = mk("saved-gone", 1);
+  const page = await open(t, { items: [it], answers: laSaved(it, "pinned") }); if (!page) return;
+  const p = await receiptOf(page, it);
+  assert.match(p, /You chose an option that is no longer listed\./, "the saved receipt does not say the choice is no longer listed: " + p);
+  assert.doesNotMatch(p, /pinned/, "the saved receipt shows the raw key: " + p);
 });
 
 test("a task's last answer reads 'Marked done.' when done is true and 'Not marked done.' otherwise", async (t) => {
