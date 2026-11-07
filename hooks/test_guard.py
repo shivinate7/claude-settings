@@ -13354,6 +13354,13 @@ SHELL_TEST_WRITES = (
     ("sed e command runs touch on tests/x, sed -i on src/app.py", "sed -i 'e touch tests/x' src/app.py"),
     ("sed -Ei on tests/a.py", "sed -Ei s/a/b/ tests/a.py"),
     ("sed -ni on tests/a.py", "sed -ni s/a/b/ tests/a.py"),
+    # The scanner reads a script as sed does: a `#` in an s replacement is text, and so is a lone quote.
+    # The w flag or command after them still names tests/a.py, so each line is refused.
+    ("sed s/// replacement holds #, then w flag writes tests/a.py", "sed -i 's/a/#/w tests/a.py' src/app.py"),
+    ("sed script holds a lone quote, then w command writes tests/a.py",
+     "sed -i \"s/don't/x/;w tests/a.py\" src/app.py"),
+    ("sed script on two lines, w command on line 2 writes tests/a.py",
+     "sed -i 's/a/b/\nw tests/a.py' src/app.py"),
 )
 for _name, _command in SHELL_TEST_WRITES:
     sh("builder-test: shell write, %s, is refused" % _name, _command, "deny", rule=BT,
@@ -13428,6 +13435,11 @@ SHELL_TEST_ALLOWS = (
     ("sed -i -f reads tests/s.sed, on src/app.py", "sed -i -f tests/s.sed src/app.py"),
     ("sed -i 1i inserts tests/x, on src/app.py", "sed -i '1i tests/x' src/app.py"),
     ("sed -i substitutes tests/a.py text, on src/app.py", r"sed -i 's/N/tests\/a.py/' src/app.py"),
+    # A `#` in a sed address is text, not a comment, and a `w tests` inside an s replacement is text.
+    ("sed -i address /#/ is text, on src/app.py", "sed -i '/#/d' src/app.py"),
+    ("sed -i s replacement holds w tests, on src/app.py", "sed -i 's/w tests/x/' src/app.py"),
+    # Control for the lone-quote refusal: the same quote with no w command writes nothing.
+    ("sed -i s/don't/x/ holds a lone quote, on src/app.py", "sed -i \"s/don't/x/\" src/app.py"),
 )
 for _name, _command in SHELL_TEST_ALLOWS:
     sh("builder-test: shell %s is allowed" % _name, _command, "allow", **BR)
@@ -13483,6 +13495,11 @@ DOT_ROOT_WRITES = (
     ("find . for test_*.py, -exec sed -i", "find . -name 'test_*.py' -exec sed -i s/a/b/ {} +"),
     ("git ls-files piped to xargs, sed -i", "git ls-files | xargs sed -i s/a/b/"),
     ("git grep -l piped to xargs, sed -i", "git grep -l old | xargs sed -i s/a/b/"),
+    # A redirect word is no pathspec: the listing still prints every tracked test, so the sed -i is refused.
+    ("git ls-files 2>/dev/null piped to xargs, sed -i", "git ls-files 2>/dev/null | xargs sed -i s/a/b/"),
+    # A pathspec that matches a tracked test (tests/test_a.py) names it, at any depth.
+    ("git ls-files '*.py' piped to xargs, sed -i", "git ls-files '*.py' | xargs sed -i s/a/b/"),
+    ("git grep -l old -- '*.py' piped to xargs, sed -i", "git grep -l old -- '*.py' | xargs sed -i s/a/b/"),
 )
 for _name, _command in DOT_ROOT_WRITES:
     sh("builder-test: shell write, %s, is refused" % _name, _command, "deny", rule=BT,
@@ -13494,6 +13511,16 @@ sh("builder-test: shell write, cd tests then find . piped to xargs, sed -i, is r
 # A root with no tests in it is still allowed, in the same checkout.
 sh("builder-test: shell write, grep -rl over src piped to xargs, sed -i, is allowed",
    "grep -rl old src | xargs sed -i s/a/b/", "allow", **DR)
+# A git listing whose pathspec names only product code lists no test, so the sed -i is allowed.
+sh("builder-test: shell write, git ls-files of src/*.py piped to xargs, sed -i, is allowed",
+   "git ls-files 'src/*.py' | xargs sed -i s/a/b/", "allow", **DR)
+sh("builder-test: shell write, git ls-files of the src folder piped to xargs, sed -i, is allowed",
+   "git ls-files src | xargs sed -i s/a/b/", "allow", **DR)
+# Pin for the `""` skip after a cd: the script word of sed -i is data, and the file it writes is
+# ../src/app.py, outside the tests folder the cd entered. Without the skip, the data word reads as a
+# test in tests/, so the case is refused.
+sh("builder-test: shell write, cd tests then sed -i on ../src/app.py, is allowed",
+   "cd tests && sed -i 's/a/b/' ../src/app.py", "allow", **DR)
 
 # ---- the diff, judged at commit, push and SubagentStop
 FAMILY = "diff"
@@ -14135,9 +14162,9 @@ def builder_matched_log_case():
     control refusal does.
     """
     materialize(DOTROOT)
-    for label, command in (
-            ("control", "find tests -name '*.py' | xargs sed -i s/a/b/"),
-            ("cd-tests", "cd tests && find . -name '*.py' | xargs sed -i s/a/b/")):
+    for label, command, want in (
+            ("control", "find tests -name '*.py' | xargs sed -i s/a/b/", "tests"),
+            ("cd-tests", "cd tests && find . -name '*.py' | xargs sed -i s/a/b/", "tests/test_a.py")):
         body = {"tool_name": "Bash", "tool_input": {"command": command}, "cwd": DOTROOT,
                 "agent_id": "bld1", "agent_type": "builder"}
         decision, reason, rows = pd_run("builder-matched-" + label, body)
@@ -14146,9 +14173,9 @@ def builder_matched_log_case():
         logged = [row[4] for row in rows if len(row) == 6 and row[3] == "builder-test-edit"]
         if not logged:
             return False, "%s: guard.log holds no builder-test-edit row" % label
-        if "tests" not in logged[0]:
-            return False, "%s: the logged matched field is %r, want a test path" % (label, logged[0])
-    return True, "the refusal logs a test path, the cd form too"
+        if logged[0] != want:
+            return False, "%s: the logged matched field is %r, want %r" % (label, logged[0], want)
+    return True, "the refusal logs tests for the control and tests/test_a.py after a cd"
 
 
 LOG_CHECKS_EXTRA.append(("log: a builder's shell refusal logs the test path it matched, after a cd too",
