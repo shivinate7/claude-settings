@@ -13,7 +13,7 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import ts from './lazy-typescript.mjs';
-import { importSpecifiers, importTargets, resolveSpecifier } from './import-reader.mjs';
+import { importEntries, importTargets, resolveSpecifier } from './import-reader.mjs';
 import { readPathAliases } from './tsconfig-paths.mjs';
 import { blankCommentsAndStrings, blankShell } from './source-text.mjs';
 
@@ -169,15 +169,23 @@ const readTs = (req, text, files, readAliases) => {
   let sf;
   try { sf = ts.createSourceFile(req.file, text, ts.ScriptTarget.Latest, true); } catch (e) { return fail(req, `${req.file} cannot be parsed: ${e.message}`); }
   let aliases = null;
+  let blind = null; // why the aliases are unread, when a package import may hide a link
   if (req.op === 'loads' || req.op === 'uses') {
     const read = readAliases();
-    // Unreadable aliases hide a link that a bare specifier may hold. A file with only relative imports needs none.
-    if (!read.ok && importSpecifiers(text, { file: req.file }).some((spec) => !spec.startsWith('.'))) return fail(req, read.reason);
     aliases = read.ok ? read.aliases : null;
+    // Unreadable aliases hide a link that a bare specifier may hold. A relative import, a `node:` import and an import the build erases
+    // (for `loads`) need none. A `uses` read counts a type-only import as a link, so it counts it here too.
+    const mayHide = () => importEntries(text, { file: req.file, types: req.op === 'uses' }).some(({ spec }) => !spec.startsWith('.') && !spec.startsWith('node:'));
+    if (!read.ok && mayHide()) blind = read.reason;
   }
-  if (req.op === 'loads') return good(req, { imports: importTargets(req.file, text, files, { types: false, aliases }).filter((f) => f !== req.file), named: namedFiles(sf, req.file, files) });
+  if (req.op === 'loads') {
+    const imports = importTargets(req.file, text, files, { types: false, aliases }).filter((f) => f !== req.file);
+    return good(req, { imports, named: namedFiles(sf, req.file, files), ...(blind && { blind }) });
+  }
   if (req.op === 'uses') {
     const imports = importTargets(req.file, text, files, { aliases }).includes(req.target);
+    // The wanted file is linked by a relative import, so the unread aliases hide nothing. Else the read is unknown.
+    if (blind && !imports) return fail(req, blind);
     const uses = req.symbol == null ? null : identifiers(sf, targetAliases(sf, req.file, req.target, files, aliases)).has(req.symbol);
     return good(req, { imports, uses });
   }
