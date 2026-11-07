@@ -109,6 +109,12 @@ def unreadable_error(path):
     raise AssertionError("control: %s opened as a file, so it is not an unreadable log" % path)
 
 
+def unreadable_payload_head(err):
+    """The head of the line for an agent-end payload log that cannot be read. Both the full and the short
+    form keep its state: a short head that drops "unknown" would read as clear (verification-report-unknown-reads)."""
+    return "agent-end payload log cannot be read (%s): its state is unknown." % err
+
+
 def session_start_commands():
     """Commands under SessionStart matchers that cover startup and that name daily_note.py."""
     with open(SETTINGS, encoding="utf-8") as handle:
@@ -539,16 +545,15 @@ class AgentEndTests(NoteCase):
         self.assert_silent(self.run_note(MORNING))
 
     def test_a_payload_log_that_cannot_be_read_is_reported_as_unknown(self):
+        self.config = self.long_path(LONG_CONFIG, "claude-config-", at_least=True)  # a long temp root: the cut runs
         os.makedirs(self.payload_path())  # a directory cannot be read as a log
         err = unreadable_error(self.payload_path())
         tail = "Read: " + self.payload_path()
-        full = "agent-end payload log cannot be read (%s): its state is unknown. %s" % (err, tail)
-        short = "agent-end payload log cannot be read (%s): %s" % (err, tail)
         lines = self.failure_lines(self.run_note(MORNING))
         self.assertEqual(len(lines), 1, "want one unknown line, got %r" % lines)
-        # The full line says unknown when it fits MAX_LINE. Past it the note keeps the short head, which
-        # names what failed, and the whole Read: tail. A long temp root takes the short form.
-        self.assertEqual(lines[0], full if len(full) <= MAX_LINE else short, lines[0])
+        self.assertIn("unknown", lines[0], "the line dropped unknown: %r" % lines[0])
+        # Past the cap the line is the short head plus the whole Read: tail, and the head still says unknown.
+        self.assert_short_head_kept(lines[0], unreadable_payload_head(err), tail, keep="unknown")
 
     def test_a_long_config_dir_keeps_the_agent_end_line_within_the_cap_with_its_whole_reader_tail(self):
         self.config = self.long_path(LONG_CONFIG, "claude-config-", at_least=True)
@@ -583,8 +588,8 @@ class AgentEndTests(NoteCase):
         tail = "Read: " + self.payload_path()
         lines = self.failure_lines(self.run_note(MORNING))
         self.assertEqual(len(lines), 1, "want one unknown line, got %r" % lines)
-        self.assert_short_head_kept(lines[0], "agent-end payload log cannot be read (%s):" % err, tail,
-                                    keep="cannot be read (%s)" % err)
+        self.assertIn("unknown", lines[0], "the line dropped unknown: %r" % lines[0])
+        self.assert_short_head_kept(lines[0], unreadable_payload_head(err), tail, keep="unknown")
 
 
 class SweepErrorLogTests(NoteCase):
