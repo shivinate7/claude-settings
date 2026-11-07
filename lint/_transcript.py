@@ -10,8 +10,14 @@ transcript and its `content` blocks. last_reply returns the text of the last ass
 import json
 import os
 import re
+import sys
 
-SEND_TOOLS = ("mcp__claude-code-remote__send_message", "SendMessage")
+# lint/ and hooks/ sit side by side, in the repo and under ~/.claude. shared_names is standard library only.
+_HOOKS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "hooks")
+if _HOOKS not in sys.path:
+    sys.path.append(_HOOKS)
+from shared_names import SEND_TOOLS  # noqa: E402,F401  the one home of the send tool names
+
 ARTIFACT_DATA = ("ArtifactData", "mcp__ArtifactData")
 WRITE_VERBS = ("set", "update", "batch")
 

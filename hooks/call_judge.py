@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""PreToolUse judge for an Agent spawn, an AskUserQuestion call and an ArtifactData write of a
-waiting-page item. One command hook replaces the settings.json `prompt` hook on Agent and the `agent`
+"""PreToolUse judge for an Agent spawn, an AskUserQuestion call, an ArtifactData write of a
+waiting-page item and an owner question sent to a session. One command hook replaces the settings.json `prompt` hook on Agent and the `agent`
 hook on AskUserQuestion: a hook of those types sees only the call's JSON and cannot read the override
 file, so no owner override reached it (decision owner-override).
 
@@ -19,9 +19,8 @@ many writes a batch holds. A write that is a re-ask (new `options` plus a `lastA
 to that one prompt, once. A set or update with non-empty `options` adds WIDENING_RULE once: an option that widens what a
 shared tool accepts must carry `widens: true`, and the judge refuses an unmarked one by its option key (decision
 uniform-over-variants). WIDENING_RULE is built from question_form.WIDENS_KEY on each read (module `__getattr__`, no cache), so an
-Agent spawn or a non-item ArtifactData call never imports question_form for it. No other write changes the prompt. The page and the chat box share the eight judge
-items, so both places get the same review. A task item (kind task, or any write that carries `steps`) that carries context, steps or
-options is judged too, on the same eight items and one task rule in PAGE_PROMPT: a step that replaces text
+Agent spawn or a non-item ArtifactData call never imports question_form for it. No other write changes the prompt. The page and the chat box share judge items 1 to 7; item 8 has its own call on the page (below). A task item (kind task, or any write that carries `steps`) that carries context, steps or
+options is judged too, on the same items and one task rule in PAGE_PROMPT: a step that replaces text
 quotes the whole line or value and shows the line after the change in full. A str_replace on `context`
 that passes item_hit is judged on its new_str alone, as a fragment: the prompt tells the model to judge
 only plain words, unexplained ids and pointers outside the item, and never to flag a missing line or
@@ -31,13 +30,26 @@ practice (note page-judge-dead-fragment-fields).
 Veto (an act no override lifts): an Explore spawn whose model field is neither sonnet nor opus. That
 is the Explore row of agent-model-cap, a model guard. Every other refusal is liftable.
 
-A question (a box with 2+ options, a page decision) also gets item 8, the past-ruling check: question_form.past_rulings
-adds the decision, debt and step rulings to the same one model call. The check always runs; a task gets it too. When it cannot
-run (a model error, a source that exists and cannot be read, or a refusal that cites a record the model was not
-shown), the question is refused with the Unvetted remedy, unless its own text carries an `Unvetted:` line. An absent
-source allows, with one stderr line.
+A question also gets item 8, the past-ruling check: question_form.past_rulings finds the decision, debt and step
+rulings it reads. The check always runs; a task gets it too. A chat box carries item 8 in its one model call. Two
+other paths have a dedicated call, lint/report_guard.py past_ruling_problem (the one past-ruling judge, also the
+Stop hook's): Sonnet, item 8 alone, PAST_RULING_TIMEOUT s.
+  Page item write: the dedicated call runs first. A refusal denies with rule `past-ruling` and the relay remedy
+  and makes no form-judge call. Otherwise the form judge (Opus, items 1 to 7) runs, and its prompt holds no item 8.
+  Owner-question send: a `mcp__claude-code-remote__send_message` or `SendMessage` whose message holds a Goal line
+  and a stake Problem line (question_form.GOAL_LINE, PROBLEM_LINE) gets the dedicated call before it is sent,
+  whoever the target is. A refusal is rule `past-ruling`. Any other send exits before a heavy import.
+When the check cannot run (a model error, a source that exists and cannot be read, or a refusal that cites a record
+the model was not shown), the question is refused with the Unvetted remedy, unless its own text carries an
+`Unvetted:` line. An absent source allows, with one stderr line.
 
 Fail open. Any other model error, odd answer or unreadable input allows, with one stderr line.
+
+Cost (rule outcomes-mechanize-rules): a send without the form, a read, and a write of another collection start
+no process and make no model call. A send with the form: one git process (question_form.past_rulings) and one Sonnet
+call. A judged item write: one git process, the dedicated Sonnet call, and then the form judge's Opus call, so one more
+Sonnet call than before. A chat box: one git process and one Opus call, as before. Nothing is written but the
+guard.log line of a refusal. test_call_judge.py counts the processes and the calls.
 
 One exception, opus_ask(): the owner's plain Opus ask (decision owner-override, the Opus word) fails CLOSED. It grants
 an override, so a model error, a timeout or an odd answer grants nothing, with one stderr line. override.grant_opus_ask
@@ -60,7 +72,7 @@ if HERE not in sys.path:
 # building-allow-list-is-the-constant). Cost: importing guard.py for it measured about 120 ms per Agent spawn;
 # shared_names is standard library only and adds about 2 ms.
 from shared_names import EXPLORE_AUDIT_MARKER  # noqa: E402
-from shared_names import DATA_TOOL  # noqa: E402  stdlib only: the one home of the tool name
+from shared_names import DATA_TOOL, SEND_TOOLS  # noqa: E402  stdlib only: the one home of the tool names
 
 OK_SHAPE = {"ok": (True, False)}
 SPAWN_RULE, QUESTION_RULE = "spawn-judge", "question-judge"
@@ -68,8 +80,10 @@ SPAWN_RULE, QUESTION_RULE = "spawn-judge", "question-judge"
 # and the code rules question_form.chat_hit names) is the question reviewer's.
 SPAWN_CITE = "(decision haiku-prompt-hooks, the spawn judge refuses a brief that breaks the spawn rules)"
 QUESTION_CITE = "(decision question-reviewer-agent-hook, a question is reviewed before it reaches the owner)"
-# THE TIME BUDGET. One model call per hook run, so the longest path is the question call's 60 s plus
-# start-up. The settings.json PreToolUse entry for this hook carries "timeout": 70.
+# THE TIME BUDGET. A judged item write makes two calls, in order, so the longest path is the dedicated past-ruling
+# call (PAST_RULING_TIMEOUT, 15 s) plus the question call's 60 s plus start-up (the git read, the import of
+# lint/report_guard.py). Every other path makes one call. The settings.json PreToolUse entry for this hook carries
+# "timeout": 90.
 SPAWN_MODEL, SPAWN_TIMEOUT = "claude-sonnet-5-5", 30
 QUESTION_MODEL, QUESTION_TIMEOUT = "claude-opus-5-5", 60  # both at the model's default effort
 
@@ -125,8 +139,9 @@ PAST_RULING_ITEM = (
 )
 # The question-judge call of lint/report_guard.py (a Stop whose reply asks the owner something): Sonnet, 15 s.
 PAST_RULING_MODEL, PAST_RULING_TIMEOUT = SPAWN_MODEL, 15
-# The seven items, then the eighth, a question to the owner is judged on: one text, for the chat box and the page.
-JUDGE_ITEMS = (
+# The seven items a question to the owner is judged on, for the chat box and the page. The eighth is the chat box's
+# alone: the page and a send get it as a dedicated call (past_ruling_check).
+ITEMS_1_TO_7 = (
     "1. The Goal is in the owner's terms.\n"
     "2. The Problem is one plain sentence that says why it needs his word.\n"
     "3. Each premise is in plain words.\n"
@@ -134,10 +149,13 @@ JUDGE_ITEMS = (
     "5. No unexplained ids: explain every decision id, branch, sha, key or rule name in plain words.\n"
     "6. Nothing points outside the box, such as an earlier message or an item number.\n"
     "7. One option is recommended.\n"
-    "8. " + PAST_RULING_ITEM + "\n"
+)
+REPLY_JSON = (
     "Reply JSON only: {\"ok\": true} or {\"ok\": false, \"reason\": \"<the item that misses, and the fix, "
     "one line>\"}."
 )
+JUDGE_ITEMS = ITEMS_1_TO_7 + "8. " + PAST_RULING_ITEM + "\n" + REPLY_JSON
+PAGE_ITEMS = ITEMS_1_TO_7 + REPLY_JSON
 QUESTION_PROMPT = (
     "Review this AskUserQuestion call: %s\nAnswer {\"ok\": true} at once for a question with one option "
     "or none. Otherwise judge the question box alone. Code has already checked the form lines and the "
@@ -162,9 +180,9 @@ PAGE_PROMPT = (
     "\"find X and change it to Y\", misses that rule, because the owner then drops the rest of the line. "
     "That rule reaches a task's `steps` and `context` on a set or update; a str_replace reaches only the "
     "top-level string field `context`, never `steps`. A task item is judged only on plain words, "
-    "unexplained ids, pointers outside the item, that whole-unit rule and item 8, and never on the Goal, "
+    "unexplained ids, pointers outside the item and that whole-unit rule, and never on the Goal, "
     "the Problem or a recommended option, because a task has none of them. "
-    "Block only on a clear miss; when unsure answer {\"ok\": true}.\n" + JUDGE_ITEMS
+    "Block only on a clear miss; when unsure answer {\"ok\": true}.\n" + PAGE_ITEMS
 )
 # A re-ask write gives an answered item new options and carries the owner's `lastAnswer` note. The text is appended to
 # the formatted PAGE_PROMPT, only for such a call (skill waiting-page, "Route and close"). It has no `%`, so it is
@@ -348,10 +366,56 @@ def past_ruling_context(payload, units):
             question_form.unreadable_sources(unknown))
 
 
+PAST_RULING_RULE_NAME = "past-ruling"  # question_form.PAST_RULING_RULE, here so a send needs no import to name it
+
+
+def past_ruling_check(payload, asked):
+    """The dedicated past-ruling call (item 8 alone) for the question text `asked`: (rule, refusal text), or None when
+    nothing settles it. The one judge is lint/report_guard.py past_ruling_problem, also the Stop hook's: it makes the git
+    read and the Sonnet call, and its text is the relay remedy, or the Unvetted remedy for a check that could not run
+    (unless `asked` carries its own `Unvetted:` line)."""
+    sys.path.insert(0, os.path.join(HERE, "..", "lint"))
+    import report_guard
+    problem = report_guard.past_ruling_problem(asked[-report_guard.ASK_TEXT_MAX:], payload.get("cwd") or "")
+    if not problem:
+        return None
+    relay = problem.startswith(report_guard.RELAY_RULE_REASON.split("%", 1)[0])
+    return (PAST_RULING_RULE_NAME if relay else QUESTION_RULE), problem
+
+
+def send_question_text(args):
+    """The message of a send when it is an owner question (a Goal line and a stake Problem line), else "". Plain string
+    tests first, so a send without the form never imports question_form."""
+    message = args.get("message")
+    if not isinstance(message, str):
+        return ""
+    low = message.lower()
+    if "goal:" not in low or "problem" not in low:
+        return ""
+    import question_form
+    if question_form.GOAL_LINE.search(message) and question_form.PROBLEM_LINE.search(message):
+        return message
+    return ""
+
+
+def judge_send(payload, tool, args):
+    """An owner question sent by a send tool gets the dedicated past-ruling call before it goes."""
+    try:
+        asked = send_question_text(args)
+        found = past_ruling_check(payload, asked) if asked else None
+    except Exception as exc:
+        print("call judge failed open: %s" % " ".join(("%s: %s" % (type(exc).__name__, exc)).split()),
+              file=sys.stderr)
+        return 0
+    return refuse(payload, tool, args, found[0], found[1]) if found else 0
+
+
 def main():
     try:
         payload = json.loads(sys.stdin.buffer.read().decode("utf-8", "replace"))
         tool, args = payload.get("tool_name"), payload.get("tool_input")
+        if tool in SEND_TOOLS:
+            return judge_send(payload, tool, args) if isinstance(args, dict) else 0
         if tool not in JUDGES:
             return 0
         if not isinstance(args, dict):
@@ -376,7 +440,9 @@ def main():
             if not judged:  # guard.py refuses a hit; no write carries options, context or steps
                 return 0
             shown = json.dumps(judged, ensure_ascii=False)
-            units = question_form.page_units(judged)
+            found = past_ruling_check(payload, "\n".join(words for _, words in question_form.page_units(judged)))
+            if found:  # item 8 refused it, or could not run: no form-judge call
+                return refuse(payload, tool, args, found[0], found[1])
             reask = any(is_reask(w) for w in judged)
             widening = any(sets_options(w) for w in judged)
         else:
