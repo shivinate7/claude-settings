@@ -861,4 +861,25 @@ rc, out = run("all", base=STALE_TREE_BASE, change=edit_a, TREE_CITES="true")
 check("tree-cites on, scope all: the step checks the whole tree",
       rc == 1 and "docs/old.md:3: STALE003 " in out, out)
 
+# The pin reader. A pin is found in any YAML shape the old line reader found it in: a flow-style step, and a steps
+# list indented four spaces. Each is a pin that drifts (exit 3), as on main.
+def pin_shape_case(shape, pin="A"):
+    """Run the scratch clone's command in a child whose CI pins ste-lint at `pin` in one shape: `flow`, a step written
+    as a flow mapping, or `indent4`, a steps list indented four spaces. Returns (rc, output, {label: sha})."""
+    with scratch("shape") as d:
+        cs = os.path.join(d, "claude-settings")
+        shas = scratch_clone(cs)
+        item = {"flow": "      - {uses: o/claude-settings/actions/ste-lint@%s}\n",
+                "indent4": "    - uses: o/claude-settings/actions/ste-lint@%s # main\n"}[shape]
+        wf = "on: pull_request\njobs:\n  l:\n    steps:\n" + item % shas[pin]
+        rc, out = run_ste_changed(os.path.join(cs, "bin", "ste-changed"),
+                                  make_repo(d, {**BASE_FILES, ".github/workflows/ci.yml": wf}, lambda work: None))
+        return rc, out, shas
+
+
+for shape in ("flow", "indent4"):
+    rc, out, shas = pin_shape_case(shape)
+    check("pin shape %s: an older ste-lint pin in this shape is found and drifts, exit 3" % shape,
+          rc == 3 and "CI pins ste-lint at %s" % shas["A"][:7] in out, out)
+
 sys.exit(1 if failed else 0)
