@@ -131,7 +131,7 @@ build.py also exits 1 on a stalled step. A `doing` or `active` step with no live
 stalled until it has a disposition (the same test as the in-progress upkeep row, so the two never
 disagree). It prints `stalled step: <id> (resume, pause or done)`, or `stalled step: <id> (done: landed in
 #N)` when a `Step:` trailer is on main, writes the page, then exits 1. A landed feel-fix with no valid
-device trial is not stalled; the device row lists it. A step is live when a session tagged `cs-step:<step id>` is working or blocked, not `review_ready`, `completed` or idle. An open pull request on branch `<step id>` or `lane/<step id>` is live only while its ledger next act is within its age limit (decision `pr-ledger`, the PR ledger). A `cs-topic:` tag never
+device trial is not stalled; the device row lists it. A step is live by `cs-step:<id>` on a live session of this repo, or an open pull whose branch is the id or `lane/<id>`. A session whose status bucket is completed or failed has ended and holds no step; an idle or review ready one still does. A `cs-topic:` tag never
 keeps a step live. The page's stalled block lists the ids.
 
 An open waiting-page item whose `lane` is a non-empty text and has no live work is stalled too. It
@@ -189,7 +189,7 @@ After each build the roadmap build script prints the upkeep list for the triage 
   so no step gets two. Its `Why yours:` line names the device trial and says a feel on a real device is the
   owner's to judge;
 - steps marked `doing` or `active` with no live lane, except a landed feel-fix with no valid
-  device trial, which the row above lists. A step is live when a session tagged `cs-step:<step id>` is working or blocked, not `review_ready`, `completed` or idle. An open pull request on branch `<step id>` or `lane/<step id>` is live only while its ledger next act is within its age limit (decision `pr-ledger`, the PR ledger). Both match the id exactly. A `cs-topic:` or `cs-build:` tag never keeps a step live.
+  device trial, which the row above lists. A step is live when a session that is not archived has the tag `cs-step:<step id>`, or an open pull request's branch equals the step id or `lane/<step id>`. A session whose status bucket is completed or failed has ended and holds no step; an idle or review ready one still does. Both match the id exactly. A `cs-topic:` or `cs-build:` tag never keeps a step live.
   The session also needs the tag `cs-repo:<owner>/<repo>` for this
   repo's GitHub name, in any case, because `list_sessions` is account-wide and step ids repeat across
   repos. A session row with no `tags` key, or null `tags`, has no tags and is not skipped. A step
