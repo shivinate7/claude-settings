@@ -13,7 +13,7 @@ import sys
 
 from guard_core import (
     _absolute, _git, _git_subcommand_index, _segment_git_c_target, basename, cap_safe, command_root,
-    git_calls, inline_script, inner_commands, resolve_command, resolve_default_base, segment_tokens, split_segments,
+    dir_before_segment, git_calls, inline_script, inner_commands, resolve_command, resolve_default_base, segment_tokens, split_segments,
 )
 import own_session  # the one home of the own get_session read, small so report_guard imports it too
 from shared_names import LANE_TAG, TOPIC_TAG, lane_head_refs  # the one home of the lane tags and head refs, shared with the roadmap build
@@ -452,14 +452,21 @@ def _generator_root(args):
     return parsed.root or ""
 
 
-def _root_is_repo(named, cwd, top):
-    """True when the --root `named`, read from `cwd`, is the repo whose top is `top`. A path that holds a shell
-    expansion cannot be read here, so it counts as this repo."""
-    if not named:
+def _root_is_repo(named, ran_in, top):
+    """True when the --root `named` may be the repo whose top is `top`. `ran_in` is the directory the run was
+    in, None when that cannot be told. Only a root that provably names another existing repo is not this one:
+    no --root, a shell expansion (`$`, backtick, glob, brace list, `~+`, `~-`, `~user`), a relative root with no
+    known directory, and a root with no `.git` all count as this repo."""
+    if not named or re.search(r"[$`*?\[{]", named):
         return True
-    if re.search(r"[$`*?\[]", named):
+    if named.startswith("~") and not (named == "~" or named.startswith("~/")):
         return True
-    return os.path.normcase(os.path.realpath(_absolute(named, cwd))) == os.path.normcase(os.path.realpath(top))
+    if not os.path.isabs(os.path.expanduser(named)) and not ran_in:
+        return True
+    resolved = os.path.realpath(_absolute(named, ran_in))
+    if not os.path.exists(os.path.join(resolved, ".git")):
+        return True
+    return os.path.normcase(resolved) == os.path.normcase(os.path.realpath(top))
 
 
 def _is_python(word):
@@ -510,13 +517,15 @@ def records_page_hit(stripped: str, cwd: str) -> str:
     """Return the commit when it would hold a records page that is none of HEAD's, the base tip's
     and origin/<base>'s, else ''. Each segment is judged from its own command word."""
     staged = False        # an earlier `git add` reaches the page
-    generated = []        # the --root of each earlier segment that runs the generator, "" for none
-    for segment in split_segments(stripped):
+    generated = []        # (--root, directory the run was in) of each earlier segment that runs the generator
+    ends = []
+    segments = split_segments(stripped, ends)
+    for number, segment in enumerate(segments):
         call = git_call_of(segment) if segment.strip() else None
         if call is None or call[0] not in ("add", "commit"):
             named = _runs_generator(segment) if call is None and segment.strip() else None
             if named is not None:
-                generated.append(named)
+                generated.append((named, dir_before_segment(segments, number, cwd, ends)))
             continue
         c_target = _segment_git_c_target(segment_tokens(segment) or [])
         root = command_root(stripped, cwd)
@@ -544,7 +553,7 @@ def records_page_hit(stripped: str, cwd: str) -> str:
         opens = _git(top, "cat-file", "-p", base_id)   # a hand-written page is no generated page: no hit
         if opens is None or opens.returncode != 0 or not opens.stdout.startswith(RECORDS_HEADER):
             continue
-        if working and any(_root_is_repo(named, root, top) for named in generated):
+        if working and any(_root_is_repo(named, ran_in, top) for named, ran_in in generated):
             return "git commit " + RECORDS_PAGE
         page_id = _commit_page_id(top, working)
         if page_id is not None and page_id not in (head_id, base_id, origin_id):

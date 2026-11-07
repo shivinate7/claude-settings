@@ -471,6 +471,7 @@
 - ste-lint-gloss-collapse: no test pins that a title holding inline code collapses whole. Decision: none
 - install-sh-mv-retries: the 25 x 0.1 s retry budget in install.sh has no test and no pin to Move-OverFile in install.ps1. Decision: none
 - git-rm-cached-false-alarm: The push-delete guard refuses `git rm -rf --cached .`, which removes files from the index only. allow `git rm` with `--cached`. Where: hooks/guard_push_delete.py. Decision: guard-reads-wrapped-commands
+- records-page-gen-false-alarm: The records-page guard refuses a commit after a generator run for this repo even when the page is unchanged, and it does not read `HOOK_CATALOG_ROOT`. Where: hooks/guard_merge.py records_page_hit. Decision: records-index-at-merge
 - report-on-empty-turn-unchecked: The report guard returns early when nothing landed, so rule reports-no-report-when-nothing-landed has no check. Where: lint/report_guard.py. Decision: claude-md-shrink
 - slug-cite-gloss-unchecked: The report guard checks only D<n> ids for a gloss, so a bare slug cite breaks speak-cite-id-plus-gloss unseen. Where: lint/report_guard.py. Decision: claude-md-shrink
 - stash-reminder-text-outside-repo: The harness worktree reminder still tells an agent to push a tagged stash entry, which guard_shared_tree.py now refuses. the reminder text is outside this repo. Decision: stash-stack-is-a-shared-subject
