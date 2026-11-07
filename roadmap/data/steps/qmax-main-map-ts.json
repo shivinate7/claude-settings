@@ -1,0 +1,11 @@
+{
+  "title": "q_max main passes its 10 MAP checks and has no TypeScript errors",
+  "phase": "now",
+  "status": "doing",
+  "order": 0.12,
+  "owner": "coordinator",
+  "why": "Coordinator, 13:59 CST Nov 7: q_max main has 10 MAP failures (map formatVersion 4, skill reads 5) and 33 TypeScript errors.",
+  "note": "Overlaps step qmax-map-format-skew (lane session_013NEJL1dp5Gks9NWgNMJ7Jw, 13:45 CST), which covers the same MAP failures. Triage asked the coordinator which lane owns them.",
+  "lane": "session_013NEJKzRCmwHVEerq6qBgSn",
+  "updatedAt": "2026-11-07T13:59:00-06:00"
+}
