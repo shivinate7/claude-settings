@@ -290,11 +290,13 @@ corrupt_case("empty-object", overwrite("{}"))
 
 
 # shared_names is the one home of the watched names and is stdlib only, so the fast path
-# imports it. The hook's own module name is allowed for a probe that runs it by name.
-FAST_PATH_MODULES = {"config_watch", "shared_names"}
+# imports it. The typecheck runs before the fast exit by design, so its two modules load on
+# every call too: lint/layout.py (the reader) and hooks/repo_typecheck.py (the check). Both are
+# stdlib only. The hook's own module name is allowed for a probe that runs it by name.
+FAST_PATH_MODULES = {"config_watch", "shared_names", "layout", "repo_typecheck"}
 
 
-@case("e the unchanged-path run loads only standard-library modules plus shared_names")
+@case("e the unchanged-path run loads only standard-library modules, shared_names and the two typecheck modules")
 def stdlib_only_hash_step(project):
     project.settle()
     control = os.path.join(project.root, "noop.py")
