@@ -12675,6 +12675,60 @@ CAP_NAME = "PROSE_JUDGE_MAX_CALLS"
 PROSE_CAP = 2
 
 
+class ReviewFixSonnetOnGuard(ReviewEnv):
+    """The fix check of a change that touches a guard or check runs on Sonnet (owner, 2026-11-07 14:44 CST, item 351 a). A Haiku fix
+    check PASS on a record with Guard or check yes reads open, and `--review-record` refuses to write one, with a remedy that names sonnet.
+    A Sonnet fix check reads as it always has, and a Haiku fix check on a change with no guard or check is unchanged. Records are built with
+    record_text() and read with record_verdict(); the write path runs through merge.main, so each case reaches the rule in the real code."""
+
+    def guard_yes_verdict(self, rounds, fix_model, net="not owed"):
+        return record_verdict(self, record_text(rounds=rounds, guard="yes", net=net, fix=(fix_check_line(model=fix_model),)))
+
+    def guard_flags(self, fix_model, guard="yes"):
+        """The review flags for a normal change with `guard`, round 1 FAILed, and a fix check PASS on `fix_model` from the earlier head."""
+        return ("--kind", "normal", "--guard", guard, "--round", "1:reviewer:sonnet:FAIL", "--head", self.head(),
+                "--fix-check", f"{REVIEW_OLD_HEAD}:reviewer:{fix_model}:PASS")
+
+    def earlier_host(self):
+        """ReviewFixFlag's shared step: the live head, with one earlier record that reviewed the fix base and has no fix line."""
+        return ReviewFixFlag.earlier_host(self)
+
+    def test_a_haiku_fix_pass_on_a_guard_change_reads_open_not_done(self):
+        for rounds in (("Round 1: reviewer, sonnet, FAIL",), ("Round 1: reviewer, sonnet, FAIL", "Round 2: reviewer, sonnet, FAIL")):
+            with self.subTest(rounds=rounds):
+                state, why = self.guard_yes_verdict(rounds, "haiku")
+                self.assertEqual(state, "open", f"a Haiku fix check PASS on a guard or check change must not read done: {why!r}")
+
+    def test_a_sonnet_fix_pass_on_a_guard_change_still_reads_done(self):
+        # control: a Sonnet fix check counts as it did before, so a first-round FAIL the fix PASSes reads done
+        state, why = self.guard_yes_verdict(("Round 1: reviewer, sonnet, FAIL",), "sonnet")
+        self.assertEqual(state, "done", f"a Sonnet fix check PASS on a guard or check change must read done: {why!r}")
+
+    def test_a_haiku_fix_pass_on_a_change_with_no_guard_still_reads_done(self):
+        # control: Guard or check no keeps the Haiku fix check, as it did before
+        text = record_text(rounds=("Round 1: reviewer, sonnet, FAIL",), guard="no", fix=(fix_check_line(model="haiku"),))
+        state, why = record_verdict(self, text)
+        self.assertEqual(state, "done", f"a Haiku fix check PASS on a change with no guard or check must read done: {why!r}")
+
+    def test_a_haiku_fix_check_on_a_guard_change_is_refused_and_names_sonnet(self):
+        rc, out, err = self.run_args("7", "--review-record", *self.guard_flags("haiku"), host=self.earlier_host())
+        self.assertNotEqual(rc, 0, "a Haiku fix check on a guard or check change was written:\n" + out + err)
+        self.assertNotIn("Traceback", err)
+        self.assertNotIn(REVIEW_MARKER, out, "a refused Haiku fix check still printed a record")
+        self.assertIn("sonnet", out + err, "the refusal does not name sonnet as the model to use:\n" + out + err)
+
+    def test_a_sonnet_fix_check_on_a_guard_change_prints_the_record(self):
+        # control: the same flags on Sonnet are written, with the fix line the record reads back
+        rc, out, err = self.run_args("7", "--review-record", *self.guard_flags("sonnet"), host=self.earlier_host())
+        self.assertEqual(rc, 0, "a Sonnet fix check on a guard or check change was refused:\n" + out + err)
+        self.assertIn(fix_check_line(model="sonnet"), posted_body(self, out).splitlines())
+
+    def test_a_haiku_fix_check_on_a_change_with_no_guard_still_prints_the_record(self):
+        # control: Guard or check no, with a Haiku fix check, is written as it was before
+        rc, out, err = self.run_args("7", "--review-record", *self.guard_flags("haiku", guard="no"), host=self.earlier_host())
+        self.assertEqual(rc, 0, "a Haiku fix check on a change with no guard or check was refused:\n" + out + err)
+        self.assertIn(fix_check_line(model="haiku"), posted_body(self, out).splitlines())
+
 class JudgeStub:
     """Stands in for decision_watch.invoke_model. `answer(prompt)` gives (verdict, error), or raises. Each call's prompt is
     kept, so a case reads what the judge sent as well as what it got back."""
