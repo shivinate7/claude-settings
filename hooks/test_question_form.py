@@ -1434,6 +1434,81 @@ def case_item_51_stray_field():
          entry_of(page_item(focus="#fill")), ("item-field-rendered", "focus"))
 
 
+# ------------------------------------------------------------------ a press link that is not a list; a partial edit of the Why yours line
+#
+# Each case below is also a pytest test (the test_ wrappers after it). A check the case records as failed fails
+# its test, by the check's name, so one runner and main() judge the same cases.
+
+def _judged(case):
+    """Run one case under pytest: each check it records as failed fails the test, by the check's name."""
+    before = len(FAILED)
+    case()
+    assert len(FAILED) == before, "; ".join(FAILED[before:])
+
+
+def case_press_link_links_not_a_list_on_a_step():
+    """`links` set to true or to a number is no list of links. The step's press has no valid link, so the hit fires as it
+    does for a missing link. It must not crash or fail open."""
+    for links in (True, 5):
+        page("a task step that presses in GitHub, with links %r, is refused as press-link" % (links,), "set",
+             entry_of(task_item(["Press Merge in GitHub on the pull request."], links=links)),
+             ("press-link", "no link to the page"))
+
+
+def case_press_link_links_not_a_list_on_an_option():
+    """The same for an option's links: true or a number is no valid link, so the press is refused as press-link."""
+    for links in (True, 5):
+        press = copy.deepcopy(ITEM92["options"])
+        press[1].update(label="Press Merge in GitHub", how="Do it by hand.", links=links)
+        page("an option that presses in GitHub, with links %r, is refused as press-link" % (links,), "set",
+             entry_of(page_item(options=press)), ("press-link", "no link to the page"))
+
+
+WHY_REASON = TASK_WHY.split(": ", 1)[1]  # the text after the Why yours label
+
+
+def case_task_str_replace_removes_only_the_label():
+    """A str_replace that removes only the Why yours label leaves a line with no label. It is refused as task-names-check."""
+    page("a str_replace that removes only the Why yours label is refused as task-names-check", "str_replace",
+         {"collection": "items", "doc_id": DOC, "field": "context", "old_str": "Why yours:", "new_str": ""},
+         ("task-names-check", None))
+
+
+def case_task_str_replace_removes_only_the_reason():
+    """A str_replace that removes only the text after the Why yours label leaves the label with no reason. It is refused."""
+    page("a str_replace that removes only the text after Why yours is refused as task-names-check", "str_replace",
+         {"collection": "items", "doc_id": DOC, "field": "context", "old_str": WHY_REASON, "new_str": ""},
+         ("task-names-check", None))
+
+
+def case_task_str_replace_rewords_the_reason():
+    """A control: an edit that keeps the label and rewords the text after it keeps the line, so it passes."""
+    page("a str_replace that rewords the Why yours reason and keeps the label passes", "str_replace",
+         {"collection": "items", "doc_id": DOC, "field": "context",
+          "old_str": "Why yours: a session on your computer was asked first",
+          "new_str": "Why yours: a session on your desk was asked first"}, None)
+
+
+def test_press_link_links_true_or_a_number_on_a_step_is_no_link():
+    _judged(case_press_link_links_not_a_list_on_a_step)
+
+
+def test_press_link_links_true_or_a_number_on_an_option_is_no_link():
+    _judged(case_press_link_links_not_a_list_on_an_option)
+
+
+def test_task_str_replace_removing_only_the_label_is_refused():
+    _judged(case_task_str_replace_removes_only_the_label)
+
+
+def test_task_str_replace_removing_only_the_reason_is_refused():
+    _judged(case_task_str_replace_removes_only_the_reason)
+
+
+def test_task_str_replace_rewording_the_reason_passes():
+    _judged(case_task_str_replace_rewords_the_reason)
+
+
 def main():
     for case in (case_item_92, case_item_51_stray_field, case_form_lines, case_form_placeholders_on_edits,
                  case_options_state_gain_and_loss, case_older_rules_keep_their_ids,
@@ -1452,7 +1527,10 @@ def main():
                  case_past_rulings_caps_and_ranks, case_past_rulings_reads_debts, case_key_overlap,
                  case_key_overlap_resend_and_fact_lists, case_key_overlap_similar_questions_clash,
                  case_past_rulings_skips_the_debt_notes_file,
-                 case_roadmap_broken_pipe_not_a_repo_is_absent, case_roadmap_broken_pipe_other_stderr_stays_unreadable):
+                 case_roadmap_broken_pipe_not_a_repo_is_absent, case_roadmap_broken_pipe_other_stderr_stays_unreadable,
+                 case_press_link_links_not_a_list_on_a_step, case_press_link_links_not_a_list_on_an_option,
+                 case_task_str_replace_removes_only_the_label, case_task_str_replace_removes_only_the_reason,
+                 case_task_str_replace_rewords_the_reason):
         try:
             case()
         except Exception as exc:
