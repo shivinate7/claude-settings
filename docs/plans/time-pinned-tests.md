@@ -4,12 +4,13 @@ Working plan for roadmap step time-pinned-tests-go (tests that pass or fail on c
 
 ## The finder
 
-`lint/find_time_pinned.py` lists lines in test files, in four kinds:
+`lint/find_time_pinned.py` lists lines in test files, in five kinds:
 
 - sleep: a real wait in a test.
 - elapsed-assert: an assert that reads a clock.
 - test-cap: a per-test or per-suite time limit.
 - wait-cap: a fixed bound on a wait for a condition or a child process. Most are hang guards, which can stay. Each repo's lane judges each one.
+- calendar: a read of the real date or time zone, such as `date.today()` or a `new Date(...)` fed by the clock.
 
 Each count is a candidate, not a verdict. A sample read found a false alarm in elapsed-assert: a timestamp checked for its value, not for speed (degen `tests/server/test_fetch_counter.py`). The repo lane decides each one.
 
