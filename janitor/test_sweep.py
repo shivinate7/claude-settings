@@ -1923,8 +1923,7 @@ class SessionEndScopeTests(unittest.TestCase):
         self.assertEqual(seen["pid_reads"], 2)
 
     def test_main_accepts_the_session_end_flag_in_full_mode(self):
-        """Flag parsing only: `main` takes --session-end with a root and runs the full mode. Old
-        code rejects the flag at argparse, which is the one red a main-level case can give."""
+        """Flag parsing only: `main` takes --session-end with a root, sets `args.session_end`, and runs the full mode."""
         seen = {}
 
         def fake_roots(args, roots, restore_log_path, mode):
