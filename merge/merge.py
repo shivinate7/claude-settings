@@ -3179,8 +3179,8 @@ def review_state(rec, head):
     return "open", f"round {top} is not passed" if top else "no round is recorded"
 
 # The age limit of each next act, in hours; one home. A line past its limit is RED, so no wait runs unbounded.
-# Keys: the next acts (batch, lane round) and the hold labels (held, parked, replaced). The batch limit is unmeasured: 24 is a first guess,
-# not read from any run history. Move it when a measured wait says otherwise. A pull request with the BATCH_LABEL (a batch run) counts
+# Keys: the next acts (batch, lane round) and the hold labels (held, parked, replaced). Every limit is unmeasured: each is a first guess,
+# not read from any run history (ruling of 12:30 CST Nov 7). Move one when a measured wait says otherwise. A pull request with the BATCH_LABEL (a batch run) counts
 # against the batch limit too.
 PR_STATE_AGE_HOURS = {"batch": 24, "lane round": 72, "held": 168, "parked": 720, "replaced": 24}
 HOLD_LABELS = ("held", "parked", "replaced", BATCH_LABEL)  # the labels that stand in for a review record; all but the BATCH_LABEL also need a Waits on line
