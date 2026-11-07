@@ -69,7 +69,7 @@ def run(md=GOOD_MD, rule_map=None, guard=GUARD_SRC, workflow=WORKFLOW_SRC,
         rule_floor=1, unmechanized_expected=None, judgment_expected=None):
     """Call check() with small pins sized to the fixture, not this repo's real numbers."""
     if rule_map is None:
-        rule_map = GOOD_MAP
+        rule_map = guards_map(guard_ids(guard))
     if unmechanized_expected is None:
         unmechanized_expected = kind_count(rule_map, "unmechanized")
     if judgment_expected is None:
@@ -78,9 +78,29 @@ def run(md=GOOD_MD, rule_map=None, guard=GUARD_SRC, workflow=WORKFLOW_SRC,
                             judgment_expected=judgment_expected)
 
 
+GUARD_TEST = "lint/test_rule_audit.py::RuleAuditTests.test_single_mapped_rule_is_clean"
+
+
+def guard_ids(guard):
+    """The rule ids `guard` text writes, read the way the audit reads them."""
+    return sorted(rule_audit.guard_rule_names(guard))
+
+
+def guards_map(ids, test=GUARD_TEST, rule_map=GOOD_MAP):
+    """`rule_map` plus a `guards` section: one row per id, each row naming `test`."""
+    return dict(rule_map, guards={i: {"test": test} for i in ids})
+
+
+def with_guards(rule_map, guard=GUARD_SRC):
+    """`rule_map` with a `guards` section for every id `guard` writes. A map that has one is kept."""
+    if "guards" in rule_map:
+        return rule_map
+    return guards_map(guard_ids(guard), rule_map=rule_map)
+
+
 def check_map(mechanism):
     mechanism = dict(mechanism, kind="check")
-    return {"rules": {"shared-trees-no-destructive-git": {"mechanism": mechanism}}}
+    return with_guards({"rules": {"shared-trees-no-destructive-git": {"mechanism": mechanism}}})
 
 
 class RuleAuditTests(unittest.TestCase):
@@ -115,7 +135,7 @@ class RuleAuditTests(unittest.TestCase):
                 }
             }
         }
-        problems = run(rule_map=rule_map)
+        problems = run(rule_map=with_guards(rule_map))
         self.assertEqual(problems, [])
 
     def test_row_naming_a_missing_check_file_fails(self):
@@ -197,7 +217,7 @@ class RuleAuditTests(unittest.TestCase):
                 }
             }
         }
-        problems = run(rule_map=rule_map)
+        problems = run(rule_map=with_guards(rule_map))
         self.assertEqual(problems, [])
 
     def test_unmechanized_with_a_thin_reason_fails(self):
@@ -264,7 +284,7 @@ class RuleAuditTests(unittest.TestCase):
             "kind": "unmechanized",
             "reason": "No check reads whether the first sentence of a reply gives the result.",
         }}
-        problems = run(md=self._rule_files(GOOD_MD, style), rule_map={"rules": rules},
+        problems = run(md=self._rule_files(GOOD_MD, style), rule_map=with_guards({"rules": rules}),
                        rule_floor=2)
         self.assertEqual(problems, [])
 
@@ -282,7 +302,7 @@ def one_row_map(kind, reason=None):
     mechanism = {"kind": kind}
     if reason is not None:
         mechanism["reason"] = reason
-    return {"rules": {"shared-trees-no-destructive-git": {"mechanism": mechanism}}}
+    return with_guards({"rules": {"shared-trees-no-destructive-git": {"mechanism": mechanism}}})
 
 
 class JudgmentKindTests(unittest.TestCase):
@@ -341,7 +361,7 @@ class JudgmentKindTests(unittest.TestCase):
             "shared-trees-no-destructive-git": {"mechanism": {
                 "kind": "unmechanized", "reason": JUDGMENT_REASON}},
             "second-judged-rule": {"mechanism": {"kind": "judgment", "reason": JUDGMENT_REASON}}}}
-        problems = run(md=TWO_RULE_MD, rule_map=rule_map, unmechanized_expected=1,
+        problems = run(md=TWO_RULE_MD, rule_map=with_guards(rule_map), unmechanized_expected=1,
                        judgment_expected=1)
         self.assertEqual(problems, [])
 
@@ -405,7 +425,8 @@ class GuardTextTests(unittest.TestCase):
     def test_rule_refused_only_in_a_sibling_module_resolves(self):
         root = self.tree(self.files())
         guard_text = rule_audit.guard_text(root)
-        problems = rule_audit.check(GOOD_MD, SIBLING_MAP, guard_text, "", 1, 0, judgment_expected=0)
+        problems = rule_audit.check(GOOD_MD, with_guards(SIBLING_MAP, guard_text), guard_text, "", 1, 0,
+                                    judgment_expected=0)
         self.assertEqual(problems, [])
 
     def test_guard_py_alone_leaves_that_sibling_rule_stale(self):
@@ -747,14 +768,6 @@ class EmittedRuleIdsTests(unittest.TestCase):
 # row names the test that proves that guard. The ids come from the guard source the same way the audit
 # reads them (guard_rule_names over hooks/guard*.py), never from a copy of the list kept here.
 
-GUARD_TEST = "lint/test_rule_audit.py::RuleAuditTests.test_single_mapped_rule_is_clean"
-
-
-def guards_map(ids, test=GUARD_TEST):
-    """GOOD_MAP plus a `guards` section: one row per id, each row naming `test`."""
-    return dict(GOOD_MAP, guards={i: {"test": test} for i in ids})
-
-
 class GuardsSectionTests(unittest.TestCase):
     """Every guard rule id the guard source writes needs its own `guards` row, and each row needs a
     test that resolves. A row for an id the guard no longer writes is stale."""
@@ -776,7 +789,7 @@ class GuardsSectionTests(unittest.TestCase):
 
     def test_no_guards_section_names_every_guard_id(self):
         # The empty state: the map has its rules and no `guards` section at all.
-        problems = run()
+        problems = run(rule_map=GOOD_MAP)
         for guard_id in self.fixture_ids():
             with self.subTest(guard_id=guard_id):
                 self.assertTrue(any(guard_id in p for p in problems), problems)
