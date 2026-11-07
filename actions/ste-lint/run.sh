@@ -6,6 +6,8 @@ set -euo pipefail
 # base branch, and a shallow clone would not carry that history.
 LINTER="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../../lint/ste_lint.py"
 STALE_CITES="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../../lint/stale_cites.py"
+FIND_COPIES="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../../lint/find_copies.py"
+PARENT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)"  # the claude-settings checkout this action sits in
 
 cd "$(git rev-parse --show-toplevel)"  # git diff prints root-relative paths; match them from any subdirectory
 
@@ -128,6 +130,15 @@ if [ "$SCOPE" != "all" ]; then
       echo
     } >> "$SUMMARY"
   fi
+fi
+# One-home check (lint/find_copies.py --in-repo, decision one-home-check): in a repo that is not claude-settings, the
+# copies it holds of the rule sentences of the claude-settings checkout this action sits in. The pin of this action is
+# the parent's version, so no extra checkout is needed. The findings print and never fail the step yet: the child
+# repos hold copies today, and a pin bump must not turn them red. A later step flips this to fail.
+if [ "$(pwd -P)" != "$PARENT" ]; then
+  set +e
+  python3 "$FIND_COPIES" --in-repo --parent "$PARENT"
+  set -e
 fi
 # --tree (the tree-cites input) names stale cites on lines the range never touched, so it runs in both scopes.
 if [ "${TREE_CITES:-false}" = "true" ]; then

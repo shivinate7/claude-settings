@@ -2,6 +2,7 @@
 """List the copies a child repo holds of claude-settings things. Read-only. Standard library only.
 
     python3 lint/find_copies.py <child> [--parent <dir>] [--json] [--threshold 0.8]
+    python3 lint/find_copies.py --in-repo [<repo>] [--parent <dir>]
 
 Rule building-one-home-per-capability: a shared thing has one home, and a child extends it,
 never copies it. Shared skills are pinned, never vendored. This tool reports copies. It fixes
@@ -20,6 +21,22 @@ and never a copy; a child file with over CHILD_GROWTH times the parent's lines o
 A skill matches on its folder name or its `name`, so a renamed skill with a new `name` shows only
 through its files.
 
+Mode --in-repo (one-home check, the rule building-one-home-per-capability): the repo, default the current folder, is
+searched for text copied from a rule sentence of the parent's RULE_FILES (lint/rule_audit.py `rule_sentences`). The
+parent is this clone, or the --parent folder: the claude-settings checkout the ste-lint action sits in, for a child.
+- COPY001 `<path>:<line>: COPY001 <rule id> copied`: a tracked `*.md` file holds a run of COPY_FLOOR (8) words of a rule
+  sentence, found whole after both are normalized (lint/word_runs.py, copy form; a re-flowed copy is found, a sentence
+  under 8 words holds no run). It is no copy when the rule id sits in the same paragraph, list item, table row,
+  blockquote or fenced block, as text or as an anchor. GLOSSARY.md and docs/records.md (lint/copy_exclusions.py) are
+  not read. In the parent itself, its own RULE_FILES are the home and are not read.
+- A child exception is one comment, `<!-- exempt: <rule-id> reason: <text> -->`, outside a code span and a fence. It
+  covers copies of its own rule id in its own file only. EXEMPT001: the reason holds fewer words than
+  REASON_MIN_WORDS (lint/rule_audit.py), and the exception covers nothing. EXEMPT002: the parent has no such rule id.
+  EXEMPT003: the exception covers no copy in its file, so it is unused.
+The last line is `copies: PASS` or `copies: FAIL`. Exit 0: none, 1: findings, 2: a read could not run (no verdict
+line). Not caught, by design: a copy of 7 words or fewer, and a reworded copy (paraphrase).
+Cost of --in-repo: one python start, one `git ls-files`, one read of each tracked `*.md`, no write, no .pyc.
+
 Files inside a reported skill copy are not reported again. License and lock files, parent
 files under an examples/ or templates/ folder, small files and files over MAX_BYTES are skipped. Exit 0: no copies. Exit 1: copies found.
 Exit 2: the child or parent cannot be read, so the result is unknown.
@@ -32,8 +49,14 @@ import os
 import re
 import sys
 
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "hooks"))
+sys.dont_write_bytecode = True  # the cost contract: a run writes no file, so no .pyc for the imports below
+HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, HERE)
+sys.path.insert(0, os.path.join(HERE, "..", "hooks"))
 import _nowindow  # noqa: E402  the one home of a no-window child start (hooks/_nowindow.py)
+import word_runs  # noqa: E402  the one home of word-run matching (lint/word_runs.py)
+from copy_exclusions import EXCLUDED_FILES  # noqa: E402  the one home of the files a prose copy check skips
+from rule_audit import REASON_MIN_WORDS, RULE_FILES, rule_sentences  # noqa: E402  the rule sentences and the reason floor
 
 MAX_BYTES = 1_000_000
 MIN_BYTES = 200  # a byte-equal file smaller than this is boilerplate, not a copy
@@ -45,6 +68,8 @@ SKIP_NAMES = re.compile(r"^(LICENSE|LICENCE|NOTICE|COPYING)(\..*)?$|^\.git(ignor
                         re.IGNORECASE)
 TEMPLATE_DIRS = {"examples", "templates"}  # a parent file here is meant to be copied, so it is no copy
 SKIP_DIRS = {".git", "node_modules", ".venv", "venv", "__pycache__", "dist", "build"}
+COPY_FLOOR = 8  # words in a row of a rule sentence that make a copy; a stock phrase under it passes
+EXEMPT_RE = re.compile(r"<!--\s*exempt:\s*([a-z0-9][a-z0-9-]*)\s+reason:(.*?)-->", re.S)
 DEFAULT_PARENT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
@@ -179,14 +204,78 @@ def find_file_copies(parent, pfiles, child, cfiles, skip_folders, threshold):
     return found
 
 
+def exceptions(text):
+    """[(line, rule id, reason)] of each child exception comment in `text`, outside a code span and a fenced block."""
+    masked, found = word_runs.mask_fences(text), []
+    for match in word_runs.SPANS.finditer(masked):
+        if match.group("tick"):
+            continue
+        exempt = EXEMPT_RE.fullmatch(match.group(0))
+        if exempt:
+            found.append((masked.count("\n", 0, match.start()) + 1, exempt.group(1), " ".join(exempt.group(2).split())))
+    return found
+
+
+def scan_file(text, index, rules):
+    """[(line, code, message)] of one tracked Markdown file: COPY001 copies and EXEMPT00n exception faults."""
+    candidates = []  # (line, rule id, whether the unit names the rule id)
+    for first, unit in word_runs.units(text):
+        for slug, offset in word_runs.first_lines(unit, index, COPY_FLOOR).items():
+            candidates.append((first + offset, slug, word_runs.names(unit, slug)))
+    found, covered = [], set()
+    for line, slug, reason in exceptions(text):
+        if len(reason.split()) < REASON_MIN_WORDS:
+            found.append((line, "EXEMPT001", "reason for %s holds under %d words; the exception covers nothing"
+                          % (slug, REASON_MIN_WORDS)))
+        elif slug not in rules:
+            found.append((line, "EXEMPT002", "%s is no rule id of the parent; the exception covers nothing" % slug))
+        elif not any(slug == c[1] for c in candidates):
+            found.append((line, "EXEMPT003", "the exception for %s covers no copy in this file; remove it" % slug))
+        else:
+            covered.add(slug)
+    found += [(line, "COPY001", "%s copied" % slug) for line, slug, named in candidates
+              if not named and slug not in covered]
+    return found
+
+
+def in_repo(repo, parent):
+    """(findings, files read, unknown): findings are (path, line, code, message). unknown is a text, or None."""
+    try:
+        rules = rule_sentences(parent)
+    except OSError as err:
+        return [], 0, "the rule files of the parent %s cannot be read (%s)" % (parent, err.strerror or type(err).__name__)
+    if not rules:
+        return [], 0, "the rule files of the parent %s hold no rule anchor" % parent
+    index = word_runs.run_index({slug: [word_runs.words(s, keep=True) for s in sentences]
+                                 for slug, sentences in rules.items()}, COPY_FLOOR)
+    files = list_files(repo)
+    if files is None:
+        return [], 0, "git ls-files failed in %s" % repo
+    home = {p.replace(os.sep, "/") for p in RULE_FILES} if os.path.realpath(repo) == os.path.realpath(parent) else set()
+    found, count = [], 0
+    for rel in files:
+        if not rel.endswith(".md") or rel in EXCLUDED_FILES or rel in home:
+            continue
+        data = read(repo, rel)
+        if data is None:
+            return [], count, "cannot read %s" % rel
+        count += 1
+        for line, code, message in scan_file(data.decode("utf-8", "replace"), index, rules):
+            found.append((rel, line, code, message))
+    return sorted(found), count, None
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    ap.add_argument("child", help="the child repo root")
+    ap.add_argument("child", nargs="?", help="the child repo root (with --in-repo: the repo, default the current folder)")
+    ap.add_argument("--in-repo", action="store_true", help="find copies of the parent's rule sentences in the repo")
     ap.add_argument("--parent", default=DEFAULT_PARENT, help="the claude-settings root (default: this clone)")
     ap.add_argument("--json", action="store_true", help="print one JSON object")
     ap.add_argument("--threshold", type=float, default=0.8, help="near-equal floor, 0 to 1 (default 0.8)")
     args = ap.parse_args(argv)
-    child, parent = os.path.abspath(args.child), os.path.abspath(args.parent)
+    if not args.child and not args.in_repo:
+        ap.error("the child repo root is required without --in-repo")
+    child, parent = os.path.abspath(args.child or "."), os.path.abspath(args.parent)
     for label, root in (("child", child), ("parent", parent)):
         if not os.path.isdir(root):
             print(f"unknown: the {label} folder {root} cannot be read")
@@ -194,6 +283,18 @@ def main(argv=None):
     if not os.path.isdir(os.path.join(parent, "skills")):
         print(f"unknown: {parent} has no skills/ folder, so it is not a claude-settings tree")
         return 2
+    if args.in_repo:
+        found, count, unknown = in_repo(child, parent)
+        if unknown:
+            print("unknown: %s" % unknown)
+            return 2
+        for rel, line, code, message in found:
+            print("%s:%d: %s %s" % (rel, line, code, message))
+        copies = {f[0] for f in found if f[2] == "COPY001"}
+        print("%d copies in %d files, %d markdown files read" % (sum(1 for f in found if f[2] == "COPY001"),
+                                                                 len(copies), count))
+        print("copies: %s" % ("FAIL" if found else "PASS"))
+        return 1 if found else 0
     pfiles, cfiles = list_files(parent), list_files(child)
     for label, root, files in (("parent", parent, pfiles), ("child", child, cfiles)):
         if files is None:
