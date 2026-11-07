@@ -980,14 +980,66 @@ def _js_values(groups, env):
     return []
 
 
+# A name before `/` ends an operand, so the `/` divides, unless the name is one of these words, after which an
+# operand is expected and the `/` opens a regex literal.
+_JS_REGEX_AFTER_WORD = frozenset((
+    "return", "typeof", "instanceof", "in", "of", "new", "delete", "void", "throw", "case", "do", "else",
+    "yield", "await"))
+_JS_REGEX_AFTER_CHAR = "(,=:[!&|?{};+-*%<>~^"
+
+
+def _js_regex_may_start(body: str, at: int) -> bool:
+    """True when the `/` at `at` sits where an operand is expected: at the start, after an opening bracket, a
+    separator, an operator or a word of `_JS_REGEX_AFTER_WORD`. After a name, a number, `)`, `]` or a string
+    it is division."""
+    back = at - 1
+    while back >= 0 and body[back] in " \t\r\n":
+        back -= 1
+    if back < 0:
+        return True
+    if body[back].isalnum() or body[back] in "_$":
+        start = back
+        while start > 0 and (body[start - 1].isalnum() or body[start - 1] in "_$"):
+            start -= 1
+        return body[start:back + 1] in _JS_REGEX_AFTER_WORD
+    return body[back] in _JS_REGEX_AFTER_CHAR
+
+
+def _js_regex_end(body: str, at: int) -> int:
+    r"""The index after the `/` that closes the regex literal opening at `at`, or -1 when none closes it on its
+    line. An escape and a `[...]` class are skipped, so `/\//` and `/[/]/` close at their last `/`."""
+    end, in_class = at + 1, False
+    while end < len(body) and body[end] != "\n":
+        char = body[end]
+        if char == "\\":
+            if body[end + 1:end + 2] == "\n":
+                return -1
+            end += 2
+            continue
+        if char == "[":
+            in_class = True
+        elif char == "]":
+            in_class = False
+        elif char == "/" and not in_class:
+            return end + 1
+        end += 1
+    return -1
+
+
 def _js_without_comments(body: str) -> str:
-    """`body` with each `//` and `/* */` comment blanked (newlines kept), strings left whole, so a path a
-    comment names is no write. A `'` or `"` string ends at a newline, a backtick string runs on; a regex
-    literal is not told from division, which can only blank less than a comment, never more."""
+    r"""`body` with each `//` and `/* */` comment blanked (newlines kept), strings and regex literals left
+    whole, so a path a comment names is no write and a `/*` in `/\/*$/` opens no comment. A `'` or `"` string
+    ends at a newline, a backtick string runs on. A `/` opens a regex where an operand is expected
+    (`_js_regex_may_start`) and a `/` closes it on the same line; else it is division."""
     out, at, size = [], 0, len(body)
     while at < size:
         char, pair = body[at], body[at:at + 2]
-        if char in "'\"`":
+        end = (_js_regex_end(body, at) if char == "/" and pair not in ("//", "/*")
+               and _js_regex_may_start(body, at) else -1)
+        if end > 0:
+            out.append(body[at:end])
+            at = end
+        elif char in "'\"`":
             end = at + 1
             while end < size and body[end] != char and (char == "`" or body[end] != "\n"):
                 end += 2 if body[end] == "\\" else 1
