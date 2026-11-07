@@ -4183,7 +4183,7 @@ test("the restatement scan finds a width written as an attribute, a style assign
   ]);
 });
 
-test("the restatement scan finds a width inside min(), max() or clamp(), and a camelCase maxWidth or minWidth", () => {
+test("the restatement scan finds a width inside min(), max() or clamp(), quoted or not, and a camelCase maxWidth or minWidth", () => {
   const src = [
     "const FIT_W = 390;",
     "div { width: min(100%, 390px); }",
@@ -4193,6 +4193,7 @@ test("the restatement scan finds a width inside min(), max() or clamp(), and a c
     'el.style.maxWidth = "390px";',
     'el.style.minWidth = "390px";',
     "const s = { maxWidth: 390 };",
+    'el.style.width = "min(100%, 390px)";',
   ].join("\n");
   assert.deepEqual(restatements(src, "390"), [
     "line 2: div { width: min(100%, 390px); }",
@@ -4202,7 +4203,8 @@ test("the restatement scan finds a width inside min(), max() or clamp(), and a c
     'line 6: el.style.maxWidth = "390px";',
     'line 7: el.style.minWidth = "390px";',
     "line 8: const s = { maxWidth: 390 };",
-  ], "the scan misses a width inside min(), max(), clamp(), or a camelCase maxWidth or minWidth");
+    'line 9: el.style.width = "min(100%, 390px)";',
+  ], "the scan misses a width inside min(), max(), clamp(), or a camelCase maxWidth or minWidth, or one whose function value is quoted");
 });
 
 test("the restatement scan skips a number equal to FIT_W that is not a width value: a count, a font weight, a breakpoint, a height, a gap, a max-height", () => {
