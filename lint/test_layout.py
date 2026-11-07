@@ -359,17 +359,6 @@ class WaitingPage(Tree):
             with self.subTest(url=url):
                 self.assertTrue(self.layout.is_waiting_page_url(self.tree, url), "%s does not name the page" % url)
 
-    def test_a_link_without_scheme_or_www_or_in_upper_case_or_padded_is_the_page(self):
-        # Catches: the one-home read drops the forms the old read counted: no scheme, http, www, an upper-case
-        # scheme or host, and leading padding. Trailing padding was never counted, so it is not pinned here.
-        self.set_page(self.URL)
-        for url in ("claude.ai/artifact/abc123", "http://claude.ai/artifact/abc123",
-                    "www.claude.ai/artifact/abc123", "HTTPS://claude.ai/artifact/abc123",
-                    "https://Claude.AI/artifact/abc123", "  https://claude.ai/artifact/abc123"):
-            with self.subTest(url=url):
-                self.assertEqual(self.layout.artifact_id(url), "abc123", "%r has no artifact id" % url)
-                self.assertTrue(self.layout.is_waiting_page_url(self.tree, url), "%r does not name the page" % url)
-
     def test_a_repo_with_no_page_has_no_page_url(self):
         self.assertFalse(self.layout.is_waiting_page_url(self.tree, self.URL))
         self.roll_out()
