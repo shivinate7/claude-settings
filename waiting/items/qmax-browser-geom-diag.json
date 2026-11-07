@@ -1,21 +1,37 @@
 {
   "added": "2026-11-07T08:40:00Z",
-  "command": {
-    "mac": "cd ~\ngh auth switch -u shivinate7\ngh workflow run browser.yml --repo shivinate7/q_max --ref claude/browser-geom-diag",
-    "powershell": "cd $HOME\ngh auth switch -u shivinate7\ngh workflow run browser.yml --repo shivinate7/q_max --ref claude/browser-geom-diag"
-  },
-  "context": "Goal: q_max main's browser suite goes green.\nWhy you: q_max CLAUDE.md (Commands) says CI runs the browser suite only when you start browser.yml.\nSteps: open the link, press Run workflow, pick branch claude/browser-geom-diag, press Run workflow. Or paste the command below. The branch is main plus a logging patch and is never merged. Only group 2 and group 6 matter; you may cancel the other five groups to save minutes. Then press Done here. Lane qmax-browser-main-red reads the log and picks the fix.",
+  "context": "Goal: find why HISTORY-ROW-HEAD and R4-ROWACT are 1px off on CI only, without waiting on you.\nProblem (rule): a cloud session can start browser.yml (gh api works), but q_max CLAUDE.md, Commands, says CI runs the browser suite only when you start it (the owner, 2026-10-02; D-748). The env var was not the block. A run inside the container cannot show a 1px gap that happens only on CI.\nBased on (read): q_max CLAUDE.md, Commands section.\nDeparts from: q_max lets only you start browser.yml \u2014 a session may start it on a non-main diagnostic branch.",
   "home": "lane qmax-browser-main-red reads the run log",
   "id": "qmax-browser-geom-diag",
-  "kind": "task",
-  "link": "https://github.com/shivinate7/q_max/actions/workflows/browser.yml",
+  "kind": "decision",
   "n": 329,
+  "options": [
+    {
+      "gain": "329 and later CI-only fixes run without you.",
+      "key": "a",
+      "label": "Grant: a session may start browser.yml on a non-main branch for a named diagnosis, once per branch head; the grant goes in q_max CLAUDE.md (recommended)",
+      "lose": "CI minutes a session spends without your press."
+    },
+    {
+      "gain": "You see every browser run start.",
+      "key": "b",
+      "label": "Keep it yours: press the run yourself on branch claude/browser-geom-diag",
+      "links": [
+        {
+          "label": "browser.yml on GitHub",
+          "url": "https://github.com/shivinate7/q_max/actions/workflows/browser.yml"
+        }
+      ],
+      "lose": "Each diagnosis waits on you."
+    }
+  ],
   "owner": "lane qmax-browser-main-red",
+  "pick": "a",
   "rank": 3,
   "ref": "q_max branch claude/browser-geom-diag (1905c25dd)",
-  "reply": "12:10 CST: Two things stop it. First, q_max's own rule says only you start browser.yml (q_max CLAUDE.md, Commands; D-748). A cloud session could press it with its GitHub tool if you drop that rule. Second, your new env var lets a lane run the checks in its own cloud copy, but it points at Neon, against your 12:04 ruling (item 331). I asked the coordinator to answer both here.",
-  "short": "q_max: one diagnostic browser run",
+  "reply": "Reworded 12:17 CST from your note: the block is your q_max rule, not the cloud.",
+  "short": "q_max: who may start browser.yml for a diagnosis",
   "status": "open",
-  "title": "Start q_max's browser workflow once on branch claude/browser-geom-diag",
-  "why": "Two q_max browser checks, HISTORY-ROW-HEAD and R4-ROWACT, are 1px off on CI only. This run logs why. q_max's rules let only you start browser.yml."
+  "title": "May a session start q_max's browser workflow on a non-main branch to diagnose a CI-only failure?",
+  "why": "Your note asked why this cannot run in the cloud. It can, but your q_max rule keeps the start with you."
 }

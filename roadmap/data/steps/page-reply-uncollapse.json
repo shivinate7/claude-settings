@@ -1,9 +1,9 @@
 {
   "title": "Page: a card with a new reply or update opens again and is marked new",
   "phase": "now",
-  "status": "todo",
+  "status": "done",
   "order": 103.3585,
   "why": "Today an answered card stays collapsed after triage writes back, so it looks as if the owner is still waiting.",
-  "note": "Owner ask ask-mw5b4vigxh (12:27 CST). This covers both the asks and the questions areas. It changes a screen, so a designer goes first.",
-  "updatedAt": "2026-11-06T18:37:00Z"
+  "note": "Owner ask ask-mw5b4vigxh (12:27 CST). This covers both the asks and the questions areas. It changes a screen, so a designer goes first. Landed on main in batch 55 (#1415, merge 5cc641f78, Nov 7 12:06 CST).",
+  "updatedAt": "2026-11-07T18:16:00Z"
 }

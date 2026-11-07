@@ -14,9 +14,9 @@
   "owner": "coordinator",
   "rank": 1,
   "ref": "owner ruling 12:04 CST Nov 7 (runner 9's chat)",
-  "reply": "12:12 CST: You picked a. Only you can change a cloud environment's variables, because the cloud refuses settings edits (premise P15). Until you press Done, lanes pass a local VERIFY_DATABASE_URL on every browser run. Routed to the coordinator.",
+  "reply": "Done by you at 12:07 CST: you removed VERIFY_DATABASE_URL from the q_max cloud environment (said in runner 9's chat). DATABASE_URL, also a Neon host, is still set; if a lane finds a cloud path that uses it, it comes back as a question. Closed 12:17 CST.",
   "short": "q_max cloud env: remove the Neon setting",
-  "status": "open",
+  "status": "closed",
   "steps": [
     "Open claude.ai/code and go to the environment settings for env_01RGfPzEB3iusXZwCZw5q5or.",
     "Delete the variable VERIFY_DATABASE_URL, or set it to postgresql://postgres@localhost:5432/postgres.",

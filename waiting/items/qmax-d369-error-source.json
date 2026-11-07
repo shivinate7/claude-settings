@@ -1,6 +1,6 @@
 {
   "added": "2026-11-07T08:21:00Z",
-  "context": "Goal: a resumed failed run shows why it failed, and hides only the provider's raw text.\nProblem (rule): the job row's error column holds both the server's own sentences and the provider's raw text, with nothing marking which is which (src/worker/reconcileWorker.ts writes error.message; claudeProvider.ts throws provider text unchanged).\nBased on (read): today recoverRun (src/components/Chat.tsx) sends every reason through answerFailure (src/utils/plainReason.ts), which drops all but the network and no-key reasons.\nBased on (read): the D-369 check's fixture error, \"the worker gave up after three attempts\", is not a sentence the product writes.\nDeparts from: main hides every resumed reason \u2014 the resumed view shows the row's reason.",
+  "context": "Goal: a resumed failed run shows why it failed, and hides only the provider's raw text.\nProblem (rule): the job row's error column holds both the server's own sentences and the provider's raw text, with nothing marking which is which (src/worker/reconcileWorker.ts writes error.message; claudeProvider.ts throws provider text unchanged).\nWhy yours: it is a product decision, what a failed run shows the user (D-369). The code cannot choose it. Your 326 a, 'hide only the provider's text', is what forces the choice. If you drop 326 a, the resumed view shows the row's reason as is, and neither a nor b is needed.\nBased on (read): today recoverRun (src/components/Chat.tsx) sends every reason through answerFailure (src/utils/plainReason.ts), which drops all but the network and no-key reasons.\nBased on (read): lane qmax-browser-main-red read claudeProvider.ts at 12:12 CST: no key and no header can reach the text. The provider's own words pass through as is; whether they can quote part of a request is unmeasured and likely small.\nDeparts from: main hides every resumed reason \u2014 the resumed view shows the row's reason.",
   "home": "q_max PRs from lane qmax-browser-main-red",
   "id": "qmax-d369-error-source",
   "kind": "decision",
@@ -18,13 +18,19 @@
       "key": "b",
       "label": "Allow-list three sentences on the screen: cancel, deadline, dead worker",
       "lose": "Pipeline failures stay hidden, short of \"hides only\"; the D-369 check's fixture changes."
+    },
+    {
+      "gain": "No code change at the source.",
+      "key": "c",
+      "label": "Drop 326 a: show the row's reason as is",
+      "lose": "The provider's raw text can reach the screen: usually a fault such as 'prompt is too long' or an overload, never the key."
     }
   ],
   "owner": "lane qmax-browser-main-red",
   "pick": "a",
   "rank": 2,
   "ref": "q_max D-369; item 326",
-  "reply": "12:15 CST, plainly: when a q_max run fails, the screen shows why. Some reasons are our own server's sentences. Some are raw text from the AI provider, which your 326 a said to hide. Both land in one field today. a: tag each reason where it is made, then show ours and hide the provider's. b: show only three known sentences. If you drop 326 a and show every reason, neither is needed.\nYou asked whether raw provider text is scary. Mostly it is just ugly: for example 'overloaded_error', a request id, or a rate-limit line. The API key is not normally sent back. Unchecked: I have not read q_max's provider code in this session, so a lane must confirm that no key or prompt text gets through. q_max is an internal tool, so the cost of showing it is confusion, not a leak.",
+  "reply": "12:17 CST: Your question about risk has an answer now. Lane qmax-browser-main-red read the provider code: no key or header can reach the screen. The provider's own words pass through as is, so they are mostly ugly, not secret. Option c is new: drop 326 a and show every reason.",
   "short": "q_max D-369: where the reason is sorted",
   "status": "open",
   "title": "q_max failed-run reason: mark provider errors at the server, or allow-list three sentences on the screen?",

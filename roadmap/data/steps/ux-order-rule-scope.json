@@ -1,10 +1,10 @@
 {
   "title": "Rule ux-order-holds-still: keep it as a house rule, or narrow it",
   "phase": "now",
-  "status": "ready",
+  "status": "done",
   "order": 2,
   "why": "The owner says the rule is applied too strictly and blocks outcomes he wants.",
-  "note": "Owner, 2026-11-06 15:51 CST (page item 311, none of these): \"this is why i think im against having this ux item be a house rule -- it is aplied too strictly and is taking me away from the outcome i want here\". The coordinator brings him the stale-decision steps: the rule's record and sentence, what it protects, and a fix (retire it, or narrow it).",
+  "note": "Owner, 2026-11-06 15:51 CST (page item 311, none of these): \"this is why i think im against having this ux item be a house rule -- it is aplied too strictly and is taking me away from the outcome i want here\". The coordinator brings him the stale-decision steps: the rule's record and sentence, what it protects, and a fix (retire it, or narrow it). Landed on main in batch 55 (#1415, merge 5cc641f78, Nov 7 12:06 CST). Item 313 closed.",
   "owner": "coordinator",
-  "updatedAt": "2026-11-06T21:55:00Z"
+  "updatedAt": "2026-11-07T18:16:00Z"
 }
