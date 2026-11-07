@@ -1,0 +1,11 @@
+{
+  "title": "A guard refuses a posted review record whose Head is not the PR's live head",
+  "phase": "now",
+  "status": "doing",
+  "order": 265.5,
+  "owner": "coordinator",
+  "lane": "session_013NEJL3KYY5NYuanNGEoyjW",
+  "why": "Incident about 15:10 CST Nov 7: lane notes-fix-page posted a review record on #1475 with a hand-typed wrong head tail.",
+  "note": "The guard refuses a GitHub comment post whose body holds the review-record marker unless the record's Head is the PR's live head and its PR line names the target PR. Topic review-rounds. Guard change, full review rounds. Red test first.",
+  "updatedAt": "2026-11-07T15:15:00-06:00"
+}
