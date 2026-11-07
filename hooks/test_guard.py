@@ -9586,7 +9586,7 @@ sh("draft-pr: a run file beside an unrelated written notes file, is denied",
    "cat > run.sh <<'EOF'\ngh pr create --title x\nEOF\ncat > notes.txt <<'TXT'\nhello\nTXT\nbash run.sh",
    "deny", "draft-pr", cwd=NOGIT, carries=DRAFT_REMEDY, lacks=DRAFT_LACKS)
 sh("draft-pr: a file that a run file sources runs with it, so its pull request is denied",
-   "cat > b.sh <<'B'\ngh pr create --title x\nB\ncat > a.sh <<'A'\nsource b.sh\nA\nbash a.sh", "deny", "draft-pr",
+   "cat > b.txt <<'B'\ngh pr create --title x\nB\ncat > a.txt <<'A'\nsource b.txt\nA\nbash a.txt", "deny", "draft-pr",
    cwd=NOGIT, carries=DRAFT_REMEDY, lacks=DRAFT_LACKS)
 chained_ask("draft-pr: a force push in a run file, is denied",
             "cat > p.sh <<'SH'\ngit push --force origin main\nSH\nbash p.sh", cwd=NOGIT)
