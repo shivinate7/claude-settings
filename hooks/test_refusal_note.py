@@ -14,7 +14,8 @@ Contract the builder codes against. Each case fails until hooks/refusal_note.py 
 - Stdin: one JSON object with session_id, tool_name, tool_input, tool_use_id, reason, cwd and
   hook_event_name ("PermissionDenied", Claude Code's own event name).
 - Writes one JSON line to <CLAUDE_CONFIG_DIR>/state/refusals/<session_id>.jsonl, with the keys ts,
-  tool_name and reason. With CLAUDE_CONFIG_DIR unset, the folder is <HOME>/.claude.
+  tool_name, reason and tool_use_id (the payload's own). agent_id is added when the payload has one
+  (hooks/test_refusal_note_agent.py). With CLAUDE_CONFIG_DIR unset, the folder is <HOME>/.claude.
 - A reason that starts with "Auto mode could not evaluate this action" or "Classifier unavailable"
   is a no-verdict refusal (a classifier outage). It writes nothing.
 - A tool_name already in the file is not appended again.
@@ -47,6 +48,40 @@ CLAUDE_DENIAL = "Permission for archive_session was denied by the auto-mode clas
 NO_VERDICT = "Auto mode could not evaluate this action. The classifier returned no verdict."
 CLASSIFIER_DOWN = "Classifier unavailable"
 
+# The route-row fixture: the one home, used by hooks/test_refusal_note_route.py and
+# lint/test_report_guard_falsifier.py. Contract the builder codes against:
+# - ROUTE_ROWS_ENV names the env var that holds the rows file's path (as GUARD_ITEM_FIELDS_PAGE does for the
+#   waiting page). The file is {"rows": [...]}, each row with id, act, route, surface, outcome, measured,
+#   cc_version, evidence, by and pattern.
+# - A cloud session is CLAUDE_CODE_REMOTE "true" (hooks/guard_core.is_cloud). CLOUD_ENV and REMOTE_SESSION_ENV
+#   are always set together, or both removed (surface_env), so no case depends on which one a hook reads.
+ROUTE_ROWS_ENV = "GUARD_ROUTE_ROWS"
+CLOUD_ENV = "CLAUDE_CODE_REMOTE"
+REMOTE_SESSION_ENV = "CLAUDE_CODE_REMOTE_SESSION_ID"
+
+
+def surface_env(env, surface):
+    """A copy of `env` that is a cloud session for surface "cloud", and a local one for "local"."""
+    env = dict(env)
+    env.pop(CLOUD_ENV, None)
+    env.pop(REMOTE_SESSION_ENV, None)
+    if surface == "cloud":
+        env[CLOUD_ENV] = "true"
+        env[REMOTE_SESSION_ENV] = "cse_fixture01"
+    return env
+
+
+def route_row(row_id, pattern, outcome, surface="cloud", route="github-mcp"):
+    """One route row in the shape the rows file holds. The fields a hook does not read are fixed values."""
+    return {"id": row_id, "act": "fixture act " + row_id, "route": route, "surface": surface,
+            "outcome": outcome, "measured": "2026-11-01", "cc_version": "2.1.0",
+            "evidence": "fixture transcript", "by": "test-author", "pattern": pattern}
+
+
+def write_route_rows(path, rows):
+    with open(path, "w", encoding="utf-8") as handle:
+        json.dump({"rows": rows}, handle)
+
 
 def tearDownModule():
     shutil.rmtree(RUN, ignore_errors=True)
@@ -68,6 +103,9 @@ class HookCase(unittest.TestCase):
         env.pop("CLAUDE_CONFIG_DIR", None)
         if config:
             env["CLAUDE_CONFIG_DIR"] = self.config
+        # Isolation: a local session, and a rows path that does not exist, so no case reads a real rows file.
+        env = surface_env(env, "local")
+        env[ROUTE_ROWS_ENV] = os.path.join(self.scratch, "no-route-rows.json")
         return env
 
     def fire(self, data, env=None):
@@ -119,7 +157,7 @@ class RefusalNoteTests(HookCase):
         self.assertEqual(run.stdout.strip(), "", "the hook printed on a refusal: %r" % run.stdout)
         rows = self.refusal_rows()
         self.assertEqual(len(rows), 1, rows)
-        self.assertEqual(set(rows[0]), {"ts", "tool_name", "reason"})
+        self.assertEqual(set(rows[0]), {"ts", "tool_name", "reason", "tool_use_id"})
         self.assertEqual(rows[0]["tool_name"], ARCHIVE)
         self.assertEqual(rows[0]["reason"], CLAUDE_DENIAL)
         self.assertTrue(isinstance(rows[0]["ts"], str) and rows[0]["ts"], rows[0])
