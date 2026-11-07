@@ -12339,6 +12339,21 @@ add("cap-until: a Write of a cap setting asks, and the ask names the lift field"
 sh("cap-until: a grep that reads the cap key from a settings file allows",
    "grep -n " + CAP_KEY + " settings.local.json", "allow", cwd=PROJ)
 
+# THE INTERPRETER WRITE IS A WRITE. A python or node script that writes a settings file with the cap key,
+# in `-c`, `-e` or a heredoc, sets the cap as a shell redirect does, so rule 8 asks for it. The path and
+# the key sit inside the script, which the shell reading never splits.
+sh("cap-interp: a python -c that writes a settings file with the cap key asks, as the shell write does",
+   "python3 -c \"import json; open('settings.local.json', 'w').write(json.dumps({'env': {'" + CAP_KEY
+   + "': '" + OPUS + "'}}))\"", "ask", "agent-model-cap", cwd=PROJ)
+sh("cap-interp: a python heredoc that writes a settings file with the cap key asks",
+   "python3 <<'PY'\nimport json\nopen('settings.local.json', 'w').write(json.dumps({'env': {'" + CAP_KEY
+   + "': '" + OPUS + "'}}))\nPY", "ask", "agent-model-cap", cwd=PROJ)
+sh("cap-interp: a node -e that writes a settings file with the cap key asks",
+   "node -e \"require('fs').writeFileSync('settings.local.json', JSON.stringify({env: {" + CAP_KEY
+   + ": '" + OPUS + "'}}))\"", "ask", "agent-model-cap", cwd=PROJ)
+sh("cap-interp: a python -c that writes a notes file naming the cap key allows",
+   "python3 -c \"open('notes.txt', 'w').write('" + CAP_KEY + "')\"", "allow", cwd=PROJ)
+
 # THE DATA HALF. A settings write named INSIDE text is not a write: a quoted argument, or text piped into
 # a pure printer. A heredoc body fed to an interpreter is code, not data, and stays in view. So is text
 # piped into an interpreter: the interpreter may run it, so a pipe into one fails closed. Incident
