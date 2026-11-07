@@ -11,7 +11,12 @@ guard rule, so the watcher does the waiting and the session is told once.
 `hooks/stall_watch.py` does it.
 
 - The hook (`--hook`, a PreToolUse hook on Bash) returns `updatedInput` only for a call with
-  `run_in_background` true. It sets no permission decision, so no permission changes.
+  `run_in_background` true. It sets no permission decision, so no permission changes. A foreground call
+  gets no output, with or without `agent_id`: Claude Code checks permission rules on a hook's rewritten
+  input.
+- For a background call whose payload has a valid `agent_id` (17 lowercase hex), the one addition is the
+  agent marker: `export CLAUDE_AGENT_ID=<id>` and a newline ahead of the wrapper, so each process the job
+  execs holds the id (decision `when-a-worktree-may-be-removed`, the marker rule).
 - The original command stays as unquoted top-level shell code inside `{ ... }`, so a settings deny rule
   still sees it. Allow rules still match a rewritten command.
 - The STALL line lists the job's shell and every process under it, parent first, so stopping them in line

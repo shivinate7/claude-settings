@@ -1,16 +1,17 @@
-"""Read one process's exec-time environment: does it hold this session's tag, or what is its agent tag?
+"""Read one process's exec-time environment: does it hold this session's tag, or what is its agent marker?
 
 The one home of that read (decision a-kill-by-pid-needs-an-owned-pid). The guard asks it before it
 allows a kill of a PPID-1 pid; the SessionEnd sweep asks it before it stops a scratchpad orphan.
 
 A server an agent's Bash call starts holds `CLAUDE_CODE_SESSION_ID=<the session's id>` in its
-exec-time environment, the same id the hook payload carries as `session_id`. An agent-level tag now
-exists too: the stall_watch hook puts `export CLAUDE_AGENT_ID=<agent_id>` ahead of an agent's Bash
-command, so each process the call execs holds it (AGENT_TAG_NAME, read by entry_value). The call's
-own shell does not hold either tag at exec (the shell sets the session one afterwards, and the
-export runs inside the shell), so a forked shell stub reads untagged; its exec'd children read
-tagged. Measured on Linux. The macOS read of CLAUDE_AGENT_ID is unmeasured. Read on
-macOS and on Linux; lint/test_wait_pid.py reads the session tag live on Linux.
+exec-time environment, the same id the hook payload carries as `session_id`. An agent-level marker
+exists too: the stall_watch hook puts `export CLAUDE_AGENT_ID=<agent_id>` ahead of a background agent
+Bash call's wrapper, so each process the job execs holds it (AGENT_TAG_NAME, read by entry_value). A
+foreground call is not rewritten, so its processes hold no marker. The job's `( )` subshell is a fork,
+so it holds neither at exec (the shell sets the session id afterwards, and the export runs inside the
+shell) and reads unmarked; its exec'd children read marked. Measured on Linux. The macOS read of
+CLAUDE_AGENT_ID is unmeasured. Read on macOS and on Linux; lint/test_wait_pid.py reads the session
+tag live on Linux.
 
 Stdlib only, no child process. Every failure (EPERM, EINVAL, a dead pid, a bad id) answers False
 from holds_session_tag and None from entry_value.
