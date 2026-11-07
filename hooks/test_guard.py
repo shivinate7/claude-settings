@@ -13467,22 +13467,24 @@ sh("builder-test: shell open-write to a test under os.getcwd() is refused",
    "deny", rule=BT, carries=("test-author",), **BR)
 
 # ---- sed reads its script as text. A word in an s/// or -e script names no file, so a sed -i on a
-# workflow file stays allowed when the script holds the word test. A # inside a script is text too, and
-# a lone quote or a second line must not hide the target after them. The controls keep a sed -i that
-# names a test file refused, whatever the script says.
+# non-test file stays allowed when the script holds the word test. The rows name docs/ci.md, not a
+# workflow file: a builder's shell write to .github/workflows/ is refused whatever the script says (the
+# workflow shell rows below). A # inside a script is text too, and a lone quote or a second line must
+# not hide the target after them. The controls keep a sed -i that names a test file refused, whatever the
+# script says.
 SED_SCRIPT_TEXT_ALLOWS = (
-    ("a # beat test s/// on checks.yml", "sed -i 's/# beat test/# beat check/' .github/workflows/checks.yml"),
-    ("two -e scripts, one with test, on checks.yml",
-     "sed -i -e 's/a/b/' -e 's/test/check/' .github/workflows/checks.yml"),
-    ("an s|| naming a test file on checks.yml",
-     "sed -i 's|hooks/test_guard_beat.py|hooks/test_guard_beat.py -q|' .github/workflows/checks.yml"),
-    ("double-quoted old test / new test on checks.yml",
-     'sed -i "s/old test/new test/" .github/workflows/checks.yml'),
-    ("cd . then a test phrase in s/// on checks.yml", "cd . && sed -i 's/a test step/a check step/' .github/workflows/checks.yml"),
-    ("a lone apostrophe inside an echo string, then test in s/// on checks.yml",
-     "echo \"don't\"; sed -i 's/a test/a check/' .github/workflows/checks.yml"),
-    ("a two-line script whose # line names test, on checks.yml",
-     "sed -i 's/a test/a check/\n# test note' .github/workflows/checks.yml"),
+    ("a # beat test s/// on docs/ci.md", "sed -i 's/# beat test/# beat check/' docs/ci.md"),
+    ("two -e scripts, one with test, on docs/ci.md",
+     "sed -i -e 's/a/b/' -e 's/test/check/' docs/ci.md"),
+    ("an s|| naming a test file on docs/ci.md",
+     "sed -i 's|hooks/test_guard_beat.py|hooks/test_guard_beat.py -q|' docs/ci.md"),
+    ("double-quoted old test / new test on docs/ci.md",
+     'sed -i "s/old test/new test/" docs/ci.md'),
+    ("cd . then a test phrase in s/// on docs/ci.md", "cd . && sed -i 's/a test step/a check step/' docs/ci.md"),
+    ("a lone apostrophe inside an echo string, then test in s/// on docs/ci.md",
+     "echo \"don't\"; sed -i 's/a test/a check/' docs/ci.md"),
+    ("a two-line script whose # line names test, on docs/ci.md",
+     "sed -i 's/a test/a check/\n# test note' docs/ci.md"),
 )
 for _name, _command in SED_SCRIPT_TEXT_ALLOWS:
     sh("builder-test: sed-script-not-target: sed -i, %s, is allowed" % _name, _command, "allow", **BR)
