@@ -956,6 +956,20 @@ def case_failed_re_list_keeps_the_judged_verdict():
     expect_verdict(label, res, "red", names_in=["unit", "e2e"], names_out=["lint"])
 
 
+def case_failed_re_list_after_a_green_run_is_unknown():
+    """A green run is judged, and then the at-once re-list is refused (HTTP 403). The re-list could have shown a
+    red or a still-running run, and a green line would say the whole head passed. So the verdict is `CI unknown`,
+    as for any read that could not run. Control: the same green run with no refusal reads green."""
+    res = run_hook(bash("gh pr ready 12"), fixture(READY, [GREEN]), extra={"CI_WAKE_DEADLINE": VERDICT_DEADLINE})
+    expect_verdict("green run, no refusal (control)", res, "green")
+    res = run_hook(bash("gh pr ready 12"), fixture(READY, [GREEN], list_error_from=2),
+                   extra={"CI_WAKE_DEADLINE": VERDICT_DEADLINE})
+    label = "green run judged, then the at-once re-list is refused"
+    check("%s: reads run 901 and lists twice" % label, "901" in watched(res) and count(res, "run", "list") == 2,
+          why(res))
+    expect_verdict(label, res, "unknown")
+
+
 def case_new_runs_on_every_list_are_paced_after_the_at_once_relist():
     """A stream: each list shows one more run that ended. wait_for re-lists once at once after the first
     judged run; from then on each list is 30 s or more after the one before it, so the stream costs one gh
@@ -1965,6 +1979,7 @@ def main():
     case_run_visible_at_the_at_once_relist_is_judged()
     case_the_at_once_relist_judges_the_newest_run_of_a_name()
     case_failed_re_list_keeps_the_judged_verdict()
+    case_failed_re_list_after_a_green_run_is_unknown()
     case_new_runs_on_every_list_are_paced_after_the_at_once_relist()
     case_wait_for_lists_again_until_a_real_run_shows()
     case_wait_for_lists_until_the_deadline_and_no_further()
