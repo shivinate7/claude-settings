@@ -192,7 +192,7 @@ Reorient: hooks/precompact_handoff.py `--reorient` (env PRECOMPACT_HANDOFF_UNDER
 
 Page note: hooks/local_time.py `--page-note`, a mode of the same file. A PostToolUse hook on
   ArtifactData. Stdin is one JSON object: hook_event_name, session_id, tool_name, tool_input,
-  tool_response, cwd. Only a get of collection `answers` saves. Each document in tool_response
+  tool_response, cwd. Only a get, list or query of collection `answers` saves. Each document in tool_response
   with a non-empty `data.note` (not `accepted pick`) becomes one inbox block, labelled
   `Waiting page note, item <n> (<item>): <note>` and stamped with `data.at` in Central. Nothing
   else saves, and a call that saves nothing writes no file. The mode prints no time line. A failed
@@ -2655,6 +2655,9 @@ def case_cross_session_tag_mid_line_is_owner_text():
 
 PAGE_URL = "https://claude.ai/artifact/3f9c1e2a-5b7d-4e8f-9a1b-2c3d4e5f6a7b"
 PAGE_BANNER = "Read answers from the page's database. One JSON line per document follows."
+# Modeled on PAGE_BANNER: the repo holds no captured list or query output. The parser reads only the doc lines.
+LIST_BANNER = "List of answers from the page's database. One JSON line per document follows."
+QUERY_BANNER = "Query of answers from the page's database. One JSON line per matching document follows."
 PAGE_AT = "2026-01-15T18:04:00.000Z"  # 12:04 CST. The page writes toISOString(): millis and Z.
 PAGE_HEADER = "### 2026-01-15 12:04 CST (UTC-06:00)"
 PAGE_NOTE = "keep the Tuesday slot if it is free"
@@ -2686,10 +2689,10 @@ def doc_line(doc_id, data):
                       ensure_ascii=False, separators=(",", ":"))
 
 
-def response_of(docs, form="string", extra=()):
-    """A get's tool_response: a banner, one line per (doc_id, data), then the `extra` lines.
-    form "string" is one text, "blocks" a list of {type: text, text} blocks, "nested" a dict."""
-    lines = [PAGE_BANNER] + [doc_line(doc_id, data) for doc_id, data in docs] + list(extra)
+def response_of(docs, form="string", extra=(), banner=PAGE_BANNER):
+    """A get's tool_response: a banner, one line per (doc_id, data), then the `extra` lines. A list or a
+    query passes its own `banner`. form "string" is one text, "blocks" a list of {type: text, text} blocks, "nested" a dict."""
+    lines = [banner] + [doc_line(doc_id, data) for doc_id, data in docs] + list(extra)
     if form == "blocks":
         return [{"type": "text", "text": ln} for ln in lines]
     if form == "nested":
@@ -2773,6 +2776,75 @@ def case_page_note_same_get_twice_saves_once():
           captured_texts(cfg, sid))
 
 
+FIRST_LABEL = label_of(3, "it-4f2a", PAGE_NOTE)
+SECOND_LABEL = label_of(4, "it-8c3d", "a second answer")
+PAGE_AT_LATER = "2026-01-15T18:06:00.000Z"
+ORDERED = {"order_by": {"field": "at", "direction": "asc"}}  # the query option a session reads answers with
+def second_answer(**fields):
+    """A second answer, a little later than the first: its own item, n, note and at."""
+    data = answer_data(n=4, item="it-8c3d", note="a second answer", at=PAGE_AT_LATER)
+    data.update(fields)
+    return data
+
+
+TWO_ANSWERS = [("a-7k2", answer_data()), ("a-9q1", second_answer())]
+
+
+def case_page_note_list_saves_each_note():
+    cfg, sid = new_cfg(), "pn-list"
+    p = page_note(cfg, sid, response_of(TWO_ANSWERS, banner=LIST_BANNER), inp=tool_input("list", doc_id=None))
+    check("page note list: the mode ran", ran_page_note(p), p.desc())
+    check("page note list: saves each new note, like a get",
+          captured_texts(cfg, sid) == [FIRST_LABEL, SECOND_LABEL], captured_texts(cfg, sid))
+    gcfg = new_cfg()
+    page_note(gcfg, sid, response_of(TWO_ANSWERS))
+    check("page note list: control, a get of the same two answers saves both",
+          captured_texts(gcfg, sid) == [FIRST_LABEL, SECOND_LABEL], captured_texts(gcfg, sid))
+    ecfg = new_cfg()
+    empty = page_note(ecfg, "pn-list-empty", response_of([], banner=LIST_BANNER),
+                      inp=tool_input("list", doc_id=None))
+    check("page note list, empty: the mode ran, and nothing is saved, no file",
+          ran_page_note(empty) and tree_of(ecfg) == {}, sorted(tree_of(ecfg)))
+
+
+def case_page_note_query_saves_each_note():
+    cfg, sid = new_cfg(), "pn-query"
+    p = page_note(cfg, sid, response_of(TWO_ANSWERS, banner=QUERY_BANNER),
+                  inp=tool_input("query", doc_id=None, query=ORDERED))
+    check("page note query: the mode ran", ran_page_note(p), p.desc())
+    check("page note query: saves each new note, in the order the query returns them",
+          captured_texts(cfg, sid) == [FIRST_LABEL, SECOND_LABEL], captured_texts(cfg, sid))
+
+
+def case_page_note_same_list_twice_saves_each_once():
+    cfg, sid = new_cfg(), "pn-list-twice"
+    inp = tool_input("list", doc_id=None)
+    resp = response_of(TWO_ANSWERS, banner=LIST_BANNER)
+    p1 = page_note(cfg, sid, resp, inp=inp)
+    check("page note list twice: the first list ran", ran_page_note(p1), p1.desc())
+    check("page note list twice: a list of two answers saves each once",
+          captured_texts(cfg, sid) == [FIRST_LABEL, SECOND_LABEL], captured_texts(cfg, sid))
+    saved = captured_texts(cfg, sid)
+    p2 = page_note(cfg, sid, resp, inp=inp)
+    check("page note list twice: the second identical list ran", ran_page_note(p2), p2.desc())
+    check("page note list twice: the second identical list saves nothing new",
+          captured_texts(cfg, sid) == saved, captured_texts(cfg, sid))
+
+
+def case_page_note_list_after_get_saves_only_the_new_note():
+    cfg, sid = new_cfg(), "pn-get-list"
+    g = page_note(cfg, sid, response_of(TWO_ANSWERS[:1]))
+    check("page note get then list: the get ran", ran_page_note(g), g.desc())
+    check("page note get then list: the get saved its note", captured_texts(cfg, sid) == [FIRST_LABEL],
+          captured_texts(cfg, sid))
+    lst = page_note(cfg, sid, response_of(TWO_ANSWERS, banner=LIST_BANNER), inp=tool_input("list", doc_id=None))
+    check("page note get then list: the list ran", ran_page_note(lst), lst.desc())
+    check("page note get then list: the new answer of the list is saved",
+          SECOND_LABEL in captured_texts(cfg, sid), captured_texts(cfg, sid))
+    check("page note get then list: the answer the get saved is not saved again",
+          captured_texts(cfg, sid).count(FIRST_LABEL) == 1, captured_texts(cfg, sid))
+
+
 def case_page_note_other_calls_save_nothing():
     cfg, sid = new_cfg(), "pn-other"
     control = page_note(cfg, sid, response_of([("a-7k2", answer_data())]))
@@ -2780,12 +2852,16 @@ def case_page_note_other_calls_save_nothing():
           ran_page_note(control) and captured_texts(cfg, sid) == [
               label_of(3, "it-4f2a", PAGE_NOTE)], control.desc())
     before = tree_of(cfg)
-    # Every call below carries real notes in its response, so a missing filter would save them.
+    # Every call below but the file listing carries real notes in its response, so a missing filter would save them.
     real = response_of([("a-7k2", answer_data()),
                         ("a-9q1", answer_data(note="another note", at="2026-01-15T18:06:00.000Z"))])
+    files = "Wrote 2 documents to answers-out:\nanswers-out/answers/a-7k2.json\nanswers-out/answers/a-9q1.json"
     calls = (
-        ("list of answers", "ArtifactData", tool_input("list", doc_id=None), real),
-        ("query of answers", "ArtifactData", tool_input("query", doc_id=None, query="note"), real),
+        ("list of items", "ArtifactData", tool_input("list", collection="items", doc_id=None), real),
+        ("query of items", "ArtifactData", tool_input("query", collection="items", doc_id=None, query=ORDERED),
+         real),
+        ("list of answers with out_dir, files only", "ArtifactData",
+         tool_input("list", doc_id=None, out_dir="answers-out"), files),
         ("get of items", "ArtifactData", tool_input("get", collection="items", doc_id="it-4f2a"),
          real),
         ("set of answers", "ArtifactData", tool_input("set", data={"note": "x"}), real),
@@ -3028,6 +3104,20 @@ def case_page_note_non_string_session_saves():
         check("page note session %s: the mode ran" % label, ran_page_note(p), p.desc())
         check("page note session %s: saves the note" % label, captured_texts(cfg, sid) == [label_of(3, "it-4f2a", PAGE_NOTE)],
               captured_texts(cfg, sid))
+
+
+def case_page_note_list_skip_is_per_answer():
+    """The session filter applies to a list too: in one list, another session's answer saves nothing and this session's saves."""
+    cfg, sid = new_cfg(), "pn-list-mixed"
+    theirs = answer_data(session=OTHER_SESSION)
+    mine = second_answer(session=OWN_SESSION)
+    p = page_note(cfg, sid, response_of([("a-7k2", theirs), ("a-9q1", mine)], banner=LIST_BANNER),
+                  inp=tool_input("list", doc_id=None), extra_env=OWN_ENV)
+    check("page note list session: the mode ran", ran_page_note(p), p.desc())
+    check("page note list session: another session's answer in a list saves nothing",
+          FIRST_LABEL not in captured_texts(cfg, sid), captured_texts(cfg, sid))
+    check("page note list session: this session's answer in a list saves its note",
+          captured_texts(cfg, sid) == [SECOND_LABEL], captured_texts(cfg, sid))
 
 
 # --------------------------------------------------------------------------- repeat cases
@@ -3821,6 +3911,10 @@ CASES = (
     case_reorient_unreadable_inbox_prints_message_and_one_stderr_line,
     case_page_note_get_saves_one_block,
     case_page_note_same_get_twice_saves_once,
+    case_page_note_list_saves_each_note,
+    case_page_note_query_saves_each_note,
+    case_page_note_same_list_twice_saves_each_once,
+    case_page_note_list_after_get_saves_only_the_new_note,
     case_page_note_other_calls_save_nothing,
     case_page_note_blank_and_accepted_notes_save_nothing,
     case_page_note_parked_answer_saves_nothing,
@@ -3839,6 +3933,7 @@ CASES = (
     case_page_note_unset_env_saves_a_session_answer,
     case_page_note_env_without_an_id_saves_a_session_answer,
     case_page_note_non_string_session_saves,
+    case_page_note_list_skip_is_per_answer,
     case_repeat_roadmap_step_marks_the_item_and_blocks,
     case_repeat_stop_hook_active_marks_and_tells_the_owner,
     case_repeat_judged_items_are_not_judged_again,
