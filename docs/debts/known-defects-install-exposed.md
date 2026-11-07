@@ -4,5 +4,5 @@
 - **Where.** `hooks/mutate_shared.py` `run_known_defects` and `_needed_parts`; the profiles are in `REPLAY_PROFILES` in `hooks/mutate_guard.py`.
 - **Decision.** mutation-ci-report-and-replay (the known-defect replay reads a defect that needs a failed install as UNKNOWN).
 - **Fix.** none — unmeasured; no live profile in this repo has an install.
-- **Until.** This debt closes when a repository that has an install runs the replay in CI, or a one-install profile can mark an install-free defect.
+- **Measured when.** A repository that has an install runs the replay in CI, and a failed install there costs a merge.
 - **Retire.** A way to tell an install-free defect from one that needs the install. Closed when `hooks/test_known_defects_exposed.py` exists and holds a case that goes red on the code before the fix and green after it. The file does not exist yet.
