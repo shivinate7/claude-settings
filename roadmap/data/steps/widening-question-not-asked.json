@@ -1,10 +1,11 @@
 {
   "title": "The question-form check refuses a page question whose only change is a widening form",
-  "phase": "next",
-  "status": "todo",
+  "phase": "now",
+  "status": "doing",
   "order": 266.4,
   "owner": "coordinator",
   "why": "Incident, 2026-11-07 15:38 CST: triage put item 376 on the page. Its only change from main was a widening option, and decision uniform-over-variants already rules that the shared tool never grows a second form. The coordinator withdrew it at 15:41 CST. The owner saw a question a ruling answers.",
-  "note": "In hooks/question_form.py: when every option but the recommended one sets widens:true, refuse with 'uniform-over-variants decides this; take the non-widening option'. Done check: item 376's shape is red, and a question with two non-widening options passes. The check's verdict changes, so this is a build lane.",
-  "updatedAt": "2026-11-07T15:39:00-06:00"
+  "note": "In hooks/question_form.py: when every option but the recommended one sets widens:true, refuse with 'uniform-over-variants decides this; take the non-widening option'. Done check: item 376's shape is red, and a question with two non-widening options passes. The check's verdict changes, so this is a build lane. Lane past-ruling-on-send takes it on a new branch (coordinator, 15:44 CST).",
+  "updatedAt": "2026-11-07T15:40:00-06:00",
+  "lane": "session_013NEJL3ZtjRrvWWB5nAzQiv"
 }
