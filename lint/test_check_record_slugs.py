@@ -14,6 +14,7 @@ import contextlib
 import importlib.util
 import io
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -25,6 +26,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py)
 import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (lint/_test_temp.py)
+import layout  # noqa: E402  the record folders come from here, never from a literal (lint/layout.py)
 MODULE = os.environ.get("RECORD_SLUGS_UNDER_TEST") or os.path.join(HERE, "check_record_slugs.py")
 sys.path.insert(0, os.path.join(HERE, "..", "testing"))
 import tracked_tree  # noqa: E402  copies what git lists, so no fixture lists files (testing/tracked_tree.py)
@@ -67,6 +69,29 @@ def flagged(out):
             if line.startswith("check_record_slugs: FAIL:")]
 
 
+# Tree mode (`--tree [--root R]`): a finding is `path:line CODE id`. Parsed from the end of each line, so a
+# prefix on the line does not hide the finding.
+TREE_FINDING = re.compile(r"(\S+:\d+ (?:GLOSS|DEBT)\d{3} \S+)$")
+
+
+def tree_found(out):
+    """The findings of a tree-mode run, sorted."""
+    return sorted(m.group(1) for m in (TREE_FINDING.search(line) for line in out.splitlines()) if m)
+
+
+def line_of(text, needle):
+    """The 1-based line of the first line of `text` that holds `needle`. An expected finding names its real line."""
+    return next(i for i, line in enumerate(text.splitlines(), 1) if needle in line)
+
+
+def commit_all(root):
+    """Commit everything under `root`, so a listing by git and a walk of the disk read the same files."""
+    for args in (("init", "-q"), ("add", "-A"),
+                 ("-c", "user.name=test", "-c", "user.email=test@example.com",
+                  "commit", "-q", "--allow-empty", "-m", "fixture")):
+        subprocess.run(["git", "-C", root, *args], check=True, capture_output=True, text=True)
+
+
 class RecordSlugsTests(unittest.TestCase):
     def setUp(self):
         self.assertTrue(os.path.isfile(MODULE), "module absent: lint/check_record_slugs.py")
@@ -75,8 +100,8 @@ class RecordSlugsTests(unittest.TestCase):
         tracked_tree.copy_tracked(self.tree, "lint", "hooks")  # the layout and the check's imports
         shutil.copyfile(MODULE, os.path.join(self.tree, "lint", "check_record_slugs.py"))
 
-    def put(self, rel, text="# Record\n"):
-        path = os.path.join(self.tree, *rel.split("/"))
+    def put(self, rel, text="# Record\n", root=None):
+        path = os.path.join(root or self.tree, *rel.split("/"))
         os.makedirs(os.path.dirname(path), exist_ok=True)
         with open(path, "w", encoding="utf-8", newline="\n") as f:
             f.write(text)
@@ -88,6 +113,30 @@ class RecordSlugsTests(unittest.TestCase):
         r = subprocess.run(cmd, cwd=self.tree, env=env, capture_output=True, text=True,
                            encoding="utf-8", errors="replace")
         return r.returncode, r.stdout + r.stderr
+
+    # Tree mode helpers. A record path comes from lint/layout.py, so a folder that moves moves the expected paths too.
+
+    def rel(self, kind, name):
+        """A file in the record folder `kind` of the temp tree, as the layout names that folder."""
+        return layout.path(self.tree, kind) + "/" + name
+
+    def decision(self, slug, text=None):
+        self.put(self.rel("decisions", slug + ".md"), text or "# %s\n" % slug)
+
+    def tree_run(self, root=None):
+        """(rc, findings, out) of `--tree` over `root`, the temp tree by default."""
+        root = root or self.tree
+        commit_all(root)
+        rc, out = self.lint("--tree", "--root", root)
+        return rc, tree_found(out), out
+
+    def assert_tree(self, want, root=None):
+        """The findings are exactly `want`, and the exit code is 1 with a finding, 0 when clean. Each case holds a
+        positive finding in `want`, so a run that reports nothing fails on that one, by name."""
+        rc, got, out = self.tree_run(root)
+        self.assertEqual(got, sorted(want), "tree findings differ: missing %s, unexpected %s"
+                         % (sorted(set(want) - set(got)), sorted(set(got) - set(want))))
+        self.assertEqual(rc, 1 if want else 0, out)
 
     def assert_passes(self, *args):
         rc, out = self.lint(*args)
@@ -353,6 +402,281 @@ class RecordSlugsTests(unittest.TestCase):
         rc, out = self.lint()
         self.assertNotIn("UNKNOWN", out)
         self.assertEqual(rc, 0, out)
+
+    # Tree mode: `--tree [--root R]` reads each file of the decision and debt folders, CLAUDE.md and output-styles/*.md.
+    # Main has no tree mode, so each case below fails on its missing finding, not on a crash.
+
+    def test_bare_first_cite_is_gloss001(self):
+        # The brief's red case. The folders are the legacy ones, and output-styles/ and CLAUDE.md are absent.
+        self.decision("tap-lag")
+        other = self.rel("decisions", "other.md")
+        text = "# Other\n\nRule `tap-lag` holds the text.\n"
+        self.put(other, text)
+        self.assert_tree(["%s:%d GLOSS001 tap-lag" % (other, line_of(text, "`tap-lag`"))])
+
+    def test_one_word_after_a_separator_is_not_a_gloss(self):
+        # A gloss has two words or more. Each file's first cite is judged, so four files give four findings.
+        self.decision("tap-lag")
+        want = []
+        for name, form in (("paren", "`tap-lag` (one)"), ("comma", "`tap-lag`, one"),
+                           ("colon", "`tap-lag`: one"), ("dash", "`tap-lag` — one")):
+            path = self.rel("decisions", name + ".md")
+            text = "# %s\n\n%s\n" % (name, form)
+            self.put(path, text)
+            want.append("%s:%d GLOSS001 tap-lag" % (path, line_of(text, "`tap-lag`")))
+        self.assert_tree(want)
+
+    def test_each_gloss_form_passes(self):
+        self.decision("tap-lag")
+        forms = {
+            "paren": "Rule `tap-lag` (two words)",
+            "comma": "Rule `tap-lag`, two words",
+            "colon": "Rule `tap-lag`: two words",
+            "dash": "Rule `tap-lag` — two words",
+            "after-words": "Two words (`tap-lag`)",
+            "lead": "Two words, `tap-lag`",
+        }
+        for name, line in forms.items():
+            self.put(self.rel("decisions", name + ".md"), "# %s\n\n%s\n" % (name, line))
+        bare = self.rel("decisions", "bare.md")
+        text = "# Bare\n\nRule `tap-lag` holds the text.\n"
+        self.put(bare, text)
+        self.assert_tree(["%s:%d GLOSS001 tap-lag" % (bare, line_of(text, "`tap-lag`"))])
+
+    def test_only_the_first_cite_in_a_file_is_judged(self):
+        self.decision("tap-lag")
+        self.put(self.rel("decisions", "glossed-first.md"),
+                 "# G\n\nRule `tap-lag` (two words) first.\n\nThen Rule `tap-lag` holds the text.\n")
+        twice = self.rel("decisions", "bare-twice.md")
+        text = "# T\n\nRule `tap-lag` holds.\n\nRule `tap-lag` holds again.\n"
+        self.put(twice, text)
+        self.assert_tree(["%s:%d GLOSS001 tap-lag" % (twice, line_of(text, "`tap-lag`"))])
+
+    def test_a_cite_in_a_fenced_block_is_not_a_cite(self):
+        self.decision("tap-lag")
+        path = self.rel("decisions", "fenced.md")
+        text = "# F\n\n```\nRule `tap-lag` holds.\n```\n\nRule `tap-lag` holds the text.\n"
+        self.put(path, text)
+        self.assert_tree(["%s:%d GLOSS001 tap-lag" % (path, line_of(text, "holds the text"))])
+
+    def test_a_cite_in_an_html_comment_is_not_a_cite(self):
+        self.decision("tap-lag")
+        path = self.rel("decisions", "commented.md")
+        text = ("# C\n\n<!-- see `tap-lag` here -->\n\n<!--\nRule `tap-lag` holds.\n-->\n\n"
+                "Rule `tap-lag` holds the text.\n")
+        self.put(path, text)
+        self.assert_tree(["%s:%d GLOSS001 tap-lag" % (path, line_of(text, "holds the text"))])
+
+    def test_a_span_that_is_not_exactly_an_id_is_not_a_cite(self):
+        self.decision("tap-lag")
+        path = self.rel("decisions", "flag-span.md")
+        text = "# S\n\nRun `tap-lag --flag` first.\n\nRule `tap-lag` holds the text.\n"
+        self.put(path, text)
+        self.assert_tree(["%s:%d GLOSS001 tap-lag" % (path, line_of(text, "holds the text"))])
+
+    def test_a_file_citing_its_own_slug_is_not_a_finding(self):
+        self.decision("tap-lag", "# Tap lag\n\nRule `tap-lag` holds the text.\n")
+        other = self.rel("decisions", "other.md")
+        text = "# Other\n\nRule `tap-lag` holds the text.\n"
+        self.put(other, text)
+        self.assert_tree(["%s:%d GLOSS001 tap-lag" % (other, line_of(text, "`tap-lag`"))])
+
+    def test_a_comment_opener_in_a_span_does_not_hide_a_cite(self):
+        # The openers are `/*`, `//` and `#`, each in a span before the cite on the same line.
+        for slug in ("a-one", "a-two", "a-three"):
+            self.decision(slug)
+        path = self.rel("decisions", "openers.md")
+        text = ("# O\n\nThe `/*` span, then Rule `a-one` holds.\n"
+                "The `//` span, then Rule `a-two` holds.\n"
+                "The `#` span, then Rule `a-three` holds.\n")
+        self.put(path, text)
+        self.assert_tree(["%s:%d GLOSS001 %s" % (path, line_of(text, slug), slug)
+                          for slug in ("a-one", "a-two", "a-three")])
+
+    def test_a_multi_line_span_before_a_cite_does_not_hide_it(self):
+        self.decision("a-four")
+        path = self.rel("decisions", "span.md")
+        text = "# S\n\nThe `// first\nsecond` span, then Rule `a-four` holds.\n"
+        self.put(path, text)
+        self.assert_tree(["%s:%d GLOSS001 a-four" % (path, line_of(text, "a-four"))])
+
+    def test_a_lone_quote_in_text_does_not_hide_a_cite(self):
+        # Don't, and <p>Don't</p>, each put a lone quote before a cite on its line. The last cite is glossed.
+        for slug in ("a-five", "a-six", "a-seven"):
+            self.decision(slug)
+        path = self.rel("decisions", "quote.md")
+        text = ("# Q\n\nDon't use Rule `a-five` holds.\n\n"
+                "<p>Don't</p> Rule `a-seven` holds.\n\n"
+                "Don't do `a-six` (two words) here.\n")
+        self.put(path, text)
+        self.assert_tree(["%s:%d GLOSS001 a-five" % (path, line_of(text, "a-five")),
+                          "%s:%d GLOSS001 a-seven" % (path, line_of(text, "a-seven"))])
+
+    def test_claude_md_and_output_styles_are_scanned(self):
+        self.decision("tap-lag")
+        self.put("CLAUDE.md", "# Rules\n\nRule `tap-lag` holds.\n")
+        self.put("output-styles/style.md", "# Style\n\nRule `tap-lag` holds.\n")
+        self.assert_tree(["CLAUDE.md:3 GLOSS001 tap-lag", "output-styles/style.md:3 GLOSS001 tap-lag"])
+
+    def test_rule_anchors_in_claude_md_and_output_styles_are_ids(self):
+        self.put("CLAUDE.md", "Rule text.<!-- rule:route-x -->\n")
+        self.put("output-styles/style.md", "Rule text.<!-- rule:style-y -->\n")
+        other = self.rel("decisions", "other.md")
+        text = "# Other\n\nRule `route-x` holds the text.\n\nRule `style-y` holds the text.\n"
+        self.put(other, text)
+        self.assert_tree(["%s:%d GLOSS001 route-x" % (other, line_of(text, "route-x")),
+                          "%s:%d GLOSS001 style-y" % (other, line_of(text, "style-y"))])
+
+    def test_a_plan_slug_is_an_id_and_plan_text_is_not_scanned(self):
+        self.decision("tap-lag")
+        self.put(self.rel("plans", "plan-z.md"), "# Plan\n\nRule `tap-lag` holds.\n")
+        other = self.rel("decisions", "other.md")
+        text = "# Other\n\nRule `plan-z` holds the text.\n"
+        self.put(other, text)
+        self.assert_tree(["%s:%d GLOSS001 plan-z" % (other, line_of(text, "`plan-z`"))])
+
+    def test_a_debt_slug_is_an_id(self):
+        # The decision names the debt in a glossed cite, so the debt raises no DEBT finding.
+        self.decision("tap-lag", "# Tap lag\n\nThe debt `debt-q` (its finding) waits.\n")
+        self.put(self.rel("debts", "debt-q.md"), "# Debt\n\n**Decision.** `tap-lag` (a valid gloss).\n")
+        other = self.rel("decisions", "other.md")
+        text = "# Other\n\nRule `debt-q` holds the text.\n"
+        self.put(other, text)
+        self.assert_tree(["%s:%d GLOSS001 debt-q" % (other, line_of(text, "`debt-q`"))])
+
+    def test_an_anchor_outside_the_id_sources_is_not_an_id(self):
+        self.decision("tap-lag")
+        self.put(self.rel("decisions", "zz.md"), "# Z\n\n<!-- rule:ghost-r -->\n")
+        other = self.rel("decisions", "other.md")
+        text = "# Other\n\nRule `ghost-r` holds the text.\n\nRule `not-an-id` holds.\n\nRule `tap-lag` holds.\n"
+        self.put(other, text)
+        self.assert_tree(["%s:%d GLOSS001 tap-lag" % (other, line_of(text, "`tap-lag`"))])
+
+    def test_records_index_catalog_and_debt_notes_and_readme_are_not_scanned(self):
+        # The tree has no CLAUDE.md and no output-styles/, so the empty states are covered here as well.
+        self.decision("tap-lag")
+        for path in ("docs/records.md", "docs/catalog.md", self.rel("debts", "README.md"),
+                     layout.path(self.tree, "debt-notes")):
+            self.put(path, "# Skipped\n\nRule `tap-lag` holds.\n")
+        other = self.rel("decisions", "other.md")
+        text = "# Other\n\nRule `tap-lag` holds the text.\n"
+        self.put(other, text)
+        self.assert_tree(["%s:%d GLOSS001 tap-lag" % (other, line_of(text, "`tap-lag`"))])
+
+    def test_a_debt_file_is_scanned_for_gloss(self):
+        self.decision("a-eight")
+        debt = self.rel("debts", "debt-r.md")
+        text = "# Debt\n\nRule `a-eight` holds the text.\n\n**Decision.** none\n"
+        self.put(debt, text)
+        self.assert_tree(["%s:%d GLOSS001 a-eight" % (debt, line_of(text, "a-eight"))])
+
+    def test_the_record_folders_come_from_the_layout(self):
+        # A repo rolled out to the layout keeps its records under docs/. Its legacy folders are then not records.
+        # The docs/ names below are the rolled-out places themselves, so they stay literal.
+        self.put(".claude/layout-extras.json", '{"rolled-out": true, "kinds": {}}\n')
+        self.put("docs/decisions/tap-lag.md", "# Tap lag\n")
+        moved = "docs/decisions/other.md"
+        text = "# Other\n\nRule `tap-lag` holds the text.\n"
+        self.put(moved, text)
+        self.put("decisions/old.md", "# Old\n\nRule `tap-lag` holds the text.\n")
+        self.put("docs/debts/d-ten.md", "# Debt\n")
+        self.assert_tree(["%s:%d GLOSS001 tap-lag" % (moved, line_of(text, "`tap-lag`")),
+                          "docs/debts/d-ten.md:1 DEBT001 d-ten"])
+
+    def test_root_names_the_tree_read_not_the_working_directory(self):
+        # The working tree holds its own finding. With --root, only the named tree's finding is reported.
+        self.decision("tap-lag")
+        self.put(self.rel("decisions", "own.md"), "# Own\n\nRule `tap-lag` holds the text.\n")
+        root = tempfile.mkdtemp(prefix="rsl_root_", dir=RUN_FOLDER)
+        self.addCleanup(tracked_tree.rm_tree, root)
+        self.put(layout.path(root, "decisions") + "/tap-lag.md", "# Tap lag\n", root=root)
+        other = layout.path(root, "decisions") + "/other.md"
+        text = "# Other\n\nRule `tap-lag` holds the text.\n"
+        self.put(other, text, root=root)
+        self.assert_tree(["%s:%d GLOSS001 tap-lag" % (other, line_of(text, "`tap-lag`"))], root=root)
+
+    def test_exit_is_one_with_a_finding_and_zero_once_it_is_gone(self):
+        self.decision("tap-lag")
+        other = self.rel("decisions", "other.md")
+        text = "# Other\n\nRule `tap-lag` holds the text.\n"
+        self.put(other, text)
+        self.assert_tree(["%s:%d GLOSS001 tap-lag" % (other, line_of(text, "`tap-lag`"))])
+        os.remove(os.path.join(self.tree, *other.split("/")))
+        self.assert_tree([])  # rc 0 and no finding
+
+    def test_a_debt_with_no_decision_line_is_debt001(self):
+        path = self.rel("debts", "d-one.md")
+        self.put(path, "# Debt\n\nWhat: a gap.\n")
+        self.assert_tree(["%s:1 DEBT001 d-one" % path])  # no line holds the part, so the finding names line 1
+
+    def test_a_bullet_decision_line_counts(self):
+        self.decision("tap-lag", "# Tap lag\n\nThe debt `d-two` (its finding) waits.\n")
+        self.put(self.rel("debts", "d-two.md"), "# Debt\n\n- **Decision.** `tap-lag` (a valid gloss)\n")
+        path = self.rel("debts", "d-one.md")
+        self.put(path, "# Debt\n\nWhat: a gap.\n")  # the positive: no decision line
+        self.assert_tree(["%s:1 DEBT001 d-one" % path])
+
+    def test_a_marker_mid_line_is_not_a_decision_line(self):
+        self.decision("tap-lag")
+        path = self.rel("debts", "d-three.md")
+        self.put(path, "# Debt\n\nSee the line **Decision.** `tap-lag` (a valid gloss).\n")
+        self.assert_tree(["%s:1 DEBT001 d-three" % path])
+
+    def test_a_decision_line_naming_no_decision_is_debt002(self):
+        path = self.rel("debts", "d-four.md")
+        text = "# Debt\n\n**Decision.** `ghost-decision` (a missing decision)\n"
+        self.put(path, text)
+        self.assert_tree(["%s:%d DEBT002 ghost-decision" % (path, line_of(text, "**Decision.**"))])
+
+    def test_none_and_none_with_a_period_are_accepted(self):
+        self.put(self.rel("debts", "d-five.md"), "# Debt\n\n**Decision.** none\n")
+        self.put(self.rel("debts", "d-six.md"), "# Debt\n\n- **Decision.** none.\n")
+        path = self.rel("debts", "d-four.md")  # the positive: a ghost slug
+        text = "# Debt\n\n**Decision.** `ghost-decision` (a missing decision)\n"
+        self.put(path, text)
+        self.assert_tree(["%s:%d DEBT002 ghost-decision" % (path, line_of(text, "**Decision.**"))])
+
+    def test_a_named_decision_must_name_the_debt(self):
+        # tap-lag names d-eight but not d-seven, so d-seven's decision line fails DEBT003.
+        self.decision("tap-lag", "# Tap lag\n\nThe debt `d-eight` (its finding) waits.\n")
+        seven = self.rel("debts", "d-seven.md")
+        self.put(seven, "# Debt\n\n**Decision.** `tap-lag` (a valid gloss)\n")
+        self.put(self.rel("debts", "d-eight.md"), "# Debt\n\n**Decision.** `tap-lag` (a valid gloss)\n")
+        self.assert_tree(["%s:3 DEBT003 d-seven" % seven])
+
+    def test_none_while_a_decision_names_the_debt_is_debt004(self):
+        self.decision("dec-nine", "# Dec\n\nThe debt `d-nine` (its finding) waits.\n")
+        path = self.rel("debts", "d-nine.md")
+        self.put(path, "# Debt\n\n**Decision.** none\n")
+        self.assert_tree(["%s:3 DEBT004 d-nine" % path])
+
+    def test_the_default_and_file_modes_do_not_read_the_gloss_or_debt_rules(self):
+        # Green on main, and it must stay green: only --tree reads these rules.
+        self.decision("tap-lag")
+        self.put(self.rel("decisions", "other.md"), "# Other\n\nRule `tap-lag` holds the text.\n")
+        self.put(self.rel("debts", "d-one.md"), "# Debt\n\nWhat: a gap.\n")
+        self.assert_passes(self.rel("decisions", "other.md"), self.rel("debts", "d-one.md"))
+
+    def test_an_unreadable_layout_is_red_in_tree_mode(self):
+        self.put("lint/layout.json", "{not json\n")  # the copy that the temp tree's script reads
+        rc, out = self.lint("--tree", "--root", self.tree)
+        self.assertEqual(rc, 1, out)
+        self.assertIn("cannot read", out)  # the same LayoutError the other modes print
+        self.assertNotIn("Traceback", out)
+
+    def test_tree_findings_returns_the_findings_the_command_prints(self):
+        # A missing name fails the assert below, not the run: getattr, not a direct call.
+        self.decision("tap-lag")
+        other = self.rel("decisions", "other.md")
+        text = "# Other\n\nRule `tap-lag` holds the text.\n"
+        self.put(other, text)
+        commit_all(self.tree)
+        spec = importlib.util.spec_from_file_location("record_slugs_tree_probe", MODULE)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        fn = getattr(module, "tree_findings", None)
+        self.assertIsNotNone(fn, "tree_findings(root) is not defined in lint/check_record_slugs.py")
+        self.assertEqual(sorted(fn(self.tree)), ["%s:%d GLOSS001 tap-lag" % (other, line_of(text, "`tap-lag`"))])
 
 
 class ImportTests(unittest.TestCase):
