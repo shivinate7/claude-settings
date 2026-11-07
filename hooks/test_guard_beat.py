@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
-"""The guard test run prints a progress line while it is quiet (decision stall-watch; debt test-guard-no-progress-line).
+"""The guard test run prints a progress line while it is quiet (decision stall-watch).
 
 A quiet tool owes a progress line at least every 120 seconds, or the stall watch cuts off a healthy run. This
 case does not wait 120 seconds, and it does not run the full suite, which takes minutes. It runs one named case of
 the stream family, the cheapest family that builds no fixtures.
 
-Contract the builder codes against: GUARD_HEARTBEAT=<seconds> sets the beat interval of hooks/test_guard.py. A beat
-is a stdout line that starts with "test_guard: still running". A beat never starts with PASS, FAIL or SKIP.
+Contract: GUARD_HEARTBEAT=<seconds> sets the beat interval of hooks/test_guard.py, 60 by default. A beat is a stdout
+line that starts with "test_guard: still running". A beat never starts with PASS, FAIL or SKIP.
 
-The default interval (120 seconds) is not measured here. The debt's retire test needs a background run over 300
-seconds, which this case does not replace.
+The default interval (60 seconds) is not measured here. A background run over 300 seconds, which the stall watch
+reads, is not replaced by this case.
 
 Run it from the repository root:
 

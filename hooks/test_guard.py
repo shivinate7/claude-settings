@@ -141,6 +141,18 @@ GUARD_FAMILY = os.environ.get("GUARD_FAMILY", "")
 if GUARD_FAMILY and GUARD_FAMILY not in FAMILIES:
     sys.exit("GUARD_FAMILY=%r is not a family. Want one of: %s"
              % (GUARD_FAMILY, ", ".join(sorted(FAMILIES))))
+# A quiet run prints a progress line (decision stall-watch: a quiet tool owes one at least every 120 seconds).
+# The default of 60 seconds keeps under that limit. GUARD_HEARTBEAT=<seconds> sets it, for tests.
+GUARD_HEARTBEAT_DEFAULT = 60.0
+_HEARTBEAT_TEXT = os.environ.get("GUARD_HEARTBEAT", "")
+try:
+    GUARD_HEARTBEAT = float(_HEARTBEAT_TEXT) if _HEARTBEAT_TEXT else GUARD_HEARTBEAT_DEFAULT
+except ValueError:
+    GUARD_HEARTBEAT = 0.0
+if not 0 < GUARD_HEARTBEAT < float("inf"):
+    sys.exit("GUARD_HEARTBEAT=%r: want a number of seconds above 0 and finite. Nothing ran." % _HEARTBEAT_TEXT)
+_RUN_START = time.monotonic()
+_LAST_LINE = [_RUN_START]  # when the run last printed a line: a beat waits for a quiet interval
 
 
 def parse_shard(value):
@@ -28778,6 +28790,22 @@ if _UNNAMED or _BAD_LOG:
 SKIP = "skip"
 
 
+def say(line):
+    """Print one case or check line, and note the time so beat() knows the run printed."""
+    print(line)
+    _LAST_LINE[0] = time.monotonic()
+
+
+def beat(done):
+    """Print a progress line when GUARD_HEARTBEAT seconds have passed since the last line. No thread or timer:
+    run_cases calls it at the top of each loop, so a run that prints nothing for that long gets one line."""
+    now = time.monotonic()
+    if now - _LAST_LINE[0] < GUARD_HEARTBEAT:
+        return
+    print("test_guard: still running (%d s in, %d cases done)" % (now - _RUN_START, done), flush=True)
+    _LAST_LINE[0] = now
+
+
 def run_cases():
     mode = os.environ.get("GUARD_TESTS", "")
     if mode not in GUARD_TESTS_MODES:
@@ -28807,6 +28835,7 @@ def run_cases():
     # MUTATE_ONLY: set by hooks/mutate_shared.py's first stage, run only the named cases.
     only = os.environ.get("MUTATE_ONLY")
     for case in cases:
+        beat(ran)
         if only and only not in case["name"]:
             continue
         ran += 1
@@ -28834,21 +28863,22 @@ def run_cases():
         elif not ok:
             note = "  (%s)" % reason[:110] if reason else ""
         failed += 0 if ok else 1
-        print("%s  %-6s(want %-6s)  [%-11s] %s%s" % (
+        say("%s  %-6s(want %-6s)  [%-11s] %s%s" % (
             "PASS" if ok else "FAIL", got, case["expected"], case["tool"], case["name"], note))
     if any((not only or only in label) and check not in FIXTURELESS_CHECKS for label, check in logs):
         materialize_all()  # a log check names its fixtures in its own code, not in a case's fields
     for label, checker in logs:
+        beat(ran)
         if only and only not in label:
             continue
         ok, note = checker()
         if ok == SKIP:  # cannot run on this platform: shown and counted, never a PASS, never a failure
             skipped += 1
-            print("SKIP  %s  (%s)" % (label, note))
+            say("SKIP  %s  (%s)" % (label, note))
             continue
         ran += 1
         failed += 0 if ok else 1
-        print("%s  %-6s(want %-6s)  [%-11s] %s  (%s)" % (
+        say("%s  %-6s(want %-6s)  [%-11s] %s  (%s)" % (
             "PASS" if ok else "FAIL", "logged" if ok else "wrong", "logged", "Bash", label, note))
     print()
     shutil.rmtree(ROOT, ignore_errors=True)
