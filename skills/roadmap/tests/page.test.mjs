@@ -207,3 +207,32 @@ test("a live doing step reads In progress in all three places", async (t) => {
   const log = page.locator("#days .ev", { has: page.locator('button[data-go="a"]') });
   assert.equal((await log.locator(".kind").textContent()).trim(), "In progress", "the Changes log row of the live doing step does not read In progress");
 });
+
+// ---------------------------------------------------------------- the phase bars: a stalled or paused step is not an active cell
+// Each bar draws one cell per step: done, then active, then blocked. A stalled or paused step keeps status active, so a bar that counts
+// the status alone draws it as active. The bars are aria-hidden, so the cells are read by their class. Step a is in progress, not stalled.
+const STALLED_C1_PAUSED_A3 = { why: "", steps: [{ id: "c1", fix: "todo" }], paused: ["a3"], badPause: [], items: [], ...NO_ITEMS };
+const barSteps = () => ({ c1: stepOf("Step c1", "doing", 1), a: stepOf("Step a", "doing", 2), a3: stepOf("Step a3", "doing", 3) });
+async function barActCells(page, scope) {
+  assert.equal(await page.locator(`${scope} .bar`).count(), 1, `${scope} has no phase bar (.bar)`);
+  return page.locator(`${scope} .bar i.act`).count();
+}
+// The scope and the control, shared by both bars: c1 Stalled, a3 Paused, a In progress, and the where-you-are bar already draws one active cell.
+async function barControls(page) {
+  await assertRowReads(page, "c1", "Stalled");
+  await assertRowReads(page, "a3", "Paused");
+  assert.match(await statusLabel(page, "a"), /In progress/, "step a is not In progress, so the bar has no genuinely active step to count");
+  assert.equal(await barActCells(page, "#now"), 1, "the where-you-are bar does not draw the one step in progress as its one active cell");
+}
+test("the rail's phase bar draws no stalled or paused step as active", async (t) => {
+  const page = await open(t, builtPage({ steps: barSteps(), stalled: STALLED_C1_PAUSED_A3 })); if (!page) return;
+  await barControls(page);
+  const act = await barActCells(page, '#rail button[data-phase="cleanup"]');
+  assert.equal(act, 1, `the rail's cleanup bar draws ${act} active cells for one step in progress: a stalled or paused step is drawn as active`);
+});
+test("the phase head's bar draws no stalled or paused step as active", async (t) => {
+  const page = await open(t, builtPage({ steps: barSteps(), stalled: STALLED_C1_PAUSED_A3 })); if (!page) return;
+  await barControls(page);
+  const act = await barActCells(page, "#phases .ph-head");
+  assert.equal(act, 1, `the phase head's bar draws ${act} active cells for one step in progress: a stalled or paused step is drawn as active`);
+});

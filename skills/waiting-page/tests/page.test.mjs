@@ -2912,6 +2912,22 @@ test("the Ask seen stamp moves when the tab hides while the Ask section is on sc
   await hideTab(page);
   assert.equal(await seenStamp(page), TAB_HIDE_STAMP, "hiding the tab with the Ask section on screen did not stamp the asks as seen");
 });
+test("the Ask seen stamp stays at the hide time when the page closes on a hidden tab after an answer lands: pagehide", async (t) => {
+  // The Ask section is below the fold at load. The owner scrolls it into view, as the on-screen case above does, so the hide stamps it.
+  const page = await open(t, { dbExtra: { asks: TAB_ASKS() }, storage: { "waiting.askSeen": TAB_SEED }, keepStorage: true, clock: TAB_HIDE }); if (!page) return;
+  await page.locator("#asks").scrollIntoViewIfNeeded();
+  assert.equal(await asksOnScreen(page), true, "the Ask section is off screen after it is scrolled into view, so this case cannot show a hidden tab's stamp");
+  await hideTab(page);
+  assert.equal(await seenStamp(page), TAB_HIDE_STAMP, "hiding the tab with the Ask section on screen did not stamp the asks as seen");
+  // An answer lands in the store while the tab is still hidden. The page then closes, later, still hidden, with the Ask section laid out where it was.
+  await page.evaluate((asks) => localStorage.setItem("__stub.asks", JSON.stringify(asks)), { ...TAB_ASKS(), [TAB_ARRIVED.id]: TAB_ARRIVED });
+  await page.clock.setFixedTime(new Date(TAB_CLOSE));
+  await page.evaluate(() => window.dispatchEvent(new Event("pagehide")));
+  assert.equal(await seenStamp(page), TAB_HIDE_STAMP, "the page closing on a hidden tab moved the Ask seen stamp to the close time, past an answer that arrived while the tab was hidden");
+  await page.reload();
+  await shownBox(page, "Seen answer 1");
+  assert.equal(await page.locator(`#row-${TAB_ARRIVED.id} .newmark`).count(), 1, "the answer that arrived while the tab was hidden has no New answer mark at the next load");
+});
 
 test("Send ask never cuts a text over 4000 characters: it stores the full text, or writes nothing and shows a notice", async (t) => {
   const page = await open(t); if (!page) return;
@@ -6169,6 +6185,33 @@ test("a doing step that is not stalled or paused reads In progress in all three 
   assert.equal(await feedMark.getAttribute("aria-label"), "In progress", "the Latest changes row of the doing step does not read In progress");
   const logMark = page.locator("#svDays .ev", { has: page.locator('button[data-go="d6"]') }).locator('[role="img"]');
   assert.equal(await logMark.getAttribute("aria-label"), "In progress", "the Changes log row of the doing step does not read In progress");
+});
+
+// The phase bars draw one cell per step: done, then active, then blocked. A stalled or paused step keeps status active, so a bar that
+// counts the status alone draws it as active. The bars are aria-hidden, so the cells are read by their class. stalledFixture: c1 stalled,
+// a3 paused, a5 stalled, a4 and d6 in progress. Each bar must show two active cells, and the where-you-are bar already does.
+async function actCells(page, scope) {
+  assert.equal(await page.locator(`${scope} .segbar`).count(), 1, `${scope} has no phase bar (.segbar)`);
+  return page.locator(`${scope} .segbar i.act`).count();
+}
+async function stalledPaused(page) {
+  assert.equal(await doingNowRow(page, "c1").locator('[role="img"][aria-label="Stalled"]').count(), 1, "step c1 is not in Doing now, marked Stalled");
+  assert.equal(await doingNowRow(page, "a3").locator('[role="img"][aria-label="Paused"]').count(), 1, "step a3 is not in Doing now, marked Paused");
+  assert.equal(await actCells(page, "#svNow"), 2, "the where-you-are bar does not draw the two steps in progress as active");
+}
+test("the rail's phase bar draws no stalled or paused step as active", async (t) => {
+  const page = await open(t, { pageHtml: stalledPage(STALLED) }); if (!page) return;
+  await openStatus(page);
+  await stalledPaused(page);
+  const act = await actCells(page, '#svRail button[data-phase="cleanup"]');
+  assert.equal(act, 2, `the rail's cleanup bar draws ${act} active cells for two steps in progress: a stalled or paused step is drawn as active`);
+});
+test("the phase head's bar draws no stalled or paused step as active", async (t) => {
+  const page = await open(t, { pageHtml: stalledPage(STALLED) }); if (!page) return;
+  await openStatus(page);
+  await stalledPaused(page);
+  const act = await actCells(page, "#svPhases .ph-head");
+  assert.equal(act, 2, `the phase head's bar draws ${act} active cells for two steps in progress: a stalled or paused step is drawn as active`);
 });
 
 test("Doing now shows the stalled or paused mark in place of the in-progress mark", async (t) => {
