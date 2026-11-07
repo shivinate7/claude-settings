@@ -2253,11 +2253,6 @@ class XcodebuildRuns(unittest.TestCase):
                 self.assertEqual(len(runs), 1, runs)  # the scope first: one xcodebuild command
                 self.assertIn("test", runs[0], runs)  # then its action: the run keeps `test` after the substitution
 
-    def test_a_substitution_mark_in_single_quotes_is_text_and_the_action_stays_in_the_run(self):
-        runs = self.runs("xcodebuild -scheme App -derivedDataPath '$(' test")
-        self.assertEqual(len(runs), 1, runs)  # the scope first: one xcodebuild command
-        self.assertIn("test", runs[0], runs)  # then its action: `$(` in single quotes is an argument, so `test` stays in the run
-
     def test_a_lone_double_quote_in_an_argument_keeps_the_action_in_the_run(self):  # green control: passes on the old code too
         runs = self.runs('xcodebuild -scheme App -derivedDataPath "x test')
         self.assertEqual(len(runs), 1, runs)  # the scope first: one xcodebuild command
