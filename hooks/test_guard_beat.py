@@ -31,9 +31,10 @@ TINY = "0.001"  # a quiet stretch of a millisecond: every checkpoint that finds 
 TIMEOUT = 900  # a bound against a hang, never an assert
 BEAT = "test_guard: still running"  # the beat line's prefix; a case line starts with PASS, FAIL or SKIP
 CASE_START = ("PASS", "FAIL", "SKIP")
-# Set by a wrapper or an outer run. A child of this test must not read them.
+# Set by a wrapper or an outer run. A child of this test must not read them. PYTHONUNBUFFERED would
+# make stdout unbuffered whatever the runner flushes, so a missing flush could not show.
 INHERITED = ("STALL_WATCH_BEAT", "GUARD_HEARTBEAT", "GUARD_FAMILY", "GUARD_SHARD", "GUARD_TESTS",
-             "MUTATE_ONLY", "GUARD_TIMING")
+             "MUTATE_ONLY", "GUARD_TIMING", "PYTHONUNBUFFERED")
 
 Run = namedtuple("Run", "rc out err")
 
