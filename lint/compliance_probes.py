@@ -690,10 +690,6 @@ UI_BUNDLE = "bundle.ui-testing"
 # commands, so `;`, `|`, `&` and a backtick are marks inside quotes too. A parenthesis in quotes is text, as in a simulator name
 # (`iPad Pro (12.9-inch)`), unless it closes a `$(` opened in the same quote.
 COMMAND_MARKS = {";", "|", "&", "$(", "(", ")", "`"}
-
-
-class Mark(str):
-    """A COMMAND_MARKS mark as `shell_words` returns it. A word that only spells one, such as the text `$(` in single quotes, is a plain str."""
 PULL_REQUEST = re.compile(r"^\s*(on:\s*\[?[^\n]*\bpull_request\b|pull_request\s*:)", re.M)
 XCODEBUILD_TEST_RE = re.compile(r"\bxcodebuild\b[^\n|;&]*\s(test|test-without-building)(?![-\w.])")
 NO_DIAGNOSE = re.compile(r"(?<![\w-])-collect-test-diagnostics\s+never(?![-\w.])")
@@ -734,15 +730,15 @@ def shell_words(line):
                 quote = ch
             i += 1
             continue
-        if line.startswith("$(", i) and quote != "'":  # inside single quotes `$(` and a backtick are text
+        if line.startswith("$(", i):
             mark, opened = "$(", opened + [quote]
             i += 1
         elif ch == ")" and (quote is None or (opened and opened[-1] == quote)):
             mark, opened = ")", opened[:-1]
-        elif ch == "(" and quote is None or ch in ";|&" or (ch == "`" and quote != "'"):
+        elif ch == "(" and quote is None or ch in ";|&`":
             mark = ch
         if mark:
-            words += ["".join(word), Mark(mark)] if word else [Mark(mark)]
+            words += ["".join(word), mark] if word else [mark]
             word = []
         elif ch.isspace():
             words += ["".join(word)] if word else []
@@ -767,18 +763,18 @@ def xcodebuild_runs(text):
     for line in text.splitlines():
         group, outer = [], []  # `outer`: (opener, the group set aside at it), innermost last
         for word in shell_words(line):
-            if not isinstance(word, Mark):
-                group.append(word)
-            elif word in ("$(", "(") or (word == "`" and not (outer and outer[-1][0] == "`")):
+            if word in ("$(", "(") or (word == "`" and not (outer and outer[-1][0] == "`")):
                 outer.append((word, group))
                 group = []
             elif word in (")", "`"):
                 end(group)
                 opener, held = outer.pop() if outer else (None, [])
                 group = held if opener in ("$(", "`") else []
-            else:  # ";", "|" or "&"
+            elif word in COMMAND_MARKS:
                 end(group)
                 group = []
+            else:
+                group.append(word)
         end(group)
         for _opener, held in reversed(outer):  # a substitution left open at the line end
             end(held)
