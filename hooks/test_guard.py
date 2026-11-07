@@ -13314,6 +13314,21 @@ SHELL_TEST_WRITES = (
     # A quoted string over two lines must not hide the find pipe after it (the scanner respects strings).
     ("echo of a two-line quoted string, then find piped to xargs, sed -i over tests",
      "echo \"one\ntwo\"; find tests|xargs sed -i s/a/b/"),
+    # A pipe at a line's end feeds the next line, so the find or grep before it still feeds the
+    # xargs that writes (decision builders-cannot-edit-tests).
+    ("find piped at a line end to xargs on the next line, sed -i over tests",
+     "find tests -name '*.py' |\n  xargs sed -i s/a/b/"),
+    ("grep piped at a line end to xargs on the next line, sed -i over tests",
+     "grep -rl a tests |\n xargs sed -i s/a/b/"),
+    ("find piped at a line end, sort at a line end, then xargs on a third line, sed -i over tests",
+     "find tests |\n sort |\n xargs sed -i s/a/b/"),
+    # A find in a substitution that feeds cp's target directory is a write to every test it lists.
+    ("cp -t with a find substitution over tests as the target directory",
+     "cp -t$(find tests -type d) x"),
+    ("cp --target-directory= with a find substitution over tests",
+     "cp --target-directory=$(find tests -type d) x"),
+    ("cp -t with a backtick find over tests as the target directory",
+     "cp -t`find tests -type d` x"),
 )
 for _name, _command in SHELL_TEST_WRITES:
     sh("builder-test: shell write, %s, is refused" % _name, _command, "deny", rule=BT,
@@ -13352,6 +13367,13 @@ SHELL_TEST_ALLOWS = (
     ("echo of a find pipe that names tests in quotes", "echo \"find tests | xargs sed -i\""),
     ("for loop over src/*.py, quoted sed -i on \"$f\" with a comment opener in quotes",
      "for f in src/*.py; do sed -i \"s/#x//\" \"$f\"; done"),
+    # A for loop copies each test out to /tmp: the test is read, and nothing in the tree is written.
+    ("for loop over tests/*.py, cp of \"$f\" out to /tmp/snap",
+     "for f in tests/*.py; do cp \"$f\" /tmp/snap/; done"),
+    # The roots of a pipeline that ends in a non-path command (wc) are not paths, so the sed -i over
+    # src/app.py is judged alone.
+    ("find over tests piped to wc, its count in a sed -i over src/app.py",
+     "x=$(find tests | wc -l); sed -i \"s/N/$x/\" src/app.py"),
 )
 for _name, _command in SHELL_TEST_ALLOWS:
     sh("builder-test: shell %s is allowed" % _name, _command, "allow", **BR)
