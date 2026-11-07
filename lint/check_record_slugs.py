@@ -164,6 +164,8 @@ SLUG_AT_START = re.compile(r"`([^`\n]+)`|([a-z0-9][a-z0-9-]*)")
 GLOSS_WINDOW = 80  # the characters of context on each side of a cite, as the cite-gloss guard reads them
 LINK_TARGET = re.compile(r"(?<=\])\([^)\n]*\)")  # the target of a markdown link, which is a path, not a cite
 URL = re.compile(r"https?://\S+")
+MARKUP_START = re.compile(r"^[*_]+")  # emphasis marks that close a cite: **id**: gloss
+MARKUP_END = re.compile(r"[*_]+$")  # emphasis marks that open it
 LIST_ITEM = re.compile(r"\s*(?:[-*+]|\d+[.)])\s")
 
 
@@ -219,7 +221,8 @@ def paragraphs(clean):
 
 def id_pattern(ids):
     """The regex of an id of `ids` written as a whole word: no word character or hyphen on either side."""
-    return re.compile(r"(?<![\w-])(?:%s)(?![\w-])" % "|".join(re.escape(i) for i in sorted(ids, key=len, reverse=True)))
+    return re.compile(r"(?<![\w-])(?:%s)(?![\w-])" % "|".join(re.escape(i) for i in sorted(ids, key=len, reverse=True)),
+                      re.I)
 
 
 def first_cites(text, ids):
@@ -236,7 +239,7 @@ def first_cites(text, ids):
         plain = plain[:start] + blank(plain[start:end]) + plain[end:]
     plain = URL.sub(lambda m: blank(m.group()), LINK_TARGET.sub(lambda m: blank(m.group()), plain))
     cites = [(start, end, content) for start, end, content in found if content in ids]
-    cites += [(m.start(), m.end(), m.group()) for m in id_pattern(ids).finditer(plain)]
+    cites += [(m.start(), m.end(), m.group().lower()) for m in id_pattern(ids).finditer(plain)]  # an id is a cite in any case
     bounds = paragraphs(clean)
     seen, out = set(), []
     for start, end, ident in sorted(cites):
@@ -244,8 +247,8 @@ def first_cites(text, ids):
             continue
         seen.add(ident)
         lo, hi = next(((a, b) for a, b in bounds if a <= start < b), (start, end))
-        glossed = report_guard.has_gloss(plain[max(lo, start - GLOSS_WINDOW):start],
-                                         plain[end:min(hi, end + GLOSS_WINDOW)])
+        before, after = plain[max(lo, start - GLOSS_WINDOW):start], plain[end:min(hi, end + GLOSS_WINDOW)]
+        glossed = report_guard.has_gloss(MARKUP_END.sub("", before), MARKUP_START.sub("", after))  # bold or italic marks sit between
         out.append((clean.count("\n", 0, start) + 1, ident, glossed))
     return out
 
