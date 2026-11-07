@@ -21,7 +21,7 @@ Use `Red-run: none: <reason>` only for a change that adds no new claim, such as 
 `lint/check_red_run.py` reads the trailer. Before you push, run `python3 ~/.claude/lint/check_red_run.py --base origin/main`. It reads the repo you are in.
 Before you stop for any reason, commit your work to your own branch and push it. Before the final report, stop every Monitor and background task you started with `TaskStop`, and start none after it.
 Run PowerShell with the PowerShell tool, never powershell.exe from Bash (agent-powershell-tool).
-When worktree isolation refuses a command as too complex, write the script with Write and run it as one plain `python3 <script>` call; never heredoc a script into Bash.
+When worktree isolation refuses a command as too complex, split it into plain, separate commands. A step that still needs a script file is a need to report.
 
 Follow the practices in decision `test-practices`. At write time: show each new case red on a named old commit, with a green control beside it (P2). The red must be an assert that fails for the named cause, never a crash, an import error or "not built" (P3). For a new feature, a crash on a missing name is not a red. After the build, the test-author makes a mutant of the built code and records the named case going red (P3). Each failure message names one cause (P4). No fixed sleep, wall-clock wait or real clock in an assert (P5). Assert the scope before the subject when the test probes or branches on the subject (P7). Fixtures reach the empty and full-size states (P8).
 

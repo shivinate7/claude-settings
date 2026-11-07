@@ -81,7 +81,7 @@ runs it. Until the owner rules, draw HTML mockups only.
 
 Before you stop for any reason, commit your work to your own branch and push it. Before the final report, stop every Monitor and background task you
 started with `TaskStop`, and start none after it.
-When worktree isolation refuses a command as too complex, write the script with Write and run it as one plain `python3 <script>` call; never heredoc a script into Bash.
+When worktree isolation refuses a command as too complex, split it into plain, separate commands. A step that still needs a script file is a need to report.
 
 Report once, with the labels from CLAUDE.md in order: Done, Deviations, Input Needed, Next. Under
 Done, list each mockup with its path, its deep links, and the sizes and themes it draws. Name your
