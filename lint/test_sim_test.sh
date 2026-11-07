@@ -30,6 +30,9 @@
 #  - One Mac-wide lock, state/sim-test.lock under the config dir, held for the whole run, a hold included, and freed on
 #    every exit, SIGHUP too. A live holder is waited for (SIM_TEST_LOCK_WAIT seconds, then refused). A dead holder is taken
 #    over. A lock folder with no pid file counts as held for 60 s, then it is taken over.
+#    A cleanup removes the lock only while its pid file names this run, so a take-over that wrote another pid is left
+#    alone. A take-over whose put-back finds the lock re-created nests nothing inside it. A live holder that kill -0 cannot
+#    signal (EPERM) is waited for, never taken over.
 #  - Its own boot takes the lease for its role (`sim-lease take --device duo|pro --udid`) before simctl boot. At a 5-minute
 #    load of 100 or a 1-minute load of 60 it waits, then exits 1 with no boot. The lease is released on every exit, INT and
 #    TERM too. A reuse takes the lease of the slot that boots its UDID, held for the run; it skips the load bars, and a
@@ -52,6 +55,8 @@ script=${SIM_TEST:-$root/bin/sim-test}
 sim_lease=$(dirname "$script")/sim-lease
 export SIM_LEASE_BIN=$sim_lease # the xcodebuild stub reads `sim-lease status` through it during a run
 REAL_SLEEP=$(command -v sleep)
+TEST_REAL_MV=$(command -v mv) # the mv stub below calls the real one through this
+export TEST_REAL_MV
 LIMIT=20 # hard timeout per run, in seconds: a red case cannot hang the suite
 fail=0; pass_n=0; fail_n=0; failed=
 why=
@@ -60,6 +65,8 @@ case_fail() { echo "FAIL $1: $2"; fail=1; fail_n=$((fail_n + 1)); failed=${faile
 end_case() { if [[ -z $why ]]; then case_pass "$1"; else case_fail "$1" "$why"; fi; why=; }
 # need MSG CMD...: the first failed need names the case's failure.
 need() { local msg=$1; shift; [[ -n $why ]] && return 0; "$@" || why=$msg; }
+# skip_case NAME REASON: a case that cannot run on this host. It prints one SKIP line, and is neither a pass nor a fail.
+skip_case() { echo "SKIP $1: $2"; }
 
 # ---- run folder (decisions/test-temp-standard.md) ----
 tmp_root=${TMPDIR:-/tmp}/claude-settings-tests
@@ -181,6 +188,22 @@ cat > "$stubs/uname" <<'SH'
 #!/bin/sh
 echo Darwin
 SH
+# mv: a stand-in only for the take-over window, when MV_HOOK is takeover, and only once per run (the marker mv_hooked).
+# The first move of the lock folder is a dead holder's move. Before it, the lock's pid file names MV_PID_SEEN, a live pid
+# that took the lock after the take-over's check. After it, another run re-creates the lock with MV_PID_NEW: the window
+# the put-back must survive. Every other move is the real mv.
+cat > "$stubs/mv" <<'SH'
+#!/bin/sh
+lock="$HOME/.claude/state/sim-test.lock"
+if [ "${MV_HOOK:-}" = takeover ] && [ "$1" = "$lock" ] && [ ! -e "$RUN/mv_hooked" ]; then
+  : > "$RUN/mv_hooked"
+  printf '%s\n' "$MV_PID_SEEN" > "$lock/pid"
+  "$TEST_REAL_MV" "$@" || exit $?
+  /bin/mkdir "$lock" && printf '%s\n' "$MV_PID_NEW" > "$lock/pid"
+  exit 0
+fi
+exec "$TEST_REAL_MV" "$@"
+SH
 # mkreport FILE UDID: writes a SpringBoard report whose text names the device folder of UDID. UDID - names no device.
 cat > "$stubs/mkreport" <<'SH'
 #!/bin/sh
@@ -215,7 +238,7 @@ fresh() {
     "$work/lock_alive" "$work/lock_pid_seen" "$work/lock_simctl" "$work/devices.json" \
     "$work/cmd_udid" "$work/cmd_args" "$work/cmd_lock_seen" "$work/cmd_lock_pid"
   rm -rf "$work/home/.claude" "$crashdir" "$work/sweep_root"
-  rm -f "$work/lease_at_boot" "$work/lease_at_xc" "$work/status_at_xc" "$work/loadavg" "$work/load_reads" "$work/boot_started" "$work/boot_release"
+  rm -f "$work/lease_at_boot" "$work/lease_at_xc" "$work/status_at_xc" "$work/loadavg" "$work/load_reads" "$work/boot_started" "$work/boot_release" "$work/mv_hooked"
   /bin/mkdir -p "$crashdir" "$work/home"
 }
 # start_tool [VAR=value...]: starts the tool in its own process group, behind a hard timeout. Its stdout and stderr go
@@ -1053,6 +1076,81 @@ need "exit code" rc_is 0
 need "status during the run names slot other for this pid" status_at_xc_has other "$tool_pid"
 need "status during the run names that Duo's UDID" status_at_xc_udid other "$tool_pid" "$OTHER"
 end_case "84 reuse of a booted Duo not in SLOT_UDID: leased as slot other, its UDID shown in status"
+
+# Cases 85 to 87: the lock. live_pid prints the pid of a sleep that outlives this subshell; the case kills it.
+live_pid() { sh -c 'sleep 600 > /dev/null 2>&1 & echo $!'; }
+# no_nested_dead: no dead-holder folder sits inside the lock folder.
+no_nested_dead() { [ -z "$(ls -d "$lockdir"/*.dead.* 2>/dev/null)" ]; }
+
+fresh; booted "iPhone Duo" $DUO1; ARGS=(-scheme X); start_tool STUB_HANG=1 STUB_HANG_SECS=30
+need "xcodebuild started, so the run holds the lock" poll_for 20 test -e "$work/started"
+new_holder=$(live_pid)
+printf '%s\n' "$new_holder" > "$lockdir/pid"
+need "scope: the pid file names the other pid before the run ends" test "$(cat "$lockdir/pid")" = "$new_holder"
+kill -TERM -- "-$tool_pid" 2>/dev/null
+finish_tool
+ARGS=(-scheme X)
+need "the lock folder is still there after the run's cleanup" test -d "$lockdir"
+need "the pid file still names the other pid" test "$(cat "$lockdir/pid" 2>/dev/null)" = "$new_holder"
+kill "$new_holder" 2>/dev/null
+end_case "85 cleanup takes only its own lock: a pid file that names another live pid is left, with its folder"
+
+# The take-over window: the lock is taken by a dead holder's move, a live pid takes it before the put-back, and another
+# run re-creates it in between. The put-back must not nest the moved folder inside the new lock.
+dead=$(dead_pid); seen_pid=$(live_pid); new_pid=$(live_pid)
+fresh; hold_lock "$dead"; run MV_HOOK=takeover MV_PID_SEEN=$seen_pid MV_PID_NEW=$new_pid
+need "the take-over window opened: the mv hook ran" test -e "$work/mv_hooked"
+need "no dead-holder folder is nested in the lock" no_nested_dead
+need "the lock's pid file names the live holder" test "$(cat "$lockdir/pid" 2>/dev/null)" = "$new_pid"
+need "exit 1: the live holder keeps the lock" rc_is 1
+kill "$seen_pid" "$new_pid" 2>/dev/null
+end_case "86 take-over put-back: a lock re-created in the window is not nested, and its live holder keeps it"
+
+# EPERM: a live holder that kill -0 cannot signal is waited for, not taken over. As root, the holder is a root process and
+# the tool runs as nobody. Otherwise the holder is pid 1, which belongs to root, and the tool runs as this user.
+eperm_user= eperm_holder= eperm_reason=
+if [[ $(id -u) -eq 0 ]]; then
+  eperm_user=nobody
+  if id nobody >/dev/null 2>&1 && command -v setpriv >/dev/null 2>&1; then eperm_holder=$(live_pid)
+  else eperm_reason="this is root, with no nobody user or no setpriv to run the tool as"; fi
+else
+  eperm_holder=1
+fi
+# as_eperm_user CMD...: runs CMD as the user that cannot signal the holder.
+as_eperm_user() { if [[ -n $eperm_user ]]; then setpriv --reuid="$eperm_user" --regid=nogroup --clear-groups "$@"; else "$@"; fi; }
+if [[ -z $eperm_reason ]]; then
+  probe=$(as_eperm_user sh -c 'kill -0 "$1" 2>&1' sh "$eperm_holder")
+  [[ $probe == *"not permitted"* ]] || eperm_reason="kill -0 from this user does not give EPERM on pid $eperm_holder"
+fi
+if [[ -n $eperm_reason ]]; then
+  skip_case "87 EPERM from kill -0: a live holder this user cannot signal is waited for" "$eperm_reason"
+else
+  fresh
+  eperm_tree=$work/eperm
+  /bin/mkdir -p "$eperm_tree/bin" "$eperm_tree/hooks"
+  cp "$script" "$eperm_tree/bin/sim-test"; cp "$sim_lease" "$eperm_tree/bin/sim-lease"; cp "$root/hooks/_nowindow.py" "$eperm_tree/hooks/"
+  chmod +x "$eperm_tree/bin/sim-test" "$eperm_tree/bin/sim-lease"
+  /bin/mkdir -p "$lockdir"; printf '%s\n' "$eperm_holder" > "$lockdir/pid"
+  saved_script=$script
+  if [[ -n $eperm_user ]]; then
+    chown -R "$eperm_user" "$work/home"
+    printf '#!/bin/sh\nexec setpriv --reuid=%s --regid=nogroup --clear-groups "%s" "$@"\n' "$eperm_user" \
+      "$eperm_tree/bin/sim-test" > "$eperm_tree/as_user"
+    chmod +x "$eperm_tree/as_user"; script=$eperm_tree/as_user
+  else
+    script=$eperm_tree/bin/sim-test
+  fi
+  ARGS=(-scheme X); run; ARGS=(-scheme X)
+  script=$saved_script
+  need "the lock folder is still there: the run waited for the holder" test -d "$lockdir"
+  need "the pid file still names the holder" test "$(cat "$lockdir/pid" 2>/dev/null)" = "$eperm_holder"
+  need "no dead-holder folder is left beside the lock" no_dead_folder
+  need "exit 1 at the lock wait limit" rc_is 1
+  need "stderr names the holder's pid" mentions_err "$eperm_holder"
+  [[ -n $eperm_user ]] && chown -R root "$work/home"
+  end_case "87 EPERM from kill -0: a live holder this user cannot signal is waited for, not taken over"
+fi
+[[ -n $eperm_user && -n $eperm_holder ]] && kill "$eperm_holder" 2>/dev/null
 
 echo "sim-test suite: $pass_n passed, $fail_n failed${failed:+: $failed}"
 exit $fail
