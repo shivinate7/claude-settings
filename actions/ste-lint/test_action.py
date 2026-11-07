@@ -874,6 +874,8 @@ def one_home_clone(d):
     scratch_clone(cs)
     write(cs, "CLAUDE.md", "**Briefs.** %s<!-- rule:brief-contents -->\n" % ONE_HOME_RULE)
     write(cs, "skills/README.md", "# Skills\n")
+    git(cs, "add", "-A")
+    git(cs, "commit", "-qm", "rules")  # a rule reader that reads HEAD sees the sentence, not the fixture's first line
     return cs
 
 
