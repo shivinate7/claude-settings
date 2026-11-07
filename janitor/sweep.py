@@ -720,6 +720,33 @@ def _is_agent_worktree(where: str, path: str) -> bool:
     return parent == norm(os.path.join(where, ".claude", "worktrees")) and name.startswith("agent-")
 
 
+_RED_RUN_NAME_RE = re.compile(r"^agent-(.+)-red$")
+
+
+def _red_run_owner_keep(where: str, path: str):
+    """A keep decision for a red-run checkout whose owner tree is still registered, else None
+    (when-a-worktree-may-be-removed). A red-run checkout is the test-author's
+    `.claude/worktrees/agent-<id>-red`; its owner tree is `.claude/worktrees/agent-<id>`. Exact
+    name match only: `agent-<id>-redx` and a checkout whose owner tree is gone follow the other
+    rules. A failed worktree list keeps. One home: the agent-end reap and the session-end sweep
+    both ask it."""
+    if not _is_agent_worktree(where, path):
+        return None
+    named = _RED_RUN_NAME_RE.match(os.path.basename(os.path.normpath(path)))
+    if not named:
+        return None
+    folder = os.path.dirname(os.path.normpath(path))
+    owner_name = "agent-" + named.group(1)
+    owner = os.path.normcase(os.path.realpath(os.path.join(folder, owner_name)))
+    entries = parse_worktree_list(where)
+    if entries is None:
+        return {"path": path, "action": "keep", "reason": "unreadable-subject"}
+    if any(os.path.normcase(os.path.realpath(e["path"])) == owner for e in entries):
+        return {"path": path, "action": "keep",
+                "reason": "red-run checkout: owner tree %s is still registered" % owner_name}
+    return None
+
+
 def _agent_rule_keep(kept: dict, idle):
     """The agent rule (when-a-worktree-may-be-removed). It ADDS removals to the older unattended
     rulings and never narrows them. The caller runs it for a tree under `.claude/worktrees/agent-*`
@@ -781,6 +808,10 @@ def decide_worktree(where: str, entry: dict, attended: bool = False, agent_rule:
         return {"path": path, "action": "keep", "reason": "unreadable-subject"}
     if dirty:
         return {"path": path, "action": "keep", "reason": "dirty"}
+    if not attended:  # a person's run (attended) is theirs to judge
+        red_kept = _red_run_owner_keep(where, path)
+        if red_kept:
+            return red_kept
     # The lock comes from the entry `parse_worktree_list` read once for the pass, not a fresh
     # `worktree list` per tree (measured: one of the reads that made a sweep outrun its 25 s).
     # `remove_worktree` still has git refuse a locked tree.
@@ -872,6 +903,9 @@ def decide_agent_end_worktree(where: str, entry: dict, min_idle=None):
         if idle < min_idle:
             return {"path": path, "action": "keep",
                     "reason": "recently-active: git activity %d minutes ago" % (idle // 60)}
+    red_kept = _red_run_owner_keep(where, path)
+    if red_kept:
+        return red_kept
     _restore_cut_short(where, entry)
     decision = decide_worktree(where, entry, attended=True, own_lock_rule=False)
     if decision["action"] != "reap":
