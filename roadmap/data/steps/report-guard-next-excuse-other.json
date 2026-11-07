@@ -1,0 +1,10 @@
+{
+  "title": "The report guard counts an excuse under Next as OTHER",
+  "phase": "now",
+  "status": "ready",
+  "order": 0.16,
+  "owner": "coordinator",
+  "why": "Coordinator, 14:15 CST Nov 7.",
+  "note": "Built in #1438.",
+  "updatedAt": "2026-11-07T14:14:00-06:00"
+}

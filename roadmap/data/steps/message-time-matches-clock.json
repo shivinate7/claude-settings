@@ -5,7 +5,7 @@
   "order": 0.95,
   "owner": "coordinator",
   "why": "Coordinator, 13:51 CST Nov 7: triage 6 stamped two messages 13:56 and 13:58 CST while the clock read 13:49-13:50 CST. Its roadmap updatedAt fields ran ahead the same way.",
-  "note": "The guard compares each HH:MM CST stamp in a send_message body with the clock. Lane named by the coordinator. Built in #1447 (coordinator, 14:15 CST Nov 7).",
+  "note": "The guard compares each HH:MM CST stamp in a send_message body with the clock. Lane named by the coordinator. Built in #1447 (coordinator, 14:15 CST Nov 7). Second slip, 14:14 CST: triage stamped page item 364 and a step note 14:16 CST. So the check should also cover page item and roadmap step writes, not only send_message bodies.",
   "lane": "coordinator",
   "updatedAt": "2026-11-07T14:14:00-06:00"
 }
