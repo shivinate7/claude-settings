@@ -15,6 +15,7 @@ Run with:  python3 lint/test_ci_scope.py -v
 """
 import ast
 import os
+import posixpath
 import shutil
 import subprocess
 import tempfile
@@ -25,6 +26,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py)
 SCRIPT = os.environ.get("CI_SCOPE") or os.path.join(HERE, "..", ".github", "scripts", "ci-scope.sh")
+REPO = os.path.abspath(os.path.join(HERE, ".."))
 JOB_FLAGS = ["checks_windows", "checks_windows_merge", "checks_windows_rest", "checks_macos", "shell_macos", "pointer_windows"]
 STEP_FLAGS = ["code", "guard", "sweep", "mods", "shoot"]
 # Flags derived from others, kept out of JOB_FLAGS so the exact-set cases below stay about the base flags:
@@ -54,6 +56,189 @@ def family_files():
         if isinstance(node, ast.Assign) and any(isinstance(t, ast.Name) and t.id == "_FAMILY_MODULES" for t in node.targets):
             return [f"hooks/{elt.value}.py" for elt in node.value.elts]
     raise AssertionError("hooks/guard.py has no _FAMILY_MODULES tuple")
+
+
+# The files the guard suite loads, derived from the code of GUARD_SEEDS, not listed by hand. A file is in the closure when
+# a file in it imports it, or loads it by a path (_refs reads each file's syntax tree):
+#   import x, from x import y, importlib.import_module("x"): x is the basename of a repo .py file;
+#   os.path.join whose literal segments have a `..`, or whose run-time root is the file's own folder (__file__, _HERE):
+#     the file of that name in that folder;
+#   os.path.join of literal segments with no run-time root: a repo path, from the repo root;
+#   a spec_from_file_location or SourceFileLoader path: its Name read through to the os.path.join assigned to it.
+# Not followed: a join with a run-time root and literal segments. In a product module it is named in LOAD_EXCEPTIONS; in a
+# test module it is a fixture path inside a temp folder, and is not named. A loader path with no literal repo file is named.
+GUARD_SEEDS = ("hooks/guard.py", "hooks/test_guard.py")
+# Each load guard_closure finds but does not follow, as "file:line": why. A line that moves makes its entry stale.
+LOAD_EXCEPTIONS = {
+    "hooks/decision_watch.py:88": "GUARD_UNDER_TEST, a test override of guard.py's path (guard.py is in the closure by import)",
+    "hooks/guard_merge.py:169": "the merge tool at a clone root, MERGE_TOOL_REL (guard_merge.py:108): merge/merge.py is in the closure",
+    "hooks/guard_merge.py:239": "a stamp read from a clone root found by walking up: a fixture root in the suite, the checkout in a real run",
+    "hooks/precompact_handoff.py:152": "the installed prompt under config_dir(), the installer's copy, not the repo's file",
+    "hooks/test_guard.py:3345": "a sibling of GUARD, hooks/ by default: git_reads.py is in the closure by import",
+    "hooks/test_guard.py:4598": "a sibling of GUARD: guard_rm_var.py is in the closure by import",
+    "hooks/test_guard.py:13932": "a sibling of GUARD: own_session.py is in the closure by import",
+    "hooks/test_guard.py:19553": "GUARD itself: guard.py, or the GUARD_UNDER_TEST copy, which is in the closure by import",
+    "hooks/test_guard.py:25400": "READ_CHECK: reread_check.py by default, which is in the closure by import",
+    "hooks/test_guard.py:27508": "a sibling of GUARD: shared_names.py is in the closure by import",
+    "lint/check_silent_undo.py:581": "a checkout's hook_catalog.py, the oracle of the silent-undo check: in the closure by merge.py's import",
+    "lint/rule_audit.py:92": "ROOT, the repo root by definition, a fixture root in the suite: lint/rule_mechanisms.json is not in the closure",
+    "lint/rule_audit.py:93": "ROOT: .github/workflows/checks.yml, already a fail-safe path in ci-scope.sh",
+    "lint/rule_audit.py:405": "ROOT: hooks/config_watch.py is not in the closure",
+    "lint/stale_cites.py:293": "PY_FACTS: skills/plain-english-map/scripts/lib/py-facts.py is in the closure by a `..` load",
+    "merge/merge.py:1702": "the checkout's own workflow, .github/workflows/checks.yml, already a fail-safe path in ci-scope.sh",
+    "skills/waiting-page/stale_pages.py:259": "the user's ~/.claude/CLAUDE.md, not this repo's .claude/CLAUDE.md",
+    "merge/merge.py:3250": "IDLE_BUILD: skills/roadmap/build.py is in the closure by a `..` load",
+}
+_CLOSURE = {}
+
+
+def _repo_files():
+    """Every file under the repo, as '/' paths. Skips .git, build folders, and .claude/worktrees (each worktree copies the repo)."""
+    out = []
+    worktrees = os.path.join(REPO, ".claude", "worktrees")
+    for dirpath, dirnames, filenames in os.walk(REPO):
+        dirnames[:] = [d for d in dirnames if d not in (".git", "node_modules", "__pycache__")
+                       and os.path.join(dirpath, d) != worktrees]
+        out += [os.path.relpath(os.path.join(dirpath, n), REPO).replace(os.sep, "/") for n in filenames]
+    return out
+
+
+def _callee(call):
+    """The dotted name a call is made through, such as `importlib.import_module`; '' when it is not a plain name."""
+    parts, f = [], call.func
+    while isinstance(f, ast.Attribute):
+        parts.append(f.attr)
+        f = f.value
+    if not isinstance(f, ast.Name):
+        return ""
+    return ".".join([f.id] + parts[::-1])
+
+
+def _join_segments(call):
+    """The literal segments of an os.path.join call after its last run-time argument, split on '/', and whether a
+    run-time argument came before them (a run-time root)."""
+    segs, lead = [], False
+    for a in call.args:
+        if isinstance(a, ast.Constant) and isinstance(a.value, str):
+            segs.append(a.value)
+        else:
+            segs, lead = [], True
+    return [p for s in segs for p in s.split("/") if p], lead
+
+
+def _loader_joins(arg, call, tree, parents):
+    """The os.path.join calls a loader's path argument can hold: the argument itself, or the joins assigned to its Name
+    in the enclosing function (the module when there is none)."""
+    if isinstance(arg, ast.Call) and _callee(arg) == "os.path.join":
+        return [arg]
+    if not isinstance(arg, ast.Name):
+        return []
+    scope, node = tree, call
+    while node in parents:
+        node = parents[node]
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            scope = node
+            break
+    return [n.value for n in ast.walk(scope) if isinstance(n, ast.Assign) and isinstance(n.value, ast.Call)
+            and _callee(n.value) == "os.path.join" and any(isinstance(t, ast.Name) and t.id == arg.id for t in n.targets)]
+
+
+def _uses_file(node):
+    return any(isinstance(n, ast.Name) and n.id == "__file__" for n in ast.walk(node))
+
+
+def _join_file(f, call, tracked, own_names):
+    """-> (path, kind) for an os.path.join: kind 'dir' when the path is read from the loading file's folder (a `..`
+    segment, or a run-time root that is that folder: an expression built from __file__, or a module-level Name in
+    own_names bound to one, such as guard.py's _HERE), 'root' when it is a repo path from the repo root with no run-time
+    root, 'run-time' when a run-time root comes before a repo path (a checkout or a fixture), or (None, None)."""
+    segs, lead = _join_segments(call)
+    if not segs:
+        return None, None
+    first = call.args[0]
+    own = _uses_file(first) or (isinstance(first, ast.Name) and first.id in own_names)
+    if ".." in segs or (lead and own):
+        c = posixpath.normpath(posixpath.join(posixpath.dirname(f), *segs))
+        if c in tracked:
+            return c, "dir"
+    if len(segs) >= 2:
+        c = posixpath.normpath("/".join(segs))
+        if c in tracked:
+            return c, "run-time" if lead else "root"
+    return None, None
+
+
+def _refs(f, tree, tracked):
+    """What one repo file loads, from its syntax tree: (module names it imports, repo files it loads by path, loader
+    targets, loads it does not follow as (line, what))."""
+    parents = {c: n for n in ast.walk(tree) for c in ast.iter_child_nodes(n)}
+    own_names = {t.id for st in tree.body if isinstance(st, ast.Assign) and _uses_file(st.value)
+                 for t in st.targets if isinstance(t, ast.Name)}
+    test = posixpath.basename(f).startswith("test_")
+    modules, paths, loads, unfollowed = set(), set(), set(), []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            modules.update(a.name.split(".")[0] for a in node.names)
+        elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
+            modules.add(node.module.split(".")[0])
+        elif isinstance(node, ast.Call):
+            name = _callee(node)
+            if name == "importlib.import_module":
+                if node.args and isinstance(node.args[0], ast.Constant) and isinstance(node.args[0].value, str):
+                    modules.add(node.args[0].value.split(".")[0])
+                else:
+                    unfollowed.append((node.lineno, "importlib.import_module of a name built at run time"))
+            elif name == "os.path.join":
+                c, kind = _join_file(f, node, tracked, own_names)
+                if kind == "run-time":
+                    if not test:  # a test's join under a run-time root is a fixture path, not a repo load
+                        unfollowed.append((node.lineno, f"os.path.join with a run-time root, then {c}"))
+                elif c:
+                    paths.add(c)
+            elif name.endswith("spec_from_file_location") or name.endswith("SourceFileLoader"):
+                arg = node.args[1] if len(node.args) > 1 else None
+                hits, named = [], False
+                for j in _loader_joins(arg, node, tree, parents):
+                    c, kind = _join_file(f, j, tracked, own_names)
+                    if kind == "run-time":
+                        named = True
+                        unfollowed.append((node.lineno, f"a loader path with a run-time root, then {c}"))
+                    elif c:
+                        hits.append(c)
+                loads.update(hits)
+                if not hits and not named:
+                    unfollowed.append((node.lineno, "a loader path with no literal repo file"))
+    return modules, paths, loads, unfollowed
+
+
+def guard_closure():
+    """-> (files, unfollowed): the repo files the guard suite loads, sorted, and the loads not followed, as
+    (file, line, what). Read from the code of GUARD_SEEDS (see above), once per run."""
+    if not _CLOSURE:
+        tracked = set(_repo_files())
+        by_name = {}
+        for p in tracked:
+            if p.endswith(".py"):
+                by_name.setdefault(posixpath.basename(p)[:-3], []).append(p)
+        files, unfollowed, parsed = set(), [], set()
+        todo = [(s, True) for s in GUARD_SEEDS]
+        while todo:
+            f, is_python = todo.pop()
+            if f not in tracked:
+                raise AssertionError(f"{f} is a guard seed or a load target, and the repo does not have it")
+            files.add(f)
+            if f in parsed or not is_python:
+                continue
+            parsed.add(f)
+            with open(os.path.join(REPO, f), encoding="utf-8") as h:
+                tree = ast.parse(h.read(), filename=f)
+            modules, paths, loads, here = _refs(f, tree, tracked)
+            todo += [(c, True) for m in modules for c in by_name.get(m, [])]
+            todo += [(c, c.endswith(".py")) for c in paths]
+            todo += [(c, True) for c in loads]
+            unfollowed += [(f, line, what) for line, what in here]
+        _CLOSURE.update(files=sorted(files), unfollowed=sorted(unfollowed))
+    return _CLOSURE["files"], _CLOSURE["unfollowed"]
 
 
 def git(cwd, *a):
@@ -478,20 +663,26 @@ class GuardWindowsSplit(unittest.TestCase):
                 self.assertEqual(got.get(name), "false", f"{name} is {got.get(name)!r} on a docs-only pull_request, want 'false'")
 
     def test_the_slice_is_guard_on_and_full_off_on_every_kind_of_path(self):
-        # One path of each kind, on a pull_request and on a push: a family module, a non-family guard hook, a guard test
-        # file, a guard-arm module, a module outside the guard, and a docs file.
-        paths = [["hooks/guard.py"], ["hooks/daily_note.py"], ["hooks/guard_test_x.py"], ["lint/guard_log_report.py"],
-                 ["merge/merge.py"], ["README.md"]]
-        for p in paths:
-            for event in ("pull_request", "push"):
-                with self.subTest(paths=p, event=event):
-                    got = run(p, event=event)
-                    full = got.get(GUARD_FULL)
-                    self.assertIn(full, ("true", "false"), f"{GUARD_FULL} is {full!r} for {p} on {event}")
-                    want = "true" if got["guard"] == "true" and full == "false" else "false"
-                    self.assertEqual(got.get(GUARD_SLICE), want,
-                                     f"{GUARD_SLICE} is {got.get(GUARD_SLICE)!r} for {p} on {event}, want {want!r}: "
-                                     "the slice is guard on and full off")
+        # One path of each kind, with its three flags on a pull_request as absolute values: a family module, a non-family
+        # guard hook, a guard test file, a guard-arm module, a guard load outside the guard (merge/merge.py), and a docs file.
+        # A push turns the full shards on and the slice off, for each path.
+        want = {  # path: (guard, full, slice) on a pull_request
+            "hooks/guard.py": ("true", "true", "false"),
+            "hooks/daily_note.py": ("true", "false", "true"),
+            "hooks/guard_test_x.py": ("true", "false", "true"),
+            "lint/guard_log_report.py": ("true", "true", "false"),
+            "merge/merge.py": ("true", "true", "false"),
+            "README.md": ("false", "false", "false"),
+        }
+        for p, (guard, full, slice_) in want.items():
+            with self.subTest(path=p, event="pull_request"):
+                got = run([p])
+                self.assertEqual((got["guard"], got.get(GUARD_FULL), got.get(GUARD_SLICE)), (guard, full, slice_),
+                                 f"guard, {GUARD_FULL}, {GUARD_SLICE} for {p} on a pull_request")
+            with self.subTest(path=p, event="push"):
+                got = run([p], event="push")
+                self.assertEqual((got.get(GUARD_FULL), got.get(GUARD_SLICE)), ("true", "false"),
+                                 f"{GUARD_FULL}, {GUARD_SLICE} for {p} on a push")
 
     def test_push_schedule_dispatch_and_an_unreadable_diff_run_the_full_guard_and_not_the_slice(self):
         runs = [(f"event {ev}", run(["README.md"], event=ev)) for ev in ("push", "schedule", "workflow_dispatch")]
@@ -528,6 +719,38 @@ class GuardWindowsSplit(unittest.TestCase):
             for p in family_files():
                 with self.subTest(path=p, edit=edit):
                     self.assertEqual(run([p], existing=[p] if edit else ()), want, f"{p}: its outputs differ from guard.py's")
+
+
+@unittest.skipUnless(BASH, "bash not on PATH")
+class GuardClosure(unittest.TestCase):
+    """The files the guard suite loads (guard_closure, read from the code of its two seeds) turn the full Windows guard
+    shards on for a pull_request. A loaded file that the scope leaves to the slice runs no full shard."""
+
+    def test_every_file_the_guard_suite_loads_turns_the_full_windows_guard_on(self):
+        # A new file only: the full-shard flag reads the path, and the one rule that reads whether a file is new (landed
+        # dirs) sets no full flag, so an edit would run the same arm.
+        files, _ = guard_closure()
+        self.assertTrue(set(GUARD_SEEDS) <= set(files), f"the closure lacks a seed: {files}")
+        for p in files:
+            with self.subTest(path=p):
+                got = run([p])
+                self.assertEqual(got.get(GUARD_FULL), "true",
+                                 f"{GUARD_FULL} is {got.get(GUARD_FULL)!r} for {p}, want 'true': the guard suite loads it")
+
+    def test_every_load_the_closure_does_not_follow_is_named_in_load_exceptions(self):
+        _, unfollowed = guard_closure()
+        found = {f"{f}:{line}" for f, line, _ in unfollowed}
+        missing, stale = sorted(found - set(LOAD_EXCEPTIONS)), sorted(set(LOAD_EXCEPTIONS) - found)
+        self.assertEqual((missing, stale), ([], []),
+                         f"LOAD_EXCEPTIONS is out of step: unnamed loads {missing}, entries with no such load {stale}")
+
+    def test_the_derivation_reads_each_kind_of_load(self):
+        # One named load of each kind, so a derivation that finds nothing fails here: an import (guard_kill imports
+        # _nowindow), a literal repo path (guard.py's RECORD_LAYOUT_FILE), and a loader path (guard.py's sim-lease load).
+        files, _ = guard_closure()
+        for p in ("hooks/_nowindow.py", "lint/layout.json", "bin/sim-lease"):
+            with self.subTest(path=p):
+                self.assertIn(p, files)
 
 
 @unittest.skipUnless(BASH, "bash not on PATH")
