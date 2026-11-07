@@ -693,7 +693,9 @@ COMMAND_MARKS = {";", "|", "&", "$(", "(", ")", "`"}
 PULL_REQUEST = re.compile(r"^\s*(on:\s*\[?[^\n]*\bpull_request\b|pull_request\s*:)", re.M)
 PRINTERS = {"echo", "printf"}  # a command that prints its words and runs none of them
 STEP_NAME = re.compile(r"^\s*(-\s+)?name\s*:")  # a workflow step's name is text, as in `- name: xcodebuild test (slow)`
-MAKE_VAR = re.compile(r"^([A-Za-z_][\w.-]*)\s*(?:[:?+]?=)\s*(.*)$")
+MAKE_VAR = re.compile(r"^(?:(?:export|override)\s+)*([A-Za-z_][\w.-]*)\s*(::=|:=|\?=|\+=|=)\s*(.*)$")
+MAKE_CONTINUATION = re.compile(r"\\\n[ \t]*")
+MAKE_RESOLVE_PASSES = 8  # caps a chain of variables, and a variable that names itself
 MAKE_REF = re.compile(r"\$[({]([A-Za-z_][\w.-]*)[)}]")
 DEV_TEAM = re.compile(r"\bDEVELOPMENT_TEAM\s*[:=]\s*[\"']?[A-Z0-9]")
 
@@ -769,15 +771,27 @@ def xcodebuild_runs(text):
 
 
 def expand_make_vars(text):
-    """`text` of a Makefile with each `$(NAME)` or `${NAME}` that the Makefile sets (`=`, `:=`, `?=`, `+=`) replaced
-    by its value, so a flag passed through a variable reads as the flag. Two passes resolve a variable in a variable."""
+    """`text` of a Makefile with each `$(NAME)` or `${NAME}` that the Makefile sets replaced by its value, so a flag
+    passed through a variable reads as the flag. Make's rules hold: a later `=`, `:=` or `::=` replaces, `+=` appends,
+    `?=` applies only when the variable is unset, a backslash-continued line is one line, and an `export` or
+    `override` prefix is read. A chain of variables resolves to a fixed point, capped so a variable that names itself
+    ends. Not read: a target-specific `target: VAR = value`, a `define` block, and `$(VAR:a=b)` substitution."""
     values = {}
-    for line in text.splitlines():
+    for line in MAKE_CONTINUATION.sub(" ", text).splitlines():
         match = MAKE_VAR.match(line)
-        if match:
-            values[match.group(1)] = (values.get(match.group(1), "") + " " + match.group(2)).strip()
-    for _ in range(2):
-        text = MAKE_REF.sub(lambda m: values.get(m.group(1), m.group(0)), text)
+        if not match:
+            continue
+        name, op, value = match.groups()
+        if op == "?=" and name in values:
+            continue
+        if op == "+=" and name in values:
+            value = values[name] + " " + value
+        values[name] = value.strip()
+    for _ in range(MAKE_RESOLVE_PASSES):
+        resolved = MAKE_REF.sub(lambda m: values.get(m.group(1), m.group(0)), text)
+        if resolved == text:
+            break
+        text = resolved
     return text
 
 
