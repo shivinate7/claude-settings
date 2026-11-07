@@ -6,8 +6,10 @@
 // A request is { file, symbol } for a value. Internal callers add `op`: 'defines' (is the symbol bound at module level)
 // 'uses' (does `file` import the tracked file `target`, and refer to `symbol`) or 'loads' (the tracked files that `file` loads at runtime, as
 // { imports, named }: the files it imports without a type-only import, and the files a string in its code equals, from its folder or the root.
-// A join call whose pieces after the first are string literals counts as one such string: path.join, path.posix.join, path.resolve, or a bare
-// join or resolve imported from 'path'. An anchor that is a temp folder, or a piece that a resolve call resets on, makes it count as none).
+// A join call whose pieces after the first are string literals names a file too: path.join, path.posix.join, path.resolve, or a bare join or
+// resolve imported from 'path'. A literal anchor makes it one more such string. Any other anchor must be a known place: `__dirname`, or a
+// top-level const bound to it, through joins of literal pieces too. The join then resolves from that place only. Any other anchor, or a piece
+// that a resolve call resets on, makes it name none).
 // A result is { file, symbol, ok: true, value } or { file, symbol, ok: false, reason, gone? }. `gone: true` means the file was
 // read and the symbol is not in it. A failure without `gone` is unknown: the caller must never read it as a pass.
 import { spawnSync } from 'node:child_process';
@@ -159,62 +161,87 @@ const dottedText = (x) => {
 };
 const isStringPiece = (x) => ts.isStringLiteral(x) || ts.isNoSubstitutionTemplateLiteral(x);
 
-// A temp folder is no part of the repository: a call to `os.tmpdir()` or `fs.mkdtemp(...)` / `fs.mkdtempSync(...)` (matched by the last name of the
-// callee, so `tmpdir()` from a destructured import counts), and a name that the function holding the use binds to one (`const d = fs.mkdtempSync(...)`).
-const TMP_CALLS = new Set(['tmpdir', 'mkdtemp', 'mkdtempSync']);
-const isTmpCall = (x) => {
-  while (ts.isParenthesizedExpression(x) || ts.isAwaitExpression(x)) x = x.expression;
-  if (!ts.isCallExpression(x)) return false;
-  const e = x.expression;
-  return (ts.isIdentifier(e) && TMP_CALLS.has(e.text)) || (ts.isPropertyAccessExpression(e) && TMP_CALLS.has(e.name.text));
-};
-// The names that `scope` (a function or the file) binds to a temp folder, not counting a nested function's own names.
-const tmpBound = (scope, outer) => {
-  const found = new Set(outer);
+// How many times the file declares each name, in any scope: a variable, a parameter, a destructured name, a function, a class, an
+// enum, a namespace or an import. A top-level `const` declared once holds the same value everywhere the file reads it.
+const declarationCounts = (sf) => {
+  const counts = new Map();
   const visit = (n) => {
-    if (n !== scope && (ts.isFunctionLike(n) || ts.isClassLike(n))) return;
-    if (ts.isVariableDeclaration(n) && ts.isIdentifier(n.name) && n.initializer && (isTmpCall(n.initializer) || (ts.isIdentifier(n.initializer) && found.has(n.initializer.text)))) found.add(n.name.text);
+    const named = ts.isVariableDeclaration(n) || ts.isParameter(n) || ts.isBindingElement(n) || ts.isFunctionDeclaration(n) || ts.isFunctionExpression(n)
+      || ts.isClassDeclaration(n) || ts.isClassExpression(n) || ts.isEnumDeclaration(n) || ts.isModuleDeclaration(n) || ts.isImportClause(n)
+      || ts.isNamespaceImport(n) || ts.isImportSpecifier(n) || ts.isImportEqualsDeclaration(n);
+    if (named && n.name && ts.isIdentifier(n.name)) counts.set(n.name.text, (counts.get(n.name.text) ?? 0) + 1);
     ts.forEachChild(n, visit);
   };
-  visit(scope);
-  return found;
+  visit(sf);
+  return counts;
 };
 
-// The path that each join call names, as one string: `path.join`, `path.resolve` and `path.posix.join` on a binding of 'path' or 'node:path',
-// and a bare `join` or `resolve` imported from it. Only the first argument (the anchor) may be anything but a plain string literal. A literal
-// anchor is the first piece. A later piece that is no literal (a name, a template with a substitution, a spread) drops the call, and so does a
-// call with no piece after the anchor, and so does an anchor that is a temp folder (isTmpCall, or a name bound to one in the same function).
-// A piece that starts with `/` drops only a `resolve` call, which resets to it; `join` keeps it (`path.join('a', '/b')` is `a/b`), so the
-// join's slash is dropped from the string.
+// The path that each join call names: `path.join`, `path.resolve` and `path.posix.join` on a binding of 'path' or 'node:path', and a bare
+// `join` or `resolve` imported from it. Every argument after the first (the anchor) is a plain string literal, or the call names nothing:
+// a name, a template with a substitution or a spread drops it, and so does a call with no piece after the anchor. A piece that starts with
+// `/` drops a `resolve` call, which resets to it; `join` keeps it (`path.join('a', '/b')` is `a/b`).
+// A literal anchor is the first piece, and the joined text goes to `strings`, tried from the file's folder, then the root.
+// Any other anchor must be a known place (placeOf), and the join resolved from it goes to `places`, tried from there only.
 const joinedStrings = (sf, file, files) => {
   const named = new Map();
   const modules = targetAliases(sf, file, PATH_MODULE, files, named);
   const callees = new Map();
   for (const m of modules) for (const f of ['join', 'resolve', 'posix.join']) callees.set(`${m}.${f}`, f !== 'resolve');
   for (const [local, imported] of named) if (imported === 'join' || imported === 'resolve') callees.set(local, imported === 'join');
-  const out = [];
-  const visit = (n, tmp) => {
-    if (ts.isFunctionLike(n)) tmp = tmpBound(n, tmp);
-    if (ts.isCallExpression(n) && n.arguments.length > 1 && callees.has(dottedText(n.expression))) {
-      const keepsSlash = callees.get(dottedText(n.expression));
-      const [anchor, ...rest] = n.arguments;
-      const literalAnchor = isStringPiece(anchor);
-      const tmpAnchor = (ts.isIdentifier(anchor) && tmp.has(anchor.text)) || isTmpCall(anchor);
-      const pieces = literalAnchor ? [anchor, ...rest] : rest;
-      if (!tmpAnchor && pieces.every(isStringPiece) && (keepsSlash || !pieces.some((p) => p.text.startsWith('/')))) {
-        const joined = pieces.map((p) => p.text).join('/');
-        out.push(literalAnchor ? joined : joined.replace(/^\/+/, ''));
+  const strings = [];
+  const places = [];
+  if (!callees.size) return { strings, places };
+  const counts = declarationCounts(sf);
+  const consts = new Map();
+  for (const st of sf.statements) {
+    if (ts.isVariableStatement(st) && st.declarationList.flags & ts.NodeFlags.Const)
+      for (const d of st.declarationList.declarations) if (ts.isIdentifier(d.name) && d.initializer) consts.set(d.name.text, d.initializer);
+  }
+  const inside = (p) => ((q) => (q === '..' || q.startsWith('../') ? null : q))(path.posix.normalize(p));
+  // [anchor, pieces, keepsSlash] of a join call, or null.
+  const split = (n) => {
+    if (!ts.isCallExpression(n) || n.arguments.length < 2 || !callees.has(dottedText(n.expression))) return null;
+    const [anchor, ...rest] = n.arguments;
+    return [anchor, rest, callees.get(dottedText(n.expression))];
+  };
+  const texts = (pieces, keepsSlash) => (pieces.every(isStringPiece) && (keepsSlash || !pieces.some((p) => p.text.startsWith('/'))) ? pieces.map((p) => p.text) : null);
+  // The repo-relative folder that an expression names by static reading, or null: `__dirname` is the file's folder, a join of a known place
+  // with literal pieces is the place it names, and a top-level `const` declared once in the file is the place its value names. Anything else
+  // (an import, a parameter, a `let`, a name set in a hook, a call to a helper, a spread) is no known place.
+  const placeOf = (x, seen) => {
+    while (ts.isParenthesizedExpression(x)) x = x.expression;
+    if (ts.isIdentifier(x)) {
+      if (counts.has(x.text) ? counts.get(x.text) !== 1 || !consts.has(x.text) || seen.has(x.text) : x.text !== '__dirname') return null;
+      return consts.has(x.text) ? placeOf(consts.get(x.text), new Set([...seen, x.text])) : path.posix.dirname(file);
+    }
+    const parts = split(x);
+    if (!parts) return null;
+    const [anchor, rest, keepsSlash] = parts;
+    const from = placeOf(anchor, seen);
+    const tail = texts(rest, keepsSlash);
+    return from === null || tail === null ? null : inside(path.posix.join(from, ...tail));
+  };
+  const visit = (n) => {
+    const parts = split(n);
+    if (parts) {
+      const [anchor, rest, keepsSlash] = parts;
+      if (isStringPiece(anchor)) {
+        const tail = texts([anchor, ...rest], keepsSlash);
+        if (tail) strings.push(tail.join('/'));
+      } else {
+        const p = placeOf(n, new Set());
+        if (p !== null) places.push(p);
       }
     }
-    ts.forEachChild(n, (c) => visit(c, tmp));
+    ts.forEachChild(n, visit);
   };
-  if (callees.size) visit(sf, tmpBound(sf, new Set()));
-  return out;
+  visit(sf);
+  return { strings, places };
 };
 
 // The tracked files that a string in the code equals, from the file's folder or the repository root. A module specifier of an import or
 // an export is no code string, and neither is a type: `import type x from './a.ts'` names a file and loads none.
-// The path of a join (joinedStrings) is one such string.
+// The strings and places of a join (joinedStrings) count too: a string is tried as a code string is, and a place is a path from the root.
 const namedFiles = (sf, file, files) => {
   const folder = path.posix.dirname(file);
   const out = new Set();
@@ -230,7 +257,9 @@ const namedFiles = (sf, file, files) => {
     ts.forEachChild(n, visit);
   };
   visit(sf);
-  for (const s of joinedStrings(sf, file, files)) consider(s);
+  const { strings, places } = joinedStrings(sf, file, files);
+  for (const s of strings) consider(s);
+  for (const p of places) if (p !== file && files.has(p)) out.add(p);
   return [...out].sort();
 };
 

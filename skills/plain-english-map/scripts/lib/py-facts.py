@@ -8,8 +8,10 @@ A request is {"file", "op", "symbol", "target"}:
   op "uses"    whether `file` imports the tracked file `target`, and whether it refers to `symbol`
   op "loads"   the tracked files `file` loads at runtime: {"imports": [path], "named": [path]}. `imports` leaves out an import under
                `if TYPE_CHECKING:`. `named` holds each tracked file that a string in the code equals, from the file's folder or the root.
-               A docstring or a bare string statement is no code string. A join counts as one string: `os.path.join` or `posixpath.join` (named
-               through the file's imports) and a `/` chain, whose pieces after the anchor are plain string literals (see `joined_strings`).
+               A docstring or a bare string statement is no code string. A join names a file too: `os.path.join` or `posixpath.join` (named
+               through the file's imports) and a `/` chain, whose pieces after the anchor are plain string literals. A literal anchor makes it
+               one more code string. Any other anchor must be a known place of the repository, and the join resolves from there only (see
+               `joined_strings`).
 A result is {"ok": true, "value": v} or {"ok": false, "reason": str, "gone": bool}.
 `gone` is true when the file was read and the symbol is not there. Any other failure is unknown, so it has no `gone`.
 The module imports only the standard library and reads files as text, so it runs under `python3 -I`.
@@ -159,21 +161,26 @@ def code_strings(tree):
     return [n.value for n in ast.walk(tree) if isinstance(n, ast.Constant) and isinstance(n.value, str) and id(n) not in skip]
 
 
-JOINS = ("os.path.join", "posixpath.join")
+PATH_FUNCS = {
+    "os.path.join": "join", "posixpath.join": "join",
+    "os.path.dirname": "dirname", "posixpath.dirname": "dirname",
+    "os.path.abspath": "same", "posixpath.abspath": "same", "os.path.realpath": "same", "posixpath.realpath": "same",
+    "pathlib.Path": "same",
+}
 
 
-def join_callees(tree):
-    """Each dotted name that holds `os.path.join` or `posixpath.join` in the file, read from its imports:
-    `import os`, `import os.path as p`, `from os import path`, `from os.path import join as pj`, `import posixpath`."""
-    names = set()
+def path_callees(tree):
+    """Each dotted name that holds a function of PATH_FUNCS in the file, read from its runtime imports, with what it does to a path:
+    `import os`, `import os.path as p`, `from os import path`, `from os.path import join as pj`, `import posixpath`, `from pathlib import Path`."""
+    names = {}
     for module, held in import_bindings(tree, types=False):
         if not held:
             continue
-        for join in JOINS:
-            if join == module:
-                names.add(held)
-            elif join.startswith(module + "."):
-                names.add(held + join[len(module):])
+        for func, does in PATH_FUNCS.items():
+            if func == module:
+                names[held] = does
+            elif func.startswith(module + "."):
+                names[held + func[len(module):]] = does
     return names
 
 
@@ -181,84 +188,128 @@ def is_literal_string(node):
     return isinstance(node, ast.Constant) and isinstance(node.value, str)
 
 
-TMP_NAMES = frozenset(("tmp_path", "tmpdir", "tmp_path_factory"))
-TMP_CALLS = frozenset(("mkdtemp", "TemporaryDirectory", "gettempdir"))
-SCOPES = (ast.Module, ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)
+def binding_counts(tree):
+    """How many times the file binds each name, in any scope: a store, a parameter, an import, a def or class, a `global`, an `except`
+    name or a match capture. A name bound once, at module level, holds the same value in every function that reads it."""
+    counts = {}
+    for node in ast.walk(tree):
+        names = []
+        if isinstance(node, ast.Name) and isinstance(node.ctx, (ast.Store, ast.Del)):
+            names = [node.id]
+        elif isinstance(node, ast.arg):
+            names = [node.arg]
+        elif isinstance(node, (ast.Import, ast.ImportFrom)):
+            names = [a.asname or a.name.split(".")[0] for a in node.names]
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            names = [node.name]
+        elif isinstance(node, (ast.Global, ast.Nonlocal)):
+            names = list(node.names)
+        elif isinstance(node, ast.ExceptHandler) and node.name:
+            names = [node.name]
+        elif type(node).__name__ in ("MatchAs", "MatchStar") and node.name:
+            names = [node.name]
+        elif type(node).__name__ == "MatchMapping" and node.rest:
+            names = [node.rest]
+        for n in names:
+            counts[n] = counts.get(n, 0) + 1
+    return counts
 
 
-def is_tmp_expr(node, tmp):
-    """Whether `node` is a temp folder: a pytest temp fixture name, a call to `tempfile.mkdtemp()`, `TemporaryDirectory()` or `gettempdir()`
-    (the call, not the module it hangs on), or a name in `tmp`. A chain that starts on one reads the temp folder, never the repository."""
-    if isinstance(node, ast.Name):
-        return node.id in TMP_NAMES or node.id in tmp
-    if isinstance(node, ast.Call):
-        dotted = dotted_name(node.func)
-        return dotted is not None and dotted.rsplit(".", 1)[-1] in TMP_CALLS
-    return False
+def inside(path):
+    """`path`, normalized, or None when it climbs out of the repository."""
+    path = posixpath.normpath(path)
+    return None if path == ".." or path.startswith("../") else path
 
 
-def tmp_bound(scope, tmp):
-    """The names that `scope` binds to a temp folder: `d = tempfile.mkdtemp()` and `with TemporaryDirectory() as d`. The walk stops at a nested
-    function, which gets its own pass; a name bound in a function is no temp folder outside it."""
-    found = set(tmp)
-    stack = list(ast.iter_child_nodes(scope))
-    while stack:
-        node = stack.pop()
-        if isinstance(node, SCOPES):
-            continue
-        if isinstance(node, ast.Assign) and is_tmp_expr(node.value, found):
-            found.update(t.id for t in node.targets if isinstance(t, ast.Name))
-        elif isinstance(node, ast.AnnAssign) and node.value is not None and isinstance(node.target, ast.Name) and is_tmp_expr(node.value, found):
-            found.add(node.target.id)
-        elif isinstance(node, (ast.With, ast.AsyncWith)):
-            for item in node.items:
-                if isinstance(item.optional_vars, ast.Name) and is_tmp_expr(item.context_expr, found):
-                    found.add(item.optional_vars.id)
-        stack.extend(ast.iter_child_nodes(node))
-    return found
+def joined_strings(tree, parent):
+    """What each join call or `/` chain names, as (strings, places). Every piece after the first argument (the anchor) is a plain string
+    literal that does not start with `/`, or the call names nothing.
+    A literal anchor is the first piece, and the joined text goes to `strings`, which `named_files` tries from the folder, then the root.
+    Any other anchor must be a known place of the repository (`place`), and the join resolved from it goes to `places`, tried from there only."""
+    callees = path_callees(tree)
+    counts = binding_counts(tree)
+    top = assigned(tree)
+    star = any(isinstance(n, ast.ImportFrom) and any(a.name == "*" for a in n.names) for n in ast.walk(tree))
 
-
-def joined_strings(tree):
-    """The path that each join call or `/` chain names, as one string. Only the first argument (the anchor) may be anything but a plain
-    string literal. A literal anchor is the first piece. A piece after it that is not a literal (a name, an f-string, a star) drops the call,
-    and so does a piece that starts with `/`, and so does a call with no piece after the anchor. So does an anchor that is a temp folder
-    (`is_tmp_expr`), read in the function that holds the call: a temp folder is no part of the repository."""
-    callees = join_callees(tree)
-    inner = {id(n.left) for n in ast.walk(tree) if isinstance(n, ast.BinOp) and isinstance(n.op, ast.Div)}
-    out = []
-    stack = [(tree, frozenset())]
-    while stack:
-        node, tmp = stack.pop()
-        if isinstance(node, SCOPES):
-            tmp = tmp_bound(node, tmp)
-        pieces = None
-        if isinstance(node, ast.Call) and callees and dotted_name(node.func) in callees:
+    def split(node):
+        """(anchor, pieces) of a join call or a `/` chain, or None."""
+        if isinstance(node, ast.Call) and callees.get(dotted_name(node.func)) == "join":
             args = node.args
-            if args and not node.keywords and not any(isinstance(a, ast.Starred) for a in args) and len(args) > 1:
-                pieces = [args[0]] + args[1:]
-                anchor = args[0]
-        elif isinstance(node, ast.BinOp) and isinstance(node.op, ast.Div) and id(node) not in inner:
-            chain, anchor = [], node
-            while isinstance(anchor, ast.BinOp) and isinstance(anchor.op, ast.Div):
-                chain.append(anchor.right)
-                anchor = anchor.left
-            pieces = [anchor] + chain[::-1]
-        if pieces is not None and all(is_literal_string(p) for p in pieces[1:]) and not is_tmp_expr(anchor, tmp):
-            texts = [p.value for p in pieces[1:]]
-            if is_literal_string(anchor):
-                texts.insert(0, anchor.value)
-            if not any(t.startswith("/") for t in texts):
-                out.append("/".join(texts))
-        stack.extend((child, tmp) for child in ast.iter_child_nodes(node))
-    return out
+            if len(args) > 1 and not node.keywords and not any(isinstance(a, ast.Starred) for a in args):
+                return args[0], args[1:]
+        elif isinstance(node, ast.BinOp) and isinstance(node.op, ast.Div):
+            pieces = []
+            while isinstance(node, ast.BinOp) and isinstance(node.op, ast.Div):
+                pieces.append(node.right)
+                node = node.left
+            return node, pieces[::-1]
+        return None
+
+    def texts(pieces):
+        if not all(is_literal_string(p) for p in pieces):
+            return None
+        out = [p.value for p in pieces]
+        return None if any(t.startswith("/") for t in out) else out
+
+    def place(node, seen):
+        """("file" or "dir", repo-relative path) for an expression that names a place of the repository by static reading, or None.
+        `__file__` is the file. `dirname(x)` and `x.parent` go up one folder. `abspath(x)`, `realpath(x)`, `Path(x)`, `x.resolve()` and
+        `x.absolute()` keep x. A join of a folder with literal pieces is a folder. A name bound once in the file, at module level, is the place
+        its value names. Anything else (a parameter, an import, a call to a helper, a name bound in a function) is no known place."""
+        if isinstance(node, ast.Name):
+            if node.id == "__file__":
+                return None if counts.get(node.id) else ("file", parent)
+            if star or node.id in seen or counts.get(node.id) != 1 or top.get(node.id) is None:
+                return None
+            return place(top[node.id], seen | {node.id})
+        if isinstance(node, ast.Attribute) and node.attr == "parent":
+            got = place(node.value, seen)
+            up = got and inside(got[1] + "/..")
+            return ("dir", up) if up else None
+        if isinstance(node, ast.Call) and not node.keywords:
+            if isinstance(node.func, ast.Attribute) and node.func.attr in ("resolve", "absolute") and not node.args:
+                return place(node.func.value, seen)
+            does = callees.get(dotted_name(node.func))
+            if does in ("dirname", "same") and len(node.args) == 1 and not isinstance(node.args[0], ast.Starred):
+                got = place(node.args[0], seen)
+                if got is None or does == "same":
+                    return got
+                up = inside(got[1] + "/..")
+                return ("dir", up) if up else None
+        parts = split(node)
+        if parts is None:
+            return None
+        got, tail = place(parts[0], seen), texts(parts[1])
+        if got is None or got[0] != "dir" or tail is None:
+            return None
+        joined = inside(posixpath.join(got[1], *tail))
+        return ("dir", joined) if joined else None
+
+    inner = {id(n.left) for n in ast.walk(tree) if isinstance(n, ast.BinOp) and isinstance(n.op, ast.Div)}
+    strings, places = [], []
+    for node in ast.walk(tree):
+        parts = None if id(node) in inner else split(node)
+        if parts is None:
+            continue
+        if is_literal_string(parts[0]):
+            tail = texts([parts[0]] + list(parts[1]))
+            if tail is not None:
+                strings.append("/".join(tail))
+        else:
+            got = place(node, frozenset())
+            if got:
+                places.append(got[1])
+    return strings, places
 
 
-def named_files(tree, parent, tracked, joined=()):
-    """The tracked files that a string in the code equals, from the parent's folder or from the root. `joined` holds the strings that joins name."""
+def named_files(tree, parent, tracked, joined=((), ())):
+    """The tracked files that a string in the code equals, from the parent's folder or from the root, and the tracked files that a join names.
+    `joined` is the (strings, places) of `joined_strings`: each string is tried as a code string is, and each place is a path from the root."""
     found = set(tracked)
     folder = parent.rsplit("/", 1)[0] if "/" in parent else ""
-    out = set()
-    for s in code_strings(tree) + list(joined):
+    strings, places = joined
+    out = {p for p in places if p in found and p != parent}
+    for s in code_strings(tree) + list(strings):
         if not s or "\n" in s or s.startswith("/"):
             continue
         for c in (posixpath.normpath(posixpath.join(folder, s)), posixpath.normpath(s)):
@@ -273,7 +324,7 @@ def answer(req, tree, tracked):
         imports = {resolve(m, req["file"], tracked) for m in imported_modules(tree, types=False)}
         imports.discard(None)
         imports.discard(req["file"])
-        return {"ok": True, "value": {"imports": sorted(imports), "named": named_files(tree, req["file"], tracked, joined_strings(tree))}}
+        return {"ok": True, "value": {"imports": sorted(imports), "named": named_files(tree, req["file"], tracked, joined_strings(tree, req["file"]))}}
     if op == "uses":
         target = req["target"]
         imports = any(resolve(m, req["file"], tracked) == target for m in imported_modules(tree))
