@@ -1134,6 +1134,22 @@ def case_token_t5_failure_error_omits_token():
           "token found in error string")
 
 
+# T5, prose. A reply with no JSON reads as an error that keeps its first 120 characters. The token starts at character 110, so
+# its first 10 characters fall inside that cut. The reply must pass the same scrub as stderr before the cut, so no part of the
+# token reaches the error, and the scrub marker stands where the token was.
+def case_token_t5_prose_reply_error_is_scrubbed():
+    reply = "x" * 110 + FAKE_TOKEN + " prose with no verdict object"
+    with scratch_config("t5-prose") as cfg:
+        _token_file(cfg, FAKE_TOKEN + "\n")
+        verdict, error = _invoke_with(_envelope(reply))
+    check("token_t5(prose): no-JSON reply gives no verdict", verdict is None and bool(error), "verdict=%s" % (verdict,))
+    check("token_t5(prose): error omits the token", FAKE_TOKEN not in (error or ""), "token found in error string")
+    check("token_t5(prose): error omits the token's first 8 characters", FAKE_TOKEN[:8] not in (error or ""),
+          "part of the token found in error string")
+    check("token_t5(prose): error keeps the scrub marker where the token was", "[token]" in (error or ""),
+          "no [token] marker in error string")
+
+
 # Token file encodings, as Windows PowerShell 5.1 writes them. The reader must return the bare
 # token whatever the BOM, line ending or NUL characters. The file's bytes are written as given.
 def _token_file_bytes(cfg, data):
@@ -1940,6 +1956,7 @@ def main():
     case_token_t3_parent_env_not_passed_through()
     case_token_t4_no_usable_token_file_is_no_token()
     case_token_t5_failure_error_omits_token()
+    case_token_t5_prose_reply_error_is_scrubbed()
     case_token_encodings_read_as_the_bare_token()
     case_token_t10_undecodable_file_is_an_error()
     case_main_ordinary_turn()
