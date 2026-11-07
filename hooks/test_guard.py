@@ -9865,11 +9865,15 @@ for _raw_who, _raw_record in (
     add("merge-role-raw: the merge tool of the host in %s on a green head is refused" % _raw_who, "deny",
         RAW_ROLE_RULE, tool=MCP_MERGE, cwd=NOGIT, pullNumber=12, repo="x", owner="y",
         env_path=GREEN_ON, config=MERGECFG, env=CLOUD_ROLE_ENV, transcript=_raw_record)
-# A lane that runs locally, with its session id and no cloud flag, is refused on the raw path too. Drop this case
-# if the rule is limited to the cloud.
-sh("merge-role-raw: gh pr merge in a local lane session on a green head is refused",
-   "gh pr merge 12 --squash", "deny", RAW_ROLE_RULE, cwd=STAMPREPO, env=ROLE_ENV,
+# A local lane has no cloud flag, and merge.py's role check runs only in a cloud session. The raw path keeps today's verdict.
+sh("merge-role-raw: gh pr merge in a local lane session on a green head keeps its ask",
+   "gh pr merge 12 --squash", "ask", BARE_MERGE, carries=BARE_SAYS, cwd=STAMPREPO, env=ROLE_ENV,
    transcript=role_path("lane"), **_BARE_GUARD)
+# An own record that cannot be read proves no tier. read_merge_role returns None for an unreadable role file, and the
+# cloud confirm in main stops on None. The raw path refuses the same way.
+sh("merge-role-raw: gh pr merge with an unreadable own record in a cloud session is refused",
+   "gh pr merge 12 --squash", "deny", RAW_ROLE_RULE, cwd=STAMPREPO, env=CLOUD_ROLE_ENV,
+   transcript=role_path("unreadable"), **_BARE_GUARD)
 
 for _kept_who, _kept_record in (
     ("the batch runner", role_path("runner")),
