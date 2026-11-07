@@ -532,6 +532,14 @@ PTRAHEAD = os.path.join(ROOT, "ptraheadmain")
 PTRNOORIGINCFG = os.path.join(ROOT, "ptrnoorigincfg")
 PTRNOORIGIN = os.path.join(ROOT, "ptrnooriginmain")
 
+# SAME-BRANCH FIXTURES, for the checkout-b-current-branch cases in the shared-tree section. Every
+# tree is clean, so the shared-tree rule passes each case, and a deny can only come from the rule
+# under test.
+SBCUR = os.path.join(ROOT, "samebranch-cur")      # on `lane-x`, with origin/lane-x one commit ahead
+SBDET = os.path.join(ROOT, "samebranch-det")      # detached HEAD: no branch is checked out
+SBOTHER = os.path.join(ROOT, "samebranch-other")  # on `lane-y`: the checkout a `-C` can name
+SBMAIN = os.path.join(ROOT, "samebranch-main")    # on `main`, and its config holds no pointer line
+
 # --------------------------------------------------------------- branch delete / worktree fixtures
 #
 # BRANCHREMOTE stands in for a remote: a bare clone BRANCHREPO pushes to, so `git for-each-ref
@@ -1587,6 +1595,44 @@ def _build_pointer():
 
     make_blind_git(GITBLIND)
 
+def _build_samebranch():
+    """The same-branch repos: SBCUR, SBDET, SBOTHER and SBMAIN. Each is clean."""
+    # THE INCIDENT SHAPE. An agent on `lane-x` ran `git checkout -B lane-x origin/lane-x` to reach a
+    # newer pushed head, and the old files stayed in place. SBCUR is that checkout: on `lane-x`, with
+    # origin/lane-x one commit ahead. `sub/` is a real folder, so the cd case runs in one.
+    make_repo(SBCUR, {"f.txt": "base\n", "sub/keep.txt": "base\n"})
+    run_vcs(SBCUR, "checkout", "-q", "-b", "lane-x")
+    _require_clean(SBCUR)
+    _require_pointer_branch(SBCUR, "lane-x")
+    head = run_vcs(SBCUR, "rev-parse", "HEAD").stdout.strip()
+    pushed = run_vcs(SBCUR, *IDENT, "commit-tree", "HEAD^{tree}", "-p", head, "-m", "pushed head")
+    if pushed.returncode != 0 or not pushed.stdout.strip():
+        sys.exit("fixture setup failed in build_fixtures: the newer head of SBCUR. stderr: %s"
+                 % pushed.stderr.strip())
+    update = run_vcs(SBCUR, "update-ref", "refs/remotes/origin/lane-x", pushed.stdout.strip())
+    if update.returncode != 0:
+        sys.exit("fixture setup failed in build_fixtures: origin/lane-x in SBCUR. stderr: %s"
+                 % update.stderr.strip())
+    # A DETACHED checkout: no branch is checked out, so no `-B` can name the branch it holds.
+    make_repo(SBDET, {"f.txt": "base\n"})
+    detach = run_vcs(SBDET, "checkout", "-q", "--detach")
+    if detach.returncode != 0:
+        sys.exit("fixture setup failed in build_fixtures: detaching SBDET. stderr: %s"
+                 % detach.stderr.strip())
+    _require_clean(SBDET)
+    _require_pointer_branch(SBDET, "HEAD")
+    # The other checkout: a second clean tree on `lane-y`, which a `-C` can name.
+    make_repo(SBOTHER, {"f.txt": "base\n"})
+    run_vcs(SBOTHER, "checkout", "-q", "-b", "lane-y")
+    _require_clean(SBOTHER)
+    _require_pointer_branch(SBOTHER, "lane-y")
+    # A checkout ON main that is not the pointer checkout: its config holds no pointer line.
+    make_repo(SBMAIN, {"f.txt": "base\n"})
+    _set_origin_main(SBMAIN, "HEAD")
+    _require_clean(SBMAIN)
+    _require_pointer_branch(SBMAIN, "main")
+
+
 def _build_conflict():
     """CONFLICT: a real checkout with one unresolved merge conflict."""
     # A real checkout with a real, unresolved merge conflict, built with git itself rather than
@@ -2200,6 +2246,7 @@ lazy_fixture([SUBJCLEAN, SUBJCLEANWT, SUBJDIRTY, SUBJSTASH, SUBJSTASHWT, SUBJSTA
 lazy_fixture([PRIVREPO], _build_privrepo)
 lazy_fixture([PTRMAIN, PTRWT, PTRCFG, PTROFF, PTROFFCFG, PTRAHEAD, PTRAHEADCFG, PTRNOORIGIN,
               PTRNOORIGINCFG, PTRBADCFG, PTRGONECFG, PTRNOCFG, GITBLIND], _build_pointer)
+lazy_fixture([SBCUR, SBDET, SBOTHER, SBMAIN], _build_samebranch)
 lazy_fixture([CONFLICT], _build_conflict)
 lazy_fixture([BRANCHREMOTE, BRANCHREPO, BRANCHFALLBACKMAIN, BRANCHFALLBACKMASTER, BRANCHNOBASE],
              _build_branch)
@@ -2655,6 +2702,52 @@ sh("checkout: the previous branch", VCS + " checkout -", "allow", cwd=NOGIT)
 sh("checkout: a forced new branch at a commit", VCS + " checkout -B tmp 380d5fc", "allow",
    cwd=NOGIT)
 sh("checkout: tracking a remote branch", VCS + " checkout --track origin/main", "allow", cwd=NOGIT)
+
+# SAME BRANCH, REFUSED. A `checkout -B <name>` or `switch -C <name>` that names the branch the checkout
+# it runs in already holds moves that branch onto a new start point under a working tree that keeps
+# the old files. That is the incident in SBCUR's fixture. Which checkout counts is the one `-C <path>`
+# names, else the cwd. CURRENT_BRANCH_RULE is the rule id the refusal must name.
+CURRENT_BRANCH_RULE = "checkout-b-current-branch"
+sh("same branch: checkout -B of the branch it is on, from origin, is refused",
+   VCS + " checkout -B lane-x origin/lane-x", "deny", CURRENT_BRANCH_RULE, cwd=SBCUR)
+sh("same branch: switch -C of the branch it is on, from origin, is refused",
+   VCS + " switch -C lane-x origin/lane-x", "deny", CURRENT_BRANCH_RULE, cwd=SBCUR)
+sh("same branch: checkout -B of the branch it is on, with no start point, is refused",
+   VCS + " checkout -B lane-x", "deny", CURRENT_BRANCH_RULE, cwd=SBCUR)
+sh("same branch: switch -C of the branch it is on, with no start point, is refused",
+   VCS + " switch -C lane-x", "deny", CURRENT_BRANCH_RULE, cwd=SBCUR)
+sh("same branch: from a folder inside that checkout, it is refused too",
+   "cd sub && " + VCS + " checkout -B lane-x origin/lane-x", "deny", CURRENT_BRANCH_RULE, cwd=SBCUR)
+sh("same branch: -C names the checkout on that branch, checkout form, from another checkout",
+   VCS + " -C " + slash(SBCUR) + " checkout -B lane-x origin/lane-x", "deny", CURRENT_BRANCH_RULE,
+   cwd=SBOTHER)
+sh("same branch: -C names the checkout on that branch, switch form, from another checkout",
+   VCS + " -C " + slash(SBCUR) + " switch -C lane-x origin/lane-x", "deny", CURRENT_BRANCH_RULE,
+   cwd=SBOTHER)
+# The pointer checkout's reset of main onto origin/main is this same form. It stays allowed there
+# (the pointer cases below pin it). A checkout on main that is NOT the pointer gets no such
+# exemption, so this form is refused here by this rule alone.
+sh("same branch: checkout -B main onto origin/main is refused in a checkout on main that is not the pointer",
+   VCS + " checkout -B main origin/main", "deny", CURRENT_BRANCH_RULE, cwd=SBMAIN)
+
+# THE NAME IS EXACT, AND THE CHECKOUT IS THE ONE THE COMMAND RUNS IN. Each of these stays allowed.
+sh("same branch: -B onto a different branch name is allowed",
+   VCS + " checkout -B other origin/lane-x", "allow", cwd=SBCUR)
+sh("same branch: -C onto a different branch name is allowed",
+   VCS + " switch -C other origin/lane-x", "allow", cwd=SBCUR)
+sh("same branch: a name that extends the branch it is on is allowed",
+   VCS + " checkout -B lane-x2 origin/lane-x", "allow", cwd=SBCUR)
+sh("same branch: a name that the branch it is on extends is allowed",
+   VCS + " checkout -B lane origin/lane-x", "allow", cwd=SBCUR)
+sh("same branch: -C names another checkout, so -B of this checkout's branch is allowed there",
+   VCS + " -C " + slash(SBOTHER) + " checkout -B lane-x origin/lane-x", "allow", cwd=SBCUR)
+sh("same branch: with no branch checked out, -B names nothing the checkout holds",
+   VCS + " checkout -B lane-x origin/lane-x", "allow", cwd=SBDET)
+# The remedy the refusal names: a fast-forward, or a detach, never a same-branch -B.
+sh("same branch: the fast-forward remedy, merge --ff-only, is allowed",
+   VCS + " merge --ff-only origin/lane-x", "allow", cwd=SBCUR)
+sh("same branch: the detach remedy, switch --detach, is allowed",
+   VCS + " switch --detach origin/lane-x", "allow", cwd=SBCUR)
 
 # THE REDIRECT FALSE POSITIVE. MEASURED in guard.log: `git checkout origin/claude/pass3-seam 2>&1`
 # was refused while the same call with no redirect passed, because `2>&1` reached
