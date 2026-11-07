@@ -1,0 +1,10 @@
+{
+  "title": "q_max browser geometry checks are green",
+  "phase": "now",
+  "status": "doing",
+  "order": 0.18,
+  "owner": "coordinator",
+  "why": "Coordinator, 14:20 CST Nov 7.",
+  "note": "Coordinator pick, 14:20 CST Nov 7 (undoable): the 2026-10-08 18px row-head ruling covers only the saved what-if row. History rows with a version chip keep main's 21px.",
+  "updatedAt": "2026-11-07T14:19:00-06:00"
+}
