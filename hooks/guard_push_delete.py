@@ -197,6 +197,17 @@ def push_destinations(args, cwd: str, overrides=None):
     return [t.removeprefix("refs/heads/") if t else t for t in found]
 
 
+def push_refspecs(args):
+    """(remote, refspecs) of a push that names the refs it sends, else None: `--all`, `--branches`,
+    `--mirror`, a deletion and a tags-only push send no range this reader can name. The remote is ''
+    when none is named, and the refspecs are empty for a bare push."""
+    _force, mirror, every, _includes, _unpinned, _leased, delete, _upstream, remote, plain = _push_parse(args)
+    delete = delete or any(spec.startswith(":") for spec in plain)
+    if mirror or every or delete or (_push_tags_only(args) and not plain):
+        return None
+    return remote, plain
+
+
 def push_verdict(args, cwd: str, overrides=None) -> str:
     """'' for an allowed push, else 'ask' or 'deny', for the `git push` arguments `args`.
 
