@@ -1054,7 +1054,7 @@ def shell_abs(path: str, base):
     return path
 
 
-def dir_before_segment(segments, number: int, shell_cwd: str, ends=()):
+def dir_before_segment(segments, number: int, shell_cwd: str, ends=(), failed_cd_stays=False):
     """The directory the shell is in when `segments[number]` runs, or None when it cannot be told.
 
     Walks the segments ahead of it in order, the way `_run_dir` reads them, but keeps the state a
@@ -1062,7 +1062,11 @@ def dir_before_segment(segments, number: int, shell_cwd: str, ends=()):
     back, a `cd` inside `( ... )` ends with the parenthesis, `popd` or a path that holds a variable
     is not tracked, and a `cd` into a folder that does not exist is not trusted (the shell stays
     where it was, and a `;` runs the next command there). `ends` is what `split_segments` gave:
-    in bash each part of a pipe runs in a subshell, so its `cd` moves nothing after the pipe."""
+    in bash each part of a pipe runs in a subshell, so its `cd` moves nothing after the pipe.
+    `failed_cd_stays` reads a `cd` to a folder that does not exist the way the shell does: it
+    leaves the shell where it was, and `;`, a newline or `||` run the next command there. After
+    `&&` the next command does not run, so that case stays None. Off by default, so a rule that
+    fails closed on an untrusted `cd` keeps doing so."""
     where = shell_cwd if shell_cwd and os.path.isabs(shell_cwd) else None
     prev, stack = None, []
     for at, segment in enumerate(segments[:number + 1]):
@@ -1086,8 +1090,13 @@ def dir_before_segment(segments, number: int, shell_cwd: str, ends=()):
             elif any(mark in move for mark in "$%`"):
                 where = None
             else:
-                where = shell_abs(move or "~", where)
-                where = where if where and os.path.isdir(where) else None
+                target = shell_abs(move or "~", where)
+                if target and os.path.isdir(target):
+                    where = target
+                elif target and failed_cd_stays and (ends[at] if at < len(ends) else "") != "&&":
+                    pass   # the cd failed: the shell stays where it was
+                else:
+                    where = None
             prev = old
         for _ in range(marks.count(")")):
             if stack:

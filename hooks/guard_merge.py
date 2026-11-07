@@ -10,7 +10,7 @@ import re
 
 from guard_core import (
     _absolute, _git, _git_subcommand_index, _segment_git_c_target, basename, cap_safe, command_root,
-    git_calls, inline_script, inner_commands, resolve_command, resolve_default_base, segment_tokens, split_segments,
+    dir_before_segment, git_calls, inline_script, inner_commands, resolve_command, resolve_default_base, segment_tokens, split_segments,
 )
 import own_session  # the one home of the own get_session read, small so report_guard imports it too
 from shared_names import LANE_TAG, TOPIC_TAG, lane_head_refs  # the one home of the lane tags and head refs, shared with the roadmap build
@@ -733,7 +733,9 @@ def conflict_markers_hit(stripped: str, cwd: str):
     whole_tops, add_specs = set(), []   # tops an earlier add stages whole / (where, top, specs) of earlier adds
     readable = True                     # every segment so far is one that cannot change the tree
     blind_commit = blind_triplet = conflict_step = False   # a commit after a blind step / that covers a triplet / a conflict step ran
-    for segment in split_segments(stripped):
+    ends = []
+    segments = split_segments(stripped, ends)
+    for number, segment in enumerate(segments):
         if not segment.strip():
             continue
         call = git_call_of(segment)
@@ -751,6 +753,8 @@ def conflict_markers_hit(stripped: str, cwd: str):
             continue
         c_target = _segment_git_c_target(segment_tokens(segment) or [])
         root = command_root(stripped, cwd)
+        if root and not os.path.isdir(root):   # a failed cd: the shell stays, and `;` runs this segment there
+            root = dir_before_segment(segments, number, cwd, ends, failed_cd_stays=True) or root
         where = _absolute(c_target, root) if c_target is not None else root
         done = _git(where, "rev-parse", "--show-toplevel") if where and os.path.isdir(where) else None
         if done is None or done.returncode != 0 or not done.stdout.strip():
