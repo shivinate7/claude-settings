@@ -4478,7 +4478,7 @@ class GhHalf(Env):
             self.assertIn(want, out)
 
     def test_banchi_604_a_pending_check_that_is_not_required_is_not_waited_on_and_its_red_still_refuses(self):
-        """A pending check that is not required does not hold the wait, and its red still refuses. Re-pointed by step merge-waits-required-only, coordinator ruling 2026-11-06 13:10 CST: wait only on the required check."""
+        """A pending check that is not required does not hold the wait, and its red still refuses. Ruling: step merge-waits-required-only, wait only on the required check."""
         # The head reads green on `checks`, `design` still pending, then red. A pending check that is not required does not hold a minute;
         # the red it turns into is seen on the settle re-read and refuses.
         before = self.head()
@@ -4500,7 +4500,7 @@ class GhHalf(Env):
         self.assertTrue(self.reverted())
 
     def test_a_pending_check_that_is_not_required_is_not_waited_on_and_merges_on_green(self):
-        """A pending check that is not required is not waited on, and one line names it. Re-pointed by step merge-waits-required-only, coordinator ruling 2026-11-06 13:10 CST: wait only on the required check."""
+        """A pending check that is not required is not waited on, and one line names it. Ruling: step merge-waits-required-only, wait only on the required check."""
         self.set(checks_seq=[[("checks", "pass", ""), ("design", "pending", "")]])
         rc, out = self.go()
         self.assertEqual(rc, 0, out)
@@ -4768,7 +4768,7 @@ class GhHalf(Env):
         self.assertFalse([e for e in red if "cancel" in e], red)
 
     def test_a_pending_run_of_a_workflow_without_the_required_job_does_not_hold_the_wait(self):
-        """A pending run of a workflow that does not define a required job does not hold the wait. Re-pointed by step merge-waits-required-only, coordinator ruling 2026-11-06 13:10 CST: wait only on the required check."""
+        """A pending run of a workflow that does not define a required job does not hold the wait. Ruling: step merge-waits-required-only, wait only on the required check."""
         push_base(self, {".github/workflows/ci.yml": workflow_text("ci", "ci")})  # a readable folder whose one workflow has no required job
         self.set(runs_seq=[[("ci", "in_progress", "")], [("ci", "completed", "success")]])
         rc, out = self.go()
@@ -5178,7 +5178,7 @@ class RestRoutes(Env):
     # ---- the checks of a head are the check runs AND the commit statuses
 
     def test_one_green_check_run_and_one_pending_status_is_pending_in_the_preview_and_not_waited_on(self):
-        """The preview shows a pending status that is not required; the wait does not hold on it. Re-pointed by step merge-waits-required-only, coordinator ruling 2026-11-06 13:10 CST: wait only on the required check."""
+        """The preview shows a pending status that is not required; the wait does not hold on it. Ruling: step merge-waits-required-only, wait only on the required check."""
         self.set(checks_seq=[[("checks", "pass", ""), ("deploy", "pending", "https://x/s", "status")]], runs_seq=[[("checks", "completed", "success")]])
         verdict, detail = self.gh_host().head_read(7)  # the preview reads every check: the pending status shows
         self.assertEqual(verdict, "pending", detail)
@@ -7247,7 +7247,7 @@ class WaitProgress(unittest.TestCase):
         self.assert_gaps_within(lines, 0.0, end)
 
     def test_a_pending_check_that_is_not_required_is_never_printed_as_waited_on(self):
-        """A pending check that is not required is never named as waited on. Re-pointed by step merge-waits-required-only, coordinator ruling 2026-11-06 13:10 CST: wait only on the required check."""
+        """A pending check that is not required is never named as waited on. Ruling: step merge-waits-required-only, wait only on the required check."""
         def checks_at(t):
             if t < 300:
                 return {"checks": [("pending", "")], "design": [("pending", "")]}
@@ -7326,7 +7326,7 @@ class AbsentRequiredCheck(unittest.TestCase):
         self.assertTrue(ok, why)
 
     def test_a_pending_run_of_another_workflow_does_not_keep_the_wait_going(self):
-        """A pending run of a workflow that does not define a required job does not keep the wait going. Re-pointed by step merge-waits-required-only, coordinator ruling 2026-11-06 13:10 CST: wait only on the required check."""
+        """A pending run of a workflow that does not define a required job does not keep the wait going. Ruling: step merge-waits-required-only, wait only on the required check."""
         host = ClockedHost(lambda t: {"checks": [("pass", "")], "needed": [("pass", "")]})
         host.required, host.cwd = ["checks", "needed"], workflow_folder(self, {"ci.yml": workflow_text("ci", "ci")})
         host.runs = lambda sha: [pending_run("ci")]  # a run of a workflow that does not define the required job: it is not waited on
@@ -7349,7 +7349,7 @@ class RequiredOnlyWait(unittest.TestCase):
     """merge-waits-required-only: the wait holds on the required check names. A pending run holds only when its workflow file defines a
     required job, or when no workflow folder can be read. A pending check or run that is not required never holds the wait, and one line on
     success names what was not waited for. A red check, required or not, still refuses.
-    Ruling: step merge-waits-required-only, coordinator ruling 2026-11-06 13:10 CST: wait only on the required check."""
+    Ruling: step merge-waits-required-only, wait only on the required check."""
     wait = WaitProgress.wait
 
     def host(self, checks_at, runs=lambda sha: [], folder=None, required=(REQUIRED_CHECK,)):
