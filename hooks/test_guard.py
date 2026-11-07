@@ -3216,6 +3216,22 @@ for _name, _command in (
     sh("guard-command-position: pinned, %s allowed" % _name, _command, "allow", cwd=NOGIT)
 
 
+# heredoc-indented-close: bash ends a heredoc only on a line that is exactly the delimiter. `<<-`
+# strips leading tabs from the close and nothing else, so a space-indented EOF is body text.
+sh("heredoc-indented-close: an indented EOF inside a heredoc body does not close it, so a reset in the body is allowed",
+   "cat <<EOF\n  EOF\n" + VCS + " reset --hard origin/main\nEOF", "allow", cwd=NOGIT)
+sh("heredoc-indented-close: under <<-, a space-indented EOF does not close the body either, so a reset in it is allowed",
+   "cat <<-EOF\n  EOF\n" + VCS + " reset --hard origin/main\nEOF", "allow", cwd=NOGIT)
+sh("heredoc-indented-close: a lone apostrophe in the body, then an indented EOF, does not close the body",
+   "cat <<EOF\ndon't\n  EOF\n" + VCS + " reset --hard origin/main\nEOF", "allow", cwd=NOGIT)
+# Controls: a tab-indented EOF under <<- does close, so the reset after it is a command, and an exact
+# EOF closes a body whose indented twin came before it.
+sh("heredoc-indented-close: under <<-, a tab-indented EOF closes the body, so a reset after it is refused",
+   "cat <<-EOF\n\tEOF\n" + VCS + " reset --hard origin/main", "deny", "shared-tree", cwd=NOGIT)
+sh("heredoc-indented-close: an exact EOF closes the body after an indented twin, so a status after it is allowed",
+   "cat <<EOF\n  EOF\nEOF\n" + VCS + " status", "allow", cwd=NOGIT)
+
+
 # ============================================================ 1. branch delete / worktree remove/prune
 FAMILY = "branch-worktree"
 #
