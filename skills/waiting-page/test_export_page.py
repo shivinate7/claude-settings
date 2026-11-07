@@ -1340,15 +1340,15 @@ class NoExport(Base):
                          "the waiting page was skipped instead of refused. Output:\n" + shown(r))
 
 
-# The cookie-header shape of kinds_in. A run of `cookie:` with no space is its worst case: main scans each start to the end
-# of the run. A rewrite must keep every verdict below and stay linear.
+# The cookie-header shape of kinds_in. The old pattern, `\bCookie:\s*[^\s=;]+=\S+`, scans from each `cookie:` to the end of a
+# run with no space, so a run of `cookie:` is quadratic. A rewrite must keep every verdict below and stay linear.
 COOKIE_PATHO = "cookie:" * 5700  # about 40k characters with no `=`
 COOKIE_CONTROL = ("cookie: " * 5700)[:len(COOKIE_PATHO)]  # the same length, a space after each colon
-COOKIE_RATIO_LIMIT = 10  # main measures about 55 here; a linear shape measures about 1
+COOKIE_RATIO_LIMIT = 10  # the old pattern is far above this on the pathological text; a linear pattern is far below it
 COOKIE_REPEATS = 5
 
-# (label, text, cookie-header found). Each row is what main returns, measured on main. A text whose literal would read as a
-# cookie header in this source is joined from parts.
+# (label, text, cookie-header found). Each row is what the old pattern, `\bCookie:\s*[^\s=;]+=\S+`, returns on 174b005c1.
+# A text whose literal would read as a cookie header in this source is joined from parts.
 COOKIE_VERDICTS = [
     ("empty text", "", False),
     ("a header with a space after the colon", "Cookie: " + "sid=abc", True),
@@ -1375,6 +1375,9 @@ COOKIE_VERDICTS = [
     ("a keyword inside a longer word", "fooCookie: " + "a=b", False),
     ("a keyword glued to a letter with no space", "x" + "Cookie:" + "abc=def", False),
     ("a hyphenated header with no space after the colon", "Set-" + "Cookie:" + "sid=abc", True),
+    ("a header after an equals sign with no space", "x=" + "Cookie:" + "a=b", True),
+    ("a header after a semicolon in a name-value list", "a=1;" + "Cookie:" + "sid=abc", True),
+    ("a keyword followed by a semicolon before the equals sign", "cookie:" + "a;b=c", False),
     ("a Unicode letter before the keyword", "éCookie: " + "a=b", False),
     ("an underscore before the keyword", "_Cookie: " + "a=b", False),
     ("a digit before the keyword", "1Cookie: " + "a=b", False),
@@ -1415,7 +1418,7 @@ class CookieHeaderShape(unittest.TestCase):
                 kinds = export_page.kinds_in(text)
                 self.assertIsInstance(kinds, list, "kinds_in did not return a list for %s" % label)
                 self.assertEqual("cookie-header" in kinds, want,
-                                 "%s: cookie-header is %s on main and is not now" % (label, want))
+                                 "%s: cookie-header is %s on 174b005c1 (the old pattern) and is not now" % (label, want))
 
     def test_a_repeated_keyword_with_no_space_is_not_quadratic(self):
         export_page = load_export_page(self)
@@ -1429,8 +1432,8 @@ class CookieHeaderShape(unittest.TestCase):
             patho.append(timed(export_page.kinds_in, COOKIE_PATHO))
         ratio = min(patho) / min(control)
         self.assertLess(ratio, COOKIE_RATIO_LIMIT,
-                        "kinds_in on a run of `cookie:` with no space took %.1f times the same-length control (limit %d): "
-                        "the cookie-header shape is quadratic in the run's length. Min of %d: pathological %.4f s, control %.4f s."
+                        "kinds_in, which runs every secret shape and not only cookie-header, took %.1f times the same-length "
+                        "control (limit %d) on a run of `cookie:` with no space. Min of %d: pathological %.4f s, control %.4f s."
                         % (ratio, COOKIE_RATIO_LIMIT, COOKIE_REPEATS, min(patho), min(control)))
 
 
