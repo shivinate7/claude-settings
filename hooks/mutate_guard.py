@@ -2929,6 +2929,34 @@ def mutation_parts(entry):
     return label, old, new, target, required, only_on
 
 
+def lay_out_guard_reads(root: str) -> None:
+    """Copy into `root` the files outside hooks/ and lint/ that a copied guard family reads from beside its
+    hooks folder: the merge tool, the CI alarm's events, the impeccable skill, the waiting-page skill, bin/sim-lease
+    and the sweep modules (the simulator refusal imports janitor/sweep.py and fails open without it).
+    A guard copy gets its own `root`. The override copies sit one folder below `work`, so `main` calls this
+    once on `work`. Without these, arms that read them fail on every mutant alike, and the clean-layout
+    control (`run_controls`) reads red."""
+    os.makedirs(os.path.join(root, "bin"), exist_ok=True)
+    shutil.copy(SIM_LEASE, os.path.join(root, "bin"))
+    os.makedirs(os.path.join(root, "janitor"), exist_ok=True)
+    for module in ("sweep.py", "temp_sweep.py"):
+        shutil.copy(os.path.join(HERE, "..", "janitor", module), os.path.join(root, "janitor"))
+    # guard_merge.py loads ../merge/merge.py (MERGE_TOOL_REL), which reads ../actions/ci-alarm/events.json (ALARM_EVENTS).
+    os.makedirs(os.path.join(root, "merge"), exist_ok=True)
+    shutil.copy(os.path.join(HERE, "..", "merge", "merge.py"), os.path.join(root, "merge"))
+    os.makedirs(os.path.join(root, "actions", "ci-alarm"), exist_ok=True)
+    shutil.copy(os.path.join(HERE, "..", "actions", "ci-alarm", "events.json"),
+                os.path.join(root, "actions", "ci-alarm"))
+    # IMPECCABLE_SKILL_FILE (guard.py), and the waiting-page folder (question_form.py's page.html; guard.py's
+    # stale_pages.py, splice.py and check_designs.mjs).
+    os.makedirs(os.path.join(root, "skills", "impeccable"), exist_ok=True)
+    shutil.copy(os.path.join(HERE, "..", "skills", "impeccable", "SKILL.md"),
+                os.path.join(root, "skills", "impeccable"))
+    shutil.copytree(os.path.join(HERE, "..", "skills", "waiting-page"),
+                    os.path.join(root, "skills", "waiting-page"),
+                    ignore=shutil.ignore_patterns("__pycache__", "test_*", "tests"))
+
+
 def lay_out(sources, work: str, target: str, name: str, old: str, new: str) -> str:
     """Lay out one copy of `target` under `work` with `old` replaced by `new`, and return the path
     of the file its suite loads. `name` keys the copy's folder or file (through `mutate_shared.safe_name`).
@@ -2945,39 +2973,17 @@ def lay_out(sources, work: str, target: str, name: str, old: str, new: str) -> s
         root = os.path.join(work, "%s_%s" % (stem, mutate_shared.safe_name(name)))
         tree = os.path.join(root, "hooks")
         mutate_shared.guard_tree(tree)
-        # The guard loads ../bin/sim-lease beside its hooks folder, so the copy takes it too, mutated or not.
-        os.makedirs(os.path.join(root, "bin"), exist_ok=True)
+        lay_out_guard_reads(root)  # takes the original bin/sim-lease; a simlease mutant overwrites it below
         if target == "simlease":
             with open(os.path.join(root, "bin", "sim-lease"), "w", encoding="utf-8", newline="\n") as handle:
                 handle.write(sources[target].replace(old, new, 1))
-        else:
-            if old != new:  # old == new is the clean-layout control: no anchor to find
-                mutate_shared.apply_mutant(tree, old, new)
-            shutil.copy(SIM_LEASE, os.path.join(root, "bin"))
+        elif old != new:  # old == new is the clean-layout control: no anchor to find
+            mutate_shared.apply_mutant(tree, old, new)
         copy_path = os.path.join(tree, "guard.py")
-        os.makedirs(os.path.join(root, "janitor"), exist_ok=True)
-        for name in ("sweep.py", "temp_sweep.py"):
-            shutil.copy(os.path.join(HERE, "..", "janitor", name), os.path.join(root, "janitor"))
         # guard.py reads lint/layout.py from ../lint (_layout_module), which is root/lint for this copy. Without
         # it the role-model table reads as unread and every role-model arm passes unjudged.
         shutil.copytree(os.path.join(HERE, "..", "lint"), os.path.join(root, "lint"),
                         ignore=shutil.ignore_patterns("__pycache__"))
-        # guard_merge.py loads ../merge/merge.py (MERGE_TOOL_REL). Without it every merge-batch arm reads
-        # "check reader could not be loaded" and fails, whatever was mutated: the clean-layout control caught this.
-        os.makedirs(os.path.join(root, "merge"), exist_ok=True)
-        shutil.copy(os.path.join(HERE, "..", "merge", "merge.py"), os.path.join(root, "merge"))
-        # merge.py reads ../actions/ci-alarm/events.json when it loads (ALARM_EVENTS).
-        os.makedirs(os.path.join(root, "actions", "ci-alarm"), exist_ok=True)
-        shutil.copy(os.path.join(HERE, "..", "actions", "ci-alarm", "events.json"),
-                    os.path.join(root, "actions", "ci-alarm"))
-        # The guard family reads two skills from ../skills: IMPECCABLE_SKILL_FILE (guard.py), and the waiting-page
-        # folder (question_form.py's page.html; guard.py's stale_pages.py, splice.py and check_designs.mjs).
-        os.makedirs(os.path.join(root, "skills", "impeccable"), exist_ok=True)
-        shutil.copy(os.path.join(HERE, "..", "skills", "impeccable", "SKILL.md"),
-                    os.path.join(root, "skills", "impeccable"))
-        shutil.copytree(os.path.join(HERE, "..", "skills", "waiting-page"),
-                        os.path.join(root, "skills", "waiting-page"),
-                        ignore=shutil.ignore_patterns("__pycache__", "test_*", "tests"))
     else:
         copy_path = os.path.join(work, "%s_%s.py" % (stem, mutate_shared.safe_name(name)))
         mutated = sources[target].replace(old, new, 1)
@@ -3022,6 +3028,7 @@ def run_controls(sources, work: str, entries):
     mutation. It answers one question: does this layout pass its own suite? A layout that crashes (a missing
     sibling module, a wrong path) fails every case whatever a mutant changed, and each FAIL line reads as a kill.
     A red control makes every mutant of that target UNKNOWN (`run_mutant`, `mutate_shared.control_verdict`).
+    `work` is `main`'s folder, after `main` has laid the shared guard family, lint and guard reads in it.
     The futures come back before any mutant runs, so the controls run beside the mutants on their own threads,
     and a mutant waits for its target's control only after its own suite has run.
 
@@ -3183,6 +3190,7 @@ def main() -> int:
     # decision copies read their own tree/lint instead (above). A guard copy carries its own lint folder (run_mutant).
     shutil.copytree(os.path.join(HERE, "..", "lint"), os.path.join(work, "lint"),
                     ignore=shutil.ignore_patterns("__pycache__"))
+    lay_out_guard_reads(work)  # the override copies' ../merge, ../actions and ../skills
 
     try:
         controls = run_controls(sources, work, MUTATIONS)
