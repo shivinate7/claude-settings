@@ -79,6 +79,17 @@ def set_body(text, body):
     return BLOCK.sub(lambda m: m.group(1) + body + m.group(3), text, count=1)
 
 
+def design_json(designs):
+    """A designData body for `designs` ({slug: mockup html}), written as the writer saves it: each `<` as \\u003c."""
+    return json.dumps(designs).replace("<", "\\u003c")
+
+
+# A kept mockup that holds what a scanner must not misread: a </script> close, comment openers, a lone quote, and a
+# template literal over two lines.
+ESCAPED_MOCKUP = ("<p>Don't stop</p><!-- a note --><i>#</i> // not a comment /* nor this */\n"
+                  "<script>const t = `one\ntwo`;</script>")
+
+
 def host_wrapped(page, after_body=""):
     """The host wrapper around `page`, with `after_body` placed right after its <body> tag."""
     assert WRAPPER_TEXT.count("@@PAGE@@") == 1 and WRAPPER_TEXT.count("<body>") == 1, "the wrapper fixture changed shape"
@@ -538,11 +549,11 @@ class Stale(unittest.TestCase):
         with open(out, encoding="utf-8", newline="") as f:
             self.assertEqual(f.read(), set_body(PAGE, STALE_BODY))
 
-    def write_out(self, live_text):
-        """Run --page <live> --write OUT against page.html; (OUT text, the run). OUT is read without newline changes."""
+    def write_out(self, live_text, *extra):
+        """Run --page <live> --write OUT against page.html, with `extra` run arguments; (OUT text, the run). OUT is read without newline changes."""
         live = write_text(os.path.join(self.fetched, "live.html"), live_text)
         out = os.path.join(self.tmp.name, "republish.html")
-        r = self.page_run(live, "--main", TEMPLATE, "--write", out)
+        r = self.page_run(live, "--main", TEMPLATE, "--write", out, *extra)
         self.assertTrue(os.path.isfile(out), r.stdout + r.stderr)
         with open(out, encoding="utf-8", newline="") as f:
             return f.read(), r
@@ -751,6 +762,130 @@ class Stale(unittest.TestCase):
             self.assert_only_new(before, {"behind.html", "current.html"})
         self.assertEqual(spy.call_count, 3)
         self.assertEqual({c.kwargs.get("timeout") for c in spy.call_args_list}, {30})
+
+    # Single-page mode with --write and --items: a closed item's mockup leaves the out page; every other mockup stays.
+    # The out page's designData is read back as JSON, so these cases hold whether or not a writer re-serializes it.
+
+    def prune_out(self, designs, items, as_folder=False, complete=True):
+        """Republish a behind live page whose designData holds `designs` ({slug: mockup html}), with `items` as the --items input.
+        Returns (OUT's designData as a dict, its raw body, OUT's text). The live page is behind, so the run must write OUT and exit 1,
+        and it must read the items."""
+        live = set_body(ALTERED, design_json(designs))
+        source = self.items_folder(items) if as_folder else self.items_file(items)
+        if as_folder and not complete:
+            os.remove(os.path.join(source, ".complete"))
+        text, r = self.write_out(live, "--items", source)
+        self.assertEqual(r.returncode, 1, "the live page is behind, so the run must write OUT and exit 1:\n" + r.stdout + r.stderr)
+        self.assertNotIn("the items cannot be read", r.stdout, "the items were not read, so no mockup was pruned:\n" + r.stdout)
+        self.assertEqual(text.count('id="designData"'), 1, "OUT does not hold exactly one designData block")
+        match = BLOCK.search(text)
+        self.assertIsNotNone(match, "OUT's designData element is not in the shape the reader takes")
+        try:
+            got = json.loads(match.group(2))
+        except ValueError as err:
+            self.fail("OUT's designData body is not one JSON object (%s)" % err)
+        self.assertIsInstance(got, dict, "OUT's designData body is not a JSON object")
+        return got, match.group(2), text
+
+    def test_prune_closed_mockups_leave_the_out_page_named_by_designs_or_by_options(self):
+        designs = {"open-look": "<p>open</p>", "closed-by-designs": "<p>a</p>", "closed-by-option": "<p>b</p>"}
+        items = [look_item(20, "open", designs=["open-look"], options=["open-look"]),
+                 look_item(21, "closed", designs=["closed-by-designs"], options=["closed-by-designs"]),
+                 look_item(22, "closed", designs=None, options=["closed-by-option"])]  # an older item: its option names the design
+        for as_folder in (False, True):
+            with self.subTest("items folder with .complete" if as_folder else "items list file"):
+                got, _, _ = self.prune_out(designs, items, as_folder=as_folder)
+                self.assertEqual(got.get("open-look"), "<p>open</p>", "control: an open item's mockup was pruned from OUT")
+                self.assertNotIn("closed-by-designs", got, "a closed item's mockup, named by its designs, stays on OUT")
+                self.assertNotIn("closed-by-option", got, "a closed item's mockup, named only by its option, stays on OUT")
+
+    def test_prune_closed_item_naming_a_mockup_the_page_lacks_changes_nothing(self):
+        items = [look_item(23, "closed", designs=["gone-look"], options=["gone-look"])]
+        got, _, _ = self.prune_out({}, items)
+        self.assertEqual(got, {}, "OUT's designData changed although the page holds no mockup for the closed item")
+
+    def test_prune_full_size_300_mockups_leaves_exactly_the_open_ones(self):
+        closed = ["closed-%03d" % i for i in range(150)]
+        opened = ["open-%03d" % i for i in range(150)]
+        designs = {slug: "<p>%s</p>" % slug for slug in closed + opened}
+        items = []
+        for i, slug in enumerate(closed):  # half name their mockup by designs, half only by an option, as an older item does
+            items.append(look_item(300 + i, "closed", designs=[slug] if i % 2 == 0 else None, options=[slug]))
+        for i, slug in enumerate(opened):
+            items.append(look_item(500 + i, "open", designs=[slug], options=[slug]))
+        got, _, _ = self.prune_out(designs, items, as_folder=True)
+        stayed = [slug for slug in closed if slug in got]
+        self.assertEqual(stayed, [], "closed items' mockups stay on OUT: %d of 150" % len(stayed))
+        pruned = [slug for slug in opened if slug not in got]
+        self.assertEqual(pruned, [], "open items' mockups were pruned from OUT: %d of 150" % len(pruned))
+
+    def test_prune_keeps_an_open_items_mockup(self):
+        designs = {"open-look": "<p>open</p>", "closed-look": "<p>closed</p>"}
+        items = [look_item(30, "open", designs=["open-look"], options=["open-look"]),
+                 look_item(31, "closed", designs=["closed-look"], options=["closed-look"])]
+        got, _, _ = self.prune_out(designs, items)
+        self.assertEqual(got.get("open-look"), "<p>open</p>", "an open item's mockup was pruned or changed on OUT")
+
+    def test_prune_keeps_a_rulings_mockup_because_an_overturn_reopens_it(self):
+        designs = {"ruling-look": "<p>ruling</p>", "closed-look": "<p>closed</p>"}
+        items = [look_item(32, "closed", designs=["ruling-look"], options=["ruling-look"], arbiter=True, pick="a"),
+                 look_item(33, "closed", designs=["closed-look"], options=["closed-look"])]
+        got, _, _ = self.prune_out(designs, items)
+        self.assertEqual(got.get("ruling-look"), "<p>ruling</p>", "a ruling's mockup was pruned from OUT, but an Overturn reopens the ruling")
+
+    def test_prune_keeps_an_answered_items_mockup_while_the_item_is_open(self):
+        designs = {"answered-look": "<p>answered</p>", "closed-look": "<p>closed</p>"}
+        answered = look_item(34, "open", designs=["answered-look"], options=["answered-look"], pick="a",
+                             lastAnswer={"choice": "a", "note": "", "at": "2026-11-06T18:00:00Z"})
+        items = [answered, look_item(35, "closed", designs=["closed-look"], options=["closed-look"])]
+        got, _, _ = self.prune_out(designs, items)
+        self.assertEqual(got.get("answered-look"), "<p>answered</p>", "an answered item that is still open lost its mockup on OUT")
+
+    def test_prune_keeps_a_mockup_no_item_names(self):
+        designs = {"unnamed-look": "<p>unnamed</p>", "closed-look": "<p>closed</p>"}
+        items = [look_item(36, "closed", designs=["closed-look"], options=["closed-look"])]
+        got, _, _ = self.prune_out(designs, items)
+        self.assertEqual(got.get("unnamed-look"), "<p>unnamed</p>",
+                         "a mockup no item names was pruned from OUT (the writer publishes it before the item write)")
+
+    def test_prune_keeps_a_mockup_shared_by_a_closed_item_and_an_open_one(self):
+        designs = {"shared-look": "<p>shared</p>", "closed-look": "<p>closed</p>"}
+        items = [look_item(37, "closed", designs=["shared-look"], options=[]),  # the closed item names it by designs
+                 look_item(38, "open", designs=None, options=["shared-look"]),  # the open item names it by its option
+                 look_item(39, "closed", designs=["closed-look"], options=["closed-look"])]
+        got, _, _ = self.prune_out(designs, items)
+        self.assertEqual(got.get("shared-look"), "<p>shared</p>", "a mockup that an open item still names was pruned from OUT")
+
+    def test_prune_changes_nothing_from_an_items_folder_without_the_complete_marker(self):
+        designs = {"closed-look": "<p>closed</p>"}
+        items = [look_item(40, "closed", designs=["closed-look"], options=["closed-look"])]
+        got, _, _ = self.prune_out(designs, items, as_folder=True, complete=False)
+        self.assertEqual(got.get("closed-look"), "<p>closed</p>",
+                         "a mockup was pruned from a folder with no .complete marker, whose list may be cut short")
+
+    def test_prune_keeps_an_escaped_mockup_with_script_close_and_comment_openers_in_one_block(self):
+        designs = {"escaped-look": ESCAPED_MOCKUP, "closed-look": "<p>closed</p>"}
+        items = [look_item(41, "open", designs=["escaped-look"], options=["escaped-look"]),
+                 look_item(42, "closed", designs=["closed-look"], options=["closed-look"])]
+        got, body, text = self.prune_out(designs, items)
+        self.assertEqual(got.get("escaped-look"), ESCAPED_MOCKUP, "the kept mockup's text changed on OUT")
+        self.assertNotRegex(body, r"(?i)</script", "a raw </script> in OUT's designData closes the element early")
+        self.assertNotIn("<!--", body, "a raw <!-- in OUT's designData")
+        again = write_text(os.path.join(self.fetched, "out-again.html"), text)
+        r = self.page_run(again, "--main", TEMPLATE)
+        self.assertEqual(r.returncode, 0, "OUT does not read back as current, so the CLI cannot take its designData:\n" + r.stdout + r.stderr)
+
+    def test_prune_empty_complete_list_keeps_every_mockup(self):
+        designs = {"unnamed-look": "<p>unnamed</p>"}
+        got, _, _ = self.prune_out(designs, [])
+        self.assertEqual(got.get("unnamed-look"), "<p>unnamed</p>", "an empty complete items list pruned a mockup from OUT")
+
+    def test_prune_all_closed_leaves_an_empty_designdata_block(self):
+        designs = {"closed-a": "<p>a</p>", "closed-b": "<p>b</p>"}
+        items = [look_item(43, "closed", designs=["closed-a"], options=["closed-a"]),
+                 look_item(44, "closed", designs=None, options=["closed-b"])]
+        got, _, _ = self.prune_out(designs, items)
+        self.assertEqual(got, {}, "closed items' mockups stay on OUT")
 
     # Single-page mode with --items <file or folder>: one wait line per open item with a `waits` field, after the verdict line.
 
@@ -1135,6 +1270,19 @@ def wait_item(n, waits, status="open"):
     item = {"id": "item-%d" % n, "n": n, "kind": "task", "status": status, "title": "CI fix"}
     if waits is not None:
         item["waits"] = waits
+    return item
+
+
+def look_item(n, status, designs=None, options=(), **more):
+    """An item record as `ArtifactData list items` saves it, with its mockups. `designs` lists slugs, one design each (None: no
+    designs list, as an older item has). `options` lists slugs, one option each, named by its `design`. `more` adds fields."""
+    item = wait_item(n, None, status=status)
+    item["kind"] = "decision"
+    if designs is not None:
+        item["designs"] = [{"slug": slug, "label": slug, "file": "docs/design/look-%d/%s.html" % (n, slug)} for slug in designs]
+    item["options"] = [{"key": chr(97 + i), "label": "Option %s" % chr(65 + i), "how": "h", "gain": "g", "lose": "l", "design": slug}
+                       for i, slug in enumerate(options)]
+    item.update(more)
     return item
 
 
