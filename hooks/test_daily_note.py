@@ -25,7 +25,9 @@ Contract the builder codes against. Every case is red until hooks/daily_note.py 
   4. <config dir>/janitor/launchd-sweep.err.log is not empty and was last written on a window day.
   5. <config dir>/state/agent-end-drops.jsonl holds a drop row on a window day: a row log() wrote when
      it dropped the new row (janitor/agent_end_reap.py). One line gives the count, says "dropped", and
-     ends with `Read:` and the file's path. A malformed row is skipped. A missing file is silent.
+     ends with `Read:` and the file's path. A malformed row is skipped, and so is a row whose `at` cannot
+     be converted to Central (year 9999, late, with a negative offset). A missing file is silent. A
+     directory at the path is unknown, and the start still writes its stamp.
   No volume check. A day of high but steady denies, or a ramp of growing volume, prints nothing.
 - Cost of checks 3, 4 and 5: they read files on disk after the stamp check, start no process, and
   write nothing beyond the stamp. Watched in this process, since main() catches every error.
@@ -176,6 +178,14 @@ class NoteCase(unittest.TestCase):
         os.makedirs(os.path.dirname(self.drops_path()), exist_ok=True)
         with open(self.drops_path(), "w", encoding="utf-8") as handle:
             handle.write("".join(lines))
+
+    def stamp_day(self):
+        """The Central day the done-today stamp records, or None when no stamp was written."""
+        path = os.path.join(self.config, "daily-note.stamp")
+        if not os.path.isfile(path):
+            return None
+        with open(path, encoding="utf-8") as handle:
+            return handle.read().strip()
 
     def sweep_err_path(self):
         return os.path.join(self.config, "janitor", "launchd-sweep.err.log")
@@ -635,6 +645,30 @@ class DropRowTests(NoteCase):
     def test_a_missing_drops_file_is_silent(self):
         """The control: no drops file is no failure."""
         self.assert_silent(self.run_note(MORNING))
+
+    def test_an_unreadable_drops_file_prints_one_unknown_line_and_still_writes_the_stamp(self):
+        """A directory at the drops path cannot be read as a log. The note prints one unknown line that ends with
+        the drops path, and the start still writes its stamp. Green on the old code: the OSError branch covers it."""
+        os.makedirs(self.drops_path())
+        lines = self.failure_lines(self.run_note(MORNING))
+        self.assertEqual(len(lines), 1, "want one unknown line, got %r" % lines)
+        self.assertIn("unknown", lines[0].lower(), "the drops line does not say unknown: %r" % lines[0])
+        self.assertTrue(lines[0].endswith("Read: " + self.drops_path()),
+                        "the drops line does not end with its reader path: %r" % lines[0])
+        self.assertEqual(self.stamp_day(), TODAY, "the start with an unreadable drops file did not write its stamp")
+
+    def test_a_drop_row_whose_at_overflows_is_skipped_and_the_other_rows_still_count(self):
+        """A row whose `at` is late on 9999-12-31 with a negative offset overflows the UTC-to-Central conversion
+        (OverflowError). That row is skipped: the valid row still counts, the line still prints, and the stamp is written."""
+        import local_time
+        overflow_at = "9999-12-31T23:00:00-05:00"
+        with self.assertRaises(OverflowError, msg="control: the row's at does not overflow the Central conversion"):
+            local_time.line(lambda: datetime.strptime(overflow_at, "%Y-%m-%dT%H:%M:%S%z"))
+        self.write_drops([drop_row(YESTERDAY_NOON, "good-run"), drop_row(overflow_at, "far-run")])
+        result = self.run_note(MORNING)
+        self.assertEqual(result.stderr, "", "the note wrote to stderr on a drop row whose at overflows: %r" % result.stderr)
+        self.assert_count(self.drops_line(result), 1)
+        self.assertEqual(self.stamp_day(), TODAY, "the start with an overflowing drop row did not write its stamp")
 
 
 class SweepErrorLogTests(NoteCase):
