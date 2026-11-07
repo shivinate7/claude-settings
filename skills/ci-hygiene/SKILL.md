@@ -61,8 +61,8 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
    ready. Each lane PR stays a draft until the integration PR merges. A lane runs
    `~/.claude/bin/merge --lane-lint <pr>` before it hands off, and the batch runner runs it again on
    each lane head before the join. A red lane does not join. Before it marks the integration PR
-   ready, the batch runner runs `~/.claude/bin/merge --lane-lint <integration branch>` on the batch
-   head. A FAIL keeps it a draft. A hand list of checks never stands in for that run: `bin/ci-job`
+   ready, the batch runner runs `~/.claude/bin/merge --lane-lint <integration PR> --integration` on the batch
+   head; a PASS sets the `batch` label, which `merge --reviewed` reads as `batch run`. A FAIL keeps it a draft and sets no label. A hand list of checks never stands in for that run: `bin/ci-job`
    reads its steps from the workflow, so it cannot miss one. A lane never runs a whole CI job
    (decision `lanes-run-no-full-ci-job`, a lane runs no full CI job).
    Never push to a ready PR while its CI run can still go green. A late lane joins the next batch.

@@ -25,19 +25,24 @@
   merge --reviewed        the ledger: one line per open PR, `#n branch act age`, with its one next act read from GitHub alone, first match wins:
                           `batch` (a done review record for the live head), `lane round n` (an open record, or one for another head),
                           `waits on debt:<slug>|page:<item id>` (a held, parked or replaced label and a `Waits on:` comment line),
-                          `blocked on #N` (its base is that PR's head branch), else `NO NEXT ACT`. A line past its limit
+                          `batch run` (the `batch` label: an integration PR, aged from its labeled event, the batch limit),
+                          `blocked on #N` (its base is the head branch of another PR of this repo; a fork's head never counts),
+                          `lane round 1` (a draft with no record), else `NO NEXT ACT`. A failed fix check also reads `lane round 1`. A line past its limit
                           (merge.PR_STATE_AGE_HOURS) or with no next act is RED. When the base's latest run is red, each batch line adds
                           `held by main red <age>`. The last line: the longest wait since a done record, and the count with no next act.
                           Exit 0 nothing red, 1 any red, 2 on a failed read, with no list printed. Cost: the open-pull list, the repo's
-                          comments since the oldest open PR (one read), one issue-events read per held PR, one read of the base's latest run.
-                          No GraphQL, no per-head check read, no timer, file or log.
-  merge --lane-lint <pr|ref> [--base BRANCH] [--lint-unknown-ok "REASON"]
+                          comments since the oldest open PR (one read), one issue-events read per held or batch-labelled PR, one read of the base's latest run.
+                          No GraphQL, no per-head check read, no timer, file or log. A malformed field from GitHub also exits 2.
+                          The batch line carries no CI state of its own (design of 12:56 CST Nov 7, record pr-ledger).
+  merge --lane-lint <pr|ref> [--base BRANCH] [--lint-unknown-ok "REASON"] [--integration]
                           the lint a lane passes before it hands its head to the batch runner: `bin/ci-job checks --lint
                           --base origin/<base>` in a temporary detached worktree at the head. A PR gives its head and base; a
                           commit or ref is linted against --base (default main). A FAIL step refuses. An unknown refuses unless
                           --lint-unknown-ok gives a reason; it is then logged and no `PASS:` line prints. Takes no lock, merges
-                          and pushes nothing; any session may run it, cloud included. Cost per call: one ci-job run (about 550 s,
-                          measured once on one PR head), one worktree.
+                          and pushes nothing; any session may run it, cloud included. --integration (a PR number only; a commit
+                          or ref refuses) adds the `batch` label to the PR after a PASS, never after a FAIL or an unknown; a failed
+                          label POST says the label is unknown and keeps the lint's verdict and exit code. Cost per call: one ci-job
+                          run (about 550 s, measured once on one PR head), one worktree, and with --integration one POST to issues/N/labels.
   merge --idle-lanes --live FILE
                           one line per lane the roadmap's live file shows done and safe to archive, then a summary line. Reads
                           skills/roadmap/build.py (the upkeep row `lanes to archive`). Takes no lock and no merge role, merges and
@@ -54,6 +59,10 @@ git push there (default_lock). Its proxy refuses a ref delete: the lock is relea
 """
 import argparse, ast, contextlib, datetime, functools, json, math, os, pathlib, re, shutil, posixpath, signal, socket, subprocess, sys, tempfile, threading, time, uuid
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "hooks"))
+try:
+    from shared_names import BATCH_LABEL  # the one home of the integration pull request's label (hooks/shared_names.py)
+except ImportError:  # a tree with no hooks/ folder still loads (the import tests copy merge.py alone); the ledger and --integration then stop, see need_batch_label
+    BATCH_LABEL = None
 try:
     import _nowindow  # the one home of a no-window child start (hooks/_nowindow.py)
 except ImportError:  # a hook loads this file; a missing helper never stops that hook
@@ -2455,14 +2464,37 @@ def ci_job_run(wt, *args):
         return "unknown", [l.rstrip() for l in lines if l.startswith("unknown")] or [f"(no unknown line read; ci-job exit {c})"], log, True
     return "unknown", [f"ci-job exited {c}"], log, False
 
-def lane_lint(root, target, host, base="", unknown_ok=""):
+def need_batch_label():
+    """Stop when hooks/shared_names.py, the one home of BATCH_LABEL, could not be loaded: a missing label name never reads as a label nobody uses."""
+    if BATCH_LABEL is None:
+        raise Stop("hooks/shared_names.py is missing beside merge/, so the name of the `batch` label is unknown. Run merge from a full checkout of claude-settings.")
+
+def label_batch(host, n):
+    """Add BATCH_LABEL to pull request n: one REST POST, which the ledger reads as a batch run. A failed POST (a missing label, no access, the
+    network) is said as unknown, never as a label that was set; the caller's verdict and exit code stand."""
+    try:
+        c, out = host.api(f"issues/{n}/labels", method="POST", body={"labels": [BATCH_LABEL]})
+    except Stop as e:
+        c, out = 1, str(e)
+    if c:
+        print(f"merge: whether #{n} carries the `{BATCH_LABEL}` label is unknown: the label POST failed: {out.strip()[:300]} "
+              f"The lint verdict above stands. Put the label on the pull request by hand before the ledger needs it. {LANE_LINT_CITE}", file=sys.stderr)
+    else:
+        say(f"merge: the `{BATCH_LABEL}` label is on #{n}; the ledger reads it as a batch run.")
+
+def lane_lint(root, target, host, base="", unknown_ok="", integration=False):
     """The lint a lane passes before its head goes to the batch runner (decision lanes-run-no-full-ci-job): `ci-job checks --lint --base origin/<base>`
     in a temporary detached worktree at the head, removed on every exit. Takes no lock; merges and pushes nothing. -> 0 on a pass, else raises Stop.
     A target of digits is a PR number: its head and base come from the PR. Any other target is a commit or ref.
     ci-job's stderr (a `start: <step>` line per step, verdict's heartbeat) passes live to this process's stderr; only its stdout is read.
-    Exit 1 of ci-job (a FAIL) refuses always. Exit 2 (an unknown) refuses unless `unknown_ok` is a non-blank reason; it is then logged, with no PASS line."""
+    Exit 1 of ci-job (a FAIL) refuses always. Exit 2 (an unknown) refuses unless `unknown_ok` is a non-blank reason; it is then logged, with no PASS line.
+    `integration` (a PR number only, so the ledger reads the pull request as a batch run): after a PASS, and only then, one REST POST adds the
+    BATCH_LABEL to the pull request. A failed POST says the label is unknown; the lint's verdict and exit code stand."""
+    host = host or Host()
+    if integration:
+        need_batch_label()  # before the lint runs, so a missing name never costs a lint and a refusal after it
     if target.isdigit():
-        info = (host or Host()).pr(int(target))
+        info = host.pr(int(target))
         head, base = info["head"], info["base"]
         tmp, wt = open_worktree(root, info, base)
     else:
@@ -2475,6 +2507,8 @@ def lane_lint(root, target, host, base="", unknown_ok=""):
     short = head[:9]
     if state == "pass":
         say(f"PASS: lint of {short} against {base} passes. The batch runner may take this head, or join it to a batch.")
+        if integration:
+            label_batch(host, int(target))
         return 0
     if state == "fail":
         raise Stop("\n".join([f"the lint of {short} against {base} FAILs:", *lines, *log, LANE_LINT_REMEDY]))
@@ -3153,9 +3187,10 @@ def review_state(rec, head):
 
 # The age limit of each next act, in hours; one home. A line past its limit is RED, so no wait runs unbounded.
 # Keys: the next acts (batch, lane round) and the hold labels (held, parked, replaced). The batch limit is unmeasured: 24 is a first guess,
-# not read from any run history. Move it when a measured wait says otherwise.
+# not read from any run history. Move it when a measured wait says otherwise. A pull request with the BATCH_LABEL (a batch run) counts
+# against the batch limit too.
 PR_STATE_AGE_HOURS = {"batch": 24, "lane round": 72, "held": 168, "parked": 720, "replaced": 24}
-HOLD_LABELS = ("held", "parked", "replaced")  # the labels that take a Waits on line in place of a review record
+HOLD_LABELS = ("held", "parked", "replaced", BATCH_LABEL)  # the labels that stand in for a review record; all but the BATCH_LABEL also need a Waits on line
 WAITS_ON_LINE = "Waits on:"
 
 def epoch_of(t):
@@ -3177,18 +3212,29 @@ def waits_on_id(line):
     return m.group(1)
 
 def reviewed_lines(h, root):
+    """`_reviewed_lines`, with a malformed field in a pull request, comment or event (a missing key, a wrong type, a time that does not parse)
+    read as a Stop: the run prints nothing and exits 2, never a traceback."""
+    try:
+        return _reviewed_lines(h, root)
+    except (KeyError, TypeError, ValueError, AttributeError, IndexError) as e:
+        raise Stop(f"a pull request, comment or event read from GitHub is malformed ({type(e).__name__}: {e}), so the ledger is unknown. " + REVIEW_CITE)
+
+def _reviewed_lines(h, root):
     """-> (lines, red) of `merge --reviewed`, built before any is printed so a failed read prints none (a Stop). Every open pull request gets one next
     act, read from GitHub alone, first match wins: its newest review record is done for the live head, `batch`; the record is open or for another
-    head, `lane round n` (n the next round owed, at most 3); a label in HOLD_LABELS and a `Waits on: debt:<slug>` or `Waits on: page:<item id>`
-    comment line, `waits on <id>`; its base is another open pull request's head branch, `blocked on #N`; else `NO NEXT ACT`. A record that does
-    not parse, or whose net value holds the change, gives no act of its own, so the rules below it run. The line is `#n branch act age`, in whole
-    hours, since the record's comment (batch, lane round), the hold label's last labeled event (a hold), or the pull request's opening (the rest).
-    RED when the act is NO NEXT ACT, the age is past its PR_STATE_AGE_HOURS limit, or, for blocked (no limit of its own), the pull request it
+    head, `lane round n` (n the next round owed, at most 3; 1 when its fix check failed); a label of held, parked or replaced and a
+    `Waits on: debt:<slug>` or `Waits on: page:<item id>` comment line, `waits on <id>`; the BATCH_LABEL, `batch run` (the batch limit); its base
+    is the head branch of another open pull request of the same repo, `blocked on #N` (a fork's head never counts); a draft, `lane round 1`;
+    else `NO NEXT ACT`. A record that does not parse, or whose net value holds the change, gives no act of its own, so the rules below it run.
+    The line is `#n branch act age`, in whole hours, since the record's comment (batch, lane round with a record), the label's last labeled
+    event (a hold, batch run), or the pull request's opening (the rest, a draft's lane round 1 too). The batch line carries no CI state of its
+    own: merge reads CI when it merges (design of 12:56 CST Nov 7, record pr-ledger). RED when the act is NO NEXT ACT, the age is past its PR_STATE_AGE_HOURS limit, or, for blocked (no limit of its own), the pull request it
     waits on is red. When the base's latest run is red, each batch line adds `held by main red <age>`; an unreadable run is a Stop. The last line
     gives the longest wait since a done record and the count with no next act. `red` is True when any line is RED.
     Cost: the open-pull list, the repo's comments since the oldest open pull request (one list read), one `issues/<n>/events` list for each pull
     request that reaches the hold rule, and, when a batch line exists, one `actions/runs` read of the base (its jobs too, only when its latest run
     did not succeed: host.base_state). No GraphQL, no head or check read, no timer, file or log."""
+    need_batch_label()
     pulls = h.pages("pulls", fields={"state": "open"})
     summary = lambda wait, none: f"longest wait since a done record: {wait}h; no next act: {none}"
     if not pulls:
@@ -3203,7 +3249,10 @@ def reviewed_lines(h, root):
             plain.setdefault(int(m.group(1)), []).append(row)
             if body.splitlines()[:1] == [REVIEW_MARKER]:
                 records.setdefault(int(m.group(1)), []).append(row)
-    heads = {d["head"]["ref"]: d["number"] for d in pulls}
+    def same_repo(d):  # a fork's head branch may share a name with a base branch: only a head in the base's own repo can be what another pull request is based on
+        base_repo = (d["base"].get("repo") or {}).get("full_name")
+        return not base_repo or (d["head"].get("repo") or {}).get("full_name") == base_repo
+    heads = {d["head"]["ref"]: d["number"] for d in pulls if same_repo(d)}
     acts = {}  # n -> (branch, act text, kind or None for no next act, since, the number it is blocked on)
     for d in sorted(pulls, key=lambda d: d["number"]):
         n, sha, opened = d["number"], d["head"]["sha"], github_epoch(d["created_at"])
@@ -3217,16 +3266,27 @@ def reviewed_lines(h, root):
                 act = ("batch", "batch", at, None)
             elif state in ("open", "stale"):
                 owed = min(max((i for i, *_ in rec["rounds"]), default=0) + 1, REVIEW_LAST_ROUND)
+                if state == "open" and rec["fix"] and rec["fix"][3] != "PASS":  # a failed fix check starts the lane over: the fix needs a new lane at round 1
+                    owed = 1
                 act = (f"lane round {owed}", "lane round", at, None)
         if act is None:
-            hold = next((k for k in HOLD_LABELS if k in labels), None)
             waits = next((line for _, body in reversed(plain.get(n, [])) for line in reversed(body.splitlines()) if line.startswith(WAITS_ON_LINE)), None)
-            wid = hold and waits and waits_on_id(waits.rstrip())
-            if wid:  # the event list is read only here: the age of a hold is the age of its label
+            wid = waits and waits_on_id(waits.rstrip())
+            for hold in (k for k in HOLD_LABELS if k in labels):
+                if hold == BATCH_LABEL:
+                    act_text, kind = "batch run", "batch run"
+                elif wid:
+                    act_text, kind = f"waits on {wid}", hold
+                else:
+                    continue
+                # the event list is read only here: the age of a hold is the age of its label
                 events = [e for e in h.pages(f"issues/{n}/events") if e.get("event") == "labeled" and (e.get("label") or {}).get("name") == hold]
-                act = (f"waits on {wid}", hold, github_epoch(events[-1]["created_at"]) if events else opened, None)
+                act = (act_text, kind, github_epoch(events[-1]["created_at"]) if events else opened, None)
+                break
         if act is None and heads.get(d["base"]["ref"], n) != n:
             act = (f"blocked on #{heads[d['base']['ref']]}", "blocked", opened, heads[d["base"]["ref"]])
+        if act is None and d.get("draft"):  # a draft with no record is a lane at its first round, aged from its opening
+            act = ("lane round 1", "lane round", opened, None)
         acts[n] = (d["head"]["ref"], *(act or ("NO NEXT ACT", None, opened, None)))
     held = ""
     if any(a[2] == "batch" for a in acts.values()):  # one read of the base's latest run, for the red-main text of each batch line
@@ -3243,7 +3303,7 @@ def reviewed_lines(h, root):
             return True
         if kind == "blocked":  # no limit of its own: it inherits the red of the pull request it waits on
             return blocker not in seen and red_of(blocker, (*seen, n))
-        return hours(since) > PR_STATE_AGE_HOURS[kind]
+        return hours(since) > PR_STATE_AGE_HOURS["batch" if kind == "batch run" else kind]  # a batch run counts against the batch limit
     lines, reds = [], 0
     for n in sorted(acts):
         branch, act, kind, since, _ = acts[n]
@@ -3354,6 +3414,7 @@ def main(argv, host=None, lock=None):
     p.add_argument("--lane-lint", action="store_true", help="lint the head of a lane (PR number, commit or ref) as the batch runner's lint does; takes no lock, merges nothing")
     p.add_argument("--base", default="", metavar="BRANCH", help="with --lane-lint on a commit or ref: the base branch to lint against (default main)")
     p.add_argument("--lint-unknown-ok", default="", metavar="REASON", help="with --lane-lint: go on when a lint step is unknown (never when one FAILs); logged")
+    p.add_argument("--integration", action="store_true", help="with --lane-lint <pr>: after a PASS, add the `batch` label to the integration pull request (one POST)")
     p.add_argument("--role", metavar="TIER", help="cloud only: record this session's merge role (batch-runner only)")
     p.add_argument("--unlock", nargs="?", const=True, metavar="BRANCH")
     p.add_argument("--undo-check-unknown-ok", default="", metavar="REASON", help="go on when the silent-undo check cannot read the history; logged")
@@ -3380,8 +3441,8 @@ def main(argv, host=None, lock=None):
                          or a.review_record or a.lane_lint):
         p.error("--idle-lanes stands alone")
     if not a.lane_lint:
-        if a.base or a.lint_unknown_ok:
-            p.error("--base and --lint-unknown-ok go with --lane-lint")
+        if a.base or a.lint_unknown_ok or a.integration:
+            p.error("--base, --lint-unknown-ok and --integration go with --lane-lint")
         if a.pr is not None and not a.pr.isdigit():
             p.error(f"argument pr: invalid int value: {a.pr!r}")
     if a.idle_lanes:
@@ -3389,6 +3450,8 @@ def main(argv, host=None, lock=None):
     elif a.lane_lint:
         if a.pr is None or a.confirm or a.unlock is not None or a.role is not None or a.reviewed or a.review_record:
             p.error("--lane-lint takes a pull request number, commit or ref, and stands alone")
+        if a.integration and not a.pr.isdigit():
+            p.error("--integration labels a pull request, so --lane-lint needs its number, not a commit or ref")
     elif a.role is not None:
         if a.pr is not None or a.confirm or a.unlock is not None or a.reviewed or a.review_record:
             p.error("--role stands alone")
@@ -3418,7 +3481,7 @@ def main(argv, host=None, lock=None):
             if c:
                 raise Stop("not in a git checkout " + LANE_LINT_CITE)
             with release_on_signals():  # a signal ends the run through lane_lint's `finally`, which removes the worktree
-                return lane_lint(root, a.pr, host, a.base, a.lint_unknown_ok)  # before the role check and any lock: it merges and pushes nothing
+                return lane_lint(root, a.pr, host, a.base, a.lint_unknown_ok, a.integration)  # before the role check and any lock: it merges and pushes nothing
         if a.role is not None:
             write_merge_role(a.role)
             say(f"merge: merge role {a.role} recorded for this session.")

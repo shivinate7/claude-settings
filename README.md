@@ -143,9 +143,12 @@ merge --unlock [BRANCH] remove the merge lock on BRANCH (default: the default br
 merge <pr> --review-record --head SHA --kind K --guard yes|no [--round N:ROLE:MODEL:VERDICT ...] [--net-value V]
                         print the review record for the head SHA that was reviewed. Exit 1 when the PR's live head is another sha.
                         Posts nothing: the lane posts it as a PR comment.
-merge --reviewed        the ledger: one line per open PR with its one next act (batch, lane round n, waits on <id>, blocked on #N, or NO NEXT ACT)
-                        and its age in hours, read from GitHub alone. RED past the age limit or with no next act. Exit 0 nothing red,
-                        1 any red, 2 on a failed read.
+merge --reviewed        the ledger: one line per open PR with its one next act (batch, batch run, lane round n, waits on <id>, blocked on #N,
+                        or NO NEXT ACT) and its age in hours, read from GitHub alone. A draft with no record reads `lane round 1`; a PR
+                        with the `batch` label reads `batch run`. When main's latest run is red, each batch line adds `held by main red <age>`.
+                        RED past the age limit or with no next act. The last line: the longest wait since a done record, and the count
+                        with no next act. Exit 0 nothing red, 1 any red, 2 on a failed read (a malformed field too).
+merge --lane-lint <pr> --integration   the lane lint; after a PASS it adds the `batch` label to the integration PR (one POST).
 merge --dev ...         run the checkout's own tree, not origin main
 ```
 
