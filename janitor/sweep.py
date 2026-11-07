@@ -449,9 +449,11 @@ def _ticks_lock_stale(pid: int, ticks: int):
 
 
 def stale_agent_lock_verdict(reason: str):
-    """True when REASON is a claude agent lock that may go. Two forms: the Agent tool's own
-    lock `claude agent agent-<id> (pid N start <date>)`, and `claude agent agent-<id> (pid N)`
-    with no start time. N is the HOST claude process, not the agent.
+    """True when REASON is a claude agent lock that may go. Three forms: the Agent tool's own
+    lock `claude agent agent-<id> (pid N start <date>)`, the harness's live form
+    `claude agent agent-<id> (pid N start <ticks>)` (S is clock ticks since boot; Linux only,
+    `_ticks_lock_stale`), and `claude agent agent-<id> (pid N)` with no start time. N is the HOST
+    claude process, not the agent.
     A lock goes when N is dead; with a start time, also when N is alive with another start time (pid
     reuse). LIMIT: with no start time there is no pid-reuse check, so a dead host whose pid a live
     process now holds keeps its lock. False when the holder still runs, or the reason is any other
@@ -899,8 +901,8 @@ def decide_agent_end_worktree(where: str, entry: dict, min_idle=None):
     the seconds of git quiet the tree needs (None: none). Idle is read first, or taken from
     ENTRY["idle"] when the caller read it: `git status` can rewrite the index and make every tree
     look active. ENTRY["finished"] says the caller proved the agent finished
-    (`agent_end_reap.agent_finished`): only then may a live host lock pass, and the shells below that
-    host be listed to stop. The rest is
+    (`agent_end_reap.agent_finished`): only then may a live host lock pass. No process is ever stopped:
+    any process inside keeps the tree. The rest is
     `decide_worktree` with the person's run flag, which skips its merged and idle keeps and keeps
     the clean, lock, session, live-ls-remote and process checks. Then HEAD must be on a
     remote-tracking ref. Any failed read keeps. A tree an earlier remove left half done
