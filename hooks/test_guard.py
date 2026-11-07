@@ -8793,6 +8793,19 @@ for _cmd in (
 ):
     sh("git env set: PowerShell, a glued block that does not set, allowed, %s" % _cmd[:36].replace(
         "\n", " "), _cmd, "allow", tool="PowerShell", cwd=NOGIT)
+# Two safe forms. A null set removes the name, so it points no git at another tree, and Write-Host prints
+# a script block without running it. A value set inside a block that does run stays refused, as does a call
+# operator on a block that sets.
+sh("git env set: PowerShell, a null set inside try, allowed",
+   "try{$env:GIT_DIR=$null}catch{}", "allow", tool="PowerShell", cwd=NOGIT)
+sh("git env set: PowerShell, a script block given to Write-Host is printed, not run, allowed",
+   "Write-Host {$env:GIT_DIR=1}", "allow", tool="PowerShell", cwd=NOGIT)
+sh("git env set: PowerShell, a value set inside try, denies",
+   "try{$env:GIT_DIR='x'}catch{}", "deny", GIT_ENV_RULE, tool="PowerShell", cwd=NOGIT)
+sh("git env set: PowerShell, a call operator on a block that sets, denies",
+   "& { $env:GIT_DIR=1 }", "deny", GIT_ENV_RULE, tool="PowerShell", cwd=NOGIT)
+sh("git env set: PowerShell, a value set then git status, denies",
+   "$env:GIT_DIR='x'; git status", "deny", GIT_ENV_RULE, tool="PowerShell", cwd=NOGIT)
 # Scanner cases (building-scanner-respects-strings): a comment opener, a lone apostrophe, a
 # newline inside a string and a here-string ahead of a glued set must not hide it.
 for _label, _head in (
