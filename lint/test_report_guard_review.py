@@ -52,8 +52,9 @@ FAILED_READS = (("the pull request read exits 1", {"fail_pulls": "exit"}),
                 ("the comment read answers garbage", {"fail_comments": "garbage"}))
 
 # The stand-in gh. It serves `pulls/<n>` and `issues/<n>/comments`, optionally under repos/<o>/<r>/. A list read
-# pages as gh does: 30 items a page unless per_page says more (at most 100), one page unless --paginate, and
-# --paginate alone prints the pages back to back while --paginate --slurp prints one array of pages.
+# pages as gh does: 30 items a page unless per_page says more (at most 100), one page unless --paginate. --paginate
+# joins the pages into one array, and --paginate --slurp prints an array of the pages. This follows listing() in
+# hooks/test_guard.py, the repo's model of gh. Real gh's bare --paginate output is not measured here.
 FAKE_GH = r'''import json, os, re, sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 with open(os.path.join(HERE, "state.json"), encoding="utf-8") as handle:
@@ -127,7 +128,7 @@ elif issue:
     if "--slurp" in flags:
         print(json.dumps(chosen))
     elif "--paginate" in flags:
-        print("".join(json.dumps(p) for p in chosen))
+        print(json.dumps([c for p in chosen for c in p]))
     else:
         print(json.dumps(chosen[0]))
 else:
@@ -275,6 +276,7 @@ class ReviewRecordTests(unittest.TestCase):
         out = self.stop(self.lane_turn(report("OTHER: round 2 PASS on commit 1234abc.")))
         self.assert_blocked(out)
         self.assertRegex(out["reason"], r"(?i)\bPR\b|pull request", out)
+        self.assertNotRegex(out["reason"], r"merge \d+ --review-record", out)  # no number nobody gave
 
     def test_lane_pass_with_a_lone_apostrophe_still_blocks(self):
         # Catches: a quote scanner that reads the text between two apostrophes as quoted, and so hides the claim.
@@ -346,11 +348,17 @@ class ReviewRecordTests(unittest.TestCase):
                 self.assertIsNone(out, out)
                 self.assertEqual(self.gh_calls(), [])
 
-    def test_pass_claim_in_a_code_span_is_not_a_claim(self):
-        # Catches: a claim quoted in inline code read as a claim made now.
-        out = self.stop(self.lane_turn(report("OTHER: `round 2 PASS` quoted from the old record on PR #12.")))
-        self.assertIsNone(out, out)
-        self.assertEqual(self.gh_calls(), [])
+    def test_pass_claim_in_a_code_span_or_fence_is_not_a_claim(self):
+        # Catches: a claim quoted in inline code, or in a fenced block above the report, read as a claim made now.
+        with self.subTest("code span"):
+            out = self.stop(self.lane_turn(report("OTHER: `round 2 PASS` quoted from the old record on PR #12.")))
+            self.assertIsNone(out, out)
+            self.assertEqual(self.gh_calls(), [])
+        with self.subTest("fenced block above the report"):
+            fenced = "```\nOTHER: round 2 PASS on PR #12.\n```\n" + report("OTHER: round 2 FAIL on PR #12, fix pending.")
+            out = self.stop(self.lane_turn(fenced))
+            self.assertIsNone(out, out)
+            self.assertEqual(self.gh_calls(), [])
 
     def test_landed_lane_reply_without_a_claim_is_clean(self):
         # Control: the landed fixture passes every other check, so the landed red case fails on this check alone.
@@ -377,7 +385,7 @@ class ReviewRecordTests(unittest.TestCase):
                 out = self.stop(self.lane_turn(report(CLAIM)))
                 message = (out or {}).get("systemMessage", "")
                 self.assertIn("UNKNOWN", message, out)
-                self.assertNotIn("clear", message.lower(), out)
+                self.assertNotRegex(message, r"(?i)\bclear\b", out)
 
 
 if __name__ == "__main__":
