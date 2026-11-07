@@ -13566,25 +13566,29 @@ class ProseJudge(Env):
         self.assertEqual(prose_unknown_lines(out), [], "a line is not judged\n" + out)
         self.assertEqual(rc, 0, out)
 
-    def test_a_line_alone_over_one_call_budget_gets_a_call_of_its_own(self):
-        # One line of about 100 KB, with its excerpts, is over any one call's budget. It goes in a call of its own; the small lines
-        # are judged in calls that do not hold it.
+    def test_a_line_alone_over_one_call_budget_is_cut_into_a_call_within_the_budget(self):
+        # One line of about 100 KB is over any one call's budget. Its rows are cut with the cut marker, so its call stays within the
+        # budget, and every line, the 100 KB one included, is judged once.
         huge = "huge-l1: cloud sessions cannot push to main. " + "the reason is written out in full, " * 3000 + "(read src/widget.py:4)."
         small = ["small-l%d" % n for n in (1, 2, 3)]
         doc = "# Cloud notes\n\n" + huge + "\n" + "\n".join("%s: cloud sessions cannot push to main. (read src/widget.py:4)." % t for t in small) + "\n"
         self.setup_range({PROSE: doc}, {BACKING: BACKING_TEXT})
         stub, rc, out = self.judge(holds_every_line, cap=None)
         self.assertTrue(stub.prompts, "no model call: the file was not selected")
-        holding = [tags_in(p) for p in stub.prompts if "huge-l1" in tags_in(p)]
+        budget = merge.PROSE_JUDGE_CALL_BYTES
+        for prompt in stub.prompts:
+            size = len(prompt.encode("utf-8"))
+            self.assertLessEqual(size, budget, "a call of %d bytes, want at most the budget of %d bytes: a line over one budget is cut, never sent whole" % (size, budget))
+        holding = [p for p in stub.prompts if "huge-l1" in tags_in(p)]
         self.assertEqual(len(holding), 1, "calls holding the 100 KB line: %d, want 1" % len(holding))
-        self.assertEqual(holding[0], ["huge-l1"], "the call holding the 100 KB line also holds %d other lines, want the line alone: a line over one budget gets a call of its own" % (len(holding[0]) - 1))
+        self.assertIn("row cut at", holding[0], "the call holding the 100 KB line has no cut marker: its rows were not cut")
         self.assertEqual(sorted(t for p in stub.prompts for t in tags_in(p)), sorted(["huge-l1"] + small), "a line is not in exactly one call")
         self.assertEqual(prose_unknown_lines(out), [], "a line is not judged\n" + out)
         self.assertEqual(rc, 0, out)
 
-    def test_no_built_prompt_goes_over_the_call_byte_budget_but_a_lone_line(self):
+    def test_no_built_prompt_goes_over_the_call_byte_budget_even_for_a_lone_line(self):
         # Packed: one line of about 100 KB, then 30 lines of about 360 bytes. Each built prompt holds at most merge.PROSE_JUDGE_CALL_BYTES
-        # UTF-8 bytes, unless the call holds one line alone. The budget is read from merge, never copied.
+        # UTF-8 bytes, a line over the budget alone included. The budget is read from merge, never copied.
         huge = "huge-l1: cloud sessions cannot push to main. " + "the reason is written out in full, " * 3000 + "(read src/widget.py:4)."
         tags = ["small-l%02d" % n for n in range(1, 31)]
         rows = [huge] + ["%s: cloud sessions cannot push to main. %s(read src/widget.py:4)." % (tag, TAGGED_FILLER) for tag in tags]
@@ -13593,8 +13597,8 @@ class ProseJudge(Env):
         self.assertTrue(stub.prompts, "no model call: the file was not selected")
         budget = merge.PROSE_JUDGE_CALL_BYTES
         for prompt in stub.prompts:
-            size, holding = len(prompt.encode("utf-8")), len(judged_rows(prompt))
-            self.assertTrue(size <= budget or holding == 1, "a call of %d bytes holds %d lines, want at most the budget of %d bytes, or one line alone" % (size, holding, budget))
+            size = len(prompt.encode("utf-8"))
+            self.assertLessEqual(size, budget, "a call of %d bytes, want at most the budget of %d bytes" % (size, budget))
         self.assertEqual(sorted(t for p in stub.prompts for t in tags_in(p)), sorted(["huge-l1"] + tags), "a line is not in exactly one call")
         self.assertEqual(prose_unknown_lines(out), [], "a line is not judged\n" + out)
         self.assertEqual(rc, 0, out)
@@ -13854,6 +13858,7 @@ class ProseJudgePrompt(unittest.TestCase):
 
     DEFS = "hooks/defs.py"  # a tracked code path that the packed lines name in backticks; its text comes through the read hook
     DEFS_PROSE = "docs/notes/defs.md"  # governed prose whose lines name DEFS
+    INDEX = "skills/impeccable/scripts/data/font-index.json"  # a minified index: its one row is about 1.1 MB
 
     def pack(self, picked, served):
         """merge.prose_judge_pack over `picked`, the body read through the `read` hook from `served` (path -> text). -> (jobs, past)."""
@@ -13917,6 +13922,24 @@ class ProseJudgePrompt(unittest.TestCase):
         self.assertLessEqual(sum(handed), 2 * count,
                              "the prompt builder was handed %d rows for %d lines, want at most %d: each line is built about once, "
                              "not once per candidate" % (sum(handed), count, 2 * count))
+
+    def test_a_cite_of_a_one_row_index_keeps_every_call_within_the_budget(self):
+        # The line cites the one row of a minified index, about 1.1 MB. The cited row is cut with the cut marker, so the call that
+        # holds the line stays within the budget and does not carry the row's 1.1 MB.
+        served = {self.INDEX: '{"fonts": "' + "f" * (1100 * 1024) + '"}\n'}
+        cite = "read %s:1" % self.INDEX
+        picked = {self.DEFS_PROSE: {3: ("The font list is in the index (%s)." % cite, [cite])}}
+        jobs, past = self.pack(picked, served)
+        self.assertEqual(past, 0, "scope: %d lines are past the calls, want none" % past)
+        self.assertEqual([(p, n) for _, rows, _ in jobs for p, n in rows], [(self.DEFS_PROSE, 3)],
+                         "scope: the calls do not hold the one line once")
+        for _, rows, prompt in jobs:
+            size = len(prompt.encode("utf-8"))
+            self.assertLessEqual(size, merge.PROSE_JUDGE_CALL_BYTES,
+                                 "a call of %d bytes for one line that cites a 1.1 MB row, want at most the budget of %d"
+                                 % (size, merge.PROSE_JUDGE_CALL_BYTES))
+            self.assertIn("row cut at", prompt, "the cited row of %s is not cut: the call has no cut marker" % self.INDEX)
+            self.assertFalse("f" * 1000 in prompt, "the call carries more than 1000 characters of the cited row of %s" % self.INDEX)
 
 
 class OrderLock(merge.GitLock):
