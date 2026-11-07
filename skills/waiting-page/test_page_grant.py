@@ -389,6 +389,35 @@ class NotCounted(Base):
                        pick="a")
         self.assertNotCounted(r, "closed item with home and no lastAnswer", reason="lastanswer")
 
+    def test_closed_item_with_home_and_matching_last_answer_and_no_lane_not_counted(self):
+        """A normal close sets `home` and keeps its `lastAnswer`, with no `lane`. Only a routed close, one with `lane` set,
+        counts its answer."""
+        last = {"choice": "a", "note": "", "at": AT}
+        r = self.check(self.repo(), self.pair(item_fields={"status": "closed", "home": "answered-leaves-page", "lane": ABSENT,
+                                                           "lastAnswer": last}), pick="a")
+        self.assertNotCounted(r, "closed item with home and matching lastAnswer and no lane", reason="lane")
+
+    def test_closed_item_with_a_lane_that_is_not_a_non_empty_string_not_counted(self):
+        last = {"choice": "a", "note": "", "at": AT}
+        for lane in ("", "   ", None, 7):
+            with self.subTest(lane=lane):
+                r = self.check(self.repo(), self.pair(item_fields={"status": "closed", "home": "answered-leaves-page",
+                                                                   "lane": lane, "lastAnswer": last}), pick="a")
+                self.assertNotCounted(r, "closed item with lane %s" % json.dumps(lane), reason="lane")
+
+    def test_closed_routed_item_with_a_blank_home_not_counted(self):
+        last = {"choice": "a", "note": "", "at": AT}
+        r = self.check(self.repo(), self.pair(item_fields={"status": "closed", "home": "   ", "lane": "owner-word-relay",
+                                                           "lastAnswer": last}), pick="a")
+        self.assertNotCounted(r, "closed item with lane and a blank home", reason="home")
+
+    def test_closed_routed_arbiter_ruling_answered_with_a_pick_not_counted(self):
+        """An arbiter ruling counts only as an overturn. A pick on a routed arbiter ruling is not counted."""
+        last = {"choice": "a", "note": "", "at": AT}
+        r = self.check(self.repo(), self.pair(item_fields={"status": "closed", "arbiter": True, "home": "answered-leaves-page",
+                                                           "lane": "owner-word-relay", "lastAnswer": last}), pick="a")
+        self.assertNotCounted(r, "closed arbiter ruling with lane and home answered with a pick", reason="arbiter")
+
     def test_answer_at_zone_less_not_counted(self):
         r = self.check(self.repo(), self.pair(answer_fields={"at": "2026-11-04T13:56:29.078"}))
         self.assertNotCounted(r, "answer at has no zone", reason="zone")
