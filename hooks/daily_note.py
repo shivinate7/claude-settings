@@ -19,8 +19,9 @@ lint/guard_log_report.py, beside this hook's folder, so the path holds from any 
 - agent-end reap runs killed or crashed. The reader is the agent-end payload log,
   <config dir>/state/agent-end-payloads.jsonl (janitor/agent_end_reap.py `log`). A run counts when
   its run id's time (the part after the pid) falls on a window day, and it has a `started` row
-  that no `done` row follows, or a row with an `error` key. A malformed row is skipped. A missing
-  file is not a failure; an unreadable one is unknown.
+  that no `done` row follows, or a row with an `error` key. A malformed row is skipped. A started
+  row can also be a done row that `log()` dropped (lock or replace timeout, or a refused read, both
+  printed to stderr). A missing file is not a failure; an unreadable one is unknown.
 - the daily sweep's error log, <config dir>/janitor/launchd-sweep.err.log
   (janitor/install_launchd.py `build_plist`), exists, is not empty, and was last written on a window
   day. The line names it and launchd-sweep.log, its stdout log. A missing file is not a failure.
@@ -138,8 +139,8 @@ def agent_end_failures(path, window):
            if (seen["bad"] or (seen["started"] and not seen["done"])) and run_day(run) in days]
     if not bad:
         return []
-    return [fit("%d agent-end reap run(s) killed or crashed, %s: servers may be left."
-                % (len(bad), span_of(window)),
+    return [fit("%d agent-end reap run(s) killed or crashed, %s: servers may be left (or a done row "
+                "that log() dropped, see stderr)." % (len(bad), span_of(window)),
                 "%d agent-end reap run(s) killed or crashed:" % len(bad), "Read: " + path)]
 
 
