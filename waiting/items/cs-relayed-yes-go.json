@@ -14,6 +14,7 @@
   "owner": "coordinator",
   "rank": 1,
   "ref": "item 349; item 335; decision auto-mode-owner-acts",
+  "reply": "Your 13:18 CST question on the 'field the page does not draw' warning: my mistake. I wrote the link as `link`, and the page draws only `links`. It is fixed here. Six of my items carried it, because the field check skips my writes. Step page-checks-reach-triage fixes that. Triage, 13:24 CST.",
   "short": "Type go in relayed-yes-allow",
   "status": "open",
   "title": "Type the go in lane relayed-yes-allow's chat",
