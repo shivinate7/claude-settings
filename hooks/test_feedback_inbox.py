@@ -3612,6 +3612,19 @@ def table_reorient_forms():
               case_reorient_nothing_when_no_open_items))
 
 
+def case_fence_line_read_by_the_guard_is_the_shared_fence_line():
+    import feedback_guard  # the guard's own unfenced(), not a copy of its fence rule
+    # Pins: a fence line indented four spaces, or led by a tab, opens a fence in the guard, so the text under it is no prose.
+    for opener in ("    ```", "\t```"):
+        kept = feedback_guard.unfenced("%s\nhidden\n```\nshown" % opener)
+        check("fence line %r: the text under it is fenced" % opener, "hidden" not in kept and "shown" in kept, repr(kept))
+    # Red: a line led by a no-break space is no fence line (CommonMark indents with spaces and tabs only), so its text
+    # is prose and the fence opens at the next ``` line. The guard reads it as a fence today.
+    kept = feedback_guard.unfenced("  ```\nhidden line\n```\nshown line")
+    check("no-break-space fence line: the text after it is prose, read until the real fence",
+          "hidden line" in kept and "shown line" not in kept, repr(kept))
+
+
 CASES = (
     case_every_owner_message_is_captured,
     case_notices_are_never_captured,
@@ -3771,6 +3784,7 @@ CASES = (
     case_repeat_cap_keeps_the_newest_notes_lines,
     case_repeat_cap_keeps_the_open_roadmap_steps,
     case_repeat_list_ids_and_refs_do_not_cost_the_valid_hit,
+    case_fence_line_read_by_the_guard_is_the_shared_fence_line,
 )
 
 
