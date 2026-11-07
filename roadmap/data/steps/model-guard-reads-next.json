@@ -1,0 +1,11 @@
+{
+  "title": "The model-name report guard reads only Done items, not Next lines",
+  "lane": "session_013NEJL1SsG5NZULw1mG6qgB",
+  "why": "Owner ask, 13:20 CST Nov 7 (\"why not fix it then\"): the report guard that wants each Done item to name its agents' models flags Next lines as Done items.",
+  "note": "Done: a red test where a Next line under a report is flagged, then green; Done lines are still checked.",
+  "phase": "now",
+  "status": "doing",
+  "order": 0.75,
+  "owner": "coordinator",
+  "updatedAt": "2026-11-07T13:28:00-06:00"
+}

@@ -1,0 +1,11 @@
+{
+  "title": "The page export and WAITING_COLLECTIONS include receipts",
+  "lane": "session_013NEJL3a6tqDKidXRwjLeAE",
+  "why": "Owner ask, 13:20 CST Nov 7 (\"why not fix it then\"): the page export and WAITING_COLLECTIONS leave out the `receipts` collection, so receipts are lost from the record branch.",
+  "note": "Done: a red test where an export of a page with a receipt drops it, then green; receipts appear under waiting/ on the next export.",
+  "phase": "now",
+  "status": "doing",
+  "order": 0.75,
+  "owner": "coordinator",
+  "updatedAt": "2026-11-07T13:28:00-06:00"
+}

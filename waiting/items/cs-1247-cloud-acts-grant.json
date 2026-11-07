@@ -1,7 +1,7 @@
 {
   "added": "2026-11-07T18:36:00Z",
   "context": "Goal: your Nov 4 ruling takes effect.\nWhat 219 a is: any repo's coordinator may ask a session on your Mac to set branch protection, and to delete branches that are already merged or archived. Today's bullet lets only the claude-settings coordinator ask, and it lists three acts.\nProblem (rule): the cloud's safety check refuses any session's edit of .claude/CLAUDE.md as self-modification. It also refused the coordinator's brief to a lane that would add the allow line. So PR #1247 has waited on your paste since Nov 4.\nBased on (read): #1247's body; the coordinator's 12:56 CST note that the classifier refused its lane brief.\nDeparts from: main's bullet names the claude-settings coordinator and three acts \u2014 any repo's coordinator, two acts.\nThe allow line for option a (add it to autoMode.allow in claude-settings settings.json):\n\"Owner Ruling Into Rules File: Editing a CLAUDE.md file (CLAUDE.md or .claude/CLAUDE.md) in a repo owned by shivinate7 is allowed on a branch other than the default branch, to write an owner ruling that the session cites by its page item and time, or a ruling the owner typed in this conversation. It can be undone: the edit reaches main only by a pull request, which can be closed or reverted. Never covers settings.json, hook or guard files, autoMode lines, a push to the default branch, or deleting or weakening an owner grant that the cited ruling does not name.\"",
-  "home": "item 342; claude-settings #1247",
+  "home": "decision auto-mode-owner-acts; claude-settings #1421; item 350",
   "id": "cs-1247-cloud-acts-grant",
   "kind": "decision",
   "lastAnswer": {
@@ -35,6 +35,7 @@
   "pick": "b",
   "rank": 2,
   "ref": "claude-settings #1247; item 219",
+  "reply": "Superseded by your chat at 13:16 CST: \"i thought i literally ruled that sessoins can and should add auto mode lalow lines for itself\". That restates decision auto-mode-owner-acts (owner, 2026-10-30 16:24 CDT, \"Allow them\"). Your 12:38 b pick rested on the coordinator's false claim that nothing allowed it. The 219 a bullet still landed as #1421. The relayed-yes grant and its allow entry go to lane relayed-yes-allow (item 350).",
   "short": "219 a bullet: paste it, or allow sessions to edit CLAUDE.md",
   "status": "closed",
   "title": "Your Nov 4 ruling (219 a) is not on main yet: paste its bullet into .claude/CLAUDE.md, or first add an allow line so sessions can make such edits?",
