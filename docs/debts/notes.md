@@ -1495,7 +1495,6 @@
 - one-home-exempt-whole-file: an `exempt` marker silences every copy of its rule in its file, not only the copy beside it (lint/find_copies.py). Decision: one-home-check Fix: none — rare and harmless. Until: 2026-11-21
 - one-home-copy-bypasses: a copy with a digit for a number word, or with `<br>` or `<em>` inside it, passes `find_copies.py --in-repo`. Decision: one-home-check Fix: none — rare and harmless. Until: 2026-11-21
 - one-home-comment-over-blank-line: an HTML comment that spans a blank line is read as prose by `lint/word_runs.py`, because units split at a blank line. Decision: one-home-check Fix: none — rare and harmless. Until: 2026-11-21
-- one-home-two-fence-regexes: lint/compliance_probes.py and lint/stale_cites.py each keep a FENCE regex (any indent) beside lint/word_runs.py FENCE (3 spaces). A shared any-indent FENCE would end it. Decision: one-home-check Fix: step:one-home-shared-fence
 - stale006-rename-and-reword: a rule renamed and reworded in one change finds no head sentence under its old id, so STALE006 lists its old runs. Owner edits only. Decision: one-home-check Fix: none — rare and harmless. Until: 2026-11-21
 - one-home-long-gloss-flags: a gloss of 8 or more words that repeats a rule is flagged COPY001. Decision: one-home-check Fix: none — rare and harmless. Until: 2026-11-21
 - one-home-short-rule-gloss-hole: a copy of a rule under about 16 words passes when it drops or inserts a gloss of 7 words or fewer. Decision: one-home-check Fix: none — rare and harmless. Until: 2026-11-21

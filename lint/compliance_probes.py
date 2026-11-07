@@ -403,10 +403,7 @@ SENTENCE_END = re.compile(r"(?<=[.!?])\s+")
 KNOWN_EXEMPTION = re.compile(r"\bknown exemptions?\b", re.I)
 RULE_REF = re.compile(r"\brule:([a-z0-9][a-z0-9-]*)")
 ANCHOR_COMMENT = word_runs.COMMENT
-# Not word_runs.FENCE: that one reads a fence indented up to 3 spaces, and this one any indent, so a fence nested in a list
-# item still opens. Folding them would change which rows count as fenced. Pinned by test_compliance_probes:
-# test_a_departure_in_a_fence_four_spaces_deep_under_a_list_item_is_not_read.
-FENCE = re.compile(r"^\s*(`{3,}|~{3,})(.*)$")
+FENCE = word_runs.FENCE
 # Each of these lines starts a unit of its own, so one bullet's exemption never passes another bullet's departure.
 LIST_ITEM = re.compile(r"^\s*(?:[-*+]|\d{1,9}[.)])\s")
 # A heading and a table row are each one whole unit; the lines after them never join them.
@@ -440,10 +437,10 @@ def paragraphs(text, rel):
         mark = FENCE.match(line)
         if fence:
             # A fence closes on a run of its own character, at least as long, with nothing after it.
-            if mark and mark.group(1)[0] == fence[0][0] and len(mark.group(1)) >= len(fence[0]) and not mark.group(2).strip():
+            if mark and mark.group(1)[0] == fence[0][0] and len(mark.group(1)) >= len(fence[0]) and not line[mark.end():].strip():
                 fence = None
         # A backtick in the rest of the line means the ticks close on it ("```x``` is code."): no fence opens.
-        elif mark and not (mark.group(1)[0] == "`" and "`" in mark.group(2)):
+        elif mark and not (mark.group(1)[0] == "`" and "`" in line[mark.end():]):
             flush()
             fence = (mark.group(1), number)
         elif not line.strip():

@@ -506,10 +506,7 @@ HTML_COMMENT = word_runs.COMMENT
 # Text in straight or curly double quotes, or a bare file path (a folder part and an extension): a mention, no claim.
 MENTION = re.compile(r'"[^"]*"|\u201c[^\u201d]*\u201d|(?<![\w./@+~-])(?:[\w.@+~-]+/)+[\w.@+~-]*\.\w+')
 HEADING_OR_QUOTE = re.compile(r"^[ \t]{0,3}(?:#{1,6}(?:[ \t]|$)|>)")
-# Not word_runs.FENCE: that one reads a fence indented up to 3 spaces, and this one any indent, so a fence nested in a list
-# item still opens. Folding them would change which rows count as fenced. Pinned by test_stale_cites:
-# test_route_claim_in_a_tilde_fence_four_spaces_deep_under_a_list_item_is_silent.
-FENCE = re.compile(r"^[ \t]*(`{3,}|~{3,})(.*)$")
+FENCE = word_runs.FENCE
 PAREN_GROUP = re.compile(r"\(([^()]*)\)")
 TABLE_ROW = re.compile(r"^[ \t]{0,3}\|")
 LIST_ITEM = re.compile(r"^[ \t]*(?:[-*+]|\d+[.)])[ \t]+")
@@ -539,13 +536,13 @@ def fenced_lines(rows):
     for number, row in enumerate(rows, 1):
         fence = FENCE.match(row)
         if opener is None:
-            if fence and not (fence.group(1)[0] == "`" and "`" in fence.group(2)):
+            if fence and not (fence.group(1)[0] == "`" and "`" in row[fence.end():]):
                 opener = fence.group(1)
                 inside.add(number)
         else:
             inside.add(number)
             if fence and fence.group(1)[0] == opener[0] and len(fence.group(1)) >= len(opener) \
-                    and not fence.group(2).strip():
+                    and not row[fence.end():].strip():
                 opener = None
     return inside
 
