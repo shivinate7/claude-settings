@@ -13084,6 +13084,20 @@ class ProseJudge(Env):
         self.assertEqual(prose_unknown_lines(out), [], "every line was judged, yet an UNKNOWN line printed\n" + out)
         self.assertEqual(rc, 0, out)
 
+    def test_a_selection_that_raises_is_the_only_unknown_line(self):
+        # A plan-level failure: the selection raises before any call, so one UNKNOWN line stands for the merge and no count line follows.
+        self.setup_range({PROSE: CITE_DOC}, {BACKING: BACKING_TEXT})
+        stub = JudgeStub(verdict_for(3, "holds"))
+        with unittest.mock.patch.object(merge, "prose_judge_lines", side_effect=RuntimeError("selection broke")), \
+                unittest.mock.patch.object(decision_watch, "invoke_model", stub):
+            rc, out = self.run_merge("7", "--confirm")
+        self.assertEqual(stub.prompts, [], "model calls: %d, want 0: the selection failed before any call" % len(stub.prompts))
+        unknown = prose_unknown_lines(out)
+        self.assertEqual(len(unknown), 1, "UNKNOWN lines: %d, want 1: the selection failure is the only one\n%s" % (len(unknown), out))
+        self.assertIn("could not run", unknown[0], "the UNKNOWN line does not name a run that could not run: %r" % unknown[0])
+        self.assertNotIn("lines not judged", out, "a count line printed beside a plan-level failure\n" + out)
+        self.assertEqual(rc, 0, out)
+
 
 class OrderLock(merge.GitLock):
     """A GitLock that appends "release" to `events` on each release, so a case can order a model call against it."""
