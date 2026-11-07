@@ -20275,12 +20275,11 @@ def worktree_home_cross_checkout_case():
           file_path=exclude, content="x")
     check("shell append into the common git directory", "allow", "Bash", lane_b,
           command="echo x >> " + slash(exclude))
-    # THE CWD IN NO CHECKOUT. Ruling (coordinator, 2026-11-07 14:29 CST), decision
-    # an-agent-outside-its-home-tree-must-stop: each session writes only inside its own checkout. A
-    # top-level session works from its scratchpad, so every case here runs from one. Its own
-    # scratchpad, its own scratchpad checkout, a clone or repo it made there, the config folder, a notes
-    # folder outside the clone and a copy out of the clone stay allowed. Own fixture, so no other check
-    # sees its worktree.
+    # THE CWD IN NO CHECKOUT. Decision an-agent-outside-its-home-tree-must-stop: each session writes
+    # only inside its own checkout. A top-level session works from its scratchpad, so every case here
+    # runs from one. Its own scratchpad, its own scratchpad checkout, a clone or repo it made there,
+    # the config folder, a notes folder outside the clone and a copy out of the clone stay allowed.
+    # Own fixture, so no other check sees its worktree.
     r3_primary, _r3_lane_a, _r3_lane_b, _r3_scratch = _cross_checkout_fixture("xcor3")
     r3_tmp = os.path.join(ROOT, "xcor3_tmp")   # the temp folder the guard reads as its own
     r3_sid = "xcor3-sid-0001"
