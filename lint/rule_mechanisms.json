@@ -781,6 +781,9 @@
     "bare-merge": {
       "test": "hooks/test_guard.py::bare-merge: gh pr merge in a repo with a merge block asks"
     },
+    "blind-brief": {
+      "test": "hooks/test_blind_brief.py::Hook.test_refusal_is_logged"
+    },
     "builder-diff": {
       "test": "hooks/test_guard.py::builder-diff: stop after COMMITTING a test change is blocked"
     },
@@ -889,6 +892,9 @@
     "other-checkout": {
       "test": "hooks/test_guard.py::builder-test: Write of the guard's test file in the main checkout, from a worktree, is refused"
     },
+    "output-never-hand-off-doable-step": {
+      "test": "hooks/test_reply_judge.py::guard.log: rule is the id the reason names"
+    },
     "owner-judge": {
       "test": "hooks/test_question_form.py::case_chat_reasons_name_a_remedy_and_no_page_field"
     },
@@ -897,6 +903,9 @@
     },
     "page-stale": {
       "test": "hooks/test_guard.py::wp_publish"
+    },
+    "parallelism-no-mid-task-talk": {
+      "test": "hooks/test_sendmessage_state.py::wording FLAG: the deny writes one guard.log line"
     },
     "playwright-browsers-path": {
       "test": "hooks/test_guard.py::guard-command-position: playwright, two heredoc headers on one line write the export"
@@ -913,6 +922,9 @@
     "press-link": {
       "test": "hooks/test_guard.py::press link: a batch with the press item among the sets is denied"
     },
+    "prose-judge": {
+      "test": "hooks/test_prose_judge.py::f: the refusal ends with the override line"
+    },
     "push-main": {
       "test": "hooks/test_guard.py::push: main, a bare push under push.default current on main asks"
     },
@@ -925,11 +937,17 @@
     "question-form": {
       "test": "hooks/test_guard.py::oj"
     },
+    "question-judge": {
+      "test": "hooks/test_call_judge.py::question: the deny names rule question-judge and logs one deny line"
+    },
     "record-writer-scope": {
       "test": "hooks/test_guard.py::audit-high paths: record-writer Write of a temp file in no repo is still refused"
     },
     "records-page": {
       "test": "hooks/test_guard.py::records_deny"
+    },
+    "reply-judge": {
+      "test": "hooks/test_reply_judge.py::guard.log: no rule named, rule is reply-judge"
     },
     "rework-off-page": {
       "test": "hooks/test_guard.py::rework off page: a str_replace that adds the phrase to context is denied"
@@ -978,6 +996,9 @@
     },
     "simulator-boot-twin": {
       "test": "hooks/test_guard.py::boot a shut-down copy with an idle twin on its runtime, OS=latest: xcodebuild destination"
+    },
+    "spawn-judge": {
+      "test": "hooks/test_call_judge.py::agent: the deny names rule spawn-judge and logs one deny line"
     },
     "subject-unread": {
       "test": "hooks/test_guard.py::subject_unread_log_case"
