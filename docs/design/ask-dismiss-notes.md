@@ -131,7 +131,8 @@ press beside Reply writes `dismissed` on `asks/<id>` with `update`; the page hid
   - The Dismissed line: `role="status"` sits on its inner `p.sline`, not on `li#row-<k>`, which keeps the id and `tabindex="-1"`.
   - CSS: this mockup's `#newcss` above the sample-label block.
 - SKILL.md, "The database" (`asks/<id>`): the page also writes `dismissed` (ISO time, or `null` at Restore) on a thread's root
-  ask, with `update`, at the owner's press. No session writes `dismissed`, and no session writes a record that has it. The page
+  ask, with `update`, at the owner's press. No session writes `dismissed`. A session that answers a dismissed record uses `update`, which keeps it. The page
   hides a dismissed thread unless a record in it waits or has a later answer. "No session deletes or replaces an ask" stays.
-- SKILL.md, "Route an ask": the writer routes and answers a record with `dismissed` as any other, with `update`; Dismiss is drawn off while a reply waits, and on only when every record has its `reply`.
+- SKILL.md, "Route an ask": the writer routes and answers a record with `dismissed` as any other, with `update`.
+  Dismiss is drawn off while a reply waits. It is on only when every record has its `reply`.
 - Tests (`skills/waiting-page/tests/page.test.mjs`): dismiss, restore, the waiting override, the frozen `shown` count, and a failed update.
