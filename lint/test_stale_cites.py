@@ -2666,7 +2666,8 @@ class ValueCiteTests(StaleCase):
         loud = [row["cite"] for row, line in silent if (NOTES, line) in flagged]
         self.assertEqual(loud, [], "a silent parity row must not be flagged:\n%s" % out)
 
-    # Type and set cites. A value is compared by value, a boolean is no number, and a set cite pins no member order.
+    # Type and set cites. A value is compared by value, a boolean is no number, 1 and 1.0 are one number as JSON reads
+    # them, and a set cite pins no member order.
     # py-facts reads a set as a sorted list, so a set cite compares to it as a set.
 
     def added_cite_range(self, code, cite):
@@ -2712,17 +2713,17 @@ class ValueCiteTests(StaleCase):
         self.assert_cite_matches(self.added_cite_range(value_file("LIMIT", "1.0"), "hooks/config.py: LIMIT = 1.0"),
                                  "the float cite 1.0 must match the float value 1.0")
 
-    def test_an_added_float_cite_of_an_int_value_is_flagged_on_its_line(self):
+    def test_an_added_float_cite_of_an_int_value_passes(self):
         self.assertIs(type(module_value(value_file("LIMIT", "1"), "LIMIT")), int)  # scope: the code binds LIMIT to the int 1
         self.assertIs(type(json.loads("1.0")), float)  # scope: the cite reads as the float 1.0
-        self.assert_cite_flagged(self.added_cite_range(value_file("LIMIT", "1"), "hooks/config.py: LIMIT = 1.0"),
-                                 "the float cite 1.0 matched the int value 1: the cite must match the type too")
+        self.assert_cite_matches(self.added_cite_range(value_file("LIMIT", "1"), "hooks/config.py: LIMIT = 1.0"),
+                                 "the float cite 1.0 must match the int value 1: JSON reads both as one number")
 
-    def test_an_added_int_cite_of_a_float_value_is_flagged_on_its_line(self):
+    def test_an_added_int_cite_of_a_float_value_passes(self):
         self.assertIs(type(module_value(value_file("LIMIT", "1.0"), "LIMIT")), float)  # scope: the code binds LIMIT to the float 1.0
         self.assertIs(type(json.loads("1")), int)  # scope: the cite reads as the int 1
-        self.assert_cite_flagged(self.added_cite_range(value_file("LIMIT", "1.0"), "hooks/config.py: LIMIT = 1"),
-                                 "the int cite 1 matched the float value 1.0: the cite must match the type too")
+        self.assert_cite_matches(self.added_cite_range(value_file("LIMIT", "1.0"), "hooks/config.py: LIMIT = 1"),
+                                 "the int cite 1 must match the float value 1.0: JSON reads both as one number")
 
     def test_an_added_cite_of_a_float_with_a_trailing_zero_passes(self):
         self.assertEqual(module_value(value_file("RATE", "0.9"), "RATE"), 0.9)  # scope: the code binds RATE to 0.9
