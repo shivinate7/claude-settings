@@ -68,6 +68,7 @@ os.environ["CLAUDE_CONFIG_DIR"] = os.path.join(RUN_FOLDER, "config")
 check, FAILED = tcj.check, tcj.FAILED
 
 import guard  # noqa: E402
+import guard_core  # noqa: E402  the refusal record: the matched text each refusal logs, read by the stored-line cases
 import reply_judge  # noqa: E402  the reply judge's instructions, which carry the widening sentence
 import route_match  # noqa: E402  the rows-file reader; the task-why cases count its reads
 import test_refusal_note as hook_base  # noqa: E402  the route-row fixture (one home), with its own run folder
@@ -607,15 +608,19 @@ TRUE_LINE = "Why yours: I can't delete it (route r-refused). Notes follow."
 READ_ID, WRITE_ID = "toolu_read", "toolu_write"
 STORED_SESSION = "why-stored-1"
 REFUSE, ASK, ALLOW = ("deny", WHY_RULE), ("ask", WHY_RULE), ("allow", "")
+DOC2, READ_TWO = "other-task", "toolu_read_two"  # a second item on the same page, and its read's id
+STALE = "Why yours: I can't delete it. Notes follow."  # a bare capability line: false until a cite is added
+DUP = "Notes follow. Notes follow."  # old_str "Notes follow." matches twice
+FIXED = os.path.join(RUN_FOLDER, "item-fixed.json")  # the file an update or set names; its content is never seen
 _transcript_names = []
 
 
-def item_line(context, version):
-    """The line an items get returns for the item: its document, with its data and version."""
-    doc = {"id": DOC, "version": version, "updatedAt": "2026-11-07T15:00:00Z",
-           "data": {"kind": "task", "title": "Delete the stale branch", "status": "open", "steps": STEPS,
-                    "context": context}}
-    return json.dumps(doc, ensure_ascii=False, separators=(",", ":"))
+def item_line(context, version, doc=DOC):
+    """The line an items get returns for the item `doc`: its document, with its data and version."""
+    line = {"id": doc, "version": version, "updatedAt": "2026-11-07T15:00:00Z",
+            "data": {"kind": "task", "title": "Delete the stale branch", "status": "open", "steps": STEPS,
+                     "context": context}}
+    return json.dumps(line, ensure_ascii=False, separators=(",", ":"))
 
 
 def wrote_line(version):
@@ -637,12 +642,26 @@ def record_answer(use_id, text, is_error=False, sidechain=False):
                                                      "content": text, "is_error": is_error}]}}
 
 
-def get_of(version, context, sidechain=False, **extra):
-    """A get of the item and its result: a read at `version` that shows `context`."""
-    tool_input = {"action": "get", "url": PAGE_URL, "collection": "items", "doc_id": DOC}
+def get_of(version, context, sidechain=False, doc=DOC, use_id=READ_ID, **extra):
+    """A get of the item `doc` and its result: a read at `version` that shows `context`."""
+    tool_input = {"action": "get", "url": PAGE_URL, "collection": "items", "doc_id": doc}
     tool_input.update(extra)
-    return [record_call(READ_ID, tool_input, sidechain),
-            record_answer(READ_ID, item_line(context, version), sidechain=sidechain)]
+    return [record_call(use_id, tool_input, sidechain),
+            record_answer(use_id, item_line(context, version, doc), sidechain=sidechain)]
+
+
+def list_of(version, context, others=(), use_id=READ_ID):
+    """A list of the page's items, one line each: the item at `version` showing `context`, then `others` as
+    (doc, version, context). A list names no doc_id, as the writer's list call names none."""
+    tool_input = {"action": "list", "url": PAGE_URL, "collection": "items"}
+    lines = [item_line(context, version)] + [item_line(text, ver, doc) for doc, ver, text in others]
+    return [record_call(use_id, tool_input), record_answer(use_id, "\n".join(lines))]
+
+
+def query_of(version, context, use_id=READ_ID):
+    """A query of the page's items and its result: the item at `version` showing `context`."""
+    tool_input = {"action": "query", "url": PAGE_URL, "collection": "items", "query": {"kind": "task"}}
+    return [record_call(use_id, tool_input), record_answer(use_id, item_line(context, version))]
 
 
 def write_of(use_id, tool_input, result, is_error=False):
@@ -660,14 +679,32 @@ def transcript_of(records):
     return path
 
 
-def edit(old, new, version=3, field="context", **extra):
-    """A str_replace of the item's field, pinned to `version` (None leaves if_version out)."""
-    tool_input = {"action": "str_replace", "url": PAGE_URL, "collection": "items", "doc_id": DOC,
+def edit(old, new, version=3, field="context", doc=DOC, **extra):
+    """A str_replace of the item `doc`'s field, pinned to `version` (None leaves if_version out)."""
+    tool_input = {"action": "str_replace", "url": PAGE_URL, "collection": "items", "doc_id": doc,
                   "field": field, "old_str": old, "new_str": new}
     if version is not None:
         tool_input["if_version"] = version
     tool_input.update(extra)
     return tool_input
+
+
+def as_write(tool_input):
+    """One write as a batch carries it: its op in place of its action, and no url, which the batch names once."""
+    entry = {key: value for key, value in tool_input.items() if key not in ("action", "url")}
+    entry["op"] = tool_input["action"]
+    return entry
+
+
+def batch_of(*writes):
+    """A batch call on the page's items, holding `writes` in the order given."""
+    return {"action": "batch", "url": PAGE_URL, "collection": "items", "writes": list(writes)}
+
+
+def file_write(action, version=3):
+    """An update or a set that names a file: the item it leaves is the file's content, which the guard never sees."""
+    return {"action": action, "url": PAGE_URL, "collection": "items", "doc_id": DOC, "file_path": FIXED,
+            "if_version": version}
 
 
 def guard_payload(tool_input, transcript, tool="ArtifactData"):
@@ -706,12 +743,28 @@ def no_process():
         yield
 
 
-def judge_payload(payload):
+@contextlib.contextmanager
+def recorded_matches(matches):
+    """Appends to `matches` the matched text of each refusal, as the guard records it (guard_core.record). The printed
+    reason holds the rule's fixed text, so the matched text is the only place a label such as "old_str not unique"
+    shows. None records nothing."""
+    if matches is None:
+        yield
+        return
+
+    def capture(tool, decision, rule, matched, *args, **kwargs):
+        matches.append(matched)
+    with mock.patch.object(guard_core, "record", capture):
+        yield
+
+
+def judge_payload(payload, matches=None):
     """(decision, rule) for one guard payload, through guard.judge in process: the decision refuse prints, or allow
-    when nothing prints. A raise is named, so a crash is never read as a verdict."""
+    when nothing prints. A raise is named, so a crash is never read as a verdict. `matches` collects the matched
+    text of each refusal."""
     out = io.StringIO()
     try:
-        with contextlib.redirect_stdout(out), no_process():
+        with contextlib.redirect_stdout(out), no_process(), recorded_matches(matches):
             guard.judge(payload)
     except SystemExit:
         pass
@@ -727,23 +780,28 @@ def judge_payload(payload):
         return "unparsed", text[:80]
 
 
-def stored_case(name, tool_input, records, want, path=None, read_check=True):
+def stored_case(name, tool_input, records, want, path=None, read_check=True, matched=None):
     """One item write judged through the guard payload, its transcript written from `records` (or the file at `path`).
     With `read_check`, the rule must read the transcript before it judges, so a case that reads nothing fails by name
-    with no verdict. A green passes with zero reads on the code before the rule, so it names no read."""
+    with no verdict. A green passes with zero reads on the code before the rule, so it names no read. With `matched`,
+    the refusal must also record that matched text, which names the cause of an ask or a deny."""
     transcript = path if path is not None else transcript_of(records)
     rows = rows_at("why-rows.json", WHY_ROWS)
+    matches = [] if matched is not None else None
     with local_rows(rows):
         if not on_local_surface(name):
             return
         with count_opens(transcript) as opened:
-            got = judge_payload(guard_payload(tool_input, transcript))
+            got = judge_payload(guard_payload(tool_input, transcript), matches)
     if got[0] == "raised":
         check(name, False, "the guard raised: %s" % got[1])
     elif read_check and not opened:
         check(name, False, "the rule read the transcript 0 times, so it judged no stored line (got %s)" % (got,))
     else:
-        check(name, got == want, "want %s, got %s" % (want, got))
+        detail = "want %s, got %s" % (want, got)
+        if matched is not None:
+            detail += ", recorded %s, want [%r]" % (matches, matched)
+        check(name, got == want and (matched is None or matches == [matched]), detail)
 
 
 def case_stored_line_reds():
@@ -827,6 +885,91 @@ def case_stored_line_cost():
                 decision, reason = judge_payload(guard_payload(tool_input, path))
         check(name, len(opened) == want and decision != "raised",
               "the transcript was opened %d times, want %d (%s %s)" % (len(opened), want, decision, reason))
+
+
+def case_stored_line_file_path():
+    """An update or set that names a file leaves a text the guard cannot read. The next edit pinned to the version it
+    returned is asked: it is never judged on the text the file replaced, in either direction."""
+    stored_case("a cite removal pinned after an update that names a file is asked, not judged on the replaced text",
+                edit(" (route r-refused)", "", version=4),
+                get_of(3, STORED) + write_of(WRITE_ID, file_write("update"), wrote_line(4)), ASK)
+    stored_case("a cite removal pinned after a set that names a file is asked, not judged on the replaced text",
+                edit(" (route r-refused)", "", version=4),
+                get_of(3, STORED) + write_of(WRITE_ID, file_write("set"), wrote_line(4)), ASK)
+    stored_case("an unrelated edit pinned after a file fix of a stale line is asked, not denied on the stale text",
+                edit("Notes follow.", "Notes below.", version=4),
+                get_of(3, STALE) + write_of(WRITE_ID, file_write("update"), wrote_line(4)), ASK)
+
+
+def case_stored_line_batch_order():
+    """A call with two judged writes is denied when either write leaves a false line, whatever the order. A write the
+    guard cannot judge asks, but it never hides the false line in the other write."""
+    records = get_of(3, STORED, doc=DOC2, use_id=READ_TWO)
+    unread = as_write(edit("r-refused", "r-asks", version=3))
+    false = as_write(edit("r-refused", "r-works", version=3, doc=DOC2))
+    stored_case("a batch of an unread item, then an item whose edit leaves a false line, is denied",
+                batch_of(unread, false), records, REFUSE)
+    stored_case("a batch of an item whose edit leaves a false line, then an unread item, is denied",
+                batch_of(false, unread), records, REFUSE)
+
+
+def case_stored_line_batch_cost():
+    """A call with two judged writes opens the transcript once for the whole call, not once for each write."""
+    records = get_of(3, TRUE_LINE) + get_of(3, TRUE_LINE, doc=DOC2, use_id=READ_TWO)
+    path = transcript_of(records)
+    rows = rows_at("why-rows.json", WHY_ROWS)
+    tool_input = batch_of(as_write(edit("Notes follow.", "Notes below.", version=3)),
+                          as_write(edit("Notes follow.", "Notes below.", version=3, doc=DOC2)))
+    name = "a batch of two judged writes opens the transcript once for the whole call"
+    with local_rows(rows):
+        if not on_local_surface(name):
+            return
+        with count_opens(path) as opened:
+            decision, reason = judge_payload(guard_payload(tool_input, path))
+    check(name, decision == "allow" and len(opened) == 1,
+          "the transcript was opened %d times, want 1 (%s %s)" % (len(opened), decision, reason))
+
+
+def case_stored_line_data_echo():
+    """A write whose result holds data (a conflict echo) is never replayed, so the next edit pinned to its version is
+    asked. A write whose result holds only its id and version still replays, and that edit is judged on the text."""
+    first = edit("r-refused", "r-asks")
+    stored_case("an unrelated edit after a write whose result holds data is asked, not replayed",
+                edit("Notes follow.", "Notes below.", version=4),
+                get_of(3, TRUE_LINE) + write_of(WRITE_ID, first, item_line(TRUE_LINE, 4)), ASK)
+    stored_case("an unrelated edit after a write whose result holds only its version is judged on the replayed text",
+                edit("Notes follow.", "Notes below.", version=4),
+                get_of(3, TRUE_LINE) + write_of(WRITE_ID, first, wrote_line(4)), ALLOW)
+
+
+def case_stored_line_list_reads():
+    """A list or a query is a read: each item in its result, at its version, is the stored text an edit pinned to that
+    version is judged on, as the guard counts reads of the page's items."""
+    others = [(DOC2, 2, "Notes only.")]
+    stored_case("a cite swap pinned to a version a list read showed is denied", edit("r-refused", "r-works"),
+                list_of(3, STORED, others=others), REFUSE)
+    stored_case("a cite swap pinned to a version a query read showed is denied", edit("r-refused", "r-works"),
+                query_of(3, STORED), REFUSE)
+    stored_case("an unrelated append on a true line, pinned to a version a list read showed, passes",
+                edit("Notes follow.", "Notes follow. Pending the proxy."), list_of(3, TRUE_LINE, others=others), ALLOW)
+
+
+def case_stored_line_no_read_pin():
+    """A context edit that names no Why yours line is asked when no read shows the item at its version. Whether the
+    edit touches a Why yours line does not decide the ask."""
+    stored_case("a context edit with no Why yours line is asked when no read of the item was made",
+                edit("Notes follow.", "Notes below.", version=3), [], ASK)
+    stored_case("a context edit with no Why yours line is asked when the only read is of another item",
+                edit("Notes follow.", "Notes below.", version=3), get_of(3, TRUE_LINE, doc=DOC2, use_id=READ_TWO), ASK)
+
+
+def case_stored_line_unique_label():
+    """Two matches of old_str without replace_all are asked as "old_str not unique", and an old_str the stored text
+    lacks is asked as "old_str not found". The label is the matched text the refusal records."""
+    stored_case("an old_str that matches twice in the stored text is asked as not unique",
+                edit("Notes follow.", "Notes below."), get_of(3, DUP), ASK, matched="old_str not unique")
+    stored_case("an old_str the stored text lacks is asked as not found", edit("r-missing", "r-works"),
+                get_of(3, STORED), ASK, matched="old_str not found")
 
 
 # ------------------------------------------------------------------ chat only
@@ -1884,7 +2027,9 @@ def main():
                  case_roadmap_broken_pipe_not_a_repo_is_absent, case_roadmap_broken_pipe_other_stderr_stays_unreadable,
                  case_task_why_cited_reds, case_task_why_cited_greens,
                  case_stored_line_reds, case_stored_line_asks, case_stored_line_replay, case_stored_line_greens,
-                 case_stored_line_cost):
+                 case_stored_line_cost, case_stored_line_file_path, case_stored_line_batch_order,
+                 case_stored_line_batch_cost, case_stored_line_data_echo, case_stored_line_list_reads,
+                 case_stored_line_no_read_pin, case_stored_line_unique_label):
         try:
             case()
         except Exception as exc:
