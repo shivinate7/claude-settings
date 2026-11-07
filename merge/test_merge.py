@@ -12667,12 +12667,45 @@ def judge_lines(out, path, word):
     return [line for line in out.splitlines() if path in line and word in line]
 
 
+REAL_INVOKE_MODEL = decision_watch.invoke_model  # captured at import, before the test base swaps in its stub
+REAL_RUN = decision_watch._nowindow.run  # captured at import, before the test base wraps it
+
+
+def base_model_stub(prompt, *args, **kwargs):
+    """decision_watch.invoke_model for every test, unless the test opts back in to REAL_INVOKE_MODEL: no subprocess, and the merge
+    reads the call as UNKNOWN."""
+    return None, "stubbed by the test base"
+
+
+class ModelStarted(BaseException):
+    """Raised when a test would start `claude -p`. A BaseException, so the judge's `except Exception` cannot turn it into UNKNOWN."""
+
+
+def guarded_run(args, **kwargs):
+    """decision_watch._nowindow.run with `claude` refused: a test that tries it fails with ModelStarted."""
+    if args and os.path.splitext(os.path.basename(str(args[0])))[0] == "claude":
+        raise ModelStarted("a test started `claude -p`: patch decision_watch.invoke_model, or opt in to REAL_INVOKE_MODEL")
+    return REAL_RUN(args, **kwargs)
+
+
+def install_model_guard():
+    """The test base: every test in this file gets base_model_stub and guarded_run, whatever its base class. setUpModule calls it, and so
+    do the two child-process branches under __main__, which run merge.main with no unittest run."""
+    unittest.mock.patch.object(decision_watch, "invoke_model", base_model_stub).start()
+    unittest.mock.patch.object(decision_watch._nowindow, "run", guarded_run).start()
+    unittest.addModuleCleanup(unittest.mock.patch.stopall)
+
+
+def setUpModule():
+    install_model_guard()
+
+
 class ProseJudge(Env):
-    def setup_range(self, main_files, feat_files, links=None):
+    def setup_range(self, main_files, feat_files, links=None, later=None):
         """main gains `main_files` ({path: text}), so their lines are in no added line. Then feat removes the pending record
         (second.md, governed prose with no cite) and changes `feat_files`, and makes each `links` ({path: target}) a symlink to
-        target. The range is the feat changes alone, so a prose file is selected through the backing file it cites, never
-        through an added line."""
+        target. Feat then takes main's base, and `later` ({path: text}) is one more feat commit after that: the lines it adds to
+        a prose file are selected through the diff base, and a cited line through the backing file it cites."""
         o = self.other
         sh(o, "git", "fetch", "-q", "origin")
         sh(o, "git", "checkout", "-q", "-B", "main", "origin/main")
@@ -12689,6 +12722,13 @@ class ProseJudge(Env):
         sh(o, "git", "add", "-A"); sh(o, "git", "commit", "-qm", "feat: drop the pending record, change the backing")
         sh(o, "git", "push", "-q", "origin", "feat")
         head_takes_base(self)
+        if later:  # after the base is taken: a prose file that main and feat both add would conflict in head_takes_base's merge
+            sh(o, "git", "fetch", "-q", "origin")
+            sh(o, "git", "checkout", "-q", "-B", "feat", "origin/feat")
+            for path, text in later.items():
+                put(os.path.join(o, path), text)
+            sh(o, "git", "add", "-A"); sh(o, "git", "commit", "-qm", "feat: add lines to the prose")
+            sh(o, "git", "push", "-q", "origin", "feat")
 
     def run_capped(self):
         """The merge with the cap at PROSE_CAP. -> (rc, out)."""
@@ -12701,6 +12741,55 @@ class ProseJudge(Env):
         with unittest.mock.patch.object(decision_watch, "invoke_model", stub):
             rc, out = self.run_capped()
         return stub, rc, out
+
+    def real_judge(self, reply):
+        """The merge through the real invoke_model and its parse, with `claude` answered in this process by `reply` as the result text.
+        Every other program goes to the real runner, so git still runs. Call after setup_range. -> (claude starts, rc, out)."""
+        envelope = json.dumps({"result": reply})
+        real_run, claude_calls = decision_watch._nowindow.run, []
+
+        def run(args, **kwargs):
+            if args and args[0] == "claude":
+                claude_calls.append(args)
+                return types.SimpleNamespace(returncode=0, stdout=envelope, stderr="")
+            return real_run(args, **kwargs)
+
+        scratch = tempfile.mkdtemp(dir=self.t)  # the real invoke_model removes its own scratch folder; this one is inside the case's folder
+        with unittest.mock.patch.object(decision_watch, "invoke_model", REAL_INVOKE_MODEL), \
+                unittest.mock.patch.object(decision_watch, "_judge_isolation", lambda: (scratch, {})), \
+                unittest.mock.patch.object(decision_watch._nowindow, "run", run):
+            rc, out = self.run_capped()
+        return claude_calls, rc, out
+
+    def merge_interrupted(self, where, exc):
+        """The merge with afterMerge set, and `exc` raised where `where` names: "model" is the model call, "plan" is the judge's plan
+        read under the merge lock. -> (times the raise was reached, origin main before the merge, output)."""
+        cfg = dict(CONFIG, merge=dict(CONFIG["merge"], afterMerge=["echo ran > after.txt"]))
+        put_base_config(self, json.dumps(cfg))
+        self.setup_range({PROSE: CITE_DOC}, {BACKING: BACKING_TEXT})
+        reached = []
+
+        def interrupt(*args, **kwargs):
+            reached.append(args)
+            raise exc
+        owner, name = (decision_watch, "invoke_model") if where == "model" else (merge, "prose_judge_lines")
+        before, out, err = self.head("main"), io.StringIO(), io.StringIO()
+        with unittest.mock.patch.object(owner, name, interrupt):
+            try:
+                self.run_merge("7", "--confirm", stdout=out, stderr=err)
+            except (SystemExit, KeyboardInterrupt):  # the interrupt left merge.main: the case reads the state it left behind
+                pass
+        return len(reached), before, out.getvalue() + err.getvalue()
+
+    def assert_interrupt_leaves_merge_whole(self, where, exc):
+        reached, before, out = self.merge_interrupted(where, exc)
+        self.assertEqual(reached, 1, "the %s interrupt was reached %d times, want 1: the case did not hit its seam\n%s" % (where, reached, out))
+        self.assertNotEqual(self.head("main"), before, "origin main did not move: the merge did not land before the interrupt\n" + out)
+        self.assertEqual(sh(self.co, "git", "rev-parse", "main"), self.head("main"),
+                         "local main did not move to the merge commit: the interrupt came before ff_main\n" + out)
+        self.assertTrue(os.path.exists(os.path.join(self.co, "after.txt")), "afterMerge did not run: the interrupt came before it\n" + out)
+        self.assertNotIn("refs/heads/feat", self.refs(), "origin feat is still there: the interrupt came before cut_branch\n" + out)
+        self.assertFalse(self.lock_ref(), "the merge lock is still held after the interrupt\n" + out)
 
     def test_a_changed_backing_file_selects_the_line_that_cites_it(self):
         self.setup_range({PROSE: CITE_DOC}, {BACKING: BACKING_TEXT})
@@ -12781,22 +12870,58 @@ class ProseJudge(Env):
         # this process, and every other program goes to the real runner, so git still runs. The child-process seams in
         # hooks/test_reply_judge.py and hooks/test_call_judge.py cannot reach the merge's own process.
         reply = json.dumps({"verdicts": [{"line": 3, "verdict": "stale", "why": "the cited file says otherwise"}]})
-        envelope = json.dumps({"result": reply})
-        real_run, claude_calls = decision_watch._nowindow.run, []
-
-        def run(args, **kwargs):
-            if args and args[0] == "claude":
-                claude_calls.append(args)
-                return types.SimpleNamespace(returncode=0, stdout=envelope, stderr="")
-            return real_run(args, **kwargs)
-
         self.setup_range({PROSE: CITE_DOC}, {BACKING: BACKING_TEXT})
-        scratch = tempfile.mkdtemp(dir=self.t)  # the real invoke_model removes its own scratch folder; this one is inside the case's folder
-        with unittest.mock.patch.object(decision_watch, "_judge_isolation", lambda: (scratch, {})), \
-                unittest.mock.patch.object(decision_watch._nowindow, "run", run):
-            rc, out = self.run_capped()
+        claude_calls, rc, out = self.real_judge(reply)
         self.assertEqual(len(claude_calls), 1, "claude starts: %d, want 1 for one selected file" % len(claude_calls))
         self.assertTrue(judge_lines(out, "%s:3" % PROSE, "stale"), "the report names no stale line at %s:3 through the real parse" % PROSE)
+
+    def test_a_reply_in_the_wrong_shape_reads_every_selected_line_unknown(self):
+        # The reply carries `findings` and `ok`, not `verdicts`. The real parse must refuse it, or its stale line reads through.
+        reply = json.dumps({"ok": True, "findings": [{"line": 3, "verdict": "stale", "why": "x"}]})
+        self.setup_range({PROSE: TWO_CITE_DOC}, {BACKING: BACKING_TEXT})
+        claude_calls, rc, out = self.real_judge(reply)
+        self.assertEqual(len(claude_calls), 1, "claude starts: %d, want 1 for one selected file" % len(claude_calls))
+        for number in (3, 5):
+            self.assertTrue(judge_lines(out, "%s:%d" % (PROSE, number), "UNKNOWN"),
+                            "no UNKNOWN line at %s:%d for a reply in the wrong shape\n%s" % (PROSE, number, out))
+        self.assertFalse([line for line in out.splitlines() if "prose judge" in line and PROSE in line and "UNKNOWN" not in line],
+                         "a non-UNKNOWN prose judge line names %s, so the wrong-shape reply was read as a verdict\n%s" % (PROSE, out))
+        self.assertEqual(rc, 0, out)
+
+    def test_a_system_exit_from_the_model_leaves_the_merge_whole(self):
+        self.assert_interrupt_leaves_merge_whole("model", SystemExit(3))
+
+    def test_a_keyboard_interrupt_from_the_model_leaves_the_merge_whole(self):
+        self.assert_interrupt_leaves_merge_whole("model", KeyboardInterrupt())
+
+    def test_a_system_exit_in_the_plan_leaves_the_merge_whole(self):
+        self.assert_interrupt_leaves_merge_whole("plan", SystemExit(3))
+
+    def test_a_keyboard_interrupt_in_the_plan_leaves_the_merge_whole(self):
+        self.assert_interrupt_leaves_merge_whole("plan", KeyboardInterrupt())
+
+    def test_the_default_model_stub_is_in_place_in_every_test(self):
+        # Without the test base, decision_watch.invoke_model is the real function, and a merge reaching it would start `claude -p`.
+        # The first two asserts read identity only, so a red run starts no program.
+        self.assertIs(decision_watch.invoke_model, base_model_stub,
+                      "decision_watch.invoke_model is not the test base's stub, so a merge could start claude -p")
+        self.assertIs(decision_watch._nowindow.run, guarded_run, "decision_watch._nowindow.run is not the claude guard")
+        self.assertEqual(decision_watch.invoke_model("probe"), (None, "stubbed by the test base"), "the test base's stub does not read UNKNOWN")
+
+    def test_the_guard_refuses_a_claude_start_and_runs_other_programs(self):
+        # Scope first: a program that is not claude runs through the guard. Then the refusal: a claude start never reaches
+        # the runner. REAL_RUN is a recorder for that half, so a red run (refusal removed) starts no program.
+        ran = decision_watch._nowindow.run([sys.executable, "-c", "print('ran')"], capture_output=True, text=True)
+        self.assertEqual((ran.returncode, ran.stdout.strip()), (0, "ran"), "a program that is not claude did not run through the guard")
+        started = []
+
+        def recorder(args, **kwargs):
+            started.append(list(args))
+            return types.SimpleNamespace(returncode=0, stdout="", stderr="")
+        with unittest.mock.patch.object(sys.modules[__name__], "REAL_RUN", recorder):
+            with self.assertRaises(ModelStarted):
+                decision_watch._nowindow.run(["claude", "-p"])
+        self.assertEqual(started, [], "the refused claude start still reached the runner")
 
     def test_no_backed_line_and_no_added_prose_makes_no_model_call(self):
         # The range changes code only, and the prose on main cites a file the range does not change.
@@ -12805,6 +12930,68 @@ class ProseJudge(Env):
         self.assertEqual(stub.prompts, [], "model calls: %d, want 0: no line cites a changed file" % len(stub.prompts))
         self.assertEqual(rc, 0, out)
         self.assertFalse(judge_lines(out, PROSE, "stale") or judge_lines(out, PROSE, "UNKNOWN"), "the report names %s with no call made" % PROSE)
+
+    def test_a_line_the_range_adds_to_governed_prose_is_judged_with_no_backing_change(self):
+        # No backing file changes and the line has no cite, so only the diff base can select it: main holds the old line,
+        # and feat adds line 5. The old line on main is in no added line, so the call must not carry it.
+        old = "# Cloud notes\n\nAn old line on main.\n"
+        self.setup_range({PROSE: old}, {}, later={PROSE: old + "\nCloud sessions run in a container.\n"})
+        stub, rc, out = self.judge(verdict_for(5, "unbacked", "no cited file backs the line"))
+        self.assertEqual(len(stub.prompts), 1, "model calls: %d, want 1: the range adds one prose line with no cite" % len(stub.prompts))
+        self.assertIn("File: %s" % PROSE, stub.prompts[0], "the call does not name %s" % PROSE)
+        self.assertIn("Line 5: Cloud sessions run in a container.", stub.prompts[0], "the call does not carry the line the range adds, at line 5")
+        self.assertNotIn("An old line on main", stub.prompts[0], "the call carries a line that main holds, not one the range adds")
+        self.assertTrue(judge_lines(out, "%s:5" % PROSE, "unbacked"), "the report names no unbacked line at %s:5" % PROSE)
+        self.assertEqual(rc, 0, out)
+
+    def test_an_unreadable_base_reads_unknown_and_never_holds_the_merge(self):
+        # The base's rev-parse fails in confirm, and only that call fails: the merge's other git reads run. The report names the
+        # unreadable base, and the merge still lands with rc 0.
+        old = "# Cloud notes\n\nAn old line on main.\n"
+        self.setup_range({PROSE: old}, {}, later={PROSE: old + "\nCloud sessions run in a container.\n"})
+        real_git, reached = merge.git, []
+
+        def base_unreadable(cwd, *a, **kw):
+            if sys._getframe(1).f_code.co_name == "confirm" and a == ("rev-parse", "--verify", "-q", "origin/main^{commit}"):
+                reached.append(a)
+                return 1, ""
+            return real_git(cwd, *a, **kw)
+        with unittest.mock.patch.object(merge, "git", base_unreadable):
+            rc, out = self.run_capped()
+        self.assertEqual(len(reached), 1, "the base's rev-parse was reached %d times, want 1: the case did not hit its seam" % len(reached))
+        self.assertIn("prose judge UNKNOWN: the base could not be read", out, "the report names no unreadable base\n" + out)
+        self.assertEqual(rc, 0, out)
+        self.assertTrue(getattr(self.host, "merged", False), "the merge did not land after the base could not be read")
+
+    def test_a_base_read_that_times_out_still_lands_the_merge(self):
+        # The base read in confirm raises TimeoutExpired, and only that read: the merge's other steps run. The try around the read
+        # holds the merge: ff_main, afterMerge and the branch cut all run, the report names the unreadable base, and rc is 0.
+        cfg = dict(CONFIG, merge=dict(CONFIG["merge"], afterMerge=["echo ran > after.txt"]))
+        put_base_config(self, json.dumps(cfg))
+        old = "# Cloud notes\n\nAn old line on main.\n"
+        self.setup_range({PROSE: old}, {}, later={PROSE: old + "\nCloud sessions run in a container.\n"})
+        before = self.head("main")
+        real_git, reached = merge.git, []
+
+        def base_times_out(cwd, *a, **kw):
+            if sys._getframe(1).f_code.co_name == "confirm" and a == ("rev-parse", "--verify", "-q", "origin/main^{commit}"):
+                reached.append(a)
+                raise subprocess.TimeoutExpired(cmd=list(a), timeout=1)
+            return real_git(cwd, *a, **kw)
+        out, err = io.StringIO(), io.StringIO()
+        with unittest.mock.patch.object(merge, "git", base_times_out), unittest.mock.patch.object(merge, CAP_NAME, PROSE_CAP):
+            try:
+                rc, _ = self.run_merge("7", "--confirm", stdout=out, stderr=err)
+            except subprocess.TimeoutExpired:  # a read that escapes confirm: the asserts below read the state it left
+                rc = None
+        text = out.getvalue() + err.getvalue()
+        self.assertEqual(len(reached), 1, "the base read was reached %d times, want 1: the case did not hit its seam\n%s" % (len(reached), text))
+        self.assertNotEqual(self.head("main"), before, "origin main did not move: the merge did not land after the base read timed out\n" + text)
+        self.assertEqual(sh(self.co, "git", "rev-parse", "main"), self.head("main"), "local main did not move to the merge commit: ff_main did not run\n" + text)
+        self.assertTrue(os.path.exists(os.path.join(self.co, "after.txt")), "afterMerge did not run after the base read timed out\n" + text)
+        self.assertNotIn("refs/heads/feat", self.refs(), "origin feat is still there: the branch was not cut after the base read timed out\n" + text)
+        self.assertIn("prose judge UNKNOWN: the base could not be read", text, "the report names no unreadable base\n" + text)
+        self.assertEqual(rc, 0, text)
 
     def test_the_model_call_runs_after_the_merge_lock_is_released(self):
         # confirm holds the lock from acquire until the release in its finally. A model call waits up to MODEL_TIMEOUT, so it
@@ -12969,6 +13156,7 @@ if __name__ == "__main__":
                 print("READY", flush=True)
                 time.sleep(60)
                 return True, ""
+        install_model_guard()
         os.chdir(sys.argv[2])
         sys.exit(merge.main(["7", "--confirm"], host=Sleep(sys.argv[2], None), lock=merge.GitLock(sys.argv[2])))
     if len(sys.argv) == 3 and sys.argv[1] == "--child":
@@ -12978,6 +13166,7 @@ if __name__ == "__main__":
                 if prior is not None:  # the wait after the claim push; the head's own wait comes first
                     os._exit(9)
                 return True, ""
+        install_model_guard()
         os.chdir(sys.argv[2])
         sys.exit(merge.main(["7", "--confirm"], host=Die(sys.argv[2], None), lock=merge.GitLock(sys.argv[2])))
     class Slicer(unittest.TestLoader):
