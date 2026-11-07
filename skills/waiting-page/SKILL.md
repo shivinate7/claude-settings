@@ -242,9 +242,10 @@ is main's `page.html` with the live `designData` and roadmap blocks kept, never 
 
 1. Read the page with `Artifact` action `read`. Use the file the read names as the saved full page.
    A read that gives a summary, not the raw page, is `unknown`.
-2. List the answers first: `ArtifactData list answers`, into its out_dir folder. Then run `python3 ~/.claude/skills/waiting-page/stale_pages.py --page <file> --write <out> --items <items> --answers <answers>`, where
-   `<items>` is what `ArtifactData list items` saved and `<answers>` is that out_dir folder. Always pass `--answers`.
-   When the list failed, pass the folder anyway: it has no `.complete`, so the run reads `unknown`, never silence. It
+2. List the answers first: `ArtifactData list answers` with `out_dir` set to one new folder and `query.limit` 1000.
+   Follow `next_cursor` until it is empty, then touch `.complete` in `<out_dir>/answers`. Then run `python3 ~/.claude/skills/waiting-page/stale_pages.py --page <file> --write <out> --items <items> --answers <out_dir>/answers`, where
+   `<items>` is what `ArtifactData list items` saved. Always pass `--answers`.
+   When the list failed, touch no `.complete` and pass the folder anyway, so the run reads `unknown`, never silence. It
    compares the page's code outside `designData` with `skills/waiting-page/page.html` on
    claude-settings main, and prints one line: `current`, `behind` or `unknown`, with the source it
    read. Code outside main's page, other than the host's document skeleton, is `behind`. Then it prints one
