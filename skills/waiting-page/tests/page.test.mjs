@@ -4121,10 +4121,12 @@ test("two designs of one slug with different focus keep their own size, and the 
 // FIT_W is the width a mockup is laid out at. A CSS rule or a comment that repeats the number goes stale when FIT_W moves.
 const FIT_W_DECL = /const FIT_W = (\d+)/;
 // A restatement is FIT_W's number as a width value: after width, max-width or min-width and a colon or equals sign, or
-// followed by the word wide. Strings, comments and templates are read as plain text, so a restatement counts wherever it
-// stands. A count, a font weight or a sibling number is not one: 3900, 1390, 0.390, a390, #390 (a hex colour) and "390 units".
+// followed by the word wide. The width may be an attribute (width="390"), a dotted style property (el.style.width = "390px"),
+// the second argument of setAttribute("width", 390), or the argument of calc(, min(, max( or clamp(. Strings, comments and
+// templates are read as plain text, so a restatement counts wherever it stands. A count, a font weight, a height or a sibling
+// number is not one: 3900, 1390, 0.390, a390, #390 (a hex colour) and "390 units".
 // A media or container condition is a breakpoint that CSS cannot read FIT_W in, so it is skipped.
-const WIDTH_BEFORE = /(?:^|[\s;{(,"'])(?:min-|max-)?width\s*[:=]\s*$/i, WIDE_AFTER = /^(?:px)?\s+wide\b/i, AT_RULE = /^\s*@(?:container|media)\b/;
+const WIDTH_BEFORE = /(?:^|[\s;{(,"'.])(?:min-|max-)?width(?:["']?\s*[:=]\s*|["']\s*,\s*)(?:(?:calc|min|max|clamp)\(\s*)?["']?$/i, WIDE_AFTER = /^(?:px)?\s+wide\b/i, AT_RULE = /^\s*@(?:container|media)\b/;
 function restatements(src, num) {
   const decl = FIT_W_DECL.exec(src), own = decl ? decl.index + decl[0].length - decl[1].length : -1;
   const lines = src.split("\n"), again = new RegExp(`(?<![\\w.#])${num}(?!\\d|\\.\\d)`, "g"), found = new Set();
