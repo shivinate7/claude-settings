@@ -319,13 +319,33 @@ def _has_n(node, n):
     return isinstance(node, list) and any(_has_n(c, n) for c in node)
 
 
-def writes_n(node, n):
-    """True when a write dict that names the items collection holds key n == n at any depth below it."""
+def _item_id(d):
+    """The page item doc id a write dict targets: `items/<id>` in doc_id or path, else doc_id under collection
+    `items`. None for a dict that targets no item."""
+    for k in ("doc_id", "path"):
+        v = d.get(k)
+        if isinstance(v, str) and v.startswith("items/"):
+            return v[len("items/"):]
+    v = d.get("doc_id")
+    return v if d.get("collection") == "items" and isinstance(v, str) else None
+
+
+def _closes(d, ids):
+    """True when write dict d sets status `closed` on an item whose doc id is in ids."""
+    data = d.get("data")
+    return isinstance(data, dict) and data.get("status") == "closed" and _item_id(d) in ids
+
+
+def writes_n(node, n, closed_ids=()):
+    """True when a write dict that names the items collection holds key n == n at any depth below it. A write
+    that closes an item whose doc id is in closed_ids counts too, though it carries no n: the caller passes the
+    doc ids a read-back of this session returned with n (Pages.read_ids)."""
     if isinstance(node, dict):
         if not is_write(node):
             return False
-        return (_in_items(node) and _has_n(node, n)) or any(writes_n(c, n) for c in node.values())
-    return isinstance(node, list) and any(writes_n(c, n) for c in node)
+        return ((_in_items(node) and _has_n(node, n)) or _closes(node, closed_ids)
+                or any(writes_n(c, n, closed_ids) for c in node.values()))
+    return isinstance(node, list) and any(writes_n(c, n, closed_ids) for c in node)
 
 
 def items_write(node):

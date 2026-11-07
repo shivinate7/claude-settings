@@ -580,6 +580,7 @@ class Pages:
 
     def __init__(self, path):
         self.path, self.records, self.owners, self.unread, self.skip = path, None, None, None, {}
+        self._by_id = None
 
     def _load(self):
         if self.records is None:
@@ -596,6 +597,13 @@ class Pages:
                 if text is not None:
                     self.owners.append((i, norm(text)))
         return not self.unread
+
+    def _results(self):
+        """Each tool_result block of the transcript by its tool_use_id."""
+        if self._by_id is None:
+            self._by_id = {b["tool_use_id"]: b for r in self.records if r.get("type") == "user"
+                           for b in _transcript.tool_results(r) if isinstance(b.get("tool_use_id"), str)}
+        return self._by_id
 
     def stand_down(self, label, why):
         self.skip.setdefault(label, [])
@@ -615,7 +623,12 @@ class Pages:
         return anchors[k - 1] + 1
 
     def _uses_after(self, start):
-        return (use for r in self.records[start:] if r.get("type") == "assistant" for use in _transcript.tool_uses(r))
+        """The tool_use blocks after `start` that did not fail: a use whose result, paired by tool_use_id, is an
+        error is left out. A use with no id or no result stays."""
+        results = self._results()
+        return (use for r in self.records[start:] if r.get("type") == "assistant"
+                for use in _transcript.tool_uses(r)
+                if (results.get(use.get("id")) or {}).get("is_error") is not True)
 
     def proof_state(self, text, k, proof, stamp, label="page"):
         """True when a tool_use that `proof(use)` accepts follows the owner record that anchors the
@@ -626,17 +639,27 @@ class Pages:
             return None
         return any(proof(use) for use in self._uses_after(start))
 
-    def read_back(self, text, k, n, stamp):
-        """The page urls of each ArtifactData get, list or query of collection `items`, after the anchor,
+    def _read_backs(self, text, k, n, stamp):
+        """The (use, result) of each ArtifactData get, list or query of collection `items`, after the anchor,
         whose result returns item n (_reads_items, _returns_n). A result pairs with its read by tool_use_id.
         Empty when the check stands down."""
         start = self._start(text, k, stamp, "page")
         if start is None:
-            return set()
-        results = {b["tool_use_id"]: b for r in self.records if r.get("type") == "user"
-                   for b in _transcript.tool_results(r) if isinstance(b.get("tool_use_id"), str)}
-        return {use["input"].get("url") for use in self._uses_after(start)
-                if _reads_items(use) and _returns_n(results.get(use.get("id")), n)}
+            return []
+        results = self._results()
+        return [(use, results[use["id"]]) for use in self._uses_after(start)
+                if _reads_items(use) and _returns_n(results.get(use.get("id")), n)]
+
+    def read_back(self, text, k, n, stamp):
+        """The page urls of the read-backs of item n (_read_backs)."""
+        return {use["input"].get("url") for use, _ in self._read_backs(text, k, n, stamp)}
+
+    def read_ids(self, text, k, n, stamp):
+        """The doc ids of the items those read-backs returned with n == n. A write that closes one of them proves
+        a send of item n though it carries no n (_proves)."""
+        return {doc_id for _, result in self._read_backs(text, k, n, stamp)
+                for doc_id, data in local_time._documents(result.get("content"))
+                if _is_n(data.get("n"), n) and isinstance(doc_id, str)}
 
     def sent(self, text, k, proof, stamp, label="page"):
         """True when the proof is found, and true too when the check stands down (see proof_state)."""
@@ -648,16 +671,16 @@ def norm(text):
     return (text or "").replace("\r\n", "\n").replace("\r", "\n").strip()
 
 
-def _proves(use, n):
+def _proves(use, n, closed_ids=()):
     """True when a tool_use sends page item n: a message naming n as a whole token, or an
-    ArtifactData write with key n == n under collection `items`."""
+    ArtifactData write with key n == n under collection `items`, or a close of an item in closed_ids."""
     name, tool_input = use.get("name") or "", use.get("input")
     if not isinstance(tool_input, dict):
         return False
     if name in SEND_TOOLS:
         msg = tool_input.get("message")
         return isinstance(msg, str) and re.search(r"(?<![A-Za-z0-9-])%s(?![A-Za-z0-9-])" % n, msg) is not None
-    return name.startswith(ARTIFACT_DATA) and _writes_n(tool_input, n)
+    return name.startswith(ARTIFACT_DATA) and _writes_n(tool_input, n, closed_ids)
 
 
 def _reads_items(use):
@@ -683,7 +706,8 @@ def page_problem(item_id, rest, text, k, stamp, pages, homes=None):
     if m is None:
         return "%s [page] has a malformed page home: it needs `page:<digits>`" % item_id
     n = m.group(1)
-    state = None if pages is None else pages.proof_state(text, k, lambda use: _proves(use, n), stamp)
+    ids = set() if pages is None else pages.read_ids(text, k, n, stamp)
+    state = None if pages is None else pages.proof_state(text, k, lambda use: _proves(use, n, ids), stamp)
     if state is None:
         return None
     if state:
@@ -700,7 +724,8 @@ def page_problem(item_id, rest, text, k, stamp, pages, homes=None):
                 % (item_id, n, branch, n, folder, branch, n))
     return ("%s [page] page:%s: the transcript shows no send of the owner's ruling to the page writer after"
             " the owner's message; send the ruling to the page writer (send_message naming %s, or an"
-            " ArtifactData write with n %s)" % (item_id, m.group(1), m.group(1), m.group(1)))
+            " ArtifactData write with n %s); if the page writer cannot be sent to, close the item with `[closed]`"
+            % (item_id, m.group(1), m.group(1), m.group(1)))
 
 
 def _names_repo(use, owner, name):
@@ -753,7 +778,11 @@ def answer_problem(b, text, k, homes, pages):
         m = PAGE_HOME.fullmatch(home_word(it[1])) if it and it[2] and not it[3] and it[1].startswith("[page]") else None
         if m:
             own.add(m.group(1))
-    unsent = [n for n in dict.fromkeys(numbers) if n not in own and not pages.sent(text, k, lambda use: _proves(use, n), b["stamp"])]
+    unsent = []
+    for n in dict.fromkeys(numbers):
+        ids = pages.read_ids(text, k, n, b["stamp"]) if n not in own else set()
+        if n not in own and not pages.sent(text, k, lambda use: _proves(use, n, ids), b["stamp"]):
+            unsent.append(n)
     if not unsent:
         return None
     return ("the owner's chat answer at %s names page item %s, and the transcript shows no send of it to the"
