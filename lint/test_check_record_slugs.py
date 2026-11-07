@@ -649,7 +649,8 @@ class RecordSlugsTests(unittest.TestCase):
 
     def test_a_plain_whole_word_names_a_debt_and_a_longer_word_does_not(self):
         # tap-two names d1x in plain text as a whole word, so debt d1x is named. It holds d1 only inside d1x.
-        self.decision("tap-two", "# Tap two\n\n- d1x: open\n")
+        # Its cite of d1x has a gloss, so the bare-cite rule leaves only the DEBT003 finding.
+        self.decision("tap-two", "# Tap two\n\n- d1x: two words open\n")
         self.put(self.rel("debts", "d1x.md"), "# Debt\n\n**Decision.** `tap-two` (a valid gloss)\n")
         d1 = self.rel("debts", "d1.md")
         text = "# Debt\n\n**Decision.** `tap-two` (a valid gloss)\n"
@@ -713,6 +714,152 @@ class RecordSlugsTests(unittest.TestCase):
         fn = getattr(module, "tree_findings", None)
         self.assertIsNotNone(fn, "tree_findings(root) is not defined in lint/check_record_slugs.py")
         self.assertEqual(sorted(fn(self.tree)), [want])
+
+    # Bare cites (speak-cite-id-plus-gloss): a record id written as a whole word in prose is a cite, as a backticked
+    # span is. The gloss window is the paragraph. Each case holds a positive finding, so a silent run fails.
+
+    def test_a_bare_prose_cite_with_no_gloss_is_gloss001(self):
+        self.decision("session-tiers")
+        path = self.rel("decisions", "other.md")
+        text = "# Other\n\nSee session-tiers for more.\n\nSee session-tiers again.\n"  # only the first cite is judged
+        self.put(path, text)
+        self.assert_tree(["%s:%d GLOSS001 session-tiers" % (path, line_of(text, "session-tiers"))])
+
+    def test_a_bare_prose_cite_with_a_gloss_passes(self):
+        self.decision("session-tiers")
+        self.put(self.rel("decisions", "glossed.md"), "# Glossed\n\nSee session-tiers (the session shapes).\n")
+        path = self.rel("decisions", "bare.md")  # the positive: the same cite with no gloss
+        text = "# Bare\n\nSee session-tiers for more.\n"
+        self.put(path, text)
+        self.assert_tree(["%s:%d GLOSS001 session-tiers" % (path, line_of(text, "session-tiers"))])
+
+    def test_a_lone_quote_does_not_hide_a_bare_cite(self):
+        # Don't, and <p>Don't</p>, each put a lone quote before a bare cite on its line.
+        self.decision("session-tiers")
+        first = self.rel("decisions", "quote-one.md")
+        first_text = "# Q\n\nDon't see session-tiers for more.\n"
+        second = self.rel("decisions", "quote-two.md")
+        second_text = "# Q\n\n<p>Don't</p> See session-tiers for more.\n"
+        self.put(first, first_text)
+        self.put(second, second_text)
+        self.assert_tree(["%s:%d GLOSS001 session-tiers" % (first, line_of(first_text, "session-tiers")),
+                          "%s:%d GLOSS001 session-tiers" % (second, line_of(second_text, "session-tiers"))])
+
+    def test_a_comment_opener_in_a_span_does_not_hide_a_bare_cite(self):
+        # The span holds an HTML comment opener, and a real comment follows it. The cite between them still counts.
+        self.decision("session-tiers")
+        path = self.rel("decisions", "opener.md")
+        text = "# O\n\nWrite `<!--` then see session-tiers for more.\n\n<!-- a note -->\n"
+        self.put(path, text)
+        self.assert_tree(["%s:%d GLOSS001 session-tiers" % (path, line_of(text, "session-tiers"))])
+
+    def test_a_bare_id_in_a_span_fence_or_comment_is_not_a_cite(self):
+        self.decision("session-tiers")
+        self.put(self.rel("decisions", "skipped.md"),
+                 "# S\n\nRun `open session-tiers` first.\n\n```\nSee session-tiers for more.\n```\n\n"
+                 "<!-- See session-tiers for more. -->\n")
+        path = self.rel("decisions", "other.md")  # the positive: a bare cite outside all three
+        text = "# Other\n\nSee session-tiers for more.\n"
+        self.put(path, text)
+        self.assert_tree(["%s:%d GLOSS001 session-tiers" % (path, line_of(text, "session-tiers"))])
+
+    def test_a_bare_id_in_a_link_target_is_not_a_cite(self):
+        self.decision("session-tiers")
+        self.put(self.rel("decisions", "linked.md"),
+                 "# L\n\nRead [the tiers](../decisions/session-tiers.md) (the session shapes) first.\n")
+        path = self.rel("decisions", "other.md")  # the positive: a bare cite outside the link target
+        text = "# Other\n\nSee session-tiers for more.\n"
+        self.put(path, text)
+        self.assert_tree(["%s:%d GLOSS001 session-tiers" % (path, line_of(text, "session-tiers"))])
+
+    def test_a_bare_id_in_a_url_is_not_a_cite(self):
+        self.decision("session-tiers")
+        self.put(self.rel("decisions", "linked.md"), "# L\n\nSee https://example.com/session-tiers for more.\n")
+        path = self.rel("decisions", "other.md")  # the positive: a bare cite outside the URL
+        text = "# Other\n\nSee session-tiers for more.\n"
+        self.put(path, text)
+        self.assert_tree(["%s:%d GLOSS001 session-tiers" % (path, line_of(text, "session-tiers"))])
+
+    def test_a_bare_id_inside_a_longer_slug_is_not_a_cite(self):
+        # d1 is not a cite inside d1-two: a hyphen or a word character bounds a whole word.
+        self.decision("d1")
+        self.decision("d1-two")
+        path = self.rel("decisions", "other.md")
+        text = "# Other\n\nRule d1-two holds the text.\n"
+        self.put(path, text)
+        self.assert_tree(["%s:%d GLOSS001 d1-two" % (path, line_of(text, "d1-two"))])
+
+    def test_a_files_own_slug_in_prose_is_not_a_cite(self):
+        self.decision("session-tiers", "# Session tiers\n\nSee session-tiers for more.\n")
+        path = self.rel("decisions", "other.md")  # the positive: another file's bare cite of the same slug
+        text = "# Other\n\nSee session-tiers for more.\n"
+        self.put(path, text)
+        self.assert_tree(["%s:%d GLOSS001 session-tiers" % (path, line_of(text, "session-tiers"))])
+
+    def test_a_glossed_backticked_first_cite_then_a_bare_later_cite_is_not_flagged(self):
+        self.decision("session-tiers")
+        self.put(self.rel("decisions", "first.md"),
+                 "# F\n\nRule `session-tiers` (two words) holds.\n\nLater, session-tiers holds too.\n")
+        path = self.rel("decisions", "other.md")  # the positive: a bare first cite is judged
+        text = "# Other\n\nSee session-tiers for more.\n"
+        self.put(path, text)
+        self.assert_tree(["%s:%d GLOSS001 session-tiers" % (path, line_of(text, "session-tiers"))])
+
+    def test_a_bare_first_cite_is_judged_before_a_backticked_later_cite(self):
+        self.decision("session-tiers")
+        path = self.rel("decisions", "mixed.md")
+        text = "# M\n\nSee session-tiers for more.\n\nRule `session-tiers` holds the text.\n"
+        self.put(path, text)
+        self.assert_tree(["%s:%d GLOSS001 session-tiers" % (path, line_of(text, "See session-tiers"))])
+
+    def test_a_gloss_on_the_next_line_of_the_same_paragraph_passes(self):
+        # A cite at a line end takes a gloss that starts on the next line of its paragraph, bare or backticked.
+        self.decision("tap-lag")
+        self.decision("session-tiers")
+        self.put(self.rel("decisions", "wrapped.md"), "# W\n\nSee `tap-lag`\n(two words) here.\n")
+        self.put(self.rel("decisions", "wrapped-bare.md"), "# W\n\nSee session-tiers\n(two words) here.\n")
+        path = self.rel("decisions", "other.md")  # the positive: a bare cite with no gloss on any line
+        text = "# Other\n\nSee session-tiers for more.\n"
+        self.put(path, text)
+        self.assert_tree(["%s:%d GLOSS001 session-tiers" % (path, line_of(text, "session-tiers"))])
+
+    def test_a_cite_at_a_paragraph_end_takes_no_gloss_from_the_next_paragraph(self):
+        self.decision("tap-lag")
+        plain = self.rel("decisions", "plain.md")
+        plain_text = "# P\n\nSee `tap-lag`\n\nTwo words here.\n"
+        paren = self.rel("decisions", "paren.md")
+        paren_text = "# P\n\nSee `tap-lag`\n\n(two words) here.\n"
+        self.put(plain, plain_text)
+        self.put(paren, paren_text)
+        self.assert_tree(["%s:%d GLOSS001 tap-lag" % (plain, line_of(plain_text, "`tap-lag`")),
+                          "%s:%d GLOSS001 tap-lag" % (paren, line_of(paren_text, "`tap-lag`"))])
+
+    def test_a_cite_at_a_list_item_end_takes_no_gloss_from_the_next_item(self):
+        self.decision("tap-lag")
+        path = self.rel("decisions", "items.md")
+        text = "# I\n\n- `tap-lag`\n- two words here\n"
+        self.put(path, text)
+        self.assert_tree(["%s:%d GLOSS001 tap-lag" % (path, line_of(text, "`tap-lag`"))])
+
+    def test_a_gloss_from_the_previous_paragraph_does_not_count(self):
+        self.decision("tap-lag")
+        path = self.rel("decisions", "prev.md")
+        text = "# P\n\nTwo words,\n\n`tap-lag` holds the text.\n"
+        self.put(path, text)
+        self.assert_tree(["%s:%d GLOSS001 tap-lag" % (path, line_of(text, "`tap-lag`"))])
+
+    def test_a_bare_anchor_in_claude_md_prose_is_a_cite(self):
+        # The anchor's own comment is not a cite, so the prose cite on line 3 is the first one.
+        self.put("CLAUDE.md", "Rule text.<!-- rule:route-x -->\n\nSee route-x for more.\n")
+        self.assert_tree(["CLAUDE.md:3 GLOSS001 route-x"])
+
+    def test_a_bare_id_in_a_debts_prose_is_a_cite(self):
+        self.decision("tap-lag", "# Tap lag\n\nThe debt `d-x` (its finding) waits.\n")
+        self.decision("session-tiers")
+        path = self.rel("debts", "d-x.md")
+        text = "# Debt\n\n**Decision.** `tap-lag` (a valid gloss)\n\nWhat: waits on session-tiers.\n"
+        self.put(path, text)
+        self.assert_tree(["%s:%d GLOSS001 session-tiers" % (path, line_of(text, "session-tiers"))])
 
 
 class ImportTests(unittest.TestCase):
