@@ -13191,6 +13191,14 @@ NODE_WRITE = "require('fs').writeFileSync('web/a.test.js', 'x')\n"
 # comment opener, and the write after it runs. The `const` line names the variables, so node would run the script.
 JS_NAMES = "const ok = true, s = 'x';\n"
 REGEX_WRITE_JS = "if (ok) /\\/*/.test(s) && require('fs').writeFileSync('%s', 'x')\n"
+# `export default` takes a JS regex literal after its word, so the `/` opens a regex, the `//` in it is no comment,
+# and the write after it runs. The `void` line is the control: `void` is already a word a regex may follow.
+DEFAULT_REGEX_WRITE_JS = r"export default /\/\//; " + "require('fs').writeFileSync('%s', 'x')\n"
+VOID_REGEX_WRITE_JS = r"void /\/\//; " + "require('fs').writeFileSync('%s', 'x')\n"
+# An executable with no `#!` line: an ELF header, NUL bytes, and a line that holds a write as text. The kernel runs a
+# binary itself, so its bytes are no shell script. The `_src` twin holds the same bytes with a product write.
+BINARY_TEST = b"\x7fELF\x02\x01\x01\x00" + b"\x00" * 8 + b"\necho x >tests/x.py\n" + b"\x00" * 4
+BINARY_SRC = b"\x7fELF\x02\x01\x01\x00" + b"\x00" * 8 + b"\necho x >src/app.py\n" + b"\x00" * 4
 # The node reader keeps a string, a template literal and a regex literal whole, and blanks a `//` or `/*` comment.
 # So a comment opener inside one of them must not blank the write after it. Each text puts the write on the same
 # line as the opener, or after a template's closing backtick, so a reader that blanks the opener's rest of its
@@ -13258,15 +13266,32 @@ def _build_scriptrepo():
         "bare_src": "echo x > src/app.py\n",
         "gen_regex.js": JS_NAMES + REGEX_WRITE_JS % "tests/x.js",
         "gen_regex_ok.js": JS_NAMES + REGEX_WRITE_JS % "src/app.js",
+        "gen_default.js": DEFAULT_REGEX_WRITE_JS % "tests/x.js",
+        "gen_default_ok.js": DEFAULT_REGEX_WRITE_JS % "src/app.js",
+        "gen_void.js": VOID_REGEX_WRITE_JS % "tests/x.js",
     })
     # The regex cases must hold the regex bytes they name, so an escaping slip fails here, not as another red.
-    for name, literal in (("re_star.js", r"p.replace(/\/*$/, '')"), ("re_slashes.js", r"p.replace(/\/\//g, '')")):
+    for name, literal in (("re_star.js", r"p.replace(/\/*$/, '')"), ("re_slashes.js", r"p.replace(/\/\//g, '')"),
+                          ("gen_default.js", r"export default /\/\//;"),
+                          ("gen_default_ok.js", r"export default /\/\//;"), ("gen_void.js", r"void /\/\//;")):
         with open(os.path.join(SCRIPTREPO, name), encoding="utf-8") as handle:
             if literal not in handle.read():
                 sys.exit("fixture setup failed in _build_scriptrepo: %r lacks the regex literal %r" % (name, literal))
     os.chmod(os.path.join(SCRIPTREPO, "gen_shebang"), 0o755)
     for name in ("gen_bare", "bare_src"):   # run as `./name`, with no `#!` line
         os.chmod(os.path.join(SCRIPTREPO, name), 0o755)
+    # The binary pair, written as bytes so the NULs are real. Each must be an executable with no `#!` line that holds
+    # the text it names, or its case would test nothing.
+    for name, data, held in (("bin_tool", BINARY_TEST, b">tests/x.py"), ("bin_src", BINARY_SRC, b">src/app.py")):
+        path = os.path.join(SCRIPTREPO, name)
+        with open(path, "wb") as handle:
+            handle.write(data)
+        os.chmod(path, 0o755)
+        with open(path, "rb") as handle:
+            body = handle.read()
+        if b"\x00" not in body or body.startswith(b"#!") or held not in body or not os.access(path, os.X_OK):
+            sys.exit("fixture setup failed in _build_scriptrepo: %r is not an executable binary with no #! line that "
+                     "holds %r" % (name, held))
     for name, total in (("at_cap.py", cap), ("over_cap.py", cap + 1)):
         lead = "#" * (total - len(TEST_WRITE_PY) - 1) + "\n"   # a comment line that fills the file, then the write
         with open(os.path.join(SCRIPTREPO, name), "wb") as handle:
@@ -13403,6 +13428,61 @@ for _name, _command in (
     ("node gen_regex_ok.js, a JS regex after the ) of an if, writes src/app.js", "node gen_regex_ok.js"),
 ):
     sh("builder-test: script-file, %s, is allowed" % _name, _command, "allow", **SR)
+
+# Each red is a verdict that goes the wrong way. Each has an allow twin or a green control beside it, so the form is
+# not what gets refused. A crash in the reader shows as an allow, so a crashing segment comes first, and a later
+# segment that writes a test path must still deny.
+
+# Spaced parentheses. The parenthesis is a token of its own, so the reader found no command in `( python3 gen.py )`.
+for _name, _command in (
+    ("spaced paren, ( python3 gen.py ), writes tests/x.py", "( python3 gen.py )"),
+    ("spaced paren, true && ( python3 gen.py ), writes tests/x.py", "true && ( python3 gen.py )"),
+    ("spaced paren, ( sh shell_write.sh ), writes tests/x.py", "( sh shell_write.sh )"),
+):
+    sh("builder-test: script-file, %s, is refused" % _name, _command, "deny", rule=BT,
+       carries=("test-author",), **SR)
+for _name, _command in (
+    ("spaced paren, ( python3 gen_ok.py ), writes src/app.py", "( python3 gen_ok.py )"),
+    ("spaced paren, true && ( python3 gen_ok.py ), writes src/app.py", "true && ( python3 gen_ok.py )"),
+    ("spaced paren, ( sh shell_src.sh ), writes src/app.py", "( sh shell_src.sh )"),
+):
+    sh("builder-test: script-file, %s, is allowed" % _name, _command, "allow", **SR)
+
+# An assignment as the script operand. `NAME=value` is no file name, so the reader has nothing to read from it, and
+# the guard allows the whole call. The control has a readable first segment and shows the second one is read.
+for _name, _command in (
+    ("assignment operand, python3 X=gen.py, then python3 gen.py writing tests/x.py",
+     "python3 X=gen.py; python3 gen.py"),
+    ("assignment operand, pwsh FX=/vfs, then python3 gen.py writing tests/x.py",
+     "pwsh FX=/vfs; python3 gen.py"),
+):
+    sh("builder-test: script-file, %s, is refused" % _name, _command, "deny", rule=BT,
+       carries=("test-author",), **SR)
+sh("builder-test: script-file, assignment operand control, python3 gen_ok.py, then python3 gen.py writing tests/x.py, "
+   "is refused", "python3 gen_ok.py; python3 gen.py", "deny", rule=BT, carries=("test-author",), **SR)
+for _name, _command in (
+    ("assignment operand, python3 X=gen_ok.py, then python3 gen_ok.py writing src/app.py",
+     "python3 X=gen_ok.py; python3 gen_ok.py"),
+    ("assignment operand, pwsh FX=/vfs, then python3 gen_ok.py writing src/app.py",
+     "pwsh FX=/vfs; python3 gen_ok.py"),
+):
+    sh("builder-test: script-file, %s, is allowed" % _name, _command, "allow", **SR)
+
+# An executable binary with no `#!` line. The kernel runs it, so a redirect its bytes hold as text is no shell write.
+# The twin holds the same bytes with a product write, so the bytes are not what gets refused.
+sh("builder-test: script-file, binary, ./bin_tool, an executable with NUL bytes and no #! line, holds >tests/x.py, "
+   "is allowed", "./bin_tool", "allow", **SR)
+sh("builder-test: script-file, binary twin, ./bin_src, the same bytes holding >src/app.py, is allowed",
+   "./bin_src", "allow", **SR)
+
+# `export default` before a regex literal. The word is not in the list of words a regex may follow, so the `//` in
+# the literal reads as a comment and blanks the write. The `void` control is the same shape with a listed word.
+sh("builder-test: script-file, export default, node gen_default.js, a regex literal after default, writes tests/x.js, "
+   "is refused", "node gen_default.js", "deny", rule=BT, carries=("test-author",), **SR)
+sh("builder-test: script-file, export default control, node gen_void.js, a regex literal after void, "
+   "writes tests/x.js, is refused", "node gen_void.js", "deny", rule=BT, carries=("test-author",), **SR)
+sh("builder-test: script-file, export default twin, node gen_default_ok.js, a regex literal after default, writes "
+   "src/app.js, is allowed", "node gen_default_ok.js", "allow", **SR)
 
 # ---- the diff, judged at commit, push and SubagentStop
 FAMILY = "diff"
