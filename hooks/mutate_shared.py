@@ -1073,8 +1073,7 @@ def replay_pr(repo: str, sha: str, profile: dict, limit: int = 20, seed: int = 0
     mutants the budget cut. The stop is cleared on the way out. Without it, a running mutant is let finish."""
     started = time.time()
     row = _replay_row(repo, sha)
-    code_re, tests_re = re.compile(profile["code"]), re.compile(profile["tests"])
-    not_re = re.compile(profile["code_not"]) if profile.get("code_not") else None
+    tests_re = re.compile(profile["tests"])
     base = base or "%s^1" % sha
     try:
         files = _changed_files(repo, base, sha)
@@ -1082,7 +1081,7 @@ def replay_pr(repo: str, sha: str, profile: dict, limit: int = 20, seed: int = 0
         row["reason"] = "cannot read the diff: %s" % error
         row["no_run_cause"] = row["reason"]
         return row
-    code = sorted(p for p, s in files.items() if s != "D" and code_re.search(p) and not (not_re and not_re.search(p)))
+    code = sorted(p for p, s in files.items() if s != "D" and _is_product(profile, p))
     suites = sorted(p for p, s in files.items() if s != "D" and tests_re.search(p))
     suites = [p for p in suites if _is_suite(repo, sha, profile, p)]
     if not code:
@@ -1489,8 +1488,8 @@ def run_known_defects(repo: str, defects, profile: dict, deps: str, suite_timeou
     lockfile. Parts with one lockfile and one install share one install and one link; any other install runs once more.
     A failed install does not stop the later parts. A defect needs a part's install when the part's `code` regex matches the
     defect's `file` (unless its `code_not` regex matches it too) or its `tests` regex matches an element of the defect's
-    `argv`; the regexes are the profile's own (`REPLAY_PROFILES`, or `--profile-file`). A part with neither regex is needed by
-    every defect, and a defect that no part claims needs every install. A defect that needs a failed install is not run: it
+    `argv`; the regexes are the profile's own (`REPLAY_PROFILES`, or `--profile-file`). When any part has neither regex, or no
+    part claims the defect, the defect needs every install. A defect that needs a failed install is not run: it
     reads UNKNOWN and its reason names the install, because a suite whose package is missing can read CAUGHT or MISS for the
     wrong cause. Any other defect runs as usual. A failed link leaves the checkout unusable, so every defect reads UNKNOWN."""
     if not defects:
@@ -1530,20 +1529,26 @@ def run_known_defects(repo: str, defects, profile: dict, deps: str, suite_timeou
     return results
 
 
+def _is_product(part: dict, path: str) -> bool:
+    """True when the profile (or part) `part` reads `path` as product code: its `code` regex matches and its `code_not` does not."""
+    return bool(part.get("code") and re.search(part["code"], path)
+                and not (part.get("code_not") and re.search(part["code_not"], path)))
+
+
 def _needed_parts(defect, parts: dict) -> list:
     """The names of the parts whose install `defect` needs: the parts that claim it by their `code` regex on its `file` (less
-    `code_not`) or their `tests` regex on an element of its `argv`, and every part with neither regex. No claim, or a defect
-    too malformed to read, needs every part."""
+    `code_not`) or their `tests` regex on an element of its `argv`. No claim, a part with neither regex, or a defect too
+    malformed to read, needs every part: a part with neither regex may be what the defect needs, so no defect can be routed
+    around it."""
     try:
         file, argv = str(defect["file"]), [str(item) for item in defect["argv"]]
     except (KeyError, TypeError):
         return list(parts)
+    if any(not part.get("code") and not part.get("tests") for part in parts.values()):
+        return list(parts)
     claimed = [name for name, part in parts.items()
-               if (part.get("code") and re.search(part["code"], file)
-                   and not (part.get("code_not") and re.search(part["code_not"], file)))
-               or (part.get("tests") and any(re.search(part["tests"], item) for item in argv))]
-    open_ = [name for name, part in parts.items() if not part.get("code") and not part.get("tests")]
-    return [name for name in parts if name in claimed or name in open_] if claimed else list(parts)
+               if _is_product(part, file) or (part.get("tests") and any(re.search(part["tests"], item) for item in argv))]
+    return claimed or list(parts)
 
 
 def _unrun_defect(defect, reason: str) -> dict:
