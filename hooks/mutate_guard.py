@@ -246,13 +246,11 @@ MUTATIONS = [
      '    return name.startswith(ENV_PREFIX) and name != ENV_ALLOWED',
      '    return name == ENV_PREFIX', "guard", 'env: a path token wherever the path puts it, cat .env.local'),
     ("shared-tree: drop the interpreter heredoc exception",
-     '    if (SHELL_HEREDOC if shells_only and not per_body else INTERPRETER_HEREDOC)(text) or _runs_written_file(\n'
-     '            text, headers):',
-     '    if False:', "guard", 'heredoc: a body fed to a shell stays under inspection'),
+     '        if (SHELL_HEREDOC if shells_only else INTERPRETER_HEREDOC)(text) or _runs_written_file(text, headers, runner):',
+     '        if False:', "guard", 'heredoc: a body fed to a shell stays under inspection'),
     ("shared-tree: keep no heredoc body in the per-body reading",
      '        keep = [number for number, header in enumerate(headers)\n'
-     '                if first(header) or _PIPED_SHELL(header) or _runs_written_file(text, [header], runner)\n'
-     '                or not _feeds_data(header, shells_only)]',
+     '                if first(header) or _PIPED_SHELL(header) or _runs_written_file(text, [header], runner)]',
      '        keep = []', "guard", 'frozen shell: a heredoc body fed to bash, naming a cat-write onto the config settings'),
     ("frozen-path: freeze nothing",
      '    if not path:\n        return False\n    try:\n        literal = _literal_resolved(path, cwd)\n'
