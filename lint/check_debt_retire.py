@@ -4,15 +4,24 @@
     python3 lint/check_debt_retire.py [--upstream origin/main] [--head HEAD] [--strict]
 
 A debt is closed when its file is deleted, or renamed out of the debts folder (lint/layout.py, kind debts). The
-check reads that debt's Retire paragraph from the base and runs what it names, on the head:
+check reads that debt's Retire paragraph from the base and runs what it names. A test must pass on the head and fail
+on the debt's birth commit, the oldest commit that added the debt file. A test that passes on the birth commit does
+not catch the defect.
 
-  runnable  a backticked span that is a test file the head tracks (test_*.py, *_test.py, *.test.mjs, test_*.mjs,
-            test_*.sh) runs as one argv, with no shell, from the head folder, under a timeout. Non-zero is red.
-            A missing interpreter, a failed start, or a timeout is unknown.
+  runnable  a backticked span that is a test file (test_*.py, *_test.py, *.test.mjs, test_*.mjs, test_*.sh) runs as
+            one argv, with no shell, under a timeout, first from the head folder, then from a scratch tree of the
+            birth commit with the head's copy of the test laid over it. On the head, non-zero is red. On the birth
+            commit the test must fail: exit 0 is red (the test misses the defect). A python test that fails an
+            assertion counts as failing (unittest says failures=N), and so does a node test that fails an assertion
+            (ERR_ASSERTION). A bash test counts as failing on any non-zero exit but 126 and 127, since a script has
+            no failure or error split. An import error, a run that only errors, a missing interpreter, a failed start,
+            or a timeout is unknown. A span that names a test file the head does not track is red.
   prose     a Retire that names no runnable check holds the close, unless the PR body cites a run:
             `Retire-run: <slug> -- <run URL>`, read as the Drops-lines line of check_silent_undo is. The run must be
-            green and on the PR head or a commit above it. A cite also clears a check that could not run here (unknown);
-            a red check is never cleared by a cite.
+            green and on the PR head or a commit above it.
+  reason    an unknown (a check that could not run here) is also cleared by `Retire-run: <slug> -- <reason>`, where the
+            reason is any text that is not one lone http(s) URL. A red check is never cleared by a cite or a reason,
+            and a reason never closes a prose Retire.
 
 Exit 1 on any finding. Design: decision debt-close-runs-retire.
 """
@@ -37,7 +46,9 @@ TIMEOUT = 600
 INTERPRETERS = {".py": ["python3"], ".mjs": ["node", "--test"], ".sh": ["bash"]}
 TEST_NAME = re.compile(r"^(?:test_[^/]+\.(?:py|mjs|sh)|[^/]+_test\.py|[^/]+\.test\.mjs)$")
 SPAN = re.compile(r"`([^`\s]+)`")  # no space inside: a lone backtick in prose never swallows the real span after it
-CITE_LINE = re.compile(r"\s*(\S+)\s+--\s+(\S+)\s*$")
+CITE_LINE = re.compile(r"\s*(\S+)\s+--\s+(\S.*?)\s*$")
+LONE_URL = re.compile(r"https?://\S+")
+GLOB = re.compile(r"[*?<>{}\[\]$]")  # a placeholder such as `test_*.py` names no file
 
 
 class Finding:
@@ -60,14 +71,22 @@ def retire_text(lines):
     return " ".join(" ".join(out).split())
 
 
-def spans(text, tracked):
-    """The backticked test files of `text` that the head tracks, in order, each once."""
+def spans(text):
+    """The backticked test files of `text`, in order, each once. The head may not track them."""
     found = []
     for s in SPAN.findall(text):
         s = s[2:] if s.startswith("./") else s
-        if s in tracked and TEST_NAME.match(os.path.basename(s)) and os.path.splitext(s)[1] in INTERPRETERS and s not in found:
+        if TEST_NAME.match(os.path.basename(s)) and os.path.splitext(s)[1] in INTERPRETERS and not GLOB.search(s) and s not in found:
             found.append(s)
     return found
+
+
+def birth_commit(wt, ref, path):
+    """The oldest commit of `ref` that added `path`, following renames. Raises Unknown when git cannot say."""
+    added = records.git_names(wt, "log", "-z", "--follow", "--diff-filter=A", "--format=%H", ref, "--", path)
+    if not added:
+        raise Unknown("no commit that added %s is in the history of %s" % (path, ref))
+    return added[-1]
 
 
 @contextlib.contextmanager
@@ -84,27 +103,68 @@ def scratch(wt, head):
         shutil.rmtree(tmp, ignore_errors=True)
 
 
-def run_span(wt, span, timeout):
-    """(kind, text) for one test: red on a non-zero exit, unknown when it could not run, else None."""
+def start(wt, span, timeout):
+    """(finished process, None), or (None, (kind, text)) when the test could not run."""
     argv = list(INTERPRETERS[os.path.splitext(span)[1]])
     exe = shutil.which(argv[0])
     if not exe:
-        return "unknown", "%s is not on PATH, so %s did not run" % (argv[0], span)
+        return None, ("unknown", "%s is not on PATH, so %s did not run" % (argv[0], span))
     try:
-        r = _nowindow.run([exe, *argv[1:], span], cwd=wt, capture_output=True, encoding="utf-8", errors="replace",
-                                  timeout=timeout, env=dict(os.environ, PYTHONDONTWRITEBYTECODE="1"))
+        return _nowindow.run([exe, *argv[1:], span], cwd=wt, capture_output=True, encoding="utf-8", errors="replace",
+                             timeout=timeout, env=dict(os.environ, PYTHONDONTWRITEBYTECODE="1")), None
     except subprocess.TimeoutExpired:
-        return "unknown", "%s ran past %d s" % (span, timeout)
+        return None, ("unknown", "%s ran past %d s" % (span, timeout))
     except OSError as e:
-        return "unknown", "%s did not start: %s" % (span, e)
+        return None, ("unknown", "%s did not start: %s" % (span, e))
+
+
+def run_span(wt, span, timeout):
+    """(kind, text) for one test on the head: red on a non-zero exit, unknown when it could not run, else None."""
+    r, bad = start(wt, span, timeout)
+    if bad:
+        return bad
     if r.returncode:
         tail = " | ".join((r.stdout + r.stderr).strip().splitlines()[-5:])
         return "red", "%s exited %d%s" % (span, r.returncode, ": " + tail[:400] if tail else "")
     return None
 
 
+def failed(span, r):
+    """True when a non-zero run of `span` is a test failing, not the run erroring: the one fact the birth run needs."""
+    out = r.stdout + r.stderr
+    suffix = os.path.splitext(span)[1]
+    if suffix == ".py":
+        m = re.search(r"^FAILED \((?:[^)]*, )?failures=(\d+)", out, re.M)
+        return bool(m and int(m.group(1)) >= 1)
+    if suffix == ".mjs":
+        return "ERR_ASSERTION" in out
+    return r.returncode not in (126, 127)
+
+
+def run_on_birth(wt, birth, head, span, timeout):
+    """(kind, text) for one test on the birth commit, with the head's copy of it laid over: None when it fails there (the
+    test catches the defect), red when it passes, unknown when it errors or could not run."""
+    blob = _nowindow.run(["git", "-C", wt, "show", head + ":" + span], capture_output=True)
+    with scratch(wt, birth) as tree:
+        if blob.returncode or not tree:
+            return "unknown", "no scratch tree of the birth commit %s for %s" % (birth[:9], span)
+        os.makedirs(os.path.dirname(os.path.join(tree, span)), exist_ok=True)
+        with open(os.path.join(tree, span), "wb") as f:
+            f.write(blob.stdout)
+        r, bad = start(tree, span, timeout)
+    if bad:
+        return bad
+    if r.returncode == 0:
+        return "red", "%s passes on the birth commit %s, so it does not catch the defect" % (span, birth[:9])
+    if failed(span, r):
+        return None
+    tail = " | ".join((r.stdout + r.stderr).strip().splitlines()[-3:])
+    return "unknown", "%s errored on the birth commit %s without failing a test: %s" % (span, birth[:9], tail[:300])
+
+
 def cites(pr_body):
-    """{debt slug: run URL} from the `Retire-run: <slug> -- <url>` lines of the PR body's last paragraph. The last cite of a slug wins."""
+    """{debt slug: run URL or written reason} from the `Retire-run: <slug> -- <text>` lines of the PR body's last paragraph.
+    The last cite of a slug wins."""
     res = {}
     for line in re.findall(r"^" + CITE + r":(.*)$", undo.last_paragraph(pr_body), re.I | re.M | re.ASCII):
         m = CITE_LINE.match(line)
@@ -131,6 +191,31 @@ def judge_run(wt, head, url, run_state):
     return "unknown", "the cited run %s is on %s, which this checkout does not hold" % (url, str(sha)[:9])
 
 
+def judge_tests(wt, head, ref, old, todo, tracked, timeout, isolate):
+    """(kind, text) for the tests a closed debt's Retire names, or None when each passes on the head and fails on the birth
+    commit of the debt file `old` (found from `ref`). A red outranks an unknown, whatever the order."""
+    missing = [s for s in todo if s not in tracked]
+    if missing:
+        return "red", "names %s, which the head does not track" % ", ".join(missing)
+    got = None
+    for span in todo:
+        with scratch(wt, head) if isolate else contextlib.nullcontext(wt) as tree:
+            one = run_span(tree, span, timeout) if tree else ("unknown", "no scratch worktree for %s" % span)
+        if one and one[0] == "red":
+            return one
+        got = got or one
+    try:
+        birth = birth_commit(wt, ref, old)
+    except Unknown as e:
+        return got or ("unknown", str(e))
+    for span in todo:
+        one = run_on_birth(wt, birth, head, span, timeout)
+        if one and one[0] == "red":
+            return one
+        got = got or one
+    return got
+
+
 def check(wt, base_ref, head="HEAD", timeout=TIMEOUT, pr_body="", run_state=None, isolate=False):
     """[Finding] for each debt that `head` closes against `base_ref` and whose Retire step does not hold. Raises Unknown.
     run_state(url) -> (conclusion, head sha) of a workflow run, or raises.
@@ -152,31 +237,28 @@ def check(wt, base_ref, head="HEAD", timeout=TIMEOUT, pr_body="", run_state=None
     found = []
     for old, new in closed:
         slug = os.path.basename(old)[:-3]
+        ref = base_ref
         try:
-            lines = records.show(wt, base_ref, old)  # the base tip's Retire, the one the base holds now
+            lines = records.show(wt, ref, old)  # the base tip's Retire, the one the base holds now
         except Unknown:
-            lines = records.show(wt, mb, old)  # the base tip no longer holds the file: the fork point's
+            ref = mb
+            lines = records.show(wt, ref, old)  # the base tip no longer holds the file: the fork point's
         text = retire_text(lines)
         if new != old and debt(new) and text == retire_text(records.show(wt, head, new)):
             continue  # a rename inside the folder with its Retire unchanged
-        todo = spans(text, tracked)
+        todo = spans(text)
         if todo:
-            got = None
-            for span in todo:
-                with scratch(wt, head) if isolate else contextlib.nullcontext(wt) as tree:
-                    one = run_span(tree, span, timeout) if tree else ("unknown", "no scratch worktree for %s" % span)
-                if one and one[0] == "red":
-                    got = one
-                    break
-                got = got or one  # an unknown sticks: only a red outranks it, whatever the order
-            if got and got[0] == "unknown" and slug in cited:  # a check this machine cannot run: a green cited run proves it ran
+            got = judge_tests(wt, head, ref, old, todo, tracked, timeout, isolate)
+            if got and got[0] == "unknown" and slug in cited:  # a check this machine cannot run: a green cited run or a written reason clears it
+                if not LONE_URL.fullmatch(cited[slug]):
+                    continue
                 if (cite := judge_run(wt, head, cited[slug], run_state)) is None:
                     continue
                 got = cite
             if got:
                 found.append(Finding(slug, got[0], "debt %s: its Retire check %s. Retire: %s" % (slug, got[1], text)))
             continue
-        got = judge_run(wt, head, cited[slug], run_state) if slug in cited else ("prose", None)
+        got = judge_run(wt, head, cited[slug], run_state) if LONE_URL.fullmatch(cited.get(slug, "")) else ("prose", None)
         if got is None:
             continue
         if got[0] == "prose":
