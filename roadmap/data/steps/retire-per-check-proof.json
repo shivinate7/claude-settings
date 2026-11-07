@@ -1,0 +1,10 @@
+{
+  "title": "A debt's one-check Retire accepts that check's own pass on the PR head",
+  "phase": "next",
+  "status": "todo",
+  "order": 210.5,
+  "owner": "lane",
+  "why": "A debt whose Retire is one browser check can close while other browser checks are red.",
+  "note": "Coordinator 23:35 CST Nov 6, from runner 9 at 23:34 CST: decision debt-close-runs-retire refused q_max #1052. #1042 closes debts RAIL and SIDE-EDGE, whose Retire is one browser check, and check_debt_retire accepts only a whole green browser.yml run. Main's browser suite is red for other checks (items 325-327), so the debts can never close. Fix: let check_debt_retire accept a per-check pass from the named check's shard job in a CI run on the PR head. It changes a guard. Meanwhile #1042 keeps both debts open.",
+  "updatedAt": "2026-11-07T05:35:00Z"
+}
