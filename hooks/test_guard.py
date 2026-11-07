@@ -11052,6 +11052,9 @@ CMK_MP = os.path.join(CMKPUSH, "mergepush")    # a commit made by `git merge --c
 CMK_NF = os.path.join(CMKPUSH, "newfile")      # an unpushed commit that adds a new file holding a triplet
 CMK_CL = os.path.join(CMKPUSH, "clean")        # an unpushed clean commit, and a.txt edited, not staged
 CMK_RT = os.path.join(CMKPUSH, "remotetrip")   # a triplet already on the remote branch, then a clean commit
+CMK_CLT = os.path.join(CMKPUSH, "cltriplet")   # a.txt holding a triplet, tracked and not staged
+CMK_SEQ = os.path.join(CMKPUSH, "seqclean")    # a.txt and b.txt edited, not staged, both clean
+CMK_SEQB = os.path.join(CMKPUSH, "seqtriplet")  # as seqclean, with b.txt holding a triplet
 
 
 def _cmk_commit(where, rel, text, msg):
@@ -11129,8 +11132,18 @@ def _build_conflict_markers_push():
     run(CMK_RT, "push", "-q", "origin", "topic")
     commit(CMK_RT, "b.txt", "clean\n", "clean change, unpushed")
 
+    _cmk_pushed(CMK_CLT, {"a.txt": "base\n"})
+    write(os.path.join(CMK_CLT, "a.txt"), CM_TRIPLET)      # tracked, modified, not staged
+    commit(CMK_CLT, "b.txt", "clean\n", "clean change, unpushed")
 
-lazy_fixture([CMK_PU, CMK_RB, CMK_MP, CMK_NF, CMK_CL, CMK_RT], _build_conflict_markers_push)
+    for path, b_text in ((CMK_SEQ, "b2\n"), (CMK_SEQB, CM_TRIPLET)):
+        _cmk_pushed(path, {"a.txt": "base\n", "b.txt": "base\n"})
+        write(os.path.join(path, "a.txt"), "a2\n")         # modified, not staged
+        write(os.path.join(path, "b.txt"), b_text)
+
+
+lazy_fixture([CMK_PU, CMK_RB, CMK_MP, CMK_NF, CMK_CL, CMK_RT, CMK_CLT, CMK_SEQ, CMK_SEQB],
+             _build_conflict_markers_push)
 
 # The commit check gives no hit when an earlier segment can change the tree. The sed deletes the marker
 # lines, so the commit it precedes holds none.
@@ -11156,6 +11169,21 @@ cmk_allow("add a.txt, commit and push, with a clean a.txt",
           VCS + " add a.txt && " + VCS + " commit -m x && " + VCS + " push", CMK_CL)
 cmk_refuse("a fix script, add -A, commit and push in one call",
            "./fix.sh && " + VCS + " add -A && " + VCS + " commit -m x && " + VCS + " push", CMK_CL)
+
+# A cd is a safe earlier segment: the commit is judged in the repository it names. These run from a
+# directory that is no repository, so only the cd leads to the repository.
+cmk_allow("a cd into a repo with a clean change, then add -A, commit and push",
+          "cd " + CMK_CL + " && " + VCS + " add -A && " + VCS + " commit -m x && " + VCS + " push", NOGIT)
+cmk_refuse("a cd into a repo with a triplet in a tracked file, then add -A, commit and push",
+           "cd " + CMK_CLT + " && " + VCS + " add -A && " + VCS + " commit -m x && " + VCS + " push", NOGIT)
+
+# An earlier commit is a safe segment too, so each commit is judged and the push sees both.
+cmk_allow("two clean commits, each after an add, then a push",
+          VCS + " add a.txt && " + VCS + " commit -m a && " + VCS + " add b.txt && " + VCS + " commit -m b && "
+          + VCS + " push", CMK_SEQ)
+cmk_refuse("two commits, each after an add, the second holding a triplet, then a push",
+           VCS + " add a.txt && " + VCS + " commit -m a && " + VCS + " add b.txt && " + VCS + " commit -m b && "
+           + VCS + " push", CMK_SEQB)
 
 
 # =========================================================================== 6. frozen paths
