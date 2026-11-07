@@ -13342,9 +13342,9 @@ SHELL_TEST_WRITES = (
     ("perl -pi on tests/a.py", "perl -pi -e s/a/b/ tests/a.py"),
     ("xargs -I{} cp of tests found by find, to {}.bak",
      "find tests -name '*.py' | xargs -I{} cp {} {}.bak"),
-    # A substitution glued to a destination stays refused, as main reads it.
-    ("cp of a into /tmp/$(basename tests/a.py)", "cp a /tmp/$(basename tests/a.py)"),
+    # A destination whose literal prefix is inside a test root is refused, with or without a substitution.
     ("cp of src/x into tests/$(date)", "cp src/x tests/$(date)"),
+    ("cp of a into a quoted tests/$(basename src/x.py)", "cp a \"tests/$(basename src/x.py)\""),
 )
 for _name, _command in SHELL_TEST_WRITES:
     sh("builder-test: shell write, %s, is refused" % _name, _command, "deny", rule=BT,
@@ -13409,6 +13409,9 @@ SHELL_TEST_ALLOWS = (
     ("cp of a quoted find over tests into /tmp/x/", "cp \"$(find tests -name a.py)\" /tmp/x/"),
     ("cp of a backtick find over tests into /tmp/x/", "cp `find tests -name a.py` /tmp/x/"),
     ("cp of a process substitution over tests into /tmp/x/", "cp <(find tests -name a.py) /tmp/x/"),
+    # A destination whose literal prefix is a fixed directory outside the test roots writes no test,
+    # even when a substitution follows it.
+    ("cp of a into /tmp/$(basename tests/a.py)", "cp a /tmp/$(basename tests/a.py)"),
 )
 for _name, _command in SHELL_TEST_ALLOWS:
     sh("builder-test: shell %s is allowed" % _name, _command, "allow", **BR)
