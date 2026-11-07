@@ -698,12 +698,16 @@ def offers_a_pick(text):
     return len(numbers) >= 2 and context
 
 
+def has_question_mark(text):
+    """True when text holds a "?" outside quotes, backticks and blockquoted lines."""
+    kept = "\n".join(line for line in text.splitlines() if not line.lstrip().startswith(">"))
+    return bool(QUESTION_MARK_RE.search(QUOTED_RE.sub("", kept)))
+
+
 def asks_a_question(text):
     """True when the Input Needed item holds a sentence that ends in "?" outside quotes, backticks and
     blockquoted lines (questions-reach-page: a question for the owner, whether or not it offers a pick)."""
-    section = input_needed_section(text)
-    kept = "\n".join(line for line in section.splitlines() if not line.lstrip().startswith(">"))
-    return bool(QUESTION_MARK_RE.search(QUOTED_RE.sub("", kept)))
+    return has_question_mark(input_needed_section(text))
 
 
 # compaction-carry: after a compaction the session reports two lines, `Recovered:` (what it got back
@@ -945,7 +949,8 @@ def _turn_acts(records, turn, acks):
     message; when that message is the ack of a send from a session in `acks`, the turn reaches back past it."""
     cut = len(records) - len(turn)
     if cut and peer_sender(records[cut - 1]) in acks:
-        idx = last_incoming_index(records, acks)
+        from _transcript import peer_body
+        idx = last_incoming_index(records, acks, asks=lambda r: has_question_mark(peer_body(r)))
         turn = records if idx is None else records[idx + 1:]
     uses = [u for r in turn if not r.get("isSidechain") for u in tool_uses(r)]
     return uses, [send_targets(u) for u in uses]
