@@ -75,11 +75,11 @@ The URL is the `waiting-page` key in the repo's extras file, `.claude/layout-ext
     "Departs from: <file>:<symbol> — <what changes>" and never has `holds`. The writer refuses it otherwise
     (guard rule `port-question`). The existing app answers every other question: read it, never ask.
   - `widens: true` on an option marks one that widens what a shared tool accepts: a second accepted form,
-    an allow-list entry or a per-repo exception. Its card shows "Goes against your ruling: a repo changes to fit a shared tool, never the tool to fit a repo": a repo
+    an allow-list entry or a per-repo exception. Its card shows "Goes against your ruling: a repo changes to fit a shared tool, never the tool to fit a repo" (rule `style-question-form`): a repo
     that differs from a shared format changes to match it. `pick` never names such an option, and a list `pick` never holds its key. The writer refuses
     it (guard rule `uniform-pick`). An update that sets `pick` carries `options` again: the guard cannot see the stored field.
   - An option may carry `links` (a list of `{label, url}`): its card shows them, and each opens in a new tab. An option that
-    asks the owner to press in a web app carries a link to that exact page (for a pull request or an issue, its number in the url).
+    asks the owner to press in a web app carries a link (rule `style-press-has-link`: a link to that exact page; for a pull request or an issue, its number in the url).
     The writer refuses it otherwise (guard rule `press-link`). An update that sets `options` carries each option's `links` again,
     and an update that sets `steps` carries `links` again: the guard cannot see the stored fields.
   - `look: true` marks a question about how something looks. Every option card with no picture then
@@ -106,7 +106,7 @@ The URL is the `waiting-page` key in the repo's extras file, `.claude/layout-ext
     `<<`, `<<<`, `/dev/null` or `export`. `mac` is bash or zsh. Never mix shells in one. The item shows each in a closed disclosure with a Copy
     button that works while it is closed, PowerShell first on Windows. A stored one-string `command` shows as one block
     with no shell label. A step that presses in a web app needs a link in `links` (guard rule `press-link`).
-    A step never sends the owner to a file for a command and never holds one: put it in `command` and say "paste the
+    Per rule `style-command-in-item` (no file for a command, none held), put it in `command` and say "paste the
     command below". The writer refuses a step with a shell line in backticks, and a `command` without both shells
     (guard rule `command-in-item`). Each shell in `command` opens with the gh login switch of rule `output-never-hand-off-doable-step`, before any other gh line (guard rule `gh-login-switch`). A `str_replace` on `command` that adds a gh line carries the switch in its `new_str`.
   - A task carries a line in `context` that starts "Why yours: <why only the owner can do it, and the check that showed it>".
@@ -207,7 +207,7 @@ project with a triage thread, it is triage. The page's name for it is `writer` i
 it with `ArtifactData get meta/page`. With no `writer`, the session that makes the page writes it
 into `meta/page`. The writer watches the page ("Read the answers").
 
-- Every other session sends its question to the writer, which writes the item. A lane sends its question
+- Per rule `questions-go-to-owner` (the writer writes each item), every other session sends its question to the writer. A lane sends its question
   to its parent in the same turn, and the orchestrator writes the item ("Add an item", step 0).
   `owner` stays the session that asked. It reads its own answer at its wake, so nobody relays answers.
 - The writer ranks. The fact tiers are the base: Blocking, Upcoming, Whenever and Pick stands. Never
@@ -425,7 +425,7 @@ live page.
      open: choosing another option is the only way out. A `multi` item stands with its list `pick`: the owner's ticks replace it. A question that touches a rule starts blank.
 3. Once the item exists, name it in the reply in one line, with the page URL for an open item only
    (the page hides a closed item, except an arbiter ruling). Open no question box (`questions-go-to-owner`).
-4. Keep working on what does not depend on the answer.
+4. Keep working on what does not depend on the answer (rule `questions-go-to-owner`).
 
 ## Read the answers
 

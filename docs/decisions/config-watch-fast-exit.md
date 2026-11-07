@@ -13,7 +13,7 @@ Why: the cost is the import, not the hash. There is no mtime or size stamp. A sa
 
 ## Note, not a debt
 
-A JSON-escaped cap key outside `env` skips its expiry check in the fast check. Only an attacker writes that form (`guard-guards-mistakes-only`, guards stop Claude's mistakes, not an attacker).
+A JSON-escaped cap key outside `env` skips its expiry check in the fast check. Only an attacker writes that form (`guard-guards-mistakes-only`, guards stop Claude's mistakes, not an attacker; rule `roles-review-cap-three`).
 
 Kind: process
 Home: hooks/config_watch.py

@@ -2,7 +2,7 @@
 
 ## The ruling
 
-The guards judge the command a wrapper runs, not the raw text. Rule `guard-guards-mistakes-only` (guards stop Claude's mistakes, not an attacker) sets the bar. The owner allowed the merge (2026-10-17 09:13 CDT, "yes merge guard fixes"), because net safety value is positive.
+The guards judge the command a wrapper runs, not the raw text. Rule `roles-review-cap-three` sets the bar, from decision `guard-guards-mistakes-only` (guards stop Claude's mistakes, not an attacker). The owner allowed the merge (2026-10-17 09:13 CDT, "yes merge guard fixes"), because net safety value is positive.
 
 - `inner_commands` in `hooks/guard_core.py` reads the command inside a nested shell, `ssh`, and the runners `docker`/`podman exec`, `kubectl exec --`, `find -exec`, `su -c`, `flock`, `stdbuf`, `unbuffer` and `caffeinate`.
 - `bare_words` reads a segment's unquoted words. The stream and delete guards refuse the danger pattern at any unquoted position, so a runner left off the list is still caught. A quoted pattern in `echo`, a commit message, `sed` or `awk` passes.

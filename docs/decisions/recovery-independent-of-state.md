@@ -1,4 +1,4 @@
-# A recovery control must not depend on the state it recovers
+# A recovery control must not depend on the state it recovers (rule `verification-recovery-independent-of-state`)
 
 ## The ruling
 

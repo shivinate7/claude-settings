@@ -28,8 +28,7 @@ it named one. Together they cover the work since the handoff's last write.
 ## 4. Rewrite the whole file
 
 Write the file again from the top, with one whole-file write. Never append a block, a
-dated line, or a "CURRENT STATE" section below the old ones. Keep only what is true now,
-in the fewest words. Drop work that landed on main and text that a later fact replaced.
+dated line, or a "CURRENT STATE" section below the old ones. Keep only what is true now, in the fewest words (rule `speak-rewrite-superseded-in-place`). Drop work that landed on main and text that a later fact replaced.
 Git and the transcript keep the history. Never make a dated copy.
 
 The handoff holds these sections, in this order:

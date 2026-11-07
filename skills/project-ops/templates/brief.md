@@ -10,7 +10,7 @@ Run `git fetch origin +refs/heads/roadmap:refs/remotes/origin/roadmap` before th
 
 ## Task
 
-<What to build, and the outcome for the person the software serves.>
+<What to build, and its outcome for the person served (rule `outcomes-judge-by-outcome`).>
 
 ## Sources
 

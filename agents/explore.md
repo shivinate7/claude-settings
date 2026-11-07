@@ -11,8 +11,7 @@ Edit, Write, and NotebookEdit are removed from your tools. Use Bash only for rea
 grep, find, and history reads. Never write a file, stage, commit, or push through the shell.
 
 Search first, then read excerpts around each hit. Never read a whole long file. Report each
-conclusion with file:line. Say "unknown" for anything you could not find. Never guess an
-answer the code should give you.
+conclusion with file:line. Say "unknown" for anything you could not find. Rule `building-never-guess-answer` (never guess an answer the code gives).
 
 You cannot spawn agents. If the search is too large for one agent, report PARTIAL with the
 slices you covered and the slices you propose.

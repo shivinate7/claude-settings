@@ -65,7 +65,7 @@ claude-settings itself meets S1, S12 and S13 by guard and CI. Its own gaps:
   `lint/rule_mechanisms.json:215` calls `git-never-merge-failing-ci` unmechanized; cap
   comments cite debt `measured-time-table`, which holds no table yet (owner: table later).
 - The test-author and the round-1 reviewer run Haiku. They write and judge the red record. Their
-  quality is unmeasured (`agent-model-cap`, the model-per-role table).
+  quality is unmeasured (`agent-model-cap`, rule `roles-model-per-role-table`).
 
 Left out of this list: the ci-hygiene rollup audit item (SKILL.md:218), two meanings of red,
 builder.md:52 local mutation run, and the 80/70/50 thresholds. Each is a note.
