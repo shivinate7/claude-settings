@@ -4568,16 +4568,6 @@ class GhHalf(Env):
         self.assertIn("update_pull_request", text)
         self.assertIn("route pr-ready-mcp-cloud", text)
 
-    def test_a_draft_head_with_all_jobs_passed_required_remedy_names_merge_confirm_before_the_mark_ready_routes(self):
-        # A session that marks the draft ready by MCP or gh skips merge.readyChecks. Only `merge <pr> --confirm` runs them, so the
-        # remedy names it before either route (debt ready-checks-skipped-by-mcp).
-        red, _, _ = merge.Host.classify({"all-jobs-passed": [("skipping", "")], "scope": [("skipping", "")]}, ["all-jobs-passed"])
-        text = " ".join(red)
-        routes = [text.find(r) for r in ("update_pull_request", "gh pr ready") if r in text]
-        self.assertTrue(routes, f"control: the remedy names no mark-ready route: {text}")
-        self.assertIn("--confirm", text, f"the remedy names no run of the ready checks: {text}")
-        self.assertLess(text.find("--confirm"), min(routes), f"a mark-ready route comes before merge --confirm, which runs the ready checks: {text}")
-
     def test_the_stale_page_remedy_names_both_draft_routes_and_their_table(self):
         # A cloud session returns a PR to draft by MCP update_pull_request (route pr-draft-mcp-cloud), so the remedy never hands it to the owner's computer.
         for claim in ("", "c1"):
@@ -8738,7 +8728,7 @@ class WaitRefusalCites(unittest.TestCase):
         self.assertFalse(ok)
         self.assertIn("deadline of 5 minutes passed", why)
         self.assertNotIn("git-never-merge-failing-ci", why, f"a pre-push deadline cites the failing-CI rule: {why}")
-        self.assertRegex(why, r"\((decision|rule) [a-z0-9-]+, ", f"the refusal names no cite: {why}")
+        self.assertIn("ci-wait-reads-run-status", why, f"the pre-push deadline does not cite its decision: {why}")
 
     def test_a_head_that_moves_during_the_wait_does_not_cite_the_failing_ci_rule(self):
         host = ClockedHost(lambda t: {"checks": [("pass", "")]}, head_at=lambda t: "other")
@@ -8746,7 +8736,7 @@ class WaitRefusalCites(unittest.TestCase):
         self.assertFalse(ok)
         self.assertIn("branch head moved", why)
         self.assertNotIn("git-never-merge-failing-ci", why, f"a moved head cites the failing-CI rule: {why}")
-        self.assertRegex(why, r"\((decision|rule) [a-z0-9-]+, ", f"the refusal names no cite: {why}")
+        self.assertIn("standing-merge-grant", why, f"the moved head does not cite its decision: {why}")
 
     def test_control_a_red_check_still_cites_the_failing_ci_rule(self):  # the control: the cite stays where a check is red
         host = ClockedHost(lambda t: {"checks": [("fail", "")]})
@@ -8755,40 +8745,102 @@ class WaitRefusalCites(unittest.TestCase):
         self.assertIn("a check is red", why)
         self.assertIn("git-never-merge-failing-ci", why, why)
 
+class FakeReadsWaitHost(merge.Host):
+    """The real wait and classify. Every other read comes from `fake` (a FakeHost): the pull request, the batch, the base, the merge.
+    `rows` is what the checks read returns, and `required` names the checks the wait holds on. `in_wait` is set for the wait's own reads only."""
+    def __init__(self, fake, required, rows):
+        super().__init__(list(required), minute=60, now=lambda: 0, pause=lambda s: None)
+        self.fake, self.required_list, self.rows, self.in_wait = fake, list(required), rows, False
+
+    def wait_checks(self, *a, **k):
+        self.in_wait = True
+        try:
+            return super().wait_checks(*a, **k)
+        finally:
+            self.in_wait = False
+
+    def pr(self, n, *a, **k): return self.fake.pr(n)
+    def required_names(self): return list(self.required_list)
+    def batch_running(self, n, base, head=None): return []
+    def checks(self, n, *a, **k): return self.rows
+    def runs(self, sha): return []
+    def base_state(self, base, flows): return "green", ""
+    def head_state(self, n, *a, **k): return "green"
+    def merge(self, *a): return self.fake.merge(*a)
+
+class MovesInWait(FakeReadsWaitHost):
+    """A push to the head lands during the first pass of the wait."""
+    def __init__(self, fake, case):
+        super().__init__(fake, ["checks"], {"checks": [("pass", "")]})
+        self.case, self.moved = case, False
+
+    def pr(self, n, *a, **k):
+        if self.in_wait and not self.moved:
+            self.moved = True
+            self.case.on("feat", {"notes.txt": "moved\n"}, "a push during the wait")
+        return self.fake.pr(n)
+
+class ReadFailsInWait(FakeReadsWaitHost):
+    """The wait's own pull request read fails: the real Host.pr runs, and its gh call fails. Outside the wait the fake answers."""
+    def __init__(self, fake):
+        super().__init__(fake, ["checks"], {"checks": [("pass", "")]})
+
+    def pr(self, n, *a, **k):
+        return merge.Host.pr(self, n) if self.in_wait else self.fake.pr(n)
+
+    def api(self, rel, *a, **k):
+        return 1, "gh: connection reset by peer"
+
 class ConfirmWaitCites(RecordsEnv):
-    """The same cite through confirm: its first wait wraps any refusal as a red head, so a head that moves during that wait is
-    refused with the failing-CI cite too (git-never-merge-failing-ci). The wait is the real one, as in BaseAware; its reads come from the fake."""
+    """The same cites through confirm: its first wait wraps a refusal as a red head. A head that moves during that wait is refused with
+    its own cite and no failing-CI cite; a read that fails in that wait carries the read cite (decision no-merge-during-batch-ci).
+    The wait is the real one, as in BaseAware; its reads come from the fake."""
 
     def test_a_head_that_moves_during_the_first_wait_does_not_cite_the_failing_ci_rule(self):
         self.claim_head({"debts/gap-one.md": DEBT_TEXT})  # resumed, with a stale page: the wait on the head runs before any push
-        fake, case = self.host, self
-        class MovesInWait(merge.Host):
-            def __init__(h):
-                super().__init__(["checks"], minute=60, now=lambda: 0, pause=lambda s: None)
-                h.in_wait, h.moved = False, False
-            def pr(h, n, *a, **k):
-                if h.in_wait and not h.moved:  # a push to the head lands during the first pass of the wait
-                    h.moved = True
-                    case.on("feat", {"notes.txt": "moved\n"}, "a push during the wait")
-                return fake.pr(n)
-            def wait_checks(h, *a, **k):
-                h.in_wait = True
-                try:
-                    return super().wait_checks(*a, **k)
-                finally:
-                    h.in_wait = False
-            def required_names(h): return ["checks"]
-            def batch_running(h, n, base, head=None): return []
-            def checks(h, n, *a, **k): return {"checks": [("pass", "")]}
-            def runs(h, sha): return []
-            def base_state(h, base, flows): return "green", ""
-            def head_state(h, n, *a, **k): return "green"
-            def merge(h, *a): return fake.merge(*a)
-        rc, out = self.run_merge("7", "--confirm", host=MovesInWait())
+        rc, out = self.run_merge("7", "--confirm", host=MovesInWait(self.host, self))
         self.assertEqual(rc, 1, out)
         self.assertIn("branch head moved", out)
         self.assertNotIn("git-never-merge-failing-ci", out, f"a head that moved in the wait cites the failing-CI rule: {out}")
+        self.assertIn("standing-merge-grant", out, f"the moved head in the first wait names no cite of its own: {out}")
         self.assertFalse(getattr(self.host, "merged", False), out)
+
+    def test_a_read_that_fails_during_the_first_wait_carries_the_read_cite(self):
+        self.claim_head({"debts/gap-one.md": DEBT_TEXT})  # resumed, with a stale page: the wait's read runs before any push
+        rc, out = self.run_merge("7", "--confirm", host=ReadFailsInWait(self.host))
+        self.assertEqual(rc, 1, out)
+        self.assertIn("reading the pull request failed", out)  # control: the read is the one that fails
+        self.assertIn("no-merge-during-batch-ci", out, f"a failed read in the first wait carries no read cite: {out}")
+        self.assertFalse(getattr(self.host, "merged", False), out)
+
+class ReadyRemedy(RecordsEnv):
+    """The all-skipped remedy a ready head's refusal prints (merge.Host.classify, read by the real wait). It opens with the ready-check
+    step only in a repo that declares merge.readyChecks, names no `merge <pr> --confirm` (the command that refused: git-remedy-never-names-target),
+    and gives the mark-ready routes. The ready checks are decision lanes-run-no-full-ci-job's."""
+    SKIPPED = {"all-jobs-passed": [("skipping", "")], "scope": [("skipping", "")]}
+
+    def remedy(self, declared):
+        """-> the remedy of the refusal for a ready head whose checks all skipped, in a repo that declares ready checks or not."""
+        if declared:  # the seed's base already holds CONFIG, so only the declared case writes a config
+            put_base_config(self, json.dumps(dict(CONFIG, merge=dict(CONFIG["merge"], readyChecks=["check invariants"]))))
+        self.on("feat", {merge.RECORDS_PAGE: page()})
+        rc, out = self.run_merge("7", "--confirm", host=FakeReadsWaitHost(self.host, [REQUIRED_CHECK], self.SKIPPED))
+        self.assertEqual(rc, 1, out)
+        self.assertIn("no check ran on this head", out, out)  # control: the all-skipped refusal is reached
+        return out[out.index("no check ran on this head"):]
+
+    def test_a_repo_that_declares_ready_checks_opens_the_remedy_with_the_ready_check_step_and_names_no_confirm(self):
+        text = self.remedy(declared=True)
+        routes = [text.find(r) for r in ("update_pull_request", "gh pr ready") if r in text]
+        self.assertTrue(routes, f"control: the remedy names no mark-ready route: {text}")
+        self.assertIn("ready check", text, f"the remedy names no ready-check step: {text}")
+        self.assertLess(text.find("ready check"), min(routes), f"a mark-ready route comes before the ready-check step: {text}")
+        self.assertNotIn("--confirm", text, f"the remedy names the refusing command: {text}")
+
+    def test_a_repo_that_declares_no_ready_checks_gets_no_ready_check_step_in_the_remedy(self):
+        text = self.remedy(declared=False)
+        self.assertIn("update_pull_request", text, f"control: the remedy names no mark-ready route: {text}")
+        self.assertNotIn("ready check", text, f"a repo with no merge.readyChecks is sent to run ready checks: {text}")
 
 class MergeImport(unittest.TestCase):
     """merge.py imports the records generator when it loads. With that import blocked, the tool prints one clear line and
