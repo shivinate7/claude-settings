@@ -181,14 +181,56 @@ def is_literal_string(node):
     return isinstance(node, ast.Constant) and isinstance(node.value, str)
 
 
+TMP_NAMES = frozenset(("tmp_path", "tmpdir", "tmp_path_factory"))
+TMP_CALLS = frozenset(("mkdtemp", "TemporaryDirectory", "gettempdir"))
+SCOPES = (ast.Module, ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)
+
+
+def is_tmp_expr(node, tmp):
+    """Whether `node` is a temp folder: a pytest temp fixture name, a call to `tempfile.mkdtemp()`, `TemporaryDirectory()` or `gettempdir()`
+    (the call, not the module it hangs on), or a name in `tmp`. A chain that starts on one reads the temp folder, never the repository."""
+    if isinstance(node, ast.Name):
+        return node.id in TMP_NAMES or node.id in tmp
+    if isinstance(node, ast.Call):
+        dotted = dotted_name(node.func)
+        return dotted is not None and dotted.rsplit(".", 1)[-1] in TMP_CALLS
+    return False
+
+
+def tmp_bound(scope, tmp):
+    """The names that `scope` binds to a temp folder: `d = tempfile.mkdtemp()` and `with TemporaryDirectory() as d`. The walk stops at a nested
+    function, which gets its own pass; a name bound in a function is no temp folder outside it."""
+    found = set(tmp)
+    stack = list(ast.iter_child_nodes(scope))
+    while stack:
+        node = stack.pop()
+        if isinstance(node, SCOPES):
+            continue
+        if isinstance(node, ast.Assign) and is_tmp_expr(node.value, found):
+            found.update(t.id for t in node.targets if isinstance(t, ast.Name))
+        elif isinstance(node, ast.AnnAssign) and node.value is not None and isinstance(node.target, ast.Name) and is_tmp_expr(node.value, found):
+            found.add(node.target.id)
+        elif isinstance(node, (ast.With, ast.AsyncWith)):
+            for item in node.items:
+                if isinstance(item.optional_vars, ast.Name) and is_tmp_expr(item.context_expr, found):
+                    found.add(item.optional_vars.id)
+        stack.extend(ast.iter_child_nodes(node))
+    return found
+
+
 def joined_strings(tree):
     """The path that each join call or `/` chain names, as one string. Only the first argument (the anchor) may be anything but a plain
     string literal. A literal anchor is the first piece. A piece after it that is not a literal (a name, an f-string, a star) drops the call,
-    and so does a piece that starts with `/`, and so does a call with no piece after the anchor."""
+    and so does a piece that starts with `/`, and so does a call with no piece after the anchor. So does an anchor that is a temp folder
+    (`is_tmp_expr`), read in the function that holds the call: a temp folder is no part of the repository."""
     callees = join_callees(tree)
     inner = {id(n.left) for n in ast.walk(tree) if isinstance(n, ast.BinOp) and isinstance(n.op, ast.Div)}
     out = []
-    for node in ast.walk(tree):
+    stack = [(tree, frozenset())]
+    while stack:
+        node, tmp = stack.pop()
+        if isinstance(node, SCOPES):
+            tmp = tmp_bound(node, tmp)
         pieces = None
         if isinstance(node, ast.Call) and callees and dotted_name(node.func) in callees:
             args = node.args
@@ -201,16 +243,13 @@ def joined_strings(tree):
                 chain.append(anchor.right)
                 anchor = anchor.left
             pieces = [anchor] + chain[::-1]
-        if pieces is None:
-            continue
-        if not all(is_literal_string(p) for p in pieces[1:]):
-            continue
-        texts = [p.value for p in pieces[1:]]
-        if is_literal_string(anchor):
-            texts.insert(0, anchor.value)
-        if any(t.startswith("/") for t in texts):
-            continue
-        out.append("/".join(texts))
+        if pieces is not None and all(is_literal_string(p) for p in pieces[1:]) and not is_tmp_expr(anchor, tmp):
+            texts = [p.value for p in pieces[1:]]
+            if is_literal_string(anchor):
+                texts.insert(0, anchor.value)
+            if not any(t.startswith("/") for t in texts):
+                out.append("/".join(texts))
+        stack.extend((child, tmp) for child in ast.iter_child_nodes(node))
     return out
 
 

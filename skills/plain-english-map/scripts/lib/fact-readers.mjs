@@ -6,7 +6,8 @@
 // A request is { file, symbol } for a value. Internal callers add `op`: 'defines' (is the symbol bound at module level)
 // 'uses' (does `file` import the tracked file `target`, and refer to `symbol`) or 'loads' (the tracked files that `file` loads at runtime, as
 // { imports, named }: the files it imports without a type-only import, and the files a string in its code equals, from its folder or the root.
-// A path.join, path.resolve or path.posix.join call whose pieces after the first are string literals counts as one such string).
+// A join call whose pieces after the first are string literals counts as one such string: path.join, path.posix.join, path.resolve, or a bare
+// join or resolve imported from 'path'. An anchor that is a temp folder, or a piece that a resolve call resets on, makes it count as none).
 // A result is { file, symbol, ok: true, value } or { file, symbol, ok: false, reason, gone? }. `gone: true` means the file was
 // read and the symbol is not in it. A failure without `gone` is unknown: the caller must never read it as a pass.
 import { spawnSync } from 'node:child_process';
@@ -158,26 +159,56 @@ const dottedText = (x) => {
 };
 const isStringPiece = (x) => ts.isStringLiteral(x) || ts.isNoSubstitutionTemplateLiteral(x);
 
+// A temp folder is no part of the repository: a call to `os.tmpdir()` or `fs.mkdtemp(...)` / `fs.mkdtempSync(...)` (matched by the last name of the
+// callee, so `tmpdir()` from a destructured import counts), and a name that the function holding the use binds to one (`const d = fs.mkdtempSync(...)`).
+const TMP_CALLS = new Set(['tmpdir', 'mkdtemp', 'mkdtempSync']);
+const isTmpCall = (x) => {
+  while (ts.isParenthesizedExpression(x) || ts.isAwaitExpression(x)) x = x.expression;
+  if (!ts.isCallExpression(x)) return false;
+  const e = x.expression;
+  return (ts.isIdentifier(e) && TMP_CALLS.has(e.text)) || (ts.isPropertyAccessExpression(e) && TMP_CALLS.has(e.name.text));
+};
+// The names that `scope` (a function or the file) binds to a temp folder, not counting a nested function's own names.
+const tmpBound = (scope, outer) => {
+  const found = new Set(outer);
+  const visit = (n) => {
+    if (n !== scope && (ts.isFunctionLike(n) || ts.isClassLike(n))) return;
+    if (ts.isVariableDeclaration(n) && ts.isIdentifier(n.name) && n.initializer && (isTmpCall(n.initializer) || (ts.isIdentifier(n.initializer) && found.has(n.initializer.text)))) found.add(n.name.text);
+    ts.forEachChild(n, visit);
+  };
+  visit(scope);
+  return found;
+};
+
 // The path that each join call names, as one string: `path.join`, `path.resolve` and `path.posix.join` on a binding of 'path' or 'node:path',
 // and a bare `join` or `resolve` imported from it. Only the first argument (the anchor) may be anything but a plain string literal. A literal
 // anchor is the first piece. A later piece that is no literal (a name, a template with a substitution, a spread) drops the call, and so does a
-// piece that starts with `/`, and so does a call with no piece after the anchor.
+// call with no piece after the anchor, and so does an anchor that is a temp folder (isTmpCall, or a name bound to one in the same function).
+// A piece that starts with `/` drops only a `resolve` call, which resets to it; `join` keeps it (`path.join('a', '/b')` is `a/b`), so the
+// join's slash is dropped from the string.
 const joinedStrings = (sf, file, files) => {
   const named = new Map();
   const modules = targetAliases(sf, file, PATH_MODULE, files, named);
-  const callees = new Set();
-  for (const m of modules) for (const f of ['join', 'resolve', 'posix.join']) callees.add(`${m}.${f}`);
-  for (const [local, imported] of named) if (imported === 'join' || imported === 'resolve') callees.add(local);
+  const callees = new Map();
+  for (const m of modules) for (const f of ['join', 'resolve', 'posix.join']) callees.set(`${m}.${f}`, f !== 'resolve');
+  for (const [local, imported] of named) if (imported === 'join' || imported === 'resolve') callees.set(local, imported === 'join');
   const out = [];
-  const visit = (n) => {
+  const visit = (n, tmp) => {
+    if (ts.isFunctionLike(n)) tmp = tmpBound(n, tmp);
     if (ts.isCallExpression(n) && n.arguments.length > 1 && callees.has(dottedText(n.expression))) {
+      const keepsSlash = callees.get(dottedText(n.expression));
       const [anchor, ...rest] = n.arguments;
-      const pieces = isStringPiece(anchor) ? [anchor, ...rest] : rest;
-      if (pieces.every(isStringPiece) && !pieces.some((p) => p.text.startsWith('/'))) out.push(pieces.map((p) => p.text).join('/'));
+      const literalAnchor = isStringPiece(anchor);
+      const tmpAnchor = (ts.isIdentifier(anchor) && tmp.has(anchor.text)) || isTmpCall(anchor);
+      const pieces = literalAnchor ? [anchor, ...rest] : rest;
+      if (!tmpAnchor && pieces.every(isStringPiece) && (keepsSlash || !pieces.some((p) => p.text.startsWith('/')))) {
+        const joined = pieces.map((p) => p.text).join('/');
+        out.push(literalAnchor ? joined : joined.replace(/^\/+/, ''));
+      }
     }
-    ts.forEachChild(n, visit);
+    ts.forEachChild(n, (c) => visit(c, tmp));
   };
-  if (callees.size) visit(sf);
+  if (callees.size) visit(sf, tmpBound(sf, new Set()));
   return out;
 };
 
