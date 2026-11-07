@@ -1,0 +1,11 @@
+{
+  "title": "q_max main's browser checks are green again",
+  "phase": "now",
+  "status": "doing",
+  "order": 0.11,
+  "owner": "coordinator",
+  "why": "Coordinator, 13:53 CST Nov 7: lane qmax-browser-main-red works on q_max main's red browser checks. It found step git-push-after-failed-commit.",
+  "note": "Coordinator pick, 13:59 CST Nov 7 (undoable): the lane removes the Neon MCP entry in .mcp.json and the vendored .claude/skills/neon* skills (ruling 332 b: sessions never touch Neon). Owner task page item 361 deletes the 611 leftover wt- Neon branches, and the lane files a debt that points at it.",
+  "lane": "qmax-browser-main-red",
+  "updatedAt": "2026-11-07T13:59:00-06:00"
+}
