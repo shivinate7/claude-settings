@@ -57,7 +57,8 @@ Paraphrase pass, `python3 lint/find_copies.py --measure lint/paraphrase_labelled
   `lint/paraphrase_heldout.json`: 60 cases (30 paraphrase, 30 distinct), built by a test-author
   that never read the prompt. Model `sonnet`, effort `high`. Precision 0.86 (25 of 29 flagged).
   Recall 0.83 (25 of 30). False positives: hd05, hd06, hd08, hd09. Missed: hp07, hp10, hp23, hp26,
-  hp29. This is the figure to trust over the first set's 1.00. Run-to-run spread: unmeasured.
+  hp29. This is the figure to trust over the first set's 1.00. A second run by the round 1 reviewer gave precision 0.89 (24 of 27) and recall 0.80 (24
+  of 30); hd06 and hp15 flip between runs. Two runs: precision 0.86 to 0.89, recall 0.80 to 0.83.
 - Verdict: the pass stays report-only. About 1 flag in 7 is a false alarm, so a blocking pass would
   cry wolf (`verification-cry-wolf-guard-is-spent`).
 - Where it runs: skill `compliance-check`, as a report-only step. Never in CI or ste-lint: CI has no

@@ -1499,3 +1499,5 @@
 - one-home-long-gloss-hides: a parenthesised gloss of 8 or more words after a backticked id is not read for copies, so a rule sentence pasted as a gloss passes. Decision: one-home-check
 - stale006-rename-and-reword: a rule renamed and reworded in one change finds no head sentence under its old id, so STALE006 lists its old runs. Owner edits only. Decision: one-home-check
 - stale006-exception-words: NEGATORS omits unless, except and without, so a growth that adds an exception skips the reword check. Owner edits only. Decision: one-home-check
+- paraphrase-heldout-weak-rows: in lint/paraphrase_heldout.json, hp19 is a cut copy labelled paraphrase (relabelled distinct, precision 0.83) and hp15 is a fragment whose verdict flips between runs. Decision: one-home-check. Fix: none — rare and harmless. Until: 2026-11-21
+- paraphrase-heldout-test-gaps: the held-out set test does not tie a row's rule_text to its own rule_id anchor (0 of 60 mismatch by hand), skips text checks for the 12 child-clone rows, and repeats the labelled set's anchor check. Decision: one-home-check. Fix: none — rare and harmless. Until: 2026-11-21
