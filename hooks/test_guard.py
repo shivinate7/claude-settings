@@ -2461,9 +2461,9 @@ sh("stash pathspec: stash --m over real uncommitted work denies like a push",
 sh("stash pathspec: stash --pathspec-from over real uncommitted work denies like a push",
    VCS + " stash --pathspec-from list", "deny", "shared-tree", cwd=SUBJDIRTY,
    carries=PUSH_FRAGMENT)
-# `import` and `export` are not git subcommands, but main reads them as stack actions, and they keep
-# that side. Over a real entry in a clean checkout they deny with the stack remedy. Over an empty
-# stack in a dirty checkout they take nothing, the same verdict as main.
+# The guard reads `import` and `export` as stack actions, and they keep that side. Over a real entry in a
+# clean checkout they deny with the stack remedy. Over an empty stack in a dirty checkout they take nothing,
+# the same verdict as main.
 STACK_FRAGMENT = "takes a stash entry"  # only STACK_DENY_REASON says this
 sh("stash import: over a real stack entry in a clean checkout denies, as on main",
    VCS + " stash import abc123", "deny", "shared-tree", cwd=SUBJSTASH, carries=STACK_FRAGMENT)
@@ -26854,7 +26854,7 @@ ROLE_LACKS = ("docs/decisions", "agent-model-cap.md", "agents/")
 ROUND_MARKER = "Round N of 3"
 FREE_ROUND_MARKERS = tuple("Round %s of 3" % n for n in _load_guard_module().ROLE_REVIEWER_FREE_ROUNDS)
 # The Explore audit marker (shiv, Nov 1 11:43 CST, page item 107, pick a). A literal, not the guard's EXPLORE_AUDIT_MARKER:
-# that constant is new, and a read at import time would fail every case on the old code.
+# a read at import time would fail every case on a guard that lacks that name.
 EXPLORE_MARKER = "Audit:"
 UNSET_DEFAULT = {"CLAUDE_CODE_SUBAGENT_MODEL": None}
 EMPTY_DEFAULT = {"CLAUDE_CODE_SUBAGENT_MODEL": ""}
