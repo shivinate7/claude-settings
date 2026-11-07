@@ -63,14 +63,16 @@ Counted as real `gh` calls, one call per list read however many pages it pages.
 - `merge --reviewed` makes two list calls per run. One lists the open PRs. The other lists the repo's issue comments since the oldest open PR, so it pages every comment of the repo since then, not only review records. The cost grows with the repo's comment traffic and with the age of the oldest open PR.
 - Not a `gh` call: each `--reviewed` run also runs one `git fetch origin main` (`load_config`) and local git reads.
 - Each ready PR that has a record adds three calls: the check runs, the commit statuses and the branch protection (required checks mode `protection`). A draft, and a PR with no record, add none.
+- A current record that says Guard or check `no` or Kind `delete-only` adds one paged read of the PR's files (`pulls/<n>/files`), draft or not. A record that says `yes`, and is not `delete-only`, reads none.
 - One ready PR with a record: five calls. With a pinned `merge.requiredChecks` list: also five, because the one protection compare moves to the start of the run and the per-PR protection read goes.
-- `merge <pr> --review-record`: one PR read per call. `--fix-check` adds one paged read of the repo's issue comments since the PR opened. It writes nothing.
+- `merge <pr> --review-record`: one PR read per call, plus one paged files read when it says Guard or check `no` or Kind `delete-only`. `--fix-check` adds one paged read of the repo's issue comments since the PR opened. It writes nothing.
 - No new long-lived process, file, cache or timer. The batch runner calls the list at each wake. A lane calls the render at each round.
-- The test `ReviewedList` in `merge/test_merge.py` pins the two list reads and the five calls for one ready PR.
+- The test `ReviewedList` in `merge/test_merge.py` pins the two list reads and the five calls for one ready PR with a Guard or check `yes` record, and six with `no`.
 
 ## The limits
 
-- Kind, Guard or check, and docs-only are the lane's own claims. The tool does not check paths. It does not tell a record that files an owner ruling from other docs. Kind stays the lane's claim. Guards stop mistakes, not attackers (record `guard-guards-mistakes-only`).
+- The tool checks two claims against the PR's paths. Guard or check `no` is refused when a changed path, or a rename's old path, starts with an entry of `RULE_DIRS` in `lint/stale_cites.py`, the one home of where guards and checks live (it includes `settings.json`). Kind `delete-only` is refused when a file has added lines (record `hold-unsafe-after-round-3`: delete-only adds nothing). `--review-record` stops and prints no body; `--reviewed` shows the record `bad`. Since `docs-only` means Guard or check `no`, a docs-only claim on a guard path fails too.
+- Not checked from paths: a `docs-only` claim on a non-guard code path, and whether a record files an owner ruling. A missing record is not refused (Q1). `RULE_DIRS` is claude-settings shaped and applies in every repo; a per-repo set is not built. Guards stop mistakes, not attackers (record `guard-guards-mistakes-only`).
 - Open: an integration PR has no record of its own.
 - A `delete-only` change with Guard or check `no` and a round 1 FAIL reads done (rule `roles-review-cap-three`, the three-round review cap). The lane fixes the defect and posts a new review record for the new head, before the batch runner batches it. The fix push makes the old record stale.
 - Unmeasured: whether the auto-mode classifier allows `merge --reviewed` and `merge <pr> --review-record`. Both are off `merge/cloud_allow.json`, which allows only `--confirm` and `--role`.
