@@ -1,0 +1,10 @@
+{
+  "title": "One cleanup lane per child repo removes copies that decision child-cites-not-copies replaces with cites",
+  "phase": "next",
+  "status": "todo",
+  "order": 12.5,
+  "owner": "coordinator",
+  "why": "Coordinator queue, 13:18 CST Nov 7: after #1106 lands (decision child-cites-not-copies), each child repo still holds copies of claude-settings text.",
+  "note": "Waits on #1106. Then one lane per child: degen, home, joyous, mailaudit, q_max. Done: each child cites claude-settings instead of copying, and its checks pass.",
+  "updatedAt": "2026-11-07T13:20:00-06:00"
+}

@@ -1,0 +1,11 @@
+{
+  "title": "A failed fix check counts as the next review round, inside the three-round cap",
+  "phase": "now",
+  "status": "doing",
+  "order": 0.65,
+  "owner": "coordinator",
+  "lane": "session_013NEJL1PyP6demZ4Pyj8fYX",
+  "why": "Owner, item 347 a, 13:12 CST Nov 7, after asking in chat at 13:07 CST whether resetting to round 1 was a good idea. Incident #1420 (the Windows fix), 13:03 CST.",
+  "note": "Rewrite the last sentences of rule roles-review-cap-three (root CLAUDE.md): a failed fix check is the next round, not a new lane at round 1. If auto mode refuses the CLAUDE.md edit, the lane sends paste text and triage files an owner paste task. Done: the rule text on main, and the check that holds the rule (if any) red on the old reset, green on the new count.",
+  "updatedAt": "2026-11-07T13:20:00-06:00"
+}
