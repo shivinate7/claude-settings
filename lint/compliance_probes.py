@@ -403,7 +403,6 @@ SENTENCE_END = re.compile(r"(?<=[.!?])\s+")
 KNOWN_EXEMPTION = re.compile(r"\bknown exemptions?\b", re.I)
 RULE_REF = re.compile(r"\brule:([a-z0-9][a-z0-9-]*)")
 ANCHOR_COMMENT = word_runs.COMMENT
-FENCE = word_runs.FENCE
 # Each of these lines starts a unit of its own, so one bullet's exemption never passes another bullet's departure.
 LIST_ITEM = re.compile(r"^\s*(?:[-*+]|\d{1,9}[.)])\s")
 # A heading and a table row are each one whole unit; the lines after them never join them.
@@ -423,42 +422,34 @@ def departs(paragraph):
 
 
 def paragraphs(text, rel):
-    """(first line number, joined text) of each paragraph or list item outside a code fence. A blank line, a fence, a
-    list item, a table row or a heading ends one; a table row and a heading are each one of their own. A fence still
-    open at the end of the file makes the group unknown: the rest of the file would go unread."""
-    found, lines, start, fence = [], [], 0, None
-    in_item = fence_in_item = False
+    """(first line number, joined text) of each paragraph or list item outside a code block. A blank line, a code
+    block, a list item, a table row or a heading ends one; a table row and a heading are each one of their own. A fence
+    still open at the end of the file makes the group unknown: the rest of the file would go unread."""
+    found, lines, start = [], [], 0
 
     def flush():
         if lines:
             found.append((start, " ".join(lines)))
             del lines[:]
 
-    for number, line in enumerate(text.splitlines(), 1):
-        mark = FENCE.match(line) if word_runs.is_fence(line, fence_in_item if fence else in_item) else None
-        if fence:
-            # A fence closes on a run of its own character, at least as long, with nothing after it.
-            if mark and mark.group(1)[0] == fence[0][0] and len(mark.group(1)) >= len(fence[0]) and not line[mark.end():].strip():
-                fence = None
-        # A backtick in the rest of the line means the ticks close on it ("```x``` is code."): no fence opens.
-        elif mark and not (mark.group(1)[0] == "`" and "`" in line[mark.end():]):
+    rows = text.splitlines()
+    for number, (line, code) in enumerate(zip(rows, word_runs.code_mask(rows)), 1):
+        if code:
             flush()
-            fence, fence_in_item = (mark.group(1), number), in_item
         elif not line.strip():
             flush()
         elif ONE_LINE_UNIT.match(line):
             flush()
             found.append((number, line.strip()))
-            in_item = word_runs.list_item_after(line, in_item)
         else:
-            in_item = word_runs.list_item_after(line, in_item)
             if LIST_ITEM.match(line):
                 flush()
             if not lines:
                 start = number
             lines.append(line.strip())
-    if fence:
-        raise CannotRun("%s:%d: a code fence never closes" % (rel, fence[1]))
+    unclosed = word_runs.unclosed_fence(rows)
+    if unclosed is not None:
+        raise CannotRun("%s:%d: a code fence never closes" % (rel, unclosed + 1))
     flush()
     return found
 

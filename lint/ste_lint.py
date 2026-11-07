@@ -37,7 +37,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))  # a linked install: the real folder holds ui_suffixes.py
 from ui_suffixes import UI_SUFFIXES  # noqa: E402
 import layout  # noqa: E402  the one home of where records live (lint/layout.json)
-import word_runs  # noqa: E402  the one home of a fence line (is_fence)
+import word_runs  # noqa: E402  the one home of a code line (code_mask)
 
 __version__ = "1.0.0"
 
@@ -857,8 +857,7 @@ def segment_markdown(lines: Sequence[str], default_mode: str) -> Tuple[List[Para
     suppressed: Dict[int, Optional[List[str]]] = {}
     file_disable: Optional[List[str]] = None
     current: Optional[Paragraph] = None
-    in_fence = None
-    in_item = False
+    code = word_runs.code_mask([raw.rstrip("\n") for raw in lines])
     in_frontmatter = False
     heading_mode = default_mode
     explicit_mode: Optional[str] = None
@@ -895,14 +894,8 @@ def segment_markdown(lines: Sequence[str], default_mode: str) -> Tuple[List[Para
             suppressed[lineno] = pending_next[1]
             pending_next = None
 
-        was_fenced = in_fence is not None
-        in_fence = fence_step(in_fence, stripped, in_item)
-        if not was_fenced and in_fence is None:
-            in_item = word_runs.list_item_after(stripped, in_item)
-        if was_fenced != (in_fence is not None):  # an opening or a closing fence line
+        if code[index]:  # a code block ends the paragraph before it
             flush()
-            continue
-        if in_fence is not None:
             continue
 
         marker = re.search(r"<!--\s*ste:\s*(procedural|descriptive|auto)\s*-->", stripped)
@@ -1808,22 +1801,6 @@ _REF_DEF = re.compile(r"^ {0,3}\[([^\]\n]+)\]:\s")
 LAST_FIX_CODES: dict = {}
 
 
-def fence_step(state, line, in_list_item=False):
-    """Return the fence state after `line`: None outside a fence, else (marker char, length, list context of the opener).
-    A fence line is one word_runs.is_fence accepts, and a fence closes only on the same char, at least as long, with
-    nothing after it. `in_list_item` is the list context of `line` (word_runs.list_item_after)."""
-    line = line.rstrip("\r\n")
-    m = word_runs.FENCE.match(line) if word_runs.is_fence(line, in_list_item if state is None else state[2]) else None
-    rest = line[m.end():] if m else ""
-    if state is None:
-        if m and not (m.group(1)[0] == "`" and "`" in rest):
-            return (m.group(1)[0], len(m.group(1)), in_list_item)
-        return None
-    if m and m.group(1)[0] == state[0] and len(m.group(1)) >= state[1] and not rest.strip():
-        return None
-    return state
-
-
 def front_matter_lines(text: str) -> int:
     """Return how many leading lines are YAML or TOML front matter, 0 when there is none."""
     lines = text.split("\n")
@@ -1890,24 +1867,19 @@ def apply_fixes(text: str) -> Tuple[str, int]:
     lines = re.findall(r"[^\n]*\n|[^\n]+", text)
     labels = {_label(m.group(1)) for ln in lines for m in [_REF_DEF.match(ln)] if m}
     out: List[str] = []
-    fence = None
-    in_item = False
     raw_end = None
     total = 0
     skip_to = front_matter_lines(text)
+    bodies = [raw[:-2] if raw.endswith("\r\n") else raw.rstrip("\n") for raw in lines]
+    inners = [_QUOTE_PREFIX.sub("", body) if body.lstrip(" ").startswith(">") else body for body in bodies]
+    code = word_runs.code_mask(inners)
     for number, raw in enumerate(lines, 1):
-        body = raw[:-2] if raw.endswith("\r\n") else raw.rstrip("\n")
-        inner = _QUOTE_PREFIX.sub("", body) if body.lstrip(" ").startswith(">") else body
-        was_fenced = fence is not None
-        item_before = in_item
-        fence = fence_step(fence, inner, in_item)
-        if not was_fenced and fence is None:
-            in_item = word_runs.list_item_after(inner, in_item)
+        body = bodies[number - 1]
         in_raw = raw_end is not None
         if in_raw:
             if raw_end.search(body):
                 raw_end = None
-        elif not was_fenced and fence is None:
+        elif not code[number - 1]:
             opened = _RAW_OPEN.match(body)
             if opened:
                 in_raw = True
@@ -1915,8 +1887,7 @@ def apply_fixes(text: str) -> Tuple[str, int]:
                                  re.I)
                 if not end.search(body, opened.end()):
                     raw_end = end
-        if (number <= skip_to or was_fenced or fence is not None or in_raw
-                or word_runs.is_fence(inner, item_before) or _REF_DEF.match(body)
+        if (number <= skip_to or code[number - 1] or in_raw or _REF_DEF.match(body)
                 or (re.match(r"(?: {4}|\t)", body) and not _LIST_ITEM.match(body))):
             out.append(raw)
             continue

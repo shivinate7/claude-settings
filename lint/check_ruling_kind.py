@@ -32,7 +32,7 @@ except ImportError:  # actions/ruling-kind runs this file in a tree without hook
     _nowindow = subprocess
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import layout  # noqa: E402  the one home of where records live (lint/layout.json)
-import word_runs  # noqa: E402  the one home of a fence line (is_fence)
+import word_runs  # noqa: E402  the one home of a code line (code_mask)
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DIR = None  # the records folder: the layout's decisions folder under ROOT; --dir replaces it
@@ -56,25 +56,17 @@ def read(rel):
 
 
 def unfenced(text):
-    """Yield the lines outside fenced text and HTML comments (CommonMark fence rules)."""
-    fence, comment, in_item, fence_in_item = None, False, False, False
-    for line in text.split("\n"):
+    """Yield the lines outside code blocks and HTML comments (CommonMark rules)."""
+    comment = False
+    lines = text.split("\n")
+    for line, code in zip(lines, word_runs.code_mask(lines)):
         if comment:
             end = line.find("-->")
             if end < 0:
                 continue
             line, comment = line[end + 3:], False
-        elif fence:
-            m = word_runs.FENCE.match(line) if word_runs.is_fence(line, fence_in_item) else None
-            if m and m.group(1)[0] == fence[0] and len(m.group(1)) >= len(fence) and not line[m.end():].strip():
-                fence = None
+        elif code:
             continue
-        else:
-            m = word_runs.FENCE.match(line) if word_runs.is_fence(line, in_item) else None
-            if m and not (m.group(1)[0] == "`" and "`" in line[m.end():]):
-                fence, fence_in_item = m.group(1), in_item
-                continue
-            in_item = word_runs.list_item_after(line, in_item)
         # Comment openers inside an inline code span are prose, so scan a masked copy.
         masked = re.sub(r"`[^`]*`", lambda m: "x" * len(m.group()), line)
         kept, pos = [], 0

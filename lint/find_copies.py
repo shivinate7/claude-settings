@@ -359,12 +359,11 @@ def candidate_lines(repo, parent, rules):
         if data is None:
             return [], count, "cannot read %s" % rel
         count += 1
-        in_item = False
-        for first, unit in word_runs.units(data.decode("utf-8", "replace")):
-            if word_runs.is_fence(unit.split("\n", 1)[0], in_item):
+        source = data.decode("utf-8", "replace")
+        code = word_runs.code_mask(source.replace("\r\n", "\n").split("\n"))
+        for first, unit in word_runs.units(source):
+            if code[first - 1]:  # a unit that opens on a code row is code
                 continue
-            for line in unit.split("\n"):  # only blank lines lie between units, and they keep the context
-                in_item = word_runs.list_item_after(line, in_item)
             for offset, row in enumerate(unit.split("\n")):
                 text = row.strip()
                 if len(word_runs.words(text, keep=True)) < PARA_MIN_WORDS:

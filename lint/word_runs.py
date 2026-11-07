@@ -157,42 +157,81 @@ def list_item_after(line, in_list_item):
     return in_list_item and _indent(line) >= 2
 
 
-def fence_ranges(rows):
-    """[(first, last)] 0-based row indexes of each fenced block, fence rows included. A closer is a run of the opener's
-    character, at least as long, with nothing after it. An unclosed fence runs to the last row. Fence lines are those
-    `is_fence` accepts; the closer reads the list context of its opener."""
-    found, opener, first = [], None, 0
-    in_item = opener_in_item = False
+def _code_blocks(rows):
+    """[(first, last, kind)] 0-based row indexes of each code block, as CommonMark reads them, the rows of a fence
+    included. kind is "fence", "unclosed" (a fence that never closes) or "indent". A fence closer is a run of the opener's character, at least as long, with
+    nothing after it, and an unclosed fence runs to the last row. A top-level block of indented code is a run of rows
+    indented four columns or more (blank rows between them inside it) that starts at the first row or after a blank
+    row, outside a list item. Such a row after a paragraph row continues that paragraph, and a fence line inside the
+    block is code like the rest. `is_fence` says which lines are fence lines, and the closer reads the list context of
+    its opener."""
+    found, opener, first, opener_in_item = [], None, 0, False
+    in_item, prev_blank = False, True
+    indent_first = indent_last = None
     for number, row in enumerate(rows):
-        fence = FENCE.match(row) if is_fence(row, in_item if opener is None else opener_in_item) else None
-        if opener is None:
-            if fence and not (fence.group(1)[0] == "`" and "`" in row[fence.end():]):  # a span, not a fence
-                opener, first, opener_in_item = fence.group(1), number, in_item
-            else:
-                in_item = list_item_after(row, in_item)
-        elif fence and fence.group(1)[0] == opener[0] and len(fence.group(1)) >= len(opener) \
-                and not row.strip()[len(fence.group(1)):].strip():
-            found.append((first, number))
-            opener = None
+        blank = not row.strip()
+        if opener is not None:
+            fence = FENCE.match(row) if is_fence(row, opener_in_item) else None
+            if fence and fence.group(1)[0] == opener[0] and len(fence.group(1)) >= len(opener) \
+                    and not row.strip()[len(fence.group(1)):].strip():
+                found.append((first, number, "fence"))
+                opener, prev_blank = None, False
+            continue
+        if indent_first is not None:
+            if blank:
+                continue
+            if _indent(row) >= 4:
+                indent_last = number
+                continue
+            found.append((indent_first, indent_last, "indent"))
+            indent_first = None
+        if blank:
+            prev_blank = True
+            continue
+        fence = FENCE.match(row) if is_fence(row, in_item) else None
+        if fence and not (fence.group(1)[0] == "`" and "`" in row[fence.end():]):  # a span, not a fence
+            opener, first, opener_in_item = fence.group(1), number, in_item
+        elif prev_blank and not in_item and _indent(row) >= 4:
+            indent_first = indent_last = number
+        else:
+            in_item = list_item_after(row, in_item)
+        prev_blank = False
     if opener is not None:
-        found.append((first, len(rows) - 1))
+        found.append((first, len(rows) - 1, "unclosed"))
+    if indent_first is not None:
+        found.append((indent_first, indent_last, "indent"))
     return found
 
 
+def code_mask(lines):
+    """[bool] per line of `lines`: True when the line is in a fenced block or an indented code block (see `_code_blocks`).
+    The one home of what a code line is: a reader that skips code rows reads this and walks no fences of its own."""
+    mask = [False] * len(lines)
+    for first, last, _ in _code_blocks(lines):
+        mask[first:last + 1] = [True] * (last + 1 - first)
+    return mask
+
+
+def unclosed_fence(lines):
+    """The 0-based row of the fence in `lines` that never closes, else None. Its rows to the last one are code."""
+    for first, _, kind in _code_blocks(lines):
+        if kind == "unclosed":
+            return first
+    return None
+
+
 def mask_fences(text):
-    """`text` with each fenced block's rows emptied, so the line count stays and a paragraph ends where a fence was."""
+    """`text` with each code block's rows emptied, so the line count stays and a paragraph ends where a block was."""
     rows = text.replace("\r\n", "\n").split("\n")
-    for first, last in fence_ranges(rows):
-        rows[first:last + 1] = [""] * (last + 1 - first)
-    return "\n".join(rows)
+    return "\n".join("" if code else row for row, code in zip(rows, code_mask(rows)))
 
 
 def units(text):
     """[(line number of the unit's first line, 1-based, the unit's text)]: a fenced block is one unit, a table row one,
-    a heading one, consecutive blockquote lines one, a list item one, and a paragraph runs to a blank line or to any
-    of those."""
+    a heading one, an indented code block one, consecutive blockquote lines one, a list item one, and a paragraph runs
+    to a blank line or to any of those."""
     rows = text.replace("\r\n", "\n").split("\n")
-    fences = {first: last for first, last in fence_ranges(rows)}
+    blocks = {first: (last, kind) for first, last, kind in _code_blocks(rows)}
     out, current, kind, in_item = [], [], None, False
 
     def flush():
@@ -204,21 +243,19 @@ def units(text):
     at = 0
     while at < len(rows):
         line, number = rows[at], at + 1
-        if at in fences:
-            if line[:1] in (" ", "\t") and kind in ("item", "prose"):  # indented: it continues the item or paragraph
-                current.extend((n + 1, rows[n]) for n in range(at, fences[at] + 1))
+        if at in blocks:
+            last, block_kind = blocks[at]
+            if block_kind != "indent" and line[:1] in (" ", "\t") and kind in ("item", "prose"):
+                current.extend((n + 1, rows[n]) for n in range(at, last + 1))  # indented: it continues the item or paragraph
             else:
                 flush()
-                out.append((number, "\n".join(rows[at:fences[at] + 1])))
-            at = fences[at] + 1
+                out.append((number, "\n".join(rows[at:last + 1])))
+            at = last + 1
             continue
         at += 1
-        item_before, in_item = in_item, list_item_after(line, in_item)
+        in_item = list_item_after(line, in_item)
         if not line.strip():
             flush()
-        elif kind is None and not item_before and FENCE.match(line):
-            # No fence (fence_ranges said so) at the top level and not inside a paragraph: indented code, a unit of its own
-            out.append((number, line))
         elif TABLE_ROW.match(line) or HEADING.match(line):
             flush()
             current.append((number, line))

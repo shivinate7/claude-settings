@@ -506,7 +506,6 @@ HTML_COMMENT = word_runs.COMMENT
 # Text in straight or curly double quotes, or a bare file path (a folder part and an extension): a mention, no claim.
 MENTION = re.compile(r'"[^"]*"|\u201c[^\u201d]*\u201d|(?<![\w./@+~-])(?:[\w.@+~-]+/)+[\w.@+~-]*\.\w+')
 HEADING_OR_QUOTE = re.compile(r"^[ \t]{0,3}(?:#{1,6}(?:[ \t]|$)|>)")
-FENCE = word_runs.FENCE
 PAREN_GROUP = re.compile(r"\(([^()]*)\)")
 TABLE_ROW = re.compile(r"^[ \t]{0,3}\|")
 LIST_ITEM = re.compile(r"^[ \t]*(?:[-*+]|\d+[.)])[ \t]+")
@@ -530,23 +529,8 @@ BACKING_KINDS = tuple(kind for kind in PREMISE_KINDS if kind not in WEAK_KINDS)
 
 
 def fenced_lines(rows):
-    """The numbers (from 1) of the rows inside a fenced block, the fence rows included. A backtick fence takes no
-    backtick in its info string, so a span such as `` ``` `` that starts a line opens none."""
-    inside, opener, in_item, opener_in_item = set(), None, False, False
-    for number, row in enumerate(rows, 1):
-        fence = FENCE.match(row) if word_runs.is_fence(row, in_item if opener is None else opener_in_item) else None
-        if opener is None:
-            if fence and not (fence.group(1)[0] == "`" and "`" in row[fence.end():]):
-                opener, opener_in_item = fence.group(1), in_item
-                inside.add(number)
-            else:
-                in_item = word_runs.list_item_after(row, in_item)
-        else:
-            inside.add(number)
-            if fence and fence.group(1)[0] == opener[0] and len(fence.group(1)) >= len(opener) \
-                    and not row[fence.end():].strip():
-                opener = None
-    return inside
+    """The numbers (from 1) of the rows inside a code block, a fence's own rows included (word_runs.code_mask)."""
+    return {number for number, code in enumerate(word_runs.code_mask(rows), 1) if code}
 
 
 def paren_cites(row):
