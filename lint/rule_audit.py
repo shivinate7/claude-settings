@@ -345,6 +345,33 @@ def guard_paths(root: str) -> List[str]:
     return sorted(glob.glob(os.path.join(root, "hooks", "guard*.py")))
 
 
+def _writes_guard_log(path: str) -> bool:
+    """True when the file calls record(), refuse() or ask_command() by name or as an attribute."""
+    try:
+        tree = ast.parse(read(path))
+    except SyntaxError:
+        return True  # a file that does not parse is read, so its error surfaces instead of its ids going missing
+    return any(isinstance(n, ast.Call)
+               and (n.func.id if isinstance(n.func, ast.Name) else getattr(n.func, "attr", "")) in GUARD_RULE_ARG
+               for n in ast.walk(tree))
+
+
+def log_writer_paths(root: str) -> List[str]:
+    """Every file under hooks/ and lint/ that calls record(), refuse() or ask_command(), tests excluded.
+
+    Found by scanning, not from a fixed list: a hook that writes a guard.log id through a module
+    constant (call_judge's judge-timeout) joins the --all-rules listing the day it lands, and a fixed
+    list would hide it from the never-fired cull until someone remembered to add it. Test files
+    (test_*.py, _test_*.py) call these names on fixtures, so their ids are not real rules."""
+    paths = []
+    for folder in ("hooks", "lint"):
+        for path in sorted(glob.glob(os.path.join(root, folder, "*.py"))):
+            name = os.path.basename(path)
+            if not name.startswith(("test_", "_test_")) and _writes_guard_log(path):
+                paths.append(path)
+    return paths
+
+
 def guard_text(root: str) -> str:
     """The text of every guard module under root. A rule refused in any of them is a guard rule.
     Empty when there is none."""
@@ -364,15 +391,81 @@ def _string_constants(node) -> set:
     return {n.value for n in ast.walk(node) if isinstance(n, ast.Constant) and isinstance(n.value, str)}
 
 
+_SCOPES = (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda, ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp)
+
+
+def _bound_in(scope) -> set:
+    """Every name a function, lambda or comprehension binds for itself: parameters, stores, nested
+    defs, imports and `except ... as`. A Name in this set is not the module-level constant."""
+    names = set()
+    for n in ast.walk(scope):
+        if isinstance(n, ast.arg):
+            names.add(n.arg)
+        elif isinstance(n, ast.Name) and not isinstance(n.ctx, ast.Load):
+            names.add(n.id)
+        elif isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)) and n is not scope:
+            names.add(n.name)
+        elif isinstance(n, (ast.Import, ast.ImportFrom)):
+            names |= {(a.asname or a.name).split(".")[0] for a in n.names}
+        elif isinstance(n, ast.ExceptHandler) and n.name:
+            names.add(n.name)
+    return names
+
+
+def _scoped_nodes(tree):
+    """(node, names shadowed at node) for every node: a name bound by an enclosing function,
+    lambda or comprehension shadows a module-level name of the same spelling."""
+    todo = [(tree, frozenset())]
+    while todo:
+        node, shadow = todo.pop()
+        yield node, shadow
+        if isinstance(node, _SCOPES):
+            shadow = shadow | _bound_in(node)
+        todo.extend((child, shadow) for child in ast.iter_child_nodes(node))
+
+
+def _module_bindings(tree) -> dict:
+    """{name: [value node or None]} for each name bound at module level (not inside a def, class or
+    comprehension). `NAME = <expr>` keeps its value; any other binding (unpacking, a loop target,
+    an augmented assignment, an import, a def or class) keeps None, since no string can be read from it."""
+    bindings = {}
+    todo = list(tree.body)
+    while todo:
+        node = todo.pop()
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            bindings.setdefault(node.name, []).append(None)
+            continue
+        if isinstance(node, (ast.Lambda, ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp)):
+            continue
+        if isinstance(node, (ast.Import, ast.ImportFrom)):
+            for a in node.names:
+                bindings.setdefault((a.asname or a.name).split(".")[0], []).append(None)
+        simple = set()
+        if isinstance(node, ast.Assign) or (isinstance(node, ast.AnnAssign) and node.value is not None):
+            for t in (node.targets if isinstance(node, ast.Assign) else [node.target]):
+                if isinstance(t, ast.Name):
+                    bindings.setdefault(t.id, []).append(node.value)
+                    simple.add(id(t))
+        elif isinstance(node, ast.Name) and not isinstance(node.ctx, ast.Load):
+            bindings.setdefault(node.id, []).append(None)
+        todo.extend(c for c in ast.iter_child_nodes(node) if id(c) not in simple)
+    return bindings
+
+
 def guard_rule_names(text: str, path: str = "<source>"):
     """The rule ids Python source writes to guard.log, read with `ast` so a comment or a string
     that shows a call names nothing. Three shapes write an id: a string literal in refuse() or
     record() (third argument) or ask_command() (first), by position or as `rule=`; the table in
-    diff_rule(); and the `code, why = {...}` role-scope table. A call that passes a variable names
-    no id. An f-string id cannot be listed, so it raises ValueError naming `path:line`: a rule
-    that can fire but is not listed would hide from a never-fired cull."""
+    diff_rule(); and the `code, why = {...}` role-scope table. A Name in that argument position
+    lists the string its module-level `NAME = "..."` holds (a module constant, such as call_judge's
+    TIMEOUT_LOG_RULE). A Name with no module-level binding in this file (a parameter, a local, or one
+    an enclosing function rebinds) names no id. An f-string id, a Name bound twice at module level,
+    and a Name bound to anything but a string literal cannot be listed, so each raises ValueError
+    naming `path:line`: a rule that can fire but is not listed would hide from a never-fired cull."""
+    tree = ast.parse(text)
+    bindings = _module_bindings(tree)
     ids = set()
-    for node in ast.walk(ast.parse(text)):
+    for node, shadow in _scoped_nodes(tree):
         if isinstance(node, ast.Call):
             name = node.func.id if isinstance(node.func, ast.Name) else getattr(node.func, "attr", "")
             at = GUARD_RULE_ARG.get(name)
@@ -385,6 +478,15 @@ def guard_rule_names(text: str, path: str = "<source>"):
                 if isinstance(arg, ast.JoinedStr):
                     raise ValueError(f"{path}:{node.lineno}: {name}() takes an f-string rule id; "
                                      "pass a string literal so the id can be listed")
+                if isinstance(arg, ast.Name) and arg.id not in shadow and arg.id in bindings:
+                    values = bindings[arg.id]
+                    if len(values) > 1:
+                        raise ValueError(f"{path}:{node.lineno}: {name}() takes rule id {arg.id}, which is "
+                                         f"bound {len(values)} times at module level; bind it once so the id can be listed")
+                    arg = values[0]
+                    if not (isinstance(arg, ast.Constant) and isinstance(arg.value, str)):
+                        raise ValueError(f"{path}:{node.lineno}: {name}() takes a rule id Name that is not "
+                                         "bound to a string literal at module level, so the id cannot be listed")
                 if isinstance(arg, ast.Constant) and isinstance(arg.value, str):
                     ids.add(arg.value)
         elif isinstance(node, ast.FunctionDef) and node.name == "diff_rule":
@@ -398,12 +500,12 @@ def guard_rule_names(text: str, path: str = "<source>"):
 
 
 def emitted_rule_ids(root: str = ROOT) -> set:
-    """Every rule id the guard can write to guard.log: the one home for that list.
-    Guard ids come from hooks/guard*.py and hooks/config_watch.py (it logs `agent-model-cap`
-    reverts). No hook writes an STE code now."""
+    """Every rule id a hook can write to guard.log: the one home for that list.
+    Ids come from the guard modules (hooks/guard*.py) and from every other non-test file under
+    hooks/ and lint/ that calls record(), refuse() or ask_command() (`log_writer_paths`): the judge
+    hooks, config_watch (it logs `agent-model-cap` reverts) and the rest. No hook writes an STE code now."""
     ids = set()
-    config_watch = os.path.join(root, "hooks", "config_watch.py")
-    for path in guard_paths(root) + ([config_watch] if os.path.exists(config_watch) else []):
+    for path in sorted(set(guard_paths(root)) | set(log_writer_paths(root))):
         ids |= guard_rule_names(read(path), os.path.relpath(path, root))
     return ids
 
