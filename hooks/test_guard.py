@@ -9157,7 +9157,7 @@ add("merge-batch: a pinned merge.requiredChecks list is the required list, so a 
 # STAMPREADY3 three; each merge block is otherwise STAMPREPO's, so only the ready checks differ.
 STAMPREADY = os.path.join(ROOT, "stamp_ready")          # stamp.json whose merge block declares one ready check
 STAMPREADY3 = os.path.join(ROOT, "stamp_ready3")        # the same, declaring three ready checks
-STAMPLONGSTEP = os.path.join(ROOT, "stamp_longstep")    # the same, declaring one ready check of 106 characters
+STAMPLONGSTEP = os.path.join(ROOT, "stamp_longstep")    # the same, declaring one ready check of 206 characters
 READY_CMD_1 = 'bin/ci-job checks --step "check invariants" --base origin/main'
 READY_CMD_3 = 'bin/ci-job checks --step "check invariants" --step "check lint" --step "check types" --base origin/main'
 
@@ -9166,7 +9166,7 @@ def _build_ready_stamp_repos():
     merge = {"method": "merge", "requiredChecks": ["checks"], "deadlineMinutes": 30, "deleteBranch": True}
     for where, steps in ((STAMPREADY, ["check invariants"]),
                          (STAMPREADY3, ["check invariants", "check lint", "check types"]),
-                         (STAMPLONGSTEP, ["check " + "a" * 100])):
+                         (STAMPLONGSTEP, ["check " + "a" * 200])):
         stamp = {"defaultBranch": "main", "kinds": [], "merge": dict(merge, readyChecks=steps)}
         make_repo(where, {".github/stamp.json": json.dumps(stamp) + "\n", "hooks/keep": "x\n"})
 
@@ -9194,18 +9194,19 @@ sh("merge-checks: a repo that declares no ready checks names no ready step on an
 # THE READY-CHECK REASON IS BOUNDED. The command is printed whole, because a cut inside it prints a command that fails, but a
 # base ref from the pull request, or a check name that quotes the command, must not make the reason unbounded. MEASURED on the
 # printed refusal: about 421 characters of wording (the rule name, the fixed sentence, the override line), 172 of text (the
-# 160 budget and its two cut marks), and one ready-check command of at most 400 characters. 421 + 172 + 400 is 993, and the
-# bound is 1000. The three-step control prints under the bound; a command with a 100-character step and the same base does not.
-# A change to the refusal's wording moves the control, so the measured lengths are read again before the bound moves.
-MERGE_REASON_MAX = 1000
-READY_LONG_CMD = 'bin/ci-job checks --step "check ' + "a" * 100 + '" --base origin/main'
-READY_CMD_LONG_BASE = ('bin/ci-job checks --step "check invariants" --step "check lint" --step "check types" '
-                       '--base origin/rel/' + "b" * 296)
-# The control: three short steps and the 300-character base make one command near the allowance, which prints whole and stays in the bound.
-sh("merge-checks: a three-step ready-check command with a 300-character base ref prints whole, within the bound",
+# 160 budget and its two cut marks). A command cut at its 400-character allowance adds its own 6-character mark, so a reason
+# with a fixed command lands at 999. The bound is 1050, which leaves room for a change to the wording. MEASURED: the one-step
+# control prints at 947, and a 300-character base with a 200-character step prints at 1143, over it. A change to the refusal's
+# wording moves the lengths, so they are read again before the bound moves.
+MERGE_REASON_MAX = 1050
+READY_LONG_CMD = 'bin/ci-job checks --step "check ' + "a" * 200 + '" --base origin/main'
+READY_CMD_ONE_LONG_BASE = 'bin/ci-job checks --step "check invariants" --base origin/rel/' + "b" * 296
+# The control: one short step and the 300-character base make a command of about 360 characters. It prints whole, backticks and
+# all, and stays under the bound with room to spare.
+sh("merge-checks: a one-step ready-check command with a 300-character base ref prints whole, within the bound",
    "gh pr merge 12 --squash", "deny", "merge-checks",
-   carries=("no check ran on this head", "First run the ready checks (check invariants", READY_CMD_LONG_BASE),
-   max_reason=MERGE_REASON_MAX, cwd=STAMPREADY3, env_path=GHLONGREF + os.pathsep + PY_PATH, config=MERGECFG)
+   carries=("no check ran on this head", "First run the ready checks (check invariants)", "`" + READY_CMD_ONE_LONG_BASE + "`"),
+   max_reason=MERGE_REASON_MAX, cwd=STAMPREADY, env_path=GHLONGREF + os.pathsep + PY_PATH, config=MERGECFG)
 sh("merge-checks: a 300-character base ref with one long ready step keeps the reason within the bound",
    "gh pr merge 12 --squash", "deny", "merge-checks",
    carries=("no check ran on this head", "First run the ready checks (check aaaa"),
