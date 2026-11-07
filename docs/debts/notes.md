@@ -1494,3 +1494,4 @@
 - one-home-two-names-one-job: two differently named functions that do one job are not found; lint/find_copies.py reads text copies of rule sentences only. The item-field guard (rule item-field-rendered) covers one waiting-item case. Decision: one-home-check
 - one-home-exempt-whole-file: an `exempt` marker silences every copy of its rule in its file, not only the copy beside it (lint/find_copies.py). Decision: one-home-check
 - one-home-copy-bypasses: a copy with a digit for a number word, or with `<br>` or `<em>` inside it, passes `find_copies.py --in-repo`. Only an attacker writes these forms (`guard-guards-mistakes-only`). Decision: one-home-check
+- one-home-comment-over-blank-line: an HTML comment that spans a blank line is read as prose by `lint/word_runs.py`, because units split at a blank line. Decision: one-home-check
