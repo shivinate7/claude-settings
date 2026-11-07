@@ -14,6 +14,7 @@ import contextlib
 import importlib.util
 import io
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -57,18 +58,21 @@ OLD_NOTE = "- old-note: an old gap. Fix: pin the base.\n"  # a line the base hol
 NEW_NO_FIX = "- new-note: a gap nobody named.\n"
 NEW_PROSE_FIX = "- new-note: a gap. Fix: pin the base.\n"
 NEW_ABSENT_STEP = "- new-note: a gap. Fix: step:alpha\n"
-NEW_BAD_REASON = "- new-note: a gap. Fix: none — someday\n"
+NEW_BAD_REASON = "- new-note: a gap. Fix: none — someday. Until: 2026-11-20\n"
 NEW_VALID_STEP = "- new-note: a gap. Fix: step:alpha-beta\n"
-NEW_VALID_NONE = "- new-note: a gap. Fix: none — owner decides\n"
+NEW_VALID_NONE = "- new-note: a gap. Fix: none — owner decides. Until: 2026-11-20\n"
 VALID_LINES = (  # every form that passes: a step, both dashes, and each reason on the list
     "- step-note: a gap. Fix: step:alpha-beta\n",
-    "- owner-note: a gap. Fix: none — owner decides\n",
-    "- mac-note: a gap. Fix: none -- needs the Mac\n",
-    "- rare-note: a gap. Fix: none — rare and harmless\n",
+    "- owner-note: a gap. Fix: none — owner decides. Until: 2026-11-20\n",
+    "- mac-note: a gap. Fix: none -- needs the Mac. Until: 2026-11-20\n",
+    "- rare-note: a gap. Fix: none — rare and harmless. Until: 2026-11-20\n",
 )
 NEW_DEBT = "debts/new-debt.md"  # a new debt file with no Fix line
 FIXED_DEBT = "debts/fixed-debt.md"  # a new debt file with a valid Fix line, beside NEW_DEBT in the same diff
 DEBT_NO_FIX = "# New debt\n\nWhat. A gap with no fix named.\n"
+PINNED_TODAY = "2026-11-07"  # the date the suite pins: the check reads FIXED_TODAY, so no case reads the clock
+KEPT_NOTE = "- kept-note: a gap. Fix: already fixed on main 1a2b3c4\n"  # a bullet with a new-grammar Fix
+THIRD_NOTE = "- third-note: a gap. Fix: already fixed on main 1a2b3c4\n"
 
 RUN_FOLDER = None  # made in setUpModule, so an import leaks no folder
 
@@ -105,6 +109,7 @@ class RecordSlugsTests(unittest.TestCase):
     def lint(self, *args):
         env = dict(os.environ)
         env.pop("CI", None)  # CI turns an unknown diff into red; these cases run locally
+        env["FIXED_TODAY"] = PINNED_TODAY  # the check's date comes from here, never from the clock
         cmd = [sys.executable, os.path.join(self.tree, "lint", "check_record_slugs.py"), *args]
         r = subprocess.run(cmd, cwd=self.tree, env=env, capture_output=True, text=True,
                            encoding="utf-8", errors="replace")
@@ -163,6 +168,17 @@ class RecordSlugsTests(unittest.TestCase):
             blob = run("hash-object", "-w", "--stdin", stdin=STEP_JSON)
             run("update-index", "--add", "--cacheinfo", "100644,%s,roadmap/data/steps/%s.json" % (blob, slug))
         run("update-ref", "refs/remotes/origin/roadmap", run("commit-tree", run("write-tree"), "-m", "roadmap"))
+
+    def printed_total(self, out, total):
+        """True when the output prints `total` as a number of its own."""
+        return re.search(r"(?<![\w.])%d(?![\w.])" % total, out) is not None
+
+    def add_note(self, line):
+        """Commit `line` as the one new notes line of a branch, on a base with no notes."""
+        self.put(DEBT_NOTES, NOTES_HEAD)
+        self.commit_base()
+        self.put(DEBT_NOTES, NOTES_HEAD + line)
+        self.commit_change()
 
     def base_sha(self):
         return subprocess.run(["git", "-C", self.tree, "rev-parse", "origin/main"], check=True,
@@ -511,7 +527,8 @@ class RecordSlugsTests(unittest.TestCase):
         self.put(DEBT_NOTES, NOTES_HEAD)
         self.commit_base()
         self.put(DEBT_NOTES, NOTES_HEAD
-                 + "- quote-ok: Don't drop the lock (see #12 and /* the old block */). Fix: none — owner decides\n"
+                 + "- quote-ok: Don't drop the lock (see #12 and /* the old block */). Fix: none — owner decides. "
+                   "Until: 2026-11-20\n"
                  + "- quote-prose: Don't drop the lock, see // the old block. Fix: pin the base.\n")
         self.commit_change()
         rc, out = self.lint()
