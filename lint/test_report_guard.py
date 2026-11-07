@@ -166,7 +166,15 @@ NO_PROCESS_CODE = (
 )
 
 
+# A guard run whose hook names no cwd reads the repo that holds the suite, so its verdict would follow the branch
+# the suite runs on. Each run starts in this folder instead: one per run, made at import, with no repo in it.
+NO_REPO_CWD = os.path.join(RUN_FOLDER, "no-repo")
+os.makedirs(NO_REPO_CWD, exist_ok=True)
+
+
 def run_guard(guard, hook, raw_stdin=None, env=None, block=(), refuse_process=False):
+    if isinstance(hook, dict):
+        hook = {"cwd": NO_REPO_CWD, **hook}  # a case that names its own cwd keeps it
     stdin_text = raw_stdin if raw_stdin is not None else json.dumps(hook)
     argv = [sys.executable, guard]
     if block:
@@ -180,6 +188,7 @@ def run_guard(guard, hook, raw_stdin=None, env=None, block=(), refuse_process=Fa
         text=True,
         timeout=15,
         env=env,
+        cwd=NO_REPO_CWD,
     )
     return run
 
