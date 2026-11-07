@@ -349,6 +349,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `kept-mockup-never-merged` | A kept mockup reaches no main branch. | [`docs/debts/kept-mockup-never-merged.md`](../docs/debts/kept-mockup-never-merged.md) |
 | `lane-ack-skips-every-reply` | In `last_incoming_index`, a send's first reply from its target is its ack, so a new question in that reply passes with no send. | [`docs/debts/lane-ack-skips-every-reply.md`](../docs/debts/lane-ack-skips-every-reply.md) |
 | `lane-cycle-delete-order` | `cut_lanes` deletes dependents first. | [`docs/debts/lane-cycle-delete-order.md`](../docs/debts/lane-cycle-delete-order.md) |
+| `lane-lint-misses-nested-landed` | A lane added a test fixture in a subfolder of a landed folder. | [`docs/debts/lane-lint-misses-nested-landed.md`](../docs/debts/lane-lint-misses-nested-landed.md) |
 | `layout-kind-repeats-extras` | When `lint/layout.json` gains a kind that a rolled-out repo already lists in its `.claude/layout-extras.json`, `layout.kinds()` refuses that repo's extras file and ste_lint exits 2 on every lane there. | [`docs/debts/layout-kind-repeats-extras.md`](../docs/debts/layout-kind-repeats-extras.md) |
 | `layout-legacy-repos` | The layout's `legacy-repos` map lets two named repos keep their `todo` kind in a place of their own: q_max at `specs/todo.md`, home at `records`. | [`docs/debts/layout-legacy-repos.md`](../docs/debts/layout-legacy-repos.md) |
 | `linked-nm-prefix-workspace` | `-w`, `--workspace` and `--prefix` change the folder npm works in. | [`docs/debts/linked-nm-prefix-workspace.md`](../docs/debts/linked-nm-prefix-workspace.md) |
@@ -359,6 +360,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `map-tested-by-no-shell` | MAP11 has no reader for a shell test. | [`docs/debts/map-tested-by-no-shell.md`](../docs/debts/map-tested-by-no-shell.md) |
 | `map-tested-by-path-pieces` | MAP11 counts only a whole path string. | [`docs/debts/map-tested-by-path-pieces.md`](../docs/debts/map-tested-by-path-pieces.md) |
 | `measured-time-table` | `bin/verdict` logs no kind, seconds and exit per run, and no table keeps measured times. | [`docs/debts/measured-time-table.md`](../docs/debts/measured-time-table.md) |
+| `merge-commit-skips-review` | While it resolved a merge of main into a lane branch, a builder pushed a logic change to `lint/report_guard.py`. | [`docs/debts/merge-commit-skips-review.md`](../docs/debts/merge-commit-skips-review.md) |
 | `merge-head-race-remains` | The race between a push and `gh pr ready` remains. | [`docs/debts/merge-head-race-remains.md`](../docs/debts/merge-head-race-remains.md) |
 | `merge-records-stale-base` | `bin/merge` rebuilds the records page after the CI wait. | [`docs/debts/merge-records-stale-base.md`](../docs/debts/merge-records-stale-base.md) |
 | `merge-silent-exit` | Twice on 2026-10-20 (#527 in the afternoon, #538 at 00:08 CDT on 10-21), the background shell that ran `bin/merge <pr> --confirm` exited rc 1 mid-wait and printed no reason. | [`docs/debts/merge-silent-exit.md`](../docs/debts/merge-silent-exit.md) |
