@@ -3285,7 +3285,7 @@ def earlier_records(bodies, n):
     for body in bodies:
         rec = parse_review(body)
         if rec is None:
-            raise Stop(f"the rounds carried to this head cannot be checked: a review record on #{n} could not be read")
+            raise Stop(f"the rounds carried to this head cannot be checked: a review record on #{n} could not be read. Edit the unreadable comment into a valid record, or delete it")
         if rec["n"] == n:
             out.append(rec)
     return out
@@ -3479,16 +3479,19 @@ def main(argv, host=None, lock=None):
             if misfits:
                 raise Stop(f"Kind: the diff breaks --kind {a.kind} at " + ", ".join(misfits) + ". Write the record with the kind the diff has. " + REVIEW_CITE)
             bodies = h.review_comments(info.get("created") or "1970-01-01T00:00:00Z").get(a.pr, [])  # the one comment read
-            earlier = [r for r in map(parse_review, bodies) if r is None or r["n"] == a.pr]  # a record naming another PR is no predecessor; None is an unread one
+            try:
+                earlier = earlier_records(bodies, a.pr)  # the one home of who is a predecessor; the fix base and the carried run both read it
+            except Stop as e:
+                if a.fix_check:  # a refused fix base exits 2, the same as a wrong base
+                    print(f"merge: --fix-check: {e}. " + REVIEW_CITE, file=sys.stderr)
+                    return 2
+                raise Stop(f"{e}. " + REVIEW_CITE)
             if a.fix_check:  # the fix diff starts from the head the newest earlier record reviewed, and a fix never follows a fix
                 last = earlier[-1] if earlier else None
                 if not last or last["head"] != a.fix_check[0] or last["fix"]:
                     print("merge: --fix-check: the reviewed head must be the Head of the newest earlier review record on this pull request, and that record must have no Fix check line. " + REVIEW_CITE, file=sys.stderr)
                     return 2
-            try:
-                h1 = carried_first_head(earlier_records(bodies, a.pr), {"rounds": a.round, "fix": a.fix_check})
-            except Stop as e:
-                raise Stop(f"{e}. " + REVIEW_CITE)
+            h1 = carried_first_head(earlier, {"rounds": a.round, "fix": a.fix_check})
             if h1:  # these rounds equal the earlier record's, so a guard or check path changed since its head was never read
                 reason = carried_refusal(root, info["base"], h1, a.head)
                 if reason:
