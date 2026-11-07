@@ -849,6 +849,10 @@ class DoneFormatAndCiteTests(unittest.TestCase):
 REVIEWER_PINNED = {"subagent_type": "reviewer", "prompt": "Round 1 of 3"}
 REVIEWER_SONNET = {"subagent_type": "reviewer", "model": "sonnet", "prompt": "Round 2 of 3"}
 NAMED_REPORT = "> **Done** BUILT the guard, PR #5 (%s)\n> **Next** Unstarted: none"
+# A builder with no model field and no pin runs on CLAUDE_CODE_SUBAGENT_MODEL. When that is unset,
+# its model is unknown (''). BUILDER_SONNET names its model.
+BUILDER_UNKNOWN = {"subagent_type": "builder", "prompt": "Round 1 of 3"}
+BUILDER_SONNET = {"subagent_type": "builder", "model": "sonnet", "prompt": "Round 2 of 3"}
 
 
 def prior_records(earlier=()):
@@ -870,6 +874,44 @@ def assert_blocks(case, out, cause):
     case.assertIn(cause, out.get("reason", ""), "the block reason lacks: " + cause)
 
 
+def subagent_env(model):
+    """This process's environment with CLAUDE_CODE_SUBAGENT_MODEL set to `model`, or unset for None."""
+    env = dict(os.environ)
+    if model is None:
+        env.pop("CLAUDE_CODE_SUBAGENT_MODEL", None)
+    else:
+        env["CLAUDE_CODE_SUBAGENT_MODEL"] = model
+    return env
+
+
+# The Stop hook in a fresh process, with its spawn_models logged: each call records the length of the
+# transcript it was given. The module loads from its own path, then main() runs on stdin.
+SPAWN_READS_CODE = (
+    "import importlib.util, json, sys\n"
+    "spec = importlib.util.spec_from_file_location('report_guard', sys.argv[1])\n"
+    "guard = importlib.util.module_from_spec(spec)\n"
+    "spec.loader.exec_module(guard)\n"
+    "reads = []\n"
+    "real_spawn_models = guard.spawn_models\n"
+    "def logged(records, *args, **kwargs):\n"
+    "    reads.append(len(records))\n"
+    "    return real_spawn_models(records, *args, **kwargs)\n"
+    "guard.spawn_models = logged\n"
+    "guard.main()\n"
+    "print('READS ' + json.dumps(reads))\n"
+)
+
+
+def run_spawn_reads(hook, env):
+    """Return (the hook's stdout, the length of each transcript its spawn_models calls were given)."""
+    run = subprocess.run([sys.executable, "-c", SPAWN_READS_CODE, REPORT_GUARD], input=json.dumps(hook),
+                         capture_output=True, text=True, timeout=15, env=env)
+    out, mark, tail = run.stdout.rpartition("READS ")
+    if not mark:
+        raise AssertionError("the probe did not finish: %s" % run.stderr[-300:])
+    return out, json.loads(tail)
+
+
 class DoneNamesModelsTests(unittest.TestCase):
     """reports-done-names-models, in report_guard.py's Stop hook."""
 
@@ -877,7 +919,7 @@ class DoneNamesModelsTests(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory(dir=RUN_FOLDER)
         self.addCleanup(self.tmp.cleanup)
 
-    def verdict(self, reply, spawns, denied=(), earlier=()):
+    def verdict(self, reply, spawns, denied=(), earlier=(), env_model="sonnet"):
         records = prior_records(earlier)
         for spawn in spawns:
             records += [tool_use_msg("Agent", spawn), tool_result_msg()]
@@ -891,7 +933,7 @@ class DoneNamesModelsTests(unittest.TestCase):
                     assistant_text(reply)]
         path = write_transcript(records, self.tmp.name)
         hook = {"hook_event_name": "Stop", "transcript_path": path, "stop_hook_active": False}
-        env = dict(os.environ, CLAUDE_CODE_SUBAGENT_MODEL="sonnet")
+        env = subagent_env(env_model)
         run = run_guard(REPORT_GUARD, hook, env=env)
         self.assertEqual(run.returncode, 0)
         return json.loads(run.stdout) if run.stdout.strip() else None
@@ -983,6 +1025,25 @@ class DoneNamesModelsTests(unittest.TestCase):
         # does not make Done name one.
         out = self.verdict(NAMED_REPORT % "builder sonnet", [self.BUILDER], earlier=[REVIEWER_PINNED])
         self.assertIsNone(out, (out or {}).get("reason"))
+
+    def test_dm_red_unknown_earlier_spawn_does_not_exempt_pair(self):
+        # The earlier builder is unknown: no model field, no pin, and CLAUDE_CODE_SUBAGENT_MODEL unset.
+        # An unknown spawn must not exempt Done's opus from the window's sonnet builder.
+        out = self.verdict(NAMED_REPORT % "builder opus", [BUILDER_SONNET], earlier=[BUILDER_UNKNOWN],
+                           env_model=None)
+        assert_blocks(self, out, "'builder opus' matches no builder spawn")
+
+    def test_dm_red_window_with_no_spawn_reads_no_whole_transcript(self):
+        # The window holds no spawn, so the check has nothing to compare. The earlier spawns must not
+        # be read: a whole-transcript read on every Stop costs a pass over the whole transcript.
+        records = prior_records([REVIEWER_PINNED]) + [
+            tool_use_msg("Bash", {"command": "git commit -m x"}), tool_result_msg(),
+            assistant_text(NAMED_REPORT % "reviewer haiku")]
+        path = write_transcript(records, self.tmp.name)
+        hook = {"hook_event_name": "Stop", "transcript_path": path, "stop_hook_active": False}
+        _, reads = run_spawn_reads(hook, subagent_env("sonnet"))
+        self.assertTrue(reads, "the probe saw no spawn_models call")
+        self.assertNotIn(len(records), reads, "the guard read the whole transcript for spawn models")
 
 
 class UnstartedItemsTests(unittest.TestCase):
@@ -1128,24 +1189,24 @@ class RewriteAfterMissingReportTests(unittest.TestCase):
         self.addCleanup(self.tmp.cleanup)
         self.sid = "rw-%d" % id(self)
 
-    def run_hook(self, records, active):
+    def run_hook(self, records, active, env_model="sonnet"):
         path = write_transcript(records, self.tmp.name)
         hook = {"hook_event_name": "Stop", "transcript_path": path, "stop_hook_active": active,
                 "session_id": self.sid}
-        run = run_guard(REPORT_GUARD, hook, env=dict(os.environ, CLAUDE_CODE_SUBAGENT_MODEL="sonnet"))
+        run = run_guard(REPORT_GUARD, hook, env=subagent_env(env_model))
         self.assertEqual(run.returncode, 0)
         return json.loads(run.stdout) if run.stdout.strip() else None
 
-    def stop(self, reply, active, earlier=(), later=(BUILDER,)):
+    def stop(self, reply, active, earlier=(), later=(BUILDER,), env_model="sonnet"):
         records = prior_records(earlier)
         for spawn in later:
             records += [tool_use_msg("Agent", spawn), tool_result_msg()]
         records += [tool_use_msg("Bash", {"command": "git commit -m x"}), tool_result_msg(),
                     assistant_text(reply)]
-        return self.run_hook(records, active)
+        return self.run_hook(records, active, env_model)
 
-    def missing_report_block(self, earlier=(), later=(BUILDER,)):
-        out = self.stop("All done.", False, earlier, later)
+    def missing_report_block(self, earlier=(), later=(BUILDER,), env_model="sonnet"):
+        out = self.stop("All done.", False, earlier, later, env_model)
         self.assertIn("Send the report now", out["reason"])
 
     def test_rw_red_rewrite_without_unstarted_blocks(self):
@@ -1249,6 +1310,26 @@ class RewriteAfterMissingReportTests(unittest.TestCase):
         out = self.stop(NAMED_REPORT % "builder sonnet", True,
                         earlier=[REVIEWER_PINNED], later=[self.BUILDER])
         self.assertIsNone(out, (out or {}).get("reason"))
+
+    def test_rw_red_unknown_earlier_spawn_does_not_exempt_pair(self):
+        # The earlier builder is unknown, as in the Stop-path case. The rewrite must still block the opus name.
+        self.missing_report_block(earlier=[BUILDER_UNKNOWN], later=[BUILDER_SONNET], env_model=None)
+        out = self.stop(NAMED_REPORT % "builder opus", True, earlier=[BUILDER_UNKNOWN],
+                        later=[BUILDER_SONNET], env_model=None)
+        assert_blocks(self, out, "'builder opus' matches no builder spawn")
+
+    def test_rw_red_window_with_no_spawn_reads_no_whole_transcript(self):
+        # The rewrite's window holds no spawn, so it must not read the whole transcript for spawn models.
+        self.missing_report_block(earlier=[REVIEWER_PINNED], later=[])
+        records = prior_records([REVIEWER_PINNED]) + [
+            tool_use_msg("Bash", {"command": "git commit -m x"}), tool_result_msg(),
+            assistant_text(NAMED_REPORT % "reviewer haiku")]
+        path = write_transcript(records, self.tmp.name)
+        hook = {"hook_event_name": "Stop", "transcript_path": path, "stop_hook_active": True,
+                "session_id": self.sid}
+        _, reads = run_spawn_reads(hook, subagent_env("sonnet"))
+        self.assertTrue(reads, "the probe saw no spawn_models call")
+        self.assertNotIn(len(records), reads, "the rewrite read the whole transcript for spawn models")
 
 
 REPORT_NO_LINE = "> **Done** BUILT abc123\n> **Deviations** none\n> **Next** ship it"
