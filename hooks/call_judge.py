@@ -71,7 +71,9 @@ SPAWN_CITE = "(decision haiku-prompt-hooks, the spawn judge refuses a brief that
 QUESTION_CITE = "(decision question-reviewer-agent-hook, a question is reviewed before it reaches the owner)"
 # THE TIME BUDGET. The longest path is a question whose first call times out: QUESTION_TIMEOUT, then one retry capped at
 # QUESTION_RETRY_TIMEOUT, plus two `claude -p` starts. That is 60 s of caps against the settings.json PreToolUse entry's
-# "timeout": 70, so 10 s are left for both starts, whose time is unmeasured. Raise either cap only with that timeout.
+# "timeout": 70. The 10 s left over is an unmeasured allowance for start-up, not a measured one: each `claude -p` start
+# runs inside its cap, while the python start and the past-ruling step run outside it. Raise either cap only with that
+# timeout.
 SPAWN_MODEL, SPAWN_TIMEOUT = "claude-sonnet-5-5", 30
 QUESTION_MODEL, QUESTION_TIMEOUT = "claude-opus-5-5", 35  # both at the model's default effort
 QUESTION_RETRY_TIMEOUT = 25  # the one retry of a question whose first call timed out (owner ask ask-mw6pwif5wv)
