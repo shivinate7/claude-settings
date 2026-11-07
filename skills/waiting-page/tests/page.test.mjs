@@ -9027,6 +9027,70 @@ test("a parked line whose id is no open item still draws with its Unpark sent ba
   await need(await parkBadge(page, PARK_A, "Unpark sent"), "the parked line with no open item shows no Unpark sent badge");
 });
 
+// ---------------------------------------------------------------- an answer names the session that reads it (page item 367)
+
+// An item's owner string names the session that reads the answer at its wake. A decision or task answer carries the first
+// session id in that string as `session`. A Park press and a parked-line answer never carry it: they go to the page's writer.
+const SESSION = "session_013NEJL3gbJkES3NR7ybj7YZ", SESSION_TWO = "session_01AbCdEfGhIjKlMnOpQrStUv";
+const SESSION_OWNER = SESSION + " (the waiting page)";
+
+test("a decision and a task answer carry the session their owner string names", async (t) => {
+  const d = mk("sess-dec", 1, { owner: SESSION_OWNER }), k = { ...TASK, id: "sess-task", n: 2, owner: SESSION_OWNER };
+  const page = await open(t, { items: [d, k] }); if (!page) return;
+  await takePick(page, d);
+  await card(page, k).getByRole("button", { name: "Mark done" }).click();
+  await send(page);
+  await page.waitForFunction(() => Object.keys(window.__answers()).length === 2);
+  const a = await answers(page);
+  assert.equal(a[d.id].session, SESSION, "the decision answer has no session: " + JSON.stringify(a[d.id]));
+  assert.equal(a[k.id].session, SESSION, "the task answer has no session: " + JSON.stringify(a[k.id]));
+});
+
+test("an owner that names no session, or has no owner string, leaves session out of the record", async (t) => {
+  const ownerless = { ...DECISION, id: "own-none", n: 4 };
+  delete ownerless.owner;
+  const items = [mk("own-coord", 1, { owner: "coordinator" }), mk("own-bare", 2, { owner: "session_ (no id)" }), mk("own-empty", 3, { owner: "" }), ownerless];
+  const page = await open(t, { items }); if (!page) return;
+  for (const it of items) await takePick(page, it);
+  await send(page);
+  await page.waitForFunction((n) => Object.keys(window.__answers()).length === n, items.length);
+  const a = await answers(page);
+  for (const it of items) assert.equal("session" in a[it.id], false, `the answer to ${it.id} (owner ${JSON.stringify(it.owner)}) carries a session: ${JSON.stringify(a[it.id].session)}`);
+});
+
+test("an owner that names two sessions gives the first one", async (t) => {
+  const it = mk("own-two", 1, { owner: SESSION + " and " + SESSION_TWO });
+  const page = await open(t, { items: [it] }); if (!page) return;
+  await takePick(page, it);
+  await send(page);
+  const rec = await recordOf(page, it.id);
+  assert.equal(rec.session, SESSION, "the answer names " + JSON.stringify(rec.session) + ", not the first session in the owner");
+});
+
+test("a Park press writes no session, even on an item whose owner names one", async (t) => {
+  const it = mk("own-park", 1, { owner: SESSION_OWNER });
+  const page = await open(t, { items: [it] }); if (!page) return;
+  await need(parkPress(page, it), "the decision card has no Park button");
+  await parkPress(page, it).click();
+  await send(page);
+  const rec = await recordOf(page, it.id);
+  assert.equal(rec.act, "park", "the record is not a park record: " + JSON.stringify(rec));
+  assert.deepEqual(Object.keys(rec).sort(), PARK_RECORD_KEYS, "the park record carries a field it should not: " + Object.keys(rec).join(", "));
+});
+
+test("a parked-line answer writes no session, even when the page's writer name holds one", async (t) => {
+  const meta = { writer: SESSION + " (triage)", parked: [PARK_A] };
+  const page = await open(t, { items: [DECISION], meta }); if (!page) return;
+  await parkLoaded(page);
+  await need(parkBtn(page, PARK_A, "unpark"), "the parked line has no Unpark button");
+  await parkBtn(page, PARK_A, "unpark").click();
+  await send(page);
+  await page.waitForFunction((k) => !!window.__answers()[k], parkKey(PARK_A));
+  const rec = (await answers(page))[parkKey(PARK_A)];
+  assert.equal(rec.parked, true, "the record is not a parked-line record: " + JSON.stringify(rec));
+  assert.deepEqual(Object.keys(rec).sort(), ["act", "at", "id", "note", "parked", "ref"], "the parked-line record carries a field it should not: " + Object.keys(rec).join(", "));
+});
+
 // ---------------------------------------------------------------- what the page says after a send: a wake, a paste in chat, a none key
 // SKILL.md forbids a session to reply in a comment thread, so no line the page shows may send the owner there.
 const NO_THREAD = /thread/i;
