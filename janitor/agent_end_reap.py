@@ -108,6 +108,10 @@ def _log_lock(path: str, deadline: float):
                 fcntl.flock(handle, fcntl.LOCK_UN)
 
 
+def drops_path() -> str:
+    return os.path.join(git_reads.config_dir(), "state", "agent-end-drops.jsonl")
+
+
 def log(record: dict, replace_run=None, give_up_at=None):
     """Append one line and keep only the last MAX_LOG_LINES. The log is the evidence for the hook
     fields the docs leave open (docs/decisions/agent-end-reap-stops-what-a-finished-agent-left.md).
@@ -118,16 +122,20 @@ def log(record: dict, replace_run=None, give_up_at=None):
     (a `time.monotonic` time, the hook's own clock) when that is sooner.
     REPLACE_RUN names a start row written earlier by this run; the last line is replaced only
     when it carries that run id, so another agent's row is never dropped.
-    Only the new row can drop, never a row the log holds: every failure comes before the replace.
-    A write that cannot finish by the deadline raises LogWaitTimeout. A read of the log that is
-    refused (any OSError but a missing file) skips the rewrite and is not retried. A failed folder,
-    lock-file or temp write, or a replace refused with an OSError other than PermissionError, drops
-    it too. A failed write never fails the hook (exit stays 0); it prints one line to stderr."""
+    Only the new row can drop, never a row the log holds. It drops when:
+    - the lock or the replace waits past the deadline (LogWaitTimeout)
+    - a read of the log is refused (any OSError but a missing file); the rewrite is skipped and the read is not retried
+    - the folder, the lock file or the temp file cannot be written
+    - the replace is refused with an OSError other than PermissionError
+    A drop never fails the hook (exit stays 0). It goes to stderr, and as one JSON line (`at`, `run`,
+    `error`) to the drops file, drops_path(). That append is best effort: if it fails too, nothing more
+    is written. Cost: one append, only on a failed write; a write that lands writes nothing extra."""
     deadline = time.monotonic() + LOG_WAIT_SECONDS
     if give_up_at is not None:
         deadline = min(deadline, give_up_at)
     path = log_path()
-    line = json.dumps(dict(record, at=time.strftime("%Y-%m-%dT%H:%M:%S%z"))) + "\n"
+    at = time.strftime("%Y-%m-%dT%H:%M:%S%z")
+    line = json.dumps(dict(record, at=at)) + "\n"
     try:
         os.makedirs(os.path.dirname(path), exist_ok=True)
         with _log_lock(path, deadline):
@@ -151,6 +159,14 @@ def log(record: dict, replace_run=None, give_up_at=None):
                     time.sleep(LOG_RETRY_SECONDS)
     except Exception as exc:
         print("agent_end_reap: payload log write failed: %r" % exc, file=sys.stderr)
+        try:
+            run = record.get("run")
+            drop = json.dumps({"at": at, "run": run if isinstance(run, str) else None, "error": repr(exc)})
+            os.makedirs(os.path.dirname(drops_path()), exist_ok=True)
+            with open(drops_path(), "a", encoding="utf-8") as handle:
+                handle.write(drop + "\n")
+        except Exception:  # best effort: the stderr line above stays
+            pass
 
 
 def is_agent_worktree_shape(path: str) -> bool:
