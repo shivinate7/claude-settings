@@ -2655,9 +2655,11 @@ def case_cross_session_tag_mid_line_is_owner_text():
 
 PAGE_URL = "https://claude.ai/artifact/3f9c1e2a-5b7d-4e8f-9a1b-2c3d4e5f6a7b"
 PAGE_BANNER = "Read answers from the page's database. One JSON line per document follows."
-# Modeled on PAGE_BANNER: the repo holds no captured list or query output. The parser reads only the doc lines.
-LIST_BANNER = "List of answers from the page's database. One JSON line per document follows."
-QUERY_BANNER = "Query of answers from the page's database. One JSON line per matching document follows."
+# A list's or query's text, as the tool printed a list live (16:06 CST): a count line, a BEGIN fence, one JSON
+# line per document, an END fence, then a next_cursor line. The fence hex is the same on both fences.
+ARTIFACT_DB = "9a41c2e0"
+NEXT_CURSOR = 'next_cursor: "c2" — more documents exist; read the next page with it.'
+PAGE_NOW = "2026-01-15T19:00:00+00:00"  # the hook's clock unless a case sets its own: an hour after the answers
 PAGE_AT = "2026-01-15T18:04:00.000Z"  # 12:04 CST. The page writes toISOString(): millis and Z.
 PAGE_HEADER = "### 2026-01-15 12:04 CST (UTC-06:00)"
 PAGE_NOTE = "keep the Tuesday slot if it is free"
@@ -2689,10 +2691,18 @@ def doc_line(doc_id, data):
                       ensure_ascii=False, separators=(",", ":"))
 
 
-def response_of(docs, form="string", extra=(), banner=PAGE_BANNER):
-    """A get's tool_response: a banner, one line per (doc_id, data), then the `extra` lines. A list or a
-    query passes its own `banner`. form "string" is one text, "blocks" a list of {type: text, text} blocks, "nested" a dict."""
-    lines = [banner] + [doc_line(doc_id, data) for doc_id, data in docs] + list(extra)
+def response_of(docs, form="string", extra=(), listed=False):
+    """A get's tool_response: a banner, one line per (doc_id, data), then the `extra` lines. A list or a query
+    passes listed=True for the captured frame, its count line taken from the documents. A query has no captured
+    output, so it takes the list frame too. form "string" is one text, "blocks" a list of {type: text, text} blocks,
+    "nested" a dict."""
+    if listed:
+        head = ['%d documents from collection "answers":' % len(docs),
+                "=== BEGIN ARTIFACT DB %s — collection answers ===" % ARTIFACT_DB]
+        tail = ["=== END ARTIFACT DB %s ===" % ARTIFACT_DB, NEXT_CURSOR]
+    else:
+        head, tail = [PAGE_BANNER], []
+    lines = head + [doc_line(doc_id, data) for doc_id, data in docs] + tail + list(extra)
     if form == "blocks":
         return [{"type": "text", "text": ln} for ln in lines]
     if form == "nested":
@@ -2710,12 +2720,15 @@ def tool_input(action, collection="answers", doc_id="a-7k2", **extra):
 
 
 def page_note(cfg, sid, response, inp=None, tool_name="ArtifactData", extra_env=None):
-    """Runs the page-note mode as PostToolUse does, for one ArtifactData call. `extra_env` adds variables
-    for this run, such as CLAUDE_CODE_REMOTE_SESSION_ID for a cloud session."""
+    """Runs the page-note mode as PostToolUse does, for one ArtifactData call. The clock is PAGE_NOW unless
+    `extra_env` sets LOCAL_TIME_NOW. `extra_env` adds variables for this run, such as
+    CLAUDE_CODE_REMOTE_SESSION_ID for a cloud session."""
     inp = inp if inp is not None else tool_input("get")
     raw = payload({"hook_event_name": "PostToolUse", "session_id": sid, "tool_name": tool_name,
                    "tool_input": inp, "tool_response": response, "cwd": cfg})
-    return run(LT_PATH, raw, cfg, args=("--page-note",), extra_env=extra_env)
+    env = {"LOCAL_TIME_NOW": PAGE_NOW}
+    env.update(extra_env or {})
+    return run(LT_PATH, raw, cfg, args=("--page-note",), extra_env=env)
 
 
 def ran_page_note(p):
@@ -2792,7 +2805,7 @@ TWO_ANSWERS = [("a-7k2", answer_data()), ("a-9q1", second_answer())]
 
 def case_page_note_list_saves_each_note():
     cfg, sid = new_cfg(), "pn-list"
-    p = page_note(cfg, sid, response_of(TWO_ANSWERS, banner=LIST_BANNER), inp=tool_input("list", doc_id=None))
+    p = page_note(cfg, sid, response_of(TWO_ANSWERS, listed=True), inp=tool_input("list", doc_id=None))
     check("page note list: the mode ran", ran_page_note(p), p.desc())
     check("page note list: saves each new note, like a get",
           captured_texts(cfg, sid) == [FIRST_LABEL, SECOND_LABEL], captured_texts(cfg, sid))
@@ -2801,7 +2814,7 @@ def case_page_note_list_saves_each_note():
     check("page note list: control, a get of the same two answers saves both",
           captured_texts(gcfg, sid) == [FIRST_LABEL, SECOND_LABEL], captured_texts(gcfg, sid))
     ecfg = new_cfg()
-    empty = page_note(ecfg, "pn-list-empty", response_of([], banner=LIST_BANNER),
+    empty = page_note(ecfg, "pn-list-empty", response_of([], listed=True),
                       inp=tool_input("list", doc_id=None))
     check("page note list, empty: the mode ran, and nothing is saved, no file",
           ran_page_note(empty) and tree_of(ecfg) == {}, sorted(tree_of(ecfg)))
@@ -2809,7 +2822,7 @@ def case_page_note_list_saves_each_note():
 
 def case_page_note_query_saves_each_note():
     cfg, sid = new_cfg(), "pn-query"
-    p = page_note(cfg, sid, response_of(TWO_ANSWERS, banner=QUERY_BANNER),
+    p = page_note(cfg, sid, response_of(TWO_ANSWERS, listed=True),
                   inp=tool_input("query", doc_id=None, query=ORDERED))
     check("page note query: the mode ran", ran_page_note(p), p.desc())
     check("page note query: saves each new note, in the order the query returns them",
@@ -2819,7 +2832,7 @@ def case_page_note_query_saves_each_note():
 def case_page_note_same_list_twice_saves_each_once():
     cfg, sid = new_cfg(), "pn-list-twice"
     inp = tool_input("list", doc_id=None)
-    resp = response_of(TWO_ANSWERS, banner=LIST_BANNER)
+    resp = response_of(TWO_ANSWERS, listed=True)
     p1 = page_note(cfg, sid, resp, inp=inp)
     check("page note list twice: the first list ran", ran_page_note(p1), p1.desc())
     check("page note list twice: a list of two answers saves each once",
@@ -2837,12 +2850,102 @@ def case_page_note_list_after_get_saves_only_the_new_note():
     check("page note get then list: the get ran", ran_page_note(g), g.desc())
     check("page note get then list: the get saved its note", captured_texts(cfg, sid) == [FIRST_LABEL],
           captured_texts(cfg, sid))
-    lst = page_note(cfg, sid, response_of(TWO_ANSWERS, banner=LIST_BANNER), inp=tool_input("list", doc_id=None))
+    lst = page_note(cfg, sid, response_of(TWO_ANSWERS, listed=True), inp=tool_input("list", doc_id=None))
     check("page note get then list: the list ran", ran_page_note(lst), lst.desc())
     check("page note get then list: the new answer of the list is saved",
           SECOND_LABEL in captured_texts(cfg, sid), captured_texts(cfg, sid))
     check("page note get then list: the answer the get saved is not saved again",
           captured_texts(cfg, sid).count(FIRST_LABEL) == 1, captured_texts(cfg, sid))
+
+
+# --------------------------------------------------------------------------- page note undo window and out_dir
+# A list or query reads answers the owner may still be undoing: an answer less than 10 s old saves nothing and
+# writes no key, so a later read after the window saves it once. A get is the routing re-read after the wait, so it
+# saves at once. A read with out_dir returns file paths, so it saves nothing.
+
+NOW_INSIDE = "2026-01-15T18:04:05+00:00"  # 5 s after PAGE_AT: inside the window
+NOW_EDGE = "2026-01-15T18:04:10+00:00"  # exactly 10 s after PAGE_AT: outside it, since the window is less than 10 s
+NOW_AFTER = "2026-01-15T18:04:30+00:00"  # 30 s after PAGE_AT: outside the window
+OLDER_AT = "2026-01-15T18:00:00.000Z"  # 4 min before NOW_INSIDE: outside the window
+
+
+def list_inp():
+    return tool_input("list", doc_id=None)
+
+
+def query_inp():
+    return tool_input("query", doc_id=None, query=ORDERED)
+
+
+def case_page_note_list_inside_undo_window_saves_nothing():
+    one = response_of([("a-7k2", answer_data())], listed=True)
+    for label, inp in (("list", list_inp()), ("query", query_inp())):
+        cfg, sid = new_cfg(), "pn-window-" + label
+        p = page_note(cfg, sid, one, inp=inp, extra_env={"LOCAL_TIME_NOW": NOW_INSIDE})
+        check("page note undo window, %s: the mode ran" % label, ran_page_note(p), p.desc())
+        check("page note undo window, %s: inside the window, nothing saved and no key written" % label,
+              tree_of(cfg) == {}, sorted(tree_of(cfg)))
+
+
+def case_page_note_list_after_undo_window_saves_once():
+    resp = response_of(TWO_ANSWERS[:1], listed=True)
+    for label, inp in (("list", list_inp()), ("query", query_inp())):
+        cfg, sid = new_cfg(), "pn-after-" + label
+        early = page_note(cfg, sid, resp, inp=inp, extra_env={"LOCAL_TIME_NOW": NOW_INSIDE})
+        check("page note after window, %s: the early read ran" % label, ran_page_note(early), early.desc())
+        check("page note after window, %s: the early read saves nothing" % label,
+              captured_texts(cfg, sid) == [], captured_texts(cfg, sid))
+        late = page_note(cfg, sid, resp, inp=inp, extra_env={"LOCAL_TIME_NOW": NOW_AFTER})
+        check("page note after window, %s: the read after the window saves the note once" % label,
+              ran_page_note(late) and captured_texts(cfg, sid) == [FIRST_LABEL], captured_texts(cfg, sid))
+        again = page_note(cfg, sid, resp, inp=inp, extra_env={"LOCAL_TIME_NOW": NOW_AFTER})
+        check("page note after window, %s: the same read again saves nothing more" % label,
+              ran_page_note(again) and captured_texts(cfg, sid) == [FIRST_LABEL], captured_texts(cfg, sid))
+
+
+def case_page_note_list_exactly_ten_seconds_saves():
+    cfg, sid = new_cfg(), "pn-edge"
+    p = page_note(cfg, sid, response_of([("a-7k2", answer_data())], listed=True), inp=list_inp(),
+                  extra_env={"LOCAL_TIME_NOW": NOW_EDGE})
+    check("page note edge: the mode ran", ran_page_note(p), p.desc())
+    check("page note edge: an answer exactly 10 s old is outside the window and saves",
+          captured_texts(cfg, sid) == [FIRST_LABEL], captured_texts(cfg, sid))
+
+
+def case_page_note_get_inside_undo_window_still_saves():
+    cfg, sid = new_cfg(), "pn-get-window"
+    p = page_note(cfg, sid, response_of([("a-7k2", answer_data())]), extra_env={"LOCAL_TIME_NOW": NOW_INSIDE})
+    check("page note get in window: the mode ran", ran_page_note(p), p.desc())
+    check("page note get in window: a get saves at once, inside the window too",
+          captured_texts(cfg, sid) == [FIRST_LABEL], captured_texts(cfg, sid))
+
+
+def case_page_note_undo_window_is_per_answer():
+    older = answer_data(item="it-1c", n=2, note="an older note", at=OLDER_AT)
+    cfg, sid = new_cfg(), "pn-window-mixed"
+    p = page_note(cfg, sid, response_of([("a-1", older), ("a-7k2", answer_data())], listed=True),
+                  inp=list_inp(), extra_env={"LOCAL_TIME_NOW": NOW_INSIDE})
+    check("page note window mixed: the mode ran", ran_page_note(p), p.desc())
+    check("page note window mixed: the older answer saves, the answer inside the window waits",
+          captured_texts(cfg, sid) == [label_of(2, "it-1c", "an older note")], captured_texts(cfg, sid))
+
+
+def case_page_note_out_dir_read_saves_nothing():
+    """A get, list or query with out_dir returns file paths, so its text holds no note to save even with doc lines."""
+    cases = (("get", tool_input("get"), response_of([("a-7k2", answer_data())])),
+             ("list", list_inp(), response_of([("a-7k2", answer_data())], listed=True)),
+             ("query", query_inp(), response_of([("a-7k2", answer_data())], listed=True)))
+    for label, inp, resp in cases:
+        plain = new_cfg()
+        control = page_note(plain, "pn-out-plain", resp, inp=inp)
+        check("page note out_dir, %s: control, the same read without out_dir saves its note" % label,
+              ran_page_note(control) and captured_texts(plain, "pn-out-plain") == [FIRST_LABEL],
+              captured_texts(plain, "pn-out-plain"))
+        cfg, sid = new_cfg(), "pn-out-" + label
+        p = page_note(cfg, sid, resp, inp=dict(inp, out_dir="answers-out"))
+        check("page note out_dir, %s: the mode ran" % label, ran_page_note(p), p.desc())
+        check("page note out_dir, %s: saves nothing and writes no key" % label, tree_of(cfg) == {},
+              sorted(tree_of(cfg)))
 
 
 def case_page_note_other_calls_save_nothing():
@@ -3031,8 +3134,9 @@ def case_page_note_u2028_in_at_saves_once():
 
 
 # --------------------------------------------------------------------------- page note session cases
-# An answer's `session` names the session that reads it. In a cloud session (env CLAUDE_CODE_REMOTE_SESSION_ID
-# cse_<x>, own id session_<x>), the note of an answer for another session saves nothing here. Every other answer saves.
+# An answer's `session` names the session that reads it. With this session's own id known (env CLAUDE_CODE_REMOTE_SESSION_ID
+# cse_<x>, own id session_<x>), the note of an answer for another session saves nothing here. With the own id unknown
+# (env unset, or not a cse_ id), an answer that names a session saves nothing. An answer with no string session saves.
 
 OWN_SESSION = "session_mine01"
 OWN_ENV = {"CLAUDE_CODE_REMOTE_SESSION_ID": "cse_mine01"}
@@ -3076,24 +3180,36 @@ def case_page_note_answer_without_session_saves():
           captured_texts(cfg, sid))
 
 
-def case_page_note_unset_env_saves_a_session_answer():
-    """With the session env unset, this is not a cloud session: an answer for another session still saves."""
-    cfg, sid = new_cfg(), "pn-unset"
-    p = page_note(cfg, sid, response_of([("a-7k2", answer_data(session=OTHER_SESSION))]))
-    check("page note env unset: the mode ran", ran_page_note(p), p.desc())
-    check("page note env unset: saves the note", captured_texts(cfg, sid) == [label_of(3, "it-4f2a", PAGE_NOTE)],
-          captured_texts(cfg, sid))
-
-
-def case_page_note_env_without_an_id_saves_a_session_answer():
-    """An env value that names no session (no cse_ prefix, or no id after it) leaves the own id unknown: every answer saves."""
-    for label, value in (("no prefix", "mine01"), ("empty id", "cse_")):
-        cfg, sid = new_cfg(), "pn-noid"
-        p = page_note(cfg, sid, response_of([("a-7k2", answer_data(session=OTHER_SESSION))]),
-                      extra_env={"CLAUDE_CODE_REMOTE_SESSION_ID": value})
-        check("page note env %s: the mode ran" % label, ran_page_note(p), p.desc())
-        check("page note env %s: saves the note" % label, captured_texts(cfg, sid) == [label_of(3, "it-4f2a", PAGE_NOTE)],
+def case_page_note_unset_env_skips_a_session_answer():
+    """With the session env unset, this session's own id is unknown: an answer that names a session saves nothing,
+    even the id the env would have named. An answer with no session saves."""
+    for label, session in (("other", OTHER_SESSION), ("own", OWN_SESSION)):
+        cfg, sid = new_cfg(), "pn-unset-" + label
+        p = page_note(cfg, sid, response_of([("a-7k2", answer_data(session=session))]))
+        check("page note env unset, %s session: the mode ran" % label, ran_page_note(p), p.desc())
+        check("page note env unset, %s session: saves nothing" % label, captured_texts(cfg, sid) == [],
               captured_texts(cfg, sid))
+    cfg, sid = new_cfg(), "pn-unset-none"
+    p = page_note(cfg, sid, response_of([("a-7k2", answer_data())]))
+    check("page note env unset, no session: the mode ran", ran_page_note(p), p.desc())
+    check("page note env unset, no session: saves the note",
+          captured_texts(cfg, sid) == [label_of(3, "it-4f2a", PAGE_NOTE)], captured_texts(cfg, sid))
+
+
+def case_page_note_env_without_an_id_skips_a_session_answer():
+    """An env value that names no session (no cse_ prefix, or no id after it) leaves the own id unknown: an answer
+    that names a session saves nothing, and an answer with no session saves."""
+    for label, value in (("no prefix", "mine01"), ("empty id", "cse_"), ("session id", OWN_SESSION)):
+        env = {"CLAUDE_CODE_REMOTE_SESSION_ID": value}
+        cfg, sid = new_cfg(), "pn-noid"
+        p = page_note(cfg, sid, response_of([("a-7k2", answer_data(session=OTHER_SESSION))]), extra_env=env)
+        check("page note env %s: the mode ran" % label, ran_page_note(p), p.desc())
+        check("page note env %s: an answer that names a session saves nothing" % label,
+              captured_texts(cfg, sid) == [], captured_texts(cfg, sid))
+        plain = new_cfg()
+        page_note(plain, "pn-noid", response_of([("a-7k2", answer_data())]), extra_env=env)
+        check("page note env %s: an answer with no session saves the note" % label,
+              captured_texts(plain, "pn-noid") == [label_of(3, "it-4f2a", PAGE_NOTE)], captured_texts(plain, "pn-noid"))
 
 
 def case_page_note_non_string_session_saves():
@@ -3111,7 +3227,7 @@ def case_page_note_list_skip_is_per_answer():
     cfg, sid = new_cfg(), "pn-list-mixed"
     theirs = answer_data(session=OTHER_SESSION)
     mine = second_answer(session=OWN_SESSION)
-    p = page_note(cfg, sid, response_of([("a-7k2", theirs), ("a-9q1", mine)], banner=LIST_BANNER),
+    p = page_note(cfg, sid, response_of([("a-7k2", theirs), ("a-9q1", mine)], listed=True),
                   inp=tool_input("list", doc_id=None), extra_env=OWN_ENV)
     check("page note list session: the mode ran", ran_page_note(p), p.desc())
     check("page note list session: another session's answer in a list saves nothing",
@@ -3930,10 +4046,16 @@ CASES = (
     case_page_note_skip_is_per_answer,
     case_page_note_own_session_answer_saves,
     case_page_note_answer_without_session_saves,
-    case_page_note_unset_env_saves_a_session_answer,
-    case_page_note_env_without_an_id_saves_a_session_answer,
+    case_page_note_unset_env_skips_a_session_answer,
+    case_page_note_env_without_an_id_skips_a_session_answer,
     case_page_note_non_string_session_saves,
     case_page_note_list_skip_is_per_answer,
+    case_page_note_list_inside_undo_window_saves_nothing,
+    case_page_note_list_after_undo_window_saves_once,
+    case_page_note_list_exactly_ten_seconds_saves,
+    case_page_note_get_inside_undo_window_still_saves,
+    case_page_note_undo_window_is_per_answer,
+    case_page_note_out_dir_read_saves_nothing,
     case_repeat_roadmap_step_marks_the_item_and_blocks,
     case_repeat_stop_hook_active_marks_and_tells_the_owner,
     case_repeat_judged_items_are_not_judged_again,
