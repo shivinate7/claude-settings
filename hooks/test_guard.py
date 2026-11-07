@@ -12174,6 +12174,34 @@ add("cap: Write of a settings file under a .claude folder in a scratch folder, s
 sh("cap: a shell heredoc writing a project settings file, setting an opus model, still asks",
    "cat > " + PROJ_SETTINGS + " <<'EOF'\n" + cap_settings(compact=True) + "\nEOF", "ask",
    "agent-model-cap", cwd=NOGIT, carries=(OPUS,))
+
+# A SHELL SPELLING OF THE SETTINGS PLACE. The shell expands `${CLAUDE_CONFIG_DIR:-$HOME/.claude}`,
+# `${X:-.claude}` and a glob such as `~/.clau*` when the write runs, so the folder a write reaches is
+# known only at run time. The guard read the folder as written, no spelling of it names a settings
+# place, and the write was allowed. A folder that holds `$`, `{`, `*`, `?` or `[` is a possible
+# settings place, so the write asks. A relative `../settings.json` beside a scratch folder names none,
+# so it stays allowed.
+CAP_SHELL_PLACES = (
+    '"${CLAUDE_CONFIG_DIR:-$HOME/.claude}/settings.json"',
+    '"${CLAUDE_CONFIG_DIR:=$HOME/.claude}/settings.json"',
+    '"${CLAUDE_CONFIG_DIR-$HOME/.claude}/settings.json"',
+    '${CLAUDE_CONFIG_DIR:-$HOME/.claude}/settings.json',
+    '"${CLAUDE_CONFIG_DIR:-.claude}/settings.json"',
+    '~/.clau*/settings.json',
+    '~/.claud[e]/settings.json',
+)
+for _place in CAP_SHELL_PLACES:
+    sh("cap: a shell write of an opus model to " + _place + " asks",
+       "printf '%s' '" + cap_settings(compact=True) + "' > " + _place,
+       "ask", "agent-model-cap", cwd=NOGIT, carries=(OPUS,))
+add("cap: Write of an opus model to a settings file under a shell-spelled config folder asks", "ask",
+    "agent-model-cap", tool="Write", cwd=NOGIT,
+    file_path="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/settings.json", content=cap_settings(), carries=(OPUS,))
+add("cap: Write of an opus model to a settings file under a question-mark folder asks", "ask",
+    "agent-model-cap", tool="Write", cwd=NOGIT, file_path="fixture?/settings.json",
+    content=cap_settings(), carries=(OPUS,))
+add("cap: Write of an opus model to ../settings.json beside a scratch folder is allowed", "allow",
+    tool="Write", cwd=NOGIT, file_path="../settings.json", content=cap_settings())
 # The workflow agent model is a cap variable too: set to opus, it lifts the model of a workflow's agents.
 for _key in ("CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL", "CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL_FORCE"):
     add("cap: Write of a project settings file setting %s to opus asks" % _key, "ask",
