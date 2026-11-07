@@ -1135,6 +1135,7 @@ class ConstantCheck(Tree):
         tracked_tree.copy_tracked(self.tree, "lint", "actions")  # the lint readers, the actions and the stamp examples
         os.makedirs(os.path.join(self.tree, "hooks"))  # the check parses hooks/ text and imports none of it
         shutil.copyfile(os.path.join(REPO, "hooks", "guard.py"), os.path.join(self.tree, "hooks", "guard.py"))
+        shutil.copyfile(os.path.join(REPO, "hooks", "git_reads.py"), os.path.join(self.tree, "hooks", "git_reads.py"))
         for name in ("layout.py", "layout.json", "check_layout.py"):  # the files under test, from LINT
             shutil.copyfile(os.path.join(LINT, name), os.path.join(self.tree, "lint", name))
 
@@ -1231,6 +1232,12 @@ class ConstantCheck(Tree):
         self.edit("hooks/guard.py", 'RECORD_LAYOUT_FILE = os.path.join("lint", "layout.json")',
                   'RECORD_LAYOUT_FILE = os.path.join("lint", "check_record_slugs.py")')
         self.assert_red("RECORD_LAYOUT_FILE")
+
+    def test_extras_literal_that_drifts_from_the_layout_is_red(self):
+        # hooks/git_reads.py repeats the layout's "extras" path so a lane reads one file; the check pins it like RECORD_LAYOUT_FILE.
+        self.edit("hooks/git_reads.py", 'LAYOUT_EXTRAS = (".claude", "layout-extras.json")',
+                  'LAYOUT_EXTRAS = (".claude", "extras.json")')
+        self.assert_red("LAYOUT_EXTRAS")
 
     def test_action_default_that_names_a_folder_is_red(self):
         self.edit("actions/ruling-kind/action.yml", 'default: ""', "default: decisions")
