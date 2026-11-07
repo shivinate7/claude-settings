@@ -1,0 +1,36 @@
+{
+  "added": "2026-11-07T18:50:00Z",
+  "context": "Goal: q_max shows past rates the way you look them up.\nProblem (goal): your 12:44 CST condition on item 343. Part of #700 is on main in a generic form: Past Rates has a Group By list in More Filters with year and city. It groups rows by count and year span, with a Year column. The dedicated By Year and By City views are not on main: the median rate per year or city, a year where every rate was refused shown as its own row, and each refusal's own reason.\nBased on (read): lane qmax-revive-idle's read of q_max main 58cad3bfb: src/components/SliceExplorer.tsx (Group By); src/utils/corpusSlice.ts (CORPUS_DIMENSIONS); no PastRatesView, decision or tests on main. A stray debt, docs/debts/past-rates-by-year-spacing.md, describes the By Year view that main lacks.\nDeparts from: main's generic Group By \u2014 a adds the dedicated views, with median and refusal logic, beside it.",
+  "home": "q_max #700; lane qmax-revive-idle",
+  "id": "qmax-700-generic-vs-views",
+  "kind": "decision",
+  "n": 344,
+  "options": [
+    {
+      "gain": "A median rate per year and per city, with each refusal explained.",
+      "key": "a",
+      "label": "Port the dedicated views (recommended: the generic grouping shows no median and no refusal reasons)",
+      "links": [
+        {
+          "label": "q_max PR #700",
+          "url": "https://github.com/shivinate7/q_max/pull/700"
+        }
+      ],
+      "lose": "A lane with a designer and a builder."
+    },
+    {
+      "gain": "No work.",
+      "key": "b",
+      "label": "The generic Group By is enough: close #700 and delete the stray debt",
+      "lose": "No medians and no refusal reasons."
+    }
+  ],
+  "owner": "coordinator",
+  "pick": "a",
+  "rank": 3,
+  "ref": "item 343; q_max #700",
+  "short": "#700: generic Group By is on main; port the views?",
+  "status": "open",
+  "title": "Main already groups Past Rates by year and city, with no medians or refusal reasons. Port #700's dedicated views anyway?",
+  "why": "Your 343 a said: first confirm it is not on main in any form. The lane found part of it."
+}

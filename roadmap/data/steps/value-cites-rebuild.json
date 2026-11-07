@@ -1,0 +1,11 @@
+{
+  "title": "Value cites: a quoted code value in prose must match the code, rebuilt from main",
+  "phase": "now",
+  "status": "doing",
+  "order": 0.3,
+  "owner": "coordinator",
+  "lane": "session_013NEJKzUBbzTDv3nW4wAhS2",
+  "why": "Owner, chat 12:47 CST Nov 7: b, rebuild from main. #1175 (the check) and #1176 (records use it) are held after review round 3 (decision hold-unsafe-after-round-3), and main now uses STALE004 for another check, with 5 conflicts in core lint.",
+  "note": "Done: the check is on main, and #1175 and #1176 are closed as replaced. The branches stay on origin for reference.",
+  "updatedAt": "2026-11-07T12:50:00-06:00"
+}
