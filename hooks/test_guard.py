@@ -13511,6 +13511,14 @@ WORKFLOW_SHELL_REFUSED = (
     ("perl -pi on ci.yml", "perl -pi -e 's/a/b/' .github/workflows/ci.yml"),
     ("echo appends to checks.yml", "echo x >> .github/workflows/checks.yml"),
     ("cd into .github/workflows, then sed -i on checks.yml", "cd .github/workflows && sed -i s/a/b/ checks.yml"),
+    # The shell reader must not let quoted text hide the target: a comment opener in a script, a lone quote
+    # in echo text, and a script that runs on to a second line.
+    ("scanner: a # in a quoted script before a pytest delete",
+     "sed -i '/# note/d; /pytest/d' .github/workflows/checks.yml"),
+    ("scanner: a lone quote in echo text before a pytest delete",
+     "echo \"don't\"; sed -i '/pytest/d' .github/workflows/checks.yml"),
+    ("scanner: a two-line script, its second line a comment, after a pytest delete",
+     "sed -i '/pytest/d\n# test note' .github/workflows/checks.yml"),
 )
 for _name, _command in WORKFLOW_SHELL_REFUSED:
     sh("builder-test: workflow shell write, %s, is refused" % _name, _command, "deny", rule=BT,
