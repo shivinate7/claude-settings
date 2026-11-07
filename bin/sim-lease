@@ -25,6 +25,9 @@ waiting take stamps `seen`, its time in epoch seconds, on its queue entry (the t
 time.time()). A waiter whose `seen` is older than SIM_LEASE_SKIP seconds (default 30, unmeasured) is stale and is passed
 over: a take whose process stopped polling, with its pid still alive, would block the queue for good. A stale waiter keeps
 its place, and its next poll makes it fresh again, ahead of every later waiter. A waiter with no `seen` counts as fresh.
+Each lease records `granted`, its grant time in epoch seconds (env SIM_LEASE_NOW when set, else time.time()). On every take, a
+lease whose `granted` is older than SIM_LEASE_MAX seconds (default 1800, unmeasured) is dropped, so a holder that outlives
+its limit cannot keep a slot for good. A lease with no `granted` does not expire.
 Reaping, on every call: a lease or waiter whose pid is dead, or whose `ps -o lstart=` start time differs from the one
 recorded at take, is dropped. A holder that dies therefore never needs to give.
 Load: `sysctl -n vm.loadavg` only. No-op: when `uname -s` is not Darwin, or CI or GITHUB_ACTIONS equals `true`,
@@ -184,10 +187,16 @@ def slot_of(udid):
     return next((s for s, u in SLOT_UDID.items() if u.casefold() == udid.casefold()), "other")
 
 
-def lease_of_entry(entry, slot):
-    """The lease record for a queue entry granted slot: the entry without its queue-only fields, with slot and device UDID."""
+def stamp(now):
+    """now as it is stored: an int when it is whole."""
+    return int(now) if now.is_integer() else now
+
+
+def lease_of_entry(entry, slot, now):
+    """The lease record for a queue entry granted slot: the entry without its queue-only fields, with slot, device UDID and
+    the grant time."""
     rec = {k: v for k, v in entry.items() if k not in ("reuse", "seen")}
-    return dict(rec, slot=slot, udid=entry.get("reuse") or SLOT_UDID[slot])
+    return dict(rec, slot=slot, udid=entry.get("reuse") or SLOT_UDID[slot], granted=stamp(now))
 
 
 def first_fresh(queue, now, skip):
@@ -240,6 +249,7 @@ def cmd_take(args):
     wait = args.wait if args.wait is not None else float(os.environ.get("SIM_LEASE_WAIT") or 300)
     poll = float(os.environ.get("SIM_LEASE_POLL") or 2)
     skip = float(os.environ.get("SIM_LEASE_SKIP") or 30)
+    max_age = float(os.environ.get("SIM_LEASE_MAX") or 1800)
     session = args.session or os.environ.get("CLAUDE_CODE_SESSION_ID") or ""
     noop, darwin = is_noop()
     if noop:
@@ -269,14 +279,15 @@ def cmd_take(args):
                 if not any(e["pid"] == pid for e in st.data["queue"]):
                     st.data["queue"].append(dict(entry))
                 now = float(os.environ.get("SIM_LEASE_NOW") or time.time())
+                st.data["leases"] = [e for e in st.data["leases"] if e.get("granted") is None or now - e["granted"] <= max_age]
                 for e in st.data["queue"]:
                     if e["pid"] == pid:
-                        e["seen"] = int(now) if now.is_integer() else now
+                        e["seen"] = stamp(now)
                 load = read_load()
                 slot = decide(st.data, entry, load, now, skip)
                 if slot:
                     st.data["queue"] = [e for e in st.data["queue"] if e["pid"] != pid]
-                    lease = lease_of_entry(entry, slot)
+                    lease = lease_of_entry(entry, slot, now)
                     st.data["leases"].append(lease)
                     granted = True
                     print(shown(lease, args))
