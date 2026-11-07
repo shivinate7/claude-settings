@@ -923,7 +923,8 @@ def _caught_as_stop(node, name, mod):
     cur = mod.parents.get(id(node))
     while cur is not None and not isinstance(cur, ast.FunctionDef):
         if isinstance(cur, ast.ExceptHandler) and cur.name == name:
-            return isinstance(cur.type, ast.Name) and cur.type.id in mod.stops
+            caught = cur.type.elts if isinstance(cur.type, ast.Tuple) else [cur.type]
+            return any(isinstance(c, ast.Name) and c.id in mod.stops for c in caught)
         cur = mod.parents.get(id(cur))
     return False
 
