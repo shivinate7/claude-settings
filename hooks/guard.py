@@ -180,14 +180,20 @@ Other tools, in `judge` order:
                        `clean` counts only with a force flag. An
                        override lifts it. It adds no git spawn beyond what the call already spends.
   agent-role-model     deny. A spawn whose model ranks above its role's row in the decision record
-                       (haiku < sonnet < opus), or that names no model where the role has no `model:`
-                       pin and no default model is set. An Explore whose brief's first line
-                       carries the `Audit:` marker, a reviewer on a later-round brief and every Opus
-                       spawn pass it. An unread record
+                       (haiku < sonnet < opus), or that names no model where nothing sets one. For an
+                       Agent or Task spawn, a `model:` pin in the role's file or a
+                       CLAUDE_CODE_SUBAGENT_MODEL default sets one. For a Workflow `agent()` call, the file
+                       pin does not reach it, so only CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL or
+                       CLAUDE_CODE_SUBAGENT_MODEL does, or a role whose row is opus (Plan). "inherit",
+                       in any case and stripped, counts as unset in either variable. An Explore whose
+                       brief's first line carries the `Audit:` marker, a reviewer on a later-round
+                       brief and every Opus spawn pass it. An unread record
                        passes and is noted as `agent-role-model-unread`. The general override lifts an
                        above-row refusal; no override lifts the no-model refusal. A Workflow
-                       `agent()` call is judged as a spawn; one whose model or agentType the scan
-                       cannot read is skipped, and an unread brief is judged as an empty brief.
+                       `agent()` call is judged as a spawn, a call with no agentType being
+                       general-purpose; one whose model or agentType the scan cannot read (a variable,
+                       a shorthand, or a spread with no literal model) is skipped, and an unread brief
+                       is judged as an empty brief. The Workflow refusal's remedy names the model to add.
                        (agent-model-cap)
   agent-model-floor, roles-third-round-steps-up
                        deny. A spawn below the model floor, or a third round on the wrong model.
@@ -2623,6 +2629,7 @@ from shared_names import REPO_TAG, repo_tag_names  # noqa: E402  the one home of
 EXPLORE_ROLE = "Explore"
 ROLE_REVIEWER_FREE_ROUNDS = ("2", "3")
 ROLE_MODEL_ENV = "CLAUDE_CODE_SUBAGENT_MODEL"
+ROLE_WORKFLOW_MODEL_ENV = "CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL"
 ROLE_MODEL_REASON = (
     "Rule (configuration): this spawn names a model above the one its role runs on. Remedy: drop the model "
     "field, or name the role's model%s. (decision agent-model-cap)"
@@ -2637,6 +2644,13 @@ ROLE_NO_MODEL_REASON = (
     "Rule (configuration): this spawn names no model, its role has no model of its own, and no default "
     "model is set, so it would run on its parent's model. Remedy: name the role's model%s. "
     "(decision agent-model-cap)"
+)
+# A Workflow agent() ignores its agentType's file `model:`, so the file's pin is no remedy. The remedy names the model
+# to add, haiku included: a haiku row's role may run Haiku (the floor lists it).
+ROLE_NO_MODEL_WORKFLOW_REASON = (
+    "Rule (configuration): this Workflow agent() call names no model, its agentType's file `model:` does not reach "
+    "a Workflow call, and no default model is set, so it would run on its parent's model. Remedy: name the role's "
+    "model (add model: '%s'). (decision agent-model-cap)"
 )
 
 
@@ -2794,16 +2808,29 @@ BRIEF_UNREAD = "brief_unread"
 BRIEF_LITERAL_REMEDY = "write the brief as a literal string so the marker is readable"
 
 
-def spawn_inputs(tool: str, tool_input):
+# Set on a spawn_inputs spawn that came from a Workflow agent() call with no model (see `no_model`).
+WORKFLOW_NO_MODEL = "workflow_no_model"
+
+
+def model_env_names_one(name) -> bool:
+    """True when the environment variable `name` names a model. "inherit", in any case and stripped, is the CLI's
+    "use the parent's model", so it counts as unset (decision agent-model-cap)."""
+    return os.environ.get(name, "").strip().lower() not in ("", "inherit")
+
+
+def spawn_inputs(tool: str, tool_input, no_model: bool = False):
     """Yield each spawn a call makes, shaped as an Agent input (`subagent_type`, `model`, `prompt`). An Agent or Task
     call is one spawn. A Workflow script yields one per agent() call that names a model, with agentType as the role
     and the model read from the script, so the role and Opus checks judge it as they judge an Agent spawn
-    (decision agent-model-cap). A brief the scan cannot read (a variable, or a prompt key beside a spread) carries no
+    (decision agent-model-cap). With `no_model` it also yields each call whose keys the scan read in full and that
+    names no model (model "", WORKFLOW_NO_MODEL set, a call with no agentType being general-purpose): the role row
+    check refuses it, and the Opus check never sets `no_model`, as a spawn with no model is not an Opus spawn. A brief the scan cannot read (a variable, or a prompt key beside a spread) carries no
     marker and grants nothing, so the spawn is judged with an empty brief and BRIEF_UNREAD set, and its refusal names
     BRIEF_LITERAL_REMEDY, so the author can make the marker readable. A
-    call whose model or agentType the scan cannot read, or that names no model, is skipped: a static read never
-    guesses a role or a model. A shorthand or a spread with no literal agentType may set the role, so it is unread;
-    a literal agentType beside a spread is read. step_up_hit still skips an unread brief, as a marker it cannot read
+    call whose model or agentType the scan cannot read is skipped, and so is a call with no model unless `no_model`
+    is set and no spread, shorthand or computed key could hold the model: a static read never guesses a role or a
+    model. A shorthand or a spread with no literal agentType may set the role, so it is unread; a literal agentType
+    beside a spread is read. step_up_hit still skips an unread brief, as a marker it cannot read
     has no round to check. Other tools yield nothing."""
     if tool in SPAWN_TOOLS:
         yield tool_input
@@ -2813,19 +2840,22 @@ def spawn_inputs(tool: str, tool_input):
             for k, u, _ in bodies:
                 keys.update(k)
                 unseen |= u
-            if unseen & {"model", "agentType"} or not keys.get("model"):
+            if unseen & {"model", "agentType"}:
+                continue
+            named = bool(keys.get("model"))
+            if not named and not (no_model and "..." not in unseen):
                 continue
             if "..." in unseen and "agentType" not in keys:
                 continue
-            yield {"subagent_type": keys.get("agentType"), "model": keys["model"], "prompt": prompt or "",
-                   BRIEF_UNREAD: prompt is None}
+            yield {"subagent_type": keys.get("agentType"), "model": keys.get("model", ""), "prompt": prompt or "",
+                   BRIEF_UNREAD: prompt is None, WORKFLOW_NO_MODEL: not named}
 
 
 def role_model_check(tool: str, tool_input):
     """(reason, matched, unread) for the spawns of an Agent, Task or Workflow call against their roles' rows: the
     first refusal, else the first unread. Cost: one table read per spawn."""
     unread = ("", "", False)
-    for spawn in spawn_inputs(tool, tool_input):
+    for spawn in spawn_inputs(tool, tool_input, no_model=True):
         verdict = role_model_one(spawn)
         if verdict[0]:
             return verdict
@@ -2837,7 +2867,9 @@ def role_model_check(tool: str, tool_input):
 def role_model_one(tool_input):
     """(reason, matched, unread) for one spawn against its role's row. `reason` is the deny, or "".
     `unread` is true when the table or the agent files could not be read: the spawn then passes. With no pointer checkout the rule stands down, silent. A spawn on Opus is left to
-    opus_spawn_hit. An Explore on an audit brief
+    opus_spawn_hit. A Workflow agent() call with no model (WORKFLOW_NO_MODEL) runs on CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL,
+    else CLAUDE_CODE_SUBAGENT_MODEL, else its parent's model; it ignores its role's file pin, so only a default or a row
+    of opus passes it. "inherit" in either variable counts as unset (model_env_names_one). An Explore on an audit brief
     (EXPLORE_AUDIT_MARKER) and a reviewer on a later-round brief run above the row. Pure, so never_lifted may call it too.
     An above-row refusal is liftable by the general override (decision agent-model-cap); the
     no-model refusal (matched ROLE_NO_MODEL_MATCH...) is not, and never_lifted reads only that one."""
@@ -2874,8 +2906,15 @@ def role_model_one(tool_input):
                 extra += ", or " + BRIEF_LITERAL_REMEDY
             return ROLE_MODEL_REASON % extra, model, False
         return "", "", False
+    if tool_input.get(WORKFLOW_NO_MODEL):
+        row = table.get(role, "sonnet")
+        if model_env_names_one(ROLE_WORKFLOW_MODEL_ENV) or model_env_names_one(ROLE_MODEL_ENV) \
+                or row == ROLE_MODEL_RANK[-1]:
+            return "", "", False
+        return ROLE_NO_MODEL_WORKFLOW_REASON % row, ROLE_NO_MODEL_MATCH + role, False
     if os.environ.get(ROLE_MODEL_ENV, "").strip():
-        return "", "", False
+        if model_env_names_one(ROLE_MODEL_ENV):
+            return "", "", False
     pinned = role_has_model_pin(pointer, role)
     if pinned is None:
         return "", pointer, True
