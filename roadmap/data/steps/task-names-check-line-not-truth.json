@@ -1,11 +1,11 @@
 {
-  "title": "A page task's check line is checked against the real check, through one shared route-rows reader",
+  "title": "A page task's Why-yours line accepts only route-row and dated measured cites, checked by new rule task-why-cited",
   "phase": "now",
   "status": "doing",
   "order": 0.23,
   "owner": "coordinator",
   "why": "Coordinator, 14:31 CST Nov 7.",
-  "note": "",
+  "note": "Coordinator picks, 14:36 CST: the Why-yours line accepts only route-row cites and dated measured cites, not a refused tool in backticks; the check ships as new rule task-why-cited. Route rows already have one reader, hooks/route_match.py, so no second reader is built.",
   "lane": "session_013NEJL1UMoM1VHADdYGDUZz",
-  "updatedAt": "2026-11-07T14:33:00-06:00"
+  "updatedAt": "2026-11-07T14:35:00-06:00"
 }
