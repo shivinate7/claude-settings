@@ -152,6 +152,15 @@ class ScoreTests(unittest.TestCase):
         self.assertEqual(row.get("unloaded"), ["test_s.py"],
                          "a suite that stayed green on a wholly broken copy of the target was not listed as unloaded")
 
+    def test_every_usable_suite_unloaded_reads_unknown(self):
+        row = score({"subject.py": SUBJECT, "test_s.py": NEVER_LOADS_TARGET}, ["test_s.py"])
+        self.assertEqual(row.get("unloaded"), ["test_s.py"],
+                         "the only usable suite stayed green on a wholly broken copy of the target but was not listed as unloaded")
+        self.assertEqual(row["status"], "UNKNOWN",
+                         "every usable suite is unloaded, yet the row reads OK, so a rate would score suites that never ran the file")
+        self.assertIsNone(row["rate"], "a rate was given for a file that no usable suite loads")
+        self.assertTrue(row["reason"], "an UNKNOWN row with no reason does not say why the file is unmeasured")
+
     def test_a_suite_that_goes_red_on_a_broken_target_is_not_unloaded(self):
         row = score({"subject.py": SUBJECT, "test_a.py": ASSERTING, "test_s.py": NEVER_LOADS_TARGET},
                     ["test_a.py", "test_s.py"])
