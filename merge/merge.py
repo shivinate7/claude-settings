@@ -3120,8 +3120,9 @@ def review_state(rec, head):
     Guard or check is no and the first round is done; or Kind is docs-only with no round. A guard or check change owes the net-value test after the
     final allowed round whatever the verdict, and owes the later rounds when the first fails unless a fix check PASS follows, even if it only deletes. Net value negative holds the change.
     A round-3 line holds the change before the net-value and guard rules. Four module constants set which lines hold: a FAIL always holds; a PARTIAL holds
-    when ROUND3_PARTIAL_HOLDS; a design-reviewer line holds only when ROUND3_DESIGN_FAIL_HOLDS; a fix check PASS lifts the round-3 line hold when
-    FIX_PASS_CLEARS_ROUND3_HOLD, so the final-round done rules decide; a fix check FAIL after round 3 holds when FIX_FAIL_AFTER_ROUND3_HOLDS, else it reads open.
+    when ROUND3_PARTIAL_HOLDS; a design-reviewer line holds only when ROUND3_DESIGN_FAIL_HOLDS; a fix check PASS lifts a reviewer's round-3 line hold when
+    FIX_PASS_CLEARS_ROUND3_HOLD, so the final-round done rules decide, but never a design reviewer's: that hold stays, and its why names the design reviewer;
+    a fix check FAIL after round 3 holds when FIX_FAIL_AFTER_ROUND3_HOLDS, else it reads open.
     A design-reviewer FAIL or PARTIAL as the last such line keeps the PASS path open, and the why of a final-round or delete-only done names it.
     A fix check (rec["fix"], decision hold-unsafe-after-round-3) is read after the held rule. A FAIL is open, whatever the rounds say, and counts
     as the next round (after the last recorded one). A WIDE is open, counts no round and
@@ -3139,12 +3140,17 @@ def review_state(rec, head):
     fix = rec.get("fix")
     # a failed final round, or a failed fix check after it, holds the change; the finding becomes a new lane
     # a final-round line holds when it is a FAIL, or a PARTIAL under ROUND3_PARTIAL_HOLDS; a design-reviewer line only under ROUND3_DESIGN_FAIL_HOLDS.
-    # A fix check PASS clears the hold under FIX_PASS_CLEARS_ROUND3_HOLD, so the final-round done rules below decide
+    # A fix check PASS clears a reviewer's hold under FIX_PASS_CLEARS_ROUND3_HOLD, so the final-round done rules below decide. The fix check
+    # reviews the code reviewer's finding, so it never clears a design reviewer's hold
     holding = {"FAIL", "PARTIAL"} if ROUND3_PARTIAL_HOLDS else {"FAIL"}
     cleared = FIX_PASS_CLEARS_ROUND3_HOLD and fix and fix[3] == "PASS"
     if (not cleared and any(i == REVIEW_LAST_ROUND and v in holding and (role == REVIEW_ROLES[0] or ROUND3_DESIGN_FAIL_HOLDS) for i, role, _, v in rounds)) \
             or (FIX_FAIL_AFTER_ROUND3_HOLDS and fix and fix[3] == "FAIL" and top >= REVIEW_LAST_ROUND):
         return "held", f"round {REVIEW_LAST_ROUND} failed, so the finding becomes a new lane at round 1"
+    held_design = next((v for i, role, _, v in rounds if i == REVIEW_LAST_ROUND and role == REVIEW_ROLES[1] and v in holding), None)
+    if ROUND3_DESIGN_FAIL_HOLDS and held_design:  # reached only when a fix check PASS cleared the reviewer lines
+        return "held", (f"the {REVIEW_ROLES[1].replace('-', ' ')} in round {REVIEW_LAST_ROUND} is {held_design}, "
+                        "and a fix check PASS does not clear it, so the finding becomes a new lane at round 1")
     design = next(((i, v) for i, role, _, v in reversed(rounds) if role == REVIEW_ROLES[1]), None)  # the last design-reviewer line, by position
     bad = design if design and design[1] != "PASS" else None
     note = f"; the {REVIEW_ROLES[1].replace('-', ' ')} in round {bad[0]} is {bad[1]}" if bad else ""
@@ -3183,7 +3189,10 @@ def round_floor(earlier, rec):
     record that did not parse already dropped); else None. Counts never go down on one PR (decision pr-review-record): the floor is the highest, over
     `earlier`, of a record's last round, plus 1 when its fix check FAILed before the final round, since that FAIL counts as the next round. A newest
     record below the floor reads open. A counted FAIL slot is filled only by a FAIL line: a record whose round N+1 has none reads open. A WIDE or PASS
-    fix check floors at the record's own last round and counts no slot. The floor comes from the bodies the listing already holds."""
+    fix check floors at the record's own last round and counts no slot. A failed round stays failed: an earlier record's last round N is uncleared when
+    it has a FAIL or PARTIAL line, or the record's fix check is FAIL or WIDE. That record, or one after it, clears it by reaching a round above N or by
+    carrying a fix check PASS; at round 3 only the PASS can. A fix check PASS never clears a design reviewer's FAIL or PARTIAL. An uncleared round reads
+    open, and the why names the earliest record at the highest such round. The floor comes from the bodies the listing already holds."""
     last = max((i for i, *_ in rec["rounds"]), default=0)
     best = None  # (floor, failed, record): the earliest record at the highest floor, a failed fix check first
     for e in earlier:
@@ -3201,13 +3210,31 @@ def round_floor(earlier, rec):
         n = max((i for i, *_ in e["rounds"]), default=0)
         if e["fix"] and e["fix"][3] == "FAIL" and n < REVIEW_LAST_ROUND and not any(i == n + 1 and v == "FAIL" for i, _, _, v in rec["rounds"]):
             return f"a failed fix check on head {e['head'][:9]} counts as round {n + 1}, and only a FAIL line fills it, but this record's round {n + 1} has none"
+    stuck = None  # (round, design, record): the earliest record at the highest uncleared round
+    later = [*earlier, rec]
+    for k, e in enumerate(earlier):
+        n = max((i for i, *_ in e["rounds"]), default=0)
+        failing = {role for i, role, _, v in e["rounds"] if i == n and v in REVIEW_VERDICTS[1:]}
+        if not failing and not (e["fix"] and e["fix"][3] in REVIEW_FIX_VERDICTS[1:]):
+            continue
+        design = REVIEW_ROLES[1] in failing  # a fix check reviews the code reviewer's finding, so its PASS never clears a design reviewer's line
+        if any(max((i for i, *_ in r["rounds"]), default=0) > n or (r["fix"] and r["fix"][3] == "PASS" and not design) for r in later[k:]):
+            continue
+        if stuck is None or n > stuck[0]:
+            stuck = (n, design, e)
+    if stuck:
+        n, design, e = stuck
+        ways = ([f"reaches round {n + 1}"] if n < REVIEW_LAST_ROUND else []) + ([] if design else ["carries a fix check PASS"])
+        why = f"round {n} on head {e['head'][:9]} is not passed" + (", and no later record " + " or ".join(ways) if ways else "")
+        return why + (("; " if ways else ", and ") + f"a fix check PASS does not clear the {REVIEW_ROLES[1].replace('-', ' ')}" if design else "")
 
 def reviewed_lines(h):
     """-> the lines of `merge --reviewed`, built before any is printed so a failed read prints none. Two list reads (the open pull requests, then the
     repo's comments since the oldest one) and, for each ready pull request that has a record, three `gh` calls: the check runs, the commit statuses and
     the branch protection (decision pr-review-record, the cost). The comment list pages every comment of the repo since the oldest open pull request.
     The newest record is read against every earlier record of its pull request that parses (round_floor): it reads open when its last round is below the
-    round count any of them reached, or when a failed fix check's counted round holds no FAIL line. Same bodies, no extra call."""
+    round count any of them reached, when a failed fix check's counted round holds no FAIL line, or when an earlier record's failed round is not yet
+    cleared by a later round or a fix check PASS. Same bodies, no extra call."""
     pulls = h.pages("pulls", fields={"state": "open"})
     if not pulls:
         return ["no open pull requests."]
