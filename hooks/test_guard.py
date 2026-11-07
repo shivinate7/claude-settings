@@ -1627,8 +1627,8 @@ def _build_conflict():
 # keeps the incident's shape: src/app.py (product), tests/test_app.py (test) and docs/debts/README.md (Markdown)
 # stay unmerged. src/resolved.py was conflicted and is git-added. src/theirs_only.py changed on the incoming
 # side only, so the merge staged it clean.
-MIX_CONFLICTED = ("src/app.py", "tests/test_app.py", "docs/debts/README.md", "src/resolved.py")
-MIX_UNMERGED = ("docs/debts/README.md", "src/app.py", "tests/test_app.py")
+MIX_CONFLICTED = ("src/app.py", "tests/test_app.py", "docs/debts/README.md", "src/resolved.py", "src/link.py")
+MIX_UNMERGED = ("docs/debts/README.md", "src/app.py", "tests/test_app.py", "src/link.py")
 
 
 def _unmerged(where):
@@ -1676,9 +1676,12 @@ def _build_merge_fixture(where, resolve_all, linked=False):
 
 def _build_mixed():
     _build_merge_fixture(MIXED, resolve_all=False)
-    if LINKS_MADE:   # the two symlinks the symlink cases read, as spelled (untracked, so the merge is unchanged)
+    if LINKS_MADE:   # the symlinks the symlink cases read, as spelled (untracked, so the merge is unchanged)
         os.symlink("app.py", os.path.join(MIXED, "src", "alias.py"))
         os.symlink("theirs_only.py", os.path.join(MIXED, "src", "alias_clean.py"))
+        # src/link.py stays unmerged in the index. Its working-tree path becomes a link to a clean product file.
+        os.remove(os.path.join(MIXED, "src", "link.py"))
+        os.symlink("theirs_only.py", os.path.join(MIXED, "src", "link.py"))
 
 
 def _build_resolved():
@@ -13204,6 +13207,12 @@ if LINKS_MADE:
         tool="Edit", file_path=os.path.join(MIXED, "src", "alias.py"), **_author_at(MIXED))
     add("test-author: Edit through a symlink to a product file that merged clean is refused", "deny", rule=TA,
         tool="Edit", file_path=os.path.join(MIXED, "src", "alias_clean.py"), carries=MERGE_CARRIES,
+        **_author_at(MIXED))
+# The path is unmerged as spelled, but the link it names resolves to a clean product file: the spelled name alone
+# never qualifies, so the resolved path decides and it is refused.
+if LINKS_MADE:
+    add("test-author: Edit of a symlink unmerged as spelled, resolving to a clean product file, is refused", "deny",
+        rule=TA, tool="Edit", file_path=os.path.join(MIXED, "src", "link.py"), carries=MERGE_CARRIES,
         **_author_at(MIXED))
 # The merge is read from the target's own checkout: a checkout with no merge (OTHER) allows the unmerged path of MIXED.
 add("test-author: Edit of an unmerged product file in a checkout with no merge is allowed", "allow",
