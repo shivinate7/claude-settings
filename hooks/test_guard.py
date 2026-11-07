@@ -27715,9 +27715,8 @@ role_model_allow("role-model: reviewer on sonnet whose guard marker follows a cl
                  "sonnet", "Check the guard diff.\n" + MD_FENCE + "\nsome code\n" + MD_FENCE + "\n" + REVIEW_GUARD_MARKER)
 role_model_refuse("role-model: reviewer on sonnet with the guard marker in lowercase is denied (case-sensitive)",
                   "reviewer", "sonnet", REVIEW_GUARD_MARKER.lower())
-# The marker is the value `yes` as a whole word. The template line `Guard or check: yes|no`, a word that starts with yes
-# (`yesterday`) and `yes-ish` are not that value, so they lift nothing. `yes` then a space, a full stop or a parenthesis
-# is the value, and lifts the reviewer as before.
+# The marker is `yes` with the end of the line, a space or a full stop after it. A `|`, a `-` or a letter after yes (the
+# template line `Guard or check: yes|no`, `yesterday`, `yes-ish`) is not that value, so those lift nothing.
 role_model_refuse("role-model: reviewer on sonnet with the template line Guard or check: yes|no is denied",
                   "reviewer", "sonnet", "Check the docs diff.\nGuard or check: yes|no")
 role_model_refuse("role-model: reviewer on sonnet with Guard or check: yesterday is denied",
