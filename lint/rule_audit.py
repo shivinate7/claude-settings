@@ -586,7 +586,8 @@ def emitted_rule_ids(root: str = ROOT) -> set:
     hooks/ and lint/ that calls record(), refuse() or ask_command() (`log_writer_paths`), such as
     config_watch (it logs `agent-model-cap` reverts), blind_brief, prose_judge, sendmessage_state, and
     call_judge's `judge-timeout`. An id a call passes through a variable lists only when the writer names its constant in
-    LOGGED_RULES (call_judge's spawn-judge, question-judge and past-ruling, reply_judge's reply-judge). No hook writes an STE code now."""
+    LOGGED_RULES: call_judge's spawn-judge, question-judge and past-ruling, and reply_judge's reply-judge and each of its
+    JUDGED_RULES. No hook writes an STE code now."""
     ids = set()
     for path in sorted(set(guard_paths(root)) | set(log_writer_paths(root))):
         ids |= guard_rule_names(read(path), os.path.relpath(path, root), root)
