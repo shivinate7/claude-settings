@@ -11,8 +11,11 @@
                           the step would push, before any push and before the ready mark, on every path (default base, other base,
                           Record-claim head). A FAIL or an unknown stops the step with the step lines and the log: nothing pushed, not
                           marked ready, and no flag lifts it. A repo with no list runs no ready check, and one line says so.
-                          Cost per draft-step ready: one ci-job run and one worktree; the run time is unmeasured for a step subset
-                          (the 1200 s lint bound applies). No new file but ci-job's own log.
+                          Each step runs in the claude-settings commit the repo's workflow pins (one sha), as CI does; two pins, a
+                          ref that is no sha or a pin that cannot be fetched is an unknown, which stops the step too.
+                          Cost per draft-step ready: one ci-job run and one worktree, plus ci-job's pinned worktree (a git fetch
+                          only when the sha is absent, an npm ci only when that tree has a lockfile); the run time is unmeasured
+                          for a step subset (the 1200 s lint bound applies). No new file but ci-job's own log.
                           On a ready PR a stale records page with no claim to make or resume is refused before any push; only the draft step heals it.
   merge --unlock [branch] remove the merge lock on the branch (default: the default branch). Never checks the holder. A cloud run reads the lock first and skips one already released.
   merge <pr> --review-record --head SHA --kind K --guard yes|no [--round N:ROLE:MODEL:VERDICT ...]
@@ -2752,7 +2755,9 @@ READY_CHECKS_CITE = "(decision lanes-run-no-full-ci-job, the ready checks: a dra
 
 def run_ready_checks(wt, n, base, checks):
     """The ready checks of the draft step: run the repo's `merge.readyChecks` through ci-job in the tree `wt`, which holds what the step
-    would push. One ci-job run. Returns on a pass; a FAIL or an unknown raises Stop, and no flag lifts it. `checks` is a non-empty list."""
+    would push. One ci-job run, which runs each step in the claude-settings commit the workflow pins (a worktree, a fetch if the sha is
+    absent, an npm ci if it has a lockfile; a pin it cannot use is an unknown). Returns on a pass; a FAIL or an unknown raises Stop, and
+    no flag lifts it. `checks` is a non-empty list."""
     args = ["checks", *[a for name in checks for a in ("--step", name)], "--base", f"origin/{base}"]
     state, lines, log, _ = ci_job_run(wt, *args)
     short = git(wt, "rev-parse", "--short=9", "HEAD")[1]
@@ -2766,7 +2771,8 @@ def draft_step(root, cfg, n, host, info):
     stop. So the branch is final at ready, and the ready confirm pushes nothing (decision records-index-at-merge).
     Takes no lock, claims no number and never merges: a claim stays at the ready confirm.
     A repo that declares merge.readyChecks also runs them first, on the tree the step would push, before any push and before the
-    ready mark, on every path (the ready checks, decision lanes-run-no-full-ci-job). One ci-job run, in one worktree."""
+    ready mark, on every path (the ready checks, decision lanes-run-no-full-ci-job). One ci-job run, in one worktree, plus the pinned
+    claude-settings worktree that ci-job makes for it (run_ready_checks)."""
     base = info["base"]
     checks = cfg.get("merge", {}).get("readyChecks")
     if not checks:

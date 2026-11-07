@@ -18,6 +18,8 @@ import os, re, subprocess, sys
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.realpath(__file__))), "hooks"))
 import _nowindow  # noqa: E402  the one home of a no-window child start (hooks/_nowindow.py)
 import git_reads  # noqa: E402  the one home of the ancestry read (hooks/git_reads.py)
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.realpath(__file__))), "lint"))
+from workflow_steps import COMMIT_SHA, settings_pins  # noqa: E402  the one home of the pin reader (lint/workflow_steps.py)
 from git_bash import find_git_bash  # noqa: E402  the one home of the Git Bash lookup (hooks/git_bash.py)
 
 LINT_ACTION = os.path.join("actions", "ste-lint", "action.yml")
@@ -50,7 +52,6 @@ LINT_FILES = ("actions/ste-lint/action.yml", "actions/ste-lint/run.sh", "lint/st
 # remedy's clause on who may move the pin)}. The "with no question" grant is the owner's for ste-lint pins only.
 PINNED = {"ste-lint": (LINT_FILES, "lint", ", with no question (rule git-integration-branch-merge)"),
           "zizmor": (("actions/zizmor/action.yml", "actions/zizmor/run.sh"), "zizmor run", "")}
-PIN = re.compile(r"[\w.-]+/claude-settings/actions/(%s)@([0-9a-f]{40})" % "|".join(map(re.escape, PINNED)))
 
 
 def out(*a):
@@ -69,9 +70,9 @@ def pins():
     for name in sorted(os.listdir(wf)) if os.path.isdir(wf) else ():
         if name.endswith((".yml", ".yaml")):
             with open(os.path.join(wf, name), encoding="utf-8", errors="replace") as f:
-                for n, line in enumerate(f, 1):
-                    for key in PIN.findall(line.split("#", 1)[0]):
-                        found.setdefault(key, ".github/workflows/%s:%d" % (name, n))
+                for action, ref, n in settings_pins(f.read()):
+                    if action in PINNED and COMMIT_SHA.fullmatch(ref):
+                        found.setdefault((action, ref), ".github/workflows/%s:%d" % (name, n))
     return found
 
 

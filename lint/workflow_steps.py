@@ -6,6 +6,10 @@ bin/ci-job runs a job's steps locally with it. It reads the layout checks.yml ke
 """
 import re
 
+# A `uses:` of one of this repo's own actions at a ref: `<owner>/claude-settings/actions/<name>@<ref>`.
+SETTINGS_ACTION = re.compile(r"[\w.-]+/claude-settings/actions/([\w-]+)@(\S+)")
+COMMIT_SHA = re.compile(r"[0-9a-f]{40}")
+
 # The Linux jobs that hold the suites of the one old `checks` job, split for wall time. merge/merge.py reads suites from each.
 CHECKS_SUITE_JOBS = ("checks", "checks-merge-install")
 
@@ -127,3 +131,18 @@ def step_env(step):
 def step_with(step):
     """A step's own `with:` block as {name: raw value}, or {} when it has none."""
     return step_map(step, "with")
+
+
+def settings_pins(text):
+    """[(action, ref, line)] for each step of a workflow whose `uses:` is `<owner>/claude-settings/actions/<name>@<ref>`,
+    in file order, `line` being the 1-based line of that `uses:`. A step's own key, so a `# uses:` comment and a line of
+    `run:` text are no pin; a trailing `# v1` is no part of the ref. The ref is whatever follows `@`: a caller that
+    needs a commit checks it against COMMIT_SHA."""
+    found, at = [], 0
+    for st in step_blocks(text):
+        at = text.index(st, at)  # the blocks are slices of `text` in order, so each search starts at the last
+        key = re.search(r"^(?:      - |        )uses:", st, re.M)
+        m = key and SETTINGS_ACTION.fullmatch(drop_comment(step_key(st, "uses")).strip("'\""))
+        if m:
+            found.append((m.group(1), m.group(2), text.count("\n", 0, at + key.start()) + 1))
+    return found

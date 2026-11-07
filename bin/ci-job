@@ -46,6 +46,13 @@
 # of the job has prints one `unknown` line, and when any name is missing no step runs: exit 2. A named step that does not
 # run (an action, a false if:) is also one `unknown` line, never a pass. The merge's ready checks run its declared
 # merge.readyChecks this way. Exit codes as below.
+# --step runs in the claude-settings commit the workflow pins, as CI does: the one 40-hex sha of its
+# `<owner>/claude-settings/actions/<name>@<sha>` uses: lines (lint/workflow_steps.py settings_pins), checked out as a
+# detached worktree of CI_JOB_SETTINGS_CLONE, else this file's own clone, else the clone the global rules file names;
+# the sha is fetched from that clone's origin when it lacks it. Each named step gets CLAUDE_SETTINGS_DIR set to that
+# tree (the step's own env: wins), and a remote code-check or zizmor action is read from it only. With no pin, a step
+# runs as before. Two pinned refs, a ref that is no sha, a sha that cannot be fetched or a failed `npm ci` makes each
+# named step one `unknown` line naming the reason, exit 2, and none runs. The worktree is removed on every exit.
 # --plan prints each step's verdict-to-be and runs nothing. Output of each run: $VERDICT_LOG, else one new
 # temp log per call, named on the last line. Exit: 1 if a step fails, else 2 if one is unknown, else 0.
 # CI checks out with fetch-depth: 0. When the job's checkout step says so and the clone is shallow, ci-job first
@@ -55,16 +62,18 @@
 # stderr as it arrives, so a quiet step still feeds the stall watch (decision stall-watch: a quiet tool prints a
 # line at least every 120 s).
 # Cost: one process per step (bin/verdict and the step's shell), one log file; no timer, no lasting process. Under
+# --step with a pin: one worktree (a temp folder, removed after), a git fetch only when the sha is absent, and an
+# `npm ci --ignore-scripts` only when the pinned tree has a package-lock.json. Under
 # --lint each install CI step adds its processes, plus network and disk only when a job has one; a pip install writes to the active Python. Each `not run` line,
 # the summary and each step's `start: <name>` line on stderr (before it runs, so a caller sees which step is running)
 # are one print.
-import os, re, shutil, subprocess, sys, tempfile
+import contextlib, os, re, shutil, subprocess, sys, tempfile
 BIN = os.path.dirname(os.path.realpath(__file__))
 sys.path.insert(0, os.path.join(os.path.dirname(BIN), "hooks"))
 sys.path.insert(0, os.path.join(os.path.dirname(BIN), "lint"))
 import _nowindow  # noqa: E402  the one home of a no-window child start (hooks/_nowindow.py)
 from git_bash import find_git_bash  # noqa: E402  the one home of the Git Bash lookup (never the WSL launcher)
-from workflow_steps import job_block, run_body, step_blocks, step_env, step_key, step_with  # noqa: E402  the one home of the step parser
+from workflow_steps import COMMIT_SHA, job_block, run_body, settings_pins, step_blocks, step_env, step_key, step_with  # noqa: E402  the one home of the step parser
 
 USAGE = "usage: ci-job <job> [--workflow <file>] [--base <ref>] [--plan] [--lint] [--step NAME]..."
 EXPR = re.compile(r"\$\{\{\s*(.*?)\s*\}\}")
@@ -206,12 +215,16 @@ CODE_CHECK = os.path.join("actions", "code-check", "code_check.py")  # under a c
 ZIZMOR_RUN = os.path.join("actions", "zizmor", "run.sh")  # the one home of the pinned zizmor run
 
 
-def action_file(top, step, rel):
+def action_file(top, step, rel, pinned=None):
     """(path, None) to the file `rel` of the action the step's uses: names; (None, looked-at) when a remote uses:
     finds none. A local uses: is always the repo under test's own file, even when missing, so the step fails here as
-    in CI. A remote uses: is the copy beside this file, else the one in the pointer checkout."""
+    in CI. A remote uses: is the file in the `pinned` tree when the workflow pins one (CI runs that commit, so a copy
+    from anywhere else would test other code), else the copy beside this file, else the one in the pointer checkout."""
     if LOCAL_ACTION.fullmatch(uses(step)):
         return os.path.join(top, rel), None
+    if pinned:
+        path = os.path.join(pinned, rel)
+        return (path, None) if os.path.isfile(path) else (None, path)
     roots = [os.path.dirname(BIN)]
     try:
         from guard_pointer import pointer_checkout  # the one Python reader of the global rules file's @-line
@@ -223,8 +236,8 @@ def action_file(top, step, rel):
     return found, None if found else " or ".join(paths)
 
 
-def code_check(top, step):
-    return action_file(top, step, CODE_CHECK)
+def code_check(top, step, pinned=None):
+    return action_file(top, step, CODE_CHECK, pinned)
 
 
 def uses(step):
@@ -272,8 +285,9 @@ def could_not_start(log, start):
     return unstarted, bool(errors) and len(unstarted) == len(set(errors))
 
 
-def plan(step, pr, values, top):
-    """(state, detail, argv, env, cwd): state is run, not run locally, skipped or unknown."""
+def plan(step, pr, values, top, pinned=None):
+    """(state, detail, argv, env, cwd): state is run, not run locally, skipped or unknown. `pinned` is the claude-settings
+    tree a --step run pins: a remote action's files are read from it."""
     if step_key(step, "continue-on-error") not in (None, "false"):
         return "unknown", "continue-on-error: this runner reads no step as allowed to fail", None, None, None
     action = known_action(step)
@@ -282,7 +296,7 @@ def plan(step, pr, values, top):
             return "unknown", no_shell("bash"), None, None, None
         if not shutil.which("pipx"):
             return "unknown", "tool missing: pipx", None, None, None
-        path, looked = action_file(top, step, ZIZMOR_RUN)
+        path, looked = action_file(top, step, ZIZMOR_RUN, pinned)
         if not path:
             return "unknown", "no run.sh: looked for %s" % looked, None, None, None
         env = {}
@@ -301,7 +315,7 @@ def plan(step, pr, values, top):
         if not shutil.which("python3"):
             return "unknown", "tool missing: python3", None, None, None
         if action == "code-check":  # the action.yml's own command
-            path, looked = code_check(top, step)
+            path, looked = code_check(top, step, pinned)
             if not path:
                 return "unknown", "no code_check.py: looked for %s" % looked, None, None, None
             return "run", 'python3 "%s" --base "%s"' % (slashed(path), values["base"]), shell_argv(None), {}, None
@@ -338,7 +352,84 @@ def plan(step, pr, values, top):
     return "run", body, argv, env, step_key(step, "working-directory")
 
 
+def settings_clone():
+    """The claude-settings clone a pin is read from: CI_JOB_SETTINGS_CLONE, else this file's own clone, else (a copy
+    install, which is no clone) the one the global rules file names."""
+    given = os.environ.get("CI_JOB_SETTINGS_CLONE")
+    if given:
+        return given
+    own = os.path.dirname(BIN)
+    top = git("rev-parse", "--show-toplevel", cwd=own)
+    if top and os.path.realpath(top) == os.path.realpath(own):
+        return own
+    try:
+        from guard_pointer import pointer_checkout  # the one Python reader of the global rules file's @-line
+        return pointer_checkout() or own
+    except ImportError:
+        return own
+
+
+def last_line(done):
+    return (done.stderr.strip().splitlines() or done.stdout.strip().splitlines() or ["no message"])[-1]
+
+
+def pin_of(text):
+    """(sha, why): the one commit the workflow pins claude-settings actions at; (None, None) when it pins none; (None, why)
+    when it pins two refs or a ref that is no commit, since then there is no one tree CI would run."""
+    refs = list(dict.fromkeys(ref for _, ref, _ in settings_pins(text)))
+    if len(refs) > 1:
+        return None, "the workflow pins claude-settings at %d refs (%s), so there is no one pinned tree" % (len(refs), ", ".join(refs))
+    if refs and not COMMIT_SHA.fullmatch(refs[0]):
+        return None, "the workflow pins claude-settings at %s, which is no 40-hex commit sha" % refs[0]
+    return (refs[0] if refs else None), None
+
+
+@contextlib.contextmanager
+def pinned_tree(sha, clone):
+    """Yield (tree, why): a detached worktree of `clone` at `sha`, with its npm packages when it has a lockfile, or
+    (None, why) when it cannot be made. The sha is fetched from the clone's origin only when the clone lacks it. The
+    worktree is removed and pruned when the block ends, on every exit path."""
+    tmp = tree = None
+    try:
+        if git("rev-parse", "--git-dir", cwd=clone) is None:
+            yield None, "pin %s: %s is no git clone" % (sha[:9], clone)
+            return
+        if git("cat-file", "-e", sha + "^{commit}", cwd=clone) is None:
+            got = _nowindow.run(["git", "fetch", "origin", sha], cwd=clone, capture_output=True, text=True,
+                                env={**os.environ, "GIT_TERMINAL_PROMPT": "0"})
+            if got.returncode != 0:
+                yield None, "pin %s: git fetch origin %s failed in %s: %s" % (sha[:9], sha, clone, last_line(got))
+                return
+        tmp = tempfile.mkdtemp(prefix="ci-job-pin-")
+        tree = os.path.join(tmp, "tree")
+        added = _nowindow.run(["git", "worktree", "add", "--detach", tree, sha], cwd=clone, capture_output=True, text=True)
+        if added.returncode != 0:
+            yield None, "pin %s: git worktree add failed: %s" % (sha[:9], last_line(added))
+            return
+        if os.path.isfile(os.path.join(tree, "package-lock.json")):
+            if not shutil.which("npm"):
+                yield None, "pin %s: tool missing: npm (the pinned tree has a package-lock.json)" % sha[:9]
+                return
+            done = _nowindow.run(["npm", "ci", "--ignore-scripts"], cwd=tree, capture_output=True, text=True)
+            if done.returncode != 0:
+                yield None, "pin %s: npm ci failed in the pinned tree: %s" % (sha[:9], last_line(done))
+                return
+        yield tree, None
+    finally:
+        if tree and os.path.isdir(clone):
+            _nowindow.run(["git", "worktree", "remove", "--force", tree], cwd=clone, capture_output=True, text=True)
+            _nowindow.run(["git", "worktree", "prune"], cwd=clone, capture_output=True, text=True)
+        if tmp:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+
 def main(argv):
+    """Run `run` with a stack that removes the pinned tree when it ends, whatever the exit."""
+    with contextlib.ExitStack() as stack:
+        return run(argv, stack)
+
+
+def run(argv, stack):
     args = list(argv)
     opts = {"--workflow": None, "--base": None}
     for key in opts:
@@ -368,7 +459,8 @@ def main(argv):
     workflow = opts["--workflow"] or os.path.join(top, ".github", "workflows", "checks.yml")
     try:
         with open(workflow, encoding="utf-8") as f:
-            block = job_block(f.read(), job)
+            text = f.read()
+        block = job_block(text, job)
     except OSError as e:
         print("unknown  cannot read the workflow: %s" % e)
         return 2
@@ -385,6 +477,15 @@ def main(argv):
         for w in absent:
             print("%-15s --step %s: no step of job %r has this name" % ("unknown", w, job))
         return 2
+    pinned = None  # --step only: the tree the workflow pins claude-settings at; None runs as before
+    if wanted:
+        sha, why = pin_of(text)
+        if sha and not dry:
+            pinned, why = stack.enter_context(pinned_tree(sha, settings_clone()))
+        if why:  # no tree to run in: a step run against other code would be a guess
+            for w in dict.fromkeys(wanted):
+                print("%-15s %s: %s" % ("unknown", w, why))
+            return 2
     base, no_base = opts["--base"], False
     if lint and not base:
         # A no-base lint run once read as a pass while CI's pull-request steps failed: default to CI's base.
@@ -431,7 +532,7 @@ def main(argv):
             tally["unknown"] += 1
             print("%-15s %s: --lint did not run it: install step %s did not finish" % ("unknown", name, blocker))
             continue
-        state, detail, shell, env, cwd = planned[n - 1] or plan(step, bool(base), values, top)
+        state, detail, shell, env, cwd = planned[n - 1] or plan(step, bool(base), values, top, pinned)
         if state != "run":
             if wanted and state != "unknown":  # a named step that did not run proved nothing: never a pass
                 state, detail = "unknown", "--step named it, but it did not run (%s): %s" % (state, detail)
@@ -460,6 +561,7 @@ def main(argv):
                                  stderr=subprocess.STDOUT, text=True,
                                  env={**{k: v for k, v in os.environ.items() if k not in RUNNER_UNSET | {"GITHUB_BASE_REF"}},
                                       **({"GITHUB_BASE_REF": values["github.base_ref"]} if base else {}),
+                                      **({"CLAUDE_SETTINGS_DIR": pinned} if pinned else {}),
                                       **env, "VERDICT_LOG": log}) as proc:
                 for line in proc.stdout:  # relay each heartbeat at once: the stall watch reads this job's output
                     if not line.startswith("verdict: still running"):
@@ -478,7 +580,7 @@ def main(argv):
         first = next((ln.rstrip("\n") for ln in kept if ln.startswith(("PASS ", "SKIP ", "FAIL "))),
                      "(verdict printed no verdict line)")
         if known_action(step) == "code-check":
-            first += " (code_check.py: %s)" % code_check(top, step)[0]
+            first += " (code_check.py: %s)" % code_check(top, step, pinned)[0]
         if rc == 127 or gone:
             state = "unknown"
             first = "tool missing (%s); %s" % (", ".join(gone) or "exit 127", first)
