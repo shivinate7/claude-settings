@@ -781,45 +781,6 @@ def _idle_then_dirty(entry: dict, attended: bool):
     return idle, path, dirty
 
 
-def host_child_stops(pids, host: int, tree: str, protected=()):
-    """The pids to stop so that every pid in PIDS (processes with a cwd in TREE) goes, deepest
-    first, or None when any of them is not proven a child of HOST. Proof, per pid: climb the parent
-    chain with `_parent_pid` until HOST; every pid on the climb below HOST has its cwd inside TREE
-    (`process_cwd`). A read that fails, a climb that reaches init or a dead pid, one past MAX_CLIMB,
-    or a pid in PROTECTED (this process and its ancestors) makes the whole answer None: one pid that
-    is not proven keeps the tree, and nothing is stopped."""
-    depth = {}
-    for pid in pids:
-        chain, current = [], pid
-        for _ in range(MAX_CLIMB):
-            cwd = process_cwd(current)
-            if current in protected or cwd is None or not _cwd_under_checkout(cwd, tree):
-                return None
-            chain.append(current)
-            parent = _parent_pid(current)
-            if parent is None or parent <= 1:
-                return None
-            if parent == host:
-                break
-            current = parent
-        else:
-            return None
-        for place, member in enumerate(reversed(chain)):  # the pid next to HOST is depth 0
-            depth[member] = max(depth.get(member, 0), place)
-    return sorted(depth, key=lambda member: -depth[member])
-
-
-def _own_chain_pids():
-    """This process and its ancestors: pids a stop list must never hold."""
-    chain, current = set(), os.getpid()
-    for _ in range(MAX_CLIMB):
-        if current is None or current <= 0 or current in chain:
-            break
-        chain.add(current)
-        current = _parent_pid(current)
-    return chain
-
-
 def decide_worktree(where: str, entry: dict, attended: bool = False, agent_rule: bool = True,
                     batch=None, fast: bool = False, own_lock_rule: bool = True,
                     finished_host_lock: bool = False):
@@ -834,15 +795,14 @@ def decide_worktree(where: str, entry: dict, attended: bool = False, agent_rule:
     lock once the tree is clean, merged, idle 30 minutes and unused; the agent-end reap turns it off.
     FINISHED_HOST_LOCK (off by default; only the agent-end reap sets it, for a tree whose agent is
     proven finished) lets a live agent lock pass when its holder is this process's own ancestor
-    (`own_agent_lock_verdict`, the calling session's host). A tree it passes is `reap` with `unlock` set. When "process-inside" is
-    then the only keep reason left and every pid inside is proven a host child (`host_child_stops`),
-    the decision is `reap` with a `stop_pids` list for the caller to signal before the removal; one
-    unproven pid keeps the tree."""
+    (`own_agent_lock_verdict`, the calling session's host). A tree it passes still needs every other
+    check, and any process inside keeps it: nothing is stopped. It is then `reap` with `unlock` and
+    `host_lock` set."""
     lock_idle = None  # an agent lock's idle is read even when attended, and before any status
     if AGENT_LOCK_RE.match(entry.get("locked_reason") or ""):
         lock_idle = entry["idle"] if "idle" in entry else worktree_idle_seconds(entry["path"])
     # A finished agent's host lock passes the lock check below by hiding the lock from it; the
-    # holder is kept for the unlock and the stop list.
+    # holder is kept for the unlock.
     host_lock, host_holder = False, None
     if finished_host_lock and entry.get("locked_reason") is not None:
         host_holder = entry["locked_reason"]
@@ -916,13 +876,6 @@ def decide_worktree(where: str, entry: dict, attended: bool = False, agent_rule:
     inside, _unreadable = processes_in(path)
     if inside is None:
         return {"path": path, "action": "keep", "reason": "unreadable-subject"}
-    if inside and host_lock:
-        stops = host_child_stops(inside, int(AGENT_LOCK_RE.match(host_holder).group(1)), path,
-                                 _own_chain_pids())
-        if stops is not None:
-            return {"path": path, "action": "reap", "stop_pids": stops, "unlock": True,
-                    "host_lock": True, "lock_reason": host_holder,
-                    "reason": "removable: finished agent's shells stopped, host lock lifted"}
     if inside:
         return {"path": path, "action": "keep",
                 "reason": "process-inside: pid %s" % ", ".join(str(p) for p in sorted(inside))}
@@ -2545,39 +2498,15 @@ def _lock_unlockable(root: str, path: str, decision: dict):
     return False
 
 
-def unlock_for_removal(root: str, path: str, decision: dict):
-    """The first half of `remove_worktree`: re-read the lock and lift it, never with `--force`. True
-    when the tree is now unlocked (DECISION["unlocked"] is set), or needed no unlock. False when the
-    re-read or the unlock failed: DECISION then says why (a keep, or an error) and the lock stays.
-    The agent-end reap calls it before it stops any shell, so a failed unlock stops nothing."""
-    if not decision.get("unlock"):
-        return True
-    if decision.get("unlocked"):
-        return True
-    if not _lock_unlockable(root, path, decision):
-        return False
-    if decision.get("unlock"):  # not when the lock was gone already
+def remove_worktree(root: str, path: str, decision: dict):
+    if decision.get("unlock") and not _lock_unlockable(root, path, decision):
+        return
+    if decision.get("unlock"):  # a stale agent lock; never --force
         unlocked = git_reads._git(root, "worktree", "unlock", path)
         if unlocked is None or unlocked.returncode != 0:
             decision["error"] = "unlock failed: %s" % (
                 unlocked.stderr.strip() if unlocked is not None else "git gave no answer")
-            return False
-        decision["unlocked"] = True
-    return True
-
-
-def relock_worktree(root: str, path: str, decision: dict):
-    """Put back the lock `unlock_for_removal` took off, so the tree is no less guarded than before.
-    True when git took it. `remove_worktree` keeps its own inline copy of this command: the relock
-    mutant in janitor/mutate_sweep.py anchors on those lines."""
-    relock = git_reads._git(root, "worktree", "lock", "--reason",
-                            decision.get("lock_reason") or "locked", path)
-    return relock is not None and relock.returncode == 0
-
-
-def remove_worktree(root: str, path: str, decision: dict):
-    if not unlock_for_removal(root, path, decision):
-        return
+            return
     admin = _admin_dir(path)
     if admin:
         try:
