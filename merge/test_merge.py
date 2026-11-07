@@ -2653,6 +2653,88 @@ class AfterPush(Env):
         self.assertIn("locked", seen[0])
         self.assertEqual(self.worktrees(), 1)
 
+def route_of(args):
+    """The REST route of a `gh api` call's args, or "" for any other call."""
+    return args[2] if len(args) > 2 and args[1] == "api" else ""
+
+def assert_unknown_stop_keeps_the_claim(test, rc, out, claim):
+    """A read that could not run after the claim push: the claim stays, nothing is pushed after it, and the one stop says the result is unknown and to rerun.
+    Only a proven refusal reverts a claim (decision standing-merge-grant)."""
+    test.assertIsNotNone(claim, "the claim was never pushed, so this case proves nothing about it:\n" + out)
+    test.assertNotIn("reverted on", out, "a claim was reverted for a read that could not run")
+    test.assertNotIn("id: pending", test.show("feat", "docs/decisions/second.md"), "the claim's record is pending on feat: the claim was reverted")
+    test.assertEqual(test.head(), claim, "feat moved after the claim push: something pushed or reverted")
+    test.assertEqual(rc, 1, out)
+    test.assertRegex(out.lower(), r"unknown", "the stop does not say the result is unknown")
+    test.assertRegex(out.lower(), r"re-?run|run again", "the stop does not say to rerun merge")
+    test.assertFalse(test.lock_ref(), "the merge lock was left on origin")
+
+class ClaimSurvivesUnknown(Env):
+    """A read that could not run after the claim push keeps the claim, on the fake host. Only a proven refusal reverts it (standing-merge-grant)."""
+
+    def unknown_at_the_claim_wait(self, error):
+        """The claim's wait raises `error`: the claim is pushed, then the read after it is unknown. -> (rc, out, the claim's sha)."""
+        claimed = []
+        def unknown():
+            claimed.append(self.head())
+            raise error
+        self.host.on_wait = unknown
+        rc, out = self.run_merge("7", "--confirm")
+        self.host.on_wait = None  # the rerun waits on its own terms, not on this read
+        return rc, out, (claimed[0] if claimed else None)
+
+    def test_an_unknown_base_check_after_the_claim_push_stops_unknown_and_keeps_the_claim(self):
+        claimed = []
+        self.host.on_wait = lambda: claimed.append(self.head())
+        real = merge.node_stamp
+        def check_unknown(wt, cfgrel, mode, base):
+            if claimed and mode == "check":  # the base check prove() makes after the claim push
+                return 0, "UNKNOWN: the stamp could not read origin/main"
+            return real(wt, cfgrel, mode, base)
+        with unittest.mock.patch.object(merge, "node_stamp", check_unknown):
+            rc, out = self.run_merge("7", "--confirm")
+        assert_unknown_stop_keeps_the_claim(self, rc, out, claimed[0] if claimed else None)
+        self.assertFalse(getattr(self.host, "merged", False), "the PUT was made")
+
+    def test_a_failed_pulls_read_before_the_put_stops_unknown_and_keeps_the_claim(self):
+        claimed = []
+        def read_fails_after_the_claim():
+            claimed.append(self.head())
+            self.host.batch_error = merge.Stop("reading pulls from GitHub failed: boom")  # the pre-PUT batch read, after the claim push
+        self.host.on_wait = read_fails_after_the_claim
+        rc, out = self.run_merge("7", "--confirm")
+        assert_unknown_stop_keeps_the_claim(self, rc, out, claimed[0] if claimed else None)
+        self.assertFalse(getattr(self.host, "merged", False), "the PUT was made")
+
+    def test_a_rerun_over_its_own_claim_resumes_and_claims_and_pushes_nothing(self):
+        rc, out, claim = self.unknown_at_the_claim_wait(merge.NetStop("the read after the claim push failed"))
+        self.assertEqual(rc, 1, out)  # precondition: the first run stopped and left its claim on feat
+        self.assertIn("id: D-002", self.show("feat", "docs/decisions/second.md"), "the first run did not leave its claim on feat")
+        before = len(self.host.waits)
+        rc, out = self.run_merge("7", "--confirm")
+        self.assertEqual(rc, 0, out)
+        self.assertIn("resumed", out)
+        self.assertEqual([sha for sha, _ in self.host.waits[before:]], [claim], "the rerun waited on a head other than its claim: it pushed")
+        self.assertEqual(self.claims("main"), 1, "the rerun claimed again")
+
+    def test_a_rerun_over_a_merge_commit_on_its_claim_claims_nothing_and_pushes_nothing(self):
+        rc, out, claim = self.unknown_at_the_claim_wait(merge.NetStop("the read after the claim push failed"))
+        self.assertEqual(rc, 1, out)  # precondition: the first run stopped and left its claim on feat
+        # The base moves and the branch merges it: the head is a merge commit on top of the claim, as a healed records page leaves it.
+        o = self.other
+        sh(o, "git", "fetch", "-q", "origin"); sh(o, "git", "checkout", "-q", "-B", "main", "origin/main")
+        put(os.path.join(o, "elsewhere.txt"), "main moved\n")
+        sh(o, "git", "add", "-A"); sh(o, "git", "commit", "-q", "-m", "main moves"); sh(o, "git", "push", "-q", "origin", "main")
+        sh(o, "git", "checkout", "-q", "-B", "feat", "origin/feat"); sh(o, "git", "merge", "-q", "--no-edit", "main"); sh(o, "git", "push", "-q", "origin", "feat")
+        merged = self.head()
+        self.assertNotEqual(merged, claim, "the merge commit did not land on top of the claim")
+        before = len(self.host.waits)
+        rc, out = self.run_merge("7", "--confirm")
+        self.assertEqual(rc, 0, out)
+        self.assertIn("nothing to claim", out, "the rerun did not say it claims nothing")
+        self.assertEqual([sha for sha, _ in self.host.waits[before:]], [merged], "the rerun waited on a head other than its merge commit: it pushed")
+        self.assertEqual(self.claims("main"), 1, "the rerun claimed again")
+
 class RerunAfterRevert(Env):
     def test_second_run_claims_the_same_number_again_and_merges(self):
         # Banchi #595, DEBT81: a red check reverts the claim; the rerun, after green, must claim again.
@@ -4047,6 +4129,74 @@ class GhHalf(Env):
 
     def test_a_git_fetch_http2_stream_error_after_the_claim_push_stops_without_a_revert(self):
         self.fetch_fails_after_the_claim_push("fatal: unable to access 'https://github.com/shivinate7/claude-settings/': HTTP/2 stream 1 was not closed cleanly: INTERNAL_ERROR (err 2)")
+
+    # ---- a read that could not run after the claim push keeps the claim (standing-merge-grant: only a proven refusal reverts it)
+
+    def after_the_claim(self, gh=None, git_call=None, **gh_kw):
+        """Run the merge with the seams wrapped, so each answer applies only once the claim is pushed: `gh(args)` answers a `gh` call,
+        `git_call(args)` answers a git call made by the git helper (args after the repo path). None from an answer lets the real call run.
+        -> (rc, out, the claim's sha on origin)."""
+        real_sh, real_git, real_push = merge.sh, merge.git, merge.push_branch
+        claimed = []
+        def push(wt, branch):
+            r = real_push(wt, branch)
+            claimed.append(self.head(branch))
+            return r
+        def sh_answer(args, *a, **k):
+            reply = gh(args) if gh and claimed and args[0] == "gh" else None
+            return reply if reply is not None else real_sh(args, *a, **k)
+        def git_answer(cwd, *a, input=None):
+            reply = git_call(a) if git_call and claimed else None
+            return reply if reply is not None else real_git(cwd, *a, input=input)
+        with unittest.mock.patch.object(merge, "push_branch", push), unittest.mock.patch.object(merge, "sh", sh_answer), \
+                unittest.mock.patch.object(merge, "git", git_answer):
+            rc, out = self.go(**gh_kw)
+        return rc, out, (claimed[0] if claimed else None)
+
+    def test_a_gh_timeout_during_the_checks_wait_stops_unknown_and_keeps_the_claim(self):
+        def timed_out(args):
+            raise subprocess.TimeoutExpired(args, 30)
+        rc, out, claim = self.after_the_claim(gh=timed_out)
+        assert_unknown_stop_keeps_the_claim(self, rc, out, claim)
+        self.assertNotIn(MERGE_CALL, self.calls())
+
+    def test_a_pr_read_with_a_non_network_error_in_the_wait_stops_unknown_and_keeps_the_claim(self):
+        def cut_short(args):
+            return (1, "gh: could not read the pull request: the reply was cut short") if route_of(args).endswith("/pulls/7") else None
+        rc, out, claim = self.after_the_claim(gh=cut_short)
+        assert_unknown_stop_keeps_the_claim(self, rc, out, claim)
+        self.assertNotIn(MERGE_CALL, self.calls())
+
+    def test_a_pr_read_with_a_json_error_after_the_claim_push_stops_unknown_and_keeps_the_claim(self):
+        def unparsable(args):
+            return (0, "{") if route_of(args).endswith("/pulls/7") else None  # gh exits 0 and prints a reply that is not JSON
+        rc, out, claim = self.after_the_claim(gh=unparsable)
+        assert_unknown_stop_keeps_the_claim(self, rc, out, claim)
+        self.assertNotIn(MERGE_CALL, self.calls())
+
+    def test_an_os_error_on_a_gh_read_after_the_claim_push_stops_unknown_and_keeps_the_claim(self):
+        def no_gh(args):
+            raise OSError(5, "Input/output error")
+        rc, out, claim = self.after_the_claim(gh=no_gh)
+        assert_unknown_stop_keeps_the_claim(self, rc, out, claim)
+        self.assertNotIn(MERGE_CALL, self.calls())
+
+    def test_a_base_fetch_with_a_non_network_error_after_the_claim_push_stops_unknown_and_keeps_the_claim(self):
+        def fetch_of_main(a):
+            if a[:2] == ("fetch", "-q") and a[-1] == "+refs/heads/main:refs/remotes/origin/main":
+                return 1, "fatal: couldn't find remote ref refs/heads/main"
+            return None
+        rc, out, claim = self.after_the_claim(git_call=fetch_of_main)
+        assert_unknown_stop_keeps_the_claim(self, rc, out, claim)
+        self.assertNotIn(MERGE_CALL, self.calls())
+
+    def test_a_checks_wait_past_its_deadline_with_a_required_check_pending_stops_unknown_and_keeps_the_claim(self):
+        # A busy Mac: each poll of the wait is ten minutes of the fake clock, past the five-minute deadline. The head's wait is green; the claim's wait is pending.
+        self.set(checks_seq=[[("checks", "pass", "")], [("checks", "pass", "")], [("checks", "pending", "")]])
+        rc, out, claim = self.after_the_claim(minute=600)
+        assert_unknown_stop_keeps_the_claim(self, rc, out, claim)
+        self.assertIn("Still pending: checks", out)
+        self.assertNotIn(MERGE_CALL, self.calls())
 
     def test_a_merge_that_may_have_landed_with_an_unreadable_state_says_to_finish_by_hand(self):
         self.set(merge_replies=[[NET_TLS, True], [NET_TLS, False]],  # the merge lands, its reply and the retries are lost
