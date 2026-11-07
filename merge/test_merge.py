@@ -153,6 +153,9 @@ class FakeHost:
             raise merge.Stop(self.files_error)
         return list(self.changed)
 
+    def review_comments(self, since):  # {PR number: [review record bodies, oldest first]}, as Host.review_comments gives it: this fake has none
+        return {}
+
     def pr(self, n):
         self.pr_calls.append(n)
         head = merge.origin_head(self.root, self.branch)
