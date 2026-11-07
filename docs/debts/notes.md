@@ -1507,3 +1507,4 @@
 - conflict-markers-chain-clean-refuse: `git stash pop`, `git pull --rebase` or `git merge`, then commit and push in one call, is refused on a clean tree; the remedy is a separate push (hooks/guard_merge.py `_makes_conflict`). Decision: commit-refuses-conflict-markers.
 - conflict-markers-show-uncapped: the push check runs one `git cat-file` per file with a marker finding, with no cap, and no cost case holds a finding (hooks/guard_merge.py `_kinds_of`). Decision: commit-refuses-conflict-markers.
 - conflict-markers-stale-tracking: a tracking ref left at a markers tip after the remote was rewound hides those commits from `git push origin <branch>` (hooks/guard_merge.py `_push_hit`). Decision: commit-refuses-conflict-markers.
+- push-after-failed-commit-chain-unread: a single-call chain `git commit ...; git push` has no sibling record in the transcript, so a failed commit there does not stop the push (hooks/guard_push_delete.py). Decision: push-after-failed-commit.

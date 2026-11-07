@@ -86,6 +86,10 @@ Shell tools (Bash, PowerShell), in judge_shell order:
   force-push           deny or ask. A lease with --force-if-includes passes. --force or a `+`
                        refspec refuses. A push that reaches the default branch asks.
                        (stale-safe-force-push)
+  push-after-failed-commit  deny. A `git push` whose own response (same message.id in the transcript,
+                       or the agent's subagents file) holds an earlier `git commit` whose result is an
+                       error or is not back yet. No tool_use_id, no match, a later response and an
+                       unreadable transcript pass. (push-after-failed-commit)
   push-main            ask. A non-forced push whose destination is literally main or master,
                        `--all` included. The remote's HEAD is not read. A dry run passes.
   push-stray-branch    ask. A push with an implied destination (bare, `HEAD`, `@`, or a colon-less
@@ -373,8 +377,9 @@ while True:
         _loading = "guard_push_delete"
         from guard_push_delete import (
             DELETE_REASON, DESTRUCTIVE_DELETE, LINKED_NM_REASON, PUSH_ASK_REASON, PUSH_MAIN_REASON,
-            PUSH_REASON, PUSH_STRAY_REASON, cmd_exe_delete_hit, delete_text, linked_nm_hit,
-            parent_delete_hit, push_ask_hit, push_target, push_text, push_verdict, rm_delete_hit,
+            PUSH_AFTER_COMMIT_REASON, PUSH_REASON, PUSH_STRAY_REASON, cmd_exe_delete_hit, delete_text, linked_nm_hit,
+            parent_delete_hit, push_after_failed_commit_hit, push_ask_hit, push_target, push_text, push_verdict,
+            rm_delete_hit,
         )
         _loading = "guard_merge"
         from guard_merge import (
@@ -3245,7 +3250,8 @@ def settle_ask(tool: str, raw: str) -> None:
 
 def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str = "",
                 transcript: str = "", agent: bool = False,
-                background: bool = False, description: str = "") -> None:
+                background: bool = False, description: str = "", agent_id: str = "",
+                tool_use_id: str = "") -> None:
     POWERSHELL_CALL[0] = tool == "PowerShell"
     PENDING_ASK.clear()
     stripped = strip_heredoc_bodies(raw)
@@ -3516,6 +3522,11 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
             elif subcommand == "push" and not read_verb("push", args):
                 # Owner rulings 206 a and 207 a: a non-forced push that writes main or master, or an
                 # implied destination off the branch's upstream. A dry run writes nothing.
+                # First, a push beside a failed or unfinished commit (rule push-after-failed-commit).
+                matched = push_after_failed_commit_hit(transcript, agent_id, tool_use_id, read_verb)
+                if matched:
+                    refuse(tool, "deny", "push-after-failed-commit", PUSH_AFTER_COMMIT_REASON,
+                           "git push beside a " + matched)
                 kind = push_ask_hit(args, where, overrides)
                 if kind == "main":
                     ask_command("push-main", PUSH_MAIN_REASON, "git push " + " ".join(args),
@@ -4946,7 +4957,8 @@ def judge(payload) -> None:
                         transcript if isinstance(transcript, str) else "",
                         bool(payload.get("agent_id") or payload.get("agent_type")),
                         tool_input.get("run_in_background") is True,
-                        tool_input.get("description") or "")
+                        tool_input.get("description") or "",
+                        str(payload.get("agent_id") or ""), str(payload.get("tool_use_id") or ""))
             segments = split_segments(strip_heredoc_bodies(command))
             matched = next((hit for seg in segments if (hit := sim_bypass_hit(seg))), "")
             if matched:

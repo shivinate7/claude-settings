@@ -3,6 +3,7 @@
 guard.py is the only entry point, and it runs these checks in its fixed order.
 Other files reach these names through `guard`.
 """
+import json
 import os
 import re
 import stat
@@ -11,8 +12,8 @@ import guard_core
 from guard_core import (
     CMD_EXE_NAMES, GIT_OPT_WITH_VALUE, _absolute, _segment_cd_move, _segment_cd_target,
     _segment_git_c_target, shell_abs, CONTRACTION, quote_advance, _git_subcommand_index,
-    _strip_heredoc_bodies_unconditionally, bare_words, basename, command_indexes, inner_commands,
-    is_powershell, norm, resolve_command, segment_tokens, split_segments,
+    _strip_heredoc_bodies_unconditionally, bare_words, basename, command_indexes, git_calls, inner_commands,
+    is_powershell, norm, resolve_command, segment_tokens, split_segments, strip_heredoc_bodies,
 )
 
 
@@ -824,6 +825,11 @@ PUSH_STRAY_REASON = (
     "so it may land on a stray branch. Check the destination (decision plain-push-asks). "
     "Approving the prompt lets this one push through; it is not a grant."
 )
+PUSH_AFTER_COMMIT_REASON = (
+    "Rule (Git): the commit sent beside this push failed or has not finished, so this push would send "
+    "the head the commit was meant to fix. Fix the commit, then run the push alone in the next response, "
+    "after reading the commit's result (decision push-after-failed-commit)."
+)
 PUSH_ASK_REASON = (
     "Rule (Git): this forced push may rewrite the default branch, or its target is unreadable. "
     "The click in this prompt is the grant."
@@ -832,3 +838,92 @@ PUSH_ASK_REASON = (
 # The installer swaps the next line for `INSTALL_ID = "<id>"` at copy time; guard.py compares the
 # ids across the modules it loads. In the repo it stays a comment, which counts as a match.
 # INSTALL_ID = "uninstalled"
+
+
+# ---- a push beside a commit that failed or has not returned (rule push-after-failed-commit)
+# Cost: one bounded tail read of the transcript per `git push`, never on another call; no file written, no process.
+SEQ_TAIL_BYTES = 1 << 20
+SEQ_AGENT_ID = re.compile(r"[A-Za-z0-9_-]+")
+
+
+def _seq_records(transcript: str, agent_id: str):
+    """The transcript's last SEQ_TAIL_BYTES as parsed JSON lines, else None. An agent's calls are in
+    `<transcript minus .jsonl>/subagents/agent-<id>.jsonl`. A cut first line is dropped. Any error is None."""
+    if not transcript:
+        return None
+    path = transcript
+    if agent_id:
+        if not SEQ_AGENT_ID.fullmatch(agent_id):
+            return None
+        base = transcript[:-len(".jsonl")] if transcript.endswith(".jsonl") else transcript
+        path = os.path.join(base, "subagents", "agent-%s.jsonl" % agent_id)
+    try:
+        with open(path, "rb") as handle:
+            size = handle.seek(0, os.SEEK_END)
+            start = max(0, size - SEQ_TAIL_BYTES)
+            handle.seek(start)
+            data = handle.read()
+    except OSError:
+        return None
+    lines = data.split(b"\n")
+    if start:
+        lines = lines[1:]
+    records = []
+    for line in lines:
+        try:
+            record = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(record, dict):
+            records.append(record)
+    return records
+
+
+def _seq_blocks(record):
+    message = record.get("message")
+    content = message.get("content") if isinstance(message, dict) else None
+    return [b for b in content if isinstance(b, dict)] if isinstance(content, list) else []
+
+
+def _has_commit(command, read_verb) -> bool:
+    """True when a segment of COMMAND runs `git commit`. A quoted `git commit` is text; a dry run is a read."""
+    if not isinstance(command, str):
+        return False
+    for segment in split_segments(strip_heredoc_bodies(command)):
+        for subcommand, args in git_calls(segment):
+            if subcommand == "commit" and not read_verb("commit", args):
+                return True
+    return False
+
+
+def push_after_failed_commit_hit(transcript: str, agent_id: str, tool_use_id: str, read_verb) -> str:
+    """A description of the sibling commit when a `git commit` in this push's own response failed
+    (`is_error: true`) or has no result yet, else ''. Siblings are the earlier tool_use records with the push's
+    message.id. No tool_use_id, no match, a push in a later response and any read error pass."""
+    try:
+        if not tool_use_id:
+            return ""
+        records = _seq_records(transcript, agent_id)
+        if not records:
+            return ""
+        uses, errors = [], {}
+        for record in records:
+            for block in _seq_blocks(record):
+                if block.get("type") == "tool_use":
+                    message = record.get("message")
+                    uses.append((message.get("id"), block.get("id"), block.get("input")))
+                elif block.get("type") == "tool_result":
+                    errors[block.get("tool_use_id")] = block.get("is_error") is True
+        own = next((i for i, use in enumerate(uses) if use[1] == tool_use_id), None)
+        if own is None or not uses[own][0]:
+            return ""
+        for message_id, use_id, tool_input in uses[:own]:
+            command = tool_input.get("command") if isinstance(tool_input, dict) else None
+            if message_id == uses[own][0] and _has_commit(command, read_verb):
+                if use_id not in errors:
+                    return "git commit with no result yet"
+                if errors[use_id]:
+                    return "git commit that failed"
+    except Exception:
+        return ""
+    return ""
