@@ -1,0 +1,26 @@
+# Two worktrees never hold one branch
+
+## The ruling
+
+Coordinator, 2026-11-07 14:29 CST, under lane override-plain-ask: the incident below gets its guard now. Orchestrator's call, not an owner grant: the forms and the deny.
+
+The guard rule `two-worktrees-one-branch` refuses a git command that checks out a branch another worktree of the clone already holds. The forms are:
+
+- `git checkout -B <branch>` and `git switch -C <branch>`. Git 2.43 lets them through with no warning.
+- `git checkout --ignore-other-worktrees` and `git switch --ignore-other-worktrees`, with any branch.
+- `git worktree add -f` (or `--force`) for a branch.
+
+The guard reads `git worktree list --porcelain` once, only for these forms. It does not run for any other command. A branch that no other worktree holds passes. A read that fails refuses, because the act is not one Claude needs to make blind.
+
+## The incident
+
+On 2026-11-07, in lane override-plain-ask, a builder agent's worktree held `lane/override-plain-ask`. The lane session then ran `git checkout -B lane/override-plain-ask origin/lane/override-plain-ask` in its own worktree, and git allowed it. Each commit in one tree then moved the branch under the other tree. The other tree's files and index stayed at the old commit and showed as a staged change. A commit there would have undone the builder's fix.
+
+## Harm it stops
+
+A commit from the stale tree reverts work silently, and the diff looks like a normal edit.
+
+Remedy the refusal prints: use a branch of your own (`git switch -c <new-branch> <start>`), or read the other tree with `git -C <dir>`.
+
+Kind: build
+Plan: docs/decisions/two-worktrees-one-branch.md#the-ruling (all)
