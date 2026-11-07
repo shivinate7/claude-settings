@@ -725,12 +725,24 @@ def _unresolved(specs):
     return any(set(spec) & set("$`()") for spec in specs)
 
 
+def _repo_of(repos, where):
+    """`(top folder, has HEAD)` of the checkout at `where`, or None when it is not one. One
+    `git rev-parse --show-toplevel --verify -q HEAD`, kept in `repos` by `where`: git prints the top
+    folder, then HEAD when it resolves, and exits 1 only for a missing HEAD."""
+    if where not in repos:
+        done = _git(where, "rev-parse", "--show-toplevel", "--verify", "-q", "HEAD") if where and os.path.isdir(where) else None
+        lines = done.stdout.splitlines() if done is not None and done.returncode in (0, 1) else []
+        repos[where] = (os.path.normpath(lines[0].strip()), done.returncode == 0) if lines and lines[0].strip() else None
+    return repos[where]
+
+
 def conflict_markers_hit(stripped: str, cwd: str):
     """Return `(kind, file)` for the first commit or push that would carry all three conflict markers
     in one file, else `('', '')`. The kind is `commit`, `push`, or `chain` (a push after a commit the
     guard could not judge; the file is then `git push`). Each segment is judged from its own command
     word."""
-    whole_tops, add_specs = set(), []   # tops an earlier add stages whole / (where, top, specs) of earlier adds
+    pending = []                        # earlier adds no commit has taken: (where, None) stages whole, (where, specs) names paths
+    repos = {}                          # where -> (top, has_head), one `git rev-parse` each until the next commit
     readable = True                     # every segment so far is one that cannot change the tree
     blind_commit = blind_triplet = conflict_step = False   # a commit after a blind step / that covers a triplet / a conflict step ran
     for segment in split_segments(stripped):
@@ -752,22 +764,30 @@ def conflict_markers_hit(stripped: str, cwd: str):
         c_target = _segment_git_c_target(segment_tokens(segment) or [])
         root = command_root(stripped, cwd)
         where = _absolute(c_target, root) if c_target is not None else root
-        done = _git(where, "rev-parse", "--show-toplevel") if where and os.path.isdir(where) else None
-        if done is None or done.returncode != 0 or not done.stdout.strip():
-            continue
-        top = os.path.normpath(done.stdout.strip())
-        if call[0] == "add":
+        if call[0] == "add":   # an add reads nothing here: a commit that takes it reads its top folder
             whole, specs = _add_shape(call[1])
             if whole or _unresolved(specs):
-                whole_tops.add(top)
+                pending.append((where, None))
             elif specs:
-                add_specs.append((where, top, specs))
+                pending.append((where, specs))
             continue
-        wholes, adds = whole_tops, add_specs   # this commit takes the adds so far; the next starts clean
-        whole_tops, add_specs = set(), []
+        repo = _repo_of(repos, where)
+        if repo is None:
+            continue
+        top, has_head = repo
+        taken, pending = pending, []   # this commit takes the adds so far; the next starts clean
+        wholes, adds = set(), []   # tops an add stages whole / (where, top, specs) of adds that name paths
+        for add_where, add_paths in taken:
+            add_repo = _repo_of(repos, add_where)
+            if add_repo is None:
+                continue
+            if add_paths is None:
+                wholes.add(add_repo[0])
+            else:
+                adds.append((add_where, add_repo[0], add_paths))
+        repos.clear()   # a commit moves HEAD: the next segment reads afresh
         all_flag, specs = _commit_shape(call[1]) if call[0] == "commit" else (False, [])
-        head = _git(top, "rev-parse", "--verify", "-q", "HEAD")   # no HEAD: `git diff` would read an empty tree
-        if head is None or head.returncode != 0:
+        if not has_head:   # no HEAD: `git diff` would read an empty tree
             continue
         if specs:
             found = _marker_findings(where, top, ["HEAD", "--", *specs], None)
