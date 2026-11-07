@@ -386,8 +386,8 @@ while True:
         )
         _loading = "guard_frozen"
         from guard_frozen import (
-            FROZEN_REASON, MUTATING_COMMAND, _shell_write_hit, frozen_shell_hit, interpreter_write_hit, is_frozen,
-            is_project_config, project_config_shell_hit,
+            FROZEN_REASON, MUTATING_COMMAND, _resolve_vars, _shell_write_hit, frozen_shell_hit,
+            interpreter_write_hit, is_frozen, is_project_config, project_config_shell_hit,
             PROJECT_FROZEN_FILES,  # noqa: F401  re-export: test_shared_names and test_wrappers read guard.PROJECT_FROZEN_FILES
         )
         _loading = "guard_env"
@@ -841,9 +841,14 @@ def hand_made_worktree_hit(segments, number: int, cwd: str, ends=()) -> str:
     if path_is_inside(primary, tempfile.gettempdir()):
         return ""
     if _unexpanded(target):
-        # A loop variable in the path: the folder before the variable is all the guard can read. The
-        # tree passes only when that folder sits in the home folder; a variable first, or a folder
-        # elsewhere, is refused, since the one-line form of that path is refused too.
+        # A variable an earlier segment assigned is read as its value (`_resolve_vars`), so a tree
+        # path through it is judged as the literal path is.
+        mark = "\x00"
+        target = _resolve_vars("; ".join(segments[:number]) + "; " + mark + target).rsplit(mark, 1)[-1]
+    if _unexpanded(target):
+        # A variable with no value the guard can read (a loop variable): the folder before it is all
+        # the guard can read. The tree passes only when that folder sits in the home folder, as the
+        # same path does with a literal tail; a variable first, or a folder elsewhere, is refused.
         literal = re.split(r"[$%`]", target, maxsplit=1)[0]
         folder = os.path.dirname(literal)
         tree = shell_abs(folder, where) if folder else None
