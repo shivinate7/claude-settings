@@ -239,6 +239,24 @@ class CoverTests(unittest.TestCase):
         self.assertEqual(route_match.matching_rows(rows, "works", bash("cd x\n" + gh_api)), [],
                          "matching_rows matches a line after the first: its whole-target match changed")
 
+    def test_an_env_prefixed_act_is_covered_by_the_row_of_its_act(self):
+        rows = [base.route_row("pr-ready", PR_READY, "asks")]
+        texts = self.helper("act_texts")({"command": "env GH_TOKEN=x gh pr ready 12"})
+        self.assertEqual(self.helper("cite_covers")("pr-ready", rows, texts), "covers",
+                         "a leading env is kept in the act piece, so the row for gh pr ready does not cover it")
+
+    def test_an_assignment_prefixed_act_is_covered_by_the_row_of_its_act(self):
+        rows = [base.route_row("pr-ready", PR_READY, "asks")]
+        texts = self.helper("act_texts")({"command": "GH_TOKEN=x gh pr ready 12"})
+        self.assertEqual(self.helper("cite_covers")("pr-ready", rows, texts), "covers",
+                         "a NAME=value assignment is kept in the act piece, so the row for gh pr ready does not cover it")
+
+    def test_an_or_chained_act_is_covered_by_the_row_of_its_act(self):
+        rows = [base.route_row("pr-ready", PR_READY, "asks")]
+        texts = self.helper("act_texts")({"command": "false || gh pr ready 12"})
+        self.assertEqual(self.helper("cite_covers")("pr-ready", rows, texts), "covers",
+                         "act_texts does not split a line at ||, so the row for gh pr ready does not cover its act")
+
 
 if __name__ == "__main__":
     unittest.main()

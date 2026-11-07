@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """Cases for the cover check of rule task-why-cited (hooks/question_form.py: why_cited_hit, task_check_hit and
 task_str_replace_hit, over hooks/route_match.py cite_covers). A waiting-page task's route cite must name a row that
-covers the task's act: one whose pattern matches a piece of the act text. The act text is each line of `command`,
-split at && and ;, and each backtick span of `context`. A cited row that covers no piece is refused; no act text,
-or a row with no pattern, is unknown and never refused.
+covers the task's act: one whose pattern matches a piece of the act text. With a command, the act text is its lines,
+split at &&, || and ;. With no command, it is each backtick span of `context`, and a span that no row matches is not
+an act this check can name. A line's cite that covers passes the line; a cite that covers nothing is refused. An
+unknown cover (no act text, a row with no pattern, a row that does not compile) is never a refusal.
 
 Run it from the repository root:
 
@@ -32,12 +33,14 @@ DELETE = {"mac": "cd ~/repo\ngh auth switch -u shivinate7\ngit push origin --del
 ROW_REMEDY = "cite the row of the act"
 COMMAND_REMEDY = "name the act's command"
 
-# r-asks covers `gh pr ready`, never a branch delete. r-del-asks covers the delete. r-nopat has no pattern.
+# r-asks covers `gh pr ready`, never a branch delete. r-del-asks covers the delete. r-nopat has no pattern, and
+# r-broken has a pattern that does not compile.
 NOPATTERN = dict(qf.hook_base.route_row("r-nopat", "unused", "asks", surface="local"))
 del NOPATTERN["pattern"]
 COVER_ROWS = [qf.hook_base.route_row("r-asks", "^gh pr ready\\b", "asks", surface="local", route="ask-first"),
               qf.hook_base.route_row("r-del-asks", "^git push origin --delete\\b", "asks", surface="local",
                                      route="ask-first"),
+              qf.hook_base.route_row("r-broken", "(", "asks", surface="local"),
               NOPATTERN]
 
 
@@ -109,11 +112,57 @@ class TaskCiteCover(unittest.TestCase):
         self.assertEqual(hit, PASS, "r-asks covers the backtick act gh pr ready 12, yet the str_replace was refused: %r"
                          % (hit,))
 
-    def test_str_replace_with_a_backtick_act_the_row_does_not_match_is_refused(self):
+    def test_str_replace_with_a_backtick_span_no_row_matches_passes(self):
+        """A span that matches no row is not an act this check can name, so the cite is unknown and passes."""
+        hit = self.judge_str_replace(LINE + CITE % "r-asks" + ", so I ran `rm -rf build_x`.")
+        self.assertEqual(hit, PASS, "a backtick span that no row matches (rm -rf build_x) is refused on its cite: %r"
+                         % (hit,))
+
+    def test_str_replace_with_a_known_backtick_act_the_row_does_not_match_is_refused(self):
         hit = self.judge_str_replace(LINE + CITE % "r-asks" + ", so I ran `git push origin --delete x`.")
         self.assertEqual(hit[0], WHY_RULE,
                          "r-asks covers no backtick span of new_str (git push origin --delete x), yet "
                          "task-why-cited did not refuse: %r" % (hit,))
+
+    def test_a_command_ignores_a_span_another_row_matches(self):
+        """With a command, the act is the command. A context span that another row matches is no act of the task."""
+        hit = self.judge_task(task(LINE + CITE % "r-asks" + ", then `gh pr ready 12`.", command=DELETE))
+        self.assertEqual(hit[0], WHY_RULE,
+                         "r-asks covers the context span gh pr ready 12, not the delete command, yet the task "
+                         "was not refused: %r" % (hit,))
+
+    def test_a_command_citing_its_own_row_passes_beside_a_span(self):
+        hit = self.judge_task(task(LINE + CITE % "r-del-asks" + ", then `gh pr ready 12`.", command=DELETE))
+        self.assertEqual(hit, PASS, "r-del-asks covers the delete command, yet the task beside a span was refused: %r"
+                         % (hit,))
+
+    def test_a_press_only_span_no_row_matches_passes(self):
+        """A press-only task has no command, and its span Merge matches no row: unknown, so it passes."""
+        hit = self.judge_task(task(LINE + CITE % "r-asks" + ", then press `Merge`."))
+        self.assertEqual(hit, PASS, "a press-only task whose span Merge matches no row is refused on its cite: %r"
+                         % (hit,))
+
+    def test_a_span_a_row_matches_is_refused_with_no_command(self):
+        hit = self.judge_task(task(LINE + CITE % "r-asks" + ", then ran `git push origin --delete x`."))
+        self.assertEqual(hit[0], WHY_RULE,
+                         "r-asks covers no span of the task (git push origin --delete x), yet task-why-cited "
+                         "did not refuse: %r" % (hit,))
+
+    def test_a_line_whose_first_cite_is_unreadable_and_second_uncovered_is_refused(self):
+        hit = self.judge_task(task(LINE + " (route r-broken) (route r-asks).", command=DELETE))
+        self.assertEqual(hit[0], WHY_RULE,
+                         "r-asks covers none of the delete command, and the line's first cite (r-broken, an uncompilable "
+                         "pattern) is unknown, so the line is not refused: %r" % (hit,))
+
+    def test_a_line_whose_first_cite_covers_passes_though_the_second_does_not(self):
+        hit = self.judge_task(task(LINE + " (route r-del-asks) (route r-asks).", command=DELETE))
+        self.assertEqual(hit, PASS, "the line's first cite r-del-asks covers the delete, yet the line was refused: %r"
+                         % (hit,))
+
+    def test_a_dated_measured_cite_backs_a_route_cite_on_a_delete(self):
+        hit = self.judge_task(task(LINE + " (route r-asks) (measured 2026-11-07, try X failed).", command=DELETE))
+        self.assertEqual(hit, PASS, "a dated measured cite on the line should back it on its own, yet it was refused: %r"
+                         % (hit,))
 
 
 if __name__ == "__main__":
