@@ -5416,6 +5416,10 @@ sh("narrate: the script run by path, piped to head",
    "~/.claude/bin/merge 12 --confirm | head -5", "deny", "live-stream", cwd=NOGIT)
 sh("narrate: the launcher script run through python, piped to tail",
    "python merge/launch.py 12 --confirm 2>&1 | tail -5", "deny", "live-stream", cwd=NOGIT)
+sh("narrate: a versioned python runs the merge script, piped to tail",
+   "python3.11 merge/merge.py 12 --confirm | tail -3", "deny", "live-stream", cwd=NOGIT)
+sh("narrate: uv run python runs the merge script, piped to tail",
+   "uv run python merge/merge.py 12 --confirm 2>&1 | tail -3", "deny", "live-stream", cwd=NOGIT)
 sh("narrate: --confirm on a command off the roster", "deploy 12 --confirm 2>&1 | tail -5",
    "allow", cwd=NOGIT)
 sh("narrate: a merge preview is not a wait", "merge 12 2>&1 | tail -5", "allow", cwd=NOGIT)
