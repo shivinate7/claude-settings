@@ -308,6 +308,39 @@ def case_one_home_for_lane_heads():
     return not problems, "; ".join(problems) or "both read the one home"
 
 
+# The copies of the config dir logic (debt config-dir-copies): (module, the function that holds the copy).
+COPY_SITES = (
+    ("daily_note.py", "main"),
+    ("override.py", "_path"),
+    ("precompact_handoff.py", "config_dir"),
+    ("sim_boot_record.py", "state_dir"),
+)
+
+
+def case_config_dir_copies_read_the_shared_home():
+    """Each copy of the config dir logic is gone. Its function holds no CLAUDE_CONFIG_DIR literal of its own,
+    and the module reads shared_names.config_dir, the one home. A source scan with the ast parser."""
+    problems = []
+    for module, func_name in COPY_SITES:
+        with open(os.path.join(HERE, module), encoding="utf-8") as handle:
+            tree = ast.parse(handle.read())
+        for node in ast.walk(tree):
+            if isinstance(node, ast.FunctionDef) and node.name == func_name:
+                literal = [inner.lineno for inner in ast.walk(node)
+                           if isinstance(inner, ast.Constant) and inner.value == "CLAUDE_CONFIG_DIR"]
+                if literal:
+                    problems.append("%s %s copies the env lookup at line %d" % (module, func_name, literal[0]))
+        reads_home = any(
+            (isinstance(node, ast.ImportFrom) and node.module == "shared_names"
+             and any(alias.name == "config_dir" for alias in node.names))
+            or (isinstance(node, ast.Attribute) and node.attr == "config_dir"
+                and isinstance(node.value, ast.Name) and node.value.id == "shared_names")
+            for node in ast.walk(tree))
+        if not reads_home:
+            problems.append("%s does not read shared_names.config_dir" % module)
+    return not problems, "; ".join(problems) or "all four read the one home"
+
+
 CASES = [
     ("(a) shared_names.py exists", case_module_exists),
     ("(a) shared_names.py imports only the standard library", case_stdlib_only),
@@ -331,6 +364,8 @@ CASES = [
     ("(k) shared_names holds lane_head_refs: the bare step slug and lane/<slug>", case_lane_head_refs_pinned),
     ("(k2) build.py and the archive guard import lane_head_refs, with no copy of it or the lane/ prefix",
      case_one_home_for_lane_heads),
+    ("(l) each config dir copy reads shared_names.config_dir, with no CLAUDE_CONFIG_DIR literal of its own",
+     case_config_dir_copies_read_the_shared_home),
 ]
 
 

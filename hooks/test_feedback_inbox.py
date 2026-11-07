@@ -2729,12 +2729,17 @@ def tree_of(cfg):
     return out
 
 
-def guard_parse(text):
-    """feedback_guard.parse, from GUARD_PATH so an override works: the Stop guard's reader."""
+def guard_module():
+    """feedback_guard loaded from GUARD_PATH in this process, so an override works. Each call loads it afresh."""
     spec = importlib.util.spec_from_file_location("feedback_guard_under_test", GUARD_PATH)
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
-    return mod.parse(text)
+    return mod
+
+
+def guard_parse(text):
+    """feedback_guard.parse, from GUARD_PATH so an override works: the Stop guard's reader."""
+    return guard_module().parse(text)
 
 
 def case_page_note_get_saves_one_block():
@@ -3612,6 +3617,81 @@ def table_reorient_forms():
               case_reorient_nothing_when_no_open_items))
 
 
+SPACED_MARK = " repeats inbox:a1b2c3d4@2026-11-07 14:11"  # an inbox ref holds a space: inbox:<sid8>@<date> <hh:mm>
+ONE_SHOT_TEXT = "go ahead and merge PR 12"
+ONE_SHOT_HOME = "- fb-0958-1 [note] -> once:merge-pr-12"
+REPO_ID = "fb-0958-21"  # the id of REPO_ITEM
+
+
+def case_repeat_spaced_inbox_mark_is_recognised_on_a_second_judging():
+    """An inbox ref holds a space. A line already marked with one is marked: a Stop that judges the item
+    again (no turn state file, so no judged ids) must leave the line with its one mark."""
+    root = repeat_repo("repeat-spaced", step=True)
+    cfg, sid = new_cfg(), "repeat-spaced"
+    capture(cfg, sid, MSG_ONE, cwd=root)
+    add_item(cfg, sid, ITEM_LINE + SPACED_MARK)
+    p, calls = stop(cfg, sid, root, answer=repeat_answer(ITEM_ID))
+    check("spaced mark: the Stop judges the item once", len(calls) == 1, p.desc())
+    check("spaced mark: the line keeps its one mark",
+          inbox_line(cfg, sid, ITEM_ID) == ITEM_LINE + SPACED_MARK, inbox_line(cfg, sid, ITEM_ID))
+
+
+def case_repeat_repo_item_is_never_judged_as_a_repeat():
+    """A [repo] item is feedback for another repo. The repeat check reads this repo's roadmap and backlog,
+    so a [repo] item is never sent to the model and never marked. A [note] beside it is still judged."""
+    root = repeat_repo("repeat-repo", step=True)
+    cfg, sid = new_cfg(), "repeat-repo"
+    capture(cfg, sid, MSG_ONE, cwd=root)
+    add_item(cfg, sid, REPO_ITEM)
+    add_item(cfg, sid, ITEM_LINE_2)
+    p, calls = stop(cfg, sid, root, answer=repeat_answer(REPO_ID, ITEM_ID_2))
+    check("repo item: one model call, for the note beside it", len(calls) == 1, p.desc())
+    prompt = calls[0]["prompt"] if calls else ""
+    check("repo item: the prompt holds no [repo] item", "[%s]" % REPO_ID not in prompt, prompt[-300:])
+    check("repo item: the note beside it is in the prompt", "[%s]" % ITEM_ID_2 in prompt, prompt[-300:])
+    check("repo item: its line gets no mark", " repeats " not in inbox_line(cfg, sid, REPO_ID),
+          inbox_line(cfg, sid, REPO_ID))
+
+
+def case_one_shot_grant_passes_with_its_home_and_blocks_without_one():
+    """A one-shot approval ("go ahead and merge PR 12") is a grant. A note homed to `once:<act>` passes it.
+    The same words with no home still block (debt one-shot-grant-label)."""
+    mod = guard_module()
+    homed = mod.problems(mod.parse(render_block(ONE_SHOT_TEXT, items=(ONE_SHOT_HOME,))), "")
+    check("one-shot grant: a note homed to once:<act> passes", homed == [], homed)
+    bare = mod.problems(mod.parse(render_block(ONE_SHOT_TEXT)), "")
+    check("one-shot grant: the same words with no home still block",
+          len(bare) == 1 and "has no home" in bare[0], bare)
+
+
+def case_guard_ruling_home_is_judged_in_the_repo_the_session_worked_in():
+    """The inbox was saved from repo A, so its sidecar binds A. The Stop runs from repo B, which has no
+    layout homes. A ruling home tracked in A is no alarm: it is judged where the session worked, not in B."""
+    home = make_repo("session-home", tracked=("decisions/a-ruling.md",))
+    elsewhere = make_repo("stop-elsewhere", tracked=("README.md",))
+    cfg, sid = new_cfg(), "r-session-home"
+    capture(cfg, sid, "the rule is settled\nkeep it as written\nthanks", cwd=home)
+    add_item(cfg, sid, "- fb-7 [ruling] -> decisions/a-ruling.md")
+    expect_silent("ruling home: a home tracked in the session's repo is no alarm from another cwd",
+                  guard(cfg, sid, cwd=elsewhere))
+
+
+def case_step_path_is_derived_from_override_step_dir():
+    """feedback_guard takes the step file template from override.STEP_DIR, not a second spelling (debt
+    step-dir-spelled-twice). With the folder moved, a fresh load of the guard takes the new folder."""
+    override = importlib.import_module("override")
+    saved = override.STEP_DIR
+    try:
+        override.STEP_DIR = "elsewhere/steps/"
+        moved = guard_module().STEP_PATH
+    finally:
+        override.STEP_DIR = saved
+    check("step path: feedback_guard.STEP_PATH follows override.STEP_DIR",
+          moved == "elsewhere/steps/%s.json", "STEP_PATH is %r with STEP_DIR moved" % (moved,))
+    check("step path: the default still names roadmap/data/steps/<slug>.json",
+          guard_module().STEP_PATH == "roadmap/data/steps/%s.json", guard_module().STEP_PATH)
+
+
 CASES = (
     case_every_owner_message_is_captured,
     case_notices_are_never_captured,
@@ -3771,6 +3851,11 @@ CASES = (
     case_repeat_cap_keeps_the_newest_notes_lines,
     case_repeat_cap_keeps_the_open_roadmap_steps,
     case_repeat_list_ids_and_refs_do_not_cost_the_valid_hit,
+    case_repeat_spaced_inbox_mark_is_recognised_on_a_second_judging,
+    case_repeat_repo_item_is_never_judged_as_a_repeat,
+    case_one_shot_grant_passes_with_its_home_and_blocks_without_one,
+    case_guard_ruling_home_is_judged_in_the_repo_the_session_worked_in,
+    case_step_path_is_derived_from_override_step_dir,
 )
 
 
