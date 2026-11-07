@@ -20763,6 +20763,97 @@ def worktree_home_red_cwd_case():
                   "folder pass; the cd, rm, shell and Write controls stay refused")
 
 
+def _red_cwd_record(primary, home):
+    """The agent's recording call from its home, which writes the home record the deny cases judge
+    against. Returns "" when it did, else the problem."""
+    got, reason = _decide_full("Bash", home, agent_id=CD_AGENT_HOME, command="echo hi")
+    if got != "allow" or not os.path.isfile(os.path.join(primary, ".git", "agent-homes", CD_AGENT_HOME)):
+        return "the agent's recording call: want allow and a home record, got %s (%s)" % (got, reason[:120])
+    return ""
+
+
+def _denied_from(rows):
+    """Each row is (label, cwd, tool, tool input). Each call must be denied, and its refusal names no path."""
+    problems = []
+    for label, cwd, tool, tool_input in rows:
+        got, reason = _decide_full(tool, cwd, agent_id=CD_AGENT_HOME, **tool_input)
+        if got != "deny":
+            problems.append("%s: expected deny, got %s (%s)" % (label, got, reason[:120]))
+        elif any(text in reason for text in (ROOT, slash(ROOT))):
+            problems.append("%s: the refusal names a path (%s)" % (label, reason[:120]))
+    return problems
+
+
+def worktree_home_unregistered_red_name_case():
+    """Rule 0, worktree-home, a folder named like the caller's red-run folder that no git worktree holds.
+    The red-run exemption reads the folder's name and its parent alone, so a plain
+    `.claude/worktrees/agent-<its id>-x` with no .git passes it. other-checkout then takes the primary as
+    that cwd's own checkout, so a write into the primary and an rm of a folder in it would pass. Both must
+    stay refused: main refuses them at the cwd, which sits outside the recorded home."""
+    primary, home, _, _ = _cross_checkout_fixture(
+        "xcounreg", lanes=("agent-" + CD_AGENT_HOME, "agent-" + CD_AGENT_SIBLING))
+    plain = os.path.join(primary, ".claude", "worktrees", "agent-" + CD_AGENT_HOME + "-x")
+    os.makedirs(plain)
+    problem = _red_cwd_record(primary, home)
+    if problem:
+        return False, problem
+    problems = _denied_from((
+        ("echo x > <primary>/src/app.py from the unregistered folder", plain, "Bash",
+         {"command": "echo x > %s" % slash(os.path.join(primary, "src", "app.py"))}),
+        ("rm -rf <primary>/src from the unregistered folder", plain, "Bash",
+         {"command": "rm -rf %s" % slash(os.path.join(primary, "src"))}),
+    ))
+    if problems:
+        return False, "; ".join(problems)
+    return True, "a write into the primary and an rm of its src folder, from an unregistered agent-<id>-x folder, are denied"
+
+
+def worktree_home_symlink_red_name_case():
+    """Rule 0, worktree-home, a symlink named like the caller's red-run folder that points at another
+    agent's red-run folder. The exemption reads the link's name, and the link resolves into the sibling's
+    folder. A Bash write from the link must stay refused."""
+    primary, home, _, _ = _cross_checkout_fixture(
+        "xcosymred", lanes=("agent-" + CD_AGENT_HOME, "agent-" + CD_AGENT_SIBLING))
+    sibling_red = sh_add_lane(primary, "agent-" + CD_AGENT_SIBLING + "-red")[0]
+    link = os.path.join(primary, ".claude", "worktrees", "agent-" + CD_AGENT_HOME + "-x")
+    try:
+        os.symlink(sibling_red, link, target_is_directory=True)
+    except OSError as error:
+        return SKIP, "this host cannot make the symlink: %s" % error
+    problem = _red_cwd_record(primary, home)
+    if problem:
+        return False, problem
+    problems = _denied_from((
+        ("echo x > f.txt from the symlink into the sibling's red-run folder", link, "Bash",
+         {"command": "echo x > f.txt"}),
+    ))
+    if problems:
+        return False, "; ".join(problems)
+    return True, "a Bash write from a symlink named agent-<id>-x into another agent's red-run folder is denied"
+
+
+def worktree_home_dotdot_cwd_case():
+    """Rule 0, worktree-home, a cwd spelled with `..`. The exemption walks the cwd as written, so
+    `<its red-run folder>/../../..` passes by name, yet it resolves to the primary. A write into the
+    primary from there must stay refused: main refuses it at the cwd. A cwd that resolves outside every
+    checkout is not in this case, because main already allows it (worktree-home reads an unknown home
+    as allow)."""
+    primary, home, _, _ = _cross_checkout_fixture(
+        "xcodotdot", lanes=("agent-" + CD_AGENT_HOME, "agent-" + CD_AGENT_SIBLING))
+    red = sh_add_lane(primary, "agent-" + CD_AGENT_HOME + "-red")[0]
+    into_primary = os.path.join(red, *([os.pardir] * 3))
+    problem = _red_cwd_record(primary, home)
+    if problem:
+        return False, problem
+    problems = _denied_from((
+        ("echo x > <primary>/src/app.py from a .. cwd that resolves into the primary", into_primary, "Bash",
+         {"command": "echo x > %s" % slash(os.path.join(primary, "src", "app.py"))}),
+    ))
+    if problems:
+        return False, "; ".join(problems)
+    return True, "a write into the primary from a .. cwd that resolves into the primary is denied"
+
+
 def worktree_home_red_nested_case():
     """Rule 0, other-checkout, the red-run folder is the primary's alone: a folder named
     `agent-<its id>-red` under another linked worktree's `.claude/worktrees/` belongs to that
@@ -21760,6 +21851,12 @@ LOG_CHECKS = (
     ("worktree-home: a call whose cwd is its own red-run folder passes for a test run, git status, a "
      "git -C checkout, a relative write and a Write inside it; a cd into another checkout, rm of the "
      "folder and a shell write into the home or primary stay refused", worktree_home_red_cwd_case),
+    ("worktree-home: a Bash call from an unregistered agent-<id>-x folder cannot write into or rm the primary",
+     worktree_home_unregistered_red_name_case),
+    ("worktree-home: a Bash call from a symlink named agent-<id>-x into another agent's red-run folder is refused",
+     worktree_home_symlink_red_name_case),
+    ("worktree-home: a Bash call from a cwd spelled with .. that resolves into the primary is refused",
+     worktree_home_dotdot_cwd_case),
     ("worktree-home: a red-run folder nested under another linked worktree, not the primary's, is "
      "refused to a cd, a shell write and a Write", worktree_home_red_nested_case),
     ("worktree-home: a write into the own red-run folder spelled in other letters of case passes on "
@@ -28798,6 +28895,12 @@ LOG_RULE_FAMILY = (
     ("worktree-home: an agent's write into its own red-run folder", "worktree-home"),
     ("worktree-home: the own red-run folder's root", "worktree-home"),
     ("worktree-home: a call whose cwd is its own red-run folder", "worktree-home"),
+    ("worktree-home: a Bash call from an unregistered agent-<id>-x folder cannot write into or rm the primary",
+     "worktree-home"),
+    ("worktree-home: a Bash call from a symlink named agent-<id>-x into another agent's red-run folder is refused",
+     "worktree-home"),
+    ("worktree-home: a Bash call from a cwd spelled with .. that resolves into the primary is refused",
+     "worktree-home"),
     ("worktree-home: a red-run folder nested under another linked worktree", "worktree-home"),
     ("worktree-home: a write into the own red-run folder spelled", "worktree-home"),
     ("worktree-home: a cd in a comment, in quotes", "worktree-home"),
