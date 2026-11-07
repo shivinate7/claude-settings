@@ -783,7 +783,9 @@ class ReadAtHeadTests(StaleCase):
 
 class UnknownTests(StaleCase):
     """A base a shallow clone cannot resolve is unknown, not a finding: the check exits 0 and says so. A base that
-    does not resolve in a full clone is a read that could not run (UnreadableReadTests)."""
+    does not resolve in a full clone is a read that could not run (UnreadableReadTests), except a root commit's
+    HEAD~1: a first push to the default branch reads that range by design (actions/ste-lint/run.sh), so it exits 0
+    as on main. The root commit's cases sit here for that reason."""
 
     def test_an_unresolvable_base_in_a_depth_one_clone_prints_unknown_and_exits_zero(self):
         def change(repo):
@@ -809,6 +811,22 @@ class UnknownTests(StaleCase):
         out = done.stdout + done.stderr
         self.assertEqual(done.returncode, 0, out)
         self.assertIn("stale-cites: unknown", out)
+
+    def test_a_root_commit_range_in_a_full_clone_exits_zero_as_on_main(self):
+        rng = self.tree("# Notes\n")._replace(base="HEAD~1")  # the one commit is the root: HEAD~1 names nothing
+        self.assertFalse(has_object(rng.repo, "HEAD~1"), "scope: the root commit has no parent")
+        self.assertEqual(git(rng.repo, "rev-parse", "--is-shallow-repository"), "false", "scope: the repo is a full clone")
+        rc, out = self.run_check(rng, spec="HEAD~1..HEAD")
+        self.assertNotIn("stale-cites: UNKNOWN,", out, "a root commit's first push printed the exit-2 read failure\n" + out)
+        self.assertEqual(rc, 0, "a root commit's first push in a full clone did not exit 0 as on main\n" + out)
+
+    def test_a_root_commit_range_in_a_depth_one_clone_prints_unknown_and_exits_zero(self):
+        rng = self.tree("# Notes\n")._replace(base="HEAD~1")
+        clone = self.depth_one_clone(rng)
+        rc, out = self.run_check(rng._replace(repo=clone), spec="HEAD~1..HEAD")
+        self.assertEqual(rc, 0, "a depth-1 clone's root-commit range exited non-zero, the carve-out is lost\n" + out)
+        self.assertTrue(unknown_lines(out), out)
+        self.assertIn("fetch-depth", out, "the shallow clone's unknown line does not name fetch-depth\n" + out)
 
 
 class PinTests(unittest.TestCase):
@@ -1294,6 +1312,56 @@ class UnreadableReadTests(StaleCase):
     def test_a_readable_cited_file_flags_an_anchor_past_its_end_and_passes_one_inside(self):
         self.assert_tree_flags(self.tree("# Notes\n\n- `hooks/guard.py:99`\n"), [(NOTES, 3, "STALE004")])
         self.assert_tree_passes(self.tree("# Notes\n\n- `hooks/guard.py:6`\n"))
+
+    def pymod_range(self, drop_head_blob):
+        """A range whose head adds lint/pymod_probe.py, read through the branch `pymod`. With `drop_head_blob`, that
+        file's blob is removed, so `git diff` cannot read the head while the base and the history still resolve."""
+        def change(repo):
+            write(repo, "lint/pymod_probe.py", "def probe_only_here():\n    return 17\n")
+            commit(repo)
+        rng = self.make_range(base_files(), change)
+        git(rng.repo, "branch", "pymod", rng.head)
+        if drop_head_blob:
+            drop_loose_object(rng.repo, "%s:lint/pymod_probe.py" % rng.head)
+        return rng
+
+    def assert_head_blob_unreadable(self, spec):
+        """A head blob the diff cannot read, in a full clone whose base resolves: exit 2 and the output names the diff.
+        It never blames the base or a shallow clone."""
+        rng = self.pymod_range(drop_head_blob=True)
+        self.assertEqual(git(rng.repo, "rev-parse", "--is-shallow-repository"), "false", "scope: the repo is not shallow")
+        self.assertTrue(has_object(rng.repo, "main"), "scope: the base resolves")
+        self.assertTrue(has_object(rng.repo, rng.head), "scope: the head commit resolves")
+        self.assertFalse(has_object(rng.repo, "%s:lint/pymod_probe.py" % rng.head), "scope: the head blob is gone")
+        rc, out = self.run_check(rng, spec=spec)
+        self.assert_read_failed(rc, out, "git diff")
+        self.assertNotIn("does not resolve", out, "a head blob the diff cannot read blamed the base, which resolves\n" + out)
+        self.assertNotIn("fetch-depth", out, "a head blob the diff cannot read was blamed on a shallow clone\n" + out)
+
+    def test_a_head_blob_the_diff_cannot_read_in_a_full_clone_exits_two_for_a_three_dot_range(self):
+        self.assert_head_blob_unreadable("main...pymod")
+
+    def test_a_head_blob_the_diff_cannot_read_in_a_full_clone_exits_two_for_a_two_dot_range(self):
+        self.assert_head_blob_unreadable("main..pymod")
+
+    def test_a_full_clone_with_every_head_blob_present_passes_both_range_forms(self):
+        rng = self.pymod_range(drop_head_blob=False)
+        self.assertTrue(has_object(rng.repo, "%s:lint/pymod_probe.py" % rng.head), "scope: the head blob is present")
+        for spec in ("main...pymod", "main..pymod"):
+            with self.subTest(spec=spec):
+                rc, out = self.run_check(rng, spec=spec)
+                self.assertEqual(rc, 0, "a full clone with its head blob present did not exit 0\n" + out)
+                self.assertIn("stale-cites: PASS", out)
+
+    def test_a_depth_one_clone_with_an_unresolvable_base_keeps_exit_zero_for_both_range_forms(self):
+        rng = self.pymod_range(drop_head_blob=False)
+        clone = self.depth_one_clone(rng)
+        for spec in ("%s...%s", "%s..%s"):
+            with self.subTest(spec=spec):
+                rc, out = self.run_check(rng._replace(repo=clone), spec=spec % (rng.base, rng.head))
+                self.assertEqual(rc, 0, "a depth-1 clone's unresolvable base exited non-zero, the carve-out is lost\n" + out)
+                self.assertTrue(unknown_lines(out), out)
+                self.assertIn("fetch-depth", out, "the shallow clone's unknown line does not name fetch-depth\n" + out)
 
 
 CLAUDE = "CLAUDE.md"
