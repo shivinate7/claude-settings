@@ -56,7 +56,7 @@ the minute read and the merge with its head guard. Every read is a `gh api` REST
 `gh` 2.48 or newer is needed (`--paginate --slurp`); an older gh fails closed.
 A cloud session runs the whole flow (c53): its proxy passes `gh api` reads, PUT pulls/N/merge and a push to refs/heads, so the lock is a
 git push there (default_lock). Its proxy refuses a ref delete: the lock is released by an expired commit, and the branch deletes print "not deleted".
-Its proxy passes a `gh api` POST to issues/N/labels (measured 2026-11-07 12:20 CST: a POST to a nonexistent issue got GitHub's 404, not a proxy refusal).
+Its proxy passes a `gh api` POST to issues/N/labels (measured 12:20 CST Nov 7: a POST to a nonexistent issue got GitHub's 404, not a proxy refusal).
 """
 import argparse, ast, contextlib, datetime, functools, json, math, os, pathlib, re, shutil, posixpath, signal, socket, subprocess, sys, tempfile, threading, time, uuid
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "hooks"))
