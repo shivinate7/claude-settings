@@ -65,6 +65,7 @@
 - git-env-set-indirect-forms: indirect sets (function wrapper, iex, EncodedCommand, run-time names) pass the git-env guard (hooks/guard_kill.py)
 - git-env-set-untested-forms: no case pins the PowerShell backtick escape, group-opener pattern or heredoc quote text (hooks/test_guard.py)
 - git-env-warn-session-start: the git env warning runs at session start only, so mid-session damage shows at next start (guard hooks)
+- gitlock-off-cloud-unmeasured: GitLock from a Mac or Windows checkout against GitHub is unmeasured. Tests use a local bare origin. Lock credentials now go through git, not gh (merge/merge.py default_lock). Fix: one real take and release from the Mac, then delete this note. Decision: merge-lock.
 - glued-subshell-unread: (rm -rf .) and x=$(tail -f y) pass because the closing parenthesis is glued to the last word (guard_push_delete, guard_stream)
 - guard-abtests-test-path: native/ABTests/ reads as a test folder, so a builder cannot edit product code there (hooks/guard.py)
 - guard-audit-agent-stop-open: SubagentStop fails open on a missing guard module, on purpose, with one log line (hooks/guard.py)
@@ -159,8 +160,8 @@
 - liveness-windows-arm-unproven: the Windows liveness arm is proven only with a stubbed ctypes.windll, not a real kernel32 call (hooks/git_reads.py _process_start_ms)
 - local-time-hard-coded-dst: the US DST rule is coded in the hook; a US rule change needs an edit; zoneinfo upgrade not built (hooks/local_time.py)
 - local-time-line-cost-unmeasured: the token cost of one local time line per prompt is unmeasured (hooks/local_time.py)
+- lock-lost-take-release-line: a take push that did not land, followed by a failed re-read, leaves the take recorded. The finally release then prints `not this run's any more` or `release failed ... Run merge --unlock`. The ref is untouched, so the line misleads (merge/merge.py GitLock.acquire, Lock.release). Fix: release says `the take may not have landed` when acquire did not return. Decision: merge-lock.
 - lock-push-429-stops: git's `returned error: 429` line is not a network error to is_net (merge/merge.py is_net). A GitLock push, ls-remote or fetch that gets it is not retried and stops the run. An `error: RPC failed; HTTP 429` line is a network error there. The deleted API lock waited on 429. Unmeasured whether git ever prints either. Fix: measure first. Decision: merge-lock.
-- lock-read-error-never-expires: GitLock.read returns an infinite expiry when a fetch fails for a non-network reason, or a log fails other than by a missing sha. So the lock stops each run whose read fails (merge/merge.py GitLock.read). Decision: merge-lock.
 - marker-writeback-loses-deletion: after a failed remove, agent-end write-back can drop a person's uncommitted deletion; needs prior failed remove (janitor/sweep.py)
 - merge-by-button-stale-page: merging by GitHub button or auto-merge skips the page rebuild, so main's records page can be stale (merge/merge.py)
 - merge-head-any-check-licenses: any passing check licenses a skipped required job, not only scope (merge/merge.py)

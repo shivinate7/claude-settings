@@ -29,10 +29,11 @@ until it exits (decision `merge-reinstalls-from-main`: each merge reinstalls fro
   403). There the release pushes an expired commit under the same lease instead: the ref stays, and any run
   may take it. A release that fails prints one line. It stops nothing.
 - **Unlock.** `merge --unlock [branch]` removes the lock for the branch, or for the default branch when no
-  branch is named. It removes the lock whether its holder is live or not. The delete is a leased push on the
-  sha it read, so a lock taken after the read stays. It prints "removed", or "nothing to remove" when no lock
-  is there or the lock is already released (expires 0). Where the delete is refused, it releases the lock to
-  an expired commit instead, and it still prints "removed".
+  branch is named. It removes the lock whether its holder is live or not, and even when its commit cannot be
+  read. The delete is a leased push on the sha it read, so a lock taken after the read stays. It prints
+  "removed", or "nothing to remove" when no lock is there or the lock is already released (expires 0).
+  Where the delete is refused, it releases the lock to an expired commit instead, and it still prints
+  "removed".
 
 Stops, by name. Each name is a row label of the refusal-vs-rule sweep, a plan record. The code
 carries no such label. The code raises the exception named in each item.
@@ -41,10 +42,9 @@ carries no such label. The code raises the exception named in each item.
   or a lost take race.
 - Lock unreadable (sweep row `lock-acquire-unreadable`; `Stop`, or `NetStop` on a network error): the ref
   cannot be read, the lock commit cannot be read over the network, or the lock commit or the take cannot be
-  made. A listed sha missing after the fetch re-lists once, then `Stop`. A non-network fetch failure, or a log
-  failure other than a missing sha, reads as an infinite expiry and ends as `Held`
-  (`lock-read-error-never-expires`). The take push runs once, by design: a network error on it stops the run
-  only when the take did not land. A take that landed with a lost reply proceeds.
+  made. A non-network fetch failure, or a failed `git log` of the listed sha, re-lists once, then `Stop`.
+  The take push runs once, by design: a network error on it stops the run only when the take did not
+  land. A take that landed with a lost reply proceeds.
 - Extend failed (sweep row `lock-extend-failed`; `NetStop`): the lock expired before the wait, the
   extension would pass 6 h, or the push failed.
 - Rate wait unextendable (sweep row `rate-wait-unextendable`; `NetStop`): a GitHub rate-limit wait needs
@@ -56,8 +56,6 @@ Known gaps, in `docs/debts/notes.md`:
 
 - `lock-retake-stale-reread`: a stale `ls-remote` after a rival's take reads as `Stop`, not `Held`.
   Unmeasured.
-- `lock-read-error-never-expires`: a lock read that fails for a reason other than the network, unless the
-  listed sha is missing, reads as a lock that never expires.
 - `lock-push-429-stops`: git's `returned error: 429` line stops a lock push or read, with no retry. Unmeasured.
 
 Why: a claim, a check wait and a merge must not race another run on the same base. The claim runs under
