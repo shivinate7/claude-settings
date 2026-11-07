@@ -56,6 +56,7 @@ import signal
 import subprocess
 import sys
 import tempfile
+from concurrent.futures import ThreadPoolExecutor
 
 import mutate_shared
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -2928,29 +2929,20 @@ def mutation_parts(entry):
     return label, old, new, target, required, only_on
 
 
-def run_mutant(sources, work: str, entry):
-    """Apply one mutation, run its suite against it, and return (label, code, FAIL lines,
-    required, skip, ERROR lines).
+def lay_out(sources, work: str, target: str, name: str, old: str, new: str) -> str:
+    """Lay out one copy of `target` under `work` with `old` replaced by `new`, and return the path
+    of the file its suite loads. `name` keys the copy's folder or file (through `mutate_shared.safe_name`).
 
-    `required` is the case name (or a distinctive fragment of it) the caller must find among the
-    FAIL lines before trusting this mutant's death: see `mutate_shared.report_verdict`. `skip`,
-    when not None, is why this mutant did not run on this platform at all: the caller reports it
-    and counts it as neither killed, survived, nor wrong cause.
-    """
-    label, old, new, target, required, only_on = mutation_parts(entry)
-    if required is None:
-        raise ValueError("mutation carries no required case name: %s" % label)
-    skip = mutate_shared.skip_reason(only_on)
-    if skip:
-        return label, None, [], required, skip
-    _path, suite, variable, stem = TARGETS[target]
+    A mutant and its clean-layout control both go through here, so they differ only in the text:
+    `old == new` is the control, the same layout with nothing mutated (see `run_controls`)."""
+    stem = TARGETS[target][3]
     if target in ("guard", "simlease"):
         # The whole guard family goes in the mutant's own hooks folder, and the anchor lands in the one
         # module that holds it. The suite loads the copied guard.py, which finds its siblings. The
         # simulator refusal imports janitor/sweep.py from ../janitor and fails open when it cannot, so
         # the copy takes sweep.py and temp_sweep.py beside its hooks folder, as a checkout has them.
         # Without them every simulator arm would be judged against a guard that allows everything.
-        root = os.path.join(work, "%s_%s" % (stem, mutate_shared.safe_name(label)))
+        root = os.path.join(work, "%s_%s" % (stem, mutate_shared.safe_name(name)))
         tree = os.path.join(root, "hooks")
         mutate_shared.guard_tree(tree)
         # The guard loads ../bin/sim-lease beside its hooks folder, so the copy takes it too, mutated or not.
@@ -2959,7 +2951,8 @@ def run_mutant(sources, work: str, entry):
             with open(os.path.join(root, "bin", "sim-lease"), "w", encoding="utf-8", newline="\n") as handle:
                 handle.write(sources[target].replace(old, new, 1))
         else:
-            mutate_shared.apply_mutant(tree, old, new)
+            if old != new:  # old == new is the clean-layout control: no anchor to find
+                mutate_shared.apply_mutant(tree, old, new)
             shutil.copy(SIM_LEASE, os.path.join(root, "bin"))
         copy_path = os.path.join(tree, "guard.py")
         os.makedirs(os.path.join(root, "janitor"), exist_ok=True)
@@ -2970,13 +2963,13 @@ def run_mutant(sources, work: str, entry):
         shutil.copytree(os.path.join(HERE, "..", "lint"), os.path.join(root, "lint"),
                         ignore=shutil.ignore_patterns("__pycache__"))
     else:
-        copy_path = os.path.join(work, "%s_%s.py" % (stem, mutate_shared.safe_name(label)))
+        copy_path = os.path.join(work, "%s_%s.py" % (stem, mutate_shared.safe_name(name)))
         mutated = sources[target].replace(old, new, 1)
     if target in ("ruling", "decision"):
         # ruling_home.py and decision_watch.py read `../lint/_transcript.py` beside itself. A bare copy in `work`
         # would crash on that import and read as red on every case, whatever was mutated
         # (a mutant's own cause of death must be checked). Lay out hooks/ and lint/ for the copy.
-        tree = os.path.join(work, "tree_%s" % mutate_shared.safe_name(label))
+        tree = os.path.join(work, "tree_%s" % mutate_shared.safe_name(name))
         os.makedirs(os.path.join(tree, "hooks"), exist_ok=True)
         os.makedirs(os.path.join(tree, "lint"), exist_ok=True)
         shutil.copy(os.path.join(HERE, "..", "lint", "_transcript.py"), os.path.join(tree, "lint"))
@@ -2986,7 +2979,7 @@ def run_mutant(sources, work: str, entry):
     if target == "override":
         # The guard family, local_time.py and the mutated override.py share one folder: the
         # copied guard and the suite's grant child both import the override module beside guard.py.
-        tree = os.path.join(work, "%s_%s" % (stem, mutate_shared.safe_name(label)))
+        tree = os.path.join(work, "%s_%s" % (stem, mutate_shared.safe_name(name)))
         mutate_shared.guard_tree(tree)
         for helper in ("local_time.py", "_nowindow.py"):
             shutil.copy(os.path.join(HERE, helper), tree)
@@ -2995,7 +2988,7 @@ def run_mutant(sources, work: str, entry):
         copy_path = os.path.join(tree, "guard.py")
     elif target == "calljudge":
         # call_judge.py imports guard_core and decision_watch beside itself: lay out the whole family.
-        tree = os.path.join(work, "%s_%s" % (stem, mutate_shared.safe_name(label)))
+        tree = os.path.join(work, "%s_%s" % (stem, mutate_shared.safe_name(name)))
         mutate_shared.guard_tree(tree)
         copy_path = os.path.join(tree, "call_judge.py")
         with open(copy_path, "w", encoding="utf-8", newline="\n") as handle:
@@ -3003,10 +2996,79 @@ def run_mutant(sources, work: str, entry):
     elif target not in ("guard", "simlease"):
         with open(copy_path, "w", encoding="utf-8", newline="\n") as handle:
             handle.write(mutated)
+    return copy_path
+
+
+def run_controls(sources, work: str, entries):
+    """Start one full-suite control per target that has a mutation to run, and return {target: Future}.
+
+    A control is `run_suite(..., only=None)` on the unmutated layout, built by `lay_out` with an identity
+    mutation. It answers one question: does this layout pass its own suite? A layout that crashes (a missing
+    sibling module, a wrong path) fails every case whatever a mutant changed, and each FAIL line reads as a kill.
+    A red control makes every mutant of that target UNKNOWN (`run_mutant`, `mutate_shared.control_verdict`).
+    The futures come back before any mutant runs, so the controls run beside the mutants on their own threads,
+    and a mutant waits for its target's control only after its own suite has run.
+
+    Cost (rule outcomes-mechanize-rules): one extra suite process and one temp tree per target per run. It writes
+    no log and starts no timer or other long-lived process. The pool ends when the last control returns."""
+    targets = []
+    for entry in entries:
+        _label, _old, _new, target, _required, only_on = mutation_parts(entry)
+        if target not in targets and not mutate_shared.skip_reason(only_on):
+            targets.append(target)
+    if not targets:
+        return {}
+    pool = ThreadPoolExecutor(max_workers=len(targets))
+    futures = {target: pool.submit(run_control, sources, work, target) for target in targets}
+    pool.shutdown(wait=False)
+    return futures
+
+
+def control_name(target: str) -> str:
+    """The name keying a target's control copy, which `main` also checks for path collisions."""
+    return "clean layout of %s" % target
+
+
+def run_control(sources, work: str, target: str):
+    """Run the full suite once on the unmutated layout of `target`. Return run_suite's result tuple."""
+    _path, suite, variable, _stem = TARGETS[target]
+    name = control_name(target)
+    copy_path = lay_out(sources, work, target, name, "", "")
+    config_dir = os.path.join(work, "cfg_%s" % mutate_shared.safe_name(name))
+    os.makedirs(config_dir, exist_ok=True)
+    return run_suite(suite, variable, copy_path, config_dir, None)
+
+
+def run_mutant(sources, work: str, entry, controls=None):
+    """Apply one mutation, run its suite against it, and return (label, code, FAIL lines,
+    required, skip, ERROR lines[, unknown]).
+
+    `required` is the case name (or a distinctive fragment of it) the caller must find among the
+    FAIL lines before trusting this mutant's death: see `mutate_shared.report_verdict`. `skip`,
+    when not None, is why this mutant did not run on this platform at all: the caller reports it
+    and counts it as neither killed, survived, nor wrong cause.
+
+    `controls` is `run_controls`' {target: Future}. When this target's control is red, a seventh
+    field `unknown` holds why, and the sixth holds the first lines the control saw: the mutant's own
+    verdict is not trusted. The mutant runs first and waits for the control after, so a long control
+    does not hold a mutant thread idle while mutants could run."""
+    label, old, new, target, required, only_on = mutation_parts(entry)
+    if required is None:
+        raise ValueError("mutation carries no required case name: %s" % label)
+    skip = mutate_shared.skip_reason(only_on)
+    if skip:
+        return label, None, [], required, skip
+    _path, suite, variable, _stem = TARGETS[target]
+    copy_path = lay_out(sources, work, target, label, old, new)
     config_dir = os.path.join(work, "cfg_%s" % mutate_shared.safe_name(label))
     os.makedirs(config_dir, exist_ok=True)
     code, red, seen = mutate_shared.staged_suite_seen(
         lambda only: run_suite(suite, variable, copy_path, config_dir, only), required)
+    if controls and target in controls:
+        control_code, control_red, _ran, control_seen = controls[target].result()
+        verdict = mutate_shared.control_verdict(control_code, control_red, control_seen)
+        if verdict:
+            return label, code, red, required, None, verdict[1], verdict[0]
     return label, code, red, required, None, seen
 
 
@@ -3075,6 +3137,20 @@ def main() -> int:
                 return 1
             seen_paths[key] = (index, label)
 
+    # Each target's clean-layout control (run_controls) writes its own copy and config folder, and
+    # must not collide with a mutant's either. The control's index is past every mutation's.
+    for control_index, target in enumerate(sorted({mutation_parts(e)[3] for e in MUTATIONS}),
+                                           start=len(MUTATIONS)):
+        label = control_name(target)
+        safed = mutate_shared.safe_name(label)
+        for candidate in ("%s_%s.py" % (TARGETS[target][3], safed), "cfg_%s" % safed):
+            other = seen_paths.get(candidate.lower())
+            if other is not None:
+                print("ERROR two mutations share one path on a case-insensitive filesystem: "
+                      "%r and %r both produce %s" % (other[1], label, candidate))
+                return 1
+            seen_paths[candidate.lower()] = (control_index, label)
+
     work = tempfile.mkdtemp(prefix="mutate_guard_")
     # A "watch" mutant is a copy of config_watch.py that runs OUTSIDE hooks/, as its own
     # subprocess, and it does a plain `import guard` (never GUARD_UNDER_TEST: a mutation of the
@@ -3093,8 +3169,9 @@ def main() -> int:
                     ignore=shutil.ignore_patterns("__pycache__"))
 
     try:
+        controls = run_controls(sources, work, MUTATIONS)
         return mutate_shared.run_mutants(
-            MUTATIONS, lambda entry: run_mutant(sources, work, entry))
+            MUTATIONS, lambda entry: run_mutant(sources, work, entry, controls))
     finally:
         shutil.rmtree(work, ignore_errors=True)
 
