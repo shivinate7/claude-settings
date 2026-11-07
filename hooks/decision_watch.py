@@ -732,7 +732,7 @@ def parse_verdict(text, shape=VERDICT_SHAPE):
     `invoke_model` and the `--model-text` entry below both call it."""
     match = re.search(r"\{.*\}", text, re.DOTALL)
     if not match:
-        return None, "model result carried no JSON verdict"
+        return None, "model result carried no JSON verdict: " + text[:120]
     try:
         verdict = json.loads(match.group(0))
     except Exception:

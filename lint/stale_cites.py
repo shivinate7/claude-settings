@@ -497,7 +497,9 @@ ROWS_AT_HEAD = os.path.relpath(route_match.ROUTE_ROWS_FILE, os.path.join(os.path
                                                                        "..")).replace(os.sep, "/")
 HTML_COMMENT = re.compile(r"<!--.*?-->")
 # Text in straight or curly double quotes, or a bare file path (a folder part and an extension): a mention, no claim.
-MENTION = re.compile(r'"[^"]*"|\u201c[^\u201d]*\u201d|(?<![\w./@+~-])(?:[\w.@+~-]+/)+[\w.@+~-]*\.\w+')
+BARE_PATH = r"(?<![\w./@+~-])(?:[\w.@+~-]+/)+[\w.@+~-]*\.\w+"  # a file path with a folder part and an extension
+MENTION = re.compile(r'"[^"]*"|\u201c[^\u201d]*\u201d|' + BARE_PATH)
+PATH_SPAN = re.compile(BARE_PATH + r"\Z")
 HEADING_OR_QUOTE = re.compile(r"^[ \t]{0,3}(?:#{1,6}(?:[ \t]|$)|>)")
 FENCE = re.compile(r"^[ \t]*(`{3,}|~{3,})(.*)$")
 PAREN_GROUP = re.compile(r"\(([^()]*)\)")
@@ -625,6 +627,39 @@ def backed_lines(texts, changed):
                 if backing_path(kind, rest) in changed:
                     found.append((path, number, cite))
     return found
+
+
+def named_in_code_spans(row):
+    """(paths, names) of the code spans on `row`: a span that is one file path is a path, any other span (a name or a number) is a name."""
+    paths, names = [], []
+    for match in CODE_SPAN.finditer(row):
+        span = match.group(0).strip("`").strip()
+        if not span:
+            continue
+        (paths if PATH_SPAN.match(span) else names).append(span)
+    return list(dict.fromkeys(paths)), list(dict.fromkeys(names))
+
+
+def named_excerpt(names, text, around=3, limit=40):
+    """The numbered lines of a file's `text` within `around` lines of each line that holds one of `names` as a whole word, at most
+    `limit` lines, a "..." row between two windows that do not touch. None when no line holds a name. A prose judge sends this
+    beside a line that names the file in backticks, so the model reads the code the line talks about."""
+    rows = text.replace("\r\n", "\n").split("\n")
+    hits = [re.compile(r"(?<!\w)%s(?!\w)" % re.escape(name)) for name in names]
+    keep = set()
+    for n, row in enumerate(rows, 1):
+        if any(h.search(row) for h in hits):
+            keep.update(range(max(n - around, 1), min(n + around, len(rows)) + 1))
+    shown = sorted(keep)[:limit]
+    if not shown:
+        return None
+    out, last = [], None
+    for n in shown:
+        if last is not None and n != last + 1:
+            out.append("...")
+        out.append("%d: %s" % (n, rows[n - 1]))
+        last = n
+    return "\n".join(out)
 
 
 def blanked(text):
