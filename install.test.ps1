@@ -1284,7 +1284,7 @@ try {
         Set-Content -Path (Join-Path $rtEpin 'skills\tile-windows\cache.local') -Value 'cache' -Encoding utf8
         Set-Content -Path (Join-Path $rtEpin 'skills\ghost-skill\cache.local') -Value 'cache' -Encoding utf8
         Set-Content -Path (Join-Path $rtEpin 'hooks\cache.local') -Value 'cache' -Encoding utf8
-        # Without the ignore rule the leftovers count as shipped, so a red case would not mean the gate failed.
+        # Without the ignore rule the leftovers count as shipped, so a red case would not mean the check failed.
         $rtEignored = $true
         foreach ($rtEf in 'skills/tile-windows/cache.local', 'skills/ghost-skill/cache.local', 'hooks/cache.local') {
             git -C $rtEpin check-ignore -q $rtEf | Out-Null
