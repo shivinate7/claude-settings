@@ -48,6 +48,7 @@ DEBT_README = "debts/README.md"  # the folder's README: it describes the markers
 DEBT_NOTES = "debts/notes.md"  # the folder's notes file: it is not a debt either
 README_FEEL_TEXT = "# Debts\n\nOne debt per file.\n\n- **Feel.** a marker shown as an example, not a debt\n"
 NOTES_FEEL_TEXT = "# Notes\n\n- **Feel.** a note that is not a debt\n"
+FIXED_DEBT_TEXT = "# Long slug\n\nWhat. A gap with a fix named.\n\nFix: none — owner decides\n"  # a valid Fix line
 
 RUN_FOLDER = None  # made in setUpModule, so an import leaks no folder
 
@@ -192,7 +193,7 @@ class RecordSlugsTests(unittest.TestCase):
 
     def test_default_diff_reads_debts(self):
         self.commit_base()
-        self.put("debts/" + LONG)
+        self.put("debts/" + LONG, FIXED_DEBT_TEXT)  # a valid Fix line, so this case names only the slug cause
         self.commit_change()
         rc, out = self.lint()  # no file arguments: the diff against origin/main
         self.assertEqual(rc, 1, out)
