@@ -192,7 +192,8 @@ Other tools, in `judge` order:
                        above-row refusal; no override lifts the no-model refusal. A Workflow
                        `agent()` call is judged as a spawn, a call with no agentType being
                        general-purpose; one whose model or agentType the scan cannot read (a variable,
-                       a shorthand, or a spread with no literal model) is skipped, and an unread brief
+                       a shorthand, a spread with no literal model, or a second argument that is not an
+                       object literal) is skipped, and an unread brief
                        is judged as an empty brief. The Workflow refusal's remedy names the model to add.
                        (agent-model-cap)
   agent-model-floor, roles-third-round-steps-up
@@ -2365,6 +2366,23 @@ AGENT_CALL = re.compile(r"\bagent\s*\(")
 SCRIPT_PAIR = re.compile(r"(?:(\w+)|\x00(\d+)\x00)\s*:\s*\x00(\d+)\x00")
 
 
+def script_second_arg_opaque(text: str, start: int) -> bool:
+    """True when the call whose arguments open at `start` has a second argument that is not an object literal (a
+    variable, or a call such as `buildOpts()`): the scan cannot read what it sets. No second argument is false."""
+    end = script_group_end(text, start - 1)
+    if end < 0:
+        return False
+    depth, parts, at = 0, [], start
+    for i in range(start, end - 1):
+        depth += text[i] in "([{"
+        depth -= text[i] in ")]}"
+        if text[i] == "," and depth == 0:
+            parts.append(text[at:i])
+            at = i + 1
+    parts.append(text[at:end - 1])
+    return len(parts) > 1 and bool(parts[1].strip()) and not parts[1].strip().startswith("{")
+
+
 def script_opts(text: str, start: int):
     """Yield the string-valued keys of each object literal that is a direct argument of the call
     whose arguments open at `start`."""
@@ -2445,6 +2463,8 @@ def script_agent_calls(script: str):
                 if not token or not isinstance(strings[int(token.group(1))], str):
                     unseen.add(key)
             bodies.append((keys, unseen, literals))
+        if script_second_arg_opaque(text, call.end()):
+            bodies.append(({}, {"..."}, {}))   # options the scan cannot read, so no key of them is known
         first, prompt = SCRIPT_FIRST_ARG.match(text, call.end()), None
         if first:
             entry, end = strings[int(first.group(1))], first.end()
@@ -2827,8 +2847,8 @@ def spawn_inputs(tool: str, tool_input, no_model: bool = False):
     check refuses it, and the Opus check never sets `no_model`, as a spawn with no model is not an Opus spawn. A brief the scan cannot read (a variable, or a prompt key beside a spread) carries no
     marker and grants nothing, so the spawn is judged with an empty brief and BRIEF_UNREAD set, and its refusal names
     BRIEF_LITERAL_REMEDY, so the author can make the marker readable. A
-    call whose model or agentType the scan cannot read is skipped, and so is a call with no model unless `no_model`
-    is set and no spread, shorthand or computed key could hold the model: a static read never guesses a role or a
+    call whose model or agentType the scan cannot read, or whose second argument is not an object literal, is
+    skipped, and so is a call with no model unless `no_model` is set and no spread, shorthand or computed key could hold the model: a static read never guesses a role or a
     model. A shorthand or a spread with no literal agentType may set the role, so it is unread; a literal agentType
     beside a spread is read. step_up_hit still skips an unread brief, as a marker it cannot read
     has no round to check. Other tools yield nothing."""
@@ -2853,15 +2873,20 @@ def spawn_inputs(tool: str, tool_input, no_model: bool = False):
 
 def role_model_check(tool: str, tool_input):
     """(reason, matched, unread) for the spawns of an Agent, Task or Workflow call against their roles' rows: the
-    first refusal, else the first unread. Cost: one table read per spawn."""
-    unread = ("", "", False)
+    first no-model refusal, else the first other refusal, else the first unread. The no-model refusal comes first
+    because no override lifts it (never_lifted reads this function's `matched`), so an above-row spawn ahead of a
+    no-model one cannot let the override lift the whole call. Cost: one table read per spawn."""
+    unread, refusal = ("", "", False), None
     for spawn in spawn_inputs(tool, tool_input, no_model=True):
         verdict = role_model_one(spawn)
         if verdict[0]:
-            return verdict
+            if verdict[1].startswith(ROLE_NO_MODEL_MATCH):
+                return verdict
+            refusal = refusal or verdict
+            continue
         if verdict[2] and not unread[2]:
             unread = verdict
-    return unread
+    return refusal or unread
 
 
 def role_model_one(tool_input):
