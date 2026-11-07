@@ -219,7 +219,7 @@ files = args or changed(base)
 bad = 0
 for f in files:
     f = f.strip()
-    if os.path.normpath(f).replace("\\", "/").startswith(DIR) and f.endswith(".md"):
+    if layout.md_under(os.path.normpath(f).replace("\\", "/"), DIR):
         for p in problems(os.path.normpath(f).replace("\\", "/")):
             bad = 1
             print("check_ruling_kind: FAIL: %s: %s" % (f, p))
