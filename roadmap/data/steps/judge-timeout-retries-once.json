@@ -1,10 +1,10 @@
 {
   "title": "The past-ruling check retries once before it refuses on a timeout",
   "why": "The owner asked (page ask ask-mw6pwif5wv, 12:09 CST Nov 7) what caused raw Unvetted-guard text to reach him. The past-ruling check (hooks/call_judge.py, item 8) timed out on its model call and refused at once.",
-  "note": "Done check: a red test where the first model call times out and the second answers; the question passes with the verdict and no Unvetted remedy.",
+  "note": "Done check: a red test where the first model call times out and the second answers; the question passes with the verdict and no Unvetted remedy. Lane started 12:20 CST Nov 7 (coordinator).",
   "phase": "next",
-  "status": "todo",
+  "status": "doing",
   "order": 262.0,
   "owner": "coordinator",
-  "updatedAt": "2026-11-07T18:16:00Z"
+  "updatedAt": "2026-11-07T18:21:00Z"
 }

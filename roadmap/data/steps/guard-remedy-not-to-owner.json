@@ -1,10 +1,10 @@
 {
   "title": "A guard's remedy text never reaches the owner",
   "why": "The owner asked (page ask ask-mw6pwif5wv, 12:09 CST Nov 7) why guard instructions meant for a session reached his page. The Unvetted remedy text was passed to him as is.",
-  "note": "The session adds the `Unvetted:` line itself; guard remedy text never lands in a page item, an ask or a report to the owner. Done check: a red test where a page write that carries a guard's remedy wording is refused.",
+  "note": "The session adds the `Unvetted:` line itself; guard remedy text never lands in a page item, an ask or a report to the owner. Done check: a red test where a page write that carries a guard's remedy wording is refused. Lane started 12:20 CST Nov 7 (coordinator).",
   "phase": "next",
-  "status": "todo",
+  "status": "doing",
   "order": 262.5,
   "owner": "coordinator",
-  "updatedAt": "2026-11-07T18:16:00Z"
+  "updatedAt": "2026-11-07T18:21:00Z"
 }
