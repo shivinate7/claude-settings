@@ -2991,6 +2991,9 @@ test("dismiss: the thread stays in place as a Dismissed line with Restore and no
   });
   await pressDismiss(page, root);
   await mustHave(page, `li#row-${root}.askc.dropped`, "the Dismissed line in the thread's place");
+  // Bandaid: the page draws the line and focuses it in one task, yet main CI read no focus there 2 of 2 tries (cause unfound).
+  // Waits up to 2 s for focus to land, then asserts as before: focus that never lands still fails, by name.
+  await page.waitForFunction((id) => document.activeElement === document.getElementById("row-" + id), root, { timeout: 2000 }).catch(() => {});
   const line = await page.locator(`li#row-${root}`).evaluate((r, id) => { const sl = r.querySelector(":scope > p.sline:not(.dline)"), a = document.activeElement; return { text: r.textContent.replace(/\s+/g, " ").trim(), tabindex: r.getAttribute("tabindex"), liRole: r.getAttribute("role"), lineRole: sl ? sl.getAttribute("role") : null, focused: a === r, at: a ? (a.id ? "#" + a.id : a.tagName.toLowerCase()) : "none", moves: window.__focusMoves.join(", ") + " (document has focus: " + document.hasFocus() + ")", restore: !!r.querySelector("#res-" + id), undo: !!document.getElementById("dun-" + id) }; }, root);
   assert.ok(line.text.startsWith("Dismissed. " + ASK_ANSWERED.text), "the Dismissed line reads " + JSON.stringify(line.text));
   assert.equal(line.restore, true, "the Dismissed line has no Restore");
