@@ -456,7 +456,8 @@ def main(argv):
             start = os.path.getsize(log) if os.path.exists(log) else 0
             kept = []
             with _nowindow.Popen([sys.executable, os.path.join(BIN, "verdict"), *shell, script],
-                                 cwd=os.path.join(top, cwd) if cwd else top, stdout=subprocess.PIPE,
+                                 cwd=os.path.join(top, cwd) if cwd else top, stdin=subprocess.DEVNULL,
+                                 stdout=subprocess.PIPE,  # stdin: empty, as on the runner (bin/verdict says why)
                                  stderr=subprocess.STDOUT, text=True,
                                  env={**{k: v for k, v in os.environ.items() if k not in RUNNER_UNSET | {"GITHUB_BASE_REF"}},
                                       **({"GITHUB_BASE_REF": values["github.base_ref"]} if base else {}),

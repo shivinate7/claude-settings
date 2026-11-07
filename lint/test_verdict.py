@@ -425,6 +425,23 @@ def plant(folder, name, age_days, header=True):
     os.utime(p, (t, t))
     return p
 
+class StdinClosed(unittest.TestCase):
+    """The command reads an empty stdin, never verdict's own. On Windows verdict starts the command with no
+    console window, so an inherited console stdin is an invalid handle there, and each subprocess call under it
+    failed with WinError 6 (owner's PC run, 2026-11-07). An empty stdin is a valid handle on every OS."""
+
+    def test_the_command_reads_no_input_from_verdicts_stdin(self):
+        with tempfile.TemporaryDirectory(dir=RUN_FOLDER) as d:
+            script = os.path.join(d, "reads.py")
+            with open(script, "w") as f:
+                f.write("import sys\nsys.exit(3 if sys.stdin.read() else 0)\n")
+            r = subprocess.run([sys.executable, V, sys.executable, script], input="leaked from the caller\n",
+                               capture_output=True, text=True, timeout=60,
+                               env={k: v for k, v in os.environ.items() if k != "VERDICT_LOG"})
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertTrue(r.stdout.startswith("PASS "), r.stdout)
+
+
 class Prune(unittest.TestCase):
     def setUp(self):
         self.sb = tempfile.TemporaryDirectory()
