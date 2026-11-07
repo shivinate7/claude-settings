@@ -3,6 +3,7 @@
 guard.py is the only entry point, and it runs these checks in its fixed order.
 Other files reach these names through `guard`.
 """
+import fnmatch
 import os
 import re
 
@@ -1153,14 +1154,24 @@ def _roots(words) -> list:
     return roots[1:] if grep and not has_pattern else roots
 
 
+_GLOB_MARK = "\x02"   # starts a glob pathspec root: MARK folder MARK glob
 _GIT_LIST_FLAGS = frozenset(("--files-with-matches", "--name-only", "--files-without-match"))
+
+
+def _glob_root(folder: str, word: str) -> str:
+    """A pathspec word as a root: the word, or, for a glob (`'*.py'`), a marked root that `_dot_roots`
+    reads as the tests under `folder` that the glob matches. A glob pathspec names tracked paths at
+    any depth, so it cannot be judged as the one path its spelling shows."""
+    text = _unquoted(word)
+    return _GLOB_MARK + folder + _GLOB_MARK + text if re.search(r"[*?\[]", text) else word
 
 
 def _git_listing_roots(args):
     """The roots of a `git ls-files` or `git grep -l` segment, which print tracked paths: its pathspecs
     (for `grep`, the words after the pattern), else `.`, the whole checkout, read as a `.` root is
-    (`_dot_roots`). A `-C DIR` before the command is its folder. None for any other `git` command, and
-    for a `git grep` that prints matching lines, not paths."""
+    (`_dot_roots`). A redirect and its target are not pathspecs, as in `_roots`; a glob pathspec is a
+    marked root (`_glob_root`). A `-C DIR` before the command is its folder. None for any other `git`
+    command, and for a `git grep` that prints matching lines, not paths."""
     folder, at = ".", 0
     while at < len(args) and args[at].startswith("-"):
         if args[at] in ("-C", "-c") and at + 1 < len(args):
@@ -1171,12 +1182,22 @@ def _git_listing_roots(args):
         return None
     rest = args[at + 1:]
     if args[at] == "ls-files":
-        roots = [word for word in rest if not word.startswith("-")]
+        roots, skip, flags_over = [], False, False
+        for word in rest:
+            if skip:
+                skip = False
+            elif (">" in word or "<" in word) and _is_redirect(word):
+                skip = True
+            elif not flags_over and word == "--":
+                flags_over = True
+            elif flags_over or not word.startswith("-"):
+                roots.append(word)
     else:
         if not any(word in _GIT_LIST_FLAGS or re.fullmatch(r"-[A-Za-z0-9]*[lL][A-Za-z0-9]*", word)
                    for word in rest):
             return None
         roots = _roots(["grep"] + rest)
+    roots = [_glob_root(folder, word) for word in roots]
     return roots or [folder]
 
 
@@ -1275,8 +1296,9 @@ _TREE_SKIP = frozenset(("node_modules", "__pycache__", "venv"))
 _TREE_LIMIT = 20000   # files read before the walk gives up
 
 
-def _first_test_under(where: str, predicate) -> str:
+def _first_test_under(where: str, predicate, glob: str = "") -> str:
     """The first path under the folder `where` (relative to it) that `predicate` accepts, else ''.
+    With `glob`, only a path whose relative spelling matches it (a pathspec glob: `*` crosses `/`).
     Read from disk, top down, skipping hidden folders, `node_modules`, `venv` and `__pycache__`.
     ponytail: a tree of more than `_TREE_LIMIT` files with no test found early reads as holding none."""
     seen = 0
@@ -1285,7 +1307,8 @@ def _first_test_under(where: str, predicate) -> str:
         for name in sorted(files):
             seen += 1
             full = os.path.join(folder, name)
-            if predicate(full, where):
+            if predicate(full, where) and (
+                    not glob or fnmatch.fnmatchcase(os.path.relpath(full, where).replace(os.sep, "/"), glob)):
                 return os.path.relpath(full, where)
         if seen > _TREE_LIMIT:
             break
@@ -1295,11 +1318,23 @@ def _first_test_under(where: str, predicate) -> str:
 def _dot_roots(roots, cwd: str, predicate) -> list:
     """`roots` with each `.` or `./` put as the first test path under it, so a writer fed from the whole
     checkout is judged by a test it can reach. A `.` root that holds no test stays as it is, and so
-    does one when `cwd` or `predicate` is not given."""
-    if not cwd or predicate is None or not any(root in (".", "./") for root in roots):
-        return roots
-    found = _first_test_under(cwd, predicate)
-    return ["./" + found if found and root in (".", "./") else root for root in roots]
+    does one when `cwd` or `predicate` is not given. A glob pathspec root (`_glob_root`) is put the
+    same way, as the first test path under its folder that the glob matches. When none matches, or
+    `cwd` or `predicate` is not given, it names nothing that is judged and is dropped."""
+    reading = bool(cwd) and predicate is not None
+    out = []
+    for root in roots:
+        if root.startswith(_GLOB_MARK):
+            folder, _mark, glob = root[len(_GLOB_MARK):].partition(_GLOB_MARK)
+            found = _first_test_under(os.path.join(cwd, folder), predicate, glob) if reading else ""
+            if found:
+                out.append(os.path.join(folder, found) if folder != "." else "./" + found)
+        elif reading and root in (".", "./"):
+            found = _first_test_under(cwd, predicate)
+            out.append("./" + found if found else root)
+        else:
+            out.append(root)
+    return out
 
 
 def _fed_segments(segments, ends, cwd: str = "", predicate=None):
