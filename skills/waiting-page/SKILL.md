@@ -55,7 +55,7 @@ The URL is the `waiting-page` key in the repo's extras file, `.claude/layout-ext
     line; Mark done; None of these; the note box), under a divider that reads "Asked before". An item the owner
     still owes never folds. It folds only once answered (see "Answered" below).
     An item that arrives after load is new, and so is any group that gains a member after load. It sorts first in its
-    tier, ahead of the other new items, and a group is an arrival while any member is; the page keeps the set of ids
+    tier, ahead of the other new items. A group is an arrival while any member is. The page keeps the set of ids
     present at load. An open card sits above an answered one: a Send moves the sent card out of its tier (see "Answered"),
     and a group moves only when every member is sent.
   - An item answered at or before load (`answers/<id>` exists, filed or not) sits in the

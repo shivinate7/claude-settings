@@ -11,8 +11,8 @@ open. No. 61 arrived at 15:40, like page item 309.
 
 Settled by the rulings of Nov 6:
 - A lane item sinks only when its answers record exists (`isSaved`), as the base does. No lane + `lastAnswer` predicate (coordinator, 15:47 CST).
-- Owner, page item 311 (page save 21:51:10Z): in each tier, every open card sits above every card answered on this visit,
-  at all times. Arrivals after load go first. A Send moves the sent card below the open ones, and a Change brings it back
+- Owner, page item 311 (page save 21:51:10Z): in each tier, every open card always sits above every card answered on this visit.
+  Arrivals after load go first. A Send moves the sent card below the open ones, and a Change brings it back
   up. His words: "ux-order-holds-still ... is applied too strictly and is taking me away from the outcome i want here".
 - Coordinator, 15:51 CST, on top of item 311: arrivals after load go to the top of their tier. A card sent on this visit
   moves through one switch, SENT_MOVE. "sink" (the default, option a, now paged through triage) and "stay" (today's
