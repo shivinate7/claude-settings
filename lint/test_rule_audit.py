@@ -2257,6 +2257,18 @@ class RefusalCiteHelperTests(unittest.TestCase):
         body = '    try:\n        pass\n    except Stop as e:\n        fail(str(e))\n'
         self.assertEqual(status_of(body_src(body, FAIL), "merge:go", module="merge"), ["cited"])
 
+    def test_a_tuple_handler_holding_a_stop_re_raised_through_a_helper_is_read_as_cited(self):
+        # `except (X, Stop) as e` binds a Stop, so its text is printed by its origin, as for a bare `except Stop`.
+        for names in ("(OSError, Stop)", "(Stop, OSError)"):
+            with self.subTest(names=names):
+                body = '    try:\n        pass\n    except %s as e:\n        fail(str(e))\n' % names
+                self.assertEqual(status_of(body_src(body, FAIL), "merge:go", module="merge"), ["cited"],
+                                 "a tuple except that holds a Stop name reads as not resolved")
+
+    def test_a_tuple_handler_of_no_stop_re_raised_through_a_helper_is_not_resolved(self):
+        body = '    try:\n        pass\n    except (OSError, ValueError) as e:\n        fail(str(e))\n'
+        self.assertEqual(status_of(body_src(body, FAIL), "merge:go", module="merge"), ["not resolved"])
+
     def test_a_caught_generic_exception_re_raised_through_a_helper_is_not_resolved(self):
         body = '    try:\n        pass\n    except Exception as e:\n        fail(str(e))\n'
         self.assertEqual(status_of(body_src(body, FAIL), "merge:go", module="merge"), ["not resolved"])
