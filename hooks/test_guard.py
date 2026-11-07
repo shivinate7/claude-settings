@@ -532,6 +532,16 @@ PTRAHEAD = os.path.join(ROOT, "ptraheadmain")
 PTRNOORIGINCFG = os.path.join(ROOT, "ptrnoorigincfg")
 PTRNOORIGIN = os.path.join(ROOT, "ptrnooriginmain")
 
+# SAME-BRANCH FIXTURES, for the held-branch cases (rule CURRENT_BRANCH_RULE) in the shared-tree section.
+# Every tree is clean, so the shared-tree rule passes each case, and a deny can only come from the
+# rule under test.
+SBCUR = os.path.join(ROOT, "samebranch-cur")      # on `lane-x`, with origin/lane-x one commit ahead
+SBDET = os.path.join(ROOT, "samebranch-det")      # detached HEAD: no branch is checked out
+SBOTHER = os.path.join(ROOT, "samebranch-other")  # on `lane-y`: the checkout a `-C` can name
+SBMAIN = os.path.join(ROOT, "samebranch-main")    # on `main`, and its config holds no pointer line
+SBPRIME = os.path.join(ROOT, "samebranch-prime")  # the primary of a clone with a linked worktree, on `lane-p`
+SBLINK = os.path.join(ROOT, "samebranch-link")    # the linked worktree of SBPRIME, on `lane-q`
+
 # --------------------------------------------------------------- branch delete / worktree fixtures
 #
 # BRANCHREMOTE stands in for a remote: a bare clone BRANCHREPO pushes to, so `git for-each-ref
@@ -811,6 +821,26 @@ def _require_pointer_branch(where, branch):
             "fixture setup failed in build_fixtures: %r was built on %r, and git answers %r. "
             "stderr: %s" % (where, branch, head.stdout.strip(), head.stderr.strip())
         )
+
+
+def _require_worktree_holds(where, holds):
+    """Stop the suite unless `git worktree list` in `where` shows each path on the branch named for it.
+
+    A case that names a branch a tree holds proves the hold only when that tree really holds it, so
+    the holders are read back from the worktree list, not assumed from the commands that built them.
+    """
+    listed = {}
+    for block in run_vcs(where, "worktree", "list", "--porcelain").stdout.split("\n\n"):
+        lines = block.splitlines()
+        path = next((line[len("worktree "):] for line in lines if line.startswith("worktree ")), "")
+        branch = next((line[len("branch refs/heads/"):] for line in lines
+                       if line.startswith("branch refs/heads/")), "")
+        if path:
+            listed[os.path.realpath(path)] = branch
+    for path, branch in holds.items():
+        if listed.get(os.path.realpath(path)) != branch:
+            sys.exit("fixture setup failed in build_fixtures: %r should hold %r. git worktree list "
+                     "says: %r" % (path, branch, listed))
 
 
 def _real_process_start_ms(pid):
@@ -1604,6 +1634,58 @@ def _build_pointer():
 
     make_blind_git(GITBLIND)
 
+def _build_samebranch():
+    """The same-branch repos: SBCUR, SBDET, SBOTHER, SBMAIN, and the SBPRIME clone with its SBLINK
+    worktree. Each is clean."""
+    # THE INCIDENT SHAPE. An agent on `lane-x` ran `git checkout -B lane-x origin/lane-x` to reach a
+    # newer pushed head, and the old files stayed in place. SBCUR is that checkout: on `lane-x`, with
+    # origin/lane-x one commit ahead. `sub/` is a real folder, so the cd case runs in one.
+    make_repo(SBCUR, {"f.txt": "base\n", "sub/keep.txt": "base\n"})
+    run_vcs(SBCUR, "checkout", "-q", "-b", "lane-x")
+    _require_clean(SBCUR)
+    _require_pointer_branch(SBCUR, "lane-x")
+    head = run_vcs(SBCUR, "rev-parse", "HEAD").stdout.strip()
+    pushed = run_vcs(SBCUR, *IDENT, "commit-tree", "HEAD^{tree}", "-p", head, "-m", "pushed head")
+    if pushed.returncode != 0 or not pushed.stdout.strip():
+        sys.exit("fixture setup failed in build_fixtures: the newer head of SBCUR. stderr: %s"
+                 % pushed.stderr.strip())
+    update = run_vcs(SBCUR, "update-ref", "refs/remotes/origin/lane-x", pushed.stdout.strip())
+    if update.returncode != 0:
+        sys.exit("fixture setup failed in build_fixtures: origin/lane-x in SBCUR. stderr: %s"
+                 % update.stderr.strip())
+    # A DETACHED checkout: no branch is checked out, so no `-B` can name the branch it holds.
+    make_repo(SBDET, {"f.txt": "base\n"})
+    detach = run_vcs(SBDET, "checkout", "-q", "--detach")
+    if detach.returncode != 0:
+        sys.exit("fixture setup failed in build_fixtures: detaching SBDET. stderr: %s"
+                 % detach.stderr.strip())
+    _require_clean(SBDET)
+    _require_pointer_branch(SBDET, "HEAD")
+    # The other checkout: a second clean tree on `lane-y`, which a `-C` can name.
+    make_repo(SBOTHER, {"f.txt": "base\n"})
+    run_vcs(SBOTHER, "checkout", "-q", "-b", "lane-y")
+    _require_clean(SBOTHER)
+    _require_pointer_branch(SBOTHER, "lane-y")
+    # A checkout ON main that is not the pointer checkout: its config holds no pointer line.
+    make_repo(SBMAIN, {"f.txt": "base\n"})
+    _set_origin_main(SBMAIN, "HEAD")
+    _require_clean(SBMAIN)
+    _require_pointer_branch(SBMAIN, "main")
+    # A CLONE WITH TWO WORKTREES. SBPRIME is the primary, on `lane-p`; SBLINK is a linked worktree of it,
+    # on `lane-q`. Each tree holds a branch that a command in the other tree can name. No other clone is
+    # involved, so only the clone's own worktrees can make the hold.
+    make_repo(SBPRIME, {"f.txt": "base\n"})
+    run_vcs(SBPRIME, "checkout", "-q", "-b", "lane-p")
+    _set_origin_main(SBPRIME, "HEAD")
+    link = run_vcs(SBPRIME, "worktree", "add", "-q", "-b", "lane-q", SBLINK)
+    if link.returncode != 0:
+        sys.exit("fixture setup failed in build_fixtures: the linked worktree SBLINK. stderr: %s"
+                 % link.stderr.strip())
+    _require_clean(SBPRIME)
+    _require_clean(SBLINK)
+    _require_worktree_holds(SBPRIME, {SBPRIME: "lane-p", SBLINK: "lane-q"})
+
+
 def _build_conflict():
     """CONFLICT: a real checkout with one unresolved merge conflict."""
     # A real checkout with a real, unresolved merge conflict, built with git itself rather than
@@ -2217,6 +2299,7 @@ lazy_fixture([SUBJCLEAN, SUBJCLEANWT, SUBJDIRTY, SUBJSTASH, SUBJSTASHWT, SUBJSTA
 lazy_fixture([PRIVREPO], _build_privrepo)
 lazy_fixture([PTRMAIN, PTRWT, PTRCFG, PTROFF, PTROFFCFG, PTRAHEAD, PTRAHEADCFG, PTRNOORIGIN,
               PTRNOORIGINCFG, PTRBADCFG, PTRGONECFG, PTRNOCFG, GITBLIND], _build_pointer)
+lazy_fixture([SBCUR, SBDET, SBOTHER, SBMAIN, SBPRIME, SBLINK], _build_samebranch)
 lazy_fixture([CONFLICT], _build_conflict)
 lazy_fixture([BRANCHREMOTE, BRANCHREPO, BRANCHFALLBACKMAIN, BRANCHFALLBACKMASTER, BRANCHNOBASE],
              _build_branch)
@@ -2672,6 +2755,83 @@ sh("checkout: the previous branch", VCS + " checkout -", "allow", cwd=NOGIT)
 sh("checkout: a forced new branch at a commit", VCS + " checkout -B tmp 380d5fc", "allow",
    cwd=NOGIT)
 sh("checkout: tracking a remote branch", VCS + " checkout --track origin/main", "allow", cwd=NOGIT)
+
+# THE HELD-BRANCH RULE, rule id CURRENT_BRANCH_RULE. A `checkout -B <name>` or `switch -C <name>` is
+# refused when a worktree of the clone holds <name>: the checkout the command runs in, or a linked
+# worktree beside it. Git moves the branch under a working tree that keeps the old files, and the
+# holder's index goes stale. Which checkout runs the command is the one `-C <path>` names, else the cwd.
+# A refusal names the rule and a remedy in words only. It never echoes the held branch, and never
+# offers the forcing flag git has for this case.
+CURRENT_BRANCH_RULE = "checkout-b-current-branch"
+REMEDY_IN_WORDS = (("new branch", "new name", "reset"),)
+
+
+def held_deny(name, command, cwd, held_text):
+    """One deny case. `held_text` is the text the refusal must not carry: the held branch, or its -B form."""
+    sh("same branch: " + name, command, "deny", CURRENT_BRANCH_RULE, cwd=cwd,
+       lacks=(held_text, "--ignore-other-worktrees"), carries=REMEDY_IN_WORDS)
+
+
+# (a) the branch the command's own checkout holds, then (b) and (c): a branch a worktree beside it holds.
+held_deny("checkout -B of the branch it is on, from origin, is refused",
+          VCS + " checkout -B lane-x origin/lane-x", SBCUR, "lane-x")
+held_deny("switch -C of the branch it is on, from origin, is refused",
+          VCS + " switch -C lane-x origin/lane-x", SBCUR, "lane-x")
+held_deny("checkout -B of the branch it is on, with no start point, is refused",
+          VCS + " checkout -B lane-x", SBCUR, "lane-x")
+held_deny("switch -C of the branch it is on, with no start point, is refused",
+          VCS + " switch -C lane-x", SBCUR, "lane-x")
+held_deny("from a folder inside that checkout, it is refused too",
+          "cd sub && " + VCS + " checkout -B lane-x origin/lane-x", SBCUR, "lane-x")
+held_deny("-C names the checkout on that branch, checkout form, from another checkout",
+          VCS + " -C " + slash(SBCUR) + " checkout -B lane-x origin/lane-x", SBOTHER, "lane-x")
+held_deny("-C names the checkout on that branch, switch form, from another checkout",
+          VCS + " -C " + slash(SBCUR) + " switch -C lane-x origin/lane-x", SBOTHER, "lane-x")
+# The pointer checkout's reset of main onto origin/main is this same form. It stays allowed there
+# (the pointer cases below pin it). A checkout on main that is NOT the pointer gets no such
+# exemption, so this form is refused here by this rule alone.
+held_deny("checkout -B main onto origin/main is refused in a checkout on main that is not the pointer",
+          VCS + " checkout -B main origin/main", SBMAIN, "-B main")
+# The linked worktree SBLINK holds lane-q and the primary SBPRIME holds lane-p, in one clone.
+held_deny("a linked worktree: checkout -B of the branch it is on is refused",
+          VCS + " checkout -B lane-q origin/main", SBLINK, "lane-q")
+held_deny("a linked worktree: checkout -B of the branch the primary holds is refused",
+          VCS + " checkout -B lane-p origin/main", SBLINK, "lane-p")
+held_deny("a linked worktree: switch -C of the branch the primary holds is refused",
+          VCS + " switch -C lane-p origin/main", SBLINK, "lane-p")
+held_deny("the primary: checkout -B of the branch the linked worktree holds is refused",
+          VCS + " checkout -B lane-q origin/main", SBPRIME, "lane-q")
+held_deny("the primary: switch -C of the branch the linked worktree holds is refused",
+          VCS + " switch -C lane-q origin/main", SBPRIME, "lane-q")
+
+# CONTROLS, EACH STAYS ALLOWED. The name is exact; the holder must sit in the same clone; a plain
+# checkout and a `switch -c` of a new name are not the rule's form at all.
+sh("same branch: -B onto a different branch name is allowed",
+   VCS + " checkout -B other origin/lane-x", "allow", cwd=SBCUR)
+sh("same branch: -C onto a different branch name is allowed",
+   VCS + " switch -C other origin/lane-x", "allow", cwd=SBCUR)
+sh("same branch: a name that extends the branch it is on is allowed",
+   VCS + " checkout -B lane-x2 origin/lane-x", "allow", cwd=SBCUR)
+sh("same branch: a name that the branch it is on extends is allowed",
+   VCS + " checkout -B lane origin/lane-x", "allow", cwd=SBCUR)
+sh("same branch: -C names a checkout of another clone, so -B of this clone's branch is allowed there",
+   VCS + " -C " + slash(SBOTHER) + " checkout -B lane-x origin/lane-x", "allow", cwd=SBCUR)
+sh("same branch: -B of a branch a checkout of another clone holds is allowed",
+   VCS + " checkout -B lane-y origin/lane-x", "allow", cwd=SBCUR)
+sh("same branch: with no branch checked out, -B names nothing the checkout holds",
+   VCS + " checkout -B lane-x origin/lane-x", "allow", cwd=SBDET)
+sh("same branch: -B of a name no worktree of the clone holds is allowed",
+   VCS + " checkout -B lane-r origin/main", "allow", cwd=SBLINK)
+sh("same branch: -C of a name no worktree of the clone holds is allowed",
+   VCS + " switch -C lane-r origin/main", "allow", cwd=SBPRIME)
+sh("same branch: a plain checkout of a branch a linked worktree holds is allowed, git refuses it itself",
+   VCS + " checkout lane-q", "allow", cwd=SBPRIME)
+sh("same branch: switch -c of a new branch is allowed",
+   VCS + " switch -c brand-new origin/main", "allow", cwd=SBLINK)
+sh("same branch: merge --ff-only of the branch it is on is allowed",
+   VCS + " merge --ff-only origin/lane-x", "allow", cwd=SBCUR)
+sh("same branch: switch --detach of the branch it is on is allowed",
+   VCS + " switch --detach origin/lane-x", "allow", cwd=SBCUR)
 
 # THE REDIRECT FALSE POSITIVE. MEASURED in guard.log: `git checkout origin/claude/pass3-seam 2>&1`
 # was refused while the same call with no redirect passed, because `2>&1` reached
