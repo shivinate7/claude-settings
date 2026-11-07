@@ -13486,15 +13486,17 @@ SED_SCRIPT_TEXT_ALLOWS = (
 )
 for _name, _command in SED_SCRIPT_TEXT_ALLOWS:
     sh("builder-test: sed-script-not-target: sed -i, %s, is allowed" % _name, _command, "allow", **BR)
-SED_TEST_TARGET_DENIES = (
+SED_TEST_TARGET_REFUSED = (
     ("sed -i s/a/b/ on tests/test_x.py", "sed -i 's/a/b/' tests/test_x.py"),
     ("sed -i -e s/a/b/ on tests/test_x.py", "sed -i -e 's/a/b/' tests/test_x.py"),
     ("sed -i on checks.yml and tests/test_x.py together", "sed -i 's/a/b/' .github/workflows/checks.yml tests/test_x.py"),
     ("sed -i -f a script file on tests/test_x.py", "sed -i -f fix.sed tests/test_x.py"),
     ("a lone apostrophe inside an echo string, then sed -i on tests/test_x.py",
      "echo \"don't\"; sed -i 's/a/b/' tests/test_x.py"),
+    ("sed -i with test in the s/// script, on tests/test_x.py", "sed -i 's/test/check/' tests/test_x.py"),
+    ("sed -i -e with test in the s/// script, on tests/test_x.py", "sed -i -e 's/test/check/' tests/test_x.py"),
 )
-for _name, _command in SED_TEST_TARGET_DENIES:
+for _name, _command in SED_TEST_TARGET_REFUSED:
     sh("builder-test: sed-script-not-target control: %s, is refused" % _name, _command, "deny", rule=BT,
        carries=("test-author",), **BR)
 
