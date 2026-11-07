@@ -470,8 +470,8 @@ const GLYPH = {
 const glyph = s => `<span class="g">${GLYPH[s]||GLYPH.todo}</span>`;
 /* The stalled band's script sets this. A stalled or paused step is drawn Stalled or Paused, never In progress. */
 let stallKind = () => '';
-/* A stalled step keeps status active, so a count or a mark that reads the status alone calls it In progress. */
-const shownState = s => s.status==='active' && stallKind(s.id)==='stalled' ? 'stalled' : s.status;
+/* A stalled or paused step keeps status active, so a count or a mark that reads the status alone calls it In progress. */
+const shownState = s => s.status==='active' && stallKind(s.id) || s.status;
 
 /* ---------- state ---------- */
 let db = null, steps = [], topics = null, cull = null, phases = null, advisor = null;
@@ -726,7 +726,7 @@ function burnCard(){
   return `<div class="card"><header><h3>Steps done, running total</h3><span class="lbl"><span class="num">${cum[cum.length-1]}</span> of <span class="num">${steps.length}</span></span></header>
     <div class="burn">${s}</div><div class="legend"><span><span class="dot" style="border-radius:2px"></span> done so far</span><span><span class="dot" style="background:var(--line-2);border-radius:2px"></span> steps changed that day</span></div></div>`;
 }
-const KIND = s => s.status==='done'?'Done':shownState(s)==='stalled'?'Stalled':s.status==='active'?'In progress':s.status==='blocked'?'Blocked':'Updated';
+const KIND = s => s.status==='done'?'Done':shownState(s)==='stalled'?'Stalled':shownState(s)==='paused'?'Paused':s.status==='active'?'In progress':s.status==='blocked'?'Blocked':'Updated';
 function feedCard(n=8){
   const recent=steps.filter(s=>when(s.updatedAt)).sort((a,b)=>when(b.updatedAt)-when(a.updatedAt)).slice(0,n);
   if(!recent.length) return '';

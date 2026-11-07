@@ -3192,8 +3192,8 @@ const stall = (() => {
   return { steps: rows, paused: ids(r.paused), bad, items: Array.isArray(r.items) ? r.items.filter((x) => x && x.n != null) : null, itemsWhy: typeof r.itemsWhy === "string" ? r.itemsWhy : "" };
 })();
 const stalledIds = new Set(stall.steps ? stall.steps.map((x) => x.id) : []), pausedIds = new Set(stall.paused || []);
-// A stalled step keeps status active, so a count or a mark that reads the status alone calls it In progress.
-const shownState = (s) => (s.status === "active" && stalledIds.has(s.id) ? "stalled" : s.status);
+// A stalled or paused step keeps status active, so a count or a mark that reads the status alone calls it In progress.
+const shownState = (s) => (s.status !== "active" ? s.status : stalledIds.has(s.id) ? "stalled" : pausedIds.has(s.id) ? "paused" : s.status);
 
 /* ---------- read-at stamps and live work ---------- */
 function readAt() {
