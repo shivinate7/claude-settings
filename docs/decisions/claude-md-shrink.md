@@ -12,7 +12,7 @@ Owner, 2026-10-16 23:53 CDT and 2026-10-17 00:40 CDT:
 
 Owner interview, 2026-10-17 (00:44 to 01:55 CDT), per rule:
 
-- `roles-sonnet-is-the-default`: delete only the sentence "An unlisted agent runs Sonnet, and that needs no word." Row kind `unmechanized`.
+- `roles-model-per-role-table`: delete only the sentence "An unlisted agent runs Sonnet, and that needs no word." Row kind `unmechanized`.
 - `roles-workers-never-spawn`, `git-wait-for-required-checks`, `git-draft-until-reviewed`: delete prose, anchor and row.
 - `shared-trees-no-machine-wide-kill`: keep only the two sentences on killing and restarting. Keep anchor and row.
 - `verification-recovery-independent-of-state` and `reports-no-report-when-nothing-landed`: keep the text. Row kind `unmechanized`.

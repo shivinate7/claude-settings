@@ -9,8 +9,8 @@ import { apply } from '../../../lint/_test_git.mjs';  // test-run signing opt-ou
 import { after } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { cpSync, existsSync, mkdtempSync, readdirSync, readFileSync, realpathSync, statSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { chmodSync, cpSync, existsSync, mkdtempSync, readdirSync, readFileSync, realpathSync, statSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
+import { delimiter, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { removeRunFolder, runFolder } from './temp-root.mjs';
 
@@ -59,14 +59,43 @@ export const junction = (target) => {
 export const gitIn = (dir, ...a) =>
   execFileSync('git', ['-c', 'core.autocrlf=false', ...a], { cwd: dir, env: cleanEnv(), encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
 
+// The files of `tests/fixture/` that the scratch repository must track.
+const FIXTURE_TRACKED = ['map.config.json', 'src/home.ts', 'src/notes.ts', 'src/screens.ts', 'src/retry.py', 'src/caller.py', 'config.json', 'docs/map/core.md', 'docs/map/homes.md', 'docs/map/traces/home.md', 'src/home.spec.ts', 'src/pkg/index.ts', 'src/pkg.spec.ts','src/retry_check.py', 'src/run_retry_check.py'];
+/** Commits every change of `dir`. With `epoch` (unix seconds) the author time is that epoch in UTC, which is what `git blame` and `git log %at` read. Without it, the commit has the current time. The commit runs with an empty hooks folder. */
+export const commitAt = (dir, epoch, message) => {
+  gitIn(dir, 'add', '-A');
+  const date = epoch === undefined ? [] : [`--date=${epoch} +0000`];
+  gitIn(dir, '-c', `core.hooksPath=${tmpFolder('pemap-nohooks-')}`, '-c', 'user.name=fixture', '-c', 'user.email=fixture@example.invalid', 'commit', '-q', ...date, '-m', message);
+};
+
+/** A case that puts an extensionless POSIX script on PATH skips on win32: CreateProcess runs no such script, and a `.cmd` needs a shell that these commands never use. */
+export const POSIX_ONLY = { skip: process.platform === 'win32' ? 'an extensionless POSIX script on PATH: only POSIX PATH lookup runs it' : false };
+
 /**
- * A copy of `tests/fixture/` in a fresh git repository in tmp. `git add -N` lists each file for `git ls-files` and writes no object.
+ * A git first on PATH. It appends each call whose arguments contain `match` (every call when `match` is '') to its log, one line per call,
+ * then runs the real git. A cost case counts the lines of `log`. Its env is added to a run's env.
+ */
+export const gitShim = (match = '') => {
+  const real = (process.env.PATH ?? '').split(delimiter).map((d) => join(d, 'git')).find((p) => existsSync(p));
+  assert.ok(real, 'git must be on PATH for the shim');
+  const bin = tmpFolder('pemap-gitshim-');
+  const log = join(bin, 'git-calls.log');
+  const sh = join(bin, 'git');
+  writeFileSync(sh, '#!/bin/sh\ncase "$*" in *"$SHIM_GIT_MATCH"*) echo "$*" >> "$SHIM_GIT_LOG";; esac\nexec "$SHIM_GIT_REAL" "$@"\n');
+  chmodSync(sh, 0o755);
+  writeFileSync(log, '');
+  return { log, env: { PATH: `${bin}${delimiter}${process.env.PATH}`, SHIM_GIT_LOG: log, SHIM_GIT_REAL: real, SHIM_GIT_MATCH: match } };
+};
+
+/**
+ * A copy of `fixture` (default `tests/fixture/`) in a fresh git repository in tmp. `track` lists the files the copy must track.
+ * `git add -N` lists each file for `git ls-files` and writes no object.
  * With `commit`, the files are committed too, so `git rev-parse HEAD` works. A host repository that builds a page has a commit.
  * The commit runs with an empty hooks folder, so no hook of the machine runs in the scratch repository.
  */
-export const scratchRepo = ({ commit = false } = {}) => {
+export const scratchRepo = ({ commit = false, fixture = FIXTURE, track = FIXTURE_TRACKED } = {}) => {
   const dir = tmpFolder('pemap-repo-');
-  cpSync(FIXTURE, dir, { recursive: true });
+  cpSync(fixture, dir, { recursive: true });
   // A Windows checkout (core.autocrlf) holds the fixture with CRLF. The cases edit it by `\n` and by exact text, so the copy is LF on every platform.
   // Every fixture file is text. The product reads CRLF fine, and format-version.test.mjs builds its CRLF repositories itself.
   for (const rel of readdirSync(dir, { recursive: true })) {
@@ -75,13 +104,11 @@ export const scratchRepo = ({ commit = false } = {}) => {
   }
   const git = (...a) => gitIn(dir, ...a);
   git('init', '-q');
-  if (commit) {
-    git('add', '.');
-    git('-c', `core.hooksPath=${tmpFolder('pemap-nohooks-')}`, '-c', 'user.name=fixture', '-c', 'user.email=fixture@example.invalid', 'commit', '-q', '-m', 'fixture');
-  } else git('add', '-N', '.');
+  if (commit) commitAt(dir, undefined, 'fixture');
+  else git('add', '-N', '.');
   // The scope first: the copy must be a git repository that tracks the fixture, or a verdict below says nothing about the skill.
   const tracked = git('ls-files').split('\n').map((l) => l.trim());
-  for (const f of ['map.config.json', 'src/home.ts', 'src/notes.ts', 'src/screens.ts', 'src/retry.py', 'src/caller.py', 'config.json', 'docs/map/core.md', 'docs/map/homes.md', 'docs/map/traces/home.md'])
+  for (const f of track)
     assert.ok(tracked.includes(f), `the scratch repository does not track ${f}`);
   if (commit) assert.match(git('rev-parse', 'HEAD').trim(), /^[0-9a-f]{40}$/, 'the scratch repository has no commit');
   return dir;
@@ -96,11 +123,14 @@ export const dropMapLine = (dir, file) => {
   writeFileSync(p, kept.join('\n'));
 };
 
-export const IDS = ['MAP1', 'MAP2', 'MAP3', 'MAP4', 'MAP5', 'MAP6', 'MAP7', 'MAP8', 'MAP9'];
+export const IDS = ['MAP1', 'MAP2', 'MAP3', 'MAP4', 'MAP5', 'MAP6', 'MAP7', 'MAP8', 'MAP9', 'MAP10', 'MAP11'];
+
+// The verdict a check prints when the fixture leaves its setting out. MAP10 skips when no decision key is set.
+const DEFAULT_VERDICT = { MAP10: 'SKIP' };
 
 /** The verdict lines of a run as one string, such as `MAP1=PASS MAP2=FAIL`. A line looks like `[PASS] MAP1`. */
 export const verdicts = (out) =>
   [...out.matchAll(/^\[(PASS|FAIL|SKIP)\]\s+(MAP\d+)\b/gm)].map((m) => `${m[2]}=${m[1]}`).join(' ');
 
 /** What the verdict string says when every check in `IDS` passes, except the ids in `except`, which get the given verdict. */
-export const expected = (except = {}) => IDS.map((id) => `${id}=${except[id] ?? 'PASS'}`).join(' ');
+export const expected = (except = {}) => IDS.map((id) => `${id}=${except[id] ?? DEFAULT_VERDICT[id] ?? 'PASS'}`).join(' ');

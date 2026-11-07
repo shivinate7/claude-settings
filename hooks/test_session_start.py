@@ -100,10 +100,12 @@ class SessionStartAgentWorktreeNoticeTests(unittest.TestCase):
             path = os.path.join(self.primary, ".claude", "worktrees", "agent-s%03d" % self.made)
             vcs(self.primary, "worktree", "add", "-q", "--detach", "--no-checkout", path, "HEAD")
 
-    def run_hook(self, remote=None, fetch_timeout="30", session_cwd=None, source=None, compact=False):
+    def run_hook(self, remote=None, fetch_timeout="30", session_cwd=None, source=None, compact=False,
+                 remote_session_id=None):
         """The hook's stdout lines. Its stderr lands in self.last_stderr.
 
         remote: the CLAUDE_CODE_REMOTE value, or None to unset it as a non-cloud runner does.
+        remote_session_id: the CLAUDE_CODE_REMOTE_SESSION_ID value, "" for an empty one, or None to unset it.
         session_cwd: the session's cwd, in the payload and as the process cwd; None means the primary checkout.
         source: the payload's "source" (startup, resume, ...), or None to send none.
         compact: send the payload with no spaces after its separators, the way the hook's sed must also read it.
@@ -117,8 +119,11 @@ class SessionStartAgentWorktreeNoticeTests(unittest.TestCase):
         env = dict(os.environ, CLAUDE_CONFIG_DIR=self.config, CLAUDE_SETTINGS_FETCH_TIMEOUT=fetch_timeout)
         # The test runner may itself be a cloud session, so each run sets the variable it means.
         env.pop("CLAUDE_CODE_REMOTE", None)
+        env.pop("CLAUDE_CODE_REMOTE_SESSION_ID", None)
         if remote is not None:
             env["CLAUDE_CODE_REMOTE"] = remote
+        if remote_session_id is not None:
+            env["CLAUDE_CODE_REMOTE_SESSION_ID"] = remote_session_id
         answer = subprocess.run([sh_exe(), HOOK], input=payload, capture_output=True, text=True,
                                 env=env, cwd=where, timeout=120)
         self.last_stderr = answer.stderr
@@ -209,13 +214,24 @@ class SessionStartCautionTests(SessionStartAgentWorktreeNoticeTests):
 
 
 class SessionStartTierLineTests(SessionStartAgentWorktreeNoticeTests):
-    """The cloud session-tier line prints once, after the checkout line, only when CLAUDE_CODE_REMOTE is "true"."""
+    """The session-tier line prints once, after the checkout line, when CLAUDE_CODE_REMOTE is exactly "true" or
+    CLAUDE_CODE_REMOTE_SESSION_ID is non-empty. A local lane session sets only the id, so it still reads its record."""
 
     # The 51-worktree case builds 51 worktrees; this class does not repeat it.
     test_no_notice_at_fifty_and_one_notice_at_fifty_one = None
 
     def tier_lines(self, lines):
         return [line for line in lines if line.startswith("session tier:")]
+
+    def outside_a_git_tree(self):
+        """A folder under the run root that is no git tree. The probe proves it, or the case tests nothing."""
+        outside = os.path.join(self.root, "outside")
+        os.makedirs(outside)
+        probe = subprocess.run([VCS, "-C", outside, "rev-parse", "--show-toplevel"], capture_output=True,
+                               text=True, timeout=60)
+        self.assertNotEqual(probe.returncode, 0, "the folder is inside a git tree, so the case tests nothing: %r"
+                            % outside)
+        return outside
 
     def test_cloud_prints_the_tier_line_once_right_after_the_checkout_line(self):
         expected = hook_tier_line()
@@ -241,16 +257,43 @@ class SessionStartTierLineTests(SessionStartAgentWorktreeNoticeTests):
 
     def test_cloud_prints_the_tier_line_once_outside_any_git_tree(self):
         # The line needs no git, so a cloud session whose cwd is no checkout still gets it, with no stderr.
-        outside = os.path.join(self.root, "outside")
-        os.makedirs(outside)
-        probe = subprocess.run([VCS, "-C", outside, "rev-parse", "--show-toplevel"], capture_output=True,
-                               text=True, timeout=60)
-        self.assertNotEqual(probe.returncode, 0, "the folder is inside a git tree, so the case tests nothing: %r"
-                            % outside)
+        outside = self.outside_a_git_tree()
         expected = hook_tier_line()
         lines = self.run_hook(remote="true", session_cwd=outside)
         self.assertEqual(self.last_stderr, "", "the hook wrote to stderr: %r" % self.last_stderr)
         self.assertEqual(self.tier_lines(lines), [expected], "the tier line is not printed once: %r" % lines)
+
+    # A local lane session sets CLAUDE_CODE_REMOTE_SESSION_ID and not CLAUDE_CODE_REMOTE, so the id alone must print the line.
+    def test_a_session_id_alone_prints_the_tier_line_in_a_git_tree(self):
+        lines = self.run_hook(remote_session_id="cse_abc")
+        self.assertTrue(lines and lines[0].startswith("checkout "), "no checkout line first: %r" % lines)
+        self.assertEqual(self.tier_lines(lines), [hook_tier_line()],
+                         "no tier line in a git tree with CLAUDE_CODE_REMOTE unset and a session id set: %r" % lines)
+
+    def test_a_session_id_alone_prints_the_tier_line_outside_a_git_tree(self):
+        outside = self.outside_a_git_tree()
+        lines = self.run_hook(session_cwd=outside, remote_session_id="cse_abc")
+        self.assertEqual(self.last_stderr, "", "the hook wrote to stderr: %r" % self.last_stderr)
+        self.assertEqual(self.tier_lines(lines), [hook_tier_line()],
+                         "no tier line outside a git tree with CLAUDE_CODE_REMOTE unset and a session id set: %r"
+                         % lines)
+
+    # Green controls: with neither variable set, or the id empty, the hook must print no tier line.
+    def test_no_tier_line_with_both_variables_unset_in_a_git_tree(self):
+        lines = self.run_hook()
+        self.assertTrue(lines and lines[0].startswith("checkout "), "no checkout line first: %r" % lines)
+        self.assertEqual(self.tier_lines(lines), [], "a tier line printed with both variables unset: %r" % lines)
+
+    def test_no_tier_line_with_both_variables_unset_outside_a_git_tree(self):
+        outside = self.outside_a_git_tree()
+        lines = self.run_hook(session_cwd=outside)
+        self.assertEqual(self.last_stderr, "", "the hook wrote to stderr: %r" % self.last_stderr)
+        self.assertEqual(self.tier_lines(lines), [], "a tier line printed with both variables unset: %r" % lines)
+
+    def test_no_tier_line_with_an_empty_session_id_in_a_git_tree(self):
+        lines = self.run_hook(remote_session_id="")
+        self.assertTrue(lines and lines[0].startswith("checkout "), "no checkout line first: %r" % lines)
+        self.assertEqual(self.tier_lines(lines), [], "a tier line printed with an empty session id: %r" % lines)
 
 
 class SessionStartSessionHomeTests(SessionStartAgentWorktreeNoticeTests):

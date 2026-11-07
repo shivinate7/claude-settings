@@ -1604,6 +1604,9 @@ def refuse(tool: str, decision: str, rule: str, reason: str, matched: str, spawn
 # that disables tests (`--deselect`, `testpaths`, `testPathIgnorePatterns`, ...), so a new
 # dependency in pyproject.toml stays allowed. For a test-author, test config is always its own.
 # `contest.py` and `latest_results.md` match no shape.
+# WORKFLOWS (`.github/workflows/*.yml|*.yaml`) have one classifier (`is_workflow_rel`, `workflow_test_steps_only`,
+# `workflow_disables_tests` in guard.py). A test-author may add, remove or move whole test-run steps, so a new
+# suite gets its CI step. A builder may change any workflow line, except an added one that disables tests.
 # Xcode/SPM: a part `^[A-Z]\w*Tests$` (`DegenUITests`) and a basename `^\w+Tests\.swift$`, case-sensitive.
 # The decisions: predicate-is-the-act, guard-that-cries-wolf-is-spent, builders-cannot-edit-tests.
 BUILDER_ROLE = "builder"

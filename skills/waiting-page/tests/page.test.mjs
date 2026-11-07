@@ -42,10 +42,21 @@ const ASKED_AFTER_SEND = "2026-10-30T00:00:00Z";
 // dbExtra is more database content ({collection: {id: data}}), such as the roadmap's own steps and
 // meta docs, which the status part must never read. window.__reads lists every read as
 // [collection, id or null]; window.__uses lists every window.claude.use(capability) call.
-function stubDb({ items, rawItems, answers, failDelete, failDeleteIn, failSet, comments, meta, groups, receipts, holdReceipts, dbExtra = {} }) {
+// noStore: the page gets no database (a view that cannot reach the store), so use("db") gives null.
+// failSetText: a write to asks whose text holds it is refused with code denied, so one ask of a batch fails and the rest save.
+// hold: { set: n } or { delete: n }. An asks write or delete after the first n waits at the hold until window.__release() runs; window.__held counts the calls waiting.
+// A case disarms it with window.__hold = null, since the init script arms it again on every load (a reload).
+function stubDb({ items, rawItems, answers, failDelete, failDeleteIn, failSet, failSetText = "", failUpdate = false, comments, meta, groups, receipts, holdReceipts, dbExtra = {}, noStore = false, hold = {} }) {
   const { meta: metaExtra, ...otherExtra } = dbExtra;
   const data = { items: { ...Object.fromEntries(items.map((i) => [i.id, i])), ...rawItems }, answers: { ...answers }, meta: { ...(meta ? { page: meta } : {}), ...metaExtra }, groups: { ...groups }, receipts: { ...receipts }, ...otherExtra };
   window.__reads = []; window.__uses = [];
+  window.__hold = hold; window.__held = 0;
+  let openLatch; const latch = new Promise((r) => { openLatch = r; }); window.__release = () => openLatch();
+  const seen = { set: 0, delete: 0 };
+  const holdFor = async (op) => { const h = window.__hold; if (!h || h[op] === undefined || ++seen[op] <= h[op]) return; window.__held++; await latch; };
+  // The asks are kept in the page's localStorage, so a reload finds them as the store held them.
+  try { const kept = JSON.parse(localStorage.getItem("__stub.asks")); if (kept) data.asks = kept; } catch (e) {}
+  const keepAsks = () => { try { localStorage.setItem("__stub.asks", JSON.stringify(data.asks || {})); } catch (e) {} };
   const subs = {}, docSubs = {};
   window.__log = [];
   const snap = (name) => ({ docs: Object.entries(data[name] || {}).map(([id, v]) => ({ id, data: () => v })) });
@@ -56,7 +67,9 @@ function stubDb({ items, rawItems, answers, failDelete, failDeleteIn, failSet, c
   };
   window.__answers = () => data.answers;
   // Pushes one item through the items listener, as a session adding an item after the page loaded would.
-  window.__putItem = (it) => { data.items[it.id] = it; fire("items", it.id); };
+  // Writes one document as the store holds it, and tells its listeners: a session's write after the page loaded.
+  window.__putDoc = (name, id, body) => { (data[name] = data[name] || {})[id] = body; fire(name, id); };
+  window.__putItem = (it) => window.__putDoc("items", it.id, it);
   // holdReceipts: the receipts' first snapshot waits for window.__releaseReceipts(), so a case can act before receipts arrive.
   const listen = (name, cb) => { window.__reads.push([name, null]); (subs[name] = subs[name] || []).push(cb); if (holdReceipts && name === "receipts") window.__releaseReceipts = () => cb(snap(name)); else setTimeout(() => cb(snap(name)), 0); return () => {}; };
   const db = {
@@ -66,14 +79,18 @@ function stubDb({ items, rawItems, answers, failDelete, failDeleteIn, failSet, c
       orderBy: () => ({ onSnapshot: (cb) => listen(name, cb) }),
       doc: (id) => ({
         get: async () => { window.__reads.push([name, id]); return dsnap(name, id); },
-        set: async (body) => { if (failSet) throw { code: "denied" }; window.__log.push(["set", name, id, body]); (data[name] = data[name] || {})[id] = body; setTimeout(() => fire(name, id), 0); },
-        delete: async () => { if (failDelete || failDeleteIn === name) throw { code: "denied" }; window.__log.push(["delete", name, id]); delete (data[name] || {})[id]; setTimeout(() => fire(name, id), 0); },
+        set: async (body) => { if (name === "asks") await holdFor("set"); if (failSet || (name === "asks" && failSetText && String(body.text).includes(failSetText))) throw { code: "denied" }; window.__log.push(["set", name, id, body]); (data[name] = data[name] || {})[id] = body; if (name === "asks") keepAsks(); setTimeout(() => fire(name, id), 0); },
+        // A merge write, as the runtime's update: the fields given are set, the rest of the record stays. It is refused when the record is gone.
+        // failUpdate refuses every asks update with permission-denied, as a store that cannot write does.
+        update: async (body) => { if (failUpdate && name === "asks") throw { code: "permission-denied" }; if (!(data[name] || {})[id]) throw { code: "not-found" }; window.__log.push(["update", name, id, body]); data[name][id] = { ...data[name][id], ...body }; if (name === "asks") keepAsks(); setTimeout(() => fire(name, id), 0); },
+        delete: async () => { if (name === "asks") await holdFor("delete"); if (failDelete || failDeleteIn === name) throw { code: "denied" }; window.__log.push(["delete", name, id]); delete (data[name] || {})[id]; if (name === "asks") keepAsks(); setTimeout(() => fire(name, id), 0); },
         onSnapshot: (cb) => { window.__reads.push([name, id]); (docSubs[name + "/" + id] = docSubs[name + "/" + id] || []).push(cb); setTimeout(() => cb(dsnap(name, id)), 0); return () => {}; },
       }),
     }),
   };
-  // comments: null (capability absent) or { can, canThrows, failCodes, goneThreads }.
-  // failCodes rejects every send; goneThreads rejects a send into those thread ids with not_found.
+  // comments: null (capability absent) or { can, canThrows, failCode, goneThreads, threadFail, anchorFail }.
+  // failCode rejects every send; goneThreads rejects a send into those thread ids with not_found.
+  // threadFail maps a thread id to the code a send into that thread rejects with; anchorFail is the code an anchored send (no threadId) rejects with.
   window.__sent = [];
   const cm = comments && {
     canSendToClaude: async () => { if (comments.canHangs) return new Promise(() => {}); if (comments.canThrows) throw { code: "unavailable" }; return comments.can || "available"; },
@@ -83,10 +100,12 @@ function stubDb({ items, rawItems, answers, failDelete, failDeleteIn, failSet, c
       if (comments.sendDelay) await new Promise((r) => setTimeout(r, comments.sendDelay));
       if (comments.failCode) throw { code: comments.failCode, message: "stub" };
       if (target.threadId && (comments.goneThreads || []).includes(target.threadId)) throw { code: "not_found", message: "stub" };
+      if (target.threadId && comments.threadFail && comments.threadFail[target.threadId]) throw { code: comments.threadFail[target.threadId], message: "stub" };
+      if (!target.threadId && comments.anchorFail) throw { code: comments.anchorFail, message: "stub" };
       return { threadId: target.threadId || "t-new-" + window.__sent.length, commentId: "c" + window.__sent.length };
     },
   };
-  window.claude = { use: async (cap) => { window.__uses.push(cap); return cap === "db" ? db : cap === "comments" ? (cm || null) : null; } };
+  window.claude = { use: async (cap) => { window.__uses.push(cap); return cap === "db" ? (noStore ? null : db) : cap === "comments" ? (cm || null) : null; } };
 }
 
 let browser;
@@ -99,7 +118,9 @@ function pageName() {
 }
 after(async () => { if (browser) await browser.close(); });
 
-async function open(t, { items = [DECISION, TASK], rawItems = {}, answers = {}, failDelete = false, failDeleteIn = "", failSet = false, comments = { can: "available" }, storage = {}, meta = null, groups = {}, receipts = {}, holdReceipts = false, designData = null, dbExtra = {}, pageHtml = html, viewport = { width: 1280, height: 900 }, scheme = "light", errors = null, platform = null } = {}) {
+// clock: a fixed browser time (an ISO string), so a case reads the page's clock without the real one. keepStorage: each storage key is set
+// only when absent, so a reload keeps what the page wrote on the earlier load (a reload that resets storage would undo it).
+async function open(t, { items = [DECISION, TASK], rawItems = {}, answers = {}, failDelete = false, failDeleteIn = "", failSet = false, failSetText = "", comments = { can: "available" }, storage = {}, meta = null, groups = {}, receipts = {}, holdReceipts = false, designData = null, dbExtra = {}, pageHtml = html, viewport = { width: 1280, height: 900 }, scheme = "light", errors = null, platform = null, noStore = false, hold = {}, clock = null, keepStorage = false, failUpdate = false } = {}) {
   browser = browser || await needEnv(t, "chromium", async () => require("playwright").chromium.launch());
   if (!browser) return null;
   const page = await browser.newPage({ viewport });
@@ -113,11 +134,14 @@ async function open(t, { items = [DECISION, TASK], rawItems = {}, answers = {}, 
   // Every other request (the fonts) is refused.
   await page.route("**/*", (r) => (r.request().url() === ORIGIN ? r.fulfill({ contentType: "text/html; charset=utf-8", body }) : r.abort()));
   await page.addInitScript(() => { new MutationObserver(() => { const w = document.querySelector(".dfitwrap"); if (w && window.__firstFit === undefined) window.__firstFit = w.getBoundingClientRect().height; }).observe(document, { childList: true, subtree: true }); });
-  await page.addInitScript(stubDb, { items, rawItems, answers, failDelete, failDeleteIn, failSet, comments, meta, groups, receipts, holdReceipts, dbExtra });
-  await page.addInitScript((kv) => { for (const k in kv) localStorage.setItem(k, kv[k]); }, storage);
+  await page.addInitScript(stubDb, { items, rawItems, answers, failDelete, failDeleteIn, failSet, failSetText, failUpdate, comments, meta, groups, receipts, holdReceipts, dbExtra, noStore, hold });
+  await page.addInitScript(({ kv, keep }) => { for (const k in kv) { if (keep && localStorage.getItem(k) !== null) continue; localStorage.setItem(k, kv[k]); } }, { kv: storage, keep: keepStorage });
   // platform: the OS a browser reports, as navigator.platform with no userAgentData (a Windows or a Mac browser).
   if (platform) await page.addInitScript((p) => { Object.defineProperty(navigator, "platform", { get: () => p }); Object.defineProperty(navigator, "userAgentData", { get: () => undefined }); }, platform);
+  if (clock) await page.clock.setFixedTime(new Date(clock));
   await page.goto(ORIGIN);
+  // With no store there are no items to wait for: the page is loaded once its empty state is drawn.
+  if (noStore) { await page.waitForFunction("state.loaded"); return page; }
   await page.waitForFunction("state.items.length > 0"); // the stub database has delivered the items
   await page.waitForSelector(`#item-${items.length ? items[0].id : Object.keys(rawItems)[0]}`);
   return page;
@@ -142,6 +166,11 @@ const SAVED_A = { [DECISION.id]: { item: DECISION.id, n: 27, at: "2026-10-26T01:
 const opt = (key, label, design) => ({ key, label, how: "h", gain: "g", lose: "l", ...(design ? { design } : {}) });
 const DESIGNS = { s1: "<p>one</p>", s2: "<p>two</p>" };
 const optFrame = (it, key) => `label.opt[for="o-${it.id}-${key}"] iframe`;
+// SENT_MOVE, where a card sent on this visit goes: "sink" (the default) moves it to the Answered section, folded; "stay" keeps it in its tier.
+// page.html declares the switch as the one line below. A case sets the value by rewriting that line in the page source. On a page with no
+// such line the rewrite does nothing, so a case fails on its own assertion, never on a missing name. The "stay" value is today's order.
+const SENT_MOVE_LINE = 'const SENT_MOVE = "sink";';
+const withSentMove = (value) => html.replace(SENT_MOVE_LINE, `const SENT_MOVE = "${value}";`);
 
 // ---------------------------------------------------------------- the final design
 
@@ -275,7 +304,7 @@ test("the Undo button goes after 8 seconds", async (t) => {
 
 test("a card becomes a receipt in place, with Change", async (t) => {
   const items = [mk("above", 1), mk("target", 2), mk("below", 3, { context: LONG })];
-  const page = await open(t, { items }); if (!page) return;
+  const page = await open(t, { items, pageHtml: withSentMove("stay") }); if (!page) return;
   const before = await geo(page);
   await choose(page, items[1], "a");
   await send(page);
@@ -298,7 +327,7 @@ for (const withDesigns of [false, true]) for (const viewport of [{ width: 1280, 
       // The oldest blocking item sorts first, so a card above the first receipt gives the page room to scroll up.
       mk("lead", 6, { context: LONG, holds: "A lane waits.", added: "2026-10-01T00:00:00Z" }),
     ];
-    const page = await open(t, { items, viewport, designData: withDesigns ? DESIGNS : null }); if (!page) return;
+    const page = await open(t, { items, viewport, designData: withDesigns ? DESIGNS : null, pageHtml: withSentMove("stay") }); if (!page) return;
     await noAnchor(page);
     // With option designs, the in-card frames must be the same DOM nodes after each pick, so none reloads.
     let sent = false;
@@ -1359,6 +1388,13 @@ test("a saved none note does not ride along when the owner picks an option", asy
 
 const sent = (page) => page.evaluate(() => window.__sent);
 const told = (page, text) => page.locator("#sentStatus", { hasText: text }).waitFor();
+// The wake result on the sent panel. The panel reads "Telling Claude…" until notifyClaude has returned, so this waits for that and then reads the words.
+// A test asserts on the words, so a failure names its cause and not a locator timeout.
+const wakeStatus = async (page) => {
+  await page.locator("#sentStatus").waitFor();
+  await page.waitForFunction(() => !document.getElementById("sentStatus").textContent.includes("Telling"), null, { timeout: 3000 }).catch(() => {});
+  return (await page.textContent("#sentStatus")).trim();
+};
 const NOTE_ONLY = { [TASK.id]: { item: TASK.id, n: 28, at: "2026-10-26T01:00:00Z", note: "Which cable?" } };
 
 test("a task note with no Mark done makes the card ready, live as the owner types", async (t) => {
@@ -1431,7 +1467,7 @@ test("a send gives one notice that names the item and the choice", async (t) => 
   await choose(page, DECISION, "a");
   await addNote(page, DECISION, "bold");
   await send(page);
-  await told(page, "Claude was told");
+  await told(page, "A wake was sent");
   const s = await sent(page);
   assert.equal(s.length, 1);
   assert.match(s[0].text, /27 a \(bold\)/);
@@ -1507,12 +1543,76 @@ test("a not_found on the stored thread starts a new anchored thread", async (t) 
   const page = await open(t, { comments: { can: "available", goneThreads: ["t-old"] }, storage: { "waiting.thread": "t-old" } });
   if (!page) return;
   await takePick(page, DECISION); await send(page);
-  await told(page, "Claude was told");
+  await told(page, "A wake was sent");
   const s = await sent(page);
   assert.equal(s.length, 2);
   assert.equal(s[0].threadId, "t-old");
   assert.ok(s[1].anchor && s[1].anchor.tag === "H1", "the new thread anchors at the h1");
   assert.equal(await page.evaluate(() => localStorage.getItem("waiting.thread")), "t-new-2");
+});
+
+// One pick sent while the stored thread rejects with `code`. anchorFail is the code the anchored retry rejects with, when it is given.
+// Returns the page, the wake result and the sends, or null with no browser.
+async function pickIntoStoredFail(t, { code, anchorFail = "" }) {
+  const page = await open(t, { comments: { can: "available", threadFail: { "t-old": code }, anchorFail }, storage: { "waiting.thread": "t-old" } });
+  if (!page) return null;
+  await takePick(page, DECISION); await send(page);
+  return { page, status: await wakeStatus(page), s: await sent(page) };
+}
+// Codes a stored thread must not retry: a rate limit or a refusal that a second thread cannot undo. Each sends once, keeps the thread and shows its code.
+const NO_FALLBACK = ["rate_limited", "claude_unavailable", "consent_required", "invalid", "unavailable", "forbidden", "not_granted", "capability_disabled", "capability_removed", "transform_error"];
+const storedThread = (page) => page.evaluate(() => localStorage.getItem("waiting.thread"));
+
+test("an upstream_error on the stored thread starts a new anchored thread", async (t) => {
+  const r = await pickIntoStoredFail(t, { code: "upstream_error" }); if (!r) return;
+  assert.equal(r.s[0].threadId, "t-old", "the first send did not go to the stored thread");
+  assert.equal(r.s.length, 2, "upstream_error on the stored thread did not start one anchored retry: " + r.s.length + " send(s)");
+  assert.ok(r.s[1].anchor && r.s[1].anchor.tag === "H1", "the retry does not anchor at the h1");
+  assert.match(r.status, /A wake was sent/, "the wake result does not say a wake was sent: " + JSON.stringify(r.status));
+  assert.equal(await storedThread(r.page), "t-new-2", "the new thread id is not stored");
+});
+
+test("an unknown code on the stored thread starts a new anchored thread, as upstream_error does", async (t) => {
+  const r = await pickIntoStoredFail(t, { code: "thread_full" }); if (!r) return;
+  assert.equal(r.s[0].threadId, "t-old", "the first send did not go to the stored thread");
+  assert.equal(r.s.length, 2, "an unknown code on the stored thread did not start one anchored retry: " + r.s.length + " send(s)");
+  assert.ok(r.s[1].anchor && r.s[1].anchor.tag === "H1", "the retry does not anchor at the h1");
+  assert.match(r.status, /A wake was sent/, "the wake result does not say a wake was sent: " + JSON.stringify(r.status));
+  assert.equal(await storedThread(r.page), "t-new-2", "the new thread id is not stored");
+});
+
+for (const code of NO_FALLBACK) {
+  test(`${code} on the stored thread sends once, shows ${code}, and keeps the thread`, async (t) => {
+    const r = await pickIntoStoredFail(t, { code }); if (!r) return;
+    assert.equal(r.s[0].threadId, "t-old", "the send did not go to the stored thread");
+    assert.equal(r.s.length, 1, `${code} on the stored thread started a second send: ${r.s.length} sends`);
+    assert.equal(await storedThread(r.page), "t-old", `${code} on the stored thread replaced the stored thread`);
+    assert.ok(r.status.includes("No session was told"), "the wake result does not say no session was told: " + JSON.stringify(r.status));
+    assert.ok(r.status.includes(code), `the wake result does not show the code ${code}: ` + JSON.stringify(r.status));
+    assert.doesNotMatch(r.status, NO_THREAD, "the wake result names a thread: " + JSON.stringify(r.status));
+  });
+}
+
+test("an upstream_error on the stored thread and on the anchored retry gives one retry and no third send", async (t) => {
+  const r = await pickIntoStoredFail(t, { code: "upstream_error", anchorFail: "upstream_error" }); if (!r) return;
+  assert.equal(r.s[0].threadId, "t-old", "the first send did not go to the stored thread");
+  assert.equal(r.s.length, 2, "expected the stored send and one anchored retry, got " + r.s.length + " send(s)");
+  assert.equal(await storedThread(r.page), "t-old", "a failed retry replaced the stored thread");
+  assert.ok(r.status.includes("No session was told"), "the wake result does not say no session was told: " + JSON.stringify(r.status));
+  assert.ok(r.status.includes("upstream_error"), "the wake result does not show upstream_error: " + JSON.stringify(r.status));
+  assert.doesNotMatch(r.status, NO_THREAD, "the wake result names a thread: " + JSON.stringify(r.status));
+});
+
+test("a claude_unavailable on a first send with no stored thread shows the code", async (t) => {
+  const page = await open(t, { comments: { can: "available", failCode: "claude_unavailable" } }); if (!page) return;
+  await takePick(page, DECISION); await send(page);
+  const status = await wakeStatus(page);
+  const s = await sent(page);
+  assert.equal(s.length, 1, "a first send with no stored thread did not go out once: " + s.length + " send(s)");
+  assert.ok(s[0].anchor, "the first send is not anchored");
+  assert.ok(status.includes("No session was told"), "the wake result does not say no session was told: " + JSON.stringify(status));
+  assert.ok(status.includes("claude_unavailable"), "the wake result does not show claude_unavailable: " + JSON.stringify(status));
+  assert.doesNotMatch(status, NO_THREAD, "the wake result names a thread: " + JSON.stringify(status));
 });
 
 test("a long note with control characters is cut to 4 KiB, keeps Owners, and is plain", async (t) => {
@@ -1585,7 +1685,7 @@ test("a canSendToClaude that never answers does not hold the send", async (t) =>
 test("Undo tells Claude the answers are withdrawn", async (t) => {
   const page = await open(t); if (!page) return;
   await takePick(page, DECISION); await send(page);
-  await told(page, "Claude was told");
+  await told(page, "A wake was sent");
   await page.locator("#undoBtn").click();
   await page.waitForFunction(() => window.__sent.length === 2);
   assert.match((await sent(page))[1].text, /Undone on the waiting page\. Owners: test thread\. Items: 27 are open again\./);
@@ -1671,7 +1771,7 @@ test("the template declares utf-8", () => {
 test("a failed receipt delete does not stop Undo, the page state or the notice", async (t) => {
   const page = await open(t, { receipts: { [DECISION.id]: { read: "2026-10-26T02:00:00Z" } }, failDeleteIn: "receipts" }); if (!page) return;
   await takePick(page, DECISION); await send(page);
-  await told(page, "Claude was told");
+  await told(page, "A wake was sent");
   await page.locator("#undoBtn").click();
   await page.waitForFunction(() => window.__sent.length === 2);
   assert.equal(await page.evaluate((id) => id in state.answers, DECISION.id), false, "the page still shows the item as sent");
@@ -1840,51 +1940,43 @@ const tierIds = async (page, k) => (await order(page)).find((x) => x[0] === "tie
 const seenOf = (page, it) => card(page, it).getAttribute("data-seen");
 const optsShown = (page, it) => card(page, it).locator(".opts").isVisible();
 
-test("a seen decision sinks under a new one in Whenever, and its options fold until the owner unfolds it", async (t) => {
+// An item the owner still owes never folds: only an answered card folds. Its options show with no fold control.
+test("a seen, owed decision sinks under a new one in Whenever, and its options show with no fold press", async (t) => {
   const seen = mk("seen-old", 1, { added: at(5) }), fresh = mk("fresh-new", 2, { added: at(20) });
   const page = await open(t, { items: [seen, fresh, sentItem()] }); if (!page) return;
   assert.deepEqual(await tierIds(page, "calm"), ["fresh-new", "seen-old"]);
   assert.equal(await seenOf(page, seen), "true", "the seen item is not marked seen");
   assert.notEqual(await seenOf(page, fresh), "true", "the new item is marked seen");
   assert.equal(await optsShown(page, fresh), true, "a new item's options are hidden");
-  const unfold = card(page, seen).locator("button.unfold");
-  assert.equal(await unfold.getAttribute("aria-expanded"), "false");
-  assert.equal(await optsShown(page, seen), false, "a seen item's options show before the owner unfolds it");
-  await unfold.click();
-  assert.equal(await unfold.getAttribute("aria-expanded"), "true");
-  assert.equal(await optsShown(page, seen), true, "unfold did not show the options");
+  assert.equal(await card(page, seen).locator("button.unfold").count(), 0, "a seen, owed decision has a fold control");
+  assert.equal(await optsShown(page, seen), true, "a seen, owed decision's options are hidden until a fold press");
 });
 
-test("a seen task's steps and command fold behind its unfold button, and unfold shows them", async (t) => {
+// A seen, owed task has no fold control: its steps and its command show at once.
+test("a seen, owed task's steps and command show with no fold press", async (t) => {
   const seen = { ...TASK, id: "seen-task", n: 37, title: "Seen task", added: at(5), steps: ["Open a terminal", "Paste the command and run it"], command: "echo seen" };
   const page = await open(t, { items: [seen, sentItem()] }); if (!page) return;
   assert.equal(await seenOf(page, seen), "true", "the seen task is not marked seen");
-  const unfold = card(page, seen).locator("button.unfold");
-  assert.equal(await unfold.getAttribute("aria-expanded"), "false");
-  assert.equal(await card(page, seen).locator("ol.steps").isVisible(), false, "a seen task's steps show before the owner unfolds it");
-  assert.equal(await card(page, seen).locator(".cmd").isVisible(), false, "a seen task's command shows before the owner unfolds it");
-  await unfold.click();
-  assert.equal(await unfold.getAttribute("aria-expanded"), "true");
-  assert.equal(await card(page, seen).locator("ol.steps").isVisible(), true, "unfold did not show the steps");
-  assert.equal(await card(page, seen).locator(".cmd").isVisible(), true, "unfold did not show the command");
+  assert.equal(await card(page, seen).locator("button.unfold").count(), 0, "a seen, owed task has a fold control");
+  assert.equal(await card(page, seen).locator("ol.steps").isVisible(), true, "a seen, owed task's steps are hidden");
+  assert.equal(await card(page, seen).locator(".cmd").isVisible(), true, "a seen, owed task's command is hidden");
 });
 
-test("a withdraw pending on a seen card that was answered on the page keeps its fold control locked open", async (t) => {
+// A seen card answered on the page, then changed to an empty draft (a withdraw pending), has no fold control to lock: its options stay open.
+test("a withdraw pending on a seen card that was answered on the page leaves no fold to lock, and its options stay open", async (t) => {
   const seen = mk("seen-answered", 1, { added: at(5) });
-  const page = await open(t, { items: [seen, sentItem()] }); if (!page) return;
-  const c = card(page, seen), unfold = c.locator("button.unfold");
+  const page = await open(t, { items: [seen, sentItem()], pageHtml: withSentMove("stay") }); if (!page) return;
+  const c = card(page, seen);
   assert.equal(await seenOf(page, seen), "true", "the card is not seen");
-  await unfold.click();
+  assert.equal(await c.locator("button.unfold").count(), 0, "a seen, owed card has a fold control");
   await choose(page, seen, "a");
   await send(page);
   await page.waitForFunction((id) => !!window.__answers()[id], seen.id);
   await c.getByRole("button", { name: "Change" }).click();
   await choose(page, seen, "a"); // the owner empties the draft: Send will withdraw the saved answer
   assert.equal(await page.locator("#send").textContent(), "Withdraw answer");
-  assert.equal(await unfold.getAttribute("aria-disabled"), "true", "a pending withdraw leaves the fold control unlocked");
-  assert.equal(await unfold.getAttribute("aria-expanded"), "true", "a pending withdraw let the fold close");
-  await unfold.click({ force: true }); // a press on the locked control must not close it
-  assert.equal(await unfold.getAttribute("aria-expanded"), "true", "the owner closed the fold with a withdraw pending");
+  assert.equal(await c.locator("button.unfold").count(), 0, "a seen card changed on the page has a fold control");
+  assert.equal(await optsShown(page, seen), true, "a seen card changed on the page hides its options under a pending withdraw");
 });
 
 test("a group seen at load counts as new once a member is added after load, and sorts in the new part", async (t) => {
@@ -1901,11 +1993,15 @@ test("a group seen at load counts as new once a member is added after load, and 
   for (const it of [a, b, late]) assert.ok(ids.indexOf("item-" + it.id) < divider, `${it.id} sorts below the seen divider`);
 });
 
-// Fold ids come from the number, so two open items that share a number must still get their own.
-test("two open items with the same number get unique fold ids", async (t) => {
-  const items = [mk("same-n-a", 7, { added: at(5) }), mk("same-n-b", 7, { added: at(5) })];
-  const page = await open(t, { items: [...items, sentItem()] }); if (!page) return;
-  for (const it of items) {
+// Fold ids come from the number, so two items that share a number must still get their own. The owed pair draws no fold control;
+// the answered pair folds, and each fold id is on one element.
+test("two items with the same number: owed ones draw no fold, and answered ones get unique fold ids", async (t) => {
+  const owed = [mk("same-n-a", 7, { added: at(5) }), mk("same-n-b", 7, { added: at(5) })];
+  const sunk = [mk("same-n-c", 7, { added: at(6), reply: "Thanks, noted." }), mk("same-n-d", 7, { added: at(6), reply: "Thanks, noted." })];
+  const page = await open(t, { items: [...owed, ...sunk], answers: { ...answerOf(sunk[0]), ...answerOf(sunk[1]) } }); if (!page) return;
+  for (const it of owed) assert.equal(await card(page, it).locator("button.unfold").count(), 0, `${it.id}: an owed item has a fold control`);
+  for (const it of sunk) {
+    await need(card(page, it).locator("button.unfold"), `${it.id}: an answered item with a reply has no fold control`);
     const target = await card(page, it).locator("button.unfold").getAttribute("aria-controls");
     const count = await page.evaluate((id) => document.querySelectorAll('[id="' + id + '"]').length, target);
     assert.equal(count, 1, `${it.id}: fold id "${target}" is on ${count} elements`);
@@ -1936,26 +2032,39 @@ test("the seen divider reads Asked before, and never claims a card is not answer
   assert.doesNotMatch(words, /not answered/i, "the divider claims a seen card is not answered");
 });
 
-test("a seen decision with one option says Show the 1 option, not 1 options", async (t) => {
-  const seen = mk("seen-one-option", 1, { added: at(5), options: [opt("a", "Red")] });
-  const page = await open(t, { items: [seen, sentItem()] }); if (!page) return;
-  const show = (await card(page, seen).locator(".uf-show").textContent()).trim();
-  assert.equal(show, "Show the 1 option", `the fold label reads "${show}"`);
+// A sunk card taken to Change draws its fold with the label of its parts. Each case reads that label off the fold.
+// A sunk decision with one option labels its fold in the singular.
+test("a sunk decision with one option, taken to Change, labels its fold Show the 1 option", async (t) => {
+  const it = mk("sunk-one-option", 1, { added: at(5), options: [opt("a", "Red")] });
+  const page = await open(t, { items: [it], answers: answerOf(it) }); if (!page) return;
+  assert.equal(await sectionOf(page, it), "tier-answered", `No. ${it.n} is not in the Answered section`);
+  await card(page, it).getByRole("button", { name: "Change" }).click();
+  const fold = card(page, it).locator("button.unfold");
+  await need(fold, `No. ${it.n} has no fold control after Change`);
+  assert.equal((await fold.locator(".uf-show").textContent()).trim(), "Show the 1 option", `the fold label of No. ${it.n} is not "Show the 1 option"`);
 });
 
-test("a seen task with one step says Show the 1 step, not 1 steps", async (t) => {
-  const seen = { ...TASK, id: "seen-one-step", n: 41, title: "One step", added: at(5), steps: ["Open a terminal"] };
-  const page = await open(t, { items: [seen, sentItem()] }); if (!page) return;
-  const show = (await card(page, seen).locator(".uf-show").textContent()).trim();
-  assert.equal(show, "Show the 1 step", `the fold label reads "${show}"`);
+// A sunk task with one step labels its fold in the singular.
+test("a sunk task with one step, taken to Change, labels its fold Show the 1 step", async (t) => {
+  const it = { ...TASK, id: "sunk-one-step", n: 41, title: "One step", added: at(5), steps: ["Open a terminal"] };
+  const page = await open(t, { items: [it], answers: { [it.id]: { item: it.id, n: it.n, at: ANSWERED_AT, done: true, note: "" } } }); if (!page) return;
+  assert.equal(await sectionOf(page, it), "tier-answered", `No. ${it.n} is not in the Answered section`);
+  await card(page, it).getByRole("button", { name: "Change" }).click();
+  const fold = card(page, it).locator("button.unfold");
+  await need(fold, `No. ${it.n} has no fold control after Change`);
+  assert.equal((await fold.locator(".uf-show").textContent()).trim(), "Show the 1 step", `the fold label of No. ${it.n} is not "Show the 1 step"`);
 });
 
-test("a seen task with no steps and no command names what folds, not a command or a zero count", async (t) => {
-  const seen = { ...TASK, id: "seen-bare", n: 42, title: "Bare task", added: at(5), steps: [] };
-  const page = await open(t, { items: [seen, sentItem()] }); if (!page) return;
-  const show = (await card(page, seen).locator(".uf-show").textContent()).trim();
-  assert.doesNotMatch(show, /command/i, `the fold label reads "${show}"`);
-  assert.doesNotMatch(show, /\b0 steps\b/, `the fold label counts steps that do not exist: "${show}"`);
+// A sunk task with no steps and no command has no count to show, so its fold names its own parts and no zero count.
+test("a sunk task with no steps and no command, taken to Change, labels its fold Show Mark done and the note, not a zero count", async (t) => {
+  const it = { ...TASK, id: "sunk-bare", n: 42, title: "Bare task", added: at(5), steps: [] };
+  const page = await open(t, { items: [it], answers: { [it.id]: { item: it.id, n: it.n, at: ANSWERED_AT, done: true, note: "" } } }); if (!page) return;
+  assert.equal(await sectionOf(page, it), "tier-answered", `No. ${it.n} is not in the Answered section`);
+  await card(page, it).getByRole("button", { name: "Change" }).click();
+  const fold = card(page, it).locator("button.unfold");
+  await need(fold, `No. ${it.n} has no fold control after Change`);
+  assert.equal((await fold.locator(".uf-show").textContent()).trim(), "Show Mark done and the note", `the fold label of No. ${it.n} is not "Show Mark done and the note"`);
+  assert.doesNotMatch(await card(page, it).textContent(), /\b0 steps\b/, `the card of No. ${it.n} counts steps that do not exist`);
 });
 
 test("a seen item sinks below a new one even when the seen item holds the higher rank", async (t) => {
@@ -2002,6 +2111,181 @@ test("a group with one new member is new as a whole, so a seen item in its tier 
   assert.notEqual(await seenOf(page, newer), "true", "the new member is marked seen");
 });
 
+// ---------------------------------------------------------------- a reply or a step since the last visit
+// An item is new when its replied time is later than both the owner's last Send and the
+// viewer's last visit (waiting.visit, an ISO time the page writes on load after it reads the marks). A roadmap step is new when
+// its updatedAt is later than that visit. Items and steps share the one visit time. A new answered card opens at load and
+// carries the mark; an owed card never folds. The mark uses the asks' green New answer style, so no case asserts a colour.
+const VISIT_AT = "2026-10-27T00:00:00Z";
+const VISIT = { "waiting.visit": VISIT_AT };
+// The page's clock for the cases that load a page: fixed, so the visit the page writes is known without the real clock.
+const LOAD_AT = "2026-11-06T18:00:00Z";
+// Later than the last Send (ANSWERED_AT, 2026-10-26T01:00Z) and later than the visit.
+const REPLIED_AT = "2026-10-28T09:00:00Z";
+const NEW_MARK = "New reply since your last Send";
+// An answered item with a reply. Its fold holds the note and the reply, so the fold has parts to open.
+const repliedCard = (over = {}) => mk("reply-sunk", 1, { added: at(5), reply: "Thanks, noted.", replied: REPLIED_AT, ...over });
+// The mark's name as a reader hears it: its aria-label, else its words (hidden tail included). Null when the card draws no mark.
+const markName = async (page, it) => {
+  const m = card(page, it).locator(".newmark");
+  if ((await m.count()) === 0) return null;
+  return m.first().evaluate((el) => (el.getAttribute("aria-label") || el.textContent).replace(/\s+/g, " ").trim());
+};
+
+// Case 1: a reply newer than the last Send and the visit opens the answered card at load, and the card carries the mark.
+test("an answered item whose reply is newer than the last Send and the last visit opens at load, with the New reply mark", async (t) => {
+  const it = repliedCard();
+  const page = await open(t, { items: [it], answers: answerOf(it, "a", { note: "Kept the red one." }), storage: VISIT }); if (!page) return;
+  assert.equal(await sectionOf(page, it), "tier-answered", `No. ${it.n} is not in the Answered section`);
+  const fold = card(page, it).locator("button.unfold");
+  await need(fold, `No. ${it.n} has no fold control`);
+  assert.equal(await fold.getAttribute("aria-expanded"), "true", `No. ${it.n} is folded on load, though its reply is newer than the last Send and the visit`);
+  assert.equal(await card(page, it).locator(".rnote").isVisible(), true, `No. ${it.n} hides its note on load`);
+  assert.equal(await markName(page, it), NEW_MARK, `No. ${it.n} draws no New reply mark`);
+});
+
+// Case 2: Change on the reopened card locks its fold open and keeps the mark for the visit.
+test("a Change on a reopened card keeps its fold locked open, and the New reply mark stays shown", async (t) => {
+  const it = repliedCard();
+  const page = await open(t, { items: [it], answers: answerOf(it, "a", { note: "Kept the red one." }), storage: VISIT }); if (!page) return;
+  const c = card(page, it), fold = c.locator("button.unfold");
+  await c.getByRole("button", { name: "Change" }).click();
+  await need(fold, `No. ${it.n} has no fold control after Change`);
+  assert.equal(await fold.getAttribute("aria-expanded"), "true", "Change left the fold closed");
+  assert.equal(await fold.getAttribute("aria-disabled"), "true", "Change left the fold unlocked");
+  assert.equal(await markName(page, it), NEW_MARK, `Change dropped the New reply mark on No. ${it.n}`);
+});
+
+// A reply older than the last Send stays folded, with no mark.
+test("a reply older than the last Send stays folded, with no New reply mark", async (t) => {
+  const it = repliedCard({ replied: "2026-10-26T00:30:00Z" });
+  const page = await open(t, { items: [it], answers: answerOf(it, "a", { note: "Kept the red one." }), storage: VISIT }); if (!page) return;
+  const fold = card(page, it).locator("button.unfold");
+  await need(fold, `No. ${it.n} has no fold control`);
+  assert.equal(await fold.getAttribute("aria-expanded"), "false", `No. ${it.n} opens on load for a reply older than the last Send`);
+  assert.equal(await markName(page, it), null, `No. ${it.n} draws a New reply mark for a reply older than the last Send`);
+});
+
+// A reply later than the last Send but earlier than the last visit stays folded, with no mark.
+test("a reply later than the last Send but earlier than the last visit stays folded, with no New reply mark", async (t) => {
+  const it = repliedCard({ replied: "2026-10-26T12:00:00Z" });
+  const page = await open(t, { items: [it], answers: answerOf(it, "a", { note: "Kept the red one." }), storage: VISIT }); if (!page) return;
+  const fold = card(page, it).locator("button.unfold");
+  await need(fold, `No. ${it.n} has no fold control`);
+  assert.equal(await fold.getAttribute("aria-expanded"), "false", `No. ${it.n} opens on load for a reply earlier than the last visit`);
+  assert.equal(await markName(page, it), null, `No. ${it.n} draws a New reply mark for a reply earlier than the last visit`);
+});
+
+// Case 3: a sunk item whose lastAnswer holds the owner's own answer, with no replied time, stays folded and draws no mark after a
+// Send on the open page. lastAnswer alone is no reply.
+test("a sunk item with lastAnswer set and no replied time stays folded with no New reply mark after a Send", async (t) => {
+  const sunk = mk("sunk-same", 1, { added: at(5), lastAnswer: { choice: "a", at: ANSWERED_AT, note: "" } }), fresh = mk("send-fresh", 2, { added: NEW_ADDED });
+  const page = await open(t, { items: [sunk, fresh], answers: answerOf(sunk), storage: VISIT, clock: LOAD_AT }); if (!page) return;
+  assert.equal(await sectionOf(page, sunk), "tier-answered", `No. ${sunk.n} is not in the Answered section`);
+  const fold = card(page, sunk).locator("button.unfold");
+  await need(fold, `No. ${sunk.n} has no fold control`);
+  assert.equal(await fold.getAttribute("aria-expanded"), "false", `No. ${sunk.n} is folded open on load with no replied time`);
+  assert.equal(await markName(page, sunk), null, `No. ${sunk.n} draws a New reply mark with no replied time`);
+  await choose(page, fresh, "b");
+  await send(page);
+  await written(page);
+  assert.equal(await fold.getAttribute("aria-expanded"), "false", `a Send on the open page opened No. ${sunk.n}`);
+  assert.equal(await markName(page, sunk), null, `a Send on the open page drew a New reply mark on No. ${sunk.n}`);
+});
+
+// Case 4: a Send on the open page moves no card and no mark. The card layout and the New reply mark read the same after it.
+test("a Send on the open page moves no card and no New reply mark", async (t) => {
+  const reply = repliedCard(), fresh = mk("send-open", 2, { added: NEW_ADDED });
+  const page = await open(t, { items: [reply, fresh], answers: answerOf(reply, "a", { note: "Kept the red one." }), storage: VISIT, clock: LOAD_AT, pageHtml: withSentMove("stay") }); if (!page) return;
+  assert.equal(await sectionOf(page, reply), "tier-answered", `No. ${reply.n} is not in the Answered section`);
+  const before = await layout(page), markBefore = await markName(page, reply);
+  assert.equal(markBefore, NEW_MARK, `No. ${reply.n} draws no New reply mark before the Send`);
+  await choose(page, fresh, "b");
+  await send(page);
+  await written(page);
+  await card(page, fresh).locator(".receipt").waitFor();
+  assert.deepEqual(await layout(page), before, "a Send on the open page moved a card");
+  assert.equal(await markName(page, reply), markBefore, `a Send on the open page changed the mark on No. ${reply.n}`);
+});
+
+// Case 5: a step updated after the visit draws open, and its row names the update.
+test("a step updated after the last visit draws open, and its row says Updated since your last visit", async (t) => {
+  const steps = stepsOf([["c1", "v2", 1, "active"], ["a2", "v2", 2, "todo"]]);
+  steps.a2.updatedAt = REPLIED_AT;
+  const page = await open(t, { pageHtml: phasePage(steps), storage: VISIT }); if (!page) return;
+  await assertBaked(page, steps);
+  await openStatus(page);
+  const row = page.locator('button[data-row="a2"]');
+  await need(row, "the step a2 has no row in the phase list");
+  assert.equal(await row.getAttribute("aria-expanded"), "true", "a2 draws closed though it was updated after the last visit");
+  assert.match(await page.locator("#s-a2").getAttribute("class"), /\bopen\b/, "a2's row does not carry the open class");
+  const label = await row.getAttribute("aria-label");
+  assert.match(label, /\. Updated since your last visit$/, `the row label is "${label}"`);
+});
+
+// A step updated before the last visit stays closed, with no Updated words.
+test("a step updated before the last visit stays closed, with no Updated words", async (t) => {
+  const steps = stepsOf([["c1", "v2", 1, "active"], ["a2", "v2", 2, "todo"]]);
+  const page = await open(t, { pageHtml: phasePage(steps), storage: VISIT }); if (!page) return;
+  await assertBaked(page, steps);
+  await openStatus(page);
+  const row = page.locator('button[data-row="a2"]');
+  await need(row, "the step a2 has no row in the phase list");
+  assert.equal(await row.getAttribute("aria-expanded"), "false", "a2 draws open though it was last updated before the visit");
+  assert.doesNotMatch(await row.getAttribute("aria-label"), /Updated since your last visit/, "a2's row names an update before the visit");
+});
+
+// Case 6: a replied time moves no card. The same page with and without replied draws every card in the same section and order.
+test("card order is the same with and without replied", async (t) => {
+  const plain = [mk("order-seen", 1, { added: at(5) }), mk("order-new", 2, { added: NEW_ADDED }), mk("order-sunk", 3, { added: at(6), reply: "Thanks, noted." })];
+  const dated = plain.map((it) => ({ ...it, replied: REPLIED_AT }));
+  const answers = answerOf(plain[2]);
+  const before = await open(t, { items: plain, answers, storage: VISIT }); if (!before) return;
+  const layoutBefore = await layout(before);
+  assert.equal(layoutBefore.length, 3, "the page did not draw the three cards");
+  const after = await open(t, { items: dated, answers, storage: VISIT }); if (!after) return;
+  assert.deepEqual(await layout(after), layoutBefore, "a replied time moved a card");
+});
+
+// Case 7: after load, waiting.visit holds the load's time. The page's clock is fixed at LOAD_AT, so the time the page writes is
+// LOAD_AT. The stored visit starts at VISIT_AT, earlier than LOAD_AT, so a page that writes nothing fails here.
+test("after load, waiting.visit holds an ISO time no earlier than the load's start", async (t) => {
+  const page = await open(t, { storage: VISIT, clock: LOAD_AT }); if (!page) return;
+  const visit = await page.evaluate(() => localStorage.getItem("waiting.visit"));
+  assert.match(visit ?? "", /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z$/, `waiting.visit is "${visit}", not an ISO time`);
+  assert.ok(Date.parse(visit) >= Date.parse(LOAD_AT), `waiting.visit is "${visit}", earlier than the load's start ${LOAD_AT}`);
+});
+
+// Case 8: with storage kept, the first load marks the card and the step, and a reload after it marks neither. The first load's
+// checks run first, so a page that marks nothing fails there, not at the reload.
+test("a reload that keeps storage drops the first load's marks: the card and the step fold and close again", async (t) => {
+  const it = repliedCard();
+  const steps = stepsOf([["c1", "v2", 1, "active"], ["a2", "v2", 2, "todo"]]);
+  steps.a2.updatedAt = REPLIED_AT;
+  const page = await open(t, { pageHtml: phasePage(steps), items: [it], answers: answerOf(it, "a", { note: "Kept the red one." }), storage: VISIT, keepStorage: true, clock: LOAD_AT }); if (!page) return;
+  const fold = card(page, it).locator("button.unfold");
+  await need(fold, `No. ${it.n} has no fold control on the first load`);
+  assert.equal(await fold.getAttribute("aria-expanded"), "true", "the first load does not open the reply card");
+  assert.equal(await markName(page, it), NEW_MARK, `the first load draws no New reply mark on No. ${it.n}`);
+  await openStatus(page);
+  const row = page.locator('button[data-row="a2"]');
+  await need(row, "the step a2 has no row in the phase list");
+  assert.equal(await row.getAttribute("aria-expanded"), "true", "the first load does not open the updated step");
+  // The reload runs the page's load again, with the visit the first load wrote (storage is kept, not reset).
+  await page.reload();
+  await page.waitForFunction("state.items.length > 0");
+  await page.waitForSelector(`#item-${it.id}`);
+  assert.equal(await markName(page, it), null, `after a reload No. ${it.n} still draws the New reply mark`);
+  const again = card(page, it).locator("button.unfold");
+  await need(again, `No. ${it.n} has no fold control after a reload`);
+  assert.equal(await again.getAttribute("aria-expanded"), "false", "after a reload the reply card is open again");
+  await openStatus(page);
+  const rowAgain = page.locator('button[data-row="a2"]');
+  await need(rowAgain, "the step a2 has no row after a reload");
+  assert.equal(await rowAgain.getAttribute("aria-expanded"), "false", "after a reload the updated step is open again");
+  assert.doesNotMatch(await rowAgain.getAttribute("aria-label"), /Updated since your last visit/, "after a reload the updated step still says Updated");
+});
+
 // ---------------------------------------------------------------- answered sink
 
 // An answered item sinks to the Answered section: after the open tiers, before Arbiter rulings, folded to its answer line.
@@ -2020,6 +2304,146 @@ const sectionIds = (page) => page.evaluate(() => [...document.querySelectorAll("
 const layout = (page) => page.evaluate(() => [...document.querySelectorAll("article.card")].map((c) => [c.closest("section.tier")?.id ?? null, c.id]));
 // The href of the rail row that a chip sits in, or null.
 const railRowOf = (page, it) => page.evaluate((id) => { const c = document.getElementById("c-" + id); const row = c && c.closest(".ov-tier"); const a = row && row.querySelector("a.ov-head"); return a ? a.getAttribute("href") : null; }, it.id);
+
+// ---------------------------------------------------------------- answered sink: arrivals on top, and a card sent on this visit
+// The names start "answered-sink:", so `--test-name-pattern answered-sink:` runs this block. An arrival (an item not on the page at load)
+// goes to the top of its tier under either SENT_MOVE value. Cards that are open at load keep today's order.
+// The chip ids of a tier's rail row, in order; [] when the row is absent.
+const railChipsIn = (page, k) => page.evaluate((key) => {
+  const head = document.querySelector(`#rail a.ov-head[href="#tier-${key}"]`);
+  const row = head && head.closest(".ov-tier");
+  return row ? [...row.querySelectorAll(".chips-n .nchip")].map((c) => c.id.slice(2)) : [];
+}, k);
+// Resolves once the store holds an answer for each id.
+const waitAnswered = (page, ids) => page.waitForFunction((list) => list.every((id) => !!window.__answers()[id]), ids);
+
+// Case 1: three cards answered on this visit and one open card, all ranked at load. An item that arrives after load is first in its tier
+// and first in its tier's rail row, under each value. Only the arrival's place is asserted: the order of the load-time cards is SENT_MOVE's to set.
+for (const value of ["stay", "sink"]) {
+  test(`answered-sink: an item that arrives after load is first in its tier and in its rail row, above the cards answered on this visit (SENT_MOVE ${value})`, async (t) => {
+    const sent = [1, 2, 3].map((n) => mk("arr-sent-" + n, n, { added: at(n), rank: n }));
+    const open1 = mk("arr-open", 4, { added: at(4), rank: 4 });
+    const page = await open(t, { items: [...sent, open1], pageHtml: withSentMove(value) }); if (!page) return;
+    for (const it of sent) await choose(page, it, "a");
+    await send(page);
+    await waitAnswered(page, sent.map((it) => it.id));
+    const arrival = mk("arr-new", 9, { added: at(28) });
+    await page.evaluate((it) => window.__putItem(it), arrival);
+    await card(page, arrival).waitFor();
+    assert.equal(await sectionOf(page, arrival), "tier-calm", `No. ${arrival.n} is not in the open tier`);
+    assert.equal((await cardsIn(page, "#tier-calm"))[0], arrival.id, `No. ${arrival.n} is not first in its tier`);
+    assert.equal((await railChipsIn(page, "calm"))[0], arrival.id, `No. ${arrival.n}'s rail chip is not first in its tier's row`);
+  });
+}
+
+// Case 2, sink: a card sent on this visit moves to the Answered section, folded. The next open card takes its slot in the tier.
+test("answered-sink: a card sent on this visit moves to the Answered section, folded, and the open cards keep their order (SENT_MOVE sink)", async (t) => {
+  const sent = mk("send-sink", 1, { added: at(1) }), o1 = mk("send-open-1", 2, { added: at(2) }), o2 = mk("send-open-2", 3, { added: at(3) });
+  const page = await open(t, { items: [sent, o1, o2], pageHtml: withSentMove("sink") }); if (!page) return;
+  // A note gives the sunk card a fold with something in it; a fold with nothing to hide would say something false.
+  await choose(page, sent, "a");
+  await addNote(page, sent, "Kept it.");
+  await send(page);
+  await waitAnswered(page, [sent.id]);
+  await card(page, sent).locator(".receipt").waitFor();
+  assert.equal(await sectionOf(page, sent), "tier-answered", `No. ${sent.n} did not move to the Answered section after its Send`);
+  const fold = card(page, sent).locator("button.unfold");
+  await need(fold, `No. ${sent.n} has no fold control in the Answered section`);
+  assert.equal(await fold.getAttribute("aria-expanded"), "false", `No. ${sent.n} is not folded after its Send`);
+  assert.deepEqual(await cardsIn(page, "#tier-calm"), [o1.id, o2.id], `the open cards of the tier do not hold their order above the sent card`);
+  assert.deepEqual(await railChipsIn(page, "calm"), [o1.id, o2.id], "the open tier's rail chips do not follow its cards");
+  assert.ok((await railChipsIn(page, "answered")).includes(sent.id), `No. ${sent.n}'s rail chip is not in the Answered row`);
+});
+
+// Case 2, stay: a card sent on this visit keeps its place in its tier, and so do its rail chips. This is today's order.
+test("answered-sink: a card sent on this visit keeps its place in its tier, and its rail chips keep theirs (SENT_MOVE stay)", async (t) => {
+  const sent = mk("send-stay", 1, { added: at(1) }), o1 = mk("send-stay-1", 2, { added: at(2) }), o2 = mk("send-stay-2", 3, { added: at(3) });
+  const page = await open(t, { items: [sent, o1, o2], pageHtml: withSentMove("stay") }); if (!page) return;
+  const before = await layout(page), chipsBefore = await railChipsIn(page, "calm");
+  await choose(page, sent, "a");
+  await send(page);
+  await waitAnswered(page, [sent.id]);
+  await card(page, sent).locator(".receipt").waitFor();
+  assert.deepEqual(await layout(page), before, "a Send on the open page moved a card");
+  assert.deepEqual(await railChipsIn(page, "calm"), chipsBefore, "a Send moved a rail chip");
+});
+
+// Change on a card sent this visit (SENT_MOVE sink): the card reopens in place, in the Answered section, as a Change on a sunk card does.
+test("answered-sink: a Change on a card sent this visit reopens it in place in the Answered section, its fold locked open (SENT_MOVE sink)", async (t) => {
+  const sent = mk("change-sent", 1, { added: at(1) }), o1 = mk("change-open", 2, { added: at(2) });
+  const page = await open(t, { items: [sent, o1], pageHtml: withSentMove("sink") }); if (!page) return;
+  await choose(page, sent, "a");
+  await addNote(page, sent, "Kept it."); // a note gives the sunk card a fold, as in the case above
+  await send(page);
+  await waitAnswered(page, [sent.id]);
+  await card(page, sent).locator(".receipt").waitFor();
+  assert.equal(await sectionOf(page, sent), "tier-answered", `No. ${sent.n} did not move to the Answered section after its Send`);
+  const answeredBefore = await cardsIn(page, "#tier-answered");
+  const c = page.locator(`#tier-answered #item-${sent.id}`);
+  await c.getByRole("button", { name: "Change" }).click();
+  assert.equal(await sectionOf(page, sent), "tier-answered", `Change moved No. ${sent.n} out of the Answered section`);
+  assert.deepEqual(await cardsIn(page, "#tier-answered"), answeredBefore, "Change moved a card within the Answered section");
+  const fold = c.locator("button.unfold");
+  await need(fold, `No. ${sent.n} has no fold control after Change`);
+  assert.equal(await fold.getAttribute("aria-expanded"), "true", "Change left the fold closed");
+  assert.equal(await fold.getAttribute("aria-disabled"), "true", "Change left the fold unlocked");
+  assert.equal(await c.locator(".opts").isVisible(), true, "the options did not open under Change");
+});
+
+// Case 3: the arrival is first before a reload. After a reload with the same data it is in its normal rank and age place, and the cards
+// saved before the load sit in the Answered section.
+test("answered-sink: a reload with the same data puts the former arrival in its normal rank and age place, and the sunk cards in the Answered section", async (t) => {
+  const sent = [1, 2].map((n) => mk("rl-sent-" + n, n, { added: at(n) }));
+  const open1 = mk("rl-open", 3, { added: at(3), rank: 1 });
+  const page = await open(t, { items: [...sent, open1] }); if (!page) return;
+  for (const it of sent) await choose(page, it, "a");
+  await send(page);
+  await waitAnswered(page, sent.map((it) => it.id));
+  const arrival = mk("rl-arrival", 9, { added: at(28) });
+  await page.evaluate((it) => window.__putItem(it), arrival);
+  await card(page, arrival).waitFor();
+  assert.equal((await cardsIn(page, "#tier-calm"))[0], arrival.id, `No. ${arrival.n} is not first in its tier before the reload`);
+  const again = await open(t, { items: [...sent, open1, arrival], answers: await answers(page) }); if (!again) return;
+  for (const it of sent) assert.equal(await sectionOf(again, it), "tier-answered", `No. ${it.n}, saved before the load, is not in the Answered section`);
+  assert.deepEqual(await cardsIn(again, "#tier-calm"), [open1.id, arrival.id], "after the reload the former arrival is not in its normal rank and age place");
+});
+
+// Case 4 (regression): a saved card with a lane sinks at load, folded, with its Filing pending pill and "waits on lane" said once.
+// A sunk card with no note, last answer or reply has nothing to fold, so it draws no fold control.
+test("answered-sink: a sunk card with no note, last answer or reply shows no fold control", async (t) => {
+  const it = mk("bare-sunk", 1, { added: at(5) }), other = mk("bare-open", 2, { added: NEW_ADDED });
+  const page = await open(t, { items: [it, other], answers: answerOf(it) }); if (!page) return;
+  assert.equal(await sectionOf(page, it), "tier-answered", `No. ${it.n} is not in the Answered section`);
+  assert.equal(await card(page, it).locator("button.unfold").count(), 0, `No. ${it.n} draws a fold control with nothing to hide`);
+});
+
+test("answered-sink: a saved card with a lane sinks at load, folded, with its Filing pending pill and its lane said once", async (t) => {
+  const it = mk("lane-sunk", 1, { added: at(5), lane: "ci-done-comment" }), other = mk("lane-open", 2, { added: NEW_ADDED });
+  const page = await open(t, { items: [it, other], answers: answerOf(it, "a", { note: "Kept the red one." }) }); if (!page) return;
+  assert.equal(await sectionOf(page, it), "tier-answered", `No. ${it.n} is not in the Answered section`);
+  const c = card(page, it), fold = c.locator("button.unfold");
+  await need(fold, `No. ${it.n} has no fold control`);
+  assert.equal(await fold.getAttribute("aria-expanded"), "false", `No. ${it.n} is not folded at load`);
+  assert.match(flat(await c.locator(".top").innerText()), /Filing pending, sent .*waits on lane ci-done-comment$/, `No. ${it.n}'s top row is not Filing pending, sent, then the lane`);
+  const said = (await c.textContent()).split("waits on lane").length - 1;
+  assert.equal(said, 1, `No. ${it.n} says "waits on lane" ${said} times`);
+});
+
+// Case 5 (regression, #1345): a reply that arrives on a card sunk at load opens its fold in place. No card moves.
+test("answered-sink: a reply that arrives on a card sunk at load opens its fold in place, and no card moves", async (t) => {
+  const it = mk("live-reply", 1, { added: at(5) }), other = mk("live-open", 2, { added: NEW_ADDED });
+  const page = await open(t, { items: [it, other], answers: answerOf(it, "a", { note: "Kept the red one." }), storage: VISIT }); if (!page) return;
+  assert.equal(await sectionOf(page, it), "tier-answered", `No. ${it.n} is not in the Answered section`);
+  const fold = card(page, it).locator("button.unfold");
+  await need(fold, `No. ${it.n} has no fold control`);
+  assert.equal(await fold.getAttribute("aria-expanded"), "false", `No. ${it.n} is open before any reply`);
+  const before = await layout(page);
+  await page.evaluate((item) => window.__putItem(item), { ...it, reply: "Thanks, noted.", replied: REPLIED_AT });
+  await page.waitForFunction((id) => document.querySelector(`#item-${id} button.unfold`)?.getAttribute("aria-expanded") === "true", it.id).catch(() => {});
+  assert.equal(await fold.getAttribute("aria-expanded"), "true", `a reply that arrived on the open page did not open No. ${it.n}`);
+  assert.equal(await markName(page, it), NEW_MARK, `No. ${it.n} draws no New reply mark for its new reply`);
+  assert.deepEqual(await layout(page), before, "the reply moved a card");
+});
 
 test("an answered item sinks to the Answered section, after the open tiers and before Arbiter rulings, folded to its answer line", async (t) => {
   const ans = mk("sink-ans", 1, { added: at(5) }), open1 = mk("sink-open", 2, { added: NEW_ADDED });
@@ -2048,7 +2472,7 @@ test("an answered item already filed stays in the Answered section, with the fil
 
 test("an open card answered on the page stays in its tier until reload, and a fresh load sinks it to the Answered section", async (t) => {
   const it = mk("order-send", 1, { added: at(5) }), other = mk("order-other", 2, { added: NEW_ADDED });
-  const page = await open(t, { items: [it, other] }); if (!page) return;
+  const page = await open(t, { items: [it, other], pageHtml: withSentMove("stay") }); if (!page) return;
   await choose(page, it, "a");
   await send(page);
   await page.waitForFunction((id) => !!window.__answers()[id], it.id);
@@ -2172,7 +2596,7 @@ test("Answered section: with the section folded by its head, a rail chip of a su
 
 test("Answered section: a Send made before the first receipts snapshot keeps its card in its tier when the receipts arrive", async (t) => {
   const it = mk("window-send", 1, { added: at(5) }), other = mk("window-other", 2, { added: NEW_ADDED });
-  const page = await open(t, { items: [it, other], holdReceipts: true }); if (!page) return;
+  const page = await open(t, { items: [it, other], holdReceipts: true, pageHtml: withSentMove("stay") }); if (!page) return;
   await choose(page, it, "a");
   await send(page);
   await page.waitForFunction((id) => !!window.__answers()[id], it.id);
@@ -2281,11 +2705,46 @@ async function mustHave(page, sel, what) {
   assert.equal(n, 1, `no ${what}: ${sel} is missing`);
 }
 // A text the page shows, as its box. A text the page does not show fails with the text named.
-async function shownBox(page, text) {
-  const loc = page.getByText(text, { exact: typeof text === "string" }).first();
+// scope: a selector the text must sit under, such as DIS_SHOWN. A Dismissed line keeps the thread's text in its .dt span, so a check that means the thread is shown passes a scope.
+async function shownBox(page, text, scope = "") {
+  const loc = (scope ? page.locator(scope) : page).getByText(text, { exact: typeof text === "string" }).first();
   const shown = await loc.waitFor({ state: "visible", timeout: 3000 }).then(() => true, () => false);
   assert.ok(shown, `the page does not show: ${text}`);
   return loc.boundingBox();
+}
+
+// The stack under the box, from the design (docs/design/page-ask-queue-notes.md): Add to list is #askAdd, Undo is #askUndo,
+// Send stays #askSend, the list is ol.stack under the heading "Not sent yet", and the line under the buttons is .sline.
+// A row's buttons are found by the names the design gives them: "Edit ask N", "Remove ask N", "Done", "Undo remove".
+const ASK = { box: "#askText", add: "#askAdd", send: "#askSend", undo: "#askUndo", rows: "ol.stack > li", words: "ol.stack > li .stext", ask: "li.askc" };
+const stackWords = (page) => page.locator(ASK.words).allInnerTexts();
+const askWrites = (page) => page.evaluate(() => window.__log.filter((l) => l[0] === "set" && l[1] === "asks").map((l) => l[3]));
+// Each waits, up to 1.5 s, for the store to hold n writes or deletes. The caller asserts the count, so a wait that gives up fails by name.
+const waitAskWrites = (page, n) => page.waitForFunction((k) => window.__log.filter((l) => l[0] === "set" && l[1] === "asks").length >= k, n, { timeout: 1500 }).catch(() => {});
+const waitAskDeletes = (page, n) => page.waitForFunction((k) => window.__log.filter((l) => l[0] === "delete" && l[1] === "asks").length >= k, n, { timeout: 1500 }).catch(() => {});
+// Whether the line under the buttons holds the words, once it shows them or at 3 s. Never throws, so a missing line fails by name.
+const lineHas = (page, words) => page.waitForFunction((w) => { const l = document.querySelector("#asks .sline"); return !!l && l.textContent.includes(w); }, words, { timeout: 3000 }).then(() => true, () => false);
+// A button found by its accessible name. A missing one fails by name, as mustHave does.
+async function mustHaveNamed(scope, name, what) {
+  const n = await scope.getByRole("button", { name, exact: true }).first().waitFor({ state: "attached", timeout: 3000 }).then(() => 1, () => 0);
+  assert.equal(n, 1, `no ${what}: no button named "${name}"`);
+}
+// Types an ask and presses Add to list: the words leave the box and wait in the list, and nothing is written.
+async function addToList(page, text) {
+  await mustHave(page, ASK.box, "Ask box");
+  await page.fill(ASK.box, text);
+  await mustHave(page, ASK.add, "Add to list button");
+  await page.click(ASK.add);
+}
+// Types an ask and presses Send, then waits for its write. The button must be on, so a press that cannot go fails by name.
+async function sendTyped(page, text) {
+  await mustHave(page, ASK.box, "Ask box");
+  await page.fill(ASK.box, text);
+  await mustHave(page, ASK.send, "Send ask button");
+  assert.equal(await page.locator(ASK.send).isDisabled(), false, `Send ask is off with "${text}" typed`);
+  const before = (await askWrites(page)).length;
+  await page.click(ASK.send);
+  await waitAskWrites(page, before + 1);
 }
 
 test("Send ask writes asks/<id> with only the id, the text and the time", async (t) => {
@@ -2307,7 +2766,7 @@ test("Send ask writes asks/<id> with only the id, the text and the time", async 
   assert.deepEqual(log.filter((l) => l[0] === "set" && l[1] !== "asks"), [], "Send wrote another collection");
 });
 
-test("Undo deletes asks/<id> and puts the text back in the box", async (t) => {
+test("Undo deletes asks/<id> and puts the ask back in the list, and the box keeps what was typed", async (t) => {
   const page = await open(t); if (!page) return;
   await mustHave(page, "#askText", "Ask box");
   await page.fill("#askText", ASK_TEXT);
@@ -2320,7 +2779,9 @@ test("Undo deletes asks/<id> and puts the text back in the box", async (t) => {
   await page.waitForFunction(() => window.__log.some((l) => l[0] === "delete" && l[1] === "asks"));
   const dels = await page.evaluate(() => window.__log.filter((l) => l[0] === "delete" && l[1] === "asks").map((l) => l[2]));
   assert.deepEqual(dels, [key], "Undo deleted " + JSON.stringify(dels) + ", not " + key);
-  assert.equal(await page.inputValue("#askText"), ASK_TEXT, "Undo did not put the text back in the box");
+  // Undo puts the ask back in the list; the box is the owner's and Undo never writes it.
+  assert.equal(await page.inputValue("#askText"), "", "Undo put the text back in the box, not the list: " + JSON.stringify(await page.inputValue("#askText")));
+  assert.deepEqual(await stackWords(page), [ASK_TEXT], "Undo did not put the ask back in the list");
 });
 
 test("the asks list is newest first by at, whatever order the records came in", async (t) => {
@@ -2380,7 +2841,7 @@ test("the Ask section never shows the text null, in the waiting, answered and se
   await mustHave(page, "#askSend", "Send ask button");
   await page.click("#askSend");
   await page.waitForFunction(() => window.__log.some((l) => l[0] === "set" && l[1] === "asks"));
-  await page.waitForFunction(() => document.getElementById("askHint").textContent.includes("Sent"));
+  assert.ok(await lineHas(page, "Sent"), "the sent state shows no line under the buttons");
   const sent = await stray();
   assert.equal(sent, "", "the sent state shows the text null: " + JSON.stringify(sent));
 });
@@ -2434,8 +2895,7 @@ test("Send ask never cuts a text over 4000 characters: it stores the full text, 
   assert.ok(hint && hint !== short.trim() && await page.locator("#askHint").isVisible(), "Send ask wrote nothing and showed no notice");
 });
 
-test("Undo after more typing in the 8-second window never restores a box over 4000 characters without a notice", async (t) => {
-  const UNDO_NOTE = "Undone. Your ask is back in the box.";
+test("Undo after more typing in the 8-second window keeps the typed words in the box and puts the whole ask back in the list", async (t) => {
   const page = await open(t); if (!page) return;
   const sent = "0123456789".repeat(395); // 3950 characters: under the limit, so Send takes it whole
   await mustHave(page, "#askText", "Ask box");
@@ -2448,10 +2908,10 @@ test("Undo after more typing in the 8-second window never restores a box over 40
   await page.fill("#askText", typed);
   await page.click("#askUndo");
   await page.waitForFunction(() => window.__log.some((l) => l[0] === "delete" && l[1] === "asks"));
-  const value = await page.inputValue("#askText");
-  const hint = (await page.textContent("#askHint")).trim();
-  const noticed = !!hint && hint !== UNDO_NOTE && await page.locator("#askHint").isVisible();
-  assert.ok(value.length <= 4000 || noticed, `Undo restored ${value.length} characters, over 4000, with no notice`);
+  // Undo never writes the box, so the typed words stay as typed, and the whole 3950-character ask is back in the list.
+  assert.equal(await page.inputValue("#askText"), typed, "Undo changed the typed words in the box");
+  const back = await stackWords(page);
+  assert.deepEqual(back.map((w) => w.length), [sent.length], `Undo put back ${JSON.stringify(back.map((w) => w.length))} characters in the list, not ${sent.length}`);
 });
 
 test("Ctrl+Enter with focus on Send ask writes no answer while an answer is staged", async (t) => {
@@ -2508,13 +2968,1093 @@ test("Copy ask after a failed write changes the hint to the copy result", async 
   await page.fill("#askText", ASK_TEXT);
   await mustHave(page, "#askSend", "Send ask button");
   await page.click("#askSend");
-  await page.locator("#askHint", { hasText: "Not saved" }).waitFor();
+  assert.ok(await lineHas(page, "Not saved"), "the not-saved words are not on the line under the buttons");
   await page.evaluate(() => { Object.defineProperty(navigator, "clipboard", { value: { writeText: async (s) => { window.__copied = s; } } }); });
   await mustHave(page, "#askCopy", "Copy ask button");
   await page.click("#askCopy");
   await page.waitForFunction(() => /Copied\. Paste it in chat\.|Select and copy the text in the box\./.test(document.getElementById("askHint").textContent), null, { timeout: 1500 }).catch(() => {});
   const hint = (await page.textContent("#askHint")).trim();
   assert.match(hint, /Copied\. Paste it in chat\.|Select and copy the text in the box\./, "after Copy ask the hint still says: " + JSON.stringify(hint));
+});
+
+// ---------------------------------------------------------------- reply to an answered ask (step ask-reply-back)
+// Contract: docs/design/ask-reply-back-notes.md, sections 1-8; the mockup is docs/design/ask-reply-back.html.
+// A reply is one new asks/<id> record {id, text, at, re}, sent through the Ask box's path: one Undo lock, one wake comment.
+// Per thread, keyed by the root ask id <k>: #reply-<k> (Reply), form #rf-<k>, textarea #rt-<k>, hint #rh-<k>,
+// Close #rx-<k>, Send reply #rs-<k>, Copy reply #rc-<k>. The thread's line is .sline in .replyend; its Undo is #askUndo.
+const RPL_ROOT = ASK_ANSWERED.id;
+const RPL_TEXT = "Did round 3 change the rail guard?";
+// ASK_ANSWERED is answered after RPL_NEW, so it opens as a new answer. Every answer is before RPL_SEEN, so each one folds.
+const RPL_NEW = { "waiting.askSeen": "2026-10-29T00:00:00Z" };
+const RPL_SEEN = { "waiting.askSeen": "2026-10-31T00:00:00Z" };
+const RPL_ISO = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/;
+// An answer a session gave to a reply: a reply to it names this record in re, not the root ask.
+const RPL_DEEP = { id: "ask-rpl-deep", text: "Is the rail guard still unchanged?", at: "2026-10-31T08:00:00Z", re: RPL_ROOT, owner: "lane tier-fold", answered: "2026-10-31T09:00:00Z", reply: "No. The rail guard is unchanged." };
+const rplKeys = (page) => page.evaluate(() => window.__log.filter((l) => l[0] === "set" && l[1] === "asks").map((l) => l[2]));
+const rplLast = async (page) => (await rplKeys(page)).at(-1);
+// Whether the page sends a wake comment with these words, once it has or at 3 s. Never throws, so a missing comment fails by name.
+const wakeHas = (page, words) => page.waitForFunction((w) => window.__sent.some((s) => String(s.text).includes(w)), words, { timeout: 3000 }).then(() => true, () => false);
+// Whether the line under the reply's thread holds the words, once it shows them or at 3 s. Never throws.
+const rplLineHas = (page, words) => page.waitForFunction((w) => { const l = document.querySelector(".replyend .sline"); return !!l && l.textContent.includes(w); }, words, { timeout: 3000 }).then(() => true, () => false);
+// Presses Reply on the answered ask and waits for its box. A Reply that is not there fails by name.
+async function openReply(page, root) {
+  await mustHave(page, `#reply-${root}`, "Reply control on the answered ask");
+  await page.click(`#reply-${root}`);
+  await mustHave(page, `#rt-${root}`, "reply box");
+}
+// Presses Send reply in the open box, then waits for its write. The button must be on, so a press that cannot go fails by name.
+async function sendReply(page, root) {
+  await mustHave(page, `#rs-${root}`, "Send reply button");
+  assert.equal(await page.locator(`#rs-${root}`).isDisabled(), false, "Send reply is off with the reply typed");
+  const before = (await askWrites(page)).length;
+  await page.click(`#rs-${root}`);
+  await waitAskWrites(page, before + 1);
+}
+async function replyTo(page, root, text) {
+  await openReply(page, root);
+  await page.fill(`#rt-${root}`, text);
+  await sendReply(page, root);
+}
+
+test("reply to an answer: Reply shows only on an unfolded answered ask, not on a waiting ask or a folded row", async (t) => {
+  const seen = { id: "ask-rpl-seen", text: "A seen answer", at: "2026-10-27T09:00:00Z", owner: "triage", answered: "2026-10-27T10:00:00Z", reply: "A seen reply." };
+  const waiting = { id: "ask-rpl-wait", text: "A question still waiting", at: "2026-10-31T08:00:00Z" };
+  const page = await open(t, { dbExtra: { asks: { [RPL_ROOT]: ASK_ANSWERED, [seen.id]: seen, [waiting.id]: waiting } }, storage: RPL_NEW }); if (!page) return;
+  // Each card is on the page before its Reply is looked for, so an absent Reply is a missing one.
+  await shownBox(page, ASK_ANSWERED.reply);
+  await mustHave(page, `#reply-${RPL_ROOT}`, "Reply on the unfolded answered ask");
+  assert.equal(await page.getAttribute(`#reply-${RPL_ROOT}`, "aria-controls"), `rf-${RPL_ROOT}`, "Reply does not control its reply box");
+  const atEnd = await page.locator(`#reply-${RPL_ROOT}`).evaluate((b) => { const li = b.closest("li.askc"), end = b.closest(".replyend"), th = li && li.querySelector(".thread"); return !!end && !!th && !!(th.compareDocumentPosition(end) & Node.DOCUMENT_POSITION_FOLLOWING); });
+  assert.equal(atEnd, true, "Reply is not at the end of its thread, after .thread");
+  await shownBox(page, waiting.text);
+  assert.equal(await page.locator(`#reply-${waiting.id}`).count(), 0, "Reply shows on a waiting ask");
+  await shownBox(page, seen.text);
+  await mustHave(page, `button.frow[data-ask="${seen.id}"]`, "folded row of the seen answer");
+  assert.equal(await page.locator(`#reply-${seen.id}`).count(), 0, "Reply shows on a folded row");
+  await page.click(`button.frow[data-ask="${seen.id}"]`);
+  await mustHave(page, `#reply-${seen.id}`, "Reply after Show answer on the seen answer");
+});
+
+test("reply to an answer: Send reply writes one asks record {id, text, at, re} and nothing else, and the parent is never written", async (t) => {
+  const page = await open(t, { dbExtra: { asks: { [RPL_ROOT]: ASK_ANSWERED } }, storage: RPL_NEW }); if (!page) return;
+  await replyTo(page, RPL_ROOT, RPL_TEXT);
+  const log = await page.evaluate(() => window.__log);
+  const writes = log.filter((l) => l[0] === "set" || l[0] === "delete");
+  assert.deepEqual(writes.map((l) => [l[0], l[1]]), [["set", "asks"]], "Send reply made these writes: " + JSON.stringify(writes.map((l) => [l[0], l[1]])));
+  const [, , key, body] = writes[0];
+  assert.match(key, /^ask-[0-9a-z]+$/, "the key is not ask-<id>: " + key);
+  assert.deepEqual(Object.keys(body).sort(), ["at", "id", "re", "text"], "the record holds " + Object.keys(body).join(", "));
+  assert.equal(body.id, key, "the id field is not the key");
+  assert.equal(body.text, RPL_TEXT, "the text is not the owner's words");
+  assert.equal(body.re, RPL_ROOT, "re is " + JSON.stringify(body.re) + ", not the ask the reply follows");
+  assert.match(body.at, RPL_ISO, "at is not an ISO time: " + body.at);
+  assert.equal(log.some((l) => l[2] === RPL_ROOT), false, "the parent record was written or deleted");
+});
+
+test("reply to an answer: a reply to a reply's answer names that newest answered record in re, not the root ask", async (t) => {
+  const page = await open(t, { dbExtra: { asks: { [RPL_ROOT]: ASK_ANSWERED, [RPL_DEEP.id]: RPL_DEEP } }, storage: RPL_NEW }); if (!page) return;
+  await replyTo(page, RPL_ROOT, "A second question about the rail guard.");
+  const body = (await askWrites(page))[0];
+  assert.equal(body.re, RPL_DEEP.id, "re is " + JSON.stringify(body.re) + ", not the newest answered record " + RPL_DEEP.id);
+});
+
+test("reply to an answer: the wake comment names the reply's id, the re id and the parent's owner, in the notes' words", async (t) => {
+  const page = await open(t, { dbExtra: { asks: { [RPL_ROOT]: ASK_ANSWERED } }, storage: RPL_NEW }); if (!page) return;
+  await replyTo(page, RPL_ROOT, RPL_TEXT);
+  const key = await rplLast(page);
+  const words = `Replied on the waiting page. Writer: triage. Ask ${key} re ${RPL_ROOT}, answered by triage: ${RPL_TEXT}`;
+  assert.equal(await wakeHas(page, words), true, "no wake comment with the words " + JSON.stringify(words) + "; sent: " + JSON.stringify((await sent(page)).map((s) => s.text)));
+});
+
+test("reply to an answer: the wake comment of a reply to a reply's answer names that answer's owner, so the writer routes to it", async (t) => {
+  const page = await open(t, { dbExtra: { asks: { [RPL_ROOT]: ASK_ANSWERED, [RPL_DEEP.id]: RPL_DEEP } }, storage: RPL_NEW }); if (!page) return;
+  const text = "A second question about the rail guard.";
+  await replyTo(page, RPL_ROOT, text);
+  const key = await rplLast(page);
+  const words = `Replied on the waiting page. Writer: triage. Ask ${key} re ${RPL_DEEP.id}, answered by lane tier-fold: ${text}`;
+  assert.equal(await wakeHas(page, words), true, "no wake comment with the words " + JSON.stringify(words) + "; sent: " + JSON.stringify((await sent(page)).map((s) => s.text)));
+});
+
+test("reply to an answer: Undo within 8 s deletes only the reply's record, never the parent, and the words go back in the reply box", async (t) => {
+  const page = await open(t, { dbExtra: { asks: { [RPL_ROOT]: ASK_ANSWERED } }, storage: RPL_NEW }); if (!page) return;
+  await replyTo(page, RPL_ROOT, RPL_TEXT);
+  const key = await rplLast(page);
+  await mustHave(page, "#askUndo", "Undo control on the reply's line");
+  await page.click("#askUndo");
+  await waitAskDeletes(page, 1);
+  const dels = await page.evaluate(() => window.__log.filter((l) => l[0] === "delete").map((l) => [l[1], l[2]]));
+  assert.deepEqual(dels, [["asks", key]], "Undo deleted " + JSON.stringify(dels) + ", not only the reply " + key);
+  await mustHave(page, `#rt-${RPL_ROOT}`, "reply box after Undo");
+  assert.equal(await page.inputValue(`#rt-${RPL_ROOT}`), RPL_TEXT, "Undo did not put the words back in the reply box");
+  assert.equal(await rplLineHas(page, "Undone. Your reply is back in the box, not sent."), true, "the reply's line does not say it was undone");
+  assert.equal(await wakeHas(page, `Undone on the waiting page. Ask ${key} is withdrawn.`), true, "no withdrawn wake for the reply " + key);
+});
+
+test("reply to an answer: a reply's Undo count holds Send ask off, with the hint that says so", async (t) => {
+  const page = await open(t, { dbExtra: { asks: { [RPL_ROOT]: ASK_ANSWERED } }, storage: RPL_NEW }); if (!page) return;
+  await replyTo(page, RPL_ROOT, RPL_TEXT);
+  await mustHave(page, ASK.box, "Ask box");
+  await page.fill(ASK.box, ASK_TEXT);
+  await mustHave(page, ASK.send, "Send ask button");
+  assert.equal(await page.locator(ASK.send).isDisabled(), true, "Send ask is on while the reply's Undo count runs");
+  assert.match((await page.textContent("#askHint")) ?? "", /Send turns on when the Undo count ends\./, "the Ask box does not say why Send ask is off");
+});
+
+test("reply to an answer: an ask's Undo count holds Send reply off, with the reply's hint that says so", async (t) => {
+  const page = await open(t, { dbExtra: { asks: { [RPL_ROOT]: ASK_ANSWERED } }, storage: RPL_NEW }); if (!page) return;
+  await sendTyped(page, ASK_TEXT);
+  await openReply(page, RPL_ROOT);
+  await page.fill(`#rt-${RPL_ROOT}`, RPL_TEXT);
+  await mustHave(page, `#rs-${RPL_ROOT}`, "Send reply button");
+  assert.equal(await page.locator(`#rs-${RPL_ROOT}`).isDisabled(), true, "Send reply is on while the ask's Undo count runs");
+  assert.match((await page.textContent(`#rh-${RPL_ROOT}`)) ?? "", /Send reply turns on when the Undo count ends\./, "the reply box does not say why Send reply is off");
+});
+
+test("reply to an answer: a waiting reply counts in the Ask count and the rail, shows under its folded parent, and is never behind Show older asks", async (t) => {
+  const parent = { id: "ask-rpl-old", text: "An old question, answered long ago", at: "2026-10-20T09:00:00Z", owner: "triage", answered: "2026-10-21T10:00:00Z", reply: "The old answer." };
+  const mine = { id: "ask-rpl-mine", text: "My reply under the old answer", at: "2026-10-31T08:00:00Z", re: parent.id };
+  // Three newer answers fill the three shown, so the old thread is the fourth: older than all of them.
+  const newer = [
+    { id: "ask-rpl-n1", text: "A newer answer 1", at: "2026-10-27T09:00:00Z", owner: "triage", answered: "2026-10-27T10:00:00Z", reply: "A newer reply 1." },
+    { id: "ask-rpl-n2", text: "A newer answer 2", at: "2026-10-26T09:00:00Z", owner: "triage", answered: "2026-10-26T10:00:00Z", reply: "A newer reply 2." },
+    { id: "ask-rpl-n3", text: "A newer answer 3", at: "2026-10-25T09:00:00Z", owner: "triage", answered: "2026-10-25T10:00:00Z", reply: "A newer reply 3." },
+  ];
+  const asks = Object.fromEntries([parent, mine, ...newer].map((a) => [a.id, a]));
+  const page = await open(t, { dbExtra: { asks }, storage: RPL_SEEN }); if (!page) return;
+  assert.equal((await page.textContent("#askCount")).trim(), "1", "the Ask count does not count the waiting reply");
+  assert.equal((await page.textContent('a.ov-head[href="#asks"] .ct')).trim(), "1", "the rail's Ask count does not count the waiting reply");
+  assert.equal(await page.locator(`button.frow[data-ask="${parent.id}"]`).count(), 1, "the old answer's thread is not on the page: it sits behind Show older asks");
+  assert.equal(await page.locator("#askOlder").count(), 0, "a Show older asks button still hides the thread with a waiting reply");
+  const fwait = page.locator(`li.askc.folded:has(button.frow[data-ask="${parent.id}"]) p.fwait`);
+  assert.equal(await fwait.count(), 1, "the waiting reply does not show under its folded parent");
+  const line = (await fwait.textContent()) ?? "";
+  assert.ok(line.includes("Your reply: " + mine.text) && line.includes("Waiting for triage to read it."), "the line under the parent says: " + JSON.stringify(line));
+  assert.equal(await page.locator("#askList li.askc:not(.folded)", { hasText: mine.text }).count(), 0, "the waiting reply shows as its own row, not only under its parent");
+});
+
+test("reply to an answer: a reply the store refuses keeps its words in the box, and Copy reply copies its re id and words", async (t) => {
+  const page = await open(t, { dbExtra: { asks: { [RPL_ROOT]: ASK_ANSWERED } }, storage: RPL_NEW, failSetText: "Refused reply" }); if (!page) return;
+  const text = "Refused reply: can the rail guard change?";
+  await openReply(page, RPL_ROOT);
+  await page.fill(`#rt-${RPL_ROOT}`, text);
+  await mustHave(page, `#rs-${RPL_ROOT}`, "Send reply button");
+  await page.click(`#rs-${RPL_ROOT}`);
+  await page.waitForFunction((id) => /Not saved/.test(document.getElementById(id)?.textContent || ""), `rh-${RPL_ROOT}`, { timeout: 3000 }).catch(() => {});
+  const hint = ((await page.textContent(`#rh-${RPL_ROOT}`)) ?? "").trim();
+  assert.match(hint, /^Not saved \(/, "the refused reply's hint does not say it was not saved: " + JSON.stringify(hint));
+  assert.match(hint, /Your reply is still in the box/, "the hint does not say the reply is still in the box: " + JSON.stringify(hint));
+  assert.equal(await page.inputValue(`#rt-${RPL_ROOT}`), text, "the refused reply lost its words");
+  assert.equal(await page.locator(`#rs-${RPL_ROOT}`).isDisabled(), false, "Send reply is off after a refused save, so it cannot try again");
+  await mustHave(page, `#rc-${RPL_ROOT}`, "Copy reply button");
+  await page.evaluate(() => { Object.defineProperty(navigator, "clipboard", { value: { writeText: async (s) => { window.__copied = s; } } }); });
+  await page.click(`#rc-${RPL_ROOT}`);
+  await page.waitForFunction(() => typeof window.__copied === "string", null, { timeout: 3000 }).catch(() => {});
+  assert.equal(await page.evaluate(() => window.__copied), `re ${RPL_ROOT}: ${text}`, "Copy reply did not copy the re id and the words");
+});
+
+test("reply to an answer: an empty reply box keeps Send reply off and says why; over 4000 characters it is off with the limit words and nothing is cut", async (t) => {
+  const page = await open(t, { dbExtra: { asks: { [RPL_ROOT]: ASK_ANSWERED } }, storage: RPL_NEW }); if (!page) return;
+  await openReply(page, RPL_ROOT);
+  await mustHave(page, `#rs-${RPL_ROOT}`, "Send reply button");
+  assert.equal(await page.locator(`#rs-${RPL_ROOT}`).isDisabled(), true, "Send reply is on with an empty box");
+  assert.match((await page.textContent(`#rh-${RPL_ROOT}`)) ?? "", /Send reply turns on once you type\./, "the empty box does not say why Send reply is off");
+  const over = "Reply word. ".repeat(400).trim();
+  await page.fill(`#rt-${RPL_ROOT}`, over);
+  assert.equal(await page.locator(`#rs-${RPL_ROOT}`).isDisabled(), true, "Send reply is on over 4000 characters");
+  const hint = ((await page.textContent(`#rh-${RPL_ROOT}`)) ?? "").trim();
+  assert.ok(hint.includes(`Your reply is ${over.length} characters. The limit is 4000.`) && hint.includes("Nothing was cut."), "the over-limit hint says: " + JSON.stringify(hint));
+  assert.equal(await page.inputValue(`#rt-${RPL_ROOT}`), over, "the words in the reply box were cut");
+  assert.deepEqual(await rplKeys(page), [], "a write happened while Send reply was off");
+});
+
+test("reply to an answer: a reply closed as a draft is in the reply box after a reload, and its Send names the same re", async (t) => {
+  const page = await open(t, { dbExtra: { asks: { [RPL_ROOT]: ASK_ANSWERED } }, storage: RPL_NEW }); if (!page) return;
+  await openReply(page, RPL_ROOT);
+  await page.fill(`#rt-${RPL_ROOT}`, RPL_TEXT);
+  await mustHave(page, `#rx-${RPL_ROOT}`, "Close button of the reply box");
+  await page.click(`#rx-${RPL_ROOT}`);
+  await page.reload();
+  await page.waitForFunction("state.items.length > 0");
+  await openReply(page, RPL_ROOT);
+  assert.equal(await page.inputValue(`#rt-${RPL_ROOT}`), RPL_TEXT, "the draft did not survive the reload");
+  await sendReply(page, RPL_ROOT);
+  const body = (await askWrites(page))[0];
+  assert.equal(body.text, RPL_TEXT, "the reply sent after the reload has the words " + JSON.stringify(body.text));
+  assert.equal(body.re, RPL_ROOT, "the reply sent after the reload names re " + JSON.stringify(body.re) + ", not " + RPL_ROOT);
+});
+
+test("reply to an answer: Reply stays at the thread's end while a reply waits, and a second reply names the same re", async (t) => {
+  const page = await open(t, { dbExtra: { asks: { [RPL_ROOT]: ASK_ANSWERED } }, storage: RPL_NEW }); if (!page) return;
+  await replyTo(page, RPL_ROOT, RPL_TEXT);
+  const first = await rplLast(page);
+  // The first reply's Undo count ends, as it does for a visit that waits: the reply then waits in its thread.
+  await jump(page, 9000);
+  await mustHave(page, `.thread .myreply[id="${first}"]`, "the waiting reply in its thread");
+  await openReply(page, RPL_ROOT);
+  await page.fill(`#rt-${RPL_ROOT}`, "A second reply in the same thread.");
+  await sendReply(page, RPL_ROOT);
+  const bodies = await askWrites(page);
+  assert.equal(bodies.length, 2, "the second reply made " + bodies.length + " asks writes in all");
+  assert.equal(bodies[1].re, RPL_ROOT, "the second reply names re " + JSON.stringify(bodies[1].re) + ", not the root ask " + RPL_ROOT);
+});
+
+test("reply to an answer: words typed while the reply saves stay in the box", async (t) => {
+  const LATER = "Also, does the Status tab show it?";
+  // The reply's write waits at the hold, so the words typed next land while it saves.
+  const page = await open(t, { dbExtra: { asks: { [RPL_ROOT]: ASK_ANSWERED } }, storage: RPL_NEW, hold: { set: 0 } }); if (!page) return;
+  await openReply(page, RPL_ROOT);
+  await page.fill(`#rt-${RPL_ROOT}`, RPL_TEXT);
+  await mustHave(page, `#rs-${RPL_ROOT}`, "Send reply button");
+  await page.click(`#rs-${RPL_ROOT}`);
+  assert.equal(await page.waitForFunction(() => window.__held > 0).then(() => true, () => false), true, "the reply's write never reached the store");
+  await mustHave(page, `#rt-${RPL_ROOT}`, "reply box while the reply saves");
+  await page.click(`#rt-${RPL_ROOT}`);
+  await page.keyboard.press("End");
+  await page.keyboard.type(" " + LATER);
+  await page.evaluate(() => window.__release());
+  await mustHave(page, "#askUndo", "Undo control once the reply saved");
+  // A send closes the box, and Reply reopens the words that were not sent (notes, sections 1 and 2).
+  const draft = (await page.evaluate((key) => localStorage.getItem(key), `waiting.replyDraft.${RPL_ROOT}`)) ?? "";
+  assert.equal(draft.trim(), LATER, "the stored draft after the send is " + JSON.stringify(draft) + ", not the words typed while the reply saved");
+  await openReply(page, RPL_ROOT);
+  const box = await page.inputValue(`#rt-${RPL_ROOT}`);
+  assert.equal(box.trim(), LATER, "the reply box holds " + JSON.stringify(box) + ", not the words typed while the reply saved");
+});
+
+test("reply to an answer: a refused reply keeps focus in the reply form", async (t) => {
+  const text = "Refused reply: can the rail guard change?";
+  const page = await open(t, { dbExtra: { asks: { [RPL_ROOT]: ASK_ANSWERED } }, storage: RPL_NEW, failSetText: "Refused reply" }); if (!page) return;
+  await openReply(page, RPL_ROOT);
+  await page.fill(`#rt-${RPL_ROOT}`, text);
+  await mustHave(page, `#rs-${RPL_ROOT}`, "Send reply button");
+  await page.click(`#rs-${RPL_ROOT}`);
+  const refused = await page.waitForFunction((id) => /Not saved/.test(document.getElementById(id)?.textContent || ""), `rh-${RPL_ROOT}`, { timeout: 3000 }).then(() => true, () => false);
+  assert.equal(refused, true, "the refused reply's hint does not say Not saved");
+  const active = await page.evaluate(() => { const a = document.activeElement; return a && a !== document.body ? a.id || a.tagName : "BODY"; });
+  assert.ok([`rt-${RPL_ROOT}`, `rs-${RPL_ROOT}`].includes(active), "after the refused reply focus is on " + active + ", not the reply form");
+});
+
+// ---------------------------------------------------------------- Dismiss on an answered ask (step ask-dismiss)
+// Contract: docs/design/ask-dismiss-notes.md, sections 1-8; the mockup is docs/design/ask-dismiss.html.
+// Dismiss writes `dismissed` (an ISO time) on the thread's root ask, with update. Restore writes `dismissed: null`. Nothing is deleted.
+// Per thread, keyed by the root ask id <k>: #dis-<k> (Dismiss), #dw-<k> (the reason while it is off), #res-<k> (Restore),
+// li#row-<k>.askc.dropped (the Dismissed line). The unfold is #askDismissed, and the dismissed list is ol#askDList.
+const DIS_ISO = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z$/;
+const DIS_OFF = "Dismiss turns on once your reply has its answer.";
+const DIS_EMPTY = "No ask on the list. Type above, and a session answers here.";
+// The rows of the main list that are asks, not a Dismissed line (its .dt holds the root text) and not the dismissed list.
+const DIS_SHOWN = "ol.asklist:not(.dlist) > li.askc:not(.dropped)";
+// DIS_KEEP is the control: it has no dismissed field, so it shows on load in every case.
+const DIS_KEEP = { id: "ask-dis-keep", text: "Can the Status tab show the lane queue?", at: "2026-10-29T09:00:00Z", owner: "triage", answered: "2026-10-29T10:00:00Z", reply: "Yes. It is on the Status tab." };
+// Dismissed, with no answer later than the dismiss: hidden on load.
+const DIS_HIDDEN = { id: "ask-dis-hid", text: "Did the rail guard change in round 3?", at: "2026-10-28T08:00:00Z", owner: "triage", answered: "2026-10-28T09:00:00Z", reply: "No. The rail guard is unchanged.", dismissed: "2026-10-30T12:00:00Z" };
+const DIS_OLD = { id: "ask-dis-old", text: "Is the old lane queue still running?", at: "2026-10-20T08:00:00Z", owner: "triage", answered: "2026-10-20T09:00:00Z", reply: "Yes, it is running.", dismissed: "2026-10-21T08:00:00Z" };
+// Dismissed, but a reply in its thread was answered after the dismiss: the thread shows again.
+const DIS_LATER = { id: "ask-dis-late", text: "Is the queue page still on the Status tab?", at: "2026-10-27T08:00:00Z", owner: "triage", answered: "2026-10-27T09:00:00Z", reply: "Yes.", dismissed: "2026-10-28T12:00:00Z" };
+const DIS_LATER_REPLY = { id: "ask-dis-late-r", text: "Has the queue page changed since?", at: "2026-10-31T08:00:00Z", re: DIS_LATER.id, owner: "lane tier-fold", answered: "2026-10-31T09:00:00Z", reply: "No. It has not changed." };
+// Dismissed, then a reply came in and still waits: the thread shows again, whatever dismissed says.
+const DIS_WAITED = { id: "ask-dis-wd", text: "Dismissed before a reply came in", at: "2026-10-26T08:00:00Z", owner: "triage", answered: "2026-10-26T09:00:00Z", reply: "Yes.", dismissed: "2026-10-27T08:00:00Z" };
+const DIS_WAITED_REPLY = { id: "ask-dis-wd-r", text: "A new question on the dismissed ask", at: "2026-10-31T10:00:00Z", re: DIS_WAITED.id };
+// A reply to DIS_HIDDEN that comes in after the thread is restored this visit, and waits for its answer.
+const DIS_HIDDEN_REPLY = { id: "ask-dis-hid-r", text: "Does the rail guard need its own test?", at: "2026-10-31T10:00:00Z", re: DIS_HIDDEN.id };
+// A reply in the thread that still waits for its answer.
+const DIS_WAIT ={ id: "ask-dis-wait", text: "Is the queue still right after the fix?", at: "2026-10-31T08:00:00Z", re: ASK_ANSWERED.id };
+const dismissWrites = (page) => page.evaluate(() => window.__log.filter((l) => l[0] === "update" && l[1] === "asks").map((l) => ({ id: l[2], body: l[3] })));
+// Waits, up to 1.5 s, for the store to hold n asks updates. The caller asserts the count, so a wait that gives up fails by name.
+const waitUpdates = (page, n) => page.waitForFunction((k) => window.__log.filter((l) => l[0] === "update" && l[1] === "asks").length >= k, n, { timeout: 1500 }).catch(() => {});
+// The record as the store holds it, from the stub's kept copy. Null when the store has no such record.
+const storedAsk = (page, id) => page.evaluate((k) => ((JSON.parse(localStorage.getItem("__stub.asks") || "null")) || {})[k] || null, id);
+// Presses Dismiss on the thread and waits for its update. The button must be on, so a press that cannot go fails by name.
+async function pressDismiss(page, root) {
+  await mustHave(page, `#dis-${root}`, "Dismiss on the answered ask");
+  assert.notEqual(await page.getAttribute(`#dis-${root}`, "aria-disabled"), "true", "Dismiss is off on the answered ask");
+  const before = (await dismissWrites(page)).length;
+  await page.click(`#dis-${root}`);
+  await waitUpdates(page, before + 1);
+}
+
+test("dismiss control: a thread with no dismissed field shows on load, and no Show dismissed unfold draws", async (t) => {
+  const page = await open(t, { dbExtra: { asks: { [ASK_ANSWERED.id]: ASK_ANSWERED, [DIS_KEEP.id]: DIS_KEEP } }, storage: RPL_NEW }); if (!page) return;
+  await shownBox(page, ASK_ANSWERED.text, DIS_SHOWN);
+  await shownBox(page, DIS_KEEP.text, DIS_SHOWN);
+  assert.equal(await page.locator("#askDismissed").count(), 0, "a Show dismissed unfold draws with nothing dismissed");
+});
+
+test("dismiss: the open card's Dismiss sits at the thread's end beside Reply, Reply first, and names its ask", async (t) => {
+  const root = ASK_ANSWERED.id;
+  const page = await open(t, { dbExtra: { asks: { [root]: ASK_ANSWERED } }, storage: RPL_NEW }); if (!page) return;
+  await mustHave(page, `#dis-${root}`, "Dismiss on the answered ask");
+  const at = await page.locator(`#dis-${root}`).evaluate((b, id) => {
+    const row = b.closest(".endrow"), end = b.closest(".replyend"), reply = document.getElementById("reply-" + id);
+    return { tag: b.tagName, inRow: !!row && !!end && end.contains(row), replyFirst: !!reply && !!row && row.contains(reply) && !!(reply.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING), label: b.getAttribute("aria-label") };
+  }, root);
+  assert.equal(at.tag, "BUTTON", "Dismiss is a " + at.tag + ", not a button");
+  assert.equal(at.inRow, true, "Dismiss is not in the thread's .endrow, under .replyend");
+  assert.equal(at.replyFirst, true, "Dismiss does not come after Reply in the same .endrow");
+  assert.equal(at.label, "Dismiss: " + ASK_ANSWERED.text, "Dismiss is labelled " + JSON.stringify(at.label));
+});
+
+test("dismiss: Dismiss writes dismissed, an ISO time, on the root ask with update, never set or delete, and the owner's text and the reply survive", async (t) => {
+  const root = ASK_ANSWERED.id;
+  const page = await open(t, { dbExtra: { asks: { [root]: ASK_ANSWERED } }, storage: RPL_NEW }); if (!page) return;
+  await pressDismiss(page, root);
+  const ups = await dismissWrites(page);
+  assert.equal(ups.length, 1, "Dismiss made " + ups.length + " update writes on asks, not one");
+  assert.equal(ups[0].id, root, "Dismiss updated " + ups[0].id + ", not the root ask " + root);
+  assert.deepEqual(Object.keys(ups[0].body), ["dismissed"], "the update writes " + Object.keys(ups[0].body).join(", ") + ", not only dismissed");
+  assert.match(ups[0].body.dismissed, DIS_ISO, "dismissed is not an ISO time: " + ups[0].body.dismissed);
+  const bad = await page.evaluate(() => window.__log.filter((l) => (l[0] === "set" || l[0] === "delete") && l[1] === "asks"));
+  assert.deepEqual(bad, [], "Dismiss made set or delete writes on asks: " + JSON.stringify(bad.map((l) => [l[0], l[2]])));
+  const kept = await storedAsk(page, root);
+  assert.equal(kept && kept.text, ASK_ANSWERED.text, "the stored text is " + JSON.stringify(kept && kept.text) + ", not the owner's words");
+  assert.equal(kept && kept.reply, ASK_ANSWERED.reply, "the stored reply is " + JSON.stringify(kept && kept.reply) + ", not the session's reply");
+  assert.equal(kept && kept.dismissed, ups[0].body.dismissed, "the stored dismissed is " + JSON.stringify(kept && kept.dismissed));
+});
+
+test("dismiss: the thread stays in place as a Dismissed line with Restore and no Undo count, and focus moves to the line", async (t) => {
+  const root = ASK_ANSWERED.id;
+  const page = await open(t, { dbExtra: { asks: { [root]: ASK_ANSWERED } }, storage: RPL_NEW }); if (!page) return;
+  // Each focus move from the press on, so a miss names where focus went and what took it.
+  await page.evaluate(() => {
+    const name = (e) => (e ? (e.id ? "#" + e.id : e.tagName.toLowerCase()) + (e.isConnected ? "" : "(removed)") : "none");
+    window.__focusMoves = [];
+    for (const k of ["focusin", "focusout"]) document.addEventListener(k, (e) => window.__focusMoves.push(k.slice(5) + " " + name(e.target)), true);
+    for (const k of ["blur", "focus"]) window.addEventListener(k, (e) => { if (e.target === window) window.__focusMoves.push("window " + k); });
+  });
+  await pressDismiss(page, root);
+  await mustHave(page, `li#row-${root}.askc.dropped`, "the Dismissed line in the thread's place");
+  // One step reads the line and focus together. A locator found in one step and read in a second can hold a line a re-render has replaced.
+  const line = await page.evaluate((id) => { const r = document.getElementById("row-" + id), sl = r ? r.querySelector(":scope > p.sline:not(.dline)") : null, a = document.activeElement; return { text: r ? r.textContent.replace(/\s+/g, " ").trim() : "", tabindex: r ? r.getAttribute("tabindex") : null, liRole: r ? r.getAttribute("role") : null, lineRole: sl ? sl.getAttribute("role") : null, focused: !!r && a === r, at: a ? (a.id ? "#" + a.id : a.tagName.toLowerCase()) : "none", moves: (window.__focusMoves ? window.__focusMoves.join(", ") : "trace lost, the page reloaded") + " (document has focus: " + document.hasFocus() + ")", restore: !!r && !!r.querySelector("#res-" + id), undo: !!document.getElementById("dun-" + id) }; }, root);
+  assert.ok(line.text.startsWith("Dismissed. " + ASK_ANSWERED.text), "the Dismissed line reads " + JSON.stringify(line.text));
+  assert.equal(line.restore, true, "the Dismissed line has no Restore");
+  assert.equal(line.undo, false, "the Dismissed line has an Undo count, not Restore alone");
+  assert.equal(line.tabindex, "-1", "the Dismissed line has tabindex " + line.tabindex + ", not -1");
+  assert.equal(line.lineRole, "status", "the Dismissed line's p.sline has role " + line.lineRole + ", not status");
+  assert.equal(line.liRole, null, "the Dismissed line's li has role " + line.liRole + ", not none: its p.sline carries status");
+  assert.equal(line.focused, true, "focus is not on the Dismissed line: it is on " + line.at + "; focus moves: " + line.moves);
+});
+
+test("dismiss: a dismissed thread is hidden on load, and one with an answer later than its dismissed, or a reply waiting, shows again", async (t) => {
+  const page = await open(t, { dbExtra: { asks: { [DIS_KEEP.id]: DIS_KEEP, [DIS_HIDDEN.id]: DIS_HIDDEN, [DIS_LATER.id]: DIS_LATER, [DIS_LATER_REPLY.id]: DIS_LATER_REPLY, [DIS_WAITED.id]: DIS_WAITED, [DIS_WAITED_REPLY.id]: DIS_WAITED_REPLY } }, storage: RPL_NEW }); if (!page) return;
+  // The control is drawn first, so a thread missing from the page is missing from a drawn list.
+  await shownBox(page, DIS_KEEP.text, DIS_SHOWN);
+  assert.equal(await page.getByText(DIS_HIDDEN.text, { exact: true }).count(), 0, "the dismissed thread with no later answer is on the list at load");
+  await shownBox(page, DIS_LATER.text, DIS_SHOWN);
+  await shownBox(page, DIS_LATER_REPLY.text, DIS_SHOWN);
+  // A dismissed root under a reply that waits: its folded row shows the root text again.
+  await shownBox(page, DIS_WAITED.text, DIS_SHOWN);
+});
+
+test("dismiss: Show N dismissed asks opens the dismissed list, newest first, with Restore beside each thread", async (t) => {
+  const page = await open(t, { dbExtra: { asks: { [DIS_KEEP.id]: DIS_KEEP, [DIS_HIDDEN.id]: DIS_HIDDEN, [DIS_OLD.id]: DIS_OLD } }, storage: RPL_NEW }); if (!page) return;
+  await shownBox(page, DIS_KEEP.text, DIS_SHOWN);
+  await mustHave(page, "#askDismissed", "Show dismissed asks unfold");
+  const label = ((await page.textContent("#askDismissed")) || "").replace(/\s+/g, " ").trim();
+  assert.ok(label.includes("Show 2 dismissed asks"), "the unfold reads " + JSON.stringify(label));
+  await page.click("#askDismissed");
+  await mustHave(page, "ol#askDList.asklist.dlist", "dismissed list");
+  assert.equal(await page.getAttribute("ol#askDList", "aria-label"), "Dismissed asks, newest first", "the dismissed list has the wrong label");
+  const order = await page.$$eval("ol#askDList .frow", (rows) => rows.map((r) => r.dataset.ask));
+  assert.deepEqual(order, [DIS_HIDDEN.id, DIS_OLD.id], "the dismissed list holds " + JSON.stringify(order) + ", not the two threads newest first");
+  for (const it of [DIS_HIDDEN, DIS_OLD]) assert.equal(await page.locator(`ol#askDList #res-${it.id}`).count(), 1, "no Restore beside " + JSON.stringify(it.text) + " in the dismissed list");
+});
+
+test("dismiss: Restore writes dismissed null with update, the line says the thread joins the list at the next load, and it returns after a reload", async (t) => {
+  const root = ASK_ANSWERED.id;
+  const page = await open(t, { dbExtra: { asks: { [root]: ASK_ANSWERED } }, storage: RPL_NEW }); if (!page) return;
+  await pressDismiss(page, root);
+  await mustHave(page, `#res-${root}`, "Restore on the Dismissed line");
+  const before = (await dismissWrites(page)).length;
+  await page.click(`#res-${root}`);
+  await waitUpdates(page, before + 1);
+  const ups = await dismissWrites(page);
+  assert.equal(ups.length - before, 1, "Restore made " + (ups.length - before) + " update writes, not one");
+  assert.deepEqual(ups.at(-1).body, { dismissed: null }, "Restore wrote " + JSON.stringify(ups.at(-1).body) + ", not dismissed: null");
+  // The line stays where it is and says when the thread returns. Dismiss takes Restore's place.
+  await mustHave(page, `li#row-${root} #dis-${root}`, "Dismiss in place of Restore on the line");
+  assert.equal(await page.locator(`li#row-${root} #res-${root}`).count(), 0, "Restore is still on the line");
+  const said = ((await page.locator(`li#row-${root}`).textContent()) || "").replace(/\s+/g, " ").trim();
+  assert.ok(said.includes("Restored. It joins the list at the next load."), "the line reads " + JSON.stringify(said));
+  // The next load draws the thread again, and the stored record has dismissed null.
+  await page.reload();
+  await shownBox(page, ASK_ANSWERED.text, DIS_SHOWN);
+  assert.equal(await page.locator("#askDismissed").count(), 0, "the restored thread is still under Show dismissed asks after a reload");
+  const kept = await storedAsk(page, root);
+  assert.ok(kept && kept.dismissed === null, "the stored dismissed is " + JSON.stringify(kept && kept.dismissed) + ", not null");
+});
+
+test("dismiss: a thread dismissed at load and restored this visit shows in the main list when a reply in it then waits", async (t) => {
+  const page = await open(t, { dbExtra: { asks: { [DIS_KEEP.id]: DIS_KEEP, [DIS_HIDDEN.id]: DIS_HIDDEN } }, storage: RPL_NEW }); if (!page) return;
+  await shownBox(page, DIS_KEEP.text, DIS_SHOWN);
+  await mustHave(page, "#askDismissed", "Show dismissed asks unfold");
+  await page.click("#askDismissed");
+  await mustHave(page, `ol#askDList #res-${DIS_HIDDEN.id}`, "Restore in the dismissed list");
+  const before = (await dismissWrites(page)).length;
+  await page.click(`ol#askDList #res-${DIS_HIDDEN.id}`);
+  await waitUpdates(page, before + 1);
+  const said = await page.waitForFunction(() => document.body.textContent.includes("Restored. It joins the list at the next load."), null, { timeout: 3000 }).then(() => true, () => false);
+  assert.equal(said, true, "the restore does not say Restored. It joins the list at the next load.");
+  // A reply comes in after the restore, as a session's write after the page loaded, and waits for its answer.
+  await page.evaluate((r) => window.__putDoc("asks", r.id, r), DIS_HIDDEN_REPLY);
+  // The main list is the scope, so it is asserted before the dismissed list is checked away.
+  await mustHave(page, `${DIS_SHOWN}#row-${DIS_HIDDEN.id}`, "restored thread in the main list");
+  assert.equal(await page.locator("#askDismissed").count(), 0, "the restored thread is still under Show dismissed asks");
+});
+
+test("dismiss: while a reply in the thread waits, Dismiss is off and says why, and a folded row with that reply has no Dismiss", async (t) => {
+  const root = ASK_ANSWERED.id;
+  const page = await open(t, { dbExtra: { asks: { [root]: ASK_ANSWERED, [DIS_WAIT.id]: DIS_WAIT } }, storage: RPL_NEW }); if (!page) return;
+  await mustHave(page, `#dis-${root}`, "Dismiss on the answered ask with a reply waiting");
+  assert.equal(await page.getAttribute(`#dis-${root}`, "aria-disabled"), "true", "Dismiss is on while its reply waits");
+  const reason = ((await page.textContent(`#dw-${root}`)) || "").trim();
+  assert.equal(reason, DIS_OFF, "the reason reads " + JSON.stringify(reason));
+  assert.ok(((await page.getAttribute(`#dis-${root}`, "aria-describedby")) || "").split(" ").includes(`dw-${root}`), "Dismiss is not described by its reason");
+  // The press is read straight after it, in a second evaluate, so a write the handler makes has landed.
+  await page.evaluate((id) => document.getElementById(id).click(), `dis-${root}`);
+  const writes = await page.evaluate(() => window.__log.filter((l) => l[0] === "update").length);
+  assert.equal(writes, 0, "a press on the off Dismiss wrote " + writes + " update(s)");
+  const folded = await open(t, { dbExtra: { asks: { [root]: ASK_ANSWERED, [DIS_WAIT.id]: DIS_WAIT } }, storage: RPL_SEEN }); if (!folded) return;
+  await mustHave(folded, `button.frow[data-ask="${root}"]`, "the folded row of the answered ask");
+  await mustHave(folded, "li.askc.folded .fwait", "the waiting reply line under the folded row");
+  assert.equal(await folded.locator(`[id="dis-${root}"]`).count(), 0, "a folded row with a waiting reply has a Dismiss");
+});
+
+test("dismiss: on a folded answered row, Dismiss sits beside the row button, never inside it, and writes dismissed", async (t) => {
+  const root = ASK_ANSWERED.id;
+  const page = await open(t, { dbExtra: { asks: { [root]: ASK_ANSWERED } }, storage: RPL_SEEN }); if (!page) return;
+  await mustHave(page, `button.frow[data-ask="${root}"]`, "folded row of the answered ask");
+  await mustHave(page, `#dis-${root}`, "Dismiss on the folded row");
+  const at = await page.locator(`#dis-${root}`).evaluate((b) => { const li = b.closest("li.askc"), row = li && li.querySelector(".frow"); return { withd: !!li && li.classList.contains("folded") && li.classList.contains("withd"), inRow: !!row && row.contains(b), beside: !!row && b.parentElement === row.parentElement }; });
+  assert.equal(at.withd, true, "the folded row lacks the li.askc.folded.withd classes");
+  assert.equal(at.inRow, false, "Dismiss is inside the folded row's button");
+  assert.equal(at.beside, true, "Dismiss is not beside the folded row's button");
+  await pressDismiss(page, root);
+  const ups = await dismissWrites(page);
+  assert.equal(ups.length, 1, "Dismiss on the folded row made " + ups.length + " update writes, not one");
+  assert.equal(ups[0].id, root, "Dismiss on the folded row updated " + ups[0].id + ", not " + root);
+  assert.match(ups[0].body.dismissed, DIS_ISO, "dismissed is not an ISO time: " + ups[0].body.dismissed);
+});
+
+test("dismiss: when the write is refused, the thread stays on the list, Dismiss stays on, and the line says why", async (t) => {
+  const root = ASK_ANSWERED.id;
+  const page = await open(t, { dbExtra: { asks: { [root]: ASK_ANSWERED } }, storage: RPL_NEW, failUpdate: true }); if (!page) return;
+  await mustHave(page, `#dis-${root}`, "Dismiss on the answered ask");
+  await page.click(`#dis-${root}`);
+  assert.equal(await rplLineHas(page, "Not dismissed (permission-denied)"), true, "the refused Dismiss does not say Not dismissed (permission-denied)");
+  assert.equal(await rplLineHas(page, "The ask stays on the list."), true, "the refused Dismiss does not say The ask stays on the list.");
+  await shownBox(page, ASK_ANSWERED.text, DIS_SHOWN);
+  assert.notEqual(await page.getAttribute(`#dis-${root}`, "aria-disabled"), "true", "Dismiss is off after a refused write, so it cannot try again");
+});
+
+test("dismiss: when Restore is refused, the thread stays dismissed and the line says it stays dismissed", async (t) => {
+  const page = await open(t, { dbExtra: { asks: { [DIS_HIDDEN.id]: DIS_HIDDEN } }, storage: RPL_NEW, failUpdate: true }); if (!page) return;
+  await mustHave(page, "#askDismissed", "Show dismissed asks unfold");
+  await page.click("#askDismissed");
+  await mustHave(page, `ol#askDList #res-${DIS_HIDDEN.id}`, "Restore in the dismissed list");
+  await page.click(`ol#askDList #res-${DIS_HIDDEN.id}`);
+  const said = await page.waitForFunction(() => document.body.textContent.includes("Not restored (permission-denied). It stays dismissed."), null, { timeout: 3000 }).then(() => true, () => false);
+  assert.equal(said, true, "the refused Restore does not say Not restored (permission-denied). It stays dismissed.");
+  await mustHave(page, `ol#askDList #res-${DIS_HIDDEN.id}`, "the thread still in the dismissed list after the refused Restore");
+});
+
+test("dismiss: with every ask dismissed, the list says No ask on the list, and the Show dismissed unfold stays", async (t) => {
+  const page = await open(t, { dbExtra: { asks: { [DIS_HIDDEN.id]: DIS_HIDDEN, [DIS_OLD.id]: DIS_OLD } }, storage: RPL_NEW }); if (!page) return;
+  await mustHave(page, "#askDismissed", "Show dismissed asks unfold, with nothing else on the list");
+  const list = ((await page.textContent("#askList")) || "").replace(/\s+/g, " ").trim();
+  assert.ok(list.includes(DIS_EMPTY), "the list reads " + JSON.stringify(list) + ", not the empty sentence");
+  assert.equal(await page.locator("#askList li.askc").count(), 0, "a thread is still drawn on the list");
+});
+
+test("dismiss: a dismissed list of 12 threads draws all 12, newest first", async (t) => {
+  const many = Array.from({ length: 12 }, (_, i) => ({ id: "ask-dis-m" + String(i).padStart(2, "0"), text: "Dismissed ask " + (i + 1), at: new Date(Date.UTC(2026, 8, 1 + i, 9)).toISOString(), owner: "triage", answered: new Date(Date.UTC(2026, 8, 1 + i, 10)).toISOString(), reply: "Answer " + (i + 1), dismissed: new Date(Date.UTC(2026, 8, 1 + i, 11)).toISOString() }));
+  const asks = Object.fromEntries([DIS_KEEP, ...many].map((a) => [a.id, a]));
+  const page = await open(t, { dbExtra: { asks }, storage: RPL_NEW }); if (!page) return;
+  await shownBox(page, DIS_KEEP.text, DIS_SHOWN);
+  await mustHave(page, "#askDismissed", "Show dismissed asks unfold");
+  const label = ((await page.textContent("#askDismissed")) || "").replace(/\s+/g, " ").trim();
+  assert.ok(label.includes("Show 12 dismissed asks"), "the unfold reads " + JSON.stringify(label));
+  await page.click("#askDismissed");
+  await mustHave(page, "ol#askDList.asklist.dlist", "dismissed list");
+  const order = await page.$$eval("ol#askDList .frow", (rows) => rows.map((r) => r.dataset.ask));
+  assert.deepEqual(order, [...many].reverse().map((a) => a.id), "the dismissed list holds " + order.length + " rows, not the 12 threads newest first");
+});
+
+test("dismiss: with no store, the list says it cannot be read and no Dismiss is drawn", async (t) => {
+  const page = await open(t, { noStore: true }); if (!page) return;
+  await shownBox(page, "Your asks cannot be read in this view.");
+  assert.equal(await page.locator('[id^="dis-"], .dismiss').count(), 0, "a Dismiss is drawn with no store");
+});
+
+// ---------------------------------------------------------------- the ask stack: Add to list, one Send, one Undo for the batch
+
+// The reach line of the ask row that holds the text, or "" when no row holds it. Reads the page, never waits.
+const reachOf = (page, text) => page.evaluate(([sel, t]) => { const li = [...document.querySelectorAll(sel)].find((c) => c.textContent.includes(t)); const s = li && li.querySelector(".astate"); return s ? s.textContent.trim() : ""; }, [ASK.ask, text]);
+
+test("Add to list stacks asks in typed order, past three, and nothing reaches the store until Send", async (t) => {
+  const page = await open(t); if (!page) return;
+  await mustHave(page, ASK.box, "Ask box");
+  await mustHave(page, ASK.add, "Add to list button");
+  assert.equal(await page.locator(ASK.add).isDisabled(), true, "Add to list is on with the box empty");
+  // Twelve asks, past the design's three: the stack has no cap, and each row keeps its place in typed order.
+  const words = Array.from({ length: 12 }, (_, i) => `Stacked ask number ${i + 1}`);
+  for (const w of words) await addToList(page, w);
+  assert.equal(await page.inputValue(ASK.box), "", "Add to list left the words in the box");
+  assert.deepEqual(await stackWords(page), words, "the stack is not the 12 asks in typed order");
+  const writes = (await askWrites(page)).length;
+  assert.equal(writes, 0, `Add to list wrote ${writes} asks records before Send`);
+});
+
+test("Edit keeps a stacked ask's place and number, Remove keeps its place, and Send writes the edited and kept asks only", async (t) => {
+  const page = await open(t); if (!page) return;
+  for (const w of ["Edit me first", "Remove me second", "Keep me third"]) await addToList(page, w);
+  assert.deepEqual(await stackWords(page), ["Edit me first", "Remove me second", "Keep me third"], "the stack is not the three asks in typed order");
+  // Edit opens the row in place under its number. Done closes it with the new words, and no row moves.
+  await mustHaveNamed(page, "Edit ask 1", "Edit control on ask 1");
+  await page.getByRole("button", { name: "Edit ask 1", exact: true }).click();
+  await page.getByRole("textbox", { name: "Ask 1", exact: true }).fill("Edited first");
+  await page.locator(ASK.rows).nth(0).getByRole("button", { name: "Done", exact: true }).click();
+  assert.deepEqual(await stackWords(page), ["Edited first", "Remove me second", "Keep me third"], "Edit did not keep ask 1 in its place");
+  // Remove keeps the row where it was, marked as removed.
+  await mustHaveNamed(page, "Remove ask 2", "Remove control on ask 2");
+  await page.getByRole("button", { name: "Remove ask 2", exact: true }).click();
+  assert.match(await page.locator(ASK.rows).nth(1).textContent(), /Removed: .*Remove me second/, "Remove did not mark ask 2 as removed in its place");
+  // Send writes what is left, and never the removed ask: the store is the proof.
+  assert.equal(await page.locator(ASK.send).isDisabled(), false, "Send is off with two asks left in the stack");
+  await page.click(ASK.send);
+  await waitAskWrites(page, 2);
+  const sent = (await askWrites(page)).map((b) => b.text);
+  assert.deepEqual(sent, ["Edited first", "Keep me third"], "Send wrote " + JSON.stringify(sent) + ", not the edited and kept asks");
+});
+
+test("the stack survives a reload: stacked asks show under Not sent yet again, and the box stays empty", async (t) => {
+  const page = await open(t); if (!page) return;
+  await addToList(page, "Survives the reload, first");
+  await addToList(page, "Survives the reload, second");
+  assert.equal((await stackWords(page)).length, 2, "the stack did not hold both asks before the reload");
+  await page.reload();
+  await page.waitForFunction("state.items.length > 0");
+  await page.waitForSelector(`#item-${DECISION.id}`);
+  await page.waitForFunction((sel) => document.querySelectorAll(sel).length > 0, ASK.rows, { timeout: 3000 }).catch(() => {});
+  await shownBox(page, "Not sent yet");
+  const after = await stackWords(page);
+  assert.deepEqual(after, ["Survives the reload, first", "Survives the reload, second"], "after a reload the stack shows " + JSON.stringify(after));
+  assert.equal(await page.inputValue(ASK.box), "", "after a reload the box holds words that were only stacked");
+  assert.equal((await askWrites(page)).length, 0, "the stack reached the store on reload");
+});
+
+test("Send writes every stacked ask and the typed box, each with one shared at", async (t) => {
+  const page = await open(t); if (!page) return;
+  await addToList(page, "Batch ask one");
+  await addToList(page, "Batch ask two");
+  await page.fill(ASK.box, "Batch ask three, typed");
+  assert.equal(await page.locator(ASK.send).isDisabled(), false, "Send is off with two asks stacked and one typed");
+  await page.click(ASK.send);
+  await waitAskWrites(page, 3);
+  const sets = await askWrites(page);
+  assert.equal(sets.length, 3, `Send wrote ${sets.length} asks records, not the 3 in the list and the box`);
+  assert.deepEqual(sets.map((b) => b.text), ["Batch ask one", "Batch ask two", "Batch ask three, typed"], "Send wrote the wrong asks");
+  const ats = new Set(sets.map((b) => b.at));
+  assert.equal(ats.size, 1, `the asks of one Send carry ${ats.size} times, not one shared at`);
+});
+
+test("one 8-second Undo takes back the send and puts the ask back in the list, and the box keeps what was typed", async (t) => {
+  const page = await open(t); if (!page) return;
+  await sendTyped(page, "Undo batch ask");
+  await mustHave(page, ASK.undo, "Undo control");
+  // Typing inside the window keeps the count on view: 7 s in, about one second is left.
+  await jump(page, 7000);
+  await page.fill(ASK.box, "Typed after the send");
+  await mustHave(page, ASK.undo, "Undo control 7 s in");
+  await page.click(ASK.undo);
+  await waitAskDeletes(page, 1);
+  const [written] = await askWrites(page);
+  const deleted = await page.evaluate(() => window.__log.filter((l) => l[0] === "delete" && l[1] === "asks").map((l) => l[2]));
+  assert.deepEqual(deleted, [written.id], "Undo deleted " + JSON.stringify(deleted) + ", not " + written.id);
+  const box = await page.inputValue(ASK.box);
+  assert.equal(box, "Typed after the send", "Undo changed the box: " + JSON.stringify(box));
+  assert.deepEqual(await stackWords(page), ["Undo batch ask"], "Undo did not put the ask back in the list");
+});
+
+test("Send stays off while the Undo count runs, so a second send cannot end the first Undo", async (t) => {
+  const page = await open(t); if (!page) return;
+  await sendTyped(page, "First ask, in the Undo window");
+  await page.fill(ASK.box, "Second ask, typed while Undo counts");
+  // Scope first: the Undo is still counting, so the Send button is the subject.
+  await mustHave(page, ASK.undo, "Undo control while typing");
+  assert.equal(await page.locator(ASK.send).isDisabled(), true, "Send is on while Undo counts, so a second send would end the first Undo");
+  await jump(page, 9000);
+  await page.fill(ASK.box, "Second ask, after the window");
+  assert.equal(await page.locator(ASK.send).isDisabled(), false, "Send stays off after the Undo count has ended");
+  assert.equal((await askWrites(page)).length, 1, "a second Send wrote while Undo counted");
+});
+
+test("each sent ask shows its own reach, and the told fact shows once on the line under the buttons, not on each row", async (t) => {
+  const page = await open(t, { meta: { writer: WRITER } }); if (!page) return;
+  await sendTyped(page, "Reach ask one");
+  await jump(page, 9000);
+  await sendTyped(page, "Reach ask two");
+  const [one] = await askWrites(page);
+  // A session reads the first ask. Nothing reads the second.
+  await page.evaluate((body) => window.__putDoc("asks", body.id, { ...body, owner: "lane status-fold", read: "2026-11-03T17:44:00Z" }), one);
+  await page.waitForFunction(([sel, w]) => [...document.querySelectorAll(sel)].some((c) => c.textContent.includes(w) && c.textContent.includes("Read by")), [ASK.ask, "Reach ask one"], { timeout: 3000 }).catch(() => {});
+  assert.match(await reachOf(page, "Reach ask one"), /^Read by lane status-fold /, "the first ask does not show its own reach");
+  assert.equal(await reachOf(page, "Reach ask two"), `Waiting for ${WRITER} to read it.`, "the second ask does not show its own reach");
+  const line = await page.evaluate(() => { const l = document.querySelector("#asks .sline"); return l ? l.textContent.trim() : ""; });
+  assert.match(line, /A wake was sent\./, "the told fact is not on the line under the buttons: " + JSON.stringify(line));
+  const repeats = await page.evaluate((sel) => [...document.querySelectorAll(sel)].filter((c) => /wake was sent|No session was told/.test(c.textContent)).length, ASK.ask);
+  assert.equal(repeats, 0, `${repeats} ask row(s) repeat the told fact`);
+});
+
+test("a failed ask stays in the list with its words and Copy ask, and the other asks are sent", async (t) => {
+  const page = await open(t, { failSetText: "Denied ask two" }); if (!page) return;
+  await addToList(page, "Saved ask one");
+  await addToList(page, "Denied ask two");
+  await page.fill(ASK.box, "Saved ask three");
+  await page.click(ASK.send);
+  await waitAskWrites(page, 2);
+  await page.waitForFunction((sel) => [...document.querySelectorAll(sel)].some((li) => li.textContent.includes("Not saved")), ASK.rows, { timeout: 3000 }).catch(() => {});
+  const sets = (await askWrites(page)).map((b) => b.text);
+  assert.deepEqual(sets, ["Saved ask one", "Saved ask three"], "the other asks were not all sent: " + JSON.stringify(sets));
+  const failed = page.locator(ASK.rows, { hasText: "Denied ask two" });
+  assert.equal(await failed.count(), 1, "the failed ask is not in the list");
+  assert.match(await failed.textContent(), /Not saved \([\w-]*denied\)/, "the failed row does not say it was not saved, and why");
+  assert.equal(await failed.getByRole("button", { name: "Copy ask", exact: true }).count(), 1, "the failed row has no Copy ask");
+});
+
+test("asks made in one batch get ids that sort in the order they were made, so the last-typed ask sorts on top", async (t) => {
+  const page = await open(t); if (!page) return;
+  // A batch shares one at, so the list breaks the tie by id, newest id first (askAll). The ids must rise in the order they are made.
+  const made = await page.evaluate(() => (typeof askId === "function" ? Array.from({ length: 50 }, () => askId()) : null));
+  assert.ok(made, "the page has no askId(), so the ids of a batch cannot be checked");
+  const bad = made.findIndex((id, i) => i > 0 && !(made[i - 1] < id));
+  assert.equal(bad, -1, bad < 0 ? "" : `ask ${made[bad]} was made after ${made[bad - 1]} but does not sort after it`);
+});
+
+// ---------------------------------------------------------------- stacked asks across a reload, Undo races, the Undo window and the hint words
+
+// A reload as a viewer sees it. The stub keeps the asks, and the page keeps its stack and draft. The hold is disarmed here, as the init script arms it on every load.
+async function reopen(page) {
+  await page.reload();
+  await page.waitForFunction("state.items.length > 0");
+  await page.waitForSelector(`#item-${DECISION.id}`);
+  await page.waitForFunction(() => document.getElementById("askList").children.length > 0, null, { timeout: 3000 }).catch(() => {});
+  await page.evaluate(() => { window.__hold = null; });
+}
+// Ends on the condition that a Send has ended: the stack head no longer reads Sending. No clock is read.
+const sendDone = (page) => page.waitForFunction(() => { const s = document.getElementById("askStack"); return !s || !s.textContent.includes("Sending"); }, null, { timeout: 3000 }).catch(() => {});
+const askDeletes = (page) => page.evaluate(() => window.__log.filter((l) => l[0] === "delete" && l[1] === "asks").map((l) => l[2]));
+// The words of each ask the store holds, as the store kept them through a reload.
+const storedTexts = (page) => page.evaluate(() => Object.values(JSON.parse(localStorage.getItem("__stub.asks") || "{}")).map((a) => a.text));
+const hintText = async (page) => (await page.textContent("#askHint")).trim();
+// The words of the line under the buttons, without its Undo button, whose count is not part of the words.
+const lineWords = (page) => page.evaluate(() => { const l = document.querySelector("#asks .sline"); if (!l) return ""; const c = l.cloneNode(true); c.querySelectorAll("button").forEach((b) => b.remove()); return c.textContent.trim(); });
+// True once a stacked ask that Send could not save shows its row with Not saved. False when no row says so.
+const failedRowShown = (page) => page.waitForFunction(() => [...document.querySelectorAll("ol.stack > li")].some((li) => li.textContent.includes("Not saved")), null, { timeout: 3000 }).then(() => true, () => false);
+const MID = ["Mid-send ask one", "Mid-send ask two", "Mid-send ask three"];
+
+test("a reload in the middle of a Send does not bring back the ask already written", async (t) => {
+  // The second write waits at the hold, so ask one is written and the batch is not done.
+  const page = await open(t, { hold: { set: 1 } }); if (!page) return;
+  for (const w of MID) await addToList(page, w);
+  await page.click(ASK.send);
+  await page.waitForFunction(() => window.__held >= 1);
+  await reopen(page);
+  assert.deepEqual(await stackWords(page), MID.slice(1), "after a reload the stack shows " + JSON.stringify(await stackWords(page)));
+});
+
+test("the Send after a reload writes an ask already written once, not twice", async (t) => {
+  const page = await open(t, { hold: { set: 1 } }); if (!page) return;
+  for (const w of MID) await addToList(page, w);
+  await page.click(ASK.send);
+  await page.waitForFunction(() => window.__held >= 1);
+  await reopen(page);
+  assert.equal(await page.locator(ASK.send).isDisabled(), false, "Send is off after the reload, with asks still in the stack");
+  await page.click(ASK.send);
+  await sendDone(page);
+  const texts = await storedTexts(page), copies = texts.filter((x) => x === MID[0]).length;
+  assert.equal(copies, 1, `"${MID[0]}" is in the store ${copies} times after the second Send`);
+});
+
+test("a reload in the middle of Undo keeps every ask, in the store or in the stack", async (t) => {
+  // The first delete lands, and the second waits at the hold: the reload falls between two deletes.
+  const page = await open(t, { hold: { delete: 1 } }); if (!page) return;
+  const words = ["Mid-undo ask one", "Mid-undo ask two", "Mid-undo ask three"];
+  for (const w of words) await addToList(page, w);
+  await page.click(ASK.send);
+  await waitAskWrites(page, 3);
+  await sendDone(page);
+  await mustHave(page, ASK.undo, "Undo control");
+  await page.click(ASK.undo);
+  await page.waitForFunction(() => window.__held >= 1);
+  await reopen(page);
+  const stored = await storedTexts(page), stack = await stackWords(page);
+  const lost = words.filter((w) => !stored.includes(w) && !stack.includes(w));
+  assert.deepEqual(lost, [], `a reload in the middle of Undo lost ${JSON.stringify(lost)}`);
+});
+
+test("a Send is refused while Undo's delete is still awaited, even after the 8 s window has passed", async (t) => {
+  const page = await open(t, { hold: { delete: 0 } }); if (!page) return;
+  await sendTyped(page, "Race ask one");
+  await mustHave(page, ASK.undo, "Undo control");
+  await page.click(ASK.undo);
+  await page.waitForFunction(() => window.__held >= 1); // the delete waits at the hold
+  await jump(page, 9000); // the 8 s window passes while the delete waits
+  await page.fill(ASK.box, "Race ask two, typed");
+  assert.equal(await page.locator(ASK.send).isDisabled(), true, "Send is on while Undo's delete is still awaited");
+  // Ctrl+Enter reaches sendAsk by its own route, so the refusal must hold there too. Read straight after the press: nothing waits on a clock.
+  const before = (await askWrites(page)).length;
+  await page.focus(ASK.box);
+  await page.keyboard.press("Control+Enter");
+  const after = (await askWrites(page)).length;
+  assert.equal(after, before, `Ctrl+Enter wrote ${after - before} ask(s) while Undo's delete was still awaited`);
+  await page.evaluate(() => window.__release());
+  await waitAskDeletes(page, 1);
+  assert.equal(await page.inputValue(ASK.box), "Race ask two, typed", "Undo changed the typed words");
+  assert.ok((await stackWords(page)).includes("Race ask one"), "Undo did not put its ask back in the list once its delete ended");
+});
+
+test("Undo deletes nothing after its 8 s window has passed, though a delete was already waiting", async (t) => {
+  const page = await open(t, { hold: { delete: 0 } }); if (!page) return;
+  const words = ["Window ask one", "Window ask two", "Window ask three"];
+  for (const w of words) await addToList(page, w);
+  await page.click(ASK.send);
+  await waitAskWrites(page, 3);
+  await sendDone(page);
+  await mustHave(page, ASK.undo, "Undo control");
+  await page.click(ASK.undo);
+  await page.waitForFunction(() => window.__held >= 1); // the first delete starts inside the window, and waits
+  await jump(page, 9000); // the window passes before that delete lands
+  await page.evaluate(() => window.__release());
+  await waitAskDeletes(page, 1);
+  const dels = await askDeletes(page);
+  assert.equal(dels.length, 1, `Undo deleted ${dels.length} asks; only the delete that started inside the 8 s window may go`);
+});
+
+test("Undo with three asks sent takes back all three and puts them back in the list in order", async (t) => {
+  const page = await open(t); if (!page) return;
+  const words = ["Three undo one", "Three undo two", "Three undo three"];
+  for (const w of words) await addToList(page, w);
+  await page.click(ASK.send);
+  await waitAskWrites(page, 3);
+  await sendDone(page);
+  const sent = (await askWrites(page)).map((b) => b.id);
+  assert.equal(sent.length, 3, `Send wrote ${sent.length} asks, not 3`);
+  await mustHave(page, ASK.undo, "Undo control");
+  await page.click(ASK.undo);
+  await waitAskDeletes(page, 3);
+  assert.deepEqual((await askDeletes(page)).sort(), sent.slice().sort(), "Undo did not delete all three asks");
+  assert.deepEqual(await stackWords(page), words, "Undo did not put all three back in the list, in order");
+});
+
+test("asks sent in one batch share one at, and the list shows the last-typed ask on top", async (t) => {
+  const page = await open(t); if (!page) return;
+  const words = ["Tie ask one", "Tie ask two", "Tie ask three"];
+  for (const w of words) await addToList(page, w);
+  await page.click(ASK.send);
+  await waitAskWrites(page, 3);
+  await sendDone(page);
+  const ats = new Set((await askWrites(page)).map((b) => b.at));
+  assert.equal(ats.size, 1, `the batch carries ${ats.size} times, so the list must break a tie by id`);
+  const shown = await page.locator("#askList .atext").allInnerTexts();
+  assert.deepEqual(shown, [...words].reverse(), "the list does not show the last-typed ask on top: " + JSON.stringify(shown));
+});
+
+test("Ctrl+Enter while the Undo count runs writes no ask", async (t) => {
+  const page = await open(t); if (!page) return;
+  await sendTyped(page, "Counting ask one");
+  await mustHave(page, ASK.undo, "Undo control");
+  await page.fill(ASK.box, "Ctrl+Enter ask two");
+  await page.focus(ASK.box);
+  await page.keyboard.press("Control+Enter");
+  const writes = (await askWrites(page)).length;
+  assert.equal(writes, 1, `Ctrl+Enter wrote ${writes - 1} ask(s) while the Undo count ran`);
+});
+
+test("a Send of two asks tells Claude once, with the batch comment words", async (t) => {
+  const page = await open(t, { meta: { writer: WRITER } }); if (!page) return;
+  for (const w of ["Batch wake one", "Batch wake two"]) await addToList(page, w);
+  await page.click(ASK.send);
+  await page.waitForFunction(() => window.__sent.length >= 1, null, { timeout: 3000 }).catch(() => {});
+  const sent = await page.evaluate(() => window.__sent.map((s) => s.text));
+  assert.equal(sent.length, 1, `the batch told Claude ${sent.length} times, not once`);
+  assert.match(sent[0], new RegExp(`^Asked on the waiting page\\. Writer: ${WRITER}\\. 2 asks: ask-[0-9a-z]+: Batch wake one; ask-[0-9a-z]+: Batch wake two\\.$`), "the batch comment words changed: " + JSON.stringify(sent[0]));
+});
+
+test("a failed Undo says which asks stay sent, with the code", async (t) => {
+  const page = await open(t, { failDeleteIn: "asks" }); if (!page) return;
+  await sendTyped(page, "Undo that fails");
+  await mustHave(page, ASK.undo, "Undo control");
+  await page.click(ASK.undo);
+  assert.ok(await lineHas(page, "Undo failed"), "the line under the buttons does not say Undo failed");
+  const line = await lineWords(page);
+  assert.match(line, /^Undo failed \(denied\)\. 1 ask stays sent\.$/, "the Undo-failed line changed: " + JSON.stringify(line));
+});
+
+test("when every ask fails to save, the line says so and Copy ask shows in the slot", async (t) => {
+  const page = await open(t, { failSet: true }); if (!page) return;
+  for (const w of ["All fail one", "All fail two"]) await addToList(page, w);
+  await page.click(ASK.send);
+  assert.ok(await lineHas(page, "Not saved"), "the line under the buttons does not say Not saved");
+  const line = await lineWords(page);
+  assert.match(line, /^Not saved \(denied\)\. Your 2 asks are kept in the list: copy them and paste them in chat\.$/, "the all-failed line changed: " + JSON.stringify(line));
+  assert.equal(await page.locator("#askSlot #askCopy").count(), 1, "the all-failed state shows no Copy ask in the slot");
+});
+
+test("with no store, Add to list is off, as Send is", async (t) => {
+  const page = await open(t, { noStore: true }); if (!page) return;
+  await mustHave(page, ASK.box, "Ask box");
+  await page.fill(ASK.box, "Typed box words");
+  assert.equal(await page.locator(ASK.send).isDisabled(), true, "Send ask is on with no store");
+  assert.equal(await page.locator(ASK.add).isDisabled(), true, "Add to list is on with no store, where an ask could never be saved");
+});
+
+test("with no store, Copy ask copies only the box, not the asks stacked on this view", async (t) => {
+  const page = await open(t, { noStore: true, storage: { "waiting.askStack": JSON.stringify(["Kept stack words"]) } }); if (!page) return;
+  await mustHave(page, ASK.box, "Ask box");
+  await page.fill(ASK.box, "Typed box words");
+  await page.evaluate(() => { Object.defineProperty(navigator, "clipboard", { value: { writeText: async (s) => { window.__copied = s; } } }); });
+  await mustHave(page, "#askSlot #askCopy", "Copy ask button");
+  await page.click("#askSlot #askCopy");
+  const copied = await page.evaluate(() => window.__copied);
+  assert.equal(copied, "Typed box words", "Copy ask copied " + JSON.stringify(copied) + ", not only the box");
+});
+
+test("the clipboard fallback for Copy answers says the text is in the box, not below", async (t) => {
+  const page = await open(t, { noStore: true }); if (!page) return;
+  await page.evaluate(() => { Object.defineProperty(navigator, "clipboard", { value: { writeText: async () => { throw new Error("refused"); } } }); });
+  await mustHave(page, "#copy", "Copy answers button");
+  await page.click("#copy");
+  await page.waitForFunction(() => !document.getElementById("copyBox").hidden, null, { timeout: 3000 }).catch(() => {});
+  const note = (await page.textContent("#barStatus")).trim();
+  assert.doesNotMatch(note, /below/, "the clipboard note says the text is below, but the box is not below it: " + JSON.stringify(note));
+  assert.match(note, /box/, "the clipboard note does not point at the read-only box: " + JSON.stringify(note));
+});
+
+test("the clipboard fallback note for Copy answers does not sit beside the read-only copy box", async (t) => {
+  const page = await open(t, { noStore: true }); if (!page) return;
+  await page.evaluate(() => { Object.defineProperty(navigator, "clipboard", { value: { writeText: async () => { throw new Error("refused"); } } }); });
+  await mustHave(page, "#copy", "Copy answers button");
+  await page.click("#copy");
+  await page.waitForFunction(() => !document.getElementById("copyBox").hidden, null, { timeout: 3000 }).catch(() => {});
+  assert.equal(await page.evaluate(() => !document.getElementById("copyBox").hidden), true, "Copy answers did not show the read-only copy box");
+  const rows = await page.evaluate(() => { const s = document.getElementById("barStatus").getBoundingClientRect(), c = document.getElementById("copyBox").getBoundingClientRect(); return { status: [s.top, s.bottom], box: [c.top, c.bottom] }; });
+  const sameRow = rows.status[0] < rows.box[1] && rows.box[0] < rows.status[1];
+  assert.equal(sameRow, false, "the clipboard note shares a row with the read-only copy box: " + JSON.stringify(rows));
+});
+
+test("Undo counting with one ask not saved and the box empty: the hint says Send ask tries it again, not Add to list", async (t) => {
+  const page = await open(t, { failSetText: "Denied ask two" }); if (!page) return;
+  await addToList(page, "Saved ask one");
+  await addToList(page, "Denied ask two");
+  await page.click(ASK.send);
+  assert.equal(await failedRowShown(page), true, "the ask that Send could not save shows no Not saved row");
+  await mustHave(page, ASK.undo, "Undo control");
+  assert.equal(await page.locator(ASK.add).isDisabled(), true, "Add to list is on with the box empty");
+  const hint = await hintText(page);
+  assert.doesNotMatch(hint, /Add to list stays on/, "the hint says Add to list stays on while Add is off: " + JSON.stringify(hint));
+  assert.match(hint, /Send ask tries the one not saved again when the Undo count ends\./, "the hint does not say Send ask tries the one not saved again: " + JSON.stringify(hint));
+});
+
+test("Undo counting with the box empty: the hint gives the counting words, with no Add to list clause", async (t) => {
+  const page = await open(t); if (!page) return;
+  await sendTyped(page, "Counting ask, box empty");
+  await mustHave(page, ASK.undo, "Undo control");
+  assert.equal(await page.inputValue(ASK.box), "", "the box is not empty");
+  const hint = await hintText(page);
+  assert.doesNotMatch(hint, /Add to list|once you type/, "the hint offers Add to list or says once you type, while Add is off and Send waits: " + JSON.stringify(hint));
+  assert.match(hint, /Send turns on when the Undo count ends\./, "the hint is not the counting hint: " + JSON.stringify(hint));
+});
+
+// Storage refused: every write to the browser's storage throws, as in a window that blocks it. Set once the page has loaded.
+const refuseStorage = (page) => page.evaluate(() => { const no = () => { throw new Error("denied"); }; Storage.prototype.setItem = no; Storage.prototype.removeItem = no; });
+// Sends the asks, then presses Undo with its first delete held. The 8 s window passes while that delete waits, so it lands
+// after the window and the asks after it are late. Returns the page once the late line shows.
+async function lateUndo(t, texts) {
+  const page = await open(t, { hold: { delete: 0 } }); if (!page) return null;
+  for (const w of texts) await addToList(page, w);
+  await page.click(ASK.send);
+  await waitAskWrites(page, texts.length);
+  await sendDone(page);
+  await mustHave(page, ASK.undo, "Undo control");
+  await page.click(ASK.undo);
+  await page.waitForFunction(() => window.__held >= 1);
+  await jump(page, 9000);
+  await page.evaluate(() => window.__release());
+  await waitAskDeletes(page, 1);
+  await lineHas(page, "Too late to undo");
+  return page;
+}
+
+test("the late line pins its words for one ask and for more than one", async (t) => {
+  const one = await lateUndo(t, ["Late ask one", "Late ask two"]); if (!one) return;
+  const oneLine = await lineWords(one);
+  const many = await lateUndo(t, ["Late ask three", "Late ask four", "Late ask five"]); if (!many) return;
+  const manyLine = await lineWords(many);
+  assert.equal(oneLine, "Too late to undo 1 ask. It stays sent.", "the one-ask late line is " + JSON.stringify(oneLine));
+  assert.equal(manyLine, "Too late to undo 2 asks. They stay sent.", "the plural late line is " + JSON.stringify(manyLine));
+});
+
+test("after the late line, focus is on the ask text box, as after an Undo that finishes", async (t) => {
+  const page = await lateUndo(t, ["Focus ask one", "Focus ask two"]); if (!page) return;
+  const focused = await page.evaluate(() => (document.activeElement && document.activeElement.id) || "");
+  assert.equal(focused, "askText", "after the late line focus is on " + JSON.stringify(focused) + ", not on the ask box");
+});
+
+test("while Undo's deletes run, the line says Taking back and the Undo control has the spent look, with no count", async (t) => {
+  const page = await open(t, { hold: { delete: 0 } }); if (!page) return;
+  for (const w of ["Taking ask one", "Taking ask two", "Taking ask three"]) await addToList(page, w);
+  await page.click(ASK.send);
+  await waitAskWrites(page, 3);
+  await sendDone(page);
+  await mustHave(page, ASK.undo, "Undo control");
+  await page.click(ASK.undo);
+  await page.waitForFunction(() => window.__held >= 1); // the first delete waits at the hold, inside the window
+  await lineHas(page, "Taking back");
+  const line = await lineWords(page);
+  assert.match(line, /^Taking back 3 asks…/, "the line while Undo's deletes run is " + JSON.stringify(line));
+  const undo = await page.evaluate(() => { const b = document.getElementById("askUndo"); if (!b) return { gone: true }; return { gone: false, spent: b.classList.contains("spent"), visibility: getComputedStyle(b).visibility }; });
+  assert.ok(undo.gone || (undo.spent && undo.visibility === "hidden"), "Undo is not off with no count while its deletes run: " + JSON.stringify(undo));
+  await page.evaluate(() => window.__release());
+});
+
+test("while Undo's delete runs after its 8 s window, the hint says Send turns on when Undo is done", async (t) => {
+  const page = await open(t, { hold: { delete: 0 } }); if (!page) return;
+  await sendTyped(page, "Done hint ask");
+  await mustHave(page, ASK.undo, "Undo control");
+  await page.click(ASK.undo);
+  await page.waitForFunction(() => window.__held >= 1);
+  await jump(page, 9000); // the window passes while the delete waits
+  await page.waitForFunction(() => document.getElementById("askHint").textContent.includes("Undo is done"), null, { timeout: 3000 }).catch(() => {});
+  const hint = await hintText(page);
+  assert.match(hint, /Send turns on when Undo is done\./, "the hint while Undo runs after its window is " + JSON.stringify(hint));
+  await page.evaluate(() => window.__release());
+});
+
+test("with storage refused, a Send that empties the list and the box shows no hint about a lost list", async (t) => {
+  const page = await open(t); if (!page) return;
+  await refuseStorage(page);
+  await sendTyped(page, "Refused storage ask");
+  await mustHave(page, ASK.undo, "Undo control");
+  assert.equal(await page.locator(ASK.rows).count(), 0, "the list has rows after Send, so this is not the empty case");
+  assert.equal(await page.inputValue(ASK.box), "", "the box is not empty after Send");
+  const hint = await hintText(page);
+  assert.doesNotMatch(hint, /would not keep your list/, "the hint says a reload would lose the list, with the list and the box empty: " + JSON.stringify(hint));
+});
+
+test("with storage refused and an ask in the list, Copy ask shows in the slot", async (t) => {
+  const page = await open(t); if (!page) return;
+  await refuseStorage(page);
+  await addToList(page, "Refused list ask");
+  await mustHave(page, ASK.rows, "the list row");
+  assert.match(await hintText(page), /would not keep your list/, "precondition: the page did not find the list unkeepable");
+  assert.equal(await page.locator("#askSlot #askCopy").count(), 1, "Copy ask is not in the slot while a reload would lose the list");
+});
+
+for (const width of [360, 390]) {
+  test(`with Copy answers shown at ${width} wide, the bar status sits on its own full-width row`, async (t) => {
+    const page = await open(t, { noStore: true, viewport: { width, height: 800 } }); if (!page) return;
+    await stubClipboard(page, true);
+    await mustHave(page, "#copy", "Copy answers button");
+    await page.click("#copy");
+    await page.waitForFunction(() => !document.getElementById("copyBox").hidden, null, { timeout: 3000 }).catch(() => {});
+    assert.equal(await page.evaluate(() => !document.getElementById("copyBox").hidden), true, "Copy answers did not show the copy box");
+    const m = await page.evaluate(() => ({ bar: document.querySelector("#bar > .in").getBoundingClientRect().width, status: document.getElementById("barStatus").getBoundingClientRect().width }));
+    assert.ok(m.status >= m.bar * 0.9, `the bar status is ${Math.round(m.status)} px wide in a ${Math.round(m.bar)} px bar; it should sit on its own full-width row`);
+  });
+}
+
+// ---------------------------------------------------------------- focus after Undo, the hint in the window, the bar status width
+
+// Undo's first delete waits at the hold, so focus and the hint are read while Undo runs, inside its window.
+test("after an Undo press by click or Enter, focus is on the ask box while its delete runs, never on the body", async (t) => {
+  const lost = [];
+  for (const how of ["click", "Enter"]) {
+    const page = await open(t, { hold: { delete: 0 } }); if (!page) return;
+    await sendTyped(page, "Focus after an Undo by " + how);
+    await mustHave(page, ASK.undo, "Undo control");
+    await page.focus(ASK.undo);
+    // Scope first: the Undo button has focus before it is pressed.
+    assert.equal(await page.evaluate(() => document.activeElement.id), "askUndo", `before the Undo ${how}, focus is not on Undo`);
+    if (how === "click") await page.click(ASK.undo); else await page.keyboard.press("Enter");
+    await page.waitForFunction(() => window.__held >= 1);
+    const focused = await page.evaluate(() => document.activeElement.id || document.activeElement.tagName);
+    if (focused !== "askText") lost.push(`${how} leaves focus on ${focused}`);
+    await page.evaluate(() => window.__release());
+  }
+  assert.deepEqual(lost, [], "focus is not on the ask box after an Undo press: " + lost.join("; "));
+});
+
+test("when the Undo count ends while the Undo button has focus, focus moves to the ask box, not the body", async (t) => {
+  const page = await open(t); if (!page) return;
+  await sendTyped(page, "Focus when the count ends");
+  await mustHave(page, ASK.undo, "Undo control");
+  await page.focus(ASK.undo);
+  // Scope first: Undo has focus while its count is still running.
+  assert.equal(await page.evaluate(() => document.activeElement.id), "askUndo", "Undo does not have focus before the count ends");
+  await jump(page, 9000); // the count ends; the page's one-second tick spends the button
+  const spent = () => { const b = document.getElementById("askUndo"); return !!b && b.classList.contains("spent"); };
+  await page.waitForFunction(spent, null, { timeout: 3000 }).catch(() => {});
+  assert.equal(await page.evaluate(spent), true, "the Undo count ended but Undo is not spent");
+  const focused = await page.evaluate(() => document.activeElement.id || document.activeElement.tagName);
+  assert.equal(focused, "askText", `after the Undo count ends with Undo focused, focus is on ${focused}, not the ask box`);
+});
+
+test("after a failed Undo, focus is on the ask box, not the body", async (t) => {
+  const page = await open(t, { failDelete: true }); if (!page) return;
+  await sendTyped(page, "Focus after a failed Undo");
+  await mustHave(page, ASK.undo, "Undo control");
+  await page.focus(ASK.undo);
+  // Scope first: Undo has focus when it is pressed and its delete fails.
+  assert.equal(await page.evaluate(() => document.activeElement.id), "askUndo", "Undo does not have focus before it is pressed");
+  await page.click(ASK.undo);
+  assert.equal(await lineHas(page, "Undo failed"), true, "the failed Undo shows no Undo failed line");
+  const focused = await page.evaluate(() => document.activeElement.id || document.activeElement.tagName);
+  assert.equal(focused, "askText", `after a failed Undo focus is on ${focused}, not the ask box`);
+});
+
+test("while an in-window Undo's delete runs, the hint says Send turns on when Undo is done, not when the count ends", async (t) => {
+  const page = await open(t, { hold: { delete: 0 } }); if (!page) return;
+  await sendTyped(page, "Hint inside the window");
+  await mustHave(page, ASK.undo, "Undo control");
+  await page.click(ASK.undo);
+  await page.waitForFunction(() => window.__held >= 1);
+  // Scope first: the window has not passed, so the Undo count is still running while the delete waits.
+  assert.equal(await page.evaluate(() => undoLeft(askState.sent) > 0), true, "the Undo window has already passed, so this is not the in-window case");
+  const hint = await hintText(page);
+  assert.match(hint, /Send turns on when Undo is done\./, "the hint while an in-window Undo runs is " + JSON.stringify(hint));
+  assert.doesNotMatch(hint, /Undo count ends/, "the hint says the Undo count ends while Undo is already running: " + JSON.stringify(hint));
+  await page.evaluate(() => window.__release());
+});
+
+test("with Copy answers shown at 800 and 1280 wide, the bar status stays inline with its buttons, not on its own row", async (t) => {
+  const ownRow = [];
+  for (const width of [800, 1280]) {
+    const page = await open(t, { noStore: true, viewport: { width, height: 800 } }); if (!page) return;
+    await stubClipboard(page, true);
+    await mustHave(page, "#copy", "Copy answers button");
+    await page.click("#copy");
+    await page.waitForFunction(() => !document.getElementById("copyBox").hidden, null, { timeout: 3000 }).catch(() => {});
+    assert.equal(await page.evaluate(() => !document.getElementById("copyBox").hidden), true, `at ${width} wide, Copy answers did not show the copy box`);
+    // Scope first: the status has words to lay out, so its row is measured.
+    const r = await page.evaluate(() => { const s = document.getElementById("barStatus").getBoundingClientRect(), c = document.getElementById("copy").getBoundingClientRect(); return { status: [s.top, s.bottom], copy: [c.top, c.bottom] }; });
+    assert.ok(r.status[1] > r.status[0], `at ${width} wide, the bar status has no text to lay out: ${JSON.stringify(r.status)}`);
+    // Inline: the status and Copy answers share a row, so their vertical extents overlap.
+    const shared = r.status[0] < r.copy[1] && r.copy[0] < r.status[1];
+    if (!shared) ownRow.push(`${width} px: status ${JSON.stringify(r.status.map(Math.round))}, Copy answers ${JSON.stringify(r.copy.map(Math.round))}`);
+  }
+  assert.deepEqual(ownRow, [], "the bar status takes its own row at 800 or 1280 wide, where it should stay inline: " + ownRow.join("; "));
+});
+
+test("an edit still open when the page reloads comes back open, with the words typed in it", async (t) => {
+  const page = await open(t); if (!page) return;
+  await addToList(page, "Edit survives the reload");
+  await mustHaveNamed(page, "Edit ask 1", "Edit control on ask 1");
+  await page.getByRole("button", { name: "Edit ask 1", exact: true }).click();
+  await page.getByRole("textbox", { name: "Ask 1", exact: true }).fill("Edit survives, changed");
+  await reopen(page);
+  const edit = page.getByRole("textbox", { name: "Ask 1", exact: true });
+  assert.equal(await edit.count(), 1, "the edit left open did not come back after the reload");
+  assert.equal(await edit.inputValue(), "Edit survives, changed", "the edit came back with other words");
 });
 
 async function openCap(t, labels, width, design) {
@@ -3039,8 +4579,9 @@ const anchorOf = (page, sent) => page.evaluate((ids) => {
   return null;
 }, sent.map((it) => "item-" + it.id));
 // Scroll anchoring stays off unless the case asks for it.
-const openSend = async (t, { items, width, height, scheme, anchored }) => {
-  const page = await open(t, { items, scheme, viewport: { width, height } });
+// sentMove names the SENT_MOVE value a case pins (see withSentMove); none keeps the page's own value.
+const openSend = async (t, { items, width, height, scheme, anchored, sentMove }) => {
+  const page = await open(t, { items, scheme, viewport: { width, height }, pageHtml: sentMove ? withSentMove(sentMove) : undefined });
   if (page && !anchored) await noAnchor(page);
   return page;
 };
@@ -3068,7 +4609,7 @@ function checkRise(pre, post, when, sentIt, anchorIt, belowIt) {
 async function sendBelowPartial(t, { width, scheme, anchored }) {
   // At 390 wide the sent card is taller than the phone's screen, so the viewport is taller to keep the card below on screen.
   const above = mk("above", 4), sent = mk("sent", 5), below = mk("below", 6);
-  const page = await openSend(t, { items: [...LEADS, above, sent, below, ...FILLER], width, height: width === 390 ? 1000 : 800, scheme, anchored }); if (!page) return;
+  const page = await openSend(t, { items: [...LEADS, above, sent, below, ...FILLER], width, height: width === 390 ? 1000 : 800, scheme, anchored, sentMove: "stay" }); if (!page) return;
   await choose(page, sent, "a");
   await settleAt(page, above, "bottom", 30);
   assert.equal(await anchorOf(page, [sent]), "item-above", "fixture: the card above is not the anchor");
@@ -3079,7 +4620,7 @@ async function sendBelowPartial(t, { width, scheme, anchored }) {
 // A card sent as the topmost card on screen, its top inside the band: its top stays, and the card below rises.
 async function sendTopOfBand(t, { scheme }) {
   const sent = mk("sent", 4, { context: LONG }), below = mk("below", 5);
-  const page = await openSend(t, { items: [...HOLDS, sent, below, ...FILLER], width: 1280, height: 800, scheme, anchored: false }); if (!page) return;
+  const page = await openSend(t, { items: [...HOLDS, sent, below, ...FILLER], width: 1280, height: 800, scheme, anchored: false, sentMove: "stay" }); if (!page) return;
   await choose(page, sent, "a");
   await settleAt(page, sent, "top", 20);
   assert.equal(await anchorOf(page, [sent]), "item-sent", "fixture: the sent card is not the topmost card on screen");
@@ -3090,7 +4631,7 @@ async function sendTopOfBand(t, { scheme }) {
 // Two cards sent together: the first is wholly above the band, the second starts inside it. The second keeps its top, and the card below rises by the second's drop.
 async function sendTwoOneAbove(t, { width, scheme }) {
   const wholly = mk("wholly-above", 4, { context: LONG }), visible = mk("visible", 5, { context: LONG }), below = mk("below", 6);
-  const page = await openSend(t, { items: [...LEADS, wholly, visible, below, ...FILLER], width, height: 800, scheme, anchored: false }); if (!page) return;
+  const page = await openSend(t, { items: [...LEADS, wholly, visible, below, ...FILLER], width, height: 800, scheme, anchored: false, sentMove: "stay" }); if (!page) return;
   await choose(page, wholly, "a");
   await choose(page, visible, "b");
   await settleAt(page, wholly, "bottom", -4);
@@ -3109,7 +4650,7 @@ async function sendTwoOneAbove(t, { width, scheme }) {
 // A tall card at 390 wide, its top above the band and its bottom inside it: the card below keeps its top, and the receipt lands just above it.
 async function sendTallOverBand(t, { scheme }) {
   const tall = mk("tall", 4, { context: LONG }), below = mk("below", 5);
-  const page = await openSend(t, { items: [...LEADS, tall, below, ...FILLER], width: 390, height: 800, scheme, anchored: false }); if (!page) return;
+  const page = await openSend(t, { items: [...LEADS, tall, below, ...FILLER], width: 390, height: 800, scheme, anchored: false, sentMove: "stay" }); if (!page) return;
   await choose(page, tall, "a");
   await settleAt(page, tall, "bottom", 60);
   assert.equal(await anchorOf(page, [tall]), "item-below", "fixture: the card below is not the anchor");
@@ -3126,7 +4667,7 @@ async function sendTallOverBand(t, { scheme }) {
 // A card sent with the card below it starting under the bar: the sent card keeps its top, and the card below rises.
 async function sendOverUnderBar(t, { scheme }) {
   const sent = mk("sent", 4, { context: LONG }), below = mk("under-bar", 5);
-  const page = await openSend(t, { items: [...HOLDS, sent, below, ...FILLER], width: 1280, height: 800, scheme, anchored: false }); if (!page) return;
+  const page = await openSend(t, { items: [...HOLDS, sent, below, ...FILLER], width: 1280, height: 800, scheme, anchored: false, sentMove: "stay" }); if (!page) return;
   await choose(page, sent, "a");
   await settleAt(page, sent, "top", 60);
   assert.equal(await anchorOf(page, [sent]), "item-sent", "fixture: the sent card is not the anchor");
@@ -3134,6 +4675,229 @@ async function sendOverUnderBar(t, { scheme }) {
   assert.ok(rd.pre["item-under-bar"].top >= rd.band.bottom - 1, `fixture: the card below starts above the bar: ${rd.pre["item-under-bar"].top} against ${rd.band.bottom}`);
   for (const [when, post] of reads(rd)) checkRise(rd.pre, post, when, sent, sent, below);
 }
+
+// Under SENT_MOVE "sink" a Send takes the card out of its tier, so nothing on screen may jump. Positions are viewport tops: the page may
+// scroll to keep its rail growth out of view, so the scroll position is not asserted. A card above the sent card keeps its viewport top,
+// and the open card below takes the sent card's top, or, when the sent card is last in its tier, the cards above it hold still.
+async function sinkSendInView(t, { width, anchored = false }) {
+  const sent = mk("sink-sent", 4, { context: LONG }), below = mk("sink-below", 5, { context: LONG });
+  const page = await openSend(t, { items: [...LEADS, sent, below, ...FILLER], width, height: 800, scheme: "light", anchored, sentMove: "sink" }); if (!page) return;
+  await choose(page, sent, "a");
+  await settleAt(page, sent, "top", 60);
+  const rd = await sendAndRead(page, [sent]);
+  const S = "item-sink-sent", B = "item-sink-below";
+  assert.ok(rd.pre[S].top >= rd.band.top && rd.pre[S].top < rd.band.bottom, `fixture: the sent card is not in view before Send at ${rd.pre[S].top}`);
+  const above = Object.keys(rd.pre).filter((id) => id !== S && rd.pre[id].top < rd.pre[S].top - 1);
+  assert.ok(above.length >= 3, `fixture: ${above.length} cards sit above the sent card`);
+  for (const [when, post] of reads(rd)) for (const id of above) assert.ok(Math.abs(post[id].top - rd.pre[id].top) <= 1, `${when}: ${id} moved on screen on Send: ${rd.pre[id].top} to ${post[id].top}`);
+  const took = reads(rd).map(([when, post]) => `${when} ${post[B].top}`).join(", ");
+  assert.ok(reads(rd).every(([, post]) => Math.abs(post[B].top - rd.pre[S].top) <= 2), `the open card below did not take the sent card's top ${rd.pre[S].top}: ${took}`);
+}
+async function sinkSendLastInTier(t, { width, anchored = false }) {
+  const sent = mk("sink-last", 4, { context: LONG });
+  // Nothing in a later tier: a stood pick there would go with the Send. The card is tall enough to scroll to the band.
+  const page = await openSend(t, { items: [...HOLDS, ...LEADS, sent], width, height: 800, scheme: "light", anchored, sentMove: "sink" }); if (!page) return;
+  await choose(page, sent, "a");
+  await settleAt(page, sent, "top", 60);
+  assert.equal(await sectionOf(page, sent), "tier-calm", "fixture: the sent card is not in the open tier");
+  const rd = await sendAndRead(page, [sent]);
+  const S = "item-sink-last";
+  assert.ok(rd.pre[S].top >= rd.band.top && rd.pre[S].top < rd.band.bottom, `fixture: the sent card is not in view before Send at ${rd.pre[S].top}`);
+  assert.equal(await sectionOf(page, sent), "tier-answered", `No. ${sent.n} did not move to the Answered section after its Send`);
+  const above = Object.keys(rd.pre).filter((id) => id !== S && rd.pre[id].top < rd.pre[S].top - 1);
+  assert.ok(above.length >= 3, `fixture: ${above.length} cards sit above the sent card`);
+  for (const [when, post] of reads(rd)) for (const id of above) assert.ok(Math.abs(post[id].top - rd.pre[id].top) <= 1, `${when}: ${id} moved on Send: ${rd.pre[id].top} to ${post[id].top}`);
+}
+for (const width of [1280, 390]) {
+  test(`answered-sink: a sent card in view: the open card below takes its top, and nothing above it moves on screen, at ${width} wide (SENT_MOVE sink)`, async (t) => {
+    await sinkSendInView(t, { width });
+  });
+  test(`answered-sink: a sent card last in its tier: nothing above it moves on screen, at ${width} wide (SENT_MOVE sink)`, async (t) => {
+    await sinkSendLastInTier(t, { width });
+  });
+}
+// The two 390 cases again with the browser's scroll anchoring on. The cases above keep it off, so they stay as they are.
+test("answered-sink: a sent card in view, with scroll anchoring on: the open card below takes its top, and nothing above it moves on screen, at 390 wide (SENT_MOVE sink)", async (t) => {
+  await sinkSendInView(t, { width: 390, anchored: true });
+});
+test("answered-sink: a sent card last in its tier, with scroll anchoring on: nothing above it moves on screen, at 390 wide (SENT_MOVE sink)", async (t) => {
+  await sinkSendLastInTier(t, { width: 390, anchored: true });
+});
+
+// Scroll anchoring stays on in the cases below: they test what a reader's browser does with the page's own compensation. A card in view
+// is one whose box overlaps the band the owner reads, from the header's bottom edge to the top of the bar.
+const inViewIds = (pre, band) => Object.keys(pre).filter((id) => pre[id].top < band.bottom && pre[id].bottom > band.top);
+const answeredRow = (page) => page.locator('#rail a.ov-head[href="#tier-answered"]').count();
+const SENT_TALL = LONG.repeat(3);
+
+// The first sink Send adds the rail's Answered row, which on a narrow screen sits above the list. The cards in view above the sent card keep
+// their viewport tops, and the open card below takes the sent card's top. A card below that one moves up by the sent card's leaving.
+async function sinkRailRowHolds(t, { width }) {
+  const sent = mk("rail-sent", 4, { context: LONG }), below = mk("rail-below", 5, { context: LONG });
+  const page = await openSend(t, { items: [...LEADS, sent, below, ...FILLER], width, height: 800, scheme: "light", anchored: true, sentMove: "sink" }); if (!page) return;
+  await choose(page, sent, "a");
+  await settleAt(page, sent, "top", 60);
+  const rd = await sendAndRead(page, [sent]);
+  const S = "item-rail-sent", B = "item-rail-below";
+  assert.ok(rd.pre[S].top >= rd.band.top && rd.pre[S].top < rd.band.bottom, `fixture: the sent card is not in view before Send at ${rd.pre[S].top}`);
+  assert.equal(await answeredRow(page), 1, "the Send did not add the Answered row to the rail");
+  const shift = rd.pre[B].top - rd.pre[S].top;
+  for (const [when, post] of reads(rd)) {
+    for (const id of inViewIds(rd.pre, rd.band)) {
+      if (id === S || id === B) continue;
+      const want = rd.pre[id].top < rd.pre[S].top ? rd.pre[id].top : rd.pre[id].top - shift;
+      assert.ok(Math.abs(post[id].top - want) <= 2, `${when}: ${id} moved on screen on Send: ${rd.pre[id].top} to ${post[id].top}`);
+    }
+    assert.ok(Math.abs(post[B].top - rd.pre[S].top) <= 2, `${when}: the open card below did not take the sent card's top ${rd.pre[S].top}: ${post[B].top}`);
+  }
+}
+
+// A card sent with its top above the screen's top edge, at a desktop width. The sent card leaves above the cards in view, so they keep their viewport tops.
+async function sinkSendPartlyAbove(t) {
+  const sent = mk("part-sent", 4, { context: SENT_TALL }), below = mk("part-below", 5, { context: LONG });
+  const page = await openSend(t, { items: [...LEADS, sent, below, ...FILLER], width: 1280, height: 800, scheme: "light", anchored: true, sentMove: "sink" }); if (!page) return;
+  await choose(page, sent, "a");
+  await settleAt(page, sent, "top", -300);
+  const rd = await sendAndRead(page, [sent]);
+  const S = "item-part-sent";
+  assert.ok(rd.pre[S].top < rd.band.top && rd.pre[S].bottom > rd.band.top + 100, `fixture: the sent card is not partly above the screen: top ${rd.pre[S].top}, bottom ${rd.pre[S].bottom}`);
+  for (const [when, post] of reads(rd)) for (const id of inViewIds(rd.pre, rd.band)) {
+    if (id === S) continue;
+    assert.ok(Math.abs(post[id].top - rd.pre[id].top) <= 2, `${when}: ${id} moved on screen on Send: ${rd.pre[id].top} to ${post[id].top}`);
+  }
+}
+
+// Undo of the Send that added the Answered row, on a phone. Once the row is gone, every card in view is back at its pre-Send viewport top.
+async function sinkUndoRailRow(t) {
+  const sent = mk("undo-sent", 4, { context: LONG }), below = mk("undo-below", 5, { context: LONG });
+  const page = await openSend(t, { items: [...LEADS, sent, below, ...FILLER], width: 390, height: 800, scheme: "light", anchored: true, sentMove: "sink" }); if (!page) return;
+  await choose(page, sent, "a");
+  await settleAt(page, sent, "top", 60);
+  const pre = await cardMap(page), band = await bandOf(page);
+  await send(page);
+  await card(page, sent).locator(".receipt").waitFor();
+  await page.locator("#sent .stamp").waitFor();
+  await frameWait(page, 2);
+  assert.equal(await answeredRow(page), 1, "the Send did not add the Answered row to the rail");
+  await page.locator("#undoBtn").click();
+  await page.waitForFunction(() => Object.keys(window.__answers()).length === 0);
+  await frameWait(page, 2);
+  assert.equal(await answeredRow(page), 0, "the Answered row stayed on the rail after Undo");
+  const back = await cardMap(page);
+  // The returning card goes back to its own slot, so only the cards it did not pass are checked.
+  const S = "item-undo-sent";
+  for (const id of inViewIds(pre, band)) {
+    if (id === S) continue;
+    assert.ok(Math.abs(back[id].top - pre[id].top) <= 2, `${id} moved on screen on Undo: ${pre[id].top} to ${back[id].top}`);
+  }
+}
+for (const width of [390, 800]) {
+  test(`answered-sink: the first Send that adds the rail's Answered row keeps the cards in view, with scroll anchoring on, at ${width} wide (SENT_MOVE sink)`, async (t) => {
+    await sinkRailRowHolds(t, { width });
+  });
+}
+test("answered-sink: a card sent with its top above the screen keeps the cards in view, with scroll anchoring on, at 1280 wide (SENT_MOVE sink)", async (t) => {
+  await sinkSendPartlyAbove(t);
+});
+test("answered-sink: Undo of the Send that added the Answered row moves no card in view, with scroll anchoring on, at 390 wide (SENT_MOVE sink)", async (t) => {
+  await sinkUndoRailRow(t);
+});
+
+// Scroll anchoring stays on in every case below. A Send is a script click, not a mouse press, since a press moves the focus to the Send button.
+const focusedId = (page) => page.evaluate(() => (document.activeElement && document.activeElement.id) || "");
+// A frame's load event does not reach the window in capture, so each frame counts its own load. A frame moved in the DOM reloads, and a new one is caught when it is added.
+const watchLoads = (page) => page.evaluate(() => {
+  window.__loads = 0;
+  const bump = () => { window.__loads++; };
+  const on = (f) => { if (f.tagName === "IFRAME") f.addEventListener("load", bump); };
+  const attach = (n) => { if (n.nodeType === 1) { on(n); n.querySelectorAll("iframe").forEach(on); } };
+  document.querySelectorAll("iframe").forEach(on);
+  new MutationObserver((ms) => ms.forEach((m) => m.addedNodes.forEach(attach))).observe(document.body, { childList: true, subtree: true });
+});
+
+// Focus on a radio of a card below the sent card (or above it, as a control), then a Send that sinks the sent card. Returns what the reader sees.
+async function sinkWithFocusBelow(t, { focusOn }) {
+  const sent = mk("rec-sent", 4), radio = mk("rec-radio", 5), frame = mk("rec-frame", 6, { designs: [{ slug: "s1", label: "Option a" }] });
+  const page = await open(t, { items: [...LEADS, sent, radio, frame, ...FILLER], designData: { s1: "<p>one</p>" }, viewport: { width: 1280, height: 800 }, pageHtml: withSentMove("sink") }); if (!page) return null;
+  await choose(page, sent, "a");
+  await settleAt(page, sent, "top", 60);
+  const target = focusOn === "above" ? LEADS[0] : radio, radioId = "o-" + target.id + "-a";
+  const frames = await page.locator("#item-rec-frame iframe.dframe").count();
+  await page.locator("#" + radioId).focus();
+  const focused = await focusedId(page);
+  await watchLoads(page);
+  await page.evaluate(() => document.getElementById("send").click());
+  await card(page, sent).locator(".receipt").waitFor();
+  await page.locator("#sent .stamp").waitFor();
+  await frameWait(page, 3);
+  return { frames, focused, radioId, active: await focusedId(page), loads: await page.evaluate(() => window.__loads) };
+}
+test("answered-sink: a Send that sinks a card keeps the focus on a radio below it, with scroll anchoring on, at 1280 wide (SENT_MOVE sink)", async (t) => {
+  const r = await sinkWithFocusBelow(t, { focusOn: "below" }); if (!r) return;
+  assert.equal(r.focused, r.radioId, "fixture: the radio below the sent card did not take the focus before Send");
+  assert.equal(r.active, r.radioId, `focus left the radio below the sent card on Send: now on "${r.active}"`);
+});
+test("answered-sink: a Send that sinks a card reloads no design frame below it, with scroll anchoring on, at 1280 wide (SENT_MOVE sink)", async (t) => {
+  const r = await sinkWithFocusBelow(t, { focusOn: "below" }); if (!r) return;
+  assert.equal(r.frames, 1, "fixture: the design frame below the sent card is not there");
+  assert.equal(r.loads, 0, "a design frame below the sent card reloaded on Send");
+});
+test("answered-sink: control: a Send that sinks a card keeps the focus on a radio above it, with scroll anchoring on, at 1280 wide (SENT_MOVE sink)", async (t) => {
+  const r = await sinkWithFocusBelow(t, { focusOn: "above" }); if (!r) return;
+  assert.equal(r.focused, r.radioId, "fixture: the radio above the sent card did not take the focus before Send");
+  assert.equal(r.active, r.radioId, `focus left the radio above the sent card on Send: now on "${r.active}"`);
+});
+
+// A sent card taller than the view, its top above the screen and its bottom below it. The next open card must take the sent card's old top,
+// and the view must not move to the card above. The control is a short card in view: the same rule, with nothing to hold.
+async function sinkSpanOrShort(t, { spanning }) {
+  // A long context folds after three lines, so the tall card carries many options instead.
+  const tallOpts = Array.from({ length: 24 }, (_, i) => opt(String.fromCharCode(97 + i), "Option " + (i + 1)));
+  const sent = mk("span-sent", 4, spanning ? { options: tallOpts } : {}), below = mk("span-below", 5, { context: LONG });
+  const page = await openSend(t, { items: [...LEADS, sent, below, ...FILLER], width: 390, height: 800, scheme: "light", anchored: true, sentMove: "sink" }); if (!page) return;
+  await choose(page, sent, "a");
+  await settleAt(page, sent, "top", spanning ? -300 : 60);
+  const rd = await sendAndRead(page, [sent]);
+  const S = "item-span-sent", B = "item-span-below";
+  if (spanning) assert.ok(rd.pre[S].top < 0 && rd.pre[S].bottom > 800 && rd.pre[S].h > 800, `fixture: the sent card does not span the view: top ${rd.pre[S].top}, bottom ${rd.pre[S].bottom}, height ${rd.pre[S].h}`);
+  for (const [when, post] of reads(rd)) assert.ok(Math.abs(post[B].top - rd.pre[S].top) <= 2, `${when}: the next open card is at ${post[B].top}, not at the sent card's old top ${rd.pre[S].top}`);
+}
+test("answered-sink: a sent card taller than the view, with scroll anchoring on: the next open card takes its top and the view stays, at 390 wide (SENT_MOVE sink)", async (t) => {
+  await sinkSpanOrShort(t, { spanning: true });
+});
+test("answered-sink: control: a sent card shorter than the view, with scroll anchoring on: the next open card takes its top, at 390 wide (SENT_MOVE sink)", async (t) => {
+  await sinkSpanOrShort(t, { spanning: false });
+});
+
+// Undo of a Send from a card whose top sits at `want` in the viewport. Undo returns the card, and it must come back at its pre-Send top.
+async function undoFromTop(t, { width, want }) {
+  const sent = mk("undo-top", 4, { context: LONG }), below = mk("undo-top-below", 5, { context: LONG });
+  const page = await openSend(t, { items: [...LEADS, sent, below, ...FILLER], width, height: 800, scheme: "light", anchored: true, sentMove: "sink" }); if (!page) return;
+  await choose(page, sent, "a");
+  const bt = (await bandOf(page)).top;
+  await settleAt(page, sent, "top", want - bt);
+  const S = "item-undo-top";
+  const pre = await cardMap(page);
+  assert.ok(Math.abs(pre[S].top - want) <= 2, `fixture: the sent card's top is ${pre[S].top}, not ${want}`);
+  await send(page);
+  await card(page, sent).locator(".receipt").waitFor();
+  await page.locator("#sent .stamp").waitFor();
+  await frameWait(page, 2);
+  await page.locator("#undoBtn").click();
+  await page.waitForFunction(() => Object.keys(window.__answers()).length === 0);
+  await frameWait(page, 3);
+  const back = await cardMap(page);
+  assert.ok(Math.abs(back[S].top - pre[S].top) <= 2, `the card came back at ${back[S].top}, not at its pre-Send top ${pre[S].top}`);
+}
+test("answered-sink: Undo of a Send from a card that starts above the screen returns it to its pre-Send top, with scroll anchoring on, at 390 wide (SENT_MOVE sink)", async (t) => {
+  await undoFromTop(t, { width: 390, want: -76 });
+});
+test("answered-sink: Undo of a Send from a card that starts above the screen returns it to its pre-Send top, with scroll anchoring on, at 1280 wide (SENT_MOVE sink)", async (t) => {
+  await undoFromTop(t, { width: 1280, want: -76 });
+});
+test("answered-sink: control: Undo of a Send from a card in view returns it to its pre-Send top, with scroll anchoring on, at 390 wide (SENT_MOVE sink)", async (t) => {
+  await undoFromTop(t, { width: 390, want: 60 });
+});
 
 // An answer that arrives without a Send, on a card in view: the card keeps its height while in view, and drops once wholly off the screen.
 async function answerWithoutSend(t, { width, scheme }) {
@@ -3943,6 +5707,357 @@ test("merged_page.py refuses --current with --no-roadmap, since a repo with no r
   assert.equal(r.stdout, "", "the refusal printed a page");
 });
 
+// ---------------------------------------------------------------- one page: the phase list draws every step (Status tab)
+// The rail holds one button per phase that has a step: the five known phases in their order, and any other
+// phase id a step carries, ordered by its smallest order and then by id, with Later last. A step with no
+// phase, or an empty one, is in "No phase". Every fixture goes through merged_page.py --data, so the roadmap
+// build bakes it as it bakes a real repo, and the case checks the baked steps before it asks the page anything.
+
+// The steps of a fixture, keyed by file stem (the step id). A row is [id, phase, order, status]; an undefined
+// phase leaves the key out, so the step has no phase at all.
+const stepsOf = (rows) => Object.fromEntries(rows.map(([id, phase, order, status = "todo"]) => [id, {
+  title: "Step " + id, status, order, note: "n", updatedAt: "2026-10-26T00:00:00Z", ...(phase === undefined ? {} : { phase }),
+}]));
+// The page built from a fixture. make_repo adds a cleanup step c1 unless the fixture names one, so a fixture names its own c1.
+function phasePage(steps, phases = {}) {
+  assert.ok(steps.c1, "the fixture names no c1: make_repo would add its own cleanup step c1");
+  return mergedPage("--data", JSON.stringify({ steps, meta: { phases } }));
+}
+// Each step's phase, id to phase, null where the step has none. Fixture and baked data are compared in this form.
+const phaseOf = (steps) => Object.fromEntries(Object.entries(steps).map(([id, s]) => [id, s.phase ?? null]));
+// Before any phase is asked about: the build bakes every fixture step under the fixture's phase, so a red below is the page's.
+async function assertBaked(page, steps) {
+  const baked = await page.evaluate(() => Object.fromEntries(Object.entries(window.ROADMAP_DATA.steps).map(([id, s]) => [id, s.phase ?? null])));
+  assert.deepEqual(baked, phaseOf(steps), "the roadmap build did not bake the fixture's steps under their phases, so the page is not the one the case set up");
+}
+// The names on the rail, in order, one per phase button.
+const railNames = (page) => page.locator(".prail > button .nm > span:first-child").allTextContents();
+// The step ids the phase list draws now: the rows of the phase shown, open and done.
+const listedIds = (page) => page.locator("#svPhases [data-row]").evaluateAll((rows) => rows.map((r) => r.getAttribute("data-row")));
+// Presses each rail button in turn, and returns the step ids the phase list drew under each button's name.
+async function listedByPhase(page) {
+  // A null prototype: a phase named __proto__ would otherwise set the prototype of a plain object, not a key.
+  const out = Object.create(null);
+  const count = await page.locator(".prail > button").count();
+  for (let i = 0; i < count; i++) {
+    const button = page.locator(".prail > button").nth(i);
+    const name = await button.locator(".nm > span:first-child").textContent();
+    await button.click();
+    out[name] = await listedIds(page);
+  }
+  return out;
+}
+
+// (a) The degen shape: every step in one foreign phase. The tab is not blank, and each step's title is drawn.
+test("the phase list draws a repo whose steps all sit in one foreign phase: the phase shows, and every step title is drawn", async (t) => {
+  const steps = stepsOf([["c1", "v2", 1, "active"], ["a2", "v2", 2], ["a3", "v2", 3, "done"]]);
+  const page = await open(t, { pageHtml: phasePage(steps) }); if (!page) return;
+  await assertBaked(page, steps);
+  await openStatus(page);
+  assert.deepEqual(await railNames(page), ["v2"], "the rail does not name the one phase the steps hold, v2: it shows the five known phases only");
+  const titles = await page.locator("#svPhases .ttl").allTextContents();
+  for (const [id, s] of Object.entries(steps)) assert.ok(titles.includes(s.title), `step ${id} (${s.title}) is not drawn in the phase list, though its phase v2 is shown`);
+});
+
+// (b) The home shape: known phases that hold steps, foreign phases by their smallest order, Later last.
+test("the phase list draws a home-shaped repo: known phases that hold steps, then foreign phases by their first order, Later last, every step drawn", async (t) => {
+  const steps = stepsOf([["c1", "now", 1], ["n2", "now", 2, "done"], ["d3", "duo", 4], ["d4", "duo", 5], ["o5", "owner", 7], ["l6", "later", 9]]);
+  const page = await open(t, { pageHtml: phasePage(steps) }); if (!page) return;
+  await assertBaked(page, steps);
+  await openStatus(page);
+  assert.deepEqual(await railNames(page), ["now", "duo", "owner", "Later"], "the rail does not hold the phases that have steps, foreign ones by their smallest order, Later last, and no empty known phase");
+  const drawn = Object.values(await listedByPhase(page)).flat();
+  for (const id of Object.keys(steps)) assert.ok(drawn.includes(id), `step ${id} is drawn under no phase of the rail: the phase list hides it`);
+});
+
+// (b, tie) Foreign phases whose smallest order is the same sit in id order. File order would put zeta first.
+test("the phase list orders foreign phases with the same smallest order by id", async (t) => {
+  const steps = stepsOf([["a1", "zeta", 5], ["c1", "zeta", 3], ["z2", "alpha", 3]]);
+  const page = await open(t, { pageHtml: phasePage(steps) }); if (!page) return;
+  await assertBaked(page, steps);
+  await openStatus(page);
+  assert.deepEqual(await railNames(page), ["alpha", "zeta"], "the rail does not put alpha before zeta: a tie on the smallest order goes by phase id");
+});
+
+// (b, current) Where the plan stands is the first shown phase with an open step. Now is shown but all done, so Duo is current.
+test("the phase list: Where the plan stands names the first shown phase with an open step, Duo here, not Later", async (t) => {
+  const steps = stepsOf([["c1", "now", 1, "done"], ["d3", "duo", 4], ["l6", "later", 9]]);
+  const page = await open(t, { pageHtml: phasePage(steps) }); if (!page) return;
+  await assertBaked(page, steps);
+  await openStatus(page);
+  assert.equal(await page.locator(".prail .here").count(), 1, "the rail marks no single current phase");
+  assert.equal(await page.locator(".prail .nm:has(.here) > span:first-child").textContent(), "duo", "the current phase on the rail is not duo, the first shown phase with an open step");
+  assert.equal(await page.locator("#svNow .ph").textContent(), "duo", "the Where the plan stands block does not name duo as the current phase");
+});
+
+// (c) A foreign phase takes its name from meta.phases.<id>.name when that is a non-empty string, else its id.
+test("the phase list names a foreign phase from meta.phases when that name is a non-empty string, else by its id", async (t) => {
+  const steps = stepsOf([["c1", "v2", 1], ["d3", "duo", 2], ["o5", "owner", 3]]);
+  const phases = { v2: { name: "Version two" }, duo: { name: "" }, owner: { name: 7 } };
+  const page = await open(t, { pageHtml: phasePage(steps, phases) }); if (!page) return;
+  await assertBaked(page, steps);
+  await openStatus(page);
+  assert.deepEqual(await railNames(page), ["Version two", "duo", "owner"], "the rail does not name each foreign phase from meta.phases.<id>.name when it is a non-empty string, else by its id");
+});
+
+// (d) A step with no phase key, and one with an empty phase, are both drawn under one phase named No phase.
+test("the phase list draws a step with no phase, or an empty one, under No phase", async (t) => {
+  const steps = stepsOf([["c1", undefined, 1, "active"], ["e2", "", 2]]);
+  const page = await open(t, { pageHtml: phasePage(steps) }); if (!page) return;
+  await assertBaked(page, steps);
+  await openStatus(page);
+  assert.deepEqual(await railNames(page), ["No phase"], "the rail does not hold one No phase button for the steps with no phase");
+  await page.locator(".prail > button", { hasText: "No phase" }).click();
+  const ids = await listedIds(page);
+  assert.ok(ids.includes("c1"), "step c1, with no phase key, is not drawn under No phase");
+  assert.ok(ids.includes("e2"), "step e2, with an empty phase, is not drawn under No phase");
+});
+
+// (b, full size) The shape of claude-settings: the five known phases and seven more, two steps each, twenty-four in all.
+// The orders run later, then the seven others, then the four known phases before Later. So a sort by order alone
+// puts Later first, and a foreign phase with a small order must still sit between Roll out and Later.
+test("the phase list at full size puts the seven others between Roll out and Later, by their smallest order, and draws every step", async (t) => {
+  const others = ["now", "next", "page", "checks", "ci", "merge", "records"];
+  const rows = [];
+  let order = 1;
+  for (const phase of ["later", ...others, "cleanup", "organize", "design", "rollout"]) for (const k of [1, 2]) rows.push([phase === "cleanup" && k === 1 ? "c1" : `${phase}-${k}`, phase, order++]);
+  const steps = stepsOf(rows);
+  const page = await open(t, { pageHtml: phasePage(steps) }); if (!page) return;
+  await assertBaked(page, steps);
+  await openStatus(page);
+  assert.deepEqual(await railNames(page), ["Clean up", "Organize", "Design", "Roll out", ...others, "Later"], "the rail is not the known phases in their order, then the others by their smallest order, then Later last");
+  const drawn = Object.values(await listedByPhase(page)).flat();
+  for (const id of Object.keys(steps)) assert.ok(drawn.includes(id), `step ${id} is drawn under no phase of the rail: the phase list hides it`);
+});
+
+// Green control: the five known phases all hold steps, so the rail keeps the five names in today's order.
+test("the phase list keeps the five known names in today's order when all five phases hold steps", async (t) => {
+  const page = await open(t, { pageHtml: mergedPage("--current", "organize") }); if (!page) return;
+  await openStatus(page);
+  assert.deepEqual(await railNames(page), ["Clean up", "Organize", "Design", "Roll out", "Later"], "the five known names or their order changed");
+});
+
+// Phase ids that name a member of Object.prototype. The page keeps per-phase state in plain objects, so each id must
+// read as its own key, never as an inherited member: its steps draw, and the rail names the phase by its id.
+for (const name of ["__proto__", "constructor", "toString"]) {
+  test(`the phase list draws every step of a phase named ${name}, and names that phase by its id`, async (t) => {
+    const steps = stepsOf([["c1", name, 1, "active"], ["a2", name, 2], ["a3", name, 3, "done"]]);
+    const page = await open(t, { pageHtml: phasePage(steps) }); if (!page) return;
+    await assertBaked(page, steps);
+    await openStatus(page);
+    assert.deepEqual(await railNames(page), [name], `the rail does not name the one phase the steps hold, ${name}, by its id`);
+    const drawn = Object.values(await listedByPhase(page)).flat();
+    for (const id of Object.keys(steps)) assert.ok(drawn.includes(id), `step ${id} is not drawn in the phase ${name}`);
+  });
+}
+
+// A phase that is not a non-empty string (a number, null, an object) is no phase: its step goes under No phase.
+// An object phase on an open step crashes the roadmap build (skills/roadmap/build.py upkeep, an unhashable dict), so
+// that case's step is done: it tests the page's handling, not the build's crash, which the case reports elsewhere.
+for (const [label, phase, status] of [["a number", 5, "active"], ["null", null, "active"], ["an object", {}, "done"]]) {
+  test(`the phase list draws a step whose phase is ${label} under No phase`, async (t) => {
+    const steps = stepsOf([["c1", phase, 1, status]]);
+    const page = await open(t, { pageHtml: phasePage(steps) }); if (!page) return;
+    await assertBaked(page, steps);
+    await openStatus(page);
+    assert.deepEqual(await railNames(page), ["No phase"], `the rail does not hold one No phase button for a step whose phase is ${label}`);
+    await page.locator(".prail > button", { hasText: "No phase" }).click();
+    assert.ok((await listedIds(page)).includes("c1"), `step c1, whose phase is ${label}, is not drawn under No phase`);
+  });
+}
+
+// ---------------------------------------------------------------- the stalled band on the Status tab (lane doing-needs-live-lane)
+// The build writes window.ROADMAP_BUILD.stalled and the page only draws it. These cases set that key on a built page, so the
+// band is proved apart from the build. Mockup: docs/design/stalled-band.html, option "Words once": the action once in the
+// band, and the rows carry marks only.
+
+// The built page's ROADMAP_BUILD block: the one regex that reads it. withStalled rewrites it; the --live case reads it back.
+const BUILD_BLOCK = /window\.ROADMAP_BUILD = (\{.*\});<\/script>/;
+function withStalled(html, stalled) {
+  assert.match(html, BUILD_BLOCK, "the built page has no ROADMAP_BUILD block to set the stalled read on");
+  return html.replace(BUILD_BLOCK, (_, j) => {
+    const b = JSON.parse(j);
+    if (stalled === undefined) delete b.stalled; else b.stalled = stalled;
+    return "window.ROADMAP_BUILD = " + JSON.stringify(b).replace(/</g, "\\u003c") + ";</script>";
+  });
+}
+const NO_ITEMS = { itemsWhy: "" };
+// c1, a2, a5 stalled (a2 landed, a5 with a pause that holds no one to decide it); a3 paused; a4 has a live lane; d6 is doing with a live lane.
+function stalledFixture() {
+  const steps = stepsOf([["c1", "cleanup", 1, "doing"], ["a2", "cleanup", 2, "doing"], ["a3", "cleanup", 3, "doing"], ["a4", "cleanup", 4, "active"], ["a5", "cleanup", 5, "doing"], ["d6", "cleanup", 6, "doing"]]);
+  steps.a3.paused = { why: "Waits for a month of CI numbers.", decides: "owner", at: "2026-11-05T16:20:00-06:00", by: "triage" };
+  return steps;
+}
+const STALLED = {
+  why: "", steps: [{ id: "c1", fix: "todo" }, { id: "a2", fix: ["#9"] }, { id: "a5", fix: "todo" }], paused: ["a3"],
+  badPause: [{ id: "a5", why: "it names no one to decide" }], items: [{ n: 14, lane: "fold-done-steps" }], itemsWhy: "",
+};
+const stalledPage = (stalled) => withStalled(phasePage(stalledFixture()), stalled);
+const band = (page) => page.locator("#stBand");
+// The band's text on one line. A page with no band fails here by name, before a text read waits out its timeout.
+async function bandText(page) {
+  assert.equal(await band(page).count(), 1, "the Status tab draws no stalled band (#stBand)");
+  return (await band(page).textContent()).replace(/\s+/g, " ");
+}
+
+test("the stalled band counts each stalled step and each item whose lane is gone, and names what to do once", async (t) => {
+  const page = await open(t, { pageHtml: stalledPage(STALLED) }); if (!page) return;
+  await openStatus(page);
+  const text = await bandText(page);
+  assert.match(text, /Stalled:\s*4/, "the band does not count 3 steps and 1 item as Stalled: 4: " + text);
+  for (const id of ["c1", "a2", "a5"]) assert.equal(await band(page).locator(`button[data-go="${id}"]`).count(), 1, `the band does not list step ${id}`);
+  assert.match(text, /Step c1/, "the band shows no step title");
+  assert.match(text, /done: landed in #9/, "a landed step does not say it is done and where it landed");
+  assert.match(text, /Pause not counted: it names no one to decide/, "a pause the build refused is not said");
+  assert.match(text, /Item\s*14/);
+  assert.match(text, /fold-done-steps/);
+  assert.match(text, /lane gone/);
+  assert.equal((text.match(/Triage resumes, pauses or closes each/g) || []).length, 1, "the action words are not in the band exactly once");
+  assert.equal(await shows(page, /Resume, pause or done/), false, "a row repeats the action words");
+  assert.equal(await band(page).evaluate((el) => el.classList.contains("hot")), true, "a band with something stalled has no red edge");
+});
+
+test("the paused fold stays closed while something is stalled, and gives why, who decides and when", async (t) => {
+  const page = await open(t, { pageHtml: stalledPage(STALLED) }); if (!page) return;
+  await openStatus(page);
+  const fold = band(page).locator("details.pz");
+  assert.equal(await fold.count(), 1, "the band has no paused fold");
+  assert.equal(await fold.evaluate((d) => d.open), false, "the paused fold is open with steps stalled");
+  assert.match((await fold.locator("summary").textContent()).replace(/\s+/g, " "), /Paused:\s*1/);
+  await fold.locator("summary").click();
+  const text = (await fold.textContent()).replace(/\s+/g, " ");
+  assert.match(text, /Step a3/);
+  assert.match(text, /Waits for a month of CI numbers\./);
+  assert.match(text, /Owner decides; paused Nov 5, 16:20 CST/);
+});
+
+test("with nothing stalled but a pause the band says so and opens the paused fold", async (t) => {
+  const page = await open(t, { pageHtml: stalledPage({ why: "", steps: [], paused: ["a3"], badPause: [], items: [], ...NO_ITEMS }) }); if (!page) return;
+  await openStatus(page);
+  const text = await bandText(page);
+  assert.match(text, /No stalled step/);
+  assert.doesNotMatch(text, /Stalled:/);
+  assert.equal(await band(page).locator("details.pz").evaluate((d) => d.open), true, "the paused fold is shut with nothing stalled");
+  assert.equal(await band(page).evaluate((el) => el.classList.contains("hot")), false, "an empty band has a red edge");
+});
+
+test("with nothing stalled and nothing paused the band is one quiet line", async (t) => {
+  const page = await open(t, { pageHtml: stalledPage({ why: "", steps: [], paused: [], badPause: [], items: [], ...NO_ITEMS }) }); if (!page) return;
+  await openStatus(page);
+  const text = await bandText(page);
+  assert.match(text, /No stalled step/);
+  assert.equal(await band(page).locator("li, details").count(), 0, "a zero band draws more than its one line");
+});
+
+test("steps not read: the band says not read and why, never none and never zero", async (t) => {
+  const unread = { why: "unknown (steps unknown)", steps: null, paused: [], badPause: [], items: null, itemsWhy: "unknown (steps unknown)" };
+  for (const [name, html] of [["a null read", stalledPage(unread)], ["a build with no stalled key", stalledPage(undefined)]]) {
+    const page = await open(t, { pageHtml: html }); if (!page) return;
+    await openStatus(page);
+    const text = await bandText(page);
+    assert.match(text, /not read/i, name + ": the band does not say not read: " + text);
+    assert.doesNotMatch(text, /No stalled step|Stalled:\s*\d/, name + ": an unread band claims a count: " + text);
+  }
+  const page = await open(t, { pageHtml: stalledPage(unread) }); if (!page) return;
+  await openStatus(page);
+  assert.match(await bandText(page), /steps unknown/, "the band hides the build's reason");
+});
+
+test("items not read: the step list shows and the items part says not read, never none", async (t) => {
+  const page = await open(t, { pageHtml: stalledPage({ why: "", steps: [{ id: "c1", fix: "todo" }], paused: [], badPause: [], items: null, itemsWhy: "unknown (live file rows carry no lane yet)" }) }); if (!page) return;
+  await openStatus(page);
+  const text = await bandText(page);
+  assert.match(text, /Stalled:\s*1/, text);
+  assert.match(text, /Waiting items/);
+  assert.match(text, /not read/i);
+  assert.doesNotMatch(text, /\bnone\b|No waiting item/i, "an unread items part reads as none");
+});
+
+test("a stalled step's row carries a Stalled mark, a paused one a Paused mark, and each says its word once", async (t) => {
+  const page = await open(t, { pageHtml: stalledPage(STALLED) }); if (!page) return;
+  await openStatus(page);
+  assert.equal(await page.locator('#s-c1 [aria-label="Stalled"]').count(), 1, "the stalled row has no Stalled mark");
+  assert.equal(await page.locator('#s-a3 [aria-label="Paused"]').count(), 1, "the paused row has no Paused mark");
+  assert.equal(await page.locator('#s-a4 .meta .tag').count(), 0, "a step with a live lane carries a tag");
+  assert.doesNotMatch(await page.locator("#s-c1 .meta").innerText(), /Stalled/, "the row repeats the word the band says");
+  assert.match(await page.locator("#s-c1 .rrow").getAttribute("aria-label"), /Stalled/, "a screen reader does not hear the row is stalled");
+  assert.match(await page.locator("#s-a3 .rrow").getAttribute("aria-label"), /Paused/);
+});
+
+test("Doing now shows the stalled or paused mark in place of the in-progress mark", async (t) => {
+  const page = await open(t, { pageHtml: stalledPage(STALLED) }); if (!page) return;
+  await openStatus(page);
+  // Scoped to the Doing now list: Up next draws its own li for each step, so #svNow alone matches those too.
+  const doingNow = page.locator("#svNow > div", { has: page.getByRole("heading", { name: "Doing now", exact: true }) });
+  const row = (id) => doingNow.locator(`li:has(.id:text-is("${id}"))`);
+  for (const id of ["c1", "a3", "d6"]) assert.equal(await row(id).count(), 1, `step ${id} is not in Doing now`);
+  const mark = async (id) => { assert.equal(await row(id).locator('[role="img"]').count(), 1, `step ${id} in Doing now has no state mark`); return row(id).locator('[role="img"]').getAttribute("aria-label"); };
+  assert.equal(await mark("c1"), "Stalled");
+  assert.equal(await mark("a3"), "Paused");
+  assert.equal(await row("a4").count(), 1, "step a4 is not in Doing now, so its mark is not read");
+  assert.equal(await row("a4").locator('[role="img"]').count(), 0, "a step with a live lane shows a state mark");
+});
+
+test("a doing step with a live lane reads In progress, not To do", async (t) => {
+  const page = await open(t, { pageHtml: stalledPage({ why: "", steps: [], paused: [], badPause: [], items: [], ...NO_ITEMS }) }); if (!page) return;
+  await openStatus(page);
+  assert.equal(await page.locator("#s-d6").count(), 1, "step d6 has no row in the Status list");
+  assert.match(await page.locator("#s-d6 .rrow").getAttribute("aria-label"), /In progress/, "a doing step does not read In progress");
+  assert.equal(await page.locator("#s-d6").evaluate((li) => li.classList.contains("active")), true);
+});
+
+test("zero stalled steps with the items not read: the band does not say No stalled step, and shows the items not-read line", async (t) => {
+  const page = await open(t, { pageHtml: stalledPage({ why: "", steps: [], paused: [], badPause: [], items: null, itemsWhy: "unknown (live file rows carry no lane yet)" }) }); if (!page) return;
+  await openStatus(page);
+  const text = await bandText(page);
+  assert.doesNotMatch(text, /No stalled step/, "the band says No stalled step with its items not read: " + text);
+  assert.match(text, /Waiting items/, "the band shows no waiting-items part: " + text);
+  assert.match(text, /not read/i, "the waiting-items part does not say not read: " + text);
+});
+
+test("items not read: the line says fixed words, and the build's reason sits behind a closed What the build said", async (t) => {
+  const page = await open(t, { pageHtml: stalledPage({ why: "", steps: [{ id: "c1", fix: "todo" }], paused: [], badPause: [], items: null, itemsWhy: "unknown (live file rows carry no lane yet)" }) }); if (!page) return;
+  await openStatus(page);
+  const shown = await band(page).innerText();
+  assert.doesNotMatch(shown, /live file rows carry no lane yet/, "the build's reason for the items shows inline: " + JSON.stringify(shown));
+  assert.match(shown, /not read/i, "the waiting-items line does not say not read: " + JSON.stringify(shown));
+  const why = band(page).locator("details").filter({ hasText: "live file rows carry no lane yet" });
+  assert.equal(await why.count(), 1, "the build's reason for the items is in no What the build said disclosure");
+  assert.equal(await why.evaluate((d) => d.open), false, "the items' What the build said disclosure is open");
+});
+
+test("a paused row's time sits inside a .num element", async (t) => {
+  const page = await open(t, { pageHtml: stalledPage(STALLED) }); if (!page) return;
+  await openStatus(page);
+  const fold = band(page).locator("details.pz");
+  assert.equal(await fold.count(), 1, "the band has no paused fold");
+  await fold.locator("summary").click();
+  const times = await fold.locator("li .num").allTextContents();
+  assert.ok(times.some((x) => /16:20/.test(x)), "the paused time of step a3 is not inside a .num element: " + JSON.stringify(times));
+});
+
+// In progress tells the owner that someone is working on the step. A stalled or paused step has no one working on it, so its row must read its own word.
+test("a stalled or paused row reads Stalled or Paused in its status, label and mark, never In progress", async (t) => {
+  const page = await open(t, { pageHtml: stalledPage(STALLED) }); if (!page) return;
+  await openStatus(page);
+  for (const [id, word] of [["c1", "Stalled"], ["a3", "Paused"]]) {
+    const row = page.locator(`#s-${id}`);
+    assert.equal(await row.count(), 1, `step ${id} has no row in the Status list`);
+    const status = (await row.locator(".rbody dd").first().textContent()).trim();
+    assert.equal(status, word, `the status of step ${id} reads ${status}, not ${word}`);
+    assert.doesNotMatch(await row.locator(".rrow").getAttribute("aria-label"), /In progress/, `the row label of step ${id} reads In progress`);
+    assert.doesNotMatch(await row.textContent(), /In progress/, `the row of step ${id} says In progress`);
+    assert.equal(await row.locator('[aria-label*="In progress"]').count(), 0, `a mark in the row of step ${id} is labelled In progress`);
+  }
+});
+
+test("merged_page.py --live hands its JSON to the build as the live file", () => {
+  const live = { readAt: new Date().toISOString(), threads: [], pulls: [] };
+  const html = mergedPage("--live", JSON.stringify(live));
+  const b = JSON.parse(BUILD_BLOCK.exec(html)[1]);
+  assert.ok(b.live && Array.isArray(b.live.threads), "the build did not read the live file: " + JSON.stringify(b.live ?? null));
+});
+
 // ---------------------------------------------------------------- c135: a question that takes several answers
 // Spec: the c135 spec (Data, Answer, Page). Labels: docs/design/c135-multi.html. A multi item sets `multi: true`; `ranked: true` also orders the ticks.
 
@@ -4135,7 +6250,7 @@ test("an unranked multi item keeps its ticks in option order: C then A equals my
   assert.deepEqual(await ticked(page, it), ["a", "c"]);
   assert.match(await card(page, it).locator(".ready").textContent(), /^Ready to send: Red and Green, your choice\.$/, "the ready line does not name the ticks in option order");
   await send(page);
-  await told(page, "Claude was told");
+  await told(page, "A wake was sent");
   const a = (await answers(page))[it.id];
   assert.deepEqual([a.choice, a.note], [["a", "c"], ""], "the answer is not in option order");
   const s = await sent(page);
@@ -4335,7 +6450,7 @@ test("the notice to Claude writes a list pick as 31 a+c, in rank order when rank
   await tick(page, m, "a"); await tick(page, m, "c"); await addNote(page, m, "bold");
   await tick(page, r, "c"); await tick(page, r, "a");
   await send(page);
-  await told(page, "Claude was told");
+  await told(page, "A wake was sent");
   const s = await sent(page);
   assert.equal(s.length, 1);
   assert.match(s[0].text, /31 a\+c \(bold\)/);
@@ -4832,6 +6947,174 @@ test("items with only listed fields show no unknown-field warning, new fields in
   assert.equal(await page.locator(".status.broken, [role=alert]").count(), 0, "a sound item shows a warning");
 });
 
+// ---------------------------------------------------------------- lane page-item-waits-on: an item that waits on a CI run or a PR
+// Spec: docs/design/page-item-waits-notes.md (its picks: plain words for a run, "PR #n" for a PR, one span with a lane,
+// the ring badge, Change kept) and the mockup docs/design/page-item-waits.html. The field `waits` is {repo, run} or {repo, pr}.
+// An item with waits, a lastAnswer and no answers record is answered by its wait: it sinks to the Answered section, its badge
+// reads "Sent <lastAnswer time>", and its rail chip says answered and waits. With waits and no lastAnswer it stays an open ask in
+// its tier, with the wait span. Each case reads the card, its rail chip or its section, by where the part sits.
+const WT_REPO = "shivinate7/q_max";
+const WT_RUN = 41861801325;
+const WT_AT = "2026-11-03T20:10:00Z"; // 14:10 CST: the time of the item's last answer
+const WT_RUN_URL = `https://github.com/${WT_REPO}/actions/runs/${WT_RUN}`;
+const WT_PR_URL = (pr) => `https://github.com/${WT_REPO}/pull/${pr}`;
+// The copy may name the repo as " in q_max", since the page does not know its own repo yet (notes, section 1). Either form is the copy.
+const RUN_COPY = /^waits on a CI run( in q_max)?$/;
+const PR_COPY = (pr) => new RegExp(`^waits on PR #${pr}( in q_max)?$`);
+const OPEN_TIERS = ["tier-holds", "tier-due", "tier-calm", "tier-stands"];
+// No. 154 as the writer keeps it: a decision with its last answer on lastAnswer and no answers record. Each case adds the fields it tests.
+const no154 = (over = {}) => mk("wt-154", 154, { title: "Pick the merge order for the q_max fix", ...over });
+const ANSWERED = { choice: "a", at: WT_AT };
+// A link's words as a reader hears them: its text without the arrow and the screen-reader words after it.
+const wordsOf = (s) => flat(s.replace(/↗/g, "").replace(/, opens in a new tab/g, ""));
+const linkWords = async (loc) => wordsOf(await loc.textContent());
+const chipLabel = (page, it) => page.locator("#c-" + it.id).getAttribute("aria-label");
+
+test("page-item-waits-on: No. 154 as stored today, answered on lastAnswer with no waits, is an owner ask in its tier (control)", async (t) => {
+  const it = no154({ lastAnswer: ANSWERED });
+  const page = await open(t, { items: [it] }); if (!page) return;
+  const home = await sectionOf(page, it);
+  assert.equal(home, "tier-calm", `No. 154 without waits is in ${home}, not in its open tier`);
+  assert.doesNotMatch(await card(page, it).getAttribute("class"), /answered/, "No. 154 without waits is drawn as answered");
+  assert.match(await chipLabel(page, it), /, open$/, "the rail chip of No. 154 without waits does not say open");
+});
+
+test("page-item-waits-on: No. 154 waiting on a CI run sits in the Answered section, with a Sent badge, the run link and an answered chip", async (t) => {
+  const it = no154({ lastAnswer: ANSWERED, waits: { repo: WT_REPO, run: WT_RUN } });
+  // A stale filed receipt for the item (its answer was closed once): the badge still reads Sent, never filed.
+  const page = await open(t, { items: [it], receipts: { [it.id]: { filed: "2026-11-03T21:30:00Z" } } }); if (!page) return;
+  assert.equal(await sectionOf(page, it), "tier-answered", "No. 154 is not in the Answered section");
+  const c = card(page, it), badge = c.locator(".top .ans");
+  await need(badge, "No. 154 has no badge in its top row");
+  assert.equal(flat(await badge.textContent()), "Sent Nov 3, 14:10 CST", "the badge is not Sent with the last answer's time");
+  assert.doesNotMatch(await badge.getAttribute("class"), /filed/, "the badge draws a filed tick");
+  const link = c.locator(`.top a[href="${WT_RUN_URL}"]`);
+  await need(link, "No. 154's top row has no link to its CI run");
+  assert.match(await linkWords(link), RUN_COPY, "the run link does not read 'waits on a CI run'");
+  const chip = await chipLabel(page, it);
+  assert.match(chip, /, answered, waits on a CI run( in q_max)?$/, `the rail chip reads "${chip}", not answered and waiting on a CI run`);
+  const cls = await page.locator("#c-" + it.id).getAttribute("class");
+  assert.match(cls, /\bsent\b/, "the rail chip is not drawn as sent");
+  assert.doesNotMatch(cls, /filed/, "the rail chip is drawn as filed");
+  assert.match(flat(await c.locator(".receipt").innerText()), /You chose A: Red\./, "the answer line is not drawn from lastAnswer");
+});
+
+test("page-item-waits-on: No. 154 waiting on PR #1011 links the PR, and its copy reads waits on PR #1011", async (t) => {
+  const it = no154({ lastAnswer: ANSWERED, waits: { repo: WT_REPO, pr: 1011 } });
+  const page = await open(t, { items: [it] }); if (!page) return;
+  const link = card(page, it).locator(`.top a[href="${WT_PR_URL(1011)}"]`);
+  await need(link, "No. 154's top row has no link to PR #1011");
+  assert.match(await linkWords(link), PR_COPY(1011), "the PR link does not read 'waits on PR #1011'");
+});
+
+test("page-item-waits-on: No. 154 with a lane and a wait shows one span, 'waits on lane cache-split and PR #1011', and only PR #1011 is its link", async (t) => {
+  const it = no154({ lastAnswer: ANSWERED, lane: "cache-split", waits: { repo: WT_REPO, pr: 1011 } });
+  const page = await open(t, { items: [it] }); if (!page) return;
+  const spans = card(page, it).locator(".top .onlane");
+  const n = await spans.count();
+  assert.equal(n, 1, `the top row has ${n} lane or wait spans, not one`);
+  assert.match(wordsOf(await spans.first().textContent()), /^waits on lane cache-split and PR #1011( in q_max)?$/, "the span does not read 'waits on lane cache-split and PR #1011'");
+  const inner = spans.first().locator("a");
+  await need(inner, "the span has no link");
+  assert.equal(await inner.getAttribute("href"), WT_PR_URL(1011), "the span's link is not PR #1011");
+  assert.match(await linkWords(inner), /^PR #1011( in q_max)?$/, "the link holds more than PR #1011");
+});
+
+test("page-item-waits-on: No. 154 with waits and no lastAnswer stays an open ask in its tier, with the wait span and an open chip", async (t) => {
+  const it = no154({ waits: { repo: WT_REPO, pr: 1011 } });
+  const page = await open(t, { items: [it] }); if (!page) return;
+  const home = await sectionOf(page, it);
+  assert.ok(OPEN_TIERS.includes(home), `No. 154 with no lastAnswer is in ${home}, not in an open tier`);
+  const link = card(page, it).locator(`.top a[href="${WT_PR_URL(1011)}"]`);
+  await need(link, "No. 154 with no lastAnswer has no wait span linking PR #1011");
+  assert.match(await linkWords(link), PR_COPY(1011), "the wait span does not read 'waits on PR #1011'");
+  assert.doesNotMatch(await card(page, it).getAttribute("class"), /answered/, "No. 154 with no lastAnswer is drawn as answered");
+  assert.match(await chipLabel(page, it), /, open$/, "the rail chip of No. 154 with no lastAnswer does not say open");
+});
+
+test("page-item-waits-on: No. 154 waiting on a run is never folded under Asked before, though it was added before the last answer", async (t) => {
+  const seenOpen = mk("wt-seen-open", 2, { added: at(5) });
+  const it = no154({ added: at(5), lastAnswer: ANSWERED, waits: { repo: WT_REPO, run: WT_RUN } });
+  const page = await open(t, { items: [it, seenOpen] }); if (!page) return;
+  assert.equal(await sectionOf(page, it), "tier-answered", "No. 154 is not in the Answered section, so it can sit under Asked before");
+  assert.equal(await card(page, it).getAttribute("data-seen"), null, "No. 154 is marked seen");
+  assert.deepEqual(await cardsIn(page, "#tier-calm"), [seenOpen.id], "No. 154 is in the Whenever tier, under the Asked before line");
+});
+
+test("page-item-waits-on: in the Answered section No. 154 sorts by its lastAnswer time among the items with answer records", async (t) => {
+  const it = no154({ lastAnswer: ANSWERED, waits: { repo: WT_REPO, run: WT_RUN } });
+  const newer = mk("wt-rec-new", 2, { added: at(5) }), older = mk("wt-rec-old", 3, { added: at(5) });
+  const records = { ...answerOf(newer, "a", { at: "2026-11-04T08:00:00Z" }), ...answerOf(older, "a", { at: "2026-10-26T01:00:00Z" }) };
+  const page = await open(t, { items: [it, newer, older], answers: records }); if (!page) return;
+  assert.deepEqual(await cardsIn(page, "#tier-answered"), [newer.id, it.id, older.id], "the Answered section is not newest first, with No. 154 at its lastAnswer time");
+});
+
+test("page-item-waits-on: itemFields lists waits, and No. 154 with waits draws no unknown-field warning", async (t) => {
+  const it = no154({ lastAnswer: ANSWERED, waits: { repo: WT_REPO, run: WT_RUN } });
+  const page = await open(t, { items: [it] }); if (!page) return;
+  const list = JSON.parse(await page.locator("script#itemFields").textContent());
+  assert.ok(list.includes("waits"), "itemFields does not list waits");
+  assert.doesNotMatch(await card(page, it).innerText(), /does not draw/, "No. 154 draws the unknown-field warning for waits");
+});
+
+test("page-item-waits-on: No. 154 waiting on a run: Change reopens it on lastAnswer, an emptied pick offers no Withdraw, and a Send writes its answer and deletes nothing", async (t) => {
+  const it = no154({ lastAnswer: ANSWERED, waits: { repo: WT_REPO, run: WT_RUN } });
+  const page = await open(t, { items: [it] }); if (!page) return;
+  const c = card(page, it), change = c.getByRole("button", { name: "Change", exact: true });
+  await need(change, "No. 154 has no Change button");
+  await change.click();
+  await need(c.locator(".opts"), "Change did not open No. 154's options");
+  assert.equal(await page.isChecked(`#o-${it.id}-a`), true, "Change did not reopen No. 154 on its last pick");
+  // A click on the chosen option empties the pick, as it does on a saved answer. Send would withdraw only a saved answer.
+  await choose(page, it, "a");
+  assert.doesNotMatch(await page.locator("#send").textContent(), /Withdraw/, "an emptied pick on No. 154 offers to withdraw an answer");
+  await choose(page, it, "b");
+  await send(page);
+  assert.ok(await holds(page, (id) => !!window.__answers()[id], it.id), "Send wrote no answer for No. 154");
+  assert.equal((await answers(page))[it.id].choice, "b", "the answer written for No. 154 is not its new pick");
+  assert.deepEqual(await page.evaluate(() => window.__log.filter((l) => l[0] === "delete")), [], "Send deleted a record for No. 154");
+});
+
+// A wait value is valid when it is a positive whole number, or a string of digits with no leading zero. Any other value is malformed.
+const WT_BAD = [0, "0", "012", -5, "abc"];
+
+test("page-item-waits-on: No. 154 with stands, waits and lastAnswer is staged for nothing: the bar counts only the other item, and Send writes no answer for No. 154", async (t) => {
+  const it = no154({ stands: true, lastAnswer: ANSWERED, waits: { repo: WT_REPO, run: WT_RUN } });
+  const other = mk("wt-other", 2, { added: "2026-11-04T09:00:00Z" }); // added after the last answer, so it is new and unfolded
+  const page = await open(t, { items: [it, other] }); if (!page) return;
+  await need(card(page, it), "No. 154 has no card");
+  assert.equal(await page.locator("#send").isDisabled(), true, "No. 154 is staged though nothing is picked for the other item");
+  await choose(page, other, "b");
+  assert.equal(await page.locator("#send").textContent(), "Send 1 answer", "the bar counts No. 154 among the ready answers");
+  await send(page);
+  assert.ok(await holds(page, (id) => !!window.__answers()[id], other.id), "Send wrote no answer for the other item");
+  assert.equal(it.id in (await answers(page)), false, "Send wrote answers/wt-154 for an item answered by its wait");
+});
+
+test("page-item-waits-on: a run or PR number that is malformed with lastAnswer stays an open ask in its tier", async (t) => {
+  const bad = [];
+  WT_BAD.forEach((v, i) => {
+    bad.push(mk("wt-bad-run-" + i, 160 + i, { title: "Malformed run " + JSON.stringify(v), lastAnswer: ANSWERED, waits: { repo: WT_REPO, run: v } }));
+    bad.push(mk("wt-bad-pr-" + i, 170 + i, { title: "Malformed pr " + JSON.stringify(v), lastAnswer: ANSWERED, waits: { repo: WT_REPO, pr: v } }));
+  });
+  const page = await open(t, { items: bad }); if (!page) return;
+  for (const it of bad) {
+    const home = await sectionOf(page, it);
+    assert.ok(OPEN_TIERS.includes(home), `${it.title} is in ${home}, not in an open tier`);
+    assert.equal(await card(page, it).locator(".top a").count(), 0, `${it.title} draws a wait link`);
+  }
+});
+
+test("page-item-waits-on: a run or PR given as a string of digits with no leading zero reads answered, as a number does", async (t) => {
+  const run = no154({ lastAnswer: ANSWERED, waits: { repo: WT_REPO, run: String(WT_RUN) } });
+  const pr = mk("wt-str-pr", 155, { title: "Pick the PR order", lastAnswer: ANSWERED, waits: { repo: WT_REPO, pr: "1011" } });
+  const page = await open(t, { items: [run, pr] }); if (!page) return;
+  assert.equal(await sectionOf(page, run), "tier-answered", "No. 154 with a string run is not in the Answered section");
+  await need(card(page, run).locator(`.top a[href="${WT_RUN_URL}"]`), "No. 154 with a string run has no link to its CI run");
+  assert.equal(await sectionOf(page, pr), "tier-answered", "No. 155 with a string PR is not in the Answered section");
+  await need(card(page, pr).locator(`.top a[href="${WT_PR_URL(1011)}"]`), "No. 155 with a string PR has no link to PR #1011");
+});
+
 // An arbiter ruling (decision session-tiers, Arbiter, "On the page"): the writer files it as a closed item with arbiter: true,
 // home = the ruling's record id, pick = the ruled option, why and ruled. Every case keeps DECISION open and first: open() waits
 // for an open card, so a red run fails on the arbiter assertions, not on that wait.
@@ -4869,7 +7152,7 @@ test("a closed item with no arbiter flag stays hidden next to a closed arbiter i
   assert.equal(await overturn(page).count(), 1, "the page offers Overturn on more than the arbiter item");
 });
 
-// Round 2: an answer or a draft that is no overturn. A ruling was an open item once, so a saved answer or a draft under its id
+// An answer or a draft that is no overturn. A ruling was an open item once, so a saved answer or a draft under its id
 // may hold an option key ("a"). Only choice "overturn" is an overturn; any other record under a ruling's id is stale.
 const staleAnswer = { [ARBITER.id]: { item: ARBITER.id, n: 901, at: "2026-10-30T18:00:00Z", choice: "a", note: "" } };
 const staleDraft = { "waiting.draft": JSON.stringify({ [ARBITER.id]: { choice: "a" } }) };
@@ -5182,4 +7465,387 @@ test("a stored park draft whose entry is gone is pruned on load, and a later ent
   await need(parkLine(page, PARK_A), "the later entry with the same id is not on the page");
   assert.equal(await parkBtn(page, PARK_A, "unpark").getAttribute("aria-pressed"), "false", "a later entry with the same id is pre-staged");
   assert.equal(await page.locator("#send").isDisabled(), true, "a later entry with the same id is ready to send");
+});
+
+// ---------------------------------------------------------------- Park on every open card (page-park-any-item)
+
+// A Park press sits in .alts on an open card: after None of these on a decision, after Mark done on a task. A press stages
+// {act:"park"} and writes nothing. Send writes answers/<id> as {act, at, item, n, note}, with no choice, done or parked field.
+const parkPress = (page, it) => page.locator(`#b-park-${it.id}`);
+const pressedOf = (loc) => loc.getAttribute("aria-pressed");
+const PARK_RECORD_KEYS = ["act", "at", "item", "n", "note"];
+const altsOf = async (page, it) => (await card(page, it).locator(".alts > button").allTextContents()).map((s) => s.trim());
+// The record Send wrote under the id, once the store holds it.
+const recordOf = async (page, id) => { await page.waitForFunction((k) => !!window.__answers()[k], id); return (await answers(page))[id]; };
+
+test("a Park press on a decision card stages with no write, and Send writes one park record with exactly five keys", async (t) => {
+  const page = await open(t, { items: [DECISION] }); if (!page) return;
+  await need(parkPress(page, DECISION), "the decision card has no Park button");
+  assert.deepEqual(await altsOf(page, DECISION), ["None of these", "Park"], "Park is not in .alts after None of these");
+  assert.match((await parkPress(page, DECISION).getAttribute("class")) || "", /\bparkbtn\b/, "the Park button has no parkbtn class");
+  assert.equal(await pressedOf(parkPress(page, DECISION)), "false", "Park starts pressed");
+  await parkPress(page, DECISION).click();
+  assert.equal(await pressedOf(parkPress(page, DECISION)), "true", "a Park press did not press Park");
+  assert.deepEqual(await page.evaluate(() => window.__log), [], "a Park press wrote before Send");
+  assert.equal(await card(page, DECISION).locator(".ready").textContent(), "Ready to send: park.", "the ready line does not name the staged Park");
+  assert.equal(await page.locator("#send").textContent(), "Send 1 answer", "the Send bar does not count the staged Park");
+  await send(page);
+  const rec = await recordOf(page, DECISION.id);
+  assert.deepEqual(Object.keys(rec).sort(), PARK_RECORD_KEYS, "the park record has the wrong fields: " + Object.keys(rec).join(", "));
+  assert.deepEqual([rec.act, rec.item, rec.n, rec.note], ["park", DECISION.id, 27, ""], "the park record has the wrong values");
+  assert.ok(!Number.isNaN(Date.parse(rec.at)), "at is not an ISO time");
+  assert.deepEqual(await parkWrites(page), [["set", "answers", DECISION.id]], "Send wrote more than the one park record");
+});
+
+test("a Park press on a task card stages with no write, and Send writes one park record with no done field", async (t) => {
+  const page = await open(t, { items: [TASK] }); if (!page) return;
+  await need(parkPress(page, TASK), "the task card has no Park button");
+  assert.deepEqual(await altsOf(page, TASK), ["Mark done", "Park"], "Park is not in .alts after Mark done");
+  await parkPress(page, TASK).click();
+  assert.equal(await pressedOf(parkPress(page, TASK)), "true", "a Park press did not press Park on the task");
+  assert.deepEqual(await page.evaluate(() => window.__log), [], "a Park press wrote before Send");
+  assert.equal(await card(page, TASK).locator(".ready").textContent(), "Ready to send: park.", "the ready line does not name the staged Park on the task");
+  await send(page);
+  const rec = await recordOf(page, TASK.id);
+  assert.deepEqual(Object.keys(rec).sort(), PARK_RECORD_KEYS, "the task park record has the wrong fields: " + Object.keys(rec).join(", "));
+  assert.deepEqual([rec.act, rec.item, rec.n, rec.note], ["park", TASK.id, 28, ""], "the task park record has the wrong values");
+  assert.deepEqual(await parkWrites(page), [["set", "answers", TASK.id]], "Send wrote more than the one park record");
+});
+
+test("a staged Park with a typed note is ready, and Send writes the note in the park record", async (t) => {
+  const page = await open(t, { items: [DECISION] }); if (!page) return;
+  await need(parkPress(page, DECISION), "the decision card has no Park button");
+  await parkPress(page, DECISION).click();
+  await addNote(page, DECISION, "Wait for the mutation job.");
+  assert.equal(await card(page, DECISION).locator(".ready").textContent(), "Ready to send: park.", "a typed note changes the staged Park's ready line");
+  assert.equal(await page.locator("#send").isDisabled(), false, "Send is shut on a staged Park with a note");
+  await send(page);
+  const rec = await recordOf(page, DECISION.id);
+  assert.deepEqual(Object.keys(rec).sort(), PARK_RECORD_KEYS, "the park record with a note has the wrong fields: " + Object.keys(rec).join(", "));
+  assert.deepEqual([rec.act, rec.item, rec.n, rec.note], ["park", DECISION.id, 27, "Wait for the mutation job."], "the park record lost the typed note");
+});
+
+test("a Park press overrides a stood pick, and Send writes the park record with no choice", async (t) => {
+  const it = mk("stand-park", 7, { stands: true });
+  const page = await open(t, { items: [it] }); if (!page) return;
+  assert.equal(await page.isChecked(`#o-${it.id}-a`), true, "the pick does not stand");
+  await need(parkPress(page, it), "the card with a stood pick has no Park button");
+  await parkPress(page, it).click();
+  assert.equal(await pressedOf(parkPress(page, it)), "true", "a Park press did not press Park on a stood pick");
+  await send(page);
+  const rec = await recordOf(page, it.id);
+  assert.ok(!("choice" in rec), "the stood pick went with the park record: " + JSON.stringify(rec));
+  assert.deepEqual(Object.keys(rec).sort(), PARK_RECORD_KEYS, "the park record over a stood pick has the wrong fields: " + Object.keys(rec).join(", "));
+  assert.deepEqual([rec.act, rec.item, rec.note], ["park", it.id, ""], "the park record over a stood pick has the wrong values");
+});
+
+test("Park toggles off on a second press, a pick, None of these or Mark done clears it, and Park clears each of them", async (t) => {
+  const page = await open(t, { items: [DECISION, TASK] }); if (!page) return;
+  const dp = () => parkPress(page, DECISION), tp = () => parkPress(page, TASK);
+  const none = () => card(page, DECISION).getByRole("button", { name: "None of these" });
+  const done = () => card(page, TASK).getByRole("button", { name: "Mark done" });
+  await need(dp(), "the decision card has no Park button");
+  await need(tp(), "the task card has no Park button");
+  // A second press clears the staged Park: no write, Send shut, no ready line.
+  await dp().click();
+  await dp().click();
+  assert.equal(await pressedOf(dp()), "false", "a second Park press did not clear Park");
+  assert.equal(await page.locator("#send").isDisabled(), true, "Send is open on a cleared Park");
+  assert.equal(await card(page, DECISION).locator(".ready").textContent(), "", "the ready line still names a cleared Park");
+  assert.deepEqual(await page.evaluate(() => window.__log), [], "toggling Park wrote");
+  // A picked option clears Park, and Park clears the picked option.
+  await choose(page, DECISION, "a");
+  await dp().click();
+  assert.equal(await pressedOf(dp()), "true", "Park did not press over a picked option");
+  assert.equal(await page.isChecked(`#o-${DECISION.id}-a`), false, "Park did not clear the picked option");
+  await choose(page, DECISION, "a");
+  assert.equal(await pressedOf(dp()), "false", "a picked option did not clear Park");
+  assert.equal(await page.isChecked(`#o-${DECISION.id}-a`), true, "a picked option was not picked after Park");
+  // None of these clears Park, and Park clears None of these.
+  await dp().click();
+  await none().click();
+  assert.equal(await pressedOf(dp()), "false", "None of these did not clear Park");
+  assert.equal(await pressedOf(none()), "true", "None of these did not press");
+  await dp().click();
+  assert.equal(await pressedOf(dp()), "true", "Park did not press over None of these");
+  assert.equal(await pressedOf(none()), "false", "Park did not clear None of these");
+  // Mark done clears Park, and Park clears Mark done.
+  await tp().click();
+  await done().click();
+  assert.equal(await pressedOf(tp()), "false", "Mark done did not clear Park");
+  assert.equal(await pressedOf(done()), "true", "Mark done did not press");
+  await tp().click();
+  assert.equal(await pressedOf(tp()), "true", "Park did not press over Mark done");
+  assert.equal(await pressedOf(done()), "false", "Park did not clear Mark done");
+  assert.equal(await page.locator("#send").textContent(), "Send 2 answers", "the two staged Parks are not both counted");
+  assert.deepEqual(await page.evaluate(() => window.__log), [], "the toggles wrote before Send");
+});
+
+test("Undo within 8 s after a Park Send deletes the park record and hands the Park back as a draft", async (t) => {
+  const page = await open(t, { items: [DECISION] }); if (!page) return;
+  await need(parkPress(page, DECISION), "the decision card has no Park button");
+  await parkPress(page, DECISION).click();
+  await send(page);
+  await recordOf(page, DECISION.id);
+  await page.locator("#undoBtn").waitFor({ timeout: 3000 }).catch(() => {});
+  await need(page.locator("#undoBtn"), "Send shows no Undo after a Park");
+  await page.locator("#undoBtn").click();
+  await page.waitForFunction((k) => !(k in window.__answers()), DECISION.id);
+  assert.deepEqual((await parkWrites(page)).filter((l) => l[0] === "delete"), [["delete", "answers", DECISION.id]], "Undo did not delete answers/<id> once");
+  assert.equal(await pressedOf(parkPress(page, DECISION)), "true", "Undo did not hand the Park back as a draft");
+  assert.equal(await page.locator("#send").textContent(), "Send 1 answer", "the undone Park is not ready to send again");
+});
+
+test("a sent Park shows the receipt Parked. with Change, and Change then a pick sends a normal choice record", async (t) => {
+  const page = await open(t, { items: [DECISION] }); if (!page) return;
+  await need(parkPress(page, DECISION), "the decision card has no Park button");
+  await parkPress(page, DECISION).click();
+  await send(page);
+  await recordOf(page, DECISION.id);
+  const c = card(page, DECISION);
+  await c.locator(".receipt").waitFor({ timeout: 3000 }).catch(() => {});
+  await need(c.locator(".receipt"), "the sent Park card shows no receipt");
+  assert.match(await c.locator(".receipt").textContent(), /Parked\./, "the receipt does not read Parked.");
+  await need(c.getByRole("button", { name: "Change" }), "the sent Park receipt has no Change button");
+  await c.getByRole("button", { name: "Change" }).click();
+  await choose(page, DECISION, "a");
+  await send(page);
+  await page.waitForFunction((k) => !!window.__answers()[k] && window.__answers()[k].choice === "a", DECISION.id);
+  const rec = (await answers(page))[DECISION.id];
+  assert.deepEqual(Object.keys(rec).sort(), ["at", "choice", "item", "n", "note"], "the changed answer is not a normal choice record: " + Object.keys(rec).join(", "));
+  assert.equal(rec.choice, "a", "the changed answer lost the picked option");
+});
+
+test("a parked line keeps only Unpark and Drop, and no Park press is drawn on a .pk line", async (t) => {
+  const page = await open(t, { items: [DECISION], meta: PARK_META }); if (!page) return;
+  await parkLoaded(page);
+  await need(parkLine(page, PARK_A), "the parked line is not a .pk in .parked .pk-list");
+  assert.deepEqual(await parkLine(page, PARK_A).locator(".btn.pkb").evaluateAll((els) => els.map((e) => e.id)), ["pk-unpark-" + PARK_A.id, "pk-drop-" + PARK_A.id], "a parked line has acts other than Unpark and Drop");
+  assert.equal(await parkLine(page, PARK_A).locator("[id^='b-park-'], .parkbtn").count(), 0, "a parked line draws a Park press");
+});
+
+// Controls: these pass on the code as it stands. A blocked card and a ruling card draw no live Park press.
+test("control: a blocked decision card's Park press is off, a press on it stages nothing, and Send writes no record for it", async (t) => {
+  const opt = (key) => ({ key, label: "L" + key, how: "h", gain: "g", lose: "l" });
+  const rawItems = {
+    "dup-keys": { ...DECISION, id: "dup-keys", n: 41, options: [opt("a"), opt("a")], pick: "a" },
+    "good": { ...DECISION, id: "good", n: 43 },
+  };
+  const page = await open(t, { items: [], rawItems }); if (!page) return;
+  const blocked = { ...DECISION, id: "dup-keys" }, good = { ...DECISION, id: "good" };
+  await need(parkPress(page, blocked), "the blocked decision card has no Park button");
+  assert.equal(await card(page, blocked).locator(".ready").textContent(), "This item cannot be sent.", "the card is not blocked");
+  assert.equal(await parkOff(parkPress(page, blocked)), true, "the blocked card's Park press is on");
+  await parkPress(page, blocked).click({ force: true }); // a real press on the disabled button: it changes nothing
+  assert.equal(await pressedOf(parkPress(page, blocked)), "false", "a press on the blocked card's Park staged it");
+  await need(parkPress(page, good), "the good decision card has no Park button");
+  assert.equal(await parkOff(parkPress(page, good)), false, "the good card's Park press is off");
+  await takePick(page, good);
+  await send(page);
+  await page.waitForFunction(() => !!window.__answers()["good"]);
+  assert.equal("dup-keys" in await answers(page), false, "Send wrote a record for the blocked card");
+  assert.deepEqual((await parkWrites(page)).filter((l) => l[2] === "dup-keys"), [], "a write named the blocked card");
+});
+
+test("control: an arbiter ruling card draws no Park press, and an open decision beside it keeps one", async (t) => {
+  const page = await open(t, { items: [DECISION, ARBITER] }); if (!page) return;
+  await need(card(page, ARBITER), "the closed arbiter item has no card");
+  await need(parkPress(page, DECISION), "the open decision card has no Park button");
+  assert.equal(await page.locator(`#b-park-${ARBITER.id}`).count(), 0, "the ruling card draws a Park press");
+  assert.equal(await card(page, ARBITER).locator(".parkbtn").count(), 0, "the ruling card has a parkbtn");
+});
+
+// Item 10 (windows-live-checks) in the state the owner saw: the item is open, and its parked line and park answer still exist.
+const W10 = mk("windows-live-checks", 10, { title: "Windows live checks" });
+const W10_PARK = { id: W10.id, ref: "Step windows-live-checks, the Windows live checks", note: "Triage removes this line." };
+
+test("an open item whose stale parked line and park answer remain shows its options and draws no parked line or Unpark sent badge", async (t) => {
+  const saved = { [parkKey(W10_PARK)]: { parked: true, id: W10.id, act: "unpark", ref: W10_PARK.ref, note: W10_PARK.note, at: "2026-11-04T23:44:00.000Z" } };
+  const page = await open(t, { items: [W10], meta: { writer: "triage", parked: [W10_PARK] }, answers: saved }); if (!page) return;
+  await parkLoaded(page, parkKey(W10_PARK));
+  await need(card(page, W10), "the open item has no card");
+  assert.equal(await page.locator(`label[for="o-${W10.id}-a"]`).count(), 1, "the open item shows no option a");
+  assert.equal(await page.locator(`label[for="o-${W10.id}-b"]`).count(), 1, "the open item shows no option b");
+  assert.equal(await page.locator("#pk-line-" + W10.id).count(), 0, "the Parked by you block draws a line for the open item " + W10.id);
+  assert.equal(await page.locator(".parked .ans", { hasText: "Unpark sent" }).count(), 0, "the Parked by you block shows an Unpark sent badge for the open item " + W10.id);
+});
+
+test("a parked line whose id is no open item still draws with its Unpark sent badge, beside an open item", async (t) => {
+  const saved = { [parkKey(PARK_A)]: { parked: true, id: PARK_A.id, act: "unpark", ref: PARK_A.ref, note: PARK_A.note, at: "2026-11-01T17:42:00.000Z" } };
+  const page = await open(t, { items: [W10], meta: { writer: "triage", parked: [PARK_A] }, answers: saved }); if (!page) return;
+  await parkLoaded(page, parkKey(PARK_A));
+  await need(card(page, W10), "the open item has no card");
+  await need(parkLine(page, PARK_A), "the parked line with no open item is not drawn");
+  await need(await parkBadge(page, PARK_A, "Unpark sent"), "the parked line with no open item shows no Unpark sent badge");
+});
+
+// ---------------------------------------------------------------- what the page says after a send: a wake, a paste in chat, a none key
+// SKILL.md forbids a session to reply in a comment thread, so no line the page shows may send the owner there.
+const NO_THREAD = /thread/i;
+const WRITER = "home-triage-4";
+const NOT_TOLD_TEXT = "No session was told. It waits for " + WRITER + "'s next wake or turn start.";
+// An answer is read by each item's owner, not by the writer, so its unsent line names no writer.
+const ANSWER_NOT_TOLD = "No session was told. Each owner reads its answer at its next wake or turn start.";
+// The ask hint says "Telling Claude…" while the wake result is pending. A test waits for that result, not for a clock.
+// The told words sit on the line under the buttons, so a test waits for that line's result, not for a clock.
+const sentLineSettled = (page) => page.waitForFunction(() => { const l = document.querySelector("#asks .sline"); const s = l ? l.textContent : ""; return s.includes("Sent") && !s.includes("Telling"); }, null, { timeout: 3000 }).catch(() => {});
+// Types an ask and sends it, then returns the line under the buttons once the wake result has landed. "" when the page has no such line.
+async function sentLine(page, text) {
+  await mustHave(page, "#askText", "Ask box");
+  await page.fill("#askText", text);
+  await mustHave(page, "#askSend", "Send ask button");
+  await page.click("#askSend");
+  await sentLineSettled(page);
+  return page.evaluate(() => { const l = document.querySelector("#asks .sline"); return l ? l.textContent.trim() : ""; });
+}
+
+test("an ask sent while a session can take a comment says a wake was sent, never that Claude was told", async (t) => {
+  const page = await open(t, { meta: { writer: WRITER }, comments: { can: "available" } }); if (!page) return;
+  const line = await sentLine(page, ASK_TEXT);
+  assert.match(line, /A wake was sent\./, "the line under the buttons does not say a wake was sent: " + JSON.stringify(line));
+  assert.doesNotMatch(line, /Claude was told/, "the line under the buttons still says Claude was told: " + JSON.stringify(line));
+});
+
+test("an ask whose stored thread rejects upstream_error says a wake was sent, after one anchored retry", async (t) => {
+  const page = await open(t, { meta: { writer: WRITER }, comments: { can: "available", threadFail: { "t-old": "upstream_error" } }, storage: { "waiting.thread": "t-old" } }); if (!page) return;
+  const line = await sentLine(page, ASK_TEXT);
+  const s = await sent(page);
+  assert.equal(s[0].threadId, "t-old", "the ask did not first go to the stored thread");
+  assert.match(line, /A wake was sent\./, "the line under the buttons does not say a wake was sent after the anchored retry: " + JSON.stringify(line));
+  assert.equal(s.length, 2, "the ask did not get one anchored retry: " + s.length + " send(s)");
+});
+
+test("an ask sent with no session to tell says what happens next, and names no thread", async (t) => {
+  const page = await open(t, { meta: { writer: WRITER }, comments: { can: "no_session" } }); if (!page) return;
+  const line = await sentLine(page, ASK_TEXT);
+  assert.ok(line.includes(NOT_TOLD_TEXT), "the line under the buttons does not say what happens next: " + JSON.stringify(line));
+  assert.doesNotMatch(line, NO_THREAD, "the line under the buttons names a thread: " + JSON.stringify(line));
+});
+
+test("an answer sent with no session to tell says each owner reads it at its next wake, and names no thread or writer", async (t) => {
+  const page = await open(t, { meta: { writer: WRITER }, comments: { can: "no_session" } }); if (!page) return;
+  await takePick(page, DECISION); await send(page);
+  await told(page, "No session was told");
+  const status = (await page.textContent("#sentStatus")).trim();
+  assert.ok(status.includes(ANSWER_NOT_TOLD), "the sent panel does not say each owner reads its answer at its next wake: " + JSON.stringify(status));
+  assert.doesNotMatch(status, NO_THREAD, "the sent panel names a thread: " + JSON.stringify(status));
+  assert.ok(!status.includes(WRITER), "the sent panel names the writer, but each owner reads its own answer: " + JSON.stringify(status));
+});
+
+test("a failed Send tells the owner to paste the copied answers in chat, and names no thread", async (t) => {
+  const page = await open(t, { failSet: true }); if (!page) return;
+  await takePick(page, DECISION); await send(page);
+  await page.locator("#barStatus", { hasText: "Not saved (denied)" }).waitFor();
+  const bar = (await page.textContent("#barStatus")).trim();
+  assert.ok(bar.includes("Copy the answers and paste them in chat."), "the failed-save note does not say to paste the copied answers in chat: " + JSON.stringify(bar));
+  assert.doesNotMatch(bar, NO_THREAD, "the failed-save note names a thread: " + JSON.stringify(bar));
+});
+
+// One decision whose options are given, with a pick on its first key that is not none. Returns its warning, or null with no browser.
+const optWith = (key, label) => ({ key, label, how: "h", gain: "g", lose: "l" });
+const optNoLabel = (key) => ({ key, how: "h", gain: "g", lose: "l" });
+async function noneKeyWarning(t, options) {
+  const pick = options.find((o) => o.key !== "none").key;
+  const page = await open(t, { items: [], rawItems: { "none-key": { ...DECISION, id: "none-key", n: 33, options, pick } } }); if (!page) return null;
+  return (await warn(page, "none-key").textContent()).trim();
+}
+// The warning names the option by its letter and label, then gives the reason. The head is the part before the reason.
+function assertNoneWarning(text, head) {
+  assert.ok(text.includes(head + ' The page keeps that key for "None of these", so this decision cannot be answered.'), "the none-key warning does not read " + JSON.stringify(head) + ": " + JSON.stringify(text));
+  assert.doesNotMatch(text, /undefined/, "the none-key warning prints undefined: " + JSON.stringify(text));
+}
+
+test("a none key warning names its option by letter and label", async (t) => {
+  const text = await noneKeyWarning(t, [optWith("none", "Keep the old way"), optWith("b", "Blue")]); if (text === null) return;
+  assertNoneWarning(text, 'Option A, "Keep the old way", has the key none.');
+});
+
+test("a none key label over 28 characters is cut with an ellipsis in the warning", async (t) => {
+  const text = await noneKeyWarning(t, [optWith("none", "Keep the existing layout for every reader"), optWith("b", "Blue")]); if (text === null) return;
+  assertNoneWarning(text, 'Option A, "Keep the existing layout fo…", has the key none.');
+  assert.doesNotMatch(text, /for every reader/, "the none-key warning shows the whole label: " + JSON.stringify(text));
+});
+
+test("a none key with no label names its letter only, and prints no undefined", async (t) => {
+  const text = await noneKeyWarning(t, [optWith("a", "Red"), optNoLabel("none")]); if (text === null) return;
+  assertNoneWarning(text, "Option B has the key none.");
+});
+
+test("a none key with a blank label names its letter only, and prints no empty quotes", async (t) => {
+  const text = await noneKeyWarning(t, [optWith("a", "Red"), optWith("none", "   ")]); if (text === null) return;
+  assertNoneWarning(text, "Option B has the key none.");
+  assert.doesNotMatch(text, /""/, "the none-key warning prints empty quotes: " + JSON.stringify(text));
+});
+
+test("the copy confirmation names no thread", async (t) => {
+  const page = await open(t, { failSet: true }); if (!page) return;
+  await takePick(page, DECISION); await send(page);
+  await page.locator("#barStatus", { hasText: "Not saved (denied)" }).waitFor();
+  await stubClipboard(page, false);
+  await page.click("#copy");
+  await page.locator("#barStatus", { hasText: "Copied" }).waitFor();
+  const bar = (await page.textContent("#barStatus")).trim();
+  assert.doesNotMatch(bar, NO_THREAD, "the copy confirmation names a thread: " + JSON.stringify(bar));
+});
+
+test("a parked line with no id says the writer has not prepared it, and names no thread", async (t) => {
+  const page = await open(t, { items: [DECISION], meta: { writer: "triage", parked: [PARK_NOID] } }); if (!page) return;
+  await parkLoaded(page);
+  await need(parkLine(page, PARK_NOID), "the line with no id is not a .pk in .parked .pk-list");
+  const why = (await parkLine(page, PARK_NOID).locator(".pk-why").first().textContent()).trim();
+  assert.match(why, /has not prepared this line yet/, "the no-id line does not say the writer has not prepared it: " + JSON.stringify(why));
+  assert.doesNotMatch(why, NO_THREAD, "the no-id line names a thread: " + JSON.stringify(why));
+});
+
+// ---------------------------------------------------------------- an option with no label: the ready line names its letter
+// The page never prints a raw key or "undefined". An option with no title is named by its letter, as its chip is.
+test("a pick of an option with no label names its letter on the ready line", async (t) => {
+  const it = mk("no-label-pick", 41, { options: [optWith("a", "Red"), optNoLabel("b")], pick: "a" });
+  const page = await open(t, { items: [it] }); if (!page) return;
+  await page.locator('label[for="o-no-label-pick-b"]').click();
+  const ready = (await card(page, it).locator(".ready").textContent()).trim();
+  assert.equal(ready, "Ready to send: B, your choice.", "the ready line does not name the option by its letter: " + JSON.stringify(ready));
+});
+
+test("a pick of an option with a blank label names its letter on the ready line", async (t) => {
+  const it = mk("blank-label-pick", 42, { options: [optWith("a", "Red"), optWith("b", "   ")], pick: "a" });
+  const page = await open(t, { items: [it] }); if (!page) return;
+  await page.locator('label[for="o-blank-label-pick-b"]').click();
+  const ready = (await card(page, it).locator(".ready").textContent()).trim();
+  assert.equal(ready, "Ready to send: B, your choice.", "the ready line does not name the option by its letter: " + JSON.stringify(ready));
+});
+
+test("a two-pick with an option that has no label names that option by its letter on the ready line", async (t) => {
+  const it = mk("no-label-two", 43, { multi: true, options: [optWith("a", "Red"), optNoLabel("b")], pick: ["a", "b"] });
+  const page = await open(t, { items: [it] }); if (!page) return;
+  await needBoxes(page, it, 2);
+  await page.locator('label[for="o-no-label-two-a"]').click();
+  await page.locator('label[for="o-no-label-two-b"]').click();
+  const ready = (await card(page, it).locator(".ready").textContent()).trim();
+  assert.equal(ready, "Ready to send: Red and B, your choice.", "the two-pick ready line does not name the unlabelled option by its letter: " + JSON.stringify(ready));
+});
+
+// ---------------------------------------------------------------- pins: a failed withdraw and a view with no store say "in chat"
+// Pins, not red cases: these lines are green on the current page. They hold the wording the page says now, so a
+// thread line coming back fails here.
+test("a withdraw the store refuses says to paste the answer in chat, and names no thread", async (t) => {
+  const page = await open(t, { answers: SAVED_A, failDelete: true }); if (!page) return;
+  const c = card(page, DECISION);
+  await c.getByRole("button", { name: "Change" }).click();
+  await choose(page, DECISION, "a");
+  await send(page);
+  const note = c.getByText("Not withdrawn (denied)", { exact: false }).first();
+  await note.waitFor();
+  const text = (await note.textContent()).trim();
+  assert.match(text, /in chat/, "the withdraw note does not say to paste in chat: " + JSON.stringify(text));
+  assert.doesNotMatch(text, NO_THREAD, "the withdraw note names a thread: " + JSON.stringify(text));
+});
+
+test("a view that cannot reach the store says to paste its answers in chat, and names no thread", async (t) => {
+  const page = await open(t, { items: [], noStore: true }); if (!page) return;
+  const empty = page.locator("#list .empty").first();
+  await empty.waitFor();
+  const text = (await empty.textContent()).trim();
+  assert.match(text, /in chat/, "the no-store empty state does not say to paste in chat: " + JSON.stringify(text));
+  assert.doesNotMatch(text, NO_THREAD, "the no-store empty state names a thread: " + JSON.stringify(text));
 });

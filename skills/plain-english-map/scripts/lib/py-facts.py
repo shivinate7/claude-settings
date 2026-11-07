@@ -6,6 +6,9 @@ A request is {"file", "op", "symbol", "target"}:
   op "value"   the literal at module level that `symbol` is assigned (`Assign` and `AnnAssign` only)
   op "defines" whether `symbol` is bound at module level (def, class, import, assignment)
   op "uses"    whether `file` imports the tracked file `target`, and whether it refers to `symbol`
+  op "loads"   the tracked files `file` loads at runtime: {"imports": [path], "named": [path]}. `imports` leaves out an import under
+               `if TYPE_CHECKING:`. `named` holds each tracked file that a string in the code equals, from the file's folder or the root.
+               A docstring or a bare string statement is no code string.
 A result is {"ok": true, "value": v} or {"ok": false, "reason": str, "gone": bool}.
 `gone` is true when the file was read and the symbol is not there. Any other failure is unknown, so it has no `gone`.
 The module imports only the standard library and reads files as text, so it runs under `python3 -I`.
@@ -13,6 +16,7 @@ The module imports only the standard library and reads files as text, so it runs
 import ast
 import json
 import os
+import posixpath
 import sys
 
 
@@ -52,11 +56,29 @@ def defined_names(tree):
     return names
 
 
-def import_bindings(tree):
+def is_type_checking(test):
+    """True for the test of `if TYPE_CHECKING:` and `if typing.TYPE_CHECKING:`."""
+    return dotted_name(test) in ("TYPE_CHECKING", "typing.TYPE_CHECKING")
+
+
+def runtime_walk(tree):
+    """Every node of the tree except the body of an `if TYPE_CHECKING:`, which a run never executes. Its `else` stays."""
+    todo = [tree]
+    while todo:
+        node = todo.pop()
+        yield node
+        if isinstance(node, ast.If) and is_type_checking(node.test):
+            todo.extend(node.orelse)
+        else:
+            todo.extend(ast.iter_child_nodes(node))
+
+
+def import_bindings(tree, types=True):
     """Each dotted module name the file imports, with the dotted name that holds that module in the file, or None.
-    `import a.b` gives (`a.b`, `a.b`). `from a import b` gives (`a`, None) and (`a.b`, `b`), since `b` may be a module."""
+    `import a.b` gives (`a.b`, `a.b`). `from a import b` gives (`a`, None) and (`a.b`, `b`), since `b` may be a module.
+    With `types` false, an import that only a type checker runs is left out."""
     pairs = []
-    for node in ast.walk(tree):
+    for node in (ast.walk(tree) if types else runtime_walk(tree)):
         if isinstance(node, ast.Import):
             pairs.extend((a.name, a.asname or a.name) for a in node.names)
         elif isinstance(node, ast.ImportFrom):
@@ -68,20 +90,23 @@ def import_bindings(tree):
     return pairs
 
 
-def imported_modules(tree):
+def imported_modules(tree, types=True):
     """Each dotted module name the file imports."""
-    return [m for m, _ in import_bindings(tree)]
+    return [m for m, _ in import_bindings(tree, types)]
 
 
 def resolve(dotted, parent, tracked):
     """The one tracked file a module name stands for, or None. A module name resolves to the tracked file with that base name,
-    which covers an import after a `sys.path.insert`. With several, the dotted path then the parent's folder narrow it."""
+    which covers an import after a `sys.path.insert`, or to the `__init__.py` of the package with that name.
+    With several, the dotted path then the parent's folder narrow it."""
     parts = dotted.split(".")
     base = parts[-1] + ".py"
-    hits = [t for t in tracked if t.rsplit("/", 1)[-1] == base]
+    package = parts[-1] + "/__init__.py"
+    hits = [t for t in tracked if t.rsplit("/", 1)[-1] == base or t == package or t.endswith("/" + package)]
     if len(hits) > 1:
         suffix = "/".join(parts) + ".py"
-        narrowed = [t for t in hits if t == suffix or t.endswith("/" + suffix)]
+        pkg_suffix = "/".join(parts) + "/__init__.py"
+        narrowed = [t for t in hits if t in (suffix, pkg_suffix) or t.endswith("/" + suffix) or t.endswith("/" + pkg_suffix)]
         hits = narrowed or hits
     if len(hits) > 1:
         folder = parent.rsplit("/", 1)[0] if "/" in parent else ""
@@ -121,8 +146,39 @@ def referenced_names(tree, aliases):
     return names
 
 
+def code_strings(tree):
+    """Each string in the code. A docstring and any other bare string statement are comments in all but name, so they are left out,
+    and so is each piece of an f-string that has a placeholder."""
+    skip = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Expr) and isinstance(node.value, ast.Constant):
+            skip.add(id(node.value))
+        elif isinstance(node, ast.JoinedStr) and len(node.values) > 1:
+            skip.update(id(v) for v in node.values)
+    return [n.value for n in ast.walk(tree) if isinstance(n, ast.Constant) and isinstance(n.value, str) and id(n) not in skip]
+
+
+def named_files(tree, parent, tracked):
+    """The tracked files that a string in the code equals, from the parent's folder or from the root."""
+    found = set(tracked)
+    folder = parent.rsplit("/", 1)[0] if "/" in parent else ""
+    out = set()
+    for s in code_strings(tree):
+        if not s or "\n" in s or s.startswith("/"):
+            continue
+        for c in (posixpath.normpath(posixpath.join(folder, s)), posixpath.normpath(s)):
+            if c in found and c != parent:
+                out.add(c)
+    return sorted(out)
+
+
 def answer(req, tree, tracked):
     op, symbol = req.get("op", "value"), req.get("symbol")
+    if op == "loads":
+        imports = {resolve(m, req["file"], tracked) for m in imported_modules(tree, types=False)}
+        imports.discard(None)
+        imports.discard(req["file"])
+        return {"ok": True, "value": {"imports": sorted(imports), "named": named_files(tree, req["file"], tracked)}}
     if op == "uses":
         target = req["target"]
         imports = any(resolve(m, req["file"], tracked) == target for m in imported_modules(tree))

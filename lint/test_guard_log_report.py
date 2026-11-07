@@ -901,8 +901,8 @@ def fresh_log(lines=None):
 
 
 class CloudCheckOneHome(unittest.TestCase):
-    """The cloud check has one home, hooks/guard_core.py's is_cloud: True only for exactly "true". This report's n/a (cloud) gate
-    and the brake gate in guard.py hold that one function (decision session-tiers: the brake is local-only)."""
+    """The cloud check has one home, hooks/guard_core.py's is_cloud: True only for exactly "true". This report's n/a (cloud) check
+    and the brake guard in guard.py hold that one function (decision session-tiers: the brake is local-only)."""
 
     def helper(self):
         import guard_core
@@ -921,7 +921,7 @@ class CloudCheckOneHome(unittest.TestCase):
     def test_the_report_check_holds_the_guard_core_is_cloud(self):
         fn = self.helper()
         self.assertTrue(callable(fn), "guard_core has no is_cloud: the cloud check has no one home yet")
-        self.assertIs(getattr(glr, "is_cloud", None), fn, "the n/a (cloud) gate does not hold guard_core.is_cloud")
+        self.assertIs(getattr(glr, "is_cloud", None), fn, "the n/a (cloud) check does not hold guard_core.is_cloud")
 
 
 class CloudPaceReadTests(unittest.TestCase):
