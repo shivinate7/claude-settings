@@ -4,8 +4,9 @@
 WindowsSplit proves: (1) each suite command in REQUIRED runs in exactly one `windows-latest` job (none
 dropped, none run twice); (2) at least MIN_JOBS `windows-latest` jobs carry those suites.
 Cut F adds: the guard suite has its own Windows job (GUARD_JOB) and runs off it nowhere else; its
-slice (GUARD_TESTS=windows-slice) runs only on pull_request; the guard mutation test has its own
-Linux job (MUTATE_JOB) and runs nowhere else; both jobs skip on the `guard` scope flag. A scoped job's
+slice (GUARD_TESTS=windows-slice) runs only on pull_request; the guard mutation test runs in its own
+Linux shard family (MUTATE_JOB and its `-<i>` jobs, MUTATE_SHARD) and nowhere else. Both skip on the `guard`
+scope flag, the family through its steps: its jobs carry no job-level if, and all-jobs-passed needs each. A scoped job's
 job-level if, if any, holds only the draft guard; its scope condition sits in each step
 (read_scope_condition, step_rest), so a step cannot run outside the scope condition.
 
@@ -292,20 +293,33 @@ GUARD_JOB = "checks-windows-guard"
 # carries SHARD_VAR[base]=<i>/<n> in its step env, and the n values cover 1 to n once each, so every case runs
 # once. A shard job past the first never runs on pull_request: the required check is the base job alone, so
 # the PR verdict stays in it (the slice there runs whole, with no shard value).
-SHARD_VAR = {"checks-windows-guard": "GUARD_SHARD", "checks-windows-merge": "MERGE_SHARD"}
-SHARD_CMD = {"checks-windows-guard": "python hooks/test_guard.py", "checks-windows-merge": "python merge/test_merge.py"}
+# The guard mutation test moves off `checks` (Linux) to its own Linux job (cut F). Its shard family (MUTATE_JOB below)
+# is one more SHARD_VAR family, but a Linux family: its shards are needed jobs, not event-only ones (EVENT_ONLY_BASES).
+MUTATE_CMD = "python3 hooks/mutate_guard.py"
+MUTATE_JOB = "checks-mutate-guard"
+MUTATE_CAP = 25  # minutes, per job of the mutation family: each leg's mutants must fit it (debt mutate-guard-split)
+SHARD_VAR = {"checks-windows-guard": "GUARD_SHARD", "checks-windows-merge": "MERGE_SHARD", MUTATE_JOB: "MUTATE_SHARD"}
+SHARD_CMD = {"checks-windows-guard": "python hooks/test_guard.py", "checks-windows-merge": "python merge/test_merge.py",
+             MUTATE_JOB: MUTATE_CMD}
+# The Windows families whose shards past the first carry SHARD_JOB_IF. all-jobs-passed reads these as the shards that stay
+# off a pull_request (shard_base). The Linux family's shards carry no job-level if: each is a needed job.
+EVENT_ONLY_BASES = ("checks-windows-guard", "checks-windows-merge")
 SHARD_JOB_IF = "${{ github.event_name != 'pull_request' }}"
 
 
-def shard_base(name):
-    """The base job a shard job belongs to (`checks-windows-guard-2` -> `checks-windows-guard`), or None."""
+def family_base(name):
+    """The base job of any shard family's job (`checks-mutate-guard-2` -> `checks-mutate-guard`), or None."""
     m = re.fullmatch(r"(.+)-([2-9]|[1-9][0-9]+)", name)
     return m.group(1) if m and m.group(1) in SHARD_VAR else None
 
 
-# The guard mutation test moves off `checks` (Linux) to its own Linux job (cut F).
-MUTATE_CMD = "python3 hooks/mutate_guard.py"
-MUTATE_JOB = "checks-mutate-guard"
+def shard_base(name):
+    """The base job of an event-only shard job (`checks-windows-guard-2` -> `checks-windows-guard`), or None. A Linux family's
+    shards are not event-only, so they have no shard_base."""
+    base = family_base(name)
+    return base if base in EVENT_ONLY_BASES else None
+
+
 # The bin/shoot suite and its browser install have their own Linux job, off the `checks` lint job.
 SHOOT_CMD = 'NODE_PATH="$PWD/.github/shoot/node_modules" node --test lint/test_shoot.mjs'
 SHOOT_JOB = "checks-shoot"
@@ -332,10 +346,10 @@ def shard_problems(cmd, homes):
     """A suite in several jobs is one shard family: its base job and `<base>-2`..`<base>-<n>`, each full step with
     SHARD_VAR=<i>/<n>, the values 1/n to n/n once each. [] when the homes are such a family."""
     names = [n for n, _ in homes]
-    bases = {shard_base(n) or n for n in names}
+    bases = {family_base(n) or n for n in names}
     base = next(iter(bases))
     if len(bases) != 1 or base not in SHARD_VAR or SHARD_CMD[base] != cmd:
-        return [f"{cmd!r} runs {len(homes)} times on windows-latest: {names}"]
+        return [f"{cmd!r} runs {len(homes)} times, not as one shard family: {names}"]
     n = len(homes)
     want_names = {base} | {f"{base}-{i}" for i in range(2, n + 1)}
     got = sorted((st.get("env") or {}).get(SHARD_VAR[base], "") if isinstance(st.get("env"), dict) else ""
@@ -583,7 +597,8 @@ def scope_problems(text):
         # ci-done is the fan-in that comments when a run ends red: it needs every job, not scope
         # alone (actions/ci-done-comment/test_comment.py checks its needs and if).
         if name not in ("scope", "ci-done", ALL_JOBS_PASSED_JOB):
-            problems += job_check_problems(name, job, FLAG_OF.get(name))
+            # A shard job takes its base job's flag: the mutation family's shards read `guard`, as their base does.
+            problems += job_check_problems(name, job, FLAG_OF.get(name, FLAG_OF.get(family_base(name))))
     return problems
 
 
@@ -599,7 +614,7 @@ def hardening_problems(text):
     for var in SHARD_VAR.values():
         homes = sum(1 for j in all_jobs(text).values() for st in j["steps"]
                     if isinstance(st.get("env"), dict) and var in st["env"]
-                    and (key(st) in REQUIRED or st.get("run") == MACOS_GUARD))
+                    and (key(st) in REQUIRED or st.get("run") in (MACOS_GUARD, MUTATE_CMD)))
         mentions = sum(strip_comment(line).count(var) for line in text.splitlines())  # a comment that names the var is no home
         if mentions != homes:
             problems.append(f"{var} appears {mentions} times in checks.yml, want {homes} (once per shard step's env)")
@@ -664,15 +679,40 @@ def guard_problems(text):
     return problems
 
 
+def mutate_homes(text):
+    """(job, step) for each step that runs the guard mutation test, in any job."""
+    return [(n, st) for n, j in all_jobs(text).items() for st in j["steps"] if key(st) == MUTATE_CMD]
+
+
 def mutate_problems(text):
-    """Cut F. The guard mutation test runs in MUTATE_JOB on Linux, and in no other job."""
+    """Cut F, and the split of the mutation test into shards. The guard mutation test runs in the mutation family (MUTATE_JOB and
+    `<MUTATE_JOB>-2` to `-<n>`) and in no other job. The family has at least two jobs, one full step each with its MUTATE_SHARD
+    value (shard_problems). Each job runs on ubuntu-latest, is capped at MUTATE_CAP minutes, is a needed job of all-jobs-passed and
+    ci-done, and gates its steps on the guard flag. A job-level if would skip the job, and all-jobs-passed reads a skip as red."""
     jobs = all_jobs(text)
-    homes = [n for n, j in jobs.items() for st in j["steps"] if st.get("run") == MUTATE_CMD]
+    homes = mutate_homes(text)
+    names = sorted(n for n, _ in homes)
     problems = []
-    if homes != [MUTATE_JOB]:
-        problems.append(f"{MUTATE_CMD!r} runs in {homes}, want exactly [{MUTATE_JOB!r}]")
-    if MUTATE_JOB in jobs and not (jobs[MUTATE_JOB]["os"] or "").startswith("ubuntu"):
-        problems.append(f"{MUTATE_JOB} runs on {jobs[MUTATE_JOB]['os']}, want ubuntu-latest")
+    if MUTATE_JOB not in names:
+        problems.append(f"{MUTATE_CMD!r} runs in {names}, want the {MUTATE_JOB} family")
+    if len(homes) < 2:
+        problems.append(f"{MUTATE_CMD!r} runs in {len(homes)} job(s), want at least 2 shards: one leg must not hold every mutant")
+    problems += shard_problems(MUTATE_CMD, homes)
+    needs = {ALL_JOBS_PASSED_JOB: job_block(text, ALL_JOBS_PASSED_JOB) or "", "ci-done": job_block(text, "ci-done") or ""}
+    for name in names:
+        job, block = jobs[name], job_block(text, name) or ""
+        if not (job["os"] or "").startswith("ubuntu"):
+            problems.append(f"{name} runs on {job['os']}, want ubuntu-latest")
+        cap = re.search(r"^    timeout-minutes:[ \t]*(\S+)", block, re.M)
+        if cap is None or not cap.group(1).isdigit() or int(cap.group(1)) > MUTATE_CAP:
+            problems.append(f"{name} timeout-minutes is {cap.group(1) if cap else None}, want a number at most {MUTATE_CAP}")
+        if job["if"] is not None:
+            problems.append(f"{name} keeps a job-level if {job['if']!r}: all-jobs-passed reads its skip as red")
+        else:
+            problems += job_check_problems(name, job, FLAG_OF[MUTATE_JOB])
+        for where, text_ in needs.items():
+            if not re.search(rf"^      - {re.escape(name)}\s*(#.*)?$", text_, re.M):
+                problems.append(f"{name} is not in {where}'s needs")
     return problems
 
 
@@ -1024,14 +1064,14 @@ class WindowsSplit(unittest.TestCase):
         self.assertTrue(guard_problems(doc(more="  checks-windows:\n    runs-on: windows-latest\n    needs: scope\n"
                                                "    if: ${{ needs.scope.outputs.checks_windows == 'true' }}\n"
                                                "    steps:\n      - run: python hooks/test_guard.py\n")))
-        checks = "jobs:\n  checks-mutate-guard:\n    runs-on: ubuntu-latest\n    steps:\n      - run: python3 hooks/mutate_guard.py\n"
-        self.assertEqual(mutate_problems(checks), [])
-        self.assertTrue(mutate_problems(checks.replace("checks-mutate-guard", "checks")))  # in the lint job
-        self.assertTrue(mutate_problems(checks.replace("ubuntu-latest", "windows-latest")))  # on Windows
-        self.assertTrue(mutate_problems("jobs:\n  checks:\n    runs-on: ubuntu-latest\n    steps:\n"
-                                        "      - run: python3 hooks/mutate_guard.py\n"
-                                        "  checks-mutate-guard:\n    runs-on: ubuntu-latest\n    steps:\n"
-                                        "      - run: python3 hooks/mutate_guard.py\n"))  # runs twice
+        # Re-pointed to the shard family: a lone job no longer passes (one leg would hold every mutant), so each defect
+        # below is built on the two-job family from mutate_doc.
+        family = mutate_doc(mutate_family("1/2", "2/2"))
+        self.assertEqual(mutate_problems(family), [])
+        self.assertTrue(mutate_problems(family.replace("checks-mutate-guard-2", "checks")))  # a shard in the lint job
+        self.assertTrue(mutate_problems(family.replace("ubuntu-latest", "windows-latest")))  # on Windows
+        self.assertTrue(mutate_problems(mutate_doc(mutate_family("1/2", "2/2") + [(
+            "checks", "  checks:\n    runs-on: ubuntu-latest\n    steps:\n      - run: python3 hooks/mutate_guard.py\n")])))  # runs twice
 
 
 def split_doc(jobs):
@@ -1144,6 +1184,111 @@ class SplitJobs(unittest.TestCase):
         for label, (text, check) in cases.items():
             with self.subTest(defect=label):
                 self.assertTrue([p for p in check(text) if "check_unknown_reads_contract" in p], label)
+
+
+# The gate every step of a guard-suite job carries (the base job's steps, as checks.yml writes them today).
+GUARD_GATE = "needs.scope.outputs.guard == 'true' || github.event_name != 'pull_request'"
+
+
+def mutate_job(name, shard, cap="25", job_if=None, gate=GUARD_GATE, needs="scope", runs_on="ubuntu-latest"):
+    """One job of the mutation family as checks.yml lays it out: a checkout, a setup and the mutation step, each gated on
+    `gate`, the mutation step's MUTATE_SHARD value `shard` (None for none). A defect changes one argument."""
+    head = f"  {name}:\n    runs-on: {runs_on}\n    needs: {needs}\n"
+    if job_if is not None:
+        head += f"    if: {job_if}\n"
+    if cap is not None:
+        head += f"    timeout-minutes: {cap}\n"
+    gated = f"        if: ${{{{ {gate} }}}}\n" if gate is not None else ""
+    env = f"        env:\n          MUTATE_SHARD: {shard}\n" if shard is not None else ""
+    return (head + "    steps:\n"
+            f"      - uses: actions/checkout@abc\n{gated}"
+            f"      - uses: actions/setup-python@abc # v6\n{gated}"
+            f"      - name: Guard mutation test\n{gated}{env}"
+            f"        run: {MUTATE_CMD}\n")
+
+
+def mutate_family(*shards):
+    """The mutation family, one job per shard value, the base job first: mutate_family("1/2", "2/2")."""
+    names = [MUTATE_JOB] + [f"{MUTATE_JOB}-{i}" for i in range(2, len(shards) + 1)]
+    return [(name, mutate_job(name, shard)) for name, shard in zip(names, shards)]
+
+
+def mutate_doc(jobs, needed=None):
+    """checks.yml text for `jobs`, a list of (name, job text). all-jobs-passed and ci-done need `needed` (default: every name)."""
+    names = [name for name, _ in jobs] if needed is None else needed
+    need = "".join(f"      - {n}\n" for n in names)
+    tail = "    runs-on: ubuntu-latest\n    needs:\n" + need + "    steps:\n      - run: echo done\n"
+    return "jobs:\n" + "".join(text for _, text in jobs) + f"  {ALL_JOBS_PASSED_JOB}:\n" + tail + "  ci-done:\n" + tail
+
+
+class MutateShards(unittest.TestCase):
+    """The shard family of the guard mutation test, read from checks.yml. Each job of the family is one leg with its MUTATE_SHARD
+    value, is capped at MUTATE_CAP minutes, takes no job-level if, is a needed job of all-jobs-passed and ci-done, and gates each
+    step on the guard flag. Each case first asserts a family of two or more jobs, so a single job reads red by that named assert."""
+
+    def setUp(self):
+        with open(CHECKS, encoding="utf-8") as f:
+            self.text = f.read()
+        self.jobs = all_jobs(self.text)
+
+    def family(self):
+        names = sorted(n for n, _ in mutate_homes(self.text))
+        self.assertGreaterEqual(len(names), 2, f"{MUTATE_CMD!r} runs in {names}: one job holds every mutant, so no leg is a shard")
+        return names
+
+    def test_the_guard_mutation_is_a_family_of_at_least_two_shards(self):
+        self.family()
+        self.assertEqual(shard_problems(MUTATE_CMD, mutate_homes(self.text)), [])
+
+    def test_each_shard_job_is_capped_at_mutate_cap_minutes(self):
+        for name in self.family():
+            cap = re.search(r"^    timeout-minutes:[ \t]*(\S+)", job_block(self.text, name) or "", re.M)
+            self.assertTrue(cap and cap.group(1).isdigit() and int(cap.group(1)) <= MUTATE_CAP,
+                            f"{name} timeout-minutes is {cap.group(1) if cap else None}, want at most {MUTATE_CAP}")
+
+    def test_no_shard_job_takes_a_job_level_if(self):
+        for name in self.family():
+            self.assertIsNone(self.jobs[name]["if"], f"{name} keeps a job-level if: all-jobs-passed would read its skip as red")
+
+    def test_each_shard_step_is_gated_on_the_guard_flag(self):
+        for name in self.family():
+            with self.subTest(job=name):
+                self.assertEqual(job_check_problems(name, self.jobs[name], FLAG_OF[MUTATE_JOB]), [])
+                for st in self.jobs[name]["steps"]:
+                    self.assertIsNotNone(step_if(st), f"{name} has a step with no if: it would start on a guard-off pull_request")
+                    self.assertFalse(eval_if(step_if(st), "pull_request", "false"),
+                                     f"{name}: a step runs on a pull_request with the guard flag off")
+
+    def test_each_shard_job_is_a_needed_job_of_all_jobs_passed_and_ci_done(self):
+        for name in self.family():
+            for where in (ALL_JOBS_PASSED_JOB, "ci-done"):
+                self.assertRegex(job_block(self.text, where) or "", rf"(?m)^      - {re.escape(name)}\s*(#.*)?$",
+                                 f"{name} is not in {where}'s needs: its red would not block the merge")
+
+    def test_the_checker_sees_each_defect(self):
+        good = mutate_family("1/2", "2/2")
+        self.assertEqual(mutate_problems(mutate_doc(good)), [])
+        two = f"{MUTATE_JOB}-2"
+        bad = {
+            "one job, one leg holds every mutant": mutate_doc(mutate_family("1/1")),
+            "a shard value missing": mutate_doc([good[0], (two, mutate_job(two, None))]),
+            "a shard value doubled": mutate_doc(mutate_family("1/2", "2/2", "2/2")),
+            "n disagrees between legs": mutate_doc(mutate_family("1/2", "2/3")),
+            "a leg dropped": mutate_doc([good[0], (f"{MUTATE_JOB}-3", mutate_job(f"{MUTATE_JOB}-3", "3/3"))]),
+            "a job-level if on a shard": mutate_doc([good[0], (two, mutate_job(two, "2/2", job_if=SHARD_JOB_IF))]),
+            "a job-level if on the base": mutate_doc([(MUTATE_JOB, mutate_job(MUTATE_JOB, "1/2", job_if=SHARD_JOB_IF)), good[1]]),
+            "no timeout on a shard": mutate_doc([good[0], (two, mutate_job(two, "2/2", cap=None))]),
+            "a shard capped over the limit": mutate_doc([good[0], (two, mutate_job(two, "2/2", cap="45"))]),
+            "a shard step not gated": mutate_doc([good[0], (two, mutate_job(two, "2/2", gate=None))]),
+            "a shard gated on the wrong flag": mutate_doc([good[0], (two, mutate_job(two, "2/2", gate=GUARD_GATE.replace("guard", "checks_windows")))]),
+            "a shard not needed by all-jobs-passed": mutate_doc(good, needed=[MUTATE_JOB]),
+            "a shard on Windows": mutate_doc([good[0], (two, mutate_job(two, "2/2", runs_on="windows-latest"))]),
+            "the mutation in a lint job": mutate_doc(good + [(
+                "checks", "  checks:\n    runs-on: ubuntu-latest\n    steps:\n      - run: python3 hooks/mutate_guard.py\n")]),
+        }
+        for label, text in bad.items():
+            with self.subTest(defect=label):
+                self.assertTrue(mutate_problems(text), label)
 
 
 class TopLevelOr(unittest.TestCase):
