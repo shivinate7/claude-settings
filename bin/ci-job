@@ -536,7 +536,8 @@ def main(argv):
                            for n in jobs}
                 for n in sorted(set(done) | set(futures)):  # workflow order: each line prints once those before it are in
                     if n in futures:
-                        finish(n, *futures[n].result())
+                        state, first = futures[n].result()
+                        finish(n, state, first.replace(logs[n], log))  # the step's own log is removed: name the one that keeps its text
                         with open(logs[n], "rb") as src, open(log, "ab") as dst:
                             shutil.copyfileobj(src, dst)
                     print(done[n])
