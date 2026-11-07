@@ -710,6 +710,19 @@ class LaneLint(CiJobStub, tm.CloudSession):
         self.assertTrue(any(SUITE in line and "FAIL" in line for line in out.splitlines()), "the refusal does not name the red suite: " + out)
         self.assertEqual(pass_lines(out), [], out)
 
+    def test_the_selector_is_the_bases_so_a_lane_that_empties_it_still_runs_the_red_suite(self):
+        """The selector runs from origin/<base>, as the config does. The lane writes tools/lane_select.py to list nothing; the base's
+        selector lists the red suite for the lane's src/p.py. The base's list decides, so the lane is refused."""
+        self.lane_fixture(listed=[SUITE], suites={SUITE: "fail"}, lane={"src/p.py": "VALUE = 1\n"}, lane_listed=[])
+        status = self.lane_status()
+        self.assertEqual(status.get("tools/lane_select.py"), "M", "the fixture does not change the selector in the lane")
+        self.use_ci_job(PASSING, 0)
+        rc, out = self.lint_run("--lane-lint", "7")
+        self.assertIn(SUITE, self.suite_names(), "the base's selector did not decide the suites; the lane's own selector did: " + out)
+        self.assertEqual(rc, 1, out)
+        self.assertTrue(any(SUITE in line and "FAIL" in line for line in out.splitlines()), "the refusal does not name the red suite: " + out)
+        self.assertEqual(pass_lines(out), [], out)
+
     def test_every_red_selected_suite_is_named_and_a_green_one_is_not(self):
         listed = [SUITE, OTHER_SUITE, THIRD_SUITE]
         self.lane_fixture(listed=listed, suites={SUITE: "fail", OTHER_SUITE: "fail", THIRD_SUITE: "pass"})
