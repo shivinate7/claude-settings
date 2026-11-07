@@ -8,9 +8,9 @@ import re
 
 import guard_core
 from guard_core import (
-    REDIRECT, SCRIPT_HEADERS, _WRITE_TARGET, _expanded, _plain_words, _resolved,
-    _split_heredocs, _strip_heredoc_bodies_unconditionally, basename, dir_before_segment, interpreter_bodies, norm, resolve_command, segment_tokens, split_segments,
-    strip_heredoc_bodies,
+    REDIRECT, SCRIPT_HEADERS, _SHELLS, _WRITE_TARGET, _expanded, _plain_words, _resolved,
+    _split_heredocs, _strip_heredoc_bodies_unconditionally, basename, dir_before_segment, interpreter_bodies, norm, resolve_command,
+    script_language, segment_tokens, split_segments, strip_heredoc_bodies,
 )
 from guard_env import _quoted_words, _substitutions, script_spots
 
@@ -980,7 +980,37 @@ def _js_values(groups, env):
     return []
 
 
+def _js_without_comments(body: str) -> str:
+    """`body` with each `//` and `/* */` comment blanked (newlines kept), strings left whole, so a path a
+    comment names is no write. A `'` or `"` string ends at a newline, a backtick string runs on; a regex
+    literal is not told from division, which can only blank less than a comment, never more."""
+    out, at, size = [], 0, len(body)
+    while at < size:
+        char, pair = body[at], body[at:at + 2]
+        if char in "'\"`":
+            end = at + 1
+            while end < size and body[end] != char and (char == "`" or body[end] != "\n"):
+                end += 2 if body[end] == "\\" else 1
+            out.append(body[at:end + 1])
+            at = end + 1
+        elif pair == "//":
+            end = body.find("\n", at)
+            end = size if end < 0 else end
+            out.append(" " * (end - at))
+            at = end
+        elif pair == "/*":
+            end = body.find("*/", at + 2)
+            end = size if end < 0 else end + 2
+            out.append("".join("\n" if c == "\n" else " " for c in body[at:end]))
+            at = end
+        else:
+            out.append(char)
+            at += 1
+    return "".join(out)
+
+
 def _js_hit(body: str, cwd: str, predicate) -> str:
+    body = _js_without_comments(body)
     env = {}
     for match in _JS_ASSIGN.finditer(body):
         env.setdefault(match.group(1), []).append(next(g for g in match.groups()[1:] if g is not None))
@@ -1054,6 +1084,7 @@ def _interpreter_write_hit(raw: str, cwd: str, predicate, file_cap: int = 0) -> 
                     return hit
         # A file the same command writes from a heredoc and then runs: its body is the script, never the disk copy.
         for lang, body, _quote in interpreter_bodies(raw):
+            lang = lang or _shebang_kind(body)   # `./gen.py` runs the body as its `#!` line reads it
             hit = (_py_hit if lang == "py" else _js_hit)(body, cwd, predicate) if lang in ("py", "js") else ""
             if hit:
                 return hit
@@ -1079,12 +1110,13 @@ _SCRIPT_NOT_FILE = {
     "js": re.compile(r"^(?:-[ep]{1,2}|--eval|--print|-i|--interactive|--test)$"),
     "sh": re.compile(r"^-[A-Za-z]*[cs]$"),
 }
-_SHEBANG_KINDS = (("py", _PY_COMMAND), ("js", _NODE_COMMAND), ("sh", re.compile(r"^(?:ba|z|da|k)?sh$")))
+_SHELL_COMMAND = re.compile(r"(?:" + _SHELLS + r")(?:\.exe|\.cmd)?").fullmatch
 
 
 def _kind_of(name: str) -> str:
-    """The reading a command word gives its file: "py", "js" or "sh", else ''."""
-    return next((kind for kind, found in _SHEBANG_KINDS if found.match(name)), "")
+    """The reading a command word gives its file: "py", "js" or "sh", else ''. Perl and ruby are not read."""
+    lang = script_language(name)
+    return lang if lang in ("py", "js") else "sh" if _SHELL_COMMAND(name) else ""
 
 
 def _script_operand(tokens, index: int, kind: str) -> str:
