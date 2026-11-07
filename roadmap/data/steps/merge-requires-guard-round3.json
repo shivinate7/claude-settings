@@ -1,0 +1,10 @@
+{
+  "title": "The merge tool requires round 3 on a guard change; delete-only changes are exempt",
+  "phase": "next",
+  "status": "todo",
+  "order": 267.6,
+  "owner": "coordinator",
+  "why": "Follow-up of step review-rounds-rework.",
+  "note": "Named by lane review-rounds-rework in PR #1552 (coordinator, 16:33 CST Nov 7). Done check: a guard change merged without a round-3 record is refused; a delete-only change passes.",
+  "updatedAt": "2026-11-07T16:33:00-06:00"
+}
