@@ -1064,6 +1064,14 @@ def shell_abs(path: str, base):
     return path
 
 
+def _makes_folder(command: str, args) -> bool:
+    """True when the command makes a folder a later `cd` may enter: `mkdir`, `md`, `New-Item`, a worktree
+    added, a clone or an init."""
+    if command in ("mkdir", "md", "new-item"):
+        return True
+    return command == "git" and ("clone" in args or "init" in args or ("worktree" in args and "add" in args))
+
+
 def dir_before_segment(segments, number: int, shell_cwd: str, ends=(), failed_cd_stays=False):
     """The directory the shell is in when `segments[number]` runs, or None when it cannot be told.
 
@@ -1072,7 +1080,7 @@ def dir_before_segment(segments, number: int, shell_cwd: str, ends=(), failed_cd
     back, a `cd` inside `( ... )` ends with the parenthesis, `popd` or a path that holds a variable
     is not tracked, and a `cd` into a folder that does not exist is not trusted: the folder is unknown. With
     `failed_cd_stays` the shell stays where it was instead (a `;` runs the next command there), unless an
-    earlier `mkdir` may have made the folder. `ends` is what `split_segments` gave:
+    earlier `mkdir`, worktree add, clone or init may have made the folder: it is then entered. `ends` is what `split_segments` gave:
     in bash each part of a pipe runs in a subshell, so its `cd` moves nothing after the pipe."""
     where = shell_cwd if shell_cwd and os.path.isabs(shell_cwd) else None
     prev, stack, made = None, [], False
@@ -1088,7 +1096,7 @@ def dir_before_segment(segments, number: int, shell_cwd: str, ends=(), failed_cd
             move = None   # a bash pipe's part: a subshell, so the shell stays where it was
         if tokens and move is None:
             word = resolve_command(tokens)
-            made = made or (word is not None and basename(tokens[word]).lower() in ("mkdir", "md", "new-item"))
+            made = made or (word is not None and _makes_folder(basename(tokens[word]).lower(), tokens[word + 1:]))
         if tokens is None:
             where = None
         elif move is not None:
@@ -1101,8 +1109,9 @@ def dir_before_segment(segments, number: int, shell_cwd: str, ends=(), failed_cd
                 where = None
             else:
                 where = shell_abs(move or "~", where)
-                # a folder missing now may be made by an earlier `mkdir` of the same command: then it is unknown
-                where = where if where and os.path.isdir(where) else (old if failed_cd_stays and not made else None)
+                if not (where and os.path.isdir(where)):
+                    # a folder an earlier command of this line makes is entered, with `failed_cd_stays`
+                    where = (where if made else old) if failed_cd_stays else None
             prev = old
         for _ in range(marks.count(")")):
             if stack:
