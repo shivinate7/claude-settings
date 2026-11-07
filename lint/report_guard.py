@@ -18,6 +18,11 @@ the rewrite once for model names and the `Unstarted:` line only. A failure block
 Cost: one small file per missing-report block, written at that block, deleted at the next Stop with
 stop_hook_active; no process, timer or log. A correction block leaves no marker, so no loop follows.
 
+On landed turns whose report has the right shape, it also blocks a Deviations item that admits a mistake
+the writer made ("I broke ...", a first-person clause with a fault word and no negator before it) and names no
+guard: `step:<slug>`, the word debt, or a guard, check or hook word with a PR or commit ref
+(`building-mistake-names-its-guard`). Quoted text, fences and URLs never count as an admission.
+
 On the same landed turns it also blocks (one block, all reasons joined) when a Done item lacks
 BUILT, RECORDED, or OTHER or a PR or commit ref (`reports-done-format`), or when the reply holds
 a record id with no short gloss (`speak-cite-id-plus-gloss`), or when a builder, reviewer,
@@ -855,6 +860,64 @@ def departs_problem(text):
     if not miss:
         return ""
     return "Departs-from guard: the Input Needed pick has a problem (" + miss + "). " + question_form.DEPARTS_REASON
+
+
+# building-mistake-names-its-guard: a Deviations admission ("I broke ...") must name the guard that would
+# have stopped it. Quoted text, fences and URLs are blanked first so a report can quote the owner. A clause
+# admits only when a first-person word comes before its fault word, so "The test was wrong so I re-pointed it"
+# passes. A negator clears it only when at most MISTAKE_NEGATOR_GAP words sit between it and the fault word,
+# so a negator that governs an earlier verb ("I did not run the check and broke it") does not.
+# `step:<slug>` is checked for form only.
+MISTAKE_FIRST_PERSON_RE = re.compile(r"\bI\b|\b[Mm]y\b")
+MISTAKE_FAULT_RE = re.compile(
+    r"\b(?:wrong(?:ly)?|mistaken(?:ly)?|mistakes?|by accident|accidental(?:ly)?|broke|clobbered|overwrote|"
+    r"misread|forgot|trusted (?:a stale|an old|an outdated)|"
+    r"instead of checking)\b", re.I)
+MISTAKE_NEGATOR_RE = re.compile(r"\bnot\b|n't\b|\bnever\b|\bno\b|\bnothing\b", re.I)
+MISTAKE_NEGATOR_GAP = 3
+MISTAKE_SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?;])\s+|\n")
+MISTAKE_CLAUSE_SPLIT_RE = re.compile(
+    r"[,:;\u2014\u2013]|\s-{1,2}\s|\b(?:because|since|but|while|although)\b", re.I)
+MISTAKE_URL_RE = re.compile(r"https?://\S+")
+MISTAKE_STEP_RE = re.compile(r"\bstep:[a-z0-9][a-z0-9-]*")
+MISTAKE_DEBT_RE = re.compile(r"\bdebts?\b", re.I)
+MISTAKE_GUARD_WORD_RE = re.compile(r"\b(?:guard|check|hook)s?\b", re.I)
+MISTAKE_REASON = (
+    "Mistake guard: Deviations admits a mistake you made: %s. A mistake is a strong sign a guard or check is "
+    "missing. Name the guard that would have stopped it: built (PR or commit), `step:<slug>`, or a debt "
+    "(rule building-mistake-names-its-guard).")
+
+
+def _admitted_clause(deviations):
+    """The first clause of the Deviations text that admits a mistake the writer made, else ''."""
+    plain = QUOTED_RE.sub(" ", MISTAKE_URL_RE.sub(" ", FENCE_RE.sub(" ", deviations)))
+    for sentence in _sentences(plain):
+        for clause in MISTAKE_CLAUSE_SPLIT_RE.split(sentence):
+            for fault in MISTAKE_FAULT_RE.finditer(clause):
+                before = clause[:fault.start()]
+                # Split on whitespace only, so a contraction such as didn't stays one word.
+                near = " ".join(before.split()[-(MISTAKE_NEGATOR_GAP + 1):])
+                if MISTAKE_FIRST_PERSON_RE.search(before) and not MISTAKE_NEGATOR_RE.search(near):
+                    return clause.strip()
+    return ""
+
+
+def _sentences(text):
+    return [BULLET_RE.sub("", s.strip()) for s in MISTAKE_SENTENCE_SPLIT_RE.split(text)]
+
+
+def mistake_problem(text):
+    """The refusal text when Deviations admits a mistake and names no guard (rule
+    `building-mistake-names-its-guard`), else ''."""
+    deviations = report_section(text, "Deviations")
+    clause = _admitted_clause(deviations)
+    if not clause:
+        return ""
+    # A guard word and its ref must share a sentence, so a stray ref elsewhere does not clear the admission.
+    if (MISTAKE_STEP_RE.search(deviations) or MISTAKE_DEBT_RE.search(deviations)
+            or any(MISTAKE_GUARD_WORD_RE.search(s) and DONE_REF_RE.search(s) for s in _sentences(deviations))):
+        return ""
+    return MISTAKE_REASON % repr(clause[:80])
 
 
 def _own_lane_read(path, own_id):
@@ -1827,6 +1890,13 @@ def main():
             reasons.append(departs)
     except Exception:
         pass
+    if shape_ok:
+        try:
+            mistake = mistake_problem(text)
+            if mistake:
+                reasons.append(mistake)
+        except Exception as exc:
+            print("mistake check failed open: %s: %s" % (type(exc).__name__, exc), file=sys.stderr)
     reasons += [r for r in relay if r]
     if hand_off:
         reasons.append(hand_off)
