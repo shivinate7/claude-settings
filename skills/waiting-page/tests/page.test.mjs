@@ -7710,6 +7710,16 @@ test("an owner that names no session, or has no owner string, leaves session out
   for (const it of items) assert.equal("session" in a[it.id], false, `the answer to ${it.id} (owner ${JSON.stringify(it.owner)}) carries a session: ${JSON.stringify(a[it.id].session)}`);
 });
 
+// A Mac session's own id is a local_ id, not a session_ id. Its owner string names that id, so the page writes no session key.
+test("an owner that names a local_ id writes an answer with no session key", async (t) => {
+  const it = mk("own-local", 1, { owner: "sim gatekeeper (local_9618917e)" });
+  const page = await open(t, { items: [it] }); if (!page) return;
+  await takePick(page, it);
+  await send(page);
+  const rec = await recordOf(page, it.id);
+  assert.equal("session" in rec, false, "the answer for a local_ owner carries a session: " + JSON.stringify(rec.session));
+});
+
 test("an owner that names two sessions gives the first one", async (t) => {
   const it = mk("own-two", 1, { owner: SESSION + " and " + SESSION_TWO });
   const page = await open(t, { items: [it] }); if (!page) return;

@@ -3236,6 +3236,17 @@ def case_page_note_list_skip_is_per_answer():
           captured_texts(cfg, sid) == [SECOND_LABEL], captured_texts(cfg, sid))
 
 
+def case_page_note_local_owner_list_saves_without_env():
+    """A Mac session has no cloud id: its env is unset, so its own id is unknown. The page writes no session key for an
+    owner that names a local_ id, so a list read outside the undo window saves the answer's note."""
+    cfg, sid = new_cfg(), "pn-local-owner"
+    p = page_note(cfg, sid, response_of([("a-7k2", answer_data())], listed=True), inp=list_inp(),
+                  extra_env={"LOCAL_TIME_NOW": NOW_AFTER})
+    check("page note local owner: the mode ran", ran_page_note(p), p.desc())
+    check("page note local owner: an answer with no session saves its note with the own id unknown",
+          captured_texts(cfg, sid) == [FIRST_LABEL], captured_texts(cfg, sid))
+
+
 # --------------------------------------------------------------------------- repeat cases
 # The Stop guard judges each new item: one model call per Stop, over the items that Stop has not
 # judged yet. A match is marked on the item line. The model is stubbed by PROBE_SOURCE, which runs
@@ -4050,6 +4061,7 @@ CASES = (
     case_page_note_env_without_an_id_skips_a_session_answer,
     case_page_note_non_string_session_saves,
     case_page_note_list_skip_is_per_answer,
+    case_page_note_local_owner_list_saves_without_env,
     case_page_note_list_inside_undo_window_saves_nothing,
     case_page_note_list_after_undo_window_saves_once,
     case_page_note_list_exactly_ten_seconds_saves,
