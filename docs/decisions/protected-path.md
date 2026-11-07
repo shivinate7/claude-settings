@@ -16,7 +16,7 @@ A repo lists paths that no session may write, in `.claude/layout-extras.json`. T
 - Scope: a deny rule a repo keeps in its own settings does not run in a project's cloud thread. This rule moves that kind of deny into the guard, which does.
 - Cost:
   - Write family: one read of the target checkout's extras file per guard call, cached for the call. No process, no file written.
-  - Bash: the extras file is read only when the command looks like a write (`SHELL_WRITE_HINT`). A read-only command opens nothing. Check: the cost test in `hooks/test_guard_protected.py`.
+  - Bash: the extras file is read only when the command looks like a write (`PROTECTED_WRITE_HINT` in `hooks/guard.py`). A read-only command opens nothing. Check: the cost test in `hooks/test_guard_protected.py`.
   - No log line, except one `noted` line on a malformed key.
 - Known limits: a write the scanner cannot see passes. That covers a path built at run time, such as `"$(git rev-parse --show-toplevel)/fixtures/a"` or `'fix' + 'tures/a'`, and a binary that writes a path it computes. On a case-insensitive file system (macOS), `FIXTURES/a` does not match `fixtures/`. The rule stops Claude's mistakes, not an attacker (decision `guard-guards-mistakes-only`).
 
