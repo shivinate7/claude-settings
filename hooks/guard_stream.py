@@ -9,9 +9,10 @@ import re
 
 from guard_core import (
     DURATION, PLAYWRIGHT_PS_SHELLS, PowerShellScript, _absolute, _pwsh_script, _skip_assignments_and_keywords, basename,
-    bare_words, command_indexes, inline_script, inner_commands, resolve_command, segment_tokens,
-    split_segments,
+    bare_words, command_indexes, inline_script, inner_commands, is_powershell, resolve_command,
+    segment_tokens, split_segments,
 )
+from guard_env import _substitutions
 
 
 # ------------------------------------------------------------------ a stream that never ends
@@ -140,21 +141,48 @@ NARRATED_TAIL_REASON = (
 VERDICT_WORDS = ("verdict", "verdict.cmd")
 
 
-def verdict_pipe_hit(stripped: str) -> str:
-    """Return the matched text when a `verdict` stage is piped into another command, else ''."""
+def _is_lookup(tokens) -> bool:
+    """True for `command -v NAME` / `command -V NAME`: the shell names a program and runs none."""
+    at = _skip_assignments_and_keywords(tokens)
+    return (at < len(tokens) and basename(tokens[at]) == "command"
+            and any(token in ("-v", "-V") for token in tokens[at + 1:]))
+
+
+def _verdict_pipe_in(text: str) -> str:
+    """One command text, no substitution left in it (they are read apart): the `verdict |` match, else ''."""
     ends = []
-    segments = split_segments(stripped, ends)
-    for index in range(len(segments) - 1):
-        if ends[index] != "|" or not segments[index + 1].strip():
+    segments = split_segments(text, ends)
+    for index, segment in enumerate(segments):
+        # A pipe at a line end (`verdict x |` then a newline) still pipes into the next line.
+        if ends[index] != "|":
             continue
-        tokens = segment_tokens(segments[index])
+        tokens = segment_tokens(segment)
         if not tokens:
             continue
         at = resolve_command(tokens)
+        if at is None and _is_lookup(tokens):
+            continue
         reach = tokens if at is None else tokens[:at + 1]
-        if any(basename(token) in VERDICT_WORDS for token in reach):
+        if any(basename(token.lstrip("(")) in VERDICT_WORDS for token in reach):
             return "verdict |"
+    # A shell's script (`bash -c '...'`) is its own command text, read the way the live-stream rule reads it.
+    for segment in segments:
+        tokens = segment_tokens(segment)
+        hit = tokens and next((h for inner in inner_commands(tokens)
+                               if (h := verdict_pipe_hit(inner))), "")
+        if hit:
+            return hit
     return ""
+
+
+def verdict_pipe_hit(stripped: str) -> str:
+    """Return the matched text when a `verdict` stage is piped into another command, else ''.
+    Each command substitution (`$(...)`, backticks, in double quotes too) is its own text, read
+    through the one reader in guard_env, as the draft-pr rule reads it."""
+    texts, too_deep = _substitutions(stripped, powershell=is_powershell(stripped))
+    if too_deep:   # the env layer refuses a nest this deep; read the command as it stands
+        texts = [(stripped, False)]
+    return next((hit for text, _in_message in texts if (hit := _verdict_pipe_in(text))), "")
 
 
 VERDICT_PIPE_REASON = (
