@@ -1,0 +1,10 @@
+{
+  "title": "A plain answer with no \"?\" is not read as an ack",
+  "phase": "next",
+  "status": "todo",
+  "order": 261.4,
+  "owner": "coordinator",
+  "why": "Coordinator, 14:12 CST Nov 7: after the notes-fix-large-2 pick, a plain answer that holds no \"?\" still reads as an ack.",
+  "note": "",
+  "updatedAt": "2026-11-07T14:12:00-06:00"
+}
