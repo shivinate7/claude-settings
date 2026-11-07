@@ -1513,3 +1513,5 @@
 - why-cited-fragment-dated-first: `cite_tokens_verdict` does not stop on a dated measured cite as `why_yours_verdict` does, so "(measured <date>, x) (route r-works)" refuses as a str_replace fragment but passes as a whole line; errs safe (lint/report_guard.py). Decision: task-names-its-check.
 - why-cited-mutants-no-page-suite: mutate_guard REPORT_TARGETS runs no suite with hooks/test_question_form.py for lint/report_guard.py, so `cite_tokens_verdict` mutants show as survived (hooks/mutate_guard.py). Decision: test-practices.
 - why-cited-gate-substring-copy: the `"(route"` and `"(measured"` substring gate in hooks/question_form.py `why_cited_hit` restates the cite regexes' openers. Decision: task-names-its-check.
+- capability-re-review-request: "the review request was rejected" in a Why yours line reads as a capability reason and needs a cite (lint/report_guard.py `CAPABILITY_RE`). Decision: none.
+- capability-re-bare-number: a bare "PR 401" or "PR 403" in a Why yours line reads as an HTTP code and needs a cite; "#401" passes, "#403" does not (lint/report_guard.py `CAPABILITY_RE`). Decision: none.
