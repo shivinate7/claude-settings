@@ -77,7 +77,7 @@ a turn end in these cases:
     go-ahead, "permission to", "permissions to", "ok to merge", "you can merge", "fine to merge",
     "merge away"; whole words, any case; a bare "permission", "ok" or "I can merge" is none. The four
     merge phrases count only in a sentence with no "?", not opening "is it" or "is this", and with no
-    "not", "never" or "n't" just before the phrase)
+    "not", "never" or "n't" right before the phrase or one word before it)
     and an act or scope word (ACT: merge, push, delete, deploy, release, publish, always, standing,
     "from now on", and all, any or every right before repo, repos, PR, PRs, branch or branches) needs one real item line of these: a `[ruling]` item
     (its home gets the check above), an open `[page]` item (its send gets the check above), or
