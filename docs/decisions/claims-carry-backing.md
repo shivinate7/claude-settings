@@ -29,16 +29,19 @@ Lane ruling, 2026-11-06 13:25 CST, process-only, under coordinator pick Q1 (b): 
 
 Coordinator, 2026-11-07 14:36 CST, process-only: the waiting page judges a task's "Why yours" line by guard rule `task-why-cited`. It accepts a route-row cite and a dated measured cite only, and reads no refusals file, so a backtick tool-name cite does not pass there.
 
-Coordinator pick, 2026-11-07 15:12 CST, process-only, reversible (lane `why-cite-matches-act`): a page task's route cite must name a row that covers the task's act.
+Coordinator pick, 2026-11-07 15:12 CST, rewritten 15:38 CST after review round 1, process-only, reversible (lane `why-cite-matches-act`): a page task's route cite must name a row that covers the task's act.
 
-- Act text: each line of the task's `command` field (each variant of `{powershell, mac}`), split at `&&` and `;`, plus each backtick span in its `context`.
-- Cover: the cited id is one of the rows on this surface whose `pattern` matches a piece of act text. The match is the route matcher's (`hooks/route_match.py`), so the row file's patterns need no change. Two rows may share a pattern, so the rule is membership, not the one row the matcher picks first.
-- No cover: a cited row whose pattern matches no piece is refused. Remedy: cite the row of the act, or name the act's command.
-- No act text, or a cited row with no pattern or one that does not compile: UNKNOWN, never a refusal. The page guard runs before the write and has no note channel, so it lets the write through, as it does for a row whose outcome does not read.
+- Act text: when the task carries a `command`, each line of it (each variant of `{powershell, mac}`), split at `&&`, `||` and `;`, with a leading `env` and `NAME=value` assignments dropped. With no command, each backtick span in the write's `context`.
+- Cover: the cited id is one of the rows on this surface whose `pattern` matches a piece of act text. The match is the route matcher's (`hooks/route_match.py`). Two rows may share a pattern, so the rule is membership. One covered piece covers a task of several steps.
+- No cover: refused when the act is known. A command is known. A backtick span is known only when it matches some other row on this surface; a span no row matches, such as a button label `Merge`, is not an act this check can name. Remedy: cite the row of the act, or name the act's command.
+- Each route cite on the line is judged. One cite that covers passes the line; one that is refused refuses it.
+- Unknown, never a refusal: no act text, a span that matches no row, a cited row with no pattern or one that does not compile, or a row not on this surface. The page guard runs before the write and has no note channel, so it lets the write through, as it does for a row whose outcome does not read.
+- A dated `(measured ...)` cite on the line backs it on its own, as the 12:59 pick says; the route cover is not read then.
 - Alternates do not cover: a row's `alternates` name other acts, not this one.
+- Known limit: an update or `str_replace` that carries no `command` cannot see the stored one, so it is judged on its own spans only.
 - Replies are out of scope: part (b), the reply judge, judges a reply's cite against its act.
 
-Reason: the 12:34 lane ruling checks a row's outcome but never which act the row is about. A delete task citing a row for another act passed (incident from lane `task-names-check-line-not-truth`, 2026-11-07 15:10 CST). Reusing the route matcher keeps one home for "which act is this row".
+Reason: the 12:34 lane ruling checks a row's outcome but never which act the row is about. A delete task citing a row for another act passed (incident from lane `task-names-check-line-not-truth`, 2026-11-07 15:10 CST). Reusing the route matcher keeps one home for "which act is this row". Refusing only a known act keeps press-only tasks and quoted text free of false alarms.
 
 ## Incident
 
