@@ -20,3 +20,4 @@ Tasks a session caught and did not do. One line each.
 - The lane-undo check reads two shapes of undo (owner, 2026-11-02 14:19 CST; it grants the 11:26 CST narrowing).
 - Build the child-repo lanes from the term recheck and the merge-line pointers. A coordinator may run them in any child repo with no per-repo grant. An exception a child wants needs the owner's grant (owner, 2026-11-02 15:43 CST).
 - Let a solo session merge. The merge tool's cloud confirm needs the batch-runner role today (owner, 2026-11-02 14:02 CST).
+- one-home-check: Build the one-home check, per the plan in `docs/plans/one-home-check.md`. Test-author writes the red cases first, then the builder, then a reviewer. It changes a check, so it gets the net-value test after round 3 (the review-cap rule, `roles-review-cap-three`).
