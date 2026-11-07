@@ -1510,3 +1510,8 @@
 - conflict-markers-stale-tracking: a tracking ref left at a markers tip after the remote was rewound hides those commits from `git push origin <branch>` (hooks/guard_merge.py `_push_hit`). Decision: commit-refuses-conflict-markers.
 - dot-root-walk-limit: a `.` root over more than 20000 files reads as having no tests, so a writer fed from it is allowed (hooks/guard_frozen.py `_dot_roots`). Main allows every `.` root. Decision: builders-cannot-edit-tests.
 - pd-run-helper-name: the guard-run helper `pd_run` (hooks/test_guard.py) has a page-draft name but now serves other cases too. Rename it when next touched.
+- git-diff-name-only-feed: a `git diff --name-only` feed to a writer is not read, so `git diff --name-only | xargs sed -i s/a/b/` over test paths is allowed (hooks/guard_frozen.py `_git_listing_roots`). Decision: builders-cannot-edit-tests.
+- sed-w-without-in-place: a sed `w` target with no `-i`, or with `-i` after `-e`, is not read (hooks/guard_frozen.py `_sed_script_targets`). Decision: builders-cannot-edit-tests.
+- sed-s-e-flag: the `s///e` flag of a sed script is not read (hooks/guard_frozen.py `_sed_script_targets`). Decision: builders-cannot-edit-tests.
+- quoted-in-place-false-alarm: `sed -n '/use --in-place/p'` is refused, because the quoted text reads as an in-place flag (hooks/guard_frozen.py). Decision: builders-cannot-edit-tests.
+- from-cwd-clone-wording: at hooks/guard.py near line 4535 the clone_hit wording can change after a cd; unmeasured. Decision: builders-cannot-edit-tests.
