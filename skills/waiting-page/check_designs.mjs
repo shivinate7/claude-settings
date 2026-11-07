@@ -70,8 +70,8 @@ function stubDb({ doc, answers }) {
 
 // Runs inside the page: the page's pictureProblem, then the options whose picture the card must draw. An option with
 // no design, or a design the page does not hold (it warns in the frame), has nothing to measure.
-const judge = (it) => {
-  if (isAnswered(it)) return { problem: null, pics: [], min: MIN_PIC };
+const judge = ({ it, useAnswers }) => {
+  if (useAnswers && isAnswered(it)) return { problem: null, pics: [], min: MIN_PIC };
   const problem = pictureProblem(it);
   const pics = [];
   for (const o of it.options || []) {
@@ -112,8 +112,10 @@ try {
   await page.route("**/*", (r) => (r.request().url() === ORIGIN ? r.fulfill({ contentType: "text/html; charset=utf-8", body: html }) : r.abort()));
   await page.addInitScript(stubDb, { doc: item, answers });
   await page.goto(ORIGIN);
-  await page.waitForFunction("typeof pictureProblem === 'function' && typeof MIN_PIC === 'number' && state.loaded && feed.answers");
-  const got = await page.evaluate(judge, item);
+  // Answers matter only when --answers was passed; the guard path passes none and must not call isAnswered or wait on feed.answers.
+  const useAnswers = answersFile !== undefined;
+  await page.waitForFunction("typeof pictureProblem === 'function' && typeof MIN_PIC === 'number' && state.loaded" + (useAnswers ? " && feed.answers" : ""));
+  const got = await page.evaluate(judge, { it: item, useAnswers });
   if (got.problem) await finish(1, { problem: got.problem });
   if (got.pics.length) {
     // The floor reads the drawn card, which exists only when the page shows the item. No card is unknown, never a pass.

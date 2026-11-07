@@ -37,7 +37,7 @@ def run_check_designs(page_file, item, cap=CHECK_DESIGNS_CAP, answers=None):
         with open(item_file, "w", encoding="utf-8") as handle:
             json.dump(item, handle)
         command = [node, script, "--page", page_file, "--item", item_file]
-        if answers:
+        if answers is not None:
             answers_file = os.path.join(scratch, "answers.json")
             with open(answers_file, "w", encoding="utf-8") as handle:
                 json.dump(answers, handle)
