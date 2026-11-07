@@ -468,6 +468,14 @@ class Ios(unittest.TestCase):
             with self.subTest(run=run):
                 self.red(self.make_run(run), self.diag_gap("Makefile"))
 
+    def test_a_recipe_prefix_does_not_hide_an_xcodebuild_test_run(self):
+        # `@` silences a recipe line and `-` ignores its exit code. Neither hides the run from the probe.
+        self.assertEqual(self.grade(self.make_run("xcodebuild test -scheme X"), "test diagnostics"), "gap", "scope: the run is read")
+        for run in ("@xcodebuild test -scheme X", "-xcodebuild test -scheme X"):
+            with self.subTest(run=run):
+                self.assertEqual(self.grade(self.make_run(run), "test diagnostics"), "gap",
+                                 "a recipe prefix hides the run, so its missing flag is not read")
+
     def test_a_hash_inside_quotes_does_not_cut_the_flag(self):
         for run in ('xcodebuild test -scheme "a #b" -collect-test-diagnostics never',
                     "xcodebuild test -scheme 'a #b' -collect-test-diagnostics never",
@@ -537,11 +545,29 @@ class Ios(unittest.TestCase):
         self.assertEqual(self.grade(self.flagged("FLAGS ::= -collect-test-diagnostics never\n"), "test diagnostics"), "pass",
                          "FLAGS ::= is an assignment, so the run carries the flag")
 
+    def test_a_colon_equals_expands_the_make_variable_at_assignment(self):
+        # `:=` expands $(FLAGS) when it is read, so FLAGS keeps the flag and -quiet joins it. The run carries the flag.
+        recipe = "xcodebuild test $(FLAGS)"
+        self.assertEqual(self.grade(self.flagged("", recipe), "test diagnostics"), "gap", "scope: the run is read")
+        self.assertEqual(self.grade(self.flagged("FLAGS = -collect-test-diagnostics never\n", recipe), "test diagnostics"), "pass",
+                         "control: one level")
+        self.assertEqual(self.grade(self.flagged("FLAGS = -collect-test-diagnostics never\nFLAGS := $(FLAGS) -quiet\n", recipe),
+                                    "test diagnostics"), "pass",
+                         "the := value holds the flag, so the -quiet append keeps it")
+
     def test_a_lone_quote_in_a_make_comment_is_no_gap(self):
         # The apostrophe is text in a comment: it opens no string, so the flag before the comment still counts.
         self.assertEqual(self.grade(self.flagged(""), "test diagnostics"), "gap", "scope: the run is read")
         self.assertEqual(self.grade(self.flagged("FLAGS = -collect-test-diagnostics never # the team's flag\n"), "test diagnostics"),
                          "pass", "the flag before a comment that holds a lone quote still counts")
+
+    def test_a_make_comment_is_cut_from_a_variable_value(self):
+        # Make cuts `# x` from F's value, so F is `-quiet` and the run's own flag after $(F) is not in the comment.
+        self.assertEqual(self.grade(self.flagged("F = -quiet # x\n", "xcodebuild test $(F)"), "test diagnostics"), "gap",
+                         "scope: the run is read, and no diagnostics flag is in it")
+        self.assertEqual(self.grade(self.flagged("F = -quiet # x\n", "xcodebuild test $(F) -collect-test-diagnostics never"),
+                                    "test diagnostics"), "pass",
+                         "the comment ends at F's value, so the run keeps its own diagnostics flag")
 
     def test_a_quoted_hash_in_a_recipe_beside_a_make_variable_is_no_gap(self):
         recipe = 'xcodebuild test -scheme "a #b" $(FLAGS)'
