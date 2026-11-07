@@ -1,0 +1,73 @@
+# Plan: which model-call hooks can move to the built-in prompt hook
+
+This survey answers roadmap step `watcher-builtin-hook-survey` (which model-call hooks can move to
+Claude Code's built-in prompt hook), for waiting-page item 248. It read each hook that calls a model
+at main `335a6974a`, and the Claude Code hooks docs on 2026-11-07. No code or setting changed.
+"Unknown" marks a fact no read confirmed.
+
+## Verdict
+
+None of the seven callers moves today. Two come close: the prose judge and the SendMessage wording
+judge. Both lose the owner override (decision `owner-override`) if they move, and the prose judge also
+loses its `xhigh` effort. Each caller's model and effort is its row in decision `agent-model-cap`
+(the model per role).
+
+| Caller (event) | Gold standard: what the built-in hook must keep | Can move | Gap (why not) | Cost now |
+| --- | --- | --- | --- | --- |
+| `hooks/call_judge.py` (PreToolUse: Agent, AskUserQuestion, ArtifactData) | Override lift; code checks before the model; one model per check | No | It runs `question_form` checks in code first and skips the model on a hit. It picks the page's item writes in code. It calls up to three models (Sonnet, Opus, Haiku) by case. A prompt hook has one model and cannot read the override file | One `claude -p` start per judged call, up to three for an Opus ask; latency unmeasured |
+| `hooks/prose_judge.py` (PreToolUse: Edit, Write) | Path filter; Haiku at `xhigh`; override lift | No, nearest | The path filter can now be an `if` rule, so that gap is closed. Two stay: a prompt hook has no effort field, and it cannot read the override file | One start per Edit or Write under a `decisions` folder; latency unmeasured |
+| `hooks/reply_judge.py` (Stop) | A note on the next turn, never a block; every fifth Stop plus labelled replies; Haiku at `xhigh` | No | A prompt hook can only allow or block. A block, even with `continueOnBlock`, makes Claude go on, so the judge would refuse, which its decision `reply-judge-samples-never-refuses` forbids. A prompt hook cannot sample, so it would run on every Stop. No effort field | One start per sampled Stop; latency unmeasured |
+| `hooks/feedback_guard.py`, repeat check (Stop) | Reads the inbox, roadmap steps (`git grep`) and backlog files; writes the inbox | No | A prompt hook sees only the event's JSON. An agent hook can read files but is experimental and has no documented way to write the inbox | One start per Stop with a new inbox item; none otherwise; latency unmeasured |
+| `lint/report_guard.py`, past-ruling check (Stop) | Ruling candidates read from the repo; fails closed; code checks the cited id | No | The candidates come from repo files in code. An error refuses (`cannot_run`); a prompt hook's error is undocumented and the docs' general rule is fail open. The cite check runs in code after the model | One start per Stop whose reply asks the owner something; latency unmeasured |
+| `hooks/sendmessage_state.py`, wording judge (PreToolUse: SendMessage) | Override lift; Sonnet at default effort | No, nearest | It judges the call's JSON only, which a prompt hook can do. It left the prompt hook for one reason: a prompt hook cannot read the override file | One start per send; latency unmeasured |
+| `hooks/sendmessage_state.py`, busy judge (same hook) | Reads the receiver's state from the session board; Haiku at `xhigh` | No | The board read runs `node` and `claude agents --json`; a prompt hook runs no code. No effort field | One start per send to a busy receiver; latency unmeasured |
+| `mods/decision-watch` (turn end) | Runs on the session's own sign-in | Already moved | It calls `$.model.complete`, the app's own login, not `claude -p`. The python path (`hooks/decision_watch.py`) has no hook entry in `settings.json` | No `claude -p` start |
+
+"Cost now" counts process starts. Each start is one `claude -p` child with `CLAUDE_CODE_OAUTH_TOKEN`
+through `decision_watch.invoke_model`. Latency is unmeasured: this cloud session's `guard.log` holds
+no timing line, and the docs give no timing figure for a prompt hook.
+
+## What a move would gain and lose
+
+- Gain: no `claude -p` start and no OAuth token in the hook's environment. The billing and sign-in of
+  a prompt hook are not documented, so the cost gain is unknown.
+- Gain: `if` filters a tool event by path (such as `Edit(**/decisions/**)`), and a Stop prompt hook
+  gets `last_assistant_message`.
+- Lose: the override lift, the `guard.log` line and any code check before or after the model.
+- Lose: effort. A prompt hook takes no effort field, so a Haiku `xhigh` judge runs at the default.
+- Lose: fail mode. Prompt-hook timeout and model-error behaviour is not documented. The hooks page's
+  general rule is that a failed hook lets the action go on.
+- Lose: notes. A prompt hook answers only `ok`, `reason` and `impossible`: no `systemMessage`, no
+  `additionalContext`, no ask.
+- Lose: events. PreCompact, SubagentStart and SessionStart take no prompt hook.
+
+## What the docs say now
+
+Source: the hooks reference (https://code.claude.com/docs/en/hooks.md), read by a `claude-code-guide`
+agent on 2026-11-07.
+
+- Events: PreToolUse, PostToolUse, PostToolUseFailure, PostToolBatch, PermissionDenied,
+  PermissionRequest, Stop, SubagentStop, TaskCreated, TaskCompleted, TeammateIdle, UserPromptSubmit,
+  UserPromptExpansion.
+- Input: the hook's JSON (`$ARGUMENTS`), with `transcript_path`, `effort` and the event's fields. A
+  prompt hook reads no file. An agent hook can read files, runs up to 50 turns, and is experimental.
+- Fields: `model` (default: the background model), `timeout` (30 s prompt, 60 s agent), `if` (tool
+  events only), `continueOnBlock` (prompt only). No effort field. `onFailure` takes only command and
+  http hooks.
+
+## When to ask again
+
+Run this survey again when one of these lands in the hooks docs:
+
+- An effort field on prompt hooks. The prose judge then moves if the owner accepts no override lift.
+- A way for a prompt hook to honour the owner override. The prose judge and the wording judge then move.
+- A documented fail mode or billing for prompt hooks. The cost rows can then be measured.
+
+## Stale text found, not changed
+
+These are notes, not asks. Each needs its own lane:
+
+- `hooks/prose_judge.py`, lines 3 and 4, says a prompt hook cannot look at the path. The `if` field
+  now does that.
+- `docs/decisions/haiku-prompt-hooks.md`, the bullet that starts "A prompt hook sees only the event's
+  input": a Stop prompt hook now gets `last_assistant_message`, the final reply.
