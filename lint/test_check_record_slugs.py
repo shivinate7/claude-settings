@@ -1082,6 +1082,18 @@ class RecordSlugsTests(unittest.TestCase):
         self.assertNotIn("README.md", out, out)
         self.assertNotIn("notes.md", out, out)
 
+    def test_debt_flow_reads_unknown_for_a_start_that_is_no_commit(self):
+        # Review round 2, finding A (verification-report-unknown-reads): a START that does not resolve to a commit is UNKNOWN
+        # and exits non-zero. It is not a root commit, so it must not read the empty tree and count every debt as opened.
+        self.put(DEBT_NOTES, NOTES_HEAD)
+        self.commit_base()
+        self.put("debts/fresh-debt.md", FIXED_DEBT_TEXT)
+        self.commit_change()
+        rc, out = self.lint("--debt-flow", "no-such-ref", "HEAD")
+        self.assertNotEqual(rc, 0, "--debt-flow read a START that is no commit as a root commit: %s" % out)
+        self.assertIn("UNKNOWN", out, out)
+        self.assertNotIn("debts opened", out, out)
+
     def test_debt_flow_counts_a_debt_added_in_the_start_commit(self):
         # Decision notes-sightings-expiry (lane ruling 2026-11-07 15:58 CST): the window includes the START commit's own
         # additions, so a debt that START adds and the end still holds is opened.
