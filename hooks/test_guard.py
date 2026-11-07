@@ -11654,6 +11654,46 @@ sh("frozen write-word: a bash heredoc that copies onto a frozen hook is refused"
 sh("frozen write-word: a python heredoc that runs cp onto a frozen hook is refused",
    WW_HEREDOC % ("import subprocess\nsubprocess.run([\"cp\", \"/tmp/x\", \"%s\"])" % CFG_HOOK),
    "deny", "frozen-path", cwd=NOGIT)
+# A script's run call whose command the shell scan does not see: a variable, a keyword argument, or a
+# call name the scan does not read, and a script that writes a shell file which a later segment runs.
+# Each refusal has a control beside it: the same shape writing a handoff, which is allowed.
+WW_RUN_SH = slash(os.path.join(NOGIT, "run.sh"))
+sh("frozen write-word: os.system of a variable that copies onto a frozen hook is refused",
+   WW_HEREDOC % ("import os\ncmd = \"cp /tmp/x %s\"\nos.system(cmd)" % CFG_HOOK), "deny", "frozen-path",
+   cwd=NOGIT)
+sh("frozen write-word: os.system of a variable that copies onto a handoff is allowed",
+   WW_HEREDOC % ("import os\ncmd = \"cp /tmp/x %s\"\nos.system(cmd)" % WW_HANDOFF), "allow", cwd=NOGIT)
+sh("frozen write-word: subprocess.run shell=True of a variable that copies onto a frozen hook is refused",
+   WW_HEREDOC % ("import subprocess\ncmd = \"cp /tmp/x %s\"\nsubprocess.run(cmd, shell=True)" % CFG_HOOK),
+   "deny", "frozen-path", cwd=NOGIT)
+sh("frozen write-word: subprocess.run shell=True of a variable that copies onto a handoff is allowed",
+   WW_HEREDOC % ("import subprocess\ncmd = \"cp /tmp/x %s\"\nsubprocess.run(cmd, shell=True)" % WW_HANDOFF),
+   "allow", cwd=NOGIT)
+sh("frozen write-word: subprocess.getoutput of a literal that copies onto a frozen hook is refused",
+   WW_HEREDOC % ("import subprocess\nsubprocess.getoutput(\"cp /tmp/x %s\")" % CFG_HOOK),
+   "deny", "frozen-path", cwd=NOGIT)
+sh("frozen write-word: subprocess.run with args= and shell=True that copies onto a frozen hook is refused",
+   WW_HEREDOC % ("import subprocess\nsubprocess.run(args=\"cp /tmp/x %s\", shell=True)" % CFG_HOOK),
+   "deny", "frozen-path", cwd=NOGIT)
+sh("frozen write-word: subprocess.run with args= and shell=True that copies onto a handoff is allowed",
+   WW_HEREDOC % ("import subprocess\nsubprocess.run(args=\"cp /tmp/x %s\", shell=True)" % WW_HANDOFF),
+   "allow", cwd=NOGIT)
+sh("frozen write-word: a list held in a variable that copies onto a frozen hook is refused",
+   WW_HEREDOC % ("import subprocess\ncmd = [\"cp\", \"/tmp/x\", \"%s\"]\nsubprocess.run(cmd)" % CFG_HOOK),
+   "deny", "frozen-path", cwd=NOGIT)
+sh("frozen write-word: sh -c of a variable that copies onto a frozen hook is refused",
+   WW_HEREDOC % ("import subprocess\nC = \"cp /tmp/x %s\"\nsubprocess.call([\"sh\", \"-c\", C])" % CFG_HOOK),
+   "deny", "frozen-path", cwd=NOGIT)
+sh("frozen write-word: print piped to sh that copies onto a frozen hook is refused",
+   "python3 - <<'EOF' | sh\nprint(\"cp /tmp/x %s\")\nEOF" % CFG_HOOK, "deny", "frozen-path", cwd=NOGIT)
+sh("frozen write-word: print piped to sh that copies onto a handoff is allowed",
+   "python3 - <<'EOF' | sh\nprint(\"cp /tmp/x %s\")\nEOF" % WW_HANDOFF, "allow", cwd=NOGIT)
+sh("frozen write-word: a script that writes a shell file onto a frozen hook, then a later segment runs it, is refused",
+   WW_HEREDOC % ("open(\"%s\", \"w\").write(\"cp /tmp/x %s\")" % (WW_RUN_SH, CFG_HOOK)) + "\nsh " + WW_RUN_SH,
+   "deny", "frozen-path", cwd=NOGIT)
+sh("frozen write-word: a script that writes a shell file onto a handoff, then a later segment runs it, is allowed",
+   WW_HEREDOC % ("open(\"%s\", \"w\").write(\"cp /tmp/x %s\")" % (WW_RUN_SH, WW_HANDOFF)) + "\nsh " + WW_RUN_SH,
+   "allow", cwd=NOGIT)
 
 add("config-edit: Edit of a project local settings file is allowed", "allow", tool="Edit",
     cwd=NOGIT, file_path=PROJ_LOCAL)
