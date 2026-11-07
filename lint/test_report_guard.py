@@ -4848,6 +4848,13 @@ DONE_STEP_NAMED = "> **Done** RECORDED abc1234 filed the note; its fix is step:f
 DONE_STEP_UNNAMED = "> **Done** RECORDED abc1234 filed the note\n> **Next** wait"
 DONE_PREFIX_ONLY = "> **Done** RECORDED abc1234 filed the note; its fix is step:fix-alpha-two\n> **Next** wait"
 DONE_BUILT = "> **Done** BUILT abc1234 fixed the guard\n> **Next** wait"
+# Every fixture commit and turn carries a time, as a real commit and a real transcript do. The base is a day before
+# every turn, so it is never one of a turn's commits. A turn's start is its human message's stamp, in the transcript's form.
+BASE_AT = "2026-11-06T12:00:00+0000"
+TURN_AT = "2026-11-07T09:00:00.000Z"
+COMMIT_AT = "2026-11-07T09:05:00+0000"
+LATER_TURN_AT = "2026-11-07T10:00:00.000Z"
+LATER_COMMIT_AT = "2026-11-07T10:05:00+0000"
 
 
 def git_in(folder, *args):
@@ -4856,6 +4863,13 @@ def git_in(folder, *args):
 
 def git_out(folder, *args):
     return subprocess.run(["git", "-C", folder, *args], check=True, capture_output=True, text=True).stdout.strip()
+
+
+def commit_at(folder, subject, at):
+    """Commit what is staged, with the author and committer time `at` (a git date)."""
+    env = dict(os.environ, GIT_AUTHOR_DATE=at, GIT_COMMITTER_DATE=at)
+    subprocess.run(["git", "-C", folder, "commit", "-q", "-m", subject], check=True, capture_output=True, text=True,
+                   env=env)
 
 
 def init_repo(folder, base=None):
@@ -4870,19 +4884,20 @@ def init_repo(folder, base=None):
     if base is not None:
         write_file(os.path.join(folder, NOTES_REL), base)
     git_in(folder, "add", "-A")
-    git_in(folder, "commit", "-q", "-m", "base")
+    commit_at(folder, "base", BASE_AT)
     git_in(folder, "update-ref", "refs/remotes/origin/main", "HEAD")
     return folder
 
 
-def commit_notes(folder, text, subject):
-    """Commit the notes file as `text`, or move the README when text is None. Returns the commit's short sha."""
+def commit_notes(folder, text, subject, at=COMMIT_AT):
+    """Commit the notes file as `text`, or move the README when text is None, at the time `at`. Returns the commit's
+    short sha."""
     if text is None:
         write_file(os.path.join(folder, "README.md"), "# Repo\n\n%s\n" % subject)
     else:
         write_file(os.path.join(folder, NOTES_REL), text)
     git_in(folder, "add", "-A")
-    git_in(folder, "commit", "-q", "-m", subject)
+    commit_at(folder, subject, at)
     return git_out(folder, "rev-parse", "--short=7", "HEAD")
 
 
@@ -4892,9 +4907,17 @@ def tool_result_text(text, tool_use_id="tu_1"):
     return {"type": "user", "isSidechain": False, "message": {"role": "user", "content": [block]}}
 
 
+def human_at(text, at):
+    """A human message stamped `at`: the start of the turn it opens."""
+    rec = human(text)
+    rec["timestamp"] = at
+    return rec
+
+
 class NotesFixTests(unittest.TestCase):
     """The step check on a landed turn, in report_guard.py's Stop hook. A turn judges only the notes and debt lines that
-    its own commits added. A commit's `[branch sha] subject` line, printed in the turn's tool results, names those commits."""
+    its own commits added: the commits dated at or after the turn's start. A commit that prints its `[branch sha]`
+    line also names itself in the turn's tool results, and a `git commit -q` prints nothing, so time is the test."""
 
     def setUp(self):
         self.tmp = tempfile.mkdtemp(dir=RUN_FOLDER)  # this run's folder, never the system temp dir (test-temp-standard)
@@ -4910,10 +4933,16 @@ class NotesFixTests(unittest.TestCase):
         self.assertNotIn("Traceback", run.stderr)
         return json.loads(run.stdout) if run.stdout.strip() else None
 
-    def turn(self, subject, sha, done):
-        """One landed turn: a `git commit` that printed its `[main sha] subject` line, then the reply `done`."""
-        return [human("do " + subject), tool_use_msg("Bash", {"command": "git commit -m %s" % subject}),
+    def turn(self, subject, sha, done, at=TURN_AT):
+        """One landed turn: a `git commit` that printed its `[main sha] subject` line, then the reply `done`. It starts
+        at `at`, its human message's time."""
+        return [human_at("do " + subject, at), tool_use_msg("Bash", {"command": "git commit -m %s" % subject}),
                 tool_result_text("[main %s] %s\n 1 file changed" % (sha, subject)), assistant_text(done)]
+
+    def quiet_turn(self, subject, done, at=TURN_AT):
+        """One landed turn whose `git commit -q` printed nothing, so no tool result names its commit."""
+        return [human_at("do " + subject, at), tool_use_msg("Bash", {"command": "git commit -q -m %s" % subject}),
+                tool_result_text(""), assistant_text(done)]
 
     def assert_blocks_naming(self, out, step):
         self.assertIsNotNone(out)
@@ -4951,12 +4980,19 @@ class NotesFixTests(unittest.TestCase):
         sha = commit_notes(self.repo, NOTES_BASE + STEP_NOTE, "one")
         self.assertIsNone(self.stop(self.turn("one", sha, DONE_BUILT)))
 
+    def test_quiet_commit_adding_a_step_fix_blocks_when_done_omits_the_step(self):
+        # `git commit -q` prints no `[branch sha]` line, so the turn's commit is found by its committer time instead.
+        init_repo(self.repo, base=NOTES_BASE)
+        commit_notes(self.repo, NOTES_BASE + STEP_NOTE, "one")
+        self.assert_blocks_naming(self.stop(self.quiet_turn("one", DONE_STEP_UNNAMED)), "fix-alpha")
+
     def test_a_fix_added_on_an_earlier_turn_does_not_block_a_later_turn(self):
         # Turn one adds the step fix and names it in Done. Turn two commits a README change and omits the step.
         init_repo(self.repo, base=NOTES_BASE)
         first = commit_notes(self.repo, NOTES_BASE + STEP_NOTE, "one")
-        second = commit_notes(self.repo, None, "two")
-        self.assertIsNone(self.stop(self.turn("one", first, DONE_STEP_NAMED) + self.turn("two", second, DONE_STEP_UNNAMED)))
+        second = commit_notes(self.repo, None, "two", at=LATER_COMMIT_AT)
+        self.assertIsNone(self.stop(self.turn("one", first, DONE_STEP_NAMED)
+                                    + self.turn("two", second, DONE_STEP_UNNAMED, at=LATER_TURN_AT)))
 
 
 if __name__ == "__main__":
