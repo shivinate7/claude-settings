@@ -298,7 +298,7 @@ class Usage(Job):
 
 class StepSelect(Job):
     """`--step NAME` (repeatable) runs only the named steps of the job, of any kind. A name no step has is one unknown
-    line and exit 2. The merge's ready gate runs its declared names this way (merge.readyChecks)."""
+    line and exit 2. The merge's ready checks run its declared names this way (merge.readyChecks)."""
     PR = Conditions.PR  # the one home of the pull-request condition
 
     def test_only_the_named_steps_run_and_the_others_do_not(self):
