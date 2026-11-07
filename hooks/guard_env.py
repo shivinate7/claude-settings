@@ -76,7 +76,7 @@ ENV_INLINE_RUNNERS = ("node", "node.exe", "bun", "bun.exe", "deno", "deno.exe")
 # Runner options that take the next word as a value, so that word is no script. The `=` forms are one word.
 ENV_RUNNER_VALUE_FLAGS = (
     "--env-file", "--env-file-if-exists", "-r", "--require", "--import", "--loader", "-C",
-    "--conditions",
+    "--conditions", "--input-type", "--experimental-loader", "--preload",
 )
 # A second copy of guard_frozen.py's `_NODE_EVAL_FLAG`, kept on purpose: this module reads the
 # `=` forms and the open rewrite of that one is not ours to touch.
@@ -133,6 +133,7 @@ ENV_ADVICE = (
     "To RUN something that needs those variables, hand the file to the runner with the "
     "--env-file flag ahead of node, npm, npx or a container command. "
     "That loads it into one process's own environment and prints nothing. "
+    "A runner given the file runs a script file: put the code in a script file, not inline. "
     "A listing and a test for existence are allowed."
 )
 
@@ -645,9 +646,13 @@ def _runner_inline_code(words, position: int, command: str, stdin_fed: bool = Fa
         word = words[i]
         if REDIRECT.fullmatch(word):
             i += 2
-        elif word.lstrip("0123456789").startswith("<<"):
-            fed = True  # a heredoc or here-string feeds stdin
-            i += 1
+        elif word.lstrip("0123456789").startswith("<"):
+            # A heredoc, here-string or `<` file feeds stdin. A spaced operator (`<<`, `<<-`, `<<<`,
+            # `<`) owns the next word, which is the delimiter, the string or the file.
+            fed = True
+            i += 2 if word.lstrip("0123456789") in ("<", "<<", "<<-", "<<<") else 1
+        elif word.isdigit() and words[i + 1:i + 2] and words[i + 1].startswith("<"):
+            i += 1  # the fd of `0< file`
         elif word == "--":
             script = i + 1 < len(words)
             break
