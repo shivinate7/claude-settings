@@ -3944,8 +3944,9 @@ _HERE_STRING = re.compile(r"@(['\"])[ \t]*\r?\n(.*?)\r?\n\1@", re.S)
 def shell_run_texts(raw: str) -> list:
     """The texts a shell reads from a whole command, for a rule that judges shell lines. A body a shell
     reads stays whole; an unquoted heredoc body or an expandable here-string joins as the `$(...)` and
-    backticks it runs. The limits: a body that python, node, perl or ruby reads is not read as shell lines,
-    and a here-string body is allowed."""
+    backticks it runs. A quoted body that an interpreter runs joins as its backtick spans alone, since perl,
+    ruby and node run those as a shell. The limits: such a body is not read as shell lines, a python body's
+    backtick span is read though python runs no shell from it, and a here-string body is allowed."""
     texts = []
     if POWERSHELL_CALL[0] and "@" in raw:
         def cut(found):
@@ -3954,11 +3955,18 @@ def shell_run_texts(raw: str) -> list:
                                                           heredoc=True)[0][:-1])
             return "x"
         raw = _HERE_STRING.sub(cut, raw)
-    texts.append(strip_heredoc_bodies(raw, shells_only=True))
+    shells = strip_heredoc_bodies(raw, shells_only=True)
+    texts.append(shells)
     if "<<" in raw:
         for quote, body, _ in _split_heredocs(raw)[1]:
             if not quote:
                 texts.extend(t for t, _ in _substitutions(body, heredoc=True)[0][:-1])
+            elif "`" in body and body.strip() not in shells:
+                # An interpreter runs this body, and perl, ruby and node run a backtick span as a shell.
+                # `$(` and `<(` stay text there: no interpreter reads them as a shell. Python's own
+                # backtick span is read too, a rare false alarm.
+                texts.extend(t for t, _ in _substitutions(re.sub(r"([$<>])\(", r"\1 (", body),
+                                                          heredoc=True)[0][:-1])
     return texts
 
 
