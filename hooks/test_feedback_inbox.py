@@ -2184,6 +2184,40 @@ def case_grant_act_words_narrowed_passes():
                       homed(new_cfg(), "narrowed", (), text=text))
 
 
+# A grant with no grant word. Note grant-no-word-miss (a grant with no grant word): each row names an act and
+# grants it, and no word in the grant list is in it, so no check flags it today.
+WORDLESS_GRANTS = ("ok to merge the lane PRs once CI is green.", "you can merge anything green.",
+                   "fine to merge the green ones.", "merge away once CI is green.")
+# Owner messages with "ok", "can" or "merge" that grant nothing. A widened grant list must pass each one.
+NOT_GRANTS = ("Ok, I'll look at the merge conflict after lunch.", "Is the merge queue still stuck? Ok to wait.",
+              "I can merge it myself later if you're busy.", "Ok, so the merge is still blocked by the red check.",
+              "The checks went green, but the merge is still blocked on review.")
+
+
+def case_grant_without_a_grant_word_blocks():
+    """Note grant-no-word-miss. A grant that names an act and no grant word ("ok to merge", "you can merge",
+    "fine to merge", "merge away") sat in chat with no home. The grant list is the only trigger, so no check
+    flags it. Red today: each row has no grant word and no item."""
+    for text in WORDLESS_GRANTS:  # one check per row, so a row that is not blocked prints one FAIL line
+        p = homed(new_cfg(), "grant-wordless", (), text=text)
+        reason = block_reason(p)
+        check("grant home: %r, a grant with no grant word, with no item: blocks, naming the message" % text,
+              p.code == 0 and reason is not None and names_message(reason, stamp_of(BLOCK_HEADER), text),
+              p.desc())
+
+
+def case_grant_wordless_non_grants_pass():
+    """Scope first: "approved, merge it" and "go ahead and merge" still block, so the silence below means "not a
+    grant", not a guard that never read the block. Then each NOT_GRANTS row, with "ok", "can" or "merge" and no
+    grant, passes with no item. Green now; a widened grant list must keep them green."""
+    for text in ("approved, merge it", "go ahead and merge"):
+        p = homed(new_cfg(), "grant-control", (), text=text)
+        expect_grant_block("grant home: %r still blocks with no item" % text, p, text)
+    for text in NOT_GRANTS:
+        expect_silent("grant home: %r holds no grant, passes with no item" % text,
+                      homed(new_cfg(), "grant-not", (), text=text))
+
+
 def case_pick_letters_a_to_h_passes():
     """Pick letters are a to h. "1 y, 2 n" is no pick, so it passes with no send. Red now."""
     p = page_run(new_cfg(), "pick-yn", [("1 y, 2 n", ())], [owner_rec("1 y, 2 n"), said_rec("Noted.")],
@@ -3726,6 +3760,8 @@ CASES = (
     case_grant_fenced_text_is_not_scanned_passes,
     case_grant_needs_an_act_word_passes,
     case_grant_act_words_narrowed_passes,
+    case_grant_without_a_grant_word_blocks,
+    case_grant_wordless_non_grants_pass,
     case_closed_note_without_a_home_blocks,
     case_closed_note_with_a_home_passes,
     case_task_open_step_home_passes,
