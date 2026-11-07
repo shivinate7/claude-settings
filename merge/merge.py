@@ -1272,9 +1272,10 @@ class Host:
         red = [f"{k}: {b} {l}".strip() for k, rows in live.items() for b, l in rows if b not in ("pass", "skipping", "pending")]
         pending = sorted({k for k, rows in live.items() if any(b == "pending" for b, _ in rows)} | {k for k in names if not got.get(k)})
         if live and not red and not pending and not any(b == "pass" for rows in live.values() for b, _ in rows):
-            fix = ("Mark the PR ready, or push anew if the PR is ready" if DRAFT_SKIP_CHECK in names
-                   else f"Run `gh workflow run checks.yml --ref {branch}`, or push anew after you mark the PR ready")
-            fix += f". {ready_step + ' ' if ready_step else ''}{READY_ROUTES}"
+            fix = (ready_step + " " if ready_step else "") + (
+                "Mark the PR ready, or push anew if the PR is ready" if DRAFT_SKIP_CHECK in names
+                else f"Run `gh workflow run checks.yml --ref {branch}`, or push anew after you mark the PR ready")
+            fix += f". {READY_ROUTES}"
             red = [f"no check ran on this head (every check skipped). {fix}"]
         if not red and DRAFT_SKIP_CHECK in names and live.get(DRAFT_SKIP_CHECK) and all(b == "skipping" for b, _ in live[DRAFT_SKIP_CHECK]):
             pending = sorted(set(pending) | {DRAFT_SKIP_CHECK})
@@ -1283,10 +1284,13 @@ class Host:
 
     def head_state(self, n, sha=None):
         """One read of the head's own checks, for the preview: green, pending, or red: <name>. Reads only, never waits.
-        `sha` is a head the caller already read (the review list has it from the pull request list); with none, the pull request is read."""
+        `sha` is a head the caller already read (the review list has it from the pull request list); with none, the pull request is read.
+        A host with ready checks reads the pull request for its base, which the ready-check step names; one with none reads no more."""
         try:
-            got = self.checks(n, warn=False, sha=sha)
-            red, pending, ignored = self.classify(got, self.required_names(), self.ignore)
+            info = self.pr(n) if self.ready_checks else {"head": sha}
+            got = self.checks(n, warn=False, sha=sha or info["head"])
+            red, pending, ignored = self.classify(got, self.required_names(), self.ignore,
+                                                  ready_step=ready_check_step(self.ready_checks, info.get("base")))
         except Stop as e:
             return f"unknown ({e})"
         s = "red: " + "; ".join(red) if red else "pending: " + ", ".join(pending) if pending else "green"
@@ -1309,7 +1313,7 @@ class Host:
                 num = self.pr_number(n)  # the number, so batch_running can leave this PR out; pr() of a number reads nothing more
                 info = self.pr(num)
                 got = self.checks(num, warn=False, sha=info["head"])
-                red, pending, _ = self.classify(got, [], self.ignore, info["branch"])
+                red, pending, _ = self.classify(got, [], self.ignore, info["branch"], ready_check_step(self.ready_checks, info["base"]))
                 runs = self.runs(info["head"])
                 red, pending = self.settle(red, pending, *self.judge_runs(runs))
                 unseen = not got and not runs and not nothing_is_green
@@ -2746,6 +2750,7 @@ def preview(root, cfg, cfgrel, n, host, lock, info=None, unknown_ok=""):
     finally:
         drop_worktree(root, tmp, wt)
     m = cfg.get("merge", {})
+    host.ready_checks = m.get("readyChecks")  # the head checks line names the ready-check step, as confirm's wait does
     held = lock.read(base)
     verdict, detail = base_verdict(root, host, base)  # the red-main check's read
     try:

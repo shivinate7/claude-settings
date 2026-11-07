@@ -202,6 +202,9 @@ def merge_check(selector, repo: str, where: str):
     except Exception as e:
         return "unknown", str(e)
     host = module.Host(required=pinned_required(where) or "protection", repo=repo or None, cwd=where or None)
+    ready = next((c["merge"].get("readyChecks") for c in _merge_configs(where) if isinstance(c["merge"], dict)), None) if where else None
+    if isinstance(ready, list) and all(isinstance(k, str) and k for k in ready):  # the all-skipped detail names the step that runs them
+        host.ready_checks = ready
     # The ignore list reaches only the batch read: this head counts every check, so an ignored red check on it still refuses.
     return host.head_read(selector, nothing_is_green=not has_workflows(where), batch_ignore=ignore)
 
