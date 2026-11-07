@@ -13304,6 +13304,12 @@ add("builder-test: control, a bash -c run behind an env assignment in double quo
     "is refused", "deny", rule=BT, tool="Edit", file_path=WF,
     old_string=LINT + '      - name: Run\n        run: bash -c "FOO=1 pytest tests/"\n', new_string=LINT,
     carries=("test-author", "Report"), **B)
+# The shell's own flags sit between the shell and its `-c` (`-eo pipefail`). The reader takes the script after `-c` only
+# when the shell is right before it, so this run's test folder is read as none, and deleting the step drops that test.
+add("builder-test: a bash -eo pipefail -c run of a test folder, deleted from checks.yml is refused",
+    "deny", rule=BT, tool="Edit", file_path=WF,
+    old_string=LINT + '      - name: Run\n        run: bash -eo pipefail -c "pytest tests/"\n', new_string=LINT,
+    carries=("test-author", "Report"), **B)
 # A quoted space is one shell word. The reader read `" "` as a command word and raised, and a guard that
 # raises fails open, so a pytest run deleted beside a `tr " "` step was allowed.
 SPLIT_STEP = '      - name: Split\n        run: echo "$ITEMS" | tr " " "\\n"\n'
@@ -13353,6 +13359,12 @@ for _command, _want in (
         ('"poetry run pytest tests/"', ("tests/",)),
         ('"pnpm exec vitest tests/"', ("tests/",)),
         ('timeout 5 "yarn jest tests/"', ("tests/",)),
+        # The shell's own flags sit between the shell and its `-c`, so the script after `-c` is read past them.
+        ('bash -l -c "pytest tests/x"', ("tests/x",)),
+        ('bash -e -c "pytest tests/x"', ("tests/x",)),
+        ('bash -eo pipefail -c "pytest tests/x"', ("tests/x",)),
+        ('bash --noprofile --norc -c "pytest tests/x"', ("tests/x",)),
+        ('sh -e -c "pytest tests/x"', ("tests/x",)),
         ('echo "python tests/x.py failed"', ()),
         ('echo "bash tests ok"', ()),
         ('echo "node tests/x.js ran"', ()),
@@ -13363,6 +13375,9 @@ for _command, _want in (
 # A control, green on the head: the shell -c clause reads the script past its env assignment.
 WF_READER_CHECKS.append(("paths: control, workflow_command_tests('bash -c \"FOO=1 pytest tests/\"') reads ['tests/']",
                          _workflow_reader_check('bash -c "FOO=1 pytest tests/"', ("tests/",))))
+# A control, green on the head: a test word inside the echoed text of a `bash -c` script is data, so none is read.
+WF_READER_CHECKS.append(("paths: control, workflow_command_tests('bash -c \"echo tests passed\"') reads nothing",
+                         _workflow_reader_check('bash -c "echo tests passed"', ())))
 
 # ---- test-path shapes: one table on the builder's early warning. Each row is one path, judged by
 # a Write, for one role (the builder). A test shape is refused, a near miss is allowed. Shapes, with
