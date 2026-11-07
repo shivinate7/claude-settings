@@ -13852,6 +13852,52 @@ class ProseJudgePrompt(unittest.TestCase):
         self.assertEqual(excerpt_rows(text, NAMED)[-1:], ["15: xs015 = 15"], "the excerpt of %s does not end at its last numbered row" % NAMED)
         self.assertFalse("left out" in text, "the prompt has a marker line though no row of %s was left out" % NAMED)
 
+    DEFS = "hooks/defs.py"  # a tracked code path that the packed lines name in backticks; its text comes through the read hook
+    DEFS_PROSE = "docs/notes/defs.md"  # governed prose whose lines name DEFS
+
+    def pack(self, picked, served):
+        """merge.prose_judge_pack over `picked`, the body read through the `read` hook from `served` (path -> text). -> (jobs, past)."""
+        real_body = merge.prose_judge_body
+
+        def read(wt, backing):
+            return served.get(backing)
+        with unittest.mock.patch.object(merge, "prose_judge_body", lambda wt, read_hook=None: real_body(wt, read)):
+            return merge.prose_judge_pack(self.WT, picked)
+
+    def defs_file(self, count):
+        """-> (text, starts): a source file of `count` defs. Def k is `def fn_<k>` on row starts[k], then five body rows and three
+        blank rows, so the window of three rows either side of each def touches no other window."""
+        rows, starts = [], []
+        for k in range(count):
+            starts.append(len(rows) + 1)
+            rows += ["def fn_%02d(x):" % k, "    y = x * 2", "    z = y + 1", "    w = z - 1", "    v = w * 3", "    return v", "", "", ""]
+        return "\n".join(rows) + "\n", starts
+
+    def defs_picked(self, count):
+        """{path: {line: (text, cites)}}: line k+1 of DEFS_PROSE names DEFS and fn_<k> in backticks, and cites nothing."""
+        return {self.DEFS_PROSE: {k + 1: ("The runner is `%s` `fn_%02d` and returns 3." % (self.DEFS, k), []) for k in range(count)}}
+
+    def test_each_line_in_a_call_gets_the_window_around_each_name_it_gives(self):
+        # Forty lines, each naming a different def. Main gave each line the window around its own def. A call shared one excerpt
+        # built from every line's names and cut to 40 rows, so most defs were missing. Each call holds each line's window and stays
+        # within the byte budget.
+        count = 40
+        text, starts = self.defs_file(count)
+        jobs, past = self.pack(self.defs_picked(count), {self.DEFS: text})
+        self.assertEqual(past, 0, "scope: %d lines are past the calls, want none" % past)
+        judged = sorted(line for _, rows, _ in jobs for _, line in rows)
+        self.assertEqual(judged, list(range(1, count + 1)), "scope: the calls hold lines %s, want each of the %d lines once" % (judged, count))
+        source = text.split("\n")
+        for _, rows, prompt in jobs:
+            size = len(prompt.encode("utf-8"))
+            self.assertLessEqual(size, merge.PROSE_JUDGE_CALL_BYTES,
+                                 "a call of %d bytes, want at most the budget of %d" % (size, merge.PROSE_JUDGE_CALL_BYTES))
+            for _, line in rows:
+                start = starts[line - 1]
+                for n in range(max(start - 3, 1), min(start + 3, len(source) - 1) + 1):
+                    want = "    %d: %s" % (n, source[n - 1])
+                    self.assertTrue(want in prompt, "line %d names fn_%02d, and row %d of its window is not in the call" % (line, line - 1, n))
+
 
 class OrderLock(merge.GitLock):
     """A GitLock that appends "release" to `events` on each release, so a case can order a model call against it."""
