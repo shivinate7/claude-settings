@@ -130,6 +130,10 @@ jobs:
         if: ${{ needs.scope.outputs.sweep == 'true' }}
         run: python3 janitor/mutate_sweep.py
 
+      - name: Reap proof Git Bash one-home suite
+        if: ${{ needs.scope.outputs.code == 'true' }}
+        run: python3 janitor/test_prove_agent_end_reap.py
+
       - name: Config watch fixture suite
         run: python3 hooks/test_config_watch.py
 
