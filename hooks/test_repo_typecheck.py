@@ -46,9 +46,11 @@ OK_STUB = "tools/typecheck-stub-ok.py"  # prints boom, exits 0: the exit code de
 SILENT_STUB = "tools/typecheck-stub-silent.py"  # exits 1 with no output
 SECOND_STUB = "tools/typecheck-stub-second.py"  # prints bang, exits 1: the second matching entry's output
 SLOW_STUB = "tools/typecheck-stub-slow.py"  # sleeps SLOW_SECONDS, prints slow, exits 1
+LONG_STUB = "tools/typecheck-stub-long.py"  # sleeps LONG_SECONDS, prints long, exits 1
 BIG_STUB = "tools/typecheck-stub-big.py"  # prints BIG_SIZE characters, exits 1
-TEST_BUDGET = 2.0  # the total budget the shared-budget case patches in, in seconds
-SLOW_SECONDS = 1.5  # longer than half of TEST_BUDGET, so one command already uses most of the budget
+TEST_BUDGET = 4.0  # the total budget the budget cases patch in, in seconds
+SLOW_SECONDS = 1.0  # well under half of TEST_BUDGET, so a slow runner cannot flip the budget case
+LONG_SECONDS = 3.5  # past what is left of TEST_BUDGET after one SLOW_SECONDS, so the budget runs out
 SLACK = 0.25  # timing margin on the second command's timeout
 BIG_SIZE = 100000  # characters the big stub prints
 TAIL_ALLOWANCE = 200  # the short tail line a capped report may end with
@@ -59,6 +61,7 @@ STUBS = {
     SILENT_STUB: "import sys\nsys.exit(1)\n",
     SECOND_STUB: "import sys\nprint('bang')\nsys.exit(1)\n",
     SLOW_STUB: "import sys, time\ntime.sleep(%r)\nprint('slow')\nsys.exit(1)\n" % SLOW_SECONDS,
+    LONG_STUB: "import sys, time\ntime.sleep(%r)\nprint('long')\nsys.exit(1)\n" % LONG_SECONDS,
     BIG_STUB: "import sys\nsys.stdout.write('x' * %d)\nsys.exit(1)\n" % BIG_SIZE,
 }
 STUB_PREFIX = "typecheck-stub"  # every stub's file name starts with this; the cost cases count starts that name it
@@ -164,6 +167,15 @@ def check_timeouts(report):
     """The timeout each typecheck stub was run with, one entry per subprocess.run call."""
     return [c["timeout"] for c in report["calls"] if c["api"] == "run"
             and any(os.path.basename(a).startswith(STUB_PREFIX) for a in c["argv"])]
+
+
+def guard_log_lines(repo):
+    """The lines of the guard.log in the case's own config folder, or [] when none was written."""
+    path = os.path.join(repo.project.cfg, "guard.log")
+    if not os.path.isfile(path):
+        return []
+    with open(path, encoding="utf-8") as handle:
+        return handle.read().splitlines()
 
 
 def printed_cwd(reason):
@@ -391,6 +403,8 @@ class Command(CaseName):
         rc, out, err = run_host(repo, repo.payload(repo.abs("app/x.ts")))
         block = block_of(out)
         self.assertIsNotNone(block, "a command printing 100 KB printed no block")
+        self.assertIn("typecheck failed after editing x.ts", block["reason"],
+                      "the capped reason lost the header that names the edited file")
         self.assertLess(len(block["reason"]), BIG_SIZE, "the block reason holds the whole 100 KB output")
         cap = getattr(importlib.import_module("repo_typecheck"), "REPORT_CAP", None)
         self.assertIsNotNone(cap, "repo_typecheck has no REPORT_CAP constant")
@@ -398,8 +412,8 @@ class Command(CaseName):
                              "the block reason is longer than REPORT_CAP plus a tail line")
 
     def test_two_matching_entries_share_one_total_budget(self):
-        # Each command sleeps past half the budget. Per-command budgets would give the second command
-        # the full TEST_BUDGET, so its timeout would be TEST_BUDGET, not what is left after the first.
+        # Each command sleeps well under half the budget, so a slow runner cannot flip the case. A per-command
+        # budget would give the second command the full TEST_BUDGET, not what is left after the first.
         repo = Repo(self.name())
         repo.declare(entry([sys.executable, SLOW_STUB], globs=("app/**/*.ts",)),
                      entry([sys.executable, SLOW_STUB], globs=("app/**/*.ts",)))
@@ -409,6 +423,27 @@ class Command(CaseName):
         self.assertEqual(len(timeouts), 2, "the commands did not run through subprocess.run, so their timeouts are unknown")
         self.assertLessEqual(timeouts[1], TEST_BUDGET - SLOW_SECONDS + SLACK,
                              "the second command got a fresh budget, not what was left of the total after the first")
+
+    def test_a_spent_budget_stops_the_remaining_entries(self):
+        repo = Repo(self.name())
+        repo.declare(entry([sys.executable, SLOW_STUB], globs=("app/**/*.ts",)),
+                     entry([sys.executable, LONG_STUB], globs=("app/**/*.ts",)),
+                     entry([sys.executable, SLOW_STUB], globs=("app/**/*.ts",)))
+        rc, out, report = run_probe(repo, repo.payload(repo.abs("app/x.ts")), budget=TEST_BUDGET)
+        self.assertEqual(len(check_starts(report)), 2,
+                         "an entry started after the budget was spent: the third command ran")
+
+    def test_one_bad_entry_costs_only_itself(self):
+        repo = Repo(self.name())
+        repo.declare(entry(fail_command(), globs=("app/**/*.ts",)),
+                     dict(entry(fail_command()), command="tsc"))
+        rc, out, err = run_host(repo, repo.payload(repo.abs("app/x.ts")))
+        block = block_of(out)
+        self.assertIsNotNone(block, "a bad entry cost the good entry its report")
+        self.assertIn("boom", block["reason"], "the good entry's output is not in the block")
+        noted = [line for line in guard_log_lines(repo) if "typecheck" in line]
+        self.assertEqual(len(noted), 1, "the bad entry did not write exactly one guard.log line naming typecheck")
+        self.assertIn("\tnoted\t", noted[0], "the bad entry's guard.log line is not a noted line")
 
     def test_a_timeout_is_silent(self):
         repo = Repo(self.name())

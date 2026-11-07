@@ -1480,17 +1480,24 @@ class Typecheck(Tree):
                 with self.assertRaises(self.layout.LayoutError, msg=label):
                     self.layout.typecheck(self.tree)
 
-    def test_a_glob_with_braces_or_a_leading_dot_slash_is_a_layout_error(self):
-        bad = {
-            "an opening brace": "app/{a,b}/*.ts",
-            "a closing brace": "app/a}/*.ts",
-            "a leading ./": "./app/**/*.ts",
-        }
-        for label, glob in bad.items():
-            with self.subTest(shape=label):
+    def test_brace_sets_and_classes_are_accepted_globs(self):
+        for glob in ("app/**/*.{ts,tsx}", "app/*.[jt]s"):
+            with self.subTest(glob=glob):
                 self.declare([self.entry(globs=[glob])])
-                with self.assertRaises(self.layout.LayoutError, msg=label):
-                    self.layout.typecheck(self.tree)
+                try:
+                    found = self.layout.typecheck(self.tree)
+                except self.layout.LayoutError as err:
+                    self.fail("a brace or class glob was refused: %s" % err)
+                self.assertEqual(len(found), 1, "a brace or class glob read as no entry: %s" % glob)
+
+    def test_a_leading_dot_slash_is_read_as_the_same_path(self):
+        self.declare([self.entry(globs=["./app/*.ts"])])
+        try:
+            found = self.layout.typecheck(self.tree)
+        except self.layout.LayoutError as err:
+            self.fail("a leading ./ was refused: %s" % err)
+        self.assertEqual(len(found), 1, "a leading ./ read as no entry")
+        self.assertTrue(self.layout.match_globs("app/x.ts", found[0]["globs"]), "./app/*.ts did not match app/x.ts")
 
 
 class MatchGlobs(Tree):
@@ -1523,6 +1530,24 @@ class MatchGlobs(Tree):
 
     def test_any_one_of_several_globs_is_enough(self):
         self.assertTrue(self.layout.match_globs("app/x.ts", ["lib/**/*.ts", "app/**/*.ts"]), "the second glob did not match")
+
+    def test_a_brace_set_matches_each_of_its_extensions_in_any_folder_depth(self):
+        globs = ["app/**/*.{ts,tsx}"]
+        self.assertTrue(self.layout.match_globs("app/x.ts", globs), "fixture: app/x.ts did not match app/**/*.{ts,tsx}")
+        self.assertTrue(self.layout.match_globs("app/x.tsx", globs), "app/x.tsx did not match app/**/*.{ts,tsx}")
+        self.assertTrue(self.layout.match_globs("app/sub/x.ts", globs), "app/sub/x.ts did not match app/**/*.{ts,tsx}")
+
+    def test_a_class_matches_one_character_of_its_set(self):
+        self.assertTrue(self.layout.match_globs("app/x.ts", ["app/*.[jt]s"]), "fixture: app/x.ts did not match app/*.[jt]s")
+        self.assertTrue(self.layout.match_globs("app/x.js", ["app/*.[jt]s"]), "app/x.js did not match app/*.[jt]s")
+
+    def test_a_name_outside_the_brace_set_and_the_class_does_not_match(self):
+        self.assertFalse(self.layout.match_globs("app/x.cs", ["app/*.[jt]s"]), "app/x.cs matched app/*.[jt]s")
+        self.assertFalse(self.layout.match_globs("app/x.cs", ["app/**/*.{ts,tsx}"]), "app/x.cs matched app/**/*.{ts,tsx}")
+
+    def test_a_leading_dot_slash_matches_the_same_path(self):
+        self.assertTrue(self.layout.match_globs("app/x.ts", ["app/*.ts"]), "fixture: app/x.ts did not match app/*.ts")
+        self.assertTrue(self.layout.match_globs("app/x.ts", ["./app/*.ts"]), "./app/*.ts did not match app/x.ts")
 
 
 if __name__ == "__main__":
