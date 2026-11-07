@@ -4668,6 +4668,9 @@ class AgentEndReapTests(unittest.TestCase):
         self.assertIn("payload 3", raws)
 
 
+MISSING = object()  # payload_extra's value for a payload with no background_tasks field
+
+
 class _AgentEndFixture(unittest.TestCase):
     """Shared fixture for the agent-end worktree cases below. Real repo with a bare remote, real
     worktrees under `.claude/worktrees/`, and the SubagentStop hook run as the harness runs it."""
@@ -4733,14 +4736,17 @@ class _AgentEndFixture(unittest.TestCase):
         host that fire_under_host names."""
         return "claude agent agent-%s (pid %d)" % (name, os.getpid())
 
-    def fire_under_host(self, agent, path, cwd=None, check=True):
+    def fire_under_host(self, agent, path, cwd=None, check=True, extra=None):
         """Run the SubagentStop hook one process below an intermediate python, itself run by this test
         process (the host). The measured chain is hook -> shell -> claude.exe, so the host is a
         grandparent. CLAUDE_PID names the host, as the harness sets it (38784 in the tool shell).
         CWD (default: the test root) is the working directory of the relay, and so of the hook. CHECK
-        False returns the answer without asserting its exit code."""
-        payload = json.dumps({"hook_event_name": "SubagentStop", "agent_id": agent,
-                              "cwd": path, "session_id": "agent-end-wt-cases"})
+        False returns the answer without asserting its exit code. EXTRA adds payload fields, such as
+        a finished agent's transcript_path and background_tasks (see payload_extra)."""
+        fields = {"hook_event_name": "SubagentStop", "agent_id": agent,
+                  "cwd": path, "session_id": "agent-end-wt-cases"}
+        fields.update(extra or {})
+        payload = json.dumps(fields)
         env = dict(os.environ, CLAUDE_CONFIG_DIR=self.cfg, CLAUDE_PID=str(os.getpid()))
         relay = ("import subprocess, sys; sys.exit(subprocess.run([sys.executable, sys.argv[1]], "
                  "input=sys.stdin.read(), text=True).returncode)")
@@ -4750,6 +4756,37 @@ class _AgentEndFixture(unittest.TestCase):
         if check:
             self.assertEqual(answer.returncode, 0, "hook exited %d: %s" % (answer.returncode, answer.stderr[-300:]))
         return answer
+
+    def session_transcript(self):
+        """The session transcript the payload names. A subagent's record sits beside it, in a folder
+        named for the session: `<transcript minus .jsonl>/subagents/agent-<id>.jsonl`."""
+        return os.path.join(self.root, "projects", "session-shell.jsonl")
+
+    def subagent_transcript(self, agent):
+        return os.path.join(self.session_transcript()[:-len(".jsonl")], "subagents", "agent-%s.jsonl" % agent)
+
+    def age_subagent_transcript(self, agent, minutes):
+        """Write AGENT's subagent transcript with its mtime MINUTES old. Returns the mtime it set, so a
+        case can check the file took it."""
+        path = self.subagent_transcript(agent)
+        write(path, '{"type": "assistant"}\n')
+        then = time.time() - minutes * 60
+        os.utime(path, (then, then))
+        return then
+
+    def payload_extra(self, background):
+        """The SubagentStop fields of a finished-agent case: the session transcript path, and
+        background_tasks unless BACKGROUND is MISSING, which leaves the field out."""
+        extra = {"transcript_path": self.session_transcript()}
+        if background is not MISSING:
+            extra["background_tasks"] = background
+        return extra
+
+    @staticmethod
+    def running_elsewhere():
+        """A busy session's background_tasks: other agents' running tasks, never the finished one."""
+        return [{"id": "a%015d" % n, "type": "subagent", "status": "running",
+                 "description": "another task", "agent_type": "Plan"} for n in (1, 2)]
 
     def last_row(self):
         """The last row of the payload log: the decision record of the last hook run."""
@@ -4799,6 +4836,14 @@ class _AgentEndFixture(unittest.TestCase):
         run_vcs(path, "add", "lane.txt")
         commit = run_vcs(path, *IDENT, "commit", "-q", "-m", "unpushed lane work")
         require(commit.returncode == 0, "commit in %s failed: %s" % (path, commit.stderr.strip()))
+
+    def sleeper(self, cwd):
+        """A plain sleeping process with its cwd in CWD, started by this test process (the host)."""
+        proc = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(120)"], cwd=cwd,
+                                stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                                stderr=subprocess.DEVNULL)
+        self.addCleanup(self.stop, proc)
+        return proc
 
     @staticmethod
     def stop(proc):
@@ -4916,21 +4961,24 @@ class AgentEndOwnWorktreeTests(_AgentEndFixture):
             self.assert_own_left(subject)
 
     def test_a_sibling_agent_tree_locked_by_the_same_host_pid_is_kept(self):
-        # Guard: the exemption must cover the ending agent's own tree only. Every agent tree of
-        # one session carries the same host pid.
+        # A host lock lifts only once the finish is proven (ruling of 2026-11-07 14:11 CST). This
+        # sibling has no subagent transcript and its payload has no background_tasks, so the finish is
+        # unproven and the lock stays. The own tree is kept whatever the sibling holds.
         own, sibling = self.add("ownsib"), self.add("sibhost")
         control = self.control_tree("sibctl")
         self.lock(sibling, self.host_lock("sibhost"))
         _age_admin_files(sibling, 31 * 60)
         self.assertGreaterEqual(sweep.worktree_idle_seconds(sibling), 31 * 60 - 60,
                                 "the sibling is not 31 min idle")
+        self.assertFalse(os.path.exists(self.subagent_transcript("sibhost")),
+                         "the sibling has a subagent transcript, so its finish is not unproven")
         self.age_control(control)
         self.fire_under_host("ownsib", own)
         with self.subTest(control="another agent's clean pushed tree idle 31 min is removed"):
             self.assertRemoved(control)
         with self.subTest(arm="own tree is kept for 30 idle min"):
             self.assert_own_left(own)
-        with self.subTest(arm="sibling locked by the same host pid, idle 31 min"):
+        with self.subTest(arm="sibling locked by the host pid, idle 31 min, finish unproven"):
             self.assertKept(sibling)
             self.assertTrue(guard.worktree_locked(self.primary, sibling), "the sibling's lock was lifted")
 
@@ -5031,6 +5079,163 @@ class AgentEndOwnWorktreeTests(_AgentEndFixture):
                              "the unstaged deletion was written back into a kept tree")
 
 
+class AgentEndShellStopTests(_AgentEndFixture):
+    """A finished agent's shells and tree at a later agent end. The owner's ruling (2026-10-15 19:43
+    CDT) stops a finished agent's own shells, then removes its tree. The coordinator's pick (ruling of
+    2026-11-07 14:11 CST) says when: a tree is unlocked, its shells stopped and the tree removed only
+    when all of these hold. The agent is not listed as running in the SubagentStop payload's
+    background_tasks, and a missing or malformed field keeps. `<transcript minus .jsonl>/subagents/
+    agent-<id>.jsonl` exists and has been idle 30 min or more. The tree is clean and pushed. A pid is
+    ours only when its parent chain reaches the host pid named in the tree's lock, that pid is this
+    session's host, and every pid below the host has its cwd in the tree.
+
+    The red case holds every check. Each keep case changes one check, so a builder that drops that
+    check fails its case. Each keep case runs beside a clean control tree that the same run removes,
+    so a keep cannot pass on a hook that deletes nothing."""
+
+    def finished_tree(self, name, lock=None):
+        """NAME's tree: clean, pushed and idle 31 min, locked by LOCK (default: the host pid this test
+        process names). The caller ages the subagent transcript when the case has one."""
+        tree = self.add(name)
+        self.lock(tree, lock or self.host_lock(name))
+        _age_admin_files(tree, 31 * 60)
+        return tree
+
+    def reason_for(self, path):
+        """The last hook run's decision reason for PATH, for a failure message."""
+        row = self.row_for_tree(path)
+        return "row reason: %s" % (row.get("reason") if row else "the run wrote no row")
+
+    @staticmethod
+    def exited(proc, timeout=5):
+        """True once PROC has exited. The timeout only bounds how long a signalled shell may take to die."""
+        try:
+            proc.wait(timeout=timeout)
+            return True
+        except subprocess.TimeoutExpired:
+            return False
+
+    def keep_case(self, name, arm, background=None, minutes=31, transcript=True, dirty=False):
+        """One finished tree that must keep both its tree and its shell. BACKGROUND None gives the
+        payload only other agents' running tasks, and MISSING omits the field. MINUTES ages the subagent
+        transcript, TRANSCRIPT False writes none, and DIRTY leaves an uncommitted file in the tree. ARM
+        names the one check the case changes."""
+        ending = name + "end"
+        own = self.add(ending)
+        control = self.control_tree(name + "ctl")
+        tree = self.finished_tree(name)
+        if transcript:
+            then = self.age_subagent_transcript(name, minutes)
+        if dirty:
+            self.untracked(tree)
+        shell = self.sleeper(tree)
+        self.age_control(control)
+        with self.subTest(precondition="the case sets only the one check its arm names"):
+            if transcript:
+                self.assertAlmostEqual(os.path.getmtime(self.subagent_transcript(name)), then, delta=2,
+                                       msg="the subagent transcript did not take its age")
+            else:
+                self.assertFalse(os.path.exists(self.subagent_transcript(name)),
+                                 "a subagent transcript exists")
+            if dirty:
+                self.assertTrue(guard.porcelain(tree), "the tree has no uncommitted file")
+        with self.subTest(precondition="the shell is alive, inside the finished tree"):
+            inside, _unreadable = sweep.processes_in(tree)
+            self.assertIn(shell.pid, inside or [], "the shell is not inside the finished tree")
+            self.assertIsNone(shell.poll(), "the shell exited before the hook ran")
+        value = self.running_elsewhere() if background is None else background
+        self.fire_under_host(ending, own, extra=self.payload_extra(value))
+        with self.subTest(control="another agent's clean pushed tree idle 31 min is removed"):
+            self.assertRemoved(control)
+        with self.subTest(arm="%s: the finished tree is kept" % arm):
+            self.assertKept(tree)
+        with self.subTest(arm="%s: the shell is not stopped" % arm):
+            self.assertIsNone(shell.poll(), "the shell was stopped; %s" % self.reason_for(tree))
+
+    def test_a_finished_host_locked_tree_has_its_shell_stopped_and_is_removed(self):
+        ending = "shellend"
+        own = self.add(ending)
+        control = self.control_tree("shellctl")
+        tree = self.finished_tree("shellfin")
+        then = self.age_subagent_transcript("shellfin", 31)
+        shell = self.sleeper(tree)
+        self.age_control(control)
+        with self.subTest(precondition="the shell is alive, inside the finished tree"):
+            inside, _unreadable = sweep.processes_in(tree)
+            self.assertIn(shell.pid, inside or [], "the shell is not inside the finished tree")
+            self.assertIsNone(shell.poll(), "the shell exited before the hook ran")
+        with self.subTest(precondition="the tree is locked by the host, and its transcript is 31 min idle"):
+            self.assertTrue(guard.worktree_locked(self.primary, tree), "the host lock did not take")
+            self.assertAlmostEqual(os.path.getmtime(self.subagent_transcript("shellfin")), then, delta=2,
+                                   msg="the subagent transcript did not take its age")
+        self.fire_under_host(ending, own, extra=self.payload_extra(self.running_elsewhere()))
+        with self.subTest(control="another agent's clean pushed tree idle 31 min is removed"):
+            self.assertRemoved(control)
+        with self.subTest(arm="the finished tree's host-child shell is stopped"):
+            self.assertTrue(self.exited(shell), "the finished agent's shell is still running")
+        with self.subTest(arm="the finished tree is removed"):
+            self.assertRemoved(tree, "; " + self.reason_for(tree))
+
+    def test_a_shell_under_a_live_pid_that_is_not_the_host_keeps_the_tree_and_shell(self):
+        name = "shellsp"
+        ending = name + "end"
+        own = self.add(ending)
+        control = self.control_tree(name + "ctl")
+        tree = self.add(name)
+        pidfile = os.path.join(self.root, "shellsp.pid")
+        sponsor_code = ("import subprocess, sys, time\n"
+                        "child = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(120)'],"
+                        " cwd=sys.argv[2])\n"
+                        "with open(sys.argv[1], 'w', encoding='utf-8') as handle:\n"
+                        "    handle.write(str(child.pid))\n"
+                        "time.sleep(120)\n")
+        sponsor = subprocess.Popen([sys.executable, "-c", sponsor_code, pidfile, tree], cwd=self.root,
+                                   stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                                   stderr=subprocess.DEVNULL)
+        self.addCleanup(self.stop, sponsor)
+        shell_pid = int(_read_when_ready(pidfile))
+        self.addCleanup(sweep.send_signal, shell_pid)
+        # The lock names a live pid that is not this session's host, so no pid under it is ours.
+        self.lock(tree, "claude agent agent-%s (pid %d)" % (name, sponsor.pid))
+        self.age_subagent_transcript(name, 31)
+        _age_admin_files(tree, 31 * 60)
+        self.age_control(control)
+        with self.subTest(precondition="the shell is alive under the sponsor the lock names"):
+            inside, _unreadable = sweep.processes_in(tree)
+            self.assertIn(shell_pid, inside or [], "the shell is not inside the finished tree")
+            self.assertTrue(sweep.pid_alive(shell_pid), "the shell exited before the hook ran")
+            self.assertIsNone(sponsor.poll(), "the sponsor exited before the hook ran")
+        self.fire_under_host(ending, own, extra=self.payload_extra(self.running_elsewhere()))
+        with self.subTest(control="another agent's clean pushed tree idle 31 min is removed"):
+            self.assertRemoved(control)
+        with self.subTest(arm="the finished tree is kept"):
+            self.assertKept(tree)
+        with self.subTest(arm="the shell under a live pid that is not the host is not stopped"):
+            self.assertTrue(sweep.pid_alive(shell_pid), "the shell under the non-host pid was stopped")
+
+    def test_an_agent_listed_as_running_in_background_tasks_keeps_the_tree_and_shell(self):
+        name = "shellrun"
+        listed = {"id": name, "type": "subagent", "status": "running",
+                  "description": "finished agent", "agent_type": "general-purpose"}
+        self.keep_case(name, "the agent is listed as running in background_tasks",
+                       background=[listed] + self.running_elsewhere())
+
+    def test_a_missing_background_tasks_field_keeps_the_tree_and_shell(self):
+        self.keep_case("shellmis", "background_tasks field missing", background=MISSING)
+
+    def test_a_malformed_background_tasks_field_keeps_the_tree_and_shell(self):
+        self.keep_case("shellmal", "background_tasks is not a list", background="shellmal is running")
+
+    def test_a_transcript_idle_under_30_minutes_keeps_the_tree_and_shell(self):
+        self.keep_case("shelltr", "subagent transcript idle 29 min", minutes=29)
+
+    def test_a_missing_subagent_transcript_keeps_the_tree_and_shell(self):
+        self.keep_case("shellnot", "no subagent transcript", transcript=False)
+
+    def test_a_finished_idle_tree_with_an_uncommitted_file_keeps_the_tree_and_shell(self):
+        self.keep_case("shelldirty", "uncommitted file in the tree", dirty=True)
+
+
 class AgentEndOtherWorktreeTests(_AgentEndFixture):
     """The same SubagentStop run also removes ANOTHER finished agent's tree under
     `.claude/worktrees/agent-*`, but only when that tree is clean, has HEAD on a remote-tracking
@@ -5109,20 +5314,18 @@ class AgentEndRulingTests(_AgentEndFixture):
                     return line[len("locked"):].strip()
         return None
 
-    def sleeper(self, cwd):
-        proc = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(120)"], cwd=cwd,
-                                stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-                                stderr=subprocess.DEVNULL)
-        self.addCleanup(self.stop, proc)
-        return proc
-
     def test_a_process_inside_a_sibling_tree_is_never_stopped(self):
-        """The stop covers the ending agent's own tree only. The sibling is aged 31 minutes, so
-        only the process inside it can keep it."""
+        """The sibling is clean and aged 31 minutes, but it has no host lock and no subagent transcript.
+        With no lock there is no host named, so no pid in it is ours, and its finish is unproven. Its
+        process is not stopped, and the sibling is kept."""
         own, sibling = self.add("sibown"), self.add("sibproc")
         proc = self.sleeper(sibling)
         inside, _unreadable = sweep.processes_in(sibling)
         self.assertIn(proc.pid, inside or [], "the fixture process is not inside the sibling")
+        self.assertFalse(guard.worktree_locked(self.primary, sibling),
+                         "the sibling is locked, so a host is named")
+        self.assertFalse(os.path.exists(self.subagent_transcript("sibproc")),
+                         "the sibling has a subagent transcript")
         control = self.control_tree("sibctl")
         _age_admin_files(sibling, 31 * 60)
         self.assertGreaterEqual(sweep.worktree_idle_seconds(sibling), 31 * 60 - 60,
