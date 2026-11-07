@@ -451,19 +451,22 @@ GLOSS_BEFORE_RE = re.compile(r"[A-Za-z]{2,}[^\n(]{0,60}\(\s*$")
 GLOSS_LEAD_RE = re.compile(r"[A-Za-z]{2,}\s+[A-Za-z]{2,}\s*(?:[,:—–=]|--|\s-)\s*$")
 
 
+def has_gloss(before, after):
+    """True when the text around a cite carries a short gloss. `before` and `after` are the characters on each side of
+    the cite, up to 80 each. The one home of the gloss test: bare_cite and lint/check_record_slugs.py --tree call it."""
+    if GLOSS_AFTER_RE.match(after) or GLOSS_POSSESSIVE_RE.match(after):
+        return True
+    if GLOSS_BEFORE_RE.search(before) and after.lstrip().startswith(")"):
+        return True
+    return bool(GLOSS_LEAD_RE.search(before) or before.rstrip().lower().endswith("vitamin"))
+
+
 def bare_cite(text):
     """Return the first record id in `text` with no short gloss beside it, else ''."""
     clean = CITE_SKIP_RE.sub(" ", text)
     for m in CITE_ID_RE.finditer(clean):
-        after = clean[m.end():m.end() + 80]
-        before = clean[max(0, m.start() - 80):m.start()]
-        if GLOSS_AFTER_RE.match(after) or GLOSS_POSSESSIVE_RE.match(after):
-            continue
-        if GLOSS_BEFORE_RE.search(before) and after.lstrip().startswith(")"):
-            continue
-        if GLOSS_LEAD_RE.search(before) or before.rstrip().lower().endswith("vitamin"):
-            continue
-        return m.group(0)
+        if not has_gloss(clean[max(0, m.start() - 80):m.start()], clean[m.end():m.end() + 80]):
+            return m.group(0)
     return ""
 
 

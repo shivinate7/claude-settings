@@ -365,6 +365,9 @@ jobs:
       - name: Record slug length
         run: python3 lint/check_record_slugs.py
 
+      - name: Record gloss and debt decision
+        run: python3 lint/check_record_slugs.py --tree
+
       # Pull requests only: the range is base..HEAD, and a push has no base. The checkout is full-depth (fetch-depth 0).
       - name: Red-run trailer
         if: ${{ github.event_name == 'pull_request' }}

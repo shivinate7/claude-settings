@@ -39,4 +39,6 @@ A feel-fix debt closes in three steps. A device trial comes first (decision `fee
 
 `lint/check_record_slugs.py` checks each debt file's slug length. It also fails a feel-fix debt that is
 deleted, renamed out of this folder, or edited to drop its `**Feel.**` line, unless origin/main's text holds
-a valid device-trial line. `lint/check_debt_retire.py` reads the Retire part at close. No check reads the What, Where or Decision part yet.
+a valid device-trial line. `lint/check_debt_retire.py` reads the Retire part at close. `python3 lint/check_record_slugs.py --tree` reads the whole tree. It fails a first cite of a record id with no gloss (GLOSS001),
+and a debt whose Decision line is missing (DEBT001), names no decision (DEBT002), names a decision that does not name
+the debt (DEBT003), or says `none` while a decision names the debt (DEBT004). No check reads the What or Where part yet.
