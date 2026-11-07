@@ -2270,6 +2270,14 @@ class RefusalCiteHelperTests(unittest.TestCase):
         body = '    try:\n        pass\n    except (OSError, ValueError) as e:\n        fail(str(e))\n'
         self.assertEqual(status_of(body_src(body, FAIL), "merge:go", module="merge"), ["not resolved"])
 
+    def test_a_tuple_handler_with_a_broad_class_beside_a_stop_re_raised_through_a_helper_is_not_resolved(self):
+        # A broad class catches any exception, so the bound `e` is not known to be a Stop.
+        for names in ("(Exception, Stop)", "(BaseException, Stop)"):
+            with self.subTest(names=names):
+                body = '    try:\n        pass\n    except %s as e:\n        fail(str(e))\n' % names
+                self.assertEqual(status_of(body_src(body, FAIL), "merge:go", module="merge"), ["not resolved"],
+                                 "a tuple handler with a broad class reads as a caught Stop")
+
     def test_a_caught_generic_exception_re_raised_through_a_helper_is_not_resolved(self):
         body = '    try:\n        pass\n    except Exception as e:\n        fail(str(e))\n'
         self.assertEqual(status_of(body_src(body, FAIL), "merge:go", module="merge"), ["not resolved"])
