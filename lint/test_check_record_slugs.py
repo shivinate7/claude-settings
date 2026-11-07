@@ -554,6 +554,90 @@ class RecordSlugsTests(unittest.TestCase):
         self.commit_change()
         self.assert_passes()
 
+    # The ratchet: the notes bullets with no Fix of the new grammar may not grow. Both counts are read live from git.
+
+    def test_ratchet_edit_that_removes_a_fix_and_raises_the_count_is_red(self):
+        self.put(DEBT_NOTES, NOTES_HEAD + OLD_NOTE + KEPT_NOTE)
+        self.commit_base()
+        self.put(DEBT_NOTES, NOTES_HEAD + OLD_NOTE + "- kept-note: a gap, its Fix removed.\n")
+        self.commit_change()
+        rc, out = self.lint()
+        self.assertEqual(rc, 1, out)
+        self.assertTrue(self.printed_total(out, 2), out)  # HEAD holds two bullets with no new-grammar Fix
+
+    def test_ratchet_red_prints_the_head_count(self):
+        # Base holds one such bullet. Two edits drop a Fix, so HEAD holds three, and the total printed is three.
+        self.put(DEBT_NOTES, NOTES_HEAD + OLD_NOTE + KEPT_NOTE + THIRD_NOTE)
+        self.commit_base()
+        self.put(DEBT_NOTES, NOTES_HEAD + OLD_NOTE + "- kept-note: a gap, its Fix removed.\n"
+                 + "- third-note: a gap, its Fix removed.\n")
+        self.commit_change()
+        rc, out = self.lint()
+        self.assertEqual(rc, 1, out)
+        self.assertTrue(self.printed_total(out, 3), out)
+
+    def test_ratchet_equal_count_passes(self):
+        # One edit drops a Fix and another adds one. The count stays at one, so the branch passes.
+        self.put(DEBT_NOTES, NOTES_HEAD + OLD_NOTE + KEPT_NOTE)
+        self.commit_base()
+        self.put(DEBT_NOTES, NOTES_HEAD + "- old-note: an old gap. Fix: already fixed on main 1a2b3c4\n"
+                 + "- kept-note: a gap, its Fix removed.\n")
+        self.commit_change()
+        self.assert_passes()
+
+    def test_ratchet_lower_count_passes(self):
+        self.put(DEBT_NOTES, NOTES_HEAD + OLD_NOTE)
+        self.commit_base()
+        self.put(DEBT_NOTES, NOTES_HEAD + "- old-note: an old gap. Fix: already fixed on main 1a2b3c4\n")
+        self.commit_change()
+        self.assert_passes()
+
+    # The Until date: each `Fix: none` line added or edited carries `Until: YYYY-MM-DD`, no more than 30 days from
+    # today. Today is PINNED_TODAY, injected through FIXED_TODAY. An already-fixed line needs no date.
+
+    def test_none_note_without_until_is_red(self):
+        self.add_note("- new-note: a gap. Fix: none — owner decides\n")
+        rc, out = self.lint()
+        self.assertEqual(rc, 1, out)
+        self.assertTrue(self.failed_about(out, "new-note", DEBT_NOTES), out)
+
+    def test_none_note_with_a_past_until_is_red(self):
+        self.add_note("- new-note: a gap. Fix: none — owner decides. Until: 2026-11-06\n")
+        rc, out = self.lint()
+        self.assertEqual(rc, 1, out)
+        self.assertTrue(self.failed_about(out, "new-note", DEBT_NOTES), out)
+
+    def test_none_note_dated_today_passes(self):
+        self.add_note("- new-note: a gap. Fix: none — owner decides. Until: 2026-11-07\n")
+        self.assert_passes()
+
+    def test_none_note_at_the_cap_passes(self):
+        self.add_note("- new-note: a gap. Fix: none — owner decides. Until: 2026-12-07\n")  # 30 days after today
+        self.assert_passes()
+
+    def test_none_note_past_the_cap_is_red(self):
+        self.add_note("- new-note: a gap. Fix: none — owner decides. Until: 2026-12-08\n")  # 31 days after today
+        rc, out = self.lint()
+        self.assertEqual(rc, 1, out)
+        self.assertTrue(self.failed_about(out, "new-note", DEBT_NOTES), out)
+
+    def test_edited_none_note_that_drops_its_until_is_red(self):
+        self.put(DEBT_NOTES, NOTES_HEAD + "- old-note: an old gap. Fix: none — owner decides. Until: 2026-11-20\n")
+        self.commit_base()
+        self.put(DEBT_NOTES, NOTES_HEAD + "- old-note: an old gap, reworded. Fix: none — owner decides\n")
+        self.commit_change()
+        rc, out = self.lint()
+        self.assertEqual(rc, 1, out)
+        self.assertTrue(self.failed_about(out, "old-note", DEBT_NOTES), out)
+
+    def test_untouched_old_none_note_with_a_past_until_passes(self):
+        old = "- old-note: an old gap. Fix: none — owner decides. Until: 2026-01-01\n"
+        self.put(DEBT_NOTES, NOTES_HEAD + old)
+        self.commit_base()
+        self.put(DEBT_NOTES, NOTES_HEAD + old + "- new-note: a gap. Fix: already fixed on main 1a2b3c4\n")
+        self.commit_change()
+        self.assert_passes()
+
 
 class ImportTests(unittest.TestCase):
     """lint/compliance_probes.py imports the module and calls its functions on a child's root, so the command line
