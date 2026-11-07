@@ -65,6 +65,7 @@ from shared_names import DATA_TOOL  # noqa: E402  stdlib only: the one home of t
 
 OK_SHAPE = {"ok": (True, False)}
 SPAWN_RULE, QUESTION_RULE = "spawn-judge", "question-judge"
+TIMEOUT_LOG_RULE = "judge-timeout"  # the guard.log rule of a past-ruling model timeout; the one home of the name
 # The record each refusal cites. The spawn judge has its own; every other rule here (the model's question verdict
 # and the code rules question_form.chat_hit names) is the question reviewer's.
 SPAWN_CITE = "(decision haiku-prompt-hooks, the spawn judge refuses a brief that breaks the spawn rules)"
@@ -255,15 +256,30 @@ def invoke_model(*args, **kwargs):
     return home(*args, **kwargs)
 
 
-def judge_question(prompt, model, timeout, is_question, retry_timeout=QUESTION_RETRY_TIMEOUT):
+def log_timeout(tool, number, model, cap, prompt):
+    """One guard.log line for a model timeout of a question: the try, the model, the cap and len(prompt) in chars, so
+    the timeout rate and its cause can be measured. A failed write never changes the verdict."""
+    try:
+        import guard_core  # lazy: the one home of the log write
+        guard_core.record(tool, "timeout", TIMEOUT_LOG_RULE,
+                          "try=%d model=%s cap=%s prompt_chars=%d" % (number, model, cap, len(prompt)))
+    except Exception:
+        pass
+
+
+def judge_question(prompt, model, timeout, is_question, tool="", retry_timeout=QUESTION_RETRY_TIMEOUT):
     """The model call of a judged tool, and the one home of the retry. A question (`is_question` true) whose first
     call times out gets one more call, capped at `retry_timeout`: a timeout says nothing about the question, and an
     Unvetted refusal costs the session a resend. Any other error, and every call that is not a question, makes the
-    one call."""
+    one call. Each timeout of a question writes one line under `tool` (log_timeout); a call that does not time out
+    writes none."""
     import decision_watch  # lazy: the one home of the timeout text
     verdict, error = invoke_model(prompt, model=model, timeout=timeout, shape=OK_SHAPE, effort=None)
     if is_question and error == decision_watch.MODEL_TIMEOUT_ERROR:
+        log_timeout(tool, 1, model, timeout, prompt)
         verdict, error = invoke_model(prompt, model=model, timeout=retry_timeout, shape=OK_SHAPE, effort=None)
+        if error == decision_watch.MODEL_TIMEOUT_ERROR:
+            log_timeout(tool, 2, model, retry_timeout, prompt)
     return verdict, error
 
 
@@ -411,7 +427,7 @@ def main():
             full += "\n" + NONE_DIRECTION_RULE  # after `%`, so the rule's text never meets the formatter
         if widening:
             full += "\n" + widening_rule()
-        verdict, error = judge_question(full + tail, model, timeout, bool(units))
+        verdict, error = judge_question(full + tail, model, timeout, bool(units), tool=tool)
     except Exception as exc:
         print("call judge failed open: %s" % " ".join(("%s: %s" % (type(exc).__name__, exc)).split()),
               file=sys.stderr)

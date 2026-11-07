@@ -1679,7 +1679,7 @@ def past_ruling_problem(asked, cwd):
     # something; none on any other Stop. The caps leave out this script's python start, the reads in past_rulings
     # (10 s timeouts) and decision_watch._judge_isolation: unmeasured.
     verdict, error = call_judge.judge_question(prompt, call_judge.PAST_RULING_MODEL, call_judge.PAST_RULING_TIMEOUT,
-                                               True, retry_timeout=call_judge.PAST_RULING_RETRY_TIMEOUT)
+                                               True, tool="Stop", retry_timeout=call_judge.PAST_RULING_RETRY_TIMEOUT)
     if error:
         return cannot_run(asked, " ".join(str(error).split()))
     if verdict.get("ok") is not False:
