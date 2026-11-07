@@ -3276,7 +3276,7 @@ function renderNow() {
   }).join("") || '<li class="none">Nothing off track.</li>'}</ul></div>`;
 }
 
-function renderRail() {
+function renderPhaseRail() {
   const cur = curPhase(), shown = shownPhase();
   $("svRail").innerHTML = PH.map((p) => {
     const ss = byPhase(p.k), d = ss.filter((s) => s.status === "done").length, a = ss.filter((s) => s.status === "active").length, b = ss.filter((s) => s.status === "blocked").length;
@@ -3518,7 +3518,7 @@ function noRoadmap() {
 /* ---------- views ---------- */
 const VIEWS = [["plan", "Plan"], ["log", "Changes"], ["ref", "Reference"], ["rec", "Records"]];
 const NOPLAN = (what) => `<section class="box"><p class="lead">${what} appear here once the plan can be read.</p></section>`;
-function renderPlan() { if (!hasData) return; renderNow(); renderRail(); renderPhase(); renderSide(); renderLog(); }
+function renderPlan() { if (!hasData) return; renderNow(); renderPhaseRail(); renderPhase(); renderSide(); renderLog(); }
 function setView(v) {
   ui.view = v;
   root.querySelectorAll("[data-view]").forEach((b) => { b.setAttribute("aria-selected", String(b.dataset.view === v)); b.tabIndex = b.dataset.view === v ? 0 : -1; });
@@ -3539,10 +3539,12 @@ function build() {
 
 /* ---------- actions ---------- */
 function toast(msg) { const t = $("svToast"); t.textContent = msg; t.hidden = false; clearTimeout(toast.h); toast.h = setTimeout(() => { t.hidden = true; }, 2800); }
-function copyText(txt, btn, fallback) {
+function copyFrom(txt, btn, fallback) {
   const label = btn.textContent;
-  const ok = () => { btn.textContent = "Copied"; setTimeout(() => { btn.textContent = label; }, 1400); };
-  try { navigator.clipboard.writeText(txt).then(ok, fallback); } catch (e) { fallback(); }
+  copyText(txt).then((done) => {
+    if (!done) { fallback(); return; }
+    btn.textContent = "Copied"; setTimeout(() => { btn.textContent = label; }, 1400);
+  });
 }
 function goStep(id) {
   const s = steps.find((x) => x.id === id); if (!s) return;
@@ -3559,8 +3561,8 @@ function goStep(id) {
 root.addEventListener("click", (e) => {
   const hit = (sel) => e.target.closest(sel);
   let n;
-  if ((n = hit("[data-ask]"))) { const ask = askText(); copyText(ask, n, () => { const box = $("svAsk"); box.value = ask; box.hidden = false; box.select(); toast("Select the text in the box and copy it."); }); return; }
-  if ((n = hit("[data-copy]"))) { copyText(n.dataset.copy, n, () => { const sp = n.previousElementSibling; if (sp) { const r = document.createRange(); r.selectNodeContents(sp); const sel = getSelection(); sel.removeAllRanges(); sel.addRange(r); } toast("Selected. Copy it with your keyboard."); }); return; }
+  if ((n = hit("[data-ask]"))) { const ask = askText(); copyFrom(ask, n, () => { const box = $("svAsk"); box.value = ask; box.hidden = false; box.select(); toast("Select the text in the box and copy it."); }); return; }
+  if ((n = hit("[data-copy]"))) { copyFrom(n.dataset.copy, n, () => { const sp = n.previousElementSibling; if (sp) { const r = document.createRange(); r.selectNodeContents(sp); const sel = getSelection(); sel.removeAllRanges(); sel.addRange(r); } toast("Selected. Copy it with your keyboard."); }); return; }
   if ((n = hit("[data-more]"))) { const id = n.dataset.more, c = n.previousElementSibling, shut = c.classList.toggle("clamp"); shut ? ui.notes.delete(id) : ui.notes.add(id); n.textContent = shut ? "Show all" : "Show less"; return; }
   if ((n = hit("[data-go]"))) { goStep(n.dataset.go); return; }
   if ((n = hit("[data-view-go]"))) { setView(n.dataset.viewGo); window.scrollTo({ top: 0 }); return; }

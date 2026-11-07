@@ -705,6 +705,14 @@ jobs:
           python3 --version && git --version
           NODE_PATH="$PWD/.github/shoot/node_modules" node --test skills/waiting-page/tests/page.test.mjs skills/waiting-page/tests/test_check_designs.mjs
 
+      # No browser: the test reads the page's scripts with the pinned tsc (actions/code-check/standard.json).
+      - name: waiting page duplicate helpers
+        if: ${{ needs.scope.outputs.shoot == 'true' || github.event_name != 'pull_request' }}
+        shell: bash
+        run: |
+          npm ci --ignore-scripts --prefix actions/code-check/tools
+          PATH="$PWD/actions/code-check/tools/node_modules/.bin:$PATH" node --test skills/waiting-page/tests/test_page_dup_helpers.mjs
+
       - name: roadmap page suite
         if: ${{ needs.scope.outputs.shoot == 'true' || github.event_name != 'pull_request' }}
         shell: bash
