@@ -242,13 +242,14 @@ is main's `page.html` with the live `designData` and roadmap blocks kept, never 
 
 1. Read the page with `Artifact` action `read`. Use the file the read names as the saved full page.
    A read that gives a summary, not the raw page, is `unknown`.
-2. Run `python3 ~/.claude/skills/waiting-page/stale_pages.py --page <file> --write <out> --items <items>`, where
-   `<items>` is what `ArtifactData list items` saved. It
+2. Run `python3 ~/.claude/skills/waiting-page/stale_pages.py --page <file> --write <out> --items <items> --answers <answers>`, where
+   `<items>` is what `ArtifactData list items` saved and `<answers>` is what `ArtifactData list answers` saved. It
    compares the page's code outside `designData` with `skills/waiting-page/page.html` on
    claude-settings main, and prints one line: `current`, `behind` or `unknown`, with the source it
    read. Code outside main's page, other than the host's document skeleton, is `behind`. Then it prints one
-   `wait:` line per open item with `waits` (`ended`, `waiting` or `unknown`), and one `waiting` lane line per item, open or
-   closed, with `lane` and `lastAnswer` and no `waits`. The exit code stays the page's.
+   `wait:` line per open item with `waits` (`ended`, `waiting` or `unknown`), and one `waiting` lane line per open item with `lane` and `lastAnswer` and no `waits`. A closed such item
+   prints it only when `answers/<its id>` exists. Without `--answers`, a closed one prints none. With `--answers` unreadable or a
+   folder without the `.complete` marker, each closed one prints the line as `unknown`, never silence. The exit code stays the page's.
 3. Keep a copy of the page in the repo, from the same file ("Keep a copy in the repo"). Do it before any
    republish, so the copy holds the page as it was.
 4. `behind`: republish `<out>` to the same URL with the capabilities `db` and `{comments: {}}`.
@@ -510,7 +511,7 @@ tells the receiver the act is withdrawn and then closes the item, with no done r
 Never-ending wait. The owning session checks the receiver at each turn start while it holds a lane item. It reads every page
 of `list_sessions`, with no `tags` argument, and picks the row whose `tags` hold `cs-step:<lane>`, or for a standing session
 `cs-build:<tier>` and the same `cs-repo:` tag. Then it reads the receiver with `get_session`. Cost: every page once per turn
-start, shared by all lane items, and one `get_session` per lane item, with no timer. The writer's `--items` lane line is the page-side sign. If the owning session itself ended, the
+start, shared by all lane items, and one `get_session` per lane item, with no timer. The writer's `--items` lane line is the page-side sign (a closed item's shows while its `answers/<id>` row stays, with `--answers`). If the owning session itself ended, the
 inherit rule applies (see "Read the answers", the watch bullet). The receiver's status is `ended` when it ended, failed or was
 archived, and `unknown` when the read cannot run or finds no session, never `ended`. For either status with no done report,
 never re-run or re-route the act on the kept answer. Check whether the act landed (for example, the PR merged or the setting

@@ -32,7 +32,7 @@ beside this script, and needs no hooks/ folder.
 
 Single-page mode (the writer, at each wake and before each republish):
 
-    python3 ~/.claude/skills/waiting-page/stale_pages.py --page <fetched.html> [--write <out.html>] [--main <page.html>] [--items <file|folder>]
+    python3 ~/.claude/skills/waiting-page/stale_pages.py --page <fetched.html> [--write <out.html>] [--main <page.html>] [--items <file|folder>] [--answers <file|folder>]
 
 One verdict line names the template source: `origin/main <short sha>` or the --main path. Exit 0
 current, 1 behind, 2 unknown. Unknown: the file is missing or empty, it holds no designData block
@@ -47,9 +47,13 @@ start git, the verdict is unknown: the installed copy never stands in for main.
 number above zero, or a string of digits with no leading zero; anything else reads `unknown`. For each open item (status not `closed`) with a `waits` field, `{repo, run}`
 or `{repo, pr}`, one gh call runs through the program named by WAITING_PAGE_GH (default `gh`):
 `run view <id> --repo <repo> --json status,conclusion` or `pr view <n> --repo <repo> --json state,mergedAt`.
-Each such item prints one line after the verdict line, `wait: item <n> (<what>): <word> (<detail>)`. An item, open or closed, with a
-non-empty string `lane` and a `lastAnswer` object but no `waits`, prints `wait: item <n> (lane <slug>): waiting (answered <lastAnswer.at>)`
+Each such item prints one line after the verdict line, `wait: item <n> (<what>): <word> (<detail>)`. An open item with a
+non-empty string `lane` and a `lastAnswer` object but no `waits` prints `wait: item <n> (lane <slug>): waiting (answered <lastAnswer.at>)`
 (`answered at unknown` when `at` is missing or not a string) instead: a routed answer whose receiver has not reported the act done. It starts no gh process and does not count against WAIT_CAP.
+A closed such item prints that line only when its id has an answer row in --answers, the answers the session saved with
+`ArtifactData list answers` (a JSON list of {"id", "data"} entries, or the folder of <id>.json files; an answer's id is its item id), read as --items
+is. Without --answers a closed lane item prints nothing. With --answers unreadable, not a list of {id, data}, or a folder without the .complete
+marker, each closed lane item prints the line with `unknown` in place of `waiting`.
 An item with `waits` keeps its one line. The word is
 `ended` (the run completed with any conclusion; the PR merged; the PR closed unmerged, which its line says),
 `waiting` (the run or PR is still going), or `unknown` (gh missing, non-zero, timed out, not JSON, or a
@@ -419,6 +423,27 @@ def load_items(path):
     return data, not os.path.isdir(path) or os.path.isfile(os.path.join(path, MARKER))
 
 
+def load_answer_ids(path):
+    """The set of answer ids saved by `ArtifactData list answers`: a JSON list of {"id", "data"} entries, or the folder of <id>.json
+    files (the one folder loader, export_page.docs_in). An answer's id is its item id. Raises ValueError for a file or folder that cannot
+    be read, a list of the wrong shape, or a folder without the .complete marker (its list may be cut short)."""
+    from export_page import MARKER, Stop, docs_in, load_json  # lazy: only --answers reads a folder
+    try:
+        if os.path.isdir(path):
+            ids = set(docs_in(path, path))
+            if not os.path.isfile(os.path.join(path, MARKER)):
+                raise ValueError("%s has no .complete marker, so its list may be cut short" % path)
+            return ids
+        data = load_json(path, path)
+    except Stop as err:
+        raise ValueError(str(err))
+    except OSError as err:
+        raise ValueError(err.strerror or str(err))
+    if not (isinstance(data, list) and all(isinstance(r, dict) and isinstance(r.get("id"), str) for r in data)):
+        raise ValueError("%s is not a JSON list of {id, data} answers" % path)
+    return {r["id"] for r in data}
+
+
 def parse_waits(waits):
     """(gh argv, label) for a `waits` of {repo, run} or {repo, pr}; ValueError when it is anything else."""
     if not isinstance(waits, dict) or set(waits) not in ({"repo", "run"}, {"repo", "pr"}):
@@ -472,9 +497,15 @@ def wait_word(argv, answer):
     raise ValueError("gh gave no pr state")
 
 
-def wait_lines(items, complete=True):
+UNREADABLE = object()  # wait_lines' `answers` when --answers was given and cannot be read
+
+
+def wait_lines(items, complete=True, answers=None):
     """One line per open item with a `waits` field, in order; at most WAIT_CAP gh calls. With complete False, none: every wait reads unknown.
-    An item, open or closed, with a `lane`, a `lastAnswer` and no `waits` gets one lane line, built from the item: no gh call, not counted in WAIT_CAP."""
+    An item with a `lane`, a `lastAnswer` and no `waits` gets one lane line, built from the item: no gh call, not counted in WAIT_CAP.
+    An open one always prints it. A closed one prints it only when `answers` (the set of answer ids, each an item id) holds its id: a routed
+    answer still in flight. With `answers` None (no --answers) a closed one prints nothing. With `answers` UNREADABLE each closed one prints
+    the line with `unknown` for `waiting`, never silence."""
     lines, calls = [], 0
     for item in items:
         if not isinstance(item, dict):
@@ -483,9 +514,15 @@ def wait_lines(items, complete=True):
         if "waits" not in item:
             answer, lane = item.get("lastAnswer"), item.get("lane")
             if isinstance(answer, dict) and isinstance(lane, str) and lane:
+                word = "waiting"
+                if item.get("status") == "closed":
+                    if answers is UNREADABLE:
+                        word = "unknown"
+                    elif answers is None or item.get("id") not in answers:
+                        continue
                 at = answer.get("at")
-                lines.append("wait: item %s (lane %s): waiting (answered %s)" % (item.get("n", item.get("id", "?")), lane,
-                                                                                at if isinstance(at, str) and at else "at unknown"))
+                lines.append("wait: item %s (lane %s): %s (answered %s)" % (item.get("n", item.get("id", "?")), lane, word,
+                                                                          at if isinstance(at, str) and at else "at unknown"))
             continue
         if item.get("status") == "closed":
             continue
@@ -506,18 +543,26 @@ def wait_lines(items, complete=True):
 
 def single_page(argv):
     """Exit 0 current, 1 behind, 2 unknown for one fetched page. Writes a file only with --write, never on unknown.
-    With --items, prints after the verdict line one wait line per open item with a `waits` field, and one lane line per item,
-    open or closed, with a `lane` and a `lastAnswer` and no `waits`; the exit code stays the verdict's."""
+    With --items, prints after the verdict line one wait line per open item with a `waits` field, and one lane line per open item
+    with a `lane` and a `lastAnswer` and no `waits`, and per closed one whose id has a row in --answers (`unknown` for all of them when
+    --answers is given and unreadable; none without --answers); the exit code stays the verdict's."""
     ap = argparse.ArgumentParser(prog="stale_pages.py", allow_abbrev=False)
     ap.add_argument("--page", required=True)
     ap.add_argument("--write")
     ap.add_argument("--main")
     ap.add_argument("--items")
+    ap.add_argument("--answers")
     args = ap.parse_args(argv)
     code = page_verdict(args)
     if args.items is not None:
+        answers = None
+        if args.answers is not None:
+            try:
+                answers = load_answer_ids(args.answers)
+            except ValueError:
+                answers = UNREADABLE
         try:
-            lines = wait_lines(*load_items(args.items))
+            lines = wait_lines(*load_items(args.items), answers=answers)
         except ValueError as err:
             lines = ["wait: the items cannot be read: unknown (%s)" % err]
         for line in lines:
