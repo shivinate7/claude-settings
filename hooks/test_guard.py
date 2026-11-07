@@ -5784,6 +5784,17 @@ add("background-end: flask --app run db upgrade under run_in_background with no 
 add("background-end: control, flask --app hello run under run_in_background with no note is refused",
     "deny", "background-end", cwd=NOGIT, carries=("background-end", "until:"),
     command="flask --app hello run", run_in_background=True)
+# A script part is a server when it is a serve, watch or dev word, wherever it sits in the name: a build that starts a
+# server, a test in dev mode, and a css watcher run until stopped, so each is refused with no note.
+add("background-end: npm run build:start under run_in_background with no note is refused",
+    "deny", "background-end", cwd=NOGIT, carries=("background-end", "until:"),
+    command="npm run build:start", run_in_background=True)
+add("background-end: npm run test:dev under run_in_background with no note is refused",
+    "deny", "background-end", cwd=NOGIT, carries=("background-end", "until:"),
+    command="npm run test:dev", run_in_background=True)
+add("background-end: npm run build:watch:css under run_in_background with no note is refused",
+    "deny", "background-end", cwd=NOGIT, carries=("background-end", "until:"),
+    command="npm run build:watch:css", run_in_background=True)
 
 # Each starts a server or watcher that never ends on its own, and has no note: a flag before the
 # script name, a Windows executable name, a wrapper that runs the command, or a script name that serves or watches.
@@ -7954,6 +7965,15 @@ sh("trim: env: a heredoc file with an env read, run by sh, denies",
    "cat > brief.md <<'EOF'\ncat " + ENV + "\nEOF\nsh brief.md", "deny", "env-file", cwd=NOGIT)
 sh("trim: env: a heredoc file with no env read, checked by python3, is allowed",
    "cat > brief.md <<'EOF'\necho hi\nEOF\npython3 check.py brief.md", "allow", cwd=NOGIT)
+# A file a heredoc writes and a runner executes keeps its body in view, so the env read in it denies. Each form runs
+# the file: a shell, an interpreter with an option before the file, a runner with a value flag, a PowerShell file, or
+# a pipe into a shell. The control names the file as an argument of a checker, which runs nothing, so it is allowed.
+for _run in ("sh -o pipefail f", "node --env-file " + ENV + " f", "node --require dotenv/config f",
+             "python3 -X dev f", "powershell -ExecutionPolicy Bypass -File f", "cat f | sudo -u root bash"):
+    sh("trim: env: a heredoc file with an env read, run as %r, still denies" % _run,
+       "cat > f <<'EOF'\ncat " + ENV + "\nEOF\n" + _run, "deny", "env-file", cwd=NOGIT)
+sh("trim: env: a heredoc file with an env read, named as an argument by python3 check.py, is allowed",
+   "cat > f <<'EOF'\ncat " + ENV + "\nEOF\npython3 check.py f", "allow", cwd=NOGIT)
 sh("trim: env: the same assignment ahead of a non-runner still denies",
    "ADMINS='Shivam Semwal' cat --env-file=" + ENV, "deny", "env-file", cwd=NOGIT)
 add("env: Edit of the example file", "allow", tool="Edit", cwd=NOGIT,
@@ -24376,6 +24396,31 @@ def gs_fork_check(name, record, files, refs, spawn, want):
     return check
 
 
+EMPTY_TREE = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"  # git's empty tree: origin/main with no files
+
+
+def gs_pushed_record_check(name, lane_record):
+    """A lane whose own extras file names `lane_record`, a branch the lane pushed, and whose step on that branch grants
+    Opus. origin/main's extras name no record branch, so the record branch is the default, roadmap, which holds no step:
+    no lift. Reading the lane's own extras would find the step on the pushed branch, so that read must not lift."""
+    def check():
+        tree = dict([gs_step(GS_STEP, GS_LANE, grants=[gs_grant("reviewer")])])
+        tree[".claude/layout-extras.json"] = json.dumps({"kinds": {}, "record-branch": lane_record}) + "\n"
+        repo = gs_repo("pushed-" + name, tree, ref=False)
+        pushed = run_vcs(repo, "update-ref", "refs/remotes/origin/" + lane_record, "HEAD")
+        main = run_vcs(repo, *IDENT, "commit-tree", EMPTY_TREE, "-m", "origin/main, with no record branch key")
+        if pushed.returncode != 0 or main.returncode != 0:
+            sys.exit("fixture setup failed in gs_pushed_record_check: %r. stderr: %s"
+                     % (name, (pushed.stderr or main.stderr).strip()))
+        made = run_vcs(repo, "update-ref", "refs/remotes/origin/main", main.stdout.strip())
+        if made.returncode != 0:
+            sys.exit("fixture setup failed in gs_pushed_record_check: update-ref origin/main in %r" % repo)
+        config, session = ov_config("grant-pushed-" + name), "gs-payload-pushed-" + name
+        problem = ov_want(*gs_spawn(config, session, repo, OP_REVIEWER), "deny", "agent-model-cap")
+        return (not problem), (problem or "deny, as wanted")
+    return check
+
+
 def gs_lift_check():
     """A reviewer spawn on the lane's step, which grants reviewers, is allowed. guard.log gets one
     step-grant line that names the step and ends in the payload's session id."""
@@ -24522,6 +24567,9 @@ GS_CHECKS = (
     ("step grant: control for a fork, its own record branch with no grant refuses an Opus spawn",
      gs_fork_check("own-no-grant", "roadmap-fork", dict([gs_step(GS_STEP, GS_LANE)]),
                    ("roadmap-fork",), OP_REVIEWER, "deny")),
+    # The record branch is read from origin/main's extras, never from the lane's own extras file.
+    ("step grant: a lane whose own extras name a branch it pushed gets no lift; the record branch is read from origin/main",
+     gs_pushed_record_check("own-extras", "lane-record")),
 )
 for _label, _check in GS_CHECKS:
     LOG_CHECKS_EXTRA.append((_label, _check))

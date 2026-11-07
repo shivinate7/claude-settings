@@ -1737,6 +1737,15 @@ EXCLUSION_ASKS = (
     "send opus on everything aside from builders and reviewers",
     "send opus, leave out builders and reviewers",
     "send opus, builders and reviewers stay on sonnet",
+    # Exclusion by a word that names a model or a state, not a role: remain, excluded, save the rest, sonnet, haiku,
+    # out, excepted. Each leaves the two roles off the Opus grant.
+    "send opus, builders and reviewers remain on sonnet",
+    "send opus, builders and reviewers excluded",
+    "send opus, builders and reviewers, save the rest",
+    "send opus, builders and reviewers on sonnet",
+    "send opus, builders and reviewers on haiku",
+    "send opus, builders and reviewers out",
+    "send opus, builders and reviewers excepted",
 )
 
 
@@ -1756,6 +1765,23 @@ def case_opus_scope_exclusion_words_grant_no_excluded_role():
     got = opus_override(cfg)
     check("opus scope: control, builders and reviewers named as the ones to run grants both, sorted",
           got is not None and got[2] == ["builder", "reviewer"], "got %r" % (got,))
+
+
+# A plain ask that keeps builders and reviewers on Opus, or sends them to Opus and leaves the rest, grants both roles:
+# `stay` and `leave` here name the roles' model, not an exclusion.
+KEPT_ON_OPUS_ASKS = (
+    "send opus, builders and reviewers stay on opus",
+    "send builders and reviewers to opus, leave the rest",
+)
+
+
+def case_opus_scope_stay_and_leave_the_rest_grant_both_roles():
+    for prompt in KEPT_ON_OPUS_ASKS:
+        cfg, judge, scope, exc = scope_grant(prompt, None, ScopeStub(answer=None))
+        check("opus scope: %r is judged without an error" % prompt, exc is None, "raised %r" % (exc,))
+        got = opus_override(cfg)
+        check("opus scope: %r grants builder and reviewer, sorted" % prompt,
+              got is not None and got[2] == ["builder", "reviewer"], "got %r" % (got,))
 
 
 def case_opus_scope_not_read_when_the_judge_says_no():
@@ -2160,6 +2186,7 @@ def main():
         case_opus_scope_drops_an_unknown_role_and_keeps_the_rest()
         case_opus_scope_two_roles_from_the_read_grant_both_sorted()
         case_opus_scope_exclusion_words_grant_no_excluded_role()
+        case_opus_scope_stay_and_leave_the_rest_grant_both_roles()
         case_opus_list_role_lifts_its_roles_and_refuses_the_rest()
         case_opus_keyword_files_keep_their_bytes()
         case_opus_scope_read_sees_every_role_before_it_runs()

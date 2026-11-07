@@ -939,6 +939,10 @@ RESTATES = [
     "Departs from: lint/stamp.py:run_stamp — no-op",
     "Departs from: lint/stamp.py:run_stamp — not changed",
     "Departs from: lint/stamp.py:run_stamp — the ask is kept",
+    # A no-change word that leads a clause, or sits in the change side with no ';', still restates main.
+    "Departs from: lint/stamp.py:run_stamp — keeps the lint job and does not move it",
+    "Departs from: lint/stamp.py:run_stamp — nothing moves",
+    "Departs from: lint/stamp.py:run_stamp — keeps the lint job and never removes it",
 ]
 # A line with an empty side, no separator, or nothing after the colon. Each is refused.
 MALFORMED = [
@@ -963,6 +967,10 @@ VALID_LINES = [
     "Departs from: Suspense cards — keeps Suspense cards and adds Reset",
     "Departs from: the screens — none of the existing screens change; adds a new tab",
     "Departs from: Suspense cards — Suspense cards stay in Suspense and a Reset button is added",
+    # A kept part leads one clause and a real change follows it: a change, not a restatement.
+    "Departs from: lint/stamp.py:run_stamp — keeps the retry count and changes the timeout to 5 seconds",
+    # A change side that says where a part is kept names a place, not a restatement: it passes.
+    "Departs from: lint/stamp.py:run_stamp — Suspense cards are kept in Suspense",
 ]
 DEPARTS_REFUSAL = (DEPARTS_RULE, "Departs")
 
