@@ -20,7 +20,7 @@ Four more rules read the notes file (coordinator rulings 2026-11-07 13:58 and 13
     the merge base of origin/main and HEAD. Both counts are read live; the total prints. A HEAD with none to count
     reads no base.
   Until: a `Fix: none` line the branch adds or edits carries `Until: YYYY-MM-DD`, today or later and no more than
-    UNTIL_CAP_DAYS (30) from today. A step or already-fixed line needs no date. Today is FIXED_TODAY (ISO), else the clock.
+    UNTIL_CAP_DAYS (14) from today. A step or already-fixed line needs no date. Today is FIXED_TODAY (ISO), else the clock.
   Upkeep: expired_notes lists the `Fix: none` lines whose Until is past, for skills/roadmap/build.py.
   Seen (decision notes-sightings-expiry): a notes line the branch adds carries `Seen: YYYY-MM-DD xN` (N of 1 or more; the
     last Seen on the line counts), dated today or earlier and no more than SEEN_EXPIRY_DAYS (30) old. A line it edits
@@ -36,14 +36,24 @@ starts `Fix:` at column one, or after one leading `- `. A notes line whose `- <s
 base is an edit and passes, so old lines never turn red. Only a step Fix reads origin/roadmap, and only an
 already-fixed Fix reads origin/main's history. When such a read cannot run, the check prints UNKNOWN, says the read
 did not run, and exits 1 (CI or not). Every diff it parses passes --src-prefix=a/ --dst-prefix=b/.
-Cost: a diff, a merge-base and a show of the notes file, a show of each added or edited debt file (the Seen rule reads
-the same diff as the Fix and Until rules, so it starts no git process of its own); two git processes per step named
-(step_exists: a rev-parse of origin/roadmap, then an ls-tree), three per already-fixed sha (fixed_on_main: a
-rev-parse of origin/main, a rev-parse of the sha, a merge-base); the ratchet adds a merge-base, an ls-tree and a show
-per ref when the branch touches the notes file; no file written, no process left running, no timer. commit_fixes
-(lint/report_guard.py) reads one commit with one git process. unseen_notes runs one `git blame --line-porcelain` per notes
-file, and one rev-parse when a boundary line shows, only when the sweep is called with --expire-notes. --next-debt lists
-the debt folder once and reads each debt. --debt-flow runs one git diff, once per batch merge.
+Cost, every git read of a run with no file argument, per notes file path (the layout gives one, or two):
+  - one name-status diff (changes) for the whole branch;
+  - one show of origin/main per moved debt file (the feel-fix check);
+  - the added lines (added_note_lines, run twice: once for the Fix check, once for the Until check): an ls-tree of
+    HEAD and a diff each, and, for the Fix check only when the branch adds a bullet, a merge-base, an ls-tree of the
+    merge base and a show of it;
+  - one show of HEAD per added debt file;
+  - two processes per distinct step named (step_exists: a rev-parse of origin/roadmap, then an ls-tree);
+  - three per already-fixed sha (fixed_on_main: a rev-parse of origin/main, a rev-parse of the sha, a merge-base);
+  - the ratchet, only when the branch touches the notes file: an ls-tree and a show of HEAD, and, when HEAD has a
+    bullet with no valid Fix, a merge-base plus an ls-tree and a show of the merge base.
+  - the Seen rule: one show of HEAD per added or edited debt file; it reads the same notes diff as the Fix and
+    Until rules, so it adds no notes read of its own;
+  - unseen_notes (janitor/sweep.py --expire-notes only): one `git blame --line-porcelain` per notes file, and one
+    rev-parse when a boundary line shows;
+  - --next-debt: one show-toplevel and one listing of the debt folder; --debt-flow: one show-toplevel and one diff.
+No file is written, no process is left running, no timer. commit_fixes (read by lint/report_guard.py) is one git show
+of one commit, one process.
 
     python3 lint/check_record_slugs.py [file ...]
         # files given: check those, skip git
@@ -313,7 +323,7 @@ def commit_fixes(root, sha):
     return out
 
 
-UNTIL_CAP_DAYS = 30  # a `Fix: none` note names a date no further out than this many days from today
+UNTIL_CAP_DAYS = 14  # a `Fix: none` note names a date no further out than this many days from today
 UNTIL = re.compile(r"(?<![\w-])Until:[ \t]*(\d{4}-\d{2}-\d{2})(?!\d)")
 
 
@@ -593,7 +603,9 @@ def fix_failures(root, entries):
     bad = []
     for path, label, fixes in entries:
         if not fixes or None in fixes:
-            bad.append((path, label, "names no valid Fix (step:<slug> on %s, or none -- <reason>)" % ROADMAP))
+            bad.append((path, label, "names no valid Fix. Use step:<slug> on %s; or none -- <reason> with the reason one "
+                        "of (%s) and Until: YYYY-MM-DD no more than %d days from today; or already fixed on main <sha>"
+                        % (ROADMAP, ", ".join(NONE_REASONS), UNTIL_CAP_DAYS)))
             continue
         for kind, value in fixes:
             if kind == "step" and not step_exists(root, value):

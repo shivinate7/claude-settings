@@ -4872,6 +4872,15 @@ def commit_at(folder, subject, at):
                    env=env)
 
 
+def amend_at(folder, at):
+    """Amend the last commit with no edit and no staged change. Its committer time becomes `at`; its author time is kept.
+    Returns the amended commit's short sha."""
+    env = dict(os.environ, GIT_COMMITTER_DATE=at)
+    subprocess.run(["git", "-C", folder, "commit", "--amend", "--no-edit"], check=True, capture_output=True, text=True,
+                   env=env)
+    return git_out(folder, "rev-parse", "--short=7", "HEAD")
+
+
 def init_repo(folder, base=None):
     """A git repo at `folder`, rolled out to the layout, whose origin/main holds the notes file as `base`, or no notes
     file when base is None. Nothing is committed past origin/main."""
@@ -4939,6 +4948,11 @@ class NotesFixTests(unittest.TestCase):
         return [human_at("do " + subject, at), tool_use_msg("Bash", {"command": "git commit -m %s" % subject}),
                 tool_result_text("[main %s] %s\n 1 file changed" % (sha, subject)), assistant_text(done)]
 
+    def amend_turn(self, subject, sha, done, at=TURN_AT):
+        """One landed turn that amends a commit: the amend prints the amended `[main sha] subject` line, then the reply."""
+        return [human_at("do " + subject, at), tool_use_msg("Bash", {"command": "git commit --amend --no-edit"}),
+                tool_result_text("[main %s] %s\n 1 file changed" % (sha, subject)), assistant_text(done)]
+
     def quiet_turn(self, subject, done, at=TURN_AT):
         """One landed turn whose `git commit -q` printed nothing, so no tool result names its commit."""
         return [human_at("do " + subject, at), tool_use_msg("Bash", {"command": "git commit -q -m %s" % subject}),
@@ -4985,6 +4999,15 @@ class NotesFixTests(unittest.TestCase):
         init_repo(self.repo, base=NOTES_BASE)
         commit_notes(self.repo, NOTES_BASE + STEP_NOTE, "one")
         self.assert_blocks_naming(self.stop(self.quiet_turn("one", DONE_STEP_UNNAMED)), "fix-alpha")
+
+    def test_an_earlier_commit_amended_in_a_later_turn_does_not_block(self):
+        # Turn one adds the step fix in a commit that names it in Done. Turn two amends that commit with no edit: its
+        # author time stays turn one's, its committer time is turn two's. Turn two's Done omits the step.
+        init_repo(self.repo, base=NOTES_BASE)
+        first = commit_notes(self.repo, NOTES_BASE + STEP_NOTE, "one")
+        amended = amend_at(self.repo, LATER_COMMIT_AT)
+        self.assertIsNone(self.stop(self.turn("one", first, DONE_STEP_NAMED)
+                                    + self.amend_turn("one", amended, DONE_STEP_UNNAMED, at=LATER_TURN_AT)))
 
     def test_a_fix_added_on_an_earlier_turn_does_not_block_a_later_turn(self):
         # Turn one adds the step fix and names it in Done. Turn two commits a README change and omits the step.

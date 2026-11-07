@@ -125,9 +125,11 @@ runs on landed and unlanded turns and not on a stop_hook_active rewrite.
 Notes-fix step check (decision `notes-name-their-fix`): on a landed turn with a well-formed report whose Done has a
 RECORDED item, each `Fix: step:<slug>` that this turn's own commits add to the debt notes file or in a new debt file
 must have its slug in Done as a whole word (`step:<slug>` or the bare slug; a longer slug that starts with it does not
-count). The turn's commits are those on HEAD and not on origin/main with a committer time at or after the turn's
+count). The turn's commits are those on HEAD and not on origin/main with an author time at or after the turn's
 start, the stamp of its last human message. Time finds them, so a quiet `git commit -q` and a redirected one count. A
-line an earlier turn added is never judged again. A commit made in another checkout counts only once it is on HEAD.
+line an earlier turn added is never judged again, and an amend or rebase of an earlier commit keeps its author
+time, so it is not judged either. A commit cherry-picked this turn keeps its old author time and is missed: a
+fail open. A commit made in another checkout counts only once it is on HEAD.
 A write to the remote through an MCP tool makes no local commit and is out of scope. An unreadable stamp, a git
 failure and an unreadable commit all fail open. A turn with no commit, a checkout with no notes file on disk, and the
 none and already-fixed forms pass. The Fix grammar lives in lint/check_record_slugs.py (parse_fix, commit_fixes) and
@@ -952,10 +954,10 @@ NOTES_FIX_REASON = (
 
 
 def turn_commits(git_text, root, start):
-    """The shas of the commits on HEAD and not on origin/main whose committer time is at or after `start` (an aware
+    """The shas of the commits on HEAD and not on origin/main whose author time is at or after `start` (an aware
     datetime), read with `git_text` (check_record_slugs.git_text, the one no-window git read). Raises on a git failure
     or a time git prints badly; the caller fails open."""
-    out = git_text(root, "log", "--no-merges", "--format=%H %ct", "origin/main..HEAD")
+    out = git_text(root, "log", "--no-merges", "--format=%H %at", "origin/main..HEAD")
     since = start.timestamp()
     return [sha for sha, when in (line.split() for line in out.splitlines() if line.strip()) if int(when) >= since]
 
