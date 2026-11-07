@@ -1443,6 +1443,12 @@ class ReportTests(StaleCase):
 # A guard module whose refuse() call names the rule: rule_audit reads the rule id from the third argument.
 GUARD_REFUSE = GUARD + "\n\ndef gate(ctx):\n    return refuse(ctx, 'no push to main', 'main-moves-by-pull-request')\n"
 STREAM = "def stream():\n    return 4\n"
+REPO_REGISTRY = "docs/design/repo-colours.json"  # its `repos` keys are the sibling names, read through repo_colour.load
+
+
+def with_registry(*repos):
+    """Extra files that hold the colour registry at REV, with `repos` as its `repos` keys."""
+    return {REPO_REGISTRY: json.dumps({"repos": {name: "#2a6fdb" for name in repos}}, indent=2) + "\n"}
 
 
 class TreeTests(StaleCase):
@@ -1731,6 +1737,58 @@ class TreeTests(StaleCase):
         self.assertEqual(done.returncode, 2, out)
         self.assertIn("--only", out)
         self.assertNotIn("unrecognized arguments", out)
+
+    def test_a_prefix_is_a_sibling_only_when_the_registry_names_its_repo(self):
+        # The sibling names are the `repos` keys of the registry at REV. Any other `word:` prefix is stripped,
+        # and the path after it is checked.
+        extra = with_registry("banchi", "q_max")
+        extra["hooks/a.py"] = "def a():\n    return 1\n"
+        rows = [
+            ("- see `banchi:hooks/nope.py`", False),
+            ("- see `q_max:harness/x.mjs`", False),
+            ("- see `Refs:hooks/a.py`", False),
+            ("- see `see:hooks/gone.py`", True),
+            ("- see `Refs:docs/gone.md`", True),
+            ("- see `Where:hooks/gone.py.`", True),
+            ("Don't read `see:hooks/gone.py` for the list.", True),  # a lone quote in text
+            ("# Dead `Refs:docs/gone.md`", True),  # a heading opens with `#`
+            ("Open a comment with `<!--`. See `Where:hooks/gone.py`.", True),
+        ]
+        text, lines = rows_text(rows)
+        for args in ([], ["--any-top"]):
+            with self.subTest(args=args):
+                self.assert_tree_flags(self.tree(text, extra=extra),
+                                       [(NOTES, n, "STALE003") for n in lines], args=args)
+
+    def test_with_no_registry_or_an_empty_one_every_prefix_is_checked(self):
+        # No registry file at REV, or one with no `repos` keys, means no sibling names: `banchi:` and `q_max:`
+        # are checked as paths.
+        rows = [
+            ("- see `banchi:hooks/nope.py`", True),
+            ("- see `q_max:hooks/nope.py`", True),
+        ]
+        text, lines = rows_text(rows)
+        for extra in ({}, with_registry()):
+            with self.subTest(registry=sorted(extra)):
+                self.assert_tree_flags(self.tree(text, extra=extra), [(NOTES, n, "STALE003") for n in lines])
+
+    def test_any_top_skips_a_placeholder_run_and_still_fires_a_dead_neighbour_on_its_line(self):
+        # A pin, green on the round-1 code: a placeholder run is skipped by run, never by line.
+        rows = [
+            ("- see `tests/<x>.py` or `./decisions/<a>.md`", False),
+            ("- see `$harness/x.mjs`", False),
+            ("- see `tests/<x>.py`, `./decisions/<a>.md` and `hooks/gone-q1.py`", True),
+        ]
+        text, lines = rows_text(rows)
+        self.assert_tree_flags(self.tree(text), [(NOTES, n, "STALE003") for n in lines], args=["--any-top"])
+
+    def test_any_top_resolves_a_dot_slash_cite_against_the_repo_root_as_well_as_the_md_folder(self):
+        # `./hooks/a.py` is one file whether the cite sits at the repo root or in the Markdown file's folder.
+        extra = {"hooks/a.py": "def a():\n    return 1\n",
+                 "README.md": "# Readme\n\n- see `./hooks/a.py`\n- see `./hooks/gone.py`\n"}
+        notes = "# Notes\n\n- see `./hooks/a.py`\n- see `./hooks/gone.py`\n"
+        self.assert_tree_flags(self.tree(notes, extra=extra), [(NOTES, 4, "STALE003"), ("README.md", 4, "STALE003")],
+                               args=["--any-top"])
 
 
 ROUTE_ROWS = "hooks/route_rows.json"  # a route id is a row of this file at head
