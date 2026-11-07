@@ -164,18 +164,24 @@ def ready_call(rest, env_repo=""):
 def exported_repo(tokens):
     """The GH_REPO a segment sets for the shell, "" when it clears it, None when it leaves it alone:
     `export GH_REPO=o/r` (an empty value clears), `unset GH_REPO` (bash), `$env:GH_REPO = o/r` or
-    `${env:GH_REPO} = o/r` (PowerShell, any case)."""
+    `${env:GH_REPO} = o/r` (PowerShell, any case), `Remove-Item Env:GH_REPO` or `ri` (clears). The
+    hook reads text only, so a value it cannot expand (`$var`, `$null`, `$(...)`, a backtick) names
+    no repo: "" too, and the folder's repo is used."""
+    def value(v):
+        return "" if "$" in v or "`" in v else v
     if tokens[:1] == ["export"]:
         vals = [t[8:] for t in tokens[1:] if t.startswith("GH_REPO=")]
-        return vals[-1] if vals else None
+        return value(vals[-1]) if vals else None
     if tokens[:1] == ["unset"]:
         return "" if "GH_REPO" in tokens[1:] else None
+    if tokens[:1] and tokens[0].lower() in ("remove-item", "ri"):
+        return "" if any(re.match(r"env:\\?gh_repo$", t, re.I) for t in tokens[1:]) else None
     m = tokens and re.match(r"\$(?:env:gh_repo|\{env:gh_repo\})(=.*)?$", tokens[0], re.I)
     if m:
         if m.group(1):
-            return m.group(1)[1:]
+            return value(m.group(1)[1:])
         if tokens[1:2] == ["="]:
-            return tokens[2] if len(tokens) > 2 else ""
+            return value(tokens[2]) if len(tokens) > 2 else ""
     return None
 
 
@@ -231,14 +237,22 @@ def wait_for(sha, cwd, deadline, repo=""):
     A run that ends skipped is no run: the draft PR's run skips, and the run of `gh pr ready`
     comes after it. While no run that ran is judged, list again, `pauses` apart; the last
     pause ends at the deadline, with one list there. After the first run that ran is judged,
-    list once more at once and judge any run not yet read there, then return. A run that first
-    shows after that re-list is not judged (debt ci-wake-lists-runs-once)."""
+    list once more at once and judge any run not yet read there, then return. The runs come back
+    newest first, as judge_runs reads them: the re-list's runs go ahead of the runs read before,
+    so a newer run of a name outranks the older one. A refused re-list returns the runs already
+    judged. A run that first shows after the re-list is not judged (debt ci-wake-lists-runs-once)."""
     extra = ["-R", repo] if repo else []
     list_args = ["run", "list", "--commit", sha, "--limit", "100", *extra, "--json", RUN_FIELDS]
     gaps = pauses()
     seen, viewed, relisted = set(), [], False
     while True:
-        runs = [r for r in gh_json(list_args, cwd) if r["conclusion"] != "skipped"]
+        try:
+            listed = gh_json(list_args, cwd)
+        except Unknown:
+            if viewed:
+                return viewed   # the at-once re-list failed: the judged runs are the answer
+            raise
+        runs = [r for r in listed if r["conclusion"] != "skipped"]
         live = {r["name"] for r in runs if r["conclusion"] != "cancelled"}
         fresh = [r for r in runs if r["databaseId"] not in seen
                  and not (r["conclusion"] == "cancelled" and r["name"] in live)]   # a cancelled twin: judge_runs reads the run that ran
@@ -248,7 +262,7 @@ def wait_for(sha, cwd, deadline, repo=""):
                for r in fresh]
         seen.update(r["databaseId"] for r in fresh)
         ran = [r for r in got if r.get("conclusion") != "skipped"]   # it ended skipped: no run
-        viewed.extend(ran)
+        viewed = ran + viewed   # newest first: gh lists newest first, and a later list shows newer runs
         if ran and not relisted and deadline - time.monotonic() > 0:
             relisted = True
             continue   # the first judged run: list once more at once for a later one

@@ -1,7 +1,8 @@
 # A late run is not judged
 
 **What.** `ci_wake.wait_for` lists the head's CI runs once more, at once, after the first judged run, and judges
-any run that shows there. A run that first shows after that re-list is not judged. The hook can then print green
+any run that shows there. Its runs go ahead of the runs judged before, so a newer run of a name outranks the older
+one. A refused re-list keeps the runs already judged. A run that first shows after that re-list is not judged. The hook can then print green
 while that run goes on.
 
 **Where.** `hooks/ci_wake.py`, `wait_for`.
