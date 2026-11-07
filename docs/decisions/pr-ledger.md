@@ -70,7 +70,7 @@ The first match wins, in this order. A held or unparseable record matches no rec
 
 The ledger reads no pull request's CI state. A batch line is a done record for the live head. `merge --lane-lint` checks the join, and the integration PR's CI run checks the merge. Its CI-side reads are main's runs, judged per workflow, for the main-red hold.
 
-Each next act has an age limit, in one constant, `PR_STATE_AGE_HOURS` in merge/merge.py. Every limit is unmeasured (coordinator pick A, 12:30 CST Nov 7); the coordinator measures the real ages after the label rollout. Batch is 24 h, a first guess at one batch cycle. Blocked on #N has no limit of its own and is red while #N is red. A next act over its limit is red.
+Each next act has an age limit, in one constant, `PR_STATE_AGE_HOURS` in merge/merge.py. Every limit is unmeasured (coordinator pick A, 12:33 CST Nov 7); the coordinator measures the real ages after the label rollout. Batch is 24 h, a first guess at one batch cycle. Blocked on #N has no limit of its own and is red while #N is red. A next act over its limit is red.
 
 A main-red hold shows on each batch line it holds.
 
@@ -91,7 +91,7 @@ Build order. Part 3b starts only after part 1 merges. This record sets no other 
 1. The ledger in `merge/merge.py`. Lane `pr-state-is-on-the-pr` builds it. Its labels cover held, parked, replaced and batch. Its sweep is this ledger read.
 2. The lane check in `lint/report_guard.py`.
 3a. Ready and stalled steps get one next act in `skills/roadmap/build.py`, plus a ready count. Branch `ready-steps-next-act`.
-3b. After part 1 merges: `merge/merge.py` adds `--reviewed --json` and makes the stale-record act match this record. The publisher runs it inside the read it already makes and passes the result in the live file. `skills/roadmap/build.py` shows each PR's next act and prints the `stalled pr:` line; it starts no process.
+3b. After part 1 merges: `merge/merge.py` adds `--reviewed --json` and makes the stale-record act match this record. A held record on an old head falls through to the label rules, as above; part 1 tests stale first, so 3b fixes that order. The publisher runs it inside the read it already makes and passes the result in the live file. `skills/roadmap/build.py` shows each PR's next act and prints the `stalled pr:` line; it starts no process.
 4. `lint/report_guard.py` checks the report's `Unstarted:` line against the ready list, the on-merge Deviations line, and the parser gaps on PR #1503. It also holds triage until each `stalled pr:` line is disposed, as it does for `stalled step:` lines. Per the 13:20 ruling, those gaps are fixed here, not filed as notes.
 
 ## The cost
@@ -105,6 +105,7 @@ Per rule `outcomes-mechanize-rules`:
   - one `issues/<n>/events` list for each PR that reaches the hold rule with the `batch` label, or with a hold label and a valid `Waits on:` line;
   - when a batch line exists, one page (50) of main's runs. A run's jobs are read only when that run did not succeed, plus, for each candidate run it examines, its jobs and, unless the red already stands, its workflow file.
   - The count per run is not measured yet.
+- Reads per lane Stop (part 2): none unless the final report claims a round PASS. Then two `gh api` reads per claimed PR: the PR's head and its comments.
 - Tests to write with the build, one per red: no review record; stale head; batch over its limit; hold with no item.
 
 ## Open
