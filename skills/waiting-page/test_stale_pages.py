@@ -1185,6 +1185,48 @@ class Stale(unittest.TestCase):
                                  "the lane line for item 154 with %s is not the unknown line:\n%s" % (label, r.stdout + r.stderr))
                 self.assertEqual(self.gh_calls(folder), [], "gh was called for a lane item with %s" % label)
 
+    # --answers that cannot be read (no file, a folder with no .complete marker, a list of the wrong shape): a closed lane item
+    # still prints its lane line, with `unknown` for `waiting`, because its answer row may be in flight. An open one still reads `waiting`.
+
+    def unreadable_answers(self, shape):
+        """The --answers value of one unreadable shape: no file, a folder whose answer row has no .complete marker, or a list of bare ids."""
+        if shape == "missing file":
+            return os.path.join(self.tmp.name, "no-such-answers.json")
+        if shape == "folder with no .complete":
+            folder = self.answers_folder([self.answer_row(154)])
+            os.remove(os.path.join(folder, ".complete"))
+            return folder
+        return self.answers_file(["item-154"])  # a list of ids, not of {id, data} entries
+
+    def closed_lane_item_under_unreadable_answers(self, shape):
+        current, _ = self.current_and_behind()
+        env, folder = self.gh_env({})
+        r = self.items_run(current, self.items_file([self.lane_item(154, status="closed")]), env, answers=self.unreadable_answers(shape))
+        self.assert_page_word(r, "current", 0)
+        self.assertEqual(r.stdout.splitlines()[1:], [lane_line(154, "unknown")],
+                         "the closed lane item under --answers as a %s does not print its lane line as unknown:\n%s" % (shape, r.stdout + r.stderr))
+        self.assertEqual(self.gh_calls(folder), [], "gh was called for a closed lane item under --answers as a %s" % shape)
+
+    def test_a_closed_lane_item_under_a_missing_answers_file_prints_its_lane_line_as_unknown(self):
+        self.closed_lane_item_under_unreadable_answers("missing file")
+
+    def test_a_closed_lane_item_under_an_answers_folder_with_no_complete_marker_prints_its_lane_line_as_unknown(self):
+        self.closed_lane_item_under_unreadable_answers("folder with no .complete")
+
+    def test_a_closed_lane_item_under_an_answers_list_of_the_wrong_shape_prints_its_lane_line_as_unknown(self):
+        self.closed_lane_item_under_unreadable_answers("list of ids")
+
+    def test_an_open_lane_item_under_unreadable_answers_still_prints_its_lane_line_as_waiting(self):
+        current, _ = self.current_and_behind()
+        for shape in ("missing file", "folder with no .complete", "list of ids"):
+            with self.subTest(answers=shape):
+                env, folder = self.gh_env({})
+                r = self.items_run(current, self.items_file([self.lane_item(154)]), env, answers=self.unreadable_answers(shape))
+                self.assert_page_word(r, "current", 0)
+                self.assertEqual(r.stdout.splitlines()[1:], [lane_line(154)],
+                                 "the open lane item under --answers as a %s does not read waiting:\n%s" % (shape, r.stdout + r.stderr))
+                self.assertEqual(self.gh_calls(folder), [], "gh was called for an open lane item under --answers as a %s" % shape)
+
 
 # Fixtures for the --items cases: a repo, a run that ended completed/failure, and the PR that run checked.
 REPO, RUN, PR = "shivinate7/q_max", "41861801325", 1011
@@ -1238,9 +1280,9 @@ LANE, ANSWERED = "owner-word-relay", "2026-11-04T13:56:29.078Z"  # a lane's slug
 HOME = "answered-leaves-page"  # the roadmap step that carries a routed answer's work: the closed item's `home`
 
 
-def lane_line(n):
-    """The lane line of an item on a lane with a lastAnswer and no waits: `wait: item <n> (lane <slug>): waiting (answered <at>)`."""
-    return "wait: item %d (lane %s): waiting (answered %s)" % (n, LANE, ANSWERED)
+def lane_line(n, word="waiting"):
+    """The lane line of an item on a lane with a lastAnswer and no waits: `wait: item <n> (lane <slug>): waiting (answered <at>)`, `word` for waiting."""
+    return "wait: item %d (lane %s): %s (answered %s)" % (n, LANE, word, ANSWERED)
 
 
 def lane_line_unknown(n):
