@@ -6,6 +6,7 @@ guard as a subprocess, the way Claude Code's Stop hook does. Run with:
 
     python lint/test_report_guard.py -v
 """
+import ast
 import contextlib
 import errno
 import importlib.util
@@ -62,6 +63,7 @@ def setUpModule():
     # The route-rows seam points at a missing file, so no old case reads a real rows file.
     _ISOLATION["rows"] = os.environ.get(hook_base.ROUTE_ROWS_ENV)
     os.environ[hook_base.ROUTE_ROWS_ENV] = os.path.join(_ISOLATION["dir"], "no-route-rows.json")
+    gh_stub_seam()
 
 
 def tearDownModule():
@@ -83,6 +85,82 @@ def tearDownModule():
     shutil.rmtree(_ISOLATION.pop("dir"), ignore_errors=True)
     shutil.rmtree(RUN_FOLDER, ignore_errors=True)
     shutil.rmtree(hook_base.RUN, ignore_errors=True)  # the hook harness's run folder, made at its import
+    gh_stub_teardown()
+
+
+# The gh stand-in. A guard run here reaches it first on PATH, so no case reaches a real gh (debt
+# push-report-before-checks). Its program is the STUB_SRC string of hooks/test_ci_wake.py, read with ast,
+# so that file's module-level setup (its own temp folder and launchers) does not run here. A case writes
+# the fixture the stand-in answers. The default fixture holds no PR and no run, so an old push case reads
+# no CI and passes.
+GH_KEYS = ("PATH", "GH_STUB_FIXTURE", "GH_STUB_LOG")
+GH_STUB = None  # the stand-in's module, set by gh_stub_seam: its read_log reads a run's call files
+TEST_CI_WAKE = os.path.join(HOOKS, "test_ci_wake.py")
+
+
+def gh_stub_source():
+    with open(TEST_CI_WAKE, encoding="utf-8") as f:
+        tree = ast.parse(f.read())
+    for node in tree.body:
+        if isinstance(node, ast.Assign) and any(getattr(t, "id", None) == "STUB_SRC" for t in node.targets):
+            return ast.literal_eval(node.value)
+    raise RuntimeError("hooks/test_ci_wake.py holds no STUB_SRC")
+
+
+def gh_stub_seam():
+    """Write the stand-in and its launchers into this run's folder, put them first on PATH, and load its module."""
+    global GH_STUB
+    folder = os.path.join(_ISOLATION["dir"], "gh-stub")
+    bin_dir = os.path.join(folder, "bin")
+    os.makedirs(bin_dir)
+    stub_py = os.path.join(folder, "gh_stub.py")
+    with open(stub_py, "w", encoding="utf-8") as f:
+        f.write(gh_stub_source())
+    # Two launchers, written as hooks/test_ci_wake.py write_stub writes them. That module is not imported:
+    # loading it makes its own temp folder.
+    launcher = os.path.join(bin_dir, "gh")
+    with open(launcher, "w", encoding="utf-8", newline="\n") as f:
+        f.write('#!/bin/sh\nexec "%s" "%s" "$@"\n' % (sys.executable, stub_py))
+    os.chmod(launcher, 0o755)
+    with open(os.path.join(bin_dir, "gh.cmd"), "w", encoding="utf-8", newline="") as f:
+        f.write('@echo off\r\n"%s" "%s" %%*\r\n' % (sys.executable, stub_py))
+    fixture = os.path.join(folder, "fixture.json")
+    with open(fixture, "w", encoding="utf-8") as f:
+        json.dump({"mode": "ok", "prs": [], "runs": []}, f)
+    _ISOLATION["gh"] = {k: os.environ.get(k) for k in GH_KEYS}  # the values before the stand-in; teardown restores them
+    _ISOLATION["gh_bin"] = bin_dir
+    os.environ["PATH"] = os.pathsep.join((bin_dir, os.environ.get("PATH", "")))
+    os.environ["GH_STUB_FIXTURE"] = fixture
+    os.environ["GH_STUB_LOG"] = os.path.join(folder, "gh.log")
+    spec = importlib.util.spec_from_file_location("gh_stub", stub_py)
+    GH_STUB = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(GH_STUB)
+
+
+def gh_stub_teardown():
+    global GH_STUB
+    for key, value in _ISOLATION.pop("gh").items():
+        if value is None:
+            os.environ.pop(key, None)
+        else:
+            os.environ[key] = value
+    _ISOLATION.pop("gh_bin")
+    GH_STUB = None
+
+
+def gh_env(fixture=None, log=None, path=None):
+    """The environment of one guard run that may reach gh: this process's environment, minus every PATH
+    spelling and GH_REPO. PATH leads with the stand-in's folder, or is `path` when given. `fixture` and
+    `log` are the case's fixture file and call log; with neither, the run keeps the module's defaults."""
+    env = {k: v for k, v in os.environ.items() if k.upper() not in ("PATH", "GH_REPO")}
+    if path is None:
+        path = os.pathsep.join((_ISOLATION["gh_bin"], _ISOLATION["gh"]["PATH"] or ""))
+    env["PATH"] = path
+    if fixture is not None:
+        env["GH_STUB_FIXTURE"] = fixture
+    if log is not None:
+        env["GH_STUB_LOG"] = log
+    return env
 
 
 def human(text):
