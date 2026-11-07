@@ -45,6 +45,7 @@ sys.path.insert(0, os.path.join(REPO_ROOT, "hooks"))
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(HERE, "..", "lint"))
 import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py)
+import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (lint/_test_temp.py)
 import guard  # noqa: E402
 import sweep  # noqa: E402
 import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (lint/_test_temp.py)
@@ -5174,10 +5175,10 @@ class AgentEndFinishedTreeTests(_AgentEndFixture):
     SubagentStop row is in the payload log and is newer than its agent transcript, the agent is not
     listed as running in the payload's background_tasks (a missing or malformed field keeps),
     `<transcript minus .jsonl>/subagents/agent-<id>.jsonl` has been idle 30 min or more, and the tree is
-    clean and pushed. Processes inside a finished tree are stopped only when each holds the agent's
-    CLAUDE_AGENT_ID, the call's own depth-0 bash excepted. These cases run unmarked, so no process is
-    proven the agent's own: a finished tree with no process inside is unlocked and removed, and one with
-    any process inside is kept with its process.
+    clean and pushed. Processes inside a finished tree are stopped only when each is proven the agent's own
+    (`sweep.host_child_stops`, the marker rule in AgentEndProcessMarkerTests). These cases run unmarked, so
+    no process is proven the agent's own: a finished tree with no process inside is unlocked and removed,
+    and one with any process inside is kept with its process.
 
     The red case is a finished, host-locked tree with no process inside, which must be removed. Each keep
     case changes one check and leaves no process in its tree, so a builder that drops that check removes
@@ -5390,8 +5391,8 @@ class AgentEndFinishedTreeTests(_AgentEndFixture):
             self.assertTrue(guard.worktree_locked(self.primary, tree), "the lock was lifted; %s" % reason)
 
     def test_an_orphan_shell_keeps_the_tree(self):
-        """A process inside the finished tree keeps the tree, whatever its parent. An orphan's chain reaches init,
-        not the host. It keeps the tree too, and the orphan is not stopped."""
+        """An unmarked orphan inside the finished tree keeps the tree, and the orphan is not stopped: no marked
+        process is its descendant, so it is not proven the agent's own."""
         name = "treeorph"
         ending = name + "end"
         own = self.add(ending)
@@ -5454,9 +5455,10 @@ class AgentEndProcessMarkerTests(_AgentEndFixture):
     """The stop half of the agent-end reap (decision when-a-worktree-may-be-removed). A finished agent's tree is
     removed only after the processes inside it are stopped, and only when each one is the agent's own. A
     process is the agent's own when its exec-time CLAUDE_AGENT_ID is the id in the tree's basename `agent-<id>`
-    and that id is 17 hex characters. Every process inside must be marked, except a host child (depth 0),
-    which may be unmarked when a marked process climbs through it. Each case changes one part of that proof, so
-    each keep names the part it breaks. The decisions run on real processes, with `sweep.agent_mark` patched to
+    and that id is 17 hex characters. A marked process is stopped. An unmarked process is stopped only when a
+    marked process in the tree is its descendant, as a background job's shell is when its sleep holds the
+    marker. The shell's parent may be the host, PID 1 or anything else. Each case changes one part of that
+    proof, so each keep names the part it breaks. The decisions run on real processes, with `sweep.agent_mark` patched to
     a map of pid to id; the end-to-end case reads the real marker."""
 
     AGENT = "5c0a1e7d93b2f4860"  # 17 hex characters, the id a tree basename carries
@@ -5514,7 +5516,7 @@ class AgentEndProcessMarkerTests(_AgentEndFixture):
         tree = self.agent_tree(self.AGENT)
         _shell, (marked, unmarked) = self.sponsor(tree, 2)
         self.assert_kept_for_process(self.decision_for(tree, {marked: self.AGENT}),
-                                     "an unmarked pid below depth 0")
+                                     "an unmarked pid with no marked descendant")
 
     def test_an_unmarked_host_child_with_no_marked_descendant_keeps_the_tree(self):
         tree = self.agent_tree(self.AGENT)
@@ -5556,6 +5558,319 @@ class AgentEndProcessMarkerTests(_AgentEndFixture):
             self.assertTrue(self.exited(shell), "the marked child is still running; %s" % self.reason_for(tree))
         with self.subTest(arm="the finished tree is removed"):
             self.assertRemoved(tree, "; " + self.reason_for(tree))
+
+    @unittest.skipUnless(sys.platform.startswith("linux"), "the marker is read from /proc/<pid>/environ")
+    def test_a_marked_orphan_is_stopped_and_its_tree_removed(self):
+        """End to end through the SubagentStop hook. The marked process is `env CLAUDE_AGENT_ID=<id> sleep`, started by
+        a sponsor that exits at once, so the sleep is an orphan: its parent is PID 1 or another parent, not the host.
+        A background job left that way is the agent's own, and its marker proves it."""
+        ending = self.ENDING
+        own = self.add(ending)
+        control = self.control_tree("orphctl")
+        tree = self.agent_tree(self.AGENT)
+        self.write_stop_row(self.AGENT, tree)
+        self.age_subagent_transcript(self.AGENT, 31)
+        pidfile = os.path.join(self.root, "marked-orphan.pid")
+        sponsor_code = ("import subprocess, sys\n"
+                        "child = subprocess.Popen(['env', 'CLAUDE_AGENT_ID=' + sys.argv[3], 'sleep', '120'],"
+                        " cwd=sys.argv[2], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,"
+                        " stderr=subprocess.DEVNULL)\n"
+                        "with open(sys.argv[1], 'w', encoding='utf-8') as handle:\n"
+                        "    handle.write(str(child.pid))\n")
+        sponsor = subprocess.Popen([sys.executable, "-c", sponsor_code, pidfile, tree, self.AGENT], cwd=self.root,
+                                   stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                                   stderr=subprocess.DEVNULL)
+        sponsor.wait(timeout=30)  # the sponsor exits, so its child is an orphan
+        orphan = int(_read_when_ready(pidfile))
+        self.addCleanup(_sigkill_quietly, orphan)
+        self.age_control(control)
+        with self.subTest(precondition="the marked orphan is alive inside the finished tree, and the host lock holds"):
+            inside, _unreadable = sweep.processes_in(tree)
+            self.assertIn(orphan, inside or [], "the marked orphan is not inside the finished tree")
+            self.assertTrue(sweep.pid_alive(orphan), "the marked orphan exited before the hook ran")
+            self.assertEqual(sweep.agent_mark(orphan), self.AGENT, "the orphan does not hold the agent's marker")
+            self.assertTrue(guard.worktree_locked(self.primary, tree), "the host lock did not take")
+        self.fire_under_host(ending, own, extra=self.payload_extra(self.running_elsewhere()))
+        with self.subTest(control="another agent's clean pushed tree idle 31 min is removed"):
+            self.assertRemoved(control)
+        with self.subTest(arm="the marked orphan is stopped"):
+            self.assertTrue(_gone(orphan), "the marked orphan is still running; %s" % self.reason_for(tree))
+        with self.subTest(arm="the finished tree is removed"):
+            self.assertRemoved(tree, "; " + self.reason_for(tree))
+
+
+def _sigkill_quietly(pid):
+    """SIGKILL PID if it is still there. A test's cleanup: the process may be gone already."""
+    try:
+        os.kill(pid, signal.SIGKILL)
+    except OSError:
+        pass
+
+
+def _gone(pid):
+    """True when PID is no longer a running process: no /proc entry, or a zombie that its parent has not reaped."""
+    try:
+        with open("/proc/%d/stat" % pid, encoding="utf-8") as handle:
+            state = handle.read().rsplit(")", 1)[1].split()[0]
+    except (OSError, IndexError):
+        return True
+    return state == "Z"
+
+
+class _PsRunner:
+    """Stands in for sweep's `_nowindow` runner. It answers `ps -o ppid= -p N` from PARENTS and records every call,
+    so a case can count the spawns a proof makes. Any other command answers as a failed run."""
+
+    def __init__(self, parents):
+        self.parents = parents
+        self.calls = []
+
+    def run(self, args, **_kwargs):
+        self.calls.append(list(args))
+        ppid = self.parents.get(int(args[-1])) if args[:1] == ["ps"] and "ppid=" in args else None
+        if ppid is None:
+            return types.SimpleNamespace(returncode=1, stdout="")
+        return types.SimpleNamespace(returncode=0, stdout="%d\n" % ppid)
+
+
+class HostChildStopsProofTests(unittest.TestCase):
+    """The marker proof of `sweep.host_child_stops` (the stop half of the agent-end reap, decision
+    when-a-worktree-may-be-removed). A pid in PIDS is stopped only when it is proven the agent's own. A pid whose
+    exec-time CLAUDE_AGENT_ID is the agent's id passes. An unmarked pid passes only when a marked pid in PIDS with
+    that id is its descendant, found by climbing parents from each marked pid. Any other mark, a protected pid,
+    no agent id, or an unmarked pid with no such descendant gives None. Parents may be the host, PID 1 or anything
+    else. The stop list is deepest first. The fixtures are tables patched into `sweep` (parent, mark and cwd per
+    pid), so no /proc or ps is read. The end-to-end case with real processes is in HostChildStopsEndToEndTests.
+
+    Each None case sits beside a positive fixture that differs by one change, so a None cannot come from some
+    other fault."""
+
+    AGENT = "3f9c1e7a0b2d4e6f8"  # 17 lowercase hex, as a tree basename carries
+    OTHER = "b71f3d0c2a9e56847"  # another agent's id
+    HOST = 9000  # the host pid; no fixture's PIDS holds it
+    TREE = "/fixture/checkout/.claude/worktrees/agent-3f9c1e7a0b2d4e6f8"
+
+    def proof(self, parents, marks, pids, agent_id=AGENT, protected=()):
+        """`sweep.host_child_stops` over a table: PARENTS maps pid to parent pid, MARKS maps pid to its agent id
+        (any other pid reads unmarked), and every pid in PARENTS has its cwd in TREE. Returns the stop list or None."""
+        with mock.patch.object(sweep, "_parent_pid", side_effect=parents.get), \
+                mock.patch.object(sweep, "process_cwd", side_effect=lambda pid: self.TREE if pid in parents else None), \
+                mock.patch.object(sweep, "agent_mark", side_effect=marks.get):
+            return sweep.host_child_stops(list(pids), self.HOST, self.TREE, protected, agent_id)
+
+    def test_a_marked_orphan_is_stopped(self):
+        """A background job the agent left behind: a marked pid whose parent is PID 1."""
+        orphan = 4100
+        self.assertEqual(self.proof({orphan: 1, 1: 0}, {orphan: self.AGENT}, [orphan]), [orphan],
+                         "the marked orphan under PID 1 is not stopped")
+
+    def test_an_unmarked_subshell_orphan_over_a_marked_child_is_stopped_child_first(self):
+        shell, child = 4200, 4201
+        self.assertEqual(self.proof({shell: 1, child: shell, 1: 0}, {child: self.AGENT}, [shell, child]),
+                         [child, shell],
+                         "the orphaned subshell and its marked child are not both stopped, child first")
+
+    def test_a_marked_pid_is_stopped_whatever_its_parent_is(self):
+        child = 4300
+        parents_by_kind = {
+            "the host": {child: self.HOST, self.HOST: 1, 1: 0},
+            "PID 1": {child: 1, 1: 0},
+            "another process": {child: 4301, 4301: 1, 1: 0},
+        }
+        for kind, parents in parents_by_kind.items():
+            with self.subTest(parent=kind):
+                self.assertEqual(self.proof(parents, {child: self.AGENT}, [child]), [child],
+                                 "a marked pid whose parent is %s is not stopped" % kind)
+
+    def test_an_unmarked_leaf_beside_a_marked_subtree_gives_none(self):
+        shell, child, leaf = 4400, 4401, 4402
+        parents = {shell: 1, child: shell, leaf: self.HOST, self.HOST: 1, 1: 0}
+        marks = {child: self.AGENT}
+        with self.subTest(arm="the marked subtree alone is stopped, child first"):
+            self.assertEqual(self.proof(parents, marks, [shell, child]), [child, shell],
+                             "the marked subtree is not stopped")
+        with self.subTest(arm="an unmarked leaf with no marked descendant gives None"):
+            self.assertIsNone(self.proof(parents, marks, [shell, child, leaf]),
+                              "an unmarked leaf with no marked descendant did not give None")
+
+    def test_another_agents_id_gives_none_on_a_leaf_or_an_ancestor(self):
+        ours, theirs, shell = 4500, 4501, 4502
+        with self.subTest(arm="our marked pid alone is stopped"):
+            self.assertEqual(self.proof({ours: self.HOST, self.HOST: 1, 1: 0}, {ours: self.AGENT}, [ours]), [ours],
+                             "our marked pid is not stopped")
+        with self.subTest(arm="another agent's marked pid beside ours gives None"):
+            self.assertIsNone(self.proof({ours: self.HOST, theirs: self.HOST, self.HOST: 1, 1: 0},
+                                         {ours: self.AGENT, theirs: self.OTHER}, [ours, theirs]),
+                              "another agent's marked pid beside ours did not give None")
+        chain = {ours: theirs, theirs: shell, shell: 1, 1: 0}
+        with self.subTest(arm="with the middle pid unmarked, all three are stopped, deepest first"):
+            self.assertEqual(self.proof(chain, {ours: self.AGENT}, [shell, theirs, ours]),
+                             [ours, theirs, shell], "the chain is not stopped, deepest first")
+        with self.subTest(arm="another agent's mark on the middle pid gives None"):
+            self.assertIsNone(self.proof(chain, {ours: self.AGENT, theirs: self.OTHER}, [shell, theirs, ours]),
+                              "another agent's mark on an ancestor did not give None")
+
+    def test_no_agent_id_gives_none(self):
+        orphan = 4600
+        parents, marks = {orphan: 1, 1: 0}, {orphan: self.AGENT}
+        with self.subTest(arm="with the agent id, the marked orphan is stopped"):
+            self.assertEqual(self.proof(parents, marks, [orphan]), [orphan], "the marked orphan is not stopped")
+        for agent_id in (None, ""):
+            with self.subTest(agent_id=agent_id):
+                self.assertIsNone(self.proof(parents, marks, [orphan], agent_id=agent_id),
+                                  "a missing agent id did not give None")
+
+    def test_a_protected_pid_gives_none(self):
+        pid = 4700
+        parents, marks = {pid: 1, 1: 0}, {pid: self.AGENT}
+        with self.subTest(arm="unprotected, the marked orphan is stopped"):
+            self.assertEqual(self.proof(parents, marks, [pid]), [pid], "the marked orphan is not stopped")
+        with self.subTest(arm="protected, it gives None"):
+            self.assertIsNone(self.proof(parents, marks, [pid], protected=(pid,)),
+                              "a protected pid did not give None")
+
+    def test_an_unmarked_leaf_with_no_marked_descendant_gives_none(self):
+        leaf = 4800
+        parents = {leaf: 1, 1: 0}
+        with self.subTest(arm="marked, the same orphan is stopped"):
+            self.assertEqual(self.proof(parents, {leaf: self.AGENT}, [leaf]), [leaf], "the marked orphan is not stopped")
+        with self.subTest(arm="unmarked, it gives None"):
+            self.assertIsNone(self.proof(parents, {}, [leaf]), "an unmarked leaf did not give None")
+
+    def test_no_pids_gives_no_stops(self):
+        self.assertEqual(self.proof({}, {}, []), [], "an empty PIDS did not give an empty stop list")
+
+    def test_one_unmarked_shell_over_forty_marked_children_stops_all_with_the_shell_last(self):
+        shell = 5000
+        kids = list(range(5001, 5041))
+        parents = {shell: 1, 1: 0}
+        parents.update({kid: shell for kid in kids})
+        got = self.proof(parents, {kid: self.AGENT for kid in kids}, [shell] + kids)
+        self.assertIsNotNone(got, "the shell over forty marked children gave None")
+        self.assertEqual(sorted(got), sorted([shell] + kids), "the stop list is not the shell and its forty children")
+        self.assertEqual(got[-1], shell, "the shell does not come last, after its children")
+
+    def test_an_unmarked_ancestor_beyond_max_climb_gives_none(self):
+        def chain(length, base):
+            pids = [base + i for i in range(length)]
+            parents = dict(zip(pids, pids[1:] + [1]))
+            parents[1] = 0
+            return pids, parents
+
+        short, short_parents = chain(4, 6000)  # one marked pid under three unmarked ancestors
+        long_pids, long_parents = chain(sweep.MAX_CLIMB + 6, 7000)
+        with self.subTest(arm="three unmarked ancestors are within reach and are stopped, the marked pid first"):
+            self.assertEqual(self.proof(short_parents, {short[0]: self.AGENT}, short), short,
+                             "the short chain is not stopped, deepest first")
+        with self.subTest(arm="unmarked ancestors beyond MAX_CLIMB steps give None"):
+            self.assertIsNone(self.proof(long_parents, {long_pids[0]: self.AGENT}, long_pids),
+                              "an unmarked ancestor beyond MAX_CLIMB steps did not give None")
+
+    def test_a_parent_cycle_ends_and_is_proven_only_by_a_marked_pid(self):
+        a, b = 8000, 8001
+        parents = {a: b, b: a}
+        with self.subTest(arm="with a marked pid in the cycle, both are stopped"):
+            got = self.proof(parents, {a: self.AGENT}, [a, b])
+            self.assertIsNotNone(got, "the marked pid in the cycle gave None")
+            self.assertEqual(sorted(got), [a, b], "the cycle's pids are not both stopped")
+        with self.subTest(arm="with no marked pid, it gives None"):
+            self.assertIsNone(self.proof(parents, {}, [a, b]), "an unmarked cycle did not give None")
+
+    @unittest.skipIf(sys.platform.startswith("win"), "the POSIX read is a `ps` call; Windows reads its own table")
+    def test_each_climb_step_of_a_marked_pid_is_one_ps_read(self):
+        """The spawn cost, stated in the record: one `ps -o ppid= -p N` per climb step. A marked pid climbs to PID 1,
+        one read per ancestor, and the read of PID 1's own parent is not made. An unmarked pid is proven by
+        membership and costs no read. This three-pid fixture is one marked pid under two unmarked ancestors, so the
+        formula gives three reads: the marked pid's parent, that parent's parent, and PID 1's read of its child."""
+        m, u1, u2 = 4900, 4901, 4902
+        parents = {m: u1, u1: u2, u2: 1, 1: 0}
+        runner = _PsRunner(parents)
+        with mock.patch.object(sweep, "_nowindow", runner), \
+                mock.patch.object(sweep, "process_cwd", side_effect=lambda pid: self.TREE if pid in parents else None), \
+                mock.patch.object(sweep, "agent_mark", side_effect={m: self.AGENT}.get):
+            got = sweep.host_child_stops([u1, u2, m], self.HOST, self.TREE, (), self.AGENT)
+        with self.subTest(arm="the proof stops the marked pid and its two ancestors, deepest first"):
+            self.assertEqual(got, [m, u1, u2], "the proof did not stop the marked pid and its two ancestors")
+        with self.subTest(arm="one ps read per climb step: three in all"):
+            self.assertEqual(len(runner.calls), 3, "the proof made %d spawns, the formula gives 3" % len(runner.calls))
+        with self.subTest(arm="every spawn is a ps read"):
+            self.assertTrue(all(call[:1] == ["ps"] for call in runner.calls), "a spawn is not a ps read: %r" % runner.calls)
+
+
+class HostChildStopsEndToEndTests(unittest.TestCase):
+    """End to end on Linux with real processes (decision when-a-worktree-may-be-removed). The stall watch hook
+    rewrites a background agent call. The rewritten job runs `python3 -c 'import time; time.sleep(60)'` with its cwd
+    in the tree, and the harness shell exits with the stall code 3 while the job runs. The job's shell, now unmarked
+    and parented by PID 1 or another process, and its sleep, which holds the marker, are proven by
+    `sweep.host_child_stops`. A session-started unmarked sleep in the same tree makes the proof None. Every child is
+    killed at teardown, and the run folder is removed."""
+
+    AGENT = "3f9c1e7a0b2d4e6f8"
+    TAG = "CLAUDE_AGENT_ID"
+    STALL_WATCH = os.path.join(REPO_ROOT, "hooks", "stall_watch.py")
+
+    def setUp(self):
+        self.run = _test_temp.run_folder()
+        self.addCleanup(shutil.rmtree, self.run, True)
+        self.tree = os.path.join(self.run, "agent-" + self.AGENT)
+        os.makedirs(self.tree)
+        self.children = []
+        self.addCleanup(self.kill_children)  # registered after the rmtree, so it runs first
+
+    def kill_children(self):
+        for child in self.children:
+            child.kill()
+            child.wait(timeout=10)
+        for pid in sweep.processes_in(self.tree)[0] or []:
+            _sigkill_quietly(pid)
+
+    def rewritten_background_call(self):
+        """The command the stall watch hook gives a background Bash call of this agent: a 60 s `python3 -c` sleep."""
+        payload = {"session_id": "host-child-proof", "hook_event_name": "PreToolUse", "tool_name": "Bash",
+                   "agent_id": self.AGENT,
+                   "tool_input": {"command": "python3 -c 'import time; time.sleep(60)'",
+                                  "description": "sleep for the proof", "run_in_background": True}}
+        env = dict(os.environ, STALL_WATCH_QUIET="2", TMPDIR=self.run)
+        answer = subprocess.run([sys.executable, self.STALL_WATCH, "--hook"], input=json.dumps(payload),
+                                capture_output=True, text=True, env=env, cwd=self.tree, timeout=30)
+        self.assertEqual(answer.returncode, 0, "the hook exited %d: %s" % (answer.returncode, answer.stderr[-300:]))
+        return json.loads(answer.stdout)["hookSpecificOutput"]["updatedInput"]["command"]
+
+    @unittest.skipUnless(sys.platform.startswith("linux") and shutil.which("python3"),
+                         "Linux with python3: the marker is read from /proc/<pid>/environ")
+    def test_the_proof_stops_a_background_job_and_refuses_a_session_sleep_in_the_same_tree(self):
+        command = self.rewritten_background_call()
+        env = {k: v for k, v in os.environ.items() if k != self.TAG}  # the rewrite is the only source of the tag
+        env["TMPDIR"] = self.run
+        with open(os.path.join(self.run, "harness.out"), "wb") as out_f:
+            harness = subprocess.run(["bash", "-c", command], cwd=self.tree, env=env, stdin=subprocess.DEVNULL,
+                                     stdout=out_f, stderr=subprocess.STDOUT, timeout=60)
+        self.assertEqual(harness.returncode, 3,
+                         "the harness shell exited %d, want 3: the stall watch did not report the job still running"
+                         % harness.returncode)
+        inside = sweep.processes_in(self.tree)[0] or []
+        marked = [pid for pid in inside if sweep.agent_mark(pid) == self.AGENT]
+        self.assertEqual(len(inside), 2, "the tree holds %d processes, want the job's shell and its sleep" % len(inside))
+        self.assertEqual(len(marked), 1, "%d marked processes in the tree, want the sleep alone" % len(marked))
+        sleep = marked[0]
+        shell = next(pid for pid in inside if pid != sleep)
+        self.assertEqual(sweep._parent_pid(sleep), shell, "the marked sleep is not the child of the job's shell")
+        self.assertIsNone(sweep.agent_mark(shell), "the job's shell holds the marker, so it is not the unmarked shell")
+        with self.subTest(arm="the job's shell and its marked sleep are proven, sleep first"):
+            self.assertEqual(sweep.host_child_stops(inside, os.getpid(), self.tree, sweep._own_chain_pids(), self.AGENT),
+                             [sleep, shell], "the job's shell and its marked sleep are not proven, sleep first")
+        session_env = {k: v for k, v in os.environ.items() if k != self.TAG}
+        session = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(120)"], cwd=self.tree,
+                                   env=session_env, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                                   stderr=subprocess.DEVNULL)
+        self.children.append(session)
+        inside = sweep.processes_in(self.tree)[0] or []
+        with self.subTest(precondition="the session sleep is inside the tree and holds no marker"):
+            self.assertIn(session.pid, inside, "the session sleep is not inside the tree")
+            self.assertIsNone(sweep.agent_mark(session.pid), "the session sleep holds a marker")
+        with self.subTest(arm="an unmarked session sleep in the same tree makes the proof None"):
+            self.assertIsNone(sweep.host_child_stops(inside, os.getpid(), self.tree, sweep._own_chain_pids(), self.AGENT),
+                              "an unmarked session sleep in the same tree did not make the proof None")
 
 
 class AgentEndOtherWorktreeTests(_AgentEndFixture):
