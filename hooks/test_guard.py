@@ -3963,6 +3963,14 @@ sh("kill-guard-word-only: a quoted echo of the gtimeout form calls nothing",
    'echo "gtimeout 5 pkill foo"', "allow", cwd=NOGIT)
 sh("kill-guard-word-only: gtimeout around a command that kills nothing is allowed",
    "gtimeout 5 ls", "allow", cwd=NOGIT)
+# kill-quoted-wrapper: watch runs its argument, and the argument may be one quoted word. The quoted form
+# runs the same pkill as the bare one, so the kill rule judges it the same way.
+sh("kill-quoted-wrapper: watch with a single-quoted pkill is refused, as watch pkill is",
+   "watch 'pkill foo'", "deny", "machine-wide-kill", cwd=NOGIT)
+sh("kill-quoted-wrapper: watch with a double-quoted pkill is refused, as watch pkill is",
+   'watch "pkill foo"', "deny", "machine-wide-kill", cwd=NOGIT)
+sh("kill-quoted-wrapper: watch of a quoted command that kills nothing is allowed",
+   "watch 'ls -la'", "allow", cwd=NOGIT)
 # Re-pointed (rule shared-trees-no-machine-wide-kill, refusal-vs-rule row machine-wide-kill): a list
 # of pids kills nothing, so `lsof -t` alone passes. Its kill is refused where it feeds one, below.
 sh("kill: lsof -t lists the pids on a port, kills nothing", "lsof -t -i :3000", "allow", cwd=NOGIT)
