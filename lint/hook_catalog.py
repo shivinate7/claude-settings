@@ -64,6 +64,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 from check_skill_model_rows import skill_names  # noqa: E402  one home for "a skill is a folder with SKILL.md"
 import layout  # noqa: E402  the one home of where records live (lint/layout.json)
+import word_runs  # noqa: E402  the one home of a fence line (is_fence)
 
 ROOT = os.path.abspath(os.environ.get("HOOK_CATALOG_ROOT") or os.path.dirname(HERE))
 PAGE = "docs/catalog.md"
@@ -490,7 +491,6 @@ def render():
 RECORDS_PAGE = layout.layout()["kinds"]["records-index"]["path"]
 SECTIONS = ("Mandates", "Rulings", "Build designs", "Unsorted decisions", "Debts", "Plans")
 RULE_MARK = re.compile(r"<!--\s*rule:([a-z0-9][a-z0-9-]*)\s*-->")
-FENCE = re.compile(r"^ {0,3}(`{3,}|~{3,})(.*)$")
 HEADING = re.compile(r"^ {0,3}(#{1,6})(?:[ \t]+(.*?))?[ \t]*$")
 ITEM = re.compile(r"^[ \t]*(?:[-*+]|\d+[.)])[ \t]+")
 KIND = re.compile(r"^Kind:\s*(process|build)\s*$")
@@ -515,17 +515,19 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 def lines_outside_fences(text):
     """(line number from 1, line) for each line. A line inside a fenced block, the fences too, has line None.
     A fence closes on the same character, at least as long, with no text after it (CommonMark)."""
-    fence = None
+    fence, in_item, fence_in_item = None, False, False
     for n, line in enumerate(text.split("\n"), 1):
-        found = FENCE.match(line)
+        found = word_runs.FENCE.match(line) if word_runs.is_fence(line, fence_in_item if fence else in_item) else None
+        rest = line[found.end():] if found else ""
         if fence:
-            if found and found.group(1)[0] == fence[0] and len(found.group(1)) >= len(fence) and not found.group(2).strip():
+            if found and found.group(1)[0] == fence[0] and len(found.group(1)) >= len(fence) and not rest.strip():
                 fence = None
             yield n, None
-        elif found and not (found.group(1)[0] == "`" and "`" in found.group(2)):
-            fence = found.group(1)
+        elif found and not (found.group(1)[0] == "`" and "`" in rest):
+            fence, fence_in_item = found.group(1), in_item
             yield n, None
         else:
+            in_item = word_runs.list_item_after(line, in_item)
             yield n, line
 
 

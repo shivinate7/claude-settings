@@ -151,6 +151,9 @@ import local_time  # noqa: E402  the one home of the inbox paths
 import override  # noqa: E402  the one home of the roadmap record ref and folder
 import ruling_home  # noqa: E402  the one home of "a branch's tree holds this file"
 import precompact_handoff  # noqa: E402  the one home of the handoff path
+import word_runs  # noqa: E402  the one home of a fence line (lint/word_runs.py)
+
+FENCE = word_runs.FENCE
 from shared_names import MACHINE_TAGS  # noqa: E402  the one home of the machine notice tags
 from guard_core import SHELL_TOOLS  # noqa: E402  the one home of the shell tool names (Bash, PowerShell)
 
@@ -763,13 +766,14 @@ def answer_problem(b, text, k, homes, pages):
 
 def unfenced(text):
     """`text` without the lines of its own code fences, an unclosed fence running to the end."""
-    kept, fence = [], None
+    kept, fence, in_item, fence_in_item = [], None, False, False
     for ln in text.split("\n"):
-        mark = re.match(r"\s*(`{3,}|~{3,})", ln)
+        mark = FENCE.match(ln) if word_runs.is_fence(ln, in_item if fence is None else fence_in_item) else None
         if fence is None:
             if mark:
-                fence = mark.group(1)
+                fence, fence_in_item = mark.group(1), in_item
             else:
+                in_item = word_runs.list_item_after(ln, in_item)
                 kept.append(ln)
         elif mark and mark.group(1)[0] == fence[0] and len(mark.group(1)) >= len(fence):
             fence = None

@@ -71,6 +71,8 @@ Paraphrase pass, `python3 lint/find_copies.py --measure lint/paraphrase_labelled
 - Retired phrase: `lint/test_retired_names.py` holds it (item 337).
 - Text matching has one home, `lint/word_runs.py`. Probe `restates` uses it too.
 - Paraphrase pass: see Measured. Report-only, never in CI.
+- Fences have one home, `word_runs.is_fence`, list-aware (option A, 16:12 CST): a line indented four columns or
+  more is a fence only inside a list item. Each reader keeps its own list context (`word_runs.list_item_after`).
 
 Kind: process
 Home: rule:building-one-home-per-capability

@@ -33,7 +33,7 @@ COPY_FLOOR = 8  # words in a row of a rule sentence that make a copy; a stock ph
 ID_SPAN = re.compile(r"[\w.:/-]+\Z")  # a code span that is one id; "`hold-unsafe-x` (net-value hold)" glosses an id
 NUMBERED = re.compile(r"\S*\d\S*")
 LINK = re.compile(r"\[([^\]\n]*)\]\([^)\n]*\)")
-FENCE = re.compile(r"^[ \t]*(`{3,}|~{3,})")
+FENCE = re.compile(r"^[ \t]*(`{3,}|~{3,})")  # the raw pattern, any indent; ask is_fence whether a line is a fence
 TABLE_ROW = re.compile(r"^[ \t]{0,3}\|")
 QUOTE = re.compile(r"^[ \t]{0,3}>")
 HEADING = re.compile(r"^[ \t]{0,3}#{1,6}(?:[ \t]|$)")
@@ -133,15 +133,43 @@ def names(unit_text, rule_id):
     return re.search(r"(?<![\w-])%s(?![\w-])" % re.escape(rule_id), unit_text) is not None
 
 
+def _indent(line):
+    """The width of the spaces and tabs that start `line`, a tab reaching the next multiple of four."""
+    return len(line[:len(line) - len(line.lstrip(" \t"))].expandtabs(4))
+
+
+def is_fence(line, in_list_item=False):
+    """True when `line` is a fence line, as CommonMark reads it. A line indented four columns or more is indented code
+    at the top level, so it is a fence only inside a list item (`in_list_item`, from `list_item_after`). FENCE is the raw
+    pattern for the marker; the rule about a backtick in the info string stays with the reader that opens a fence."""
+    found = FENCE.match(line)
+    return bool(found) and (in_list_item or _indent(line) <= 3)
+
+
+def list_item_after(line, in_list_item):
+    """Whether the line after `line` sits in a list item, given whether `line` did. A list item line starts one (at the
+    top level it is indented three columns at most); a blank line or a line indented two columns or more keeps the
+    state; any other line ends it. A reader calls it on each line outside a fence and keeps the state it returns."""
+    if not line.strip():
+        return in_list_item
+    if LIST_ITEM.match(line) and (in_list_item or _indent(line) <= 3):
+        return True
+    return in_list_item and _indent(line) >= 2
+
+
 def fence_ranges(rows):
     """[(first, last)] 0-based row indexes of each fenced block, fence rows included. A closer is a run of the opener's
-    character, at least as long, with nothing after it. An unclosed fence runs to the last row."""
+    character, at least as long, with nothing after it. An unclosed fence runs to the last row. Fence lines are those
+    `is_fence` accepts; the closer reads the list context of its opener."""
     found, opener, first = [], None, 0
+    in_item = opener_in_item = False
     for number, row in enumerate(rows):
-        fence = FENCE.match(row)
+        fence = FENCE.match(row) if is_fence(row, in_item if opener is None else opener_in_item) else None
         if opener is None:
             if fence and not (fence.group(1)[0] == "`" and "`" in row[fence.end():]):  # a span, not a fence
-                opener, first = fence.group(1), number
+                opener, first, opener_in_item = fence.group(1), number, in_item
+            else:
+                in_item = list_item_after(row, in_item)
         elif fence and fence.group(1)[0] == opener[0] and len(fence.group(1)) >= len(opener) \
                 and not row.strip()[len(fence.group(1)):].strip():
             found.append((first, number))
@@ -165,7 +193,7 @@ def units(text):
     of those."""
     rows = text.replace("\r\n", "\n").split("\n")
     fences = {first: last for first, last in fence_ranges(rows)}
-    out, current, kind = [], [], None
+    out, current, kind, in_item = [], [], None, False
 
     def flush():
         nonlocal current, kind
@@ -185,8 +213,12 @@ def units(text):
             at = fences[at] + 1
             continue
         at += 1
+        item_before, in_item = in_item, list_item_after(line, in_item)
         if not line.strip():
             flush()
+        elif kind is None and not item_before and FENCE.match(line):
+            # No fence (fence_ranges said so) at the top level and not inside a paragraph: indented code, a unit of its own
+            out.append((number, line))
         elif TABLE_ROW.match(line) or HEADING.match(line):
             flush()
             current.append((number, line))

@@ -19,11 +19,12 @@ import sys
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import layout  # noqa: E402  the one home of where records live (lint/layout.json)
+import word_runs  # noqa: E402  the one home of a fence line (is_fence)
 
 RECORD = os.path.join(ROOT, *layout.path(ROOT, "decisions").split("/"), "agent-model-cap.md")
 SKILLS = os.path.join(ROOT, "skills")
 ROW = re.compile(r"^\|\s*skill `([^`]+)`\s*\|")
-FENCE = re.compile(r"^(`{3,}|~{3,})")
+FENCE = word_runs.FENCE
 CODE_SPAN = re.compile(r"(`+)(?!`).+?(?<!`)\1(?!`)")
 PHRASES = ("no model pin", "runs on the caller's model")
 
@@ -48,20 +49,21 @@ def opens_comment(s, inside):
 def live_lines(text, problems=None):
     """Yield the lines outside fenced blocks and multi-line HTML comments. A fence or comment still open at
     the end hides every later line: when `problems` is a list, it gets one line naming the open one."""
-    fence, comment = None, False
+    fence, comment, in_item, fence_in_item = None, False, False, False
     fence_at = comment_at = 0
     for number, line in enumerate(text.splitlines(), 1):
         s = line.strip()
         if fence:
             # A fence closes only on the same character, at least as long, with nothing after it.
-            if s and set(s) == {fence[0]} and len(s) >= len(fence):
+            if s and set(s) == {fence[0]} and len(s) >= len(fence) and word_runs.is_fence(line, fence_in_item):
                 fence = None
             continue
         if not comment:
-            opener = FENCE.match(s)
+            opener = FENCE.match(line) if word_runs.is_fence(line, in_item) else None
             if opener:
-                fence, fence_at = opener.group(1), number
+                fence, fence_at, fence_in_item = opener.group(1), number, in_item
                 continue
+            in_item = word_runs.list_item_after(line, in_item)
             yield line
         was = comment
         comment = opens_comment(s, comment)
