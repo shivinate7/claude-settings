@@ -1598,6 +1598,13 @@ def ruling_cite(reason, ids, strict=False) -> str:
     return "bogus" if strict else ""
 
 
+def reason_item(reason):
+    """The item number a form-judge refusal names ("Item 5: ..."), the first such number in the text, else None.
+    The prompt asks the judge for "the item that misses", so a reason that follows it names one."""
+    m = re.search(r"\bitem\s*#?(\d+)\b", reason, re.IGNORECASE)
+    return int(m.group(1)) if m else None
+
+
 def _all_strings(value):
     if isinstance(value, str):
         yield value

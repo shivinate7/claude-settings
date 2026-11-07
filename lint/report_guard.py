@@ -131,7 +131,7 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 from _transcript import (  # noqa: E402
-    ARTIFACT_DATA, is_last_human, items_write, last_incoming_index, last_reply, page_writer_id, peer_sender,
+    ARTIFACT_DATA, is_last_human, items_write, last_incoming_index, last_reply, page_writer_id, peer_sender, writer_ids,
     read_transcript, records_after_last_human, send_targets, tool_results, tool_uses)
 import layout  # noqa: E402
 
@@ -964,9 +964,10 @@ def question_problem(records, turn, text, hook):
     if not (offers_a_pick(text) or asks_a_question(text)):
         return "", ""
     writer = page_writer_id(records)
-    acks = {writer: {writer}} if writer else {}
+    wids = set(writer_ids(writer)) if writer else set()  # the page names its writer as a label or a bare id
+    acks = {i: {i} for i in wids}
     uses, sends = _turn_acts(records, turn, acks)
-    if writer and any(writer in t for t in sends):
+    if wids and any(wids & t for t in sends):
         return "", ""
     sys.path.insert(0, os.path.join(HERE, "..", "hooks"))
     from override import remote_session_id
@@ -976,7 +977,7 @@ def question_problem(records, turn, text, hook):
         if parent:
             acks[parent] = {parent} | PARENT_TARGETS
             uses, sends = _turn_acts(records, turn, acks)
-        wanted = ({parent} if parent else set()) | ({writer} if writer else set()) | PARENT_TARGETS
+        wanted = ({parent} if parent else set()) | wids | PARENT_TARGETS
         return ("" if any(t & wanted for t in sends) else LANE_REFUSAL), ""
     root = repo_root(hook.get("cwd"))
     page = layout.waiting_page(root) if root else "unknown"
@@ -989,7 +990,7 @@ def question_problem(records, turn, text, hook):
     if here is None:
         # No page: the question is asked in the reply or the box, so the box counts.
         return "", ("" if any(u.get("name") == ASK_TOOL for u in uses) else NO_PAGE_NOTE)
-    route = ("send_message to the writer " + writer if writer else
+    route = ("send_message to the writer " + writer_ids(writer)[0] if writer else
              "read meta/page on " + page + " with ArtifactData get, then send_message the question to its writer")
     return OWNER_REFUSAL % route, ""
 

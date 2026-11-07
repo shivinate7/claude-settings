@@ -159,7 +159,8 @@ REPLY_JSON = (
     "Reply JSON only: {\"ok\": true} or {\"ok\": false, \"reason\": \"<the item that misses, and the fix, "
     "one line>\"}."
 )
-JUDGE_ITEMS = ITEMS_1_TO_7 + "8. " + PAST_RULING_ITEM + "\n" + REPLY_JSON
+PAST_RULING_ITEM_NUMBER = 8
+JUDGE_ITEMS = ITEMS_1_TO_7 + "%d. " % PAST_RULING_ITEM_NUMBER + PAST_RULING_ITEM + "\n" + REPLY_JSON
 PAGE_ITEMS = ITEMS_1_TO_7 + REPLY_JSON
 QUESTION_PROMPT = (
     "Review this AskUserQuestion call: %s\nAnswer {\"ok\": true} at once for a question with one option "
@@ -502,6 +503,10 @@ def main():
         reason = verdict.get("reason")
         reason = reason if isinstance(reason, str) and reason.strip() else fallback
         cite = question_form.ruling_cite(reason, ids) if tool == "AskUserQuestion" else ""
+        # Only item 8 is the past-ruling rule: a refusal of items 1 to 7 may name a listed record in passing.
+        # A reason that names no item number (the model ignored the reply shape) keeps the cite's label, as before.
+        if cite == "cited" and question_form.reason_item(reason) not in (None, PAST_RULING_ITEM_NUMBER):
+            cite = ""
         if cite == "bogus":  # the answer cites a record the model was not shown: no usable verdict
             return unvetted(payload, tool, args, rule, "the review cited a record that was not in the list", units)
         return refuse(payload, tool, args, question_form.PAST_RULING_RULE if cite else rule, reason)

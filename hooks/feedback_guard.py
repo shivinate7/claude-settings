@@ -1186,7 +1186,7 @@ def export_check(cwd, transcript_path, session_id):
         return None, None  # nothing is read from the repo before a write is found
     writer = _transcript.page_writer_id(records)
     if writer:
-        is_writer = writer in (session_id, override.remote_session_id())
+        is_writer = _transcript.writer_is(writer, session_id, override.remote_session_id())
     else:
         is_writer = any(e[0] < max(w[0] for w in writes) for e in exports)
     if not is_writer:

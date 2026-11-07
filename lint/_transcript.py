@@ -400,3 +400,18 @@ def page_writer_id(records):
                 if found:
                     writer = found
     return writer
+
+
+_WRITER_ID_RE = re.compile(r"(?<![\w-])session_[A-Za-z0-9]+(?![\w-])")
+
+
+def writer_ids(writer):
+    """The session ids a page writer string names, in order. The page holds a label such as
+    "Triage (session_X)", or a bare id; a string that names no session id gives the string itself."""
+    return list(dict.fromkeys(_WRITER_ID_RE.findall(writer))) or [writer]
+
+
+def writer_is(writer, *ids):
+    """True when any of `ids` appears in the page writer string as a whole token, so session_X never
+    matches session_XY. The one home of the page-writer compare."""
+    return any(i and re.search(r"(?<![\w-])%s(?![\w-])" % re.escape(i), writer) for i in ids)
