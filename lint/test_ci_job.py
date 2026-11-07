@@ -7,6 +7,7 @@ None of them may read PASS. The GithubBaseRef class: the GITHUB_BASE_REF each st
 The last class plans the real checks job: every step gets one line.
 The last two classes: the code-check step from a copied install, and a step quiet past the stall limit.
 StepMaps reads a step's with: and env: values: a block scalar as its lines, an inline comment dropped.
+StepSelect: --step runs only the named steps; a name no step has is one unknown line, exit 2.
 Run: python3 lint/test_ci_job.py
 """
 import functools
@@ -293,6 +294,32 @@ class Usage(Job):
                               capture_output=True, text=True, env=ENV)
         self.assertEqual(done.returncode, 2, done.stdout)
         self.assertIn("no job", done.stdout)
+
+
+class StepSelect(Job):
+    """`--step NAME` (repeatable) runs only the named steps of the job, of any kind. A name no step has is one unknown
+    line and exit 2. The merge's ready gate runs its declared names this way (merge.readyChecks)."""
+
+    def test_only_the_named_steps_run_and_the_others_do_not(self):
+        rc, lines, out = self.run_job(step("first", "echo first > first.txt"),
+                                      step("second", "echo second > second.txt\nexit 1"),
+                                      step("third", "echo third > third.txt"),
+                                      args=("--step", "first", "--step", "third"))
+        self.assertTrue(os.path.exists(os.path.join(self.root, "first.txt")), out)
+        self.assertTrue(os.path.exists(os.path.join(self.root, "third.txt")), out)
+        self.assertFalse(os.path.exists(os.path.join(self.root, "second.txt")), out)
+        self.assertEqual((rc, self.verdicts(lines)), (0, ["PASS", "PASS"]), out)
+
+    def test_a_name_no_step_has_is_one_unknown_line_and_exit_two(self):
+        rc, lines, out = self.run_job(step("ok", "echo ran > ran.txt"), args=("--step", "nope"))
+        self.assertEqual(self.verdicts(lines), ["unknown"], out)
+        self.assertIn("nope", lines[0], out)
+        self.assertEqual(rc, 2, out)
+        self.assertFalse(os.path.exists(os.path.join(self.root, "ran.txt")), out)
+
+    def test_a_run_with_no_step_runs_every_step(self):  # the control
+        rc, lines, out = self.run_job(step("one", "true"), step("two", "true"))
+        self.assertEqual((rc, self.verdicts(lines)), (0, ["PASS", "PASS"]), out)
 
 
 class SteAction(Job):
