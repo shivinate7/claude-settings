@@ -457,8 +457,8 @@ delete of `answers/<id>` wait for the done report. A Park is the exception (see 
    you read (`if_version`). If the close conflicts, the owner marked the item read in the meantime: read it again and retry the close. Copy the answer's `choice` or `done`, its `note` and its `at` into the item's `lastAnswer`
    in the same update. Then delete `answers/<id>`, so the answer cannot count for a later item. The page shows a closed
    item as one line, with its home and its reply, until the owner marks it read. The page shows `lastAnswer` as the answer on the opened line, and on an item left open (steps 3, 4 and a busy lane).
-   The writer holds this close while a record in `asks/` with `item` set to this item has no `reply`: the page would hide that reply
-   with its item. It holds for at most 7 days from that record's `at` (unmeasured). After that it closes the item, and the page shows
+   The writer holds this close while a record in `asks/` with `item` set to this item has no `reply`: the hold keeps that reply on its item's
+   card, next to what it answers. It holds for at most 7 days from that record's `at` (unmeasured). After that it closes the item, and the page shows
    the reply as an Asks row.
 3. If the answer is `none` with no clear direction, and you write the new `options`, `pick` and `why` from the
    note in this same turn (a `multi` item's new `pick` is a list), set `added` to now. Write `lastAnswer` from

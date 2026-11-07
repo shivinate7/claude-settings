@@ -2897,7 +2897,7 @@ function askItem(t, dl) {
     answered ? null : (validT(t.at) ? h("span", {}, waited(t.at)) : null),
     latest && askFresh(latest) ? h("span", { class: "newmark" }, "New answer") : null,
     answered ? h("button", { class: "morebtn", type: "button", "aria-expanded": "true", "data-ask": t.id, onclick: press }, "Fold") : null);
-  const body = [...(answered ? askAnswer(t) : []), ...t.reps.flatMap(askMine)];
+  const body = [...(answered ? askAnswer(t) : []), ...t.reps.flatMap((r) => askMine(r))];
   const fresh = latest && askFresh(latest);
   return h("li", { class: "askc", id: "row-" + k, "data-new": fresh ? k + "@" + latest.answered : null }, head, t.itemGone ? h("p", { class: "reline" }, "Re: an item no longer on this page") : t.orphan ? h("p", { class: "reline" }, "Re: an ask not on this page") : null, h("p", { class: "atext" }, t.text),
     answered ? null : h("p", { class: "astate" }, ...askWaitWords(t)), body.length ? h("div", { class: "thread" }, body) : null, latest ? askReplyEnd(t, dl) : null);
