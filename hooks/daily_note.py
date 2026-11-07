@@ -164,7 +164,8 @@ def sweep_error_failures(err_path, out_path, window):
 
 def main():
     try:
-        config = os.environ.get("CLAUDE_CONFIG_DIR") or os.path.join(os.path.expanduser("~"), ".claude")
+        from shared_names import config_dir  # the one home of the config dir; inside the try, so a lone copy exits 0
+        config = config_dir()
         stamp_path = os.path.join(config, "daily-note.stamp")
         today = central_today()
         try:

@@ -164,7 +164,7 @@ _writes_n = _transcript.writes_n
 _is_n = _transcript.is_n
 REPO_HOME = re.compile(r"repo:([A-Za-z0-9._-]+)/([A-Za-z0-9._-]+)")
 STEP_HOME = re.compile(r"step:([A-Za-z0-9_-]+)")
-STEP_PATH = "roadmap/data/steps/%s.json"  # where a `step:<slug>` home resolves, as a blob on some ref
+STEP_PATH = override.STEP_DIR + "%s.json"  # where a `step:<slug>` home resolves, as a blob on some ref
 NOT_A_GRANT = "not-a-grant"  # the home of a [note] that says its grant word is no grant
 # A chat answer to waiting-page item n: `<n> <letter>` (a to h), an optional parenthetical, one per
 # comma or line. Letters outside a to h are no answer, so "1 y, 2 n" passes.
@@ -211,8 +211,10 @@ EXPORT_REASON = (
     " \"Keep a copy in the repo\" says, commit and push the record branch, then stop. An export run whose"
     " verdict is `same` also clears this.")
 EXPORT_CITE = " (decision waiting-data-in-repo, roadmap step waiting-export-check)"
-GRANT_HOMES = ("a [ruling] item whose home is a tracked file, a [page] item `page:<n>` with its send, or a"
-               " [note] item `-> %s` when the words are no grant" % NOT_A_GRANT)
+ONCE_HOME = "once:"  # the home prefix of a [note] that records a one-shot approval: `once:<act>`
+GRANT_HOMES = ("a [ruling] item whose home is a tracked file, a [page] item `page:<n>` with its send, a"
+               " [note] item `-> %s` when the words are no grant, or a [note] item `-> %s<act>` for a one-shot"
+               " approval" % (NOT_A_GRANT, ONCE_HOME))
 BULLET = re.compile(r"[ \t]*(?:[-*+\u2022]|\d+[.)])[ \t]+\S")
 
 
@@ -357,12 +359,23 @@ def waiting_copy(layout, root):
     return branch, (waiting[0]["export"] if waiting else layout.path(root, "waiting-data")).strip("/")
 
 
+def session_repo(session_id):
+    """The folder the session's inbox sidecar binds (local_time.write_repo_marker), or None."""
+    try:
+        marker = local_time.repo_marker_path(session_id)
+        with open(marker, encoding="utf-8") as f:
+            return f.read().strip() or None
+    except (OSError, TypeError, ValueError):
+        return None
+
+
 class Homes:
     """Checks ruling and task homes against the layout. `skip` holds the reason the check stood
     down, once, for the systemMessage line."""
 
-    def __init__(self, cwd):
+    def __init__(self, cwd, worked_in=None):
         self.cwd, self.skip, self.skip_closed, self.skip_filing = cwd, None, None, None
+        self.worked_in = worked_in  # the folder the inbox's sidecar binds: where the session worked
         self._filed = None  # (numbers or None, branch, folder), read once per Stop
         self._top = None  # (the cwd's repo top or None,), read once per Stop
 
@@ -379,7 +392,8 @@ class Homes:
             if root is None:
                 return None, None, "names %s, which is in no git repo" % found
             return root, os.path.relpath(os.path.realpath(found), root).replace(os.sep, "/"), None
-        start = self.cwd if self.cwd and os.path.isdir(self.cwd) else None
+        where = self.worked_in if self.worked_in and os.path.isdir(self.worked_in) else self.cwd
+        start = where if where and os.path.isdir(where) else None
         root = self._root(start) if start else None
         if root is None:
             self._stand_down("the session's folder is in no git repo", closed)
@@ -785,14 +799,15 @@ def is_grant(text):
 def grant_problem(b, text, items):
     """The reason for a message that grants and has no home for it, else None. A home is a [ruling] item
     (its own check judges the path), an open [page] item (its own check judges the send), or a
-    `[note] -> not-a-grant` item. `items` holds item() of each item line of the block."""
+    `[note] -> not-a-grant` item, or a `[note] -> once:<act>` item for a one-shot approval. `items` holds item() of each item line of the block."""
     if not is_grant(text):
         return None
     for it in items:
         if it is None or not it[2]:
             continue
         if it[1].startswith("[ruling]") or (it[1].startswith("[page]") and not it[3]) or (
-                it[1].startswith("[note]") and home_word(it[1]) == NOT_A_GRANT):
+                it[1].startswith("[note]") and (home_word(it[1]) == NOT_A_GRANT or (
+                    home_word(it[1]).startswith(ONCE_HOME) and len(home_word(it[1])) > len(ONCE_HOME)))):
             return None
     return ("the message at %s (%s) holds a grant word and has no home for it: add %s"
             % (b["stamp"], text.split("\n")[0][:40], GRANT_HOMES))
@@ -850,7 +865,8 @@ MARK = " repeats "  # appended to an item line, before the ref
 REF_KINDS = ("roadmap", "debt", "todo", "note", "inbox")  # the candidate ref prefixes
 # A mark the guard wrote: ` repeats <ref>` at the line tail, before an optional ` [closed]`. The item's
 # own words may hold "repeats", so a bare substring is not a mark.
-MARKED = re.compile(r"%s(?:%s):\S+(?: \[closed\])?\s*$" % (re.escape(MARK), "|".join(REF_KINDS)))
+# An inbox ref is `inbox:<sid8>@<date> <hh:mm>`, so it holds one space (inbox_candidates).
+MARKED = re.compile(r"%s(?:%s):\S+(?: \d{2}:\d{2})?(?: \[closed\])?\s*$" % (re.escape(MARK), "|".join(REF_KINDS)))
 INBOX_SUFFIX = ".inbox.md"
 
 
@@ -889,12 +905,13 @@ def squash(text, cut=REPEAT_CUT):
 
 
 def new_items(blocks, judged):
-    """[(id, block index)] for each well-formed, open item whose id is not in `judged`."""
+    """[(id, block index)] for each well-formed, open item whose id is not in `judged`. A [repo] item is
+    feedback for another repo, so it is never compared with this repo's roadmap and backlog."""
     seen, out = set(judged), []
     for n, b in enumerate(blocks):
         for ln in b["items"]:
             it = item(ln)
-            if it is not None and it[2] and not it[3] and it[0] not in seen:
+            if it is not None and it[2] and not it[3] and it[0] not in seen and not it[1].startswith("[repo]"):
                 seen.add(it[0])
                 out.append((it[0], n))
     return out
@@ -1252,7 +1269,7 @@ def inbox_stop(hook):
             return {}
         except (OSError, UnicodeDecodeError):
             blocks = None
-        homes, flags, note = Homes(hook.get("cwd")), [], None
+        homes, flags, note = Homes(hook.get("cwd"), session_repo(hook.get("session_id"))), [], None
         if blocks is not None:
             seen, burst, judged = read_state(turns, len(blocks))
             burst = burst_indexes(blocks, seen, burst)
