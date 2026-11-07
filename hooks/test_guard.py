@@ -20214,6 +20214,8 @@ def worktree_home_cross_checkout_case():
     """Rule 0, `other-checkout`, beside `worktree-home`: any session, agent or not, may not write
     into a checkout of its clone other than the one its cwd stands in. A target in no checkout of
     the clone is allowed. A nested worktree belongs to itself, not to the primary that holds it.
+    A session whose cwd is in no checkout is refused a write into a checkout of its home clone, the
+    one CLAUDE_PROJECT_DIR names; with that variable unset, no clone is named and the write passes.
     Why: docs/decisions/an-agent-outside-its-home-tree-must-stop.md."""
     primary, lane_a, lane_b, scratch = _cross_checkout_fixture("xco")
     in_a = os.path.join(lane_a, "src", "app.py")
@@ -20273,6 +20275,84 @@ def worktree_home_cross_checkout_case():
           file_path=exclude, content="x")
     check("shell append into the common git directory", "allow", "Bash", lane_b,
           command="echo x >> " + slash(exclude))
+    # THE CWD IN NO CHECKOUT. Ruling (coordinator, 2026-11-07 14:29 CST), decision
+    # an-agent-outside-its-home-tree-must-stop: each session writes only inside its own checkout. A
+    # top-level session works from its scratchpad, so every case here runs from one. Its own
+    # scratchpad, its own scratchpad checkout, a clone or repo it made there, the config folder, a notes
+    # folder outside the clone and a copy out of the clone stay allowed. Own fixture, so no other check
+    # sees its worktree.
+    r3_primary, _r3_lane_a, _r3_lane_b, _r3_scratch = _cross_checkout_fixture("xcor3")
+    r3_tmp = os.path.join(ROOT, "xcor3_tmp")   # the temp folder the guard reads as its own
+    r3_sid = "xcor3-sid-0001"
+    r3_pad = os.path.join(r3_tmp, "-home-user-claude-settings", r3_sid, "scratchpad")
+    os.makedirs(r3_pad, exist_ok=True)
+    home = {"CLAUDE_PROJECT_DIR": r3_primary}
+    r3_problems = []
+
+    def from_pad(label, expect, tool, env=home, **tool_input):
+        got, reason = decide({
+            "raw": None, "tool": tool, "cwd": r3_pad, "session": r3_sid, "env_path": None,
+            "config": None, "agent_id": None, "process_cwd": None, "temp": r3_tmp,
+            "env": env, "tool_input": tool_input})
+        if got != expect:
+            r3_problems.append("%s: expected %s, got %s (%s)" % (label, expect, got, reason[:120]))
+        elif expect == "deny" and ("other-checkout" not in reason or r3_primary in reason
+                                   or r3_tmp in reason):
+            r3_problems.append("%s: the refusal must name other-checkout and no path: %s" % (
+                label, reason[:160]))
+
+    # RED. From the scratchpad, a write into the home clone, and a shell redirect into it, are refused.
+    from_pad("red: a Write from a scratchpad cwd into the home clone", "deny", "Write",
+             file_path=os.path.join(r3_primary, "f.txt"), content="x")
+    from_pad("red: a shell redirect from a scratchpad cwd into the home clone", "deny", "Bash",
+             command="echo x > " + slash(os.path.join(r3_primary, "f")))
+    # GREEN. Each one is a false alarm a top-level session working from its scratchpad would hit.
+    from_pad("green: a Write inside the scratchpad", "allow", "Write",
+             file_path=os.path.join(r3_pad, "note.md"), content="x")
+    from_pad("green: a shell redirect inside the scratchpad", "allow", "Bash",
+             command="echo x > " + slash(os.path.join(r3_pad, "out.txt")))
+    from_pad("green: a Write into the config folder", "allow", "Write",
+             file_path=os.path.join(CFG, "r3-note.md"), content="x")
+    from_pad("green: a Write into a notes folder outside the clone", "allow", "Write",
+             file_path=os.path.join(ROOT, "xcor3_notes", "side.md"), content="x")
+    from_pad("green: a copy out of the home clone into the scratchpad", "allow", "Bash",
+             command="cp " + slash(os.path.join(r3_primary, "src", "app.py")) + " "
+             + slash(os.path.join(r3_pad, "app-copy.py")))
+    from_pad("green: a Read of the home clone", "allow", "Read",
+             file_path=os.path.join(r3_primary, "src", "app.py"))
+    from_pad("green: a git read of the home clone", "allow", "Bash",
+             command=VCS + " -C " + slash(r3_primary) + " log --oneline -1")
+    own_checkout = os.path.join(r3_pad, "wt-notes")   # this session's own linked checkout
+    if run_vcs(r3_primary, "worktree", "add", "-q", own_checkout, "-b", "xcor3-notes").returncode != 0:
+        sys.exit("fixture setup failed in worktree_home_cross_checkout_case: own scratchpad checkout")
+    from_pad("green: a Write into the own scratchpad checkout", "allow", "Write",
+             file_path=os.path.join(own_checkout, "src", "new.txt"), content="x")
+    from_pad("green: a shell redirect into the own scratchpad checkout", "allow", "Bash",
+             command="echo x > " + slash(os.path.join(own_checkout, "src", "new2.txt")))
+    scratch_clone = os.path.join(r3_pad, "other-clone")   # a clone of the same repo, made here
+    if run_vcs(r3_pad, "clone", "-q", r3_primary, scratch_clone).returncode != 0:
+        sys.exit("fixture setup failed in worktree_home_cross_checkout_case: the scratch clone")
+    from_pad("green: a Write into a scratch clone of the same repo", "allow", "Write",
+             file_path=os.path.join(scratch_clone, "src", "app.py"), content="x")
+    other_repo = os.path.join(r3_pad, "other-tool")   # another repo, made here
+    make_repo(other_repo, {"x.py": "1\n"})
+    from_pad("green: a Write into another repo in the scratchpad", "allow", "Write",
+             file_path=os.path.join(other_repo, "x.py"), content="x")
+    from_pad("green: with no CLAUDE_PROJECT_DIR, no home clone is named and a Write passes", "allow",
+             "Write", env={}, file_path=os.path.join(r3_primary, "f.txt"), content="x")
+    from_pad("green: a relative Write, resolved against the scratchpad", "allow", "Write",
+             file_path="relative.md", content="x")
+    from_pad("green: a cd into the own scratchpad checkout, then a relative write", "allow", "Bash",
+             command="cd " + slash(own_checkout) + " && echo x > a.txt")
+    from_pad("green: a heredoc in the scratchpad whose body names a home-clone path", "allow", "Bash",
+             command="cat > " + slash(os.path.join(r3_pad, "notes.md")) + " <<'EOF'\n"
+             + os.path.join(r3_primary, "src", "app.py") + "\nEOF")
+    from_pad("green: a cat read of a home-clone path", "allow", "Bash",
+             command="cat " + slash(os.path.join(r3_primary, "src", "app.py")))
+    from_pad("green: a git add in another repo in the scratchpad", "allow", "Bash",
+             command=VCS + " -C " + slash(other_repo) + " add x.py")
+    problems.extend(r3_problems)
+
     # A whole worktree removed by hand: refused, and the remedy names the proper tool.
     got, reason = _decide_full("Bash", primary, command="rm -rf .claude/worktrees/lane-b")
     if got != "deny" or "other-checkout" not in reason or "git worktree remove" not in reason \
@@ -21758,8 +21838,9 @@ LOG_CHECKS = (
      session_is_live_backwards_clock_step_case),
     ("worktree-home: orchestrator, no-record, home, outside-home, edit, read, removed-home, "
      "unreadable", worktree_home_case),
-    ("worktree-home: any session's write into another checkout of its clone is refused; outside "
-     "the clone and its own checkout pass", worktree_home_cross_checkout_case),
+    ("worktree-home: any session's write into another checkout of its clone is refused, and a write "
+     "from a cwd in no checkout into its home clone is refused; outside the clone, its scratchpad, its "
+     "own scratchpad checkout and a scratch clone pass", worktree_home_cross_checkout_case),
     ("worktree-home: a write into a worktree in the session's own scratchpad is allowed; another "
      "session's, an agent's, a sessionless, a symlinked and a climbing write are refused",
      worktree_home_scratchpad_case),
