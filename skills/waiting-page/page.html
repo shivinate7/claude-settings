@@ -1126,8 +1126,8 @@ function fmt(iso, withDay = true) {
 }
 const CT = "America/Chicago";
 const dayKey = (d) => d.toLocaleDateString("en-CA", { timeZone: CT });
-// A time read today shows the clock only; an earlier US Central day adds its day.
-const fmtRecent = (iso) => { const d = new Date(iso); return isNaN(d) ? "" : fmt(iso, dayKey(d) !== dayKey(new Date())); };
+// A time read today shows the clock only; any other US Central day adds its day. Spaces are no-break so the time never wraps inside.
+const fmtRecent = (iso) => { const d = new Date(iso); return isNaN(d) ? "" : fmt(iso, dayKey(d) !== dayKey(new Date())).replace(/ /g, "\u00A0"); };
 const span = (ms) => { const hrs = Math.round(Math.abs(ms) / 36e5); if (hrs < 1) return "under an hour"; if (hrs < 24) return hrs + (hrs === 1 ? " hour" : " hours"); const d = Math.round(hrs / 24); return d + (d === 1 ? " day" : " days"); };
 const validT = (iso) => !isNaN(Date.parse(iso));
 const waited = (iso) => (validT(iso) ? "waited " + span(Date.now() - Date.parse(iso)) : "");
