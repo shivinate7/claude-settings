@@ -59,8 +59,12 @@ Interface the hook must match:
   question a standing ruling already decides. Each case builds its own real git repo (make_repo), and a fixture
   ruling is found in the prompt with the call's JSON cut out. A search that cannot read a source prints one stderr
   line, `past-ruling search unknown:`, and never says clear.
+- The waiting-page lookup from another checkout (question_form.page_item_hit, with the payload's cwd): a call from a repo
+  with no page is judged against the pointer checkout's page, and a sibling child's page, as pointer_fixture() builds them.
+  run_hook(pointer=) writes the hook's global rules file, the one that names the pointer checkout.
 """
 import atexit
+import contextlib
 import json
 import os
 import re
@@ -160,6 +164,69 @@ def make_repo(name, decisions=None, steps=None, debts=None, page=PAGE_URL):
         git(repo, "checkout", "-q", "-")
     REPOS[name] = repo
     return repo
+
+
+# ------------------------------------------------------------------ the page lookup from another checkout (page roots)
+#
+# The fixture of the waiting-page lookup (hooks/question_form.py page_item_hit: the cwd's page, else the pointer
+# checkout's, else a sibling's). One parent folder holds the pointer checkout, which the global rules file names on its
+# `@` line; a sibling child repo with its own waiting page; a roadmap repo with no extras file; a folder in no repo; and a
+# bare home whose config names no pointer. The pointer's registry holds its waiting page (role waiting-page) and a
+# reference entry, so the lookup must match a waiting-page entry by id. Built once per run under ROOT, and hermetic_home()
+# points HOME and the config at it, so no case reads the machine's real HOME.
+POINTER_PAGE_URL = "https://claude.ai/artifact/pointerpage"
+POINTER_REF_URL = "https://claude.ai/artifact/pointerref"
+CHILD_PAGE_URL = "https://claude.ai/artifact/childpage"
+UNRELATED_URL = "https://claude.ai/artifact/unrelatedpage"
+POINTER_FIXTURE = {}
+
+
+def write_extras(repo, artifacts):
+    os.makedirs(os.path.join(repo, ".claude"), exist_ok=True)
+    with open(os.path.join(repo, ".claude", "layout-extras.json"), "w", encoding="utf-8") as f:
+        json.dump({"kinds": {}, "artifacts": artifacts}, f)
+
+
+def pointer_fixture():
+    """The fixture's folders, built on first use: `home` and `config` (the hermetic home and its config, whose CLAUDE.md
+    names `settings`), `bare` (a home with no CLAUDE.md), `settings` (the pointer checkout), `child`, `roadmap` and `loose`."""
+    if not POINTER_FIXTURE:
+        family = os.path.join(ROOT, "family")
+        found = {name: os.path.join(family, name) for name in ("settings", "child", "roadmap", "loose", "bare")}
+        found.update(home=os.path.join(family, "home"), config=os.path.join(family, "home", ".claude"))
+        for name in ("config", "bare", "loose", "child", "roadmap"):
+            os.makedirs(found[name])
+        write_extras(found["settings"], [
+            {"id": "settings-queue", "url": POINTER_PAGE_URL, "role": "waiting-page", "account": "current"},
+            {"id": "settings-ref", "url": POINTER_REF_URL, "role": "reference", "account": "other", "export": False}])
+        write_extras(found["child"], [
+            {"id": "child-queue", "url": CHILD_PAGE_URL, "role": "waiting-page", "account": "current"}])
+        for name in ("settings", "child", "roadmap"):
+            git(found[name], "init", "-q")
+        with open(os.path.join(found["config"], "CLAUDE.md"), "w", encoding="utf-8") as f:
+            f.write("@%s/CLAUDE.md\n" % found["settings"])
+        POINTER_FIXTURE.update(found)
+    return POINTER_FIXTURE
+
+
+@contextlib.contextmanager
+def hermetic_home(bare=False):
+    """HOME, USERPROFILE and CLAUDE_CONFIG_DIR name the fixture home inside the block (`bare`: a home whose config names
+    no pointer), then their old values come back."""
+    fixture = pointer_fixture()
+    home = fixture["bare"] if bare else fixture["home"]
+    config = fixture["bare"] if bare else fixture["config"]
+    names = ("CLAUDE_CONFIG_DIR", "HOME", "USERPROFILE")
+    saved = {name: os.environ.get(name) for name in names}
+    os.environ.update(CLAUDE_CONFIG_DIR=config, HOME=home, USERPROFILE=home)
+    try:
+        yield fixture
+    finally:
+        for name, value in saved.items():
+            if value is None:
+                os.environ.pop(name, None)
+            else:
+                os.environ[name] = value
 
 
 try:
@@ -266,11 +333,14 @@ def write_pass(cfg, session, body):
         f.write(body if isinstance(body, str) else json.dumps(body))
 
 
-def run_hook(stdin_text, answer=ALLOW, model_fail=False, pass_=None):
+def run_hook(stdin_text, answer=ALLOW, model_fail=False, pass_=None, pointer=None):
     RUNS[0] += 1
     base = os.path.join(ROOT, "run-%03d" % RUNS[0])
     cfg = os.path.join(base, "config")
     os.makedirs(cfg)
+    if pointer:  # the hook's global rules file names this checkout, as the owner's does (hooks/guard_pointer.py)
+        with open(os.path.join(cfg, "CLAUDE.md"), "w", encoding="utf-8") as f:
+            f.write("@%s/CLAUDE.md\n" % pointer)
     os.makedirs(STUB_DIR, exist_ok=True)
     with open(os.path.join(STUB_DIR, "sitecustomize.py"), "w", encoding="utf-8") as f:
         f.write(STUB_SITE)
@@ -279,6 +349,8 @@ def run_hook(stdin_text, answer=ALLOW, model_fail=False, pass_=None):
     env = {k: v for k, v in os.environ.items() if not k.startswith("CJ_")}
     env.update({"CLAUDE_CONFIG_DIR": cfg, "PYTHONPATH": STUB_DIR, "CJ_LOADED_DIR": base,
                 "CJ_RECORD": os.path.join(base, "calls.jsonl"), "CJ_ANSWER": answer})
+    if pointer:  # the hook's home is its run folder too, so it reads no real HOME
+        env.update(HOME=cfg, USERPROFILE=cfg)
     if model_fail:
         env["CJ_MODEL_FAIL"] = "1"
     proc = subprocess.run([sys.executable, HOOK], input=stdin_text, capture_output=True, text=True,
@@ -860,6 +932,32 @@ def case_page_reads_and_other_collections_skip_question_form():
     r = run_hook(page_input("set", item), answer=ALLOW)
     check("page import: a judged items write imports question_form (the record sees the import)",
           "question_form" in r.imports, detail(r))
+
+
+# ------------------------------------------------------------------ a write from a repo with no page (the pointer lookup)
+
+LINK_FIELD = {"link": "https://example.invalid/item-link"}  # `link` is not in the page's itemFields block
+
+
+def case_page_roadmap_cwd_is_judged_against_the_pointer_page():
+    # A write from a repo with no page (a roadmap worktree, no extras file) to the pointer checkout's page is judged
+    # against that page, as a write from the page's own checkout is. A link write is a code hit that guard.py refuses,
+    # so call_judge makes no call and no deny for it. A good item gets one model call, and the judge's refusal denies it.
+    fx = pointer_fixture()
+    r = run_hook(page_input("update", LINK_FIELD, url=POINTER_PAGE_URL, cwd=fx["roadmap"]), answer=PAGE_FLAG,
+                 pointer=fx["settings"])
+    check("page lookup: a link write from the roadmap repo makes no call and no deny here (guard.py refuses it)",
+          r.code == 0 and r.out == "" and r.calls == [], detail(r))
+    r = run_hook(page_input("set", good_page_item(), url=POINTER_PAGE_URL, cwd=fx["roadmap"]), answer=PAGE_FLAG,
+                 pointer=fx["settings"])
+    check("page lookup: a good item from the roadmap repo to the pointer page gets one model call, claude-opus-5-5",
+          len(r.calls) == 1 and model_of(r.calls[0]["argv"]) == QUESTION_MODEL, detail(r))
+    check("page lookup: the judge's refusal denies that item, rule question-judge",
+          r.reason().startswith("question-judge: ") and "plain effect" in r.reason(), detail(r))
+    control = run_hook(page_input("set", good_page_item(), url=POINTER_PAGE_URL, cwd=fx["settings"]), answer=PAGE_FLAG,
+                       pointer=fx["settings"])
+    check("page lookup control: the same item from the pointer checkout gets one model call and the same deny",
+          len(control.calls) == 1 and control.reason().startswith("question-judge: "), detail(control))
 
 
 # ------------------------------------------------------------------ a re-ask of an answered item (ruled Nov 1 17:44 CST)
@@ -1550,7 +1648,8 @@ def main():
                  case_unvetted_not_for_closed_items, case_past_ruling_debt_candidates,
                  case_unshown_id_takes_the_unvetted_path, case_marker_does_not_skip_the_check,
                  case_unknown_names_the_claude_settings_records, case_cite_of_a_shown_record_is_not_bogus,
-                 case_page_task_gets_item_8_and_is_refused, case_mid_reason_unlisted_id_is_a_plain_refusal):
+                 case_page_task_gets_item_8_and_is_refused, case_mid_reason_unlisted_id_is_a_plain_refusal,
+                 case_page_roadmap_cwd_is_judged_against_the_pointer_page):
         try:
             case()
         except Exception as exc:
