@@ -823,7 +823,13 @@ def _plain_words(words):
 # operand.
 _WRAPPER = re.compile(r"(?:xargs|sudo|env|timeout|nohup|nice|command|time|ssh)(?:\.exe|\.cmd)?").fullmatch
 _FLAG = re.compile(r"-\S*").fullmatch
-_DURATION = re.compile(r"\d+[smhd]?").fullmatch
+_DURATION = re.compile(r"\d+(?:\.\d+)?[smhd]?").fullmatch   # `timeout 1.5` takes a decimal
+# A shell or Python that, after `-s` or `-`, runs the script on its stdin (`bash -s a b < f`), or after `-c` runs
+# its text (`python3 -c "exec(open('f').read())"`). The words after the flag are its arguments, not the command.
+_STDIN_RUNNER = re.compile(r"(?:" + _SHELLS + r"|python[\d.]*)(?:\.exe|\.cmd)?").fullmatch
+_STDIN_FLAGS = ("-s", "-")
+# A file fed to a stage on stdin, `< f`; `<<`, `<<<` and `<(` are no such file.
+_STDIN_FILE = re.compile(r"(?<![<\d&])\d*<(?![<(&])[ \t]*[\"']?([^\s;&|<>()\"'`]+)")
 # A substitution hands a command's output to a runner (`eval "$(cat f)"`), which no word order shows.
 _SUBSTITUTION = re.compile(r"\$\(|`|<\(")
 
@@ -839,12 +845,34 @@ def _runs_stdin(words) -> bool:
         _WRAPPER(word.rsplit("/", 1)[-1]) or _FLAG(word) or _DURATION(word) for word in words)
 
 
-def _follows_runner(words, at) -> bool:
+def _runs_by_flag(words, runner, at, fed) -> bool:
+    """True when words[runner] is a shell or Python whose own options, before its first operand, hold `-c`, or
+    `-s` or `-` with words[at] `fed` to it on stdin. Its -c text may hold another runner word (`exec(open('f')`),
+    so this reads every such runner before the file, not only the nearest one."""
+    if not _STDIN_RUNNER(words[runner].rsplit("/", 1)[-1]):
+        return False
+    after_flag = False
+    for word in words[runner + 1:at]:
+        if word == "-c" or (fed and word in _STDIN_FLAGS):
+            return True
+        if _FLAG(word):
+            after_flag = word != "-m"
+        elif after_flag:
+            after_flag = False
+        else:
+            return False
+    return False
+
+
+def _follows_runner(words, at, fed=False) -> bool:
     """True when words[at] is the file a runner earlier in its stage runs: the nearest runner before it has no
     operand between it and the file. A flag, the word after a flag (`-o pipefail`, `--env-file .env`) and a
     duration are no operand; the word after `-m` is a module, so it is one. An operand such as `check.py` or
     `cat` is the command the runner runs, and the file is its argument: `python3 check.py f` and `sudo cat f`
-    read f."""
+    read f. A shell or Python runs the file past its operands after `-c` (the file is named in the text it runs),
+    and after `-s` or `-` when the file is `fed` to it by `< f`."""
+    if any(_runs_by_flag(words, i, at, fed) for i in range(at)):
+        return True
     runner = max((i for i in range(at) if _runner(words[i])), default=None)
     if runner is None:
         return False
@@ -870,12 +898,13 @@ def _runs_written_file(text: str, headers) -> bool:
     written = {word for header in headers for word in _plain_words(_WRITE_TARGET.findall(header))}
     for pipeline in re.split(r"\n|;|&&|\|\||&", _WRITE_TARGET.sub(" ", text)) if written else ():
         stages = [_plain_words(_WORDS(stage)) for stage in pipeline.split("|")]
+        fed = [set(_plain_words(_STDIN_FILE.findall(stage))) for stage in pipeline.split("|")]
         if _SUBSTITUTION.search(pipeline) and any(_runner(word) for words in stages for word in words):
             if any(word in written for words in stages for word in words):
                 return True
         for stage, words in enumerate(stages):
             for at, word in enumerate(words):
-                if word in written and (at == 0 or _follows_runner(words, at) or any(
+                if word in written and (at == 0 or _follows_runner(words, at, word in fed[stage]) or any(
                         _runs_stdin(later) for later in stages[stage + 1:] if later)):
                     return True
     return False

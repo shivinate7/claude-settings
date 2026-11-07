@@ -38,8 +38,10 @@ rule's settings-write ask, and it reaches agents.
     - The roles the ask names are granted, two or more as a list, only when a plain list joins them (PLAIN_LIST:
       commas, and, or, &, plus); any other words between two roles: no grant. A role word with a NEGATIONS word (not,
       no, don't, never, except, without, or an exclusion word such as skip, but, other, apart, aside, out, sonnet or
-      instead) within three words before or after it: no grant (`builders, no problem` grants nothing too). `leave`
-      before the role, and `stay` or `remain` with no `opus` after it, count too.
+      instead), or an exclusion verb in any form (EXCLUSION_STEM: skipping, omit, barring), within three words before
+      or after it: no grant (`builders, no problem` grants nothing too). `leave` before the role with no `opus` in
+      its clause, and `stay`, `remain` or `keep` with no `opus` after it, count too. A sonnet, haiku or stay word in
+      a clause of its own that names the rest (`sonnet for the rest`, `others stay`) governs those, not the role.
     - An ask that names no role takes its roles from the owner's earlier typed prompts (decision owner-override:
       scope from context, fall back to every role), before the ask only. _context_prompts reads them from
       the one tail read (_tail_prompts), through the one owner-turn test (_owner_text), each through _strip_blocks,
@@ -114,8 +116,18 @@ NEGATIONS = {"not", "no", "never", "except", "without", "dont", "don't", "don\u2
 # after it ("builders and reviewers to opus, leave the rest"). `stay` and `remain` count unless `opus` follows
 # within two words ("stay on opus" keeps the role on Opus).
 LEAVE_WORDS = {"leave", "leaves"}
-STAY_WORDS = {"stay", "stays", "remain", "remains"}
+STAY_WORDS = {"stay", "stays", "remain", "remains", "keep", "keeps", "kept"}
 STAY_SPAN = 2
+# An exclusion verb in any form ("skipping", "omit", "barring", "ignoring", "excepting", "exempting"): a set of
+# exact words misses a form, so the stem is matched with its endings. `bar` takes only its verb endings, so "barely"
+# and "barrel" are no exclusion.
+EXCLUSION_STEM = re.compile(r"(?:skip(?:s|ped|ping)?|omit(?:s|ted|ting)?|ignor(?:e|es|ed|ing)|except(?:s|ed|ing|ions?)?"
+                            r"|exempt(?:s|ed|ing|ions?)?|bar(?:s|red|ring)?)", re.I)
+# A model or stay word in a clause of its own that names the other roles ("sonnet for the rest", "others stay")
+# governs those roles, not the ones the ask sends to Opus.
+MODEL_WORDS = {"sonnet", "haiku"}
+REST_WORDS = {"rest", "others", "other", "everyone", "everybody", "everything", "else"}
+CLAUSE_MARK = re.compile(r"[,;:.!?\u2014]")
 NEGATION_SPAN = 3  # a negation within this many words before or after a role word negates it
 PLAIN_LIST = re.compile(r"(?:[\s,&]|\b(?:and|or|plus)\b)*", re.I)  # the only text that may join two role words
 SPELLED_UNIT = r"h(?:ours?|rs?)|m(?:ins?|inutes?)"
@@ -263,17 +275,33 @@ def _ask_scope(text):
         return None
     matches = list(ROLE_WORDS.finditer(text))
     words = [m.group() for m in matches]
+    clause = [len(CLAUSE_MARK.findall(text, 0, m.start())) for m in matches]
+
+    def _governs_rest(to, at):
+        # A model or stay word whose clause names the other roles and not this one governs those roles.
+        lower = words[to].lower()
+        if lower not in MODEL_WORDS | STAY_WORDS or clause[to] == clause[at]:
+            return False
+        return any(c == clause[to] and w.lower() in REST_WORDS for w, c in zip(words, clause))
+
     roles, last_end = set(), None
     for at, word in enumerate(words):
         role = opus_role(word)
         if role not in ASK_ROLES:
             continue
         first = max(0, at - NEGATION_SPAN)
-        near = words[first:at] + words[at + 1:at + 1 + NEGATION_SPAN]
-        if NEGATIONS & {w.lower() for w in near} or LEAVE_WORDS & {w.lower() for w in words[first:at]}:
-            return None
-        for to, word_near in enumerate(words[first:at + 1 + NEGATION_SPAN], first):
-            if word_near.lower() in STAY_WORDS and "opus" not in {w.lower() for w in words[to + 1:to + 1 + STAY_SPAN]}:
+        span = range(first, min(len(words), at + 1 + NEGATION_SPAN))
+        for to in span:
+            lower = words[to].lower()
+            if to == at or _governs_rest(to, at):
+                continue
+            if lower in NEGATIONS or EXCLUSION_STEM.fullmatch(lower):
+                return None
+            if lower in STAY_WORDS and "opus" not in {w.lower() for w in words[to + 1:to + 1 + STAY_SPAN]}:
+                return None
+            # `leave` before the role excludes it unless its clause sends it to Opus ("leave builders on opus").
+            if lower in LEAVE_WORDS and to < at and "opus" not in {
+                    w.lower() for w, c in zip(words[to + 1:], clause[to + 1:]) if c == clause[to]}:
                 return None
         if last_end is not None and not PLAIN_LIST.fullmatch(text, last_end, matches[at].start()):
             return None

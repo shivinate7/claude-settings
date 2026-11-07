@@ -185,24 +185,44 @@ NO_CHANGE = re.compile(r"(?<![\w/-])(?:none|nothing|n/a|no changes?|no differenc
                        r"|remains?\s+(?:as\s+(?:it|is|today|before)|the\s+same|unchanged)"
                        r"|(?:is|are)\s+still\s+(?:the\s+same|as\s+(?:it|is|today|before)|unchanged))(?![\w/-])", re.I)
 # A verb after the no-change word that names a real change: "keeps Suspense cards and adds Reset", "keeps the
-# count and changes the timeout", "none of the screens change; adds a new tab". "adds nothing" restates.
-CHANGE_AFTER = re.compile(r"\b(?:adds?(?!\s+(?:nothing|none|no)\b)|added|mov(?:es?|ed)|remov(?:es?|ed)"
-                          r"|drops?|dropped|replac(?:es?|ed)|renam(?:es?|ed)|chang(?:es|ed)|sets?|raises?|lowers?"
-                          r"|switch(?:es|ed))\b", re.I)
+# count and changes the timeout", "none of the screens change; adds a new tab". `set` is a noun ("the set of
+# fields") or a participle ("already set to 5") as often as a verb, so it counts only as "sets <object> to":
+# "sets the cap to 5" changes, "is set to 5" does not.
+CHANGE_AFTER = re.compile(r"\b(?:adds?|added|mov(?:es?|ed)|remov(?:es?|ed)"
+                          r"|drops?|dropped|replac(?:es?|ed)|renam(?:es?|ed)|chang(?:es|ed)|raises?|lowers?"
+                          r"|switch(?:es|ed))\b"
+                          r"|(?<!\bthe )(?<!\ba )\bsets?\s+(?:(?!to\b)\w+\s+){1,3}to\b", re.I)
 # A negator ahead of a change verb in its clause turns it into more of the restatement: "does not move it",
 # "never removes it", "nothing moves". A clause ends at ";", ",", "and" or "but".
 CHANGE_NEGATOR = re.compile(r"\b(?:not|never|nothing|none|no)\b|n['\u2019]t\b", re.I)
 CHANGE_CLAUSE_END = re.compile(r";|,|\b(?:and|but)\b", re.I)
+# A negator as the verb's object cancels it too: "changes nothing", "removes nothing", "drops no field". "no-op"
+# is a thing the verb acts on ("adds a no-op flag"), not a negator.
+CHANGE_NEGATED_OBJECT = re.compile(r"\s+(?:nothing|none|no)\b(?!-)", re.I)
 
 
 def _real_change(change, start) -> bool:
     """True when `change`, past index `start`, holds a change verb (CHANGE_AFTER) with no negator before it in
-    its clause."""
+    its clause and no negator as its object."""
     for verb in CHANGE_AFTER.finditer(change, start):
         clause = CHANGE_CLAUSE_END.split(change[:verb.start()])[-1]
-        if not CHANGE_NEGATOR.search(clause):
+        if not CHANGE_NEGATOR.search(clause) and not CHANGE_NEGATED_OBJECT.match(change, verb.end()):
             return True
     return False
+
+
+# "no-op" names a thing a change verb acts on ("adds a no-op flag", "removes the no-op check"), not a no-change
+# word: a verb with an optional article right before it.
+NO_OP_OBJECT = re.compile(r"(?:" + CHANGE_AFTER.pattern + r")\s+(?:(?:a|an|one|the)\s+)?$", re.I)
+
+
+def _no_change_word(first_clause):
+    """The first NO_CHANGE match in the change side's first clause that is not a no-op object, else None."""
+    for word in NO_CHANGE.finditer(first_clause):
+        if word.group(0).lower().replace("-", "") == "noop" and NO_OP_OBJECT.search(first_clause[:word.start()]):
+            continue
+        return word
+    return None
 # The new-thing change side, "adds <X>": group 1 is X.
 PORT_NEW_THING = re.compile(r"adds\b\s*(.*\S)", re.I)
 DEPARTS_REASON = ("A question to the owner says how the work departs from main, in a line that starts "
@@ -239,7 +259,7 @@ def departs_hit(text) -> str:
         added = PORT_NEW_THING.fullmatch(change)
         if is_placeholder(main) or is_placeholder(change) or (added and is_placeholder(added.group(1))):
             return "Departs from line with a side that is only a placeholder: write the real text"
-        word = NO_CHANGE.search(change.split(";", 1)[0])
+        word = _no_change_word(change.split(";", 1)[0])
         if word and not _real_change(change, word.end()):
             return "Departs from line whose change side says no change (%r): it restates main" % word.group(0)
     return ""
@@ -496,15 +516,27 @@ def _owner_acts(clause) -> bool:
 _SESSION_SUBJECT = re.compile(r"\bsession\s+(?:\w+ly\s+)?$", re.I)
 _PAST_OWNER_PRESS = re.compile(OWNER_NAME.pattern + r"\s+(?:(?:has|had|already)\s+)*$", re.I)
 _PAST_PRESS = re.compile(r"(?:press|click|tap)(?:ed|ped)\b", re.I)
+# In a session clause, "by clicking Merge" is the means of the clause's own subject, the session, and "a click"
+# or "one press" after a determiner is a count of presses, not a press asked of anyone ("without a click").
+# "after clicking Approve" and "after your Merge click" name no such subject or determiner, so they stay presses.
+_GERUND_PRESS = re.compile(r"(?:press|click|tap)(?:ing|ping)\b", re.I)
+_SESSION_MEANS = re.compile(r"\b(?:by|via)\s+$", re.I)
+_NOUN_PRESS = re.compile(r"(?:press(?:es)?|clicks?|taps?)\b", re.I)
+_PRESS_COUNT = re.compile(r"\b(?:a|an|one|no|any|single|without)\s+$", re.I)
 
 
 def _owner_press_in(clause) -> bool:
     """True when `clause` holds a press verb that the session does not make: one the session's own subject
-    is not directly before, and no past press by the owner. "after clicking Approve", "after Approve is
-    clicked", "after your Merge click" and "after the owner has to click Approve" each hold one."""
+    is not directly before, no past press by the owner, no "by clicking" means and no counted press noun.
+    "after clicking Approve", "after Approve is clicked", "after your Merge click" and "after the owner has to
+    click Approve" each hold one."""
     for m in PRESS_VERB.finditer(clause):
         before = clause[:m.start()]
         if _SESSION_SUBJECT.search(before) or (_PAST_PRESS.match(m.group()) and _PAST_OWNER_PRESS.search(before)):
+            continue
+        if _GERUND_PRESS.fullmatch(m.group()) and _SESSION_MEANS.search(before):
+            continue
+        if _NOUN_PRESS.fullmatch(m.group()) and _PRESS_COUNT.search(before):
             continue
         return True
     return False
