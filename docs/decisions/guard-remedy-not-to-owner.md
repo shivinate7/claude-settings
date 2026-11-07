@@ -7,13 +7,13 @@ Question: where does a Stop refusal's remedy live when the owner sees the refusa
 - Each refusal from `lint/report_guard.py` (the Stop hook that checks each reply) opens with one owner line: one plain sentence that names the check and cites this record, `guard-remedy-not-to-owner`.
 - The steps live under that check's heading in `## Steps per check`.
 - No verdict changes. Only the text moves.
-- Scope: Stop refusals only. `hooks/question_form.py` keeps its own text, `DEPARTS_REASON` included.
+- Scope: Stop refusals only. `hooks/question_form.py` keeps its own text, `DEPARTS_REASON` included. A Stop refusal shows only the miss that `departs_hit` names.
 
 ## Incident, risk and cost
 
 Incident: owner ask `ask-mw6pwif5wv`, 2026-11-07 12:09 CST. A past-ruling model call timed out. The Unvetted refusal reached the owner in chat, though its steps were for the session. Risk kind: named incident.
 
-Build: open. The refusal texts in `lint/report_guard.py` carry the steps until a builder lane changes them.
+Build: done in `lint/report_guard.py`. `owner_line()` is the one home of the owner line and the cite. The suite `lint/test_report_guard_remedy.py` checks each block path. Each refusal text holds facts only: which check, what is wrong, which Done line, which model.
 
 Cost: none at run time. No process starts, no file is written and no timer runs. Unmeasured: how often a session reads this record before it acts on a refusal.
 
@@ -23,7 +23,7 @@ Each heading names the check, then its text. Landed turns: the check runs only o
 
 ### Report-shape guard: no report (landed turns)
 
-Text: `BLOCK_REASON_HEAD` and `BLOCK_REASON_TAIL`.
+Text: `BLOCK_REASON`.
 
 - Send the report now, as the next thing you write.
 - The report is one blockquote. Its bold labels are Done, Deviations, Input Needed and Next, in that order. Drop a label that does not apply.
@@ -35,12 +35,12 @@ Text: `BLOCK_REASON_HEAD` and `BLOCK_REASON_TAIL`.
 
 Text: inline, in the landed-turn checks.
 
-- Give each Done line its kind: BUILT, RECORDED or OTHER.
+- Give each Done line its kind: BUILT, RECORDED or OTHER. The refusal quotes the line.
 - A BUILT or RECORDED line also names a PR or commit.
 
 ### Model-name guard (landed turns)
 
-Text: `MODELS_REASON`, with two detail forms.
+Text: `MODELS_REASON`, with two detail forms in its brackets.
 
 - A Done item that agents built or reviewed names each one's role and model, like "(builder sonnet, reviewer sonnet)".
 - For "no model named for <role>": name that role's model in the Done item.
@@ -63,7 +63,7 @@ Text: `ANSWERED_REASON`, rule `answered-needs-source` (a claim of "answered" nee
 
 ### Recovered guard (any reply whose report shape holds)
 
-Text: `CARRY_FORMS` and two inline texts in `recovered_problem`.
+Text: two inline facts in `recovered_problem`. The two line forms below live here only.
 
 - If a compaction came before this report, and the report has no carry line since, add the missing line under Deviations, inside the report's blockquote:
   - `Recovered: <each fact, with its source: git, page or digest>`, or `Recovered: none`.
@@ -72,7 +72,7 @@ Text: `CARRY_FORMS` and two inline texts in `recovered_problem`.
 
 ### Departs-from guard (any reply with a pick)
 
-Text: the miss from `departs_hit` in `hooks/question_form.py`, then `DEPARTS_REASON`. Rule `question-departs` (a pick says how it departs from main).
+Text: the miss from `departs_hit` in `hooks/question_form.py`, in the owner line. `DEPARTS_REASON` is not shown here; it stays for the waiting page and the question box. Rule `question-departs` (a pick says how it departs from main).
 
 - Write one line: "Departs from: <what on main> — <what changes>". Fill both sides. The change must differ from main.
 - If the change is new, write "Departs from: main — adds <X>".
@@ -94,25 +94,25 @@ Text: `MISTAKE_REASON`. Rule `building-mistake-names-its-guard` (a mistake names
 Text: `OWNER_REFUSAL`. Owner ruling, 2026-11-01 23:31 CST.
 
 - Send the question to the page writer in the same turn it is asked.
-- The refusal gives the route: `send_message` to the page writer by its session id. If the writer is unknown, read the waiting page with `ArtifactData` get, then `send_message` the question to its writer.
+- The route: `send_message` to the page writer by its session id. The refusal names the writer's id when it is known. If the writer is unknown, the refusal names the waiting page: read it with `ArtifactData` get, then `send_message` the question to its writer.
 - In a repo with no waiting page, this check does not refuse. The question box counts instead.
 
 ### Lane pick guard (lane sessions)
 
 Text: `LANE_REFUSAL`.
 
-- A lane's own chat does not reach the owner. Send the question to your parent now: `send_message` with session_id `@parent`.
+- A lane's own chat does not reach the owner. Send the question to your parent now: `send_message` with session_id `@parent`. A lane's page writer also counts.
 
 ### Rewrite-stamp guard (landed turns)
 
-Text: inline, in `rewrite_stamp_problem`. Rule `rewrite-cite-predates-ruling` (a rewrite claimed for a ruling must be committed after that ruling).
+Text: inline, in `rewrite_stamp_problem`, from `owner_line()`. Rule `rewrite-cite-predates-ruling` (a rewrite claimed for a ruling must be committed after that ruling).
 
 - The refusal names the decision, its last commit date, and the ruling it is said to be rewritten for.
 - Rewrite the record, fetch the branch that holds the rewrite, or say it is not rewritten yet.
 
 ### Hand-off guard (any reply with a "Why yours" line)
 
-Text: `HAND_OFF_NO_CITE`, `HAND_OFF_NO_DATE`, `CITE_FORMS`, two inline forms, and `HAND_OFF_TAIL`. Rule `output-never-hand-off-doable-step` (a step the session can do is not handed to the owner).
+Text: `HAND_OFF_NO_CITE`, `HAND_OFF_NO_DATE`, two inline forms, and `HAND_OFF_TAIL`. Rule `output-never-hand-off-doable-step` (a step the session can do is not handed to the owner).
 
 - A "Why yours" line gives a capability reason with no cite. End the line with one of:
   - `(route <id>)`, where the id is in the route rows file and its outcome on this surface is refused or asks;
@@ -120,8 +120,8 @@ Text: `HAND_OFF_NO_CITE`, `HAND_OFF_NO_DATE`, `CITE_FORMS`, two inline forms, an
   - `(measured <YYYY-MM-DD>, <check and result>)`.
   A check name is no cite. If no row, refusal or measurement fits, the act may be one this session can do. Do it.
 - A measurement with no date, or no check and result: write `(measured <YYYY-MM-DD>, <check and result>)`.
-- The route row says the act works on this surface, so it is not the owner's. Do it through the route that the row names.
-- The route id is in no row of the route rows file: cite an id the file holds, or name a tool refused this session in backticks.
+- The route row says the act works on this surface, so it is not the owner's. The refusal names the row and the route. Do the act through that route.
+- The route id is in no row of the route rows file (the refusal names the id): cite an id the file holds, or name a tool refused this session in backticks.
 
 ### Refusal guard (any reply)
 
@@ -168,12 +168,12 @@ Text: `HOLD_REASON`. Decision `session-tiers` (the duties of the triage session,
 
 Text: inline, in the main check.
 
-- A record id appears with no short gloss after it. Write the id, then a few plain words that say what it is.
+- A record id appears with no short gloss after it. Write the id, then a few plain words that say what it is, like "D12, short titles for records".
 
 ## Shared tails
 
-- Every refusal ends with ` (rule reports-order-of-labels)`. That rule says the report's four labels go in order: Done, Deviations, Input Needed, Next. On the rewrite after a refusal, a triage hold alone has no tail.
-- Correction tail, text `CORRECTION_TAIL`: "Post only the corrected lines, as a short correction. Never send the report again." The owner has read the report before a refusal lands, so a resent report doubles it. On a first refusal, this tail is not added when a triage hold is on, or when the report is missing or misshapen. A missing report asks for the report itself. Its reply carries every other fix too.
+- Every refusal opens with the owner line from `owner_line()`, which cites this record, and ends with ` (rule reports-order-of-labels)`. That rule says the report's four labels go in order: Done, Deviations, Input Needed, Next. On the rewrite after a refusal, a triage hold alone has no tail.
+- Correction rule, no text in any refusal: after any refusal but a missing report, post only the corrected lines, as a short correction. Never send the report again. The owner has read the report before a refusal lands, so a resent report doubles it. A missing report asks for the report itself, and its reply carries every other fix too.
 - The system message notes (`NO_PAGE_NOTE`, the hand-off guard's UNKNOWN lines and the route flags) and the stderr lines are not refusals. They never stop a reply, and they fall outside this record.
 
 Kind: process
