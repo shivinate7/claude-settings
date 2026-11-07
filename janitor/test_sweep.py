@@ -4083,6 +4083,20 @@ class AgentEndLogConcurrencyTests(unittest.TestCase):
         self.assertEqual(runs, seeds, "the hook lost rows that were not its own: %s" % runs)
 
 
+class _BrokenStderr:
+    """A stderr whose every write raises BrokenPipeError, as a closed pipe does. Counts the writes it refused."""
+
+    def __init__(self):
+        self.writes = 0
+
+    def write(self, text):
+        self.writes += 1
+        raise BrokenPipeError(32, "stderr pipe closed (stand-in)")
+
+    def flush(self):
+        pass
+
+
 class AgentEndLogReadTests(unittest.TestCase):
     """janitor/agent_end_reap.py log(), the read before the rewrite. The log is read under its lock and
     rewritten with the new row, so a read that is refused must not become the loss of every prior row.
@@ -4221,6 +4235,77 @@ class AgentEndLogReadTests(unittest.TestCase):
             kept = [json.loads(line).get("run") for line in handle.read().splitlines()]
         self.assertEqual(kept, ["ok-run"], "control: the successful write did not land its row: %r" % kept)
         self.assertFalse(os.path.exists(self.drops_file(path)), "a successful write created the drops file")
+
+    def full_drops_bytes(self):
+        """A drops file of exactly 256 KiB: 256 JSON rows of one KiB each, so every line parses as a drop row."""
+        rows = []
+        for n in range(256):
+            blank = json.dumps({"at": "2026-10-13T12:00:00-0500", "run": "seed-%d" % n, "error": ""}) + "\n"
+            rows.append(json.dumps({"at": "2026-10-13T12:00:00-0500", "run": "seed-%d" % n,
+                                    "error": "x" * (1024 - len(blank))}) + "\n")
+        return "".join(rows).encode("utf-8")
+
+    def test_a_drop_while_stderr_is_broken_still_writes_its_row(self):
+        """The stderr line runs before the drops append. A broken stderr must not stop the drop: log() returns,
+        and the drop row lands."""
+        path = self.scoped_log_path()
+        broken = _BrokenStderr()
+        raised = None
+        with self.refused_log_reads(path) as refused, mock.patch.object(sys, "stderr", broken):
+            try:
+                self.reap.log({"raw": "{}", "run": "broken-run", "state": "done"})
+            except Exception as exc:
+                raised = exc
+        self.assertTrue(refused, "the forced PermissionError never reached the log read, so the case tested nothing")
+        self.assertTrue(broken.writes, "the broken stderr was never written to, so the case tested nothing")
+        self.assertIsNone(raised, "log() raised %r when stderr was broken, before the drop row was written" % (raised,))
+        self.assert_one_drop_row(path, "broken-run")
+
+    def test_a_drop_whose_drops_file_cannot_be_appended_to_does_not_raise(self):
+        """The best-effort append: a drops path that is a directory cannot be opened for append. log() must still
+        return. Green on the old code: the append's own except covers it."""
+        path = self.scoped_log_path()
+        os.makedirs(self.drops_file(path))
+        raised = None
+        with self.refused_log_reads(path) as refused, contextlib.redirect_stderr(io.StringIO()):
+            try:
+                self.reap.log({"raw": "{}", "run": "append-run", "state": "done"})
+            except Exception as exc:
+                raised = exc
+        self.assertTrue(refused, "the forced PermissionError never reached the log read, so the case tested nothing")
+        self.assertTrue(os.path.isdir(self.drops_file(path)), "the drops path is not a directory, so no append was refused")
+        self.assertIsNone(raised, "log() raised %r when the drops file could not be appended to" % (raised,))
+
+    def test_two_drops_in_a_row_leave_two_rows_in_the_drops_file(self):
+        """The drops file is appended to, not rewritten: the second drop keeps the first row. Green on the old code."""
+        path = self.scoped_log_path()
+        with self.refused_log_reads(path) as refused, contextlib.redirect_stderr(io.StringIO()):
+            self.reap.log({"raw": "{}", "run": "first-run", "state": "done"})
+            self.reap.log({"raw": "{}", "run": "second-run", "state": "done"})
+        self.assertEqual(len(refused), 2, "the forced PermissionError reached the log read %d time(s), want 2" % len(refused))
+        runs = [row.get("run") for row in self.read_drops(path)]
+        self.assertEqual(runs, ["first-run", "second-run"], "the drops file holds runs %r, want both drops in order" % (runs,))
+
+    def test_a_drops_file_at_256_KiB_moves_to_old_and_the_next_drop_starts_a_fresh_file(self):
+        """The drops file is bounded. At 256 KiB or more, the next drop moves the file to `<drops>.old`, replacing
+        any old one, and starts a fresh file with just the new row. The seed is exactly 256 KiB, so this pins "at"."""
+        path = self.scoped_log_path()
+        drops = self.drops_file(path)
+        old = drops + ".old"
+        seed = self.full_drops_bytes()
+        os.makedirs(os.path.dirname(drops), exist_ok=True)
+        with io.open(old, "wb") as handle:
+            handle.write(b'{"at": "2026-10-01T12:00:00-0500", "run": "stale-run", "error": "x"}\n')
+        with io.open(drops, "wb") as handle:
+            handle.write(seed)
+        self.assertEqual(os.path.getsize(drops), 256 * 1024, "control: the seeded drops file is not 256 KiB")
+        with self.refused_log_reads(path) as refused, contextlib.redirect_stderr(io.StringIO()):
+            self.reap.log({"raw": "{}", "run": "rotate-run", "state": "done"})
+        self.assertTrue(refused, "the forced PermissionError never reached the log read, so the case tested nothing")
+        with io.open(old, "rb") as handle:
+            moved = handle.read()
+        self.assertEqual(moved, seed, "the drops file at 256 KiB was not moved to <drops>.old, which does not hold its rows")
+        self.assert_one_drop_row(path, "rotate-run")
 
 
 class AgentEndReapBatchTests(unittest.TestCase):
