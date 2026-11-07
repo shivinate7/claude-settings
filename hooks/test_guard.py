@@ -27164,6 +27164,21 @@ workflow_refuse("role-model: Workflow test-author with no model is denied when C
 workflow_refuse("role-model: Workflow builder with no model is denied when both defaults are unset, and names no haiku",
                 _step_flow("'Fix the failing case.'", "agentType: 'builder'"), rule=ROLE_RULE,
                 carries=WF_NO_MODEL_CARRIES, lacks=ROLE_LACKS + ("haiku",), env=WF_UNSET)
+# The scan reads no variable options, so a call whose options are a variable is skipped, whatever it names.
+workflow_allow("role-model: Workflow agent() with variable options naming builder on sonnet is skipped, and allowed",
+               "const opts = {agentType: 'builder', model: 'sonnet'};\nawait agent('Fix it.', opts);", env=WF_UNSET)
+# Options built by a call hide the agentType, so the call is skipped as unread.
+workflow_allow("role-model: Workflow agent() with options built by a call and no literal agentType is skipped, and allowed",
+               "const p = 'Fix it.';\nawait agent(p, buildOpts());", env=WF_UNSET)
+# A call with no second argument names no model and no agentType: the general-purpose row, and no default is set.
+workflow_refuse("role-model: Workflow agent() with no second argument is denied as no-model, general-purpose",
+                "await agent('x');", rule=ROLE_RULE, carries=(WF_NO_MODEL_CARRIES, "model: 'sonnet'"), lacks=ROLE_LACKS,
+                env=WF_UNSET)
+# An above-row spawn first, then a no-model one. Under the general override the above-row refusal lifts, and the
+# no-model refusal holds (never_lifted), so the whole script is still denied.
+WF_ABOVE_THEN_NO_MODEL = (
+    "await agent('Write the failing cases.', {agentType: 'test-author', model: 'sonnet'});\n"
+    "await agent('Fix the failing case.', {agentType: 'builder'});")
 # Plan's row is opus, and a no-model Agent Plan is allowed through its file's pin. The Workflow allow follows that.
 workflow_allow("role-model: Workflow Plan with no model is allowed when both defaults are unset (Plan's row is opus)",
                _step_flow("'Plan the change.'", "agentType: 'Plan'"), env=WF_UNSET)
@@ -27320,6 +27335,9 @@ ROLE_OVERRIDE_CHECKS = (
     ("role-model: the no-model refusal stays under an owner override in a Workflow, and spends none",
      lambda: role_override_no_model_check("Workflow", {"script": WF_NO_MODEL_SCRIPT},
                                           {"script": WF_ABOVE_ROW_SCRIPT}, WF_UNSET, "ov-wf-no-model")),
+    ("role-model: under the general override, a script with an above-row spawn then a no-model one is still denied",
+     lambda: role_override_no_model_check("Workflow", {"script": WF_ABOVE_THEN_NO_MODEL},
+                                          {"script": WF_ABOVE_ROW_SCRIPT}, WF_UNSET, "ov-wf-above-then-no-model")),
     ("role-model: opus 2h lifts an Explore on opus with no Audit: marker (item 137)", role_opus_explore_lift_check),
     ("role-model: opus test-authors 2h lifts a test-author on opus, and no builder", role_opus_role_lift_check),
     ("role-model: the typed override lifts a Workflow builder on opus with a variable brief, once",
