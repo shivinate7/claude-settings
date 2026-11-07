@@ -1,10 +1,10 @@
 {
   "title": "Auto mode's judge stops refusing ordinary lane messages",
   "phase": "next",
-  "status": "doing",
+  "status": "todo",
   "order": 103.393,
   "why": "Owner page answer.",
-  "note": "Doing: draft PR #1380, head 16c6dd321, review passed through round 3 (Windows lane, 17:41 CST); handed to the coordinator by triage 17:44 CST. #1372's blanket send_message allow drops after #1380 merges.\nOwner on item 301 (15:24 CST Nov 6): \"maybe we fix the judge itself for send messages though in general i think it's only blocked problematically\". Item 301 picked a: lanes get a send_message allow line. This step looks at the 3 send_message refusals in the item 287 scan and fixes the cause in the judge's rules, if any is ours to fix.",
+  "note": "Doing: draft PR #1380, head 16c6dd321, review passed through round 3 (Windows lane, 17:41 CST); handed to the coordinator by triage 17:44 CST. #1372's blanket send_message allow drops after #1380 merges.\nOwner on item 301 (15:24 CST Nov 6): \"maybe we fix the judge itself for send messages though in general i think it's only blocked problematically\". Item 301 picked a: lanes get a send_message allow line. This step looks at the 3 send_message refusals in the item 287 scan and fixes the cause in the judge's rules, if any is ours to fix. Coordinator 23:06 CST Nov 6: #1380 merged (d738a5315, 23:02 CST). Lane send-allow-drop stopped at its brief's stop condition: no test proves the judge now allows an ordinary lane brief or a hand-off, so the blanket send_message allow line stays. Next: measure the live judge's verdict on an ordinary lane brief and a hand-off message with the allow line removed (a local session with a test settings copy), then drop the line with a test that pins it.",
   "owner": "coordinator",
-  "updatedAt": "2026-11-06T23:44:00Z"
+  "updatedAt": "2026-11-07T05:06:00Z"
 }
