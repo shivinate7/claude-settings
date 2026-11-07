@@ -12782,6 +12782,25 @@ class ProseJudge(Env):
         self.assertTrue(judge_lines(out, "%s:5" % PROSE, "unbacked"), "the report names no unbacked line at %s:5" % PROSE)
         self.assertEqual(rc, 0, out)
 
+    def test_an_unreadable_base_reads_unknown_and_never_holds_the_merge(self):
+        # The base's rev-parse fails in confirm, and only that call fails: the merge's other git reads run. The report names the
+        # unreadable base, and the merge still lands with rc 0.
+        old = "# Cloud notes\n\nAn old line on main.\n"
+        self.setup_range({PROSE: old}, {}, later={PROSE: old + "\nCloud sessions run in a container.\n"})
+        real_git, reached = merge.git, []
+
+        def base_unreadable(cwd, *a, **kw):
+            if sys._getframe(1).f_code.co_name == "confirm" and a == ("rev-parse", "--verify", "-q", "origin/main^{commit}"):
+                reached.append(a)
+                return 1, ""
+            return real_git(cwd, *a, **kw)
+        with unittest.mock.patch.object(merge, "git", base_unreadable):
+            rc, out = self.run_capped()
+        self.assertEqual(len(reached), 1, "the base's rev-parse was reached %d times, want 1: the case did not hit its seam" % len(reached))
+        self.assertIn("prose judge UNKNOWN: the base could not be read", out, "the report names no unreadable base\n" + out)
+        self.assertEqual(rc, 0, out)
+        self.assertTrue(getattr(self.host, "merged", False), "the merge did not land after the base could not be read")
+
     def test_the_model_call_runs_after_the_merge_lock_is_released(self):
         # confirm holds the lock from acquire until the release in its finally. A model call waits up to MODEL_TIMEOUT, so it
         # must come after that release. Building the prompt under the lock is allowed.
