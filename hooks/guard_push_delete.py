@@ -3,6 +3,7 @@
 guard.py is the only entry point, and it runs these checks in its fixed order.
 Other files reach these names through `guard`.
 """
+import json
 import os
 import re
 import stat
@@ -14,6 +15,7 @@ from guard_core import (
     _strip_heredoc_bodies_unconditionally, bare_words, basename, command_indexes, inner_commands,
     is_powershell, norm, resolve_command, segment_tokens, split_segments,
 )
+from shared_names import MACHINE_TAGS, TASK_NOTIFICATION_TAG
 
 
 # `-o` is read in the short-flag loop, where its value may be glued on.
@@ -828,6 +830,168 @@ PUSH_ASK_REASON = (
     "Rule (Git): this forced push may rewrite the default branch, or its target is unreadable. "
     "The click in this prompt is the grant."
 )
+
+
+# ------------------------------------------------------------------ push-needs-fail-record
+#
+# A shell `git push` is refused while the session's own transcript shows a PR known to the session and a
+# reviewer or design-reviewer report with no later posted record that holds a line with that report's role
+# and verdict (decision push-needs-fail-record). Cost: one read of the transcript per push, failing open on
+# any error. The merge module loads only when the scan finds a report with the Done-line shape.
+FAIL_RECORD_REASON = (
+    "push-needs-fail-record: a reviewer report in this session has no posted review record, and a push now "
+    "moves the head the review read. Before any push, render the record with "
+    "`merge <pr> --review-record --head <reviewed sha>` (it refuses once the head moves), post it with the "
+    "GitHub MCP comment tool, then push. (decision push-needs-fail-record)"
+)
+_CREATE_PR_TOOL = "mcp__github__create_pull_request"
+_COMMENT_TOOL = "mcp__github__add_issue_comment"
+_AGENT_TOOL = "Agent"
+# A transcript line is parsed only when it holds one of these, or the id of a call already seen: tool names
+# sit in call lines, the notice and hand-back tags in message lines.
+_FAIL_RECORD_MARKS = ('"Agent"', _CREATE_PR_TOOL, _COMMENT_TOOL, TASK_NOTIFICATION_TAG, "agent-message")
+# The Done line, markdown leads and indent allowed. The verdict word is checked against the merge tool's own
+# constants once it loads, so none is named here.
+_DONE_LABEL = re.compile(r"[\s>*#_-]*Done\b[\s*_:]*")
+_VERDICT_LINE = re.compile(r"[\s>*#_-]*([A-Z]+), (round \d+ of \d+|fix check), [\w.-]+[\s*_]*")
+_NOTICE = re.compile(r"<tool-use-id>\s*([^<\s]+)\s*</tool-use-id>.*?<result>(.*?)</result>", re.S)
+_HANDBACK = re.compile(r'<agent-message from="([^"]+)">(.*?)</agent-message>', re.S)
+_AGENT_ID = re.compile(r"agentId:\s*(\S+)")
+_HAND_FRAMES = tuple(tag for tag in MACHINE_TAGS if "<agent-message" in tag)
+
+
+def _blocks_text(content) -> str:
+    """The text of a tool_result's content: a string, or the text blocks of a list."""
+    if isinstance(content, list):
+        return "".join(b.get("text", "") for b in content if isinstance(b, dict))
+    return content if isinstance(content, str) else ""
+
+
+def _done_verdict(text: str):
+    """(word, kind) of the verdict on the Done line of `text`, kind `round` or `fix`, else None. The Done line is
+    the first line after a `Done` label, or the label's own line. A finding line never counts."""
+    after = False
+    for line in text.splitlines():
+        label = _DONE_LABEL.match(line)
+        if label:
+            line = line[label.end():]
+            if not line.strip():
+                after = True
+                continue
+        elif not after:
+            continue
+        found = _VERDICT_LINE.fullmatch(line)
+        if found:
+            return found.group(1), "fix" if found.group(2) == "fix check" else "round"
+        if after and line.strip():
+            return None
+    return None
+
+
+def _notice_reports(record, roles, agents):
+    """The (role, text) reports one transcript record carries outside a tool result: a task-notification (a
+    user message or a queued_command attachment) or a hand-back opening with its frame. `roles` maps an Agent
+    call id to its subagent_type, `agents` an agentId to the call id."""
+    text = None
+    if record.get("type") == "attachment":
+        attached = record.get("attachment")
+        if isinstance(attached, dict) and attached.get("type") == "queued_command":
+            text = attached.get("prompt")
+    elif isinstance(record.get("message"), dict):
+        text = record["message"].get("content")
+    if not isinstance(text, str):
+        return []
+    found = []
+    if TASK_NOTIFICATION_TAG in text:
+        found += [(roles.get(call), body) for call, body in _NOTICE.findall(text)]
+    if text.lstrip().startswith(_HAND_FRAMES):
+        found += [(roles.get(agents.get(agent)), body) for agent, body in _HANDBACK.findall(text)]
+    return found
+
+
+def _transcript_events(path: str):
+    """The ordered events of a transcript that the rule reads: ("pr",) for a create_pull_request that returned
+    no error, ("post", body) for a comment that returned none, and ("report", role, word, kind) for an Agent
+    report whose Done line has the verdict shape. Raises OSError when the file cannot be read."""
+    events, calls, roles, agents, posts = [], {}, {}, {}, {}
+    with open(path, encoding="utf-8", errors="replace") as handle:
+        for line in handle:
+            if not any(mark in line for mark in _FAIL_RECORD_MARKS) and not any(seen in line for seen in calls):
+                continue
+            try:
+                record = json.loads(line)
+                content = record["message"]["content"] if isinstance(record.get("message"), dict) else None
+            except (ValueError, TypeError):
+                continue
+            reports = []
+            for block in content if isinstance(content, list) else ():
+                if not isinstance(block, dict):
+                    continue
+                if block.get("type") == "tool_use":
+                    name, given = block.get("name"), block.get("input")
+                    given = given if isinstance(given, dict) else {}
+                    calls[block.get("id")] = name
+                    if name == _AGENT_TOOL:
+                        roles[block.get("id")] = given.get("subagent_type")
+                    elif name == _COMMENT_TOOL and isinstance(given.get("body"), str):
+                        posts[block.get("id")] = given["body"]
+                elif block.get("type") == "tool_result" and not block.get("is_error"):
+                    call, body = block.get("tool_use_id"), _blocks_text(block.get("content"))
+                    if calls.get(call) == _CREATE_PR_TOOL:
+                        events.append(("pr",))
+                    elif call in posts:
+                        events.append(("post", posts[call]))
+                    elif calls.get(call) == _AGENT_TOOL:
+                        for agent in _AGENT_ID.findall(body):
+                            agents[agent] = call
+                        reports.append((roles.get(call), body))
+            for role, body in reports + _notice_reports(record, roles, agents):
+                verdict = _done_verdict(body)
+                if verdict:
+                    events.append(("report", role) + verdict)
+    return events
+
+
+def fail_record_hit(transcript: str) -> str:
+    """Return a short label when `transcript` shows a PR known to the session and a reviewer report with no later
+    posted record holding a line with that report's role and verdict, else ''. A report before the PR is known
+    is not read. A design-reviewer fix check is not read: a record holds a Fix check line for the reviewer only.
+    An unreadable transcript, or an unloadable merge module, passes."""
+    if not transcript:
+        return ""
+    try:
+        events = _transcript_events(transcript)
+        if not any(event[0] == "report" for event in events):
+            return ""
+        from guard_merge import merge_module   # here, not at the top: guard_merge imports this file
+        merge = merge_module()
+        if merge is None:
+            return ""
+        known, pending = False, []
+        for event in events:
+            if event[0] == "pr":
+                known = True
+            elif event[0] == "report":
+                _, role, word, kind = event
+                verdicts = merge.REVIEW_FIX_VERDICTS if kind == "fix" else merge.REVIEW_VERDICTS
+                if (known and role in merge.REVIEW_ROLES and word in verdicts
+                        and (kind == "round" or role == merge.REVIEW_ROLES[0])):
+                    pending.append((role, word, kind))
+            else:
+                record = merge.parse_review(event[1])
+                if record is None:
+                    continue
+                known = True
+                held = {(role, word, "round") for _, role, _, word in record["rounds"]}
+                if record["fix"]:
+                    held.add((record["fix"][1], record["fix"][3], "fix"))
+                pending = [report for report in pending if report not in held]
+        if pending:
+            return "%s %s %s report, no posted record" % pending[0]
+    except Exception:
+        pass
+    return ""
+
 
 # The installer swaps the next line for `INSTALL_ID = "<id>"` at copy time; guard.py compares the
 # ids across the modules it loads. In the repo it stays a comment, which counts as a match.
