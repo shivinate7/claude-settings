@@ -92,7 +92,8 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        refspec naming the current branch) that writes a name other than the branch's
                        upstream. Only with an upstream on the pushed remote that is not main or master.
   push-needs-fail-record  deny. A `git push` (not a dry run) while the session's own transcript shows a PR and a reviewer or
-                       design-reviewer report with no later posted review record holding that role and verdict.
+                       design-reviewer report with no later posted review record holding that role and verdict, or a push to
+                       the head branch of a PR whose posted record already holds a Fix check line.
   env-file             deny. Any read or write of an environment file.
   merge-checks         deny. A merge while the head has a check pending or red, while another
                        ready PR on the base runs CI, or when the read could not run. `--auto` too.
@@ -374,9 +375,9 @@ while True:
         )
         _loading = "guard_push_delete"
         from guard_push_delete import (
-            DELETE_REASON, DESTRUCTIVE_DELETE, FAIL_RECORD_REASON, LINKED_NM_REASON, PUSH_ASK_REASON,
+            DELETE_REASON, DESTRUCTIVE_DELETE, LINKED_NM_REASON, PUSH_ASK_REASON,
             PUSH_MAIN_REASON, PUSH_REASON, PUSH_STRAY_REASON, cmd_exe_delete_hit, fail_record_hit, delete_text, linked_nm_hit,
-            parent_delete_hit, push_ask_hit, push_target, push_text, push_verdict, rm_delete_hit,
+            parent_delete_hit, push_ask_hit, push_destinations, push_target, push_text, push_verdict, rm_delete_hit,
         )
         _loading = "guard_merge"
         from guard_merge import (
@@ -3518,9 +3519,9 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
             elif subcommand == "push" and not read_verb("push", args):
                 # Owner rulings 206 a and 207 a: a non-forced push that writes main or master, or an
                 # implied destination off the branch's upstream. A dry run writes nothing.
-                matched = fail_record_hit(transcript)
+                matched, reason = fail_record_hit(transcript, lambda: push_destinations(args, where, overrides))
                 if matched:
-                    refuse(tool, "deny", "push-needs-fail-record", FAIL_RECORD_REASON, matched)
+                    refuse(tool, "deny", "push-needs-fail-record", reason, matched)
                 kind = push_ask_hit(args, where, overrides)
                 if kind == "main":
                     ask_command("push-main", PUSH_MAIN_REASON, "git push " + " ".join(args),
