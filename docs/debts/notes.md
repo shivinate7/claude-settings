@@ -1484,3 +1484,5 @@
 - conflict-markers-push-var-branch: `git push origin "$OTHER"` reads HEAD's range, so it misses a triplet on the other branch or refuses for HEAD's (hooks/guard_merge.py `_push_hit`). Decision: commit-refuses-conflict-markers.
 - conflict-markers-loop-subshell: a commit inside a `for` loop and a push inside `( )` are not read (hooks/guard_merge.py `conflict_markers_hit`). Decision: commit-refuses-conflict-markers.
 - conflict-markers-chain-clean-refuse: `git stash pop`, `git pull --rebase` or `git merge`, then commit and push in one call, is refused on a clean tree; the remedy is a separate push (hooks/guard_merge.py `_makes_conflict`). Decision: commit-refuses-conflict-markers.
+- conflict-markers-show-uncapped: the push check runs one `git cat-file` per file with a marker finding, with no cap, and no cost case holds a finding (hooks/guard_merge.py `_kinds_of`). Decision: commit-refuses-conflict-markers.
+- conflict-markers-stale-tracking: a tracking ref left at a markers tip after the remote was rewound hides those commits from `git push origin <branch>` (hooks/guard_merge.py `_push_hit`). Decision: commit-refuses-conflict-markers.
