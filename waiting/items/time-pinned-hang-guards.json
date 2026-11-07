@@ -1,0 +1,36 @@
+{
+  "added": "2026-11-07T18:53:00Z",
+  "context": "Goal: a test's verdict never depends on how fast the machine is.\nProblem (rule): decision test-practices P5 bans every wall-clock wait in a test. PR #1177 rewrites P5 to allow a \"hang guard\": a wait limit that only stops a test that hangs. It cites only a plan line, not your ruling. A reviewer showed that a speed limit can pass as a hang guard just by its label.\nBased on (read): docs/decisions/test-practices.md P5 on main; docs/plans/time-pinned-tests.md; 252 existing wait limits in tests.\nDeparts from: main's P5, which bans every wall-clock wait \u2014 a and b allow a hang-guard limit.\nMeanwhile lane cs-revive-unfinished ships #1177's finder fix and leaves P5's text alone.",
+  "home": "step time-pinned-tests-go; claude-settings #1177; lane cs-revive-unfinished",
+  "id": "time-pinned-hang-guards",
+  "kind": "decision",
+  "n": 345,
+  "options": [
+    {
+      "gain": "The 252 limits become legal.",
+      "key": "a",
+      "label": "Allow hang guards as written",
+      "lose": "A speed limit can hide as a hang guard."
+    },
+    {
+      "gain": "Real hang guards stay, and speed limits get caught: each limit must be several times the measured run, with the figure beside it, as CI job limits already require.",
+      "key": "b",
+      "label": "Allow them with a size rule (recommended)",
+      "lose": "One more rule to check."
+    },
+    {
+      "gain": "No rule change.",
+      "key": "c",
+      "label": "Keep P5 as it is, and ship only #1177's finder fix",
+      "lose": "The 252 limits stay against P5's text."
+    }
+  ],
+  "owner": "coordinator",
+  "pick": "b",
+  "rank": 3,
+  "ref": "claude-settings #1177; decision test-practices",
+  "short": "Test hang guards: allow, allow with a size rule, or keep the ban",
+  "status": "open",
+  "title": "May a test keep a wait limit that only stops a hung test (a hang guard)?",
+  "why": "PR #1177 changes your test rule without your ruling, so only you can say yes or no."
+}
