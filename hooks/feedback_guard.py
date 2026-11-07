@@ -178,7 +178,11 @@ GRANT = re.compile(_WORD % r"approval|approved?|grant(?:ed)?|authori[sz]ed?|go[ 
 # A grant word alone is no grant: the message also names an act or a scope.
 _STANDING_ACT = r"always|standing|from now on|(?:all|any|every)\s+(?:repos?|prs?|branch(?:es)?)"
 ACT = re.compile(_WORD % (r"merge|push|delete|deploy|release|publish|" + _STANDING_ACT), re.IGNORECASE)
-STANDING = re.compile(_WORD % _STANDING_ACT, re.IGNORECASE)  # a scope word: no one-shot home covers it
+# A standing scope however worded. ACT keeps its short list; these words only bar a once: home.
+_STANDING_SCOPE = (r"whenever|going forward|from here on|in (?:the )?future|by default|"
+                   r"until (?:withdrawn|revoked|further notice|i say otherwise)|(?:each|every)\s+time|"
+                   r"(?:all|any|every)\s+(?:open|green|new|future)")
+STANDING = re.compile(_WORD % (_STANDING_ACT + "|" + _STANDING_SCOPE), re.IGNORECASE)  # no one-shot home covers it
 CLOSED_TOKEN = re.compile(r"(?<!\S)\[closed\](?!\S)")
 # A grant's [ruling] home may also be one of these root files, when git tracks it on some branch.
 GRANT_ROOT_HOMES = ("settings.json", ".claude/CLAUDE.md")
