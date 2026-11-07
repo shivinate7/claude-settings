@@ -98,8 +98,10 @@ SESSION_VALUE = "q9W8e7R6" + "t5Y4u3I2"
 CLIENT_VALUE = "Zx8Kp2Lm" + "9Qw4Rt7Y"
 GLUED_VALUE = "Yt6Nb3Kd9Hj2" + "Pq7W"  # a credential value of letters and digits, built from parts
 NPM_VALUE = "npm_Ab3Cd5Ef7Gh9Ij1Kl3" + "Mn5"  # an npm token shape, built from parts
-# Seconds for one 20,000-character run of name characters: about 0.4 s with the name shape bounded, about 10 s without.
-LONG_RUN_BOUND = 2.0
+# A scan that re-reads a run from each start position takes about 16 times as long over four times the run; a linear
+# scan takes about 4 times. The bound sits between them. RUN_N is the shorter run, the longer run is four times it.
+RUN_N = 20000
+GROWTH_BOUND = 10
 
 # (label, the note's value, the text that must never be printed). A dict or a list nests the secret.
 RED = [
@@ -515,19 +517,19 @@ class Base(unittest.TestCase):
     def out(self, name="waiting"):
         return os.path.join(self.tmp.name, name)
 
-    def run_cmd(self, *args, env=None):
+    def run_cmd(self, *args, env=None, timeout=60):
         if not os.path.isfile(CMD):
             self.fail("export_page.py is not built: no file at %s" % CMD)
         env = env or dict(os.environ, PYTHONDONTWRITEBYTECODE="1")
-        return subprocess.run([sys.executable, CMD, *args], capture_output=True, text=True, timeout=60, env=env)
+        return subprocess.run([sys.executable, CMD, *args], capture_output=True, text=True, timeout=timeout, env=env)
 
-    def export(self, fetched, out, page=None, allow_empty=()):
+    def export(self, fetched, out, page=None, allow_empty=(), timeout=60):
         args = ["--fetched", fetched, "--out", out]
         if page:
             args += ["--page", page]
         for name in allow_empty:
             args += ["--allow-empty", name]
-        return self.run_cmd(*args)
+        return self.run_cmd(*args, timeout=timeout)
 
     def assertVerdict(self, r, want, secrets=()):
         self.assertTrue(says(r, want), "verdict %r not printed. Output:\n%s" % (want, shown(r, secrets)))
@@ -590,29 +592,42 @@ class Scan(Base):
                 self.assertEqual(r.returncode, 0, "%s: the run failed without a refusal. Output:\n%s" % (label, shown(r)))
                 self.assertEqual(read_text(os.path.join(out, "items", "ok.json")), canonical(doc), label)
 
-    def assert_scans_within_bound(self, folder, note, what):
-        # A shape that re-reads a run from each start position makes the scan grow with the square of the run's length.
-        fetched = self.fetch(items={"ok": {"id": "ok", "title": "Ok", "note": note}})
-        out = self.out(folder)
+    def timed_export(self, fetched, folder, timeout):
+        """Seconds for one export of `fetched` into a fresh copy. The exit code is asserted before the time is used."""
         start = time.perf_counter()
-        r = self.export(fetched, out)
+        r = self.export(fetched, self.out(folder), timeout=timeout)
         took = time.perf_counter() - start
-        self.assertEqual(r.returncode, 0, "%s did not export (exit %d). Output:\n%s" % (what, r.returncode, shown(r)))
-        self.assertLess(took, LONG_RUN_BOUND,
-                        "the scan of %s took %.2f s, over the %.1f s bound" % (what, took, LONG_RUN_BOUND))
+        self.assertEqual(r.returncode, 0, "%s did not export (exit %d). Output:\n%s" % (folder, r.returncode, shown(r)))
+        return took
 
-    def test_a_long_run_of_name_characters_scans_within_the_bound(self):
-        # 20,000 name characters with no keyword in them.
-        self.assert_scans_within_bound("long-run", "aB3_-" * 4000, "a 20,000-character run of name characters")
+    def timed_growth(self, folder, make_note):
+        """(growth, short, long) for the scan of a run of 4 x RUN_N characters over the scan of a run of RUN_N, both timed
+        in this process. Each size is the faster of two exports, so one slow export does not set the ratio. The timeout is
+        a hang guard only: the scan takes well under a second at RUN_N, and a quadratic scan takes minutes at 4 x RUN_N."""
+        timings = {}
+        for size in (RUN_N, 4 * RUN_N):
+            fetched = self.fetch(items={"ok": {"id": "ok", "title": "Ok", "note": make_note(size)}})
+            timings[size] = min(self.timed_export(fetched, "%s-%d-%d" % (folder, size, run), timeout=900)
+                                for run in (1, 2))
+        return timings[4 * RUN_N] / timings[RUN_N], timings[RUN_N], timings[4 * RUN_N]
 
-    def test_a_long_run_of_underscores_scans_within_the_bound(self):
+    def assert_grows_no_faster_than_linear(self, folder, make_note, what):
+        growth, short, long_run = self.timed_growth(folder, make_note)
+        self.assertLess(growth, GROWTH_BOUND,
+                        "the scan of %s grew %.1f times, from %.3f s at %d characters to %.3f s at %d; a linear scan "
+                        "grows 4 times, and the bound is %d" % (what, growth, short, RUN_N, long_run, 4 * RUN_N, GROWTH_BOUND))
+
+    def test_a_long_run_of_name_characters_grows_no_faster_than_linear(self):
+        # Name characters with no keyword in them.
+        self.assert_grows_no_faster_than_linear("long-run", lambda n: "aB3_-" * (n // 5), "a run of name characters")
+
+    def test_a_long_run_of_underscores_grows_no_faster_than_linear(self):
         # The password shape's name prefix takes `_`, so a run of them is re-read from each start position.
-        self.assert_scans_within_bound("underscores", "_" * 20000, "a 20,000-character run of underscores")
+        self.assert_grows_no_faster_than_linear("underscores", lambda n: "_" * n, "a run of underscores")
 
-    def test_a_long_run_of_key_equals_scans_within_the_bound(self):
-        # The credential-name value lookaheads scan to the end of a run of `key=`, from each start position. At 20,000
-        # characters the run is under the bound, so this run is 40,000.
-        self.assert_scans_within_bound("key-equals", "key=" * 10000, "a 40,000-character run of key=")
+    def test_a_long_run_of_key_equals_grows_no_faster_than_linear(self):
+        # The credential-name value lookaheads scan to the end of a run of `key=`, from each start position.
+        self.assert_grows_no_faster_than_linear("key-equals", lambda n: "key=" * (n // 4), "a run of key=")
 
 
 class Mirror(Base):
