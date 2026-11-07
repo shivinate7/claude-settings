@@ -13493,9 +13493,9 @@ for _name, _command in (
 ):
     sh("builder-test: script-file, %s, is allowed" % _name, _command, "allow", **SR)
 
-# The glued input redirect, `)<`, and a digit before it, `)0<`. `_GLUED_REDIRECT` has no `<`, so the `)` stays on the
-# script word: the operand reads `gen.py)<in`, names no file, and the write is not read. The spaced form is the control.
-# Each allow twin runs the same form on a script that writes product code.
+# The glued input redirect, `)<in`, and a digit before it, `)0<in`. `_GLUED_REDIRECT` matches the `<`, so `_unparen`
+# splits the `)` off the script word and `gen.py` is read: the write to tests/x.py is refused. The spaced form is the
+# control. Each allow twin runs the same form on a script that writes product code.
 for _name, _command in (
     ("glued input, (python3 gen.py)<in, writes tests/x.py", "(python3 gen.py)<in"),
     ("glued input, (python3 gen.py)0<in, a digit before the redirect, writes tests/x.py", "(python3 gen.py)0<in"),
@@ -13511,11 +13511,10 @@ for _name, _command in (
 ):
     sh("builder-test: script-file, %s, is allowed" % _name, _command, "allow", **SR)
 
-# The glued heredoc, `)<<` and `)<<-`, and the glued here-string, `)<<<`. `_GLUED_REDIRECT` does not match a `<` that
-# begins `<<` or `<(`, so the `)` stays on the script word: the operand reads `gen.py)<<EOF`, names no file, and the
-# write is not read. Each refusal runs a script that writes a test path. The stdin forms, `(cat)<<EOF` and
-# `(python3 -)<<EOF`, are the controls: they read as they do today. Each allow twin runs the same form on a script that
-# writes product code.
+# The glued heredoc, `)<<` and `)<<-`, and the glued here-string, `)<<<`. `_GLUED_REDIRECT` matches the `<` that begins
+# each of them, so `_unparen` splits the `)` off and `gen.py` is read: each refusal runs a script that writes a test
+# path. The stdin forms, `(cat)<<EOF` and `(python3 -)<<EOF`, are the controls: they name no script file, so they are
+# allowed. Each allow twin runs the same form on a script that writes product code.
 for _name, _command in (
     ("glued input, (python3 gen.py)<<EOF, a glued heredoc, writes tests/x.py", "(python3 gen.py)<<EOF\nx\nEOF\n"),
     ("glued input, (python3 gen.py)<<-EOF, a glued tab-stripping heredoc, writes tests/x.py",
@@ -13536,6 +13535,12 @@ for _name, _command in (
     ("glued input, (python3 gen_ok.py)<<<x, writes src/app.py", "(python3 gen_ok.py)<<<x"),
 ):
     sh("builder-test: script-file, %s, is allowed" % _name, _command, "allow", **SR)
+# The process substitution, `)<(`. `_GLUED_REDIRECT` skips a `<` that begins `<(`, so `_unparen` leaves the `)` on the
+# script word and the script is not read. bash rejects `(python3 gen.py)<(echo hi)` at parse time, so nothing runs and
+# the allow is safe. This case pins that verdict. Remove the `(?!\()` lookahead and `gen.py` is read: the write is
+# refused, and this case goes red.
+sh("builder-test: script-file, glued input, (python3 gen.py)<(echo hi), a process substitution, "
+   "writes tests/x.py, is allowed", "(python3 gen.py)<(echo hi)", "allow", **SR)
 
 
 # `_unparen` re-splits a segment whose `)` is glued to a redirect, and the re-split must keep the segment's script type.
