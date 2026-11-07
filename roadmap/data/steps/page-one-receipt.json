@@ -4,8 +4,8 @@
   "status": "doing",
   "order": 103.362,
   "why": "Owner ask ask-mw5ax2zb2j: improve the page as it grew.",
-  "note": "Coordinator 12:37 CST, from page-growth-review (Sonnet Explore audit): S.",
-  "updatedAt": "2026-11-07T13:30:00-06:00",
+  "note": "Coordinator 12:37 CST, from page-growth-review (Sonnet Explore audit): S. Coordinator picks, 13:56 CST Nov 7 (undoable): (1a) the rail's \"N ready to send\" goes, and the bar keeps the count. (2) receipt() and lastAnswerEl() share one home for the \"what you chose\" words, with the \"no longer listed\" wording.",
+  "updatedAt": "2026-11-07T13:56:00-06:00",
   "paused": {
     "why": "Waits on step page-reply-uncollapse to merge.",
     "decides": "coordinator",
