@@ -7335,6 +7335,22 @@ sh("delete: eval of rm at the working folder still denies",
    'eval "rm -rf ."', "deny", "destructive-delete", cwd=NOGIT)
 sh("delete: pwsh -Command of a PowerShell delete at a drive root still denies",
    'pwsh -Command "Remove-Item -Recurse -Force C:/"', "deny", "destructive-delete", cwd=NOGIT)
+sh("delete: pwsh -Command of a PowerShell delete at a drive root with no -Force denies",
+   'pwsh -Command "Remove-Item -Recurse C:/"', "deny", "destructive-delete", cwd=NOGIT)
+# A LIVE SUBSTITUTION INSIDE DOUBLE QUOTES. `"$( )"` runs the command inside it, so a delete there is a
+# command, not text. The echo cases above stay allowed, since their delete is not inside `$( )`. A `#`, a
+# line break or a lone apostrophe around the substitution does not hide it.
+sh("delete: a live $(rm -r -f .) inside double quotes denies",
+   '''echo "$(rm -r -f .)"''', "deny", "destructive-delete", cwd=NOGIT)
+sh("delete: a live $(Remove-Item -Recurse -Force C:/) inside double quotes denies",
+   '''echo "$(Remove-Item -Recurse -Force C:/)"''', "deny", "destructive-delete", tool="PowerShell",
+   cwd=NOGIT)
+sh("delete: a live $(rm -r -f .) after a # inside double quotes denies",
+   '''echo "# $(rm -r -f .)"''', "deny", "destructive-delete", cwd=NOGIT)
+sh("delete: a live $(rm -r -f .) on a second line of a double quote denies",
+   'echo "first line\n$(rm -r -f .)\nlast line"', "deny", "destructive-delete", cwd=NOGIT)
+sh("delete: a live $(rm -r -f .) after a lone apostrophe denies",
+   '''echo don't && echo "$(rm -r -f .)"''', "deny", "destructive-delete", cwd=NOGIT)
 # THE INDEX-ONLY FORM. `git rm --cached` removes a path from the index and leaves the working folder
 # alone, so `git rm -rf --cached .` deletes nothing on disk. The same words without `--cached` delete
 # every file under the working folder, and a chained delete still denies.
@@ -11645,6 +11661,19 @@ sh("frozen amp: cp onto a frozen hook with 2>&1 stays denied",
    "cp /tmp/x.py " + CFG_HOOK + " 2>&1", "deny", "frozen-path", cwd=NOGIT)
 sh("frozen amp: cp FROM a frozen hook to scratch with &> /dev/null is still a read",
    "cp " + CFG_HOOK + " /tmp/guard.bak &> /dev/null", "allow", cwd=NOGIT)
+# THE DESTINATION AFTER A NULL REDIRECT. `cp SRC &> /dev/null DEST` writes DEST whatever the redirect says, so
+# a frozen DEST named after the null redirect is judged, as one named before it is.
+sh("frozen amp: cp /tmp/x.py &> /dev/null onto a frozen hook named last stays denied",
+   "cp /tmp/x.py &> /dev/null " + CFG_HOOK, "deny", "frozen-path", cwd=NOGIT)
+sh("frozen amp: cp /tmp/x.json &> /dev/null onto a frozen settings file named last stays denied",
+   "cp /tmp/x.json &> /dev/null " + CFG_SETTINGS, "deny", "frozen-path", cwd=NOGIT)
+# THE FROZEN SOURCE WITH A FILE REDIRECT. `cp FROZEN /tmp/x &> /tmp/build.log` reads the frozen file and writes
+# scratch, so it is allowed: the `&` of `&>` is no copy source. A frozen destination with the same redirect
+# still denies.
+sh("frozen amp: cp FROM a frozen hook to scratch with &> to a build log is still a read",
+   "cp " + CFG_HOOK + " /tmp/x &> /tmp/build.log", "allow", cwd=NOGIT)
+sh("frozen amp: cp onto a frozen hook with &> to a build log stays denied",
+   "cp /tmp/x.py " + CFG_HOOK + " &> /tmp/build.log", "deny", "frozen-path", cwd=NOGIT)
 
 add("config-edit: Edit of a project local settings file is allowed", "allow", tool="Edit",
     cwd=NOGIT, file_path=PROJ_LOCAL)
@@ -13075,6 +13104,34 @@ sh("builder join: the working folder from Path.cwd() joined to tests still refus
 sh("builder join: the working folder from os.getcwd() joined to tests still refuses",
    "python3 - <<'EOF'\nimport os\nopen(os.path.join(os.getcwd(), 'tests', 'test_x.py'), 'w').write('x')\nEOF",
    "deny", rule=BT, **B)
+# THE HEAD OF A JOIN IN python -c. An unknown head drops out of the join, so only a head from a temp source
+# (tempfile.mkdtemp, mkstemp, gettempdir, TemporaryDirectory) is safe. A head the script takes from
+# sys.argv, from subprocess output, from Path(__file__) or from os.path.dirname() names a folder in the repo,
+# so the join to hooks/test_x.py still refuses.
+sh("builder join: a repo head from sys.argv[1] joined to hooks in python -c still refuses",
+   '''python3 -c "import os, sys; repo = sys.argv[1]; open(os.path.join(repo, 'hooks', 'test_x.py'), 'w').write('x')" .''',
+   "deny", rule=BT, **B)
+sh("builder join: a repo head from subprocess output joined to hooks in python -c still refuses",
+   '''python3 -c "import os, subprocess; repo = subprocess.check_output(['git', 'rev-parse', '--show-toplevel']).decode().strip(); open(os.path.join(repo, 'hooks', 'test_x.py'), 'w').write('x')"''',
+   "deny", rule=BT, **B)
+sh("builder join: a repo head from Path(__file__).resolve().parents joined to hooks in python -c still refuses",
+   '''python3 -c "import os; from pathlib import Path; repo = Path(__file__).resolve().parents[1]; open(os.path.join(repo, 'hooks', 'test_x.py'), 'w').write('x')"''',
+   "deny", rule=BT, **B)
+sh("builder join: a repo head from os.path.dirname joined to hooks in python -c still refuses",
+   '''python3 -c "import os; repo = os.path.dirname(os.path.dirname(os.path.abspath(__file__))); open(os.path.join(repo, 'hooks', 'test_x.py'), 'w').write('x')"''',
+   "deny", rule=BT, **B)
+sh("builder join: a temp folder from mkdtemp joined to hooks in python -c is allowed",
+   '''python3 -c "import os, tempfile; tmp = tempfile.mkdtemp(); open(os.path.join(tmp, 'hooks', 'test_x.py'), 'w').write('x')"''',
+   "allow", **B)
+sh("builder join: a temp folder from gettempdir joined to hooks in python -c is allowed",
+   '''python3 -c "import os, tempfile; tmp = tempfile.gettempdir(); open(os.path.join(tmp, 'hooks', 'test_x.py'), 'w').write('x')"''',
+   "allow", **B)
+sh("builder join: a temp folder from mkstemp joined to hooks in python -c is allowed",
+   '''python3 -c "import os, tempfile; fd, tmp = tempfile.mkstemp(); os.close(fd); open(os.path.join(tmp, 'hooks', 'test_x.py'), 'w').write('x')"''',
+   "allow", **B)
+sh("builder join: a temp folder from TemporaryDirectory joined to hooks in python -c is allowed",
+   '''python3 -c "import os, tempfile; with tempfile.TemporaryDirectory() as tmp: open(os.path.join(tmp, 'hooks', 'test_x.py'), 'w').write('x')"''',
+   "allow", **B)
 add("test-author: Edit of product code is refused", "deny", rule=TA, tool="Edit",
     file_path="src/app.py", carries=("builder", "Report"), **A)
 add("builder-test: a ruff --ignore script added to package.json is allowed", "allow", tool="Edit",
