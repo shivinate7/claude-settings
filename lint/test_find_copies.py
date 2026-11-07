@@ -35,6 +35,7 @@ MODULE = os.environ.get("FIND_COPIES_UNDER_TEST") or os.path.join(HERE, "find_co
 RUN_FOLDER = _test_temp.run_folder()  # test-temp-standard (one run folder per test run)
 REPO = os.path.dirname(HERE)
 LABELLED = os.path.join(HERE, "paraphrase_labelled.json")
+HELDOUT = os.path.join(HERE, "paraphrase_heldout.json")  # built without the prompt in view, so it tests the prompt
 sys.path.append(os.path.join(HERE, "..", "hooks"))  # decision_watch, the one home of the model call
 
 SKILL_MD = "---\nname: {name}\ndescription: A shared skill for the fixture.\n---\n\n" + "".join(
@@ -594,6 +595,72 @@ class ParaphraseLabelledSetTest(unittest.TestCase):
             current |= set(re.findall(r"rule:([a-z0-9-]+)", git_show("HEAD", path) or ""))
         for case in self.load():
             self.assertIn(case["rule_id"], current, f"case {case['id']}: no current rule:{case['rule_id']} anchor at HEAD")
+
+
+class ParaphraseHeldoutSetTest(unittest.TestCase):
+    """lint/paraphrase_heldout.json: a labelled set the paraphrase prompt was not written from. Its shape, its floor of
+    30 cases per label, that each rule_id and rule_text is current, and that each claude-settings source is a real line
+    that holds the text. A child source (`repo:path:line@sha`) names a clone that CI does not have, so only its form is
+    checked here, as in ParaphraseLabelledSetTest."""
+
+    SOURCE = re.compile(r"^(?:(?P<repo>[a-z_]+):)?(?P<path>[^:@]+):(?P<line>[0-9]+)@(?P<sha>[0-9a-f]{7,40})$")
+    FIELDS = {"id", "rule_id", "rule_text", "text", "source", "label", "why"}
+    FLOOR = 30
+
+    def load(self):
+        self.assertTrue(os.path.isfile(HELDOUT), "lint/paraphrase_heldout.json is missing")
+        with open(HELDOUT, encoding="utf-8") as f:
+            cases = json.load(f)
+        self.assertIsInstance(cases, list, "the held-out set is not a JSON list of cases")
+        return cases
+
+    def test_each_case_has_the_fields_and_a_known_label(self):
+        ids = []
+        for case in self.load():
+            self.assertEqual(set(case), self.FIELDS, f"case {case.get('id')!r} has keys {sorted(case)}")
+            self.assertIn(case["label"], ("paraphrase", "distinct"), f"case {case['id']} has label {case['label']!r}")
+            self.assertTrue(case["why"].strip(), f"case {case['id']} has an empty why")
+            self.assertTrue(case["rule_text"].strip(), f"case {case['id']} has an empty rule_text")
+            self.assertNotIn("\n", case["text"], f"case {case['id']} text spans lines")
+            ids.append(case["id"])
+        self.assertEqual(len(ids), len(set(ids)), "two cases share an id")
+
+    def test_each_label_meets_the_floor(self):
+        cases = self.load()
+        for label in ("paraphrase", "distinct"):
+            n = sum(1 for case in cases if case.get("label") == label)
+            self.assertGreaterEqual(n, self.FLOOR, f"the set has {n} {label} cases; the floor is {self.FLOOR}")
+
+    def test_every_source_has_the_form_path_line_at_sha(self):
+        for case in self.load():
+            self.assertRegex(case["source"], self.SOURCE, f"case {case['id']} source {case['source']!r} is not path:line@sha")
+
+    def test_claude_settings_sources_quote_their_line(self):
+        for case in self.load():
+            m = self.SOURCE.match(case["source"])
+            self.assertIsNotNone(m, f"case {case['id']} source {case['source']!r} is not path:line@sha")
+            if m.group("repo"):
+                continue  # a child clone: form only, see the class note
+            text = git_show(m.group("sha"), m.group("path"))
+            self.assertIsNotNone(text, f"case {case['id']}: {m.group('path')} cannot be read at {m.group('sha')}")
+            lines = text.split("\n")
+            line = int(m.group("line"))
+            self.assertLessEqual(line, len(lines), f"case {case['id']}: line {line} is past the end of {m.group('path')}")
+            self.assertIn(case["text"], lines[line - 1], f"case {case['id']}: the text is not on {case['source']}")
+
+    def test_each_rule_id_is_a_current_anchor(self):
+        current = set()
+        for path in ("CLAUDE.md", "output-styles/shiv-stylisms.md"):
+            current |= set(re.findall(r"rule:([a-z0-9-]+)", git_show("HEAD", path) or ""))
+        for case in self.load():
+            self.assertIn(case["rule_id"], current, f"case {case['id']}: no current rule:{case['rule_id']} anchor at HEAD")
+
+    def test_each_rule_text_is_the_current_wording(self):
+        style = git_show("HEAD", "output-styles/shiv-stylisms.md") or ""
+        current = ParaphraseLabelledSetTest.plain((git_show("HEAD", "CLAUDE.md") or "") + "\n" + style)
+        for case in self.load():
+            self.assertIn(ParaphraseLabelledSetTest.plain(case["rule_text"]), current,
+                          f"case {case['id']}: rule_text is not the current wording of rule:{case['rule_id']}")
 
 
 # One-home check, copies inside a repo (plan parts a and c). The parent holds rule sentences in its RULE_FILES and

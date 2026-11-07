@@ -1,0 +1,542 @@
+[
+  {
+    "id": "hp01",
+    "rule_id": "git-main-only-by-pr",
+    "rule_text": "Move main only by pull request, merged only when I name the act, or under a repo grant.",
+    "text": "Merge only when you say so, or under a repo grant, per CLAUDE.md.",
+    "source": "README.md:116@b93b1af",
+    "label": "paraphrase",
+    "why": "Says the rule in other words: merge only on the owner's word or under a repo grant."
+  },
+  {
+    "id": "hp02",
+    "rule_id": "git-main-only-by-pr",
+    "rule_text": "Move main only by pull request, merged only when I name the act, or under a repo grant.",
+    "text": "Main still moves only by PR.",
+    "source": "home:CLAUDE.md:10@87e6833",
+    "label": "paraphrase",
+    "why": "Restates the rule that main moves only by pull request."
+  },
+  {
+    "id": "hp03",
+    "rule_id": "roles-model-per-role-table",
+    "rule_text": "A workflow agent takes the builder or reviewer role through `agentType`. Each agent runs its role's model and effort from `agent-model-cap`, the model-per-role table.",
+    "text": "Each agent role runs the model and effort of its row in the table below.",
+    "source": "docs/decisions/agent-model-cap.md:5@b93b1af",
+    "label": "paraphrase",
+    "why": "Restates the rule that each role runs the model and effort in its table row."
+  },
+  {
+    "id": "hp04",
+    "rule_id": "roles-findings-are-debts-or-notes",
+    "rule_text": "A known gap is a debt only if Claude is likely to hit it in normal work. Write one record per debt in the repo's debt store, and point it to its decision where one exists. Any other finding is one line in the store's notes file. A note becomes a debt after a real incident.",
+    "text": "makes a finding a debt when Claude is likely to hit it in normal work.",
+    "source": "docs/debts/README.md:3@b93b1af",
+    "label": "paraphrase",
+    "why": "Restates the rule that a finding is a debt only where Claude is likely to hit it in normal work."
+  },
+  {
+    "id": "hp05",
+    "rule_id": "parallelism-keep-going",
+    "rule_text": "When a lane ends, start in the same turn each queued item the owner asked for whose questions are all answered. A follow-up the session found is treated as asked when it serves my goal and can be undone, such as an archive push or a CI fix lane. Queue it, start it without asking me, and name it under Done, or under Next while it waits. Ask first for an act that cannot be undone, a change to my goal, or work in a repo other than the one the session started in. A message to a person, spend, a delete with no copy, and a deploy or change to a live system or device cannot be undone. A standing grant for that act still holds. A follow-up never lifts a wait that another rule here makes, such as a merge. Stop only where a rule here waits for my grant, for a test only I can run, or for the load brake.",
+    "text": "Stop only for a decision that is the owner's, a test only the owner can run, or a wait or hold this file names",
+    "source": "home:CLAUDE.md:46@87e6833",
+    "label": "paraphrase",
+    "why": "Restates the stop-only-when rule: an owner decision, a test only the owner can run, or a named wait."
+  },
+  {
+    "id": "hp06",
+    "rule_id": "git-one-record-per-question",
+    "rule_text": "One record per question. When its ruling changes, rewrite the record in place. Open a record only for a new question.",
+    "text": "A changed ruling on the SAME question rewrites its entry in place.",
+    "source": "q_max:CLAUDE.md:86@58cad3b",
+    "label": "paraphrase",
+    "why": "Restates the rule that a changed ruling rewrites its record in place."
+  },
+  {
+    "id": "hp07",
+    "rule_id": "git-one-record-per-question",
+    "rule_text": "One record per question. When its ruling changes, rewrite the record in place. Open a record only for a new question.",
+    "text": "A different question gets a new entry that names the old one.",
+    "source": "q_max:docs/debts/same-question-ruling-no-check.md:3@58cad3b",
+    "label": "paraphrase",
+    "why": "Restates the rule that only a new question opens a new record."
+  },
+  {
+    "id": "hp08",
+    "rule_id": "git-never-merge-failing-ci",
+    "rule_text": "Never merge failing CI.",
+    "text": "A red run blocks the next merge until it is fixed.",
+    "source": "docs/decisions/ci-cut-in-steps.md:11@b93b1af",
+    "label": "paraphrase",
+    "why": "Restates the rule that failing CI is never merged."
+  },
+  {
+    "id": "hp09",
+    "rule_id": "verification-report-unknown-reads",
+    "rule_text": "Verify a claim before you rely on it, a document's own claims too. Report a read that could not run as unknown, never as clear or broken.",
+    "text": "Mark each of them `unknown`, never pass or fail.",
+    "source": "skills/compliance-check/SKILL.md:61@b93b1af",
+    "label": "paraphrase",
+    "why": "Restates the rule that a read which cannot run is unknown, never clear, for the probes that need the network."
+  },
+  {
+    "id": "hp10",
+    "rule_id": "building-fix-cause-not-symptom",
+    "rule_text": "Fix the cause, not the symptom. Name a bandaid as one when it is the right call.",
+    "text": "Then a fix never hides a flaw or blurs the cause of one.",
+    "source": "skills/design-review/SKILL.md:61@b93b1af",
+    "label": "paraphrase",
+    "why": "Restates fix-the-cause: a fix must not hide the defect or blur its cause."
+  },
+  {
+    "id": "hp11",
+    "rule_id": "shared-trees-own-ports-data",
+    "rule_text": "A branch switch is a whole-tree act. Give each checkout its own ports and data.",
+    "text": "Give each parallel agent its own worktree, its own ports and its own database.",
+    "source": "q_max:specs/briefs/ux-landing.md:218@58cad3b",
+    "label": "paraphrase",
+    "why": "Restates the rule that each checkout has its own ports and data, with the worktree rule beside it."
+  },
+  {
+    "id": "hp12",
+    "rule_id": "roles-review-cap-three",
+    "rule_text": "A change gets at most three review rounds. Decision `hold-unsafe-after-round-3` (net-value hold after round 3) holds the delete-only change's one round, the held change that is also red, and the merge at zero or positive net value. Rounds 1 and 2 still fix the defect (`outcomes-tests-are-statements`). After round 3, a change that changes a guard or check (`hold-unsafe-after-round-3`, net-value hold after round 3) gets the net-value test. The round-3 reviewer judges its net safety value against main: safety holes closed against safety holes opened, weighted by expected harm. A change that changes no guard or check skips the test and merges on green. A safety hole is a guard or check that lets through an act that main refuses or asks about. Turning a main refusal into an ask is also a safety hole. For any guard or check, an act counts only if Claude could write it by mistake or from a misread task. A form only an attacker would write does not count (`guard-guards-mistakes-only`, guards stop Claude's mistakes, not an attacker). An act that my typed override lets through is not a safety hole (`owner-override`, my typed override). For every change, each open finding becomes a debt or a note, pointing to its decision (`roles-findings-are-debts-or-notes`). A change with negative net value is held: remove it from the batch, so the rest merges green. A held change is parked. It gets no fix lane and no more work until the owner decides. After round 3, red CI is not a named safety hole: split it, ship the passing part, and open the red part as a new lane. That lane starts at round 1, try 1. Its brief records what failed; if no split works or the test looks stale, ask the owner (`outcomes-stale-decision-protocol`); never weaken a test to reach green. A red batch still drops the lane first (`git-integration-branch-merge`); the split happens in that lane's own fix. A small fix to a round's finding gets a fix check and merges on green. A FAIL or a wider diff starts a new lane at round 1.",
+    "text": "A bypass counts as a safety hole only if Claude could write it by mistake or from a misread task.",
+    "source": "docs/decisions/guard-guards-mistakes-only.md:9@b93b1af",
+    "label": "paraphrase",
+    "why": "Restates the rule that a guard's act counts only if Claude could write it by mistake or from a misread task."
+  },
+  {
+    "id": "hp13",
+    "rule_id": "style-time-central-24h",
+    "rule_text": "Give times in US Central, 24-hour clock, with the zone on every time, such as 21:40 CDT. Never show me UTC.",
+    "text": "a session tells the owner times in US Central (America/Chicago), DST-aware, 24-hour clock.",
+    "source": "docs/decisions/local-time-central.md:5@b93b1af",
+    "label": "paraphrase",
+    "why": "Restates the Central, 24-hour time rule; the owner's 2026-10-12 ruling is its source."
+  },
+  {
+    "id": "hp14",
+    "rule_id": "speak-one-name-per-thing",
+    "rule_text": "`GLOSSARY.md`, beside this file, gives each workflow thing one name. Use that name. A repo glossary adds its own terms and never defines a term from that file again. Write only the term the repo uses for a thing, but read my words by meaning. The term is the name the repo uses for it: a glossary term, else the item's own name in code, CI or a record title. When I name a thing another way, act on it and answer with that term. If two repo terms match the meaning, ask which I meant first. No term matches only when the repo names the thing nowhere. Then use plain words and add no term.",
+    "text": "a session reads what the owner types by meaning, and the glossary keeps one name per thing.",
+    "source": "docs/decisions/glossary-meets-owner-halfway.md:5@b93b1af",
+    "label": "paraphrase",
+    "why": "Restates the one-name rule and the read-by-meaning rule; the owner's 2026-11-01 ruling is its source."
+  },
+  {
+    "id": "hp15",
+    "rule_id": "speak-rewrite-superseded-in-place",
+    "rule_text": "Rewrite superseded text in place. Keep only what is true now, in the fewest words. Git keeps the history.",
+    "text": "so it no longer lists the gap. Git keeps the history.",
+    "source": "degen:docs/debts/README.md:17@19def78",
+    "label": "paraphrase",
+    "why": "Restates the rule that a superseded entry is rewritten in place and git keeps the history."
+  },
+  {
+    "id": "hp16",
+    "rule_id": "speak-rewrite-superseded-in-place",
+    "rule_text": "Rewrite superseded text in place. Keep only what is true now, in the fewest words. Git keeps the history.",
+    "text": "rewrite superseded text in place, keep only what is true",
+    "source": "agents/record-writer.md:17@b93b1af",
+    "label": "paraphrase",
+    "why": "Restates the rewrite-in-place rule in other words: keep only what is true now."
+  },
+  {
+    "id": "hp17",
+    "rule_id": "verification-green-proves-only-its-fixtures",
+    "rule_text": "A green check proves only its platform and the states its fixtures build.",
+    "text": "a green run proves only its own platform",
+    "source": "mailaudit:docs/decisions/ci-runs-in-utc.md:17@1f00c08",
+    "label": "paraphrase",
+    "why": "Restates the rule that a green check proves only its platform and fixtures."
+  },
+  {
+    "id": "hp18",
+    "rule_id": "building-one-home-per-capability",
+    "rule_text": "Give each capability one home, and call it from everywhere. Extend that home before you build a second. A duplicate needs a stated reason.",
+    "text": "A shared fixture or test step has one home",
+    "source": "agents/test-author.md:30@b93b1af",
+    "label": "paraphrase",
+    "why": "Restates the one-home rule for test fixtures and steps."
+  },
+  {
+    "id": "hp19",
+    "rule_id": "roles-sonnet-is-the-ceiling",
+    "rule_text": "Sonnet is the ceiling, except Plan, the built-in advisor (`advisorModel`), the designer, the design reviewer, and a builder's third try (`roles-third-round-steps-up`), which run Opus. An Explore whose brief's first non-blank line carries the audit marker `Audit:` may run Sonnet or Opus. Any other agent runs Opus, or any model above Sonnet, only on my grant for the spawn I name, or by override: `opus 2h` for a time, `opus builders 2h` for one role.",
+    "text": "Opus runs only for Plan, the built-in advisor (`advisorModel`; agents inherit it), the designer and the design reviewer",
+    "source": "docs/decisions/agent-model-cap.md:6@b93b1af",
+    "label": "paraphrase",
+    "why": "Restates the Opus exceptions of the Sonnet-ceiling rule, with the owner's ruling as its source."
+  },
+  {
+    "id": "hp20",
+    "rule_id": "git-no-merge-during-batch-ci",
+    "rule_text": "While a batch's integration PR has a CI run in progress, nothing merges to main, by any session or by me.",
+    "text": "no one merges to main while a batch's CI runs.",
+    "source": "docs/decisions/no-merge-during-batch-ci.md:5@773c276",
+    "label": "paraphrase",
+    "why": "Restates the rule that nothing merges to main while a batch's CI run is in progress; the owner's ruling is its source."
+  },
+  {
+    "id": "hp21",
+    "rule_id": "outcomes-mechanize-rules",
+    "rule_text": "Once ready, turn each rule below into a hook or check. This file is the fallback, not the enforcement. Tracking, logging, monitoring or measuring reads on demand inside a process already running, never on a timer or on every tool call, and starts no new long-lived process. Each states its cost in its record (process starts, files written, how often), and a test proves that cost. A log needs a named reader, or it is not written.",
+    "text": "A log with no reader is not written.",
+    "source": "docs/plans/align-watchers.md:46@fbc94bf",
+    "label": "paraphrase",
+    "why": "Restates the rule that a log needs a named reader or it is not written."
+  },
+  {
+    "id": "hp22",
+    "rule_id": "git-ci-done-comment-wakes",
+    "rule_text": "A run that ends red posts one PR comment, which wakes the session that watches the PR (`ci-done-comment`).",
+    "text": "posts one PR comment when a run ends with a failed or cancelled job.",
+    "source": "skills/ci-hygiene/SKILL.md:200@b93b1af",
+    "label": "paraphrase",
+    "why": "Restates the rule that a run ending red posts one PR comment."
+  },
+  {
+    "id": "hp23",
+    "rule_id": "verification-recovery-independent-of-state",
+    "rule_text": "A recovery control must not depend on the state it recovers, or it fails on the one day it is needed.",
+    "text": "the guard refuses it exactly when it is needed.",
+    "source": "docs/decisions/recovery-independent-of-state.md:6@b93b1af",
+    "label": "paraphrase",
+    "why": "Restates the rule that a recovery control must not depend on the state it recovers."
+  },
+  {
+    "id": "hp24",
+    "rule_id": "building-scanner-respects-strings",
+    "rule_text": "Scan source code with the language's own parser or tokenizer when the repo has one. Otherwise, match strings and comments in one pass. Test every scanner on comment openers (`/*`, `//`, `#`) inside strings, on a multi-line template literal, and on a lone quote in text, such as JSX `<p>Don't</p>`.",
+    "text": "Code that scans source text gets cases for comment openers inside strings, a multi-line template literal, and a lone quote in text",
+    "source": "agents/test-author.md:28@b93b1af",
+    "label": "paraphrase",
+    "why": "Restates the scanner rule: its tests cover comment openers in strings, a multi-line template, and a lone quote."
+  },
+  {
+    "id": "hp25",
+    "rule_id": "tokens-never-load-whole-doc",
+    "rule_text": "Never load a long document whole. Read one record, one section, or a rendered view.",
+    "text": "Never read a whole long file.",
+    "source": "agents/explore.md:13@b93b1af",
+    "label": "paraphrase",
+    "why": "Restates the rule to read one section or excerpt, never a whole long document."
+  },
+  {
+    "id": "hp26",
+    "rule_id": "building-one-home-per-capability",
+    "rule_text": "Give each capability one home, and call it from everywhere. Extend that home before you build a second. A duplicate needs a stated reason.",
+    "text": "A second shape would be a second home.",
+    "source": "docs/decisions/opt-in-ci-templates-composite.md:21@b93b1af",
+    "label": "paraphrase",
+    "why": "Restates the one-home rule: a second shape is a second home."
+  },
+  {
+    "id": "hp27",
+    "rule_id": "verification-report-unknown-reads",
+    "rule_text": "Verify a claim before you rely on it, a document's own claims too. Report a read that could not run as unknown, never as clear or broken.",
+    "text": "a read that could not run is unknown, never clear",
+    "source": "docs/debts/verdict-rewritten-xcode-output.md:7@b93b1af",
+    "label": "paraphrase",
+    "why": "Restates the unknown-not-clear rule in the debt's decision line."
+  },
+  {
+    "id": "hp28",
+    "rule_id": "building-comments-say-why",
+    "rule_text": "Comment only what complex code does and why. Never narrate history or review rounds.",
+    "text": "a comment says what and why, never history",
+    "source": "docs/debts/comment-check-changed-from.md:5@b93b1af",
+    "label": "paraphrase",
+    "why": "Restates the comments rule: say what and why, never history."
+  },
+  {
+    "id": "hp29",
+    "rule_id": "reports-name-unstarted-items",
+    "rule_text": "An orchestrator's report holds an `Unstarted:` line under Next: each queued item with every question answered that it left unstarted, with its reason, or `none`.",
+    "text": "omits a step that is ready and not started",
+    "source": "docs/debts/unstarted-guard-held.md:3@3a92767",
+    "label": "paraphrase",
+    "why": "Restates the rule that the Unstarted line names each ready item left unstarted."
+  },
+  {
+    "id": "hp30",
+    "rule_id": "shared-trees-archive-then-delete",
+    "rule_text": "Push an unmerged branch to `archive/<branch>` on origin, or a new archive name if taken. Once the push succeeds, delete it locally with no question: nothing is lost.",
+    "text": "archive an unmerged branch before a delete",
+    "source": "docs/debts/design-branch-deleted-unmerged.md:5@b93b1af",
+    "label": "paraphrase",
+    "why": "Restates the archive-then-delete rule in its gloss; the rest of the line is a pointer."
+  },
+  {
+    "id": "hd01",
+    "rule_id": "outcomes-tests-are-statements",
+    "rule_text": "A failing test is a claim, not law. Re-point it, red then green, or fix the defect it found. If it may be stale and no ruling covers it, use the protocol above.",
+    "text": "A test is a claim, not law. When your change breaks one, sort the failure into one class.",
+    "source": "agents/builder.md:35@b93b1af",
+    "label": "distinct",
+    "why": "Shares the rule's words, but the claim that follows is the builder's four-class sort, which the rule does not state."
+  },
+  {
+    "id": "hd02",
+    "rule_id": "outcomes-tests-are-statements",
+    "rule_text": "A failing test is a claim, not law. Re-point it, red then green, or fix the defect it found. If it may be stale and no ruling covers it, use the protocol above.",
+    "text": "A test is a claim, not law. When a CHANGES verdict turns on a broken test, state its class.",
+    "source": "agents/reviewer.md:32@b93b1af",
+    "label": "distinct",
+    "why": "Shares the rule's words, but adds the reviewer's CHANGES step and the class to state."
+  },
+  {
+    "id": "hd03",
+    "rule_id": "git-record-own-file-per-kind",
+    "rule_text": "Give each record its own file, one folder per kind.",
+    "text": "One file per debt, named by a slug of 32 characters or fewer. Each file has four parts:",
+    "source": "docs/debts/README.md:7@b93b1af",
+    "label": "distinct",
+    "why": "Shares the own-file and slug words, but gives this folder's file shape, four parts."
+  },
+  {
+    "id": "hd04",
+    "rule_id": "shared-trees-own-ports-data",
+    "rule_text": "A branch switch is a whole-tree act. Give each checkout its own ports and data.",
+    "text": "`shared-trees-own-ports-data` (each checkout its own data): it writes `.iceberg/` into each",
+    "source": "docs/plans/plugin-assess-three.md:79@886ec99",
+    "label": "distinct",
+    "why": "Names the rule, then a local fact about one plugin writing its .iceberg folder."
+  },
+  {
+    "id": "hd05",
+    "rule_id": "tokens-run-through-verdict",
+    "rule_text": "Run every verification command through `verdict <cmd>`, which prints the verdict and keeps the full output in a log.",
+    "text": "run that mutation test once through `verdict` before pushing.",
+    "source": "agents/builder.md:54@b93b1af",
+    "label": "distinct",
+    "why": "Shares the verdict-command words, but the step is a mutation test before push."
+  },
+  {
+    "id": "hd06",
+    "rule_id": "verification-browser-login-only-needed",
+    "rule_text": "Prefer a headless or isolated browser over my own, and use my login only when needed.",
+    "text": "When it names routes and no screenshots, render each route in a headless or isolated browser.",
+    "source": "agents/design-reviewer.md:21@b93b1af",
+    "label": "distinct",
+    "why": "Shares the headless-browser words, but the condition and step belong to design review."
+  },
+  {
+    "id": "hd07",
+    "rule_id": "building-scanner-respects-strings",
+    "rule_text": "Scan source code with the language's own parser or tokenizer when the repo has one. Otherwise, match strings and comments in one pass. Test every scanner on comment openers (`/*`, `//`, `#`) inside strings, on a multi-line template literal, and on a lone quote in text, such as JSX `<p>Don't</p>`.",
+    "text": "Scanner tests: when the diff adds or changes code that scans source text, flag it if its tests lack the cases in building-scanner-respects-strings",
+    "source": "agents/reviewer.md:53@b93b1af",
+    "label": "distinct",
+    "why": "Names the rule as a reviewer check; the claim is the review step, not the rule's claim."
+  },
+  {
+    "id": "hd08",
+    "rule_id": "parallelism-each-own-checkout",
+    "rule_text": "Fan tasks out to agents now, each in its own checkout. A workflow run, the ultracode path, is a fan-out too. Give each workflow agent that writes files `isolation: 'worktree'`.",
+    "text": "Shared checkout: sessions that work in this repo each use their own worktree.",
+    "source": "home:CLAUDE.md:50@87e6833",
+    "label": "distinct",
+    "why": "Shares the own-worktree words, but its scope is this repo's shared checkout."
+  },
+  {
+    "id": "hd09",
+    "rule_id": "output-write-in-ste",
+    "rule_text": "Write plainly: short sentences, one term per meaning, no filler.",
+    "text": "Write plainly (claude-settings rule `output-write-in-ste`, the plain-writing rule).",
+    "source": "degen:CLAUDE.md:19@19def78",
+    "label": "distinct",
+    "why": "Names the STE rule; the rest of the line points at this repo's lint step."
+  },
+  {
+    "id": "hd10",
+    "rule_id": "roles-brief-contents",
+    "rule_text": "A brief carries the task, the files, governing rulings, failure classes from `outcomes-tests-are-statements`, and the check that proves the task done—in the fewest words. It specifies a report cap in lines sized to the choice it feeds. With no cap named, the cap is 25 lines.",
+    "text": "State each ruling in the fewest words.",
+    "source": "agents/reviewer.md:25@356ecf1",
+    "label": "distinct",
+    "why": "Reuses the brief's fewest-words phrase as a reviewer report instruction, not the brief's contents."
+  },
+  {
+    "id": "hd11",
+    "rule_id": "git-integration-branch-merge",
+    "rule_text": "Batch lane PRs that pass their local checks into one integration branch. Keep each lane's own commit. A lane joins the batch after the review the roles rules require. Only the integration PR goes ready, and its run is the only CI run for the batch. Before you open a PR, check other sessions' open PRs and offer to batch. A repo may name one session to batch PRs and run each merge, on the owner's grant. Skill `ci-hygiene` (CI upkeep), step 8 (Batch lanes), holds the rest: late lanes, a red run, the drop and the fix, and batching across sessions.",
+    "text": "Rule `git-integration-branch-merge` already treats a lone lane as its own integration PR.",
+    "source": "docs/decisions/auto-mode-owner-acts.md:51@0c64f50",
+    "label": "distinct",
+    "why": "Names the rule and adds a claim about a lone lane that the rule text does not state."
+  },
+  {
+    "id": "hd12",
+    "rule_id": "building-port-keeps-behaviour",
+    "rule_text": "A port or redesign keeps the existing app's behaviour as the default. Each choice cites where it was read, file and symbol. A question goes to the owner only when the work departs from that behaviour, says so in a \"Departs from:\" line, and is never marked blocking. A question the code or a standing grant answers is not asked.",
+    "text": "The Departs from word list misses some restatements and refuses some changes",
+    "source": "docs/debts/departs-word-list-limits.md:1@b93b1af",
+    "label": "distinct",
+    "why": "Shares the Departs-from words, but it is a debt title about a word list."
+  },
+  {
+    "id": "hd13",
+    "rule_id": "git-no-merge-during-batch-ci",
+    "rule_text": "While a batch's integration PR has a CI run in progress, nothing merges to main, by any session or by me.",
+    "text": "A merge to main under a running batch run moves the base",
+    "source": "docs/decisions/no-merge-during-batch-ci.md:40@b93b1af",
+    "label": "distinct",
+    "why": "Shares the batch-CI words; it is the incident that caused the ruling."
+  },
+  {
+    "id": "hd14",
+    "rule_id": "git-ci-done-comment-wakes",
+    "rule_text": "A run that ends red posts one PR comment, which wakes the session that watches the PR (`ci-done-comment`).",
+    "text": "a red run's `ci-done` comment by `github-actions[bot]` reached the watching session as `issue_comment.created`",
+    "source": "docs/decisions/ci-wait-reads-run-status.md:32@b93b1af",
+    "label": "distinct",
+    "why": "Shares the red-run comment words; it is a measured delivery on one batch."
+  },
+  {
+    "id": "hd15",
+    "rule_id": "reports-no-report-when-nothing-landed",
+    "rule_text": "No report when nothing landed.",
+    "text": "The report guard returns early when nothing landed, so rule reports-no-report-when-nothing-landed has no check.",
+    "source": "docs/debts/notes.md:476@b93b1af",
+    "label": "distinct",
+    "why": "Names the rule; the claim is that the guard has no check for it."
+  },
+  {
+    "id": "hd16",
+    "rule_id": "speak-cite-id-plus-gloss",
+    "rule_text": "Give every id a short plain name the first time it appears, like \"D12, short titles for records\". That covers decision and debt ids, roadmap step ids, lane numbers, PR and issue numbers, commit hashes, rule anchors, and hook and script names. Never cite a bare id. A numbered id carries no order, so state the work order in words.",
+    "text": "the card text quoted a bare topic id (rule `speak-cite-id-plus-gloss`)",
+    "source": "docs/decisions/uniform-over-variants.md:22@b93b1af",
+    "label": "distinct",
+    "why": "Shares the cite-with-gloss words; it is a dated incident on one card."
+  },
+  {
+    "id": "hd17",
+    "rule_id": "building-allow-list-is-the-constant",
+    "rule_text": "A guard's or check's allow list must point at the constant the code emits, never a copy of it.",
+    "text": "`LINT_JOBS` copies `CHECKS_SUITE_JOBS`",
+    "source": "docs/debts/notes.md:1253@b93b1af",
+    "label": "distinct",
+    "why": "Shares the constant-copy words; it is a local debt about two lint job lists."
+  },
+  {
+    "id": "hd18",
+    "rule_id": "building-fix-cause-not-symptom",
+    "rule_text": "Fix the cause, not the symptom. Name a bandaid as one when it is the right call.",
+    "text": "The bounded settle at the end of `R4-SCROLLBOX` is a bandaid, and the probe names it as one.",
+    "source": "q_max:docs/debts/browser-tier-no-real-idle-gate.md:3@58cad3b",
+    "label": "distinct",
+    "why": "Shares the bandaid words; it is a local debt about one browser probe."
+  },
+  {
+    "id": "hd19",
+    "rule_id": "building-fix-cause-not-symptom",
+    "rule_text": "Fix the cause, not the symptom. Name a bandaid as one when it is the right call.",
+    "text": "This is a bandaid. The limit is soft: queued jobs keep downloading.",
+    "source": "degen:docs/decisions/jdownloader-addon.md:41@19def78",
+    "label": "distinct",
+    "why": "Shares the bandaid words; it is a local note on one add-on's quota."
+  },
+  {
+    "id": "hd20",
+    "rule_id": "outcomes-stale-decision-protocol",
+    "rule_text": "When a decision looks stale, name the record and the sentence. Measure the claim, or say \"unmeasured\". Name the outcome the decision protected and what protects it now. Propose a fix. Wait for my grant.",
+    "text": "A decision that looks stale follows rule:outcomes-stale-decision-protocol.",
+    "source": "mailaudit:CLAUDE.md:37@1f00c08",
+    "label": "distinct",
+    "why": "Names the rule and points a stale decision to it; it does not restate the protocol."
+  },
+  {
+    "id": "hd21",
+    "rule_id": "shared-trees-no-machine-wide-kill",
+    "rule_text": "Kill only yours. Others' servers and processes are not yours to stop, unless my override covers the stop (`owner-override`, my typed override).",
+    "text": "a kill of pid 0, 1 or -1",
+    "source": "docs/decisions/owner-override.md:68@b93b1af",
+    "label": "distinct",
+    "why": "Shares the kill words; it is an owner ruling about three pids."
+  },
+  {
+    "id": "hd22",
+    "rule_id": "git-never-discard-output",
+    "rule_text": "Keep git write output. Discarded output hides failures from the reader.",
+    "text": "keeps \"Keep git write output.\", 4 words.",
+    "source": "docs/decisions/cull-rules.md:13@2adf678",
+    "label": "distinct",
+    "why": "Quotes the rule text for a word-count exception; the claim is the exception."
+  },
+  {
+    "id": "hd23",
+    "rule_id": "style-no-unmeasured-estimate",
+    "rule_text": "Give no time estimate for agent work. State a time only from a measured range of the same kind, with its sample count, such as \"PR CI 8-10 min, 13 runs\". With no measure, give none.",
+    "text": "The rule `style-no-unmeasured-estimate` in the `shiv-stylisms` output style is the rule half.",
+    "source": "docs/debts/measured-time-table.md:7@b93b1af",
+    "label": "distinct",
+    "why": "Names the rule only, as the rule half of a debt about a table."
+  },
+  {
+    "id": "hd24",
+    "rule_id": "tokens-verdict-not-stream",
+    "rule_text": "A verification command's answer is its verdict, not its stream. Get the verdict with one bounded command. Never scroll a log to find out whether something passed.",
+    "text": "keeps only the last lines, and a wrapper watching the pipe can read a stalled or false exit.",
+    "source": "docs/debts/verdict-pipe-drops-line.md:3@b93b1af",
+    "label": "distinct",
+    "why": "Shares the verdict words; it is a local incident with a pipe."
+  },
+  {
+    "id": "hd25",
+    "rule_id": "building-guard-needs-incident",
+    "rule_text": "Build a guard or check against a mistake Claude has made or is likely to make in normal work. Its record names the mistake and the harm it stops. At each cull, delete a guard only when its false alarms cost more than the harm it stops.",
+    "text": "build the guard against the feed-build incident of 2026-10-11",
+    "source": "docs/debts/build-disk-guard.md:9@b93b1af",
+    "label": "distinct",
+    "why": "Shares the guard-and-incident words; it is a debt about one disk guard."
+  },
+  {
+    "id": "hd26",
+    "rule_id": "verification-trust-guard-after-red",
+    "rule_text": "Trust a guard only once it goes red on the defect it guards.",
+    "text": "A test with bold keys and inline keys goes red, then green.",
+    "source": "docs/debts/bold-option-keys-missed.md:6@b93b1af",
+    "label": "distinct",
+    "why": "Shares the red-then-green words; it is the test plan for one debt."
+  },
+  {
+    "id": "hd27",
+    "rule_id": "verification-trust-guard-after-red",
+    "rule_text": "Trust a guard only once it goes red on the defect it guards.",
+    "text": "Red on the current code, green after the fix.",
+    "source": "docs/debts/ff-first-lane-not-a-tip.md:9@b93b1af",
+    "label": "distinct",
+    "why": "Shares the red-then-green words; it is the check plan for one fast-forward case."
+  },
+  {
+    "id": "hd28",
+    "rule_id": "roles-review-cap-three",
+    "rule_text": "A change gets at most three review rounds. Decision `hold-unsafe-after-round-3` (net-value hold after round 3) holds the delete-only change's one round, the held change that is also red, and the merge at zero or positive net value. Rounds 1 and 2 still fix the defect (`outcomes-tests-are-statements`). After round 3, a change that changes a guard or check (`hold-unsafe-after-round-3`, net-value hold after round 3) gets the net-value test. The round-3 reviewer judges its net safety value against main: safety holes closed against safety holes opened, weighted by expected harm. A change that changes no guard or check skips the test and merges on green. A safety hole is a guard or check that lets through an act that main refuses or asks about. Turning a main refusal into an ask is also a safety hole. For any guard or check, an act counts only if Claude could write it by mistake or from a misread task. A form only an attacker would write does not count (`guard-guards-mistakes-only`, guards stop Claude's mistakes, not an attacker). An act that my typed override lets through is not a safety hole (`owner-override`, my typed override). For every change, each open finding becomes a debt or a note, pointing to its decision (`roles-findings-are-debts-or-notes`). A change with negative net value is held: remove it from the batch, so the rest merges green. A held change is parked. It gets no fix lane and no more work until the owner decides. After round 3, red CI is not a named safety hole: split it, ship the passing part, and open the red part as a new lane. That lane starts at round 1, try 1. Its brief records what failed; if no split works or the test looks stale, ask the owner (`outcomes-stale-decision-protocol`); never weaken a test to reach green. A red batch still drops the lane first (`git-integration-branch-merge`); the split happens in that lane's own fix. A small fix to a round's finding gets a fix check and merges on green. A FAIL or a wider diff starts a new lane at round 1.",
+    "text": "A FAIL follows rule `roles-review-cap-three` (the three-round cap).",
+    "source": "docs/decisions/docs-only-prs-skip-review.md:17@b93b1af",
+    "label": "distinct",
+    "why": "Names the rule as the path for a FAIL in a docs-only round; it adds no claim of its own."
+  },
+  {
+    "id": "hd29",
+    "rule_id": "roles-third-round-steps-up",
+    "rule_text": "Third try: Opus. A builder's third try runs after review round 2 fails; its brief carries `Round 3 of 3`. Reviewers run Sonnet from round 2 on; round 1 uses the role's model.",
+    "text": "no guard case pins `Round 3 of 3` for a test-author or general-purpose role on Opus",
+    "source": "docs/debts/notes.md:621@b93b1af",
+    "label": "distinct",
+    "why": "Shares the Round 3 of 3 words; it is a local gap in one guard's tests."
+  },
+  {
+    "id": "hd30",
+    "rule_id": "roles-one-role-per-agent",
+    "rule_text": "Each agent is one role: builder, reviewer, designer, design reviewer, or Explore, never two. A lane that touches a screen gets a designer before the builder and a design reviewer after it. A text-only change on an existing screen skips the designer (decision `design-agents`).",
+    "text": "`roles-one-role-per-agent`, the reviewer agent",
+    "source": "docs/plans/plugin-assess-three.md:111@886ec99",
+    "label": "distinct",
+    "why": "Names the rule in a table row for one plugin assessment; it adds no claim."
+  }
+]
