@@ -1358,14 +1358,16 @@ MEASURED_RE = re.compile(r"\(measured\b([^)]*)\)", re.I)
 MEASURED_OK_RE = re.compile(r"\s+(\d{4}-\d{2}-\d{2}),\s*\S")
 # "blocked until" and "not available until" wait on another act, so they are a dependency, not a capability. The
 # narrow forms keep three false alarms out: "could not be simpler", "rejected by review" (only a refused push, request,
-# token, call or credential counts), and "PR #401" (a bare 401 counts, a `#`-numbered one does not).
+# token, call or credential, or a rejection by a remote, server, API, GitHub or host, counts), and "PR #401" (a bare 401 counts, a `#`-numbered one does not).
 CAPABILITY_RE = re.compile(
     r"\bcan['’]t\b|\bcannot\b|\brefuse[sd]?\b|\bunable to\b|\bdenied\b|\bforbidden\b|\bno access\b"
     r"|\b(?:isn['’]t|not)\s+(?:allowed|permitted)\b|\bunavailable\b|\b403\b"
     r"|\bblocked\b(?!\s+until\b)|\bnot available\b(?!\s+until\b)"
-    r"|\bcould(?:n['’]t|\s+not)\b(?!\s+be\s+(?:more|less|\w+er)\b)"
+    r"|\bcould(?:n['’]t|\s+not)\b(?!\s+be\s+(?:(?:any|made|much)\s+)*(?:more|less|\w+er)\b)"
     r"|\brejected\s+(?:(?:the|my|our|this)\s+)?(?:push|request|token|call|credential)"
-    r"|\b(?:push|request|token|call|credential)\w*\s+(?:was\s+|were\s+)?rejected\b"
+    r"|\b(?:push|request|token|call|credential)\w*\s+"
+    r"(?:(?:was|were|got|gets|keeps getting|has been|have been)\s+)?rejected\b"
+    r"|\b(?:remote|server|API|GitHub|host)\s+rejected\b"
     r"|(?<!#)\b401\b", re.I)
 CHOICE_RE = re.compile(
     r"\byour choice\b|\byour call\b|\bneeds your login\b|\bsign in as you\b|\ba safety rule\b.*?\bstays yours\b"
