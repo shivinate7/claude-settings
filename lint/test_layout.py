@@ -370,6 +370,13 @@ class WaitingPage(Tree):
                 self.assertEqual(self.layout.artifact_id(url), "abc123", "%r has no artifact id" % url)
                 self.assertTrue(self.layout.is_waiting_page_url(self.tree, url), "%r does not name the page" % url)
 
+    def test_a_link_with_trailing_spaces_or_a_newline_names_its_id(self):
+        # Checks that trailing spaces and a trailing newline are ignored, as leading spaces are: a link pasted with
+        # padding names the same artifact.
+        for url in ("https://claude.ai/artifact/abc123 ", "https://claude.ai/artifact/abc123\n"):
+            with self.subTest(url=url):
+                self.assertEqual(self.layout.artifact_id(url), "abc123", "trailing padding %r is not ignored" % url)
+
     def test_a_repo_with_no_page_has_no_page_url(self):
         self.assertFalse(self.layout.is_waiting_page_url(self.tree, self.URL))
         self.roll_out()
