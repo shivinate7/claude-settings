@@ -4,7 +4,7 @@
 
 No owner ruling yet. The coordinator asked for this guard rule after the incident below, under rule `building-guard-needs-incident` (a guard needs a mistake it stops). At 16:22 CST on 2026-11-07 the coordinator widened it. The merge tool's verdict calls are refused in the foreground too. A `merge --lane-lint` call piped into a filter hid the result twice that day. Roadmap step `guard-pipe-on-merge-lint` (merge verdict calls piped) holds that part. The owner may change either.
 
-- A pipeline that holds a named check and a later `tail` or `head` stage is refused. The rule id is `background-check-tail`, in `hooks/guard_stream.py`.
+- A pipeline that holds a named check and a later `tail` or `head` stage is refused. The rule id is `check-tail`, in `hooks/guard_stream.py`.
 - The merge tool's verdict calls are `merge --lane-lint` and `merge --review-record`. They are refused in the foreground and in the background.
 - `merge --confirm` stays with the narrated-tail rule (`live-stream`, in the same file), so it is never refused twice. A plain `merge <pr>` preview, which returns in seconds, passes.
 - `ci-job` is refused only in a call with `run_in_background`. In the foreground it passes.
