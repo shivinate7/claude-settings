@@ -22,13 +22,28 @@ except ImportError:  # install-hooks-whole: the guard set lands whole, the helpe
 from shared_names import config_dir  # noqa: E402  the one home, shared with the config watch
 
 
-def _git(where: str, *args):
-    try:
-        return _nowindow.run(
-            ["git", "-C", where, *args], capture_output=True, encoding="utf-8", errors="replace", timeout=10
-        )
-    except Exception:
-        return None
+RETRY_TIMEOUT = 15  # seconds: the one retry of a read that timed out at the normal 10
+
+
+def _git(where: str, *args, retry: bool = False):
+    """One `git` call: the finished process, or None when it could not start or timed out. `retry` is for a
+    read whose non-zero exit also means "unread" (the guard's diff reads): a failed call runs once more, with
+    the longer RETRY_TIMEOUT after a timeout, before the caller treats the read as failed."""
+    slow = False
+    done = None
+    for _attempt in range(2 if retry else 1):
+        try:
+            done = _nowindow.run(
+                ["git", "-C", where, *args], capture_output=True, encoding="utf-8", errors="replace",
+                timeout=10 if not slow else RETRY_TIMEOUT
+            )
+        except subprocess.TimeoutExpired:
+            done, slow = None, True
+        except Exception:
+            done = None
+        if done is not None and done.returncode == 0:
+            break
+    return done
 
 
 def is_worktree(where: str):

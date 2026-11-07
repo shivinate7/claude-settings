@@ -2034,10 +2034,20 @@ def entry_kind(subject: str) -> str:
 
 def git_names(root: str, *args):
     """The NUL-separated names one git call prints, or None when git failed."""
-    answer = guard_core._git(root, *args)
+    answer = guard_core._git(root, *args, retry=True)
     if answer is None or answer.returncode != 0:
         return None
     return [p for p in answer.stdout.split("\0") if p]
+
+
+def held_as_replay(root: str, sha: str):
+    """True when HEAD holds a commit with the same patch as `sha`, a commit HEAD no longer reaches: a rebase
+    replayed it as a new commit. False when none does; None when git failed. `git cherry` marks such a
+    commit `-` by its patch id."""
+    answer = guard_core._git(root, "cherry", "HEAD", sha, retry=True)
+    if answer is None or answer.returncode != 0:
+        return None
+    return ("- " + sha) in answer.stdout.splitlines()
 
 
 def changed_paths(root: str, old: str, new=None):
@@ -2084,7 +2094,8 @@ def own_changes(root: str):
 
     OWN (a builder's test path in it is refused):
       - each commit the agent made (HEAD reflog `commit`, `commit (amend)`, `commit (merge)`) that HEAD
-        still holds, against its first parent. A merge commit is measured against git's own merge of
+        still holds, or whose patch a rebase replayed into HEAD (`held_as_replay`), against its first
+        parent. A merge commit is measured against git's own merge of
         its parents, so only what the agent resolved or added counts;
       - the working tree against HEAD, or, while a merge is in progress, against git's own merge of
         HEAD and MERGE_HEAD.
@@ -2095,8 +2106,8 @@ def own_changes(root: str):
     the working tree or a commit of its own carries it, and that is refused.
     A plain cherry-pick or rebase pick, a clean merge, a reset, a checkout and a pull are other
     people's commits, and are not read."""
-    log = guard_core._git(root, "reflog", "show", "--format=%H %gs", "HEAD")
-    gitdir = guard_core._git(root, "rev-parse", "--absolute-git-dir")
+    log = guard_core._git(root, "reflog", "show", "--format=%H %gs", "HEAD", retry=True)
+    gitdir = guard_core._git(root, "rev-parse", "--absolute-git-dir", retry=True)
     merging = guard_core._git(root, "rev-parse", "-q", "--verify", "MERGE_HEAD")
     if log is None or gitdir is None or merging is None or log.returncode or gitdir.returncode:
         return None
@@ -2109,15 +2120,21 @@ def own_changes(root: str):
     lost = set()
     if kinds:
         # `kinds --not HEAD` lists what HEAD does not reach: a commit in it was reset or amended away.
-        answer = guard_core._git(root, "rev-list", *kinds, "--not", "HEAD")
+        answer = guard_core._git(root, "rev-list", *kinds, "--not", "HEAD", retry=True)
         if answer is None or answer.returncode != 0:
             return None
         lost = set(answer.stdout.split())
     changes = []
     for sha, kind in kinds.items():
         if sha in lost:
-            continue
-        parents = guard_core._git(root, "show", "-s", "--format=%P", sha)
+            # A rebase replays the agent's own commit as a plain pick: the new commit is another sha, and
+            # the original is gone from HEAD's history. The original still counts while HEAD holds its patch.
+            replayed = held_as_replay(root, sha) if kind == OWN else False
+            if replayed is None:
+                return None
+            if not replayed:
+                continue
+        parents = guard_core._git(root, "show", "-s", "--format=%P", sha, retry=True)
         if parents is None or parents.returncode != 0:
             return None
         parents = parents.stdout.split()
@@ -2250,7 +2267,7 @@ def diff_violation(root: str, role: str):
     may not change ('' when none, None when git could not answer: UNKNOWN, never clear), and the paths
     a builder changed that are logged and never refused. Every offence of another role is logged only."""
     changes = own_changes(root)
-    top = guard_core._git(root, "rev-parse", "--show-toplevel")
+    top = guard_core._git(root, "rev-parse", "--show-toplevel", retry=True)
     if changes is None or top is None or top.returncode != 0:
         return None, []
     top = os.path.realpath(top.stdout.strip())
