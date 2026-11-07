@@ -427,6 +427,27 @@ def _is_primary_checkout(entry_path: str):
 AGENT_LOCK_RE = re.compile(r"^claude agent agent-[\w-]+ \(pid (\d+)(?: start (.+))?\)$")
 
 
+def _ticks_lock_stale(pid: int, ticks: int):
+    """The `stale_agent_lock_verdict` answer for a lock `(pid N start S)` whose S is clock ticks since
+    boot, the harness's own form (measured: host pid 159 holds start 181, field 22 of /proc/159/stat).
+    Linux only: True when pid N is gone or its field 22 is not S (the pid was reused), False when it is
+    S. None where /proc cannot answer, on any other platform too, since its unit there is unmeasured:
+    the host is then unproven, and the caller keeps the tree and stops nothing."""
+    if not sys.platform.startswith("linux"):
+        return None
+    try:
+        with open("/proc/%d/stat" % pid, encoding="utf-8") as handle:
+            text = handle.read()
+    except (FileNotFoundError, ProcessLookupError):
+        return True
+    except OSError:
+        return None
+    try:
+        return int(text.rsplit(")", 1)[1].split()[22 - 3]) != ticks  # fields after ')' start at field 3
+    except (ValueError, IndexError):
+        return None
+
+
 def stale_agent_lock_verdict(reason: str):
     """True when REASON is a claude agent lock that may go. Two forms: the Agent tool's own
     lock `claude agent agent-<id> (pid N start <date>)`, and `claude agent agent-<id> (pid N)`
@@ -439,6 +460,8 @@ def stale_agent_lock_verdict(reason: str):
     if not found:
         return False
     pid, start = int(found.group(1)), found.group(2)
+    if start is not None and start.isdigit():  # the harness's live form: clock ticks since boot
+        return _ticks_lock_stale(pid, int(start))
     locked_ms = None
     if start is not None:
         try:
@@ -2522,15 +2545,39 @@ def _lock_unlockable(root: str, path: str, decision: dict):
     return False
 
 
-def remove_worktree(root: str, path: str, decision: dict):
-    if decision.get("unlock") and not _lock_unlockable(root, path, decision):
-        return
-    if decision.get("unlock"):  # a stale agent lock; never --force
+def unlock_for_removal(root: str, path: str, decision: dict):
+    """The first half of `remove_worktree`: re-read the lock and lift it, never with `--force`. True
+    when the tree is now unlocked (DECISION["unlocked"] is set), or needed no unlock. False when the
+    re-read or the unlock failed: DECISION then says why (a keep, or an error) and the lock stays.
+    The agent-end reap calls it before it stops any shell, so a failed unlock stops nothing."""
+    if not decision.get("unlock"):
+        return True
+    if decision.get("unlocked"):
+        return True
+    if not _lock_unlockable(root, path, decision):
+        return False
+    if decision.get("unlock"):  # not when the lock was gone already
         unlocked = git_reads._git(root, "worktree", "unlock", path)
         if unlocked is None or unlocked.returncode != 0:
             decision["error"] = "unlock failed: %s" % (
                 unlocked.stderr.strip() if unlocked is not None else "git gave no answer")
-            return
+            return False
+        decision["unlocked"] = True
+    return True
+
+
+def relock_worktree(root: str, path: str, decision: dict):
+    """Put back the lock `unlock_for_removal` took off, so the tree is no less guarded than before.
+    True when git took it. `remove_worktree` keeps its own inline copy of this command: the relock
+    mutant in janitor/mutate_sweep.py anchors on those lines."""
+    relock = git_reads._git(root, "worktree", "lock", "--reason",
+                            decision.get("lock_reason") or "locked", path)
+    return relock is not None and relock.returncode == 0
+
+
+def remove_worktree(root: str, path: str, decision: dict):
+    if not unlock_for_removal(root, path, decision):
+        return
     admin = _admin_dir(path)
     if admin:
         try:

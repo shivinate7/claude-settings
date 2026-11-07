@@ -64,15 +64,22 @@ A worktree is removed only when all of these hold. A read that cannot tell keeps
 
 #### A finished agent's shells
 
-Coordinator pick, 2026-11-07 14:11 CST, under the owner's ruling of 2026-10-15 19:43 CDT. A finished agent's own shells, such as a dev server, have the live host as parent. At a later agent end, a tree locked by the host is unlocked, its shells stopped and the tree removed only when all of these hold:
+Coordinator pick, 2026-11-07 14:43 CST (it replaces the pick of 14:11 CST), under the owner's ruling of 2026-10-15 19:43 CDT. A finished agent's own shells, such as a dev server, have the live host as parent. At a later agent end, a tree locked by the host is unlocked, its shells stopped and the tree removed only when all of these hold:
 
-- The agent is not listed as running in the SubagentStop payload's `background_tasks` (entries are `{id, type, status}`, `id` is the agent id). A missing or malformed field keeps the tree.
+- The agent's own SubagentStop row is in the agent-end payload log (`state/agent-end-payloads.jsonl`). A missing row keeps the tree.
+- The agent is not listed as running in the SubagentStop payload's `background_tasks` (each entry has `id`, `type`, `status`, `agent_type` and `description`; `id` is the agent id). A missing or malformed field keeps the tree.
 - `<transcript_path minus .jsonl>/subagents/agent-<id>.jsonl` exists and has been idle 30 min or more.
 - The tree is clean and pushed. A dirty tree is always kept.
 
-A pid is stopped only when its parent chain reaches the pid named in the tree's lock, that pid is this session's host (an ancestor of the hook, and under the session's `claude` root when one is found), and every pid on the chain below the host has its cwd inside the tree. One pid that is not proven keeps the tree and nothing is stopped. The reaper signals children before parents, then reads the process table until it is empty within the stage budget (`WORKTREE_SECONDS`). Only then is the tree removed; a pid still alive keeps it. Shells in a tree that is kept for any other reason are never stopped. A platform that cannot list processes or prove the chain stops nothing and removes nothing. A pid whose cwd cannot be read is never stopped. An unlocked tree keeps the rule above.
+Why the stop row: `background_tasks` is not proof that an agent still runs. 64 of 213 mid-run (payload, agent) pairs were unlisted in `background_tasks`, with quiet gaps of 6.4-16.2 min (measured 2026-11-07 from the session payload log). A running agent in a quiet gap reads as finished there. Its own stop row is written only when it ends.
 
-Home: `janitor/agent_end_reap.py` (`agent_finished`, `stop_and_settle`), `janitor/sweep.py` (`host_child_stops`).
+The live lock reads `claude agent agent-<id> (pid N start S)`, where S is clock ticks since boot, field 22 of `/proc/<N>/stat` (measured: host 159, start 181). On Linux the host proof matches S against that field: a match is the live host, a mismatch or a dead pid is a stale lock. A platform that cannot read it (macOS, Windows, where the unit is unmeasured) leaves the host unproven: the tree is kept and nothing is stopped.
+
+A pid is stopped only when its parent chain reaches the pid named in the tree's lock, that pid is this session's host (an ancestor of the hook, and under the session's `claude` root when one is found), and every pid on the chain below the host has its cwd inside the tree. A shell whose chain reaches init (an orphan) is not a host child: it keeps the tree, as on main. One pid that is not proven keeps the tree and nothing is stopped.
+
+The order is fixed. The lock is re-read and lifted first (`sweep.unlock_for_removal`). Shells are stopped only after that succeeds; a failed re-read or unlock stops nothing and keeps the tree. The reaper then signals children before parents and reads the process table until it is empty within the stage budget (`WORKTREE_SECONDS`). Only then is the tree removed. A pid still alive puts the lock back and keeps the tree. Shells in a tree kept for any other reason are never stopped. A platform that cannot list processes or prove the chain stops nothing and removes nothing. A pid whose cwd cannot be read is never stopped. An unlocked tree keeps the rule above.
+
+Home: `janitor/agent_end_reap.py` (`stopped_agents`, `agent_finished`, `stop_and_settle`), `janitor/sweep.py` (`host_child_stops`, `unlock_for_removal`).
 
 Session start warns when more than 50 agent worktrees exist. An agent leaves its worktree clean and pushed, and a later agent end removes it. The builder and test-author agent definitions say so.
 
