@@ -1830,7 +1830,12 @@ def workflow_command_tests(command: str) -> set:
             args = tokens[1:] if runner else ([] if script is None else [tokens[1 + script]])
         else:
             args = tokens if runner else tokens[:1]
-        found.update(workflow_path(tok) for tok in args if is_test_rel(workflow_path(tok)))
+        # A quoted word with a space holds a whole command (`bash -c "pytest tests/x"`, a YAML-quoted run value):
+        # it is no path, and is read as a command line of its own. Each level drops one quote, so the recursion ends.
+        spaced = [tok for tok in tokens if re.search(r"\s", tok)]
+        found.update(workflow_path(tok) for tok in args if tok not in spaced and is_test_rel(workflow_path(tok)))
+        for tok in spaced:
+            found |= workflow_command_tests(tok)
     return found
 
 
