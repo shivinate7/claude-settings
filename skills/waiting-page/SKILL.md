@@ -171,7 +171,7 @@ Read every ISO time you write (`added`, `replied`, `ruled`, `read`, `filed`, `an
 - `groups/<slug>`: `title` and `why`. `why` is one sentence on how the items of the group connect.
   Write the record in the same step that sets `group` on the second item.
 - `answers/<id>`: the page writes it when the owner presses Send. Fields: `item`, `n`, `at` (ISO
-  time), `note`, and `choice` (a decision) or `done: true` (a task). A task answer may instead be
+  time), `note`, and `choice` (a decision) or `done: true` (a task), and `session` (copied from the item's `owner` id, absent when `owner` names none, never on a park answer). A task answer may instead be
   a note with no `done`. A pick that stands writes `choice` equal to `pick`, with the note
   `accepted pick`. A tap on the starred option is an ordinary pick, with no such note. On a `multi` item `choice` is a
   list of option keys, in rank order when `ranked` and in option order otherwise. A stood pick writes the whole `pick` list in that order. "None of these" writes
@@ -329,7 +329,7 @@ A save on the page sends a comment to Claude when the page allows it. The commen
 sessions that watch the page. Only the owning session reads, routes and closes its items, except that the writer closes an item on a park answer. On a `lane` item, the park branch has it tell first. It reads
 the answers at each wake, and at the start of each turn while it has an item open (the writer also
 while `meta/page.parked` is not empty): `ArtifactData list answers`. That read is the fallback when no wake comes. A peer session never
-relays an answer's text. It sends only the page URL, the item id and the act, and the receiver checks the answer itself (decision relayed-grant-read-from-page). An answer typed in the chat counts the same. A chat answer to an open item: the
+relays an answer's text. It sends only the page URL, the item id and the act, and the receiver checks the answer itself (decision relayed-grant-read-from-page). A session skips an answer whose `session` names another session; the receiver of a relayed grant still reads the answer itself. An answer typed in the chat counts the same. A chat answer to an open item: the
 writer adds the answer and its time to the item's `context`, and the writer closes it. Nothing is
 written to `answers/`, so steps 2 to 4 of "Route and close" skip their delete.
 The writer also sets `lastAnswer` from the chat answer, with the time the owner gave it.
