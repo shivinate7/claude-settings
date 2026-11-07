@@ -193,6 +193,13 @@ def write_extras(repo, artifacts):
         json.dump({"kinds": {}, "artifacts": artifacts}, f)
 
 
+def write_pointer(config, checkout):
+    """The config's CLAUDE.md, whose `@` line names `checkout`: the pointer that hooks/guard_pointer.py reads."""
+    os.makedirs(config, exist_ok=True)
+    with open(os.path.join(config, "CLAUDE.md"), "w", encoding="utf-8") as f:
+        f.write("@%s/CLAUDE.md\n" % checkout)
+
+
 def designed_item():
     """A waiting-page decision that passes the form and carries a picture: one option has a `design`. The file_path
     item of the fixture is this item, and the cases that need a picture inline use it too."""
@@ -232,8 +239,7 @@ def pointer_fixture():
             f.write("# child-marker\n\n## The ruling\n\n%s\n" % CHILD_RULING_MARK)
         with open(os.path.join(found["roadmap"], FOREIGN_ITEM), "w", encoding="utf-8") as f:
             json.dump(designed_item(), f)
-        with open(os.path.join(found["config"], "CLAUDE.md"), "w", encoding="utf-8") as f:
-            f.write("@%s/CLAUDE.md\n" % found["settings"])
+        write_pointer(found["config"], found["settings"])
         POINTER_FIXTURE.update(found)
     return POINTER_FIXTURE
 
@@ -368,8 +374,7 @@ def run_hook(stdin_text, answer=ALLOW, model_fail=False, pass_=None, pointer=Non
     cfg = os.path.join(base, "config")
     os.makedirs(cfg)
     if pointer:  # the hook's global rules file names this checkout, as the owner's does (hooks/guard_pointer.py)
-        with open(os.path.join(cfg, "CLAUDE.md"), "w", encoding="utf-8") as f:
-            f.write("@%s/CLAUDE.md\n" % pointer)
+        write_pointer(cfg, pointer)
     os.makedirs(STUB_DIR, exist_ok=True)
     with open(os.path.join(STUB_DIR, "sitecustomize.py"), "w", encoding="utf-8") as f:
         f.write(STUB_SITE)

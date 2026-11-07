@@ -721,6 +721,103 @@ def case_u2_git_failure_gives_a_note_and_no_reason():
           bool(note) and NOT_CHECKED in note, repr(note))
 
 
+# --------------------------------------------------------------------------- two-page cases
+# The Stop runs in the pointer checkout (alpha). Its sibling (bravo) holds a second waiting page. Each run is
+# repeated under several hash seeds, because export_check walks the pages in the order a set of URLs iterates.
+
+ALPHA_PAGE_ID, ALPHA_URL = "pairalpha", "https://claude.ai/artifact/pairalpha"  # the pointer checkout's page
+BRAVO_PAGE_ID, BRAVO_URL = "pairbravo", "https://claude.ai/artifact/pairbravo"  # the sibling's page
+ALPHA_FOLDER, BRAVO_FOLDER = "alpha", "bravo"  # each page's export folder; neither is a prefix of the other
+SEEDS = range(8)  # PYTHONHASHSEED values
+ORDER_SOURCE = "import json, sys\nprint(json.dumps(list({u for u in json.loads(sys.argv[1])})))\n"
+
+
+def set_order(seed, urls):
+    """The order a set of `urls`, added in that order, iterates under hash seed `seed`. export_check builds its set
+    of page URLs the same way, so this says which page root the check reaches first."""
+    cp = subprocess.run([sys.executable, "-c", ORDER_SOURCE, json.dumps(urls)], capture_output=True, timeout=30,
+                        env=dict(os.environ, PYTHONHASHSEED=str(seed)))
+    return json.loads(cp.stdout.decode("utf-8", "replace"))
+
+
+def two_page_repos(name, alpha_commits, bravo_commits):
+    """The pointer checkout (alpha) and its sibling (bravo) under one parent, each with its own waiting page and
+    export folder, and a record branch that holds the given commits (see roadmap_repo). The pointer file names alpha,
+    in a home of the run folder. Returns (alpha, bravo, env), where env names that home for run_stop."""
+    alpha = roadmap_repo("pairs/%s/alpha" % name, alpha_commits,
+                         extras=registry(page_export=ALPHA_FOLDER, page_id=ALPHA_PAGE_ID, page_url=ALPHA_URL))
+    bravo = roadmap_repo("pairs/%s/bravo" % name, bravo_commits,
+                         extras=registry(page_export=BRAVO_FOLDER, page_id=BRAVO_PAGE_ID, page_url=BRAVO_URL))
+    home = os.path.join(ROOT, "pairs", name, "home")
+    tcj.write_pointer(os.path.join(home, ".claude"), alpha)
+    return alpha, bravo, {"CLAUDE_CONFIG_DIR": os.path.join(home, ".claude"), "HOME": home, "USERPROFILE": home}
+
+
+def pair_stops(label, cwd, env, writes, urls):
+    """One Stop in `cwd` under each hash seed, as [(seed, Proc)]. The scope is checked first: the seeds must reach
+    the two page roots first in both orders, or no seed shows the other order."""
+    firsts = {set_order(seed, urls)[0] for seed in SEEDS}
+    check("%s scope: the seeds reach the two page roots first in both orders" % label, len(firsts) == 2,
+          "first roots %s" % sorted(firsts))
+    stops = []
+    for seed in SEEDS:
+        seeded = dict(env, PYTHONHASHSEED=str(seed))
+        stops.append((seed, run_stop("%s-s%d" % (label.lower(), seed), cwd, writes, extra_env=seeded)))
+    return stops
+
+
+def expect_only(name, p, blamed, spared):
+    """A block whose reason names `blamed`'s copy folder on the record branch, and does not name `spared`'s folder."""
+    reason = (expect_block(name, p, (SCRIPT, "roadmap", blamed + "/")).get("reason") or "")
+    check("%s: the reason does not name %s/" % (name, spared), spared + "/" not in reason, reason)
+
+
+def case_p1_unreadable_sibling_does_not_hide_the_pointer_page():
+    """Both pages were written in this session: the pointer checkout's (its copy is older than the write, so it needs
+    an export) and the sibling's (no origin/roadmap, so its copy cannot be read). Under every hash seed the reason
+    is the pointer page's. The sibling reached first used to return no reason, which hid the other page. Red on
+    the old code for the seeds that reach the sibling first."""
+    with tcj.hermetic_home() as fx:
+        check("P1 scope: the pointer checkout's copy is readable and has no commit in the copy folder",
+              copy_readable(fx["settings"], FOLDER) and newest_copy(fx["settings"], FOLDER) is None,
+              newest_copy(fx["settings"], FOLDER))
+        check("P1 scope: the sibling has no record ref, so its copy cannot be read",
+              not copy_readable(fx["child"], FOLDER), "the sibling's copy reads")
+        env = {"CLAUDE_CONFIG_DIR": fx["config"], "HOME": fx["home"], "USERPROFILE": fx["home"]}
+        writes = ([owner(at(18, 50))] + page_write(at(19), "w1", url=tcj.POINTER_PAGE_URL)
+                  + page_write(at(19, 10), "w2", url=tcj.CHILD_PAGE_URL))
+        for seed, p in pair_stops("P1", fx["settings"], env, writes, [tcj.POINTER_PAGE_URL, tcj.CHILD_PAGE_URL]):
+            expect_block("P1 seed %d" % seed, p, (SCRIPT, "roadmap", FOLDER + "/"))
+
+
+def case_p2_page_exported_after_its_write_is_not_blamed():
+    """Bravo's page is written first, and its copy lands after that write. Alpha's page is written last, and its copy
+    is older than the write, so alpha alone needs an export. Under every hash seed the reason names alpha's folder and
+    not bravo's. A check that pools the newest write across the pages blocks bravo too, and names bravo under the
+    seeds that reach bravo first. Red on that pooled copy."""
+    alpha, bravo, env = two_page_repos("p2", [(at(17), item(ALPHA_FOLDER, 1))], [(at(19, 30), item(BRAVO_FOLDER, 1))])
+    check("P2 scope: alpha's newest copy commit is 17:00", newest_copy(alpha, ALPHA_FOLDER) == at(17),
+          newest_copy(alpha, ALPHA_FOLDER))
+    check("P2 scope: bravo's newest copy commit is 19:30", newest_copy(bravo, BRAVO_FOLDER) == at(19, 30),
+          newest_copy(bravo, BRAVO_FOLDER))
+    writes = [owner(at(18, 50))] + page_write(at(19), "w1", url=BRAVO_URL) + page_write(at(20), "w2", url=ALPHA_URL)
+    for seed, p in pair_stops("P2", alpha, env, writes, [BRAVO_URL, ALPHA_URL]):
+        expect_only("P2 seed %d" % seed, p, blamed=ALPHA_FOLDER, spared=BRAVO_FOLDER)
+
+
+def case_p3_mirror_page_exported_after_its_write_is_not_blamed():
+    """P2 with the pages swapped: alpha's copy lands after alpha's write, and bravo's is older than bravo's write.
+    Under every hash seed the reason names bravo's folder and not alpha's. Red on the pooled copy, as P2 is."""
+    alpha, bravo, env = two_page_repos("p3", [(at(19, 30), item(ALPHA_FOLDER, 1))], [(at(17), item(BRAVO_FOLDER, 1))])
+    check("P3 scope: alpha's newest copy commit is 19:30", newest_copy(alpha, ALPHA_FOLDER) == at(19, 30),
+          newest_copy(alpha, ALPHA_FOLDER))
+    check("P3 scope: bravo's newest copy commit is 17:00", newest_copy(bravo, BRAVO_FOLDER) == at(17),
+          newest_copy(bravo, BRAVO_FOLDER))
+    writes = [owner(at(18, 50))] + page_write(at(19), "w1", url=ALPHA_URL) + page_write(at(20), "w2", url=BRAVO_URL)
+    for seed, p in pair_stops("P3", alpha, env, writes, [ALPHA_URL, BRAVO_URL]):
+        expect_only("P3 seed %d" % seed, p, blamed=BRAVO_FOLDER, spared=ALPHA_FOLDER)
+
+
 CASES.extend((
     case_s1_block_when_copy_is_older_than_the_write,
     case_s2_later_copy_commit_passes,
@@ -766,6 +863,9 @@ CASES.extend((
     case_u1_export_check_returns_the_reason,
     case_u2_git_failure_gives_a_note_and_no_reason,
     case_u3_pointer_page_write_gives_the_reason_from_a_roadmap_or_a_folder_in_no_repo,
+    case_p1_unreadable_sibling_does_not_hide_the_pointer_page,
+    case_p2_page_exported_after_its_write_is_not_blamed,
+    case_p3_mirror_page_exported_after_its_write_is_not_blamed,
 ))
 
 
