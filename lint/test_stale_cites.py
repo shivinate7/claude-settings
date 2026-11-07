@@ -241,10 +241,12 @@ class StaleCase(unittest.TestCase):
         change(repo)
         return Range(case, repo, base_sha, git(repo, "rev-parse", "HEAD"))
 
-    def run_check(self, rng, base=None, extra_env=None):
+    def run_check(self, rng, base=None, extra_env=None, spec=None):
+        """(exit code, output) of `--range`. `spec` gives the range text when a case needs another shape."""
         self.assertTrue(os.path.isfile(MODULE), "module absent: lint/stale_cites.py")
         env = dict(os.environ, TMPDIR=rng.case, **(extra_env or {}))
-        spec = "%s...%s" % (rng.base if base is None else base, rng.head)
+        if spec is None:
+            spec = "%s...%s" % (rng.base if base is None else base, rng.head)
         done = subprocess.run([sys.executable, MODULE, "--range", spec],
                               cwd=rng.repo, env=env, capture_output=True, text=True,
                               encoding="utf-8", errors="replace")
@@ -1089,6 +1091,101 @@ class ExcludeFolderTests(StaleCase):
                 self.assert_passes(self.make_range(base_files(extra=extra), change))
 
 
+UNRESOLVED = "3" * 40  # a commit id that no test repo holds
+
+
+def has_object(repo, spec):
+    """True when git can read the object `spec` names in `repo`."""
+    return subprocess.run(["git", "cat-file", "-e", spec], cwd=repo, capture_output=True).returncode == 0
+
+
+def drop_loose_object(repo, spec):
+    """Remove the loose object `spec` names, so a read of it cannot run. A packed object stays readable, so a case
+    that dropped one would break nothing: this refuses that case instead of passing it."""
+    sha = git(repo, "rev-parse", spec)
+    path = os.path.join(repo, ".git", "objects", sha[:2], sha[2:])
+    if not os.path.isfile(path):
+        raise AssertionError("scope: %s is not a loose object, so dropping it breaks no read" % spec)
+    os.chmod(path, 0o644)  # git writes objects read-only, and Windows removes no read-only file
+    os.remove(path)
+
+
+class UnreadableReadTests(StaleCase):
+    """A read the check makes that cannot run exits 2 and says unknown beside the read's name. It never exits 0 and
+    never prints PASS. Each case breaks one read on a fixture; its control runs the same fixture with nothing broken."""
+
+    def moved_lib(self, cited):
+        """A range that moves hooks/lib.mjs. NOTES names it on line 3 when `cited`, and names no path otherwise."""
+        notes = "# Notes\n\n- refusal list in `hooks/lib.mjs`\n" if cited else "# Notes\n\n- no path cite here\n"
+
+        def change(repo):
+            move(repo, "hooks/lib.mjs", MOVED)
+            write(repo, NOTES, notes)
+            commit(repo)
+        return self.make_range(base_files(), change)
+
+    def assert_healthy_moved_lib(self):
+        """The same fixture read whole: a clean range exits 0, and a real stale cite exits 1."""
+        self.assert_passes(self.moved_lib(cited=False))
+        self.assert_flags(self.moved_lib(cited=True), [(NOTES, 3, "STALE001")])
+
+    def assert_read_failed(self, rc, out, read):
+        """Exit 2, no PASS verdict, the output says unknown and names `read`."""
+        self.assertEqual(rc, 2, "a read that could not run did not exit 2\n" + out)
+        self.assertNotIn("stale-cites: PASS", out, "a read that could not run printed a PASS verdict\n" + out)
+        self.assertRegex(out, "(?i)unknown", "the output does not say unknown\n" + out)
+        self.assertIn(read, out, "the output does not name the read that failed (%s)\n%s" % (read, out))
+
+    def test_a_head_that_does_not_resolve_exits_two_and_names_the_merge_base(self):
+        rng = self.moved_lib(cited=True)
+        self.assertTrue(has_object(rng.repo, rng.base), "scope: the base resolves")
+        self.assertFalse(has_object(rng.repo, UNRESOLVED), "scope: the head does not resolve")
+        rc, out = self.run_check(rng, spec="%s...%s" % (rng.base, UNRESOLVED))
+        self.assert_read_failed(rc, out, "merge-base")
+        self.assertNotIn("fetch-depth", out, "a missing head was blamed on a shallow clone of the base\n" + out)
+
+    def test_a_three_dot_range_with_a_resolving_head_is_read_whole(self):
+        self.assert_healthy_moved_lib()
+
+    def test_a_two_dot_range_whose_head_does_not_resolve_exits_two_and_names_the_diff(self):
+        rng = self.moved_lib(cited=True)
+        self.assertFalse(has_object(rng.repo, UNRESOLVED), "scope: the head does not resolve")
+        rc, out = self.run_check(rng, spec="%s..%s" % (rng.base, UNRESOLVED))
+        self.assert_read_failed(rc, out, "git diff")
+        self.assertNotIn("fetch-depth", out, "a missing head was blamed on a shallow clone of the base\n" + out)
+
+    def test_a_two_dot_range_with_a_resolving_head_flags_the_stale_cite_and_passes_when_clean(self):
+        rng = self.moved_lib(cited=True)
+        rc, out = self.run_check(rng, spec="%s..%s" % (rng.base, rng.head))
+        self.assertEqual(rc, 1, "a resolving two-dot range did not flag the stale cite\n" + out)
+        self.assertEqual([(p, n, c) for p, n, c, _ in parse(out)], [(NOTES, 3, "STALE001")], out)
+        clean = self.moved_lib(cited=False)
+        rc, out = self.run_check(clean, spec="%s..%s" % (clean.base, clean.head))
+        self.assertEqual(rc, 0, "a clean two-dot range did not exit 0\n" + out)
+
+    def test_an_exclude_file_that_cannot_be_read_exits_two_and_names_it(self):
+        rng = self.moved_lib(cited=False)
+        self.assertIn(MOVED, touched(rng), "scope: the range renames a path, so the check reads the excludes")
+        os.mkdir(os.path.join(rng.repo, ".ste-lint-exclude"))  # a folder under the file's name: open() cannot read it
+        rc, out = self.run_check(rng)
+        self.assert_read_failed(rc, out, ".ste-lint-exclude")
+
+    def test_no_exclude_file_is_read_whole(self):
+        self.assert_healthy_moved_lib()
+
+    def test_a_line_anchor_whose_cited_file_cannot_be_read_exits_two_and_names_it(self):
+        rng = self.tree("# Notes\n\n- `hooks/guard.py:99`\n")
+        self.assertIn("hooks/guard.py", git(rng.repo, "ls-tree", "-r", "--name-only", "HEAD").split(),
+                      "scope: the cited file is tracked at HEAD")
+        drop_loose_object(rng.repo, "HEAD:hooks/guard.py")
+        rc, out = self.run_tree(rng)
+        self.assert_read_failed(rc, out, "hooks/guard.py")
+
+    def test_a_readable_cited_file_flags_an_anchor_past_its_end_and_passes_one_inside(self):
+        self.assert_tree_flags(self.tree("# Notes\n\n- `hooks/guard.py:99`\n"), [(NOTES, 3, "STALE004")])
+        self.assert_tree_passes(self.tree("# Notes\n\n- `hooks/guard.py:6`\n"))
+
+
 CLAUDE = "CLAUDE.md"
 MECH = "lint/rule_mechanisms.json"
 GUARD_EDIT = GUARD.replace("return 1", "return 2")  # a status M change to hooks/guard.py
@@ -1438,6 +1535,64 @@ class ReportTests(StaleCase):
         self.assertIn(record + ":3", report_prose(out, "hooks/guard.py"), out)
         self.assertIn(record + ":4", report_prose(out, "lint/test_x.py"), out)
         self.assertNotIn(record + ":5", report_prose(out, "hooks/guard.py") | report_prose(out, "lint/test_x.py"), out)
+
+
+class UnreadableReportTests(StaleCase):
+    """A report read that cannot run prints an unknown line that names it, never a silent gap. The report keeps the
+    exit code, as a malformed mechanisms file does (its case ends _and_keeps_the_exit_code), so these keep it too."""
+
+    def guard_edit(self, extra):
+        """A range that changes hooks/guard.py only. Nothing is removed, so only the report reads the repo's files."""
+        def change(repo):
+            write(repo, "hooks/guard.py", GUARD_EDIT)
+            commit(repo)
+        return self.make_range(base_files(extra=extra), change)
+
+    def test_a_decision_record_that_cannot_be_read_prints_an_unknown_line_naming_it(self):
+        record = "docs/decisions/guard-home-first.md"
+        rng = self.guard_edit(decisions(("guard-home-first", "hooks/guard.py")))
+        self.assertEqual(touched(rng), {"hooks/guard.py"}, "scope: only the code file changed")
+        self.assertIn(record, git(rng.repo, "ls-tree", "-r", "--name-only", "HEAD").split(),
+                      "scope: the record is tracked at HEAD")
+        drop_loose_object(rng.repo, "HEAD:" + record)
+        rc, out = self.run_check(rng)
+        self.assertTrue([line for line in unknown_lines(out) if record in line],
+                        "a record that cannot be read printed no unknown line naming it\n" + out)
+        self.assertEqual(rc, 0, "an unreadable record changed the exit code\n" + out)
+
+    def test_a_readable_decision_record_prints_its_home_line_and_no_unknown_line(self):
+        rng = self.guard_edit(decisions(("guard-home-first", "hooks/guard.py")))
+        rc, out = self.run_check(rng)
+        self.assertIn("Home of decision guard-home-first", out, out)
+        self.assertEqual(unknown_lines(out), [], out)
+        self.assertEqual(rc, 0, out)
+
+    def test_a_readable_decision_record_beside_a_real_stale_cite_still_exits_one(self):
+        def change(repo):
+            write(repo, "hooks/guard.py", GUARD_EDIT)
+            move(repo, "hooks/lib.mjs", MOVED)
+            commit(repo)
+        extra = decisions(("guard-home-first", "hooks/guard.py"))
+        rng = self.make_range(base_files("# Notes\n\n- refusal list in `hooks/lib.mjs`\n", extra=extra), change)
+        self.assert_flags(rng, [(NOTES, 3, "STALE001")])
+
+    def test_a_mechanisms_file_that_cannot_be_read_prints_an_unknown_line_naming_it(self):
+        rng = self.guard_edit({MECH: mechanisms({"guard-row": {"kind": "guard", "ref": "hooks/guard.py"}})})
+        self.assertEqual(touched(rng), {"hooks/guard.py"}, "scope: only the code file changed")
+        self.assertIn(MECH, git(rng.repo, "ls-tree", "-r", "--name-only", "HEAD").split(),
+                      "scope: the mechanisms file is tracked at HEAD")
+        drop_loose_object(rng.repo, "HEAD:" + MECH)
+        rc, out = self.run_check(rng)
+        self.assertTrue([line for line in unknown_lines(out) if MECH in line],
+                        "a mechanisms file that cannot be read printed no unknown line naming it\n" + out)
+        self.assertEqual(rc, 0, "an unreadable mechanisms file changed the exit code\n" + out)
+
+    def test_a_readable_mechanisms_file_names_its_row_and_prints_no_unknown_line(self):
+        rng = self.guard_edit({MECH: mechanisms({"guard-row": {"kind": "guard", "ref": "hooks/guard.py"}})})
+        rc, out = self.run_check(rng)
+        self.assertTrue(named(out, "guard-row"), "the mechanisms row does not name the changed file\n" + out)
+        self.assertEqual(unknown_lines(out), [], out)
+        self.assertEqual(rc, 0, out)
 
 
 # A guard module whose refuse() call names the rule: rule_audit reads the rule id from the third argument.
