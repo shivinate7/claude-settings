@@ -759,7 +759,7 @@ class Host:
 
     def pages(self, rel, key=None, fields=None):
         """-> every item of a list read, all pages. `key` names the field that holds the page in an object reply (check_runs, statuses); None is an array reply.
-        Each page is asked for by number (`page=n`) and the read ends on the first empty page, whatever page size GitHub serves. `gh --paginate` is not used:
+        Each page is asked for by number (`page=n`) and the read ends on the first empty page, whatever page size GitHub serves. gh's own paging is not used:
         it follows the Link header to a numeric `repositories/<id>/...` route, which the cloud agent proxy refuses with 403.
         A failed read is a Stop: never an empty list, which would read as no checks or no pull requests. More than PAGE_CEILING pages is a Stop too."""
         items = []
