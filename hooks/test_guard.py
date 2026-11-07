@@ -3623,6 +3623,15 @@ sh("pointer: a move back to main restores the invariant and passes",
    VCS + " checkout main", "allow", cwd=PTRMAIN, config=PTRCFG)
 sh("pointer: switch main passes for the same reason",
    VCS + " switch main", "allow", cwd=PTRMAIN, config=PTRCFG)
+# A checkout detached at local main's commit counts as on main (hooks/session_start.sh, "A checkout detached at
+# local main's commit counts as on main"), so a detach to `main` passes. Only that target: a detach to any other
+# ref stays refused, and so does a detach that names no ref.
+sh("pointer: checkout --detach main leaves HEAD on main's commit, which counts as on main, so it passes",
+   VCS + " checkout --detach main", "allow", cwd=PTRMAIN, config=PTRCFG)
+sh("pointer: checkout --detach origin/main is not the main exemption, so it is refused",
+   VCS + " checkout --detach origin/main", "deny", "pointer-head", cwd=PTRMAIN, config=PTRCFG)
+sh("pointer: checkout --detach of another branch is refused",
+   VCS + " checkout --detach somebranch", "deny", "pointer-head", cwd=PTRMAIN, config=PTRCFG)
 # refusal-vs-rule (pointer-head, recovery-independent-of-state): a move TO main is the recovery act and
 # passes. A reset of main onto origin/main is a move to main too. The pin runs both on main and in a
 # checkout that is off main, so the verdict cannot rest on HEAD already naming main.
