@@ -35,7 +35,7 @@
                           one line per lane the roadmap's live file shows done and safe to archive, then a summary line. Reads
                           skills/roadmap/build.py (the upkeep row `lanes to archive`). Takes no lock and no merge role, merges and
                           posts nothing; any session may run it. An unreadable build or a missing --live exits 1: unknown, never empty.
-  merge --role TIER       cloud only: record this session's merge role (batch-runner only; the coordinator never merges). In a cloud session `--confirm`
+  merge --role TIER       cloud only: record this session's merge role (batch-runner or solo-owner; the coordinator never merges). In a cloud session `--confirm`
                           runs only when that role is recorded for the session (read_merge_role).
 
 Git half: the merge lock, the temporary worktree, the claim, the push, the revert, resume, the
@@ -3197,33 +3197,37 @@ def fix_check_arg(text):
         raise argparse.ArgumentTypeError(f"{text!r} is not REVIEWED_HEAD:{REVIEW_ROLES[0]}:MODEL:VERDICT, with a full 40-hex head and VERDICT {'|'.join(REVIEW_FIX_VERDICTS)}")
     return m.group(1, 2, 3, 4)
 
-MERGE_ROLES = {"batch-runner"}  # the one tier that may run `merge <pr> --confirm` in a cloud session; the coordinator never merges
+# Each tier that may run `merge <pr> --confirm` in a cloud session, with the env var that holds the id its role file names. The coordinator never merges.
+# batch-runner: the remote session id. solo-owner: the owner-started session's own id; the guard refuses `--role solo-owner` from a lane or a child.
+ROLE_ID_ENV = {"batch-runner": "CLAUDE_CODE_REMOTE_SESSION_ID", "solo-owner": "CLAUDE_CODE_SESSION_ID"}
+MERGE_ROLES = set(ROLE_ID_ENV)
 
 def role_path():
     return pathlib.Path(os.environ.get("CLAUDE_CONFIG_DIR") or os.path.join(os.path.expanduser("~"), ".claude")) / "state" / "merge-role.json"
 
 def read_merge_role():
-    """This session's recorded merge role, or None: no session id, no file, unreadable or malformed, another session's, or a tier outside MERGE_ROLES.
+    """This session's recorded merge role, or None: no file, unreadable or malformed, a tier outside MERGE_ROLES, no id in the env for that tier, or another session's id.
     Every failure is None, so the check fails closed. An absent id never equals an absent record."""
-    sid = os.environ.get("CLAUDE_CODE_REMOTE_SESSION_ID")
-    if not sid:
-        return None
     try:
         data = json.loads(role_path().read_text(encoding="utf-8"))
     except (OSError, ValueError):  # UnicodeDecodeError and JSONDecodeError are ValueErrors
         return None
-    if not isinstance(data, dict) or data.get("session") != sid:
+    if not isinstance(data, dict):
         return None
     role = data.get("role")
-    return role if isinstance(role, str) and role in MERGE_ROLES else None  # a list is unhashable: test the type first
+    if not isinstance(role, str) or role not in MERGE_ROLES:  # a list is unhashable: test the type first
+        return None
+    sid = os.environ.get(ROLE_ID_ENV[role])
+    return role if sid and data.get("session") == sid else None
 
 def write_merge_role(tier):
-    """Record `tier` as this cloud session's merge role. Refuses outside the cloud, with no session id, or for a tier outside MERGE_ROLES; nothing is written then."""
-    sid = os.environ.get("CLAUDE_CODE_REMOTE_SESSION_ID")
+    """Record `tier` as this cloud session's merge role, under the id its tier names (ROLE_ID_ENV). Refuses outside the cloud, with no session id, or for a tier outside MERGE_ROLES; nothing is written then."""
+    id_env = ROLE_ID_ENV.get(tier, "CLAUDE_CODE_REMOTE_SESSION_ID")
+    sid = os.environ.get(id_env)
     if os.environ.get("CLAUDE_CODE_REMOTE") != "true":
         raise Stop("--role records a merge role in a cloud session only. " + ROLE_CITE)
     if not sid:
-        raise Stop("--role needs CLAUDE_CODE_REMOTE_SESSION_ID, and it is not set. " + ROLE_CITE)
+        raise Stop(f"--role needs {id_env}, and it is not set. " + ROLE_CITE)
     if tier not in MERGE_ROLES:
         raise Stop("this session's tier may not record a merge role. Run `merge --lane-lint <pr>` first. Then post the review record on the pull request; the batch runner finds it. " + ROLE_CITE)  # names no valid tier: a lane must not learn which to claim
     path = role_path()
@@ -3277,7 +3281,7 @@ def main(argv, host=None, lock=None):
     p.add_argument("--lane-lint", action="store_true", help="lint the head of a lane (PR number, commit or ref) as the batch runner's lint does; takes no lock, merges nothing")
     p.add_argument("--base", default="", metavar="BRANCH", help="with --lane-lint on a commit or ref: the base branch to lint against (default main)")
     p.add_argument("--lint-unknown-ok", default="", metavar="REASON", help="with --lane-lint: go on when a lint step is unknown (never when one FAILs); logged")
-    p.add_argument("--role", metavar="TIER", help="cloud only: record this session's merge role (batch-runner only)")
+    p.add_argument("--role", metavar="TIER", help="cloud only: record this session's merge role (batch-runner or solo-owner)")
     p.add_argument("--unlock", nargs="?", const=True, metavar="BRANCH")
     p.add_argument("--undo-check-unknown-ok", default="", metavar="REASON", help="go on when the silent-undo check cannot read the history; logged")
     p.add_argument("--base-red-ok", default="", metavar="REASON", help="go on when the base's latest run is red or unreadable (the batch carries the fix); logged")

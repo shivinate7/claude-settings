@@ -798,6 +798,7 @@ def conflict_markers_hit(stripped: str, cwd: str):
 
 # ---- merge --role: the tier is read from this session's own get_session record
 ROLE_TAG_PREFIX = "cs-build:"
+SOLO_ROLE = "solo-owner"  # the one merge tier no cs-build tag names: an owner-started session's own record proves it
 
 
 def merge_roles():
@@ -869,10 +870,16 @@ def role_proof_hit(stripped: str, transcript: str) -> str:
         try:  # cost: one transcript read, only on a role-flag call
             from override import remote_session_id
             own_id = remote_session_id()
-            if own_id and transcript:
-                tags = _own_get_session_tags(transcript, own_id)
-                if tier in merge_roles() and tags is not None and ROLE_TAG_PREFIX + tier in tags:
-                    continue
+            if own_id and transcript and tier in merge_roles():
+                if tier == SOLO_ROLE:  # owner-started: the own record has no parent and no cs-build tag (ruling tier-boundaries-enforced)
+                    tags, tagged_after, parent = own_session.own_session_read(transcript, own_id)
+                    if tags is not None and not tagged_after and parent is None \
+                            and not any(str(t).startswith(ROLE_TAG_PREFIX) for t in tags):
+                        continue
+                else:
+                    tags = _own_get_session_tags(transcript, own_id)
+                    if tags is not None and ROLE_TAG_PREFIX + tier in tags:
+                        continue
         except Exception:
             pass
         return "merge role " + tier
@@ -891,30 +898,18 @@ RAW_ROLE_REASON = (
 )
 
 
-# Ruling tier-boundaries-enforced (2026-11-01): solo and one-lane sessions keep merging their own work, so an untagged
-# session keeps today's ask here while merge.py's file check is stricter.
+# The merge role is the one home merge/merge.py read_merge_role: coordinator ruling 2026-11-07 16:32 CST, tier-boundaries-enforced; no get_session tag fallback.
 def raw_role_hit(transcript: str) -> bool:
     """True when a raw merge in a cloud session comes from a session the merge tool would refuse. Local sessions are never
-    refused here: the tool's role check runs in the cloud only. A role the tool records for this session
-    (read_merge_role) allows. Otherwise the own get_session record decides: it must be readable and current, and carry no
-    cs-build tier outside MERGE_ROLES. A session with no cs-build tag keeps today's verdict. Fails closed: an unreadable
-    record, a missing id or any error is a refusal, because the guard-wide crash path fails open.
-    Cost: one module read, one small file read, and one transcript read, only on a cloud merge."""
+    refused here: the tool's role check runs in the cloud only. The role the tool records for this session (read_merge_role)
+    allows; with none, or any load or read failure, the merge is refused.
+    Cost: one module read and one small file read, only on a cloud merge."""
     if not is_cloud():
         return False
     try:
         module = merge_module()
         if module is not None and module.read_merge_role():
             return False
-        from override import remote_session_id
-        own_id = remote_session_id()
-        roles = merge_roles()
-        if own_id and transcript and roles:
-            tags, tagged_after = _own_session_read(transcript, own_id)
-            if tags is not None and not tagged_after:
-                tiers = [str(t)[len(ROLE_TAG_PREFIX):] for t in tags if str(t).startswith(ROLE_TAG_PREFIX)]
-                if all(tier in roles for tier in tiers):
-                    return False
     except Exception:
         pass
     return True
