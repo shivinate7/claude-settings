@@ -1058,7 +1058,7 @@ def make_fake_gh(folder, base, delay=0, delay_s=0, checks=None, runs=None, broke
     `count_file`, when given, is a path the stand-in appends one line to per call (the call's argv as
     JSON), before it answers. Only a case that counts calls names one; every other fake writes nothing.
 
-    `head_sha`, when given, is the sha the pull request's head reports. Without it the head is "abc1234".
+    `head_sha`, when given, is the sha the pull request's head reports. Without it the head reports the fixed placeholder sha that the state's `pr` record starts with.
 
     MEASURED on Windows 2026-09-16: a call of "gh" through CreateProcess appends `.exe` and never
     reads PATHEXT, so a `gh.cmd` earlier on PATH was skipped and the real `gh.exe` further along
