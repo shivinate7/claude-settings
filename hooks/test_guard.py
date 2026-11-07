@@ -5425,6 +5425,76 @@ sh("narrate: tail of a file, no pipe", "tail -n 5 notes.txt", "allow", cwd=NOGIT
 sh("narrate: merge --confirm named in a quoted argument runs nothing",
    "echo 'merge 12 --confirm' | tail -1", "allow", cwd=NOGIT)
 
+# --- a backgrounded roster command piped into tail or head (rule background-check-tail)
+#
+# Incident 2026-11-07, lane notes-fix-other-2: a backgrounded `merge --lane-lint 1476 2>&1 | tail -8`
+# lost its verdict. The roster is named, one spelling per entry: `merge`, `merge.cmd`,
+# `~/.claude/bin/merge`, `python merge/merge.py`, `python merge/launch.py`, and `ci-job checks --lint`.
+# `verdict` keeps the whole output, so a call through it is allowed. A foreground call is never refused.
+# Every backgrounded case names an until note, so background-end decides none of them. sh() takes no
+# run_in_background, so the backgrounded cases use add(), the form the background-end section uses.
+TAIL_BG_UNTIL = "Lane lint in the background. until: the lint prints its verdict"
+
+add("background-check-tail: the incident line, backgrounded, is refused", "deny",
+    "background-check-tail", cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
+    command="~/.claude/bin/merge --lane-lint 1476 2>&1 | tail -8")
+add("background-check-tail: merge --lane-lint piped to head, backgrounded, is refused", "deny",
+    "background-check-tail", cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
+    command="merge --lane-lint 7 | head -5")
+add("background-check-tail: merge.cmd --lane-lint piped to tail, backgrounded, is refused", "deny",
+    "background-check-tail", cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
+    command="merge.cmd --lane-lint 7 2>&1 | tail -3")
+add("background-check-tail: the script run through python piped to tail, backgrounded, is refused",
+    "deny", "background-check-tail", cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
+    command="python merge/merge.py --lane-lint 7 2>&1 | tail -3")
+add("background-check-tail: the launcher run through python piped to head, backgrounded, is refused",
+    "deny", "background-check-tail", cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
+    command="python merge/launch.py --lane-lint 7 | head -3")
+add("background-check-tail: ci-job checks --lint piped to tail, backgrounded, is refused", "deny",
+    "background-check-tail", cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
+    command="~/.claude/bin/ci-job checks --lint --base origin/main 2>&1 | tail -20")
+add("background-check-tail: a quoted # does not hide a roster command after it, backgrounded, is refused",
+    "deny", "background-check-tail", cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
+    command='echo "# lint"; merge --lane-lint 7 | tail -3')
+add("background-check-tail: a lone apostrophe in quotes does not hide a roster command, backgrounded, is refused",
+    "deny", "background-check-tail", cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
+    command='echo "it\'s up"; merge --lane-lint 7 2>&1 | tail -3')
+
+add("background-check-tail: the incident line through verdict, backgrounded, is allowed", "allow",
+    cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
+    command="~/.claude/bin/verdict ~/.claude/bin/merge --lane-lint 1476 2>&1 | tail -8")
+add("background-check-tail: a python3 verdict wrapper piped to tail, backgrounded, is allowed", "allow",
+    cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
+    command="python3 ~/.claude/bin/verdict merge --lane-lint 1476 | tail -3")
+add("background-check-tail: wait-pid piped to tail, backgrounded, is allowed", "allow",
+    cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
+    command="~/.claude/bin/wait-pid 1836 2>&1 | tail -3")
+add("background-check-tail: output kept in a file, then grep piped to tail, backgrounded, is allowed",
+    "allow", cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
+    command="~/.claude/bin/merge --lane-lint 1476 > /tmp/x/lanelint.log 2>&1; echo \"rc=$?\"; "
+            "grep -E '^(PASS|FAIL)' /tmp/x/lanelint.log | tail -15")
+add("background-check-tail: merge --lane-lint piped to tee, backgrounded, is allowed", "allow",
+    cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
+    command="merge --lane-lint 1476 2>&1 | tee run.out")
+add("background-check-tail: an ordinary command piped to tail, backgrounded, is allowed", "allow",
+    cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
+    command="make check 2>&1 | tail -40")
+add("background-check-tail: a roster name inside echo's quotes, backgrounded, is allowed", "allow",
+    cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
+    command="echo 'merge --lane-lint 1' | tail -1")
+add("background-check-tail: a roster name after a quoted #, backgrounded, is allowed", "allow",
+    cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
+    command='echo "# merge --lane-lint 1 | tail -3"')
+add("background-check-tail: a roster name in a multi-line quote, backgrounded, is allowed", "allow",
+    cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
+    command='echo "first line\nmerge --lane-lint 1 | tail -3\nlast line"')
+
+# Foreground: the same incident line, and a roster command piped to tail, are never refused by this rule.
+sh("background-check-tail: the incident line in the foreground is allowed",
+   "~/.claude/bin/merge --lane-lint 1476 2>&1 | tail -8", "allow", cwd=NOGIT)
+sh("background-check-tail: ci-job piped to tail in the foreground is allowed",
+   "~/.claude/bin/ci-job checks --lint --base origin/main 2>&1 | tail -20", "allow", cwd=NOGIT)
+
 # --- ln -s onto a directory that is already there
 sh("ln: -s over a real directory nests the link inside it",
    "ln -s /opt/tool/realdir realdir", "deny", "ln-over-directory", cwd=TRAPLN)
