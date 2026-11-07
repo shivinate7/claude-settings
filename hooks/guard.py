@@ -191,9 +191,11 @@ Other tools, in `judge` order:
                        passes and is noted as `agent-role-model-unread`. The general override lifts an
                        above-row refusal; no override lifts the no-model refusal. A Workflow
                        `agent()` call is judged as a spawn, a call with no agentType being
-                       general-purpose; one whose model or agentType the scan cannot read (a variable,
-                       a shorthand, a spread with no literal model, or a second argument that is not an
-                       object literal) is skipped, and an unread brief
+                       general-purpose; one whose model or agentType the scan cannot read is skipped:
+                       a spread argument, a sole argument that is not a string, a template or an object
+                       literal (a variable, a callback parameter, a call), a key set by a variable, a
+                       shorthand, or a second argument that is not an object literal. A literal second
+                       argument that names no model is still refused (owner item 107). An unread brief
                        is judged as an empty brief. The Workflow refusal's remedy names the model to add.
                        (agent-model-cap)
   agent-model-floor, roles-third-round-steps-up
@@ -2366,12 +2368,15 @@ AGENT_CALL = re.compile(r"\bagent\s*\(")
 SCRIPT_PAIR = re.compile(r"(?:(\w+)|\x00(\d+)\x00)\s*:\s*\x00(\d+)\x00")
 
 
-def script_second_arg_opaque(text: str, start: int) -> bool:
-    """True when the call whose arguments open at `start` has a second argument that is not an object literal (a
-    variable, or a call such as `buildOpts()`): the scan cannot read what it sets. No second argument is false."""
+def script_call_unread(text: str, start: int) -> str:
+    """How far the scan can read the arguments of the call that open at `start`. "skip" when an argument is a
+    spread, or the sole argument is not a string, a template or an object literal (a variable, a callback
+    parameter or a call): it may be an options object that names the model, so neither model nor role is known
+    (owner item 107). "opaque" when the second argument is not an object literal: the scan cannot read what it
+    sets. Else "", no second argument included."""
     end = script_group_end(text, start - 1)
     if end < 0:
-        return False
+        return ""
     depth, parts, at = 0, [], start
     for i in range(start, end - 1):
         depth += text[i] in "([{"
@@ -2380,7 +2385,12 @@ def script_second_arg_opaque(text: str, start: int) -> bool:
             parts.append(text[at:i])
             at = i + 1
     parts.append(text[at:end - 1])
-    return len(parts) > 1 and bool(parts[1].strip()) and not parts[1].strip().startswith("{")
+    parts = [p.strip() for p in parts]
+    if any(p.startswith("...") for p in parts):
+        return "skip"
+    if len(parts) == 1 and parts[0] and not parts[0].startswith(("\x00", "{")):
+        return "skip"
+    return "opaque" if len(parts) > 1 and parts[1] and not parts[1].startswith("{") else ""
 
 
 def script_opts(text: str, start: int):
@@ -2463,7 +2473,10 @@ def script_agent_calls(script: str):
                 if not token or not isinstance(strings[int(token.group(1))], str):
                     unseen.add(key)
             bodies.append((keys, unseen, literals))
-        if script_second_arg_opaque(text, call.end()):
+        unread = script_call_unread(text, call.end())
+        if unread == "skip":
+            bodies.append(({}, {"model", "agentType", "..."}, {}))   # model and role unknown: the spawn checks skip it
+        elif unread == "opaque":
             bodies.append(({}, {"..."}, {}))   # options the scan cannot read, so no key of them is known
         first, prompt = SCRIPT_FIRST_ARG.match(text, call.end()), None
         if first:
@@ -2847,9 +2860,10 @@ def spawn_inputs(tool: str, tool_input, no_model: bool = False):
     check refuses it, and the Opus check never sets `no_model`, as a spawn with no model is not an Opus spawn. A brief the scan cannot read (a variable, or a prompt key beside a spread) carries no
     marker and grants nothing, so the spawn is judged with an empty brief and BRIEF_UNREAD set, and its refusal names
     BRIEF_LITERAL_REMEDY, so the author can make the marker readable. A
-    call whose model or agentType the scan cannot read, or whose second argument is not an object literal, is
-    skipped, and so is a call with no model unless `no_model` is set and no spread, shorthand or computed key could hold the model: a static read never guesses a role or a
-    model. A shorthand or a spread with no literal agentType may set the role, so it is unread; a literal agentType
+    call whose model or agentType the scan cannot read is skipped: a spread argument, a sole argument that is not a
+    string, a template or an object literal (script_call_unread, owner item 107), a key set by a variable, or a second
+    argument that is not an object literal. So is a call with no model unless `no_model` is set and no spread,
+    shorthand or computed key could hold the model: a static read never guesses a role or a model. A shorthand or a spread with no literal agentType may set the role, so it is unread; a literal agentType
     beside a spread is read. step_up_hit still skips an unread brief, as a marker it cannot read
     has no round to check. Other tools yield nothing."""
     if tool in SPAWN_TOOLS:
