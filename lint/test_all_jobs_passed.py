@@ -142,9 +142,9 @@ class AllJobsPassedJob(unittest.TestCase):
     def test_all_jobs_passed_is_a_pinned_checkout_then_the_action(self):
         self.assertEqual(steps_problems(self.text), [])
 
-    def test_only_shard_jobs_stay_off_and_a_needed_job_keeps_at_most_the_draft_guard_as_if(self):
-        # Named failure: a job-level if skips a needed job, and all-jobs-passed reads the skip as red. A needed job may keep
-        # the draft guard alone, as scope does: a draft pull_request skips all-jobs-passed too.
+    def test_only_shard_jobs_stay_off_and_a_needed_job_has_no_job_level_if(self):
+        # Named failure: a job-level if skips a needed job, and all-jobs-passed reads the skip as red. scope is the one
+        # exception: its draft guard skips all-jobs-passed too, on a draft pull_request.
         self.assertEqual(off_problems(self.text), [])
 
     def test_scope_skips_only_a_draft_pr(self):
@@ -197,6 +197,7 @@ class AllJobsPassedFixtures(unittest.TestCase):
 # all-jobs-passed needs it. Each variant below changes GOOD in one place, and the anchors must match, so a moved line is named.
 GUARD2_OFF = ("  checks-windows-guard-2:\n    runs-on: windows-latest\n    needs: scope\n"
               "    if: ${{ github.event_name != 'pull_request' }}\n")
+GUARD2_NONE = "  checks-windows-guard-2:\n    runs-on: windows-latest\n    needs: scope\n"
 GUARD2_DRAFT = ("  checks-windows-guard-2:\n    runs-on: windows-latest\n    needs: scope\n"
                 "    if: ${{ !github.event.pull_request.draft }}\n")
 GUARD2_FLAG = ("  checks-windows-guard-2:\n    runs-on: windows-latest\n    needs: scope\n"
@@ -217,10 +218,16 @@ class GuardShardInNeedsFixtures(unittest.TestCase):
     """The rules on a fixture. A guard shard that runs on a ready pull_request is needed, and its job-level if may hold the draft
     guard only. Red controls: a merge shard in needs, and a needed guard shard whose job-level if reads a flag."""
 
-    def test_a_needed_guard_shard_with_the_draft_guard_only_is_green(self):
+    def test_a_needed_guard_shard_with_no_job_level_if_is_green(self):
+        self.assertIn(GUARD2_OFF, GOOD, "the fixture lost checks-windows-guard-2's job-level if")
+        text = in_needs(GOOD.replace(GUARD2_OFF, GUARD2_NONE, 1), "checks-windows-guard-2")
+        self.assertEqual(all_problems(text), [], "a needed guard shard with no job-level if is refused")
+
+    def test_a_needed_guard_shard_with_a_draft_guard_if_is_red(self):
+        # The draft guard as a job-level if: a guard shard has none, so all-jobs-passed refuses it.
         self.assertIn(GUARD2_OFF, GOOD, "the fixture lost checks-windows-guard-2's job-level if")
         text = in_needs(GOOD.replace(GUARD2_OFF, GUARD2_DRAFT, 1), "checks-windows-guard-2")
-        self.assertEqual(all_problems(text), [], "a needed guard shard with the draft guard only is refused")
+        self.assertTrue(all_problems(text), "a needed guard shard with the draft guard as its job-level if is accepted")
 
     def test_a_merge_shard_in_needs_is_red(self):
         self.assertIn("  all-jobs-passed:\n", GOOD, "the fixture lost the all-jobs-passed job")
