@@ -1070,11 +1070,11 @@ def dir_before_segment(segments, number: int, shell_cwd: str, ends=()):
     Walks the segments ahead of it in order, the way `_run_dir` reads them, but keeps the state a
     real shell keeps: `cd`, `pushd`, `Set-Location` move it, a bare `cd` goes home, `cd -` goes
     back, a `cd` inside `( ... )` ends with the parenthesis, `popd` or a path that holds a variable
-    is not tracked, and a `cd` into a folder that does not exist is not trusted (the shell stays
-    where it was, and a `;` runs the next command there). `ends` is what `split_segments` gave:
+    is not tracked, and a `cd` into a folder that does not exist leaves the shell where it was (a `;` runs
+    the next command there), unless an earlier `mkdir` may have made it. `ends` is what `split_segments` gave:
     in bash each part of a pipe runs in a subshell, so its `cd` moves nothing after the pipe."""
     where = shell_cwd if shell_cwd and os.path.isabs(shell_cwd) else None
-    prev, stack = None, []
+    prev, stack, made = None, [], False
     for at, segment in enumerate(segments[:number + 1]):
         marks = [char for _, char, quote in walk_quotes(segment) if not quote and char in "()"]
         stack.extend([(where, prev)] * marks.count("("))
@@ -1085,6 +1085,9 @@ def dir_before_segment(segments, number: int, shell_cwd: str, ends=()):
         if move is not None and not is_powershell(segment) and "|" in (
                 ends[at] if at < len(ends) else "", ends[at - 1] if 0 < at <= len(ends) else ""):
             move = None   # a bash pipe's part: a subshell, so the shell stays where it was
+        if tokens and move is None:
+            word = resolve_command(tokens)
+            made = made or (word is not None and basename(tokens[word]).lower() in ("mkdir", "md", "new-item"))
         if tokens is None:
             where = None
         elif move is not None:
@@ -1097,7 +1100,8 @@ def dir_before_segment(segments, number: int, shell_cwd: str, ends=()):
                 where = None
             else:
                 where = shell_abs(move or "~", where)
-                where = where if where and os.path.isdir(where) else None
+                # a folder missing now may be made by an earlier `mkdir` of the same command: then it is unknown
+                where = where if where and os.path.isdir(where) else (None if made else old)
             prev = old
         for _ in range(marks.count(")")):
             if stack:

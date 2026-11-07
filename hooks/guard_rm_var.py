@@ -156,10 +156,17 @@ def _rm_real(path: str) -> str:
     return real.lower() if sys.platform == "darwin" else real
 
 
+# A home folder written out, for any user: `/home`, `/home/x`, `/Users`, `/Users/x`, `C:/Users/x`. The folder
+# holding every home folder is the same delete, so it counts with them.
+_HOME_FOLDER = re.compile(r"(?:/home|/Users|[A-Za-z]:/[Uu]sers)(?:/[^/\s'\"*]+)?")
+
+
 def _rm_target_bad(path: str, cwd: str) -> bool:
-    """True when path, or a glob's parent, is /, home, the cwd or a parent of the cwd."""
+    """True when path, or a glob's parent, is /, a home folder, the cwd or a parent of the cwd."""
     if re.search(r"[*?\[]", os.path.basename(path)):
         path = os.path.dirname(path)
+    if _HOME_FOLDER.fullmatch(path.replace("\\", "/").rstrip("/")):
+        return True
     cwd, home = _rm_real(cwd or "/"), _rm_real(os.path.expanduser("~"))
     # An absolute path skips the join, so on Windows a Git Bash `/c/...` reaches _rm_real intact.
     q = _rm_real(path if path.startswith("/") else os.path.join(cwd, path))

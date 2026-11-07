@@ -4749,7 +4749,6 @@ def never_lifted(payload, tool: str, tool_input: dict, cwd: str) -> bool:
         raw = tool_input.get("command", "") or ""
         stripped = strip_heredoc_bodies(raw)
         return bool(git_env_command_hit(raw, stripped) or frozen_shell_hit(stripped, cwd)
-                    or interpreter_write_hit(raw, cwd, is_frozen)
                     or any(t and kills_group_pid(t) for t in map(segment_tokens, split_segments(stripped)))
                     or (_shell_write_hit(stripped, cwd, is_settings_file) and cap_change(raw))
                     or (agent_role(payload) == BUILDER_ROLE and builder_shell_test_hit(raw, stripped, cwd)))

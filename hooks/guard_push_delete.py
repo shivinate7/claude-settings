@@ -362,10 +362,10 @@ def push_ask_hit(args, cwd: str, overrides=None) -> str:
 # abbreviates parameter names, so `-r`, `-rec` and `-recurse` are one flag. The command text is
 # read with backslashes already turned into forward slashes, which is why a drive root reads
 # as `C:/`.
-# A user's home folder written out (`/home/x`, `/Users/x`, `C:/Users/x`) is wide for any user: the rule guards the folder.
+# A home folder written out (`/home/x`, `/Users`, `C:/Users/x`) is no pattern here: `_literal_home` asks
+# guard_rm_var._rm_target_bad, the one matcher of home paths.
 WIDE_TARGET = (
-    r"(?:/\*?|(?:~|\.|\$HOME|\$\{HOME\}|%USERPROFILE%|\$env:USERPROFILE)(?:/\*?)?|\*|[A-Za-z]:/?\*?"
-    r"|(?:/home|/Users|[A-Za-z]:/[Uu]sers)/[^/\s'\"*]+(?:/\*?)?)"
+    r"(?:/\*?|(?:~|\.|\$HOME|\$\{HOME\}|%USERPROFILE%|\$env:USERPROFILE)(?:/\*?)?|\*|[A-Za-z]:/?\*?)"
 )
 # The POSIX `rm -rf` form is read by TOKENS (`rm_delete_hit`), not by a pattern: a quoted `rm -rf /`
 # in an echo or a commit message is text. `RM_RAW` reads raw text only for a segment shlex cannot
@@ -434,11 +434,11 @@ RM_WIDE_TARGET = re.compile(WIDE_TARGET)
 
 
 def _literal_home(target: str) -> bool:
-    """True when an absolute target is this user's home, a glob of it, or a folder above it: the
-    one matcher `_rm_target_bad` is, judged with no working folder (`/`). Imported late: guard_rm_var
-    comes after this file in the family order."""
+    """True when an absolute target is a home folder (this user's or another's), a glob of it, or a
+    folder above it: the one matcher `_rm_target_bad` is, judged with no working folder (`/`).
+    Imported late: guard_rm_var comes after this file in the family order."""
     from guard_rm_var import _rm_target_bad
-    return target.startswith("/") and _rm_target_bad(target, "/")
+    return bool(re.match(r"(?:/|[A-Za-z]:/)", target)) and _rm_target_bad(target, "/")
 
 
 def _rm_args_wide(args) -> str:
@@ -816,7 +816,7 @@ def cmd_exe_delete_hit(segment: str) -> str:
     if not any(arg.lower() == "/s" for arg in rest):
         return ""
     for arg in rest:
-        if re.fullmatch("(?i)" + WIDE_TARGET, arg):
+        if re.fullmatch("(?i)" + WIDE_TARGET, arg) or _literal_home(arg):
             return word + " /s " + arg
     return ""
 
