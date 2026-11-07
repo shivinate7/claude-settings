@@ -16321,7 +16321,7 @@ UP_WIDE = {"key": "a", "label": "Let the stamp accept banchi's titles", "how": "
 UP_MATCH = {"key": "b", "label": "Rename banchi's titles to the shared form", "how": "h", "gain": "g",
             "lose": "l"}
 # A plain third option. With UP_WIDE and UP_MATCH alone, the widening option is the only option besides the pick, and
-# a question like that is refused (owner ruling 2026-11-07 15:44 CST, decision uniform-over-variants). A case that
+# a question like that is refused (coordinator's ruling 2026-11-07 15:44 CST, decision uniform-over-variants). A case that
 # means "not refused" for the pick or the mark takes UP_THREE.
 UP_THIRD = {"key": "c", "label": "Keep banchi's titles and skip the stamp", "how": "h", "gain": "g",
             "lose": "l"}
@@ -16349,9 +16349,10 @@ def up(name, expected, item, action="set", **extra):
 
 
 def up_refused(name, item):
-    """A deny by the widening rule whose id is the builder's (uniform-pick, or a new id): the case pins the ruling's
-    words in the reason, not the rule id. The item's form lines are valid, so no form rule is the cause."""
-    add("uniform pick: " + name, "deny", None, carries=("shared tool, never the tool to fit a repo",),
+    """A deny by the widening rule, uniform-pick, whose reason says to drop the question: the only other option widens.
+    The item's form lines are valid, so no form rule is the cause."""
+    add("uniform pick: " + name, "deny", "uniform-pick",
+        carries=("shared tool, never the tool to fit a repo", "drop the question and do the recommended option"),
         tool="ArtifactData", cwd=PQ_REPO, url=PQ_URL, action="set", collection="items", doc_id="banchi-titles",
         data=item)
 

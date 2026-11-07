@@ -28,9 +28,9 @@ Interface the module must match (the lane's form contract):
 - A widening option: page `widens: true`, never in `pick`; chat `Goes against your ruling: a repo changes to
   fit a shared tool, never the tool to fit a repo` in its label or description, and never `(Recommended)` in
   its label (rule uniform-pick).
-- A question whose only option besides the recommended one widens is refused, on both surfaces (owner ruling
-  2026-11-07 15:44 CST). The recommended option is the page's pick, or the one labelled (recommended); in the box,
-  the one labelled (Recommended). The rule id is the builder's, so those cases judge the cause, not the id.
+- A question whose only option besides the recommended one widens is refused, on both surfaces (coordinator's
+  ruling 2026-11-07 15:44 CST). The recommended option is the page's pick, or the one labelled (recommended); in the
+  box, the one labelled (Recommended). The rule is uniform-pick, and its matched text is pinned (ONLY_HIT).
 - A press in a web app: page `links`; chat an https:// url in that option's description (rule press-link).
   The chat scan skips an option's Gain and Lose text, as the page scan reads only label and how.
 - A chat refusal reason names its remedy and no field of the waiting page (no `stands`). Each page reason
@@ -109,7 +109,7 @@ THIRD = "Based on (ruling): your 16:54 CDT ruling says no owner step per merge."
 
 
 # A third, plain option (c). Rule uniform-pick refuses a question whose only option besides the recommended one
-# widens a shared tool (owner ruling 2026-11-07 15:44 CST, decision uniform-over-variants). So the form cases offer
+# widens a shared tool (coordinator's ruling 2026-11-07 15:44 CST, decision uniform-over-variants). So the form cases offer
 # a real choice beside the pick and the widening option. A case that needs the two-option shape says so.
 PLAIN_THIRD = {"gain": "The lane waits, and nothing changes.", "how": "The lane stays as it is until you answer.",
                "key": "c", "label": "Wait and change nothing", "lose": "The lane waits a day."}
@@ -355,16 +355,28 @@ def case_older_rules_keep_their_ids():
 
 # ------------------------------------------------------------------ a question whose only alternative widens
 
-# Owner ruling 2026-11-07 15:44 CST, on decision uniform-over-variants: a question whose only option besides the
-# recommended one widens a shared tool is already answered, so it is refused, on the page and in the chat box. The
-# rule id is the builder's (uniform-pick, or a new id), so these cases judge the cause, not the id: each fixture's
-# form lines are valid, so a refusal by a form, departs or stake rule would be the wrong cause.
-NOT_THIS_CAUSE = (FORM_RULE, DEPARTS_RULE, "owner-judge", "MISSING", "RAISED")
+# Coordinator's ruling 2026-11-07 15:44 CST, on decision uniform-over-variants: a question whose only option besides
+# the recommended one widens a shared tool is already answered, so it is refused, on the page and in the chat box.
+# The refusal is rule uniform-pick with the matched text ONLY_HIT, pinned as the literal words. Each fixture's form
+# lines are valid, so a refusal by a form, departs or stake rule would be the wrong cause, and the rule plus the
+# matched text together name the cause.
+ONLY_HIT = "the only option besides the recommended one widens a shared tool"
+# The reasons the two older uniform-pick hits print, as main has them. Each keeps these words; only the
+# only-alternative hit says ONLY_SAYS.
+MAIN_PICK_REASON = ("A pick never names an option that widens what a shared tool accepts: the owner ruled that "
+                    "a repo changes to fit a shared tool, never the tool to fit a repo. Make the pick an option "
+                    "where the repo changes to match the shared format, or leave pick out.")
+MAIN_CHAT_REASON = ("A recommended option never widens what a shared tool accepts: the owner ruled that a "
+                    "repo changes to fit a shared tool, never the tool to fit a repo. Recommend an option "
+                    "where the repo changes to match the shared format, and give the widening option no "
+                    "(Recommended) label.")
+ONLY_SAYS = "drop the question and do the recommended option"
 
 
 def widening_refusal(name, got):
-    rule = got[0] if isinstance(got, tuple) and got else ""
-    check(name, bool(rule) and rule not in NOT_THIS_CAUSE, "want a refusal by the widening rule, got %r" % (got,))
+    rule, matched = got if isinstance(got, tuple) and len(got) == 2 else ("", "")
+    check(name, rule == "uniform-pick" and ONLY_HIT in str(matched),
+          "want uniform-pick naming %r, got %r" % (ONLY_HIT, got))
 
 
 def widening_page(name, op, entry):
@@ -412,15 +424,65 @@ def case_only_alternative_widens_controls_pass():
     chat("two options, neither widening, pass", tcj.good_box(), None)
 
 
+def recommended_widening_box():
+    """A box whose Recommended option widens (the mark in its description), beside one plain option."""
+    options = [{"label": "Allow the second form (Recommended)",
+                "description": "Gain: it lands today. Lose: two forms stay. " + WIDE},
+               {"label": "Keep one form", "description": "Gain: one form stays. Lose: it waits."}]
+    return tcj.good_box(options=options)
+
+
+# The page twin of recommended_widening_box: three options, the Recommended one widening. With three options the
+# only-alternative hit cannot be the cause, so only the Recommended-widens refusal can refuse these pages.
+REC_OPTIONS = [{"key": "a", "label": "Allow the second form (Recommended)", "how": "The lane allows the second form.",
+                "gain": "It lands today.", "lose": "Two forms stay.", "widens": True},
+               {"key": "b", "label": "Keep one form", "how": "The lane keeps one form.",
+                "gain": "One form stays.", "lose": "It waits."},
+               dict(PLAIN_THIRD)]
+
+
+def case_only_alternative_widens_closed_passes():
+    # A closed item asks nothing, so the refusal does not reach it. On main, which has no such rule, it passes.
+    page("a closed item with pick b, a widening option a, and two options passes", "set",
+         entry_of(dict(ITEM376, status="closed")), None)
+
+
+def case_recommended_widening_page_is_refused():
+    no_pick = page_item(options=copy.deepcopy(REC_OPTIONS))
+    no_pick.pop("pick")
+    page("a page option labelled (Recommended) that widens, with no pick, is refused as uniform-pick", "set",
+         entry_of(no_pick), ("uniform-pick", None))
+    page("a page option labelled (Recommended) that widens, with pick b, the plain option, is refused as uniform-pick",
+         "set", entry_of(page_item(options=copy.deepcopy(REC_OPTIONS), pick="b")), ("uniform-pick", None))
+    plain = copy.deepcopy(REC_OPTIONS)
+    plain[0].pop("widens")
+    page("the same three options with the mark off, pick b, pass", "set",
+         entry_of(page_item(options=plain, pick="b")), None)
+
+
+def case_widening_reasons_pinned_per_hit():
+    # Each hit prints its own reason. The page pick hit and the box Recommended hit keep main's words; only the
+    # only-alternative hit says to drop the question.
+    pick = printed_reason({"url": PAGE_URL, "action": "set", "collection": "items", "doc_id": DOC,
+                           "data": page_item(pick="b")})
+    check("reasons: the page pick hit keeps main's reason words", MAIN_PICK_REASON in pick, pick[:200])
+    check("reasons: the page pick hit does not say to drop the question", ONLY_SAYS not in pick, pick[:200])
+    only = printed_reason({"url": PAGE_URL, "action": "set", "collection": "items", "doc_id": DOC, "data": ITEM376})
+    check("reasons: the page only-alternative hit says to drop the question", ONLY_SAYS in only, only[:200])
+    box = tcj.run_hook(tcj.question_input(box=recommended_widening_box()), answer=tcj.ALLOW).reason()
+    check("reasons: the box Recommended hit keeps main's reason words", MAIN_CHAT_REASON in box, box[:200])
+    check("reasons: the box Recommended hit does not say to drop the question", ONLY_SAYS not in box, box[:200])
+    box_only = tcj.run_hook(tcj.question_input(box=item376_box()), answer=tcj.ALLOW).reason()
+    check("reasons: the box only-alternative hit says to drop the question and names its matched text",
+          ONLY_SAYS in box_only and ONLY_HIT in box_only, box_only[:200])
+
+
 def case_recommended_widening_is_refused_unchanged():
     # The existing uniform-pick rule, unchanged: the widening option is the pick (page) or the Recommended one (box).
     two = [copy.deepcopy(ITEM92["options"][0]), dict(ITEM92["options"][1], widens=True)]
     page("two options, the pick is the widening option, is refused as uniform-pick", "set",
          entry_of(page_item(options=two, pick="b")), ("uniform-pick", None))
-    options = [{"label": "Allow the second form (Recommended)",
-                "description": "Gain: it lands today. Lose: two forms stay. " + WIDE},
-               {"label": "Keep one form", "description": "Gain: one form stays. Lose: it waits."}]
-    chat("two options, the Recommended one widens, is refused as uniform-pick", tcj.good_box(options=options),
+    chat("two options, the Recommended one widens, is refused as uniform-pick", recommended_widening_box(),
          ("uniform-pick", None))
 
 
@@ -1543,7 +1605,8 @@ def main():
                  case_past_rulings_skips_the_debt_notes_file,
                  case_roadmap_broken_pipe_not_a_repo_is_absent, case_roadmap_broken_pipe_other_stderr_stays_unreadable,
                  case_only_alternative_widens_is_refused, case_only_alternative_widens_controls_pass,
-                 case_recommended_widening_is_refused_unchanged):
+                 case_only_alternative_widens_closed_passes, case_recommended_widening_page_is_refused,
+                 case_widening_reasons_pinned_per_hit, case_recommended_widening_is_refused_unchanged):
         try:
             case()
         except Exception as exc:
