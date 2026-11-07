@@ -14,7 +14,7 @@ One file per debt, named by a slug of 32 characters or fewer. Each file has four
 A new debt file also has a fifth part, the Fix field: a line that starts `Fix:` at column one, or after one leading `- ` (decision `notes-name-their-fix`, a note or a debt names its fix). It takes one of these forms:
 
 - `Fix: step:<slug>`, where `roadmap/data/steps/<slug>.json` exists on `origin/roadmap`.
-- `Fix: none -- <reason>` (the em dash also counts). The reason is `owner decides`, `needs the Mac`, `rare and harmless`, or `already fixed on main <sha>` (a hex sha of 7 to 40 digits).
+- `Fix: none -- <reason>` (the em dash also counts). The reason is `owner decides`, `needs the Mac`, `needs a Windows run`, `rare and harmless`, or `already fixed on main <sha>` (a hex sha of 7 to 40 digits, a commit that is an ancestor of origin/main).
 
 Each line a branch adds to `notes.md` carries the same field, anywhere on the line. A line whose `- <slug>:` already exists at the merge base is an edit and passes. `lint/check_record_slugs.py` checks this in CI. The Stop guard (`lint/report_guard.py`) also asks that Done name each `step:` that the turn's own commits add.
 
