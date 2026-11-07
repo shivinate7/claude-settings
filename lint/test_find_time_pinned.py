@@ -43,7 +43,15 @@ SWIFT_CLOCKS = [
     "ContinuousClock.now", "SuspendingClock.now",
     "start.timeIntervalSinceNow", "start.duration(to: .now)",
 ]
-SUMMARY_ZERO = "0 time-pinned in 0 files (sleep 0, elapsed-assert 0, test-cap 0, wait-cap 0, calendar 0); 0 unread"
+def summary_line(total, files, sleep=0, elapsed=0, test_cap=0, calendar=0, hang_guards=0, unread=0):
+    """The one summary line. A hang guard is its own count and is never added to the total (owner ruling
+    2026-11-07 13:00 CST, test-practices P5)."""
+    return ("%d time-pinned in %d files (sleep %d, elapsed-assert %d, test-cap %d, calendar %d); "
+            "hang guards %d (allowed; check each cap sits well above the run); %d unread"
+            % (total, files, sleep, elapsed, test_cap, calendar, hang_guards, unread))
+
+
+SUMMARY_ZERO = summary_line(0, 0)
 
 
 def src(*lines):
@@ -1138,13 +1146,13 @@ class OutputTest(FinderCase):
             lines)
         self.assertEqual(
             lines[-1],
-            "2 time-pinned in 1 files (sleep 1, elapsed-assert 0, test-cap 0, wait-cap 1, calendar 0); 0 unread",
-            "calendar not listed in the summary")
+            summary_line(1, 1, sleep=1, hang_guards=1),
+            "a hang guard is counted in the time-pinned total or files")
 
     def test_summary_line_for_an_empty_root(self):
         proc = run(self.root)
         self.assertEqual(proc.returncode, 0, proc.stderr)
-        self.assertEqual(proc.stdout.splitlines()[-1], SUMMARY_ZERO, "calendar not listed in the summary")
+        self.assertEqual(proc.stdout.splitlines()[-1], SUMMARY_ZERO, "the summary line lacks the hang guards count")
 
     def test_summary_counts_each_category(self):
         text = src(
@@ -1167,8 +1175,8 @@ class OutputTest(FinderCase):
                          "calendar not listed in the counts")
         proc = run(self.root)
         self.assertEqual(proc.stdout.splitlines()[-1],
-                         "4 time-pinned in 1 files (sleep 1, elapsed-assert 1, test-cap 1, wait-cap 1, calendar 0); "
-                         "0 unread", "calendar not listed in the summary")
+                         summary_line(3, 1, sleep=1, elapsed=1, test_cap=1, hang_guards=1),
+                         "a hang guard is counted in the time-pinned total")
 
     def test_line_text_is_trimmed_and_capped_at_120(self):
         long_line = "    time.sleep(1)  # " + "x" * 200
@@ -1227,6 +1235,62 @@ class ExitCodeTest(FinderCase):
         proc = run(self.root)
         self.assertEqual(proc.returncode, 1, proc.stdout + proc.stderr)
         self.assertIn("UNREAD tests/test_bad.py: ", proc.stdout)
+
+
+# ---- a hang guard is listed, never counted (owner ruling 2026-11-07 13:00 CST, test-practices P5) ----
+
+HANG_GUARD = src(
+    "import subprocess",
+    "",
+    "def test_run(cmd):",
+    "    subprocess.run(cmd, timeout=5)",
+)
+SLEEP_FILE = src("import time", "", "def test_wait():", "    time.sleep(1)")
+
+
+def hang_row(path="tests/test_run.py"):
+    return "%s:%d: wait-cap: subprocess.run(cmd, timeout=5)" % (path, lineno(HANG_GUARD, "subprocess.run"))
+
+
+class HangGuardTest(FinderCase):
+    def test_hang_guard_alone_exits_0(self):
+        self.put("tests/test_run.py", HANG_GUARD)
+        proc = run(self.root)
+        self.assertIn(hang_row(), proc.stdout.splitlines(), "scope: the hang guard was not found")
+        self.assertNotIn("UNREAD", proc.stdout, "scope: the fixture was not read")
+        self.assertEqual(proc.returncode, 0,
+                         "a file whose only finding is a hang guard exits %d, not 0" % proc.returncode)
+
+    def test_hang_guard_is_not_counted_in_the_summary(self):
+        self.put("tests/test_run.py", HANG_GUARD)
+        proc = run(self.root)
+        self.assertIn(hang_row(), proc.stdout.splitlines(), "scope: the hang guard was not found")
+        self.assertNotIn("UNREAD", proc.stdout, "scope: the fixture was not read")
+        self.assertEqual(proc.stdout.splitlines()[-1], summary_line(0, 0, hang_guards=1),
+                         "a hang guard is counted in the time-pinned total or files")
+
+    def test_hang_guard_file_is_not_a_time_pinned_file(self):
+        self.put("tests/test_run.py", HANG_GUARD)
+        self.put("tests/test_wait.py", SLEEP_FILE)
+        proc = run(self.root)
+        lines = proc.stdout.splitlines()
+        self.assertIn(hang_row(), lines, "scope: the hang guard was not found")
+        self.assertIn("tests/test_wait.py:%d: sleep: time.sleep(1)" % lineno(SLEEP_FILE, "time.sleep(1)"), lines,
+                      "scope: the sleep was not found")
+        self.assertEqual(lines[-1], summary_line(1, 1, sleep=1, hang_guards=1),
+                         "a file whose only finding is a hang guard is counted as a time-pinned file")
+
+    def test_hang_guard_stays_listed_in_text(self):
+        self.put("tests/test_run.py", HANG_GUARD)
+        proc = run(self.root)
+        self.assertIn(hang_row(), proc.stdout.splitlines(), "a hang guard is no longer listed in the text output")
+
+    def test_json_still_carries_wait_cap_rows(self):
+        self.put("tests/test_run.py", HANG_GUARD)
+        code, out = self.report()
+        self.assertEqual(self.rows(out), {("tests/test_run.py", lineno(HANG_GUARD, "subprocess.run"), "wait-cap")},
+                         "the JSON rows lost the wait-cap finding")
+        self.assertEqual(out["counts"]["wait-cap"], 1, "the JSON counts lost the wait-cap")
 
 
 # ---- helper taint, assert arguments, a Playwright wait, an unlistable folder --------------
