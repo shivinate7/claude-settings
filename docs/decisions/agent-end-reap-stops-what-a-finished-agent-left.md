@@ -46,7 +46,7 @@ keeps it. The agent's own shells have the live host as parent, so read 3 keeps t
 The reaper stops each orphaned tree inside the ended agent's worktree, not only listeners. That stop targets
 only that tree (owner ruling, 2026-09-27). One more stop reaches a finished agent's host-child shells at a
 later agent end, and only in a host-locked tree that the finish proof clears (owner ruling, 2026-10-15
-19:43 CDT; coordinator pick, 2026-11-07 14:11 CST). It targets that tree's own shells only: the chain from
+19:43 CDT; coordinator pick, 2026-11-07 14:43 CST). It targets that tree's own shells only: the chain from
 each pid to the host lies inside the tree.
 
 The guard's kill rule is separate from the reaper's reads. The guard's ownership change

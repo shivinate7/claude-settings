@@ -35,12 +35,14 @@ removes it once idle 30 minutes. It removes every other `.claude/worktrees/agent
 worktree idle 30 minutes or more that `sweep.decide_agent_end_worktree` clears: clean (no dirty or
 untracked file), no process inside, no live lock, HEAD on a remote-tracking ref. A tree it cannot
 prove keeps. One lock and its shells are the exception (rulings of 2026-10-15 19:43 CDT and
-2026-11-07 14:11 CST): a tree locked by this session's host is unlocked, its shells stopped and the
-tree removed only when the payload proves the agent finished (`agent_finished`: not listed as running
-in `background_tasks`, and its subagent transcript idle 30 minutes or more) and the tree is clean and
-pushed. A pid is stopped only when its parent chain reaches the host and every pid on the chain below
-it has its cwd in the tree (`sweep.host_child_stops`). Children are signalled first, the process table
-is read again until empty (`stop_and_settle`), and any pid still alive keeps the tree. A tree kept for
+2026-11-07 14:43 CST): a tree locked by this session's host is unlocked, its shells stopped and the
+tree removed only when the agent is proven finished (`agent_finished`: its own SubagentStop row is in
+the payload log, it is not listed as running in `background_tasks`, and its subagent transcript is idle
+30 minutes or more) and the tree is clean and pushed. A pid is stopped only when its parent chain
+reaches the host and every pid on the chain below it has its cwd in the tree (`sweep.host_child_stops`).
+The unlock comes first (`sweep.unlock_for_removal`); a failed one stops nothing. Children are signalled
+first, the process table is read again until empty (`stop_and_settle`), and any pid still alive puts the
+lock back and keeps the tree. A tree kept for
 another reason never has a shell stopped. The stage stops at WORKTREE_SECONDS or HOOK_BUDGET, so the hook stays inside its 60 s
 timeout.
 
@@ -512,29 +514,50 @@ def build_keep(entry: dict, idle, deadline: float):
     return None, cwds
 
 
-FINISHED_STATUSES = ("completed", "failed", "killed", "stopped", "cancelled")  # a listed task in one of these is not running
 SETTLE_POLL_SECONDS = 0.1  # pause between two reads of the process table while a stopped shell exits
 
 
-def agent_finished(payload, path: str) -> bool:
-    """True when the agent that owns the tree at PATH is proven finished, by all of: the payload's
-    `background_tasks` is a list of dicts and none names this agent (`id` is the agent id) as anything
-    but a finished task; `transcript_path` names a `.jsonl`; and
-    `<transcript minus .jsonl>/subagents/agent-<id>.jsonl` exists and has been idle
+def stopped_agents():
+    """The set of agent ids that have a SubagentStop row in the payload log, or None when the log
+    cannot be read. A row counts when its `raw` payload parses to a SubagentStop for that `agent_id`.
+    The log keeps the last 200 runs, so an agent whose row the cap cut reads as not stopped."""
+    try:
+        with open(log_path(), encoding="utf-8") as handle:
+            lines = handle.readlines()
+    except OSError:
+        return None
+    found = set()
+    for line in lines:
+        try:
+            raw = json.loads(line).get("raw")
+            payload = json.loads(raw) if isinstance(raw, str) else None
+        except (ValueError, AttributeError):
+            continue
+        if (isinstance(payload, dict) and payload.get("hook_event_name") == "SubagentStop"
+                and isinstance(payload.get("agent_id"), str)):
+            found.add(payload["agent_id"])
+    return found
+
+
+def agent_finished(payload, path: str, stopped) -> bool:
+    """True when the agent that owns the tree at PATH is proven finished, by all of: STOPPED (from
+    `stopped_agents`) holds its own SubagentStop row; the payload's `background_tasks` is a list of
+    dicts and none lists this agent (`id` is the agent id) as running; `transcript_path` names a
+    `.jsonl`; and `<transcript minus .jsonl>/subagents/agent-<id>.jsonl` exists and has been idle
     AGENT_END_IDLE_SECONDS. A missing or malformed field, or an unreadable file, is False.
-    Ruling: coordinator pick of 2026-11-07 14:11 CST (when-a-worktree-may-be-removed)."""
-    if not isinstance(payload, dict):
+    Why the stop row: `background_tasks` omits a running agent in a quiet gap (decision
+    when-a-worktree-may-be-removed, "A finished agent's shells")."""
+    if not isinstance(payload, dict) or not stopped:
         return False
     name = os.path.basename(os.path.normpath(path))
-    if not name.startswith("agent-"):
+    if not name.startswith("agent-") or name[len("agent-"):] not in stopped:
         return False
     agent = name[len("agent-"):]
     tasks = payload.get("background_tasks")
     if not isinstance(tasks, list) or not all(isinstance(t, dict) for t in tasks):
         return False
-    for task in tasks:
-        if task.get("id") == agent and task.get("status") not in FINISHED_STATUSES:
-            return False
+    if any(t.get("id") == agent and t.get("status") == "running" for t in tasks):
+        return False
     transcript = payload.get("transcript_path")
     if not isinstance(transcript, str) or not transcript.endswith(".jsonl"):
         return False
@@ -568,7 +591,7 @@ def host_is_session_root(decision: dict) -> bool:
 
 
 def stop_and_settle(path: str, decision: dict, deadline: float):
-    """Signal each pid in DECISION["stop_pids"], children first, then re-read `sweep.processes_in`
+    """Called only after the unlock succeeded (`sweep.unlock_for_removal`). Signal each pid in DECISION["stop_pids"], children first, then re-read `sweep.processes_in`
     until it is empty or DEADLINE (a `time.monotonic` time). True only when it came back empty:
     a pid still alive, or a read that failed, means False and the tree stays. Settling reads the
     process table, never `pid_alive`: a stopped child nobody has waited on is a zombie, which
@@ -603,6 +626,7 @@ def reap_worktrees(target: str, deadline: float, payload=None):
     queue = [e for e in entries if os.path.normcase(os.path.realpath(e["path"])) != own
              and sweep._is_agent_worktree(root, e["path"])]
     sweep._LIVE_HEADS = {}  # one remote listing per remote for the whole stage
+    stopped = stopped_agents()  # one read of the payload log for the stage
     try:
         for done, entry in enumerate(queue):
             if time.monotonic() > deadline:
@@ -610,7 +634,7 @@ def reap_worktrees(target: str, deadline: float, payload=None):
                 break
             # Idle is read once, before `git status` in the decision can rewrite the index.
             entry = dict(entry, finished=entry.get("locked_reason") is not None
-                         and agent_finished(payload, entry["path"]))  # a file stat: it moves no index
+                         and agent_finished(payload, entry["path"], stopped))  # file reads: no index
             entry = dict(entry, idle=sweep.worktree_idle_seconds(entry["path"]))
             decision = sweep.decide_agent_end_worktree(root, entry, sweep.AGENT_END_IDLE_SECONDS)
             if decision["action"] == "reap" and decision.get("host_lock") and not host_is_session_root(decision):
@@ -618,7 +642,13 @@ def reap_worktrees(target: str, deadline: float, payload=None):
                 for field in ("stop_pids", "unlock"):
                     decision.pop(field, None)
             if decision["action"] == "reap" and decision.get("stop_pids"):
-                if not stop_and_settle(entry["path"], decision, deadline):
+                # The unlock and its lock re-read come first: a failed one stops nothing.
+                if not sweep.unlock_for_removal(root, entry["path"], decision):
+                    decision.pop("stop_pids", None)
+                    if decision["action"] == "reap":
+                        decision.update(action="keep", reason="unreadable-subject: the unlock failed")
+                elif not stop_and_settle(entry["path"], decision, deadline):
+                    sweep.relock_worktree(root, entry["path"], decision)
                     decision.update(action="keep", reason="process-inside: a stopped shell is still alive")
                     decision.pop("unlock", None)
             if decision["action"] == "reap":
