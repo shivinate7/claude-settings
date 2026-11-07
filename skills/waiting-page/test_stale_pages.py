@@ -1090,7 +1090,7 @@ class Stale(unittest.TestCase):
                                  "the lane line for item 154 with %s is not the unknown line:\n%s" % (label, r.stdout + r.stderr))
                 self.assertEqual(self.gh_calls(folder), [], "gh was called for a lane item with %s" % label)
 
-    # owner ruling, chat 13:44 CST Nov 6: the doc key is the item id
+    # The doc key is the item id (roadmap step page-item-id-check).
     def test_a_wait_line_for_an_item_with_no_n_and_no_id_names_its_entry_key(self):
         """The entry key is the item's id, so a wait line names it when the item has no `n` and no `id` field. Red on the old
         code, which names the item ? from the missing fields. Both forms: a `waits` item (gh) and a lane item (no gh call)."""
