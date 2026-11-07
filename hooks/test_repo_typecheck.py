@@ -7,7 +7,8 @@ Run it from the repository root:
 
 WHAT IT PROVES. After a Write, Edit or MultiEdit of a file that a repo's `.claude/layout-extras.json`
 declares under "typecheck", the watch runs the declared command from the repo root and prints one
-PostToolUse block on stdout. Every other case is silent, and each matching edit starts the command once.
+PostToolUse block on stdout. Every other case is silent. Each matching entry's command starts once per
+matching edit, and the outputs of matching entries share one block.
 
 HOW IT DRIVES THE CODE. Each case runs hooks/config_watch.py the way a hook runs it: a JSON payload on
 stdin, the answer on stdout. The module is not called directly. On the old code a direct call to a
@@ -42,11 +43,13 @@ EXTRAS = os.path.join(".claude", "layout-extras.json")
 FAIL_STUB = "tools/typecheck-stub.py"  # prints boom, its cwd and its argv, exits 1
 OK_STUB = "tools/typecheck-stub-ok.py"  # prints boom, exits 0: the exit code decides, not the output
 SILENT_STUB = "tools/typecheck-stub-silent.py"  # exits 1 with no output
+SECOND_STUB = "tools/typecheck-stub-second.py"  # prints bang, exits 1: the second matching entry's output
 STUBS = {
     FAIL_STUB: "import os, sys\nprint('boom')\nprint('cwd=' + os.getcwd())\n"
                "print('argv=' + repr(sys.argv[1:]))\nsys.exit(1)\n",
     OK_STUB: "print('boom')\n",
     SILENT_STUB: "import sys\nsys.exit(1)\n",
+    SECOND_STUB: "import sys\nprint('bang')\nsys.exit(1)\n",
 }
 STUB_PREFIX = "typecheck-stub"  # every stub's file name starts with this; the cost cases count starts that name it
 POSIX = os.name != "nt"
@@ -420,6 +423,17 @@ class Cost(CaseName):
         self.assertIn("typecheck-stub.py", [os.path.basename(a) for a in starts[0]["argv"]],
                       "the process that started is not the matching entry's command")
 
+    def test_two_matching_entries_each_run_and_report_joined(self):
+        repo = Repo(self.name())
+        repo.declare(entry(fail_command(), globs=("app/**/*.ts",)),
+                     entry([sys.executable, SECOND_STUB], globs=("app/**/*.tsx", "app/**/*.ts")))
+        rc, out, report = run_probe(repo, repo.payload(repo.abs("app/x.ts")))
+        block = block_of(out)
+        self.assertIsNotNone(block, "two matching entries printed no single block")
+        self.assertEqual(len(check_starts(report)), 2, "two matching entries did not start two processes")
+        self.assertIn("boom", block["reason"], "the first matching entry's output is not in the block")
+        self.assertIn("bang", block["reason"], "the second matching entry's output is not in the joined block")
+
     def test_the_declared_timeout_is_capped_at_ninety_seconds(self):
         repo = Repo(self.name())
         repo.declare(entry(fail_command(), timeout=500))
@@ -460,6 +474,19 @@ class Cost(CaseName):
         rc, out, report = run_probe(repo, bash)
         self.assertEqual(out, "", "a Bash call printed a typecheck block")
         self.assertEqual(check_starts(report), [], "a Bash call started the typecheck command")
+
+    def test_a_notebook_edit_does_not_trigger_the_check(self):
+        repo = Repo(self.name())
+        repo.declare(entry(fail_command()))
+        rc, out, report = run_probe(repo, repo.payload(repo.abs("app/x.ts"), tool="Write"))
+        self.assertIsNotNone(block_of(out), "a Write of app/x.ts printed no block, so the NotebookEdit case proves nothing")
+        # The NotebookEdit payload names the same path under both keys, so only the tool name differs.
+        notebook = {"tool_name": "NotebookEdit",
+                    "tool_input": {"file_path": repo.abs("app/x.ts"), "notebook_path": repo.abs("app/x.ts"), "new_source": "x"},
+                    "cwd": repo.root, "session_id": "case"}
+        rc, out, report = run_probe(repo, notebook)
+        self.assertEqual(out, "", "a NotebookEdit printed a typecheck block")
+        self.assertEqual(check_starts(report), [], "a NotebookEdit started the typecheck command")
 
 
 class Wiring(CaseName):
