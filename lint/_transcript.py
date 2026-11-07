@@ -369,8 +369,23 @@ def _finds_writer(node):
     return None
 
 
+WRITER_BARE_RE = re.compile(r"[\w.-]+")
+WRITER_SESSION_RE = re.compile(r"(?<![\w-])session_\w+(?![\w-])")
+
+
+def writer_session(writer):
+    """The session id a `writer` value names. A bare id is itself. A label such as "Triage (session_<x>)",
+    the form the live pages hold, names the one session_<x> in it. A label with no id, or with two, names
+    none, so the caller treats the writer as unknown."""
+    if WRITER_BARE_RE.fullmatch(writer):
+        return writer
+    ids = set(WRITER_SESSION_RE.findall(writer))
+    return ids.pop() if len(ids) == 1 else None
+
+
 def page_writer_id(records):
-    """The `writer` string in the newest ArtifactData get of meta/page result in the main session, else None."""
+    """The session id (writer_session) of the `writer` in the newest ArtifactData get of meta/page result in
+    the main session, else None."""
     pending, writer = set(), None
     for rec in records:
         if rec.get("isSidechain"):
@@ -392,5 +407,5 @@ def page_writer_id(records):
                     m = re.search(r'"writer"\s*:\s*"([^"]+)"', text)
                     found = m.group(1) if m else None
                 if found:
-                    writer = found
+                    writer = writer_session(found)
     return writer
