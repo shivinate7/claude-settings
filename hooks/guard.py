@@ -3568,7 +3568,7 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
 
     # 7c. A builder's shell write to a test file. The path comes from the stripped command, a script's
     # own writes (a python or node heredoc body, -c, -e) from the raw one. Only an agent with a builder
-    # role is judged, the same gate as the Edit tools.
+    # role is judged, the same guard as the Edit tools.
     if role == BUILDER_ROLE:
         matched = builder_shell_test_hit(raw, stripped, cwd)
         if matched:

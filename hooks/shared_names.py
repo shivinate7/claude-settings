@@ -65,6 +65,18 @@ GH_FALLBACK_LOGIN = "ssemwal-cdc"
 # the guard's rule lane-repo-tag checks them on a lane `create_session`, so both name the same strings.
 REPO_TAG = "cs-repo:"
 STEP_TAG = "cs-step:"
+# A topic lane carries TOPIC_TAG; a tier session (batch-runner, triage) carries BUILD_TAG plus its tier; a lane
+# session carries LANE_TAG.
+TOPIC_TAG = "cs-topic:"
+BUILD_TAG = "cs-build:"
+LANE_TAG = BUILD_TAG + "lane"
+
+
+def lane_head_refs(slug: str) -> tuple[str, str]:
+    """The head refs a lane's pull request may carry for its step `slug`: the bare slug and `lane/<slug>`. The one
+    home, read by the roadmap build (idle lanes, stalled steps) and by the archive guard, so the two forms cannot
+    drift apart."""
+    return (slug, "lane/" + slug)
 
 
 def repo_tag_names(tag: object, slug: str) -> bool:
@@ -92,3 +104,11 @@ def refusals_path(session_id: object) -> Optional[str]:
     if not isinstance(session_id, str) or not re.fullmatch(r"[\w.-]+", session_id) or session_id.startswith("."):
         return None
     return os.path.join(config_dir(), STATE_DIR_NAME, "refusals", session_id + ".jsonl")
+
+
+def route_flags_path(session_id: object) -> Optional[str]:
+    """The file of route-row flags a session's Stop has already shown, so each shows once per session, or None for
+    an id that is not a plain name. Written and read by lint/report_guard.py."""
+    if not isinstance(session_id, str) or not re.fullmatch(r"[\w.-]+", session_id) or session_id.startswith("."):
+        return None
+    return os.path.join(config_dir(), STATE_DIR_NAME, "route-flags", session_id + ".json")
