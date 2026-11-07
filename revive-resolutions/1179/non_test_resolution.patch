@@ -1,0 +1,295 @@
+diff --git a/docs/debts/notes.md b/docs/debts/notes.md
+index 641a24609..b1f45c486 100644
+--- a/docs/debts/notes.md
++++ b/docs/debts/notes.md
+@@ -1252,6 +1252,8 @@
+ - text-only-decision-wrapping-wide: `docs/decisions/design-agents.md` says the design reviewer catches "wrapping" unqualified, while `agents/design-reviewer.md`, the file the reviewer reads, narrows it to a label, button or heading that newly wraps. Decision: design-agents
+ - text-only-overflow-css-fix: in a text-only lane, an overflow fix routes to the builder (skill design-review step 5), and only the "edits more than copy" bullet, read at fix time, sends a CSS fix to a designer. Decision: design-agents
+ - lockfail1-catch-text: lockfail1's catch says "could not hold settings.json open" but also catches a throw from the install run; it still counts a FAIL, so only the text misleads (install.test.ps1). Decision: copy-mode-overwrites-no-backup
++- stale-cites-flag-mask-batch: a flag that another touched file declares masks its removal; a batch integration range is likelier to hit it (limit (a), `lint/stale_cites.py` `declared_elsewhere`). Measure: 49 of 133 per-script flags have a twin in another script (orchestrator count, 2026-11-03 21:17 CST, not re-run). Decision: stale-cites-at-merge
++- stale-cites-flag-test-gaps: the flag cost case accepts `rc in (0, 1)` (`lint/test_stale_cites.py:1267`). No case covers the same-kind filter (`lint/stale_cites.py:771`) for a `.sh` flag moved to a `.py` file. Decision: stale-cites-at-merge
+ - lint-jobs-copy-suite-jobs: `LINT_JOBS` copies `CHECKS_SUITE_JOBS`, so a third split job added to the constant leaves that job's no-scope-condition check unread (lint/test_windows_split.py LINT_JOBS; rule `building-allow-list-is-the-constant`: an allow list points at the constant, never a copy).
+ - page-ready-line-removed-key: a stored draft whose option key the writer later removes reads "Ready to send: , your choice." (Send stays off); show nothing when the draft is not ready (skills/waiting-page/page.html). Decision: questions-go-to-owner
+ - auto-mode-refuses-lane-force-push: the auto-mode classifier refused a test-author's `Bash` force-with-lease push of its own rebased lane branch (2026-11-03 20:07 CST, lane value-cites). The lane pushed to a new branch name instead, so nothing was lost. A rebase of a pushed lane branch goes to a new branch name, never a force push. Decision: stale-safe-force-push
+diff --git a/docs/decisions/stale-cites-at-merge.md b/docs/decisions/stale-cites-at-merge.md
+index c7e408345..cada1f87b 100644
+--- a/docs/decisions/stale-cites-at-merge.md
++++ b/docs/decisions/stale-cites-at-merge.md
+@@ -2,24 +2,26 @@
+ 
+ ## The ruling
+ 
+-The ste-lint CI step refuses a pull request that leaves stale prose of one kind. The kind is a tracked Markdown line that names a repo file or a Python name bound at module level that the same PR deleted, renamed or moved. `lint/stale_cites.py` is the check. `actions/ste-lint/run.sh` runs it in scope `changed`, before the markdown-only exit, so a code-only PR is checked too. Every repo that pins the ste-lint action gets it when its pin moves.
++The ste-lint CI step refuses a pull request that leaves stale prose of one kind. The kind is a tracked Markdown line that names a repo file or a Python name bound at module level that the same PR deleted, renamed or moved. A line that cites a script flag the same PR removed from that script is stale too. `lint/stale_cites.py` is the check. `actions/ste-lint/run.sh` runs it in scope `changed`, before the markdown-only exit, so a code-only PR is checked too. Every repo that pins the ste-lint action gets it when its pin moves.
+ 
+ Owner, 2026-11-01 16:30 CST, in chat to triage: "make it a standing thing that stale prose never makes it anymore".
+ 
+-- Codes: STALE001, a path the range removed. STALE002, a name cited as "`file.py` `name`" (backticked name) or "(file.py name)" on one line, where `name` was bound in that file at base and is not bound at head. A bare word after a path is never a cite. Python is read with `ast`. `lint/stale_cites.py` `names_in` walks each module-level statement, also inside a module-level if, try, with, for, while or match, never inside a def or class. In those statements, py-facts `defined_names` (`skills/plain-english-map/scripts/lib/py-facts.py`, the one home) finds each def, class, import and assignment to a plain name. `lint/stale_cites.py` `target_bindings` adds each name in a tuple, list or starred assignment target, a for target, a with-as target and a walrus target. A def directly in a module-level class counts too. A def nested in a function does not. A name that moved but is still bound in the file (`f = h`, a re-import) is not removed. JavaScript and shell names are not checked. A cite of a name in such a file (`.mjs`, `.js`, `.cjs`, `.ts`, `.sh`) that the range touched prints `stale-cites: unknown, <md path>:<line> ...` and keeps the exit 0. It prints only when the range also removes a path or a Python name, since only then is Markdown read. A range that touches only such files prints nothing and passes, with no added git start and no Markdown read.
+-- Scope: built on main are `stale-names-bound` (the removed-name check, STALE002), the Report below, and the opt-in tree mode (the dead-path check STALE003 and the bad-anchor check STALE004; decision `stale-cites-whole-tree`, the whole-tree record). The planned lanes (`stale-flags`, `value-cites`, and the records-only lane) follow `docs/plans/pointer-system.md`. The coordinator's picks of 2026-11-03 19:48 CST set their rules: a value cite matches the code as written, Python only, and a JavaScript value reads "unknown". The reverse list (code that nothing in prose cites) is planned, report-only, never a finding, the same form as decision `claude-md-change-is-flagged` (a CLAUDE.md change is reported, never held).
++- Codes: STALE001, a path the range removed. STALE002, a name cited as "`file.py` `name`" (backticked name) or "(file.py name)" on one line, where `name` was bound in that file at base and is not bound at head. A bare word after a path is never a cite. Python is read with `ast`. `lint/stale_cites.py` `names_in` walks each module-level statement, also inside a module-level if, try, with, for, while or match, never inside a def or class. In those statements, py-facts `defined_names` (`skills/plain-english-map/scripts/lib/py-facts.py`, the one home) finds each def, class, import and assignment to a plain name. `lint/stale_cites.py` `target_bindings` adds each name in a tuple, list or starred assignment target, a for target, a with-as target and a walrus target. A def directly in a module-level class counts too. A def nested in a function does not. A name that moved but is still bound in the file (`f = h`, a re-import) is not removed. JavaScript and shell names are not checked. A cite of a name in such a file (`.mjs`, `.js`, `.cjs`, `.ts`, `.sh`) that the range touched prints `stale-cites: unknown, <md path>:<line> ...` and keeps the exit 0. It prints only when the range also removes a path, a Python name or a flag, since only then is Markdown read. A range that touches only such files prints nothing and passes, with no added git start and no Markdown read. STALE007, a flag cited as `script --flag` inside one backticked code span, where the range removed that flag from that script. A `~/.claude/<path>` cite resolves to `<path>` at the repo root. A Python flag is an `add_argument` string literal, read with `ast`. A shell (`.sh`) flag is a whole-word `--token` in the file. A flag only named in a docstring or comment was never declared. A span that cites no script (`git push --force`), and a script that never held the flag (a shim whose target holds the flags), never fire. A flag that another touched `.py` file declares as an `add_argument` literal at head, or another touched `.sh` file holds as a whole word, moved there and is not removed.
++- Flag limits: a shell comment that still names a removed flag passes. An extensionless shell script (`bin/rm`, `bin/sim-test` and others) is never read. A flag that another subcommand of the same file keeps passes. (a) Another touched `.py` that declares the flag at head masks its removal. A batch integration range is likelier to hit this. The lint run on each lane head is the narrower check. (b) An unrelated touched `.sh` with the flag as a whole word, anywhere (help text or a comment too), masks it. (c) A flag moved from a `.sh` into a `.py` parser still fires. The match is same-kind only.
++- Test copy: the `argument_flags` copy in `lint/test_stale_cites.py` is a near copy of the reader in `lint/stale_cites.py`. It keeps any string that starts with `-`, where the reader keeps only `LONG_FLAG.fullmatch` matches. A change to one needs the other.
++- Scope: built on main are `stale-names-bound` (the removed-name check, STALE002), `stale-flags` (the removed-flag check, STALE007), the Report below, and the opt-in tree mode (the dead-path check STALE003 and the bad-anchor check STALE004; decision `stale-cites-whole-tree`, the whole-tree record). The planned lanes (`value-cites` and the records-only lane) follow `docs/plans/pointer-system.md`. The coordinator's picks of 2026-11-03 19:48 CST set their rules: a value cite matches the code as written, Python only, and a JavaScript value reads "unknown". The reverse list (code that nothing in prose cites) is planned, report-only, never a finding, the same form as decision `claude-md-change-is-flagged` (a CLAUDE.md change is reported, never held).
+ - Report, step L4 of the pointer plan: the check prints report lines after its findings, and the ste-lint step adds them to its summary under "Stale-cites report". A line starts `stale-cites: report, `. It is never a finding and never changes the exit code, the same form as decision `claude-md-change-is-flagged`. Two halves. The anchor half names each `<!-- rule:id -->` anchor whose sentence changed in a rule file (`RULE_FILES` in `lint/rule_audit.py`), with its `lint/rule_mechanisms.json` row (kind, ref, test). Then it lists this PR's changed files under `hooks/`, `lint/`, `bin/`, `actions/` and `.github/`, or "none". It gives no verdict on whether the guard or check changed. A guard row's logic can sit in any module, so the reviewer judges (orchestrator ruling, process-only, 2026-11-03 20:35 CST). The Home half names each changed non-Markdown file (added, changed, removed or renamed), the decisions whose Home line names it, and the rows whose ref or test is it. Only a real anchor counts: an anchor inside a code span is a mention, never named. A repo with no `lint/rule_mechanisms.json` gets the Home half only, with no error. Named readers: the lane reviewer, who checks that the guard or check behind an edited rule changed with it, and the batch runner, who reads the summary before a merge.
+ - Report cost: the report adds one `ls-tree` of the decisions folders and the mechanisms file when a non-Markdown file changed. It adds none when the run already listed the whole tree. The decisions folder is the first of `candidates(root, "decisions")` in `lint/layout.py` that holds a file, so a repo not rolled out to the layout is read at `decisions/` or `docs/decisions/`. It also adds one `git cat-file --batch`. That batch reads each decision record whole (a regex takes its Home line) and the mechanisms file once. A changed rule file adds its base and head blobs and the mechanisms file. Its list of changed files comes from the diff the run already read, so an edit to a rule file alone starts 4 git processes (`rev-parse`, `merge-base`, `diff`, `cat-file --batch`). A PR that changes only Markdown outside the rule files adds nothing. A `lint/rule_mechanisms.json` that is not JSON, or whose rules or rows are not objects, prints one `stale-cites: unknown, ...` line naming the file, and the Home half still prints without rows. Any other failed report read prints one `stale-cites: unknown, report not read, ...` line. The exit stays as it was.
+-- Readers: `scan()` runs a list of readers (`READERS` in `lint/stale_cites.py`), one per check. Each later lane (`stale-flags`, `value-cites`) adds one entry. The report follows the findings.
++- Readers: `scan()` runs a list of readers (`READERS` in `lint/stale_cites.py`), one per check. The later lane `value-cites` adds one entry. The report follows the findings.
+ - Only names the range removed count. A line already stale at base, for a name the range did not touch, never fires. So the check is never red on work the PR did not do.
+ - A path matches only at a path boundary. `mods/session-board/hooks/lib.mjs` does not match `hooks/lib.mjs`.
+-- Left out: `docs/records.md` (generated at merge), each file `.ste-lint-exclude` names, and a line marked `<!-- ste-disable-line STALE001 -->` or `STALE002`. A record that names a removed file on purpose takes the mark.
++- Left out: `docs/records.md` (generated at merge), each file `.ste-lint-exclude` names, and a line marked `<!-- ste-disable-line STALE001 -->`, `STALE002`, `STALE003`, `STALE004` or `STALE007`. A record that names a removed file on purpose takes the mark.
+ - Each Markdown file is read as committed at head, never from the working tree, through the same `git cat-file --batch` process. A byte that is not UTF-8 reads as a replacement character and the file is still checked.
+ - A base that does not resolve (a shallow clone with no history) is unknown, not a finding. The check prints `stale-cites: unknown, ...`, names fetch-depth 0, and exits 0, so a repo that pins the action and checks out shallow is not red at its pin move (owner-lane call, 2026-11-01).
+ - `FAIL=false` is honored: the findings print and the step exits 0.
+ - Findings have their own exit path. The STE split script makes a finding on an untouched line report-only, and every stale line is untouched by design.
+ - A touched `.py` file that does not parse at base or head is unknown the same way: `stale-cites: unknown, <file> ...`, and it alone keeps the exit 0.
+-- Cost, per ste-lint changed-scope run (each PR CI run and each `bin/ste-changed` call): one `python3` start. Git starts 3 (`rev-parse`, `merge-base`, `diff`) when the range removes or renames no path and changes only Markdown outside the rule files. A touched `.py` file adds one `git cat-file --batch` and, through the report, one `ls-tree`, so it starts 5. A removed or renamed path adds `ls-tree` and that `cat-file --batch`, so 5 at most. Each tracked Markdown file is read once. It is read only when the findings have something to look for: a removed or renamed path, or a name that a touched `.py` file no longer defines. A touched `.py` file also loads the py-facts script once, in-process (importlib, no start, no `.pyc`). It writes no file and starts no lasting process. `CostTests` in `lint/test_stale_cites.py` proves it.
++- Cost, per ste-lint changed-scope run (each PR CI run and each `bin/ste-changed` call): one `python3` start. Git starts 3 (`rev-parse`, `merge-base`, `diff`) when the range removes or renames no path and changes only Markdown outside the rule files. A touched `.py` or `.sh` file adds one `git cat-file --batch`, which the name reader and the flag reader share, and, through the report, one `ls-tree`, so it starts 5. A removed or renamed path adds `ls-tree` and that `cat-file --batch`, so 5 at most. Each tracked Markdown file is read once. It is read only when the findings have something to look for: a removed or renamed path, a name that a touched `.py` file no longer defines, or a flag that a touched `.py` or `.sh` file no longer declares. A touched `.py` file also loads the py-facts script once, in-process (importlib, no start, no `.pyc`). It writes no file and starts no lasting process. `CostTests` in `lint/test_stale_cites.py` proves it.
+ - An opt-in whole-tree mode is in stale-cites-whole-tree. The range check here is unchanged.
+ 
+ ## Kind of staleness
+diff --git a/docs/plans/pointer-system.md b/docs/plans/pointer-system.md
+index 34e38e1a5..0b8b6182e 100644
+--- a/docs/plans/pointer-system.md
++++ b/docs/plans/pointer-system.md
+@@ -6,24 +6,24 @@ when a cite no longer matches the code. Each lane below adds one kind of cite.
+ 
+ ## Status
+ 
+-- Built on main: `stale-names-bound` (STALE002, range mode). Tree mode, opt-in through the ste-lint input
++- Built on main: `stale-names-bound` (STALE002, range mode) and `stale-flags` (STALE007, range mode). Tree mode, opt-in through the ste-lint input
+   `tree-cites`, with the dead-path check (STALE003) and the bad-anchor check (STALE004), per decision
+   `stale-cites-whole-tree` (the whole-tree record). The cited-by report, per the Report step of decision
+   `stale-cites-at-merge` (the range check record).
+-- Planned: `stale-flags`, `value-cites`, the route-claim check, and the records-only lane for value cites.
++- Planned: `value-cites`, the route-claim check, and the records-only lane for value cites.
+ - New codes start at STALE005, which the route-claim check takes (decision `claims-carry-backing`, the
+-  route-row record). `stale-flags` and `value-cites` claim the next free code when they are built.
++  route-row record). `stale-flags` is STALE007; `value-cites` claims the next free code when it is built.
+ 
+ ## Lanes
+ 
+-Work order of the planned lanes, in words: `stale-flags`, then `value-cites`, then the records-only lane.
+-The built lanes are `stale-names-bound` and `cited-by-report`. The source notes numbered these steps L1
++Work order of the planned lanes, in words: `value-cites`, then the records-only lane.
++The built lanes are `stale-names-bound`, `stale-flags` and `cited-by-report`. The source notes numbered these steps L1
+ to L4. The slugs replace the numbers.
+ 
+ | Lane | What it checks | Status |
+ |---|---|---|
+ | `stale-names-bound` | A cited Python name that the pull request removed (STALE002) | Built on main |
+-| `stale-flags` | A cited command-line flag that the pull request removed | Planned. Next free code when built. |
++| `stale-flags` | A cited command-line flag that the pull request removed (STALE007) | Built on main |
+ | `value-cites` | A cited value that the pull request changed | Planned. Next free code when built. |
+ | `cited-by-report` | A report of the checks that hold each rule | Built on main (the Report step of decision `stale-cites-at-merge`) |
+ | Route-claim check (no slug yet) | A changed line that states a capability by route with no backing (STALE005) | Planned (decision `claims-carry-backing`, the route-row record) |
+@@ -43,7 +43,7 @@ to L4. The slugs replace the numbers.
+ - Cost: no new process and no new file read. The decision `stale-cites-at-merge` has the full cost line.
+ - Known gaps: the `stale-cites-*` notes in `docs/debts/notes.md`.
+ 
+-### stale-flags (planned)
++### stale-flags (built on main)
+ 
+ - Cite: a script path and a `--flag` inside one backticked code span.
+ - Flag set: for a `.py` script, the `add_argument` string literals, read with `ast`. For shell, a
+@@ -51,7 +51,11 @@ to L4. The slugs replace the numbers.
+ - Fires only when the pull request removed the flag from that file.
+ - Red cases: a removed `--between` in a cited span fires. No fire for: a kept flag; `git push --force`;
+   a flag in another script's span; a shim path (`bin/merge`, whose flags live in `merge/merge.py`).
+-- Cost: no new process. Reads touched blobs through the open `cat-file` process.
++- A flag that another touched `.py` file declares as an `add_argument` literal at head, or another touched
++  `.sh` file holds as a whole word, moved there and does not fire.
++- Cost: no new process beyond the one `cat-file`, and no `ls-tree` of the Markdown tree unless a flag was removed. A touched `.py`
++  or `.sh` adds that `cat-file`; the flag reader reads blobs through it. The decision `stale-cites-at-merge`
++  has the full cost line and the named limits.
+ 
+ ### value-cites (planned)
+ 
+diff --git a/lint/stale_cites.py b/lint/stale_cites.py
+index 1cec6e636..c6592ed44 100644
+--- a/lint/stale_cites.py
++++ b/lint/stale_cites.py
+@@ -14,10 +14,16 @@ Refuses a range that leaves a tracked Markdown line naming a name the range remo
+             with-as or walrus target, or when it is a def directly in a module-level class. A name that moved
+             but is still bound in the file is not removed. A test node id, `path.py::name` or
+             `path.py::Class::name`, is read the same way, in a code span or not: each segment is a name.
++  STALE007  one backticked code span cites a script and a `--flag` of it, and the range removed that flag from the
++            script. A `~/.claude/<path>` cite is `<path>` at the repo root. A Python flag is an `add_argument`
++            string literal (read with `ast`); a shell (.sh) flag is a whole-word `--token` in the file. A flag
++            named only in a docstring or comment of a .py was never declared. A span that cites no script (as in
++            `git push --force`), or a script that never had the flag (a shim whose target holds the flags), never
++            fires. A flag another touched .py declares (or another touched .sh holds) at head moved there.
+   Unknown   the line cites `<file.mjs> <name>` (also .js, .cjs, .ts, .sh) in the same two forms, and the range
+             touched that file. JavaScript and shell names are not read, so the line prints
+             `stale-cites: unknown, <path>:<line> ...` and keeps the exit 0. It prints only when the range also
+-            removes a path or a Python name, since only then is Markdown read. A range that touches only such
++            removes a path, a Python name or a flag, since only then is Markdown read. A range that touches only such
+             files prints nothing and passes.
+   STALE005  (range mode only, report only) a SENTENCE of governed prose, in a paragraph the range adds a line to,
+             states a capability by route with no backing. A paragraph is a run of prose rows; a blank row, a heading,
+@@ -39,7 +45,7 @@ Refuses a range that leaves a tracked Markdown line naming a name the range remo
+             (decision source-prose-lint-ships-dark). A line marked `<!-- ste-disable-line STALE005 -->` is left out.
+ A line already stale at base, for a name the range did not remove, never fires. Left out: docs/records.md,
+ each file `.ste-lint-exclude` (and the EXCLUDE env of the ste-lint action) names, and a line marked
+-`<!-- ste-disable-line STALE001 -->` (or STALE002, STALE003, STALE004). Fenced blocks count as prose.
++`<!-- ste-disable-line STALE001 -->` (or STALE002, STALE003, STALE004, STALE007). Fenced blocks count as prose.
+ Each Markdown file is read as committed at head, never from the working tree.
+ --tree [REV] reads every tracked Markdown file at REV (default HEAD) instead of a range, so it fires on lines no
+ change touched. It is opt-in (the ste-lint input `tree-cites`). It needs no base, so a shallow clone is fine.
+@@ -75,10 +81,10 @@ file's head blob (the paragraph around it) and, when a sentence cites a route or
+ the rows file or that file's presence at head, all through the one `cat-file` the run opens: one more start, and none
+ for a range with no such line. A range that changes the rows file reads it at base and head through the same `cat-file`;
+ when a row id is gone it also lists the tree once and reads each tracked .md once.
+-A touched .py adds one `git cat-file --batch` and, through the report below, one `ls-tree`, so it starts 5. A removed
+-or renamed path adds `ls-tree` and that `cat-file --batch`, so 5 at most. Each tracked .md is read once, and only
+-when a removed or renamed path, or a name that a touched .py no longer defines, gives the findings something to
+-look for. A touched .py also loads the py-facts script once, in-process (no start, no .pyc). It writes no file and leaves no process running.
++A touched .py or .sh adds one `git cat-file --batch`, which the flag reader and the name reader share, and, through
++the report below, one `ls-tree`, so it starts 5. A removed or renamed path adds `ls-tree` and that `cat-file --batch`,
++so 5 at most. Each tracked .md is read once, and only when a removed or renamed path, a name that a touched .py no
++longer defines, or a flag that a touched .py or .sh no longer declares, gives the findings something to look for. A touched .py also loads the py-facts script once, in-process (no start, no .pyc). It writes no file and leaves no process running.
+ The report adds, for a changed non-Markdown file, one `ls-tree` of the decisions folders and the mechanisms file (none
+ when the run already listed the whole tree) and the `cat-file --batch`, which reads each decision record whole (a regex
+ then takes its Home line) and the mechanisms file once. The decisions folder is the first of lint/layout.py
+@@ -374,6 +380,33 @@ def names_in(source):
+     return names
+ 
+ 
++CLAUDE_HOME = "~/.claude/"
++FLAG_SPAN = re.compile(r"`([^`\n]+)`")
++LONG_FLAG = re.compile(r"--[A-Za-z][\w-]*")
++SHELL_FLAG = re.compile(r"(?<![\w-])--[A-Za-z][\w-]*")
++SHELL_SCRIPT = re.compile(r"\.sh\Z")
++
++
++def argument_flags(source):
++    """The long flags a Python source declares: the string literals passed to `add_argument`, read with `ast`.
++    A flag only named in a docstring or comment is not declared. None when the source does not parse."""
++    try:
++        tree = ast.parse(source)
++    except (SyntaxError, ValueError):
++        return None
++    flags = set()
++    for node in ast.walk(tree):
++        if isinstance(node, ast.Call) and getattr(node.func, "attr", None) == "add_argument":
++            flags.update(arg.value for arg in node.args
++                         if isinstance(arg, ast.Constant) and isinstance(arg.value, str) and LONG_FLAG.fullmatch(arg.value))
++    return flags
++
++
++def shell_flags(source):
++    """The whole-word `--token`s in a shell source; `--between-x` is no `--between`."""
++    return set(SHELL_FLAG.findall(source))
++
++
+ def disabled(line):
+     codes = set()
+     for match in DISABLE_RE.finditer(line):
+@@ -402,11 +435,13 @@ class Range:
+         self.base, self.head, self.removed, self.renamed, self.batch = base, head, removed, renamed, batch
+         self.added_lines = lines or {}  # the .md lines the range adds, by path
+         self.unknowns = []
++        self.added = set(added)
+         self.tree = None  # the head tree entries once a read listed the whole tree; the report reuses it
+         self.changed = set(removed) | set(renamed) | set(renamed.values()) | set(modified) | set(added)
+         self.py_files = {p: p for p in modified if p.endswith(".py")}
+         self.py_files.update({old: new for old, new in renamed.items() if old.endswith(".py") and new.endswith(".py")})
+         self.foreign_files = {p for p in list(modified) + list(renamed.values()) if FOREIGN_FILE.search(p)}
++        self.shell_files = {p for p in self.foreign_files if SHELL_SCRIPT.search(p)}
+ 
+ 
+ class PathReader:
+@@ -702,6 +737,63 @@ def blob_ids(blob):
+         return None
+ 
+ 
++class FlagReader:
++    """STALE007: a code span that cites `script --flag` for a flag the range removed from that script."""
++    code = "STALE007"
++
++    def prepare(self, rng):
++        removed_flags = {}  # script at head -> flags the range removed
++        files = dict(rng.py_files)  # base path -> head path
++        shell = rng.shell_files
++        files.update({old: new for old, new in rng.renamed.items() if new in shell})
++        files.update({p: p for p in shell if p not in rng.renamed.values()})
++        for path in sorted(files):
++            old_src = rng.batch.get("%s:%s" % (rng.base, path))
++            new_src = rng.batch.get("%s:%s" % (rng.head, files[path]))
++            if old_src is None or new_src is None:
++                continue
++            read = argument_flags if path.endswith(".py") else shell_flags
++            before, after = read(old_src.decode("utf-8", "replace")), read(new_src.decode("utf-8", "replace"))
++            if before is None or after is None:
++                continue  # a .py that does not parse is already reported as unknown by NameReader
++            if before - after:
++                removed_flags[files[path]] = before - after
++        for script in list(removed_flags):
++            # A flag another touched file of the same kind declares at head moved there; it is not removed.
++            removed_flags[script] -= self.declared_elsewhere(rng, script, files)
++            if not removed_flags[script]:
++                del removed_flags[script]
++        return removed_flags or None
++
++    def declared_elsewhere(self, rng, script, files):
++        """The flags the other touched .py (or .sh) files declare at head, read through the open blob reader."""
++        suffix = ".py" if script.endswith(".py") else ".sh"
++        others = {p for p in list(files.values()) + sorted(rng.added) if p.endswith(suffix) and p != script}
++        read = argument_flags if suffix == ".py" else shell_flags
++        declared = set()
++        for path in sorted(others):
++            src = rng.batch.get("%s:%s" % (rng.head, path))
++            flags = read(src.decode("utf-8", "replace")) if src is not None else None
++            declared |= flags or set()
++        return declared
++
++    def line(self, state, text, claimed):
++        if "--" not in text:
++            return []
++        messages = []
++        for span in FLAG_SPAN.finditer(text):
++            tokens = span.group(1).split()
++            for token in tokens:
++                script = token[len(CLAUDE_HOME):] if token.startswith(CLAUDE_HOME) else token
++                for flag_token in tokens if script in state else ():
++                    flag = LONG_FLAG.match(flag_token)
++                    if flag and flag.group(0) in state[script]:
++                        message = "%s no longer takes %s at head; fix the cite" % (script, flag.group(0))
++                        if message not in messages:
++                            messages.append(message)
++        return messages
++
++
+ class RouteClaimReader:
+     """STALE005: a sentence of governed prose that states a capability by route with no backing, in a paragraph the
+     range adds a line to. Report only: its messages never become findings (decision source-prose-lint-ships-dark).
+@@ -853,7 +945,7 @@ def route_ids(rng, cache):
+ # reader already cited there). A reader with `unknown = True` reports its messages as unknown, not as findings.
+ # A reader with `scope = "added"` reads the lines the range adds instead: `prepare(rng)` and `claims(rng, state)`, and
+ # its messages are report lines, never findings. A new check adds one entry.
+-READERS = (PathReader(), NameReader(), ForeignReader(), RouteClaimReader())
++READERS = (PathReader(), NameReader(), ForeignReader(), FlagReader(), RouteClaimReader())
+ 
+ 
+ def tracked_entries(rev, *paths):
+@@ -888,7 +980,7 @@ def read_markdown(batch, rev, md):
+ def find_stale(rng):
+     """{(path, line, code): [messages]}: the findings. Fills `rng.unknowns`."""
+     found = {}
+-    if not rng.removed and not rng.renamed and not rng.py_files:
++    if not rng.removed and not rng.renamed and not rng.py_files and not rng.shell_files:
+         return found  # the cost contract: nothing removed, so no blob, tree or Markdown read
+     active = [(r, state) for r in READERS if getattr(r, "scope", "tree") == "tree"
+               for state in [r.prepare(rng)] if state is not None]
+diff --git a/skills/fresh-prose/SKILL.md b/skills/fresh-prose/SKILL.md
+index 4081d5673..c6be85f3b 100644
+--- a/skills/fresh-prose/SKILL.md
++++ b/skills/fresh-prose/SKILL.md
+@@ -51,6 +51,7 @@ its own record (`git-one-record-per-question`).
+ The ste-lint CI step refuses a pull request that leaves stale prose (`lint/stale_cites.py`).
+ STALE001 fires on a tracked Markdown line that names a file the same pull request deleted or renamed.
+ STALE002 fires on a line that cites a Python file and a name the pull request removed from that file.
++STALE007 fires on a code span that cites a script and a `--flag` the pull request removed from that script.
+ 
+ ## Proof
+ 
