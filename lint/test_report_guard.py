@@ -4558,7 +4558,9 @@ class PostedNeedsCommentUrlTests(ReplyGuardRuns, unittest.TestCase):
 
     def test_posted_green_exempt_claims_pass_beside_their_red_twins(self):
         # Each green line differs from its twin only in the exempt word. The twin blocks first, so the pass
-        # shows the exemption, not a check that never reached the line.
+        # shows the exemption, not a check that never reached the line. Lane ruling 15:31 CST,
+        # session_013NEJL45afxTyvacTQtAEwZ (F1): these pairs stay exempt. F1's word list names neither no nor
+        # needs, so the no and needs pairs are pinned against it.
         pairs = [
             # Catches: will before the verb is read as a claim.
             ("The review record will be posted on PR #1500.", "The review record is posted on PR #1500."),
@@ -4689,7 +4691,8 @@ class PostedNeedsCommentUrlTests(ReplyGuardRuns, unittest.TestCase):
 
     def test_posted_rewrite_after_missing_report_blocks_the_incident_line(self):
         # The rewrite after a missing-report refusal is checked once, as answered is. Catches: a rewrite
-        # that keeps the claim passes, so the refusal can be routed around.
+        # that keeps the claim passes, so the refusal can be routed around. Lane ruling 15:15 CST,
+        # session_013NEJL45afxTyvacTQtAEwZ: mirrors answered-needs-source.
         out = self.refused_then_rewrite(self.INCIDENT)
         self.assertIsNotNone(out, self.INCIDENT)
         self.assertEqual(out.get("decision"), "block", self.INCIDENT)
@@ -4697,11 +4700,86 @@ class PostedNeedsCommentUrlTests(ReplyGuardRuns, unittest.TestCase):
 
     def test_posted_rewrite_with_no_prior_refusal_stays_quiet(self):
         # Catches: a rewrite with no missing-report refusal before it is refused. Green on the old code too.
+        # Lane ruling 15:15 CST, session_013NEJL45afxTyvacTQtAEwZ: mirrors answered-needs-source.
         self.assert_allowed(self.INCIDENT, stop_hook_active=True)
 
     def test_posted_green_rewrite_after_missing_report_passes_a_cited_line(self):
-        # Catches: the rewrite check refuses a line that cites its comment URL.
+        # Catches: the rewrite check refuses a line that cites its comment URL. Lane ruling 15:15 CST,
+        # session_013NEJL45afxTyvacTQtAEwZ: mirrors answered-needs-source.
         self.assertIsNone(self.refused_then_rewrite(self.CITED))
+
+    def test_posted_red_negator_outside_the_aux_chain_refuses(self):
+        # Lane ruling 15:31 CST, session_013NEJL45afxTyvacTQtAEwZ (F1): a negator or modal exempts only inside the
+        # auxiliary chain directly before the verb. A subordinator exempts only when the verb is passive or follows
+        # the subordinator directly. Catches: a negator or subordinator earlier in the clause exempts a claim.
+        rows = [
+            # Catches: after, earlier in the clause, exempts a claim whose verb it does not precede.
+            "After CI passed I posted the round-1 review record on #1500.",
+            # Catches: nothing, earlier in the clause, exempts a claim.
+            "Nothing failed and I posted the review record on #1500.",
+            # Catches: can, before a verb outside its chain, exempts a claim.
+            "I can confirm the review record is posted on #1500.",
+        ]
+        for line in rows:
+            with self.subTest(line=line):
+                self.assert_blocked(line, self.NEEDLE, line)
+
+    def test_posted_green_chain_or_direct_subordinator_passes_beside_its_twin(self):
+        # Lane ruling 15:31 CST, session_013NEJL45afxTyvacTQtAEwZ (F1): the exemption holds where the chain or a
+        # direct subordinator holds. Catches: the narrowed rule refuses a verb that a chain word or a direct
+        # subordinator exempts.
+        pairs = [
+            ("Once posted the review record on #1500, hand it to runner 8.",
+             "The review record was posted on #1500, hand it to runner 8."),
+            ("The lane has not posted the review on PR #1500.", "The lane has posted the review on PR #1500."),
+        ]
+        for green, twin in pairs:
+            with self.subTest(line=green):
+                self.assert_blocked(twin, self.NEEDLE, twin)
+                self.assert_allowed(green)
+
+    def test_posted_red_colon_before_the_noun_refuses(self):
+        # Lane ruling 15:31 CST, session_013NEJL45afxTyvacTQtAEwZ (F2): the noun is read across a colon, so a label
+        # before the colon is the noun. Catches: a colon ends the clause, and the noun before it is lost.
+        rows = ["Review record: posted to PR #1500.", "Round-1 review record: posted (#1500)."]
+        for line in rows:
+            with self.subTest(line=line):
+                self.assert_blocked(line, self.NEEDLE, line)
+
+    def test_posted_green_other_nouns_and_no_pr_line_pass_beside_their_twins(self):
+        # Lane ruling 15:31 CST, session_013NEJL45afxTyvacTQtAEwZ (F3): the nouns are review record, review and
+        # comment. A claim needs a #N, a github.com URL or the word PR on the line. Catches: bare record is read as
+        # a noun, or a comment posted to a page is read as a PR claim.
+        pairs = [
+            ("posted the step record.", "posted the review record on #1500."),
+            ("Posted the decision record to docs/decisions/x.md.", "Posted the review record on #1500."),
+            ("comment posted to the waiting page", "comment posted to PR #1500."),
+            ("The review record was posted to the waiting page.", "The review record was posted to PR #1500."),
+        ]
+        for green, twin in pairs:
+            with self.subTest(line=green):
+                self.assert_blocked(twin, self.NEEDLE, twin)
+                self.assert_allowed(green)
+
+    def test_posted_left_with_its_object_unchanged_passes_beside_a_new_record(self):
+        # Lane ruling 15:31 CST, session_013NEJL45afxTyvacTQtAEwZ (F3), the lane's call: left needs its object to be
+        # a new thing, so left is exempt when unchanged, as is or alone follows it in the clause. Catches: a left
+        # review record unchanged is read as a claim.
+        twin = "I left the review record on #1500."
+        for green in ("I left the review record unchanged.", "I left the review record as is.",
+                      "I left the review record alone."):
+            with self.subTest(line=green):
+                self.assert_blocked(twin, self.NEEDLE, twin)
+                self.assert_allowed(green)
+
+    def test_posted_green_multi_pr_line_passes_when_one_number_matches(self):
+        # Lane ruling 15:31 CST, session_013NEJL45afxTyvacTQtAEwZ (F4): the match is lenient. A line that names several
+        # PRs passes when one of its #N matches the cited URL's number, and refuses when none does. Catches: a line
+        # that names two PRs is refused for the one its URL does not name, or a URL for another PR passes.
+        blocked = "Posted the review record on #1500 and #1501, see https://github.com/o/r/pull/1499#issuecomment-1."
+        self.assert_blocked(blocked, self.NEEDLE, blocked)
+        self.assert_allowed("Posted the review record on #1500 and #1501, see "
+                            "https://github.com/o/r/pull/1500#issuecomment-123.")
 
     # Cost: regex only. The probe is builtins.open, the pattern AnsweredNeedsSourceTests uses, plus subprocess.Popen
     # and subprocess.run recorded, so a process start inside the check is counted.
