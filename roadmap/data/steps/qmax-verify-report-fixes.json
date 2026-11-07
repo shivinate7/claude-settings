@@ -1,0 +1,11 @@
+{
+  "title": "q_max verify report fixes",
+  "phase": "now",
+  "status": "ready",
+  "order": 0.13,
+  "owner": "coordinator",
+  "why": "Coordinator, 13:59 CST Nov 7.",
+  "note": "Built in q_max #1079 (head 3292860), with runner 9 to merge.",
+  "lane": "runner 9",
+  "updatedAt": "2026-11-07T14:00:00-06:00"
+}
