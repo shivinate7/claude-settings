@@ -5056,6 +5056,65 @@ class AnsweredNeedsSourceTests(unittest.TestCase):
         self.assertEqual(set(opened), {transcript, GUARD_PY})
 
 
+class PromiseNeedsMechanismTests(unittest.TestCase):
+    """The promise verdict (rule building-mistake-names-its-guard). On any turn, a reply line that promises
+    "from now on" and names only a handoff as its home is refused. Incident: roadmap step export-after-page-write."""
+
+    hook = AnsweredNeedsSourceTests.hook
+    verdict = AnsweredNeedsSourceTests.verdict
+    assert_blocked = AnsweredNeedsSourceTests.assert_blocked
+    assert_allowed = AnsweredNeedsSourceTests.assert_allowed
+
+    INCIDENT = ("From now on, every wake that changes the page ends with an export. That step is in my handoff.")
+
+    def test_pr_red_incident_line_blocks_on_an_unlanded_turn(self):
+        # Catches: the check runs only on landed turns; the incident turn landed nothing.
+        self.assert_blocked(self.INCIDENT, "Promise guard", self.INCIDENT)
+
+    def test_pr_red_incident_line_blocks_in_a_report_on_a_landed_turn(self):
+        # Catches: a promise inside the report blockquote passes.
+        self.assert_blocked("> **Done** BUILT abc1234\n> **Next** " + self.INCIDENT, "Promise guard", landed=True)
+
+    def test_pr_red_a_handoff_path_is_no_home(self):
+        # Catches: the handoff file's own path read as a repo path, so the promise passes.
+        line = "From now on I export after each wake; see ~/.claude/handoffs/session_x.md."
+        self.assert_blocked(line, "Promise guard", line)
+
+    def test_pr_green_a_mechanical_home_passes(self):
+        rows = [
+            # Catches: a PR cite on the line still refused.
+            "From now on the Stop check refuses it (#1400); the handoff keeps a note too.",
+            # Catches: a commit cite still refused.
+            "From now on the hook blocks it, commit 3f2a9c1d; the handoff points there.",
+            # Catches: a queued step still refused.
+            "From now on: queued as step:export-after-wake, handoff holds it until then.",
+            # Catches: a hook path still refused.
+            "From now on hooks/feedback_guard.py refuses it; the handoff says so.",
+        ]
+        for line in rows:
+            with self.subTest(line=line):
+                self.assert_allowed(line)
+
+    def test_pr_green_no_handoff_or_quoted_or_code_passes(self):
+        rows = [
+            # Catches: any "from now on" refused, with no handoff named.
+            "From now on the page shows the receipts.",
+            # Catches: the owner's quoted words read as this session's promise.
+            'The owner said "from now on it lives in the handoff" was wrong.',
+            # Catches: code spans read as prose.
+            "The bad line was `from now on, in my handoff`.",
+            # Catches: a question read as a promise.
+            "Should this live in the handoff from now on?",
+        ]
+        for line in rows:
+            with self.subTest(line=line):
+                self.assert_allowed(line)
+
+    def test_pr_green_fenced_promise_passes(self):
+        # Catches: a fenced block read as prose.
+        self.assert_allowed("```\nFrom now on, in my handoff.\n```")
+
+
 class PendingRefusalTests(unittest.TestCase):
     """refusal-note, the Stop half: a refused tool stays pending until the reply names it under
     Input Needed or says the refusal was right. A reply that raises a refusal also records it as raised,
