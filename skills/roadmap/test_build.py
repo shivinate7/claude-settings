@@ -1517,6 +1517,13 @@ class ReadyNotStarted(ReadyFixture):
         _, out = self.build_from_main("--live", str(self.live))
         self.assert_unknown_phase(out, "c2")
 
+    def test_phase_with_a_trailing_space_prints_an_unknown_line_that_names_the_step(self):
+        # A stray space is not a phase name, so the step must not drop out of the ready list with no line.
+        self.ready_step("c2", order=2, phase="now ")
+        self.known_read()
+        _, out = self.build_from_main("--live", str(self.live))
+        self.assert_unknown_phase(out, "c2")
+
     def assert_unknown_phase(self, out, sid):
         """A todo step with no usable phase prints one unknown ready line that names it, and the count reads unknown."""
         named = [line for line in out.splitlines()
@@ -1653,6 +1660,42 @@ class ReadyNextAct(ReadyFixture):
                 self.assertEqual(over_lines(out), [ready_line("over", id="c3", owner="coordinator", age=LIMIT_HOURS + 1)],
                                  "%s: the control prints its red line" % name)
                 self.assertEqual(self.ready_ids(self.ready_block(page)), ["c3"], "%s: c2 is excluded from the ready list" % name)
+
+    def test_unread_main_reads_the_ready_list_unknown_and_never_start_lane(self):
+        # With main unread, no step can be shown landed, so the list reads unknown. The control is the same build with main read.
+        self.ready_step("c2", order=2, updatedAt=self.aged(LIMIT_HOURS + 1))  # over the limit, so a listed line would say start lane
+        self.known_read()
+        _, out = self.build_from_main("--live", str(self.live), expect=(1,))
+        self.assertEqual(over_lines(out), [ready_line("over", id="c2", owner="coordinator", age=LIMIT_HOURS + 1)],
+                         "control: with main read, c2 prints its red line")
+        page, out = self.build_from_main("--live", str(self.live), "--main-branch", "nomain", expect=(0, 1))
+        ready = self.ready_block(page)
+        self.assertIsNone(ready.get("steps"), "an unread main reads the ready list unknown, never a list of steps")
+        self.assertTrue(str(ready.get("why")).startswith("unknown ("), "the why reads %r, not unknown (...)" % ready.get("why"))
+        self.assertEqual(self.ready_lines(out), ["ready not started: %s" % ready["why"]], "the list prints one unknown line")
+        counts = count_lines(out)
+        self.assertTrue(counts and counts[0].startswith("ready not started count: unknown ("),
+                        "the count reads unknown, never 0: %r" % counts)
+        self.assertEqual([line for line in out.splitlines() if line.startswith("ready ") and "start lane" in line], [],
+                         "no ready line says start lane when main is unread")
+        self.assertEqual(self.code, 0, "an unknown ready read stalls nothing")
+
+    def test_todo_step_held_by_an_open_pull_named_for_it_prints_no_ready_red_line(self):
+        # The pull's branch is not the step id, so no lane holds the step. Its title names the step, and that holds it back.
+        pull = {"number": 60, "title": "c2: finish the fix", "branch": "lane-x"}
+        self.ready_step("c2", order=2, updatedAt=self.aged(LIMIT_HOURS + 6))  # 30 h old
+        self.known_read(pulls=[pull])
+        page, out = self.build_from_main("--live", str(self.live), expect=(1,))  # the exit 1 is the pair line's, not a ready line's
+        self.assertEqual(self.ready_ids(self.ready_block(page)), [], "a step its pull names is held, not listed as ready")
+        self.assertEqual(over_lines(out), [], "the held step prints no ready red line")
+        self.assertEqual(count_lines(out), ["ready not started count: 0"], "the count reads zero")
+        self.assertEqual(re.findall(r"^%s: (.*)$" % re.escape(TodoWithOpenPull.PAIR), out, re.M), ["c2 (#60)"],
+                         "the pair line still names the step and its pull")
+        self.known_read()  # control: the same old step with no pull is listed and goes red
+        page, out = self.build_from_main("--live", str(self.live), expect=(1,))
+        self.assertEqual(over_lines(out), [ready_line("over", id="c2", owner="coordinator", age=LIMIT_HOURS + 6)],
+                         "control: with no pull, c2 is listed and prints its red line")
+        self.assertEqual(count_lines(out), ["ready not started count: 1"], "control: the count reads one")
 
     def test_a_ready_step_with_no_age_prints_no_red_line(self):
         self.ready_step("c2", order=2, updatedAt=_ABSENT)  # no age, so nothing shows it over the limit
@@ -2303,6 +2346,19 @@ class ReadyAndDraftRows(UpkeepFixture):
                             self.draft(1002, "lone-draft", self.created_before(780))])
         count, detail = self.row(self.out_with_live(), self.DRAFT)
         self.assertEqual((count, self.entries(detail)), (1, ["#1002 (lone-draft)"]))
+
+    def test_draft_whose_only_lane_has_ended_is_listed_as_stale(self):
+        # c1's only lane is completed, so c1 holds no live lane and its draft is stale. c2's lane is running: its draft stays unlisted.
+        self.commit_step("c1", status="doing")
+        self.commit_step("c2", status="doing", order=2)
+        self.publish(sessions=[
+            session_row("session_done", "SESSION_STATUS_IDLE", self.REPO, "cs-build:lane", "cs-step:c1",
+                        status_bucket=BUCKET_COMPLETED),
+            session_row("session_run", "SESSION_STATUS_RUNNING", self.REPO, "cs-build:lane", "cs-step:c2",
+                        status_bucket=BUCKET_WORKING)],
+            pulls=[self.draft(1001, "c1", self.created_before(780)), self.draft(1002, "c2", self.created_before(780))])
+        count, detail = self.row(self.out_with_live(), self.DRAFT)
+        self.assertEqual((count, self.entries(detail)), (1, ["#1001 (c1)"]))
 
     def test_draft_whose_title_holds_a_live_step_id_is_still_listed(self):
         # Only the draft's branch can lane it. The title "Follow-up for c91" holds the live step c91 and stays listed.
