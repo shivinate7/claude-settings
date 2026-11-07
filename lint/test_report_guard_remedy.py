@@ -89,6 +89,15 @@ DOT_SPAN_ORDER = "Then `write.` the line."
 NEWLINE_SPAN_BEFORE_ORDER = "The `Agent\ntool` was refused. Send the line."
 NEWLINE_SPAN_ORDER = "The `Agent\nwrite` the line."
 DOT_SPAN_BEFORE_ORDER = "The `v1.2` release is in. Send the line again."
+# A connector before a span does not make the unit a list item: after "`Next`," the span is still an order word.
+LIST_SO_SPAN_ORDER = "The reply lacks `Next`, so `add` it."
+LIST_THEN_SPAN_ORDER = "The reply lacks `Next`, then `send` the report."
+LIST_PLEASE_SPAN_ORDER = "The check read `Done`, please `send` it again."
+# Controls. A unit after a list item that opens with a plain word is still read, so skipping every such unit fails here.
+LIST_WORD_ORDER = "The classifier refused `Agent`, write the line."
+# A span with a dot before its comma is no list item, so the verb unit after it is still read. This fails for a
+# _SPAN_COMMA_END that drops the dot from its excluded marks.
+DOT_LIST_VERB_ORDER = "The check read `a.b`, `add` it."
 # A step line is a bullet or a numbered item. A section ends at the next ## or ### heading.
 STEP_LINE = re.compile(r"(?m)^\s*(?:[-*+]|\d+[.)])\s+\S")
 SECTION_END = re.compile(r"(?m)^#{2,3} ")
@@ -464,6 +473,24 @@ class RemedyReasons(trg.SameTurnWriter, unittest.TestCase):
 
     def test_1a_control_dot_span_before_order_is_flagged(self):
         self.assert_order_flagged(DOT_SPAN_BEFORE_ORDER, "control: an order after a span with a dot is not flagged")
+
+    def test_1a_order_span_after_list_so_is_flagged(self):
+        self.assert_order_flagged(LIST_SO_SPAN_ORDER,
+                                  "an order span after a list item and 'so' is skipped as a list item")
+
+    def test_1a_order_span_after_list_then_is_flagged(self):
+        self.assert_order_flagged(LIST_THEN_SPAN_ORDER,
+                                  "an order span after a list item and 'then' is skipped as a list item")
+
+    def test_1a_order_span_after_list_please_is_flagged(self):
+        self.assert_order_flagged(LIST_PLEASE_SPAN_ORDER,
+                                  "an order span after a list item and 'please' is skipped as a list item")
+
+    def test_1a_control_word_after_list_is_flagged(self):
+        self.assert_order_flagged(LIST_WORD_ORDER, "control: a word order after a list item is skipped")
+
+    def test_1a_control_verb_after_dot_span_list_is_flagged(self):
+        self.assert_order_flagged(DOT_LIST_VERB_ORDER, "control: a verb unit after a dotted span list item is skipped")
 
     def test_1a_three_tool_refusal_reason_is_fact_only(self):
         # Three refused tools, two of them opening with an imperative word. The scope is pinned first: the three names
