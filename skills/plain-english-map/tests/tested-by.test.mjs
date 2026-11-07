@@ -32,6 +32,10 @@
 //        or a non-literal tail (T6n), or a single-quoted word that stays literal (T6p), fails as a read that does not load, not as an
 //        unknown read. A `.zsh` test with a lone quote in its first-line comment is read as a shell test (T6q). A Ruby test stays an unknown read (T6j).
 //        With no python3 on PATH, a Python test fails as an unknown read, and with python3 it passes (T6b).
+//        The bound-anchor forms, new in T6y to T6am: a two-step binding (T6y), a default-value word `${NAME:-$REPO_ROOT/x}` (T6z), `export`,
+//        `readonly`, `dirname --` and a copied alias (T6aa to T6ae) must count, and fail today (T6y to T6ae). `${0%/*}`, `${BASH_SOURCE...}`,
+//        `pwd -P`, a `$OTHER/..` chain and a .zsh binding (T6af to T6ai, T6aj, T6an) are controls: they pass today. An environment name (T6ak),
+//        a function argument (T6al) and a name bound on two branches to two places (T6am, red today) count for nothing.
 //   T7   placement and form. A tested-by line under a table line (T7a), a screen line (T7b) or a home (T7c) fails. Unindented (T7d), with no
 //        backticks (T7e), or with a `;` separator (T7f), it fails. Under a map line after a decisions line (T7g), it passes.
 //        Under a backtick line in a Notes section it is an orphan and fails (T7h): a tested-by line is valid only under a Code files map line.
@@ -100,7 +104,8 @@ const mustFail = (r, ...names) => {
   for (const n of names) assert.ok(line.includes(n), `the MAP11 failure must name ${n}\n${line}`);
   assert.notEqual(r.status, 0, `the command must exit non-zero on a FAIL\n${shown(r)}`);
 };
-const mustPass = (r) => assert.match(map11(r), /^\[PASS\] MAP11\b/, `MAP11 must PASS on this map\n${shown(r)}`);
+/** MAP11 passes. `cause`, when given, names the one form the test checks, and is the message on a FAIL. */
+const mustPass = (r, cause = 'MAP11 must PASS on this map') => assert.match(map11(r), /^\[PASS\] MAP11\b/, `${cause}\n${shown(r)}`);
 /** MAP11 fails on `rel` and says the test does not load the file. An unknown read is a different failure, and it fails this check first. */
 const mustNotLoad = (r, rel) => {
   mustFail(r, rel);
@@ -529,6 +534,169 @@ test('T6x. a shell test in src/ with `here=$(dirname "$0")` then `python3 "$here
   assert.ok(existsSync(join(dir, 'src/retry.py')), 'src/retry.py must exist, so the root path would load it');
   assert.equal(existsSync(join(dir, 'src', 'src', 'retry.py')), false, 'src/src/retry.py must not exist');
   mustNotLoad(check(dir), 'src/retry_check.sh');
+});
+
+test('T6y. a shell test with `HERE=$(cd "$(dirname "$0")" && pwd)`, then `REPO_ROOT="$(cd "$HERE/.." && pwd)"`, then `cp "$REPO_ROOT/src/retry.py" ...` passes: REPO_ROOT is HERE plus `/..`, so the tail resolves from the root', () => {
+  needFile(REL);
+  const dir = scratchRepo();
+  soleTest(dir, 'src/retry_check.sh', '#!/bin/sh\nHERE="$(cd "$(dirname "$0")" && pwd)"\nREPO_ROOT="$(cd "$HERE/.." && pwd)"\ncp "$REPO_ROOT/src/retry.py" "$HERE/retry_copy.py"\n');
+  // The scope first: the two-step binding is in the test, and src/src/retry.py must not exist, or a tail from HERE would pass for the wrong reason.
+  assert.match(readAt(dir, 'src/retry_check.sh'), /^REPO_ROOT="\$\(cd "\$HERE\/\.\." && pwd\)"$/m, 'REPO_ROOT must be bound to HERE with a literal /..');
+  assert.equal(existsSync(join(dir, 'src', 'src', 'retry.py')), false, 'src/src/retry.py must not exist');
+  mustPass(check(dir), 'REPO_ROOT, bound to HERE plus /.., must count as the root: the tail $REPO_ROOT/src/retry.py loads the file');
+});
+
+test('T6z. a shell test with `SETUP_SH="${CLOUD_SETUP_SH_UNDER_TEST:-$REPO_ROOT/src/retry.py}"`, then `python3 "$SETUP_SH"`, passes: the default-value word names the root path (the shape of hooks/test_cloud_setup.sh)', () => {
+  needFile(REL);
+  const dir = scratchRepo();
+  soleTest(dir, 'src/retry_check.sh', '#!/bin/sh\nREPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"\nSETUP_SH="${CLOUD_SETUP_SH_UNDER_TEST:-$REPO_ROOT/src/retry.py}"\npython3 "$SETUP_SH"\n');
+  // The scope first: REPO_ROOT is bound directly, so only the default-value word is new here. src/src/retry.py must not exist.
+  assert.match(readAt(dir, 'src/retry_check.sh'), /^SETUP_SH="\$\{CLOUD_SETUP_SH_UNDER_TEST:-\$REPO_ROOT\/src\/retry\.py\}"$/m, 'the shell test must default SETUP_SH to $REPO_ROOT/src/retry.py');
+  assert.equal(existsSync(join(dir, 'src', 'src', 'retry.py')), false, 'src/src/retry.py must not exist');
+  mustPass(check(dir), 'a ${NAME:-$REPO_ROOT/src/retry.py} default must count as the load of its path: the word after :- is the root path, and SETUP_SH is run');
+});
+
+test('T6aa. a shell test with `export ROOT="$(dirname "$0")/.."`, then `python3 "$ROOT/src/retry.py"`, passes: export is an assignment, so ROOT is bound to the root', () => {
+  needFile(REL);
+  const dir = scratchRepo();
+  soleTest(dir, 'src/retry_check.sh', '#!/bin/sh\nexport ROOT="$(dirname "$0")/.."\npython3 "$ROOT/src/retry.py"\n');
+  // The scope first: the line starts with export, and src/src/retry.py must not exist, so only the root can resolve the tail.
+  assert.match(readAt(dir, 'src/retry_check.sh'), /^export ROOT="\$\(dirname "\$0"\)\/\.\."$/m, 'the shell test must export ROOT');
+  assert.equal(existsSync(join(dir, 'src', 'src', 'retry.py')), false, 'src/src/retry.py must not exist');
+  mustPass(check(dir), 'export ROOT=... must bind ROOT the way a plain ROOT=... does, so the tail $ROOT/src/retry.py loads the file');
+});
+
+test('T6ab. a shell test with `readonly HERE="$(dirname "$0")"`, then `python3 "$HERE/retry.py"`, passes: readonly is an assignment, so HERE is bound to the test folder', () => {
+  needFile(REL);
+  const dir = scratchRepo();
+  soleTest(dir, 'src/retry_check.sh', '#!/bin/sh\nreadonly HERE="$(dirname "$0")"\npython3 "$HERE/retry.py"\n');
+  // The scope first: the line starts with readonly, and the root must hold no retry.py, so only the test folder can resolve the tail.
+  assert.match(readAt(dir, 'src/retry_check.sh'), /^readonly HERE="\$\(dirname "\$0"\)"$/m, 'the shell test must make HERE readonly');
+  assert.equal(existsSync(join(dir, 'retry.py')), false, 'the root must hold no retry.py');
+  mustPass(check(dir), 'readonly HERE=... must bind HERE the way a plain HERE=... does, so the tail $HERE/retry.py loads the file');
+});
+
+test('T6ac. a shell test with `HERE="$(dirname -- "$0")"`, then `python3 "$HERE/retry.py"`, passes: the `--` ends the options, so HERE is bound to the test folder', () => {
+  needFile(REL);
+  const dir = scratchRepo();
+  soleTest(dir, 'src/retry_check.sh', '#!/bin/sh\nHERE="$(dirname -- "$0")"\npython3 "$HERE/retry.py"\n');
+  // The scope first: the dirname call carries --, and the root must hold no retry.py, so only the test folder can resolve the tail.
+  assert.match(readAt(dir, 'src/retry_check.sh'), /^HERE="\$\(dirname -- "\$0"\)"$/m, 'the shell test must call dirname with --');
+  assert.equal(existsSync(join(dir, 'retry.py')), false, 'the root must hold no retry.py');
+  mustPass(check(dir), 'a $(dirname -- "$0") binding must count as the test folder, as $(dirname "$0") does: the tail $HERE/retry.py loads the file');
+});
+
+test('T6ad. a shell test with `HERE="$(dirname "$0")"`, `B=$HERE`, then `python3 "$B/retry.py"`, passes: B is an alias of the bound HERE', () => {
+  needFile(REL);
+  const dir = scratchRepo();
+  soleTest(dir, 'src/retry_check.sh', '#!/bin/sh\nHERE="$(dirname "$0")"\nB=$HERE\npython3 "$B/retry.py"\n');
+  // The scope first: B is set from HERE with no tail, and the root must hold no retry.py, so only the test folder can resolve the tail.
+  assert.match(readAt(dir, 'src/retry_check.sh'), /^B=\$HERE$/m, 'the shell test must set B from HERE');
+  assert.equal(existsSync(join(dir, 'retry.py')), false, 'the root must hold no retry.py');
+  mustPass(check(dir), 'an unquoted alias B=$HERE of a bound name must bind B to the same place: the tail $B/retry.py loads the file');
+});
+
+test('T6ae. a shell test with `HERE="$(dirname "$0")"`, `B="$HERE"`, then `python3 "$B/retry.py"`, passes: B is a quoted alias of the bound HERE', () => {
+  needFile(REL);
+  const dir = scratchRepo();
+  soleTest(dir, 'src/retry_check.sh', '#!/bin/sh\nHERE="$(dirname "$0")"\nB="$HERE"\npython3 "$B/retry.py"\n');
+  // The scope first: B is set from HERE in double quotes, and the root must hold no retry.py, so only the test folder can resolve the tail.
+  assert.match(readAt(dir, 'src/retry_check.sh'), /^B="\$HERE"$/m, 'the shell test must set B to "$HERE"');
+  assert.equal(existsSync(join(dir, 'retry.py')), false, 'the root must hold no retry.py');
+  mustPass(check(dir), 'a quoted alias B="$HERE" of a bound name must bind B to the same place: the tail $B/retry.py loads the file');
+});
+
+test('T6af. control, green on the old code and the new: a shell test with `HERE="${0%/*}"`, then `python3 "$HERE/retry.py"`, passes: ${0%/*} is the test folder', () => {
+  needFile(REL);
+  const dir = scratchRepo();
+  soleTest(dir, 'src/retry_check.sh', '#!/bin/sh\nHERE="${0%/*}"\npython3 "$HERE/retry.py"\n');
+  // The scope first: the root must hold no retry.py, so only the test folder can resolve the tail.
+  assert.match(readAt(dir, 'src/retry_check.sh'), /^HERE="\$\{0%\/\*\}"$/m, 'the shell test must bind HERE to ${0%/*}');
+  assert.equal(existsSync(join(dir, 'retry.py')), false, 'the root must hold no retry.py');
+  mustPass(check(dir));
+});
+
+test('T6ag. control, green: a shell test with `HERE="$(dirname "${BASH_SOURCE[0]}")"`, then `python3 "$HERE/retry.py"`, passes: BASH_SOURCE[0] stands for $0', () => {
+  needFile(REL);
+  const dir = scratchRepo();
+  soleTest(dir, 'src/retry_check.sh', '#!/bin/bash\nHERE="$(dirname "${BASH_SOURCE[0]}")"\npython3 "$HERE/retry.py"\n');
+  // The scope first: the root must hold no retry.py, so only the test folder can resolve the tail.
+  assert.match(readAt(dir, 'src/retry_check.sh'), /^HERE="\$\(dirname "\$\{BASH_SOURCE\[0\]\}"\)"$/m, 'the shell test must bind HERE through BASH_SOURCE[0]');
+  assert.equal(existsSync(join(dir, 'retry.py')), false, 'the root must hold no retry.py');
+  mustPass(check(dir));
+});
+
+test('T6ah. control, green: a shell test with `HERE="${BASH_SOURCE%/*}"`, then `python3 "$HERE/retry.py"`, passes: BASH_SOURCE stands for $0 in ${BASH_SOURCE%/*}', () => {
+  needFile(REL);
+  const dir = scratchRepo();
+  soleTest(dir, 'src/retry_check.sh', '#!/bin/bash\nHERE="${BASH_SOURCE%/*}"\npython3 "$HERE/retry.py"\n');
+  // The scope first: the root must hold no retry.py, so only the test folder can resolve the tail.
+  assert.match(readAt(dir, 'src/retry_check.sh'), /^HERE="\$\{BASH_SOURCE%\/\*\}"$/m, 'the shell test must bind HERE to ${BASH_SOURCE%/*}');
+  assert.equal(existsSync(join(dir, 'retry.py')), false, 'the root must hold no retry.py');
+  mustPass(check(dir));
+});
+
+test('T6ai. control, green: a shell test with `HERE="$(cd "$(dirname "$0")" && pwd -P)"`, then `python3 "$HERE/retry.py"`, passes: pwd -P gives the test folder', () => {
+  needFile(REL);
+  const dir = scratchRepo();
+  soleTest(dir, 'src/retry_check.sh', '#!/bin/sh\nHERE="$(cd "$(dirname "$0")" && pwd -P)"\npython3 "$HERE/retry.py"\n');
+  // The scope first: the root must hold no retry.py, so only the test folder can resolve the tail.
+  assert.match(readAt(dir, 'src/retry_check.sh'), /^HERE="\$\(cd "\$\(dirname "\$0"\)" && pwd -P\)"$/m, 'the shell test must bind HERE with pwd -P');
+  assert.equal(existsSync(join(dir, 'retry.py')), false, 'the root must hold no retry.py');
+  mustPass(check(dir));
+});
+
+test('T6aj. control, green: a shell test with `HERE="$(dirname "$0")"`, `UP="$HERE/.."`, then `python3 "$UP/src/retry.py"`, passes: UP chains up one folder from HERE', () => {
+  needFile(REL);
+  const dir = scratchRepo();
+  soleTest(dir, 'src/retry_check.sh', '#!/bin/sh\nHERE="$(dirname "$0")"\nUP="$HERE/.."\npython3 "$UP/src/retry.py"\n');
+  // The scope first: UP is HERE plus /.., and src/src/retry.py must not exist, so only the root can resolve the tail.
+  assert.match(readAt(dir, 'src/retry_check.sh'), /^UP="\$HERE\/\.\."$/m, 'the shell test must bind UP to HERE plus /..');
+  assert.equal(existsSync(join(dir, 'src', 'src', 'retry.py')), false, 'src/src/retry.py must not exist');
+  mustPass(check(dir));
+});
+
+test('T6ak. control, green: a shell test with `python3 "$TMPDIR/src/retry.py"` and no TMPDIR assignment does not load the file: an environment name is no anchor, so MAP11 fails as a read that does not load', () => {
+  needFile(REL);
+  const dir = scratchRepo();
+  soleTest(dir, 'src/retry_check.sh', '#!/bin/sh\npython3 "$TMPDIR/src/retry.py"\n');
+  // The scope first: no line assigns TMPDIR, and src/retry.py exists, so a tail resolved from the root would load it.
+  assert.doesNotMatch(readAt(dir, 'src/retry_check.sh'), /TMPDIR=/, 'the shell test must not assign TMPDIR');
+  assert.ok(existsSync(join(dir, 'src/retry.py')), 'src/retry.py must exist, so the tail would resolve from the root');
+  mustNotLoad(check(dir), 'src/retry_check.sh');
+});
+
+test('T6al. control, green: a shell test whose function sets `ROOT="$1"`, called as `use "$(dirname "$0")"`, does not load the file: a function argument is no anchor, so MAP11 fails as a read that does not load', () => {
+  needFile(REL);
+  const dir = scratchRepo();
+  soleTest(dir, 'src/retry_check.sh', '#!/bin/sh\nuse() {\n  ROOT="$1"\n  python3 "$ROOT/src/retry.py"\n}\nuse "$(dirname "$0")"\n');
+  // The scope first: ROOT is set from the first argument, which is the test folder. src/src/retry.py must not exist, so the file is not loaded.
+  assert.match(readAt(dir, 'src/retry_check.sh'), /^ {2}ROOT="\$1"$/m, 'the shell test must set ROOT from its first argument');
+  assert.equal(existsSync(join(dir, 'src', 'src', 'retry.py')), false, 'src/src/retry.py must not exist');
+  mustNotLoad(check(dir), 'src/retry_check.sh');
+});
+
+test('T6am. a shell test that binds ROOT to the test folder on one branch and to the root on the other, then `python3 "$ROOT/src/retry.py"`, does not load the file: a name with two places is no static anchor', () => {
+  needFile(REL);
+  const dir = scratchRepo();
+  soleTest(dir, 'src/retry_check.sh', '#!/bin/sh\nif [ "$1" = up ]; then\n  ROOT="$(dirname "$0")"\nelse\n  ROOT="$(dirname "$0")/.."\nfi\npython3 "$ROOT/src/retry.py"\n');
+  // The scope first: each branch binds ROOT to a different place, and src/src/retry.py must not exist, so one branch does not load the file.
+  assert.match(readAt(dir, 'src/retry_check.sh'), /^ {2}ROOT="\$\(dirname "\$0"\)"$/m, 'the then branch must bind ROOT to the test folder');
+  assert.match(readAt(dir, 'src/retry_check.sh'), /^ {2}ROOT="\$\(dirname "\$0"\)\/\.\."$/m, 'the else branch must bind ROOT to the root');
+  assert.equal(existsSync(join(dir, 'src', 'src', 'retry.py')), false, 'src/src/retry.py must not exist');
+  const r = check(dir);
+  assert.match(map11(r), /^\[FAIL\] MAP11\b/, `ROOT bound to two places on two branches counts for nothing, so MAP11 must FAIL: the reader loaded the file from the else branch\n${shown(r)}`);
+  mustNotLoad(r, 'src/retry_check.sh');
+});
+
+test('T6an. control, green: a .zsh shell test with `HERE="$(cd "$(dirname "$0")" && pwd)"`, then `python3 "$HERE/retry.py"`, passes: the bound-anchor rule reads .zsh as shell', () => {
+  needFile(REL);
+  const dir = scratchRepo();
+  soleTest(dir, 'src/retry_check.zsh', '#!/bin/zsh\nHERE="$(cd "$(dirname "$0")" && pwd)"\npython3 "$HERE/retry.py"\n');
+  // The scope first: the root must hold no retry.py, so only the test folder can resolve the tail.
+  assert.match(readAt(dir, 'src/retry_check.zsh'), /^HERE="\$\(cd "\$\(dirname "\$0"\)" && pwd\)"$/m, 'the .zsh test must bind HERE to the test folder');
+  assert.equal(existsSync(join(dir, 'retry.py')), false, 'the root must hold no retry.py');
+  mustPass(check(dir));
 });
 
 test('T7a. a tested-by line under a table line fails, and the output names the page', () => {
