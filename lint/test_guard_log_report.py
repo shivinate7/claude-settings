@@ -1202,14 +1202,61 @@ class EmittedRuleReaderTests(unittest.TestCase):
         src = 'def go(c):\n    rid = "oracle-a" if c else "oracle-b"\n    refuse(tool, "deny", rid, R, m)\n'
         self.assertEqual(emitted_guard_rules(src), {"oracle-a", "oracle-b"})
 
-    def test_the_oracle_lists_the_ids_of_the_hooks_outside_the_guard_modules(self):
+    def test_the_oracle_lists_the_ids_of_every_hook_that_writes_one(self):
         if HOOKS_DIR not in sys.path:
             sys.path.insert(0, HOOKS_DIR)
         import blind_brief
         import call_judge
-        wanted = {blind_brief.RULE, call_judge.SPAWN_RULE, call_judge.QUESTION_RULE}
+        import prose_judge
+        import question_form
+        import reply_judge
+        import sendmessage_state
+        wanted = {blind_brief.RULE, prose_judge.RULE, sendmessage_state.RULE, reply_judge.JUDGE_RULE,
+                  call_judge.SPAWN_RULE, call_judge.QUESTION_RULE, question_form.PAST_RULING_RULE}
         self.assertEqual(sorted(wanted - emitted_rules()), [],
                          "the oracle reads only guard*.py and config_watch.py, so these ids are not in its list")
+
+    def test_a_helper_forwards_its_fourth_argument_as_the_rule(self):
+        # call_judge's refuse(payload, tool, args, rule, reason) hands its fourth argument on as the rule.
+        src = ('def refuse(payload, tool, args, rule, reason):\n'
+               '    guard_core.refuse(tool, "deny", rule, reason, "")\n'
+               'def go(payload, tool, args):\n'
+               '    refuse(payload, tool, args, "helper-rule", "why")\n')
+        self.assertEqual(emitted_guard_rules(src), {"helper-rule"})
+
+    def test_a_helper_whose_rule_is_a_constant_leaves_its_literal_reason_unlisted(self):
+        # blind_brief's refuse(payload, tool, reason, matched) takes its rule from a constant, so the literal
+        # in its third argument is a reason, not an id.
+        src = ('RULE = "fixed-helper-rule"\n'
+               'def refuse(payload, tool, reason, matched):\n'
+               '    guard_core.refuse(tool, "deny", RULE, reason, matched)\n'
+               'def go(payload, tool):\n'
+               '    refuse(payload, tool, "a literal reason", "m")\n')
+        self.assertEqual(emitted_guard_rules(src), {"fixed-helper-rule"})
+
+    def test_a_tuple_of_literal_constants_names_each_constant(self):
+        src = ('SPAWN_RULE, QUESTION_RULE = "tuple-x", "tuple-y"\n'
+               'def go(tool):\n'
+               '    refuse(tool, "deny", SPAWN_RULE, R, m)\n'
+               '    refuse(tool, "deny", QUESTION_RULE, R, m)\n')
+        self.assertEqual(emitted_guard_rules(src), {"tuple-x", "tuple-y"})
+
+    def test_a_name_unpacked_from_a_literal_table_names_that_column(self):
+        # call_judge's JUDGES table: `prompt, model, timeout, rule, fallback = JUDGES[tool]` reads column 3.
+        src = ('JUDGES = {"Agent": (1, ROUTE_RULE), "Ask": (2, "ask-rule")}\n'
+               'ROUTE_RULE = "route-rule"\n'
+               'def go(tool):\n'
+               '    count, rule = JUDGES[tool]\n'
+               '    refuse(tool, "deny", rule, R, m)\n')
+        self.assertEqual(emitted_guard_rules(src), {"route-rule", "ask-rule"})
+
+    def test_a_computed_rule_with_a_constant_branch_names_the_constant(self):
+        # reply_judge: `rule = min(found)[1] if found else JUDGE_RULE`. The computed branch names no id here.
+        src = ('JUDGE_RULE = "judge-const"\n'
+               'def go(found):\n'
+               '    rule = min(found)[1] if found else JUDGE_RULE\n'
+               '    record("Stop", "noted", rule, "m")\n')
+        self.assertEqual(emitted_guard_rules(src), {"judge-const"})
 
 
 def run_cli(argv):
