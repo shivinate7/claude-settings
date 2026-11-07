@@ -1,10 +1,10 @@
 {
   "title": "Find the real cause of the dismiss-focus CI miss and remove the 2 s bandaid wait",
   "phase": "now",
-  "status": "todo",
-  "order": 103.49,
+  "status": "doing",
+  "order": 1.0,
   "owner": "coordinator",
   "why": "Coordinator, 2026-11-07 05:01 CST: fix PR #1405 (lane dismiss-focus-main-red) is a named bandaid. It waits 2 s for focus, and the assert now names where focus went. A code read says the focus move is synchronous, so the cause of the CI miss is still not found.",
-  "note": "Under step ask-dismiss. When a run fails the waited assert, read the element it names and find the real cause. Then remove the bandaid wait. Done check: the 2 s wait is gone and the test passes 20 CI runs. No owner question. Owner ruling, item 330 b (2026-11-07 06:28 CST): the claude-settings merge queue holds until this step finds and fixes the cause; an instrument-only batch (#1406) gets no --base-red-ok.",
-  "updatedAt": "2026-11-07T12:30:00Z"
+  "note": "Under step ask-dismiss. When a run fails the waited assert, read the element it names and find the real cause. Then remove the bandaid wait. Done check: the 2 s wait is gone and the test passes 20 CI runs. No owner question. Owner ruling, item 330 b (2026-11-07 06:28 CST): the claude-settings merge queue holds until this step finds and fixes the cause; an instrument-only batch (#1406) gets no --base-red-ok. Top priority (coordinator 06:31 CST). Lane dismiss-focus-main-red (session_013NEJL1EXcFMANVWL3GyqrZ).",
+  "updatedAt": "2026-11-07T12:31:00Z"
 }
