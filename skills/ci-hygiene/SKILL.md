@@ -88,8 +88,9 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
    When a batch merges, the session that starts lanes starts one debt-fix lane. It fixes the open debt
    with the highest Seen count, which `python3 ~/.claude/lint/check_record_slugs.py --next-debt` prints,
    and runs `python3 ~/.claude/janitor/sweep.py --root <repo> --expire-notes`, then with `--confirm`, on
-   its own branch (decision `notes-sightings-expiry`, a note counts its sightings and expires). Prose only:
-   no check sees whether a batch started that lane.
+   its own branch (decision `notes-sightings-expiry`, a note counts its sightings and expires). The sweep
+   only edits the file, so that lane commits what the sweep deletes. Prose only: no check sees whether a
+   batch started that lane.
    No merge to main while a batch's run is in progress. The owner is included. Decision
    `no-merge-during-batch-ci` (no merge while a batch runs) holds the rule. A merge needs a green
    run on the current base (decision `merge-needs-current-base`). A head that lacks the base tip is

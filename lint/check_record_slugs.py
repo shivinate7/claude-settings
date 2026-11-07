@@ -39,19 +39,17 @@ did not run, and exits 1 (CI or not). Every diff it parses passes --src-prefix=a
 Cost, every git read of a run with no file argument, per notes file path (the layout gives one, or two):
   - one name-status diff (changes) for the whole branch;
   - one show of origin/main per moved debt file (the feel-fix check);
-  - the added lines (added_note_lines, run twice: once for the Fix check, once for the Until check): an ls-tree of
-    HEAD and a diff each, and, for the Fix check only when the branch adds a bullet, a merge-base, an ls-tree of the
-    merge base and a show of it;
-  - one show of HEAD per added debt file;
+  - the added lines (all_note_changes, read once and shared by the Fix, Until and Seen checks): an ls-tree of HEAD
+    and a diff, and, when the branch adds a bullet, a merge-base, an ls-tree of the merge base and a show of it;
+  - one show of HEAD per debt file the branch adds or edits (debt_texts, shared by the Fix and Seen checks);
   - two processes per distinct step named (step_exists: a rev-parse of origin/roadmap, then an ls-tree);
   - three per already-fixed sha (fixed_on_main: a rev-parse of origin/main, a rev-parse of the sha, a merge-base);
   - the ratchet, only when the branch touches the notes file: an ls-tree and a show of HEAD, and, when HEAD has a
     bullet with no valid Fix, a merge-base plus an ls-tree and a show of the merge base.
-  - the Seen rule: one show of HEAD per added or edited debt file; it reads the same notes diff as the Fix and
-    Until rules, so it adds no notes read of its own;
-  - unseen_notes (janitor/sweep.py --expire-notes only): one `git blame --line-porcelain` per notes file, and one
-    rev-parse when a boundary line shows;
-  - --next-debt: one show-toplevel and one listing of the debt folder; --debt-flow: one show-toplevel and one diff.
+  - unseen_notes (janitor/sweep.py --expire-notes only): one `git blame --line-porcelain` per notes file, one
+    rev-parse when a boundary line shows, and one ls-tree of HEAD when blame fails (a file HEAD does not hold);
+  - --next-debt: one show-toplevel and one listing of the debt folder; --debt-flow: one show-toplevel, one rev-parse
+    of START's parent (a hash-object when START has none) and one diff.
 No file is written, no process is left running, no timer. commit_fixes (read by lint/report_guard.py) is one git show
 of one commit, one process.
 
@@ -62,8 +60,9 @@ of one commit, one process.
         # prints the slug of the open debt to fix next: the highest Seen count, then the oldest Seen date (a debt with no
         # Seen line is x1 with no date, after the dated ones), then the slug. The notes file and the README are no debts
     python3 lint/check_record_slugs.py --debt-flow START END
-        # prints `debts opened N, closed M`, then one `+ <slug>` or `- <slug>` line per debt file added or deleted from the
-        # merge base of START and END to END (the fifth pace number of a batch merge)
+        # prints `debts opened N, closed M`, then one `+ <slug>` or `- <slug>` line per debt file added or deleted, net, from
+        # the parent of START (the empty tree when it has none) to END, so START itself counts (the fifth pace number
+        # of a batch merge)
 
 The functions take a repo root, so lint/compliance_probes.py reads a child's records with them.
 """
@@ -96,12 +95,14 @@ def git_names(root, *args):
     return [name for name in r.stdout.split("\0") if name]
 
 
-def changes(root, base="origin/main", head="HEAD", renames=True):
-    """(added, moved) files of `root` from the merge base of `base` and `head` to `head`, from one process. `moved` holds
+def changes(root, base="origin/main", head="HEAD", renames=True, direct=False):
+    """(added, moved) files of `root` from the merge base of `base` and `head` to `head` (with `direct`, from `base`
+    itself, the net change of the two), from one process. `moved` holds
     (status, old, new) for each delete, modify and rename; a rename names two paths. The rename flag is explicit (-M, or
     --no-renames for the debt flow, where a rename is a delete and an add), so diff.renames in a config never moves the
     verdict. Raises Unknown when git cannot say."""
-    names = git_names(root, "diff", "--name-status", "-z", "-M" if renames else "--no-renames", f"{base}...{head}")
+    span = [base, head] if direct else [f"{base}...{head}"]
+    names = git_names(root, "diff", "--name-status", "-z", "-M" if renames else "--no-renames", *span)
     added, moved, i = [], [], 0
     while i < len(names):
         status = names[i]
@@ -410,12 +411,15 @@ def parse_seen(text):
     return (date, count) if count >= 1 else None
 
 
-def seen_problem(line, now, added=True, floor=0):
+def seen_problem(line, now, added=True, floor=0, kept=False):
     """Why the note `line` fails the Seen rule, else ''. A line the branch adds needs a valid field whose date is no
-    older than SEEN_EXPIRY_DAYS. A line it edits needs none, but a field it carries must be valid (the age is not
-    judged, so an old line is never red for being old). Either way the date is not in the future, N is under 2 (a
-    second sighting makes the note a debt), and N is not below `floor`, the count the merge base held."""
+    older than SEEN_EXPIRY_DAYS. A line it edits needs none, unless its base line had one (`kept`): the edit may not
+    drop it. A field it carries must be valid (the age is not judged, so an old line is never red for being old).
+    Either way the date is not in the future, N is under 2 (a second sighting makes the note a debt), and N is not
+    below `floor`, the count the merge base held."""
     if not SEEN_MARK.search(line):
+        if kept:
+            return "drops its Seen field (its line at the merge base had one)"
         return "has no Seen: YYYY-MM-DD xN (a note counts its sightings)" if added else ""
     seen = parse_seen(line)
     if seen is None:
@@ -439,7 +443,8 @@ def seen_failures(root, now, changed=None):
     for path, pairs in changed.items():
         for line, held in pairs:
             floor = (parse_seen(held) or (None, 0))[1] if held else 0
-            why = seen_problem(line, now, added=held is None, floor=floor)
+            kept = bool(held and SEEN_MARK.search(held))
+            why = seen_problem(line, now, added=held is None, floor=floor, kept=kept)
             if why:
                 bad.append((path, _note_entry(path, line)[1], why))
     return bad
@@ -505,18 +510,33 @@ def blame_lines(root, path):
     return rows
 
 
+def note_rows(root, path):
+    """blame_lines of the notes file `path`, or, when HEAD does not hold the file (blame fails and an ls-tree of HEAD
+    finds no such path), its lines as read from disk, each as a line not yet committed. Raises Unknown when blame fails
+    for any other reason, or when HEAD cannot be read."""
+    try:
+        return blame_lines(root, path)
+    except Unknown:
+        if git_text(root, "ls-tree", "--name-only", "HEAD", "--", path).strip():
+            raise
+    with open(os.path.join(root, *path.split("/")), encoding="utf-8", errors="replace", newline="") as handle:
+        lines = handle.read().split("\n")
+    return [({"sha": NOT_COMMITTED, "line": number, "boundary": False, "time": 0, "tz": "+0000"}, text.rstrip("\r"))
+            for number, text in enumerate(lines, 1)]
+
+
 def unseen_notes(root, now):
     """[(path, line number, slug, last sighting, line text)] for each bullet of the notes file in the checkout `root` that
     expired (last sighting more than SEEN_EXPIRY_DAYS before `now`) or has no true date (last sighting None, UNKNOWN).
     The last sighting is the valid Seen date of the line, else the author date of the commit that last touched it,
     from one `git blame --line-porcelain` per notes file. A line whose blame commit is a shallow-clone boundary
-    is UNKNOWN: the clone cut its history. A line not yet committed is seen `now`. Raises Unknown when git cannot
-    blame, and layout.LayoutError when the layout cannot be read."""
+    is UNKNOWN: the clone cut its history. A line not yet committed is seen `now`, and so is every line of a notes file
+    that HEAD does not hold. Raises Unknown when git cannot blame, and layout.LayoutError when the layout cannot be read."""
     found = []
     for path in layout.candidates(root, "debt-notes"):
         if not os.path.isfile(os.path.join(root, *path.split("/"))):
             continue
-        rows = [(e, text) for e, text in blame_lines(root, path) if NOTE_LINE.match(text)]
+        rows = [(e, text) for e, text in note_rows(root, path) if NOTE_LINE.match(text)]
         shallow = None
         if any(e["boundary"] for e, _text in rows):  # the one rev-parse, and only when a boundary line exists
             import git_reads  # the one home of the shallow probe (hooks/git_reads.py), loaded on use
@@ -564,9 +584,19 @@ def next_debt(root):
 
 
 def debt_flow(root, start, end):
-    """(opened slugs, closed slugs): the debt files added and deleted between the refs `start` and `end`, from one git
-    diff with renames off. The folder's README and notes file are no debts. Raises Unknown when git cannot say."""
-    added_files, moved = changes(root, start, end, renames=False)
+    """(opened slugs, closed slugs): the debt files added and deleted from the parent of `start` (the empty tree when
+    `start` has no parent) to `end`, so `start` itself counts. The count is net: a debt that `start` adds and a later
+    commit deletes is in neither list. One git diff with renames off, plus one rev-parse for the parent, and a
+    hash-object only when there is none. The folder's README and notes file are no debts. Raises Unknown when git
+    cannot say."""
+    parent = _nowindow.run(["git", "rev-parse", "--verify", "--quiet", start + "^"], cwd=root, capture_output=True,
+                           encoding="utf-8", errors="replace")
+    if parent.returncode:
+        parent = _nowindow.run(["git", "hash-object", "-t", "tree", "--stdin"], cwd=root, capture_output=True,
+                               encoding="utf-8", errors="replace", input="")
+        if parent.returncode:
+            raise Unknown("git hash-object failed: %s" % parent.stderr.strip())
+    added_files, moved = changes(root, parent.stdout.strip(), end, renames=False, direct=True)
     debt = debt_file(root)
     return (sorted(os.path.basename(f)[:-3] for f in added_files if debt(f)),
             sorted(os.path.basename(old)[:-3] for status, old, _new in moved if status == "D" and debt(old)))
