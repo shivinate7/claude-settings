@@ -34,8 +34,9 @@ is the Explore row of agent-model-cap, a model guard. Every other refusal is lif
 A question (a box with 2+ options, a page decision) also gets item 8, the past-ruling check: question_form.past_rulings
 adds the decision, debt and step rulings to the same one model call. The check always runs; a task gets it too. When it cannot
 run (a model error, a source that exists and cannot be read, or a refusal that cites a record the model was not
-shown), the question is refused with the Unvetted remedy, unless its own text carries an `Unvetted:` line. An absent
-source allows, with one stderr line.
+shown), the question is refused with the Unvetted remedy, unless its own text carries an `Unvetted:` line. A model call
+that times out is made once more, capped at QUESTION_RETRY_TIMEOUT, before that refusal (owner ask ask-mw6pwif5wv,
+2026-11-07 12:09 CST); any other error is not retried. An absent source allows, with one stderr line.
 
 Fail open. Any other model error, odd answer or unreadable input allows, with one stderr line.
 
@@ -68,10 +69,12 @@ SPAWN_RULE, QUESTION_RULE = "spawn-judge", "question-judge"
 # and the code rules question_form.chat_hit names) is the question reviewer's.
 SPAWN_CITE = "(decision haiku-prompt-hooks, the spawn judge refuses a brief that breaks the spawn rules)"
 QUESTION_CITE = "(decision question-reviewer-agent-hook, a question is reviewed before it reaches the owner)"
-# THE TIME BUDGET. One model call per hook run, so the longest path is the question call's 60 s plus
-# start-up. The settings.json PreToolUse entry for this hook carries "timeout": 70.
+# THE TIME BUDGET. The longest path is a question whose first call times out: QUESTION_TIMEOUT, then one retry capped at
+# QUESTION_RETRY_TIMEOUT, plus two `claude -p` starts. That is 60 s of caps against the settings.json PreToolUse entry's
+# "timeout": 70, so 10 s are left for both starts, whose time is unmeasured. Raise either cap only with that timeout.
 SPAWN_MODEL, SPAWN_TIMEOUT = "claude-sonnet-5-5", 30
-QUESTION_MODEL, QUESTION_TIMEOUT = "claude-opus-5-5", 60  # both at the model's default effort
+QUESTION_MODEL, QUESTION_TIMEOUT = "claude-opus-5-5", 35  # both at the model's default effort
+QUESTION_RETRY_TIMEOUT = 25  # the one retry of a question whose first call timed out (owner ask ask-mw6pwif5wv)
 
 # The plain Opus ask (opus_ask). The prompt hook's settings.json row carries "timeout": 30, so OPUS_ASK_TIMEOUT plus
 # start-up fits. The owner's text follows the last line.
@@ -247,6 +250,17 @@ def invoke_model(*args, **kwargs):
     return home(*args, **kwargs)
 
 
+def judge_question(prompt, model, timeout, units):
+    """The model call of a judged tool. A question (`units` non-empty) whose first call times out gets one more call,
+    capped at QUESTION_RETRY_TIMEOUT: a timeout says nothing about the question, and an Unvetted refusal costs the
+    session a resend. Any other error, and every call without `units`, makes the one call."""
+    import decision_watch  # lazy: the one home of the timeout text
+    verdict, error = invoke_model(prompt, model=model, timeout=timeout, shape=OK_SHAPE, effort=None)
+    if units and error == decision_watch.MODEL_TIMEOUT_ERROR:
+        verdict, error = invoke_model(prompt, model=model, timeout=QUESTION_RETRY_TIMEOUT, shape=OK_SHAPE, effort=None)
+    return verdict, error
+
+
 def opus_ask(text):
     """True only when the model answers {"ok": true} to the owner's prompt `text` as a present request to run Opus
     agents. Fails closed: an error, a timeout or an odd answer is False with one stderr line; a plain
@@ -391,7 +405,7 @@ def main():
             full += "\n" + NONE_DIRECTION_RULE  # after `%`, so the rule's text never meets the formatter
         if widening:
             full += "\n" + widening_rule()
-        verdict, error = invoke_model(full + tail, model=model, timeout=timeout, shape=OK_SHAPE, effort=None)
+        verdict, error = judge_question(full + tail, model, timeout, units)
     except Exception as exc:
         print("call judge failed open: %s" % " ".join(("%s: %s" % (type(exc).__name__, exc)).split()),
               file=sys.stderr)

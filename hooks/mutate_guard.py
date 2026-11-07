@@ -2040,8 +2040,8 @@ MUTATIONS = [
      'guard_core.set_override_context(payload.get("session_id"), None)',
      "calljudge", "agent: one-act override, an agent's call leaves the deny"),
     ("call judge: the question judge runs on Sonnet",
-     'QUESTION_MODEL, QUESTION_TIMEOUT = "claude-opus-5-5", 60',
-     'QUESTION_MODEL, QUESTION_TIMEOUT = "claude-sonnet-5-5", 60',
+     'QUESTION_MODEL, QUESTION_TIMEOUT = "claude-opus-5-5", 35',
+     'QUESTION_MODEL, QUESTION_TIMEOUT = "claude-sonnet-5-5", 35',
      "calljudge", 'question: one model call, claude-opus-5-5'),
 
     # ---- lane-repo-tag. Each mutant breaks one clause of the lane repo tag check, or of git_reads.github_repo and
