@@ -1183,8 +1183,9 @@ def table_parity_and_exit_codes():
     return problems
 
 
-# The agent tag. A valid agent_id is 17 lowercase hex. The hook puts `export CLAUDE_AGENT_ID=<id>` ahead
-# of the command, so every process the call starts holds the tag in its exec-time environment.
+# The agent tag. A valid agent_id is 17 lowercase hex. A background agent call's command gets
+# `export CLAUDE_AGENT_ID=<id>` ahead of its wrapper, so every process the job starts holds the tag in
+# its exec-time environment. A foreground call is not rewritten.
 AGENT_TAG = "CLAUDE_AGENT_ID"
 AGENT_ID = "3f9c1e7a0b2d4e6f8"
 WRAP_BASE = re.compile(r"stall-watch-[0-9a-f]{32}")
@@ -1224,16 +1225,15 @@ def same_wrapper(a, b):
 
 
 @posix_case
-def agent_foreground_call_gets_export_prefix():
-    """12a. a foreground call with agent_id: its command is the export line, a newline, then the original"""
+def agent_foreground_call_gets_no_output():
+    """12a. a foreground call with agent_id gets no output, as one without agent_id does: the original runs as typed"""
     orig = "echo agent-fg"
     rc, out, err = hook(orig, agent_id=AGENT_ID, background=False)
     problems = expect(rc == 0, f"hook exit {rc}, want 0: {err.strip()[:200]}")
-    cmd = updated_command(out)
-    if cmd is None:
-        return problems + ["foreground agent call: no hookSpecificOutput.updatedInput.command"]
-    return problems + expect(cmd == export_line(AGENT_ID) + orig,
-                             f"foreground agent call: command {cmd!r}, want the export line then the original")
+    problems += expect(out == "", f"foreground agent call: output {out[:120]!r}, want none")
+    rc_plain, out_plain, _err = hook(orig, background=False)
+    return problems + expect(rc_plain == 0 and out_plain == "",
+                             f"foreground call without agent_id: output {out_plain[:120]!r}, want none")
 
 
 @posix_case
@@ -1289,43 +1289,37 @@ def malformed_agent_id_is_ignored():
 
 
 @posix_case
-def agent_tag_reaches_an_exec_child_on_linux():
-    """12e. live: the rewritten foreground command starts a child whose exec-time environment holds CLAUDE_AGENT_ID=<id>"""
+def agent_foreground_child_holds_no_tag_on_linux():
+    """12e. live: a foreground agent call gets no rewrite, so the harness runs the original as it is, and the
+    child it starts holds no CLAUDE_AGENT_ID"""
     if not sys.platform.startswith("linux"):
         raise Skip("Linux only: the child's environment is read from /proc")
     d = new_dir()
     pidfile = os.path.join(d, "child.pid")
     orig = "sleep 30 & echo $! > " + shlex.quote(pidfile)
-    cmd = updated_command(hook(orig, agent_id=AGENT_ID, background=False)[1])
-    if cmd is None:
-        return ["foreground agent call: no hookSpecificOutput.updatedInput.command, so no child can hold the tag"]
-    if cmd != export_line(AGENT_ID) + orig:
-        return ["foreground agent call: command is not the export line then the original"]
-    env = {k: v for k, v in job_env().items() if k != AGENT_TAG}  # the export is the only source of the tag
+    out = hook(orig, agent_id=AGENT_ID, background=False)[1]
+    if out.strip():
+        return ["foreground agent call: the hook rewrote the command (%r), want no output" % out[:120]]
+    env = {k: v for k, v in job_env().items() if k != AGENT_TAG}  # nothing in the environment names the tag
     with open(os.path.join(d, "bash.out"), "wb") as out_f:
-        run = subprocess.run(["bash", "-c", cmd], stdin=subprocess.DEVNULL, stdout=out_f,
+        run = subprocess.run(["bash", "-c", orig], stdin=subprocess.DEVNULL, stdout=out_f,
                              stderr=subprocess.STDOUT, env=env, timeout=20)
     if run.returncode != 0:
-        return [f"rewritten command exit {run.returncode}, want 0"]
+        return [f"original command exit {run.returncode}, want 0"]
     try:
         with open(pidfile) as f:
             pid = int(f.read().strip())
     except (OSError, ValueError):
-        return ["the rewritten command wrote no child pid"]
+        return ["the original command wrote no child pid"]
     PIDS.add(pid)
     problems = expect(pid_alive(pid), f"child pid {pid} is not alive")
     if problems:
         return problems
     with open("/proc/%d/environ" % pid, "rb") as f:
         entries = f.read().split(b"\0")
-    problems = expect((AGENT_TAG + "=" + AGENT_ID).encode() in entries,
-                      "child environ has no whole entry CLAUDE_AGENT_ID=<id>")
-    if problems:
-        return problems
-    import proc_env  # the reader, reached only after the rewrite and the environ read hold (P7)
-    got = proc_env.entry_value(pid, AGENT_TAG)
     kill_all([pid])
-    return expect(got == AGENT_ID, f"entry_value gives {got!r}, want the id")
+    return expect(not any(entry.startswith((AGENT_TAG + "=").encode()) for entry in entries),
+                  "foreground agent call: its child holds CLAUDE_AGENT_ID")
 
 
 # The Bash hook commands in settings.json when the agent tag landed: the guard, the stall watch and the
