@@ -42,7 +42,7 @@ Owner report, Nov 2 12:55 CST: "can add only one ask before Send". Cause: `askSt
 
 - Edit (state `edit`) opens the ask in place, in a textarea, with Done. It keeps its number and its place. Rows above do not move.
   The box keeps what is typed in it.
-- Remove (state `removed`) keeps the row's place: "Removed: <words>" with Undo remove (ux-ask-or-undo). The row goes at the next
+- Remove (state `removed`) keeps the row's place: "Removed: <words>" with Undo remove. The row goes at the next
   Add, Send or reload.
 - Other option for Edit: move the words back to the box. Loss: it clashes with words already in the box.
 - Pick: in place.
