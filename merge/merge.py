@@ -2379,7 +2379,7 @@ def lane_head_and_base(root, target, base):
     return head, base
 
 def ci_job_run(wt, *args):
-    """Run `bin/ci-job <args>` in the tree `wt`, the one home of that run: lane_lint and the draft step's ready gate call it.
+    """Run `bin/ci-job <args>` in the tree `wt`, the one home of that run: lane_lint and the draft step's ready checks call it.
     ci-job's stderr (a `start: <step>` line per step, verdict's heartbeat) passes live to this process's stderr; only its stdout is read.
     -> (state, lines, log, liftable). state: "pass" (exit 0), "fail" (exit 1) or "unknown" (exit 2, a timeout, any other exit).
     lines: the FAIL or unknown lines ci-job printed, or one line saying what was read instead. log: ci-job's log line, as a list of
@@ -2683,17 +2683,17 @@ def stale_page_remedy(n, claim=""):
     return (f"The head holds a Record-claim ({claim}) that this base claims nothing for. "
             f"Revert that claim commit on the branch, then run the records step: " + steps)
 
-READY_GATE_CITE = "(decision lanes-run-no-full-ci-job, the ready gate: a draft goes ready only when the repo's merge.readyChecks pass)"
+READY_CHECKS_CITE = "(decision lanes-run-no-full-ci-job, the ready checks: a draft goes ready only when the repo's merge.readyChecks pass)"
 
-def ready_gate(wt, n, base, checks):
-    """The ready gate of the draft step: run the repo's `merge.readyChecks` through ci-job in the tree `wt`, which holds what the step
+def run_ready_checks(wt, n, base, checks):
+    """The ready checks of the draft step: run the repo's `merge.readyChecks` through ci-job in the tree `wt`, which holds what the step
     would push. One ci-job run. Returns on a pass; a FAIL or an unknown raises Stop, and no flag lifts it. `checks` is a non-empty list."""
     args = ["checks", *[a for name in checks for a in ("--step", name)], "--base", f"origin/{base}"]
     state, lines, log, _ = ci_job_run(wt, *args)
     short = git(wt, "rev-parse", "--short=9", "HEAD")[1]
     if state != "pass":
         raise Stop("\n".join([f"the ready checks of {short} against {base} {'FAIL' if state == 'fail' else 'are unknown, not a pass'}:", *lines, *log,
-                              f"#{n} stays a draft and nothing was pushed. Fix it on the branch, push, and run --confirm again. {READY_GATE_CITE}"]))
+                              f"#{n} stays a draft and nothing was pushed. Fix it on the branch, push, and run --confirm again. {READY_CHECKS_CITE}"]))
     say(f"merge: the ready checks ({', '.join(checks)}) pass on {short}.")
 
 def draft_step(root, cfg, n, host, info):
@@ -2701,43 +2701,41 @@ def draft_step(root, cfg, n, host, info):
     stop. So the branch is final at ready, and the ready confirm pushes nothing (decision records-index-at-merge).
     Takes no lock, claims no number and never merges: a claim stays at the ready confirm.
     A repo that declares merge.readyChecks also runs them first, on the tree the step would push, before any push and before the
-    ready mark, on every path (the ready gate, decision lanes-run-no-full-ci-job). One ci-job run, in one worktree."""
+    ready mark, on every path (the ready checks, decision lanes-run-no-full-ci-job). One ci-job run, in one worktree."""
     base = info["base"]
     checks = cfg.get("merge", {}).get("readyChecks")
     if not checks:
         say("merge: this repo declares no ready checks (merge.readyChecks), so the draft step runs none.")
-    if base != cfg["defaultBranch"]:
+    default = base == cfg["defaultBranch"]
+    if not default:
         say(f"merge: {base} is not the default branch ({cfg['defaultBranch']}). The records page is rebuilt only for it. Nothing was pushed.")
-        if checks:
-            tmp, wt = open_worktree(root, info, base)
-            try:
-                ready_gate(wt, n, base, checks)
-            finally:
-                drop_worktree(root, tmp, wt)
-    else:
+    if default or checks:  # one worktree, one open_worktree call, on either base
         tmp, wt = open_worktree(root, info, base)
         try:
-            claim = head_claim(wt)  # a page commit on top would hide the claim from own_claim at the ready confirm
-            if claim:
-                if checks:
-                    ready_gate(wt, n, base, checks)  # before the remedy: it has the session mark ready by hand, past the gate
-                raise Stop(f"{info['head'][:9]} on {info['branch']} holds a Record-claim ({claim}), so the draft step adds no page commit on top of it. "
-                           f"Mark #{n} ready by hand ({READY_ROUTES}), then run --confirm again. Nothing was pushed. {RECORDS_CITE}")
-            # before the rebuild: a small-move proof resets the tree. before_wait: under confirm's lock it extends the lock
-            stale, stands = holds_base(wt, f"origin/{base}", info["head"], getattr(host, "before_wait", None))
-            if stale:  # holds_base ends with the remedy
-                raise Stop(("BEHIND: " if "does not hold" in stale else "UNKNOWN: ") + stale + " Nothing was pushed.")
-            if stands:
-                say(f"merge: {stands}. The green run stands.")
-            rebuilt = rebuild_records(wt)
-            sha = commit_claim(wt, None) if rebuilt else None
-            if checks:
-                ready_gate(wt, n, base, checks)  # on the page commit when there is one, so what is checked is what is pushed
-            if rebuilt:
-                push_branch(wt, info["branch"])
-                say(f"merge: the records page pushed to {info['branch']} at {sha[:9]}.")
+            if not default:
+                run_ready_checks(wt, n, base, checks)
             else:
-                say(f"merge: the records page on {info['branch']} at {info['head'][:9]} is current. Nothing was pushed.")
+                claim = head_claim(wt)  # a page commit on top would hide the claim from own_claim at the ready confirm
+                if claim:
+                    if checks:
+                        run_ready_checks(wt, n, base, checks)  # before the remedy: it has the session mark ready by hand, past the checks
+                    raise Stop(f"{info['head'][:9]} on {info['branch']} holds a Record-claim ({claim}), so the draft step adds no page commit on top of it. "
+                               f"Mark #{n} ready by hand ({READY_ROUTES}), then run --confirm again. Nothing was pushed. {RECORDS_CITE}")
+                # before the rebuild: a small-move proof resets the tree. before_wait: under confirm's lock it extends the lock
+                stale, stands = holds_base(wt, f"origin/{base}", info["head"], getattr(host, "before_wait", None))
+                if stale:  # holds_base ends with the remedy
+                    raise Stop(("BEHIND: " if "does not hold" in stale else "UNKNOWN: ") + stale + " Nothing was pushed.")
+                if stands:
+                    say(f"merge: {stands}. The green run stands.")
+                rebuilt = rebuild_records(wt)
+                sha = commit_claim(wt, None) if rebuilt else None
+                if checks:
+                    run_ready_checks(wt, n, base, checks)  # on the page commit when there is one, so what is checked is what is pushed
+                if rebuilt:
+                    push_branch(wt, info["branch"])
+                    say(f"merge: the records page pushed to {info['branch']} at {sha[:9]}.")
+                else:
+                    say(f"merge: the records page on {info['branch']} at {info['head'][:9]} is current. Nothing was pushed.")
         finally:
             drop_worktree(root, tmp, wt)
     ok, why = host.ready(n)
