@@ -809,6 +809,62 @@ class GuardClosure(unittest.TestCase):
                 keys = named_keys(f, source_of(f), tracked)
                 self.assertEqual(sorted(keys), exceptions_of(f), f"{f}: its named loads differ from its LOAD_EXCEPTIONS entries")
 
+    # Forms the derivation misses, each read from a real file. The scope lines first: the file is in the closure and the
+    # target is a repo file, so a rename fails for its own cause.
+    def test_a_repo_root_join_with_one_literal_loads_its_file(self):
+        # janitor/sweep.py's default_settings_path: os.path.join(REPO_ROOT, "settings.json"), REPO_ROOT the checkout.
+        tracked = set(_repo_files())
+        self.assertIn("janitor/sweep.py", guard_closure()[0], "scope: janitor/sweep.py is not in the closure")
+        self.assertIn("settings.json", tracked, "scope: settings.json is not a repo file")
+        _, paths, loads, _ = _refs("janitor/sweep.py", ast.parse(source_of("janitor/sweep.py")), tracked)
+        self.assertIn("settings.json", paths | loads, "the sweep's settings load is not followed")
+
+    def test_a_test_module_join_under_the_repo_root_loads_its_file(self):
+        # hooks/test_guard.py reads settings.json as os.path.join(REPO, "settings.json"), REPO the real checkout (line 57).
+        tracked = set(_repo_files())
+        self.assertIn("hooks/test_guard.py", guard_closure()[0], "scope: hooks/test_guard.py is not in the closure")
+        self.assertIn("settings.json", tracked, "scope: settings.json is not a repo file")
+        _, paths, loads, _ = _refs("hooks/test_guard.py", ast.parse(source_of("hooks/test_guard.py")), tracked)
+        self.assertIn("settings.json", paths | loads, "the test module's settings load under REPO is not followed")
+
+    def test_a_pathlib_load_through_a_name_loads_its_file(self):
+        # merge/merge.py: IDLE_BUILD = pathlib.Path(__file__).resolve().parents[1] / "skills/roadmap/build.py", read by
+        # importlib's spec_from_file_location(..., IDLE_BUILD) in idle_lanes.
+        tracked = set(_repo_files())
+        self.assertIn("merge/merge.py", guard_closure()[0], "scope: merge/merge.py is not in the closure")
+        self.assertIn("skills/roadmap/build.py", tracked, "scope: skills/roadmap/build.py is not a repo file")
+        _, _, loads, unfollowed = _refs("merge/merge.py", ast.parse(source_of("merge/merge.py")), tracked)
+        self.assertIn("skills/roadmap/build.py", loads, "the idle-lane loader's pathlib path is not followed")
+        self.assertNotIn("a loader path with no literal repo file", [what for _, what in unfollowed])
+
+    # Controls, green on the derivation as it stands: a load the derivation must not follow.
+    def test_a_fixture_root_join_in_a_test_is_not_a_repo_load(self):
+        tracked = set(_repo_files())
+        self.assertIn("settings.json", tracked, "scope: settings.json is not a repo file")
+        src = 'import os\n\ndef probe(root):\n    return open(os.path.join(root, "settings.json"))\n'
+        _, paths, loads, unfollowed = _refs("hooks/test_zz_probe.py", ast.parse(src), tracked)
+        self.assertNotIn("settings.json", paths | loads)
+        self.assertEqual(unfollowed, [])
+
+    def test_a_product_join_of_several_literals_under_the_repo_root_stays_named(self):
+        # ROOT is the checkout by definition, but the suite can point it at a fixture root, so the join is named.
+        tracked = set(_repo_files())
+        self.assertIn("lint/rule_mechanisms.json", tracked, "scope: lint/rule_mechanisms.json is not a repo file")
+        src = ('import os\nROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))\n'
+               'MAP_FILE = os.path.join(ROOT, "lint", "rule_mechanisms.json")\n')
+        _, paths, loads, unfollowed = _refs("lint/zz_probe.py", ast.parse(src), tracked)
+        self.assertNotIn("lint/rule_mechanisms.json", paths | loads)
+        self.assertTrue(unfollowed, "the join is neither followed nor named")
+
+    def test_load_text_inside_a_string_is_not_followed(self):
+        # The derivation reads syntax, not text: a load written in a docstring or a string with a comment opener is no load.
+        tracked = set(_repo_files())
+        self.assertIn("settings.json", tracked, "scope: settings.json is not a repo file")
+        src = ('import os\nDOC = """os.path.join(REPO_ROOT, "settings.json")  # shown, not run"""\n'
+               'NOTE = \'open(os.path.join(REPO, "settings.json")) # a comment opener in a string\'\n')
+        _, paths, loads, _ = _refs("janitor/zz_probe.py", ast.parse(src), tracked)
+        self.assertNotIn("settings.json", paths | loads)
+
 
 @unittest.skipUnless(BASH, "bash not on PATH")
 class MutationReport(unittest.TestCase):
