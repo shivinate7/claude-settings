@@ -2184,3 +2184,6 @@
 - load-sections-skips-non-py-silently: `load_sections` in `hooks/test_guard.py` skips non-.py files with no message. Found in PR 2635. Decision: roles-findings-are-debts-or-notes.
 - tests-for-silent-empty: `tests_for_main` in `hooks/mutate_guard.py` prints nothing on a runner parse error or a non-static SECTION_DIR. Found in PR 2635. Decision: roles-findings-are-debts-or-notes.
 - scratchpad-rm-rf-unguarded: no guard refuses `rm -rf` on a scratchpad folder that another agent of the session wrote. A builder deleted one. Queued as a debt. Decision: scratchpad-owner (the pattern).
+- reap-date-lock-off-linux: a date-form host lock on macOS reads own=True and stale=False, so a finished tree locked that way can be removed off Linux (janitor/sweep.py `stale_agent_lock_verdict`, `decide_worktree`). Decision: when-a-worktree-may-be-removed.
+- reap-root-veto-untested: the veto in `host_is_session_root` (janitor/agent_end_reap.py) has no test, and `session_root_pid` finds no root under the tests. Decision: when-a-worktree-may-be-removed.
+- reap-finish-recheck-window: the finish is read before ls-remote, status and the process scan, with no re-check at unlock. An agent resumed in those seconds and then idle 30 min with no process would be read as finished (janitor/agent_end_reap.py `reap_worktrees`). Decision: when-a-worktree-may-be-removed.
