@@ -918,13 +918,15 @@ def _locals(fdef):
 
 
 def _caught_as_stop(node, name, mod):
-    """True when the nearest `except` clause above `node`, in its own def, binds `name` and catches a Stop class.
-    Another clause that binds the same name does not count: its exception is not a Stop."""
+    """True when the nearest `except` clause above `node`, in its own def, binds `name` and catches a Stop class,
+    alone or in a tuple with no broad class (Exception, BaseException). Another clause that binds the same name
+    does not count: its exception is not a Stop."""
     cur = mod.parents.get(id(node))
     while cur is not None and not isinstance(cur, ast.FunctionDef):
         if isinstance(cur, ast.ExceptHandler) and cur.name == name:
             caught = cur.type.elts if isinstance(cur.type, ast.Tuple) else [cur.type]
-            return any(isinstance(c, ast.Name) and c.id in mod.stops for c in caught)
+            names = {c.id for c in caught if isinstance(c, ast.Name)}
+            return bool(names & mod.stops) and not names & {"Exception", "BaseException"}  # a broad class catches any exception
         cur = mod.parents.get(id(cur))
     return False
 
