@@ -2728,6 +2728,7 @@ def preview(root, cfg, cfgrel, n, host, lock, info=None, unknown_ok=""):
         try:
             undo_check(wt, f"origin/{base}", unknown_ok, info.get("body", ""))
             debt_check(wt, f"origin/{base}", host, info)
+            codes_check(wt, f"origin/{base}")
             refuse_dropped_lane(wt, f"origin/{base}", info["head"], unknown_ok)
             stale, stands = holds_base(wt, f"origin/{base}", info["head"])
             current = stale and ("BEHIND: " if "does not hold" in stale else "UNKNOWN: ") + stale + " --confirm refuses it."
