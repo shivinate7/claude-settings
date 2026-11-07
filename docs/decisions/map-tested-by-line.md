@@ -39,6 +39,8 @@ Debts:
 - `map-tested-by-no-shell` (MAP11 cannot read a shell test, so a tested-by line naming one fails).
 - `map-tested-by-path-pieces` (a test that builds the path by `os.path.join` or `path.join` fails MAP11).
 - `map-py-base-name-match` (a test with stdlib `import queue` passes for a mapped `jobs/queue.py`; MAP9 shares the reader).
+- `map-alias-runtime-links` (MAP8 and the map picture read no path aliases, so an `@/` trace step fails MAP8).
+- `map-alias-tsconfig-references` (a root tsconfig with `references` reads as no aliases, so an alias import loads nothing, with no unknown read).
 
 Kind: process
 Home: skills/plain-english-map/SKILL.md
