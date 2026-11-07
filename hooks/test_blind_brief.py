@@ -796,6 +796,14 @@ class IosApps(unittest.TestCase):
         found, out = self.device_codes("iPhone Duo, folded, then iPhone Duo, unfolded.")
         self.assertEqual(found, set(), out)
 
+    def test_short_form_unfolded_after_folded_gets_no_duo_order(self):
+        found, out = self.device_codes("Draw the Duo unfolded after the Duo folded.")
+        self.assertEqual(found, set(), out)
+
+    def test_short_form_folded_after_unfolded_gets_duo_order(self):
+        found, out = self.device_codes("Draw the Duo folded after the Duo unfolded.")
+        self.assertEqual(found, {"duo-order"}, out)
+
 
 def tearDownModule():
     shutil.rmtree(RUN_FOLDER, ignore_errors=True)  # test-temp-standard: teardown removes the run folder
