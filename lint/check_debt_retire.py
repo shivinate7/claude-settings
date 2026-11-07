@@ -5,22 +5,26 @@
 
 A debt is closed when its file is deleted, or renamed out of the debts folder (lint/layout.py, kind debts). The
 check reads that debt's Retire paragraph from the base and runs what it names. A test must pass on the head and fail
-on the debt's birth commit, the oldest commit that added the debt file. A test that passes on the birth commit does
-not catch the defect.
+on the debt's birth commit, the newest commit that added the debt file (the start of its current life, if the slug
+was closed and added again). A test that passes on the birth commit does not catch the defect.
 
   runnable  a backticked span that is a test file (test_*.py, *_test.py, *.test.mjs, test_*.mjs, test_*.sh) runs as
             one argv, with no shell, under a timeout, first from the head folder, then from a scratch tree of the
-            birth commit with the head's copy of the test laid over it. On the head, non-zero is red. On the birth
-            commit the test must fail: exit 0 is red (the test misses the defect). A python test that fails an
-            assertion counts as failing (unittest says failures=N), and so does a node test that fails an assertion
-            (ERR_ASSERTION). A bash test counts as failing on any non-zero exit but 126 and 127, since a script has
-            no failure or error split. An import error, a run that only errors, a missing interpreter, a failed start,
-            or a timeout is unknown. A span that names a test file the head does not track is red.
+            birth commit with the head's copy of the test laid over it. On the head, non-zero is red, and so is a
+            python file that runs no test ("Ran 0 tests", or test_ functions and no __main__ block, exit 0).
+            On the birth commit the test must fail: exit 0 is red (the test misses the defect). Python fails there on
+            any non-zero exit, unless the output shows a top-level ImportError, ModuleNotFoundError or SyntaxError, or
+            unittest errors with no failures (unknown). Node fails there on an assertion error (ERR_ASSERTION); an
+            import error is unknown. Bash has no failure or error split, so it fails there on a non-zero exit only
+            when the output shows no missing file or command (and the exit is not 126 or 127); otherwise unknown.
+            A missing interpreter, a failed start, or a timeout is unknown. A span that names a test file the head does
+            not track is red.
   prose     a Retire that names no runnable check holds the close, unless the PR body cites a run:
-            `Retire-run: <slug> -- <run URL>`, read as the Drops-lines line of check_silent_undo is. The run must be
-            green and on the PR head or a commit above it.
+            `Retire-run: <slug> -- <run URL>`, read as the Drops-lines line of check_silent_undo is. The text after
+            ` -- ` that starts with an http(s) URL is a run cite: the run must be green and on the PR head or a commit
+            above it, and a note after the URL is ignored.
   reason    an unknown (a check that could not run here) is also cleared by `Retire-run: <slug> -- <reason>`, where the
-            reason is any text that is not one lone http(s) URL. A red check is never cleared by a cite or a reason,
+            reason is any text that does not start with a URL. A red check is never cleared by a cite or a reason,
             and a reason never closes a prose Retire.
 
 Exit 1 on any finding. Design: decision debt-close-runs-retire.
@@ -47,7 +51,7 @@ INTERPRETERS = {".py": ["python3"], ".mjs": ["node", "--test"], ".sh": ["bash"]}
 TEST_NAME = re.compile(r"^(?:test_[^/]+\.(?:py|mjs|sh)|[^/]+_test\.py|[^/]+\.test\.mjs)$")
 SPAN = re.compile(r"`([^`\s]+)`")  # no space inside: a lone backtick in prose never swallows the real span after it
 CITE_LINE = re.compile(r"\s*(\S+)\s+--\s+(\S.*?)\s*$")
-LONE_URL = re.compile(r"https?://\S+")
+RUN_URL = re.compile(r"https?://\S+")
 GLOB = re.compile(r"[*?<>{}\[\]$]")  # a placeholder such as `test_*.py` names no file
 
 
@@ -82,11 +86,12 @@ def spans(text):
 
 
 def birth_commit(wt, ref, path):
-    """The oldest commit of `ref` that added `path`, following renames. Raises Unknown when git cannot say."""
+    """The newest commit of `ref` that added `path`, following renames: the start of its current life, when a slug was
+    closed and added again. Raises Unknown when git cannot say."""
     added = records.git_names(wt, "log", "-z", "--follow", "--diff-filter=A", "--format=%H", ref, "--", path)
     if not added:
         raise Unknown("no commit that added %s is in the history of %s" % (path, ref))
-    return added[-1]
+    return added[0]
 
 
 @contextlib.contextmanager
@@ -126,19 +131,35 @@ def run_span(wt, span, timeout):
     if r.returncode:
         tail = " | ".join((r.stdout + r.stderr).strip().splitlines()[-5:])
         return "red", "%s exited %d%s" % (span, r.returncode, ": " + tail[:400] if tail else "")
+    if span.endswith(".py"):  # a file that runs no test proves nothing, so exit 0 is not green
+        if re.search(r"^Ran 0 tests", r.stderr, re.M):
+            return "red", "%s ran no tests" % span
+        try:
+            with open(os.path.join(wt, span), encoding="utf-8", errors="replace") as f:
+                src = f.read()
+        except OSError:
+            return None
+        if re.search(r"^def test_", src, re.M) and "__main__" not in src:
+            return "red", "%s defines test functions but nothing runs them (no __main__ block)" % span
     return None
 
 
 def failed(span, r):
-    """True when a non-zero run of `span` is a test failing, not the run erroring: the one fact the birth run needs."""
+    """True when a non-zero run of `span` on the birth commit is the test failing, not the run erroring: the one fact the birth
+    run needs. Anything that cannot be told apart from the defect is not a catch."""
     out = r.stdout + r.stderr
     suffix = os.path.splitext(span)[1]
     if suffix == ".py":
         m = re.search(r"^FAILED \((?:[^)]*, )?failures=(\d+)", out, re.M)
-        return bool(m and int(m.group(1)) >= 1)
+        if m and int(m.group(1)) >= 1:
+            return True
+        # Any other non-zero exit is a catch, unless the file never got to run its test: an import or syntax error at the top
+        # level, or unittest errors with no failures.
+        return not re.search(r"^(?:ImportError|ModuleNotFoundError|SyntaxError)\b", out, re.M) and not re.search(r"^FAILED \(errors=", out, re.M)
     if suffix == ".mjs":
         return "ERR_ASSERTION" in out
-    return r.returncode not in (126, 127)
+    # bash has no failure/error split, so a non-zero exit is a catch only when the output shows no missing file or command.
+    return r.returncode not in (126, 127) and not re.search(r"No such file or directory|not found|can't open file", out)
 
 
 def run_on_birth(wt, birth, head, span, timeout):
@@ -171,6 +192,12 @@ def cites(pr_body):
         if m:
             res[m.group(1)] = m.group(2)
     return res
+
+
+def cite_url(text):
+    """The run URL a cite's text starts with (a note after it is ignored), or None when the text is a written reason."""
+    m = RUN_URL.match(text)
+    return m.group(0) if m else None
 
 
 def judge_run(wt, head, url, run_state):
@@ -250,15 +277,15 @@ def check(wt, base_ref, head="HEAD", timeout=TIMEOUT, pr_body="", run_state=None
         if todo:
             got = judge_tests(wt, head, ref, old, todo, tracked, timeout, isolate)
             if got and got[0] == "unknown" and slug in cited:  # a check this machine cannot run: a green cited run or a written reason clears it
-                if not LONE_URL.fullmatch(cited[slug]):
+                if not (url := cite_url(cited[slug])):
                     continue
-                if (cite := judge_run(wt, head, cited[slug], run_state)) is None:
+                if (cite := judge_run(wt, head, url, run_state)) is None:
                     continue
                 got = cite
             if got:
                 found.append(Finding(slug, got[0], "debt %s: its Retire check %s. Retire: %s" % (slug, got[1], text)))
             continue
-        got = judge_run(wt, head, cited[slug], run_state) if LONE_URL.fullmatch(cited.get(slug, "")) else ("prose", None)
+        got = judge_run(wt, head, cite_url(cited[slug]), run_state) if cite_url(cited.get(slug, "")) else ("prose", None)
         if got is None:
             continue
         if got[0] == "prose":
