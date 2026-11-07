@@ -18,9 +18,9 @@ Refuses a range that leaves a tracked Markdown line naming a name the range remo
             touched that file. JavaScript and shell names are not read, so the line prints
             `stale-cites: unknown, <path>:<line> ...` and keeps the exit 0. It prints only when the range also
             removes a path or a Python name, since only then is Markdown read. A range that touches only such
-            files prints nothing and passes. A value cite of such a file (STALE008) prints the same way, and only when
-            the whole tree is read, which a removed path, a removed name or a changed literal makes it. Its code is
-            STALE008, so the mark for that code leaves it out. A JSON value cite is not read and prints nothing.
+            files prints nothing and passes. A value cite of such a file (STALE008) prints the same way, on an untouched
+            line only when the whole tree is read and the range touched that file, and on an added line always. Its
+            code is STALE008, so the mark for that code leaves it out. A JSON value cite is not read and prints nothing.
   STALE005  (range mode only, report only) a SENTENCE of governed prose, in a paragraph the range adds a line to,
             states a capability by route with no backing. A paragraph is a run of prose rows; a blank row, a heading,
             a quote row, a fence and a list item end one. A sentence ends at . ! or ? before a space, so a claim
@@ -49,6 +49,10 @@ Refuses a range that leaves a tracked Markdown line naming a name the range remo
             literal py-facts `answer` reads (a value `ast.literal_eval` accepts and JSON can hold), compared by
             value, so a set cite ignores order. A head value that is no literal, such as a call, gives no finding.
             A name no module-level assignment ever bound is no removal: only an added line says so, without "removed".
+            A .py cite the check cannot read is never skipped. On an added line, a cite whose value is no JSON literal
+            (MAP9 reads none) or whose path no tracked file has is a finding. A cite of a name that holds no literal at
+            head, or of a file that does not parse, is unknown. An untouched line prints each of these as unknown too,
+            only when the whole tree is read. A cite of a path the range removed is STALE001's.
 A line already stale at base, for a name the range did not remove, never fires. Left out: docs/records.md,
 each file `.ste-lint-exclude` (and the EXCLUDE env of the ste-lint action) names, and a line marked
 `<!-- ste-disable-line STALE001 -->` (or STALE002, STALE003, STALE004, STALE008). Fenced blocks count as prose.
@@ -81,7 +85,7 @@ line starts `stale-cites: report, `. It has two halves, and STALE005 lines first
 
 Cost, per ste-lint changed-scope run (CostTests in lint/test_stale_cites.py proves it): one python3 start.
 Git starts 3 (rev-parse, merge-base, diff) when the range removes or renames no path and changes only
-Markdown outside RULE_FILES. That one diff is `--raw -p -U0`, so it also carries the added lines STALE005 reads and
+Markdown outside RULE_FILES and adds no value cite of a code file (STALE008 below, which makes it 4). That one diff is `--raw -p -U0`, so it also carries the added lines STALE005 reads and
 a code-only range pays only for the patch text. An added governed line that holds a verb or a route word reads its
 file's head blob (the paragraph around it) and, when a sentence cites a route or a `(read ...)` or `(test ...)` file,
 the rows file or that file's presence at head, all through the one `cat-file` the run opens: one more start, and none
@@ -91,10 +95,11 @@ A touched .py adds one `git cat-file --batch` and, through the report below, one
 or renamed path adds `ls-tree` and that `cat-file --batch`, so 5 at most. Each tracked .md is read once, and only
 when a removed or renamed path, or a name that a touched .py no longer defines, gives the findings something to
 look for. A touched .py also loads the py-facts script once, in-process (no start, no .pyc). It writes no file and leaves no process running.
-STALE008 adds no start of its own. It reads every tracked .md, through the same `ls-tree` and `cat-file`, only when a
-touched .py changed a module-level literal, as the removed-name read does. Otherwise it reads only the touched .md whose
-added lines hold a cite of a .py file, found from the diff already read, so a Markdown-only range with no such line
-reads no blob. A touched .json or .mjs starts nothing more.
+STALE008 starts at most the one `cat-file`. It reads every tracked .md, through the same `ls-tree` and `cat-file`, only
+when a touched .py changed a module-level literal, as the removed-name read does. Otherwise it reads only the touched .md
+whose added lines hold a value cite of a .py, .mjs, .js, .cjs, .ts or .sh file, found from the diff already read. Such a
+Markdown-only range starts 4 (the 3 and that `cat-file`); one with no such line reads no blob and starts 3. A touched .json
+starts nothing more.
 The report adds, for a changed non-Markdown file, one `ls-tree` of the decisions folders and the mechanisms file (none
 when the run already listed the whole tree) and the `cat-file --batch`, which reads each decision record whole (a regex
 then takes its Home line) and the mechanisms file once. The decisions folder is the first of lint/layout.py
@@ -151,6 +156,11 @@ ANCHOR = re.compile(r":(\d+)(?:-(\d+))?(?!\w)")
 
 class Unknown(Exception):
     """A read that could not run."""
+
+
+class UnknownText(str):
+    """A message a reader that judges returns for a line it cannot judge: find_stale prints it as unknown, never as a
+    finding."""
 
 
 class BaseUnknown(Unknown):
@@ -407,6 +417,7 @@ def names_in(source):
 VALUE_CITE_RE = re.compile(r"(?:(\S+?):\s+)?(\S+)\s+=\s+(.+)")
 SPAN_RE = re.compile(r"`([^`]+)`")
 GONE = "gone"  # `tree_value` answer: the module assigns no such name
+ABSENT = "absent"  # `ValueReader.tree` answer: no tracked file has the path
 
 
 def value_cites(line):
@@ -599,10 +610,19 @@ class ForeignReader:
         return messages
 
 
+def foreign_value_text(path, symbol):
+    return "%s %s: JavaScript and shell values are not checked" % (path, symbol)
+
+
+def readable_cite(path):
+    """True for a cite path a value reader answers for: a .py file, or a file whose values it cannot read."""
+    return path.endswith(".py") or bool(FOREIGN_FILE.search(path))
+
+
 class ForeignValueReader:
     """STALE008 unknown: a line that holds a value cite of a JavaScript or shell file the range touched. Those values
     are not read, so the line is reported as unknown. Its code is STALE008, so that mark leaves the line out. A JSON
-    cite is not read and prints nothing."""
+    cite is not read and prints nothing. It runs on a whole-tree read only; ValueReader reports an added line's cite."""
     code = "STALE008"
     unknown = True
 
@@ -612,7 +632,7 @@ class ForeignValueReader:
     def line(self, state, text, claimed):
         messages = []
         for path, symbol, _ in value_cites(text):
-            text_ = "%s %s: JavaScript and shell values are not checked" % (path, symbol)
+            text_ = foreign_value_text(path, symbol)
             if path in state and text_ not in messages:
                 messages.append(text_)
         return messages
@@ -622,7 +642,7 @@ class ValueReader:
     """STALE008: a value cite `file.py: NAME = literal` that quotes what the range changed or removed, or that the
     range added wrong. A cite of a value the range did not change, on a line the range did not add, is left alone.
     It needs every tracked Markdown file only when a module-level literal changed; else it reads the touched pages
-    whose added lines hold a cite of a .py file, which is where a new wrong cite can sit."""
+    whose added lines hold a value cite of a code file, which is where a new wrong cite can sit."""
     code = "STALE008"
 
     class State:
@@ -646,7 +666,7 @@ class ValueReader:
                 changed = True
                 break
         pages = [md for md in sorted(rng.md_base)
-                 if any(path.endswith(".py") for _, text in rng.added_lines.get(md, ()) for path, _, _ in value_cites(text))]
+                 if any(readable_cite(path) for _, text in rng.added_lines.get(md, ()) for path, _, _ in value_cites(text))]
         return self.State(rng, changed, pages) if changed or pages else None
 
     @staticmethod
@@ -680,16 +700,20 @@ class ValueReader:
         text = blob.decode("utf-8", "replace").replace("\r\n", "\n") if blob is not None else ""
         state.fresh = collections.Counter(line.strip() for line in text.split("\n"))
 
+    def tree(self, state, side, path):
+        """The parsed .py at base or head: ABSENT when no tracked file has the path, None when it does not parse."""
+        key = (side, path)
+        if key not in state.trees:
+            blob = state.rng.batch.get("%s:%s" % (state.rng.base if side == "base" else state.rng.head, path))
+            state.trees[key] = ABSENT if blob is None else parse_python(blob)
+        return state.trees[key]
+
     def value(self, state, side, path, symbol):
         """`tree_value` of the cite's symbol in the file at base or head. None when the file is absent or no parse."""
         key = (side, path, symbol)
         if key not in state.values:
-            tree_key = (side, path)
-            if tree_key not in state.trees:
-                blob = state.rng.batch.get("%s:%s" % (state.rng.base if side == "base" else state.rng.head, path))
-                state.trees[tree_key] = parse_python(blob) if blob is not None else None
-            tree = state.trees[tree_key]
-            state.values[key] = None if tree is None else tree_value(tree, symbol)
+            tree = self.tree(state, side, path)
+            state.values[key] = None if tree is None or tree is ABSENT else tree_value(tree, symbol)
         return state.values[key]
 
     def line(self, state, text, claimed):
@@ -699,12 +723,35 @@ class ValueReader:
         state.seen[key] += 1
         # The nth copy of a line is added when base holds fewer than n copies, so a second copy of an old line counts.
         added = state.fresh is not None and state.seen[key] > state.fresh[key]
+        whole = state.rng.tree is not None  # every tracked page is read: an untouched line is read too
         messages = []
+
+        def cannot_read(why, finding):
+            """A cite this reader cannot judge: a finding on an added line, unknown on any line of a whole read."""
+            if added and finding:
+                messages.append(why)
+            elif added or whole:
+                messages.append(UnknownText(why))
+
         for path, symbol, literal in value_cites(text):
-            lit = parse_literal(literal) if path.endswith(".py") else None
-            head = self.value(state, "head", path, symbol) if lit else None
-            if head is None:
-                continue  # not a .py cite or no JSON literal; a file gone or unparsed at head (STALE001's); no literal at head
+            if not path.endswith(".py"):
+                if added and FOREIGN_FILE.search(path):  # a touched file's cite on an untouched line: ForeignValueReader's
+                    messages.append(UnknownText(foreign_value_text(path, symbol)))
+                continue
+            if path in state.rng.removed or path in state.rng.renamed:
+                continue  # STALE001 judges a cite of a path the range removed
+            tree = self.tree(state, "head", path)
+            lit = parse_literal(literal)
+            if tree is ABSENT:
+                cannot_read("%s names no tracked file at head" % path, True)
+                continue
+            if lit is None:  # MAP9 reads a cite as JSON, so a cite in any other form can never match
+                cannot_read("%s says %s = %s, and %s is no JSON literal" % (path, symbol, literal, literal), True)
+                continue
+            head = self.value(state, "head", path, symbol)
+            if head is None:  # the file does not parse, or the name holds no literal: neither can be compared
+                cannot_read("%s %s holds no literal at head, so the cite is not checked" % (path, symbol), False)
+                continue
             base = self.value(state, "base", path, symbol) if path in state.rng.py_files else head
             quotes_base = base not in (None, GONE) and same_value(lit, base[0])
             if head == GONE:
@@ -1144,8 +1191,10 @@ def find_stale(rng):
             for reader, state in active:
                 if reader.code not in off:
                     for message in reader.line(state, line, claimed):
-                        if getattr(reader, "unknown", False):
-                            rng.unknowns.append("%s:%d: %s" % (md, number, message))
+                        if getattr(reader, "unknown", False) or isinstance(message, UnknownText):
+                            entry = "%s:%d: %s" % (md, number, message)
+                            if entry not in rng.unknowns:  # two readers may say the same unknown
+                                rng.unknowns.append(entry)
                         else:
                             found.setdefault((md, number, reader.code), []).append(message)
     return found
