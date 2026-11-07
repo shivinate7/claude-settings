@@ -1256,8 +1256,10 @@ jobs:
   checks-windows-guard:
     runs-on: windows-latest
     needs: scope
-    # Full guard suite off pull_request: 1296 s in one job (run 40293472341). In 2 shards the jobs took 582 s and
-    # 679 s (run 40296937814); 20 min is about 1.8x the slower.
+    # Full guard suite off pull_request, in 3 shards. In 2 shards, before the conflict-markers guard (run 42404373325),
+    # shard 1 took 18:42 and shard 2 13:25. After it (runs 42406480975, 42408558620), shard 2 took 19:31 and shard 1
+    # ran past 20:00 and was cancelled. The split came because shard 1 hit its cap; each of 3 shards takes a third of
+    # the cases (expected time unmeasured until the first full run). The cap stays 20 min.
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
@@ -1271,10 +1273,10 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Guard fixture suite (shard 1 of 2)
+      - name: Guard fixture suite (shard 1 of 3)
         if: ${{ (needs.scope.outputs.guard == 'true' || github.event_name != 'pull_request') && !cancelled() && github.event_name != 'pull_request' && needs.scope.outputs.code == 'true' }}
         env:
-          GUARD_SHARD: 1/2
+          GUARD_SHARD: 1/3
         run: python hooks/test_guard.py
 
       - name: Guard fixture suite (Windows slice)
@@ -1299,10 +1301,32 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Guard fixture suite (shard 2 of 2)
+      - name: Guard fixture suite (shard 2 of 3)
         if: ${{ !cancelled() && github.event_name != 'pull_request' && needs.scope.outputs.code == 'true' }}
         env:
-          GUARD_SHARD: 2/2
+          GUARD_SHARD: 2/3
+        run: python hooks/test_guard.py
+
+  checks-windows-guard-3:
+    runs-on: windows-latest
+    needs: scope
+    if: ${{ github.event_name != 'pull_request' }}
+    # A shard of checks-windows-guard: its figures and cap are there.
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
+        with:
+          python-version: "3.11"
+
+      - name: Guard fixture suite (shard 3 of 3)
+        if: ${{ !cancelled() && github.event_name != 'pull_request' && needs.scope.outputs.code == 'true' }}
+        env:
+          GUARD_SHARD: 3/3
         run: python hooks/test_guard.py
 
   # The merge suites on Windows. The slice runs whole here on pull_request; off pull_request the full git-half
@@ -1709,6 +1733,7 @@ jobs:
       - mutation-report
       - checks-windows-guard
       - checks-windows-guard-2
+      - checks-windows-guard-3
       - checks-windows-merge
       - checks-windows-merge-2
       - checks-windows-merge-3
