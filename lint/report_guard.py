@@ -260,8 +260,9 @@ GH_API_MERGES_ROUTE_RE = re.compile(r"(^|/)repos/[^/]+/[^/]+/merges/?$")
 def _gh_api_lands(args):
     """True when a `gh api` call (the tokens after `api`) merges. The route is the first word that
     is no flag and no flag's value. The method is `-X`/`--method` when given, else POST once any
-    field or `--input` is given (gh's own default), else GET. A PUT or POST to a pull's merge route
-    and a POST to the repo's merges route land; GET and every other route do not."""
+    field or `--input` is given (gh's own default), else GET. A PUT to a pull's merge route and a POST
+    to the repo's merges route land; GET, a POST to a pull's merge route, `--help` and every other
+    route do not."""
     method, has_fields, route, i = None, False, None, 0
     while i < len(args):
         arg = args[i]
@@ -271,6 +272,8 @@ def _gh_api_lands(args):
             i += 1
         elif arg.startswith("--method=") or arg.startswith("-X"):
             method = arg.split("=", 1)[1].upper() if "=" in arg else arg[2:].upper()
+        elif arg in ("--help", "-h"):
+            return False   # prints help and makes no request
         elif arg in GH_API_FIELD_FLAGS:
             has_fields = True
             i += 1
@@ -286,7 +289,7 @@ def _gh_api_lands(args):
         return False
     method = method or ("POST" if has_fields else "GET")
     if GH_API_MERGE_ROUTE_RE.search(route):
-        return method in ("PUT", "POST")
+        return method == "PUT"
     return method == "POST" and bool(GH_API_MERGES_ROUTE_RE.search(route))
 
 

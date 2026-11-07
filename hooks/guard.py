@@ -1807,7 +1807,10 @@ def workflow_command_tests(command: str) -> set:
     test path. A lint tool that is given a test folder (`ruff check tests/`) runs none."""
     found = set()
     for segment in WORKFLOW_COMMAND_SPLIT.split(command):
-        tokens = [tok.strip("\"'") for tok in segment.split()]
+        try:
+            tokens = shlex.split(segment, comments=False)   # a quoted value with a space is one word
+        except ValueError:
+            tokens = [tok.strip("\"'") for tok in segment.split()]
         while tokens:
             if re.match(r"^\w+=", tokens[0]) or tokens[0] in ("npx", "sudo", "time"):
                 tokens.pop(0)
