@@ -508,7 +508,7 @@ MENTION = re.compile(r'"[^"]*"|\u201c[^\u201d]*\u201d|(?<![\w./@+~-])(?:[\w.@+~-
 HEADING_OR_QUOTE = re.compile(r"^[ \t]{0,3}(?:#{1,6}(?:[ \t]|$)|>)")
 # Not word_runs.FENCE: that one reads a fence indented up to 3 spaces, and this one any indent, so a fence nested in a list
 # item still opens. Folding them would change which rows count as fenced. Pinned by test_stale_cites:
-# test_route_claim_in_a_fence_four_spaces_deep_under_a_list_item_is_silent.
+# test_route_claim_in_a_tilde_fence_four_spaces_deep_under_a_list_item_is_silent.
 FENCE = re.compile(r"^[ \t]*(`{3,}|~{3,})(.*)$")
 PAREN_GROUP = re.compile(r"\(([^()]*)\)")
 TABLE_ROW = re.compile(r"^[ \t]{0,3}\|")
@@ -931,7 +931,7 @@ def rule_file_texts(rng, rev):
     return texts
 
 
-NEGATORS = frozenset(("not", "never", "no", "nor", "cannot", "unless", "except", "without", "t"))  # "t" is what n't leaves in the word form
+NEGATORS = frozenset(("not", "never", "no", "nor", "cannot", "unless", "except", "t"))  # "t" is what n't leaves in the word form
 
 
 def only_grown(old, new):
