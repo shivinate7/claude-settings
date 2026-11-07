@@ -5,6 +5,7 @@ word_runs.FENCE is the one home of a fence line. Each check that reads fences us
 own. A fence line indented four spaces or more under a list item is a fence too. Stdlib unittest; no file is read or
 written. Rule building-one-home-per-capability.
 """
+import ast
 import os
 import re
 import sys
@@ -53,6 +54,68 @@ class OneFenceHomeTests(unittest.TestCase):
         import ste_lint
         self.assertIs(getattr(ste_lint, "FENCE", word_runs.FENCE), word_runs.FENCE,
                       "ste_lint holds a FENCE of its own that nothing reads; delete it")
+
+
+# The three copies that take the list-aware fence test. Their own indent rule goes; the test decides each line.
+LIST_AWARE_COPIES = ("ste_lint.py", "check_ruling_kind.py", "hook_catalog.py")
+NOT_BUILT = "word_runs has no is_fence; the list-aware fence test is not built"
+
+
+class ListAwareFenceTests(unittest.TestCase):
+    def test_is_fence_four_spaces_is_a_fence_only_inside_a_list_item(self):
+        self.assertTrue(hasattr(word_runs, "is_fence"), NOT_BUILT)  # the scope first, so a missing name is an assert
+        with self.subTest(case="top level, four spaces"):
+            self.assertFalse(word_runs.is_fence("    ```", in_list_item=False),
+                             "a top-level four-space fence line is indented code, not a fence")
+        with self.subTest(case="top level, a tab"):
+            self.assertFalse(word_runs.is_fence("\t```", in_list_item=False), "a top-level tab-led line is indented code")
+        with self.subTest(case="list item, four spaces"):
+            self.assertTrue(word_runs.is_fence("    ```", in_list_item=True),
+                            "a four-space fence line inside a list item is a fence")
+        with self.subTest(case="list item, four spaces, prose"):
+            self.assertFalse(word_runs.is_fence("    text", in_list_item=True), "an indented line of text is no fence")
+
+    def test_is_fence_up_to_three_spaces_is_a_fence_either_way(self):
+        self.assertTrue(hasattr(word_runs, "is_fence"), NOT_BUILT)
+        for line in ("```", "   ```", "~~~", "   ~~~"):
+            for in_item in (False, True):
+                with self.subTest(line=line, in_list_item=in_item):
+                    self.assertTrue(word_runs.is_fence(line, in_list_item=in_item),
+                                    "a fence line indented three spaces or less is a fence in or out of a list item")
+
+    def test_units_and_mask_fences_do_not_open_a_fence_at_top_level_four_spaces(self):
+        text = "Prose before the fence line.\n\n    ```\nProse after the fence line.\n"
+        with self.subTest(case="mask_fences"):
+            self.assertIn("Prose after the fence line.", word_runs.mask_fences(text),
+                          "a top-level four-space fence line in prose opened a fence, which hid the prose after it")
+        with self.subTest(case="units"):
+            prose = [unit for _, unit in word_runs.units(text) if "Prose after the fence line." in unit]
+            self.assertTrue(prose and all("```" not in unit for unit in prose),
+                            "a top-level four-space fence line in prose made the prose after it part of a fenced unit")
+        # Control: the same shape inside a list item is a fence, so its text is hidden.
+        listed = "1. Step one:\n\n    ```sh\nInside the fence.\n    ```\nAfter the fence.\n"
+        with self.subTest(case="control, list item"):
+            self.assertNotIn("Inside the fence.", word_runs.mask_fences(listed), "a list-item fence hides its text")
+            self.assertIn("After the fence.", word_runs.mask_fences(listed), "the prose after a list-item fence is read")
+
+
+class ListAwareCopiesTests(unittest.TestCase):
+    def test_the_three_copies_call_is_fence_and_hold_no_fence_regex(self):
+        lint = os.path.dirname(os.path.abspath(__file__))
+        for name in LIST_AWARE_COPIES:
+            with self.subTest(module=name):
+                with open(os.path.join(lint, name), encoding="utf-8") as handle:
+                    tree = ast.parse(handle.read(), name)
+                # The scope first: the module asks word_runs.is_fence about a line. Then the subject: no regex of its own.
+                calls = [node for node in ast.walk(tree) if isinstance(node, ast.Call)
+                         and ((isinstance(node.func, ast.Attribute) and node.func.attr == "is_fence")
+                              or (isinstance(node.func, ast.Name) and node.func.id == "is_fence"))]
+                self.assertTrue(calls, "%s does not call word_runs.is_fence" % name)
+                regexes = [node.lineno for node in ast.walk(tree) if isinstance(node, ast.Call)
+                           and isinstance(node.func, ast.Attribute) and node.func.attr == "compile"
+                           and node.args and isinstance(node.args[0], ast.Constant) and isinstance(node.args[0].value, str)
+                           and any(mark in node.args[0].value for mark in ("{3,}", "```", "~~~"))]
+                self.assertEqual(regexes, [], "%s holds a fence regex of its own, on the lines listed" % name)
 
 
 if __name__ == "__main__":
