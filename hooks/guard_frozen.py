@@ -238,8 +238,9 @@ def _mutates_as_command(command: str, words) -> bool:
     return bool(re.fullmatch(MUTATING_COMMAND, command))
 
 
-# A character that lets a script run text the segment split cannot see: a substitution, a group, a brace.
-_SCRIPT_RUNS_HIDDEN = re.compile(r"[$`(){}]")
+# A character that lets a script run text the segment split cannot see: a substitution, a group, a brace,
+# or a backslash (an escaped quote or separator the split would read wrongly).
+_SCRIPT_RUNS_HIDDEN = re.compile(r"[$`(){}\\]")
 
 
 def _script_mutates(script: str) -> bool:
@@ -472,7 +473,7 @@ def _words_of(word: str):
     text split as the shell splits it (a `bash -c` script), and each quote's text as its own words
     (cut at a paren too, so `'$(echo 1 > P)'` shows `P`)."""
     inner = _unquoted(word)
-    out = [inner] + [_unquoted(w) for w in _quoted_words(inner, True)]   # a quoted script, read again
+    out = [inner] + [_unquoted(w) for w in _quoted_words(inner)]   # a quoted script, read again
     for piece in re.split(r"""['"()]""", word):
         out.extend(REDIRECT.sub(r" \1 ", piece).split())
     return out
@@ -617,7 +618,10 @@ def _shell_write_hit(cmd: str, cwd: str, predicate, holds=None, follow_cd=False,
     ends = []
     segments = split_segments(cmd, ends)
     scans = [_scan(segment) for segment in segments]
-    parsed = [_quoted_words(segment, True) for segment in segments]
+    parsed = [_quoted_words(segment) for segment in segments]
+    # The same words with a quoted newline kept, for a `sh -c` script read at its command positions only:
+    # the text the write patterns read keeps newlines as spaces, so a quoted newline never ends a command.
+    scripts = [_quoted_words(segment, True) for segment in segments] if command_position else parsed
     closed = any(unsafe or _runs_stored_text(segment, words, plain)
                  for segment, words, (unsafe, plain) in zip(segments, parsed, scans))
     kinds = ["" if closed else _kind(words, plain) for words, (_u, plain) in zip(parsed, scans)]
@@ -636,11 +640,12 @@ def _shell_write_hit(cmd: str, cwd: str, predicate, holds=None, follow_cd=False,
             to_file = any(_writes_a_file(parsed[k]) for k in chain)
             if runs_nowhere and (quiet or not to_file):
                 data = data | _data_words(kinds[number], raw)
-        words, shown = [], []
+        words, shown, script = [], [], []
         for index, word in enumerate(raw):
             if index in data:
                 words.append('""')   # data, or a `cp` source: no redirect or `tee` in it runs
                 shown.append('""')
+                script.append('""')
             elif index and re.fullmatch(_DESCRIPTOR, word) and _is_redirect(raw[index - 1]):
                 # Never judged as a path. `dup` stays in the text so `2> PATH` is not read as `> PATH`.
                 # The raw word is unquoted: a quoted "&1" is a file and is judged.
@@ -649,6 +654,8 @@ def _shell_write_hit(cmd: str, cwd: str, predicate, holds=None, follow_cd=False,
                 pieces = _words_of(word) if "'" in word or '"' in word else [word]
                 words.extend(pieces)
                 shown.extend(pieces)
+                kept = scripts[number][index]
+                script.extend(_words_of(kept) if "'" in kept or '"' in kept else [kept])
         text = " ".join(shown)
         at = (dir_before_segment(segments, number, cwd, ends) or cwd) if follow_cd else cwd
         verb = _segment_command(words)[0] if predicate_command else ""
@@ -657,7 +664,7 @@ def _shell_write_hit(cmd: str, cwd: str, predicate, holds=None, follow_cd=False,
                 continue
             if not word or word in (">", ">>"):
                 continue
-            if (predicate(word, at, verb) if predicate_command else predicate(word, at)) and writes_to(word, text, *(_segment_command(words) if command_position else ())):
+            if (predicate(word, at, verb) if predicate_command else predicate(word, at)) and writes_to(word, text, *(_segment_command(script) if command_position else ())):
                 return word
     return ""
 

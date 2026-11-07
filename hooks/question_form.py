@@ -448,15 +448,20 @@ def _flat_text(value) -> str:
 # act after it ("as the owner asked", "after Shivam's OK"), a past act ("after he approved it") and a
 # press of the page's own button ("after he hits Send") ask the owner for nothing.
 SESSION_PRESS = re.compile(r"^\s*(?:(?:the|a|this)\s+session|claude)\b", re.I)
+# A session clause that asks someone for something ("Claude asks the owner for a click on Merge") hands the
+# press on, so it is never excused. "as he asked" is a past act and asks for nothing.
+SESSION_ASKS = re.compile(r"\b(?:ask|asks|asking|request|requests|requesting|tell|tells|telling|remind|reminds"
+                          r"|reminding)\b", re.I)
 _CLAUSE_BREAK = re.compile(r",|;|:|\(|\s-\s|(?<=[.!?])\s+|\n|\b(?:then|and|but|so|or)\b", re.I)
 # The clauses left after the excused ones are joined with `;`: PRESS_VERB reads it as a clause start, so
 # "... but you approve it" stays a press, and mark ... ready reads across it, as across the cut break.
 _CLAUSE_JOIN = "; "
 OWNER_YOU = re.compile(r"\byou\b", re.I)
-OWNER_NAME = re.compile(r"\b(?:the\s+owner|shivam|he)\b", re.I)
-# The act is the verb the name is subject of: a modal, "to" or an -ly word may come between, so "Claude asks Shivam to click Merge" and "Shivam will
-# approve it" acts and "the owner clicked Approve" (the button's name, after a past act) does not.
-OWNER_ACT = re.compile(r"(?:\s+(?:will|can|must|should|may|then|also|first|now|to|\w+ly))*\s+"
+OWNER_NAME = re.compile(r"\b(?:the\s+(?:owner|user)|shivam|he|him)\b", re.I)
+# The act is the verb the name is subject of: a modal, "to", "just", "please" or an -ly word may come
+# between, so "Shivam will approve it" and "the user to just click Merge" act, and "the owner clicked
+# Approve" (the button's name, after a past act) does not.
+OWNER_ACT = re.compile(r"(?:\s+(?:will|can|must|should|may|then|also|first|now|to|just|please|\w+ly))*\s+"
                        r"(?:press(?:es|ing)?|click(?:s|ing)?|tap(?:s|ping)?|approv(?:e|es|ing)"
                        r"|merg(?:e|es|ing)|hit(?:s|ting)?|turn(?:s|ing)?\s+(?:it\s+)?on)\b" + _PAGE_BUTTON, re.I)
 _PRESS_LEAD = frozenset(("you", "and", "then", "or", "please"))
@@ -476,7 +481,7 @@ def _owner_press_text(label, how) -> tuple:
     text = label + ". " + how
     clauses = [c for c in _CLAUSE_BREAK.split(how) if c and c.strip()]
     session = [c for c in clauses if SESSION_PRESS.search(c) and not OWNER_YOU.search(c)
-               and not _owner_acts(c)]
+               and not SESSION_ASKS.search(c) and not _owner_acts(c)]
     if not session:
         return text, text
     done = " ".join(session).lower()
