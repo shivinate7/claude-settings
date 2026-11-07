@@ -890,6 +890,8 @@ class UnknownTests(StaleCase):
             shown = rng.head + "\n"
             return subprocess.CompletedProcess(argv, 1, stdout=shown if text else shown.encode(), stderr="" if text else b"")
 
+        rc, out = self.main_in_process(stale, rng, "HEAD~1..HEAD")
+        self.assertEqual(rc, 2, "scope: the in-process run with the real rev-list does not exit 2\n" + out)
         with mock.patch.object(stale._nowindow, "run", rev_list_prints_head_then_fails):
             rc, out = self.main_in_process(stale, rng, "HEAD~1..HEAD")
         self.assertEqual(rc, 2, "a rev-list that printed the head then exited non-zero was read as a root commit "
