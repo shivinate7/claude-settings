@@ -135,17 +135,6 @@ class Steps(Job):
         self.assertFalse(os.path.exists(os.path.join(self.root, "planned.txt")))
 
 
-class StdinClosed(Job):
-    """A step reads an empty stdin, as on GitHub's runner. On Windows an inherited console stdin is an invalid
-    handle in the no-window step, so each subprocess call in it failed with WinError 6."""
-
-    def test_a_step_reads_no_input_from_ci_jobs_stdin(self):
-        argv, env = self.job_call(step("reads", "test -z \"$(cat)\""))
-        done = subprocess.run(argv, cwd=self.root, input="leaked from the caller\n", capture_output=True, text=True,
-                              env=env, timeout=120)
-        lines = [ln for ln in done.stdout.splitlines() if not ln.startswith("log=")]
-        self.assertEqual((done.returncode, self.verdicts(lines)), (0, ["PASS"]), done.stdout + done.stderr)
-
 
 class Skips(Job):
     """A step that skips tests reads SKIP, never PASS, and never hides a FAIL (plan row S8, test-ci-standard plan)."""

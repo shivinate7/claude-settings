@@ -7,7 +7,8 @@ a raw call. hooks/test_nowindow.py pins this contract.
 
 Each wrapper is a drop-in for the `subprocess` function of the same name. On Windows it ORs
 CREATE_NO_WINDOW into the caller's `creationflags` and keeps every flag the caller passed. Elsewhere
-it adds nothing. The platform is read at call time, and the wrapper looks up `subprocess.<name>` at
+it adds nothing. On Windows it also gives the child an empty stdin when the caller names no stdin and no input:
+a no-window child cannot use an inherited console stdin. The platform is read at call time, and the wrapper looks up `subprocess.<name>` at
 call time too, so a test patch on `subprocess.<name>` sees the call.
 
 Limit: on Windows a child with no redirected stdout and stderr, started with this flag, writes to a
@@ -24,6 +25,10 @@ CREATE_NO_WINDOW = 0x08000000  # subprocess has no such name on a non-Windows ru
 def _flags(kwargs):
     if sys.platform == "win32" or os.name == "nt":
         kwargs["creationflags"] = kwargs.get("creationflags", 0) | CREATE_NO_WINDOW
+        if "stdin" not in kwargs and kwargs.get("input") is None:
+            # The child has no console, so an inherited console stdin is an invalid handle there, and its own
+            # subprocess calls fail with WinError 6. An empty stdin is valid. input= sets stdin itself.
+            kwargs["stdin"] = subprocess.DEVNULL
     return kwargs
 
 

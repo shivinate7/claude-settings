@@ -82,6 +82,25 @@ class HelperContract(unittest.TestCase):
             self.h.Popen(["x"], creationflags=CREATE_NEW_PROCESS_GROUP)
         self.assertEqual(rec.call_args.kwargs["creationflags"], CREATE_NO_WINDOW | CREATE_NEW_PROCESS_GROUP)
 
+    def test_windows_gives_an_empty_stdin_when_the_caller_names_none(self):
+        # A no-window child's inherited console stdin is an invalid handle: its own subprocess calls hit WinError 6.
+        for name in WRAPPERS:
+            with self.subTest(wrapper=name):
+                rec = self.recorder(name)
+                with on_platform(True):
+                    getattr(self.h, name)(["x"])
+                self.assertIs(rec.call_args.kwargs.get("stdin"), subprocess.DEVNULL)
+
+    def test_windows_keeps_the_callers_stdin_and_input(self):
+        rec = self.recorder("run")
+        with on_platform(True):
+            self.h.run(["x"], stdin=subprocess.PIPE)
+        self.assertIs(rec.call_args.kwargs["stdin"], subprocess.PIPE)
+        with on_platform(True):
+            self.h.run(["x"], input="data")
+        self.assertNotIn("stdin", rec.call_args.kwargs)  # subprocess.run refuses stdin= beside input=
+        self.assertEqual(rec.call_args.kwargs["input"], "data")
+
     def test_posix_sets_no_creationflags_key(self):
         for name in WRAPPERS:
             with self.subTest(wrapper=name):
