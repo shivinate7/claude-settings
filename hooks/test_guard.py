@@ -5519,6 +5519,13 @@ sh("waiter: a loop inside a heredoc body is allowed",
    "cat <<'EOF'\nwhile true; do sleep 5; done\nEOF", "allow", cwd=NOGIT)
 sh("waiter: a comment opener in quotes does not hide a loop, refused",
    'echo "it\'s # fine"; while true; do sleep 5; done', "deny", "waiter", cwd=NOGIT)
+# A brace is a script block only where the command runs it. `echo {sleep}` prints the word and waits for nothing,
+# and a block that does run still counts its sleep.
+sh("waiter: a brace around sleep in an echo is text, allowed", "echo {sleep}", "allow", cwd=NOGIT)
+sh("waiter: a brace around sleep in an echo does not hide a long sleep after it, refused",
+   "echo {sleep}; sleep 30", "deny", "waiter", cwd=NOGIT)
+sh("waiter: a call operator on a script block with a long Start-Sleep is refused",
+   "& { Start-Sleep 30 }", "deny", "waiter", tool="PowerShell", cwd=NOGIT)
 
 # Each refused shape below waits by repeating or by a long
 # pause; each allowed shape is a false alarm the guard raised on a non-waiting command.
@@ -5564,6 +5571,29 @@ sh("waiter: gh pr -R o/r checks --watch in the foreground is refused",
    "gh pr -R o/r checks 5 --watch", "deny", "waiter", cwd=NOGIT)
 add("waiter: gh run -R o/r watch under run_in_background is refused", "deny", "waiter",
     cwd=NOGIT, command="gh run -R o/r watch 1", run_in_background=True)
+# The repo flag in each spelling (`-R o/r`, `--repo o/r`, `--repo=o/r`, `-Ro/r`) is a flag, not the verb. A foreground
+# `gh pr checks --watch` is refused in each, and under run_in_background it is allowed. The repo flag may sit between
+# `gh run` and `watch`, or after the verb, and each is still a run watch.
+sh("waiter: gh pr checks -R o/r --watch in the foreground is refused", "gh pr checks 5 -R o/r --watch", "deny",
+   "waiter", cwd=NOGIT)
+sh("waiter: gh pr checks --repo o/r --watch in the foreground is refused", "gh pr checks 5 --repo o/r --watch",
+   "deny", "waiter", cwd=NOGIT)
+sh("waiter: gh pr checks --repo=o/r --watch in the foreground is refused", "gh pr checks 5 --repo=o/r --watch",
+   "deny", "waiter", cwd=NOGIT)
+sh("waiter: gh pr checks -Ro/r --watch in the foreground is refused", "gh pr checks 5 -Ro/r --watch",
+   "deny", "waiter", cwd=NOGIT)
+add("waiter: gh pr checks -R o/r --watch under run_in_background is allowed", "allow", cwd=NOGIT,
+    command="gh pr checks 5 -R o/r --watch", run_in_background=True)
+sh("waiter: gh run --repo o/r watch in the foreground is refused", "gh run --repo o/r watch 1", "deny",
+   "waiter", cwd=NOGIT)
+sh("waiter: gh run --repo=o/r watch in the foreground is refused", "gh run --repo=o/r watch 1", "deny",
+   "waiter", cwd=NOGIT)
+sh("waiter: gh run -Ro/r watch in the foreground is refused", "gh run -Ro/r watch 1", "deny", "waiter", cwd=NOGIT)
+sh("waiter: gh run watch 1 -R o/r in the foreground is refused", "gh run watch 1 -R o/r", "deny", "waiter",
+   cwd=NOGIT)
+# `--watch=false` turns the watch off, so `gh pr checks` with it is not a watcher.
+sh("waiter: gh pr checks 5 --watch=false is not a watcher, allowed", "gh pr checks 5 --watch=false", "allow",
+   cwd=NOGIT)
 sh("waiter: a readiness check is allowed", "curl --retry 5 http://localhost:3000", "allow",
    cwd=NOGIT)
 sh("waiter: an unrelated log query is allowed", VCS + " log --since=yesterday", "allow", cwd=NOGIT)
