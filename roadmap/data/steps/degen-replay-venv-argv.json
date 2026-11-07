@@ -1,0 +1,10 @@
+{
+  "title": "degen's known-defect replays run with its own Python packages",
+  "phase": "next",
+  "status": "todo",
+  "order": 269.1,
+  "owner": "coordinator",
+  "why": "Lane replay-profile-parts: every degen known defect reads UNKNOWN on a runner without its packages, because degen's catchers run the system python3 (coordinator, 17:33 CST Nov 7).",
+  "note": "Waits on #1654; the coordinator starts its lane on that merge. Fix: fill {deps} in a known-defect argv, and point degen's entries at the venv python. Done check: a red test where a degen defect's replay reads its real verdict with the deps installed.",
+  "updatedAt": "2026-11-07T17:32:00-06:00"
+}
