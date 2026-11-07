@@ -35,8 +35,9 @@
 //        T11b: an `extends` chain, whose paths resolve from the base file. T11c, T11c2: a matched pattern with no hit, and a bare specifier
 //        with no pattern: both FAIL. T11d: a truncated tsconfig makes the read unknown. T11e, T11f: controls. No tsconfig keeps main's FAIL,
 //        and a broken tsconfig with relative imports only passes.
-//        Red on main: T11a, T11b, T11d. T11c and T11c2 are controls: main skips every bare specifier, so both FAIL there too. Their proof
-//        after the build is a mutant that falls back to baseUrl. Green on main: T11c, T11c2, T11e, T11f.
+//        Red on main: T11a, T11b, T11d. T11c and T11c2 are controls: main skips every bare specifier, so both FAIL there too. Their proofs
+//        after the build are two mutants: T11c fails on a baseUrl fallback after a pattern match, and T11c2 fails on an implicit `~/` alias
+//        (to `src/`, or to the importer's folder). Green on main: T11c, T11c2, T11e, T11f.
 //   C0   control, green on the old code: the import reader MAP11 uses reads the fixture's imports the way these cases assume.
 
 import { test } from 'node:test';
