@@ -904,8 +904,8 @@ def run_clone_step(d, work, cs):
 with scratch("one-home-step") as d:
     cs = one_home_clone(d)
     rc, out = run_clone_step(d, child_with_brief(d, "copy", "# Brief\n\n%s\n" % ONE_HOME_RULE), cs)
-    check("one-home step: a child copy of a rule sentence fails the step with COPY001 on its line",
-          rc != 0 and "agents/brief.md:3: COPY001 brief-contents copied" in out and "copies: FAIL" in out, out)
+    check("one-home step: a child copy of a rule sentence prints COPY001 on its line and does not fail the step yet",
+          rc == 0 and "agents/brief.md:3: COPY001 brief-contents copied" in out and "copies: FAIL" in out, out)
     rc, out = run_clone_step(d, child_with_brief(d, "clean", "# Brief\n\nKeep briefs short.\n"), cs)
     check("one-home step, control: a child with no copy passes the step with no COPY001",
           rc == 0 and "COPY001" not in out, out)
