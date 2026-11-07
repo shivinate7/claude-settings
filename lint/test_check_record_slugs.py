@@ -703,7 +703,8 @@ class RecordSlugsTests(unittest.TestCase):
         old = "- old-note: an old gap. Fix: none — owner decides. Until: 2026-01-01\n"
         self.put(DEBT_NOTES, NOTES_HEAD + old)
         self.commit_base()
-        self.put(DEBT_NOTES, NOTES_HEAD + old + "- new-note: a gap. Fix: already fixed on main 1a2b3c4\n")
+        sha = self.base_sha()[:7]  # a real commit on origin/main, so the new line's Fix is valid
+        self.put(DEBT_NOTES, NOTES_HEAD + old + "- new-note: a gap. Fix: already fixed on main %s\n" % sha)
         self.commit_change()
         self.assert_passes()
 
