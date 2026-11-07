@@ -29,8 +29,9 @@
   "owner": "lane notes-fix-merge-ci (session_013NEJL17gMWcgUJ44gi3ZRs)",
   "rank": 2,
   "ref": "decision builders-cannot-edit-tests; step notes-fix-builder-mutants; notes row mutate-guard-owner-unclear",
+  "reply": "Withdrawn 17:58 CST. The coordinator took c at 17:55 CST: builders may add mutants, and a builder diff that removes or changes a mutant line is refused. It tightens main and can be undone, so it needs no owner word. Home: decision builders-cannot-edit-tests, in lane notes-fix-merge-ci's PR.",
   "short": "Who may change a guard's mutation tests",
-  "status": "open",
+  "status": "closed",
   "title": "May a builder change the mutation tests that prove a guard works?",
   "why": "Main lets builders edit hooks/mutate_guard.py, but refuses their edits to other test files. The lane parks this step until you pick."
 }
