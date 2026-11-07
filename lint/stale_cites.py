@@ -37,6 +37,15 @@ Refuses a range that leaves a tracked Markdown line naming a name the range remo
             that changes the rows file also reports each prose line at head that cites a row id it removes. It prints
             as `stale-cites: report, path:line: STALE005 ...` and never changes the exit code, so it ships dark
             (decision source-prose-lint-ships-dark). A line marked `<!-- ste-disable-line STALE005 -->` is left out.
+  STALE006  (range mode only, report only) a Markdown line anchors `path:N` or `path:N-M` on a file the range edits
+            in place (any type but Markdown), and the line itself is not added or edited in the range. The hunks of
+            the range's diff map the cited base lines to head: lines above them grew or shrank gives `cited lines
+            moved to path:N at head` (the new anchor), a hunk inside them gives `cited text changed in this range`,
+            and a deletion of all of them gives `cited lines removed in this range`. An edit below them is silent,
+            and so is an anchor already past the file's end at base. The anchor is read as STALE004 reads it
+            (`anchor_on`), except the path may have no folder part (`code.py:10`), and fences count as prose. It prints
+            as `stale-cites: report, path:line: STALE006 ...` after the STALE005 lines, never changes the exit code,
+            and a line marked `<!-- ste-disable-line STALE006 -->` is left out.
 A line already stale at base, for a name the range did not remove, never fires. Left out: docs/records.md,
 each file `.ste-lint-exclude` (and the EXCLUDE env of the ste-lint action) names, and a line marked
 `<!-- ste-disable-line STALE001 -->` (or STALE002, STALE003, STALE004). Fenced blocks count as prose.
@@ -79,6 +88,11 @@ A touched .py adds one `git cat-file --batch` and, through the report below, one
 or renamed path adds `ls-tree` and that `cat-file --batch`, so 5 at most. Each tracked .md is read once, and only
 when a removed or renamed path, or a name that a touched .py no longer defines, gives the findings something to
 look for. A touched .py also loads the py-facts script once, in-process (no start, no .pyc). It writes no file and leaves no process running.
+STALE006 starts no process of its own. A range that edits a non-Markdown file in place reads the tracked Markdown at head
+through the `cat-file --batch` the run opens (the trees of `rng.tree` when a read listed it, else walked through that
+same process, since an `ls-tree` here would be a second start), so a changed file that is no .py adds that one
+`cat-file` start, and a .py adds none. It builds one map (the file's hunks, already in the diff, and its base line
+count) for each changed file that an anchor names.
 The report adds, for a changed non-Markdown file, one `ls-tree` of the decisions folders and the mechanisms file (none
 when the run already listed the whole tree) and the `cat-file --batch`, which reads each decision record whole (a regex
 then takes its Home line) and the mechanisms file once. The decisions folder is the first of lint/layout.py
@@ -129,7 +143,14 @@ FOREIGN_FILE = re.compile(r"\.%s\Z" % FOREIGN_EXT)
 DISABLE_RE = re.compile(r"<!--\s*ste-disable-line([^>]*?)-->")
 SIMPLE_PATH = re.compile(r"^%s$" % RUN)
 FILE_CITE = re.compile(r"^[^/]+(?:/[^/]+)*/[^/]*[^/.]\.[A-Za-z0-9]+$")  # a folder part and an extension
+BARE_CITE = re.compile(r"^(?:[^/]+/)*[^/]*[^/.]\.[A-Za-z0-9]+$")  # an extension; the folder part is optional
 ANCHOR = re.compile(r":(\d+)(?:-(\d+))?(?!\w)")
+
+
+def anchor_on(line, run, home, paths):
+    """The `:N` or `:N-M` match right after `run` (a RUN_RE match) when the run is one whole cite whose file `home` is
+    among `paths`, else None. The one home of the anchor read: STALE004 and STALE006 both call it."""
+    return ANCHOR.match(line, run.end()) if home in paths and run.group(0).rstrip(".-") == run.group(0) else None
 
 
 class Unknown(Exception):
@@ -153,8 +174,8 @@ class BlobReader:
     def __init__(self):
         self.proc = None
 
-    def get(self, spec):
-        """Bytes of the blob, or None when the object does not exist."""
+    def read(self, spec, kind=b"blob"):
+        """(oid, bytes) of the object, the bytes empty when it is not of `kind`; None when the object does not exist."""
         if self.proc is None:
             self.proc = _nowindow.Popen(["git", "cat-file", "--batch"], stdin=subprocess.PIPE,
                                          stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
@@ -167,7 +188,26 @@ class BlobReader:
             return None
         data = self.proc.stdout.read(int(header[2]))
         self.proc.stdout.read(1)
-        return data if header[1] == b"blob" else b""
+        return header[0], (data if header[1] == kind else b"")
+
+    def get(self, spec):
+        """Bytes of the blob, or None when the object does not exist."""
+        found = self.read(spec)
+        return None if found is None else found[1]
+
+    def entries(self, spec):
+        """[(mode, name, oid)] of the tree `spec` names, read through the same process; [] when it is no tree."""
+        found = self.read(spec, b"tree")
+        if found is None:
+            return []
+        oid, data = found
+        width, out, i = len(oid) // 2, [], 0  # the oid is hex, so a raw id is half as long
+        while i < len(data):
+            space, nul = data.index(b" ", i), data.index(b"\0", i)
+            out.append((data[i:space].decode("ascii"), data[space + 1:nul].decode("utf-8", "replace"),
+                        data[nul + 1:nul + 1 + width].hex()))
+            i = nul + 1 + width
+        return out
 
     def close(self):
         if self.proc is not None:
@@ -221,14 +261,15 @@ def parse_range(text):
     raise Unknown("--range wants base...head, got %r" % text)
 
 
-HUNK = re.compile(r"@@ -\d+(?:,(\d+))? \+(\d+)(?:,(\d+))? @@")
+HUNK = re.compile(r"@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@")
 
 
-def added_markdown_lines(patch):
-    """{path: [(number, text)]}: each line a `-U0` patch adds to a .md file, by its line number at head. A hunk's
-    body is read by its counts, never by its first character, so an added line that starts `+++ ` or `@@ ` is no
-    header. A `\\ No newline` marker is no line."""
-    found, path, rows, i = {}, None, patch.split("\n"), 0
+def read_patch(patch):
+    """(lines, hunks) of a `-U0` patch. lines: {path: [(number, text)]}, each line the patch adds to a .md file, by its
+    line number at head. hunks: {path: [(old start, old count, new count)]}, each hunk of each file at its head path;
+    an old count of 0 is an insertion after line `old start`. A hunk's body is read by its counts, never by its first
+    character, so an added line that starts `+++ ` or `@@ ` is no header. A `\\ No newline` marker is no line."""
+    found, hunks, path, rows, i = {}, {}, None, patch.split("\n"), 0
     while i < len(rows):
         row = rows[i]
         i += 1
@@ -239,8 +280,10 @@ def added_markdown_lines(patch):
         hunk = HUNK.match(row)
         if not hunk:
             continue
-        gone = int(hunk.group(1)) if hunk.group(1) is not None else 1
-        number, new = int(hunk.group(2)), int(hunk.group(3)) if hunk.group(3) is not None else 1
+        gone = int(hunk.group(2)) if hunk.group(2) is not None else 1
+        number, new = int(hunk.group(3)), int(hunk.group(4)) if hunk.group(4) is not None else 1
+        if path is not None:
+            hunks.setdefault(path, []).append((int(hunk.group(1)), gone, new))
         while (gone or new) and i < len(rows):
             body = rows[i]
             i += 1
@@ -251,13 +294,13 @@ def added_markdown_lines(patch):
                 if path is not None and path.endswith(".md"):
                     found.setdefault(path, []).append((number, body[1:].rstrip("\r")))
                 number += 1
-    return found
+    return found, hunks
 
 
 def read_diff(diff_args):
-    """(removed, renamed, modified, added, lines) from one `git diff -M --raw -p -z -U0`: removed paths, {old: new},
-    paths changed in place, added paths, and `added_markdown_lines`. The raw records come first, then one empty
-    record, then the patch text. One start serves both, so the added lines cost no start of their own."""
+    """(removed, renamed, modified, added, lines, hunks) from one `git diff -M --raw -p -z -U0`: removed paths,
+    {old: new}, paths changed in place, added paths, and `read_patch`. The raw records come first, then one empty
+    record, then the patch text. One start serves both, so the added lines and hunks cost no start of their own."""
     out = git("diff", "-M", "--raw", "-p", "-z", "-U0", "--no-ext-diff", "--src-prefix=a/", "--dst-prefix=b/",
               *diff_args, on_fail=BaseUnknown).decode("utf-8", "replace")
     head, _, patch = out.partition("\0\0")
@@ -278,7 +321,7 @@ def read_diff(diff_args):
         elif status == "A":
             added.append(tokens[i + 1])
         i += 2
-    return removed, renamed, modified, added, added_markdown_lines(patch)
+    return (removed, renamed, modified, added, *read_patch(patch))
 
 
 PY_FACTS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "skills", "plain-english-map",
@@ -398,9 +441,11 @@ def path_cites(line, gone, exotic):
 class Range:
     """What the readers share: the range's blobs, its changed paths and the texts a read could not judge."""
 
-    def __init__(self, base, head, removed, renamed, modified, batch, added=(), lines=None):
+    def __init__(self, base, head, removed, renamed, modified, batch, added=(), lines=None, hunks=None):
         self.base, self.head, self.removed, self.renamed, self.batch = base, head, removed, renamed, batch
         self.added_lines = lines or {}  # the .md lines the range adds, by path
+        self.hunks = hunks or {}  # the hunks of each file, by head path (`read_patch`)
+        self.modified = set(modified)
         self.unknowns = []
         self.tree = None  # the head tree entries once a read listed the whole tree; the report reuses it
         self.changed = set(removed) | set(renamed) | set(renamed.values()) | set(modified) | set(added)
@@ -825,6 +870,104 @@ class RouteClaimReader:
                     found.setdefault((md, number), "cites %s, a route row this range removes" % ", ".join(ids))
 
 
+def drift_of(hunks, first, last):
+    """How the range treats the cited lines `first`..`last` of a base file, from its hunks: ("moved", shift) when only
+    hunks above the lines change their number, ("removed", 0) when every cited line is deleted, ("changed", 0) when a
+    hunk deletes, replaces or splits some of them, and None when nothing above or inside them changes. An insertion
+    after line N sits above the lines when N is below `first`, inside them when N is `first` or more and below `last`,
+    and below them otherwise."""
+    shift, touched, deleted = 0, False, 0
+    for start, old, new in hunks:
+        if old == 0:
+            if start < first:
+                shift += new
+            elif start < last:
+                touched = True
+            continue
+        end = start + old - 1
+        if end < first:
+            shift += new - old
+        elif start <= last:
+            touched = True
+            deleted += (min(end, last) - max(start, first) + 1) if new == 0 else 0
+    if deleted == last - first + 1:
+        return "removed", 0
+    if touched:
+        return "changed", 0
+    return ("moved", shift) if shift else None
+
+
+def anchor_text(home, first, last):
+    return "%s:%d" % (home, first) + ("-%d" % last if last != first else "")
+
+
+class DriftReader:
+    """STALE006: a Markdown line that anchors `path:N` or `path:N-M` on a file the range edits in place, where the range
+    moves, changes or removes the cited lines. The anchor was written against the file at base, so the hunks of the
+    range map each cited base line to head. Report only, like STALE005. A line the range adds or edits is left out: its
+    author anchored it. A file of any type counts, except Markdown, whose anchors the Markdown cost class leaves unread.
+    An anchor already past the end of the file at base is no drift. The markdown files come from `rng.tree` when a read
+    listed it, else from the trees of the shared `cat-file`, so no git process starts for them."""
+    code = "STALE006"
+    scope = "range"
+
+    def prepare(self, rng):
+        """The set of changed files an anchor can name: modified in place, not Markdown, with a hunk. None when empty."""
+        targets = {p for p in rng.modified if not p.endswith(".md") and rng.hunks.get(p)}
+        return targets or None
+
+    def markdown(self, rng):
+        """The governed Markdown paths at head, sorted."""
+        excludes = exclude_patterns(".")
+        if rng.tree is not None:
+            return sorted(markdown_files(rng.tree, excludes))
+        found, stack = [], [("", "%s^{tree}" % rng.head)]
+        while stack:
+            prefix, oid = stack.pop()
+            for mode, name, child in rng.batch.entries(oid):
+                if mode == "40000":
+                    stack.append((prefix + name + "/", child))
+                elif mode in ("100644", "100755") and governed(prefix + name, excludes):
+                    found.append(prefix + name)
+        return sorted(found)
+
+    def claims(self, rng, targets):
+        """[(path, number, message)], one per Markdown line, its anchors' messages joined by "; "."""
+        found, maps = [], {}
+        for md in self.markdown(rng):
+            added = {n for n, _ in rng.added_lines.get(md, ())}
+            folder = posixpath.dirname(md)
+            for number, line in enumerate(read_markdown(rng.batch, rng.head, md).split("\n"), 1):
+                if ":" not in line or number in added or ("ste-disable-line" in line and self.code in disabled(line)):
+                    continue
+                messages = []
+                for run in RUN_RE.finditer(line):
+                    cite = run.group(0)
+                    if not BARE_CITE.match(cite) or placeholder_adjacent(line, run.start(), run.end()):
+                        continue
+                    home = next((c for c in (cite, posixpath.normpath(posixpath.join(folder, cite))) if c in targets), None)
+                    anchor = anchor_on(line, run, home, targets)
+                    if anchor is None:
+                        continue
+                    first, last = int(anchor.group(1)), int(anchor.group(2) or anchor.group(1))
+                    if home not in maps:
+                        base = rng.batch.get("%s:%s" % (rng.base, home))
+                        maps[home] = None if base is None else line_count(base)
+                    if maps[home] is None or first < 1 or last < first or last > maps[home]:
+                        continue  # already no line of the file at base: STALE004's, never drift
+                    drift = drift_of(rng.hunks[home], first, last)
+                    cited = anchor_text(home, first, last)
+                    if drift is None:
+                        continue
+                    kind, shift = drift
+                    messages.append("%s, cited lines moved to %s at head" % (cited, anchor_text(home, first + shift, last + shift))
+                                    if kind == "moved" else "%s, cited text changed in this range" % cited
+                                    if kind == "changed" else "%s, cited lines removed in this range" % cited)
+                if messages:
+                    found.append((md, number, "; ".join(messages)))
+        return found
+
+
 def route_ids(rng, cache):
     """(ids, why) of the route rows at head, read once. ids is the set of row ids, or None with `why` ("absent" or
     "unreadable") when the file is missing or is not {"rows": [...]}: one unknown is noted, and no id is called dead.
@@ -851,9 +994,9 @@ def route_ids(rng, cache):
 # One entry per code. A reader has `code`, `prepare(rng)` (its state, or None when the range gives it nothing to
 # check) and `line(state, text, claimed)` (messages for one Markdown line; `claimed` holds the paths an earlier
 # reader already cited there). A reader with `unknown = True` reports its messages as unknown, not as findings.
-# A reader with `scope = "added"` reads the lines the range adds instead: `prepare(rng)` and `claims(rng, state)`, and
-# its messages are report lines, never findings. A new check adds one entry.
-READERS = (PathReader(), NameReader(), ForeignReader(), RouteClaimReader())
+# A reader with `scope = "added"` or `"range"` reads the range instead of the head lines: `prepare(rng)` and
+# `claims(rng, state)`, and its messages are report lines, never findings. A new check adds one entry.
+READERS = (PathReader(), NameReader(), ForeignReader(), RouteClaimReader(), DriftReader())
 
 
 def tracked_entries(rev, *paths):
@@ -1049,23 +1192,25 @@ def report(rng):
 
 
 def claim_lines(rng):
-    """The report lines of each reader that reads added lines, sorted by file and line."""
-    found = []
+    """The report lines of each reader that reads the range, a reader at a time in READERS order, each sorted by file
+    and line."""
+    lines = []
     for reader in READERS:
-        if getattr(reader, "scope", "tree") == "added":
+        if getattr(reader, "scope", "tree") in ("added", "range"):
             state = reader.prepare(rng)
             if state is not None:
-                found += [(path, number, reader.code, message) for path, number, message in reader.claims(rng, state)]
-    return ["%s%s:%d: %s %s" % (REPORT, path, number, code, message) for path, number, code, message in sorted(found)]
+                lines += ["%s%s:%d: %s %s" % (REPORT, path, number, reader.code, message)
+                          for path, number, message in sorted(reader.claims(rng, state))]
+    return lines
 
 
 def scan(range_text):
     """(found, unknowns, report): {(path, line, code): [messages]}, one text per read that could not run, and the
     report lines. The report adds no finding, and a report read that fails is one unknown."""
     diff_args, base, head = parse_range(range_text)
-    removed, renamed, modified, added, lines = read_diff(diff_args)
+    removed, renamed, modified, added, lines, hunks = read_diff(diff_args)
     batch = BlobReader()
-    rng = Range(base, head, removed, renamed, modified, batch, added, lines)
+    rng = Range(base, head, removed, renamed, modified, batch, added, lines, hunks)
     lines = []
     try:
         found = find_stale(rng)
@@ -1131,7 +1276,7 @@ def scan_tree(rev):
                             found.setdefault((md, number, "STALE003"), []).append(
                                 "%s names no tracked file at %s%s" % (cite, rev, hint))
                         continue
-                    anchor = ANCHOR.match(line, run.end()) if cite == run.group(0) and home in files else None
+                    anchor = anchor_on(line, run, home, files)
                     if anchor is None or "STALE004" in off:
                         continue
                     first, last = int(anchor.group(1)), int(anchor.group(2) or anchor.group(1))
