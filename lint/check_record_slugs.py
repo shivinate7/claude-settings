@@ -13,7 +13,8 @@ adds, names no fix (decision `notes-name-their-fix`: a gap in a file nobody read
 the one home of this grammar (FIX_BODY, NONE_REASONS, parse_fix); lint/report_guard.py imports it. A valid Fix is:
     Fix: step:<slug>        <slug> is a step file on origin/roadmap (roadmap/data/steps/<slug>.json)
     Fix: none -- <reason>   or "none —"; the reason is one of NONE_REASONS
-    Fix: already fixed on main <sha>   a hex sha of 7 to 40 digits (with or without the "none --" lead)
+    Fix: already fixed on main <sha>   a hex sha of 7 to 40 digits (with or without the "none --" lead) that is a
+                            commit and an ancestor of origin/main (`git merge-base --is-ancestor`)
 Three more rules read the notes file (coordinator rulings 2026-11-07 13:58 and 13:59 CST):
   Ratchet: when the branch touches the notes file, the bullets with no valid Fix at HEAD may not outnumber those at
     the merge base of origin/main and HEAD. Both counts are read live; the total prints. A HEAD with none to count
@@ -23,11 +24,14 @@ Three more rules read the notes file (coordinator rulings 2026-11-07 13:58 and 1
   Upkeep: expired_notes lists the `Fix: none` lines whose Until is past, for skills/roadmap/build.py.
 A notes line holds the field anywhere (the last `Fix:` on the line counts). A debt file holds it as a line that
 starts `Fix:` at column one, or after one leading `- `. A notes line whose `- <slug>:` already exists at the merge
-base is an edit and passes, so old lines never turn red. Only a step Fix reads origin/roadmap, one `git ls-tree` per
-step. When that read cannot run, the check prints UNKNOWN, says the read did not run, and exits 1 (CI or not).
-Cost: a diff and a show of the notes file, a show of each added debt file, one git process per step named; the
-ratchet adds one ls-tree and one show per ref when the branch touches the notes file; no file written, no process
-left running, no timer. commit_fixes (lint/report_guard.py) reads one commit with one git process.
+base is an edit and passes, so old lines never turn red. Only a step Fix reads origin/roadmap, and only an
+already-fixed Fix reads origin/main's history. When such a read cannot run, the check prints UNKNOWN, says the read
+did not run, and exits 1 (CI or not). Every diff it parses passes --src-prefix=a/ --dst-prefix=b/.
+Cost: a diff and a show of the notes file, a show of each added debt file; two git processes per step named
+(step_exists: a rev-parse of origin/roadmap, then an ls-tree), three per already-fixed sha (fixed_on_main: a
+rev-parse of origin/main, a rev-parse of the sha, a merge-base); the ratchet adds a merge-base, an ls-tree and a show
+per ref when the branch touches the notes file; no file written, no process left running, no timer. commit_fixes
+(lint/report_guard.py) reads one commit with one git process.
 
     python3 lint/check_record_slugs.py [file ...]
         # files given: check those, skip git
@@ -116,7 +120,7 @@ def show(root, ref, path):
 
 ROADMAP = "origin/roadmap"
 STEP_PATH = "roadmap/data/steps/%s.json"
-NONE_REASONS = ("owner decides", "needs the Mac", "rare and harmless")
+NONE_REASONS = ("owner decides", "needs the Mac", "needs a Windows run", "rare and harmless")
 SLUG = r"[a-z0-9][a-z0-9-]*"
 DASH = r"(?:—|--)"
 FIX_BODY = re.compile(
@@ -129,8 +133,16 @@ NOTE_SLUG = re.compile(r"^[-*+]\s+([\w.-]+)\s*:")
 DEBT_FIX_LINE = re.compile(r"^(?:- )?Fix:")
 
 
-class RoadmapUnread(Unknown):
-    """origin/roadmap could not be read, so a step Fix is not known to be valid. Never green."""
+class FixUnread(Unknown):
+    """A ref a Fix names could not be read, so the Fix is not known to be valid. Never green."""
+
+
+class RoadmapUnread(FixUnread):
+    """origin/roadmap could not be read, so a step Fix is not known to be valid."""
+
+
+class MainUnread(FixUnread):
+    """origin/main could not be read, so an already-fixed sha is not known to be on main."""
 
 
 def parse_fix(text):
@@ -168,7 +180,8 @@ def step_exists(root, slug, ref=ROADMAP):
 
 
 def patch_added(diff):
-    """{path: (is_new, [added lines])} from the text of a zero-context patch. A line counts only inside a hunk, so a
+    """{path: (is_new, [added lines])} from the text of a zero-context patch made with --src-prefix=a/ --dst-prefix=b/
+    (the callers pass both, so a diff.noprefix or diff.mnemonicPrefix setting never changes the header form). A line counts only inside a hunk, so a
     removed line that starts with dashes is never a file header."""
     out, path, is_new, in_hunk = {}, None, False, False
     for raw in diff.split("\n"):
@@ -187,6 +200,24 @@ def patch_added(diff):
     return out
 
 
+def fixed_on_main(root, sha, ref="origin/main"):
+    """True when `sha` is a commit that is an ancestor of `ref`. False for a sha that names no commit, or one that is
+    not on `ref`. Raises MainUnread when `ref` or the ancestry read cannot run: that is unknown, never a missing fix."""
+    def run(*args):
+        return _nowindow.run(["git", *args], cwd=root, capture_output=True, encoding="utf-8", errors="replace")
+    try:
+        if run("rev-parse", "--verify", "--quiet", ref + "^{commit}").returncode:
+            raise Unknown("%s does not name a commit" % ref)
+        if run("rev-parse", "--verify", "--quiet", sha + "^{commit}").returncode:
+            return False
+        code = run("merge-base", "--is-ancestor", sha, ref).returncode
+        if code not in (0, 1):
+            raise Unknown("git merge-base --is-ancestor exited %d" % code)
+        return code == 0
+    except (Unknown, OSError) as err:
+        raise MainUnread("the %s read did not run (%s)" % (ref, err))
+
+
 def added_note_lines(root, path, base="origin/main", head="HEAD", edits=False):
     """The bullet lines the branch adds to the notes file `path`, from the merge base of `base` and `head`, minus each
     line whose `- <slug>:` the merge base already holds (an edit), unless `edits`, which keeps them. A heading or a
@@ -195,7 +226,7 @@ def added_note_lines(root, path, base="origin/main", head="HEAD", edits=False):
     if not git_text(root, "ls-tree", "--name-only", head, "--", path).strip():
         return []
     diff = git_text(root, "-c", "core.quotepath=off", "diff", "--unified=0", "--no-color", "--no-ext-diff",
-                    "--no-textconv", f"{base}...{head}", "--", path)
+                    "--no-textconv", "--src-prefix=a/", "--dst-prefix=b/", f"{base}...{head}", "--", path)
     notes = [l for l in patch_added(diff).get(path, (False, []))[1] if NOTE_LINE.match(l)]
     if not notes or edits:
         return notes
@@ -238,7 +269,7 @@ def commit_fixes(root, sha):
     process. Raises Unknown when git cannot read the commit."""
     notes = layout.candidates(root, "debt-notes")
     diff = git_text(root, "-c", "core.quotepath=off", "show", "--format=", "--unified=0", "--no-color", "--no-ext-diff",
-                    "--no-textconv", "--no-renames", sha, "--", *notes, *layout.candidates(root, "debts"))
+                    "--no-textconv", "--src-prefix=a/", "--dst-prefix=b/", "--no-renames", sha, "--", *notes, *layout.candidates(root, "debts"))
     debt, out = debt_file(root), []
     for path, (is_new, lines) in patch_added(diff).items():
         if path in notes:
@@ -337,8 +368,8 @@ def notes_ratchet(root, files, moved, base="origin/main"):
 
 
 def fix_failures(root, entries):
-    """[(path, label, why)] for each entry of added_fixes with no valid Fix. Raises RoadmapUnread when a step
-    cannot be read."""
+    """[(path, label, why)] for each entry of added_fixes with no valid Fix. Raises FixUnread when a step
+    cannot be read, or origin/main when an already-fixed sha needs it."""
     bad = []
     for path, label, fixes in entries:
         if not fixes or None in fixes:
@@ -347,6 +378,8 @@ def fix_failures(root, entries):
         for kind, value in fixes:
             if kind == "step" and not step_exists(root, value):
                 bad.append((path, label, "names step:%s, which is not on %s" % (value, ROADMAP)))
+            elif kind == "fixed" and not fixed_on_main(root, value):
+                bad.append((path, label, "names commit %s, which is not an ancestor of origin/main" % value))
     return bad
 
 
@@ -427,8 +460,8 @@ def main(args):
               % ("deleted" if how == "deleted" else "lost its Feel line", f))
     try:
         unfixed = fix_failures(ROOT, entries)
-    except RoadmapUnread as err:  # a step Fix cannot be judged: red on any machine, never green
-        print("check_record_slugs: UNKNOWN, %s, so no step Fix was checked" % err)
+    except FixUnread as err:  # a step or sha Fix cannot be judged: red on any machine, never green
+        print("check_record_slugs: UNKNOWN, %s, so no Fix was checked" % err)
         return 1
     for path, label, why in unfixed:
         print('check_record_slugs: FAIL: "%s" %s: %s' % (label, why, path))
