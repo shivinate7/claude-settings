@@ -71,7 +71,7 @@
     "roles-one-role-per-agent": {
       "mechanism": {
         "kind": "unmechanized",
-        "reason": "No hook judges it. A prompt hook sees only the event input, never what an agent did, and no check reads an agent's roles."
+        "reason": "No prompt hook judges it. A prompt hook sees only the event input, never what an agent did, and no check reads an agent's roles."
       }
     },
     "roles-model-per-role-table": {
