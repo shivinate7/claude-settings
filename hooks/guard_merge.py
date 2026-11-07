@@ -12,7 +12,7 @@ import re
 import sys
 
 from guard_core import (
-    REDIRECTION, _absolute, _git, _git_subcommand_index, _segment_git_c_target, _walk_wrappers, basename, cap_safe,
+    GIT_WORK_TREE_RE, REDIRECTION, _absolute, _git, _git_subcommand_index, _segment_git_c_target, _walk_wrappers, basename, cap_safe,
     command_root, dir_before_segment, git_calls, inline_script, inner_commands, resolve_command, resolve_default_base,
     segment_tokens, shell_abs, split_segments,
 )
@@ -550,9 +550,11 @@ def records_page_hit(stripped: str, cwd: str) -> str:
                 generated.append((run[0], _env_chdir(run[1], dir_before_segment(segments, number, cwd, ends))))
             continue
         c_target = _segment_git_c_target(segment_tokens(segment) or [])
-        # The segment's own directory: a `cd` inside `( ... )` ends with the parenthesis. The chain's last
-        # `cd` stands in only when that directory cannot be told.
-        root = dir_before_segment(segments, number, cwd, ends) or command_root(stripped, cwd)
+        # The segment's own directory (a `cd` inside `( ... )` ends with the parenthesis), moved by its own
+        # `--work-tree`. The chain's `command_root` stands in only when that directory cannot be told.
+        root, work_tree = dir_before_segment(segments, number, cwd, ends), GIT_WORK_TREE_RE.search(segment)
+        root = command_root(stripped, cwd) if root is None else (
+            _absolute(work_tree.group(2), root) if work_tree else root)
         where = _absolute(c_target, root) if c_target is not None else root
         done = _git(where, "rev-parse", "--show-toplevel") if where and os.path.isdir(where) else None
         if done is None or done.returncode != 0 or not done.stdout.strip():
