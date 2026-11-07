@@ -1,0 +1,16 @@
+{
+  "added": "2026-11-07T19:15:00Z",
+  "context": "Goal: a yes you give through the coordinator lets the acting session act.\nWhy you: your 13:10 CST ruling in runner 8's chat needs a home in .claude/CLAUDE.md. Auto mode refused the coordinator's edit of that file, the default you kept at 12:38 CST, so only you can write it.\nDeparts from: main, where no grant covers a relayed yes \u2014 adds the bullet below under \"## Standing grants\", above \"Acts the cloud refuses\".\nNote: auto mode may still refuse a relayed merge after this lands; the bullet gives it the grant to read.\nSteps: open the link. Paste the bullet below on the line under \"## Standing grants\". Press Commit changes, pick \"Create a new branch\", then Propose changes. Then press Done here.\n\n- **A relayed yes** (owner, 2026-11-07 13:10 CST, in runner 8's chat, until withdrawn: \"a yes passed on by\n  coordinator should literally be enough\"). When the claude-settings coordinator relays an owner yes to a\n  session it started, that yes is the owner's grant for the act it names. It covers that act only, never a variant.",
+  "home": ".claude/CLAUDE.md Standing grants (your PR)",
+  "id": "cs-relayed-yes-paste",
+  "kind": "task",
+  "link": "https://github.com/shivinate7/claude-settings/edit/main/.claude/CLAUDE.md",
+  "n": 349,
+  "owner": "coordinator",
+  "rank": 1,
+  "ref": "item 346; item 342",
+  "short": "Paste the relayed-yes bullet",
+  "status": "open",
+  "title": "Paste the relayed-yes grant into .claude/CLAUDE.md",
+  "why": "Your 13:10 CST words in runner 8's chat: \"a yes passed on by coordinator should literally be enough\"."
+}
