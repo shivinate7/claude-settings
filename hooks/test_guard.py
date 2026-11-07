@@ -13292,6 +13292,19 @@ SHELL_TEST_WRITES = (
      "node - <<'EOF'\nconst s = `\nline one\nline two\n`;\nrequire('fs').writeFileSync('web/a.test.js', s)\nEOF"),
     # A comment opener inside quotes is text, so the redirect after it still writes the test.
     ("echo of a hash in quotes, redirected onto tests/x.py", "echo \"#\" > tests/x.py"),
+    # A write fed by find, xargs, a for list or a substitution lands on a test path (debt
+    # find-xargs-test-write). The find root is read; a -name or -path value is never a root.
+    ("find piped to xargs, sed -i over tests", "find tests|xargs sed -i s/a/b/"),
+    ("find piped to xargs with -I, sed -i over tests", "find tests|xargs -I{} sed -i s/a/b/ {}"),
+    ("find -exec sed -i over tests *.py", "find tests -name '*.py' -exec sed -i s/a/b/ {} +"),
+    ("for loop over tests/*.py, sed -i on $f", "for f in tests/*.py; do sed -i s/a/b/ $f; done"),
+    ("for loop over tests/*.py, sed -i on \"$f\"",
+     "for f in tests/*.py; do sed -i s/a/b/ \"$f\"; done"),
+    ("grep substitution over tests, sed -i", "sed -i s/a/b/ $(grep -rl a tests)"),
+    ("backtick substitution over tests, sed -i", "sed -i s/a/b/ `grep -rl a tests`"),
+    # A lone apostrophe in text must not hide the find pipe after it (the scanner respects strings).
+    ("lone apostrophe in echo, then find piped to xargs, sed -i over tests",
+     "echo don't; find tests|xargs sed -i s/a/b/"),
 )
 for _name, _command in SHELL_TEST_WRITES:
     sh("builder-test: shell write, %s, is refused" % _name, _command, "deny", rule=BT,
@@ -13317,6 +13330,19 @@ SHELL_TEST_ALLOWS = (
     ("recovery by git checkout of tests/x.py", "git checkout -- tests/x.py"),
     ("recovery by git restore of tests/x.py", "git restore tests/x.py"),
     ("scan tail alone: a heredoc to /tmp, then python3 runs it", SCAN_TAIL),
+    # A find, xargs, for list or substitution that writes product code, or only reads tests, stays
+    # allowed (debt find-xargs-test-write). A grep pattern, a -not -path value and a cp source are no root.
+    ("find over src piped to xargs, sed -i", "find src|xargs sed -i s/a/b/"),
+    ("for loop over src/*.py, sed -i on $f", "for f in src/*.py; do sed -i s/a/b/ $f; done"),
+    ("find over . piped to xargs, sed -i", "find .|xargs sed -i s/a/b/"),
+    ("grep pattern tests over src piped to xargs, sed -i", "grep -rl tests src|xargs sed -i s/a/b/"),
+    ("find src with -not -path tests/*, -exec sed -i",
+     "find src -not -path 'tests/*' -exec sed -i s/a/b/ {} +"),
+    ("find over tests piped to xargs, grep -n", "find tests|xargs grep -n foo"),
+    ("cp of a find over tests into /tmp", "cp $(find tests -name '*.py') /tmp/x/"),
+    ("echo of a find pipe that names tests in quotes", "echo \"find tests | xargs sed -i\""),
+    ("for loop over src/*.py, quoted sed -i on \"$f\" with a comment opener in quotes",
+     "for f in src/*.py; do sed -i \"s/#x//\" \"$f\"; done"),
 )
 for _name, _command in SHELL_TEST_ALLOWS:
     sh("builder-test: shell %s is allowed" % _name, _command, "allow", **BR)
