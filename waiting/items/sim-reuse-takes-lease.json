@@ -1,0 +1,31 @@
+{
+  "added": "2026-11-07T18:30:00Z",
+  "context": "Goal: phones are shared across repos with no clash and no waste.\nProblem (rule, stale decision): record sim-lease-tool, ruling 4, says \"The reuse path takes no lease\", and test case 50 in lint/test_sim_test.sh expects it. That is why two runs held Duo 1 at once.\nBased on (read): the record and case 50.\nDeparts from: main, where a reuse takes no lease \u2014 a reuse takes the lease of the booted slot, skips the load bars (no boot), waits while another live run holds it, and gives it back at cleanup.\nMeanwhile: the lane builds on a, and sends nothing to the batch runner until you answer.",
+  "home": "step sim-lease-gaps",
+  "id": "sim-reuse-takes-lease",
+  "kind": "decision",
+  "lane": "sim-lease-gaps",
+  "n": 336,
+  "options": [
+    {
+      "gain": "No two runs ever share one phone; the status shows who holds each booted phone.",
+      "key": "a",
+      "label": "Rewrite ruling 4: a reuse takes the lease (recommended)",
+      "lose": "A run that reuses a phone may now wait for it."
+    },
+    {
+      "gain": "A reuse never waits.",
+      "key": "b",
+      "label": "Keep ruling 4 as it is",
+      "lose": "Two runs can still drive one phone at once."
+    }
+  ],
+  "owner": "coordinator",
+  "pick": "a",
+  "rank": 1,
+  "ref": "decision sim-lease-tool ruling 4; lint/test_sim_test.sh case 50; step sim-lease-gaps",
+  "short": "Shared phones: a reused phone takes the lease",
+  "status": "open",
+  "title": "Shared iPhone simulators: may a run that reuses an already-booted phone take that phone's lease, which an old ruling forbids?",
+  "why": "This is gap 1 from your Mac's notes (commit b7bc81da): two runs drove Duo 1 at once today, and the Home review lost 7 tries."
+}
