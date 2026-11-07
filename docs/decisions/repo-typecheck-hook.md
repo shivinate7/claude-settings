@@ -18,7 +18,7 @@ holds. Each matching entry runs, and their reports are joined. One home: `hooks/
 
 - `command` is an argv list. It runs from the repo root, with no shell. Name `node` and the
   compiler's script, never `node_modules/.bin/tsc`: on Windows that file is a shim a process cannot start.
-- A glob is repo-relative. `**` crosses folders. Braces (`{ts,tsx}`) and classes (`[jt]`) are read,
+- A glob is repo-relative. `**` crosses folders. Braces (`{ts,tsx}`, not nested) and classes (`[jt]`) are read,
   and a `./` prefix reads as the same path.
 - A bad entry costs only itself. It is skipped, and one `noted` line in guard.log names the key.
 - All matching entries share one 90-second budget.
@@ -42,7 +42,7 @@ TypeScript signal, and in a project thread it never ran.
   find the extras file, and one read of it when found. No file is written, except one `noted`
   guard.log line per bad entry on each such edit under that repo. NotebookEdit never runs it.
 - The cap watch's fast path now also imports `hooks/repo_typecheck.py` and `lint/layout.py`. Both use
-  the standard library only.
+  the standard library only. A bad entry also loads the guard.log writer.
 - A process starts only when the edited file matches a declared glob: one per matching entry, all
   bounded by one 90-second budget.
 - The config_watch entry timeout rose from 20 to 120 seconds, to fit a 90-second check.

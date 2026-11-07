@@ -1510,3 +1510,6 @@
 - repo-typecheck-bash-edit: an edit made through Bash (`sed -i`) has no `file_path`, so the repo typecheck never runs for it (hooks/repo_typecheck.py `run`). Decision: repo-typecheck-hook.
 - repo-typecheck-wrapper-timeout: on Windows a timeout kills only the direct child, so a wrapper whose grandchild holds the pipe can run past the 90-second budget (hooks/repo_typecheck.py `run`). The record prescribes a direct `node` command. Decision: repo-typecheck-hook.
 - repo-typecheck-cap-cut: the report cap can cut mid-line, and a noisy first entry can push later entries' output out of the report (hooks/repo_typecheck.py `REPORT_CAP`). Decision: repo-typecheck-hook.
+- repo-typecheck-noted-line: the noted line for a bad typecheck entry has no session and names only `.claude/layout-extras.json`, and it repeats on every Write or Edit under that repo (hooks/repo_typecheck.py `_note`). Decision: repo-typecheck-hook.
+- repo-typecheck-log-wait: each noted line can wait up to 2 seconds on the guard.log lock, outside the 90-second budget (hooks/repo_typecheck.py `_note`). Decision: repo-typecheck-hook.
+- repo-typecheck-nested-brace: a nested brace set (`{a,{b,c}}`) is accepted and never matches, with no noted line (lint/layout.py `_expand_braces`). Decision: repo-typecheck-hook.
