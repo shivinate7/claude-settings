@@ -13535,6 +13535,22 @@ for _name, _command in (
     ("glued input, (python3 gen_ok.py)<<<x, writes src/app.py", "(python3 gen_ok.py)<<<x"),
 ):
     sh("builder-test: script-file, %s, is allowed" % _name, _command, "allow", **SR)
+
+# The glued input dup, `)<&3`, and the glued read-write redirect, `)<>f`. `_GLUED_REDIRECT` matches the `<` that begins
+# each, so `_unparen` splits the `)` off and `gen.py` is read: each refusal runs a script that writes a test path. Each
+# allow twin runs the same form on a script that writes product code.
+for _name, _command in (
+    ("glued input, (python3 gen.py)<&3, a glued input dup, writes tests/x.py", "(python3 gen.py)<&3"),
+    ("glued input, (python3 gen.py)<>f, a glued read-write redirect, writes tests/x.py", "(python3 gen.py)<>f"),
+):
+    sh("builder-test: script-file, %s, is refused" % _name, _command, "deny", rule=BT,
+       carries=("test-author",), **SR)
+for _name, _command in (
+    ("glued input, (python3 gen_ok.py)<&3, writes src/app.py", "(python3 gen_ok.py)<&3"),
+    ("glued input, (python3 gen_ok.py)<>f, writes src/app.py", "(python3 gen_ok.py)<>f"),
+):
+    sh("builder-test: script-file, %s, is allowed" % _name, _command, "allow", **SR)
+
 # The process substitution, `)<(`. `_GLUED_REDIRECT` skips a `<` that begins `<(`, so `_unparen` leaves the `)` on the
 # script word and the script is not read. bash rejects `(python3 gen.py)<(echo hi)` at parse time, so nothing runs and
 # the allow is safe. This case pins that verdict. Remove the `(?!\()` lookahead and `gen.py` is read: the write is
