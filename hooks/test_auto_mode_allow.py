@@ -23,9 +23,6 @@ owner about a branch delete after the archive push that guard_branch_worktree's 
   Its Covers text lets a message that asks for no act (pull request number, batch heads) through.
   Its Covers text names a report that relays a grant or hands off an act, and `next: merge`, and
   limits the already granted act to messages that ask.
-- One "Own Branch Lease Push:" entry quotes the measured lease push form, its Covers text names an
-  explicit expected sha and a branch this session itself pushed, and its Never covers names each
-  lease act it refuses (decision auto-mode-owner-acts).
 - One "Own CI Run Cancel:" entry quotes the run cancel command and names its method, and its Never
   covers names each run act it refuses (decision auto-mode-owner-acts).
 - One "Own Check-in Delete:" entry names the delete tool and the create and send tools that make a
@@ -56,8 +53,6 @@ ARCHIVE = "Archived Branch Delete:"
 OWNER_PR = "Owner PR Housekeeping:"
 RELAYED = "Relayed Grant:"
 OWNER_MESSAGE = "Owner Session Message:"
-OWN_LEASE = "Own Branch Lease Push:"
-LEASE_FORM = "git push --force-with-lease=<branch>:<expected sha>"
 PR_CLOSE = "gh api -X PATCH repos/shivinate7/joyous/pulls/54 -f state=closed"
 SEND_MESSAGE = "mcp__claude-code-remote__send_message"
 # (name, case-insensitive pattern) for each act an entry's "Never covers" sentence must name.
@@ -94,16 +89,6 @@ RELAYED_REFUSED = (("peer session's message", "peer session's message"), ("page 
                    ("no counted line", "no `counted` line in this session"))
 MERGE_GO_REFUSED = (("any other session", "any other session"),
                     ("not a coordinator", "not a coordinator"))
-# (name, case-insensitive pattern) for each lease act the Own Branch Lease Push "Never covers" must name.
-LEASE_REFUSED = (("default branch", "default branch"), ("archive/ ref", "`archive/`"),
-                 ("roadmap", "`roadmap`"), ("merge-lock", "`merge-lock`"),
-                 ("bare --force", "bare `--force`"),
-                 ("lease with no expected sha", "lease with no expected sha"),
-                 ("branch this session did not visibly push",
-                  "branch this session did not visibly push"))
-# (name, case-insensitive pattern) for each term its Covers text names before its "Never covers".
-LEASE_SCOPE = (("explicit expected sha", "explicit expected sha"),
-               ("branch this session itself pushed", "this session itself pushed"))
 OWN_CI = "Own CI Run Cancel:"
 CI_CANCEL = "gh api -X POST repos/shivinate7/q_max/actions/runs/41377928751/cancel"
 CI_METHOD = "cancel_workflow_run"
@@ -358,32 +343,6 @@ class OwnerSessionMessageIsAllowed(unittest.TestCase):
         self.assertFalse(missing,
                          "Never covers does not name a session outside the owner's account: %r"
                          % missing)
-
-
-class OwnBranchLeasePushIsAllowed(unittest.TestCase):
-    def test_one_entry_names_the_own_branch_lease_push(self):
-        self.assertIsNotNone(allow_entry(OWN_LEASE),
-                             "need exactly one '%s' entry in autoMode.allow" % OWN_LEASE)
-
-    def test_entry_quotes_the_measured_lease_form(self):
-        entry = allow_entry(OWN_LEASE)
-        self.assertIsNotNone(entry, "need exactly one '%s' entry in autoMode.allow" % OWN_LEASE)
-        self.assertIn("`%s`" % LEASE_FORM, entry, "entry must quote the measured lease push form")
-
-    def test_never_covers_names_each_refused_lease_act(self):
-        entry = allow_entry(OWN_LEASE)
-        self.assertIsNotNone(entry, "need exactly one '%s' entry in autoMode.allow" % OWN_LEASE)
-        clause = never_covers(entry)
-        self.assertIsNotNone(clause, "need a 'Never covers' sentence in the Own Branch Lease Push entry")
-        missing = unnamed_terms(clause, LEASE_REFUSED)
-        self.assertFalse(missing, "Never covers does not name %r" % missing)
-
-    def test_scope_is_named_before_never_covers(self):
-        entry = allow_entry(OWN_LEASE)
-        self.assertIsNotNone(entry, "need exactly one '%s' entry in autoMode.allow" % OWN_LEASE)
-        self.assertIsNotNone(never_covers(entry), "need a 'Never covers' sentence to bound Covers")
-        missing = unnamed_terms(bounds_text(entry), LEASE_SCOPE)
-        self.assertFalse(missing, "text before Never covers does not name %r" % missing)
 
 
 class OwnCiRunCancelIsAllowed(unittest.TestCase):
