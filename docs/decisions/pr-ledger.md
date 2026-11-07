@@ -109,8 +109,8 @@ Per rule `outcomes-mechanize-rules`:
 
 - Batch runner 8 activity from 2026-11-06 15:15 CST to 2026-11-07 05:00 CST: unknown.
 - The q_max PRs were not sampled.
-- Stale-record act: this record says `fix check`, or a new lane at round 1. `merge.py` reads any stale record as `lane round n`. Ruling needed: which one stands.
-- `merge --reviewed --json` (part 3b's input) does not exist on `pr-state-is-on-the-pr`. Ruling needed: which part adds it.
+- Stale-record act: this record's line stands (rule `roles-review-cap-three`). `merge.py` on part 1 still reads a stale record as `lane round n`; part 3b changes it to match, with its own red case.
+- Part 3b adds `merge --reviewed --json`.
 - A `review_ready` lane stays live (14:40 ruling), so its draft still hides from the draft row after 3a. Unknown whether part 3b fixes that.
 - Dated by: a change to how the batch runner reads its queue, or to the next-act read in `merge --reviewed`. Either change rewrites this record.
 
