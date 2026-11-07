@@ -148,7 +148,7 @@ Other tools, in `judge` order:
   worktree-home        deny. A call from an agent whose shell cwd or write target is outside its
                        own recorded worktree. Read and Grep pass, so a stranded agent can report.
                        A Write or Edit strictly inside the caller's own `agent-<id>-<suffix>`
-                       red-run folder passes, and so does a Bash call whose cwd is there.
+                       red-run folder passes, and so does a Bash call whose cwd is there, if a git worktree holds that folder.
                        No record (a non-isolated agent, or the orchestrator) allows everything.
                        No override lifts it. (an-agent-outside-its-home-tree-must-stop)
   other-checkout       deny. Any session's write whose target sits in a checkout of this clone
@@ -4212,7 +4212,7 @@ def worktree_home_hit(payload, tool: str, tool_input: dict, cwd: str) -> str:
         # A cwd inside the caller's own red-run folder is the test-author's second home: the call
         # passes here, and the other rules still judge what it writes.
         if (path_is_inside(home_cwd, home) is False
-                and not _own_red_run(payload, home_primary, home_cwd)
+                and not _own_red_cwd(payload, home_primary, home_cwd)
                 and not is_move_into(tool, str(tool_input.get("command", "")), home_cwd, home)):
             return "shell cwd outside recorded agent home"
     elif tool in WRITE_TOOLS:
@@ -4434,28 +4434,51 @@ def _cd_home_exempt(payload, cwd: str, target: str) -> bool:
 RED_RUN_ROOT_VERBS = ("cp",)
 
 
-def _own_red_run(payload, primary: str, path: str, root_ok: bool = True) -> bool:
-    """True when PATH is inside the caller's own test-author red-run folder
-    `<primary>/.claude/worktrees/agent-<its agent id>-<suffix>`. The one home for that test: the
-    `cd` act and the write act of other-checkout, and worktree-home's Write target, all ask it.
-    PRIMARY is the primary checkout alone, so a folder under a linked worktree never counts. The id and
-    its dash match whole, so a sibling whose id only starts with this one does not pass. ROOT_OK False
-    leaves the folder itself out: a write passes only strictly inside it, so a delete of the folder
-    is still refused. Both sides compare case-folded and realpath'd (`path_is_inside`)."""
+def _own_red_folder(payload, primary: str, path: str) -> str:
+    """The caller's own red-run folder `<primary>/.claude/worktrees/agent-<its agent id>-<suffix>`
+    that holds PATH (or is PATH), else ''. The name is read from the realpath of PATH, so a symlink
+    or a `..` spelling is judged by where it lands, as `path_is_inside` judges it."""
     agent_id = payload.get("agent_id") if isinstance(payload, dict) else None
     if not isinstance(agent_id, str) or not agent_id or not primary or not path:
-        return False
+        return ""
+    try:
+        folder = os.path.realpath(path)
+    except Exception:
+        return ""
     holder = os.path.join(primary, ".claude", "worktrees")
-    folder = path
     while True:
         parent = os.path.dirname(folder)
         if parent == folder:
-            return False
+            return ""
         if (path_is_inside(parent, holder) is True and path_is_inside(holder, parent) is True
                 and os.path.normcase(os.path.basename(folder)).startswith(
                     os.path.normcase("agent-" + agent_id + "-"))):
-            return root_ok or folder != path
+            return folder
         folder = parent
+
+
+def _own_red_run(payload, primary: str, path: str, root_ok: bool = True) -> bool:
+    """True when PATH is inside the caller's own test-author red-run folder (`_own_red_folder`).
+    The one home for that test: the `cd` act and the write act of other-checkout, and
+    worktree-home's Write target, all ask it. PRIMARY is the primary checkout alone, so a folder
+    under a linked worktree never counts. The id and its dash match whole, so a sibling whose id
+    only starts with this one does not pass. ROOT_OK False leaves the folder itself out: a write
+    passes only strictly inside it, so a delete of the folder is still refused. Both sides compare
+    case-folded and realpath'd (`path_is_inside`)."""
+    folder = _own_red_folder(payload, primary, path)
+    return bool(folder) and (root_ok or path_is_inside(folder, path) is not True)
+
+
+def _own_red_cwd(payload, primary: str, cwd: str) -> bool:
+    """True when the shell CWD sits in the caller's own red-run folder AND that folder is a checkout
+    of this clone (a root `git worktree list` names). A plain `agent-<id>-x` folder that no worktree
+    holds is no second home: other-checkout would take the primary as that cwd's own checkout. An
+    unreadable worktree list gives False, so the call stays refused as on main."""
+    folder = _own_red_folder(payload, primary, cwd)
+    if not folder:
+        return False
+    return any(path_is_inside(folder, root) is True and path_is_inside(root, folder) is True
+               for root in clone_checkouts(folder) or ())
 
 
 def other_checkout_hit(tool: str, tool_input: dict, cwd: str, session_id: str = "",

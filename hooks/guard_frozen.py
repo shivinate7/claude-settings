@@ -213,7 +213,7 @@ def is_project_config(path: str, cwd: str) -> bool:
 # The list holds the PowerShell cmdlets (`Set-Content`, `Out-File`, `Add-Content`, `Remove-Item`) as
 # well as the POSIX commands. Matching folds case, as PowerShell does.
 MUTATING_COMMAND = (
-    r"\b(?i:rm|mv|cp|chmod|truncate|tee|install|ln"
+    r"\b(?i:rm|mv|cp|chmod|truncate|tee|install|ln|mkdir|touch"
     r"|set-content|add-content|clear-content|out-file|new-item|remove-item|move-item|copy-item"
     r"|rename-item|set-itemproperty|ri|rd|rmdir|del|erase|move|copy|ren)\b"
 )
