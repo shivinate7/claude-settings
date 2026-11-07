@@ -4162,12 +4162,32 @@ test("the restatement scan finds a width behind a comment opener in a string, in
   ]);
 });
 
-test("the restatement scan skips a number equal to FIT_W that is not a width value: a count, a font weight, a breakpoint", () => {
+test("the restatement scan finds a width written as an attribute, a style assignment, a setAttribute argument or a calc value", () => {
+  const src = [
+    "const FIT_W = 390;",
+    '<img width="390" alt="">',
+    "<svg width='390'></svg>",
+    'el.style.width = "390px";',
+    'el.setAttribute("width", 390);',
+    "div { width: calc(390px); }",
+  ].join("\n");
+  assert.deepEqual(restatements(src, "390"), [
+    'line 2: <img width="390" alt="">',
+    "line 3: <svg width='390'></svg>",
+    'line 4: el.style.width = "390px";',
+    'line 5: el.setAttribute("width", 390);',
+    "line 6: div { width: calc(390px); }",
+  ]);
+});
+
+test("the restatement scan skips a number equal to FIT_W that is not a width value: a count, a font weight, a breakpoint, a height", () => {
   const src = [
     "const FIT_W = 390;",
     "const rows = 390; // the count of rows",
     '<td>390 units</td> <i style="font-weight: 390"></i>',
     "@container (min-width: 390px) { .pk { gap: 16px } }",
+    'el.style.height = "390px";',
+    'el.setAttribute("height", 390);',
   ].join("\n");
   assert.deepEqual(restatements(src, "390"), []);
 });
