@@ -14,6 +14,8 @@ files under hooks/, lint/, bin/, actions/ and .github/ (no touched or untouched 
 with the decisions whose Home names it and the rows that name it.
 STALE005 (range mode only) reports an added governed line that states a capability by route with no backing. It is
 report only: the exit code does not change (RouteClaimTests).
+STALE006 (range mode only) reports a Markdown line anchor `path:N` or `path:N-M` whose cited lines moved, changed or
+were removed in the range. It is report only too (DriftTests).
 
 
 `--tree [REV]` reads every tracked Markdown file at REV instead of a range: STALE003 for a path cite that names
@@ -2179,6 +2181,180 @@ class CitedExcerptTests(unittest.TestCase):
     def test_a_cite_that_names_no_backing_path_gives_none(self):
         shown = self.stale.cited_excerpt("read the top of the file", self.TEXT)
         self.assertIsNone(shown, "a read cite with no backing path gives %r, want None" % (shown,))
+
+
+ANCHOR_NOTES = "# Notes\n\n- the gate is `code.py:10`.\n"  # the anchor is on line 3
+SPAN_NOTES = "# Notes\n\n- the gate is `code.py:10-12`.\n"
+STALE006 = re.compile(r"^stale-cites: report, ([\w./@+~-]+\.md):(\d+): STALE006 (.*)$")
+HUNK_HEADER = re.compile(r"^@@ -(\d+)(?:,(\d+))? \+\d+(?:,\d+)? @@", re.M)
+CITED_SPAN = re.compile(r"code\.py:\d+(?:-\d+)?")
+
+
+def source_lines(n=20):
+    """code.py as lines: line k is `vK = K`, so a cite reads against its own number."""
+    return ["v%d = %d" % (k, k) for k in range(1, n + 1)]
+
+
+def text_of(lines):
+    return "".join(line + "\n" for line in lines)
+
+
+def insert_above_line_ten(lines):
+    """`lines` with three lines added above line 10, so the old line 10 is now line 13."""
+    return lines[:9] + ["a%d = %d" % (k, k) for k in (1, 2, 3)] + lines[9:]
+
+
+def stale006_lines(out):
+    """(path, line, text) for each report line the check printed as STALE006, in output order."""
+    return [(m.group(1), int(m.group(2)), m.group(3)) for m in map(STALE006.match, out.splitlines()) if m]
+
+
+def base_hunks(rng, path):
+    """(old start, old count) of each hunk the range makes in `path`, from `git diff -U0`. A case reads its scope
+    from these before it probes the check."""
+    out = git(rng.repo, "diff", "-U0", rng.base, rng.head, "--", path)
+    return [(int(m.group(1)), int(m.group(2) or 1)) for m in HUNK_HEADER.finditer(out)]
+
+
+class DriftTests(StaleCase):
+    """STALE006, range mode, report only. A Markdown line anchors `path:N` or `path:N-M` on a file the range edits in
+    place. The anchor was written against the file at base, so the range shows where those lines went: moved (lines
+    above them grew or shrank), changed (a line inside them differs) or removed. A Markdown line the range adds or edits
+    was anchored by its author, so it is never reported. Each report line starts
+    `stale-cites: report, path:line: STALE006`. The exit code never changes."""
+
+    def drift(self, head_code, head_notes=None, base_notes=ANCHOR_NOTES, base_code=None):
+        """A range that writes `head_code` to code.py, and `head_notes` to NOTES when given. Base holds `base_code`
+        (the numbered source by default) and `base_notes`."""
+        base_code = source_lines() if base_code is None else base_code
+
+        def change(repo):
+            write(repo, "code.py", text_of(head_code))
+            if head_notes is not None:
+                write(repo, NOTES, head_notes)
+            commit(repo)
+        return self.make_range(base_files(base_notes, extra={"code.py": text_of(base_code)}), change)
+
+    def assert_stale006(self, rng, line, contains=(), path=NOTES):
+        """Scope first: the range touched code.py. Then the exit is 0, the STALE006 lines that name `path` are exactly
+        `line`, and that line's text holds each of `contains`. Returns the text."""
+        self.assertIn("code.py", touched(rng))
+        rc, out = self.run_check(rng)
+        self.assertEqual(rc, 0, out)
+        hits = [(n, text) for p, n, text in stale006_lines(out) if p == path]
+        self.assertEqual([n for n, _ in hits], [line], "STALE006 does not name %s:%d alone\n%s" % (path, line, out))
+        for needle in contains:
+            self.assertIn(needle, hits[0][1], "the STALE006 line lacks %r\n%s" % (needle, out))
+        return hits[0][1]
+
+    def assert_no_stale006(self, rng):
+        """The exit is 0, and no STALE006 line prints."""
+        rc, out = self.run_check(rng)
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(stale006_lines(out), [], "a STALE006 line prints where the range makes none due\n" + out)
+
+    def test_anchor_on_lines_that_three_inserted_lines_push_down_is_reported_at_their_new_home(self):
+        rng = self.drift(insert_above_line_ten(source_lines()))
+        self.assertEqual(base_hunks(rng, "code.py"), [(9, 0)])  # scope: three lines go in above line 10
+        self.assertNotIn(NOTES, touched(rng))  # scope: the anchoring line is untouched
+        self.assert_stale006(rng, 3, ["code.py:13"])
+
+    def test_span_below_two_deleted_lines_is_reported_at_its_new_span(self):
+        rng = self.drift(source_lines()[2:], base_notes=SPAN_NOTES)
+        self.assertEqual(base_hunks(rng, "code.py"), [(1, 2)])  # scope: lines 1 and 2 go, above the span
+        self.assertNotIn(NOTES, touched(rng))  # scope: the anchoring line is untouched
+        self.assert_stale006(rng, 3, ["code.py:8-10"])
+
+    def test_edit_inside_the_span_with_no_line_above_it_moving_reports_cited_text_changed(self):
+        lines = source_lines()
+        lines[10] = "v11 = 99"  # line 11, inside 10-12
+        rng = self.drift(lines, base_notes=SPAN_NOTES)
+        self.assertEqual(base_hunks(rng, "code.py"), [(11, 1)])  # scope: one line inside the span changes
+        text = self.assert_stale006(rng, 3, ["cited text changed"])
+        self.assertTrue(set(CITED_SPAN.findall(text)) <= {"code.py:10-12"},
+                        "the STALE006 line names a new anchor, though no line above the span moved\n" + text)
+
+    def test_edit_only_below_the_span_is_silent_while_an_insertion_above_it_is_reported(self):
+        control = self.drift(insert_above_line_ten(source_lines()), base_notes=SPAN_NOTES)
+        self.assert_stale006(control, 3, ["code.py:13-15"])  # control: the same span, moved by an insertion above
+        lines = source_lines()
+        lines[13] = "v14 = 99"  # line 14, below 10-12
+        rng = self.drift(lines, base_notes=SPAN_NOTES)
+        self.assertEqual(base_hunks(rng, "code.py"), [(14, 1)])  # scope: the one edit is below the span
+        self.assert_no_stale006(rng)
+
+    def test_anchor_line_the_range_adds_is_never_reported(self):
+        self.assert_stale006(self.drift(insert_above_line_ten(source_lines())), 3, ["code.py:13"])  # control
+        rng = self.drift(insert_above_line_ten(source_lines()), head_notes=ANCHOR_NOTES, base_notes="# Notes\n")
+        self.assertEqual(base_hunks(rng, NOTES), [(1, 0)])  # scope: the range adds the anchoring line
+        self.assert_no_stale006(rng)
+
+    def test_anchor_line_the_range_edits_is_never_reported(self):
+        self.assert_stale006(self.drift(insert_above_line_ten(source_lines())), 3, ["code.py:13"])  # control
+        rng = self.drift(insert_above_line_ten(source_lines()), head_notes="# Notes\n\n- the gate is `code.py:13`.\n")
+        self.assertEqual(base_hunks(rng, NOTES), [(3, 1)])  # scope: line 3 is edited in place, re-anchored
+        self.assert_no_stale006(rng)
+
+    def test_cited_lines_deleted_outright_report_cited_lines_removed(self):
+        lines = source_lines()
+        del lines[9:12]  # lines 10 to 12
+        rng = self.drift(lines, base_notes=SPAN_NOTES)
+        self.assertEqual(base_hunks(rng, "code.py"), [(10, 3)])  # scope: the span goes and nothing replaces it
+        self.assert_stale006(rng, 3, ["cited lines removed"])
+
+    def test_cited_file_emptied_reports_cited_lines_removed(self):
+        rng = self.drift([], base_notes=SPAN_NOTES)
+        self.assertEqual(base_hunks(rng, "code.py"), [(1, 20)])  # scope: every line of the file goes
+        self.assert_stale006(rng, 3, ["cited lines removed"])
+
+    def test_disable_line_mark_for_stale006_silences_its_line(self):
+        marked = "# Notes\n\n- the gate is `code.py:10`. <!-- ste-disable-line STALE006 -->\n"
+        self.assert_stale006(self.drift(insert_above_line_ten(source_lines())), 3, ["code.py:13"])  # control
+        rng = self.drift(insert_above_line_ten(source_lines()), base_notes=marked)
+        self.assertEqual(base_hunks(rng, "code.py"), [(9, 0)])  # scope: the same insertion above line 10
+        self.assert_no_stale006(rng)
+
+    def test_stale006_keeps_the_exit_zero_and_prints_after_the_stale005_lines(self):
+        rng = self.drift(insert_above_line_ten(source_lines()),
+                         head_notes=ANCHOR_NOTES + "- The cloud cannot push to main.\n")
+        self.assertIn(NOTES, touched(rng))  # scope: the range adds a claim line to NOTES
+        rc, out = self.run_check(rng)
+        self.assertEqual(rc, 0, out)
+        report = out.splitlines()
+        claims = [i for i, line in enumerate(report) if "STALE005" in line]
+        self.assertTrue(claims, "STALE005 does not print for the added claim line\n" + out)
+        self.assertEqual([n for p, n, _ in stale006_lines(out) if p == NOTES], [3],
+                         "no STALE006 line for the anchor on line 3\n" + out)
+        moved = [i for i, line in enumerate(report) if "STALE006" in line]
+        self.assertLess(max(claims), min(moved), "a STALE006 line prints before a STALE005 line\n" + out)
+
+    def test_stale006_starts_no_git_process_beyond_the_five_a_touched_py_starts(self):
+        rng = self.drift(insert_above_line_ten(source_lines()))
+        rc, out, commands = self.run_traced_commands(rng)
+        self.assertEqual(rc, 0, out)
+        self.assertEqual([n for p, n, _ in stale006_lines(out) if p == NOTES], [3],
+                         "no STALE006 line for the anchor on line 3\n" + out)
+        # A touched .py starts these five with no anchor line. The Markdown read rides the cat-file and the ls-tree
+        # that the run already opens, so the anchor adds no start.
+        subs = sorted(c.split()[0] for c in commands)
+        self.assertEqual(subs, ["cat-file", "diff", "ls-tree", "merge-base", "rev-parse"], commands)
+
+    def test_insertion_above_line_one_moves_an_anchor_on_line_one(self):
+        rng = self.drift(["a1 = 1", "a2 = 2"] + source_lines(), base_notes="# Notes\n\n- the gate is `code.py:1`.\n")
+        self.assertEqual(base_hunks(rng, "code.py"), [(0, 0)])  # scope: the insertion sits above line 1
+        self.assert_stale006(rng, 3, ["code.py:3"])
+
+    def test_anchor_on_the_last_line_of_a_long_file_moves_with_one_line_inserted_at_the_top(self):
+        base = source_lines(300)
+        rng = self.drift(["top = 0"] + base, base_notes="# Notes\n\n- the gate is `code.py:300`.\n", base_code=base)
+        self.assertEqual(base_hunks(rng, "code.py"), [(0, 0)])  # scope: one line goes in above line 1
+        self.assert_stale006(rng, 3, ["code.py:301"])
+
+    def test_anchor_inside_a_fence_after_a_comment_opener_and_a_lone_quote_still_reports(self):
+        notes = '# Notes\n\n```\n/* a comment opener, and a lone " quote\n- the gate is `code.py:10`.\n```\n'
+        rng = self.drift(insert_above_line_ten(source_lines()), base_notes=notes)
+        self.assertNotIn(NOTES, touched(rng))  # scope: the anchored line is untouched
+        self.assert_stale006(rng, 5, ["code.py:13"])
 
 
 if __name__ == "__main__":
