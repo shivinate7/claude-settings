@@ -14,6 +14,7 @@
 //   - an unindented tested-by line, a line with no backticks, and a `;` separator each fail, and the failure names the page (T7d to T7f).
 //   - `import pkgpy` loads `pkgpy/__init__.py` by its package name (T8d, T8e).
 //   - a map line whose tested-by line is missing passes: the line is optional (T1b).
+//   - a present tsconfig.json that does not parse makes an alias read unknown, and the message starts `unknown read: could not read <test>: tsconfig.json` (T11d).
 //
 // Cases:
 //   T1   the clean fixture passes. T1b: no tested-by line at all passes. T1c, T1d: full size, 40 tests on one line, all pass; one that does not load the file fails.
@@ -30,6 +31,12 @@
 //        Under a backtick line in a Notes section it is an orphan and fails (T7h): a tested-by line is valid only under a Code files map line.
 //   T8   one hop. Through `src/pkg/index.ts`, the test passes (T8a). Without the re-export, it fails (T8b). Two hops fail (T8c).
 //        Through `src/pkgpy/__init__.py`, the test passes (T8d). Without the re-export, it fails (T8e).
+//   T11  a test that imports by a tsconfig path alias (`@/`). T11a: a comment, trailing commas, baseUrl and paths: the alias loads home.ts.
+//        T11b: an `extends` chain, whose paths resolve from the base file. T11c, T11c2: a matched pattern with no hit, and a bare specifier
+//        with no pattern: both FAIL. T11d: a truncated tsconfig makes the read unknown. T11e, T11f: controls. No tsconfig keeps main's FAIL,
+//        and a broken tsconfig with relative imports only passes.
+//        Red on main: T11a, T11b, T11d. T11c and T11c2 are controls: main skips every bare specifier, so both FAIL there too. Their proof
+//        after the build is a mutant that falls back to baseUrl. Green on main: T11c, T11c2, T11e, T11f.
 //   C0   control, green on the old code: the import reader MAP11 uses reads the fixture's imports the way these cases assume.
 
 import { test } from 'node:test';
@@ -426,4 +433,148 @@ test('C0. control, green on the old code: the import reader MAP11 uses reads the
   assert.deepEqual(of('src/pkg.spec.ts'), ['src/pkg/index.ts'], 'pkg.spec.ts loads the package, and reaches home.ts only through it: one hop');
   assert.deepEqual(of('src/pkg/index.ts'), ['src/home.ts'], 'the package re-exports home.ts');
   assert.deepEqual(of('src/home.spec.ts', "import type { homeTitle } from './home';\n"), [], 'a type-only import loads nothing');
+});
+
+// ---- T11. A test that imports by a tsconfig path alias (decision map-tested-by-line; debt map-import-alias-unread).
+// The host's tsconfig.json is read: comments, trailing commas and an `extends` chain. Then `paths`: the longest prefix, one `*`, an exact
+// name wins, targets are tried in order, and a matched pattern with no hit is null, with no baseUrl fallback. Then `baseUrl`.
+// A missing tsconfig keeps main's behaviour. A present one that cannot be read makes the read unknown.
+// The scanner traps of a JSON text: `/*` inside the string "@/*" (T11a), and a lone quote in a `//` comment (T11a). A JSON text holds
+// no template literal, so that trap has no case here.
+const TSCONFIG = 'tsconfig.json';
+const ALIAS = 'src/alias.spec.ts';
+const RELATIVE = 'src/relative.spec.ts';
+const T11A_TSCONFIG = `{
+  // the host's path aliases
+  "compilerOptions": {
+    "baseUrl": ".",
+    "paths": {"@/*": ["./src/*"],},
+  },
+}
+`;
+const T11B_ROOT = '{\n  "extends": "./config/base.json"\n}\n';
+const T11B_BASE = '{\n  "compilerOptions": {\n    "paths": {"@/*": ["../src/*"]}\n  }\n}\n';
+const T11C_TSCONFIG = '{\n  "compilerOptions": {\n    "baseUrl": ".",\n    "paths": {"src/*": ["./lib/*"]}\n  }\n}\n';
+const T11_TRUNCATED = '{\n  "compilerOptions": {\n    "baseUrl": ".",\n    "paths": {"@/*": ["./src/*"]\n';
+
+/** True when `text` reads as JSON. A tsconfig with a comment or a trailing comma does not. */
+const parses = (text) => { try { JSON.parse(text); return true; } catch { return false; } };
+/** The module specifiers of the `from '...'` imports of a TS file. */
+const specifiersOf = (text) => [...text.matchAll(/from ['"]([^'"]+)['"]/g)].map((m) => m[1]);
+/** The test paths named in backticks on the tested-by lines of docs/map/core.md. */
+const testedPaths = (dir) => readAt(dir, CORE).split('\n').filter((l) => l.includes('Tested by:')).flatMap((l) => [...l.matchAll(/`([^`]+)`/g)].map((m) => m[1]));
+/** Writes `rel` into `dir` and tracks it, so `git ls-files` lists it. */
+const addTracked = (dir, rel, text) => { writeAt(dir, rel, text); gitIn(dir, 'add', '-N', rel); };
+/** Adds the map line of a new test file under the code files of docs/map/core.md, as each test of the fixture has one. Else MAP1 fails on the new file. */
+const mapTest = (dir, rel, prose) => insertAfter(dir, CORE, '- `src/home.spec.ts` ', `- \`${rel}\` — ${prose}`);
+/** A test that imports `specifier` and nothing else, tracked and mapped. */
+const writeAliasSpec = (dir, specifier) => {
+  addTracked(dir, ALIAS, `import { homeTitle } from '${specifier}';\n\nexport const title = homeTitle;\n`);
+  mapTest(dir, ALIAS, 'Tests the home title by an alias.');
+};
+/** The scope of a case: the file `rel` imports by `prefix`, such as `@/`. */
+const importsBy = (dir, rel, prefix) => assert.ok(readAt(dir, rel).includes(`'${prefix}`), `${rel} must import by ${prefix}`);
+
+test('T11a. a tsconfig with a comment, trailing commas, baseUrl and paths: the alias import loads home.ts, so MAP11 passes', () => {
+  needFile(REL);
+  const dir = scratchRepo();
+  addTracked(dir, TSCONFIG, T11A_TSCONFIG);
+  writeAliasSpec(dir, '@/home');
+  setTestedBy(dir, 'src/home.ts', tested(ALIAS));
+  // The scope first: the tsconfig exists, it is JSONC (a comment, trailing commas, and a lone quote in the comment), it maps `@/*`, and the test imports by the alias.
+  assert.ok(existsSync(join(dir, TSCONFIG)), 'tsconfig.json must exist');
+  assert.ok(!parses(readAt(dir, TSCONFIG)), 'the tsconfig must not parse as JSON: it holds a comment and trailing commas');
+  assert.ok(readAt(dir, TSCONFIG).includes("host's"), 'the tsconfig must hold a lone quote in its comment');
+  assert.ok(readAt(dir, TSCONFIG).includes('"@/*"'), 'the tsconfig must map "@/*"');
+  importsBy(dir, ALIAS, '@/');
+  mustPass(check(dir));
+});
+
+test('T11b. a tsconfig that extends a base file, whose paths resolve from the base: the alias import loads home.ts, so MAP11 passes', () => {
+  needFile(REL);
+  const dir = scratchRepo();
+  addTracked(dir, TSCONFIG, T11B_ROOT);
+  addTracked(dir, 'config/base.json', T11B_BASE);
+  writeAliasSpec(dir, '@/home');
+  setTestedBy(dir, 'src/home.ts', tested(ALIAS));
+  // The scope first: the root holds no paths, the base holds no baseUrl, and its target climbs out of config/ to src/.
+  assert.ok(existsSync(join(dir, TSCONFIG)), 'tsconfig.json must exist');
+  assert.ok(!readAt(dir, TSCONFIG).includes('paths'), 'the root tsconfig must hold no paths');
+  assert.ok(!readAt(dir, 'config/base.json').includes('baseUrl'), 'config/base.json must hold no baseUrl');
+  assert.ok(readAt(dir, 'config/base.json').includes('"../src/*"'), 'config/base.json must map to ../src/*');
+  importsBy(dir, ALIAS, '@/');
+  mustPass(check(dir));
+});
+
+/** The MAP11 run of a scratch repository under T11C_TSCONFIG, whose alias test imports `specifier`. */
+const pathMissRun = (specifier) => {
+  const dir = scratchRepo();
+  addTracked(dir, TSCONFIG, T11C_TSCONFIG);
+  writeAliasSpec(dir, specifier);
+  setTestedBy(dir, 'src/home.ts', tested(ALIAS));
+  return { dir, r: check(dir) };
+};
+
+test('T11c. control: a matched paths pattern with no hit is null, with no baseUrl fallback, so `src/home` FAILs MAP11 and names the page, the test and the file', () => {
+  needFile(REL);
+  const { dir, r } = pathMissRun('src/home');
+  // The scope first: no lib folder holds the pattern target, and src/home.ts exists, so a baseUrl fallback would reach it.
+  assert.ok(existsSync(join(dir, TSCONFIG)), 'tsconfig.json must exist');
+  assert.ok(!existsSync(join(dir, 'lib')), 'no lib folder may exist, or the pattern target would hit');
+  assert.ok(existsSync(join(dir, 'src/home.ts')), 'src/home.ts must exist, so a baseUrl fallback would hit it');
+  importsBy(dir, ALIAS, 'src/');
+  mustFail(r, CORE, ALIAS, 'src/home.ts');
+});
+
+test('T11c2. control: a bare specifier with no matching pattern is null, so `~/home` FAILs MAP11 and names the page, the test and the file', () => {
+  needFile(REL);
+  const { dir, r } = pathMissRun('~/home');
+  // The scope first: the tsconfig exists, and the test imports by `~/`, which no pattern of it matches.
+  assert.ok(existsSync(join(dir, TSCONFIG)), 'tsconfig.json must exist');
+  importsBy(dir, ALIAS, '~/');
+  mustFail(r, CORE, ALIAS, 'src/home.ts');
+});
+
+test('T11d. a tsconfig that is present but truncated: the alias read is unknown, so MAP11 FAILs with `unknown read: could not read src/alias.spec.ts: tsconfig.json`', () => {
+  needFile(REL);
+  const dir = scratchRepo();
+  addTracked(dir, TSCONFIG, T11_TRUNCATED);
+  writeAliasSpec(dir, '@/home');
+  setTestedBy(dir, 'src/home.ts', tested(ALIAS));
+  // The scope first: the tsconfig is on disk and does not parse, and the test imports by the alias.
+  assert.ok(existsSync(join(dir, TSCONFIG)), 'tsconfig.json must exist');
+  assert.ok(!parses(readAt(dir, TSCONFIG)), 'the tsconfig must not parse');
+  importsBy(dir, ALIAS, '@/');
+  const r = check(dir);
+  mustFail(r, ALIAS);
+  assert.match(map11(r), /unknown read: could not read src\/alias\.spec\.ts: tsconfig\.json/, `the unreadable tsconfig must make the alias read unknown, and name the test and tsconfig.json\n${map11(r)}`);
+});
+
+test('T11e. control: with no tsconfig.json, the alias import loads nothing, so MAP11 FAILs as on main, and the read is not unknown', () => {
+  needFile(REL);
+  const dir = scratchRepo();
+  writeAliasSpec(dir, '@/home');
+  setTestedBy(dir, 'src/home.ts', tested(ALIAS));
+  // The scope first: no tsconfig.json exists, and the test imports by the alias.
+  assert.ok(!existsSync(join(dir, TSCONFIG)), 'the scratch repository must hold no tsconfig.json');
+  importsBy(dir, ALIAS, '@/');
+  const r = check(dir);
+  mustFail(r, CORE, ALIAS, 'src/home.ts');
+  assert.doesNotMatch(map11(r), /unknown read/, `a missing tsconfig keeps main's read: a FAIL with no unknown read\n${map11(r)}`);
+});
+
+test('T11f. control: a tsconfig that does not parse, with only relative imports, reads no alias, so MAP11 passes', () => {
+  needFile(REL);
+  const dir = scratchRepo();
+  addTracked(dir, TSCONFIG, T11_TRUNCATED);
+  addTracked(dir, RELATIVE, "import { homeTitle } from './home';\n\nexport const title = homeTitle;\n");
+  mapTest(dir, RELATIVE, 'Tests the home title by a relative import.');
+  setTestedBy(dir, 'src/home.ts', tested(RELATIVE));
+  // The scope first: the tsconfig does not parse, the test imports by relative paths only, and every TS test named on a tested-by line does too.
+  assert.ok(existsSync(join(dir, TSCONFIG)), 'tsconfig.json must exist');
+  assert.ok(!parses(readAt(dir, TSCONFIG)), 'the tsconfig must not parse');
+  assert.ok(specifiersOf(readAt(dir, RELATIVE)).length > 0, 'the test must import something');
+  for (const t of testedPaths(dir).filter((p) => /\.(ts|tsx|mjs|js)$/.test(p)))
+    assert.ok(specifiersOf(readAt(dir, t)).every((s) => s.startsWith('.')), `${t} must import by relative paths only`);
+  mustPass(check(dir));
 });
