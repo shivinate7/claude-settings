@@ -7807,6 +7807,24 @@ for _command in NM_OFF_LIST:
     nm_case("linked-nm: " + _command + " (Bash) in a folder with no node_modules is allowed",
             _command, "allow", NMABSENT)
 
+# THE WORKSPACE FLAGS ON `npm version`. With a workspace flag, npm reifies the linked root, so the command
+# changes the install through the link. Without one it only rewrites package.json (a control below).
+NM_WORKSPACE_VERSION = (
+    "npm version patch -w a", "npm version patch --workspaces", "npm version patch -ws",
+    "npm version patch --workspace=a", "npm -w a version patch",
+)
+# THE DRY RUNS THAT STILL RUN INSTALL SCRIPTS. npm rebuild, rb and edit run install scripts even with
+# --dry-run, so a dry run is no no-change for them. `npm prune --dry-run` and `npm audit fix --dry-run`
+# stay allowed (a control below).
+NM_DRY_RUN_WRITERS = (
+    "npm rebuild --dry-run", "npm rb x --dry-run", "npm edit x --dry-run", "npm --dry-run rebuild",
+)
+for _command in NM_WORKSPACE_VERSION + NM_DRY_RUN_WRITERS:
+    nm_case("linked-nm: refuse " + _command + " (Bash) in a linked folder", _command, "deny", NMLINKED)
+    nm_case("linked-nm: " + _command + " (Bash) in a real folder is allowed", _command, "allow", NMREAL)
+    nm_case("linked-nm: " + _command + " (Bash) in a folder with no node_modules is allowed",
+            _command, "allow", NMABSENT)
+
 # THE FALSE-ALARM CONTROLS in a linked folder. None of these changes the linked install, so none is refused.
 nm_case("linked-nm: npm i -g x (Bash) in a linked folder is allowed, a global install",
         "npm i -g x", "allow", NMLINKED)
@@ -7822,7 +7840,8 @@ nm_case("linked-nm: npm ci in a quoted echo, in a linked folder, is allowed",
 NM_READ_ONLY = (
     "npm", "npm -v", "npm ls", "npm list", "npm -C . ls", "npm view x", "npm outdated", "npm audit",
     "npm audit signatures", "npm explain x", "npm fund", "npm exec -- tsc", "npm config get registry",
-    "npm help install", "npm prune --dry-run", "npm audit fix --dry-run",
+    "npm help install", "npm prune --dry-run", "npm audit fix --dry-run", "npm version patch",
+    "npm rebuild --help",
 )
 for _command in NM_READ_ONLY:
     nm_case("linked-nm: " + _command + " (Bash) in a linked folder is allowed", _command, "allow", NMLINKED)
