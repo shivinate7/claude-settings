@@ -27704,6 +27704,10 @@ role_model_refuse("role-model: reviewer on sonnet on Round 1 with Guard or check
                   "reviewer", "sonnet", "Round 1 of 3. Check the docs diff.\n" + GUARD_NO_LINE)
 role_model_refuse("role-model: reviewer on sonnet with the guard marker mid-line is denied", "reviewer", "sonnet",
                   "Check the diff. " + REVIEW_GUARD_MARKER)
+# The boundary read takes the character at the marker's length from the line start, so a mid-line marker can put a space
+# there. It must still lift nothing. The case above reads `r` there and would pass a startswith swapped for `in`.
+role_model_refuse("role-model: reviewer on sonnet with the guard marker mid-line, a space at the boundary offset, is denied",
+                  "reviewer", "sonnet", "Review the " + REVIEW_GUARD_MARKER)
 # A model the table does not rank sits above every row, so the marker lifts it no more than a Round N line does.
 role_model_refuse("role-model: reviewer on an unranked model with the guard marker is denied (claude-mystery-9 is above "
                   "the row)", "reviewer", "claude-mystery-9", REVIEW_GUARD_MARKER + "\nCheck the guard diff.")
