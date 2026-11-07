@@ -14,6 +14,7 @@ Output names pinned (the `scope` job re-exports them as job outputs):
 Run with:  python3 lint/test_ci_scope.py -v
 """
 import ast
+import functools
 import os
 import posixpath
 import shutil
@@ -103,13 +104,19 @@ _CLOSURE = {}
 
 def _repo_files():
     """Every file under the repo, as '/' paths. Skips .git, build folders, and .claude/worktrees (each worktree copies the repo)."""
+    return list(_files_under(REPO))
+
+
+@functools.lru_cache(maxsize=None)
+def _files_under(root):
+    """The files under `root`, walked once per root. A tuple, so no caller can change the cached list."""
     out = []
-    worktrees = os.path.join(REPO, ".claude", "worktrees")
-    for dirpath, dirnames, filenames in os.walk(REPO):
+    worktrees = os.path.join(root, ".claude", "worktrees")
+    for dirpath, dirnames, filenames in os.walk(root):
         dirnames[:] = [d for d in dirnames if d not in (".git", "node_modules", "__pycache__")
                        and os.path.join(dirpath, d) != worktrees]
-        out += [os.path.relpath(os.path.join(dirpath, n), REPO).replace(os.sep, "/") for n in filenames if n != ".git"]
-    return out
+        out += [os.path.relpath(os.path.join(dirpath, n), root).replace(os.sep, "/") for n in filenames if n != ".git"]
+    return tuple(out)
 
 
 def _callee(call):
@@ -169,6 +176,7 @@ def _uses_file(node):
     return any(isinstance(n, ast.Name) and n.id == "__file__" for n in ast.walk(node))
 
 
+@functools.lru_cache(maxsize=None)
 def _bound_names(tree):
     """The module-level names bound once in the file, with their values. A name bound anywhere else in the file (a
     parameter, a local, an import, a second assignment) is not read through: its value is not the module's."""
@@ -314,7 +322,12 @@ def _keyed(named, parents):
 
 def _refs(f, tree, tracked):
     """What one repo file loads, from its syntax tree: (module names it imports, repo files it loads by path, loader
-    targets, loads it does not follow as (key, what))."""
+    targets, loads it does not follow as (key, what)). Cached per (file, tree, tracked set)."""
+    return _refs_of(f, tree, frozenset(tracked))
+
+
+@functools.lru_cache(maxsize=None)
+def _refs_of(f, tree, tracked):
     parents = {c: n for n in ast.walk(tree) for c in ast.iter_child_nodes(n)}
     own_names = {t.id for st in tree.body if isinstance(st, ast.Assign) and _uses_file(st.value)
                  for t in st.targets if isinstance(t, ast.Name)}
@@ -379,9 +392,7 @@ def guard_closure():
             if f in parsed or not is_python:
                 continue
             parsed.add(f)
-            with open(os.path.join(REPO, f), encoding="utf-8") as h:
-                tree = ast.parse(h.read(), filename=f)
-            modules, paths, loads, here = _refs(f, tree, tracked)
+            modules, paths, loads, here = _refs(f, _parse(f, source_of(f)), tracked)
             todo += [(c, True) for m in modules for c in by_name.get(m, [])]
             todo += [(c, c.endswith(".py")) for c in paths]
             todo += [(c, True) for c in loads]
@@ -390,9 +401,15 @@ def guard_closure():
     return _CLOSURE["files"], _CLOSURE["unfollowed"]
 
 
+@functools.lru_cache(maxsize=None)
+def _parse(f, src):
+    """The syntax tree of one file's source, parsed once per (file, source): the closure and the cases read the same text."""
+    return ast.parse(src, filename=f)
+
+
 def named_keys(f, src, tracked):
     """The LOAD_EXCEPTIONS keys of the loads one file's source names but does not follow, read from the source text."""
-    return [f"{f}:{k}" for k, _ in _refs(f, ast.parse(src, filename=f), tracked)[3]]
+    return [f"{f}:{k}" for k, _ in _refs(f, _parse(f, src), tracked)[3]]
 
 
 def exceptions_of(f):
@@ -400,6 +417,7 @@ def exceptions_of(f):
     return sorted(k for k in LOAD_EXCEPTIONS if k.split(":")[0] == f)
 
 
+@functools.lru_cache(maxsize=None)
 def source_of(f):
     with open(os.path.join(REPO, f), encoding="utf-8") as handle:
         return handle.read()
@@ -951,7 +969,7 @@ class GuardClosure(unittest.TestCase):
         tracked = set(_repo_files())
         self.assertIn("janitor/sweep.py", guard_closure()[0], "scope: janitor/sweep.py is not in the closure")
         self.assertIn("settings.json", tracked, "scope: settings.json is not a repo file")
-        _, paths, loads, _ = _refs("janitor/sweep.py", ast.parse(source_of("janitor/sweep.py")), tracked)
+        _, paths, loads, _ = _refs("janitor/sweep.py", _parse("janitor/sweep.py", source_of("janitor/sweep.py")), tracked)
         self.assertIn("settings.json", paths | loads, "the sweep's settings load is not followed")
 
     def test_a_test_module_join_under_the_repo_root_loads_its_file(self):
@@ -959,7 +977,7 @@ class GuardClosure(unittest.TestCase):
         tracked = set(_repo_files())
         self.assertIn("hooks/test_guard.py", guard_closure()[0], "scope: hooks/test_guard.py is not in the closure")
         self.assertIn("settings.json", tracked, "scope: settings.json is not a repo file")
-        _, paths, loads, _ = _refs("hooks/test_guard.py", ast.parse(source_of("hooks/test_guard.py")), tracked)
+        _, paths, loads, _ = _refs("hooks/test_guard.py", _parse("hooks/test_guard.py", source_of("hooks/test_guard.py")), tracked)
         self.assertIn("settings.json", paths | loads, "the test module's settings load under REPO is not followed")
 
     def test_a_pathlib_load_through_a_name_loads_its_file(self):
@@ -968,7 +986,7 @@ class GuardClosure(unittest.TestCase):
         tracked = set(_repo_files())
         self.assertIn("merge/merge.py", guard_closure()[0], "scope: merge/merge.py is not in the closure")
         self.assertIn("skills/roadmap/build.py", tracked, "scope: skills/roadmap/build.py is not a repo file")
-        _, _, loads, unfollowed = _refs("merge/merge.py", ast.parse(source_of("merge/merge.py")), tracked)
+        _, _, loads, unfollowed = _refs("merge/merge.py", _parse("merge/merge.py", source_of("merge/merge.py")), tracked)
         self.assertIn("skills/roadmap/build.py", loads, "the idle-lane loader's pathlib path is not followed")
         self.assertNotIn("a loader path with no literal repo file", [what for _, what in unfollowed])
 
@@ -1023,7 +1041,7 @@ class GuardClosure(unittest.TestCase):
         tracked = set(_repo_files())
         self.assertIn("hooks/test_guard.py", guard_closure()[0], "scope: hooks/test_guard.py is not in the closure")
         self.assertIn(target, tracked, f"scope: {target} is not a repo file")
-        _, paths, loads, _ = _refs("hooks/test_guard.py", ast.parse(source_of("hooks/test_guard.py")), tracked)
+        _, paths, loads, _ = _refs("hooks/test_guard.py", _parse("hooks/test_guard.py", source_of("hooks/test_guard.py")), tracked)
         self.assertIn(target, paths | loads, f"the test module's join under REPO for {target} is not followed")
 
     def test_a_test_module_join_under_the_repo_reads_the_impeccable_skill(self):
@@ -1079,7 +1097,7 @@ class GuardClosure(unittest.TestCase):
         tracked = set(_repo_files())
         self.assertIn("skills/roadmap/build.py", guard_closure()[0], "scope: skills/roadmap/build.py is not in the closure")
         self.assertIn("skills/roadmap/page/index.html", tracked, "scope: skills/roadmap/page/index.html is not a repo file")
-        _, paths, loads, _ = _refs("skills/roadmap/build.py", ast.parse(source_of("skills/roadmap/build.py")), tracked)
+        _, paths, loads, _ = _refs("skills/roadmap/build.py", _parse("skills/roadmap/build.py", source_of("skills/roadmap/build.py")), tracked)
         self.assertIn("skills/roadmap/page/index.html", paths | loads, "the chain through .parent is not followed")
 
     def test_a_home_config_chain_is_neither_read_nor_named(self):
