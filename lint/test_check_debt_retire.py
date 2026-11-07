@@ -456,12 +456,18 @@ class Birth(Case):
         found = self.findings(pr_body="Retire-run: d-imp -- %s\n" % RUN_URL, run_state=runs)
         self.assertEqual(pairs(found), [], "a green cite did not clear the unknown of a test that cannot import on the birth commit")
 
-    @unittest.skip("TODO: the written-reason form is not built yet. Set its PR-body line here, then unskip.")
     def test_b7_a_written_reason_clears_an_unknown_check(self):
         self.repo(debts={"d-imp": NEWMOD})
         self.change(rm=["docs/debts/d-imp.md"])
-        found = self.findings(pr_body="TODO: the written-reason line")
+        found = self.findings(pr_body="Retire-run: d-imp -- newmod.py lands in the next PR, so the birth tree cannot import it\n")
         self.assertEqual(pairs(found), [], "a written reason did not clear an unknown check")
+
+    def test_b7b_a_written_reason_does_not_clear_a_red_check(self):
+        self.repo(debts={"d-weak": WEAK})
+        self.change(rm=["docs/debts/d-weak.md"])
+        found = self.findings(pr_body="Retire-run: d-weak -- the test is fine, trust me\n")
+        self.assertEqual(self.ran_at_birth(), ["test_weak.py"], "the Retire check did not run on the birth commit")
+        self.assertEqual(pairs(found), [("d-weak", "red")], "a written reason cleared a test that passes on the birth commit")
 
     def test_b8_every_span_is_checked_when_an_earlier_span_is_red_on_the_birth_commit(self):
         self.repo(debts={"d-two": PASS_THEN_WEAK})
