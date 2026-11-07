@@ -1,10 +1,11 @@
 {
   "title": "checks-mutate-guard runs as shards, each under 25 min",
-  "phase": "next",
-  "status": "todo",
+  "phase": "now",
+  "status": "doing",
   "order": 268.8,
   "owner": "coordinator",
   "why": "#1597 raised the checks-mutate-guard CI cap from 25 to 45 min as a stopgap (ci-job-caps), and #1534 already put the job at about 71% of its old cap (coordinator, 17:19 CST Nov 7). Debt mutate-guard-split names the real fix.",
   "note": "Split checks-mutate-guard into shards so each runs under 25 min. Retires debt mutate-guard-split. Done check: each shard's measured time on one run.",
-  "updatedAt": "2026-11-07T17:19:00-06:00"
+  "updatedAt": "2026-11-07T17:20:00-06:00",
+  "lane": "session_013NEJL1q9xCaEWZfB6KebLx"
 }
