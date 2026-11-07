@@ -1,0 +1,35 @@
+{
+  "added": "2026-11-07T18:44:00Z",
+  "context": "Goal: q_max shows past rates the way you look them up.\nProblem (goal): PR #700, \"Past Rates: By Year and By City views\" (Oct 12), never merged. Its history no longer shares a base with main, so it cannot merge as it is: 65 commits, about 3,500 lines.\nBased on (read): lane qmax-revive-idle found the feature is not on main.\nDeparts from: main, where Past Rates has no By Year or By City view \u2014 option a adds both.\nNo recommendation: it depends on whether you still look up past rates by year or by city. #700 stays open until you answer.",
+  "home": "q_max #700; lane qmax-revive-idle",
+  "id": "qmax-700-past-rates-views",
+  "kind": "decision",
+  "n": 343,
+  "options": [
+    {
+      "gain": "You get the By Year and By City views you asked for in October.",
+      "key": "a",
+      "label": "Port it: a lane rebuilds both views from main, with a design check",
+      "links": [
+        {
+          "label": "q_max PR #700",
+          "url": "https://github.com/shivinate7/q_max/pull/700"
+        }
+      ],
+      "lose": "A full lane of work."
+    },
+    {
+      "gain": "No work.",
+      "key": "b",
+      "label": "Close it",
+      "lose": "The two views are gone. The PR stays on GitHub if you want them later."
+    }
+  ],
+  "owner": "coordinator",
+  "rank": 3,
+  "ref": "q_max #700",
+  "short": "#700 Past Rates views: port or close",
+  "status": "open",
+  "title": "q_max PR #700 (Past Rates by year and by city) cannot merge: rebuild the two views, or close it?",
+  "why": "The PR has sat since Oct 12 and its history no longer fits main."
+}
