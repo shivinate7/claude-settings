@@ -56,13 +56,10 @@ the minute read and the merge with its head guard. Every read is a `gh api` REST
 `gh` 2.48 or newer is needed (`--paginate --slurp`); an older gh fails closed.
 A cloud session runs the whole flow (c53): its proxy passes `gh api` reads, PUT pulls/N/merge and a push to refs/heads, so the lock is a
 git push there (default_lock). Its proxy refuses a ref delete: the lock is released by an expired commit, and the branch deletes print "not deleted".
+Its proxy passes a `gh api` POST to issues/N/labels (measured 2026-11-07 12:20 CST: a POST to a nonexistent issue got GitHub's 404, not a proxy refusal).
 """
 import argparse, ast, contextlib, datetime, functools, json, math, os, pathlib, re, shutil, posixpath, signal, socket, subprocess, sys, tempfile, threading, time, uuid
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "hooks"))
-try:
-    from shared_names import BATCH_LABEL  # the one home of the integration pull request's label (hooks/shared_names.py)
-except ImportError:  # a tree with no hooks/ folder still loads (the import tests copy merge.py alone); the ledger and --integration then stop, see need_batch_label
-    BATCH_LABEL = None
 try:
     import _nowindow  # the one home of a no-window child start (hooks/_nowindow.py)
 except ImportError:  # a hook loads this file; a missing helper never stops that hook
@@ -82,6 +79,7 @@ except Exception as e:  # a missing or broken module: one line, no traceback whe
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "hooks"))  # guard_core, which cut_lanes loads
 from required_check import REQUIRED_CHECK  # noqa: E402  the one home of the required check's name (hooks/required_check.py)
+from shared_names import BATCH_LABEL  # noqa: E402  the one home of the integration pull request's label (hooks/shared_names.py)
 
 class Stop(Exception):
     """A refusal. The message is the whole report."""
@@ -2464,11 +2462,6 @@ def ci_job_run(wt, *args):
         return "unknown", [l.rstrip() for l in lines if l.startswith("unknown")] or [f"(no unknown line read; ci-job exit {c})"], log, True
     return "unknown", [f"ci-job exited {c}"], log, False
 
-def need_batch_label(cite):
-    """Stop when hooks/shared_names.py, the one home of BATCH_LABEL, could not be loaded: a missing label name never reads as a label nobody uses."""
-    if BATCH_LABEL is None:
-        raise Stop("hooks/shared_names.py is missing beside merge/, so the name of the `batch` label is unknown. Run merge from a full checkout of claude-settings. " + cite)
-
 def label_batch(host, n):
     """Add BATCH_LABEL to pull request n: one REST POST, which the ledger reads as a batch run. A failed POST (a missing label, no access, the
     network) is said as unknown, never as a label that was set; the caller's verdict and exit code stand."""
@@ -2491,8 +2484,6 @@ def lane_lint(root, target, host, base="", unknown_ok="", integration=False):
     `integration` (a PR number only, so the ledger reads the pull request as a batch run): after a PASS, and only then, one REST POST adds the
     BATCH_LABEL to the pull request. A failed POST says the label is unknown; the lint's verdict and exit code stand."""
     host = host or Host()
-    if integration:
-        need_batch_label(LANE_LINT_CITE)  # before the lint runs, so a missing name never costs a lint and a refusal after it
     if target.isdigit():
         info = host.pr(int(target))
         head, base = info["head"], info["base"]
@@ -2514,6 +2505,8 @@ def lane_lint(root, target, host, base="", unknown_ok="", integration=False):
         raise Stop("\n".join([f"the lint of {short} against {base} FAILs:", *lines, *log, LANE_LINT_REMEDY]))
     if liftable and unknown_ok.strip():
         say(f"merge: lint of {short} against {base} is unknown, not a pass. --lint-unknown-ok, reason: {unknown_ok.strip()}", *lines, *log)
+        if integration:  # the ledger reads the label as a batch run, which only a PASS earns
+            say(f"merge: the `{BATCH_LABEL}` label was not set on #{int(target)} because the lint read unknown, not a pass.")
         return 0
     head_line = f"the lint of {short} against {base} is unknown, not a pass:"
     if not liftable:  # a timeout or an odd exit says nothing about any step, so no flag lifts it
@@ -3234,7 +3227,6 @@ def _reviewed_lines(h, root):
     Cost: the open-pull list, the repo's comments since the oldest open pull request (one list read), one `issues/<n>/events` list for each pull
     request that reaches the hold rule, and, when a batch line exists, one `actions/runs` read of the base (its jobs too, only when its latest run
     did not succeed: host.base_state). No GraphQL, no head or check read, no timer, file or log."""
-    need_batch_label(REVIEW_CITE)
     pulls = h.pages("pulls", fields={"state": "open"})
     summary = lambda wait, none: f"longest wait since a done record: {wait}h; no next act: {none}"
     if not pulls:
