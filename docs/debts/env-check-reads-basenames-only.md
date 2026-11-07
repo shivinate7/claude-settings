@@ -1,6 +1,6 @@
-# The env-file check reads basenames only
+# The env-file guard reads basenames only
 
-**What.** The env-file check judges each word's last path part and ignores the working directory. These forms read or open an env file and pass: `cd .envs && cat config.json`, `pushd .env && cat x`, `cat .envs/x`, `cat .env/x/secret`, `ag -G .env K`, `ag --file-search-regex .env K`, `grep --incl .env K .` (a shortened long flag) and `yq -n 'load(".env")'`. A session that has entered an env-named folder, or names a file inside one, is likely to hit this in normal work. No incident is on record.
+**What.** The env-file guard judges each word's last path part and ignores the working directory. These forms read or open an env file and pass: `cd .envs && cat config.json`, `pushd .env && cat x`, `cat .envs/x`, `cat .env/x/secret`, `ag -G .env K`, `ag --file-search-regex .env K`, `grep --incl .env K .` (a shortened long flag) and `yq -n 'load(".env")'`. A session that has entered an env-named folder, or names a file inside one, is likely to hit this in normal work. No incident is on record.
 
 **Where.** `hooks/guard_env.py`: `_env_flat` (the per-word judge) and `_pattern_words` (the flag reader). Folder commands (`cd`, `pushd`, `mkdir`) are allowed on an env-prefixed folder, so the folder form is open by design until the working directory is followed.
 
