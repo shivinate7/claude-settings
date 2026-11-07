@@ -140,6 +140,13 @@ class BaseUnknown(Unknown):
     """The base of the range does not resolve, as in a shallow clone. Not a finding."""
 
 
+def head_resolves(head):
+    """True when `head` names a commit. Run only after a read failed, to tell a missing head (a read that could
+    not run) from a missing base (a shallow clone)."""
+    done = _nowindow.run(["git", "rev-parse", "--verify", "--quiet", head + "^{commit}"], capture_output=True)
+    return done.returncode == 0
+
+
 def git(*args, on_fail=Unknown):
     done = _nowindow.run(["git", *args], capture_output=True)
     if done.returncode != 0:
@@ -202,8 +209,10 @@ def exclude_patterns(root):
     try:
         with open(os.path.join(root, ".ste-lint-exclude"), encoding="utf-8") as f:
             lines += f.read().splitlines()
-    except OSError:
-        pass
+    except FileNotFoundError:
+        pass  # no exclude file is a repo with no excludes
+    except OSError as exc:  # present but unreadable: the check cannot tell what it should leave out
+        raise Unknown(".ste-lint-exclude cannot be read (%s)" % exc)
     lines += os.environ.get("EXCLUDE", "").replace(",", "\n").splitlines()
     cleaned = (line.strip() for line in lines)
     return [glob_regex(p) for p in cleaned if p and not p.startswith("#")]
@@ -213,7 +222,12 @@ def parse_range(text):
     """(diff arguments, base spec, head spec). A three-dot range reads base blobs at the merge base."""
     if "..." in text:
         left, right = text.split("...", 1)
-        base = git("merge-base", left, right, on_fail=BaseUnknown).decode().strip()
+        try:
+            base = git("merge-base", left, right).decode().strip()
+        except Unknown as exc:
+            if head_resolves(right):
+                raise BaseUnknown(str(exc))  # the head is there, so the history is not: a shallow clone
+            raise
         return [text], base, right
     if ".." in text:
         left, right = text.split("..", 1)
@@ -254,12 +268,17 @@ def added_markdown_lines(patch):
     return found
 
 
-def read_diff(diff_args):
+def read_diff(diff_args, head=None):
     """(removed, renamed, modified, added, lines) from one `git diff -M --raw -p -z -U0`: removed paths, {old: new},
     paths changed in place, added paths, and `added_markdown_lines`. The raw records come first, then one empty
     record, then the patch text. One start serves both, so the added lines cost no start of their own."""
-    out = git("diff", "-M", "--raw", "-p", "-z", "-U0", "--no-ext-diff", "--src-prefix=a/", "--dst-prefix=b/",
-              *diff_args, on_fail=BaseUnknown).decode("utf-8", "replace")
+    try:
+        out = git("diff", "-M", "--raw", "-p", "-z", "-U0", "--no-ext-diff", "--src-prefix=a/", "--dst-prefix=b/",
+                  *diff_args).decode("utf-8", "replace")
+    except Unknown as exc:
+        if head is None or head_resolves(head):
+            raise BaseUnknown(str(exc))  # the head is there, so the base is the gap: a shallow clone
+        raise
     head, _, patch = out.partition("\0\0")
     tokens = head.split("\0")
     removed, renamed, modified, added = [], {}, [], []
@@ -996,12 +1015,14 @@ def decision_folders():
     return layout.candidates(".", "decisions")
 
 
-def mechanism_rows(rng):
+def mechanism_rows(rng, listed=False):
     """{slug: row} of lint/rule_mechanisms.json at head, or None for a repo that has none. One read. A file that
     is not JSON, or whose rules or rows are not objects with a `mechanism` object, raises Unknown naming the file:
     a row's fields are read as a dict afterwards."""
     blob = rng.batch.get("%s:%s" % (rng.head, MECHANISMS))
     if blob is None:
+        if listed:  # the tree lists the file, so a missing blob is a read that could not run
+            raise Unknown("%s is in the tree at %s but cannot be read" % (MECHANISMS, rng.head))
         return None
     try:
         rules = json.loads(blob.decode("utf-8", "replace"))
@@ -1056,6 +1077,8 @@ def home_report(rng, rules, entries, folders):
     for path in (p for p in paths if folder is not None and p.startswith(folder + "/")):
         if path.endswith(".md"):
             blob = rng.batch.get("%s:%s" % (rng.head, path))
+            if blob is None:  # listed in the tree, so a missing blob is a read that could not run
+                rng.unknowns.append("%s is in the tree at %s but cannot be read" % (path, rng.head))
             texts[path] = (blob or b"").decode("utf-8", "replace")
             for home in HOME_LINE.findall(texts[path]):
                 homes.setdefault(home, []).append(os.path.basename(path)[:-3])
@@ -1095,7 +1118,7 @@ def report(rng):
     rules = None
     if present:
         try:
-            rules = mechanism_rows(rng)
+            rules = mechanism_rows(rng, listed=entries is not None)
         except Unknown as exc:  # the Home half still prints, without rows
             rng.unknowns.append(str(exc))
     lines = anchor_report(rng, rules) if rules is not None else []
@@ -1117,7 +1140,7 @@ def scan(range_text):
     """(found, unknowns, report): {(path, line, code): [messages]}, one text per read that could not run, and the
     report lines. The report adds no finding, and a report read that fails is one unknown."""
     diff_args, base, head = parse_range(range_text)
-    removed, renamed, modified, added, lines = read_diff(diff_args)
+    removed, renamed, modified, added, lines = read_diff(diff_args, head)
     batch = BlobReader()
     rng = Range(base, head, removed, renamed, modified, batch, added, lines)
     lines = []
@@ -1156,11 +1179,14 @@ def scan_tree(rev):
         by_name.setdefault(p.rsplit("/", 1)[-1], []).append(p)
     mds = markdown_files(entries, exclude_patterns("."))
     batch = BlobReader()
+    regular = set(file_paths(entries))
     counts = {}  # tracked file -> its line count, read once
 
     def lines_of(path):
         if path not in counts:
             data = batch.get("%s:%s" % (rev, path))
+            if data is None and path in regular:  # listed as a file, so a missing blob is a read that could not run
+                raise Unknown("%s is in the tree at %s but cannot be read" % (path, rev))
             counts[path] = line_count(data) if data is not None else None
         return counts[path]
 
