@@ -1,0 +1,11 @@
+{
+  "title": "A FAIL record from a review round run before its PR exists names the live head",
+  "phase": "now",
+  "status": "doing",
+  "order": 266.6,
+  "owner": "coordinator",
+  "lane": "session_013NEJKzYhDtNPLcEdeVFEVe",
+  "why": "Incident #1565 (coordinator, Nov 7): a review round ran before its PR existed, and its FAIL record named an ancestor of the live head.",
+  "note": "Stacks on fix-check-after-notes-v2. Done check: a red test where the FAIL record names an ancestor, then the record names the live head or is refused.",
+  "updatedAt": "2026-11-07T15:46:00-06:00"
+}
