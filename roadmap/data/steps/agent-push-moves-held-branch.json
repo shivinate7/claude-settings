@@ -1,0 +1,11 @@
+{
+  "title": "The guard refuses a push to a branch that another worktree holds",
+  "phase": "now",
+  "status": "doing",
+  "order": 0.2,
+  "owner": "coordinator",
+  "why": "Coordinator, 14:29 CST Nov 7.",
+  "note": "Same lane as step override-plain-ask.",
+  "lane": "session_013NEJKyzA8bkZSm147VHnke",
+  "updatedAt": "2026-11-07T14:28:00-06:00"
+}
