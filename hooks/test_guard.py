@@ -416,6 +416,11 @@ FARWT = os.path.join(ROOT, "worktrees", "stray")
 SYMWT = os.path.join(GITMAIN, ".claude", "worktrees", "linked-agent")
 DECOYMAIN = os.path.join(ROOT, "decoyhost", ".claude", "worktrees", "decoy")
 CONFLICT = os.path.join(ROOT, "conflict")  # a real checkout with an unresolved merge conflict
+MIXED = os.path.join(ROOT, "mixedmerge")  # a merge in progress: unmerged product, test and .md files, one staged product file
+RESOLVED = os.path.join(ROOT, "resolvedmerge")  # a merge in progress with every conflict staged: no unmerged path
+PICKED = os.path.join(ROOT, "pickconflict")  # a cherry-pick stopped on a product conflict
+REBASING = os.path.join(ROOT, "rebaseconflict")  # a rebase stopped on a product conflict
+OTHER = os.path.join(ROOT, "otherplain")  # a plain checkout with no merge, holding the same product path as MIXED
 SUBJCLEAN = os.path.join(ROOT, "subjclean")  # a real checkout with a clean tree and no stash
 SUBJCLEANWT = os.path.join(ROOT, "subjcleanlane")  # a real, clean linked worktree of that one
 SUBJDIRTY = os.path.join(ROOT, "subjdirty")  # a real checkout with real uncommitted work
@@ -678,20 +683,21 @@ def run_vcs(cwd, *args):
     return subprocess.run([VCS, *args], cwd=cwd, capture_output=True, text=True)
 
 
-def _require_conflict(where, path):
-    """Stop the suite unless `where` really holds an unresolved conflict on `path`.
+def _require_conflict(where, path, ref="MERGE_HEAD"):
+    """Stop the suite unless `where` really holds an unresolved conflict on `path`. `ref` is the ref that
+    marks the operation: MERGE_HEAD for a merge, CHERRY_PICK_HEAD for a cherry-pick.
 
     A fixture whose setup silently fails proves nothing: it can pass for the wrong reason on
     one machine and fail on another. This reads the tree with git itself, the same two checks
     the guard's own `conflict_in_progress` makes, so a broken build step is caught here rather
     than showing up later as a wrong PASS or a confusing FAIL far from its cause.
     """
-    verify = run_vcs(where, "rev-parse", "--verify", "-q", "MERGE_HEAD")
+    verify = run_vcs(where, "rev-parse", "--verify", "-q", ref)
     if verify.returncode != 0:
         sys.exit(
-            "fixture setup failed in build_fixtures: MERGE_HEAD does not resolve in %r. "
+            "fixture setup failed in build_fixtures: %s does not resolve in %r. "
             "The conflict-repo merge did not run, or it did not conflict. "
-            "stderr: %s" % (where, verify.stderr.strip())
+            "stderr: %s" % (ref, where, verify.stderr.strip())
         )
     status = run_vcs(where, "status", "--porcelain")
     lines = [line for line in status.stdout.splitlines() if path in line]
@@ -1615,6 +1621,105 @@ def _build_conflict():
     run_vcs(CONFLICT, *ident, "merge", "feature")  # conflicts and leaves MERGE_HEAD set
     _require_conflict(CONFLICT, "docs/DEBTS.md")
 
+
+# ---- the merge carve-out fixtures (test-author-scope). Each is built with git itself, never mocked. The merge
+# keeps the incident's shape: src/app.py (product), tests/test_app.py (test) and docs/debts/README.md (Markdown)
+# stay unmerged. src/resolved.py was conflicted and is git-added. src/theirs_only.py changed on the incoming
+# side only, so the merge staged it clean.
+MIX_CONFLICTED = ("src/app.py", "tests/test_app.py", "docs/debts/README.md", "src/resolved.py")
+MIX_UNMERGED = ("docs/debts/README.md", "src/app.py", "tests/test_app.py")
+
+
+def _unmerged(where):
+    """The sorted paths `git ls-files -u` lists in `where`, each once. Exits when git cannot answer."""
+    done = run_vcs(where, "ls-files", "-u", "-z")
+    if done.returncode != 0:
+        sys.exit("fixture setup failed: ls-files -u in %r: %s" % (where, done.stderr.strip()))
+    return sorted({entry.split("\t", 1)[1] for entry in done.stdout.split("\0") if "\t" in entry})
+
+
+def _build_merge_fixture(where, resolve_all):
+    """A merge of `feature` into `main` in `where`. It stops with MIX_UNMERGED unmerged and src/resolved.py
+    git-added. `resolve_all` resolves those too, so no path stays unmerged."""
+    make_repo(where, {**{path: "base\n" for path in MIX_CONFLICTED}, "src/theirs_only.py": "base\n"})
+    _must(where, "checkout", "-q", "-b", "feature")
+    for path in MIX_CONFLICTED:
+        write(os.path.join(where, path), "feature\n")
+    write(os.path.join(where, "src/theirs_only.py"), "feature only\n")
+    _must(where, "add", "-A")
+    _must(where, *IDENT, "commit", "-q", "-m", "feature change")
+    _must(where, "checkout", "-q", "main")
+    for path in MIX_CONFLICTED:
+        write(os.path.join(where, path), "main\n")
+    _must(where, "add", "-A")
+    _must(where, *IDENT, "commit", "-q", "-m", "main change")
+    run_vcs(where, *IDENT, "merge", "feature")  # conflicts on MIX_CONFLICTED and stages src/theirs_only.py
+    _require_conflict(where, "src/app.py")
+    if _unmerged(where) != sorted(MIX_CONFLICTED):
+        sys.exit("fixture setup failed: the merge in %r left %r unmerged, not %r"
+                 % (where, _unmerged(where), sorted(MIX_CONFLICTED)))
+    write(os.path.join(where, "src/resolved.py"), "resolved\n")
+    _must(where, "add", "src/resolved.py")
+    if resolve_all:
+        for path in MIX_UNMERGED:
+            write(os.path.join(where, path), "resolved\n")
+        _must(where, "add", *MIX_UNMERGED)
+    expected = [] if resolve_all else sorted(MIX_UNMERGED)
+    if _unmerged(where) != expected:
+        sys.exit("fixture setup failed: %r holds unmerged %r, not %r" % (where, _unmerged(where), expected))
+
+
+def _build_mixed():
+    _build_merge_fixture(MIXED, resolve_all=False)
+    if LINKS_MADE:   # the two symlinks the symlink cases read, as spelled (untracked, so the merge is unchanged)
+        os.symlink("app.py", os.path.join(MIXED, "src", "alias.py"))
+        os.symlink("theirs_only.py", os.path.join(MIXED, "src", "alias_clean.py"))
+
+
+def _build_resolved():
+    _build_merge_fixture(RESOLVED, resolve_all=True)
+
+
+def _build_picked():
+    """A cherry-pick of `feature` that conflicts on src/app.py: CHERRY_PICK_HEAD is set, MERGE_HEAD is not."""
+    make_repo(PICKED, {"src/app.py": "base\n"})
+    _must(PICKED, "checkout", "-q", "-b", "feature")
+    write(os.path.join(PICKED, "src/app.py"), "feature\n")
+    _must(PICKED, "add", "-A")
+    _must(PICKED, *IDENT, "commit", "-q", "-m", "feature change")
+    _must(PICKED, "checkout", "-q", "main")
+    write(os.path.join(PICKED, "src/app.py"), "main\n")
+    _must(PICKED, "add", "-A")
+    _must(PICKED, *IDENT, "commit", "-q", "-m", "main change")
+    run_vcs(PICKED, *IDENT, "cherry-pick", "feature")
+    _require_conflict(PICKED, "src/app.py", ref="CHERRY_PICK_HEAD")
+    if run_vcs(PICKED, "rev-parse", "--verify", "-q", "MERGE_HEAD").returncode == 0:
+        sys.exit("fixture setup failed: the cherry-pick in %r also set MERGE_HEAD" % PICKED)
+
+
+def _build_rebasing():
+    """A rebase of `feature` onto `main` that stops on src/app.py. A rebase sets no MERGE_HEAD."""
+    make_repo(REBASING, {"src/app.py": "base\n"})
+    _must(REBASING, "checkout", "-q", "-b", "feature")
+    write(os.path.join(REBASING, "src/app.py"), "feature\n")
+    _must(REBASING, "add", "-A")
+    _must(REBASING, *IDENT, "commit", "-q", "-m", "feature change")
+    _must(REBASING, "checkout", "-q", "main")
+    write(os.path.join(REBASING, "src/app.py"), "main\n")
+    _must(REBASING, "add", "-A")
+    _must(REBASING, *IDENT, "commit", "-q", "-m", "main change")
+    _must(REBASING, "checkout", "-q", "feature")
+    run_vcs(REBASING, *IDENT, "rebase", "main")
+    if _unmerged(REBASING) != ["src/app.py"]:
+        sys.exit("fixture setup failed: the rebase in %r left %r unmerged" % (REBASING, _unmerged(REBASING)))
+    if run_vcs(REBASING, "rev-parse", "--verify", "-q", "MERGE_HEAD").returncode == 0:
+        sys.exit("fixture setup failed: the rebase in %r set MERGE_HEAD" % REBASING)
+
+
+def _build_other():
+    make_repo(OTHER, {"src/app.py": "plain\n"})
+
+
 def _build_branch():
     """The branch-delete repos: a bare remote, the base fallbacks and the unmerged branches."""
     # ----------------------------------------------------------------- branch delete fixtures
@@ -2201,6 +2306,11 @@ lazy_fixture([PRIVREPO], _build_privrepo)
 lazy_fixture([PTRMAIN, PTRWT, PTRCFG, PTROFF, PTROFFCFG, PTRAHEAD, PTRAHEADCFG, PTRNOORIGIN,
               PTRNOORIGINCFG, PTRBADCFG, PTRGONECFG, PTRNOCFG, GITBLIND], _build_pointer)
 lazy_fixture([CONFLICT], _build_conflict)
+lazy_fixture([MIXED], _build_mixed)
+lazy_fixture([RESOLVED], _build_resolved)
+lazy_fixture([PICKED], _build_picked)
+lazy_fixture([REBASING], _build_rebasing)
+lazy_fixture([OTHER], _build_other)
 lazy_fixture([BRANCHREMOTE, BRANCHREPO, BRANCHFALLBACKMAIN, BRANCHFALLBACKMASTER, BRANCHNOBASE],
              _build_branch)
 lazy_fixture([PUSHFEAT, PUSHMAIN, PUSHTRUNK, PUSHTRUNKLOCAL, PUSHNOHEAD, PUSHDETACHED, PUSHSAMETAG, PUSHDANGLING, PUSHNOHEADMAIN,
@@ -13038,6 +13148,54 @@ add("test-author: Edit of janitor/mutate_sweep.py is allowed", "allow", tool="Ed
 add("test-author: Edit of HOOKS/mutate_guard.py is allowed (case folds)", "allow", tool="Edit",
     file_path="HOOKS/mutate_guard.py", **A)
 
+# ---- the merge carve-out (test-author-scope). A test-author writes a NON-test path only in an unresolved merge, and
+# only where that path is an unmerged index entry (`git ls-files -u`), as spelled or resolved through a symlink. Any
+# git failure keeps the refusal. A cherry-pick or a rebase conflict stays refused, and so does a builder's test edit.
+MERGE_CARRIES = ("builder", "Report")
+
+
+def _author_at(cwd):
+    return dict(agent_id="auth1", agent_type="test-author", cwd=cwd)
+
+
+add("test-author: Edit of an unmerged product file mid-merge is allowed", "allow", tool="Edit",
+    file_path=os.path.join(MIXED, "src", "app.py"), **_author_at(MIXED))
+add("test-author: Write of an unmerged product file mid-merge is allowed", "allow", tool="Write",
+    file_path=os.path.join(MIXED, "src", "app.py"), **_author_at(MIXED))
+add("test-author: Edit of an unmerged Markdown file mid-merge is allowed", "allow", tool="Edit",
+    file_path=os.path.join(MIXED, "docs", "debts", "README.md"), **_author_at(MIXED))
+add("test-author: Edit of a product file that merged clean, mid-merge, is refused", "deny", rule=TA,
+    tool="Edit", file_path=os.path.join(MIXED, "src", "theirs_only.py"), carries=MERGE_CARRIES,
+    **_author_at(MIXED))
+add("test-author: Edit of a conflicted product file after git add is refused", "deny", rule=TA,
+    tool="Edit", file_path=os.path.join(MIXED, "src", "resolved.py"), carries=MERGE_CARRIES,
+    **_author_at(MIXED))
+add("test-author: Edit of a product file in a merge with no unmerged path is refused", "deny", rule=TA,
+    tool="Edit", file_path=os.path.join(RESOLVED, "src", "theirs_only.py"), carries=MERGE_CARRIES,
+    **_author_at(RESOLVED))
+add("test-author: Edit of a conflicted product file in a cherry-pick is refused", "deny", rule=TA,
+    tool="Edit", file_path=os.path.join(PICKED, "src", "app.py"), carries=MERGE_CARRIES, **_author_at(PICKED))
+add("test-author: Edit of a conflicted product file in a rebase is refused", "deny", rule=TA,
+    tool="Edit", file_path=os.path.join(REBASING, "src", "app.py"), carries=MERGE_CARRIES,
+    **_author_at(REBASING))
+add("builder-test: Edit of an unmerged test file mid-merge is still refused", "deny", rule=BT,
+    tool="Edit", file_path=os.path.join(MIXED, "tests", "test_app.py"), carries=("test-author", "Report"),
+    agent_id="bld1", agent_type="builder", cwd=MIXED)
+# The target is in another checkout (OTHER) that holds the same relative path as an unmerged path of MIXED. The
+# merge state is read from the target's own checkout, so this checkout's merge cannot allow it.
+add("test-author: Edit of another checkout's product file is refused while this one is mid-merge", "deny",
+    rule=TA, tool="Edit", file_path=os.path.join(OTHER, "src", "app.py"), carries=MERGE_CARRIES,
+    **_author_at(MIXED))
+add("test-author: Write of another checkout's product file is refused while this one is mid-merge", "deny",
+    rule=TA, tool="Write", file_path=os.path.join(OTHER, "src", "app.py"), carries=MERGE_CARRIES,
+    **_author_at(MIXED))
+if LINKS_MADE:
+    add("test-author: Edit through a symlink to an unmerged product file mid-merge is allowed", "allow",
+        tool="Edit", file_path=os.path.join(MIXED, "src", "alias.py"), **_author_at(MIXED))
+    add("test-author: Edit through a symlink to a product file that merged clean is refused", "deny", rule=TA,
+        tool="Edit", file_path=os.path.join(MIXED, "src", "alias_clean.py"), carries=MERGE_CARRIES,
+        **_author_at(MIXED))
+
 # ---- workflow test-run steps. A test-author may add or remove a whole test-run step in a workflow; nothing else there.
 # A builder may change any workflow line, except one that disables tests in a test-runner line. Each author row and
 # its builder row share one old and one new text, so the two roles judge the same edit. An Edit is judged by
@@ -14036,6 +14194,30 @@ for _name, _change in AUTHOR_GREEN:
        agent_id="auth1", agent_type="test-author")
     add("author-diff: stop with %s is allowed" % _name, "allow", event="SubagentStop",
         cwd=_repo, agent_id="auth1", agent_type="test-author")
+
+
+# ---- the merge carve-out at commit time: a test-author's commit of a merge whose paths are all resolved is allowed,
+# and its commit, push and stop are logged as author-diff, never refused.
+sh("author-diff: commit by a test-author of a merge with every path resolved is allowed", COMMIT, "allow",
+   cwd=RESOLVED, agent_id="auth1", agent_type="test-author", silent=True)
+
+
+def merge_resolved_log_case():
+    """A test-author's commit and push in a resolved merge print nothing, log one noted author-diff line each,
+    and refuse nothing. RESOLVED is a main checkout, so its stop logs under role-diff-main-checkout instead
+    (judge_stop); the pin is the commit and the push."""
+    out, rows = _diff_log_run(os.path.join(ROOT, "difflog-mergeresolved"), RESOLVED, "test-author", "auth1")
+    hits = [r for r in rows if len(r) == 6 and r[2] == "noted" and r[3] == "author-diff"]  # six: session last
+    refused = [r for r in rows if len(r) == 6 and r[2] == "deny"]
+    if out or refused or len(hits) != 2:
+        return False, ("expected silent allows, no refusal and 2 noted author-diff lines, got %r, %d refusals, "
+                       "%d author-diff lines; logged rules %r" % (out[:60], len(refused), len(hits),
+                                                                  [r[3] for r in rows if len(r) > 3]))
+    return True, "commit and push allowed and logged as author-diff, nothing printed, nothing refused"
+
+
+LOG_CHECKS_EXTRA.append(("author-diff: a test-author's commit of a resolved merge is allowed and logged, never refused",
+                         merge_resolved_log_case))
 
 
 # ---- workflow files at commit time: the diff a test-author or a builder would commit (role_offences). A
