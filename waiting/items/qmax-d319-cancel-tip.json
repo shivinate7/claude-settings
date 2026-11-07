@@ -1,0 +1,30 @@
+{
+  "added": "2026-11-07T04:21:00Z",
+  "context": "Goal: q_max main's browser suite goes green without weakening a check.\nProblem (rule): the Cancel tip lost the word \"spend\", so check D-319 is red.\nBased on (read): lane qmax-browser-main-red's report to the coordinator, 22:21 CST.\nDeparts from: main's tip gives no reason \u2014 a puts the reason back.",
+  "home": "q_max PRs from lane qmax-browser-main-red",
+  "id": "qmax-d319-cancel-tip",
+  "kind": "decision",
+  "n": 325,
+  "options": [
+    {
+      "gain": "The tip says why a cancel matters.",
+      "key": "a",
+      "label": "Restore the reason in the tip (recommended)",
+      "lose": "Nothing."
+    },
+    {
+      "gain": "A shorter tip.",
+      "key": "b",
+      "label": "Rule the new text and re-point D-319",
+      "lose": "The reason is gone."
+    }
+  ],
+  "owner": "lane qmax-browser-main-red",
+  "pick": "a",
+  "rank": 2,
+  "ref": "q_max D-319",
+  "short": "q_max D-319: Cancel tip reason",
+  "status": "open",
+  "title": "q_max Cancel tip: put the reason back, or re-point D-319?",
+  "why": "A check stays red until you rule, and q_max main's browser suite must go green without a weaker check."
+}

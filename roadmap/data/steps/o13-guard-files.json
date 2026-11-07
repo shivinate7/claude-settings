@@ -5,11 +5,5 @@
   "order": 103.3529,
   "why": "Finishes step o13's word change in files that only a guard lane may touch.",
   "note": "Coordinator 12:19 CST: Sites: hooks/guard.py:3571; hooks/test_guard.py:14684 and 25938-25952 (\"brake gate\"); skills/roadmap/test_build.py:1316 (\"pair gate\" becomes \"pair check\"). Coordinator 21:38 CST: F1 and F3 merged (F3 #1340 at 21:05), hold lifted. Lane PR draft #1390 (e3f7209f), with runner 8.",
-  "updatedAt": "2026-11-07T03:38:00Z",
-  "paused": {
-    "why": "Waits on the held guard steps F1 and F3 to merge.",
-    "decides": "coordinator",
-    "at": "2026-11-06T14:39:00-06:00",
-    "by": "triage"
-  }
+  "updatedAt": "2026-11-07T04:21:00Z"
 }

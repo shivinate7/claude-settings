@@ -1,0 +1,30 @@
+{
+  "added": "2026-11-07T04:21:00Z",
+  "context": "Goal: q_max main's browser suite goes green without weakening a check.\nProblem (rule): the bidder column heads carry no \"(K)\" unit, so check FU10-C8 is red.\nBased on (read): lane qmax-browser-main-red's report to the coordinator, 22:21 CST; item 252 deferred the thousands totals.\nDeparts from: check FU10-C8 demands \"(K)\" in the heads \u2014 a retires that clause.",
+  "home": "q_max PRs from lane qmax-browser-main-red",
+  "id": "qmax-fu10-c8-bidder-heads",
+  "kind": "decision",
+  "n": 327,
+  "options": [
+    {
+      "gain": "The check matches the built screen and the thousands-totals deferral (item 252).",
+      "key": "a",
+      "label": "Retire the clause; heads show no unit (recommended)",
+      "lose": "No unit cue in the head."
+    },
+    {
+      "gain": "A unit cue in the head.",
+      "key": "b",
+      "label": "Re-point it so the heads show \"(K)\"",
+      "lose": "Departs from the built screen."
+    }
+  ],
+  "owner": "lane qmax-browser-main-red",
+  "pick": "a",
+  "rank": 2,
+  "ref": "q_max FU10-C8; item 252",
+  "short": "q_max FU10-C8: bidder head unit",
+  "status": "open",
+  "title": "q_max bidder heads: retire the \"(K)\" clause of FU10-C8, or show \"(K)\"?",
+  "why": "A check stays red until you rule, and q_max main's browser suite must go green without a weaker check."
+}
