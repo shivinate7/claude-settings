@@ -27,7 +27,7 @@
                           `waits on debt:<slug>|page:<item id>` (a held, parked or replaced label and a `Waits on:` comment line),
                           `batch run` (the `batch` label: an integration PR, aged from its labeled event, the batch limit),
                           `blocked on #N` (its base is the head branch of another PR of this repo; a fork's head never counts),
-                          `lane round 1` (a draft with no record), else `NO NEXT ACT`. A failed fix check also reads `lane round 1`. A line past its limit
+                          `lane round n` with n 1 (a draft with no record; a failed fix check reads n 1 too), else `NO NEXT ACT`. A line past its limit
                           (merge.PR_STATE_AGE_HOURS) or with no next act is RED. When the base's latest run is red, each batch line adds
                           `held by main red <age>`. The last line: the longest wait since a done record, and the count with no next act.
                           Exit 0 nothing red, 1 any red, 2 on a failed read, with no list printed. Cost: the open-pull list, the repo's
@@ -2464,10 +2464,10 @@ def ci_job_run(wt, *args):
         return "unknown", [l.rstrip() for l in lines if l.startswith("unknown")] or [f"(no unknown line read; ci-job exit {c})"], log, True
     return "unknown", [f"ci-job exited {c}"], log, False
 
-def need_batch_label():
+def need_batch_label(cite):
     """Stop when hooks/shared_names.py, the one home of BATCH_LABEL, could not be loaded: a missing label name never reads as a label nobody uses."""
     if BATCH_LABEL is None:
-        raise Stop("hooks/shared_names.py is missing beside merge/, so the name of the `batch` label is unknown. Run merge from a full checkout of claude-settings.")
+        raise Stop("hooks/shared_names.py is missing beside merge/, so the name of the `batch` label is unknown. Run merge from a full checkout of claude-settings. " + cite)
 
 def label_batch(host, n):
     """Add BATCH_LABEL to pull request n: one REST POST, which the ledger reads as a batch run. A failed POST (a missing label, no access, the
@@ -2492,7 +2492,7 @@ def lane_lint(root, target, host, base="", unknown_ok="", integration=False):
     BATCH_LABEL to the pull request. A failed POST says the label is unknown; the lint's verdict and exit code stand."""
     host = host or Host()
     if integration:
-        need_batch_label()  # before the lint runs, so a missing name never costs a lint and a refusal after it
+        need_batch_label(LANE_LINT_CITE)  # before the lint runs, so a missing name never costs a lint and a refusal after it
     if target.isdigit():
         info = host.pr(int(target))
         head, base = info["head"], info["base"]
@@ -3224,17 +3224,17 @@ def _reviewed_lines(h, root):
     act, read from GitHub alone, first match wins: its newest review record is done for the live head, `batch`; the record is open or for another
     head, `lane round n` (n the next round owed, at most 3; 1 when its fix check failed); a label of held, parked or replaced and a
     `Waits on: debt:<slug>` or `Waits on: page:<item id>` comment line, `waits on <id>`; the BATCH_LABEL, `batch run` (the batch limit); its base
-    is the head branch of another open pull request of the same repo, `blocked on #N` (a fork's head never counts); a draft, `lane round 1`;
+    is the head branch of another open pull request of the same repo, `blocked on #N` (a fork's head never counts); a draft, the first `lane round`;
     else `NO NEXT ACT`. A record that does not parse, or whose net value holds the change, gives no act of its own, so the rules below it run.
     The line is `#n branch act age`, in whole hours, since the record's comment (batch, lane round with a record), the label's last labeled
-    event (a hold, batch run), or the pull request's opening (the rest, a draft's lane round 1 too). The batch line carries no CI state of its
+    event (a hold, batch run), or the pull request's opening (the rest, a draft's first lane round too). The batch line carries no CI state of its
     own: merge reads CI when it merges (design of 12:56 CST Nov 7, record pr-ledger). RED when the act is NO NEXT ACT, the age is past its PR_STATE_AGE_HOURS limit, or, for blocked (no limit of its own), the pull request it
     waits on is red. When the base's latest run is red, each batch line adds `held by main red <age>`; an unreadable run is a Stop. The last line
     gives the longest wait since a done record and the count with no next act. `red` is True when any line is RED.
     Cost: the open-pull list, the repo's comments since the oldest open pull request (one list read), one `issues/<n>/events` list for each pull
     request that reaches the hold rule, and, when a batch line exists, one `actions/runs` read of the base (its jobs too, only when its latest run
     did not succeed: host.base_state). No GraphQL, no head or check read, no timer, file or log."""
-    need_batch_label()
+    need_batch_label(REVIEW_CITE)
     pulls = h.pages("pulls", fields={"state": "open"})
     summary = lambda wait, none: f"longest wait since a done record: {wait}h; no next act: {none}"
     if not pulls:
@@ -3266,7 +3266,7 @@ def _reviewed_lines(h, root):
                 act = ("batch", "batch", at, None)
             elif state in ("open", "stale"):
                 owed = min(max((i for i, *_ in rec["rounds"]), default=0) + 1, REVIEW_LAST_ROUND)
-                if state == "open" and rec["fix"] and rec["fix"][3] != "PASS":  # a failed fix check starts the lane over: the fix needs a new lane at round 1
+                if state == "open" and rec["fix"] and rec["fix"][3] != "PASS":  # a failed fix check starts the lane over: the fix needs a new lane, so n is the first round
                     owed = 1
                 act = (f"lane round {owed}", "lane round", at, None)
         if act is None:
