@@ -282,7 +282,7 @@ fields per session in the file. The page-ruling row adds one `ArtifactData list 
 page) to the same publish. The roadmap build script adds no git process, file, timer or log for either row. The
 dated-claim row reads the notes already loaded and adds nothing.
 The red line, the stalled lines, the ready lines and the two stale-ready rows read the live file and steps build.py
-already reads, and add no process, file, timer or log. The publisher adds one field, `createdAt`, per pull row.
+already reads. They add no process, file, timer or log. The publisher adds one field, `createdAt`, per pull row.
 It comes from the GitHub list call the publisher already makes.
 The mockup check runs at most four git processes per build, however many entries and origin refs (the ref listing, the shallow check, one batched type read, and one batched link read when a ref holds a blob at an entry's path). Check: `test_five_entries_over_fifty_origin_refs_start_at_most_four_git_processes` in `skills/roadmap/test_build.py`. It adds no file, timer or log.
 No watcher, no timer, no log.
