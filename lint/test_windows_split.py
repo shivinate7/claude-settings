@@ -62,6 +62,7 @@ REQUIRED = [
     "python merge/test_launch.py",
     "python merge/test_merge.py",
     "python merge/test_cmd.py",
+    "python hooks/test_repo_typecheck.py",
 ]
 
 
