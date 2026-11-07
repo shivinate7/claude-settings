@@ -4,6 +4,6 @@
 
 **Where.** `.github/stamp.json` on main. The merge tool copy on each machine.
 
-**Decision.** `merge-deletes-batch-lanes` (a merge deletes its batch's lane branches).
+- **Decision.** `merge-deletes-batch-lanes` (a merge deletes batch lane branches).
 
 **Retire.** Run `merge/install_from_main.sh` on each machine that runs the merge tool. Check: `merge <pr>` preview reads the stamp with no refusal on each machine.

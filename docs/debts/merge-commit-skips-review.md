@@ -4,6 +4,6 @@
 
 **Where.** `lint/report_guard.py` (the guard file changed), lane lint, and the batch runner's intake.
 
-**Decision.** `none`. The rule that makes this a debt is `building-mistake-names-its-guard` (a mistake names the guard that would have stopped it).
+- **Decision.** `none`. The rule that makes this a debt is `building-mistake-names-its-guard` (a mistake names its guard).
 
 **Retire.** Make lane lint, or the batch runner's intake, refuse a non-merge commit that comes after the last review and touches a guard or check path. A review record must name that commit to let it through. Check: a fixture with such a commit. The check refuses it. Red on the current code, green after the fix.

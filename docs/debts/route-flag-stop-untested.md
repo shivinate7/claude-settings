@@ -4,6 +4,6 @@
 
 **Where.** `lint/report_guard.py`, `refusal_route_flags` (:1194-1215) and its Stop call (:1537-1544), on the `prose-truth-falsifier-r3` branch.
 
-**Decision.** `claims-carry-backing` (the claim-backing record, its falsifiers section).
+- **Decision.** `claims-carry-backing` (claim backing, falsifiers section).
 
 **Retire.** A test writes a refusal row with `route_flag` and runs the Stop read, and checks that the flag is read. When that case is in the suite and green, the finding is closed.

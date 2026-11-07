@@ -4,6 +4,6 @@
 
 **Where.** `hooks/question_form.py`, `_owner_press_text`, `OWNER_NAME` and `OWNER_ACT`, rule `press-link`.
 
-**Decision.** act-in-place (the owner acts where he reads).
+- **Decision.** `act-in-place` (the owner acts where he reads).
 
 **Retire.** `_owner_press_text` reads a press verb in a session clause as the owner's when no session verb in that clause is the same press. Red-first cases in `hooks/test_question_form.py` for each case named in What go green, and "The session merges PR #374." and "After the pick, the session merges PR #374." stay allowed.

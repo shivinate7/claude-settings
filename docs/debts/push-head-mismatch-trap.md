@@ -4,7 +4,7 @@
 
 **Where.** `hooks/guard.py`, the Bash push rules. No rule reads this case yet.
 
-**Decision.** none. See the Ruling below.
+- **Decision.** `none`. See the Ruling below.
 
 **Retire.** Restore the rule, with its `push-head:` cases and mutants (fixtures `TRAPDIFF`, `TRAPSAME`, `TRAPCUT`), from commit 15e7b85 on branch `guard/banchi-shell-traps`. Design:
 
@@ -18,4 +18,4 @@ The check is a push of HEAD to a differing tracked name refused, and the allowed
 
 ## Ruling
 
-Owner, 2026-10-02: hold this rule until Banchi reports its hatch uses. Banchi's own copy was overridden 4 times since 2026-09-29; unmeasured how many were false alarms. A rule that cries wolf is spent (`guard-that-cries-wolf-is-spent`). If at least one was a real stray-branch incident, or all 4 were intent the rule could tell apart, restore it from 15e7b85. If all 4 were false alarms of one shape, narrow the predicate to exclude that shape first, and name the shape in the rule's comment.
+Owner, 2026-10-02: hold this rule until Banchi reports its hatch uses. Banchi's own copy was overridden 4 times since 2026-09-29; unmeasured how many were false alarms. A rule that cries wolf is spent (`guard-that-cries-wolf-is-spent` (a guard that cries wolf)). If at least one was a real stray-branch incident, or all 4 were intent the rule could tell apart, restore it from 15e7b85. If all 4 were false alarms of one shape, narrow the predicate to exclude that shape first, and name the shape in the rule's comment.

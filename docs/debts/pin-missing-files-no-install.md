@@ -4,6 +4,6 @@
 
 **Where.** `merge/install_from_main.sh`, the dirty-pin check in `move_pin` and `at_main`.
 
-**Decision.** merge-reinstalls-from-main (the pin follows local main and is reinstalled after each merge).
+- **Decision.** `merge-reinstalls-from-main` (each merge reinstalls from main).
 
 **Retire.** Restore a deletions-only pin before the dirty check, as the helper already does for a `<clone>-live-<sha>` tree. A case: a pin at main with one tracked file deleted; after the helper, the file is back and the installer ran.

@@ -4,6 +4,6 @@
 
 **Where.** `merge/merge.py` (`draft_step`, `READY_ROUTES`). `.github/stamp.json` `merge.readyChecks` in the repo that declares it.
 
-**Decision.** `lanes-run-no-full-ci-job` (a lane runs no full CI job; the ready checks).
+- **Decision.** `lanes-run-no-full-ci-job` (lanes run no full CI job).
 
 **Retire.** Closed when a case in `merge/test_merge.py` shows a ready mark made outside the draft step is refused. It is also closed when the route text names the ready checks first, for a repo that declares `merge.readyChecks`.

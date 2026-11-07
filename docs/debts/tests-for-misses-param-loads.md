@@ -4,6 +4,6 @@
 
 **Where.** `_loads_module` in `hooks/mutate_guard.py`.
 
-**Decision.** `mutation-ci-report-and-replay`, the mutation report job and the known-defect replay.
+- **Decision.** `mutation-ci-report-and-replay` (mutation report and known-defect replay).
 
 **Retire.** The selector follows a path parameter to its call sites, or the wrapper suites name their module in a form the selector reads. `--tests-for hooks/guard.py` then prints `hooks/test_call_judge.py`.

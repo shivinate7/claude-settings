@@ -4,6 +4,6 @@
 
 **Where.** `lint/stale_cites.py`, the STALE005 check (the route-claim check).
 
-**Decision.** `claims-carry-backing` (the claim-backing record, its STALE005 section).
+- **Decision.** `claims-carry-backing` (claim backing, STALE005 section).
 
 **Retire.** STALE005 does not judge a quoted span or a file path as a claim. Closed when a test feeds the two r2 lines (the quoted old claim and the grant title) and expects no hit, and a sentence that states a route claim still hits.

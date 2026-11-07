@@ -4,7 +4,7 @@
 
 **Where.** `hooks/local_time.py` (the capture hook), in `capture`, the prefix check against `MACHINE_TAGS`. `hooks/shared_names.py`, `MACHINE_TAGS`, the one copy of the tag list. `hooks/test_shared_names.py` holds a pinned copy that must match it. `hooks/feedback_guard.py`, the `Pages` check: it reads owner records through `lint/_transcript.py` `owner_text`, with the same tuple.
 
-**Decision.** owner-feedback-inbox (owner feedback goes to an inbox before the turn ends).
+- **Decision.** `owner-feedback-inbox` (owner feedback goes to an inbox).
 
 **Retire.** Tell the owner's typed prompt from harness text by the hook input's own origin field, not by a text prefix. Measured: the session transcript's user record for a peer prompt carries `isMeta: true` and `promptSource: "system"`. For an agent hand-back it carries `origin.kind: "peer"`. Whether the UserPromptSubmit hook input (the hook that runs on each owner prompt) carries any of these fields: unmeasured. Closed when `capture` skips each notice by that origin field. A test in `hooks/test_local_time.py` feeds it a peer prompt, a seed prompt and a scheduled-task wake. It asserts that none is saved. That test goes red when the prefix check is removed.
 

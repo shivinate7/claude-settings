@@ -4,6 +4,6 @@
 
 **Where.** hooks/guard_frozen.py, `_DESCRIPTOR` and `_shell_write_hit`, rule frozen-path.
 
-**Decision.** merge-reinstalls-from-main (ruling 1: no work runs in the pinned checkout).
+- **Decision.** `none`.
 
 **Retire.** Strip a trailing `)`, backtick or `&` before the descriptor match. A guard case allows `x=$(ls 2>&1)` from the pin, red before the fix and green after.

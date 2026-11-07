@@ -6,7 +6,7 @@ real run is never judged. The hook can then print green while that run goes on.
 
 **Where.** `hooks/ci_wake.py`, `wait_for`.
 
-**Decision.** ci-wait-reads-run-status (CI waits read the run status).
+- **Decision.** `ci-wait-reads-run-status` (CI waits read the run status).
 
 **Retire.** `wait_for` lists the runs once more after each judged run. If no new run shows,
 it stops. A test_ci_wake.py case adds a second real run after the first one ends. The hook

@@ -4,6 +4,6 @@
 
 **Where.** `skills/waiting-page/page.html`: the `.askrow` grid and its narrow-screen rules, and `renderAskForm`, which writes the hint (`askHint`) and the Copy ask slot (`askSlot`).
 
-**Decision.** none.
+- **Decision.** `none`.
 
 **Retire.** Give the hint a fixed height on narrow screens, so a press does not change the row height. This is a fix idea, not yet built. The check: a test in `skills/waiting-page/tests/page.test.mjs` sets 390px and an unreachable store, reads the boxes of Send ask and Copy ask, presses Copy ask, and reads them again. Neither box may move.

@@ -4,6 +4,6 @@
 
 **Where.** `hooks/question_form.py`, WHY_YOURS_LINE and its context check (:789, :801).
 
-**Decision.** `claims-carry-backing` (the claim-backing record, its part (v) hand-off check).
+- **Decision.** `none`.
 
 **Retire.** A test feeds a task context whose "Why yours" line gives a capability reason with no cite, and expects a refusal. The same line with a cite passes.

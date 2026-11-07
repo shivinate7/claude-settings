@@ -4,6 +4,6 @@
 
 **Where.** `lint/check_landed_dirs.py` (the landed-folder check), `landed-dirs.txt` (the landed folders), `install.sh` `land_dir`, and `merge --lane-lint`.
 
-**Decision.** `none`. The rule that makes this a debt is `building-guard-needs-incident` (a guard is built after a mistake Claude is likely to repeat).
+- **Decision.** `none`. The rule that makes this a debt is `building-guard-needs-incident` (a guard follows a mistake).
 
 **Retire.** Make `lint/check_landed_dirs.py` refuse a tracked file in a subfolder of a landed folder. This is the cheaper of two fixes. The other runs case 8 in lane lint when a diff adds a file under a landed folder. Check: a fixture test with a tracked file in a subfolder of a landed folder. The check refuses it. Red on the current code, green after the fix.

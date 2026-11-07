@@ -4,6 +4,6 @@
 
 **Where.** `merge/merge.py`, `lane_tips`.
 
-**Decision.** `merge-deletes-batch-lanes` (a merge deletes its batch's lane branches).
+- **Decision.** `merge-deletes-batch-lanes` (a merge deletes batch lane branches).
 
 **Retire.** Read the tip of a fast-forwarded lane too. Check: a fixture test whose first lane fast-forwards. Its branch is cut. Red on the current code, green after the fix.

@@ -4,7 +4,7 @@
 
 **Where.** `hooks/feedback_guard.py`, `Pages.sent`, the page-proof check. It scans all records after the anchor. On branch `one-inbox-per-repo`, the same `sent` serves repo items.
 
-**Decision.** owner-feedback-inbox (owner feedback goes to an inbox before the turn ends).
+- **Decision.** `none`.
 
 **Retire.** An owner call picks option A or option B. This record does not pick one.
 

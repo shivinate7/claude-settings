@@ -4,6 +4,6 @@
 
 **Where.** The plain-ask scope read `_ask_scope` and its `NEGATIONS` set in `hooks/override.py`. The judge it calls, `opus_ask`, sits in `hooks/call_judge.py`.
 
-**Decision.** owner-override (an owner override lets a refused or asked act through).
+- **Decision.** `owner-override` (owner override lets refused acts through).
 
 **Retire.** Either add `but`, `other`, `apart`, `aside`, `save`, `leave`, `out`, `sonnet`, `haiku`, `excepted`, `excluded`, `stay`, `stays` and `remain` to `NEGATIONS`, or make `opus_ask` answer false for an exclusion. The check: a plain-ask case that gives "everything but builders and reviewers" and expects no grant. It is red at this lane head and green after the fix.

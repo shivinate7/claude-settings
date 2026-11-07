@@ -4,6 +4,6 @@
 
 **Where.** `hooks/guard.py`, the `hand-made-worktree` check (the path read for a `worktree add` call).
 
-**Decision.** `lanes-start-in-tool-worktrees` (a lane works only in a tool-made worktree).
+- **Decision.** `lanes-start-in-tool-worktrees` (lanes work in tool worktrees).
 
 **Retire.** A case in `hooks/test_guard.py` for that `for` loop command, red on main, green after the fix.

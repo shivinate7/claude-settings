@@ -4,6 +4,6 @@
 
 **Where.** `settings.json` (the Edit and Write judge prompts, and the SendMessage hook entry). `hooks/precompact_handoff.py` (part c). `hooks/sendmessage_state.py` (part b).
 
-**Decision.** `haiku-prompt-hooks`, prompt hooks judge rules that no script can parse.
+- **Decision.** `haiku-prompt-hooks` (prompt hooks judge unparsable rules).
 
 **Retire.** Each part is built on main, or ruled out in a decision record. The debt closes when no part is open. Part (a) closes when the `when unsure answer` sentence leaves both prompts.

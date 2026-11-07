@@ -4,7 +4,7 @@
 
 **Where.** `actions/stamp`, and Banchi's stamp config.
 
-**Decision.** `one-shared-record-stamp`, one shared parser, not four claim tools.
+- **Decision.** `one-shared-record-stamp` (one parser, not four claim tools).
 
 **Retire.** Revisit when `claim-ids.py` claims a step in `docs/gates/steps/`. Then copy its rules into the engine and prove parity as for decisions. Closed when the stamp claims a step.
 

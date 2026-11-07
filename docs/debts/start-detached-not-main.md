@@ -4,6 +4,6 @@
 
 **Where.** hooks/session_start.sh, the pointer branch check. install.sh moves a clean, detached cloud checkout to origin/main, which makes this case the usual one.
 
-**Decision.** session-tiers, the session shapes and the cloud merge role.
+- **Decision.** `none`.
 
 **Retire.** session_start.sh also counts HEAD equal to `refs/remotes/origin/main` as on main. A test in hooks/test_install_src.sh starts with a stale local `main` and HEAD at origin/main, and shows no "not main" line.

@@ -4,6 +4,6 @@
 
 **Where.** `settings.json`, the SessionStart startup|resume refresh command; `merge/test_install_from_main.sh`.
 
-**Decision.** merge-reinstalls-from-main (the pin follows local main and is reinstalled after each merge).
+- **Decision.** `merge-reinstalls-from-main` (each merge reinstalls from main).
 
 **Retire.** Cases for a held lock, a stale lock and the exit removal; the lock carries its owner's id, and only the owner removes it.

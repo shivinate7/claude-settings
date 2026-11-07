@@ -4,6 +4,6 @@
 
 **Where.** `hooks/guard.py`, `other_checkout_hit`, the `if not own: return ""` line.
 
-**Decision.** `an-agent-outside-its-home-tree-must-stop`, an agent outside its home tree must stop (the `other-checkout` section).
+- **Decision.** `an-agent-outside-its-home-tree-must-stop` (agents stop outside their home tree). See the `other-checkout` section.
 
 **Retire.** Add a case in `worktree_home_cross_checkout_case` with `cwd=<scratchpad>` and a write whose target lands in the primary. The call is refused, and the case goes red on the old guard.

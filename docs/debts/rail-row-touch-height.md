@@ -4,6 +4,6 @@
 
 **Where.** `skills/waiting-page/page.html`: `.ov-head` (CSS). It is used by the tier rows built in the overview `renderRail`, and by the Ask row built in `askRailRow`.
 
-**Decision.** `ux-house-rules`, the house decision that sets touch size at 44px on touch and 24px for a mouse.
+- **Decision.** `none`.
 
 **Retire.** Set `.ov-head` to at least 44px on touch. The check: a test in `skills/waiting-page/tests/page.test.mjs` reads each rail row's height at 390px on touch and asserts 44px or more, as the link and Copy tests do.

@@ -4,6 +4,6 @@
 
 **Where.** `lint/report_guard.py`, CAPABILITY_RE (:1280-1283), read by `hand_off_problem`.
 
-**Decision.** `claims-carry-backing` (the claim-backing record, its part (v) hand-off check).
+- **Decision.** `claims-carry-backing` (claim backing, hand-off check).
 
 **Retire.** A test feeds each form above as a "Why yours" capability line with no cite, and expects a refusal. The test passes.

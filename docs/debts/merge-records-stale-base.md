@@ -4,6 +4,6 @@
 
 **Where.** `merge/merge.py`, the records-page rebuild and the DIRTY report after the wait.
 
-**Decision.** none.
+- **Decision.** `merge-needs-current-base` (a green run on current base).
 
 **Retire.** Before it pushes, `bin/merge` checks that the lane holds main's tip, or merges cleanly with it. If not, it stops and says "merge main first". A merge test adds a lane on an old main. It is red now, and green when the stop comes before the push.

@@ -4,6 +4,6 @@
 
 **Where.** `hooks/guard_frozen.py`, `_shell_write_hit` with `command_position`, through `_words_of` and `writes_to`. Rule 7c of `hooks/guard.py`, `builder-test-edit`, shows the refusal.
 
-**Decision.** `builders-cannot-edit-tests`, builders cannot edit tests (the shell check).
+- **Decision.** `builders-cannot-edit-tests` (builders cannot edit tests; shell check).
 
 **Retire.** Read a `bash -c` script's arguments at command position, as the rest of the shell reader does, and keep the any-position reading for a write. Closed when a red case allows both forms above, and a `bash -c` case that writes a test path stays refused.

@@ -4,6 +4,6 @@
 
 **Where.** `merge/merge.py`, `cut_lanes`, the delete order.
 
-**Decision.** `merge-deletes-batch-lanes` (a merge deletes its batch's lane branches).
+- **Decision.** `merge-deletes-batch-lanes` (a merge deletes batch lane branches).
 
 **Retire.** Keep every lane of a cycle, with a line. Check: a fixture test with two lanes based on each other. Both are kept. Red on the current code, green after the fix.

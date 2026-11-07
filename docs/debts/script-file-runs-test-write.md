@@ -4,6 +4,6 @@
 
 **Where.** `hooks/guard.py`, `builder_shell_test_hit` (rule 7c, `builder-test-edit`). It reads a heredoc body and a `-c` or `-e` script. It does not read a script file that a command runs by name.
 
-**Decision.** `builders-cannot-edit-tests`, builders cannot edit tests (the shell check).
+- **Decision.** `builders-cannot-edit-tests` (builders cannot edit tests; shell check).
 
 **Retire.** Read the script file a command runs, or the file a heredoc in the same command writes, and judge its writes. Closed when a red case in `hooks/test_guard.py` writes a test path this way and the guard refuses it.

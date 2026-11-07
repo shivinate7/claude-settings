@@ -4,6 +4,6 @@
 
 **Where.** `skills/waiting-page/page.html`: the `.btn.dash` rule and its `--line` token.
 
-**Decision.** none.
+- **Decision.** `none`.
 
 **Retire.** Give the unpressed `.btn.dash` edge a token at 3:1 or higher in both themes, and keep the pressed state set apart by shape (a solid edge), not by colour alone. The check: a browser test reads the computed edge colour of `#b-none-<id>`, `#b-done-<id>` and `#b-park-<id>` against the card surface in light and dark, and fails under 3:1.

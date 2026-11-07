@@ -4,6 +4,6 @@
 
 **Where.** `hooks/override.py` `grant_opus_ask`, `_system_prompt_last` and `_seed_record`.
 
-**Decision.** `owner-override` (the owner override and its Opus form).
+- **Decision.** `owner-override` (owner override, its Opus form).
 
 **Retire.** Close it when the installed Claude Code sends `source` on every UserPromptSubmit: check one typed prompt and one check-in with a hook dump. In a cloud session, also check that the owner's typed prompt does not carry `sdk`, which the schema names for the Agent SDK. If it does, the plain ask fails closed there, and `OPUS_ASK_SOURCES` must change. Or measure, from inside the hook, that a check-in's and a seed's records are in the transcript when it fires. Refusing an absent `source` is not a fix: it refuses every typed plain ask.

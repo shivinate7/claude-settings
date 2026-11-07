@@ -4,6 +4,6 @@
 
 **Where.** `hooks/guard.py`, `workflow_command_tests`. It reads the first token of each command segment as the command, and skips only `VAR=`, `npx`, `sudo` and `time`. A wrapper hides the test, so `workflow_drops_tests` (called by `workflow_builder_refused`) counts it as not run. `workflow_run_is_test` has the same first-token rule for a test-author's single-line `run:`.
 
-**Decision.** `builders-cannot-edit-tests`, builders cannot edit tests (the workflow test-step rule).
+- **Decision.** `builders-cannot-edit-tests` (builders cannot edit tests). See the workflow test-step rule.
 
 **Retire.** Skip the known wrapper commands before the interpreter or test path, in both `workflow_command_tests` and `workflow_run_is_test`. A wrapper's flags and values (`-a`, `600`, `FOO=1`) and its subcommand (`run` after `coverage` or `uv`) are skipped with it. A red case in `hooks/test_guard.py` closes it. The case shows that each wrapped form above passes. A builder's wrap of a bare run is not refused. A test-author's wrapped single-line `run:` passes `workflow_run_is_test`.

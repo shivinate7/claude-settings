@@ -4,6 +4,6 @@
 
 **Where.** `skills/waiting-page/page.html`, `markAsksSeen` and its two listeners. The seen time is read at load into `ASK_SEEN`.
 
-**Decision.** none.
+- **Decision.** `none`.
 
 **Retire.** Stamp only while the Ask section is on screen. The check: a test in `skills/waiting-page/tests/page.test.mjs` fires `visibilitychange` to hidden and `pagehide` with an answer that arrives while hidden, reloads, and finds that answer with the New mark, above "Show N older asks".

@@ -4,6 +4,6 @@
 
 **Where.** `lint/compliance_probes.py`, probe group `restates`: the 12-word floor (`SHARED_MIN`) on shared words per unit.
 
-**Decision.** `child-cites-not-copies` (a child repo names a claude-settings record and never copies it).
+- **Decision.** `child-cites-not-copies` (a child repo names, never copies).
 
 **Retire.** Not yet built. Write a test in `lint/test_compliance_probes.py`, red on the current code first. It gives the restates group a child line under 12 words, copied from a record, and expects a refusal. The same test must still pass a repo-only rule that cites a record with its ruling time.

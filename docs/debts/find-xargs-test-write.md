@@ -4,6 +4,6 @@
 
 **Where.** `hooks/guard_frozen.py`, `_shell_write_hit`. The builder check (rule 7c of `hooks/guard.py`, `builder-test-edit`) calls it.
 
-**Decision.** `builders-cannot-edit-tests`, builders cannot edit tests (the shell check).
+- **Decision.** `builders-cannot-edit-tests` (builders cannot edit tests; shell check).
 
 **Retire.** Read the paths that `find`, `xargs`, a `for` list and `$( )` feed to a write command, and judge them with the same predicate. Closed when a red case refuses each of the four forms above for a builder, and the test path in each is named.
