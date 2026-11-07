@@ -112,12 +112,13 @@ The URL is the `waiting-page` key in the repo's extras file, `.claude/layout-ext
     The card shows it above the reply, as "Your last answer, <time>". The writer copies it from `answers/<id>` before it
     deletes that record (steps 2 to 4 of "Route and close"), and from a chat answer. When the writer rewrites `options`,
     it writes `lastAnswer` again without `choice`: the old key may now name another option.
-  - `lane` (the receiver's branch slug, or its tier, such as `batch-runner` from its `cs-build:` tag, when it has no branch) is set when an answer
-    takes the busy-lane path. The card shows "waits on lane <slug>" in its top row. The item stays open until the receiver
-    reports the act done, and then the owning session closes it and deletes `answers/<id>` (see "Route and close", the busy-lane path).
-  - `waits` (`{repo, run}` or `{repo, pr}`: a CI run id or a PR number) is set while the item waits on that run or PR. `run` and
+  - `lane` (the receiver's branch slug, or its tier, such as `batch-runner` from its `cs-build:` tag, when it has no branch) is set
+    in the update that closes an item whose answer takes the busy-lane path. The page draws nothing for it. It stays, with
+    `lastAnswer` and `answers/<id>`, until the receiver reports the act done. Then the writer deletes `answers/<id>` and
+    drops `lane` (see "Route and close", the busy-lane path).
+  - `waits` (`{repo, run}` or `{repo, pr}`: a CI run id or a PR number) is set while an open item waits on that run or PR. `run` and
     `pr` are a whole number above zero, or a string of digits with no leading zero; any other value reads as no wait. An item
-    with `waits` and `lastAnswer` reads as answered on the page.
+    with `waits` and `lastAnswer` reads as answered on the page. A routed item carries no `waits`.
     `stale_pages.py --items` names each open item's wait `ended`, `waiting` or `unknown` (see "Route and close").
   - Before writing `reply`, `lastAnswer`, `lane` or `waits`, the writer checks that the page is current with `stale_pages.py`, the same
     check as `multi` and `ranked` (see "Update a repo's pages"). An older page draws none of the four.
@@ -246,8 +247,8 @@ is main's `page.html` with the live `designData` and roadmap blocks kept, never 
    compares the page's code outside `designData` with `skills/waiting-page/page.html` on
    claude-settings main, and prints one line: `current`, `behind` or `unknown`, with the source it
    read. Code outside main's page, other than the host's document skeleton, is `behind`. Then it prints one
-   `wait:` line per open item with `waits` (`ended`, `waiting` or `unknown`), and one `waiting` lane line per open item with
-   `lane` and `lastAnswer` and no `waits`. The exit code stays the page's.
+   `wait:` line per open item with `waits` (`ended`, `waiting` or `unknown`), and one `waiting` lane line per closed item with
+   `lane`, `lastAnswer` and `home` and no `waits`. The exit code stays the page's.
 3. Keep a copy of the page in the repo, from the same file ("Keep a copy in the repo"). Do it before any
    republish, so the copy holds the page as it was.
 4. `behind`: republish `<out>` to the same URL with the capabilities `db` and `{comments: {}}`.
@@ -483,22 +484,24 @@ The busy-lane rule: a clear page answer (a `none` answer with a clear direction 
 is busy or its act is another session's (a relay). Otherwise, and for every clear chat answer, it takes steps 1 and 2 in the turn
 it is read, and closes that turn.
 
-Busy-lane path. The routing session files the
-answer at once as a note on its step (the item's home, step 1), never held for the receiver. It sets `lane` (the receiver's
-branch slug, or its tier, such as `batch-runner` from its `cs-build:` tag, when it has no branch) and `lastAnswer` on the item,
-and keeps the item
-open and `answers/<id>` in place. It never sets `added` here: rule 5 of `page_grant.py` needs the answer's `at` later than
-`added`. A relay sends the receiver only the page URL, the item id and the act. The routing session closes the item and deletes
-`answers/<id>` (step 2) only when the receiver reports the act done. The done report is status, never a grant. A Park is the
-exception: on an item with `lane`, the writer tells the receiver the act is withdrawn and then closes the item, with no done
-report (see the park branch below). A `none` answer on this path gets no new options.
+Busy-lane path. The routing session files the answer at once as a note on its step or debt (step 1), never held for the
+receiver. In the same turn it closes the item in one update: `status` `closed`, `home` the step or debt that carries the work,
+`lane` (the receiver's branch slug, or its tier, such as `batch-runner` from its `cs-build:` tag, when it has no branch), and
+`lastAnswer`. The close drops `waits`, so a routed item carries none. `answers/<id>` stays in place until the receiver's done
+report, so `page_grant.py` counts the relayed pick: it counts a closed item with a `home` and a `lastAnswer.at` equal to the
+answer's `at`. The routing session never sets `added` here: rule 5 of `page_grant.py` needs the answer's `at` later than `added`.
+A relay sends the receiver only the page URL, the item id and the act. On the receiver's done report the writer deletes
+`answers/<id>` and drops `lane`. The done report is status, never a grant. A `none` answer on this path gets no new options.
+A Park is the exception: on an item with `lane` (one routed by the older path, before the close at routing), the writer
+tells the receiver the act is withdrawn and then closes the item, with no done report (see the park branch below).
 
 - Already routed. The owning session reads `answers/` at each turn start, so a kept answer looks new. An answer whose item
   already has `lane` and a `lastAnswer` with the same `at` is routed. Skip it until the done report.
-- Changed. A kept answer with no `act: "park"` and a new `at` is a new answer: the owner changed it. Route it again, relay it with the new `at`,
+- Changed. A kept answer with no `act: "park"` and a new `at` is a new answer. Route it again, relay it with the new `at`,
   and rewrite `lastAnswer`.
-- Withdrawn. If a kept answer is gone from an open item at the owning session's re-read, the owner withdrew it. The session drops `lane`
-  (`{"lane": {"__delete__": true}}`) and nothing else, leaves the item open as unanswered, and tells the receiver the act is withdrawn.
+- Withdrawn. The page hides the item, so the owner withdraws a routed answer in chat, and that word, or the receiver's report
+  that it dropped the act, makes the writer reopen the item in one update (`status` `open`, `added` now, `lane` dropped with
+  `{"lane": {"__delete__": true}}`), delete `answers/<id>`, and tell the receiver the act is withdrawn.
 - Chat answer. A chat answer closes the item (decision questions-go-to-owner, and the busy-lane rule), so no page answer
   can follow. Steps 2 to 4 skip their delete, and the writer sets `lastAnswer` from it. It has no `answers/<id>`, so
   `page_grant.py` can never count it for a receiver. The routing session tells the owner in its reply that the receiver needs
@@ -511,15 +514,15 @@ start, shared by all lane items, and one `get_session` per lane item, with no ti
 inherit rule applies (see "Read the answers", the watch bullet). The receiver's status is `ended` when it ended, failed or was
 archived, and `unknown` when the read cannot run or finds no session, never `ended`. For either status with no done report,
 never re-run or re-route the act on the kept answer. Check whether the act landed (for example, the PR merged or the setting
-changed). If it did, close the item (step 2) with a home. If it did not, or you cannot tell, write one line on the item's
-`context` (the page draws `context`): "receiver <slug> <status> at <time> with no done report; the act is unconfirmed". Write it
-once: append it to `context`, never replace `context`, and skip it when `context` already holds a line for this receiver. Leave
-the item open, so the page shows it. There is no age threshold.
+changed). If it did, delete `answers/<id>` and drop `lane`. If it did not, or you cannot tell, write one line on the item's
+home, the step or debt record (the closed item is hidden): "receiver <slug> <status> at <time> with no done report; the act is
+unconfirmed". Write it once: append it, never replace the record's text, and skip it when the record already holds a line for
+this receiver. Leave `lane` and `answers/<id>` in place. There is no age threshold.
 
 While an item has `waits`, steps 2 to 4 and the busy-lane path never delete `answers/<id>`. End of a wait: when the
 `--items` line for the item says `ended` ("Keep the page on main's code", step 2), the writer, in that wake, drops
-`waits` (`ArtifactData update items/<id> {"waits": {"__delete__": true}}`). With `lane` set, that is all: the close and the
-delete of `answers/<id>` wait for the done report. A Park is the exception (see the park branch). Otherwise it then closes or rewrites the item and deletes `answers/<id>`.
+`waits` (`ArtifactData update items/<id> {"waits": {"__delete__": true}}`). With `lane` set, that is all: the delete of
+`answers/<id>` and the drop of `lane` wait for the done report. A Park is the exception (see the park branch). Otherwise it then closes or rewrites the item and deletes `answers/<id>`.
 
 1. Write `receipts/<id>` with `read` set to now. Then move the answer to the item's home: the
    decision entry, the roadmap step or the PR, as rule `output-answer-has-a-home` (an answer has a
@@ -531,7 +534,7 @@ delete of `answers/<id>` wait for the done report. A Park is the exception (see 
 2. Close the item: `ArtifactData update items/<id> {"status": "closed"}`, pinned to the version
    you read (`if_version`). Copy the answer's `choice` or `done`, its `note` and its `at` into the item's `lastAnswer`
    in the same update. Then delete `answers/<id>`, so the answer cannot count for a later item. The page hides a closed
-   item, so `lastAnswer` here is for the record only. The page shows it on an item left open (steps 3, 4 and a busy lane).
+   item, so `lastAnswer` here is for the record only. The page shows it on an item left open (steps 3 and 4).
 3. If the answer is `none` with no clear direction, and you write the new `options`, `pick` and `why` from the
    note in this same turn (a `multi` item's new `pick` is a list), set `added` to now. Write `lastAnswer` from
    the answer in the same update, without `choice`, because the new `options` replace the old keys. Then delete

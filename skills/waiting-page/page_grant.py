@@ -30,7 +30,9 @@ Counted only when all hold:
      answers/ID.json and items/ID.json exist. Relay text alone never counts.
   3. The answer's `item` is --item and the item's `id`, and the answer's `n` is the item's `n`.
   4. The item is open: `status` is `open`, or absent (the page hides only `closed`, page.html `state.items`). A closed
-     item takes no answer, except an arbiter ruling (`arbiter` true, written closed) answered `overturn`.
+     item takes no answer, except an arbiter ruling (`arbiter` true, written closed) answered `overturn`, and a routed
+     item: `home` is a non-empty string and `lastAnswer.at` equals the answer's `at`. Routing closes the item at once
+     and keeps `lastAnswer` and answers/ID until the receiver's done report.
   5. The answer's `at` is later than the item's `added`: an earlier answer belongs to an earlier ask. Both carry a
      time zone (`Z` or an offset); one without is not counted.
   6. A decision (`kind` absent or `decision`): `choice` is the key of one option, or `overturn` when the item's `arbiter`
@@ -231,8 +233,17 @@ def judge(args):
         raise not_counted("answer n %s is not the item's n %s: the answer is for another ask" % (n, item.get("n")))
     status = item.get("status", "open")  # absent is open, as the page reads it: it hides only "closed"
     if status != "open" and not (status == "closed" and item.get("arbiter") is True and answer.get("choice") == "overturn"):
-        raise not_counted("item status is %s: only an open item takes an answer, or a closed arbiter ruling an overturn"
-                          % json.dumps(status))
+        home = item.get("home")
+        last = item.get("lastAnswer")
+        routed = status == "closed" and isinstance(home, str) and home != ""
+        if routed and isinstance(last, dict) and last.get("at") == answer.get("at"):
+            pass  # a routed answer: the item closed at routing with a home and keeps lastAnswer until the done report
+        elif routed:
+            raise not_counted("item status is closed with a home, but its lastAnswer.at is not this answer's at: "
+                              "the routed answer is not this one")
+        else:
+            raise not_counted("item status is %s: only an open item takes an answer, a closed arbiter ruling an overturn, "
+                              "or a closed item with a home and a lastAnswer that is this answer" % json.dumps(status))
     if moment(answer.get("at"), "answer at") <= moment(item.get("added"), "item added"):
         raise not_counted("answer is not later than the item's added time: it predates the ask")
 
