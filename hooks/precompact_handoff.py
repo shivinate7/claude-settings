@@ -188,7 +188,7 @@ _REFUSAL = re.compile(
     r"hook error|(?:doesn['\u2019]t|does not) want to proceed|tool use was rejected"
     r"|permission to use \S+(?: with .*?)? has been denied"
     r"|permission for this (?:action|tool use|command) (?:has been|was) denied"
-    r"|permission to (?:read|edit|write) \S+ has been denied"
+    r"|permission to (?:read|edit|write) .+? has been denied"
     r"|was denied by the claude code auto mode classifier|refusing to run it"
     r"|^(?:denied|refused):", re.I)
 

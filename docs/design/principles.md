@@ -252,3 +252,13 @@ test, and the fallback was seen working. To see the fallback, invert the `@suppo
 feature test false, then use the page. A browser-name check fails.
 Source: [web.dev, Baseline](https://web.dev/baseline); impeccable `overdrive` asks for a working
 fallback, with no check.
+
+## ux-text-zooms
+
+Guidance, not a house rule: a miss is advice, not a finding (record ux-house-rules).
+Web text zooms to 200% and loses no content, and it grows with the browser's default font size. So a font
+size is never in px without a repo record.
+Check: zoom each changed route to 200% at its smallest width, and raise the browser's default font size.
+Pass when no content is clipped or lost, and the text grows.
+Source: [MDN, font-size](https://developer.mozilla.org/en-US/docs/Web/CSS/font-size) (a `px` size ignores
+the browser's default font size); WCAG 1.4.4 (resize text).

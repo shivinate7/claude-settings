@@ -25,8 +25,9 @@ WATCH_NONE = re.compile(r"none\b", re.I)
 URL = re.compile(r"https?://\S+")
 # A standalone number, as `12` or `#12`, outside any URL: a copied item id.
 ID = re.compile(r"(?<!\w)#?\d+(?!\w)")
-# A count in parentheses, as `(3 open)`, tells how many items are open and copies no id.
-COUNT = re.compile(r"\(\s*\d+\s+[A-Za-z][^()]*\)")
+# A count in parentheses, as `(3 open)`, tells how many items are open and copies no id. A digit or `#`
+# after the count word is an id, so it stays out of the match.
+COUNT = re.compile(r"\(\s*\d+\s+[A-Za-z][^()\d#]*\)")
 HOME = "Write `Open items: none`, or name the page's items collection by URL, not ids."
 
 
