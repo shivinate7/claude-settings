@@ -16,6 +16,8 @@
 //   - a map line whose tested-by line is missing passes: the line is optional (T1b).
 //   - a join whose anchor is a string literal reads that literal as its first piece (T10e), and `posixpath.dirname` counts as
 //     `os.path.dirname` (T10m). The rule's list of known anchors names neither. Both are Assumed, and Input Needed: a strict reading turns each to FAIL.
+//   - the known places of T11 (the ESM and Python forms below) are the brief's direction. The rule's list names none of them, so the
+//     decision must name them before the builder merges, or a strict reading turns each should-name case to FAIL.
 //
 // Cases:
 //   T1   the clean fixture passes. T1b: no tested-by line at all passes. T1c, T1d: full size, 40 tests on one line, all pass; one that does not load the file fails.
@@ -39,6 +41,13 @@
 //        Not a load, a FAIL: an anchor that is no known place (T10a, T10o, T10r, T10s, T10t, T10u, T10y), a tail that names no tracked
 //        file from the real place (T10h, T10q), a name or a starred piece (T10f, T10j), an absolute piece (T10i), an array join (T10g),
 //        a join from another module (T10k, T10v, T10x), a join in a comment, docstring or string (T10l).
+//   T11  known places the rule's list does not name yet. Loads, red on the old code: a JS folder from `path.dirname(fileURLToPath(import.meta.url))`
+//        (`url.fileURLToPath` too), `import.meta.dirname`, `path.dirname(import.meta.filename)`, `path.dirname(__filename)` or
+//        `fileURLToPath(new URL('.', import.meta.url))` (T11a to T11f); a Python folder from `os.path.normpath` (T11l) or
+//        `Path(__file__).resolve().parents[1]` (T11m). T11n is a control, green on main: realpath and abspath already keep a known place.
+//        Not a load, a FAIL, green on the old code and the guard of the allow side: the twins of those forms with an anchor that is shadowed
+//        (T11g), a temp folder (T11h, T11p, T11r), a foreign function (T11i), a file (T11j), a function-local name (T11k), a parameter (T11o),
+//        a name bound twice (T11q), or a place outside the repository (T11s).
 //   C0   control, green on the old code: the import reader MAP11 uses reads the fixture's imports the way these cases assume.
 
 import { test } from 'node:test';
@@ -466,9 +475,9 @@ const pieceCase = (testFile, text, file, literals) => {
   return dir;
 };
 
-/** MAP11 passes, so the join of `testFile` loads `file`. On main this is red: MAP11 fails and its line names the test and the file. */
-const mustLoad = (r, testFile, file) =>
-  assert.match(map11(r), /^\[PASS\] MAP11\b/, `MAP11 must PASS: ${testFile} loads ${file} through a join of its pieces\n${shown(r)}`);
+/** MAP11 passes, so the join of `testFile` loads `file`. On main this is red: MAP11 fails and its line names the test and the file. `why` names the anchor form the case holds. */
+const mustLoad = (r, testFile, file, why = '') =>
+  assert.match(map11(r), /^\[PASS\] MAP11\b/, `MAP11 must PASS: ${testFile} loads ${file} through a join of its pieces${why ? ` (${why})` : ''}\n${shown(r)}`);
 
 /** MAP11 fails on the page, the test and the file, and the cause is that the test does not load the file. `why` names the rule the case holds. */
 const mustNotLoad = (r, page, testFile, file, why = 'the test does not load the file') => {
@@ -834,4 +843,318 @@ def test_wait():
     assert path.is_file()
 `, 'src/retry.py', ['..', 'src', 'retry.py']);
   mustLoad(check(dir), testFile, 'src/retry.py');
+});
+
+// ---- T11. Known places the rule's list does not name yet. A JS folder is `path.dirname(fileURLToPath(import.meta.url))` (`url.fileURLToPath`
+// too), `path.dirname(import.meta.filename)`, `path.dirname(__filename)`, `import.meta.dirname`, or `fileURLToPath(new URL('.', import.meta.url))`.
+// A Python folder is `os.path.normpath(...)` of a known place, and `Path(__file__).resolve().parents[n]` with a literal n.
+// A file (`__filename`, `import.meta.filename`, `fileURLToPath(import.meta.url)`) names a place only through its dirname: a join from the
+// file itself names nothing, as a join from `__file__` names nothing in py-facts.py (`place` keeps the kind `file`, which a join does not take).
+// Each allow case (T11g to T11k, T11o to T11s) is the twin of a should-name form, with the anchor unbound, shadowed, rebound, a temp folder,
+// a foreign function, a function-local name, or outside the repository.
+// Assumed, Input Needed: the decision's list of known places names none of these forms, so the decision must name them before the builder
+// merges. Until then a strict reading turns each should-name case to FAIL.
+
+test("T11a. const HERE = path.dirname(fileURLToPath(import.meta.url)), with path from 'node:path' and fileURLToPath from 'node:url': path.join(HERE, '..', 'src', 'home.ts') loads src/home.ts: MAP11 passes", () => {
+  needFile(REL);
+  const testFile = 'tests/here_url.spec.ts';
+  const text = `import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const HERE = path.dirname(fileURLToPath(import.meta.url));
+
+export const page = path.join(HERE, '..', 'src', 'home.ts');
+`;
+  assert.match(text, /^const HERE = path\.dirname\(fileURLToPath\(import\.meta\.url\)\);$/m, 'the test must hold the dirname form');
+  const dir = pieceCase(testFile, text, 'src/home.ts', ['..', 'src', 'home.ts']);
+  mustLoad(check(dir), testFile, 'src/home.ts', 'the anchor is a top-level const bound to path.dirname(fileURLToPath(import.meta.url))');
+});
+
+test("T11b. const HERE = path.dirname(url.fileURLToPath(import.meta.url)), with url from 'node:url': path.join(HERE, '..', 'src', 'home.ts') loads src/home.ts: MAP11 passes", () => {
+  needFile(REL);
+  const testFile = 'tests/here_url_ns.spec.ts';
+  const text = `import path from 'node:path';
+import url from 'node:url';
+
+const HERE = path.dirname(url.fileURLToPath(import.meta.url));
+
+export const page = path.join(HERE, '..', 'src', 'home.ts');
+`;
+  assert.match(text, /^const HERE = path\.dirname\(url\.fileURLToPath\(import\.meta\.url\)\);$/m, 'the test must hold the namespace form');
+  const dir = pieceCase(testFile, text, 'src/home.ts', ['..', 'src', 'home.ts']);
+  mustLoad(check(dir), testFile, 'src/home.ts', 'the anchor is a top-level const bound to path.dirname(url.fileURLToPath(import.meta.url))');
+});
+
+test("T11c. path.join(import.meta.dirname, '..', 'src', 'home.ts') loads src/home.ts: MAP11 passes", () => {
+  needFile(REL);
+  const testFile = 'tests/meta_dirname.spec.ts';
+  const text = `import path from 'node:path';
+
+export const page = path.join(import.meta.dirname, '..', 'src', 'home.ts');
+`;
+  assert.match(text, /import\.meta\.dirname/, 'the test must read import.meta.dirname');
+  const dir = pieceCase(testFile, text, 'src/home.ts', ['..', 'src', 'home.ts']);
+  mustLoad(check(dir), testFile, 'src/home.ts', 'the anchor is import.meta.dirname itself');
+});
+
+test("T11d. const HERE = path.dirname(import.meta.filename) loads src/home.ts through path.join(HERE, '..', 'src', 'home.ts'): MAP11 passes", () => {
+  needFile(REL);
+  const testFile = 'tests/meta_filename.spec.ts';
+  const text = `import path from 'node:path';
+
+const HERE = path.dirname(import.meta.filename);
+
+export const page = path.join(HERE, '..', 'src', 'home.ts');
+`;
+  assert.match(text, /^const HERE = path\.dirname\(import\.meta\.filename\);$/m, 'the test must hold the dirname of import.meta.filename');
+  const dir = pieceCase(testFile, text, 'src/home.ts', ['..', 'src', 'home.ts']);
+  mustLoad(check(dir), testFile, 'src/home.ts', 'the anchor is the dirname of import.meta.filename');
+});
+
+test("T11e. const HERE = path.dirname(__filename) loads src/home.ts through path.join(HERE, '..', 'src', 'home.ts'): MAP11 passes", () => {
+  needFile(REL);
+  const testFile = 'tests/filename_dirname.spec.ts';
+  const text = `import path from 'node:path';
+
+const HERE = path.dirname(__filename);
+
+export const page = path.join(HERE, '..', 'src', 'home.ts');
+`;
+  assert.match(text, /^const HERE = path\.dirname\(__filename\);$/m, 'the test must hold the dirname of __filename');
+  const dir = pieceCase(testFile, text, 'src/home.ts', ['..', 'src', 'home.ts']);
+  mustLoad(check(dir), testFile, 'src/home.ts', 'the anchor is the dirname of __filename');
+});
+
+test("T11f. const HERE = fileURLToPath(new URL('.', import.meta.url)), the folder URL, loads src/home.ts through path.join(HERE, '..', 'src', 'home.ts'): MAP11 passes", () => {
+  needFile(REL);
+  const testFile = 'tests/folder_url.spec.ts';
+  const text = `import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const HERE = fileURLToPath(new URL('.', import.meta.url));
+
+export const page = path.join(HERE, '..', 'src', 'home.ts');
+`;
+  assert.match(text, /^const HERE = fileURLToPath\(new URL\('\.', import\.meta\.url\)\);$/m, "the test must hold the folder URL form");
+  const dir = pieceCase(testFile, text, 'src/home.ts', ['..', 'src', 'home.ts']);
+  mustLoad(check(dir), testFile, 'src/home.ts', "the anchor is fileURLToPath of new URL('.', import.meta.url)");
+});
+
+test("T11g. the same HERE as T11a, and a parameter also named HERE in another function: HERE is bound twice, so it is no known place and path.join(HERE, '..', 'src', 'home.ts') names nothing: MAP11 fails and names the page, the test and the file", () => {
+  needFile(REL);
+  const testFile = 'tests/here_shadow.spec.ts';
+  const text = `import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const HERE = path.dirname(fileURLToPath(import.meta.url));
+
+export function elsewhere(HERE) {
+  return HERE;
+}
+
+export const page = path.join(HERE, '..', 'src', 'home.ts');
+`;
+  // The scope first: HERE is declared at module level and again as a parameter, so the verdict is about a name bound twice.
+  assert.match(text, /^const HERE = path\.dirname/m, 'the test must bind HERE at module level');
+  assert.match(text, /elsewhere\(HERE\)/, 'the test must bind HERE again as a parameter');
+  const dir = pieceCase(testFile, text, 'src/home.ts', ['..', 'src', 'home.ts']);
+  mustNotLoad(check(dir), CORE, testFile, 'src/home.ts', 'HERE is bound twice, so it is no known place and the join is no load');
+});
+
+test("T11h. HERE = path.dirname(fs.mkdtempSync(...)) is the dirname of a temp folder, which is no known place: path.join(HERE, 'src', 'home.ts') names nothing: MAP11 fails and names the page, the test and the file", () => {
+  needFile(REL);
+  const testFile = 'tests/here_tmp.spec.ts';
+  const text = `import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+
+const HERE = path.dirname(fs.mkdtempSync(path.join(os.tmpdir(), 'x')));
+
+export const page = path.join(HERE, 'src', 'home.ts');
+`;
+  assert.match(text, /mkdtempSync/, 'the test must make its folder with mkdtempSync');
+  const dir = pieceCase(testFile, text, 'src/home.ts', ['x', 'src', 'home.ts']);
+  mustNotLoad(check(dir), CORE, testFile, 'src/home.ts', 'the dirname of a temp folder is no known place, so the join is no load');
+});
+
+test("T11i. HERE = dirname(fileURLToPath(import.meta.url)) with dirname imported from './utils', not from 'node:path': the call is no path dirname, so path.join(HERE, '..', 'src', 'home.ts') names nothing: MAP11 fails and names the page, the test and the file", () => {
+  needFile(REL);
+  const testFile = 'tests/here_foreign.spec.ts';
+  const text = `import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { dirname } from './utils';
+
+const HERE = dirname(fileURLToPath(import.meta.url));
+
+export const page = path.join(HERE, '..', 'src', 'home.ts');
+`;
+  assert.match(text, /^import \{ dirname \} from '\.\/utils';$/m, "the test must import dirname from './utils'");
+  const dir = pieceCase(testFile, text, 'src/home.ts', ['..', 'src', 'home.ts', './utils']);
+  mustNotLoad(check(dir), CORE, testFile, 'src/home.ts', 'a dirname imported from another module is no path dirname, so the join is no load');
+});
+
+test("T11j. FILE = fileURLToPath(import.meta.url) is the file, not a folder: path.join(FILE, '..', '..', 'src', 'home.ts') names nothing, since a file is no join anchor: MAP11 fails and names the page, the test and the file", () => {
+  needFile(REL);
+  const testFile = 'tests/file_anchor.spec.ts';
+  const text = `import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const FILE = fileURLToPath(import.meta.url);
+
+export const page = path.join(FILE, '..', '..', 'src', 'home.ts');
+`;
+  assert.match(text, /^const FILE = fileURLToPath\(import\.meta\.url\);$/m, 'the test must bind FILE to the file path');
+  const dir = pieceCase(testFile, text, 'src/home.ts', ['..', 'src', 'home.ts']);
+  mustNotLoad(check(dir), CORE, testFile, 'src/home.ts', 'a file is no folder, so a join from it is no load');
+});
+
+test("T11k. HERE = path.dirname(fileURLToPath(import.meta.url)) bound inside a function, not at module level: the name is no module-level const, so path.join(HERE, '..', 'src', 'home.ts') names nothing: MAP11 fails and names the page, the test and the file", () => {
+  needFile(REL);
+  const testFile = 'tests/here_in_function.spec.ts';
+  const text = `import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+export function page() {
+  const HERE = path.dirname(fileURLToPath(import.meta.url));
+  return path.join(HERE, '..', 'src', 'home.ts');
+}
+`;
+  assert.match(text, /^ {2}const HERE = path\.dirname/m, 'the test must bind HERE inside a function');
+  const dir = pieceCase(testFile, text, 'src/home.ts', ['..', 'src', 'home.ts']);
+  mustNotLoad(check(dir), CORE, testFile, 'src/home.ts', 'a name set in a function is no module-level const, so the join is no load');
+});
+
+test("T11l. ROOT = os.path.normpath(os.path.join(HERE, '..')) with HERE = os.path.dirname(os.path.abspath(__file__)), then os.path.join(ROOT, 'src', 'retry.py') loads src/retry.py: MAP11 passes", () => {
+  needFile(REL);
+  const testFile = 'tests/normpath_root.py';
+  const text = `import os
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+ROOT = os.path.normpath(os.path.join(HERE, ".."))
+
+
+def test_wait():
+    path = os.path.join(ROOT, "src", "retry.py")
+    assert os.path.isfile(path)
+`;
+  assert.match(text, /^ROOT = os\.path\.normpath\(os\.path\.join\(HERE, "\.\."\)\)$/m, 'the test must bind ROOT to a normpath of a join of HERE');
+  const dir = pieceCase(testFile, text, 'src/retry.py', ['..', 'src', 'retry.py']);
+  mustLoad(check(dir), testFile, 'src/retry.py', 'the anchor is a module-level name bound to normpath of a join of a known place');
+});
+
+test('T11m. ROOT = Path(__file__).resolve().parents[1] at module level, then ROOT / "src" / "retry.py" loads src/retry.py: MAP11 passes', () => {
+  needFile(REL);
+  const testFile = 'tests/parents_root.py';
+  const text = `from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+
+
+def test_wait():
+    path = ROOT / "src" / "retry.py"
+    assert path.is_file()
+`;
+  assert.match(text, /^ROOT = Path\(__file__\)\.resolve\(\)\.parents\[1\]$/m, 'the test must bind ROOT to parents[1] of the file');
+  const dir = pieceCase(testFile, text, 'src/retry.py', ['src', 'retry.py']);
+  mustLoad(check(dir), testFile, 'src/retry.py', 'the anchor is a module-level name bound to Path(__file__).resolve().parents[1]');
+});
+
+// Control, green on main: realpath and abspath keep a known place, and that already works. A regression guard for the forms above.
+test('T11n. control, green on main: HERE = os.path.abspath(os.path.dirname(__file__)) and ROOT = os.path.realpath(os.path.join(HERE, "..")) loads src/retry.py through ROOT: MAP11 passes', () => {
+  needFile(REL);
+  const testFile = 'tests/realpath_root.py';
+  const dir = pieceCase(testFile, `import os
+
+HERE = os.path.abspath(os.path.dirname(__file__))
+ROOT = os.path.realpath(os.path.join(HERE, ".."))
+
+
+def test_wait():
+    path = os.path.join(ROOT, "src", "retry.py")
+    assert os.path.isfile(path)
+`, 'src/retry.py', ['..', 'src', 'retry.py']);
+  mustLoad(check(dir), testFile, 'src/retry.py', 'abspath and realpath around a known place keep it');
+});
+
+test('T11o. the twin of T11l with the anchor a parameter: os.path.join(os.path.normpath(os.path.join(tmp_path, "..")), "src", "retry.py") names nothing, since tmp_path is no known place: MAP11 fails and names the page, the test and the file', () => {
+  needFile(REL);
+  const testFile = 'tests/normpath_param.py';
+  const text = `import os
+
+
+def test_wait(tmp_path):
+    path = os.path.join(os.path.normpath(os.path.join(tmp_path, "..")), "src", "retry.py")
+    assert os.path.isfile(path)
+`;
+  assert.match(text, /def test_wait\(tmp_path\):/, 'the test must take tmp_path as a parameter');
+  const dir = pieceCase(testFile, text, 'src/retry.py', ['..', 'src', 'retry.py']);
+  mustNotLoad(check(dir), CORE, testFile, 'src/retry.py', 'normpath around a parameter is still no known place, so the join is no load');
+});
+
+test('T11p. the twin of T11l with the anchor a temp folder: os.path.join(os.path.normpath(tempfile.mkdtemp()), "src", "retry.py") names nothing: MAP11 fails and names the page, the test and the file', () => {
+  needFile(REL);
+  const testFile = 'tests/normpath_mkdtemp.py';
+  const text = `import os
+import tempfile
+
+
+def test_wait():
+    path = os.path.join(os.path.normpath(tempfile.mkdtemp()), "src", "retry.py")
+    assert os.path.isfile(path)
+`;
+  assert.match(text, /tempfile\.mkdtemp\(\)/, 'the test must make its folder with tempfile.mkdtemp');
+  const dir = pieceCase(testFile, text, 'src/retry.py', ['src', 'retry.py']);
+  mustNotLoad(check(dir), CORE, testFile, 'src/retry.py', 'normpath around a temp folder is still no known place, so the join is no load');
+});
+
+test('T11q. the twin of T11l with HERE bound twice: ROOT = os.path.normpath(os.path.join(HERE, "..")) names nothing, since HERE is bound at module level twice: MAP11 fails and names the page, the test and the file', () => {
+  needFile(REL);
+  const testFile = 'tests/normpath_rebound.py';
+  const text = `import os
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+HERE = os.getcwd()
+ROOT = os.path.normpath(os.path.join(HERE, ".."))
+
+
+def test_wait():
+    path = os.path.join(ROOT, "src", "retry.py")
+    assert os.path.isfile(path)
+`;
+  // The scope first: HERE is bound twice at module level, so the verdict is about a name bound twice.
+  assert.equal(text.match(/^HERE = /gm).length, 2, 'the test must bind HERE twice at module level');
+  const dir = pieceCase(testFile, text, 'src/retry.py', ['..', 'src', 'retry.py']);
+  mustNotLoad(check(dir), CORE, testFile, 'src/retry.py', 'HERE is bound twice, so it is no known place and the join is no load');
+});
+
+test('T11r. the twin of T11m with the anchor a temp folder: Path(tmp_path).parents[1] / "src" / "retry.py" names nothing, since tmp_path is no known place: MAP11 fails and names the page, the test and the file', () => {
+  needFile(REL);
+  const testFile = 'tests/parents_tmp.py';
+  const text = `from pathlib import Path
+
+
+def test_wait(tmp_path):
+    path = Path(tmp_path).parents[1] / "src" / "retry.py"
+    assert path.is_file()
+`;
+  assert.match(text, /Path\(tmp_path\)\.parents\[1\]/, 'the test must take parents[1] of a temp folder');
+  const dir = pieceCase(testFile, text, 'src/retry.py', ['src', 'retry.py']);
+  mustNotLoad(check(dir), CORE, testFile, 'src/retry.py', 'parents of a temp folder is no known place, so the chain is no load');
+});
+
+test('T11s. the twin of T11m out of the repository: ROOT = Path(__file__).parents[2] climbs past the repository root, so ROOT / "src" / "retry.py" names nothing: MAP11 fails and names the page, the test and the file', () => {
+  needFile(REL);
+  const testFile = 'tests/parents_outside.py';
+  const text = `from pathlib import Path
+
+ROOT = Path(__file__).parents[2]
+
+
+def test_wait():
+    path = ROOT / "src" / "retry.py"
+    assert path.is_file()
+`;
+  assert.match(text, /^ROOT = Path\(__file__\)\.parents\[2\]$/m, 'the test must bind ROOT to parents[2] of the file');
+  const dir = pieceCase(testFile, text, 'src/retry.py', ['src', 'retry.py']);
+  mustNotLoad(check(dir), CORE, testFile, 'src/retry.py', 'parents[2] of tests/x.py is above the repository, so the chain is no load');
 });
