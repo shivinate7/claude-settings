@@ -940,6 +940,25 @@ class RecordSlugsTests(unittest.TestCase):
                 self.assertTrue(self.failed_about(out, rel), out)
         self.assertFalse(self.failed_about(out, FIXED_DEBT), out)
 
+    def test_debt_file_with_a_seen_date_in_the_future_is_red(self):
+        self.put(DEBT_NOTES, NOTES_HEAD)
+        self.commit_base()
+        self.put(NEW_DEBT, "# New debt\n\nWhat. A gap with a fix named.\n\nSeen: %s x2\nFix: none — owner decides\n"
+                 % day(1))
+        self.commit_change()
+        rc, out = self.lint()
+        self.assertEqual(rc, 1, out)
+        self.assertIn("in the future", out, out)
+        self.assertTrue(self.failed_about(out, NEW_DEBT), out)
+
+    def test_debt_file_with_an_old_seen_date_passes(self):  # a debt's Seen has no age limit, unlike a note's
+        self.put(DEBT_NOTES, NOTES_HEAD)
+        self.commit_base()
+        self.put(NEW_DEBT, "# New debt\n\nWhat. A gap with a fix named.\n\nSeen: %s x2\nFix: none — owner decides\n"
+                 % day(-FAR_PAST_DAYS))
+        self.commit_change()
+        self.assert_passes()
+
     def test_debt_file_with_a_valid_seen_line_passes(self):
         self.put(DEBT_NOTES, NOTES_HEAD)
         self.commit_base()
@@ -974,6 +993,10 @@ class RecordSlugsTests(unittest.TestCase):
         self.put("debts/%s.md" % slug, body)
 
     def assert_next_debt(self, expected):
+        # --next-debt reads the repo of the current directory, so the tree must be one. It reads the debt folders from
+        # the working tree, so no commit is needed.
+        if not os.path.isdir(os.path.join(self.tree, ".git")):
+            self.git("init", "-q")
         rc, out = self.lint("--next-debt")
         self.assertEqual(rc, 0, "--next-debt did not exit 0 (not built?): %s" % out)
         self.assertEqual(out.strip(), expected, out)
@@ -1007,6 +1030,11 @@ class RecordSlugsTests(unittest.TestCase):
         self.put_debt("small", "Seen: %s x1" % day(-1))
         self.assert_next_debt("small")
 
+    def test_next_debt_ranks_an_undated_debt_after_a_dated_one_in_a_count_tie(self):
+        self.put_debt("aaa-undated")  # no Seen line: x1 with no date, and the alphabet would pick it
+        self.put_debt("zzz-dated", "Seen: %s x1" % day(-1))
+        self.assert_next_debt("zzz-dated")
+
     # --debt-flow START END: the debts opened and closed between two refs. The notes file and the README are not debts.
 
     def test_debt_flow_names_the_debts_opened_and_closed_and_nothing_else(self):
@@ -1030,6 +1058,22 @@ class RecordSlugsTests(unittest.TestCase):
         self.assertNotIn("new-note-line", out, out)
         self.assertNotIn("README.md", out, out)
         self.assertNotIn("notes.md", out, out)
+
+    def test_debt_flow_prints_the_count_line_then_one_plus_or_minus_line_per_debt(self):
+        self.put("debts/closed-one.md", DEBT_NO_FIX)
+        self.put("debts/kept.md", DEBT_NO_FIX)  # neither opened nor closed: it must not appear
+        self.put(DEBT_NOTES, NOTES_HEAD)
+        self.commit_base()
+        start = self.base_sha()
+        self.put("debts/opened-b.md", FIXED_DEBT_TEXT)
+        self.put("debts/opened-a.md", FIXED_DEBT_TEXT)
+        self.delete("debts/closed-one.md")
+        self.commit_change()
+        rc, out = self.lint("--debt-flow", start, "HEAD")
+        self.assertEqual(rc, 0, "--debt-flow did not exit 0 (not built?): %s" % out)
+        lines = out.splitlines()
+        self.assertEqual(lines[:1], ["debts opened 2, closed 1"], out)
+        self.assertEqual(sorted(lines[1:]), ["+ opened-a", "+ opened-b", "- closed-one"], out)
 
     def test_next_debt_and_debt_flow_read_the_repo_of_the_current_directory(self):
         # Decision notes-sightings-expiry: both read the repo of the current directory, never the repo that holds the
