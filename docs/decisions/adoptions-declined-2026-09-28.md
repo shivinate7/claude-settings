@@ -6,7 +6,7 @@ The owner declined each candidate below. A session that proposes one again first
 
 | Candidate | Why declined | What would reopen it |
 | --- | --- | --- |
-| Package this repo as a plugin | Cloud sessions load no plugins from local settings. A plugin cannot ship CLAUDE.md or permissions. The SessionStart hook already installs. | Cloud sessions load user plugins. |
+| Package this repo as a plugin | Whether cloud sessions load plugins from local settings is unknown (route plugins-local-cloud). A plugin cannot ship CLAUDE.md or permissions. The SessionStart hook already installs. | Cloud sessions load user plugins. |
 | Sandbox mode | Every network host and tool needs an allow entry. The guard, deny rules and frozen paths give most of the gain. | A guard bypass that deny rules and frozen paths do not cover. |
 | destructive_command_guard (dcg) | Too broad for one developer: a second binary, over 50 rule packs mostly for unused tools, open bypass issues, fails open. | Regular use of Docker, Kubernetes, cloud or database CLIs. Copy those few patterns into the guard. |
 | Status line | It renders in the terminal. The owner works in the desktop app. | Daily terminal use. |
