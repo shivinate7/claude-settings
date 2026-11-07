@@ -11170,7 +11170,7 @@ cmk_allow("a push of a clean commit, with a triplet already on the remote branch
 # is refused.
 cmk_allow("add a.txt, commit and push, with a clean a.txt",
           VCS + " add a.txt && " + VCS + " commit -m x && " + VCS + " push", CMK_CL)
-# Re-pointed in round 2 (was a refusal): CMK_CL holds no triplet before the call, so the blind chain is allowed.
+# CMK_CL holds no triplet before the call, so the blind chain is allowed.
 cmk_allow("a fix script, add -A, commit and push, with no triplet in the tree before the call",
           "./fix.sh && " + VCS + " add -A && " + VCS + " commit -m x && " + VCS + " push", CMK_CL)
 
@@ -11190,7 +11190,7 @@ cmk_refuse("two commits, each after an add, the second holding a triplet, then a
            + VCS + " push", CMK_SEQB)
 
 
-# Round 2. A commit or a --continue is judged on what it covers. A blind step before a commit (one that can
+# A commit or a --continue is judged on what it covers. A blind step before a commit (one that can
 # change the tree) is refused only when a push follows the commit in the call and the commit covers a
 # triplet already in the tree before the call, or when the chain runs a git step that makes a conflict. A
 # push judges the net change it sends.
