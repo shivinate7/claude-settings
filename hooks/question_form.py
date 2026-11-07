@@ -517,12 +517,13 @@ _SESSION_SUBJECT = re.compile(r"\bsession\s+(?:\w+ly\s+)?$", re.I)
 _PAST_OWNER_PRESS = re.compile(OWNER_NAME.pattern + r"\s+(?:(?:has|had|already)\s+)*$", re.I)
 _PAST_PRESS = re.compile(r"(?:press|click|tap)(?:ed|ped)\b", re.I)
 # In a session clause, "by clicking Merge" is the means of the clause's own subject, the session, and "a click"
-# or "one press" after a determiner is a count of presses, not a press asked of anyone ("without a click").
-# "after clicking Approve" and "after your Merge click" name no such subject or determiner, so they stay presses.
+# or "one press" after "with" or "without" is how the session acts, not a press asked of anyone ("without a
+# click"). "after clicking Approve", "approved by clicking Approve", "after a click on Approve" and "after your
+# Merge click" name no such means, so they stay presses.
 _GERUND_PRESS = re.compile(r"(?:press|click|tap)(?:ing|ping)\b", re.I)
-_SESSION_MEANS = re.compile(r"\b(?:by|via)\s+$", re.I)
+_SESSION_MEANS = re.compile(r"(?<!ed )\b(?:by|via)\s+$", re.I)   # "approved by clicking" names no subject
 _NOUN_PRESS = re.compile(r"(?:press(?:es)?|clicks?|taps?)\b", re.I)
-_PRESS_COUNT = re.compile(r"\b(?:a|an|one|no|any|single|without)\s+$", re.I)
+_PRESS_COUNT = re.compile(r"\bwith(?:out)?\s+(?:(?:a|an|one|no|any|a\s+single)\s+)?$", re.I)
 
 
 def _owner_press_in(clause) -> bool:

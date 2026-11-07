@@ -39,9 +39,10 @@ rule's settings-write ask, and it reaches agents.
       commas, and, or, &, plus); any other words between two roles: no grant. A role word with a NEGATIONS word (not,
       no, don't, never, except, without, or an exclusion word such as skip, but, other, apart, aside, out, sonnet or
       instead), or an exclusion verb in any form (EXCLUSION_STEM: skipping, omit, barring), within three words before
-      or after it: no grant (`builders, no problem` grants nothing too). `leave` before the role with no `opus` in
-      its clause, and `stay`, `remain` or `keep` with no `opus` after it, count too. A sonnet, haiku or stay word in
-      a clause of its own that names the rest (`sonnet for the rest`, `others stay`) governs those, not the role.
+      or after it: no grant (`builders, no problem` grants nothing too). `leave` or `keep` before the role with no
+      `opus` right after the role list, and `stay`, `remain` or a later `keep` with no `opus` after it, count too. A
+      sonnet, haiku or stay word in a clause of its own that names the rest (`sonnet for the rest`, `others stay`)
+      governs those, not the role.
     - An ask that names no role takes its roles from the owner's earlier typed prompts (decision owner-override:
       scope from context, fall back to every role), before the ask only. _context_prompts reads them from
       the one tail read (_tail_prompts), through the one owner-turn test (_owner_text), each through _strip_blocks,
@@ -116,7 +117,10 @@ NEGATIONS = {"not", "no", "never", "except", "without", "dont", "don't", "don\u2
 # after it ("builders and reviewers to opus, leave the rest"). `stay` and `remain` count unless `opus` follows
 # within two words ("stay on opus" keeps the role on Opus).
 LEAVE_WORDS = {"leave", "leaves"}
-STAY_WORDS = {"stay", "stays", "remain", "remains", "keep", "keeps", "kept"}
+STAY_WORDS = {"stay", "stays", "remain", "remains"}
+# `keep` after the role is a stay word ("builders and reviewers keep their model"); before it, it is read as `leave`
+# ("keep builders on opus" keeps them on Opus).
+KEEP_WORDS = {"keep", "keeps", "kept"}
 STAY_SPAN = 2
 # An exclusion verb in any form ("skipping", "omit", "barring", "ignoring", "excepting", "exempting"): a set of
 # exact words misses a form, so the stem is matched with its endings. `bar` takes only its verb endings, so "barely"
@@ -284,6 +288,13 @@ def _ask_scope(text):
             return False
         return any(c == clause[to] and w.lower() in REST_WORDS for w, c in zip(words, clause))
 
+    def _opus_after_roles(at):
+        # `opus` within STAY_SPAN words after the plain list of role words that holds words[at].
+        end = at + 1
+        while end < len(words) and (words[end].lower() in ("and", "or", "plus") or opus_role(words[end])):
+            end += 1
+        return "opus" in {w.lower() for w in words[end:end + STAY_SPAN]}
+
     roles, last_end = set(), None
     for at, word in enumerate(words):
         role = opus_role(word)
@@ -297,11 +308,12 @@ def _ask_scope(text):
                 continue
             if lower in NEGATIONS or EXCLUSION_STEM.fullmatch(lower):
                 return None
-            if lower in STAY_WORDS and "opus" not in {w.lower() for w in words[to + 1:to + 1 + STAY_SPAN]}:
+            stay = lower in STAY_WORDS or (lower in KEEP_WORDS and to > at)
+            if stay and "opus" not in {w.lower() for w in words[to + 1:to + 1 + STAY_SPAN]}:
                 return None
-            # `leave` before the role excludes it unless its clause sends it to Opus ("leave builders on opus").
-            if lower in LEAVE_WORDS and to < at and "opus" not in {
-                    w.lower() for w, c in zip(words[to + 1:], clause[to + 1:]) if c == clause[to]}:
+            # `leave` or `keep` before the role excludes it unless `opus` comes right after the role list ("leave
+            # builders and reviewers on opus"); "leave builders alone and use opus" still excludes it.
+            if (lower in LEAVE_WORDS or lower in KEEP_WORDS) and to < at and not _opus_after_roles(at):
                 return None
         if last_end is not None and not PLAIN_LIST.fullmatch(text, last_end, matches[at].start()):
             return None
