@@ -1044,6 +1044,42 @@ class LockRetake(Env):
             else:
                 self.fail(f"a fetch the network dropped read the lock as never expiring: {got}")
 
+    def test_a_listed_sha_gone_after_the_fetch_is_not_never_expires(self):
+        listed = merge.GitLock(self.other, now=lambda: self.now).acquire("main", 600)
+        ref = merge.lock_ref("main")
+        self.assertNotEqual(merge.git(self.co, "cat-file", "-e", listed)[0], 0, "scope: the listed lock is already local, so the fetch brings nothing new for it")
+        rivals = []
+        def hook(args, run):
+            if args[:1] == ("fetch",) and args[-1] == ref and not rivals:
+                rivals.append(self.rival_lock(f"--force-with-lease={ref}:{listed}"))  # a rival takes the ref after the listing, before this fetch
+            return run()
+        with self.git_hook(hook):
+            got = self.lock.read("main")
+        self.assertTrue(rivals, "the rival never took the ref, so the case proves nothing")
+        self.assertNotEqual(got[1], float("inf"), f"the read gives the listed lock {listed}, which the fetch no longer brings, as a lock that never expires")
+        self.assertEqual(got[0], rivals[0], "the read names the listed lock, not the lock the ref holds now")
+
+    def test_unlock_does_not_remove_a_lock_taken_after_its_read(self):
+        expired = merge.GitLock(self.other, now=lambda: self.now).acquire("main", 600)
+        self.now += 601  # expired, so a rival may take the ref over it; unlock still reads it as a lock to remove
+        self.assertEqual(self.head("merge-lock/main"), expired)  # scope: the expired lock is on origin before unlock reads it
+        ref = merge.lock_ref("main")
+        taken = []
+        def hook(args, run):
+            if args[:1] == ("push",) and args[-1].endswith(ref) and not taken:
+                taken.append(self.rival_lock(f"--force-with-lease={ref}:{expired}"))  # a rival takes the ref after unlock's read, before unlock's push
+            return run()
+        with self.git_hook(hook):
+            try:
+                self.lock.unlock("main")
+            except merge.Stop:
+                reported = True
+            else:
+                reported = False
+        self.assertTrue(taken, "the rival never took the lock after unlock's read, so the case proves nothing")
+        self.assertEqual(self.head("merge-lock/main"), taken[0], "unlock removed a lock a rival took after its read: the delete is not leased on the sha it read")
+        self.assertTrue(reported, "unlock reports no failed delete when the lock it read was taken over")
+
     def test_the_lock_message_is_read_by_the_listed_sha(self):
         listed = merge.GitLock(self.other, now=lambda: self.now).acquire("main", 600)
         expected = expires_in(self.lock_text())  # scope: the listed lock's own expiry, read by the module's own parser in the test
@@ -1100,6 +1136,25 @@ class LockRetake(Env):
         self.assertEqual(got, pushed, "acquire returned a sha other than this run's lock commit")
         self.assertEqual(self.lock.sha, got, "the take is not recorded on the lock")
         self.assertGreater(self.lock.until, self.now, "the recorded take has no expiry in the future")
+
+    def test_a_landed_take_whose_reread_fails_is_still_released(self):
+        self.assertFalse(self.lock_ref())  # scope: no lock ref on origin before the take
+        ref = merge.lock_ref("main")
+        taken, rereads = [], []
+        def hook(args, run):
+            if args[:1] == ("push",) and args[-1].endswith(":" + ref) and not args[-1].startswith(":") and not taken:
+                taken.append(args)
+                run()  # the take lands on origin
+                return 128, self.NET_DROP  # its reply is lost
+            if taken and args[:1] == ("ls-remote",) and args[-1] == ref and len(rereads) <= merge.NET_RETRIES:
+                rereads.append(args)
+                return 128, self.NET_DROP  # the re-read fails on the first try and on every retry
+            return run()
+        with self.git_hook(hook):
+            rc, out = self.run_merge("7", "--confirm")
+        self.assertTrue(taken, "the take push never ran, so the case proves nothing")
+        self.assertEqual(len(rereads), merge.NET_RETRIES + 1, f"scope: the re-read did not fail past its retries: {out}")
+        self.assertFalse(self.lock_ref(), f"the lock this run took is still on origin after its re-read failed, so no release ran: {out}")
 
 class Guards(Env):
     def test_moved_head_is_refused_and_nothing_is_claimed(self):
