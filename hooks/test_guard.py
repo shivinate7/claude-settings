@@ -10935,6 +10935,27 @@ records_deny("a chain that runs the generator with --root=/x/other, then add -A 
              GEN + " --root=/x/other && " + ADD_A + " && " + COMMIT_X, "product")
 records_deny("a chain that runs the generator with --root=/x/<this repo's name>, then add -A and commit",
              GEN + " --root=/x/" + os.path.basename(LANE) + " && " + ADD_A + " && " + COMMIT_X, "product")
+
+# A token the generator's parser refuses does not make the run no run: argparse exits on it, but the shell
+# still runs the generator, which writes this repo's page. Redirections and a trailing & are such tokens; so
+# are a subshell that moves the run into lint, and an `env -C` that runs the generator in this repo from
+# another folder.
+for _name, _run in (
+    ("2>&1", GEN + " 2>&1"),
+    ("> /dev/null", GEN + " > /dev/null"),
+    (">/dev/null 2>&1", GEN + " >/dev/null 2>&1"),
+    ("&> /dev/null", GEN + " &> /dev/null"),
+    ("--root . > /dev/null", GEN + " --root . > /dev/null"),
+):
+    records_deny("a chain that runs the generator with %s, then add -A and commit" % _name,
+                 _run + " && " + ADD_A + " && " + COMMIT_X, "product")
+# A trailing & detaches the run, which detached-launch refuses before records-page reads it: a control, not a red.
+sh("a chain that runs the generator with a trailing &, then add -A and commit is refused",
+   GEN + " & " + ADD_A + " && " + COMMIT_X, "deny", cwd=LANE)
+records_deny("a chain that runs the generator in a subshell from lint with --root .., then add -A and commit",
+             "( cd lint && " + RUN_FROM_LINT + " ) && " + ADD_A + " && " + COMMIT_X, "product")
+records_deny("a chain that runs the generator with env -C into this repo, from another folder, then git -C commit -am",
+             "env -C " + LANE + " " + GEN + " --root . && " + VCS + " -C " + LANE + " commit -am x", OTHER_REPO)
 records_deny("a chain that runs the generator as its own command word, then add -A and commit",
              "./lint/hook_catalog.py && " + ADD_A + " && " + COMMIT_X, "product")
 records_deny("a chain that runs the generator through env, then add -A and commit",
