@@ -25,7 +25,7 @@ Contract the builder codes against:
     and opus_list_* cases call override.grant_opus_ask directly, with the judge and the scope read stood in.
     The override_ask_* cases run the plain override route through local_time.grant_override, with the plain
     override judge (call_judge.override_ask) stood in by a JudgeRecorder. The override_ask_judge_kill case runs
-    main() instead, so the inbox capture after the grant is checked too.
+    main() instead, so the inbox capture before the grant is checked too.
 
 Set LOCAL_TIME_UNDER_TEST to test another file.
 
@@ -775,7 +775,7 @@ def opus_type(prompt, answer=None, error=None, at=OV_NOW, transcript=None, remot
     (none when None). `override` stands in for the plain override judge, call_judge.override_ask, for the grant only:
     a JudgeRecorder, or a judge that answers no when None. `drop_judge` removes that name instead, so the import of
     call_judge.override_ask fails. The real name, when the module has one, comes back after. `via_main` runs the whole
-    hook, main(), with the payload on stdin, so the capture after the grant runs too. A kill that the judge raises
+    hook, main(), with the payload on stdin, so the capture before the grant runs too. A kill that the judge raises
     leaves this function by raising it, with no return value."""
     _, decision_watch = hooks_modules()
     call_judge = call_judge_module()
