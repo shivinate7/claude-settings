@@ -18,7 +18,9 @@ holds. Each matching entry runs, and their reports are joined. One home: `hooks/
 
 - `command` is an argv list. It runs from the repo root, with no shell. Name `node` and the
   compiler's script, never `node_modules/.bin/tsc`: on Windows that file is a shim a process cannot start.
-- A glob is repo-relative. `**` crosses folders. Braces (`{ts,tsx}`) and a `./` prefix are refused.
+- A glob is repo-relative. `**` crosses folders. Braces (`{ts,tsx}`) and classes (`[jt]`) are read,
+  and a `./` prefix reads as the same path.
+- A bad entry costs only itself. It is skipped, and one `noted` line in guard.log names the key.
 - All matching entries share one 90-second budget.
 - The block reason is capped in length.
 - On a nonzero exit with output, the hook prints PostToolUse `decision: block` with the output as

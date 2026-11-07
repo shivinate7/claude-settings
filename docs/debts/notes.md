@@ -1508,3 +1508,5 @@
 - conflict-markers-show-uncapped: the push check runs one `git cat-file` per file with a marker finding, with no cap, and no cost case holds a finding (hooks/guard_merge.py `_kinds_of`). Decision: commit-refuses-conflict-markers.
 - conflict-markers-stale-tracking: a tracking ref left at a markers tip after the remote was rewound hides those commits from `git push origin <branch>` (hooks/guard_merge.py `_push_hit`). Decision: commit-refuses-conflict-markers.
 - repo-typecheck-bash-edit: an edit made through Bash (`sed -i`) has no `file_path`, so the repo typecheck never runs for it (hooks/repo_typecheck.py `run`). Decision: repo-typecheck-hook.
+- repo-typecheck-wrapper-timeout: on Windows a timeout kills only the direct child, so a wrapper whose grandchild holds the pipe can run past the 90-second budget (hooks/repo_typecheck.py `run`). The record prescribes a direct `node` command. Decision: repo-typecheck-hook.
+- repo-typecheck-cap-cut: the report cap can cut mid-line, and a noisy first entry can push later entries' output out of the report (hooks/repo_typecheck.py `REPORT_CAP`). Decision: repo-typecheck-hook.
