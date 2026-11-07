@@ -7,7 +7,7 @@ Two normal forms read the same spans in one left-to-right pass, so a mark inside
 - probe form (`keep=False`): HTML comments and code spans are dropped, and so is any word that holds a digit. The
   `restates` probe compares prose with records in this form.
 - copy form (`keep=True`): HTML comments are dropped, a code span keeps its text, a link keeps its text and not its
-  address, and digits are words. The copy finder and the reword check compare a rule sentence with a file in this form.
+  address, a parenthesised gloss right after a code span that is one id becomes a gap no run crosses, and digits are words. The copy finder and the reword check compare a rule sentence with a file in this form.
 Both lowercase, keep letters as words, and turn a line break into a space. A comment opener inside a code span, a lone
 quote and a `//` in text change no word.
 
@@ -17,8 +17,19 @@ blockquote, a heading and a fenced block.
 import re
 
 # One pass, left to right: a code span (the closer is a run of the same length) or an HTML comment. An opener with no
-# closer is plain text.
-SPANS = re.compile(r"(?P<tick>`+)(?!`)(?P<inner>.*?)(?<!`)(?P=tick)(?!`)|<!--.*?-->")
+# closer is plain text. A comment may run over lines, so the dot matches a line break (re.S). A code span stops at a
+# blank line, as in Markdown, so a lone backtick pairs with none in a later paragraph. A parenthesised gloss right after
+# a code span is matched with it, so the copy form can drop the gloss of an id (see ID_SPAN).
+SPANS = re.compile(r"(?P<tick>`+)(?!`)(?P<inner>(?:(?!\n[ \t]*\n).)*?)(?<!`)(?P=tick)(?!`)"
+                   r"(?P<gloss>[ \t]*\([^()\n]*\))?|<!--.*?-->", re.S)
+# The whole span forms, for the checks that blank or find them on a paragraph (rule_audit, stale_cites).
+CODE_SPAN = re.compile(r"(?<!`)(`+)(?!`).*?(?<!`)\1(?!`)", re.S)
+COMMENT = re.compile(r"<!--.*?-->", re.S)
+# A sentence ends at . ! or ? before a space or the end. "e.g.", "i.e.", "vs." and "cf." end none, so a paren group
+# such as "(e.g. read hooks/x.py:2)" stays in one sentence.
+SENTENCE_END = re.compile(r"(?<!\be\.g)(?<!\bi\.e)(?<!\bvs)(?<!\bcf)[.!?](?=\s|\Z)")
+GAP = " \0 "
+ID_SPAN = re.compile(r"[\w.:/-]+\Z")  # a code span that is one id; "`hold-unsafe-x` (net-value hold)" glosses an id
 NUMBERED = re.compile(r"\S*\d\S*")
 LINK = re.compile(r"\[([^\]\n]*)\]\([^)\n]*\)")
 FENCE = re.compile(r"^[ \t]{0,3}(`{3,}|~{3,})")
@@ -29,15 +40,28 @@ LIST_ITEM = re.compile(r"^[ \t]*(?:[-*+]|\d+[.)])[ \t]+")
 
 
 def _blank_keeping_lines(match):
-    return " " + "\n" * match.group(0).count("\n")
+    """A blank for the span, its line breaks kept, and a gloss kept after a code span (probe form)."""
+    span = match.group(0)
+    gloss = match.group("gloss") or ""
+    return " " + "\n" * span[:len(span) - len(gloss)].count("\n") + gloss
+
+
+def _copy_form_span(match):
+    """The copy form of a span: a comment goes, a code span keeps its text, and the gloss of an id becomes GAP, because a
+    rule cites its own decision that way and the gloss is no sentence of the rule. GAP is a word no text holds, so a run
+    of words never crosses it, and a gap on both sides still matches itself."""
+    if not match.group("tick"):
+        return _blank_keeping_lines(match)
+    inner, gloss = match.group("inner"), match.group("gloss") or ""
+    return inner + (GAP if gloss and ID_SPAN.match(inner) else gloss)
 
 
 def tokens(text, keep=False):
     """[(word, line offset)] of `text`: the words in the form above, each with the 0-based line of the text it sits on."""
     if keep:
-        text = SPANS.sub(lambda m: (m.group("inner") or "") if m.group("tick") else _blank_keeping_lines(m), text)
+        text = SPANS.sub(_copy_form_span, text)
         text = LINK.sub(r"\1", text)
-        pattern = r"[a-z0-9]+"
+        pattern = r"[a-z0-9]+|\0"
     else:
         text = NUMBERED.sub(" ", SPANS.sub(_blank_keeping_lines, text))
         pattern = r"[a-z]+"
@@ -54,10 +78,17 @@ def windows(word_list, size):
     return [tuple(word_list[at:at + size]) for at in range(len(word_list) - size + 1)]
 
 
-def in_order(short, long):
-    """True when every word of `short` is in `long`, in the same order, with other words allowed between."""
-    rest = iter(long)
-    return all(word in rest for word in short)
+def added_words(short, long):
+    """The words of `long` that are not part of `short`, when `long` holds every word of `short` in the same order (other
+    words between); None when it does not."""
+    rest = iter(short)
+    pending, added = next(rest, None), []
+    for word in long:
+        if pending is not None and word == pending:
+            pending = next(rest, None)
+        else:
+            added.append(word)
+    return added if pending is None else None
 
 
 def run_index(owners, size):

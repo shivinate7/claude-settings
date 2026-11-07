@@ -502,17 +502,17 @@ class ForeignReader:
 # The rows file as a repo path, for a read at head. Derived from the one home of its path, never copied.
 ROWS_AT_HEAD = os.path.relpath(route_match.ROUTE_ROWS_FILE, os.path.join(os.path.dirname(os.path.abspath(__file__)),
                                                                        "..")).replace(os.sep, "/")
-HTML_COMMENT = re.compile(r"<!--.*?-->")
+HTML_COMMENT = word_runs.COMMENT
 # Text in straight or curly double quotes, or a bare file path (a folder part and an extension): a mention, no claim.
 MENTION = re.compile(r'"[^"]*"|\u201c[^\u201d]*\u201d|(?<![\w./@+~-])(?:[\w.@+~-]+/)+[\w.@+~-]*\.\w+')
 HEADING_OR_QUOTE = re.compile(r"^[ \t]{0,3}(?:#{1,6}(?:[ \t]|$)|>)")
+# Not word_runs.FENCE: that one reads a fence indented up to 3 spaces, and this one any indent, so a fence nested in a list
+# item still opens. Folding them would change which rows count as fenced.
 FENCE = re.compile(r"^[ \t]*(`{3,}|~{3,})(.*)$")
 PAREN_GROUP = re.compile(r"\(([^()]*)\)")
 TABLE_ROW = re.compile(r"^[ \t]{0,3}\|")
 LIST_ITEM = re.compile(r"^[ \t]*(?:[-*+]|\d+[.)])[ \t]+")
-# A sentence ends at . ! or ? before a space or the end. "e.g.", "i.e.", "vs." and "cf." end none, so a paren group
-# such as "(e.g. read hooks/x.py:2)" stays in one sentence.
-SENTENCE_END = re.compile(r"(?<!\be\.g)(?<!\bi\.e)(?<!\bvs)(?<!\bcf)[.!?](?=\s|\Z)")
+SENTENCE_END = word_runs.SENTENCE_END  # "e.g.", "i.e.", "vs." and "cf." end no sentence
 # A capability verb. `is refused` and `are refused` are present; a bare `refused` is an incident and never matches.
 VERB = re.compile(r"\b(?:cannot|can\s+not|can['’]t|won['’]t|will\s+not|refuses|denies|blocks"
                   r"|(?:is|are)\s+(?:not\s+)?(?:refused|blocked|denied)"
@@ -930,10 +930,21 @@ def rule_file_texts(rng, rev):
     return texts
 
 
+NEGATORS = frozenset(("not", "never", "no", "nor", "cannot", "t"))  # "t" is what n't leaves in the word form
+
+
+def only_grown(old, new):
+    """True when `new` holds every word of `old` in order and its added words hold no negator: a rule that gained "not"
+    or "n't" changed its meaning, so it is a reword and not growth."""
+    added = word_runs.added_words(old, new)
+    return added is not None and not NEGATORS & set(added)
+
+
 def removed_rule_runs(rng):
     """{run of REWORD_FLOOR words: [rule id, ...]}: the runs a rule sentence held at base and no rule sentence holds at
     head. Empty when no RULE_FILES file changed, or the change only reflowed or re-emphasised its sentences, or only added
-    words to them (a head sentence holds every word of the old one, in order). A run is
+    words to them (a head sentence of the same rule holds every word of the old one, in order, and the added words hold
+    no negator). A run is
     read in the copy form of lint/word_runs.py, so a quoted old sentence (its anchor in a code span) is no source."""
     rule_files = {p.replace(os.sep, "/") for p in RULE_FILES}
     if not rng.changed & rule_files:
@@ -943,15 +954,17 @@ def removed_rule_runs(rng):
         for sentences in rule_sentences_of(text).values():
             for sentence in sentences:
                 kept.update(word_runs.windows(word_runs.words(sentence, keep=True), REWORD_FLOOR))
-    head_lists = [word_runs.words(sentence, keep=True) for text in rule_file_texts(rng, rng.head).values()
-                  for sentences in rule_sentences_of(text).values() for sentence in sentences]
+    head_lists = {}  # {rule id: [word list of each sentence of that rule at head]}: a rule is compared with its own
+    for text in rule_file_texts(rng, rng.head).values():
+        for slug, sentences in rule_sentences_of(text).items():
+            head_lists.setdefault(slug, []).extend(word_runs.words(sentence, keep=True) for sentence in sentences)
     removed = {}
     for text in rule_file_texts(rng, rng.base).values():
         for slug, sentences in rule_sentences_of(text).items():
             for sentence in sentences:
                 old = word_runs.words(sentence, keep=True)
                 lost = [run for run in word_runs.windows(old, REWORD_FLOOR) if run not in kept]
-                if lost and not any(word_runs.in_order(old, new) for new in head_lists):  # words only added: not removed
+                if lost and not any(only_grown(old, new) for new in head_lists.get(slug, ())):  # words only added
                     for run in lost:
                         if slug not in removed.setdefault(run, []):
                             removed[run].append(slug)
@@ -990,7 +1003,7 @@ MECHANISMS = "lint/rule_mechanisms.json"
 # top dirs a source path may start with, a different set), so it lives here.
 RULE_DIRS = ("hooks/", "lint/", "bin/", "actions/", ".github/")
 HOME_LINE = re.compile(r"^Home:[ \t]*`?([^\s`]+)`?[ \t]*$", re.M)
-CODE_SPAN = re.compile(r"(?<!`)(`+)(?!`).*?(?<!`)\1(?!`)", re.S)
+CODE_SPAN = word_runs.CODE_SPAN
 
 
 def decision_folders():

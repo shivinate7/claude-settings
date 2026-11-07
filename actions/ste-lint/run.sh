@@ -131,15 +131,21 @@ if [ "$SCOPE" != "all" ]; then
     } >> "$SUMMARY"
   fi
 fi
-# One-home check (lint/find_copies.py --in-repo, decision one-home-check): in a repo that is not claude-settings, the
-# copies it holds of the rule sentences of the claude-settings checkout this action sits in. The pin of this action is
-# the parent's version, so no extra checkout is needed. The findings print and never fail the step yet: the child
-# repos hold copies today, and a pin bump must not turn them red. A later step flips this to fail.
-if [ "$(pwd -P)" != "$PARENT" ]; then
-  set +e
+# One-home check (lint/find_copies.py --in-repo, decision one-home-check). In claude-settings itself it compares the
+# repo with its own rule sentences (no --parent) and a copy fails the step, like any other finding (FAIL=false makes it
+# report only). In a child it compares the repo with the rule sentences of the claude-settings checkout this action sits
+# in (the pin of this action is the parent's version, so no extra checkout is needed). The child findings print and
+# never fail the step yet: the child repos hold copies today, and a pin bump must not turn them red. Step
+# child-copies-cleanup flips that.
+set +e
+if [ "$(pwd -P)" = "$PARENT" ]; then
+  python3 "$FIND_COPIES" --in-repo
+  COPIES_EXIT=$?
+  [ "$COPIES_EXIT" -ne 0 ] && STALE_EXIT="$COPIES_EXIT"
+else
   python3 "$FIND_COPIES" --in-repo --parent "$PARENT"
-  set -e
 fi
+set -e
 # --tree (the tree-cites input) names stale cites on lines the range never touched, so it runs in both scopes.
 if [ "${TREE_CITES:-false}" = "true" ]; then
   set +e

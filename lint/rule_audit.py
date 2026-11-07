@@ -362,9 +362,9 @@ def rule_text(root: str = ROOT) -> str:
     return "\n".join(read(os.path.join(root, p)) for p in RULE_FILES)
 
 
-CODE_SPAN = re.compile(r"(?<!`)(`+)(?!`).*?(?<!`)\1(?!`)", re.S)
+CODE_SPAN = word_runs.CODE_SPAN  # the one home of the span, comment and sentence-end forms (lint/word_runs.py)
 LEAD_IN = re.compile(r"^\*\*[^*]+\*\*\s*")  # the bold label that starts a rule paragraph, such as **Output.**
-SENTENCE_END = re.compile(r"(?<!\be\.g)(?<!\bi\.e)(?<!\bvs)(?<!\bcf)[.!?](?=\s|\Z)")
+SENTENCE_END = word_runs.SENTENCE_END
 
 
 def anchor_spans(text: str):

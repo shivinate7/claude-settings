@@ -64,7 +64,8 @@ Paraphrase pass, `python3 lint/find_copies.py --measure lint/paraphrase_labelled
 - Reworded rule text: `lint/stale_cites.py`, code STALE006, 5-word floor (item 340). It skips a
   rule sentence that only gained words.
 - Child repos: the ste-lint step runs `find_copies.py --in-repo --parent` from its own checkout.
-  Child exceptions use the `exempt` marker (item 338), codes EXEMPT001 to EXEMPT003. The step only
+  Child exceptions use the `exempt` marker (item 338), codes EXEMPT001 to EXEMPT003. In claude-settings
+  itself the step runs `--in-repo` with no `--parent`, and a copy fails it. In a child the step only
   reports for now. Measured 2026-11-07, rough: degen 2, home 1, joyous 1, mailaudit 7, q_max 13.
   Step `child-copies-cleanup` clears them, then the step fails on a copy.
 - Retired phrase: `lint/test_retired_names.py` holds it (item 337).
