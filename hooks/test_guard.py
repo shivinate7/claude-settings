@@ -11805,6 +11805,18 @@ sh("frozen-digit-switch: perl -0pi -e on a config hook is refused, as perl -pi i
 # The near form: the same digit cluster with no in-place letter reads the hook and writes nothing.
 sh("frozen-digit-switch: perl -0ne reads a config hook and writes nothing, allowed",
    "perl -0ne 'print' " + CFG_HOOK, "allow", cwd=NOGIT)
+# frozen-perl-ruby-inline: perl -e and ruby -e take their script on the command line. A write to a frozen
+# file in that script is a write, as it is in a heredoc body. A read of the same file stays allowed.
+sh("frozen-perl-ruby-inline: perl -e open-writes a config hook is refused",
+   "perl -e 'open(F,\">\",\"" + CFG_HOOK + "\")'", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen-perl-ruby-inline: ruby -e File.write of a config hook is refused",
+   "ruby -e 'File.write(\"" + CFG_HOOK + "\",\"x\")'", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen-perl-ruby-inline: a # inside a -e string does not hide the write after it",
+   "perl -e 'print \"#\"; open(F,\">\",\"" + CFG_HOOK + "\")'", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen-perl-ruby-inline: perl -e opens a config hook for reading and writes nothing, allowed",
+   "perl -e 'open(F,\"<\",\"" + CFG_HOOK + "\")'", "allow", cwd=NOGIT)
+sh("frozen-perl-ruby-inline: ruby -e reads a config hook and writes nothing, allowed",
+   "ruby -e 'print File.read(\"" + CFG_HOOK + "\")'", "allow", cwd=NOGIT)
 sh("config-edit: rm of a project settings file is allowed", "rm " + PROJ_SETTINGS, "allow",
    cwd=NOGIT)
 sh("config-edit: mv of a project settings file is allowed",
