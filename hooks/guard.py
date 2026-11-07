@@ -205,8 +205,9 @@ Other tools, in `judge` order:
                        transcript that the `to` names (by agentId or by `name`), and its model is the
                        spawn's `model`, else the role's agents/*.md pin, else CLAUDE_CODE_SUBAGENT_MODEL.
                        A model the guard cannot read, a target no spawn holds, an unreadable transcript
-                       and a `session_...` target pass. The remedy names a fresh spawn whose brief carries the
-                       marker, because a resume keeps its model. Cost: only a message with the marker reads the transcript, once.
+                       and a `session_...` target pass. A refused spawn is no target. The remedy names a fresh
+                       spawn whose brief carries the marker, because a resume keeps its model. Cost: only a
+                       message with the marker reads the transcript, once per call, a refusal included.
                        The Workflow scan is static. It reads string-literal `model` and
                        `agentType` keys, and a literal prompt, in each `agent()` call. A template
                        prompt reads its static text only. A step-up call whose prompt or model is
@@ -2654,17 +2655,24 @@ def step_up_reason(prompt: str, role, model) -> str:
 # THE RESUME STEP-UP (rule roles-third-round-steps-up, decision agent-model-cap). A SendMessage resumes the agent it names on the
 # model its spawn gave it, so a third-round message to a builder on Sonnet asks for a third try on the wrong model. The
 # message is judged by step_up_reason as the target's next round. The target is the newest Agent or Task spawn in the session
-# transcript whose result names the agentId `to`, or whose `name` input is `to`; its model is the spawn's `model`, else its
-# role's agents/*.md pin, else CLAUDE_CODE_SUBAGENT_MODEL ("inherit" counts as unset). A model the guard cannot read, a target
-# no spawn holds, a transcript it cannot read and a cross-session `to` pass. Cost: only a message that carries a third-round
-# marker reads anything: one pass over the transcript and, for a spawn with no model, the agents/*.md files in file order
-# until one names the role (role_agent_keys). No process starts and nothing is written.
+# transcript whose result names the agentId `to`, or whose `name` input is `to`; a spawn whose result is an error or names no
+# agentId never started, so it is no target. Its model is the spawn's `model`, else its role's agents/*.md pin, else
+# CLAUDE_CODE_SUBAGENT_MODEL ("inherit" counts as unset). A model the guard cannot read, a target no spawn holds, a transcript
+# it cannot read and a cross-session `to` pass. Cost: only a message that carries a third-round marker reads anything: one
+# pass over the transcript per call, a refusal included (judge() runs step_up_hit once), and, for a spawn with no model, the
+# agents/*.md files in file order until one names the role (role_agent_keys). No process starts and nothing is written.
 RESUME_TOOL = "SendMessage"
 RESUME_AGENT_ID = re.compile(r"\bagentId:\s*([A-Za-z0-9_-]+)")
 RESUME_CROSS_SESSION = "session_"
-# A resume keeps the old model, so the remedy is a fresh spawn. Its brief carries the marker, or the Opus ceiling refuses an Opus spawn.
-RESUME_REMEDY = ("A resume keeps the agent's old model (%s). Spawn a fresh %s with model %s, and open its brief with "
-                 "the `Round 3 of 3` marker, which the Opus ceiling reads.")
+# A resume keeps the old model, so the remedy is a fresh spawn whose brief carries the marker. Without it, the Opus ceiling
+# refuses an Opus builder, and the role model row (agent-role-model) refuses a reviewer above its row. The remedy does not
+# name the old model, the refused target.
+RESUME_REMEDY = ("A resume keeps the agent's old model. Spawn a fresh %s with model %s, and open its brief with "
+                 "the `Round 3 of 3` marker, %s")
+RESUME_MARKER_READER = {
+    "builder": "which the Opus ceiling reads.",
+    "reviewer": "which lets a reviewer run above its role's row (agent-role-model).",
+}
 
 
 def step_up_resume_reason(tool_input, payload) -> str:
@@ -2701,13 +2709,15 @@ def step_up_resume_reason(tool_input, payload) -> str:
     reason = step_up_reason(message, role, model)
     if not reason:
         return ""
-    return re.sub(r"Spawn it with model (\w+)\.", lambda hit: RESUME_REMEDY % (model, role, hit.group(1)), reason)
+    return re.sub(r"Spawn it with model (\w+)\.",
+                  lambda hit: RESUME_REMEDY % (role, hit.group(1), RESUME_MARKER_READER[role]), reason)
 
 
 def resume_target_spawn(transcript, to):
     """The input of the newest Agent or Task spawn in the transcript that `to` names, as an agentId in the spawn's result
-    or as the spawn's `name`, or None when none does or the transcript cannot be read. A line that holds neither an
-    agentId nor a spawn tool name is skipped unparsed."""
+    or as the spawn's `name`, or None when none does or the transcript cannot be read. A spawn counts only when its
+    result names an agentId and is no error: a refused spawn never started, so it is no target. A line that holds
+    neither an agentId nor a spawn tool name is skipped unparsed."""
     spawns, ids = [], {}  # spawns: [(tool_use id, input)]; ids: tool_use id -> the agentId its result names
     try:
         with open(transcript, encoding="utf-8") as handle:
@@ -2725,7 +2735,7 @@ def resume_target_spawn(transcript, to):
                     if block.get("type") == "tool_use" and block.get("name") in SPAWN_TOOLS \
                             and isinstance(block.get("input"), dict):
                         spawns.append((block.get("id"), block["input"]))
-                    elif block.get("type") == "tool_result":
+                    elif block.get("type") == "tool_result" and not block.get("is_error"):
                         body = block.get("content")
                         if isinstance(body, list):
                             body = "".join(b.get("text", "") for b in body if isinstance(b, dict))
@@ -2736,7 +2746,7 @@ def resume_target_spawn(transcript, to):
         return None
     target = None
     for use_id, spawn_input in spawns:
-        if spawn_input.get("name") == to or ids.get(use_id) == to:
+        if use_id in ids and (spawn_input.get("name") == to or ids[use_id] == to):
             target = spawn_input
     return target
 
@@ -4923,13 +4933,14 @@ def session_home_hit(payload, tool: str, tool_input: dict, cwd: str) -> str:
     return ""
 
 
-def never_lifted(payload, tool: str, tool_input: dict, cwd: str) -> bool:
+def never_lifted(payload, tool: str, tool_input: dict, cwd: str, step_up=None) -> bool:
     """True when the call holds an act no owner override lifts (decision owner-override): a
     git location variable, a frozen path, a kill of pid 0, 1 or -1, a role or model guard, or a
     worktree-home refusal. refuse() asks this before it spends an override, because a lifted act ends the
-    check."""
+    check. `step_up` is judge()'s once-per-call step_up_hit, so a refusal does not read the transcript again."""
+    step_up = step_up or (lambda: step_up_hit(tool, tool_input, payload))
     # role_model_check's above-row refusal is liftable (item 127 pick a); only its no-model refusal is never lifted.
-    if (floor_hit(tool, tool_input) or step_up_hit(tool, tool_input, payload)
+    if (floor_hit(tool, tool_input) or step_up()
             or role_model_check(tool, tool_input)[1].startswith(ROLE_NO_MODEL_MATCH)
             or worktree_home_hit(payload, tool, tool_input, cwd)):
         return True
@@ -4964,7 +4975,13 @@ def judge(payload) -> None:
     cwd = payload.get("cwd", "") or os.getcwd() or ""
     if not isinstance(cwd, str):
         cwd = ""
-    guard_core.set_override_veto(lambda: never_lifted(payload, tool, tool_input, cwd))
+    step_up_memo = []  # step_up_hit runs once per call: on a SendMessage it reads the session transcript
+
+    def step_up_once():
+        if not step_up_memo:
+            step_up_memo.append(step_up_hit(tool, tool_input, payload))
+        return step_up_memo[0]
+    guard_core.set_override_veto(lambda: never_lifted(payload, tool, tool_input, cwd, step_up_once))
     session_home_keep(payload, tool, cwd)  # rule session-home's record, kept before any refusal can end the call
     # 0, handoff-unread. After compaction, no call the guard judges runs from the main session until it reads its handoff.
     # Not in never_lifted: the owner may mean the call. A failed import allows.
@@ -5004,7 +5021,7 @@ def judge(payload) -> None:
 
     # 9b. Step-up: a reviewer's second round on Sonnet, a builder's third on Opus. A reviewer's third round passes here on
     # Sonnet or Opus; the Opus ceiling (9d, opus_spawn_hit) then refuses Opus unless an override lifts it.
-    step_up = step_up_hit(tool, tool_input, payload)
+    step_up = step_up_once()
     if step_up:
         refuse(tool, "deny", "roles-third-round-steps-up", step_up, str(tool_input.get("model") or tool_input.get("to")))
 
