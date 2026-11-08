@@ -20,7 +20,8 @@ Exempt, each held by its own case in `hooks/test_guard.py`:
 - a local branch pushed to its own name (not a judged source);
 - a destination `main` or `master`, which `push-main` asks about;
 - a source at the tip of `main` or `master`, or of the branch `origin/HEAD` names. That tip holds no work. The batch runner's first push of an integration branch is this push;
-- a tag or any non-branch destination, a deletion, a glob, a colon-less push, `--force` and a lease (the force rule stands for these), `--all`, a mirror, a remote named by URL, and any read that fails.
+- a tag or any non-branch destination, a deletion, a glob, a colon-less push, `--all`, a mirror, a remote named by URL, and any read that fails;
+- `--force` and a lease, which the force rule judges.
 
 Stated limit: `HEAD:<new>` at another branch's tip stays as main allows it (coordinator, 14:45 CST; `plain-push-asks`). A session that pushes `HEAD` to a new name on a PR's head commit is not caught. This rule judges only what it can name by sha or remote ref. It also removes the false alarm on a chain that switches to a new branch, commits, then pushes `HEAD:new`.
 
