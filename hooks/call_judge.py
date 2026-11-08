@@ -136,7 +136,7 @@ ACTOR_PRONOUNS = ("i", "you", "we", "they", "he", "she", "it")
 # The words that make a forecast's clause an ask: "Verify the check will pass it" asks for the run, it claims nothing.
 VERDICT_ASK_WORDS = ("whether", "if", "verify", "confirm", "prove", "probe", "find out", "unknown")
 VERDICT_CLAIM_REMEDY = (
-    "this message forecasts what a check will refuse, block, deny, catch, flag, fail, allow or pass, and the turn did "
+    "this message forecasts what a check will refuse, block, catch, flag, fail, allow or pass, and the turn did "
     "not run it. Run the check first (a command that names the file the claim names), or add a backing cite at head: "
     "`(test path::name)`, where the file defines that name, or `(read path:line)`, where the file is one the claim "
     "names (named in the sentence, outside the cite) or the file that defines the named rule. Or drop the forecast.")
@@ -534,7 +534,7 @@ def _bare(token):
 
 def has_subject(tokens):
     """True when one of `tokens` names a check: a subject word (case-blind, but CI in capitals), a PR by number
-    (`PR #1516`, `PR#1516`), or a source file path. A token is compared whole, so "test-author" is no "test"."""
+    (`PR #<n>` or `PR#<n>`: a run has no file to match, so only a cite backs it), or a source file path. A token is compared whole, so "test-author" is no "test"."""
     words = [_bare(t) for t in tokens]
     for index, word in enumerate(words):
         following = words[index + 1] if index + 1 < len(words) else ""
