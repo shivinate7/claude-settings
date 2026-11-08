@@ -261,11 +261,11 @@ MUTATIONS = [
     # _run_files: a line that runs a substitution with a runner reads the written file it names.
     ("heredoc: a runner's substitution runs no written file, eval of a file",
      '        if _SUBSTITUTION.search(line) and any(_RUNNER(_basename_word(word)) for word in line_words):',
-     '        if False:', "guard", 'draft-pr: a run file read by eval through a substitution, is denied'),
+     '        if False:', "guard", 'draft-pr: a pull request in f, run by python3 -c on a substitution of f, is denied'),
     # _stage_runs: a runner that reads a script on stdin runs none of the words piped into it.
     ("heredoc: a runner reads no piped script, cat f | sh runs nothing",
      '            stdin = not picked or picked[0] == "-"',
-     '            stdin = False', "guard", 'draft-pr: a run file piped into sh, is denied'),
+     '            stdin = False', "guard", 'draft-pr: a pull request in f, piped into python3 - on stdin, is denied'),
     # _reads_only: a pure reader is no reader, so its operands count as run beside a runner.
     ("heredoc: a pure reader is not read as one, ls f piped into xargs runs f",
      '        if name in _READERS:\n            return True',

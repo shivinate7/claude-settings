@@ -9671,6 +9671,13 @@ for _label, _last in (
 ):
     sh("draft-pr: a pull request in f, run by " + _label + ", is denied", _R3_FIXTURE + _last, "deny", "draft-pr",
        cwd=NOGIT, carries=DRAFT_REMEDY, lacks=DRAFT_LACKS)
+# Round 3b, must deny: a Python interpreter runs a substitution of f, or reads f on stdin. Each denies on main.
+sh("draft-pr: a pull request in f, run by python3 -c on a substitution of f, is denied",
+   _R3_FIXTURE + "python3 -c \"$(cat f)\"", "deny", "draft-pr", cwd=NOGIT,
+   carries=DRAFT_REMEDY, lacks=DRAFT_LACKS)
+sh("draft-pr: a pull request in f, piped into python3 - on stdin, is denied",
+   _R3_FIXTURE + "cat f | python3 -", "deny", "draft-pr", cwd=NOGIT,
+   carries=DRAFT_REMEDY, lacks=DRAFT_LACKS)
 # Limits of the draft-pr rule (decision `draft-until-reviewed`), no case: `gh api -X POST .../pulls`,
 # `hub pull-request`, and short-flag clusters such as `-dt x` (refused, a rare false alarm).
 
