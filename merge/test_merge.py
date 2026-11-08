@@ -12731,6 +12731,18 @@ def named_line(cause, path, numbers):
     return "merge: #7 prose judge UNKNOWN (%s): %s:%s" % (cause, path, ",".join(str(n) for n in numbers))
 
 
+class FailingImport:
+    """A meta-path finder that makes `import decision_watch` raise RuntimeError(message), as a broken install would. Other names go on to the
+    finders after it."""
+    def __init__(self, message):
+        self.message = message
+
+    def find_spec(self, fullname, path=None, target=None):
+        if fullname == "decision_watch":
+            raise RuntimeError(self.message)
+        return None
+
+
 def named_by_file(cause, rows, names):
     """The named lines of `cause` for the (path, line) `rows` of the files in `names`: one line per file that holds a row, in `names` order."""
     lines = []
@@ -13266,10 +13278,10 @@ class ProseJudge(Env):
             raise RuntimeError("the call pool broke")
         return calls
 
-    def run_packed(self, calls=None, hide_decision_watch=False):
-        """The merge at the test cap, with merge.prose_judge_calls replaced by `calls` when given, and `import decision_watch` made to fail
-        when `hide_decision_watch`. prose_judge_pack is spied, so the case reads the lines the packed jobs hold. -> (those (path, line)
-        rows, rc, out)."""
+    def run_packed(self, calls=None, hide_decision_watch=False, import_error=None, readable=None, cap=PROSE_CAP):
+        """The merge at `cap` (None: the default). merge.prose_judge_calls is replaced by `calls` when given, merge.readable_verdicts by `readable`
+        when given. `import decision_watch` raises RuntimeError(`import_error`) when given, and finds no module when `hide_decision_watch`.
+        prose_judge_pack is spied, so the case reads the lines the packed jobs hold. -> (those (path, line) rows, rc, out)."""
         packed, real_pack = [], merge.prose_judge_pack
 
         def spy_pack(wt, picked):
@@ -13280,11 +13292,20 @@ class ProseJudge(Env):
             stack.enter_context(unittest.mock.patch.object(merge, "prose_judge_pack", spy_pack))
             if calls is not None:
                 stack.enter_context(unittest.mock.patch.object(merge, "prose_judge_calls", calls))
-            if hide_decision_watch:
+            if readable is not None:
+                stack.enter_context(unittest.mock.patch.object(merge, "readable_verdicts", readable))
+            if import_error is not None:
+                real = sys.modules.pop("decision_watch", None)
+                finder = FailingImport(import_error)
+                sys.meta_path.insert(0, finder)
+                stack.callback(sys.meta_path.remove, finder)
+                if real is not None:
+                    stack.callback(sys.modules.__setitem__, "decision_watch", real)
+            elif hide_decision_watch:
                 real = sys.modules.get("decision_watch")
                 sys.modules["decision_watch"] = None  # `import decision_watch` now raises ImportError
                 stack.callback(sys.modules.__setitem__, "decision_watch", real)
-            rc, out = self.run_capped()
+            rc, out = self.run_capped(cap)
         self.assertEqual(len(packed), 1, "scope: the plan was packed %d times, want 1" % len(packed))
         return {row for _, rows, _ in packed[0] for row in rows}, rc, out
 
@@ -13345,6 +13366,64 @@ class ProseJudge(Env):
         self.assertEqual(sorted(named_unknown_lines(text)), ["merge: #7 prose judge UNKNOWN (model error): docs/notes/abc.md:3"],
                          "the named line does not carry the path with its control characters stripped\n" + repr(text))
         self.assertEqual(controls(text), [], "the report carries control characters from the path: %r" % controls(text))
+
+    def failing_pool(self, message):
+        """A stand-in for merge.prose_judge_calls: it raises RuntimeError(`message`), as a call pool that cannot start would."""
+        def calls(decision_watch_module, prompts):
+            raise RuntimeError(message)
+        return calls
+
+    def failing_readable(self, message):
+        """A stand-in for merge.readable_verdicts: it raises RuntimeError(`message`) on its first call, the first job's answer, and reads the
+        real way after that."""
+        real, seen = merge.readable_verdicts, []
+
+        def readable(verdict, keyed=False):
+            if not seen:
+                seen.append(verdict)
+                raise RuntimeError(message)
+            return real(verdict, keyed=keyed)
+        return readable
+
+    def assert_plan_line_stripped(self, out, expected):
+        """The plan-level line reads `expected` as its exception text, and the report carries no control characters from that text."""
+        self.assertIn("UNKNOWN: it could not run (RuntimeError: ", out, "scope: the plan-level line does not print\n" + out)
+        self.assertEqual(controls(out), [], "the report carries control characters from the exception text: %r" % controls(out))
+        self.assertIn("merge: #7 prose judge UNKNOWN: it could not run (RuntimeError: %s)." % expected, out,
+                      "the plan-level line does not read the exception text with its control characters removed\n" + out)
+
+    # An exception while the first job's answer is read ends the loop. No line of any job is reported yet, so every line of every job is named
+    # as a model error, and the count line counts them.
+    def test_an_exception_in_the_first_jobs_answer_names_every_later_line_as_a_model_error(self):
+        names = (LANE_A, LANE_B, LANE_C)
+        self.setup_range(three_call_files(), {BACKING: BACKING_TEXT})
+        stub = JudgeStub(holds_every_line)
+        with unittest.mock.patch.object(decision_watch, "invoke_model", stub):
+            held, rc, out = self.run_packed(cap=None, readable=self.failing_readable("the reply reader broke"))
+        every = {(p, n) for p in names for n in range(3, 3 + CALL_LINES)}  # three_call_files cites one line on each of lines 3 to 52
+        self.assertEqual(len(stub.prompts), 3, "scope: model calls %d, want 3: one per job" % len(stub.prompts))
+        self.assertEqual(held, every, "scope: the jobs hold %d of %d lines, want every line in a job" % (len(held), len(every)))
+        self.assert_named(out, named_by_file("model error", every, names))
+        self.assert_count_line(out, len(every), [(len(every), "model error")])
+        self.assertEqual(rc, 0, out)
+
+    def test_a_control_character_in_a_failed_call_pool_message_is_stripped(self):
+        self.setup_range({PROSE: TWO_CITE_DOC}, {BACKING: BACKING_TEXT})
+        held, rc, out = self.run_packed(calls=self.failing_pool("pool\x1b broke\r now"))
+        self.assert_plan_line_stripped(out, "pool broke now")
+
+    def test_a_control_character_in_a_failed_import_message_is_stripped(self):
+        self.setup_range({PROSE: TWO_CITE_DOC}, {BACKING: BACKING_TEXT})
+        held, rc, out = self.run_packed(import_error="import broke\x1b now\r done")
+        self.assert_plan_line_stripped(out, "import broke now done")
+
+    def test_a_control_character_in_a_loop_failure_message_is_stripped(self):
+        self.setup_range({PROSE: TWO_CITE_DOC}, {BACKING: BACKING_TEXT})
+        stub = JudgeStub(holds_every_line)
+        with unittest.mock.patch.object(decision_watch, "invoke_model", stub):
+            held, rc, out = self.run_packed(readable=self.failing_readable("loop broke\x1b now\r done"))
+        self.assertEqual(len(stub.prompts), 1, "scope: model calls %d, want 1 for the one job" % len(stub.prompts))
+        self.assert_plan_line_stripped(out, "loop broke now done")
 
     def test_a_system_exit_from_the_model_leaves_the_merge_whole(self):
         self.assert_interrupt_leaves_merge_whole("model", SystemExit(3))
