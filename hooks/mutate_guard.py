@@ -261,6 +261,12 @@ MUTATIONS = [
      '                end = index + 1 if closed else index',
      '                end = index', "guard",
      'heredoc-keep: a kept body, then nohup of the file, a detached launch, denies'),
+    # _run_dir: it re-walks text strip_heredoc_bodies already stripped, whose dropped bodies took their closers.
+    # Without read_on, the header left open reads every line after it as body: the tail's cd never moves the root.
+    ("heredoc: _run_dir reads a stripped, unclosed header as body, the tail after a data body is lost",
+     '    cmd = _strip_heredoc_bodies_unconditionally(cmd, read_on=True)\n    where = None',
+     '    cmd = _strip_heredoc_bodies_unconditionally(cmd)\n    where = None', "guard",
+     'heredoc-tail: a data body, then cd into the dirty checkout and reset --hard, denies'),
     # _reads_only: a pure reader is no reader, so its operands count as run beside a runner.
     ("heredoc: a pure reader is not read as one, ls f piped into xargs runs f",
      '        if name in _READERS:\n            return True',
@@ -683,7 +689,7 @@ MUTATIONS = [
      '                handle.write(line + "\\n")',
      '                pass', "guard", 'log: one line per refusal and none for an allow'),
     ("shared-tree: keep heredoc bodies in every rule",
-     '    return "\\n".join(_walk_heredocs(cmd, keep=keep)[0])',
+     '    return "\\n".join(_walk_heredocs(cmd, keep=keep, read_on=read_on)[0])',
      '    return cmd', "guard", 'heredoc: prose naming the stash with no interpreter'),
     ("env-file: name the file in the environment reason, the reviewed defect",
      '        refuse(tool, "deny", "env-file", ENV_TOOL_REASON + ". " + ENV_ADVICE, target)',

@@ -756,7 +756,7 @@ def _split_heredocs(cmd: str, contractions_are_text: bool = False):
 
 def _walk_heredocs(cmd: str, contractions_are_text: bool = False, legacy: bool = False,
                    kept_at: "list | None" = None, body_at: "list | None" = None,
-                   keep: "set | None" = None):
+                   keep: "set | None" = None, read_on: bool = False):
     """Return (kept lines, [(quote, body, header)], unclosed): every header line kept, every body set apart,
     each body with the text of the header line that opened it (two headers share one line).
     The walk is bash's own reading, where a later `'` closes a contraction's mark. With
@@ -768,7 +768,9 @@ def _walk_heredocs(cmd: str, contractions_are_text: bool = False, legacy: bool =
     A caller that passes `kept_at` gets the line index of each kept line appended to it. `body_at` gets the
     line index of each body's header line, in the order of the bodies. A body whose header line index is in
     `keep` stays in view, its lines and its closing delimiter line kept after its header. With any `keep`, a
-    dropped body keeps its closing delimiter line, so the kept text re-walks with every heredoc closed."""
+    dropped body keeps its closing delimiter line, so the kept text re-walks with every heredoc closed.
+    With `read_on`, a header that no line closes keeps the lines after it too, as commands: the text is one an
+    earlier walk already stripped, whose dropped bodies took their closers with them."""
     lines = cmd.split("\n")
     last = -1 if contractions_are_text else max(
         (i for i, line in enumerate(lines) if "'" in line), default=-1)
@@ -802,6 +804,10 @@ def _walk_heredocs(cmd: str, contractions_are_text: bool = False, legacy: bool =
                 kept.extend(lines[first:end])
                 if kept_at is not None:
                     kept_at.extend(range(first, end))
+            if read_on and not closed and not (keep and header_at in keep):
+                kept.extend(lines[start:index])
+                if kept_at is not None:
+                    kept_at.extend(range(start, index))
             if closed:
                 index += 1  # a dropped body drops its closing delimiter line too
             else:
@@ -809,19 +815,19 @@ def _walk_heredocs(cmd: str, contractions_are_text: bool = False, legacy: bool =
     return kept, bodies, unclosed
 
 
-def _drop_heredoc_bodies(cmd: str, keep: "set | None" = None) -> str:
+def _drop_heredoc_bodies(cmd: str, keep: "set | None" = None, read_on: bool = False) -> str:
     """Drop the body of every heredoc, keeping every header line. `keep` holds the header line indices
     of the bodies that stay in view (a file a command runs). The one loop
     `strip_heredoc_bodies` and `_strip_heredoc_bodies_unconditionally` both need: the first
     guards it with the interpreter exception, the second never does, and neither re-implements
     the walk itself."""
     lane_at, main_at = [], []
-    _walk_heredocs(cmd, kept_at=lane_at, keep=keep)
-    _walk_heredocs(cmd, legacy=True, kept_at=main_at, keep=keep)   # BANDAID: main's own walk, see _MAIN_HEADER
+    _walk_heredocs(cmd, kept_at=lane_at, keep=keep, read_on=read_on)
+    _walk_heredocs(cmd, legacy=True, kept_at=main_at, keep=keep, read_on=read_on)   # BANDAID: main's own walk, see _MAIN_HEADER
     if lane_at != main_at:
         in_view = set(lane_at) | set(main_at)   # a line stays in view when either walk keeps it
         return "\n".join(line for at, line in enumerate(cmd.split("\n")) if at in in_view)
-    return "\n".join(_walk_heredocs(cmd, keep=keep)[0])
+    return "\n".join(_walk_heredocs(cmd, keep=keep, read_on=read_on)[0])
 
 
 # A file a heredoc header writes (`> f`, `>> f`, `>| f`, `&> f`, `tee -a f`), the words of the command, and a
@@ -1480,7 +1486,7 @@ def _absolute(where: str, shell_cwd: str) -> str:
     return where
 
 
-def _strip_heredoc_bodies_unconditionally(cmd: str) -> str:
+def _strip_heredoc_bodies_unconditionally(cmd: str, read_on: bool = False) -> str:
     """Drop the body of every heredoc, header line kept, even one fed to an interpreter.
 
     `strip_heredoc_bodies` keeps an INTERPRETER heredoc's body under inspection, on purpose,
@@ -1494,8 +1500,10 @@ def _strip_heredoc_bodies_unconditionally(cmd: str) -> str:
     body dropped this way; every other caller of `strip_heredoc_bodies` still needs that body
     kept for its OWN question, which is what a write or a refused command might say, not where
     the shell sits. The walk itself is `_drop_heredoc_bodies`, shared with that function.
+    `read_on` is for a caller handed text `strip_heredoc_bodies` already stripped, whose header lines have lost
+    their closers: a header no line closes then keeps the lines after it, never swallows them as body.
     """
-    return _drop_heredoc_bodies(cmd)
+    return _drop_heredoc_bodies(cmd, read_on=read_on)
 
 
 def _run_dir(cmd: str, shell_cwd: str) -> str:
@@ -1516,7 +1524,7 @@ def _run_dir(cmd: str, shell_cwd: str) -> str:
     `strip_heredoc_bodies` keeps for other callers: a `cd` line inside one never moves the
     OUTER shell, which is the tree this function answers about.
     """
-    cmd = _strip_heredoc_bodies_unconditionally(cmd)
+    cmd = _strip_heredoc_bodies_unconditionally(cmd, read_on=True)
     where = None
     last_cd = None
     for segment in split_segments(cmd):
