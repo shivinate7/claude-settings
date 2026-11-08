@@ -61,13 +61,13 @@ except ImportError:  # a hook never dies for a missing helper (it lands a moment
 
 AGENT_ID = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 MAX_LOG_LINES = 200  # the payload log keeps the last 200 runs
-LOG_WAIT_SECONDS = 30  # one log() call waits at most this long for the lock and the replace together
-LOG_RETRY_SECONDS = 0.02  # pause between two tries at the lock or the replace
+LOG_WAIT_SECONDS = 30  # one log() call waits at most this long for the lock, the read and the replace together
+LOG_RETRY_SECONDS = 0.02  # pause between two tries at the lock, the read or the replace
 LOG_DONE_BY = 58  # seconds after the hook started by which the done row stops waiting; the hook's own limit is 60
 
 
 class LogWaitTimeout(OSError):
-    """A log() call waited past its deadline for the lock or the replace."""
+    """A log() call waited past its deadline for the lock, the read or the replace."""
 
 
 def log_path() -> str:
@@ -108,6 +108,13 @@ def _log_lock(path: str, deadline: float):
                 fcntl.flock(handle, fcntl.LOCK_UN)
 
 
+DROPS_MAX_BYTES = 256 * 1024  # the drops file moves to `<drops>.old` at this size
+
+
+def drops_path() -> str:
+    return os.path.join(git_reads.config_dir(), "state", "agent-end-drops.jsonl")
+
+
 def log(record: dict, replace_run=None, give_up_at=None):
     """Append one line and keep only the last MAX_LOG_LINES. The log is the evidence for the hook
     fields the docs leave open (docs/decisions/agent-end-reap-stops-what-a-finished-agent-left.md).
@@ -118,24 +125,49 @@ def log(record: dict, replace_run=None, give_up_at=None):
     (a `time.monotonic` time, the hook's own clock) when that is sooner.
     REPLACE_RUN names a start row written earlier by this run; the last line is replaced only
     when it carries that run id, so another agent's row is never dropped.
-    Only the new row can drop, never a row the log holds: every failure comes before the replace.
-    A write that cannot finish by the deadline raises LogWaitTimeout. A read of the log that is
-    refused (any OSError but a missing file) skips the rewrite and is not retried. A failed folder,
-    lock-file or temp write, or a replace refused with an OSError other than PermissionError, drops
-    it too. A failed write never fails the hook (exit stays 0); it prints one line to stderr."""
+    Only the new row can drop, never a row the log holds. It drops when:
+    - the lock or the replace waits past the deadline (LogWaitTimeout)
+    - a read of the log is refused with PermissionError until the deadline (LogWaitTimeout)
+    - a read of the log fails with any other OSError but a missing file; the row drops at once
+    - the folder, the lock file or the temp file cannot be written
+    - the replace is refused with an OSError other than PermissionError
+    A read refused with PermissionError is retried every LOG_RETRY_SECONDS until that deadline, as the
+    replace is, so a refusal that passes lets the row land.
+    A drop does not raise out of log(), so the hook's exit stays 0. A record that cannot be serialised
+    raises before any write, and no drop row is written for it. A drop goes as one JSON line (`at`, `run`,
+    `error`) to the drops file, drops_path(), and then to stderr. The append comes first, so a closed
+    stderr (OSError or ValueError) cannot stop it. The append is best effort: if it fails too, nothing
+    more is written. It shares the `state/` folder with the log, so a folder that cannot be written, or a
+    full disk, fails both and leaves stderr as the only report.
+    Cost: one append, only on a failed write, plus one rename when the drops file is DROPS_MAX_BYTES
+    (256 KiB) or more; a write that lands writes nothing extra.
+    Bound: that rename moves the drops file to `<drops>.old`, replacing any old one, so the two files
+    hold at most about 512 KiB. A failed rename is swallowed and the file keeps growing until it works.
+    A read that stays refused leaves the log as it is: the row is not written. A drop shows in the daily
+    note's drops line, which reads the current drops file only, unless the `state/` folder cannot be
+    written, or the row moved to `.old` before the note read the file."""
     deadline = time.monotonic() + LOG_WAIT_SECONDS
     if give_up_at is not None:
         deadline = min(deadline, give_up_at)
     path = log_path()
-    line = json.dumps(dict(record, at=time.strftime("%Y-%m-%dT%H:%M:%S%z"))) + "\n"
+    at = time.strftime("%Y-%m-%dT%H:%M:%S%z")
+    line = json.dumps(dict(record, at=at)) + "\n"
     try:
         os.makedirs(os.path.dirname(path), exist_ok=True)
         with _log_lock(path, deadline):
-            try:
-                with open(path, encoding="utf-8") as handle:
-                    kept = handle.readlines()[-(MAX_LOG_LINES - 1):]
-            except FileNotFoundError:
-                kept = []  # no log yet; any other read error propagates, so the log is never rewritten short
+            while True:
+                try:
+                    with open(path, encoding="utf-8") as handle:
+                        kept = handle.readlines()[-(MAX_LOG_LINES - 1):]
+                    break
+                except FileNotFoundError:
+                    kept = []  # no log yet
+                    break
+                except PermissionError as exc:  # held a moment: retried like the replace
+                    if time.monotonic() >= deadline:
+                        raise LogWaitTimeout("payload log read refused until the deadline: %r" % exc)
+                    time.sleep(LOG_RETRY_SECONDS)
+                # any other OSError propagates, so the log is never rewritten short
             if replace_run and kept and ('"run": "%s"' % replace_run) in kept[-1]:
                 kept = kept[:-1]  # our own start row: the finished row takes its place
             temp = "%s.%d.tmp" % (path, os.getpid())
@@ -150,7 +182,24 @@ def log(record: dict, replace_run=None, give_up_at=None):
                         raise LogWaitTimeout("payload log replace refused until the deadline: %r" % exc)
                     time.sleep(LOG_RETRY_SECONDS)
     except Exception as exc:
-        print("agent_end_reap: payload log write failed: %r" % exc, file=sys.stderr)
+        try:
+            run = record.get("run")
+            drop = json.dumps({"at": at, "run": run if isinstance(run, str) else None, "error": repr(exc)})
+            drops = drops_path()
+            os.makedirs(os.path.dirname(drops), exist_ok=True)
+            try:
+                if os.path.getsize(drops) >= DROPS_MAX_BYTES:
+                    os.replace(drops, drops + ".old")  # the one rotation: the next append starts a fresh file
+            except OSError:  # best effort: no file yet, or the rename is refused; the append still runs
+                pass
+            with open(drops, "a", encoding="utf-8") as handle:
+                handle.write(drop + "\n")
+        except Exception:  # best effort: the stderr line below stays
+            pass
+        try:
+            print("agent_end_reap: payload log write failed: %r" % exc, file=sys.stderr)
+        except (OSError, ValueError):  # a closed stderr must not raise out of log(); the drop row is already written
+            pass
 
 
 def is_agent_worktree_shape(path: str) -> bool:
