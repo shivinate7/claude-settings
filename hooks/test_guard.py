@@ -7990,7 +7990,7 @@ NM_WORKSPACE_VERSION = (
     "npm version patch --workspace=a", "npm -w a version patch",
     "npm verison patch -w a", "npm -w a verison patch",
     "npm version patch --ws", "npm version patch --workspace a", "npm --ws version patch",
-    "npm verison patch --ws",
+    "npm verison patch --ws", "npm version patch --ws=true", "npm version patch --workspaces=true",
 )
 # THE DRY RUNS THAT STILL RUN INSTALL SCRIPTS. npm rebuild, rb and edit run install scripts even with
 # --dry-run, so a dry run is no no-change for them. npm resolves the unique abbreviations of rebuild and edit to
@@ -8006,6 +8006,17 @@ for _command in NM_WORKSPACE_VERSION + NM_DRY_RUN_WRITERS:
     nm_case("linked-nm: " + _command + " (Bash) in a real folder is allowed", _command, "allow", NMREAL)
     nm_case("linked-nm: " + _command + " (Bash) in a folder with no node_modules is allowed",
             _command, "allow", NMABSENT)
+
+# THE FALSE VALUE ON THE WORKSPACE FLAG. npm 10.9.9 reads `--ws=false`, `--ws false`, `--workspaces=false`,
+# `-ws=false` and `--no-workspaces` as workspaces=false, so `npm version` bumps the root alone and rewrites only
+# package.json. The true forms, `--ws=true` and `--workspaces=true`, are refused above (NM_WORKSPACE_VERSION).
+NM_WORKSPACE_FALSE = (
+    "npm version patch --ws=false", "npm version patch --ws false", "npm version patch --workspaces=false",
+    "npm version patch -ws=false", "npm version patch --no-workspaces",
+)
+for _command in NM_WORKSPACE_FALSE:
+    nm_case("linked-nm: " + _command + " (Bash) in a linked folder is allowed, npm reads workspaces=false",
+            _command, "allow", NMLINKED)
 
 # THE FALSE-ALARM CONTROLS in a linked folder. None of these changes the linked install, so none is refused.
 nm_case("linked-nm: npm i -g x (Bash) in a linked folder is allowed, a global install",
