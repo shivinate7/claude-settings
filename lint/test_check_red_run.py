@@ -207,62 +207,84 @@ LABEL_FORMS = (
     ("Red-run: NONE=1 python3 lint/test_x.py -> 1 failed on SHA", "valid", "must-pass"),
     ("Red-run: lint_mode=on: python3 lint/test_x.py -> 1 failed on SHA", "valid", "must-pass"),
     ("Red-run: python3 lint/test_x.py (mutant: x) -> 1 failed on SHA", "valid", "must-pass"),
+    # #1745 round 2: an upper-case assignment behind a list marker, number or wrapper. The raw first word missed it.
+    ("Red-run: - MUTATE_ONLY=x python3 t.py -> 1 failed on SHA", "valid", "#1745 round 2"),
+    ("Red-run: `MUTATE_ONLY=x python3 t.py -> 1 failed on SHA", "valid", "#1745 round 2"),
+    ("Red-run: (MUTATE_ONLY=x python3 t.py -> 1 failed on SHA", "valid", "#1745 round 2"),
+    ('Red-run: "MUTATE_ONLY=x python3 t.py -> 1 failed on SHA', "valid", "#1745 round 2"),
+    ("Red-run: *MUTATE_ONLY=x python3 t.py -> 1 failed on SHA", "valid", "#1745 round 2"),
+    ("Red-run: > MUTATE_ONLY=x python3 t.py -> 1 failed on SHA", "valid", "#1745 round 2"),
+    ("Red-run: 1. MUTATE_ONLY=x python3 t.py -> 1 failed on SHA", "valid", "#1745 round 2"),
+    ("Red-run: 1) MUTATE_ONLY=x python3 t.py -> 1 failed on SHA", "valid", "#1745 round 2"),
     # Controls: the two valid keyword forms, so a refusal above is not a broken line shape.
     ("Red-run: mutant: drop the guard -> 1 failed on SHA", "valid", "control"),
     ("Red-run: none: re-points fixtures", "valid", "control"),
 )
 # The normalised label word of a line: the first word after `Red-run:`, with its wrappers, list markers, emphasis and
 # trailing closers and colons stripped, in lower case. A leading underscore that closes no underscore stays (a real name),
-# unless the core is bare letters: `_-mutant` reads `mutant`.
+# unless the core is bare letters: `_-mutant` reads `mutant`. Each row is (line, word, upper_env). upper_env is True
+# when the stripped token, before it is folded to lower case, is an upper-case `NAME=` assignment.
 LABEL_WORDS = (
-    ("Red-run:", ""),  # the empty state: no word
-    ("Red-run: (mutant A) -> 1 failed on SHA", "mutant"),
-    ('Red-run: "mutant A" -> 1 failed on SHA', "mutant"),
-    ("Red-run: [mutant] -> 1 failed on SHA", "mutant"),
-    ("Red-run: - mutant: A -> 1 failed on SHA", "mutant"),
-    ("Red-run: * mutant x -> 1 failed on SHA", "mutant"),
-    ("Red-run: > mutant x -> 1 failed on SHA", "mutant"),
-    ("Red-run: 1) mutant x -> 1 failed on SHA", "mutant"),
-    ("Red-run: 1. mutant x -> 1 failed on SHA", "mutant"),
-    ("Red-run: {mutant} x -> 1 failed on SHA", "mutant"),
-    ("Red-run: <mutant> x -> 1 failed on SHA", "mutant"),
-    ("Red-run: `mutant` x -> 1 failed on SHA", "mutant"),
-    ("Red-run: “mutant A” -> 1 failed on SHA", "mutant"),
-    ("Red-run: ‘mutant’ x -> 1 failed on SHA", "mutant"),
-    ("Red-run: #mutant x -> 1 failed on SHA", "mutant"),
-    ("Red-run: ~mutant~ x -> 1 failed on SHA", "mutant"),
-    ("Red-run: _mutant_ x -> 1 failed on SHA", "mutant"),
-    ("Red-run: _mutant A_ x -> 1 failed on SHA", "mutant"),
-    ("Red-run: _mutnat_ x -> 1 failed on SHA", "mutnat"),
+    ("Red-run:", "", False),  # the empty state: no word
+    ("Red-run: (mutant A) -> 1 failed on SHA", "mutant", False),
+    ('Red-run: "mutant A" -> 1 failed on SHA', "mutant", False),
+    ("Red-run: [mutant] -> 1 failed on SHA", "mutant", False),
+    ("Red-run: - mutant: A -> 1 failed on SHA", "mutant", False),
+    ("Red-run: * mutant x -> 1 failed on SHA", "mutant", False),
+    ("Red-run: > mutant x -> 1 failed on SHA", "mutant", False),
+    ("Red-run: 1) mutant x -> 1 failed on SHA", "mutant", False),
+    ("Red-run: 1. mutant x -> 1 failed on SHA", "mutant", False),
+    ("Red-run: {mutant} x -> 1 failed on SHA", "mutant", False),
+    ("Red-run: <mutant> x -> 1 failed on SHA", "mutant", False),
+    ("Red-run: `mutant` x -> 1 failed on SHA", "mutant", False),
+    ("Red-run: “mutant A” -> 1 failed on SHA", "mutant", False),
+    ("Red-run: ‘mutant’ x -> 1 failed on SHA", "mutant", False),
+    ("Red-run: #mutant x -> 1 failed on SHA", "mutant", False),
+    ("Red-run: ~mutant~ x -> 1 failed on SHA", "mutant", False),
+    ("Red-run: _mutant_ x -> 1 failed on SHA", "mutant", False),
+    ("Red-run: _mutant A_ x -> 1 failed on SHA", "mutant", False),
+    ("Red-run: _mutnat_ x -> 1 failed on SHA", "mutnat", False),
     # #1745 round 1: a list marker inside a leading underscore strips to the word.
-    ("Red-run: _-mutant A (x) -> 1 failed on SHA", "mutant"),
-    ("Red-run: _+mutant A -> 1 failed on SHA", "mutant"),
-    ("Red-run: _- mutant A -> 1 failed on SHA", "mutant"),
-    ("Red-run: _+none -> 1 failed on SHA", "none"),
-    ("Red-run: **none** x -> 1 failed on SHA", "none"),
-    ("Red-run: (none) x -> 1 failed on SHA", "none"),
-    ("Red-run: _(none)_ x -> 1 failed on SHA", "none"),
-    ("Red-run: _**mutant**_ x -> 1 failed on SHA", "mutant"),
-    ("Red-run: **_mutant_** x -> 1 failed on SHA", "mutant"),
-    ("Red-run: _`mutant`_ x -> 1 failed on SHA", "mutant"),
-    ('Red-run: _"mutant"_ x -> 1 failed on SHA', "mutant"),
-    ("Red-run: _'mutant'_ x -> 1 failed on SHA", "mutant"),
-    ("Red-run: mutant: x -> 1 failed on SHA", "mutant"),
-    ("Red-run: mutant, x -> 1 failed on SHA", "mutant"),
-    ("Red-run: (mutant:) x -> 1 failed on SHA", "mutant"),
-    ("Red-run: MUTANT: x -> 1 failed on SHA", "mutant"),
-    ("Red-run: Mutant x -> 1 failed on SHA", "mutant"),
-    ("Red-run: mutnt x -> 1 failed on SHA", "mutnt"),
-    ("Red-run: mutant=x x -> 1 failed on SHA", "mutant=x"),
-    ("Red-run: _build/run_tests.sh -> 1 failed on SHA", "_build/run_tests.sh"),
-    ("Red-run: _Build/Run_Tests.sh x -> 1 failed on SHA", "_build/run_tests.sh"),
-    ("Red-run: __main__.py -> 1 failed on SHA", "__main__.py"),
-    ("Red-run: _mutant.sh x -> 1 failed on SHA", "_mutant.sh"),
-    ("Red-run: _mutation_probe.sh x -> 1 failed on SHA", "_mutation_probe.sh"),
-    ("Red-run: __none__.py x -> 1 failed on SHA", "__none__.py"),
-    ("Red-run: ./mutant x -> 1 failed on SHA", "./mutant"),
-    ("Red-run: python3 lint/test_x.py (mutant: x) -> 1 failed on SHA", "python3"),
-    ("Red-run: " + "(" * 40 + "mutant" + ")" * 40 + " x -> 1 failed on SHA", "mutant"),
+    ("Red-run: _-mutant A (x) -> 1 failed on SHA", "mutant", False),
+    ("Red-run: _+mutant A -> 1 failed on SHA", "mutant", False),
+    ("Red-run: _- mutant A -> 1 failed on SHA", "mutant", False),
+    ("Red-run: _+none -> 1 failed on SHA", "none", False),
+    ("Red-run: **none** x -> 1 failed on SHA", "none", False),
+    ("Red-run: (none) x -> 1 failed on SHA", "none", False),
+    ("Red-run: _(none)_ x -> 1 failed on SHA", "none", False),
+    ("Red-run: _**mutant**_ x -> 1 failed on SHA", "mutant", False),
+    ("Red-run: **_mutant_** x -> 1 failed on SHA", "mutant", False),
+    ("Red-run: _`mutant`_ x -> 1 failed on SHA", "mutant", False),
+    ('Red-run: _"mutant"_ x -> 1 failed on SHA', "mutant", False),
+    ("Red-run: _'mutant'_ x -> 1 failed on SHA", "mutant", False),
+    ("Red-run: mutant: x -> 1 failed on SHA", "mutant", False),
+    ("Red-run: mutant, x -> 1 failed on SHA", "mutant", False),
+    ("Red-run: (mutant:) x -> 1 failed on SHA", "mutant", False),
+    ("Red-run: MUTANT: x -> 1 failed on SHA", "mutant", False),
+    ("Red-run: Mutant x -> 1 failed on SHA", "mutant", False),
+    ("Red-run: mutnt x -> 1 failed on SHA", "mutnt", False),
+    ("Red-run: mutant=x x -> 1 failed on SHA", "mutant=x", False),
+    ("Red-run: _build/run_tests.sh -> 1 failed on SHA", "_build/run_tests.sh", False),
+    ("Red-run: _Build/Run_Tests.sh x -> 1 failed on SHA", "_build/run_tests.sh", False),
+    ("Red-run: __main__.py -> 1 failed on SHA", "__main__.py", False),
+    ("Red-run: _mutant.sh x -> 1 failed on SHA", "_mutant.sh", False),
+    ("Red-run: _mutation_probe.sh x -> 1 failed on SHA", "_mutation_probe.sh", False),
+    ("Red-run: __none__.py x -> 1 failed on SHA", "__none__.py", False),
+    ("Red-run: ./mutant x -> 1 failed on SHA", "./mutant", False),
+    ("Red-run: python3 lint/test_x.py (mutant: x) -> 1 failed on SHA", "python3", False),
+    ("Red-run: " + "(" * 40 + "mutant" + ")" * 40 + " x -> 1 failed on SHA", "mutant", False),
+    # #1745 round 2: an upper-case assignment behind a list marker, a number or a wrapper reads as its word.
+    ("Red-run: - MUTATE_ONLY=x python3 t.py -> 1 failed on SHA", "mutate_only=x", True),
+    ("Red-run: `MUTATE_ONLY=x python3 t.py -> 1 failed on SHA", "mutate_only=x", True),
+    ("Red-run: (MUTATE_ONLY=x python3 t.py -> 1 failed on SHA", "mutate_only=x", True),
+    ('Red-run: "MUTATE_ONLY=x python3 t.py -> 1 failed on SHA', "mutate_only=x", True),
+    ("Red-run: *MUTATE_ONLY=x python3 t.py -> 1 failed on SHA", "mutate_only=x", True),
+    ("Red-run: > MUTATE_ONLY=x python3 t.py -> 1 failed on SHA", "mutate_only=x", True),
+    ("Red-run: 1. MUTATE_ONLY=x python3 t.py -> 1 failed on SHA", "mutate_only=x", True),
+    ("Red-run: 1) MUTATE_ONLY=x python3 t.py -> 1 failed on SHA", "mutate_only=x", True),
+    # A lower-case assignment is not an environment exemption: its upper_env stays False.
+    ("Red-run: mutate=x -> 1 failed on SHA", "mutate=x", False),
+    ("Red-run: mutant=x -> 1 failed on SHA", "mutant=x", False),
 )
 BASE_REF = "origin/main"
 # origin/main's name for the message verdict, read from its checker. #1672 renames has_trailer to has_valid_trailer,
@@ -903,13 +925,13 @@ class CheckCase(Fixture):
 
 
 def word_of(result):
-    """The word of a label_word result: the first element of its (word, ended_in_colon) pair. A bare string is the word
-    itself, so a word row fails on its own word, and the pair test names the shape. Pure."""
+    """The word of a label_word result: field 0 of its (word, ended_in_colon, upper_env) tuple. A bare string is the
+    word itself, so a word row fails on its own word, and the triple test names the shape. Pure."""
     return result[0] if isinstance(result, tuple) else result
 
 
 class LabelForms(unittest.TestCase):
-    """Each LABEL_FORMS row alone and beside a valid line, and the LABEL_WORDS table and the pair of label_word."""
+    """Each LABEL_FORMS row alone and beside a valid line, and the LABEL_WORDS table and the triple of label_word."""
 
     @classmethod
     def setUpClass(cls):
@@ -933,22 +955,35 @@ class LabelForms(unittest.TestCase):
     def test_label_word_reads_the_normalised_word(self):
         fn = getattr(self.check, "label_word", None)
         self.assertIsNotNone(fn, "label_word absent: the red-run label has no one normaliser yet")
-        for line, word in LABEL_WORDS:
+        for line, word, _upper_env in LABEL_WORDS:
             with self.subTest(line=line):
                 self.assertEqual(word_of(fn(line)), word, "label_word(%r) must read the word %r" % (line, word))
 
-    def test_label_word_returns_the_word_and_whether_it_ended_in_a_colon(self):
+    def test_label_word_reads_upper_env(self):
         fn = getattr(self.check, "label_word", None)
         self.assertIsNotNone(fn, "label_word absent: the red-run label has no one normaliser yet")
-        for line, pair in (("Red-run:", ("", False)),
-                           ("Red-run: mutant x -> 1 failed on SHA", ("mutant", False)),
-                           ("Red-run: mutant: x -> 1 failed on SHA", ("mutant", True)),
-                           ("Red-run: (mutant:) x -> 1 failed on SHA", ("mutant", True))):
+        for line, _word, upper_env in LABEL_WORDS:
+            with self.subTest(line=line):
+                self.assertEqual(tuple(fn(line)[2:]), (upper_env,),
+                                 "label_word(%r) must carry upper_env %r as its third field" % (line, upper_env))
+
+    def test_label_word_returns_word_colon_and_upper_env(self):
+        """label_word's one read is the triple (word, ended_in_colon, upper_env). Round 2 F1 of #1745 and the lane pick
+        of 2026-11-07 20:57 CST name it: the upper-case NAME= exemption reads the same stripped token as the word."""
+        fn = getattr(self.check, "label_word", None)
+        self.assertIsNotNone(fn, "label_word absent: the red-run label has no one normaliser yet")
+        for line, triple in (("Red-run:", ("", False, False)),
+                             ("Red-run: mutant x -> 1 failed on SHA", ("mutant", False, False)),
+                             ("Red-run: mutant: x -> 1 failed on SHA", ("mutant", True, False)),
+                             ("Red-run: (mutant:) x -> 1 failed on SHA", ("mutant", True, False)),
+                             ("Red-run: - MUTATE_ONLY=x python3 t.py -> 1 failed on SHA",
+                              ("mutate_only=x", False, True))):
             with self.subTest(line=line):
                 got = fn(line)
                 self.assertIsInstance(got, tuple,
-                                      "label_word must return a (word, ended_in_colon) pair, not %r: %s" % (got, line))
-                self.assertEqual(got, pair, "label_word(%r) must be %r" % (line, pair))
+                                      "label_word must return a (word, ended_in_colon, upper_env) triple, not %r: %s"
+                                      % (got, line))
+                self.assertEqual(got, triple, "label_word(%r) must be %r" % (line, triple))
 
     def test_label_parts_is_not_a_second_home(self):
         self.assertFalse(hasattr(self.check, "_label_parts"),
