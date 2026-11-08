@@ -761,8 +761,9 @@ batch report. The pages are the `waiting-page` keys of the repos' extras files, 
    broken or doubled block. Republish `<new page>` to the same URL
    with the capabilities `db` and `{comments: {}}`, one publish at a time, never with `force`. A
    republish of plain `page.html` drops the open items' designs and the Status tab.
-   `stale_pages.py` empties both blocks before it compares, so it cannot tell that they were lost: it
-   reads such a page current. After the publish, re-read the republished page (`Artifact` action
+   `stale_pages.py` empties both blocks before it compares, so it cannot tell that `designData` was lost: it
+   reads such a page current. It does flag an empty roadmap block (`roadmap block: empty on <owner> page`, exit 1):
+   bake it ("Update the roadmap block"). After the publish, re-read the republished page (`Artifact` action
    `read`) and check that its `designData` block equals the one in the page you fetched in step 1.
 4. Update one page first, then read its items: they must all still be there. That the database and
    its saved answers survive a republish is unmeasured until this live check is run.

@@ -28,7 +28,8 @@ the whole old read-only page. Nothing publishes it.
 - **On the record branch.** The checkout stands on the record branch: the roadmap build script reads the working
   tree. Build after each edit to `roadmap/data/`.
 - **Anywhere else.** The roadmap build script reads the record branch through the repo history, `origin/<branch>`
-  first. Fetch the branch first, because the roadmap block is as old as the fetch.
+  first. With no local copy, the build fetches the branch from `origin` itself, even on a single-branch checkout.
+  If origin has it and it cannot be read, the build exits non-zero and writes nothing. The block is as old as that fetch.
 - `--block` needs `--out`, on either path.
 
 The record homes (decisions, debts, debt notes, plans, specs) come from the checkout, at the paths

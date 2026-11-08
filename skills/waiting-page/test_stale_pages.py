@@ -39,10 +39,28 @@ ROADMAP_BODY = ('\n<script>window.ROADMAP_DATA = {"steps": {"c1": {"note": "a \\
 ROADMAP_RE = re.compile(re.escape(OPEN) + r".*?" + re.escape(CLOSE), re.S)
 
 
-def with_both_blocks(page):
-    """`page` with its designData and its roadmap block filled, as a live page holds them."""
-    page = page.replace('id="designData">', 'id="designData">' + DESIGN_BODY, 1)
-    return ROADMAP_RE.sub(lambda m: OPEN + ROADMAP_BODY + CLOSE, page, count=1)
+# A roadmap block build.py wrote with no record branch: its data is null, so the block is not empty.
+NULL_BODY = '\n<script>window.ROADMAP_DATA = null; window.ROADMAP_BUILD = {"repo": "r"};</script>\n'
+# Bodies of a block no build has baked: none, a newline, and mixed white space.
+EMPTY_BODIES = ("", "\n", " \t\r\n ")
+
+
+def with_block(page, body):
+    """`page` with its roadmap block's text set to `body`, and nothing else changed."""
+    return ROADMAP_RE.sub(lambda m: OPEN + body + CLOSE, page, count=1)
+
+
+def with_both_blocks(page, body=ROADMAP_BODY):
+    """`page` with its designData and its roadmap block filled (`body` is the block's text), as a live page holds them."""
+    return with_block(page.replace('id="designData">', 'id="designData">' + DESIGN_BODY, 1), body)
+
+
+def empty_block_page(body):
+    """PAGE with its roadmap block holding only `body`, which must be white space: a page no build has baked."""
+    assert not body.strip(), "the body is not white space"
+    page = with_both_blocks(PAGE, body=body)
+    assert "ROADMAP_DATA" not in ROADMAP_RE.search(page).group(0), "the block holds data"
+    return page
 
 
 def setUpModule():
@@ -56,6 +74,7 @@ def tearDownModule():
 # Fixtures, all derived from page.html at run time. A live page holds backslash-u escapes in its mockups.
 BLOCK = re.compile(r'(<script type="application/json" id="designData">)(.*?)(</script>)', re.S)
 ALTERED = PAGE.replace("<style>", "<style>/* altered */", 1)  # differs outside designData, the roadmap block and <title> text (shiv ruling, Oct 30 14:33 CDT)
+NULLED_PAGE = with_block(PAGE, NULL_BODY)  # page.html with its roadmap block baked with no record branch: not empty, so no line
 BS = chr(92)  # one backslash: a live page's mockups hold backslash-u-003c escapes
 STALE_BODY = '{"a": "' + BS + 'u003cp>mock' + BS + 'u003c/p>", "b": "<i>raw</i>"}'
 MOCK_BODY = '{"a": "' + BS + 'u003cp>mockup' + BS + 'u003c/p>", "b": "<i>raw</i>"}'
@@ -184,8 +203,8 @@ class Stale(unittest.TestCase):
         self.assertIn("1 current, 1 behind, 1 unknown, 0 not-found", out)
 
     def test_page_with_own_mockups_is_current(self):
-        mock = PAGE.replace('id="designData">', 'id="designData">{"a": "\\u003cp>mockup\\u003c/p>"}', 1)
-        self.assertNotEqual(mock, PAGE)
+        mock = NULLED_PAGE.replace('id="designData">', 'id="designData">{"a": "\\u003cp>mockup\\u003c/p>"}', 1)
+        self.assertNotEqual(mock, NULLED_PAGE)
         root = self.repo("mocked", "DDD")
         self.fetch("DDD", mock)
         code, out = self.run_cmd(root)
@@ -195,8 +214,8 @@ class Stale(unittest.TestCase):
     def test_a_page_that_differs_only_in_its_title_is_current_in_both_modes(self):
         # The verdict ignores the <title> text, so a title alone never makes a page behind. The title holds a lone
         # quote and comment openers; every other byte is page.html's.
-        titled = re.sub(r"<title>[^<]*</title>", "<title>Bob's /* // Compass Cockpit</title>", PAGE, count=1)
-        self.assertNotEqual(titled, PAGE)
+        titled = re.sub(r"<title>[^<]*</title>", "<title>Bob's /* // Compass Cockpit</title>", NULLED_PAGE, count=1)
+        self.assertNotEqual(titled, NULLED_PAGE)
         with self.subTest("batch"):
             root = self.repo("titled", "KKK")
             self.fetch("KKK", titled)
@@ -282,15 +301,17 @@ class Stale(unittest.TestCase):
 
     def test_a_carry_of_a_page_from_before_the_roadmap_block_keeps_its_designs_and_reads_current(self):
         # The first batch: every live page predates the roadmap block, and its designs must survive the republish.
-        self.live_with_both_blocks()  # the template has the block to keep
+        self.live_with_both_blocks()  # the shipped page.html has the empty block the carry keeps
         old = ROADMAP_RE.sub("", PAGE.replace('id="designData">', 'id="designData">' + DESIGN_BODY, 1), count=1)
         self.assertNotEqual(DESIGN_BLOCK.findall(old), DESIGN_BLOCK.findall(PAGE))
         carried = self.carry_into_template(old)
         self.assertEqual(DESIGN_BLOCK.findall(carried), DESIGN_BLOCK.findall(old), "the carry lost the live designData")
-        self.assertTrue(re.search(re.escape(OPEN) + r"\s*" + re.escape(CLOSE), carried), "the template's empty roadmap block is gone")
+        self.assertTrue(re.search(re.escape(OPEN) + r"\s*" + re.escape(CLOSE), carried),
+                        "the carry did not keep the shipped page's empty roadmap block")
         self.fetch("JJJ", carried)
         code, out = self.run_cmd(self.repo("before", "JJJ"))
-        self.assertEqual(code, 0, out)
+        self.assertEqual(code, 1, out)  # today: the empty block is flagged, and the verdict word stays current
+        self.assertIn(self.empty_block_line("before"), out.splitlines(), out)
         self.assertIn("current: before", out)
 
     def test_a_carry_reads_current_and_keeps_the_live_designs(self):
@@ -570,7 +591,7 @@ class Stale(unittest.TestCase):
         self.assertEqual(out, set_body(PAGE, DESIGN_BODY), "OUT is not page.html with the live designData")
 
     def test_current_page_with_mockups_is_current_and_check_mode_writes_nothing(self):
-        mocked = write_text(os.path.join(self.fetched, "mocked.html"), set_body(PAGE, MOCK_BODY))
+        mocked = write_text(os.path.join(self.fetched, "mocked.html"), set_body(NULLED_PAGE, MOCK_BODY))
         before = self.snapshot()
         r = self.page_run(mocked, "--main", TEMPLATE)
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
@@ -600,7 +621,7 @@ class Stale(unittest.TestCase):
                 self.assert_only_new(before, set())
 
     def test_only_origin_main_proves_current_or_behind(self):
-        clone = self.make_clone("clone", {"skills/waiting-page/page.html": PAGE, "CLAUDE.md": "# claude-settings\n"})
+        clone = self.make_clone("clone", {"skills/waiting-page/page.html": NULLED_PAGE, "CLAUDE.md": "# claude-settings\n"})
         home = os.path.join(self.tmp.name, "home")
         claude = os.path.join(home, ".claude")
         installed = os.path.join(claude, "skills", "waiting-page")
@@ -614,7 +635,7 @@ class Stale(unittest.TestCase):
         link_repo_dirs(claude)
         pointer = write_text(os.path.join(claude, "CLAUDE.md"), "@%s/CLAUDE.md\n" % clone)
         script = os.path.join(installed, "stale_pages.py")
-        same = write_text(os.path.join(self.fetched, "same.html"), PAGE)  # equals origin/main
+        same = write_text(os.path.join(self.fetched, "same.html"), NULLED_PAGE)  # equals origin/main
         old = write_text(os.path.join(self.fetched, "old.html"), ALTERED)  # equals the installed copy
         with self.subTest("pointer: origin/main page is current"):
             self.assert_origin_run(same, home, script, 0, "current")
@@ -635,7 +656,7 @@ class Stale(unittest.TestCase):
             script_text = f.read()
         with open(SPLICE, encoding="utf-8") as f:
             splice_text = f.read()
-        clone = self.make_clone("own", {"skills/waiting-page/page.html": PAGE,
+        clone = self.make_clone("own", {"skills/waiting-page/page.html": NULLED_PAGE,
                                         "skills/waiting-page/stale_pages.py": script_text,
                                         "skills/waiting-page/splice.py": splice_text})
         home = os.path.join(self.tmp.name, "home")
@@ -643,7 +664,7 @@ class Stale(unittest.TestCase):
         link_repo_dirs(os.path.join(home, ".claude"))
         script = os.path.join(home, ".claude", "skills", "waiting-page", "stale_pages.py")
         os.symlink(os.path.join(clone, "skills", "waiting-page", "stale_pages.py"), script)
-        same = write_text(os.path.join(self.fetched, "same.html"), PAGE)
+        same = write_text(os.path.join(self.fetched, "same.html"), NULLED_PAGE)
         old = write_text(os.path.join(self.fetched, "old.html"), ALTERED)
         with self.subTest("origin/main page is current"):
             self.assert_origin_run(same, home, script, 0, "current")
@@ -665,13 +686,13 @@ class Stale(unittest.TestCase):
 
     def test_host_wrapper_around_the_template_is_current_in_both_modes(self):
         with self.subTest("single page"):
-            page = write_text(os.path.join(self.fetched, "wrapped.html"), host_wrapped(PAGE))
+            page = write_text(os.path.join(self.fetched, "wrapped.html"), host_wrapped(NULLED_PAGE))
             r = self.page_run(page, "--main", TEMPLATE)
             self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
             self.assertEqual(self.verdict(r)[0], "current")
         with self.subTest("batch"):
             root = self.repo("wrapped", "HHH")
-            self.fetch("HHH", host_wrapped(PAGE))
+            self.fetch("HHH", host_wrapped(NULLED_PAGE))
             code, out = self.run_cmd(root)
             self.assertEqual(code, 0, out)
             self.assertIn("current: wrapped", out)
@@ -683,6 +704,63 @@ class Stale(unittest.TestCase):
         self.assertEqual(code, 1, out)
         self.assertIn("behind: appended", out)
         self.assertNotIn("current: appended", out)
+
+    def empty_block_line(self, owner):
+        """The line batch and page mode print for a page whose roadmap block holds no data (`owner` is the page's owner)."""
+        return 'roadmap block: empty on %s page (bake it: skill waiting-page, "Update the roadmap block")' % owner
+
+    def roadmap_lines(self, out):
+        return [line for line in out.splitlines() if line.startswith("roadmap block: ")]
+
+    def test_unbaked_each_page_gets_its_own_line_and_the_run_exits_1(self):
+        roots = [self.repo("emptyone", "EM1"), self.repo("emptytwo", "EM2"), self.repo("baked", "OK1")]
+        self.fetch("EM1", empty_block_page("\n"))
+        self.fetch("EM2", empty_block_page(" \t\r\n "))
+        self.fetch("OK1", with_both_blocks(PAGE))
+        code, out = self.run_cmd(*roots)
+        self.assertCountEqual(self.roadmap_lines(out), [self.empty_block_line("emptyone"), self.empty_block_line("emptytwo")], out)
+        self.assertEqual(code, 1, out)
+        self.assertIn("current: emptyone", out)  # the verdict word stays what it was
+        self.assertIn("current: emptytwo", out)
+        self.assertIn("current: baked", out)
+        self.assertEqual(self.total_line(out), "waiting pages: 3 current, 0 behind, 0 unknown, 0 not-found")
+
+    def test_unbaked_every_white_space_body_is_flagged(self):
+        root = self.repo("bare", "EMP")
+        for body in EMPTY_BODIES:
+            with self.subTest(body=body):
+                self.fetch("EMP", empty_block_page(body))
+                code, out = self.run_cmd(root)
+                self.assertIn(self.empty_block_line("bare"), out.splitlines(), out)
+                self.assertEqual(code, 1, out)
+
+    def test_nulled_block_is_not_empty_in_batch_mode(self):
+        root = self.repo("nulled", "NUL")
+        live = with_both_blocks(PAGE, body=NULL_BODY)
+        self.assertIn("ROADMAP_DATA = null", live, "the fixture block does not hold the null data build.py bakes")
+        self.fetch("NUL", live)
+        code, out = self.run_cmd(root)
+        self.assertEqual(code, 0, out)
+        self.assertIn("current: nulled", out)
+        self.assertEqual(self.roadmap_lines(out), [], out)
+
+    def test_unbaked_block_in_page_mode_prints_its_line_and_exits_1(self):
+        page = write_text(os.path.join(self.fetched, "unbaked-single.html"), empty_block_page("\n"))
+        r = self.page_run(page, "--main", TEMPLATE)
+        lines = self.roadmap_lines(r.stdout)
+        self.assertEqual(len(lines), 1, r.stdout + r.stderr)
+        self.assertRegex(lines[0], r'^roadmap block: empty on \S+ page \(bake it: skill waiting-page, "Update the roadmap block"\)$')
+        self.assertEqual(self.verdict(r)[0], "current", r.stdout + r.stderr)
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+
+    def test_nulled_block_is_current_in_page_mode(self):
+        live = with_both_blocks(PAGE, body=NULL_BODY)
+        self.assertIn("ROADMAP_DATA = null", live, "the fixture block does not hold the null data build.py bakes")
+        page = write_text(os.path.join(self.fetched, "nulled-single.html"), live)
+        r = self.page_run(page, "--main", TEMPLATE)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertEqual(self.verdict(r)[0], "current", r.stdout + r.stderr)
+        self.assertEqual(self.roadmap_lines(r.stdout), [], r.stdout)
 
     def test_write_to_an_unwritable_path_is_unknown_without_traceback(self):
         stale = write_text(os.path.join(self.fetched, "unwritable.html"), set_body(ALTERED, STALE_BODY))
@@ -715,7 +793,7 @@ class Stale(unittest.TestCase):
         self.assert_unknown_run(same, home, script)
 
     def test_non_utf8_pointer_file_gives_no_traceback(self):
-        clone = self.make_clone("clone", {"skills/waiting-page/page.html": PAGE, "CLAUDE.md": "# claude-settings\n"})
+        clone = self.make_clone("clone", {"skills/waiting-page/page.html": NULLED_PAGE, "CLAUDE.md": "# claude-settings\n"})
         home = os.path.join(self.tmp.name, "home")
         claude = os.path.join(home, ".claude")
         installed = os.path.join(claude, "skills", "waiting-page")
@@ -729,7 +807,7 @@ class Stale(unittest.TestCase):
         pointer = bytes([255, 254, 32]) + b"caf" + bytes([233, 10]) + b"@" + os.fsencode(clone) + b"/CLAUDE.md" + bytes([10])
         with open(os.path.join(claude, "CLAUDE.md"), "wb") as f:
             f.write(pointer)
-        same = write_text(os.path.join(self.fetched, "same.html"), PAGE)
+        same = write_text(os.path.join(self.fetched, "same.html"), NULLED_PAGE)
         r = self.page_run(same, home=home, script=script)
         self.assertIn(r.returncode, (0, 1, 2), r.stdout + r.stderr)
         self.assertNotIn("Traceback", r.stdout + r.stderr)
@@ -738,7 +816,7 @@ class Stale(unittest.TestCase):
 
     def test_check_mode_writes_no_file_and_write_mode_writes_exactly_one(self):
         stale = write_text(os.path.join(self.fetched, "cost.html"), set_body(ALTERED, STALE_BODY))
-        mocked = write_text(os.path.join(self.fetched, "cost-current.html"), set_body(PAGE, MOCK_BODY))
+        mocked = write_text(os.path.join(self.fetched, "cost-current.html"), set_body(NULLED_PAGE, MOCK_BODY))
         before = self.snapshot()
         with mock.patch.object(subprocess, "run", wraps=subprocess.run) as spy:
             self.assertEqual(self.page_run(stale, "--main", TEMPLATE).returncode, 1)
@@ -792,8 +870,8 @@ class Stale(unittest.TestCase):
 
     def current_and_behind(self):
         """The two fetched pages the --items cases run on: page.html as it is, and the stale page the behind cases use."""
-        return (write_text(os.path.join(self.fetched, "current.html"), PAGE),
-                write_text(os.path.join(self.fetched, "behind.html"), set_body(ALTERED, STALE_BODY)))
+        return (write_text(os.path.join(self.fetched, "current.html"), NULLED_PAGE),
+                write_text(os.path.join(self.fetched, "behind.html"), set_body(with_block(ALTERED, NULL_BODY), STALE_BODY)))
 
     def items_run(self, page, items, env):
         return self.page_run(page, "--main", TEMPLATE, "--items", items, env=env)

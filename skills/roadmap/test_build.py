@@ -1428,6 +1428,7 @@ class ReadyNotStarted(UpkeepFixture):
 
     def test_steps_unknown_prints_one_unknown_ready_line(self):
         self.on_main()
+        git(self.repo, "remote", "remove", "origin")  # the fixture's GitHub origin cannot be asked here; with none, the branch is simply absent
         code, out = run_build("--repo", str(self.repo), "--record-branch", "no-such-branch", "--out", str(self.out))
         self.assertIn(code, (0, None), out)
         self.assertEqual(self.ready_lines(out), ["ready not started: unknown (steps unknown)"],
@@ -2222,6 +2223,115 @@ class ForkRecord(Fixture):
         self.broken_extras("{not json")
         page = self.page_from(self.fork, "--record-branch", "roadmap")
         self.assertIn(self.MAIN_TITLE, page)
+
+
+class SingleBranchOrigin(Fixture):
+    """--block in a checkout cloned --single-branch on main. Its fetch line maps main alone, so origin/roadmap never
+    exists there, and a plain `git fetch origin roadmap` would leave the steps in FETCH_HEAD only. The build must read
+    origin's record branch by the explicit refspec, so the steps reach the block."""
+    STEPS = {"s1": dict(STEP, title="Only on origin")}
+    MISSING = "0123456789012345678901234567890123456789"  # a commit no object store holds
+
+    def clone_origin(self, name, *branches):
+        """(origin, clone): a bare origin holding `branches` of the fixture repo, and a --single-branch clone of its main."""
+        origin = pathlib.Path(self.tmp.name) / (name + ".git")
+        git(self.tmp.name, "init", "-q", "--bare", str(origin))
+        git(self.repo, "push", str(origin), *branches)
+        clone = pathlib.Path(self.tmp.name) / name
+        subprocess.run(["git", "clone", "-q", "--single-branch", "--branch", "main", origin.as_uri(), str(clone)], check=True)
+        return origin, clone
+
+    def has_ref(self, repo, ref):
+        return subprocess.run(["git", "-C", str(repo), "rev-parse", "--verify", "--quiet", ref],
+                              capture_output=True).returncode == 0
+
+    def assert_single_branch(self, clone):
+        """The scope every case relies on: the clone maps main alone, and holds neither origin/roadmap nor a local roadmap."""
+        self.assertEqual(git(clone, "config", "--get", "remote.origin.fetch").strip(),
+                         "+refs/heads/main:refs/remotes/origin/main", "the clone is not single-branch on main")
+        self.assertFalse(self.has_ref(clone, "refs/remotes/origin/roadmap"), "the clone already holds origin/roadmap")
+        self.assertFalse(self.has_ref(clone, "refs/heads/roadmap"), "the clone holds a local roadmap branch")
+
+    def block(self, clone):
+        """(block text, output) of a --block build of `clone`, which must write the file."""
+        code, out = run_build("--repo", str(clone), "--block", "--out", str(self.out))
+        self.assertIn(code, (0, None), out)
+        return self.out.read_text(encoding="utf-8"), out
+
+    def steps_read(self, block):
+        return next(p for p in baked(block, "window.ROADMAP_BUILD = ")["panels"] if p["name"] == "Steps")["read"]
+
+    def test_block_bakes_the_steps_of_origins_record_branch(self):
+        origin, clone = self.clone_origin("with-roadmap", "main", "roadmap")
+        self.assert_single_branch(clone)
+        self.assertTrue(self.has_ref(origin, "refs/heads/roadmap"), "origin lacks the record branch the case needs")
+        block, out = self.block(clone)
+        data = baked(block, "window.ROADMAP_DATA = ")
+        self.assertIsNotNone(data, "the block baked null: origin's roadmap branch was never fetched\n" + out)
+        self.assertIn("s1", data["steps"], "the block lacks origin's step s1")
+        self.assertEqual(data["steps"]["s1"]["title"], "Only on origin")
+
+    def test_block_leaves_origin_roadmap_as_a_remote_tracking_ref(self):
+        origin, clone = self.clone_origin("tracking", "main", "roadmap")
+        self.assert_single_branch(clone)
+        self.block(clone)
+        self.assertTrue(self.has_ref(clone, "refs/remotes/origin/roadmap"),
+                        "the build read origin's roadmap without fetching it into origin/roadmap")
+
+    def test_origin_without_the_record_branch_still_bakes_null_and_says_so(self):
+        origin, clone = self.clone_origin("without-roadmap", "main")
+        self.assert_single_branch(clone)
+        self.assertFalse(self.has_ref(origin, "refs/heads/roadmap"), "origin holds the record branch the case must lack")
+        block, out = self.block(clone)
+        self.assertIsNone(baked(block, "window.ROADMAP_DATA = "), out)
+        read = self.steps_read(block)
+        self.assertTrue(read.startswith("unknown"), read)
+        self.assertIn("roadmap", read, read)
+
+    def test_no_origin_remote_and_no_record_branch_bakes_null_as_before(self):
+        self.on_main()
+        git(self.repo, "branch", "-D", "roadmap")
+        self.assertEqual(git(self.repo, "remote").strip(), "", "the fixture repo has an origin remote")
+        block, out = self.block(self.repo)
+        self.assertIsNone(baked(block, "window.ROADMAP_DATA = "), out)
+        read = self.steps_read(block)
+        self.assertTrue(read.startswith("unknown"), read)
+        self.assertIn("roadmap", read, read)
+
+    def test_origin_record_branch_whose_fetch_fails_writes_no_block(self):
+        origin, clone = self.clone_origin("unfetchable", "main", "roadmap")
+        self.assert_single_branch(clone)
+        (origin / "refs" / "heads" / "roadmap").write_text(self.MISSING + "\n", encoding="utf-8")
+        self.assertIn("refs/heads/roadmap", git(clone, "ls-remote", str(origin)), "origin does not list its record branch")
+        fetch = subprocess.run(["git", "-C", str(clone), "fetch", str(origin),
+                                "+refs/heads/roadmap:refs/remotes/origin/roadmap"], capture_output=True, text=True)
+        self.assertNotEqual(fetch.returncode, 0, "the explicit fetch succeeds, so this case does not stand for a failed fetch")
+        code, out = run_build("--repo", str(clone), "--block", "--out", str(self.out))
+        self.assertNotIn(code, (0, None), "the build exited 0 with origin's record branch unread:\n" + out)
+        self.assertFalse(self.out.exists(), "a block was written though origin's record branch was not read")
+
+    def test_unreachable_origin_with_no_record_branch_exits_nonzero_and_writes_no_block(self):
+        _, clone = self.clone_origin("gone", "main")
+        self.assert_single_branch(clone)
+        missing = pathlib.Path(self.tmp.name) / "missing.git"
+        git(clone, "remote", "set-url", "origin", str(missing))
+        self.assertFalse(missing.exists(), "the origin path exists, so origin is reachable")
+        code, out = run_build("--repo", str(clone), "--block", "--out", str(self.out))
+        self.assertNotIn(code, (0, None), "the build exited 0 though origin could not be asked:\n" + out)
+        self.assertFalse(self.out.exists(), "a block was written though origin could not be asked")
+
+    def test_a_git_that_cannot_read_origin_exits_nonzero_and_writes_no_block(self):
+        # Only "No such remote" (git exit 2) means there is no origin. Any other failure to read the remote is not
+        # "no origin": a block baked then would say the repo has no roadmap.
+        _, clone = self.clone_origin("unreadable", "main")
+        self.assert_single_branch(clone)
+        config = clone / ".git" / "config"
+        config.write_text(config.read_text(encoding="utf-8") + "not a config line\n", encoding="utf-8")
+        probe = subprocess.run(["git", "-C", str(clone), "remote", "get-url", "origin"], capture_output=True, text=True)
+        self.assertNotIn(probe.returncode, (0, 2), "git still reads origin, so this is not a failed read: " + probe.stderr)
+        code, out = run_build("--repo", str(clone), "--block", "--out", str(self.out))
+        self.assertNotIn(code, (0, None), "the build exited 0 though git could not read origin, so the block says no roadmap:\n" + out)
+        self.assertFalse(self.out.exists(), "a block was written though git could not read origin")
 
 
 class MockupFiles(UpkeepFixture):
