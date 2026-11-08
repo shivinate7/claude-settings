@@ -627,15 +627,15 @@ def _holds_frozen(path: str, cwd: str) -> bool:
 
 def _shell_write_hit(cmd: str, cwd: str, predicate, holds=None, follow_cd=False,
                      command_position=False, predicate_command=False, extra_verbs="",
-                     skip_absolute_cd=False) -> str:
+                     skip_after_cd=None) -> str:
     """Return the path a shell command writes to that `predicate(path, cwd)` accepts, else ''.
     `holds(path, cwd)` tells a folder that holds such a path, for a linking `cp` (`_cp_link_source`).
     `follow_cd` hands `predicate` the folder a leading `cd` moved to (`dir_before_segment`), or `cwd`
     when that folder cannot be told. `predicate_command` also hands `predicate` the segment's command
     name as a third argument (`''` when none). `extra_verbs` is a regex of more command names that count as
-    writes (CREATING_COMMAND); it needs `command_position`. `skip_absolute_cd` (needs `follow_cd`) leaves
-    a segment unjudged when an absolute, `~` or variable `cd` set the folder it runs in
-    (`dir_before_segment`, `origin`): its relative words are the absolute form's to judge."""
+    writes (CREATING_COMMAND); it needs `command_position`. `skip_after_cd` (needs `follow_cd`) is a
+    function of the folder the last absolute or `~` `cd` before a segment landed in (`dir_before_segment`,
+    `origin`); a segment it accepts is left unjudged, as its absolute form is the caller's to judge."""
     holds = holds or (lambda path, where: _holds(path, where, predicate))
     cmd = _resolve_vars(cmd)
     ends = []
@@ -680,11 +680,11 @@ def _shell_write_hit(cmd: str, cwd: str, predicate, holds=None, follow_cd=False,
                 kept = scripts[number][index]
                 script.extend(_words_of(kept) if "'" in kept or '"' in kept else [kept])
         text = " ".join(shown)
-        at, far = cwd, False
+        at, anchor = cwd, None
         if follow_cd:
-            at, far = dir_before_segment(segments, number, cwd, ends, origin=True)
+            at, anchor = dir_before_segment(segments, number, cwd, ends, origin=True)
             at = at or cwd
-        if far and skip_absolute_cd:
+        if anchor and skip_after_cd and skip_after_cd(anchor):
             continue
         verb = _segment_command(words)[0] if predicate_command else ""
         for word in words:
