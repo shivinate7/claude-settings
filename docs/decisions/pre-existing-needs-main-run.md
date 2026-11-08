@@ -2,7 +2,7 @@
 
 ## The ruling
 
-The pre-existing check, in the Stop hook `lint/report_guard.py` (rule `pre-existing-needs-main-run`), refuses a reply when a sentence of it makes a pre-existing claim and its line names no run on the base branch's tip. A false "pre-existing" lets a lane ship its own red, and the batch or main then goes red. The check runs on any turn, landed or not. One refusal per turn lists the lines and joins any other reason. A rewrite after a missing-report refusal is checked too, once, as with the answered check.
+The pre-existing check, in the Stop hook `lint/report_guard.py` (rule `pre-existing-needs-main-run`), refuses a reply when a sentence makes a pre-existing claim and its line names no run on the base branch's tip. A false "pre-existing" lets a lane ship its own red. The batch or main then goes red. The check runs on any turn, landed or not. One refusal per turn lists the lines and joins any other reason. A rewrite after a missing-report refusal is checked too, once, as with the answered check.
 
 **What it reads.** Each sentence of the last reply, outside fences, quoted text and inline code spans. A sentence that ends in `?` asks and claims nothing, but a claim in the sentence before a question is judged. A sentence is a claim when it holds one of three forms:
 
