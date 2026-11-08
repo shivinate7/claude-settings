@@ -358,6 +358,16 @@ MUTATIONS = [
      '        return merge.removeprefix("refs/heads/") if merge else None\n    return None',
      '        return merge.removeprefix("refs/heads/") if merge else None\n    return current', "guard",
      'push.default matching'),
+    # The review-record rule: each mutant removes one link of the chain, and one named case must go red.
+    ("push-needs-review-record: the guard.py call is dropped",
+     'review_record_hit(transcript, lambda: push_destinations(args, where, overrides))',
+     '(False, "")', "guard", 'the incident: a reviewer FAIL in the foreground result'),
+    ("push-needs-review-record: a posted record never clears its report",
+     'pending = [report for report in pending if report not in held]',
+     'pending = list(pending)', "guard", 'a FAIL round 1, then a FAIL record posted'),
+    ("push-needs-review-record: a fix check PASS no longer denies its head branch",
+     'if heads[number] in destinations():',
+     'if False:', "guard", 'a fix check PASS for PR 1464 posted, then a push to its head branch'),
     ("force-push: quoted text is read as a push",
      'return PUSH_QUOTED.sub(" ", segment)', 'return segment', "guard",
      'false alarm: --force quoted in a commit message'),
@@ -3091,6 +3101,14 @@ def run_mutant(sources, work: str, entry):
         root = os.path.join(work, "%s_%s" % (stem, mutate_shared.safe_name(label)))
         tree = os.path.join(root, "hooks")
         mutate_shared.guard_tree(tree)
+        # The guard reads merge/merge.py beside its hooks folder, or from the clone the global rules point at.
+        # The suite runs under an empty CLAUDE_CONFIG_DIR, so with no merge beside the copy every review-record
+        # decision fails open: the baseline allows, and a mutant's red is the baseline's, not its own. merge.py
+        # imports lint/hook_catalog.py from root/lint, which the lint copy below provides, and reads
+        # actions/ci-alarm beside itself, so actions/ takes the copy too.
+        for part in ("merge", "actions"):
+            shutil.copytree(os.path.join(os.path.dirname(HERE), part), os.path.join(root, part),
+                            ignore=shutil.ignore_patterns("__pycache__", "test_*"))
         # The guard loads ../bin/sim-lease beside its hooks folder, so the copy takes it too, mutated or not.
         os.makedirs(os.path.join(root, "bin"), exist_ok=True)
         if target == "simlease":
