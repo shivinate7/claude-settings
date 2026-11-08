@@ -28328,8 +28328,8 @@ rbb_refuse("reviewer-brief-blind: refused: a reviewer brief with a Round 1 \u201
            "Check the floor fix.\nRound 1 \u2013 FAIL\nFiles: hooks/guard.py.")
 
 # A verdict line pasted from a report that names no round must refuse, since a later reviewer reads that verdict as its
-# own. Each row is one line Claude saw, quoted with its source. The FAIL line is the first line of a reviewer agent's
-# report in a lane session, 2026-11-08 08:27 CST. The PASS line is a reviewer report, 2026-11-08 07:51 CST.
+# own. Each row is one line Claude saw, quoted with its source. The FAIL line is the first line of a reviewer's report
+# in a lane session. The PASS line is a reviewer's report line.
 rbb_refuse("reviewer-brief-blind: refused: a reviewer brief with a Done: FAIL line that names no round, on haiku",
            "Check the floor fix.\nDone: FAIL, round not named in brief, claude-haiku-5-5\nFiles: hooks/guard.py.")
 rbb_refuse("reviewer-brief-blind: refused: a reviewer brief with a Done: PASS line that names no round, on haiku",
@@ -28341,10 +28341,24 @@ rbb_refuse("reviewer-brief-blind: refused: a reviewer brief with a Done: PASS li
 rbb_allow("reviewer-brief-blind: allowed: a reviewer brief whose first line is a Done: line that asks for a verdict",
           "Done: read the diff, then give a verdict: PASS or FAIL.\nFiles: hooks/guard.py.")
 
-# The builder report line the orchestrator's brief for this step quotes, commit 2318769a1. It refuses at the start head,
-# since a reviewer brief then holds a builder's report, so it is pinned as refused and not as allowed.
+# A builder's report line, quoted in an orchestrator's brief for this step. It refuses at the start head, since a
+# reviewer brief then holds a builder's report, so it is pinned as refused and not as allowed.
 rbb_refuse("reviewer-brief-blind: refused: a reviewer brief opening with a builder Done: BUILT line, a commit named",
            "Done: BUILT. Commit 2318769a1 on vlp-r2-build, not pushed.\nFiles: hooks/guard.py.")
+
+# A bare verdict word that ends its clause is a verdict, at the line end, before a period, and before a period inside
+# bold. Each allow must pass: a verdict word followed by more words, a comma-led choice list, and a label that is no
+# report label. Each allow is red only under the mutant that drops the rule it pins.
+rbb_refuse("reviewer-brief-blind: refused: a reviewer brief with a Done: PASS. line, the period at the line end",
+           "Check the floor fix.\nDone: PASS.\nFiles: hooks/guard.py.")
+rbb_refuse("reviewer-brief-blind: refused: a reviewer brief with a bold Done: **FAIL.** line, the period inside the bold",
+           "Check the floor fix.\nDone: **FAIL.**\nFiles: hooks/guard.py.")
+rbb_allow("reviewer-brief-blind: allowed: a reviewer brief with a Done: PASS from the family run line, the verdict word not at a clause end",
+          "Check the floor fix.\nDone: PASS from the family run.\nFiles: hooks/guard.py.")
+rbb_allow("reviewer-brief-blind: allowed: a reviewer brief with a Done: PASS, FAIL or PARTIAL, then list the findings line",
+          "Check the floor fix.\nDone: PASS, FAIL or PARTIAL, then list the findings.\nFiles: hooks/guard.py.")
+rbb_allow("reviewer-brief-blind: allowed: a reviewer brief with a Target: PASS line, no report label",
+          "Check the floor fix.\nTarget: PASS, with no new allow.\nFiles: hooks/guard.py.")
 
 # The owner override lifts the refusal, as it lifts the role-model refusal (role_override_lift_check copied here).
 RBB_SPAWN = {"prompt": "Check the floor fix.\nDone: BUILT c204a1f.\nDeviations: none.", "subagent_type": "reviewer",
