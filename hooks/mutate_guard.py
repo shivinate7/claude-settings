@@ -421,7 +421,7 @@ MUTATIONS = [
     ("push-agent-branch: a short hex tail is a name",
      'AGENT_BRANCH = re.compile(r"(?:claude/|worktree-)?agent-[0-9a-f]{8,}")',
      'AGENT_BRANCH = re.compile(r"(?:claude/|worktree-)?agent-[0-9a-f]*")', "guard",
-     'agent-notes, -u HEAD is silent'),
+     'agent-1234567, -u HEAD is silent'),
     ("push-agent-branch: an explicit destination is not read",
      '                agent = agent or bool(AGENT_BRANCH.fullmatch(target.removeprefix("refs/heads/")))',
      '                pass', "guard", 'explicit agent destination from a branch with no upstream asks'),

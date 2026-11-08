@@ -589,14 +589,15 @@ PUSHSELF = os.path.join(ROOT, "pushself")
 PUSHMAINUP = os.path.join(ROOT, "pushmainup")  # main itself, tracking origin/main
 PUSHSTACK = os.path.join(ROOT, "pushstack")    # lane/fix cut from origin/lane/base: its upstream is another lane
 # Agent-worktree branch names (rule push-agent-branch). A branch is named by HEAD, so each name has its own
-# checkout. PUSHAGENT holds the name the 2026-11-08 stray push sent to origin, with no upstream. The other
-# shapes and the near misses sit beside it.
+# checkout. PUSHAGENT holds the name that a stray push sent to origin, with no upstream. The other shapes and
+# the near misses sit beside it.
 PUSHAGENT = os.path.join(ROOT, "pushagent")            # claude/agent-<hex>
 PUSHAGENTWT = os.path.join(ROOT, "pushagentwt")        # worktree-agent-<hex>
 PUSHAGENTBARE = os.path.join(ROOT, "pushagentbare")    # agent-<hex>
 PUSHAGENTNOTES = os.path.join(ROOT, "pushagentnotes")  # agent-notes: a prefix with no hex after it
 PUSHAGENTMYABC = os.path.join(ROOT, "pushagentmyabc")  # my-agent-abc: a prefix, too short to hold hex
 PUSHAGENTMYHEX = os.path.join(ROOT, "pushagentmyhex")  # my-agent-<hex>: hex behind a prefix, not the shape
+PUSHAGENTSHORT = os.path.join(ROOT, "pushagentshort")  # agent-<7 hex>: a hex tail one character short of the shape
 # The rule ids the push asks name. Each is the one home for its id in this file.
 PUSH_STRAY_RULE = "push-stray-branch"   # ruling 206 a: a push with an implied destination off its upstream
 PUSH_MAIN_RULE = "push-main"            # ruling 207 a: a non-forced push whose destination is main or master
@@ -1937,7 +1938,8 @@ def _build_push():
                           (PUSHAGENTBARE, "agent-a22bb0ed47825117b"),
                           (PUSHAGENTNOTES, "agent-notes"),
                           (PUSHAGENTMYABC, "my-agent-abc"),
-                          (PUSHAGENTMYHEX, "my-agent-a22bb0ed47825117b")):
+                          (PUSHAGENTMYHEX, "my-agent-a22bb0ed47825117b"),
+                          (PUSHAGENTSHORT, "agent-1234567")):
         make_repo(where, {"base.txt": "base\n"})
         run_vcs(where, "remote", "add", "origin", slash(BRANCHREMOTE))
         run_vcs(where, "update-ref", "refs/remotes/origin/main", "HEAD")
@@ -2250,7 +2252,8 @@ lazy_fixture([BRANCHREMOTE, BRANCHREPO, BRANCHFALLBACKMAIN, BRANCHFALLBACKMASTER
 lazy_fixture([PUSHFEAT, PUSHMAIN, PUSHTRUNK, PUSHTRUNKLOCAL, PUSHNOHEAD, PUSHDETACHED, PUSHSAMETAG, PUSHDANGLING, PUSHNOHEADMAIN,
               PUSHONLYMASTER, PUSHUPSTREAM, PUSHUP, PUSHUPSELF, PUSHNOUP, PUSHMATCH, RECROADMAP, RECFORK,
               PUSHSTRAY, PUSHLANE, PUSHLANEMASTER, PUSHSELF, PUSHMAINUP, PUSHSTACK,
-              PUSHAGENT, PUSHAGENTWT, PUSHAGENTBARE, PUSHAGENTNOTES, PUSHAGENTMYABC, PUSHAGENTMYHEX],
+              PUSHAGENT, PUSHAGENTWT, PUSHAGENTBARE, PUSHAGENTNOTES, PUSHAGENTMYABC, PUSHAGENTMYHEX,
+              PUSHAGENTSHORT],
              _build_push)
 lazy_fixture([WTMAIN, WTCLEAN, WTDIRTY, WTLOCKED, WTLIVE, WTDEADSESSION, WTSTALESTART, WTPRUNE,
               WTPRUNESTALE, WTLIVECFG, WTDEADCFG, WTSTALESTARTCFG], _build_worktrees)
@@ -7103,9 +7106,9 @@ sh("push: stray branch, a bare push under push.default current asks",
    VCS + " -c push.default=current push", "ask", PUSH_STRAY_RULE, cwd=PUSHSTRAY)
 
 # ASK, rule push-agent-branch. A non-forced push whose destination is an agent-worktree name asks, with or
-# without -u. The 2026-11-08 stray push sent claude/agent-<hex> to origin, and push-stray-branch stays silent
-# on a branch with no upstream. The names are agent-<hex>, claude/agent-<hex> and worktree-agent-<hex>, with 8
-# or more hex characters after the prefix. PUSHAGENT sits on claude/agent-a22bb0ed47825117b, with no upstream.
+# without -u. push-stray-branch stays silent on a branch with no upstream, so this rule carries that case. The
+# names are agent-<hex>, claude/agent-<hex> and worktree-agent-<hex>, with 8 or more hex characters after the
+# prefix. PUSHAGENT sits on its claude/agent- branch, with no upstream.
 push_case("agent branch, HEAD asks", "origin HEAD", "ask", cwd=PUSHAGENT, rule=PUSH_AGENT_RULE)
 push_case("agent branch, -u HEAD asks", "-u origin HEAD", "ask", cwd=PUSHAGENT, rule=PUSH_AGENT_RULE)
 push_case("agent branch, @ asks", "origin @", "ask", cwd=PUSHAGENT, rule=PUSH_AGENT_RULE)
@@ -7120,6 +7123,14 @@ push_case("agent worktree, agent-<hex>, -u HEAD asks", "-u origin HEAD", "ask",
 # An explicit agent destination from a branch with no upstream (PUSHFEAT, `feat`).
 push_case("explicit agent destination from a branch with no upstream asks",
           "origin HEAD:claude/agent-a22bb0ed47825117b", "ask", rule=PUSH_AGENT_RULE)
+# Under push.autoSetupRemote, git pushes the current name and sets its upstream itself, so a bare push, `origin`
+# or `-u origin` writes the agent name. The key rides on the call, where the guard reads it.
+sh("push: agent branch, a bare push under autoSetupRemote asks",
+   VCS + " -c push.autoSetupRemote=true push", "ask", PUSH_AGENT_RULE, cwd=PUSHAGENT)
+sh("push: agent branch, origin under autoSetupRemote asks",
+   VCS + " -c push.autoSetupRemote=true push origin", "ask", PUSH_AGENT_RULE, cwd=PUSHAGENT)
+sh("push: agent branch, -u origin under autoSetupRemote asks",
+   VCS + " -c push.autoSetupRemote=true push -u origin", "ask", PUSH_AGENT_RULE, cwd=PUSHAGENT)
 
 # SILENT, rule push-agent-branch. Each is an allow that prints nothing. The lane and feature branch controls
 # are the no-upstream rows above (PUSHFEAT, `feat`): their -u and HEAD pushes stay silent under this rule too.
@@ -7138,6 +7149,15 @@ push_case("my-agent-abc, -u HEAD is silent (too short to be hex)", "-u origin HE
           cwd=PUSHAGENTMYABC, silent=True)
 push_case("my-agent-<hex>, -u HEAD is silent (the shape must open the name)", "-u origin HEAD", "allow",
           cwd=PUSHAGENTMYHEX, silent=True)
+push_case("agent-1234567, -u HEAD is silent (7 hex is one short of the shape)", "-u origin HEAD", "allow",
+          cwd=PUSHAGENTSHORT, silent=True)
+# The same autoSetupRemote forms on a lane branch with no upstream (PUSHFEAT, `feat`) stay silent.
+sh("push: lane branch, a bare push under autoSetupRemote is silent",
+   VCS + " -c push.autoSetupRemote=true push", "allow", cwd=PUSHFEAT, silent=True)
+sh("push: lane branch, origin under autoSetupRemote is silent",
+   VCS + " -c push.autoSetupRemote=true push origin", "allow", cwd=PUSHFEAT, silent=True)
+sh("push: lane branch, -u origin under autoSetupRemote is silent",
+   VCS + " -c push.autoSetupRemote=true push -u origin", "allow", cwd=PUSHFEAT, silent=True)
 
 # ASK, owner rulings 207 a. A non-forced push whose destination is the literal
 # name main or master asks. The name is literal: origin/HEAD does not decide it.
