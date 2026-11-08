@@ -2447,21 +2447,15 @@ def refuse_bad_pr(info):
     if info["mergeable"] == "CONFLICTING" or info["merge_state"] == "DIRTY":
         raise Stop("the pull request is CONFLICTING. Merge the base into the branch and run again. Nothing was claimed. " + BASE_CITE)
 
-def fetch_branch(root, branch, head=None):
-    """Fetch origin's `branch` into refs/remotes/origin/<branch>. With `head` (the sha gh named), refuse unless the fetched ref holds it.
-    The one home of the PR-head fetch: open_worktree and check_review_ranges call it."""
-    c, out = git(root, "fetch", "-q", "origin", f"+refs/heads/{branch}:refs/remotes/origin/{branch}")
-    if c:
-        raise Stop(f"git fetch origin {branch} failed: {out}")
-    if head is not None:
-        got = git(root, "rev-parse", f"refs/remotes/origin/{branch}")[1]
-        if got != head:
-            raise Stop(f"{branch} moved: gh says {head[:9]}, origin holds {got[:9]}. Run again. Nothing was claimed.")
-
 def open_worktree(root, info, base):
     """Fetch, check that the head is the one gh named, and make a detached worktree there."""
-    fetch_branch(root, base)
-    fetch_branch(root, info["branch"], info["head"])
+    for ref in (base, info["branch"]):
+        c, out = git(root, "fetch", "-q", "origin", f"+refs/heads/{ref}:refs/remotes/origin/{ref}")
+        if c:
+            raise Stop(f"git fetch origin {ref} failed: {out}")
+    got = git(root, "rev-parse", f"refs/remotes/origin/{info['branch']}")[1]
+    if got != info["head"]:
+        raise Stop(f"{info['branch']} moved: gh says {info['head'][:9]}, origin holds {got[:9]}. Run again. Nothing was claimed.")
     return add_worktree(root, info["head"])
 
 def add_worktree(root, head):
@@ -2557,11 +2551,12 @@ def review_range_starts(body):
     return [s for i, row in enumerate(rows, 1) if i not in fenced for s in REVIEW_RANGE.findall(row) if not re.search(r"[<>{}]", s)]
 
 def check_review_ranges(root, host, info, base, body):
-    """A lane that names a parent (`Merge after: #N`) asks its reviewer to read `git diff <start> <end>`. Judged by ancestry (triage ruling, 2026-11-08 09:05 CST):
+    """A lane that names a parent (`Merge after: #N`) asks its reviewer to read `git diff <start> <end>`. A start judged by ancestry, not by string, also passes
+    a lane built on a parent that gained commits, or on a merge of its parents (decision lanes-run-no-full-ci-job):
     a start S passes when (1) S is an ancestor of, or is, the lane head; (2) for each named parent P, merge-base(lane head, P's head) is an ancestor of, or is, S;
     (3) `git rev-list --no-merges S --not <each parent head> origin/<base>` is empty. A start that does not resolve, or a hex start under 7 digits, refuses.
     A start equal to a parent's branch, bare or as origin/<branch>, is that parent's head. `info` is the lane PR's read and `base` its base branch.
-    Fetches the base and the lane branch, checked against the head gh named (fetch_branch), and each parent's head by its sha. Any git or host error refuses.
+    The caller has fetched the base and the lane head (open_worktree, in lane_lint). It fetches each parent's head by its sha. Any git or host error refuses.
     A parent with no range passes with one note line. Raises Stop on the first bad start. Reads each parent's PR once."""
     parents = parent_prs(body)
     if not parents:
@@ -2579,8 +2574,6 @@ def check_review_ranges(root, host, info, base, body):
                    f"A start off the lane's fork from its parents makes the reviewer read the wrong commits. Restate the range from the head of the parent "
                    f"the lane is built on, or from the commit that merges its parents (7 or more hex digits). {LANE_LINT_CITE}")
 
-    fetch_branch(root, base)
-    fetch_branch(root, info["branch"], lane)
     for n, i in infos.items():  # by sha, not branch: a merged parent's branch may be deleted while its head stays on origin
         c, out = git(root, "fetch", "-q", "origin", i["head"])
         if c:
@@ -2623,19 +2616,20 @@ def lane_lint(root, target, host, base="", unknown_ok=""):
     A target of digits is a PR number: its head and base come from the PR. Any other target is a commit or ref.
     ci-job's stderr (a `start: <step>` line per step, verdict's heartbeat) passes live to this process's stderr; only its stdout is read.
     Exit 1 of ci-job (a FAIL) refuses always. Exit 2 (an unknown) refuses unless `unknown_ok` is a non-blank reason; it is then logged, with no PASS line.
-    A PR-number target first runs check_review_ranges on its body, before any ci-job run.
+    A PR-number target runs check_review_ranges on its body in the open tree's try, before any ci-job run.
     A lint that ran no lint CI step is ci-job's exit 2, so it refuses as an unknown. The PASS line names the CI steps ci-job skipped, as a count and their names."""
     pr_body = ""  # a commit or ref has no PR body
     if target.isdigit():
         host = host or Host()
         info = host.pr(int(target))
         head, base, pr_body = info["head"], info["base"], info.get("body", "")
-        check_review_ranges(root, host, info, base, pr_body)
         tmp, wt = open_worktree(root, info, base)
     else:
         head, base = lane_head_and_base(root, target, base)
         tmp, wt = add_worktree(root, head)
     try:  # a SIGTERM reaches here as a SystemExit (release_on_signals in main), so this `finally` removes the tree
+        if pr_body:  # after open_worktree, whose fetch the check's git reads need
+            check_review_ranges(root, host, info, base, pr_body)
         state, lines, log, liftable = ci_job_run(wt, "checks", "--lint", "--base", f"origin/{base}", pr_body=pr_body)
     finally:
         drop_worktree(root, tmp, wt)
