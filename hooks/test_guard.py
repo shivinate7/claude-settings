@@ -13365,6 +13365,17 @@ for _command, _want in (
         ('bash -eo pipefail -c "pytest tests/x"', ("tests/x",)),
         ('bash --noprofile --norc -c "pytest tests/x"', ("tests/x",)),
         ('sh -e -c "pytest tests/x"', ("tests/x",)),
+        # Shell words the reader does not pass yet: a long flag that takes a value (`--rcfile f`), a cluster whose
+        # `c` is not last (`-ce`, `-cx`), a `+` option (`+e`), and `-oe pipefail`, whose cluster does not end in `o`.
+        ('bash --rcfile f -c "pytest tests/"', ("tests/",)),
+        ('bash --init-file f -c "pytest tests/"', ("tests/",)),
+        ('bash -ce "pytest tests/"', ("tests/",)),
+        ('bash -cx "pytest tests/"', ("tests/",)),
+        ('bash +e -c "pytest tests/"', ("tests/",)),
+        ('bash -oe pipefail -c "pytest tests/"', ("tests/",)),
+        # Controls, green on the head: a plain shell -c, and a shell that runs a script file rather than a -c.
+        ('bash -c "pytest tests/"', ("tests/",)),
+        ('bash -e tests/x.py', ("tests/x.py",)),
         ('echo "python tests/x.py failed"', ()),
         ('echo "bash tests ok"', ()),
         ('echo "node tests/x.js ran"', ()),
