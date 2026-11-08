@@ -13554,6 +13554,64 @@ chained_ask("ask-alone: r3-bd a body with a cd and a push delete of main, writte
             "cat <<'EOF-1' > x.sh\nEOF\ncd " + slash(PUSHMAIN) + "\ngit push origin :main\nEOF-1\nsh x.sh",
             cwd=PUSHFEAT)
 
+# (h) A KEPT HEREDOC BODY IS TEXT, NOT A SHELL STEP. A heredoc body that a later command runs is kept in view,
+# and the guard reads it. An interpreter body runs no `$( )` and no backtick, so a push named in its prose is
+# data, and the shapes below allow. A push line that `sh` runs, and a substitution in a shell body, still run
+# and still deny. The words `git` and `.env` are built from VCS and ENV, as in the rest of this file.
+SCRATCH = slash(os.path.join(ROOT, "scratch"))
+REPRO_LINE = ('cases = {"subst": "' + VCS + ' commit -m \\"$(cat <<\'EOF\'\\nfix: no ' + VCS
+              + ' push --force here\\nEOF\\n)\\" && ' + VCS + ' push origin lane-x"}')
+REPRO = "S=" + SCRATCH + "\ncat > $S/r.py <<'EOF'\n" + REPRO_LINE + "\nEOF\npython3 $S/r.py"
+sh("ask-alone: the repro, a file written by heredoc with a prose force-push in $( ) and then run, allows",
+   REPRO, "allow", cwd=PUSHFEAT)
+
+TRIAGE_NOTE = "`" + VCS + " push origin roadmap` is the one writer, and a force-push is refused."
+TRIAGE = ("python3 - <<'PY'\nfrom pathlib import Path\np = Path(\"roadmap/steps.md\")\n"
+          "p.write_text(p.read_text() + \"\\nNote: " + TRIAGE_NOTE + "\\n\")\nPY\n"
+          "python3 roadmap/build.py && " + VCS + " add -A && " + VCS + " commit -m x && "
+          + VCS + " push origin lane-x")
+sh("ask-alone: the triage shape, a python step-note edit with a backtick push and force-push prose, then a push to lane-x, allows",
+   TRIAGE, "allow", cwd=PUSHFEAT)
+
+# The scanner shapes: a `#` line with a lone apostrophe, and a backtick span over two lines, in one python body.
+SCAN = ("python3 - <<'PY'\n# don't re-run this by hand\nnote = \"\"\"Do not run `" + VCS
+        + " push --force\norigin roadmap` here: the force-push is refused.\"\"\"\nPY\n"
+        "python3 roadmap/build.py && " + VCS + " add -A && " + VCS + " commit -m x && "
+        + VCS + " push origin lane-x")
+sh("ask-alone: a python body with a # line, a lone apostrophe and a two-line backtick span, then a push to lane-x, allows",
+   SCAN, "allow", cwd=PUSHFEAT)
+
+# Python runs no shell, so a $( ) in its print text is text, as a quoted commit message is.
+sh("ask-alone: a python body that prints a $( ) around a forced push to main is text, allows",
+   "python3 - <<'PY'\nprint(\"$(" + VCS + " push --force origin HEAD:main) is refused\")\nPY",
+   "allow", cwd=PUSHFEAT)
+
+# CONTROLS, green on main too: the real pushes keep their verdicts, and the fix must not drop them.
+FORCE_LANE = VCS + " push --force origin lane-x"
+sh("ask-alone: control, a plain chain of add, commit and a push to lane-x allows",
+   VCS + " add -A && " + VCS + " commit -m x && " + VCS + " push origin lane-x", "allow", cwd=PUSHFEAT)
+sh("ask-alone: control, a forced push to lane-x alone denies",
+   FORCE_LANE, "deny", "force-push", cwd=PUSHFEAT, carries=REMEDY)
+sh("ask-alone: control, a forced push to lane-x chained after an add and a commit denies",
+   VCS + " add -A && " + VCS + " commit -m x && " + FORCE_LANE, "deny", "force-push", cwd=PUSHFEAT,
+   carries=REMEDY)
+sh("ask-alone: control, a forced push to lane-x inside a dollar paren in a plain echo denies",
+   'echo "$(' + FORCE_LANE + ')"', "deny", "force-push", cwd=PUSHFEAT, carries=REMEDY)
+sh("ask-alone: control, a forced push to lane-x in backticks in a plain echo denies",
+   "echo `" + FORCE_LANE + "`", "deny", "force-push", cwd=PUSHFEAT, carries=REMEDY)
+sh("ask-alone: control, a forced push line in a heredoc body that a later sh runs denies",
+   "cat > x.sh <<'EOF'\n" + FORCE_LANE + "\nEOF\nsh x.sh", "deny", "force-push", cwd=PUSHFEAT,
+   carries=REMEDY)
+sh("ask-alone: control, a forced push in backticks in a heredoc body that a later sh runs denies",
+   "cat > x.sh <<'EOF'\necho `" + FORCE_LANE + "`\nEOF\nsh x.sh", "deny", "force-push", cwd=PUSHFEAT,
+   carries=REMEDY)
+sh("ask-alone: control, a forced push to main alone asks",
+   VCS + " push --force origin HEAD:main", "ask", "force-push", cwd=PUSHFEAT)
+chained_ask("ask-alone: control, a forced push to main chained after an add denies as a chained ask command",
+            VCS + " add -A && " + VCS + " push --force origin HEAD:main", cwd=PUSHFEAT)
+chained_prune("ask-alone: a prune chained after an add, then a push to lane-x, denies",
+              VCS + " add -A && " + PRUNE + " && " + VCS + " push origin lane-x")
+
 
 # =========================================================================== ordinary work
 FAMILY = "paths"
