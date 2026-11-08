@@ -16564,6 +16564,21 @@ mrf_case("PR number 8 is refused and named", "deny", "PR number 8", carries=("#8
 mrf_case("PRs #7 #8 names 8 and is refused", "deny", "PRs #7 #8", carries=("#8",))
 mrf_case("PRs #7 or #8 names 8 and is refused", "deny", "PRs #7 or #8", carries=("#8",))
 mrf_case("PRs #7 + #8 names 8 and is refused", "deny", "PRs #7 + #8", carries=("#8",))
+# A line with the PR word is judged when the number is not right after the word (decision send-message-refs-resolve,
+# What is judged). A bare #N with no PR word is not, and the controls below keep that line.
+mrf_case("PR opened: #8 is refused and names 8", "deny", "PR opened: #8", carries=("#8",))
+mrf_case("PR is #8 is refused and names 8", "deny", "PR is #8", carries=("#8",))
+mrf_case("PR - #8 is refused and names 8", "deny", "PR - #8", carries=("#8",))
+mrf_case("PR, #8 is open is refused and names 8", "deny", "PR, #8 is open", carries=("#8",))
+mrf_case("Opened the PR as #8 is refused and names 8", "deny", "Opened the PR as #8", carries=("#8",))
+mrf_case("the PR for this lane is #8 is refused and names 8", "deny", "the PR for this lane is #8", carries=("#8",))
+mrf_case("pull #8 is open is refused and names 8", "deny", "pull #8 is open", carries=("#8",))
+mrf_case("PR [#8] is open is refused and names 8", "deny", "PR [#8] is open", carries=("#8",))
+mrf_case("this repo's owner/repo#8 is open is refused and names 8", "deny", "o/r#8 is open", carries=("#8",))
+mrf_case("Issue #8 is open. is allowed, with no PR word", "allow", "Issue #8 is open.")
+mrf_case("PR #7 is open. is allowed", "allow", "PR #7 is open.")
+mrf_case("acme/widgets#8 is open. names another repo and is allowed", "allow", "acme/widgets#8 is open.")
+mrf_case("PR #7, 12 files is allowed, and 12 is not judged", "allow", "PR #7, 12 files")
 # Fail open: a shallow clone and a repo with no origin name what they could not check, with no permissionDecision.
 mrf_case("a made-up sha in a shallow clone is allowed, and the output names the sha", "allow",
          "Rebased on 8c1f0e2a7.", cwd=MRF_SHALLOW, carries=("8c1f0e2a7",), context=True)
