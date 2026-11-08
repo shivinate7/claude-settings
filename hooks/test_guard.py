@@ -12829,7 +12829,7 @@ add("frozen-scan-crash: residual, python -c that writes a .claude/hooks folder u
 # the crash note. The two-link controls stay under the cap: the same write there is judged by its composed path,
 # with no note. A value doubled 40 times is cut by the read budget (`_COMPOSE_BUDGET`); the row's time limit is
 # what fails when that budget is gone. A loop that appends to a name bound nowhere holds itself (`_PY_EXPANDING`),
-# and the read after it stays allowed. Each name carries frozen-scan-crash:, so MUTATE_ONLY=frozen-scan-crash: runs them.
+# and the read or the write after it stays allowed. Each name carries frozen-scan-crash:, so MUTATE_ONLY=frozen-scan-crash: runs them.
 
 CLIMB_LINKS = ["notes", ".."] * 30   # 60 links, each out to ~/notes and back, so the chain ends at home
 SHORT_LINKS = ["notes", ".."]        # the same shape, two links, under the cap
@@ -12881,6 +12881,13 @@ add("frozen-scan-crash: cycle, python -c that reads a frozen settings file after
     "allow", cwd=NOGIT, env=TILDE_ENV,
     command="python3 -c 'import os\nfor i in range(3):\n    p += \"/x\"\n"
             "print(open(os.path.join(os.path.expanduser(\"~\"), \".claude\", \"settings.json\")).read())'")
+# The loop's path feeds a write here, so a cap hit would read the script as plain text and deny on the settings
+# literal. The cycle guard keeps the cap from being reached: the write is judged on its own text, and it is allowed.
+add("frozen-scan-crash: cycle, python -c that reads a frozen settings file, then loops on a name bound nowhere and writes to it, is allowed",
+    "allow", cwd=NOGIT, env=TILDE_ENV,
+    command="python3 -c 'import json\njson.load(open(\"~/.claude/settings.json\"))\n"
+            "for i in range(3):\n    p += \"/x\"\n"
+            "open(p, \"w\")'")
 add("frozen-scan-crash: control, python -c that reads a frozen settings file after a loop that appends to a name bound before it is allowed",
     "allow", cwd=NOGIT, env=TILDE_ENV,
     command="python3 -c 'import os\nq = \"/x\"\nfor i in range(3):\n    q += \"/x\"\n"

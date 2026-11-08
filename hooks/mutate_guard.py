@@ -275,7 +275,7 @@ MUTATIONS = [
      'frozen-scan-crash: budget, python -c that doubles a value 40 times'),
     ("frozen-scan-crash: the cycle guard is removed, so a name that holds itself is read to the cap",
      "if value is None or id(value) in _PY_EXPANDING:", "if value is None:", "guard",
-     'frozen-scan-crash: cycle, python -c that reads a frozen settings file after a loop'),
+     'frozen-scan-crash: cycle, python -c that reads a frozen settings file, then loops on a name bound nowhere and writes'),
     ("force-push: forget every forced push",
      '    if not (force or leased or plus or mirror or delete):\n        return ""',
      '    if True:\n        return ""', "guard", 'push: the long force flag'),
