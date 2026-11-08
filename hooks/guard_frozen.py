@@ -653,8 +653,13 @@ def _shell_write_hit(cmd: str, cwd: str, predicate, holds=None, follow_cd=False,
             if runs_nowhere and (quiet or not to_file):
                 data = data | _data_words(kinds[number], raw)
         words, shown, script = [], [], []
+        assigned = _quoted_assignments(raw)
         for index, word in enumerate(raw):
-            if index in data:
+            if index in assigned:
+                words.append(_ASSIGNMENT_STAND_IN)
+                shown.append(_ASSIGNMENT_STAND_IN)
+                script.append(_ASSIGNMENT_STAND_IN)
+            elif index in data:
                 words.append('""')   # data, or a `cp` source: no redirect or `tee` in it runs
                 shown.append('""')
                 script.append('""')
@@ -679,6 +684,22 @@ def _shell_write_hit(cmd: str, cwd: str, predicate, holds=None, follow_cd=False,
             if (predicate(word, at, verb) if predicate_command else predicate(word, at)) and writes_to(word, text, *(_segment_command(script) if command_position else ())):
                 return word
     return ""
+
+
+# A leading `NAME="quoted value"` only sets a variable for the command after it. Its value is data: a
+# word inside it (`copy`, a path) is no command and no write target. A value that can run (`$`, a backtick,
+# a process substitution) stays in view. The stand-in is an assignment, so the command word still resolves.
+_ASSIGNMENT_STAND_IN = "V=d"
+
+
+def _quoted_assignments(raw):
+    """The indexes of the words of a segment that are quoted `NAME=value` assignments before its command."""
+    words = [_unquoted(word) for word in raw]
+    command = resolve_command(tuple(words))
+    end = len(raw) if command is None else command
+    return {index for index in range(end)
+            if _ASSIGNMENT.match(raw[index]) and ("'" in raw[index] or '"' in raw[index])
+            and not _UNSAFE_MARK.search(raw[index]) and "$" not in raw[index]}
 
 
 def _segment_command(words):
