@@ -17398,6 +17398,12 @@ tn_replace("a str_replace on the title is allowed", "allow", "title",
            "Delete the stale branches", "Delete the old branches")
 tn_replace("a str_replace whose old_str holds no Why yours line is allowed", "allow", "context",
            TN_CTX, "The cloud proxy refused the branch deletes (403), twice.")
+# Rule task-why-cited (decision claims-carry-backing, part (v)). hooks/test_question_form.py judges the rule in-process;
+# this case runs the real guard, so a rule the guard does not dispatch would show here as an allow.
+add("task why cited: a Why yours line with a capability reason and no cite is denied by the guard", "deny",
+    "task-why-cited", tool="ArtifactData", cwd=PQ_REPO, url=PQ_URL, action="set", collection="items",
+    doc_id="stale-branch-deletes",
+    data=tn_task(context=TN_CTX + "\nWhy yours: the cloud proxy refused the branch deletes (403)."))
 
 
 # --------------------------------------------------------------------------- a decision states the question form
