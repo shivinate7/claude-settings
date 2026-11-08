@@ -2368,6 +2368,28 @@ class RefusalCiteFixtureTests(unittest.TestCase):
         self.assertEqual(status_of(src, "lambda-guard"), ["not resolved"],
                          "the run-time rebind comes before the lambda, so the read is of the run-time hit")
 
+    def test_a_generator_read_after_a_run_time_rebind_stays_not_resolved(self):
+        src = branch_src('    hit = helper(seg)\n'
+                         '    g = (refuse(tool, "deny", "p-id", hit[1], hit[0]) for x in seg)\n'
+                         '    hit = pick(seg)\n'
+                         '    return next(g)\n')
+        self.assertEqual(status_of(src, "p-id"), ["not resolved"],
+                         "a generator expression runs when next() pulls it, after the rebind, so its read is run-time")
+
+    def test_a_generator_read_after_a_rebind_in_an_if_stays_not_resolved(self):
+        src = branch_src('    hit = helper(seg)\n'
+                         '    g = (refuse(tool, "deny", "p-id2", hit[1], hit[0]) for x in seg)\n'
+                         '    if seg:\n'
+                         '        hit = pick(seg)\n'
+                         '    return list(g)\n')
+        self.assertEqual(status_of(src, "p-id2"), ["not resolved"],
+                         "the if may rebind hit before list() pulls the generator, so its read is run-time")
+
+    def test_an_eager_generator_read_with_no_rebind_stays_cited(self):
+        src = branch_src('    hit = helper(seg)\n'
+                         '    return any(refuse(tool, "deny", "eager-id", hit[1], hit[0]) for x in seg)\n')
+        self.assertEqual(status_of(src, "eager-id"), ["cited"])
+
     def test_an_empty_reason_is_not_resolved(self):
         self.assertEqual(status_of('refuse(t, "deny", "empty-id", "", m)\n', "empty-id"), ["not resolved"])
 
