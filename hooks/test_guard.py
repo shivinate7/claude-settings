@@ -2635,6 +2635,14 @@ sh("run-dir bypass: a `cd` inside an interpreter heredoc body never moves the ou
 sh("run-dir r3-bd: a body cd after a stray EOF line, a reset after the closer, denies as on main",
    "cat <<'EOF-1' > x.sh\nEOF\ncd " + slash(SUBJDIRTY) + "\nEOF-1\n" + VCS + " reset --hard HEAD",
    "deny", "shared-tree", cwd=SUBJCLEAN)
+# A `cd` into the dirty tree after a body written to a shell script. The body is kept in view and its closer
+# is dropped, so a second strip swallows the `cd` line and the reset runs in the clean tree. Each denies on main.
+sh("run-dir heredoc-kept-tail: a body written to run.sh, then a cd into a dirty tree and a hard reset, denies",
+   "cat > run.sh <<'EOT'\necho hi\nEOT\ncd " + slash(SUBJDIRTY) + " && " + VCS + " reset --hard HEAD",
+   "deny", "shared-tree", cwd=SUBJCLEAN)
+sh("run-dir heredoc-kept-tail: a body written to run.sh, then a cd into a repo whose branch holds the only copy of its work, then a branch delete, denies",
+   "cat > run.sh <<'EOT'\necho hi\nEOT\ncd " + slash(BRANCHREPO) + " && " + VCS + " branch -D unmerged-work",
+   "deny", "shared-tree", cwd=SUBJCLEAN)
 # PER PATH for `restore` and `checkout <path>`: the pathspec goes to git, and an empty answer
 # proves the write changes nothing. Both named paths sit in the SAME dirty tree.
 sh("subject: restoring a clean path inside a dirty tree changes nothing",
