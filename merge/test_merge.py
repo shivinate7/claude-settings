@@ -2766,9 +2766,9 @@ class CutLanes(Env):
         self.assertTrue(self.has_local("stray"), f"a local branch at no lane tip was deleted; out: {out!r}")
         self.assertNotIn("stray", out)
 
-    def test_deleteBranch_false_keeps_every_lane_and_the_round_check_reads_no_open_prs(self):
-        # With deleteBranch off, every lane branch stays and the run makes no open-PR read. The round-3 check reads the open PRs
-        # only to name a lane tip that has no record, and default records give each tip one (decision pr-review-record, the cost).
+    def test_deleteBranch_false_keeps_every_lane_and_reads_no_open_heads_when_each_tip_has_a_record(self):
+        # With deleteBranch off, every lane branch stays. This fixture makes no open_heads read, because every tip has a record.
+        # The round-3 check reads the open PRs only to name a lane tip that has no record, and default records give each tip one (decision pr-review-record, the cost).
         # cut_lanes, the only deletion read, runs only with deleteBranch on.
         put_base_config(self, json.dumps(dict(CONFIG, merge=dict(CONFIG["merge"], deleteBranch=False))))
         lane_batch(self, "lane1", "lane2")
