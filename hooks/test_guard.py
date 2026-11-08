@@ -10348,7 +10348,8 @@ RR_SEND_MATCHER_LABEL = "review-record-after-round: a settings.json matcher rout
 # `to` names a reviewer or design-reviewer spawn that has finished. `to` resolves to a spawn by its launch result's
 # toolUseResult.agentId, or by the spawn call's `name` input, and the latest spawn with that name wins. A background
 # spawn is running while its launch result is async_launched and no later record holds a finish notice for its id.
-# Any other result, a foreground spawn's included, is finished. A result of unknown shape asks. The refusal says to
+# Any other result, a foreground spawn's included, is finished. A result of unknown shape asks. An errored spawn never
+# ran, so it is skipped: the spawn before it governs, as review_record_hit skips it. The refusal says to
 # spawn a fresh reviewer and pass it the prior report (rule roles-resume-by-name). Each transcript also holds the
 # round's review record after its reviewer spawn, so review-record-after-round does not refuse first.
 FAMILY = "resume-finished-reviewer"
@@ -10368,6 +10369,11 @@ RF_STOPPED, RF_STOPPED_AGENT = "reviewer-pr17", "a8e4b1d7f2c90316"
 RF_FOREGROUND, RF_FOREGROUND_AGENT = "reviewer-pr18", "a0c7e5f9b3d16428"
 RF_ERRORED = "reviewer-pr19"
 RF_RUNNING, RF_RUNNING_AGENT = "reviewer-pr20", "a3b8d0e6f4c17295"
+RF_ERR_FINISHED, RF_ERR_FINISHED_AGENT = "reviewer-pr21", "a5d8c3f1e7b20964"
+RF_ERR_RUNNING, RF_ERR_RUNNING_AGENT = "reviewer-pr22", "a6e9d4a2f8c31075"
+RF_MALFORMED = "reviewer-pr23"
+# A record the reader cannot parse: a user record whose message is a string, not an object.
+RF_UNPARSED = json.dumps({"type": "user", "message": "a message that is a string, not a record"})
 RF_DIR = os.path.join(ROOT, "resumefinished")
 
 
@@ -10486,6 +10492,14 @@ RF_TRANSCRIPTS = {
     # A background reviewer whose finish notice says it is still running.
     "reviewer-notice-running": rr_session(rf_launch("r1", "reviewer", RF_RUNNING, RF_RUNNING_AGENT),
                                           rf_finish("r1", status="running"), rr_comment("c1", rr_record())),
+    # A reviewer that finished, then a spawn of the same name whose result is an error: that spawn never ran.
+    "finished-then-errored-spawn": rr_session(
+        rf_launch("r1", "reviewer", RF_ERR_FINISHED, RF_ERR_FINISHED_AGENT), rf_finish("r1"),
+        rr_comment("c1", rr_record()), rr_spawn_error("r2", "reviewer", name=RF_ERR_FINISHED)),
+    # A reviewer still running, then a spawn of the same name whose result is an error.
+    "running-then-errored-spawn": rr_session(
+        rf_launch("r1", "reviewer", RF_ERR_RUNNING, RF_ERR_RUNNING_AGENT), rr_comment("c1", rr_record()),
+        rr_spawn_error("r2", "reviewer", name=RF_ERR_RUNNING)),
     # No spawn at all: the empty state.
     "no-spawn": rr_session(),
 }
@@ -10557,10 +10571,105 @@ rf_ask("a reviewer whose launch result holds a bare string asks",
        {"to": RF_UNKNOWN, "message": RF_MSG}, rf_path("reviewer-unknown-result"))
 rf_ask("a reviewer whose notice names its id with no status asks",
        {"to": RF_NOTICE_AGENT, "message": RF_MSG}, rf_path("reviewer-notice-no-status"))
-rf_ask("a reviewer whose spawn result is an error asks",
-       {"to": RF_ERRORED, "message": RF_MSG}, rf_path("reviewer-spawn-errored"))
+# An errored spawn never ran, so it is skipped, as review_record_hit skips it. Its name resolves to nothing, or to the
+# spawn before it: the older finished spawn is refused, and the older running spawn is allowed.
+rf_allow("a reviewer whose spawn result is an error is allowed: that spawn never ran",
+         {"to": RF_ERRORED, "message": RF_MSG}, rf_path("reviewer-spawn-errored"))
+rf_refuse("a reviewer that finished, then a same-name spawn whose result is an error, is refused: the finished one governs",
+          {"to": RF_ERR_FINISHED, "message": RF_MSG}, rf_path("finished-then-errored-spawn"))
+rf_allow("a reviewer that runs, then a same-name spawn whose result is an error, is allowed: the running one governs",
+         {"to": RF_ERR_RUNNING, "message": RF_MSG}, rf_path("running-then-errored-spawn"))
 rf_ask("a reviewer whose finish notice says it is still running asks",
        {"to": RF_RUNNING_AGENT, "message": RF_MSG}, rf_path("reviewer-notice-running"))
+
+
+# The two checks below run one SendMessage each, in a config folder of their own, so each reads the guard.log rows
+# its own call wrote. They build their own folders and read no lazy fixture: see FIXTURELESS_CHECKS.
+RF_COST_LABEL = ("resume-finished-reviewer: one SendMessage to a finished reviewer reads the transcript once, "
+                 "across both readers")
+RF_UNPARSED_LABEL = ("resume-finished-reviewer: a transcript record the read cannot parse asks, and logs a noted "
+                     "line")
+
+
+def rf_guard_run(name, lines, to):
+    """(decision, reason, guard.log rows) for one SendMessage from the main session to `to`, judged over the transcript
+    `lines`. The folder named `name` is the config folder the call writes its guard.log into."""
+    folder = os.path.join(ROOT, "resumefinished-log", name)
+    write_transcripts({"transcript": lines}, folder)   # the one writer: it puts the merge tool's record marker in
+    path = os.path.join(folder, "transcript.jsonl")
+    log = os.path.join(folder, "guard.log")
+    if os.path.exists(log):
+        os.remove(log)
+    env = dict(os.environ)
+    for key in ("CLAUDE_CODE_REMOTE", "CLAUDE_CODE_SESSION_ID", "CLAUDE_CODE_REMOTE_SESSION_ID", "CLAUDE_PROJECT_DIR"):
+        env.pop(key, None)
+    env.update(ROLE_ENV)
+    env["CLAUDE_CONFIG_DIR"] = folder
+    env["CLAUDE_GUARD_ROOT_PID"] = str(os.getpid())   # the suite stands in for `claude`
+    body = {"tool_name": RR_BUILTIN_SEND, "tool_input": {"to": to, "message": RF_MSG}, "cwd": NOGIT,
+            "transcript_path": path}
+    got = subprocess.run([sys.executable, GUARD], input=json.dumps(body), capture_output=True, text=True,
+                         env=env, timeout=120)
+    if got.returncode != 0:
+        return "error", got.stderr.strip()[:200], []
+    decision, reason = read_decision(got.stdout)
+    return decision, reason, [line.split("\t") for line in _guard_log_lines(folder)]
+
+
+def rf_unparsed_case():
+    """A transcript with a record the reader cannot parse, after a finished reviewer: a SendMessage to that reviewer is
+    asked, not allowed, and one noted line names the rule. The control is the same transcript without that record: the
+    finished reviewer is refused there, so the record is the cause."""
+    base = rr_session(rr_spawn("r1", "reviewer", name=RF_MALFORMED), rr_comment("c1", rr_record()))
+    # The scope first: the unparsed line is a JSON object whose message is a string, the shape the reader fails on.
+    bad = json.loads(RF_UNPARSED)
+    if not isinstance(bad, dict) or not isinstance(bad.get("message"), str):
+        return False, "the unparsed fixture is not a record with a string message: %r" % (RF_UNPARSED[:80],)
+    decision, reason, _rows = rf_guard_run("unparsed-control", base, RF_MALFORMED)
+    if decision != "deny" or RF_RULE not in reason:
+        return False, "control: without the unparsed record, want a deny that names %s, got %r: %s" % (
+            RF_RULE, decision, reason[:80])
+    decision, reason, rows = rf_guard_run("unparsed", base + [RF_UNPARSED], RF_MALFORMED)
+    problems = []   # one cause per message: the verdict, then the noted line
+    if decision != "ask" or RF_RULE not in reason:
+        problems.append("with the unparsed record, want an ask that names %s, got %r: %s" % (
+            RF_RULE, decision, reason[:80]))
+    noted = [r for r in rows if len(r) == 6 and r[2] == "noted" and r[3].startswith(RF_RULE)]
+    if not noted:
+        problems.append("no noted %s line in guard.log: %r" % (RF_RULE, [r[2:4] for r in rows if len(r) > 3]))
+    if problems:
+        return False, "; ".join(problems)
+    return True, "the unparsed record asks, and one noted line names the rule"
+
+
+def rf_cost_case():
+    """One SendMessage from the main session to a finished reviewer opens the transcript once: review_record_hit and
+    resume_finished_hit share one read. The control is a send to main, which only the review reader judges: it opens the
+    transcript once too. The control and the deny are asserted before the count, so a count is read only where the
+    rule reached its read."""
+    folder = os.path.join(ROOT, "resumefinished-cost")
+    write_transcripts({"transcript": RF_TRANSCRIPTS["bg-reviewer-finished"]}, folder)
+    with open(os.path.join(folder, "transcript.jsonl"), encoding="utf-8") as handle:
+        lines = handle.read().splitlines()   # the lines with the record marker in, as lb_run writes them
+    control_got, control_reason, control = lb_run(
+        RR_BUILTIN_SEND, {"mode": "judge", "reading": LB_NORMAL}, {"to": "main", "message": RF_MSG},
+        own_env=ROLE_ENV, transcript=lines, spy=True)
+    if control_got == "error":
+        return False, control_reason
+    if control_got != "allow":
+        return False, "control: a send to main is %s, want allow: %s" % (control_got, control_reason[:80])
+    if control.get("opened", 0) != 1:
+        return False, "control: a send to main opened the transcript %d time(s), want 1" % control.get("opened", 0)
+    got, reason, side = lb_run(RR_BUILTIN_SEND, {"mode": "judge", "reading": LB_NORMAL},
+                               {"to": RF_REVIEW, "message": RF_MSG}, own_env=ROLE_ENV, transcript=lines, spy=True)
+    if got == "error":
+        return False, reason
+    if got != "deny" or RF_RULE not in reason:
+        return False, "%s, want a deny that names %s: %s" % (got, RF_RULE, reason[:80])
+    opened = side.get("opened", 0)
+    if opened != 1:
+        return False, "the transcript was opened %d time(s) by one SendMessage to a finished reviewer, want 1" % opened
+    return True, "one SendMessage to a finished reviewer opens the transcript once, as a send to main does"
 
 
 # =========================================================================== 5d. cite by id
@@ -14193,6 +14302,14 @@ FIXTURELESS_CHECKS.add(rr_cost_case)
 LOG_CHECKS_EXTRA.append((RR_SEND_MATCHER_LABEL, review_send_matcher_case))
 LOG_FAMILY[RR_SEND_MATCHER_LABEL] = "review-record-after-round"
 FIXTURELESS_CHECKS.add(review_send_matcher_case)
+# The resume-finished-reviewer checks (section 5j) are appended here too, for the same reason. Each builds its own
+# folders and reads no lazy fixture.
+LOG_CHECKS_EXTRA.append((RF_COST_LABEL, rf_cost_case))
+LOG_FAMILY[RF_COST_LABEL] = "resume-finished-reviewer"
+FIXTURELESS_CHECKS.add(rf_cost_case)
+LOG_CHECKS_EXTRA.append((RF_UNPARSED_LABEL, rf_unparsed_case))
+LOG_FAMILY[RF_UNPARSED_LABEL] = "resume-finished-reviewer"
+FIXTURELESS_CHECKS.add(rf_unparsed_case)
 for _name, _change in BUILDER_GREEN:
     if getattr(_change, "needs_link", False) and not LINKS_MADE:
         continue

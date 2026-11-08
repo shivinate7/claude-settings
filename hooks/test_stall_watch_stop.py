@@ -1023,6 +1023,33 @@ def finished_job_is_silent_with_shared_names_stale():
     return finished_job_is_silent_without_the_notice_tag("stale", "shared_names stale")
 
 
+@case
+def missing_reader_is_named_on_stderr_not_silent():
+    """N5. lint/_transcript.py absent beside the copy: a finished job prints nothing on stdout, exit 0, and the
+    Stop check prints one stderr line that names the missing reader, not silence. A control with lint beside the
+    copy prints nothing on stderr."""
+    base = new_dir()
+    output_file(base, "bnolint7200", 7200)
+    done = transcript(flagged("bnolint7200") + [notice("bnolint7200")])
+    root = new_dir()
+    lone = os.path.join(root, "hooks")
+    os.makedirs(lone)
+    for name in ("stall_watch.py", "shared_names.py"):
+        shutil.copy(os.path.join(HERE, name), os.path.join(lone, name))
+    rc, out, err = run_stop(done, base, module=os.path.join(lone, "stall_watch.py"))
+    problems = expect(rc == 0, f"lint missing: exit {rc}, want 0: {err.strip()[:200]}")
+    problems += expect(out.strip() == "", f"lint missing: a finished job prints on stdout: {out[:200]!r}")
+    lines = [line for line in err.splitlines() if line.strip()]
+    problems += expect(len(lines) == 1, f"lint missing: stderr holds {len(lines)} line(s), want one: {err[:300]!r}")
+    if len(lines) == 1:
+        problems += expect("_transcript.py" in lines[0],
+                           f"lint missing: the stderr line does not name _transcript.py: {lines[0][:300]!r}")
+    rc, out, err = run_stop(done, base, module=hooks_copy("real"))
+    problems += expect(rc == 0 and err.strip() == "",
+                       f"control: lint beside the copy, stderr is not empty: rc {rc}, {err[:200]!r}")
+    return problems
+
+
 # Row tables. Each row is one case body from above, and keeps its S-label.
 PREFIX_ROWS = (
     attachment_notice_for_longer_id_does_not_close_shorter_job,
