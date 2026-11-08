@@ -1,0 +1,11 @@
+{
+  "title": "Session start fetches origin on every branch, not only on the default branch, and reports how far behind the branch is",
+  "why": "Owner ask ask-mw8gfqzlws, 17:19 CST Nov 8. In a Banchi cloud thread on Nov 8, local origin/main was 78398f4 while GitHub's main was 40483e3 (seen in a pre-push refusal), so checks that compare main with origin/main compared two stale copies. Read at 17:23 CST on main 2ac382cc6: hooks/session_start.sh already fetches origin's default branch at start and resume, bounded at 2 s (CLAUDE_SETTINGS_FETCH_TIMEOUT), and warns when the branch is behind or the fetch did not run. But it runs only when the session sits ON the default branch, so a lane on its own branch never fetches. Unmeasured: whether Banchi loads this hook, and whether 2 s is enough in the cloud. Ask's shape: fetch with --prune when the folder is a git repo with an origin; quiet on success, one context line and exit 0 on failure; report (never move) a local main that differs from origin/main; report how far the current branch is behind origin/main; a fetch timeout (the ask says about 20 s; today's bound is 2 s); no checkout, restore, reset or stash; no change to existing guards. Extend session_start.sh's bounded_fetch, its one home; do not add a second hook. Red cases: a session on a non-default branch with a stale origin/main gets the new sha and a behind line; an offline session still starts.",
+  "note": "",
+  "phase": "now",
+  "owner": "claude-settings",
+  "lane": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB) to route",
+  "status": "todo",
+  "order": 845,
+  "updatedAt": "2026-11-08T17:20:00-06:00"
+}
