@@ -179,10 +179,9 @@
     },
     "shared-trees-confirm-before-write": {
       "mechanism": {
-        "kind": "guard",
-        "ref": "git-after-cd"
-      },
-      "test": "hooks/test_guard.py::git-after-cd: the 2026-11-07 incident, a cd joined by && then ; git writes, is refused"
+        "kind": "unmechanized",
+        "reason": "dropped: per-write token cost, no incident; owner ruling on PR 235"
+      }
     },
     "shared-trees-own-ports-data": {
       "mechanism": {

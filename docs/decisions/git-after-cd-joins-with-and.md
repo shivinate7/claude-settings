@@ -2,7 +2,16 @@
 
 ## The ruling
 
-Rule `git-after-cd` in `hooks/guard.py` refuses a git write that follows a `cd` joined to it by `;`, a newline or `||`. A write is a verb of `SESSION_HOME_GIT_VERBS`, `push`, or `branch` with `-f` or `--force`.
+Rule `git-after-cd` in `hooks/guard.py` refuses a git write that follows a `cd` joined to it by `;`, a newline or `||`.
+
+A write is one of these:
+
+- A verb of `SESSION_HOME_GIT_VERBS`, `push` or `update-ref`.
+- A file verb of `GIT_FILE_VERBS` (`rm`, `mv`).
+- A `fetch` that writes a branch (`fetch_moves_branch`).
+- A `branch` with a force, move or delete flag.
+
+A call whose argv names a read, such as `push --dry-run` or `push -n` (`read_verb`), is no write.
 
 1. When the cd fails, the shell stays in its folder and a `;` runs the next command there. The write then lands in the clone the session meant to leave alone.
 2. The rule reads `dir_before_segment` twice for each write. With `failed_cd_stays=True` a missing folder leaves the shell where it was. With it off, the folder is unknown. A write is refused when the first read gives a folder and the second gives none.
@@ -26,7 +35,10 @@ Limits:
 - A cd that fails only at run time, not at check time, is not seen. A folder that exists when the guard looks is trusted.
 - A relative `-C` joins onto the stranded folder, so it is refused; a `-C` that holds a variable is not read.
 - A segment the tokenizer cannot read, because a quote is cut in it, is unknown and passes. An interpreter's heredoc body is read this way.
-- An `sh -c` body is not walked (`guard-guards-mistakes-only`). PowerShell is out of scope.
+- A cd into a folder an earlier `;` segment creates is refused: `mkdir -p X; cd X; git commit` and `git worktree add ../x; cd ../x; git commit`. The folder is not there when the guard looks. The `&&` form passes.
+- A cd to a variable is not judged: `cd "$WT"; git push` passes. Failing closed would also refuse `cd "$REPO"; git status` in normal work. Debt `git-after-cd-variable-cd` holds the gap.
+- PowerShell is out of scope. The lane brief named Bash, and `failed_cd_stays` in `dir_before_segment` reads Bash joins.
+- An `sh -c` body is not walked (`guard-guards-mistakes-only`).
 
 Kind: process
 Home: rule:shared-trees-confirm-before-write

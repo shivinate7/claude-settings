@@ -388,7 +388,7 @@ while True:
         )
         _loading = "guard_frozen"
         from guard_frozen import (
-            FROZEN_REASON, MUTATING_COMMAND, _shell_write_hit, frozen_shell_hit, interpreter_write_hit, is_frozen,
+            FROZEN_REASON, GIT_FILE_VERBS, MUTATING_COMMAND, _shell_write_hit, frozen_shell_hit, interpreter_write_hit, is_frozen,
             is_project_config, project_config_shell_hit,
             PROJECT_FROZEN_FILES,  # noqa: F401  re-export: test_shared_names and test_wrappers read guard.PROJECT_FROZEN_FILES
         )
@@ -4669,17 +4669,27 @@ GIT_AFTER_CD_REASON = (
 )
 
 
+# The `branch` flags that move, rename or delete a ref (a force, a move, a delete).
+GIT_BRANCH_WRITE_FLAGS = ("-f", "--force", "-m", "-M", "--move", "-d", "-D", "--delete")
+
+
 def git_write_verb(verb: str, args) -> bool:
     """True when a git call changes a ref, the index or the files: the verbs of SESSION_HOME_GIT_VERBS,
-    plus `push`, plus `branch` with -f or --force. A `stash list`, a `stash show` and a `clean` that
-    deletes nothing only read."""
+    `push`, `update-ref`, the file verbs of GIT_FILE_VERBS, a `fetch` that writes a branch
+    (`fetch_moves_branch`), and `branch` with a force, move or delete flag. A call whose argv names a
+    read (`read_verb`: a dry run, help), a `stash list`, a `stash show` and a `clean` that deletes
+    nothing only read."""
+    if read_verb(verb, args):
+        return False
     if verb == "branch":
-        return any(arg in ("-f", "--force") for arg in args)
+        return any(arg in GIT_BRANCH_WRITE_FLAGS for arg in args)
+    if verb == "fetch":
+        return fetch_moves_branch(args)
     if verb == "stash":
         return args[:1] not in (["list"], ["show"])
     if verb == "clean":
         return clean_deletes_files(args)
-    return verb == "push" or verb in SESSION_HOME_GIT_VERBS
+    return verb in ("push", "update-ref") or verb in GIT_FILE_VERBS or verb in SESSION_HOME_GIT_VERBS
 
 
 def git_after_cd_hit(command: str, cwd: str) -> str:
