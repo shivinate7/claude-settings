@@ -1151,6 +1151,7 @@ STAMP_REASON = (
     "this message's header stamp is wrong for the clock: {why}. "
     "The time is {now}: re-stamp your own header with that time, then send it again. If the first line quotes "
     "someone else's time in header form, open the message with your own label first. "
+    "If the first line names a future time, such as a deadline or an ETA, move it off the first line. "
     "(decision local-time-central, sessions speak times in US Central)"
 )
 STAMP_AHEAD_WHY = "it is {off} minutes ahead, and the limit is " + str(STAMP_LIMIT_MINUTES)
