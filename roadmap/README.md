@@ -24,5 +24,8 @@ pre-commit hook runs it on the staged files. Every plain `python roadmap/build.p
 the branch added since `origin/roadmap`, read from the HEAD tree, because a `git pull --rebase` or a merge
 brings steps in without staging them. A refusal writes no page and exits 1, so the chain above stops before
 the amend and the push. With no HEAD or no `origin/roadmap` ref, the build prints one "gap check did not
-run" line and goes on. Cost per build: one `merge-base`, one `diff`, one `ls-tree`, one `cat-file --batch`,
-and one `git show` per base for each changed open step. It writes no file and starts no process that outlives the build.
+run" line and goes on. Cost per build: up to four git processes (rev-parse twice, merge-base, diff) when
+the branch changed no open step; when it did, add one `cat-file --batch` for the changed files, one `ls-tree` and
+one more `cat-file --batch` for the tree, and one `git show` per base for a keyless step or a shared key. It writes
+no file and starts no process that outlives the build. The check reads committed steps: after a refusal, fix,
+commit, then run the chain again from the second build.

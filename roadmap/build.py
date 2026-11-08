@@ -28,7 +28,7 @@ when no base holds its file. Done steps never block. Cost, on top of the note ch
 an open step file, one `git ls-files -s -z` and one more `git cat-file --batch` for the index files not yet
 read, plus one `git show` per base per staged open step; no file written. Every plain build also runs it on the
 commits since merge-base(HEAD, origin/roadmap), read from the HEAD tree, so a merge or rebase cannot bring in a
-shared key unchecked (roadmap/README.md).
+shared key unchecked; its cost is in roadmap/README.md.
 """
 import datetime
 import json
@@ -334,7 +334,7 @@ def main():
         print("gap check did not run: no HEAD or no origin/roadmap ref to compare against, "
               "so steps a merge or rebase brought in were not checked.")
     elif refused := staged_gap_refusals(merged):
-        print("Gap check failed, so no page was written. Fix the steps, then build again:")
+        print("Gap check failed, so no page was written. It reads committed steps: fix, commit, then build again:")
         print("\n".join("  " + r for r in refused))
         raise SystemExit(1)
     data = {"steps": load("steps"), "topics": load("topics"), "meta": load("meta")}
