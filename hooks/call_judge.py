@@ -792,33 +792,55 @@ def turn_commands(transcript_path):
 # The programs that execute a file given as an argument. A read (cat, grep, sed, git show, python3 -c) is not one: it
 # names the file and runs nothing, so it backs no forecast about the file. A versioned name (python3.12) is its base.
 RUN_COMMANDS = frozenset({"python3", "python", "node", "bash", "sh", "pytest"})
-COMMAND_SEPARATORS = frozenset({"&&", "||", ";", "|", "&"})
+# shlex gives a run of these characters as one token. Such a token ends a command when it holds a SEPARATOR_CHARS
+# character or is `&` or `&&`: `;`, `|`, `||`, `|&`, `(`, `)`, `$(`'s `(`, `<(` and a backtick. Any other one is a
+# redirect (`<`, `>`, `>>`, `>&`, `<<`), and the word after it is its target, which runs nothing.
+SHELL_PUNCTUATION = "();<>|&`"
+SEPARATOR_CHARS = "();|`"
+# Words that open a command without being it: `if python3 x; then`, `do python3 x`, `! python3 x`, `{ python3 x; }`.
+SHELL_KEYWORDS = frozenset({"if", "then", "else", "elif", "do", "while", "until", "!", "{"})
 # Programs that run the command after them. The words they take before it are skipped: an option, its value where it
 # has one, and for `timeout` the duration. `verdict`, `time` and `nohup` take none.
 WRAPPER_COMMANDS = frozenset({"verdict", "timeout", "env", "time", "nice", "nohup"})
 WRAPPER_VALUE_OPTIONS = frozenset({"-s", "-k", "-u", "-n", "-C", "--signal", "--kill-after", "--unset", "--adjustment"})
-# Shells run the string after `-c` as a command line; `-n` only parses the script.
+# Shells run the string after `-c` as a command line; `-n` only parses the script. Their `-e` is errexit, not code.
 SHELL_RUNNERS = frozenset({"bash", "sh"})
-# Interpreters whose `-c` / `-e` string is code, not a file. `python3 -m` runs a module, so only pytest is a run.
-CODE_STRING_FLAGS = frozenset({"-c", "-e"})
+# Per runner, the flags whose next word is code, not a file. node's `-c` is `--check`, so it is not here.
+CODE_STRING_FLAGS = {"python": frozenset({"-c"}), "node": frozenset({"-e", "--eval", "-p", "--print"})}
+# Per runner, the flags that parse or list the file and run none of it. node reads them only before the script, so
+# the arguments loop meets them first; pytest reads them anywhere, so its whole argument list is searched.
+CHECK_ONLY_FLAGS = {"node": frozenset({"--check", "-c"}), "pytest": frozenset({"--collect-only", "--co"})}
 PYTHON_VALUE_FLAGS = frozenset({"-W", "-X"})
+# unittest options that take a value. `discover` reads its start dir from -s (default ".") and its file pattern from
+# -p (default "test*.py").
+UNITTEST_VALUE_OPTIONS = frozenset({"-k", "-s", "-p", "-t", "--start-directory", "--pattern", "--top-level-directory"})
+UNITTEST_DEFAULT_PATTERN = "test*.py"
+# A here-document opener: `<<EOF`, `<<-'EOF'`, `<< "EOF"`, but not a `<<<` here-string. Its body lines are text, not
+# commands, unless a shell reads them (`bash <<EOF`).
+HEREDOC = re.compile(r"(?<!<)<<(?!<)-?\s*\\?(['\"]?)([A-Za-z_][\w-]*)\1")
+# How deep a quoted `$( )` or backtick is read inside another one.
+SUBSTITUTION_DEPTH = 3
 
 
-def runs_file(command, name):
-    """True when a Bash `command` runs the file `name`: a runner from RUN_COMMANDS (or `python3 -m pytest`) with the file
-    as an argument, a wrapper (WRAPPER_COMMANDS, `uv run`) around one, a `bash -c` string that does, or the file path as
-    the command. Each `&&`, `||`, `;` or `|` part is read alone, and a line shlex cannot parse is no run. A check that
-    runs nothing from the file (`bash -n`, `python3 -m py_compile`) is no run."""
+def runs_file(command, name, _depth=0):
+    """True when a Bash `command` runs the file `name`: a runner from RUN_COMMANDS (or `python3 -m pytest` / `-m
+    unittest`) with the file as an argument, a wrapper (WRAPPER_COMMANDS, `uv run`) or shell keyword around one, a
+    `bash -c` string, `$( )` or backtick that does, or the file path as the command. Each command between separators is
+    read alone, a redirect target is no argument, a here-document body is text unless a shell reads it, a quoted
+    string that spans lines is one word, and text shlex cannot parse is no run. A check that runs nothing from the file (`bash -n`, `node --check`, `pytest --co`,
+    `python3 -m py_compile`) is no run."""
+    import fnmatch
     import shlex
 
     def is_file(word):
         word = word.split("::")[0]
         return word == name or word.endswith("/" + name)
 
-    def strip_wrappers(part):
+    def strip_head(part):
+        """`part` from its command word on: shell keywords, `VAR=value` words and wrappers dropped."""
         while part:
             head = os.path.basename(part[0])
-            if re.match(r"\w+=", part[0]):
+            if part[0] in SHELL_KEYWORDS or re.match(r"\w+=", part[0]):
                 part = part[1:]
             elif head in WRAPPER_COMMANDS:
                 rest = part[1:]
@@ -835,8 +857,76 @@ def runs_file(command, name):
                 break
         return part
 
+    def split_line(line):
+        """The commands of one line, each a word list with redirects and their targets dropped, and the plain words;
+        None when shlex cannot parse it."""
+        try:
+            lexer = shlex.shlex(line, posix=True, punctuation_chars=SHELL_PUNCTUATION)
+            lexer.whitespace_split = True
+            tokens = list(lexer)
+        except ValueError:
+            return None
+        parts, part, words, skip = [], [], [], False
+        for token in tokens:
+            if token and all(char in SHELL_PUNCTUATION for char in token):
+                if any(char in SEPARATOR_CHARS for char in token) or token in ("&", "&&"):
+                    parts.append(part)
+                    part, skip = [], False
+                else:
+                    skip = True
+                continue
+            words.append(token)
+            if skip:
+                skip = False
+            else:
+                part.append(token)
+        parts.append(part)
+        return parts, words
+
+    def feeds_shell(prefix):
+        """True when the here-document opened after `prefix` is read by a bare shell, as in `bash <<EOF`."""
+        split = split_line(prefix)
+        part = strip_head(split[0][-1]) if split else []
+        return bool(part) and os.path.basename(part[0]) in SHELL_RUNNERS and all(
+            word.startswith("-") and not re.match(r"-[^-]*c", word) for word in part[1:])
+
+    def pytest_runs(args):
+        if any(word in CHECK_ONLY_FLAGS["pytest"] for word in args):
+            return False
+        index = 0
+        while index < len(args):
+            if args[index] == "-c":
+                index += 2
+                continue
+            if is_file(args[index]):
+                return True
+            index += 1
+        return False
+
+    def unittest_runs(args):
+        """A test name that is the file runs it. `discover`, or no test name, runs each file in the start dir that
+        matches the pattern."""
+        options, names, index = {}, [], 0
+        while index < len(args):
+            word = args[index]
+            if word in UNITTEST_VALUE_OPTIONS:
+                options[word] = args[index + 1] if index + 1 < len(args) else ""
+                index += 2
+                continue
+            if not word.startswith("-"):
+                names.append(word)
+            index += 1
+        if names and names[0] != "discover":
+            return any(is_file(word) for word in names)
+        positional = names[1:]
+        start = options.get("-s") or options.get("--start-directory") or (positional[0] if positional else ".")
+        pattern = options.get("-p") or options.get("--pattern") or (
+            positional[1] if len(positional) > 1 else UNITTEST_DEFAULT_PATTERN)
+        base = os.path.basename(name)
+        return fnmatch.fnmatch(base, pattern) and is_file(os.path.normpath(os.path.join(start, base)))
+
     def part_runs(part):
-        part = strip_wrappers(part)
+        part = strip_head(part)
         if not part:
             return False
         if is_file(part[0]):
@@ -844,25 +934,22 @@ def runs_file(command, name):
         runner = re.sub(r"^(python)[\d.]+$", r"\1", os.path.basename(part[0]))
         if runner not in RUN_COMMANDS:
             return False
-        args, index, pytest_run = part[1:], 0, runner == "pytest"
+        args, index = part[1:], 0
+        if runner == "pytest":
+            return pytest_runs(args)
         while index < len(args):
             word = args[index]
             if runner in SHELL_RUNNERS and re.match(r"-[^-]*c", word):
-                return index + 1 < len(args) and runs_file(args[index + 1], name)
+                return index + 1 < len(args) and runs_file(args[index + 1], name, _depth + 1)
             if runner in SHELL_RUNNERS and re.match(r"-[^-]*n", word):
                 return False
-            if pytest_run:
-                if word == "-c":
-                    index += 2
-                    continue
-            elif word in CODE_STRING_FLAGS:
+            if word in CODE_STRING_FLAGS.get(runner, ()) or word in CHECK_ONLY_FLAGS.get(runner, ()):
                 return False
             if runner == "python" and word == "-m":
-                if args[index + 1:index + 2] != ["pytest"]:
-                    return False
-                pytest_run = True
-                index += 2
-                continue
+                module, rest = args[index + 1:index + 2], args[index + 2:]
+                if module == ["pytest"]:
+                    return pytest_runs(rest)
+                return module == ["unittest"] and unittest_runs(rest)
             if runner == "python" and word in PYTHON_VALUE_FLAGS:
                 index += 2
                 continue
@@ -871,22 +958,36 @@ def runs_file(command, name):
             index += 1
         return False
 
+    heredoc, unclosed = None, ""
     for line in command.replace("\\\n", "").splitlines():
-        try:
-            lexer = shlex.shlex(line, posix=True, punctuation_chars=True)
-            lexer.whitespace_split = True
-            words = list(lexer)
-        except ValueError:
+        if heredoc:
+            delimiter, read_body = heredoc
+            if line.strip() == delimiter:
+                heredoc = None
+                continue
+            if not read_body:
+                continue
+        else:
+            opener = HEREDOC.search(line)
+            if opener:
+                heredoc = (opener.group(2), feeds_shell(line[:opener.start()]))
+        # A line with an open quote is joined to the next, so a multi-line quoted string stays one word and its
+        # inner lines are not read as commands.
+        line = unclosed + "\n" + line if unclosed else line
+        split = split_line(line)
+        if split is None:
+            unclosed = line
             continue
-        parts, part = [], []
-        for word in words:
-            if word in COMMAND_SEPARATORS:
-                parts.append(part)
-                part = []
-            else:
-                part.append(word)
-        parts.append(part)
+        unclosed = ""
+        parts, words = split
         if any(part_runs(part) for part in parts):
+            return True
+        # A word that still holds `$(` or a backtick came from a quoted string: read the command inside it. shlex
+        # drops the quote kind, so a word that sits in single quotes on the line, where bash runs nothing, is passed
+        # over. This is a bandaid: a word quoted in parts by both kinds can still be read.
+        if _depth < SUBSTITUTION_DEPTH and any(
+                ("$(" in word or "`" in word) and "'" + word + "'" not in line and runs_file(word, name, _depth + 1)
+                for word in words):
             return True
     return False
 
