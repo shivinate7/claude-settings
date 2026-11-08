@@ -1,11 +1,11 @@
 {
   "title": "Raise upstream: the Claude Code harness's worktree isolation refuses a git probe",
   "why": "Lane session_013NEJKzXJPDWrSRe3i1fGJd (#1593) met a refusal whose text comes from the Claude Code harness's worktree isolation, not from a claude-settings guard: a grep of main finds nothing (coordinator, 04:44 CST Nov 8).",
-  "note": "Fix: none — the refusal text is the Claude Code harness's worktree isolation, not a claude-settings guard (grep of main finds nothing). Until: 2026-11-21. Raise it upstream. Filed 04:46 CST Nov 8. False-alarm sighting (lane git-dash-c-other-checkout, #2323, via the coordinator 17:16 CST Nov 8): the harness worktree check counts \"git\" inside a branch name as a second git call, so it refuses `git push origin HEAD:git-dash-c-other-checkout`.",
+  "note": "Fix: none — the refusal text is the Claude Code harness's worktree isolation, not a claude-settings guard (grep of main finds nothing). Until: 2026-11-21. Raise it upstream. Filed 04:46 CST Nov 8. False-alarm sighting (lane git-dash-c-other-checkout, #2323, via the coordinator 17:16 CST Nov 8): the harness worktree check counts \"git\" inside a branch name as a second git call, so it refuses `git push origin HEAD:git-dash-c-other-checkout`. Sighting (lane encoded-retry-after-refusal, session_013NEJL37B9ZSA9toGnPeeVa, 17:28 CST Nov 8): in a session isolated in a worktree (EnterWorktree, .claude/worktrees/encoded-retry-merge), the harness refused three plain commands as \"too complex to verify that it stays inside the worktree\": `python3 merge/merge.py --lane-lint 2314` (one command, worktree root, nothing chained), `~/.claude/bin/verdict ~/.claude/bin/merge --lane-lint 2314`, and the same after a cd into the worktree. The command names no git call; the merge tool runs git inside. The same command ran from the main checkout.",
   "phase": "now",
   "status": "todo",
   "order": 608,
   "owner": "triage",
   "lane": "",
-  "updatedAt": "2026-11-08T17:17:00-06:00"
+  "updatedAt": "2026-11-08T17:28:00-06:00"
 }

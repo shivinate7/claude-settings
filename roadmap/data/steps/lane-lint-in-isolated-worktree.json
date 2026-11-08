@@ -2,10 +2,10 @@
   "title": "`merge --lane-lint` runs inside a worktree-isolated agent",
   "order": 266,
   "why": "`merge --lane-lint` is refused inside a worktree-isolated agent, so lane item-cite-carries-name (#1790) ran ci-job --lint and ste-changed instead, and runner 8 reruns lane lint (coordinator, 23:29 CST Nov 7). Other lane sessions ran it from their main checkout.",
-  "note": "Scope unchecked: triage did not find the refusal's source on main (merge/merge.py makes its own detached worktree for lane lint, line 2405). First prove the refusal happens only in an agent's isolated worktree, and name the guard or check that refuses it. Not a queue fix; waits under the item 384 hold. Slug from the coordinator; title by triage. Cause named (lane batch63-lint-b, coordinator 00:29 CST Nov 8): the refusal is Claude Code's own worktree check, not a repo hook. Covered by lane runner-repos-in-parallel, whose follow-up PR adds the brief-template line \"the lane orchestrator runs --lane-lint, never an isolated builder\".",
+  "note": "Scope unchecked: triage did not find the refusal's source on main (merge/merge.py makes its own detached worktree for lane lint, line 2405). First prove the refusal happens only in an agent's isolated worktree, and name the guard or check that refuses it. Not a queue fix; waits under the item 384 hold. Slug from the coordinator; title by triage. Cause named (lane batch63-lint-b, coordinator 00:29 CST Nov 8): the refusal is Claude Code's own worktree check, not a repo hook. Covered by lane runner-repos-in-parallel, whose follow-up PR adds the brief-template line \"the lane orchestrator runs --lane-lint, never an isolated builder\". Sighting (lane encoded-retry-after-refusal, session_013NEJL37B9ZSA9toGnPeeVa, 17:28 CST Nov 8): in a session isolated in a worktree (EnterWorktree, .claude/worktrees/encoded-retry-merge), the harness refused three plain commands as \"too complex to verify that it stays inside the worktree\": `python3 merge/merge.py --lane-lint 2314` (one command, worktree root, nothing chained), `~/.claude/bin/verdict ~/.claude/bin/merge --lane-lint 2314`, and the same after a cd into the worktree. The command names no git call; the merge tool runs git inside. The same command ran from the main checkout. Also on step harness-worktree-git-probe.",
   "phase": "next",
   "status": "doing",
   "owner": "coordinator",
   "lane": "session_013NEJKzGm25T6yUwjjibfGN",
-  "updatedAt": "2026-11-08T00:28:00-06:00"
+  "updatedAt": "2026-11-08T17:28:00-06:00"
 }
