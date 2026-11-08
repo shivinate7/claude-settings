@@ -3903,17 +3903,17 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
 from shared_names import DATA_TOOL  # noqa: E402  the one home of the tool name, shared with hooks/call_judge.py
 
 
-def data_tool_judge(tool_input, cwd=""):
+def data_tool_judge(tool_input, cwd="", session_id=None):
     """((rule, matched), writes): data_tool_hit's verdict and the item writes it judged, for the rule that
     reads the writes again (page-item-design)."""
     import question_form
-    return question_form.page_item_hit(tool_input, cwd)
+    return question_form.page_item_hit(tool_input, cwd, session_id)
 
 
-def data_tool_hit(tool_input, cwd=""):
+def data_tool_hit(tool_input, cwd="", session_id=None):
     """(rule, matched) for the first write of a waiting item that a rule refuses, else ("", ""). The write
     filter and the page check live in hooks/question_form.py, which hooks/call_judge.py also reads."""
-    return data_tool_judge(tool_input, cwd)[0]
+    return data_tool_judge(tool_input, cwd, session_id)[0]
 
 
 # ------------------------------------------------------------------ a waiting page behind main is not published
@@ -5190,7 +5190,7 @@ def judge(payload) -> None:
         return
 
     if tool == DATA_TOOL:
-        (rule, matched), item_writes = data_tool_judge(tool_input, cwd)
+        (rule, matched), item_writes = data_tool_judge(tool_input, cwd, session_id_of(payload))
         if rule:
             import question_form
         # One literal refuse() per rule: lint/rule_audit.py reads only string-literal rule ids.
