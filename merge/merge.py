@@ -3104,7 +3104,7 @@ def shallow_boundary(root):
     """-> the set of commit shas whose parents this clone cut off (its `shallow` file); empty for a full clone. Only a missing `shallow` file
     means full history. Any other read error, or a `.git` file that names no git dir, raises Stop naming the file: reading it as full history
     would read every unstamped record as old."""
-    # A file read, not a git call: the one `git log` is the whole cost of the cutover read (a test pins it). A linked worktree's `.git` is a
+    # A file read, not a git call: a `git log` per history is the whole cost of the cutover read. A linked worktree's `.git` is a
     # file naming its git dir, and the `shallow` file lives in that dir's common dir.
     path = os.path.join(root, ".git")
     try:
@@ -3127,16 +3127,17 @@ def shallow_boundary(root):
         why = "it names no git dir" if isinstance(e, IndexError) else f"{type(e).__name__}: {e}"
         raise Stop(f"cannot read {os.path.normpath(path)} to tell whether this clone is shallow ({why}). Repair it, then run the command again. " + REVIEW_CITE) from e
 
-def salt_cutover(root, ref):
+def salt_cutover(root, ref, where=None):
     """-> (stamp, git_log_exit, out) of the first first-parent commit on `ref` in `root` whose merge/merge.py holds `REVIEW_STAMP_SALT =`: its committer time,
     UTC as `YYYY-MM-DDTHH:MM:SSZ`, or None when the read ran and found none. A non-zero exit gives (None, exit, output): the caller names it. A shallow clone whose
-    first salt commit is the boundary raises Stop, since an older salt commit may exist and the cutover is unknown."""
+    first salt commit is the boundary raises Stop, since an older salt commit may exist and the cutover is unknown. `where` names the history in that Stop
+    (default `ref`), for a caller whose ref says nothing, such as the tool checkout's HEAD."""
     c, out = git(root, "log", "--first-parent", "--reverse", "-S", "REVIEW_STAMP_SALT =", "--format=%H %ct", ref, "--", "merge/merge.py")
     if c:
         return None, c, out
     first = out.split()[:2]
     if first and first[0] in shallow_boundary(root):  # its parent is missing, so an older salt commit may exist: the cutover is unknown
-        raise Stop(f"{ref} is a shallow history, too shallow to read the review stamp cutover: the first commit holding the salt, {first[0][:9]}, is the shallow boundary. "
+        raise Stop(f"{where or ref} is a shallow history, too shallow to read the review stamp cutover: the first commit holding the salt, {first[0][:9]}, is the shallow boundary. "
                    "Run `git fetch --unshallow origin`, then run the command again. " + REVIEW_CITE)
     return (datetime.datetime.fromtimestamp(int(first[1]), datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
             if len(first) == 2 and first[1].isdigit() else None), 0, out
@@ -3148,7 +3149,7 @@ def tool_stamp_since():
     The salt commit is fixed history, and a checkout that runs code reading the salt holds it, so this fetches nothing. One read per tool root in a process."""
     tool = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
     if tool not in _tool_stamp_since:
-        stamp, c, out = salt_cutover(tool, "HEAD")
+        stamp, c, out = salt_cutover(tool, "HEAD", where=f"the merge tool's checkout {tool}")
         if c:
             raise Stop(f"could not read the merge tool's source checkout {tool} to find the review stamp cutover (git log exited {c}): {out[:300]}. "
                        "Repair that checkout, then run the command again. " + REVIEW_CITE)
@@ -3158,9 +3159,9 @@ def tool_stamp_since():
 def review_stamp_since(root, base):
     """-> the committer time, UTC as `YYYY-MM-DDTHH:MM:SSZ`, of the first first-parent commit on origin/<default branch> whose merge/merge.py holds
     `REVIEW_STAMP_SALT =`, or None when the read ran and found none. It reads the default branch (host_default_branch), never the PR's `base`: the stamp
-    merged into the default branch, and a stacked base may lack that commit, which would read every unstamped record as old. A repo whose history never
-    touched merge/merge.py has no salt commit to find, so the cutover comes from the merge tool's own source checkout (tool_stamp_since): the stamp rule then
-    holds in every repo, not only claude-settings. A read that cannot run
+    merged into the default branch, and a stacked base may lack that commit, which would read every unstamped record as old. When the caller's repo has no
+    salt commit, whatever its history touched, the cutover comes from the merge tool's own source checkout (tool_stamp_since): the stamp rule then holds
+    in every repo, not only claude-settings (coordinator item 386). A read that cannot run
     (git errors, no origin/<default branch> ref, a shallow clone whose first salt commit is the boundary, or a shallow file that cannot be read)
     raises Stop naming it, never None: an unknown cutover must not read every unstamped record as old
     (rule verification-report-unknown-reads). The caller fetches first (fetch_default_branch). One call per (root, `base`) in a process. A record
@@ -3173,11 +3174,7 @@ def review_stamp_since(root, base):
         if c:
             raise Stop(f"could not read origin/{default} to find the review stamp cutover (git log exited {c}): {out[:300]}. Fetch origin, then run the command again. " + REVIEW_CITE)
         if stamp is None:
-            c, out = git(root, "log", "-1", "--format=%H", f"origin/{default}", "--", "merge/merge.py")
-            if c:
-                raise Stop(f"could not read origin/{default} to find the review stamp cutover (git log exited {c}): {out[:300]}. Fetch origin, then run the command again. " + REVIEW_CITE)
-            if not out.strip():
-                stamp = tool_stamp_since()
+            stamp = tool_stamp_since()
         _stamp_since[key] = stamp
     return _stamp_since[key]
 
