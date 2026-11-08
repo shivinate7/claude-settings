@@ -13872,6 +13872,7 @@ HK_RETIRE_FORMS = (
     ("python3 check.py brief.md", "brief.md"),
     ("python3 -m json.tool cfg.json", "cfg.json"),
     ("sudo cat f", "f"),
+    ("sudo -u root cat f", "f"),
     ("timeout 5 wc f", "f"),
     ("ls f | xargs wc", "f"),
 )
@@ -14001,14 +14002,14 @@ for _label, _form in HK_FORM_CONTROLS:
 
 
 # CLASS 7. Pins for forms that had no case. A run of a body after `then` or `do` denies, since the run executes the
-# body. Stdin piped to a named script is data, as an operand after the script is, so the pipe into check.py
-# allows. Each has a plain-body control beside it (P2).
+# body. A body piped into a named script denies, as `cat f | python3 check.py` does. Each has a plain-body control
+# beside it (P2).
 HK_PIN_FORMS = (
     ("python3 -W ignore f", "f", "python3 -W ignore f", "deny"),
     ("a pipe into ssh -p 22 host", "f", "cat f | ssh -p 22 host", "deny"),
     ("if ./f; then :; fi", "f", "if ./f; then :; fi", "deny"),
     ("do ./f in a for loop", "f", "for i in 1; do ./f; done", "deny"),
-    ("a pipe into python3 check.py", "f", "cat f | python3 check.py", "allow"),
+    ("a pipe into python3 check.py", "f", "cat f | python3 check.py", "deny"),
 )
 for _label, _file, _call, _want in HK_PIN_FORMS:
     _body = "cat > %s <<'EOF'\ngh pr create --title x\nEOF\n%s" % (_file, _call)
@@ -14019,6 +14020,39 @@ for _label, _file, _call, _want in HK_PIN_FORMS:
         sh("heredoc-keep: pin, a body in %s run by %s, allows" % (_file, _label), _body, "allow", cwd=NOGIT)
     sh("heredoc-keep: control, a plain body in %s run by %s, allowed" % (_file, _label),
        "cat > %s <<'EOF'\nhello\nEOF\n%s" % (_file, _call), "allow", cwd=NOGIT)
+
+
+# CLASS 8. A run of a written file behind a wrapper. A wrapper's value word (`timeout 5`) is not the command, but a
+# path that follows it (`./tool`) is still a run of the file a body wrote. Each body is written to `tool`, then run
+# through one wrapper. Each run has a plain-body control beside it (P2).
+HK_WRAPPED_RUNS = (
+    "sudo ./tool diff",
+    "time ./tool cat x",
+    "env ./tool head",
+    "ls f | xargs ./tool wc",
+    "timeout 5 ./tool wc",
+)
+HK_WRAPPED_BODIES = (
+    ("a destructive delete", "rm -rf ./*", "destructive-delete"),
+    ("a gh pr create line", "gh pr create --title x", "draft-pr"),
+)
+for _run in HK_WRAPPED_RUNS:
+    for _body_label, _body, _rule in HK_WRAPPED_BODIES:
+        _call = "cat > tool <<'EOF'\n%s\nEOF\n%s" % (_body, _run)
+        if _rule == "draft-pr":
+            sh("heredoc-keep: %s written to tool, then %s, denies" % (_body_label, _run), _call, "deny", _rule,
+               cwd=NOGIT, carries=DRAFT_REMEDY, lacks=DRAFT_LACKS)
+        else:
+            sh("heredoc-keep: %s written to tool, then %s, denies" % (_body_label, _run), _call, "deny", _rule,
+               cwd=NOGIT)
+    sh("heredoc-keep: control, a plain body written to tool, then %s, allowed" % _run,
+       "cat > tool <<'EOF'\nhello\nEOF\n%s" % _run, "allow", cwd=NOGIT)
+# A find that runs a written file on each match is a run of that file.
+sh("heredoc-keep: a written file holding gh pr create --title x, run by find -exec ./f, denies",
+   "cat > f <<'EOF'\ngh pr create --title x\nEOF\nfind . -exec ./f {} \\;",
+   "deny", "draft-pr", cwd=NOGIT, carries=DRAFT_REMEDY, lacks=DRAFT_LACKS)
+sh("heredoc-keep: control, a plain body in f run by find -exec ./f, allowed",
+   "cat > f <<'EOF'\nhello\nEOF\nfind . -exec ./f {} \\;", "allow", cwd=NOGIT)
 
 
 # ---- lane-closes-after-records: the two checks that are log checks, not cases. The override is a story over
