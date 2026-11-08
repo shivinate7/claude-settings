@@ -162,6 +162,9 @@ class FakeHost:
     def head_state(self, n):
         return self.state
 
+    def review_comments(self, since):  # the repo's review record bodies: none on this fake repo, so a plain record reads no earlier one
+        return {}
+
     def base_state(self, base, flows):  # main's latest run is green unless a case says so (RedMainBrake)
         return "green", ""
 
@@ -13934,6 +13937,154 @@ class ReviewFixKeepsRounds(ReviewChainFixture):
         rc, out, err, _ = self.run_chain(self.NEWEST, comments, rounds=("1:reviewer:sonnet:PASS", "1:design-reviewer:sonnet:FAIL"))
         self.assert_refused(rc, out, err)
         self.assert_names(err, "Round 1", "design-reviewer")
+
+class ReviewRoundOneReset(ReviewChainFixture):
+    """A fresh round 1 may not reset the round count of a pull request (rule roles-review-cap-three, decision pr-review-record). An earlier record
+    whose top round n is below 3, with a FAIL line in round n, sets the floor to n + 1, unless a record on the pull request from that one on has a
+    Fix check line. A new record without a Fix check line whose last round is below the floor is refused where it is written: exit 2, nothing on
+    stdout, and `run round N` on stderr. `merge --reviewed` reads such a newest record open, with round N owed in its why. Each red case sits beside
+    its controls, which pass on the base and after the change."""
+
+    FAIL_ONE = ("Round 1: reviewer, haiku, FAIL",)
+    PASS_ONE = ("Round 1: reviewer, haiku, PASS",)
+    FAIL_TWO = FAIL_ONE + ("Round 2: reviewer, haiku, FAIL",)
+    MIXED_ONE = ("Round 1: reviewer, haiku, FAIL", "Round 1: design-reviewer, opus, PASS")  # a round with a FAIL line and a PASS line
+
+    def earlier_fail(self):
+        """The earlier record: a round-1 FAIL on the earlier head, with no Fix check line."""
+        return record_text(head=self.EARLIER, rounds=self.FAIL_ONE)
+
+    def write(self, earlier, rounds):
+        """`merge 7 --review-record` on the live head, with the `rounds` (N:ROLE:MODEL:VERDICT each) and the earlier record bodies `earlier`, oldest
+        first, on pull request 7. -> (rc, out, err, host)."""
+        host = self.record_host(*(review_comment(i, 7, body) for i, body in enumerate(earlier, 1)))
+        argv = ["7", "--review-record", "--kind", "normal", "--guard", "no", "--head", self.LIVE]
+        for rnd in rounds:
+            argv += ["--round", rnd]
+        rc, out, err = self.run_args(*argv, host=host)
+        return rc, out, err, host
+
+    def assert_refused_for(self, rc, out, err, text):
+        """A plain record refused where it is written: exit 2, nothing on stdout, no traceback, and stderr holds `text`."""
+        self.assertEqual(rc, 2, "the fresh record was not refused with exit 2:\n" + out + err)
+        self.assertEqual(out, "", "the refused record printed to stdout:\n" + out)
+        self.assertNotIn("Traceback", err)
+        self.assertIn(text, err, f"the refusal does not say {text!r}:\n" + err)
+
+    def read_line(self, *bodies):
+        """`merge --reviewed` over pull request 7 at the live head, with the record `bodies`, oldest first. -> the line for #7."""
+        host = PullsHost([batch_pull(7, self.LIVE)], {}, comments=[review_comment(i, 7, body) for i, body in enumerate(bodies, 1)])
+        rc, out, err = self.run_args("--reviewed", host=host)
+        self.assertEqual(rc, 0, out + err)
+        return list_line(self, out, 7)
+
+    def test_a_fresh_round_one_after_a_round_one_fail_is_refused_with_run_round_two(self):
+        # scope first: a round-2 PASS after the same FAIL is accepted, so the refusal below is for the round count
+        rc, out, err, _ = self.write([self.earlier_fail()], ("1:reviewer:haiku:FAIL", "2:reviewer:haiku:PASS"))
+        self.assertEqual(rc, 0, "control: a round-2 record after a round-1 FAIL was refused:\n" + out + err)
+        for rounds in (("1:reviewer:haiku:FAIL",), ("1:reviewer:haiku:PASS",)):
+            with self.subTest(rounds=rounds):
+                rc, out, err, _ = self.write([self.earlier_fail()], rounds)
+                self.assert_refused_for(rc, out, err, "run round 2")
+
+    def test_a_round_with_a_fail_line_and_a_pass_line_floors_the_fresh_round_one(self):
+        # the rule reads a FAIL line, not every line: the design reviewer's PASS beside the FAIL does not lift the floor
+        earlier = [record_text(head=self.EARLIER, rounds=self.MIXED_ONE)]
+        rc, out, err, _ = self.write(earlier, ("1:reviewer:haiku:FAIL", "2:reviewer:haiku:PASS"))
+        self.assertEqual(rc, 0, "control: a round-2 record after the mixed round 1 was refused:\n" + out + err)
+        rc, out, err, _ = self.write(earlier, ("1:reviewer:haiku:PASS",))
+        self.assert_refused_for(rc, out, err, "run round 2")
+
+    def test_a_fresh_record_after_two_failed_rounds_is_refused_with_run_round_three(self):
+        earlier = [record_text(head=self.EARLIER, rounds=self.FAIL_TWO)]
+        rc, out, err, _ = self.write(earlier, ("1:reviewer:haiku:FAIL", "2:reviewer:haiku:FAIL", "3:reviewer:opus:PASS"))
+        self.assertEqual(rc, 0, "control: a record that reaches round 3 after two FAILs was refused:\n" + out + err)
+        for rounds in (("1:reviewer:haiku:FAIL",), ("1:reviewer:haiku:PASS",), ("1:reviewer:haiku:FAIL", "2:reviewer:haiku:FAIL"),
+                       ("1:reviewer:haiku:FAIL", "2:reviewer:haiku:PASS")):
+            with self.subTest(rounds=rounds):
+                rc, out, err, _ = self.write(earlier, rounds)
+                self.assert_refused_for(rc, out, err, "run round 3")
+
+    def test_a_fresh_round_one_pass_after_a_round_one_fail_reads_open_with_round_two_owed(self):
+        # scope first: the newest record alone reads done, so the open line comes from the round floor
+        newest = record_text(head=self.LIVE, rounds=self.PASS_ONE)
+        self.assertEqual(record_state(self, newest, self.LIVE), "done", "scope: the newest record alone does not read done")
+        line = self.read_line(self.earlier_fail(), newest)
+        self.assertTrue(line.startswith(f"#7 feat7 {self.LIVE[:9]} open: "), "the fresh round 1 does not read open:\n" + line)
+        self.assertRegex(ReviewedList.why_of(line), r"\bround 2\b", "the why does not name round 2 as owed:\n" + line)
+
+    def test_a_fresh_round_one_fail_after_a_round_one_fail_reads_open_with_round_two_owed(self):
+        newest = record_text(head=self.LIVE, rounds=self.FAIL_ONE)
+        self.assertEqual(record_state(self, newest, self.LIVE), "open", "scope: the newest record alone does not read open")
+        line = self.read_line(self.earlier_fail(), newest)
+        self.assertTrue(line.startswith(f"#7 feat7 {self.LIVE[:9]} open: "), "the fresh round 1 does not read open:\n" + line)
+        self.assertRegex(ReviewedList.why_of(line), r"\bround 2\b", "the why does not name round 2 as owed:\n" + line)
+
+    def test_a_plain_record_reads_the_comment_list_once(self):
+        cases = (("a round-2 record after a round-1 FAIL", [self.earlier_fail()], ("1:reviewer:haiku:FAIL", "2:reviewer:haiku:PASS")),
+                 ("a fresh round 1 with no earlier record", [], ("1:reviewer:haiku:PASS",)))
+        for label, earlier, rounds in cases:
+            with self.subTest(label=label):
+                rc, out, err, host = self.write(earlier, rounds)
+                self.assertEqual(rc, 0, "scope: the record was not printed:\n" + out + err)
+                reads = [rel for rel, _ in host.list_calls if rel == "issues/comments"]
+                self.assertEqual(len(reads), 1, f"a plain record read the comment list {len(reads)} times, not once")
+
+    def test_a_round_two_after_a_round_one_fail_reads_done(self):
+        # control: a round-2 record is not short of the floor, so it reads by its own rules
+        newest = record_text(head=self.LIVE, rounds=self.FAIL_ONE + ("Round 2: reviewer, haiku, PASS",))
+        line = self.read_line(self.earlier_fail(), newest)
+        self.assertTrue(line.startswith(f"#7 feat7 {self.LIVE[:9]} done: "), "the round-2 record does not read done:\n" + line)
+
+    def test_a_round_one_fail_with_a_fix_check_pass_after_a_round_one_fail_reads_done(self):
+        # control: a record with a Fix check line is not floored by this rule
+        newest = record_text(head=self.LIVE, rounds=self.FAIL_ONE, fix=(fix_check_line(verdict="PASS", head=self.EARLIER),))
+        line = self.read_line(self.earlier_fail(), newest)
+        self.assertTrue(line.startswith(f"#7 feat7 {self.LIVE[:9]} done: "), "the record with a passed fix check does not read done:\n" + line)
+
+    def test_a_fix_check_record_reads_the_comment_list_once(self):
+        # control, green on the base: the fix-check write reads the list once, the same count a plain record must keep
+        rc, out, err, host = self.run_chain(self.NEWEST, self.pair(None))
+        self.assertEqual(rc, 0, "scope: the fix-check record was not printed:\n" + out + err)
+        reads = [rel for rel, _ in host.list_calls if rel == "issues/comments"]
+        self.assertEqual(len(reads), 1, f"a fix-check record read the comment list {len(reads)} times, not once")
+
+    def test_a_fresh_round_one_after_an_earlier_fix_check_pass_is_accepted(self):
+        # the FAIL record carries a passed fix check; then a later record carries one. Either keeps the fresh round 1 accepted
+        own = record_text(head=self.EARLIER, rounds=self.FAIL_ONE, fix=(fix_check_line(verdict="PASS", head=self.OTHER),))
+        rc, out, err, _ = self.write([own], ("1:reviewer:haiku:PASS",))
+        self.assertEqual(rc, 0, "a fresh round 1 after a FAIL record with a passed fix check was refused:\n" + out + err)
+        self.assertNotIn("run round", err)
+        later = record_text(head=self.NEWEST, rounds=self.FAIL_ONE, fix=(fix_check_line(verdict="PASS", head=self.EARLIER),))
+        rc, out, err, _ = self.write([self.earlier_fail(), later], ("1:reviewer:haiku:PASS",))
+        self.assertEqual(rc, 0, "a fresh round 1 after a later record with a passed fix check was refused:\n" + out + err)
+        self.assertNotIn("run round", err)
+
+    def test_a_fresh_round_one_after_an_earlier_failed_or_wide_fix_check_is_accepted(self):
+        # a FAIL or WIDE fix check on the earlier record is not this rule's floor, so the fresh round 1 is written as it is today
+        for verdict in ("FAIL", "WIDE"):
+            with self.subTest(verdict=verdict):
+                own = record_text(head=self.EARLIER, rounds=self.FAIL_ONE, fix=(fix_check_line(verdict=verdict, head=self.OTHER),))
+                rc, out, err, _ = self.write([own], ("1:reviewer:haiku:PASS",))
+                self.assertEqual(rc, 0, f"a fresh round 1 after a {verdict} fix check was refused:\n" + out + err)
+                self.assertNotIn("run round", err)
+
+    def test_a_fresh_round_one_after_a_record_that_reached_round_three_is_not_refused_by_this_rule(self):
+        # a record at round 3 sets no floor of this rule, whatever its verdict, so only the absence of the round text is pinned here
+        for rounds in (REVIEW_FAILED_THREE, REVIEW_PASSED_THREE, REVIEW_PARTIAL_THREE):
+            with self.subTest(final=rounds[-1]):
+                rc, out, err, _ = self.write([record_text(head=self.EARLIER, rounds=rounds)], ("1:reviewer:haiku:PASS",))
+                self.assertNotIn("run round", err, "a record at round 3 set the round floor:\n" + err)
+
+    def test_a_fresh_round_one_after_an_all_pass_record_is_accepted(self):
+        rc, out, err, _ = self.write([record_text(head=self.EARLIER, rounds=self.PASS_ONE)], ("1:reviewer:haiku:PASS",))
+        self.assertEqual(rc, 0, "a fresh round 1 after an all-PASS record was refused:\n" + out + err)
+        self.assertIn(REVIEW_MARKER, out)
+
+    def test_a_fresh_round_one_with_no_earlier_record_is_accepted(self):
+        rc, out, err, _ = self.write([], ("1:reviewer:haiku:PASS",))
+        self.assertEqual(rc, 0, "a fresh round 1 on a pull request with no earlier record was refused:\n" + out + err)
+        self.assertIn(REVIEW_MARKER, out)
 
 class ReviewedList(ReviewEnv):
     """`merge --reviewed` over scripted reads. PullsHost serves the open pulls, the check runs of each head and the repo-wide comments. The
