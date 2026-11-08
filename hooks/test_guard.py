@@ -13716,7 +13716,8 @@ sendto_refuse("a read of a product path, then Fix the guard, is refused to a tes
               lacks=("hooks/guard.py",))
 # Round 1 findings, message-role. Each pins the shared reader that brief-role-scope also calls (`message_edit_paths`).
 # An allow twin passes its transcript, since no transcript means no judge at all.
-# Passes: a noun (`guard fix`, `bug fix`, `rule update`) or a participle before `in`/`at` makes a path a locator.
+# Passes: a noun (`guard fix`, `bug fix`, `rule update`) names the change. A participle right before `at` makes a path a
+# locator. Lane ruling 2026-11-08 13:03 CST, process-only: a participle before `in` makes no locator.
 sendto_allow("a message adding red cases for the guard fix in a product file, to a test-author, is allowed",
              SENDTO_AUTHOR, "Add red cases for the guard fix in hooks/guard.py to tests/test_x.py.", T_SENDTO_AUTHOR)
 sendto_allow("a message adding red cases for the bug fix in a product file, to a test-author, is allowed",
@@ -13725,8 +13726,11 @@ sendto_allow("a message adding red cases for the rule update in a product file, 
              SENDTO_AUTHOR, "Add red cases for the rule update in hooks/guard.py to tests/test_x.py.", T_SENDTO_AUTHOR)
 sendto_allow("a message fixing the failure reported at a test path, to a builder, is allowed",
              SENDTO_BUILDER, "Fix the failure reported at hooks/test_guard.py:120.", T_SENDTO_BUILDER)
-sendto_allow("a message fixing the failure shown in a test path, to a builder, is allowed",
-             SENDTO_BUILDER, "Fix the failure shown in hooks/test_guard.py:120.", T_SENDTO_BUILDER)
+# Refused: a participle before `in` is no locator (lane ruling 2026-11-08 13:03 CST, process-only). The test path is the
+# object of the fix, and a builder is not sent a test edit.
+sendto_refuse("a message fixing the failure shown in a test path, to a builder, is refused, naming test-author",
+              SENDTO_BUILDER, "Fix the failure shown in hooks/test_guard.py:120.", T_SENDTO_BUILDER, "test-author",
+              lacks=("hooks/test_guard.py",))
 # Refused: `verdict` at a noun position hides the product path after it. The refusal names a builder.
 sendto_refuse("a message fixing the verdict in a product file, to a test-author, is refused, naming builder",
               SENDTO_AUTHOR, "Fix the verdict in hooks/guard.py so the case passes.", T_SENDTO_AUTHOR, "builder",
@@ -13734,11 +13738,36 @@ sendto_refuse("a message fixing the verdict in a product file, to a test-author,
 sendto_refuse("a message adding a red case, then making it pass by fixing a product file, is refused to a test-author, naming builder",
               SENDTO_AUTHOR, "Add a red case to tests/test_x.py, then make it pass by fixing hooks/guard.py.",
               T_SENDTO_AUTHOR, "builder", lacks=("hooks/guard.py",))
-# Refused: `append` is not an edit verb, so the product path after it is never read as an edit. The .md form is
+# Refused: `append` is an edit verb, so the product path after it is its object. The .md form is
 # brief-role only: message-role never refuses a Markdown path to a test-author.
 sendto_refuse("a message appending a line to a product file, to a test-author, is refused, naming builder",
               SENDTO_AUTHOR, "Append a line to hooks/guard.py for the case.", T_SENDTO_AUTHOR, "builder",
               lacks=("hooks/guard.py",))
+# Refused: a verb after a determiner or a preposition is a noun only when no path follows it. Each message edits a product
+# file, so a test-author is refused, and the refusal names a builder.
+sendto_refuse("a message saying once the cases are red fix a product file, to a test-author, is refused, naming builder",
+              SENDTO_AUTHOR, "Once the cases are red fix hooks/guard.py.", T_SENDTO_AUTHOR, "builder",
+              lacks=("hooks/guard.py",))
+sendto_refuse("a message saying for each red case update a product file, to a test-author, is refused, naming builder",
+              SENDTO_AUTHOR, "For each red case in tests/test_x.py update hooks/guard.py.", T_SENDTO_AUTHOR, "builder",
+              lacks=("hooks/guard.py",))
+sendto_refuse("a message saying in a product file fix the bug, to a test-author, is refused, naming builder",
+              SENDTO_AUTHOR, "In hooks/guard.py fix the bug.", T_SENDTO_AUTHOR, "builder", lacks=("hooks/guard.py",))
+sendto_refuse("a message saying per the record update a product file, to a test-author, is refused, naming builder",
+              SENDTO_AUTHOR, "Per the record in docs/decisions/x.md update hooks/guard.py.", T_SENDTO_AUTHOR, "builder",
+              lacks=("hooks/guard.py",))
+# Refused: a participle before `at` is a locator, but `found` is not one of the five, and before `in` none is
+# (lane ruling 2026-11-08 13:03 CST, process-only). The product path is the object.
+sendto_refuse("a message fixing the bug found in a product file, to a test-author, is refused, naming builder",
+              SENDTO_AUTHOR, "Fix the bug found in hooks/guard.py.", T_SENDTO_AUTHOR, "builder", lacks=("hooks/guard.py",))
+sendto_refuse("a message fixing the exception raised in a product file, to a test-author, is refused, naming builder",
+              SENDTO_AUTHOR, "Fix the exception raised in hooks/guard.py.", T_SENDTO_AUTHOR, "builder",
+              lacks=("hooks/guard.py",))
+sendto_refuse("a message fixing the failure reported in a product file, to a test-author, is refused, naming builder",
+              SENDTO_AUTHOR, "Fix the failure reported in hooks/guard.py.", T_SENDTO_AUTHOR, "builder",
+              lacks=("hooks/guard.py",))
+sendto_refuse("a message fixing the bug found at a product file, to a test-author, is refused, naming builder",
+              SENDTO_AUTHOR, "Fix the bug found at hooks/guard.py.", T_SENDTO_AUTHOR, "builder", lacks=("hooks/guard.py",))
 # Controls. A run and a test edit are a test-author's own work, so both stay allowed.
 sendto_allow("a message running verdict on a test file, to a test-author, is allowed",
              SENDTO_AUTHOR, "Run verdict python3 hooks/test_guard.py.", T_SENDTO_AUTHOR)
@@ -13846,16 +13875,19 @@ brief_allow("a test-author brief that adds red cases for the bug fix in a produc
             "test-author", "Add red cases for the bug fix in hooks/guard.py to tests/test_x.py.")
 brief_allow("a test-author brief that adds red cases for the rule update in a product file is allowed",
             "test-author", "Add red cases for the rule update in hooks/guard.py to tests/test_x.py.")
-# Passes: a participle between the noun and `at` or `in` makes the test path a locator. A builder is not briefed to edit
-# a test, so the path must not be read as its object. The builder assert case above is the control: it stays asked.
+# Passes: a participle right before `at` makes the test path a locator. The builder assert case above is the control: it
+# stays asked. Lane ruling 2026-11-08 13:03 CST, process-only: a participle before `in` makes no locator, so the test path
+# is the object, and a builder is not briefed to edit a test.
 brief_allow("a builder brief that fixes a failure reported at a test path is allowed",
             "builder", "Fix the failure reported at hooks/test_guard.py:120.")
-brief_allow("a builder brief that fixes a failure raised in a test path is allowed",
-            "builder", "Fix the failure raised in hooks/test_guard.py:120.")
+brief_ask("a builder brief that fixes a failure raised in a test path is asked, naming test-author",
+          "builder", "Fix the failure raised in hooks/test_guard.py:120.", "to a test-author",
+          lacks=("hooks/test_guard.py", "test_guard.py"))
 brief_allow("a builder brief that fixes a failure shown at a test path is allowed",
             "builder", "Fix the failure shown at hooks/test_guard.py:120.")
-brief_allow("a builder brief that fixes a failure logged in a test path is allowed",
-            "builder", "Fix the failure logged in hooks/test_guard.py:120.")
+brief_ask("a builder brief that fixes a failure logged in a test path is asked, naming test-author",
+          "builder", "Fix the failure logged in hooks/test_guard.py:120.", "to a test-author",
+          lacks=("hooks/test_guard.py", "test_guard.py"))
 brief_allow("a builder brief that fixes a failure seen at a test path is allowed",
             "builder", "Fix the failure seen at hooks/test_guard.py:120.")
 # Asked: `verdict` at a noun position hides the product path after it, so the brief goes to a builder.
@@ -13866,8 +13898,8 @@ brief_ask("a test-author brief that fixes the verdict in a product file is asked
 brief_ask("a test-author brief that adds a red case, then makes it pass by fixing a product file, is asked, naming builder",
           "test-author", "Add a red case to tests/test_x.py, then make it pass by fixing hooks/guard.py.",
           "to a builder", lacks=("hooks/guard.py",))
-# Asked: `append` is not an edit verb in the reader, so a Markdown path after it is not read as an edit. A test-author
-# owns no Markdown, so the brief goes to a record-writer.
+# Asked: `append` is an edit verb in the reader, so the Markdown path after it is its object. A test-author owns no
+# Markdown, so the brief goes to a record-writer.
 brief_ask("a test-author brief that appends a line to a notes file is asked, naming record-writer",
           "test-author", "Append a line to docs/debts/notes.md for the case.", "to a record-writer",
           lacks=("docs/debts/notes.md", "notes.md"))
@@ -13876,6 +13908,26 @@ brief_allow("a test-author brief that runs verdict on a test file is allowed",
             "test-author", "Run verdict python3 hooks/test_guard.py.")
 brief_allow("a test-author brief that fixes the failing case in a test file is allowed",
             "test-author", "Fix the failing case in hooks/test_guard.py.")
+# Asked: the same forms as the message block, sent to a test-author as a brief. Each edits a product file, so the ask goes
+# to a builder. Lane ruling 2026-11-08 13:03 CST covers the participle forms.
+brief_ask("a test-author brief saying once the cases are red fix a product file is asked, naming builder",
+          "test-author", "Once the cases are red fix hooks/guard.py.", "to a builder", lacks=("hooks/guard.py",))
+brief_ask("a test-author brief saying for each red case update a product file is asked, naming builder",
+          "test-author", "For each red case in tests/test_x.py update hooks/guard.py.", "to a builder",
+          lacks=("hooks/guard.py",))
+brief_ask("a test-author brief saying in a product file fix the bug is asked, naming builder",
+          "test-author", "In hooks/guard.py fix the bug.", "to a builder", lacks=("hooks/guard.py",))
+brief_ask("a test-author brief saying per the record update a product file is asked, naming builder",
+          "test-author", "Per the record in docs/decisions/x.md update hooks/guard.py.", "to a builder",
+          lacks=("hooks/guard.py",))
+brief_ask("a test-author brief fixing the bug found in a product file is asked, naming builder",
+          "test-author", "Fix the bug found in hooks/guard.py.", "to a builder", lacks=("hooks/guard.py",))
+brief_ask("a test-author brief fixing the exception raised in a product file is asked, naming builder",
+          "test-author", "Fix the exception raised in hooks/guard.py.", "to a builder", lacks=("hooks/guard.py",))
+brief_ask("a test-author brief fixing the failure reported in a product file is asked, naming builder",
+          "test-author", "Fix the failure reported in hooks/guard.py.", "to a builder", lacks=("hooks/guard.py",))
+brief_ask("a test-author brief fixing the bug found at a product file is asked, naming builder",
+          "test-author", "Fix the bug found at hooks/guard.py.", "to a builder", lacks=("hooks/guard.py",))
 
 
 # The crash pin. The guard's main fails open on any exception, so the hook shows a silent allow for a message whose
