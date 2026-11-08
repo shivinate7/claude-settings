@@ -2180,9 +2180,9 @@ def owed_round(num, bodies, sha):
 
 def head_in_history(root, head, tip):
     """True when commit `head` is `tip` or an ancestor of it, False when it is a commit of the clone that is not, and False when the clone does not hold `head`
-    (git exit 128 that names it: not in this batch's history). Any other git failure raises, so the caller refuses as unknown. In a shallow clone an exit 1 is
-    unknown too, because the clone may have cut the history between the two commits. The shallow probe is hooks/git_reads.is_shallow, the one home of it, and it runs only on that exit.
-    One local git read, and a second on exit 1."""
+    (git exit 128 that names it: not in this batch's history) in a full clone. Any other git failure raises, so the caller refuses as unknown. In a shallow clone an exit 1 or
+    an exit 128 is unknown too, because the clone may have cut the history between the two commits or lack the head. The shallow probe is hooks/git_reads.is_shallow, the one home of it, and it runs only on those exits.
+    One local git read, and a second on exit 1 or 128."""
     if root is None:
         raise RuntimeError("no checkout to read the history from")
     import git_reads  # hooks/git_reads.py, on sys.path from the top of this file
@@ -2191,8 +2191,12 @@ def head_in_history(root, head, tip):
         if git_reads.is_shallow(root) is False:
             return False
         raise RuntimeError(f"the clone is shallow or its depth is unknown, so it may have cut the history between {head[:9]} and {tip[:9]}")
-    if c == 0 or c == 128 and head in out:
-        return c == 0
+    if c == 128 and head in out:
+        if git_reads.is_shallow(root) is False:
+            return False
+        raise RuntimeError(f"the clone is shallow or its depth is unknown, so it may lack {head[:9]} because it cut the history")
+    if c == 0:
+        return True
     raise RuntimeError(f"git merge-base failed on {head[:9]} (exit {c}): {(out.splitlines() or ['no output'])[-1]}")
 
 def stale_guard_round(num, bodies, live, new_to_batch, own=False):
@@ -2214,10 +2218,10 @@ def stale_guard_round(num, bodies, live, new_to_batch, own=False):
         return ("newhead", f"has a done record for head {rec['head'][:9]}, and the new head has no fix check and no new review") if own else None
     if not (own or new_to_batch(rec["head"])):
         return None
-    if state == "held":  # the same kinds and remedies as owed_round
-        return "held", f"changes a guard or check and is held for the owner ({why}; its newest record is for head {rec['head'][:9]})"
+    if state == "held":  # the same kinds and remedies as owed_round; the caller adds "changes a guard or check and" to each kind but newhead
+        return "held", f"is held for the owner ({why}; its newest record is for head {rec['head'][:9]})"
     if rec["fix"] and rec["fix"][3] != "PASS":
-        return "fix", f"changes a guard or check and its fix check failed ({why}; its newest record is for head {rec['head'][:9]})"
+        return "fix", f"its fix check failed ({why}; its newest record is for head {rec['head'][:9]})"
     return "round", f"the third round is owed on the new head (its newest record is for head {rec['head'][:9]})"
 
 def oldest_new_since(root, base_ref, head):
