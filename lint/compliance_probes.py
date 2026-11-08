@@ -278,6 +278,10 @@ def shoot_config(root):
         return None, "%s: sizes is not a list of widths" % SHOOT_CONFIG
     if not isinstance(themes, list) or not themes or not all(t in ("light", "dark") for t in themes):
         return None, "%s: themes holds light and dark only" % SHOOT_CONFIG
+    # touchWidths: null is unset and [] is valid (no width gets touch), as in bin/shoot readConfig; false and 0 are not unset.
+    touch = data.get("touchWidths")
+    if touch is not None and (not isinstance(touch, list) or not all(isinstance(w, int) and not isinstance(w, bool) and w >= 1 for w in touch)):
+        return None, "%s: touchWidths is a list of widths" % SHOOT_CONFIG
     if "ignoreHTTPSErrors" in data and not isinstance(data["ignoreHTTPSErrors"], bool):
         return None, "%s: ignoreHTTPSErrors is true or false" % SHOOT_CONFIG
     for route in routes:
