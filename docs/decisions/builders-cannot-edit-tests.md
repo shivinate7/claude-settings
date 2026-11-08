@@ -21,13 +21,13 @@ An unreadable state logs `role-diff-unread` and is allowed. A second stop with a
 
 - **Refused.** Each commit the builder made (`commit`, `commit (amend)`, `commit (merge)`) that HEAD still holds, against its first parent, and each merge git committed itself (reflog `merge <x>` or `pull ...` with `Merge made by`, as `-X ours|theirs` or `-s ours` makes). A fast-forward is not read. A merge commit is measured against git's own merge of its parents (`git merge-tree`), so only what the builder resolved or added counts. A test path that both sides changed and the builder resolved is refused, whichever side it kept. A write after a finished rebase is refused too, such as main's bytes written back over a test file the rebase replayed (coordinator, 2026-11-01 23:10 CST). Also the working tree and its untracked files against HEAD. While a merge is in progress, they are measured against git's own merge of HEAD and MERGE_HEAD.
 - **Logged only.** A replay the builder resolved or chose: a hand-resolved cherry-pick, a revert, a rebase squash, fixup or continue. The working tree while a replay is in progress (a cherry-pick, revert, squash or rebase). A path that a rebase replayed and that holds the upstream side again, as the builder left it during the rebase (a conflict it resolved to the upstream side).
-- **Not read.** A plain cherry-pick, rebase pick or `am`, a clean merge, a reset, a checkout and a pull. Each brings other people's commits.
+- **Not read.** A plain cherry-pick, rebase pick or `am`, a reset, a checkout and a fast-forward pull. Each brings other people's commits. A clean merge or pull that makes a merge commit is read, and adds nothing, since it equals git's own merge. A `merge` or `pull` merge commit that cannot be measured (three parents, or no `merge-tree` answer) is skipped and logged `role-diff-unread`; every other entry and the working tree are still judged.
 
 **Known gap.** A squash merge or a `cherry-pick -n`, once committed, is a plain own commit: git removes its marker at the commit. Its test change is refused at push and stop.
 
 **Cost.** Git reads only, plus the objects `merge-tree` writes. No timer and no long-lived process. Each commit, push and stop costs one reflog read, three rev-parse calls, one diff and one untracked list. Commits of the builder's own add one rev-list, and one parent read and one diff each. A merge commit or a merge in progress adds one `merge-tree`. Each rebase in the reflog adds one ancestry check, and two diffs while HEAD holds it. A log line is written only for an offence, a logged change or an unread state. `merge-tree --write-tree` needs git 2.38 or newer: older git reads a merge as unread.
 
-**Measure.** `GUARD_FAMILY=builder-refuse hooks/test_guard.py`: 111 of 111 `builder-refuse` cases pass on this tip.
+**Measure.** `GUARD_FAMILY=builder-refuse hooks/test_guard.py`: 143 of 143 `builder-refuse` cases pass on this tip.
 
 ## Roles
 
