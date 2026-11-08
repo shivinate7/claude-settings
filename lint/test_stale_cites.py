@@ -351,6 +351,18 @@ class StaleCase(unittest.TestCase):
             commit(repo)
         return self.make_range(base_files(base_notes, extra=extra), change), flagged
 
+    def rows_range(self, rows, head_extra=None):
+        """A range that rewrites DECISION, a decision record, as `rows` ((text, flagged) pairs) over a base of a heading
+        and the merge/merge.py fixture. `head_extra` ({path: text}) is written at head too. Returns (range, flagged lines)."""
+        text, flagged = rows_text(rows)
+
+        def change(repo):
+            write(repo, DECISION, text)
+            for path, body in (head_extra or {}).items():
+                write(repo, path, body)
+            commit(repo)
+        return self.make_range(base_files(extra={DECISION: "# Heading\n", MERGE_PY: LANE_LINT}), change), flagged
+
     def mjs_and_removal(self, notes, at_head=False):
         """The range touches hooks/lib.mjs and removes a .py file, so Markdown is read. `notes` is committed at base, or
         at head when `at_head`, so its cites are added lines."""
@@ -873,10 +885,12 @@ class PinTests(unittest.TestCase):
 
 class CostTests(StaleCase):
     """The check's cost is a contract. A range that removes or renames no path, and changes only Markdown outside
-    the rule files, starts three git processes and reads no blob, or one more when it adds a governed line: STALE005
-    reads the added lines once. A removed or renamed path makes the check read the
-    tracked Markdown files. So does a name that a touched .py no longer defines. A changed file that is not Markdown
-    also reads the repo's decision records for its Home line, even when nothing was removed. No run writes a file."""
+    the rule files, starts three git processes and reads no blob. It starts one more, a cat-file, when an added line
+    holds a verb or route word a reader judges: STALE005's list on any governed page, and STALE009's looser list
+    (CODE_VERB_WORD, where `check`, `run` and `read` count) on an added decision record. A removed or renamed path
+    makes the check read the tracked Markdown files. So does a name that a touched .py no longer defines. A changed
+    file that is not Markdown also reads the repo's decision records for its Home line, even when nothing was removed.
+    No run writes a file."""
 
     def run_traced(self, rng):
         rc, out, commands = self.run_traced_commands(rng)
@@ -972,6 +986,28 @@ class CostTests(StaleCase):
         listing = [command for command in commands if command.startswith("ls-tree")]
         self.assertTrue(listing, commands)
         self.assertIn("docs/decisions", listing[0], commands)
+
+    def test_a_decision_line_with_a_stale009_verb_and_no_stale005_verb_reads_its_blob_and_starts_one_more_git_process(self):
+        """`runs` is a STALE009 verb and no STALE005 verb, so the decision line's head blob is read: four starts, not
+        three. The same line on a page outside the decisions folder reads no blob, which pins the extra start to the
+        decision reader."""
+        line = "The check runs weekly."
+        module = load_module_under_test()
+        self.assertIsNotNone(module.CODE_VERB_WORD.search(line))  # scope: STALE009's pre-check reads the line
+        self.assertIsNone(module.VERB.search(line))  # scope: no STALE005 verb in it
+        self.assertIsNone(module.ROUTE_WORD.search(line))  # scope: and no route word
+        rng, _ = self.rows_range([("- " + line, False)])
+        self.assertIn(DECISION, touched(rng))  # scope: the range adds the line to a decision record
+        rc, out, commands = self.run_traced_commands(rng)
+        self.assertEqual(rc, 0, out)
+        self.assertEqual([(p, n) for p, n, _ in code_claims(out)], [(DECISION, 1)], out)  # the read is STALE009's
+        self.assertEqual(sorted(command.split()[0] for command in commands),
+                         ["cat-file", "diff", "merge-base", "rev-parse"], commands)
+        page, _ = self.route_range([("- " + line, False)])  # the twin: the same line on a page outside decisions
+        self.assertNotIn(DECISION, touched(page))
+        rc, out, commands = self.run_traced_commands(page)
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(sorted(command.split()[0] for command in commands), ["diff", "merge-base", "rev-parse"], commands)
 
     def test_a_lone_touched_mjs_starts_four_git_processes_with_the_reports_ls_tree_and_prints_no_unknown_line(self):
         """Guards the code-only pin: the report's backing scan reuses the reads home_report already makes (the decisions
@@ -1082,8 +1118,41 @@ class CostTests(StaleCase):
 
 
 class ForeignFileTests(StaleCase):
-    """A cite of a JavaScript or shell name prints as unknown, not as a finding, and only when Markdown is already
-    read. A lone touched .mjs passes silently."""
+    """A cite of a JavaScript or shell name is never a finding. On an added line outside the decision folder it prints
+    unknown only for a file the range touched, and only when Markdown is read; a lone touched .mjs passes silently.
+    A claim sentence of a decision record prints its unknown line whether or not the file is touched
+    (CodeClaimReader.judge)."""
+
+    def test_a_decision_claim_citing_an_absent_or_untouched_js_file_prints_one_unknown_line_each_and_no_finding(self):
+        names = [("hooks/gone.mjs", "run"), ("hooks/gone.cjs", "run"), ("hooks/gone.js", "run"), ("hooks/gone.ts", "run"),
+                 ("hooks/gone.sh", "run"), ("hooks/lib.mjs", "refusals")]  # the last file is present and untouched
+        rows = [("- The check refuses a push to main, as `%s` `%s` shows." % pair, False) for pair in names]
+        rng, _ = self.rows_range(rows)
+        at_head = git(rng.repo, "ls-tree", "-r", "--name-only", rng.head).split()
+        for path, _ in names[:-1]:
+            self.assertNotIn(path, at_head)  # scope: the file is absent at head
+        self.assertIn("hooks/lib.mjs", at_head)  # scope: the file is present at head
+        self.assertEqual(touched(rng), {DECISION})  # scope: no cited file is in the range
+        rc, out = self.run_check(rng)
+        self.assertEqual(rc, 0, out)
+        self.assertIn("stale-cites: PASS", out)
+        self.assertEqual(parse(out), [], out)
+        self.assertEqual(code_claims(out), [], out)  # a foreign cite is no missing cite, so STALE009 is silent
+        self.assertEqual(unknown_lines(out), [
+            "stale-cites: unknown, %s:%d: %s %s: JavaScript and shell names are not checked" % (DECISION, n, path, name)
+            for n, (path, name) in enumerate(names, 1)
+        ], out)
+
+    def test_an_added_notes_line_citing_an_absent_or_untouched_js_file_prints_no_unknown_line_and_no_finding(self):
+        """ForeignReader names a cite only for a file the range touched, so these two lines print nothing. STALE010's
+        docstring says a .mjs cite keeps the unknown line: this pins the code as it is, and the gap is for a builder."""
+        rng, _ = self.route_range([("- see `hooks/gone.mjs` `run`", False), ("- see `hooks/lib.mjs` `refusals`", False)])
+        self.assertNotIn("hooks/gone.mjs", git(rng.repo, "ls-tree", "-r", "--name-only", rng.head).split())  # scope: absent
+        self.assertEqual(touched(rng), {NOTES})  # scope: the cited .mjs file is not in the range
+        rc, out = self.run_check(rng)
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(parse(out), [], out)
+        self.assertEqual(unknown_lines(out), [], out)
 
     def test_a_touched_mjs_cited_beside_another_removal_prints_one_unknown_line(self):
         rng = self.mjs_and_removal("# Notes\n\n- `hooks/lib.mjs` `refusals`\n")
@@ -2912,18 +2981,6 @@ class CodeClaimTests(StaleCase):
     bound at head is STALE010 (NameCiteTests), not a report here. The exit code never changes (decision
     source-prose-lint-ships-dark)."""
 
-    def rows_range(self, rows, head_extra=None):
-        """A range that rewrites DECISION as `rows` ((text, flagged) pairs) over a base of a heading and the
-        merge/merge.py fixture. `head_extra` ({path: text}) is written at head too. Returns (range, flagged lines)."""
-        text, flagged = rows_text(rows)
-
-        def change(repo):
-            write(repo, DECISION, text)
-            for path, body in (head_extra or {}).items():
-                write(repo, path, body)
-            commit(repo)
-        return self.make_range(base_files(extra={DECISION: "# Heading\n", MERGE_PY: LANE_LINT}), change), flagged
-
     def assert_code_claims(self, rng, expected):
         """The exit is 0, the verdict is PASS and no finding prints. The STALE009 report lines are exactly `expected`,
         as (path, line) pairs. Returns the output."""
@@ -2944,6 +3001,16 @@ class CodeClaimTests(StaleCase):
         rng, _ = self.rows_range(rows)
         self.assertIn(DECISION, touched(rng))
         self.assert_code_claims(rng, [(DECISION, 1)])
+
+    def test_a_claim_citing_a_node_id_of_a_name_bound_at_head_is_silent_and_the_uncited_twin_still_fires(self):
+        """A test node id is a STALE002 cite too (`lint/x.py::check`), so a claim sentence that cites a name bound at
+        head is no missing cite. The uncited twin in the same range still reports."""
+        node = "The check refuses a push to main, as `lint/x.py::check` shows."
+        rows = [("- " + node, False), ("- " + UNCITED, True)]
+        rng, _ = self.rows_range(rows)
+        self.assertEqual(binding_kind(CODE["lint/x.py"], "check"), "def")  # scope: the cited name is bound at head
+        self.assertIn(DECISION, touched(rng))
+        self.assert_code_claims(rng, [(DECISION, 2)])
 
     def test_a_name_the_range_adds_to_its_file_is_bound_at_head_so_a_cite_to_it_is_silent(self):
         rows = [("- " + INCIDENT, True), ("- " + NEW_CITED, False)]
@@ -3106,7 +3173,8 @@ INCIDENT_LINE = (  # the line PR #1553 added to docs/debts/notes.md, verbatim
 class NameCiteTests(StaleCase):
     """STALE010, range mode, a finding. An ADDED line that cites a Python name in a STALE002 form, or a node id, is
     flagged when its file is absent at head or the name is not bound there at head (names_in). A cite of a JavaScript
-    or shell file keeps the unknown form. A fenced cite counts as prose, as STALE002 reads fences (its docstring)."""
+    or shell file keeps the unknown form, and a cite of a .py file that does not parse at head is one unknown line with
+    no finding. A fenced cite counts as prose, as STALE002 reads fences (its docstring)."""
 
     def test_the_incident_line_is_flagged_while_its_name_is_unbound_and_silent_once_it_is_bound(self):
         rng, _ = self.route_range([(INCIDENT_LINE, True)], extra={STALE_FIXTURE: LACKS_CODE_CLAIM})
@@ -3178,6 +3246,23 @@ class NameCiteTests(StaleCase):
         ]
         rng, _ = self.route_range(rows)
         self.assert_flags(rng, [(NOTES, 2, "STALE010"), (NOTES, 3, "STALE010")])
+
+    def test_a_cite_of_a_py_file_that_does_not_parse_at_head_prints_one_unknown_line_and_stops_nothing(self):
+        """The file is committed at base and not touched, so only the cite reads it. Its cites are unknown, once, and the
+        exit stays 0 for them. A dead cite in the same range still prints its finding: the run does not stop."""
+        broken = "def keep(:\n    return 1\n"
+        rows = [("- (lint/broken.py check)", False), ("- `lint/broken.py` `check`", False), ("- (lint/x.py gone_ten)", True)]
+        rng, flagged = self.route_range(rows, extra={"lint/broken.py": broken})
+        with self.assertRaises(SyntaxError):
+            ast.parse(broken)  # scope: the file does not parse
+        self.assertNotIn("lint/broken.py", touched(rng))  # scope: the range does not touch the file
+        self.assertIn(NOTES, touched(rng))
+        rc, out = self.run_check(rng)
+        self.assertEqual(rc, 1, out)
+        self.assertEqual([(p, n, c) for p, n, c, _ in parse(out)], [(NOTES, flagged[0], "STALE010")], out)
+        self.assertEqual(unknown_lines(out), [
+            "stale-cites: unknown, lint/broken.py does not parse at head; cites of its names were not checked",
+        ], out)
 
     def test_a_cite_of_a_javascript_file_prints_unknown_and_no_stale010_and_a_python_cite_beside_it_is_flagged(self):
         js = "# Notes\n\n- `hooks/lib.mjs` `refusals`\n"
