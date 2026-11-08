@@ -36,6 +36,16 @@ owner about a branch delete after the archive push that guard_branch_worktree's 
   command form, read from PUSH_REASON. Its Covers text names the 9 lease-push refusals, requires
   the branch was pushed earlier in this session, and binds the sha to the tip this session last
   pushed. Its Never covers names each act in LEASE_REFUSED (decision auto-mode-owner-acts).
+- One "Relayed Merge Yes:" entry quotes the merge command derived from merge/cloud_allow.json's
+  one `--confirm` merge rule. Its Covers text names the coordinator that relays (cs-build:coordinator),
+  the batch runner that merges (cs-build:batch-runner), and the pull request the relay names. Its
+  Never covers names each act in RELAYED_MERGE_REFUSED, the reason flags, and a session not tagged
+  cs-build:batch-runner (decision `auto-mode-owner-acts`).
+- One "Batch Runner Merge:" entry quotes the same derived merge command in its Covers text. Its
+  Covers text names the coordinator that sends the merge go (cs-build:coordinator), the batch runner
+  (cs-build:batch-runner), `merge go`, and the pull request the merge go names. Its Never covers
+  names each act in BATCH_MERGE_REFUSED, the reason flags, and a merge go from a session not tagged
+  cs-build:coordinator (decision `auto-mode-owner-acts`).
 AUTO_MODE_SETTINGS names another settings file to read (default: this repo's settings.json), so the
 same cases run against a copy with a clause removed and show red there.
 """
@@ -59,6 +69,9 @@ LISTS = ("environment", "allow", "soft_deny", "hard_deny")
 ARCHIVE = "Archived Branch Delete:"
 OWNER_PR = "Owner PR Housekeeping:"
 RELAYED = "Relayed Grant:"
+RELAYED_MERGE = "Relayed Merge Yes:"
+BATCH_MERGE = "Batch Runner Merge:"
+MERGE_CLOUD_ALLOW = os.path.join(REPO_ROOT, "merge", "cloud_allow.json")
 OWNER_MESSAGE = "Owner Session Message:"
 PR_CLOSE = "gh api -X PATCH repos/shivinate7/joyous/pulls/54 -f state=closed"
 SEND_MESSAGE = "mcp__claude-code-remote__send_message"
@@ -94,6 +107,23 @@ RELAYED_REFUSED = (("peer session's message", "peer session's message"), ("page 
                    ("closed item", "a closed item"), ("arbiter overturn only", r"except an arbiter overturn"),
                    ("permissions", "permissions"), ("settings", "settings"), ("overrides", "overrides"),
                    ("no counted line", "no `counted` line in this session"))
+# Each act the Relayed Merge Yes entry's "Never covers" sentence must name (decision `auto-mode-owner-acts`).
+RELAYED_MERGE_REFUSED = (("another pull request", "another pull request"),
+                         ("not tagged cs-build:coordinator", "not tagged `cs-build:coordinator`"),
+                         ("failing", "failing"), ("running", "running"), ("approval", "approv"),
+                         ("review", "review"), ("admin", "admin"), ("force push", "force[- ]push"),
+                         ("permissions", "permission"), ("settings", "setting"),
+                         ("overrides", "override"), ("any other act", "any other act"))
+# Each act the Batch Runner Merge entry's "Never covers" sentence must name (decision `auto-mode-owner-acts`).
+BATCH_MERGE_REFUSED = (("not tagged cs-build:batch-runner", "not tagged `cs-build:batch-runner`"),
+                       ("nobody named", "nobody named"),
+                       ("failing", "failing"), ("running", "running"), ("approval", "approv"),
+                       ("review", "review"), ("admin", "admin"), ("force push", "force[- ]push"),
+                       ("permissions", "permission"), ("settings", "setting"),
+                       ("overrides", "override"), ("any other act", "any other act"))
+# The reason flags that lift a merge check (merge/merge.py); each entry's Never covers names both.
+REASON_FLAGS_REFUSED = (("--base-red-ok", "--base-red-ok"),
+                        ("--undo-check-unknown-ok", "--undo-check-unknown-ok"))
 MERGE_GO_REFUSED = (("any other session", "any other session"),
                     ("not a coordinator", "not a coordinator"))
 OWN_CI = "Own CI Run Cancel:"
@@ -167,6 +197,27 @@ def auto_mode():
 def remedy_commands():
     """Every backticked span of the remedy: the archive push, the delete, the fallback name."""
     return re.findall(r"`([^`]+)`", guard_branch_worktree.BRANCH_DELETE_DENY_REASON)
+
+
+def merge_rules():
+    """The --confirm merge rules in merge/cloud_allow.json, as written there.
+
+    The trailing-flag rule `Bash(~/.claude/bin/merge * --confirm *)` is left out on purpose. Its extra
+    arguments take the reason flags, which each Relayed or Batch entry's Never covers names, so an entry
+    quotes only the bare rule's command.
+    """
+    with open(MERGE_CLOUD_ALLOW, encoding="utf-8") as handle:
+        allow = json.load(handle).get("permissions", {}).get("allow", [])
+    return [rule for rule in allow
+            if rule.startswith("Bash(~/.claude/bin/merge ") and rule.endswith(" --confirm)")]
+
+
+def merge_command():
+    """The one merge rule's command with its `*` read as <pr>, or None when there is not exactly one rule."""
+    rules = merge_rules()
+    if len(rules) != 1:
+        return None
+    return rules[0][len("Bash("):-1].replace("*", "<pr>")
 
 
 def allow_entry(prefix):
@@ -253,6 +304,121 @@ class RelayedGrantIsAllowed(unittest.TestCase):
         self.assertIsNotNone(clause, "need a 'Never covers' sentence in the Relayed Grant entry")
         missing = unnamed_terms(clause, RELAYED_REFUSED)
         self.assertFalse(missing, "Never covers does not name %r" % missing)
+
+
+class RelayedMergeYesIsAllowed(unittest.TestCase):
+    def relayed_merge_entry(self):
+        """The one Relayed Merge Yes entry, asserting first that there is exactly one."""
+        entry = allow_entry(RELAYED_MERGE)
+        self.assertIsNotNone(entry, "need exactly one '%s' entry in autoMode.allow" % RELAYED_MERGE)
+        return entry
+
+    def test_one_entry_names_the_relayed_merge_yes(self):
+        self.assertIn("$defaults", auto_mode().get("allow", []), "autoMode.allow lost $defaults")
+        self.relayed_merge_entry()
+
+    def test_merge_rule_is_one_in_the_constant(self):
+        rules = merge_rules()
+        self.assertEqual(len(rules), 1,
+                         "merge/cloud_allow.json must hold exactly one --confirm merge rule: %r" % rules)
+        command = merge_command()
+        self.assertIn("<pr>", command, "derived merge command has no <pr> for the pull request number")
+        self.assertNotIn("*", command, "derived merge command still has a wildcard")
+
+    def test_entry_quotes_the_merge_command(self):
+        entry = self.relayed_merge_entry()
+        command = merge_command()
+        self.assertIsNotNone(command, "merge/cloud_allow.json must hold exactly one --confirm merge rule")
+        self.assertIn("`%s`" % command, bounds_text(entry),
+                      "Covers text must quote the merge command in backticks")
+
+    def test_covers_names_the_coordinator_tag(self):
+        entry = self.relayed_merge_entry()
+        self.assertIn("cs-build:coordinator", bounds_text(entry),
+                      "Covers text must require a session tagged cs-build:coordinator")
+
+    def test_covers_names_the_pull_request_the_relay_names(self):
+        entry = self.relayed_merge_entry()
+        self.assertIn("the pull request the relay names", bounds_text(entry),
+                      "Covers text must say the pull request the relay names")
+
+    def test_covers_names_the_batch_runner_that_merges(self):
+        entry = self.relayed_merge_entry()
+        self.assertIn("cs-build:batch-runner", bounds_text(entry),
+                      "Covers text must name cs-build:batch-runner as the session that merges")
+
+    def test_never_covers_names_a_batch_runner_not_tagged(self):
+        clause = never_covers(self.relayed_merge_entry())
+        self.assertIsNotNone(clause, "need a 'Never covers' sentence in the Relayed Merge Yes entry")
+        self.assertIn("not tagged `cs-build:batch-runner`", clause,
+                      "Never covers does not name a session not tagged cs-build:batch-runner")
+
+    def test_never_covers_names_each_refused_act(self):
+        clause = never_covers(self.relayed_merge_entry())
+        self.assertIsNotNone(clause, "need a 'Never covers' sentence in the Relayed Merge Yes entry")
+        missing = unnamed_terms(clause, RELAYED_MERGE_REFUSED)
+        self.assertFalse(missing, "Never covers does not name %r" % missing)
+
+    def test_never_covers_names_the_reason_flags(self):
+        clause = never_covers(self.relayed_merge_entry())
+        self.assertIsNotNone(clause, "need a 'Never covers' sentence in the Relayed Merge Yes entry")
+        missing = unnamed_terms(clause, REASON_FLAGS_REFUSED)
+        self.assertFalse(missing, "Never covers does not name the reason flags %r" % missing)
+
+
+class BatchRunnerMergeIsAllowed(unittest.TestCase):
+    def batch_merge_entry(self):
+        """The one Batch Runner Merge entry, asserting first that there is exactly one."""
+        entry = allow_entry(BATCH_MERGE)
+        self.assertIsNotNone(entry, "need exactly one '%s' entry in autoMode.allow" % BATCH_MERGE)
+        return entry
+
+    def test_one_entry_names_the_batch_runner_merge(self):
+        self.batch_merge_entry()
+
+    def test_entry_quotes_the_merge_command(self):
+        entry = self.batch_merge_entry()
+        command = merge_command()
+        self.assertIsNotNone(command, "merge/cloud_allow.json must hold exactly one --confirm merge rule")
+        self.assertIn("`%s`" % command, bounds_text(entry),
+                      "Covers text must quote the merge command in backticks")
+
+    def test_covers_names_the_batch_runner_tag(self):
+        entry = self.batch_merge_entry()
+        self.assertIn("cs-build:batch-runner", bounds_text(entry),
+                      "Covers text must require a session tagged cs-build:batch-runner")
+
+    def test_covers_names_merge_go(self):
+        entry = self.batch_merge_entry()
+        self.assertIn("merge go", bounds_text(entry), "Covers text must name the merge go")
+
+    def test_covers_names_the_coordinator_as_sender(self):
+        entry = self.batch_merge_entry()
+        self.assertIn("cs-build:coordinator", bounds_text(entry),
+                      "Covers text must name cs-build:coordinator as the merge go's sender")
+
+    def test_covers_names_the_pull_request_the_merge_go_names(self):
+        entry = self.batch_merge_entry()
+        self.assertIn("the pull request the merge go names", bounds_text(entry),
+                      "Covers text must say the pull request the merge go names")
+
+    def test_never_covers_names_a_merge_go_from_a_non_coordinator(self):
+        clause = never_covers(self.batch_merge_entry())
+        self.assertIsNotNone(clause, "need a 'Never covers' sentence in the Batch Runner Merge entry")
+        self.assertIn("a merge go from a session not tagged `cs-build:coordinator`", clause,
+                      "Never covers does not name a merge go from a session not tagged cs-build:coordinator")
+
+    def test_never_covers_names_each_refused_act(self):
+        clause = never_covers(self.batch_merge_entry())
+        self.assertIsNotNone(clause, "need a 'Never covers' sentence in the Batch Runner Merge entry")
+        missing = unnamed_terms(clause, BATCH_MERGE_REFUSED)
+        self.assertFalse(missing, "Never covers does not name %r" % missing)
+
+    def test_never_covers_names_the_reason_flags(self):
+        clause = never_covers(self.batch_merge_entry())
+        self.assertIsNotNone(clause, "need a 'Never covers' sentence in the Batch Runner Merge entry")
+        missing = unnamed_terms(clause, REASON_FLAGS_REFUSED)
+        self.assertFalse(missing, "Never covers does not name the reason flags %r" % missing)
 
 
 class OwnerPrHousekeepingIsAllowed(unittest.TestCase):

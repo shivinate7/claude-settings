@@ -25,6 +25,8 @@ Each entry keeps `$defaults`, the classifier's built-in exceptions.
 | Merge confirm (`merge/cloud_allow.json`, cloud only) | `~/.claude/bin/merge ... --confirm` | mechanics in `session-tiers` |
 | "Owner PR Housekeeping" (`settings.json` `autoMode.allow`) | In a `shivinate7` repo: close a PR the coordinator or batch runner named in the visible conversation as replaced, empty or batched. Mark ready only an integration PR that the visible conversation names as such: the batch's or a lone lane's, named by the coordinator or batch runner, or the one PR of a solo or one-lane session that no coordinator started, named by that session | this record |
 | "Owner Session Message" (`settings.json` `autoMode.allow`) | `send_message` to a session in the owner's own account, including the session that started this one (its parent or coordinator). A message that asks for no act is covered. A message that asks is limited to acts the owner already granted. A coordinator may send a batch runner it created a merge go (owner, 2026-11-03 15:58 CST) | this record |
+| "Relayed Merge Yes" (`settings.json` `autoMode.allow`) | `~/.claude/bin/merge <pr> --confirm` by a session tagged `cs-build:batch-runner`, for the one pull request that a session tagged `cs-build:coordinator` named when it relayed the owner's yes to merge it, under every merge check | this record |
+| "Batch Runner Merge" (`settings.json` `autoMode.allow`) | `~/.claude/bin/merge <pr> --confirm` by a session tagged `cs-build:batch-runner`, for a pull request its coordinator named in a merge go, under the coordinator's standing grant and every merge check | this record |
 | `mcp__claude-code-remote__add_repo` (`settings.json` `permissions.allow`) | Attach a GitHub repo to the session | this record |
 | `mcp__claude-code-remote__archive_session` (`settings.json` `permissions.allow`) | Archive a session in the owner's account | this record |
 | `mcp__claude-code-remote__send_message` (`settings.json` `permissions.allow`) | Any `send_message` call. No bound is checked (see Send message allow rule) | this record |
@@ -78,6 +80,14 @@ Grant: owner, page item 278, pick d, 2026-11-06 12:41 CST. Typed go, in lane lea
 ### Merge go to a batch runner
 
 Owner, 2026-11-03 15:58 CST, typed in the lane session merge-go-message-allow: `narrow the merge carve-out in the "Owner Session Message" entry of settings.json autoMode.allow, so a coordinator may send its own batch runner a merge go under standing-merge-grant`. Incident: at 15:48 CST the classifier refused a coordinator's `send_message` that gave its own batch runner a merge go, as "Merge Without Review". The entry's merge refusal predates `standing-merge-grant` (owner, 2026-11-01 21:34 CST). The carve-out covers only that merge go. A merge ask to any other session, or from a session that is not a coordinator, stays refused.
+
+### Batch Runner Merge
+
+Owner, 2026-11-07 13:27 CST, typed in lane session relayed-yes-allow: `go runner-merge-allow: allow batch-runner merges under the coordinator's standing grant`. Earlier ask: Queue item 149 b (owner, 2026-11-01 22:16 CST), which auto mode did not count as typed words. Incident: auto mode refused runner 8's merges until the owner typed his grant in its chat (2026-11-01 22:23 CST, roadmap step runner-merge-allow). The entry covers only a merge the coordinator named in a merge go to its own batch runner (decision `standing-merge-grant`). It lifts no merge check, and never covers a flag that lifts one (`--base-red-ok`, `--undo-check-unknown-ok`). The merge go must come from a session tagged `cs-build:coordinator`.
+
+### Relayed Merge Yes
+
+Owner, 2026-11-07 13:10 CST, coordinator-reported: a yes the coordinator passes on is enough. Owner, 13:19 CST, typed in lane session relayed-yes-allow: `add the relayed-yes grant to .claude/CLAUDE.md and an autoMode.allow entry for merges on a coordinator-relayed owner yes`. Incident: at 13:05 CST the classifier refused batch runner 8's `merge 1421 --confirm` on an owner yes the coordinator relayed. The entry covers that merge only, by a session tagged `cs-build:batch-runner`, since a lane and the coordinator never merge (decision `standing-merge-grant`). It lifts no merge check, and never covers a flag that lifts one (`--base-red-ok`, `--undo-check-unknown-ok`). It never covers another act, a pull request the relay did not name, or a relay from a session not tagged `cs-build:coordinator`. Gap: the refusal was recorded as `merge 1421 --confirm`; whether runner 8 typed the full `~/.claude/bin/merge` path is unknown. Gap: whether the classifier reads the relay message is unmeasured.
 
 ### Archived Branch Delete
 
