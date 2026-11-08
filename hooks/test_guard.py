@@ -7635,6 +7635,15 @@ sh("push-new-branch: a fresh commit chained after a branch switch, pushed to a n
 # none. PUSHTRUNK holds no origin/main, so only the default-branch read can exempt this push.
 sh("push-new-branch: a new branch at the tip of origin/HEAD, which names trunk, allows",
    VCS + " push origin refs/remotes/origin/HEAD:refs/heads/skc-trunk-new", "allow", cwd=PUSHTRUNK)
+# PINS, each held by a mutant in hooks/mutate_guard.py. A tag is no branch. A push that already asks keeps its
+# ask beside a new-branch refspec, and a delete of main is that ask.
+sh("push-new-branch: a remote branch's tip pushed to a tag is not judged, allows",
+   VCS + " push origin origin/lane/base:refs/tags/v1", "allow", cwd=PUSHNEWBR)
+sh("push-new-branch: a delete of main beside a new-branch refspec stays ask, not deny",
+   VCS + " push origin :main HEAD~1:refs/heads/skc-ask-new", "ask", "force-push", cwd=PUSHNEWBR)
+# origin holds no master here, so without the default-branch skip the new-branch rule would judge this push.
+sh("push-new-branch: a remote branch's tip pushed to master asks push-main, not a new branch",
+   VCS + " push origin origin/feat:master", "ask", PUSH_MAIN_RULE, cwd=PUSHSELF)
 
 # ASK, owner rulings 207 a. A non-forced push whose destination is the literal
 # name main or master asks. The name is literal: origin/HEAD does not decide it.
