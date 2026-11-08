@@ -1,0 +1,11 @@
+{
+  "title": "A guard named as a habit or a brief wording does not count; a report names a PR, commit, step or debt",
+  "why": "Owner ruling, typed in lane notes-fix-reverify-large at 11:27 CST Nov 8 (relayed by the coordinator): \"any sort of thing that requires sessions to make habits should be triggers for a step to be created and a fix to be in the works or at least queued for one; this goes against our mandates of codifying stuff that can be mechanized rather than having temporal states\". Home: rule building-mistake-names-its-guard in CLAUDE.md. Add a check that refuses a report's guard line naming none of a PR, commit, step or debt; check first whether lint/report_guard.py already holds part of it. An owner ask: item 387 a lets it start during the lane hold.",
+  "note": "",
+  "phase": "now",
+  "owner": "claude-settings",
+  "lane": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB) to start",
+  "status": "todo",
+  "order": 756,
+  "updatedAt": "2026-11-08T11:29:00-06:00"
+}
