@@ -70,7 +70,7 @@ class RouteTests(RouteFixture, unittest.TestCase):
                         peer_msg("got it", from_session=self.PARENT),
                         peer_msg("one more pick?", from_session=self.PARENT),
                         assistant_text(self.reply(self.QUESTION)))
-        self.assert_blocked(out, "Lane pick guard", "@parent")
+        self.assert_blocked(out, "Lane pick guard", "its parent")
 
     def test_rt_red_owner_message_after_the_writer_ack_starts_a_turn(self):
         # Catches: the same skip on the page writer's ack. Its second message is skipped as an ack too.
