@@ -135,6 +135,20 @@ class ClauseFieldTests(unittest.TestCase):
             with self.subTest(sentence=sentence):
                 self.assertEqual(self.only(sentence).verb, verb, "verb: wrong lemma for %r" % sentence)
 
+    def test_a_regular_past_tense_verb_drops_its_ed_and_its_doubled_consonant(self):
+        # Catches: the -ed rule negated (checked read as chec), or read for words of four letters or fewer only (checked
+        # kept whole). Neither word is in the irregular table, so only the rule reads them.
+        for sentence, verb in (("I checked the CI.", "check"), ("The job dropped.", "drop")):
+            with self.subTest(sentence=sentence):
+                self.assertEqual(self.only(sentence).verb, verb, "verb: wrong lemma for %r" % sentence)
+
+    def test_a_clause_that_ends_on_a_be_word_reads_be_as_its_verb(self):
+        # Catches: the copula branch skipped when no verb word follows the be word, so the verb reads None.
+        for sentence in ("I am.", "The check was."):
+            with self.subTest(sentence=sentence):
+                self.assertEqual(self.only(sentence).verb, "be",
+                                 "verb: a clause that ends on a be word has no verb for %r" % sentence)
+
     def test_aux_is_the_auxiliary_without_its_negation(self):
         # Catches: aux always None, so the auxiliary of a negated verb group is lost.
         for sentence, aux in (("I can't merge PR 12.", "can"), ("I could not open the PR.", "could")):
@@ -236,6 +250,16 @@ class LexiconTests(unittest.TestCase):
         # has longer forms ("not able to", "no way to"); this case pins the basic six only.
         basic = {"can't", "cannot", "unable to", "can not", "could not", "couldn't"}
         self.assertLessEqual(basic, set(clause.CANNOT_FORMS), "CANNOT_FORMS lacks a basic form")
+
+
+class ReasonTests(unittest.TestCase):
+    def test_reasons_return_the_text_after_each_reason_link(self):
+        # Catches: each reason event skipped as overlapping the last one found (the `at < done` test inverted), so one
+        # reason is lost, or every reason is lost. Each reason runs to the next hard stop.
+        self.assertEqual(clause.reasons("I was merging PR 12 because the branch is protected."), ["the branch is protected"],
+                         "reasons: one because clause gives no reason")
+        self.assertEqual(clause.reasons("I can't merge PR 12 because the branch is protected. Also because the CI is red."),
+                         ["the branch is protected", "the CI is red"], "reasons: the second sentence's reason is lost")
 
 
 class LinearTests(unittest.TestCase):
