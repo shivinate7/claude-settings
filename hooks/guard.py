@@ -206,19 +206,23 @@ Other tools, in `judge` order:
                        report labels, or a BUILT or RECORDED item, with or without a `Done:` label,
                        each at line start) or a verdict line (a line with `verdict`, or a round label
                        with or without `result`, before its colon and a REVIEWER_VERDICT_WORDS word
-                       right after it, or a report's `FAIL, round N of 3, ...` line). Marks (`-`, `*`,
+                       right after it, or a leading verdict: a verdict word, a comma and `round N`, as in
+                       `FAIL, round N` or `PASS, round N of 3`). Marks (`-`, `*`,
                        `#`, bold) before a line's first word are skipped, and so are marks right after the
                        colon (`**Verdict:** FAIL`). A dash after a round label and before a verdict word
-                       reads as the colon (`Round 1 - FAIL`, `Round 1 result - FAIL`, `Prior round
+                       reads as the colon (`Round N - FAIL`, `Round N result - FAIL`, `Prior round
                        result - FAIL`) unless the verdict word runs on into a hyphenated word
-                       (`Round 2 - FAIL-safe`), and `round result` reads as `verdict`
+                       (`Round N - FAIL-safe`), and `round result` reads as `verdict`
                        (`Prior round result: FAIL`). The verdict scan reads the
-                       brief after three steps: each backtick span is blanked (a quote) unless it
+                       brief after four steps: each backtick span is blanked (a quote) unless it
                        holds only a verdict word (``Prior verdict: `FAIL` `` is refused), each line is
                        split at sentence ends (`.`, `;`, `!`, `?`) so each sentence starts its own
-                       line, and a choice list that ends its sentence (verdict words, bare or
-                       backticked, joined by `,`, `/`, `or` or `and`) is blanked, as a format line
-                       (`a verdict: PASS or FAIL`).
+                       line, the label-rewrite pass runs (marks after a colon dropped, a round-label
+                       dash read as a colon, `round result` read as `verdict`), and a choice list
+                       that ends its sentence (verdict words, bare or backticked, joined by `,`,
+                       `/`, `or` or `and`) is blanked, as a format line (`a verdict: PASS or FAIL`).
+                       A sentence ends at a period before a space, a capital or the line end, so
+                       `**...PASS, FAIL or PARTIAL.**` is refused.
                        Each step hides only its own span or sentence, so a later label in the same
                        line is read afresh (`... PASS or FAIL. Prior verdict: FAIL.` is refused).
                        A report shape counts at line start only. A verdict label counts anywhere in its
@@ -2647,12 +2651,13 @@ BRIEF_BLIND_LABELS = re.compile(BRIEF_BLIND_OPEN + r"(%s)[*_]*[ \t]*(?::|$)" % "
 BRIEF_BLIND_DONE = r"(?:%s[*_]*[ \t]*:[*_]*[ \t]*)?" % BRIEF_DONE_LABEL
 BRIEF_BLIND_ITEM = re.compile(BRIEF_BLIND_OPEN + BRIEF_BLIND_DONE + r"(?:BUILT|RECORDED)(?![\w-])", re.M)
 # A verdict line is one of two. A line with `verdict`, or a round label with or without `result`, before its colon, and one
-# verdict word right after the colon. Or a report's leading verdict, `FAIL, round <n> of 3, ...`. A line that opens with a
+# verdict word right after the colon. Or a leading verdict, a verdict word then `, round <n>` (`FAIL, round N`). A line that opens with a
 # verdict word and a colon (`FAIL: test_x`) is a quote. The regex reads only that shape. The exemptions are made first, in
 # Python, by brief_blind_verdict_text: it blanks each backtick span (a quote, so a finding that quotes `verdict: FAIL`
 # passes) but keeps a span that holds only a verdict word (``Prior verdict: `FAIL` `` is a verdict). It splits each line
-# at its sentence ends so each sentence starts its own line, and blanks a verdict-word choice list
-# that ends its sentence (an instruction names the choices, `a verdict: PASS, FAIL or PARTIAL`, and is a format line). An
+# at its sentence ends so each sentence starts its own line, rewrites the label spellings (below), and blanks a verdict-word
+# choice list that ends its sentence (an instruction names the choices, `a verdict: PASS, FAIL or PARTIAL`, and is a format
+# line). The period must be followed by a space, a capital or the line end, so `**...PASS, FAIL or PARTIAL.**` is refused. An
 # exemption hides only its own span or sentence, never the rest of its line: `Give a verdict: PASS or FAIL. Prior verdict:
 # FAIL.` is refused. A list that runs on into other words is a verdict. The label scans stay lazy and stop at a colon. Some
 # long lines are still slow (debt note verdict-regex-slow-line).
@@ -2674,9 +2679,9 @@ BRIEF_BLIND_CHOICES = re.compile(
     r"[*_`]*\b(?:%(w)s)\b[*_`]*(?:%(sep)s[*_`]*\b(?:%(w)s)\b[*_`]*)+" % {"w": BRIEF_BLIND_VERDICT_WORDS, "sep": _BRIEF_BLIND_SEP})
 _BRIEF_BLIND_LINE_END = re.compile(r"[ \t]*$", re.M)
 # Three spellings of a verdict label that the regex reads after a plain rewrite, each a single linear pass. Emphasis marks
-# after a colon (`**Verdict:** FAIL`) go. A dash after a round label and before a verdict word (`Round 1 - FAIL`) reads as
-# a colon, with or without `result` (`Round 1 result - FAIL`, `Prior round result - FAIL`), but not inside a hyphenated
-# word (`Round 2 - FAIL-safe`). `round result` then reads as `verdict` (`Prior round result: FAIL`).
+# after a colon (`**Verdict:** FAIL`) go. A dash after a round label and before a verdict word (`Round N - FAIL`) reads as
+# a colon, with or without `result` (`Round N result - FAIL`, `Prior round result - FAIL`), but not inside a hyphenated
+# word (`Round N - FAIL-safe`). `round result` then reads as `verdict` (`Prior round result: FAIL`).
 BRIEF_BLIND_COLON_MARKS = re.compile(r"(?<=:)[*_]+")
 BRIEF_BLIND_ROUND_DASH = re.compile(
     r"(\b[Rr]ound[ \t]+(?:\d+(?:[ \t]+of[ \t]+\d+)?(?:[ \t]+[Rr]esult)?|[Rr]esult))[ \t]*[\u2014\u2013-][ \t]*"
