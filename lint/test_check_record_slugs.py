@@ -206,7 +206,8 @@ class RecordSlugsTests(unittest.TestCase):
     def assert_only_the_scope_note_fails(self, out):
         """The scope note is refused by the Until rule, so its FAIL shows the notes were read. No other line fails."""
         self.assertTrue(self.failed_about(out, "scope-note"), out)
-        self.assertEqual(len(fail_lines(out)), 1, out)
+        refused = "\n".join(fail_lines(out))
+        self.assertEqual(len(fail_lines(out)), 1, "a note the check should pass is refused:\n" + refused)
 
     def refused_notes(self, notes):
         """Add each {slug: text} of `notes` as a none note, and assert the check refuses each one and no other line."""
@@ -214,7 +215,7 @@ class RecordSlugsTests(unittest.TestCase):
         rc, out = self.lint()
         self.assertEqual(rc, 1, out)
         for slug in notes:
-            self.assertTrue(self.failed_about(out, slug), out)
+            self.assertTrue(self.failed_about(out, '"%s"' % slug), "not refused: %s\n%s" % (slug, out))
         self.assertEqual(len(fail_lines(out)), len(notes), out)  # one refusal per note, no other cause
 
     def passed_notes(self, notes):
@@ -776,12 +777,34 @@ class RecordSlugsTests(unittest.TestCase):
         self.assertTrue(self.failed_about(out, "commit-note", DEBT_NOTES), out)
 
     def test_each_cost_unit_after_a_none_reason_is_red(self):
+        # Each unit in digit form, singular and plural where the word has both: a mutant that drops one fails its case.
         self.refused_notes({
-            "unit-seconds": "rare and harmless: the call takes 1.3 s",
+            "unit-s": "rare and harmless: the call takes 1.3 s",
+            "unit-sec": "owner decides: the call takes 1.3 sec",
+            "unit-secs": "owner decides: the call takes 2 secs",
+            "unit-second": "owner decides: the call takes 1 second",
+            "unit-seconds": "owner decides: the call takes 1.3 seconds",
             "unit-millis": "rare and harmless: the call takes 200 ms",
+            "unit-millisecond": "owner decides: the call takes 1 millisecond",
+            "unit-min": "rare and harmless: the job takes 1 min",
+            "unit-mins": "rare and harmless: the job takes 2 mins",
+            "unit-minute": "owner decides: the job takes 1 minute",
+            "unit-minutes": "owner decides: the job takes 3 minutes",
+            "unit-hr": "rare and harmless: the job takes 1 hr",
+            "unit-hour": "owner decides: the job takes 1 hour",
+            "unit-hours": "owner decides: the job takes 2 hours",
+            "unit-day": "owner decides: the job waits 1 day",
+            "unit-line": "owner decides: the fix is 1 line",
             "unit-lines": "owner decides: the fix is 40 lines",
-            "unit-kilobytes": "owner decides: the file is 3 KB",
+            "unit-char": "rare and harmless: 1 char",
+            "unit-chars": "rare and harmless: 8 chars",
+            "unit-character": "owner decides: 1 character",
             "unit-characters": "rare and harmless: 8,000 characters",
+            "unit-byte": "owner decides: the file is 1 byte",
+            "unit-bytes": "owner decides: the file is 3 bytes",
+            "unit-kilobytes": "owner decides: the file is 3 KB",
+            "unit-mb": "rare and harmless: the file is 5 MB",
+            "unit-gb": "owner decides: the cache is 2 GB",
         })
 
     def test_each_complexity_word_after_a_none_reason_is_red(self):
@@ -837,7 +860,7 @@ class RecordSlugsTests(unittest.TestCase):
     def test_each_verdict_word_after_a_cost_is_check_output(self):
         notes = [none_note("verdict-%s" % word.lower(),
                            "rare and harmless: the call takes 1.3 s; %s %s" % (CHECK, word))
-                 for word in ("PASS", "FAIL", "ok", "red", "green")]
+                 for word in ("PASS", "FAIL", "ok", "red", "green", "failed")]
         self.add_notes(*notes, SCOPE_NOTE)
         rc, out = self.lint()
         self.assertEqual(rc, 1, out)
@@ -984,6 +1007,15 @@ class RecordSlugsTests(unittest.TestCase):
             "dash-ascii-pass": "rare and harmless: the call takes 1.3 s; `verdict bench` -- pass",
             "dash-en-pass": "rare and harmless: the call takes 1.3 s; `verdict bench` – pass",
             "arrow-fat-green": "owner decides: the call takes 1.3 s; `verdict bench` => green",
+        })
+
+    def test_check_output_with_a_comma_semicolon_hyphen_or_thin_arrow_after_a_cost_passes(self):
+        # Each separator the check output may carry between its command and its verdict word.
+        self.passed_notes({
+            "sep-comma": "rare and harmless: the call takes 1.3 s; `verdict bench`, pass",
+            "sep-semicolon": "rare and harmless: the call takes 1.3 s; `verdict bench`; pass",
+            "sep-hyphen": "rare and harmless: the call takes 1.3 s; `verdict bench` - pass",
+            "sep-thin-arrow": "rare and harmless: the call takes 1.3 s; `verdict bench` -> pass",
         })
 
 
