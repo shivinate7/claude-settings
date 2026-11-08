@@ -113,13 +113,19 @@ Counted as real `gh` calls, one call per page of a list read. Most reads fit one
 Rule `pr-review-record`, in `hooks/guard.py` (PreToolUse).
 
 - The mistake: a lane typed the Head by hand on PR #1475 (15:10 CST, 2026-11-07). The record named a head that was not the live one, so the batch runner read it as stale.
-- The second mistake: the records on PR #1502 and PR #1535 had prose after the CI line, so `parse_review` returned None and a lane fixed each by hand. The harm: `merge --reviewed` cannot read such a record, so the merge stalls. A body that opens with the marker must be the render output as it is, or the render output, a line exactly `---`, then a footer, with nothing between the CI line and `---`. One judge, `review_shape_hit` in `hooks/guard_merge.py`, checks that for a post and for an edit, and its refusal names that shape.
+- The second mistake: the records on PR #1502 and PR #1535 had prose after the CI line, so `parse_review` returned None and a lane fixed each by hand. The harm: `merge --reviewed` cannot read such a record, so the merge stalls. A body that opens with the marker must be the render output as it is, or the render output, a line exactly `---`, then a footer, with nothing between the CI line and `---`. One judge, `review_form_hit` in `hooks/guard_merge.py`, checks that form for a post and for an edit, and its refusal names that form.
 - It judges a post, or an edit, of a comment whose body starts with the marker, as its first line (`parse_review` reads it so): `mcp__github__add_issue_comment`, `mcp__github__update_issue_comment` (an edit; its PR is the one the comment sits on), `gh pr comment` and `gh issue comment` (`--body`, `-b`, `--body-file`, `-F`) and `gh api repos/O/R/issues/<n>/comments` (`-f`, `-F`, `--field`, `--raw-field` with `body=` or `body=@file`). A heredoc body counts. A `$'...'` body is decoded first, as bash sends it (`ansi_c_decoded` in `hooks/guard_merge.py`, read only by this judge). A body of exactly `$(cat FILE)`, and a stdin body piped from `cat FILE`, are read from FILE. `--input` bodies are not read.
 - It refuses unless the body parses (`parse_review`), its `PR:` equals the target PR, and its `Head:` equals the PR's live head. The refusal prints the render command for the live head, `merge <pr> --review-record --head <live sha> ...`.
 - A malformed marked body is refused before any read.
 - It fails open. Four reads can fail: the live head, the comment an edit names, a body file, a body on stdin that no `cat FILE` supplies. Each one allows the call and prints one line on stderr that names the review record. An edit with no integer comment id is allowed with a note. A network blip must not block every post.
 - The cost: one PR read for a post that names a PR number. Two (the open-PR list, then the PR) for a post that names no number or names a branch. Two for a marked edit (its comment, then its PR). None for any other comment or edit, which includes prose that names the marker below its first line. No file, no process, no log line. The tests pin each count.
-- A shell edit by comment id (`gh api -X PATCH repos/O/R/issues/comments/<id>`) is judged for shape only, by `review_shape_hit`: its route names a comment, not a PR, so its head is not judged and it makes no read. Two more bodies are not read: a body held in a shell variable (`--body "$BODY"`), and a `gh api --input` body, on a post or on a PATCH.
+- A shell edit by comment id (`gh api -X PATCH repos/O/R/issues/comments/<id>`) is judged for form only, by `review_form_hit`: its route names a comment, not a PR, and it makes no read. The guard does not read these, on a post or on a PATCH:
+  - the head on a shell edit, so a record edited in place by PATCH can still carry a hand-typed head;
+  - a body held in a shell variable (`--body "$BODY"`);
+  - a body from `$(printf ...)` or `$(echo ...)`, since only a body of exactly `$(cat FILE)` is read;
+  - a stdin body that is neither a heredoc nor piped from `cat FILE`;
+  - a `gh api --input` body;
+  - a body sent to a full-URL endpoint, `gh api https://api.github.com/repos/...`.
 
 ## The limits
 

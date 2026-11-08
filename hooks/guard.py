@@ -591,7 +591,7 @@ while True:
             HOOK_BYPASS_REASON, conflict_markers_hit, hook_bypass_hit, octopus_push_hit, _push_calls, gh_call_of, gh_write_of, git_call_of, merge_call_of, merge_check, merge_check_reason, record_writer_hit,
             records_page_hit, repo_proof_hit, role_proof_hit,
             DEFAULT_RECORD_BRANCH, RECORD_REASON, settings_roots, TRUST_REASON, archive_hit, brief_hit, stamp_hit, trust_card_hit, written_time_hit,
-            undrafted_pr_create, uses_merge_tool, ready_page_hit, CREATE_PR_TOOL, REVIEW_COMMENT_TOOL, review_record_hit, review_shape_hit, review_note, pr_call_target, ansi_c_decoded,
+            undrafted_pr_create, uses_merge_tool, ready_page_hit, CREATE_PR_TOOL, REVIEW_COMMENT_TOOL, review_record_hit, review_form_hit, review_note, pr_call_target, ansi_c_decoded,
             FILE_WRITE_TOOLS, UPDATE_COMMENT_TOOL, comment_pull_request,
         )
         _loading = "guard_frozen"
@@ -1937,7 +1937,7 @@ def review_post_hit(segment: str, raw: str, where: str, before: int, previous: s
     rest = gh_call_of(ansi_c_decoded(segment))   # bash sends a `$'...'` body decoded
     if rest is None:
         return None
-    shape_only = False
+    form_only = False
     if rest[:2] in (["pr", "comment"], ["issue", "comment"]):   # an issue comment reaches the same pull request
         args = rest[2:]
         selector, repo = _comment_target(args)
@@ -1946,7 +1946,7 @@ def review_post_hit(segment: str, raw: str, where: str, before: int, previous: s
         posted = _api_post_bodies(rest)
         if posted is None:
             posted = _api_post_bodies(rest, _COMMENT_EDIT_ROUTE)
-            shape_only = posted is not None   # an edit names a comment, not a pull request: judge its shape, read no head
+            form_only = posted is not None   # an edit names a comment, not a pull request: judge its form, read no head
         if posted is None:
             return None
         repo, selector, texts, files, stdin = posted
@@ -1977,8 +1977,8 @@ def review_post_hit(segment: str, raw: str, where: str, before: int, previous: s
             review_note("the body file " + name + " could not be read")
     if stdin and not judged_stdin:
         review_note("the body comes from stdin and cannot be read")
-    if shape_only:
-        return review_shape_hit(texts)
+    if form_only:
+        return review_form_hit(texts)
     return review_record_hit(texts, repo, selector, where)
 
 

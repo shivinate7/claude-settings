@@ -479,11 +479,11 @@ def ready_page_hit(tool: str, tool_input: dict, command: str, where: str):
 # ---- a review record posted as a comment (rule pr-review-record)
 #
 # A body whose first line is the record marker must parse as a record (merge/merge.py `parse_review`, the one home of the form).
-# That is the shape check, `review_shape_hit`: the render output as it is, or with a footer after a line exactly `---` and
-# nothing between the CI line and `---`. A post, and an edit in place, are both judged for shape. A post must also name the pull request it is posted
+# That is the form check, `review_form_hit`: the render output as it is, or with a footer after a line exactly `---` and
+# nothing between the CI line and `---`. A post, and an edit in place, are both judged for form. A post must also name the pull request it is posted
 # on and name that pull request's live head (`review_record_hit`). A hand-typed head is how a record goes stale the moment it is
 # posted. The remedy is the render, which fills the live head itself.
-# Cost: the shape check reads no pull request and no file. One pull request read per marked post that passes it (`Host.pr`), none
+# Cost: the form check reads no pull request and no file. One pull request read per marked post that passes it (`Host.pr`), none
 # for a post with no marker and none for an edit, whose input names a comment, not a pull request. A read that fails allows the
 # post with a note on stderr: a network blip must not block every post. A malformed body is refused before any read.
 REVIEW_COMMENT_TOOL = "mcp__github__add_issue_comment"
@@ -497,7 +497,7 @@ REVIEW_REASON = (
     "Remedy: run `%s` and post its output unchanged. "
     "(decision pr-review-record, a review record names the head it reviewed)"
 )
-REVIEW_SHAPE_REASON = (
+REVIEW_FORM_REASON = (
     "Rule (pr-review-record): this body holds the review-record marker but is not a well-formed record. "
     "`merge --reviewed` cannot read a body that does not parse. "
     "Remedy: run `%s` and post its output as it is. If you add a footer, put a line exactly `---` before it, "
@@ -574,21 +574,21 @@ def _marked_bodies(bodies):
     return (module, marked) if marked else None
 
 
-def _shape_refusal(module, marked, selector):
+def _form_refusal(module, marked, selector):
     """Return (matched, reason) for the first marked body that does not parse, else None. Reads nothing."""
     named = "" if callable(selector) else str(selector).strip()
     for body in marked:
         if module.parse_review(body) is None:
-            return "review record that does not parse", REVIEW_SHAPE_REASON % _review_render(
+            return "review record that does not parse", REVIEW_FORM_REASON % _review_render(
                 module, named if named.isdigit() else "<pr>", "<live head>")
     return None
 
 
-def review_shape_hit(bodies, selector=""):
+def review_form_hit(bodies, selector=""):
     """Return (matched, reason) when a body that opens with the record marker does not parse, else None. The one home of the
-    shape check: an edit in place is judged by this alone, and review_record_hit calls it. It makes no read."""
+    form check: an edit in place is judged by this alone, and review_record_hit calls it. It makes no read."""
     found = _marked_bodies(bodies)
-    return _shape_refusal(*found, selector) if found else None
+    return _form_refusal(*found, selector) if found else None
 
 
 def review_record_hit(bodies, repo: str, selector, where: str):
@@ -601,7 +601,7 @@ def review_record_hit(bodies, repo: str, selector, where: str):
     if not found:
         return None
     module, marked = found
-    hit = _shape_refusal(module, marked, selector)
+    hit = _form_refusal(module, marked, selector)
     if hit:
         return hit
     try:
