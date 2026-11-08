@@ -64,5 +64,43 @@ One more guard process start per SendMessage, as the matcher in `settings.json` 
 
 `MUTATE_ONLY=message-role: hooks/test_guard.py`: the `message-role` cases, 37 refusals, 57 passes and 1 crash check (`quotespan0`). `hooks/mutate_guard.py` carries one mutant per edge those cases pin, labelled `message-role:`.
 
+## Spawn briefs
+
+An Agent or Task spawn's brief is judged by the clause reader of "What a message edits". `brief_role_hit` in `hooks/guard.py` runs before the agent starts. It asks. It never denies. An override lifts it.
+
+It stops a brief that sends a role outside its scope:
+
+- A builder briefed to change a test.
+- A test-author briefed to change product code or a Markdown file.
+
+The ask names the role to send the work to: a test-author, a builder or a record-writer. It never names the path.
+
+The mistake it stops: on 2026-11-08 the write guard refused two test-author edits of `docs/debts/notes.md` mid-task, at 09:18 and 09:20 CST (`test-author-scope`). The write guard still refuses the edit itself. This check asks at spawn, before the agent runs.
+
+How it reads the role:
+
+- The role is the spawn's `subagent_type`. The part after the last `:` is kept, then `role_key` applies. `plugin:test-author` and `Test-Author ` both read as a test-author.
+- No transcript is read. `Task` is judged the same as `Agent`.
+
+Which paths count:
+
+- A builder: a test path only (`is_test_rel`). The exclusions below do not apply to a builder.
+- A test-author: an edit of a path with a file extension that `author_path_ok` rejects. A Markdown path counts. Unlike a message, the ask says "to a record-writer".
+- Shared with the message rule, these pass for a test-author: a test-noun spec (`Add red cases for ... in hooks/guard.py`), a workflow file, a `../` path, and an extensionless path such as `Makefile`.
+
+Known gap:
+
+- `Edit only X` and `Edit just X` pass unasked. The reader takes no object after `only` or `just`, so an off-role path in that form is not read. The message rule shares the reader and misses the same form.
+- The write guard still refuses the agent's own edit. The cost is one wasted turn.
+- The reverse form asks. `Fix hooks/guard.py is not your job` asks, because a negation after the path clears nothing.
+- The first form is filed as a note, `brief-role-edit-only-passes`, with no fix queued.
+
+Check:
+
+- `MUTATE_ONLY=brief-role python3 hooks/test_guard.py` runs the 13 `brief-role` cases: 5 asks and 8 passes. The filter is a substring match on case names.
+- `hooks/mutate_guard.py` has no mutant for this rule.
+
+Cost: no transcript is read. The guard already judges `Agent` and `Task` calls (`settings.json`), so this adds no hook.
+
 Kind: process
 Home: hooks/guard.py
