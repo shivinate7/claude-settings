@@ -79,6 +79,15 @@ Object.assign(PAGES, {
     <script>const v = localStorage.getItem("session"); document.getElementById("seed").textContent = "session=" + (v === null ? "unset" : v);
       document.getElementById("reveal").onclick = () => { document.getElementById("app").innerHTML = "<section id='view'>Account view for " + (v === null ? "nobody" : v) + "</section>"; };</script>`,
 });
+// The touch fixture. The body is red under a coarse pointer and blue otherwise. The hero is one viewport
+// (100vh), so the body shows only in the spacer below it. The bar is fixed to the viewport's foot. The
+// coarse-only element is empty, so it adds no height in either mode.
+Object.assign(PAGES, {
+  "/touch.html": `<!doctype html><style>body{margin:0;background:#00f}@media (pointer:coarse){body{background:#f00}}
+    #hero{height:100vh;background:#0f0}#rest{height:2000px}#bar{position:fixed;bottom:0;left:0;right:0;height:50px;background:#ff0}
+    .touch-only{display:none}@media (pointer:coarse){.touch-only{display:block}}</style>
+    <div id="hero"></div><div id="rest"></div><div id="bar"></div><nav id="phone-nav" class="touch-only"></nav>`,
+});
 let server, base, tmp, browser, tls;
 
 // test-temp-standard: one run folder per test run, `<pid>-<UUID>`, under one temp root for this repo.
@@ -151,7 +160,8 @@ async function run(cfg, env = {}) {
   return { code, out: text, dir: out, pngs, ms: Date.now() - started };
 }
 
-// Mean luminance (0-255) and the count of distinct colours, read through the browser's canvas.
+// Mean luminance (0-255), the count of distinct colours, the PNG's size, and the colour runs down pixel
+// column 5 ("G@0 Y@850 R@900": each colour and the row it starts at), read through the browser's canvas.
 async function pixels(b, file) {
   const page = await b.newPage();
   try {
@@ -168,7 +178,14 @@ async function pixels(b, file) {
       let sum = 0;
       const seen = new Set();
       for (let i = 0; i < d.length; i += 4) { sum += (d[i] + d[i + 1] + d[i + 2]) / 3; seen.add((d[i] << 16) | (d[i + 1] << 8) | d[i + 2]); }
-      return { mean: sum / (d.length / 4), colours: seen.size, width: img.width };
+      const runs = [];
+      let last = null;
+      for (let y = 0; y < c.height; y++) {
+        const i = (y * c.width + 5) * 4;
+        const k = d[i] > 128 ? (d[i + 1] > 128 ? "Y" : "R") : d[i + 1] > 128 ? "G" : "B";
+        if (k !== last) { runs.push(k + "@" + y); last = k; }
+      }
+      return { mean: sum / (d.length / 4), colours: seen.size, width: img.width, height: img.height, column: runs.join(" ") };
     }, src);
   } finally {
     await page.close();
@@ -451,6 +468,96 @@ test("unknown keys on the config and on a route are not refused", async (t) => {
   const r = await run({ futureKey: 1, routes: [{ path: "/content.html", futureRouteKey: { a: 1 } }], ...ONE });
   assert.equal(r.code, 0, r.out);
   assert.match(r.out, /shoot: PASS 1 shots, 0 failed, out=/);
+});
+
+// ---- Touch per size: a width under 1024 is a coarse pointer; 1024 and wider is not ----
+// One shared run (building-one-home-per-capability): each case reads its own shots from it and asserts
+// the scope (exit, then width, then height) before the claim. Colour runs are read down column 5.
+// The full-page layout every touch and fine shot shares: the hero's green to 850, the bar's yellow to 900,
+// then the spacer in the pointer's colour.
+const TOUCH_SHOTS = {
+  routes: [{ name: "touch", path: "/touch.html" }, { name: "short", path: "/content.html" }],
+  sizes: [390, 1023, 1024, 1440], themes: ["light"],
+};
+let touchShots;
+const shotsForTouch = () => (touchShots ??= run(TOUCH_SHOTS));
+
+test("a width under 1024 is a coarse pointer, 1024 and wider is not", async (t) => {
+  const b = await chromium(t);
+  if (!b) return;
+  const r = await shotsForTouch();
+  assert.equal(r.code, 0, r.out);
+  assert.deepEqual(r.pngs.filter((f) => f.startsWith("touch-")), ["touch-1023-light.png", "touch-1024-light.png", "touch-1440-light.png", "touch-390-light.png"]);
+  for (const [w, colour] of [[390, "R"], [1023, "R"], [1024, "B"], [1440, "B"]]) {
+    const px = await pixels(b, path.join(r.dir, `touch-${w}-light.png`));
+    assert.equal(px.width, w, "scope: the shot is at this width");
+    assert.equal(px.column, `G@0 Y@850 ${colour}@900`, `${w} px wide: touch should be ${colour === "R" ? "on" : "off"} (the spacer colour)`);
+  }
+});
+
+test("a touch full-page shot keeps touch through the capture: the PNG is the full page, coarse below the first viewport", async (t) => {
+  const b = await chromium(t);
+  if (!b) return;
+  const r = await shotsForTouch();
+  assert.equal(r.code, 0, r.out);
+  const px = await pixels(b, path.join(r.dir, "touch-390-light.png"));
+  assert.equal(px.width, 390, "scope: the shot is at 390");
+  assert.equal(px.height, 2900, "the PNG is not the full page: 900 px of hero and 2000 px of spacer");
+  assert.match(px.column, / R@900$/, `the full-page PNG is not coarse below the first viewport: touch is off in this capture (runs ${px.column})`);
+});
+
+test("a 100vh hero stays one viewport tall in a touch full-page shot", async (t) => {
+  const b = await chromium(t);
+  if (!b) return;
+  const r = await shotsForTouch();
+  assert.equal(r.code, 0, r.out);
+  const px = await pixels(b, path.join(r.dir, "touch-390-light.png"));
+  assert.equal(px.height, 2900, "scope: the PNG is the full page");
+  // The spacer colour is the touch claim, pinned by the case above. This case reads the geometry only.
+  assert.match(px.column, /^G@0 Y@850 [RB]@900$/, `the hero is not one viewport tall (900 px): its green runs past the first viewport (runs ${px.column})`);
+});
+
+test("a position:fixed bar shows once in a touch full-page shot, not once per viewport tile", async (t) => {
+  const b = await chromium(t);
+  if (!b) return;
+  const r = await shotsForTouch();
+  assert.equal(r.code, 0, r.out);
+  const px = await pixels(b, path.join(r.dir, "touch-390-light.png"));
+  assert.equal(px.height, 2900, "scope: the PNG is the full page");
+  const bars = px.column.split(" ").filter((run) => run.startsWith("Y@")).length;
+  assert.equal(bars, 1, `the fixed bar shows ${bars} times in the full-page PNG, not once (runs ${px.column})`);
+});
+
+test("the .html beside a touch shot is computed with touch: a coarse-only element is not marked hidden", async (t) => {
+  if (!(await chromium(t))) return;
+  const r = await shotsForTouch();
+  assert.equal(r.code, 0, r.out);
+  const page = html(r, "touch-390-light");
+  assert.match(page, /<nav id="phone-nav"/, "scope: the coarse-only element is in the .html");
+  assert.doesNotMatch(page, /<nav id="phone-nav"[^>]*\bhidden\b/, "the .html marks the coarse-only element hidden: the page was computed without touch");
+});
+
+test("control: a 1440 shot has no touch, so the PNG shows the fine-pointer colour and the .html marks the element hidden", async (t) => {
+  const b = await chromium(t);
+  if (!b) return;
+  const r = await shotsForTouch();
+  assert.equal(r.code, 0, r.out);
+  const px = await pixels(b, path.join(r.dir, "touch-1440-light.png"));
+  assert.equal(px.width, 1440, "scope: the shot is at 1440");
+  assert.equal(px.column, "G@0 Y@850 B@900", "1440 px: touch is on, so the spacer is not the fine-pointer colour");
+  const page = html(r, "touch-1440-light");
+  assert.match(page, /<nav id="phone-nav"/, "scope: the coarse-only element is in the .html");
+  assert.match(page, /<nav id="phone-nav" class="touch-only" hidden="">/, "1440 px: the coarse-only element should be marked hidden in the .html");
+});
+
+test("a page shorter than one viewport: the full-page PNG is one viewport tall, not shorter", async (t) => {
+  const b = await chromium(t);
+  if (!b) return;
+  const r = await shotsForTouch();
+  assert.equal(r.code, 0, r.out);
+  const px = await pixels(b, path.join(r.dir, "short-390-light.png"));
+  assert.equal(px.width, 390, "scope: the shot is at 390");
+  assert.equal(px.height, 900, "the full-page PNG of a short page is not the viewport height");
 });
 
 // A self-signed https fixture. The certificate is built here, into the run folder, and never committed.
