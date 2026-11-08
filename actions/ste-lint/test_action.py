@@ -22,7 +22,10 @@ an uncommitted removal is named unknown and never PASS, a held .git/index.lock p
 a name with a space is linted, and a run with no merge base writes unknown to the step summary, not "No markdown changed".
 Also asserts a stat-only change (a touched tracked file, the same bytes) still fails on a committed STE001, and an untracked
 markdown file that .ste-lint-exclude matches is not named unknown. A dirty tree whose snapshot fails is named unknown, never
-PASS, and a clean tree with a held index lock lints as main does, touched or not."""
+PASS, and a clean tree with a held index lock lints as main does, touched or not.
+Also asserts a root push's missing HEAD~1 is named by an ste-lint unknown line, not "no markdown changed"; a .ste-lint-exclude
+line git rejects as a pathspec is unknown, never "no markdown changed"; and a .git/index that is gone or a directory is one
+ste-lint unknown line, exit 0, and no PASS."""
 import ast, atexit, contextlib, os, re, shutil, subprocess, sys, tempfile, time, uuid
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -119,11 +122,14 @@ def run_step(d, work, env):
     return p.returncode, p.stdout + p.stderr
 
 
-def run(scope, fail="true", base=BASE_FILES, change=default_change, on_main=False, **over):
+def run(scope, fail="true", base=BASE_FILES, change=default_change, on_main=False, after=None, **over):
     """Build a bare remote, commit `base` on main, branch to topic (or stay on main when
-    on_main), apply `change(work)`, then run the step script. `over` overrides env vars."""
+    on_main), apply `change(work)`, then run the step script. `after(work)`, when given, runs last: after the fetch,
+    just before the step. `over` overrides env vars."""
     with tempfile.TemporaryDirectory(dir=RUN_FOLDER) as d:  # test-temp-standard: the run folder, never the system temp
         work = make_repo(d, base, change, on_main)
+        if after:
+            after(work)
         env = dict(os.environ, EVENT_NAME="pull_request", BASE_REF="main", DEFAULT_BRANCH="main",
                    REF_NAME="topic", SCOPE=scope, FAIL=fail, PATHS_GLOB="**/*.md", EXCLUDE="",
                    CHANGED_PATHS_GLOB="*.md", DECISIONS_DIR="", GITHUB_STEP_SUMMARY=os.path.join(d, "sum"))
@@ -869,9 +875,75 @@ check("root push scope: HEAD has no parent and the tree is clean",
       len(root.get("parents", [])) == 1 and root.get("status") == "", str(root))
 check("root push: exits 0, as main does (an unknown base, decision stale-cites-at-merge)", rc == 0, out)
 check("root push: the output says `stale-cites: unknown,` in lower case", "stale-cites: unknown," in out, out)
+check("root push: no `no markdown changed` line, since HEAD~1 was never read", "no markdown changed" not in out, out)
+check("root push: an ste-lint unknown line names the missing HEAD~1",
+      any(l.startswith("ste-lint: unknown") and "HEAD~1" in l for l in out.splitlines()), out)
 rc, out = run("changed", on_main=True, change=second_commit, EVENT_NAME="push", BASE_REF="", REF_NAME="main")
 check("root push control: with HEAD~1 present, exits 0 and says `stale-cites: PASS`",
       rc == 0 and "stale-cites: PASS" in out, out)
+check("root push control: with HEAD~1 present, no ste-lint unknown line",
+      not any(l.startswith("ste-lint: unknown") for l in out.splitlines()), out)
+
+
+# A changed-file read that git refuses. A .ste-lint-exclude line git rejects as a pathspec, such as ../gen/*.md (a path outside
+# the repo), fails the diff that lists the changed files. That read printed "no markdown changed" with exit 0: a false green for
+# files nobody read. The step must print one ste-lint unknown line, exit 0, and never "no markdown changed" or PASS. The valid
+# exclude line is the control: the same committed STE001 fails as main does. git's rejection is read in the change (P7).
+BAD_PATHSPEC_BASE = {"a.md": "# T\n\nShort line.\n", "long-note.md": "# S\n\nShort line.\n",
+                     ".ste-lint-exclude": "../gen/*.md\n"}
+bad_pathspec = {}
+
+
+def bad_pathspec_change(work):
+    long_sentence("long-note.md")(work)  # committed: a STE001 error in the PR range
+    p = subprocess.run(["git", "-C", work, "diff", "--name-only", "origin/main...HEAD", "--", "*.md",
+                        ":(exclude,glob)../gen/*.md"], capture_output=True, text=True)
+    bad_pathspec.update(rc=p.returncode, err=p.stderr)
+
+
+rc, out = run("changed", base=BAD_PATHSPEC_BASE, change=bad_pathspec_change)
+check("bad pathspec scope: git rejects the exclude line, exit non-zero, naming the path outside the repository",
+      bad_pathspec.get("rc", 0) != 0 and "outside repository" in bad_pathspec.get("err", ""), str(bad_pathspec))
+check("bad pathspec: exits 0, as an unknown read does", rc == 0, out)
+check("bad pathspec: one ste-lint line says unknown",
+      any(l.startswith("ste-lint: unknown") for l in out.splitlines()), out)
+check("bad pathspec: no `no markdown changed` line, since the changed files were not read",
+      "no markdown changed" not in out, out)
+check("bad pathspec: no ste-lint PASS verdict", "ste-lint: PASS" not in out, out)
+rc, out = run("changed", base={**BAD_PATHSPEC_BASE, ".ste-lint-exclude": "gen/**\n"}, change=long_sentence("long-note.md"))
+check("bad pathspec control: a valid exclude line lints long-note.md and exits 1 on its STE001",
+      rc == 1 and "long-note.md:3: STE001 " in out, out)
+
+
+# The content check of the tracked files cannot run (run.sh, the DIFF_RC branch). The copy of .git/index fails when the index
+# is gone or is a directory, so the working tree was not read. The step must print one ste-lint unknown line, exit 0, and print
+# no PASS, though a Markdown edit is uncommitted. The index is replaced after the fetch and just before the step (P7).
+index_state = {}
+
+
+def index_replaced(how):
+    def after(work):
+        index = os.path.join(work, git_read(work, "rev-parse", "--git-path", "index").strip())
+        index_state["dirty"] = " M draft-note.md" in git_read(work, "status", "--porcelain")
+        index_state["was_file"] = os.path.isfile(index)
+        os.remove(index)
+        if how == "dir":
+            os.mkdir(index)  # cp -p of a directory fails, as a missing file does
+        index_state["now"] = "dir" if os.path.isdir(index) else "missing" if not os.path.lexists(index) else "other"
+    return after
+
+
+for how in ("missing", "dir"):
+    rc, out = run("changed", base=UNCOMMITTED_BASE, change=edit_draft, after=index_replaced(how))
+    check("index %s scope: .git/index was a file, is now %s, and draft-note.md is modified" % (how, how),
+          index_state.get("was_file") is True and index_state.get("now") == how and index_state.get("dirty") is True,
+          str(index_state))
+    check("index %s: exits 0, as an unknown read does" % how, rc == 0, out)
+    check("index %s: exactly one ste-lint line says unknown" % how,
+          sum(l.startswith("ste-lint: unknown") for l in out.splitlines()) == 1, out)
+    check("index %s: no PASS line, from ste-lint or stale-cites" % how,
+          "ste-lint: PASS" not in out and "stale-cites: PASS" not in out, out)
+    check("index %s: no `no markdown changed` line" % how, "no markdown changed" not in out, out)
 
 
 # The step summary of a run with no merge base. It must say unknown, not "No markdown changed": nothing was read.
