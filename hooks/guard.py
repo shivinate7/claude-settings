@@ -1648,10 +1648,15 @@ WORKFLOW_REL = re.compile(r"^\.github/workflows/[^/]+\.ya?ml$")
 WORKFLOW_STEP_KEYS = {"name", "if", "run", "shell", "working-directory", "timeout-minutes"}
 WORKFLOW_STEP_START = re.compile(r"^(\s*)-\s+(name|run):")
 WORKFLOW_KEY_LINE = re.compile(r"^(\s*)(?:-\s+)?([A-Za-z][\w-]*):\s*(.*)$")
-WORKFLOW_INTERPRETERS = {"python", "python3", "node", "bash", "sh", "pwsh"}
-# Interpreter flags whose next token is their value, not the script (`python -X utf8`, `node -r ts-node/register`).
-WORKFLOW_VALUE_FLAGS = {"-X", "-W", "-r", "--require", "--import", "-o"}
+WORKFLOW_INTERPRETERS = {"python", "python3", "py", "node", "bash", "sh", "pwsh"}
+# Flags whose next token is their value, not the script: an interpreter's (`python -X utf8`, `node -r
+# ts-node/register`) and pytest's (`pytest -k expr F`, `-m mark`, `-c cfg`, `-p plugin`).
+WORKFLOW_VALUE_FLAGS = {"-X", "-W", "-r", "--require", "--import", "-o",
+                        "-k", "-m", "-p", "-c", "--rootdir", "--deselect", "--ignore", "--ignore-glob",
+                        "--confcutdir", "--basetemp", "--junitxml", "--maxfail", "--durations", "--tb",
+                        "--import-mode", "--cache-dir"}
 # Interpreter flags after which a command or module follows, so no script path does (`python -m`, `bash -c`).
+# Not so for pytest, whose `-m` and `-c` take a value (`python -m pytest -m mark F`).
 WORKFLOW_NO_PATH_FLAGS = {"-c", "-m"}
 # The word a runner takes before its script (`uv run F`, `npx tsx F`), and the module `python -m` hands its
 # arguments to as scripts (`python -m pytest F`). Read only for a caller that names the runner.
@@ -1681,6 +1686,7 @@ def workflow_script_index(args, runner=None):
     `uv run`, `bun run`, `deno run`, `npx tsx` (WORKFLOW_RUNNER_VERBS) and `python -m pytest`
     (WORKFLOW_RUNNER_MODULES). A caller that passes none reads the interpreters alone."""
     verbs = WORKFLOW_RUNNER_VERBS.get(runner, ()) if runner else ()
+    pytest = runner in ("pytest", "py.test")
     index = 0
     while index < len(args):
         arg = args[index]
@@ -1691,8 +1697,9 @@ def workflow_script_index(args, runner=None):
             index += 1
         elif runner and arg == "-m" and args[index + 1:index + 2] and args[index + 1] in WORKFLOW_RUNNER_MODULES:
             index += 2
+            pytest = True
         elif arg.startswith("-"):
-            if arg in WORKFLOW_NO_PATH_FLAGS:
+            if arg in WORKFLOW_NO_PATH_FLAGS and not pytest:
                 return None
             index += 2 if arg in WORKFLOW_VALUE_FLAGS else 1
         else:
