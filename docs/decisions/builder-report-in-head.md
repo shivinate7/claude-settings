@@ -13,7 +13,7 @@ The lane rule: before a lane spawns the reviewer, it runs `python3 ~/.claude/lin
 - A fix round passes `--base <last reviewed head>`, so a refused fix-round edit to a file round 1 already touched still fails.
 - A 0 passes. The lane spawns the reviewer.
 - A 1 sends the builder back. The output names each reported path that is not in the diff.
-- A 2 is reported as unknown (branch not on origin, git failure, no `Files:` line, an empty one, or an absolute path). The lane does not call it a pass.
+- A 2 is reported as unknown (branch not on origin, git failure, no `Files:` line, an empty one, an absolute path, or a report that is not UTF-8). The lane does not call it a pass.
 - The reviewer brief carries the verdict. The reviewer never re-runs the check (`roles-each-layer-proves-once`, each layer proves a change once).
 
 Scope: reported but not in the diff only. A changed file the report leaves out is not judged.
