@@ -4,10 +4,14 @@
     python3 lint/check_cost_pins.py [--root DIR]
 
 A Cost paragraph starts at a line whose first word is `Cost` followed by a character that is not a letter
-(`Cost:`, `Cost.`, `Cost, per`, `Cost of`, `**Cost**:`), bare or after a list marker or bold marks. `Costs` and `Costly`
-start none. It runs until a blank line, a list item at the same or a lesser indent than the Cost line, a heading or a
-code fence. A deeper list item stays in it. Fenced code is not read. A paragraph with an odd number of backticks cannot
-be read: it is one finding on its first line.
+(`Cost:`, `Cost.`, `Cost, per`, `Cost of`, `**Cost**:`), bare or after a list marker (`-`, `*`, `8.`, `3)`) or bold
+marks. `Costs` and `Costly` start none. It runs until a blank line, a list item at the same or a lesser indent than the
+Cost line, a heading or a code fence. A deeper line or list item stays in it. Fenced code is not read. A paragraph with
+an odd number of backticks cannot be read: it is one finding on its first line.
+
+A heading of any level whose text starts with that word (`## Cost`, `### Cost per call`) opens a cost section. Its body
+up to the next heading is cost text: each paragraph in it is read as a Cost paragraph, whatever its first word. The
+heading line itself is not read.
 
 Each sentence of a paragraph is read alone. A sentence ends at ". ", "! " or "? " outside backticks, or at the
 paragraph end. Closing marks `)`, `*`, `"` and `'` after the stop belong to the sentence it ends.
@@ -35,7 +39,8 @@ import layout  # noqa: E402  the one home of where records live (lint/layout.jso
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-COST_START = re.compile(r"^\s*(?:[-*]\s+)?(?:\*\*)?Cost(?![A-Za-z])")
+COST_START = re.compile(r"^\s*(?:(?:[-*]|\d+[.)])\s+)?(?:\*\*)?Cost(?![A-Za-z])")
+COST_HEADING = re.compile(r"^\s{0,3}#{1,6}\s+(?:\*\*)?Cost(?![A-Za-z])")
 LIST_ITEM = re.compile(r"^(\s*)(?:[-*]|\d+[.)])\s")
 HEADING = re.compile(r"^\s{0,3}#")
 FENCE = re.compile(r"^\s*(?:```|~~~)")
@@ -57,7 +62,7 @@ def indent_of(text):
 
 def paragraphs(lines):
     """Each Cost paragraph of `lines` as a list of (line number, text)."""
-    found, current, fenced, base = [], None, False, 0
+    found, current, fenced, base, section = [], None, False, 0, False
     for number, text in enumerate(lines, 1):
         if FENCE.match(text):
             fenced = not fenced
@@ -65,12 +70,18 @@ def paragraphs(lines):
             continue
         if fenced:
             continue
-        item = LIST_ITEM.match(text)
-        if COST_START.match(text):
+        if HEADING.match(text):
+            # each heading ends the section before it; only a Cost heading opens a new one
+            section, current = bool(COST_HEADING.match(text)), None
+            continue
+        if not text.strip():
+            current = None
+            continue
+        outdented = bool(LIST_ITEM.match(text)) and indent_of(text) <= base
+        if COST_START.match(text) or (section and (current is None or outdented)):
             current, base = [(number, text)], indent_of(text)
             found.append(current)
-        elif (current is not None and text.strip() and not HEADING.match(text)
-              and not (item and indent_of(text) <= base)):
+        elif current is not None and not outdented:
             current.append((number, text))
         else:
             current = None

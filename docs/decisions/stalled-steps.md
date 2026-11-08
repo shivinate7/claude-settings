@@ -45,7 +45,7 @@ No process or timer. Per Stop, the hold adds:
 - Entries: one own-record transcript read (`_own_tier_proved`).
 - A Stop after a refusal (`stop_hook_active`) with entries: that read, and one more for the Input Needed check (`last_reply`, since the hook carries no reply text).
 - Each verdict-run build in the transcript: one log read.
-- A build result in the transcript: `build.py` loads for its line prefix.
+- A build result in the transcript: `build.py` loads for its line prefix (not pinned: no test counts the load).
 - A lifted override: one claim-marker file, once per override.
 
 `build` reads the live file triage already writes.
