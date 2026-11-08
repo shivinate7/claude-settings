@@ -2561,7 +2561,7 @@ def check_review_ranges(root, host, info, base, body):
     a start S passes when (1) S is an ancestor of, or is, the lane head; (2) for each named parent P, merge-base(lane head, P's head) is an ancestor of, or is, S;
     (3) `git rev-list --no-merges S --not <each parent head> origin/<base>` is empty. A start that does not resolve, or a hex start under 7 digits, refuses.
     A start equal to a parent's branch, bare or as origin/<branch>, is that parent's head. `info` is the lane PR's read and `base` its base branch.
-    Fetches the base, the lane branch and each parent branch, each checked against the head gh named (fetch_branch). Any git or host error refuses.
+    Fetches the base and the lane branch, checked against the head gh named (fetch_branch), and each parent's head by its sha. Any git or host error refuses.
     A parent with no range passes with one note line. Raises Stop on the first bad start. Reads each parent's PR once."""
     parents = parent_prs(body)
     if not parents:
@@ -2581,8 +2581,10 @@ def check_review_ranges(root, host, info, base, body):
 
     fetch_branch(root, base)
     fetch_branch(root, info["branch"], lane)
-    for i in infos.values():
-        fetch_branch(root, i["branch"], i["head"])
+    for n, i in infos.items():  # by sha, not branch: a merged parent's branch may be deleted while its head stays on origin
+        c, out = git(root, "fetch", "-q", "origin", i["head"])
+        if c:
+            refuse(starts[0], f"cannot be judged: git fetch origin {i['head'][:9]} (#{n}'s head) failed, so that head is on no remote this clone reads: {out}")
     branch_heads = {name: i["head"] for i in infos.values() for name in (i["branch"], f"origin/{i['branch']}")}
     for start in starts:
         if SHORT_HEX.fullmatch(start):
