@@ -113,6 +113,7 @@ The URL is the `waiting-page` key in the repo's extras file, `.claude/layout-ext
     When the cloud refused the act, the session first asks a session on the owner's computer
     (`list_computer_folders`, then `request_computer_folder`), and the line names that outcome.
     The writer refuses a task with no such line (guard rule `task-names-check`).
+    When the line says a session cannot do the act (refused, denied, cannot, unavailable, 403), it ends with a cite: `(route <id>)`, an id from the route rows file whose row says refused or asks, or `(measured <YYYY-MM-DD>, <check and result>)`. A row that says the act works, an id no row holds, a measurement with no date, and a tool name in backticks are refused (guard rule `task-why-cited`).
   - `reply` (a string) is what the session says back to a comment or a note. The card shows it as "Reply: <text>".
     A reply over 220 characters folds to three lines, with a "More of the reply" button.
   - `replied` (an ISO time) is when the writer last wrote `reply` or changed `waits`. The writer sets it to now in the same update. A write of `lastAnswer` alone never sets it, because it copies the owner's own answer. Dropping `lane` sets none. The page
@@ -256,13 +257,14 @@ is main's `page.html` with the live `designData` and roadmap blocks kept, never 
 
 1. Read the page with `Artifact` action `read`. Use the file the read names as the saved full page.
    A read that gives a summary, not the raw page, is `unknown`.
-2. Run `python3 ~/.claude/skills/waiting-page/stale_pages.py --page <file> --write <out> --items <items>`, where
-   `<items>` is what `ArtifactData list items` saved. It
+2. Run `python3 ~/.claude/skills/waiting-page/stale_pages.py --page <file> --write <out> --items <items> --answers <answers>`, where
+   `<items>` and `<answers>` are what `ArtifactData list items` and `ArtifactData list answers` saved. It
    compares the page's code outside `designData` with `skills/waiting-page/page.html` on
    claude-settings main, and prints one line: `current`, `behind` or `unknown`, with the source it
    read. Code outside main's page, other than the host's document skeleton, is `behind`. Then it prints one
    `wait:` line per open item with `waits` (`ended`, `waiting` or `unknown`), and one `waiting` lane line per open item with
-   `lane` and `lastAnswer` and no `waits`. The exit code stays the page's.
+   `lane` and `lastAnswer` and no `waits`. Last, one `kept-answer:` line per closed item whose `answers/<id>` is still kept
+   (never an open item, an item with `waits`, an arbiter ruling or a park answer). The exit code stays the page's.
 3. Keep a copy of the page in the repo, from the same file ("Keep a copy in the repo"). Do it before any
    republish, so the copy holds the page as it was.
 4. `behind`: republish `<out>` to the same URL with the capabilities `db` and `{comments: {}}`.
@@ -279,7 +281,7 @@ repo's waiting page from a file behind main is refused, and its reason repeats s
 publish of main's page stamps main's page version, and the next session start says when the page is behind.
 
 Cost: on demand, inside a wake already running. One `Artifact read`, one python process, at most
-one short read-only git process, with no fetch, and one gh call per open item with `waits`. It writes `<out>` only, and no file without
+one short read-only git process, with no fetch, and one gh call per open item with `waits`, and with `--answers` one more `ArtifactData list answers` read. It writes `<out>` only, and no file without
 `--write`. No timer, no watcher. `test_stale_pages.py` proves the file count.
 
 ## Keep a copy in the repo
@@ -287,7 +289,7 @@ one short read-only git process, with no fetch, and one gh call per open item wi
 A page that is lost or moved to another org takes its items with it. Once, 80 items were rebuilt from old
 transcripts because no repo held them. So the writer keeps a copy of the page's data in the repo (decision
 `waiting-data-in-repo`). The copy lives on the repo's record branch, never on main. Main moves only by pull
-request. The record branch (`roadmap` by default, `layout.py` `record_branch()`) takes a direct push.
+request. The record branch (`roadmap` by default, `~/.claude/lint/layout.py` `record_branch()`) takes a direct push.
 
 The writer runs this at each wake, as step 3 of "Keep the page on main's code", before any republish. A lane
 never runs it. There is one path: the record branch's own worktree. Never write the copy anywhere else.
@@ -409,7 +411,7 @@ live page.
      Carry `port: true` again on each update to a port item: the guard cannot see the stored field.
    - On a task, add the "Why yours:" line to `context` first. When the cloud refused the act, ask a
      session on the owner's computer before you write the task (`list_computer_folders`, then
-     `request_computer_folder`), and name that outcome in the line. The writer refuses a task without it.
+     `request_computer_folder`), and name that outcome in the line. The writer refuses a task without it. A capability reason in the line ends with `(route <id>)` or `(measured <YYYY-MM-DD>, <check and result>)`; the writer refuses it otherwise.
      Carry `kind: task` again on a `context` update: the guard cannot see the stored field.
    - Fill `holds` (never on a port item) whenever a lane, a merge or a PR waits on the answer. Never guess an urgency:
      with nothing waiting, leave `holds` out.
@@ -521,6 +523,11 @@ report (see the park branch below). A `none` answer on this path gets no new opt
   `page_grant.py` can never count it for a receiver. The routing session tells the owner in its reply that the receiver needs
   the owner's grant typed in the receiver's own session.
 
+The writer reads each `kept-answer:` line at its wake ("Keep the page on main's code", step 2). The item is closed and its answer is still kept:
+re-read `answers/<id>`, then delete it (pinned to its version), or, when the act is not done, reopen the item with `lane` and `lastAnswer`.
+An item with `waits` is never named: no delete happens during a wait.
+A `kept-answer: unknown` line means that the check did not run: fetch again.
+
 Never-ending wait. The owning session checks the receiver at each turn start while it holds a lane item. It reads every page
 of `list_sessions`, with no `tags` argument, and picks the row whose `tags` hold `cs-step:<lane>`, or for a standing session
 `cs-build:<tier>` and the same `cs-repo:` tag. Then it reads the receiver with `get_session`. Cost: every page once per turn
@@ -542,7 +549,7 @@ delete of `answers/<id>` wait for the done report. A Park is the exception (see 
    decision entry, the roadmap step or the PR, as rule `output-answer-has-a-home` (an answer has a
    home) says. When it is there, update the receipt with `filed` set to now. A `none` answer with a clear
    direction becomes a step: a roadmap step, sent to triage, if the repo has a roadmap (its record branch exists:
-   `record_branch()` in `lint/layout.py` names it, default `roadmap`). Otherwise it becomes a todo record
+   `git rev-parse --verify --quiet origin/<branch>^{commit}` succeeds, with `<branch>` from `record_branch()` in `~/.claude/lint/layout.py`, default `roadmap`). Otherwise it becomes a todo record
    (layout `todo` or `debts`). When the home is a roadmap step, the filed note cites `page item <n>`, which the
    roadmap upkeep row "page rulings not on their step" checks.
 2. Close the item: `ArtifactData update items/<id> {"status": "closed"}`, pinned to the version
@@ -571,7 +578,7 @@ delete of `answers/<id>` wait for the done report. A Park is the exception (see 
 
 A parked answer (`answers/park.<id>`, or an item's answer with `act: "park"` under `answers/<item id>`): the writer waits 10 seconds after its `at`, as for an item's answer, so it never routes an act inside the Undo window.
 Then it reads the answer again (`ArtifactData get`). If it is gone, the owner undid or withdrew it: leave the entry, and rule nothing.
-This re-read saves nothing to the inbox, because the hook skips a document with `parked: true`. Then the writer finds the entry in `meta/page.parked` by `id`.
+A re-read of `answers/park.<id>` saves nothing to the inbox, because the hook skips a document with `parked: true`. An item's park answer has no `parked` key, so the hook saves its note when it has one. Then the writer finds the entry in `meta/page.parked` by `id`.
 A chat word on a parked line takes the same branch. That word is the Copy text (`Unpark "<ref>"` or `Drop "<ref>"`).
 A Copy word `<n> park (<note>)` parks the open item numbered `<n>`, with that note, by the park answer branch below.
 The writer finds the entry by its `ref`, or by its `id` when the word names it. Nothing is in `answers/`, so it skips the wait, the re-read and the answer delete.
@@ -736,7 +743,7 @@ Page URL keys and the retired roadmap URL: skill `roadmap`, first paragraph.
 
 A batch that changes `page.html` republishes each waiting page this account can reach, before the
 batch report. The pages are the `waiting-page` keys of the repos' extras files, read by
-`live_pages()` in `lint/layout.py`.
+`live_pages()` in `~/.claude/lint/layout.py`.
 
 1. Fetch each page with `Artifact` action `read` into one folder, as `<artifact id>.html`. A page
    that cannot be read gets an empty `<artifact id>.unreadable`. A read that gives a summary, not
