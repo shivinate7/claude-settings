@@ -917,15 +917,21 @@ def _own_tier_proved(transcript: str, tier: str) -> bool:
 
 def _command_words(args):
     """`args` up to the end of their command. The segment splitter cuts at `&&`, `||`, `;`, `|` and a
-    newline, but not at `(`, `)` or a lone `&`. A `)` glued to a word closes the subshell the command
-    sits in, and a glued `&` sends it to the background: either ends that word and the command."""
+    newline, but not at `(`, `)` or a lone `&`. A `)` glued to a word ends the command only when it
+    closes a subshell the command sits in: a `)` that closes a `$(` or `(` opened among the args
+    (`$(git branch --show-current) -f`) stays, with the words after it. A glued `&` sends the command
+    to the background and ends it."""
     words = []
+    depth = 0
     for arg in args:
         word = arg.rstrip(")&")
-        if word != arg:
+        tail = arg[len(word):]
+        depth += word.count("(")
+        if tail and ("&" in tail or tail.count(")") > depth):
             if word:
                 words.append(word)
             break
+        depth -= tail.count(")")
         words.append(arg)
     return words
 
