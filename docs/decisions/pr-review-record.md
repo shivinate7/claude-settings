@@ -58,11 +58,11 @@ A change is done when one of these holds (rule `roles-review-cap-three`):
 
 ## The cost
 
-Counted as real `gh` calls, one call per list read however many pages it pages.
+Counted as real `gh` calls, one call per page of a list read. Most reads fit one page of 100.
 
-- `merge --reviewed` makes two list calls per run. One lists the open PRs. The other lists the repo's issue comments since the oldest open PR, so it pages every comment of the repo since then, not only review records. The cost grows with the repo's comment traffic and with the age of the oldest open PR.
+- `merge --reviewed` makes two list reads per run. One lists the open PRs. The other lists the repo's issue comments since the oldest open PR, so it pages every comment of the repo since then, not only review records. The cost grows with the repo's comment traffic and with the age of the oldest open PR.
 - Not a `gh` call: each `--reviewed` run also runs one `git fetch origin main` (`load_config`) and local git reads.
-- Each ready PR that has a record adds three calls: the check runs, the commit statuses and the branch protection (required checks mode `protection`). A draft, and a PR with no record, add none.
+- Each ready PR that has a record adds three reads: the check runs, the commit statuses and the branch protection (required checks mode `protection`). A draft, and a PR with no record, add none.
 - One ready PR with a record: five calls. With a pinned `merge.requiredChecks` list: also five, because the one protection compare moves to the start of the run and the per-PR protection read goes.
 - `merge <pr> --review-record`: one PR read per call. `--fix-check` adds one paged read of the repo's issue comments since the PR opened. It writes nothing.
 - No new long-lived process, file, cache or timer. The batch runner calls the list at each wake. A lane calls the render at each round.
@@ -73,8 +73,11 @@ Counted as real `gh` calls, one call per list read however many pages it pages.
 Rule `pr-review-record`, in `hooks/guard.py` (PreToolUse).
 
 - The mistake: a lane typed the Head by hand on PR #1475 (15:10 CST, 2026-11-07). The record named a head that was not the live one, so the batch runner read it as stale.
-- The second mistake: the records on PR #1502 and PR #1535 had prose after the CI line, so `parse_review` returned None and a lane fixed each by hand. The harm: `merge --reviewed` cannot read such a record, so the merge stalls. A body that opens with the marker must be the render output as it is, or the render output, a line exactly `---`, then a footer, with nothing between the CI line and `---`. One judge, `review_form_hit` in `hooks/guard_merge.py`, checks that form for a post and for an edit, and its refusal names that form.
-- The runner's reads name the same remedy. `merge --reviewed` puts it in the `bad:` line of a record that does not parse, and `merge --fix-check` puts it in its refusal when the newest earlier record does not parse. Text after the CI line gets the `---` sentence: put free text below a line exactly `---`, with nothing between the CI line and `---` (`REVIEW_RULE_REMEDY`, the one home, also read by the guard). Any other form gets the render command (`review_unparsed_why`); the guard adds the conditional footer sentence (`REVIEW_FOOTER_REMEDY`).
+- The second mistake: the records on PR #1502 and PR #1535 had prose after the CI line, so `parse_review` returned None and a lane fixed each by hand. The harm: `merge --reviewed` cannot read such a record, so the merge stalls.
+- A body that opens with the marker must be the render output as it is. Or it is the render output, a line exactly `---`, then a footer, with nothing between the CI line and `---`.
+- The post judge, `review_record_hit` in `hooks/guard_merge.py`, checks that form, then the record's `PR:` against the target and its `Head:` against the live head. The edit judge, `review_form_hit` in the same file, checks that form alone, with no read. Both judges' form refusals name that form.
+- The runner's reads name the same remedy. `merge --reviewed` puts it in the `bad:` line of a record that does not parse. `merge --fix-check` puts it in its refusal when the newest earlier record does not parse.
+- Text after the CI line gets the `---` sentence (`REVIEW_RULE_REMEDY` in `merge/merge.py`, also read by the guard). Any other form gets the render command (`review_unparsed_why`). The guard adds the conditional footer sentence (`REVIEW_FOOTER_REMEDY`).
 - It judges a post of a comment whose body starts with the marker, as its first line (`parse_review` reads it so): `mcp__github__add_issue_comment`, `gh pr comment` and `gh issue comment` (`--body`, `-b`, `--body-file`, `-F`) and `gh api repos/O/R/issues/<n>/comments` (`-f`, `-F`, `--field`, `--raw-field` with `body=` or `body=@file`). A heredoc body counts. A `$'...'` body is decoded first, as bash sends it (`ansi_c_decoded` in `hooks/guard_merge.py`, read only by this judge). A body of exactly `$(cat FILE)`, and a stdin body piped from `cat FILE`, are read from FILE. `--input` bodies are not read.
 - It refuses unless the body parses (`parse_review`), its `PR:` equals the target PR, and its `Head:` equals the PR's live head. The refusal prints the render command for the live head, `merge <pr> --review-record --head <live sha> ...`.
 - A malformed marked body is refused before any read.

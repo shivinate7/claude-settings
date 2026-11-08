@@ -1,6 +1,0 @@
-# Kept mockups never reach a main branch
-
-- **What.** A kept mockup reaches no main branch. The designer pushes only its own branch, and design-explore gathers the kept mockups onto a design branch with no PR step. Measured 2026-11-02, for html files in `docs/design` only: on origin/main, claude-settings 15, q_max 19, banchi 8, degen 14, mailaudit 6, joyous 0. Only on a non-main ref: claude-settings 3, and 0 for q_max, banchi, degen, mailaudit and joyous. Not in those counts: banchi's 7 more html in `designs/d4-*` on origin/roadmap.
-- **Where.** `agents/designer.md`: the push step (line 82) and the write scope (lines 14-15), which limits writes to the repo that spawned the designer. `skills/design-explore/SKILL.md`: step 6, Gather (lines 67-68).
-- **Decision.** `waiting-data-in-repo` (git is each artifact's home, and a mockup is an artifact too). Its lane's reading: a kept mockup lands in the repo's design folder on main, by PR. Branch `kept-mockup-merges` adds that step.
-- **Retire.** The designer and design-explore land the kept mockups in the repo's design folder on main, in one PR, as the decision says. The design folder is layout kind `design`, `docs/design` by default. Check: none yet. Add one that a kept mockup is on main after its PR merges.

@@ -71,7 +71,7 @@
     "roles-one-role-per-agent": {
       "mechanism": {
         "kind": "unmechanized",
-        "reason": "No hook judges it. A prompt hook sees only the event input, never what an agent did, and no check reads an agent's roles."
+        "reason": "No prompt hook judges it. By agent type, the guard (hooks/guard.py) refuses a builder's test-file write, a test-author's or designer's write outside its paths, and a record-writer's non-Markdown write. floor_hit reads a Haiku spawn's agent type only to judge its model. No check sees one agent do a second role's work inside its own paths."
       }
     },
     "roles-model-per-role-table": {
