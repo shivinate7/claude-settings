@@ -3343,7 +3343,7 @@ def source_record_problem(h, root, a, own_records):
     if h.review_comments(c["created_at"]).get(c["issue_number"], [""])[-1] != c["body"]:
         return None, f"--fix-base-record: that record is not the newest on #{c['issue_number']}"
     if rec["fix"]:
-        return None, "--fix-base-record: that record has a Fix check line, and a chain never runs through --fix-base-record, so a replacement pull request gets a fresh round 1 on its whole diff"
+        return None, "--fix-base-record: that record has a Fix check line, and a chain never runs through --fix-base-record"
     return rec, None
 
 MERGE_ROLES = {"batch-runner"}  # the one tier that may run `merge <pr> --confirm` in a cloud session; the coordinator never merges
