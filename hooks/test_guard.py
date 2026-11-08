@@ -8977,6 +8977,22 @@ for _name, _command in (
 ):
     sh("draft-pr: " + _name + " is refused", _command, "deny", "draft-pr", cwd=NOGIT,
        carries=DRAFT_REMEDY, lacks=DRAFT_LACKS)
+# A backtick span in a body that perl, ruby or node runs is a shell command, so it is judged. A written
+# file run by its interpreter and a body fed to it both reach the span, so each form is refused.
+TICK_BODY = {
+    "perl": "print `gh pr create -t x`;",
+    "ruby": "puts `gh pr create -t x`",
+    "node": "execSync(`gh pr create -t x`)",
+}
+for _lang, _file in (("perl", "f.pl"), ("ruby", "f.rb"), ("node", "f.js")):
+    _run = "%s %s" % (_lang, _file)
+    sh("draft-pr: a %s body with a backtick gh pr create span, run from a written file, is refused" % _lang,
+       "\n".join(["cat > %s <<'EOF'" % _file, TICK_BODY[_lang], "EOF", _run]), "deny", "draft-pr",
+       cwd=NOGIT, carries=DRAFT_REMEDY, lacks=DRAFT_LACKS)
+for _lang in ("perl", "ruby", "node"):
+    sh("draft-pr: a %s body with a backtick gh pr create span, fed to %s, is refused" % (_lang, _lang),
+       "\n".join(["%s - <<'EOF'" % _lang, TICK_BODY[_lang], "EOF"]), "deny", "draft-pr",
+       cwd=NOGIT, carries=DRAFT_REMEDY, lacks=DRAFT_LACKS)
 # Limits of the draft-pr rule (decision `draft-until-reviewed`), no case: `gh api -X POST .../pulls`,
 # `hub pull-request`, and short-flag clusters such as `-dt x` (refused, a rare false alarm).
 
