@@ -12,8 +12,10 @@ from guard_core import split_segments, agent_transcript_path
 from guard_merge import _plain_source, git_call_of
 from guard_push_delete import push_refspecs, push_target
 
-# The families a model id and a trailer both map to a name for. A word outside it names no model here, so the
-# check passes (fail open): `claude-zzz-9-9` and "Claude Code" are no model.
+# The families a model id and a trailer both map to a name for. An agent's model id with a word outside it maps to
+# nothing, so the check passes (fail open): `claude-zzz-9-9`. A trailer word outside it, with no version after it
+# ("Claude Code"), names no model and passes; with a version after it (`GPT-4`, `Claude 5.5`) it counts as a
+# model and is refused.
 MODEL_FAMILIES = ("opus", "sonnet", "haiku", "fable")
 # `claude-<family>-<major>-<minor>` then an optional suffix such as `[1m]`. A minor of three or more digits is a
 # date (`claude-sonnet-4-20250514`), not a version, so it maps to nothing.

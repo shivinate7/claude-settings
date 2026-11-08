@@ -135,10 +135,10 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        (commit-refuses-conflict-markers)
   commit-trailer-model deny. An agent's `git push` whose unpushed commits hold a Co-Authored-By trailer (git's
                        own trailer parse) that names another model family, or the same family with another
-                       version, than the agent's own: the last assistant record's `message.model` in its
-                       subagent transcript. A trailer with no model word passes. An unread transcript, an
+                       version, than the agent's own: the last assistant record's `message.model` and top-level
+                       `requestedModel` in its transcript; a trailer naming either passes. A trailer with no model word passes. An unread transcript, an
                        unmapped id or a git error allows. (commit-trailer-model)
-  frozen-path         deny. A write to the settings, hooks or global CLAUDE.md under
+  frozen-path          deny. A write to the settings, hooks or global CLAUDE.md under
                        `${CLAUDE_CONFIG_DIR:-$HOME/.claude}`. (frozen-path-resolves-shell-vars)
   config-edit          noted. A write to a project's own settings or hooks. See below.
   agent-model-cap   ask. A write to a settings file that sets or changes
