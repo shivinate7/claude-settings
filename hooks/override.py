@@ -91,11 +91,14 @@ import sys
 import uuid
 from datetime import datetime, timedelta, timezone
 
-try:  # stdlib only: the one home of the machine-text tags
-    from shared_names import MACHINE_TAGS, NOTICE_FRAMES
+try:  # stdlib only: the one home of the machine-text tags and the config dir
+    from shared_names import MACHINE_TAGS, NOTICE_FRAMES, config_dir
     NOTICE_TAGS = MACHINE_TAGS + NOTICE_FRAMES
 except ImportError:  # a missing or stale helper: the keyword grants still run, the plain ask grants nothing
     NOTICE_TAGS = ()
+
+    def config_dir():  # a copy by need: an override file must stay readable while the helper lands late
+        return os.environ.get("CLAUDE_CONFIG_DIR") or os.path.join(os.path.expanduser("~"), ".claude")
 
 ONCE_WINDOW = timedelta(minutes=10)  # how long a one-act override waits for its act
 CLAIM_KEEP = 2 * ONCE_WINDOW.total_seconds()  # seconds; past it, a marker's override has ended
@@ -191,8 +194,7 @@ def _path(session_id, *folder):
     cannot name a file."""
     if not isinstance(session_id, str) or not SESSION_ID.fullmatch(session_id) or session_id[0] == ".":
         return None
-    base = os.environ.get("CLAUDE_CONFIG_DIR") or os.path.join(os.path.expanduser("~"), ".claude")
-    return os.path.join(base, "state", "override", *folder, session_id + ".json")
+    return os.path.join(config_dir(), "state", "override", *folder, session_id + ".json")
 
 
 def _write(path, data):
