@@ -27268,9 +27268,11 @@ role_opus_refuse("role-model: granted round 4 on opus with a valid Grant line is
            "reviewer", "opus", GRANT_ROUND_4 + "\n" + GRANT_CITE)
 # The Rounds paragraph of agents/reviewer.md is the text a granted fourth round reads. Each clause is matched on
 # its words within one sentence, not on the whole paragraph, so a reword that keeps those words still passes.
+# The brief's clause bounds its gap to a verb and an optional `with`. The report's own marker sits later in the
+# same sentence, so an open gap would match that marker when the brief's marker is gone.
 GRANTED_CLAUSES = (
-    ("a granted round's brief opens with Round 4 of 4",
-     (r"\bbrief (?:opens|starts|begins)\b.*\bround 4 of 4\b",)),
+    ("a granted round's brief names Round 4 of 4",
+     (r"\bbrief \w+(?: with)? round 4 of 4\b",)),
     ("round 4 is then the last round", (r"\bround 4 is (?:then )?the (?:last|final) round\b",)),
     ("round 4, not round 3, holds the net-value lines",
      (r"\bround 4\b", r"\bnot round 3\b", r"\bholds\b", r"\bnet-value lines\b")),
