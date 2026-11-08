@@ -2455,14 +2455,14 @@ class CutLanes(Env):
         self.assertTrue(self.has_local("stray"), f"a local branch at no lane tip was deleted; out: {out!r}")
         self.assertNotIn("stray", out)
 
-    def test_deleteBranch_false_keeps_every_lane_and_reads_open_prs_once_for_the_gate(self):
-        # The third-round gate reads the open pull requests once when the batch has lane tips (decision pr-review-record, the cost). The
-        # deletion's own read does not run here, so the one read is the gate's.
+    def test_deleteBranch_false_keeps_every_lane_and_the_gate_reads_no_open_prs(self):
+        # The third-round gate reads no open pull request (decision pr-review-record, the cost). The deletion's read does not run here either:
+        # cut_lanes runs only with deleteBranch on, so no open-PR read runs at all.
         put_base_config(self, json.dumps(dict(CONFIG, merge=dict(CONFIG["merge"], deleteBranch=False))))
         lane_batch(self, "lane1", "lane2")
         rc, out = self.go()
         self.assertEqual(rc, 0, out)
-        self.assertEqual(self.host.open_calls, 1)
+        self.assertEqual(self.host.open_calls, 0)
         self.assertNotIn("merge: lane", out)
         for b in ("lane1", "lane2", "feat"):
             self.assertNotEqual(self.head(b), "")
@@ -12970,12 +12970,12 @@ class ReviewGatePreview(ReviewGateEnv):
         self.assertEqual(rc, 0, out)
 
 class ReviewGateCost(ReviewGateEnv):
-    """What the third-round gate reads (decision pr-review-record, the cost): the repo's comment list once, and the open pull requests once when
-    the batch has lane tips, never for a pull request with no tips. A preview runs the gate alone. A confirm also runs cut_lanes, which reads the
-    open pull requests after the merge, so the confirm case keeps its branches: the one open-PR read it counts is the gate's."""
+    """What the third-round gate reads (decision pr-review-record, the cost): the repo's comment list once, and no open pull request. A preview
+    runs the gate alone. A confirm also runs cut_lanes, which reads the open pull requests after the merge, but only with deleteBranch on. The
+    confirm case keeps its branches, so no open-PR read runs at all."""
 
     def counted(self, host):
-        """Counts the gate's two reads on `host`, after scope() has made its own. -> (comment reads, open-PR reads): each gains one entry a call."""
+        """Counts the gate's reads on `host`, after scope() has made its own. -> (comment reads, open-PR reads): each gains one entry a call."""
         comments, opens = [], []
         real_comments, real_opens = host.review_comments, host.open_heads
         def review_comments(since):
@@ -12987,7 +12987,7 @@ class ReviewGateCost(ReviewGateEnv):
         host.review_comments, host.open_heads = review_comments, open_heads
         return comments, opens
 
-    def test_a_batch_with_lane_tips_reads_the_comment_list_once_and_the_open_prs_once(self):
+    def test_a_batch_with_lane_tips_reads_the_comment_list_once_and_the_gate_reads_no_open_prs(self):
         tips = lane_batch(self, "agent/lane1", "agent/lane2")
         host = self.batch_host(tips, [gate_comment(1, 8, tips["agent/lane1"], guard="no", rounds=REVIEW_PASS)])
         self.scope(tips, host)
@@ -12995,7 +12995,7 @@ class ReviewGateCost(ReviewGateEnv):
         rc, out = self.run_merge("7", host=host)
         self.assertEqual(rc, 0, out)
         self.assertEqual(len(comments), 1, f"the comment list was read {len(comments)} times, want 1:\n" + out)
-        self.assertEqual(len(opens), 1, f"the open pull requests were read {len(opens)} times, want 1:\n" + out)
+        self.assertEqual(len(opens), 0, f"the open pull requests were read {len(opens)} times, want 0:\n" + out)
 
     def test_a_pull_request_with_no_lane_tips_reads_the_comment_list_once_and_no_open_prs(self):
         host = self.batch_host({}, [gate_comment(1, 7, self.head("feat"), guard="no", rounds=REVIEW_PASS)])
@@ -13005,7 +13005,7 @@ class ReviewGateCost(ReviewGateEnv):
         self.assertEqual(len(comments), 1, f"the comment list was read {len(comments)} times, want 1:\n" + out)
         self.assertEqual(len(opens), 0, f"the open pull requests were read {len(opens)} times, want 0 with no lane tips:\n" + out)
 
-    def test_a_confirm_that_keeps_its_branches_reads_the_comment_list_once_and_the_open_prs_once(self):
+    def test_a_confirm_that_keeps_its_branches_reads_the_comment_list_once_and_the_gate_reads_no_open_prs(self):
         put_base_config(self, json.dumps(dict(CONFIG, merge=dict(CONFIG["merge"], deleteBranch=False))))
         tips = lane_batch(self, "agent/lane1", "agent/lane2")
         host = self.batch_host(tips, [gate_comment(1, 8, tips["agent/lane1"], guard="no", rounds=REVIEW_PASS)])
@@ -13015,7 +13015,7 @@ class ReviewGateCost(ReviewGateEnv):
         self.assertEqual(rc, 0, out)
         self.assertTrue(getattr(host, "merged", False), "the confirm did not reach the merge:\n" + out)
         self.assertEqual(len(comments), 1, f"the comment list was read {len(comments)} times, want 1:\n" + out)
-        self.assertEqual(len(opens), 1, f"the open pull requests were read {len(opens)} times, want 1:\n" + out)
+        self.assertEqual(len(opens), 0, f"the open pull requests were read {len(opens)} times, want 0:\n" + out)
 
 # The report-only model judge at merge. The merge reads each governed Markdown file at head, selects a file whose line
 # cites a changed backing file (lint/stale_cites.py backed_lines), and sends it to decision_watch.invoke_model once. The
