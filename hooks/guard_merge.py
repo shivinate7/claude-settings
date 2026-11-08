@@ -16,7 +16,7 @@ from guard_core import (
 import own_session  # the one home of the own get_session read, small so report_guard imports it too
 from shared_names import LANE_TAG, TOPIC_TAG, config_dir, lane_head_refs  # the one home of the lane tags and head refs, shared with the roadmap build
 from guard_pointer import (
-    pointer_checkout,
+    HEAD_MOVE_SUBCOMMANDS, pointer_checkout,
 )
 from guard_push_delete import (
     push_destinations, push_refspecs, push_target, push_text,
@@ -729,19 +729,20 @@ def _makes_conflict(call):
     return call[0] in _CONFLICT_VERBS and not {"--continue", "--abort"} & set(call[1])
 
 
-_HEAD_MOVERS = ("commit", "revert", "reset")
+# The verbs that can move HEAD: checkout and switch (one home, guard_pointer), the commit makers, and the
+# conflict verbs. A checkout of a path moves nothing, and counts: the guard cannot tell.
+_HEAD_MOVERS = HEAD_MOVE_SUBCOMMANDS + ("commit", "revert", "reset") + _CONFLICT_VERBS
 
 
 def _moves_head(call):
-    """True for a git step that can move HEAD: commit, revert, reset, and the conflict verbs (merge, pull,
-    rebase, cherry-pick, am), `--continue` and `--abort` too."""
-    return call[0] in _HEAD_MOVERS or call[0] in _CONFLICT_VERBS
+    """True for a git step whose verb is in `_HEAD_MOVERS`, `--continue` and `--abort` too."""
+    return call[0] in _HEAD_MOVERS
 
 
-def head_moved_before(segments, number):
-    """True when a segment before `segments[number]` moves HEAD, so a push there reads a head the shell
-    call has not reached yet."""
-    for segment in segments[:number]:
+def head_moved_before(parts):
+    """True when one of `parts` (the shell segments that run before a push, a lone `&` split too) moves HEAD, so
+    the push reads a head the shell call has not reached yet."""
+    for segment in parts:
         call = git_call_of(segment) if segment.strip() else None
         if call is not None and _moves_head(call):
             return True

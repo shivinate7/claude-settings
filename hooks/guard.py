@@ -3145,11 +3145,10 @@ def ask_command(rule: str, reason: str, matched: str, command: str) -> None:
         PENDING_ASK.append((rule, reason, matched, rule + ", " + command))
 
 
-def background_commands(segment: str) -> int:
-    """The commands in one segment once an unquoted single `&` also separates them. `&&` is already
-    split, and a `&` that joins a redirect (`&>`, `>&`, `<&`) is no separator. A `&` with nothing
-    before it (PowerShell's call operator, the tail of `|&`) or nothing after it (a trailing job)
-    adds no command. Local to ask-alone: split_segments stays as the other rules read it."""
+def background_parts(segment: str) -> list:
+    """The parts of one segment once an unquoted single `&` also separates them. `&&` is already
+    split, and a `&` that joins a redirect (`&>`, `>&`, `<&`) is no separator. Local to ask-alone and
+    the owed-record push read: split_segments stays as the other rules read it."""
     parts, quote, current, escaped = [], "", [], False
     for index, char in enumerate(segment):
         if escaped:
@@ -3166,7 +3165,25 @@ def background_commands(segment: str) -> int:
             continue
         current.append(char)
     parts.append("".join(current))
-    return max(1, sum(1 for part in parts if part.strip()))
+    return parts
+
+
+def background_commands(segment: str) -> int:
+    """The commands in one segment (see background_parts). A `&` with nothing before it (PowerShell's call
+    operator, the tail of `|&`) or nothing after it (a trailing job) adds no command."""
+    return max(1, sum(1 for part in background_parts(segment) if part.strip()))
+
+
+def head_moved_for_push(segments: list, number: int) -> bool:
+    """True when a step that runs before the push in `segments[number]` moves HEAD: an earlier segment, or an
+    earlier part of the same segment split on a lone `&`."""
+    before = [part for segment in segments[:number] for part in background_parts(segment)]
+    for part in background_parts(segments[number]):
+        call = git_call_of(part) if part.strip() else None
+        if call is not None and call[0] == "push":
+            break
+        before.append(part)
+    return head_moved_before(before)
 
 
 def count_commands(text: str) -> int:
@@ -3532,7 +3549,7 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
                 record_hit, record_reason = review_record_hit(transcript, lambda: push_destinations(args, where, overrides))
                 if record_hit:
                     refuse(tool, "deny", "push-needs-review-record", record_reason, record_hit)
-                owed = owed_record_hit(args, where, overrides, cwd, head_moved_before(push_segments, seg_number))
+                owed = owed_record_hit(args, where, overrides, cwd, head_moved_for_push(push_segments, seg_number))
                 if owed:
                     ask_command("push-owes-review-record", owed[1], owed[0], "push past an unrecorded review")
                 kind = push_ask_hit(args, where, overrides)
