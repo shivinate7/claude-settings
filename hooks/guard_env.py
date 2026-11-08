@@ -1411,9 +1411,14 @@ def _folders_at(pieces, number: int, bases, ends):
     """The folders the shell may be in when `pieces[number]` runs, started from each folder in `bases`
     (`dir_before_segment`, which falls back to the base when it cannot tell). A `cd` after `&&` or `||`
     might not run, so the segment is judged with each such `cd` run and skipped: all run, all skipped,
-    and each one skipped alone. A combination of two skipped is not tried, and a search that only runs
-    when its `cd` ran (`test -d D && cd D && rg K`) is judged in the folder before it too."""
+    and each one skipped alone. A combination of two skipped is not tried.
+
+    A skipped `cd` is judged only when the segment can still run without it: the `cd` follows `||`,
+    or a connector from the `cd` up to the segment is not `&&`. After `&&` with only `&&` up to the
+    segment (`test -d D && cd D && rg K`), the `&&` before the `cd` failed, so the chain stops there
+    and the segment never runs in the folder before the `cd`."""
     conditional = [at for at in range(1, number) if at <= len(ends) and ends[at - 1] in ("&&", "||")
+                   and (ends[at - 1] == "||" or any(end != "&&" for end in ends[at:number]))
                    and (tokens := segment_tokens(pieces[at])) and _segment_cd_move(tokens) is not None]
     variants = [list(pieces)]
     for skipped in ([conditional] + [[at] for at in conditional] if conditional else []):
@@ -1445,6 +1450,26 @@ def _text_folders(texts, cwd, places):
     return folders
 
 
+def _every_folder(texts, cwd):
+    """Every folder a segment of any text may run in, started from `cwd` (a folder, or a list of them).
+    It fails closed when the place of each substitution is not known (a heredoc body, whose own text
+    is dropped): each text is judged in every folder a `cd` in any text reaches. A `cd` in a nested
+    substitution moves from the folders found before it, so the search repeats until it finds no new
+    folder, once per text at most."""
+    found = [cwd] if isinstance(cwd, str) else list(cwd)
+    for _round in range(len(texts)):
+        new = []
+        for text, _in_message in texts:
+            ends = []
+            pieces = split_segments(text, ends)
+            for number in range(1, len(pieces)):
+                new += [f for f in _folders_at(pieces, number, found, ends) if f not in found + new]
+        if not new:
+            break
+        found += new
+    return found
+
+
 def _env_walk(texts, cwd, depth: int = 0, places=None):
     """Return (reason, log) when `rg` or `ag` with a hidden flag, `rg` with a positive glob, or a
     recursive grep, walks a folder that holds an env file on disk. The
@@ -1455,7 +1480,7 @@ def _env_walk(texts, cwd, depth: int = 0, places=None):
     The folder the command runs in is `cwd`, moved by each literal `cd <dir>` earlier in the command
     (`dir_before_segment`). A `cd` the guard cannot resolve (a variable, `popd`, a folder that does
     not exist) leaves the search at `cwd`. A `cd` after `&&` or `||` might not run, so the search is
-    walked in both folders (`_folders_at`). A search in a command substitution runs where the segment
+    walked in both folders when it can run without the `cd` (`_folders_at`). A search in a command substitution runs where the segment
     that holds it runs (`_text_folders`, from `places`), so `cd D && x=$(rg --hidden K)` walks D.
     `cwd` is a folder, or a list of them for a string that a conditional `cd` may run in.
 
@@ -1497,7 +1522,7 @@ def _env_walk(texts, cwd, depth: int = 0, places=None):
         return ENV_DEPTH_REASON, "shell strings nested past %d levels" % ENV_MAX_DEPTH
     pwd_text = any(text.strip() in ("pwd", "pwd -P", "pwd -L") for text, _ in texts[:-1])
     text_folders = _text_folders(texts, cwd, places) if places and len(places) == len(texts) else [
-        [cwd] if isinstance(cwd, str) else list(cwd)] * len(texts)
+        _every_folder(texts, cwd)] * len(texts)
     for index, (text, _) in enumerate(texts):
         ends = []
         pieces = split_segments(text, ends)
