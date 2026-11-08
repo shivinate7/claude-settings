@@ -2705,7 +2705,7 @@ def prose_judge_plan(wt, sha, base_ref, names, n):
             plan.append((PAST_CAP, [(path, number) for path, by_line in sorted(picked.items()) for number in sorted(by_line) if (path, number) not in packed]))
         return plan
     except Exception as e:  # selection failed: unknown, and the merge has landed
-        return [f"merge: #{n} prose judge UNKNOWN: it could not run ({type(e).__name__}: {' '.join(str(e).split())[:200]})."]
+        return [plain_text(f"merge: #{n} prose judge UNKNOWN: it could not run ({type(e).__name__}: {' '.join(str(e).split())[:200]}).")]
 
 def readable_verdicts(verdict, keyed=False):
     """verdict["verdicts"] when every entry has an integer line and one of the three words, else None: the reply is then unread, never partly read.
@@ -2758,15 +2758,18 @@ def prose_judge_run(plan, n):
     counts = dict.fromkeys(PROSE_JUDGE_CAUSES, 0)
     unread = {c: {} for c in PROSE_JUDGE_CAUSES}  # cause -> path -> [line numbers]
 
+    reported = set()  # (path, line) of each line already judged or named, so a failure in the loop names only the rest
+
     def lose(cause, path, number):
         counts[cause] += 1
         unread[cause].setdefault(path, []).append(number)
+        reported.add((path, number))
     answers = None  # None when the calls could not start: each job's lines are then a model error, and the past-cap lines still read past the cap
     try:
         import decision_watch
         answers = prose_judge_calls(decision_watch, [item[2] for item in plan or [] if not isinstance(item, str) and len(item) == 3])
     except Exception as e:
-        plan_failures.append(f"merge: #{n} prose judge UNKNOWN: it could not run ({type(e).__name__}: {' '.join(str(e).split())[:200]}).")
+        plan_failures.append(plain_text(f"merge: #{n} prose judge UNKNOWN: it could not run ({type(e).__name__}: {' '.join(str(e).split())[:200]})."))
     try:
         for item in plan or []:
             if isinstance(item, str):
@@ -2792,12 +2795,18 @@ def prose_judge_run(plan, n):
             said = {(e["path"], e["line"]): e for e in entries}
             for path, number in rows:
                 e = said.get((path, number))
+                reported.add((path, number))
                 if e is None:
                     lose(SKIPPED, path, number)
                 elif e["verdict"] != "holds":
                     findings.append(prose_judge_row(n, path, number, e["verdict"], e.get("why") or ""))
     except Exception as e:
-        plan_failures.append(f"merge: #{n} prose judge UNKNOWN: it could not run ({type(e).__name__}: {' '.join(str(e).split())[:200]}).")
+        plan_failures.append(plain_text(f"merge: #{n} prose judge UNKNOWN: it could not run ({type(e).__name__}: {' '.join(str(e).split())[:200]})."))
+        for item in plan or []:  # the loop stopped: every line it did not reach is unknown, never a pass
+            if not isinstance(item, str):
+                for path, number in item[1]:
+                    if (path, number) not in reported:
+                        lose(item[0] if len(item) == 2 else MODEL_ERROR, path, number)
     report = findings
     if len(report) > PROSE_JUDGE_MAX_LINES:
         report[PROSE_JUDGE_MAX_LINES:] = [f"merge: #{n} prose judge: {len(findings) - PROSE_JUDGE_MAX_LINES} more lines not shown"]
