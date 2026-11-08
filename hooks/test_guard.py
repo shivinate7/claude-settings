@@ -20591,6 +20591,37 @@ def worktree_home_cross_checkout_heredoc_text_case():
     check("control: ruby lone quote in a string, then a File.write into another checkout", "deny",
           "Bash", lane_a, command="ruby - <<'RB'\nputs \"it's\"\nFile.write(\"%s/x\", \"1\")\nRB" % other)
 
+    # A python heredoc's printed text is a command once a shell runs it, so a copy it names into
+    # another checkout is refused. The shell may run it through sh -c, eval, a substitution, or a
+    # script that the same command runs or globs.
+    check("sh -c runs the output of a python heredoc that prints a copy into another checkout",
+          "deny", "Bash", lane_a,
+          command="sh -c \"$(\npython3 - <<'PY'\nprint('cp x %s/y')\nPY\n)\"" % other)
+    check("eval runs the output of a python heredoc that prints a copy into another checkout",
+          "deny", "Bash", lane_a,
+          command="eval \"$(\npython3 - <<'PY'\nprint('cp x %s/y')\nPY\n)\"" % other)
+    check("a variable holds the output of a python heredoc that prints a copy, then sh -c runs it",
+          "deny", "Bash", lane_a,
+          command="x=$(\npython3 - <<'PY'\nprint('cp x %s/y')\nPY\n)\nsh -c \"$x\"" % other)
+    check("sh -c runs the output of a python heredoc that writes a copy with sys.stdout",
+          "deny", "Bash", lane_a,
+          command="sh -c \"$(\npython3 - <<'PY'\nimport sys; sys.stdout.write('cp x %s/y')\nPY\n)\""
+                  % other)
+    # A python heredoc that writes a script naming a copy into another checkout: a shell that runs
+    # the script in the same call, by name or by glob, is a run of the copy. The script alone, with
+    # no run in this call, is refused too, since a later call may run it.
+    check("python heredoc writes a script that copies into another checkout, then sh runs it by glob",
+          "deny", "Bash", lane_a,
+          command="python3 - <<'PY'\nopen('gen.sh','w').write('cp x %s/y\\n')\nPY\nsh *.sh" % other)
+    check("python heredoc writes a script that copies into another checkout, with no run in the call",
+          "deny", "Bash", lane_a,
+          command="python3 - <<'PY'\nopen('gen.sh','w').write('cp x %s/y\\n')\nPY" % other)
+    # Control: a python body that writes a JSON file that names a copy, and never runs it, is allowed.
+    check("control: python heredoc writes a JSON file that names a copy into another checkout",
+          "allow", "Bash", lane_a,
+          command="python3 - <<'PY'\nimport json\nopen('notes.json','w').write(json.dumps("
+                  "{'n': 'cp x %s/y'}))\nPY" % other)
+
     if problems:
         return False, "; ".join(problems)
     return True, "quoted python text passes; interpreter, perl and ruby writes into another checkout refused"
