@@ -12,7 +12,8 @@ The guard rule `commit-leaves-edit-unstaged` asks before a `git commit` when a t
 - `--amend` and `--dry-run` are read the same way and pass the same way.
 - One `git diff --cached --name-only` and one `git diff --name-only` call, both in the commit's own tree. Any other command makes no git call for this rule.
 - A read that fails passes.
-- A commit that follows a git call in the same command which changes the index (`git add -A && git commit`) passes, because the guard reads the index before that call runs.
+- The guard reads the index before the command runs. So in a chain, an earlier `git add <paths>` or `git rm <paths>` adds those paths to the commit and takes them out of the left-out set, and the check still runs. `git rm x && git commit` is the incident's own form.
+- Any other earlier git call that changes the index (`add -A`, `add .`, `add -u`, `reset`, `restore --staged`) makes the commit pass: its effect is not read.
 - It asks, and the owner's answer decides. An override lifts it.
 
 The ask names the left-out paths, so the reader sees what stays behind. Remedy: `git add <path>` for an edit that belongs in this commit, or commit it on its own.
