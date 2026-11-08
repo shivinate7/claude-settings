@@ -6,9 +6,10 @@ Output: lines written to $GITHUB_OUTPUT (stdout when unset):
   files, any                    every test either OS runs (the union), and whether it is non-empty
   files_windows, any_windows    the tests the Windows job runs
   files_macos, any_macos        the tests the macOS job runs
-  matrix                        {"include": [{"os", "files"}]}, one entry per OS that has tests; files is a list of
-                                {"path", "cmd"} sorted by path, cmd being the tokens before the path on the checks.yml run line
-                                (mod-tests.sh files: `node` for a mods test, `node --test` for a map skill test)
+  matrix                        {"include": [{"os", "files"}]}, one entry per OS that has tests; files is a sorted list of paths
+  commands                      {path: cmd} over every selected file: the tokens before the path on the checks.yml run line
+                                (mod-tests.sh files: `node` for a mods test, `node --test` for a map skill test). A file
+                                both systems run with different commands keeps the Windows one.
 Stdout also names every touched path and what became of it, so the run log shows each decision.
 
 A touched path selects:
@@ -297,13 +298,13 @@ def flag(listed):
 def write_outputs(windows, macos, cmds):
     """`cmds` is {OS word: {test: command}}."""
     files = sorted(set(windows) | set(macos))
-    matrix = [{"os": name, "files": [{"path": t, "cmd": cmds[word][t]} for t in sorted(listed)]}
-              for name, word, listed in (("windows-latest", "windows", windows), ("macos-latest", "macos", macos))
-              if listed]
+    matrix = [{"os": name, "files": sorted(listed)}
+              for name, listed in (("windows-latest", windows), ("macos-latest", macos)) if listed]
+    commands = {t: cmds["windows"][t] if t in cmds["windows"] else cmds["macos"][t] for t in files}
     lines = (f"files={json.dumps(files)}\nany={flag(files)}\n"
              f"files_windows={json.dumps(windows)}\nany_windows={flag(windows)}\n"
              f"files_macos={json.dumps(macos)}\nany_macos={flag(macos)}\n"
-             f"matrix={json.dumps({'include': matrix})}\n")
+             f"matrix={json.dumps({'include': matrix})}\ncommands={json.dumps(commands)}\n")
     target = os.environ.get("GITHUB_OUTPUT")
     if target:
         with open(target, "a", encoding="utf-8", newline="\n") as f:
