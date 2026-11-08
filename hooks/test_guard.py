@@ -21903,6 +21903,12 @@ sh("other-checkout: a git -C commit into a separate clone of the same repo is re
    VCS + " -C " + slash(XCL_SEP) + " commit -m x", "deny", "other-checkout", cwd=XCL_PRIMARY)
 sh("other-checkout: a git -C reset --hard into a separate clone of the same repo is refused",
    VCS + " -C " + slash(XCL_SEP) + " reset --hard", "deny", "other-checkout", cwd=XCL_PRIMARY)
+# A git -C into a separate clone, written to a script that sh then runs, is a write into that clone. The
+# direct form is refused on main; the script form is allowed on main as well as on 0343b6758 (a gap that
+# predates that commit), so this case is red on 0343b6758 and main alike.
+sh("other-checkout: a git -C reset --hard into a separate clone, redirected to a script that sh then runs, is refused",
+   "echo 'git -C " + slash(XCL_SEP) + " reset --hard' > /tmp/s.sh && sh /tmp/s.sh", "deny", "other-checkout",
+   cwd=XCL_PRIMARY)
 sh("other-checkout: a stranded cwd's git status is allowed",
    VCS + " status", "allow", cwd=XCL_SEP, env={"CLAUDE_PROJECT_DIR": XCL_PRIMARY})
 sh("other-checkout: a stranded cwd's git log is allowed",
