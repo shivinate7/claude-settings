@@ -188,6 +188,23 @@ WIDENING_TEMPLATE = (
 )
 
 
+# A question whose every option loses something large goes back to its writer for one more option (decision
+# question-form: the owner's ask that such a question not reach him as a forced loss). Appended after the `%`
+# formatting, after WIDENING_RULE on a page write, and on a box with a question of 2+ options. It has no `%`.
+TRADEOFF_RULE = (
+    "This call sets options. Judge their tradeoff, and push back when every option loses something large, so the "
+    "owner gives up a large gain whichever he picks. Read each option's lose on its own text: on the page its `lose` "
+    "field, in a box the `Lose:` part of its description. A lose is large when it gives up the Goal or a large part "
+    "of it, removes a safety check or a guard, cannot be undone, or costs money the owner pays (a purchase, a paid "
+    "seat or service). Model calls, Opus or Sonnet use, session time, waiting, a delay, more work for a session, a "
+    "small limit, or a lose that only says another option's gain is missed are not large. Skip this rule for options "
+    "the owner may pick together (multi-select, a `multi` item, or a pick that lists several keys). When every "
+    "option's lose is large, block, and in the reason ask the writer for one more option that keeps the gains of the "
+    "others, naming those gains. The option you ask for must never widen what a shared tool accepts (a second "
+    "accepted form, an allow-list entry, a per-repo exception). When unsure, allow."
+)
+
+
 def widening_rule():
     """The widening rule's text, with the mark's key from question_form.WIDENS_KEY."""
     import question_form
@@ -361,7 +378,7 @@ def main():
             raise ValueError("tool_input is not an object")
         prompt, model, timeout, rule, fallback = JUDGES[tool]
         units = []  # (Unvetted marker text, words) of each question this call asks the owner
-        reask = widening = False
+        reask = widening = sets_choice = False
         if tool == "AskUserQuestion":
             import question_form
             code_rule, matched = question_form.chat_hit(args)
@@ -370,6 +387,9 @@ def main():
                 return refuse(payload, tool, args, code_rule, reason)
             shown = json.dumps(args, ensure_ascii=False)
             units = question_form.chat_units(args)
+            qs = args.get("questions")
+            sets_choice = isinstance(qs, list) and any(
+                isinstance(q, dict) and isinstance(q.get("options"), list) and len(q["options"]) >= 2 for q in qs)
         elif tool == DATA_TOOL:
             if args.get("action") not in PAGE_WRITE_ACTIONS or not writes_an_item(args):
                 return 0
@@ -394,6 +414,8 @@ def main():
             full += "\n" + NONE_DIRECTION_RULE  # after `%`, so the rule's text never meets the formatter
         if widening:
             full += "\n" + widening_rule()
+        if widening or sets_choice:
+            full += "\n" + TRADEOFF_RULE
         verdict, error = invoke_model(full + tail, model=model, timeout=timeout, shape=OK_SHAPE, effort=None)
     except Exception as exc:
         print("call judge failed open: %s" % " ".join(("%s: %s" % (type(exc).__name__, exc)).split()),
