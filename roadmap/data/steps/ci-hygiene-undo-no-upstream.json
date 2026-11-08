@@ -1,0 +1,11 @@
+{
+  "title": "The ci-hygiene skill says to run check_silent_undo.py with no --upstream, so it compares against the PR base",
+  "why": "Coordinator 17:45 CST Nov 8; Merge after: #1869 (after it, a run with no --upstream resolves the PR base). Incident: lane notes-fix-large-1's hand-written #2052 fix-check brief passed origin/main to check_silent_undo, so the fix check passed a head that lane lint failed (a #2052 commit reverses a hunk of #1458's d561e8e1f; one 626 s lane-lint run lost). No tool passes origin/main; the brief copied the habit. Fix: the skills/ci-hygiene line that says to run check_silent_undo.py says \"with no --upstream\". Docs only.",
+  "note": "",
+  "phase": "now",
+  "owner": "claude-settings",
+  "lane": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB) to route",
+  "status": "todo",
+  "order": 848,
+  "updatedAt": "2026-11-08T17:46:00-06:00"
+}
