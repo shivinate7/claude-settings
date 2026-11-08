@@ -106,6 +106,11 @@ DIGIT_AT_257 = "abcdefgh" * 32 + "a1"
 DIGIT_AT_1000 = "abcdefgh" * 125 + "1"
 assert CAP_LAST_DIGIT.index("1") == 256 and DIGIT_AT_257.index("1") == 257 and DIGIT_AT_1000.index("1") == 1000, \
     "the digit fixtures must sit at their named indexes"
+# 300 digits and no letter, and the same with a letter after them at index 300. The long-value shape refuses a value with a
+# letter and a digit, and allows one with a digit and no letter. Only the long-value shape reads past index 256.
+DIGITS_300 = "7" * 300
+DIGITS_300_THEN_LETTER = DIGITS_300 + "a"
+assert DIGITS_300_THEN_LETTER.index("a") == 300, "the letter must sit at index 300, past the short shape's window"
 # A scan that re-reads a run from each start position takes about 16 times as long over four times the run; a linear
 # scan takes about 4 times. The bound sits between them. RUN_N is the shorter run, the longer run is four times it.
 RUN_N = 20000
@@ -277,6 +282,8 @@ RED = [
     ("digit at index 256 of a credential value", "API_KEY=" + CAP_LAST_DIGIT, CAP_LAST_DIGIT),
     ("digit at index 257 of a credential value", "API_KEY=" + DIGIT_AT_257, DIGIT_AT_257),
     ("digit at index 1000 of a credential value", "API_KEY=" + DIGIT_AT_1000, DIGIT_AT_1000),
+    # The letter at index 300 is past the short shape's window, so only the long-value shape can see it. It refuses.
+    ("API_KEY of 300 digits then a letter", "API_KEY=" + DIGITS_300_THEN_LETTER, DIGITS_300_THEN_LETTER),
 ]
 
 # (label, the note's value). Words, a URL, a time, an id and a number that are not secrets pass.
@@ -392,6 +399,8 @@ GREEN = [
     ("MY_TOKEN set to a long placeholder", "MY_TOKEN=<your-long-token-here>"),
     # The RED value at 1000 with no credential name in front: a fix that refuses any long value with a digit fails here.
     ("a long run of letters with a digit at index 1000, and no credential name", DIGIT_AT_1000),
+    # 300 digits and no letter is no secret: the long-value shape refuses only a value with a letter and a digit.
+    ("API_KEY of 300 digits and no letter", "API_KEY=" + DIGITS_300),
     ("prose with the word secret before a name", "the secret santa list"),
     # The names that do not count under the rule (bare token, camelCase, a hyphenated or a non-credential name) pass.
     # These four are false alarms today: each refuses on its value's length, so they are red on the builder's head.
