@@ -20656,6 +20656,57 @@ def worktree_home_cross_checkout_heredoc_text_case():
     return True, "quoted python text passes; interpreter, perl and ruby writes into another checkout refused"
 
 
+def worktree_home_cross_checkout_heredoc_list_argv_case():
+    """Rule 0, `other-checkout`, a quoted python judge script that runs the guard over a list argv with
+    no shell, beside `worktree_home_cross_checkout_heredoc_text_case`. Roadmap step python-text-list-argv:
+    such a script is text, so it passes, with its `check_output` form too. A list argv that starts with a
+    shell, a string argv, shell=True, or an argv held in a variable is a shell run, so it is refused.
+    Why: docs/decisions/an-agent-outside-its-home-tree-must-stop.md.
+    """
+    primary, lane_a, lane_b, _ = _cross_checkout_fixture("xcolistargv")
+    other = slash(lane_b)
+    problems = []
+
+    def check(label, expect, tool, cwd, **tool_input):
+        got, reason = _decide_full(tool, cwd, **tool_input)
+        if got != expect:
+            problems.append("%s: expected %s, got %s (%s)" % (label, expect, got, reason[:120]))
+        elif expect == "deny" and ("other-checkout" not in reason or primary in reason):
+            problems.append("%s: the refusal must name other-checkout and no path: %s" % (
+                label, reason[:160]))
+
+    # The judge script: each form differs only in its argv, shell flag or argv name, the body is one heredoc.
+    shell_line = "cp x %s/y" % other
+    feed = "input=json.dumps({'tool_name': 'Bash', 'tool_input': {'command': '%s'}}), text=True)" % shell_line
+
+    def judge(call):
+        return "python3 - <<'PY'\nimport json, subprocess, sys\n%s\nPY" % call
+
+    # Allowed: a list argv that names the guard, with no shell, run or checked for output.
+    check("judge script runs the guard over a list argv with no shell, quoting a copy into another checkout",
+          "allow", "Bash", lane_a,
+          command=judge("subprocess.run([sys.executable, 'hooks/guard.py'], " + feed))
+    check("judge script checks the guard's output over a list argv with no shell, quoting a copy into another checkout",
+          "allow", "Bash", lane_a,
+          command=judge("subprocess.check_output([sys.executable, 'hooks/guard.py'], " + feed))
+    # Controls: the same body, with an argv that is a shell run, a shell flag, or a variable, stays refused.
+    check("control: judge script whose list argv is bash -c over the copy", "deny", "Bash", lane_a,
+          command=judge("subprocess.run(['bash', '-c', '%s'], %s" % (shell_line, feed)))
+    check("control: judge script whose list argv is sh -c over the copy", "deny", "Bash", lane_a,
+          command=judge("subprocess.run(['sh', '-c', '%s'], %s" % (shell_line, feed)))
+    check("control: judge script whose argv is a string, with shell=True", "deny", "Bash", lane_a,
+          command=judge("subprocess.run('%s', shell=True, %s" % (shell_line, feed)))
+    check("control: judge script whose list argv to the guard carries shell=True", "deny", "Bash", lane_a,
+          command=judge("subprocess.run([sys.executable, 'hooks/guard.py'], shell=True, %s" % feed))
+    check("control: judge script whose argv is a variable that holds bash -c over the copy", "deny",
+          "Bash", lane_a,
+          command=judge("argv = ['bash', '-c', '%s']\nsubprocess.run(argv, %s" % (shell_line, feed)))
+
+    if problems:
+        return False, "; ".join(problems)
+    return True, "a list argv to the guard with no shell passes; a shell argv, shell=True or a variable argv is refused"
+
+
 def _stand_in_git(tag):
     """A stand-in `git` first on PATH. It appends each call's arguments to its log, then runs the real git.
     Returns (log, PATH) for a case to pass the guard, or (None, None) when no git is on PATH."""
@@ -22152,6 +22203,9 @@ LOG_CHECKS = (
     ("worktree-home: a quoted python body that only quotes a path in another checkout is allowed; a "
      "perl or ruby write into another checkout, or an interpreter body that runs one, is refused",
      worktree_home_cross_checkout_heredoc_text_case),
+    ("worktree-home: a quoted python judge script that runs the guard over a list argv with no shell "
+     "is allowed; a shell argv, shell=True, or an argv held in a variable is refused",
+     worktree_home_cross_checkout_heredoc_list_argv_case),
     ("worktree-home: a write into a worktree in the session's own scratchpad is allowed; another "
      "session's, an agent's, a sessionless, a symlinked and a climbing write are refused",
      worktree_home_scratchpad_case),
