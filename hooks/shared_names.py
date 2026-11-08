@@ -32,6 +32,8 @@ NOTICE_FRAMES = tuple(tag + end for tag in ("<webhook-payload", "<wake", "<teamm
 # An Explore may run Sonnet, above its Haiku row, only when its brief's first non-blank line carries this marker
 # (rule agent-role-model). Here, not in the guard, so the spawn judge names it without importing the guard.
 EXPLORE_AUDIT_MARKER = "Audit:"
+# A reviewer may run Sonnet, above its Haiku row, on a fix check: its brief's first line carries this marker, since a fix check has no review round to mark it.
+FIX_CHECK_MARKER = "Fix check"
 
 # THE BRIEF MARKER TABLE (rules agent-role-model, roles-third-round-steps-up; decision agent-model-cap). One row per
 # marker: (kind, regex text, position). guard.marker_hits is the one scanner that reads it. Cost: a pure scan of the
@@ -54,6 +56,7 @@ BRIEF_MARKERS = (
     ("round", r"^(?![ \t]*(?i:(?:round|try)[ \t]+\d[ \t]+of[ \t]+3\b))(?:(?!\b" + _ANY_ROUND_SHAPE + r").)*?\bRound" + _N_OF_3,
      "first-line"),
     ("audit", r"\b" + re.escape(EXPLORE_AUDIT_MARKER), "first-line"),
+    ("fixcheck", r"\b" + re.escape(FIX_CHECK_MARKER) + r"\b", "first-line"),
 )
 
 # The owner's two gh logins on his computer. A gh command handed to him switches to the default first;
