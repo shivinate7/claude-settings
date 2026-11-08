@@ -62,6 +62,14 @@ Text: `ANSWERED_REASON`, rule `answered-needs-source` (a claim of "answered" nee
 - A mention of the word, not a claim, can go in an inline code span.
 - Lines inside a code fence, and lines that end in a question mark, are not checked.
 
+### Closed-item guard (any reply)
+
+Text: the reason from `closed_item_problem`, rule `questions-go-to-owner` (every question reaches the owner through the waiting page).
+
+- Drop the line. The item is closed on the waiting page, so it is no question.
+- Or, if the line cites the ruling behind a new question, add the option letter (`item 214 a`) or write "closed" right after the ref.
+- The copy is read as of the last fetch of the record branch. Fetch it if the item was just reopened.
+
 ### Recovered guard (any reply whose report shape holds)
 
 Text: two inline facts in `recovered_problem`. The two line forms below live here only.

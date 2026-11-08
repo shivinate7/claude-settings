@@ -757,7 +757,7 @@ _ITEM_JOIN = r"(?:\s*,\s*(?:(?:and|or)\s+)?|\s*&\s*|\s+(?:and|or)\s+)"
 ITEM_CITE_RE = re.compile(
     r"\b(?:items?(?:\*\*|__)?\s*:?(?:\*\*|__)?\s+(\d+(?:" + _ITEM_JOIN + r"\d+)*)|page:(\d+))(?!\d)", re.IGNORECASE)
 # A ref followed by an option letter, `pick <letter>`, `option <letter>`, or a `note` that ends its clause cites the
-# owner's ruling on it, not an open question. Letters join only with "+", "/" or "and" (a+c, a/c, a and c): "a or b"
+# ruling on it, not an open question. Letters join only with "+", "/" or "and" (a+c, a/c, a and c): "a or b"
 # and "a, b" still ask, so they are no ruling. A letter counts only before the end, a mark, " (", a dash or a closing
 # `**`; and never when "or", or a comma and another letter, follows it past spaces and marks.
 _LETTER = r"\(?[a-z]\)?"
