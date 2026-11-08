@@ -5247,11 +5247,13 @@ sh("git-after-cd: a check, then && a landed cd, then && a git push, passes",
    "pytest -q && cd %s && %s push" % (slash(ROOT), VCS), "allow", cwd=NOGIT)
 sh("git-after-cd: a check, then && a git push, passes",
    "pytest -q && %s push" % VCS, "allow", cwd=NOGIT)
-# A CHECK JOINED BY || OR |. A `||` or a `|` before the push's chain is no `;` join, so the push passes.
+# A CHECK JOINED BY || OR |. A `||` before the push's chain is no `;` join, so the push passes. A `|` hides the
+# check's status, since the pipe's status is its last command's, so the push after `&&` runs on the check's failure.
 sh("git-after-cd: a check joined to a push by ||, then a git push -u, passes",
    "pytest || %s push -u origin b" % VCS, "allow", cwd=NOGIT)
-sh("git-after-cd: a pipe into tee, then && a git push -u, passes",
-   "make check | tee l && %s push -u origin b" % VCS, "allow", cwd=NOGIT)
+sh("git-after-cd: a pipe into tee, then && a git push -u, is refused",
+   "make check | tee l && %s push -u origin b" % VCS, "deny", "git-after-cd", cwd=NOGIT,
+   carries=("&&",))
 # A CHAIN OVER NEWLINES, AND COMPOUNDS. A `&&` at a line's end joins the next line, so the lines are one chain.
 # An if, a while, a set -e line and an exit guard run the push only when the check passed. A check and a push
 # inside `{ }` or `( )`, joined by `;`, run the push whatever the check did, so both forms are refused.
