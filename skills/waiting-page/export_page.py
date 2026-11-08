@@ -117,11 +117,11 @@ SECRET_SHAPES = (
     # as in "token budget: 200000". A second branch takes a value with no digit: 12 or more of [A-Za-z_-] that end the
     # value (end of line, a closing quote, `,`, `;` or `}`) and have no camelCase hump (3 lower-case letters then a capital;
     # a hump after 1 or 2, as in `QwErTy`, is random), so `accessTokenValue`, `localStorage.getItem(` and prose such as
-    # "Token: Authorization needed" pass.
+    # "Token: Authorization needed" pass. A letters-only value that reads as words (letters_are_words) passes too.
     ("credential-name", re.compile(
-        r"[A-Za-z0-9_-]*(?:secret|token|key|cookie)[A-Za-z0-9_-]*[\"']?[ \t]*[=:][ \t]*[\"']?(?:"
+        r"[A-Za-z0-9_-]*(?:secret|token|key|cookie)[A-Za-z0-9_-]*[\"']?[ \t]*(?P<sep>[=:])[ \t]*[\"']?(?:"
         r"(?=[A-Za-z0-9+/_.~%=-]*[A-Za-z])(?=[A-Za-z0-9+/_.~%=-]*\d)[A-Za-z0-9+/_.~%=-]{8,}"
-        r"|(?!(?-i:[A-Za-z_-]*[a-z]{3}[A-Z]))[A-Za-z_-]{12,}(?=[\"']?[ \t]*(?:[,;}\r\n]|\Z)))", re.I)),
+        r"|(?!(?-i:[A-Za-z_-]*[a-z]{3}[A-Z]))(?P<letters>[A-Za-z_-]{12,})(?=[\"']?[ \t]*(?:[,;}\r\n]|\Z)))", re.I)),
     # A well-known cookie name set with "=" to a value of 8 or more characters with a digit in it.
     ("cookie-value", re.compile(
         r"(?<![A-Za-z0-9_.-])(?:cf_clearance|__cf_bm|sessionid|session_id|sid|csrftoken|PHPSESSID|JSESSIONID)[ \t]*=[ \t]*"
@@ -216,8 +216,29 @@ def email_is_no_person(found):
             and found.string[found.end():found.end() + 1] in (":", "/"))
 
 
+WORD_SEGMENT = re.compile(r"[a-z]+|[A-Z]+|[A-Z][a-z]+")  # one word in lower case, upper case or capitalised
+CONSONANT_RUN = re.compile(r"[b-df-hj-np-tv-z]{4,}", re.I)  # the words here have at most three consonants in a row; `y` counts as one
+
+
+def letters_are_words(value):
+    """True when a letters-only value reads as words: each `_` or `-` part is one word in one case form, a third or more of
+    the letters are vowels, and no run of four or more consonants. `REPLACE_WITH_YOUR_KEY` and `infrastructure` pass.
+    Random letters in a mixed case or with few vowels do not. Random lower-case letters with enough vowels still pass."""
+    parts = [p for p in re.split(r"[_-]", value) if p]
+    letters = "".join(parts)
+    return (bool(letters) and all(WORD_SEGMENT.fullmatch(p) for p in parts)
+            and sum(c in "aeiouAEIOU" for c in letters) * 10 >= len(letters) * 3
+            and not CONSONANT_RUN.search(letters))
+
+
+def credential_is_no_secret(found):
+    """True when a `:` set a letters-only value that reads as words. An `=` assigns, so it never passes."""
+    value = found.group("letters")
+    return found.group("sep") == ":" and bool(value) and letters_are_words(value)
+
+
 # A match of these shapes can still name no secret and no person. Every other shape refuses on any match.
-NO_SECRET_MATCH = {"password": password_is_no_secret, "email": email_is_no_person}
+NO_SECRET_MATCH = {"password": password_is_no_secret, "email": email_is_no_person, "credential-name": credential_is_no_secret}
 
 
 def kinds_in(text):
