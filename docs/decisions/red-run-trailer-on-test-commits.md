@@ -4,20 +4,21 @@
 
 `lint/check_red_run.py` is the one home. CI runs it on each pull request (step "Red-run trailer" in `checks.yml`), with `BASE_SHA` set to the PR base. The test-author runs `python3 ~/.claude/lint/check_red_run.py --base origin/main` before it pushes, in whatever repo it works in (`agents/test-author.md`).
 
-1. It reads each non-merge commit in `<base>..HEAD`. A commit that adds lines to a test path needs a trailer in its message: `Red-run: <command> -> <N> failed on <sha>` (N is 1 or more, sha is 7 or more hex digits), or `Red-run: none: <reason>`.
+1. It reads each non-merge commit in `<base>..HEAD`. A commit that adds lines to a test path needs a trailer in its message: `Red-run: <command> -> <N> failed on <sha>` (N is 1 or more, sha is 7 or more hex digits), `Red-run: mutant: <mutation> -> <N> failed on <sha>`, or `Red-run: none: <reason>`.
 2. A test path is what `is_test_rel` in `hooks/guard.py` judges. The check imports it and keeps no copy.
-3. `Red-run: none: <reason>` is for a change that adds no new claim, such as a re-pointed fixture. A reviewer reads each reason, because a junk reason passes.
+3. `Red-run: none: <reason>` is for a change that adds no new claim, such as a re-pointed fixture. A reviewer reads each reason, because a junk reason passes. `Red-run: mutant: <mutation> -> <N> failed on <sha>` is for a pin that passes on the old code and goes red only on a mutant. The mutation is non-empty, N is 1 or more, and the sha has the shape of the failed form's (7 or more hex digits). A line whose keyword reads `mutant` is judged by this form alone. The mutant pattern takes `Red-run:`, then any whitespace or none (a tab, or no space: `Red-run:mutant:`), `mutant` in any case, any whitespace before the colon, the colon, then a literal space. The failed and none forms need a literal space after `Red-run:`.
 4. A commit that only deletes test lines needs no trailer. A merge is not judged; the commits it brings in are.
 5. Rollout: when the tree at HEAD holds `lint/check_red_run.py`, a commit whose parent tree has no such file is not judged. The commits from before the check landed stay as they are. The check reads this with `git ls-tree HEAD`, never from disk. In a repo whose HEAD has no such file, each non-merge, non-revert commit in the range is judged.
 6. The check reads the repo it runs in: the current directory, or the folder `--root <dir>` names. It imports `is_test_rel` from its own install (`../hooks/guard.py` beside the script), never from the repo it reads. Other repos get the check from the installed copy at `~/.claude/lint/check_red_run.py` now. Their CI runs it later, through a separate lane. This repo's CI step stays as it is.
 7. A commit whose message has git's `This reverts commit <sha>.` line is not judged. Its lines were judged once already, when the commit it reverts landed.
 8. A range git cannot read, or a run with no base, prints UNKNOWN and exits 2. It never exits 0, locally or in CI. This differs from the shape in `ci-unknown-is-red`, where an unknown read exits 0 locally and non-zero only when env `CI` is set.
 
-Why: the plan found 17 red runs recorded for 29 test changes (`docs/plans/test-ci-standard.md`, standard S5, step 2). A test that was never seen red on the old code may not be able to fail. `agents/test-author.md` names the trailer as the record of the run.
+Why: the plan found 17 red runs recorded for 29 test changes (`docs/plans/test-ci-standard.md`, standard S5, step 2). A test that was never seen red on the old code may not be able to fail. `agents/test-author.md` names the trailer as the record of the run. The mutant form came from two pins whose mutant went red but whose only valid trailer was `none` (commits 57526aaec, a regex widening, and 18b628f73, a dropped lookahead): the record said the case never failed.
 
 Known limits:
 
 - The check reads that a run is claimed, not that it ran. A reviewer re-runs a claim only when the claim is in doubt (`roles-each-layer-proves-once`).
+- The mutant sha is checked for shape only, like the failed form's: never that it names a commit, that HEAD reaches it, that the mutation was made or that the named case went red. Lane pick, process-only, 2026-11-07 18:29 CST: a reach check raised false alarms after a rebase or the cherry-pick remedy, which rewrite the commit a sha names. The open note `red-run-sha-not-verified` holds the gap.
 - A pure rename of a test file reads as a delete and an add, so it needs `Red-run: none: <reason>`.
 - A branch that merged a newer main carries main's commits in the range, and each is judged like the rest.
 - A lane begun before the check landed escapes for its commits from before that, unless it is rebased.
@@ -28,7 +29,7 @@ Known limits:
 
 Risk kind: likely risk, per `building-guard-needs-incident`. Test-author work adds new tests in normal work, and 12 of 29 recorded changes carried no red run. Landed 2026-11-01.
 
-Cost: no long-lived process, no log, no timer. One python process per run, once per pull request run and once per test-author push. It starts these git children. One `rev-parse` and one `log` read the range, and one `ls-tree` reads HEAD. Each non-revert commit in the range then costs one `diff`. When HEAD holds the check, each also costs one `ls-tree` first, and the `diff` runs only when the parent tree holds the check.
+Cost: no long-lived process, no log, no timer. One python process per run, once per pull request run and once per test-author push. It starts these git children. One `rev-parse` and one `log` read the range, and one `ls-tree` reads HEAD. The mutant form adds no extra git child. Each non-revert commit in the range then costs one `diff`. When HEAD holds the check, each also costs one `ls-tree` first, and the `diff` runs only when the parent tree holds the check.
 
 Kind: process
 Home: lint/check_red_run.py

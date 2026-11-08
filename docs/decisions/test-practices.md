@@ -16,7 +16,7 @@ P2. Prove red first on a named old commit, with a green control beside it.
 - Counter: claude-settings d8c5ac166 — a check waited for a string the install never prints, so it could never go red.
 Applies to: every test that adds or changes a case.
 
-P3. A red counts only when an assert fails for the named cause; a crash, import error, timeout or "not built yet" is not a red. For a new feature, a crash on a missing name is not a red. After the build, the test-author makes a mutant of the built code and records the named case going red.
+P3. A red counts only when an assert fails for the named cause; a crash, import error, timeout or "not built yet" is not a red. For a new feature, a crash on a missing name is not a red. After the build, the test-author makes a mutant of the built code and records the named case going red, as `Red-run: mutant: <mutation> -> <N> failed on <sha>` (decision red-run-trailer-on-test-commits).
 - claude-settings decision mutation-report-scores-suites — "A crash is not a kill."
 - mailaudit decision testing-mutant-dies-check-cause — a mutant "kill" came from an unrelated guard.
 - claude-settings 06fe84c0b — the recorded red run was 14 AttributeErrors on missing symbols: it shows the test runs, not that it tells good code from bad.

@@ -17,6 +17,7 @@ builder.
 You do the work yourself. In a fresh worktree, run the repo's setup command before any test.
 Run the tests you write. Each new case fails on the old code for the right reason. Record that run as a trailer on
 the commit that adds it: `Red-run: <command> -> <N> failed on <sha>` (N is 1 or more, sha is 7 or more hex digits).
+For a pin that passes on the old code and goes red only on a mutant, use `Red-run: mutant: <mutation> -> <N> failed on <sha>` (mutation non-empty, sha 7 or more hex digits).
 Use `Red-run: none: <reason>` only for a change that adds no new claim, such as a re-pointed fixture.
 `lint/check_red_run.py` reads the trailer. Before you push to the brief's branch, run `python3 ~/.claude/lint/check_red_run.py --base origin/main`. It reads the repo you are in.
 Before you stop for any reason, commit your work. Push only to the branch the brief names, as `git push origin HEAD:<branch>`, never your worktree's own branch. With no branch named, commit only and report. Before the final report, stop every Monitor and background task you started with `TaskStop`, and start none after it.
