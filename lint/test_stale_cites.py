@@ -965,6 +965,22 @@ class CostTests(StaleCase):
         self.assertEqual(rc, 1, out)
         self.assertLessEqual(len(subs), 5, subs)
 
+    def test_a_range_that_removes_a_path_and_changes_a_rule_sentence_lists_the_tree_once(self):
+        """STALE001 and STALE006 each need the whole tree at head. The range lists it once, so it starts one ls-tree
+        and at most the five git processes the module docstring allows."""
+        def change(repo):
+            move(repo, "hooks/lib.mjs", MOVED)
+            write(repo, "CLAUDE.md", NEW_RULE)
+            commit(repo)
+        rng = self.make_range(base_files(extra={"CLAUDE.md": OLD_RULE}), change)
+        changed = touched(rng)  # scope first: a path is renamed away, and a rule file's sentence changes
+        self.assertIn(MOVED, changed)
+        self.assertIn("CLAUDE.md", changed)
+        rc, out, subs = self.run_traced(rng)
+        self.assertIn(rc, (0, 1), out)  # the verdict is not the subject here; the starts are
+        self.assertEqual(subs.count("ls-tree"), 1, "the tree is listed once per reader, not once per range: %s" % subs)
+        self.assertLessEqual(len(subs), 5, subs)
+
     def test_route_claim_markdown_only_range_with_a_claim_candidate_starts_exactly_four_git_processes(self):
         text, flagged = rows_text([
             ("# Notes", False),
