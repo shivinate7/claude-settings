@@ -94,3 +94,7 @@ Checked Nov 2 12:58 CST: none of these is in docs/debts/notes.md on main. Triage
 - page-fitpad-overscroll-uncapped (lane answered-section-folded, #2317): fitPad (about line 1850) has no cap on rubber-band overscroll (Safari); only Chromium desktop was run.
 - mixed-roles-control-comment-overstates (lane merge-conflict-mixed-roles, #2313): the control test's comment claims more proof than the test gives.
 - mixed-roles-no-edit-write-second-path (lane merge-conflict-mixed-roles, #1521): #1521 has no Edit or Write case for the second product path.
+- pick-claim-misses-owner-pick-quotes (lane step-pick-claims-match-page, #2294): the pick-claim reader misses `Owner pick a` and quoted picks.
+- pick-claim-owner-picked-a-lane (lane step-pick-claims-match-page, #2294): the pick-claim reader flags the prose `the owner picked a lane` as a claim.
+- pick-claim-underscore-key (lane step-pick-claims-match-page, #2294): `item 9 a_b` reads as a pick claim.
+- pick-claim-quoted-word-no-item (lane step-pick-claims-match-page, #2294): a quoted word between the pick and `on item N` reads as a claim with no item.
