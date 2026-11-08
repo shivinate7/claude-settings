@@ -15,7 +15,7 @@ Output names pinned (the selector writes them to $GITHUB_OUTPUT):
   files_windows  a JSON list of the test files the Windows job runs
   files_macos    a JSON list of the test files the macOS job runs
   matrix         {"include": [{"os", "files": [path]}]}, one entry per OS with files
-  commands       {path: cmd} over every selected file; cmd is the command the run line names before the path
+  commands_windows, commands_macos   {path: cmd} over that OS's files; cmd is the interpreter the run line names
 
 Run with:  python3 lint/test_touched_tests.py -v
 """
@@ -249,11 +249,11 @@ class Selector(unittest.TestCase):
             entries.append({"os": entry.get("os"), "files": decoded})
         return sorted(entries, key=lambda e: str(e["os"]))
 
-    def commands_of(self, outputs):
-        """The `commands` output: a JSON object {path: cmd} over the selected files."""
-        self.assertIn("commands", outputs, f"no commands= line in GITHUB_OUTPUT: {outputs}")
-        commands = self.json_value(outputs["commands"], "commands")
-        self.assertIsInstance(commands, dict, f"commands= is not a JSON object: {outputs['commands']!r}")
+    def commands_of(self, outputs, key):
+        """The per-OS output `key` (commands_windows or commands_macos): a JSON object {path: cmd} over that OS's files."""
+        self.assertIn(key, outputs, f"no {key}= line in GITHUB_OUTPUT: {outputs}")
+        commands = self.json_value(outputs[key], key)
+        self.assertIsInstance(commands, dict, f"{key}= is not a JSON object: {outputs[key]!r}")
         return commands
 
     def exits_1(self, base, change=None, delete=()):
@@ -410,9 +410,11 @@ class Selector(unittest.TestCase):
         built = [{"os": name, "files": listed} for name, listed in (("windows-latest", windows), ("macos-latest", macos)) if listed]
         self.assertEqual(self.include_entries(outputs["matrix"]), sorted(built, key=lambda e: e["os"]),
                          "matrix is not the include entries built from files_windows and files_macos")
-        # The fixture's run lines name python3 for each file.
-        self.assertEqual(self.commands_of(outputs), {a: "python3", c: "python3"},
-                         "commands does not name each selected file's command from its run line")
+        # The fixture's run lines name python3 for each file: a on Windows, c on macOS.
+        self.assertEqual(self.commands_of(outputs, "commands_windows"), {a: "python3"},
+                         "commands_windows does not name the Windows file's command from its run line")
+        self.assertEqual(self.commands_of(outputs, "commands_macos"), {c: "python3"},
+                         "commands_macos does not name the macOS file's command from its run line")
 
     def test_matrix_is_empty_when_nothing_is_selected(self):
         """A touched test no CI job runs selects nothing, so the matrix is {"include": []}."""
@@ -636,11 +638,11 @@ class Selector(unittest.TestCase):
         self.assertEqual(self.include_entries(outputs["matrix"]), [{"os": "windows-latest", "files": [
             "lint/z.test.mjs", "merge/test_y.sh", "skills/alpha/tests/a.test.mjs",
         ]}], "the windows matrix entry is not the windows job's paths")
-        self.assertEqual(self.commands_of(outputs), {
+        self.assertEqual(self.commands_of(outputs, "commands_windows"), {
             "lint/z.test.mjs": "node",
             "merge/test_y.sh": "sh",
             "skills/alpha/tests/a.test.mjs": "node --test",
-        }, "commands does not name each file's command from its run line")
+        }, "commands_windows does not name each file's command from its run line")
 
     # Row 7: a file mod-tests.sh runs keeps that script's form: node for a mods test, node --test for a map skill test.
     def test_a_runner_script_file_keeps_the_script_form(self):
@@ -658,8 +660,115 @@ class Selector(unittest.TestCase):
         self.assertIn("matrix", outputs, f"no matrix= line in GITHUB_OUTPUT: {outputs}")
         self.assertEqual(self.include_entries(outputs["matrix"]), [{"os": "windows-latest", "files": [mods, skill]}],
                          "the windows matrix entry is not the runner script's paths")
-        self.assertEqual(self.commands_of(outputs), {mods: "node", skill: "node --test"},
+        self.assertEqual(self.commands_of(outputs, "commands_windows"), {mods: "node", skill: "node --test"},
                          "a runner-script file did not keep the script's own command form")
+
+    def line_of(self, text, needle):
+        """The 1-based number of the first line of `text` that holds `needle`."""
+        return next(i for i, line in enumerate(text.splitlines(), 1) if needle in line)
+
+    # F2: the command is the interpreter alone. An env prefix or a word before the interpreter cannot be read: exit 1.
+    def test_an_env_prefix_before_node_exits_1_naming_its_line(self):
+        a = "lint/test_x.mjs"
+        text = dedent("""\
+            name: fixture checks
+            on: pull_request
+            jobs:
+              windows:
+                runs-on: windows-latest
+                steps:
+                  - run: FOO=x node lint/test_x.mjs
+            """)
+        stderr = self.exits_1(with_checks({a: "old\n"}, text), {a: "new\n"})
+        self.assertIn(f"line {self.line_of(text, 'FOO=x')}", stderr, f"the exit does not name the env-prefixed run line: {stderr}")
+
+    def test_an_env_prefix_before_python3_exits_1_naming_its_line(self):
+        a = "lint/test_y.py"
+        text = dedent("""\
+            name: fixture checks
+            on: pull_request
+            jobs:
+              windows:
+                runs-on: windows-latest
+                steps:
+                  - run: PYTHONPATH=. python3 lint/test_y.py
+            """)
+        stderr = self.exits_1(with_checks({a: "old\n"}, text), {a: "new\n"})
+        self.assertIn(f"line {self.line_of(text, 'PYTHONPATH')}", stderr,
+                      f"the exit does not name the env-prefixed python3 run line: {stderr}")
+
+    def test_a_cd_prefix_before_node_exits_1_naming_its_line(self):
+        a = "lint/test_z.mjs"
+        text = dedent("""\
+            name: fixture checks
+            on: pull_request
+            jobs:
+              windows:
+                runs-on: windows-latest
+                steps:
+                  - run: cd a && node lint/test_z.mjs
+            """)
+        stderr = self.exits_1(with_checks({a: "old\n"}, text), {a: "new\n"})
+        self.assertIn(f"line {self.line_of(text, 'cd a')}", stderr, f"the exit does not name the cd-prefixed run line: {stderr}")
+
+    # F1: a one-line flow sequence of steps is not read: exit 1, naming the steps line.
+    def test_a_one_line_flow_steps_list_exits_1_naming_its_line(self):
+        a = "lint/test_a.py"
+        text = dedent("""\
+            name: fixture checks
+            on: pull_request
+            jobs:
+              windows:
+                runs-on: windows-latest
+                steps: [{run: python3 lint/test_a.py}]
+            """)
+        stderr = self.exits_1(with_checks({a: "old\n"}, text), {a: "new\n"})
+        self.assertIn(f"line {self.line_of(text, 'steps:')}", stderr,
+                      f"the exit does not name the one-line flow steps: {stderr}")
+
+    # F3: one test run under two interpreters. Each OS's commands output names its own interpreter.
+    def test_each_os_names_its_own_command_for_a_test_both_run(self):
+        a = "lint/test_a.py"
+        text = dedent("""\
+            name: fixture checks
+            on: pull_request
+            jobs:
+              windows:
+                runs-on: windows-latest
+                steps:
+                  - run: python lint/test_a.py
+              macos:
+                runs-on: macos-latest
+                steps:
+                  - run: python3 lint/test_a.py
+            """)
+        outputs, _ = self.run_outputs(with_checks({a: "old\n"}, text), {a: "new\n"})
+        windows, macos = self.os_lists(outputs)
+        self.assertEqual(windows, [a], "files_windows does not list the test the Windows job runs")
+        self.assertEqual(macos, [a], "files_macos does not list the test the macOS job runs")
+        self.assertEqual(self.commands_of(outputs, "commands_windows"), {a: "python"},
+                         "commands_windows does not name the Windows job's interpreter")
+        self.assertEqual(self.commands_of(outputs, "commands_macos"), {a: "python3"},
+                         "commands_macos does not name the macOS job's interpreter")
+
+    # F4: a mod source with no sibling test lists the mod's tests by the lint form, mods/<mod>/**/*.test.mjs.
+    def test_a_mod_source_with_no_sibling_test_lists_the_mods_tests(self):
+        base = {"mods/m/check.mjs": "old\n", "mods/m/tests/a.test.mjs": "old\n",
+                "mods/m/sub/deep/b.test.mjs": "old\n", "mods/other/c.test.mjs": "old\n"}
+        text = dedent("""\
+            name: fixture checks
+            on: pull_request
+            jobs:
+              windows:
+                runs-on: windows-latest
+                steps:
+                  - run: node mods/m/tests/a.test.mjs
+                  - run: node mods/m/sub/deep/b.test.mjs
+                  - run: node mods/other/c.test.mjs
+            """)
+        windows, _, _ = self.per_os(with_checks(base, text), {"mods/m/check.mjs": "new\n"})
+        self.assertEqual(windows, ["mods/m/sub/deep/b.test.mjs", "mods/m/tests/a.test.mjs"],
+                         "a touched mods/m/ source does not list every test under mods/m/, or lists another mod's test")
 
 
 if __name__ == "__main__":
