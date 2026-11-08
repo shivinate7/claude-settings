@@ -8491,7 +8491,8 @@ class DraftLaneLines(RecordsEnv):
     """`merge <pr> --confirm` on a draft copies the key lines of each lane PR into the integration PR's body, before the ready mark.
     A key line is a `Retire-run:` or `Drops-lines:` line in a body's last counted paragraph, as check_silent_undo.last_paragraph reads it.
     The contract for merge/merge.py:
-    - The lanes are merge.lane_tips(wt, base_ref, head). Host.prs_of_commit(sha) returns the REST rows of commits/<sha>/pulls.
+    - The lanes are the tips of merge.read_lanes(wt, base_ref, head), less a dropped one. Host.prs_of_commit(sha) returns the REST rows
+      of commits/<sha>/pulls.
       A lane's own PR is the row whose head sha is its tip. The integration PR is a row too, since it holds every tip.
     - A copied line goes into the integration body's last counted paragraph, above the attribution. A line the body already holds
       is not copied again. A line in a lane's earlier paragraph or fenced block is not copied.
@@ -8509,6 +8510,10 @@ class DraftLaneLines(RecordsEnv):
     LANE_B = f"Lane B prose only.\n\n{ATTRIB}"
     DECOY = "Decoy row.\n\nDrops-lines: debts/decoy.md -- the integration row, not a lane"  # the integration row's body: no lane holds this line
     SESSION = "https://claude.ai/code/session_01MVD32PXm1757wMqHinaZZG"  # the session URL some bodies end with, alone in its paragraph
+    OWN_URL, LANE_URL = "https://github.com/o/r/actions/runs/1111", "https://github.com/o/r/actions/runs/4242"  # two runs of gap-one
+    OWN_CITE = f"Retire-run: gap-one -- {OWN_URL}"  # the batch's own cite of gap-one
+    OWN_EXCUSE = "Drops-lines: debts/gap-one.md -- the batch's own reason"  # the batch's own excuse of the path lane-a drops
+    B_DROPS = "Drops-lines: debts/gap-two.md -- lane B's own reason"  # a live lane's key line, copied even with a dropped lane beside it
 
     def setUp(self):
         super().setUp()
@@ -8618,6 +8623,70 @@ class DraftLaneLines(RecordsEnv):
         self.assertTrue(final.rstrip().endswith(self.SESSION), "the session URL is no longer the last line of the body")
         self.assertEqual(sorted(self.counted(final)), sorted([self.OWN, self.RETIRE, self.DROPS]),
                          "the last counted paragraph is not the key-line paragraph above both closing paragraphs")
+
+    def test_a_body_edited_after_the_first_read_is_not_overwritten(self):
+        # A person edits the integration body while the lane PRs are read, after the step's first read and before its write.
+        self.make_batch(self.LANE_A, self.LANE_B, self.BATCH)
+        edited = f"Batch of lanes a and b, edited by a person.\n\n{self.OWN}\n\n{self.ATTRIB}"
+        real = self.host.prs_of_commit
+
+        def edit_then_read(sha):
+            self.host.body = edited
+            return real(sha)
+
+        self.host.prs_of_commit = edit_then_read
+        rc, out = self.draft_confirm()
+        self.assertEqual(rc, 1, "a body edited after the first read did not stop the draft step\n" + out)
+        self.assertEqual(self.body_writes(), [], "the step wrote over a body edited after its first read")
+        self.assertEqual(self.host.body, edited, "the edited body was changed")
+        self.assertEqual(self.host.readies, [], "the ready mark was set after a body edit")
+
+    def test_a_lane_retire_run_for_a_slug_the_batch_already_cites_is_not_copied(self):
+        import check_debt_retire as debt
+        body = f"Batch of lanes a and b.\n\n{self.OWN_CITE}\n\n{self.ATTRIB}"
+        lane_a = f"Retire the gap.\n\nRetire-run: gap-one -- {self.LANE_URL}\n\n{self.ATTRIB}"
+        self.make_batch(lane_a, self.LANE_B, body)
+        rc, out = self.draft_confirm()
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(debt.cites(self.host.body).get("gap-one"), self.OWN_URL,
+                         "lane-a's Retire-run for gap-one, which the batch already cites, replaced the batch's own cite")
+
+    def test_a_lane_drops_line_for_a_path_the_batch_already_excuses_is_not_copied(self):
+        body = f"Batch of lanes a and b.\n\n{self.OWN_EXCUSE}\n\n{self.ATTRIB}"
+        lane_a = f"Retire the gap.\n\n{self.DROPS}\n\n{self.ATTRIB}"
+        self.make_batch(lane_a, self.LANE_B, body)
+        rc, out = self.draft_confirm()
+        self.assertEqual(rc, 0, out)
+        self.assertNotIn(self.DROPS, self.host.body, "lane-a's Drops-lines for a path the batch already excuses was copied")
+
+    def test_a_dropped_lane_contributes_no_lines_and_the_live_lane_still_does(self):
+        # lane-a's merge is reverted on the batch, so lane-a is dropped. The fixture is the one CutLanes uses for a dropped lane.
+        lane_b = f"Lane B.\n\n{self.B_DROPS}\n\n{self.ATTRIB}"
+        self.make_batch(self.LANE_A, lane_b, self.BATCH)
+        CutLanes.revert_on_batch(self, CutLanes.merge_of(self, "lane-a"))
+        sh(self.co, "git", "fetch", "-q", "origin")
+        live, dropped = merge.read_lanes(self.co, "origin/main", self.head())  # the scope, before the subject
+        self.assertIn(self.tips["lane-a"], dropped, "precondition: the fixture does not drop lane-a")
+        self.assertIn(self.tips["lane-b"], live, "precondition: lane-b is not a live lane")
+        rc, out = self.draft_confirm()
+        self.assertEqual(rc, 0, out)
+        self.assertIn(self.B_DROPS, self.counted(self.host.body), "the live lane's key line was not copied")
+        self.assertNotIn(self.RETIRE, self.host.body, "a dropped lane's Retire-run was copied")
+        self.assertNotIn(self.DROPS, self.host.body, "a dropped lane's Drops-lines was copied")
+
+    def test_a_failed_body_write_stops_before_the_ready_mark(self):
+        self.make_batch(self.LANE_A, self.LANE_B, self.BATCH)
+        for exc in (merge.Stop("writing the body of #7 to GitHub failed: HTTP 422"), merge.NetStop("network error, still failing after retries")):
+            with self.subTest(exc=type(exc).__name__):
+                self.host.readies = []
+
+                def refuse(n, body, exc=exc):
+                    raise exc
+
+                self.host.set_body = refuse
+                rc, out = self.draft_confirm()
+                self.assertEqual(rc, 1, f"a body write that raised {type(exc).__name__} did not stop the draft step\n" + out)
+                self.assertEqual(self.host.readies, [], "the ready mark was set after a failed body write")
 
 class RecordsRebuildReal(RecordsEnv):
     """The same seam with the real generator, lint/hook_catalog.py, as merge.RECORDS defaults to it."""
