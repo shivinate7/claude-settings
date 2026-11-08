@@ -5756,7 +5756,7 @@ class MistakeNamesGuardTests(unittest.TestCase):
     def test_mg_green_guard_line_backticked_passes(self):
         self.assert_allowed(mg_report("The brief quoted `Guard: run it later` from the lane."))
 
-    # Round 2 (review findings). A guard label counts only at the start of a sentence: a line start after a bullet,
+    # A guard label counts only at the start of a sentence: a line start after a bullet,
     # blockquote mark or bold section label, or after . ; ! ?. A label is guard or guards then : — – - or --. A
     # guard line's ref is read from its label to the line end, backticks kept: #N and PR N need 2+ digits, and a bare
     # sha needs 7-40 hex with a digit and a letter a-f. The refusal names the section and never quotes the line.
@@ -5805,7 +5805,7 @@ class MistakeNamesGuardTests(unittest.TestCase):
         self.assertIsNotNone(out, "no block: a guard line with no ref passed")
         self.assertIn("Deviations", out.get("reason", ""), "the refusal does not name the section: %s" % out)
 
-    # Round 3 (review findings). A guard label may sit inside **...**, *...* or _..._, with the colon inside or outside.
+    # A guard label may sit inside **...**, *...* or _..._, with the colon inside or outside.
     # Red: a label in any of those forms, with no ref, blocks.
     def test_mg_red_guard_r3_bold_label_colon_inside_blocks(self):
         self.assert_blocked(mg_report("**Guard:** future briefs run the check."))
