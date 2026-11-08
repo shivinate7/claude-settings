@@ -7811,6 +7811,62 @@ for _name, _command in (
     ("a folder, long flags", "rm --recursive --force build/"),
 ):
     sh("delete: " + _name + " is allowed", _command, "allow", cwd=NOGIT)
+# THE SPLIT FLAGS IN QUOTED TEXT. `rm -r -f .` and `del -Recurse -Force C:/` in an echo are text, as
+# `rm -rf .` already is. A shell that runs the same text still refuses it.
+sh("delete: an echo of rm with split flags at the working folder calls nothing",
+   'echo "rm -r -f ."', "allow", cwd=NOGIT)
+sh("delete: an echo of the PowerShell delete at a drive root calls nothing",
+   'echo "del -Recurse -Force C:/"', "allow", cwd=NOGIT)
+sh("delete: sh -c of rm with split flags at the working folder still denies",
+   'sh -c "rm -rf ."', "deny", "destructive-delete", cwd=NOGIT)
+sh("delete: bash -c of rm with split flags at the working folder still denies",
+   'bash -c "rm -r -f ."', "deny", "destructive-delete", cwd=NOGIT)
+sh("delete: eval of rm at the working folder still denies",
+   'eval "rm -rf ."', "deny", "destructive-delete", cwd=NOGIT)
+sh("delete: pwsh -Command of a PowerShell delete at a drive root still denies",
+   'pwsh -Command "Remove-Item -Recurse -Force C:/"', "deny", "destructive-delete", cwd=NOGIT)
+sh("delete: pwsh -Command of a PowerShell delete at a drive root with no -Force denies",
+   'pwsh -Command "Remove-Item -Recurse C:/"', "deny", "destructive-delete", cwd=NOGIT)
+# THE SPLIT-FLAG DELETE IN A WRAPPER'S STRING. parallel, script -qc, watch and runuser each run their quoted
+# text as a shell command, so `rm -r -f .` inside the quotes deletes the working folder, as bash -c's does.
+for _name, _command in (
+    ("parallel", 'parallel "rm -r -f ." ::: a'),
+    ("script -qc", 'script -qc "rm -r -f ." /dev/null'),
+    ("watch", 'watch "rm -r -f ."'),
+    ("runuser -c", 'runuser -c "rm -r -f ." u'),
+):
+    sh("delete: the split-flag rm at the working folder behind " + _name + " denies", _command, "deny",
+       "destructive-delete", cwd=NOGIT)
+# A single-quoted substitution is text, as the echo of the split-flag rm above is. It runs nothing.
+sh("delete: an echo of a single-quoted $(rm -r -f .) calls nothing",
+   "echo '$(rm -r -f .)'", "allow", cwd=NOGIT)
+# A LIVE SUBSTITUTION INSIDE DOUBLE QUOTES. `"$( )"` runs the command inside it, so a delete there is a
+# command, not text. The echo cases above stay allowed, since their delete is not inside `$( )`. A `#`, a
+# line break or a lone apostrophe around the substitution does not hide it.
+sh("delete: a live $(rm -r -f .) inside double quotes denies",
+   '''echo "$(rm -r -f .)"''', "deny", "destructive-delete", cwd=NOGIT)
+sh("delete: a live $(Remove-Item -Recurse -Force C:/) inside double quotes denies",
+   '''echo "$(Remove-Item -Recurse -Force C:/)"''', "deny", "destructive-delete", tool="PowerShell",
+   cwd=NOGIT)
+sh("delete: a live $(rm -r -f .) after a # inside double quotes denies",
+   '''echo "# $(rm -r -f .)"''', "deny", "destructive-delete", cwd=NOGIT)
+sh("delete: a live $(rm -r -f .) on a second line of a double quote denies",
+   'echo "first line\n$(rm -r -f .)\nlast line"', "deny", "destructive-delete", cwd=NOGIT)
+sh("delete: a live $(rm -r -f .) after a lone apostrophe denies",
+   '''echo don't && echo "$(rm -r -f .)"''', "deny", "destructive-delete", cwd=NOGIT)
+# THE INDEX-ONLY FORM. `git rm --cached` removes a path from the index and leaves the working folder
+# alone, so `git rm -rf --cached .` deletes nothing on disk. The same words without `--cached` delete
+# every file under the working folder, and a chained delete still denies.
+sh("delete: git rm -rf --cached . touches the index only, and is allowed",
+   VCS + " rm -rf --cached .", "allow", cwd=NOGIT)
+sh("delete: git rm -r -f --cached . touches the index only, and is allowed",
+   VCS + " rm -r -f --cached .", "allow", cwd=NOGIT)
+sh("delete: git rm -rf . with no --cached still denies", VCS + " rm -rf .", "deny",
+   "destructive-delete", cwd=NOGIT)
+sh("delete: git rm -r -f . with no --cached still denies", VCS + " rm -r -f .", "deny",
+   "destructive-delete", cwd=NOGIT)
+sh("delete: git rm -rf --cached . chained with rm -rf . still denies",
+   VCS + " rm -rf --cached . && rm -rf .", "deny", "destructive-delete", cwd=NOGIT)
 
 # Each is a program that runs the real command: find -exec, su -c, a container exec, and flock.
 for _name, _command in (
@@ -8192,7 +8248,8 @@ def nm_case(name, command, expected, cwd, tool="Bash"):
         add(name, expected, tool=tool, cwd=cwd, windows=True, command=command)
 
 
-# THE INSTALLS. Each is refused in a linked folder, and each is allowed in a real folder and an absent one.
+# THE INSTALLS, and the commands that rewrite node_modules too: prune, dedupe, rebuild, link and audit fix.
+# Each is refused in a linked folder, and each is allowed in a real folder and an absent one.
 NM_INSTALLS = (
     ("npm ci", "Bash"), ("npm ci", "PowerShell"),
     ("npm install", "Bash"), ("npm install left-pad", "Bash"),
@@ -8200,6 +8257,8 @@ NM_INSTALLS = (
     ("npm add", "Bash"), ("npm add left-pad", "Bash"),
     ("npm uninstall", "Bash"), ("npm uninstall left-pad", "Bash"),
     ("npm update", "Bash"), ("npm update left-pad", "Bash"),
+    ("npm prune", "Bash"), ("npm dedupe", "Bash"), ("npm rebuild", "Bash"), ("npm link", "Bash"),
+    ("npm audit fix", "Bash"), ("npm audit --json fix", "Bash"),
 )
 # THE RECURSIVE DELETES inside node_modules. A bare `rm -rf node_modules` names the link itself, not a
 # file inside it, so it is not pinned here.
@@ -8253,7 +8312,7 @@ nm_case("linked-nm: npm ci with a repeated --prefix whose last value is real, fr
         "npm ci --prefix " + slash(NMLINKED) + " --prefix " + slash(NMREAL), "allow", NMLINKED)
 
 # THE CONTROLS IN A LINKED FOLDER. Each is the job of a linked folder, and none is refused.
-for _command, _tool in (("npm run setup", "Bash"), ("npm run build", "Bash"), ("npm test", "Bash"),
+for _command, _tool in (("npm run setup", "Bash"),
                         ("rm node_modules", "Bash"), ("Remove-Item node_modules", "PowerShell")):
     nm_case("linked-nm: " + _command + " (" + _tool + ") in a linked folder is allowed",
             _command, "allow", NMLINKED, _tool)
@@ -8308,6 +8367,38 @@ nm_case("linked-nm: refuse npm --loglevel error ci (Bash) in a linked folder",
 nm_case("linked-nm: refuse npm --prefix . ci (Bash) in a linked folder",
         "npm --prefix . ci", "deny", NMLINKED)
 
+# THE OFF-LIST COMMANDS. The guard allows only the read-only commands it lists. Each of these is refused in a
+# linked folder: some rewrite node_modules, and the rest are not on the list. A real folder and a folder with
+# no node_modules allow each, since neither is a link.
+NM_OFF_LIST = (
+    "npm unlink x", "npm ddp", "npm rb", "npm ln x", "npm pru", "npm it", "npm install-test",
+    "npm install-ci-test", "npm sit", "npm edit x", "npm explore x", "npm init", "npm shrinkwrap",
+    "npm instal x", "npm -C . ci",
+)
+for _command in NM_OFF_LIST:
+    nm_case("linked-nm: refuse " + _command + " (Bash) in a linked folder", _command, "deny", NMLINKED)
+    nm_case("linked-nm: " + _command + " (Bash) in a real folder is allowed", _command, "allow", NMREAL)
+    nm_case("linked-nm: " + _command + " (Bash) in a folder with no node_modules is allowed",
+            _command, "allow", NMABSENT)
+
+# THE WORKSPACE FLAGS ON `npm version`. With a workspace flag, npm reifies the linked root, so the command
+# changes the install through the link. Without one it only rewrites package.json (a control below).
+NM_WORKSPACE_VERSION = (
+    "npm version patch -w a", "npm version patch --workspaces", "npm version patch -ws",
+    "npm version patch --workspace=a", "npm -w a version patch",
+)
+# THE DRY RUNS THAT STILL RUN INSTALL SCRIPTS. npm rebuild, rb and edit run install scripts even with
+# --dry-run, so a dry run is no no-change for them. `npm prune --dry-run` and `npm audit fix --dry-run`
+# stay allowed (a control below).
+NM_DRY_RUN_WRITERS = (
+    "npm rebuild --dry-run", "npm rb x --dry-run", "npm edit x --dry-run", "npm --dry-run rebuild",
+)
+for _command in NM_WORKSPACE_VERSION + NM_DRY_RUN_WRITERS:
+    nm_case("linked-nm: refuse " + _command + " (Bash) in a linked folder", _command, "deny", NMLINKED)
+    nm_case("linked-nm: " + _command + " (Bash) in a real folder is allowed", _command, "allow", NMREAL)
+    nm_case("linked-nm: " + _command + " (Bash) in a folder with no node_modules is allowed",
+            _command, "allow", NMABSENT)
+
 # THE FALSE-ALARM CONTROLS in a linked folder. None of these changes the linked install, so none is refused.
 nm_case("linked-nm: npm i -g x (Bash) in a linked folder is allowed, a global install",
         "npm i -g x", "allow", NMLINKED)
@@ -8317,6 +8408,17 @@ nm_case("linked-nm: npm ci --dry-run (Bash) in a linked folder is allowed",
         "npm ci --dry-run", "allow", NMLINKED)
 nm_case("linked-nm: npm ci in a quoted echo, in a linked folder, is allowed",
         'echo "npm ci"', "allow", NMLINKED)
+
+# THE READ-ONLY CONTROLS in a linked folder. Each runs a command on the read-only list or a dry run, or
+# names no command (bare `npm`, `npm -v`), so none is refused.
+NM_READ_ONLY = (
+    "npm", "npm -v", "npm ls", "npm list", "npm -C . ls", "npm view x", "npm outdated", "npm audit",
+    "npm audit signatures", "npm explain x", "npm fund", "npm exec -- tsc", "npm config get registry",
+    "npm help install", "npm prune --dry-run", "npm audit fix --dry-run", "npm version patch",
+    "npm rebuild --help", "npm run build", "npm test",
+)
+for _command in NM_READ_ONLY:
+    nm_case("linked-nm: " + _command + " (Bash) in a linked folder is allowed", _command, "allow", NMLINKED)
 
 # THE JUNCTION WITHOUT os.path.isjunction. Python 3.11, the CI interpreter, has no os.path.isjunction, so
 # the link test must read the junction itself. This case runs the guard with that function removed.
@@ -8592,6 +8694,317 @@ sh("env: a < redirect with a script word is input to the script, node app.js < i
    "node --env-file=" + ENV + " app.js < input.txt", "allow", cwd=NOGIT)
 sh("env: --input-type takes a value and app.mjs is the script, not inline code",
    "node --env-file=" + ENV + " --input-type module app.mjs", "allow", cwd=NOGIT)
+
+# A runner handed the file may run a child command that prints the variables: a program that prints
+# its environment (env, printenv), a child named through a quoted word or an --entrypoint, or a
+# script fed on stdin to python or a shell. A shell string (sh, bash or zsh -c, and npm, npx or pnpm
+# -c) is judged segment by segment with the same env reader as the parent shell form, and a $
+# expansion in it is denied too. A value flag of a runner or container (--pull, --extra) takes the
+# word after it, and an empty --entrypoint is no program, so the child is the words after the image.
+# Each deny form is refused with env-file. The reason is not pinned here, so the builder chooses it.
+# The allow controls are the ordinary uses of the same runners.
+for _child in (
+    "uv run --env-file " + ENV + " env",
+    "uv run --env-file=" + ENV + " printenv",
+    "uv run --env-file " + ENV + " env | grep FOO",
+    "uv run --env-file " + ENV + " printenv FOO",
+    "uv run --env-file " + ENV + " python -c \"import os; print(os.environ)\"",
+    "uv run --env-file " + ENV + " sh -c 'echo $FOO'",
+    "docker run --env-file " + ENV + " alpine env",
+    "docker run --rm --env-file " + ENV + " alpine printenv",
+    "docker run --env-file " + ENV + " -e X=1 --name t alpine env",
+    "docker compose --env-file " + ENV + " run web env",
+    "podman run --env-file " + ENV + " alpine env",
+    "npm --env-file=" + ENV + " exec -c env",
+    "npx --env-file=" + ENV + " -c printenv",
+    "node --env-file=" + ENV + " /c/Users/x/node_modules/npm/bin/npm-cli.js exec -c env",
+    "npm --env-file=" + ENV + " exec -c \"env\"",
+    "npx --env-file=" + ENV + " -c \"printenv\"",
+    "docker run --env-file " + ENV + " alpine \"env\"",
+    "docker run --env-file " + ENV + " --entrypoint printenv alpine DB_URL",
+    "docker run --env-file " + ENV + " --entrypoint=env alpine",
+    "npm --env-file=" + ENV + " exec -c 'echo $DB_URL'",
+    "docker run -i --env-file " + ENV + " alpine sh < s.sh",
+    "docker run --platform linux/amd64 --env-file " + ENV + " alpine env",
+    "docker run -m 512m --env-file " + ENV + " alpine env",
+    "uv run --env-file " + ENV + " -v env",
+    "echo \"import os\" | uv run --env-file " + ENV + " python",
+):
+    sh("env-child: deny, a runner given the file must not print it through a child, " + _child[:60],
+       _child, "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, node runs npm-cli.js exec -c with a shell string that expands a variable",
+   "node --env-file=" + ENV + " /c/Users/x/node_modules/npm/bin/npm-cli.js exec -c 'echo $DB_URL'",
+   "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, uv runs a python script fed by a heredoc that prints os.environ",
+   "uv run --env-file " + ENV + " python <<'EOF'\nimport os; print(os.environ)\nEOF",
+   "deny", "env-file", cwd=NOGIT)
+for _child_ok in (
+    "uv run --env-file " + ENV + " python app.py",
+    "uv run --env-file " + ENV + " pytest",
+    "docker run --env-file " + ENV + " myimage",
+    "docker run --env-file " + ENV + " myimage npm start",
+    "docker run --env-file " + ENV + " -e MODE=env myimage",
+    "npm --env-file=" + ENV + " run build",
+    "npm --env-file=" + ENV + " exec -c \"node app.js\"",
+    "docker run --env-file " + ENV + " alpine sh -c \"npm start\"",
+    "uv run --env-file " + ENV + " python app.py < input.txt",
+    "docker run --env-file " + ENV + " --entrypoint node myimage app.js",
+):
+    sh("env-child: allow, a runner given the file may run its own app, " + _child_ok[:60],
+       _child_ok, "allow", cwd=NOGIT)
+
+# Each deny names one cause: a later segment of a shell string that prints or reads the file, a value
+# flag the list does not hold, or an empty --entrypoint. Each allow is the same runner running an app.
+sh("env-child: deny, uv runs sh -c whose later segment cats the env file, npm start && cat " + ENV,
+   "uv run --env-file " + ENV + " sh -c \"npm start && cat " + ENV + "\"", "deny", "env-file",
+   cwd=NOGIT)
+sh("env-child: deny, docker runs sh -c whose later segment is env after cd, cd /app && env",
+   "docker run --env-file " + ENV + " alpine sh -c \"cd /app && env\"", "deny", "env-file",
+   cwd=NOGIT)
+sh("env-child: deny, docker runs sh -c whose later segment is printenv after a semicolon",
+   "docker run --env-file " + ENV + " alpine sh -c \"echo x; printenv\"", "deny", "env-file",
+   cwd=NOGIT)
+sh("env-child: deny, npm exec -c whose later segment is env after &&, npm test && env",
+   "npm --env-file=" + ENV + " exec -c \"npm test && env\"", "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, uv runs bash -c whose later segment is printenv after set -x",
+   "uv run --env-file " + ENV + " bash -c \"set -x; printenv FOO\"", "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, docker runs sh -c whose first word is exec before env",
+   "docker run --env-file " + ENV + " alpine sh -c \"exec env\"", "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, docker --pull takes a value, so the child after the image is env",
+   "docker run --pull always --env-file " + ENV + " alpine env", "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, uv --extra takes a value, so the child is python printing os.environ",
+   "uv run --env-file " + ENV + " --extra dev python -c \"import os; print(os.environ)\"",
+   "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, docker --entrypoint with an empty value, so the child is env",
+   "docker run --env-file " + ENV + " --entrypoint \"\" alpine env", "deny", "env-file", cwd=NOGIT)
+# A `#` inside quotes is text, and a line break in a shell string starts a new segment. Both are
+# pinned here, so the segment scan must read the quote marks and the line breaks.
+sh("env-child: deny, a comment opener inside a quoted word does not hide a later env segment",
+   "uv run --env-file " + ENV + " sh -c \"echo '#'; env\"", "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, a line break inside a shell string starts a segment that is env",
+   "uv run --env-file " + ENV + " sh -c \"npm start\nenv\"", "deny", "env-file", cwd=NOGIT)
+sh("env-child: allow, a separator inside single quotes is text, echo 'a && env'",
+   "uv run --env-file " + ENV + " sh -c \"echo 'a && env'\"", "allow", cwd=NOGIT)
+sh("env-child: allow, a lone quote in a shell string is text, echo don't",
+   "uv run --env-file " + ENV + " sh -c \"echo don't\"", "allow", cwd=NOGIT)
+sh("env-child: allow, a line break between npm ci and npm test is two app commands",
+   "uv run --env-file " + ENV + " sh -c \"npm ci\nnpm test\"", "allow", cwd=NOGIT)
+sh("env-child: allow, docker runs sh -c whose segments are cd and npm start",
+   "docker run --env-file " + ENV + " alpine sh -c \"cd /app && npm start\"", "allow", cwd=NOGIT)
+sh("env-child: allow, uv runs sh -c whose segments are npm ci and npm test",
+   "uv run --env-file " + ENV + " sh -c \"npm ci; npm test\"", "allow", cwd=NOGIT)
+sh("env-child: allow, docker --pull takes a value, so the child is myimage",
+   "docker run --pull always --env-file " + ENV + " myimage", "allow", cwd=NOGIT)
+sh("env-child: allow, uv --extra takes a value, so the child is pytest",
+   "uv run --env-file " + ENV + " --extra dev pytest", "allow", cwd=NOGIT)
+# A flag that takes no value (-q, --reinstall, --verbose, --rm) is skipped alone, so the word after it is
+# the child. The words after the child are its own arguments: -k env and -m env are pytest's, and serve
+# env is the image's.
+sh("env-child: allow, uv -q takes no value, so the child is pytest with -k env",
+   "uv run --env-file " + ENV + " -q pytest -k env", "allow", cwd=NOGIT)
+sh("env-child: allow, uv --reinstall takes no value, so the child is pytest with -k env",
+   "uv run --env-file " + ENV + " --reinstall pytest -k env", "allow", cwd=NOGIT)
+sh("env-child: allow, uv --verbose takes no value, so the child is pytest with -m env",
+   "uv run --env-file " + ENV + " --verbose pytest -m env", "allow", cwd=NOGIT)
+sh("env-child: allow, docker --rm takes no value, so the child is myimage with serve env",
+   "docker run --env-file " + ENV + " --rm myimage serve env", "allow", cwd=NOGIT)
+# A value flag that the list does not hold takes the word after it, so the child after exec is env.
+sh("env-child: deny, npm --registry takes a value, so exec -c runs env as the child",
+   "npm --env-file=" + ENV + " --registry x exec -c env", "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, pnpm --reporter takes a value, so exec runs env as the child",
+   "pnpm --env-file=" + ENV + " --reporter silent exec env", "deny", "env-file", cwd=NOGIT)
+# `--` ends the runner's options, so the word after it is the child. The two allows are a test
+# filter (vitest env) and jest's own option (jest -c env), and the guard must not read them as env.
+sh("env-child: deny, pnpm exec -- runs env, since -- ends the runner's options",
+   "pnpm --env-file=" + ENV + " exec -- env", "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, pnpm exec -- runs printenv, since -- ends the runner's options",
+   "pnpm --env-file=" + ENV + " exec -- printenv", "deny", "env-file", cwd=NOGIT)
+sh("env-child: allow, pnpm exec -- runs vitest, so env is vitest's test filter",
+   "pnpm --env-file=" + ENV + " exec -- vitest env", "allow", cwd=NOGIT)
+sh("env-child: allow, npm exec -- runs jest, so -c env is jest's option, not npm's shell string",
+   "npm --env-file=" + ENV + " exec -- jest -c env", "allow", cwd=NOGIT)
+# A flag that takes no value (--recursive, --parallel, --silent) is skipped alone, so the word after
+# it is the child: env here.
+sh("env-child: deny, pnpm exec --recursive takes no value, so the child is env",
+   "pnpm --env-file=" + ENV + " exec --recursive env", "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, pnpm exec --parallel takes no value, so the child is env",
+   "pnpm --env-file=" + ENV + " exec --parallel env", "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, pnpm exec --silent takes no value, so the child is env",
+   "pnpm --env-file=" + ENV + " exec --silent env", "deny", "env-file", cwd=NOGIT)
+# Controls, green on this head: with no flag before the child, pnpm exec denies env and allows vitest.
+sh("env-child: deny, pnpm exec with no flag runs env, the control for the cases above",
+   "pnpm --env-file=" + ENV + " exec env", "deny", "env-file", cwd=NOGIT)
+sh("env-child: allow, pnpm exec with no flag runs vitest, the control for the cases above",
+   "pnpm --env-file=" + ENV + " exec vitest", "allow", cwd=NOGIT)
+# A glued v in a short-flag cluster takes the next word as its volume, so /a:/b is not the child.
+sh("env-child: deny, docker -itv takes /a:/b as the volume, so env runs in img",
+   "docker run -itv /a:/b --env-file " + ENV + " img env", "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, docker -dv takes /a:/b as the volume, so env runs in img",
+   "docker run -dv /a:/b --env-file " + ENV + " img env", "deny", "env-file", cwd=NOGIT)
+# A flag that takes no value (--stream) is skipped alone, so python is the child and its -c prints os.environ.
+sh("env-child: deny, pnpm exec --stream takes no value, so python -c prints os.environ",
+   "pnpm --env-file=" + ENV + " exec --stream python -c \"import os; print(os.environ)\"",
+   "deny", "env-file", cwd=NOGIT)
+# An unlisted option ahead of -c must not hide env from the shell string.
+sh("env-child: deny, npm exec with an unlisted --foo before -c still runs env",
+   "npm --env-file=" + ENV + " exec --foo x -c \"env\"", "deny", "env-file", cwd=NOGIT)
+# uv -q and --verbose take no value, so vitest is the child and env is its test filter.
+sh("env-child: allow, uv -q takes no value, so vitest runs with the filter env",
+   "uv run --env-file " + ENV + " -q vitest env", "allow", cwd=NOGIT)
+sh("env-child: allow, uv --verbose takes no value, so vitest runs with the filter env",
+   "uv run --env-file " + ENV + " --verbose vitest env", "allow", cwd=NOGIT)
+# npm exec --yes takes no value, so jest -c env is jest's own option, not npm's shell string.
+sh("env-child: allow, npm exec --yes takes no value, so jest -c env is jest's option",
+   "npm --env-file=" + ENV + " exec --yes jest -c env", "allow", cwd=NOGIT)
+
+# Two unlisted value flags in a row. The scan takes each unlisted flag's next word as a possible
+# value, and runs past every unlisted option, so it reaches the image and its child (env). The
+# --label deny is no such shape: --label is a listed flag, so the scan reads it, and that case
+# pins the listed flag green.
+# Each allow is the same runner with a child that prints nothing, so the flags alone are not denied.
+sh("env-child: deny, docker --cap-add X --cap-add Y, two unlisted value flags, so env runs in img",
+   "docker run --env-file " + ENV + " --cap-add X --cap-add Y img env", "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, docker --pull always --label a=b after the file, so env runs in img",
+   "docker run --env-file " + ENV + " --pull always --label a=b img env", "deny", "env-file",
+   cwd=NOGIT)
+sh("env-child: deny, docker --pull always --rm before the file, so env runs in img",
+   "docker run --pull always --rm --env-file " + ENV + " img env", "deny", "env-file", cwd=NOGIT)
+sh("env-child: allow, docker with two unlisted value flags and no child, so img runs its own command",
+   "docker run --env-file " + ENV + " --cap-add X --cap-add Y img", "allow", cwd=NOGIT)
+sh("env-child: allow, docker with one unlisted value flag, so serve env is the image's own arguments",
+   "docker run --env-file " + ENV + " --cap-add X img serve env", "allow", cwd=NOGIT)
+
+# npm, npx and pnpm given the file, with a printing child and no -c. npm's `--` and its `x` alias
+# end the options, so the word after them is the child. npx reads its first word as the child.
+# pnpm's -r and -w take no value, so exec is the command word. The allows run an app's own command.
+sh("env-child: deny, npm exec -- ends npm's options, so env is the child",
+   "npm --env-file=" + ENV + " exec -- env", "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, npm x -- ends npm's options, so env is the child of the exec alias x",
+   "npm --env-file=" + ENV + " x -- env", "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, npx with no -c runs env as its first word",
+   "npx --env-file=" + ENV + " env", "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, npx with no -c runs printenv FOO as its first word",
+   "npx --env-file=" + ENV + " printenv FOO", "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, pnpm -r takes no value, so exec runs env as the child",
+   "pnpm --env-file=" + ENV + " -r exec env", "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, pnpm -w takes no value, so exec runs env as the child",
+   "pnpm --env-file=" + ENV + " -w exec env", "deny", "env-file", cwd=NOGIT)
+sh("env-child: allow, npx with no -c runs vitest, an app's own test command",
+   "npx --env-file=" + ENV + " vitest", "allow", cwd=NOGIT)
+sh("env-child: allow, npx with no -c runs tsx app.ts, an app's own script",
+   "npx --env-file=" + ENV + " tsx app.ts", "allow", cwd=NOGIT)
+sh("env-child: allow, npm exec -- runs jest, an app's own test command",
+   "npm --env-file=" + ENV + " exec -- jest", "allow", cwd=NOGIT)
+sh("env-child: allow, pnpm -r takes no value, so exec runs vitest, the control for -r",
+   "pnpm --env-file=" + ENV + " -r exec vitest", "allow", cwd=NOGIT)
+sh("env-child: allow, pnpm -w takes no value, so exec runs vitest, the control for -w",
+   "pnpm --env-file=" + ENV + " -w exec vitest", "allow", cwd=NOGIT)
+sh("env-child: deny, pnpm dlx runs env as its first word, as npx does with no -c",
+   "pnpm --env-file=" + ENV + " dlx env", "deny", "env-file", cwd=NOGIT)
+# uv -v and -vv are boolean flags, so vitest is the child and env is its own test filter.
+sh("env-child: allow, uv -vv takes no value, so vitest runs with the filter env",
+   "uv run --env-file " + ENV + " -vv vitest env", "allow", cwd=NOGIT)
+sh("env-child: allow, uv -v takes no value, so vitest runs with the filter env",
+   "uv run --env-file " + ENV + " -v vitest env", "allow", cwd=NOGIT)
+
+# Flags the list does not name that take no value, given the file. uv's --exact and --all-groups and
+# npx's --silent are bools, so the word after each is the program, and env after it is the program's
+# argument. A bun ./x is a script path, not bun's x alias, so env is its argument.
+sh("env-child: allow, uv --exact takes no value, so pytest runs with the filter env",
+   "uv run --env-file " + ENV + " --exact pytest -k env", "allow", cwd=NOGIT)
+sh("env-child: allow, uv --all-groups takes no value, so pytest runs with the filter env",
+   "uv run --env-file " + ENV + " --all-groups pytest -k env", "allow", cwd=NOGIT)
+sh("env-child: allow, npx --silent takes no value, so jest runs with the filter env",
+   "npx --env-file=" + ENV + " --silent jest -t env", "allow", cwd=NOGIT)
+sh("env-child: allow, bun ./x runs the script ./x, not bun's x alias, so env is its argument",
+   "bun --env-file=" + ENV + " ./x env", "allow", cwd=NOGIT)
+
+# Bool flags that take no value, given the file. `--sig-proxy` is docker's bool, so img is the image
+# and env after it is the child. `--active` is uv's bool, so env is the child of the uv run. `bun x`
+# is the exec alias of bunx, so its first word is the child. Each allow runs the program's own
+# command, with env only as an argument. `bunx` is no loader command, so no bunx case is pinned here.
+sh("env-child: deny, docker --sig-proxy takes no value, so env after img is the child",
+   "docker run --env-file " + ENV + " --pull always --sig-proxy img env", "deny", "env-file",
+   cwd=NOGIT)
+sh("env-child: deny, docker --rm takes no value after --pull always, so env after img is the child",
+   "docker run --env-file " + ENV + " --pull always --rm img env", "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, uv --active takes no value, so env is the child of the uv run",
+   "uv run --env-file " + ENV + " --extra dev --active env", "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, bun x is the exec alias, so env is the child",
+   "bun --env-file=" + ENV + " x env", "deny", "env-file", cwd=NOGIT)
+sh("env-child: allow, docker --sig-proxy takes no value, so serve env is the image's own command",
+   "docker run --env-file " + ENV + " --pull always --sig-proxy img serve env", "allow", cwd=NOGIT)
+sh("env-child: allow, docker with no child after the image, so serve is the image's own command",
+   "docker run --env-file " + ENV + " --pull always img serve", "allow", cwd=NOGIT)
+sh("env-child: allow, bun x runs vitest, an app's own test command",
+   "bun --env-file=" + ENV + " x vitest", "allow", cwd=NOGIT)
+# Each bool flag takes no value, so the word after it is the child. The allow puts vitest after the
+# flag, with env as its filter. The deny puts env after the flag, and env is the child. A bool that
+# ENV_CHILD_BOOL_FLAG drops reads the next word as the flag's value, so the allow turns to a deny.
+sh("env-child: deny, uv --dev takes no value, so env after --extra x is the child",
+   "uv run --env-file " + ENV + " --extra x --dev env", "deny", "env-file", cwd=NOGIT)
+sh("env-child: allow, uv --dev takes no value, so vitest runs with the filter env",
+   "uv run --env-file " + ENV + " --dev vitest env", "allow", cwd=NOGIT)
+sh("env-child: deny, uv --all-packages takes no value, so env after --extra x is the child",
+   "uv run --env-file " + ENV + " --extra x --all-packages env", "deny", "env-file", cwd=NOGIT)
+sh("env-child: allow, uv --all-packages takes no value, so vitest runs with the filter env",
+   "uv run --env-file " + ENV + " --all-packages vitest env", "allow", cwd=NOGIT)
+sh("env-child: deny, uv --upgrade takes no value, so env after --extra x is the child",
+   "uv run --env-file " + ENV + " --extra x --upgrade env", "deny", "env-file", cwd=NOGIT)
+sh("env-child: allow, uv --upgrade takes no value, so vitest runs with the filter env",
+   "uv run --env-file " + ENV + " --upgrade vitest env", "allow", cwd=NOGIT)
+sh("env-child: deny, uv --refresh takes no value, so env after --extra x is the child",
+   "uv run --env-file " + ENV + " --extra x --refresh env", "deny", "env-file", cwd=NOGIT)
+sh("env-child: allow, uv --refresh takes no value, so vitest runs with the filter env",
+   "uv run --env-file " + ENV + " --refresh vitest env", "allow", cwd=NOGIT)
+# uv's --upgrade-package and --refresh-package take a value, so X is not a flag. The allow is the
+# control: pytest is the child. The deny puts env after X, and env is the child.
+sh("env-child: allow, uv --upgrade-package takes X, so pytest is the child, a control",
+   "uv run --env-file " + ENV + " --upgrade-package X pytest", "allow", cwd=NOGIT)
+sh("env-child: deny, uv --upgrade-package takes X, so env after it is the child",
+   "uv run --env-file " + ENV + " --upgrade-package X env", "deny", "env-file", cwd=NOGIT)
+sh("env-child: allow, uv --refresh-package takes X, so pytest is the child, a control",
+   "uv run --env-file " + ENV + " --refresh-package X pytest", "allow", cwd=NOGIT)
+sh("env-child: deny, uv --refresh-package takes X, so env after it is the child",
+   "uv run --env-file " + ENV + " --refresh-package X env", "deny", "env-file", cwd=NOGIT)
+
+# A `$` in a shell string refuses only in a segment whose command prints (echo, printf, env, printenv).
+# A `$` in any other segment is an ordinary argument, so an app's own command may use it. The three
+# deny forms below each print a variable through echo or printf, so they stay denied.
+sh("env-child: allow, a $ in a cd segment is an argument, docker runs sh -c cd $APP_DIR && npm start",
+   "docker run --env-file " + ENV + " img sh -c \"cd $APP_DIR && npm start\"", "allow", cwd=NOGIT)
+sh("env-child: allow, a $ in a pytest argument is an argument, uv runs sh -c pytest --basetemp=$TMPDIR",
+   "uv run --env-file " + ENV + " sh -c 'pytest --basetemp=$TMPDIR'", "allow", cwd=NOGIT)
+sh("env-child: allow, a $ in a node script argument is an argument, npm exec -c node $SCRIPT",
+   "npm --env-file=" + ENV + " exec -c 'node $SCRIPT'", "allow", cwd=NOGIT)
+sh("env-child: deny, echo prints a $ variable in a shell string, uv runs sh -c echo $DB_URL",
+   "uv run --env-file " + ENV + " sh -c 'echo $DB_URL'", "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, printf prints a $ variable in a shell string, docker runs sh -c printf",
+   "docker run --env-file " + ENV + " img sh -c 'printf \"%s\" \"$KEY\"'", "deny", "env-file",
+   cwd=NOGIT)
+sh("env-child: deny, npm exec -c echo prints a $ variable, npm exec -c echo $X",
+   "npm --env-file=" + ENV + " exec -c 'echo $X'", "deny", "env-file", cwd=NOGIT)
+
+# A wrapper word before the printing program (timeout, nice, sudo), or a node inline program under npx,
+# is a child the scan must read. Each deny is one such child that prints the environment.
+sh("env-child: deny, timeout 5 wraps env, uv run --env-file runs timeout 5 env",
+   "uv run --env-file " + ENV + " timeout 5 env", "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, timeout 5 wraps printenv in an image, docker run runs timeout 5 printenv",
+   "docker run --env-file " + ENV + " img timeout 5 printenv", "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, nice wraps env in a shell string, uv run sh -c nice env",
+   "uv run --env-file " + ENV + " sh -c \"nice env\"", "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, sudo wraps env in a shell string, uv run sh -c sudo env",
+   "uv run --env-file " + ENV + " sh -c \"sudo env\"", "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, npx runs node -e that prints process.env",
+   "npx --env-file=" + ENV + " node -e \"console.log(process.env)\"", "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, npx runs node -p that prints process.env",
+   "npx --env-file=" + ENV + " node -p process.env", "deny", "env-file", cwd=NOGIT)
+
+# Controls for the wrapper and npx cases above: the same runners with an app as the child stay allowed.
+sh("env-child: allow, uv run --env-file runs timeout 5 pytest, the control for timeout 5 env",
+   "uv run --env-file " + ENV + " timeout 5 pytest", "allow", cwd=NOGIT)
+sh("env-child: allow, npx runs node app.js, the control for npx node -e and node -p",
+   "npx --env-file=" + ENV + " node app.js", "allow", cwd=NOGIT)
 
 for wrapped in (
     "timeout 60 node --env-file=" + ENV + " app.js",
@@ -12054,6 +12467,14 @@ sh("frozen: cp FROM a frozen hook with stderr sent to /dev/null is a read",
    "cp " + CFG_HOOK + " /tmp/g 2>/dev/null", "allow", cwd=NOGIT)
 sh("frozen: cp FROM a frozen hook, with a redirect onto a frozen hook, still denies",
    "cp " + CFG_HOOK + " /tmp/g > " + CFG_HOOK, "deny", "frozen-path", cwd=NOGIT)
+# A line break inside a quoted operand is part of one word, so the frozen file after it is still the
+# target of the write, whichever command carries the quoted text.
+sh("frozen: sed -i whose quoted a-text script holds a line break still denies a frozen hook",
+   "sed -i '/^x/a\\\nnew line' " + CFG_HOOK, "deny", "frozen-path", cwd=NOGIT)
+sh("frozen: sed -i -e whose quoted i-text script holds a line break still denies a frozen hook",
+   "sed -i -e '1i\\\nimport os' " + CFG_HOOK, "deny", "frozen-path", cwd=NOGIT)
+sh("frozen: cp whose quoted source spans two lines still denies onto a frozen hook",
+   "cp '/tmp/a\nb.py' " + CFG_HOOK, "deny", "frozen-path", cwd=NOGIT)
 
 # THE LIVE PINNED CHECKOUT IS FROZEN. Owner ruling (decision merge-reinstalls-from-main, ruling 1:
 # no work runs in the pinned checkout). The pin is `<clone>-live`, and each move leaves a stamped
@@ -12232,6 +12653,45 @@ sh("frozen dup: cp from a dup before a frozen settings file stays frozen",
    "cp /tmp/x 2>&1 " + CFG_SETTINGS, "deny", "frozen-path", cwd=NOGIT)
 sh("frozen dup: tee after a dup onto a frozen settings file stays frozen",
    "echo x | tee 2>&1 " + CFG_SETTINGS, "deny", "frozen-path", cwd=NOGIT)
+# THE AMPERSAND REDIRECT. `&>` and `&>>` send both streams to a file, so a copy into a frozen path with
+# one of them writes the frozen file. The `&` is a redirect, never a copy source. The forms that already
+# refuse stay refused, and a copy FROM a frozen file with `&>` is still a read.
+sh("frozen amp: cp onto a frozen hook with &> /dev/null stays denied",
+   "cp /tmp/x.py " + CFG_HOOK + " &> /dev/null", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen amp: cp onto a frozen hook with &>/dev/null, no space, stays denied",
+   "cp /tmp/x.py " + CFG_HOOK + " &>/dev/null", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen amp: cp onto a frozen settings file with &>> /dev/null stays denied",
+   "cp /tmp/x.json " + CFG_SETTINGS + " &>> /dev/null", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen amp: cp onto a frozen hook with &> /dev/null, then a chained echo, stays denied",
+   "cp /tmp/x.py " + CFG_HOOK + " &> /dev/null && echo done", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen amp: cp onto a frozen hook with > /dev/null stays denied",
+   "cp /tmp/x.py " + CFG_HOOK + " > /dev/null", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen amp: cp onto a frozen hook with >& /dev/null stays denied",
+   "cp /tmp/x.py " + CFG_HOOK + " >& /dev/null", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen amp: cp onto a frozen hook with 2>&1 stays denied",
+   "cp /tmp/x.py " + CFG_HOOK + " 2>&1", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen amp: cp FROM a frozen hook to scratch with &> /dev/null is still a read",
+   "cp " + CFG_HOOK + " /tmp/guard.bak &> /dev/null", "allow", cwd=NOGIT)
+# THE DESTINATION AFTER A NULL REDIRECT. `cp SRC &> /dev/null DEST` writes DEST whatever the redirect says, so
+# a frozen DEST named after the null redirect is judged, as one named before it is.
+sh("frozen amp: cp /tmp/x.py &> /dev/null onto a frozen hook named last stays denied",
+   "cp /tmp/x.py &> /dev/null " + CFG_HOOK, "deny", "frozen-path", cwd=NOGIT)
+sh("frozen amp: cp /tmp/x.json &> /dev/null onto a frozen settings file named last stays denied",
+   "cp /tmp/x.json &> /dev/null " + CFG_SETTINGS, "deny", "frozen-path", cwd=NOGIT)
+# THE FROZEN SOURCE WITH A FILE REDIRECT. `cp FROZEN /tmp/x &> /tmp/build.log` reads the frozen file and writes
+# scratch, so it is allowed: the `&` of `&>` is no copy source. A frozen destination with the same redirect
+# still denies.
+sh("frozen amp: cp FROM a frozen hook to scratch with &> to a build log is still a read",
+   "cp " + CFG_HOOK + " /tmp/x &> /tmp/build.log", "allow", cwd=NOGIT)
+sh("frozen amp: cp onto a frozen hook with &> to a build log stays denied",
+   "cp /tmp/x.py " + CFG_HOOK + " &> /tmp/build.log", "deny", "frozen-path", cwd=NOGIT)
+# THE LONE >& REDIRECT. `>&` sends both streams to a file, as `&>` does. A copy FROM a frozen hook with `>&` to a
+# build log reads the frozen file and writes scratch, so it is allowed. A copy onto a frozen hook with the same
+# redirect still denies.
+sh("frozen amp: cp FROM a frozen hook to scratch with >& to a build log is still a read",
+   "cp " + CFG_HOOK + " /tmp/x >& /tmp/l", "allow", cwd=NOGIT)
+sh("frozen amp: cp onto a frozen hook with >& to a build log stays denied",
+   "cp /tmp/x.py " + CFG_HOOK + " >& /tmp/l", "deny", "frozen-path", cwd=NOGIT)
 
 add("config-edit: Edit of a project local settings file is allowed", "allow", tool="Edit",
     cwd=NOGIT, file_path=PROJ_LOCAL)
@@ -13667,6 +14127,78 @@ add("builder-test: a session run with --agent builder (no agent_id) is not judge
 add("builder-test: a builder Write of a test file from no repository is refused by shape", "deny",
     rule=BT, tool="Write", file_path="src/test_app.py", carries=("test-author", "Report"),
     agent_id="bld1", agent_type="builder", cwd=NOGIT)
+# THE JOIN WITH AN UNKNOWN HEAD. A builder's script joins a folder it cannot read (a temp folder from
+# tempfile.mkdtemp(), which is in no repository) to test-looking pieces. The unknown head drops out of the
+# join, so the pieces read as a repo test path: a false alarm. A join that resolves to the working folder
+# or to a relative folder is a repo test path, and still refuses.
+sh("builder join: a temp folder from mkdtemp joined to tests is allowed",
+   "python3 - <<'EOF'\nimport os, tempfile\ntmpdir = tempfile.mkdtemp()\n"
+   "open(os.path.join(tmpdir, 'tests', 'test_x.py'), 'w').write('x')\nEOF", "allow", **B)
+sh("builder join: a temp folder from mkdtemp in python -c joined to tests is allowed",
+   "python3 -c \"import os, tempfile; t = tempfile.mkdtemp(); "
+   "open(os.path.join(t, 'tests', 'test_x.py'), 'w').write('x')\"", "allow", **B)
+sh("builder join: a literal folder outside the repository joined to tests is allowed",
+   "python3 - <<'EOF'\nimport os\nopen(os.path.join('/tmp/elsewhere', 'tests', 'test_x.py'), 'w').write('x')\nEOF",
+   "allow", **B)
+sh("builder join: a relative folder joined to tests still refuses",
+   "python3 - <<'EOF'\nimport os\nopen(os.path.join('tests', 'test_x.py'), 'w').write('x')\nEOF",
+   "deny", rule=BT, **B)
+sh("builder join: a relative folder held in a variable and joined to tests still refuses",
+   "python3 - <<'EOF'\nimport os\nrepo = '.'\nopen(os.path.join(repo, 'tests', 'test_x.py'), 'w').write('x')\nEOF",
+   "deny", rule=BT, **B)
+sh("builder join: the working folder from Path.cwd() joined to tests still refuses",
+   "python3 - <<'EOF'\nfrom pathlib import Path\n(Path.cwd() / 'tests' / 'test_x.py').write_text('x')\nEOF",
+   "deny", rule=BT, **B)
+sh("builder join: the working folder from os.getcwd() joined to tests still refuses",
+   "python3 - <<'EOF'\nimport os\nopen(os.path.join(os.getcwd(), 'tests', 'test_x.py'), 'w').write('x')\nEOF",
+   "deny", rule=BT, **B)
+# THE HEAD OF A JOIN IN python -c. An unknown head drops out of the join, so only a head from a temp source
+# (tempfile.mkdtemp, mkstemp, gettempdir, TemporaryDirectory) is safe. A head the script takes from
+# sys.argv, from subprocess output, from Path(__file__) or from os.path.dirname() names a folder in the repo,
+# so the join to hooks/test_x.py still refuses.
+sh("builder join: a repo head from sys.argv[1] joined to hooks in python -c still refuses",
+   '''python3 -c "import os, sys; repo = sys.argv[1]; open(os.path.join(repo, 'hooks', 'test_x.py'), 'w').write('x')" .''',
+   "deny", rule=BT, **B)
+sh("builder join: a repo head from subprocess output joined to hooks in python -c still refuses",
+   '''python3 -c "import os, subprocess; repo = subprocess.check_output(['git', 'rev-parse', '--show-toplevel']).decode().strip(); open(os.path.join(repo, 'hooks', 'test_x.py'), 'w').write('x')"''',
+   "deny", rule=BT, **B)
+sh("builder join: a repo head from Path(__file__).resolve().parents joined to hooks in python -c still refuses",
+   '''python3 -c "import os; from pathlib import Path; repo = Path(__file__).resolve().parents[1]; open(os.path.join(repo, 'hooks', 'test_x.py'), 'w').write('x')"''',
+   "deny", rule=BT, **B)
+sh("builder join: a repo head from os.path.dirname joined to hooks in python -c still refuses",
+   '''python3 -c "import os; repo = os.path.dirname(os.path.dirname(os.path.abspath(__file__))); open(os.path.join(repo, 'hooks', 'test_x.py'), 'w').write('x')"''',
+   "deny", rule=BT, **B)
+sh("builder join: a temp folder from mkdtemp joined to hooks in python -c is allowed",
+   '''python3 -c "import os, tempfile; tmp = tempfile.mkdtemp(); open(os.path.join(tmp, 'hooks', 'test_x.py'), 'w').write('x')"''',
+   "allow", **B)
+sh("builder join: a temp folder from gettempdir joined to hooks in python -c is allowed",
+   '''python3 -c "import os, tempfile; tmp = tempfile.gettempdir(); open(os.path.join(tmp, 'hooks', 'test_x.py'), 'w').write('x')"''',
+   "allow", **B)
+sh("builder join: a temp folder from mkstemp joined to hooks in python -c is allowed",
+   '''python3 -c "import os, tempfile; fd, tmp = tempfile.mkstemp(); os.close(fd); open(os.path.join(tmp, 'hooks', 'test_x.py'), 'w').write('x')"''',
+   "allow", **B)
+sh("builder join: a temp folder from TemporaryDirectory joined to hooks in python -c is allowed",
+   '''python3 -c "import os, tempfile; with tempfile.TemporaryDirectory() as tmp: open(os.path.join(tmp, 'hooks', 'test_x.py'), 'w').write('x')"''',
+   "allow", **B)
+# THE dir= ARGUMENT OF mkdtemp. `dir='.'` and `dir=os.getcwd()` put the temp folder in the working folder, so a
+# join to tests from it is a repo test path and refuses. Only the system temp folder is no repo folder. The inline
+# join from the same call refuses too. A bare mkdtemp() inline stays allowed, as its held form does.
+sh("builder join: a temp folder from mkdtemp(dir='.') held in a variable, joined to tests still refuses",
+   '''python3 -c "import os, tempfile; d = tempfile.mkdtemp(dir='.'); open(os.path.join(d, 'tests', 'test_x.py'), 'w').write('x')"''',
+   "deny", rule=BT, **B)
+sh("builder join: a temp folder from mkdtemp(dir=os.getcwd()) held in a variable, joined to tests still refuses",
+   '''python3 -c "import os, tempfile; d = tempfile.mkdtemp(dir=os.getcwd()); open(os.path.join(d, 'tests', 'test_x.py'), 'w').write('x')"''',
+   "deny", rule=BT, **B)
+sh("builder join: a temp folder from mkdtemp(dir='.') joined inline to tests still refuses",
+   '''python3 -c "import os, tempfile; open(os.path.join(tempfile.mkdtemp(dir='.'), 'tests', 'test_x.py'), 'w').write('x')"''',
+   "deny", rule=BT, **B)
+sh("builder join: a temp folder from mkdtemp() joined inline to tests is allowed",
+   '''python3 -c "import os, tempfile; open(os.path.join(tempfile.mkdtemp(), 'tests', 'test_x.py'), 'w').write('x')"''',
+   "allow", **B)
+# A TemporaryDirectory held in a variable and joined through its .name is still a system temp folder: allowed.
+sh("builder join: a TemporaryDirectory held in a variable, joined through .name to tests is allowed",
+   '''python3 -c "import os, tempfile; td = tempfile.TemporaryDirectory(); open(os.path.join(td.name, 'tests', 'test_x.py'), 'w')"''',
+   "allow", **B)
 add("test-author: Edit of product code is refused", "deny", rule=TA, tool="Edit",
     file_path="src/app.py", carries=("builder", "Report"), **A)
 add("builder-test: a ruff --ignore script added to package.json is allowed", "allow", tool="Edit",
@@ -13787,6 +14319,121 @@ add("builder-test: continue-on-error added under a test step is refused", "deny"
 add("builder-test: if: false added under a test step is refused", "deny", rule=BT, tool="Edit",
     file_path=WF, old_string=LINT + TEST_LINUX, new_string=LINT + IF_FALSE,
     carries=("test-author", "Report"), **B)
+# A mutation test is a test run too: a disabled mutate step reads green while its mutants go unrun. Its file is
+# named in AUTHOR_MUTATION_TESTS, not a test_ name, so the step check must count that list. The controls keep a
+# non-test script, a near-miss hooks/mutate_x.py and a timeout change on the mutate step allowed.
+MUTATE_GUARD = ("      - name: Guard mutation test\n        run: python3 hooks/mutate_guard.py\n"
+                "        timeout-minutes: 25\n")
+MUTATE_GUARD_CONTINUE = ("      - name: Guard mutation test\n        continue-on-error: true\n"
+                         "        run: python3 hooks/mutate_guard.py\n        timeout-minutes: 25\n")
+MUTATE_GUARD_IF_FALSE = ("      - name: Guard mutation test\n        if: false\n"
+                         "        run: python3 hooks/mutate_guard.py\n        timeout-minutes: 25\n")
+MUTATE_GUARD_TIMEOUT = MUTATE_GUARD.replace("minutes: 25", "minutes: 30")
+MUTATE_SWEEP = "      - name: Mutate sweep\n        run: python3 janitor/mutate_sweep.py\n"
+MUTATE_SWEEP_CONTINUE = ("      - name: Mutate sweep\n        continue-on-error: true\n"
+                         "        run: python3 janitor/mutate_sweep.py\n")
+SOME_TOOL = "      - name: Some tool\n        run: python3 hooks/some_tool.py\n"
+SOME_TOOL_CONTINUE = ("      - name: Some tool\n        continue-on-error: true\n"
+                      "        run: python3 hooks/some_tool.py\n")
+MUTATE_X = "      - name: Mutate tool\n        run: python3 hooks/mutate_x.py\n"
+MUTATE_X_CONTINUE = ("      - name: Mutate tool\n        continue-on-error: true\n"
+                     "        run: python3 hooks/mutate_x.py\n")
+add("builder-test: continue-on-error added under the mutate_guard step is refused", "deny", rule=BT, tool="Edit",
+    file_path=WF, old_string=LINT + MUTATE_GUARD, new_string=LINT + MUTATE_GUARD_CONTINUE,
+    carries=("test-author", "Report"), **B)
+add("builder-test: continue-on-error added under the mutate_sweep step is refused", "deny", rule=BT, tool="Edit",
+    file_path=WF, old_string=LINT + MUTATE_SWEEP, new_string=LINT + MUTATE_SWEEP_CONTINUE,
+    carries=("test-author", "Report"), **B)
+add("builder-test: if: false added under the mutate_guard step is refused", "deny", rule=BT, tool="Edit",
+    file_path=WF, old_string=LINT + MUTATE_GUARD, new_string=LINT + MUTATE_GUARD_IF_FALSE,
+    carries=("test-author", "Report"), **B)
+add("builder-test: continue-on-error added to a step running hooks/some_tool.py is allowed", "allow", tool="Edit",
+    file_path=WF, old_string=LINT + SOME_TOOL, new_string=LINT + SOME_TOOL_CONTINUE, **B)
+add("builder-test: continue-on-error added to a step running hooks/mutate_x.py is allowed", "allow", tool="Edit",
+    file_path=WF, old_string=LINT + MUTATE_X, new_string=LINT + MUTATE_X_CONTINUE, **B)
+add("builder-test: a timeout change on the mutate_guard step is allowed", "allow", tool="Edit",
+    file_path=WF, old_string=LINT + MUTATE_GUARD, new_string=LINT + MUTATE_GUARD_TIMEOUT, **B)
+# A YAML comment after a disable value still disables the step, so the disable line must be read without its comment.
+# A lone apostrophe in that comment must not stop the reader from finding the `#`: a quote-aware reader that throws on
+# it would fall open. The controls keep a comment after a false value, and a quoted `#` on a run line, allowed.
+MUTATE_GUARD_CONTINUE_FLAKY = ("      - name: Guard mutation test\n        continue-on-error: true  # flaky\n"
+                               "        run: python3 hooks/mutate_guard.py\n        timeout-minutes: 25\n")
+MUTATE_GUARD_IF_FALSE_FLAKY = ("      - name: Guard mutation test\n        if: false  # flaky\n"
+                               "        run: python3 hooks/mutate_guard.py\n        timeout-minutes: 25\n")
+MUTATE_GUARD_CONTINUE_APOSTROPHE = ("      - name: Guard mutation test\n        continue-on-error: true  # don't\n"
+                                    "        run: python3 hooks/mutate_guard.py\n        timeout-minutes: 25\n")
+TEST_GUARD_CONTINUE_FLAKY = ("      - name: Guard tests\n        continue-on-error: true  # flaky\n"
+                             "        run: python3 hooks/test_guard.py\n")
+MUTATE_GUARD_CONTINUE_FALSE = ("      - name: Guard mutation test\n        continue-on-error: false  # never\n"
+                               "        run: python3 hooks/mutate_guard.py\n        timeout-minutes: 25\n")
+MUTATE_GUARD_QUOTED_HASH = ("      - name: Guard mutation test\n"
+                            "        run: echo \"a # b\" && python3 hooks/mutate_guard.py\n        timeout-minutes: 25\n")
+add("builder-test: continue-on-error: true with a trailing # flaky comment under the mutate_guard step is refused",
+    "deny", rule=BT, tool="Edit", file_path=WF, old_string=LINT + MUTATE_GUARD,
+    new_string=LINT + MUTATE_GUARD_CONTINUE_FLAKY, carries=("test-author", "Report"), **B)
+add("builder-test: if: false with a trailing # flaky comment under the mutate_guard step is refused", "deny", rule=BT,
+    tool="Edit", file_path=WF, old_string=LINT + MUTATE_GUARD, new_string=LINT + MUTATE_GUARD_IF_FALSE_FLAKY,
+    carries=("test-author", "Report"), **B)
+add("builder-test: continue-on-error: true with a trailing # flaky comment under a test step is refused", "deny",
+    rule=BT, tool="Edit", file_path=WF, old_string=LINT + TEST_LINUX, new_string=LINT + TEST_GUARD_CONTINUE_FLAKY,
+    carries=("test-author", "Report"), **B)
+add("builder-test: continue-on-error: true with a lone apostrophe in its # comment under the mutate_guard step "
+    "is refused", "deny", rule=BT, tool="Edit", file_path=WF, old_string=LINT + MUTATE_GUARD,
+    new_string=LINT + MUTATE_GUARD_CONTINUE_APOSTROPHE, carries=("test-author", "Report"), **B)
+add("builder-test: continue-on-error: false with a trailing # comment under the mutate_guard step is allowed", "allow",
+    tool="Edit", file_path=WF, old_string=LINT + MUTATE_GUARD, new_string=LINT + MUTATE_GUARD_CONTINUE_FALSE, **B)
+add("builder-test: a quoted # on the mutate_guard run line ahead of the script is allowed", "allow", tool="Edit",
+    file_path=WF, old_string=LINT + MUTATE_GUARD, new_string=LINT + MUTATE_GUARD_QUOTED_HASH, **B)
+# A mutation test run through `cd hooks &&` or a `working-directory:` line names its script by the bare file name.
+# The step check counts that run by the name (the basename against MUTATION_TEST_NAMES) and resolves no folder, so
+# a disabled step in either form would read green without that count.
+# The pins hold what a test file already keeps: the same forms on a test file are refused, by basename.
+TEST_GUARD_CD = "      - name: Guard tests\n        run: cd hooks && python3 test_guard.py\n"
+TEST_GUARD_CD_CONTINUE = ("      - name: Guard tests\n        continue-on-error: true\n"
+                          "        run: cd hooks && python3 test_guard.py\n")
+TEST_GUARD_WD = "      - name: Guard tests\n        working-directory: hooks\n        run: python3 test_guard.py\n"
+TEST_GUARD_WD_IF_FALSE = ("      - name: Guard tests\n        if: false\n        working-directory: hooks\n"
+                          "        run: python3 test_guard.py\n")
+MUTATE_GUARD_CD = "      - name: Guard mutation test\n        run: cd hooks && python3 mutate_guard.py\n"
+MUTATE_GUARD_CD_CONTINUE = ("      - name: Guard mutation test\n        continue-on-error: true\n"
+                            "        run: cd hooks && python3 mutate_guard.py\n")
+MUTATE_GUARD_WD = ("      - name: Guard mutation test\n        working-directory: hooks\n"
+                   "        run: python3 mutate_guard.py\n")
+MUTATE_GUARD_WD_IF_FALSE = ("      - name: Guard mutation test\n        if: false\n        working-directory: hooks\n"
+                            "        run: python3 mutate_guard.py\n")
+MUTATE_SWEEP_WD = "      - name: Mutate sweep\n        working-directory: janitor\n        run: python3 mutate_sweep.py\n"
+MUTATE_SWEEP_WD_CONTINUE = ("      - name: Mutate sweep\n        continue-on-error: true\n"
+                            "        working-directory: janitor\n        run: python3 mutate_sweep.py\n")
+MUTATE_X_CD = "      - name: Mutate tool\n        run: cd hooks && python3 mutate_x.py\n"
+MUTATE_X_CD_CONTINUE = ("      - name: Mutate tool\n        continue-on-error: true\n"
+                        "        run: cd hooks && python3 mutate_x.py\n")
+add("builder-test: continue-on-error added under the cd hooks mutate_guard step is refused", "deny", rule=BT,
+    tool="Edit", file_path=WF, old_string=LINT + MUTATE_GUARD_CD, new_string=LINT + MUTATE_GUARD_CD_CONTINUE,
+    carries=("test-author", "Report"), **B)
+add("builder-test: if: false added under the working-directory mutate_guard step is refused", "deny", rule=BT,
+    tool="Edit", file_path=WF, old_string=LINT + MUTATE_GUARD_WD, new_string=LINT + MUTATE_GUARD_WD_IF_FALSE,
+    carries=("test-author", "Report"), **B)
+add("builder-test: continue-on-error added under the working-directory mutate_sweep step is refused", "deny",
+    rule=BT, tool="Edit", file_path=WF, old_string=LINT + MUTATE_SWEEP_WD, new_string=LINT + MUTATE_SWEEP_WD_CONTINUE,
+    carries=("test-author", "Report"), **B)
+add("builder-test: continue-on-error added to a cd hooks mutate_x.py step is allowed", "allow", tool="Edit",
+    file_path=WF, old_string=LINT + MUTATE_X_CD, new_string=LINT + MUTATE_X_CD_CONTINUE, **B)
+add("builder-test: continue-on-error added under the cd hooks test step is refused", "deny", rule=BT,
+    tool="Edit", file_path=WF, old_string=LINT + TEST_GUARD_CD, new_string=LINT + TEST_GUARD_CD_CONTINUE,
+    carries=("test-author", "Report"), **B)
+add("builder-test: if: false added under the working-directory test step is refused", "deny", rule=BT,
+    tool="Edit", file_path=WF, old_string=LINT + TEST_GUARD_WD, new_string=LINT + TEST_GUARD_WD_IF_FALSE,
+    carries=("test-author", "Report"), **B)
+# A mutation test's whole step is a test run too: deleting it leaves its mutants unrun, so the deletion is refused by
+# the file name the step runs. The control deletes an upload step beside the kept mutate step, in the same job.
+UPLOAD_REPORT = ("      - name: Upload report\n        uses: actions/upload-artifact@v4\n"
+                 "        with:\n          name: report\n          path: out/report.json\n")
+add("builder-test: a whole mutate_guard step deleted from checks.yml is refused", "deny", rule=BT, tool="Edit",
+    file_path=WF, old_string=LINT + MUTATE_GUARD, new_string=LINT, carries=("test-author", "Report"), **B)
+add("builder-test: a whole mutate_sweep step deleted from checks.yml is refused", "deny", rule=BT, tool="Edit",
+    file_path=WF, old_string=LINT + MUTATE_SWEEP, new_string=LINT, carries=("test-author", "Report"), **B)
+add("builder-test: an upload step deleted beside the mutate_guard step is allowed", "allow", tool="Edit",
+    file_path=WF, old_string=LINT + MUTATE_GUARD + UPLOAD_REPORT, new_string=LINT + MUTATE_GUARD, **B)
 add("builder-test: a whole test step deleted from checks.yml is refused", "deny", rule=BT, tool="Edit",
     file_path=WF, old_string=LINT + TEST_LINUX, new_string=LINT, carries=("test-author", "Report"), **B)
 add("builder-test: a test step moved within checks.yml is allowed", "allow", tool="Edit", file_path=WF,
@@ -13827,10 +14474,70 @@ add("builder-test: an added run of a test path with --deselect is refused", "den
     file_path=WF, old_string=LINT,
     new_string=LINT + "      - name: X\n        run: python3 hooks/x_test.py --deselect a\n",
     carries=("test-author", "Report"), **B)
+# A wrapper runs the test it wraps, so a wrapped run is judged as the bare run it wraps. A builder's wrap of a bare
+# run keeps its test, a test-author's wrapped single-line run is a test step, and deleting a wrapped run drops its test.
+WRAPPED_RUNS = (
+    "timeout 600 python3 tests/test_a.py",
+    "xvfb-run -a python3 tests/test_a.py",
+    "coverage run tests/test_a.py",
+    "uv run tests/test_a.py",
+    "env FOO=1 python3 tests/test_a.py",
+    "nice python3 tests/test_a.py",
+    "python3 -m coverage run tests/test_a.py",
+)
+for _form in WRAPPED_RUNS:
+    add("builder-test: %s in place of a bare test run is allowed" % _form, "allow", tool="Edit", file_path=WF,
+        old_string=R3_UNIT, new_string="      - name: Unit\n        run: %s\n" % _form, **B)
+for _form in WRAPPED_RUNS:
+    add("test-author: a whole new test step, %s, is allowed" % _form, "allow", tool="Edit", file_path=WF,
+        old_string=LINT, new_string=LINT + "      - name: Unit\n        run: %s\n" % _form, **A)
+for _form in WRAPPED_RUNS:
+    add("builder-test: a wrapped test run, %s, deleted from checks.yml is refused" % _form, "deny", rule=BT,
+        tool="Edit", file_path=WF, old_string=LINT + "      - name: Unit\n        run: %s\n" % _form, new_string=LINT,
+        carries=("test-author", "Report"), **B)
+add("builder-test: a wrapped test run unwrapped to its bare path is allowed", "allow", tool="Edit", file_path=WF,
+    old_string="      - name: Unit\n        run: timeout 600 python3 tests/test_a.py\n", new_string=R3_UNIT, **B)
+# Not a test run: a wrapper around one does not make it a test, so each of these still drops the test it replaces.
+add("builder-test: a bare test run replaced by an echo of its path is refused", "deny", rule=BT, tool="Edit",
+    file_path=WF, old_string=R3_UNIT, new_string="      - name: Unit\n        run: echo python3 tests/test_a.py\n",
+    carries=("test-author", "Report"), **B)
+add("builder-test: a bare test run replaced by a timeout around a lint run is refused", "deny", rule=BT, tool="Edit",
+    file_path=WF, old_string=R3_UNIT, new_string="      - name: Unit\n        run: timeout 600 python3 lint/ste_lint.py\n",
+    carries=("test-author", "Report"), **B)
+add("test-author: a whole new test step, timeout around curl, is refused", "deny", rule=TA, tool="Edit",
+    file_path=WF, old_string=LINT, new_string=LINT + "      - name: Unit\n        run: timeout 600 curl -s x\n",
+    carries=("builder", "Report"), **A)
 add("test-author: a whole new test step with if: false is refused", "deny", rule=TA, tool="Edit",
     file_path=WF, old_string=LINT,
     new_string=LINT + "      - name: Guard tests\n        if: false\n        run: python3 hooks/test_guard.py\n",
     carries=("builder", "Report"), **A)
+# A multi-line run: block whose wrapper takes a quoted value with a space. The shell reads the quoted value as one
+# word, so the run is a test. A whitespace split reads `-screen` and `0` as the command and finds no test path, so
+# the deletion would pass. The bare block beside it is the control: the same block shape, no wrapper, is refused.
+XVFB_QUOTED_BLOCK = ("      - name: Xvfb unit\n        run: |\n"
+                     "          xvfb-run -s \"-screen 0 1024x768x24\" python3 tests/test_a.py\n")
+BARE_BLOCK = "      - name: Bare unit\n        run: |\n          python3 tests/test_a.py\n"
+add("builder-test: a multi-line run under xvfb-run with a quoted -s value, deleted from checks.yml is refused",
+    "deny", rule=BT, tool="Edit", file_path=WF, old_string=LINT + XVFB_QUOTED_BLOCK, new_string=LINT,
+    carries=("test-author", "Report"), **B)
+add("builder-test: a multi-line bare test run, no wrapper, deleted from checks.yml is refused",
+    "deny", rule=BT, tool="Edit", file_path=WF, old_string=LINT + BARE_BLOCK, new_string=LINT,
+    carries=("test-author", "Report"), **B)
+# A backslash in a test path is a separator on Windows, and is_test_rel reads it as `/`. The run line must keep it:
+# shlex in POSIX mode reads an unquoted backslash as an escape, so `tests\test_a.py` loses its separator and reads as
+# no test. Each deletion below is refused on main, so a parse that drops the backslash is a regression.
+BACKSLASH_INLINE = "      - name: Win unit\n        run: python tests\\test_a.py\n"
+BACKSLASH_BLOCK = "      - name: Win unit\n        run: |\n          python tests\\test_a.py\n"
+BACKSLASH_NODE = "      - name: Win node\n        run: node tests\\run.js\n"
+add("builder-test: a bare python run with a backslash test path, deleted from checks.yml is refused",
+    "deny", rule=BT, tool="Edit", file_path=WF, old_string=LINT + BACKSLASH_INLINE, new_string=LINT,
+    carries=("test-author", "Report"), **B)
+add("builder-test: a multi-line python run with a backslash test path, deleted from checks.yml is refused",
+    "deny", rule=BT, tool="Edit", file_path=WF, old_string=LINT + BACKSLASH_BLOCK, new_string=LINT,
+    carries=("test-author", "Report"), **B)
+add("builder-test: a node run with a backslash test path, deleted from checks.yml is refused",
+    "deny", rule=BT, tool="Edit", file_path=WF, old_string=LINT + BACKSLASH_NODE, new_string=LINT,
+    carries=("test-author", "Report"), **B)
 
 # ---- test-path shapes: one table on the builder's early warning. Each row is one path, judged by
 # a Write, for one role (the builder). A test shape is refused, a near miss is allowed. Shapes, with
@@ -14036,6 +14743,14 @@ sh("builder-test: bash -c with an escaped quote, then a pipe into a cp onto a te
    r'bash -c "echo \"x\"|cp /tmp/a tests/test_x.py"', "deny", rule=BT, carries=("test-author",), **BR)
 sh("builder-test: bash -c with an escaped quote, then a newline and a cp onto a test, is refused",
    'bash -c "echo \\"x\\"\ncp /tmp/a tests/test_x.py"', "deny", rule=BT, carries=("test-author",), **BR)
+# The message after -m keeps its place in the words a git commit is read by, so a pathspec after it is read at its
+# own place: a path named rm or mv is no git rm or git mv. A real git rm after the commit is still refused.
+sh("builder-test: git commit with a message, then a pathspec named rm before a test, is allowed",
+   'git commit -m "docs" rm tests/test_x.py', "allow", **BR)
+sh("builder-test: git commit with a message, then a pathspec named mv before a test, is allowed",
+   'git commit -m "docs" mv tests/test_x.py', "allow", **BR)
+sh("builder-test: git commit with a message, then && and a git rm of a test, is refused",
+   'git commit -m "docs" && git rm tests/test_x.py', "deny", rule=BT, carries=("test-author",), **BR)
 sh("builder-test: python heredoc that reads tests/x.py, rebinds the name, then writes src/app.py is allowed",
    "python3 - <<'EOF'\np='tests/x.py'\nprint(open(p).read())\np='src/app.py'\nopen(p,'w').write('x')\nEOF",
    "allow", **BR)
@@ -14441,6 +15156,61 @@ sh("builder-diff: a builder in a tree git cannot read is allowed and noted", COM
    cwd=NOGIT, agent_id="bld1", agent_type="builder")
 sh("builder-diff: reads stay allowed in a dirty tree", "cat tests/test_a.py && ls tests",
    "allow", cwd=_dirty, agent_id="bld1", agent_type="builder")
+
+# ---- frozen: the main mirror and the live pin name are copied into guard_frozen.py from install.sh and
+# merge/install_from_main.sh. Each shell name is a literal in its script, and the guard keeps its own copy
+# (MAIN_MIRROR_NAME, LIVE_PIN_SUFFIX). Each copy is read as text, never imported, so the check loads no guard.
+# A change to one side alone would leave the frozen check guarding a folder that no install builds.
+FAMILY = "frozen"
+_MIRROR_SHELL = re.compile(r'^MAIN_MIRROR="\$HOME/([^"/$]+)"[ \t\r]*$', re.M)
+_PIN_SHELL = re.compile(r'^pin="\$clone([^"/$]*)"[ \t\r]*$', re.M)
+
+
+def _module_literal(text, name):
+    """The value of the top-level assignment `name = <literal>` in a Python module's text, or None."""
+    for node in ast.parse(text).body:
+        if isinstance(node, ast.Assign) and any(isinstance(t, ast.Name) and t.id == name for t in node.targets):
+            try:
+                return ast.literal_eval(node.value)
+            except ValueError:
+                return None
+    return None
+
+
+def mirror_name_problems(install_sh, install_from_main, guard_frozen):
+    """One line per copy that differs from its shell literal, or [] when every copy agrees. Each argument is
+    the text of one file."""
+    problems = []
+    mirror = _MIRROR_SHELL.findall(install_sh)
+    pin = _PIN_SHELL.findall(install_from_main)
+    name = _module_literal(guard_frozen, "MAIN_MIRROR_NAME")
+    suffix = _module_literal(guard_frozen, "LIVE_PIN_SUFFIX")
+    if len(mirror) != 1:
+        problems.append("install.sh does not set MAIN_MIRROR to $HOME/<name> exactly once")
+    elif name != mirror[0]:
+        problems.append("MAIN_MIRROR_NAME is %r but install.sh MAIN_MIRROR is $HOME/%s" % (name, mirror[0]))
+    if len(pin) != 1:
+        problems.append('install_from_main.sh does not set pin="$clone<suffix>" exactly once')
+    elif suffix != pin[0]:
+        problems.append("LIVE_PIN_SUFFIX is %r but install_from_main.sh pin suffix is %r" % (suffix, pin[0]))
+    return problems
+
+
+def _mirror_names_tie():
+    """MAIN_MIRROR_NAME and LIVE_PIN_SUFFIX in guard_frozen.py equal the shell names they copy."""
+    def read(*parts):
+        with open(os.path.join(REPO, *parts), encoding="utf-8") as handle:
+            return handle.read()
+
+    problems = mirror_name_problems(read("install.sh"), read("merge", "install_from_main.sh"),
+                                    read("hooks", "guard_frozen.py"))
+    if problems:
+        return False, "; ".join(problems)
+    return True, "MAIN_MIRROR_NAME and LIVE_PIN_SUFFIX equal install.sh MAIN_MIRROR and the install_from_main.sh pin"
+
+
+LOG_CHECKS_EXTRA.append(("frozen: MAIN_MIRROR_NAME and LIVE_PIN_SUFFIX equal the shell names they copy",
+                         _mirror_names_tie))
 
 # ---- merge: gh_call_of reads the pr verb past a root flag. Its callers (merge_call_of, the draft-PR read,
 # ci_wake and guard.py's title read) take the first two words it returns, so a -R or --repo in front hides the
@@ -29761,7 +30531,7 @@ LEASE_RULE = "simulator-boot-lease"
 LEASE_CARRIES = ("sim-test", "lease")
 LEASE_SLOT_UDID = {"1": "3553660D-315C-4B9C-8614-039D7A5B637E",     # Duo 1
                    "2": "801F55F4-F666-4C6D-AB04-7DF77C953974",     # Duo 2
-                   "pro": "8787FE1C-48CC-4213-9B5C-8605AFE7F9B3"}   # iPhone 18 Pro
+                   "pro": "86F9268A-A905-4B82-9BC0-D7EBB682D341"}   # iPhone 18 Pro
 LEASE_DUO1, LEASE_DUO2, LEASE_PRO = LEASE_SLOT_UDID["1"], LEASE_SLOT_UDID["2"], LEASE_SLOT_UDID["pro"]
 LEASE_DECOY = "1A2B3C4D-0000-4000-8000-0000000000D6"  # named "Duo 1", but not Duo 1's UDID: a name match would allow it
 LEASE_PID = os.getpid()    # a live holder for the whole run
