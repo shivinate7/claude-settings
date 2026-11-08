@@ -32,9 +32,17 @@ Limits:
 - A runner word outside the guard's interpreter list (ash, nodejs, perl5.36) is not known, so `python3 f.py && ash f.py` is allowed.
 - An unknown runner drops the body, as on main, for a non-.sh file name and for stdin. A .sh name stays read, so `mysh f.sh` is refused.
 - A PowerShell here-string is read as shell lines when `iex` or `Invoke-Expression` takes it after a space.
-- It is also read when `[scriptblock]::Create(` builds a block from it, or when it is piped into iex or a pwsh that reads stdin.
+- It is also read when `[scriptblock]::Create(` builds a block from it, or when `pwsh` or `powershell` takes it after `-Command` or `-c`.
+- It is also read when it is piped into `iex`, `Invoke-Expression`, or a pwsh that reads stdin (`| & pwsh -`), with any `Out-String` stages between.
 - Not read: `iex(@"`, `Create (@"`, a pwsh switch the guard does not know before the stdin dash, and `ForEach-Object { iex $_ }`. Main reads none of them.
+- Not read: a pipe split across lines before `iex`, `iex ("" + @"…"@)`, and a here-string written with `Set-Content` and run later.
 - A here-string given to `Set-Content` is allowed.
+- A rare false alarm: `Write-Output iex @'…'@` is refused, because the word `iex` sits before the here-string.
+- Another rare false alarm: `pwsh -File x.ps1 -c @"…"@` and `pwsh x.ps1 -c @"…"@` are refused. Any earlier `-c` counts, even a script's own argument.
+- Not read, as on main: a pwsh named by path before `-c` (`/usr/bin/pwsh -c @"`), and `pwsh -c:@"`.
+- A here-string given to a POSIX shell's `-c` (`bash -c`, `sh -c`, `bash -lc`) is read, behind `sudo` or `timeout N` too.
+- Not read, as on main: a here-string piped to `bash`, or given to `cmd /c`.
+- Not followed: a `Set-Content` file that bash or pwsh runs later.
 - A here-string held in a variable is not read, even when a later line runs it (`iex $b`, `$b | iex`). Main allows it too.
 - The guard does not judge a `gh api` POST to the pulls endpoint, or `hub pull-request`. Each can open a non-draft PR.
 - A short-flag cluster such as `-dt x` is refused, a rare false alarm.

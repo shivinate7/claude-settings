@@ -3939,17 +3939,22 @@ def impeccable_shell_hit(segment: str) -> str:
 
 # A PowerShell here-string: `@'` ... `'@` is text, `@"` ... `"@` runs its `$(...)`.
 _HERE_STRING = re.compile(r"@(['\"])[ \t]*\r?\n(.*?)\r?\n\1@", re.S)
-# What runs a here-string, by the command word around it. Before it: `iex` or `Invoke-Expression` takes it as
-# its argument (a `(` may open it), or `[scriptblock]::Create(` builds a block from it. After it, the closing
-# parens of such a call, then a pipe into iex, Invoke-Expression, or a pwsh that reads stdin. A here-string
-# given to Set-Content, or held in a variable that no word on its own line runs, matches neither: a later line
-# that runs the variable (`$b = @"..."@` then `iex $b`) is not read.
-# The before side keeps its own word list. `nested_script` (guard_core.py) answers a different question: it
-# returns the text that follows a word, and the text here is the here-string cut out of the command, so it
-# cannot say whether the word is there. After a pipe it has no argument to return either.
+# What runs a here-string, by the command word around it. Before it, three forms run it. `iex` or
+# `Invoke-Expression` takes it as its argument, and a `(` may open it. `[scriptblock]::Create(` builds a block
+# from it. A pwsh or powershell launch ends in `-Command` or `-c`. After it, the closing parens of such a call,
+# then a pipe into iex, Invoke-Expression, or a pwsh that reads stdin, through any `Out-String` stages. A
+# here-string given to Set-Content matches neither. Nor does one held in a variable that no word on its own
+# line runs. A later line that runs the variable (`$b = @"..."@` then `iex $b`) is not read.
+# The before side keeps its own word list for the PowerShell forms. `nested_script` (guard_core.py) answers a
+# different question. It returns the text that follows a word. Here the text is the here-string cut out of the
+# command, so it cannot say whether the word is there. After a pipe it has no argument to return either.
+# A POSIX shell given the here-string as its `-c` script is read through `inline_script` (guard_core.py), which
+# holds the shell list and steps over `sudo` and `timeout N`.
 _HERE_RUN_BEFORE = re.compile(r"(?:(?:^|[\s;&|(){}])(?:iex|Invoke-Expression)[ \t]+(?:-Command[ \t]+)?\(?"
-                              r"|\[scriptblock\]::Create\()[ \t]*\Z", re.I).search
-_HERE_PIPE_AFTER = re.compile(r"[ \t)]*\|[ \t]*([^\n]*)").match
+                              r"|\[scriptblock\]::Create\("
+                              r"|(?:^|[\s;&|(){}])(?:pwsh|powershell)(?:\.exe)?(?=[ \t])[^\n;&|]*?[ \t]-c(?:ommand)?[ \t]+)"
+                              r"[ \t]*\Z", re.I).search
+_HERE_PIPE_AFTER = re.compile(r"[ \t)]*\|([^\n]*)").match
 # A pwsh switch that takes the next word as its value, by the name without its dash. `-ExecutionPolicy` may be
 # cut to any prefix of two letters or more.
 _PWSH_VALUE_SWITCHES = {"ep", "workingdirectory", "wd", "configurationname", "config", "inputformat",
@@ -3978,13 +3983,23 @@ def _pwsh_reads_stdin(tokens) -> bool:
 
 def _here_string_is_run(found) -> bool:
     """True when the command word around the here-string FOUND runs its body, whatever the body holds."""
-    if _HERE_RUN_BEFORE(found.string[:found.start()]):
+    before = found.string[:found.start()]
+    if _HERE_RUN_BEFORE(before):
+        return True
+    last = split_segments(before)[-1:]   # a stand-in word sits where the here-string is: it must be the script
+    if last and inline_script(segment_tokens(last[0]) + ["x"]) == "x":
         return True
     piped = _HERE_PIPE_AFTER(found.string, found.end())
-    parts = split_segments(piped.group(1)) if piped else []
-    tokens = segment_tokens(parts[0]) if parts else []
-    word = re.sub(r"\.exe$", "", basename(tokens[0]).lower()) if tokens else ""
-    return word in ("iex", "invoke-expression") or (word in ("pwsh", "powershell") and _pwsh_reads_stdin(tokens))
+    for stage in piped.group(1).split("|") if piped else []:
+        parts = split_segments(stage)
+        tokens = segment_tokens(parts[0]) if parts else []
+        at = resolve_command(tokens)   # steps over the `&` call operator and a wrapper word
+        tokens = tokens[at:] if at is not None else []
+        word = re.sub(r"\.exe$", "", basename(tokens[0]).lower()) if tokens else ""
+        if word == "out-string" and len(parts) == 1:   # the text passes on to the next stage
+            continue
+        return word in ("iex", "invoke-expression") or (word in ("pwsh", "powershell") and _pwsh_reads_stdin(tokens))
+    return False
 
 
 def shell_run_texts(raw: str) -> list:
@@ -3994,8 +4009,9 @@ def shell_run_texts(raw: str) -> list:
     as its pieces split at every backtick, since perl, ruby and node run a backtick span as a shell. A body
     that python alone runs adds nothing. The limits: a body with no backtick is not read, and a body with
     one is read anywhere, unless python alone runs it.
-    A here-string that iex, Invoke-Expression, pwsh or a scriptblock runs (`_here_string_is_run`) joins as its
-    lines; one held in a variable is not read, even when a later line runs the variable."""
+    A here-string that iex, Invoke-Expression, pwsh, a scriptblock or a POSIX shell's `-c` runs
+    (`_here_string_is_run`) joins as its lines. One held in a variable is not read. A later line that runs the
+    variable does not change that."""
     texts = []
     if POWERSHELL_CALL[0] and "@" in raw:
         def cut(found):
