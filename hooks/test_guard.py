@@ -16874,16 +16874,25 @@ def _f1b_push_reset(w):
     _must(w, *IDENT, "commit", "-q", "-m", "product work")
 
 
+MAIN_LATER = "# main's newer case\n"
+
+
+def _conflict_setup(w):
+    """Cut at main. Reset to a lane tip that adds test cases to the test file. Main then adds a different
+    line at the same place in that file, and is committed. The builder has not merged main yet."""
+    main = w + "-main"
+    _test_author_lane(w)
+    _must(w, "reset", "-q", "--hard", "lane")
+    write(os.path.join(main, TEST_A), BASE_FILES[TEST_A] + MAIN_LATER)
+    _must(main, "add", "-A")
+    _must(main, *IDENT, "commit", "-q", "-m", "main moves")
+
+
 def _f2_conflict_open(w):
     """Cut at main. Reset to a lane tip that adds test cases to the test file. Main then adds a different
     line at the same place in that file. The builder merges main, and the test file conflicts. The merge is
     left in progress: MERGE_HEAD is set, the test file is unmerged, and nothing is committed."""
-    main = w + "-main"
-    _test_author_lane(w)
-    _must(w, "reset", "-q", "--hard", "lane")
-    write(os.path.join(main, TEST_A), BASE_FILES[TEST_A] + "# main's newer case\n")
-    _must(main, "add", "-A")
-    _must(main, *IDENT, "commit", "-q", "-m", "main moves")
+    _conflict_setup(w)
     merged = run_vcs(w, *IDENT, "merge", "--no-edit", "main")
     if merged.returncode == 0:
         sys.exit("fixture setup failed: the merge in %r did not conflict" % w)
@@ -16917,10 +16926,9 @@ def _f2_conflict_then_reset(w):
     _must(w, "reset", "-q", "--hard", "lane")
 
 
-def _product_conflict_merge(w):
+def _product_conflict_setup(w):
     """Cut at main. Reset to a lane tip that changes a product file. Main changes the same product file on the
-    same line. The builder merges main, the product file conflicts, and the builder resolves it and commits the
-    merge by hand. No test file conflicts."""
+    same line, and is committed. The builder has not merged main yet."""
     main = w + "-main"
     _must(main, "checkout", "-q", "-b", "lane")
     write(os.path.join(main, "src/app.py"), "x = 6\n")
@@ -16931,6 +16939,12 @@ def _product_conflict_merge(w):
     write(os.path.join(main, "src/app.py"), "x = 9\n")
     _must(main, "add", "-A")
     _must(main, *IDENT, "commit", "-q", "-m", "main product")
+
+
+def _product_conflict_merge(w):
+    """The builder merges main, the product file conflicts, and the builder resolves it and commits the merge
+    by hand. No test file conflicts."""
+    _product_conflict_setup(w)
     merged = run_vcs(w, *IDENT, "merge", "--no-edit", "main")
     if merged.returncode == 0:
         sys.exit("fixture setup failed: the merge in %r did not conflict" % w)
@@ -18058,6 +18072,138 @@ def plain_commit_reads_case():
 
 LOG_CHECKS_EXTRA.append(("builder-refuse: a builder's plain commit makes no git call that names a changed path",
                          plain_commit_reads_case))
+
+# A strategy merge settles a hunk by strategy: `-X ours|theirs`, `-s ours`, or a `pull` with those options. Git
+# commits it itself, so the HEAD reflog reads `merge <x>: Merge made by ...` or `pull ...: Merge made by ...`, not
+# `commit (merge)`. Such a merge is a commit the builder made, so a test change in it is refused at commit, push and
+# the first stop. Each fixture checks its reflog subject and the bytes it left, so a merge that settled another way
+# cannot pass for these cases.
+def _check_merge(w, rel=None, want=None, how="Merge made by"):
+    """Stop the run unless the HEAD reflog of `w` is a merge or a pull whose subject holds `how`, and, when `rel`
+    is given, `rel` holds `want`. A merge that settled another way would pass for the wrong reason."""
+    subject = run_vcs(w, "reflog", "-1", "--format=%gs", "HEAD").stdout.strip()
+    if not subject.startswith(("merge ", "pull ")) or how not in subject:
+        sys.exit("fixture setup failed: the HEAD reflog in %r reads %r, want a merge or pull with %r"
+                 % (w, subject, how))
+    if rel is not None:
+        with open(os.path.join(w, rel), encoding="utf-8") as handle:
+            got = handle.read()
+        if got != want:
+            sys.exit("fixture setup failed: %s in %r holds %r, want %r" % (rel, w, got[:80], want[:80]))
+
+
+def _conflict_by_strategy(w, option, want):
+    """_conflict_setup, then the builder merges main with a strategy option. The option settles the hunk both
+    sides edit, so git commits the merge without a conflict."""
+    _conflict_setup(w)
+    _must(w, *IDENT, "merge", "-q", "--no-edit", *option, "main")
+    _check_merge(w, TEST_A, want)
+
+
+def _x_theirs(w):
+    _conflict_by_strategy(w, ["-X", "theirs"], BASE_FILES[TEST_A] + MAIN_LATER)
+
+
+def _x_ours(w):
+    _conflict_by_strategy(w, ["-X", "ours"], LANE_TEXT)
+
+
+def _ours_drops_main(w):
+    """Cut at main. Reset to a lane tip that adds test cases at the end of the test file. Main prepends a case at
+    the top, a different hunk, and is committed. The two sides merge clean, and `-s ours` keeps the builder's side,
+    so main's case is dropped with no conflict to show it."""
+    main = w + "-main"
+    _test_author_lane(w)
+    _must(w, "reset", "-q", "--hard", "lane")
+    write(os.path.join(main, TEST_A), MAIN_FIRST + BASE_FILES[TEST_A])
+    _must(main, "add", "-A")
+    _must(main, *IDENT, "commit", "-q", "-m", "main prepends a case")
+    _must(w, *IDENT, "merge", "-q", "--no-edit", "-s", "ours", "main")
+    _check_merge(w, TEST_A, LANE_TEXT)
+
+
+def _pull_theirs(w):
+    """Cut at main, with a local remote. The conflicting hunk of _conflict_setup is pushed, and the builder pulls it
+    with `-X theirs`. The pull settles the hunk and commits the merge (reflog `pull ...: Merge made by`)."""
+    _origin(w)
+    _conflict_setup(w)
+    _push_main(w)
+    _must(w, *IDENT, "pull", "-q", "--no-rebase", "--no-edit", "-X", "theirs", "origin", "main")
+    _check_merge(w, TEST_A, BASE_FILES[TEST_A] + MAIN_LATER)
+
+
+def _ff_lane(w):
+    """Cut at main. The builder fast-forwards to the test-author's lane tip, which adds test cases. It makes no
+    commit of its own."""
+    _test_author_lane(w)
+    _must(w, "merge", "-q", "--ff-only", "lane")
+    _check_merge(w, how="Fast-forward")
+
+
+def _clean_strategy_merge(w):
+    """Cut at main. The builder commits product work, then merges the test-author's lane with `-X theirs`. The two
+    sides change different files, so the merge is clean and the option settles nothing: the merge is git's own."""
+    _product_commit(w)
+    _test_author_lane(w)
+    _must(w, *IDENT, "merge", "-q", "--no-edit", "-X", "theirs", "lane")
+    _check_merge(w, TEST_A, LANE_TEXT)
+
+
+def _product_strategy_merge(w):
+    """_product_conflict_setup, then the builder merges main with `-X theirs`. The option settles the product file
+    both sides changed, and no test file conflicts."""
+    _product_conflict_setup(w)
+    _must(w, *IDENT, "merge", "-q", "--no-edit", "-X", "theirs", "main")
+    _check_merge(w, "src/app.py", "x = 9\n")
+
+
+# Refused: a test change a strategy merge settled, judged at commit, push and the first stop.
+_bd_strat_theirs = diff_repo("bd-strat-theirs", _x_theirs)
+sh("builder-refuse: a -X theirs merge that settles a test hunk both sides edit is denied at commit",
+   COMMIT, "deny", rule=BDIFF, cwd=_bd_strat_theirs, agent_id="bld1", agent_type="builder")
+sh("builder-refuse: a -X theirs merge that settles a test hunk both sides edit is denied at push",
+   PUSH, "deny", rule=BDIFF, cwd=_bd_strat_theirs, agent_id="bld1", agent_type="builder")
+add("builder-refuse: a -X theirs merge that settles a test hunk both sides edit is blocked at the first stop",
+    "deny", rule=BDIFF, event="SubagentStop", cwd=_bd_strat_theirs, agent_id="bld1", agent_type="builder")
+
+_bd_strat_ours = diff_repo("bd-strat-ours", _x_ours)
+sh("builder-refuse: a -X ours merge that settles a test hunk both sides edit is denied at commit",
+   COMMIT, "deny", rule=BDIFF, cwd=_bd_strat_ours, agent_id="bld1", agent_type="builder")
+sh("builder-refuse: a -X ours merge that settles a test hunk both sides edit is denied at push",
+   PUSH, "deny", rule=BDIFF, cwd=_bd_strat_ours, agent_id="bld1", agent_type="builder")
+add("builder-refuse: a -X ours merge that settles a test hunk both sides edit is blocked at the first stop",
+    "deny", rule=BDIFF, event="SubagentStop", cwd=_bd_strat_ours, agent_id="bld1", agent_type="builder")
+
+_bd_strat_drop = diff_repo("bd-strat-drop", _ours_drops_main)
+sh("builder-refuse: a -s ours merge that drops main's test case, with no conflict, is denied at commit",
+   COMMIT, "deny", rule=BDIFF, cwd=_bd_strat_drop, agent_id="bld1", agent_type="builder")
+sh("builder-refuse: a -s ours merge that drops main's test case, with no conflict, is denied at push",
+   PUSH, "deny", rule=BDIFF, cwd=_bd_strat_drop, agent_id="bld1", agent_type="builder")
+add("builder-refuse: a -s ours merge that drops main's test case, with no conflict, is blocked at the first stop",
+    "deny", rule=BDIFF, event="SubagentStop", cwd=_bd_strat_drop, agent_id="bld1", agent_type="builder")
+
+_bd_strat_pull = diff_repo("bd-strat-pull", _pull_theirs)
+sh("builder-refuse: a pull --no-rebase -X theirs that settles a test hunk both sides edit is denied at commit",
+   COMMIT, "deny", rule=BDIFF, cwd=_bd_strat_pull, agent_id="bld1", agent_type="builder")
+sh("builder-refuse: a pull --no-rebase -X theirs that settles a test hunk both sides edit is denied at push",
+   PUSH, "deny", rule=BDIFF, cwd=_bd_strat_pull, agent_id="bld1", agent_type="builder")
+add("builder-refuse: a pull --no-rebase -X theirs that settles a test hunk both sides edit is blocked at the first stop",
+    "deny", rule=BDIFF, event="SubagentStop", cwd=_bd_strat_pull, agent_id="bld1", agent_type="builder")
+
+# Not refused: a fast-forward is other people's commit; a clean -X theirs merge equals git's own merge; a -X theirs
+# that settles a product file is no test path. Each logs no builder-diff line.
+diff_repo("bd-strat-ff", _ff_lane)
+LOG_CHECKS_EXTRA.append(("builder-refuse: a builder's fast-forward to a test-author's lane is allowed and logs no "
+                         "builder-diff line", clean_builder_case("bd-strat-ff")))
+diff_repo("bd-strat-clean", _clean_strategy_merge)
+LOG_CHECKS_EXTRA.append(("builder-refuse: a builder's -X theirs merge of a test-author's lane, where the two sides "
+                         "change different files, is allowed and logs no builder-diff line",
+                         clean_builder_case("bd-strat-clean")))
+diff_repo("bd-strat-product", _product_strategy_merge)
+LOG_CHECKS_EXTRA.append(("builder-refuse: a builder's -X theirs merge that settles a product file both sides changed "
+                         "is allowed and logs no builder-diff line", clean_builder_case("bd-strat-product")))
+
+
 
 # Undo route: a new test file is refused, and the reason says to delete it and names no test path.
 _bd_u2 = diff_repo("bd-u2-new-file", _u2_new_test)
