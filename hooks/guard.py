@@ -2059,8 +2059,8 @@ def builder_add_only_breach(tool_input, full: str) -> bool:
 
 def author_set_names(text: str):
     """The names `AUTHOR_MUTATION_TESTS` holds in `text`, as a set: empty when the file has no such
-    assignment or holds `set()`. None when the text does not parse or the assignment is no literal set,
-    list or tuple of strings (the names cannot be read)."""
+    assignment, holds `set()`, or assigns no literal set, list or tuple of strings (a set expression's
+    names cannot be read, so it holds none and drops every name). None when the text does not parse."""
     try:
         tree = ast.parse(text)
     except (SyntaxError, ValueError):
@@ -2081,7 +2081,7 @@ def author_set_names(text: str):
         if isinstance(value, (ast.Set, ast.List, ast.Tuple)) and all(
                 isinstance(e, ast.Constant) and isinstance(e.value, str) for e in value.elts):
             return {e.value for e in value.elts}
-        return None
+        return set()
     return set()
 
 
@@ -2120,7 +2120,70 @@ def builder_set_path(path: str, cwd: str) -> bool:
 # builder restores a changed test file from HEAD as its undo route, so `writes_to` must not read these.
 _ADD_ONLY_SHELL_WRITERS = {"patch", "ed", "ex", "dd", "rsync", "perl", "ruby", "awk", "gawk", "sponge"}
 _ADD_ONLY_GIT_WRITERS = {"checkout", "restore", "checkout-index", "apply", "am", "stash"}
-_IN_PLACE_FLAG = re.compile(r"^-[A-Za-z0-9]*i[A-Za-z0-9.]*$")
+# `-i` alone or after switches that take no value (`-pi`, `-lni.bak`); `-Mstrict` and `-Ilib` name a module or folder.
+_IN_PLACE_FLAG = re.compile(r"^-[acdlnpsStuUvwWXy0-9]*i[A-Za-z0-9.]*$")
+
+
+def _restore_index_only(rest) -> bool:
+    """True when a `git restore` writes only the index: `--staged` without `--worktree`."""
+    staged = worktree = False
+    for word in rest:
+        if word == "--":
+            break
+        if word.startswith("--"):
+            staged = staged or guard_core.long_flag_abbrev(word, "--staged", "--sta")
+            worktree = worktree or guard_core.long_flag_abbrev(word, "--worktree", "--w")
+        elif word.startswith("-"):
+            letters = word[1:].split("s", 1)[0]   # `-s` takes the rest of the word as its revision
+            staged, worktree = staged or "S" in letters, worktree or "W" in letters
+    return staged and not worktree
+
+
+def _source_pathspecs(subcommand: str, rest):
+    """The pathspecs a `git checkout` or `git restore` rewrites from a named revision, else []."""
+    if subcommand == "checkout":
+        if any(word in ("-b", "-B", "--orphan") for word in rest):
+            return []
+        if "--" in rest:
+            cut = rest.index("--")
+            revision = [word for word in rest[:cut] if not word.startswith("-")]
+            return rest[cut + 1:] if revision else []
+        return [word for word in rest if not word.startswith("-")][1:]
+    if subcommand != "restore":
+        return []
+    source, paths, value = False, [], False
+    for word in rest:
+        if value:
+            value = False
+        elif word in ("-s", "--source"):
+            source = value = True
+        elif word.startswith("--source=") or (word.startswith("-s") and not word.startswith("--")):
+            source = True
+        elif not word.startswith("-"):
+            paths.append(word)
+    return paths if source else []
+
+
+def _holds_add_only(word: str, where: str) -> bool:
+    """True when `word` names a folder of its repository that holds a file of BUILDER_ADD_ONLY."""
+    rel = repo_rel(word, where, outside=False)
+    if rel is None:
+        return False
+    rel = norm(rel).strip("/").lower()
+    return rel in ("", ".") or any(name.startswith(rel + "/") for name in BUILDER_ADD_ONLY)
+
+
+def _index_only_paths(stripped: str):
+    """The words a `git rm --cached` names that no other segment of the command names: it drops them from
+    the index and keeps the file, so it writes no add-only file."""
+    named, others = set(), set()
+    for segment in split_segments(stripped):
+        calls = git_calls(segment)
+        if calls and all(sub == "rm" and "--cached" in rest for sub, rest in calls):
+            named.update(word for _sub, rest in calls for word in rest if not word.startswith("-"))
+        else:
+            others.update(str(token) for token in (segment_tokens(segment) or segment.split()))
+    return named - others
 
 
 def builder_add_only_shell_hit(stripped: str, cwd: str) -> str:
@@ -2150,8 +2213,11 @@ def builder_add_only_shell_hit(stripped: str, cwd: str) -> str:
         if command == "git":
             hit = ""
             for subcommand, rest in git_calls(segment):
+                if subcommand == "restore" and _restore_index_only(rest):
+                    continue
                 if subcommand in _ADD_ONLY_GIT_WRITERS:
-                    hit = hit or names(rest)
+                    hit = hit or names(rest) or next(
+                        (word for word in _source_pathspecs(subcommand, rest) if _holds_add_only(word, where)), "")
             if hit:
                 return hit
         elif command in guard_core.INLINE_SCRIPT_SHELLS:
@@ -2163,7 +2229,8 @@ def builder_add_only_shell_hit(stripped: str, cwd: str) -> str:
         elif command in _ADD_ONLY_SHELL_WRITERS:
             in_place = command not in ("perl", "ruby", "awk", "gawk") or "inplace" in args or any(
                 _IN_PLACE_FLAG.match(a) for a in args)
-            hit = names(args) if in_place else ""
+            written = [a for a in args if not a.startswith("-")][-1:] if command == "rsync" else args
+            hit = names(written) if in_place else ""
             if hit:
                 return hit
     return ""
@@ -2173,8 +2240,10 @@ def builder_shell_test_hit(raw: str, stripped: str, cwd: str) -> str:
     """The test path a builder's shell command writes, else ''. Two readings: the plain forms (a
     redirect, `tee`, `sed -i`, `cp`, a heredoc header) on the heredoc-stripped command, and the
     python or node script a heredoc body or `-c` / `-e` holds, on the raw command."""
+    kept = _index_only_paths(stripped)
+
     def refused(path: str, where: str) -> bool:
-        return builder_test_path(path, where) or builder_add_only_path(path, where)
+        return builder_test_path(path, where) or (builder_add_only_path(path, where) and path not in kept)
     return (_shell_write_hit(stripped, cwd, refused, follow_cd=True, command_position=True)
             or builder_add_only_shell_hit(stripped, cwd)
             or interpreter_write_hit(raw, cwd, refused))
@@ -2443,13 +2512,13 @@ def role_offences(root: str, top: str, role: str, paths, old: str, new=None):
         names = [rel, os.path.relpath(real, top)]
         if role == AUTHOR_ROLE and is_workflow_rel(rel) and all(
                 is_workflow_rel(n) or author_path_ok(n) for n in names):
-            bad = not workflow_test_steps_only(text_at(root, old, rel), text_at(root, new, rel))
+            bad = not workflow_test_steps_only(text_at(top, old, rel), text_at(top, new, rel))
         elif role == AUTHOR_ROLE:
             bad = not all(author_path_ok(n) for n in names)
             if not bad and basename(rel) == "package.json":
-                bad = not package_json_author_ok(text_at(root, old, rel), text_at(root, new, rel))
+                bad = not package_json_author_ok(text_at(top, old, rel), text_at(top, new, rel))
             if not bad and basename(rel) == "pyproject.toml":
-                bad = not pyproject_author_ok(text_at(root, old, rel), text_at(root, new, rel))
+                bad = not pyproject_author_ok(text_at(top, old, rel), text_at(top, new, rel))
         elif role == WRITER_ROLE:
             bad = not all(n.lower().endswith(".md") for n in names)
         elif role == DESIGNER_ROLE:
@@ -2457,12 +2526,12 @@ def role_offences(root: str, top: str, role: str, paths, old: str, new=None):
         else:
             bad = any(is_test_rel(n) for n in names) or (
                 any(norm(n).lstrip("/").lower() in BUILDER_ADD_ONLY for n in names)
-                and not _lines_kept(text_at(root, old, rel), text_at(root, new, rel))) or (
+                and not _lines_kept(text_at(top, old, rel), text_at(top, new, rel))) or (
                 any(norm(n).lstrip("/").lower() == AUTHOR_SET_FILE for n in names)
-                and set_names_dropped(text_at(root, old, rel), text_at(root, new, rel), strict=True)) or (
+                and set_names_dropped(text_at(top, old, rel), text_at(top, new, rel), strict=True)) or (
                 is_test_config_rel(rel) and disables_tests(
-                text_at(root, new, rel).splitlines(), text_at(root, old, rel).splitlines())) or (
-                is_workflow_rel(rel) and workflow_builder_refused(text_at(root, old, rel), text_at(root, new, rel)))
+                text_at(top, new, rel).splitlines(), text_at(top, old, rel).splitlines())) or (
+                is_workflow_rel(rel) and workflow_builder_refused(text_at(top, old, rel), text_at(top, new, rel)))
         if bad:
             found.append(rel)
     return found
