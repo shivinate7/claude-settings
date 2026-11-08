@@ -1,0 +1,11 @@
+{
+  "title": "Rule builder-test-edit lets a builder write a probe under /tmp",
+  "phase": "now",
+  "status": "doing",
+  "order": 45,
+  "owner": "coordinator",
+  "lane": "session_013NEJKzDBTjFbhzwzV96i8v",
+  "why": "Rule builder-test-edit refused a builder probe under /tmp, which decision builders-cannot-edit-tests (line 58) allows. A false alarm, reported by lane test-file-in-ci.",
+  "note": "Coordinator 18:52 CST Nov 7.",
+  "updatedAt": "2026-11-07T18:52:00-06:00"
+}
