@@ -289,9 +289,12 @@ def stale_tree_hit(where, args) -> str:
         if staged is None:
             return ""
     reads = []                            # the paths whose recorded copy is the work tree's
+    if paths and include:
+        # bash reads `..` in a cd target by its text, realpath reads it through a link: normalize first.
+        real_where, real_top = os.path.realpath(os.path.normpath(where)), os.path.realpath(top)
     for name, (_, after) in changed.items():
         if paths:
-            reads_it = not include or _named_by(name, paths, where, top)
+            reads_it = not include or _named_by(name, paths, real_where, real_top)
         elif every:
             reads_it = staged[name][1] != "" if name in staged else after != ""
         else:
@@ -331,9 +334,8 @@ def stale_tree_hit(where, args) -> str:
 def _named_by(name, paths, where, top):
     """True when a literal or glob pathspec in PATHS (relative to WHERE) covers the top-relative
     NAME. Used only for `-i` with paths. A path that resolves to the top folder names every path.
-    WHERE and TOP are resolved first: git's top is a real path, and the cwd may reach it through a
-    symlink (macOS /var -> /private/var). The paths stay as typed."""
-    where, top = os.path.realpath(where), os.path.realpath(top)
+    The caller passes WHERE and TOP as real paths: git's top is a real path, and the cwd may reach
+    it through a symlink (macOS /var -> /private/var). The paths stay as typed."""
     for path in paths:
         full = os.path.relpath(os.path.join(where, path), top).replace(os.sep, "/")
         if full == "." or name == full or name.startswith(full.rstrip("/") + "/") or fnmatch.fnmatchcase(name, full):

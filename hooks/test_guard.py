@@ -3798,6 +3798,7 @@ EU = os.path.join(STDIR, "eutree")          # the pair: b's f.txt is synced, the
 EU_A, EU_B = os.path.join(EU, "a"), os.path.join(EU, "b")
 EU_LINK = os.path.join(STDIR, "eulink")     # a symlink to EU: the cwd spelling a macOS temp folder gives
 EU_LINK_A, EU_LINK_B = os.path.join(EU_LINK, "a"), os.path.join(EU_LINK, "b")
+EU_HOP_A, EU_HOP_B = os.path.join(EU_A, "hop"), os.path.join(EU_B, "hop")   # a link at each top, to sub/inner
 DL = os.path.join(STDIR, "dltree")          # the pair: the move deletes f.txt, b's stale index keeps it
 DL_A, DL_B = os.path.join(DL, "a"), os.path.join(DL, "b")
 KP = os.path.join(STDIR, "kptree")          # the pair: b's f.txt is synced, and g.txt (kept by the move) is staged
@@ -4124,6 +4125,13 @@ def _build_eutree():
         _st_must(os.path.islink(EU_LINK), "%r: the link was not made" % EU_LINK)
         _st_must(os.path.realpath(EU_LINK_B) == os.path.realpath(EU_B),
                  "%r: the link does not resolve to %r" % (EU_LINK_B, EU_B))
+        for where, hop in ((EU_A, EU_HOP_A), (EU_B, EU_HOP_B)):   # the kernel reads hop/.. as sub, bash as the top
+            os.makedirs(os.path.join(where, "sub", "inner"))
+            os.symlink(os.path.join(where, "sub", "inner"), hop, target_is_directory=True)
+            _st_must(os.path.normpath(os.path.join(hop, "..")) == os.path.normpath(where),
+                     "%r: hop/.. does not read as the top %r" % (hop, where))
+            _st_must(os.path.realpath(os.path.join(hop, "..")) == os.path.realpath(os.path.join(where, "sub")),
+                     "%r: hop/.. does not resolve to the sub folder" % hop)
 
 
 def _build_dltree():
@@ -4247,7 +4255,7 @@ lazy_fixture([RF_B], _build_rfmtree)
 lazy_fixture([RE_B], _build_rfetree)
 lazy_fixture([RSM_B], _build_rsmtree)
 lazy_fixture([ES_B], _build_estree)
-lazy_fixture([EU_A, EU_B, EU_LINK], _build_eutree)
+lazy_fixture([EU_A, EU_B, EU_LINK, EU_HOP_A, EU_HOP_B], _build_eutree)
 lazy_fixture([DL_A, DL_B], _build_dltree)
 lazy_fixture([KP_B], _build_kptree)
 lazy_fixture([PF_D], _build_pftree)
@@ -4368,6 +4376,12 @@ if LINKS_MADE:
                VCS + " commit -i -m x f.txt", EU_LINK_B)
     _st_allow("control: commit -i -m x . through the same symlink, in the fresh checkout, is allowed",
               VCS + " commit -i -m x .", EU_LINK_A)
+    # bash reads `..` after a link lexically, as the top: the commit runs there. The guard must name f.txt from
+    # the top too, so the stale copy is refused. A guard that reads `..` through the link names the sub folder.
+    _st_refuse("commit -i -m x f.txt after cd to a link's .. is refused: bash reads .. lexically, so the top is named",
+               "cd " + slash(os.path.join(EU_HOP_B, "..")) + " && " + VCS + " commit -i -m x f.txt", NOGIT)
+    _st_allow("control: the same cd and commit -i -m x f.txt in the fresh checkout is allowed",
+              "cd " + slash(os.path.join(EU_HOP_A, "..")) + " && " + VCS + " commit -i -m x f.txt", NOGIT)
 
 # A dry run writes no commit. A symlink is the link itself, so the moved link is the copy to compare.
 _st_allow("git commit --dry-run in a stale tree is allowed", VCS + " commit --dry-run -m x", ST_B)
