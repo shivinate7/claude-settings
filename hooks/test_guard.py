@@ -8822,6 +8822,24 @@ for _cmd in ("rg -uuu X .", "rg --hidden X .", "ag --hidden X ."):
     sh("env: walk control, folder is empty, allowed: " + _cmd, _cmd, "allow", cwd=ENVWALK_EMPTY)
 
 
+# Select-String -NotMatch is a switch, so the next word is the pattern. A word after the pattern is a
+# path, and an env name there is a read. An env name in the pattern is text.
+sh("env: Select-String -NotMatch, env name as the path, refused: Select-String -NotMatch x " + ENV,
+   "Select-String -NotMatch x " + ENV, "deny", "env-file", tool="PowerShell", cwd=NOGIT)
+sh("env: Select-String -NotMatch, env name in a quoted pattern, allowed",
+   r"Select-String -NotMatch 'sub\.env' docs/a.md", "allow", tool="PowerShell", cwd=NOGIT)
+sh("env: Select-String -NotMatch, bare env name as the pattern alone, allowed",
+   r"Select-String -NotMatch sub\.env", "allow", tool="PowerShell", cwd=NOGIT)
+# git grep reads tracked files and prints the lines that match. An env name in its pattern is text.
+for _cmd in (
+    VCS + r" grep -n 'sub\.env' -- docs",
+    VCS + r" grep -n 'sub\\\.env\|sub\.env' -- docs",
+    VCS + r" grep -n 'sub\\\.env\|sub\.env' HEAD -- .",
+    VCS + r" grep -n -i 'notmatch\|sub\\\.env' FETCH_HEAD -- docs hooks",
+):
+    sh("env: git grep, env name in the pattern, allowed: " + _cmd, _cmd, "allow", cwd=NOGIT)
+
+
 def env_posix_class_stderr_case():
     """The guard prints no FutureWarning on stderr for a `[[:alpha:]]` file regex.
 
