@@ -10,9 +10,14 @@ import re
 CHECKS_SUITE_JOBS = ("checks", "checks-merge-install")
 
 
+def job_re(name):
+    """The pattern of one job: group 1 is the text from its `  name:` line to the next job line. `name` is a regex."""
+    return re.compile(rf"^  {name}:\s*$(.*?)(?=^  [\w-]+:\s*$|\Z)", re.M | re.S)
+
+
 def job_block(text, name):
     """Raw text of one job: from its `  name:` line to the next job line. None when the job is absent."""
-    m = re.search(rf"^  {re.escape(name)}:\s*$(.*?)(?=^  [\w-]+:\s*$|\Z)", text, re.M | re.S)
+    m = job_re(re.escape(name)).search(text)
     return m.group(1) if m else None
 
 
@@ -127,3 +132,34 @@ def step_env(step):
 def step_with(step):
     """A step's own `with:` block as {name: raw value}, or {} when it has none."""
     return step_map(step, "with")
+
+
+GATING_KEYS = ("continue-on-error", "if")
+
+
+def gates(key, value):
+    """True when a `key:` value makes its step or job unable to fail a pull request: `continue-on-error: true`, or an
+    `if:` that is always false. The value loses its inline comment first."""
+    value = drop_comment(value).strip()
+    if key == "continue-on-error":
+        return value == "true"
+    return re.fullmatch(r"false|\$\{\{\s*false\s*\}\}", value) is not None
+
+
+def gating_text(text):
+    """The workflow text without each step or job that cannot fail a pull request (see `gates`), so a read of what
+    CI runs counts only what can fail. A job's own keys sit at 4 spaces; a step's, by step_key. A comment, a block
+    scalar body or a quoted run is never the key."""
+    def gated(own_value):
+        return any(gates(key, own_value(key)) for key in GATING_KEYS if own_value(key) is not None)
+
+    def keep(job):
+        body = job.group(1)
+        if gated(lambda key: next((m.group(1) for m in re.finditer(rf"^    {key}:[ \t]*(.*?)[ \t]*$", body, re.M)), None)):
+            return ""
+        first = re.search(r"^      - ", body, re.M)
+        if not first:
+            return job.group(0)
+        live = "".join(s for s in step_blocks(body) if not gated(lambda key: step_key(s, key)))
+        return job.group(0)[:job.start(1) - job.start(0)] + body[:first.start()] + live
+    return job_re(r"[\w-]+").sub(keep, text)
