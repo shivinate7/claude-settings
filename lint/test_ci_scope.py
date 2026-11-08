@@ -82,14 +82,21 @@ def role_table_path():
 #     the file of that name in that folder;
 #   os.path.join of literal segments with no run-time root: a repo path, from the repo root;
 #   a spec_from_file_location or SourceFileLoader path: its Name read through to the os.path.join assigned to it.
-# Not followed: a join with a run-time root and literal segments. In a product module it is named in LOAD_EXCEPTIONS; in a
-# test module it is a fixture path inside a temp folder, and is not named. A loader path with no literal repo file is named.
+# Not followed: a join with a run-time root and literal segments, and a join with a spread folder (`*folder.split("/")`, how a
+# layout-built path is joined). In a product module each is named in LOAD_EXCEPTIONS; in a test module it is a fixture path
+# inside a temp folder, and is not named. A loader path with no literal repo file is named.
 GUARD_SEEDS = ("hooks/guard.py", "hooks/test_guard.py")
 # Each load guard_closure finds but does not follow, as "file:line": why. A line that moves makes its entry stale.
 LOAD_EXCEPTIONS = {
     "hooks/decision_watch.py:88": "GUARD_UNDER_TEST, a test override of guard.py's path (guard.py is in the closure by import)",
+    "hooks/decision_watch.py:327": "a path git status reports as changed, joined under the checkout: whichever file changed, not a fixed one",
+    "hooks/feedback_guard.py:328": "a home folder the layout (or the repo's extras) names, tested for existence: a folder, not a fixed file",
+    "hooks/feedback_guard.py:948": "each task kind's home folder from the layout, read for its todo and notes text: the folders the layout names",
+    "hooks/git_reads.py:294": "LAYOUT_EXTRAS, .claude/layout-extras.json: the repo's own extras file, read for its roadmap object",
+    "hooks/guard.py:2673": "role_model_table: the decisions folder from lint/layout.json, then ROLE_TABLE_FILE, the role table record; GuardWindowsSplit's role-table case covers its scope",
     "hooks/guard_merge.py:169": "the merge tool at a clone root, MERGE_TOOL_REL (guard_merge.py:108): merge/merge.py is in the closure",
     "hooks/guard_merge.py:239": "a stamp read from a clone root found by walking up: a fixture root in the suite, the checkout in a real run",
+    "hooks/override.py:173": "the override state file of a session id, under the Claude config folder: the installer's state, not a repo file",
     "hooks/precompact_handoff.py:152": "the installed prompt under config_dir(), the installer's copy, not the repo's file",
     "hooks/test_guard.py:3362": "a sibling of GUARD, hooks/ by default: git_reads.py is in the closure by import",
     "hooks/test_guard.py:4622": "a sibling of GUARD: guard_rm_var.py is in the closure by import",
@@ -97,14 +104,31 @@ LOAD_EXCEPTIONS = {
     "hooks/test_guard.py:19743": "GUARD itself: guard.py, or the GUARD_UNDER_TEST copy, which is in the closure by import",
     "hooks/test_guard.py:25627": "READ_CHECK: reread_check.py by default, which is in the closure by import",
     "hooks/test_guard.py:27735": "a sibling of GUARD: shared_names.py is in the closure by import",
+    "lint/check_silent_undo.py:583": "gen.RECORDS_PAGE (hook_catalog's records page), in the head's worktree: the page the check compares",
     "lint/check_silent_undo.py:586": "a checkout's hook_catalog.py, the oracle of the silent-undo check: in the closure by merge.py's import",
+    "lint/check_skill_model_rows.py:23": "the decisions folder from the layout, then agent-model-cap.md: the same role table record hooks/guard.py:2673 reads",
+    "lint/hook_catalog.py:90": "read(rel): a path from the catalog's own tables (the hooks and pages it checks), read by path",
+    "lint/hook_catalog.py:97": "has_file(rel): the same catalog paths as read(), tested for existence",
+    "lint/hook_catalog.py:695": "listed_folders(): a folder the layout lists for a kind, read for its files",
+    "lint/hook_catalog.py:790": "the catalog's generated pages, written at paths from its own table: the writer of the pages it then checks",
+    "lint/layout.py:65": "_extras: the repo's own extras file, at the path the layout's extras key names: a repo file, not this one",
+    "lint/layout.py:507": "item['preflight']: a path a repo's own preflight item names, tested for existence: a repo file",
+    "lint/layout.py:531": "mockup_homes: the repo's design folder from the layout, returned as a path; no file is read here",
+    "lint/report_guard.py:1142": "the decisions folder from the layout, then each id: the record files, tested for existence",
     "lint/rule_audit.py:92": "ROOT, the repo root by definition, a fixture root in the suite: lint/rule_mechanisms.json is not in the closure",
     "lint/rule_audit.py:93": "ROOT: .github/workflows/checks.yml, already a fail-safe path in ci-scope.sh",
     "lint/rule_audit.py:405": "ROOT: hooks/config_watch.py is not in the closure",
     "lint/stale_cites.py:320": "PY_FACTS: skills/plain-english-map/scripts/lib/py-facts.py is in the closure by a `..` load",
+    "merge/merge.py:1554": "RECORDS_PAGE in the merge's own worktree: the records page the merge proves fresh",
     "merge/merge.py:1773": "the checkout's own workflow, .github/workflows/checks.yml, already a fail-safe path in ci-scope.sh",
-    "skills/waiting-page/stale_pages.py:259": "the user's ~/.claude/CLAUDE.md, not this repo's .claude/CLAUDE.md",
+    "merge/merge.py:1785": "a path a changed file names, read from the checkout: whichever files the change names",
+    "merge/merge.py:1803": "a path a test file's text names, read from the checkout: whichever file that test names",
+    "merge/merge.py:1876": "CI_SCOPE, the scope script, tested for existence in the merge's worktree: already a fail-safe path in ci-scope.sh",
     "merge/merge.py:3375": "IDLE_BUILD: skills/roadmap/build.py is in the closure by a `..` load",
+    "skills/waiting-page/export_page.py:429": "an export label's target under the out folder: a write, not a load",
+    "skills/waiting-page/export_page.py:444": "a stale export label removed under the out folder: a write, not a load",
+    "skills/waiting-page/export_page.py:472": "entry['export'] under the worktree: the export file the page entry names",
+    "skills/waiting-page/stale_pages.py:259": "the user's ~/.claude/CLAUDE.md, not this repo's .claude/CLAUDE.md",
 }
 _CLOSURE = {}
 
@@ -212,6 +236,9 @@ def _refs(f, tree, tracked):
                         unfollowed.append((node.lineno, f"os.path.join with a run-time root, then {c}"))
                 elif c:
                     paths.add(c)
+                elif not test and any(isinstance(a, ast.Starred) for a in node.args):
+                    # A spread folder (`*folder.split("/")`) is how a layout-built path is joined. Its file is not known here.
+                    unfollowed.append((node.lineno, "os.path.join of a spread folder: a layout-built path the closure does not follow"))
             elif name.endswith("spec_from_file_location") or name.endswith("SourceFileLoader"):
                 arg = node.args[1] if len(node.args) > 1 else None
                 hits, named = [], False
