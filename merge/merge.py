@@ -2572,11 +2572,13 @@ def parent_prs(body):
 
 def review_range_starts(body):
     """The (start, end) of each backticked range (REVIEW_RANGE) in a PR body, read row by row. It reads the whole body: the range sits in the first paragraph.
-    A range in a fenced block (stale_cites.fenced_lines) is an example and a range whose start or end holds <>{} is a placeholder: both are skipped."""
+    A range in a fenced block (stale_cites.fenced_lines) is an example, and a range whose start holds <>{} is a placeholder: both are skipped.
+    An end that holds <>{} is a placeholder too: the range is still judged by its start, and its end is None, so the end check skips it."""
     import stale_cites
     rows = (body or "").split("\n")
     fenced = stale_cites.fenced_lines(rows)
-    return [s for i, row in enumerate(rows, 1) if i not in fenced for s in REVIEW_RANGE.findall(row) if not re.search(r"[<>{}]", s[0] + s[1])]
+    return [(start, None if re.search(r"[<>{}]", end) else end) for i, row in enumerate(rows, 1) if i not in fenced
+            for start, end in REVIEW_RANGE.findall(row) if not re.search(r"[<>{}]", start)]
 
 def check_review_ranges(root, host, info, base, body):
     """A lane that names a parent (`Merge after: #N`) asks its reviewer to read `git diff <start> <end>`. A start judged by ancestry, not by string, also passes
@@ -2610,7 +2612,7 @@ def check_review_ranges(root, host, info, base, body):
     branch_heads = {name: i["head"] for i in infos.values() for name in (i["branch"], f"origin/{i['branch']}")}
     lane_ends = {info["branch"], f"origin/{info['branch']}"}
     for start, end in starts:
-        if end not in lane_ends and not (LONG_HEX.fullmatch(end) and lane.startswith(end.lower())):  # an end below the lane head leaves the commits above it unread
+        if end is not None and end not in lane_ends and not (LONG_HEX.fullmatch(end) and lane.startswith(end.lower())):  # an end below the lane head leaves the commits above it unread
             raise Stop(f"the review range ends at {end}, which is not the lane head {lane[:9]}. The end must be the lane head: {info['branch']}, "
                        f"origin/{info['branch']}, or 7 or more hex digits of {lane[:9]}. End the range at the lane branch. {LANE_LINT_CITE}")
         if SHORT_HEX.fullmatch(start):
