@@ -26,6 +26,8 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import test_report_guard as trg  # noqa: E402  the Stop runner, the transcript records and the run folder (one home)
 import test_refusal_note as hook_base  # noqa: E402  the route-row seam and the surface pin (one home)
+sys.path.insert(0, os.path.join(HERE, "..", "testing"))
+import tracked_tree  # noqa: E402  copies the tracked lint and hooks folders, so an installed copy needs no file list
 
 HEAD = "Cannot-claim guard (rule output-never-hand-off-doable-step)"
 NO_TRY = "no failed try"
@@ -137,9 +139,10 @@ class CannotClaimTests(unittest.TestCase):
 
     # ---- the Stop run and its verdict
 
-    def stop(self, records, active=False, refused=(), rows=()):
+    def stop(self, records, active=False, refused=(), rows=(), guard=trg.REPORT_GUARD):
         """The Stop decision for `records`, or None. The route-rows file and the refusals file sit in this case's
-        folder, and the surface is pinned to local so a row's outcome reads on it."""
+        folder, and the surface is pinned to local so a row's outcome reads on it. `guard` is the script run; a case
+        that runs an installed copy passes that copy's report_guard.py."""
         hook_base.write_route_rows(self.rows, list(rows))
         hook = {"hook_event_name": "Stop", "transcript_path": trg.write_transcript(records, self.run_dir),
                 "stop_hook_active": active, "cwd": self.run_dir}
@@ -153,7 +156,7 @@ class CannotClaimTests(unittest.TestCase):
                                              "reason": "refused"}) + "\n")
         env = dict(os.environ, CLAUDE_CONFIG_DIR=self.cfg, HOME=self.home)
         env[hook_base.ROUTE_ROWS_ENV] = self.rows
-        run = trg.run_guard(trg.REPORT_GUARD, hook, env=hook_base.surface_env(env, "local"))
+        run = trg.run_guard(guard, hook, env=hook_base.surface_env(env, "local"))
         self.assertEqual(run.returncode, 0, "the Stop hook exited non-zero: " + run.stderr[-300:])
         self.assertNotIn("Traceback", run.stderr, "the Stop hook crashed: " + run.stderr[-300:])
         return json.loads(run.stdout) if run.stdout.strip() else None
@@ -1118,6 +1121,31 @@ class CannotClaimTests(unittest.TestCase):
         # Control, already green: a connect failure after a colon is no blocker, so the claim blocks as no try.
         line = "I can't open the PR: the MCP server failed to connect."
         out = self.stop([trg.human("open a PR"), notice("github: failed to connect"), trg.assistant_text(line)])
+        self.assert_blocked_for(out, NO_TRY, line)
+
+    # ---- an installed copy: the hook's lint and hooks folders under a config dir that holds only a pointer line to the
+    # checkout. The copy has no decisions of its own, so a rule id is real only when the pointer checkout names it.
+
+    def installed_guard(self):
+        """Install the hook into this case's config dir, as the installer does: the folders landed-dirs.txt names that the
+        hook reads (lint, hooks and output-styles, the file the rule anchors come from), and a CLAUDE.md that holds only
+        the pointer line. Returns the copy of report_guard.py the Stop hook runs."""
+        tracked_tree.copy_tracked(self.cfg, "lint", "hooks", "output-styles")
+        with open(os.path.join(self.cfg, "CLAUDE.md"), "w", encoding="utf-8") as handle:
+            handle.write("@%s/CLAUDE.md\n" % os.path.dirname(HERE))
+        return os.path.join(self.cfg, "lint", "report_guard.py")
+
+    def test_cc_red_installed_copy_reads_a_rule_id_from_the_pointer_checkout(self):
+        # Catches: the rule-id check reading the pointer checkout only once the guard has loaded. An installed hook judges
+        # the claim before that load, so the pointer is never read, the real id is no id, and the claim blocks.
+        line = "I can't push to main (git-main-only-by-pr)."
+        out = self.stop([trg.human("push to main"), trg.assistant_text(line)], guard=self.installed_guard())
+        self.assert_passes(out, "a real rule id, read from the pointer checkout of an installed copy")
+
+    def test_cc_green_installed_copy_still_blocks_a_slug_that_names_no_rule(self):
+        # Control, already green: a slug that no rule or decision holds is still no rule id in an installed copy.
+        line = "I could not open the PR (connect-failure-notice)."
+        out = self.stop([trg.human("open a PR"), trg.assistant_text(line)], guard=self.installed_guard())
         self.assert_blocked_for(out, NO_TRY, line)
 
 
