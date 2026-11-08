@@ -12880,12 +12880,50 @@ class ReviewRoundCheckRefusal(ReviewRoundCheckEnv):
         rc, out, _before = self.run_round_check(host, "--confirm")
         self.assert_allowed(rc, out, host)
 
-    def test_a_record_for_an_older_head_of_the_lane_is_ignored(self):
+    def test_a_guard_record_for_an_older_head_of_the_lane_still_refuses(self):
+        # a push after review must not shed the guard owing: the newest record names an old head and says guard yes, and no record names the tip
         tips = lane_batch(self, "agent/lane1")
         host = self.batch_host(tips, [round_check_comment(1, 8, REVIEW_OLD_HEAD, guard="yes", rounds=REVIEW_PASS)])
         self.scope(tips, host)
+        rc, out, before = self.run_round_check(host, "--confirm")
+        self.assert_refused(rc, out, host, before, 8)
+        self.assertIn("round 3", out, "the refusal does not say round 3 is owed:\n" + out)
+        self.assertIn("owed", out, "the refusal does not say round 3 is owed:\n" + out)
+
+    def test_a_stale_guard_no_record_for_an_older_head_of_the_lane_still_passes(self):
+        # the control beside the refusal above: a record with guard no owes nothing, even for an old head
+        tips = lane_batch(self, "agent/lane1")
+        host = self.batch_host(tips, [round_check_comment(1, 8, REVIEW_OLD_HEAD, guard="no", rounds=REVIEW_PASS)])
+        self.scope(tips, host)
         rc, out, _before = self.run_round_check(host, "--confirm")
         self.assert_allowed(rc, out, host)
+
+    def test_a_lone_pr_whose_guard_record_names_an_older_head_is_refused(self):
+        host = self.batch_host({}, [round_check_comment(1, 7, REVIEW_OLD_HEAD, guard="yes", rounds=REVIEW_PASS)])
+        rc, out, before = self.run_round_check(host, "--confirm")
+        self.assert_refused(rc, out, host, before, 7)
+        self.assertIn("round 3", out, "the refusal does not say round 3 is owed:\n" + out)
+
+    def test_a_lone_pr_whose_history_merged_a_lane_still_checks_its_own_head(self):
+        # the pull request's own head is checked along with the lane tips, not instead of them: feat holds lane1's merge, so read_lanes
+        # gives one tip with no open pull request at it, and feat's own guard record for its head, round 1 PASS, owes round 3
+        tips = lane_batch(self, "agent/lane1")
+        host = self.batch_host({}, [round_check_comment(1, 7, self.head("feat"), guard="yes", rounds=REVIEW_PASS)])
+        sh(self.co, "git", "fetch", "-q", "origin")
+        lanes, _dropped = merge.read_lanes(self.co, "origin/main", self.head("feat"))
+        self.assertEqual(lanes, [tips["agent/lane1"]], "feat's history does not hold exactly lane1's merge as its one tip")
+        self.assertNotIn("agent/lane1", host.open_heads(), "lane1 is an open pull request, so this is not a lone pull request")
+        rc, out, before = self.run_round_check(host, "--confirm")
+        self.assert_refused(rc, out, host, before, 7)
+        self.assertIn("round 3", out, "the refusal does not say round 3 is owed:\n" + out)
+
+    def test_an_integration_pr_with_its_own_guard_record_is_refused_beside_a_lane_tip(self):
+        # the integration pull request's own record owes round 3 even though the batch has a lane tip with no record of its own
+        tips = lane_batch(self, "agent/lane1")
+        host = self.batch_host(tips, [round_check_comment(1, 7, self.head("feat"), guard="yes", rounds=REVIEW_PASS)])
+        self.scope(tips, host)
+        rc, out, before = self.run_round_check(host, "--confirm")
+        self.assert_refused(rc, out, host, before, 7)
 
     def test_a_stale_open_record_does_not_block_a_done_record_for_the_tip(self):
         tips = lane_batch(self, "agent/lane1")
