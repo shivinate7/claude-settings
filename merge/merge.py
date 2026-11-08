@@ -22,14 +22,14 @@
                           the rounds; HEAD is the reviewed head the fix diff starts from, and differs from SHA. It refuses (exit 2)
                           unless HEAD is the Head of the newest earlier record on the PR with no Fix check line, read from the
                           PR's issue comments since the PR opened. A done record prints only when `merge --lane-lint` passes on SHA: a
-                          FAIL refuses, and an unknown refuses unless --lint-unknown-ok gives a reason, which lane_lint logs.
+                          FAIL refuses, and an unknown refuses unless --lint-unknown-ok gives a reason, which lane_lint prints on stderr.
   merge --reviewed        one line per open PR that has a review record comment, with its state (bad when the newest does not parse) and its
                           live CI; then the PRs with no record.
   merge --lane-lint <pr|ref> [--base BRANCH] [--lint-unknown-ok "REASON"]
                           the lint a lane passes before it hands its head to the batch runner: `bin/ci-job checks --lint
                           --base origin/<base>` in a temporary detached worktree at the head. A PR gives its head and base; a
                           commit or ref is linted against --base (default main). A FAIL step refuses. An unknown refuses unless
-                          --lint-unknown-ok gives a reason; it is then logged and no `PASS:` line prints. Takes no lock, merges
+                          --lint-unknown-ok gives a reason; it is then printed on stderr and no `PASS:` line prints. Takes no lock, merges
                           and pushes nothing; any session may run it, cloud included. Cost per call: one ci-job run (about 550 s,
                           measured once on one PR head), one worktree.
   merge --idle-lanes --live FILE
@@ -3080,15 +3080,28 @@ def review_marked(text):
 
 _stamp_since = {}
 
+def fetch_default_branch(root):
+    """-> the repo's default branch name, with origin/<name> fetched. The review stamp merged into the default branch, so its cutover reads that
+    branch's history, and a stale or shallow origin/<name> would give a later cutover or none."""
+    name = host_default_branch(root)
+    c, out = git(root, "fetch", "-q", "origin", f"+refs/heads/{name}:refs/remotes/origin/{name}")
+    if c:
+        raise Stop(f"git fetch origin {name} failed: {out} " + REVIEW_CITE)
+    return name
+
 def review_stamp_since(root, base):
-    """-> the committer time, UTC as `YYYY-MM-DDTHH:MM:SSZ`, of the first first-parent commit on origin/`base` whose merge/merge.py holds `REVIEW_STAMP_SALT =`,
-    or None when the read ran and found none. A read that cannot run (git errors, or no origin/`base` ref) raises Stop naming it, never None: an unknown
-    cutover must not read every unstamped record as old (rule verification-report-unknown-reads). One call per (root, base) in a process. A record created before this time may carry no Stamp line."""
+    """-> the committer time, UTC as `YYYY-MM-DDTHH:MM:SSZ`, of the first first-parent commit on origin/<default branch> whose merge/merge.py holds
+    `REVIEW_STAMP_SALT =`, or None when the read ran and found none. It reads the default branch (host_default_branch), never the PR's `base`: the stamp
+    merged into the default branch, and a stacked base may lack that commit, which would read every unstamped record as old. A read that cannot run
+    (git errors, or no origin/<default branch> ref) raises Stop naming it, never None: an unknown cutover must not read every unstamped record as old
+    (rule verification-report-unknown-reads). The caller fetches first (fetch_default_branch). One call per (root, `base`) in a process. A record
+    created before this time may carry no Stamp line."""
     key = (root, base)
     if key not in _stamp_since:
-        c, out = git(root, "log", "--first-parent", "--reverse", "-S", "REVIEW_STAMP_SALT =", "--format=%ct", f"origin/{base}", "--", "merge/merge.py")
+        default = host_default_branch(root)
+        c, out = git(root, "log", "--first-parent", "--reverse", "-S", "REVIEW_STAMP_SALT =", "--format=%ct", f"origin/{default}", "--", "merge/merge.py")
         if c:
-            raise Stop(f"could not read origin/{base} to find the review stamp cutover (git log exited {c}): {out[:300]}. Fetch origin, then run the command again. " + REVIEW_CITE)
+            raise Stop(f"could not read origin/{default} to find the review stamp cutover (git log exited {c}): {out[:300]}. Fetch origin, then run the command again. " + REVIEW_CITE)
         first = out.split()[:1]
         _stamp_since[key] = (datetime.datetime.fromtimestamp(int(first[0]), datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
                              if first and first[0].isdigit() else None)
@@ -3315,7 +3328,7 @@ def main(argv, host=None, lock=None):
     p.add_argument("--confirm", action="store_true")
     p.add_argument("--lane-lint", action="store_true", help="lint the head of a lane (PR number, commit or ref) as the batch runner's lint does; takes no lock, merges nothing")
     p.add_argument("--base", default="", metavar="BRANCH", help="with --lane-lint on a commit or ref: the base branch to lint against (default main)")
-    p.add_argument("--lint-unknown-ok", default="", metavar="REASON", help="with --lane-lint or --review-record: go on when a lint step is unknown (never when one FAILs); logged")
+    p.add_argument("--lint-unknown-ok", default="", metavar="REASON", help="with --lane-lint or --review-record: go on when a lint step is unknown (never when one FAILs); the reason is printed on stderr")
     p.add_argument("--role", metavar="TIER", help="cloud only: record this session's merge role (batch-runner only)")
     p.add_argument("--unlock", nargs="?", const=True, metavar="BRANCH")
     p.add_argument("--undo-check-unknown-ok", default="", metavar="REASON", help="go on when the silent-undo check cannot read the history; logged")
@@ -3410,6 +3423,7 @@ def main(argv, host=None, lock=None):
             if info["head"] != a.head:  # a push after the review must not relabel the old rounds as current
                 raise Stop(f"the pull request head is {info['head'][:9]}, not the reviewed {a.head[:9]}. Review the new head, then write its record. " + REVIEW_CITE)
             if a.fix_check:  # the fix diff starts from the head the newest earlier record reviewed, and a fix never follows a fix
+                fetch_default_branch(root)  # a stale local origin/<default> would give an old cutover
                 cutover = review_stamp_since(root, info["base"])
                 earlier = [parse_review(b, created, cutover) for created, b in h.review_comments(info.get("created") or "1970-01-01T00:00:00Z").get(a.pr, [])]
                 last = earlier[-1] if earlier else None
@@ -3420,7 +3434,7 @@ def main(argv, host=None, lock=None):
             if review_state(parse_review(body), a.head)[0] == "done":  # a done record is the handoff, so the lane lint must pass on the head it names (decision pr-review-record)
                 try:
                     with release_on_signals(), contextlib.redirect_stdout(sys.stderr):  # a signal removes lane_lint's worktree; its PASS line is no part of the record
-                        lane_lint(root, a.head, h, info["base"], a.lint_unknown_ok)  # lane_lint logs a given unknown reason, as under --lane-lint
+                        lane_lint(root, a.head, h, info["base"], a.lint_unknown_ok)  # lane_lint prints a given unknown reason on stderr, as under --lane-lint
                 except Liftable as e:  # an unknown step: the reason flag lifts it, so the remedy names the flag in this command's form
                     why = "\n".join(line for line in str(e).splitlines() if "--lint-unknown-ok" not in line)
                     raise Liftable(f"no done record is printed while the lint of {a.head[:9]} does not pass: {why}\nRun `merge --lane-lint {a.pr}` "
