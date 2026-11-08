@@ -1244,7 +1244,8 @@ class QuietStepKeepsTheStallWatchFed(Job):
     """A step quiet past the stall limit must not strand its job. verdict's heartbeat has to reach ci-job's own
     output, so the stall watch sees the job alive. The job then ends on its own, with no process of it left.
     ci-job's start line for each step also goes to the beat file, so a job of short steps with its output hidden
-    still feeds the watch. A step silent after its start line is still cut."""
+    still feeds the watch. With the verdict heartbeat above the quiet age, the start lines alone do not keep a
+    silent step alive."""
 
     QUIET = step("quiet", "sleep 6")
     SLOW = step("slow", "sleep 2.5")
@@ -1326,15 +1327,17 @@ class QuietStepKeepsTheStallWatchFed(Job):
         self.assertEqual(starts, ["start: s%d" % n for n in range(1, 7)],
                          "ci-job wrote no start line per step to STALL_WATCH_BEAT")
 
-    def test_a_silent_step_after_its_start_line_is_still_cut(self):
+    def test_start_lines_alone_do_not_keep_a_silent_step_alive(self):
+        """With the verdict heartbeat above the quiet age, the start lines alone do not keep a silent step alive."""
         log, beat = self.empty_file("empty.log"), self.empty_file("stall-watch.beat")
         proc, out = self.start_job(self.HANG, env={"VERDICT_HEARTBEAT": "60", "STALL_WATCH_BEAT": beat})
         watch = self.run_watch(proc.pid, log, beat)
         with open(out, encoding="utf-8", errors="replace") as f:
             job_out = f.read()
         self.assertIn("start: hang", job_out, "the job never reached its silent step\n" + job_out)  # scope
+        # subject: with the verdict heartbeat above the quiet age, the start lines alone do not keep a silent step alive
         self.assertEqual(watch.returncode, 3, "a silent step was not cut after 3 s with no output\n"
-                         + watch.stdout + watch.stderr)  # subject: the fix must not beat on a timer
+                         + watch.stdout + watch.stderr)
         self.assertIsNone(proc.poll(), "the watch ended the job, which it never does")
 
     def test_without_a_beat_path_ci_job_writes_no_beat_file_and_stdout_keeps_only_verdicts(self):
