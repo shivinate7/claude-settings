@@ -22,9 +22,9 @@ it lacks the merge flag. Code: `.github/scripts/ci-scope.sh`.
 A pull request that changes only a guard file now also runs `checks-windows-merge`. On a pull request,
 that job runs `merge/test_launch.py`, the Windows slice of `merge/test_merge.py`
 (`MERGE_TESTS=windows-slice`) and `merge/test_cmd.py`. Shards 2 to 5 do not run on a pull request. The
-same holds for each other file in the closure. The job takes a median of 8.2 min and at most 13.6 min
-over 26 runs, pushes and pull requests mixed (`ci-job-caps`, window 2026-11-05). The pull-request slice
-alone is unmeasured.
+same holds for each other file in the closure. On a pull request the job takes a median of 2.2 min
+(`ci-job-caps`, window of 2026-11-06). Off pull requests it takes a median of 11.8 min and at most 13.6 min over
+24 runs (same record).
 
 Why: a change to a module that `merge.py` loads changes what the merge tool does. A pull request that
 skips the Windows merge job can then break merges on Windows with green CI.

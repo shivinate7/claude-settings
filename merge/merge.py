@@ -572,7 +572,7 @@ class Lock:
             self.until = None  # no lock is held after this: a later rate wait extends nothing
         say(f"merge: the lock release failed: {why}.{left} Run merge --unlock only if no run holds it.")
 
-SHA_HEX = r"[0-9a-f]{40}"  # a full git object id; one home for every sha pattern in this file
+SHA_HEX = r"[0-9a-f]{40}"  # a full 40-hex git object id; one home for that pattern (an abbreviated sha has its own pattern where it is read)
 
 class GitLock(Lock):
     """Any git remote. Tests use a local bare origin. Each push is leased on the sha it read (empty: create only), so a ref that moved since the read refuses the push."""

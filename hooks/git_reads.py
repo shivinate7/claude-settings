@@ -34,8 +34,9 @@ def _git(where: str, *args):
 
 
 def lists_refs(args):
-    """True for `git -C <dir> ls-remote ...`, the one git call whose stdout is the answer: a stderr line on its success (a trace, a warning) is no ref. Keyed on the
-    args, so each caller and each stand-in for a runner that passes the args on gets it. One home: merge/merge.py `sh` reads it."""
+    """True for `git -C <dir> ls-remote ...`, the only call read stdout-only on success: its stdout is a ref list, and a stderr line (a trace, a warning) is no ref.
+    Other git calls whose stdout is the answer, such as commit-tree and mktree, still join stderr. Keyed on the
+    args, so each caller and each stand-in for a runner that passes the args on gets it. One home: merge/merge.py `sh` reads it through its own private copy of this module."""
     return args[:2] == ["git", "-C"] and args[3:4] == ["ls-remote"]
 
 
@@ -47,7 +48,7 @@ def listing_text(returncode, stdout, stderr):
 
 
 def ls_remote(where: str, *args, env=None, timeout=10):
-    """-> (returncode, text) of `git -C where ls-remote *args`, or None when git did not run or timed out. The janitor's reader; merge's `sh` shares `lists_refs` and `listing_text`."""
+    """-> (returncode, text) of `git -C where ls-remote *args`, or None when git did not run or timed out. The janitor's reader. merge's `sh` loads its own private copy of this module for `lists_refs` and `listing_text`."""
     try:
         r = _nowindow.run(["git", "-C", where, "ls-remote", *args], capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=timeout, env=env)
     except Exception:
