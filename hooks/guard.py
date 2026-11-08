@@ -1537,9 +1537,17 @@ AUTHOR_BASENAMES = {"requirements-dev.txt"}
 # The three mutation tests are test code for a test-author, named one by one so a later product
 # mutate_*.py stays a builder's. A builder keeps editing them: they are not test paths. Case folds as in `is_test_rel`.
 AUTHOR_MUTATION_TESTS = {"hooks/mutate_guard.py", "hooks/mutate_shared.py", "janitor/mutate_sweep.py"}
+# Test config is two kinds. A whole-file config holds only test settings, so a builder may not change it
+# at all. A partly-owned file also holds product settings, so a builder may not change its owned parts
+# (`owned_config_changed`). The test-author owns both kinds whole, so `TEST_CONFIG` is their union.
+WHOLE_FILE_TEST_CONFIG_PATTERN = (
+    r"pytest\.ini|(?:jest|vitest|playwright|karma)\.conf(?:ig)?\.\w+|vitest\.workspace\.\w+"
+    r"|\.mocharc(?:\.\w+)?|[^/]+\.xctestplan")
+PARTLY_OWNED_TEST_CONFIG_PATTERN = r"package\.json|pyproject\.toml|setup\.cfg|tox\.ini"
+WHOLE_FILE_TEST_CONFIG = re.compile(r"^(?:%s)$" % WHOLE_FILE_TEST_CONFIG_PATTERN)
+PARTLY_OWNED_TEST_CONFIG = re.compile(r"^(?:%s)$" % PARTLY_OWNED_TEST_CONFIG_PATTERN)
 TEST_CONFIG = re.compile(
-    r"^(?:pytest\.ini|tox\.ini|setup\.cfg|pyproject\.toml|package\.json"
-    r"|(?:jest|vitest|playwright|karma)\.conf(?:ig)?\.\w+|vitest\.workspace\.\w+|\.mocharc(?:\.\w+)?|[^/]+\.xctestplan)$")
+    r"^(?:%s|%s)$" % (WHOLE_FILE_TEST_CONFIG_PATTERN, PARTLY_OWNED_TEST_CONFIG_PATTERN))
 # What disables tests. NAMES are test-runner settings that no lint tool shares, so they count in any
 # test config. FLAGS (`--ignore` is also ruff's and flake8's) count only in a test-runner context:
 # pytest `addopts`, a `[tool.pytest*]` section, or a line that calls a test runner.
@@ -1619,6 +1627,12 @@ def _in_test_dir(parts) -> bool:
 
 def is_test_config_rel(rel: str) -> bool:
     return bool(TEST_CONFIG.match(basename(rel)))
+
+
+def builder_test_rel(rel: str) -> bool:
+    """True when a repository-relative path is one a builder may not change whatever the change: a test
+    path or a whole-file test config. A partly-owned file is judged by its owned parts."""
+    return is_test_rel(rel) or bool(WHOLE_FILE_TEST_CONFIG.match(basename(rel)))
 
 
 def author_path_ok(rel: str) -> bool:
@@ -1945,8 +1959,8 @@ def repo_rel(path: str, cwd: str, outside: bool = True):
 
 def builder_test_path(path: str, cwd: str) -> bool:
     """True when `path` is a test path a builder may not change. The one predicate the Edit and Write
-    tools (`role_write_hit`) and a shell write (`builder_shell_test_hit`) both ask. Test config that
-    disables tests is judged on content, so only the Edit tools read it."""
+    tools (`role_write_hit`) and a shell write (`builder_shell_test_hit`) both ask. A partly-owned test
+    config is judged on content, so only the Edit tools read it."""
     rel = repo_rel(path, cwd)
     if rel is None:
         return False
@@ -1958,7 +1972,7 @@ def builder_test_path(path: str, cwd: str) -> bool:
     if (repo_rel(os.path.join(where or "", "x"), where, outside=False) is not None
             and repo_rel(path, where, outside=False) is None):
         return False
-    return is_test_rel(rel)
+    return builder_test_rel(rel)
 
 
 def builder_shell_test_hit(raw: str, stripped: str, cwd: str) -> str:
@@ -1998,6 +2012,9 @@ def role_write_hit(role: str, tool_input, target: str, cwd: str, session_id: str
         return target
     if is_test_config_rel(rel) and any(
             disables_tests(part.splitlines(), []) for part in write_content_parts(tool_input)):
+        return target
+    if (repo_rel(target, cwd, outside=False) is not None
+            and owned_config_edit(rel, tool_input, _expanded(target, cwd))):
         return target
     if is_workflow_rel(rel) and any(
             workflow_builder_refused(o, n) for o, n in workflow_pairs(tool_input, _expanded(target, cwd)) or ()):
@@ -2156,50 +2173,145 @@ def own_changes(root: str):
     return changes
 
 
+# The owned parts of a partly-owned test config (see TEST_CONFIG). One split serves both roles: the
+# test-author may change only these parts and `devDependencies`; a builder may change none of them.
+TEST_SCRIPT = re.compile(r"^(?:pre|post)?test")
+
+
+def package_json_parts(text: str):
+    """(owned, rest) of a manifest: owned is the `jest` key and the test scripts, rest is every other
+    key and script. None when the text is no JSON object."""
+    try:
+        manifest = json.loads(text)
+    except Exception:
+        return None
+    if not isinstance(manifest, dict):
+        return None
+    scripts = manifest.get("scripts")
+    scripts = scripts if isinstance(scripts, dict) else {}
+    owned = {"scripts": {k: v for k, v in scripts.items() if TEST_SCRIPT.match(k)}}
+    rest = {k: v for k, v in manifest.items() if k not in ("jest", "scripts")}
+    rest["scripts"] = {k: v for k, v in scripts.items() if not TEST_SCRIPT.match(k)}
+    if "jest" in manifest:
+        owned["jest"] = manifest["jest"]
+    return owned, rest
+
+
 def package_json_author_ok(old: str, new: str) -> bool:
     """A test-author may change `devDependencies`, `jest`, and the test scripts of a manifest, and
     nothing else in it."""
-    try:
-        before, after = json.loads(old), json.loads(new)
-    except Exception:
+    before, after = package_json_parts(old), package_json_parts(new)
+    if before is None or after is None:
         return False
-    if not isinstance(before, dict) or not isinstance(after, dict):
-        return False
+    return ({k: v for k, v in before[1].items() if k != "devDependencies"}
+            == {k: v for k, v in after[1].items() if k != "devDependencies"})
 
-    def scripts(manifest):
-        found = manifest.get("scripts")
-        found = found if isinstance(found, dict) else {}
-        return {k: v for k, v in found.items() if not re.match(r"^(?:pre|post)?test", k)}
 
-    for key in set(before) | set(after):
-        if key in ("devDependencies", "jest"):
+def toml_quote_after(line: str, quote):
+    """The multi-line string delimiter (three quotes of one kind) still open at the end of `line`, else
+    None, given the delimiter open at its start. A single-line string and a comment are skipped."""
+    index = 0
+    while index < len(line):
+        if quote:
+            if quote[0] == '"' and line[index] == "\\":
+                index += 2
+            elif line.startswith(quote, index):
+                quote, index = None, index + 3
+            else:
+                index += 1
             continue
-        if key == "scripts":
-            if scripts(before) != scripts(after):
-                return False
-        elif before.get(key) != after.get(key):
-            return False
-    return True
+        char = line[index]
+        if char == "#":
+            break
+        if char in "\"'":
+            if line.startswith(char * 3, index):
+                quote, index = char * 3, index + 3
+                continue
+            index += 1
+            while index < len(line) and line[index] != char:
+                index += 2 if char == '"' and line[index] == "\\" else 1
+        index += 1
+    return quote
 
 
 def toml_sections(text: str):
-    """Split TOML text into {header: body}, the lines before any header under ''."""
-    sections, name = {"": []}, ""
+    """Split TOML text into {header: body}, the lines before any header under ''. A line inside a
+    multi-line string is no header, whatever it looks like."""
+    sections, name, quote = {"": []}, "", None
     for line in text.splitlines():
-        found = re.match(r"^\s*\[\[?([^\]]+)\]\]?\s*$", line)
+        found = quote is None and re.match(r"^\s*\[\[?([^\]]+)\]\]?\s*(?:#.*)?$", line)
         if found:
             name = found.group(1).strip()
             sections.setdefault(name, [])
         else:
+            quote = toml_quote_after(line, quote)
             sections[name].append(line.strip())
     return {key: "\n".join(body).strip() for key, body in sections.items()}
 
 
+def pyproject_parts(text: str):
+    """(owned, rest) sections of a project file: owned is the `[tool.pytest*]` sections."""
+    sections = toml_sections(text)
+    return ({k: v for k, v in sections.items() if k.startswith("tool.pytest")},
+            {k: v for k, v in sections.items() if not k.startswith("tool.pytest")})
+
+
 def pyproject_author_ok(old: str, new: str) -> bool:
     """A test-author may change the `[tool.pytest*]` sections of a project file, and nothing else."""
-    before, after = toml_sections(old), toml_sections(new)
-    return all(before.get(key) == after.get(key)
-               for key in set(before) | set(after) if not key.startswith("tool.pytest"))
+    return pyproject_parts(old)[1] == pyproject_parts(new)[1]
+
+
+def ini_owned_parts(text: str):
+    """The owned sections of a `setup.cfg` or `tox.ini`: `[pytest]`, `[tool:pytest]`, and a `[testenv]` or
+    `[testenv:*]` whose body names a test runner. `[tox]` and a lint env are not owned."""
+    sections, name = {}, None
+    for line in text.splitlines():
+        found = re.match(r"^\[([^\]]+)\]\s*$", line)
+        if found:
+            name = found.group(1).strip()
+            sections.setdefault(name, [])
+        elif name is not None:
+            sections[name].append(line.strip())
+    bodies = {key: "\n".join(body).strip() for key, body in sections.items()}
+    return {key: body for key, body in bodies.items()
+            if key in ("pytest", "tool:pytest")
+            or (re.match(r"^testenv(?::|$)", key) and TEST_RUNNER_CONTEXT.search(body))}
+
+
+def owned_config_changed(rel: str, old: str, new: str) -> bool:
+    """True when `old` to `new` changes an owned part of a partly-owned test config. A manifest that
+    cannot be read counts as changed, never as clear. A blank manifest reads as empty."""
+    name = basename(rel)
+    if not PARTLY_OWNED_TEST_CONFIG.match(name) or old == new:
+        return False
+    if name == "package.json":
+        before, after = (package_json_parts(t if t.strip() else "{}") for t in (old, new))
+        return before is None or after is None or before[0] != after[0]
+    if name == "pyproject.toml":
+        return pyproject_parts(old)[0] != pyproject_parts(new)[0]
+    return ini_owned_parts(old) != ini_owned_parts(new)
+
+
+def owned_config_edit(rel: str, tool_input, full: str) -> bool:
+    """True when a write tool call changes an owned part of the partly-owned config at `full`. An Edit's
+    strings are fragments, so each is applied to the file on disk to give the whole texts. A fragment
+    not found there is judged as it stands."""
+    if not PARTLY_OWNED_TEST_CONFIG.match(basename(rel)):
+        return False
+    pairs = workflow_pairs(tool_input, full)
+    if not pairs:
+        return False
+    if "content" in tool_input:
+        return any(owned_config_changed(rel, o, n) for o, n in pairs)
+    disk = text_at(os.path.dirname(full), None, basename(full))
+    text, unplaced = disk, []
+    count = -1 if tool_input.get("replace_all") else 1
+    for old, new in pairs:
+        if old in text and (old or not text.strip()):
+            text = text.replace(old, new, count)
+        else:
+            unplaced.append((old, new))
+    return owned_config_changed(rel, disk, text) or any(owned_config_changed(rel, o, n) for o, n in unplaced)
 
 
 def text_at(root: str, rev, rel: str) -> str:
@@ -2240,8 +2352,9 @@ def role_offences(root: str, top: str, role: str, paths, old: str, new=None):
         elif role == DESIGNER_ROLE:
             bad = not all(designer_path_ok(n) for n in names)
         else:
-            bad = any(is_test_rel(n) for n in names) or (is_test_config_rel(rel) and disables_tests(
+            bad = any(builder_test_rel(n) for n in names) or (is_test_config_rel(rel) and disables_tests(
                 text_at(root, new, rel).splitlines(), text_at(root, old, rel).splitlines())) or (
+                owned_config_changed(rel, text_at(root, old, rel), text_at(root, new, rel))) or (
                 is_workflow_rel(rel) and workflow_builder_refused(text_at(root, old, rel), text_at(root, new, rel)))
         if bad:
             found.append(rel)
