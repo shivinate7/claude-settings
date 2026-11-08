@@ -115,8 +115,9 @@ NOT_KEY_LINES = ("Prose: the Red-run: none form is for re-points.",
                  "Reduce: y")
 # Real commands pass as the failed form. Each first word is an ordinary word, a path, or an environment assignment. An
 # upper-case assignment (`NAME=value`, quoted or not) skips the second layer, so `MUTATE_ONLY=x` and `MUTATE_ONLY="a: b"`
-# pass. The first layer still reads it: `MUTANT_X=1` is refused, as `mutant=x` is. Any assignment is exempt from the colon
-# refusal, as `lint_mode=on:` is. `mutant=x` and `mutate=x` stay refused (PREFIX_BYPASSES, WRAPPED_AND_TYPO).
+# pass. The first layer still reads it: `MUTANT_X=1` is refused, as `mutant=x` is. A `NAME=` word is exempt from a colon on
+# its own ends only, as `lint_mode=on:` is. A colon carried from a skipped token always refuses. `mutant=x` and `mutate=x`
+# stay refused (PREFIX_BYPASSES, WRAPPED_AND_TYPO).
 REAL_COMMANDS = ("Red-run: python3 lint/test_x.py -> 2 failed on SHA",
                  "Red-run: MUTATE_ONLY='x' python3 hooks/test_guard.py -> 1 failed on SHA",
                  "Red-run: MUTATE_ONLY=x python3 lint/test_x.py -> 1 failed on SHA",
@@ -205,8 +206,8 @@ LABEL_FORMS = (
     # marker with no colon is skipped, so the word after it reads and the line passes.
     ("Red-run: : runner x -> 1 failed on SHA", "refused", "colon-only token keeps its colon"),
     ("Red-run: -: x -> 1 failed on SHA", "refused", "colon-only token keeps its colon"),
-    # A colon carried from such a token is the label's own colon, so an assignment word does not exempt it. No `mut` in
-    # these rows: LabelFormHints would read each one as a mutant form and demand its hint.
+    # A colon carried from such a token always refuses, and an assignment word does not exempt it. No `mut` in these
+    # rows: LabelFormHints would read each one as a mutant form and demand its hint.
     ("Red-run: : PYTEST_ADDOPTS=-q python3 t.py -> 1 failed on SHA", "refused", "carried colon on an assignment word"),
     ("Red-run: -: lint_mode=on python3 t.py -> 1 failed on SHA", "refused", "carried colon on an assignment word"),
     ("Red-run: - python3 t.py -> 1 failed on SHA", "valid", "control: bare list marker"),
