@@ -26,6 +26,7 @@ import test_report_guard as trg  # noqa: E402  the fixture, helpers and run fold
 
 human = trg.human
 peer_msg = trg.peer_msg
+real_frame_msg = trg.real_frame_msg
 assistant_text = trg.assistant_text
 
 
@@ -107,6 +108,15 @@ class RouteTests(RouteFixture, unittest.TestCase):
                         *self.send(session_id="@parent"),
                         assistant_text(self.reply(self.QUESTION)))
         self.assertIsNone(out, "a question sent in its own turn was blocked")
+
+    def test_rt_red_real_frame_parent_reply_is_no_ack(self):
+        # Catches: the parent's reply, in the real frame shape (no origin key), read as the ack of the send to
+        # @parent, so the question after it rides on that send. Main reads no sender from that record: the reply
+        # starts a turn with no send in it, and the question is refused.
+        out = self.lane(peer_msg("pick?"), *self.send(session_id="@parent"),
+                        real_frame_msg("next task: write the report", from_session=self.PARENT),
+                        assistant_text(self.reply(self.QUESTION)))
+        self.assert_blocked(out, "Lane pick guard", "parent")  # the refusal's wording differs between main and here
 
     # The owner-facing session. Its own record, with no lane tag and no parent, makes it owner-facing: a send to
     # @parent reaches no one there, so the question needs the page writer.

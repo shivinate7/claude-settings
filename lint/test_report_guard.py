@@ -105,6 +105,14 @@ def peer_msg(body, stamp=None, from_session="local_fixture"):
     return rec
 
 
+def real_frame_msg(body, from_session="local_fixture"):
+    """A cross-session reply in the shape a real transcript holds in its string content: a user record with
+    isMeta true and no origin key. The frame opens with the from-session attribute only, as the real frame does."""
+    frame = '<cross-session-message from-session="%s">%s</cross-session-message>' % (from_session, body)
+    return {"type": "user", "isSidechain": False, "isMeta": True,
+            "message": {"role": "user", "content": frame}}
+
+
 def tool_use_msg(name, input_=None):
     block = {"type": "tool_use", "name": name, "input": input_ or {}}
     return {"type": "assistant", "isSidechain": False, "message": {"role": "assistant", "content": [block]}}
