@@ -659,15 +659,14 @@ def job_problems(shell, template, pidfiles=()):
     before = alive(below)
     for pid in listed:  # one at a time, in line order: the parent dies first and starts nothing more
         kill_all([pid])
-    time.sleep(0.5)
-    deadline = time.monotonic() + 2.5
-    while True:
+
+    def leftovers():
         left = {pid: args for pid, _ppid, args in process_table() if mark in args}
         for pid in alive(before):
             left.setdefault(pid, args_of.get(pid, ""))
-        if not left or time.monotonic() > deadline:
-            break
-        time.sleep(0.1)
+        return left
+    wait_until(lambda: not leftovers(), 3.0)
+    left = leftovers()
     if left:
         pid, args = next(iter(left.items()))
         problems.append(f"stopping pids {','.join(map(str, listed))} leaves the job running: "
@@ -805,9 +804,7 @@ def reap_ends_a_job_that_no_report_names():
         problems += expect(m is not None, "report names no pid=")
         PIDS.clear()  # as when a report names the wrong pid: only the mark is left to find the job
         reap()
-        deadline = time.monotonic() + 2.5
-        while alive(job) and time.monotonic() < deadline:
-            time.sleep(0.1)
+        wait_until(lambda: not alive(job), 2.5)
         problems += expect(not alive(job), f"reap() left the job running: pids {alive(job)}")
     finally:
         kill_all(alive(job))  # the job must not outlive a failing case
@@ -827,15 +824,16 @@ def log_keeps_growing_after_watcher_exits():
         reap()
         return problems + ["report names no log="]
     log = m.group(1)
-    deadline = time.monotonic() + 15
-    body = ""
-    while time.monotonic() < deadline:
-        if os.path.exists(log):
-            with open(log, encoding="utf-8", errors="replace") as f:
-                body = f.read()
-            if "second" in body:
-                break
-        time.sleep(0.2)
+    seen = {"body": ""}  # the last read of the log, kept when the job removes the file
+
+    def log_has_second():
+        if not os.path.exists(log):
+            return False
+        with open(log, encoding="utf-8", errors="replace") as f:
+            seen["body"] = f.read()
+        return "second" in seen["body"]
+    wait_until(log_has_second, 15)
+    body = seen["body"]
     problems += expect("first" in body, "log lacks the output printed before the stall")
     problems += expect("second" in body, "log lacks output printed after the watcher exited")
     reap()
