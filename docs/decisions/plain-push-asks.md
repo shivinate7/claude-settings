@@ -2,8 +2,8 @@
 
 ## The ruling
 
-Two pushes that are not forced ask. Approving the prompt lets one push through; it is not a grant.
-The owner's typed override lets each through (`owner-override`). Owner rulings, Cockpit, 2026-11-03 22:23 CST.
+Three kinds of push that are not forced ask. Approving the prompt lets one push through; it is not a grant.
+The owner's typed override lets each through (`owner-override`). Owner rulings, Cockpit, 2026-11-03 22:23 CST, for the first two; the third has its source below.
 
 | Push | Outcome | Rule id |
 |---|---|---|
@@ -17,13 +17,17 @@ The owner's typed override lets each through (`owner-override`). Owner rulings, 
 - Item 206 a, `push-stray-branch`: `git push origin HEAD` writes the local branch's name, not its
   upstream. Measured 2026-11-03: local `mylocal` tracking `origin/lane/x` made a new remote branch
   `mylocal`.
+- `push-agent-branch`: a push that writes an agent-worktree name puts a stray branch on the remote. Bare
+  and `-u` count, and so does a bare push under `push.autoSetupRemote`. Source: coordinator, 2026-11-08
+  01:10 CST, under item 206 a. A test-author or builder pushing a lane-named branch unasked is
+  not read here; roadmap step `push-ask-reads-brief` holds it.
 - Silent:
   - a push to the branch's own upstream;
-  - a first push with no upstream;
-  - a `-u` push whose destination is the local branch's own name, even when the branch tracks
+  - a first push with no upstream, unless its destination is an agent-worktree name;
+  - a `-u` push whose destination is the local branch's own name, not an agent-worktree name, even when the branch tracks
     another lane. It sets the new upstream on purpose. Source: coordinator brief, 2026-11-03
     22:23 CST, as clarified 2026-11-04 01:49 CST;
-  - an explicit `HEAD:<branch>` (agents push this way);
+  - an explicit `HEAD:<branch>` to a lane branch (agents push this way);
   - `archive/*`, and `--tags`;
   - a push to another remote than the upstream's;
   - `--dry-run`, which writes nothing;
