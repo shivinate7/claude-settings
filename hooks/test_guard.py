@@ -5737,17 +5737,25 @@ sh("check-tail: ci-job checks --lint 2>&1 |& cat in the foreground, the & of |& 
    "~/.claude/bin/ci-job checks --lint 2>&1 |& cat", "allow", cwd=NOGIT)
 
 # A `&` glued to the last word backgrounds the pipeline as a spaced one does: `tail -3&` is `tail -3 &`.
-# The spaced form is refused first by detached-launch, which reads only a spaced `&`, so these name
-# check-tail. They pass today, since `_ends_in_ampersand` reads only a lone `&` token. The two quoted
-# cases keep a `#` or an apostrophe inside quotes from ending the text the `&` follows.
-add("check-tail: ci-job checks piped to tail -3&, the & glued to the word, is refused", "deny",
-    "check-tail", cwd=NOGIT, description=TAIL_BG_UNTIL, command="ci-job checks | tail -3&")
-add("check-tail: ci-job checks|tail&, with no space around the pipe or the &, is refused", "deny",
-    "check-tail", cwd=NOGIT, description=TAIL_BG_UNTIL, command="ci-job checks|tail&")
-add("check-tail: a glued & after a quoted #, piped to grep, is refused", "deny",
-    "check-tail", cwd=NOGIT, description=TAIL_BG_UNTIL, command="ci-job checks | grep '#x'&")
-add("check-tail: a glued & after a quoted lone apostrophe, piped to grep, is refused", "deny",
-    "check-tail", cwd=NOGIT, description=TAIL_BG_UNTIL, command='ci-job checks | grep "don\'t"&')
+# detached-launch reads that job through `backgrounding_amp` and refuses it first, since no pid is
+# captured, so these name detached-launch. The two quoted cases keep a `#` or an apostrophe inside
+# quotes from ending the text the `&` follows.
+add("check-tail: ci-job checks piped to tail -3&, the & glued to the word, is refused; "
+    "detached-launch refuses it first", "deny",
+    "detached-launch", cwd=NOGIT, description=TAIL_BG_UNTIL, command="ci-job checks | tail -3&")
+add("check-tail: ci-job checks|tail&, with no space around the pipe or the &, is refused; "
+    "detached-launch refuses it first", "deny",
+    "detached-launch", cwd=NOGIT, description=TAIL_BG_UNTIL, command="ci-job checks|tail&")
+add("check-tail: a glued & after a quoted #, piped to grep, is refused; "
+    "detached-launch refuses it first", "deny",
+    "detached-launch", cwd=NOGIT, description=TAIL_BG_UNTIL, command="ci-job checks | grep '#x'&")
+add("check-tail: a glued & after a quoted lone apostrophe, piped to grep, is refused; "
+    "detached-launch refuses it first", "deny",
+    "detached-launch", cwd=NOGIT, description=TAIL_BG_UNTIL, command='ci-job checks | grep "don\'t"&')
+# The pid is captured on the next line, so detached-launch does not refuse it. check-tail reads the `&` at
+# the line's end as a background job and refuses the pipeline.
+add("check-tail: ci-job checks piped to tail -3&, a newline, then echo $! capturing the pid, is refused", "deny",
+    "check-tail", cwd=NOGIT, description=TAIL_BG_UNTIL, command="ci-job checks | tail -3&\necho $!")
 
 # Controls, each held in the foreground and each allowed. A reading that takes any `&` in a word for a
 # background job would refuse every one: the `&` of `|&` (also glued to the next word), `&&`, a quoted
@@ -7728,10 +7736,12 @@ for _name, _command in (
 RM_PARENT_HINT = {"Bash": "rm -rf build", "PowerShell": "Remove-Item -Recurse build"}
 
 
-def rm_parent(name, command, expected="deny", **kw):
-    """One case of the block: a deny names destructive-delete, an allow names nothing."""
-    sh("rm-parent: " + name.replace("\n", " ; "), command, expected,
-       "destructive-delete" if expected == "deny" else None, cwd=NOGIT, **kw)
+def rm_parent(name, command, expected="deny", rule=None, **kw):
+    """One case of the block: a deny names destructive-delete unless `rule` names the rule that reads it
+    first, and an allow names nothing."""
+    if rule is None:
+        rule = "destructive-delete" if expected == "deny" else None
+    sh("rm-parent: " + name.replace("\n", " ; "), command, expected, rule, cwd=NOGIT, **kw)
 
 
 # The flag spellings, on `.` and `..`: one cluster, split flags, a capital R, a verbose letter, the
@@ -7961,10 +7971,14 @@ for _command in (VCS + " rm -r --cached .", VCS + " rm -r .", VCS + " rm -r --ca
     rm_parent("allows " + _command, _command, "allow")
 rm_parent("a real rm -rf . after a git command", VCS + " status && rm -rf .")
 
-# KNOWN OPEN. A shell operator glued to the target (`..&`, `..>x`, `.>/dev/null`) leaves the target
-# unread by both the token read and the raw read. These cases record today's verdict and are not a
-# ruling that it is right: when a fix makes one deny, re-point it here.
-for _command in ("rm -rf ..&", "rm -rf ..>x", "rm -rf .>/dev/null"):
+# A `&` glued to the target backgrounds the delete as a spaced one does, so detached-launch refuses
+# `rm -rf ..&` before any delete rule reads it. destructive-delete still reads no target glued to a
+# shell operator, so this row shows only the detached-launch refusal.
+rm_parent("rm -rf ..& is refused by detached-launch", "rm -rf ..&", rule="detached-launch")
+# KNOWN OPEN. A shell operator glued to the target (`..>x`, `.>/dev/null`) leaves the target unread by
+# both the token read and the raw read. These cases record today's verdict and are not a ruling that
+# it is right: when a fix makes one deny, re-point it here.
+for _command in ("rm -rf ..>x", "rm -rf .>/dev/null"):
     rm_parent("known open: " + _command, _command, "allow")
 
 
@@ -9924,9 +9938,10 @@ LANE_TRANSCRIPT = role_path("lane")
 TRIAGE_TRANSCRIPT = role_path("triage")
 
 
-def record_refuse(name, command, transcript, cwd=PUSHFEAT, env=ROLE_ENV, **kw):
-    """A git push the guard refuses under roadmap-one-writer. The reason names the rule, never the push."""
-    sh("roadmap-one-writer: " + name, command, "deny", rule=RECORD_RULE, lacks=RECORD_LACKS,
+def record_refuse(name, command, transcript, cwd=PUSHFEAT, env=ROLE_ENV, rule=RECORD_RULE, **kw):
+    """A git push the guard refuses under roadmap-one-writer, or under `rule` when another rule reads it
+    first. The reason names the rule, never the push."""
+    sh("roadmap-one-writer: " + name, command, "deny", rule=rule, lacks=RECORD_LACKS,
        transcript=transcript, env=env, cwd=cwd, **kw)
 
 
@@ -10001,7 +10016,7 @@ record_refuse("a lane's HEAD:roadmap push in a subshell after a cd, piped to tai
 record_refuse("a lane's push to roadmap in a subshell under bash -c after a cd is refused",
               'bash -c "(cd ' + slash(RECROADMAP) + " && " + VCS + ' push origin roadmap)"', LANE_TRANSCRIPT)
 record_refuse("a lane's push to roadmap with a trailing background & is refused",
-              VCS + " push origin roadmap&", LANE_TRANSCRIPT)
+              VCS + " push origin roadmap&", LANE_TRANSCRIPT, rule="detached-launch")
 record_allow("a lane's push to lane/foo in a subshell after a cd into the roadmap checkout is allowed",
              "(cd " + slash(RECROADMAP) + " && " + VCS + " push origin lane/foo)", LANE_TRANSCRIPT)
 # Quoted, heredoc and comment text never hides a push, and a push after such text is still a push.
@@ -28562,8 +28577,9 @@ def register_simulator_boot_cases():
        "xcodebuild -scheme App -destination 'platform=iOS Simulator,id=" + SIM_UC + "' -only-testing:AppTests test",
        "deny", rule="simulator-boot-route", env_path=one_path, config=one_cfg, carries="Run `sim-test")
 
-    # The remedy names sim-test with the xcodebuild arguments only. The shell's redirects and a background `&`
-    # are not arguments of xcodebuild, so the remedy holds none of them, whether spaced or glued to a quote.
+    # The remedy names sim-test with the xcodebuild arguments only. The shell's redirects are not arguments of
+    # xcodebuild, so the remedy holds none of them. A background `&` is refused by detached-launch before this
+    # rule reads the command, so no row here reaches the remedy with a `&`.
     sh("route: a test of a shut-down simulator with 2>&1 names sim-test -scheme App, with no redirect word",
        "xcodebuild test -scheme App -destination 'platform=iOS Simulator,id=" + SIM_UC + "' 2>&1",
        "deny", rule="simulator-boot-route", env_path=one_path, config=one_cfg,
@@ -28572,10 +28588,9 @@ def register_simulator_boot_cases():
        "xcodebuild test -scheme App -destination 'platform=iOS Simulator,id=" + SIM_UC + "' > out.log",
        "deny", rule="simulator-boot-route", env_path=one_path, config=one_cfg,
        carries="Run `sim-test -scheme App", lacks=(">",))
-    sh("route: a test of a shut-down simulator, the quote glued to a trailing &, names sim-test -scheme App",
+    sh("route: a test of a shut-down simulator, the quote glued to a trailing &, is refused by detached-launch first",
        'xcodebuild test -scheme App -destination "platform=iOS Simulator,id=' + SIM_UC + '"&',
-       "deny", rule="simulator-boot-route", env_path=one_path, config=one_cfg,
-       carries="Run `sim-test -scheme App", lacks=("&",))
+       "deny", rule="detached-launch", env_path=one_path, config=one_cfg)
     sh("route: a test of a shut-down simulator, the quote glued to a redirect, names sim-test -scheme App",
        'xcodebuild test -scheme App -destination "platform=iOS Simulator,id=' + SIM_UC + '">/dev/null',
        "deny", rule="simulator-boot-route", env_path=one_path, config=one_cfg,
