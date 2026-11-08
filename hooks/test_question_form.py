@@ -1595,8 +1595,8 @@ def case_step_ruling_tail_stops_at_a_ruling_word():
 
 
 # ------------------------------------------------------------------ the step pool: label rows and recall rows
-# The step candidate pool takes a sentence that names ruling, owner or shiv, with no owner-marker gate and no label
-# exclusion. Each row names one sentence and what the pool does with it. POOL_RE is the pool's rule as this test
+# The step candidate pool keeps each sentence that names ruling, owner or shiv, label openers included. Each row names
+# one sentence and what the pool does with it. POOL_RE is the pool's rule as this test
 # states it. LABEL_OPENER_RE finds a label at the clause start, after bullet or emphasis marks, an enumerator, or at most
 # two words (as in "Second incident"). A label mid-sentence is no opener.
 POOL_RE = re.compile(r"ruling|owner|shiv", re.I)
