@@ -2797,8 +2797,8 @@ def _suite_profile(source: str):
     same name, or the same name assigned in another function, adds nothing, and the name means nothing after its loop. A
     loop name is followed through a path call, a file call and a call that keeps its text (`_PATH_WRAPPERS`: `str`,
     `basename`, `split`, `replace` and the like), never through any other call. A bare call to a function the file
-    defines itself is no file call, whatever its name. A path that arrives as a function parameter is not followed (debt
-    tests-for-misses-param-loads)."""
+    defines at module level is no file call, whatever its name. A path that arrives as a function parameter is not
+    followed (debt tests-for-misses-param-loads)."""
     import ast
     try:
         tree = ast.parse(source)
@@ -2972,10 +2972,10 @@ def _suite_profile(source: str):
                    (isinstance(owner, ast.Name) and owner.id in ("path", "posixpath", "ntpath"))
         return func.attr in _PATH_METHODS
 
-    own_defs = {node.name for node in ast.walk(tree) if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))}
+    own_defs = {node.name for node in tree.body if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))}
 
     def is_file_call(func) -> bool:
-        """A `_FILE_CALLS` name, but never a bare name the file defines itself: a local `def run(paths)` is some helper,
+        """A `_FILE_CALLS` name, but never a bare name the file defines at module level: a `def run(paths)` there is a helper,
         and its arguments are not paths it opens. A method call (`subprocess.run`, `self.copy`) counts by its name."""
         if isinstance(func, ast.Name):
             return func.id in _FILE_CALLS and func.id not in own_defs

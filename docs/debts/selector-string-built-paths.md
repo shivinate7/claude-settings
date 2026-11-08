@@ -6,7 +6,7 @@
 
 **Decision.** `mutation-ci-report-and-replay`, the mutation report job and the known-defect replay.
 
-**Count.** On 2026-11-08, 44 of the 118 tracked `test_*.py` built a path by string inside a path or file call. Two of them reach a tracked file this way; the rest name a temporary, fixture or output file.
+**Count.** On 2026-11-08, 44 of the 118 tracked `test_*.py` built a path by string inside an `open`, `shutil.copy*`, `os.path.join` or `Path` call. A check of each such read, and of each such join under a checkout root, found two that reach a tracked file.
 
 - `record()` in `lint/test_compliance_probes.py` reads `docs/decisions/<slug>.md` through `slug + ".md"`. So a diff of `docs/decisions/standing-merge-grant.md` does not pick that suite, though its cases read that record. A `+` fix alone would not pick it: `slug` is a parameter (debt `tests-for-misses-param-loads`, the selector misses a path passed as a parameter). Its `record_slugs()` also lists the folder, which no static form names.
 - `actions/ste-lint/test_action.py` checks that `lint/<m>.py` exists, for module names it parses from `lint/ste_lint.py` at run time. No static form names those files.
