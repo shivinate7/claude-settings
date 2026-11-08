@@ -922,18 +922,6 @@ def _unresolved_file_arg(args, known) -> bool:
     return any(re.search(r"[/$~*?\[{\\]", arg) and arg not in known for arg in args if not arg.startswith("-"))
 
 
-def _runs_unresolved_path(text: str, known) -> bool:
-    """True when a shell, a wrapper, or an interpreter that reads its program elsewhere runs, in TEXT, a file
-    argument the guard cannot resolve to a heredoc's file (`_unresolved_file_arg`), as `_written_file_use` reads it."""
-    for stages in _pipeline_stages(text):
-        for words in stages:
-            for at, word in enumerate(words):
-                if _RUNNER(word.rsplit("/", 1)[-1]) and interpreter_script(words[at:]) in (None, PROGRAM_NOT_A_FILE) \
-                        and _unresolved_file_arg(words[at + 1:], known):
-                    return True
-    return False
-
-
 def _written_file_use(text: str, headers, bodies=()) -> str:
     """How a file a heredoc writes is used later, in TEXT (the command with its bodies dropped): 'run' when
     its pipeline holds a shell, a runner or an interpreter that reads its program elsewhere (`sh < f`,
@@ -978,16 +966,63 @@ def _runs_written_file(text: str, headers, bodies=()) -> bool:
     return bool(_written_file_use(text, headers, bodies))
 
 
-def _kept_headers(text: str, bodies) -> set:
-    """The headers whose body stays in view: a body whose file a later command runs, and every body whose
-    file a kept body names as a word (`bash helper.sh`, `source ./helper.sh`, `subprocess.run(['bash','helper.sh'])`),
-    repeated until nothing more is added. The kept script may run the file, so the file's body is not data. A
-    kept body that runs a path the guard cannot resolve (`bash "$PWD/helper.sh"`, `bash $f`, `bash h*.sh`) keeps
-    every body, as the top-level run does (`_written_file_use`)."""
-    kept = {header for _, _, header in bodies if _runs_written_file(text, [header], bodies)}
-    known = set(heredoc_sources(bodies))
-    if any(_runs_unresolved_path(body, known) for _, body, header in bodies if header in kept):
-        return {header for _, _, header in bodies}
+# The commands that only read or print, so a body that holds nothing else runs no file. A command word outside
+# this list, other than a literal script file a heredoc wrote, may run a file.
+KNOWN_READERS = frozenset({"echo", "printf", "cat", "grep", "head", "tail", "wc", "ls", "test", "[", "true", "false", ":"})
+_REDIRECT = re.compile(r"\d*(?:>>?|<<?<?|&>>?|>&|<&)(.*)", re.DOTALL)
+_UNRESOLVED_WORD = re.compile(r"[$`*?\[{~\\]")   # a variable, a substitution, a glob, a brace or a home path
+
+
+def _run_script_arg(words):
+    """For WORDS, a shell or an interpreter followed by only flags and one script file last: that file. None when
+    WORDS run no script file (an inline `-c` program, stdin, a data argument after the script, no argument)."""
+    name = words[0].rsplit("/", 1)[-1].rsplit("\\", 1)[-1].lower()
+    if re.fullmatch(_SHELLS, name):
+        files = [word for word in words[1:] if not word.startswith("-")]
+        inline = any(re.fullmatch(r"-[A-Za-z]*c", word) for word in words[1:] if word.startswith("-"))
+        return files[0] if len(files) == 1 and words[-1] == files[0] and not inline else None
+    index = interpreter_script(words)
+    return words[index] if index not in (None, PROGRAM_NOT_A_FILE) and index == len(words) - 1 else None
+
+
+def _segment_runs_nothing_unseen(segment: str, sources) -> bool:
+    """True when the command SEGMENT runs only a known reader (`KNOWN_READERS`) or a script file whose body
+    SOURCES shows (that body is checked on its own, as `_kept_headers` checks every kept body). Read with the
+    quote-aware tokenizer, so a word inside a quote is no command word. A command word that is a variable or
+    a glob, an `xargs`, `exec`, `env`, `source` or `.`, a shell or interpreter with an inline program or data
+    arguments, a substitution anywhere, or a segment the tokenizer cannot read, may run a file."""
+    tokens = segment_tokens(segment)
+    if tokens is None or any("`" in token or "$(" in token for token in tokens):
+        return False
+    words, skip = [], False
+    for token in tokens:
+        redirect = None if skip else _REDIRECT.fullmatch(token)
+        if skip or redirect:
+            skip = bool(redirect) and not redirect.group(1)
+            continue
+        words.append(token)
+    while words and (ASSIGNMENT.match(words[0]) or words[0] in LOOP_KEYWORDS or words[0] in ("done", "fi")):
+        words.pop(0)
+    if not words:
+        return True
+    if _UNRESOLVED_WORD.search(words[0]):
+        return False
+    if words[0] in KNOWN_READERS:
+        return True
+    script = words[0] if len(words) == 1 else _run_script_arg(words)
+    return script is not None and not _UNRESOLVED_WORD.search(script) \
+        and sources.get(_plain_words([script])[0]) is not None
+
+
+def _body_runs_nothing_unseen(body: str, sources) -> bool:
+    """True when every segment of the shell BODY passes `_segment_runs_nothing_unseen`."""
+    return all(_segment_runs_nothing_unseen(segment, sources) for segment in split_segments(body, []))
+
+
+def _kept_closure(kept: set, bodies) -> set:
+    """KEPT, and every header whose file a kept body names as a word (`bash helper.sh`, `source ./helper.sh`,
+    `subprocess.run(['bash','helper.sh'])`), repeated until nothing more is added."""
+    kept = set(kept)
     grew = bool(kept)
     while grew:
         grew = False
@@ -996,6 +1031,23 @@ def _kept_headers(text: str, bodies) -> set:
             if header not in kept and named & set(_plain_words(_WRITE_TARGET.findall(header))):
                 kept.add(header)
                 grew = True
+    return kept
+
+
+def _kept_headers(text: str, bodies) -> set:
+    """The headers whose body stays in view: a body whose file a later command runs, and every body whose
+    file a kept body names as a word (`_kept_closure`). The kept script may run the file, so the file's body is
+    not data. A body is dropped only when the guard can see that nothing runs it: every kept shell body must
+    run only known readers or a literal script file a heredoc wrote (`_body_runs_nothing_unseen`), else every
+    body stays, as the top-level run does (`_written_file_use`). The test runs on the closed set, so a chained
+    script's body is read too. A kept body an interpreter runs as its script file is not shell text and is
+    left to the closure."""
+    first = {header for _, _, header in bodies if _runs_written_file(text, [header], bodies)}
+    kept = _kept_closure(first, bodies)
+    sources = heredoc_sources(bodies)
+    if not all(_body_runs_nothing_unseen(body, sources) for _, body, header in bodies
+               if header in kept and _written_file_use(text, [header], bodies) != "script"):
+        return {header for _, _, header in bodies}
     return kept
 
 
