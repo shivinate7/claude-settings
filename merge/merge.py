@@ -3696,6 +3696,21 @@ def idle_lanes(live):
     say(*entries)
     return 1 if unread else 0
 
+def open_fail_on_ancestor(h, live, a):
+    """True when the record for --head `a.head` may be written although the pull request's `live` head differs: it has no fix check, every line of
+    its highest round is FAIL, it reads open (a round-3 all-FAIL record reads held), and `a.head` is an ancestor of `live` (the compare is ahead
+    with no behind). The record then reads open, so it clears nothing, and the lane's next record names this head as its fix base. The cheap clauses run first, so a
+    record that cannot qualify reads no compare. Any other record keeps the equal-head rule (decision pr-review-record)."""
+    if a.fix_check or not a.round:
+        return False
+    top = max(r[0] for r in a.round)
+    if any(r[3] != "FAIL" for r in a.round if r[0] == top):
+        return False
+    if review_state(parse_review(review_body(a.pr, a.head, a.kind, a.guard, a.round, a.net_value)), a.head)[0] != "open":
+        return False
+    found = h.compare_files(a.head, live)
+    return found["ahead_by"] > 0 and found["behind_by"] == 0
+
 def main(argv, host=None, lock=None, hosts=None):
     p = argparse.ArgumentParser(prog="merge", description=__doc__.split("\n\n")[0])
     p.add_argument("pr", nargs="?", help="a pull request number; with --lane-lint, a number or a commit or ref")
@@ -3714,7 +3729,7 @@ def main(argv, host=None, lock=None, hosts=None):
     p.add_argument("--reviewed", action="store_true", help="list the open pull requests with their review record state and live CI")
     p.add_argument("--root", action="append", default=[], metavar="DIR", help="with --reviewed: a repo checkout to list, in place of the working directory's; repeat it for each repo")
     p.add_argument("--review-record", action="store_true", help="print the review record for the pull request's live head (posts nothing)")
-    p.add_argument("--head", type=head_arg, metavar="SHA", help="with --review-record: the 40-hex head the review read; the live head must equal it")
+    p.add_argument("--head", type=head_arg, metavar="SHA", help="with --review-record: the 40-hex head the review read; the live head must equal it, except that an open record whose newest round is all FAIL, with no --fix-check, may name an ancestor of the live head")
     p.add_argument("--kind", choices=REVIEW_KINDS, help="with --review-record: the kind of change")
     p.add_argument("--guard", choices=REVIEW_GUARDS, help="with --review-record: whether the change touches a guard or check")
     p.add_argument("--round", action="append", type=round_arg, default=[], metavar="N:ROLE:MODEL:VERDICT", help="with --review-record: one reviewer line; repeat it")
@@ -3801,7 +3816,7 @@ def main(argv, host=None, lock=None, hosts=None):
         if a.review_record:
             if info["state"] != "OPEN":
                 raise Stop(f"the pull request is {info['state']} " + REVIEW_CITE)
-            if info["head"] != a.head:  # a push after the review must not relabel the old rounds as current
+            if info["head"] != a.head and not open_fail_on_ancestor(h, info["head"], a):  # a push after the review must not relabel the old rounds as current; only an open all-FAIL record may name an ancestor, because it reads open and clears nothing
                 raise Stop(f"the pull request head is {info['head'][:9]}, not the reviewed {a.head[:9]}. Review the new head, then write its record. " + REVIEW_CITE)
             if a.fix_check:  # a fix never follows a fix, and the fix diff starts from the Head the newest earlier record reviewed, or from a record-file-only step from it
                 recs = h.review_comments(info.get("created") or "1970-01-01T00:00:00Z").get(a.pr, [])
