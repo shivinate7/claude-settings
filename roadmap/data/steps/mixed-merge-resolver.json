@@ -1,11 +1,11 @@
 {
   "title": "A role resolves a base merge whose conflicts touch both test and product files",
   "phase": "now",
-  "status": "doing",
+  "status": "ready",
   "order": 268.3,
   "owner": "coordinator",
   "lane": "session_013NEJL1CxMTqgaXC4PMxQLc",
   "why": "No role may resolve a base merge whose conflicts touch both test and product files, so the orchestrator resolved one by hand on PR #1619 (coordinator, 17:05 CST Nov 7). That breaks roles-orchestrator-never-builds.",
-  "note": "Done check: a mixed-conflict merge goes to a named role, with no orchestrator edit.",
-  "updatedAt": "2026-11-07T17:05:00-06:00"
+  "note": "Done check: a mixed-conflict merge goes to a named role, with no orchestrator edit. Built as #1683, with runner 8: round 3 PASS, net value positive (coordinator 18:44 CST). Done when #1683 merges. Follow-up: merge-commit-role-scope.",
+  "updatedAt": "2026-11-07T18:45:00-06:00"
 }

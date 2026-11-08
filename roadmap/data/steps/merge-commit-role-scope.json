@@ -1,0 +1,11 @@
+{
+  "title": "The merge-commit check judges only the current agent's commits",
+  "phase": "now",
+  "status": "doing",
+  "order": 50,
+  "owner": "coordinator",
+  "lane": "session_013NEJL1CxMTqgaXC4PMxQLc",
+  "why": "Follow-up from #1683 (mixed-merge-resolver) review: the check should judge only the current agent's commits, and the backslash mutant is missing.",
+  "note": "Scope: judge only the current agent's commits, plus the backslash mutant. Stacked on #1683. Coordinator 18:44 CST Nov 7.",
+  "updatedAt": "2026-11-07T18:45:00-06:00"
+}

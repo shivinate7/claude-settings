@@ -6,6 +6,6 @@
   "owner": "coordinator",
   "lane": "session_013NEJL17gMWcgUJ44gi3ZRs",
   "why": "Builder agents edited hooks/mutate_guard.py, a test-author path (AUTHOR_MUTATION_TESTS in hooks/guard.py), and reported no refusal (lane notes-fix-merge-ci, 17:51 CST Nov 7). Rule roles-one-role-per-agent.",
-  "note": "Coordinator took c at 17:55 CST Nov 7: builders may add mutants; a builder diff that removes or changes a mutant line is refused. Home: decision builders-cannot-edit-tests, in this lane's PR. Page item 378 withdrawn.",
-  "updatedAt": "2026-11-07T17:57:00-06:00"
+  "note": "Coordinator took c at 17:55 CST Nov 7: builders may add mutants; a builder diff that removes or changes a mutant line is refused. Home: decision builders-cannot-edit-tests, in this lane's PR. Page item 378 withdrawn. Absorbs debt builder-edits-mutation-config (coordinator 18:44 CST).",
+  "updatedAt": "2026-11-07T18:45:00-06:00"
 }
