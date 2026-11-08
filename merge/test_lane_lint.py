@@ -153,6 +153,36 @@ class CiJobStub:
         return [c for c in calls if "--plan" not in c["argv"]]
 
 
+WAIT_LINE = "GitHub to show the pushed head"  # the progress text of the wait for a pushed head (merge.py wait_checks)
+WAIT_CEILING = 600  # fake seconds a wait may run. The bound is the builder's choice; this ceiling only proves the wait is finite
+WAIT_POLLS_CEILING = 30  # pull request reads one wait may make
+RUNAWAY_PAUSES = 500  # pauses after which a wait that never ends is stopped, so a broken wait cannot hang the run
+LAG_POLLS = 3  # reads that still show the stale head before GitHub shows the pushed one
+
+
+class LagHost(tm.FakeHost):
+    """A FakeHost whose pull request head lags a push: pr() reports `stale` for the first `lag` reads, then the head on origin.
+    now() and pause() are tm.Clock's, so a wait moves a fake clock and costs no real time. lag=0 never reports the stale head."""
+
+    def __init__(self, root, other, stale, lag, clock):
+        super().__init__(root, other)
+        self.stale, self.lag, self.clock, self.minute = stale, lag, clock, 60  # minute: Host's default poll interval, for a wait that reads it
+
+    def now(self):
+        return self.clock.now()
+
+    def pause(self, seconds):
+        if len(self.clock.pauses) >= RUNAWAY_PAUSES:
+            raise AssertionError("the wait paused %d times and never ended" % RUNAWAY_PAUSES)
+        self.clock.pause(seconds)
+
+    def pr(self, n):
+        info = super().pr(n)  # appends this read to pr_calls
+        if len(self.pr_calls) <= self.lag:
+            info["head"] = self.stale
+        return info
+
+
 class LaneLint(CiJobStub, tm.CloudSession):
     @classmethod
     def setUpClass(cls):
@@ -372,6 +402,79 @@ class LaneLint(CiJobStub, tm.CloudSession):
         self.assertFalse(os.path.exists(cwd), "the lint tree is still on disk after an exception")
         self.assertFalse(tm.tree_listed(self.co, cwd), "git still lists the lint tree after an exception")
         self.assertEqual(self.worktrees(), 1)
+
+    def push_lane_commit(self):
+        """The lane's push: one commit on the lane checkout's feat, pushed from there. -> (the head GitHub showed before it, the pushed head).
+        The local head is that commit: the lane checkout's local feat, origin/feat and the pushed head are one sha."""
+        stale = self.head("feat")
+        tm.sh(self.co, "git", "checkout", "-q", "-B", "feat", "origin/feat")
+        tm.put(os.path.join(self.co, "lane-push.txt"), "a lane pushes a commit\n")
+        tm.sh(self.co, "git", "add", "-A")
+        tm.sh(self.co, "git", "commit", "-q", "-m", "lane push")
+        tm.sh(self.co, "git", "push", "-q", "origin", "feat")
+        pushed = tm.sh(self.co, "git", "rev-parse", "feat")
+        self.assertNotEqual(stale, pushed, "the case pushed nothing")
+        self.assertEqual(self.head("feat"), pushed, "the push did not land on origin")
+        return stale, pushed
+
+    def lagging_host(self, stale, lag):
+        """self.host becomes a LagHost on the lane checkout, with a fresh tm.Clock. -> the clock."""
+        clock = tm.Clock()
+        self.host = LagHost(self.co, self.other, stale, lag, clock)
+        return clock
+
+    def test_lane_lint_waits_for_github_to_show_the_pushed_head_then_lints_that_head(self):
+        stale, pushed = self.push_lane_commit()
+        clock = self.lagging_host(stale, LAG_POLLS)
+        self.use_ci_job(PASSING, 0)
+        start = clock.now()
+        rc, text = self.run_lane("--lane-lint", "7")
+        self.assertIn(WAIT_LINE, text, "lane_lint did not wait for GitHub to show the pushed head: " + text)
+        self.assertGreater(clock.now(), start, "lane_lint printed the wait but the fake clock did not move: " + text)
+        self.assertEqual(rc, 0, "lane_lint refused after GitHub showed the pushed head: " + text)
+        runs = self.lint_calls()
+        self.assertEqual(len(runs), 1, "the lint ran %d times, want once: %s" % (len(runs), text))
+        self.assertEqual(runs[0]["head"], pushed, "the lint ran on a head other than the pushed one")
+        self.assertEqual(len(pass_lines(text)), 1, text)
+
+    def test_lane_lint_refuses_after_a_bounded_wait_when_github_never_shows_the_pushed_head(self):
+        stale, pushed = self.push_lane_commit()
+        clock = self.lagging_host(stale, float("inf"))
+        self.use_ci_job(PASSING, 0)
+        start = clock.now()
+        rc, text = self.run_lane("--lane-lint", "7")
+        self.assertIn(WAIT_LINE, text, "lane_lint did not wait for GitHub to show the pushed head before it refused: " + text)
+        waited = clock.now() - start
+        self.assertLessEqual(waited, WAIT_CEILING, "the wait had no finite bound: it ran %d fake seconds" % waited)
+        self.assertLessEqual(len(self.host.pr_calls), WAIT_POLLS_CEILING, "the wait read GitHub %d times" % len(self.host.pr_calls))
+        self.assertEqual(rc, 1, "lane_lint did not refuse a head GitHub never showed: " + text)
+        refusal = "\n".join(line for line in text.splitlines() if WAIT_LINE not in line)
+        self.assertIn("GitHub", refusal, "the refusal does not say GitHub never showed the pushed head: " + text)
+        self.assertIn(pushed[:7], refusal, "the refusal does not name the local head GitHub never showed: " + text)
+        self.assertEqual(pass_lines(text), [], text)
+        self.assertEqual(self.lint_calls(), [], "the lint ran on a head GitHub never showed")
+
+    def test_lane_lint_does_not_wait_when_github_already_shows_the_pushed_head(self):  # the control
+        head = self.head("feat")  # nothing pushed here: origin's feat is the pushed head, and GitHub shows it
+        tm.sh(self.co, "git", "checkout", "-q", "-B", "feat", "origin/feat")  # the local head is the pushed head, as in the pushed cases
+        clock = self.lagging_host(head, lag=0)  # lag=0: pr() never reports a stale head
+        self.use_ci_job(PASSING, 0)
+        rc, text = self.lint_run("--lane-lint", "7", head=head)
+        self.assertEqual(rc, 0, text)
+        self.assertEqual(clock.pauses, [], "lane_lint paused although GitHub already showed the pushed head: %s" % clock.pauses)
+        self.assertNotIn(WAIT_LINE, text, "lane_lint printed a wait with nothing to wait for: " + text)
+
+    def test_lane_lint_ref_target_never_waits_for_github(self):
+        sha = self.head("feat")
+        clock = self.lagging_host("0" * 40, float("inf"))  # a pull request read would show a head that never matches the ref
+        self.use_ci_job(PASSING, 0)
+        for target in (sha, "origin/feat"):  # a commit, and a ref that names the same commit
+            with self.subTest(target=target):
+                rc, text = self.lint_run("--lane-lint", target, head=sha)
+                self.assertEqual(rc, 0, text)
+                self.assertEqual(clock.pauses, [], "a commit or ref target paused: %s" % clock.pauses)
+                self.assertNotIn(WAIT_LINE, text, "a commit or ref target printed a wait: " + text)
+        self.assertEqual(self.host.pr_calls, [], "a commit or ref target read the pull request, which it never needs")
 
     def stop_run(self, proc):
         """Cleanup for a run this case started: it is ours, so a live one is killed. The stub ends by itself when its run is gone."""
