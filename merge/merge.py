@@ -2219,7 +2219,7 @@ def after_merge(root, cmds):
     """Run each command. True when every one passed. A failure never undoes the merge."""
     ok = True
     for cmd in cmds:
-        # nowindow: the afterMerge command prints on the caller's terminal; with no window that output may not show (unmeasured, see the Limit in hooks/_nowindow.py)
+        # nowindow: the afterMerge command prints on the caller's terminal; the wrapper's no-window flag could hide that output
         c = subprocess.run([resolve_program("bash"), "-c", cmd], cwd=root).returncode
         say(f"merge: afterMerge `{cmd}`: " + ("done." if not c else f"FAILED (exit {c}). The merge landed and stays."))
         ok = ok and not c

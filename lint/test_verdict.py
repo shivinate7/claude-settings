@@ -426,10 +426,9 @@ def plant(folder, name, age_days, header=True):
     return p
 
 class StdinPassesThrough(unittest.TestCase):
-    """Off Windows, a piped stdin reaches the command: `printf x | verdict cmd` feeds cmd. Only Windows swaps in an
-    empty stdin, inside hooks/_nowindow.py, because a no-window child cannot use an inherited console stdin."""
+    """A piped stdin reaches the command on every OS: `printf x | verdict cmd` feeds cmd. On Windows only a console
+    stdin becomes an empty one, inside hooks/_nowindow.py: a no-window child cannot use an inherited console stdin."""
 
-    @unittest.skipIf(os.name == "nt", "Windows gives the command an empty stdin (hooks/_nowindow.py)")
     def test_a_piped_stdin_reaches_the_command(self):
         with tempfile.TemporaryDirectory(dir=RUN_FOLDER) as d:
             script = os.path.join(d, "reads.py")

@@ -12,12 +12,14 @@ Pins the contract that lint/test_no_window_spawn.py relies on:
   every flag the caller passed. The constant is pinned as a number, because subprocess has no
   CREATE_NO_WINDOW on the Linux CI runner.
 - On Windows the wrapper also sets stdin=DEVNULL when the caller gives no stdin (or stdin=None) and no input,
-  and the check_output wrapper drops input=None there. A no-window child cannot use an inherited console stdin.
+  unless this process's stdin is a pipe or a file, which the child inherits. The check_output wrapper then drops
+  input=None. A no-window child cannot use an inherited console stdin. The suite patches fstat(0) for the type.
 - Elsewhere the wrapper adds no creationflags key. The kwargs reach subprocess unchanged.
 """
 import contextlib
 import importlib.util
 import os
+import stat
 import subprocess
 import sys
 import unittest
@@ -41,9 +43,13 @@ def load_helper():
 
 
 @contextlib.contextmanager
-def on_platform(windows):
+def on_platform(windows, stdin_mode=stat.S_IFCHR):
+    """Patch the platform, and this process's stdin type as fstat(0) reads it: a console by default."""
     name, plat = ("nt", "win32") if windows else ("posix", "linux")
-    with mock.patch.object(os, "name", name), mock.patch.object(sys, "platform", plat):
+    real_fstat = os.fstat
+    fstat = lambda fd: os.stat_result((stdin_mode,) + (0,) * 9) if fd == 0 else real_fstat(fd)  # noqa: E731
+    with mock.patch.object(os, "name", name), mock.patch.object(sys, "platform", plat), \
+            mock.patch.object(os, "fstat", fstat):
         yield
 
 
@@ -122,6 +128,29 @@ class HelperContract(unittest.TestCase):
             self.h.check_output(["x"], input=None)
         self.assertIs(rec.call_args.kwargs["stdin"], subprocess.DEVNULL)
         self.assertNotIn("input", rec.call_args.kwargs)
+
+    def test_windows_passes_a_piped_or_file_stdin_through(self):
+        # `printf x | verdict cmd` and `verdict cmd < file` must feed cmd; only a console stdin is replaced.
+        for mode in (stat.S_IFIFO, stat.S_IFREG):
+            with self.subTest(mode=oct(mode)):
+                rec = self.recorder("run")
+                with on_platform(True, stdin_mode=mode):
+                    self.h.run(["x"], stdout=subprocess.PIPE)
+                self.assertNotIn("stdin", rec.call_args.kwargs)
+                rec = self.recorder("check_output")
+                with on_platform(True, stdin_mode=mode):
+                    self.h.check_output(["x"], input=None)
+                self.assertEqual(rec.call_args.kwargs.get("input", "absent"), None)  # empty input, as on POSIX
+                self.assertNotIn("stdin", rec.call_args.kwargs)
+
+    def test_windows_unreadable_stdin_becomes_empty(self):
+        rec = self.recorder("run")
+
+        def no_stdin(fd):
+            raise OSError(9, "Bad file descriptor")
+        with on_platform(True), mock.patch.object(os, "fstat", no_stdin):
+            self.h.run(["x"])
+        self.assertIs(rec.call_args.kwargs["stdin"], subprocess.DEVNULL)
 
     def test_posix_check_output_keeps_input_none(self):
         rec = self.recorder("check_output")
