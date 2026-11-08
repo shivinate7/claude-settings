@@ -1704,6 +1704,39 @@ def case_step_quoted_wrapper_value_before_a_folder_is_text():
          entry_of(task_item([r'Check the output of `sudo -u "my user" C:\Docs\Read-Me/`'])), None)
 
 
+def case_step_unbalanced_quote_passes_with_no_exception():
+    # A quote with no close has no raw-word reading, so _raw_words falls back to a whitespace split. The step passes and
+    # no exception escapes the check. Only the fallback reads an unbalanced quote, so a fallback that raises turns these
+    # red. The last span has balanced quotes and never reaches the fallback: it is a pass control only.
+    for span in ('say "hi', '"', "'"):
+        page("a step holding `%s` with an unbalanced quote passes, with no exception" % span, "set",
+             entry_of(task_item(["Check the output of `%s`" % span])), None)
+    page(r'a step holding `sudo -u "my user" C:\Docs\Read-Me/` with balanced quotes passes, a control', "set",
+         entry_of(task_item([r'Check the output of `sudo -u "my user" C:\Docs\Read-Me/`'])), None)
+
+
+def case_step_quote_starting_mid_word_before_a_cmdlet_path_is_a_shell_line():
+    # A quote that starts mid-word (`--user="my user"`, `--format="%E s"`) is read by the wrapper walk as a flag with the
+    # value `"my`, so the word after it (`user"`) is taken as the command. The cmdlet path after that is never checked.
+    # The forward-slash forms are the controls: they are refused at head. A folder ending in a separator stays text.
+    refused = ("command-in-item", "shell line")
+    for span in (r'sudo --user="my user" C:\tools\Get-Thing', r'time --format="%E s" C:\tools\Get-Thing'):
+        page("a step holding `%s` is refused as a shell line" % span, "set",
+             entry_of(task_item(["Check the output of `%s`" % span])), refused)
+    for span in ('sudo --user="my user" C:/tools/Get-Thing', 'time --format="%E s" C:/tools/Get-Thing'):
+        page("a step holding `%s` is refused as a shell line, a control" % span, "set",
+             entry_of(task_item(["Check the output of `%s`" % span])), refused)
+    page(r'a step holding `sudo --user="my user" C:\Docs\Read-Me/` is text and passes, a control', "set",
+         entry_of(task_item([r'Check the output of `sudo --user="my user" C:\Docs\Read-Me/`'])), None)
+
+
+def case_step_powershell_assignment_of_a_cmdlet_path_is_a_shell_line():
+    # The value of a PowerShell assignment is a cmdlet at a path, and it is refused as the bare path is. The prefix walk
+    # skips `$x =`, so the path is the word the cmdlet check reads. Pinned so a change to the walk keeps it refused.
+    page(r"a step holding `$x = C:\tools\Get-Thing` is refused as a shell line", "set",
+         entry_of(task_item([r"Check the output of `$x = C:\tools\Get-Thing`"])), ("command-in-item", "shell line"))
+
+
 # A same-process ratio, not a wall clock: a linear form reads about 2 when a run of spaces doubles, the overlapping
 # `[ \t]+` form about 4. The limit sits between them.
 RATIO_LIMIT = 3.0
@@ -2433,6 +2466,9 @@ def main():
                  case_step_loop_keyword_before_a_cmdlet_path_is_a_shell_line,
                  case_step_quoted_wrapper_value_before_a_cmdlet_path_is_a_shell_line,
                  case_step_quoted_wrapper_value_before_a_folder_is_text,
+                 case_step_unbalanced_quote_passes_with_no_exception,
+                 case_step_quote_starting_mid_word_before_a_cmdlet_path_is_a_shell_line,
+                 case_step_powershell_assignment_of_a_cmdlet_path_is_a_shell_line,
                  case_powershell_spaced_literals_are_no_bash_test,
                  case_bracket_test_alternative_is_linear):
         try:
