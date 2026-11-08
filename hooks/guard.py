@@ -2665,18 +2665,21 @@ BRIEF_BLIND_ITEM = re.compile(BRIEF_BLIND_OPEN + BRIEF_BLIND_DONE + r"(?:BUILT|R
 # choice list that ends its sentence (an instruction names the choices, `a verdict: PASS, FAIL or PARTIAL`, and is a format
 # line). The period must be followed by a space, a capital or the line end, so `**...PASS, FAIL or PARTIAL.**` is refused. An
 # exemption hides only its own span or sentence, never the rest of its line: `Give a verdict: PASS or FAIL. Prior verdict:
-# FAIL.` is refused. A list that runs on into other words is a verdict. The label scans stay lazy and stop at a colon, after
-# at most one short label before them (`_BRIEF_BLIND_PREFIX`). Some long lines are still slow (debt note
-# verdict-regex-slow-line); the prefix is bounded and adds no slowness of its own.
-# A short label may come first (`Done: FAIL, round N`, `Prior review: verdict: FAIL`, `Round N: reviewer verdict: FAIL`): one to
-# four plain words and a colon, tried once and given up if the rest does not read as a verdict line. It is bounded, so it adds
-# a fixed cost at each line start.
-_BRIEF_BLIND_PREFIX = r"(?:[A-Za-z][A-Za-z0-9]*(?:[ \t]+[A-Za-z0-9]+){0,3}[*_]*[ \t]*:[ \t]*)?"
+# FAIL.` is refused. A list that runs on into other words is a verdict. The label scans stay lazy and stop at a colon. Some
+# long lines are still slow (debt note verdict-regex-slow-line).
 BRIEF_BLIND_VERDICT = re.compile(
-    BRIEF_BLIND_OPEN + _BRIEF_BLIND_PREFIX
-    + r"(?:(?:[^\n:]*?\b[Vv]erdict\b[^\n:]*?|[Rr]ound[ \t]+\d+(?:[ \t]+of[ \t]+\d+)?(?:[^\n:]*?\b[Rr]esult\b[^\n:]*?)?)"
+    BRIEF_BLIND_OPEN + r"(?:(?:[^\n:]*?\b[Vv]erdict\b[^\n:]*?|[Rr]ound[ \t]+\d+(?:[ \t]+of[ \t]+\d+)?(?:[^\n:]*?\b[Rr]esult\b[^\n:]*?)?)"
     r"[*_]*[ \t]*:[ \t]*[*_`\"'(]*(?:%s)\b|(?:%s)[*_]*[ \t]*,[ \t]*[Rr]ound[ \t]+\d+)" % (BRIEF_BLIND_VERDICT_WORDS, BRIEF_BLIND_VERDICT_WORDS),
     re.M)
+# A short label may come first (`Done: FAIL, round N`, `Prior review: verdict: FAIL`, `Round N: reviewer verdict: FAIL`): one to
+# four plain words, marks and a colon. brief_blind_verdict_text adds, below such a line, a copy of what follows the label, so
+# BRIEF_BLIND_VERDICT reads that copy at its own line start. It adds the copy only when two cheap tests pass, so a long
+# labelled line costs no more than the same line without a label: the text has a colon followed by a verdict word, or it
+# opens with a leading verdict (`FAIL, round N`). The label regex is anchored and bounded, and runs once per line.
+BRIEF_BLIND_LABEL = re.compile(
+    BRIEF_BLIND_OPEN + r"[A-Za-z][A-Za-z0-9]*(?:[ \t]+[A-Za-z0-9]+){0,3}[*_]*[ \t]*:[ \t]*([^\n]*)", re.M)
+_BRIEF_BLIND_AFTER_COLON = re.compile(r"[ \t]*[*_`\"'(]*(?:%s)\b" % BRIEF_BLIND_VERDICT_WORDS)
+_BRIEF_BLIND_LEADING = re.compile(r"(?:%s)[*_]*[ \t]*,[ \t]*[Rr]ound[ \t]+\d+" % BRIEF_BLIND_VERDICT_WORDS)
 # A backtick span stays on one line. Group 1 is set when the span holds only a verdict word; brief_blind_verdict_text keeps
 # that span. One pattern pairs every span left to right, so a kept span's closing backtick never opens the next span.
 # A sentence ends at `.`, `;`, `!` or `?` before a space, a capital letter or the line end, so a path (`guard.py:12`) or a
@@ -2706,14 +2709,33 @@ BRIEF_BLIND_REASON = ("A reviewer's brief holds a builder's report or a prior ve
                       "prior findings as a list of file, line and claim, with no verdict (decision reviewer-brief-blind).")
 
 
+def _brief_blind_after_label(m) -> str:
+    """The line of a BRIEF_BLIND_LABEL match, then a copy of its text after the label when that text may read as a verdict
+    line: it has a first colon followed by a verdict word, or it opens with a leading verdict. The copy stops after the
+    leading verdict when that is all it holds. A leading mark gets an `x`, so BRIEF_BLIND_OPEN does not skip a mark that
+    the label's own scan would read."""
+    rest = m.group(1)
+    colon = rest.find(":")
+    if colon >= 0 and _BRIEF_BLIND_AFTER_COLON.match(rest, colon + 1):
+        keep = rest
+    else:
+        lead = _BRIEF_BLIND_LEADING.match(rest)
+        if not lead:
+            return m.group(0)
+        keep = rest[:lead.end()]
+    return m.group(0) + "\n" + ("x" if keep[0] in "-*+#>_" else "") + keep
+
+
 def brief_blind_verdict_text(brief: str) -> str:
     """The brief as the verdict scan reads it: backtick spans blanked except a lone verdict word, one sentence per line,
-    the three label spellings rewritten, and each choice list that ends its sentence blanked."""
+    the three label spellings rewritten, each choice list that ends its sentence blanked, and below each line with a short
+    label a copy of what follows the label."""
     text = BRIEF_BLIND_SENTENCE_END.sub("\n", BRIEF_BLIND_SPAN.sub(lambda m: m.group(0) if m.group(1) else " ", brief))
     text = BRIEF_BLIND_ROUND_DASH.sub(r"\1: ", BRIEF_BLIND_COLON_MARKS.sub("", text))
     text = BRIEF_BLIND_ROUND_RESULT.sub("verdict", text)
-    return BRIEF_BLIND_CHOICES.sub(
+    text = BRIEF_BLIND_CHOICES.sub(
         lambda m: " " if _BRIEF_BLIND_LINE_END.match(text, m.end()) else m.group(0), text)
+    return BRIEF_BLIND_LABEL.sub(_brief_blind_after_label, text)
 
 
 def brief_blind_shape(brief) -> str:
