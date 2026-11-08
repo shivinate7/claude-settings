@@ -1,0 +1,261 @@
+"""Unit cases for lint/_clause.py, the clause parser the cannot-claim check reads.
+
+The contract these cases pin (the builder implements it):
+- sentences(text, mask) -> [(start, end)]. A sentence ends after . ! ? that a space or the end follows, at a position
+  the mask leaves unmarked. Each span keeps its terminator.
+- clauses(sentence, mask) -> [Clause]. A clause ends at ; : ! ? a dash or a comma, and before a comma and a conjunction.
+  A clause also starts at `because`. start and end are offsets into the sentence and exclude the terminator.
+- mask: one bool per character, True inside a code span or a quote. The caller builds it. The parser reads no quotes.
+- Clause fields: start, end, join, subject, verb, aux, modal, negated, conditional, tense, passive, object, complement,
+  reason_for. Words are lowercase. join is the word that opens the clause, or None.
+- Lexicons: NEGATORS, ADVERBS, CONDITIONALS, REASON_LINKS, DETERMINERS, CANNOT_FORMS.
+
+Sentences marked "constructed" are not in test_report_guard_cannot.py. The others are from it.
+"""
+import re
+import sys
+import unittest
+
+import _clause as clause
+import report_guard
+
+
+def none(text):
+    return [False] * len(text)
+
+
+def code_mask(text):
+    """True inside each `code span`, the mask the check passes in."""
+    mask = none(text)
+    for m in re.finditer(r"`[^`]*`", text):
+        mask[m.start():m.end()] = [True] * (m.end() - m.start())
+    return mask
+
+
+def parse(sentence):
+    return clause.clauses(sentence, none(sentence))
+
+
+def calls_of(fn):
+    """The Python and C calls fn makes, counted by sys.setprofile. The count does not depend on the clock."""
+    count = [0]
+
+    def probe(frame, event, arg):
+        if event in ("call", "c_call"):
+            count[0] += 1
+
+    sys.setprofile(probe)
+    try:
+        fn()
+    finally:
+        sys.setprofile(None)
+    return count[0]
+
+
+class SentenceTests(unittest.TestCase):
+    def split(self, text, mask=None):
+        spans = clause.sentences(text, none(text) if mask is None else mask)
+        return [text[start:end].strip() for start, end in spans]
+
+    def test_a_terminator_ends_a_sentence_and_stays_in_it(self):
+        # Catches: a span that drops its terminator, or a text that does not split after a period.
+        self.assertEqual(self.split("I can't merge PR 12. The branch is protected."),
+                         ["I can't merge PR 12.", "The branch is protected."])
+
+    def test_a_dot_in_a_code_span_ends_no_sentence(self):
+        # Catches: the mask ignored, so the dot in `a.b` ends a sentence and one sentence becomes three.
+        text = "Run `a.b` now. I can't merge PR 12."
+        self.assertEqual(self.split(text, code_mask(text)), ["Run `a.b` now.", "I can't merge PR 12."])
+
+    def test_a_code_span_over_two_lines_masks_its_dots(self):
+        # Catches: a multi-line code span whose dot before a line break ends a sentence.
+        text = "Run `a.\nb.c` now. I can't push."
+        self.assertEqual(self.split(text, code_mask(text)), ["Run `a.\nb.c` now.", "I can't push."])
+
+    def test_a_comment_opener_inside_a_code_span_ends_no_sentence(self):
+        # Catches: `//` or `#` inside a code span read as a comment that hides the sentence end after it.
+        text = "`//` and `#` are comments. I can't merge PR 12."
+        self.assertEqual(self.split(text, code_mask(text)),
+                         ["`//` and `#` are comments.", "I can't merge PR 12."])
+
+    def test_a_lone_quote_in_text_does_not_hide_a_sentence_end(self):
+        # Catches: a lone double quote read as an open quote, so the parser masks the rest and no sentence ends.
+        self.assertEqual(self.split('Say "no. I can\'t merge PR 12.'), ['Say "no.', "I can't merge PR 12."])
+
+    def test_a_dot_inside_a_token_ends_no_sentence(self):
+        # Catches: a dot read as a sentence end when no space follows it, as in api.github.com.
+        self.assertEqual(self.split("Reach api.github.com today. I can't merge PR 12."),
+                         ["Reach api.github.com today.", "I can't merge PR 12."])
+
+    def test_text_with_no_terminator_is_one_span(self):
+        # Catches: a text with no terminator that yields no span at all.
+        self.assertEqual(self.split("I can't merge PR 12"), ["I can't merge PR 12"])
+
+    def test_empty_text_has_no_sentence(self):
+        # Catches: an empty text that yields a span at offset zero.
+        self.assertEqual(clause.sentences("", []), [])
+
+
+class ClauseFieldTests(unittest.TestCase):
+    def only(self, sentence):
+        found = parse(sentence)
+        self.assertEqual(len(found), 1, "one clause wanted, %d found: %r" % (len(found), sentence))
+        return found[0]
+
+    def test_start_and_end_bound_the_clause_without_its_terminator(self):
+        # Catches: end one past the period, so the clause text carries its terminator.
+        sentence = "I can't merge PR 12."
+        found = self.only(sentence)
+        self.assertEqual(sentence[found.start:found.end], "I can't merge PR 12", "start/end: the clause text is wrong")
+
+    def test_a_semicolon_and_a_comma_before_but_end_a_clause(self):
+        # Catches: no split at a semicolon, or no split at a comma before a conjunction.
+        self.assertEqual(len(parse("I could not open the PR; open it from your computer.")), 2,
+                         "clauses: no split at the semicolon")
+        self.assertEqual(len(parse("I can't merge PR 12, but the CI is red.")), 2,
+                         "clauses: no split at the comma before but")
+
+    def test_join_is_the_word_that_opens_a_clause(self):
+        # Catches: join always None, so the word that opens a later clause is lost.
+        found = parse("I can't merge PR 12, but the CI is red.")
+        self.assertIsNone(found[0].join, "join: the first clause has an opener")
+        self.assertEqual(found[1].join, "but", "join: the second clause does not open with but")
+
+    def test_subject_is_the_head_and_a_possessive_gives_its_possessor(self):
+        # Catches: the head noun of the phrase ("check") taken in place of the possessor ("main").
+        found = parse("Main's check blocks PR 12, so I can't merge it.")
+        self.assertEqual(len(found), 2, "clauses: no split at the comma before so")
+        self.assertEqual(found[0].subject, "main", "subject: a possessive should give main")
+        self.assertEqual(found[1].subject, "i", "subject: the second clause's subject is not I")
+        self.assertEqual(found[1].join, "so", "join: the second clause does not open with so")
+
+    def test_verb_is_the_lemma_not_the_surface_form(self):
+        # Catches: the surface form ("failed") taken where the lemma ("fail") is due.
+        for sentence, verb in (("The push failed.", "fail"), ("I can't merge PR 12.", "merge")):
+            with self.subTest(sentence=sentence):
+                self.assertEqual(self.only(sentence).verb, verb, "verb: wrong lemma for %r" % sentence)
+
+    def test_aux_is_the_auxiliary_without_its_negation(self):
+        # Catches: aux always None, so the auxiliary of a negated verb group is lost.
+        for sentence, aux in (("I can't merge PR 12.", "can"), ("I could not open the PR.", "could")):
+            with self.subTest(sentence=sentence):
+                self.assertEqual(self.only(sentence).aux, aux, "aux: wrong auxiliary for %r" % sentence)
+
+    def test_modal_is_cannot_can_would_or_plain(self):
+        # Catches: every modal read as plain. The could-reads-as-plain row is an assumption the commit message flags.
+        cases = (("I can't merge PR 12.", "cannot"), ("I can’t merge PR 12.", "cannot"),
+                 ("I can merge PR 12.", "can"), ("I would not merge PR 12.", "would"),
+                 ("I will merge PR 12.", "plain"), ("I could not push.", "plain"))
+        for sentence, modal in cases:
+            with self.subTest(sentence=sentence):
+                self.assertEqual(self.only(sentence).modal, modal, "modal: wrong value for %r" % sentence)
+
+    def test_negated_is_true_for_a_negator_and_the_cannot_forms(self):
+        # Catches: negated always False, so a negated claim reads as an affirmed one.
+        cases = (("I never merged PR 12.", True), ("I merged PR 12.", False), ("I can't merge PR 12.", True),
+                 ("I cannot push.", True), ("I can merge PR 12.", False))
+        for sentence, negated in cases:
+            with self.subTest(sentence=sentence):
+                self.assertEqual(self.only(sentence).negated, negated, "negated: wrong value for %r" % sentence)
+
+    def test_conditional_is_the_clause_that_holds_if_unless_whether_or_would(self):
+        # Catches: conditional always False, so an if-clause reads as a plain statement.
+        found = parse("If the branch is protected, I can't merge PR 12.")
+        self.assertEqual(len(found), 2, "clauses: no split at the comma")
+        self.assertTrue(found[0].conditional, "conditional: the if clause is not conditional")
+        self.assertFalse(found[1].conditional, "conditional: the main clause is conditional")
+
+    def test_tense_is_past_present_or_future(self):
+        # Catches: tense always present, so a past refusal reads as a present one.
+        cases = (("I could not push the branch.", "past"), ("I can't merge PR 12.", "present"),
+                 ("I will not merge PR 12.", "future"))
+        for sentence, tense in cases:
+            with self.subTest(sentence=sentence):
+                self.assertEqual(self.only(sentence).tense, tense, "tense: wrong value for %r" % sentence)
+
+    def test_passive_is_true_for_a_be_participle_in_a_passive_sense(self):
+        # Catches: passive always False, so a passive merge reads as an active one.
+        cases = (("PR 12 was merged by the bot.", True), ("I merged PR 12.", False))
+        for sentence, passive in cases:
+            with self.subTest(sentence=sentence):
+                self.assertEqual(self.only(sentence).passive, passive, "passive: wrong value for %r" % sentence)
+
+    def test_object_is_the_head_noun_before_the_first_preposition_with_numbers_skipped(self):
+        # Catches: the last noun of the clause ("main", "word") or a number ("12") taken as the object.
+        cases = (("I can't open the PR without your word.", "pr"), ("I can't merge PR 12 into main.", "pr"),
+                 ("I cannot push.", None))
+        for sentence, obj in cases:
+            with self.subTest(sentence=sentence):
+                self.assertEqual(self.only(sentence).object, obj, "object: wrong head for %r" % sentence)
+
+    def test_complement_is_the_predicate_adjective_after_a_copula(self):
+        # Catches: complement always None, so a predicate adjective ("red") is lost.
+        cases = (("The check is red.", "red"), ("I can't merge PR 12.", None))
+        for sentence, complement in cases:
+            with self.subTest(sentence=sentence):
+                self.assertEqual(self.only(sentence).complement, complement,
+                                 "complement: wrong value for %r" % sentence)
+
+    def test_reason_for_is_the_reason_link_in_its_clause(self):
+        # Catches: reason_for always None, so the because-clause that gives the reason is not marked.
+        found = parse("I can't merge PR 12 because the branch is protected.")
+        self.assertEqual(len(found), 2, "clauses: no split at because")
+        self.assertIsNone(found[0].reason_for, "reason_for: the claim clause names a reason link")
+        self.assertEqual(found[1].reason_for, "because", "reason_for: the reason clause names no link")
+        self.assertEqual(found[1].join, "because", "join: the reason clause does not open with because")
+
+
+class LexiconTests(unittest.TestCase):
+    def test_negators_are_the_negation_words(self):
+        # Catches: a negation word dropped from NEGATORS, or a non-negator added to it.
+        self.assertEqual(set(clause.NEGATORS), {"not", "n't", "never", "no"}, "NEGATORS")
+
+    def test_adverbs_are_the_one_adverb_list_of_the_check(self):
+        # Catches: an adverb dropped from ADVERBS, or ADVERBS drifting from the check's _ADVERB pattern.
+        words = {"even", "yet", "currently", "actually", "really", "still", "also", "just", "now", "directly",
+                 "simply", "unfortunately"}
+        self.assertEqual(set(clause.ADVERBS), words, "ADVERBS")
+        self.assertEqual(set(clause.ADVERBS), set(re.findall(r"[a-z]+", report_guard._ADVERB)),
+                         "ADVERBS differs from report_guard._ADVERB")
+
+    def test_conditionals_are_the_words_that_make_a_clause_conditional(self):
+        # Catches: a conditional word dropped from CONDITIONALS.
+        self.assertEqual(set(clause.CONDITIONALS), {"if", "unless", "whether", "would"}, "CONDITIONALS")
+
+    def test_reason_links_are_the_words_that_open_a_reason(self):
+        # Catches: REASON_LINKS holding a word the check does not read as a reason, or missing because.
+        self.assertEqual(set(clause.REASON_LINKS), {"because"}, "REASON_LINKS")
+
+    def test_determiners_are_the_words_a_noun_phrase_opens_with(self):
+        # Catches: a determiner dropped from DETERMINERS, so a noun phrase starting with it loses its head.
+        words = {"a", "an", "the", "this", "that", "these", "those", "its", "their", "his", "her", "our", "my", "your"}
+        self.assertEqual(set(clause.DETERMINERS), words, "DETERMINERS")
+
+    def test_cannot_forms_hold_the_basic_forms(self):
+        # Catches: a basic cannot form ("can't", "could not", "unable to") dropped from CANNOT_FORMS. The check also
+        # has longer forms ("not able to", "no way to"); this case pins the basic six only.
+        basic = {"can't", "cannot", "unable to", "can not", "could not", "couldn't"}
+        self.assertLessEqual(basic, set(clause.CANNOT_FORMS), "CANNOT_FORMS lacks a basic form")
+
+
+class LinearTests(unittest.TestCase):
+    def test_work_grows_linearly_with_the_clause_count(self):
+        # Catches: a rescan of the earlier clauses at each new clause, whose work grows as the square of the count.
+        def text(k):
+            return "I can't merge PR 12, but the CI is red, " * k + "so I can't merge it"
+
+        small, big = text(40), text(160)
+        self.assertGreater(len(parse(small)), 40, "the probe sentence does not split into clauses")
+
+        def work(sentence):
+            mask = none(sentence)
+            return calls_of(lambda: (clause.sentences(sentence, mask), clause.clauses(sentence, mask)))
+
+        small_calls = work(small)
+        self.assertGreater(small_calls, 0, "the probe counted no calls")
+        ratio = work(big) / small_calls
+        self.assertLess(ratio, 6, "work grew %.1fx for 4x the clauses; linear is near 4x, quadratic near 16x" % ratio)
+
+
+if __name__ == "__main__":
+    unittest.main()
