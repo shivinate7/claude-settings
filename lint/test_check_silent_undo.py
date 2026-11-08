@@ -2403,7 +2403,7 @@ class RevivedNote(unittest.TestCase):
     """A note the branch deleted must not come back when a merge brings the base in. The notes file merges by union (the
     real `.gitattributes` line), so a merge that conflicts at the file's end keeps the base's copy with no clash. Each of the
     first six cases runs twice: with that line, and with no `.gitattributes`, where the same merge conflicts and is resolved by
-    hand. The doubled-note cases and the reworded case run with the union line only: the doubling and the reword come from the
+    hand. The doubled-note cases and the reworded and in-place cases run with the union line only: the doubling and the reword come from the
     union driver, which a plain merge does not use."""
 
     ATTRIBUTES = os.path.join(os.path.dirname(HERE), ".gitattributes")  # the real file: its union line is what is under test
@@ -2416,6 +2416,7 @@ class RevivedNote(unittest.TestCase):
     DOUBLED = "- doubled-note: a finding a union merge doubles (lint/check_doubled.py)"
     LATER = "- later-note: a finding main adds after the doubled note (lint/check_later.py)"
     REWORDED = "- retired-note: a finding the branch retires, reworded (lint/check_retired.py)"
+    IN_PLACE = "an edit in place does not keep a note"  # the refusal's words, compared lowercased
 
     def text(self, *lines):
         return "".join(line + "\n" for line in (self.HEADING,) + lines)
@@ -2607,6 +2608,30 @@ class RevivedNote(unittest.TestCase):
         self.assertIn(self.REWORDED, self.notes_at(head), "premise: the union merge brought retired-note back reworded")
         self.assertNotIn(self.RETIRED, self.notes_at(head), "premise: the head holds no copy of the original text")
         self.assert_refused(self.r.verdict())
+
+    def test_a_merge_brings_back_a_deleted_note_then_an_edit_in_place_is_refused(self):
+        self.start(union=True)
+        head = self.merge_main()
+        self.assertIn(self.RETIRED, self.notes_at(head), "premise: the union merge brought retired-note back")
+        self.commit_notes("reword the revived note in place", [self.REWORDED if line == self.RETIRED else line for line in self.body(head)])
+        self.assertEqual(len(self.r.sh("rev-list", "--parents", "-n", "1", "HEAD").split()), 2, "premise: the reword is a non-merge commit")
+        self.assertEqual(sum(line.startswith("- retired-note:") for line in self.body("HEAD")), 1,
+                         "premise: the reword left one copy of retired-note")
+        self.assertNotIn(self.RETIRED, self.body("HEAD"), "premise: the reword replaced the original text")
+        got = self.r.verdict()
+        self.assert_refused(got)
+        named = [p for p in got if "retired-note" in p and self.retire[:7] in p]
+        self.assertIn(self.IN_PLACE, named[0].lower(), "the refusal for retired-note does not say that an edit in place does not keep a note: %r" % named)
+
+    def test_a_merge_brings_back_a_deleted_note_then_deleted_and_re_added_passes(self):  # control
+        self.start(union=True)
+        head = self.merge_main()
+        self.assertIn(self.RETIRED, self.notes_at(head), "premise: the union merge brought retired-note back")
+        deleted = self.commit_notes("delete the revived note again", [line for line in self.body(head) if line != self.RETIRED])
+        self.assertNotIn(self.RETIRED, self.notes_at(deleted), "premise: the last commit deletes retired-note")
+        self.commit_notes("re-add the note on purpose", self.body(head))
+        self.assertIn(self.RETIRED, self.notes_at("HEAD"), "premise: the re-add put retired-note back in the head")
+        self.assertEqual(self.r.verdict(), [], "a note a merge brought back, then deleted and re-added on purpose, was refused")
 
 
 if __name__ == "__main__":
