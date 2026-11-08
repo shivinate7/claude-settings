@@ -32,9 +32,12 @@
     parent holds one copy and the merge holds two. That is a duplicate, not a loss, so there is no finding.
   - A finding stays after a fix-forward commit. Redo the merge, or add the trailer.
 
-  Cost: measured 6 git calls for a merge that touches no union file, and about 10 when it touches the notes
-  file. That includes the gate: one `git grep` per parent for merge=union in any .gitattributes. The floor is
-  git 2.40, only where a merge=union rule exists. No long-lived process, no log.
+  Cost, measured in git calls. The gate is one `git grep` per parent for merge=union in any
+  .gitattributes, and each count includes it. A repo with no merge=union rule takes 6 calls for a merge:
+  rev-list, merge-base, two diff-tree, and two grep for the gate. A repo with the rule takes 8 calls for a
+  merge that touches no union file. A merge that touches the notes file takes 12 calls when both parents
+  hold the rule, and 11 when one does. The floor is git 2.40, only where a merge=union rule exists. No
+  long-lived process, no log.
 
 The escape is the line `Drops-lines: <path> -- <reason>`, one path per line. `bin/merge` reads it from the
 commit trailers of the branch and from the PR body. A bare path excuses nothing, and no reason excuses
