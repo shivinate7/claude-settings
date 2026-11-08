@@ -13,8 +13,10 @@ that CI's silent-undo step names in the pushed head's workflow file, and that st
 holds the destination branch, it runs the same check on that remote tip too, and refuses only the findings the
 first run has and the second lacks. So a finding origin already holds does not refuse a later push, and a finding
 the sent commits add does. A ref other than HEAD is judged by its own sha. A range that cannot be read (UNKNOWN)
-is allowed, with one guard.log line and one stderr line that say unknown. A push the lint does not judge starts
-no lint.
+is allowed, with one guard.log line and one stderr line that say unknown, and that stderr line names the fix
+`git fetch --unshallow origin`. A push that follows a commit-making segment in the same call (commit, merge, revert,
+cherry-pick, rebase, am) is refused, and the refusal says to run the push in a call of its own. A workflow with no
+fast step, and a checkout with no checks.yml, is skipped in silence. A push the lint does not judge starts no lint.
 
 THE SEAMS THE GUARD HONORS.
   CAP_ENV          seconds one lint run may take, read from the guard's environment. Case 7b sets it to 1 and runs
@@ -33,6 +35,7 @@ lint/check_silent_undo.py that runs the product's own check at its real path, an
 The workflow is read from the pushed head, as CI reads a pull request's head.
 """
 
+import glob
 import json
 import os
 import re
@@ -118,60 +121,60 @@ def commit(where, files, subject, body=""):
     git(where, "commit", "-q", "-m", subject + ("\n\n" + body if body else ""))
 
 
-def workflow(run=SILENT_RUN):
-    """checks.yml with the silent-undo step's run line set to `run`. None: a workflow with no such step."""
+def workflow(run=SILENT_RUN, cond="github.event_name == 'pull_request'"):
+    """checks.yml with the silent-undo step's run line set to `run` and its if: set to `cond`. None: a workflow
+    with no such step."""
     text = ("name: checks\non: [pull_request]\njobs:\n  checks:\n    runs-on: ubuntu-latest\n    steps:\n"
             "      - uses: actions/checkout@v4\n        with:\n          fetch-depth: 0\n")
     if run is None:
         return text + "      - name: Mod version bump\n        run: python3 lint/check_mod_versions.py\n"
     return text + ("      - name: Silent undo check\n"
-                   "        if: ${{ github.event_name == 'pull_request' }}\n"
+                   "        if: ${{ %s }}\n"
                    "        env:\n"
                    "          BASE_REF: ${{ github.base_ref }}\n"
                    "          HEAD_SHA: ${{ github.event.pull_request.head.sha }}\n"
-                   "        run: %s\n" % run)
+                   "        run: %s\n" % (cond, run))
 
 
 def stub_program(seen, lines, code, sleep_s=0):
-    """A fixture stand-in for the lint step's program. Each run appends its argv to the list in the file `seen`,
-    prints `lines`, waits `sleep_s` seconds and exits `code`. It is not the product."""
+    """A fixture stand-in for the lint step's program. Each run writes its argv to its own file, `seen` plus its pid,
+    so two runs that start together (the head's and the remote tip's) never overwrite each other's record. It prints
+    `lines`, waits `sleep_s` seconds and exits `code`. It is not the product."""
     return ("#!/usr/bin/env python3\n"
             "# A fixture stand-in for the lint step's program (hooks/test_guard_lane_lint_push.py). Not the product.\n"
             "import json, os, sys, time\n"
-            "seen = %r\n"
-            "runs = []\n"
-            "if os.path.exists(seen):\n"
-            "    with open(seen, encoding='utf-8') as handle:\n"
-            "        runs = json.load(handle)\n"
-            "runs.append(sys.argv[1:])\n"
-            "with open(seen, 'w', encoding='utf-8') as handle:\n"
-            "    json.dump(runs, handle)\n"
+            "with open(%r + '.' + str(os.getpid()), 'w', encoding='utf-8') as handle:\n"
+            "    json.dump(sys.argv[1:], handle)\n"
             "time.sleep(%r)\n"
             "for line in %r:\n"
             "    print(line)\n"
             "sys.exit(%r)\n" % (seen, sleep_s, list(lines), code))
 
 
-def base_repo(case, run=SILENT_RUN):
-    """A bare origin and a clone whose `main` holds the base files and the workflow, pushed to origin."""
+def base_repo(case, run=SILENT_RUN, checks=True):
+    """A bare origin and a clone whose `main` holds the base files and the workflow, pushed to origin. `checks`
+    False leaves .github/workflows/checks.yml out of the tree altogether."""
     origin = os.path.join(case, "origin.git")
     clone = os.path.join(case, "clone")
     git(case, "init", "-q", "--bare", "-b", "main", origin)
     git(case, "init", "-q", "-b", "main", clone)
     git(clone, "remote", "add", "origin", origin)
-    commit(clone, {"notes.txt": NOTES, "policy.txt": "v1\n", "lint/check_silent_undo.py": SHIM,
-                   ".github/workflows/checks.yml": workflow(run)}, "main: base")
+    files = {"notes.txt": NOTES, "policy.txt": "v1\n", "lint/check_silent_undo.py": SHIM}
+    if checks:
+        files[".github/workflows/checks.yml"] = workflow(run)
+    commit(clone, files, "main: base")
     git(clone, "push", "-q", "origin", "main")
     git(clone, "remote", "set-head", "origin", "main")
     return clone, origin
 
 
-def drop_repo(case, pushed=False, run=SILENT_RUN, lane_step=None, merge_body=""):
+def drop_repo(case, pushed=False, run=SILENT_RUN, lane_step=None, merge_body="", checks=True):
     """Branch `topic` holds a lane commit, then merges origin/main's later commit and drops the line main added
     (notes.txt), so the merge reads as a silent undo. origin/topic is the lane commit. With `pushed`, the merge
     is pushed to origin/topic first, and one more lane commit is left to push. `lane_step` is a (run, stub
-    text) pair the lane commits to its own workflow before the merge. `merge_body` is the merge message's body."""
-    clone, _origin = base_repo(case, run)
+    text) pair the lane commits to its own workflow before the merge. `merge_body` is the merge message's body.
+    `checks` False builds the repo with no checks.yml at all."""
+    clone, _origin = base_repo(case, run, checks)
     git(clone, "checkout", "-q", "-b", "topic")
     if lane_step is not None:
         commit(clone, {".github/workflows/checks.yml": workflow(lane_step[0]), STUB_REL: lane_step[1]},
@@ -323,34 +326,47 @@ def lint_starts(out):
 
 
 def seen_runs(case):
-    """The argv of each run a stand-in lint program made in `case`, in order, or None when none ran."""
-    path = os.path.join(case, "seen.json")
-    if not os.path.exists(path):
+    """The argv of each run a stand-in lint program made in `case`, in file-name order, or None when none ran."""
+    paths = sorted(glob.glob(os.path.join(glob.escape(case), "seen.json.*")))
+    if not paths:
         return None
-    with open(path, encoding="utf-8") as handle:
-        return json.load(handle)
+    runs = []
+    for path in paths:
+        with open(path, encoding="utf-8") as handle:
+            runs.append(json.load(handle))
+    return runs
 
 
 def tearDownModule():
     shutil.rmtree(RUN, ignore_errors=True)
 
 
+def unknown_stderr_lines(out):
+    return [line for line in out.stderr.splitlines() if "unknown" in line.lower()]
+
+
 class LaneLintCase(unittest.TestCase):
     def case(self):
         return tempfile.mkdtemp(prefix="case-", dir=RUN)
 
-    def assert_denied(self, out, finding_file, lints=LINT_LAUNCHES):
-        """Each part is its own subtest, so a failure names the one cause it shows."""
+    def assert_denied(self, out, finding_file, lints=LINT_LAUNCHES, remedy=None):
+        """Each part is its own subtest, so a failure names the one cause it shows. A None finding_file, lints or
+        remedy skips that part."""
         with self.subTest("the guard ran"):
             self.assertEqual(out.error, "", "the guard did not run: %s" % out.error)
         with self.subTest("the push is refused"):
             self.assertEqual(out.decision, "deny", "the push was allowed, want a refusal by rule %s" % RULE)
         with self.subTest("the refusal names the rule"):
             self.assertIn(RULE, out.reason, "the refusal does not name rule %s" % RULE)
-        with self.subTest("the refusal names the file that holds the finding"):
-            self.assertIn(finding_file, out.reason, "the refusal does not name %s" % finding_file)
-        with self.subTest("the lint launches before the refusal"):
-            self.assertEqual(len(lint_starts(out)), lints, "lint launches before the refusal")
+        if finding_file is not None:
+            with self.subTest("the refusal names the file that holds the finding"):
+                self.assertIn(finding_file, out.reason, "the refusal does not name %s" % finding_file)
+        if lints is not None:
+            with self.subTest("the lint launches before the refusal"):
+                self.assertEqual(len(lint_starts(out)), lints, "lint launches before the refusal")
+        if remedy is not None:
+            with self.subTest("the refusal gives the remedy"):
+                self.assertIn(remedy, out.reason, "the refusal does not say %r" % remedy)
 
     def assert_allowed(self, out, lints=None):
         with self.subTest("the guard ran"):
@@ -361,6 +377,19 @@ class LaneLintCase(unittest.TestCase):
             with self.subTest("the lint launches on the push"):
                 self.assertEqual(len(lint_starts(out)), lints, "lint launches on an allowed push")
 
+    def assert_silent_allow(self, out):
+        """A push the lint skips in silence: allowed, no lint launch, no guard.log line for the rule, no stderr."""
+        with self.subTest("the guard ran"):
+            self.assertEqual(out.error, "", "the guard did not run: %s" % out.error)
+        with self.subTest("the push is allowed"):
+            self.assertEqual(out.decision, "allow", "the push was refused: %s" % out.reason[:200])
+        with self.subTest("no lint launch on the push"):
+            self.assertEqual(len(lint_starts(out)), 0, "lint launches on a push the lint skips")
+        with self.subTest("no guard.log line for the rule"):
+            self.assertEqual(out.notes, [], "guard.log lines for %s, want none" % RULE)
+        with self.subTest("no stderr"):
+            self.assertEqual(out.stderr.strip(), "", "stderr, want none: %s" % out.stderr[:200])
+
     def assert_unknown_note(self, out):
         """An unknown lint allows the push, with one guard.log line and one stderr line that say unknown."""
         with self.subTest("an unknown lint does not refuse"):
@@ -369,8 +398,7 @@ class LaneLintCase(unittest.TestCase):
             self.assertEqual(len(out.notes), 1, "guard.log lines for %s, want exactly one" % RULE)
             self.assertIn("unknown", out.notes[0].lower(), "the guard.log line does not say unknown")
         with self.subTest("one stderr line says unknown"):
-            said = [line for line in out.stderr.splitlines() if "unknown" in line.lower()]
-            self.assertEqual(len(said), 1, "stderr lines that say unknown, want exactly one")
+            self.assertEqual(len(unknown_stderr_lines(out)), 1, "stderr lines that say unknown, want exactly one")
 
 
 class DenyCases(LaneLintCase):
@@ -423,6 +451,24 @@ class DenyCases(LaneLintCase):
         out = guard_run(case, clone, "git push origin other-branch:topic")
         self.assert_denied(out, "notes.txt", lints=LINT_LAUNCHES_EXISTING)
 
+    def test_1d_a_commit_made_earlier_in_the_same_call_refuses_the_push(self):
+        case = self.case()
+        clone = clean_repo(case, name="topic")
+        code, _stdout = real_undo(clone, "origin/main")
+        scope(code == 0, "the real check fails the clean lane, so a refusal could come from a finding")
+        chains = (
+            ("commit", "git add -A && git commit -m x"),
+            ("merge", "git merge --no-ff origin/main"),
+            ("revert", "git revert --no-edit HEAD"),
+            ("cherry-pick", "git cherry-pick origin/main"),
+            ("rebase", "git rebase origin/main"),
+            ("am", "git am patch.mbox"),
+        )
+        for verb, before in chains:
+            with self.subTest(verb):
+                out = guard_run(case, clone, before + " && git push origin topic")
+                self.assert_denied(out, None, lints=None, remedy="call of its own")
+
 
 class AllowCases(LaneLintCase):
     def test_1b_a_finding_origin_already_holds_does_not_refuse_a_clean_commit_sent_on_top(self):
@@ -443,6 +489,20 @@ class AllowCases(LaneLintCase):
         out = guard_run(case, clone, "git push origin topic")
         self.assert_allowed(out, lints=LINT_LAUNCHES_EXISTING)
 
+    def test_1e_a_chain_with_no_commit_verb_before_the_push_is_still_linted(self):
+        case = self.case()
+        clone = clean_repo(case, name="topic")
+        code, _stdout = real_undo(clone, "origin/main")
+        scope(code == 0, "the real check fails the clean lane")
+        controls = (
+            ("status chained before the push", "git status && git push origin topic"),
+            ("a quoted commit is text, not a commit verb", 'echo "git commit -m x" && git push origin topic'),
+        )
+        for label, command in controls:
+            with self.subTest(label):
+                out = guard_run(case, clone, command)
+                self.assert_allowed(out, lints=LINT_LAUNCHES)
+
     def test_3_clean_lane_push_is_allowed_and_linted(self):
         for commits in (2, 25):
             with self.subTest(commits=commits):
@@ -461,7 +521,7 @@ class AllowCases(LaneLintCase):
         out = guard_run(case, clone, "git push origin lane-clean")
         self.assert_allowed(out)
 
-    def test_4_shallow_clone_pushing_a_clean_commit_is_allowed_with_one_unknown_note(self):
+    def test_4_shallow_clone_pushing_a_clean_commit_is_allowed_with_one_unknown_note_naming_the_fix(self):
         case = self.case()
         clone = shallow_repo(case)
         code, stdout = real_undo(clone, "origin/main")
@@ -469,6 +529,10 @@ class AllowCases(LaneLintCase):
         out = guard_run(case, clone, "git push origin lane-shallow")
         self.assert_allowed(out, lints=LINT_LAUNCHES)
         self.assert_unknown_note(out)
+        with self.subTest("the one stderr line names the fix: git fetch --unshallow origin"):
+            said = unknown_stderr_lines(out)
+            self.assertTrue(any("git fetch --unshallow origin" in line for line in said),
+                            "the unknown stderr line does not name the fix: %s" % said)
 
     def test_5_drops_lines_trailer_excuses_the_drop(self):
         case = self.case()
@@ -504,6 +568,24 @@ class SkipCases(LaneLintCase):
             out = guard_run(case, clone, "git push origin topic")
             self.assert_denied(out, "notes.txt", lints=LINT_LAUNCHES_EXISTING)
 
+    def test_7c_a_workflow_with_no_fast_step_is_skipped_in_silence(self):
+        case = self.case()
+        clone = drop_repo(case, run=None)
+        code, stdout = real_undo(clone, "origin/main")
+        scope(code == 1 and "notes.txt" in stdout, "the real check does not fail the merge, so silence hides nothing")
+        out = guard_run(case, clone, "git push origin topic")
+        self.assert_silent_allow(out)
+
+    def test_7d_a_repo_with_no_checks_yml_is_skipped_in_silence(self):
+        case = self.case()
+        clone = drop_repo(case, checks=False)
+        scope(not os.path.exists(os.path.join(clone, ".github", "workflows", "checks.yml")),
+              "the checkout holds a checks.yml")
+        code, stdout = real_undo(clone, "origin/main")
+        scope(code == 1 and "notes.txt" in stdout, "the real check does not fail the merge, so silence hides nothing")
+        out = guard_run(case, clone, "git push origin topic")
+        self.assert_silent_allow(out)
+
 
 class UnknownCases(LaneLintCase):
     def test_7b_a_lint_run_past_the_time_cap_is_unknown_and_allowed(self):
@@ -517,9 +599,11 @@ class UnknownCases(LaneLintCase):
         self.assert_allowed(out)
         self.assert_unknown_note(out)
 
-    def test_7c_a_workflow_with_no_silent_undo_step_is_unknown_and_allowed(self):
+    def test_7e_a_fast_step_whose_if_the_guard_cannot_read_stays_unknown(self):
         case = self.case()
-        clone = drop_repo(case, run=None)
+        clone = clean_repo(case, name="topic")
+        commit(clone, {".github/workflows/checks.yml": workflow(cond="contains(github.ref, 'release')")},
+               "lane: a fast step with an if the guard cannot read")
         out = guard_run(case, clone, "git push origin topic")
         self.assert_allowed(out, lints=0)
         self.assert_unknown_note(out)
