@@ -2443,11 +2443,13 @@ class NotesUnionRevival(unittest.TestCase):
         r.push()
         return r
 
-    def build(self, path, a_rows, b_rows, order, union=True, b_msg="Merge lane B", keep=None, rows=None, ff_first=False, extra_b=None, attrs=None, extra_base=None):
+    def build(self, path, a_rows, b_rows, order, union=True, b_msg="Merge lane B", keep=None, rows=None, ff_first=False, extra_b=None, attrs=None, extra_base=None, octopus=None, lane_msgs=None):
         """The batch shape: integ is origin/main with lane A and lane B merged in by local `git merge --no-ff`, one merge
         commit each, in `order`. ff_first fast-forwards integ to lane A instead. A conflict in a file without merge=union
         is resolved by hand to `keep`. extra_b maps more paths lane B adds, path -> text. Without union, attrs is main's
-        .gitattributes text (see base), and extra_base maps more paths main holds (see base). -> (repo, integ head)."""
+        .gitattributes text (see base), and extra_base maps more paths main holds (see base). octopus "before" or "after"
+        puts one three-parent merge (see octopus) into integ ahead of the lane merges or after them. lane_msgs maps a lane
+        to its commit message, default "lane X". -> (repo, integ head)."""
         r = self.base(path, union, rows, attrs, extra_base)
         for lane, rows_ in (("A", a_rows), ("B", b_rows)):
             r.sh("checkout", "-q", "-b", "lane" + lane, "origin/main")
@@ -2455,8 +2457,10 @@ class NotesUnionRevival(unittest.TestCase):
             if lane == "B":
                 for name, body in (extra_b or {}).items():
                     r.put(name, body)
-            r.commit("lane " + lane)
+            r.commit((lane_msgs or {}).get(lane, "lane " + lane))
         r.sh("checkout", "-q", "-b", "integ", "origin/main")
+        if octopus == "before":
+            self.octopus(r)
         for lane in order:
             msg = b_msg if lane == "B" else "Merge lane A"
             if ff_first and lane == "A":
@@ -2468,7 +2472,36 @@ class NotesUnionRevival(unittest.TestCase):
                 r.put(path, keep)
                 r.sh("add", "-A")
                 r.sh("commit", "-q", "-m", msg)
+        if octopus == "after":
+            self.octopus(r)
         return r, r.sh("rev-parse", "HEAD")
+
+    def octopus(self, r):
+        """Two side branches off origin/main, each adding a file of its own, merged into the checked-out branch as one
+        three-parent merge. Nothing conflicts."""
+        here = r.sh("symbolic-ref", "--short", "HEAD")
+        for name in ("sideO1", "sideO2"):
+            r.sh("checkout", "-q", "-b", name, "origin/main")
+            r.put("sides/%s.txt" % name, name + "\n")
+            r.commit("add the %s side" % name)
+        r.sh("checkout", "-q", here)
+        r.sh("merge", "--no-ff", "--no-edit", "-m", "Octopus merge of the two sides", "sideO1", "sideO2")
+
+    def octopus_shas(self, r, head):
+        """The three-parent merges of origin/main..head, as shas."""
+        rows = r.sh("rev-list", "--merges", "--parents", "origin/main..%s" % head).splitlines()
+        return [row.split()[0] for row in rows if len(row.split()) == 4]
+
+    def assert_unknown_naming(self, r, head, row):
+        """check() is UNKNOWN, and the UNKNOWN carries the revival finding that names the row, as the unread union read
+        carries its findings. main prints the FAIL line beside the UNKNOWN line, and exits 1."""
+        with self.assertRaises(C.Unknown) as cm:
+            C.check(r.dir, "origin/main", head)
+        self.assertTrue(any(self.PATH in p and row in p for p in cm.exception.problems), "the UNKNOWN does not carry the revival finding: %s" % (cm.exception.problems,))
+        rc, text = PrintedFindings.run_main(self, ["--upstream", "origin/main", "--head", head, "--repo", r.dir, "--strict"], "utf-8")
+        self.assertIn("FAIL", text, "the revival prints no FAIL line beside the UNKNOWN")
+        self.assertIn("UNKNOWN", text, "the octopus merge prints no UNKNOWN line")
+        self.assertEqual(rc, 1, "a revival beside an UNKNOWN does not exit 1")
 
     def test_a_row_deleted_by_one_lane_and_appended_after_by_the_other_is_a_finding(self):
         for order in self.ORDERS:
@@ -2822,6 +2855,30 @@ class NotesUnionRevival(unittest.TestCase):
             rc, text = PrintedFindings.run_main(self, ["--upstream", "origin/main", "--head", head, "--repo", r.dir, "--strict"], "utf-8")
         self.assertEqual(rc, 1, "the revival does not exit 1 when the merge changes many long paths")
         self.assertIn(self.GAMMA, text, "the printed FAIL does not name the row")
+
+    def test_an_octopus_merge_does_not_drop_a_revival_found_with_it(self):
+        """check() reads a three-parent merge as UNKNOWN. The UNKNOWN must keep the revival findings the other merges gave,
+        whether the octopus merge comes before the revival merge or after it."""
+        for at in ("before", "after"):
+            with self.subTest(octopus=at):
+                r, head = self.build(self.PATH, self.ROWS[:2], self.ROWS + [self.NEW], ("A", "B"), octopus=at)
+                self.assertEqual(len(self.octopus_shas(r, head)), 1, "premise: one three-parent merge is in the range")
+                self.assertIn(self.GAMMA, self.rows_at(r, head, self.PATH), "premise: the union merge revived the deleted row")
+                self.assert_unknown_naming(r, head, self.GAMMA)
+
+    def test_an_octopus_merge_alone_is_unknown_and_never_a_pass(self):  # control
+        r = self.base(self.PATH, union=True)
+        r.sh("checkout", "-q", "-b", "integ", "origin/main")
+        self.octopus(r)
+        head = r.sh("rev-parse", "HEAD")
+        self.assertEqual(len(self.octopus_shas(r, head)), 1, "premise: one three-parent merge is in the range")
+        with self.assertRaises(C.Unknown) as cm:
+            C.check(r.dir, "origin/main", head)
+        self.assertEqual(list(cm.exception.problems), [], "an octopus merge with no revival reports a finding: %s" % (cm.exception.problems,))
+        rc, text = PrintedFindings.run_main(self, ["--upstream", "origin/main", "--head", head, "--repo", r.dir, "--strict"], "utf-8")
+        self.assertNotIn("FAIL", text, "an octopus merge with no revival prints a FAIL line")
+        self.assertIn("UNKNOWN", text, "an octopus merge with no revival prints no UNKNOWN line")
+        self.assertEqual(rc, 1, "an octopus merge with no revival does not exit 1 under --strict")
 
 
 if __name__ == "__main__":
