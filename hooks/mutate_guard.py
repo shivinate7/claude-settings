@@ -2282,10 +2282,12 @@ MUTATIONS = [
      '        refuse(tool, "deny", "handoff-unread", HANDOFF_UNREAD_REASON % unread, unread)',
      '        pass',
      "guard", "handoff-unread: after compaction, Bash is refused while the handoff is unread"),
-    ("handoff-unread: a failed import of reread_check no longer fails open",
-     '    except Exception:\n        unread_handoff = None\n',
-     '    except Exception:\n        raise\n',
-     "guard", "handoff-unread: a guard copy without reread_check.py fails open"),
+    ("handoff-unread: a failed import of reread_check fails open again",
+     '        _loading = "reread_check"\n        import reread_check\n',
+     '        _loading = "reread_check"\n        try:\n            import reread_check\n'
+     '        except ImportError:\n'
+     '            reread_check = type("R", (), {"unread_handoff": staticmethod(lambda payload: "")})\n',
+     "guard", "a guard copy without reread_check.py refuses as guard-crash"),
     ("handoff-unread: an agent's call is judged like the main session's",
      '        if ph is None or not isinstance(payload, dict) or payload.get("agent_id"):',
      '        if ph is None or not isinstance(payload, dict):',
