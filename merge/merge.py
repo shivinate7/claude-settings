@@ -3230,6 +3230,16 @@ def round_floor(earlier, rec):
         if e["fix"] and e["fix"][3] == "FAIL" and n < REVIEW_LAST_ROUND and not any(i == n + 1 and v == "FAIL" for i, _, _, v in rec["rounds"]):
             return f"a failed fix check on head {e['head'][:9]} counts as round {n + 1}, and only a FAIL line fills it, but this record's round {n + 1} has none"
 
+def dropped_round_lines(last, rec):
+    """-> why, when the parsed record `rec` lacks a Round line of the parsed record `last` it follows; else None. A line is the same when its round
+    number, role, model and verdict match. Extra lines in `rec` are not refused. A lane that rewrites its rounds by hand can lose a FAIL line that
+    kept the earlier record open, and the record then reads done."""
+    kept = set(rec["rounds"])
+    dropped = [f"Round {i}: {role}, {model}, {verdict}" for i, role, model, verdict in last["rounds"] if (i, role, model, verdict) not in kept]
+    if dropped:
+        return (f"this record drops {'; '.join(dropped)} of the record on head {last['head'][:9]}. Copy every Round line of that record unchanged, "
+                "then add this check's own")
+
 def reviewed_lines(h):
     """-> the lines of `merge --reviewed`, built before any is printed so a failed read prints none. Two list reads (the open pull requests, then the
     repo's comments since the oldest one) and, for each ready pull request that has a record, three `gh` calls: the check runs, the commit statuses and
@@ -3552,6 +3562,8 @@ def main(argv, host=None, lock=None):
                     else:  # the record's rounds may not fall below the floor the earlier records set, or a later record could copy them and relabel the final round's net value
                         earlier = [r for r in map(parse_review, recs) if r and r["n"] == a.pr]
                         problem = round_floor(earlier, parse_review(review_body(a.pr, a.head, a.kind, a.guard, a.round, a.net_value, fix=a.fix_check)))
+                if not problem:
+                    problem = dropped_round_lines(last, parse_review(review_body(a.pr, a.head, a.kind, a.guard, a.round, a.net_value, fix=a.fix_check)))
                 if not problem and last["head"] != a.fix_check[0]:
                     problem = fix_base_problem(h, root, a.fix_check[0], last["head"])
                 if not problem and last["fix"]:  # a chained fix diff must start inside the live head's history
