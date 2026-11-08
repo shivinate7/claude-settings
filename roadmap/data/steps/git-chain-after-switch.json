@@ -1,0 +1,11 @@
+{
+  "title": "The guard refuses a git merge, commit or push joined by \";\" after a git switch or checkout",
+  "why": "Lane comment-check-scans-shell (session_013NEJL37UFXTQuAcox7s8fD), 10:03 CST Nov 8: `git switch X; ...; git merge origin/main` ran the merge on the branch the tree already held (#2050), because the switch failed when another worktree held X. Aborted before a commit.",
+  "note": "Filed 10:29 CST Nov 8 from that lane. Fix: refuse the chained form; the remedy says join with && or split the calls. Related, not the same: push-after-check-semicolon (a push after a check), one-worktree-per-branch.",
+  "phase": "now",
+  "owner": "claude-settings",
+  "lane": "",
+  "status": "todo",
+  "order": 731,
+  "updatedAt": "2026-11-08T10:29:00-06:00"
+}

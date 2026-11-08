@@ -1,0 +1,11 @@
+{
+  "title": "A posted review record is read back and must parse",
+  "why": "Lane resume-finished-reviewer-no-tree (session_013NEJL3qSsV2LJ6R1a1HMCB): it put notes after the CI: line in three review records (two on #1917, one on #1974); they did not parse, and merge --fix-check refused later. Nothing checked them when posted.",
+  "note": "Filed 10:29 CST Nov 8 from that lane. Fix: merge --review-record prints that notes go below ---, and reads back each posted record through parse_review. Related: review-record-from-render (doing), record-after-each-round (doing). Two superseded malformed records stay on #1917 (heads 0e32564e8, 4872fb8e4).",
+  "phase": "now",
+  "owner": "claude-settings",
+  "lane": "",
+  "status": "todo",
+  "order": 733,
+  "updatedAt": "2026-11-08T10:29:00-06:00"
+}
