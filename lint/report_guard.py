@@ -147,7 +147,8 @@ history word in another clause hides no claim. The line claims it for each PR it
 `#<N>`, `PR <N>` or a github pull URL. The Stop is refused unless each such PR has a review record comment for its live head: the newest comment whose first line is
 the review marker, read by merge/merge.py parse_review (never retyped here), naming the PR, and that merge/merge.py review_state calls done for the live head. A claim with no
 PR on its line is refused and asks for the PR. The remedy names the act (`merge <pr> --review-record ...`, then post the
-record) and never the live head. merge/merge.py is loaded by hooks/guard_merge.py merge_module: beside the hooks' real path (the installed symlink), then in the
+record) and never the live head. A newest record that exists but does not parse is refused in its own words (PR named, "does not parse", the same
+remedy as a missing record, with the post as a new comment), not as a missing record; it names the CI line as the cause only when text follows that line before the first `---` line. merge/merge.py is loaded by hooks/guard_merge.py merge_module: beside the hooks' real path (the installed symlink), then in the
 checkout the global rules file names (the copied cloud layout); a tool it cannot load is UNKNOWN. Reads: `gh api` REST only, two per claimed PR
 (the PR, then its issue comments, every page); a Stop with no claim, or in an owner-facing session, reads nothing. A failed read, or an error in the check, never
 blocks: it adds a systemMessage that says UNKNOWN. Cost: 2 gh reads per claimed PR in a lane Stop, plus the guard_merge and merge module imports; no file,
@@ -2421,6 +2422,14 @@ REVIEW_NO_RECORD = (
     "Remedy: have the reviewer run `merge %d --review-record --head <the head the reviewer read> --kind <kind> --guard "
     "<yes|no> --round <N:ROLE:MODEL:VERDICT>`, post the record it prints as a comment on PR #%d, then report again."
 )
+REVIEW_UNPARSED = (
+    "Review-record guard: this reply claims a review PASS for PR #%d, and the newest review record on that PR does not parse, "
+    "so merge reads no record from it.%s Remedy: have the reviewer run `merge %d --review-record --head <the head the reviewer "
+    "read> --kind <kind> --guard <yes|no> --round <N:ROLE:MODEL:VERDICT>`, post the record it prints as a new comment on "
+    "PR #%d, then report again."
+)
+REVIEW_UNPARSED_CI = (" Cause: the CI line must be the last line before `---`, and nothing may follow it; a line after the CI "
+                      "line makes the record unreadable.")
 
 
 def review_claims(text):
@@ -2457,10 +2466,20 @@ def _gh_json(args, cwd):
 
 
 def _newest_record(n, comments, merge_mod):
-    """The parsed newest review record comment of `comments` (oldest first), else None."""
+    """(parsed record, body) of the newest review record comment of `comments` (oldest first). No marked comment is
+    (None, None); a marked comment that does not parse is (None, its body), so the caller needs no second read."""
     bodies = [c.get("body") or "" for c in comments if isinstance(c, dict)]
     marked = [b for b in bodies if b.splitlines()[:1] == [merge_mod.REVIEW_MARKER]]
-    return merge_mod.parse_review(marked[-1]) if marked else None
+    return (merge_mod.parse_review(marked[-1]), marked[-1]) if marked else (None, None)
+
+
+def _text_after_ci_line(body, merge_mod):
+    """True when non-blank text follows the last CI line before the first `---` line: the one cause named for an unparsed record."""
+    lines = body.splitlines()
+    if "---" in lines:
+        lines = lines[:lines.index("---")]
+    at = [i for i, line in enumerate(lines) if line == merge_mod.REVIEW_CI_LINE]
+    return bool(at) and any(line.strip() for line in lines[at[-1] + 1:])
 
 
 def review_record_problem(hook, text):
@@ -2490,11 +2509,14 @@ def review_record_problem(hook, text):
             pages = _gh_json(["repos/{owner}/{repo}/issues/%d/comments" % n, "-X", "GET", "-f", "per_page=100",
                               "--paginate", "--slurp"], cwd)
             comments = [c for page in pages for c in (page if isinstance(page, list) else [page])]
-            rec = _newest_record(n, comments, merge_mod)
+            rec, body = _newest_record(n, comments, merge_mod)
         except Exception as err:  # a read that could not run is UNKNOWN, never clear and never a block
             notes.append("Review-record guard: UNKNOWN, the check read nothing for PR #%d (%s)." % (n, type(err).__name__))
             continue
-        if not rec or rec["n"] != n or merge_mod.review_state(rec, live)[0] != "done":
+        if rec is None and body is not None:
+            cause = REVIEW_UNPARSED_CI if _text_after_ci_line(body, merge_mod) else ""
+            reasons.append(REVIEW_UNPARSED % (n, cause, n, n))
+        elif not rec or rec["n"] != n or merge_mod.review_state(rec, live)[0] != "done":
             reasons.append(REVIEW_NO_RECORD % (n, n, n))
     return " ".join(reasons), " ".join(notes)
 
