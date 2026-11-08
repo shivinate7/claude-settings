@@ -1,0 +1,30 @@
+{
+  "added": "2026-11-08T12:34:00Z",
+  "context": "Goal: an agent's relative `../` write never lands outside its own checkout by mistake.\nProblem (rule): one of the two incident agents was a reviewer working in its caller's checkout, so it had no recorded home, and your decision allows such an agent. Covering it changes your decision's sentence.\nBased on (read): step guard-relative-write-escape: on 2026-11-08 an agent's relative `../` mkdir escaped its worktree twice (a #1458 test-author and an earlier reviewer) and made /home/user/tmp.\nBased on (ruling): decision an-agent-outside-its-home-tree-must-stop (latest cited event 2026-10-27) allows an agent with no recorded home to write anywhere (\"No record ... This part allows it.\", line 24 on main, read 06:34 CST Nov 8). Asked again because a 2026-11-08 incident shows a reviewer with no recorded home writing outside its checkout, which that ruling did not weigh.\nDeparts from: main, where an agent with no recorded home may write anywhere \u2014 refuses that agent's relative shell write that lands outside the checkout holding its working folder.\nMeanwhile: lane guard-relative-write-escape (session_013NEJKzJxDxuXzuwNe7fhYn) builds both parts, with the no-record part separable, and drops it on b.",
+  "home": "guard-relative-write-escape",
+  "id": "relative-write-no-record-agent",
+  "kind": "decision",
+  "n": 416,
+  "options": [
+    {
+      "gain": "The reviewer form of the incident is closed, so a stray ../ write by a reviewer no longer lands in a shared tree.",
+      "how": "The guard refuses a relative shell write by any agent, recorded home or not, when it lands outside the checkout that holds the agent's working folder. The decision's no-record sentence is rewritten in place.",
+      "key": "a",
+      "label": "Cover agents with no recorded home too",
+      "lose": "A reviewer's deliberate relative write outside its checkout is refused (none seen)."
+    },
+    {
+      "gain": "Your decision stays as written.",
+      "how": "The guard refuses the relative write only for an agent with a recorded home. The lane drops the no-record part.",
+      "key": "b",
+      "label": "Recorded homes only",
+      "lose": "The reviewer form of the incident stays open."
+    }
+  ],
+  "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
+  "pick": "a",
+  "ref": "step guard-relative-write-escape; decision an-agent-outside-its-home-tree-must-stop (line 24 on main)",
+  "short": "Relative ../ writes: cover agents with no home",
+  "status": "open",
+  "title": "Should the guard also refuse a relative ../ write outside its checkout by an agent with no recorded home?"
+}

@@ -1,11 +1,11 @@
 {
   "title": "The write-outside-the-checkout guard refuses a relative `../` path that leaves the agent's worktree",
   "why": "On 2026-11-08 an agent's relative `../` mkdir escaped its worktree twice (a #1458 test-author and an earlier reviewer) and made /home/user/tmp. No guard refused it, so writes landed in a shared tree outside the agent's checkout (lane notes-fix-large-1 via the coordinator, 05:24 CST Nov 8).",
-  "note": "Fix: the guard resolves a relative path against the command's folder and refuses one that lands outside the agent's worktree, red case first on `mkdir ../tmp` from an agent worktree. Extends done step c156 (one write-outside-the-checkout guard). Queue fix (owner 13:20 CST Nov 7). Slug from the lane. Filed 05:30 CST Nov 8; no lane named. Doing in lane session_013NEJKzJxDxuXzuwNe7fhYn (coordinator, 06:16 CST Nov 8; owner item 410 a lets a gap fix start a lane).",
+  "note": "Fix: the guard resolves a relative path against the command's folder and refuses one that lands outside the agent's worktree, red case first on `mkdir ../tmp` from an agent worktree. Extends done step c156 (one write-outside-the-checkout guard). Queue fix (owner 13:20 CST Nov 7). Slug from the lane. Filed 05:30 CST Nov 8; no lane named. Doing in lane session_013NEJKzJxDxuXzuwNe7fhYn (coordinator, 06:16 CST Nov 8; owner item 410 a lets a gap fix start a lane). The no-record part (a reviewer with no recorded home) waits on page item 416, relative-write-no-record-agent; the lane builds it separable and drops it on b (coordinator, 06:31 CST Nov 8).",
   "status": "doing",
   "order": 621,
   "lane": "session_013NEJKzJxDxuXzuwNe7fhYn",
   "phase": "now",
   "owner": "triage",
-  "updatedAt": "2026-11-08T06:21:00-06:00"
+  "updatedAt": "2026-11-08T06:33:00-06:00"
 }
