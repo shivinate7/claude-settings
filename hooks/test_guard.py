@@ -138,6 +138,7 @@ FAMILIES = {
     "reload-stamp": "a hook file broken, missing or mis-stamped: the guard waits and reloads, then refuses, never allows",
     "override": "the owner override: one act or a timed override, one session, the exclusions it never lifts",
     "handoff-unread": "after compaction, the guard refuses each call it judges until the session reads its handoff: the refusals, the allows, the cost, the fail-open copy, and the override",
+    "handoff-sections": "a write that leaves a session's handoff without a section the prompt's marker names is refused, naming the sections; the marker is the one list; the fail-open copies; and the cost",
     "wsl": "the WSL launch allow list, the refused WSL forms, and quoted or commented text",
     "load-brake": "the machine-load brake: busy and full on start calls, full on an agent's or a lane session's shell or file write (a lane session's own record tags cs-build:lane), the reader seam, no child process, no per-call read, no CPU read or wait, the cloud skip (CLAUDE_CODE_REMOTE=true reads nothing), the neutral load every other family's lane call meets",
     "misc": "anything outside a tagged section",
@@ -20980,6 +20981,8 @@ REASON_MAY_NAME = {
     # The refusal names the handoff the session must read: under the config folder, which is ROOT here
     # and ~/.claude in a session. That path is the remedy, so the rule may name its folder.
     "handoff-unread": (ROOT, slash(ROOT), ".claude"),
+    # The refusal names the missing sections and may name the handoff it judges: under the config folder.
+    "handoff-sections": (ROOT, slash(ROOT), ".claude"),
 }
 
 
@@ -27284,6 +27287,359 @@ for _label, _check in (
      hu_import_check),
 ):
     LOG_CHECKS_EXTRA.append((_label, _check))
+
+
+# =========================================================================== handoff-sections
+# A write that leaves a session's handoff without a section that the prompt's step 4 marker names is refused,
+# and the reason names the missing sections. The marker is read at run time from the installed prompt (the
+# config folder's hooks/precompact_handoff_prompt.md). No code copies its list: a name the marker adds is
+# required, and a name it drops is not. The rule fails open: a prompt with no marker, or one that cannot be
+# read, refuses nothing. Cost: a call it allows writes no file and starts no process; a refusal writes its
+# guard.log line and nothing else.
+FAMILY = "handoff-sections"
+HS_RULE = "handoff-sections"
+HS_SID = "5d2a7c10-0000-4000-8000-00000000f00d"      # the session that writes
+HS_OTHER = "9e41b0c3-0000-4000-8000-00000000beef"    # another session's handoff
+HS_SECTIONS = ("Goal", "Working premises", "Where things stand", "Work in flight", "Next steps",
+               "Files and commands")
+HS_TAIL = ("Work in flight", "Next steps", "Files and commands")   # the three a cut tail loses
+HS_BODIES = {
+    "Goal": "Ship the handoff section check (owner message, 2026-11-08).\n",
+    "Working premises": "- P1 [ruling] Six sections are required. Source: owner, 2026-11-08. Checked 2026-11-08.\n",
+    "Where things stand": "Branch hsk-tests at 2ac382cc6. No pull request.\n",
+    "Work in flight": "Nothing in flight.\n",
+    "Next steps": "The builder adds the check.\n",
+    "Files and commands": "hooks/guard.py and hooks/precompact_handoff.py.\n",
+}
+HS_MARKER = re.compile(r"<!--\s*handoff-sections:\s*(.*?)\s*-->")
+HS_CFG = os.path.join(ROOT, "hs-cfg")              # the installed prompt, as the repo holds it
+HS_CFG_NOMARK = os.path.join(ROOT, "hs-nomark")    # the installed prompt with its marker line removed
+HS_CFG_DIR = os.path.join(ROOT, "hs-dir")          # the prompt path is a directory
+HS_CFG_BYTES = os.path.join(ROOT, "hs-bytes")      # the prompt is not UTF-8
+HS_CFG_EXTRA = os.path.join(ROOT, "hs-extra")      # the marker names one section more
+HS_CFG_LESS = os.path.join(ROOT, "hs-less")        # the marker drops Files and commands
+HS_PROMPT = os.path.join(HERE, "precompact_handoff_prompt.md")
+HS_OPEN = "Open questions"                         # the section HS_CFG_EXTRA's marker adds
+
+
+def hs_text(omit=()):
+    """A handoff holding every section but those in `omit`, each under its own `## ` heading."""
+    parts = ["# Handoff\n\n"]
+    for name in HS_SECTIONS:
+        if name not in omit:
+            parts.append("## %s\n%s\n" % (name, HS_BODIES[name]))
+    return "".join(parts)
+
+
+HS_FULL = hs_text()
+HS_LAST = HS_FULL[HS_FULL.index("## Work in flight\n"):]   # the cut tail: three sections, to the end
+
+
+def hs_prompt_text():
+    with open(HS_PROMPT, "r", encoding="utf-8") as f:
+        return f.read()
+
+
+def hs_marker_names(text):
+    """The names on the marker line of `text`, in order; the six sections when it has none."""
+    m = HS_MARKER.search(text)
+    return [n.strip() for n in m.group(1).split("|")] if m else list(HS_SECTIONS)
+
+
+def hs_prompt_with(text, names):
+    """`text` with its marker line set to `names`, appended when it has none."""
+    line = "<!-- handoff-sections: %s -->" % " | ".join(names)
+    if HS_MARKER.search(text):
+        return HS_MARKER.sub(lambda _m: line, text, count=1)
+    return text + "\n" + line + "\n"
+
+
+def hs_prompt_path(config):
+    with hu_config(config):
+        return ph.prompt_path()
+
+
+def hs_handoff(config, session=HS_SID):
+    with hu_config(config):
+        return ph.handoff_path(session)
+
+
+def hs_install(config, text):
+    write(hs_prompt_path(config), text)
+
+
+def hs_write_bytes(path, data):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "wb") as handle:
+        handle.write(data)
+
+
+def _build_hs_intact():
+    hs_install(HS_CFG, hs_prompt_text())
+    write(hs_handoff(HS_CFG), HS_FULL)   # the Edit and MultiEdit cases edit this file on disk
+
+
+def _build_hs_nomark():
+    hs_install(HS_CFG_NOMARK, HS_MARKER.sub("", hs_prompt_text()))
+
+
+def _build_hs_dir():
+    os.makedirs(hs_prompt_path(HS_CFG_DIR), exist_ok=True)
+
+
+def _build_hs_bytes():
+    hs_write_bytes(hs_prompt_path(HS_CFG_BYTES), b"\xff\xfe" + hs_prompt_text().encode("utf-8"))
+
+
+def _build_hs_extra():
+    text = hs_prompt_text()
+    hs_install(HS_CFG_EXTRA, hs_prompt_with(text, hs_marker_names(text) + [HS_OPEN]))
+
+
+def _build_hs_less():
+    text = hs_prompt_text()
+    hs_install(HS_CFG_LESS, hs_prompt_with(text, [n for n in hs_marker_names(text)
+                                                  if n != "Files and commands"]))
+
+
+lazy_fixture([HS_CFG], _build_hs_intact)
+lazy_fixture([HS_CFG_NOMARK], _build_hs_nomark)
+lazy_fixture([HS_CFG_DIR], _build_hs_dir)
+lazy_fixture([HS_CFG_BYTES], _build_hs_bytes)
+lazy_fixture([HS_CFG_EXTRA], _build_hs_extra)
+lazy_fixture([HS_CFG_LESS], _build_hs_less)
+HS_HANDOFF = hs_handoff(HS_CFG)
+
+# A refusal names every missing section, and names no section that is present. The reason may name the
+# handoff it judges, which sits under the config folder (REASON_MAY_NAME).
+add("handoff-sections: a Write that drops Work in flight, Next steps and Files and commands is refused, naming the three",
+    "deny", HS_RULE, tool="Write", cwd=NOGIT, session=HS_SID, config=HS_CFG,
+    carries=HS_TAIL, lacks=("Goal", "Working premises", "Where things stand"),
+    file_path=HS_HANDOFF, content=hs_text(omit=HS_TAIL))
+add("handoff-sections: a Write that keeps all six sections passes, silently",
+    "allow", tool="Write", cwd=NOGIT, session=HS_SID, config=HS_CFG, silent=True,
+    file_path=HS_HANDOFF, content=hs_text())
+add("handoff-sections: a full-size handoff that keeps all six sections passes, silently",
+    "allow", tool="Write", cwd=NOGIT, session=HS_SID, config=HS_CFG, silent=True,
+    file_path=HS_HANDOFF,
+    content=HS_FULL.replace(HS_BODIES["Where things stand"],
+                            "Branch hsk-tests at 2ac382cc6.\n" + "A line of state, kept.\n" * 6000))
+add("handoff-sections: a Write that empties the handoff is refused, naming all six sections",
+    "deny", HS_RULE, tool="Write", cwd=NOGIT, session=HS_SID, config=HS_CFG,
+    carries=HS_SECTIONS, file_path=HS_HANDOFF, content="")
+HS_HEADINGS = (
+    "# goal\n\n## WORKING PREMISES\n- P1 [read] The file says so. Source: hooks/guard.py:1. Checked 2026-11-08.\n\n"
+    "## Where things stand (as of 15:26)\nBranch hsk-tests.\n\n"
+    "## Work in flight:\nNothing in flight.\n\n## Next steps\nThe builder adds the check.\n\n"
+    "## Files and commands that matter\nhooks/guard.py\n")
+add("handoff-sections: headings match on the name, in any case, with text after the name, and pass",
+    "allow", tool="Write", cwd=NOGIT, session=HS_SID, config=HS_CFG, silent=True,
+    file_path=HS_HANDOFF, content=HS_HEADINGS)
+HS_WRONG_LEVEL = (
+    "# Handoff\n\n## Goal\nShip it.\n\n## Working premises\n- P1 [assumed] A guess. Source: none. Checked never.\n\n"
+    "## Where things stand\nBranch.\n\n## Work in flight\nNothing.\n\n### Next steps\nGo on.\n\n"
+    "Next steps are below.\n\n## Files and commands\nhooks/guard.py\n")
+add("handoff-sections: Next steps at ### level, or named only in a sentence, is no heading and is refused",
+    "deny", HS_RULE, tool="Write", cwd=NOGIT, session=HS_SID, config=HS_CFG,
+    carries=("Next steps",), lacks=("Goal", "Working premises", "Where things stand", "Work in flight",
+                                    "Files and commands"),
+    file_path=HS_HANDOFF, content=HS_WRONG_LEVEL)
+add("handoff-sections: another session's handoff is refused the same way, naming the three",
+    "deny", HS_RULE, tool="Write", cwd=NOGIT, session=HS_SID, config=HS_CFG,
+    carries=HS_TAIL, lacks=("Goal", "Working premises", "Where things stand"),
+    file_path=hs_handoff(HS_CFG, HS_OTHER), content=hs_text(omit=HS_TAIL))
+add("handoff-sections: a repo's own HANDOFF.md is not a session handoff, and passes",
+    "allow", tool="Write", cwd=NOGIT, session=HS_SID, config=HS_CFG, silent=True,
+    file_path=os.path.join(NOGIT, "HANDOFF.md"), content=hs_text(omit=HS_TAIL))
+add("handoff-sections: a file named handoff.md outside the config folder is not a session handoff, and passes",
+    "allow", tool="Write", cwd=NOGIT, session=HS_SID, config=HS_CFG, silent=True,
+    file_path=os.path.join(NOGIT, "notes", "handoff.md"), content=hs_text(omit=HS_TAIL))
+add("handoff-sections: an Edit that cuts the tail after Where things stand is refused, naming the three",
+    "deny", HS_RULE, tool="Edit", cwd=NOGIT, session=HS_SID, config=HS_CFG,
+    carries=HS_TAIL, lacks=("Goal", "Working premises", "Where things stand"),
+    file_path=HS_HANDOFF, old_string=HS_LAST, new_string="")
+add("handoff-sections: an Edit that keeps all six sections passes, silently",
+    "allow", tool="Edit", cwd=NOGIT, session=HS_SID, config=HS_CFG, silent=True,
+    file_path=HS_HANDOFF, old_string="Nothing in flight.\n",
+    new_string="Nothing in flight; the red run is recorded.\n")
+add("handoff-sections: a MultiEdit whose second edit cuts the tail is refused, naming the three",
+    "deny", HS_RULE, tool="MultiEdit", cwd=NOGIT, session=HS_SID, config=HS_CFG,
+    carries=HS_TAIL, lacks=("Goal", "Working premises", "Where things stand"),
+    file_path=HS_HANDOFF,
+    edits=[{"old_string": "Branch hsk-tests at", "new_string": "Branch hsk-tests2 at"},
+           {"old_string": HS_LAST, "new_string": ""}])
+add("handoff-sections: a MultiEdit that keeps all six sections passes, silently",
+    "allow", tool="MultiEdit", cwd=NOGIT, session=HS_SID, config=HS_CFG, silent=True,
+    file_path=HS_HANDOFF,
+    edits=[{"old_string": "The builder adds the check.", "new_string": "The builder adds the check, then the red run."},
+           {"old_string": "Nothing in flight.\n", "new_string": "Nothing in flight; the red run is recorded.\n"}])
+
+# The marker is the one list. A name it adds is required; a name it drops is not, and the control shows
+# the same write is refused while the marker still names that section.
+add("handoff-sections: a name the marker adds is required: a Write without it is refused, naming it",
+    "deny", HS_RULE, tool="Write", cwd=NOGIT, session=HS_SID, config=HS_CFG_EXTRA,
+    carries=(HS_OPEN,), lacks=HS_SECTIONS,
+    file_path=hs_handoff(HS_CFG_EXTRA), content=hs_text())
+add("handoff-sections: a name the marker drops is not required: a Write without it passes, silently",
+    "allow", tool="Write", cwd=NOGIT, session=HS_SID, config=HS_CFG_LESS, silent=True,
+    file_path=hs_handoff(HS_CFG_LESS), content=hs_text(omit=("Files and commands",)))
+add("handoff-sections: with the same marker, a Write without Next steps is still refused",
+    "deny", HS_RULE, tool="Write", cwd=NOGIT, session=HS_SID, config=HS_CFG_LESS,
+    carries=("Next steps",), lacks=("Goal", "Working premises", "Where things stand", "Work in flight",
+                                    "Files and commands"),
+    file_path=hs_handoff(HS_CFG_LESS), content=hs_text(omit=("Next steps",)))
+
+
+def hs_case(config, tool, tool_input, session=HS_SID):
+    """A case dict for decide(), with each key decide() reads, built as add() builds one."""
+    return {"name": "handoff-sections", "expected": None, "rule": None, "raw": None, "tool": tool,
+            "cwd": NOGIT, "env_path": None, "session": session, "carries": (), "lacks": (),
+            "config": config, "transcript": None, "agent_id": None, "agent_type": None, "event": None,
+            "stop_active": False, "no_root": False, "max_seconds": None, "env": None, "guard": None,
+            "silent": False, "temp": TEMP_DIR, "tool_input": tool_input, "family": FAMILY,
+            "windows": False}
+
+
+def hs_write(config, content, session=HS_SID):
+    return decide(hs_case(config, "Write", {"file_path": hs_handoff(config, session),
+                                            "content": content}, session))
+
+
+def hs_fail_open(label, config):
+    """The rule allows a drop that the intact prompt refuses, silently. The intact prompt is the control:
+    without it, an allow would prove nothing, since a rule that never refuses also allows."""
+    def check():
+        control = hs_write(HS_CFG, hs_text(omit=HS_TAIL))
+        if control[0] != "deny":
+            return False, "the intact prompt does not refuse the drop: %r" % (control[0],)
+        got = hs_write(config, hs_text(omit=HS_TAIL))
+        if got != ("allow", ""):
+            return False, "%s: the drop got %r, want a silent allow" % (label, got)
+        return True, "%s: the drop is allowed silently, and the intact prompt refuses it" % label
+    return check
+
+
+for _label, _config in (("the prompt has no marker line", HS_CFG_NOMARK),
+                        ("the prompt path is a directory", HS_CFG_DIR),
+                        ("the prompt is not UTF-8", HS_CFG_BYTES)):
+    LOG_CHECKS_EXTRA.append(("handoff-sections: fail open when %s" % _label, hs_fail_open(_label, _config)))
+
+
+# The probe runs one guard call in-process and counts what it does: each file write (open in a write mode,
+# or an os-level write) and each process start (Popen, os.system, os.spawn*). The counts go to stderr, so
+# the guard's own stdout stays the decision. Bytecode writes are off, or a compiled module would hide one.
+HS_PROBE = r"""
+import builtins, io, json, os, runpy, subprocess, sys
+guard, payload = sys.argv[1], sys.argv[2]
+seen = {"writes": [], "starts": []}
+real_open = builtins.open
+
+
+def counted_open(file, mode="r", *args, **kwargs):
+    if any(c in str(mode) for c in "wax+"):
+        seen["writes"].append(os.path.basename(str(file)))
+    return real_open(file, mode, *args, **kwargs)
+
+
+builtins.open = counted_open
+
+
+class CountingPopen(subprocess.Popen):
+    def __init__(self, *args, **kwargs):
+        seen["starts"].append("Popen")
+        super().__init__(*args, **kwargs)
+
+
+subprocess.Popen = CountingPopen
+
+
+def counted(bucket, name, real):
+    def call(*args, **kwargs):
+        # A folder call that finds the folder already there changes nothing, so it is no write.
+        if name in ("makedirs", "mkdir") and args and os.path.exists(args[0]):
+            return real(*args, **kwargs)
+        seen[bucket].append("os." + name)
+        return real(*args, **kwargs)
+    return call
+
+
+for name in ("remove", "unlink", "rename", "replace", "makedirs", "mkdir", "rmdir", "utime", "truncate",
+             "chmod"):
+    if hasattr(os, name):
+        setattr(os, name, counted("writes", name, getattr(os, name)))
+for name in ("system", "spawnv", "spawnve", "spawnvp", "spawnvpe", "posix_spawn", "posix_spawnp",
+             "startfile"):
+    if hasattr(os, name):
+        setattr(os, name, counted("starts", name, getattr(os, name)))
+sys.path.insert(0, os.path.dirname(os.path.abspath(guard)))
+sys.argv = [guard]
+sys.stdin = io.StringIO(payload)
+code = 0
+try:
+    runpy.run_path(guard, run_name="__main__")
+except SystemExit as e:
+    code = e.code
+finally:
+    sys.stderr.write("HS_COST " + json.dumps(seen) + "\n")
+sys.exit(code)
+"""
+
+
+def hs_probe(config, tool, tool_input, session=HS_SID):
+    """One guard call under HS_PROBE. Returns (decision, reason, writes, starts), or None for the counts
+    when the probe printed none (the probe itself failed, so the counts prove nothing)."""
+    materialize(config)   # the config folder's installed prompt, built before the guard reads it
+    env = dict(os.environ)
+    for name in ("CLAUDE_CODE_REMOTE", "PYTHONPATH", "CLAUDE_CODE_SESSION_ID",
+                 "CLAUDE_CODE_REMOTE_SESSION_ID", "CLAUDE_PROJECT_DIR"):
+        env.pop(name, None)
+    env["CLAUDE_CONFIG_DIR"] = config
+    env["CLAUDE_GUARD_ROOT_PID"] = str(os.getpid())
+    env["PYTHONDONTWRITEBYTECODE"] = "1"
+    payload = json.dumps({"tool_name": tool, "tool_input": tool_input, "cwd": NOGIT, "session_id": session})
+    run = subprocess.run([sys.executable, "-c", HS_PROBE, GUARD, payload], capture_output=True,
+                         text=True, env=env, timeout=120)
+    counts = None
+    for line in run.stderr.splitlines():
+        if line.startswith("HS_COST "):
+            counts = json.loads(line[len("HS_COST "):])
+    decision, reason = read_decision(run.stdout)
+    if counts is None:
+        return decision, reason, None, None
+    return decision, reason, counts["writes"], counts["starts"]
+
+
+def hs_cost_check():
+    """A call the rule allows writes no file and starts no process. A refusal writes its guard.log line and
+    starts no process. The control is a refusal the guard already makes (git-env-set): a probe that counts
+    nothing would also show zero writes, so the control must show the refusal's log line."""
+    control = hs_probe(HS_CFG, "Bash", {"command": "GIT_DIR=/nowhere " + VCS + " status"})
+    if control[2] is None:
+        return False, "the probe printed no count for the control call"
+    if control[0] != "deny" or control[2] != ["guard.log"]:
+        return False, "the control refusal gave %r with writes %r, want deny with one guard.log write" % (
+            control[0], control[2])
+    allowed = hs_probe(HS_CFG, "Write", {"file_path": hs_handoff(HS_CFG), "content": hs_text()})
+    if allowed[2] is None:
+        return False, "the probe printed no count for an allowed handoff Write"
+    if allowed[0] != "allow" or allowed[1]:
+        return False, "a complete handoff Write gave %r, want a silent allow" % (allowed[0],)
+    if allowed[2] or allowed[3]:
+        return False, "an allowed handoff Write made writes %r and starts %r, want none" % (
+            allowed[2], allowed[3])
+    refused = hs_probe(HS_CFG, "Write", {"file_path": hs_handoff(HS_CFG), "content": hs_text(omit=HS_TAIL)})
+    if refused[2] is None:
+        return False, "the probe printed no count for a refused handoff Write"
+    if refused[0] != "deny":
+        return False, "a handoff Write that drops three sections gave %r, want deny" % (refused[0],)
+    if refused[2] != ["guard.log"] or refused[3]:
+        return False, "a refused handoff Write wrote %r and started %r, want one guard.log write and no start" % (
+            refused[2], refused[3])
+    return True, "an allowed handoff Write writes no file and starts no process; a refusal writes its guard.log line only"
+
+
+LOG_CHECKS_EXTRA.append(("handoff-sections: an allowed write writes no file and starts no process; a refusal "
+                         "writes its guard.log line only", hs_cost_check))
 
 
 # =========================================================================== the machine-load brake

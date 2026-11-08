@@ -1989,6 +1989,221 @@ def case_precompact_digest_without_handoff():
         c.cleanup()
 
 
+# --------------------------------------------------------------------------- handoff sections
+# A handoff holds six sections. Step 4 of the prompt names them once, in a marker line, and the code
+# reads that marker at run time; no code copies the list. The Stop cases below build handoffs from
+# these bodies, so a case states only what it removes.
+SECTION_NAMES = ("Goal", "Working premises", "Where things stand", "Work in flight", "Next steps",
+                 "Files and commands")
+SECTION_BODIES = {
+    "Goal": "Ship the handoff section check (owner message, 2026-11-08).\n",
+    "Working premises": "- P1 [ruling] Six sections are required. Source: owner, 2026-11-08. Checked 2026-11-08.\n",
+    "Where things stand": "Branch hsk-tests at 2ac382cc6. No pull request.\n",
+    "Work in flight": "Nothing in flight.\n",
+    "Next steps": "The builder adds the check.\n",
+    "Files and commands": "hooks/guard.py and hooks/precompact_handoff.py.\n",
+}
+MARKER_LINE = re.compile(r"<!--\s*handoff-sections:\s*(.*?)\s*-->")
+MTIME_1 = 1800000000   # fixed handoff mtimes: a case sets them, and never waits for the clock
+MTIME_2 = MTIME_1 + 3600
+
+
+def handoff_text(omit=()):
+    """A handoff holding every section but those in `omit`, each under its own `## ` heading."""
+    parts = ["# Handoff\n\n"]
+    for name in SECTION_NAMES:
+        if name not in omit:
+            parts.append("## %s\n%s\n" % (name, SECTION_BODIES[name]))
+    return "".join(parts)
+
+
+def names_in(text):
+    """The section names a text holds, in any case, as whole phrases."""
+    return {n for n in SECTION_NAMES if re.search(r"\b%s\b" % re.escape(n), text or "", re.I)}
+
+
+def prompt_source():
+    with open(os.path.join(HERE, "precompact_handoff_prompt.md"), "r", encoding="utf-8") as f:
+        return f.read()
+
+
+def install_prompt(c, text):
+    """The installed prompt, which the code reads: the config folder's copy, not the repo's."""
+    put(c.prompt_path(), text)
+
+
+def block_reason(proc):
+    """The reason of the block a Stop run printed; None when it printed no block."""
+    try:
+        obj = json.loads(proc.stdout or "")
+    except ValueError:
+        return None
+    if not isinstance(obj, dict) or obj.get("decision") != "block":
+        return None
+    return obj.get("reason", "")
+
+
+def nudge_at(c, text, mtime, active=False):
+    """Write the handoff as `text` leaves it, set its mtime, then run one Stop. The messages sit below
+    the first checkpoint, so only the section check can block."""
+    put(c.handoff_path(), text)
+    os.utime(c.handoff_path(), (mtime, mtime))
+    return nudge(c, NUDGE_OVERHEAD, active=active, lines=[])
+
+
+def case_prompt_marker_names_the_sections():
+    text = prompt_source()
+    found = MARKER_LINE.findall(text)
+    step4 = step_body(text, 4) or ""
+    check("sections marker: the prompt holds one handoff-sections marker, in step 4",
+          len(found) == 1 and MARKER_LINE.search(step4) is not None,
+          "markers: %d, in step 4: %s" % (len(found), MARKER_LINE.search(step4) is not None))
+    names = [n.strip() for n in found[0].split("|")] if found else []
+    check("sections marker: it names the six sections, each once",
+          sorted(names) == sorted(SECTION_NAMES), "names: %r" % names)
+
+
+def case_code_holds_no_section_names():
+    """The six names live in the prompt's marker and nowhere in the code, so no copy can go stale. Python's
+    own tokenizer reads the module: a name in a comment is no copy, and a name in a string or a docstring is.
+    The scan must reach the module's last token before it may assert on what it found."""
+    import io
+    import tokenize
+    with open(MODULE, "r", encoding="utf-8") as f:
+        source = f.read()
+    patterns = [(n, re.compile(r"\b%s\b" % r"\s+".join(re.escape(w) for w in n.split()), re.I))
+                for n in SECTION_NAMES]
+    hits = []
+    reached_end = False
+    for tok in tokenize.generate_tokens(io.StringIO(source).readline):
+        if tok.type == tokenize.ENDMARKER:
+            reached_end = True
+        if tok.type == tokenize.COMMENT:
+            continue
+        for name, rx in patterns:
+            if rx.search(tok.string):
+                hits.append("%s at line %d" % (name, tok.start[0]))
+    check("sections in code: the scan reached the end of the module", reached_end,
+          "the tokenizer stopped early")
+    check("sections in code: no section name in the module outside comments",
+          not hits, "hits: %s" % "; ".join(hits))
+
+
+def case_nudge_flags_a_damaged_handoff_once_per_mtime():
+    c = Case("nudge_sections")
+    try:
+        install_prompt(c, prompt_source())
+        omitted = ("Work in flight", "Next steps", "Files and commands")
+        damaged = handoff_text(omit=omitted)
+        first = nudge_at(c, damaged, MTIME_1)
+        with open(c.handoff_path(), "r", encoding="utf-8") as f:
+            on_disk = f.read()
+        check("sections nudge: scope: the handoff on disk is the damaged one", on_disk == damaged,
+              "on disk: %r" % on_disk[:120])
+        reason = block_reason(first)
+        check("sections nudge: a Stop after a damaging write blocks",
+              reason is not None, "stdout: %r" % first.stdout[:200])
+        check("sections nudge: the block names the three missing sections and no other",
+              names_in(reason) == set(omitted), "named: %r" % sorted(names_in(reason)))
+
+        again = nudge_at(c, damaged, MTIME_1)
+        check("sections nudge: the same handoff mtime is silent on the next Stop",
+              not (again.stdout or "").strip(), "stdout: %r" % again.stdout[:200])
+
+        newer = handoff_text(omit=("Next steps",))
+        third = nudge_at(c, newer, MTIME_2)
+        reason3 = block_reason(third)
+        check("sections nudge: a new damaging mtime blocks again",
+              reason3 is not None, "stdout: %r" % third.stdout[:200])
+        check("sections nudge: the second block names Next steps only",
+              names_in(reason3) == {"Next steps"}, "named: %r" % sorted(names_in(reason3)))
+    finally:
+        c.cleanup()
+
+
+def case_nudge_sections_quiet_when_complete_absent_or_active():
+    damaged = handoff_text(omit=("Next steps",))
+    variants = (
+        ("a damaged handoff, not active: the control", damaged, False, True),
+        ("a complete handoff", handoff_text(), False, False),
+        ("no handoff file at all", None, False, False),
+        ("a damaged handoff with stop_hook_active", damaged, True, False),
+    )
+    for label, text, active, want_block in variants:
+        c = Case("nudge_quiet")
+        try:
+            install_prompt(c, prompt_source())
+            if text is None:
+                check("sections nudge (%s): scope: no handoff file" % label,
+                      not os.path.exists(c.handoff_path()), "a file exists")
+                proc = nudge(c, NUDGE_OVERHEAD, active=active, lines=[])
+            else:
+                proc = nudge_at(c, text, MTIME_1, active=active)
+            blocked = block_reason(proc) is not None
+            check("sections nudge (%s): %s" % (label, "blocks" if want_block else "is silent"),
+                  blocked == want_block, "stdout: %r" % proc.stdout[:200])
+        finally:
+            c.cleanup()
+
+
+def put_bytes(path, data):
+    parent = os.path.dirname(path)
+    if parent:
+        os.makedirs(parent, exist_ok=True)
+    with open(path, "wb") as f:
+        f.write(data)
+
+
+def case_nudge_sections_fail_open_on_bad_prompt():
+    damaged = handoff_text(omit=("Next steps",))
+    text = prompt_source()
+    c = Case("nudge_control")
+    try:
+        install_prompt(c, text)
+        control = nudge_at(c, damaged, MTIME_1)
+        check("sections fail open: control: the intact prompt blocks the damaged handoff",
+              block_reason(control) is not None, "stdout: %r" % control.stdout[:200])
+    finally:
+        c.cleanup()
+
+    def dir_prompt(c):
+        os.makedirs(c.prompt_path(), exist_ok=True)
+
+    def bytes_prompt(c):
+        put_bytes(c.prompt_path(), b"\xff\xfe" + text.encode("utf-8"))
+
+    bad = (
+        ("the prompt has no marker line", lambda c: install_prompt(c, MARKER_LINE.sub("", text))),
+        ("the prompt path is a directory", dir_prompt),
+        ("the prompt is not UTF-8", bytes_prompt),
+    )
+    for label, install in bad:
+        c = Case("nudge_bad")
+        try:
+            install(c)
+            proc = nudge_at(c, damaged, MTIME_1)
+            check("sections fail open (%s): exit 0" % label, proc.returncode == 0,
+                  "rc=%r stderr=%r" % (proc.returncode, proc.stderr[-200:]))
+            check("sections fail open (%s): no block" % label, block_reason(proc) is None,
+                  "stdout: %r" % proc.stdout[:200])
+        finally:
+            c.cleanup()
+
+
+def case_nudge_sections_flags_an_empty_handoff():
+    c = Case("nudge_empty")
+    try:
+        install_prompt(c, prompt_source())
+        proc = nudge_at(c, "", MTIME_1)
+        reason = block_reason(proc)
+        check("sections nudge (empty): an empty handoff blocks", reason is not None,
+              "stdout: %r" % proc.stdout[:200])
+        check("sections nudge (empty): the block names all six sections",
+              names_in(reason) == set(SECTION_NAMES), "named: %r" % sorted(names_in(reason)))
+    finally:
+        c.cleanup()
+
+
 # --------------------------------------------------------------------------- the run
 
 
@@ -2045,6 +2260,12 @@ def main() -> int:
     case_digest_refused_line_limits()
     case_precompact_digest_starts_at_handoff()
     case_precompact_digest_without_handoff()
+    case_prompt_marker_names_the_sections()
+    case_code_holds_no_section_names()
+    case_nudge_flags_a_damaged_handoff_once_per_mtime()
+    case_nudge_sections_quiet_when_complete_absent_or_active()
+    case_nudge_sections_fail_open_on_bad_prompt()
+    case_nudge_sections_flags_an_empty_handoff()
 
     if FAILED:
         print()
