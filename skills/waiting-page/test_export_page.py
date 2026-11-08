@@ -115,6 +115,14 @@ STREET = "123 Main Street"
 API_VALUE = "abcdefgh" + "12345678"
 SESSION_VALUE = "q9W8e7R6" + "t5Y4u3I2"
 CLIENT_VALUE = "Zx8Kp2Lm" + "9Qw4Rt7Y"
+# Hyphenated letters for the words test, built from parts. Each comment names the check the value fails.
+TIGHT_COMPACT = "tight-" + "compact"  # a plain option key: three vowels in twelve letters, and a run that joins at the hyphen
+ICON_COMPACT = "icon-" + "compact"  # a plain option key with four vowels
+MIXED_HYPHEN = "QwErTy-" + "UiOpAs"  # mixed case in each part: fails the word form alone
+CONSONANT_HYPHEN = "xkcdqwrt-" + "plmnvbz"  # lower case with no vowel: on the hyphen path it fails the consonant run alone, not the vowel share
+UPPER_HYPHEN = "XKQ-ZVB-" + "WTR-PLS"  # upper-case parts with no vowel: the share and the joined run both refuse it today; the all-lower gate keeps it off the hyphen path, where each part passes the run
+RUN_PART = "aeixkcdo" + "-uaei"  # eight vowels, and a run of four consonants inside one part: fails the run alone
+SHORT_VOWELS = "bbabbab" + "bbabbb"  # three vowels in thirteen letters and no run: fails the vowel share alone
 
 # (label, the note's value, the text that must never be printed). A dict or a list nests the secret.
 RED = [
@@ -243,6 +251,17 @@ RED = [
     ("api_key of sixteen capitals with four vowels", "api_key: " + FEW_VOWELS_16, FEW_VOWELS_16),
     ("API_KEY of sixteen capitals with an eleven-consonant run", "API_KEY: " + LONG_CONSONANT_RUN_16, LONG_CONSONANT_RUN_16),
     ("api_key set to twelve underscores and no letter", "api_key: " + "_" * 12, "_" * 12),
+    # A `:` value of letters passes only when every words check passes. The mixed-case row fails the word form alone, the
+    # vowel row fails the vowel share alone and the run row fails the consonant run alone, so removing one check turns its
+    # row red. The lower-case row fails the run alone on the hyphen path. The upper-case row has no vowel, and the share
+    # and the joined run both refuse it today; without the all-lower gate the hyphen path's per-part run check passes it,
+    # so that row goes red. The `=` row is refused whatever its value.
+    ("a key name set with = to a hyphenated word", "key = '" + TIGHT_COMPACT + "'", TIGHT_COMPACT),
+    ("secret of mixed-case words joined by a hyphen", "secret: '" + MIXED_HYPHEN + "'", MIXED_HYPHEN),
+    ("secret of thirteen letters with three vowels", "secret: '" + SHORT_VOWELS + "'", SHORT_VOWELS),
+    ("secret of a consonant run inside one word", "secret: '" + RUN_PART + "'", RUN_PART),
+    ("secret of lower-case letters with no vowel", "secret: '" + CONSONANT_HYPHEN + "'", CONSONANT_HYPHEN),
+    ("secret of upper-case three-letter parts joined by hyphens", "secret: '" + UPPER_HYPHEN + "'", UPPER_HYPHEN),
     ("street with the suffix Park", "1400 Lakeshore Park", "1400 Lakeshore Park"),
     ("street with the suffix Trail", "2500 Maple Trail", "2500 Maple Trail"),
     ("street with the suffix Cir", "1200 Oak Cir", "1200 Oak Cir"),
@@ -369,6 +388,10 @@ GREEN = [
     ("api_key set to an upper-case placeholder with underscores", "api_key: REPLACE_WITH_YOUR_KEY"),
     ("Key set to a lower-case label word", "Key: infrastructure"),
     ("--key-color set to a CSS keyword before a semicolon", "--key-color: currentcolor;"),
+    # A plain option key whose value is a hyphenated word is no secret, in a line of text or in a JS object line.
+    ("option key icon-compact", "key: '" + ICON_COMPACT + "'"),
+    ("option key tight-compact", "key: '" + TIGHT_COMPACT + "'"),
+    ("option key tight-compact in a JS object line", "{ key: '" + TIGHT_COMPACT + "', label: 'Tight' }"),
     # The names that do not count under the rule (bare token, camelCase, a hyphenated or a non-credential name) pass.
     # These four are false alarms today: each refuses on its value's length, so they are red on the builder's head.
     ("destructured token alias", "const { token: accessTokenValue } = await getSession();"),
