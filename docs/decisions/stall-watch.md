@@ -121,19 +121,22 @@ Cost (`outcomes-mechanize-rules`): one `stat` per running agent at each Stop, an
 transcript's end for each agent that is quiet and not yet listed. No new process, timer or file. Case
 `A8_cost_one_stat_per_running_agent_and_a_read_only_when_quiet` counts both.
 Limits: a session that is idle with no Stop sees nothing until its next Stop. A TaskStop or a terminal
-notice (completed, failed, killed or stopped) closes an agent only until a later resume reopens it. A
-resume is a `user` record whose `toolUseResult` dict holds `resumedAgentId` (a SendMessage result). A
-queued delivery has none, and text quoted in a tool result is never read. Transcript order decides: a
-launch or resume opens, a notice or TaskStop closes, and the last wins. A resumed id with no launch in
-this transcript is open: it is listed when its transcript beside the session is quiet, and as unknown
-when none is found. Only an agent reopens; a shell stays closed. The resume record's time is the job's
-start time, unless it is unreadable: then the launch time stays.
-An agent stuck inside one tool call is never listed: an open call has no age cap. A model turn longer than the age would list a busy agent. Measured on 5 local agent transcripts
+notice (completed, failed, killed or stopped) closes an agent id for the whole transcript. So an agent
+stopped or finished, then resumed under the same id, is never listed again (debt `agent-resume-reads-closed`,
+an agent resumed after it closed). A model turn longer than the age would list a busy agent. Measured on 5 local agent transcripts
 (559 records, 2026-11-07): the longest gap between records was 206 s, under the 300 s age.
 
 The hook exits 0 and never refuses. A crash never refuses a call, as advisory hooks stay fail-open
 (`guard-hooks-fail-closed`). It reuses the transcript parsing of the PreToolUse path, so that parsing has
 one home (`building-one-home-per-capability`).
+
+Resume rule: a launch or resume opens an agent, and a notice or TaskStop closes it until a later resume
+reopens it. Transcript order decides: the last one wins. Only an agent reopens; a shell stays closed. A
+resume is a `user` record whose `toolUseResult` dict holds `resumedAgentId` (a SendMessage result). A
+queued delivery has none, and text quoted in a tool result is never read. A resumed id with no launch in
+this transcript is open: it is listed when its transcript beside the session is quiet, and as unknown
+when none is found. The resume record's time is the job's start time, unless it is unreadable: then the
+launch time stays.
 
 - Age: the default is 300 seconds, a builder's choice, checked only by the gap measure in the limits above. `STALL_WATCH_QUIET` sets another
   number of seconds.
