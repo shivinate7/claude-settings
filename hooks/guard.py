@@ -1803,24 +1803,33 @@ WORKFLOW_RUN_BLOCK = re.compile(r"^(\s*)(?:-\s+)?run:\s*[|>][+-]?\s*$")
 
 # A shell and its `-c` flag (`-c`, `-ec`, `-xec`): the quoted word after them is a command line of its own.
 WORKFLOW_SHELLS = {"sh", "bash", "zsh", "dash", "ksh"}
-# Between the shell and `-c` pass option words: short clusters (`-l`, `-e`), long flags (`--norc`), and a cluster that
-# ends in `o` or `O` (`-eo pipefail`), which takes the next word as its value.
-WORKFLOW_SHELL_C = re.compile(r"^-[A-Za-z]*c$")
-WORKFLOW_SHELL_FLAG = re.compile(r"^-(?:-[\w-]+|[A-Za-z]+)$")
+# Between the shell and its script pass option words: short clusters (`-l`, `-e`, `-ce`), `+` clusters (`+e`), and long
+# flags (`--norc`). Each `o` or `O` in a cluster, and the long flags in WORKFLOW_SHELL_LONG_VALUE, take the next word.
+WORKFLOW_SHELL_SHORT = re.compile(r"^[-+][A-Za-z]+$")
+WORKFLOW_SHELL_LONG = re.compile(r"^--[\w-]+$")
+WORKFLOW_SHELL_LONG_VALUE = {"--rcfile", "--init-file"}
 
 
 def workflow_shell_c_scripts(tokens) -> set:
-    """The indexes of `tokens` that are the script word of a shell `-c`, past any option words."""
+    """The indexes of `tokens` that are the script word of a shell `-c`: the first non-option word after the
+    shell's options, when any short cluster of them holds a `-c`."""
     scripts = set()
     for at, tok in enumerate(tokens):
         if os.path.basename(tok) not in WORKFLOW_SHELLS:
             continue
         at += 1
-        while at < len(tokens) and WORKFLOW_SHELL_FLAG.match(tokens[at]):
-            if WORKFLOW_SHELL_C.match(tokens[at]):
-                scripts.add(at + 1)
+        has_c = False
+        while at < len(tokens):
+            word = tokens[at]
+            if WORKFLOW_SHELL_LONG.match(word):
+                at += 2 if word in WORKFLOW_SHELL_LONG_VALUE else 1
+            elif WORKFLOW_SHELL_SHORT.match(word):
+                has_c = has_c or (word[0] == "-" and "c" in word)
+                at += 1 + sum(ch in "oO" for ch in word[1:])
+            else:
                 break
-            at += 2 if tokens[at][-1] in "oO" and not tokens[at].startswith("--") else 1
+        if has_c and at < len(tokens):
+            scripts.add(at)
     return scripts
 
 
