@@ -34,7 +34,8 @@ CI: read live by merge --reviewed
 - One `Round` line per reviewer. A round can hold more than one line.
 - The `Fix check` line is optional, comes once after the Round lines, and is not a round (record `hold-unsafe-after-round-3`). `--fix-check HEAD:reviewer:MODEL:VERDICT` writes it. Its reviewed head must differ from Head. A FAIL is open. A PASS counts as its round passing in any round; after round 3 it keeps the net value round 3 gave; with no round recorded it reads open.
 - The comment never stores CI state. The merge tool reads CI live. `merge --reviewed` shows a draft
-  PR as `CI draft, no run`, because a draft has no CI run.
+  PR as `CI draft, no run`, because a draft has no CI run. A draft open over 12 hours whose newest record is missing, stale, bad or for another PR
+  prints `send back: #N session_ID (reason)` instead, and the batch runner sends each back to its lane session. No new gh call.
 - A body is not a record when the marker is missing, a field is malformed, round numbers skip, or a round is above 3.
 - The newest record for a head counts. A record for an old head is stale.
 - `merge <pr> --review-record --head <40-hex sha>` prints the body for the head the review read. When the PR's live head is another sha, it stops with exit 1 and prints no body, so a push after the review never relabels old rounds as current.
