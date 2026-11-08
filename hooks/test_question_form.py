@@ -1585,18 +1585,18 @@ def case_step_ruling_tail_stops_at_an_incident():
         check("step ruling tail: %r joins no unit" % carried, carried not in row, row[:200])
 
 
-# ------------------------------------------------------------------ the step pool: origin/main's, less the label openers (decision question-form)
+# ------------------------------------------------------------------ the step pool: main's, less label openers
 # The step candidate pool is origin/main's: a sentence is a candidate when it names ruling, owner or shiv, with no
 # owner-marker gate. The one exclusion kept is a sentence that OPENS with an Incident, Gripe or Deferred label. Each row
-# names one sentence and what the pool does with it. MAIN_POOL_RE is origin/main's RULING_WORDS, pinned as the reference.
-# LABEL_OPENER_RE is the exclusion as this test states it: the label at the clause start, after bullet or emphasis marks,
-# an enumerator, or at most two words (as in "Second incident"). A label mid-sentence is no opener.
+# names one sentence and what the pool does with it. MAIN_POOL_RE is origin/main's RULING_WORDS, pinned as the
+# reference. LABEL_OPENER_RE is the exclusion as this test states it: the label at the clause start, after bullet or
+# emphasis marks, an enumerator, or at most two words (as in "Second incident"). A label mid-sentence is no opener.
 MAIN_POOL_RE = re.compile(r"ruling|owner|shiv", re.I)
 LABEL_OPENER_RE = re.compile(r"\A[\s*_>#+-]*(?:\(\d+\)\s*)?(?:[\w'-]+\s+){0,2}(?:incident|gripe|deferred)s?\b", re.I)
 SENTENCE_BREAK = re.compile(r"(?<=[.!?])\s+")
-# Recall rows: sentences origin/main's pool keeps and 284dafb3c drops, none opening with a label. Each is verbatim from a
-# step note (field note or why) on origin/roadmap, the corpus docs/decisions/question-form.md counts. A step with one
-# sentence gives one unit, so the sentence is the unit.
+# Recall rows: sentences origin/main's pool keeps and 284dafb3c drops, none opening with a label. Each is verbatim
+# from a step note (field note or why) on origin/roadmap, the corpus docs/decisions/question-form.md counts. A step
+# with one sentence gives one unit, so the sentence is the unit.
 STEP_POOL_RECALL = (
     ("o15", "Done: lane PR 632 (rulings and tasks from owner feedback need a tracked home) landed in batch PR 637, "
             "merged to main as 54be9f1 on Oct 26."),
@@ -1622,8 +1622,9 @@ STEP_POOL_RECALL = (
     ("c164", "Note: a non-writer owner that rewrites an item may republish a design, which only the writer should do."),
     ("waiting-data-in-repo", "Owner hold: its draft PR merges only on the owner's word."),
 )
-# Exclusion rows: sentences origin/main's pool keeps that OPEN with an Incident, Gripe or Deferred label. The pool drops
-# each one, so its step gives no unit at all (the empty state). The label may carry a qualifier, a bullet or an enumerator.
+# Exclusion rows: sentences origin/main's pool keeps that OPEN with an Incident, Gripe or Deferred label. The pool
+# drops each one, so its step gives no unit at all (the empty state). The label may carry a qualifier, a bullet or an
+# enumerator.
 STEP_POOL_LABEL_OPENERS = (
     "Incident: the owner's ruling was read as a yes.",
     "Incident today (shiv, Nov 6): a lane merged without the owner's ruling.",
@@ -1633,8 +1634,8 @@ STEP_POOL_LABEL_OPENERS = (
     "Second incident (shiv, Nov 3): a lane merged the owner's ruling by hand.",
     "Deferred (shiv, Oct 27 04:22 CDT): the live waiting pages (home-app, degen, mailaudit) belong to a third account; "
     "both the cloud and the Mac get 404.",
-    "Gripe, Oct 28 (shiv, in triage 11's session): on a task item (no option picker) the page offers only Mark done and "
-    "a note.",
+    "Gripe, Oct 28 (shiv, in triage 11's session): on a task item (no option picker) the page offers only Mark done "
+    "and a note.",
     "Deferred (needs shiv): does the designer run /design itself, or does shiv run it and hand the canvas over.",
     "Incident the same hour: a question's 'Departs from' line described main wrongly (owner, 16:23 CST).",
 )
@@ -1647,7 +1648,7 @@ STEP_POOL_MID_SENTENCE = (
 
 
 def case_step_pool_keeps_recall_rows():
-    """Each row is a sentence origin/main's pool keeps and this pool drops, with no label opening it: the pool keeps it."""
+    """Each row is a sentence origin/main's pool keeps and this pool drops, with no label opening it: keep it."""
     import question_form  # the one form check (hooks/question_form.py)
     fn = getattr(question_form, "_step_rulings", None)
     check("step pool recall: question_form._step_rulings exists", callable(fn), "missing function")
@@ -1665,7 +1666,8 @@ def case_step_pool_keeps_recall_rows():
 def case_step_pool_keeps_main_ruling_sentences_but_label_openers():
     """Aggregate over the corpus: every sentence origin/main's pool keeps, less the label openers, is kept by this pool.
     The step notes come from the production reader (question_form._read_steps) on this checkout's origin/roadmap. A read
-    that fails, or a ref that is absent, fails the row by name."""
+    that fails, or a ref that is absent, fails the row by name. A sentence whose words are all stopwords (`Owner ask
+    ask-mw5ax2zb2j (12:21 CST).`) shares no word with any question, so no question can reach it: it is not measured."""
     import question_form  # the one form check (hooks/question_form.py)
     fn = getattr(question_form, "_step_rulings", None)
     read = getattr(question_form, "_read_steps", None)
@@ -1683,7 +1685,8 @@ def case_step_pool_keeps_main_ruling_sentences_but_label_openers():
         for field in steps[step_id]:
             if isinstance(field, str):
                 for sentence in SENTENCE_BREAK.split(field.strip()):
-                    if sentence and MAIN_POOL_RE.search(sentence) and not LABEL_OPENER_RE.search(sentence):
+                    if (sentence and MAIN_POOL_RE.search(sentence) and not LABEL_OPENER_RE.search(sentence)
+                            and question_form._words(sentence)):
                         required.append((step_id, sentence))
     check("step pool corpus scope: origin/main's pool holds sentences to measure", len(required) > 0,
           "no sentence in the corpus names ruling, owner or shiv")
@@ -1692,7 +1695,7 @@ def case_step_pool_keeps_main_ruling_sentences_but_label_openers():
     detail = ""
     if missed:
         detail = "%d of %d dropped; first %s: %s" % (len(missed), len(required), missed[0][0], missed[0][1][:100])
-    check("step pool corpus: every origin/main pool sentence with no label opener is kept (%d sentences)" % len(required),
+    check("step pool corpus: every main pool sentence with no label opener is kept (%d sentences)" % len(required),
           not missed, detail)
 
 
