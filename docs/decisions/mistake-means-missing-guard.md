@@ -7,6 +7,12 @@ Owner, 2026-11-06 11:38 CST: AI sometimes assumes it broke something by accident
 - The report names the guard that would have stopped the mistake: built (a PR or commit), queued as `step:<slug>`, or a debt.
 - An apology alone is not a fix.
 
+Owner, 2026-11-08 11:27 CST, typed in lane notes-fix-reverify-large: "any sort of thing that requires sessions to make habits should be triggers for a step to be created and a fix to be in the works or at least queued for one; this goes against our mandates of codifying stuff that can be mechanized rather than having temporal states".
+
+- A habit, a brief line or a promise to remember is no guard. Only a PR, a commit, `step:<slug>` or a debt counts.
+
+Incident, 2026-11-08 11:26 CST: a lane report said "Guard: future merge briefs run `lint/check_silent_undo.py` before the push." Its admission named the builders, not "I", so the check never read the guard line. The step for that mistake is `step:merge-main-silent-undo-precheck` (a push of a main merge is checked for dropped lines).
+
 Incident, 2026-11-06: the coordinator ran `sed -i '$d'` on its feedback inbox to drop the last item. The command deleted the closing code fence instead. Only the Stop check in `hooks/feedback_guard.py` caught it, one turn later. The same day, the coordinator trusted a stale decision line and called a lane idle while the lane's PR was open.
 
 More incidents, 2026-11-06, from the batch of PR #1034 (a batch of lanes), each with the guard it lacked. Neither guard is built.
@@ -23,6 +29,8 @@ More incidents, 2026-11-06, from the batch of PR #1034 (a batch of lanes), each 
 - A negator clears the admission only when at most three words sit between it and the fault word. "Nothing I did broke the build" passes. "I did not run the check and broke the build" blocks.
 - Quoted and backticked text, fences and URLs are read as text, never as an admission. So a report can quote the owner's words.
 - A guard is named when the Deviations item holds `step:<slug>`, the word debt, or a sentence with a guard, check or hook word and a PR or commit ref. These words match in any case. It may sit in any bullet of the item. This read keeps backticked text, so `` `step:<slug>` `` counts.
+- A guard line, one that labels its guard (`Guard:` or `guard —`), names a PR or commit ref, `step:<slug>` or a debt between the label and the end of its line, in any section. The check reads it with or without an admission.
+- The word debt counts only in a clause with no negator, so "a debt is not needed" names no debt.
 - `step:<slug>` is checked for its form only. The check does not read the roadmap.
 - The check reads only landed turns, as the rest of the report guard does. An admission in a turn that landed nothing is not checked.
 - The report guard refuses once per turn. A correction after the refusal is not checked again, as for every other report check.
