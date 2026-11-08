@@ -336,9 +336,10 @@ def undrafted_pr_create(segment: str) -> bool:
 # on and name that pull request's live head. A hand-typed head is how a record goes stale the moment it is
 # posted. The remedy is the render, which fills the live head itself.
 # An edit of a comment (`gh api` on issues/comments/<id>, `--edit-last`, the MCP update tool) whose new body is marked is refused
-# after the form check, stamped or not.
+# after the form check, stamped or not. An edit whose new body has no marker reads the old body once and is refused when that holds
+# a record, or when the read could not run.
 # Cost: the form check reads no pull request and no file. One pull request read per marked post that passes it (`Host.pr`), none
-# for a post with no marker. A marked edit makes no read. A read that fails allows the
+# for a post with no marker. A marked edit makes no read; an unmarked edit makes one. A read that fails allows the
 # post with a note on stderr: a network blip must not block every post. A malformed body is refused before any read.
 REVIEW_COMMENT_TOOL = "mcp__github__add_issue_comment"
 # The update tool replaces a comment's text: a marked body is refused as an edit (REVIEW_EDIT_REASON).
@@ -363,6 +364,18 @@ REVIEW_EDIT_REASON = (
     "A record is rendered by the merge tool for the live head, and an edited one was rendered by no run. "
     "Remedy: post a fresh record. Run `%s` and post its output as a new comment. "
     "(decision pr-review-record, an edit of a record comment is refused)"
+)
+REVIEW_WITHDRAW_REASON = (
+    "Rule (pr-review-record): this edit would overwrite a comment that holds a review record, so the record would be gone. "
+    "A record is never edited into a note. "
+    "Remedy: post a separate withdrawal comment, then post a fresh record. Run `%s` and post its output as a new comment. "
+    "(decision pr-review-record, an edit of a record comment is refused)"
+)
+REVIEW_OLD_UNREAD_REASON = (
+    "Rule (pr-review-record): the read of the comment's current body could not run (%s), so the edit is refused. "
+    "The old body may hold a review record. "
+    "Remedy: run the edit again when `gh` can read the comment, or post a new comment. "
+    "(decision pr-review-record, hooks fail closed on a read that cannot run)"
 )
 
 
@@ -440,15 +453,55 @@ def _edit_reason(module):
     return "edit of a review record comment", REVIEW_EDIT_REASON % _review_render(module, "<pr>", "<live head>")
 
 
-def review_record_hit(bodies, repo: str, selector, where: str, edit: bool = False):
+def _old_body(host, edit):
+    """The one read of the body an edit replaces. `edit` is ("comment", id) for an edit that names a comment, or ("last", selector)
+    for `--edit-last`, which edits the caller's last comment on that pull request: the newest comment of the listing (the listing
+    names its authors, but the caller's login is a second read, so a newer comment by another user hides the record: a limit).
+    A read that fails raises."""
+    kind, ref = edit
+    if kind == "comment":
+        if not isinstance(ref, int) or isinstance(ref, bool):
+            raise RuntimeError("the call names no comment id")
+        code, out = host.api("issues/comments/%d" % ref)
+        if code:
+            raise RuntimeError("reading the comment failed")
+        return str(json.loads(out).get("body") or "")
+    code, out = host.api("issues/%d/comments" % host.pr_number(ref), "--paginate")
+    if code:
+        raise RuntimeError("reading the comments failed")
+    rows = [row for page in json.loads(out) for row in (page if isinstance(page, list) else [page])]
+    return str(rows[-1].get("body") or "") if rows else ""
+
+
+def _old_body_hit(edit, repo: str, where: str):
+    """Return (matched, reason) for an edit whose new body holds no marker but whose old body does, or whose old body could not be
+    read, else None. One read of the old body."""
+    module = merge_module()
+    try:
+        if module is None:
+            raise RuntimeError("the merge tool could not be loaded")
+        with module.shared_deadline(MERGE_READ_TIMEOUT):
+            old = _old_body(module.Host(repo=repo or None, cwd=where or None), edit)
+    except (Exception, SystemExit) as e:
+        why = cap_safe((str(e).splitlines() or [type(e).__name__])[0], 80)
+        return "edit of a comment, old body not read", REVIEW_OLD_UNREAD_REASON % why
+    if module.review_marked(old):
+        return "edit of a comment that holds a review record", REVIEW_WITHDRAW_REASON % _review_render(module, "<pr>", "<live head>")
+    return None
+
+
+def review_record_hit(bodies, repo: str, selector, where: str, edit=None):
     """Return (matched, reason) when a comment post must be refused, else None.
 
     `bodies` are the texts the post would send, `selector` names the pull request it goes to (a number, a URL, a branch,
-    or '' for the current branch's), `repo` is OWNER/NAME or ''. No body holding the marker: None, and no read. `edit` is true when the
-    body replaces a comment's text (a PATCH of the comment, `--edit-last`, the MCP update tool): a marked body is refused
-    after the form check and before any read, because an edited record was rendered by no run. Limit: an edit that strips
-    the marker is not seen without a read of the old body, and a stripped record reads as no record."""
+    or '' for the current branch's), `repo` is OWNER/NAME or ''. A post with no body holding the marker: None, and no read.
+    `edit` is None for a post. For a body that replaces a comment's text (a PATCH of the comment, `--edit-last`, the MCP update
+    tool) it names the comment, ("comment", id) or ("last", selector). A marked new body is refused after the form check and
+    before any read, because an edited record was rendered by no run. An unmarked new body makes one read of the old body
+    (`_old_body`) and is refused when that holds a record, or when the read could not run. No new body known: None, no read."""
     found = _marked_bodies(bodies)
+    if edit and not found:
+        return _old_body_hit(edit, repo, where) if any(isinstance(b, str) for b in bodies) else None
     if not found:
         return None
     module, marked = found

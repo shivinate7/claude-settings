@@ -124,8 +124,8 @@ Shell tools (Bash, PowerShell), in judge_shell order:
   draft-pr             deny. A `gh pr create` without `--draft`, or an MCP create_pull_request without
                        draft true. (draft-until-reviewed)
   pr-review-record     deny. A marked review record posted with a wrong or hand-typed head or number, as a comment
-                       or as an MCP add_issue_comment, or any edit of a comment to a marked body (gh api PATCH,
-                       --edit-last, MCP update_issue_comment).
+                       or as an MCP add_issue_comment, or any edit of a comment to a marked body, or of a
+                       comment that holds a record (gh api PATCH, --edit-last, MCP update_issue_comment).
   records-page         deny. A `git commit` whose docs/records.md differs from the base's page.
                        (records-index-at-merge)
   conflict-markers     deny. A `git commit` that would hold a start, a lone mid and an end conflict marker
@@ -1539,21 +1539,22 @@ def review_post_hit(segment: str, raw: str, where: str, before: int, previous: s
     rest = gh_call_of(ansi_c_decoded(segment))   # bash sends a `$'...'` body decoded
     if rest is None:
         return None
-    edit = False
+    edit = None
     if rest[:2] in (["pr", "comment"], ["issue", "comment"]):   # an issue comment reaches the same pull request
         args = rest[2:]
-        edit = any(a in ("--edit-last", "--edit-last=true", "-e") for a in args)
         selector, repo = _comment_target(args)
+        if any(a in ("--edit-last", "--edit-last=true", "-e") for a in args):
+            edit = ("last", selector)
         texts, files, stdin = message_sources(args, "comment")
     elif rest[:1] == ["api"]:
         posted = _api_post_bodies(rest)
         if posted is None:
             posted = _api_post_bodies(rest, _COMMENT_EDIT_ROUTE)
-            edit = posted is not None   # an edit names a comment, not a pull request: a marked body is refused, no read
+            edit = ("comment", int(posted[1])) if posted is not None else None   # an edit names a comment, not a pull request
         if posted is None:
             return None
         repo, selector, texts, files, stdin = posted
-        selector = str(selector)
+        selector = "" if edit else str(selector)   # a comment edit's number is a comment id, not a pull request
     else:
         return None
     texts, files = list(texts), list(files)
@@ -5035,9 +5036,11 @@ def judge(payload) -> None:
         elif isinstance(tool_input.get("body"), str) and "review-record" in tool_input["body"]:
             review_note("the call names no pull request number")
 
-    # The update tool replaces a comment's text. A marked body is refused before any read, so the call needs no comment id.
+    # The update tool replaces a comment's text: a marked body is refused before any read, any other makes one read of the old body.
     if tool == UPDATE_COMMENT_TOOL:
-        hit = review_record_hit([tool_input.get("body")], "", "", cwd, True)
+        owner, name = tool_input.get("owner"), tool_input.get("repo")
+        repo = owner + "/" + name if isinstance(owner, str) and isinstance(name, str) else ""
+        hit = review_record_hit([tool_input.get("body")], repo, "", cwd, ("comment", tool_input.get("comment_id")))
         if hit:
             refuse(tool, "deny", "pr-review-record", hit[1], hit[0])
 
