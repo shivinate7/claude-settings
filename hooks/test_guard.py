@@ -28682,12 +28682,12 @@ for _label, _check in _BRIEF_MARKER_CHECKS:
     FIXTURELESS_CHECKS.add(_check)
 
 
-# ---- B4: the fix check marker (owner item 351 a, 2026-11-07 14:44 CST; coordinator pick, 2026-11-08 14:44 CST). A
-# reviewer's fix check carries no round, so it lifts to Sonnet on FIX_CHECK_MARKER. The marker counts only when the brief's
-# first non-blank line starts with it, leading spaces and tabs aside, and it is case-sensitive: text ahead of it on that
-# line does not count. It lifts a reviewer on Sonnet only: Haiku passes on its own row, Opus stays under the ceiling, and a
-# builder, a test-author or an Explore gets no lift. The constant is read from shared_names at module load, never copied.
-# Until it is built, it reads as FIX_UNBUILT, so each case fails on its assert, not on an import error.
+# ---- B4: the fix check marker (owner item 444 a, 2026-11-08 15:04 CST). A reviewer's fix check carries no round, so it
+# lifts to Sonnet on FIX_CHECK_MARKER. The marker counts only when the brief's first non-blank line starts with it, leading
+# spaces and tabs aside, and it is case-sensitive: text ahead of it on that line does not count. It lifts a reviewer on
+# Sonnet only: Haiku passes on its own row, Opus stays under the ceiling, and a builder, a test-author or an Explore gets no
+# lift. The constant is read from shared_names at module load, never copied. A missing constant reads as FIX_UNBUILT, so
+# each case fails on its assert, not on an import error.
 FIX_UNBUILT = "FIX_CHECK_NOT_BUILT"
 try:
     FIX_MARKER = getattr(_shared_names_under_test(), "FIX_CHECK_MARKER", FIX_UNBUILT)
@@ -28779,6 +28779,11 @@ role_model_refuse("role-model: fix check: the marker on line two does not lift a
                   carries=(ROLE_REMEDY, FIX_MARKER))
 role_model_refuse("role-model: fix check: a lowercase marker on line one does not lift a reviewer on sonnet, and the "
                   "remedy names the marker", "reviewer", "sonnet", FIX_MARKER_LOWER + ". Re-run the cases.",
+                  carries=(ROLE_REMEDY, FIX_MARKER))
+# The lift reaches only a model below the top rank. A model the table does not rank counts above it, so the marker does not
+# lift a reviewer on it. Its refusal still names the marker, as every reviewer refusal does.
+role_model_refuse("role-model: fix check: reviewer on claude-fable-5-1 with the marker on line one is denied, the lift "
+                  "does not reach an unranked model", "reviewer", "claude-fable-5-1", FIX_MARKER + ". Re-run the cases.",
                   carries=(ROLE_REMEDY, FIX_MARKER))
 role_opus_refuse("role-model: fix check: reviewer on opus with the marker is denied under agent-model-cap, the ceiling holds",
                  "reviewer", "opus", FIX_MARKER + ". Re-run the cases.")
