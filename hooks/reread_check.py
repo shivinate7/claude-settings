@@ -25,7 +25,8 @@ Spec: docs/decisions/precompact-handoff.md, item 9. One flag file per session,
 
 Never exits 2: bad stdin, a failed import of the sibling precompact_handoff, and every
 other failure exit 0. Importing this module never exits: without the sibling,
-`unread_handoff` returns "".
+`ph` is None and `unread_handoff` returns "". The guard reads `ph` at load and refuses as
+guard-crash when it is None (decision install-hooks-whole), so that "" never judges a call.
 """
 import json
 import os

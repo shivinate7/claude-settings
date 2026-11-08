@@ -2286,8 +2286,12 @@ MUTATIONS = [
      '        _loading = "reread_check"\n        import reread_check\n',
      '        _loading = "reread_check"\n        try:\n            import reread_check\n'
      '        except ImportError:\n'
-     '            reread_check = type("R", (), {"unread_handoff": staticmethod(lambda payload: "")})\n',
+     '            reread_check = type("R", (), {"ph": 1, "unread_handoff": staticmethod(lambda payload: "")})\n',
      "guard", "a guard copy without reread_check.py refuses as guard-crash"),
+    ("handoff-unread: a reread_check without its precompact_handoff sibling is let load again",
+     '        if reread_check.ph is None:',
+     '        if False:',
+     "guard", "a guard copy without precompact_handoff.py refuses as guard-crash"),
     ("handoff-unread: an agent's call is judged like the main session's",
      '        if ph is None or not isinstance(payload, dict) or payload.get("agent_id"):',
      '        if ph is None or not isinstance(payload, dict):',

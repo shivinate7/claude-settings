@@ -30,7 +30,7 @@ Every tool the guard judges, first of the refusals (`judge`, after the Read and 
 set_override_veto and session_home_keep):
   handoff-unread       deny. After compaction, a call from the main session while its handoff is
                        unread. The reason names the handoff and says to Read it. A payload with
-                       `agent_id` passes. An override lifts it. A failed import of reread_check refuses as guard-crash at load.
+                       `agent_id` passes. An override lifts it. A failed import of reread_check, or of its sibling precompact_handoff, refuses as guard-crash at load.
                        (precompact-handoff, item 9)
 
 Shell tools (Bash, PowerShell), in judge_shell order:
@@ -427,6 +427,8 @@ while True:
         # guard_kill imports proc_env above, so its failure surfaces under guard_kill's name.
         _loading = "reread_check"
         import reread_check
+        if reread_check.ph is None:   # reread_check never raises on its sibling, so the guard reads the gap
+            raise ImportError("reread_check could not import precompact_handoff")
 
         _loading = "install-id"
         if _install_ids_differ():
@@ -435,7 +437,7 @@ while True:
     except Exception as exc:
         if time.monotonic() < _load_deadline:
             time.sleep(_LOAD_STEP_SECONDS)
-            for _name in ("git_reads", "guard_core", "reread_check", "proc_env") + _FAMILY_MODULES:
+            for _name in ("git_reads", "guard_core", "reread_check", "precompact_handoff", "proc_env") + _FAMILY_MODULES:
                 sys.modules.pop(_name, None)
             importlib.invalidate_caches()
             _loading = "guard_core"
