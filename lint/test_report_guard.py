@@ -4301,6 +4301,19 @@ class AnsweredNeedsSourceTests(unittest.TestCase):
             with self.subTest(line=line):
                 self.assert_blocked(line, line)
 
+    def test_an_red_refusal_names_the_inline_code_span_route(self):
+        # Ruling (coordinator, 15:57 CST): the refusal text names the inline code span route. The verdict does not
+        # change. Control first: the same line with the word in backticks is no claim, so it returns ''.
+        # Catches: the reason names only "say what is meant in other words", so a session never learns the route.
+        import report_guard  # noqa: E402  answered_problem, the refusal text (lint/report_guard.py)
+
+        self.assertEqual(report_guard.answered_problem("The `answered` check blocks this line."), "",
+                         "the inline code span control is refused: the existing exemption broke")
+        refusal = report_guard.answered_problem("The answered check blocks this line.")
+        self.assertTrue(refusal, "the verdict changed: a bare answered line is no longer refused")
+        self.assertIn("inline code span", refusal,
+                      "the refusal text does not name the inline code span route: %r" % refusal)
+
     # Green: these pass before the verdict exists too. Each guards against a false alarm.
 
     def test_an_green_each_source_cites_the_word(self):

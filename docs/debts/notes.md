@@ -1461,3 +1461,4 @@
 - split-sentence-eight-copies: the worktree-isolation split sentence is copied into 8 agent files; its one home could be COMMON in hooks/agent_brief.py, and claude-code-guide gets no copy (agents/*.md). Decision: none
 - split-sentence-command-term: the split sentence says "command" for a whole shell call, which GLOSSARY.md names a shell call (agents/*.md). Decision: none
 - designer-context-test-one-kind: the designer context case accepts informed or directed, so a sentence that names only one kind stays green (hooks/test_blind_brief.py near line 571). The harm is a refused call, not an unsafe act. Decision: design-skills
+- answered-reason-test-phrase-only: the reason-text case asserts only the phrase "inline code span", so a reason that invites a claim into a code span stays green (lint/test_report_guard.py near line 4314). Decision: answered-needs-source
