@@ -279,6 +279,28 @@ class SignalKilled(Job):
         self.assertEqual((rc, self.verdicts(lines)), (1, ["FAIL"]), out)
 
 
+class SuiteKilled(Job):
+    """A suite that a signal kills inside a step reads FAIL, as on main. The suite's own process dies by the signal, and the
+    step's bash survives it and exits 128 + N. verdict sees a nonzero exit, not a signal, so the FAIL line has no `killed by signal`."""
+
+    def suite_run(self, signal_name):
+        return self.run_job(step("suite", "python3 -c 'import os, signal; os.kill(os.getpid(), signal.%s)'" % signal_name))
+
+    @unittest.skipIf(os.name == "nt", "kill(1) signals are POSIX")
+    def test_a_suite_killed_by_sigkill_inside_a_step_reads_fail_with_rc_137(self):
+        rc, lines, out = self.suite_run("SIGKILL")
+        self.assertTrue(any(line.startswith("FAIL") and " rc=137 " in line for line in lines), "scope: the step did not exit 137: " + out)
+        self.assertFalse(any("killed by signal" in line for line in lines), "the step's shell was signalled, not the suite: " + out)
+        self.assertEqual((rc, self.verdicts(lines)), (1, ["FAIL"]), out)
+
+    @unittest.skipIf(os.name == "nt", "kill(1) signals are POSIX")
+    def test_a_suite_killed_by_sigterm_inside_a_step_reads_fail_with_rc_143(self):
+        rc, lines, out = self.suite_run("SIGTERM")
+        self.assertTrue(any(line.startswith("FAIL") and " rc=143 " in line for line in lines), "scope: the step did not exit 143: " + out)
+        self.assertFalse(any("killed by signal" in line for line in lines), "the step's shell was signalled, not the suite: " + out)
+        self.assertEqual((rc, self.verdicts(lines)), (1, ["FAIL"]), out)
+
+
 class Conditions(Job):
     PR = "${{ github.event_name == 'pull_request' }}"
 
