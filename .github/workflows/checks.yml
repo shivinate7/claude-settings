@@ -1383,8 +1383,9 @@ jobs:
   checks-windows-merge-2:
     runs-on: windows-latest
     needs: scope
-    # A shard of checks-windows-merge: its figures and cap are there. all-jobs-passed needs it, so it has no job-level if (a draft
-    # skips it through needs: scope), and on a ready pull_request its steps skip unless merge_windows_full is on.
+    # A shard of checks-windows-merge, with the same cap.
+    # all-jobs-passed needs it, so it has no job-level if (a draft skips it through needs: scope), and on a ready pull_request its
+    # steps skip unless merge_windows_full is on.
     # n23 green, median 13.5, slowest green 14.5 min; run 42282722326 ended at the 15 min cap mid-suite (15.2 min or more).
     # Cap 22 is shared: it comes from merge-2's cap end (15.2 / 0.7 = 21.7, rounded up), not from this shard's slowest (decision ci-job-caps).
     timeout-minutes: 22
@@ -1409,8 +1410,9 @@ jobs:
   checks-windows-merge-3:
     runs-on: windows-latest
     needs: scope
-    # A shard of checks-windows-merge: its figures and cap are there. all-jobs-passed needs it, so it has no job-level if (a draft
-    # skips it through needs: scope), and on a ready pull_request its steps skip unless merge_windows_full is on.
+    # A shard of checks-windows-merge, with the same cap.
+    # all-jobs-passed needs it, so it has no job-level if (a draft skips it through needs: scope), and on a ready pull_request its
+    # steps skip unless merge_windows_full is on.
     # n25 green, median 12.5, slowest 13.8 min.
     # Cap 22 is shared: it comes from merge-2's cap end (15.2 / 0.7 = 21.7, rounded up), not from this shard's slowest (decision ci-job-caps).
     timeout-minutes: 22
@@ -1435,8 +1437,9 @@ jobs:
   checks-windows-merge-4:
     runs-on: windows-latest
     needs: scope
-    # A shard of checks-windows-merge: its figures and cap are there. all-jobs-passed needs it, so it has no job-level if (a draft
-    # skips it through needs: scope), and on a ready pull_request its steps skip unless merge_windows_full is on.
+    # A shard of checks-windows-merge, with the same cap.
+    # all-jobs-passed needs it, so it has no job-level if (a draft skips it through needs: scope), and on a ready pull_request its
+    # steps skip unless merge_windows_full is on.
     # n24 green, median 10.8, slowest 12.2 min.
     # Cap 22 is shared: it comes from merge-2's cap end (15.2 / 0.7 = 21.7, rounded up), not from this shard's slowest (decision ci-job-caps).
     timeout-minutes: 22
@@ -1461,8 +1464,9 @@ jobs:
   checks-windows-merge-5:
     runs-on: windows-latest
     needs: scope
-    # A shard of checks-windows-merge: its figures and cap are there. all-jobs-passed needs it, so it has no job-level if (a draft
-    # skips it through needs: scope), and on a ready pull_request its steps skip unless merge_windows_full is on.
+    # A shard of checks-windows-merge, with the same cap.
+    # all-jobs-passed needs it, so it has no job-level if (a draft skips it through needs: scope), and on a ready pull_request its
+    # steps skip unless merge_windows_full is on.
     # n25 green, median 11.8, slowest 13.7 min.
     # Cap 22 is shared: it comes from merge-2's cap end (15.2 / 0.7 = 21.7, rounded up), not from this shard's slowest (decision ci-job-caps).
     timeout-minutes: 22
