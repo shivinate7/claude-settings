@@ -40,7 +40,7 @@ The guard stops Claude's mistakes, not an attacker (`guard-guards-mistakes-only`
 
 ## Measure
 
-`MUTATE_ONLY=worktree-strands-agents: hooks/test_guard.py`: 4 refusals and 7 passes. `hooks/mutate_guard.py` carries one mutant per edge those cases pin, labelled `worktree-strands-agents:`.
+`MUTATE_ONLY=worktree-strands-agents: hooks/test_guard.py`: 6 refusals and 8 passes. `hooks/mutate_guard.py` carries one mutant per edge those cases pin, labelled `worktree-strands-agents:`.
 
 Kind: process
 Home: hooks/guard.py

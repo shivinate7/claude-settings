@@ -502,15 +502,30 @@ def stopped_ids(content):
     return [m.group(1)] if m else []
 
 
+def once_per_notice(ids, text, seen):
+    """ids, the first time this notice text is read, else none. The harness writes one notice on several
+    records (the enqueue, the queued attachment, a queue-operation remove, the user record). After a
+    SendMessage resume, a copy of the old notice can arrive again, and must not close the running agent.
+    A later notice of the same agent differs: it carries the resume call's tool-use id."""
+    if not ids:
+        return ids
+    key = text.strip()
+    if key in seen:
+        return []
+    seen.add(key)
+    return ids
+
+
 def open_agents(transcript):
     """The ids of this session's background agents that still run, oldest first. An agent opens on the
     answer to its spawn (toolUseResult.agentId, status async_launched) and reopens on a SendMessage
     answer that resumes it (resumedAgentId). It closes on a terminal task notice, unless the notice's
     summary says it waits on its own background work, or on the result of a TaskStop call. A foreground
     agent never opens: its answer is its end. A notice counts only as the start of a record's text (see
-    closed_by_notice), in a user record, a queued attachment or a queue-operation enqueue. Reads only
-    lines that hold one of the keys; raises on an unreadable file, so a caller that must not fail wraps the call."""
-    running, stops = {}, set()
+    closed_by_notice), in a user record, a queued attachment or a queue-operation line, and only at its
+    first record (see once_per_notice). Reads only lines that hold one of the keys; raises on an unreadable
+    file, so a caller that must not fail wraps the call."""
+    running, stops, seen = {}, set(), set()
     keys = (b"agentId", b"resumedAgentId", b"TaskStop", b"Successfully stopped") + NOTICE_KEY
     with open(transcript, "rb") as f:
         for line in f:
@@ -523,7 +538,7 @@ def open_agents(transcript):
                     att = rec.get("attachment")
                     notice = att.get("prompt") if isinstance(att, dict) else rec.get("content")
                     if isinstance(notice, str):
-                        for gone in closed_by_notice(notice, keep_waiting=True):
+                        for gone in once_per_notice(closed_by_notice(notice, keep_waiting=True), notice, seen):
                             running.pop(gone, None)
                     continue
                 content = rec["message"]["content"]
@@ -536,7 +551,7 @@ def open_agents(transcript):
                              and b.get("type") == "tool_use" and b.get("name") == "TaskStop"
                              and isinstance(b.get("id"), str))
             elif kind == "user":
-                for gone in closed_by_notice(text, keep_waiting=True):
+                for gone in once_per_notice(closed_by_notice(text, keep_waiting=True), text, seen):
                     running.pop(gone, None)
                 if isinstance(tur, dict):
                     if tur.get("status") == "async_launched" and isinstance(tur.get("agentId"), str):
