@@ -1657,10 +1657,8 @@ def review_post_hit(segment: str, raw: str, where: str, before: int, previous: s
     unseen_stdin = stdin and not judged_stdin
     if unseen_stdin and edit is None:
         review_note("the body comes from stdin and cannot be read")
-    hit = review_record_hit(texts, repo, selector, where, edit, variable=variable, unseen=bool(unseen), unread=unread)
-    if unseen_stdin and edit is not None and hit is None:   # an allowed edit's new body was never read; a refused edit prints no note
-        review_note("the body comes from stdin and cannot be read")
-    return hit
+    return review_record_hit(texts, repo, selector, where, edit, variable=variable, unseen=bool(unseen), unread=unread,
+                             stdin_unseen=bool(unseen_stdin))
 
 
 def cited_record_path(segment: str, raw: str, where: str, before: int) -> str:

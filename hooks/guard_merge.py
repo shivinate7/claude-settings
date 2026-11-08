@@ -491,9 +491,10 @@ def _old_body(host, edit):
     return str(rows[-1].get("body") or "") if rows else ""
 
 
-def _old_body_hit(edit, repo: str, where: str):
+def _old_body_hit(edit, repo: str, where: str, stdin_unseen: bool = False):
     """Return (matched, reason) for an edit whose new body holds no marker but whose old body does, or whose old body could not be
-    read, else None. One read of the old body."""
+    read, else None. One read of the old body. `stdin_unseen`: the new body came from stdin the guard cannot see, so an allowed edit
+    prints the not-checked note; a refused edit prints none."""
     module = merge_module()
     try:
         if module is None:
@@ -506,6 +507,8 @@ def _old_body_hit(edit, repo: str, where: str):
         return "edit of a comment, old body not read", REVIEW_OLD_UNREAD_REASON % (why, remedy)
     if module.review_marked(old):
         return "edit of a comment that holds a review record", REVIEW_WITHDRAW_REASON % _review_render(module, "<pr>", "<live head>")
+    if stdin_unseen:
+        review_note("the body comes from stdin and cannot be read")
     return None
 
 
@@ -532,7 +535,8 @@ def _body_file_reason(name):
     return "edit with a body file that could not be read", REVIEW_BODY_FILE_REASON % cap_safe(str(name), 80)
 
 
-def review_record_hit(bodies, repo: str, selector, where: str, edit=None, variable=(), unseen: bool = False, unread: str = ""):
+def review_record_hit(bodies, repo: str, selector, where: str, edit=None, variable=(), unseen: bool = False, unread: str = "",
+                      stdin_unseen: bool = False):
     """Return (matched, reason) when a comment post must be refused, else None.
 
     `bodies` are the texts the post would send, `selector` names the pull request it goes to (a number, a URL, a branch,
@@ -550,7 +554,7 @@ def review_record_hit(bodies, repo: str, selector, where: str, edit=None, variab
             return _body_file_reason(unread)
         if not unseen and not any(isinstance(b, str) for b in bodies):
             return None
-        return _old_body_hit(edit, repo, where)
+        return _old_body_hit(edit, repo, where, stdin_unseen)
     if not found:
         return None
     module, marked = found
