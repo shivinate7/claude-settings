@@ -264,9 +264,14 @@ MUTATIONS = [
     # _run_dir: it re-walks text strip_heredoc_bodies already stripped, whose dropped bodies took their closers.
     # Without read_on, the header left open reads every line after it as body: the tail's cd never moves the root.
     ("heredoc: _run_dir reads a stripped, unclosed header as body, the tail after a data body is lost",
-     '    cmd = _strip_heredoc_bodies_unconditionally(cmd, read_on=True)\n    where = None',
+     '    cmd = _strip_heredoc_bodies_unconditionally(cmd, read_on=isinstance(cmd, BodiesDropped))\n    where = None',
      '    cmd = _strip_heredoc_bodies_unconditionally(cmd)\n    where = None', "guard",
      'heredoc-tail: a data body, then cd into the dirty checkout and reset --hard, denies'),
+    # The same line: a really-unclosed raw body is body, only a stripped text reads on past its open header.
+    ("heredoc: _run_dir reads every open header on, a really-unclosed body is read as commands",
+     '    cmd = _strip_heredoc_bodies_unconditionally(cmd, read_on=isinstance(cmd, BodiesDropped))\n    where = None',
+     '    cmd = _strip_heredoc_bodies_unconditionally(cmd, read_on=True)\n    where = None', "guard",
+     'heredoc-tail: a reset in the dirty checkout, then an unclosed data body holding cd into the clean checkout, denies'),
     # _reads_only: a pure reader is no reader, so its operands count as run beside a runner.
     ("heredoc: a pure reader is not read as one, ls f piped into xargs runs f",
      '        if name in _READERS:\n            return True',

@@ -1168,9 +1168,18 @@ def _kept_bodies(text: str, bodies, body_at) -> set:
         keep |= more
 
 
+class BodiesDropped(str):
+    """The text `strip_heredoc_bodies` made by dropping each body with its closing line. Only that
+    path returns it: it dropped every body because every header was closed, so a header in the text
+    with no closing line after it was closed before the strip. A header in a plain `str` (the raw
+    command, which the strip returns whole when a body has no closer) is really unclosed.
+    `_run_dir` reads this type to tell the two apart; no other reader does."""
+
+
 def strip_heredoc_bodies(cmd: str, shells_only: bool = False) -> str:
     """Drop the body of every heredoc, and keep every header line. `shells_only` keeps a body
-    only when a shell reads it, for a rule that judges shell lines."""
+    only when a shell reads it, for a rule that judges shell lines. A strip that drops bodies
+    returns `BodiesDropped`."""
     if "<<" not in cmd:
         return cmd  # no heredoc: nothing to drop
     body_at = []
@@ -1196,7 +1205,7 @@ def strip_heredoc_bodies(cmd: str, shells_only: bool = False) -> str:
         return cmd  # the body may be executed, so keep it under inspection
     # A body stays in view only when a command runs the file it writes; every other body is text.
     keep = _kept_bodies(text, bodies, body_at)
-    return "\n".join([_drop_heredoc_bodies(cmd, keep) if keep else dropped] + runs)
+    return BodiesDropped("\n".join([_drop_heredoc_bodies(cmd, keep) if keep else dropped] + runs))
 
 
 # BANDAID (owner rule hold-unsafe-after-round-3: no safety hole that main lacks). This is main's header
@@ -1524,7 +1533,9 @@ def _run_dir(cmd: str, shell_cwd: str) -> str:
     `strip_heredoc_bodies` keeps for other callers: a `cd` line inside one never moves the
     OUTER shell, which is the tree this function answers about.
     """
-    cmd = _strip_heredoc_bodies_unconditionally(cmd, read_on=True)
+    # Text a strip already stripped lost each closing line, so a header with none was closed: read on past it.
+    # A raw command with a header that no line closes runs its body to the end: no read on.
+    cmd = _strip_heredoc_bodies_unconditionally(cmd, read_on=isinstance(cmd, BodiesDropped))
     where = None
     last_cd = None
     for segment in split_segments(cmd):
