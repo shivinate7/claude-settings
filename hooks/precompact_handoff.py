@@ -88,6 +88,14 @@ import shutil
 import sys
 import time
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+try:
+    from shared_names import config_dir  # noqa: E402  the one home of the config dir
+except ImportError:  # a copy by need: the hook lands before its sibling in an install, and must still build its digest
+    def _config_dir_fallback():
+        return os.environ.get("CLAUDE_CONFIG_DIR") or os.path.join(os.path.expanduser("~"), ".claude")
+    config_dir = _config_dir_fallback
+
 DIGEST_CAP = 60_000
 # With a handoff, the digest runs from its last rewrite, so it needs room for all of that span.
 DIGEST_SINCE_CAP = 200_000
@@ -112,11 +120,6 @@ DEFAULT_WINDOW = 500_000
 PREMISE_KINDS = ("ruling", "measured", "read", "notes", "assumed")
 _PREMISES_HEAD = re.compile(r"^##[ \t]+Working premises[ \t]*$", re.I | re.M)
 _PREMISE_LINE = re.compile(r"^[ \t]*[-*][ \t]+(P\d+)\b(?:[ \t]*\[([^\]\n]*)\])?", re.M)
-
-
-def config_dir():
-    return os.environ.get("CLAUDE_CONFIG_DIR") or os.path.join(
-        os.path.expanduser("~"), ".claude")
 
 
 def digest_path(session_id):
