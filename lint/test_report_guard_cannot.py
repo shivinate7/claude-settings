@@ -887,7 +887,7 @@ class CannotClaimTests(unittest.TestCase):
         out = self.stop([trg.human("push the branch"), *failed_bash("python3.12 x.py", "tu_x"), landed_reply(line)])
         self.assert_blocked_for(out, NO_TRY, line)
 
-    # ---- a script try backs its claim only when the line names the script; a CI blocker gates merges only; an object window stops at a joining noun
+    # ---- a script try backs its claim only when the line names the script; the CI and joining-noun skips are reverted (coordinator ruling 04:31 CST)
 
     def assert_blocks(self, out, line):
         """A block by the cannot-claim guard that lists `line`, whatever its variant."""
@@ -916,13 +916,14 @@ class CannotClaimTests(unittest.TestCase):
                 out = self.stop([trg.human("act now"), *exit_bash(command, code, "tu_s"), landed_reply(line)])
                 self.assert_passes(out, "a failed %s, named in the line" % command)
 
-    def test_cc_red_a_ci_blocker_passes_a_merge_claim_in_each_phrasing(self):
-        # Catches: a CI blocker in a phrasing the blocker clause does not reach, so the merge claim it gates blocked.
+    def test_cc_red_a_ci_blocker_blocks_a_merge_claim_in_each_phrasing(self):
+        # Catches: a CI state read as a merge blocker, so the merge claim beside it passed with no try. Coordinator ruling
+        # 04:31 CST, revert of skip widenings: these phrasings name no blocker, so the claim blocks.
         for line in ("I can't merge PR 12 because CI failed.", "I can't merge PR 12 as CI is red.",
                      "CI is red and I can't merge PR 12."):
             with self.subTest(line=line):
                 out = self.stop([trg.human("merge PR 12"), trg.assistant_text(line)])
-                self.assert_passes(out, "a merge claim gated by CI")
+                self.assert_blocked_for(out, NO_TRY, line)
 
     def test_cc_green_failing_ci_still_blocks_an_open_claim(self):
         # Control: CI gates a merge only, so an open claim with no try still blocks while CI has failed.
@@ -936,11 +937,12 @@ class CannotClaimTests(unittest.TestCase):
         out = self.stop([trg.human("merge PR 12"), trg.assistant_text(line)])
         self.assert_blocks(out, line)
 
-    def test_cc_red_an_object_window_stops_at_a_joining_noun(self):
-        # Catches: "open the CI logs and PR" read as an open of the PR, so the and joined a noun into the object.
+    def test_cc_red_an_object_window_does_not_stop_at_a_joining_noun(self):
+        # Catches: "open the CI logs and PR" read with the and ending the object, so the open of the PR went unread. Coordinator
+        # ruling 04:31 CST, revert of skip widenings: the and or or stop is reverted, so the PR is the object and the claim blocks.
         line = "I could not open the CI logs and PR."
         out = self.stop([trg.human("open the PR"), trg.assistant_text(line)])
-        self.assert_passes(out, "an open whose object is the CI logs, not the PR")
+        self.assert_blocked_for(out, NO_TRY, line)
 
     def test_cc_green_a_pr_object_or_a_verb_pair_still_claims(self):
         # Control: an object PR after a modifier, or a verb pair before the object, is still an open or create claim.
@@ -949,7 +951,7 @@ class CannotClaimTests(unittest.TestCase):
                 out = self.stop([trg.human("open the PR"), trg.assistant_text(line)])
                 self.assert_blocks(out, line)
 
-    # ---- a failed connection or health check is no blocker; the merge tool names the merge script; an and or or before a bare PR stops the object window only when no article precedes the PR
+    # ---- a failed connection or health check is no blocker; the merge tool names the merge script; the and or or stop of the object window is reverted (coordinator ruling 04:31 CST)
 
     def test_cc_red_a_failed_connection_is_no_blocker_for_a_merge_claim(self):
         # Catches: "CI failed to connect" and "the checks failed to connect" read as a CI blocker, so the merge claim beside
@@ -966,12 +968,13 @@ class CannotClaimTests(unittest.TestCase):
         out = self.stop([trg.human("merge PR 12"), trg.assistant_text(line)])
         self.assert_blocks(out, line)
 
-    def test_cc_green_a_ci_failure_passes_a_merge_claim(self):
-        # Control: CI failing, or CI red, names the blocker of a merge, so the merge claim passes.
+    def test_cc_red_a_ci_failure_blocks_a_merge_claim(self):
+        # Catches: CI failing, or CI red, read as a merge blocker, so the merge claim beside it passed with no try. Coordinator
+        # ruling 04:31 CST, revert of skip widenings: a CI state names no blocker here, so the claim blocks.
         for line in ("I can't merge PR 12 because CI failed.", "CI is red and I can't merge PR 12."):
             with self.subTest(line=line):
                 out = self.stop([trg.human("merge PR 12"), trg.assistant_text(line)])
-                self.assert_passes(out, "a merge claim whose blocker is CI")
+                self.assert_blocked_for(out, NO_TRY, line)
 
     def test_cc_red_the_merge_tool_names_the_merge_script(self):
         # Catches: "the merge tool" not read as naming the merge script, so a failed merge 12 did not back its claim
@@ -994,13 +997,14 @@ class CannotClaimTests(unittest.TestCase):
                 out = self.stop([trg.human("open the PR"), notice("github: failed to connect"), trg.assistant_text(line)])
                 self.assert_blocks(out, line)
 
-    def test_cc_green_an_and_joined_noun_before_a_bare_pr_is_no_claim(self):
-        # Control: "the CI logs and PR" joins a bare PR to a noun, so the open is of the logs and no claim.
+    def test_cc_red_an_and_joined_noun_before_a_bare_pr_still_claims(self):
+        # Catches: "the CI logs and PR" read as joining a bare PR to a noun, so the open passed as no claim. Coordinator ruling
+        # 04:31 CST, revert of skip widenings: the and or or stop is reverted, so the open is a claim and blocks.
         line = "I could not open the CI logs and PR."
         out = self.stop([trg.human("open the PR"), trg.assistant_text(line)])
-        self.assert_passes(out, "an open whose object is the CI logs and a bare PR")
+        self.assert_blocked_for(out, NO_TRY, line)
 
-    # ---- an and or or after create or raise stops the object window; a failed word before to, with, a colon or a paren is an outage; a failed CI state passes a merge claim
+    # ---- an and or or after create or raise does not stop the object window; a failed word before to, with, a colon or a paren is an outage; a CI state names no blocker (coordinator ruling 04:31 CST)
 
     def test_cc_red_a_create_or_raise_claim_with_and_or_or_still_blocks(self):
         # Catches: the and or or stop of the object window applied to open only, so "create the branch and PR" read its PR as
@@ -1025,12 +1029,12 @@ class CannotClaimTests(unittest.TestCase):
                 out = self.stop([trg.human("merge PR 12"), trg.assistant_text(line)])
                 self.assert_blocks(out, line)
 
-    def test_cc_red_a_ci_that_has_failed_passes_a_merge_claim(self):
-        # Catches: "CI has failed" read as no blocker, so the merge claim it stated blocked as having no try. The tail has
-        # failed names the CI state of a merge.
+    def test_cc_red_a_ci_that_has_failed_blocks_a_merge_claim(self):
+        # Catches: "CI has failed" skipped as a merge blocker, so the merge claim beside it passed with no try. Coordinator
+        # ruling 04:31 CST, revert of skip widenings: the has-failed tail names no blocker here, so the claim blocks.
         line = "I can't merge PR 12 because CI has failed."
         out = self.stop([trg.human("merge PR 12"), trg.assistant_text(line)])
-        self.assert_passes(out, "a merge claim whose blocker is CI that has failed")
+        self.assert_blocked_for(out, NO_TRY, line)
 
     def test_cc_red_a_connection_or_network_check_failure_is_an_outage_for_a_merge_claim(self):
         # Catches: "connection check" and "network check" read as a CI check blocker, so a merge claim beside an outage with
