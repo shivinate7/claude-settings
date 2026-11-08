@@ -19,18 +19,22 @@ judges (the one home), read from the install of this script, never from the repo
 the commits it brings in are.
 
 A ruling cite (`outcomes-grant-covers-named-act`): a commit message that makes a ruling claim names the ruling's home and
-its time. A claim is one of the phrases in RULING_CITE_RE: the owner, Shivam or the arbiter with `ruling`, `'s ruling`
-or `ruled` (also `owner-ruled`, `ruled by the owner`), or `per ruling`, `per the ruling`. It sits in the subject, the
-body or a trailer, outside backticks and fences (a fence is cut out whole, blank lines included). A negation
-(`no owner ruling`) is not a claim. The claim's own paragraph names a home and a time, or a `Ruling:` line in the
-trailer block does, both on that line; that line covers a claim in the subject or the trailer block, never in a body
-paragraph. A home is `item N x`, `item N, pick x`, `item <slug>`, `step:<slug>`, `rule:<id>`, or `decision <folder>/<slug>.md`
-(or `decision <slug>` when that file is in the commit's tree), the folder read from lint/layout.py. A time is a stamp in
-the forms of STAMP_FULL_RE and STAMP_CLOCK_RE (lint/report_guard.py, the one home): `YYYY-MM-DD HH:MM CST` or
-`HH:MM CST`. The FAIL line says which part is missing. It judges each non-merge, non-revert commit, whatever paths it
-touches. Rollout: it judges a commit only when its author date is at or after the author date of the first commit
-reachable from HEAD that adds RULING_CITE_RE to this file (one `git log -S` read per run), so a commit written before
-the rule landed is not judged, a cherry-pick of it included. The Red-run rule and its own gate are unchanged.
+its time. A claim is a claim form in RULING_CITE_RE, where the actor is the owner, Shivam or the arbiter: `per ruling`,
+`per the ruling`, `per the owner ruling`, `per the owner's ruling` (not `per ruling kind`); `under` or `following the
+owner's ruling`; `the owner ruled`, `as the owner ruled`, `owner-ruled`; `ruled by the owner`. A noun that only names a
+ruling (`files an owner ruling`, `arbiter ruling card`) is not a claim. It sits in the subject, the body or a trailer,
+outside backticks and fences (a fence is cut out whole, blank lines included). A negation (`not per the ruling`) is
+not a claim. The claim's own paragraph names a home and a time, or a `Ruling:` line in the trailer block does, both on
+that line; that line covers a claim in the subject or the trailer block, never in a body paragraph. A home is `item N`
+with an optional pick letter (`item N x`, `item N, pick x`), `item <slug>`, `ruling N x` (a page item), `step:<slug>`,
+`rule:<id>`, or `decision <folder>/<slug>.md` (or `decision <slug>` when that file is in the commit's tree), the folder
+read from lint/layout.py. A time is a stamp in the forms of STAMP_FULL_RE and STAMP_CLOCK_RE (lint/report_guard.py,
+the one home): `YYYY-MM-DD HH:MM CST` or `HH:MM CST`. The FAIL line says which part is missing. It judges a non-merge,
+non-revert commit, whatever paths it touches, when two gates hold. First, the commit's parent tree holds this file, so
+a repo whose HEAD lacks it (the installed copy run in another repo) and a commit after the file's removal are not
+judged. Second, the commit's author date is at or after the author date of the first commit reachable from HEAD that
+adds RULING_CITE_RE to this file (one `git log -S` read per run), so a commit written before the rule landed is not
+judged, a cherry-pick of it included. The Red-run rule and its own gate are unchanged.
 
 Limits: a pure rename of a test file reads as a delete and an add, so it needs `Red-run: none: <reason>`. A
 branch that merged a newer main carries main's commits in the range, and each is judged like the rest.
@@ -52,15 +56,19 @@ SELF_REL = "lint/check_red_run.py"
 RED = re.compile(r"^Red-run: \S.*? -> (\d+) failed on [0-9a-fA-F]{7,64}\s*$")
 REVERT = re.compile(r"^This reverts commit [0-9a-fA-F]{7,64}\.?\s*$", re.MULTILINE)
 NONE = re.compile(r"^Red-run: none: \s*\S.*$")
-# A ruling claim: the owner, Shivam or the arbiter as the one who ruled. The lookahead keeps a name such as `ruling-kind` out.
+# A ruling claim: a claim form only, never a noun that names a ruling ("files an owner ruling", "arbiter ruling card").
+# The lookaheads keep a name such as `ruling-kind` or `per ruling kind` out.
 _ACTOR = r"(?:the\s+)?(?:owner|shivam|arbiter)"
 RULING_CITE_RE = re.compile(
-    r"\b(?:%s(?:['’]s)?[\s-]+rulings?|%s[\s-]+ruled|ruled\s+by\s+%s|per\s+(?:the\s+)?rulings?)(?![\w-])"
-    % (_ACTOR, _ACTOR, _ACTOR), re.I)
-NEGATED_BEFORE = re.compile(r"\b(?:no|not|never|without|nor)\s+(?:(?:an?|the|any)\s+)?$", re.I)  # "no owner ruling" claims nothing
+    r"\bper\s+(?:the\s+)?(?:(?:owner|shivam|arbiter)(?:['’]s)?\s+)?rulings?(?![\w-]|\s+kind\b)"
+    r"|\b(?:under|following)\s+%s(?:['’]s)?\s+rulings?(?![\w-])"
+    r"|\b%s[\s-]+ruled(?![\w-])"
+    r"|\bruled\s+by\s+%s(?![\w-])" % (_ACTOR, _ACTOR, _ACTOR), re.I)
+NEGATED_BEFORE = re.compile(r"\b(?:no|not|never|without|nor)\s+(?:(?:an?|the|any)\s+)?$", re.I)  # "not per the ruling" claims nothing
 RULING_TRAILER = re.compile(r"^Ruling:[ \t]*(\S.*)$", re.MULTILINE)
 RULING_MARKER = "RULING_CITE_RE"  # the string whose first commit starts the rollout
-ITEM_HOME_RE = re.compile(r"\bitem\s+(?:\d+(?:\s*[a-z]\b|,\s*pick\s+[a-z]\b)|[a-z][a-z0-9]*(?:-[a-z0-9]+)+)", re.I)
+ITEM_HOME_RE = re.compile(r"\bitem\s+(?:\d+(?:\s*[a-z]\b|,\s*pick\s+[a-z]\b)?|[a-z][a-z0-9]*(?:-[a-z0-9]+)+)"
+                          r"|\bruling\s+\d+\s*[a-z]\b", re.I)  # `ruling 178 a` names a page item
 REF_HOME_RE = re.compile(r"\b(?:step|rule):[a-z0-9][\w-]*", re.I)
 DECISION_HOME_RE = re.compile(r"\bdecision\s+`?([\w./-]+)", re.I)
 FENCE_RE = re.compile(r"```.*?```", re.DOTALL)
@@ -116,8 +124,8 @@ def decision_named(root, sha):
 
 
 def has_home(text, named):
-    """True when the text names a home: `item N x`, `item N, pick x`, `item <slug>`, `step:<slug>`, `rule:<id>`, or a
-    decision file (`named`)."""
+    """True when the text names a home: `item N` (pick letter optional), `item <slug>`, `ruling N x`, `step:<slug>`,
+    `rule:<id>`, or a decision file (`named`)."""
     return bool(ITEM_HOME_RE.search(text) or REF_HOME_RE.search(text)
                 or any(named(m.group(1)) for m in DECISION_HOME_RE.finditer(text)))
 
@@ -200,12 +208,13 @@ def gaps(root, base):
     for sha, parent, subject, message, authored in commits(root, base):
         if parent is None or REVERT.search(message):
             continue
-        if not (rollout and not check_landed(root, parent)):
+        landed = check_landed(root, parent)
+        if landed or not rollout:
             paths = added_test_paths(root, parent, sha)
             if paths and not has_trailer(message):
                 shown = ", ".join(paths[:MAX_PATHS]) + (" and %d more" % (len(paths) - MAX_PATHS) if len(paths) > MAX_PATHS else "")
                 found.append(("red", "check_red_run: FAIL: %s %s: adds lines to %s with no valid Red-run trailer" % (sha[:7], subject, shown)))
-        if since is not None and authored >= since:
+        if landed and since is not None and authored >= since:
             lacks = missing_cite(message, decision_named(root, sha))
             if lacks:
                 found.append(("ruling", "check_red_run: FAIL: %s %s: cites a ruling with %s in the claim's paragraph" % (sha[:7], subject, lacks)))
@@ -240,7 +249,7 @@ def main(args):
               "`Red-run: none: <reason>` for a change that adds no new claim, to the commit message.")
     if "ruling" in kinds:
         print("check_red_run: in the claim's paragraph, or in a `Ruling:` trailer line, name the ruling's home "
-              "(`item N x`, `step:<slug>`, `decision <slug>` or `rule:<id>`) and its time "
+              "(`item N x`, `ruling N x`, `step:<slug>`, `decision <slug>` or `rule:<id>`) and its time "
               "(`YYYY-MM-DD HH:MM CST` or `HH:MM CST`). A phrase that only names a thing goes in backticks.")
     if bad:
         trailer = "Red-run: ..." if "red" in kinds else "Ruling: ..."
