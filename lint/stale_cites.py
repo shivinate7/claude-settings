@@ -124,6 +124,7 @@ sys.dont_write_bytecode = True  # the cost contract: a run writes no file, so no
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "hooks"))
 import _nowindow  # noqa: E402  the one home of a no-window child start (hooks/_nowindow.py)
 import layout  # noqa: E402  the one home of where a repo keeps its decisions (lint/layout.py)
+from ste_lint import INLINE_CODE_RE, code_span_text  # noqa: E402  the one home of the inline-code mask (lint/ste_lint.py)
 from precompact_handoff import PREMISE_KINDS  # noqa: E402  the one home of the premise kinds (hooks/precompact_handoff.py)
 import route_match  # noqa: E402  the one home of the route rows file's path (hooks/route_match.py)
 from rule_audit import ANCHOR_RE, RULE_FILES  # noqa: E402  the one home of the anchor pattern and the rule files
@@ -415,7 +416,6 @@ def names_in(source):
 # differences by design: a cite with no FILE takes its file from the map line above in MAP9, and here it is no cite;
 # MAP9 skips fenced blocks, and here they count as prose, as for every other code.
 VALUE_CITE_RE = re.compile(r"(?:(\S+?):\s+)?(\S+)\s+=\s+(.+)")
-SPAN_RE = re.compile(r"`([^`]+)`")
 GONE = "gone"  # `tree_value` answer: the module assigns no such name
 ABSENT = "absent"  # `ValueReader.tree` answer: no tracked file has the path
 
@@ -423,8 +423,8 @@ ABSENT = "absent"  # `ValueReader.tree` answer: no tracked file has the path
 def value_cites(line):
     """(file, symbol, literal text) for each backtick span of the line that holds a value cite with a file."""
     found = []
-    for span in SPAN_RE.finditer(line):
-        match = VALUE_CITE_RE.fullmatch(span.group(1))
+    for span in INLINE_CODE_RE.finditer(line):
+        match = VALUE_CITE_RE.fullmatch(code_span_text(span))
         if match and match.group(1):
             found.append((match.group(1), match.group(2), match.group(3)))
     return found

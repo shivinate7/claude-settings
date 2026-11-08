@@ -19,12 +19,12 @@ import sys
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import layout  # noqa: E402  the one home of where records live (lint/layout.json)
+from ste_lint import INLINE_CODE_RE  # noqa: E402  the one home of the inline-code mask (lint/ste_lint.py)
 
 RECORD = os.path.join(ROOT, *layout.path(ROOT, "decisions").split("/"), "agent-model-cap.md")
 SKILLS = os.path.join(ROOT, "skills")
 ROW = re.compile(r"^\|\s*skill `([^`]+)`\s*\|")
 FENCE = re.compile(r"^(`{3,}|~{3,})")
-CODE_SPAN = re.compile(r"(`+)(?!`).+?(?<!`)\1(?!`)")
 PHRASES = ("no model pin", "runs on the caller's model")
 
 
@@ -35,7 +35,7 @@ def opens_comment(s, inside):
         if "-->" not in s:
             return True
         s = s.split("-->", 1)[1]
-    s = CODE_SPAN.sub("", s)
+    s = INLINE_CODE_RE.sub("", s)
     pos = s.find("<!--")
     while pos != -1:
         end = s.find("-->", pos + 4)

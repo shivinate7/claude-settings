@@ -450,6 +450,12 @@ _PH_RE = re.compile(r"\x00\d+\x00+")
 # unclosed run from opening a shorter span mid-run. Used by the linter and the fixer.
 INLINE_CODE_RE = re.compile(r"(?<!`)(`+)(?!`).*?(?<!`)\1(?!`)")
 
+
+def code_span_text(match):
+    """The text inside one INLINE_CODE_RE match, without its backtick runs."""
+    run = len(match.group(1))
+    return match.group()[run:-run]
+
 MASK_PATTERNS = [
     INLINE_CODE_RE,                                 # inline code
     re.compile(r"!\[[^\]]*\]\([^)]*\)"),            # image

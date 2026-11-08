@@ -64,6 +64,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 from check_skill_model_rows import skill_names  # noqa: E402  one home for "a skill is a folder with SKILL.md"
 import layout  # noqa: E402  the one home of where records live (lint/layout.json)
+from ste_lint import INLINE_CODE_RE  # noqa: E402  the one home of the inline-code mask (lint/ste_lint.py)
 
 ROOT = os.path.abspath(os.environ.get("HOOK_CATALOG_ROOT") or os.path.dirname(HERE))
 PAGE = "docs/catalog.md"
@@ -104,11 +105,14 @@ def flat(text):
 def cell(text, cap=None):
     """One table cell: one line, a pipe written \\|, and <tag> text in a code span so a viewer shows it.
     With cap, a cell over cap characters is cut at a word and ends in an ellipsis, never inside a code span."""
-    parts = re.split(r"(`[^`]*`)", flat(text))
-    text = "".join(p if p.startswith("`") else re.sub(r"<[^<>\s][^<>]*>", r"`\g<0>`", p) for p in parts)
+    text, pos, out = flat(text), 0, []
+    for span in INLINE_CODE_RE.finditer(text):
+        out += [re.sub(r"<[^<>\s][^<>]*>", r"`\g<0>`", text[pos:span.start()]), span.group()]
+        pos = span.end()
+    text = "".join(out) + re.sub(r"<[^<>\s][^<>]*>", r"`\g<0>`", text[pos:])
     if cap and len(text) > cap:
         end = max(text.rfind(" ", 0, cap), 0) or cap - 1
-        for span in re.finditer(r"`[^`]*`", text):
+        for span in INLINE_CODE_RE.finditer(text):
             if span.start() < end < span.end():
                 end = span.start()
         text = text[:end].rstrip() + "\u2026"

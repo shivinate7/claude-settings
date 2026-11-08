@@ -32,6 +32,7 @@ except ImportError:  # actions/ruling-kind runs this file in a tree without hook
     _nowindow = subprocess
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import layout  # noqa: E402  the one home of where records live (lint/layout.json)
+from ste_lint import INLINE_CODE_RE  # noqa: E402  the one home of the inline-code mask (lint/ste_lint.py)
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DIR = None  # the records folder: the layout's decisions folder under ROOT; --dir replaces it
@@ -75,7 +76,7 @@ def unfenced(text):
                 fence = m.group(1)
                 continue
         # Comment openers inside an inline code span are prose, so scan a masked copy.
-        masked = re.sub(r"`[^`]*`", lambda m: "x" * len(m.group()), line)
+        masked = INLINE_CODE_RE.sub(lambda m: "x" * len(m.group()), line)
         kept, pos = [], 0
         while True:
             a = masked.find("<!--", pos)
