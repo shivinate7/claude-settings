@@ -4,7 +4,7 @@
     python3 lint/check_silent_undo.py [--upstream origin/main] [--head HEAD] [--strict]
     python3 lint/check_silent_undo.py --history [REV] [--window 60]   # audit, always exit 0
 
-Three reads, one verdict. Design: docs/decisions/silent-undo-check-design.md.
+Four reads, one verdict. Design: docs/decisions/silent-undo-check-design.md.
 
   lost lines  A merge commit M (in upstream..head) loses a line one parent added since the
               merge base: the line is absent from every base, M holds fewer copies than that
@@ -32,6 +32,12 @@ Three reads, one verdict. Design: docs/decisions/silent-undo-check-design.md.
               `git log` of upstream..head over the file. When that log names a commit, one `git cat-file --batch`
               process more (class Blobs) reads each commit's file and its parent's, one commit at a time, so at most
               two texts are held; each side whose tree lacks the file adds one `git ls-tree`. No process stays running.
+  note edits  A note row the base holds is edited in place by the branch: a slug present at the merge base of upstream
+              and head whose head row text is none of that slug's base texts. A row the branch adds may be edited freely;
+              a delete, an add and an unchanged row pass. A merge of main that changes a base row passes, since the base is
+              the merge base. Each slug is named once, with its path. Cost, per run: one `git merge-base`, run only when a
+              notes file has a note at head, and per notes path one `git show` of the base file beside the head read
+              the revived read already makes. No process stays running, and no log or file is written.
 
 A file git pairs as renamed (its own 50 percent similarity) is read as the same file: its edits
 are the diff of old name to new name, as they would be in place. A file below that stays a delete and an add.
@@ -624,6 +630,48 @@ def revived_notes(cwd, upstream, head):
     return found
 
 
+def note_rows(text):
+    """slug -> the set of whitespace-normalised `- <slug>:` lines that carry it."""
+    rows = collections.defaultdict(set)
+    for line in text.splitlines():
+        m = NOTE.match(line)
+        if m:
+            rows[m.group(1)].add(norm(line))
+    return rows
+
+
+def edited_notes(cwd, upstream, head):
+    """[(notes path, problem line)], one per slug the base holds whose head row text is none of that slug's base texts: an
+    edit in place of a row this branch does not own. The base is the merge base of upstream and head, so a row that main
+    edited and a merge brought in matches the base and passes. A row the branch adds, a delete and an unchanged row pass. A
+    file missing at the base or at head has no finding. A slug with several wordings at the base keeps each: a dedupe leaves
+    a base text. A note with no `- <slug>:` form has no slug, so the check does not see it."""
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    import layout  # lazy, as revived_notes loads it
+    try:
+        paths = layout.candidates(cwd, "debt-notes")
+    except layout.LayoutError as e:
+        raise Unknown("the notes file is not known: %s" % e)
+    found = []
+    base = None
+    for path in paths:
+        now = note_rows(blob(cwd, head, path))
+        if not now:
+            continue
+        if base is None:
+            rc, out = git(cwd, "merge-base", upstream, head, ok=(0, 1))
+            base = out.strip() if rc == 0 else ""
+        if not base:
+            break
+        then = note_rows(blob(cwd, base, path))
+        for slug in sorted(now):
+            if slug in then and not now[slug] <= then[slug]:
+                found.append((path, "%s: note `%s` is edited in place. A branch edits only the notes it adds; the base row is "
+                              "another change's. Put the row back as the base holds it, or delete it and add the new wording "
+                              "as a row of this branch." % (path, slug)))
+    return found
+
+
 # ----------------------------------------------------------------------- modes
 
 
@@ -701,6 +749,7 @@ def check(cwd, upstream, head, default=None, tool=None, pr_body="", run_state=No
     for m in git(cwd, "rev-list", "--merges", "%s..%s" % (upstream, h))[1].split():
         items += [(x[0], fmt_lost(m, *x)) for x in lost_lines(cwd, m, refs)]
     items += revived_notes(cwd, upstream, h)
+    items += edited_notes(cwd, upstream, h)
     rc, out = git(cwd, "merge-tree", "--write-tree", upstream, h, ok=(0, 1))
     if rc == 0:
         old, new = upstream, out.split()[0]
