@@ -70,7 +70,7 @@ Unmeasured: whether the Mac build has the same values; whether a scheduled-task 
 
 Measured 2026-11-06 13:17 CST, Claude Code 2.1.319, this lane's own transcript: the turns that carried
 cloud `send_message` deliveries (queued remote notifications) all had `origin.kind` `task-notification`
-and no hop chain. The only `peer` turns were subagent hand-backs, which carry a sender task id. The peer
+and no hop chain. The only `peer` turns were agent hand-backs, which carry a sender task id. The peer
 guard reads only `peer` turns with no sender task id. So the 10-hop cap does not apply between cloud
 sessions. Read from the Linux binary 2.1.319, unmeasured on the Mac: it applies to `SendMessage` between
 sessions on one computer. Cloud to the owner's computer by `send_message` was refused with
