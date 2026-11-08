@@ -21,6 +21,7 @@ import argparse
 import ast
 import bisect
 import io
+import itertools
 import json
 import os
 import re
@@ -42,6 +43,35 @@ class DatedText:
         return (m for m in self.DATE.finditer(text) if not self.EXEMPT.search(text[:m.start()]))
 
 
+class HistoryPhrase:
+    """The `history phrase` group: wording that tells how the code used to be, or how a run came out.
+    FORMS hold the wording that is history anywhere. RUN holds a run's colour or result named on the head, on
+    main or on the base, or red or green before a change: history whatever word comes before it ("is", "are",
+    a label). RUN is logic, and so skipped, when `when`, `if`, `unless`, `until`, `while` or `once` stands
+    earlier in the same clause, since the phrase then names a condition. A check on the clause before the
+    match does what a lookbehind cannot: take a variable run of words."""
+    # Each form names the words around it, so a mid-sentence "previously" and "the user changed the value" stay
+    # clean. The "previously" form needs the start of a sentence, since only there it opens a history clause.
+    # "the old behaviour expected by ..." is a participle naming who relies on it, not a past-tense verb.
+    FORMS = re.compile(
+        r"(?:^[\s#/*\"']*|[.;:]\s+)previously\b,?\s+(?:this|it|they|we|was|were|returned|used|did|had)\b"
+        r"|\bchanged\s+from\s+(?:the\s+(?:old|previous|original|former)\b|an?\s+\w+\s+to\b|\w+ing\s+\w+\s+to\b)"
+        r"|\badded\s+after\s+(?:code\s+)?review\b"
+        r"|\bformerly\b"
+        r"|\bthe\s+old\s+behaviou?r\s+(?:(?!\w+ed\s+(?:by|for|on|in|at|with|from)\b)\w+ed|was|were|had|did|used|let|ran|took|gave|made|kept)\b", re.I)
+    RESULT = r"(?:red|green|pass(?:es|ed|ing)?|fail(?:s|ed|ing)?)"
+    RUN = re.compile(
+        r"\b" + RESULT + r"\s+(?:on|at)\s+(?:the\s+)?(?:origin/)?(?:head|main|base)\b(?![/-]|\.\w)"
+        r"|\b(?:was|were|went|been|turned|stayed)\s+" + RESULT + r"\s+before\b"
+        r"|\b" + RESULT + r"\s+before\s+(?:this|the)\s+(?:change|fix)\b", re.I)
+    CONDITION = re.compile(r"\b(?:when|if|unless|until|while|once)\b", re.I)
+
+    def finditer(self, text):
+        run = (m for m in self.RUN.finditer(text)
+               if not self.CONDITION.search(re.split(r"[.;:!?]", text[:m.start()])[-1]))
+        return itertools.chain(self.FORMS.finditer(text), run)
+
+
 PATTERNS = {
     # "in", "after" or "from" before a round number is narration whatever follows. A bare round number is
     # narration unless a numeric unit follows it, as in "2 decimals", which is arithmetic.
@@ -52,20 +82,7 @@ PATTERNS = {
     "commit hash": re.compile(r"\b(?=[0-9a-f]*[a-f])(?=[0-9a-f]*\d)[0-9a-f]{7,40}\b"),
     "status word": re.compile(r"\b(?:MEASURED|CORRECTED)\b|\bADDED\s+\d"),
     "date": DatedText(),
-    # Each form names the words around it, so a mid-sentence "previously" and "the user changed the value" stay
-    # clean. The "previously" form needs the start of a sentence, since only there it opens a history clause.
-    # "the old behaviour expected by ..." is a participle naming who relies on it, not a past-tense verb.
-    # Run-state history is a past result of a test or check: red, green, passing or failing "on <head|main|base>", or
-    # a past-tense "red before" form. It goes stale once the code moves. Red and green as state data or a condition stay clean
-    # ("a green head", "returns red when a job fails"). "is" before the word marks a live condition, so it skips the form.
-    "history phrase": re.compile(
-        r"(?:^[\s#/*\"']*|[.;:]\s+)previously\b,?\s+(?:this|it|they|we|was|were|returned|used|did|had)\b"
-        r"|\bchanged\s+from\s+(?:the\s+(?:old|previous|original|former)\b|an?\s+\w+\s+to\b|\w+ing\s+\w+\s+to\b)"
-        r"|\badded\s+after\s+(?:code\s+)?review\b"
-        r"|\bformerly\b"
-        r"|(?<!\bis\s)\b(?:red|green|passed|passing|failed|failing)\s+(?:on|at)\s+(?:the\s+)?(?:origin/)?(?:head|main|base)\b(?![/-]|\.\w)"
-        r"|\b(?:was|were|went|been|turned|stayed)\s+(?:red|green|passing|failing)\s+before\b"
-        r"|\bthe\s+old\s+behaviou?r\s+(?:(?!\w+ed\s+(?:by|for|on|in|at|with|from)\b)\w+ed|was|were|had|did|used|let|ran|took|gave|made|kept)\b", re.I),
+    "history phrase": HistoryPhrase(),
     "owner order": re.compile(r"\bowner(?:'s)?\s+(?:ruling|order|request|ask)\b", re.I),
 }
 REMEDY = "say what and why; the history goes in git or the decision"
