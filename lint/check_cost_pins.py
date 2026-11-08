@@ -87,7 +87,7 @@ NOT_COUNTS = [re.compile(r"[\w/.-]+\.[A-Za-z]+(?::\d+)+"), re.compile(r"\b\d{4}-
               re.compile(r"\bRound\s+\d+\s+of\s+\d+\b", re.IGNORECASE), re.compile(r"\bPR\s+#?\d+\b"),
               re.compile(r"\b(?:ruling|item|rule|step|decision)\s+\d+\b", re.IGNORECASE), re.compile(r"#\d+\b")]
 # text, [(code span text, line)], line of the first character, text with code spans blanked, [(start, end)] of each span
-Sentence = collections.namedtuple("Sentence", "text spans line blanked holes")
+Sentence = collections.namedtuple("Sentence", "text spans line blanked blanks")
 
 
 def indent_of(text):
@@ -151,11 +151,11 @@ def mid_line_start(number, text):
     return None
 
 
-def sentence_of(text, spans, line, holes):
+def sentence_of(text, spans, line, blanks):
     blanked = list(text)
-    for start, end in holes:
+    for start, end in blanks:
         blanked[start:end] = "_" * (end - start)
-    return Sentence("".join(text), spans, line, "".join(blanked), holes)
+    return Sentence("".join(text), spans, line, "".join(blanked), blanks)
 
 
 def read_paragraph(paragraph):
@@ -164,8 +164,8 @@ def read_paragraph(paragraph):
     A sentence is a `Sentence`: spans is [(code span text, line number)]. A backtick holds the sentence open,
     so a stop inside a code span ends nothing, and each span lies wholly inside one sentence."""
     chars = [(number, c) for number, text in paragraph for c in text + "\n"]
-    sentences, text, spans, holes, inside, opened, width, i = [], [], [], [], False, 0, 0, 0
-    begin, hole = 0, 0
+    sentences, text, spans, blanks, inside, opened, width, i = [], [], [], [], False, 0, 0, 0
+    begin, blank_at = 0, 0
     while i < len(chars):
         if not text:
             begin = chars[i][0]
@@ -176,11 +176,11 @@ def read_paragraph(paragraph):
             while i + n < len(chars) and chars[i + n][1] == "`":
                 n += 1
             if not inside:
-                hole = len(text)
+                blank_at = len(text)
             text.extend("`" * n)
             if inside and n == width:
                 spans.append((unpadded("".join(ch for _, ch in chars[opened:i])), chars[opened][0]))
-                holes.append((hole, len(text)))
+                blanks.append((blank_at, len(text)))
                 inside = False
             elif not inside:
                 inside, opened, width = True, i + n, n
@@ -193,11 +193,11 @@ def read_paragraph(paragraph):
                 j += 1
             if j == len(chars) or chars[j][1].isspace():
                 text.extend(ch for _, ch in chars[i + 1:j])
-                sentences.append(sentence_of(text, spans, begin, holes))
-                text, spans, holes, i = [], [], [], j - 1
+                sentences.append(sentence_of(text, spans, begin, blanks))
+                text, spans, blanks, i = [], [], [], j - 1
         i += 1
     if "".join(text).strip():
-        sentences.append(sentence_of(text, spans, begin, holes))
+        sentences.append(sentence_of(text, spans, begin, blanks))
     return sentences, not inside
 
 
@@ -293,7 +293,7 @@ def has_reader(sentence, start, end, candidates, root, texts):
     """True when a bound, or a test that holds the code span nearest the count word, backs the count."""
     if BOUND.search(sentence.blanked):
         return True
-    near = [(min(abs(a - end), abs(start - b)), k) for k, (a, b) in enumerate(sentence.holes)
+    near = [(min(abs(a - end), abs(start - b)), k) for k, (a, b) in enumerate(sentence.blanks)
             if not is_test_name(sentence.spans[k][0])]
     if not near:
         return False
