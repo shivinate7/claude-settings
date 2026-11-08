@@ -2736,6 +2736,14 @@ class DoubleBacktickMaskTests(unittest.TestCase):
         self.assertIn("STE001", self.codes("Use ` then " + words + " ``x`` now.\n"),
                       "a lone backtick before a double-backtick span hides the words before it")
 
+    def test_two_backtick_run_inside_a_three_backtick_run_does_not_close_the_span(self):
+        # The ``` run is not a closing run of two, so the span runs on to the `` after the words and
+        # the words stay inside it.
+        words = " ".join(["word"] * 31)
+        self.assertIn("STE001", self.codes("Use " + words + " now.\n"), "fixture sentence is not over budget")
+        self.assertNotIn("STE001", self.codes("Use ``x ``` " + words + " `` now.\n"),
+                         "a two-backtick run inside a three-backtick run closes the span early")
+
     def test_single_backtick_span_content_is_not_linted(self):
         words = " ".join(["word"] * 31)
         self.assertIn("STE001", self.codes("Run " + words + " now.\n"), "fixture sentence is not over budget")
