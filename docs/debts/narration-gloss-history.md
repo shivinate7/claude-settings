@@ -7,7 +7,3 @@
 **Decision.** `none`.
 
 **Retire.** Fix: `step:clause-parser-claims` reads the clause inside the gloss and flags a history verb next to the round. A FLAGGED case for each example above goes green in `lint/test_check_comment_narration.py`.
-
-## Ruling
-
-The coordinator ruled this a debt, not a note (2026-11-08 05:17 CST). Its fix waits on `step:clause-parser-claims`, the gloss-clause parser.
