@@ -13292,6 +13292,29 @@ sh(SHELL_CD + "a non-test name edited by sed -i after a cd into a test folder is
    "cd tests; sed -i s/a/b/ helper.py", "deny", rule=BT, **B)
 sh(SHELL_CD + "a non-test name written by tee after a cd into a test folder is refused",
    "cd tests; echo x | tee helper.py", "deny", rule=BT, **B)
+# A quoted > is text, so a grep that reads it reads. The guard misreads a > that a quoted word ends, or that a
+# quoted word names a test path after, as a redirect onto the next word, when a sed, awk or head stage follows.
+# The brief's command and its twins pin that shape: the red cases name a quoted > beside a test path.
+BRIEF_CD_GREP = ("cd %s && grep -n \"^mtc_bash\\|^def mtc_bash\" hooks/test_guard.py; "
+                 "grep -n 'lastUpdatedAt\\|==\\| > ' hooks/test_guard.py | sed -n '1,400p' | grep -i \"updatedAt\"")
+sh(SHELL_CD + "a grep of a quoted > beside a sed and a grep pipe, after a cd into the worktree, is allowed",
+   BRIEF_CD_GREP % slash(GITWT), "allow", **B)
+sh(SHELL_CD + "a grep of a quoted > in single quotes on a test file is allowed",
+   "grep -n 'a > b' hooks/test_guard.py", "allow", **B)
+sh(SHELL_CD + "a grep of a quoted > in double quotes on a test file is allowed",
+   'grep -n "a > b" hooks/test_guard.py', "allow", **B)
+sh(SHELL_CD + "a quoted > that ends a single-quoted grep pattern, then a sed pipe, is allowed",
+   "grep -n 'a >' hooks/test_guard.py | sed -n '1,400p'", "allow", **B)
+sh(SHELL_CD + "a quoted > that ends a double-quoted grep pattern, then a sed pipe, is allowed",
+   'grep -n "a >" hooks/test_guard.py | sed -n \'1,400p\'', "allow", **B)
+sh(SHELL_CD + "a quoted > naming a test path, then a sed pipe, is allowed",
+   "grep -n 'a > hooks/test_guard.py' hooks/guard.py | sed -n 1p", "allow", **B)
+sh(SHELL_CD + "a real redirect of a grep onto a test file is refused",
+   "grep x foo > hooks/test_guard.py", "deny", rule=BT, **B)
+sh(SHELL_CD + "a real redirect after an echo of a quoted > onto a test file is refused",
+   "echo 'a > b' > hooks/test_guard.py", "deny", rule=BT, **B)
+sh(SHELL_CD + "a sed -i on a test file is refused",
+   "sed -i 's/a/b/' hooks/test_guard.py", "deny", rule=BT, **B)
 add("test-author: Edit of product code is refused", "deny", rule=TA, tool="Edit",
     file_path="src/app.py", carries=("builder", "Report"), **A)
 add("builder-test: a ruff --ignore script added to package.json is allowed", "allow", tool="Edit",
