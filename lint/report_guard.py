@@ -138,7 +138,7 @@ checkout the global rules file names (the copied cloud layout); a tool it cannot
 (the PR, then its issue comments, every page); a Stop with no claim, or in an owner-facing session, reads nothing. A failed read, or an error in the check, never
 blocks: it adds a systemMessage that says UNKNOWN. The comment's last edit time and the cutover (merge/merge.py review_stamp_since, for the PR's base) go to parse_review, so an unstamped
 record from before the cutover reads done, as merge --reviewed reads it; with no cwd, or a cwd with no cutover, the Stamp line is required, and the refusal names it. Cost: 2 gh reads and one git log
-(review_stamp_since, cached per (root, base) in the process: one per distinct base per Stop), plus the guard_merge and merge module imports; no file,
+(review_stamp_since, cached per (root, base) in the process: one per distinct base per Stop; the default branch comes from the pull, never a third gh read), plus the guard_merge and merge module imports; no file,
 process kept or timer. A stop_hook_active rewrite is not checked.
 """
 import datetime
@@ -1737,7 +1737,8 @@ def review_record_problem(hook, text):
             pages = _gh_json(["repos/{owner}/{repo}/issues/%d/comments" % n, "-X", "GET", "-f", "per_page=100",
                               "--paginate", "--slurp"], cwd)
             comments = [c for page in pages for c in (page if isinstance(page, list) else [page])]
-            cutover = merge_mod.review_stamp_since(cwd, pull["base"]["ref"]) if cwd else None
+            default = (pull["base"].get("repo") or {}).get("default_branch")  # the pull carries it, so no repo read
+            cutover = merge_mod.review_stamp_since(cwd, pull["base"]["ref"], default=default) if cwd else None
             rec = _newest_record(n, comments, merge_mod, cutover)
             newest = _newest_marked(comments, merge_mod)
             unstamped = (not cutover and newest is not None

@@ -3285,18 +3285,19 @@ def shallow_boundary(root):
         why = "it names no git dir" if isinstance(e, IndexError) else f"{type(e).__name__}: {e}"
         raise Stop(f"cannot read {os.path.normpath(path)} to tell whether this clone is shallow ({why}). Repair it, then run the command again. " + REVIEW_CITE) from e
 
-def review_stamp_since(root, base):
+def review_stamp_since(root, base, default=None):
     """-> the committer time, UTC as `YYYY-MM-DDTHH:MM:SSZ`, of the first first-parent commit on origin/<default branch> whose merge/merge.py holds
     `REVIEW_STAMP_SALT =`, or None when the read ran and found none. It reads the default branch (host_default_branch), never the PR's `base`: the stamp
     merged into the default branch, and a stacked base may lack that commit, which would read every unstamped record as old. A read that cannot run
     (git errors, no origin/<default branch> ref, a shallow clone whose first salt commit is the boundary, or a shallow file that cannot be read)
     raises Stop naming it, never None: an unknown cutover must not read every unstamped record as old
     (rule verification-report-unknown-reads). The caller fetches first (fetch_default_branch). One call per (root, `base`) in a process. A record
-    created before this time may carry no Stamp line."""
+    created before this time may carry no Stamp line. `default` is the default branch name when the caller already read it (the report guard's
+    pulls/N payload, base.repo.default_branch); with none, default_branch_once asks gh."""
     # `base` is only a cache key, since the answer reads the default branch. It stays because both callers and their test doubles pass it.
     key = (root, base)
     if key not in _stamp_since:
-        default = default_branch_once(root)
+        default = default or default_branch_once(root)
         c, out = git(root, "log", "--first-parent", "--reverse", "-S", "REVIEW_STAMP_SALT =", "--format=%H %ct", f"origin/{default}", "--", "merge/merge.py")
         if c:
             raise Stop(f"could not read origin/{default} to find the review stamp cutover (git log exited {c}): {out[:300]}. Fetch origin, then run the command again. " + REVIEW_CITE)
