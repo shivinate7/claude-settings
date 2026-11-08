@@ -1,11 +1,11 @@
 {
   "title": "The merge lock's expired-lock delete does not race a new holder",
   "phase": "now",
-  "status": "doing",
+  "status": "ready",
   "order": 0.22,
   "owner": "coordinator",
   "why": "Coordinator, 14:31 CST Nov 7.",
-  "note": "",
+  "note": " Built as #1657, reviewed, with runner 8; stack #1460 -> #1657 -> #1708 -> #1729 (20:10 CST).",
   "lane": "session_013NEJL2sZ68ECc62SiwfqPk",
-  "updatedAt": "2026-11-07T14:31:00-06:00"
+  "updatedAt": "2026-11-07T20:10:00-06:00"
 }
