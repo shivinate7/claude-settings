@@ -131,7 +131,13 @@ jobs:
         run: python3 hooks/test_guard.py
 """
 OTHER_JOB_RUNS_ON = "  checks-merge-install:\n    runs-on: ubuntu-latest\n"  # the exact text of that job's runs-on in OTHER_JOBS_WORKFLOW (checks has the same line)
-COLLISION = "error: cannot lock ref 'refs/remotes/origin/main': is at %s but expected %s" % ("a" * 40, "b" * 40)  # git's text when another fetch moved the ref
+def collision_on(ref):
+    """git's text when another fetch moved origin's ref `ref` (a ref-lock collision)."""
+    return "error: cannot lock ref 'refs/remotes/origin/%s': is at %s but expected %s" % (ref, "a" * 40, "b" * 40)
+
+
+COLLISION = collision_on("main")  # git's text when another fetch moved the ref
+MAIN_REFSPEC = "+refs/heads/main:refs/remotes/origin/main"  # the fetch of main that a lane lint makes (fetch_branch of the base)
 
 
 def pass_lines(text):
@@ -991,16 +997,15 @@ class LaneLint(CiJobStub, tm.CloudSession):
                 self.assertEqual(pass_lines(out), [], out)
                 self.assertRegex(out, r"(?i)unknown")
 
-    def run_with_main_fetch_failing(self, target, fails, failure):
-        """Run the lane lint of `target` with the first `fails` fetches of main answered `failure` (exit, text), as a fetch that another
-        lint's fetch moved answers; every other git call runs as it is. -> (rc, output, fetches of main, the waits a retry asked for)."""
-        main = "+refs/heads/main:refs/remotes/origin/main"
-        seen, clock, real = {"main": 0}, QuietClock(), merge.git
+    def run_with_fetch_failing(self, target, fails, failure, refspec=MAIN_REFSPEC):
+        """Run the lane lint of `target` with the first `fails` fetches of `refspec` answered `failure` (exit, text), as a fetch that
+        another lint's fetch moved answers; every other git call runs as it is. -> (rc, output, fetches of that refspec, the waits a retry asked for)."""
+        seen, clock, real = {"fetches": 0}, QuietClock(), merge.git
 
         def git(cwd, *a, **kwargs):
-            if a[:3] == ("fetch", "-q", "origin") and main in a:
-                seen["main"] += 1
-                if seen["main"] <= fails:
+            if a[:3] == ("fetch", "-q", "origin") and refspec in a:
+                seen["fetches"] += 1
+                if seen["fetches"] <= fails:
                     return failure
             return real(cwd, *a, **kwargs)
 
@@ -1008,14 +1013,14 @@ class LaneLint(CiJobStub, tm.CloudSession):
             os.remove(self.log)
         with unittest.mock.patch.object(merge, "git", git), unittest.mock.patch.object(merge, "time", clock):
             rc, out = self.run_lane("--lane-lint", target)
-        return rc, out, seen["main"], clock.waits
+        return rc, out, seen["fetches"], clock.waits
 
     def test_a_fetch_of_main_that_collides_with_another_lints_fetch_is_retried_and_the_lint_goes_on(self):
         head = self.head("feat")
         self.use_ci_job(PASSING, 0)
         for target in ("7", head):  # a PR target fetches main in open_worktree, a ref target in lane_head_and_base
             with self.subTest(target=target):
-                rc, out, fetches, _ = self.run_with_main_fetch_failing(target, 1, (1, COLLISION))
+                rc, out, fetches, _ = self.run_with_fetch_failing(target, 1, (1, COLLISION))
                 self.assertGreaterEqual(fetches, 2, "the fetch of main that collided with another lint's fetch was not retried: " + out)
                 self.assertEqual(rc, 0, "a fetch that collided with another lint's read as a failed lint: " + out)
                 self.assertEqual(len(pass_lines(out)), 1, out)
@@ -1024,7 +1029,7 @@ class LaneLint(CiJobStub, tm.CloudSession):
     def test_control_a_fetch_of_main_that_fails_for_another_reason_stops_after_one_fetch(self):
         head = self.head("feat")
         self.use_ci_job(PASSING, 0)
-        rc, out, fetches, _ = self.run_with_main_fetch_failing(head, 99, (128, "fatal: couldn't find remote ref main"))
+        rc, out, fetches, _ = self.run_with_fetch_failing(head, 99, (128, "fatal: couldn't find remote ref main"))
         self.assertEqual(fetches, 1, "a fetch that failed for another reason was retried: " + out)
         self.assertNotEqual(rc, 0, out)
         self.assertIn("fetch origin main", out)
