@@ -574,6 +574,8 @@ class GitLock(Lock):
             now_cur = self.read(b)  # a moved ref is another run's take. An unchanged ref is a push the remote refused.
             if (now_cur[0] if now_cur else None) != (cur[0] if cur else None):
                 raise Held("another run took the merge lock first " + LOCK_CITE)
+            if is_net(c, out):  # the call never reached the remote: that is no refusal
+                raise NetStop("cannot take the merge lock " + LOCK_CITE + ": " + out)
             raise Stop("the remote refused the push that takes the merge lock " + LOCK_CITE + ": " + out)
         self._take(b, sha, tree, msg, now)
         return sha
