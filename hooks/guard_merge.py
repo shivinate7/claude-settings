@@ -1622,18 +1622,18 @@ LANE_SEND_RULE = "lane-lint-send"
 LANE_SEND_ENV = "LANE_LINT_SEND_SECONDS"  # the seconds one hand-off's pull request reads may take together; a read past it is unknown
 LANE_SEND_MAX = 5  # pull requests judged in one message; a sixth makes the whole message unknown
 RUNNER_TAG = ROLE_TAG_PREFIX + ROLE_TIERS[0]
-_SEND_PR_URL = re.compile(r"https?://github\.com/([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)/pull/(\d+)(?!\d)")
-_SEND_PR_BARE = re.compile(r"(?<![\w&/])#(\d{1,5})(?!\w)")  # `#41`; not `&#39;`, a colour, or a number in a longer digit run
+_SEND_PR_URL = re.compile(r"(?<![\w./-])(?:https?://)?(?:www\.)?github\.com/([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)/pull/(\d+)(?!\d)")  # the scheme and `www.` are optional; not `notgithub.com`
+_SEND_PR_BARE = re.compile(r"(?:(?<![\w&/])|(?<=\b[Pp][Rr]))#(\d{1,5})(?!\w)")  # `#41` and `PR#41`; not `&#39;`, a colour, `name#41`, or a number in a longer digit run
 _SEND_PR_QUALIFIED = re.compile(r"(?<![\w/.-])([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)#(\d{1,5})(?!\w)")  # `owner/name#41`; a bare `name#41` has no owner and is not judged
 LANE_SEND_REASON = (
-    "lane-lint-send: this hand-off names %s, with no review record at its live head. Run `merge --lane-lint <pr>` on the "
+    "lane-lint-send: this hand-off names %s, with no review record at its live head, or no lint marker for that head on this machine. Run `merge --lane-lint <pr>` on the "
     "lane's pushed head, fix any finding, write the review record with `merge <pr> --review-record`, post it on the pull "
     "request, then send again. (decision lane-lint-send, a lane hands a batch runner only a pull request whose live head passed its lint)"
 )
 LANE_SEND_NO_RECORD_REASON = (
     "lane-lint-send: this hand-off names a pull request, and this session's transcript holds no get_session, create_session or "
     "list_sessions record of the target, so the guard cannot tell whether the target is a batch runner. Run get_session on the "
-    "target alone, in its own turn, then retry; a retry of this send passes once. "
+    "target alone, in its own turn, then retry; an exact retry of this message passes. "
     "(decision lane-lint-send, a lane hands a batch runner only a pull request whose live head passed its lint)"
 )
 
@@ -1652,8 +1652,9 @@ def _send_refs(message: str):
     return refs
 
 
-def _send_refused_before(transcript: str, target: str) -> bool:
-    """True when this transcript holds an earlier send_message to `target` whose result names LANE_SEND_RULE: the one refusal per target is spent."""
+def _send_refused_before(transcript: str, target: str, message: str) -> bool:
+    """True when this transcript holds an earlier send_message to `target` with exactly this `message` whose result names LANE_SEND_RULE: the
+    refusal of this text is spent, so its exact retry passes. A send with other text is no retry and is judged afresh."""
     sends = set()
     with open(transcript, encoding="utf-8") as handle:
         for line in handle:
@@ -1666,7 +1667,7 @@ def _send_refused_before(transcript: str, target: str) -> bool:
                     continue
                 if block.get("type") == "tool_use" and str(block.get("name", "")).endswith("send_message"):
                     given = block.get("input")
-                    if isinstance(given, dict) and given.get("session_id") == target:
+                    if isinstance(given, dict) and given.get("session_id") == target and given.get("message") == message:
                         sends.add(block.get("id"))
                 elif block.get("type") == "tool_result" and block.get("tool_use_id") in sends:
                     body = block.get("content")
@@ -1704,8 +1705,9 @@ def lane_lint_send_hit(tool: str, tool_input, transcript: str, cwd: str, note):
     """Return (matched, reason) when this send_message hands a batch runner an open pull request whose live head has no review record,
     else None. A message that names no pull request reads nothing. A target whose newest record (get_session, create_session or a
     list_sessions row) has no cs-build:batch-runner tag is not judged and costs no pull request read. With no usable record of the
-    target the first such send is refused with a steer, and a send after that refusal passes. Each pull request (at most
-    LANE_SEND_MAX) is read through the merge tool's hand_off_read: a closed or merged pull request and an issue pass. A read that
+    target the first such send is refused with a steer, and an exact retry of that message passes; any other send is judged afresh. Each pull request (at most
+    LANE_SEND_MAX) is read through the merge tool's hand_off_read: a closed or merged pull request and an issue pass, and an open one passes
+    only with a review record at its live head and the lint marker of that head. A read that
     fails, a read past LANE_SEND_ENV, an unknown repo, a missing merge tool and a sixth pull request are unknown: allowed, with `note(why)`
     called once. Fails open: the guard-wide crash path allows too, and a bug here never blocks a hand-off."""
     if tool != BRIEF_TOOL or not isinstance(tool_input, dict):
@@ -1716,7 +1718,7 @@ def lane_lint_send_hit(tool: str, tool_input, transcript: str, cwd: str, note):
     refs = _send_refs(message)
     if not refs:
         return None
-    try:  # cost: one transcript read per send that names a pull request
+    try:  # cost: one transcript read per send that names a pull request, a second when the target has no usable record
         tags, tagged_after = _own_session_read(transcript, target, created=True, listed=True) if transcript else (None, False)
     except Exception:
         tags, tagged_after = None, False
@@ -1724,7 +1726,7 @@ def lane_lint_send_hit(tool: str, tool_input, transcript: str, cwd: str, note):
         try:  # with no transcript to read the refusal could never be spent: that is unknown, and the hand-off passes
             if not transcript:
                 raise OSError("no transcript path")
-            spent = _send_refused_before(transcript, target)
+            spent = _send_refused_before(transcript, target, message)
         except Exception as err:
             note("the transcript could not be read (%s)" % cap_safe(str(err), 100))
             return None

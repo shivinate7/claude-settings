@@ -2503,11 +2503,15 @@ def drop_worktree(root, tmp, wt):
 
 LANE_LINT_REMEDY = "Fix it on the lane, push, and run `merge --lane-lint` again. Do not hand this head to the batch runner or join it to a batch until the lint passes. " + LANE_LINT_CITE
 
-LANE_LINT_MARKER_DIR = ("state", "lane-lint")  # under the config folder; the one reader of a marker is the --review-record refusal
+LANE_LINT_MARKER_DIR = ("state", "lane-lint")  # under the config folder; read through lane_lint_passed by the --review-record refusal and by hand_off_read
 
 def lane_lint_marker(head):
     """The marker path of a full 40-hex `head`: one empty file per head that passed `merge --lane-lint`, under CLAUDE_CONFIG_DIR (else ~/.claude)."""
     return pathlib.Path(os.environ.get("CLAUDE_CONFIG_DIR") or os.path.join(os.path.expanduser("~"), ".claude"), *LANE_LINT_MARKER_DIR, head)
+
+def lane_lint_passed(head):
+    """True when `head` has its lint marker on this machine: the one reader of a marker."""
+    return lane_lint_marker(head).exists()
 
 def write_lane_lint_marker(head):
     """Write the empty marker of `head`, so the review record may name it. A head that is not 40 hex gets none. A write that fails prints one line
@@ -3280,6 +3284,10 @@ def parse_review(text):
         last = i
     return {"n": int(n), "head": head, "kind": kind, "guard": guard, "rounds": rounds, "net": net.group(1), "fix": fix}
 
+def record_at_head(rec, head):
+    """True when the parsed record `rec` (None when it did not parse) has Head equal to the live `head`: the one head compare of a record, used by review_state and hand_off_read."""
+    return rec is not None and rec["head"] == head
+
 def review_state(rec, head):
     """-> (state, why) of a parsed record against the PR's live `head`. States: bad (rec is None), stale, held, done, open.
     The done rules follow roles-review-cap-three and the decision pr-review-record: the last round is all PASS, or a fix check PASS counts as that round
@@ -3293,7 +3301,7 @@ def review_state(rec, head):
     round the rules above run as written: it keeps the net value that round gave and settles none that is owed."""
     if rec is None:
         return "bad", "the newest record does not parse"
-    if rec["head"] != head:
+    if not record_at_head(rec, head):
         return "stale", f"the record is for head {rec['head'][:9]}"
     if rec["net"] == "negative":
         return "held", "net value is negative"
@@ -3343,8 +3351,8 @@ HAND_OFF_EPOCH = "1970-01-01T00:00:00Z"  # the comment read's `since` when a pul
 
 def hand_off_read(h, numbers):
     """-> {n: "open" | "cleared" | "skip"} for the numbers a hand-off message names, in the repo of `h`. "skip": the number is a closed or merged pull
-    request, or an issue. "cleared": an open pull request whose newest review record parses and has Head equal to the live head. "open": any
-    other open pull request. Cost: one pulls read per number (one issues read more for a number that is no pull request) and, when a
+    request, or an issue. "cleared": an open pull request whose newest review record parses and has Head equal to the live head, and whose live head has its
+    lane-lint marker on this machine (a marker is per machine, so a record with no marker here is "open"). "open": any other open pull request. Cost: one pulls read per number (one issues read more for a number that is no pull request) and, when a
     number is an open pull request, one paged read of the repo's issue comments since the oldest of them opened. A failed read raises Stop, or
     the timeout of the surrounding shared_deadline: never a guess."""
     live = {}
@@ -3365,7 +3373,7 @@ def hand_off_read(h, numbers):
     found = {n: "skip" for n in numbers}
     for n, row in open_rows.items():
         rec = newest_review(records.get(n), n)
-        found[n] = "cleared" if rec and rec["head"] == row["head"] else "open"
+        found[n] = "cleared" if record_at_head(rec, row["head"]) and lane_lint_passed(row["head"]) else "open"
     return found
 
 def reviewed_read(h):
@@ -3674,7 +3682,7 @@ def main(argv, host=None, lock=None, hosts=None):
                 raise Stop(f"the pull request is {info['state']} " + REVIEW_CITE)
             if info["head"] != a.head:  # a push after the review must not relabel the old rounds as current
                 raise Stop(f"the pull request head is {info['head'][:9]}, not the reviewed {a.head[:9]}. Review the new head, then write its record. " + REVIEW_CITE)
-            if not lane_lint_marker(a.head).exists():  # the record names a head the lane has linted: no marker, no record
+            if not lane_lint_passed(a.head):  # the record names a head the lane has linted: no marker, no record
                 raise Stop(f"no passing `merge --lane-lint` is recorded for head {a.head[:9]}. Run `merge --lane-lint {a.pr}` on this head first, then write its record. " + LANE_LINT_CITE)
             if a.fix_check:  # the fix diff starts from the head the newest earlier record reviewed, and a fix never follows a fix
                 earlier = [parse_review(b) for b in h.review_comments(info.get("created") or "1970-01-01T00:00:00Z").get(a.pr, [])]
