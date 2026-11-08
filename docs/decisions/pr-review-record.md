@@ -58,12 +58,12 @@ A change is done when one of these holds (rule `roles-review-cap-three`):
 
 ## The cost
 
-Counted as real `gh` calls, one call per list read however many pages it pages.
+Counted as real `gh` calls, one call per page of a list read. Most reads fit one page of 100.
 
-- `merge --reviewed` makes two list calls per run. One lists the open PRs. The other lists the repo's issue comments since the oldest open PR, so it pages every comment of the repo since then, not only review records. The cost grows with the repo's comment traffic and with the age of the oldest open PR.
+- `merge --reviewed` makes two list reads per run. One lists the open PRs. The other lists the repo's issue comments since the oldest open PR, so it pages every comment of the repo since then, not only review records. The cost grows with the repo's comment traffic and with the age of the oldest open PR.
 - Not a `gh` call: each `--reviewed` run also runs `git fetch` of its base and local git reads (`load_config`), once per root with `--root`.
-- Each ready PR that has a record adds three calls: the check runs, the commit statuses and the branch protection (required checks mode `protection`). A draft, and a PR with no record, add none.
-- `merge --reviewed --root DIR ...` makes these calls once per root, plus one to three repo reads and, when the base has a done PR, the batch-line reads. The exact formula is the docstring of the `ReviewedRoots` case `test_gh_calls_per_root_match_the_formula_with_and_without_a_done_pr` in `merge/test_merge.py`, and its cost cases pin it. A head whose checks link two runs adds a run-list read to each CI read of it.
+- Each ready PR that has a record adds three reads: the check runs, the commit statuses and the branch protection (required checks mode `protection`). A draft, and a PR with no record, add none.
+- `merge --reviewed --root DIR ...` makes these reads once per root, plus one to three repo reads and, when the base has a done PR, the batch-line reads. The exact formula is the docstring of the `ReviewedRoots` case `test_gh_calls_per_root_match_the_formula_with_and_without_a_done_pr` in `merge/test_merge.py`, and its cost cases pin it. A head whose checks link two runs adds a run-list read to each CI read of it.
 - One ready PR with a record: five calls. With a pinned `merge.requiredChecks` list: also five, because the one protection compare moves to the start of the run and the per-PR protection read goes.
 - `merge <pr> --review-record`: one PR read per call. `--fix-check` adds one paged read of the repo's issue comments since the PR opened. It writes nothing.
 - No new long-lived process, file, cache or timer. The batch runner calls the list at each wake. A lane calls the render at each round.
