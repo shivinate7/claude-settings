@@ -963,16 +963,23 @@ MISTAKE_URL_RE = re.compile(r"https?://\S+")
 MISTAKE_STEP_RE = re.compile(r"\bstep:[a-z0-9][a-z0-9-]*")
 MISTAKE_DEBT_RE = re.compile(r"\bdebts?\b", re.I)
 MISTAKE_GUARD_WORD_RE = re.compile(r"\b(?:guard|check|hook)s?\b", re.I)
-# The label is "guard" then a colon, a dash or a spaced hyphen. A word that merely holds it (`guard_merge.py`,
-# `push-guard`, `guard.py`) is no label.
-MISTAKE_GUARD_LABEL_RE = re.compile(r"(?<![\w./-])guard(?:\s*:|\s*[\u2014\u2013]|\s+-\s)", re.I)
-MISTAKE_BACKTICKED_STEP_RE = re.compile(r"`(step:[a-z0-9][a-z0-9-]*)`")
+# A guard label opens a sentence: a line start after a bullet, a bold section label (the blockquote mark is already
+# stripped), or a space after . ; ! ?. It is guard or guards, then a colon, a dash, or a spaced - or --. So
+# `guard_merge.py`, `push-guard` and "the push guard - refuses" are no label.
+MISTAKE_GUARD_LABEL_RE = re.compile(
+    r"(?:^\s*(?:(?:[-*+]|\d+[.)])\s+)?(?:\*\*[^*\n]+\*\*\s*)?|(?<=[.;!?])\s+)"
+    r"guards?(?:\s*:|\s*[\u2014\u2013]|\s+--?\s)", re.I)
+# A guard line's ref is stricter than DONE_REF_RE: #N and PR N need 2+ digits (a list item "#1" is no PR) and a bare
+# sha needs 7-40 hex digits with a digit and a letter a-f, so a plain number is no sha.
+GUARD_REF_RE = re.compile(
+    r"(?:#\d{2,}|\bPRs?\s*#?\d{2,}|/pull/\d{2,}|/commit/[0-9a-f]{7,40}"
+    r"|\b(?=[0-9a-f]*\d)(?=[0-9a-f]*[a-f])[0-9a-f]{7,40}\b)")
 MISTAKE_REASON = owner_line(
     "Mistake guard (rule building-mistake-names-its-guard)",
     "Deviations admits a mistake, %s, and names no guard or check that would have stopped it")
 GUARD_LINE_REASON = owner_line(
     "Mistake guard (rule building-mistake-names-its-guard)",
-    "a guard line, %s, names no PR, commit, step or debt, and a habit or a line in a brief is no guard")
+    "a guard line in %s names no PR, commit, step or debt; a habit or brief line is no guard")
 
 
 def _admitted_clause(deviations):
@@ -1000,15 +1007,21 @@ def _debt_named(text):
 
 
 def _bare_guard_line(report):
-    """The first guard line of the report block that holds no ref, step or debt, else ''. Quoted text and fences
-    are blanked, a URL keeps only its refs, and a backticked `step:<slug>` still counts."""
-    plain = MISTAKE_URL_RE.sub(lambda m: " " + " ".join(DONE_REF_RE.findall(m.group())) + " ", FENCE_RE.sub(" ", report))
-    plain = QUOTED_RE.sub(" ", MISTAKE_BACKTICKED_STEP_RE.sub(r" \1 ", plain))
-    for line in plain.splitlines():
+    """The section name of the first guard line of the report block that holds no ref, step or debt, else ''.
+    Labels are found with quoted text, fences and URLs blanked to spaces of the same length. The ref is read from
+    the label to the line end in the original text, so a backticked ref counts."""
+    def blank(m):
+        return re.sub(r"[^\n]", " ", m.group())
+    plain = QUOTED_RE.sub(blank, MISTAKE_URL_RE.sub(blank, FENCE_RE.sub(blank, report)))
+    section = ""
+    for raw, line in zip(report.splitlines(), plain.splitlines()):
+        head = LABEL_RE.match(raw)
+        if head and head.group(1).strip().rstrip(":").strip() in LABEL_ORDER:
+            section = head.group(1).strip().rstrip(":").strip()
         for label in MISTAKE_GUARD_LABEL_RE.finditer(line):
-            tail = line[label.end():]
-            if not (DONE_REF_RE.search(tail) or MISTAKE_STEP_RE.search(tail) or _debt_named(tail)):
-                return line[label.start():].strip()
+            tail = raw[label.end():]
+            if not (GUARD_REF_RE.search(tail) or MISTAKE_STEP_RE.search(tail) or _debt_named(tail)):
+                return section or "the report"
     return ""
 
 
@@ -1022,7 +1035,7 @@ def mistake_problem(text):
                        or any(MISTAKE_GUARD_WORD_RE.search(s) and DONE_REF_RE.search(s) for s in _sentences(deviations))):
         return MISTAKE_REASON % repr(clause[:80])
     bare = _bare_guard_line(block_text(text, keep_indent=True))
-    return GUARD_LINE_REASON % repr(bare[:80]) if bare else ""
+    return GUARD_LINE_REASON % bare if bare else ""
 
 
 def _own_lane_read(path, own_id):
