@@ -1043,7 +1043,8 @@ def agent_owned_worktree(root: str):
 # the spelling the tool passed. Rule 7 resolves its own paths with `realpath`, so a test on the spelling
 # alone would leave rule 8 blind to a shape rule 7 already sees: a symlink named `alias.json` that points
 # at a project's `.claude/settings.json`. The place (`_settings_place`) is a `.claude` folder, the config
-# directory, a folder the shell expands, the working folder's checkout root or install folder, or the
+# directory, the working folder itself, a folder the shell expands, the working folder's checkout root or
+# install folder, or the
 # target's own folder when that is a checkout root or holds `install.ps1`. The resolve sits inside a
 # `try`, so the cannot-raise property of this rule holds. The managed settings file joins the list at the
 # same price.
@@ -3673,7 +3674,7 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
     # and rule 1 strips it. A command that writes a settings file and names the cap variable
     # somewhere else on the line is asked too: an over-trigger of one prompt, inside a scope this
     # narrow, beats a bypass by a second segment.
-    matched = _shell_write_hit(stripped, cwd, is_settings_file)
+    matched = _shell_write_hit(stripped, cwd, is_settings_file, follow_cd=True)
     if matched:
         change = cap_change(raw)
         if change:
@@ -4821,7 +4822,7 @@ def never_lifted(payload, tool: str, tool_input: dict, cwd: str) -> bool:
         stripped = strip_heredoc_bodies(raw)
         return bool(git_env_command_hit(raw, stripped) or frozen_shell_hit(stripped, cwd)
                     or any(t and kills_group_pid(t) for t in map(segment_tokens, split_segments(stripped)))
-                    or (_shell_write_hit(stripped, cwd, is_settings_file) and cap_change(raw))
+                    or (_shell_write_hit(stripped, cwd, is_settings_file, follow_cd=True) and cap_change(raw))
                     or (agent_role(payload) == BUILDER_ROLE and builder_shell_test_hit(raw, stripped, cwd)))
     role = agent_role(payload)
     for target in write_targets(tool_input) if tool in WRITE_TOOLS else ():

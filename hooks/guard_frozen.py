@@ -9,7 +9,7 @@ import re
 import guard_core
 from guard_core import (
     REDIRECT, _expanded, _resolved, _split_heredocs, _strip_heredoc_bodies_unconditionally, basename,
-    dir_before_segment, is_powershell, norm, resolve_command, segment_tokens, split_segments,
+    _segment_cd_move, dir_before_segment, is_powershell, norm, resolve_command, segment_tokens, split_segments,
 )
 from guard_env import _quoted_words
 
@@ -638,6 +638,11 @@ def _shell_write_hit(cmd: str, cwd: str, predicate, holds=None, follow_cd=False,
                  for segment, words, (unsafe, plain) in zip(segments, parsed, scans))
     kinds = ["" if closed else _kind(words, plain) for words, (_u, plain) in zip(parsed, scans)]
     quiet = all(kind in ("printer", "cd") or not words for kind, words in zip(kinds, parsed))
+    # `dir_before_segment` walks every segment ahead of the one asked about, so asking it per segment
+    # grows as the square of the segments. With no folder move anywhere it returns `cwd` for each, so
+    # the walk runs only when one segment moves.
+    moves = follow_cd and any(
+        tokens and _segment_cd_move(tokens) is not None for tokens in map(segment_tokens, segments))
     for number, raw in enumerate(parsed):
         linked = _cp_link_source(raw, holds, cwd)
         if linked:
@@ -669,7 +674,7 @@ def _shell_write_hit(cmd: str, cwd: str, predicate, holds=None, follow_cd=False,
                 kept = scripts[number][index]
                 script.extend(_words_of(kept) if "'" in kept or '"' in kept else [kept])
         text = " ".join(shown)
-        at = (dir_before_segment(segments, number, cwd, ends) or cwd) if follow_cd else cwd
+        at = (dir_before_segment(segments, number, cwd, ends) or cwd) if moves else cwd
         verb = _segment_command(words)[0] if predicate_command else ""
         for word in words:
             if word.startswith("-") or REDIRECT.fullmatch(word):
