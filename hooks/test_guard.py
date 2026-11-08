@@ -13776,6 +13776,39 @@ brief_allow("a record-writer brief that deletes a notes line is allowed",
 brief_allow("a reviewer brief that reads a notes file is allowed",
             "reviewer", "Review hooks/test_guard.py against docs/debts/notes.md and report the findings.")
 
+# `Edit only X`, `Edit just X` and `Change only X` name an edit of X, so the path is read and the role decides. Each
+# form is asked where the role may not change the path. The control forms stay allowed where the role may change it.
+brief_ask("a test-author brief that says edit only a notes file is asked, naming record-writer",
+          "test-author", "Edit only docs/debts/notes.md.", "to a record-writer",
+          lacks=("docs/debts/notes.md", "notes.md"))
+brief_ask("a test-author brief that says edit just a notes file is asked, naming record-writer",
+          "test-author", "Edit just docs/debts/notes.md.", "to a record-writer",
+          lacks=("docs/debts/notes.md", "notes.md"))
+brief_ask("a test-author brief that says change only a notes file is asked, naming record-writer",
+          "test-author", "Change only docs/debts/notes.md.", "to a record-writer",
+          lacks=("docs/debts/notes.md", "notes.md"))
+# The same form with a product path. A fix that reads only Markdown would pass this one.
+brief_ask("a test-author brief that says edit only a product script is asked, naming builder",
+          "test-author", "Edit only janitor/sweep.py.", "to a builder",
+          lacks=("janitor/sweep.py", "sweep.py"))
+# A builder's brief with the same form and a test path. The ask sends it to a test-author.
+brief_ask("a builder brief that says edit only a test is asked, naming test-author",
+          "builder", "Edit only hooks/test_guard.py.", "to a test-author",
+          lacks=("hooks/test_guard.py", "test_guard.py"))
+# A negated clause names a product path and says it is not the agent's job. It is not an edit of that path.
+brief_allow("a test-author brief that says a product fix is not its job is allowed",
+            "test-author", "Fix hooks/guard.py is not your job. Add a red case to hooks/test_guard.py.")
+# Controls. The two negated forms the brief names already pass. The test path after `only` stays in scope, and a
+# builder may edit a product path after `only`.
+brief_allow("a test-author brief that says edit only a test is allowed",
+            "test-author", "Edit only hooks/test_guard.py.")
+brief_allow("a test-author brief that says a fix is not its job, with a gerund, is allowed",
+            "test-author", "Fixing hooks/guard.py is not your job.")
+brief_allow("a test-author brief that says do not edit a product file is allowed",
+            "test-author", "Do not edit hooks/guard.py.")
+brief_allow("a builder brief that says edit only a product file is allowed",
+            "builder", "Edit only hooks/guard.py.")
+
 
 # The crash pin. The guard's main fails open on any exception, so the hook shows a silent allow for a message whose
 # judging raises. A plain word `quotespan0` is read as a masked quote that is not there, so only this direct call
