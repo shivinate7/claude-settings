@@ -1148,6 +1148,7 @@ def brief_hit(tool: str, tool_input, transcript: str):
 OWED_DIR = ("state", "owed-review-records")
 OWED_KEEP_SECONDS = 14 * 86400
 _OWED_NAME = re.compile(r"[0-9a-f]{40}\.json")
+OWED_TIME_FORMATS = ("%Y-%m-%dT%H:%M:%S.%fZ", "%Y-%m-%dT%H:%M:%SZ")   # written, then the older whole-second form
 OWED_BRANCH_TOOL = "mcp__github__update_pull_request_branch"   # GitHub's one-click base merge: a push the shell never sees
 OWED_REASON = (
     "a reviewer stopped at head %s of pull request %d, and no posted review record holds that head. A push now moves "
@@ -1180,8 +1181,13 @@ def owed_record_write(where, session, now):
     branches = [line.split()[0] for line in done.stdout.splitlines() if line.strip() and "->" not in line]
     if not branches:
         return ""   # no remote branch holds the head, so no push can move one past it
+    base = resolve_default_base(where)
+    if base and base.startswith("origin/"):   # a head the default branch holds owes nothing, and has no PR to record it
+        done = _git(where, "merge-base", "--is-ancestor", "HEAD", "refs/remotes/" + base)
+        if done is not None and done.returncode == 0:
+            return ""
     folder = _owed_folder()
-    stamp = datetime.datetime.fromtimestamp(now, datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    stamp = datetime.datetime.fromtimestamp(now, datetime.timezone.utc).strftime(OWED_TIME_FORMATS[0])
     try:
         os.makedirs(folder, exist_ok=True)
         for name in os.listdir(folder):
@@ -1197,14 +1203,23 @@ def owed_record_write(where, session, now):
     return ""
 
 
-def _owed_branches(path):
-    """The branch list of one entry file, or None when it cannot be read as the entry form."""
+def _owed_entry(path):
+    """(branches, written) of one entry file, `written` a UTC datetime, or None when it cannot be read as the entry
+    form."""
     try:
         with open(path, encoding="utf-8") as handle:
-            branches = json.load(handle)["branches"]
+            entry = json.load(handle)
+        branches, stamp = entry["branches"], entry["time"]
     except (OSError, ValueError, KeyError, TypeError):
         return None
-    return branches if isinstance(branches, list) and all(isinstance(b, str) for b in branches) else None
+    if not (isinstance(branches, list) and all(isinstance(b, str) for b in branches) and isinstance(stamp, str)):
+        return None
+    for form in OWED_TIME_FORMATS:
+        try:
+            return branches, datetime.datetime.strptime(stamp, form)
+        except ValueError:
+            continue
+    return None
 
 
 def _owed_unread(why):
@@ -1275,17 +1290,23 @@ def _owed_scan(where, names, pairs, find, repo=None, memo=None):
     """(matched, reason) for the first entry that a push to one of `pairs` moves past, else None. A pair is
     (source, dest, remote): the revision pushed (None when unknown, so it counts as new), the branch written, and
     the remote named (None for any). An entry matches a pair when it names that branch, the branch's remote-tracking
-    ref is the entry's head H or a descendant of it, and the source is not that ref. `find(host, dest, memo,
-    merge_mod)` gives (number, comments) of the pull request for `dest`, else None."""
+    ref is the entry's head H or a descendant of it, and the source is not that ref. Per pair, only the newest
+    matching entry by its written time governs (all of them on a tie): the record for an older head cannot be
+    written once the live head moved past it. `find(host, dest, memo, merge_mod)` gives (number, comments) of the
+    pull request for `dest`, else None."""
     memo, merge_mod, host = {} if memo is None else memo, None, None
+    entries = []
     for name in names:
         sha = name[:-len(".json")]
-        branches = _owed_branches(os.path.join(_owed_folder(), name))
-        if branches is None:   # a torn entry counts only where its head is a commit of this repo
+        entry = _owed_entry(os.path.join(_owed_folder(), name))
+        if entry is None:   # a torn entry counts only where its head is a commit of this repo
             if _ref_sha(where, sha):
                 return _owed_unread("an entry is torn")
             continue
-        for source, dest, remote in pairs:
+        entries.append((sha,) + entry)
+    for source, dest, remote in pairs:
+        newest, heads = None, []
+        for sha, branches, written in entries:
             for branch in branches:
                 if (branch != remote + "/" + dest) if remote else (branch.partition("/")[2] != dest):
                     continue
@@ -1298,14 +1319,20 @@ def _owed_scan(where, names, pairs, find, repo=None, memo=None):
                         continue
                 if source is not None and _ref_sha(where, source) == tip:
                     continue
+                if newest is None or written > newest:
+                    newest, heads = written, [sha]
+                elif written == newest:
+                    heads.append(sha)
+                break
+        for sha in heads:
+            if merge_mod is None:
+                merge_mod = merge_module()
                 if merge_mod is None:
-                    merge_mod = merge_module()
-                    if merge_mod is None:
-                        raise RuntimeError("the merge tool could not be loaded")
-                    host = merge_mod.Host(cwd=where, repo=repo)
-                found = find(host, dest, memo, merge_mod)
-                if found is not None and not _records_hold(found[1], sha, merge_mod):
-                    return "push past unrecorded head " + sha[:12], OWED_REASON % (sha[:12], found[0], found[0], sha)
+                    raise RuntimeError("the merge tool could not be loaded")
+                host = merge_mod.Host(cwd=where, repo=repo)
+            found = find(host, dest, memo, merge_mod)
+            if found is not None and not _records_hold(found[1], sha, merge_mod):
+                return "push past unrecorded head " + sha[:12], OWED_REASON % (sha[:12], found[0], found[0], sha)
     return None
 
 
