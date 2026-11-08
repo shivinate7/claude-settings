@@ -11,7 +11,7 @@ tool fixes none, and it writes nothing. Each finding has one category:
 - elapsed-assert: an assert that reads a wall-clock reading or a difference of two.
 - test-cap: a per-test or per-suite time limit (a hang guard, like wait-cap).
 - wait-cap: a fixed time bound on a wait for a condition or a child process (a hang guard). A hang guard
-  (test-cap or wait-cap) is allowed (owner ruling 2026-11-07 13:00 CST, decision test-practices P5): it
+  (test-cap or wait-cap) is allowed (decision test-practices P5): it
   is listed, never counted as time-pinned, and never sets exit 1. Check that each cap sits well above
   the run, so it only stops a hang and never decides a verdict by speed.
 - calendar: a read of the real date or zone with no time given (`datetime.now()`, `date.today()`,
