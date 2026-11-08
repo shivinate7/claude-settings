@@ -980,6 +980,14 @@ for scope, name, tree_run, zero in (
     check("run.sh exit codes: tree-cites, fail=false, scope %s + %s → step exits %s"
           % (scope, name, "0" if zero else "non-zero"), ran and ((rc == 0) if zero else (rc != 0)), out)
 
+# fail=false with tree-cites on: an UNKNOWN from either stale_cites run keeps the step red, whatever the other run says.
+for name, range_run, tree_run in (
+        ("range UNKNOWN + tree FAIL", STALE_UNKNOWN_2, STALE_FAIL),
+        ("range FAIL + tree UNKNOWN", STALE_FAIL, STALE_UNKNOWN_2)):
+    rc, out = run("changed", "false", TREE_CITES="true", stubs={"stale": (range_run, tree_run)})
+    ran = "".join(range_run[:2]).strip() in out and "".join(tree_run[:2]).strip() in out
+    check("run.sh exit codes: tree-cites, fail=false, %s → step exits non-zero" % name, ran and rc != 0, out)
+
 
 # set -e. A linter that exits non-zero, or prints what the split and audit scripts cannot read, fails the job in
 # both scopes and with fail true or false. Each case proves the linter ran first.
@@ -990,8 +998,8 @@ for scope in ("changed", "all"):
             check("run.sh exit codes: linter %s, scope %s, fail=%s → step exits non-zero" % (label, scope, fail),
                   "ste_lint stub ran" in out and rc != 0 and "ste-lint: PASS" not in out, out)
 
-# A failing git range (base...HEAD with no merge base) must fail the job. The diff runs in a process substitution,
-# so set -e does not see its exit; the git error on stderr is the proof it ran.
+# A failing git range (base...HEAD with no merge base) must fail the job. Stub helpers keep the stale checks out of
+# it, so the only range read is the step's own diff; the git error on stderr is the proof it ran.
 for fail in ("true", "false"):
     rc, out = run("changed", fail, change=unrelated_change, stubs={})  # stub helpers: only the step's own diff is read
     check("run.sh exit codes: git diff of the range fails (no merge base), scope changed, fail=%s → step exits non-zero"
