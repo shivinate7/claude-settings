@@ -930,8 +930,8 @@ def _env_relay(texts):
 # ENV_WALK_COMMANDS read a folder when no path is named, and need a hidden flag to reach dotfiles.
 # ENV_GREP_COMMANDS reach them with a recursive flag, and `rgrep` is always recursive. The walk
 # stops at ENV_WALK_LIMIT entries and the search is then refused: a folder that large cannot be
-# shown clean. Entries under a `node_modules` folder count toward ENV_BULK_LIMIT instead, and a folder
-# that the ignore rules skip is not walked for rg and ag, which skip it too.
+# shown clean. A folder that the ignore rules skip is not walked
+# for rg and ag, which skip it too.
 ENV_WALK_COMMANDS = ("rg", "ag")
 ENV_GREP_COMMANDS = ("grep", "egrep", "fgrep")
 ENV_GREP_RECURSIVE_COMMAND = "rgrep"
@@ -939,8 +939,6 @@ ENV_GREP_RECURSIVE_LONG = ("--recursive", "--dereference-recursive")
 # Letters of a grep flag cluster that take a value, and so end the cluster: `-A 3`, `-e pat`, `-f file`.
 ENV_GREP_VALUE_SHORT = ENV_VALUE_SHORT + "ef"
 ENV_WALK_LIMIT = 50000
-ENV_BULK_LIMIT = 10 * ENV_WALK_LIMIT
-ENV_BULK_FOLDER = "node_modules"
 ENV_TOO_LARGE = "<too large>"
 ENV_WALK_REASON = ("this command would search a folder that holds an environment file, and a "
                    "hidden flag makes it read dotfiles")
@@ -965,29 +963,25 @@ def _ignored_paths(folder: str):
 
 
 def _env_file_in(folder: str, include=(), exclude=(), exclude_dir=(), ignored=frozenset()) -> str:
-    """The first env file under `folder`, or ENV_TOO_LARGE past ENV_WALK_LIMIT entries (ENV_BULK_LIMIT
-    for those under a `node_modules` folder), else ''. A symlink is not followed, as rg and ag do not.
+    """The first env file under `folder`, or ENV_TOO_LARGE past ENV_WALK_LIMIT entries, else ''. A symlink is not followed, as rg and ag do not.
     `.git` holds no env file and is skipped. The grep globs narrow it: a file is read only when it
     matches an `include` glob (when any is given) and no `exclude` glob, and a folder that matches an
     `exclude_dir` glob is not entered. `ignored` is `_ignored_paths`: a file or folder in it is skipped."""
-    seen = bulk = 0
+    seen = 0
     for top, dirs, files in os.walk(folder):
         relative = os.path.relpath(top, folder).replace(os.sep, "/")
         prefix = "" if relative == "." else relative + "/"
         dirs[:] = [d for d in dirs if d != ".git"
                    and not any(fnmatch.fnmatchcase(d, g) for g in exclude_dir)
                    and prefix + d + "/" not in ignored]
-        if ENV_BULK_FOLDER in relative.split("/"):
-            bulk += len(dirs) + len(files)
-        else:
-            seen += len(dirs) + len(files)
+        seen += len(dirs) + len(files)
         for name in files:
             if (names_env_file(name)
                     and (not include or any(fnmatch.fnmatchcase(name, g) for g in include))
                     and not any(fnmatch.fnmatchcase(name, g) for g in exclude)
                     and prefix + name not in ignored):
                 return os.path.join(top, name)
-        if seen > ENV_WALK_LIMIT or bulk > ENV_BULK_LIMIT:
+        if seen > ENV_WALK_LIMIT:
             return ENV_TOO_LARGE
     return ""
 
