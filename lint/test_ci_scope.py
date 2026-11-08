@@ -74,20 +74,20 @@ LOAD_EXCEPTIONS = {
     "hooks/guard_merge.py:169": "the merge tool at a clone root, MERGE_TOOL_REL (guard_merge.py:108): merge/merge.py is in the closure",
     "hooks/guard_merge.py:239": "a stamp read from a clone root found by walking up: a fixture root in the suite, the checkout in a real run",
     "hooks/precompact_handoff.py:152": "the installed prompt under config_dir(), the installer's copy, not the repo's file",
-    "hooks/test_guard.py:3345": "a sibling of GUARD, hooks/ by default: git_reads.py is in the closure by import",
-    "hooks/test_guard.py:4598": "a sibling of GUARD: guard_rm_var.py is in the closure by import",
-    "hooks/test_guard.py:13932": "a sibling of GUARD: own_session.py is in the closure by import",
-    "hooks/test_guard.py:19553": "GUARD itself: guard.py, or the GUARD_UNDER_TEST copy, which is in the closure by import",
-    "hooks/test_guard.py:25400": "READ_CHECK: reread_check.py by default, which is in the closure by import",
-    "hooks/test_guard.py:27508": "a sibling of GUARD: shared_names.py is in the closure by import",
+    "hooks/test_guard.py:3361": "a sibling of GUARD, hooks/ by default: git_reads.py is in the closure by import",
+    "hooks/test_guard.py:4614": "a sibling of GUARD: guard_rm_var.py is in the closure by import",
+    "hooks/test_guard.py:13948": "a sibling of GUARD: own_session.py is in the closure by import",
+    "hooks/test_guard.py:19569": "GUARD itself: guard.py, or the GUARD_UNDER_TEST copy, which is in the closure by import",
+    "hooks/test_guard.py:25416": "READ_CHECK: reread_check.py by default, which is in the closure by import",
+    "hooks/test_guard.py:27524": "a sibling of GUARD: shared_names.py is in the closure by import",
     "lint/check_silent_undo.py:581": "a checkout's hook_catalog.py, the oracle of the silent-undo check: in the closure by merge.py's import",
     "lint/rule_audit.py:92": "ROOT, the repo root by definition, a fixture root in the suite: lint/rule_mechanisms.json is not in the closure",
     "lint/rule_audit.py:93": "ROOT: .github/workflows/checks.yml, already a fail-safe path in ci-scope.sh",
     "lint/rule_audit.py:405": "ROOT: hooks/config_watch.py is not in the closure",
     "lint/stale_cites.py:293": "PY_FACTS: skills/plain-english-map/scripts/lib/py-facts.py is in the closure by a `..` load",
-    "merge/merge.py:1702": "the checkout's own workflow, .github/workflows/checks.yml, already a fail-safe path in ci-scope.sh",
+    "merge/merge.py:1728": "the checkout's own workflow, .github/workflows/checks.yml, already a fail-safe path in ci-scope.sh",
     "skills/waiting-page/stale_pages.py:259": "the user's ~/.claude/CLAUDE.md, not this repo's .claude/CLAUDE.md",
-    "merge/merge.py:3250": "IDLE_BUILD: skills/roadmap/build.py is in the closure by a `..` load",
+    "merge/merge.py:3276": "IDLE_BUILD: skills/roadmap/build.py is in the closure by a `..` load",
 }
 _CLOSURE = {}
 
@@ -642,7 +642,7 @@ class Scope(unittest.TestCase):
 @unittest.skipUnless(BASH, "bash not on PATH")
 class GuardWindowsSplit(unittest.TestCase):
     """The Windows guard suite on a pull_request. guard_windows_full turns on the full shards (checks-windows-guard's shard 1
-    and checks-windows-guard-2). guard_windows_slice turns on the slice, which is guard on and full off, so the two never run
+    and each checks-windows-guard-<i>). guard_windows_slice turns on the slice, which is guard on and full off, so the two never run
     together. Push, schedule, dispatch and the fail-safe paths turn full on and slice off."""
 
     def test_a_guard_family_pr_turns_the_full_windows_guard_on(self):
