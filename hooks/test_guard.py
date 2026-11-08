@@ -23587,6 +23587,39 @@ LOG_CHECKS_EXTRA.append(("session-home: a cd that a lone & ends, with a pid capt
                          session_home_pid_background_cd_case))
 
 
+def session_home_listed_cd_case():
+    """Rule session-home, judged from the primary: a `cd` inside a backgrounded list applies to the later segments of
+    that same list. `cd scratch && sed -i on CLAUDE.md & echo $!` writes the scratch folder, not the primary, so it is
+    allowed. The same write with no cd is still refused in the primary."""
+    primary = sh_new_primary("bglist")
+    lost, lost_branch = sh_add_lane(primary, "lane-bglist-lost")
+    session = sh_session()
+    scratch = os.path.join(ROOT, "shome_bglist_scratch")
+    os.makedirs(scratch, exist_ok=True)
+    into = slash(scratch)
+    problems = []
+    _decide_full("Bash", lost, session=session, command="echo hi")
+    if not sh_holds(primary, session, lost):
+        problems.append("the lane call wrote no session record naming the lane")
+    sh_lose_lane(primary, lost, lost_branch)
+    got, reason = _decide_full("Bash", primary, session=session,
+                               command="cd " + into + " && sed -i s/a/b/ CLAUDE.md & echo $!")
+    if got != "allow":
+        problems.append("cd scratch && sed -i on CLAUDE.md, backgrounded with a pid, from the primary: want allow, "
+                        "got %s (%s)" % (got, reason[:120]))
+    got, reason = _decide_full("Bash", primary, session=session, command="sed -i s/a/b/ CLAUDE.md & echo $!")
+    problems += sh_refusal_problems("sed -i on CLAUDE.md, backgrounded with a pid, no cd, from the primary",
+                                    got, reason, primary, lost)
+    if problems:
+        return False, "; ".join(problems)
+    return True, "a cd inside a backgrounded list moves the write into scratch, which is allowed; the same write with no cd is refused in the primary"
+
+
+LOG_CHECKS_EXTRA.append(("session-home: a cd inside a backgrounded list applies to the write after it in that list, "
+                         "so the write lands in the scratch folder and is allowed",
+                         session_home_listed_cd_case))
+
+
 def session_home_clean_refuses_case():
     """Rule session-home: while the record is lost, `git clean -fd` in the primary checkout is
     refused, as `git reset --hard` is. The primary tree is clean, so the refusal is
