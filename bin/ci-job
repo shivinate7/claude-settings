@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# ci-job <job> [--workflow <file>] [--base <ref>] [--plan] [--lint] [--step NAME]...: run every step of one workflow job here,
+# ci-job <job> [--workflow <file>] [--base <ref>] [--plan] [--lint] [--pinned] [--step NAME]...: run every step of one workflow job here,
 # each through bin/verdict, and print one verdict per step. It runs on demand only: a lane never runs a full
 # job, because the batch CI run is the only full run (lanes-run-no-full-ci-job). The one exception is --lint.
 # --lint runs only the job's fast lint and check steps, chosen from the step commands in the workflow, never a
@@ -48,6 +48,8 @@
 # of the job has prints one `unknown` line, and when any name is missing no step runs: exit 2. A named step that does not
 # run (an action, a false if:) is also one `unknown` line, never a pass. The merge's ready checks run its declared
 # merge.readyChecks this way. Exit codes as below.
+# --pinned is for merge's ready check: it passes the flag so a child's pin runs its pinned harness. For now it is accepted and
+# ignored; a later change makes it run the harness pinned by sha (phase 2 of lane merge-ready-uses-pin).
 # --plan prints each step's verdict-to-be and runs nothing. Output of each run: $VERDICT_LOG, else one new
 # temp log per call, named on the last line. Exit: 1 if a step fails, else 2 if one is unknown, else 0.
 # CI checks out with fetch-depth: 0. When the job's checkout step says so and the clone is shallow, ci-job first
@@ -73,7 +75,7 @@ from git_bash import find_git_bash  # noqa: E402  the one home of the Git Bash l
 from pin_note import ENV as PIN_NOTE_ENV, MARKER as PIN_NOTE_MARKER  # noqa: E402  the one home of the pin note's names (hooks/pin_note.py)
 from workflow_steps import job_block, run_body, step_blocks, step_env, step_key, step_with  # noqa: E402  the one home of the step parser
 
-USAGE = "usage: ci-job <job> [--workflow <file>] [--base <ref>] [--plan] [--lint] [--step NAME]..."
+USAGE = "usage: ci-job <job> [--workflow <file>] [--base <ref>] [--plan] [--lint] [--pinned] [--step NAME]..."
 EXPR = re.compile(r"\$\{\{\s*(.*?)\s*\}\}")
 BUILTINS = {"cd", "echo", "printf", "test", "[", "[[", "export", "set", "exit", "if", "then", "else", "elif", "fi",
             "for", "do", "done", "while", "until", "case", "esac", "true", "false", ":", "read", "local", "return",
@@ -378,7 +380,7 @@ def main(argv):
         del args[i:i + 2]
     dry = "--plan" in args
     lint = "--lint" in args
-    args = [a for a in args if a not in ("--plan", "--lint")]
+    args = [a for a in args if a not in ("--plan", "--lint", "--pinned")]  # --pinned: accepted, no effect yet
     if len(args) != 1 or (wanted and lint):
         print(USAGE)
         return 2

@@ -2891,7 +2891,7 @@ READY_CHECKS_CITE = "(decision lanes-run-no-full-ci-job, the ready checks: a dra
 def run_ready_checks(wt, n, base, checks):
     """The ready checks of the draft step: run the repo's `merge.readyChecks` through ci-job in the tree `wt`, which holds what the step
     would push. One ci-job run. Returns on a pass; a FAIL or an unknown raises Stop, and no flag lifts it. `checks` is a non-empty list."""
-    args = ["checks", *[a for name in checks for a in ("--step", name)], "--base", f"origin/{base}"]
+    args = ["checks", "--pinned", *[a for name in checks for a in ("--step", name)], "--base", f"origin/{base}"]
     state, lines, log, _ = ci_job_run(wt, *args)
     short = git(wt, "rev-parse", "--short=9", "HEAD")[1]
     if state != "pass":
