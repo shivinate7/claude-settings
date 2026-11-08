@@ -63,7 +63,9 @@ if [ "${EVENT:-}" = pull_request ] && [ -n "$range" ] && files=$(git diff --name
       bin/ios-ship|lint/test_ios_ship.sh) on="$on $S code " ;;
       # bin/sim-test: macOS only, like bin/ios-ship. Its suite runs in the shell-macos job, and runs the real bin/sim-lease
       # beside the script, so an edit to bin/sim-lease turns the same job on.
-      bin/sim-test|lint/test_sim_test.sh|bin/sim-lease) on="$on $S code " ;;
+      bin/sim-test|lint/test_sim_test.sh) on="$on $S code " ;;
+      # merge.py's load closure reaches bin/sim-lease too (hooks/guard.py loads it by path), so it also turns on the merge job.
+      bin/sim-lease) on="$on $S $M code " ;;
       # bin/shoot: its suite installs Playwright and Chromium, so only these paths run it.
       bin/shoot|lint/test_shoot.mjs|testing/skip-locally-fail-in-ci.mjs) on="$on code shoot " ;;
       # actions/playwright-setup has two callers: checks-shoot (shoot) and checks-guard (checks_guard). checks-guard also

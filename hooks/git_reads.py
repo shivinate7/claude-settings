@@ -6,7 +6,8 @@ reading of a checkout's GitHub repo, which the guard's rule lane-repo-tag shares
 The janitor (janitor/sweep.py, janitor/session_end_sweep.py) imports this file and no guard module,
 so its start-up never loads the guard. guard_core.py imports it by name, and a test or the janitor
 that patches one of these names patches it here, on the module object that import returns.
-merge/merge.py loads its own private copy by path, so a patch here does not reach merge. Standard
+merge/merge.py loads its own private copy by path for `lists_refs` and `listing_text` only; its
+`ancestor` still imports this module from sys.modules, so a patch to the other names reaches merge. Standard
 library only, plus `_nowindow` and `shared_names`, and it imports no guard module.
 """
 import calendar
