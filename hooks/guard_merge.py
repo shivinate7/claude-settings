@@ -1098,22 +1098,31 @@ BRIEF_STEP_REASON = (
 
 # Rule lane-brief-roles: a brief that passes lane-one-topic names a session id for each of these roles.
 ROLE_LABELS = ("Coordinator", "Triage", "Batch runner")
-_ROLE_MD = r"[\s*_`]*"  # markdown or whitespace between the parts of `**Triage**: session_x`
-_ROLE_ID_AFTER = _ROLE_MD + r"(?:\d+)?" + _ROLE_MD + r":?" + _ROLE_MD + r"session_[A-Za-z0-9]+"
+ROLE_GAP_MAX = 80  # most characters of other text between a label and its id
 BRIEF_ROLES_REASON = (
-    "this brief does not name a session id for {missing}. A lane brief names the coordinator, triage and batch "
-    "runner session ids, such as `Roles: Coordinator <id>; Triage <id>; Batch runner <id>.` on its second line, so "
-    "the lane can reach triage (list_sessions has no tag filter in cloud). The ids are in the Standing sessions "
-    "roster on the roadmap branch. (decision session-tiers, a lane brief names its roles)"
+    "this brief has no session id the guard could read for {missing}. A lane brief names the coordinator, triage "
+    "and batch runner session ids, so the lane can reach triage (list_sessions has no tag filter in cloud). Put "
+    "each label and its id on the same line, up to 80 characters apart, with no other role label between them: "
+    "`Roles: Coordinator session_…; Triage session_…; Batch runner session_….` on the brief's second "
+    "line. The ids are in the Standing sessions roster on the record branch (`roadmap` by default). "
+    "(decision session-tiers, a lane brief names its roles)"
 )
 BRIEF_KIND_TOPIC, BRIEF_KIND_ROLES = "topic", "roles"  # the third item brief_hit returns: which rule refused
 
 
+def _role_pattern(label: str) -> str:
+    """The label at a word boundary, then up to ROLE_GAP_MAX characters of the same line that hold no other role
+    label (at a word boundary) and no `session_`, then `session_<id>`."""
+    others = "|".join(re.escape(other) for other in ROLE_LABELS if other != label)
+    return (r"\b" + re.escape(label) + r"(?:(?!\b(?:" + others + r")|session_)[^\n]){0," + str(ROLE_GAP_MAX)
+            + r"}session_[A-Za-z0-9]+")
+
+
 def _missing_roles(message: str):
-    """The ROLE_LABELS the message gives no session id for. A role is named when its label (any case) is followed
-    by optional markdown, an optional number, an optional colon, then `session_<id>`. Reads the whole message."""
-    return [label for label in ROLE_LABELS
-            if not re.search(re.escape(label) + _ROLE_ID_AFTER, message, re.IGNORECASE)]
+    """The ROLE_LABELS the message gives no readable session id for. A role is named when its label (any case, at a
+    word boundary) is followed on the same line, within ROLE_GAP_MAX characters that hold no other role label and
+    no other `session_`, by `session_<id>`. Reads the whole message."""
+    return [label for label in ROLE_LABELS if not re.search(_role_pattern(label), message, re.IGNORECASE)]
 
 
 def _roles_verdict(message: str):

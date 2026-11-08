@@ -122,9 +122,9 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        override lifts it.
   lane-brief-roles    deny. A lane brief (the lane-one-topic marker) sent to a target that passes lane-one-topic, on
                        the topic path or the older step path, unless its whole text names a session id for each of
-                       Coordinator, Triage and Batch runner (guard_merge.ROLE_LABELS): the label, any case, then optional
-                       markdown (`*`, `_`, backtick), an optional number, an optional colon, then `session_<id>`. Form
-                       only: no id is matched to a roster. A brief lane-one-topic refuses keeps that reason. A non-lane
+                       Coordinator, Triage and Batch runner (guard_merge.ROLE_LABELS): the label, any case, at a word
+                       boundary, then on the same line up to 80 characters that hold no other role label and no
+                       `session_`, then `session_<id>`. Form only: no id is matched to the Standing sessions roster. A brief lane-one-topic refuses keeps that reason. A non-lane
                        target and a message without the marker pass. An override lifts it.
   draft-pr             deny. A `gh pr create` without `--draft`. (draft-until-reviewed)
   records-page         deny. A `git commit` whose docs/records.md differs from the base's page.
