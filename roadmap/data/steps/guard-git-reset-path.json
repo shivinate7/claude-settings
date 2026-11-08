@@ -1,0 +1,11 @@
+{
+  "title": "The shared-tree guard has a recorded ruling on `git reset <path>`",
+  "phase": "next",
+  "status": "todo",
+  "order": 638,
+  "owner": "coordinator",
+  "lane": null,
+  "why": "A builder in lane guard-relative-write-escape ran `git reset -q HEAD hooks/test_guard.py` to unstage a file. No work was lost, but the rules forbid destructive git and no record says whether a path reset counts (lane report, 06:53 CST Nov 8).",
+  "note": "Done check: one record states whether `git reset [HEAD] -- <path>` (unstage only, no --hard, no --merge, no --keep) is allowed, and a guard test pins that verdict for both forms. A fix for a found gap (item 410 a). Slug from the lane; title by triage.",
+  "updatedAt": "2026-11-08T06:55:00-06:00"
+}
