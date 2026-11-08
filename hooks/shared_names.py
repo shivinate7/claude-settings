@@ -43,6 +43,7 @@ def notice_closes(rec: object) -> list:
         return []
     content = (rec.get("message") or {}).get("content")
     if isinstance(content, list):
+        # The block join of hooks/stall_watch.py text_of, copied: stall_watch keeps its own, which it needs when this file fails to load.
         parts = [b.get("text") or b.get("content") for b in content if isinstance(b, dict)]
         content = "\n".join(p for p in parts if isinstance(p, str))
     return closed_by_notice(content)
