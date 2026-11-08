@@ -150,8 +150,10 @@ Other tools, in `judge` order:
   worktree-home        deny. A call from an agent whose shell cwd or write target is outside its
                        own recorded worktree. Read and Grep pass, so a stranded agent can report.
                        A Write or Edit strictly inside the caller's own `agent-<id>-<suffix>`
-                       red-run folder passes.
-                       No record (a non-isolated agent, or the orchestrator) allows everything.
+                       red-run folder passes. A relative shell write that lands outside the
+                       agent's own checkout is refused, with `mkdir` and `touch` counted as writes.
+                       No record (a non-isolated agent, or the orchestrator): only that relative
+                       shell write is judged, against the checkout that holds its cwd.
                        No override lifts it. (an-agent-outside-its-home-tree-must-stop)
   other-checkout       deny. Any session's write whose target sits in a checkout of this clone
                        other than the one holding its cwd. A nested worktree owns its own files.
@@ -942,7 +944,8 @@ def agent_worktree_home(payload, cwd: str):
       "unknown"   an `agent_id` is present, but the home record could not be read (no git, no
                   common directory, an unreadable file). Allowed, never a hit.
       "no-record" the record reads clean and holds nothing, and this call's own `cwd` is not the
-                  agent's worktree shape either: a non-isolated agent. Allow everything.
+                  agent's worktree shape either: a non-isolated agent. Only a relative shell
+                  write outside the checkout that holds its cwd is a hit.
       "home"      `home` names the agent's recorded worktree, whether just written on this call
                   or read back from an earlier one.
     """
@@ -4204,33 +4207,44 @@ def relative_write_escape(payload, tool: str, tool_input: dict, cwd: str, own: s
     A target resolves against the folder its segment runs in (`follow_cd`). An absolute, `~` or variable
     target is not judged here, and an empty OWN is unknown, so both allow. `mkdir` and `touch` count as
     writes in this clause alone (CREATING_COMMAND). The agent's own red-run folder passes, its root
-    included: a delete of that root is other-checkout's to refuse. LEAVE_CHECKOUTS leaves a target
-    that sits in another checkout to other-checkout, which already refuses it."""
+    included: a delete of that root is other-checkout's to refuse. The clone's common git directory
+    passes, as it does there. LEAVE_CHECKOUTS leaves a target in another checkout to other-checkout,
+    except a write by a CREATING_COMMAND word, which other-checkout does not judge."""
     if not own:
         return ""
+    common = _git_common_dir(own)   # file reads only, no git
 
-    def escapes(word, at):
+    def escapes(word, at, verb=""):
         if "$" in word or "`" in word or shell_abs(word, None) is not None:
             return False
         try:
             target = _resolved(word, at)
         except Exception:
             return False
-        if leave_checkouts and _checkout_root_by_stat(target) not in ("", own):
+        if common and path_is_inside(target, common) is True:
+            return False
+        if (leave_checkouts and _checkout_root_by_stat(target) not in ("", own)
+                and not re.fullmatch(CREATING_COMMAND, verb)):
             return False
         return path_is_inside(target, own) is False and not _own_red_run(payload, primary, target)
 
     POWERSHELL_CALL[0] = tool == "PowerShell"
     command = strip_heredoc_bodies(str(tool_input.get("command", "") or ""))
+    # A parenthesis glued to a word hides the verb from the command read: `(mkdir x)` names `(mkdir`. Each
+    # unquoted `(` and `)` (not `$(`, `<(`, `>(`) gets a space on both sides. The count and place of
+    # parentheses is unchanged, so the subshell scope of a `cd` still ends at its `)`.
+    pads = {index for index, char, quote in walk_quotes(command)
+            if char in "()" and not quote and not (char == "(" and index and command[index - 1] in "$<>")}
+    command = "".join(" " + char + " " if index in pads else char for index, char in enumerate(command))
     return _shell_write_hit(command, cwd, escapes, follow_cd=True, command_position=True,
-                            extra_verbs=CREATING_COMMAND)
+                            predicate_command=True, extra_verbs=CREATING_COMMAND)
 
 
 def worktree_home_hit(payload, tool: str, tool_input: dict, cwd: str) -> str:
     """Rule 0, worktree-home: return the log detail when an agent's call reaches outside its own
     worktree, else ''. `status` is "none" for the orchestrator (no `agent_id`) and for tools this
     rule does not judge; "unknown" when the record could not be read at all, which allows (an
-    unreadable state is never a hit); "no-record" for a non-isolated agent, which allows everything;
+    unreadable state is never a hit); "no-record" for a non-isolated agent, judged on a relative shell write only;
     "home" once the agent's worktree is known, from this call or an earlier one. Read/Grep are never
     checked here: the agent must still be able to read and report
     (decision an-agent-outside-its-home-tree-must-stop)."""
@@ -4553,7 +4567,7 @@ def other_checkout_hit(tool: str, tool_input: dict, cwd: str, session_id: str = 
             owner = _owning_checkout(resolved, roots)
         except Exception:
             return False
-        # An agent shares its session's id, and worktree-home judges no shell target, so only a
+        # An agent shares its session's id, and worktree-home judges only a relative shell target, so only a
         # top-level call may write into the session's own scratchpad worktree.
         if not has_agent and under_session_scratchpad(resolved, session_id):
             return False
