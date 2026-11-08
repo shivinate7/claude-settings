@@ -1973,6 +1973,15 @@ MUTATIONS = [
      '    texts = [stripped, *substitution_commands(raw, stripped)]\n',
      '    texts = [stripped]\n',
      "guard", "substitution: shared tree, an assignment from a dollar paren denies"),
+    # ---- ask-step-hidden (debt ask-step-hidden-in-script): the push loop reads wrapped scripts through _push_calls.
+    ("ask-step-hidden: the push loop skips _push_calls, so a force push inside bash -c passes",
+     '        for args, where, overrides in _push_calls(segment, stripped, cwd):\n            verdict = push_verdict(',
+     '        for args, where, overrides in ([] if tool else _push_calls(segment, stripped, cwd)):\n            verdict = push_verdict(',
+     "guard", "ask-step-hidden: a force push inside bash -c denies"),
+    ("ask-step-hidden: the trailing paren or backtick stays on the path word, so a subshell write hides its path",
+     '                word = word.rstrip(")`") or word\n',
+     '                word = word\n',
+     "guard", "ask-step-hidden: a cap write in a subshell with a leading space asks"),
     # ---- hand-made-worktree (decision lanes-start-in-tool-worktrees): one mutant per branch.
     ("hand-made-worktree: the judge_shell loop never asks, so no hand-made tree is refused",
      '            matched = hand_made_worktree_hit(segments, number, cwd, ends)\n',
