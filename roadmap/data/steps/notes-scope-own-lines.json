@@ -1,0 +1,11 @@
+{
+  "title": "A notes-only commit changes only the notes lines its own PR added",
+  "why": "Lane past-ruling-on-send (session_013NEJL3ZtjRrvWWB5nAzQiv), 14:51 CST Nov 8: on PR #2041 (verdict-run-not-read) a record-writer's brief named notes by the prefix `verdict-`, so its notes-only commit added Fix lines to 12 notes that belong to the verdict wrapper tool, not to this PR. The lane restored them in f9d09b9bf. Harm: a notes-only commit silently rewrote other lanes' debt notes, and only a hand check of the diff caught it.",
+  "note": "",
+  "phase": "now",
+  "owner": "claude-settings",
+  "lane": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB) to route",
+  "status": "todo",
+  "order": 818,
+  "updatedAt": "2026-11-08T14:51:00-06:00"
+}
