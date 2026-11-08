@@ -1840,6 +1840,16 @@ class LintSuitesChainTests(unittest.TestCase):
                       "--lint-suites must pick %s for a diff that deletes hooks/leaf.py: entry.py, unchanged, imports it, and the "
                       "suite opens entry.py" % CHAIN_SUITE)
 
+    def test_a_diff_that_deletes_a_path_an_imported_intermediate_module_opens_picks_the_suite(self):
+        # the control is test_a_diff_of_only_a_path_an_imported_intermediate_module_opens_picks_the_suite: the same fixture,
+        # with merge/target.py edited. Here the lane deletes merge/target.py, and the unchanged entry.py still opens it.
+        repo = chain_repo(CHAIN_MID_LOADS["open"], {"merge/target.py": None}, suite="import entry\n",
+                          base={"merge/target.py": "X = 1\n"})
+        self.assertEqual(self.changed(repo), ["merge/target.py"], "the scope: the diff holds only merge/target.py's deletion")
+        self.assertIn(CHAIN_SUITE, self.picked(repo),
+                      "--lint-suites must pick %s for a diff that deletes merge/target.py: entry.py, unchanged, opens it by a "
+                      "path constant, and the suite imports entry.py" % CHAIN_SUITE)
+
 
 if __name__ == "__main__":
     unittest.main()
