@@ -13795,8 +13795,8 @@ LOG_CHECKS_EXTRA.append(("merge: gh_call_of reads the pr verb past a spaced --re
 
 # ---- heredoc-keep: a body a run line reads (`> run.sh`, then `bash run.sh`) stays in view. The kept body keeps its
 # closing line in the text, so every line after it is judged as the command it is. Class 1 is the re-walk invariant,
-# class 2 the refusals after a kept body, class 3 the retire forms of the false alarm (debt slug
-# heredoc-written-run-false-alarm), class 4 the true refusals that stay. Red on main: class 3 only. Red on the held
+# class 2 the refusals after a kept body, class 3 the retire forms of the false alarm (a harmless run of a file a
+# body writes), class 4 the true refusals that stay. Red on main: class 3 only. Red on the held
 # fix (the closing line dropped): class 1 and the detached-launch forms of class 2.
 FAMILY = "heredoc-keep"
 HK_KEPT = "cat > run.sh <<'EOF'\necho hi\nEOF\n"
@@ -13893,6 +13893,26 @@ for _run in ("bash f", "sh < f", "./f"):
 sh("heredoc-keep: a real gh pr create after a data body, with no --draft, denies",
    "cat > notes.md <<'EOF'\nhello\nEOF\ngh pr create --title x", "deny", "draft-pr", cwd=NOGIT,
    carries=DRAFT_REMEDY, lacks=DRAFT_LACKS)
+
+
+# CLASS 5. A body that a kept run file reads stays in view: a body in a file a run file sources or names, a body that
+# an interpreter reads through a substitution or a pipe, and a body written to a .sh file that no command in the
+# call runs. Each denies on the builder's keep. Each is judged red on a mutant that keeps no body (see the commit).
+sh("heredoc-keep: reader, a body in b.sh that a.sh sources, then a.sh runs, denies",
+   "cat > b.sh <<'EOF'\ngh pr create --title x\nEOF\ncat > a.sh <<'EOF'\nsource b.sh\nEOF\nbash a.sh",
+   "deny", "draft-pr", cwd=NOGIT, carries=DRAFT_REMEDY, lacks=DRAFT_LACKS)
+sh("heredoc-keep: reader, a body in b.txt that a.sh names, then a.sh runs, denies",
+   "cat > b.txt <<'EOF'\ngh pr create --title x\nEOF\ncat > a.sh <<'EOF'\nbash b.txt\nEOF\nbash a.sh",
+   "deny", "draft-pr", cwd=NOGIT, carries=DRAFT_REMEDY, lacks=DRAFT_LACKS)
+sh("heredoc-keep: reader, a body in f that python3 -c runs through a substitution, denies",
+   "cat > f <<'EOF'\ngh pr create --title x\nEOF\npython3 -c \"$(cat f)\"",
+   "deny", "draft-pr", cwd=NOGIT, carries=DRAFT_REMEDY, lacks=DRAFT_LACKS)
+sh("heredoc-keep: reader, a body in f that a cat pipes into python3, denies",
+   "cat > f <<'EOF'\ngh pr create --title x\nEOF\ncat f | python3 -",
+   "deny", "draft-pr", cwd=NOGIT, carries=DRAFT_REMEDY, lacks=DRAFT_LACKS)
+sh("heredoc-keep: reader, a body in run.sh that no command in this call runs, denies",
+   "cat > run.sh <<'EOF'\ngh pr create --title x\nEOF",
+   "deny", "draft-pr", cwd=NOGIT, carries=DRAFT_REMEDY, lacks=DRAFT_LACKS)
 
 
 # ---- lane-closes-after-records: the two checks that are log checks, not cases. The override is a story over
