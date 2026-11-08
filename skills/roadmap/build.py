@@ -78,6 +78,17 @@ Each entry reads `<step id> (page item <n>)`. The row reads one unknown entry, n
 when the live file is missing or unreadable, its readAt is bad (the stale-step row's readAt cases), it has no
 items list, or it holds an item row of the wrong shape. A skipped session row does not blank this row.
 
+The upkeep list also names each open step whose note, why or ask holds an owner-pick claim that the page's recorded
+answers do not match (step pick-claims-match-page). A claim is `the owner picked <letter>`, `owner picked <letter>` or
+`item <n> <letter>` (`item #<n>` too), any case, the letter one whole word; "Owner picked none of these" is not one. A
+claim naming item n matches the live file's "answers" row {"n", "choice"?, "at"?} with that n, or that item's
+`lastAnswer` {"choice"?, "note"?, "at"?} on its "items" row, when its choice (a letter, or a list of letters) holds the
+letter. A claim with no item number matches nothing. An answers row with no integer n (answers/park.<id>) is skipped.
+Each entry reads `<step id> (claim "<claim as written>")`. The row reads one unknown entry, never an empty list, when
+the live file is missing or unreadable, its readAt is bad, it has no answers list or no items list, or an answers row
+or a lastAnswer has the wrong shape. A skipped session row does not blank it. Cost: it reads only the live file the
+build already takes; 0 process starts, 0 files written, no timer or watcher.
+
 The upkeep list also names each doing or active step whose note holds a stale dated claim, so triage asks
 for a re-check on main before a lane starts (step stale-note-recheck). A claim is the whole word Finding or
 Checked (any case; no letter, digit or hyphen may touch it, so "Findings", "Rechecked", "Re-checked" and
@@ -166,6 +177,9 @@ ENDED_BUCKETS = SESSION_BUCKETS[3:5]
 ITEM_DONE_STATUSES = ("closed",)
 # A live file with no items list: the open items are unknown, so the lanes to archive read unknown.
 ITEMS_MISSING_WHY = "unknown (the live file has no items list)"
+# A live file with no answers list: the page's recorded answers are unknown, so the owner-pick claims read unknown.
+ANSWERS_MISSING_WHY = "unknown (the live file has no answers list)"
+PICKS_LINE = "owner-pick claims with no matching answer"
 IDLE_LANES_LINE = "lanes to archive"
 # A readAt this far past the build time is clock skew; further than that is a bad stamp.
 FUTURE_MINUTES = 5
@@ -592,6 +606,12 @@ def live_work(path, steps, slug=None):
     row, the stalled items and the lanes-to-archive row: `pageItems` holds the rows, or None with `itemsWhy` saying why
     they read unknown. `lane` is where the item's answer went (text, or null for none) and `owner` is the session that
     reads the answer; a row keeps each only when the file has the key.
+    "answers" (optional, the waiting page's answers/<id> rows `{"n", "choice"?, "at"?}`; a row with no integer n, such as
+    answers/park.<id>, is skipped) and an item row's optional `lastAnswer` `{"choice"?, "note"?, "at"?}` feed the
+    owner-pick claims row (pick_claims). A `choice` is a letter or a list of letters. `answerPicks` holds {n: sorted
+    lowercase letters} from both, or None with `answersWhy` saying why they read unknown: the readAt reasons, no answers
+    list, no items list, or an answers row or lastAnswer of the wrong shape. Cost: it reads only the file already
+    parsed; 0 process starts, 0 files written, no timer or watcher.
     `laneTags` holds the cs-topic: and cs-build: tags of the live sessions, for lane_live.
     Two more optional keys feed the lanes-to-archive row (idle_lanes): a sessions row's `status_bucket` (list_sessions'
     enum name; missing reads as not completed) and a pulls row's `head` (the head commit sha). `laneSessions` holds the
@@ -700,10 +720,59 @@ def live_work(path, steps, slug=None):
         # a publisher that does not send `lane` reads unknown in stalled_items, never "no lane".
         page_items = [dict({"n": r["n"], "status": r["status"], "home": r["home"]},
                            **{k: r[k] for k in ("lane", "owner") if k in r}) for r in raw["items"]]
+    picks, picks_why = None, None
+    if read_why:
+        picks_why = read_why
+    elif not isinstance(raw.get("answers"), list):
+        picks_why = ANSWERS_MISSING_WHY
+    elif not isinstance(raw.get("items"), list):
+        picks_why = ITEMS_MISSING_WHY
+    else:
+        picks, picks_why = answer_picks(raw["answers"], raw["items"])
     return {"read": read, "threads": threads, "pulls": sorted(pulls, key=lambda r: r["number"]),
             "branches": branches, "skipped": skipped, "strays": strays,
             "sessionSteps": session_steps, "liveSteps": live_steps, "laneTags": lane_tags, "staleWhy": stale_why, "pullWhy": pull_why,
-            "pageItems": page_items, "itemsWhy": items_why, "laneSessions": lane_sessions}
+            "pageItems": page_items, "itemsWhy": items_why, "laneSessions": lane_sessions,
+            "answerPicks": picks, "answersWhy": picks_why}
+
+
+def pick_letters(row):
+    """The lowercase letters of a row's `choice` (a letter, or a list of letters), [] when it has none, or None when
+    the row or its choice, at or note has the wrong shape."""
+    if not isinstance(row, dict):
+        return None
+    for key in ("at", "note"):
+        if row.get(key) is not None and not isinstance(row[key], str):
+            return None
+    choice = row.get("choice")
+    if choice is None:
+        return []
+    if isinstance(choice, str):
+        return [choice.strip().lower()]
+    if isinstance(choice, list) and all(isinstance(c, str) for c in choice):
+        return [c.strip().lower() for c in choice]
+    return None
+
+
+def answer_picks(answers, items):
+    """({n: sorted letters}, None) from the answers rows and the items rows' lastAnswer, else (None, why). An answers
+    row with no integer n is skipped; one with it, or a lastAnswer that is not null, of the wrong shape reads unknown."""
+    picks = {}
+    for row in answers:
+        if not (isinstance(row, dict) and type(row.get("n")) is int):
+            continue
+        letters = pick_letters(row)
+        if letters is None:
+            return None, "unknown (an answers row has the wrong shape)"
+        picks.setdefault(row["n"], set()).update(letters)
+    for row in items:
+        if not (isinstance(row, dict) and type(row.get("n")) is int) or row.get("lastAnswer") is None:
+            continue
+        letters = pick_letters(row["lastAnswer"])
+        if letters is None:
+            return None, "unknown (an items row's lastAnswer has the wrong shape)"
+        picks.setdefault(row["n"], set()).update(letters)
+    return {n: sorted(v) for n, v in picks.items()}, None
 
 
 def live_age_minutes(read):
@@ -1377,6 +1446,35 @@ def unfiled(steps, work):
     return out
 
 
+# An owner-pick claim: `the owner picked <letter>` or `item [#]<n> <letter>`, any case. No word character may touch either
+# end, so "homeowner picked a", "subitem 9 a", "items 9 a" and "item 9 ab" are not claims.
+PICK_CLAIM = re.compile(r"(?<![\w-])(?:(?i:(?:the\s+)?owner\s+picked)\s+(?P<pick>[A-Za-z])"
+                        r"|(?i:item)\s+#?(?P<n>\d+)\s+(?P<letter>[A-Za-z]))(?!\w)")
+
+
+def pick_claims(open_, work):
+    """Entries `<step> (claim "<text as written>")` for each owner-pick claim in an open step's note, why or ask that the
+    page's recorded answers do not match, or one unknown entry. A claim naming item n matches when the answers row with n,
+    or that item's lastAnswer, holds its letter. A claim with no item number matches nothing. Reads the live file only."""
+    work = work or {"read": "unknown (no --live file)"}
+    if "answersWhy" not in work:
+        return [work["read"]]
+    if work["answersWhy"]:
+        return [work["answersWhy"]]
+    out = []
+    for k, d in open_:
+        seen = set()
+        for key in ("note", "why", "ask"):
+            text = d.get(key)
+            for m in PICK_CLAIM.finditer(text if isinstance(text, str) else ""):
+                if m.group("n") is not None and m.group("letter").lower() in work["answerPicks"].get(int(m.group("n")), ()):
+                    continue
+                if m.group(0) not in seen:
+                    seen.add(m.group(0))
+                    out.append('%s (claim "%s")' % (k, m.group(0)))
+    return out
+
+
 def idle_lanes(work, steps, marks, slug, repo, main_branch="main", marks_why=None):
     """Entries for each lane of this repo that can be archived, or one `unknown (<why>)` entry, never an empty list
     when a read could not run. Each entry reads `<session id> (<steps>; topic <topic or ->)`, sorted.
@@ -1496,6 +1594,7 @@ def upkeep(steps, added, marks, strays, work=None, slug=None, repo=None, main_br
             ("draft PRs over %d h with no live lane" % STALE_DRAFT_HOURS, stale_drafts(work)),
             ("dated claims to re-check before a lane starts", dated_claims(open_, now.date())),
             ("page rulings not on their step", unfiled(steps, work)),
+            (PICKS_LINE, pick_claims(open_, work)),
             (IDLE_LANES_LINE, idle_lanes(work or {"read": "unknown (no --live file)"}, steps, marks, slug, repo, main_branch, unread)
              if repo is not None else ["unknown (the checkout was not named)"]),
             ("landed, waiting for a device trial", waiting),

@@ -77,7 +77,8 @@ GitHub, so the publisher reads them just before the build and passes one file:
      "pulls": [{"number", "title", "branch"?, "draft"?, "createdAt"?, "head"?, "url"?, "checks"?}],
      "branches": [{"name", "updatedAt"?}],
      "sessions": [{"id", "session_status", "tags", "status_bucket"?}],
-     "items": [{"n", "status", "home", "lane"?}]}
+     "items": [{"n", "status", "home", "lane"?, "owner"?, "lastAnswer"?}],
+     "answers": [{"n", "choice"?, "at"?}]}
 
 - `threads`: `list_threads`, every page. Leave out resolved threads. `state` is the thread state as
   listed. Add `step` only when the thread's brief names it.
@@ -91,11 +92,19 @@ GitHub, so the publisher reads them just before the build and passes one file:
   in progress and for lanes to archive. A live file with no `sessions` list still renders
   Live work.
 - `items`: `ArtifactData list items` of the repo's waiting page, every page, each row copied with only
-  `n`, `status`, `home`, `lane` and `owner`. `lane` is where the item's answer went: the lane's slug, a tier name
+  `n`, `status`, `home`, `lane`, `owner` and `lastAnswer`. Copy the item's `lastAnswer` (`{choice?, note?, at?}`)
+  onto its row when it has one: the page deletes `answers/<id>` once the answer is filed, and `lastAnswer` stays.
+  `lane` is where the item's answer went: the lane's slug, a tier name
   such as `batch-runner`, or `null` for none. Copy it when the item has one; leave the key out when the
   page row has none. `owner` is the session that reads the answer, also optional. The build keeps each
   exactly when its key is present. The upkeep list reads the items for page rulings and for lanes to archive,
   and the red line reads `lane` for stalled items. A live file with no `items` list still renders Live work.
+- `answers`: `ArtifactData list answers` of the repo's waiting page, every page. Copy each `answers/<id>` row with
+  only `n`, `choice` and `at`. Skip `answers/park.<id>` rows. The owner-pick claims row compares each step's
+  "the owner picked a" or "item N a" claim with these rows and with each item's `lastAnswer`. A live file with no
+  `answers` list, or no `items` list, reads that row unknown and still renders Live work. Cost: the row reads only
+  the live file the build already takes; 0 process starts, 0 files written, no timer or watcher. The publisher adds
+  one `answers` list read to its publish.
 - An entry with the wrong shape is counted on the page and in the upkeep list, never dropped. A
   `step` that names no open step goes in the upkeep list.
 - With no `--live`, no `threads` or `pulls` list, or a `readAt` that is not an ISO time, the
