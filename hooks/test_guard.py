@@ -8078,9 +8078,11 @@ sh("env: --input-type takes a value and app.mjs is the script, not inline code",
 # A runner handed the file may run a child command that prints the variables: a program that prints
 # its environment (env, printenv), a child named through a quoted word or an --entrypoint, or a
 # script fed on stdin to python or a shell. A shell string (sh, bash or zsh -c, and npm, npx or pnpm
-# -c) is denied when its first word is env or printenv, or when it holds a $ expansion, and is
-# allowed otherwise. Each deny form is refused with env-file. The reason is not pinned here, so the
-# builder chooses it. The allow controls are the ordinary uses of the same runners.
+# -c) is judged segment by segment with the same env reader as the parent shell form, and a $
+# expansion in it is denied too. A value flag of a runner or container (--pull, --extra) takes the
+# word after it, and an empty --entrypoint is no program, so the child is the words after the image.
+# Each deny form is refused with env-file. The reason is not pinned here, so the builder chooses it.
+# The allow controls are the ordinary uses of the same runners.
 for _child in (
     "uv run --env-file " + ENV + " env",
     "uv run --env-file=" + ENV + " printenv",
@@ -8130,6 +8132,51 @@ for _child_ok in (
 ):
     sh("env-child: allow, a runner given the file may run its own app, " + _child_ok[:60],
        _child_ok, "allow", cwd=NOGIT)
+
+# Each deny names one cause: a later segment of a shell string that prints or reads the file, a value
+# flag the list does not hold, or an empty --entrypoint. Each allow is the same runner running an app.
+sh("env-child: deny, uv runs sh -c whose later segment cats the env file, npm start && cat " + ENV,
+   "uv run --env-file " + ENV + " sh -c \"npm start && cat " + ENV + "\"", "deny", "env-file",
+   cwd=NOGIT)
+sh("env-child: deny, docker runs sh -c whose later segment is env after cd, cd /app && env",
+   "docker run --env-file " + ENV + " alpine sh -c \"cd /app && env\"", "deny", "env-file",
+   cwd=NOGIT)
+sh("env-child: deny, docker runs sh -c whose later segment is printenv after a semicolon",
+   "docker run --env-file " + ENV + " alpine sh -c \"echo x; printenv\"", "deny", "env-file",
+   cwd=NOGIT)
+sh("env-child: deny, npm exec -c whose later segment is env after &&, npm test && env",
+   "npm --env-file=" + ENV + " exec -c \"npm test && env\"", "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, uv runs bash -c whose later segment is printenv after set -x",
+   "uv run --env-file " + ENV + " bash -c \"set -x; printenv FOO\"", "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, docker runs sh -c whose first word is exec before env",
+   "docker run --env-file " + ENV + " alpine sh -c \"exec env\"", "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, docker --pull takes a value, so the child after the image is env",
+   "docker run --pull always --env-file " + ENV + " alpine env", "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, uv --extra takes a value, so the child is python printing os.environ",
+   "uv run --env-file " + ENV + " --extra dev python -c \"import os; print(os.environ)\"",
+   "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, docker --entrypoint with an empty value, so the child is env",
+   "docker run --env-file " + ENV + " --entrypoint \"\" alpine env", "deny", "env-file", cwd=NOGIT)
+# A `#` inside quotes is text, and a line break in a shell string starts a new segment. Both are
+# pinned here, so the segment scan must read the quote marks and the line breaks.
+sh("env-child: deny, a comment opener inside a quoted word does not hide a later env segment",
+   "uv run --env-file " + ENV + " sh -c \"echo '#'; env\"", "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, a line break inside a shell string starts a segment that is env",
+   "uv run --env-file " + ENV + " sh -c \"npm start\nenv\"", "deny", "env-file", cwd=NOGIT)
+sh("env-child: allow, a separator inside single quotes is text, echo 'a && env'",
+   "uv run --env-file " + ENV + " sh -c \"echo 'a && env'\"", "allow", cwd=NOGIT)
+sh("env-child: allow, a lone quote in a shell string is text, echo don't",
+   "uv run --env-file " + ENV + " sh -c \"echo don't\"", "allow", cwd=NOGIT)
+sh("env-child: allow, a line break between npm ci and npm test is two app commands",
+   "uv run --env-file " + ENV + " sh -c \"npm ci\nnpm test\"", "allow", cwd=NOGIT)
+sh("env-child: allow, docker runs sh -c whose segments are cd and npm start",
+   "docker run --env-file " + ENV + " alpine sh -c \"cd /app && npm start\"", "allow", cwd=NOGIT)
+sh("env-child: allow, uv runs sh -c whose segments are npm ci and npm test",
+   "uv run --env-file " + ENV + " sh -c \"npm ci; npm test\"", "allow", cwd=NOGIT)
+sh("env-child: allow, docker --pull takes a value, so the child is myimage",
+   "docker run --pull always --env-file " + ENV + " myimage", "allow", cwd=NOGIT)
+sh("env-child: allow, uv --extra takes a value, so the child is pytest",
+   "uv run --env-file " + ENV + " --extra dev pytest", "allow", cwd=NOGIT)
 
 for wrapped in (
     "timeout 60 node --env-file=" + ENV + " app.js",
