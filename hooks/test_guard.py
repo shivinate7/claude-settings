@@ -566,6 +566,7 @@ ARCHSCOPE_OPEN = os.path.join(ROOT, "archscope-open")        # q_max's open pull
 ARCHSCOPE_REPO = os.path.join(ROOT, "archscope-repo")        # q_max's own read, its default branch, is refused on scope
 ARCHSCOPE_COMPARE = os.path.join(ROOT, "archscope-compare")  # the branch's compare in q_max is refused on scope
 ARCHSCOPE_DRAFT = os.path.join(ROOT, "archscope-draft")      # the open draft's head compare, read as head-landed, is refused on scope
+ARCHSCOPE_PULLS_ALL = os.path.join(ROOT, "archscope-pulls-all")  # the stranded-branch pulls read (state=all, the branch's head) is refused on scope
 ARCHRATE_OPEN = os.path.join(ROOT, "archrate-open")          # q_max's open pull request list is a rate-limit 403
 
 
@@ -1551,6 +1552,9 @@ def build_fixtures():
     # An open draft on the slug, based on the default branch: its head compare is the head-landed read, refused on scope.
     make_fake_gh(ARCHSCOPE_DRAFT, "main", need=["o/r"], others=draft_rows, compares={draft_pair: "scope"},
                  replies={"scope": SCOPE_403_REPLY})
+    # The stranded-branch pulls read: q_max's open list is clean, and its state=all list for the branch's head is refused on scope.
+    make_fake_gh(ARCHSCOPE_PULLS_ALL, "main", repos=arch_pair(qmax={"pulls_error": ["all", "scope"]}),
+                 replies={"scope": SCOPE_403_REPLY})
     make_fake_gh(ARCHRATE_OPEN, "main", repos=arch_pair(qmax={"pulls_error": ["open", "rate"]}), replies={"rate": RATE_403_REPLY})
     # Each fake's answer is checked once, with the argv the guard sends: the -i list read, a bare repo read, a compare read.
     # The bare and compare reads send no -i, so gh prints no status block for them: their bytes are the body and tail.
@@ -1562,6 +1566,9 @@ def build_fixtures():
                        SCOPE_403_REPLY.split(b"\r\n\r\n", 1)[1])
     _verify_reply_fake(ARCHSCOPE_DRAFT, ["api", "repos/o/r/compare/" + draft_pair, "-X", "GET"],
                        SCOPE_403_REPLY.split(b"\r\n\r\n", 1)[1])
+    _verify_reply_fake(ARCHSCOPE_PULLS_ALL, ["api", "repos/" + ARCH_REPO_QMAX + "/pulls", "-X", "GET", "-f", "state=all",
+                                             "-f", "head=" + ARCH_REPO_QMAX.split("/")[0] + ":" + ARCH_BRANCH,
+                                             "-f", "per_page=100", "-f", "page=1", "-i"], SCOPE_403_REPLY)
     _verify_reply_fake(ARCHRATE_OPEN, ["api", "repos/" + ARCH_REPO_QMAX + "/pulls", "-X", "GET", "-f", "state=open",
                                        "-f", "per_page=100", "-f", "page=1", "-i"], RATE_403_REPLY)
     os.makedirs(GHNONE, exist_ok=True)
@@ -10302,6 +10309,10 @@ archive_refuse("a lane whose branch compare in q_max is refused on scope: refuse
 # The head-landed read: an open draft on the default branch whose head compare is refused on scope gives the same scope reason.
 archive_refuse("a lane whose open draft on the default branch has a head compare refused on scope: refused with the scope reason, not the read reason",
                role_path("archive-lane"), fake_gh_path(ARCHSCOPE_DRAFT), carries=(ARCHIVE_SCOPE_PIN, ARCHIVE_BATCH_PIN),
+               lacks=ARCHIVE_SCOPE_LACKS)
+# The stranded-branch read: the state=all pulls read for the branch's head is refused on scope, and the open list is clean.
+archive_refuse("a lane whose stranded branch has its state=all pull request read refused on scope in q_max: refused with the scope reason, not the read reason",
+               role_path("archive-inc"), fake_gh_path(ARCHSCOPE_PULLS_ALL), carries=(ARCHIVE_SCOPE_PIN, ARCHIVE_BATCH_PIN),
                lacks=ARCHIVE_SCOPE_LACKS)
 # Controls: the transient failure and gh's rate-limit 403 keep the read reason and its retry. Neither names the scope.
 archive_refuse("a lane whose open pull requests cannot be read (a transient failure) keeps the read reason and its retry",
