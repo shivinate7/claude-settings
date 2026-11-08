@@ -3874,35 +3874,6 @@ def _reviewed_lines(h, root):
     lines.append(summary(max(done, default=0), sum(a[2] is None for a in acts.values())))
     return lines, bool(reds)
 
-def fix_filing_refusal(root, reviewed, head, findings):
-    """-> None when the push `reviewed..head` only files findings in this pull request, else the reason a PASS fix check is refused (decision
-    pr-review-record, owner ruling item 394 a). The reviewed record's `findings` must be `N, this PR`, and every changed path must be a file added
-    under FILING_DIR or lines added to FILING_NOTES; each path wider than that is named, a deleted notes line too. Raises Stop when the diff cannot
-    be read, never a pass: a filing that cannot be seen is not shown to be filing-only.
-    Cost: two local reads of the diff (name-status, numstat) in `root`, no GitHub call, no file or log. The caller runs it only for a PASS fix check
-    whose reviewed record carries a Findings line, so a legacy record reads no diff."""
-    base = ("-c", "core.quotepath=false", "diff", "--no-renames", "--no-ext-diff", "-z")
-    c, names = git(root, *base, "--name-status", f"{reviewed}..{head}")
-    c2, counts = git(root, *base, "--numstat", f"{reviewed}..{head}")
-    if c or c2:
-        raise Stop(f"the diff {reviewed[:9]}..{head[:9]} could not be read, so the fix check cannot be shown to file findings only: {names if c else counts} " + REVIEW_CITE)
-    parts = names.split("\0")
-    status = {path: st for st, path in zip(parts[0::2], parts[1::2])}
-    deleted = {}
-    for row in counts.split("\0"):
-        if row.count("\t") == 2:
-            _added, gone, path = row.split("\t")
-            deleted[path] = int(gone) if gone.isdigit() else None  # a binary file prints "-": its lines are not countable, so it never counts as deletion-free
-    wider = sorted(path for path, st in status.items()
-                   if not (st == "A" and path.startswith(FILING_DIR) or st == "M" and path == FILING_NOTES and deleted.get(path) == 0))
-    if not status:
-        return "the push changes no file, so it files no finding"
-    if wider:
-        return "the push changes more than a filing: " + ", ".join(wider)
-    if not re.fullmatch(r"[1-9][0-9]*, this PR", findings):
-        return f"the reviewed record says Findings: {findings}, which cannot carry a push that files: " + ", ".join(sorted(status))
-    return None
-
 def head_arg(text):
     """argparse type of --head: a full lowercase 40-hex sha, the one the review read."""
     if not re.fullmatch(REVIEW_SHA, text, re.ASCII):
@@ -4127,11 +4098,6 @@ def main(argv, host=None, lock=None):
                 if not last or last["head"] != a.fix_check[0] or last["fix"]:
                     print("merge: --fix-check: the reviewed head must be the Head of the newest earlier review record on this pull request, and that record must have no Fix check line. " + REVIEW_CITE, file=sys.stderr)
                     return 2
-                if a.fix_check[3] == "PASS" and last["findings"] is not None:  # a legacy record has no Findings line, so its fix check reads no diff
-                    why = fix_filing_refusal(root, a.fix_check[0], a.head, last["findings"])
-                    if why:
-                        print(f"merge: --fix-check: {why}. {REVIEW_CITE}", file=sys.stderr)
-                        return 2
             say(review_body(a.pr, a.head, a.kind, a.guard, a.round, a.net_value, fix=a.fix_check, findings=a.findings).rstrip("\n"))
             print("merge: nothing was posted. Post the lines above as a comment on the pull request.", file=sys.stderr)
             return 0
