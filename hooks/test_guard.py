@@ -13875,6 +13875,7 @@ HK_RETIRE_FORMS = (
     ("sudo -u root cat f", "f"),
     ("timeout 5 wc f", "f"),
     ("ls f | xargs wc", "f"),
+    ("python3 -E check.py f", "f"),   # `-E` takes no code for python (_CODE_FLAGS), so f is data
 )
 HK_RETIRE_BODIES = (
     ("a gh pr create line", "gh pr create --title x"),
@@ -13890,17 +13891,28 @@ for _run, _target in HK_RETIRE_FORMS:
 
 
 # CLASS 3b. A data body that a read shares its line with. Nothing in the call runs the body, so each read allows.
-# Each read has a plain body beside it (P2): the same call with `hello` allows on both trees.
+# Each read has a plain body beside it (P2): the same call with `hello` allows on both trees. The rows also hold the
+# reads that touch a body in f without running it: a quote with a lone apostrophe, or one that spans two lines, starts
+# no run of f, and `$(< f)` reads f as data (the false alarm the debt note heredoc-keep-redirect-read-alarm names).
 HK_READ_FORMS = (
-    ("cat notes.md, then a python version probe", "cat notes.md; echo \"v: $(python3 --version)\""),
-    ("a node version probe, then wc of notes.md", "echo $(node --version) && wc -l notes.md"),
-    ("a node version held in V, then cat of notes.md", "V=$(node --version); cat notes.md"),
+    ("cat notes.md, then a python version probe", "notes.md", "cat notes.md; echo \"v: $(python3 --version)\""),
+    ("a node version probe, then wc of notes.md", "notes.md", "echo $(node --version) && wc -l notes.md"),
+    ("a node version held in V, then cat of notes.md", "notes.md", "V=$(node --version); cat notes.md"),
+    ("a lone apostrophe in double quotes, then cat f and a python probe", "f",
+     "echo \"don't\"; cat f; echo \"$(python3 --version)\""),
+    ("a double quote that spans two lines, then cat f and a python probe", "f",
+     "echo \"one;\ntwo\"; cat f; echo \"$(python3 --version)\""),
+    ("a redirect read in echo, echo \"$(< f)\"", "f", "echo \"$(< f)\""),
+    ("a redirect read as a gh issue body", "f", "gh issue create --title t --body \"$(< f)\""),
+    ("a redirect read in a for list", "f", "for l in $(< f); do echo $l; done"),
+    ("a lone apostrophe unquoted, then cat f and a python probe", "f",
+     "echo don't; cat f; echo \"$(python3 --version)\""),
 )
-for _label, _read in HK_READ_FORMS:
-    sh("heredoc-keep: a body in notes.md, then %s, allows" % _label,
-       "cat > notes.md <<'EOF'\ngh pr create --title x\nEOF\n" + _read, "allow", cwd=NOGIT)
-    sh("heredoc-keep: control, a plain body in notes.md, then %s, allowed" % _label,
-       "cat > notes.md <<'EOF'\nhello\nEOF\n" + _read, "allow", cwd=NOGIT)
+for _label, _file, _read in HK_READ_FORMS:
+    sh("heredoc-keep: a body in %s, then %s, allows" % (_file, _label),
+       "cat > %s <<'EOF'\ngh pr create --title x\nEOF\n" % _file + _read, "allow", cwd=NOGIT)
+    sh("heredoc-keep: control, a plain body in %s, then %s, allowed" % (_file, _label),
+       "cat > %s <<'EOF'\nhello\nEOF\n" % _file + _read, "allow", cwd=NOGIT)
 
 
 # CLASS 4. The true refusals stay. A body a shell runs is code: bash reads a heredoc straight, and a file the header
@@ -13939,9 +13951,13 @@ sh("heredoc-keep: reader, a body in run.sh that no command in this call runs, de
 
 
 # CLASS 5b. Readers that class 5 does not name: a python flag before the `-` or the script name, a launcher before the
-# interpreter, and node or perl that loads a body file by name. Each body holds `gh pr create --title x`, so each run
+# interpreter, node or perl that loads a body file by name, and a `$(cat f)` after a `;`, `#` or `//` inside a quote,
+# which `_list_pieces` keeps in the piece with python3. Each body holds `gh pr create --title x`, so each run
 # denies on main. Each has a plain-body control beside it (P2).
 HK_READER_FORMS = (
+    ("a quoted semicolon before $(cat f) in python3 -c", "f", "python3 -c \"import os; $(cat f)\""),
+    ("a # in quotes before $(cat f) in python3 -c", "f", "python3 -c \"print('#'); $(cat f)\""),
+    ("a // in quotes before $(cat f) in python3 -c", "f", "python3 -c \"print('//'); $(cat f)\""),
     ("python3 -W ignore - < f", "f", "python3 -W ignore - < f"),
     ("python3 -X utf8 - < f", "f", "python3 -X utf8 - < f"),
     ("a pipe into python3 -X utf8 -", "f", "cat f | python3 -X utf8 -"),
@@ -13971,6 +13987,10 @@ sh("heredoc-keep: a written file holding gh pr create --title x, piped to ssh, d
 sh("heredoc-keep: a written file holding gh pr create --title x, piped to sudo, denies",
    "cat > f <<'EOF'\ngh pr create --title x\nEOF\ncat f | sudo -s",
    "deny", "draft-pr", cwd=NOGIT, carries=DRAFT_REMEDY, lacks=DRAFT_LACKS)
+# A wrapper's value word (`timeout 5`) before sudo: `_stdin_shell` skips it, so `sudo -s` still reads f as a shell.
+sh("heredoc-keep: a written file holding gh pr create --title x, piped to timeout 5 sudo -s, denies",
+   "cat > f <<'EOF'\ngh pr create --title x\nEOF\ncat f | timeout 5 sudo -s",
+   "deny", "draft-pr", cwd=NOGIT, carries=DRAFT_REMEDY, lacks=DRAFT_LACKS)
 # Shell names that `_SHELL_SCRIPT` does not keep (it keeps .sh, .bash and .zsh). A body written to one, with no run,
 # denies on main.
 sh("heredoc-keep: a ksh script holding gh pr create --title x, with no run, denies",
@@ -13992,6 +14012,7 @@ HK_FORM_CONTROLS = (
     ("builtin . f", "cat > f <<'EOF'\n%s\nEOF\nbuiltin . f"),
     ("a pipe into ssh", "cat > f <<'EOF'\n%s\nEOF\ncat f | ssh host"),
     ("a pipe into sudo", "cat > f <<'EOF'\n%s\nEOF\ncat f | sudo -s"),
+    ("a pipe into timeout 5 sudo -s", "cat > f <<'EOF'\n%s\nEOF\ncat f | timeout 5 sudo -s"),
     ("a ksh file with no run", "cat > run.ksh <<'EOF'\n%s\nEOF"),
     ("a dash file with no run", "cat > run.dash <<'EOF'\n%s\nEOF"),
     ("a file named sh with no run", "cat > sh <<'EOF'\n%s\nEOF"),
@@ -14003,13 +14024,29 @@ for _label, _form in HK_FORM_CONTROLS:
 
 # CLASS 7. Pins for forms that had no case. A run of a body after `then` or `do` denies, since the run executes the
 # body. A body piped into a named script denies, as `cat f | python3 check.py` does. Each has a plain-body control
-# beside it (P2).
+# beside it (P2). The keyword, `-exec`-family and wrapper-value rows run f through a shell keyword, a find action or a
+# wrapper's value flag: each is a run `_run_files` must still see.
 HK_PIN_FORMS = (
     ("python3 -W ignore f", "f", "python3 -W ignore f", "deny"),
     ("a pipe into ssh -p 22 host", "f", "cat f | ssh -p 22 host", "deny"),
     ("if ./f; then :; fi", "f", "if ./f; then :; fi", "deny"),
     ("do ./f in a for loop", "f", "for i in 1; do ./f; done", "deny"),
     ("a pipe into python3 check.py", "f", "cat f | python3 check.py", "deny"),
+    ("while ./f in a loop", "f", "while ./f; do :; done", "deny"),
+    ("until ./f in a loop", "f", "until ./f; do :; done", "deny"),
+    ("if true; then ./f", "f", "if true; then ./f; fi", "deny"),
+    ("else ./f", "f", "if false; then :; else ./f; fi", "deny"),
+    ("elif ./f", "f", "if false; then :; elif ./f; then :; fi", "deny"),
+    ("a ! before ./f", "f", "! ./f", "deny"),
+    ("a brace group holding ./f", "f", "{ ./f; }", "deny"),
+    ("find -execdir ./f", "f", "find . -execdir ./f \\;", "deny"),
+    ("find -ok ./f", "f", "find . -ok ./f \\;", "deny"),
+    ("find -okdir ./f", "f", "find . -okdir ./f \\;", "deny"),
+    ("find -exec ./f with a + end", "f", "find . -exec ./f {} +", "deny"),
+    ("nice -n 5 ./f", "f", "nice -n 5 ./f", "deny"),
+    ("env -u X ./f", "f", "env -u X ./f", "deny"),
+    ("timeout -s KILL 5 ./f", "f", "timeout -s KILL 5 ./f", "deny"),
+    ("xargs -n 1 ./f", "f", "ls f | xargs -n 1 ./f", "deny"),
 )
 for _label, _file, _call, _want in HK_PIN_FORMS:
     _body = "cat > %s <<'EOF'\ngh pr create --title x\nEOF\n%s" % (_file, _call)
