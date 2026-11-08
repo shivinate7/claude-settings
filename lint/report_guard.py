@@ -590,9 +590,10 @@ def agent_pin(role):
 
 def spawn_window(records, upto=None):
     """The records whose spawns must be named in Done: those after the last turn start, an owner
-    message, a fired wake or a peer brief. Which model a name may carry is matched against the whole
-    session, in done_models_problem. A task notice or stop-hook feedback is not one, so
-    anchoring there would drop the turn's earlier spawns. With no task start the whole transcript stays.
+    message, a fired wake or a peer brief. A peer or task-notification wake after a Stop is one only
+    when the turn before it landed (last_owner_index). Which model a name may carry is matched against
+    the whole session, in done_models_problem. A mid-turn task notice or stop-hook feedback is not one,
+    so anchoring there would drop the turn's earlier spawns. With no task start the whole transcript stays.
     `upto` stops the search at that index, for a re-check bound to an earlier anchor."""
     sys.path.insert(0, os.path.join(HERE, "..", "hooks"))
     import shared_names
