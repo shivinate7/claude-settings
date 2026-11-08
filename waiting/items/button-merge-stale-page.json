@@ -28,7 +28,7 @@
   "pick": "a",
   "rank": 2,
   "ref": "decision no-merge-during-batch-ci",
-  "reply": "19:12 CST: a (you rarely press the button: a hook refuses auto-merge for Claude, and the button stays yours). Home: roadmap step auto-merge-refused-for-claude, routed to the coordinator; decision no-merge-during-batch-ci records it when the lane lands.",
+  "reply": "19:12 CST: a (you rarely press the button: a hook refuses auto-merge for Claude, and the button stays yours). Home: roadmap step auto-merge-refused, in build in lane auto-merge-refused (coordinator, 19:05 CST); decision no-merge-during-batch-ci records it in that lane's PR.",
   "short": "Do you press GitHub's merge button often?",
   "status": "closed",
   "title": "Do you often merge pull requests with GitHub's merge button yourself?",

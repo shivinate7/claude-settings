@@ -1,0 +1,11 @@
+{
+  "title": "A hook refuses auto-merge for Claude; the merge button stays the owner's",
+  "phase": "now",
+  "status": "doing",
+  "order": 40,
+  "owner": "coordinator",
+  "lane": "session_013NEJL3qDimXFeUC8aPbjdg",
+  "why": "A merge by GitHub's button or by auto-merge skips the merge tool's records rebuild, so the page goes stale and main's check turns red (decision no-merge-during-batch-ci, lines 33-35).",
+  "note": "Owner pick a on page item 369 (button-merge-stale-page), 19:03 CST Nov 7: the owner rarely presses the button himself, so a hook refuses auto-merge for Claude and the button stays his. Record the ruling in decision no-merge-during-batch-ci. Weighing: lane notes-keep-reverify, 14:48 CST. Lane started 19:04 CST; the ruling's home is decision no-merge-during-batch-ci, in that lane's PR.",
+  "updatedAt": "2026-11-07T19:08:00-06:00"
+}

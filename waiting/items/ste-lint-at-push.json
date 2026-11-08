@@ -6,7 +6,7 @@
   "kind": "decision",
   "lane": "session_013NEJKzXyKNARtJsbz3Q1R2",
   "lastAnswer": {
-    "at": "2026-11-08T01:03:53Z",
+    "at": "2026-11-08T01:03:53.964Z",
     "choice": "a",
     "note": ""
   },
@@ -30,7 +30,7 @@
   "ref": "record ste-guard-fixes-not-nags; step lint-before-record-push; PR #1653",
   "reply": "19:12 CST: a (allow the push-time lint) went to lane lint-before-record-push, roadmap step lint-before-record-push. The item closes on the lane's report.",
   "short": "Plain-English lint at push time, or CI only",
-  "status": "open",
+  "status": "closed",
   "title": "May a push that breaks the plain-English lint be refused before it leaves?",
   "why": "Your ruling of 2026-10-22 may cover a lint at push time too. The lane keeps building, and only its merge waits for your word."
 }

@@ -1,11 +1,11 @@
 {
   "title": "The comment check catches 'red on the head' history wording in test comments",
-  "phase": "next",
-  "status": "todo",
+  "phase": "now",
+  "status": "doing",
   "order": 60,
   "owner": "coordinator",
-  "lane": "",
+  "lane": "session_013NEJKz5DUxWNjsPPXNF5q1",
   "why": "#1671's test comments said \"RED on the head this branch starts from\" in 14 blocks, which narrates history (rule building-comments-say-why). check_comment_narration passed them before and after a test-author rewrote them. Test-authors write this phrase after nearly every red run.",
   "note": "Fix: add check_comment_narration patterns for a comment that says a case is red or green on a commit or head, or fails on the base. Done check: a lint test where the phrase fails, and a control where a comment saying what a case pins passes. Extends done step comment-narration-patterns. Filed from lane notes-fix-large-3 (session_013NEJL1rKuNDSwMxwArjXHb), 19:03 CST Nov 7.",
-  "updatedAt": "2026-11-07T19:03:00-06:00"
+  "updatedAt": "2026-11-07T19:08:00-06:00"
 }

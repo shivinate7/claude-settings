@@ -34,7 +34,7 @@
   "owner": "lane banchi-t7-root-ipv6-skip (session_013NEJL46E7t1ZeTe57HjYPW)",
   "rank": 2,
   "ref": "ask ask-mw6vybwdb8; step banchi-t7-root-ipv6-skip",
-  "reply": "19:12 CST: a (named SKIP in the cloud) and your note went to lane banchi-t7-root-ipv6-skip. The lane builds the skip and answers whether the T7 checks earn their place. The item closes on the lane's report.",
+  "reply": "Lane banchi-t7-root-ipv6-skip, 19:20 CST: pick a counted, and the build has started on branch t7-cloud-skip. On your note, whether T7 is needed: yes. T7 has 646 checks and is the only test that reaches store/, server/ and cli/. Each of the 3 checks in question guards a recorded incident: the read-only door's WAL miss, and the 2026-09-23 port split. On CI, T7 is cheap: product shards 1-3 ran 2.6-4.2 min each, harness included (main run 87). The real cost is the cloud VM, where T7 alone ran over 25 min and did not finish (15:01-15:26 CST). The lane proposes a separate step to find that slowness. This item closes on the lane's done report.",
   "short": "banchi T7 in the cloud: named SKIP, or keep proving",
   "status": "open",
   "title": "How should banchi's T7 checks act in a cloud session, where they cannot pass?",
