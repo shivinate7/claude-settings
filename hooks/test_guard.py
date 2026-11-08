@@ -7168,6 +7168,25 @@ push_case("stray branch, a second refspec that names the current branch asks",
 sh("push: stray branch, a bare push under push.default current asks",
    VCS + " -c push.default=current push", "ask", PUSH_STRAY_RULE, cwd=PUSHSTRAY)
 
+# UNREAD FOLDER. Owner ruling 413 a (2026-11-08): a push whose folder cannot be read asks, as the forced push
+# does on the same folder (the lease cases above). A bare push's destination is read from its folder, so with
+# no readable folder the destination is unknown. A `cd $(...)` is a second command, so its ask is chained and
+# denies, as the lease cases above do. A `cd X &&` to a folder that is not there is one command, so it asks alone.
+chained_ask("push: unread folder, a bare push after cd through $(...) with ;, is a chained ask",
+            'cd "$(mktemp -d)"; ' + VCS + " push", cwd=PUSHFEAT)
+chained_ask("push: unread folder, a bare push after cd through $(...) with &&, is a chained ask",
+            'cd "$(mktemp -d)" && ' + VCS + " push", cwd=PUSHFEAT)
+sh("push: unread folder, a bare push after cd $HOME/x, a folder that is not there, asks alone",
+   "cd $HOME/x && " + VCS + " push", "ask", cwd=PUSHFEAT)
+sh("push: unread folder, a bare push with git -C naming a directory that is not there asks",
+   VCS + " -C " + slash(os.path.join(ROOT, "nowhere")) + " push", "ask", cwd=PUSHFEAT)
+# CONTROLS, the same shapes in a readable checkout. A bare push on a feature branch that tracks its own
+# upstream allows, and a cd into that checkout first is one command that allows.
+push_case("unread folder, control: a bare push in a readable checkout on a feature branch allows",
+          "", "allow", cwd=PUSHSELF, silent=True)
+sh("push: unread folder, control: a bare push after cd into that readable checkout allows",
+   "cd " + slash(PUSHSELF) + " && " + VCS + " push", "allow", cwd=PUSHFEAT, silent=True)
+
 # ASK, owner rulings 207 a. A non-forced push whose destination is the literal
 # name main or master asks. The name is literal: origin/HEAD does not decide it.
 push_case("main, HEAD:main from a feature branch asks", "origin HEAD:main", "ask", rule=PUSH_MAIN_RULE)
