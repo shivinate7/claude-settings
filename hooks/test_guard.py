@@ -21956,6 +21956,92 @@ _relesc_add("worktree-home relative escape: an agent with no record, mkdir ../x 
             "lands in its own checkout and is allowed", "allow", "mkdir ../x", "free_src", agent=RELESC_FREE)
 
 
+# Replays of three calls the live guard refused with other-checkout (guard log, 2026-11-08 12:25:41,
+# 12:26:07 and 12:26:18 UTC, this session). Each is the command as it was typed, judged for this
+# fixture's agent from its home. The first and third hold `cd ..` and `> ../f` only as heredoc body text.
+# The second holds them as quoted arguments after a heredoc. A heredoc body is text, so a refusal that
+# comes from that text is a false alarm, and each replay expects allow. The controls isolate the trigger:
+# the second call's quoted arguments with no heredoc before them, a heredoc with no file redirect before
+# its marker, and the same file-redirected heredoc with its target outside the clone.
+RELESC_REPLAY_1 = r"""SP=/tmp/claude-0/-home-user-claude-settings/788c10d3-3c3c-55c6-b5bc-31af1756bcc3/scratchpad && rm -rf "$SP/probe" && mkdir -p "$SP/probe/P" && cd "$SP/probe/P" && git init -q && git -c user.email=a@b -c user.name=t commit -q --allow-empty -m init && git worktree add -q "$SP/probe/P/.claude/worktrees/agent-zz" -b wt-zz && cat > "$SP/probe/run.py" <<'EOF'
+import json, subprocess, sys
+sp, guard = sys.argv[1], sys.argv[2]
+home = sp + "/probe/P/.claude/worktrees/agent-zz"
+def ask(tool_input, cwd, agent="zz"):
+    body = {"tool_name": "Bash", "tool_input": {"command": tool_input}, "cwd": cwd}
+    if agent:
+        body["agent_id"] = agent
+    out = subprocess.run([sys.executable, guard], input=json.dumps(body), capture_output=True, text=True)
+    return (out.stdout.strip() or out.stderr.strip())[:300]
+print("record:", ask("echo hi", home))
+for cmd in ("cd .. && mkdir tmp", "echo x > ../f", "touch ../f", "mkdir ../tmp"):
+    print(repr(cmd), "->", ask(cmd, home))
+EOF
+cd "$SP/probe" && python3 "$SP/probe/run.py" "$SP" /home/user/claude-settings/.claude/worktrees/agent-ab8bdbda8fd686581/hooks/guard.py
+"""
+RELESC_REPLAY_2 = r"""SP=/tmp/claude-0/-home-user-claude-settings/788c10d3-3c3c-55c6-b5bc-31af1756bcc3/scratchpad && mkdir -p "$SP/probe" && cat > "$SP/probe/judge.py" <<'EOF'
+import json, subprocess, sys
+guard, cwd, agent = sys.argv[1], sys.argv[2], sys.argv[3]
+for cmd in sys.argv[4:]:
+    body = {"tool_name": "Bash", "tool_input": {"command": cmd}, "cwd": cwd, "agent_id": agent}
+    out = subprocess.run([sys.executable, guard], input=json.dumps(body), capture_output=True, text=True)
+    text = (out.stdout.strip() or out.stderr.strip()).replace("\n", " | ")
+    print(repr(cmd), "->", text[:260])
+EOF
+python3 "$SP/probe/judge.py" /home/user/claude-settings/.claude/worktrees/agent-ab8bdbda8fd686581/hooks/guard.py /home/user/claude-settings/.claude/worktrees/agent-ab8bdbda8fd686581 ab8bdbda8fd686581 "cd .. && mkdir tmp" "echo x > ../f" "touch ../f" "mkdir ../tmp"
+"""
+RELESC_REPLAY_3 = r"""SP=/tmp/claude-0/-home-user-claude-settings/788c10d3-3c3c-55c6-b5bc-31af1756bcc3/scratchpad && cat > "$SP/probe/judge.py" <<'EOF'
+import json, subprocess, sys
+guard, cwd, agent, listing = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
+for cmd in open(listing, encoding="utf-8").read().splitlines():
+    body = {"tool_name": "Bash", "tool_input": {"command": cmd}, "cwd": cwd, "agent_id": agent}
+    out = subprocess.run([sys.executable, guard], input=json.dumps(body), capture_output=True, text=True)
+    text = (out.stdout.strip() or out.stderr.strip()).replace("\n", " | ")
+    print(repr(cmd), "->", text[:260])
+EOF
+cat > "$SP/probe/cmds.txt" <<'EOF'
+cd .. && mkdir tmp
+echo x > ../f
+touch ../f
+mkdir ../tmp
+EOF
+python3 "$SP/probe/judge.py" /home/user/claude-settings/.claude/worktrees/agent-ab8bdbda8fd686581/hooks/guard.py /home/user/claude-settings/.claude/worktrees/agent-ab8bdbda8fd686581 ab8bdbda8fd686581 "$SP/probe/cmds.txt"
+"""
+_relesc_add("other-checkout: heredoc replay: the first refused call, a heredoc body that holds cd .. and > ../f, is allowed",
+            "allow", RELESC_REPLAY_1, "home")
+_relesc_add("other-checkout: heredoc replay: the second refused call, its quoted arguments after a heredoc, are allowed",
+            "allow", RELESC_REPLAY_2, "home")
+_relesc_add("other-checkout: heredoc replay: the third refused call, a file-redirected heredoc of cd .. and > ../f, is allowed",
+            "allow", RELESC_REPLAY_3, "home")
+_relesc_add("other-checkout: heredoc replay control: the second call's quoted arguments with no heredoc before them are allowed",
+            "allow", 'python3 "$SP/probe/judge.py" /home/user/claude-settings/.claude/worktrees/agent-ab8bdbda8fd686581/hooks/guard.py /home/user/claude-settings/.claude/worktrees/agent-ab8bdbda8fd686581 ab8bdbda8fd686581 "cd .. && mkdir tmp" "echo x > ../f" "touch ../f" "mkdir ../tmp"', "home")
+_relesc_add("other-checkout: heredoc replay control: a heredoc with no file redirect before its marker is allowed",
+            "allow", "cat <<'EOF'\ncd .. && mkdir tmp\necho x > ../f\nEOF", "home")
+_relesc_add("other-checkout: heredoc replay control: the same file-redirected heredoc, to a path outside the clone, is allowed",
+            "allow", "cat > %(abs_outside)s/cmds.txt <<'EOF'\ncd .. && mkdir tmp\necho x > ../f\ntouch ../f\nmkdir ../tmp\nEOF", "home")
+# Bisect of the refusal above, with the same agent and cwd: each row narrows one part of the call.
+_relesc_add("other-checkout: heredoc replay bisect: echo of a quoted cd .. && mkdir tmp is allowed",
+            "allow", 'echo "cd .. && mkdir tmp"', "home")
+_relesc_add("other-checkout: heredoc replay bisect: echo of a quoted echo x > ../f is allowed",
+            "allow", 'echo "echo x > ../f"', "home")
+_relesc_add("other-checkout: heredoc replay bisect: quoted cd .. and > ../f as python arguments are allowed",
+            "allow", 'python3 judge.py "cd .. && mkdir tmp" "echo x > ../f"', "home")
+_relesc_add("other-checkout: heredoc replay bisect: a file-redirected heredoc to an absolute target, then a listing read, is allowed",
+            "allow", "cat > %(abs_outside)s/cmds.txt <<'EOF'\ncd .. && mkdir tmp\necho x > ../f\nEOF\npython3 judge.py %(abs_outside)s/cmds.txt", "home")
+_relesc_add("other-checkout: heredoc replay bisect: a file-redirected heredoc to a $SP target is allowed",
+            "allow", 'cat > "$SP/probe/cmds.txt" <<\'EOF\'\ncd .. && mkdir tmp\necho x > ../f\nEOF', "home")
+_relesc_add("other-checkout: heredoc replay bisect2: a file-redirected heredoc of cd .. then echo done is allowed",
+            "allow", "cat > %(abs_outside)s/cmds.txt <<'EOF'\ncd .. && mkdir tmp\nEOF\necho done", "home")
+_relesc_add("other-checkout: heredoc replay bisect2: python3 judge.py with an absolute listing argument is allowed",
+            "allow", "python3 judge.py %(abs_outside)s/cmds.txt", "home")
+_relesc_add("other-checkout: heredoc replay bisect2: python3 judge.py with cd .. && mkdir tmp as its one argument is allowed",
+            "allow", 'python3 judge.py "cd .. && mkdir tmp"', "home")
+_relesc_add("other-checkout: heredoc replay bisect3: python3 judge.py with a quoted echo x > ../f as its one argument is allowed",
+            "allow", 'python3 judge.py "echo x > ../f"', "home")
+_relesc_add("other-checkout: heredoc replay bisect3: python3 judge.py with a real redirect to ../f is refused",
+            "deny", "python3 judge.py x > ../f", "home", rule="other-checkout")
+
+
 # The cost pins, measured on the unchanged code: the git spawns and worktree-list spawns each call makes
 # today. The new clause may not add to either; a count above its pin fails. Rows: label, agent, cwd key,
 # command, most spawns, most worktree lists.
