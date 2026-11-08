@@ -213,6 +213,18 @@ def case_second_send_after_one_reply_passes():
     check(case, got is None, "asked: got %r" % (got,))
 
 
+def case_newest_frame_decides_passes():
+    # The newest inbound frame from the target is the one read: an older Departs frame does not trigger B once a
+    # newer plain frame from the same target follows it.
+    case = "B: an older Departs frame then a newer plain frame from the target passes"
+    fn = pick_fn(case)
+    if fn is None:
+        return
+    path = transcript("newest", [inbound(TARGET, PICK), inbound(TARGET, "Status: the lane is idle.")])
+    got = send(fn, AGREED, path)
+    check(case, got is None, "asked: got %r" % (got,))
+
+
 def case_bold_departs_label_is_a_pick_asks():
     case = "A: a bold Departs from label is a pick too, and asks with no Checked line"
     fn = pick_fn(case)
@@ -277,7 +289,8 @@ CASES = (case_departs_pick_without_checked_asks, case_inbound_pick_without_check
          case_departs_pick_with_real_checked_passes, case_inbound_pick_with_real_checked_passes,
          case_checked_made_up_decision_asks, case_checked_bare_slug_passes,
          case_no_pick_passes_without_past_rulings, case_inbound_pick_from_other_session_passes,
-         case_second_send_after_one_reply_passes, case_bold_departs_label_is_a_pick_asks,
+         case_second_send_after_one_reply_passes, case_newest_frame_decides_passes,
+         case_bold_departs_label_is_a_pick_asks,
          case_guard_asks_on_inbound_pick, case_control_guard_allows_plain_send)
 
 
