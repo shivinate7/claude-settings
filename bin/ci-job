@@ -578,8 +578,7 @@ def main(argv):
         tally["FAIL" if state == "FAIL" else "unknown"] += state not in ("PASS", "SKIP")
         blocker = blocker or (name if (kind[n - 1] == "install" or not preamble_ran) and state == "unknown" else None)
         print("%-15s %s: %s" % (state, name, first))
-    nothing_picked = picked is not None and bool(any(suites) or elsewhere) and "suite" not in kind  # the selector ran and this job owes no suite step
-    if lint and not ran_lint and not nothing_picked and not tally["FAIL"] and not tally["unknown"]:  # a pass that ran no lint CI step proved nothing; any other line already gives the exit
+    if lint and not ran_lint and not tally["FAIL"] and not tally["unknown"]:  # a pass that ran no lint CI step proved nothing; any other line already gives the exit
         tally["unknown"] += 1
         print("%-15s no lint CI step %s: %d of the job's %d steps are lint CI steps, and each one is skipped, not run, or unknown" % (
             "unknown", "would run" if dry else "ran", sum(k == "lint" for k in kind), len(steps)))
