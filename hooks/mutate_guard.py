@@ -50,8 +50,8 @@ catcher suite: `CAUGHT`, `MISS` or `UNKNOWN` per defect. With `--base`, each id 
 when it sits beside it, imports or loads its module, or names its basename in a path expression it copies, opens or runs
 (read from the `ast` tree, so a docstring or comment never counts).
 `--lint-suites BASE` prints the suites that test any file of the diff BASE...HEAD, and each tracked suite the diff changes: the one selector `bin/ci-job --lint` asks
-for the hooks/ and merge/ CI steps it runs. A suite also tests a `.py` file that a module it loads imports, however deep, inside
-the repository (`suites_for_paths` with `chain`). `bin/ci-job` stops the selector after 60 s and reads that as unknown; the job
+for the hooks/ and merge/ CI steps it runs. A suite also tests a `.py` file that a module it reaches imports or loads by a path
+constant, however deep, inside the repository (`suites_for_paths` with `chain`). `bin/ci-job` stops the selector after 60 s and reads that as unknown; the job
 scope is the linted job only, and a suite picked for a CI step of another job prints one `not run` line there. Cost: once per
 lane lint, one process, one `git diff`, and (when the diff holds a file) one `git ls-files` and one parse of each tracked
 `test_*.py` and of each module they reach, once for the whole diff, never once per touched file.
@@ -2787,7 +2787,8 @@ def _suite_profile(source: str):
     (`_PATH_NAMES`, `_PATH_METHODS`), and the path argument of `spec_from_file_location`, `SourceFileLoader` and
     `runpy.run_path` (never the module-name argument). A name in such an expression is followed to the expressions an
     assignment binds it to, in any scope of the file (module, function or class level; one name bound in two scopes pools
-    both values). A path that arrives as a function parameter is not followed (debt tests-for-misses-param-loads)."""
+    both values), and a `for` target is bound to the strings of its iterable: a tuple, list or set literal, or a name bound
+    to one. A path that arrives as a function parameter is not followed (debt tests-for-misses-param-loads)."""
     import ast
     try:
         tree = ast.parse(source)
@@ -2801,6 +2802,16 @@ def _suite_profile(source: str):
                     bound.setdefault(target.id, []).append(node.value)
         elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name) and node.value is not None:
             bound.setdefault(node.target.id, []).append(node.value)
+    literals = (ast.Tuple, ast.List, ast.Set)
+    for node in ast.walk(tree):  # after the assignments, so a loop over a bound name finds its literal
+        if isinstance(node, (ast.For, ast.AsyncFor)):
+            if isinstance(node.iter, ast.Name):
+                items = [value for value in bound.get(node.iter.id, ()) if isinstance(value, literals)]
+            else:
+                items = [node.iter] if isinstance(node.iter, literals) else []
+            for target in ast.walk(node.target):
+                if isinstance(target, ast.Name):
+                    bound.setdefault(target.id, []).extend(items)
     stems, bases = set(), set()
 
     def constants(expr, seen):
@@ -2875,9 +2886,9 @@ def suites_for_paths(paths, tracked, union: bool, chain: bool = False) -> set:
     each tracked `test_*.py` whose profile (`_suite_profile`) names it: its stem imported or loaded when it is a `.py`
     file, its basename in a path expression of any file. A listed file (REPORT_TARGETS) adds its listed suites; with
     `union` False it gets those only and no scan. With `chain` True a suite also tests a `.py` path that a module it loads
-    imports, however deep: from each tracked `.py` the suite names (by stem or by basename), it follows the stems that file
-    imports (`import`, `from`, a literal `import_module`) to tracked `.py` files, each file once, so a cycle ends. A stem or
-    basename with no tracked `.py` is outside the repository and ends the chain there. Each file is read and parsed once,
+    imports or loads, however deep: from each tracked `.py` the suite names, it follows the stems that file imports (`import`,
+    `from`, a literal `import_module`) and the basenames it names in a path expression, to tracked `.py` files, each file
+    once, so a cycle ends. A stem or basename with no tracked `.py` is outside the repository and ends the chain there. Each file is read and parsed once,
     whatever the number of paths or suites."""
     import re
     listed = dict(REPORT_TARGETS)
@@ -2907,11 +2918,16 @@ def suites_for_paths(paths, tracked, union: bool, chain: bool = False) -> set:
         for item in tracked:
             if item.endswith(".py"):
                 by_stem.setdefault(os.path.splitext(os.path.basename(item))[0], []).append(item)
+
+        def loads_of(profile):  # the tracked .py files a profile imports, or names in a path expression
+            stems, bases = profile
+            files = [file for stem in stems for file in by_stem.get(stem, [])]
+            files += [file for base in bases if base.endswith(".py") for file in by_stem.get(base[:-3], [])
+                      if os.path.basename(file) == base]
+            return files
+
         for suite in suites:
-            stems, bases = profile_of(suite)
-            todo = [file for stem in stems for file in by_stem.get(stem, [])]
-            todo += [file for base in bases if base.endswith(".py") for file in by_stem.get(base[:-3], [])
-                     if os.path.basename(file) == base]
+            todo = loads_of(profile_of(suite))
             seen = set()
             while todo:
                 file = todo.pop()
@@ -2920,7 +2936,7 @@ def suites_for_paths(paths, tracked, union: bool, chain: bool = False) -> set:
                 seen.add(file)
                 profile = profile_of(file)
                 if profile is not None:
-                    todo.extend(next_file for stem in profile[0] for next_file in by_stem.get(stem, []))
+                    todo.extend(loads_of(profile))
             reached[suite] = seen
     for path in scan:
         folder, name = os.path.split(path)
@@ -2960,7 +2976,7 @@ def tests_for_main(argv) -> int:
 def lint_suites_main(argv) -> int:
     """`--lint-suites BASE`: print the suites that test any file of `git diff BASE...HEAD`, a line each, sorted. It is the
     one selector `bin/ci-job --lint` asks for the CI steps with a suite it runs. Unlike `--tests-for`, a listed file also gets the
-    suites its scan finds, and a suite also gets a `.py` file that a module it loads imports (`chain`). Exit 2 with one
+    suites its scan finds, and a suite also gets a `.py` file that a module it reaches imports or loads (`chain`). Exit 2 with one
     `ERROR` line when the diff or the file list cannot be read. Cost: one `git diff`, then, when the diff holds a file, one
     `git ls-files` and one parse of each tracked `test_*.py` and of each module they reach, once for the whole diff."""
     import argparse

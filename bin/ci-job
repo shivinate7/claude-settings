@@ -7,8 +7,8 @@
 # `bin/ste-changed ...` or a pinned `pipx run <tool>==<version> ...` (the pin read from the workflow), one command
 # per line, no `&&`, `|` or `;`. A CI step with a `python3 hooks/test_<name>.py` or `python3 merge/test_<name>.py` line, with
 # arguments or other lines around it, runs whole, as CI runs it, only when the one selector, `hooks/mutate_guard.py --lint-suites <base>`,
-# picks that suite for a file of the diff <base>...HEAD. The selector follows imports: a suite is picked for a change to any
-# module that a module it loads imports. A picked suite that fails is FAIL. A line before the suite that fails, so the
+# picks that suite for a file of the diff <base>...HEAD. The selector follows imports and path loads: a suite is picked for a
+# change to any module that a module it reaches imports or loads by a path constant. A picked suite that fails is FAIL. A line before the suite that fails, so the
 # shell never reaches the suite, makes the CI step unknown: ci-job echoes a marker right before a top-level first suite
 # line (preamble_marked; not under pwsh) and reads a failure with no marker in the log as the preamble's. A selector that
 # cannot run, or runs past its 60 s limit (SELECTOR_LIMIT), is unknown on each such CI step, exit 2. With no base or no
