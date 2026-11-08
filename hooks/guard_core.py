@@ -1633,6 +1633,14 @@ BUILDER_ROLE = "builder"
 AUTHOR_ROLE = "test-author"
 WRITER_ROLE = "record-writer"
 DESIGNER_ROLE = "designer"
+ROLE_DEFAULT = "general-purpose"
+
+
+def role_key(subagent_type) -> str:
+    """The role a spawn names, without case and without surrounding space; an empty role is the default role. The one
+    normaliser: role_name and opus_spawn_hit's Explore grant (guard.py) and the review record rule (guard_merge.py) read the role through it.
+    hooks/call_judge.py explore_off_model folds the Explore role on its own."""
+    return (str(subagent_type or "").strip() or ROLE_DEFAULT).lower()
 
 
 def agent_role(payload) -> str:

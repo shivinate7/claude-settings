@@ -2850,7 +2850,7 @@ MUTATIONS = [
      ')',
      "guard", "a reviewer spawn whose result is an error does not gate"),
     ("review-record-after-round: the design-reviewer note is dropped",
-     '    if uses[last]["input"].get("subagent_type") == "design-reviewer":',
+     '    if role_key(uses[last]["input"].get("subagent_type")) == "design-reviewer":',
      '    if False:',
      "guard", "the refusal names the design-reviewer line"),
     ("review-record-after-round: a record before the reviewer spawn counts",

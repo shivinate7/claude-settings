@@ -11,7 +11,7 @@ import sys
 
 from guard_core import (
     _absolute, _git, _git_subcommand_index, _segment_git_c_target, basename, cap_safe, command_root, GIT_WORK_TREE_RE,
-    dir_before_segment, git_calls, inline_script, inner_commands, resolve_command, resolve_default_base, segment_tokens, split_segments,
+    dir_before_segment, git_calls, inline_script, inner_commands, resolve_command, resolve_default_base, role_key, segment_tokens, split_segments,
     strip_heredoc_bodies,
 )
 import own_session  # the one home of the own get_session read, small so report_guard imports it too
@@ -1148,17 +1148,19 @@ RECORD_SPAWN_TOOLS = ("Agent", "Task")
 RECORD_REVIEWER_ROLES = ("reviewer", "design-reviewer")  # a spawn of one of these is a round
 RECORD_TRIGGER_ROLES = ("builder", "test-author")  # a spawn of one of these, or a send_message, moves past the round
 RECORD_COMMENT_TOOL = "mcp__github__add_issue_comment"
-RECORD_REASON = (
+# The remedy's merge call takes the flags merge/merge.py's --review-record takes (its usage line and argparse), each as a placeholder.
+REVIEW_RECORD_CALL = "merge <pr> --review-record --head <sha> --kind <kind> --guard <yes|no> --round <n>:<role>:<model>:<verdict>"
+REVIEW_RECORD_REASON = (
     "review-record-after-round: the last reviewer spawn in this session has no review record after it, so the "
-    "round is not on the pull request yet. Run `merge <pr> --review-record --head <reviewed sha>`, post the body "
+    "round is not on the pull request yet. Run `" + REVIEW_RECORD_CALL + "` with the reviewed sha, post the body "
     "it prints with the GitHub comment tool (add_issue_comment), then retry. "
     "(decision pr-review-record, a lane posts the record after each round)"
 )
-RECORD_DESIGN_NOTE = (
+REVIEW_RECORD_DESIGN_NOTE = (
     " The last reviewer spawn was a design-reviewer: add its line, `Round <n>: design-reviewer, <model>, <verdict>`, "
-    "to that round's record, with `merge <pr> --review-record --head <sha> --round <n>:design-reviewer:<model>:<verdict>`."
+    "to that round's record, with `" + REVIEW_RECORD_CALL.replace("<role>", "design-reviewer") + "`."
 )
-RECORD_DESIGN_REASON = RECORD_REASON + RECORD_DESIGN_NOTE
+REVIEW_RECORD_DESIGN_REASON = REVIEW_RECORD_REASON + REVIEW_RECORD_DESIGN_NOTE
 
 
 def _transcript_reader():
@@ -1172,7 +1174,8 @@ def _transcript_reader():
 
 def _is_spawn_of(use, roles) -> bool:
     given = use.get("input")
-    return use.get("name") in RECORD_SPAWN_TOOLS and isinstance(given, dict) and given.get("subagent_type") in roles
+    return (use.get("name") in RECORD_SPAWN_TOOLS and isinstance(given, dict)
+            and role_key(given.get("subagent_type")) in roles)
 
 
 _COMMENT_PATH = re.compile(r"(?:^|/)(?:issues|pulls)/[^/\s]+/comments/?$")
@@ -1245,7 +1248,7 @@ def review_record_hit(tool: str, tool_input, transcript: str, agent: bool = Fals
         return "", "", False
     try:
         reader = _transcript_reader()
-        judged = tool in reader.SEND_TOOLS or (tool in RECORD_SPAWN_TOOLS and tool_input.get("subagent_type") in RECORD_TRIGGER_ROLES)
+        judged = tool in reader.SEND_TOOLS or (tool in RECORD_SPAWN_TOOLS and role_key(tool_input.get("subagent_type")) in RECORD_TRIGGER_ROLES)
         if not judged:
             return "", "", False
         records = [rec for rec in reader.read_transcript(transcript) if not rec.get("isSidechain")]
@@ -1266,9 +1269,9 @@ def review_record_hit(tool: str, tool_input, transcript: str, agent: bool = Fals
     if any(_posts_record(use, marker) for use in uses[last + 1:]):
         return "", "", False
     matched = "%s after a reviewer spawn with no review record" % tool
-    if uses[last]["input"].get("subagent_type") == "design-reviewer":
-        return RECORD_DESIGN_REASON, matched, False
-    return RECORD_REASON, matched, False
+    if role_key(uses[last]["input"].get("subagent_type")) == "design-reviewer":
+        return REVIEW_RECORD_DESIGN_REASON, matched, False
+    return REVIEW_RECORD_REASON, matched, False
 
 
 # The installer swaps the next line for `INSTALL_ID = "<id>"` at copy time; guard.py compares the
