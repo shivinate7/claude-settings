@@ -5518,6 +5518,147 @@ class HostChildStopsEndToEndTests(unittest.TestCase):
                               "an unmarked session sleep in the same tree did not make the proof None")
 
 
+class _VirtualClock:
+    """Stands in for the `time` module inside agent_end_reap. `monotonic()` reads a virtual now and
+    `sleep()` advances it, so a settle's deadline passes with no real wait (P5). Every other name is
+    the real `time` module."""
+
+    def __init__(self):
+        self.now = 0.0
+
+    def monotonic(self):
+        return self.now
+
+    def sleep(self, seconds):
+        self.now += seconds
+
+    def __getattr__(self, name):
+        return getattr(time, name)
+
+
+# A marked child. It writes its ready file once its SIGTERM disposition is set; argument 2 is "trap"
+# to ignore SIGTERM, anything else to keep the default.
+_MARKED_CHILD = ("import os, signal, sys, time\n"
+                 "if sys.argv[2] == 'trap': signal.signal(signal.SIGTERM, signal.SIG_IGN)\n"
+                 "with open(sys.argv[1] + '.tmp', 'w', encoding='utf-8') as handle:\n"
+                 "    handle.write('ready')\n"
+                 "os.replace(sys.argv[1] + '.tmp', sys.argv[1])\n"
+                 "time.sleep(120)\n")
+
+
+class AgentEndFailSafeSettleTests(_AgentEndFixture):
+    """The fail-safe branches of the agent-end stop (`agent_end_reap.stop_and_settle` and the
+    `reap_worktrees` code after it). A finished agent's tree is kept and relocked when a marked process
+    survives the stop, or when the process table cannot be read after the stop. A failed unlock stops
+    nothing. Each case breaks one of those branches, and its keep names that branch."""
+
+    AGENT = AgentEndProcessMarkerTests.AGENT  # the finished agent's id (one home: that class)
+    ENDING = AgentEndProcessMarkerTests.ENDING  # the agent whose SubagentStop runs the reap
+
+    def marked_child(self, tree, name, trap):
+        """A child of this test process, started in TREE, whose exec-time environment carries AGENT's
+        marker (`env` execs python, so the marker is in the program's own environ). TRAP makes it ignore
+        SIGTERM. Returns once its ready file is written, so its disposition is set before any case signals it."""
+        ready = os.path.join(self.root, name + ".ready")
+        proc = subprocess.Popen(["env", "CLAUDE_AGENT_ID=" + self.AGENT, sys.executable, "-c", _MARKED_CHILD,
+                                 ready, "trap" if trap else "plain"], cwd=tree, stdin=subprocess.DEVNULL,
+                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        self.addCleanup(self.stop, proc)
+        _read_when_ready(ready)
+        return proc
+
+    def run_reap(self, tree):
+        """The reap the SubagentStop hook runs, for the finished agent's TREE: `reap_worktrees` over the repo's
+        agent trees, with the payload of a busy session. The finished proof is the agent's stop row and its aged
+        transcript. The deadline is one virtual second away (see _VirtualClock). Returns the rows."""
+        own = self.add(self.ENDING)
+        self.write_stop_row(self.AGENT, tree)
+        self.age_subagent_transcript(self.AGENT, 31)
+        payload = {"hook_event_name": "SubagentStop", "agent_id": self.ENDING, "cwd": own,
+                   "session_id": "agent-end-wt-cases"}
+        payload.update(self.payload_extra(self.running_elsewhere()))
+        clock = _VirtualClock()
+        with mock.patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": self.cfg, "CLAUDE_PID": str(os.getpid())}):
+            with mock.patch.object(self.reap, "time", clock):
+                return self.reap.reap_worktrees(own, clock.monotonic() + 1.0, payload)
+
+    @staticmethod
+    def row_of(rows, tree):
+        for row in rows:
+            if _norm_path(str(row.get("path", ""))) == _norm_path(tree):
+                return row
+        return None
+
+    def test_a_child_that_traps_sigterm_keeps_its_tree_and_relocks_it(self):
+        lock = self.live_host_lock(self.AGENT)
+        if lock is None:
+            self.skipTest("the live lock's start is read from /proc, which this box has")
+        tree = self.finished_tree(self.AGENT, lock=lock)
+        survivor = self.marked_child(tree, "trapped", trap=True)
+        inside, _unreadable = sweep.processes_in(tree)
+        self.assertIn(survivor.pid, inside or [], "scope: the marked child that traps SIGTERM is not inside the finished tree")
+        row = self.row_of(self.run_reap(tree), tree)
+        self.assertIsNotNone(row, "the reap wrote no row for the finished tree")
+        self.assertEqual(row.get("action"), "keep", "the finished tree was reaped while a marked child survived SIGTERM")
+        self.assertIn("process-inside", str(row.get("reason")), "the tree was kept for another reason: %s" % row.get("reason"))
+        self.assertIn(str(survivor.pid), str(row.get("reason")),
+                      "the keep reason does not name the survivor pid %d: %s" % (survivor.pid, row.get("reason")))
+        self.assertIs(row.get("relocked"), True, "the stop kept the tree but its row says relocked %r" % (row.get("relocked"),))
+        self.assertTrue(guard.worktree_locked(self.primary, tree),
+                        "the stop kept the tree but git does not show it locked: the relock did not run")
+        self.assertKept(tree)
+
+    def test_b_a_failed_process_table_read_after_the_signal_keeps_its_tree_and_relocks_it(self):
+        lock = self.live_host_lock(self.AGENT)
+        if lock is None:
+            self.skipTest("the live lock's start is read from /proc, which this box has")
+        tree = self.finished_tree(self.AGENT, lock=lock)
+        survivor = self.marked_child(tree, "unread", trap=True)
+        inside, _unreadable = sweep.processes_in(tree)
+        self.assertIn(survivor.pid, inside or [], "scope: the marked child is not inside the finished tree")
+        signalled = []
+        real_send, real_in = sweep.send_signal, sweep.processes_in
+
+        def send(pid):
+            signalled.append(pid)
+            return real_send(pid)
+
+        def read_after_signal(path):
+            """The real read until a signal has gone out; after that the enumeration fails."""
+            return (None, None) if signalled else real_in(path)
+
+        with mock.patch.object(sweep, "send_signal", new=send), \
+                mock.patch.object(sweep, "processes_in", new=read_after_signal):
+            row = self.row_of(self.run_reap(tree), tree)
+        self.assertIn(survivor.pid, signalled, "the stop did not signal the marked child before the read that failed")
+        self.assertIsNotNone(row, "the reap wrote no row for the finished tree")
+        self.assertEqual(row.get("action"), "keep", "the finished tree was reaped after the process table could not be read")
+        self.assertTrue(str(row.get("reason")).startswith("unreadable-subject: the process table after the stop"),
+                        "the tree was kept for another reason: %s" % row.get("reason"))
+        self.assertIs(row.get("relocked"), True, "the stop kept the tree but its row says relocked %r" % (row.get("relocked"),))
+        self.assertTrue(guard.worktree_locked(self.primary, tree),
+                        "the stop kept the tree but git does not show it locked: the relock did not run")
+        self.assertKept(tree)
+
+    def test_c_a_failed_unlock_signals_nothing(self):
+        lock = self.live_host_lock(self.AGENT)
+        if lock is None:
+            self.skipTest("the live lock's start is read from /proc, which this box has")
+        tree = self.finished_tree(self.AGENT, lock=lock)
+        child = self.marked_child(tree, "locked", trap=False)
+        inside, _unreadable = sweep.processes_in(tree)
+        self.assertIn(child.pid, inside or [], "scope: the marked child is not inside the finished tree")
+        with mock.patch.object(sweep, "unlock_for_removal", return_value=False):
+            row = self.row_of(self.run_reap(tree), tree)
+        self.assertIsNotNone(row, "the reap wrote no row for the finished tree")
+        self.assertEqual(row.get("action"), "keep", "the finished tree was reaped although its unlock failed")
+        self.assertEqual(row.get("reason"), "unreadable-subject: the unlock failed",
+                         "the tree was kept for another reason: %s" % row.get("reason"))
+        self.assertNotIn("signalled", row, "a failed unlock still signalled pids: %r" % (row.get("signalled"),))
+        self.assertIsNone(child.poll(), "the marked child was stopped although its unlock failed")
+        self.assertKept(tree)
+
+
 class AgentEndOtherWorktreeTests(_AgentEndFixture):
     """The same SubagentStop run also removes ANOTHER finished agent's tree under
     `.claude/worktrees/agent-*`, but only when that tree is clean, has HEAD on a remote-tracking

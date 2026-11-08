@@ -1183,7 +1183,7 @@ def table_parity_and_exit_codes():
     return problems
 
 
-# The agent tag. A valid agent_id is 17 lowercase hex. A background agent call's command gets
+# The agent marker. A valid agent_id is 17 lowercase hex. A background agent call's command gets
 # `export CLAUDE_AGENT_ID=<id>` ahead of its wrapper, so every process the job starts holds the tag in
 # its exec-time environment. A foreground call is not rewritten.
 AGENT_TAG = "CLAUDE_AGENT_ID"
@@ -1322,7 +1322,7 @@ def agent_foreground_child_holds_no_tag_on_linux():
                   "foreground agent call: its child holds CLAUDE_AGENT_ID")
 
 
-# The Bash hook commands in settings.json when the agent tag landed: the guard, the stall watch and the
+# The Bash hook commands in settings.json when the agent marker landed: the guard, the stall watch and the
 # simulator boot record. The count is the cost: a call starts no process the stall watch entry does not.
 PRE_TOOL_USE_BASH_HOOKS = 3
 

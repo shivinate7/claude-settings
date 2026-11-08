@@ -212,7 +212,7 @@ def other_platform_is_none():
 
 @case
 def name_is_the_pinned_constant():
-    """E10. the agent tag name is CLAUDE_AGENT_ID, pinned as AGENT_TAG_NAME"""
+    """E10. the agent marker name is CLAUDE_AGENT_ID, pinned as AGENT_TAG_NAME"""
     got = proc_env.AGENT_TAG_NAME
     return expect(got == AGENT_TAG, f"AGENT_TAG_NAME is {got!r}, want {AGENT_TAG!r}")
 
