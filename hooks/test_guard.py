@@ -5403,6 +5403,10 @@ sh("git-after-cd: an if ! check whose then body is echo to a redirect && exit 1,
 sh("git-after-cd: an if ! cd whose then body is echo to a redirect && exit 1, then ; a git commit, is refused",
    "if ! cd %s; then echo bad > /no/dir/x && exit 1; fi; %s commit -am x" % (AFTER_CD_GONE, VCS), "deny",
    "git-after-cd", cwd=NOGIT, carries=("&&", "-C"))
+# A `|| exit` covers its echo, substitution included, so the refusal comes from the bare `pytest -q;` before it.
+sh("git-after-cd: a check, then ; an echo of a make substitution protected by || exit 1, then a git push -u, is refused",
+   "pytest -q; echo $(make x) || exit 1; %s push -u origin b" % VCS, "deny", "git-after-cd",
+   cwd=NOGIT, carries=("&&",))
 sh("git-after-cd: a check || an echo then && a git push -u, is refused",
    "pytest -q || echo x && %s push -u origin b" % VCS, "deny", "git-after-cd", cwd=NOGIT, carries=("&&",))
 sh("git-after-cd: an if ! check whose then body is an echo of a substitution then ; exit 1, then ; a git push -u, passes",
