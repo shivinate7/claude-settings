@@ -751,38 +751,44 @@ def renamed_to(body, added, old_slugs):
     return [x for x in added if x[0] not in old_slugs and any(held(c, content_words(x[1]), PAIR_HELD) for c in mine)]
 
 
-def dropped_in_pair(slug, body, pair, now):
-    """[(slug, [fold slugs], clause)] for the clauses of the removed note `body` that its `pair` of added notes and head's text
-    for the same notes both lack."""
+def dropped_in_pair(slug, body, pair, now, moved):
+    """[(slug, [fold slugs], clause)] for the clauses of the removed note `body` that no line the branch added for it holds (`moved`,
+    a list with the content words of each note line added or changed since the note was removed, so a clause moved into one note
+    that is not in the pair still counts as kept; the lines are never pooled, or any clause would be held) and that head's text for the pair's notes lacks too."""
     slugs = {x[0] for x in pair}
     at_head = [t for s, t in note_bodies(counts(now).elements()) if s in slugs | {slug}]
     if not at_head:
         return []  # a later commit retired the note
     new_words, head_words = (set().union(*map(content_words, ts)) for ts in ([t for _, t in pair], at_head))
-    return [(slug, sorted(slugs - {slug}), c) for c in clauses(body) if not held(c, new_words) and not held(c, head_words)]
+    return [(slug, sorted(slugs - {slug}), c) for c in clauses(body)
+            if not held(c, new_words) and not held(c, head_words) and not any(held(c, w) for w in moved)]
 
 
 def dropped_clauses(before, after, now, pending=None):
     """[(slug, [fold slugs], clause)] for one commit's file texts (the parent's, the commit's, and head's): each clause of a
-    removed note line that the commit's added lines for that note (or its fold target, or its rename) no longer hold, and that
-    head's text for the same notes does not hold either. See HELD above. `pending`, a list when given, is the removed notes
-    (slug, text) that earlier commits of the branch left unpaired: a rename that spans commits pairs a later commit's new notes
-    with them, and a note this commit leaves unpaired is added to it."""
+    removed note line that the commit's added lines (any note's, not only the pair's) no longer hold, and that head's text
+    for the pair's notes does not hold either. See HELD above. `pending`, a list when given, is the removed notes
+    [slug, text, words] that earlier commits of the branch left unpaired, `words` being the content words of each note line
+    added since: a rename that spans commits pairs a later commit's new notes with them, and a note this commit leaves unpaired
+    is added to it."""
     gone = note_bodies((counts(before) - counts(after)).elements())
     added = note_bodies((counts(after) - counts(before)).elements())
     old_slugs = set(note_counts(before))
+    here = [content_words(t) for _, t in added]
     found = []
-    for slug, body in list(pending or ()):  # earlier commits' unpaired notes, against this commit's new notes
+    for entry in list(pending or ()):  # earlier commits' unpaired notes, against this commit's new notes
+        slug, body, moved = entry
+        moved += here
         pair = renamed_to(body, added, old_slugs)
         if pair:
-            pending.remove((slug, body))
-            found += dropped_in_pair(slug, body, pair, now)
+            pending.remove(entry)
+            found += dropped_in_pair(slug, body, pair, now, moved)
     for slug, body in gone:
         pair = [x for x in added if x[0] == slug or names(x[1], slug)] or renamed_to(body, added, old_slugs)
         if pair:
-            found += dropped_in_pair(slug, body, pair, now)
+            found += dropped_in_pair(slug, body, pair, now, here)
         elif pending is not None:
-            pending.append((slug, body))  # a plain retire, unless a later commit adds its rename
+            pending.append([slug, body, list(here)])  # a plain retire, unless a later commit adds its rename
     return found
 
 
