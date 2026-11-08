@@ -781,23 +781,10 @@ for (const [label, key, cfg] of REFUSED) {
 }
 
 // ---- Stub route key: a route's stub script runs before the page's own scripts, in the top frame ----
-// A stub is a test fixture, so each stub file is written into the run folder (stubFile), never into the repo.
+// A word stub is a test fixture, so it is written into the run folder (stubFile), never into the repo.
 // The word pages read window.claude at parse time, so a stub that lands after the page's scripts is too late.
-// The waiting page is the real skills/waiting-page/page.html, served as it is.
+// The waiting page is the real skills/waiting-page/page.html, shot with the stand-in the skill ships (shoot-stub.js).
 const WORD_STUB = `window.claude = { use: async (cap) => (cap === "db" ? { word: "Marmalade" } : null) };`;
-const WAITING_STUB = `(() => {
-  const task = (id, n, title) => ({ id, n, kind: "task", status: "open", added: "2026-11-01T00:00:00Z", ref: "shoot stub",
-    title, owner: "shoot stub", home: "shoot stub", context: "A stub item.", steps: ["Open the page"], links: [], minutes: 1 });
-  const docs = { items: { "shoot-stub-task": task("shoot-stub-task", 1, "Approve the shoot stub check"),
-    "shoot-stub-task-2": task("shoot-stub-task-2", 2, "Check the second stub item") } };
-  const snap = (name) => ({ docs: Object.entries(docs[name] || {}).map(([id, v]) => ({ id, data: () => v })) });
-  const one = (name, id) => ({ exists: !!(docs[name] || {})[id], data: () => (docs[name] || {})[id] || null });
-  const collection = (name) => ({
-    onSnapshot: (cb) => { setTimeout(() => cb(snap(name)), 0); return () => {}; },
-    doc: (id) => ({ get: async () => one(name, id), onSnapshot: (cb) => { setTimeout(() => cb(one(name, id)), 0); return () => {}; } }),
-  });
-  window.claude = { use: async (cap) => (cap === "db" ? { collection } : null) };
-})();`;
 
 function stubFile(name, text) {
   const file = path.join(tmp, name);
@@ -856,7 +843,7 @@ test("stub: a missing stub file is a config error that names the route and the k
   const r = await run({ routes: [{ name: "word", path: "/word.html", stub: path.join(tmp, "no-such-stub.js") }], ...ONE });
   assert.equal(r.code, 2, r.out);
   assert.match(configLine(r), /\/word\.html/, "the config line does not name the route");
-  assert.match(configLine(r), /stub/, "the config line does not name the key");
+  assert.match(configLine(r), /: stub[: ]/, "the config line does not name the key: no ': stub' before its message");
   assert.deepEqual(r.pngs, []);
 });
 
@@ -866,7 +853,15 @@ test("stub: a stub path that is not a readable file is a config error that names
   const r = await run({ routes: [{ name: "word", path: "/word.html", stub: dir }], ...ONE });
   assert.equal(r.code, 2, r.out);
   assert.match(configLine(r), /\/word\.html/, "the config line does not name the route");
-  assert.match(configLine(r), /stub/, "the config line does not name the key");
+  assert.match(configLine(r), /: stub[: ]/, "the config line does not name the key: no ': stub' before its message");
+  assert.deepEqual(r.pngs, []);
+});
+
+test("stub: a stub with a syntax error is a config error that names the route and the key, and takes no shot", async () => {
+  const r = await run({ routes: [{ name: "word", path: "/word.html", stub: stubFile("syntax-stub.js", "window.claude = {") }], ...ONE });
+  assert.equal(r.code, 2, r.out);
+  assert.match(configLine(r), /\/word\.html/, "the config line does not name the route");
+  assert.match(configLine(r), /: stub[: ]/, "the config line does not name the key: no ': stub' before its message");
   assert.deepEqual(r.pngs, []);
 });
 
@@ -875,20 +870,21 @@ for (const [label, value] of [["a number", 5], ["null", null], ["true", true], [
     const r = await run({ routes: [{ name: "word", path: "/word.html", stub: value }], ...ONE });
     assert.equal(r.code, 2, r.out);
     assert.match(configLine(r), /\/word\.html/, "the config line does not name the route");
-    assert.match(configLine(r), /stub/, "the config line does not name the key");
+    assert.match(configLine(r), /: stub[: ]/, "the config line does not name the key: no ': stub' before its message");
     assert.deepEqual(r.pngs, []);
   });
 }
 
-test("stub: the waiting page, shot with its stub, shows the stub's item titles in the .html", async (t) => {
+test("stub: the waiting page, shot with the stand-in the skill ships, shows an item's title in the .html", async (t) => {
   if (!(await chromium(t))) return;
+  // The stand-in is the skill's own file, so the case names the file and not its text: the title is the file's to set.
   // The wait step holds the shot until the first item's card is drawn: the items arrive a tick after the page's scripts.
-  const r = await run({ timeoutMs: 10000, routes: [{ name: "waiting", path: "/waiting.html", stub: stubFile("waiting-stub.js", WAITING_STUB), steps: [{ wait: "#t-shoot-stub-task" }] }], ...ONE });
-  assert.equal(r.code, 0, `the waiting page did not shoot with its item shown:\n${r.out}`);
+  const stub = path.join(HERE, "..", "skills", "waiting-page", "shoot-stub.js");
+  const r = await run({ timeoutMs: 10000, routes: [{ name: "waiting", path: "/waiting.html", stub, steps: [{ wait: 'h3.title[id^="t-"]' }] }], ...ONE });
+  assert.equal(r.code, 0, `the waiting page did not shoot with an item shown:\n${r.out}`);
   const page = html(r, "waiting-820-light");
-  assert.match(page, /Approve the shoot stub check/, "the first item's title is not in the .html");
-  assert.match(page, /Check the second stub item/, "the second item's title is not in the .html");
-  assert.doesNotMatch(page, /cannot reach the page's store/, "the page says it cannot reach its store, so the stub did not reach it");
+  assert.match(page, /<h3[^>]*\bid="t-[^"]+"[^>]*>[^<]+<\/h3>/, "no item card with a title is in the .html");
+  assert.doesNotMatch(page, /cannot reach the page's store/, "the page says it cannot reach its store, so the stand-in did not reach it");
 });
 
 test("stub: the waiting page shot without a stub says it cannot reach its store, and shows no item (the control)", async (t) => {
@@ -906,6 +902,16 @@ test("stub: a route with a stub runs in its own browser context, so its window.c
   assert.match(html(r, "stubbed-820-light"), /Marmalade/, "the stubbed route did not show the stub's word");
   assert.match(html(r, "plain-820-light"), /Fallback word/, "the route after the stubbed one did not show its fallback");
   assert.doesNotMatch(html(r, "plain-820-light"), /Marmalade/, "window.claude from the stubbed route reached the route after it");
+});
+
+// localStorage is shared by every page of one browser context, so a write by the stub reaches a later route only if
+// the stubbed route shares the context. The stub's own global would not show that; this does.
+test("stub: what a stub writes to localStorage stays in its own browser context, so the next route reads it unset", async (t) => {
+  if (!(await chromium(t))) return;
+  const r = await run({ routes: [{ name: "stubbed", path: "/ls.html", stub: stubFile("ls-stub.js", 'localStorage.setItem("k", "stubbed");') }, { name: "plain", path: "/ls.html" }], ...ONE });
+  assert.equal(r.code, 0, r.out);
+  assert.match(html(r, "stubbed-820-light"), /k=stubbed j=unset/, "the stub's write did not reach its own page");
+  assert.match(html(r, "plain-820-light"), /k=unset j=unset/, "the stub's localStorage write reached the route after it");
 });
 
 test("stub: it runs in the top frame only, so a frame inside the page has no window.claude", async (t) => {
