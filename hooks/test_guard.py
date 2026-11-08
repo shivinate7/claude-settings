@@ -9790,6 +9790,17 @@ for _other in ("scripts/merge.py", "mymerge/merge.py", "merge/other.py"):
 # The control for the `./` forms: a merge.py in `scripts` is no merge tool after `cd scripts`, so the same runner allows it.
 roots_allow("cd scripts && ./merge.py --reviewed is not the merge tool, so a runner with two repo tags allows it",
             "cd scripts && ./merge.py --reviewed", role_path("roots-runner"))
+# After `cd merge`, a bare script name (no `./`) is the merge tool: its folder is the one `cd` entered. Green: it pins that.
+role_refuse("cd merge && merge.py --role batch-runner is refused on a lane record",
+            "cd merge && merge.py --role batch-runner", role_path("lane"))
+role_refuse("cd merge && launch.py --role batch-runner is refused on a lane record",
+            "cd merge && launch.py --role batch-runner", role_path("lane"))
+# A python form with `./` reads `.` as its folder, not the folder of `cd`, so the call is judged as no merge tool. Red.
+role_refuse("cd merge && python3 ./merge.py --role batch-runner is refused on a lane record",
+            "cd merge && python3 ./merge.py --role batch-runner", role_path("lane"))
+roots_refuse("cd merge && python3 ./merge.py --reviewed, a two-tag runner's bare call, is refused, and the reason says to pass one --root per tag",
+             "cd merge && python3 ./merge.py --reviewed", role_path("roots-runner"), carries=ROOTS_BARE_CARRIES,
+             lacks=(ROOTS_REMEDY,))
 # The shell wrappers inner_commands unwraps, for a bare --reviewed. A runner with two repo tags is refused in each, with the
 # tags; a runner with one repo tag allows in each. Each one pins the reader, so a change that drops a wrapper shows.
 for _wrap_label, _wrap_cmd in (("eval", "eval 'merge --reviewed'"),
