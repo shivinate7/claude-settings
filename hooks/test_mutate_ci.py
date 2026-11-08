@@ -1467,11 +1467,29 @@ CHAIN_LOADS = {"import": "import leaf\n\nVALUE = leaf.V\n",  # entry.py loads le
                "importlib": "import importlib\n\nleaf = importlib.import_module(\"leaf\")\n"}  # or by importlib
 
 
-def chain_repo(entry_text, lane):
-    """A repository whose base holds CHAIN_SUITE, hooks/entry.py (`entry_text`) and hooks/leaf.py. The branch `lane` then
-    writes `lane` (path -> text) and commits, so main...HEAD is the files `lane` names."""
+CHAIN_HEAD = "import os\n\nHERE = os.path.dirname(os.path.abspath(__file__))\n"
+CHAIN_MID_LOADS = {  # hooks/entry.py, the intermediate module, loads merge/target.py by a path constant
+    "spec": CHAIN_HEAD + "import importlib.util\n\nTARGET = os.path.join(HERE, \"..\", \"merge\", \"target.py\")\n"
+            "spec = importlib.util.spec_from_file_location(\"target\", TARGET)\n",
+    "open": CHAIN_HEAD + "TARGET = os.path.join(HERE, \"..\", \"merge\", \"target.py\")\n"
+            "with open(TARGET, encoding='utf-8') as handle:\n    handle.read()\n"}
+CHAIN_LOOP_OPENS = (CHAIN_HEAD + "for name in (\"leaf.py\", \"other.py\"):\n"  # the suite opens each file in a loop
+                    "    with open(os.path.join(HERE, name), encoding='utf-8') as handle:\n        handle.read()\n")
+CHAIN_LOOP_COPIES = (CHAIN_HEAD + "import shutil\n\nfor name in (\"leaf.py\", \"other.py\"):\n"  # or copies each one
+                     "    shutil.copy(os.path.join(HERE, name), HERE)\n")
+CHAIN_HELPER_OPENS = "with open(os.path.join(HERE, \"helper.py\"), encoding='utf-8') as handle:\n    handle.read()\n"
+CHAIN_CYCLE_HELPER = (CHAIN_HEAD + "with open(os.path.join(HERE, \"entry.py\"), encoding='utf-8') as handle:\n"
+                      "    handle.read()\n")  # helper.py loads entry.py, and entry.py loads helper.py: a cycle
+
+
+def chain_repo(entry_text, lane, suite=CHAIN_OPENS, base=None):
+    """A repository whose base holds `suite` (CHAIN_SUITE, which opens hooks/entry.py by default), hooks/entry.py
+    (`entry_text`), hooks/leaf.py and the `base` files (path -> text; each replaces a default of the same path). The branch
+    `lane` then writes `lane` (path -> text) and commits, so main...HEAD is the files `lane` names."""
     repo = new_repo()
-    put(repo, {CHAIN_SUITE: CHAIN_OPENS, "hooks/entry.py": entry_text, "hooks/leaf.py": "V = 1\n"})
+    files = {CHAIN_SUITE: suite, "hooks/entry.py": entry_text, "hooks/leaf.py": "V = 1\n"}
+    files.update(base or {})
+    put(repo, files)
     commit(repo, "base")
     git(repo, "checkout", "-qb", "lane")
     put(repo, lane)
@@ -1480,9 +1498,11 @@ def chain_repo(entry_text, lane):
 
 
 class LintSuitesChainTests(unittest.TestCase):
-    """`--lint-suites BASE` picks a suite that reaches a changed file through a module the suite loads. CHAIN_SUITE opens
-    hooks/entry.py by a path constant, and entry.py loads hooks/leaf.py by an import, or by importlib.import_module. A diff
-    that changes only leaf.py picks the suite (one case per form). A diff that changes entry.py picks it too (the control)."""
+    """`--lint-suites BASE` picks a suite that reaches a changed file through the modules it loads, however deep. CHAIN_SUITE
+    opens hooks/entry.py by a path constant, and entry.py loads hooks/leaf.py by an import, or by importlib.import_module. A
+    diff that changes only leaf.py picks the suite (one case per form). A diff that changes entry.py picks it too (the
+    control). A path that an intermediate module loads, and a path a loop variable names, are followed too. A file that
+    nothing loads picks no suite, and a cycle of loads ends (the controls)."""
 
     def picked(self, repo):
         code, out, err = run_cli(["--lint-suites", "main"], cwd=repo)
@@ -1510,6 +1530,51 @@ class LintSuitesChainTests(unittest.TestCase):
         repo = chain_repo(CHAIN_LOADS["import"], {"hooks/entry.py": CHAIN_LOADS["import"] + "# changed\n"})
         self.assertEqual(self.changed(repo), ["hooks/entry.py"], "the scope: the diff holds only entry.py")
         self.assertIn(CHAIN_SUITE, self.picked(repo), "--lint-suites must pick %s for a diff of the file it opens" % CHAIN_SUITE)
+
+    def test_a_diff_of_only_a_path_an_intermediate_module_loads_picks_the_suite(self):
+        repo = chain_repo(CHAIN_MID_LOADS["spec"], {"merge/target.py": "X = 2\n"}, base={"merge/target.py": "X = 1\n"})
+        self.assertEqual(self.changed(repo), ["merge/target.py"], "the scope: the diff holds only merge/target.py")
+        self.assertIn(CHAIN_SUITE, self.picked(repo),
+                      "--lint-suites must pick %s for a diff of only merge/target.py: it opens entry.py, and entry.py loads "
+                      "merge/target.py by a path constant" % CHAIN_SUITE)
+
+    def test_a_diff_of_only_a_path_an_imported_intermediate_module_opens_picks_the_suite(self):
+        repo = chain_repo(CHAIN_MID_LOADS["open"], {"merge/target.py": "X = 2\n"}, suite="import entry\n",
+                          base={"merge/target.py": "X = 1\n"})
+        self.assertEqual(self.changed(repo), ["merge/target.py"], "the scope: the diff holds only merge/target.py")
+        self.assertIn(CHAIN_SUITE, self.picked(repo),
+                      "--lint-suites must pick %s for a diff of only merge/target.py: it imports entry.py, and entry.py opens "
+                      "merge/target.py by a path constant" % CHAIN_SUITE)
+
+    def test_a_diff_of_only_a_module_a_suite_opens_in_a_loop_picks_the_suite(self):
+        repo = chain_repo("V = 0\n", {"hooks/leaf.py": "V = 2\n"}, suite=CHAIN_LOOP_OPENS)
+        self.assertEqual(self.changed(repo), ["hooks/leaf.py"], "the scope: the diff holds only leaf.py")
+        self.assertIn(CHAIN_SUITE, self.picked(repo),
+                      "--lint-suites must pick %s for a diff of only hooks/leaf.py: it opens each name of a loop, and leaf.py "
+                      "is one of them" % CHAIN_SUITE)
+
+    def test_a_diff_of_only_a_module_a_suite_copies_in_a_loop_picks_the_suite(self):
+        repo = chain_repo("V = 0\n", {"hooks/leaf.py": "V = 2\n"}, suite=CHAIN_LOOP_COPIES)
+        self.assertEqual(self.changed(repo), ["hooks/leaf.py"], "the scope: the diff holds only leaf.py")
+        self.assertIn(CHAIN_SUITE, self.picked(repo),
+                      "--lint-suites must pick %s for a diff of only hooks/leaf.py: it copies each name of a loop, and leaf.py "
+                      "is one of them" % CHAIN_SUITE)
+
+    def test_a_diff_of_a_file_that_nothing_loads_picks_no_suite(self):  # the control for cost
+        repo = chain_repo(CHAIN_MID_LOADS["spec"], {"merge/orphan.py": "X = 2\n"},
+                          base={"merge/target.py": "X = 1\n", "merge/orphan.py": "X = 1\n"})
+        self.assertEqual(self.changed(repo), ["merge/orphan.py"], "the scope: the diff holds only merge/orphan.py")
+        self.assertEqual(self.picked(repo), [],
+                         "--lint-suites must pick no suite for merge/orphan.py: nothing loads it, though entry.py loads its "
+                         "sibling merge/target.py")
+
+    def test_a_cycle_of_path_loads_ends_and_picks_the_suite_for_a_file_in_it(self):  # the control for cost
+        repo = chain_repo(CHAIN_HEAD + CHAIN_HELPER_OPENS, {"hooks/helper.py": CHAIN_CYCLE_HELPER + "V = 2\n"},
+                          suite=CHAIN_OPENS + CHAIN_HELPER_OPENS, base={"hooks/helper.py": CHAIN_CYCLE_HELPER + "V = 1\n"})
+        self.assertEqual(self.changed(repo), ["hooks/helper.py"], "the scope: the diff holds only helper.py")
+        self.assertEqual(self.picked(repo), [CHAIN_SUITE],
+                         "--lint-suites must pick %s for a diff of hooks/helper.py, which the suite loads, and the cycle "
+                         "entry.py <-> helper.py must end" % CHAIN_SUITE)
 
 
 if __name__ == "__main__":
