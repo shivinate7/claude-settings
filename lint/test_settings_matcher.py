@@ -565,11 +565,12 @@ def lookalike_hits(entries):
 
 
 class ArtifactMacNames(unittest.TestCase):
-    def test_guard_matcher_covers_mac_publish_and_item_writes(self):
-        # Rule page-stale needs publish_files; page-item-design and mockup-home need the two item writes.
+    def test_guard_matcher_covers_every_mapped_mac_name(self):
+        # Rule page-stale needs publish_files; page-item-design and mockup-home need the two item writes; the reads
+        # reach reread_check.unread_handoff, which guard.judge runs on every judged call.
         entries = guard_entries()
         self.assertTrue(entries, "no PreToolUse entry runs guard.py")
-        for tool in sorted(MAC_PAGE_TOOLS | MAC_WRITE_TOOLS):
+        for tool in sorted(MAC_PAGE_TOOLS | MAC_DATA_TOOLS):
             with self.subTest(name=tool):
                 self.assertTrue(any(covers(e, tool) for e in entries),
                                 "guard.py matcher does not cover %s: %r"
