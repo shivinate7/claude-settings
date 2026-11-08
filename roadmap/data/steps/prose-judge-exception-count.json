@@ -1,0 +1,11 @@
+{
+  "title": "An exception after the prose judge's model call counts its lines as not judged",
+  "phase": "next",
+  "status": "todo",
+  "order": 260,
+  "owner": "coordinator",
+  "lane": null,
+  "why": "Decision claims-carry-backing (line 59) says every line not judged is counted. An exception after the model call in merge/merge.py prose_judge_run (about lines 2673-2679 on 394ad4863) counts no lines. Found by lane claims-backing-repoint (#1765).",
+  "note": "Waits under the owner's 21:42 CST hold (item 384): it does not drain the queue. Slug from the coordinator; title written by triage from the coordinator's description. Filed from the coordinator, 21:51 CST Nov 7.",
+  "updatedAt": "2026-11-07T21:51:00-06:00"
+}

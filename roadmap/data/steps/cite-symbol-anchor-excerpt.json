@@ -1,0 +1,11 @@
+{
+  "title": "A `read path::name` cite reads the excerpt at the symbol's definition",
+  "phase": "next",
+  "status": "todo",
+  "order": 260,
+  "owner": "coordinator",
+  "lane": null,
+  "why": "lint/stale_cites.py cited_excerpt sends the top 40 lines for a `read path::name` cite. It should use defined_line, as `test path::name` cites do, so records can cite merge.py by symbol and stop going stale at each line move. Found by lane claims-backing-repoint (#1765).",
+  "note": "Waits under the owner's 21:42 CST hold (item 384): it does not drain the queue. Slug from the coordinator; title written by triage from the coordinator's description. Filed from the coordinator, 21:51 CST Nov 7.",
+  "updatedAt": "2026-11-07T21:51:00-06:00"
+}
