@@ -98,8 +98,8 @@ if [ "${EVENT:-}" = pull_request ] && [ -n "$range" ] && files=$(git diff --name
       actions/*|githooks/*|testing/*|lint/*|.github/dependabot.yml) on="$on code " ;;
       # Map skill .md files: its tests read them, so this arm turns on `mods` before the *.md arm.
       skills/plain-english-map/*.md) on="$on $W $X mods " ;;
-      # Docs the guard suite reads: they run it in full, as a code path does.
-      output-styles/shiv-stylisms.md|skills/impeccable/SKILL.md) on="$on code guard $F " ;;
+      # Docs the guard suite reads: they run it in full, as a code path does. The decision record is the role table hooks/guard.py role_model_table reads.
+      output-styles/shiv-stylisms.md|skills/impeccable/SKILL.md|docs/decisions/agent-model-cap.md) on="$on code guard $F " ;;
       # Docs: nothing runs on them but the lints in `checks`. (hooks/*.md, the precompact prompt, matches hooks/* above.)
       *.md) ;;
       *) on="$on $ALL " ;;
