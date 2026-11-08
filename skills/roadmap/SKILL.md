@@ -148,7 +148,7 @@ passes for zero stalled items.
 
 build.py also prints `ready not started: <id> (<age>h)` for each step with status `todo` or `ready` and
 phase `now`. The step needs no live lane (the same test as above), no open pull that names it (the pair line
-names the two), and no valid `paused` field. No open item homed on it may lack a lane. The age is whole hours from `updatedAt` to the live read, or `(age unknown)` when `updatedAt`
+names the two), and no valid `paused` field. No open item homed on it may have a `lane` that is null or empty. The age is whole hours from `updatedAt` to the live read, or `(age unknown)` when `updatedAt`
 is missing or has no zone. The same list rides in the build info (`window.ROADMAP_BUILD.ready`). No page draws it yet.
 One function, `next_act`, gives each ready step and each stalled step `id`, `act`, `owner` and `age`. A ready
 step's act is `start lane`. The owner is the step's `owner` field, else `coordinator`.
