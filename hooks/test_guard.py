@@ -4975,6 +4975,10 @@ sh("git-after-cd: a cd into a missing folder, then ; a subshell cd, then && a gi
 # A `||` after a failed cd runs `exit`, so the push after `;` never runs in the stranded folder.
 sh("git-after-cd: a cd into a missing folder, then || exit 1, then ; a git push passes, the shell exits first",
    "cd /tmp/w || exit 1; %s push" % VCS, "allow", cwd=NOGIT)
+# A top-level `return` does not stop bash: outside a function or a sourced script it fails and the shell
+# goes on, so the push after `;` still runs in the stranded folder. Only `exit` stops the shell here.
+sh("git-after-cd: a cd into a missing folder, then || return 1, then ; a git push is refused",
+   "cd /tmp/w || return 1; %s push" % VCS, "deny", "git-after-cd", cwd=NOGIT, carries=("&&", "-C"))
 # A failed `if` test skips the then branch, so the push there never runs in the stranded folder.
 sh("git-after-cd: a cd into a missing folder as an if test, then a git push in the then branch passes",
    "if cd /tmp/w; then %s push; fi" % VCS, "allow", cwd=NOGIT)
