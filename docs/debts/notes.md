@@ -1,4 +1,7 @@
 # Notes: findings too unlikely to hit to be debts
+- builder-cd-fail-body: `if ! cd X; then : > tests/x; fi`, `until cd X; do …; done` and `while ! cd X` count the cd as certain, though the body runs only when the cd into an existing folder fails (hooks/guard_frozen.py `_cd_certain`). Decision: builders-cannot-edit-tests.
+- builder-cd-link-in-target: after a certain cd, a link inside the written path is not resolved, so `cd out && : > linkt/a_test.py` with `out/linkt` linked into a repo's tests is allowed; the no-cd form was allowed on main too (hooks/guard.py `builder_test_path`). Decision: builders-cannot-edit-tests.
+- builder-cd-up-from-tests: `cd ..; : > helper.py` from a call cwd inside a test folder is refused, since an uncertain cd judges both folders; the `&&` form is allowed (hooks/guard_frozen.py `_shell_write_hit`). Decision: builders-cannot-edit-tests.
 - AskUserQuestion gain/loss rule may refuse terse real choices: check it on real questions. Decision: question-reviewer-agent-hook.
 - guard-suite-red-on-unparsed: hooks/test_guard.py is not green when hooks/guard_wsl.py is parsed and unparsed, so the report has no same-engine gold row for the guard. Cause unmeasured: find which case reads the source text. Decision: mutation-report-scores-suites.
 - hooks/guard_wsl.py plain-node form excludes only `*` and `?`, so a bracket glob passes: `wsl -e node mods/[ab]/x.test.mjs` (first-file false green). Fix: exclude `*?[]` too, with a refusal case. Decision: wsl-allow-list (WSL allow list).
