@@ -1,11 +1,11 @@
 {
   "title": "The merge-commit check passes a builder in a fresh worktree on a test-author's merge",
   "phase": "now",
-  "status": "doing",
+  "status": "done",
   "order": 50,
   "owner": "coordinator",
   "lane": "session_013NEJL1CxMTqgaXC4PMxQLc",
   "why": "Follow-up from #1683 (mixed-merge-resolver) review: the check should judge only the current agent's commits, and the backslash mutant is missing.",
-  "note": "Coordinator pick, 18:51 CST Nov 7, can be undone: scope shrinks. Pin one test (a builder in a fresh worktree on a test-author's merge passes), add one builder.md line, add the backslash mutant's posix field, and turn debt merge-commit-read-as-builders into a note. Measured: the false alarm fires only in a shared worktree, which role agents never use. Stacked on #1683.",
-  "updatedAt": "2026-11-07T18:51:00-06:00"
+  "note": "Coordinator pick, 18:51 CST Nov 7, can be undone: scope shrinks. Pin one test (a builder in a fresh worktree on a test-author's merge passes), add one builder.md line, add the backslash mutant's posix field, and turn debt merge-commit-read-as-builders into a note. Measured: the false alarm fires only in a shared worktree, which role agents never use. Stacked on #1683. Done with no change: PR #1702 is closed, and its work moves to step worktree-role-pins (lane mixed-merge-resolver, relaying the coordinator's ruling of 04:08 CST Nov 8). PR #1704 (role-scope-notes, no roadmap step) is closed the same way. Fix lines that point at step:merge-commit-role-scope now point at worktree-role-pins.",
+  "updatedAt": "2026-11-08T04:08:00-06:00"
 }
