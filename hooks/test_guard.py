@@ -13442,6 +13442,56 @@ sh("builder-test: shell sed -i on hooks/mutate_guard.py is refused, since an add
    "sed -i 's/a/b/' hooks/mutate_guard.py", "deny", rule=BT, carries=("test-author",), **BM)
 add("test-author: Edit of hooks/mutate_guard.py that changes a mutant entry is allowed", "allow", tool="Edit",
     file_path=MUTATE_PATH, old_string=MUTANT_ONE, new_string=ENTRY_ONE_CHANGED, **dict(A, cwd=_builder_mutants))
+
+# A shell write to hooks/mutate_guard.py is refused outright: a shell write cannot be shown to add only, so a
+# restore from HEAD, a restore from another revision, an in-place edit and a patch all refuse. The verb is not
+# the test: the same verbs on another file stay allowed (the controls after the list).
+MUTATE_SHELL_WRITES = (
+    ("git checkout -- restores the file from HEAD", "git checkout -- hooks/mutate_guard.py"),
+    ("git checkout from origin/main rewrites the file", "git checkout origin/main -- hooks/mutate_guard.py"),
+    ("git restore rewrites the file", "git restore hooks/mutate_guard.py"),
+    ("perl -pi edits the file in place", "perl -pi -e 's/a/b/' hooks/mutate_guard.py"),
+    ("patch applies a diff to the file", "patch hooks/mutate_guard.py < x.diff"),
+)
+for _name, _command in MUTATE_SHELL_WRITES:
+    sh("builder-test: shell write to hooks/mutate_guard.py, %s, is refused" % _name, _command, "deny",
+       rule=BT, carries=("test-author",), **BM)
+sh("builder-test: shell perl -pi on src/app.py is allowed, since the verb alone does not refuse",
+   "perl -pi -e 's/a/b/' src/app.py", "allow", **BM)
+sh("builder-test: shell echo quoting the mutate_guard.py restore command is allowed",
+   "echo \"git restore hooks/mutate_guard.py\"", "allow", **BM)
+sh("builder-test: shell cat of hooks/mutate_guard.py is allowed", "cat hooks/mutate_guard.py", "allow", **BM)
+
+# A MultiEdit is judged edit by edit, in order: one edit that changes an entry refuses the call, and a call of
+# inserts alone is allowed.
+add("builder-test: MultiEdit of hooks/mutate_guard.py, an insert and a change of an entry, is refused", "deny",
+    rule=BT, tool="MultiEdit", file_path=MUTATE_PATH, carries=("test-author",),
+    edits=[{"old_string": MUTANT_ONE, "new_string": MUTANT_ONE + MUTANT_NEW},
+           {"old_string": "'SECOND_ANCHOR = 1'", "new_string": "'SECOND_ANCHOR = 9'"}], **BM)
+add("builder-test: MultiEdit of hooks/mutate_guard.py, two inserts and no change, is allowed", "allow",
+    tool="MultiEdit", file_path=MUTATE_PATH,
+    edits=[{"old_string": MUTANT_ONE, "new_string": MUTANT_ONE + MUTANT_NEW},
+           {"old_string": MUTANT_TWO, "new_string": MUTANT_TWO + MUTANT_NEW}], **BM)
+
+# A line of hooks/mutate_guard.py is existing when HEAD holds it, not when only the disk does (coordinator pick,
+# 2026-11-07 18:27 CST). HEAD holds the first entry. The disk also holds an uncommitted third entry, the builder's
+# own add, which the builder may change. It may not change the first entry, though the disk holds that too.
+_own_add = diff_repo("g-builder-own-add", _put(MUTATE_PATH, "MUTATIONS = [\n" + MUTANT_ONE + MUTANT_NEW + "]\n"),
+                     files={**BASE_FILES, MUTATE_PATH: "MUTATIONS = [\n" + MUTANT_ONE + "]\n"})
+OWN_ADD = dict(B, cwd=_own_add)
+add("builder-test: Edit of hooks/mutate_guard.py that changes a line the builder added, not in HEAD, is allowed",
+    "allow", tool="Edit", file_path=MUTATE_PATH, old_string="'THIRD_ANCHOR = 2'",
+    new_string="'THIRD_ANCHOR = 3'", **OWN_ADD)
+add("builder-test: Edit of hooks/mutate_guard.py that changes a line HEAD holds, on disk too, is refused", "deny",
+    rule=BT, tool="Edit", file_path=MUTATE_PATH, old_string="'FIRST_ANCHOR = 1'",
+    new_string="'FIRST_ANCHOR = 3'", carries=("test-author",), **OWN_ADD)
+
+# The empty state: HEAD holds an empty list, so a first entry is the builder's add and is allowed.
+_empty_mut = diff_repo("g-builder-empty-mutants", lambda w: None,
+                       files={**BASE_FILES, MUTATE_PATH: "MUTATIONS = [\n]\n"})
+add("builder-test: Edit of hooks/mutate_guard.py that adds a first entry to an empty list is allowed", "allow",
+    tool="Edit", file_path=MUTATE_PATH, old_string="MUTATIONS = [\n", new_string="MUTATIONS = [\n" + MUTANT_ONE,
+    **dict(B, cwd=_empty_mut))
 FAMILY = "diff"  # the family the cases below ran in
 
 
@@ -13535,6 +13585,29 @@ _repo = diff_repo("b-reverted", lambda w: (write(os.path.join(w, "tests/test_a.p
                                                  BASE_FILES["tests/test_a.py"])))
 add("builder-diff: a test change put back to the base bytes is no change", "allow",
     event="SubagentStop", cwd=_repo, agent_id="bld1", agent_type="builder")
+# A builder's commit and stop are judged on the diff against HEAD. A line of hooks/mutate_guard.py that the change
+# removes or changes is refused; a change that only adds lines is allowed. The family is paths, so the mutant
+# block's run (GUARD_FAMILY=paths) selects these too.
+FAMILY = "paths"
+MUTANT_BASE = {**BASE_FILES, MUTATE_PATH: MUTANT_FILE}
+_mut_drop = diff_repo("g-builder-mutants-drop", _put(MUTATE_PATH, "MUTATIONS = [\n" + MUTANT_ONE + "]\n"),
+                      files=MUTANT_BASE)
+_mut_change = diff_repo("g-builder-mutants-change",
+                        _put(MUTATE_PATH, "MUTATIONS = [\n" + ENTRY_ONE_CHANGED + MUTANT_TWO + "]\n"),
+                        files=MUTANT_BASE)
+_mut_add = diff_repo("g-builder-mutants-add",
+                     _put(MUTATE_PATH, "MUTATIONS = [\n" + MUTANT_ONE + MUTANT_TWO + MUTANT_NEW + "]\n"),
+                     files=MUTANT_BASE)
+for _what, _repo in (("removes an entry", _mut_drop), ("changes an entry", _mut_change)):
+    sh("builder-diff: commit that %s of hooks/mutate_guard.py is refused" % _what, COMMIT, "deny", rule=BDIFF,
+       cwd=_repo, agent_id="bld1", agent_type="builder")
+    add("builder-diff: stop after a change that %s of hooks/mutate_guard.py is blocked" % _what, "deny",
+        rule=BDIFF, event="SubagentStop", cwd=_repo, agent_id="bld1", agent_type="builder")
+sh("builder-diff: commit that only adds to hooks/mutate_guard.py is allowed", COMMIT, "allow",
+   cwd=_mut_add, agent_id="bld1", agent_type="builder")
+add("builder-diff: stop after a change that only adds to hooks/mutate_guard.py is allowed", "allow",
+    event="SubagentStop", cwd=_mut_add, agent_id="bld1", agent_type="builder")
+FAMILY = "diff"
 _inh_main = os.path.join(DIFFROOT, "g-inherited-main")
 _inh = os.path.join(DIFFROOT, "g-inherited")
 
