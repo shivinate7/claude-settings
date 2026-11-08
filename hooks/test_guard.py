@@ -13049,6 +13049,11 @@ add("test-author: Write of Testing/x.py is allowed (case folds)", "allow", tool=
 for _path in ("hooks/guard.py", "merge/merge.py", "testing_utils/x.py", "src/testing.py"):
     add("test-author: Write of %s is refused" % _path, "deny", rule=TA, tool="Write",
         file_path=_path, carries=("builder", "Report"), **A)
+# Accepted cost, not a bug. Ruling: coordinator 02:47 CST Nov 8, option A, any depth like test/ and spec/.
+add("test-author: Write of numpy/testing/_private/utils.py is allowed", "allow", tool="Write",
+    file_path="numpy/testing/_private/utils.py", **A)
+add("builder-test: Write of numpy/testing/x.py is refused", "deny", rule=BT, tool="Write",
+    file_path="numpy/testing/x.py", carries=("test-author", "Report"), **B)
 # ---- mutation tests are test code: hooks/mutate_*.py holds the mutants the guard suite is judged
 # by, so a test-author edits them. The builder case pins the rule to the test-author: agent_brief.py
 # tells a builder to add mutants to hooks/mutate_guard.py when the brief asks, and a builder must keep that.
