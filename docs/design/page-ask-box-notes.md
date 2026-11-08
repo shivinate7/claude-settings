@@ -107,8 +107,9 @@ Themes: light and dark. The settled defaults of the step note are not opened aga
   The whole row is one button, 48px tall.
 - An answer stays open while it is new to this viewer. It shows "New answer".
   The page keeps a seen mark per viewer in `localStorage` `waiting.askSeen`, an ISO time.
-  It is set when the tab hides or the page closes, only while the answers list is on screen and each new answer in it, a New answer row or a fresh reply answer under a folded thread,
-  has been in view since it was drawn. A pagehide of a hidden tab leaves it at the hide time. A hide after a back-forward cache restore counts, even before its pageshow.
+  It is set when the tab hides or the page closes, and only while the answers list is on screen.
+  Each new answer in that list must also have been in view since it was drawn.
+  A new answer is a New answer row, or a fresh reply answer under a folded thread. A pagehide of a hidden tab leaves it at the hide time. A hide after a back-forward cache restore counts, even before its pageshow.
   When storage fails, answers from the last 24 hours stay open and older ones fold.
 - A fold happens only at a page load or at a press. A row never folds while the owner looks at it.
 - Fold and Show answer sit at the same spot, the right end of the first line. Focus goes to the control at that spot after a press.
