@@ -6,6 +6,7 @@ without loading the whole guard.
 Cost: one transcript read per call, no file written.
 """
 import json
+import os
 import re
 
 # A get_session result for another session arrives as its untrusted text: an opening tag with a nonce, a preamble,
@@ -57,8 +58,18 @@ def own_session_read(transcript, own_id, created=False):
 
 def own_session_ccr(transcript, own_id):
     """The whole `ccr` dict of the newest get_session result whose ccr.id is own_id, else None. The
-    branch and source fields of the record are read from it (lane-closes-after-records)."""
-    return _scan(transcript, own_id, False)[3]
+    branch and source fields of the record are read from it (lane-closes-after-records).
+
+    Never raises. A transcript it cannot read (no path, a missing file, a folder, bad text) is None, the
+    same as "no record", and the archive proof refuses on None, so an unreadable input fails closed
+    instead of crashing the guard. The type check comes first because open() reads an int as a file
+    descriptor and would open, then close, a descriptor the caller owns."""
+    if not isinstance(transcript, (str, os.PathLike)):
+        return None
+    try:
+        return _scan(transcript, own_id, False)[3]
+    except (OSError, TypeError, ValueError):
+        return None
 
 
 def _scan(transcript, own_id, created):
