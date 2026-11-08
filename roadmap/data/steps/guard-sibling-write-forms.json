@@ -1,0 +1,11 @@
+{
+  "title": "The other-checkout guard refuses a python write and a file-changing `git -C` into a sibling worktree, as it refuses a shell append there",
+  "phase": "next",
+  "status": "doing",
+  "order": 658,
+  "owner": "lane guard-relative-write-escape",
+  "lane": "session_013NEJKzJxDxuXzuwNe7fhYn",
+  "why": "One act into a sibling worktree got three forms and three verdicts: a shell append was refused, while a python write and a file-changing `git -C` passed (lane ste-pin-note-fails-lint, session_013NEJL2HC7TYTRcNonXZTbs; coordinator, 08:01 CST Nov 8).",
+  "note": "Own branch, failing tests first, review rounds 1-3. #1984 and #1906 do not cover it. Doing in lane guard-relative-write-escape. Slug and title from the lane.",
+  "updatedAt": "2026-11-08T07:50:00-06:00"
+}
