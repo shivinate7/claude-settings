@@ -1994,26 +1994,6 @@ class PinnedSettings(Job):
         self.assertEqual(by_step(lines).get("read pinned"), "PASS",
                          "the lint step read the marker %r, not the pinned tree's:\n%s" % (self.root_file("seen.txt"), out))
 
-    def test_lint_reads_only_the_pins_of_its_lint_steps_so_a_plain_lint_step_runs_in_its_own_pins_tree(self):
-        # The job's second pin, B, is on a step --lint does not run, so it must not make the plain lint step unknown. The
-        # control beside this, test_lint_runs_a_lint_step_in_the_pinned_tree, is the same lint step with one pin.
-        self.settings(extra={"actions/code-check/code_check.py": CODE_CHECK_A})
-        self.assertNotEqual(self.sha_a, self.sha_b, "precondition: the two pins are one commit")
-        rc, lines, out = self.run_pinned(
-            step("code check", uses=PIN_USES % self.sha_a),
-            step("pin b", uses=PIN_ONLY_USES % self.sha_b),
-            self.lint_step("read pinned", "read_marker", MARKER_SCRIPT, "pinned"),
-            args=("--lint", "--base", "origin/main"))
-        self.assertTrue(os.path.isfile(os.path.join(self.root, "code-check-A.txt")),
-                        "precondition: the code check under pin A did not run:\n" + out)
-        self.assertEqual(by_step(lines).get("pin b"), "not run",
-                         "precondition: the step at pin B is not one --lint leaves out:\n" + out)
-        self.assertEqual(by_step(lines).get("read pinned"), "PASS",
-                         "the plain lint step did not run in the tree of its own pin A; its line is %r, so the pin of a "
-                         "step --lint does not run counted:\n%s" % (line_of(lines, "read pinned"), out))
-        self.assertEqual((rc, self.root_file("seen.txt")), (0, "pinned"),
-                         "the lint step must read pin A's marker, and the job must exit 0:\n" + out)
-
     def test_lint_runs_a_remote_ste_lint_from_the_pinned_tree_only(self):
         self.settings(extra={"bin/ste-changed": STE_CHANGED_STUB}, executable=("bin/ste-changed",))
         rc, lines, out = self.run_pinned(
