@@ -404,14 +404,27 @@ def session_line(root, main_checkout=None):
             "(skill waiting-page, \"Keep the page on main's code\")." % url)
 
 
+def keyed(key, doc):
+    """The doc with its entry key as `id`: the key is the item's id, and an `id` field in the doc is ignored."""
+    return {**doc, "id": key} if isinstance(doc, dict) else doc
+
+
+def is_entry(row):
+    """True for a list row of the `ArtifactData list` shape, {"id": key, "data": {...}}."""
+    return isinstance(row, dict) and set(row) == {"id", "data"} and isinstance(row["data"], dict)
+
+
 def load_items(path):
     """(items, complete): the saved items as a list from a JSON list file, or the folder `ArtifactData list` saves. `complete` is False
     for a folder without the marker the session leaves after the last list page, since a stopped fetch may lack items. Raises ValueError with the cause."""
     from export_page import MARKER, Stop, docs_in, load_json  # lazy: only --items reads a folder
     try:
-        # In a folder the entry key is the item's id; an `id` field is ignored, so the key stands in for it.
-        data = ([{**doc, "id": key} if isinstance(doc, dict) else doc for key, doc in docs_in(path, path).items()]
-                if os.path.isdir(path) else load_json(path, path))
+        if os.path.isdir(path):
+            data = [keyed(key, doc) for key, doc in docs_in(path, path).items()]
+        else:
+            data = load_json(path, path)
+            if isinstance(data, list):  # a flat row passes through; an `ArtifactData list` entry carries its key
+                data = [keyed(row["id"], row["data"]) if is_entry(row) else row for row in data]
     except Stop as err:
         raise ValueError(str(err))
     except OSError as err:

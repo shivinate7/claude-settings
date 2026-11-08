@@ -1090,14 +1090,17 @@ class Stale(unittest.TestCase):
                                  "the lane line for item 154 with %s is not the unknown line:\n%s" % (label, r.stdout + r.stderr))
                 self.assertEqual(self.gh_calls(folder), [], "gh was called for a lane item with %s" % label)
 
-    # owner ruling, chat 13:44 CST Nov 6: the doc key is the item id
+    def entry_key_forms(self):
+        """Two forms of an item with no `n` and no `id`: a waits item (gh) and a lane item (no gh call). Each is a builder of the item."""
+        return (("waits item", lambda: wait_item(154, {"repo": REPO, "run": RUN})),
+                ("lane item", lambda: self.lane_item(154, waits=None)))
+
+    # The doc key is the item id (roadmap step page-item-id-check).
     def test_a_wait_line_for_an_item_with_no_n_and_no_id_names_its_entry_key(self):
         """The entry key is the item's id, so a wait line names it when the item has no `n` and no `id` field. Red on the old
         code, which names the item ? from the missing fields. Both forms: a `waits` item (gh) and a lane item (no gh call)."""
         current, _ = self.current_and_behind()
-        forms = (("waits item", lambda: wait_item(154, {"repo": REPO, "run": RUN})),
-                 ("lane item", lambda: self.lane_item(154, waits=None)))
-        for label, make in forms:
+        for label, make in self.entry_key_forms():
             with self.subTest(label):
                 env, _ = self.gh_env({RUN_ARGV: RUN_DONE})
                 item = make()
@@ -1107,6 +1110,23 @@ class Stale(unittest.TestCase):
                 lines = r.stdout.splitlines()[1:]
                 self.assertEqual(len(lines), 1, "want one wait line for the item, got %d:\n%s" % (len(lines), r.stdout + r.stderr))
                 self.assertIn("item entry-key-154", lines[0], "the wait line is not labelled by its entry key:\n" + lines[0])
+
+    def test_a_wait_line_for_a_list_row_with_no_n_and_no_id_names_its_entry_key(self):
+        """A --items list file holds the rows ArtifactData list returns, {"id", "data"}. The entry key is the item's id, so a wait
+        line names the item in `data` by its key when that item has no `n` and no `id` field. Red on the old code, which reads
+        the row itself as the item: it finds no waits and no lane, so it prints nothing."""
+        current, _ = self.current_and_behind()
+        for label, make in self.entry_key_forms():
+            with self.subTest(label):
+                env, _ = self.gh_env({RUN_ARGV: RUN_DONE})
+                item = make()
+                del item["n"], item["id"]
+                r = self.items_run(current, self.items_file([{"id": "entry-key-154", "data": item}]), env)
+                self.assert_page_word(r, "current", 0)
+                lines = r.stdout.splitlines()[1:]
+                self.assertEqual(len(lines), 1, "want one wait line for the row, got %d:\n%s" % (len(lines), r.stdout + r.stderr))
+                self.assertIn("item entry-key-154", lines[0], "the wait line is not labelled by its entry key:\n" + lines[0])
+                self.assertNotIn("item ?", r.stdout, "a wait line names the item ?:\n" + r.stdout)
 
 
 # Fixtures for the --items cases: a repo, a run that ended completed/failure, and the PR that run checked.
