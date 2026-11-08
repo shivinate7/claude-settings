@@ -7,7 +7,7 @@
 import "../../lint/_test_git.mjs";  // test-run signing opt-out (lint/_test_git.mjs)
 import assert from "node:assert/strict";
 import { symlinkSync, mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync, readdirSync, statSync, realpathSync, openSync, closeSync } from "node:fs";
-import { execFileSync, spawnSync } from "node:child_process";
+import { execFileSync, spawn, spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
@@ -1803,19 +1803,30 @@ test("scanner: a near-miss after a fence that holds a multi-line template litera
 // test, kills the process tree, prints what ran and exits 1. After the child closes, it kills and
 // names each process the suite left running, and exits 1.
 const HANG_KIND = "STAMP_SUITE_HANG_KIND"; // "hold", "orphan" or "escape", as hangCommand reads it
+const GRACE_EXIT = "STAMP_SUITE_GRACE_EXIT"; // the suite child writes "alive" or "gone" here as it exits
+const GRACE_LEFT = "STAMP_SUITE_GRACE_LEFT"; // the grace sleeper writes "gone" here as it exits
 
 // node -e code, by kind. "hold": the child holds the pipe and the command sleeps too. "orphan": the
 // command exits, so the child holds the pipe and its parent pid names a dead process. On Windows the
 // child is detached, since libuv kills a non-detached child with its parent. "escape": the child is
 // detached with no pipe, and the command exits 0, so nothing waits on the child. "grace": as escape,
-// but the child exits 2 s later, inside the watchdog's 3 s grace. "clean": no child at all. Both pids
-// go to pidFile first; a clean run writes its own pid twice. Both command lines carry pidFile raw, in a
-// comment, so a check can tell them from a reused pid. JSON.stringify doubles a Windows backslash, so a
-// quoted copy alone would not match.
+// but the child lives on 1 s after the suite child exits, so it is alive at the watchdog's close and
+// gone inside its 3 s grace. "clean": no child at all. Both pids go to pidFile first; a clean run
+// writes its own pid twice. Both command lines carry pidFile raw, in a comment, so a check can tell
+// them from a reused pid. JSON.stringify doubles a Windows backslash, so a quoted copy alone would not
+// match.
+// The grace sleeper starts its 1 s only once the suite child has recorded its exit, so it cannot end
+// before that exit. It writes GRACE_LEFT in its exit handler, so a marker it never wrote means it did not exit on its own.
+function graceSleeper(pidFile) {
+  return `const fs = require("fs"), env = process.env;
+process.on("exit", () => fs.writeFileSync(env[${JSON.stringify(GRACE_LEFT)}], "gone"));
+const t = setInterval(() => { if (fs.existsSync(env[${JSON.stringify(GRACE_EXIT)}])) { clearInterval(t); setTimeout(() => {}, 1000); } }, 20); // ${pidFile}`;
+}
+
 function hangCommand(pidFile, kind) {
   const escape = kind === "escape" || kind === "grace";
   const winOrphan = kind === "orphan" && !POSIX;
-  const sleeper = kind === "grace" ? `setTimeout(() => {}, 2000); // ${pidFile}` : `setInterval(() => {}, 1e9); // ${pidFile}`;
+  const sleeper = kind === "grace" ? graceSleeper(pidFile) : `setInterval(() => {}, 1e9); // ${pidFile}`;
   const spawnOpts = escape ? `{ detached: true, stdio: "ignore" }`
     : winOrphan ? `{ detached: true, stdio: "inherit", windowsHide: true }`
     : `{ stdio: "inherit" }`;
@@ -2028,7 +2039,9 @@ test("watchdog: a command that exits fast and leaves nothing exits 0 and names n
 test("watchdog: a detached child that exits inside the 3 s grace is no leftover, so the run exits 0", () =>
   withTempDir((dir) => {
     const pidFile = join(dir, "pids");
-    const env = { ...process.env, STAMP_SUITE_CAP_S: "20", STAMP_SUITE_SWEEP: "1", [HANG]: pidFile, [HANG_KIND]: "grace" };
+    const suiteExit = join(dir, "suite-exit"), sleeperExit = join(dir, "sleeper-exit");
+    const env = { ...process.env, STAMP_SUITE_CAP_S: "20", STAMP_SUITE_SWEEP: "1", [HANG]: pidFile, [HANG_KIND]: "grace",
+      [GRACE_EXIT]: suiteExit, [GRACE_LEFT]: sleeperExit };
     delete env[CHILD];
     let r, found;
     try {
@@ -2041,6 +2054,11 @@ test("watchdog: a detached child that exits inside the 3 s grace is no leftover,
     assert.equal(r.status, 0, r.out);
     assert.doesNotMatch(r.out, /left processes running|Still running after the kill/, r.out);
     assert.deepEqual(found.left, [], `still running: ${found.left}\n${r.out}`);
+    // The sleeper was alive when the suite child exited. The close follows that exit, so the watchdog
+    // found the sleeper alive and waited for it inside the grace, rather than finding nothing to wait for.
+    assert.equal(existsSync(suiteExit), true, `scope: the suite child recorded no exit\n${r.out}`);
+    assert.equal(existsSync(sleeperExit), true, `the grace sleeper never recorded its own exit: it did not run, or it was killed\n${r.out}`);
+    assert.equal(readFileSync(suiteExit, "utf8"), "alive",`the grace sleeper was already gone when the suite child exited, so at the close it was not alive and the grace wait was not exercised\n${r.out}`);
   }));
 
 // Windows only: the Job Object is the kill guarantee there. On CI a run without one must fail by name,
@@ -2123,9 +2141,9 @@ test("watchdog, Windows: a go file that cannot be written fails the run before a
 // platform. The env names are spelled here, not imported: a new export would fail the import before
 // any case ran. goChild starts the child the way watchdog() does, with no watchdog above it. HANG
 // scopes the child to the clean fixture, so the child never starts this file again.
-function goChild(dir, goFile) {
+function goChild(dir, goFile, waitMs = "500") {
   const env = { ...process.env, [CHILD]: "1", STAMP_SUITE_RUN: randomUUID(), STAMP_SUITE_GO: goFile,
-    STAMP_SUITE_GO_WAIT_MS: "500", [HANG]: join(dir, "pids"), [HANG_KIND]: "clean" };
+    STAMP_SUITE_GO_WAIT_MS: waitMs, [HANG]: join(dir, "pids"), [HANG_KIND]: "clean" };
   return shSync(process.execPath, [SELF], { env, encoding: "utf8" });
 }
 
@@ -2143,7 +2161,7 @@ test("watchdog, child: a go file that never appears runs no test and fails by na
     const out = `${r.stdout}${r.stderr}`;
     assert.equal(r.signal, null, `the child ended on signal ${r.signal}, not on its own\n${out}`);
     assert.notEqual(r.status, 0, `the child exited 0 with no go file: it ran its tests\n${out}`);
-    assert.match(out, /^FAIL - no go file/m, `the child printed no line starting "FAIL - no go file"\n${out}`);
+    assert.match(out, /^FAIL - no go file at .* after 500 ms,/m, `the child printed no "FAIL - no go file at <path> after 500 ms," line, so the wait knob was not honoured\n${out}`);
     assert.doesNotMatch(out, /^ok - /m, `the child ran a test with no go file\n${out}`);
     assert.deepEqual(found.left, [], `still running: ${found.left}\n${out}`);
   }));
@@ -2169,6 +2187,30 @@ test("watchdog, child: a go file that exists lets the child run its tests and ex
     assert.deepEqual(found.left, [], `still running: ${found.left}\n${out}`);
   }));
 
+// A go file written part way through the wait releases the child: the wait ends when the file appears,
+// not at its timeout. A helper process writes the file about 1 s in, under a 3 s wait. The helper is its
+// own process because spawnSync holds this test until the child exits.
+test("watchdog, child: a go file written mid-wait releases the child, which runs its tests and exits 0", () =>
+  withTempDir((dir) => {
+    const goFile = join(dir, "go-mid-wait");
+    assert.equal(existsSync(goFile), false, "scope: the go file must be absent when the child starts, so the child waits");
+    spawn(process.execPath, ["-e", `setTimeout(() => require("fs").writeFileSync(${JSON.stringify(goFile)}, "go"), 1000)`],
+      { detached: true, stdio: "ignore", windowsHide: true }).unref();
+    const pidFile = join(dir, "pids");
+    let r, found;
+    try {
+      r = goChild(dir, goFile, "3000");
+    } finally {
+      found = leftovers(pidFile);
+    }
+    const out = `${r.stdout}${r.stderr}`;
+    assert.equal(r.signal, null, `the child ended on signal ${r.signal}, not on its own\n${out}`);
+    assert.equal(r.status, 0, `the child exited ${r.status} although the go file was written during its wait\n${out}`);
+    assert.equal(found.pids.length, 2, `the clean fixture wrote no pid file, so no test ran\n${out}`);
+    assert.match(out, /ok - hang fixture \(clean\)/, out);
+    assert.deepEqual(found.left, [], `still running: ${found.left}\n${out}`);
+  }));
+
 // ---------------------------------------------------------------- run
 // LIST_TESTS=1 prints each registered name as `LISTED <JSON>` and exits before any test body runs.
 if (process.env.LIST_TESTS === "1") { for (const { name } of tests) console.log("LISTED " + JSON.stringify(name)); process.exit(0); }
@@ -2180,6 +2222,8 @@ if (process.env[CHILD] !== "1") {
 }
 else {
   const run = process.env[HANG] ? [hangFixture(process.env[HANG_KIND] ?? "hold")] : tests;
+  // The grace case reads whether the grace sleeper was still alive when this suite child exited.
+  if (process.env[GRACE_EXIT]) process.on("exit", () => writeFileSync(process.env[GRACE_EXIT], existsSync(process.env[GRACE_LEFT]) ? "gone" : "alive"));
   let failed = 0;
   waitForGo();
   for (const { name, fn } of run) {
