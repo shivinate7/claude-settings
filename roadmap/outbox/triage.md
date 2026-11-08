@@ -20,3 +20,4 @@ Checked Nov 2 12:58 CST: none of these is in docs/debts/notes.md on main. Triage
 - red-run-strip-wording (same source): the docstring and the record say list markers strip "from both ends", but `-` and `+` strip only at the start (lint/check_red_run.py:122).
 - merge-reads-ci-job-stdout (lane lane-lint-no-silent-pass, #1756, Nov 7 21:26 CST): merge/merge.py lines 1690 and 1818 read ci-job stdout outside ci_job_run, a second reader of one output.
 - skipped-line-parse-unpinned (same source): no test pins the moved skipped-line parse.
+- triage-pr-step-unverified (triage, Nov 7 21:35 CST): triage put a coordinator note about #1634 on step review-record-provenance, the only step that named #1634, instead of reading the PR title; #1634 was merge-page-by-number. Fix: build.py warns when a step note cites a PR whose title another step's title matches better, or triage reads each PR title before it notes a PR. File as a debt on main; one incident.
