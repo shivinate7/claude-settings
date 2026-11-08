@@ -1,28 +1,29 @@
 {
   "added": "2026-11-08T11:05:00Z",
-  "context": "Goal: a lane's reviewed `Drops-lines:` excuse passes every check that reads it, the same way.\nProblem (rule): decision silent-undo-check-design says \"Merge tool only: the CLI and CI pass no PR body ... CI's way out is a `Drops-lines` commit trailer.\" So a `Drops-lines:` line in a PR body passes the merge tool, but CI and the lane lint fail it. On #1785, a body line failed the lane lint twice. Changing a recorded decision needs your word (stale-decision protocol, raised by lane notes-fix-page).\nBased on (read): main's docs/decisions/silent-undo-check-design.md, lines 24-25, read by triage at 05:04 CST Nov 8. That sentence kept one reader of the body and no CI env plumbing.\nBased on (measured): #1785, where a body `Drops-lines:` line failed the lane lint twice.\nBased on (ruling): item 165 a (owner): a lane's dropped work is excused by the existing `Drops-lines` line. It did not say where the line may sit.\nDeparts from: main, where only the merge tool reads the PR body \u2014 the CLI also reads it through merge/merge.py's reader, from env PR_BODY in CI and `--pr-body` locally.\nMeanwhile: the lane holds its builder on this step and keeps working its other PRs. #1785 uses a commit trailer. Step silent-undo-ci-body (draft #1712) already passes the PR body to CI's step for `Retire-run:` cites.",
+  "context": "Goal: a lane's reviewed `Drops-lines:` excuse passes every check that reads it, the same way.\nProblem (rule): decision silent-undo-check-design says \"Merge tool only: the CLI and CI pass no PR body ... CI's way out is a `Drops-lines` commit trailer.\" So a `Drops-lines:` line in a PR body passes the merge tool, but CI and the lane lint fail it. On #1785, a body line failed the lane lint twice. Changing a recorded decision needs your word (stale-decision protocol, raised by lane notes-fix-page).\nBased on (read): main's docs/decisions/silent-undo-check-design.md, lines 24-25, read by triage at 05:04 CST Nov 8. That sentence kept one reader of the body and no CI env plumbing.\nBased on (ruling): item 165 a (owner): a lane's dropped work is excused by the existing `Drops-lines` line. It did not say where the line may sit.\nBased on (ruling): your words at 13:20 CST Nov 7, \"a found gap gets a fix, not a note\". The merge-only reader leaves the gap measured on #1785. The merge tool's own body reading is the same widening, and you may rule that it goes too.\nDeparts from: main, where a `Drops-lines:` body line passes only the merge tool and no remedy says where the excuse goes \u2014 every remedy and docstring says it goes in a commit trailer (b), or the CLI also reads the body through merge/merge.py's reader (a).\nMeanwhile: the lane holds its builder on this step and keeps working its other PRs. #1785 uses a commit trailer.",
   "home": "silent-undo-cli-ignores-pr-body",
   "id": "drops-lines-body-everywhere",
   "kind": "decision",
   "n": 411,
   "options": [
     {
-      "gain": "One rule everywhere, so a body line stops failing CI and the lane lint.",
+      "gain": "One rule everywhere, so a body line stops failing CI and the lane lint. Draft #1712 already passes the PR body to CI for Retire-run cites.",
       "how": "The silent-undo CLI reads the PR body through merge/merge.py's reader: env PR_BODY in CI, `--pr-body` locally. Decision silent-undo-check-design is rewritten in place to say every reader takes the body.",
       "key": "a",
       "label": "The CLI reads the body through the merge tool's reader",
-      "lose": "CI passes the PR body through an env var (draft #1712 already adds that plumbing for Retire-run)."
+      "lose": "CI and the lane lint accept a second form of the excuse. Goes against your ruling: a repo changes to fit a shared tool, never the tool to fit a repo.",
+      "widens": true
     },
     {
-      "gain": "No CI change.",
-      "how": "The decision stays. Every remedy and docstring says a `Drops-lines:` excuse goes in a commit trailer only.",
+      "gain": "No new accepted form in CI or the lane lint, and no CI change. Each lane writes the excuse in the one form every reader takes.",
+      "how": "The decision stays. Every remedy and docstring says a `Drops-lines:` excuse goes in a commit trailer. A lane writes its excuse there.",
       "key": "b",
-      "label": "Keep the decision; a `Drops-lines:` excuse goes in a commit trailer only",
-      "lose": "The body form stays a trap: it passes at merge and fails in CI and the lane lint."
+      "label": "Keep the decision; a `Drops-lines:` excuse goes in a commit trailer",
+      "lose": "The merge tool still reads the body form, so a body line still passes at merge and fails in CI until you rule on that reader too."
     }
   ],
   "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
-  "pick": "a",
+  "pick": "b",
   "ref": "docs/decisions/silent-undo-check-design.md (lines 24-25 on main); step silent-undo-cli-ignores-pr-body; step silent-undo-ci-body (#1712); #1785",
   "short": "Drops-lines in the PR body: read it everywhere",
   "status": "open",

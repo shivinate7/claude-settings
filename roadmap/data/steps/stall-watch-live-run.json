@@ -1,0 +1,11 @@
+{
+  "title": "The stall watch resolves a relative log path against the command's folder, and does not kill a live run whose output a pipe holds back",
+  "why": "Two gaps (lane draft-pr-guard-text-false-alarm via the coordinator, 05:02 CST Nov 8): (1) hooks/stall_watch.py resolves a relative --also log path against the session cwd, not the command's; (2) a run piped to `| tail -1` holds back its output, so the 300 s quiet timer kills live work.",
+  "note": "Fix: (1) resolve a relative --also path against the command's cwd, or refuse with a remedy that names the absolute form; (2) first check whether #1823 (step stall-watch-quiet-lint) covers a suite run; if not, count the child process's life, not only its output. Red tests first. Queued after draft-pr-unquoted-body-sq-subst in the same lane (item 386 b). Queue fix (owner 13:20 CST Nov 7). Slug from the coordinator. Filed 05:08 CST Nov 8.",
+  "phase": "now",
+  "status": "todo",
+  "order": 613,
+  "owner": "triage",
+  "lane": "session_013NEJL232Ko7dmr4v3fmrvF",
+  "updatedAt": "2026-11-08T05:05:00-06:00"
+}
