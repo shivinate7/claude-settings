@@ -21,8 +21,8 @@
                           --undo-check-unknown-ok "REASON" also lifts a failed lane read of the no-Lanes check (one line names it).
                           Cost: with a `Lanes:` line, reviewed_read's reads (two list reads, and three gh calls per ready PR with a record), then
                           one gh api compare per open PR on the base that reads done (against the base), one per handed PR against the integration
-                          head, and one per Lanes-named open PR not in the batch. Without a `Lanes:` line, read_lanes's git processes in the worktree
-                          (one `git log`, then two per lane tip not on the base) and no gh call. No long-lived process, file or timer.
+                          head, and one per Lanes-named open PR not in the batch. Without a `Lanes:` line, one `git log` process in the worktree
+                          (plus one git process per lane tip on a base that is not the default branch) and no gh call. No long-lived process, file or timer.
   merge --unlock [branch] remove the merge lock on the branch (default: the default branch). Never checks the holder. A cloud run reads the lock first and skips one already released.
   merge <pr> --review-record --head SHA --kind K --guard yes|no [--round N:ROLE:MODEL:VERDICT ...]
                           [--fix-check HEAD:reviewer:MODEL:PASS|FAIL] [--net-value V]
@@ -2849,7 +2849,7 @@ def preview(root, cfg, cfgrel, n, host, lock, info=None, unknown_ok=""):
             undo_check(wt, f"origin/{base}", unknown_ok, info.get("body", ""), lambda url: host.cited_run(url), info["head"])
             debt_check(wt, f"origin/{base}", host, info)
             refuse_dropped_lane(wt, f"origin/{base}", info["head"], unknown_ok)
-            handed_local(wt, f"origin/{base}", n, info, unknown_ok)  # after the dropped-lane check: its refusal is the more specific
+            handed_local(wt, f"origin/{base}", n, info, unknown_ok, cfg["defaultBranch"])  # after the dropped-lane check: its refusal is the more specific
             stale, stands = holds_base(wt, f"origin/{base}", info["head"])
             current = stale and ("BEHIND: " if "does not hold" in stale else "UNKNOWN: ") + stale + " --confirm refuses it."
             current = current or stands and stands + ". The green run stands."
@@ -2937,7 +2937,7 @@ def draft_step(root, cfg, n, host, info, unknown_ok=""):
     if default or checks:  # one worktree, one open_worktree call, on either base
         tmp, wt = open_worktree(root, info, base)
         try:
-            handed_local(wt, f"origin/{base}", n, info, unknown_ok)  # before any push or ready check
+            handed_local(wt, f"origin/{base}", n, info, unknown_ok, cfg["defaultBranch"])  # before any push or ready check
             if not default:
                 run_ready_checks(wt, n, base, checks)
             else:
@@ -3007,7 +3007,7 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
         record_lift(lifts, UNDO_FLAG, undo_check(wt, base_ref, unknown_ok, info.get("body", ""), lambda url: host.cited_run(url), info["head"]))
         debt_check(wt, base_ref, host, info)
         record_lift(lifts, UNDO_FLAG, refuse_dropped_lane(wt, base_ref, info["head"], unknown_ok))
-        record_lift(lifts, UNDO_FLAG, handed_local(wt, base_ref, n, info, unknown_ok))  # after the dropped-lane check: its refusal is the more specific
+        record_lift(lifts, UNDO_FLAG, handed_local(wt, base_ref, n, info, unknown_ok, cfg["defaultBranch"]))  # after the dropped-lane check: its refusal is the more specific
         stale, stands = holds_base(wt, base_ref, info["head"], host.before_wait)
         if stale:
             raise Stop(stale + " This run claimed nothing.")
@@ -3466,22 +3466,29 @@ def handed_check(host, n, info):
                       f"Nothing was pushed, marked ready, locked, claimed or merged. {HANDED_CITE}")
     return f"merge: handed-lane check: {len(named)} lanes in the batch, {len(left)} named as left out."
 
-def handed_local(wt, base_ref, n, info, unknown_ok=""):
+def handed_local(wt, base_ref, n, info, unknown_ok="", default=""):
     """The handed-lane check for a body with no `Lanes:` line, in the worktree `wt` of the head: local git, no gh read. A head that merges
     lane tips (read_lanes, less the dropped ones) is an integration head, so the missing Lanes line refuses. A read that fails raises Stop: unknown is never a pass,
     unless the run has the reason flag --undo-check-unknown-ok "<reason>", which lifts the same read for refuse_dropped_lane: one line says so
-    and the reason is returned, for record_lift. A body with a Lanes line is handed_check's. Cost: read_lanes's git processes (one `git log`, two per lane tip not on the base), no gh call."""
+    and the reason is returned, for record_lift. On a base that is not `default` (the default branch), a tip that origin/<default> holds is the
+    default branch merged into the head, not a lane; a failed ancestry read is an unknown read, as above. A body with a Lanes line is
+    handed_check's. Cost: one `git log` process, no gh call; on a base that is not the default branch, one more git process per tip."""
     if body_lanes(info.get("body") or "")[0] is not None:
         return None
     try:
         tips, dropped = read_lanes(wt, base_ref, info["head"])
+        tips = [t for t in tips if t not in dropped]  # a reverted lane is refuse_dropped_lane's
+        if default and info["base"] != default:
+            held = {t: ancestor(wt, t, f"origin/{default}") for t in tips}
+            if None in held.values():  # git could not tell: never "not an ancestor"
+                raise ValueError(f"git merge-base failed against origin/{default}")
+            tips = [t for t in tips if not held[t]]
     except Exception as e:
         if unknown_ok.strip():
             say(f"merge: handed-lane check UNKNOWN ({type(e).__name__}: {e}). {UNDO_FLAG}, reason: {unknown_ok.strip()}")
             return unknown_ok.strip()
         raise Stop(f"the handed-lane check could not read the merge commits of #{n} ({type(e).__name__}: {e}). Unknown is not a pass. "
                    f"Nothing was pushed, marked ready, locked, claimed or merged. {HANDED_CITE}")
-    tips = [t for t in tips if t not in dropped]  # a reverted lane is refuse_dropped_lane's
     if tips:
         raise Unnamed(f"the head of #{n} merges lanes (tip {', '.join(sorted(t[:9] for t in tips))}) but the body has no {BATCH_LANES} line.\n"
                       f"Name each lane on a {BATCH_LANES} line, and each handed lane left out on a {'/'.join(BATCH_LEFT_OUT)} line with a reason. "
