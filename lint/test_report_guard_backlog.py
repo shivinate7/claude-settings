@@ -37,7 +37,7 @@ sys.path.insert(0, os.path.join(HERE, "..", "skills", "roadmap"))
 import test_report_guard as trg  # noqa: E402  the fixture, helpers and run folder (one home)
 import test_report_guard_stalled as trs  # noqa: E402  the own-record, tag and tool-call helpers (one home)
 import build  # noqa: E402  the idle-lanes row label, IDLE_LANES_LINE (one home, skills/roadmap/build.py)
-import shared_names  # noqa: E402  the one home of the Backlog labels, BACKLOG_FIELDS (hooks/shared_names.py)
+from shared_names import BACKLOG_FIELDS  # noqa: E402  the one home of the Backlog labels (hooks/shared_names.py)
 
 human = trg.human
 assistant_text = trg.assistant_text
@@ -60,12 +60,6 @@ PARENT_ID = "session_parent1"
 REVIEWED_CMD = "merge --reviewed"
 IDLE_CMD = "merge --idle-lanes --live roadmap-live.json"
 REFUSED = "the hook tried to start a process or open a socket"
-
-# The Backlog labels in item order. The one home is BACKLOG_FIELDS in hooks/shared_names.py. Until that name exists, the
-# owner's ruling words stand in, so each case fails on its own cause, not on the missing name. The one-home case below
-# fails on the missing name, and the stand-in goes once the name exists.
-SPEC_BACKLOG_FIELDS = ("reviewed past one batch cycle", "no next act", "lanes to archive")
-BACKLOG_FIELDS = tuple(getattr(shared_names, "BACKLOG_FIELDS", SPEC_BACKLOG_FIELDS))
 
 # The Stop run with a process start and a socket refused: each fails the run loudly instead of passing silently.
 NO_IO_CODE = (
@@ -166,6 +160,15 @@ def landed(reply):
     return [tool_use_msg("Bash", {"command": "git commit -m x"}), tool_result_msg(), assistant_text(reply)]
 
 
+def flat(records):
+    """The records of a transcript, with each helper's list of records spread into its place. A helper such as coordinator() or
+    reviewed_read() returns a list, and a list written as one line would hide its records from the transcript reader."""
+    out = []
+    for item in records:
+        out.extend(flat(item) if isinstance(item, list) else [item])
+    return out
+
+
 class BacklogFixture(trg.SameTurnWriter):
     """test_report_guard's QuestionReachesPageTests fixture, borrowed name by name, as test_report_guard_stalled does. A case here
     reuses it and does not copy it, so a change to the shared fixture reaches this file."""
@@ -177,11 +180,11 @@ class BacklogFixture(trg.SameTurnWriter):
 
     def run_stop(self, records, env_id=COORD_ENV, stop_active=False):
         """Stop on `records` as the session env_id names, with the hook's own session id set."""
-        return self.stop(records, env_id=env_id, stop_active=stop_active, session_id=OWNER_SESSION)
+        return self.stop(flat(records), env_id=env_id, stop_active=stop_active, session_id=OWNER_SESSION)
 
     def stop_without_io(self, records, env_id=COORD_ENV):
         """Stop on `records`, with a process start and a socket refused. The run must finish with no refusal printed."""
-        path = trg.write_transcript(records, self.run_dir)
+        path = trg.write_transcript(flat(records), self.run_dir)
         hook = {"hook_event_name": "Stop", "session_id": OWNER_SESSION, "transcript_path": path,
                 "stop_hook_active": False, "cwd": self.repo}
         env = dict(os.environ, CLAUDE_CONFIG_DIR=self.cfg, HOME=self.home)
@@ -430,13 +433,30 @@ class NoProcessTests(BacklogFixture, unittest.TestCase):
         self.names_value(self.stop_without_io(records), 2)
 
 
-class OneHomeTests(unittest.TestCase):
-    """The Backlog labels have one home."""
+def verdict_pass(command):
+    """A run through verdict that passed. bin/verdict prints no log path on PASS, only the verdict line."""
+    return tool_pair("Bash", {"command": "~/.claude/bin/verdict " + command}, "PASS %s (0.3s)" % command)
 
-    def test_bk_red_the_backlog_labels_have_one_home(self):
-        # Red until hooks/shared_names.py names BACKLOG_FIELDS: the three labels are read from that one home, never retyped here.
-        self.assertTrue(hasattr(shared_names, "BACKLOG_FIELDS"),
-                        "hooks/shared_names.py names no BACKLOG_FIELDS, so the Backlog labels have no one home")
+
+class VerdictRunTests(BacklogFixture, unittest.TestCase):
+    """A run through verdict. A PASS names no log, so its read is the verdict line itself. A FAIL names its log, and that log is read."""
+
+    def test_bk_red_a_pass_reviewed_verdict_reads_both_counts_zero(self):
+        # Catches: a PASS verdict of merge --reviewed (no log, no RED line) is read as no read, so its two counts do not read 0.
+        records = [human("wake"), coordinator(), verdict_pass(REVIEWED_CMD), assistant_text(report(backlog(past=2)))]
+        self.names_value(self.run_stop(records), 0)
+
+    def test_bk_green_a_pass_reviewed_verdict_with_zero_counts_passes(self):
+        # Control: the same PASS read with its two counts at 0 is released.
+        records = [human("wake"), coordinator(), verdict_pass(REVIEWED_CMD), assistant_text(report(backlog(past=0, none=0)))]
+        self.released(self.run_stop(records))
+
+    def test_bk_red_a_pass_idle_verdict_reads_unknown(self):
+        # Catches: a PASS verdict of merge --idle-lanes names no log, so the lane count it gives is unread and must say unknown.
+        # The idle read before it is older, so the PASS run is the newest read and its count is the one checked.
+        records = [human("wake"), coordinator(), idle_read(lanes=3), verdict_pass(IDLE_CMD),
+                   assistant_text(report(backlog(lanes=3)))]
+        self.names_value(self.run_stop(records), "unknown")
 
 
 if __name__ == "__main__":

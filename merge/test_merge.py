@@ -16,8 +16,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import merge  # noqa: E402
 from required_check import REQUIRED_CHECK  # noqa: E402  the one home of the required check's name (hooks/required_check.py)
-from shared_names import BATCH_LABEL  # noqa: E402  the one home of the integration pull request's label (hooks/shared_names.py)
-import shared_names  # noqa: E402  the one home of the Backlog field labels, BACKLOG_FIELDS (hooks/shared_names.py)
+from shared_names import BACKLOG_FIELDS, BATCH_LABEL  # noqa: E402  the one home of the Backlog field labels and of the integration pull request's label (hooks/shared_names.py)
 import decision_watch  # noqa: E402  the one model caller (hooks/decision_watch.py); merge.py puts hooks on sys.path
 sys.path.append(os.path.join(os.path.dirname(HERE), "lint"))  # append: no lint module shadows one this suite imports
 import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py)
@@ -12867,16 +12866,6 @@ def kind_case(kind, n, hours, cid):
     return ([batch_pull(n, REVIEW_HEAD, created_at=ago(hours + 100), labels=(kind,))],
             [waits_comment(cid, n, hours, f"Waits on: debt:await-{kind}")], {n: [label_event(kind, hours)]})
 
-# The Backlog labels in item order: reviewed past one batch cycle, no next act, lanes to archive. The one home is
-# BACKLOG_FIELDS in hooks/shared_names.py. Until that name exists, the owner's ruling words stand in, so a case fails on
-# its own cause, not on the missing name. test_the_backlog_labels_have_one_home fails on the missing name, and this
-# stand-in goes once the name exists.
-SPEC_BACKLOG_FIELDS = ("reviewed past one batch cycle", "no next act", "lanes to archive")
-
-def backlog_fields():
-    """The three Backlog labels, from hooks/shared_names.py BACKLOG_FIELDS when that name exists, else the stand-in."""
-    return tuple(getattr(shared_names, "BACKLOG_FIELDS", SPEC_BACKLOG_FIELDS))
-
 def summary_numbers(test, out):
     """The three numbers on the last line of `out`, in order: the longest wait since a done record in hours, the count with no next act,
     then the count of batch lines past one batch cycle (PR_STATE_AGE_HOURS["batch"])."""
@@ -13095,14 +13084,10 @@ class ReviewedLedger(ReviewEnv):
     # The third field: the count of batch lines (a done record on the live head) past PR_STATE_AGE_HOURS["batch"]. A batch run, a hold,
     # a lane round, a blocked line and a line with no next act are not counted. The labels come from the one home, BACKLOG_FIELDS.
 
-    def test_the_backlog_labels_have_one_home(self):
-        # Red until hooks/shared_names.py names BACKLOG_FIELDS: the three labels are read from that one home, never retyped.
-        self.assertTrue(hasattr(shared_names, "BACKLOG_FIELDS"), "hooks/shared_names.py names no BACKLOG_FIELDS, so the Backlog labels have no one home")
-
     def test_the_third_field_carries_the_backlog_label(self):
         pulls, comments, events = kind_case("batch", 7, past("batch"), 1)
         host, rc, out, err = self.ledger(pulls, comments, events=events)
-        self.assertIn(backlog_fields()[0], out.splitlines()[-1], "the last line does not carry the label of the third field:\n" + out)
+        self.assertIn(BACKLOG_FIELDS[0], out.splitlines()[-1], "the last line does not carry the label of the third field:\n" + out)
 
     def test_the_third_field_counts_a_batch_line_past_one_batch_cycle(self):
         pulls, comments, events = kind_case("batch", 7, past("batch"), 1)
