@@ -12192,6 +12192,7 @@ for _n, _c in (
     ("echo perl -i", "echo perl -i " + CFG_SETTINGS),
     ("grep sed -i", "grep sed -i " + CFG_SETTINGS),
     ("echo sed -i", "echo sed -i " + CFG_SETTINGS),
+    ("grep quoted sed -i", "grep 'sed -i' " + CFG_SETTINGS),
 ):
     sh("frozen shell: " + _n + " spells an in-place flag as text on the config settings, allows", _c, "allow",
        cwd=NOGIT)
@@ -12231,6 +12232,25 @@ for _n, _c in (
     ("perl -pi after sudo", "sudo perl -pi -e 's/a/b/' " + CFG_SETTINGS),
     ("perl -pi after env", "env perl -pi -e 's/a/b/' " + CFG_SETTINGS),
     ("perl -pi under xargs", "xargs perl -pi -e 's/a/b/' " + CFG_SETTINGS),
+):
+    sh("frozen shell: " + _n + " writes the config settings, denies", _c, "deny", "frozen-path", cwd=NOGIT)
+# A sed -i or perl -pi that a command other than sudo, env or xargs runs: a subshell, a find action, eval, or a
+# runner that is no COMMAND_WRAPPERS entry (stdbuf, busybox, flock). The sed or perl is the command that
+# writes P, so each form denies. The sed and perl forms are twins of one another.
+for _n, _c in (
+    ("sed -i in a subshell", "(sed -i s/a/b/ " + CFG_SETTINGS + " && echo done)"),
+    ("sed -i under find -exec", "find . -exec sed -i s/a/b/ " + CFG_SETTINGS + " ;"),
+    ("sed -i under find -exec, escaped ;", "find . -exec sed -i s/a/b/ " + CFG_SETTINGS + " \\;"),
+    ("sed -i under find -execdir", "find . -execdir sed -i s/a/b/ " + CFG_SETTINGS + " \\;"),
+    ("sed -i under find -ok", "find . -ok sed -i s/a/b/ " + CFG_SETTINGS + " \\;"),
+    ("sed -i under eval", "eval sed -i s/a/b/ " + CFG_SETTINGS),
+    ("sed -i under stdbuf", "stdbuf -oL sed -i s/a/b/ " + CFG_SETTINGS),
+    ("sed -i under busybox", "busybox sed -i s/a/b/ " + CFG_SETTINGS),
+    ("sed -i under flock", "flock /tmp/lock sed -i s/a/b/ " + CFG_SETTINGS),
+    ("perl -pi in a subshell", "(perl -pi -e 's/a/b/' " + CFG_SETTINGS + " && echo done)"),
+    ("perl -pi under find -exec", "find . -exec perl -pi -e 's/a/b/' " + CFG_SETTINGS + " ;"),
+    ("perl -pi under find -exec, escaped ;", "find . -exec perl -pi -e 's/a/b/' " + CFG_SETTINGS + " \\;"),
+    ("perl -pi under eval", "eval perl -pi -e 's/a/b/' " + CFG_SETTINGS),
 ):
     sh("frozen shell: " + _n + " writes the config settings, denies", _c, "deny", "frozen-path", cwd=NOGIT)
 # A string before the write hides nothing. A lone quote, a comment opener or a line break inside quotes ends no
