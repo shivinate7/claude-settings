@@ -19,13 +19,12 @@ judges (the one home), read from the install of this script, never from the repo
 the commits it brings in are.
 
 A ruling cite (`outcomes-grant-covers-named-act`): a commit message that makes a ruling claim names the ruling's home and
-its time. A claim is a claim form in RULING_CITE_RE, where the actor is the owner, Shivam or the arbiter: `per ruling`,
-`per the ruling`, `per the owner ruling`, `per the owner's ruling` (not `per ruling kind`); `under` or `following the
-owner's ruling`; `the owner ruled`, `as the owner ruled`, `owner-ruled`; `ruled by the owner`. A noun that only names a
-ruling (`files an owner ruling`, `arbiter ruling card`) is not a claim. It sits in the subject, the body or a trailer,
-outside backticks and fences (a fence is cut out whole, blank lines included). A negation (`not per the ruling`) is
-not a claim. The claim's own paragraph names a home and a time, or a `Ruling:` line in the trailer block does, both on
-that line; that line covers a claim in the subject or the trailer block, never in a body paragraph. A home is `item N`
+its time. A claim is a claim form in RULING_CITE_RE: a `per` phrase (never `per ruling kind`), an `under`
+or `following` phrase, or an actor (the owner, Shivam or the arbiter) who ruled. A noun that only names a ruling is
+not a claim; the tests list both sets. It sits in the subject, the body or a trailer, outside backticks and fences (a
+fence is cut out whole, blank lines included). A negation before the claim makes it not a claim.
+The claim's own paragraph names a home and a time, or a `Ruling:` line in the trailer block does, both on that line;
+that line covers a claim in the subject or the trailer block, never in a body paragraph. A home is `item N`
 with an optional pick letter (`item N x`, `item N, pick x`), `item <slug>`, `ruling N x` (a page item), `step:<slug>`,
 `rule:<id>`, or `decision <folder>/<slug>.md` (or `decision <slug>` when that file is in the commit's tree), the folder
 read from lint/layout.py. A time is a stamp in the forms of STAMP_FULL_RE and STAMP_CLOCK_RE (lint/report_guard.py,
@@ -56,7 +55,7 @@ SELF_REL = "lint/check_red_run.py"
 RED = re.compile(r"^Red-run: \S.*? -> (\d+) failed on [0-9a-fA-F]{7,64}\s*$")
 REVERT = re.compile(r"^This reverts commit [0-9a-fA-F]{7,64}\.?\s*$", re.MULTILINE)
 NONE = re.compile(r"^Red-run: none: \s*\S.*$")
-# A ruling claim: a claim form only, never a noun that names a ruling ("files an owner ruling", "arbiter ruling card").
+# A ruling claim: a claim form only, never a noun that names a ruling (the noun cases are in the tests).
 # The lookaheads keep a name such as `ruling-kind` or `per ruling kind` out.
 _ACTOR = r"(?:the\s+)?(?:owner|shivam|arbiter)"
 RULING_CITE_RE = re.compile(
