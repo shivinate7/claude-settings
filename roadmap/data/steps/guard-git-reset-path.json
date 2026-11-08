@@ -1,11 +1,11 @@
 {
   "title": "The shared-tree guard has a recorded ruling on path-scoped git reset, checkout and restore",
   "phase": "next",
-  "status": "todo",
+  "status": "doing",
   "order": 638,
   "owner": "coordinator",
-  "lane": null,
+  "lane": "session_013NEJL3ZjZdzrS8tBezxY85",
   "why": "A builder in lane guard-relative-write-escape ran `git reset -q HEAD hooks/test_guard.py` to unstage a file. No work was lost, but the rules forbid destructive git and no record says whether a path reset counts (lane report, 06:53 CST Nov 8).",
-  "note": "Done check: one record states whether `git reset [HEAD] -- <path>` (unstage only, no --hard, no --merge, no --keep) is allowed, and a guard test pins that verdict for both forms. A fix for a found gap (item 410 a). Slug from the lane; title by triage. Second sighting (lane findings-ride-in-lane, coordinator 07:55 CST Nov 8): a sonnet builder in its own agent worktree ran `git checkout -q -- .` to drop its own uncommitted mutant edit in merge/merge.py; no guard refused or asked. Nothing was lost, but in a shared tree it drops other agents' uncommitted work (rule shared-trees-no-destructive-git). Unlike a path reset, which only unstages, a checkout or restore of the work tree discards edits. Done check adds: `git checkout -- <paths>`, `git checkout .` and `git restore` of the work tree are refused outside the agent's own tree (or always asked), per the record.",
-  "updatedAt": "2026-11-08T07:48:00-06:00"
+  "note": "Done check: one record states whether `git reset [HEAD] -- <path>` (unstage only, no --hard, no --merge, no --keep) is allowed, and a guard test pins that verdict for both forms. A fix for a found gap (item 410 a). Slug from the lane; title by triage. Second sighting (lane findings-ride-in-lane, coordinator 07:55 CST Nov 8): a sonnet builder in its own agent worktree ran `git checkout -q -- .` to drop its own uncommitted mutant edit in merge/merge.py; no guard refused or asked. Nothing was lost, but in a shared tree it drops other agents' uncommitted work (rule shared-trees-no-destructive-git). Unlike a path reset, which only unstages, a checkout or restore of the work tree discards edits. Done check adds: `git checkout -- <paths>`, `git checkout .` and `git restore` of the work tree are refused outside the agent's own tree (or always asked), per the record. Doing in lane bg-tail-loses-verdict (session_013NEJL3ZjZdzrS8tBezxY85), branch guard-path-reset-ruling, Merge after #1998; a test-author pins today's verdicts first (07:50 CST Nov 8). Scope includes the checkout/restore form added 07:49 CST.",
+  "updatedAt": "2026-11-08T07:49:00-06:00"
 }
