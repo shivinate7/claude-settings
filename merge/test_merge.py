@@ -12634,11 +12634,11 @@ class ReviewRecordAncestorHead(ReviewEnv):
     FAIL_ONE = ("1:reviewer:sonnet:FAIL",)
     PASS_ONE = ("1:reviewer:sonnet:PASS",)
 
-    def review_at(self, head, rounds, status="ahead", comments=(), extra=(), kind="normal", guard="no"):
+    def review_at(self, head, rounds, status="ahead", comments=(), extra=(), kind="normal"):
         """The record for --head `head` with `rounds` (N:ROLE:MODEL:VERDICT each), `extra` after them. The compare of `head` and the live head
         answers `status`. -> (rc, out, err, host)."""
         host = self.record_host(*comments, diffs={(head, self.LIVE): compare_of(status)})
-        argv = ["7", "--review-record", "--kind", kind, "--guard", guard, "--head", head]
+        argv = ["7", "--review-record", "--kind", kind, "--guard", "no", "--head", head]
         for rnd in rounds:
             argv += ["--round", rnd]
         rc, out, err = self.run_args(*argv, *extra, host=host)
