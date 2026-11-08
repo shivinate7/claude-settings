@@ -57,7 +57,7 @@ POINTER_FORMS = (
 )
 # Fixed instants, with the expected central_full and central_iso text. Checked by hand against America/Chicago:
 # a summer instant (CDT), a winter instant (CST), and both sides of each change. Spring forward is 08:00 UTC on
-# 2026-03-08, fall back is 07:00 UTC on 2026-11-01.
+# the second Sunday of March, fall back is 07:00 UTC on the first Sunday of November.
 PINNED = (
     ("summer, CDT", datetime(2026, 7, 1, 17, 0, tzinfo=timezone.utc),
      "2026-07-01 12:00 CDT", "2026-07-01T12:00:00-05:00"),
