@@ -77,35 +77,25 @@ def log_path() -> str:
 @contextlib.contextmanager
 def _log_lock(path: str, deadline: float):
     """Hold an exclusive lock on `<log>.lock` so parallel hook runs take turns. `fcntl.flock` on
-    POSIX, `msvcrt.locking` on Windows, both non-blocking and tried every LOG_RETRY_SECONDS until
-    DEADLINE (a `time.monotonic` time), then LogWaitTimeout. The body never runs without the lock.
-    (`msvcrt.LK_LOCK` gives up after about 10 s on its own, so it is not used.)"""
+    POSIX, `msvcrt.locking` on Windows (both through guard_core.try_lock_fd, non-blocking), tried every
+    LOG_RETRY_SECONDS until DEADLINE (a `time.monotonic` time), then LogWaitTimeout. The body never
+    runs without the lock. (`msvcrt.LK_LOCK` gives up after about 10 s on its own, so it is not used.)"""
+    from guard_core import try_lock_fd, unlock_fd  # lazily: the one home of the non-blocking file lock
     with open(path + ".lock", "a+") as handle:
-        win = sys.platform.startswith("win")
-        if win:
-            import msvcrt
-        else:
-            import fcntl
+        fd = handle.fileno()
         while True:
             try:
-                if win:
-                    handle.seek(0)
-                    msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
-                else:
-                    fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
-                break
-            except OSError:  # held by another run
-                if time.monotonic() >= deadline:
-                    raise LogWaitTimeout("payload log lock not taken before the deadline")
-                time.sleep(LOG_RETRY_SECONDS)
+                if try_lock_fd(fd):
+                    break
+            except OSError:  # any other OS error is retried like a held lock, until the deadline
+                pass
+            if time.monotonic() >= deadline:
+                raise LogWaitTimeout("payload log lock not taken before the deadline")
+            time.sleep(LOG_RETRY_SECONDS)
         try:
             yield
         finally:
-            if win:
-                handle.seek(0)
-                msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
-            else:
-                fcntl.flock(handle, fcntl.LOCK_UN)
+            unlock_fd(fd)
 
 
 def log(record: dict, replace_run=None, give_up_at=None):

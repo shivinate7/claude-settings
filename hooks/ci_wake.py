@@ -189,14 +189,12 @@ def lock_pr(pr, lock_dir):
     key = re.sub(r"[^A-Za-z0-9._-]+", "_", str(pr.get("url") or pr["number"]))
     os.makedirs(lock_dir, exist_ok=True)
     fd = os.open(os.path.join(lock_dir, key + ".lock"), os.O_CREAT | os.O_RDWR)
+    from guard_core import try_lock_fd  # lazily: the one home of the non-blocking file lock
     try:
-        if os.name == "nt":
-            import msvcrt
-            msvcrt.locking(fd, msvcrt.LK_NBLCK, 1)
-        else:
-            import fcntl
-            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-    except OSError:
+        held = not try_lock_fd(fd)
+    except OSError:  # any OS error counts as held: this watcher never runs without the lock
+        held = True
+    if held:
         os.close(fd)
         return False
     HELD.append(fd)
