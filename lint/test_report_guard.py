@@ -34,6 +34,7 @@ import test_call_judge as tcj  # noqa: E402  the model stub and git fixtures (on
 import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py)
 import _test_temp  # noqa: E402  test-temp-standard: one run folder per test run (lint/_test_temp.py)
 import test_refusal_note as hook_base  # noqa: E402  the route-rows seam name and fixture (one home, hooks/test_refusal_note.py)
+from test_stall_watch_stop import queue_op, stop_summary  # noqa: E402  the harness's stop summary and queue records (one home)
 
 GOOD_REPORT = "> **Done** BUILT abc123\n> **Next** ship it"
 RUN_FOLDER = _test_temp.run_folder()  # the new cases take their temp folders from it, never from the system temp dir
@@ -594,6 +595,33 @@ class ReportGuardTests(unittest.TestCase):
             self.assertEqual(run.returncode, 0)
             self.assertEqual(run.stdout.strip(), "",
                              "a turn that lands nothing was asked for a report: " + run.stdout[:200])
+        # Catches: a stop_hook_summary or a queue-operation record between the reply and the peer message stops the
+        # peer message from starting a new turn, so the earlier commit still counts and "nothing to land" is asked for
+        # a report. The row with no record between is the control.
+        between = [("no record", None), ("stop_hook_summary", stop_summary(0)), ("queue-operation", queue_op("enqueue", 0))]
+        for label, extra in between:
+            with self.subTest(between=label), tempfile.TemporaryDirectory() as tmp:
+                records = [human("do the task"), tool_use_msg("Bash", {"command": "git commit -m x"}),
+                           tool_result_msg(), assistant_text(GOOD_REPORT)]
+                if extra is not None:
+                    records.append(extra)
+                records += [peer_msg("fix check: 0 findings on abc1234"), assistant_text("Fix check passed; nothing to land.")]
+                run = run_guard(REPORT_GUARD, self.hook_for(write_transcript(records, tmp)))
+                self.assertEqual(run.returncode, 0)
+                self.assertEqual(run.stdout.strip(), "",
+                                 "%s between the reply and the peer message: the peer message did not start a new "
+                                 "turn, so the earlier commit still counts: %s" % (label, run.stdout[:200]))
+        # Pin (green before the fix): a peer message that arrives mid-turn, after a tool result and a queue-operation
+        # record, keeps the earlier commit in its window and the reply must still block. A fix that resets on any
+        # record but a tool result passes this reply and fails here.
+        with tempfile.TemporaryDirectory() as tmp:
+            records = [human("do the task"), tool_use_msg("Bash", {"command": "git commit -m x"}),
+                       tool_result_msg(), queue_op("enqueue", 0),
+                       peer_msg("Answer: yes, rename it."), assistant_text("Renamed it and committed.")]
+            run = run_guard(REPORT_GUARD, self.hook_for(write_transcript(records, tmp)))
+            self.assertEqual(run.returncode, 0)
+            self.assertNotEqual(run.stdout.strip(), "", "a mid-turn peer message after a queue-operation reset the window")
+            self.assertEqual(json.loads(run.stdout).get("decision"), "block")
 
     def test_67_every_github_landing_tool_with_no_report_blocks(self):
         # Pinned by hand, not read from report_guard.LANDING_TOOLS: an emptied set must fail here.
