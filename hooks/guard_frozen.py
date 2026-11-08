@@ -714,8 +714,19 @@ def _holds_frozen(path: str, cwd: str) -> bool:
                for target, root in readings)
 
 
+def _parallel_scripts(segment: str):
+    """The scripts a `parallel` segment runs, each input in its place (`guard_core.wrapped_commands`), else [].
+    parallel is the one runner whose run text is not its own words in order: `parallel 'tee {}' ::: P` names P
+    apart from the `tee`, so its scripts are judged as command lines of their own."""
+    tokens = segment_tokens(segment)
+    at = resolve_command(tokens) if tokens else None
+    if at is None or basename(tokens[at]) != "parallel":
+        return []
+    return guard_core.wrapped_commands(list(tokens), at)
+
+
 def _shell_write_hit(cmd: str, cwd: str, predicate, holds=None, follow_cd=False,
-                     command_position=False, predicate_command=False) -> str:
+                     command_position=False, predicate_command=False, _depth: int = 0) -> str:
     """Return the path a shell command writes to that `predicate(path, cwd)` accepts, else ''.
     `holds(path, cwd)` tells a folder that holds such a path, for a linking `cp` (`_cp_link_source`).
     `follow_cd` hands `predicate` the folder a leading `cd` moved to (`dir_before_segment`), or `cwd`
@@ -796,9 +807,18 @@ def _shell_write_hit(cmd: str, cwd: str, predicate, holds=None, follow_cd=False,
                                    _words_of(kept) if "'" in kept or '"' in kept else [kept])
         text = " ".join(shown)
         at = (dir_before_segment(segments, number, cwd, ends) or cwd) if follow_cd else cwd
-        commands = [position for start in _command_starts(heads) for position in _segment_commands(start)]
+        # A parallel script is judged on its own text, its inputs in place. The segment itself then keeps only its
+        # outer redirects: its words show the script's verb apart from the input it takes.
+        runs = _parallel_scripts(segments[number]) if _depth < 4 else []
+        for script in runs:
+            hit = _shell_write_hit(script, at, predicate, holds, follow_cd, command_position, predicate_command,
+                                   _depth + 1)
+            if hit:
+                return hit
+        commands = [position for start in _command_starts(heads)
+                    for position in _segment_commands(start, scripts=not runs)]
         # The whole segment read with its quoted newlines kept, so a `sh -c` script is read at its own commands.
-        positions = commands + _segment_commands(head_script) if command_position else commands
+        positions = commands + _segment_commands(head_script, scripts=not runs) if command_position else commands
         verb = commands[0][0] if predicate_command and commands else ""
         # `dd of=PATH`: the path is glued to its operand name, so it is judged on its own too.
         for word in words + [w[3:] for w in words if w.startswith("of=") and len(w) > 3]:
@@ -857,14 +877,17 @@ def _command_starts(words):
     return [[word for word in start if word] for start in starts]
 
 
-def _segment_commands(words, depth: int = 0):
+def _segment_commands(words, depth: int = 0, scripts: bool = True):
     """Every (command name, plain words after it) a segment's words run: the command itself, then each
     command a runner it names starts (`guard_core.wrapped_commands`: `flock`, `unbuffer`, `setsid`,
-    `docker exec`, `su -c` ...), read again the same way. The one reader of wrappers, as the rules use."""
+    `docker exec`, `su -c` ...), read again the same way. The one reader of wrappers, as the rules use.
+    `scripts` False leaves out a parallel script, which its caller judges as a command line of its own."""
     found = [_segment_command(words)]
     index = resolve_command(tuple(words))
     if index is not None and depth < 4:
         for text in guard_core.wrapped_commands(list(words), index):
+            if not scripts and isinstance(text, guard_core.PosixScript):
+                continue
             try:
                 inner = shlex.split(text)
             except ValueError:

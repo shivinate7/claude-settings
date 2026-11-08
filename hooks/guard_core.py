@@ -11,6 +11,7 @@ import errno
 import functools
 import json
 import os
+import posixpath
 import re
 import shlex
 import sys
@@ -425,28 +426,42 @@ WRAPPER_VALUE_FLAGS.update({
                     "--on-calendar", "--timer-property"},
     # `numactl`, `parallel` and `eatmydata` are not installed here. `numactl` is read from the `opts` table of its
     # upstream numactl.c (github.com/numactl/numactl, master): each option with `has_arg` 1 takes a value, and
-    # `-c`/`--cpubind` is one of them. `parallel` is read from the OPTIONS of parallel.pod, the source of parallel(1),
-    # as the github.com/gitGNU/gnu_parallel mirror holds it: gnu.org/software/parallel/parallel.html itself answered
-    # HTTP 429/503 on each try. That mirror predates `--memsuspend`, `--limit`, `--group-by` and `--tmp`, so those are
-    # no entry. An option the manual writes as `-l[N]`, `--max-lines[=N]`, `-i[S]`, `--replace[=S]`, `-e[S]` or
-    # `--eof[=S]` takes a glued value only. `--semaphore-name` is the name the owner's rows ask for (the manual spells
-    # it `--semaphorename` and `--id`). `eatmydata` is a shell script that takes no flag but a bare `--`.
+    # `-c`/`--cpubind` is one of them. `parallel` is read from the OPTIONS of src/parallel.pod, the source of
+    # parallel(1), at cgit.git.savannah.gnu.org/cgit/parallel.git (master, read 2026-11-08), and checked against
+    # `options_completion_hash` in src/parallel beside it (`$Global::version = 20261022`): each spec with `=s`, `=i` or
+    # `=f` takes a value, under every name it lists. Getopt::Long also reads a unique prefix of a long name (`--memsus`)
+    # and a value after `=`; only the full names are here. `--replace`/`-i`, `--eof`/`-e` and `--max-lines`/`-l` take
+    # an optional value (`:s`, `:f`), which Getopt::Long reads from the next word when it is no option. They are no
+    # entry: the walk then reads that word as the command, so a verb stays seen. `eatmydata` is a shell script that
+    # takes no flag but a bare `--`.
     "numactl": {"-i", "--interleave", "-p", "--preferred", "-P", "--preferred-many", "-m", "--membind",
                 "-N", "--cpunodebind", "-c", "--cpubind", "-C", "--physcpubind", "-w", "--weighted-interleave",
                 "-S", "--shm", "-f", "--file", "-M", "--shmmode", "-I", "--shmid", "-o", "--offset",
                 "-L", "--length"},
-    "parallel": {"-j", "--jobs", "-P", "--max-procs", "-S", "--sshlogin", "--sshloginfile", "--slf",
-                 "-a", "--arg-file", "--arg-file-sep", "--arg-sep", "-n", "--max-args", "-N", "--max-replace-args",
-                 "-L", "-s", "--max-chars", "-I", "-E", "-d", "--delimiter", "-C", "--colsep", "--header",
-                 "--results", "--res", "--joblog", "--tmpdir", "--timeout", "--delay", "--retries", "--load",
-                 "--memfree", "--nice", "--halt", "--halt-on-error", "--workdir", "--wd", "--basefile", "--bf",
-                 "--transferfile", "--tf", "--trc", "--return", "--env", "--rpl", "--parens", "--block",
-                 "--block-size", "--recstart", "--recend", "--tagstring", "--sql", "--sqlmaster",
-                 "--sqlandworker", "--sqlworker", "-J", "--profile", "--sshdelay", "--ssh", "--termseq",
-                 "--semaphorename", "--semaphore-name", "--id", "--semaphoretimeout", "--st", "--trim",
-                 "--compress-program", "--decompress-program", "--minversion", "--seqreplace", "--slotreplace",
-                 "--basenamereplace", "--bnr", "--basenameextensionreplace", "--bner", "--dirnamereplace", "--dnr",
-                 "--extensionreplace", "--er"},
+    "parallel": {"--arg-file", "--argfile", "-a", "--arg-file-sep", "--argfilesep", "--arg-sep", "--argsep",
+                 "--basefile", "--bf", "--basenamereplace", "--bnr", "--basenameextensionreplace", "--bner", "--bin",
+                 "--block", "--block-size", "--blocksize", "--block-timeout", "--blocktimeout", "--bt",
+                 "--col-sep", "--colsep", "-C", "--combineexec", "--combine-exec", "--combineexecutable",
+                 "--combine-executable", "--compress-program", "--compressprogram", "--use-compress-program",
+                 "--usecompressprogram", "--decompress-program", "--decompressprogram", "--use-decompress-program",
+                 "--usedecompressprogram", "--ctag-string", "--ctagstring", "--debug", "-D", "--delay",
+                 "--delimiter", "-d", "--dirnamereplace", "--dnr", "-E", "--env", "--extensionreplace", "--er",
+                 "--filter", "--group-by", "--groupby", "--halt-on-error", "--haltonerror", "--halt", "--header",
+                 "-I", "--joblog", "--jl", "--jobs", "-j", "--max-procs", "--maxprocs", "-P", "-L", "--limit",
+                 "--linkinputsource", "--xapplyinputsource", "--load", "--match", "--memfree", "--memsuspend",
+                 "--milestone", "--ms", "--min-version", "--minversion", "--max-args", "--maxargs", "-n",
+                 "--max-replace-args", "--maxreplaceargs", "-N", "--max-chars", "--maxchars", "-s", "--nice",
+                 "--parens", "--process-slot-var", "--processslotvar", "--profile", "-J", "--recstart", "--recend",
+                 "--results", "--result", "--res", "--retries", "--return", "--rpl", "--rsync-opts", "--rsyncopts",
+                 "--semaphore-name", "--semaphorename", "--id", "--semaphore-timeout", "--semaphoretimeout", "--st",
+                 "--seqreplace", "--slotreplace", "--shard", "--shell-completion", "--shellcompletion", "--sql",
+                 "--sql-master", "--sqlmaster", "--sql-worker", "--sqlworker", "--sql-and-worker", "--sqlandworker",
+                 "--ssh", "--ssh-delay", "--sshdelay", "--sshlogin", "-S", "--sshloginfile", "--slf",
+                 "--tag-string", "--tagstring", "--template", "--tmpl", "--term-seq", "--termseq", "--timeout",
+                 "--tmpdir", "--tempdir", "--total-jobs", "--totaljobs", "--total", "--transfer-file",
+                 "--transferfile", "--transfer-files", "--transferfiles", "--tf", "--trc", "--trim",
+                 "--work-dir", "--workdir", "--wd", "-B", "-H", "-U", "-W",
+                 "--_parset", "--_pipe_block", "--_buf_start", "--_buf_growth", "--_buf_cap"},
     "eatmydata": set(),
     "flock": {"-w", "-E", "--timeout", "--conflict-exit-code"},
     "docker": {"-e", "--env", "-u", "--user", "-w", "--workdir", "--env-file", "--detach-keys"},
@@ -471,6 +486,40 @@ WRAPPER_VALUE_FLAGS["timeout"] = TIMEOUT_FLAGS_WITH_VALUE
 WRAPPER_GLUED_FLAGS = {"nsenter": set("muinpCUTSGrw")}
 # The words that open `parallel`'s input sources (parallel(1), "::: arguments"): they are no part of the command.
 PARALLEL_INPUT_MARKS = {":::", "::::", ":::+", "::::+"}
+# parallel's replacement strings (parallel(1), "{}" to "{%}"): `{}`, `{.}`, `{/}`, `{//}`, `{/.}`, the positional
+# `{n}` with the same endings (`{2/.}`, `{-1}`), and `{#}` and `{%}`, the job and slot numbers.
+PARALLEL_REPLACEMENT = re.compile(r"\{(-?\d+)?(//|/\.|/|\.)?\}|\{[#%]\}")
+
+
+def _parallel_script(words):
+    """(command words, inputs) when parallel reads the words after its flags as a script the walk cannot split,
+    else None. That is one quoted command that holds a space (`'rm {} && echo ok'`), or a replacement string with
+    `:::` inputs after it (`cp {} /tmp/bak/ ::: P`): parallel puts each input in its place, not after the words."""
+    mark = next((i for i, word in enumerate(words) if word in PARALLEL_INPUT_MARKS), len(words))
+    command = list(words[:mark])
+    if not command:
+        return None
+    if not (re.search(r"\s", command[0])
+            or (mark < len(words) and any(PARALLEL_REPLACEMENT.search(word) for word in command))):
+        return None
+    return command, [word for word in words[mark + 1:] if word not in PARALLEL_INPUT_MARKS]
+
+
+def _parallel_value(match, value: str) -> str:
+    """The text parallel puts for one replacement string, given one input, shell-quoted as parallel quotes it.
+    `{#}` and `{%}` are numbers; a path keeps `~` bare, as the outer shell already read it."""
+    if match.group(0) in ("{#}", "{%}"):
+        return "1"
+    ending = match.group(2)
+    if ending == ".":
+        value = posixpath.splitext(value)[0]
+    elif ending == "/":
+        value = posixpath.basename(value)
+    elif ending == "//":
+        value = posixpath.dirname(value) or "."
+    elif ending == "/.":
+        value = posixpath.splitext(posixpath.basename(value))[0]
+    return value if re.fullmatch(r"[\w@%+=:,./~-]+", value) else shlex.quote(value)
 
 # A leading shell keyword that opens or joins a control-flow block, never a command itself.
 # `split_segments` cuts on `;`, so the segment after a loop's own semicolon starts with `do`, and
@@ -709,8 +758,8 @@ def _wrapper_flags(word: str, tokens, index: int):
         token = tokens[index]
         index += 1
         if token.startswith("--"):
-            flag, glued, value = token.partition("=")
-            if not glued and flag in takes:
+            flag, equals, value = token.partition("=")
+            if not equals and flag in takes:
                 value = tokens[index] if index < end else ""
                 index += 1
             found.append((flag, value))
@@ -754,8 +803,8 @@ def _walk_wrappers(tokens):
             index += 1
         if word in ("taskset", "chrt", "chroot"):
             index += index < end   # the CPU mask, the priority or the new root
-        if word == "parallel" and index < end and re.search(r"\s", tokens[index]):
-            return start, tuple(chain), index > end   # a command string: `wrapped_commands` reads it as a script
+        if word == "parallel" and _parallel_script(tokens[index:]):
+            return start, tuple(chain), index > end   # a script: `wrapped_commands` reads it with its inputs in place
         if word == "uv":
             table = word
             if index < end and tokens[index] == "tool":   # `uv tool run [flags] cmd` reads its flags as `uvx` does
@@ -1996,7 +2045,7 @@ def ssh_remote_script(tokens) -> str:
 def wrapped_commands(tokens, at: int):
     """The command texts the runner at `tokens[at]` starts, else []. Read: `docker|podman exec`,
     `kubectl exec ... --`, `find -exec ... ;`, `su -c`, `flock FILE`, `stdbuf`, `unbuffer`,
-    `caffeinate`, `setsid`, `ionice`, `strace`, `runuser -u USER [--] cmd`. A text keeps its quoting, so `docker exec c sh -c 'x y'` still reads as `sh -c`."""
+    `caffeinate`, `setsid`, `ionice`, `strace`, `runuser -u USER [--] cmd`, a `parallel` script. A text keeps its quoting, so `docker exec c sh -c 'x y'` still reads as `sh -c`."""
     word, rest = basename(tokens[at]), tokens[at + 1:]
     if word == "kubectl" and "exec" in rest and "--" in rest:
         return [shlex.join(rest[rest.index("--") + 1:])]
@@ -2028,13 +2077,19 @@ def wrapped_commands(tokens, at: int):
         inner = rest[index:]
         return [shlex.join(inner)] if inner else []
     elif word == "parallel":
-        # `parallel 'rm {}' ::: P`: one quoted command string, which the shell reads as a script, and the words after
-        # it (the `:::` markers dropped) are the inputs it runs on, so they stay as its arguments: `rm {} P`.
+        # parallel joins its command words into one script for the shell and runs it once per input. Each input
+        # takes the place of each replacement string (`parallel 'tee {}' ::: P` runs `tee P`); a script with none
+        # gets the inputs appended (`parallel 'rm -f' ::: P` runs `rm -f P`).
         index, _ = _wrapper_flags(word, rest, 0)
-        if index >= len(rest) or not re.search(r"\s", rest[index]):
-            return []   # the walk read an unquoted command as the command word
-        inputs = [t for t in rest[index + 1:] if t not in PARALLEL_INPUT_MARKS]
-        return [PosixScript(" ".join([rest[index], *([shlex.join(inputs)] if inputs else [])]))]
+        found = _parallel_script(rest[index:])
+        if not found:
+            return []   # the walk read the command word itself
+        command, inputs = found
+        script = " ".join(command)
+        if not PARALLEL_REPLACEMENT.search(script):
+            return [PosixScript(" ".join([script, *([shlex.join(inputs)] if inputs else [])]))]
+        return [PosixScript(PARALLEL_REPLACEMENT.sub(lambda match: _parallel_value(match, value), script))
+                for value in dict.fromkeys(inputs)] or [PosixScript(script)]
     elif word not in ("stdbuf", "unbuffer", "caffeinate", "setsid", "ionice", "strace"):
         return []
     index, _ = _wrapper_flags(word, rest, 0)
