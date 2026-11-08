@@ -8762,6 +8762,38 @@ sh("env-child: deny, a ruby code string whose second line is system env runs env
 sh("env-child: allow, ruby puts a double-quoted don't, a lone quote in text, uv run",
    "uv run --env-file " + ENV + " ruby -e 'puts \"don'\\''t\"'", "allow", cwd=NOGIT)
 
+# Script forms the reader judges: an awk program given by -e or --source, a ruby here-string, a ruby #{ENV} in
+# a string, and a value letter whose glued value holds a code letter. A value letter (perl -I, ruby -r) takes
+# the rest of its word, so a code letter in that value is no option. An awk -f program is a file the guard does
+# not read, so the word after it is data. Each name holds the words the MUTATE_ONLY fragment selects.
+sh("env-child form: deny, gawk --source names ENVIRON, uv run --env-file runs gawk",
+   "uv run --env-file " + ENV + " gawk --source 'BEGIN{print ENVIRON[\"X\"]}'", "deny", "env-file", cwd=NOGIT)
+sh("env-child form: deny, awk -e names ENVIRON, uv run --env-file runs awk",
+   "uv run --env-file " + ENV + " awk -e 'BEGIN{print ENVIRON[\"X\"]}'", "deny", "env-file", cwd=NOGIT)
+sh("env-child form: deny, a ruby here-string p ENV is code, uv run --env-file runs ruby",
+   "uv run --env-file " + ENV + " ruby <<< 'p ENV'", "deny", "env-file", cwd=NOGIT)
+sh("env-child form: deny, a ruby #{ENV} in a double-quoted string is code, uv run --env-file runs ruby",
+   "uv run --env-file " + ENV + " ruby -e 'puts \"#{ENV}\"'", "deny", "env-file", cwd=NOGIT)
+sh("env-child form: deny, perl -Iinclude glues an e to its value, the -e then prints %ENV",
+   "uv run --env-file " + ENV + " perl -Iinclude -e 'print %ENV'", "deny", "env-file", cwd=NOGIT)
+sh("env-child form: deny, ruby -rdate glues an e to its value, the -e then prints ENV",
+   "uv run --env-file " + ENV + " ruby -rdate -e 'p ENV'", "deny", "env-file", cwd=NOGIT)
+sh("env-child form: allow, awk -f prog.awk reads no program, ENV.csv after it is data",
+   "uv run --env-file " + ENV + " awk -f prog.awk ENV.csv", "allow", cwd=NOGIT)
+sh("env-child form: deny, sh -c with an unquoted backslash in pr\\intenv is printenv, uv run",
+   "uv run --env-file " + ENV + " sh -c pr\\intenv", "deny", "env-file", cwd=NOGIT)
+
+# A path listing names the env file and reads none of it, so it is allowed. A find that runs cat on the
+# file reads it, so the -exec cat is the control that stays denied.
+sh("env-child form: allow, find -name with -print lists the env file name, reads no contents",
+   "find . -name '" + ENV + "' -print", "allow", cwd=NOGIT)
+sh("env-child form: allow, find -name lists the env file name, reads no contents",
+   "find . -name " + ENV, "allow", cwd=NOGIT)
+sh("env-child form: allow, ls -a lists the env file name, reads no contents",
+   "ls -a " + ENV, "allow", cwd=NOGIT)
+sh("env-child form: deny, find -exec cat reads the env file, the control for find -name",
+   "find . -name " + ENV + " -exec cat {} \\;", "deny", "env-file", cwd=NOGIT)
+
 for wrapped in (
     "timeout 60 node --env-file=" + ENV + " app.js",
     "verdict npm --env-file=" + ENV + " test",
