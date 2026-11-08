@@ -1966,7 +1966,7 @@ def builder_shell_test_hit(raw: str, stripped: str, cwd: str) -> str:
     redirect, `tee`, `sed -i`, `cp`, a heredoc header) on the heredoc-stripped command, and the
     python or node script a heredoc body or `-c` / `-e` holds, on the raw command."""
     return (_shell_write_hit(stripped, cwd, lambda p, at: builder_test_path(p, at, call_cwd=cwd),
-                             follow_cd=True, command_position=True)
+                             follow_cd=True, command_position=True, cd_certain=True)
             or interpreter_write_hit(raw, cwd, builder_test_path))
 
 
