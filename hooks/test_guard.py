@@ -12018,7 +12018,7 @@ RR_TRIM2 = "def test_x():\n    assert 1 == 1\n"
 RR_FULL_PLUS = RR_FULL + "    assert 4 == 4\n"
 RR_CMTPLAIN = os.path.join(RRROOT, "rr-cmtplain")      # a comment-only reword of a pushed test file, no trailer
 RR_CMTNONE = os.path.join(RRROOT, "rr-cmtnone")        # the same reword, with `Red-run: none: comment only`
-RR_CMTLANE = os.path.join(RRROOT, "rr-cmtlane")        # a lane: two trailered commits, then the reword with none
+RR_CMTLANE = os.path.join(RRROOT, "rr-cmtlane")        # a lane: two trailered commits, then the reword with no trailer
 RR_CMT_V1 = "# Verdict for the push check.\n# Read before a push.\ndef test_x():\n    assert 1 == 1\n"
 RR_CMT_V2 = "# Verdict for each push, read at push time.\n# Read before a push is sent.\ndef test_x():\n    assert 1 == 1\n"
 RR_CMT_SUBJECT = "reword test_x comments"
@@ -12401,7 +12401,7 @@ def _build_red_run():
     _rr_reword(RR_CMTPLAIN)
     _rr_reword(RR_CMTNONE, RR_CMT_NONE_LINE)
 
-    # A lane: a test commit and a test file each with a trailer, then the comment-only reword with none.
+    # A lane: a test commit and a test file each with a trailer, then the comment-only reword with no trailer.
     _cmk_pushed(RR_CMTLANE, {"a.txt": "base\n"})
     _rr_commit(RR_CMTLANE, {RR_TEST: RR_CMT_V1}, _rr_msg(RR_SUBJECT, RR_RED_LINE))
     _rr_commit(RR_CMTLANE, {RR_LANE_TEST: RR_TEST_TEXT}, _rr_msg(RR_LANE_SUBJECT, RR_NONE_LINE))
@@ -12570,9 +12570,9 @@ rr_allow("commit -m m, then cd /tmp and echo, with no push in the call, and a st
 # with no trailer it is refused; with `none` and a reason it is allowed.
 rr_refuse("a comment-only reword of a pushed test file, pushed with no Red-run line", VCS + " push", RR_CMTPLAIN)
 rr_allow("the same comment-only reword with Red-run: none: comment only", VCS + " push", RR_CMTNONE)
-# A lane whose earlier commits carry trailers, then a comment-only reword with none. The refusal names the reword,
-# and names neither trailered commit.
-rr_refuse("a lane whose earlier commits carry trailers, then a comment-only reword with none, names the reword",
+# A lane whose earlier commits carry trailers, then a comment-only reword with no trailer. The refusal names the
+# reword, and names neither trailered commit.
+rr_refuse("a lane whose earlier commits carry trailers, then a comment-only reword with no trailer, names the reword",
           VCS + " push", RR_CMTLANE, carries=(RR_CMT_SUBJECT,), lacks=(RR_SUBJECT, RR_LANE_SUBJECT))
 
 
