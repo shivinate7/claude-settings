@@ -4,4 +4,4 @@
 - **Where.** `run_commands` and `names_path` in `lint/test_windows_split.py`. Only the mod-test step is barred from this form, by `mods_step_problems`.
 - **Decision.** None.
 - **Retire.** CiCoverage skips a step with `continue-on-error: true` or an always-false `if:`, with a case for each in `lint/test_windows_split.py`.
-- **Fix.** step:ci-coverage-gated-steps
+- **Fix.** PR #2004 (ci-coverage-gated-steps)
