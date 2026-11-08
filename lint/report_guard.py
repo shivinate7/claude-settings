@@ -727,10 +727,14 @@ CARRY_FORMS = {
 }
 # A source word or form, matched ignoring case: git, page, digest, `commit <hex>`, `commits <hex>` or `sha <hex>` (a
 # colon may follow the word, and one backtick may sit before the hex), `PR #<n>`, `PR#<n>`, `pull request #<n>`, `pull #<n>`,
-# `issue #<n>` (`issue` needs the `#`), a github.com link. A space before `#` is optional (`pull#1`). A bare `#<n>` is no source. The hex has 7 to 40 characters and holds
-# a digit, so a word such as "commit defaced" names no source.
-SOURCE_RE = re.compile(r"\b(?:git|page|digest)\b|\b(?:commits?|sha)(?::\s*|\s+)`?(?=[0-9a-f]*\d)[0-9a-f]{7,40}\b"
-                       r"|\bPR\s*#\d+\b|\bissue\s*#\d+\b|\bpull(?:\s+request)?\s*#\d+\b|\bgithub\.com/\S", re.I)
+# `issue #<n>` (`issue` needs the `#`), a github.com link. Any run of spaces, or none, may sit before `#` (`pull#1`). A bare `#<n>` is no source.
+# The hex has 7 to 40 characters and holds a digit, so a word such as "commit defaced" names no source.
+# A PR with no `#` ("PR 978") is no source, and the word beside it (git, page, digest) does not rescue it:
+# see item_names_source.
+SOURCE_WORD_RE = re.compile(r"\b(?:git|page|digest)\b", re.I)
+SOURCE_FORM_RE = re.compile(r"\b(?:commits?|sha)(?::\s*|\s+)`?(?=[0-9a-f]*\d)[0-9a-f]{7,40}\b"
+                            r"|\bPR\s*#\d+\b|\bissue\s*#\d+\b|\bpull(?:\s+request)?\s*#\d+\b|\bgithub\.com/\S", re.I)
+BARE_PR_RE = re.compile(r"\bPR\s*\d", re.I)
 NONE_ITEM_RE = re.compile(r"(?:none|nothing)\b", re.I)
 
 
@@ -803,11 +807,18 @@ def carry_present(name, text):
     return bool(dict(CARRY_LINES)[name].search(text))
 
 
+def item_names_source(item):
+    """Whether a Recovered item names a source: a source form, or a source word unless the item cites a PR with no `#`."""
+    if SOURCE_FORM_RE.search(item):
+        return True
+    return not BARE_PR_RE.search(item) and bool(SOURCE_WORD_RE.search(item))
+
+
 def unsourced_recovered_item(block):
-    """The first item of a Recovered line in `block` that names no source (see SOURCE_RE), else ''.
+    """The first item of a Recovered line in `block` that names no source (see item_names_source), else ''.
     An item that starts with "none" or "nothing" needs no source."""
     for item in recovered_items(block) or []:
-        if not NONE_ITEM_RE.match(item) and not SOURCE_RE.search(item):
+        if not NONE_ITEM_RE.match(item) and not item_names_source(item):
             return item[:60]
     return ""
 
@@ -1965,7 +1976,9 @@ def main():
     if incoming is not None and last_human_idx is not None and incoming > last_human_idx:
         # A peer message after a reply that ended its turn starts a new turn: its landing window holds
         # no commit from before it. One that arrives mid-turn (a tool result came last) leaves the window whole.
-        prior = [r for r in records[:incoming] if not r.get("isSidechain")]
+        # Skip records that end no turn and start none: the stop summary and the queue records.
+        prior = [r for r in records[:incoming]
+                 if not r.get("isSidechain") and r.get("type") not in ("system", "queue-operation")]
         if prior and prior[-1].get("type") == "assistant" and not list(tool_uses(prior[-1])):
             landing = records[incoming + 1:]
     route += success_route_flags(hook, after)
