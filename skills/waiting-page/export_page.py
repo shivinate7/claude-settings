@@ -23,6 +23,13 @@ Verdict, one line, then exit:
   unknown    a collection folder or its marker is missing, a file is not one JSON doc, a collection emptied, or the
              page has no or two designData blocks; nothing is written; exit 2
   unknown    the run crashed (one line, nothing written); exit 3
+Picture check, with --page: after the copy is written, each fetched item that carries a picture and that the page draws as an
+open decision (not closed, not a ruling, not answered) is run through check_designs.mjs, the page's own `pictureProblem` in
+Chromium (page_check.py is the one home). A miss prints `held item <n>: <the page's sentence>` after the verdict line, one
+per item, and the run exits 4: fix the item, export again, and do not republish while one is held. A check that cannot run
+(no node, no Playwright or Chromium), or an open pictured item with no page file, prints one `checks unknown: <why>` line
+before the verdict; the copy is written and the exit code is as without checks. The checker gets the fetched answers
+(`--answers`) and skips an item the page's own `isAnswered` draws as answered. No time budget spans the items.
 Every doc is scanned, as parsed JSON, before the first write: each string value, each key, each doc id and each
 10 or 11 digit number (a phone). The page text and each supporting text file are scanned as text with the same
 shapes, except that a version pin such as `react@18.3.1` and a retina name such as `logo@2x.png` are not emails.
@@ -33,6 +40,13 @@ placeholder, a mask or a plain word as the whole rest of its line, `PWD=<path>`,
 A personal fact in plain words passes too. A postal address (street, PO box, "City, ST ZIP") is a shape.
 A doc is written with sorted keys, two-space indent and a final newline, so an unchanged doc is byte-identical. A doc no
 longer fetched is deleted from its collection folder; a truncated fetch deletes docs, and git history keeps them.
+
+Check, before a republish, writes nothing:
+
+    python3 ~/.claude/skills/waiting-page/export_page.py --check --fetched DIR --page FILE
+
+The same item checks. A miss prints its `held item` line, exit 4. Else `checks pass`, exit 0. Unknown: `checks unknown: <why>`,
+exit 3. The writer holds the republish on any exit but 0: a check that cannot read its input fails, never passes.
 
 Rebuild, the recovery path. It reads only the repo copy, never the live page:
 
@@ -57,7 +71,8 @@ also exports its designData block. A supporting file no longer fetched stays in 
 An entry with `"export": false` prints `<id>: skipped - no export`, needs no folder in DIR, writes nothing and
 counts as exit 0. Each other artifact prints one line `<id>: <verdict>`, and a find's lines start with `<id>:` too. One artifact's refusal or
 unknown leaves its own folder as it was and holds back no other. Exit: 0 when every artifact is changed or same; else
-the worst of 1 (refused), 2 (unknown: also a registry that is missing, empty or unreadable) and 3 (a crash).
+the worst of 1 (refused), 2 (unknown: also a registry that is missing, empty or unreadable) and 3 (a crash); 4 (a held
+item) only when none of those happened. The waiting-page entry prints each `held item` line after its verdict, prefixed `<id>: `.
 
 Cost: one python process, one read of each file, writes only for a changed doc. No git, no network, no timer.
 """
@@ -70,6 +85,7 @@ import sys
 HERE = os.path.dirname(os.path.realpath(__file__))
 sys.path.insert(0, HERE)
 import splice  # noqa: E402  the one home of the designData block's span
+import page_check  # noqa: E402  the one home that runs the page's picture check
 
 # The same five as lint/layout.py WAITING_COLLECTIONS. A copy, because a single export and the rebuild must run with no
 # lint/ beside them: the recovery path may not depend on the repo it recovers (verification-recovery-independent-of-state).
@@ -78,7 +94,7 @@ PAGE_FOLDER, DESIGN_FILE, PAGE_FILE, FILES_FOLDER = "page", "designData.json", "
 MARKER = ".complete"  # the session touches it in a collection folder after the last list page
 BATCH_SIZE = 50
 BATCH_BYTES = 900000  # one ArtifactData batch call stays under about 1 MB
-REFUSED, UNKNOWN, CRASH = 1, 2, 3
+REFUSED, UNKNOWN, CRASH, HELD = 1, 2, 3, 4
 
 STREET_WORDS = ("Street", "St", "Avenue", "Ave", "Road", "Rd", "Drive", "Dr", "Lane", "Ln", "Boulevard", "Blvd", "Way",
                 "Court", "Ct", "Place", "Pl", "Circle", "Cir", "Terrace", "Ter", "Parkway", "Pkwy", "Park", "Trail", "Trl",
@@ -392,7 +408,8 @@ def existing(out, collections=COLLECTIONS):
     return found
 
 
-def export(fetched, out, page, allow_empty, collections=COLLECTIONS, prefix="", design=True, files=None):
+def fetched_docs(fetched, collections):
+    """{collection: {doc id: data}} read from the fetched folder; Stop (unknown) when a folder or its marker is missing."""
     docs = {}
     for name in collections:
         folder = os.path.join(fetched, name)
@@ -401,6 +418,19 @@ def export(fetched, out, page, allow_empty, collections=COLLECTIONS, prefix="", 
         if not os.path.isfile(os.path.join(folder, MARKER)):
             raise Stop("unknown - %s has no %s marker, so the fetch may have stopped early" % (name, MARKER), UNKNOWN)
         docs[name] = docs_in(folder, name)
+    return docs
+
+
+def picture_checks(page, docs):
+    """([held item lines], the `checks unknown: <why>` line or None) for the fetched docs against the page file `page`."""
+    held, why = page_check.check_items(page, docs["items"], docs.get("answers", {}))
+    return ["held item %s: %s" % (n, sentence) for n, sentence in held], ("checks unknown: " + why) if why else None
+
+
+def export(fetched, out, page, allow_empty, collections=COLLECTIONS, prefix="", design=True, files=None):
+    """(verdict, `checks unknown` line or None, held item lines). The picture check runs after the copy is written, on the
+    waiting page's own export only (`design`), and never on a refused or unknown run."""
+    docs = fetched_docs(fetched, collections)
 
     have = existing(out, collections)
     for name in collections:
@@ -459,7 +489,13 @@ def export(fetched, out, page, allow_empty, collections=COLLECTIONS, prefix="", 
         if label not in want:
             os.remove(os.path.join(out, *label.split("/")))
             changed += 1
-    return "changed %d" % changed if changed else "same"
+    unknown, held = None, []
+    if design and "items" in collections:
+        if page:
+            held, unknown = picture_checks(page, docs)
+        elif page_check.pictured_items(docs["items"])[0]:  # a pictured item and no page: the check cannot run
+            unknown = "checks unknown: no page file"
+    return ("changed %d" % changed if changed else "same"), unknown, held
 
 
 def export_all(root, fetched, worktree, allow_empty):
@@ -473,7 +509,7 @@ def export_all(root, fetched, worktree, allow_empty):
         raise Stop("unknown - the artifacts registry cannot be read: %s" % err, UNKNOWN)
     if not entries:
         raise Stop("unknown - %s has no artifacts registry entry to export" % root, UNKNOWN)
-    worst = 0
+    worst, held_any = 0, False
     for entry in entries:
         name = entry["id"]
         if entry["export"] is False:  # held in the registry, never exported: no folder needed, nothing written
@@ -485,17 +521,38 @@ def export_all(root, fetched, worktree, allow_empty):
         try:
             if not os.path.isdir(folder):
                 raise Stop("unknown - the fetched folder has no %s folder" % name, UNKNOWN)
-            verdict = export(folder, os.path.join(worktree, *entry["export"].split("/")),
+            verdict, unknown, held = export(folder, os.path.join(worktree, *entry["export"].split("/")),
                              page if os.path.isfile(page) else None, allow_empty, tuple(entry["collections"]), "%s: " % name,
                              entry["role"] == layout.WAITING_ROLE, supporting_files(files) if os.path.isdir(files) else None)
             code = 0
         except Stop as stop:
-            verdict, code = str(stop), stop.code
+            verdict, unknown, held, code = str(stop), None, [], stop.code
         except Exception as err:  # one artifact's crash must not hide the verdict of the others
-            verdict, code = "unknown - the run crashed (%s)" % type(err).__name__, CRASH
+            verdict, unknown, held, code = "unknown - the run crashed (%s)" % type(err).__name__, None, [], CRASH
+        if unknown:  # before the verdict, so the verdict stays the last line of the artifact
+            print("%s: %s" % (name, unknown))
         print("%s: %s" % (name, verdict))
+        for line in held:
+            print("%s: %s" % (name, line))
+        held_any = held_any or bool(held)
         worst = max(worst, code)
-    return worst
+    return worst or (HELD if held_any else 0)  # a held item is 4 only when nothing worse (1, 2 or 3) happened
+
+
+def check_only(fetched, page):
+    """--check: the export's picture checks on the fetched items and the page file; nothing is written. The exit code."""
+    read_page(page)  # a page that is not one readable file is unknown, as in an export
+    held, unknown = picture_checks(page, fetched_docs(fetched, ("items", "answers")))
+    for line in held:
+        print(line)
+    if unknown:
+        print(unknown)
+    if held:
+        return HELD
+    if unknown:
+        return CRASH  # exit 3: the checks could not run
+    print("checks pass")
+    return 0
 
 
 def entry_bytes(entry):
@@ -551,11 +608,23 @@ def main(argv):
                     help="a collection that really emptied, so its docs leave the copy")
     ap.add_argument("--all", help="the repo root whose artifacts registry lists each artifact to export")
     ap.add_argument("--worktree", help="with --all: the record branch worktree each artifact's export path is under")
+    ap.add_argument("--check", action="store_true", help="with --fetched and --page: run the picture checks only, write nothing")
     ap.add_argument("--rebuild", help="the waiting-data folder to read batches from")
     ap.add_argument("--batches", help="the folder to write batch-NNN.json into")
     args = ap.parse_args(argv)
     all_mode = bool(args.all or args.worktree)
     export_mode, rebuild_mode = bool(args.out or args.page or (args.fetched and not all_mode)), bool(args.rebuild or args.batches)
+    if args.check:
+        if all_mode or rebuild_mode or args.out or not (args.fetched and args.page):
+            ap.error("--check takes --fetched DIR --page FILE and nothing else")
+        try:
+            return check_only(args.fetched, args.page)
+        except Stop as stop:
+            print(str(stop))
+            return stop.code
+        except Exception as err:
+            print("unknown - the run crashed (%s)" % type(err).__name__)
+            return CRASH
     if [all_mode, export_mode, rebuild_mode].count(True) != 1 or (all_mode and not (args.all and args.fetched and args.worktree)) \
             or (export_mode and not (args.fetched and args.out)) or (rebuild_mode and not (args.rebuild and args.batches)):
         ap.error("use --fetched DIR --out DIR [--page FILE], or --all ROOT --fetched DIR --worktree DIR, or --rebuild DIR --batches DIR")
@@ -564,8 +633,9 @@ def main(argv):
     try:
         if all_mode:
             return export_all(os.path.abspath(args.all), args.fetched, args.worktree, args.allow_empty)
+        unknown, held = None, []
         if export_mode:
-            verdict = export(args.fetched, args.out, args.page, args.allow_empty)
+            verdict, unknown, held = export(args.fetched, args.out, args.page, args.allow_empty)
         else:
             verdict = rebuild(args.rebuild, args.batches)
     except Stop as stop:
@@ -574,8 +644,12 @@ def main(argv):
     except Exception as err:  # a crash is unknown, never a silent pass or a traceback the reader scrolls past
         print("unknown - the run crashed (%s)" % type(err).__name__)
         return CRASH
+    if unknown:  # before the verdict, so the verdict stays the last line (hooks/feedback_guard.py reads `same` there)
+        print(unknown)
     print(verdict)
-    return 0
+    for line in held:
+        print(line)
+    return HELD if held else 0
 
 
 if __name__ == "__main__":
