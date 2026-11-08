@@ -2010,6 +2010,7 @@ def role_write_hit(role: str, tool_input, target: str, cwd: str, session_id: str
 # rebase step that is no plain pick. A plain cherry-pick, rebase pick or `am` copies a commit someone
 # else made, and a reset, checkout, pull or clean merge hands the agent other people's commits: none is read.
 ENTRY_OWN = re.compile(r"^commit(?: \((?:initial|amend|merge)\))?:")
+ENTRY_AMEND = re.compile(r"^commit \(amend\):")
 ENTRY_REBASE = re.compile(r"^(?:pull --)?rebase\b[^:(]*\(([^)]*)\)")
 ENTRY_RESOLVED = re.compile(r"^(?:commit \(cherry-pick\)|revert)\b")
 REBASE_PLAIN_STEPS = ("start", "finish", "abort", "pick", "reword", "edit")
@@ -2105,10 +2106,13 @@ def own_changes(root: str):
         return None
     entries = [line.partition(" ")[::2] for line in log.stdout.splitlines() if line.strip()][::-1]
     kinds = {}
-    for sha, subject in entries:
+    replaced = {}
+    for index, (sha, subject) in enumerate(entries):
         kind = entry_kind(subject)
         if kind in (OWN, NOTED):
             kinds.setdefault(sha, kind)
+            if index and ENTRY_AMEND.match(subject):
+                replaced.setdefault(sha, entries[index - 1][0])
     lost = set()
     if kinds:
         # `kinds --not HEAD` lists what HEAD does not reach: a commit in it was reset or amended away.
@@ -2117,9 +2121,21 @@ def own_changes(root: str):
             return None
         lost = set(answer.stdout.split())
     changes = []
+    inherited = set()
     for sha, kind in kinds.items():
         if sha in lost:
             continue
+        before = replaced.get(sha)
+        if before and (kinds.get(before) != OWN or before in inherited):
+            # An amend of a commit the agent did not make. With the same tree it is a message-only
+            # amend, and the test lines in it are the other author's. An amend of the agent's own
+            # commit is read in full.
+            trees = [guard_core._git(root, "rev-parse", c + "^{tree}") for c in (sha, before)]
+            if any(t is None or t.returncode != 0 for t in trees):
+                return None
+            if trees[0].stdout == trees[1].stdout:
+                inherited.add(sha)
+                continue
         parents = guard_core._git(root, "show", "-s", "--format=%P", sha)
         if parents is None or parents.returncode != 0:
             return None
