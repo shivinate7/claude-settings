@@ -25581,6 +25581,37 @@ sh("agent-handoff-write: an agent's Bash echo > to another session's handoff is 
    "echo x > " + AH_OTHER, ANY_DECISION, cwd=NOGIT, session=HU_SID, config=AH_CFG, agent_id=AH_AGENT,
    lacks=(AH_RULE,))
 
+# THE SPELLINGS, THE INTERPRETER, AND THE FOLLOWED CD. A handoff named through $CLAUDE_CONFIG_DIR or
+# ${CLAUDE_CONFIG_DIR} resolves in the hook's environment, which the command never sets. An agent's python -c
+# writes the handoff from code the shell parse never reads. A `cd` into the handoffs folder makes a bare
+# <session>.md the handoff, and the guard must follow that cd. A heredoc body is text, and the write is its
+# redirect. Each of the first three is an agent's write of its own handoff, so each is denied with the rule.
+# The last two pin the guard's current verdict, so a mutant of follow_cd or of the heredoc strip shows up red.
+AH_VAR_HANDOFF = "$CLAUDE_CONFIG_DIR/handoffs/%s.md" % HU_SID
+AH_BRACED_HANDOFF = "${CLAUDE_CONFIG_DIR}/handoffs/%s.md" % HU_SID
+sh("agent-handoff-write: an agent's Bash echo > to the handoff, spelled $CLAUDE_CONFIG_DIR, is refused",
+   "echo x > " + AH_VAR_HANDOFF, "deny", AH_RULE, cwd=NOGIT, session=HU_SID, config=AH_CFG,
+   agent_id=AH_AGENT, lacks=(AH_HANDOFF, slash(AH_HANDOFF)))
+sh("agent-handoff-write: an agent's Bash echo > to the handoff, spelled ${CLAUDE_CONFIG_DIR}, is refused",
+   "echo x > " + AH_BRACED_HANDOFF, "deny", AH_RULE, cwd=NOGIT, session=HU_SID, config=AH_CFG,
+   agent_id=AH_AGENT, lacks=(AH_HANDOFF, slash(AH_HANDOFF)))
+sh("agent-handoff-write: an agent's python -c open(handoff, 'w') write is refused",
+   "python3 -c \"open('" + AH_HANDOFF + "','w').write('x')\"", "deny", AH_RULE, cwd=NOGIT,
+   session=HU_SID, config=AH_CFG, agent_id=AH_AGENT, lacks=(AH_HANDOFF, slash(AH_HANDOFF)))
+sh("agent-handoff-write: an agent's cd into the handoffs folder, then echo > the bare session file, is refused",
+   "cd " + os.path.join(AH_CFG, "handoffs") + " && echo x > " + HU_SID + ".md", "deny", AH_RULE,
+   cwd=NOGIT, session=HU_SID, config=AH_CFG, agent_id=AH_AGENT,
+   lacks=(AH_HANDOFF, slash(AH_HANDOFF)))
+sh("agent-handoff-write: an agent's cat > the handoff with a heredoc body is refused",
+   "cat > " + AH_HANDOFF + " <<'EOF'\nnotes for the orchestrator\nEOF", "deny", AH_RULE,
+   cwd=NOGIT, session=HU_SID, config=AH_CFG, agent_id=AH_AGENT,
+   lacks=(AH_HANDOFF, slash(AH_HANDOFF)))
+# The discriminating control for the heredoc strip: the body is text, so a handoff write held in it is no write.
+# The redirect names another file, so the call is allowed. A guard that reads the body as commands denies it.
+sh("agent-handoff-write: an agent's cat > another file, with a heredoc body that holds a handoff write, is allowed",
+   "cat > notes.md <<'EOF'\necho x > " + AH_HANDOFF + "\nEOF", "allow", cwd=NOGIT, session=HU_SID,
+   config=AH_CFG, agent_id=AH_AGENT, lacks=(AH_RULE,))
+
 # With precompact_handoff unimportable, reread_check.ph is None, and names_handoff raises on every agent's write
 # before rule 0 runs. The write is still an agent's write outside its worktree, so worktree-home must refuse it.
 AH_BROKEN_PRIMARY = os.path.join(ROOT, "ah-broken-primary")    # a checkout with one agent's worktree in it
