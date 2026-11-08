@@ -472,10 +472,13 @@ def scan_jobs(transcript):
 
 
 def closed_by_notice(text, keep_waiting=False):
-    """The ids of the <task-notification> blocks in text with a terminal status. With keep_waiting, a
-    block whose summary says the agent waits on its own background work closes nothing."""
+    """The ids of the <task-notification> blocks in text with a terminal status. With keep_waiting (the
+    agent reader), a block whose summary says the agent waits on its own background work closes nothing,
+    and text that does not start with the tag is no notice: a hand-back may quote one mid-text."""
     ids = []
     if not TASK_NOTIFICATION_TAG:
+        return ids
+    if keep_waiting and not text.lstrip().startswith(TASK_NOTIFICATION_TAG):
         return ids
     for note in text.split(TASK_NOTIFICATION_TAG)[1:]:
         tid, st, summary = TASK_ID.search(note), TASK_STATUS.search(note), TASK_SUMMARY.search(note)
@@ -504,8 +507,9 @@ def open_agents(transcript):
     answer to its spawn (toolUseResult.agentId, status async_launched) and reopens on a SendMessage
     answer that resumes it (resumedAgentId). It closes on a terminal task notice, unless the notice's
     summary says it waits on its own background work, or on the result of a TaskStop call. A foreground
-    agent never opens: its answer is its end. Reads only lines that hold one of the keys; raises on an
-    unreadable file, so a caller that must not fail wraps the call."""
+    agent never opens: its answer is its end. A notice counts only as the start of a record's text (see
+    closed_by_notice), in a user record, a queued attachment or a queue-operation enqueue. Reads only
+    lines that hold one of the keys; raises on an unreadable file, so a caller that must not fail wraps the call."""
     running, stops = {}, set()
     keys = (b"agentId", b"resumedAgentId", b"TaskStop", b"Successfully stopped") + NOTICE_KEY
     with open(transcript, "rb") as f:
@@ -515,9 +519,9 @@ def open_agents(transcript):
             try:
                 rec = json.loads(line)
                 kind = rec.get("type")
-                if kind == "attachment":  # a completion notice that arrives as a queued command
+                if kind in ("attachment", "queue-operation"):  # a notice that arrives as a queued command
                     att = rec.get("attachment")
-                    notice = att.get("prompt") if isinstance(att, dict) else None
+                    notice = att.get("prompt") if isinstance(att, dict) else rec.get("content")
                     if isinstance(notice, str):
                         for gone in closed_by_notice(notice, keep_waiting=True):
                             running.pop(gone, None)
