@@ -16,7 +16,8 @@ review record for its live head. Choices pinned here:
   The newest record decides. The check takes merge's verdict, never a PASS word of its own.
 - The reads: the live head (pulls/<n>) and the comments (issues/<n>/comments), two REST reads per PR, made only for
   such a claim in a lane. A failed read, or an exception in the check, never blocks: the reply gets a systemMessage
-  with UNKNOWN, never "clear".
+  with UNKNOWN, never "clear". The cutover read is one such read, but it never hides the record check: when the pull and
+  its comments were read and hold no record for the live head, the claim is still refused.
 - The remedy names `merge <n> --review-record` and never the live head sha: a record must name the head the
   reviewer read, and the refusal cannot know which head that was.
 - The installed layout: the script is a symlink in the config folder, with no merge/ beside lint/. The check still
@@ -308,13 +309,13 @@ class ReviewRecordTests(unittest.TestCase):
         self.assert_two_rest_reads()
         self.assertIsNone(out, out)
 
-    def stop(self, records, env_id=True, script=None, block=()):
+    def stop(self, records, env_id=True, script=None, block=(), cwd=None):
         """Run the Stop hook on `records`. env_id is this session's remote id (a lane sets it). The stand-in
         comes first on PATH, and the call log is emptied first, so each run's calls are its own. `script` runs
-        another copy of the hook, and `block` names modules the run cannot import."""
+        another copy of the hook, and `block` names modules the run cannot import. `cwd` is the hook's folder, the repo root when None."""
         open(self.count, "w", encoding="utf-8").close()
         path = trg.write_transcript(records, self.run_dir)
-        hook = {"hook_event_name": "Stop", "transcript_path": path, "stop_hook_active": False, "cwd": self.repo}
+        hook = {"hook_event_name": "Stop", "transcript_path": path, "stop_hook_active": False, "cwd": cwd or self.repo}
         env = dict(os.environ, CLAUDE_CONFIG_DIR=self.cfg, HOME=self.home,
                    PATH=self.gh_dir + os.pathsep + os.environ.get("PATH", ""))
         env.pop("CLAUDE_CODE_REMOTE_SESSION_ID", None)
@@ -339,10 +340,11 @@ class ReviewRecordTests(unittest.TestCase):
                     trg.tool_result_msg(), trg.assistant_text(reply)]
         return [*own, trg.peer_msg("do the task", from_session=PARENT), trg.assistant_text(reply)]
 
-    def assert_blocked(self, out):
-        self.assertIsNotNone(out, "the reply passed; expected a block")
-        self.assertEqual(out.get("decision"), "block", out)
-        self.assertTrue(out.get("reason"), out)
+    def assert_blocked(self, out, msg=""):
+        prefix = msg + " " if msg else ""
+        self.assertIsNotNone(out, prefix + "the reply passed; expected a block")
+        self.assertEqual(out.get("decision"), "block", prefix + str(out))
+        self.assertTrue(out.get("reason"), prefix + str(out))
 
     def assert_reads_of(self, *numbers):
         """Exactly two REST reads for each PR in `numbers`, its live head and its comments, and no other read."""
@@ -412,6 +414,19 @@ class ReviewRecordTests(unittest.TestCase):
         out = self.stop(self.lane_turn(report(CLAIM)))
         self.assert_reads_of(PR)
         self.assertIsNone(out, out)
+
+    def test_a_subfolder_cwd_reads_the_same_cutover_as_the_repo_root(self):
+        # Catches: the cutover read run from a subfolder of the checkout, `git -C <subfolder>` reading merge/merge.py as a path under the
+        # subfolder. The cutover is then none, and an unstamped record from before the cutover refuses. The case above, run from the
+        # root, is the control: the same record passes there, so the subfolder run is the one that differs.
+        self.cutover_history("fixture")
+        self.assertEqual(self.in_process_cutover("fixture"), CUTOVER,
+                         "fixture: the cutover from the root is not the time of the commit that adds the salt line")
+        body = unstamped(record())
+        self.serve(comments=[{"body": body, "created_at": BEFORE}], base="fixture", default_branch="fixture")
+        out = self.stop(self.lane_turn(report(CLAIM)), cwd=os.path.join(self.repo, "merge"))
+        self.assert_reads_of(PR)
+        self.assertIsNone(out, "a run from a subfolder refused an unstamped record from before the cutover:\n" + str(out))
 
     def test_an_unstamped_record_created_after_the_cutover_blocks_a_pass_claim(self):
         # Catches: the cutover letting a record made after the stamp's merge through with no Stamp line.
@@ -711,6 +726,28 @@ class ReviewRecordTests(unittest.TestCase):
                 message = (out or {}).get("systemMessage", "")
                 self.assertIn("UNKNOWN", message, out)
                 self.assertNotRegex(message, r"(?i)\bclear\b", out)
+
+    def delete_cutover_ref(self, base="main"):
+        """Remove origin/<base>, the ref the cutover read asks for. The stand-in's default branch is main, so the read asks for origin/main."""
+        subprocess.run(["git", "-C", self.repo, "update-ref", "-d", "refs/remotes/origin/" + base], check=True, capture_output=True)
+
+    def test_a_failed_cutover_read_still_refuses_a_claim_with_no_record(self):
+        # Catches: the cutover read's Stop (origin/main is gone here) skipping the whole record check, so a PASS claim with no record is given
+        # an UNKNOWN note and let through. The pull and its comments were both read, and they hold no record, so the claim is refused.
+        self.serve(comments=[CHATTER])
+        self.delete_cutover_ref()
+        out = self.stop(self.lane_turn(report(CLAIM)))
+        self.assert_reads_of(PR)
+        self.assert_blocked(out, msg="a failed cutover read let a PASS claim with no record through, as an UNKNOWN note:")
+        self.assertIn("PR #12", out["reason"], out)
+
+    def test_a_failed_cutover_read_does_not_refuse_a_stamped_record_for_the_live_head(self):
+        # Control: the same missing origin/main, and a record stamped for the live head. The record stands, so the claim is not refused.
+        self.serve(comments=[record()])
+        self.delete_cutover_ref()
+        out = self.stop(self.lane_turn(report(CLAIM)))
+        self.assert_reads_of(PR)
+        self.assertNotEqual((out or {}).get("decision"), "block", out)
 
 
 if __name__ == "__main__":
