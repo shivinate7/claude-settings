@@ -194,13 +194,15 @@ def quote_advance(text: str, index: int, quote: str):
     return 1, ""
 
 
-def walk_quotes(text: str):
+def walk_quotes(text: str, apostrophes_are_text: bool = False):
     """Yield (index, char, quote open before it) over `text`, one step at a time. A contraction
     that bash never closes is text, as in `_split_reading`'s second reading. BLIND text yields as
-    unquoted."""
+    unquoted. With `apostrophes_are_text`, every unquoted `'` that follows a letter or digit is
+    text too (`don't&sed`, which `CONTRACTION` does not match), so it hides nothing after it."""
     quote, index = "", 0
     while index < len(text):
-        if not quote and text[index] == "'" and is_contraction(text, index):
+        if not quote and text[index] == "'" and (is_contraction(text, index) or (
+                apostrophes_are_text and index and text[index - 1].isalnum())):
             width, after = 1, ""
         else:
             width, after = quote_advance(text, index, quote)
@@ -1062,7 +1064,8 @@ def dir_before_segment(segments, number: int, shell_cwd: str, ends=(), failed_cd
     back, a `cd` inside `( ... )` ends with the parenthesis, `popd` or a path that holds a variable
     is not tracked, and a `cd` into a folder that does not exist is not trusted (the shell stays
     where it was, and a `;` runs the next command there). `ends` is what `split_segments` gave:
-    in bash each part of a pipe runs in a subshell, so its `cd` moves nothing after the pipe.
+    in bash each part of a pipe runs in a subshell, so its `cd` moves nothing after the pipe. A
+    segment that `_split_jobs` ended with a lone `&` is a background job: its `cd` moves nothing.
     `failed_cd_stays` reads a `cd` to a folder that does not exist the way the shell does: it
     leaves the shell where it was, and `cd -` still goes to the folder before the last `cd` that
     worked. After `&&` the rest of that chain does not run, up to the next `;`, newline or `||`:
@@ -1089,6 +1092,8 @@ def dir_before_segment(segments, number: int, shell_cwd: str, ends=(), failed_cd
         if move is not None and not is_powershell(segment) and "|" in (
                 ends[at] if at < len(ends) else "", ends[at - 1] if 0 < at <= len(ends) else ""):
             move = None   # a bash pipe's part: a subshell, so the shell stays where it was
+        if move is not None and at < len(ends) and ends[at] == "&":
+            move = None   # a backgrounded `cd` runs in a subshell, so the shell stays where it was
         if tokens is None:
             where = None
         elif move is not None:

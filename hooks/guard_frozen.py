@@ -454,9 +454,13 @@ def _output_targets(words):
 def _split_background(segment):
     """`segment` cut at each lone, unquoted `&` (a background job ends there, so the next word starts a
     command, as after `;`). `&&`, `|&`, `>&`, `<&` and `&>` hold an `&` that is no break. A quoted or escaped
-    `&` is text. `split_segments` keeps a lone `&` inside its segment, for callers that read a job as one."""
+    `&` is text. `split_segments` keeps a lone `&` inside its segment, for callers that read a job as one. A
+    quote that bash leaves open at the end of the segment is read again with each apostrophe after a letter
+    or digit as text, so `echo don't&sed ...` still splits at its `&`."""
+    steps = list(guard_core.walk_quotes(segment))
+    unclosed = bool(steps) and bool(steps[-1][2]) and steps[-1][1] != steps[-1][2]
     parts, start = [], 0
-    for at, char, quote in guard_core.walk_quotes(segment):
+    for at, char, quote in (guard_core.walk_quotes(segment, True) if unclosed else steps):
         if char != "&" or quote:
             continue
         if (segment[at - 1:at] if at else "") in ("&", "|", ">", "<") or segment[at + 1:at + 2] in ("&", ">"):
@@ -1761,9 +1765,9 @@ def _names_run(tokens):
     return found
 
 
-# Perl text that starts a command: `system`, `exec`, a backtick or `qx`, a pipe `open`, `eval`, `fork`, `syscall`.
+# Perl text that starts a command: `system`, `exec`, a backtick or `qx`, a pipe `open` (`open2`, `open3`), `readpipe`, `eval`, `fork`, `syscall`.
 # A script with one of them is code that may run `sed -i`, so a spelling of it is no longer text.
-_PERL_RUNS_COMMANDS = re.compile(r"\b(?:system|exec|qx|open|eval|fork|syscall)\b|`")
+_PERL_RUNS_COMMANDS = re.compile(r"\b(?:system|exec|qx|open|open2|open3|readpipe|eval|fork|syscall)\b|`")
 _PERL_SCRIPT_SWITCH = r"-[0-9aCcFlnpsStTuUvwW]*[eE]"
 
 
