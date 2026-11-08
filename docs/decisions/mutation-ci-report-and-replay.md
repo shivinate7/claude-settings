@@ -35,7 +35,7 @@ Reader: the owner, when item 163 is reopened. The read is on demand: `gh run lis
 
 ## Cost
 
-Measured locally, 2026-11-05, on batch 11 (59bff081 to 0497265b), 4 cores, with the job's settings: 10 mutants, a 300 s budget, a 180 s suite timeout. The range changed one product file, `hooks/stall_watch.py`.
+Measured locally, 2026-11-05, on batch 11 (59bff081 to 0497265b), 4 cores, with the job's settings: 10 mutants, a 300 s budget, a 180 s suite timeout. The range changed one product file, `hooks/stall_watch.py` (a fact of that batch, not pinned).
 
 | Step | Wall time | Process starts | Files written | Target |
 |---|---|---|---|---|
