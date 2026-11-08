@@ -2776,7 +2776,8 @@ _PATH_NAMES = frozenset(("Path", "PurePath", "PurePosixPath", "PureWindowsPath",
 _PATH_METHODS = frozenset(("Path", "PurePath", "joinpath", "abspath", "realpath", "normpath", "with_name"))
 _FILE_CALLS = frozenset(("open", "copy", "copy2", "copyfile", "copytree", "move", "run", "call", "check_call",
                          "check_output", "Popen", "read_text", "read_bytes"))
-_PATH_WRAPPERS = frozenset(("str", "fspath", "format"))  # a call that passes its argument's text on as a path
+# A call whose result keeps its argument's text, whole or in parts, so a path built from it still names that file.
+_PATH_WRAPPERS = frozenset(("str", "fspath", "format", "basename", "split", "rsplit", "replace"))
 
 
 def _suite_profile(source: str):
@@ -2790,9 +2791,14 @@ def _suite_profile(source: str):
     assignment binds it to, in any scope of the file (module, function or class level; one name bound in two scopes pools
     both values). A `for` or comprehension target is bound, inside its own loop only, to the strings of its own iterable: a
     tuple, list, set or dict literal, a comprehension's element, `sorted` / `reversed` / `enumerate` / `list` / `tuple` /
-    `set` / `frozenset` of one of these, or a name that an assignment in the loop's own function (else module) binds to
-    one, through at most one more name (`B = A`). Another loop's use of the same name, or the same name assigned in another
-    function, adds nothing, and the name means nothing after its loop. A path that arrives as a function parameter is not followed (debt tests-for-misses-param-loads)."""
+    `set` / `frozenset` / `zip` of one of these, the `.items()` / `.keys()` / `.values()` of a dict literal, or a name that
+    an assignment in the loop's own function (else module) binds to one, through at most one more name (`B = A`). A pair
+    target splits a `.items()` loop into keys and values, and a `zip` loop into its arguments. Another loop's use of the
+    same name, or the same name assigned in another function, adds nothing, and the name means nothing after its loop. A
+    loop name is followed through a path call, a file call and a call that keeps its text (`_PATH_WRAPPERS`: `str`,
+    `basename`, `split`, `replace` and the like), never through any other call. A bare call to a function the file
+    defines itself is no file call, whatever its name. A path that arrives as a function parameter is not followed (debt
+    tests-for-misses-param-loads)."""
     import ast
     try:
         tree = ast.parse(source)
@@ -2852,6 +2858,13 @@ def _suite_profile(source: str):
             return [expr.key, expr.value]
         if isinstance(expr, ast.Call) and isinstance(expr.func, ast.Name) and expr.func.id in wrappers and expr.args:
             return items_of(expr.args[0], scope, holder, hops, seen)
+        if isinstance(expr, ast.Call) and getattr(expr.func, "id", "") == "zip":
+            return [item for arg in expr.args for item in items_of(arg, scope, holder, hops, seen)]
+        if isinstance(expr, ast.Call) and isinstance(expr.func, ast.Attribute) and not expr.args \
+                and expr.func.attr in ("items", "keys", "values"):
+            mapping = items_of(expr.func.value, scope, holder, hops, seen)
+            return side(mapping, "keys") + side(mapping, "values") if expr.func.attr == "items" \
+                else side(mapping, expr.func.attr)
         if isinstance(expr, ast.Name) and expr.id not in seen:
             seen = seen | {expr.id}
             found = list(scope.get(expr.id, ()))
@@ -2861,17 +2874,44 @@ def _suite_profile(source: str):
             return found
         return []
 
-    def loop_scope(scope, target, iterable, holder):
-        """`scope` with each name of a loop `target` bound to the items of this loop's own iterable, so the name means
-        these strings inside the loop and nowhere else. `enumerate` gives its element to the second name of a pair."""
+    def side(mapping, which):
+        """The keys or the values of each dict literal in `mapping`; any other expression whole, as it may hold either."""
+        found = []
+        for expr in mapping:
+            if isinstance(expr, ast.Dict):
+                found.extend(part for part in (expr.keys if which == "keys" else expr.values) if part is not None)
+            else:
+                found.append(expr)
+        return found
+
+    def bind(inner, scope, target, iterable, holder):
+        """Bind each name of a loop `target` in `inner` to the items of `iterable`. A pair target splits its items:
+        `enumerate` gives its element to the second name, `.items()` its keys to the first and its values to the second,
+        and `zip` gives each name the items of its own argument."""
+        func = iterable.func if isinstance(iterable, ast.Call) else None
+        if isinstance(target, ast.Tuple) and func is not None:
+            name, args = getattr(func, "id", ""), iterable.args
+            if name == "enumerate" and len(target.elts) == 2 and args:
+                return bind(inner, scope, target.elts[1], args[0], holder)
+            if name == "zip" and len(target.elts) == len(args) and not any(isinstance(arg, ast.Starred) for arg in args):
+                for part, arg in zip(target.elts, args):
+                    bind(inner, scope, part, arg, holder)
+                return None
+            if isinstance(func, ast.Attribute) and func.attr == "items" and not args and len(target.elts) == 2:
+                mapping = items_of(func.value, scope, holder, 1, frozenset())
+                for part, which in zip(target.elts, ("keys", "values")):
+                    items = side(mapping, which)
+                    inner.update((leaf.id, items) for leaf in ast.walk(part) if isinstance(leaf, ast.Name))
+                return None
         items = items_of(iterable, scope, holder, 1, frozenset())
-        if isinstance(iterable, ast.Call) and getattr(iterable.func, "id", "") == "enumerate" \
-                and isinstance(target, ast.Tuple) and len(target.elts) == 2:
-            target = target.elts[1]
+        inner.update((leaf.id, items) for leaf in ast.walk(target) if isinstance(leaf, ast.Name))
+        return None
+
+    def loop_scope(scope, target, iterable, holder):
+        """`scope` with each name of a loop `target` bound to the items of this loop's own iterable (`bind`), so the name
+        means these strings inside the loop and nowhere else."""
         inner = dict(scope)
-        for part in ast.walk(target):
-            if isinstance(part, ast.Name):
-                inner[part.id] = items
+        bind(inner, scope, target, iterable, holder)
         return inner
 
     scopes = {}  # a node -> the loop names in force at it
@@ -2898,7 +2938,7 @@ def _suite_profile(source: str):
 
     def walk(expr):
         """(node, direct) for each node under `expr`. `direct` is False below a call that does not build a path (not in
-        `_PATH_NAMES`, `_PATH_METHODS`, `_FILE_CALLS` or `_PATH_WRAPPERS`): a loop name there is an argument of some other
+        `_PATH_NAMES`, `_PATH_METHODS`, `is_file_call` or `_PATH_WRAPPERS`): a loop name there is an argument of some other
         function, not a path, so it is not followed."""
         todo = [(expr, True)]
         while todo:
@@ -2906,7 +2946,7 @@ def _suite_profile(source: str):
             yield node, direct
             if isinstance(node, ast.Call):
                 func = node.func.attr if isinstance(node.func, ast.Attribute) else getattr(node.func, "id", "")
-                if not (is_path_call(node.func) or func in _FILE_CALLS or func in _PATH_WRAPPERS):
+                if not (is_path_call(node.func) or is_file_call(node.func) or func in _PATH_WRAPPERS):
                     direct = False
             todo.extend((child, direct) for child in ast.iter_child_nodes(node))
 
@@ -2932,6 +2972,15 @@ def _suite_profile(source: str):
                    (isinstance(owner, ast.Name) and owner.id in ("path", "posixpath", "ntpath"))
         return func.attr in _PATH_METHODS
 
+    own_defs = {node.name for node in ast.walk(tree) if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))}
+
+    def is_file_call(func) -> bool:
+        """A `_FILE_CALLS` name, but never a bare name the file defines itself: a local `def run(paths)` is some helper,
+        and its arguments are not paths it opens. A method call (`subprocess.run`, `self.copy`) counts by its name."""
+        if isinstance(func, ast.Name):
+            return func.id in _FILE_CALLS and func.id not in own_defs
+        return isinstance(func, ast.Attribute) and func.attr in _FILE_CALLS
+
     def last(dotted: str) -> str:
         return dotted.rsplit(".", 1)[-1]
 
@@ -2954,7 +3003,7 @@ def _suite_profile(source: str):
                 skip = 0 if func == "run_path" else 1  # the first argument of the other two is the module name
                 for part in list(node.args[skip:]) + [kw.value for kw in node.keywords if kw.arg not in ("name", "fullname")]:
                     constants(part, set())
-            elif func in _FILE_CALLS:
+            elif is_file_call(node.func):
                 for part in list(node.args) + [kw.value for kw in node.keywords]:
                     constants(part, set())
             if is_path_call(node.func):
