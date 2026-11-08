@@ -144,10 +144,11 @@ async function open(t, { items = [DECISION, TASK], rawItems = {}, answers = {}, 
   // With no store there are no items to wait for: the page is loaded once its empty state is drawn.
   if (noStore) { await page.waitForFunction("state.loaded"); return page; }
   await page.waitForFunction("state.items.length > 0"); // the stub database has delivered the items
-  // The first card is awaited visible, as a reader sees it. A sunk card (one with a saved answer) is awaited attached only: the Answered section
-  // starts closed, so its card is drawn but hidden.
+  // The first card is awaited visible, as a reader sees it. A card inside the closed Answered list is drawn but hidden, so it is awaited
+  // attached: the list's own hidden state says it is sunk, whatever answered it (a saved answer or a wait).
   const first = items.length ? items[0].id : Object.keys(rawItems)[0];
-  await page.waitForSelector(`#item-${first}`, { state: answers[first] ? "attached" : "visible" });
+  await page.waitForFunction((id) => { const el = document.getElementById("item-" + id), ab = document.getElementById("ab");
+    return !!el && (el.getClientRects().length > 0 || (!!ab && ab.hidden && ab.contains(el))); }, first);
   return page;
 }
 const card = (page, it) => page.locator(`#item-${it.id}`);
