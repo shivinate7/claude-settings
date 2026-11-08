@@ -22,26 +22,13 @@ except ImportError:  # install-hooks-whole: the guard set lands whole, the helpe
 from shared_names import config_dir  # noqa: E402  the one home, shared with the config watch
 
 
-def _run(where: str, args, text: bool):
-    """The one runner under `_git` and `_git_bytes`: the finished git call, or None when git could not run."""
+def _git(where: str, *args):
     try:
-        if text:
-            return _nowindow.run(
-                ["git", "-C", where, *args], capture_output=True, encoding="utf-8", errors="replace", timeout=10
-            )
-        return _nowindow.run(["git", "-C", where, *args], capture_output=True, timeout=10)
+        return _nowindow.run(
+            ["git", "-C", where, *args], capture_output=True, encoding="utf-8", errors="replace", timeout=10
+        )
     except Exception:
         return None
-
-
-def _git(where: str, *args):
-    """The finished git call, its output decoded as text; None when git could not run."""
-    return _run(where, args, True)
-
-
-def _git_bytes(where: str, *args):
-    """As `_git`, with the output kept as bytes, so a line ending or an invalid byte stays as git wrote it."""
-    return _run(where, args, False)
 
 
 def is_worktree(where: str):

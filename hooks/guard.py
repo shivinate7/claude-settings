@@ -46,8 +46,7 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        SubagentStop (`judge_stop`) logs the same names for the whole diff, and
                        also role-diff-main-checkout, role-diff-unresolved and
                        role-diff-unread. An unread diff of any role, builder included, is logged
-                       and allowed. A merge path whose bytes git could not read logs
-                       role-diff-unread too, and is still judged.
+                       and allowed.
                        (builders-cannot-edit-tests)
   git-env-set          deny. A command that sets GIT_DIR, GIT_WORK_TREE or GIT_INDEX_FILE.
                        Reading, unsetting, or a mention in quoted text passes. (git-env-set-refused)
@@ -2044,33 +2043,17 @@ def git_names(root: str, *args):
     return [p for p in answer.stdout.split("\0") if p]
 
 
-def raw_names(fields, modes):
-    """The paths in a `git diff --raw -z` answer, each tracked path's `(old mode, new mode)` put in `modes`.
-    `fields` passes through when `modes` is None. None when git failed or its answer does not parse."""
-    if fields is None or modes is None:
-        return fields
-    heads, paths = fields[::2], fields[1::2]
-    if len(heads) != len(paths) or not all(head.startswith(":") and len(head.split()) == 5 for head in heads):
-        return None
-    for head, rel in zip(heads, paths):
-        modes[rel] = tuple(head[1:].split()[:2])
-    return paths
-
-
-def changed_paths(root: str, old: str, new=None, modes=None, top: str = ""):
+def changed_paths(root: str, old: str, new=None, top: str = ""):
     """The paths that differ from `old` (a commit or tree) to `new` (a commit), or to the working tree
-    and its untracked files when `new` is None; None when git failed. With a dict `modes`, the same one
-    diff is read in raw form, and `modes` gets each tracked path's `(old mode, new mode)`: '000000' is
-    absent and '160000' a gitlink. The working tree's mode is git's own, so `core.fileMode` holds.
+    and its untracked files when `new` is None; None when git failed.
     Every path is relative to the checkout's top. `git diff` prints that from any folder, but only
     with `--no-relative`: under `diff.relative=true` it names paths relative to the run folder, and
-    `bytes_at` and `text_at` would read the wrong file. `git ls-files --others` lists only the folder it
+    `text_at` would read the wrong file. `git ls-files --others` lists only the folder it
     runs in, relative to it, so it runs in `top` (the checkout's top, which `diff_violation` already
     read; it defaults to `root`)."""
-    form = ("--no-relative",) + (("--name-only",) if modes is None else ("--raw", "--no-abbrev"))
     if new is not None:
-        return raw_names(git_names(root, "diff", *form, "-z", "--no-renames", old, new), modes)
-    tracked = raw_names(git_names(root, "diff", *form, "-z", "--no-renames", old), modes)
+        return git_names(root, "diff", "--no-relative", "--name-only", "-z", "--no-renames", old, new)
+    tracked = git_names(root, "diff", "--no-relative", "--name-only", "-z", "--no-renames", old)
     fresh = git_names(top or root, "ls-files", "--others", "--exclude-standard", "-z")
     if tracked is None or fresh is None:
         return None
@@ -2085,66 +2068,6 @@ def merge_tree(root: str, ours: str, theirs: str):
     if answer is None or answer.returncode not in (0, 1):
         return None
     return answer.stdout.split("\0", 1)[0].strip() or None
-
-
-# A conflicted file's marker lines, as bytes so each line's ending stays. (guard_merge._MARKER_KINDS names the kind
-# of one line `git diff --check` flagged; this reads every marker line of a file, so it is a different rule.)
-CONFLICT_LABEL = re.compile(rb"^([<=>|])\1{6}(?: [^\r\n]*)?(?=\r?$)", re.M)
-
-
-def bytes_at(root: str, rev, rel: str, top: str = ""):
-    """The file's bytes at `rev` (a commit or tree), in the working tree when `rev` is None, and None when it
-    does not exist there or `rev` is '' (no commit). An empty file is b'', not None.
-    `rel` is relative to the top of the checkout, so the working tree is read from `top` (which
-    `diff_violation` already read). `root` is the folder the command runs in, and `top` defaults to it."""
-    if rev is None:
-        try:
-            with open(os.path.join(top or root, rel), "rb") as handle:
-                return handle.read()
-        except Exception:
-            return None
-    if not rev:
-        return None
-    answer = guard_core._git_bytes(root, "show", "--no-textconv", rev + ":" + norm(rel))
-    return answer.stdout if answer is not None and answer.returncode == 0 else None
-
-
-ABSENT_MODE = "000000"   # git's raw diff mode for a side that does not hold the path
-GITLINK_MODE = "160000"  # a submodule entry: a commit id, with no bytes in this repository
-
-
-def merge_resolved(root: str, old: str, new, paths, modes, unread=None, top: str = ""):
-    """The paths among `paths` that differ from git's merge tree `old` in more than conflict-marker
-    labels. `git merge-tree` labels its markers by commit (`>>>>>>> main`), `git merge` by branch, so a
-    conflicted file left as git wrote it differs in those labels alone.
-    `modes` holds each tracked path's `(old mode, new mode)` from `changed_paths`. A path with no entry is
-    an untracked file: absent from `old`, present in the working tree.
-    A path is kept when its mode or object type differs (a chmod +x, a symlink, a gitlink), when either side
-    is absent, or when its bytes differ. So a line ending, an invalid byte or an empty file added is a change.
-    Each marker line is compared by its kind only (7 of `<`, `=`, `>` or `|`, then an optional label).
-    A gitlink side is never read. A failed read keeps the path, and the path goes in `unread` when its
-    mode says the side holds it. So a failed read never drops a path.
-    Named limit: any working-tree conversion (`core.autocrlf`, `.gitattributes` text, eol or ident, an LFS
-    smudge) makes the bytes on disk differ from git's merge blob, so an open merge's untouched conflicted
-    test file is refused, never passed (debt `merge-resolved-worktree-convert`).
-    `top` is the checkout's top, where an open merge's working-tree file is read; it defaults to `root`.
-    Cost: in a merge only, one `git show` per differing path for the `old` side, and a second for a committed
-    merge's `new` side (an open merge reads the working-tree file instead). `own_changes` re-reads each
-    merge commit the agent made that HEAD still holds, so it repeats on each commit, push and stop."""
-    def bare(data):
-        return CONFLICT_LABEL.sub(lambda m: m.group(1) * 7, data)
-    kept = []
-    for rel in paths:
-        before, after = modes.get(rel, (ABSENT_MODE, ""))
-        datas = []
-        for rev, mode in ((old, before), (new, after)):
-            data = None if mode == GITLINK_MODE else bytes_at(root, rev, rel, top)
-            if data is None and mode not in (ABSENT_MODE, GITLINK_MODE) and unread is not None and rel not in unread:
-                unread.append(rel)
-            datas.append(data)
-        if before != after or None in datas or bare(datas[0]) != bare(datas[1]):
-            kept.append(rel)
-    return kept
 
 
 def upstream_kept(root: str, orig: str, onto: str):
@@ -2163,10 +2086,9 @@ def upstream_kept(root: str, orig: str, onto: str):
     return [p for p in replayed if p not in set(moved)]
 
 
-def own_changes(root: str, unread=None, top: str = ""):
+def own_changes(root: str, top: str = ""):
     """The agent's own change, as a list of `(old, new, paths, kind)`; None when git could not answer:
-    unknown, never clear. `new` None is the working tree, and `old` '' is no commit. A merge path whose
-    bytes could not be read is kept, and goes in the list `unread` when one is given.
+    unknown, never clear. `new` None is the working tree, and `old` '' is no commit.
 
     OWN (a builder's test path in it is refused):
       - each commit the agent made (HEAD reflog `commit`, `commit (amend)`, `commit (merge)`) that HEAD
@@ -2181,9 +2103,8 @@ def own_changes(root: str, unread=None, top: str = ""):
     the working tree or a commit of its own carries it, and that is refused.
     A plain cherry-pick or rebase pick, a clean merge, a reset, a checkout and a pull are other
     people's commits, and are not read.
-    `top` is the checkout's top, where untracked files are listed and an open merge's working-tree files
-    are read. A caller that already
-    read it passes it, so no git call is added; it defaults to `root`."""
+    `top` is the checkout's top, where untracked files are listed. A caller that already read it passes
+    it, so no git call is added; it defaults to `root`."""
     log = guard_core._git(root, "reflog", "show", "--format=%H %gs", "HEAD")
     gitdir = guard_core._git(root, "rev-parse", "--absolute-git-dir")
     merging = guard_core._git(root, "rev-parse", "-q", "--verify", "MERGE_HEAD")
@@ -2215,26 +2136,20 @@ def own_changes(root: str, unread=None, top: str = ""):
         old = merge_tree(root, *parents) if len(parents) == 2 else (parents[0] if parents else "")
         if old is None:
             return None
-        modes = {} if len(parents) == 2 else None
-        paths = (changed_paths(root, old, sha, modes) if old else
+        paths = (changed_paths(root, old, sha) if old else
                  git_names(root, "diff-tree", "--no-relative", "--root", "-r", "--name-only",
                            "--no-commit-id", "-z", "--no-renames", sha))
         if paths is None:
             return None
-        if modes is not None:
-            paths = merge_resolved(root, old, sha, paths, modes, unread, top)
         changes.append((old, sha, paths, kind))
     old = "HEAD"
     if merging.returncode == 0:
         old = merge_tree(root, "HEAD", merging.stdout.strip())
         if old is None:
             return None
-    modes = {} if merging.returncode == 0 else None
-    paths = changed_paths(root, old, modes=modes, top=top)
+    paths = changed_paths(root, old, top=top)
     if paths is None:
         return None
-    if modes is not None:
-        paths = merge_resolved(root, old, None, paths, modes, unread, top)
     replaying = merging.returncode != 0 and any(
         os.path.exists(os.path.join(gitdir.stdout.strip(), mark)) for mark in REPLAY_MARKS)
     changes.append((old, None, paths, NOTED if replaying else OWN))
@@ -2341,16 +2256,15 @@ def role_offences(root: str, top: str, role: str, paths, old: str, new=None):
     return found
 
 
-def diff_violation(root: str, role: str, unread=None):
+def diff_violation(root: str, role: str):
     """Judge the agent's own change (`own_changes`). Returns `(offence, noted)`: the first path the role
     may not change ('' when none, None when git could not answer: UNKNOWN, never clear), and the paths
-    a builder changed that are logged and never refused. Every offence of another role is logged only.
-    `unread` gets each merge path whose bytes could not be read; it is still judged."""
+    a builder changed that are logged and never refused. Every offence of another role is logged only."""
     top = guard_core._git(root, "rev-parse", "--show-toplevel")
     if top is None or top.returncode != 0:
         return None, []
     top = os.path.realpath(top.stdout.strip())
-    changes = own_changes(root, unread, top)
+    changes = own_changes(root, top)
     if changes is None:
         return None, []
     builder = role == BUILDER_ROLE
@@ -2387,13 +2301,9 @@ def builder_diff_reason() -> str:
 
 def diff_refusal(tool: str, role: str, root: str) -> None:
     """Judge a role's own change at commit or push. A builder's test change is refused (rule `builder-diff`,
-    with the undo route). A builder's logged change, any other role's offence, and a change git could not
-    answer for are logged for the reviewer, never refused. A merge path whose bytes could not be read is
-    logged as unread and still judged: a builder's test path in it is refused."""
-    unread = []
-    found, noted = diff_violation(root, role, unread)
-    for rel in unread:
-        record(tool, "noted", "role-diff-unread", rel)
+    with the undo route). A builder's logged change, any other role's offence, and a change that could
+    not be read are logged for the reviewer: a refusal on an unread change would be a false alarm."""
+    found, noted = diff_violation(root, role)
     if found is None:
         record(tool, "noted", "role-diff-unread", root)
     elif found and role == BUILDER_ROLE:
@@ -2420,10 +2330,7 @@ def judge_stop(payload) -> None:
     if is_worktree(where) is False:
         record("SubagentStop", "noted", "role-diff-main-checkout", where)
         return
-    unread = []
-    found, noted = diff_violation(where, role, unread)
-    for rel in unread:
-        record("SubagentStop", "noted", "role-diff-unread", rel)
+    found, noted = diff_violation(where, role)
     if found != "" and payload.get("stop_hook_active"):
         record("SubagentStop", "noted", "role-diff-unresolved", found or "unread")
     elif found is None:

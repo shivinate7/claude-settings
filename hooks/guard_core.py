@@ -19,7 +19,7 @@ from datetime import datetime
 
 # No try/except: a guard copy without git_reads.py judges nothing, so it fails closed (guard.py).
 from git_reads import (  # noqa: F401
-    PROCESS_START_UNREADABLE, SESSION_LIVE_TOLERANCE_MS, _common_dir, _git, _git_bytes, _inside_work_tree,
+    PROCESS_START_UNREADABLE, SESSION_LIVE_TOLERANCE_MS, _common_dir, _git, _inside_work_tree,
     _path_identity, _process_start_ms, _process_start_ms_windows, _under_by_identity,
     branch_cherry_empty, branch_is_ancestor, branch_is_empty, branch_on_remote, branch_proof,
     clone_checkouts, dirty_paths_are_pushed_copies, git_common_dir, is_worktree, porcelain,
