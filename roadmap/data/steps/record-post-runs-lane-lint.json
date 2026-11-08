@@ -1,0 +1,11 @@
+{
+  "title": "merge --review-record runs lane-lint on the reviewed head and refuses the record on FAIL",
+  "phase": "now",
+  "status": "doing",
+  "order": 269.21,
+  "owner": "coordinator",
+  "lane": "session_013NEJKz26y1pT4XskPQbQbz",
+  "why": "A review record posted on a head that fails the lane's own checks sends a red PR to the batch, and CI then turns the batch red.",
+  "note": "Topic merge-tool. Replaces step record-push-runs-catalog-check: merge --lane-lint already runs the hook catalog check, so the gap is that the record post runs no lane-lint (coordinator, 19:43 CST Nov 7). Incident: #1687 got a review record and went to runner 8 with the hook catalog check red.",
+  "updatedAt": "2026-11-07T19:43:00-06:00"
+}
