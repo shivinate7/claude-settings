@@ -11,7 +11,7 @@ from guard_core import (
     REDIRECT, _expanded, _resolved, _split_heredocs, _strip_heredoc_bodies_unconditionally, _walk_heredocs,
     basename, dir_before_segment, is_powershell, norm, resolve_command, segment_tokens, split_segments,
 )
-from guard_env import _quoted_words, _substitutions
+from guard_env import _quoted_words
 
 
 # ------------------------------------------------------------------ the frozen paths
@@ -926,47 +926,32 @@ def python_body_is_text(body: str) -> bool:
     return True
 
 
-_PY_ARGUMENT = re.compile(r"-|-[BEIORSbdqsuv]+|<<.*")
+_PY_ARGUMENT = re.compile(r"-|-[BEIORSbdqsuv]+|<<-?[A-Za-z_]\w*")
 
 
-def _python_feeds_on(header: str) -> bool:
-    """True when the one command on HEADER that holds `<<` is a python that reads its program from the
-    heredoc (`python3 -`, plain flags only) and whose output goes to no pipe. A pipe after it, a redirect,
-    a script file or `-c` is not: the output of a quoted body can be a shell line that a later stage runs."""
+def _python_header_alone(raw: str, header: str) -> bool:
+    """True when RAW, with its heredoc bodies stripped, is the one line HEADER, and that line is one
+    segment: a python that reads its program from the heredoc, with plain flags only. A pipe, a redirect,
+    `;`, `&&`, `&`, `$(`, a backtick, `{`, `(`, a function, a loop or any other line fails, since a shell
+    may run what the body prints."""
+    if [line for line in _strip_heredoc_bodies_unconditionally(raw).split("\n") if line.strip()] != [header]:
+        return False
     ends = []
     segments = split_segments(header, ends)
-    holding = [at for at, segment in enumerate(segments) if "<<" in segment]
-    tokens = segment_tokens(segments[holding[0]]) if len(holding) == 1 else []
-    index = resolve_command(tokens) if tokens else None
-    return (index is not None and bool(_PY_COMMAND.match(basename(tokens[index])))
-            and all(_PY_ARGUMENT.fullmatch(word) for word in tokens[index + 1:])
-            and ends[holding[0]] in ("", ";", "&&", "||", "&"))
+    tokens = segment_tokens(segments[0]) if len(segments) == 1 and ends == [""] else None
+    return (bool(tokens) and bool(_PY_COMMAND.match(basename(tokens[0])))
+            and all(_PY_ARGUMENT.fullmatch(word) for word in tokens[1:])
+            and sum(word.startswith("<<") for word in tokens) == 1)
 
 
-# The extensions of a file a shell or an interpreter can run. A python body that writes one of these, a name
-# with no extension, or a name it cannot read, stays in view: its strings may be the script's lines.
-_PY_RUNNABLE_EXTENSIONS = frozenset((".sh", ".bash", ".zsh", ".ps1", ".py", ".pl", ".rb"))
+# The extensions of a file that holds text a shell does not run. A python body that writes any other name,
+# a name with no extension, or a name it cannot read, stays in view: its strings may be a script's lines.
+_PY_TEXT_EXTENSIONS = frozenset((".json", ".md", ".txt", ".csv"))
 
 
-def _could_run_as_script(path: str) -> bool:
-    name = basename(path)
-    return not name or os.path.splitext(name)[1].lower() in _PY_RUNNABLE_EXTENSIONS or "." not in name.lstrip(".")
-
-
-def _heredoc_header_in_substitution(raw: str, header: str) -> bool:
-    """True when the heredoc header line HEADER sits inside a command or process substitution of RAW, or
-    holds one. A shell runs or reads what a substitution prints, so the body's output is not for the terminal."""
-    if re.search(r"[$<>]\(|`", header):
-        return True
-    texts, too_deep = _substitutions(_strip_heredoc_bodies_unconditionally(raw))   # a body's quote marks hide no `$(`
-    return too_deep or any(header in text for text, _message in texts[:-1])
-
-
-def _python_writes_a_named_file(body: str, rest: str) -> bool:
-    """True when the parsed BODY writes a file that could run as a script (`_could_run_as_script`), a file
-    that a word of REST (the command without the body) names, or a file whose path `_py_paths` cannot read.
-    A body that writes `x.sh`, or writes `x.json` while a later line runs `sh x.json`, makes its strings
-    shell lines, so it stays in view."""
+def _python_writes_text_files_only(body: str) -> bool:
+    """True when every file the parsed BODY writes (`_py_written`) has a literal name that ends in one of
+    `_PY_TEXT_EXTENSIONS`. A body that does not parse is not."""
     import ast
     import textwrap
     try:
@@ -975,40 +960,33 @@ def _python_writes_a_named_file(body: str, rest: str) -> bool:
         for call, expression in _py_written(tree, env_at):
             paths = _py_paths(expression, env_at(call))
             if not paths or any(
-                    _could_run_as_script(path)
-                    or re.search(r"(?<![\w.-])" + re.escape(basename(path)) + r"(?![\w-])", rest) for path in paths):
-                return True
+                    os.path.splitext(basename(path))[1].lower() not in _PY_TEXT_EXTENSIONS for path in paths):
+                return False
     except Exception:
-        return True   # unread: the body stays in view
-    return False
+        return False   # unread: the body stays in view
+    return True
 
 
 def drop_text_python_bodies(raw: str) -> str:
-    """RAW with the lines of each quoted python heredoc body that is text (`python_body_is_text`) dropped,
-    for a rule that reads shell lines. The header, the closing line and every other body stay. A body
-    drops only when all three readings of the walk (bash's, the contraction one, main's) give it the same
-    lines, its header line holds no other heredoc, and it writes no file that the rest of the command names."""
+    """RAW with the lines of a quoted python heredoc body dropped, for a rule that reads shell lines. It
+    drops only when RAW is that one heredoc and nothing else (`_python_header_alone`), the body is text
+    (`python_body_is_text`), it writes only text files (`_python_writes_text_files_only`), and all three
+    readings of the walk (bash's, the contraction one, main's) give the same one body. Else RAW is kept."""
     if "<<" not in raw:
         return raw
-    walks = []   # (spans, bodies) of each reading
+    walks = []   # (span, body) of each reading
     for contractions, legacy in ((False, False), (True, False), (False, True)):
         spans = []
         _, bodies, unclosed = _walk_heredocs(raw, contractions, legacy, body_spans=spans)
-        if unclosed:
+        if unclosed or len(bodies) != 1:
             return raw
-        walks.append((spans, bodies))
-    spans, bodies = walks[0]
-    agreed = [{(span, body[1]) for span, body in zip(*walk)} for walk in walks]
-    lines, drop = raw.split("\n"), set()
-    for (quote, body, header), span in zip(bodies, spans):
-        if (quote and all((span, body) in same for same in agreed)
-                and sum(other == header for _q, _b, other in bodies) == 1
-                and _python_feeds_on(header) and python_body_is_text(body)
-                and not _heredoc_header_in_substitution(raw, header)
-                and not _python_writes_a_named_file(
-                    body, "\n".join(line for at, line in enumerate(lines) if not span[0] <= at < span[1]))):
-            drop.update(range(*span))
-    return "\n".join(line for at, line in enumerate(lines) if at not in drop) if drop else raw
+        walks.append((spans[0], bodies[0]))
+    span, (quote, body, header) = walks[0]
+    if (quote and all(walk == walks[0] for walk in walks)
+            and _python_header_alone(raw, header) and python_body_is_text(body)
+            and _python_writes_text_files_only(body)):
+        return "\n".join(line for at, line in enumerate(raw.split("\n")) if not span[0] <= at < span[1])
+    return raw
 
 
 _JS_STR = r"""(?:'([^'\n]*)'|"([^"\n]*)"|`([^`$]*)`|([A-Za-z_$][\w$]*)|path\s*\.\s*(?:join|resolve)\s*\(([^()]*)\))"""
