@@ -916,7 +916,9 @@ def _name_filters(words) -> tuple:
     """The file-name globs that limit what a `find` or `grep` segment reads: the values of `-name`, or of
     `--include`, so a walk of its folder roots counts only the files it reaches. () when there is none, and
     for a `find` that holds `-o`, `!`, `-not` or a group, which can widen or invert what `-name` picks, and
-    for a value that holds `$`, a backtick, `{` or `\\`. A `find` stops at its first `-exec`."""
+    for a value that holds `$` or a backtick, or a brace list of `_BRACE_LIMIT` words or more. A value's brace
+    list is several filters (`_brace_words`), and a backslash escape reads as its literal character, so a
+    walk counts a file that any of them matches. A `find` stops at its first `-exec`."""
     index = resolve_command(tuple(words))
     if index is None:
         return ()
@@ -939,7 +941,15 @@ def _name_filters(words) -> tuple:
             elif word == "--include" and at + 1 < len(args):
                 values.append(args[at + 1])
     values = [_unquoted(value) for value in values]
-    return () if any(re.search(r"[$`{\\]", value) for value in values) else tuple(values)
+    if any(re.search(r"[$`]", value) for value in values):
+        return ()
+    filters = []
+    for value in values:
+        variants = _brace_words(value)
+        if len(variants) >= _BRACE_LIMIT:
+            return ()
+        filters.extend(re.sub(r"\\(.)", r"\1", variant) for variant in variants)
+    return tuple(filters)
 
 
 def _dot_roots(roots, cwd: str, predicate, names=()) -> list:
