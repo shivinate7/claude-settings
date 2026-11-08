@@ -1256,10 +1256,10 @@ def pipe_at_line_end_runs_the_cd_in_a_subshell():
     ])
 
 
-def log_folders_after(shell, script, nested=()):
+def log_folders_after(shell, script, nested=(), name="log"):
     """Run script under shell in a fresh start folder that holds a folder x, and each folder in nested
     (a path under x, made before the script runs). Return the folders, named start, x or the nested
-    path, that hold a file named log once the script ends. The exit code is not read."""
+    path, that hold a file named name (log by default) once the script ends. The exit code is not read."""
     start = new_dir()
     x = os.path.join(start, "x")
     os.mkdir(x)
@@ -1269,7 +1269,7 @@ def log_folders_after(shell, script, nested=()):
         folders[os.path.join("x", rel)] = os.path.join(x, rel)
     subprocess.run([shell, "-c", script], cwd=start, stdin=subprocess.DEVNULL,
                    capture_output=True, timeout=20)
-    return {name for name, d in folders.items() if os.path.exists(os.path.join(d, "log"))}
+    return {folder for folder, d in folders.items() if os.path.exists(os.path.join(d, name))}
 
 
 @posix_case
@@ -1455,6 +1455,61 @@ def backslash_newline_inside_a_word_joins_the_word():
         got = log_folders_after(shell, "cd x && t\\\nee log")
         if got != {"x"}:
             problems.append(f"{shell}: cd x && t\\ ee log left the log in {sorted(got)}, want ['x']")
+    return problems
+
+
+@posix_case
+def apostrophe_in_a_comment_is_text_not_a_quote():
+    """27y. a lone apostrophe in a `# comment` is text: the backslash-newline after it is a continuation, so the log is watched at build.log, not at a path with a newline in it"""
+    repro = "# don't\nprintf hi > \\\nbuild.log\ngrep 'x' y"
+    problems = read_rows_problems([
+        ("# dont\nprintf hi > \\\nbuild.log\ngrep 'x' y", ["build.log"], []),  # control: the same lines with no apostrophe
+    ])
+    got, unresolved = read_with(load_module(), repro)
+    problems += expect(got == ["build.log"] and not unresolved,
+                       f"log watched at the wrong path {got!r} (unresolved {unresolved!r}), want ['build.log']")
+    for shell in ("/bin/sh", "/bin/bash"):  # the premise: both shells write build.log in the start folder
+        found = log_folders_after(shell, repro, name="build.log")
+        if found != {"start"}:
+            problems.append(f"{shell}: the repro wrote build.log in {sorted(found)}, want ['start']")
+    return problems
+
+
+@posix_case
+def backslash_newline_pairs_the_join_keeps_stay_text():
+    """27z. a backslash-newline stays text inside single quotes and $'...', at the end of a comment line, and after an escaped backslash; a # in quotes opens no comment"""
+    sw = load_module()
+    problems = read_rows_problems([
+        ("printf hi > a # note \\\ncd /x && printf hi > log", ["a", "/x/log"], []),  # a comment ends at its newline: the cd line is a new command
+        ("cd /x && echo a\\\\\ncd b && printf hi > log", ["/x/b/log"], []),  # an escaped backslash, then a newline, ends the command
+        ('cd /x && echo "#" \\\ncd b && printf hi > log', ["/x/log"], []),  # a # in double quotes is no comment: the pair goes, so cd b is an argument of echo
+        ("cd /x && echo '#' \\\ncd b && printf hi > log", ["/x/log"], []),  # the same # in single quotes
+        ("printf hi > 'lo\\\ng'", ["lo\\\ng"], []),  # inside single quotes the pair is text: the file bash writes has the newline in its name
+    ])
+    join = getattr(sw, "_join_continuations", None)  # the reader names no $ word, so the join's text is the only view of $'...'
+    if join is None:
+        problems.append("no _join_continuations: the $'...' pin has no join text to read")
+    else:
+        text = "printf hi > $'lo\\\ng'"
+        if join(text) != text:
+            problems.append(f"the join dropped the pair in {text!r}: bash keeps a backslash-newline inside $'...' as text")
+    premises = [
+        ("printf hi > a # note \\\ncd x && printf hi > log", (), "a", {"start"}),
+        ("printf hi > a # note \\\ncd x && printf hi > log", (), "log", {"x"}),
+        ("cd x && echo a\\\\\ncd b && printf hi > log", ("b",), "log", {"x/b"}),
+        ('cd x && echo "#" \\\ncd b && printf hi > log', ("b",), "log", {"x"}),
+        ("cd x && echo '#' \\\ncd b && printf hi > log", ("b",), "log", {"x"}),
+        ("printf hi > 'lo\\\ng'", (), "lo\\\ng", {"start"}),
+    ]
+    for script, nested, fname, want in premises:  # the premise: both shells put each file where the rows say
+        for shell in ("/bin/sh", "/bin/bash"):
+            got = log_folders_after(shell, script, nested=nested, name=fname)
+            if got != want:
+                problems.append(f"{shell}: {script!r} left {fname!r} in {sorted(got)}, want {sorted(want)}")
+    for shell, fname in (("/bin/sh", "$lo\\\ng"), ("/bin/bash", "lo\\\ng")):  # dash has no $'...': its word keeps the $
+        got = log_folders_after(shell, "printf hi > $'lo\\\ng'", name=fname)
+        if got != {"start"}:
+            problems.append(f"{shell}: the $'...' pair case left {fname!r} in {sorted(got)}, want ['start']")
     return problems
 
 
