@@ -236,6 +236,8 @@ Other tools, in `judge` order:
                        findings list passes. A Workflow call is judged with or without a model; one
                        whose agentType the scan cannot read passes. A reviewer call whose prompt the
                        scan cannot read is refused with BRIEF_UNREAD_REASON.
+                       The refusal names the refused line by its number in the brief (`line N`), the
+                       first label or item line of a report or the first verdict line, never its text.
                        An override lifts it. (reviewer-brief-blind)
   lane-effort-pin      deny. A `create_session` call tagged `cs-build:lane` whose prompt is
                        not exactly `/effort medium` (LANE_EFFORT), with no trimming. A lane tag is
@@ -2704,6 +2706,9 @@ BRIEF_BLIND_ROUND_RESULT = re.compile(r"\b[Rr]ound[ \t]+[Rr]esult\b")
 BRIEF_BLIND_REASON = ("A reviewer's brief holds a builder's report or a prior verdict, so the reviewer anchors on it. "
                       "Send the task, the diff or a pointer to it, and the governing rulings. For a later round, send the "
                       "prior findings as a list of file, line and claim, with no verdict (decision reviewer-brief-blind).")
+# The refusal names the refused line by its number and never by its text: a brief line may hold any fragment that
+# FORBIDDEN_IN_A_REASON forbids, and a long line would make the reason long.
+BRIEF_BLIND_LINE_REASON = " The refused line is line %d of the brief."
 
 
 def brief_blind_verdict_text(brief: str) -> str:
@@ -2716,15 +2721,26 @@ def brief_blind_verdict_text(brief: str) -> str:
         lambda m: " " if _BRIEF_BLIND_LINE_END.match(text, m.end()) else m.group(0), text)
 
 
+def brief_blind_hit(brief) -> tuple:
+    """(shape, line): the shape of a brief that a reviewer must not read, "report", "item" or "verdict", else "", and the
+    1-based number of the brief line that holds it (0 for none). A report or item is read at its first label or item line.
+    The verdict scan runs line by line, which reads the same as the whole text: no step crosses a newline. One pass."""
+    if not isinstance(brief, str):
+        return "", 0
+    if len(set(BRIEF_BLIND_LABELS.findall(brief))) >= 2:
+        return "report", brief.count("\n", 0, BRIEF_BLIND_LABELS.search(brief).start()) + 1
+    item = BRIEF_BLIND_ITEM.search(brief)
+    if item:
+        return "item", brief.count("\n", 0, item.start()) + 1
+    for number, line in enumerate(brief.split("\n"), 1):
+        if BRIEF_BLIND_VERDICT.search(brief_blind_verdict_text(line)):
+            return "verdict", number
+    return "", 0
+
+
 def brief_blind_shape(brief) -> str:
     """The shape of a brief that a reviewer must not read: "report", "item" or "verdict", else ""."""
-    if not isinstance(brief, str):
-        return ""
-    if len(set(BRIEF_BLIND_LABELS.findall(brief))) >= 2:
-        return "report"
-    if BRIEF_BLIND_ITEM.search(brief):
-        return "item"
-    return "verdict" if BRIEF_BLIND_VERDICT.search(brief_blind_verdict_text(brief)) else ""
+    return brief_blind_hit(brief)[0]
 
 
 def brief_blind_role(role) -> bool:
@@ -2732,14 +2748,15 @@ def brief_blind_role(role) -> bool:
     return isinstance(role, str) and role_key(role).rsplit(":", 1)[-1] in BRIEF_BLIND_ROLES
 
 
-def reviewer_brief_hit(tool: str, tool_input) -> str:
-    """The shape of the first reviewer brief in an Agent, Task or Workflow call that holds a report or a verdict, or "".
+def reviewer_brief_hit(tool: str, tool_input) -> tuple:
+    """(shape, line) of the first reviewer brief in an Agent, Task or Workflow call that holds a report or a verdict, or
+    ("", 0). The line is the refused line's number in that brief, 0 for BRIEF_UNREAD.
     A Workflow agent() call is read statically, with or without a model (spawn_inputs skips one with no model, so this
     reads script_agent_calls itself). A call whose agentType the scan cannot read passes: it never guesses the role. A
     reviewer call whose prompt it cannot read (a variable, or a template with `${...}`) returns BRIEF_UNREAD: the
     reviewer's brief cannot be shown blind, and the refusal is BRIEF_UNREAD_REASON."""
     if tool in SPAWN_TOOLS:
-        return brief_blind_shape(tool_input.get("prompt")) if brief_blind_role(tool_input.get("subagent_type")) else ""
+        return brief_blind_hit(tool_input.get("prompt")) if brief_blind_role(tool_input.get("subagent_type")) else ("", 0)
     if tool == "Workflow" and isinstance(tool_input.get("script"), str):
         for prompt, bodies in script_agent_calls(tool_input["script"]):
             keys, unseen = {}, set()
@@ -2749,12 +2766,12 @@ def reviewer_brief_hit(tool: str, tool_input) -> str:
             if "agentType" in unseen or ("..." in unseen and "agentType" not in keys):
                 continue
             if brief_blind_role(keys.get("agentType")):
-                shape = brief_blind_shape(prompt)
+                shape, line = brief_blind_hit(prompt)
                 if not shape and (prompt is None or "\x00" in prompt):  # a template's `${...}` reads as \x00
                     shape = BRIEF_UNREAD
                 if shape:
-                    return shape
-    return ""
+                    return shape, line
+    return "", 0
 
 
 # THE ROLE MODEL ROW (rule agent-role-model, decision agent-model-cap). The model per role is read at each spawn from the
@@ -4994,10 +5011,11 @@ def judge(payload) -> None:
         refuse(tool, "deny", "lane-repo-tag", LANE_REPO_TAG_REASON % (REPO_TAG + (lane_repo or "<owner>/<name>")), lane_tags)
 
     # 9b2c. A reviewer's brief holds no builder report and no verdict line. An override lifts it: not in never_lifted.
-    brief_shape = reviewer_brief_hit(tool, tool_input)
+    brief_shape, brief_line = reviewer_brief_hit(tool, tool_input)
     if brief_shape:
         refuse(tool, "deny", "reviewer-brief-blind",
-               BRIEF_UNREAD_REASON if brief_shape == BRIEF_UNREAD else BRIEF_BLIND_REASON, brief_shape)
+               BRIEF_UNREAD_REASON if brief_shape == BRIEF_UNREAD
+               else BRIEF_BLIND_REASON + BRIEF_BLIND_LINE_REASON % brief_line, brief_shape)
 
     # 9b3. The role model row: a spawn above its role's row, or with no model where nothing else sets one, is refused.
     # The override lifts the above-row refusal and never the no-model one (never_lifted).
