@@ -875,18 +875,27 @@ def waiver_report(next_line, done=TEST_AUTHOR_DONE):
 
 class Background:
     """A spawn that runs in the background. `finish` is None while the agent runs. Otherwise it names the
-    record type the finish notice arrives as: 'queue-operation' or 'attachment'."""
+    record type the finish notice arrives as: 'queue-operation' or 'attachment'. `status` is the notice's
+    <status>, completed unless a case says otherwise."""
 
-    def __init__(self, spawn, finish=None):
+    def __init__(self, spawn, finish=None, status="completed"):
         self.spawn = spawn
         self.finish = finish
+        self.status = status
 
 
-def finish_record(use_id, kind):
+class Unanswered:
+    """A spawn whose call has no tool_result at all: the transcript holds the call and nothing after it."""
+
+    def __init__(self, spawn):
+        self.spawn = spawn
+
+
+def finish_record(use_id, kind, status="completed"):
     """A background agent's finish notice, in the record type it arrives as. Its text names the tool use
     and its status, as the real notice does."""
-    text = ("<task-notification>\n<tool-use-id>%s</tool-use-id>\n<status>completed</status>\n"
-            "</task-notification>" % use_id)
+    text = ("<task-notification>\n<tool-use-id>%s</tool-use-id>\n<status>%s</status>\n"
+            "</task-notification>" % (use_id, status))
     if kind == "attachment":
         return {"type": "attachment", "attachment": {"type": "queued_command", "prompt": text}}
     return {"type": "queue-operation", "operation": "enqueue", "content": text}
@@ -900,16 +909,19 @@ def background_records(bg):
     launch["toolUseResult"] = {"status": "async_launched", "agentId": "a" + uuid.uuid4().hex[:16]}
     records = [tool_use_msg("Agent", bg.spawn, tool_use_id=use_id), launch]
     if bg.finish:
-        records.append(finish_record(use_id, bg.finish))
+        records.append(finish_record(use_id, bg.finish, bg.status))
     return records
 
 
 def spawn_records(spawn):
     """The call and its result for one Agent spawn, under a tool_use id of its own, as a real transcript
     pairs them. `spawn` is the call's input, or (input, resolved_model) when the result names the model
-    the agent ran, or a Background for a spawn that runs in the background."""
+    the agent ran, a Background for a spawn that runs in the background, or an Unanswered for a call with
+    no result."""
     if isinstance(spawn, Background):
         return background_records(spawn)
+    if isinstance(spawn, Unanswered):
+        return [tool_use_msg("Agent", spawn.spawn, tool_use_id="tu_spawn_" + uuid.uuid4().hex[:8])]
     inp, resolved = spawn if isinstance(spawn, tuple) else (spawn, None)
     use_id = "tu_spawn_" + uuid.uuid4().hex[:8]
     result = tool_result_msg(use_id, resolved_model=resolved)
@@ -1322,15 +1334,46 @@ class DoneNamesModelsTests(unittest.TestCase):
     def test_dm_red_finished_background_builder_opus_blocks_after_attachment(self):
         self.assert_finished_background_builder_blocks("attachment")
 
-    def assert_finished_background_builder_blocks(self, finish):
-        """A background builder opus whose finish notice arrived as `finish` is not running, so Next's
-        "still running" waives nothing. The same builder, still running, is waived by its Next line."""
+    def test_dm_red_running_notice_keeps_background_builder_running(self):
+        done = "BUILT the guard, PR #5 (builder sonnet)"
+        # Control: a completed notice finishes the opus builder, so its Next line waives nothing. The notice
+        # pairs with the builder by its tool-use id.
+        finished = self.verdict(waiver_report("builder opus still running. Unstarted: none", done=done),
+                                [BUILDER_SONNET, Background(self.BUILDER_OPUS_R2, finish="queue-operation")])
+        assert_blocks(self, finished, "no model named for builder opus")
+        # Red: a notice whose status is running does not finish the builder, so Next still waives it.
+        running = self.verdict(waiver_report("builder opus still running. Unstarted: none", done=done),
+                               [BUILDER_SONNET, Background(self.BUILDER_OPUS_R2, finish="queue-operation",
+                                                           status="running")])
+        assert_no_model_block(self, running)
+
+    def test_dm_red_unanswered_builder_opus_is_finished_not_running(self):
+        done = "BUILT the guard, PR #5 (builder sonnet)"
+        # Control: Next names no role, so the opus builder is unnamed and blocks. That shows the call with no
+        # result is read as an opus spawn in the window.
+        unnamed = self.verdict(waiver_report("The tree check is next. Unstarted: none", done=done),
+                               [BUILDER_SONNET, Unanswered(self.BUILDER_OPUS_R2)])
+        assert_blocks(self, unnamed, "no model named for builder opus")
+        # Red: a call with no tool_result is finished, so Next's "still running" waives nothing.
+        out = self.verdict(waiver_report("builder still running. Unstarted: none", done=done),
+                           [BUILDER_SONNET, Unanswered(self.BUILDER_OPUS_R2)])
+        assert_blocks(self, out, "no model named for builder opus")
+
+    def test_dm_pin_killed_background_builder_opus_blocks_after_queue_op(self):
+        self.assert_finished_background_builder_blocks("queue-operation", status="killed")
+
+    def test_dm_pin_killed_background_builder_opus_blocks_after_attachment(self):
+        self.assert_finished_background_builder_blocks("attachment", status="killed")
+
+    def assert_finished_background_builder_blocks(self, finish, status="completed"):
+        """A background builder opus whose finish notice arrived as `finish` with `status` is finished, so
+        Next's "still running" waives nothing. The same builder, still running, is waived by its Next line."""
         done = "BUILT the guard, PR #5 (builder sonnet)"
         running = self.verdict(waiver_report("builder opus still running. Unstarted: none", done=done),
                                [BUILDER_SONNET, Background(self.BUILDER_OPUS_R2)])
         assert_no_model_block(self, running)
         finished = self.verdict(waiver_report("builder opus still running. Unstarted: none", done=done),
-                                [BUILDER_SONNET, Background(self.BUILDER_OPUS_R2, finish=finish)])
+                                [BUILDER_SONNET, Background(self.BUILDER_OPUS_R2, finish=finish, status=status)])
         assert_blocks(self, finished, "no model named for builder opus")
 
 
