@@ -25516,6 +25516,10 @@ HC_HOME = os.path.join(ROOT, "hc-home")           # a HOME folder, for the ~/.cl
 HC_NAMED_TEXT = "# Handoff\n\nOpen: item 46 (search pill clear).\n\n## Next\n\nCheck the page.\n"
 HC_BARE_TEXT = "# Handoff\n\nWaiting on the build.\n\n## Next\n\nCheck the page.\n"
 HC_BIG_LAST = "Note 1999: nothing to see here."   # the last line of HC_BIG, where an Edit lands
+HC_TWICE = os.path.join(ROOT, "hc-twice")         # a handoff whose phrase "(search pill clear)" occurs twice, once after item 46
+HC_TWICE_TEXT = "# Handoff\n\nNote (search pill clear).\nOpen: item 46 (search pill clear).\n\n## Next\n\nCheck the page.\n"
+HC_BADBYTE = os.path.join(ROOT, "hc-badbyte")     # a handoff with one byte that is not UTF-8
+HC_BADBYTE_TEXT = b"# Handoff\n\nWaiting on the STRAY build.\n\n## Next\n\nCheck the page.\n"
 
 
 def hc_handoff(config):
@@ -25541,10 +25545,24 @@ def _build_hc_big():
     write(hc_handoff(HC_BIG), "\n".join(lines) + "\n")
 
 
+def _build_hc_twice():
+    write(hc_handoff(HC_TWICE), HC_TWICE_TEXT)
+
+
+def _build_hc_badbyte():
+    # one byte that is not UTF-8, so the handoff cannot be read as text; the edited phrase is still there
+    path = hc_handoff(HC_BADBYTE)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "wb") as handle:
+        handle.write(HC_BADBYTE_TEXT.replace(b"STRAY", b"\xff"))
+
+
 lazy_fixture([HC_CLEAN], _build_hc_clean)
 lazy_fixture([HC_NAMED], _build_hc_named)
 lazy_fixture([HC_BARE], _build_hc_bare)
 lazy_fixture([HC_BIG], _build_hc_big)
+lazy_fixture([HC_TWICE], _build_hc_twice)
+lazy_fixture([HC_BADBYTE], _build_hc_badbyte)
 
 
 def hc_add(name, expected, config, tool, tool_input, carries=(), **kw):
@@ -25595,6 +25613,23 @@ hc_add("handoff-cite: an Edit at the end of a long handoff that adds a named ite
 hc_add("handoff-cite: an Edit at the end of a long handoff that adds bare items 47 and 48 is refused", "deny", HC_BIG,
        "Edit", {"file_path": hc_handoff(HC_BIG), "old_string": HC_BIG_LAST,
                 "new_string": HC_BIG_LAST + "\nThen items 47 and 48 wait."}, carries="47")
+
+# The capital form is read in a Write (the one case red on the old code). A MultiEdit, whose bare cite is only in the
+# second edit, and an Edit whose replace_all strips the name from a bare item 46 (the name is on the second of two
+# matches, so a single replace would leave it named) are green on the old code; each has a mutant that must flip it.
+hc_add("handoff-cite: a Write of the handoff with a capital Item 46 is refused", "deny", HC_CLEAN, "Write",
+       {"file_path": hc_handoff(HC_CLEAN), "content": "Item 46 is open.\n"}, carries="46")
+hc_add("handoff-cite: a MultiEdit whose bare item 46 is in its second edit is refused", "deny", HC_BARE, "MultiEdit",
+       {"file_path": hc_handoff(HC_BARE), "edits": [
+           {"old_string": "Waiting on the build.", "new_string": "Waiting on the build, then the page."},
+           {"old_string": "Check the page.", "new_string": "Check item 46 after the build."}]}, carries="46")
+hc_add("handoff-cite: an Edit with replace_all that strips the name from a bare item 46 is refused", "deny", HC_TWICE,
+       "Edit", {"file_path": hc_handoff(HC_TWICE), "old_string": "(search pill clear)", "new_string": "(name)",
+                "replace_all": True}, carries="46")
+# Fail open: the handoff holds one byte that is not UTF-8, so the check cannot read it and the call passes.
+hc_add("handoff-cite: an Edit of a handoff with an unreadable byte is allowed, since the check cannot read it", "allow",
+       HC_BADBYTE, "Edit", {"file_path": hc_handoff(HC_BADBYTE), "old_string": "Check the page.",
+                            "new_string": "Check item 46 after the build."}, silent=True)
 
 
 # =========================================================================== the machine-load brake

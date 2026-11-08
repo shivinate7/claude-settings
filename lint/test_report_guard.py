@@ -850,7 +850,9 @@ class ItemCiteTests(unittest.TestCase):
 
     An item cite is `item <n>`, `items <n> and <m>` or `items <n>, <m>`, with an optional `page` or
     `waiting-page` before it. The first time a number appears in a reply, it needs its short name beside
-    it. A later cite of that number needs none. The text matrix lives here, on bare_cite. The Stop cases
+    it. A later cite of that number needs none. On a reply, a bare `item <n>` is read only when the reply
+    also names `page`, `waiting page` or `triage` outside code (the scope ruling); `page item <n>` and
+    `waiting-page item <n>` are always read. The text matrix lives here, on bare_cite. The Stop cases
     prove only the wiring.
     """
 
@@ -859,26 +861,28 @@ class ItemCiteTests(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory(dir=RUN_FOLDER)
         self.addCleanup(self.tmp.cleanup)
 
-    def assert_refused(self, text):
+    def assert_refused(self, text, number=None):
         got = rg.bare_cite(text)
         self.assertTrue(got, "item cite with no short name must be refused: %r gave no cite" % text)
+        if number is not None:
+            self.assertEqual(got, number, "the refused cite must be item %s: %r gave %r" % (number, text, got))
 
     def assert_passes(self, text):
         got = rg.bare_cite(text)
         self.assertEqual(got, "", "item cite with its short name must pass: %r gave %r" % (text, got))
 
-    # refused: a number with no name beside it
+    # refused: a number with no name beside it, on a reply that names triage (the scope ruling)
     def test_icite_red_bare_item_number_is_refused(self):
-        self.assert_refused("item 46")
+        self.assert_refused("Triage left item 46 open.", "46")
 
     def test_icite_red_bare_items_pair_is_refused(self):
-        self.assert_refused("items 46 and 47")
+        self.assert_refused("Triage left items 46 and 47 open.", "46")
 
     def test_icite_red_bare_items_list_is_refused(self):
-        self.assert_refused("items 46, 47")
+        self.assert_refused("Triage left items 46, 47 open.", "46")
 
     def test_icite_red_one_bare_number_in_a_pair_is_refused(self):
-        self.assert_refused("items 46 (search pill clear) and 47")
+        self.assert_refused("Triage left items 46 (search pill clear) and 47 open.", "47")
 
     def test_icite_red_page_prefix_does_not_hide_a_bare_cite(self):
         for text in ("page item 46", "waiting-page item 46"):
@@ -886,58 +890,118 @@ class ItemCiteTests(unittest.TestCase):
                 self.assert_refused(text)
 
     def test_icite_red_first_bare_cite_is_refused_when_a_later_one_is_named(self):
-        self.assert_refused("Open item 46. Later, item 46 (search pill clear).")
+        self.assert_refused("Triage left item 46 open. Later, item 46 (search pill clear).", "46")
 
     def test_icite_red_comment_opener_in_a_code_span_does_not_hide_a_bare_cite(self):
-        self.assert_refused("Note `/* open` and item 46 waits.")
+        self.assert_refused("Triage left a note `/* open` and item 46 waits.", "46")
 
     def test_icite_red_lone_quote_does_not_hide_a_bare_cite(self):
-        self.assert_refused("Don't skip item 46.")
+        self.assert_refused("Triage: don't skip item 46.", "46")
 
     def test_icite_red_lone_backtick_does_not_hide_a_bare_cite(self):
-        self.assert_refused("Use ` then item 46 waits.")
+        self.assert_refused("Triage: use ` then item 46 waits.", "46")
 
     def test_icite_red_multi_line_template_literal_does_not_hide_a_bare_cite(self):
-        self.assert_refused("const s = `a\nb`; then item 46 waits.")
+        self.assert_refused("Triage left: const s = `a\nb`; then item 46 waits.", "46")
 
     def test_icite_red_bare_cite_at_the_end_of_a_long_reply_is_refused(self):
-        # the full-size state: the bare cite is the last of 2000 lines
+        # the full-size state: the scope word is on line 1, the bare cite is the last of 2000 lines
         long_reply = "\n".join("Line %d of the report, no cite here." % n for n in range(2000))
-        self.assert_refused(long_reply + "\nThen item 46 waits.")
+        self.assert_refused("Triage left the report open.\n" + long_reply + "\nThen item 46 waits.", "46")
+
+    # the scope ruling: a bare item cite on a reply is read only when the reply names page or triage outside code
+    def test_icite_red_bare_item_in_a_cart_sentence_passes(self):
+        self.assert_passes("Fixed the cart so item 2 no longer renders twice.")
+
+    def test_icite_red_bare_item_in_a_list_sentence_passes(self):
+        self.assert_passes("Reordered the list so item 1 comes first.")
+
+    def test_icite_red_scope_word_in_a_code_span_does_not_turn_scope_on(self):
+        self.assert_passes("Run `triage` first; item 46 waits.")
+
+    def test_icite_red_scope_word_in_a_fence_does_not_turn_scope_on(self):
+        self.assert_passes("```\ntriage\n```\nitem 46 waits.")
+
+    def test_icite_red_homepage_does_not_turn_scope_on(self):
+        self.assert_passes("The homepage shows item 46 waiting.")
+
+    def test_icite_green_page_word_refuses_a_bare_item(self):
+        self.assert_refused("page item 46 is open.", "46")
+
+    def test_icite_green_lone_quote_before_a_scope_word_still_refuses(self):
+        self.assert_refused("Don't triage item 46.", "46")
+
+    def test_icite_green_lone_backtick_before_a_scope_word_still_refuses(self):
+        self.assert_refused("Use ` then triage item 46.", "46")
+
+    # capital forms are read: the same cite with a capital I or S is refused
+    def test_icite_red_capital_item_after_a_triage_label_is_refused(self):
+        self.assert_refused("Triage: Item 46 is open.", "46")
+
+    def test_icite_red_capital_items_pair_after_a_triage_label_is_refused(self):
+        self.assert_refused("Triage: Items 46 and 47 are open.", "46")
+
+    # a list tail joins a number only to a plural head: a year or a count after a singular item is not a cite
+    def test_icite_red_year_after_a_named_item_is_not_a_cite(self):
+        self.assert_passes("Triage owner: item 137 (pick a), 2026-11-01 18:38 CST.")
+
+    def test_icite_red_tail_of_a_singular_item_is_not_a_cite(self):
+        self.assert_passes("page item 46 (search pill clear), 3 times")
+
+    def test_icite_green_plural_list_tail_joins_a_bare_number(self):
+        self.assert_refused("Triage left items 46 (search pill clear), 47 open.", "47")
+
+    # a backticked record name counts as the record; a backticked code span does not
+    def test_icite_red_backticked_record_name_counts_as_the_record(self):
+        self.assert_passes("triage: `precompact-handoff.md`, item 8")
+
+    def test_icite_green_backticked_code_is_not_a_record_name(self):
+        self.assert_refused("triage: `make`, item 8", "8")
+
+    # a quoted name after a colon, and a name in the next table cell, are names
+    def test_icite_red_quoted_name_after_a_colon_passes(self):
+        self.assert_passes('page item 180: "align all"')
+
+    def test_icite_red_table_cell_name_passes(self):
+        self.assert_passes("| page item 46 | search pill clear |")
+
+    def test_icite_green_empty_table_cell_is_not_a_name(self):
+        self.assert_refused("| page item 46 | |", "46")
 
     # passes: the name sits beside the number, or the number is a later cite of a named one
     def test_icite_green_named_cites_pass(self):
-        for text in ("item 46 (search pill clear)", "page item 382 (merge-unreviewed-head)",
-                     "item 46, search pill clear", "items 46 (search pill clear) and 47 (stale head record)",
-                     "search pill clear (item 46)"):
+        for text in ("Triage left item 46 (search pill clear)", "page item 382 (merge-unreviewed-head)",
+                     "Triage left item 46, search pill clear",
+                     "Triage left items 46 (search pill clear) and 47 (stale head record)",
+                     "Triage left search pill clear (item 46)"):
             with self.subTest(text=text):
                 self.assert_passes(text)
 
     def test_icite_green_later_cite_of_a_named_number_passes(self):
-        self.assert_passes("item 46 (search pill clear) ... later item 46 again")
+        self.assert_passes("Triage left item 46 (search pill clear) ... later item 46 again")
 
     def test_icite_green_record_named_cites_pass(self):
-        for text in ("precompact-handoff, item 9", "docs/decisions/precompact-handoff.md, item 8",
-                     "c193-sizes.md item 3"):
+        for text in ("Triage left precompact-handoff, item 9", "Triage left docs/decisions/precompact-handoff.md, item 8",
+                     "Triage left c193-sizes.md item 3"):
             with self.subTest(text=text):
                 self.assert_passes(text)
 
     def test_icite_green_skipped_text_is_not_a_cite(self):
-        for text in ("Use `item 46` as the label.", "```\nitem 46\n```",
-                     "```\nrun item 46\nand item 47\n```",
+        for text in ("Triage left: use `item 46` as the label.", "Triage left.\n```\nitem 46\n```",
+                     "Triage left.\n```\nrun item 46\nand item 47\n```",
                      "See [item 46](https://x.test/p/46) for the page.",
-                     "Open https://x.test/items-46 now."):
+                     "Triage left open https://x.test/items-46 now."):
             with self.subTest(text=text):
                 self.assert_passes(text)
 
     def test_icite_green_empty_and_numberless_text_pass(self):
-        for text in ("", "The item count went from 46 to 47.", "Items were fine and done."):
+        for text in ("", "Triage: the item count went from 46 to 47.", "Triage: items were fine and done."):
             with self.subTest(text=text):
                 self.assert_passes(text)
 
     # the Stop hook, through main: the wiring of the same check
     def test_icite_red_bare_item_in_a_report_blocks_through_main(self):
-        reply = "Per item 46.\n\n> **Done** BUILT guard, PR #226\n> **Next** none"
+        reply = "Triage left item 46 open.\n\n> **Done** BUILT guard, PR #226\n> **Next** none"
         run = landed_run(self.tmp.name, reply)
         self.assertEqual(run.returncode, 0, run.stderr)
         self.assertTrue(run.stdout.strip(), "the Stop hook stayed silent on a bare item cite")
@@ -947,7 +1011,7 @@ class ItemCiteTests(unittest.TestCase):
         self.assertIn("46", out["reason"])
 
     def test_icite_green_named_item_in_a_report_passes_through_main(self):
-        reply = "Per item 46 (search pill clear).\n\n> **Done** BUILT guard, PR #226\n> **Next** none"
+        reply = "Triage left item 46 (search pill clear).\n\n> **Done** BUILT guard, PR #226\n> **Next** none"
         run = landed_run(self.tmp.name, reply)
         self.assertEqual(run.returncode, 0, run.stderr)
         self.assertEqual(run.stdout.strip(), "", "the Stop hook blocked a named item cite: %s" % run.stdout[:200])
@@ -1240,7 +1304,7 @@ class RewriteAfterMissingReportTests(unittest.TestCase):
         self.assertEqual(out.get("decision"), "block")
         self.assertIn("Answered: no permission rule can lift it.", out["reason"])
         self.missing_report_block()
-        self.assertIsNone(self.stop("Item 143 answered in chat at 17:25 CST.\n\n" + self.GOOD, True))
+        self.assertIsNone(self.stop("Item 143 (stale pill) answered in chat at 17:25 CST.\n\n" + self.GOOD, True))
 
     def test_rw_no_prior_missing_report_block_stays_quiet(self):
         bad = "> **Done** BUILT the guard, PR #5\n> **Next** merge"
@@ -4551,7 +4615,7 @@ class AnsweredNeedsSourceTests(unittest.TestCase):
         self.assert_allowed("The owner answers in chat. Answering takes a minute, and the answer is pending.")
 
     def test_an_green_landed_turn_with_a_cited_line_passes(self):
-        reply = "Item 143 answered in chat at 17:25 CST.\n\n> **Done** BUILT abc123\n> **Next** ship it"
+        reply = "Item 143 (stale pill) answered in chat at 17:25 CST.\n\n> **Done** BUILT abc123\n> **Next** ship it"
         self.assert_allowed(reply, landed=True)
 
     def test_an_green_stop_hook_active_stays_quiet(self):
