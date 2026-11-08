@@ -972,6 +972,51 @@ def case_main_prints_the_config_report():
           and dw.UNKNOWN_PREFIX not in message, result.stdout)
 
 
+# A PowerShell call that writes a project config file, its text holding `\"` before the write. The
+# PowerShell reading finds the write, and the bash reading takes `\"` as an escaped quote and hides
+# it. main() must name the config file, as it does for an Edit above.
+def case_main_powershell_config_report():
+    repo = make_repo("main_powershell_config_report")
+    write(os.path.join(repo, "src", "app.py"), "print('hello')\n")
+    commit_all(repo)
+    command = 'echo "C:\\" ; Set-Content .claude/settings.json x ; echo \\"D"'
+    call = {"type": "tool_use", "name": "PowerShell", "input": {"command": command}}
+    records = [
+        human_record("tune the project settings", T0),
+        assistant_record(tool_use=call),
+        assistant_record(text="done"),
+    ]
+    path = write_transcript(repo, records)
+    result = _run_main({"transcript_path": path, "cwd": repo})
+    check("main_powershell_config_report: exit 0", result.returncode == 0, result.returncode)
+    try:
+        message = json.loads(result.stdout.strip()).get("systemMessage", "")
+    except Exception:
+        message = ""
+    check("main_powershell_config_report: names the config file",
+          "Config files changed this turn" in message and "settings.json" in message, result.stdout)
+
+
+# The same shape writing a file that is not project config: no config line. A reading that calls
+# every PowerShell write a config write fails here.
+def case_main_powershell_unrelated_write_names_no_config():
+    repo = make_repo("main_powershell_unrelated_write")
+    write(os.path.join(repo, "src", "app.py"), "print('hello')\n")
+    commit_all(repo)
+    command = 'echo "C:\\" ; Set-Content notes.txt x ; echo \\"D"'
+    call = {"type": "tool_use", "name": "PowerShell", "input": {"command": command}}
+    records = [
+        human_record("note the result", T0),
+        assistant_record(tool_use=call),
+        assistant_record(text="done"),
+    ]
+    path = write_transcript(repo, records)
+    result = _run_main({"transcript_path": path, "cwd": repo})
+    check("main_powershell_unrelated_write: exit 0", result.returncode == 0, result.returncode)
+    check("main_powershell_unrelated_write: no config line",
+          "Config files changed" not in result.stdout, result.stdout)
+
+
 def case_main_missing_transcript():
     repo = make_repo("main_missing_transcript")
     result = _run_main({"transcript_path": os.path.join(repo, "nope.jsonl"), "cwd": repo})
@@ -1961,6 +2006,8 @@ def main():
     case_token_t10_undecodable_file_is_an_error()
     case_main_ordinary_turn()
     case_main_prints_the_config_report()
+    case_main_powershell_config_report()
+    case_main_powershell_unrelated_write_names_no_config()
     case_main_missing_transcript()
     case_main_stop_hook_active_stays_quiet()
 
