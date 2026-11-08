@@ -2421,13 +2421,17 @@ def lane_head_and_base(root, target, base):
         raise Stop(f"cannot find {target} as a commit or ref in this clone or on origin {LANE_LINT_CITE}")
     return head, base
 
-def ci_job_run(wt, *args):
+def ci_job_run(wt, *args, body_file=None):
     """Run `bin/ci-job <args>` in the tree `wt`, the one home of that run: lane_lint and the draft step's ready checks call it.
+    `body_file` names a UTF-8 file holding the PR body; ci-job reads it as `${{ github.event.pull_request.body }}` (CI_JOB_PR_BODY_FILE).
+    With none, the variable is unset, so an inherited one never reaches ci-job.
     ci-job's stderr (a `start: <step>` line per step, verdict's heartbeat) passes live to this process's stderr; only its stdout is read.
     -> (state, lines, log, liftable). state: "pass" (exit 0), "fail" (exit 1) or "unknown" (exit 2, a timeout, any other exit).
     lines: the FAIL or unknown lines ci-job printed, or one line saying what was read instead. log: ci-job's log line, as a list of
     0 or 1 (the last one: the FAIL lines name it too). liftable: True only for ci-job's own exit 2, which names its unknown steps."""
-    env = {k: v for k, v in os.environ.items() if not k.startswith("GITHUB_")}  # as the merge's own lint run reads it
+    env = {k: v for k, v in os.environ.items() if not k.startswith("GITHUB_") and k != "CI_JOB_PR_BODY_FILE"}  # as the merge's own lint run reads it
+    if body_file:
+        env["CI_JOB_PR_BODY_FILE"] = body_file
     try:
         c, out = sh([sys.executable, CI_JOB, *args], cwd=wt, env=env, timeout=LINT_SECONDS, live_stderr=True)
     except subprocess.TimeoutExpired:
@@ -2445,18 +2449,25 @@ def ci_job_run(wt, *args):
 def lane_lint(root, target, host, base="", unknown_ok=""):
     """The lint a lane passes before its head goes to the batch runner (decision lanes-run-no-full-ci-job): `ci-job checks --lint --base origin/<base>`
     in a temporary detached worktree at the head, removed on every exit. Takes no lock; merges and pushes nothing. -> 0 on a pass, else raises Stop.
-    A target of digits is a PR number: its head and base come from the PR. Any other target is a commit or ref.
+    A target of digits is a PR number: its head, base and body come from the PR (one Host.pr read; a failed read refuses). The body goes
+    to ci-job as a file in the temporary dir (CI_JOB_PR_BODY_FILE). Any other target is a commit or ref, with no PR and so no body.
     ci-job's stderr (a `start: <step>` line per step, verdict's heartbeat) passes live to this process's stderr; only its stdout is read.
     Exit 1 of ci-job (a FAIL) refuses always. Exit 2 (an unknown) refuses unless `unknown_ok` is a non-blank reason; it is then logged, with no PASS line."""
+    body = None
     if target.isdigit():
         info = (host or Host()).pr(int(target))
-        head, base = info["head"], info["base"]
+        head, base, body = info["head"], info["base"], info.get("body") or ""
         tmp, wt = open_worktree(root, info, base)
     else:
         head, base = lane_head_and_base(root, target, base)
         tmp, wt = add_worktree(root, head)
     try:  # a SIGTERM reaches here as a SystemExit (release_on_signals in main), so this `finally` removes the tree
-        state, lines, log, liftable = ci_job_run(wt, "checks", "--lint", "--base", f"origin/{base}")
+        body_file = None
+        if body is not None:
+            body_file = os.path.join(tmp, "pr-body.md")  # beside the tree, so the lint never sees it as a change; dropped with tmp
+            with open(body_file, "w", encoding="utf-8", newline="") as f:
+                f.write(body)
+        state, lines, log, liftable = ci_job_run(wt, "checks", "--lint", "--base", f"origin/{base}", body_file=body_file)
     finally:
         drop_worktree(root, tmp, wt)
     short = head[:9]

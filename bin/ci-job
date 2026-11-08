@@ -38,8 +38,11 @@
 # it leaves out prints `not run`, which is no verdict.
 # A step's `if:` reads every needs.scope.outputs flag (== 'true' or != 'false') as true, !cancelled(), always() and success() as true,
 # and github.event_name == 'pull_request' as true only with a base. ${{ github.base_ref }} is --base without
-# its remote; ${{ github.event.pull_request.head.sha }} is HEAD; ${{ github.event.pull_request.body }} and ${{ github.token }} are empty.
-# So an excuse that lives only in the PR body (Drops-lines, Retire-run) reads FAIL here, as it does on main, which passes no body.
+# its remote; ${{ github.event.pull_request.head.sha }} is HEAD; ${{ github.token }} is empty.
+# ${{ github.event.pull_request.body }} is the text of the UTF-8 file that $CI_JOB_PR_BODY_FILE names, read as written (no newline
+# translation); merge --lane-lint writes the lane PR's body there. The body reaches a step as literal text, never through a shell.
+# With no such variable it is empty, as for a ref target with no PR, so an excuse that lives only in the PR body (Drops-lines,
+# Retire-run) reads FAIL, as it does on main, which passes no body. A named file that cannot be read is one unknown line, exit 2.
 # Any other expression makes the step unknown.
 # Each step's env sets GITHUB_BASE_REF to that value (the step's own env: wins), as GitHub does on a pull-request run; with no --base it is unset, as off one.
 # A tool is missing when a line's command is not on PATH, or the step exits 127.
@@ -401,9 +404,17 @@ def main(argv):
                 print("unknown         no base resolved (origin/main is absent; pass --base), so these pull-request "
                       "steps are skipped: %s" % ", ".join(unread))
                 no_base = True
+    body_file, pr_body = os.environ.get("CI_JOB_PR_BODY_FILE"), ""
+    if body_file:
+        try:
+            with open(body_file, encoding="utf-8", newline="") as f:
+                pr_body = f.read()
+        except (OSError, UnicodeDecodeError) as e:
+            print("unknown         CI_JOB_PR_BODY_FILE %s cannot be read: %s" % (body_file, e))
+            return 2
     values = {"base": base or "", "github.base_ref": base.split("/", 1)[1] if base and "/" in base else (base or ""),
               "github.event.pull_request.head.sha": git("rev-parse", "HEAD", cwd=top) or "",
-              "github.event.pull_request.body": "",  # a local run has no PR body
+              "github.event.pull_request.body": pr_body,  # "" with no CI_JOB_PR_BODY_FILE: a ref target has no PR body
               "github.token": ""}  # the silent-undo CLI builds a run reader only when the body holds a cite, so an empty body never needs a token
     log = os.environ.get("VERDICT_LOG")
     if not log and not dry:
