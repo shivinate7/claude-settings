@@ -1,0 +1,11 @@
+{
+  "title": "A builder brief's done check runs the comment-narration scan on the touched files",
+  "phase": "next",
+  "status": "todo",
+  "order": 646,
+  "owner": "coordinator",
+  "lane": null,
+  "why": "Lane stall-watch-quiet-lint's builder ran only the stall-watch tests as its done check, so a narration hit (a date and \"Owner ruling\" in comments) reached lane lint and cost an extra lint run (lane, 07:18 CST Nov 8).",
+  "note": "Done check: a red test where hooks/agent_brief.py flags a builder brief whose done check omits the comment-narration scan on the files it touches. Related: step brief-builder-no-test-grant (same checker). A fix for a found gap (item 410 a). Slug from the lane; title by triage.",
+  "updatedAt": "2026-11-08T07:18:00-06:00"
+}
