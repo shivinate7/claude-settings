@@ -9572,9 +9572,10 @@ role_refuse("a lone quote in a comment does not hide the call on the next line",
 # RECFORK on roadmap-fork (its extras name that branch).
 RECORD_RULE = "roadmap-one-writer"
 RECORD_LACKS = ("origin roadmap", "HEAD:roadmap")  # the refusal never names the push it refuses
-# The remedy sends the session to fetch and check its copy of the record branch before it asks the owner
-# to push, since a stale copy asked the owner to push a commit that was already on origin.
-RECORD_CARRIES = ("git fetch origin", "git branch -r --contains", "ask the owner only when")
+# The remedy sends the session to fetch, then run `git merge-base --is-ancestor <commit> origin/<record branch>`.
+# That checks whether the commit is already on the record branch, so the owner is asked to push only what is not.
+# `git branch -r --contains` is not the check: a commit on a lane branch alone would read as already on the record branch.
+RECORD_CARRIES = ("git fetch origin", "git merge-base --is-ancestor", "origin/<record branch>", "ask the owner only when")
 LANE_TRANSCRIPT = role_path("lane")
 TRIAGE_TRANSCRIPT = role_path("triage")
 
