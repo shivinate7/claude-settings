@@ -266,7 +266,9 @@ Other tools, in `judge` order:
                        spaces. A call with no device (absent, empty or not a string) needs a live
                        lease of the session for every booted device. A non-launch call that
                        names a device no simulator holds is refused; a launch of one stays allowed. A launch meets the cap, twin and boot-lease rules first.
-                       Fails open where the device list cannot be read. The remedy is
+                       Fails open where the device list cannot be read. A call that names no
+                       single leased device, from a session that holds a lease, is told to name
+                       the device by the UDID it leases. Otherwise the remedy is
                        `sim-test --device pro --hold` for a device in slot pro, else
                        `sim-test --hold`. An override lifts it. (sim-test-is-the-one-boot-path)
   builder-test-edit, test-author-scope, record-writer-scope, designer-scope
