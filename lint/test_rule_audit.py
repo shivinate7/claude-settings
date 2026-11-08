@@ -906,27 +906,60 @@ def _sibling(binding, read):
     return False
 
 
+def _effect(at):
+    """Where a binding takes effect in source order: an assignment at its end, since its value runs first, else at its
+    start. None is an argument, which binds on entry."""
+    if at is None:
+        return (0, 0)
+    if isinstance(at, (ast.Assign, ast.AnnAssign, ast.AugAssign, ast.NamedExpr)):
+        return (at.end_lineno, at.end_col_offset)
+    return (at.lineno, at.col_offset)
+
+
+def _loops_holding(node, mod):
+    """The loops whose body holds `node`, within its own def."""
+    loops, cur = [], node
+    parent = mod.parents.get(id(cur))
+    while parent is not None and not isinstance(parent, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+        if isinstance(parent, (ast.For, ast.AsyncFor, ast.While)) and any(cur is s for s in parent.body):
+            loops.append(parent)
+        cur, parent = parent, mod.parents.get(id(parent))
+    return loops
+
+
 def _reaching(entries, read, mod):
-    """The bindings a read sees. A binding in the other arm of the read's `if` never runs before the read, so its
-    text must not pool into the read. A binding in an arm of an earlier `if` does reach a read after that `if`, so
-    both arms binding one name reach it. A run-time binding that does reach the read still leaves it unresolved."""
+    """The bindings a read sees. One reaches the read when it takes effect before the read and is not in an arm of
+    an `if` the read is not in: a binding after the read, or in a sibling arm, never ran before it. A loop body that
+    holds both pools them all, since the loop may run the binding again before the read. A run-time binding that
+    reaches the read still leaves it unresolved."""
+    loops = {id(loop) for loop in _loops_holding(read, mod)}
     chain = _branch_chain(read, mod)
-    return [entry for entry in entries if not _sibling(entry[2], chain)]
+    before = (read.lineno, read.col_offset)
+    found = []
+    for entry in entries:
+        at = entry[2]
+        if at is None:
+            found.append(entry)
+        elif loops & {id(loop) for loop in _loops_holding(at, mod)}:
+            found.append(entry)
+        elif _effect(at) < before and not _sibling(_branch_chain(at, mod), chain):
+            found.append(entry)
+    return found
 
 
 def _locals(fdef, mod):
-    """name -> [(value, slot, chain)] for each binding in a function. A value of None is a binding made at
+    """name -> [(value, slot, at)] for each binding in a function. A value of None is a binding made at
     run time (an argument, a loop target), so the name has no static text. A slot is the position
-    in a tuple value that the name unpacks. A chain is the `if` arms that hold the binding (_branch_chain).
-    An argument binds on entry, so its chain is empty."""
+    in a tuple value that the name unpacks. `at` is the node the binding takes effect at (see _effect),
+    and None for an argument, which binds on entry."""
     locs = {}
 
     def bind(name, value, slot, at):
-        locs.setdefault(name, []).append((value, slot, _branch_chain(at, mod)))
+        locs.setdefault(name, []).append((value, slot, at))
 
     args = fdef.args
     for arg in args.posonlyargs + args.args + args.kwonlyargs + [a for a in (args.vararg, args.kwarg) if a]:
-        locs.setdefault(arg.arg, []).append((None, None, ()))
+        locs.setdefault(arg.arg, []).append((None, None, None))
     for node in _own(fdef):
         if isinstance(node, ast.Assign):
             for target in node.targets:
@@ -938,17 +971,23 @@ def _locals(fdef, mod):
                 else:
                     for name in _bound_names(target):
                         bind(name, None, None, node)
-        elif isinstance(node, (ast.For, ast.AsyncFor, ast.comprehension, ast.AugAssign, ast.AnnAssign, ast.NamedExpr)):
+        elif isinstance(node, (ast.For, ast.AsyncFor)):
+            for name in _bound_names(node.target):
+                bind(name, None, None, node.target)  # the target binds as the body starts
+        elif isinstance(node, ast.comprehension):
+            for name in _bound_names(node.target):
+                bind(name, None, None, mod.parents.get(id(node)))  # the comprehension binds before its element is read
+        elif isinstance(node, (ast.AugAssign, ast.AnnAssign, ast.NamedExpr)):
             for name in _bound_names(node.target):
                 bind(name, None, None, node)
         elif isinstance(node, (ast.With, ast.AsyncWith)):
             for item in node.items:
                 for name in _bound_names(item.optional_vars) if item.optional_vars else []:
-                    bind(name, None, None, node)
+                    bind(name, None, None, item.optional_vars)
         elif isinstance(node, ast.Lambda):
             # A lambda's parameters bind at run time. Its body is read in this scope, so they read as unknown.
             for arg in node.args.posonlyargs + node.args.args + node.args.kwonlyargs + [a for a in (node.args.vararg, node.args.kwarg) if a]:
-                bind(arg.arg, None, None, node)
+                bind(arg.arg, None, None, arg)
         elif isinstance(node, ast.ExceptHandler) and node.name:
             bind(node.name, None, None, node)  # the caught exception is bound at run time
     return locs
@@ -1248,7 +1287,7 @@ class _Reasons:
         if not any(isinstance(a, ast.Starred) for a in call.args) and not any(k.arg is None for k in call.keywords):
             for name, arg in _call_args(call, fdef):
                 if name in flocs:
-                    flocs[name] = [(_Fixed(self.alts(arg, mod, locs, depth + 1)), None, ())]
+                    flocs[name] = [(_Fixed(self.alts(arg, mod, locs, depth + 1)), None, None)]
         returns = [n.value for n in _own(fdef) if isinstance(n, ast.Return) and n.value is not None]
         return _union([self._value(v, None, index, fmod, flocs, depth + 1) for v in returns])
 
@@ -1737,7 +1776,7 @@ class _Helpers:
             flocs, unknown = dict(hlocs), []
             for name, arg in pairs:
                 texts = self.reasons.alts(arg, self.mod, locs)
-                flocs[name] = [(_Fixed(texts), None, ())]
+                flocs[name] = [(_Fixed(texts), None, None)]
                 if texts is None and name in reach:
                     unknown.append(arg)
             fallback = ", ".join(_unparse(a) for a in unknown) or _unparse(msg)
