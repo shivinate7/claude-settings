@@ -5,7 +5,7 @@
   "order": 261.5,
   "owner": "coordinator",
   "why": "Coordinator 14:34 CST: `git checkout -B <current branch>` in an agent worktree left a stale index twice.",
-  "note": "A guard change, so a build lane (test-author, builder, reviewer). Done check: a red test on `git checkout -B <current branch>` in an agent worktree.",
-  "updatedAt": "2026-11-07T14:34:00-06:00",
+  "note": "A guard change, so a build lane (test-author, builder, reviewer). Done check: a red test on `git checkout -B <current branch>` in an agent worktree. Nov 7 22:47 CST: lane roadmap-push-refusal-says-fetch (#1777) hit it twice more: an agent's `git checkout -B` left old files in the worktree and index. Possible false alarm in the same incident: the shared-trees guard refused restoring stale staged files that match origin's blobs in an agent worktree; unchecked.",
+  "updatedAt": "2026-11-07T22:47:00-06:00",
   "lane": "session_013NEJL1N3YkCMouc1pELXyu"
 }

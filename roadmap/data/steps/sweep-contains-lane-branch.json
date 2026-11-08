@@ -1,0 +1,11 @@
+{
+  "title": "The sweep's keep check does not count a lane branch as proof that work is pushed",
+  "phase": "now",
+  "status": "todo",
+  "order": 103.51,
+  "owner": "coordinator",
+  "lane": null,
+  "why": "janitor/sweep.py (line 741) keeps a worktree unless HEAD is on a remote-tracking ref, read with `git branch -r --contains HEAD`. That also matches lane branches, the same bug #1777 fixed in the roadmap refusal. Reported by lane roadmap-push-refusal-says-fetch (coordinator, 22:45 CST Nov 7).",
+  "note": "Unchecked: first check whether a lane-branch match lets the sweep remove work that is not on main or an archive. If it does, a build lane (test-author, builder, reviewer). Done check: a red test where HEAD is only on a lane branch. Slug and title by triage; no source gave one. A queue-fix lane under the item 384 hold.",
+  "updatedAt": "2026-11-07T22:47:00-06:00"
+}
