@@ -1003,6 +1003,10 @@ ARCHIVE_NO_PR_REASON = (
     "strands that work. Open a draft pull request for that branch and hand it to the batch runner, then retry. "
     "(decision session-tiers, a lane closes only after its records pull request has landed)"
 )
+ARCHIVE_BRANCH_READ_REASON = (
+    "the lane's branches or their pull requests could not be read, so the guard cannot tell whether any work of "
+    "the lane is stranded. Retry once gh answers. (decision session-tiers, a lane closes only after its records pull request has landed)"
+)
 _REPO_NAME = re.compile(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+")
 _SOURCE_REPO = re.compile(r"github\.com[/:]([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+?)(?:\.git)?/?\Z")
 
@@ -1041,17 +1045,20 @@ def _branch_repos(ccr, tag_repos):
 def _stranded_branch(module, ccr, tag_repos) -> bool:
     """True when a branch in the record's external_metadata.current_branches is ahead of its repo's default
     branch (compare status ahead or diverged) and has a pull request in no state. A record with no branch
-    field, or only null values, names none: no check. A 404 on the compare means the branch is not in that
-    repo, so that branch is skipped in that repo. Any other failed read raises, and archive_hit refuses on it."""
+    field, or only null values, names none: no check. A branch field that is not a map is a shape the read
+    does not know, so it raises. A 404 on the compare means the branch is not in that repo, so that branch is
+    skipped in that repo. Any other failed read raises, and archive_hit refuses on it. The caller holds one
+    shared deadline over all the reads here (a nested shared_deadline would reset it)."""
     meta = ccr.get("external_metadata")
     named = meta.get("current_branches") if isinstance(meta, dict) else None
-    branches = [b for b in named.values() if isinstance(b, str) and b] if isinstance(named, dict) else []
+    if named is not None and not isinstance(named, dict):
+        raise RuntimeError("current_branches is not a map")
+    branches = [b for b in named.values() if isinstance(b, str) and b] if named else []
     if not branches:
         return False
     for repo in _branch_repos(ccr, tag_repos):
         host = module.Host(repo=repo)
-        with module.shared_deadline(MERGE_READ_TIMEOUT):
-            code, out = host.api("")
+        code, out = host.api("")
         try:
             if code:
                 raise ValueError(out)
@@ -1061,8 +1068,7 @@ def _stranded_branch(module, ccr, tag_repos) -> bool:
         for branch in branches:
             if branch.startswith("archive/") or branch == default:
                 continue
-            with module.shared_deadline(MERGE_READ_TIMEOUT):
-                code, out = host.api("compare/" + default + "..." + branch)
+            code, out = host.api("compare/" + default + "..." + branch)
             if code and not module.is_net(code, out) and re.search(r"\bHTTP 404\b", out):
                 continue
             try:
@@ -1073,8 +1079,7 @@ def _stranded_branch(module, ccr, tag_repos) -> bool:
                 raise RuntimeError("the compare read failed: " + str(e))
             if not ahead:
                 continue
-            with module.shared_deadline(MERGE_READ_TIMEOUT):
-                rows = host.pages("pulls", fields={"state": "all", "head": repo.split("/")[0] + ":" + branch})
+            rows = host.pages("pulls", fields={"state": "all", "head": repo.split("/")[0] + ":" + branch})
             if not rows:
                 return True
     return False
@@ -1087,7 +1092,7 @@ def archive_hit(tool: str, tool_input, transcript: str):
     head commit is already in its base (compare: behind or identical). A lane is also refused while a branch of
     its record (external_metadata.current_branches) is ahead of its repo's default branch with no pull request
     in any state (_stranded_branch). Fails closed: any error in the reads is a refusal, because the guard-wide
-    crash path fails open."""
+    crash path fails open. A failed open-list read and a failed branch read each refuse with their own reason."""
     if tool != ARCHIVE_TOOL:
         return None
     target = tool_input.get("session_id") if isinstance(tool_input, dict) else None
@@ -1106,7 +1111,8 @@ def archive_hit(tool: str, tool_input, transcript: str):
         return "archive of a lane with no step or repo tag", ARCHIVE_TAGS_REASON
     try:  # cost: one paged gh REST read per cs-repo tag (one in practice), through the merge tool's page reader;
         # then one transcript read for each lane that clears the open list, and, for a record that names branches:
-        # one repo read per repo, one compare read per repo x branch, and one pulls read per branch that is ahead
+        # one repo read per repo, one compare read per repo x branch, and one pulls read per branch that is ahead,
+        # all under one shared MERGE_READ_TIMEOUT
         module = merge_module()
         if module is None:
             raise RuntimeError("the merge tool could not be loaded")
@@ -1121,10 +1127,15 @@ def archive_hit(tool: str, tool_input, transcript: str):
                 if slug:
                     return "archive of lane " + slug + " with open pull request " + str(row.get("number", "?")), ARCHIVE_OPEN_REASON
         ccr = own_session.own_session_ccr(transcript, target)
-        if isinstance(ccr, dict) and _stranded_branch(module, ccr, repos):
-            return "archive of a lane with a branch that has no pull request", ARCHIVE_NO_PR_REASON
     except (Exception, SystemExit):
         return "archive with an unreadable pull request list", ARCHIVE_READ_REASON
+    try:
+        with module.shared_deadline(MERGE_READ_TIMEOUT):
+            stranded = isinstance(ccr, dict) and _stranded_branch(module, ccr, repos)
+    except (Exception, SystemExit):
+        return "archive with an unreadable branch read", ARCHIVE_BRANCH_READ_REASON
+    if stranded:
+        return "archive of a lane with a branch that has no pull request", ARCHIVE_NO_PR_REASON
     return None
 
 
