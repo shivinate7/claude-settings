@@ -39,12 +39,21 @@ class DatedText:
     """A date pattern that skips a date a rule or a limit runs on: the word effective, valid, until or expires,
     an optional `date`, `on`, `from` or `through`, and an optional colon come right before it. Such a date says
     why, so it is not history. A phrase check on the text before the date does what a lookbehind cannot:
-    take a variable run of spaces and any case."""
+    take a variable run of spaces and any case. A ruling cite is exempt too: the word owner (any case) and a
+    comma right before the date, and a 24-hour time and a zone abbreviation such as CST, CDT or UTC right
+    after it. A cite without the time, or with another lead word, stays flagged."""
     DATE = re.compile(r"\b20\d\d-\d\d-\d\d\b")
     EXEMPT = re.compile(r"\b(?:effective|valid|until|expires?)(?:\s+(?:date|on|from|through))?\s*:?\s*$", re.I)
+    CITE_BEFORE = re.compile(r"\bowner\s*,\s*$", re.I)
+    CITE_AFTER = re.compile(r"\s+(?:[01]\d|2[0-3]):[0-5]\d\s+[A-Z]{3,4}\b")
 
     def finditer(self, text):
-        return (m for m in self.DATE.finditer(text) if not self.EXEMPT.search(text[:m.start()]))
+        return (m for m in self.DATE.finditer(text) if not self.exempt(text, m))
+
+    def exempt(self, text, m):
+        if self.EXEMPT.search(text[:m.start()]):
+            return True
+        return bool(self.CITE_BEFORE.search(text[:m.start()]) and self.CITE_AFTER.match(text, m.end()))
 
 
 class ReviewRound:
