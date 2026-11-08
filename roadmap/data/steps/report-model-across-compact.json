@@ -1,0 +1,11 @@
+{
+  "title": "The report guard's model check reads spawns from before a compaction",
+  "why": "After a compaction, the guard's records hold no spawn from before it, so a Done item that names a pre-compaction reviewer is called wrong whatever its model. Note report-model-before-compact (on #1921): the check fired 4 times in lane session-worktree-strands-agents on reviewers spawned with model sonnet. It may also be the real cause of the no-model-field sightings on step report-guard-role-default-model (lane report-guard-role-default-model, 05:23 CST Nov 8).",
+  "note": "Fix: the guard reads spawn records from before the compaction (the full transcript or the handoff's agent list), or says \"unknown\" instead of \"wrong\" for a name it cannot match; red case first on a Done item naming a reviewer spawned before a compaction. Not covered by #1919. Queue fix (owner 13:20 CST Nov 7). Filed 05:25 CST Nov 8; the coordinator assigns a lane.",
+  "phase": "now",
+  "status": "todo",
+  "order": 616,
+  "owner": "triage",
+  "lane": "",
+  "updatedAt": "2026-11-08T05:22:00-06:00"
+}
