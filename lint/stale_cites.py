@@ -175,7 +175,7 @@ FOREIGN_EXT = r"(?:mjs|cjs|js|ts|sh)"  # code files whose names this check does 
 
 def pair_res(ext):
     """"`file.<ext>` `name`" and "(file.<ext> name)". A dotted name, `Guard.run`, is read by its first part: group 2 stops
-    there, since only that part is a module-level name and the later parts are members that no module scan binds."""
+    there, since the later parts are members, and `names_in` binds no class attribute (debt stale010-dotted-member)."""
     dotted = r"(?:\.[A-Za-z_]\w*)*"
     return (
         re.compile(NOT_BEFORE + r"`?(%s\.%s)`?\s+`([A-Za-z_]\w*)%s`" % (RUN, ext, dotted)),

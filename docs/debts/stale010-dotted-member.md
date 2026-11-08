@@ -6,4 +6,4 @@
 
 **Decision.** record-cites-live-code (claims about code cite live code names).
 
-**Retire.** A dotted cite on a module-level class also checks its second part against that class's names. A case in `lint/test_stale_cites.py` shows a dead member gives STALE010.
+**Retire.** A dotted cite on a module-level class also checks its second part against that class's names, class attributes included (debt stale010-class-level-names). A case in `lint/test_stale_cites.py` shows a dead member gives STALE010.
