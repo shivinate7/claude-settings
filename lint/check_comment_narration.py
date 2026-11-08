@@ -177,7 +177,7 @@ class HistoryPhrase:
 
     def finditer(self, text):
         run = (m for m in self.RUN.finditer(text)
-               if not self.CONDITION.search(re.split(r"[.;:!?]", text[:m.start()])[-1]))
+               if not self.CONDITION.search(re.split(r"[.;:!?,]", text[:m.start()])[-1]))
         return itertools.chain(self.FORMS.finditer(text), run)
 
 
@@ -556,37 +556,105 @@ def sh_heredoc_bodies(src, i, pending):
     return i
 
 
+SH_BOUNDARY = r"(?![^\s;&|()<>`])"
+SH_CMD_WORD = re.compile(r"(?:case|esac|then|do|else|elif|if|while|until|time)" + SH_BOUNDARY + r"|[!{](?=\s)")
+SH_FUNCTION = re.compile(r"function[ \t]+[^\s;&|()<>`]+")
+SH_TEST_OPEN = re.compile(r"\[\[(?=\s)")
+SH_TEST_CLOSE = re.compile(r"\]\]" + SH_BOUNDARY)
+SH_BRACKET_EXPR = re.compile(r"\[[!^]?\]?(?:\[:\w+:\]|[^\]\s$`'\"\\])*\]")
+SH_IN_WORD = re.compile(r"in" + SH_BOUNDARY)
+SH_ESAC_WORD = re.compile(r"esac" + SH_BOUNDARY)
+
+
 def sh_code_end(src, i, spans, pending, close=None):
     """Scan shell code from i, adding each comment as (start, end) to spans. With close `)` or a backtick, stop after
     the one that ends the command substitution. `ws` is True where a word may start, the only place a `#` opens a
-    comment: a quote or an expansion ends a word that goes on, so `"a"#b` and `$(x)#b` hold no comment. A paren
-    inside `[[ ]]` (a regex group) or right after `?*+@!` (an extglob group) does not end a word either, so `)#b`
-    there holds none. `<<` is a shift, not a heredoc, inside an array subscript `a[1<<2]`; `((` and `$((` are read
-    by sh_try_arith."""
-    kinds, ws = [], True  # kinds: one entry per open paren, True when the paren is part of a word
-    dbl = sub = False  # inside [[ ]]; array subscript depth
+    comment: a quote or an expansion ends a word that goes on, so `"a"#b` and `$(x)#b` hold no comment. `cmd` is
+    True only at command position, the only place `case`, `esac` and the other reserved words count: after a newline,
+    `;`, `&`, `|`, `$(`, a backtick, `{`, `then` or `do`, or a `(` that opens a subshell. `parens` holds one kind per
+    open `(`: cmd for a subshell or a process substitution, list for an array, where a newline or `|` starts no
+    command, and word for a paren that is part of a word, an extglob group (right after `?*+@!`), a regex group or a
+    case pattern group, where `)#b` holds no comment. A bracket expression `[(]` inside `[[ ]]` or a case pattern is
+    one word that pushes and pops no paren. Inside `[[ ... ]]` (`test`) nothing starts a command either.
+    `<<` is a shift, not a heredoc, inside an array subscript `a[1<<2]` (`sub` counts the open `[`); `((` and `$((`
+    are read by sh_try_arith. Each open `case` is one entry in `cases`, [state, paren depth where it opened]: word0
+    and word1 before `in`, pat for the arm patterns, body for an arm's commands. A pattern's `)` ends the pattern,
+    never the substitution."""
+    ws, cmd, test, sub, parens, cases = True, True, False, 0, [], []
+
+    def starts_cmd():
+        return not test and (not parens or parens[-1] == "cmd")
+
     while i < len(src):
         c = src[i]
+        st = cases[-1] if cases else None
+        if st and st[0] == "word1" and ws and c not in " \t\n\\#":
+            m = SH_IN_WORD.match(src, i)
+            if not m:
+                raise Unread("case word is not followed by in")
+            st[0] = "pat"
+            i, ws, cmd = m.end(), True, False
+            continue
+        if st and st[0] == "word0" and ws and c not in " \t\n\\#":
+            st[0] = "word1"
+        if st and st[0] == "pat" and ws and len(parens) == st[1]:
+            if c == "(":
+                i += 1  # a bare ( before a pattern
+                continue
+            if SH_ESAC_WORD.match(src, i):  # like POSIX, esac first in a pattern list ends the case
+                cases.pop()
+                i, ws, cmd = i + 4, False, False
+                continue
+        if test and ws and (m := SH_TEST_CLOSE.match(src, i)):
+            test = False
+            i, ws, cmd = m.end(), False, False
+            continue
+        if cmd and (not st or st[0] == "body") and (m := SH_TEST_OPEN.match(src, i)):
+            test = True
+            i, ws, cmd = m.end(), True, False
+            continue
+        if cmd and (not st or st[0] == "body") and (m := SH_FUNCTION.match(src, i)):
+            i, ws = m.end(), False  # the name is read: `{` after it opens the body
+            continue
+        if cmd and (not st or st[0] == "body") and (m := SH_CMD_WORD.match(src, i)):
+            word = m.group(0)
+            if word == "case":
+                cases.append(["word0", len(parens)])
+                i, ws, cmd = m.end(), True, False
+            elif word == "esac":
+                if not st:
+                    raise Unread("esac with no case")
+                cases.pop()
+                i, ws, cmd = m.end(), False, False
+            else:
+                i, ws = m.end(), False
+            continue
+        if st and st[0] == "body" and c == ";" and src[i + 1:i + 2] in (";", "&"):
+            i += 3 if src.startswith(";;&", i) else 2
+            st[0], ws, cmd = "pat", True, False
+            continue
         if c == "\\":
             if src.startswith("\n", i + 1):
                 i += 2  # a line break the shell removes: the next word starts where this one would have
             else:
                 i += 2
-                ws = False
+                ws = cmd = False
         elif c == "'":
             i = sh_quote_end(src, i + 1)
-            ws = False
+            ws = cmd = False
         elif c == '"':
             i = sh_dquote_end(src, i + 1, spans, pending)
-            ws = False
+            ws = cmd = False
         elif c == "`":
             if close == "`":
+                if cases:
+                    raise Unread("case never ends with esac")
                 return i + 1
             i = sh_code_end(src, i + 1, spans, pending, "`")
-            ws = False
+            ws = cmd = False
         elif c == "$":
             i = sh_dollar_end(src, i, spans, pending)
-            ws = False
+            ws = cmd = False
         elif c == "#" and ws:
             end = sh_comment_end(src, i, close == "`")
             spans.append((i, end))
@@ -595,7 +663,7 @@ def sh_code_end(src, i, spans, pending, close=None):
             i += 1
             if pending:
                 i = sh_heredoc_bodies(src, i, pending)
-            ws, sub, dbl = True, 0, False  # a line continuation is read by the backslash branch, so [[ ]] goes on
+            ws, sub, cmd = True, 0, starts_cmd()  # a line continuation is read by the backslash branch, so [[ ]] goes on
         elif src.startswith("<<<", i):
             i += 3  # a here-string, not a heredoc
             ws = True
@@ -608,37 +676,55 @@ def sh_code_end(src, i, spans, pending, close=None):
             ws = False
         elif ws and src.startswith("((", i) and (j := sh_try_arith(src, i + 2, spans, pending)) is not None:
             i = j
-            ws = False
-        elif ws and src.startswith("[[", i) and src[i + 2:i + 3] in (" ", "\t", "\n"):
-            dbl = True
-            i += 2
-            ws = False
-        elif dbl and ws and src.startswith("]]", i):
-            dbl = False
-            i += 2
-            ws = False
+            ws = cmd = False
+        elif c == "[" and (test or (st and st[0] == "pat" and len(parens) == st[1])) and (m := SH_BRACKET_EXPR.match(src, i)):
+            i, ws, cmd = m.end(), False, False  # a bracket expression is one word: a ( or ) in it opens and closes nothing
         elif c == "[" and i and (src[i - 1].isalnum() or src[i - 1] in "_]"):
             sub += 1
             i += 1
-            ws = False
+            ws = cmd = False
         elif c == "]" and sub:
             sub -= 1
             i += 1
-            ws = False
+            ws = cmd = False
         elif c == "(":
-            kinds.append(dbl or (i > 0 and src[i - 1] in "?*+@!"))
-            ws = not kinds[-1]
+            if test or (st and st[0] == "pat") or (i > 0 and src[i - 1] in "?*+@!"):
+                kind = "word"
+            elif cmd or (i > 0 and src[i - 1] in "<>"):
+                kind = "cmd"
+            else:
+                kind = "list"
+            parens.append(kind)
+            ws, cmd = kind != "word", kind == "cmd"
             i += 1
         elif c == ")":
-            if close == ")" and not kinds:
-                return i + 1
-            ws = not (kinds.pop() if kinds else dbl)
             i += 1
+            base = st[1] if st else 0
+            if st and st[0] == "pat" and len(parens) == base:
+                st[0], ws, cmd = "body", True, True
+            elif len(parens) > base:
+                if parens.pop() == "word":
+                    ws = cmd = False
+                else:
+                    ws, cmd = True, starts_cmd()  # starts_cmd keeps `f() {` a function body
+            elif cases:
+                raise Unread("case arm ends with a lone )")
+            elif close == ")":
+                return i
+            else:
+                ws = cmd = True  # a stray `)` at top level closes nothing
         else:
+            redirect = c in "&|" and i > 0 and src[i - 1] in "<>"  # `>&2` and `>|` are redirections
             i += 1
             ws = c in " \t;&|<>"
+            if c in ";&|" and not redirect:
+                cmd = starts_cmd()
+            elif c not in " \t":
+                cmd = False
     if close:
         raise Unread("command substitution never closes")
+    if cases:
+        raise Unread("case never ends with esac")
     return i
 
 
