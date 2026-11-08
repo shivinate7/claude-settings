@@ -445,7 +445,7 @@ def load_config(start: str) -> dict:
 NUL = "\x00"
 _PH_RE = re.compile(r"\x00\d+\x00+")
 
-from inline_code import INLINE_CODE_RE, code_span_text  # noqa: E402,F401  the one home of the inline-code mask (lint/inline_code.py), re-exported for importers
+from inline_code import INLINE_CODE_RE  # noqa: E402  the one home of the inline-code mask (lint/inline_code.py), re-exported for importers
 
 MASK_PATTERNS = [
     INLINE_CODE_RE,                                 # inline code
