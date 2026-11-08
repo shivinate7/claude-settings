@@ -183,7 +183,6 @@
 - override-agent-text-unmeasured: no check shows whether a session-sent message reading exactly `override` fires the prompt hook and grants an override. Decision: owner-override
 - override-once-not-bound: a one-act override lifts the next refusal within 10 minutes, whatever it is (owner 15:34: not a safety hole). Decision: owner-override
 - override-removal-unreminded: nothing reminds an agent to remove a raised agent-cap file early; only expiry reverts it (hooks/config_watch.py)
-- override-veto-core-unwrapped: hooks/guard.py judge() calls guard_core.set_override_veto unwrapped; a stale guard_core raises, the guard logs guard-crash and allows the call. Fix: wrap it like set_override_context. Decision: owner-override
 - page-excuse-trailer-only: in a repo with no hook_catalog.py upstream, only a Drops-lines trailer excuses the records page, unchecked (lint/check_silent_undo.py)
 - perl-ruby-bodies-unread: perl and ruby bodies are not read, so a test write in one is not refused (hooks/guard_frozen.py _interpreter_write_hit)
 - pin-switch-in-place-mix: with no symlink rights, git switch --detach in place can show a live reader old and new files mixed (merge/install_from_main.sh)

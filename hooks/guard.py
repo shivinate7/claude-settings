@@ -1039,11 +1039,13 @@ def agent_owned_worktree(root: str):
 # so the owner answers one call at a time. A wall here would only push the work off the guard's
 # path.
 #
-# THE SETTINGS TEST IS A BASENAME, and it is taken from the RESOLVED path as well as from the
-# spelling the tool passed. Rule 7 resolves its own paths with `realpath`, so a basename test on the
-# spelling alone would leave rule 8 blind to a shape rule 7 already sees: a symlink named
-# `alias.json` that points at a project's `.claude/settings.json`. The resolve sits inside a `try`,
-# so the cannot-raise property of this rule holds. The managed settings file joins the list at the
+# THE SETTINGS TEST IS A BASENAME PLUS A PLACE, and it is taken from the RESOLVED path as well as from
+# the spelling the tool passed. Rule 7 resolves its own paths with `realpath`, so a test on the spelling
+# alone would leave rule 8 blind to a shape rule 7 already sees: a symlink named `alias.json` that points
+# at a project's `.claude/settings.json`. The place (`_settings_place`) is a `.claude` folder, the config
+# directory, a folder the shell expands, the working folder's checkout root or install folder, or the
+# target's own folder when that is a checkout root or holds `install.ps1`. The resolve sits inside a
+# `try`, so the cannot-raise property of this rule holds. The managed settings file joins the list at the
 # same price.
 SETTINGS_BASENAMES = ("settings.json", "settings.local.json", "managed-settings.json")
 
@@ -1113,7 +1115,12 @@ def _settings_place(path: str, cwd: str) -> bool:
             if os.path.dirname(up) == up:
                 break
             up = os.path.dirname(up)
-    return os.path.normcase(os.path.realpath(folder)) in here
+    target = os.path.realpath(folder)
+    # The target's own folder is a place too, from any cwd: a checkout root (`.git` marks it) or an install
+    # source (`install.ps1`) holds a settings file that a local install links into ~/.claude.
+    if _checkout_root_by_stat(target) == target or os.path.exists(os.path.join(target, "install.ps1")):
+        return True
+    return os.path.normcase(target) in here
 
 
 def is_settings_file(path: str, cwd: str = "") -> bool:
