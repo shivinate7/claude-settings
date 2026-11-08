@@ -24,7 +24,7 @@ also typed "Approved" in the lane chat at 11:55 CST. It replaces the child cloud
 222 (hook-allow-probe), whose settings file the guards refused. Arm 2, a sibling guard's `deny`
 against the hook's `allow`, was not run.
 
-Result, 2026-11-08 11:56-11:59 CST, Claude Code 2.1.319, nested `claude -p --permission-mode auto
+Result, 2026-11-08 11:56-12:00 CST, Claude Code 2.1.319, nested `claude -p --permission-mode auto
 --model sonnet`, hook `probe/hook_allow_probe.py` (branch `archive/hook-allow-probe`). The probed
 act is a Bash write of an allow rule into `.claude/settings.local.json`, not an `Agent` spawn.
 

@@ -98,7 +98,7 @@ and `opus builders 2h`:
 - `<act>` comes from a fixed catalogue in one home, a constant the gate reads (rule
   building-allow-list-is-the-constant). The act's full scope sits in the owner's words or the
   constant, never in a record a model writes. First entries, one per incident:
-  - `merge <pr>`: superseded, pending question 3. Decision `standing-merge-grant` and the "Owner Session Message" coordinator-to-runner merge carve-out in settings.json `autoMode.allow` cover the incident. No "Merge Without Review" refusal is on record after 2026-11-01. Scope if kept: `~/.claude/bin/merge <pr> --confirm` for that PR number only, in the gate. The
+  - `merge <pr>`: superseded (decision `standing-merge-grant`); question 3 answered (a). Decision `standing-merge-grant` and the "Owner Session Message" coordinator-to-runner merge carve-out in settings.json `autoMode.allow` cover the incident. No "Merge Without Review" refusal is on record after 2026-11-01. Scope if kept: `~/.claude/bin/merge <pr> --confirm` for that PR number only, in the gate. The
     cloud rule still allows any PR (section 2, the gate). The PR is required. Only the session
     tagged `cs-build:batch-runner` for the repo, never its agents: on main, every other session
     hands its merge to the batch runner (session-start hook, merge role).
@@ -247,7 +247,7 @@ a cost act, not a safety act. This plan leaves it as it is.
 
 A pair no design covers keeps the classifier as today.
 
-Recommendation: Design A as the one design, with Design B only if the computer probes of Design A
+Recommendation: Design A as the one design, with Design B only if its probes
 fail.
 
 ## 4. Page save (superseded)
@@ -272,4 +272,4 @@ Design B: one file write per grant, one file read per tool call while the file e
 4. **Agents.** Moot under section 2: `self-edit` gates nothing as written. Options were: (a) `self-edit` reaches the target's agents, as a timed override does, and `merge` stays with the batch runner; (b) the lead session only. The `[Self-Modification]` refusal was a builder's.
 5. **The gate.** Answered (a) by the 2026-11-03 sign-off (item 152 a): probe the hook gate first, the mod gate second. Option (b), the mod gate only, rested on its documented skip. The hook gate is known to load in cloud sessions.
 6. **Computer sessions.** Answered (a) by the 2026-11-03 sign-off (item 152 a): Design A only, Design B if its probes fail. Option (b), both now, was not taken; (a) keeps one home.
-7. **The cloud merge rule.** Superseded, pending question 3. Decision `standing-merge-grant` and the "Owner Session Message" coordinator-to-runner merge carve-out in settings.json `autoMode.allow` cover the incident. No "Merge Without Review" refusal is on record after 2026-11-01. `merge/cloud_allow.json` allows `merge * --confirm` for every PR.
+7. **The cloud merge rule.** Superseded (decision `standing-merge-grant`); question 3 answered (a). Decision `standing-merge-grant` and the "Owner Session Message" coordinator-to-runner merge carve-out in settings.json `autoMode.allow` cover the incident. No "Merge Without Review" refusal is on record after 2026-11-01. `merge/cloud_allow.json` allows `merge * --confirm` for every PR.
