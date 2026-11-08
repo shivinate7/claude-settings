@@ -375,6 +375,14 @@ class ReviewRecordTests(unittest.TestCase):
         self.serve(comments=[record(), record(head=OLD)])
         self.assert_blocked(self.stop(self.lane_turn(report(CLAIM))))
 
+    def test_marker_line_with_trailing_spaces_is_a_record_as_merge_reads_it(self):
+        # Catches: _newest_record's raw first-line test, which reads a record whose marker line has trailing spaces as no
+        # record, so a lane's PASS claim on a PR that merge --reviewed reads as done is refused. merge's review_marked and
+        # parse_review both strip a line's trailing whitespace.
+        body = record().replace(merge_mod.REVIEW_MARKER + "\n", merge_mod.REVIEW_MARKER + "  \n", 1)
+        self.assertTrue(merge_mod.review_marked(body), "fixture: merge does not read the marker line with trailing spaces as the marker")
+        self.assert_record_satisfies_claim(body)
+
     def test_an_unstamped_done_record_created_before_the_cutover_satisfies_a_pass_claim(self):
         # Catches: a record made before the stamp's merge, with no Stamp line, read as no record, so a lane's PASS claim on its
         # pull request is refused. merge --reviewed reads the same record as done.
@@ -460,6 +468,18 @@ class ReviewRecordTests(unittest.TestCase):
         self.assertIn("merge 12 --review-record", out["reason"], out)
         self.assertNotIn(LIVE, out["reason"], out)
         self.assertNotIn(LIVE[:7], out["reason"], out)
+
+    def test_unstamped_record_with_no_cutover_is_refused_and_the_remedy_names_the_stamp_line(self):
+        # Catches: the refusal of an unstamped record in a repo with no cutover, whose text names no Stamp line, so the
+        # reviewer is not told what the record lacks. The render command stays in the remedy.
+        self.assertIsNone(merge_mod.review_stamp_since(self.repo, "main"), "fixture: a cutover is set for main")
+        body = unstamped(record())
+        self.assertIsNone(merge_mod.parse_review(body, None, None), "fixture: merge reads the unstamped record with no cutover")
+        self.serve(comments=[body])
+        out = self.stop(self.lane_turn(report(CLAIM)))
+        self.assert_blocked(out)
+        self.assertIn("merge 12 --review-record", out["reason"], out)
+        self.assertIn("Stamp", out["reason"], "the refusal names no Stamp line for a record that has none:\n" + out["reason"])
 
     def test_full_size_comment_list_without_a_record_blocks(self):
         # Full size: 101 comments, none a record. The check reads them all, then blocks.
