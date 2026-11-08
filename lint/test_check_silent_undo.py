@@ -2401,8 +2401,10 @@ class RetireCite(unittest.TestCase):
 
 class RevivedNote(unittest.TestCase):
     """A note the branch deleted must not come back when a merge brings the base in. The notes file merges by union (the
-    real `.gitattributes` line), so a merge that conflicts at the file's end keeps the base's copy with no clash. Each case
-    runs twice: with that line, and with no `.gitattributes`, where the same merge conflicts and is resolved by hand."""
+    real `.gitattributes` line), so a merge that conflicts at the file's end keeps the base's copy with no clash. Each of the
+    first six cases runs twice: with that line, and with no `.gitattributes`, where the same merge conflicts and is resolved by
+    hand. The doubled-note cases and the reworded case run with the union line only: the doubling and the reword come from the
+    union driver, which a plain merge does not use."""
 
     ATTRIBUTES = os.path.join(os.path.dirname(HERE), ".gitattributes")  # the real file: its union line is what is under test
     NOTES = "docs/debts/notes.md"
@@ -2411,6 +2413,9 @@ class RevivedNote(unittest.TestCase):
     RETIRED = "- retired-note: a finding the branch retires (lint/check_retired.py)"
     OWN = "- branch-note: a finding the branch adds (lint/check_branch.py)"
     MAIN = "- main-note: a finding main adds after the cut (lint/check_main.py)"
+    DOUBLED = "- doubled-note: a finding a union merge doubles (lint/check_doubled.py)"
+    LATER = "- later-note: a finding main adds after the doubled note (lint/check_later.py)"
+    REWORDED = "- retired-note: a finding the branch retires, reworded (lint/check_retired.py)"
 
     def text(self, *lines):
         return "".join(line + "\n" for line in (self.HEADING,) + lines)
@@ -2418,31 +2423,36 @@ class RevivedNote(unittest.TestCase):
     def notes_at(self, rev):
         return self.r.sh("show", "%s:%s" % (rev, self.NOTES)).splitlines()
 
-    def start(self, union, retire=True):
-        """A base whose notes end in retired-note, then an unrelated main commit, so the fork point is that commit and not the
-        one that added the notes. The branch deletes retired-note, or with retire False appends a line of its own. Main then
-        appends main-note after retired-note, so the two edits meet at the end of the file. The layout file makes the notes
-        path docs/debts/notes.md, as RetireCite does."""
+    def start(self, union, retire=True, base=None, branch=None, main=None):
+        """A base whose notes hold untouched-note and retired-note, then an unrelated main commit, so the fork point is that
+        commit and not the one that added the notes. The branch deletes retired-note, or with retire False appends a line of
+        its own. Main then appends main-note after retired-note, so the two edits meet at the end of the file. `base`, `branch`
+        and `main` replace those notes lines (after the heading) for the cases that need other text. -> the branch's commit.
+        The layout file makes the notes path docs/debts/notes.md, as RetireCite does."""
+        base = (self.UNTOUCHED, self.RETIRED) if base is None else base
+        if branch is None:
+            branch = (self.UNTOUCHED,) if retire else (self.UNTOUCHED, self.RETIRED, self.OWN)
+        main = (self.UNTOUCHED, self.RETIRED, self.MAIN) if main is None else main
         r = self.r = Repo()
         self.union = union
         r.put(".claude/layout-extras.json", json.dumps({"kinds": {}, "rolled-out": True}) + "\n")
         if union:
             shutil.copyfile(self.ATTRIBUTES, os.path.join(r.dir, ".gitattributes"))
-        r.commit("notes", docs__debts__notes_md=self.text(self.UNTOUCHED, self.RETIRED))
+        r.commit("notes", docs__debts__notes_md=self.text(*base))
         r.commit("unrelated main commit", other_txt="other v1\n")
         r.push()
         r.sh("checkout", "-q", "-b", "feat")
         self.assertEqual(r.sh("check-attr", "merge", "--", self.NOTES).rsplit(": ", 1)[-1], "union" if union else "unspecified",
                          "premise: this variant's driver for the notes file")
         self.retire = None
+        edit = r.commit("the branch edits the notes", docs__debts__notes_md=self.text(*branch))
         if retire:
-            self.retire = r.commit("retire the note", docs__debts__notes_md=self.text(self.UNTOUCHED))
-        else:
-            r.commit("append a line of the branch's own", docs__debts__notes_md=self.text(self.UNTOUCHED, self.RETIRED, self.OWN))
+            self.retire = edit
         r.sh("checkout", "-q", "main")
-        r.commit("main appends", docs__debts__notes_md=self.text(self.UNTOUCHED, self.RETIRED, self.MAIN))
+        r.commit("main appends", docs__debts__notes_md=self.text(*main))
         r.push()
         r.sh("checkout", "-q", "feat")
+        return edit
 
     def merge_main(self, final=None):
         """Merges main into the branch and commits the result. self.merged is the file git wrote before any resolution. `final`,
@@ -2460,10 +2470,37 @@ class RevivedNote(unittest.TestCase):
         self.assertEqual(len(r.sh("rev-list", "--parents", "-n", "1", head).split()), 3, "premise: the head is a merge commit")
         return head
 
-    def assert_refused(self, got):
-        """One problem line names retired-note and the commit that deleted it."""
-        named = [p for p in got if "retired-note" in p and self.retire[:7] in p]
-        self.assertTrue(named, "retired-note came back through the merge, and no problem names it with %s: %r" % (self.retire[:7], got))
+    def body(self, rev):
+        """The notes lines at rev with the heading dropped: the lines a case builds the file from."""
+        return self.notes_at(rev)[1:]
+
+    def copies(self, rev):
+        """How many copies of doubled-note the notes file at rev holds."""
+        return self.body(rev).count(self.DOUBLED)
+
+    def commit_notes(self, msg, lines, on_main=False):
+        """Commits the notes file as the heading and `lines`, on the branch or on main. Main is pushed, so the check's upstream
+        holds that commit. -> the sha."""
+        if on_main:
+            self.r.sh("checkout", "-q", "main")
+        sha = self.r.commit(msg, docs__debts__notes_md=self.text(*lines))
+        if on_main:
+            self.r.push()
+            self.r.sh("checkout", "-q", "feat")
+        return sha
+
+    def drop_one_copy(self, head):
+        """The branch's commit that deletes the first copy of doubled-note at head. -> its sha."""
+        lines = self.body(head)
+        lines.remove(self.DOUBLED)
+        return self.commit_notes("delete one copy of the doubled note", lines)
+
+    def assert_refused(self, got, slug="retired-note", deleted=None):
+        """One problem line names the note and the commit that deleted it: retired-note and self.retire, unless the case names
+        another slug and commit."""
+        deleted = deleted or self.retire
+        named = [p for p in got if slug in p and deleted[:7] in p]
+        self.assertTrue(named, "%s came back through the merge, and no problem names it with %s: %r" % (slug, deleted[:7], got))
 
     def test_union_merge_that_brings_back_a_deleted_note_is_refused(self):
         self.start(union=True)
@@ -2501,6 +2538,75 @@ class RevivedNote(unittest.TestCase):
         head = self.merge_main(final=self.text(self.UNTOUCHED, self.RETIRED, self.OWN, self.MAIN))
         self.assertIn(self.UNTOUCHED, self.notes_at(head), "premise: untouched-note is in the head")
         self.assertEqual(self.r.verdict(), [])
+
+    def start_doubled(self):
+        """The branch adds doubled-note and main adds it too, at the file's end, so the union merge of main keeps two copies."""
+        return self.start(union=True, retire=False, branch=(self.UNTOUCHED, self.RETIRED, self.DOUBLED, self.OWN),
+                          main=(self.UNTOUCHED, self.RETIRED, self.MAIN, self.DOUBLED))
+
+    def test_a_dedupe_of_a_doubled_note_passes(self):
+        self.start_doubled()
+        head = self.merge_main()
+        self.assertEqual(self.copies(head), 2, "premise: the union merge doubled doubled-note")
+        head = self.drop_one_copy(head)
+        self.assertEqual(self.copies(head), 1, "premise: the branch's own delete left one copy")
+        self.assertEqual(self.r.verdict(), [], "one copy left by a dedupe was refused, as if a merge had revived the note")
+
+    def test_a_dedupe_of_two_copies_on_main_passes_without_a_merge(self):
+        self.start(union=True, retire=False, base=(self.UNTOUCHED, self.RETIRED, self.DOUBLED, self.DOUBLED),
+                   branch=(self.UNTOUCHED, self.RETIRED, self.DOUBLED),
+                   main=(self.UNTOUCHED, self.RETIRED, self.DOUBLED, self.DOUBLED, self.MAIN))
+        self.assertEqual(self.copies("main"), 2, "premise: main holds two copies of doubled-note")
+        self.assertEqual(self.copies("HEAD"), 1, "premise: the branch's own delete left one copy")
+        self.assertEqual(self.r.verdict(), [], "a dedupe of two copies on main was refused, with no merge in the branch")
+
+    def test_a_doubled_note_deduped_then_brought_back_by_a_merge_is_refused(self):  # control
+        self.start_doubled()
+        head = self.merge_main()
+        dedupe = self.drop_one_copy(head)
+        self.assertEqual(self.copies(dedupe), 1, "premise: the dedupe left one copy")
+        self.commit_notes("main keeps two copies of the doubled note", self.body("main") + [self.DOUBLED], on_main=True)
+        head = self.merge_main()
+        self.assertEqual(self.copies(head), 2, "premise: the merge of main put the second copy back")
+        self.assert_refused(self.r.verdict(), slug="doubled-note", deleted=dedupe)
+
+    def test_a_doubled_note_deleted_whole_then_brought_back_by_a_merge_is_refused(self):  # control
+        self.start_doubled()
+        head = self.merge_main()
+        whole = self.commit_notes("delete both copies of the doubled note", [l for l in self.body(head) if l != self.DOUBLED])
+        self.assertEqual(self.copies(whole), 0, "premise: the branch's delete left no copy")
+        self.commit_notes("main adds a note after the doubled note", self.body("main") + [self.LATER], on_main=True)
+        head = self.merge_main()
+        self.assertEqual(self.copies(head), 1, "premise: the union merge re-added one copy")
+        self.assert_refused(self.r.verdict(), slug="doubled-note", deleted=whole)
+
+    def test_a_dedupe_on_a_merged_in_side_branch_passes(self):
+        self.start_doubled()
+        head = self.merge_main()
+        self.assertEqual(self.copies(head), 2, "premise: the union merge doubled doubled-note")
+        self.r.sh("checkout", "-q", "-b", "side")
+        lines = self.body(head)
+        lines.remove(self.DOUBLED)
+        self.commit_notes("side deletes one copy of the doubled note", lines)
+        self.r.sh("checkout", "-q", "feat")
+        self.r.sh("merge", "--no-ff", "-m", "Merge the side branch into the branch", "side")
+        head = self.r.sh("rev-parse", "HEAD")
+        self.assertEqual(len(self.r.sh("rev-list", "--parents", "-n", "1", head).split()), 3, "premise: the head is a merge commit")
+        self.assertEqual(self.copies(head), 1, "premise: the merged side branch left one copy")
+        self.assertEqual(self.r.verdict(), [], "a dedupe on a merged-in side branch was refused as a revival")
+
+    def test_a_note_the_branch_deletes_then_re_adds_on_purpose_passes(self):  # control
+        self.start(union=True)
+        head = self.commit_notes("the branch re-adds retired-note on purpose", [self.UNTOUCHED, self.RETIRED])
+        self.assertIn(self.RETIRED, self.notes_at(head), "premise: the re-add put retired-note back in the head")
+        self.assertEqual(self.r.verdict(), [], "a note the branch deleted and then re-added on purpose was refused")
+
+    def test_a_merge_brings_back_a_deleted_note_reworded_is_refused(self):  # control
+        self.start(union=True, main=(self.UNTOUCHED, self.REWORDED, self.MAIN))
+        head = self.merge_main()
+        self.assertIn(self.REWORDED, self.notes_at(head), "premise: the union merge brought retired-note back reworded")
+        self.assertNotIn(self.RETIRED, self.notes_at(head), "premise: the head holds no copy of the original text")
+        self.assert_refused(self.r.verdict())
 
 
 if __name__ == "__main__":
