@@ -727,7 +727,10 @@ def _open_script_blocks(tokens):
             continue
         while (opens := _PS_BLOCK_OPEN.match(tok)) and len(tok) > opens.end():
             out.append(opens.group(0)[-1])
-            tok = tok[opens.end():].rstrip("})")
+            body = tok[opens.end():]
+            tok = body.rstrip("})")
+            if tok.rfind("${") > tok.rfind("}"):   # keep the `}` that closes a `${` name
+                tok = body[:body.index("}", len(tok)) + 1]
         out += _split_glued_braces(tok)
     return out
 

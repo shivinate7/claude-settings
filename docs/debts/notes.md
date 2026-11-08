@@ -60,14 +60,13 @@
 - guard-own-errors-fail-open: guard and rm_prompt_answer exit 0 on their own internal errors (guard scripts)
 - guard-remedy-needs-bash: guard remedy names sh install.sh, which Bash cannot run while the guard is missing (guard wrappers)
 - ghlock-no-compare-and-swap: GitHub API has no compare-and-swap; an expiring lock between read and PATCH could overwrite a rival's lock (merge/merge.py GhLock)
-- git-env-do-while-space: `do{1}while($x -eq 1)$env:GIT_DIR="x"` passes. A space in the condition defeats `_paren_end`. Main passes it too. Where: hooks/guard_kill.py `_split_glued_braces`. Decision: git-env-set-refused. Fix: none — rare and harmless
+- git-env-do-while-space: `do{1}while($x -eq 1)$env:GIT_DIR="x"` passes. A space in the condition defeats `_paren_end`. The spaced `do { 1 } while ($a) $env:X='x'` passes too, because `}` and `while(` are separate tokens. Main passes both. Where: hooks/guard_kill.py `_split_glued_braces`. Decision: git-env-set-refused. Fix: none — rare and harmless
 - git-env-glued-block: a glued PowerShell block opener followed by a group hides a git-env set from the guard (hooks/guard_kill.py)
 - git-env-lower-case-fold: lower-case git env names fold to the rule; no record names this as accepted (guard hooks)
 - git-env-sc-paren-value: `sc env:GIT_DIR (if($x){$null}else{"a"})` passes because the read of the value stops at the statement marker. Main refuses it. Where: hooks/guard_kill.py `_ps_env_set`. Decision: git-env-set-refused. Fix: none — rare and harmless
 - git-env-set-false-alarms: `Write-Host {$env:GIT_DIR=1}` is refused, though the block is only printed (hooks/guard_kill.py `_open_script_blocks`). Decision: git-env-set-refused. Fix: none — a printed block can run later or through a pipe, and no narrow rule kept every running form refused
 - git-env-set-indirect-forms: indirect sets (function wrapper, iex, EncodedCommand, run-time names) pass the git-env guard (hooks/guard_kill.py)
 - git-env-set-untested-forms: no case pins the PowerShell backtick escape, group-opener pattern or heredoc quote text (hooks/test_guard.py)
-- git-env-try-two-scrubs: `try{$env:GIT_DIR=$null; $env:GIT_WORK_TREE=$null}catch{}` is still refused. The trigger is a block with a `;` and two sets, whose `}` is glued to the second value. The same block with no `catch` is refused too. A space before `}` passes. A false alarm on main too. Where: hooks/guard_kill.py `_open_script_blocks`. Decision: git-env-set-refused. Fix: none — rare and harmless
 - wsl-literal-bracket-path: `wsl -e node app/[id]/x.test.mjs` is refused. A literal `[` or `]` in a test path reads as a glob. A new false alarm against main: main allowed `app/[id]/test_x.py`, and refusing it is the cost of the glob fix. Where: hooks/guard_wsl.py `_literal_test_path`. Decision: wsl-allow-list. Fix: none — rare and harmless
 - git-env-warn-session-start: the git env warning runs at session start only, so mid-session damage shows at next start (guard hooks)
 - glued-subshell-unread: (rm -rf .) and x=$(tail -f y) pass because the closing parenthesis is glued to the last word (guard_push_delete, guard_stream)
