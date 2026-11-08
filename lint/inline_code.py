@@ -1,5 +1,5 @@
 """The one home of the inline-code mask: INLINE_CODE_RE and code_span_text. It imports no other module, so the Stop
-guard (lint/report_guard.py) can read it without loading the whole linter (lint/ste_lint.py, which re-exports both)."""
+guard (lint/report_guard.py) can read it without loading the whole linter (lint/ste_lint.py, which re-exports INLINE_CODE_RE)."""
 import re
 
 # A code span opens with a whole run of backticks and closes with a run of the same length, so a backtick inside a
