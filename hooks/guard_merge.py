@@ -7,9 +7,10 @@ import fnmatch
 import json
 import os
 import re
+import sys
 
 from guard_core import (
-    _absolute, _git, _git_subcommand_index, _segment_git_c_target, basename, cap_safe, command_root,
+    _absolute, _git, _git_subcommand_index, _segment_cd_target, _segment_git_c_target, basename, cap_safe, command_root,
     git_calls, inline_script, inner_commands, resolve_command, resolve_default_base, segment_tokens, split_segments,
 )
 import own_session  # the one home of the own get_session read, small so report_guard imports it too
@@ -807,11 +808,12 @@ ROLE_REASON = (
 )
 
 
-def merge_args_of(segment: str):
+def merge_args_of(segment: str, cd=None):
     """Return the arguments after the command word when the segment runs the merge tool, else None.
 
     The command word is the shim (`merge`, `~/.claude/bin/merge`, `bin/merge`) or python on
-    `merge/merge.py` or `merge/launch.py`; for python, the arguments follow the script.
+    `merge/merge.py` or `merge/launch.py`; for python, the arguments follow the script. A script named with no
+    folder runs from the folder of `cd`, the last cd target of the segments before this one (see merge_calls).
     """
     tokens = segment_tokens(segment)
     if not tokens:
@@ -823,19 +825,40 @@ def merge_args_of(segment: str):
     rest = tokens[index + 1:]
     if word.startswith("python"):
         script = next((t for t in rest if not t.startswith("-")), None)
-        if script is None or basename(script) not in ("merge.py", "launch.py") \
-                or basename(os.path.dirname(script.replace("\\", "/"))) != "merge":
+        if script is None:
+            return None
+        folder = os.path.dirname(script.replace("\\", "/")) or (cd or "").replace("\\", "/").rstrip("/")
+        if basename(script) not in ("merge.py", "launch.py") or basename(folder) != "merge":
             return None
         return rest[rest.index(script) + 1:]
     return rest if word == "merge" else None
 
 
-def role_call_of(segment: str):
+def merge_calls(stripped: str):
+    """Yield (segment, arguments) for each segment of the command that runs the merge tool. The last `cd` target of the
+    segments before a segment is its folder (guard_core's `_segment_cd_target`, the reader the push and delete rules use)."""
+    cd = None
+    for segment in split_segments(stripped):
+        if not segment.strip():
+            continue
+        rest = merge_args_of(segment, cd)
+        if rest is not None:
+            yield segment, rest
+        tokens = segment_tokens(segment)
+        target = _segment_cd_target(tokens) if tokens else None
+        if target is not None:
+            cd = target
+
+
+def role_call_of(segment: str, cd=None):
     """Return the tier word after the role flag when the segment runs the merge tool with it, else None.
     A role flag with no value gives ''."""
-    rest = merge_args_of(segment)
-    if rest is None:
-        return None
+    rest = merge_args_of(segment, cd)
+    return None if rest is None else role_flag_of(rest)
+
+
+def role_flag_of(rest):
+    """The tier word after the role flag in a merge call's arguments, else None; a flag with no value gives ''."""
     for at, arg in enumerate(rest):
         if arg == "--role":
             return rest[at + 1] if at + 1 < len(rest) else ""
@@ -856,12 +879,23 @@ def _own_get_session_tags(transcript: str, session_id: str):
     return _own_session_read(transcript, session_id)[0]
 
 
+def _own_turn_tags(transcript: str, session_id: str):
+    """The tags of the own get_session result read after the turn's last incoming message (a user's, or a cross-session
+    one), else None: a record read before it is stale, since another session may have tagged this one since. The turn
+    start is lint/_transcript.py's `is_incoming`, the one test of a record that starts a turn."""
+    lint = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "lint")
+    if lint not in sys.path:
+        sys.path.append(lint)
+    import _transcript
+    return own_session.own_session_read(transcript, session_id, turn_start=_transcript.is_incoming)[0]
+
+
 def role_proof_hit(stripped: str, transcript: str) -> str:
     """Return the matched call when a segment runs the merge tool with a role the own record does not
     prove, else ''. Fails closed inside the clause: any error in the reads is a refusal, because the
     allow rule has no classifier behind it and the guard-wide crash path fails open."""
-    for segment in split_segments(stripped):
-        tier = role_call_of(segment) if segment.strip() else None
+    for _, rest in merge_calls(stripped):
+        tier = role_flag_of(rest)
         if tier is None:
             continue
         try:  # cost: one transcript read, only on a role-flag call
@@ -906,16 +940,17 @@ def merge_roots_hit(stripped: str, transcript: str) -> str:
     the own get_session record tags cs-repo, else ''. Only a batch runner's record is compared; a record that is not one's
     allows. No readable own record gives ROOTS_REMEDY. A call with no `--root`, or with no `--reviewed`, is not this rule's.
     Fails closed inside the clause, like role_proof_hit: the guard-wide crash path fails open."""
-    for segment in split_segments(stripped):
-        rest = merge_args_of(segment) if segment.strip() else None
-        if rest is None or "--reviewed" not in rest or not any(a == "--root" or a.startswith("--root=") for a in rest):
+    for _, rest in merge_calls(stripped):
+        if "--reviewed" not in rest or not any(a == "--root" or a.startswith("--root=") for a in rest):
             continue
         try:  # cost: one transcript read, only on a --reviewed call with --root
             from override import remote_session_id
             from shared_names import REPO_TAG, repo_tag_names
             names = _root_names(rest)
             own_id = remote_session_id()
-            tags = _own_get_session_tags(transcript, own_id) if own_id and transcript else None
+            if not own_id:  # a local session has no cs tags: it is no batch runner
+                continue
+            tags = _own_turn_tags(transcript, own_id) if transcript else None
             if not isinstance(tags, (list, tuple)):
                 return ROOTS_REMEDY
             if ROLE_TAG_PREFIX + "batch-runner" not in tags:
@@ -923,7 +958,7 @@ def merge_roots_hit(stripped: str, transcript: str) -> str:
             tagged = [t[len(REPO_TAG):] for t in tags
                       if isinstance(t, str) and t.startswith(REPO_TAG) and _ROOT_REPO_NAME.fullmatch(t[len(REPO_TAG):])]
             missing = [t for t in tagged if not any(repo_tag_names(REPO_TAG + t, n) for n in names)]
-            extra = [n for n in names if not any(repo_tag_names(tag, n) for tag in tags)]
+            extra = [n or "(empty)" for n in names if not n or not any(repo_tag_names(tag, n) for tag in tags)]
         except Exception:
             return ROOTS_REMEDY
         if missing or extra:

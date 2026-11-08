@@ -46,20 +46,25 @@ def _record_json(body):
     return record
 
 
-def own_session_read(transcript, own_id, created=False):
+def own_session_read(transcript, own_id, created=False, turn_start=None):
     """(tags, tagged_after, parent): the tags and parent_session_id of the newest get_session result
     whose ccr.id is own_id, else None for each, and whether a set_session_tags call follows that
     result. With `created`, a create_session call whose result names own_id is a record too: its tags
     are the call's input.tags, its parent is None unless the input names parent_session_id. The newest
-    record of either kind decides. Without it, only get_session counts."""
+    record of either kind decides. Without it, only get_session counts. With `turn_start`, a function of one
+    transcript record, a record it accepts clears what was read so far: only a record read after the last such
+    record counts."""
     uses, newest, parent, tagged_after = set(), None, None, False
     creates = {}  # tool_use id -> (tags, parent) a create_session call set
     with open(transcript, encoding="utf-8") as handle:
         for line in handle:
             try:
-                content = json.loads(line)["message"]["content"]
+                rec = json.loads(line)
+                content = rec["message"]["content"]
             except (ValueError, KeyError, TypeError):
                 continue
+            if turn_start is not None and turn_start(rec):
+                newest, parent, tagged_after = None, None, False
             if not isinstance(content, list):
                 continue
             for block in content:
