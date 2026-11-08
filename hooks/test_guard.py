@@ -11107,7 +11107,7 @@ SCRATCH_AGENT = "9f3c1a7e5b2d4c8f6"           # an agent's id on its payload
 NO_LINK_HERE = "this host gives no symlink, so the link case does not run here"
 
 
-def scratch_deny(name, command, cwd=NOGIT, session=FAKE_SESSION, agent_id=SCRATCH_AGENT):
+def scratch_refuse(name, command, cwd=NOGIT, session=FAKE_SESSION, agent_id=SCRATCH_AGENT):
     """One case: an agent's commit of a scratchpad message file is refused, and the remedy names `-F -`."""
     sh(name, command, "deny", SCRATCH_RULE, carries=SCRATCH_REMEDY, cwd=cwd, session=session,
        agent_id=agent_id)
@@ -11121,37 +11121,37 @@ def scratch_allow(name, command, cwd=NOGIT, session=FAKE_SESSION, agent_id=SCRAT
 SCRATCH_CMD = VCS + " commit -F " + slash(SCRATCH_MSG)
 # Each flag form reaches its own branch of message_sources: the long form, the value after the flag,
 # the glued value, a cluster of short flags, and the amend act.
-scratch_deny("scratchpad-message: an agent's commit -F of a scratchpad file is refused", SCRATCH_CMD)
-scratch_deny("scratchpad-message: an agent's commit --file= of a scratchpad file is refused",
+scratch_refuse("scratchpad-message: an agent's commit -F of a scratchpad file is refused", SCRATCH_CMD)
+scratch_refuse("scratchpad-message: an agent's commit --file= of a scratchpad file is refused",
              VCS + " commit --file=" + slash(SCRATCH_MSG))
-scratch_deny("scratchpad-message: an agent's commit --file of a scratchpad file is refused",
+scratch_refuse("scratchpad-message: an agent's commit --file of a scratchpad file is refused",
              VCS + " commit --file " + slash(SCRATCH_MSG))
-scratch_deny("scratchpad-message: an agent's commit -F<file> glued of a scratchpad file is refused",
+scratch_refuse("scratchpad-message: an agent's commit -F<file> glued of a scratchpad file is refused",
              VCS + " commit -F" + slash(SCRATCH_MSG))
-scratch_deny("scratchpad-message: an agent's commit -aF <file> cluster of a scratchpad file is refused",
+scratch_refuse("scratchpad-message: an agent's commit -aF <file> cluster of a scratchpad file is refused",
              VCS + " commit -aF " + slash(SCRATCH_MSG))
-scratch_deny("scratchpad-message: an agent's commit --amend -F of a scratchpad file is refused",
+scratch_refuse("scratchpad-message: an agent's commit --amend -F of a scratchpad file is refused",
              VCS + " commit --amend -F " + slash(SCRATCH_MSG))
 # A relative path resolves against the call's cwd, which here is the scratchpad folder itself.
-scratch_deny("scratchpad-message: an agent's relative -F from inside its scratchpad is refused",
+scratch_refuse("scratchpad-message: an agent's relative -F from inside its scratchpad is refused",
              VCS + " commit -F commit_msg.txt", cwd=os.path.dirname(SCRATCH_MSG))
 # The file is judged by its path, so an empty file, another session's file and a call with no
 # session id are all refused alike.
-scratch_deny("scratchpad-message: an agent's commit -F of an empty scratchpad file is refused",
+scratch_refuse("scratchpad-message: an agent's commit -F of an empty scratchpad file is refused",
              VCS + " commit -F " + slash(SCRATCH_EMPTY))
-scratch_deny("scratchpad-message: an agent's commit -F of another session's scratchpad file is refused",
+scratch_refuse("scratchpad-message: an agent's commit -F of another session's scratchpad file is refused",
              VCS + " commit -F " + slash(SCRATCH_OTHER_MSG))
-scratch_deny("scratchpad-message: an agent's commit -F of a scratchpad file with no session id is refused",
+scratch_refuse("scratchpad-message: an agent's commit -F of a scratchpad file with no session id is refused",
              SCRATCH_CMD, session=None)
 # A scanner reads the commit after a comment opener in a string, a multi-line string, or a lone quote.
-scratch_deny("scratchpad-message: a comment opener in a string does not hide the -F scratchpad commit",
+scratch_refuse("scratchpad-message: a comment opener in a string does not hide the -F scratchpad commit",
              'echo "# not a comment" && ' + SCRATCH_CMD)
-scratch_deny("scratchpad-message: a comment opener in a multi-line string does not hide the -F scratchpad commit",
+scratch_refuse("scratchpad-message: a comment opener in a multi-line string does not hide the -F scratchpad commit",
              'echo "first\n# second"\n' + SCRATCH_CMD)
-scratch_deny("scratchpad-message: a lone quote in text does not hide the -F scratchpad commit",
+scratch_refuse("scratchpad-message: a lone quote in text does not hide the -F scratchpad commit",
              LONE_PAIR + SCRATCH_CMD)
 if LINKS_MADE:
-    scratch_deny("scratchpad-message: an agent's commit -F of a link outside its scratchpad, into it, is refused",
+    scratch_refuse("scratchpad-message: an agent's commit -F of a link outside its scratchpad, into it, is refused",
                  VCS + " commit -F " + slash(SCRATCH_LINK_IN))
 else:
     skip_case("scratchpad-message: an agent's commit -F of a link into its scratchpad is refused", NO_LINK_HERE)
@@ -11179,11 +11179,11 @@ else:
 # The directory the commit runs in is set in the same command: by a variable, by pushd, or by git's own
 # -C. Each form must still deny, judged from the directory the command really runs in.
 SCRATCH_DIR = slash(os.path.dirname(SCRATCH_MSG))
-scratch_deny("scratchpad-message: an agent's commit -F through a variable set in the same command is refused",
+scratch_refuse("scratchpad-message: an agent's commit -F through a variable set in the same command is refused",
              "S=" + SCRATCH_DIR + "; " + VCS + " commit -F $S/commit_msg.txt")
-scratch_deny("scratchpad-message: an agent's commit -F after pushd into its scratchpad is refused",
+scratch_refuse("scratchpad-message: an agent's commit -F after pushd into its scratchpad is refused",
              "pushd " + SCRATCH_DIR + " && " + VCS + " commit -F commit_msg.txt")
-scratch_deny("scratchpad-message: an agent's commit -C . -F after cd into its scratchpad is refused",
+scratch_refuse("scratchpad-message: an agent's commit -C . -F after cd into its scratchpad is refused",
              "cd " + SCRATCH_DIR + " && " + VCS + " -C . commit -F commit_msg.txt")
 # The control for the pushd form: the same directory move, to a folder outside every scratchpad, allows.
 scratch_allow("scratchpad-message: an agent's commit -F of a relative file after pushd outside every scratchpad is allowed",
