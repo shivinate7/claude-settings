@@ -423,10 +423,18 @@ class CostPinTests(unittest.TestCase):
                            "- **Cost:** Reads `state/k3.json`; `web/foo.spec.jsx` proves it.\n"
                            "- **Cost:** Reads `state/k4.json`; `web/foo.spec.mjs` proves it.\n"
                            "- **Cost:** Reads `state/k5.json`; `web/foo.test.tsx` proves it.\n"
-                           "- **Cost:** Each run names `web/foo.spec.tsx` and `web/foo.spec.mjs` once. "
+                           "- **Cost:** Reads `state/k6.json`; `web/foo.spec.cjs` proves it.\n"
+                           "- **Cost:** Reads `state/k7.json`; `web/foo.spec.mts` proves it.\n"
+                           "- **Cost:** Reads `state/k8.json`; `web/foo.spec.cts` proves it.\n"
+                           "- **Cost:** Reads `state/k9.json`; `web/foo.test.cjs` proves it.\n"
+                           "- **Cost:** Reads `state/k10.json`; `web/foo.test.mts` proves it.\n"
+                           "- **Cost:** Each run names `web/foo.spec.tsx`, `web/foo.spec.mjs`, `web/foo.spec.cjs`, "
+                           "`web/foo.spec.mts`, `web/foo.spec.cts`, `web/foo.test.cjs` and `web/foo.test.mts` once. "
                            "It also reads `state/real.json` once.\n")
         for path, name in (("web/foo.spec.js", "k1"), ("web/foo.spec.tsx", "k2"), ("web/foo.spec.jsx", "k3"),
-                           ("web/foo.spec.mjs", "k4"), ("web/foo.test.tsx", "k5")):
+                           ("web/foo.spec.mjs", "k4"), ("web/foo.test.tsx", "k5"),
+                           ("web/foo.spec.cjs", "k6"), ("web/foo.spec.mts", "k7"), ("web/foo.spec.cts", "k8"),
+                           ("web/foo.test.cjs", "k9"), ("web/foo.test.mts", "k10")):
             self.put(path, "// cases\n%s.json is read\n" % name)
         self.assert_found([row("candidates.md", text, "state/real.json", "state/real.json")])
 
