@@ -2428,25 +2428,27 @@ class NotesUnionRevival(unittest.TestCase):
     def rows_at(self, r, rev, path):
         return r.sh("show", "%s:%s" % (rev, path)).splitlines()
 
-    def base(self, path, union, rows=None, attrs=None):
+    def base(self, path, union, rows=None, attrs=None, extra_base=None):
         """origin/main holds `rows` (ROWS by default) at `path`; with union, main's .gitattributes gives `path` merge=union.
-        Without union, `attrs` (when given) is main's .gitattributes text."""
+        Without union, `attrs` (when given) is main's .gitattributes text. extra_base maps more paths main holds, path -> text."""
         r = Repo()
         if union:
             attrs = "%s merge=union\n" % path
         if attrs is not None:
             r.put(".gitattributes", attrs)
         r.put(path, self.text(self.ROWS if rows is None else rows))
+        for name, body in (extra_base or {}).items():
+            r.put(name, body)
         r.commit("base")
         r.push()
         return r
 
-    def build(self, path, a_rows, b_rows, order, union=True, b_msg="Merge lane B", keep=None, rows=None, ff_first=False, extra_b=None, attrs=None):
+    def build(self, path, a_rows, b_rows, order, union=True, b_msg="Merge lane B", keep=None, rows=None, ff_first=False, extra_b=None, attrs=None, extra_base=None):
         """The batch shape: integ is origin/main with lane A and lane B merged in by local `git merge --no-ff`, one merge
         commit each, in `order`. ff_first fast-forwards integ to lane A instead. A conflict in a file without merge=union
         is resolved by hand to `keep`. extra_b maps more paths lane B adds, path -> text. Without union, attrs is main's
-        .gitattributes text (see base). -> (repo, integ head)."""
-        r = self.base(path, union, rows, attrs)
+        .gitattributes text (see base), and extra_base maps more paths main holds (see base). -> (repo, integ head)."""
+        r = self.base(path, union, rows, attrs, extra_base)
         for lane, rows_ in (("A", a_rows), ("B", b_rows)):
             r.sh("checkout", "-q", "-b", "lane" + lane, "origin/main")
             r.put(path, self.text(rows_))
@@ -2642,6 +2644,21 @@ class NotesUnionRevival(unittest.TestCase):
                 self.assertIn(self.GAMMA, rows, "premise: the union kept the old text beside its rewrite")
                 self.assertIn(self.GAMMA_NEW, rows, "premise: the rewrite is in the final head")
                 self.assert_fails_naming(r, head, self.GAMMA)
+
+    def test_a_union_rule_only_in_a_subdirectory_gitattributes_still_revives_the_row_and_fails(self):
+        """The union rule sits in docs/debts/.gitattributes, and no root .gitattributes holds it. A gate that reads only the
+        root misses the rule, so it passes the row the union merge revived."""
+        sub = "docs/debts/.gitattributes"
+        for order in self.ORDERS:
+            for attrs in self.NO_UNION_RULES:
+                with self.subTest(order=order, attrs=attrs):
+                    r, head = self.build(self.PATH, self.ROWS[:2], self.ROWS + [self.NEW], order, union=False, attrs=attrs,
+                                         extra_base={sub: "notes.md merge=union\n"})
+                    self.assertNotIn("merge=union", r.sh("show", "origin/main:.gitattributes", ok=False), "premise: the root .gitattributes holds the union rule")
+                    self.assertIn("merge=union", r.sh("show", "origin/main:%s" % sub), "premise: the subdirectory .gitattributes lacks the union rule")
+                    self.assertIn("union", r.sh("check-attr", "merge", "--", self.PATH), "premise: git does not read the subdirectory rule for the notes file")
+                    self.assertIn(self.GAMMA, self.rows_at(r, head, self.PATH), "premise: the union merge revived the deleted row")
+                    self.assert_fails_naming(r, head, self.GAMMA)
 
     @contextlib.contextmanager
     def git_below_240(self):
