@@ -7,7 +7,7 @@ record numbers, waits on checks or merges. It releases the lock when it ends. Tw
 lock for one base at once, with two exceptions until each old-code run exits (decision
 `merge-reinstalls-from-main`: each merge reinstalls from main). An old-code run still on the deleted API lock
 can delete a new take. A run older than c53 takes the old name `refs/merge-lock/<base>` and never reads the
-new name, so it can hold the old name while a new run holds the new one. Code: `confirm` in
+new name. So it can hold the old name while a new run holds the new one. Code: `confirm` in
 `merge/merge.py`.
 
 - **Holder.** The lock is the ref `refs/heads/merge-lock/<base>`. Its commit message holds `expires`, an
