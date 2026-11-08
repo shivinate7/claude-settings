@@ -11687,6 +11687,11 @@ class PullsHost(merge.Host):
             self.required, self.protection = "protection", list(required)
         self.compare_reads = []  # (first operand, second operand) of each compare read
 
+    def ancestry(self, base, shas):
+        """The batch line's containment test (merge.Host.ancestry), answered through this fake's holds_head: the compares table decides, and each
+        compare read is counted in compare_reads, as it was before the batch line read git. `shas` and `base` are not needed to answer."""
+        return self.holds_head
+
     def gh(self, args, cwd=None):
         if args[:2] == ["run", "list"]:
             return 0, json.dumps(self.workflow_runs.get(args[args.index("--commit") + 1], []))
@@ -14045,6 +14050,197 @@ unexpected(method + " " + rel)
         self.assert_done(alpha, 5)
         self.assertEqual(batch_lines_of(alpha), [], "alpha names a batch line as well as unknown:\n" + out)
         self.assertEqual(batch_lines_of(lines[j:]), ["open batch now: o/bravo #9"], out)
+
+    def stacked_hosts(self, compares=None, draft9=False):
+        """alpha: done #5, done #6 stacked on #5 (its base is #5's head branch), and #9, the integration pull request, open with no record."""
+        heads = {n: hex_head(str(n)) for n in (5, 6, 9)}
+        pulls = [batch_pull(5, heads[5]), batch_pull(6, heads[6], base="feat5"), batch_pull(9, heads[9], draft=draft9)]
+        comments = [record_of(5, heads[5]), record_of(6, heads[6])]
+        return {self.alpha: root_host("o/alpha", pulls=pulls, comments=comments, check_rows={h: green() for h in heads.values()}, compares=compares)}
+
+    def test_a_done_pr_stacked_on_a_done_base_pr_is_named_after_it(self):
+        # #6's base is #5's head branch, so #6 is stacked on #5. Nothing holds either head: both are named, #5 first.
+        head5, head6 = hex_head("5"), hex_head("6")
+        pulls = [batch_pull(5, head5), batch_pull(6, head6, base="feat5")]
+        hosts = {self.alpha: root_host("o/alpha", pulls=pulls, comments=[record_of(5, head5), record_of(6, head6)],
+                                       check_rows={head5: green(), head6: green()})}
+        rc, out, err = self.run_roots("--reviewed", "--root", self.alpha, hosts=hosts)
+        self.assertEqual(rc, 0, out + err)
+        block = by_repo(self, out, "o/alpha")["o/alpha"]
+        self.assert_done(block, 5, 6)
+        self.assertEqual(batch_lines_of(block), ["open batch now: o/alpha #5 #6"], "a done pull request stacked on a done base pull request is not named:\n" + out)
+
+    def test_a_done_child_with_a_lower_number_prints_after_its_base_pr(self):
+        # #4 is stacked on #8, a done pull request on main. Ascending order would print #4 first: a stacked child prints after its base.
+        head4, head8 = hex_head("4"), hex_head("8")
+        pulls = [batch_pull(8, head8), batch_pull(4, head4, base="feat8")]
+        hosts = {self.alpha: root_host("o/alpha", pulls=pulls, comments=[record_of(8, head8), record_of(4, head4)],
+                                       check_rows={head8: green(), head4: green()})}
+        rc, out, err = self.run_roots("--reviewed", "--root", self.alpha, hosts=hosts)
+        self.assertEqual(rc, 0, out + err)
+        block = by_repo(self, out, "o/alpha")["o/alpha"]
+        self.assert_done(block, 4, 8)
+        self.assertEqual(batch_lines_of(block), ["open batch now: o/alpha #8 #4"], out)
+
+    def test_a_stack_descendant_whose_head_holds_its_base_head_does_not_hold_it_out(self):
+        # The compare of head 5 with head 6 reads ahead, so #6 contains #5's head. #6 is #5's stack descendant, not a holder: both are named.
+        head5, head6 = hex_head("5"), hex_head("6")
+        pulls = [batch_pull(5, head5), batch_pull(6, head6, base="feat5")]
+        hosts = {self.alpha: root_host("o/alpha", pulls=pulls, comments=[record_of(5, head5), record_of(6, head6)],
+                                       check_rows={head5: green(), head6: green()}, compares={(head5, head6): "ahead"})}
+        rc, out, err = self.run_roots("--reviewed", "--root", self.alpha, hosts=hosts)
+        self.assertEqual(rc, 0, out + err)
+        block = by_repo(self, out, "o/alpha")["o/alpha"]
+        self.assert_done(block, 5, 6)
+        self.assertEqual(batch_lines_of(block), ["open batch now: o/alpha #5 #6"], "a stack descendant held its base pull request out:\n" + out)
+
+    def test_a_stacked_child_whose_base_pr_is_not_done_stays_out(self):
+        # #5 is open and not done (a failed round), so #6, done and stacked on #5, is not named. #9, done on main, is named, and the line prints.
+        head5, head6, head9 = hex_head("5"), hex_head("6"), hex_head("9")
+        pulls = [batch_pull(5, head5), batch_pull(6, head6, base="feat5"), batch_pull(9, head9)]
+        comments = [record_of(5, head5, rounds=OPEN_ROUNDS), record_of(6, head6), record_of(9, head9)]
+        hosts = {self.alpha: root_host("o/alpha", pulls=pulls, comments=comments, check_rows={h: green() for h in (head5, head6, head9)})}
+        rc, out, err = self.run_roots("--reviewed", "--root", self.alpha, hosts=hosts)
+        self.assertEqual(rc, 0, out + err)
+        block = by_repo(self, out, "o/alpha")["o/alpha"]
+        five = pr_lines(block, 5)
+        self.assertEqual(len(five), 1, "want one line for #5:\n" + out)
+        self.assertNotIn(" done: ", five[0], "the control: #5 is not done:\n" + out)
+        self.assert_done(block, 6, 9)
+        self.assertEqual(batch_lines_of(block), ["open batch now: o/alpha #9"], "a child whose base pull request is not done is named:\n" + out)
+
+    def test_a_stacked_child_is_held_out_when_an_open_pr_holds_its_base_pr(self):
+        # The integration #9 holds #5's head, so #5 is held out, and #6, stacked on #5, goes out with it. #9 is a draft or ready.
+        # The control with no hold is the stacked case above: both named.
+        for draft9 in (True, False):
+            with self.subTest(draft=draft9):
+                rc, out, err = self.run_roots("--reviewed", "--root", self.alpha,
+                                              hosts=self.stacked_hosts({(hex_head("5"), hex_head("9")): "ahead"}, draft9))
+                self.assertEqual(rc, 0, out + err)
+                block = by_repo(self, out, "o/alpha")["o/alpha"]
+                self.assert_done(block, 5, 6)
+                self.assertEqual(batch_lines_of(block), [], "a stacked child is named though an open pull request holds its base:\n" + out)
+
+    def test_a_stacked_child_is_named_when_its_base_pr_head_is_already_in_main(self):
+        # #5's head is identical to main, so main holds #5's head and no batch line names #5. #6, stacked on #5, is named: the base holds its
+        # base pull request's head, so that head is not left to merge. Both states of #5, done and open, are covered.
+        head5, head6 = hex_head("5"), hex_head("6")
+        compares = {(head5, "main"): "identical", ("main", head5): "identical"}
+        for done5 in (True, False):
+            with self.subTest(done5=done5):
+                five = record_of(5, head5) if done5 else record_of(5, head5, rounds=OPEN_ROUNDS)
+                pulls = [batch_pull(5, head5), batch_pull(6, head6, base="feat5")]
+                hosts = {self.alpha: root_host("o/alpha", pulls=pulls, comments=[five, record_of(6, head6)],
+                                               check_rows={head5: green(), head6: green()}, compares=compares)}
+                rc, out, err = self.run_roots("--reviewed", "--root", self.alpha, hosts=hosts)
+                self.assertEqual(rc, 0, out + err)
+                block = by_repo(self, out, "o/alpha")["o/alpha"]
+                self.assert_done(block, 6)
+                self.assertEqual(batch_lines_of(block), ["open batch now: o/alpha #6"],
+                                 "a stacked child whose base head the base holds is not named:\n" + out)
+
+    def test_a_chain_that_ends_on_a_branch_no_open_pr_heads_stays_out(self):
+        # #6 is based on the branch ghost, which no open pull request heads, so the chain of #6 never reaches main. #7 is stacked on #6 and stays
+        # out with it, though both are done. #5, done on main, is named.
+        head5, head6, head7 = hex_head("5"), hex_head("6"), hex_head("7")
+        pulls = [batch_pull(5, head5), batch_pull(6, head6, base="ghost"), batch_pull(7, head7, base="feat6")]
+        comments = [record_of(5, head5), record_of(6, head6), record_of(7, head7)]
+        hosts = {self.alpha: root_host("o/alpha", pulls=pulls, comments=comments,
+                                       check_rows={head5: green(), head6: green(), head7: green()})}
+        rc, out, err = self.run_roots("--reviewed", "--root", self.alpha, hosts=hosts)
+        self.assertEqual(rc, 0, out + err)
+        block = by_repo(self, out, "o/alpha")["o/alpha"]
+        self.assert_done(block, 5, 6, 7)
+        self.assertEqual(batch_lines_of(block), ["open batch now: o/alpha #5"], "a chain that ends off main is named:\n" + out)
+
+    def test_the_batch_line_reads_git_once_per_root_and_reads_no_compare(self):
+        # alpha: done #5, #6 and #7, and open #8 and #9 (a draft), which hold nothing. bravo: one done #4. The batch line reads each root's origin
+        # through git: one fetch by sha that names the open heads, and one rev-list, per root with a done pull request. No compare is read.
+        alpha = {n: self.lane_commit(self.alpha, n) for n in (5, 6, 7, 8, 9)}
+        bravo4 = self.lane_commit(self.bravo, 4)
+        self.per_root_gh({
+            self.alpha: self.root_state("o/alpha", pulls=[batch_pull(n, alpha[n], draft=n == 9) for n in sorted(alpha)],
+                                        comments=[record_of(n, alpha[n]) for n in (5, 6, 7)], check_rows={sha: green() for sha in alpha.values()}),
+            self.bravo: self.root_state("o/bravo", pulls=[batch_pull(4, bravo4)], comments=[record_of(4, bravo4)], check_rows={bravo4: green()}),
+        })
+        real_git, calls = merge.git, []
+
+        def counting(cwd, *a, input=None):  # the one git helper of merge.py: each start is one call, with its verb and whether it names a sha
+            calls.append((os.path.realpath(cwd), a[0], any(re.fullmatch(r"[0-9a-f]{40}", x) for x in a[1:])))
+            return real_git(cwd, *a, input=input)
+        with unittest.mock.patch.object(merge, "git", counting):
+            rc, out, err = self.run_roots("--reviewed", "--root", self.alpha, "--root", self.bravo, hosts=None)
+        self.assertEqual(rc, 0, out + err)
+        self.assertEqual(self.compare_routes(), [], "the batch line read GitHub compares:\n" + out)
+        blocks = by_repo(self, out, "o/alpha", "o/bravo")
+        self.assertEqual(batch_lines_of(blocks["o/alpha"]), ["open batch now: o/alpha #5 #6 #7"], out)
+        self.assertEqual(batch_lines_of(blocks["o/bravo"]), ["open batch now: o/bravo #4"], out)
+        for root in (self.alpha, self.bravo):
+            with self.subTest(root=root):
+                fetched = [c for c in calls if c[0] == root and c[1] == "fetch" and c[2]]
+                self.assertEqual(len(fetched), 1, f"git starts {len(fetched)} fetches by sha for {root}, want 1: {calls}")
+                listed = [c for c in calls if c[0] == root and c[1] == "rev-list"]
+                self.assertLessEqual(len(listed), 1, f"git starts {len(listed)} rev-lists for {root}, want at most 1: {calls}")
+
+    def test_a_real_head_that_descends_from_a_done_head_holds_it_out(self):
+        # #6's real head descends from #5's, so the open #6 holds #5 out. #6 is a draft with no record. #7, done and unrelated, is named.
+        head5 = self.lane_commit(self.alpha, 5)
+        head6 = self.lane_commit(self.alpha, 6, parent=head5)
+        head7 = self.lane_commit(self.alpha, 7)
+        self.per_root_gh({self.alpha: self.root_state(
+            "o/alpha", pulls=[batch_pull(5, head5), batch_pull(6, head6, draft=True), batch_pull(7, head7)],
+            comments=[record_of(5, head5), record_of(7, head7)], check_rows={h: green() for h in (head5, head6, head7)},
+            compares={f"{head5}...{head6}": "ahead"})})
+        rc, out, err = self.run_roots("--reviewed", "--root", self.alpha, hosts=None)
+        self.assertEqual(rc, 0, out + err)
+        block = by_repo(self, out, "o/alpha")["o/alpha"]
+        self.assert_done(block, 5, 7)
+        self.assertEqual(self.batch_numbers(block), [7], "#5, whose head an open pull request descends from, is named:\n" + out)
+
+    def test_a_real_head_already_in_main_is_held_out(self):
+        # main moves to #5's head, so #5 is in the base and no batch line names it. #7, a head that branches from the old main, is named.
+        old_main = self.main_sha(self.alpha)
+        head5 = self.lane_commit(self.alpha, 5)
+        self.advance_main(self.alpha, head5)
+        head7 = self.lane_commit(self.alpha, 7, parent=old_main)
+        self.per_root_gh({self.alpha: self.root_state(
+            "o/alpha", pulls=[batch_pull(5, head5), batch_pull(7, head7)], comments=[record_of(5, head5), record_of(7, head7)],
+            check_rows={head5: green(), head7: green()}, compares={f"{head5}...main": "identical"})})
+        rc, out, err = self.run_roots("--reviewed", "--root", self.alpha, hosts=None)
+        self.assertEqual(rc, 0, out + err)
+        block = by_repo(self, out, "o/alpha")["o/alpha"]
+        self.assert_done(block, 5, 7)
+        self.assertEqual(self.batch_numbers(block), [7], "#5, whose head main already holds, is named:\n" + out)
+
+    def test_unheld_real_heads_are_named(self):
+        # The control for the two real-head holds: two real heads on main that neither contains. Both are named.
+        head5, head6 = self.lane_commit(self.alpha, 5), self.lane_commit(self.alpha, 6)
+        self.per_root_gh({self.alpha: self.root_state(
+            "o/alpha", pulls=[batch_pull(5, head5), batch_pull(6, head6)], comments=[record_of(5, head5), record_of(6, head6)],
+            check_rows={head5: green(), head6: green()})})
+        rc, out, err = self.run_roots("--reviewed", "--root", self.alpha, hosts=None)
+        self.assertEqual(rc, 0, out + err)
+        block = by_repo(self, out, "o/alpha")["o/alpha"]
+        self.assert_done(block, 5, 6)
+        self.assertEqual(batch_lines_of(block), ["open batch now: o/alpha #5 #6"], out)
+
+    def test_a_head_the_origin_lacks_is_unknown_and_never_read_as_not_held(self):
+        # #8, open, has a head the origin does not have. The fetch fails, so the batch line is unknown: #5 is not named, since the missing
+        # head might hold it. rc is 1, and the root's own lines still print.
+        head5, missing = self.lane_commit(self.alpha, 5), hex_head("8")
+        self.per_root_gh({self.alpha: self.root_state("o/alpha", pulls=[batch_pull(5, head5), batch_pull(8, missing)],
+                                                      comments=[record_of(5, head5)], check_rows={head5: green(), missing: green()})})
+        rc, out, err = self.run_roots("--reviewed", "--root", self.alpha, hosts=None)
+        self.assertEqual(rc, 1, out + err)
+        self.assertNotIn("Traceback", err)
+        lines = out.splitlines()
+        self.assertEqual(batch_lines_of(lines), [], "a batch line names pull requests though the origin lacks an open head:\n" + out)
+        unknown = [l for l in lines if l.startswith("batch line unknown (")]
+        self.assertEqual(len(unknown), 1, "want one `batch line unknown (...)`:\n" + out)
+        self.assertRegex(unknown[0], r"^batch line unknown \(.+\)$", "the unknown line gives no reason:\n" + out)
+        five = pr_lines(lines, 5)
+        self.assertEqual(len(five), 1, "want one line for #5:\n" + out)
+        self.assertIn(" done: ", five[0], "the root's own lines did not print:\n" + out)
 
 
 # The report-only model judge at merge. The merge reads each governed Markdown file at head, selects a file whose line
