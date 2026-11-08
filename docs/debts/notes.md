@@ -16,7 +16,7 @@
 - ask-alone-tail-test-gap: no ask-alone test puts a quoted #, /* or lone apostrophe inside a harmless && echo or ; Write-Host tail (hooks/test_guard.py)
 - ask-step-hidden-in-script: cap write inside command substitution, backticks or unspaced subshell, and force push inside bash -c, pass with no ask (hooks/guard.py)
 - bare-merge-reads-folder-not-repo: gh pr merge -R other/repo asks or allows by the current folder's merge-tool stamp, not the named repo (hooks/guard_merge.py)
-- bare-merge-skips-host-merge-tool: closed by the matcher change. mcp__github__merge_pull_request now reaches merge-checks, because the guard matcher in settings.json names it. Debt mcp-merge-matcher-missing holds the matcher test still owed.
+- bare-merge-skips-host-merge-tool: closed by the matcher change. mcp__github__merge_pull_request now reaches merge-checks, because the guard matcher in settings.json names it. lint/test_settings_matcher.py fails when a merge tool leaves the matcher.
 - bare-merge-tool-unloadable: when merge/merge.py cannot load, merge-checks refuses a bare merge before the bare-merge ask reaches the owner (hooks/guard_merge.py)
 - bare-words-shares-env-list: the bare_words search-tool exemption and the env-file rule share ENV_PATTERN_COMMANDS; a tool added for one changes both (hooks/guard_core.py)
 - base-read-midway-untested: no test covers read_default_base returning unknown when a later verify cannot run (hooks/guard_core.py)
