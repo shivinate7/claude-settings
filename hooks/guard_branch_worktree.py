@@ -134,8 +134,10 @@ TWO_WORKTREES_REFUSE_REASON = (
     "Remedy: in your own worktree, run `git -C <own worktree> checkout --detach origin/<branch>`, "
     "commit there, then `git -C <own worktree> push origin HEAD:<branch>`. Name the worktree with "
     "-C, because a shell's cwd can reset to another checkout. To read the other tree, use "
-    "`git -C <dir>`. To move or delete the branch itself with `update-ref`, run the call in the "
-    "tree that holds it, as `git -C <holder> update-ref ...`. "
+    "`git -C <dir>`. To move the branch itself, move its ref, index and files together from the tree "
+    "that holds it, as `git -C <holder> merge --ff-only <commit>`. `update-ref` moves the ref alone "
+    "and leaves that tree's index at the old commit. If the holder's folder is gone but the list "
+    "still shows its branch, `git worktree prune` drops that record. "
     "(decision two-worktrees-one-branch, two worktrees never hold one branch)"
 )
 
