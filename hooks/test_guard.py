@@ -964,8 +964,9 @@ def api_error(code, message):
     sys.exit(1)
 
 
-def listing(items, key, fields, flags, top=None):
-    """What gh prints for a list read: one page unless --paginate; array pages joined; object pages back to back; --slurp one array of pages."""
+def listing(items, key, fields, flags, top=None, rel=""):
+    """What gh prints for a list read: one page unless --paginate; array pages joined; object pages back to back; --slurp one array of pages.
+    With -i the status line and headers come first, and a page that more pages follow carries the Link header GitHub sends, on the numeric route."""
     size = max(1, min(int(fields.get("per_page", 30)), state["page_cap"]))
     pages = [items[i:i + size] for i in range(0, len(items), size)] or [[]]
     chosen = pages if "--paginate" in flags else [pages[max(1, int(fields.get("page", 1))) - 1] if int(fields.get("page", 1)) <= len(pages) else []]
@@ -1010,6 +1011,11 @@ else:
     rows_of.update({o["head"]: (o.get("checks", []), o.get("statuses", [])) for o in state["others"]})
     if re.fullmatch(r"pulls/\d+", rel):
         print(json.dumps(dict(state["pr"], number=int(rel.split("/")[1]))))
+    elif re.fullmatch(r"issues/comments/\d+", rel) and rel.rsplit("/", 1)[1] in state["comments"]:
+        # GET of a conversation comment: its issue_url names the pull request the comment sits on, as GitHub's does.
+        comment = rel.rsplit("/", 1)[1]
+        print(json.dumps({"id": int(comment), "body": "", "issue_url": "https://api.github.com/" + path.split("/issues/comments/")[0]
+                          + "/issues/%d" % state["comments"][comment]}))
     elif rel == "pulls":
         others = [dict(state["pr"], number=o["number"], draft=o.get("draft", False), head={"ref": o.get("ref", "feat%d" % o["number"]), "sha": o["head"]},
                        base={"ref": o.get("base", "main"), "repo": {"default_branch": o.get("default_branch", "main")}},
@@ -1030,12 +1036,7 @@ else:
                    for i, c in enumerate(statuses)]
             states = {s["state"] for s in sts}
             combined = "failure" if states & {"failure", "error"} else "pending" if (not states or "pending" in states) else "success"
-            print(listing(sts, "statuses", fields, flags, {"state": combined, "sha": rel.split("/")[1], "total_count": len(sts)}))
-    elif re.fullmatch(r"issues/comments/\d+", rel) and rel.rsplit("/", 1)[1] in state["comments"]:
-        # GET of a conversation comment: its issue_url names the pull request the comment sits on, as GitHub's does.
-        comment = rel.rsplit("/", 1)[1]
-        print(json.dumps({"id": int(comment), "body": "", "issue_url": "https://api.github.com/" + path.split("/issues/comments/")[0]
-                          + "/issues/%d" % state["comments"][comment]}))
+            print(listing(sts, "statuses", fields, flags, {"state": combined, "sha": rel.split("/")[1], "total_count": len(sts)}, rel=rel))
     elif re.fullmatch(r"branches/[^/]+/protection/required_status_checks", rel):
         if state["protection"] == "absent":
             api_error(404, "Branch not protected")
