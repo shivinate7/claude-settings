@@ -49,8 +49,8 @@ against both done and to do, since done to to do is only 4.9 to 5.7:1.
 ## Builder changes, `skills/waiting-page/page.html` (picks 1 and 4)
 
 - CSS: `.segbar` gets `position: relative`.
-- CSS: `.segbar > i { max-width: clamp(0px, calc((100% - var(--n) * 5px + 2.5px) * 1000), 100%); }`.
-- CSS: `.segbar > .runs { display: flex; position: absolute; top: 0; bottom: 0; left: 0; gap: 2px; overflow: hidden; width: clamp(0px, calc((var(--n) * 5px - 2.5px - 100%) * 1000), 100%); }`.
+- CSS: `.segbar > i { max-width: clamp(0px, calc((100% - var(--n) * 5px + 2px) * 1000), 100%); }`.
+- CSS: `.segbar > .runs { display: flex; position: absolute; top: 0; bottom: 0; left: 0; gap: 2px; overflow: hidden; width: clamp(0px, calc((var(--n) * 5px - 2px - 100%) * 1000), 100%); }`.
 - CSS: `.segbar > .runs > i { flex: var(--c) 1 0px; min-width: 4px; }`.
 - CSS: `.segbar i.pzd { background: linear-gradient(var(--muted), var(--muted)) left bottom / 100% 50% no-repeat; }`, in place
   of the ring. Delete `.segbar i.pzd::after` and its two dark-theme rules.
@@ -70,6 +70,8 @@ With `barsBlockedPage`, at 390 and 1280, light and dark, for the three bars in `
 - `--muted` and `--holds`, read from the computed `:root`, each reach 3:1 against `--surface`.
 - Re-point: the test "a paused cell narrower than 3px paints apart from a done cell" asserts a cell under 3px and
   samples painted pixels. No cell under 3px is drawn after this change, so it is replaced by the checks above.
+- Re-point: `actCells` in `skills/waiting-page/tests/page.test.mjs` counts `.segbar i.act`, a descendant selector, so it
+  would also count the in-progress run. Make it `.segbar > i.act`. The tests that read `${scope} > i` need no change.
 
 ## Critique (impeccable, single context)
 

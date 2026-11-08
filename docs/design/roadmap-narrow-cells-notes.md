@@ -53,8 +53,8 @@ Measured today (the mockup's "Today" options, 30 steps): rail chip 58px at 390 (
 ## Builder changes, `skills/roadmap/page/index.html` (picks 1 and 4)
 
 - CSS: `.bar{position:relative}` added to `.bar`.
-- CSS: `.bar>i{max-width:clamp(0px,calc((100% - var(--n)*5px + 2.5px)*1000),100%)}`.
-- CSS: `.bar>.runs{display:flex;position:absolute;top:0;bottom:0;left:0;gap:2px;overflow:hidden;width:clamp(0px,calc((var(--n)*5px - 2.5px - 100%)*1000),100%)}`.
+- CSS: `.bar>i{max-width:clamp(0px,calc((100% - var(--n)*5px + 2px)*1000),100%)}`.
+- CSS: `.bar>.runs{display:flex;position:absolute;top:0;bottom:0;left:0;gap:2px;overflow:hidden;width:clamp(0px,calc((var(--n)*5px - 2px - 100%)*1000),100%)}`.
 - CSS: `.bar>.runs>i{flex:var(--c) 1 0px;min-width:4px;height:100%}`.
 - CSS: `.bar i.pzd{background:linear-gradient(var(--muted),var(--muted)) left bottom/100% 50% no-repeat;box-shadow:none}`, in place of the ring.
 - JS: `segs(c,n)` appends `<b class="runs">` holding one `<i class="KIND" style="--c:COUNT">` per kind with a count above 0, in
@@ -74,7 +74,9 @@ and the phase head bar:
 - The 58px chip at 390 and the 90px phase head at 1280 are in runs mode; the Now card is in cell mode.
 - The paused part has `background-size` `100% 50%`, `background-position` `0% 100%`, and `box-shadow` `none`.
 - `--muted` and `--bad`, read from the computed `:root`, each reach 3:1 against `--surface`.
-- The cell-order tests keep their 30 `.bar > i` cells; they need no change.
+- The cell-order tests read `.bar > i`, so they keep their 30 cells and need no change.
+- Re-point: `barActCells` in `skills/roadmap/tests/page.test.mjs` counts `.bar i.act`, a descendant selector, so it
+  would also count the in-progress run. Make it `.bar > i.act`.
 
 ## Critique (impeccable, single context)
 

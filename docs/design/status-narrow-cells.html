@@ -997,15 +997,15 @@ html.nolab [data-new]::after, html.nolab [data-today]::after { display: none; }
    Under that, the cells take 0 width and the runs layer draws one block per kind, in the same order,
    each block as wide as its share of the steps and never under 4px. The bar carries --n, its step count. */
 .segbar { position: relative; }
-.segbar > i { max-width: clamp(0px, calc((100% - var(--n) * 5px + 2.5px) * 1000), 100%); }
+.segbar > i { max-width: clamp(0px, calc((100% - var(--n) * 5px + 2px) * 1000), 100%); }
 .segbar > .runs { display: flex; position: absolute; top: 0; bottom: 0; left: 0; gap: 2px; overflow: hidden;
-  width: clamp(0px, calc((var(--n) * 5px - 2.5px - 100%) * 1000), 100%); }
+  width: clamp(0px, calc((var(--n) * 5px - 2px - 100%) * 1000), 100%); }
 .segbar > .runs > i { flex: var(--c) 1 0px; min-width: 4px; }
 </script>
 <script type="text/plain" id="nr-count">
 /* ---------- New, narrow rule Count only ----------
    One cell per step while each cell gets 3px or more beside 2px gaps. Under that, no bar: the chip's d/n count stays. */
-.segbar > i { max-width: clamp(0px, calc((100% - var(--n) * 5px + 2.5px) * 1000), 100%); }
+.segbar > i { max-width: clamp(0px, calc((100% - var(--n) * 5px + 2px) * 1000), 100%); }
 </script>
 <script type="text/plain" id="nr-today">
 /* ---------- Today: one cell per step with 2px gaps at every width ---------- */
