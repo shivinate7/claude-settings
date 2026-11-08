@@ -946,7 +946,7 @@ MUTATIONS = [
      '                False\n                or any(', "guard",
      'role-model: reviewer on sonnet with the guard marker on line 1 is allowed'),
     ("role-model: the guard marker is read anywhere in a line, so a mid-line marker walks past on sonnet",
-     'elif not fenced and line.startswith(REVIEW_GUARD_MARKER):',
+     r'elif not fenced and line.lstrip(" \t").startswith(REVIEW_GUARD_MARKER):',
      'elif not fenced and REVIEW_GUARD_MARKER in line:', "guard",
      'role-model: reviewer on sonnet with the guard marker mid-line, a space at the boundary offset, is denied'),
     ("role-model: the guard marker's boundary counts a pipe, so the template line Guard or check: yes|no walks past on sonnet",
