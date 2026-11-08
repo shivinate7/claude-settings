@@ -2318,7 +2318,7 @@ class QuestionReachesPageTests(SameTurnWriter, unittest.TestCase):
 
     def test_ln_green_send_to_parent_in_the_turn_passes(self):
         # Catches: a lane's question sent to its parent in its turn not read as sent, in any of the three forms.
-        # The human-first shape is red on main: main checks it and blocks, where a peers-only lane is skipped.
+        # The human-first shape pins the send after a human message. A peers-only lane is skipped before it.
         shapes = (("peers only", [peer_msg("pick?")]), ("human first", [human("decide"), peer_msg("pick?")]))
         forms = (("@parent", self.send(session_id="@parent")), ("parent id", self.send(session_id=self.PARENT)),
                  ("to parent", self.send(to="parent")))
