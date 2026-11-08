@@ -223,13 +223,16 @@ Other tools, in `judge` order:
                        runs on into a hyphenated word
                        (`Round N - FAIL-safe`), and `round result` reads as `verdict`
                        (`Prior round result: FAIL`). The verdict scan reads the
-                       brief after four steps: each backtick span is blanked (a quote) unless it
+                       brief after five steps: each backtick span is blanked (a quote) unless it
                        holds only a verdict word (``Prior verdict: `FAIL` `` is refused), each line is
                        split at sentence ends (`.`, `;`, `!`, `?`) so each sentence starts its own
                        line, the label-rewrite pass runs (marks after a colon dropped, a round-label
-                       dash read as a colon, `round result` read as `verdict`), and a choice list
+                       dash read as a colon, `round result` read as `verdict`), a choice list
                        that ends its sentence (verdict words, bare or backticked, joined by `,`,
-                       `/`, `or` or `and`) is blanked, as a format line (`a verdict: PASS or FAIL`).
+                       `/`, `or` or `and`) is blanked, as a format line (`a verdict: PASS or FAIL`),
+                       and below each line with a short label a copy of what follows the label is
+                       added (`Prior review: verdict: FAIL`), or `Verdict: <word>` for a bare verdict
+                       word after a report label.
                        A sentence ends at a period before a space, a capital or the line end, so
                        `**...PASS, FAIL or PARTIAL.**` is refused.
                        Each step hides only its own span or sentence, so a later label in the same
@@ -2687,7 +2690,7 @@ _BRIEF_BLIND_LEADING = re.compile(r"(?:%s)[*_]*[ \t]*,[ \t]*[Rr]ound[ \t]+\d+" %
 # `Done: FAIL` at the line end) is a leading verdict too, with no round named. A verdict word that starts a choice list
 # (`Done: PASS, FAIL or PARTIAL, then ...`) or runs on into a word or a hyphen is not. Group 1 is the verdict word.
 _BRIEF_BLIND_BARE = re.compile(
-    r"[*_`]*(%(w)s)[*_`]*(?![\w-])(?![ \t]*(?:,|/|(?:or|and)\b)[ \t]*[*_`]*\b(?:%(w)s)\b)[ \t]*(?:[,.;!?]|$)"
+    r"[*_`]*(%(w)s)[*_`]*(?![ \t]*,[ \t]*[*_`]*\b(?:%(w)s)\b)[ \t]*(?:[,.;!?]|$)"
     % {"w": BRIEF_BLIND_VERDICT_WORDS})
 # A backtick span stays on one line. Group 1 is set when the span holds only a verdict word; brief_blind_verdict_text keeps
 # that span. One pattern pairs every span left to right, so a kept span's closing backtick never opens the next span.
