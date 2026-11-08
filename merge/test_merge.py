@@ -13047,6 +13047,19 @@ class ReviewRecordForm(unittest.TestCase):
         with self.subTest(field="a malformed field above the CI line"):  # the footer does not rescue a malformed record part
             self.assertIsNone(review_fn(self, "parse_review")(record_text(kind="bogus").rstrip("\n") + REVIEW_FOOTER))
 
+    def test_a_note_line_after_a_blank_line_below_the_ci_line_is_not_a_record(self):
+        # Pins the incident's own text: a note line after the CI line, with a blank line before it. The field case above has no blank
+        # line, so this one is not redundant. The same record with no note parses, keeps its fix check, and is done at its head.
+        head, fix_head = "d35865d42dae16eef06d9cc516c56f904c287fe1", "5acce9e26c7520dc8808304f87dfeb6805192300"
+        body = record_text(n=2189, head=head, guard="yes", net="positive", fix=(fix_check_line(head=fix_head, model="sonnet"),),
+                           rounds=("Round 1: reviewer, haiku, FAIL", "Round 2: reviewer, sonnet, PASS", "Round 3: reviewer, sonnet, PASS"))
+        note = 'Note, Fix: none, Until: 2026-11-21: the remedy says "copy your edited files aside"; on real git a copy leaves the file in place.'
+        with_note = body.rstrip("\n") + "\n\n" + note + REVIEW_FOOTER
+        no_note = body.rstrip("\n") + REVIEW_FOOTER
+        self.assertIsNone(review_fn(self, "parse_review")(with_note), "parse_review read a note line below the CI line as part of the record")
+        self.assertEqual(record_state(self, no_note, head=head), "done", "the record without the note is not done at its head")
+        self.assertEqual(parse_text(self, no_note).get("fix"), (fix_head, "reviewer", "sonnet", "PASS"), "the fix check did not parse")
+
 class ReviewRecordRules(unittest.TestCase):
     """review_state over records the form gives. A change is done by the review cap rule (roles-review-cap-three): the last round is PASS
     and the last design-reviewer line is PASS or absent, or the third round is done and Guard or check is no, or the third round is done
