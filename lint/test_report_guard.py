@@ -123,6 +123,21 @@ def assistant_text(text):
             "message": {"role": "assistant", "content": [{"type": "text", "text": text}]}}
 
 
+def background_agent_launch(spawn, n=0):
+    """A spawn that runs in the background and has not finished: its Agent tool_use, then the async-launch
+    result that names the agent. No completion record follows, so the agent is still running at the Stop.
+    The shape is the one hooks/stall_watch.py reads: isAsync, status async_launched, agentId."""
+    cid = "toolu_bg%d" % n
+    aid = "a%016x" % (0x51a7e0000 + n)
+    use = {"type": "assistant", "isSidechain": False, "message": {"role": "assistant", "content": [
+        {"type": "tool_use", "id": cid, "name": "Agent", "input": dict(spawn, run_in_background=True)}]}}
+    result = {"type": "user", "isSidechain": False, "message": {"role": "user", "content": [
+        {"type": "tool_result", "tool_use_id": cid,
+         "content": "Async agent launched successfully. agentId: %s." % aid}]},
+        "toolUseResult": {"isAsync": True, "status": "async_launched", "agentId": aid}}
+    return [use, result]
+
+
 def compact_boundary():
     """The system record Claude Code writes when a compaction finishes. Its token fields are as the
     hook-inputs-carry-token-counts decision measured them, top level; their nesting is unmeasured."""
@@ -851,13 +866,15 @@ class DoneNamesModelsTests(unittest.TestCase):
     """reports-done-names-models, in report_guard.py's Stop hook."""
 
     def setUp(self):
-        self.tmp = tempfile.TemporaryDirectory()
+        self.tmp = tempfile.TemporaryDirectory(dir=RUN_FOLDER)
         self.addCleanup(self.tmp.cleanup)
 
-    def verdict(self, reply, spawns, denied=()):
+    def verdict(self, reply, spawns, denied=(), running=(), subagent_model="sonnet"):
         records = [human("do the task")]
         for spawn in spawns:
             records += [tool_use_msg("Agent", spawn), tool_result_msg()]
+        for n, spawn in enumerate(running):
+            records += background_agent_launch(spawn, n)
         for spawn in denied:
             use = tool_use_msg("Agent", spawn)
             use["message"]["content"][0]["id"] = "tu_denied"
@@ -868,7 +885,10 @@ class DoneNamesModelsTests(unittest.TestCase):
                     assistant_text(reply)]
         path = write_transcript(records, self.tmp.name)
         hook = {"hook_event_name": "Stop", "transcript_path": path, "stop_hook_active": False}
-        env = dict(os.environ, CLAUDE_CODE_SUBAGENT_MODEL="sonnet")
+        env = dict(os.environ)
+        env.pop("CLAUDE_CODE_SUBAGENT_MODEL", None)  # an unset spawn reads the agent file's pin, not this
+        if subagent_model:
+            env["CLAUDE_CODE_SUBAGENT_MODEL"] = subagent_model
         run = run_guard(REPORT_GUARD, hook, env=env)
         self.assertEqual(run.returncode, 0)
         return json.loads(run.stdout) if run.stdout.strip() else None
@@ -932,6 +952,68 @@ class DoneNamesModelsTests(unittest.TestCase):
         self.assertIsNone(self.verdict(
             "> **Done** BUILT the guard, PR #5\n> **Next** Unstarted: none",
             [{"subagent_type": "Explore", "prompt": "find x"}, {"subagent_type": "Plan", "prompt": "plan"}]))
+
+    REVIEWER = {"subagent_type": "reviewer", "prompt": "Round 1 of 3"}
+    TEST_AUTHOR = {"subagent_type": "test-author", "model": "haiku", "prompt": "write the cases"}
+    RUNNING_NEXT = "> **Next** reviewer round 1 running; Unstarted: none"
+
+    @staticmethod
+    def file_pin(role):
+        """The model: key of agents/<role>.md's frontmatter, read from the file the way the guard reads it."""
+        with open(os.path.join(HERE, "..", "agents", role + ".md"), encoding="utf-8") as f:
+            front = f.read().split("---")[1].splitlines()
+        for line in front:
+            key, _, value = line.partition(":")
+            if key.strip() == "model":
+                return value.strip()
+        return ""
+
+    def check_unset_spawn_takes_file_pin(self, role):
+        import report_guard  # noqa: E402  MODEL_FAMILIES, the names a Done item may give (one home)
+        pin = self.file_pin(role)
+        self.assertEqual(pin, "haiku", "agents/%s.md pins %r, not the haiku this case expects" % (role, pin))
+        wrong = next(f for f in report_guard.MODEL_FAMILIES if f != pin)
+        spawn = {"subagent_type": role, "prompt": "Round 1 of 3"}
+
+        def reply(model):
+            return "> **Done** BUILT the cases, PR #5 (%s %s)\n> **Next** Unstarted: none" % (role, model)
+
+        out = self.verdict(reply(pin), [spawn], subagent_model=None)
+        self.assertIsNone(out, out and out["reason"])
+        out = self.verdict(reply(wrong), [spawn], subagent_model=None)
+        self.assertIsNotNone(out, "a %s spawn with no model field ran %s, yet Done naming %s passed"
+                             % (role, pin, wrong))
+        self.assertIn("'%s %s' matches no %s spawn, which ran %s" % (role, wrong, role, pin), out["reason"])
+
+    def test_dm_green_unset_reviewer_takes_file_pin(self):
+        self.check_unset_spawn_takes_file_pin("reviewer")
+
+    def test_dm_green_unset_test_author_takes_file_pin(self):
+        self.check_unset_spawn_takes_file_pin("test-author")
+
+    def test_dm_false_alarm_running_reviewer_absent_from_done_passes(self):
+        # A reviewer still running is not a finished claim: Done names the test-author and the builder only.
+        reply = "> **Done** BUILT the cases, PR #5 (test-author haiku, builder sonnet)\n" + self.RUNNING_NEXT
+        out = self.verdict(reply, [self.TEST_AUTHOR, self.BUILDER], running=[self.REVIEWER])
+        self.assertIsNone(out, out and out["reason"])
+
+    def test_dm_green_running_reviewer_named_at_pin_passes(self):
+        # Control for the case above: the same running fixture, with Done naming the reviewer at its pin.
+        reply = ("> **Done** BUILT the cases, PR #5 (test-author haiku, builder sonnet, reviewer haiku)\n"
+                 + self.RUNNING_NEXT)
+        out = self.verdict(reply, [self.TEST_AUTHOR, self.BUILDER], running=[self.REVIEWER])
+        self.assertIsNone(out, out and out["reason"])
+
+    def test_dm_red_unnamed_reviewer_in_done_blocks(self):
+        out = self.verdict("> **Done** BUILT the guard, PR #5 (builder sonnet, reviewer)\n> **Next** Unstarted: none",
+                           [self.BUILDER, self.REVIEWER])
+        self.assertIsNotNone(out, "a reviewer that Done names with no model passed")
+        self.assertIn("no model named for reviewer", out["reason"])
+
+    def test_dm_green_both_roles_named_match_passes(self):
+        self.assertIsNone(self.verdict(
+            "> **Done** BUILT the guard, PR #5 (builder sonnet, reviewer haiku)\n> **Next** Unstarted: none",
+            [self.BUILDER, {"subagent_type": "reviewer", "model": "haiku", "prompt": "Round 1 of 3"}]))
 
 
 class UnstartedItemsTests(unittest.TestCase):
