@@ -23,8 +23,9 @@
   ],
   "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
   "ref": "banchi #961 and #944; step banchi-revive-944-961",
+  "reply": "You picked a (06:18 CST Nov 8): runner 9 closes banchi #961 and #944 as parked and keeps each branch, and a later lane reopens them. Routed to runner 9 and the coordinator; home: step banchi-revive-944-961. Closed 06:24 CST Nov 8.",
   "short": "Two idle banchi drafts",
-  "status": "open",
+  "status": "closed",
   "title": "Close banchi drafts #961 and #944 as parked, or start a lane for them?",
   "why": "The coordinator recommends a: your hold on new lanes (item 384) stands, and a closed PR with its branch kept loses nothing."
 }
