@@ -19,21 +19,40 @@ A touched path selects:
 Each selected test then lands in one of these places, each printed with its reason, none dropped silently:
   HEAVY           the batch shards it in its own jobs; running it per lane push is a cost blow-up
   NEEDS_SETUP     needs a browser or a tool this workflow does not install, or runs on one OS only
-  NOT_ON_WINDOWS  checks.yml runs it on no Windows job, so the batch would show no Windows red for it
-  NOT_ON_MACOS    a Windows-only suite that would false-red on macOS
-  run             listed for each OS that does not exclude it; a *.test.ps1 is Windows only
-An unreadable diff (no BASE_SHA, git fails) exits 1 and writes no output (decision ci-unknown-is-red).
+  per OS          listed for an OS when a job of checks.yml at HEAD runs on that OS and names it (see os_runs);
+                  skipped on each other OS, and on both with "no CI job runs it" when no Windows or macOS job names it
+An unreadable diff (no BASE_SHA, git fails) or a checks.yml it cannot read exits 1 and writes no output
+(decision ci-unknown-is-red).
 """
 import fnmatch
 import json
 import os
+import re
 import subprocess
 import sys
 
 # Test-file name patterns, matched on the file's own name.
 TEST_PATTERNS = ("*.test.mjs", "*.test.js", "test_*.mjs", "test_*.py", "test_*.sh", "*.test.sh", "*.test.ps1")
-# The patterns that run on Windows only (checks.yml: pointer-windows runs them under Windows PowerShell 5.1).
-WINDOWS_ONLY_PATTERNS = ("*.test.ps1",)
+
+# The workflow whose jobs decide each OS's list. It is read from the HEAD commit, so a lane that moves a test between
+# jobs is judged by its own checks.yml.
+CI_PATH = ".github/workflows/checks.yml"
+# runs-on prefix -> the OS word the lists and log lines use. A Linux runner runs nothing here. Any other runner is
+# unknown, and exits 1.
+OS_RUNNERS = {"windows-": "windows", "macos-": "macos"}
+LINUX_RUNNERS = ("ubuntu-",)
+# The runner scripts a run text may name in place of a test path, with the tests each phase runs (script ->
+# {argument: globs}; "" is no argument). Read from .github/scripts/mod-tests.sh: phase_mods runs every *.test.mjs
+# and *.test.js under mods/, and phase_skill runs `node --test` in the map skill's tests folder. A change to that
+# script's file lists changes this table too.
+RUNNER_SCRIPTS = {
+    ".github/scripts/mod-tests.sh": {
+        "mods": ("mods/*.test.mjs", "mods/*.test.js"),
+        "skill": ("skills/plain-english-map/tests/*.test.mjs", "skills/plain-english-map/tests/*.test.js"),
+        "": ("mods/*.test.mjs", "mods/*.test.js",
+             "skills/plain-english-map/tests/*.test.mjs", "skills/plain-english-map/tests/*.test.js"),
+    },
+}
 
 # The suites checks.yml runs in shard jobs or under a step cap of its own (glob -> reason).
 HEAVY = {
@@ -51,104 +70,6 @@ NEEDS_SETUP = {
     "lint/test_ios_ship.sh": "needs macOS tooling (bin/ios-ship); runs in shell-macos only",
     "lint/test_sim_test.sh": "needs macOS tooling (bin/sim-test); runs in shell-macos only",
 }
-
-# Tests checks.yml runs on no Windows job: they run in `checks`, `checks-merge-install`, `checks-guard`, `checks-shoot`
-# or a macOS job. Read from the jobs of checks.yml; a test missing here runs on Windows and may false-red.
-# The batch shows no Windows red for these, so a draft run does not either.
-NOT_ON_WINDOWS = (
-    "actions/all-jobs-passed/test_action.sh",
-    "actions/ci-alarm/test_action.sh",
-    "actions/ci-alarm/test_clear_rule.py",
-    "actions/ci-done-comment/test_comment.py",
-    "actions/code-check/test_action.py",
-    "actions/playwright-setup/test_action.py",
-    "actions/readme-links/test_readme_links.py",
-    "actions/ruling-kind/test_action.sh",
-    "actions/silent-undo/test_action.sh",
-    "actions/ste-lint/test_action.py",
-    "actions/test_action_metadata.py",
-    "actions/test_ruling_kind_records_dir.py",
-    "actions/zizmor/test_action.sh",
-    "githooks/main-ref/test_hook.sh",
-    "githooks/test_pre_commit.sh",
-    "hooks/test_auto_mode_allow.py",
-    "hooks/test_cloud_setup.sh",
-    "hooks/test_mutate_ci.py",
-    "hooks/test_mutate_js.py",
-    "hooks/test_mutate_replay.py",
-    "hooks/test_mutate_report.py",
-    "hooks/test_mutate_shared.py",
-    "hooks/test_nowindow.py",
-    "hooks/test_sim_boot_record.py",
-    "hooks/test_stall_watch.py",
-    "janitor/test_prove_agent_end_reap.py",
-    "lint/test_all_jobs_passed.py",
-    "lint/test_check_agent_models.py",
-    "lint/test_check_artifact_cites.py",
-    "lint/test_check_claude_md_size.py",
-    "lint/test_check_comment_narration.py",
-    "lint/test_check_debt_retire.py",
-    "lint/test_check_glossary.py",
-    "lint/test_check_hook_stubs.py",
-    "lint/test_check_ios_mockup.py",
-    "lint/test_check_landed_dirs.py",
-    "lint/test_check_mod_versions.py",
-    "lint/test_check_record_slugs.py",
-    "lint/test_check_red_run.py",
-    "lint/test_check_ruling_kind.py",
-    "lint/test_check_shared_resources.py",
-    "lint/test_check_silent_undo.py",
-    "lint/test_check_skill_model_rows.py",
-    "lint/test_check_unknown_reads_contract.py",
-    "lint/test_ci_job.py",
-    "lint/test_ci_scope.py",
-    "lint/test_compliance_probes.py",
-    "lint/test_find_copies.py",
-    "lint/test_find_time_pinned.py",
-    "lint/test_guard_log_report.py",
-    "lint/test_hook_catalog.py",
-    "lint/test_label_once.py",
-    "lint/test_layout.py",
-    "lint/test_no_window_spawn.py",
-    "lint/test_notes_union_merge.py",
-    "lint/test_prove_route_judge.py",
-    "lint/test_repo_colour.py",
-    "lint/test_report_guard_review.py",
-    "lint/test_report_guard_stalled.py",
-    "lint/test_retired_names.py",
-    "lint/test_retired_repos.py",
-    "lint/test_rm_shim.py",
-    "lint/test_rule_audit.py",
-    "lint/test_scanner_traps.mjs",
-    "lint/test_settings_matcher.py",
-    "lint/test_sim_lease.py",
-    "lint/test_stale_cites.py",
-    "lint/test_ste_autofix.py",
-    "lint/test_test_git.py",
-    "lint/test_touched_tests.py",
-    "lint/test_tracked_tree.py",
-    "lint/test_wait_pid.py",
-    "merge/test_idle_lanes.py",
-    "merge/test_install_from_main.sh",
-    "merge/test_lane_lint.py",
-    "merge/test_repaired_merges.py",
-    "skills/ios-apps/tests/test_new_app.py",
-    "skills/project-ops/tests/test_scaffold.py",
-    "skills/roadmap/test_build.py",
-    "skills/waiting-page/test_export_page.py",
-    "skills/waiting-page/test_page_grant.py",
-    "skills/waiting-page/test_skill_park_relay.py",
-    "skills/waiting-page/test_splice.py",
-    "skills/waiting-page/test_stale_pages.py",
-    "testing/skip-locally-fail-in-ci.test.mjs",
-)
-
-# Windows-only suites that would false-red on macOS: hooks/test_install_windows.sh asserts the real Git Bash uname.
-# The other tests only Windows and Linux jobs run (merge/test_cmd.py, merge/test_launch.py, hooks/test_stall_watch_stop.py)
-# are portable by design (test_cmd.py runs bin/merge off Windows), so macOS runs them.
-NOT_ON_MACOS = (
-    "hooks/test_install_windows.sh",
-)
 
 MAP_DIR = "skills/plain-english-map/"
 MAP_TESTS = MAP_DIR + "tests/"
@@ -206,8 +127,119 @@ def candidates(path, tracked):
     return {c for c in found if c in tracked}
 
 
-def matches(path, patterns):
-    return any(fnmatch.fnmatchcase(path, pattern) for pattern in patterns)
+# A YAML mapping key line: indent, an optional "- " list dash, the key, and the rest of the line.
+KEY_LINE = re.compile(r"^(?P<indent> *)(?P<dash>- +)?(?P<key>[A-Za-z0-9_.-]+):(?:[ \t]+(?P<value>.*?))?[ \t]*$")
+
+
+def one_line_scalar(value):
+    """A one-line YAML scalar's text, with its comment cut and its quotes removed; None when it is not one."""
+    value = (value or "").strip()
+    if value[:1] in ("'", '"'):
+        end = value.find(value[0], 1)
+        return value[1:end] if end > 0 and not value[end + 1:].strip().lstrip("#") else None
+    value = re.split(r"[ \t]#", value, maxsplit=1)[0].strip()
+    return value if value and value[0] not in "[{|>&*!" and "${{" not in value else None
+
+
+def ci_jobs(text):
+    """{job: (runs-on, [run text])} for each job under the top-level `jobs:` of a workflow. A hand parser: the runner
+    image has no YAML module. A run text is the line's value plus every deeper line after it, so a block scalar
+    (`run: |`), a folded one and a plain continuation are each read whole. A job this cannot read exits 1: a job
+    read as no job would drop its tests in silence."""
+    jobs, job, job_indent, prop_indent, in_jobs = {}, None, None, None, False
+    lines = text.splitlines()
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        i += 1
+        if not line.strip() or line.lstrip().startswith("#"):
+            continue
+        indent = len(line) - len(line.lstrip(" "))
+        if line[indent] == "\t":
+            fail(f"{CI_PATH} line {i} is indented with a tab")
+        m = KEY_LINE.match(line)
+        if indent == 0:
+            in_jobs = bool(m) and m["key"] == "jobs" and not m["dash"] and one_line_scalar(m["value"]) is None
+            job = None
+            continue
+        if not in_jobs:
+            continue
+        if job_indent is None:
+            job_indent = indent
+        if indent < job_indent:
+            fail(f"{CI_PATH} line {i} sits between the top level and the jobs: {line.strip()!r}")
+        if indent == job_indent:
+            if not m or m["dash"] or m["value"]:
+                fail(f"{CI_PATH} line {i} is not a job name: {line.strip()!r}")
+            job, prop_indent = m["key"], None
+            if job in jobs:
+                fail(f"{CI_PATH} names job {job} twice")
+            jobs[job] = [None, []]
+            continue
+        if prop_indent is None:
+            prop_indent = indent
+        if not m:
+            continue
+        key_col = indent + len(m["dash"] or "")
+        if m["key"] == "runs-on" and indent == prop_indent and not m["dash"]:
+            runner = one_line_scalar(m["value"])
+            if runner is None or jobs[job][0] is not None:
+                fail(f"{CI_PATH} job {job}: cannot read runs-on {m['value']!r}; the OS lists would be unknown")
+            jobs[job][0] = runner
+        elif m["key"] == "run":
+            body = [m["value"] or ""]
+            while i < len(lines) and (not lines[i].strip() or len(lines[i]) - len(lines[i].lstrip(" ")) > key_col):
+                body.append(lines[i])
+                i += 1
+            jobs[job][1].append("\n".join(body))
+    if not jobs:
+        fail(f"{CI_PATH} has no jobs this can read")
+    for name, (runner, _) in jobs.items():
+        if runner is None:
+            fail(f"{CI_PATH} job {name} has no runs-on this can read; the OS lists would be unknown")
+    return {name: (runner, runs) for name, (runner, runs) in jobs.items()}
+
+
+def os_of(job, runner):
+    for prefix, word in OS_RUNNERS.items():
+        if runner.startswith(prefix):
+            return word
+    if runner.startswith(LINUX_RUNNERS):
+        return None
+    fail(f"{CI_PATH} job {job} runs on {runner!r}, a runner this cannot place on an OS")
+
+
+def names(text, path):
+    """True when `text` names `path` as a whole path, not as part of a longer one."""
+    return re.search(rf"(?<![\w./\\-])(?:\./)?{re.escape(path)}(?![\w./\\-])", text) is not None
+
+
+def script_globs(text):
+    """The test globs of each runner script (RUNNER_SCRIPTS) that `text` names, by the phase argument it passes."""
+    globs = []
+    for script, phases in RUNNER_SCRIPTS.items():
+        for m in re.finditer(rf"(?<![\w./\\-])(?:\./)?{re.escape(script)}(?![\w./\\-])(?:[ \t]+(\w+))?", text):
+            arg = m[1] or ""
+            if arg not in phases:
+                fail(f"{CI_PATH} runs {script} with argument {arg!r}, which names no phase this knows")
+            globs.extend(phases[arg])
+    return globs
+
+
+def os_runs():
+    """{OS word: [run text]} for the Windows and macOS jobs of checks.yml at HEAD."""
+    texts = {word: [] for word in OS_RUNNERS.values()}
+    for job, (runner, runs) in ci_jobs(git("show", f"HEAD:{CI_PATH}")).items():
+        word = os_of(job, runner)
+        if word:
+            texts[word].extend(runs)
+    return texts
+
+
+def runs_on(test, texts):
+    """The OS words whose jobs name `test`, by its path or by a runner script whose globs cover it."""
+    return [word for word, runs in texts.items()
+            if any(names(t, test) or any(fnmatch.fnmatchcase(test, g) for g in script_globs(t)) for t in runs)]
 
 
 def flag(listed):
@@ -242,28 +274,25 @@ def main():
         found = sorted(candidates(path, tracked))
         print(f"touched {path} -> {', '.join(found) if found else 'no test file maps to it'}")
         selected |= set(found)
-    windows, macos = [], []
+    texts = os_runs()
+    lists = {word: [] for word in texts}
+    labels = {"windows": "Windows", "macos": "macOS"}
     for test in sorted(selected):
         why = reason(test, HEAVY) or reason(test, NEEDS_SETUP)
         if why:
             print(f"skip {test}: {why}")
             continue
-        on = []
-        if matches(test, NOT_ON_WINDOWS):
-            print(f"skip {test} on windows: checks.yml runs it on no Windows job")
-        else:
-            on.append("windows")
-            windows.append(test)
-        if matches(test, WINDOWS_ONLY_PATTERNS):
-            print(f"skip {test} on macos: a Windows-only test")
-        elif matches(test, NOT_ON_MACOS):
-            print(f"skip {test} on macos: a Windows-only suite that false-reds there")
-        else:
-            on.append("macos")
-            macos.append(test)
-        if on:
-            print(f"run {test} on {' and '.join(on)}")
-    write_outputs(windows, macos)
+        on = runs_on(test, texts)
+        if not on:
+            print(f"skip {test} on {' and '.join(texts)}: no CI job runs it on Windows or macOS ({CI_PATH})")
+            continue
+        for word in texts:
+            if word in on:
+                lists[word].append(test)
+            else:
+                print(f"skip {test} on {word}: {CI_PATH} runs it on no {labels[word]} job")
+        print(f"run {test} on {' and '.join(on)}")
+    write_outputs(lists["windows"], lists["macos"])
 
 
 if __name__ == "__main__":
