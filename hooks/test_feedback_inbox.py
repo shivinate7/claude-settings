@@ -545,6 +545,13 @@ def expect_block(name, p, named=(), unnamed=()):
         check("%s: does not name %s" % (name, n), n not in reason, reason)
 
 
+def expect_no_skipped_note(name, p):
+    """Scope of the all-read cases: every repo the home is judged in reads, so none is skipped and the block reason
+    has no "Skipped as unreadable" sentence. A reason that carries the sentence anyway fails here."""
+    reason = block_reason(p) or ""
+    check(name + ": no skipped-as-unreadable sentence", "Skipped as unreadable" not in reason, reason)
+
+
 # --------------------------------------------------------------------------- capture cases
 
 def case_verbatim_scanner_text_is_fenced():
@@ -2263,12 +2270,14 @@ def case_task_closed_step_home_passes():
 
 def case_task_missing_step_home_blocks():
     """An open or closed task whose home is `step:<slug>` with no step file on any branch blocks, and the
-    reason names the item. Green today: the guard refuses a step home for a task whether or not the file
-    exists. It guards a fix that lets a step home through without the file."""
+    reason names the item. The one repo reads, so the reason has no skipped-as-unreadable sentence. Green today:
+    the guard refuses a step home for a task whether or not the file exists. It guards a fix that lets a step
+    home through without the file."""
     repo = step_repo()
     p = homed(new_cfg(), "task-step-missing", ("- fb-0958-7 [task] -> step:no-such-step",), cwd=repo)
     expect_block("task step home: an open task homed to a step with no file on any branch blocks", p,
                  named=("fb-0958-7",))
+    expect_no_skipped_note("task step home: the repo reads, so no repo is skipped", p)
     p = homed(new_cfg(), "task-step-missing-closed", ("- fb-0958-7 [task] -> step:no-such-step [closed]",),
               cwd=repo)
     expect_block("task step home: a closed task homed to a step with no file on any branch blocks", p,
@@ -3730,8 +3739,8 @@ def case_guard_home_tracked_in_the_stop_repo_passes_when_the_sidecar_names_anoth
 
 def case_guard_sidecar_in_no_git_folder_still_judges_the_stop_repo():
     """A home is judged in every repo that resolves among the sidecar's repo and the Stop's cwd. The sidecar names a
-    folder in no git repo, so only the Stop's repo resolves, and an untracked home there blocks. The check stands
-    down only when neither resolves."""
+    folder in no git repo, so only the Stop's repo resolves, and an untracked home there blocks. That repo reads, so
+    the reason has no skipped-as-unreadable sentence. The check stands down only when neither resolves."""
     plain = os.path.join(ROOT, "sidecar-no-git-folder")
     os.makedirs(plain)
     cwd = make_repo("sidecar-no-git-stop", tracked=("decisions/a-ruling.md",))
@@ -3739,8 +3748,9 @@ def case_guard_sidecar_in_no_git_folder_still_judges_the_stop_repo():
     write_file(sidecar_of(cfg, sid), plain)
     write_file(inbox_of(cfg, sid), render_block("the rule is settled\nkeep it\nthanks",
                                                 items=("- fb-9 [ruling] -> decisions/untracked.md",)))
-    expect_block("sidecar in no git folder: an untracked home in the Stop's repo blocks",
-                 guard(cfg, sid, cwd=cwd), named=("fb-9",))
+    p = guard(cfg, sid, cwd=cwd)
+    expect_block("sidecar in no git folder: an untracked home in the Stop's repo blocks", p, named=("fb-9",))
+    expect_no_skipped_note("sidecar in no git folder: the Stop's repo reads, so no repo is skipped", p)
 
 
 def unreadable_sidecar_repo():
@@ -3758,8 +3768,9 @@ def expect_unreadable_sidecar(bad):
 
 
 def names_unreadable_sidecar(reason, bad, cwd):
-    """True when the block reason names the unreadable sidecar repo `bad`. The Stop's repo is judged too, and its
-    path and name start with `bad`'s, so its own path and name are cut out before the search."""
+    """True when the block reason names the unreadable sidecar repo `bad`. The Stop's repo is judged too. Its path
+    and name are cut out before the search, so a mention of it cannot pass for a mention of `bad`. That matters only
+    where its name starts with `bad`'s, as in the sidecar-stop case. The step and closed-note cases use `steps`."""
     rest = reason.replace(cwd, "").replace(os.path.realpath(cwd), "").replace(os.path.basename(cwd), "")
     return any(name in rest for name in (bad, os.path.realpath(bad), os.path.basename(bad)))
 
