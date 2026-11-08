@@ -1885,23 +1885,20 @@ RUNNER_SEND_REASON = (
     "Batch runner hold: the review sent #%d back to %s and no send_message to that session names #%d. Send it, "
     "then end; or name the PR under Input Needed to escalate (decision session-tiers, the batch runner)."
 )
-# A cheap prefilter: a Bash command that has `merge` or `merge.py` as a word. The segment splitter then decides which
-# segments start with the merge tool (_merge_calls).
+# A cheap prefilter: a Bash command that has `merge` or `merge.py` as a word. The guard's merge-tool reader then decides
+# which segments run the merge tool (_merge_calls).
 MERGE_RUN_RE = re.compile(r"""(?:^|[\s/;&|(])merge(?:\.py)?(?=[\s;&|)"']|$)""")
 COMPLETION_RE = re.compile(r"<tool-use-id>([^<\s]+)</tool-use-id>.*?<output-file>([^<]+)</output-file>", re.S)
-# Words a segment may put before the merge tool: a runner (python3, verdict), its flags and environment assignments.
-LAUNCHER_RE = re.compile(r"(?:python[\d.]*|verdict)$")
-ENV_WORD_RE = re.compile(r"\w+=")
 
 
 def _merge_constants():
-    """(MERGED_LINE, IDLE_SUMMARY, NO_LIST, REVIEW_SEND_BACK) from merge/merge.py, the one emitter, loaded only when a
-    merge run is in the transcript."""
-    import importlib.util
-    path = os.path.join(HERE, "..", "merge", "merge.py")
-    spec = importlib.util.spec_from_file_location("merge_for_hold", path)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
+    """(MERGED_LINE, IDLE_SUMMARY, NO_LIST, REVIEW_SEND_BACK) from merge/merge.py, the one emitter, loaded through
+    guard_merge.merge_module(): beside the guard's real path, then in the checkout the global rules file points at. An
+    installed copy has no merge/ beside it, so it reads the pointer's. No tool found raises, and the hold fails open."""
+    from guard_merge import merge_module
+    module = merge_module()
+    if module is None:
+        raise RuntimeError("merge/merge.py was not found beside the guard or in the pointer's checkout")
     return module.MERGED_LINE, module.IDLE_SUMMARY, module.NO_LIST, module.REVIEW_SEND_BACK
 
 
@@ -1911,36 +1908,21 @@ def _line_re(template):
                       re.M)
 
 
-def _merge_tool_args(segment):
-    """The arguments of a segment that starts with the merge tool (merge, a path ending /merge, merge.py), past a
-    launcher such as `python3` or `verdict`, else None."""
-    tokens = guard.segment_tokens(segment)
-    i = 0
-    while tokens and i < len(tokens):
-        word = tokens[i]
-        if (LAUNCHER_RE.match(os.path.basename(word)) or ENV_WORD_RE.match(word)
-                or (i and word.startswith("-") and LAUNCHER_RE.match(os.path.basename(tokens[i - 1])))):
-            i += 1
-        else:
-            break
-    if tokens and i < len(tokens) and os.path.basename(tokens[i]) in ("merge", "merge.py"):
-        return tokens[i + 1:]
-    return None
-
-
 def _merge_calls(command):
-    """The argument list of each segment of `command` that starts with the merge tool, split as the guard splits. A
+    """The argument list of each segment of `command` that runs the merge tool, split as the guard splits and read by
+    the guard's merge-tool reader (guard_merge.merge_tool_args), cut where a glued `)` or `&` ends the command. A
     merge named inside another command's arguments or quotes (a grep, a comment body) is no call."""
     global guard
     if guard is None:
         _load_guard()
     if guard is None:
         return []
+    from guard_merge import _command_words, merge_tool_args  # the copy guard loaded, from sys.modules
     calls = []
     for segment in guard.split_segments(guard.strip_heredoc_bodies(command)):
-        args = _merge_tool_args(segment)
+        args = merge_tool_args(segment)
         if args is not None:
-            calls.append(args)
+            calls.append(_command_words(args))
     return calls
 
 
@@ -2013,11 +1995,12 @@ def runner_hold(hook, records, active):
     Known limits (debts, not fixed): a merge whose output is redirected or piped away (`> out.txt`, `| tail`) shows
     no merged line, so it holds nothing; and a merge run through verdict that PASSES prints no log path (bin/verdict),
     so its result is unread. A verdict run that exits 1 shows the log and is read.
-    Cost: no process; it reads the transcript the Stop already read. Only when a Bash command names the merge tool:
-    the imports of guard_merge, the guard's parser and merge/merge.py, and one log or output file read for a verdict or background
-    run. Only when an act is owed: the own-record read in _own_tier_proved (a second open of the transcript), and one
-    override read, which writes the override's claim marker when a one-act override lifts the hold. No other file is
-    written."""
+    Cost: no process; it reads the transcript the Stop already read. Only when a Bash command has `merge` as a word
+    (MERGE_RUN_RE, which a `git merge` matches too): the import of guard_merge and the own-record read in
+    _own_tier_proved (a second open of the transcript). Only in a proved batch runner: the import of the guard's parser,
+    merge/merge.py through guard_merge.merge_module() (beside the guard, then the pointer's checkout), and one log or
+    output file read for each verdict or background merge run. Only when an act is owed: one override read, which writes
+    the override's claim marker when a one-act override lifts the hold. No other file is written."""
     try:
         if not any(MERGE_RUN_RE.search(str((use.get("input") or {}).get("command", "")))
                    for rec in records if not rec.get("isSidechain") for use in tool_uses(rec)
@@ -2026,6 +2009,8 @@ def runner_hold(hook, records, active):
         # Loaded before the shell parser, which loads its own copy of guard_merge: an import error here fails open.
         sys.path.insert(0, os.path.join(HERE, "..", "hooks"))
         from guard_merge import _own_tier_proved
+        if not _own_tier_proved(hook.get("transcript_path"), RUNNER_TIER):
+            return ""  # checked first, so a session that is no batch runner loads no parser and no merge tool
         runs, sends = _merge_runs(records)
         if not runs:
             return ""
@@ -2055,8 +2040,6 @@ def runner_hold(hook, records, active):
             merged = [n for n in merged if not re.search(r"#%d(?!\d)" % n, section)]
             owed = [(n, sid) for n, sid in owed if not re.search(r"#%d(?!\d)" % n, section)]
         if not merged and not owed:
-            return ""
-        if not _own_tier_proved(hook.get("transcript_path"), RUNNER_TIER):
             return ""
         import override
         if override.take(hook.get("session_id"), None, override.now()) in override.LIFTS:

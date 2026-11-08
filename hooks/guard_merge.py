@@ -807,11 +807,13 @@ ROLE_REASON = (
 )
 
 
-def role_call_of(segment: str):
-    """Return the tier word after the role flag when the segment runs the merge tool with it, else None.
+def merge_tool_args(segment: str):
+    """Return the words after the merge tool when the segment runs it, else None. The one reader of a
+    merge-tool call: the role proof here and the batch runner hold (lint/report_guard.py) share it.
 
-    The command word is the shim (`merge`, `~/.claude/bin/merge`, `bin/merge`) or python on
-    `merge/merge.py` or `merge/launch.py`. A role flag with no value gives ''.
+    The command word, past the wrappers resolve_command unwraps (`time`, `env X=1`, `nohup`,
+    `verdict`, a leading `(`), is the shim (`merge`, `~/.claude/bin/merge`, `bin/merge`) or python on
+    `merge/merge.py` or `merge/launch.py`. The words are raw: a `)` or `&` glued to the last one stays.
     """
     tokens = segment_tokens(segment)
     if not tokens:
@@ -826,8 +828,15 @@ def role_call_of(segment: str):
         if script is None or basename(script) not in ("merge.py", "launch.py") \
                 or basename(os.path.dirname(script.replace("\\", "/"))) != "merge":
             return None
-        rest = rest[rest.index(script) + 1:]
-    elif word != "merge":
+        return rest[rest.index(script) + 1:]
+    return rest if word == "merge" else None
+
+
+def role_call_of(segment: str):
+    """Return the tier word after the role flag when the segment runs the merge tool with it, else None.
+    A role flag with no value gives ''."""
+    rest = merge_tool_args(segment)
+    if rest is None:
         return None
     for at, arg in enumerate(rest):
         if arg == "--role":
