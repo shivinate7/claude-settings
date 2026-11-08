@@ -93,6 +93,11 @@ Shell tools (Bash, PowerShell), in judge_shell order:
   push-stray-branch    ask. A push with an implied destination (bare, `HEAD`, `@`, or a colon-less
                        refspec naming the current branch) that writes a name other than the branch's
                        upstream. Only with an upstream on the pushed remote that is not main or master.
+  archive-remote-tip   deny, or ask. A remote delete (`--delete`, `-d`, `:name`), or an archive push
+                       (`<src>:archive/<name>`), unless the local remote-tracking tip of the name is an
+                       ancestor of the default base or of a `refs/remotes/<remote>/archive/*` ref (and, for
+                       an archive push, of the source). Asks when the tip, the source or git's answer is
+                       unknown. A name with no tracking ref passes an archive push. A dry run passes.
   env-file             deny. Any read or write of an environment file.
   merge-checks         deny. A merge while the head has a check pending or red, while another
                        ready PR on the base runs CI, or when the read could not run. `--auto` too.
@@ -388,8 +393,9 @@ while True:
         )
         _loading = "guard_push_delete"
         from guard_push_delete import (
-            DELETE_REASON, DESTRUCTIVE_DELETE, LINKED_NM_REASON, PUSH_ASK_REASON, PUSH_MAIN_REASON,
-            PUSH_REASON, PUSH_STRAY_REASON, cmd_exe_delete_hit, delete_text, linked_nm_hit,
+            ARCHIVE_TIP_ASK_REASON, ARCHIVE_TIP_REASON, DELETE_REASON, DESTRUCTIVE_DELETE,
+            LINKED_NM_REASON, PUSH_ASK_REASON, PUSH_MAIN_REASON, PUSH_REASON, PUSH_STRAY_REASON,
+            archive_tip_hit, cmd_exe_delete_hit, delete_text, linked_nm_hit,
             parent_delete_hit, push_ask_hit, push_verdict, rm_delete_hit,
         )
         _loading = "guard_merge"
@@ -3844,6 +3850,20 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
     matched = record_writer_hit(stripped, cwd, transcript, record_branch_of, read_verb)
     if matched:
         refuse(tool, "deny", "roadmap-one-writer", RECORD_REASON, matched)
+
+    # 6a3. A remote delete, or an archive push, that drops a remote tip nothing else holds (rule
+    # archive-remote-tip). After the record-branch check, so a delete of the record branch keeps that
+    # refusal. A dry run writes nothing. Reads run only for a delete or an archive target.
+    for segment in (part for text in texts for part in split_segments(text)):
+        for args, where, overrides in _push_calls(segment, stripped, cwd):
+            if read_verb("push", args):
+                continue
+            verdict, _detail = archive_tip_hit(args, where, overrides)
+            if verdict == "deny":
+                refuse(tool, "deny", "archive-remote-tip", ARCHIVE_TIP_REASON, "git push " + " ".join(args))
+            elif verdict == "ask":
+                ask_command("archive-remote-tip", ARCHIVE_TIP_ASK_REASON, "git push " + " ".join(args),
+                            "remote tip unknown")
 
     # 6b. A pull request opened without --draft.
     for text, _in_message in _substitutions(stripped)[0]:

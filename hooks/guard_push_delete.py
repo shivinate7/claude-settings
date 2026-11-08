@@ -351,6 +351,131 @@ def push_ask_hit(args, cwd: str, overrides=None) -> str:
     return "stray" if merge != current() and not upstream else ""
 
 
+# ------------------------------------------------------------------ the remote tip (archive-remote-tip)
+#
+# A remote delete, and an archive push (`<src>:archive/<name>`), lose the old remote tip of <name> when
+# nothing else holds it. The tip is read from the remote-tracking ref, locally: no fetch, no network. A
+# stale tracking ref reads as the tip it last saw.
+ARCHIVE_DIR = "archive"
+ARCHIVE_TARGETS = ("refs/heads/" + ARCHIVE_DIR + "/", ARCHIVE_DIR + "/")
+
+
+def _ref_tip(cwd: str, ref: str):
+    """(state, sha) of one ref: 'ok' with the commit sha, 'none' when git says it does not exist,
+    'unknown' when git cannot answer. Exit 1 of `rev-parse --verify --quiet` is the only 'none'."""
+    answer = guard_core._git(cwd, "rev-parse", "--verify", "--quiet", ref + "^{commit}")
+    if answer is None or answer.returncode not in (0, 1):
+        return "unknown", ""
+    if answer.returncode == 1:
+        return "none", ""
+    sha = answer.stdout.strip()
+    return ("ok", sha) if sha else ("unknown", "")
+
+
+def _is_ancestor(cwd: str, older: str, newer: str):
+    """True or False for `older` an ancestor of `newer`, None when git cannot answer."""
+    answer = guard_core._git(cwd, "merge-base", "--is-ancestor", older, newer)
+    if answer is None or answer.returncode not in (0, 1):
+        return None
+    return answer.returncode == 0
+
+
+def _on_default_base(cwd: str, remote: str, tip: str):
+    """True, False, or None for the tip an ancestor of the default base. A repo with no default base
+    has no such arm: False."""
+    base, _head = guard_core.read_default_base(cwd, remote)
+    if base is None:
+        return False
+    # read_default_base answers a short name; a full ref keeps a branch of the same name from being ambiguous.
+    full = ("refs/remotes/" if base.startswith(remote + "/") else "refs/heads/") + base
+    return _is_ancestor(cwd, tip, full)
+
+
+def _in_archive_ref(cwd: str, remote: str, tip: str):
+    """True, False, or None for some ref under `refs/remotes/<remote>/archive/` holding the tip.
+    One `for-each-ref --contains` reads every archive ref at once, so a repo with many archive refs
+    costs one spawn."""
+    answer = guard_core._git(cwd, "for-each-ref", "--count=1", "--format=%(refname)",
+                             "--contains=" + tip,
+                             "refs/remotes/" + remote + "/" + ARCHIVE_DIR + "/")
+    if answer is None or answer.returncode != 0:
+        return None
+    return bool(answer.stdout.strip())
+
+
+def _archive_names(plain, deleting: bool):
+    """(deleted names, archive pushes as (source, name)) of the refspecs. A delete flag makes every
+    word a name; without it only a `:name` refspec deletes. A name with a glob, or one outside
+    refs/heads, is no branch this rule reads."""
+    deleted, pushed = [], []
+    for spec in plain:
+        source, colon, target = spec.lstrip("+").partition(":")
+        if deleting and not (colon and source):
+            deleted.append((target if colon else source).removeprefix("refs/heads/"))
+        elif colon and not source:
+            deleted.append(target.removeprefix("refs/heads/"))
+        elif colon:
+            for prefix in ARCHIVE_TARGETS:
+                if target.startswith(prefix):
+                    pushed.append((source, target[len(prefix):]))
+                    break
+
+    def branch(name):
+        return bool(name) and "*" not in name and not name.startswith("refs/")
+
+    return [name for name in deleted if branch(name)], [(src, name) for src, name in pushed if branch(name)]
+
+
+def archive_tip_hit(args, cwd: str, overrides=None):
+    """(verdict, detail) for a `git push` the remote-tip rule judges: ('deny', ...) or ('ask', ...), else
+    ('', ''). Judged: a delete of a remote branch X (`--delete`, `-d`, `:X`), and an archive push
+    (`<src>:archive/<name>` or `<src>:refs/heads/archive/<name>`).
+
+    A delete passes when the remote-tracking tip of X is an ancestor of the default base or of an archive
+    ref. A tip that is not there, or a read git cannot answer, asks. An archive push passes when the tip
+    of <name> is an ancestor of the source, the default base or an archive ref, and when <name> has no
+    remote-tracking ref at all. A source that does not resolve, or a read git cannot answer, asks. Reads
+    run only for a delete or an archive target, and each stops at the first arm that passes."""
+    _force, mirror, every, _inc, _unp, _leased, delete, _upstream, remote, plain = _push_parse(args)
+    if mirror or every or not plain:
+        return "", ""
+    deleted, pushed = _archive_names(plain, delete)
+    if not deleted and not pushed:
+        return "", ""
+    if not remote:
+        remote = _push_config(cwd, "branch." + (_push_current_branch(cwd) or "") + ".remote", overrides)
+    remote = remote or "origin"
+    asked = ""
+    for source, name in [(None, each) for each in deleted] + pushed:
+        state, tip = _ref_tip(cwd, "refs/remotes/" + remote + "/" + name)
+        if state == "none" and source is not None:
+            continue   # an archive push to a name the remote has never held loses nothing
+        if state != "ok":
+            asked = asked or "no readable remote-tracking tip for " + name
+            continue
+        arms = []
+        if source is not None:
+            src_state, src_sha = _ref_tip(cwd, "HEAD" if source == "@" else source)
+            if src_state != "ok":
+                asked = asked or "the source " + source + " does not resolve"
+                continue
+            arms.append(lambda sha=src_sha: _is_ancestor(cwd, tip, sha))
+        arms.append(lambda: _on_default_base(cwd, remote, tip))
+        arms.append(lambda: _in_archive_ref(cwd, remote, tip))
+        answers = []
+        for arm in arms:
+            found = arm()
+            if found:
+                break
+            answers.append(found)
+        else:
+            if None in answers:
+                asked = asked or "git could not answer for " + name
+            else:
+                return "deny", "the remote tip of " + name
+    return ("ask", asked) if asked else ("", "")
+
+
 # ------------------------------------------------------------------ a rewrite and a wide delete
 #
 # A force push rewrites a branch other people have pulled. It is sometimes right, so it asks rather
@@ -838,6 +963,17 @@ PUSH_STRAY_REASON = (
     "Rule (Git): this push writes a branch name other than the one this branch tracks (its upstream), "
     "so it may land on a stray branch. Check the destination (decision plain-push-asks). "
     "Approving the prompt lets this one push through; it is not a grant."
+)
+ARCHIVE_TIP_REASON = (
+    "Rule (Git): this would drop the remote tip of <branch> with no other copy. That tip is not on the "
+    "default branch, and no archive branch on <remote> holds it. Remedy: push the remote-tracking tip to "
+    "an archive branch first, `git push <remote> refs/remotes/<remote>/<branch>:refs/heads/archive/<branch>`, "
+    "then retry. The check reads the local remote-tracking refs, so fetch <remote> first if they are stale."
+)
+ARCHIVE_TIP_ASK_REASON = (
+    "Rule (Git): the remote tip of <branch> is unknown here: its remote-tracking ref is missing, the source "
+    "does not resolve, or git could not answer. So this push may drop a commit that has no other copy. "
+    "Fetch <remote> and check, then approve. Approving the prompt lets this one through; it is not a grant."
 )
 PUSH_ASK_REASON = (
     "Rule (Git): this forced push may rewrite the default branch, or its target is unreadable. "

@@ -23,7 +23,8 @@ The owner's typed override lets each through (`owner-override`). Owner rulings, 
     another lane. It sets the new upstream on purpose. Source: coordinator brief, 2026-11-03
     22:23 CST, as clarified 2026-11-04 01:49 CST;
   - an explicit `HEAD:<branch>` (agents push this way);
-  - `archive/*`, and `--tags`;
+  - `archive/*`, and `--tags` (for these two rules; an archive push of a branch with an unarchived remote
+    tip is refused by `archive-remote-tip`, decision `archive-remote-tip`);
   - a push to another remote than the upstream's;
   - `--dry-run`, which writes nothing;
   - `push.default=matching`, whose destination is not read;
