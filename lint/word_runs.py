@@ -63,19 +63,22 @@ def _copy_form_span(match):
 
 
 def mask_code_spans(text, only=None):
-    """`text` with each inline code span (its ticks and inner text, not a gloss after it) turned into NUL characters of
-    the same length, line breaks kept. A reader that matches words on the result never reads a word inside a span, and a
+    """`text` with each inline code span (its ticks and inner text; the plain words of a gloss after it stay) turned into NUL characters of
+    the same length, line breaks kept. A span in a gloss after a span is masked on the same terms. A reader that matches words on the result never reads a word inside a span, and a
     mask is never a space, so "builder `x` sonnet" never joins into the pair "builder sonnet". A lone backtick masks
     nothing, a span stops at a blank line (SPANS), and a comment opener inside a span stays inside it. An HTML comment is
     left as it is: it is no code span. `only` is a compiled pattern: when given, a span is masked only if its inner text
     matches it, and any other span stays readable.
-    Cost: one pass of SPANS over `text`; no file read, no state."""
+    Cost: one pass of SPANS over `text`, plus one more pass over each gloss after a span; no file read, no state."""
     def mask(match):
         span = match.group(0)
-        if not match.group("tick") or (only is not None and not only.search(match.group("inner"))):
+        if not match.group("tick"):
             return span
         gloss = match.group("gloss") or ""
-        return re.sub(r"[^\n]", "\0", span[:len(span) - len(gloss)]) + gloss
+        lead = span[:len(span) - len(gloss)]
+        if only is None or only.search(match.group("inner")):
+            lead = re.sub(r"[^\n]", "\0", lead)
+        return lead + mask_code_spans(gloss, only)
     return SPANS.sub(mask, text)
 
 

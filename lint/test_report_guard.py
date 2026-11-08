@@ -1376,6 +1376,12 @@ class DoneNamesModelsTests(unittest.TestCase):
                                 [BUILDER_SONNET, Background(self.BUILDER_OPUS_R2, finish=finish, status=status)])
         assert_blocks(self, finished, "no model named for builder opus")
 
+    def test_dm_false_alarm_span_in_a_gloss_after_a_plain_span_passes(self):
+        # `foo` holds no role word, so its gloss is read. The quoted `reviewer opus` in that gloss is code.
+        out = self.verdict("> **Done** BUILT the guard, PR #5 (builder sonnet, reviewer sonnet); see `foo` "
+                           "(and `reviewer opus`)\n> **Next** Unstarted: none", [BUILDER_SONNET, REVIEWER_SONNET])
+        assert_no_model_block(self, out)
+
 
 class UnstartedItemsTests(unittest.TestCase):
     """reports-name-unstarted-items, in report_guard.py's Stop hook."""
