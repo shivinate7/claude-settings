@@ -62,8 +62,13 @@
                           and refuses the base or a branch that exists. A lint that fails is run once more: a pass on the re-run joins and a
                           `lint re-ran:` line says so; a second fail is red. An unknown is never re-run. A PR whose live head carries a
                           `Batch: red <head> <job>` comment (the drop's record) reads `lane batch red` and is left out. --drop-red PR (the red
-                          integration PR's number) and --on BRANCH (build on the head of the batch whose CI is running, not on the base) are not
-                          built yet: each stops the run with a line saying so. Exit 0 when the build ran, 2 on a failed read (nothing printed).
+                          integration PR's number) reads PR's newest run, takes its failing jobs less all-jobs-passed, finds the lanes of its batch
+                          (its merge commits) whose changed files hit a suite, and drops each with its dependents (a stacked PR, a `Merge after #n`
+                          PR): one `Batch: red <head> <job>` comment on each, then a rebuild from the base by merges, never a revert, from the
+                          batch's other lanes alone. No lane hit: nothing is dropped, posted or built, the job is named and the exit is 1. --on
+                          BRANCH builds on BRANCH's head, the batch whose CI is running, not on the base: its own lanes are no candidates and a PR
+                          based on the base joins. If a split drops a lane from BRANCH, merge refuses the batch built on it, as that batch holds the
+                          lane. The two flags exclude each other. Exit 0 when the build ran, 2 on a failed read (nothing printed).
                           Cost: the open-pull list and the repo's comments (one read each), one `pulls/<n>` read per merge-after target outside the
                           open list, one fetch of the base and one per candidate, two worktrees plus one per running lint, one or two merges per
                           candidate (more only when a PR is left out), one lint run per candidate not skipped, one more lint run (about 550 s,
@@ -73,7 +78,11 @@
                           and, for the newest lint change, one `hit_suites` call per base commit that changes a path, newest first, until one
                           hits: the worst case is every such commit of the base's history, when none hits (then every head is linted). Each merge
                           that conflicts only on the records page runs the records generator once, and again when the merge is replayed because
-                          a PR was left out. No timer, file or log of its own.
+                          a PR was left out. --drop-red adds one fetch of the base and one of the integration branch, one `gh run list` for its
+                          head, one `actions/runs/<id>/jobs` read per run that did not pass, one worktree at that head, one `git log` and a merge-base
+                          per lane, one `git diff` and at most one `hit_suites` call per lane, and one comment POST per dropped PR with no line for
+                          its head; the rebuild costs what a build costs, for the batch's lanes alone. --on adds one fetch of BRANCH, one `git log`
+                          and a merge-base per lane of BRANCH, and one more worktree. No timer, file or log of its own.
   merge --idle-lanes --live FILE
                           one line per lane the roadmap's live file shows done and safe to archive, then a summary line. Reads
                           skills/roadmap/build.py (the upkeep row `lanes to archive`). Takes no lock and no merge role, merges and
@@ -2647,15 +2656,114 @@ def merge_conflicts(wt, sha, label, commit):
             git(wt, "reset", "--hard", "-q", "HEAD")
             git(wt, "clean", "-fdq")
 
+def fetch_tip(root, base, on=None):
+    """-> the sha a batch tree starts at: origin/<base>'s head, or origin/<on>'s head when `on` names the batch to build on. The base is always
+    fetched, since the lanes' merge base and the lint's base are origin/<base>. A failed fetch is a Stop."""
+    for branch in dict.fromkeys([base, *([on] if on else [])]):
+        c, out = git(root, "fetch", "-q", "origin", f"+refs/heads/{branch}:refs/remotes/origin/{branch}")
+        if c:
+            raise Stop(f"git fetch origin {branch} failed: {out} {BASE_CITE}")
+    return git(root, "rev-parse", f"origin/{on or base}")[1]
+
+def fetch_head(root, branch, sha):
+    """-> "" when origin/<branch> was fetched and holds `sha`, else why not. The one read of a PR head, for build_batch and red_drop."""
+    c, why = git(root, "fetch", "-q", "origin", f"+refs/heads/{branch}:refs/remotes/origin/{branch}")
+    if c:
+        return f"cannot fetch {branch}: {why}"
+    got = git(root, "rev-parse", f"refs/remotes/origin/{branch}")[1]
+    return "" if got == sha else f"{branch} moved: GitHub says {sha[:9]}, origin holds {got[:9]}"
+
+RED_NOT_FAILED = ("success", "skipped", "neutral", "cancelled", "timed_out")  # job conclusions that are no red CI step: a job that ends at its cap is re-capped or split, never a reason to drop a lane (skill ci-hygiene, step 8)
+
+def red_jobs(h, sha):
+    """-> the names of the failing jobs of the newest workflow runs on `sha`, in run order, less the required aggregate (REQUIRED_CHECK), which
+    fails with any job. Newest run per workflow name, as judge_runs reads them. No run, or a run still going, is a Stop: the red is unknown. A run
+    that did not pass has its jobs read (`actions/runs/<id>/jobs`, one read each); a job counts when it completed with a conclusion outside
+    RED_NOT_FAILED."""
+    runs = h.runs(sha)
+    if not runs:
+        raise Stop(f"no workflow run is listed for {sha[:9]}, so its red jobs are unknown {READ_CITE}")
+    newest = list({r["name"]: r for r in reversed(runs)}.values())[::-1]
+    going = [r["name"] for r in newest if r["status"] != "completed"]
+    if going:
+        raise Stop(f"the run of {', '.join(going)} on {sha[:9]} is still going, so its red jobs are unknown. Run again when it ends {READ_CITE}")
+    names = []
+    for r in newest:
+        if r["conclusion"] in ("success", "skipped", "neutral"):
+            continue
+        for j in h.pages(f"actions/runs/{r['databaseId']}/jobs", "jobs"):
+            if (j.get("status") == "completed" and j.get("conclusion") not in RED_NOT_FAILED and j["name"] != REQUIRED_CHECK
+                    and j["name"] not in names):
+                names.append(j["name"])
+    return names
+
+def lane_paths(wt, base_ref, tip):
+    """-> the paths lane `tip` changes since its merge base with base_ref, read in the tree `wt`. A failed read is a Stop."""
+    c, out = git(wt, "-c", "core.quotepath=off", "diff", "--name-only", "--no-renames", f"{base_ref}...{tip}")
+    if c:
+        raise Stop(f"the files of {tip[:9]} cannot be read: {out.strip()[:300]} {UNKNOWN_CITE}")
+    return sorted(p for p in out.splitlines() if p)
+
+def red_drop(root, h, base, pulls, int_n):
+    """-> (jobs, {PR number: why}, {PR number}, [tip sha]): the failing jobs of the newest run on the head of the red integration pull request int_n
+    (red_jobs, joined by a comma); the lanes of its batch to drop; every open PR whose head is a live lane of the batch (the only PRs a rebuild may
+    hold); and the lanes that no open PR has as its head but whose files hit a suite (the rebuild never holds them, so they are only named). No
+    failing job gives no lane at all. A lane is hit when hit_suites finds a suite its changed files reach; hit_suites reads the suites of the `checks`
+    jobs, not each job's own, so every red job reads the same hit set and the jobs only fill the reason. The lanes come from the batch's merge
+    commits (read_lanes), and a lane whose merge is net-reverted there is none. A dependent of a dropped lane, a PR stacked on it or one with a
+    `Merge after #n` line, to any depth, is dropped with it. A failed read is a Stop."""
+    by_num = {d["number"]: d for d in pulls}
+    d = by_num.get(int_n)
+    if d is None:
+        raise Stop(f"#{int_n} is not an open pull request, so the batch to rebuild cannot be read {READ_CITE}")
+    if d["base"]["ref"] != base:
+        raise Stop(f"#{int_n} is based on {d['base']['ref']}, not {base}: pass --base {d['base']['ref']} {UNKNOWN_CITE}")
+    sha, base_ref = d["head"]["sha"], f"origin/{base}"
+    jobs = ", ".join(red_jobs(h, sha))
+    if not jobs:
+        return jobs, {}, set(), []
+    why = fetch_head(root, d["head"]["ref"], sha)
+    if why:
+        raise Stop(f"{why} {UNKNOWN_CITE}")
+    tmp, wt = add_worktree(root, sha)  # hit_suites reads the suites from the tree that ran
+    try:
+        try:
+            tips, undone = read_lanes(wt, base_ref, sha)
+        except ValueError as e:
+            raise Stop(f"the lanes of #{int_n} cannot be read: {e} {UNKNOWN_CITE}")
+        hit = {}  # tip -> whether its changed files reach a suite
+        for t in tips:
+            if t not in undone:
+                paths = lane_paths(wt, base_ref, t)
+                hit[t] = bool(paths) and bool(hit_suites(wt, paths, set()))
+    finally:
+        drop_worktree(root, tmp, wt)
+    by_head = {x["head"]["sha"]: n for n, x in by_num.items()}
+    in_batch = {by_head[t] for t in hit if t in by_head}
+    drops = {by_head[t]: f"dropped: its files hit the red job {jobs}" for t in hit if hit[t] and t in by_head}
+    stacks = stack_heads(pulls)
+    parents = {n: ({stacks[by_num[n]["base"]["ref"]]} if stacks.get(by_num[n]["base"]["ref"], n) != n else set())
+               | set(merge_after_targets(by_num[n].get("body"))) for n in in_batch}
+    grew = True
+    while grew:
+        grew = False
+        for n in sorted(in_batch - set(drops)):
+            lost = sorted(parents[n] & set(drops))
+            if lost:
+                drops[n], grew = f"dropped: it depends on {', '.join(f'#{t}' for t in lost)}, which the red job {jobs} hit", True
+    return jobs, drops, in_batch, [t for t in hit if hit[t] and t not in by_head]
+
 class BatchBuild:
     """One `merge --build-batch`: the batch tree, the trial merges and the lint pool. A unit is a stack of pull requests, or a pull request alone; it
     joins whole or not at all. Units go in one at a time, each merged onto the tree at once, so a conflict shows before any lint; its lints (one at a
     time inside a unit, `cap` units at once) run in the pool while later units merge. A unit that conflicts with a unit still being linted waits
     for those lints (settle) and tries again on the units that passed. State: `joined` (the PR numbers, in merge order), `left` (PR number -> why),
-    `lines` (the `skipped lint` lines)."""
+    `lines` (the `skipped lint` lines). The tree starts at `start`, a sha (the base's head when None; --on gives the head of another batch), named
+    `floor` in a conflict line: a trial merge that conflicts there conflicts with the floor, not with the batch."""
 
-    def __init__(self, root, h, base, info, bases, after, on_main, cap):
+    def __init__(self, root, h, base, info, bases, after, on_main, cap, start=None, floor="main"):
         self.root, self.h, self.base, self.base_ref = root, h, base, f"origin/{base}"
+        self.start, self.floor = start, floor
         self.info, self.bases, self.after, self.on_main = info, bases, after, on_main  # info: n -> {branch, sha}; bases: n -> the open PR it is stacked on
         self.lock = threading.Lock()  # `git worktree add` and `remove` run one at a time, so two lint threads never race on the worktree list
         self.pool = concurrent.futures.ThreadPoolExecutor(cap)
@@ -2665,13 +2773,14 @@ class BatchBuild:
         self._history, self._skip, self._newest = None, None, None
 
     def open(self):
-        c, out = git(self.root, "fetch", "-q", "origin", f"+refs/heads/{self.base}:refs/remotes/origin/{self.base}")
-        if c:
-            raise Stop(f"git fetch origin {self.base} failed: {out} {BASE_CITE}")
-        self.tip = git(self.root, "rev-parse", self.base_ref)[1]
-        for _ in range(2):  # the batch tree, and the probe tree that holds the base alone
-            self.trees.append(add_worktree(self.root, self.tip))
+        self.tip = self.start or fetch_tip(self.root, self.base)
+        base_tip = git(self.root, "rev-parse", self.base_ref)[1]
+        # the batch tree; the probe tree, which holds the base alone for the lint skip's reads; and, when the tree starts past the base, a trial tree at
+        # the start, which stands in for the base in the trial merges
+        for sha in (self.tip, base_tip, *([self.tip] if self.tip != base_tip else [])):
+            self.trees.append(add_worktree(self.root, sha))
         self.wt, self.probe = self.trees[0][1], self.trees[1][1]
+        self.trial = self.trees[2][1] if len(self.trees) > 2 else self.probe
 
     def close(self):
         self.pool.shutdown(wait=True, cancel_futures=True)
@@ -2741,7 +2850,7 @@ class BatchBuild:
         for n in unit:
             sha, label = self.info[n]["sha"], f"#{n} {self.info[n]['branch']}"
             if self.head() != self.tip:
-                files = merge_conflicts(self.probe, sha, label, commit=False)
+                files = merge_conflicts(self.trial, sha, label, commit=False)
                 if files:
                     return n, "main", files
             before = self.head()
@@ -2857,7 +2966,7 @@ class BatchBuild:
             culprit, kind, files = self.merge_all(unit)
             if not culprit:
                 break
-            where = "main" if kind == "main" else f"the batch ({self.batch_names(files)})"
+            where = self.floor if kind == "main" else f"the batch ({self.batch_names(files)})"
             self.unmerge(start, mark)
             if kind == "batch" and attempt == 1 and self.queue:
                 self.settle()  # the conflict may be with a unit whose lint is red, which the batch will not hold
@@ -2894,6 +3003,23 @@ def units_of(info, bases):
         return d
     return sorted((sorted(g, key=lambda n: (depth(n), n)) for g in groups.values()), key=min)
 
+def record_drops(h, heads, int_n, jobs):
+    """Post one comment on each pull request of `heads` (number -> (live head, why it is dropped)): `Batch: red <head> <jobs>`, the line pr_acts reads
+    as `lane batch red` and refuse_batch_red reads on the batch. All are tried; a failed POST is then one Stop naming each pull request left without
+    its line. Nothing is rebuilt or pushed after it, and a run again writes the missing lines only (a PR with its line is left alone)."""
+    failed = []
+    for n, (sha, why) in sorted(heads.items()):
+        body = "\n".join([f"{BATCH_RED_WORD} {sha} {jobs}", "", f"`merge --build-batch --drop-red {int_n}` dropped this head from the red batch #{int_n} ({why}).",
+                          "Fix it in its own lane and push: a new head makes this line stale, and the lane joins the next batch."]) + "\n"
+        try:
+            c, out = h.api(f"issues/{n}/comments", method="POST", body={"body": body})
+        except Stop as e:
+            c, out = 1, str(e)
+        if c:
+            failed.append(f"#{n} ({out.strip()[:200]})")
+    if failed:
+        raise Stop(f"the {BATCH_RED_WORD} line was not posted on {', '.join(failed)}, so it is unknown whether those lanes are recorded as dropped. Nothing was rebuilt. Run again {UNKNOWN_CITE}")
+
 def build_batch(root, h, base, push="", drop_red=None, on=None):
     """merge --build-batch: build an integration branch from pull request state alone. -> 0 when the build ran (a PR left out is no failure), 2 when a
     read failed (nothing printed), else raises Stop (a refused --push, a failed fetch or push).
@@ -2902,10 +3028,19 @@ def build_batch(root, h, base, push="", drop_red=None, on=None):
     at all (BatchBuild). A PR whose merge-after target is neither merged nor in the batch is left out. Each is merged --no-ff onto the base and
     onto the batch so far, and lane-linted at its head against the base unless its merge base holds main's newest lint-step change; lints run in
     parallel, at most os.cpu_count() - 2 (at least 1) at once. A lint that fails is run once more (a flaky step); a PR is red only when both runs
-    fail, and gets one `Lint: red <head> <steps>` comment. `drop_red` (--drop-red) and `on` (--on) are flag skeletons: each raises Stop, not built yet. Only --push moves a ref:
-    it makes the new branch `push`, and refuses the base or a branch that exists.
+    fail, and gets one `Lint: red <head> <steps>` comment. Only --push moves a ref: it makes the new branch `push`, and refuses the base or a branch that exists.
+    `drop_red` (--drop-red PR) splits a red batch: PR is the integration pull request whose newest run ran red (red_jobs: the failing jobs, less the
+    required aggregate). The lanes of its batch come from its merge commits (read_lanes); a lane whose changed files hit a suite (hit_suites, no log is
+    read) is dropped with its dependents (red_drop), each gets one `Batch: red <head> <job>` comment (record_drops), and the batch is rebuilt from the
+    base by merges, never a revert, from the batch's own other lanes alone (a lane that joined the candidates since waits for the next batch). It is
+    built only to a new --push branch. When no lane is hit it drops, posts and builds nothing, names the job on stderr and returns 1. A failed read,
+    a run still going and a failed POST are unknown: 2 (a POST that failed leaves the lines that did post, and a run again posts the rest).
+    `on` (--on BRANCH) builds batch N+1 on batch N while N's CI runs: the tree starts at origin/BRANCH's head, the lanes of BRANCH's own merge commits
+    (read_lanes) are no candidates and are not listed, and a PR based on the base is accepted. A conflict with that start reads `conflicts with
+    BRANCH's head`. refuse_batch_red then stops N+1 from shipping a lane that a split of N dropped: N+1's head holds the lane, and the lane's
+    `Batch: red` line names it. The two flags exclude each other.
     Output, printed at the end: the cap line, `skipped lint:` lines, a `joins: #n branch sha` line per joined PR in merge order, a `left out: #n
-    branch: why` line per PR left out in PR order, and `batch: N PRs`.
+    branch: why` line per PR left out in PR order (a dropped lane too), and `batch: N PRs`.
     Cost: the open-pull list and the repo's comments (one read each), one `pulls/<n>` read per merge-after target outside the open list, one fetch
     of the base and one per candidate branch, two worktrees (the batch tree and a probe tree at the base) and one more per running lint, one or two
     merges per candidate (onto the base and onto the batch) and a replay of the joined ones when one was left out, one lint run per candidate not
@@ -2914,26 +3049,46 @@ def build_batch(root, h, base, push="", drop_red=None, on=None):
     of the base (history), one `ci-job checks --lint --plan` start (lint_steps), a merge-base, a rev-list and a diff per candidate, one hit_suites
     call per candidate with paths, and for newest_lint_change one hit_suites call per base commit that changes a path, newest first, until one
     hits: every such commit of the base's history in the worst case, when none hits (then every head is linted). Each merge that conflicts only on
-    the records page runs the records generator once (heal_records_page), and again when rebuild replays it. No timer, file or log of its own."""
-    if drop_red is not None:
-        raise Stop("--drop-red is not built yet")
-    if on is not None:
-        raise Stop("--on is not built yet")
+    the records page runs the records generator once (heal_records_page), and again when rebuild replays it. --drop-red adds: one fetch of the base
+    and one of the integration branch, one `gh run list` for its head (runs), one `actions/runs/<id>/jobs` read per run that did not pass, one
+    worktree at the integration head, one `git log` (read_lanes) with a merge-base per lane, one `git diff` and at most one hit_suites call per lane,
+    and one comment POST per dropped PR that has no line for its head; the rebuild then costs what the build above does, for the batch's lanes alone.
+    --on adds one fetch of BRANCH, one `git log` and a merge-base per lane of BRANCH (read_lanes), and one more worktree (the trial tree at BRANCH's
+    head). No timer, file or log of its own."""
     if push:
         if push == base:
             raise Stop(f"--push names the base {base}: a batch goes to a new branch, never to the base. {PUSH_BASE_CITE}")
         if origin_head(root, push):
             raise Stop(f"origin already has the branch {push}: --push makes a new branch and never moves one. {PUSH_EXISTS_CITE}")
+    start = fetch_tip(root, base, on) if drop_red is not None or on is not None else None  # the lanes of the red batch and of batch `on` are read against origin/<base>, so it is fetched first
+    floor = f"{on}'s head" if on else "main"
     try:
         pulls = h.pages("pulls", fields={"state": "open"})
         by_num = {d["number"]: d for d in pulls}
         acts = pr_acts(h, pulls, holds=False) if pulls else {}  # holds off: only the batch act matters, so a held PR costs no events read; the labels are read below
         cands = [n for n in sorted(acts) if acts[n][2] == "batch"]
+        jobs, drops, orphans = "", {}, []
+        if drop_red is not None:
+            jobs, drops, in_batch, orphans = red_drop(root, h, base, pulls, drop_red)
+            if not drops and not orphans:
+                print(f"merge: the newest run of #{drop_red} has " + (f"the failing jobs {jobs}" if jobs else "no failing job beside the required check")
+                      + ", and none of them is hit by a lane of its batch (read from each lane's changed files). Nothing was dropped, posted or rebuilt. "
+                      + BATCH_RED_CITE, file=sys.stderr)
+                return 1
+            cands = [n for n in cands if n in in_batch and n not in drops]  # the rebuild holds the batch's own lanes, less the dropped ones: a late lane waits for the next batch
+        on_lanes = set()
+        if on is not None:
+            try:
+                on_lanes = set(read_lanes(root, f"origin/{base}", start)[0])
+            except ValueError as e:
+                raise Stop(f"the lanes of {on} cannot be read: {e} {UNKNOWN_CITE}")
         after = {n: merge_after_targets(by_num[n].get("body")) for n in cands}
         on_main = {t for t in sorted({t for ts in after.values() for t in ts if t not in by_num}) if merged_into(h, t, base)}
         stacks = stack_heads(pulls)
         bases = {n: stacks[by_num[n]["base"]["ref"]] for n in cands if stacks.get(by_num[n]["base"]["ref"], n) != n}
         wrong_base = {n for n in cands if by_num[n]["base"]["ref"] != base and n not in bases}
+        if drops:  # last, so a read that failed above leaves no comment behind; a PR that already carries its line for this head is not written to again
+            record_drops(h, {n: (by_num[n]["head"]["sha"], why) for n, why in drops.items() if acts[n][2] != "lane batch red"}, drop_red, jobs)
     except Stop as e:  # a failed read lists nothing and exits 2: unknown, never an empty batch
         print(f"merge: {e}", file=sys.stderr)
         return 2
@@ -2941,12 +3096,15 @@ def build_batch(root, h, base, push="", drop_red=None, on=None):
         print(f"merge: a pull request, comment or event read from GitHub is malformed ({type(e).__name__}: {e}), so the batch is unknown. {UNKNOWN_CITE}", file=sys.stderr)
         return 2
     cap = max(1, (os.cpu_count() or 1) - 2)
-    out, left, joined = [], {}, []
+    out, left, joined = [], dict(drops), []
+    out += [f"dropped without a PR: {t[:9]}: its files hit the red job {jobs}, and no open pull request has that head, so the rebuild does not hold it" for t in orphans]
     info = {}
     holds = tuple(k for k in HOLD_LABELS if k != BATCH_LABEL)  # a hold stands in for a review, so a held PR is no candidate even with a done record
     for n in cands:
         d = by_num[n]
         branch, sha = d["head"]["ref"], d["head"]["sha"]
+        if sha in on_lanes:  # a lane of batch `on` is already in the tree
+            continue
         held = next((k for k in holds if k in label_names(d)), None)
         if held:
             left[n] = f"label {held}"
@@ -2954,16 +3112,15 @@ def build_batch(root, h, base, push="", drop_red=None, on=None):
         if n in wrong_base:
             left[n] = f"its base is {d['base']['ref']}, not {base}"
             continue
-        c, why = git(root, "fetch", "-q", "origin", f"+refs/heads/{branch}:refs/remotes/origin/{branch}")
-        got = "" if c else git(root, "rev-parse", f"refs/remotes/origin/{branch}")[1]
-        if c or got != sha:
-            left[n] = f"cannot fetch {branch}: {why}" if c else f"{branch} moved: GitHub says {sha[:9]}, origin holds {got[:9]}"
+        why = fetch_head(root, branch, sha)
+        if why:
+            left[n] = why
             continue
         info[n] = {"branch": branch, "sha": sha}
     warnings = []
     if info:
         out.append(f"lint cap: {cap} at once (os.cpu_count() {os.cpu_count()} minus 2, at least 1)")
-        b = BatchBuild(root, h, base, info, bases, after, on_main, cap)
+        b = BatchBuild(root, h, base, info, bases, after, on_main, cap, start, floor)
         try:
             b.open()
             todo = units_of(info, bases)
@@ -3223,13 +3380,9 @@ BATCH_RED_CITE = "(rule git-integration-branch-merge, a red batch drops its fail
 
 def comments_since(host, since):
     """-> the repo's issue comments updated since `since` (Host.issue_comments). A failed read is a Stop that carries READ_CITE: unknown is red, so the
-    merge is refused. A host with no comment read holds none: the real Host always has one, so only a scripted host of the git-only cases lacks it
-    (a bandaid for those, until the scripted host gives one)."""
-    read = getattr(host, "issue_comments", None)
-    if read is None:
-        return []
+    merge is refused."""
     try:
-        return read(since)
+        return host.issue_comments(since)
     except Stop as e:
         raise Stop(f"{e} The check for a `{BATCH_RED_WORD}` line could not read the comments. {READ_CITE}")
 
@@ -3979,8 +4132,8 @@ def main(argv, host=None, lock=None):
     p.add_argument("--live", default=None, metavar="FILE", help="with --idle-lanes: the publisher's live-work file")
     p.add_argument("--build-batch", action="store_true", help="build an integration branch from PR state alone: the PRs whose act is batch, merged in order and linted in parallel; moves no ref without --push")
     p.add_argument("--push", metavar="BRANCH", help="with --build-batch: push the batch to this new branch of origin (never the base, never a branch that exists)")
-    p.add_argument("--drop-red", type=int, metavar="PR", help="with --build-batch: rebuild without the lane the red integration pull request PR names (not built yet)")
-    p.add_argument("--on", metavar="BRANCH", help="with --build-batch: build on this branch, the head of the batch whose CI is running, not on the base (not built yet)")
+    p.add_argument("--drop-red", type=int, metavar="PR", help="with --build-batch: rebuild without the lanes the red integration pull request PR's failing job hits, and their dependents; posts `Batch: red <head> <job>` on each")
+    p.add_argument("--on", metavar="BRANCH", help="with --build-batch: build on this branch, the head of the batch whose CI is running, not on the base; that batch's own lanes are not candidates")
     p.add_argument("--reviewed", action="store_true", help="the ledger: each open pull request with its one next act and age; exit 1 when any line is RED")
     p.add_argument("--review-record", action="store_true", help="print the review record for the pull request's live head (posts nothing)")
     p.add_argument("--head", type=head_arg, metavar="SHA", help="with --review-record: the 40-hex head the review read; the live head must equal it")
@@ -3999,6 +4152,8 @@ def main(argv, host=None, lock=None):
         p.error("--push goes with --build-batch")
     if (a.drop_red is not None or a.on is not None) and not a.build_batch:
         p.error("--drop-red and --on go with --build-batch")
+    if a.drop_red is not None and a.on is not None:
+        p.error("--drop-red rebuilds from the base and --on builds on a batch: give one")
     if a.idle_lanes and (a.pr is not None or a.confirm or a.unlock is not None or a.role is not None or a.reviewed
                          or a.review_record or a.lane_lint or a.build_batch):
         p.error("--idle-lanes stands alone")

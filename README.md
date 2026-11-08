@@ -152,7 +152,10 @@ merge --reviewed        the ledger: one line per open PR with its one next act (
 merge --build-batch [--base BRANCH] [--push BRANCH] [--drop-red PR] [--on BRANCH]   build an integration branch from PR state alone: the PRs whose act is `batch`
                         (a PR with a held, parked or replaced label is left out), merged in PR order, a stack whole or not at all, each lane-linted
                         in parallel unless its merge base holds main's newest lint change. A lint that fails is run once more; a second fail leaves the PR out and posts `Lint: red <head> <steps>`.
-                        `--drop-red` and `--on` are not built yet.
+                        `--drop-red PR` splits a red batch: it reads the newest run of the integration PR, finds the lanes of its batch whose changed files hit a suite, and
+                        drops each with its dependents (a stacked PR, a `Merge after #n` PR). Each gets one `Batch: red <head> <job>` comment, and the rest is rebuilt from
+                        main by merges, never a revert. No lane hit: nothing is dropped and the exit is 1. `--on BRANCH` builds the next batch on the head of the batch whose CI is
+                        running; that batch's own lanes are no candidates. The two flags exclude each other.
                         Prints `joins:`, `left out:` and `batch: N PRs`. Only --push moves a ref, to a new branch.
 merge --lane-lint <pr> --integration   the lane lint; after a PASS it adds the `batch` label to the integration PR (one POST).
 merge --dev ...         run the checkout's own tree, not origin main
