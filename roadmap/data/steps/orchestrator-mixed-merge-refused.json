@@ -1,0 +1,11 @@
+{
+  "title": "A lane session's merge commit that resolves both test and product files is refused",
+  "why": "Coordinator 12:02 CST Nov 8: refuse a merge commit made by a lane session (not a test-author) whose resolution touches both test and product files. Builds on #1521's role reader, so it starts once #1521 merges. Sightings: 1a444eb96 on #1932, and #2194's #1479 merge (11:59 CST). Owner item 437 (builder-test-edit-scope) is open on the same guard.",
+  "note": "",
+  "phase": "now",
+  "owner": "claude-settings",
+  "lane": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB) to route",
+  "status": "todo",
+  "order": 774,
+  "updatedAt": "2026-11-08T12:04:00-06:00"
+}

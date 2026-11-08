@@ -1,9 +1,9 @@
 {
- "title": "8 of 9 roadmap-linked artifact pages live in another account",
- "phase": "next",
- "status": "todo",
- "order": 525,
- "why": "Coordinator, Nov 3 17:37 CST, from the artifact-lane lane.",
- "note": "Owner question: page item 217 (register as other / drop links / re-export into git). Home of the answer: step artifact-lane.",
- "updatedAt": "2026-11-03T23:39:00Z"
+  "title": "8 of 9 roadmap-linked artifact pages live in another account",
+  "phase": "next",
+  "status": "todo",
+  "order": 525,
+  "why": "Coordinator, Nov 3 17:37 CST, from the artifact-lane lane.",
+  "note": "Owner question: page item 217 (register as other / drop links / re-export into git). Home of the answer: step artifact-lane. Lane 12:02 CST Nov 8: new export prompt covering every repo (degen, banchi and others), on branch artifact-pages-other-account (b29966ca); dry run on a fake second repo passed. Posted as owner task 438 (other-account-pages-to-git) rather than replacing task 240, which is a different act (republish 4 Cockpits; mailaudit still open).",
+  "updatedAt": "2026-11-08T12:04:00-06:00"
 }
