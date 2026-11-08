@@ -1,0 +1,31 @@
+{
+  "added": "2026-11-08T05:45:00Z",
+  "context": "Goal: a lane whose only change since its review is a main merge plus a small fix merges on a fix check, not a full new review.\nProblem (rule): the rule says a wider diff starts again at round 1. After a main merge, the old-to-new diff holds all of main's changes, so every main merge counts as \"wider\" and forces a full round.\nBased on (ruling): rule roles-review-cap-three: a small fix gets a fix check; a FAIL or a wider diff starts at round 1. Asked because \"wider\" is unclear after a main merge.\nBased on (ruling): decisions/hold-unsafe-after-round-3: a fix check covers only a fix to a round's defect. Asked again because tonight at least six PRs took a full round for a main merge plus a one-line form fix, a cost that ruling did not weigh.\nBased on (observed): #1679, #1670, #1439, #1472, #1449 and #1655 each took a full round for a main merge plus a one-line form fix (coordinator, 23:40 CST Nov 7).\nDeparts from: main, where a fix's size is judged on old..new \u2014 it is judged on the PR's own diff (main...head) plus conflict edits.\nMeanwhile: the width follow-up on step fix-check-guard-scope waits on this answer. The guard-question part (#1787) goes on.",
+  "home": "fix-check-guard-scope",
+  "id": "fix-check-width-after-merge",
+  "kind": "decision",
+  "n": 401,
+  "options": [
+    {
+      "gain": "A main merge alone never forces a full review, so reviews go to real changes.",
+      "how": "The fix check's \"adds nothing else\" test reads main...head and the conflict edits, as the guard question now does.",
+      "key": "a",
+      "label": "Judge size on the PR's own diff plus conflict edits (recommended)",
+      "lose": "A bad conflict resolution hidden in a merge is caught only if the fix check reads the conflict edits."
+    },
+    {
+      "gain": "Every byte since the last review is judged.",
+      "how": "The fix check's size test keeps reading every byte since the last review.",
+      "key": "b",
+      "label": "Keep old..new",
+      "lose": "A full review round after every main merge."
+    }
+  ],
+  "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
+  "pick": "a",
+  "ref": "rule roles-review-cap-three; decisions/hold-unsafe-after-round-3; #1787",
+  "short": "Fix-check width after a main merge",
+  "status": "open",
+  "title": "After a main merge, is a fix's size judged on the PR's own diff?",
+  "why": "The coordinator recommends a: it keeps reviews on real changes, and the fix check still reads the conflict edits."
+}
