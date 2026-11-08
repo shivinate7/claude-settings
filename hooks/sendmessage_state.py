@@ -24,7 +24,6 @@ else beside this file's real path (a symlink install, a worktree). Neither found
 import json
 import os
 import shutil
-import signal
 import subprocess
 import sys
 import tempfile
@@ -101,19 +100,12 @@ def receiver_state(name):
 
 
 def kill_tree(proc):
-    """Kill the reader and what it started. Only the process this hook started."""
+    """Kill the reader and what it started: _nowindow.kill_tree, the one home. With no helper installed yet
+    (the fallback above), only the reader itself."""
     try:
-        if os.name == "nt":
-            _nowindow.run(["taskkill", "/T", "/F", "/PID", str(proc.pid)], capture_output=True, timeout=5)
-        else:
-            os.killpg(proc.pid, signal.SIGKILL)
-    except Exception:
-        pass
-    try:
+        _nowindow.kill_tree(proc)
+    except AttributeError:
         proc.kill()
-        proc.wait(timeout=5)
-    except Exception:
-        pass
 
 
 def build_prompt(to, message):

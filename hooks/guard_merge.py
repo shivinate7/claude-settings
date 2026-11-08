@@ -8,7 +8,6 @@ import importlib
 import json
 import os
 import re
-import signal
 import subprocess
 import sys
 import time
@@ -792,17 +791,16 @@ def _push_hit(segment, stripped, cwd, args, is_test_rel):
 # A step that takes only the base ref reads the checked-out HEAD, so it runs once with the destination as
 # its base when origin holds it (the lines the push adds), else origin's default branch.
 # A finding is a non-indented stdout line; ALLOWED and UNKNOWN lines are not. Unknown means allowed: a
-# shallow clone (a step's own `<name>: UNKNOWN` line), a workflow with no fast step, a step whose `if:` or
-# `env:` this reader cannot evaluate, a run past LANE_LINT_PUSH_SECONDS (default 40, one deadline for the
-# whole call, under the hook's own 60 s), a missing bash, an odd exit, or a tip run that is unknown when the
-# first run fails. One guard.log line and one stderr line per call say so (guard.py).
-# Not judged: a dry run, a delete, a tag, a destination `archive/*` or the record branch, and a checkout with
-# no .github/workflows/checks.yml. Limits: a commit made earlier in the same call is not in HEAD yet and is
-# not linted; a push with nothing to send still starts its runs.
-# Measured on 13 lane ranges (0 to 51 commits, 0 to 26 files): silent-undo 0.07 to 2.0 s, ruling-kind
-# 0.04 to 0.08 s, comment-narration 0.12 to 2.1 s. The guard's whole run over 7 lane tips: 0.3 to 2.5 s
-# for a new destination, 0.6 to 2.1 s for an existing one. The runs of one ref start together, so a push
-# waits for the slowest, not the sum. Budget: 10 s of lint time per push. All three steps fit.
+# shallow clone (a step's own `<name>: UNKNOWN` line; the note adds `git fetch --unshallow origin`), a step
+# whose `if:` or `env:` this reader cannot evaluate, a run past LANE_LINT_PUSH_SECONDS (default 40, one
+# deadline for the whole call, under the hook's own 60 s), a missing bash, an odd exit, or a tip run that is
+# unknown when the first run fails. One guard.log line and one stderr line per call say so (guard.py).
+# Not judged, and silent: a dry run, a delete, a tag, a destination `archive/*` or the record branch, a
+# checkout with no .github/workflows/checks.yml, and a workflow with no fast step.
+# A commit, merge, revert, cherry-pick, rebase or am earlier in the same call is not in HEAD yet, so the push
+# it precedes cannot be linted: that push is denied (LANE_LINT_PUSH_CHAIN_REASON) when a fast step exists.
+# Limit: a push with nothing to send still starts its runs.
+# The measured times and the budget are in decision lane-lint-at-push.
 # Cost: no process for a call with no push, or a push the list above skips. Else per ref, one `bash`
 # child per run: one per step that takes only the base ref, and one per step that takes the head sha (two
 # when origin holds the destination); each child's own git and lint reads run inside it. The workflow is
@@ -813,6 +811,13 @@ LANE_LINT_PUSH_REASON = (
     "Remedy: fix what each line names and commit the fix, then push again. For a silent undo, put the lines "
     "back, or add a `Drops-lines: <path> -- <reason>` trailer to a commit message."
 )
+LANE_LINT_PUSH_CHAIN_REASON = (
+    "Rule (Git, lane-lint-push; decision lane-lint-at-push, the lane lint before a push): a commit this call makes "
+    "before the push (a commit, merge, revert, cherry-pick, rebase or am) is not in HEAD yet, so this push cannot "
+    "lint what it sends. Remedy: run the push in a call of its own, after the commit lands."
+)
+_LANE_CHAIN_VERBS = ("commit", "merge", "revert", "cherry-pick", "rebase", "am")
+_LANE_CHAIN_DONE = {"--abort", "--quit", "--skip"}   # the step ends a sequence and makes no commit
 LANE_LINT_ENV = "LANE_LINT_PUSH_SECONDS"
 LANE_LINT_SECONDS = 40.0
 LANE_WORKFLOW = ".github/workflows/checks.yml"
@@ -822,7 +827,8 @@ _LANE_EXPR = re.compile(r"\$\{\{\s*(.*?)\s*\}\}\Z")
 _LANE_PULL_REQUEST = "github.event_name == 'pull_request'"
 _LANE_ENV_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]*\Z")
 _LANE_UNKNOWN = re.compile(r"^[\w.-]+: UNKNOWN\b")
-_LANE_NOT_FINDING = re.compile(r"^[\w.-]+: (?:ALLOWED|UNKNOWN)\b")
+# ALLOWED, UNKNOWN and REMEDY lines are a step's notes (lint/check_silent_undo.py), never a finding.
+_LANE_NOT_FINDING = re.compile(r"^[\w.-]+: (?:ALLOWED|UNKNOWN|REMEDY)\b")
 _LANE_EXITS = {   # the prefix's own exit codes, no lint step's
     95: "the push sends a ref other than the checked-out HEAD, and this step reads HEAD",
     96: "the pushed head's workflow differs from the checkout's",
@@ -913,17 +919,8 @@ def _lane_start(top, bash, step, extra):
 
 
 def _lane_stop(proc):
-    """Stop a run and what it started: the child leads its own process group on a POSIX host."""
-    try:
-        if os.name == "nt":
-            _nowindow.run(["taskkill", "/T", "/F", "/PID", str(proc.pid)], capture_output=True, timeout=10)
-        else:
-            os.killpg(proc.pid, signal.SIGKILL)
-    except Exception:
-        try:
-            proc.kill()
-        except Exception:
-            pass
+    """Stop a run and what it started (_nowindow.kill_tree), then close its pipes."""
+    _nowindow.kill_tree(proc)
     try:
         proc.communicate(timeout=5)
     except Exception:
@@ -953,13 +950,23 @@ def _lane_read(result):
     rows = out.splitlines()
     for row in rows:
         if _LANE_UNKNOWN.match(row):
-            return "unknown", row.strip()
+            shallow = "; remedy: git fetch --unshallow origin" if re.search(r"\bshallow\b", row, re.I) else ""
+            return "unknown", row.strip() + shallow
     if code == 0:
         return "pass", []
     if code != 1:
         return "unknown", "the lint exited %s: %s" % (code, cap_safe((err.strip().splitlines() or ["no message"])[-1], 100))
     found = [row.strip() for row in rows if row.strip() and not row[:1].isspace() and not _LANE_NOT_FINDING.match(row)]
     return ("fail", found) if found else ("unknown", "the lint exited 1 and printed no finding line")
+
+
+def _lane_segment_top(segment, stripped, cwd):
+    """The top folder of the checkout a call's segment acts on (its `-C` folder, else the call's folder), or ''."""
+    target = _segment_git_c_target(segment_tokens(segment) or [])
+    root = command_root(stripped, cwd)
+    where = _absolute(target, root) if target is not None else root
+    found = _toplevel(where) if where and os.path.isdir(where) else None
+    return os.path.normpath(found.stdout.strip()) if found is not None and found.returncode == 0 and found.stdout.strip() else ""
 
 
 def lane_lint_push_hit(stripped: str, cwd: str, record_branch_of, read_verb, note):
@@ -980,8 +987,13 @@ def lane_lint_push_hit(stripped: str, cwd: str, record_branch_of, read_verb, not
 def _lane_lint_push_hit(stripped, cwd, record_branch_of, read_verb, notes):
     deadline = None
     cap = _lane_cap()
+    chained = []   # the earlier segments of this call that commit; their folders are read only when a push is judged
     for segment in split_segments(stripped):
         call = git_call_of(segment) if segment.strip() else None
+        if (call is not None and call[0] in _LANE_CHAIN_VERBS and not read_verb(call[0], call[1])
+                and not _LANE_CHAIN_DONE & set(call[1])):
+            chained.append(segment)
+            continue
         if call is None or call[0] != "push" or read_verb("push", call[1]):
             continue
         named = push_refspecs(call[1])
@@ -1019,9 +1031,9 @@ def _lane_lint_push_hit(stripped, cwd, record_branch_of, read_verb, notes):
             steps, whys = plan
             notes.extend(whys)
             if not steps:
-                if not whys:
-                    notes.append("%s has no step that takes the pull request's base ref or head sha" % LANE_WORKFLOW)
-                continue
+                continue   # a workflow with no fast step has nothing to run here
+            if chained and top in {_lane_segment_top(each, stripped, cwd) for each in chained}:
+                return "git push", LANE_LINT_PUSH_CHAIN_REASON
             bash = find_git_bash()
             if not bash:
                 notes.append("bash was not found")

@@ -15,6 +15,7 @@ hidden console, so its output never reaches the caller's terminal. A site that m
 output on the caller's terminal carries a `# nowindow: <reason>` marker and calls `subprocess` itself.
 """
 import os
+import signal
 import subprocess
 import sys
 
@@ -45,3 +46,20 @@ def check_call(*args, **kwargs):
 
 def check_output(*args, **kwargs):
     return subprocess.check_output(*args, **_flags(kwargs))
+
+
+def kill_tree(proc):
+    """Kill a child this process started and what it started, then reap it. The child must lead its own process
+    group on a POSIX host (start_new_session). Never call it on a process this one did not start."""
+    try:
+        if os.name == "nt":
+            run(["taskkill", "/T", "/F", "/PID", str(proc.pid)], capture_output=True, timeout=5)
+        else:
+            os.killpg(proc.pid, signal.SIGKILL)
+    except Exception:
+        pass
+    try:
+        proc.kill()
+        proc.wait(timeout=5)
+    except Exception:
+        pass

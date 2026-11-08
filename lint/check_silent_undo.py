@@ -682,7 +682,7 @@ def main(argv):
     for p in problems:
         say("silent-undo: FAIL: " + p)
     if problems:
-        say("silent-undo: put the work back, or add the trailer `%s: <path> -- <reason>` to a commit message." % TRAILER)
+        say("silent-undo: REMEDY: put the work back, or add the trailer `%s: <path> -- <reason>` to a commit message." % TRAILER)
     return 1 if problems else 0
 
 

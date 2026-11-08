@@ -142,11 +142,13 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        commit against origin's default branch; a step that takes the head sha runs again
                        on the remote tip when origin holds the destination, and only a finding line absent
                        there refuses. Not judged: a dry run, a delete, a tag, a destination `archive/*` or
-                       the record branch, a checkout with no checks.yml. A workflow with no such step, a
-                       step `if:` or `env:` it cannot read, a step's own UNKNOWN line, a run past
-                       LANE_LINT_PUSH_SECONDS (40 s), an odd exit and a missing bash read as unknown:
-                       allowed, with one guard.log line and one stderr line that say unknown. An override
-                       lifts it. (lane-lint-at-push)
+                       the record branch, a checkout with no checks.yml, a workflow with no such step.
+                       A push after a commit, merge, revert, cherry-pick, rebase or am in the same call is
+                       denied when such a step exists: push in a call of its own. A step `if:` or `env:`
+                       it cannot read, a step's own UNKNOWN line (a shallow clone: the note says `git fetch
+                       --unshallow origin`), a run past LANE_LINT_PUSH_SECONDS (40 s), an odd exit and a
+                       missing bash read as unknown: allowed, with one guard.log line and one stderr line
+                       that say unknown. An override lifts it. (lane-lint-at-push)
   frozen-path        deny. A write to the settings, hooks or global CLAUDE.md under
                        `${CLAUDE_CONFIG_DIR:-$HOME/.claude}`. (frozen-path-resolves-shell-vars)
   config-edit          noted. A write to a project's own settings or hooks. See below.
