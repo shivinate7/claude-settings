@@ -13870,13 +13870,25 @@ for _name, _command in (
     sh("builder-test: shell write, %s, is allowed" % _name, _command, "allow", **DR)
 # A quoted brace is text to grep and find, not a brace list: `--include="test_{a,b}.py"` and `-name 'test_{a,b}.py'`
 # match only a file whose name holds those braces, and hooks holds none. So each walk names no test and writes
-# nothing, and is allowed. The unquoted forms expand in the shell into real test names, and stay denied below.
+# nothing, and is allowed. Where a brace does expand into a real test name, the deny pins below the allow pins hold it.
 for _name, _command in (
     ("grep -rl over hooks, --include=\"*.{py,js}\" quoted, sed -i", "grep -rl old hooks --include=\"*.{py,js}\" | xargs sed -i s/a/b/"),
     ("grep -rl over hooks, --include=\"test_{a,b}.py\" quoted, sed -i", "grep -rl old hooks --include=\"test_{a,b}.py\" | xargs sed -i s/a/b/"),
     ("find hooks -name 'test_{a,b}.py', sed -i", "find hooks -name 'test_{a,b}.py' | xargs sed -i s/a/b/"),
 ):
     sh("builder-test: shell write, %s, is allowed" % _name, _command, "allow", **DR)
+# A word with a quote and an unquoted brace list: the shell expands the braces and drops the quote, so
+# `"test_"{a,b}.py` names test_a.py and test_b.py, and each walk is refused. A guard that skips brace expansion
+# whenever a value holds a quote reads it as one literal `test_{a,b}.py`, names no test, and allows it, so these
+# pins go red there. The allow pin below quotes its braces, so it names no test and stays allowed.
+for _name, _command in (
+    ("find hooks -name \"test_\"{a,b}.py, sed -i", "find hooks -name \"test_\"{a,b}.py | xargs sed -i s/a/b/"),
+    ("grep -rl over hooks, --include=\"test_\"{a,b}.py, sed -i", "grep -rl old hooks --include=\"test_\"{a,b}.py | xargs sed -i s/a/b/"),
+):
+    sh("builder-test: shell write, %s, is refused" % _name, _command, "deny", rule=BT,
+       carries=("test-author",), **DR)
+sh("builder-test: shell write, find hooks -name test_'{a,b}'.py, sed -i, is allowed",
+   "find hooks -name test_'{a,b}'.py | xargs sed -i s/a/b/", "allow", **DR)
 # A brace sequence, and a double backslash that the shell reads as one, name test_a.py once the shell has read
 # the command, so each walk of hooks is refused. The guard reads the name the shell would pass on.
 for _name, _command in (
