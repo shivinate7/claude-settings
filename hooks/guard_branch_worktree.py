@@ -1,12 +1,15 @@
-"""The guard's branch-worktree family: branch delete and worktree remove/prune.
+"""The guard's branch-worktree family: branch delete, worktree remove/prune, and a commit from a
+tree its branch moved under (stale-tree-commit).
 
 guard.py is the only entry point, and it runs these checks in its fixed order.
 Other files reach these names through `guard`.
 """
+import os
 import shlex
 
 from guard_core import (
-    branch_is_empty, resolve_default_base,
+    _git, _segment_git_c_target, basename, branch_is_empty, dir_before_segment, git_calls,
+    resolve_command, resolve_default_base, segment_tokens, shell_abs,
 )
 
 
@@ -108,6 +111,198 @@ WORKTREE_PRUNE_ASK_REASON = (
     "longer exists. It deletes no files, but the record it drops could belong to another "
     "session. "
     "The click in this prompt is the grant."
+)
+
+# ------------------------------------------------------------------ stale-tree-commit
+#
+# Decision stale-tree-commit, "The ruling". Read the per-worktree HEAD reflog FILE, not `git reflog
+# HEAD`: with the worktree's own log missing, git falls back to the clone's logs, and the rule
+# must read that as "no evidence". The git directory comes from the one `rev-parse` call; the log
+# and the HEAD file are read as files, so the reflog and the detached check cost no git call.
+# A commit makes at most five git calls: rev-parse, the ancestor test, the staged paths
+# (diff-index), what the branch changed (diff-tree), and, for `-a` or named paths, hash-object.
+
+# `commit` options that take a value in the next word (or glued to a short flag).
+COMMIT_VALUE_FLAGS = {
+    "-m", "-F", "-C", "-c", "-t", "--message", "--file", "--author", "--date", "--reuse-message",
+    "--reedit-message", "--fixup", "--squash", "--cleanup", "--template", "--trailer",
+    "--pathspec-from-file",
+}
+COMMIT_VALUE_LETTERS = "mFCct"   # a short cluster ends where one of these starts its value
+
+
+def commit_scope(args):
+    """(all, include, paths) of a `git commit` call's arguments. `all` is `-a`/`--all`; `include`
+    is `-i`/`--include`; `paths` are the named pathspecs, which commit the work-tree copies."""
+    every = include = False
+    paths = []
+    ended = False
+    skip = False
+    for arg in args:
+        if skip:
+            skip = False
+            continue
+        if ended or not arg.startswith("-") or arg == "-":
+            paths.append(arg)
+        elif arg == "--":
+            ended = True
+        elif arg.startswith("--"):
+            name = arg.split("=", 1)[0]
+            if name == "--all":
+                every = True
+            elif name == "--include":
+                include = True
+            elif name in COMMIT_VALUE_FLAGS and "=" not in arg:
+                skip = True
+        else:
+            for at, letter in enumerate(arg[1:], 1):
+                if letter == "a":
+                    every = True
+                elif letter == "i":
+                    include = True
+                elif letter in COMMIT_VALUE_LETTERS:
+                    skip = at == len(arg) - 1
+                    break
+                elif letter in "Su":   # optional value, always glued
+                    break
+    return every, include, paths
+
+
+def _raw_pairs(where, args):
+    """{path: (old_sha, new_sha)} of a raw `-z` diff command in `where`, or None when it failed.
+    A missing side is "". Rename detection is off: the plumbing commands default to it off."""
+    answer = _git(where, *args)
+    if answer is None or answer.returncode != 0:
+        return None
+    parts = answer.stdout.split("\0")
+    pairs = {}
+    at = 0
+    while at + 1 < len(parts):
+        meta = parts[at]
+        if not meta.startswith(":"):
+            break
+        fields = meta[1:].split()
+        if len(fields) < 5:
+            return None
+        pairs[parts[at + 1]] = tuple("" if not sha.strip("0") else sha for sha in fields[2:4])
+        at += 2
+    return pairs
+
+
+def _newest_entry(gitdir):
+    """The newest HEAD reflog entry of a git directory as (old, new, message), or None for no
+    log, an empty log or an unreadable line. Reads the tail of the file only."""
+    try:
+        with open(os.path.join(gitdir, "logs", "HEAD"), "rb") as handle:
+            handle.seek(0, os.SEEK_END)
+            size = handle.tell()
+            handle.seek(max(0, size - 8192))
+            tail = handle.read().decode("utf-8", "replace")
+    except OSError:
+        return None
+    lines = [line for line in tail.split("\n") if line.strip()]
+    if not lines:
+        return None
+    head, _, message = lines[-1].partition("\t")
+    fields = head.split()
+    if len(fields) < 2:
+        return None
+    return fields[0], fields[1], message.strip()
+
+
+def _is_detached(gitdir):
+    try:
+        with open(os.path.join(gitdir, "HEAD"), encoding="utf-8", errors="replace") as handle:
+            return not handle.read().startswith("ref:")
+    except OSError:
+        return True
+
+
+def stale_tree_hit(where, args) -> str:
+    """The stale path's name when a `git commit` with these arguments, run in `where`, would undo
+    a change the branch made under this checkout (decision stale-tree-commit), else ''. Every
+    read that fails passes."""
+    first = _git(where, "rev-parse", "--absolute-git-dir", "--show-toplevel", "HEAD")
+    if first is None or first.returncode != 0:
+        return ""
+    lines = [line.strip() for line in first.stdout.split("\n")]
+    if len(lines) < 3 or not all(lines[:3]):
+        return ""
+    gitdir, top, head = lines[:3]
+    if _is_detached(gitdir):
+        return ""
+    last = _newest_entry(gitdir)
+    if last is None:
+        return ""
+    old, new, message = last
+    if new != head:
+        moved = new                       # the branch moved under this checkout
+    elif message == "" or message.startswith("reset:"):
+        moved = old                       # a move that leaves the index alone
+    else:
+        return ""                         # commit, pull, merge, rebase, checkout: the index synced
+    if not moved.strip("0") or moved == head:
+        return ""
+    ancestor = _git(where, "merge-base", "--is-ancestor", moved, head)
+    if ancestor is None or ancestor.returncode != 0:
+        return ""                         # a squash or a reset back: not a move forward
+    every, include, paths = commit_scope(args)
+    changed = _raw_pairs(top, ["diff-tree", "-r", "-z", "--no-abbrev", moved, head])
+    if not changed:
+        return ""
+    if every or include or not paths:
+        staged = _raw_pairs(top, ["diff-index", "--cached", "-r", "-z", "--no-abbrev", head])
+        if staged is None:
+            return ""
+        for name, (_, index_sha) in staged.items():
+            if name in changed and index_sha == changed[name][0]:
+                return name
+    if every or paths:
+        spec = ["--", *paths] if paths else []
+        dirty = _raw_pairs(where, ["diff-index", "-r", "-z", "--no-abbrev", head, *spec])
+        names = [name for name in (dirty or {}) if name in changed]
+        files = [name for name in names if os.path.isfile(os.path.join(top, name))]
+        if names:
+            shas = []
+            if files:
+                hashed = _git(top, "hash-object", "--", *files)
+                if hashed is None or hashed.returncode != 0:
+                    return ""
+                shas = hashed.stdout.split()
+            present = dict(zip(files, shas))
+            for name in names:
+                if present.get(name, "") == changed[name][0]:
+                    return name
+    return ""
+
+
+def stale_tree_commit_hit(segments, number: int, cwd: str, ends=()) -> str:
+    """The stale path's name when `segments[number]` is a `git commit` that would undo what its
+    branch changed under the tree it runs in, else ''. The tree is the shell's cwd after earlier
+    `cd` steps (`dir_before_segment`), then the call's own `-C`. Only a commit makes a git call."""
+    segment = segments[number]
+    commits = [args for subcommand, args in git_calls(segment) if subcommand == "commit"]
+    if not commits:
+        return ""
+    tokens = segment_tokens(segment)
+    index = resolve_command(tokens) if tokens else None
+    if index is None or basename(tokens[index]) not in ("git", "git.exe"):
+        return ""
+    where = dir_before_segment(segments, number, cwd, ends)
+    named = _segment_git_c_target(tokens)
+    if named is not None:
+        where = None if any(mark in named for mark in "$%`") else shell_abs(named, where)
+    if not where or not os.path.isdir(where):
+        return ""
+    return stale_tree_hit(where, commits[0])
+
+
+STALE_TREE_REASON = (
+    "Rule (stale tree): the branch moved under this checkout. Its index or files still hold old "
+    "copies of files that the branch changed, so a commit here would undo the commits it missed, "
+    "and the diff would look like a normal edit. "
+    "Remedy: stop and report it to your orchestrator, which starts a fresh agent with your "
+    "report. Commit nothing here (decision stale-tree-commit, a commit never runs from a tree its branch moved under)."
 )
 
 # The installer swaps the next line for `INSTALL_ID = "<id>"` at copy time; guard.py compares the
