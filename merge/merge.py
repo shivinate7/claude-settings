@@ -3231,14 +3231,15 @@ def round_floor(earlier, rec):
             return f"a failed fix check on head {e['head'][:9]} counts as round {n + 1}, and only a FAIL line fills it, but this record's round {n + 1} has none"
 
 def dropped_round_lines(last, rec):
-    """-> why, when the parsed record `rec` lacks a Round line of the parsed record `last` it follows; else None. A line is the same when its round
-    number, role, model and verdict match. Extra lines in `rec` are not refused. A lane that rewrites its rounds by hand can lose a FAIL line that
-    kept the earlier record open, and the record then reads done."""
-    kept = set(rec["rounds"])
-    dropped = [f"Round {i}: {role}, {model}, {verdict}" for i, role, model, verdict in last["rounds"] if (i, role, model, verdict) not in kept]
-    if dropped:
-        return (f"this record drops {'; '.join(dropped)} of the record on head {last['head'][:9]}. Copy every Round line of that record unchanged, "
-                "then add this check's own")
+    """-> why, when the parsed record `rec` lacks a Round line of the parsed record `last` it follows, or holds those lines in another order; else
+    None. A line is the same when its round number, role, model and verdict match. Extra lines in `rec` are not refused. Every line is kept, in its
+    order, so the new record stays a faithful copy. Only the last design-reviewer line, by position, decides whether a design FAIL keeps the record
+    open, so a dropped or swapped design line can turn an open record done."""
+    rest = iter(rec["rounds"])  # `line in rest` consumes up to its match, so a line found out of order reads as missing
+    lost = [f"Round {i}: {role}, {model}, {verdict}" for i, role, model, verdict in last["rounds"] if (i, role, model, verdict) not in rest]
+    if lost:
+        return (f"this record drops or reorders {'; '.join(lost)} of the record on head {last['head'][:9]}. "
+                "Copy every Round line of that record unchanged and in its order, then add the new lines after them")
 
 def reviewed_lines(h):
     """-> the lines of `merge --reviewed`, built before any is printed so a failed read prints none. Two list reads (the open pull requests, then the
