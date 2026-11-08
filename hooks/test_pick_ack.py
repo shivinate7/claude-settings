@@ -9,16 +9,21 @@ Run it from the repository root:
     python3 hooks/test_pick_ack.py
 
 Interface the code must match (hooks/guard_merge.py, beside brief_hit):
-- pick_ack_hit(tool, tool_input, transcript) -> (matched, reason) when the send asks, else None. `transcript` is
-  the path of the JSONL transcript. The repo is the process cwd; each transcript record also names it in `cwd`.
+- pick_ack_hit(tool, tool_input, transcript, cwd="", own_id="") -> (matched, reason) when the send asks, else None.
+  `transcript` is the path of the JSONL transcript. `cwd` and `own_id` are the payload's cwd and session_id, as
+  hooks/guard.py passes them. The past-ruling check runs in the repo of `cwd`.
+- Two id spaces. The payload session_id and each transcript record's sessionId are this session's local UUID. The
+  get_session record's ccr.id is the remote id (session_<x>), and so is the peer frame's from-session. The env
+  CLAUDE_CODE_REMOTE_SESSION_ID holds the same id as cse_<x>; hooks/override.py remote_session_id maps it back.
 - Trigger A: the message has a line that starts `Departs from:`, outside a code fence. Bold, bulleted, numbered and
   `>`-quoted labels count too, as DEPARTS_LINE reads them.
 - Trigger B: the newest inbound peer frame from the target session_id carries a Departs from line, and this send is
   the first send to that target since that frame. A frame is read in the real shape (a `user` record with no origin
   key, whose string content opens `<cross-session-message from-session="<id>">`) or in the origin shape.
 - A send to session_id `@parent` goes to the parent_session_id that the own get_session record names (the reader is
-  hooks/own_session.py own_session_read). With no transcript path, or with a parent that cannot be resolved, trigger B
-  cannot be read: such a send passes, with one stderr line that starts `pick-names-rulings: `.
+  hooks/own_session.py own_session_read, matched on the remote id). With no transcript path, or with a parent that
+  cannot be resolved, trigger B cannot be read: such a send passes, with one stderr line that starts
+  `pick-names-rulings: `.
 - A trigger that fires passes when the message has a `Checked: <id>[, <id>...]` line that names an id
   question_form.candidate_ids(question_form.past_rulings(...)) returns: `decisions/<slug>` or the bare slug.
 - past_rulings runs only when a trigger fires.
@@ -45,7 +50,10 @@ REAL_ID = "decisions/" + tcj.APPS_SLUG
 MADE_UP_ID = "decisions/no-such-ruling-q7x"
 TOOL = "mcp__claude-code-remote__send_message"
 GET_SESSION = "mcp__claude-code-remote__get_session"
-SENDER = "session_PICKSELF01"  # this session
+LANE_ENV = "CLAUDE_CODE_REMOTE_SESSION_ID"
+OWN_UUID = "5d1e8c3a-2b6f-4e9a-8c07-3f4a1d9e6b28"  # this session's local id: the payload session_id, each sessionId
+OWN_REMOTE = "session_PICKSELF01"  # this session's remote id: the get_session record's ccr.id
+OWN_ENV = "cse_PICKSELF01"  # what LANE_ENV holds for OWN_REMOTE
 TARGET = "session_PICKTGT01"  # the lane the send goes to
 OTHER = "session_PICKOTHER01"  # another lane
 PARENT = "session_PICKPARENT01"  # this session's parent: the target of a send to "@parent"
@@ -92,10 +100,10 @@ def real_inbound(from_session, body):
     `<cross-session-message from-session="<id>">` and closes `</cross-session-message>`. The ids and text are synthetic."""
     frame = '<cross-session-message from-session="%s">%s</cross-session-message>' % (from_session, body)
     enqueue = {"type": "queue-operation", "operation": "enqueue", "timestamp": FIXTURE_TIME,
-               "sessionId": SENDER, "content": frame}
+               "sessionId": OWN_UUID, "content": frame}
     user = {"parentUuid": None, "isSidechain": False, "type": "user", "message": {"role": "user", "content": frame},
             "isMeta": True, "uuid": "fixture-peer-frame", "timestamp": FIXTURE_TIME, "promptSource": "system",
-            "turnOrigin": "system", "entrypoint": "remote", "cwd": REPO, "sessionId": SENDER}
+            "turnOrigin": "system", "entrypoint": "remote", "cwd": REPO, "sessionId": OWN_UUID}
     return [enqueue, user]
 
 
@@ -108,11 +116,11 @@ def real_frame_shape(record, from_session):
 
 
 def own_session_record(parent):
-    """A get_session call and its result for this session. The result is the record's JSON: a ccr block that names
-    its parent_session_id, as get_session returns it."""
+    """A get_session call and its result for this session. The result is the record's JSON: a ccr block whose id is
+    the remote id and which names its parent_session_id, as get_session returns it."""
     tool_id = "fixture-get-session"
     call = {"type": "tool_use", "id": tool_id, "name": GET_SESSION, "input": {}}
-    body = json.dumps({"ccr": {"id": SENDER, "title": "a lane session", "tags": [], "parent_session_id": parent}})
+    body = json.dumps({"ccr": {"id": OWN_REMOTE, "title": "a lane session", "tags": [], "parent_session_id": parent}})
     done = {"type": "tool_result", "tool_use_id": tool_id, "content": [{"type": "text", "text": body}]}
     return [{"type": "assistant", "cwd": REPO, "message": {"role": "assistant", "content": [call]}},
             {"type": "user", "cwd": REPO, "message": {"role": "user", "content": [done]}}]
@@ -128,7 +136,8 @@ def sent(target, message, tool_id):
 
 def transcript(name, items):
     """The JSONL transcript of `items` (one record, a list of them, or a list holding lists), in this run's folder.
-    Returns its path. A bare record is one item: iterating it would walk its keys, so it is wrapped first."""
+    Returns its path. A bare record is one item: iterating it would walk its keys, so it is wrapped first. Every
+    record names this session's local UUID as its sessionId, as a real transcript does, unless it names one."""
     folder = os.path.join(RUN_FOLDER, "pick")
     os.makedirs(folder, exist_ok=True)
     path = os.path.join(folder, name + ".jsonl")
@@ -137,7 +146,7 @@ def transcript(name, items):
     with open(path, "w", encoding="utf-8") as f:
         for item in items:
             for rec in (item if isinstance(item, list) else [item]):
-                f.write(json.dumps(rec) + "\n")
+                f.write(json.dumps(dict(rec, sessionId=rec.get("sessionId", OWN_UUID))) + "\n")
     return path
 
 
@@ -163,8 +172,9 @@ def in_repo():
 
 
 def send(fn, message, path, target=TARGET):
+    """pick_ack_hit called as hooks/guard.py calls it: the payload's cwd and session_id (the local UUID)."""
     with in_repo():
-        return fn(TOOL, {"session_id": target, "message": message}, path)
+        return fn(TOOL, {"session_id": target, "message": message}, path, REPO, OWN_UUID)
 
 
 def send_capturing_stderr(fn, message, path, target=TARGET):
@@ -247,10 +257,12 @@ def case_parent_send_asks_on_parent_departs_frame():
     import own_session  # the one reader of a session's own get_session record (hooks/own_session.py)
     path = transcript("parent-ask", [owner_said("Run the lint on the batch."), own_session_record(PARENT),
                                      real_inbound(PARENT, PICK)])
-    named = own_session.own_session_read(path, SENDER)[2]
+    named = own_session.own_session_read(path, OWN_REMOTE)[2]
     check(case + ": scope: the own get_session record names the parent", named == PARENT,
           "parent is %r" % (named,))
-    got = send(fn, AGREED, path, target="@parent")
+    with mock.patch.dict(os.environ) as env:
+        env.pop(LANE_ENV, None)  # the env unset: the parent comes from the record's ccr.id
+        got = send(fn, AGREED, path, target="@parent")
     check(case, asked(got), "no ask: got %r" % (got,))
 
 
@@ -261,12 +273,48 @@ def case_parent_send_without_parent_id_passes_with_stderr():
         return
     import own_session  # the one reader of a session's own get_session record (hooks/own_session.py)
     path = transcript("parent-none", [owner_said("Run the lint on the batch."), real_inbound(PARENT, PICK)])
-    check(case + ": scope: no get_session record names a parent", own_session.own_session_read(path, SENDER)[2] is None,
-          "a parent resolved")
+    check(case + ": scope: no get_session record names a parent",
+          own_session.own_session_read(path, OWN_REMOTE)[2] is None, "a parent resolved")
     got, err = send_capturing_stderr(fn, AGREED, path, target="@parent")
     check(case, got is None, "asked: got %r" % (got,))
     check(case + ": one stderr line, naming the rule", len(err) == 1 and err[0].startswith("pick-names-rulings: "),
           "stderr lines: %r" % (err[:3],))
+
+
+def parent_send_asks_with_uuid_payload(case, name, remote_env):
+    """A real-shape reply to @parent asks when the payload id and the transcript's sessionId are this session's UUID,
+    and the own get_session record names the remote id and its parent. `remote_env` is the value of
+    CLAUDE_CODE_REMOTE_SESSION_ID, or None for an unset env."""
+    fn = pick_fn(case)
+    if fn is None:
+        return
+    import own_session  # the one reader of a session's own get_session record (hooks/own_session.py)
+    import override  # the one reader of the remote env (hooks/override.py remote_session_id)
+    path = transcript(name, [owner_said("Run the lint on the batch."), own_session_record(PARENT),
+                             real_inbound(PARENT, PICK)])
+    with mock.patch.dict(os.environ) as env:
+        env.pop(LANE_ENV, None)
+        if remote_env is not None:
+            env[LANE_ENV] = remote_env
+        check(case + ": scope: the env names the remote id, or no id when unset",
+              override.remote_session_id() == (OWN_REMOTE if remote_env is not None else None),
+              "env maps to %r" % (override.remote_session_id(),))
+        check(case + ": scope: the own get_session record names the parent by the remote id",
+              own_session.own_session_read(path, OWN_REMOTE)[2] == PARENT, "no parent by the remote id")
+        got = send(fn, AGREED, path, target="@parent")
+    check(case, asked(got), "no ask: got %r" % (got,))
+
+
+def case_uuid_parent_send_asks_with_remote_env():
+    parent_send_asks_with_uuid_payload(
+        "@parent, payload id a UUID, CLAUDE_CODE_REMOTE_SESSION_ID set to the remote id: a reply asks",
+        "parent-uuid-env", OWN_ENV)
+
+
+def case_uuid_parent_send_asks_without_remote_env():
+    parent_send_asks_with_uuid_payload(
+        "@parent, payload id a UUID, env unset: a reply asks, resolved through the own record's ccr.id",
+        "parent-uuid-noenv", None)
 
 
 def case_quoted_departs_line_asks():
@@ -439,15 +487,19 @@ def case_bold_departs_label_is_a_pick_asks():
 
 # ------------------------------------------------------------------ real guard.py runs
 
-def guard_run(name, message, items):
-    """One guard.py run on a send_message to TARGET, from this repo, with its own config folder. Returns the process."""
+def guard_run(name, message, path, target=TARGET, remote_env=None):
+    """One guard.py run on a send_message to `target`, from this repo, with its own config folder, and the transcript
+    at `path`. The payload session_id is this session's local UUID, as a real run gives it. `remote_env` is the value
+    of CLAUDE_CODE_REMOTE_SESSION_ID for the run, or None for an unset env. Returns the process."""
     cfg = os.path.join(RUN_FOLDER, "guard-" + name, "config")
     os.makedirs(cfg)
-    payload = {"tool_name": TOOL, "tool_input": {"session_id": TARGET, "message": message}, "cwd": REPO,
-               "session_id": SENDER, "transcript_path": transcript("guard-" + name, items)}
+    payload = {"tool_name": TOOL, "tool_input": {"session_id": target, "message": message}, "cwd": REPO,
+               "session_id": OWN_UUID, "transcript_path": path}
     env = dict(os.environ)
-    for key in ("CLAUDE_CODE_SESSION_ID", "CLAUDE_CODE_REMOTE_SESSION_ID", "CLAUDE_CODE_REMOTE", "CLAUDE_PROJECT_DIR"):
+    for key in ("CLAUDE_CODE_SESSION_ID", LANE_ENV, "CLAUDE_CODE_REMOTE", "CLAUDE_PROJECT_DIR"):
         env.pop(key, None)
+    if remote_env is not None:
+        env[LANE_ENV] = remote_env
     env["CLAUDE_CONFIG_DIR"] = cfg
     env["CLAUDE_GUARD_ROOT_PID"] = str(os.getpid())  # the suite stands in for `claude`, as hooks/test_guard.py does
     return subprocess.run([sys.executable, os.path.join(HERE, "guard.py")], input=json.dumps(payload),
@@ -479,7 +531,8 @@ def guard_asks(case, proc):
 
 def case_guard_asks_on_inbound_pick():
     case = "guard.py on trigger B prints an ask"
-    guard_asks(case, guard_run("b-ask", AGREED, inbound(TARGET, PICK)))
+    path = transcript("guard-b-ask", inbound(TARGET, PICK))
+    guard_asks(case, guard_run("b-ask", AGREED, path))
 
 
 def case_guard_asks_on_real_frame_inbound_pick():
@@ -487,13 +540,37 @@ def case_guard_asks_on_real_frame_inbound_pick():
     frame = real_inbound(TARGET, PICK)
     check(case + ": scope: the fixture frame is the real shape from the target", real_frame_shape(frame[1], TARGET),
           "not the real shape")
-    guard_asks(case, guard_run("b-real-ask", AGREED, frame))
+    path = transcript("guard-b-real-ask", frame)
+    guard_asks(case, guard_run("b-real-ask", AGREED, path))
+
+
+def guard_uuid_parent_send_asks(case, name, remote_env):
+    """guard.py end to end on a real-shape reply to @parent, with the payload id a UUID: prints an ask."""
+    import own_session  # the one reader of a session's own get_session record (hooks/own_session.py)
+    path = transcript(name, [owner_said("Run the lint on the batch."), own_session_record(PARENT),
+                             real_inbound(PARENT, PICK)])
+    check(case + ": scope: the own get_session record names the parent by the remote id",
+          own_session.own_session_read(path, OWN_REMOTE)[2] == PARENT, "no parent by the remote id")
+    guard_asks(case, guard_run(name, AGREED, path, target="@parent", remote_env=remote_env))
+
+
+def case_guard_uuid_parent_send_asks_with_remote_env():
+    guard_uuid_parent_send_asks(
+        "guard.py: @parent, payload id a UUID, CLAUDE_CODE_REMOTE_SESSION_ID set to the remote id: prints an ask",
+        "guard-parent-uuid-env", OWN_ENV)
+
+
+def case_guard_uuid_parent_send_asks_without_remote_env():
+    guard_uuid_parent_send_asks(
+        "guard.py: @parent, payload id a UUID, env unset: prints an ask, resolved through the own record's ccr.id",
+        "guard-parent-uuid-noenv", None)
 
 
 def case_control_guard_allows_plain_send():
     # Green on main: a send with no pick and no inbound pick is allowed, so the guard run itself is read as working.
     case = "control: guard.py allows a plain send with no pick"
-    proc = guard_run("plain", PLAIN, owner_said("Run the lint."))
+    path = transcript("guard-plain", owner_said("Run the lint."))
+    proc = guard_run("plain", PLAIN, path)
     check(case + ": exits 0", proc.returncode == 0, proc.stderr[-200:])
     decision, reason = decision_of(proc)
     check(case + ": permissionDecision is allow", decision == "allow", "decision %r: %s" % (decision, reason[:120]))
@@ -503,6 +580,7 @@ CASES = (case_departs_pick_without_checked_asks, case_inbound_pick_without_check
          case_real_frame_inbound_pick_without_checked_asks, case_real_frame_inbound_pick_with_real_checked_passes,
          case_departs_pick_with_real_checked_passes, case_inbound_pick_with_real_checked_passes,
          case_parent_send_asks_on_parent_departs_frame, case_parent_send_without_parent_id_passes_with_stderr,
+         case_uuid_parent_send_asks_with_remote_env, case_uuid_parent_send_asks_without_remote_env,
          case_quoted_departs_line_asks, case_numbered_departs_line_asks,
          case_fenced_departs_line_passes, case_departs_line_after_fence_asks,
          case_lone_backtick_in_text_does_not_hide_departs_line,
@@ -512,6 +590,7 @@ CASES = (case_departs_pick_without_checked_asks, case_inbound_pick_without_check
          case_unreadable_transcript_on_trigger_b_passes, case_no_transcript_path_passes_with_stderr_line,
          case_past_rulings_raising_after_trigger_a_asks, case_bold_departs_label_is_a_pick_asks,
          case_guard_asks_on_inbound_pick, case_guard_asks_on_real_frame_inbound_pick,
+         case_guard_uuid_parent_send_asks_with_remote_env, case_guard_uuid_parent_send_asks_without_remote_env,
          case_control_guard_allows_plain_send)
 
 
