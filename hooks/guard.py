@@ -4924,18 +4924,21 @@ def _opens_push_body(segments, start: int, number: int) -> bool:
 def _push_body_head(segments, start: int):
     """For the body opener at `segments[start]` (`then`, `do`, `else`, `elif`): the index of the head of its
     compound (`if`, `for`, `while`, `until`), found by counting the compounds still open before it, else None
-    when the head cannot be read. The compound's test guards only the body, not what stands before the
+    when the head cannot be read. A `{` or `(` that opens the group the compound stands in is read past, so
+    `{ for ...; do push; done; }` and `( if ...; then push; fi )` reach the check before the group. The compound's test guards only the body, not what stands before the
     compound, so the walk goes on back past the head to any earlier `;`-joined check."""
     opener = segment_tokens(segments[start])
     if start == 0 or not opener or opener[0] not in GIT_PUSH_BODY_WORDS:
         return None
     open_depth = 0
     for head in range(start - 1, -1, -1):
-        open_depth += _compound_delta(segments[head], wide=True)
+        open_depth += _compound_delta(re.sub(r"^[\s(]+", "", segments[head]), wide=True)   # `( if x` opens the `if`
         if open_depth >= 1:
             words = list(segment_tokens(segments[head]) or [])
-            while words and words[0] in GIT_PUSH_BODY_WORDS:
-                words.pop(0)
+            while words and (words[0] in GIT_PUSH_BODY_WORDS or not words[0].strip("({")):
+                words.pop(0)   # a body word, or a `{` or `(` group opener, stands before the compound's head
+            if words:
+                words[0] = words[0].lstrip("({")   # `(if`
             return head if words[:1] in (["if"], ["for"], ["while"], ["until"]) else None
     return None
 

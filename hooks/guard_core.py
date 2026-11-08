@@ -1083,9 +1083,23 @@ def _head_word(segment: str) -> str:
     return tokens[0].rstrip(")") if tokens else ""
 
 
+# Commands a then body may run before its `exit` with no way to leave the body: they only print.
+EXIT_BODY_PLAIN_WORDS = ("echo", "printf", "true", ":")
+
+
+def _leaves_body_never(tokens, segment: str, end: str, in_pipe: bool) -> bool:
+    """True when a then-body step, `;`- or newline-joined, is a bare `echo`, `printf`, `true` or `:` with no
+    substitution, pipe, `&&` or `||` and no compound word: it cannot `exit`, `return`, `break` or skip the
+    steps after it, so an `exit` later in the body still runs whenever the body does."""
+    word = tokens[1:2] if tokens[:1] == ["then"] else tokens[:1]
+    return (bool(word) and word[0] in EXIT_BODY_PLAIN_WORDS and end in (";", "\n") and not in_pipe
+            and not any(mark in segment for mark in ("`", "$(", "<(", ">(")))
+
+
 def _exits_on_failure(segments, ends, at: int) -> bool:
     """True when the `||` after `segments[at]` runs a bare `exit` as its first command (past a `then` line
-    when `segments[at]` is an `if` test), or as a
+    when `segments[at]` is an `if` test, and past `echo`, `printf`, `true` or `:` steps of that then body
+    that cannot leave it: `if ! X; then echo bad; exit 1; fi`), or as a
     `;`-joined step of a `{ ... }` group that is not piped: the shell stops there when the command
     before the `||` fails, so nothing later runs in the folder it stayed in. Not read: a top-level
     `return`, which does not stop bash; `(exit 1)` or `( exit 1 )`, which ends only a subshell; an
@@ -1095,6 +1109,7 @@ def _exits_on_failure(segments, ends, at: int) -> bool:
         return ends[number] if number < len(ends) else ""
 
     grouped, found = False, False
+    plain_if = end_of(at) in (";", "\n") and (segment_tokens(segments[at]) or [])[:2] == ["if", "!"]
     for number in range(at + 1, len(segments)):
         tokens = segment_tokens(segments[number]) or []
         if number == at + 1:
@@ -1103,6 +1118,8 @@ def _exits_on_failure(segments, ends, at: int) -> bool:
                 continue   # `if ! X; then` with its body on the next lines
         if grouped and tokens[:1] == ["}"]:
             return found and end_of(number) != "|"
+        if plain_if and number > at + 1 and tokens[:1] in (["else"], ["elif"], ["fi"]):
+            return False   # the then body ended with no exit, and an `exit` after `else` runs when the test passed
         if found:
             continue
         index = resolve_command(tokens) if tokens else None
@@ -1112,6 +1129,8 @@ def _exits_on_failure(segments, ends, at: int) -> bool:
             if not grouped:
                 return True
             found = True
+        elif plain_if and _leaves_body_never(tokens, segments[number], end_of(number), in_pipe):
+            continue   # `echo bad; exit 1`: nothing before the exit can leave the then body
         elif not grouped or end_of(number) not in (";", "\n"):
             return False
     return False
