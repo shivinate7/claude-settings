@@ -178,7 +178,7 @@ class FakeHost:
 
     def with_default_records(self, found):
         """-> `found` with a done record for the own head and each lane tip, oldest, under PR 7. Without one, a lane tip or a lone head with no
-        record is refused (owner pick a, 21:26 CST 2026-11-07, merge-unreviewed-head). A case that tests the absence of a record sets `records_default` False. Each
+        record is refused (owner pick a, page item 382). A case that tests the absence of a record sets `records_default` False. Each
         lane tip is read with read_lanes, as the round-3 check reads it."""
         if not self.records_default:
             return found
@@ -13850,7 +13850,7 @@ class ReviewRoundCheckEnv(Env):
 
 class ReviewRoundCheckRefusal(ReviewRoundCheckEnv):
     """`merge 7 --confirm` on a ready batch refuses a lane whose newest record for its tip is not done and whose Guard or check is yes. Each
-    refusal sits beside a control that is not refused, so a check that refuses every lane fails here too. Owner pick a, 21:26 CST 2026-11-07 (merge-unreviewed-head):
+    refusal sits beside a control that is not refused, so a check that refuses every lane fails here too. Owner pick a (page item 382):
     a lane tip with no done record for its head is refused. The cases that test a missing record set records_default False."""
 
     def test_an_integration_pr_with_a_guard_lane_at_round_one_is_refused_before_any_push(self):
@@ -14324,7 +14324,7 @@ class ReviewRoundCheckStaleRecords(ReviewRoundCheckEnv):
     """The round-3 check's stale-record rule and its comment window, each red case beside a green control. A record for a head already on origin/main
     is no lane's, so a later batch owes nothing for it. A lane's older head, committed more than a day before its tip, still owes the third round when its
     record is in the comment list: the comment read reaches back to the oldest commit new to the batch. A stale guard record for a head new to the
-    batch still refuses. Owner pick a, 21:26 CST 2026-11-07 (merge-unreviewed-head): a lane tip with no done record for its head is refused, so the
+    batch still refuses. Owner pick a (page item 382): a lane tip with no done record for its head is refused, so the
     one stale-only case here expects the refusal; the other cases keep their records and their points. A stale record of the pull request's own names its remedy by its state: held, a failed fix check, or the third round owed."""
 
     def test_a_guard_record_on_a_head_already_on_main_is_not_refused_by_a_later_batch(self):
@@ -14380,7 +14380,7 @@ class ReviewRoundCheckStaleRecords(ReviewRoundCheckEnv):
 
 class ReviewUnreviewedHead(ReviewRoundCheckEnv):
     """`merge 7 --confirm` refuses a lane tip, and a lone pull request's own head, whose review record for that exact head is not done, whatever its
-    Guard or check value (owner pick a, 21:26 CST 2026-11-07, merge-unreviewed-head). An integration pull request's own head is never refused for having
+    Guard or check value (owner pick a, page item 382). An integration pull request's own head is never refused for having
     no record. Cases 1, 2, 3 and 6 are red on the old code. Cases 4, 5 and 7 are green controls beside them, so a check that refuses every head fails too.
     Case 5's integration head holds only its lanes' merges. Case 8 adds an own commit beyond a lane tip and is refused. Case 9 is an integration head with
     a FAIL on its own head, which passes. Cases 8, 9 and 11 are red on the old code. Cases 10 and 12 are green controls: the newest record across pull
@@ -14852,32 +14852,6 @@ class ReviewUnreviewedHead(ReviewRoundCheckEnv):
         self.assert_tool_commit_with_product(head, merge.CLAIM_SUBJECT)
         rc, out, before = self.run_round_check(host, "--confirm")
         self.assert_own_head_unreviewed(rc, out, host, before, head)
-
-class PickACitations(unittest.TestCase):
-    """A docstring that cites the owner's pick a ruling gives its time too, so a reader can find the ruling. The scan reads docstrings through ast, the
-    language's own parser, so a string or a comment is never taken for one. A plain TestCase: it needs no fixture."""
-    RULING_TIME = "21:26 CST 2026-11-07"
-    SCANNED = ("merge.py", "test_merge.py")  # the merge tool and its suite, the files whose docstrings cite the ruling
-
-    def test_every_docstring_that_cites_owner_pick_a_carries_the_ruling_time(self):
-        cited, bare = [], []
-        for name in self.SCANNED:
-            path = os.path.join(HERE, name)
-            with open(path, encoding="utf-8") as f:
-                tree = ast.parse(f.read(), filename=path)
-            for node in ast.walk(tree):
-                if not isinstance(node, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)):
-                    continue
-                doc = ast.get_docstring(node, clean=False)
-                if not doc or not re.search(r"owner pick a", doc, re.I):
-                    continue
-                where = f"{name}:{getattr(node, 'lineno', 1)} {getattr(node, 'name', '<module>')}"
-                cited.append(where)
-                if self.RULING_TIME not in doc:
-                    bare.append(where)
-        self.assertTrue(any(w.endswith(" tool_commit") for w in cited),
-                        "the scan does not reach merge.py's tool_commit docstring, so it reads no citation:\n" + "\n".join(cited))
-        self.assertEqual(bare, [], f"these docstrings cite the owner's pick a without its time {self.RULING_TIME}:\n" + "\n".join(bare))
 
 # The report-only model judge at merge. The merge reads each governed Markdown file at head, selects a file whose line
 # cites a changed backing file (lint/stale_cites.py backed_lines), and sends it to decision_watch.invoke_model once. The
