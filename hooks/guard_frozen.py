@@ -618,13 +618,25 @@ def _holds_frozen(path: str, cwd: str) -> bool:
                for target, root in readings)
 
 
+_COMPOUND_HEAD = ("for", "while", "until", "if", "elif", "then", "do", "else")
+
+
+def _cd_certain(segments, ends, number: int) -> bool:
+    """True when segment `number` runs only if every segment before it ran: each separator ahead of it is
+    `&&`, or a `;` that ends a compound's header line (`for ...; do`, `if ...; then`), which the compound owns."""
+    return all(ends[k] == "&&" or (ends[k] == ";" and segments[k].split()[:1] and segments[k].split()[0] in _COMPOUND_HEAD)
+               for k in range(min(number, len(ends))))
+
+
 def _shell_write_hit(cmd: str, cwd: str, predicate, holds=None, follow_cd=False,
-                     command_position=False, predicate_command=False) -> str:
+                     command_position=False, predicate_command=False, cd_certain=False) -> str:
     """Return the path a shell command writes to that `predicate(path, cwd)` accepts, else ''.
     `holds(path, cwd)` tells a folder that holds such a path, for a linking `cp` (`_cp_link_source`).
     `follow_cd` hands `predicate` the folder a leading `cd` moved to (`dir_before_segment`), or `cwd`
     when that folder cannot be told. `predicate_command` also hands `predicate` the segment's command
-    name as a third argument (`''` when none)."""
+    name as a third argument (`''` when none). `cd_certain` trusts the folder after a `cd` only for a write
+    that runs only if the `cd` ran (`_cd_certain`), read through its real path (a link resolves), and never
+    for a target that starts with an unresolved `$` or backtick: those are judged against `cwd`."""
     holds = holds or (lambda path, where: _holds(path, where, predicate))
     cmd = _resolve_vars(cmd)
     ends = []
@@ -670,13 +682,16 @@ def _shell_write_hit(cmd: str, cwd: str, predicate, holds=None, follow_cd=False,
                 script.extend(_words_of(kept) if "'" in kept or '"' in kept else [kept])
         text = " ".join(shown)
         at = (dir_before_segment(segments, number, cwd, ends) or cwd) if follow_cd else cwd
+        if cd_certain and at != cwd:
+            at = os.path.realpath(at) if _cd_certain(segments, ends, number) else cwd
         verb = _segment_command(words)[0] if predicate_command else ""
         for word in words:
             if word.startswith("-") or REDIRECT.fullmatch(word):
                 continue
             if not word or word in (">", ">>"):
                 continue
-            if (predicate(word, at, verb) if predicate_command else predicate(word, at)) and writes_to(word, text, *(_segment_command(script) if command_position else ())):
+            where = cwd if cd_certain and re.match(r"[^/]*[$`]", word) else at
+            if (predicate(word, where, verb) if predicate_command else predicate(word, where)) and writes_to(word, text, *(_segment_command(script) if command_position else ())):
                 return word
     return ""
 
