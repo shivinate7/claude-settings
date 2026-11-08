@@ -978,7 +978,7 @@ button.tile:hover { background: color-mix(in srgb, var(--chip) 60%, var(--surfac
 <!-- /roadmap:data -->
 
 <script>
-const state = { tab: "q", items: [], rulings: [], rulingsOpen: true, answeredOpen: false, sunk: null, known: null, answers: {}, meta: null, groups: {}, receipts: {}, draft: {}, changing: {}, more: {}, moreReply: {}, unfold: {}, seen: null, sendAt: null, notice: {}, routed: {}, db: null, comments: null, loaded: false, sending: false, barNote: "", copyOffer: false, sentPanel: null };
+const state = { tab: "q", items: [], rulings: [], rulingsOpen: true, answeredOpen: false, sunk: null, known: null, answers: {}, meta: null, groups: {}, receipts: {}, draft: {}, changing: {}, more: {}, moreReply: {}, unfold: {}, seen: null, replySeen: null, sendAt: null, notice: {}, routed: {}, db: null, comments: null, loaded: false, sending: false, barNote: "", copyOffer: false, sentPanel: null };
 try { state.draft = JSON.parse(localStorage.getItem("waiting.draft") || "{}"); } catch (e) {}
 const $ = (id) => document.getElementById(id);
 const NONE = "none";
@@ -1185,11 +1185,18 @@ function freezeSunk() {
   state.sunk = new Set(state.items.filter((it) => !isRuling(it) && (isSaved(it) || answeredByWait(it))).map((it) => it.id));
   // The Answered section opens on load only with a New reply in it, decided here once and never read live: a reply that lands later, or a Send that sinks a card, opens nothing.
   state.answeredOpen = state.items.some((it) => isSunk(it) && newReply(it));
+  // Each item's reply as the owner has seen it: every item's at load (an open card shows its reply), then each card's when the open section shows it
+  // or a Send sinks it. Kept by the reply's time, so a second reply is unseen again.
+  state.replySeen = Object.fromEntries(state.items.map((it) => [it.id, it.replied]));
 }
+// A New reply the owner has not seen: one that landed after load, on a card the open Answered section has not shown since. Only the closed head reads it.
+const unseenReply = (it) => newReply(it) && !!state.replySeen && state.replySeen[it.id] !== it.replied;
+const seeReply = (it) => { if (state.replySeen) state.replySeen[it.id] = it.replied; };
 // A card sent on this visit joins the set under "sink", and the write records it, so Undo leaves a card that was already sunk where it is.
+// The owner sent it with its reply in view, so the reply is seen.
 function sinkSent(it) {
   if (SENT_MOVE !== "sink" || !state.sunk || it.park || isRuling(it) || state.sunk.has(it.id)) return false;
-  state.sunk.add(it.id); return true;
+  state.sunk.add(it.id); seeReply(it); return true;
 }
 const unsinkSent = (w) => { if (w.sank && state.sunk) state.sunk.delete(w.it.id); };
 function sorted() {
@@ -1828,7 +1835,8 @@ function releaseSent() {
 // A Send can shrink the page (the sent card leaves the open list and the Answered section starts closed), and the browser then clamps the scroll up the page.
 // A sent card that starts in the band has cards above it that must hold still, so a pad at the page's end keeps the old scroll reachable and the render puts it back.
 // The pad is never more than a third of the screen: past that the page shrinks as the browser makes it, so the screen is never mostly blank.
-// It gives back only what the scroll no longer needs, on each scroll, and at once on a scroll down by the owner's own wheel, swipe or key: the owner can always scroll the blank away.
+// While it shows, the scroll sits at the page's end. Each scroll fits it to the new scroll, after the scroll has moved, so a scroll up gives the blank back step for step.
+// Nothing shrinks it before a scroll: at the page's end that would pull the scroll up, against a scroll down. A scroll down there moves nothing, as at any page's end.
 // A sent card that starts above the band needs no pad: the first thing after it that is in view is the anchor, and the scroll follows it.
 const viewPad = document.body.appendChild(Object.assign(document.createElement("div"), { id: "viewpad", ariaHidden: "true" }));
 const padNow = () => parseFloat(viewPad.style.height) || 0;
@@ -1839,13 +1847,7 @@ function keepScroll(y) {
   fitPad(y);
   window.scrollTo(scrollX, y);
 }
-const giveBack = (px) => { if (px > 0 && padNow()) viewPad.style.height = Math.max(0, padNow() - px) + "px"; };
 addEventListener("scroll", () => { if (padNow()) fitPad(scrollY); }, { passive: true });
-addEventListener("wheel", (e) => { if (!e.ctrlKey) giveBack(e.deltaY * (e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? innerHeight : 1)); }, { passive: true });
-let touchY = 0;
-addEventListener("touchstart", (e) => { touchY = e.touches[0].clientY; }, { passive: true });
-addEventListener("touchmove", (e) => { const y = e.touches[0].clientY; giveBack(touchY - y); touchY = y; }, { passive: true });
-addEventListener("keydown", (e) => { if (["ArrowDown", "PageDown", "End"].includes(e.key) || (e.key === " " && !e.shiftKey)) if (!e.target.closest || !e.target.closest("input, textarea, select, button, [contenteditable]")) giveBack(innerHeight); });
 function holdView(ids, back) {
   const tops = new Map(), none = Object.assign(() => {}, { tops });
   if (SENT_MOVE !== "sink") return none;
@@ -1998,8 +2000,10 @@ function answeredEl(items, place) {
   const on = state.answeredOpen;
   const body = [], done = new Set();
   items.forEach((it) => { if (!done.has(it.id)) place(items, it, done, body); });
-  // A reply that lands on a card inside the closed section shows on its head and opens nothing. The words show once on a screen (ux-label-once): the head carries them unless an open tier's card has a New reply.
-  const by = sorted(), mark = on || !items.some(newReply) ? null
+  // A reply that lands on a card inside the closed section after load shows on its head and opens nothing; once the open section shows the card, the head drops it.
+  // The words show once on a screen (ux-label-once): the head carries them unless an open tier's card has a New reply.
+  if (on) items.forEach(seeReply);
+  const by = sorted(), mark = on || !items.some(unseenReply) ? null
     : TIERS.some((T) => by[T.k].some(newReply)) ? h("span", { class: "newmark dot", title: REPLY_WORDS.join("") }, h("span", { class: "sr" }, REPLY_WORDS.join("")))
     : h("span", { class: "newmark" }, REPLY_WORDS[0], h("span", { class: "sr" }, " inside," + REPLY_WORDS[1]));
   return sectionEl("answered", { cls: "sunk", glyph: "done", name: "Answered", count: items.length, open: on, listId: "ab", btnId: "b-answered", body, mark,
