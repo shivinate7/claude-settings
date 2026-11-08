@@ -516,12 +516,35 @@ src = open(CMD, encoding="utf-8").read()
 m = re.search(r"^LINT_FILES = (\([^)]*\))", src, re.M)
 check("the command names the files the step runs (LINT_FILES)", bool(m), "")
 LINT_FILES = ast.literal_eval(m.group(1)) if m else ()
-for name in ("lint/ste_lint.py", "lint/layout.py"):
-    tree = ast.parse(open(os.path.join(ROOT, name), encoding="utf-8").read())
-    mods = {a.name for n in ast.walk(tree) if isinstance(n, ast.Import) for a in n.names}
-    mods |= {n.module for n in ast.walk(tree) if isinstance(n, ast.ImportFrom) and n.module}
-    local = sorted("lint/%s.py" % m for m in mods if os.path.exists(os.path.join(ROOT, "lint", m + ".py")))
-    check("LINT_FILES holds every lint module %s imports" % name, set(local) <= set(LINT_FILES), str(local))
+# The linter's imports, followed at any depth through lint/ and hooks/ (the folders its sys.path reaches).
+# The pin check hashes only LINT_FILES, so every file these imports reach must be listed there.
+IMPORT_DIRS = ("lint", "hooks")
+
+
+def repo_imports(rel):
+    """The lint/ and hooks/ files that the module at `rel` imports, as repo-relative paths."""
+    tree = ast.parse(open(os.path.join(ROOT, rel), encoding="utf-8").read())
+    mods = {a.name.split(".")[0] for n in ast.walk(tree) if isinstance(n, ast.Import) for a in n.names}
+    mods |= {n.module.split(".")[0] for n in ast.walk(tree)
+             if isinstance(n, ast.ImportFrom) and n.module and not n.level}
+    return sorted("%s/%s.py" % (d, m) for m in mods for d in IMPORT_DIRS
+                  if os.path.exists(os.path.join(ROOT, d, m + ".py")))
+
+
+def import_closure(entry):
+    seen, todo = set(), [entry]
+    while todo:
+        rel = todo.pop()
+        if rel not in seen:
+            seen.add(rel)
+            todo.extend(repo_imports(rel))
+    return seen
+
+
+reached = set().union(*(import_closure(e) for e in ("lint/ste_lint.py", "lint/layout.py")))
+for rel in sorted(reached):
+    check("LINT_FILES holds %s, which the linter imports" % rel, rel in LINT_FILES,
+          "%s is imported by the linter (lint/ and hooks/ at any depth), and LINT_FILES in bin/ste-changed omits it" % rel)
 check("LINT_FILES holds the linter run.sh runs",
       "lint/ste_lint.py" in LINT_FILES and "../../lint/ste_lint.py" in open(os.path.join(HERE, "run.sh")).read(), "")
 
