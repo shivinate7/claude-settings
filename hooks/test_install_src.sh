@@ -4178,6 +4178,22 @@ guardset5() {
   guard_set_lists_hold "$name" $mods
 }
 
+# guardset6: listed_in counts a name only as a whole name. names.py is a substring of the listed shared_names.py,
+# so it is missing from each guard-set list. A substring match would find it in each list that carries
+# shared_names.py. shared_names.py, listed in each, is the control.
+guardset6() {
+  name="guardset6: listed_in counts a name only as a whole name: names.py, inside the listed shared_names.py, is missing from each guard-set list"
+  probe=$(guard_set_lists_hold "guardset6 probe" names.py)
+  ctl=$(guard_set_lists_hold "guardset6 control" shared_names.py)
+  if [ "$(printf '%s\n' "$probe" | grep -c ' names.py is not in ')" -ne 4 ]; then
+    bad "$name" "names.py matched inside shared_names.py in a list: $(printf '%s' "$probe" | tr '\n' ' ')"
+  elif [ "$ctl" != "ok   - guardset6 control" ]; then
+    bad "$name" "shared_names.py is not found in each guard-set list: $(printf '%s' "$ctl" | tr '\n' ' ')"
+  else
+    ok "$name"
+  fi
+}
+
 guardset2() {
   name="guardset2: the installed config watch reverts an unasked cap raise with no flat shared_names.py or git_reads.py beside it"
   guardset_install guardset2
@@ -5324,6 +5340,7 @@ run guardset2
 run guardset3
 run guardset4
 run guardset5
+run guardset6
 run win_sh1
 run win_sh2
 run win_sh3

@@ -23520,11 +23520,16 @@ def _fix_with(folder, good, names):
     return fix
 
 
-def _reload_run(folder, name, fix=None, command=None, delay=RELOAD_DELAY_S):
+def _reload_cfg(name):
+    """The CLAUDE_CONFIG_DIR of the copy `name`: one folder each."""
+    return os.path.join(ROOT, "reload-cfg", name)
+
+
+def _reload_run(folder, name, fix=None, command=None, delay=RELOAD_DELAY_S, session=None):
     """One Bash call through the copy's guard.py. fix, when given, runs once, delay seconds after the
-    guard starts. Returns (run, fixed): fixed is True when fix ran, which is before the guard ended
-    only if the guard waited."""
-    cfg = os.path.join(ROOT, "reload-cfg", name)
+    guard starts. session, when given, is the payload's session_id. Returns (run, fixed): fixed is True
+    when fix ran, which is before the guard ended only if the guard waited."""
+    cfg = _reload_cfg(name)
     os.makedirs(cfg, exist_ok=True)
     env = dict(os.environ)
     env.pop("CLAUDE_CODE_REMOTE", None)
@@ -23532,8 +23537,10 @@ def _reload_run(folder, name, fix=None, command=None, delay=RELOAD_DELAY_S):
     env.pop("CLAUDE_CODE_SESSION_ID", None)
     env["CLAUDE_CONFIG_DIR"] = cfg
     env["CLAUDE_GUARD_ROOT_PID"] = str(os.getpid())
-    payload = json.dumps({"tool_name": "Bash", "tool_input": {"command": command or FAILCLOSED_CALL},
-                          "cwd": NOGIT})
+    body = {"tool_name": "Bash", "tool_input": {"command": command or FAILCLOSED_CALL}, "cwd": NOGIT}
+    if session:
+        body["session_id"] = session
+    payload = json.dumps(body)
     fixed = threading.Event()
 
     def land():
@@ -23619,8 +23626,8 @@ for _label, _check in RELOAD_CHECKS:
 
 # A flat module (no INSTALL_ID line) is an older copy, or missing, when the guard first loads it. Its whole file
 # lands LATE_LAND_S after the guard starts, and the guard waits and reloads. A module that loaded stays in
-# sys.modules until the retry pops it. The reread_check and proc_env cases cache a stale copy, and the
-# precompact_handoff case caches reread_check with ph None, so these cases need those two pops.
+# sys.modules until the retry pops it, so each case needs its module popped: reread_check and proc_env cache
+# an older copy, and precompact_handoff caches an older copy that reread_check reuses on the retry.
 LATE_LAND_S = 1.5
 
 
@@ -23653,6 +23660,47 @@ def late_land_case(module, older_text):
     return check
 
 
+def late_land_stale_ph_case():
+    """A stale precompact_handoff loads first and stays in sys.modules until the retry pops it. guard_core
+    carries a stale stamp, so the first load fails the install-id check, after reread_check has imported
+    precompact_handoff. Both fresh files land LATE_LAND_S after the guard starts, precompact_handoff first.
+    The reload must read the fresh one: a session with the re-read flag set is refused handoff-unread. The
+    stale copy names its flag file elsewhere, so reused, it finds no flag and the call is allowed."""
+    def check():
+        name = "late-stale-ph"
+        fresh = _source_text("precompact_handoff.py")
+        stale = fresh.replace('"%s.reread"', '"%s.reread-old"', 1)
+        if stale == fresh:
+            raise RuntimeError("precompact_handoff.py has no flag path literal to age")
+        # Control first: an intact copy with the flag set refuses, so the miss below is the stale copy's.
+        control = name + "-control"
+        control_folder, _good = _reload_copy(control, INSTALL_ID)
+        hu_files(_reload_cfg(control), flag=True, handoff=True)
+        control_run, _fixed = _reload_run(control_folder, control, session=HU_SID)
+        control_decision, control_reason = _decision(control_run)
+        if control_decision != "deny" or "(handoff unread)" not in control_reason \
+                or hu_paths(_reload_cfg(control), HU_SID)[0] not in control_reason:
+            return False, ("control: an intact copy with the flag set is %r, want deny naming the handoff: %r"
+                           % (control_decision, control_reason[:90]))
+        folder, good = _reload_copy(name, INSTALL_ID)
+        _put_whole(os.path.join(folder, "precompact_handoff.py"), stale)
+        _damage_stamp(folder, good)   # guard_core's stamp is stale: the first load fails the install-id check
+        fix = _fix_with(folder, {"precompact_handoff.py": fresh, RELOAD_CORE: good[RELOAD_CORE]},
+                        ["precompact_handoff.py", RELOAD_CORE])   # ph first, so a reload that sees matching ids sees fresh ph
+        hu_files(_reload_cfg(name), flag=True, handoff=True)
+        run, fixed = _reload_run(folder, name, fix, session=HU_SID, delay=LATE_LAND_S)
+        decision, reason = _decision(run)
+        if not fixed:
+            return False, ("the guard finished with %r before precompact_handoff landed, so it never waited to reload: %r"
+                           % (decision, reason[:90]))
+        if decision != "deny" or "(handoff unread)" not in reason:
+            return False, ("after the reload the flagged call is %r, want deny: the stale precompact_handoff was reused"
+                           % decision)
+        return True, ("precompact_handoff landed late, the guard reloaded the fresh one, and the flagged call "
+                      "is refused handoff-unread")
+    return check
+
+
 LATE_LAND_CHECKS = (
     ("late-land: reread_check.py, an older copy with no ph name, lands late: the call is allowed",
      late_land_case("reread_check.py", '"""An older copy: no ph name yet."""\n')),
@@ -23660,6 +23708,8 @@ LATE_LAND_CHECKS = (
      late_land_case("precompact_handoff.py", None)),
     ("late-land: proc_env.py, an older copy with no holds_session_tag name, lands late: the call is allowed",
      late_land_case("proc_env.py", '"""An older copy: no holds_session_tag name yet."""\n')),
+    ("late-land: a stale precompact_handoff loads first, the reload picks up the fresh one: a flagged call is refused",
+     late_land_stale_ph_case()),
 )
 for _label, _check in LATE_LAND_CHECKS:
     LOG_CHECKS_EXTRA.append((_label, _check))
