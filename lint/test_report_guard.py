@@ -4301,6 +4301,19 @@ class AnsweredNeedsSourceTests(unittest.TestCase):
             with self.subTest(line=line):
                 self.assert_blocked(line, line)
 
+    def test_an_red_refusal_names_the_inline_code_span_route(self):
+        # Ruling (coordinator, 15:57 CST): the refusal text names the inline code span route. The verdict does not
+        # change. Control first: the same line with the word in backticks is no claim, so it returns ''.
+        # Catches: the reason names only "say what is meant in other words", so a session never learns the route.
+        import report_guard  # noqa: E402  answered_problem, the refusal text (lint/report_guard.py)
+
+        self.assertEqual(report_guard.answered_problem("The `answered` check blocks this line."), "",
+                         "the inline code span control is refused: the existing exemption broke")
+        refusal = report_guard.answered_problem("The answered check blocks this line.")
+        self.assertTrue(refusal, "the verdict changed: a bare answered line is no longer refused")
+        self.assertIn("inline code span", refusal,
+                      "the refusal text does not name the inline code span route: %r" % refusal)
+
     # Green: these pass before the verdict exists too. Each guards against a false alarm.
 
     def test_an_green_each_source_cites_the_word(self):
@@ -4760,6 +4773,42 @@ class MistakeNamesGuardTests(unittest.TestCase):
     def test_mg_red_apostrophes_do_not_hide_admission_blocks(self):
         self.assert_blocked(mg_report("I didn't check; I clobbered the lane's notes."))
 
+    def test_mg_red_lone_apostrophe_does_not_hide_admission_blocks(self):
+        # A lone apostrophe with a space before it reads as an opening quote. The admission after it still counts.
+        for text in ("I waited 'til the lane ended, and I broke the batch.' Nothing else.",
+                     "I ran it 'cause the lane was slow, and I clobbered the notes.' Nothing else."):
+            with self.subTest(text=text):
+                self.assert_blocked(mg_report(text))
+
+    def test_mg_red_elided_opener_does_not_hide_admission_blocks(self):
+        # An elided word after an apostrophe ('em, 'round, 'tis, 'kay) is no opening quote, so the admission after it
+        # still counts. Each text holds one lone elision and a later apostrophe that could close a span.
+        for text in ("I told 'em to wait, then I broke the lanes' notes.",
+                     "I waited 'round the lanes, then I clobbered the notes.' Nothing else.",
+                     "The lane said 'tis fine, and I broke the batch.' Nothing else.",
+                     "I called it 'kay, then I overwrote the notes.' Nothing else."):
+            with self.subTest(text=text):
+                self.assert_blocked(mg_report(text))
+
+    def test_mg_red_capitalised_elision_does_not_hide_admission_blocks(self):
+        # A capitalised elision ('Cause, 'Til) opens no quote either: the admission after it still counts.
+        for text in ("I ran it 'Cause the lane was slow, and I clobbered the notes.' Nothing else.",
+                     "I waited 'Til the lanes ended, and I broke the batch.' Nothing else."):
+            with self.subTest(text=text):
+                self.assert_blocked(mg_report(text))
+
+    def test_mg_red_year_elision_does_not_hide_admission_blocks(self):
+        # A year elision ('25) opens no quote either: the admission after it still counts.
+        self.assert_blocked(mg_report("Back in '25 I broke the lanes' notes."))
+
+    def test_mg_pin_listed_elisions_do_not_hide_admission_blocks(self):
+        # Green now: 'cos, 'twas and 'nuff are listed elisions. Each text holds one and a later apostrophe.
+        for text in ("I waited 'cos the lane was slow, and I clobbered the notes.' Nothing else.",
+                     "The lane said 'twas fine, and I broke the batch.' Nothing else.",
+                     "I told them 'nuff, then I overwrote the notes.' Nothing else."):
+            with self.subTest(text=text):
+                self.assert_blocked(mg_report(text))
+
     # Green: each of these must pass.
     def test_mg_green_inbox_admission_with_fence_step_passes(self):
         self.assert_allowed(mg_report(MG_INBOX + " Queued as step:inbox-fence-check."))
@@ -4784,6 +4833,13 @@ class MistakeNamesGuardTests(unittest.TestCase):
 
     def test_mg_green_quoted_owner_phrase_passes(self):
         self.assert_allowed(mg_report('Owner said "I broke it, own up to a mistake".'))
+
+    def test_mg_green_single_quoted_owner_phrase_passes(self):
+        self.assert_allowed(mg_report("Owner said 'I broke it, own up to a mistake'."))
+
+    def test_mg_green_elision_closed_at_once_stays_quoted_passes(self):
+        # 'em' closed at once is quoted text, so the quote after it pairs as usual and 'I broke it' stays quoted.
+        self.assert_allowed(mg_report("Owner said 'em' and 'I broke it'."))
 
     def test_mg_green_admission_in_done_passes(self):
         self.assert_allowed(mg_report("none", done="> **Done** OTHER I broke my feedback inbox and restored it."))
@@ -4826,6 +4882,51 @@ class MistakeNamesGuardTests(unittest.TestCase):
 
     def test_mg_green_debt_filed_sentence_passes(self):
         self.assert_allowed(mg_report("I broke the inbox. Debt filed: inbox-fence."))
+
+    # "broke" that means split admits nothing, so it passes. Each fault word after it still admits a mistake, even
+    # with a relative clause ("that was wrong"), a when clause or a parenthesis after the writer's verb: a regex
+    # cannot tell that description from an admission, so no such clause clears it.
+    def test_mg_green_broke_the_batch_into_lanes_passes(self):
+        self.assert_allowed(mg_report("I broke the batch into three lanes."))
+
+    # "into" after "broke" does not clear an admission that names a state the writer put the thing in.
+    def test_mg_red_broke_the_build_into_a_red_state_blocks(self):
+        self.assert_blocked(mg_report("I broke the build into a red state."))
+
+    def test_mg_red_changed_the_test_that_was_wrong_blocks(self):
+        self.assert_blocked(mg_report("I changed the test that was wrong."))
+
+    def test_mg_red_repointed_test_in_parentheses_blocks(self):
+        self.assert_blocked(mg_report("I re-pointed the test (the one that was wrong)."))
+
+    def test_mg_red_repointed_test_when_check_was_wrong_blocks(self):
+        self.assert_blocked(mg_report("I re-pointed the test when the check was wrong."))
+
+    def test_mg_red_wrote_the_test_that_was_wrong_blocks(self):
+        self.assert_blocked(mg_report("I wrote the test that was wrong."))
+
+    def test_mg_red_merged_the_pr_when_check_was_wrong_blocks(self):
+        self.assert_blocked(mg_report("I merged the PR when the check was wrong."))
+
+    def test_mg_red_merged_the_pr_and_that_was_wrong_blocks(self):
+        self.assert_blocked(mg_report("I merged the PR and that was wrong."))
+
+    # The twins: an admission keeps its block when a parenthesis, a that clause or a when clause follows it.
+    # A clause split must cut only after the admission, never drop it.
+    def test_mg_red_broke_the_batch_by_merging_a_red_lane_blocks(self):
+        self.assert_blocked(mg_report("I broke the batch by merging a red lane."))
+
+    def test_mg_red_changed_the_test_wrongly_blocks(self):
+        self.assert_blocked(mg_report("I changed the test wrongly."))
+
+    def test_mg_red_forgot_the_check_in_parentheses_blocks(self):
+        self.assert_blocked(mg_report("I forgot the check (the one for the batch)."))
+
+    def test_mg_red_trusted_stale_record_before_that_clause_blocks(self):
+        self.assert_blocked(mg_report("I trusted a stale record that the lane had cited."))
+
+    def test_mg_red_forgot_the_check_before_when_clause_blocks(self):
+        self.assert_blocked(mg_report("I forgot the check when the lane was open."))
 
 
 if __name__ == "__main__":
