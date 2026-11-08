@@ -3684,8 +3684,8 @@ sh("pointer-failed-cd-walk: a cd into the pointer checkout, then a switch, is re
 sh("pointer-failed-cd-walk: a cd out of the pointer checkout, a failed cd, then a switch, is allowed",
    "cd " + slash(NOGIT) + "; cd " + POINTER_NONEXIST + "; " + VCS + " switch other",
    "allow", cwd=PTRMAIN, config=PTRCFG)
-# Run from the pointer checkout, the switch is refused. The mkdir and the cd are only the line's
-# shape: these cases do not pin how the guard reads a mkdir.
+# Run from the pointer checkout, the switch is refused. The first case goes red if the guard reads a
+# folder that a mkdir made as entered: the cd would then move the switch out of the pointer checkout.
 sh("pointer-failed-cd-walk: run from the pointer checkout, a switch after a mkdir and a cd into its folder is refused",
    "mkdir sub && cd sub && " + VCS + " switch y", "deny", "pointer-head", cwd=PTRMAIN, config=PTRCFG)
 sh("pointer-failed-cd-walk: run from the pointer checkout, a switch after a mkdir and a failed cd is refused",
@@ -11976,21 +11976,21 @@ sh("frozen: a redirect onto the global CLAUDE.md", "echo x > " + CFG_CLAUDEMD, "
    "frozen-path", cwd=NOGIT)
 sh("frozen: a redirect onto a config hook", "cat template.py > " + CFG_HOOK, "deny", "frozen-path",
    cwd=NOGIT)
-# interpreter in-place edit: an interpreter that edits its file in place writes it as `sed -i` does.
-sh("interpreter in-place edit: perl -pi -e on a config hook is refused, as sed -i is",
+# interpreter write: an interpreter that writes a file, in place or from a heredoc body, writes it as `sed -i` does.
+sh("interpreter write: perl -pi -e on a config hook is refused, as sed -i is",
    "perl -pi -e 's/a/b/' " + CFG_HOOK, "deny", "frozen-path", cwd=NOGIT)
-sh("interpreter in-place edit: ruby -i -pe on a config hook is refused, as sed -i is",
+sh("interpreter write: ruby -i -pe on a config hook is refused, as sed -i is",
    "ruby -i -pe 's/a/b/' " + CFG_HOOK, "deny", "frozen-path", cwd=NOGIT)
-sh("interpreter in-place edit: a perl heredoc body that writes a config hook is refused",
+sh("interpreter write: a perl heredoc body that writes a config hook is refused",
    "perl <<'EOF'\nopen(F, '>', '" + CFG_HOOK + "');\nEOF", "deny", "frozen-path", cwd=NOGIT)
-sh("interpreter in-place edit: a ruby heredoc body that writes a config hook is refused",
+sh("interpreter write: a ruby heredoc body that writes a config hook is refused",
    "ruby <<'EOF'\nFile.write('" + CFG_HOOK + "', 'x')\nEOF", "deny", "frozen-path", cwd=NOGIT)
-sh("interpreter in-place edit: sed -i on a config hook is refused (parity)",
+sh("interpreter write: sed -i on a config hook is refused (parity)",
    "sed -i s/a/b/ " + CFG_HOOK, "deny", "frozen-path", cwd=NOGIT)
 # The near forms: a read of a frozen file, and an in-place edit of a file that is not frozen, stay allowed.
-sh("interpreter in-place edit: perl -ne reads a config hook and writes nothing, allowed",
+sh("interpreter write: perl -ne reads a config hook and writes nothing, allowed",
    "perl -ne 'print' " + CFG_HOOK, "allow", cwd=NOGIT)
-sh("interpreter in-place edit: perl -pi -e on a file that is not frozen is allowed",
+sh("interpreter write: perl -pi -e on a file that is not frozen is allowed",
    "perl -pi -e 's/a/b/' notes.txt", "allow", cwd=NOGIT)
 # frozen-digit-switch: perl takes its switches in a cluster, and a digit may come before the `i`: `-0pi`
 # sets the record separator, then edits in place. The in-place switch reads that cluster as perl does.
