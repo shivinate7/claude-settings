@@ -961,7 +961,13 @@ def _shell_write_scan(cmd, cwd, predicate, holds, follow_cd, command_position, p
                 # The raw word is unquoted: a quoted "&1" is a file and is judged.
                 shown.append("dup")
             else:
+                # An unquoted `)` or backtick glued to the path (`( echo > F)`, `$(... > F)`) is not
+                # part of it. A quoted word ends in its quote, so it is never cut here.
+                word = word.rstrip(")`") or word
                 pieces = _words_of(word) if "'" in word or '"' in word else [word]
+                # `_words_of` cuts a quote's text at a paren but not at a backtick: a `bash -c` script that
+                # holds a backtick substitution ends its path word with one.
+                pieces = [piece.rstrip("`") or piece for piece in pieces]
                 words.extend(pieces)
                 shown.extend(pieces)
                 kept = scripts[number][index]
