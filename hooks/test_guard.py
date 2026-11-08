@@ -13004,6 +13004,53 @@ add("builder-test: a session run with --agent builder (no agent_id) is not judge
 add("builder-test: a builder Write of a test file from no repository is refused by shape", "deny",
     rule=BT, tool="Write", file_path="src/test_app.py", carries=("test-author", "Report"),
     agent_id="bld1", agent_type="builder", cwd=NOGIT)
+# ---- a shell write after a `cd`, from a builder call in a repository (builder-test-edit, shell reading).
+# A test-shaped path in a folder in no repository is no test of the repo. The folder a leading `cd` moves
+# to is read at hook time, so each cd target below must exist then. NOGIT is that folder: it sits in no
+# repository and is built eagerly. Two children are named but never made here. The command makes
+# CD_CREATED itself, and CD_MISSING is missing on purpose. _check_cd_children builds nothing. It asserts
+# the state those cases rely on, the first time a case names one of them.
+CD_CREATED = os.path.join(NOGIT, "made-by-the-call")
+CD_MISSING = os.path.join(NOGIT, "no-such-folder")
+
+
+def _check_cd_children():
+    for child in (CD_CREATED, CD_MISSING):
+        if os.path.exists(child):
+            sys.exit("fixture setup failed: %r exists before its cd case runs" % child)
+    parent = os.path.dirname(NOGIT)
+    while parent and parent != os.path.dirname(parent):
+        if os.path.exists(os.path.join(parent, ".git")):
+            sys.exit("fixture setup failed: NOGIT sits inside the repository at %r" % parent)
+        parent = os.path.dirname(parent)
+
+
+lazy_fixture([CD_CREATED, CD_MISSING], _check_cd_children)
+SHELL_CD = "builder-test (shell-cd): "
+sh(SHELL_CD + "a probe that cds into a folder in no repository, then writes a test-shaped path there, is allowed",
+   'P=%s && mkdir -p "$P/tests" && cd "$P" && for f in x_test.mjs y-test.cjs; do : > "tests/$f"; done'
+   % slash(NOGIT), "allow", **B)
+sh(SHELL_CD + "a write after a cd into a folder in no repository is allowed",
+   "cd %s && : > tests/x_test.mjs" % slash(NOGIT), "allow", **B)
+sh(SHELL_CD + "a test write in the builder's worktree, with no cd, is refused",
+   ": > tests/x_test.py", "deny", rule=BT, **B)
+sh(SHELL_CD + "a test write after a cd into a folder of the same repository is refused",
+   "cd src && : > tests/x", "deny", rule=BT, **B)
+sh(SHELL_CD + "a test write after a cd into another repository is refused",
+   "cd %s && : > tests/x" % slash(PRIVREPO), "deny", rule=BT, **B)
+sh(SHELL_CD + "a test write after a cd to an unset variable is refused",
+   'cd "$SHELL_CD_UNSET" && : > tests/x', "deny", rule=BT, env={"SHELL_CD_UNSET": None}, **B)
+sh(SHELL_CD + "a test write after a cd to a missing folder is refused",
+   "cd %s ; : > tests/x" % slash(CD_MISSING), "deny", rule=BT, **B)
+sh(SHELL_CD + "a test write after a cd inside a subshell is refused",
+   "(cd %s && :) && : > tests/x" % slash(NOGIT), "deny", rule=BT, **B)
+sh(SHELL_CD + "a test write after a cd in a pipe is refused",
+   "cd %s | true; : > tests/x" % slash(NOGIT), "deny", rule=BT, **B)
+# Known residual, pinned as a debt: the folder does not exist at hook time, so the cd is not followed and
+# the write is judged at the call's own repository.
+sh(SHELL_CD + "a test write after a cd into a folder the same call creates is refused (known residual, debt)",
+   "mkdir -p %s && cd %s && : > tests/x_test.mjs" % (slash(CD_CREATED), slash(CD_CREATED)),
+   "deny", rule=BT, **B)
 add("test-author: Edit of product code is refused", "deny", rule=TA, tool="Edit",
     file_path="src/app.py", carries=("builder", "Report"), **A)
 add("builder-test: a ruff --ignore script added to package.json is allowed", "allow", tool="Edit",
