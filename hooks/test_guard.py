@@ -10518,14 +10518,16 @@ def cite_unread_folders_case():
     env["CLAUDE_CONFIG_DIR"] = os.path.join(folder, "cfg")
     env["PATH"] = GHMAIN + os.pathsep + PY_PATH
 
-    def ask(command):
+    def ask(command, git=False):
+        path = GHMAIN + os.pathsep + PY_PATH + (os.pathsep + GIT_PATH if git else "")
         return subprocess.run(
             [sys.executable, copy],
             input=json.dumps({"tool_name": "Bash", "tool_input": {"command": command},
                               "cwd": NOGIT}),
-            capture_output=True, text=True, env=env, timeout=60)
+            capture_output=True, text=True, env=dict(env, PATH=path), timeout=60)
 
-    probe = ask(VCS + ' commit -m "cites decisions/one-shared-record-stamp.md"')
+    # Git runs for the probe, so its conflict-markers read answers clear and only the stand-down is tested.
+    probe = ask(VCS + ' commit -m "cites decisions/one-shared-record-stamp.md"', git=True)
     if "permissionDecision" in probe.stdout:
         return False, "the inline probe must stand down, got %r" % probe.stdout[:120]
     try:
@@ -10535,6 +10537,7 @@ def cite_unread_folders_case():
         logged = False
     if not logged:
         return False, "the probe must log that the record folders are unread"
+    # Git cannot start for this call, so the conflict-markers read is unknown. The deny must still come first.
     result = ask(VCS + " commit -F " + slash(ROOT) + "/no-such-message.txt")
     try:
         block = json.loads(result.stdout)["hookSpecificOutput"]
@@ -19603,11 +19606,13 @@ def merge_tool_missing_case():
     if "merge-checks" not in result.stdout or "could not be loaded" not in result.stdout:
         return False, "expected a deny that names the unloadable tool, got %r" % result.stdout[:120]
     # The same copy cannot read the record folders either. The cite rule stands down, and the log says so.
+    # Git runs for this call, so the conflict-markers read answers clear (NOGIT is no repository) and does not ask.
+    git_env = dict(env, PATH=GHMAIN + os.pathsep + PY_PATH + os.pathsep + GIT_PATH)
     result = subprocess.run(
         [sys.executable, copy],
         input=json.dumps({"tool_name": "Bash", "cwd": NOGIT, "tool_input": {
             "command": VCS + ' commit -m "cites decisions/one-shared-record-stamp.md"'}}),
-        capture_output=True, text=True, env=env, timeout=60)
+        capture_output=True, text=True, env=git_env, timeout=60)
     if "permissionDecision" in result.stdout:
         return False, "an unread folder list must not deny, got %r" % result.stdout[:120]
     try:
