@@ -1105,6 +1105,7 @@ _COMPOUND_CLOSER = {
 _FUNCTION_NAME = re.compile(r"[^\s(){}]+\(\)(\{?)")   # `f()` and `f(){`
 
 
+@functools.lru_cache(maxsize=16384, typed=True)   # the walk reads each segment once per call, and a long command has thousands
 def _compound_delta(segment: str, wide: bool = False) -> int:
     """How far a segment moves the compound nesting: +1 for each `{` group, `if`, `for`, `while` or
     `until` it opens at its head (past a leading `then`, `do`, `else` or `elif`), -1 for each `}`,
@@ -1114,12 +1115,9 @@ def _compound_delta(segment: str, wide: bool = False) -> int:
     since a miss there turns it on wrongly. Without it `case` is not read, so a skip ends at the next
     `;` (it fails closed: the commands after it are judged in the stranded folder)."""
     tokens = segment_tokens(segment) or []
-    try:
-        raw = shlex.split(segment, posix=False)
-    except ValueError:
-        raw = []
-    if len(raw) == len(tokens):
-        tokens = raw   # quotes kept, so a quoted word is no keyword; when the two readings differ, the words count as read
+    # A word that opens inside quotes is no keyword. When `_quoted_opens` cannot line its reading up, it names none.
+    quoted = _quoted_opens(segment, len(tokens))
+    tokens = ["\0" if at in quoted else word for at, word in enumerate(tokens)]
     delta = 0
     while tokens:
         word = tokens[0]
