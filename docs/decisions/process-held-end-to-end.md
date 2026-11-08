@@ -49,7 +49,7 @@ Numbers follow the audit's break file. Each break names its link.
 - UNKNOWN, kept open:
   - The cause of the PR #1502 lane-lint skip (break 5).
   - Why PRs #1512 and #1472 count as hand-written (breaks 2 and 3). It rests on step text.
-- Covered, not built: whether `review-record-provenance` covers the MCP comment tool. The provenance lane reported at 19:13 CST that PR #1601 (`review-record-from-render`) guards `mcp__github__add_issue_comment` through `merge/merge.py:parse_review`. The lane's cite is `hooks/guard_merge.py` `review_record_hit`. That function is in commit ae991eba0, which no branch or remote ref holds now, and origin/main lacks it. The provenance step adds a marker only the tool writes (step `review-record-provenance`, not built).
+- Covered, not built: whether `review-record-provenance` covers the MCP comment tool. The provenance lane reported at 19:13 CST that PR #1601 (`review-record-from-render`) guards `mcp__github__add_issue_comment` through `merge/merge.py:parse_review`. The lane's cite is `hooks/guard_merge.py` `review_record_hit`. That function is in commit ae991eba0, on PR #1601's branch review-record-from-render (head ae991eba0, per gh api at 20:39 CST); origin/main lacks it. The provenance step adds a marker only the tool writes (step `review-record-provenance`, not built).
 
 ## In build
 
