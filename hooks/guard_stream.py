@@ -9,9 +9,10 @@ import re
 
 from guard_core import (
     DURATION, PLAYWRIGHT_PS_SHELLS, PowerShellScript, _absolute, _pwsh_script, _skip_assignments_and_keywords, basename,
-    bare_words, command_indexes, inline_script, inner_commands, resolve_command, segment_tokens,
-    split_segments,
+    bare_words, command_indexes, inline_script, inner_commands, is_powershell, resolve_command,
+    segment_tokens, split_segments,
 )
+from guard_env import _substitutions
 
 
 # ------------------------------------------------------------------ a stream that never ends
@@ -126,6 +127,69 @@ NARRATED_TAIL_REASON = (
     "like a hang. "
     "Remedy: run the command with nothing after it and read its output as it arrives, or "
     "redirect to a file you read back afterwards, or use tee to keep a full copy."
+)
+
+
+# A PIPE OUT OF `verdict`. A pipeline's exit is its last stage's, so `verdict CMD | tail` returns
+# tail's exit and a red run reads 0. verdict prints its `FAIL ... rc=` line first, and a filter
+# that keeps the end of the stream (or anything that selects lines) can cut it. Every command after
+# the pipe counts, not only TRUNCATING_FILTERS: grep, tee and cat all return their own exit.
+# `verdict` is a COMMAND_WRAPPERS entry, so `resolve_command` skips it and names the program it
+# runs; the verdict word is read from the tokens up to that program (`timeout 600 verdict x`,
+# `python bin/verdict x`, `VAR=1 verdict x`). A verdict that closes a segment on something other
+# than `|` (`&&`, `;`, a redirect target, the last stage) has no pipe out of it.
+VERDICT_WORDS = ("verdict", "verdict.cmd")
+
+
+def _is_lookup(tokens) -> bool:
+    """True for `command -v NAME` / `command -V NAME`: the shell names a program and runs none."""
+    at = _skip_assignments_and_keywords(tokens)
+    return (at < len(tokens) and basename(tokens[at]) == "command"
+            and any(token in ("-v", "-V") for token in tokens[at + 1:]))
+
+
+def _verdict_pipe_in(text: str) -> str:
+    """One command text, no substitution left in it (they are read apart): the `verdict |` match, else ''."""
+    ends = []
+    segments = split_segments(text, ends)
+    for index, segment in enumerate(segments):
+        # A pipe at a line end (`verdict x |` then a newline) still pipes into the next line.
+        if ends[index] != "|":
+            continue
+        tokens = segment_tokens(segment)
+        if not tokens:
+            continue
+        at = resolve_command(tokens)
+        if at is None and _is_lookup(tokens):
+            continue
+        reach = tokens if at is None else tokens[:at + 1]
+        if any(basename(token.lstrip("(")) in VERDICT_WORDS for token in reach):
+            return "verdict |"
+    # A shell's script (`bash -c '...'`) is its own command text, read the way the live-stream rule reads it.
+    for segment in segments:
+        tokens = segment_tokens(segment)
+        hit = tokens and next((h for inner in inner_commands(tokens)
+                               if (h := verdict_pipe_hit(inner))), "")
+        if hit:
+            return hit
+    return ""
+
+
+def verdict_pipe_hit(stripped: str) -> str:
+    """Return the matched text when a `verdict` stage is piped into another command, else ''.
+    Each command substitution (`$(...)`, backticks, in double quotes too) is its own text, read
+    through the one reader in guard_env, as the draft-pr rule reads it."""
+    texts, too_deep = _substitutions(stripped, powershell=is_powershell(stripped))
+    if too_deep:   # the env layer refuses a nest this deep; read the command as it stands
+        texts = [(stripped, False)]
+    return next((hit for text, _in_message in texts if (hit := _verdict_pipe_in(text))), "")
+
+
+VERDICT_PIPE_REASON = (
+    "a pipe out of verdict hides its result: the pipeline returns the last command's exit, so a "
+    "failed run reads as exit 0, and verdict prints its FAIL line first, which a filter can cut. "
+    "Remedy: run `verdict <cmd>` with nothing after it. Its output is already short. "
+    "(rule tokens-run-through-verdict, verdict keeps the full output in a log)"
 )
 
 
