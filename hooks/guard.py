@@ -185,8 +185,9 @@ Other tools, in `judge` order:
                        writes over one, that another agent wrote. Each such write records its agent in a
                        sidecar `<scratchpad>/.writers/<hash>`. A run is an interpreter or the path as the
                        command word; a write is a Write-family target or a shell write target. A first
-                       write, the agent's own file, a call with no `agent_id` and a read pass. The reason
-                       names no path. A call that names no scratchpad touches no file. An override lifts it.
+                       write, the agent's own file, a file that no longer exists, a call with no `agent_id` (its
+                       write deletes the file's record) and a read pass. The record moves before an overwrite ask.
+                       The reason names no path. A call that names no scratchpad touches no file. An override lifts it.
                        (scratchpad-owner)
   agent-role-model     deny. A spawn whose model ranks above its role's row in the decision record
                        (haiku < sonnet < opus), or that names no model where the role has no `model:`
@@ -374,7 +375,7 @@ while True:
             PUSH_DENY_REASON, STACK_DENY_REASON, TREE_ASK_REASON, TREE_DENY_REASON,
             checkout_conflict_resolve, clean_deletes_files, names_only_files, one_place, session_id_of, shared_tree_match,
             SESSION_ID_RE, in_any_session_scratchpad, stash_takes_the_stack, subject_state, under_session_scratchpad,
-            scratchpad_record_writer, scratchpad_writer_of,
+            scratchpad_clear_writer, scratchpad_record_writer, scratchpad_writer_of,
         )
         _loading = "guard_pointer"
         from guard_pointer import (
@@ -396,7 +397,7 @@ while True:
         )
         _loading = "guard_frozen"
         from guard_frozen import (
-            FROZEN_REASON, MUTATING_COMMAND, _shell_write_hit, frozen_shell_hit, interpreter_write_hit, is_frozen,
+            FROZEN_REASON, MUTATING_COMMAND, _resolve_vars, _shell_write_hit, frozen_shell_hit, interpreter_write_hit, is_frozen,
             is_project_config, project_config_shell_hit,
             PROJECT_FROZEN_FILES,  # noqa: F401  re-export: test_shared_names and test_wrappers read guard.PROJECT_FROZEN_FILES
         )
@@ -4767,6 +4768,8 @@ SCRATCHPAD_OVERWRITE_REASON = (
     "Remedy: write your own file under a name of your own, or ask the orchestrator to hand the file to you. "
     "(decision scratchpad-owner, an agent asks before it runs or overwrites another agent's scratchpad file)"
 )
+# Shell verbs that remove or move a file: a write the rule judges, but the file stays no agent's text, so no record.
+SCRATCHPAD_REMOVERS = ("rm", "mv", "unlink", "rmdir", "shred")
 SCRATCHPAD_WRITE_PASSES = 8   # shell write targets listed from one call, at most
 
 
@@ -4777,13 +4780,13 @@ def scratchpad_agent(payload) -> str:
 
 
 def scratchpad_writes(payload, tool: str, tool_input: dict, cwd: str):
-    """(agent, session, the scratchpad files this call writes): the Write family's targets and the shell
-    write targets `_shell_write_hit` reads. Only an agent's call that names a scratchpad reaches the disk;
-    any other call gets no files."""
+    """(agent, session, the scratchpad files this call writes, those of them a remover verb names): the Write
+    family's targets and the shell write targets `_shell_write_hit` reads. `agent` is '' for a call with no
+    `agent_id`. Only a call that names a scratchpad reaches the disk; any other call gets no files."""
     agent, session = scratchpad_agent(payload), session_id_of(payload)
-    files = []
-    if not agent or not session:
-        return agent, session, files
+    files, removed = [], set()
+    if not session:
+        return agent, session, files, removed
     try:
         if tool in WRITE_TOOLS:
             for target in write_targets(tool_input):
@@ -4793,38 +4796,49 @@ def scratchpad_writes(payload, tool: str, tool_input: dict, cwd: str):
         elif tool in SHELL_TOOLS:
             command = str(tool_input.get("command", "") or "")
             if SCRATCHPAD_WORD not in command and SCRATCHPAD_WORD not in cwd:
-                return agent, session, files
+                return agent, session, files, removed
             command, found = strip_heredoc_bodies(command), {}
 
-            def in_scratchpad(word, at):
+            def in_scratchpad(word, at, verb):
                 full = shell_abs(word, at)
                 if full and SCRATCHPAD_WORD in full and full not in files and under_session_scratchpad(full, session):
-                    found[word] = full
+                    found[word] = (full, verb in SCRATCHPAD_REMOVERS)
                     return True
                 return False
 
             for _ in range(SCRATCHPAD_WRITE_PASSES):   # the reader names one hit a pass: exclude each as it is listed
-                hit = _shell_write_hit(command, cwd, in_scratchpad, follow_cd=True)
+                hit = _shell_write_hit(command, cwd, in_scratchpad, follow_cd=True, predicate_command=True)
                 if not hit:
                     break
-                files.append(found[hit])
+                files.append(found[hit][0])
+                if found[hit][1]:
+                    removed.add(found[hit][0])
     except Exception:
         pass   # a file that cannot be read is not judged and not recorded, never a failed call
-    return agent, session, files
+    return agent, session, files, removed
 
 
 def scratchpad_owner_write(payload, tool: str, tool_input: dict, cwd: str) -> None:
-    """Rule scratchpad-owner, the write form: ask when an agent's call writes over a scratchpad file whose
-    record names another agent; else record the agent as the writer of each file it writes. A first write,
-    a rewrite of its own file and a call with no `agent_id` pass. Run once the call's other rules passed."""
-    agent, session, files = scratchpad_writes(payload, tool, tool_input, cwd)
+    """Rule scratchpad-owner, the write form. A call with no `agent_id` clears the record of each scratchpad
+    file it writes: the file is its own now. An agent's call records the agent as the writer of each file it
+    writes, and asks when a file's record named another agent. The record is written before the ask, because
+    an approval in the UI never reaches the guard again; a file an `rm` or `mv` names is judged but not recorded. A first write, a rewrite of its own file and a file
+    that no longer exists pass (`scratchpad_writer_of`). Run once the call's other rules passed."""
+    agent, session, files, removed = scratchpad_writes(payload, tool, tool_input, cwd)
+    if not agent:
+        for full in files:
+            scratchpad_clear_writer(full, session)
+        return
+    taken = ""
     for full in files:
         writer = scratchpad_writer_of(full, session)
-        if writer and writer != agent:
-            refuse(tool, "ask", "scratchpad-owner", SCRATCHPAD_OVERWRITE_REASON,
-                   "agent %s writes over a scratchpad file agent %s wrote: %s" % (agent, writer, full))
+        if writer and writer != agent and not taken:
+            taken = "agent %s writes over a scratchpad file agent %s wrote: %s" % (agent, writer, full)
     for full in files:
-        scratchpad_record_writer(full, session, agent)
+        if full not in removed:
+            scratchpad_record_writer(full, session, agent)
+    if taken:
+        refuse(tool, "ask", "scratchpad-owner", SCRATCHPAD_OVERWRITE_REASON, taken)
 
 
 def scratchpad_owner_hit(payload, tool: str, tool_input: dict, cwd: str) -> str:
@@ -4832,13 +4846,14 @@ def scratchpad_owner_hit(payload, tool: str, tool_input: dict, cwd: str) -> str:
     agent of the session wrote, else ''. A run is an interpreter or runner word (`_RUNNER`) with the file as
     its first plain argument, or the file as the command word. A `cd` ahead of the run names the folder a
     relative path is read from (`dir_before_segment`). Quoted text, comments and heredoc bodies hold no
-    run: the segments come from `split_segments` over the heredoc-stripped command."""
+    run: the segments come from `split_segments` over the heredoc-stripped command, its variables read
+    as `_shell_write_hit` reads them (`_resolve_vars`)."""
     agent, session = scratchpad_agent(payload), session_id_of(payload)
     command = str(tool_input.get("command", "") or "") if tool in SHELL_TOOLS else ""
     if not agent or not session or (SCRATCHPAD_WORD not in command and SCRATCHPAD_WORD not in cwd):
         return ""
     ends = []
-    segments = split_segments(strip_heredoc_bodies(command), ends)
+    segments = split_segments(_resolve_vars(strip_heredoc_bodies(command)), ends)
     for number, segment in enumerate(segments):
         tokens = segment_tokens(segment)
         index = resolve_command(tokens) if tokens else None
@@ -4846,7 +4861,9 @@ def scratchpad_owner_hit(payload, tool: str, tool_input: dict, cwd: str) -> str:
             continue
         word = tokens[index]
         if _RUNNER(basename(word)):
-            script = next((arg for arg in tokens[index + 1:] if arg and not arg.startswith("-")), "")
+            args = list(tokens[index + 1:])
+            at = workflow_script_index(args)   # past the interpreter's flags and their values
+            script = args[at] if at is not None else ""
         else:
             script = word if "/" in word else ""
         if not script:

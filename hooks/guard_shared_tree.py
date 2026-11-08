@@ -595,15 +595,27 @@ def scratchpad_record_writer(where: str, session_id: str, agent_id: str) -> None
 
 
 def scratchpad_writer_of(where: str, session_id: str) -> str:
-    """The agent id recorded as the writer of the scratchpad file `where`, or '' when none is recorded."""
+    """The agent id recorded as the writer of the scratchpad file `where`, or '' when none is recorded or the
+    file no longer exists: the record of a removed file is stale, and a new file at its path is a first write."""
     try:
         record = scratchpad_writer_record(where, session_id)
-        if not record:
+        if not record or not os.path.lexists(where):
             return ""
         with open(record, encoding="utf-8") as handle:
             return handle.read().strip()
     except Exception:
         return ""
+
+
+def scratchpad_clear_writer(where: str, session_id: str) -> None:
+    """Delete the record of the scratchpad file `where`, when a call with no `agent_id` has written it. No
+    record, or a record that cannot be deleted, leaves things as they are."""
+    try:
+        record = scratchpad_writer_record(where, session_id)
+        if record:
+            os.remove(record)
+    except Exception:
+        pass
 
 
 def in_any_session_scratchpad(where: str) -> bool:
