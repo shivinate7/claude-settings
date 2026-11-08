@@ -2835,14 +2835,22 @@ async function foldedRowPage(t, kind, width) {
 }
 const FOLD_DATE = "Answered Oct 30, 05:00 CDT";
 // The date line's words and text runs, its box, the press beside the row (or Show answer), and the row's height. The runs are read per text
-// node, so a wrapped line counts once per line; lines counts the distinct tops of those runs.
+// node, so a wrapped line counts once per line; lines counts the distinct tops of those runs. dateLines counts the distinct tops of the
+// date's own non-space characters, those after the word "Answered": the label may sit on a line of its own, the date stays whole on one.
 const foldedDate = (page, id) => page.evaluate((id) => {
   const li = document.getElementById("row-" + id), row = li.querySelector(".frow"), when = row.querySelector(".fwhen");
   const press = li.querySelector(":scope > button.btn") || row.querySelector(".fgo");
   const runs = [], walk = document.createTreeWalker(when, NodeFilter.SHOW_TEXT);
   for (let n = walk.nextNode(); n; n = walk.nextNode()) { const r = document.createRange(); r.selectNodeContents(n); runs.push(...r.getClientRects()); }
+  const dateTops = new Set(), label = when.textContent.indexOf("Answered") + "Answered".length, chars = document.createTreeWalker(when, NodeFilter.SHOW_TEXT);
+  for (let n = chars.nextNode(), at = 0; n; at += n.data.length, n = chars.nextNode())
+    for (let i = 0; i < n.data.length; i++) {
+      if (at + i < label || /\s/.test(n.data[i])) continue;
+      const r = document.createRange(); r.setStart(n, i); r.setEnd(n, i + 1);
+      const box = r.getClientRects()[0]; if (box) dateTops.add(Math.round(box.top));
+    }
   const p = press.getBoundingClientRect(), b = when.getBoundingClientRect();
-  return { dateText: when.innerText.replace(/\s+/g, " ").trim(), lines: new Set(runs.map((r) => Math.round(r.top))).size,
+  return { dateText: when.innerText.replace(/\s+/g, " ").trim(), lines: new Set(runs.map((r) => Math.round(r.top))).size, dateLines: dateTops.size,
     textRight: runs.length ? Math.max(...runs.map((r) => r.right)) : Infinity, boxRight: b.right, pressLeft: p.left,
     pressName: (press.querySelector("span") || press).textContent.trim(), pressShown: press.checkVisibility() && p.width > 8, rowH: row.getBoundingClientRect().height };
 }, id);
@@ -2852,7 +2860,7 @@ function foldedScope(g, kind, width) {
   assert.ok(g.pressShown, `the press "${g.pressName}" is not shown at ${width} wide`);
   assert.equal(g.dateText, FOLD_DATE, `the date line reads "${g.dateText}", not "${FOLD_DATE}", at ${width} wide`);
 }
-// At 360 and 390 wide, light theme: two claims per row kind, one test each, so each failure names one cause. The waiting-reply row at 390
+// At 360 and 390 wide, light theme: three claims per row kind, one test each, so each failure names one cause. The waiting-reply row at 390
 // is green on the old page (its date ends 11 px before Show answer): it guards the fix from moving the date under the press there.
 for (const width of [360, 390]) for (const kind of Object.keys(FOLD_ROWS)) {
   test(`folded answered row ${FOLD_ROWS[kind].label}: its date line stays in its box, at ${width} wide`, async (t) => {
@@ -2860,6 +2868,12 @@ for (const width of [360, 390]) for (const kind of Object.keys(FOLD_ROWS)) {
     const g = await foldedDate(page, FOLD_ROWS[kind].ask.id);
     foldedScope(g, kind, width);
     assert.ok(g.textRight <= g.boxRight + 1, `the date line runs ${Math.round(g.textRight - g.boxRight)} px past its box, at ${width} wide`);
+  });
+  test(`folded answered row ${FOLD_ROWS[kind].label}: its date stays whole on one line, at ${width} wide`, async (t) => {
+    const page = await foldedRowPage(t, kind, width); if (!page) return;
+    const g = await foldedDate(page, FOLD_ROWS[kind].ask.id);
+    foldedScope(g, kind, width);
+    assert.equal(g.dateLines, 1, `the date wraps inside itself to ${g.dateLines} lines at ${width} wide, not one`);
   });
   test(`folded answered row ${FOLD_ROWS[kind].label}: its date line ends before the press, at ${width} wide`, async (t) => {
     const page = await foldedRowPage(t, kind, width); if (!page) return;
