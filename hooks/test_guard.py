@@ -5730,6 +5730,11 @@ add("check-tail: ci-job checks --lint piped to tail, then a trailing background 
     command="~/.claude/bin/ci-job checks --lint | tail -3 &")
 sh("check-tail: ci-job checks --lint piped to tail in the foreground, with no &, is allowed",
    "~/.claude/bin/ci-job checks --lint | tail -3", "allow", cwd=NOGIT)
+# `|&` pipes both streams. Its `&` is part of the pipe, not a background `&`, so these are allowed.
+sh("check-tail: ci-job checks --lint |& tail -3 in the foreground, the & of |& is a pipe, is allowed",
+   "~/.claude/bin/ci-job checks --lint |& tail -3", "allow", cwd=NOGIT)
+sh("check-tail: ci-job checks --lint 2>&1 |& cat in the foreground, the & of |& is a pipe, is allowed",
+   "~/.claude/bin/ci-job checks --lint 2>&1 |& cat", "allow", cwd=NOGIT)
 
 # A merge script run by its path, with no interpreter word, is the same verdict call as
 # `python merge/merge.py`, so check-tail refuses it too.
