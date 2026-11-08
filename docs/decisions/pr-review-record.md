@@ -60,7 +60,7 @@ A change is done when one of these holds (rule `roles-review-cap-three`):
   - `none` passes with no read.
   - `<n>, this PR` passes when the PR adds a file under `docs/debts/`, or adds lines to `docs/debts/notes.md`. Deleting a notes line does not count.
   - `<n>, follow-up #<pr>[, ...]` passes when each named PR is open or merged. A closed PR that was not merged does not pass. This PR does not pass.
-  - A check that cannot read its input fails (item 276 a). A follow-up PR that 404s is not done, and the line names it. Any other read failure is unknown, and it holds the record. `--findings-unknown-ok "<reason>"` lifts that hold, and the tool logs the lift.
+  - A check that cannot read its input fails (owner, 2026-11-06 12:39 CST, page item 276 (unknown-read-one-rule), pick a). A follow-up PR that 404s is not done, and the line names it. Any other read failure is unknown, and it holds the record. `--findings-unknown-ok "<reason>"` lifts that hold, and the tool prints the lift.
   - Owner item 394 a, 2026-11-08 06:08 CST: a fix check may pass a push that only files this PR's findings (record `hold-unsafe-after-round-3`). The fix-check reviewer judges that push; it passes only when the reviewed record's Findings is `<n>, this PR`. The tool does not check it.
 
 ## The cost
@@ -81,7 +81,7 @@ Counted as real `gh` calls, one call per page of a list read. Most reads fit one
 - Open: an integration PR has no record of its own.
 - A `delete-only` change with Guard or check `no` and a round 1 FAIL reads done (rule `roles-review-cap-three`, the three-round review cap). The lane fixes the defect and posts a new review record for the new head, before the batch runner batches it. The fix push makes the old record stale.
 - Unmeasured: whether the auto-mode classifier allows `merge --reviewed` and `merge <pr> --review-record`. Both are off `merge/cloud_allow.json`, which allows only `--confirm` and `--role`.
-- One fix check per record. A second fix on a fixed head starts a new lane at round 1. `--fix-check` refuses unless its reviewed head equals the Head of the newest earlier record on the PR and that record has no Fix check line.
+- One fix check per record. A second fix on a fixed head starts a new lane at round 1. `--fix-check` refuses unless its reviewed head equals the Head of the newest earlier record on the PR and that record has no Fix check line. Owner page item 418 (fix-checks-chain) is where a second fix check is decided.
 - The tool cannot see whether a Findings count is true, or whether a debt edit is that finding's own. It cannot see a follow-up PR's topic, or whether a finding got its own roadmap step. Legacy records keep today's verdict.
 - The tool does not see whether a fix-check push is filing-only. The fix-check reviewer reads the diff.
 
