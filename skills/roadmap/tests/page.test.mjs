@@ -440,6 +440,19 @@ test("the rail's cleanup button names its stalled and paused steps in its label"
   assert.equal(await btn.count(), 1, "the rail has no cleanup button");
   assert.match((await btn.getAttribute("aria-label")) || "", /1 stalled, 1 paused/, "the rail's cleanup label does not name the stalled and paused steps");
 });
+// The rail's label names a blocked step in the form of the stalled and paused words, when the rail's bar draws a blocked cell.
+test("the rail's cleanup button names its blocked step in its label, as its bar draws it", async (t) => {
+  const page = await open(t, builtPage({ steps: barFixtureBlocked(), live: BAR_LIVE, stalled: STALLED_S3_P4 })); if (!page) return;
+  assert.equal(await page.locator(`${BARS[1][1]} > i.blk`).count(), 1, "the rail's cleanup bar draws no blocked cell (i.blk)");
+  const label = (await page.locator('#rail button[data-phase="cleanup"]').getAttribute("aria-label")) || "";
+  assert.match(label, /, 1 blocked\b/, `the rail's cleanup label does not name the blocked step: "${label}"`);
+});
+test("control: the rail's cleanup label names no blocked step when its bar draws none", async (t) => {
+  const page = await open(t, builtPage({ steps: barFixture(), live: BAR_LIVE, stalled: STALLED_S3_P4 })); if (!page) return;
+  assert.equal(await page.locator(`${BARS[1][1]} > i.blk`).count(), 0, "the rail's cleanup bar draws a blocked cell with no blocked step");
+  const label = (await page.locator('#rail button[data-phase="cleanup"]').getAttribute("aria-label")) || "";
+  assert.doesNotMatch(label, /blocked/, `the rail's cleanup label names a blocked step that is not there: "${label}"`);
+});
 test("the Now card's bar and the phase head's bar are role img", async (t) => {
   const page = await open(t, builtPage({ steps: barFixture(), live: BAR_LIVE, stalled: STALLED_S3_P4 })); if (!page) return;
   for (const [name, scope] of [BARS[0], BARS[2]]) {
@@ -512,6 +525,33 @@ for (const [kind, word, tag] of [["stalled", "Stalled", "stl"], ["paused", "Paus
     const page = await open(t, builtPage({ steps: { c1: stepOf("Step c1", "todo", 1), x: stepOf("Step x", "doing", 2) }, stalled: listing(kind, ["x"]) })); if (!page) return;
     assert.equal(await page.locator(`#s-x .tag.${tag}`).count(), 1, `step x is doing and listed ${kind}, but its row carries no ${word} tag`);
     assert.match(await statusLabel(page, "x"), new RegExp(`status: ${word}\\.`), `step x is doing and listed ${kind}, but its row label does not read ${word}`);
+  });
+}
+
+// The band's count and rows take a listed step only when it is doing. A to-do or done step the build lists is in neither the count nor a
+// row. Each case lists doing step a beside step x, so the count is 1 when x is left out and 2 when it is not. The row check comes after
+// the plan rows are found, so the steps have arrived.
+const BAND_WORD = { stalled: "Stalled", paused: "Paused" };
+for (const kind of ["stalled", "paused"]) for (const status of ["todo", "done"]) {
+  test(`the band counts a ${OWN[status][0]} step listed ${kind} in neither its count nor a row, and still counts the doing step beside it`, async (t) => {
+    const steps = { c1: stepOf("Step c1", "todo", 1), a: stepOf("Step a", "doing", 2), x: stepOf("Step x", status, 3) };
+    const page = await open(t, builtPage({ steps, stalled: listing(kind, ["a", "x"]) })); if (!page) return;
+    for (const id of ["a", "x"]) await statusLabel(page, id);
+    assert.equal(await stall(page).locator('button[data-go="a"]').count(), 1, `the band draws no row for doing step a listed ${kind}`);
+    const text = await stallText(page);
+    assert.match(text, new RegExp(`${BAND_WORD[kind]}: 1(?!\\d)`), `the band counts the ${OWN[status][0]} step x listed ${kind} as well as doing step a: ${text}`);
+    assert.equal(await stall(page).locator('button[data-go="x"]').count(), 0, `the band draws a row for the ${OWN[status][0]} step x listed ${kind}`);
+  });
+}
+// Control: a listed id with no step in the plan keeps its count and its row, named Untitled step, as before the band read steps.
+for (const kind of ["stalled", "paused"]) {
+  test(`control: a ${kind} id with no step in the plan keeps its count and its row, named Untitled step`, async (t) => {
+    const page = await open(t, builtPage({ steps: { c1: stepOf("Step c1", "todo", 1), a: stepOf("Step a", "doing", 2) }, stalled: listing(kind, ["a", "zz"]) })); if (!page) return;
+    await statusLabel(page, "a");
+    const text = await stallText(page);
+    assert.match(text, new RegExp(`${BAND_WORD[kind]}: 2(?!\\d)`), `the band does not count the listed id zz with no step as ${BAND_WORD[kind]}: ${text}`);
+    assert.equal(await stall(page).locator('button[data-go="zz"]').count(), 1, "the band draws no row for the listed id zz with no step");
+    assert.match(await stall(page).locator('button[data-go="zz"]').textContent(), /Untitled step/, "the row of the listed id zz with no step is not named Untitled step");
   });
 }
 

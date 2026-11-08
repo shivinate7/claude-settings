@@ -2,7 +2,7 @@
 
 Mockup: `roadmap-stalled-paused.html`. Drawn from `skills/roadmap/page/index.html` at 38a463f8e (the
 branch of PR #1522, stalled and paused steps stop reading "In progress"). The page CSS in the mockup is
-the page's own two style blocks, copied unchanged. Sizes: Phone 390 and Wide 1280, the brief's sizes.
+the page's own two style blocks at that commit; the page's later `.grp` nowrap rule is not in it. Sizes: Phone 390 and Wide 1280, the brief's sizes.
 This repo's device list reads "unknown". Themes: light and dark. Sample data: a phase of 12 steps and a
 phase of 30 steps.
 
@@ -25,8 +25,9 @@ Deep links: `#s=mixed|dense`, `&o=hatch|tint`, `&c=on|off`, `&w=all|390|1280`, `
    progress), stripes (stalled), ring (paused), solid red (blocked), solid grey (to do). The roadmap
    bars are not aria-hidden, so the cell must not rely on colour alone. The ring echoes the pause
    mark's ring.
-   Loss: in a rail chip at 390 a cell is 1 to 2 px wide, and the stripes and ring fade to a mid red
-   and a mid grey there. The phase head and Now card bars keep the shapes (measured at 3x, 30 steps).
+   Loss: in a rail chip at 390 a cell is 2.25 px wide at 13 steps and 0 px at 30, and the stripes and
+   ring fade to a mid red and a mid grey there. At 1280 and 30 steps a phase head cell is 1.06 px at 1x,
+   so the shapes show only at 3x.
    Pick: yes.
 
 3. **Bar cells, option Tint.** Stalled is `--bad` at 45 % and paused is `--muted` at 45 %, as `.act`
@@ -77,6 +78,8 @@ The detector found nothing. It reads the harness, not the screen in the frames.
 - Open: nothing on the screen teaches that stripes mean stalled and a ring means paused, except the
   bar's `title` on hover. The count words (item 4) carry it in the Now card. The phase head has no
   words. A question for the owner, not blocking: is the stalled band's red mark enough of a key?
+- Open: paused cells under ~3px read like done (measured 1.08-1.25:1 on the roadmap tokens); lane `nfp-narrow-paused-cell`
+  gives them a non-colour cue.
 - Open: Tint (item 3) fails in dark. It stays only so the owner can cull it.
 
 ## Seen, outside this lane

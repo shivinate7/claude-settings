@@ -2,7 +2,7 @@
 
 Mockup: `status-stalled-paused.html`. Drawn from `skills/waiting-page/page.html` at 38a463f8e (the
 branch of PR #1522, stalled and paused steps stop reading "In progress"). The page CSS in the mockup is
-the page's own style block, copied unchanged. Sizes: Phone 390 and Wide 1280, the brief's sizes. This
+the page's own style block at that commit; the page's later `.grp` nowrap rule is not in it. Sizes: Phone 390 and Wide 1280, the brief's sizes. This
 repo's device list reads "unknown". Themes: light and dark. Sample data: a phase of 12 steps and a
 phase of 30 steps.
 
@@ -21,7 +21,7 @@ stalled mark is already red.
    Gain: the cells read as the roadmap's, one family. Stalled differs from solid red blocked, and
    paused from solid grey to do, by shape.
    Loss: every `.segbar` here is `aria-hidden`, so the colour-alone rule does not require the shape.
-   In a rail chip at 390 a cell is 1 to 2 px wide, and the ring fades to a grey line there.
+   In a rail chip at 390 (104.7 px, measured at 24b1f98e3) a cell is 6.2 px wide at 13 steps and 1.55 px at 30; the ring fills the cell at 30.
    Pick: yes, so both pages draw one bar.
 
 2. **Bar cells, option Tint.** Stalled is `color-mix(in srgb, var(--holds) 45%, transparent)`, paused
@@ -49,8 +49,6 @@ stalled mark is already red.
 
 - CSS: `.segbar i.stl { background: repeating-linear-gradient(135deg, var(--holds) 0 2px, transparent 2px 4px); }`.
 - CSS: `.segbar i.pzd { background: transparent; box-shadow: inset 0 0 0 1.5px var(--muted); }`.
-- CSS: a paused cell under 3px wide paints solid, with 1px of each gap: `--ink` in light, `--ground` in
-  dark. The ring fills such a cell and paints near a done cell (1.15:1); the solid paint is at least 3:1.
 - JS: `segs(counts, n)` over `tally` emits `<i class="stl">` and `<i class="pzd">` in the order of item 4.
   Count `t` and `p` with `shownState(s)`. Change all three calls: `renderNow`, `renderRail` and the
   phase head in the phase view.
@@ -65,8 +63,8 @@ stalled mark is already red.
 
 The detector found nothing. It reads the harness, not the screen in the frames.
 - Fixed: the harness labels on the Now card covered the phase name. They now sit at the card's foot.
-- Fixed: a paused cell under 3px wide (a rail chip at 390, the phase head at 1280, with 30 steps) read
-  as a grey line beside a done cell. It now paints solid, as in the builder changes above.
+- Open: paused cells under ~3px read like done (measured 1.02-1.09:1 on this page's tokens); lane `nfp-narrow-paused-cell`
+  gives them a non-colour cue.
 - Open: Tint (item 2) fails in dark. It stays only so the owner can cull it.
 
 ## Seen, outside this lane

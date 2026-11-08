@@ -527,12 +527,7 @@ body.sheet-open { overflow: hidden; }
 .segbar i.act { background: color-mix(in srgb, var(--acc) 45%, transparent); }
 .segbar i.blk { background: var(--holds); }
 .segbar i.stl { background: repeating-linear-gradient(135deg, var(--holds) 0 2px, transparent 2px 4px); }
-.segbar i.pzd { position: relative; background: transparent; box-shadow: inset 0 0 0 1.5px var(--muted); }
-/* Under 3px the ring fills the cell and paints near a done cell. There the cell and 1px of each gap paint --ink in light and
-   --ground in dark, at least 3:1 against a done cell. The width is 0 from 3px up, so a wider cell keeps its ring. */
-.segbar i.pzd::after { content: ""; position: absolute; top: 0; bottom: 0; left: -1px; width: clamp(0px, calc((3px - 100%) * 1000), calc(100% + 2px)); background: var(--ink); }
-@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .segbar i.pzd::after { background: var(--ground); } }
-:root[data-theme="dark"] .segbar i.pzd::after { background: var(--ground); }
+.segbar i.pzd { background: transparent; box-shadow: inset 0 0 0 1.5px var(--muted); }
 
 /* The view switch sits right above the view it changes. What every view shares sits above the switch. */
 .views { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 2px; padding: 3px; max-width: 520px; background: var(--chip); border-radius: 11px; }
@@ -3069,10 +3064,10 @@ const unknownRead = (r) => String(r).startsWith("unknown");
 // "unknown (why)" shows as its why, so the word "unknown" appears once on the screen, at the plan.
 const reason = (r) => { const m = /^unknown \(([\s\S]*)\)$/.exec(String(r == null ? "" : r)); return m ? m[1] : String(r == null ? "" : r); };
 const segs = (c, n) => ["done", "act", "stl", "pzd", "blk"].map((k) => `<i class="${k}"></i>`.repeat(c[k])).join("") + "<i></i>".repeat(Math.max(0, n - c.done - c.act - c.stl - c.pzd - c.blk)) + (n ? "" : "<i></i>");
-// The bar's cell counts for a phase's steps, one per cell kind; every read of a step's drawn state goes through shownState.
+// The bar's cell counts for a phase's steps, one per cell kind. shownState decides in progress, stalled and paused; the tallies read status for done and blocked.
 const tally = (ss) => ({ done: ss.filter((s) => s.status === "done").length, act: ss.filter((s) => shownState(s) === "active").length, stl: ss.filter((s) => shownState(s) === "stalled").length, pzd: ss.filter((s) => shownState(s) === "paused").length, blk: ss.filter((s) => s.status === "blocked").length });
-// ", 3 stalled, 1 paused", with a kind left out when it has no steps.
-const stallWords = (c) => (c.stl ? ", " + c.stl + " stalled" : "") + (c.pzd ? ", " + c.pzd + " paused" : "");
+// ", 3 stalled, 1 paused, 1 blocked", with a kind left out when it has no steps.
+const stallWords = (c) => (c.stl ? ", " + c.stl + " stalled" : "") + (c.pzd ? ", " + c.pzd + " paused" : "") + (c.blk ? ", " + c.blk + " blocked" : "");
 
 /* Status marks: shape and colour together, never colour alone. */
 const GLY = {
@@ -3250,7 +3245,10 @@ function stalledBand() {
     return `<div class="livenone" id="stBand"><p><span class="lh">Stalled steps</span> <span class="unk"><span class="rg unk" aria-hidden="true"></span> not read: ${esc(stall.plain)}</span></p>`
       + `<details><summary>What the build said</summary><pre>${esc(reason(stall.why))}</pre></details></div>`;
   }
-  const items = stall.items, n = stall.steps.length + (items ? items.length : 0);
+  // The band takes a listed step only when shownState says it is that kind. A listed id with no step in the plan stays.
+  const holds = (id, k) => { const s = steps.find((x) => x.id === id); return !s || shownState(s) === k; };
+  const stl = stall.steps.filter((x) => holds(x.id, "stalled")), pzd = stall.paused.filter((id) => holds(id, "paused"));
+  const items = stall.items, n = stl.length + (items ? items.length : 0);
   const title = (id) => { const s = steps.find((x) => x.id === id); return s && s.title ? s.title : "Untitled step"; };
   const head = n
     ? `<div class="sth"><h3>${rg("stalled")}Stalled: <span class="num">${n}</span></h3><span class="lead">No live lane and no open pull request. Triage resumes, pauses or closes each.</span></div>`
@@ -3261,14 +3259,14 @@ function stalledBand() {
     if (marks.length) return `<span class="fx land">done: landed in ${esc(marks.join(", "))}</span>`;
     return Object.prototype.hasOwnProperty.call(stall.bad, x.id) ? `<span class="fx bad">Pause not counted: ${esc(stall.bad[x.id])}.</span>` : "";
   };
-  const stepRows = stall.steps.map((x) => `<li><span class="k"><span class="id">${esc(x.id)}</span></span><span><button type="button" class="tx" data-go="${esc(x.id)}">${esc(title(x.id))}</button>${fix(x)}</span></li>`).join("");
+  const stepRows = stl.map((x) => `<li><span class="k"><span class="id">${esc(x.id)}</span></span><span><button type="button" class="tx" data-go="${esc(x.id)}">${esc(title(x.id))}</button>${fix(x)}</span></li>`).join("");
   const itemPart = !items
     ? `<h4>Waiting items</h4><ul><li class="unkrow"><span class="unk"><span class="rg unk" aria-hidden="true"></span> not read: no item carries its lane yet</span>`
       + (reason(stall.itemsWhy) ? `<details><summary>What the build said</summary><pre>${esc(reason(stall.itemsWhy))}</pre></details>` : "") + "</li></ul>"
     : items.length ? `<h4>Waiting items</h4><ul>${items.map((it) => `<li class="it"><span class="k"><span>Item <span class="num">${esc(it.n)}</span></span></span><span>Answer routed to <span class="ln">${esc(it.lane)}</span>; lane gone</span></li>`).join("")}</ul>` : "";
-  const stepPart = stall.steps.length ? (items && !items.length ? `<ul>${stepRows}</ul>` : `<h4>Steps</h4><ul>${stepRows}</ul>`) : "";
-  const pz = stall.paused.length
-    ? `<details class="pz"${n ? "" : " open"}><summary>${rg("paused")}Paused: <span class="num">${stall.paused.length}</span></summary><ul>${stall.paused.map((id) => {
+  const stepPart = stl.length ? (items && !items.length ? `<ul>${stepRows}</ul>` : `<h4>Steps</h4><ul>${stepRows}</ul>`) : "";
+  const pz = pzd.length
+    ? `<details class="pz"${n ? "" : " open"}><summary>${rg("paused")}Paused: <span class="num">${pzd.length}</span></summary><ul>${pzd.map((id) => {
       const p = (steps.find((x) => x.id === id) || {}).paused || {}, at = when(p.at), who = DECIDES[p.decides];
       const line = [who ? who + " decides" : "", at ? `paused <span class="num">${esc(fmt(at.toISOString()))}</span>` : ""].filter(Boolean).join("; ");
       return `<li><span class="k"><span class="id">${esc(id)}</span></span><span><button type="button" class="tx" data-go="${esc(id)}">${esc(title(id))}</button>${p.why ? `<span class="fx why">${esc(p.why)}</span>` : ""}${line ? `<span class="fx">${line}</span>` : ""}</span></li>`;

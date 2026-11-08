@@ -8193,6 +8193,30 @@ test("the phase head's text names its stalled and paused steps", async (t) => {
   const text = (await prog.locator(".sr").allTextContents()).join(" ").replace(/\s+/g, " ");
   assert.match(text, /3 stalled, 1 paused/, "the phase head's text does not name the stalled and paused steps: " + text);
 });
+// The rail's label and the phase head's text name a blocked step in the form of the stalled and paused words, when the bar draws one.
+test("the rail's cleanup button names its blocked step in its label, as its bar draws it", async (t) => {
+  const page = await open(t, { pageHtml: barsBlockedPage() }); if (!page) return;
+  await openStatus(page);
+  assert.equal(await page.locator('#svRail button[data-phase="cleanup"] .segbar > i.blk').count(), 1, "the rail's cleanup bar draws no blocked cell (i.blk)");
+  const label = (await page.locator('#svRail button[data-phase="cleanup"]').getAttribute("aria-label")) || "";
+  assert.match(label, /, 1 blocked\b/, `the rail's cleanup label does not name the blocked step: "${label}"`);
+});
+test("the phase head's text names its blocked step, as its bar draws it", async (t) => {
+  const page = await open(t, { pageHtml: barsBlockedPage() }); if (!page) return;
+  await openStatus(page);
+  assert.equal(await page.locator("#svPhases .ph-head .segbar > i.blk").count(), 1, "the phase head's bar draws no blocked cell (i.blk)");
+  const text = (await page.locator("#svPhases .ph-head .prog .sr").allTextContents()).join(" ").replace(/\s+/g, " ");
+  assert.match(text, /, 1 blocked\b/, `the phase head's text does not name the blocked step: "${text}"`);
+});
+test("control: the rail's cleanup label and the phase head's text name no blocked step when none is drawn", async (t) => {
+  const page = await open(t, { pageHtml: barsPage() }); if (!page) return;
+  await openStatus(page);
+  assert.equal(await page.locator("#svPhases .ph-head .segbar > i.blk").count(), 0, "the phase head's bar draws a blocked cell with no blocked step");
+  const label = (await page.locator('#svRail button[data-phase="cleanup"]').getAttribute("aria-label")) || "";
+  const text = (await page.locator("#svPhases .ph-head .prog .sr").allTextContents()).join(" ");
+  assert.doesNotMatch(label, /blocked/, `the rail's cleanup label names a blocked step that is not there: "${label}"`);
+  assert.doesNotMatch(text, /blocked/, `the phase head's text names a blocked step that is not there: "${text}"`);
+});
 // The Now card's bar counts a blocked step as blocked, as the rail's bar and the phase head's bar do.
 const blockedSteps = () => stepsOf([["c1", "cleanup", 1, "todo"], ["d1", "cleanup", 2, "done"], ["b2", "cleanup", 3, "blocked"], ["t3", "cleanup", 4, "todo"]]);
 const noStalled = { why: "", steps: [], paused: [], badPause: [], items: [], ...NO_ITEMS };
@@ -8229,6 +8253,39 @@ test("the Now card's count line names the blocked step when the Now card's bar d
 });
 
 // ---------------------------------------------------------------- a to-do or done step listed paused or stalled (lane nfp-stalled-kind-color)
+// The band on the Status tab takes a listed step into its count and its rows only when it is doing, as the roadmap's band does (its
+// cases are in skills/roadmap/tests/page.test.mjs). Each case lists doing step a beside step x, so the count is 1 when x is left out
+// and 2 when it is not. This file keeps its own read shape, as its countLinesW copy notes; the roadmap file has the same shape.
+const bandRead = (kind, ids) => kind === "stalled"
+  ? { why: "", steps: ids.map((id) => ({ id, fix: "todo" })), paused: [], badPause: [], items: [], ...NO_ITEMS }
+  : { why: "", steps: [], paused: ids, badPause: [], items: [], ...NO_ITEMS };
+const BAND_WORD = { stalled: "Stalled", paused: "Paused" };
+for (const kind of ["stalled", "paused"]) for (const status of ["todo", "done"]) {
+  test(`the band counts a ${status} step listed ${kind} in neither its count nor a row, and still counts the doing step beside it`, async (t) => {
+    const steps = stepsOf([["c1", "cleanup", 1, "todo"], ["a", "cleanup", 2, "doing"], ["x", "cleanup", 3, status]]);
+    const page = await open(t, { pageHtml: withStalled(phasePage(steps), bandRead(kind, ["a", "x"])) }); if (!page) return;
+    await openStatus(page);
+    for (const id of ["a", "x"]) assert.equal(await page.locator(`#s-${id}`).count(), 1, `step ${id} has no row in the Status list`);
+    assert.equal(await band(page).locator('button[data-go="a"]').count(), 1, `the band draws no row for doing step a listed ${kind}`);
+    const text = await bandText(page);
+    assert.match(text, new RegExp(`${BAND_WORD[kind]}:\\s*1(?!\\d)`), `the band counts the ${status} step x listed ${kind} as well as doing step a: ${text}`);
+    assert.equal(await band(page).locator('button[data-go="x"]').count(), 0, `the band draws a row for the ${status} step x listed ${kind}`);
+  });
+}
+// Control: a listed id with no step in the plan keeps its count and its row, named Untitled step, as before the band read steps.
+for (const kind of ["stalled", "paused"]) {
+  test(`control: a ${kind} id with no step in the plan keeps its count and its row, named Untitled step`, async (t) => {
+    const steps = stepsOf([["c1", "cleanup", 1, "todo"], ["a", "cleanup", 2, "doing"]]);
+    const page = await open(t, { pageHtml: withStalled(phasePage(steps), bandRead(kind, ["a", "zz"])) }); if (!page) return;
+    await openStatus(page);
+    assert.equal(await page.locator("#s-a").count(), 1, "step a has no row in the Status list");
+    const text = await bandText(page);
+    assert.match(text, new RegExp(`${BAND_WORD[kind]}:\\s*2(?!\\d)`), `the band does not count the listed id zz with no step as ${BAND_WORD[kind]}: ${text}`);
+    assert.equal(await band(page).locator('button[data-go="zz"]').count(), 1, "the band draws no row for the listed id zz with no step");
+    assert.match(await band(page).locator('button[data-go="zz"]').textContent(), /Untitled step/, "the row of the listed id zz with no step is not named Untitled step");
+  });
+}
+
 // The edge, as on the roadmap: a to-do step listed paused (t1) and a done step listed stalled (d1), beside to-do c1 and doing a2. Each
 // place reads the step's own status. EDGE_W_FULL is the same at full size: 30 steps, so each bar draws every cell.
 const EDGE_W = () => {
