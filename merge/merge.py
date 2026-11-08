@@ -156,9 +156,10 @@ def sh(args, cwd=None, input=None, env=None, timeout=None, live_stderr=False):
     return r.returncode, (r.stdout + r.stderr).strip()
 
 def git(cwd, *a, input=None, timeout=None):
-    """Run git in `cwd`, reading stdout and stderr combined, so a caller parses git's answer from text. A GIT_TRACE* variable that writes
-    its trace to stderr would become part of that text (a sha, a path), so the child runs without them. GIT_TRACE2* stays: it writes to a file."""
-    env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_TRACE") or k.startswith("GIT_TRACE2")}
+    """Run git in `cwd`, reading stdout and stderr combined, so a caller parses git's answer from text. A GIT_TRACE* variable
+    (GIT_TRACE2* too) set to 1, 2, true or a file descriptor writes its trace to stderr or an open stream, where it would become
+    part of that text (a sha, a path). So the child keeps such a variable only when its value is an absolute path, a file target."""
+    env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_TRACE") or os.path.isabs(v)}
     return sh(["git", "-C", cwd, *a], input=input, env=env, timeout=timeout)
 
 def repo_root():
@@ -818,7 +819,7 @@ class Host:
             return int(m.group(1))
         branch = s
         if not branch:
-            c, out = sh(["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=self.cwd)
+            c, out = sh(["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=self.cwd, live_stderr=True)  # stdout only: a trace line is no branch
             if c or not out.strip() or out.strip() == "HEAD":
                 raise Stop("no pull request is named, and the branch of the working directory cannot be read: " + out)
             branch = out.strip()
