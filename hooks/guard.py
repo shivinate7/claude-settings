@@ -122,8 +122,8 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        override lifts it.
   brief-pr-head       deny. A brief (an Agent or Task `prompt`, a send_message `message`, or an agent() prompt of a
                        Workflow script that reads as a literal) that pairs PR #N with a branch that is not #N's head ref.
-                       Incident 2026-11-07, lane notes-fix-large-3: a brief paired #1687 with its base branch; two false
-                       review FAILs, a false debt and a duplicate step followed. Grammar (guard_merge.brief_pairings):
+                       A brief that pairs #N with its base branch (lane notes-fix-large-3) sends its reviewers to the
+                       wrong code and yields false review FAILs. Grammar (guard_merge.brief_pairings):
                        adjacent words only, with backticks, `origin/` and `refs/heads/` dropped: `PR #N, branch X`,
                        `PR #N branch X`, `PR #N from branch X`, `PR #N with branch X`, `#N (branch X)`,
                        `#N on branch X`, `#N, head X` (also `head branch X`, `head ref X`), `branch X (#N)`,
@@ -137,7 +137,7 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        pinned to the repo, once per distinct (repo, N). A 404 on the pull request means the number is no
                        PR: allowed. Any other failed read (gh missing too), and a bare #N where the checkout's repo cannot
                        be read, refuse and say unknown. A mismatch is read before every spawn check (9a) and refused after
-                       lane-one-topic (9f); a lifted refusal in between still meets it (guard_core.set_lift_gate), so no
+                       lane-one-topic (9f); a lifted refusal in between still meets it (guard_core.set_lift_check), so no
                        lift after step 9a skips it. The refusal names #N, the shape and the read command, and neither branch.
                        Cost: one gh read per distinct (repo, N), two at most when a short name falls back, zero with no
                        pairing, and no git start: the repo is git_reads.github_repo(use_git=False), the one reading the
@@ -5057,7 +5057,7 @@ def judge(payload) -> None:
     if not isinstance(cwd, str):
         cwd = ""
     guard_core.set_override_veto(lambda: never_lifted(payload, tool, tool_input, cwd))
-    guard_core.set_lift_gate(None)  # a gate from an earlier judge() in this process must not meet this call
+    guard_core.set_lift_check(None)  # a check left by an earlier judge() in this process must not meet this call
     session_home_keep(payload, tool, cwd)  # rule session-home's record, kept before any refusal can end the call
     # 0, handoff-unread. After compaction, no call the guard judges runs from the main session until it reads its handoff.
     # Not in never_lifted: the owner may mean the call. A failed import allows.
@@ -5096,14 +5096,14 @@ def judge(payload) -> None:
         refuse(tool, "deny", "agent-model-floor", MODEL_FLOOR_REASON, floor_model)
 
     # 9a. A brief that pairs PR #N with a branch that is not #N's head ref (rule brief-pr-head). Read here, before every
-    # spawn check below, and refused at 9f. A lifted refusal exits refuse() at once, so the gate makes it meet this refusal
+    # spawn check below, and refused at 9f. A lifted refusal exits refuse() at once, so the lift check makes it meet this refusal
     # first: no lift skips the check. The repo is read from the checkout's files, so no git starts.
     paired = brief_pr_head_hit(brief_texts(tool, tool_input), lambda: git_reads.github_repo(cwd, use_git=False))
 
     def brief_refusal():
         refuse(tool, "deny", "brief-pr-head", paired[1], paired[0])
     if paired:
-        guard_core.set_lift_gate(brief_refusal)
+        guard_core.set_lift_check(brief_refusal)
 
     # 9b. Step-up: a reviewer's second round on Sonnet, a builder's third on Opus. A reviewer's third round passes here on
     # Sonnet or Opus; the Opus ceiling (9d, opus_spawn_hit) then refuses Opus unless an override lifts it.

@@ -1143,7 +1143,7 @@ def brief_hit(tool: str, tool_input, transcript: str):
 
 
 # ---- a brief pairs PR #N with a branch that is not #N's head ref (rule brief-pr-head)
-# Incident 2026-11-07, lane notes-fix-large-3: a brief paired #1687 with its base branch, and the reviewers read the wrong code.
+# A brief that pairs #N with its base branch sends its reviewers to the wrong code (lane notes-fix-large-3).
 _PAIR_TOKEN = r"[A-Za-z0-9_./-]+"
 # A pull request mention: `owner/name#N`, `PR #N`, `name #N` (a short name) or a bare `#N`. The short word is judged by _short_repo.
 _PR_REF = re.compile(
@@ -1223,17 +1223,17 @@ BRIEF_PR_HEAD_REASON = (
     "this brief pairs #%d with a branch that is not that pull request's head ref, in the shape %s. A brief that "
     "names a pull request and a branch sends its reader to the branch's code, and a wrong branch sends it to the "
     "wrong code. Read the head with `%s` and brief that branch, or name the pull request alone. "
-    "(rule brief-pr-head)"
+    "(decision brief-claim-has-probe, a brief's claim carries the probe that showed it)"
 )
 BRIEF_PR_HEAD_UNREAD_REASON = (
     "this brief pairs #%d with a branch in the shape %s, and the head ref of that pull request could not be read, "
     "so whether the branch is its head is unknown. Retry once gh answers, or read the head with `%s` and brief "
-    "that branch. (rule brief-pr-head)"
+    "that branch. (decision brief-claim-has-probe, a brief's claim carries the probe that showed it)"
 )
 BRIEF_PR_HEAD_NO_REPO_REASON = (
     "this brief pairs #%d with a branch in the shape %s, and the guard cannot read this checkout's repo, so "
     "whether the branch is the head of that pull request is unknown. Write the pull request with its repo, as "
-    "`owner/name#N`, or name the pull request alone. (rule brief-pr-head)"
+    "`owner/name#N`, or name the pull request alone. (decision brief-claim-has-probe, a brief's claim carries the probe that showed it)"
 )
 _NOT_A_PR = object()  # a read that answered 404: the number is no pull request there
 
