@@ -1460,9 +1460,9 @@ class CompactionCarryTests(unittest.TestCase):
                 self.assertEqual(out["decision"], "block", item)
 
     def test_cc_red_pr_source_without_a_hash_is_no_source(self):
-        # Catches: a PR with no "#" passes as a source: "PR2", "PR3", "PR   3" (spaces), "PR 97", "GitHub PR 97",
+        # Catches: a PR with no "#" passes as a source: "PR<n>", "PR<n>", "PR   <n>" (spaces), "PR <n>", "GitHub PR <n>",
         # "pr 2 of the plan", "the PR 3 times", and a bare PR beside a page or git word, which that word does not
-        # rescue: "PR 97 on the page", "PR 97 (page)", "PRs 97 (page)", "PR no. 97 (page)", "PR-97 on the page",
+        # rescue: "PR <n> on the page", "PR <n> (page)", "PRs <n> (page)", "PR no. <n> (page)", "PR-<n> on the page",
         # "PR: 978 (git)", "PR number 978 (git)". The "#" form is the source
         # (test_cc_green_recovered_item_naming_a_commit_pr_or_url_passes).
         items = ["ruling X from PR2", "ruling X from PR3", "ruling X from PR   3", "ruling X from PR 978",
@@ -1477,8 +1477,8 @@ class CompactionCarryTests(unittest.TestCase):
                 self.assertEqual(out["decision"], "block", item)
 
     def test_cc_red_pr_refusal_names_the_hash_fix(self):
-        # Catches: the refusal for a bare "PR 97 (git)" does not name "PR #<n>" as the fix. A bare PR is refused even
-        # beside git, so the owner must be told to write the "#<n>" form. The control is "PR #97 (git)", which passes.
+        # Catches: the refusal for a bare "PR <n> (git)" does not name "PR #<n>" as the fix. A bare PR is refused even
+        # beside git, so the owner must be told to write the "#<n>" form. The control is "PR #<n> (git)", which passes.
         control = report_lines("Recovered: ruling X from PR #978 (git)", "Handoff gave: none")
         self.assertIsNone(self.stop(self.compacted_turn(control)), "a sourced PR #<n> item blocks")
         reply = report_lines("Recovered: ruling X from PR 978 (git)", "Handoff gave: none")
@@ -1524,7 +1524,7 @@ class CompactionCarryTests(unittest.TestCase):
 
     def test_cc_green_spaced_pr_hash_is_a_source(self):
         # Catches: "PR #<n>" refused as sourceless. It is the control for the cases above: a narrowing that drops
-        # only the no-space forms must leave it a source. "PR #97 on the page" is the control for the page-word case.
+        # only the no-space forms must leave it a source. "PR #<n> on the page" is the control for the page-word case.
         for item in ("ruling X from PR #3", "ruling X from PR #978 on the page"):
             with self.subTest(item=item):
                 reply = report_lines("Recovered: " + item, "Handoff gave: none")
