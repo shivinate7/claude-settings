@@ -1,0 +1,11 @@
+{
+  "title": "The cloud install writes ~/.claude/actions/code-check/standard.json",
+  "why": "The file is missing from the cloud install, so the installed narration lint reads unknown while the repo copy passes.",
+  "note": "Filed 09:55 CST Nov 8 (coordinator 09:52 CST, under item 410 a), from lane reviewed-head-push-ask (session_013NEJL36oZi9XZ76KB8nFQy). Red case: install into a clean HOME as the cloud does, then check for that file. No lane is in install.sh's code today (lane session_013NEJL3kdQhQRttX7boZUwM works in install.ps1); step cloud-bin-on-path (todo) is the same cloud install, so one lane can take both.",
+  "phase": "next",
+  "owner": "claude-settings",
+  "lane": "",
+  "status": "todo",
+  "order": 712,
+  "updatedAt": "2026-11-08T09:55:00-06:00"
+}
