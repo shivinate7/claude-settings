@@ -8216,6 +8216,26 @@ sh("env-child: deny, pnpm exec with no flag runs env, the control for the cases 
    "pnpm --env-file=" + ENV + " exec env", "deny", "env-file", cwd=NOGIT)
 sh("env-child: allow, pnpm exec with no flag runs vitest, the control for the cases above",
    "pnpm --env-file=" + ENV + " exec vitest", "allow", cwd=NOGIT)
+# A glued v in a short-flag cluster takes the next word as its volume, so /a:/b is not the child.
+sh("env-child: deny, docker -itv takes /a:/b as the volume, so env runs in img",
+   "docker run -itv /a:/b --env-file " + ENV + " img env", "deny", "env-file", cwd=NOGIT)
+sh("env-child: deny, docker -dv takes /a:/b as the volume, so env runs in img",
+   "docker run -dv /a:/b --env-file " + ENV + " img env", "deny", "env-file", cwd=NOGIT)
+# A flag that takes no value (--stream) is skipped alone, so python is the child and its -c prints os.environ.
+sh("env-child: deny, pnpm exec --stream takes no value, so python -c prints os.environ",
+   "pnpm --env-file=" + ENV + " exec --stream python -c \"import os; print(os.environ)\"",
+   "deny", "env-file", cwd=NOGIT)
+# An unlisted option ahead of -c must not hide env from the shell string.
+sh("env-child: deny, npm exec with an unlisted --foo before -c still runs env",
+   "npm --env-file=" + ENV + " exec --foo x -c \"env\"", "deny", "env-file", cwd=NOGIT)
+# uv -q and --verbose take no value, so vitest is the child and env is its test filter.
+sh("env-child: allow, uv -q takes no value, so vitest runs with the filter env",
+   "uv run --env-file " + ENV + " -q vitest env", "allow", cwd=NOGIT)
+sh("env-child: allow, uv --verbose takes no value, so vitest runs with the filter env",
+   "uv run --env-file " + ENV + " --verbose vitest env", "allow", cwd=NOGIT)
+# npm exec --yes takes no value, so jest -c env is jest's own option, not npm's shell string.
+sh("env-child: allow, npm exec --yes takes no value, so jest -c env is jest's option",
+   "npm --env-file=" + ENV + " exec --yes jest -c env", "allow", cwd=NOGIT)
 
 for wrapped in (
     "timeout 60 node --env-file=" + ENV + " app.js",
