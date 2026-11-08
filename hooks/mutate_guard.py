@@ -2656,14 +2656,25 @@ def add_profile_group(parser) -> None:
 
 
 def load_profile(args) -> dict:
-    """The profile `add_profile_group` chose. A file that cannot be read raises OSError, or ValueError when it is no JSON or no object."""
+    """The profile `add_profile_group` chose. A file that cannot be read raises OSError, or ValueError when it is no JSON, no
+    object, or holds a `code`, `code_not` or `tests` that is no regex: the replays route and select by them, so a bad one
+    reads as an unreadable profile here, not as a traceback later."""
     import json
+    import re
     if not args.profile_file:
         return REPLAY_PROFILES[args.profile]
     with open(args.profile_file, encoding="utf-8") as handle:
         profile = json.load(handle)
     if not isinstance(profile, dict):
         raise ValueError("the profile file %s does not hold a JSON object" % args.profile_file)
+    parts = profile["parts"] if isinstance(profile.get("parts"), dict) else {"the profile": profile}
+    for name, part in parts.items():
+        for key in ("code", "code_not", "tests"):
+            if isinstance(part, dict) and part.get(key) is not None:
+                try:
+                    re.compile(part[key])
+                except (re.error, TypeError) as error:
+                    raise ValueError("the profile file %s: %s of %s is no regex: %s" % (args.profile_file, key, name, error))
     return profile
 
 
@@ -2745,7 +2756,8 @@ def _known_defects_base_entries(repo: str, list_path: str, base: str):
 
 def known_defects_main(argv) -> int:
     """Replay the planted defects of a list (`.github/known-defects.json`) against a repository's HEAD. One line per defect:
-    `CAUGHT`, `MISS` or `UNKNOWN`. Exit 1 when any defect is MISS or UNKNOWN (decision ci-unknown-is-red). A missing list file
+    `CAUGHT`, `MISS` or `UNKNOWN`. Exit 1 when any defect is MISS or UNKNOWN (decision ci-unknown-is-red). A defect that
+    needs a failed install is not run and reads UNKNOWN (`run_known_defects` says which defects need which install). A missing list file
     prints one UNKNOWN line that names its path and exits 1; an empty list exits 0 (with `--base`, only when REF's list names
     no entry); a list or a profile that cannot be read exits 2.
     `--profile` or `--profile-file` is required: the checkout gets the profile's install, as `--changed` does.
