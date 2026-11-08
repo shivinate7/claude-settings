@@ -11,10 +11,14 @@ Run it from the repository root:
 Interface the code must match (hooks/guard_merge.py, beside brief_hit):
 - pick_ack_hit(tool, tool_input, transcript) -> (matched, reason) when the send asks, else None. `transcript` is
   the path of the JSONL transcript. The repo is the process cwd; each transcript record also names it in `cwd`.
-- Trigger A: the message has a line that starts `Departs from:`. Bold and bulleted labels count too, as
-  DEPARTS_LINE reads them.
-- Trigger B: the newest inbound `<cross-session-message from-session="<id>">` frame from the target session_id
-  carries a Departs from line, and this send is the first send to that target since that frame.
+- Trigger A: the message has a line that starts `Departs from:`, outside a code fence. Bold, bulleted, numbered and
+  `>`-quoted labels count too, as DEPARTS_LINE reads them.
+- Trigger B: the newest inbound peer frame from the target session_id carries a Departs from line, and this send is
+  the first send to that target since that frame. A frame is read in the real shape (a `user` record with no origin
+  key, whose string content opens `<cross-session-message from-session="<id>">`) or in the origin shape.
+- A send to session_id `@parent` goes to the parent_session_id that the own get_session record names (the reader is
+  hooks/own_session.py own_session_read). With no transcript path, or with a parent that cannot be resolved, trigger B
+  cannot be read: such a send passes, with one stderr line that starts `pick-names-rulings: `.
 - A trigger that fires passes when the message has a `Checked: <id>[, <id>...]` line that names an id
   question_form.candidate_ids(question_form.past_rulings(...)) returns: `decisions/<slug>` or the bare slug.
 - past_rulings runs only when a trigger fires.
@@ -24,6 +28,7 @@ Interface the code must match (hooks/guard_merge.py, beside brief_hit):
 A missing function fails each case by name (`missing function`), never by a crash.
 """
 import contextlib
+import io
 import json
 import os
 import subprocess
@@ -39,14 +44,20 @@ REPO = tcj.DECISIONS_REPO  # docs/decisions holds tcj.APPS_SLUG, the one real de
 REAL_ID = "decisions/" + tcj.APPS_SLUG
 MADE_UP_ID = "decisions/no-such-ruling-q7x"
 TOOL = "mcp__claude-code-remote__send_message"
+GET_SESSION = "mcp__claude-code-remote__get_session"
 SENDER = "session_PICKSELF01"  # this session
 TARGET = "session_PICKTGT01"  # the lane the send goes to
 OTHER = "session_PICKOTHER01"  # another lane
+PARENT = "session_PICKPARENT01"  # this session's parent: the target of a send to "@parent"
+FIXTURE_TIME = "2026-11-08T09:00:00.000Z"  # a fixed stamp: no case reads the clock
 PICK = ("Goal: keep the stamp check in the lint job.\n"
         "Problem (rule): the stamp runs after lint, so a red stamp hides the lint verdict.\n"
         "Based on (measured): the stamp ran 3 minutes after lint in the last 20 runs.\n" + tcj.DEPARTS_LINE)
 AGREED = "Agreed. Keep the stamp check in the lint job."
 PLAIN = "Status: PR #12 is merged; the lane is idle."
+FENCED = ("Status: the lane quotes the form of a pick and makes none.\n"
+          "```\n" + tcj.DEPARTS_LINE + "\n```\n"
+          "The lane is idle.")
 FAILED = []
 
 
@@ -65,13 +76,46 @@ def owner_said(text):
 
 
 def inbound(from_session, body):
-    """A peer's message as a transcript holds it: a meta user record with origin.kind peer, and the frame in its content."""
+    """A peer message in the origin shape: a meta user record with an origin key. The real transcripts hold
+    real_inbound's shape instead; this one stays for the cases that name it."""
     frame = ('<cross-session-message from="uds:fixture-pipe" from-session="%s" from-name="peer-lane" '
              'from-mode="bypass">%s</cross-session-message>' % (from_session, body))
     return {"type": "user", "cwd": REPO, "isSidechain": False, "isMeta": True,
             "origin": {"kind": "peer", "from": "uds:fixture-pipe", "fromSession": from_session,
                        "fromMode": "bypass", "name": "peer-lane", "body": body},
             "message": {"role": "user", "content": "Another Claude session sent a message:\n" + frame}}
+
+
+def real_inbound(from_session, body):
+    """A peer message as a real transcript holds it: a queue-operation enqueue record, then a `user` record with
+    isMeta true and no origin key, whose string content is the frame. The frame opens
+    `<cross-session-message from-session="<id>">` and closes `</cross-session-message>`. The ids and text are synthetic."""
+    frame = '<cross-session-message from-session="%s">%s</cross-session-message>' % (from_session, body)
+    enqueue = {"type": "queue-operation", "operation": "enqueue", "timestamp": FIXTURE_TIME,
+               "sessionId": SENDER, "content": frame}
+    user = {"parentUuid": None, "isSidechain": False, "type": "user", "message": {"role": "user", "content": frame},
+            "isMeta": True, "uuid": "fixture-peer-frame", "timestamp": FIXTURE_TIME, "promptSource": "system",
+            "turnOrigin": "system", "entrypoint": "remote", "cwd": REPO, "sessionId": SENDER}
+    return [enqueue, user]
+
+
+def real_frame_shape(record, from_session):
+    """True when the record is the real shape of a peer message from `from_session`: no origin key, and string content
+    that opens with that session's frame tag. A scope check, so a red verdict is not a bad fixture."""
+    content = (record.get("message") or {}).get("content")
+    return ("origin" not in record and isinstance(content, str)
+            and content.startswith('<cross-session-message from-session="%s">' % from_session))
+
+
+def own_session_record(parent):
+    """A get_session call and its result for this session. The result is the record's JSON: a ccr block that names
+    its parent_session_id, as get_session returns it."""
+    tool_id = "fixture-get-session"
+    call = {"type": "tool_use", "id": tool_id, "name": GET_SESSION, "input": {}}
+    body = json.dumps({"ccr": {"id": SENDER, "title": "a lane session", "tags": [], "parent_session_id": parent}})
+    done = {"type": "tool_result", "tool_use_id": tool_id, "content": [{"type": "text", "text": body}]}
+    return [{"type": "assistant", "cwd": REPO, "message": {"role": "assistant", "content": [call]}},
+            {"type": "user", "cwd": REPO, "message": {"role": "user", "content": [done]}}]
 
 
 def sent(target, message, tool_id):
@@ -123,6 +167,14 @@ def send(fn, message, path, target=TARGET):
         return fn(TOOL, {"session_id": target, "message": message}, path)
 
 
+def send_capturing_stderr(fn, message, path, target=TARGET):
+    """send(), with the stderr lines the check printed, blank lines dropped."""
+    err = io.StringIO()
+    with contextlib.redirect_stderr(err):
+        got = send(fn, message, path, target)
+    return got, [line for line in err.getvalue().splitlines() if line.strip()]
+
+
 def asked(got):
     return isinstance(got, tuple) and len(got) == 2 and bool(got[1])
 
@@ -147,6 +199,28 @@ def case_inbound_pick_without_checked_asks():
     check(case, asked(got), "no ask: got %r" % (got,))
 
 
+def case_real_frame_inbound_pick_without_checked_asks():
+    case = "B: a reply to a pick in the real frame shape, with no Checked line, asks"
+    fn = pick_fn(case)
+    if fn is None:
+        return
+    frame = real_inbound(TARGET, PICK)
+    check(case + ": scope: the fixture frame is the real shape from the target", real_frame_shape(frame[1], TARGET),
+          "not the real shape")
+    got = send(fn, AGREED, transcript("b-real-pick", [owner_said("Run the lint on the batch."), frame]))
+    check(case, asked(got), "no ask: got %r" % (got,))
+
+
+def case_real_frame_inbound_pick_with_real_checked_passes():
+    case = "B: a reply to a pick in the real frame shape, Checked naming a real decision, passes"
+    fn = pick_fn(case)
+    if fn is None:
+        return
+    path = transcript("b-real-checked", [owner_said("Run the lint on the batch."), real_inbound(TARGET, PICK)])
+    got = send(fn, AGREED + "\nChecked: " + REAL_ID, path)
+    check(case, got is None, "asked: got %r" % (got,))
+
+
 def case_departs_pick_with_real_checked_passes():
     case = "A: a departs pick whose Checked line names a real decision passes"
     fn = pick_fn(case)
@@ -163,6 +237,91 @@ def case_inbound_pick_with_real_checked_passes():
         return
     got = send(fn, AGREED + "\nChecked: " + REAL_ID, transcript("b-real", inbound(TARGET, PICK)))
     check(case, got is None, "asked: got %r" % (got,))
+
+
+def case_parent_send_asks_on_parent_departs_frame():
+    case = "@parent: a reply to the parent asks when the parent's newest frame has Departs and no Checked line"
+    fn = pick_fn(case)
+    if fn is None:
+        return
+    import own_session  # the one reader of a session's own get_session record (hooks/own_session.py)
+    path = transcript("parent-ask", [owner_said("Run the lint on the batch."), own_session_record(PARENT),
+                                     real_inbound(PARENT, PICK)])
+    named = own_session.own_session_read(path, SENDER)[2]
+    check(case + ": scope: the own get_session record names the parent", named == PARENT,
+          "parent is %r" % (named,))
+    got = send(fn, AGREED, path, target="@parent")
+    check(case, asked(got), "no ask: got %r" % (got,))
+
+
+def case_parent_send_without_parent_id_passes_with_stderr():
+    case = "@parent: with no parent id resolvable, a reply to @parent passes, with one stderr line"
+    fn = pick_fn(case)
+    if fn is None:
+        return
+    import own_session  # the one reader of a session's own get_session record (hooks/own_session.py)
+    path = transcript("parent-none", [owner_said("Run the lint on the batch."), real_inbound(PARENT, PICK)])
+    check(case + ": scope: no get_session record names a parent", own_session.own_session_read(path, SENDER)[2] is None,
+          "a parent resolved")
+    got, err = send_capturing_stderr(fn, AGREED, path, target="@parent")
+    check(case, got is None, "asked: got %r" % (got,))
+    check(case + ": one stderr line, naming the rule", len(err) == 1 and err[0].startswith("pick-names-rulings: "),
+          "stderr lines: %r" % (err[:3],))
+
+
+def case_quoted_departs_line_asks():
+    case = "A: a `> Departs from:` quoted line is a pick, and asks with no Checked line"
+    fn = pick_fn(case)
+    if fn is None:
+        return
+    quoted = PICK.replace(tcj.DEPARTS_LINE, "> " + tcj.DEPARTS_LINE)
+    got = send(fn, quoted, transcript("a-quoted", owner_said("Run the lint on the batch.")))
+    check(case, asked(got), "no ask: got %r" % (got,))
+
+
+def case_numbered_departs_line_asks():
+    case = "A: a `1. Departs from:` numbered line is a pick, and asks with no Checked line"
+    fn = pick_fn(case)
+    if fn is None:
+        return
+    numbered = PICK.replace(tcj.DEPARTS_LINE, "1. " + tcj.DEPARTS_LINE)
+    got = send(fn, numbered, transcript("a-numbered", owner_said("Run the lint on the batch.")))
+    check(case, asked(got), "no ask: got %r" % (got,))
+
+
+def case_fenced_departs_line_passes():
+    case = "A: a Departs from line inside a code fence does not fire trigger A, and the send passes"
+    fn = pick_fn(case)
+    if fn is None:
+        return
+    import question_form  # the one past-rulings search (hooks/question_form.py)
+    check(case + ": scope: the Departs line sits between the fence marks",
+          FENCED.index("```") < FENCED.index(tcj.DEPARTS_LINE) < FENCED.rindex("```"), "the line is outside the fence")
+    path = transcript("a-fenced", owner_said("Run the lint on the batch."))
+    with mock.patch.object(question_form, "past_rulings", return_value=([], [])) as past:
+        got = send(fn, FENCED, path)
+    check(case, got is None, "asked: got %r" % (got,))
+    check(case + ": past_rulings is not called", past.call_count == 0, "called %d time(s)" % past.call_count)
+
+
+def case_departs_line_after_fence_asks():
+    case = "control: a Departs from line after a closed code fence still asks"
+    fn = pick_fn(case)
+    if fn is None:
+        return
+    message = "```\n" + tcj.DEPARTS_LINE + "\n```\n" + PICK
+    got = send(fn, message, transcript("a-after-fence", owner_said("Run the lint on the batch.")))
+    check(case, asked(got), "no ask: got %r" % (got,))
+
+
+def case_lone_backtick_in_text_does_not_hide_departs_line():
+    case = "control: a lone backtick in text does not hide a Departs from line, which asks"
+    fn = pick_fn(case)
+    if fn is None:
+        return
+    message = "Type a lone ` in the form; it is text, not a fence.\n" + PICK
+    got = send(fn, message, transcript("a-backtick", owner_said("Run the lint on the batch.")))
+    check(case, asked(got), "no ask: got %r" % (got,))
 
 
 def case_checked_made_up_decision_asks():
@@ -242,6 +401,17 @@ def case_unreadable_transcript_on_trigger_b_passes():
     check(case, got is None, "asked: got %r" % (got,))
 
 
+def case_no_transcript_path_passes_with_stderr_line():
+    case = "a send with no transcript path passes, with one stderr line"
+    fn = pick_fn(case)
+    if fn is None:
+        return
+    got, err = send_capturing_stderr(fn, PLAIN, "")
+    check(case, got is None, "asked: got %r" % (got,))
+    check(case + ": one stderr line, naming the rule", len(err) == 1 and err[0].startswith("pick-names-rulings: "),
+          "stderr lines: %r" % (err[:3],))
+
+
 def case_past_rulings_raising_after_trigger_a_asks():
     # The search that would name the ids fails after trigger A fired: the pick has no verified Checked line, so it asks.
     case = "A: past_rulings raising after trigger A fires asks"
@@ -297,15 +467,27 @@ def decision_of(proc):
         return "unparsable", out[:200]
 
 
-def case_guard_asks_on_inbound_pick():
-    case = "guard.py on trigger B prints an ask"
-    proc = guard_run("b-ask", AGREED, inbound(TARGET, PICK))
+def guard_asks(case, proc):
+    """The checks a guard run that asks must pass: exit 0, an ask, and a reason that names the rule."""
     check(case + ": exits 0", proc.returncode == 0, proc.stderr[-200:])
     decision, reason = decision_of(proc)
     check(case + ": permissionDecision is ask", decision == "ask", "decision %r" % (decision,))
     if decision == "ask":
         check(case + ": the reason names rule pick-names-rulings", reason.startswith("pick-names-rulings: "),
               reason[:120])
+
+
+def case_guard_asks_on_inbound_pick():
+    case = "guard.py on trigger B prints an ask"
+    guard_asks(case, guard_run("b-ask", AGREED, inbound(TARGET, PICK)))
+
+
+def case_guard_asks_on_real_frame_inbound_pick():
+    case = "guard.py on trigger B in the real frame shape prints an ask"
+    frame = real_inbound(TARGET, PICK)
+    check(case + ": scope: the fixture frame is the real shape from the target", real_frame_shape(frame[1], TARGET),
+          "not the real shape")
+    guard_asks(case, guard_run("b-real-ask", AGREED, frame))
 
 
 def case_control_guard_allows_plain_send():
@@ -318,13 +500,19 @@ def case_control_guard_allows_plain_send():
 
 
 CASES = (case_departs_pick_without_checked_asks, case_inbound_pick_without_checked_asks,
+         case_real_frame_inbound_pick_without_checked_asks, case_real_frame_inbound_pick_with_real_checked_passes,
          case_departs_pick_with_real_checked_passes, case_inbound_pick_with_real_checked_passes,
+         case_parent_send_asks_on_parent_departs_frame, case_parent_send_without_parent_id_passes_with_stderr,
+         case_quoted_departs_line_asks, case_numbered_departs_line_asks,
+         case_fenced_departs_line_passes, case_departs_line_after_fence_asks,
+         case_lone_backtick_in_text_does_not_hide_departs_line,
          case_checked_made_up_decision_asks, case_checked_bare_slug_passes,
          case_no_pick_passes_without_past_rulings, case_inbound_pick_from_other_session_passes,
          case_second_send_after_one_reply_passes, case_newest_frame_decides_passes,
-         case_unreadable_transcript_on_trigger_b_passes, case_past_rulings_raising_after_trigger_a_asks,
-         case_bold_departs_label_is_a_pick_asks,
-         case_guard_asks_on_inbound_pick, case_control_guard_allows_plain_send)
+         case_unreadable_transcript_on_trigger_b_passes, case_no_transcript_path_passes_with_stderr_line,
+         case_past_rulings_raising_after_trigger_a_asks, case_bold_departs_label_is_a_pick_asks,
+         case_guard_asks_on_inbound_pick, case_guard_asks_on_real_frame_inbound_pick,
+         case_control_guard_allows_plain_send)
 
 
 def main():
