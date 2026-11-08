@@ -2469,15 +2469,24 @@ def ci_job_run(wt, *args):
 
 def unshallow_for_lint(root):
     """Make `root` a full clone before the lane lint reads history: the silent-undo check reads a shallow clone as unknown (decision
-    lanes-run-no-full-ci-job). One `git fetch --unshallow origin` on a shallow clone, none on a full one. A failed fetch raises Stop,
-    not Liftable: the lint is unknown, and --lint-unknown-ok must not lift an unknown that no step named."""
-    c, out = git(root, "rev-parse", "--is-shallow-repository")
-    if c or out != "true":
+    lanes-run-no-full-ci-job). One `git fetch --unshallow origin` on a shallow clone, none on a full one. Any other outcome raises Stop,
+    not Liftable: a failed fetch, a clone still shallow after it, a probe that answers neither true nor false. The lint is unknown,
+    and --lint-unknown-ok must not lift an unknown that no step named."""
+    def stop(why):
+        raise Stop(f"the lint is unknown, not a pass: {why}\n"
+                   f"Run `git fetch --unshallow origin` where origin is reachable, then run `merge --lane-lint` again. {LANE_LINT_CITE}")
+    def shallow():  # stdout only: a stderr line (GIT_TRACE) must not change the answer; stderr passes through
+        c, out = sh(["git", "-C", root, "rev-parse", "--is-shallow-repository"], live_stderr=True)
+        if c or out not in ("true", "false"):
+            stop(f"git rev-parse --is-shallow-repository answered {out!r} (exit {c}), so this clone cannot be called full.")
+        return out == "true"
+    if not shallow():
         return
     c, out = git(root, "fetch", "--unshallow", "origin")
     if c:
-        raise Stop(f"the lint is unknown, not a pass: this clone is shallow, so the lint cannot read the history, and `git fetch --unshallow origin` failed: {out}\n"
-                   f"Run `git fetch --unshallow origin` where origin is reachable, then run `merge --lane-lint` again. {LANE_LINT_CITE}")
+        stop(f"this clone is shallow, so the lint cannot read the history, and `git fetch --unshallow origin` failed: {out}")
+    if shallow():
+        stop("this clone is still shallow after `git fetch --unshallow origin`, so the lint cannot read the history.")
 
 def lane_lint(root, target, host, base="", unknown_ok=""):
     """The lint a lane passes before its head goes to the batch runner (decision lanes-run-no-full-ci-job): `ci-job checks --lint --base origin/<base>`
