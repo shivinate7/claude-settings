@@ -388,6 +388,9 @@ jobs:
       - name: Hook stub check
         run: python3 lint/check_hook_stubs.py
 
+      - name: Hook dup-name check
+        run: python3 lint/check_hook_dup_names.py
+
       - name: Record slug length
         run: python3 lint/check_record_slugs.py
 
