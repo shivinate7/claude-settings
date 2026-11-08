@@ -10,6 +10,7 @@ Two counts are held shut:
 
 - A crash is not a kill. A mutant is killed only when a suite prints a `FAIL` line. A throw, an import error and a timeout leave no `FAIL` line, or end at the timeout, so they count as crashed.
 - A suite that is not green on the clean source is not a killer. Each suite first runs on the clean source after the same parse and unparse that every mutant carries. A suite that is red there is listed as unusable for that file. A file with no usable suite, a parse error or a missing target reads UNKNOWN, never a rate.
+- A usable suite that stays green on a wholly broken copy of the file never loaded it: the report lists it as `unloaded`. A file whose every usable suite is unloaded reads UNKNOWN, never a rate.
 
 `--report` makes its mutants with `ast_mutants` only. The JS engine serves the replay below. For a JavaScript or TypeScript file the engine makes the same kinds of mutant, from `hooks/mutate_js.mjs`, run by `js_mutants` in `hooks/mutate_shared.py`. The engine parses with the TypeScript compiler API, loaded only through the plain-english-map loader (`lazy-typescript.mjs`, the one home of that import). It reads sites from the parse tree. A string, template text, a comment or JSX text that holds `a === b` gets no mutant. A `true` or `false` in a type position is a literal type and gets none. Each mutant is one text edit on the original source, and nothing else is reprinted. `js_mutants` samples as `ast_mutants` does. `classify_node_tap` reads a `node --test` run as `classify_run` reads a Python suite: only an assertion in a `not ok` block is a kill, and any other red is a crash.
 
@@ -74,9 +75,7 @@ Measured 2026-11-02. Per repo: its last 50 merged pull requests (PRs). Five muta
 - banchi had no per-file `select` in these scores. A survivor may sit in code that no changed suite reaches.
 - banchi `t7/cli_identify.py` was not green on the clean source (assert) in PRs 898, 923, 926, 930 and 956. Cause unread.
 
-Open items, each a debt:
-
-- `replay-big-file-unknown`: a file that does not parse is skipped, and its row still gives a rate.
+A file that does not parse is skipped, and its row reads UNKNOWN with no rate, never OK.
 
 ## The CI report
 
