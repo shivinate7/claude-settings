@@ -976,7 +976,7 @@ class CheckCase(Fixture):
 
 
 def word_of(result):
-    """The word of a label_word result: field 0 of its (word, ended_in_colon, upper_env) tuple. A bare string is the
+    """The word of a label_word result: field 0 of its (word, colon, upper_env) tuple. A bare string is the
     word itself, so a word row fails on its own word, and the triple test names the shape. Pure."""
     return result[0] if isinstance(result, tuple) else result
 
@@ -1019,8 +1019,8 @@ class LabelForms(unittest.TestCase):
                                  "label_word(%r) must carry upper_env %r as its third field" % (line, upper_env))
 
     def test_label_word_returns_word_colon_and_upper_env(self):
-        """label_word returns one triple (word, ended_in_colon, upper_env). The upper-case NAME= exemption reads the
-        same stripped token as the word, so one parse serves both."""
+        """label_word returns one triple (word, colon, upper_env). colon is True when a colon refuses this label.
+        The upper-case NAME= exemption reads the same stripped token as the word, so one parse serves both."""
         fn = getattr(self.check, "label_word", None)
         self.assertIsNotNone(fn, "label_word absent: the red-run label has no one normaliser yet")
         for line, triple in (("Red-run:", ("", False, False)),
@@ -1032,14 +1032,15 @@ class LabelForms(unittest.TestCase):
             with self.subTest(line=line):
                 got = fn(line)
                 self.assertIsInstance(got, tuple,
-                                      "label_word must return a (word, ended_in_colon, upper_env) triple, not %r: %s"
+                                      "label_word must return a (word, colon, upper_env) triple, not %r: %s"
                                       % (got, line))
                 self.assertEqual(got, triple, "label_word(%r) must be %r" % (line, triple))
 
     def test_refusals_read_the_label_only_through_label_word(self):
         """The label refusals take their label from label_word and from no other parse. A fresh module takes the stub, so no
         other case sees it. The real verdicts come first. Then label_word is stubbed to read a benign word for a mutant
-        line, which must pass, and a mutant word for a benign line, which must be refused."""
+        line, which must pass, and a mutant word for a benign line, which must be refused. Last, it reads a colon, then
+        the none word, for a benign line, which must be refused: refused_word reads both from label_word."""
         check = load_module("check_red_run_label_stub", MODULE)
         benign = filled(["Red-run: python3 lint/test_x.py -> 1 failed on SHA"], LABEL_SHA)[0]
         mutant = filled(["Red-run: mutant A (...) -> 1 failed on SHA"], LABEL_SHA)[0]
@@ -1051,6 +1052,12 @@ class LabelForms(unittest.TestCase):
         check.label_word = lambda line: ("mutant", False, False)
         self.assertFalse(check.valid_line(benign),
                          "label_word reads a mutant word, yet the benign line passes: a refusal parses the label itself")
+        check.label_word = lambda line: ("python3", True, False)
+        self.assertFalse(check.valid_line(benign),
+                         "label_word reads a colon, yet the benign line passes: a refusal parses the label itself")
+        check.label_word = lambda line: ("none", False, False)
+        self.assertFalse(check.valid_line(benign),
+                         "label_word reads none, yet the benign line passes: a refusal parses the label itself")
 
 
 class LabelFormHints(Fixture):
