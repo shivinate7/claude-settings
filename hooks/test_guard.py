@@ -9525,6 +9525,8 @@ role_refuse("a user message that quotes cs-build:batch-runner is ignored", MERGE
 MERGE_CALL_FORMS = [(prefix, form, "") for prefix in ("", "cd somewhere && ")
                     for form in (MERGE_SHIM, "bin/merge", "python3 merge/merge.py", "python3 merge/launch.py")]
 MERGE_CALL_FORMS += [("cd merge && ", "python3 merge.py", ""), ("cd merge && ", "python3 launch.py", "")]
+# After `cd merge`, `./merge.py` and `./launch.py` run the same two tools as the python forms above.
+MERGE_CALL_FORMS += [("cd merge && ", "./merge.py", ""), ("cd merge && ", "./launch.py", "")]
 MERGE_CALL_FORMS += [(prefix, form, "") for prefix in ("", "cd somewhere && ")
                      for form in ("python3 -X dev merge/merge.py", "python3 -W ignore merge/merge.py",
                                   "py merge/merge.py", "py -3 merge/merge.py")]
@@ -9785,6 +9787,9 @@ for _other in ("scripts/merge.py", "mymerge/merge.py", "merge/other.py"):
                _other + " --role batch-runner", role_path("lane"))
     roots_allow(_other + " --reviewed is not the merge tool, so a runner with two repo tags allows it",
                 _other + " --reviewed", role_path("roots-runner"))
+# The control for the `./` forms: a merge.py in `scripts` is no merge tool after `cd scripts`, so the same runner allows it.
+roots_allow("cd scripts && ./merge.py --reviewed is not the merge tool, so a runner with two repo tags allows it",
+            "cd scripts && ./merge.py --reviewed", role_path("roots-runner"))
 # The shell wrappers inner_commands unwraps, for a bare --reviewed. A runner with two repo tags is refused in each, with the
 # tags; a runner with one repo tag allows in each. Each one pins the reader, so a change that drops a wrapper shows.
 for _wrap_label, _wrap_cmd in (("eval", "eval 'merge --reviewed'"),
@@ -14038,6 +14043,51 @@ LOG_CHECKS_EXTRA.append(("merge: gh_call_of reads the pr verb past a --repo=<rep
                          gh_root_repo_equals_check))
 LOG_CHECKS_EXTRA.append(("merge: gh_call_of reads the pr verb past a spaced --repo <repo> root flag",
                          gh_root_repo_spaced_check))
+
+
+# ---- merge: inner_commands keeps the script type of each text it returns. A text that holds a heredoc header
+# (`<<`) goes through strip_heredoc_bodies, which rebuilds it as a plain str, so a reader that judges by the tag
+# reads that text with the wrong rules. The checks load the guard first, then read the tags from guard_core it loaded.
+def _inner_script_type_check(command, tag):
+    """True when each text inner_commands returns for `command` is an instance of the guard_core tag `tag`."""
+    guard = _load_guard_module()
+    core = sys.modules["guard_core"]
+    kind = getattr(core, tag, None)
+    if kind is None:
+        return False, "guard_core has no %s tag" % tag
+    guard.POWERSHELL_CALL[0] = False
+    try:
+        texts = core.inner_commands(core.segment_tokens(command))
+    finally:
+        guard.POWERSHELL_CALL[0] = False
+    if not texts:
+        return False, "inner_commands reads no text from %r" % command
+    for text in texts:
+        if not isinstance(text, kind):
+            return False, "inner_commands returned a %s for %r, want %s" % (type(text).__name__, command, tag)
+    return True, "inner_commands keeps %s on each text from %r" % (tag, command)
+
+
+def inner_posix_heredoc_check():
+    return _inner_script_type_check("bash -c 'echo 1<<3; true'", "PosixScript")
+
+
+def inner_powershell_heredoc_check():
+    return _inner_script_type_check("pwsh -c 'echo 1<<3; Write-Host 2'", "PowerShellScript")
+
+
+def inner_posix_plain_control_check():
+    """The control: the same wrapper with no `<<` keeps its tag, so a red above is the heredoc path alone."""
+    return _inner_script_type_check("bash -c 'echo 1; true'", "PosixScript")
+
+
+FIXTURELESS_CHECKS.update((inner_posix_heredoc_check, inner_powershell_heredoc_check, inner_posix_plain_control_check))
+LOG_CHECKS_EXTRA.append(("merge: inner_commands keeps PosixScript on a bash -c text that holds <<",
+                         inner_posix_heredoc_check))
+LOG_CHECKS_EXTRA.append(("merge: inner_commands keeps PowerShellScript on a pwsh -c text that holds <<",
+                         inner_powershell_heredoc_check))
+LOG_CHECKS_EXTRA.append(("merge: inner_commands keeps PosixScript on a bash -c text with no <<, the control",
+                         inner_posix_plain_control_check))
 
 # ---- lane-closes-after-records: the two checks that are log checks, not cases. The override is a story over
 # several calls on one clock (see the owner-override family), and the matcher reads settings.json, as the
