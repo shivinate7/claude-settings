@@ -978,6 +978,9 @@ class CostTests(StaleCase):
         self.assertIn("CLAUDE.md", changed)
         rc, out, subs = self.run_traced(rng)
         self.assertIn(rc, (0, 1), out)  # the verdict is not the subject here; the starts are
+        # An uncaught exception also exits 1, so the verdict line must print and no traceback may.
+        self.assertRegex(out, r"stale-cites: (PASS|FAIL)", out)
+        self.assertNotIn("Traceback", out, out)
         self.assertEqual(subs.count("ls-tree"), 1, "the tree is listed once per reader, not once per range: %s" % subs)
         self.assertLessEqual(len(subs), 5, subs)
 
