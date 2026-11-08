@@ -627,6 +627,17 @@ def agent_pin(role):
     return ""
 
 
+def _closed_by_notice(text):
+    """The agent ids a completion notice in `text` closes: stall_watch's parser, the one home.
+    It loads on first use, and a missing module closes nothing, so a spawn stays running."""
+    sys.path.insert(0, os.path.join(HERE, "..", "hooks"))
+    try:
+        from stall_watch import closed_by_notice
+    except ImportError:
+        return []
+    return closed_by_notice(text)
+
+
 class Spawned(dict):
     """spawn_models' map of role to model families, with `finished`: the roles that have a finished spawn."""
     finished = frozenset()
@@ -642,15 +653,22 @@ def spawn_models(records):
     A running spawn has no result yet, or only a background-launch result. It joins the map
     but not `finished`.
     """
-    failed, answered = set(), set()  # a denied or errored spawn ran no agent, so it counts for nothing
+    failed, answered, agent_of, closed = set(), set(), {}, set()  # a denied or errored spawn counts for nothing
     for rec in records:
         launch = rec.get("toolUseResult")
         launched = isinstance(launch, dict) and launch.get("isAsync") is True and launch.get("status") == "async_launched"
         for b in tool_results(rec):
             if b.get("is_error"):
                 failed.add(b.get("tool_use_id"))
-            elif not launched:
+            elif launched:
+                agent_of[b.get("tool_use_id")] = launch.get("agentId")
+            else:
                 answered.add(b.get("tool_use_id"))
+        att = rec.get("attachment")  # a completion notice that arrives as a queued command
+        notice = att.get("prompt") if rec.get("type") == "attachment" and isinstance(att, dict) else None
+        if isinstance(notice, str):
+            closed.update(_closed_by_notice(notice))
+    answered.update(t for t, agent in agent_of.items() if agent in closed)
     found, finished = Spawned(), set()
     for rec in records:
         for b in tool_uses(rec):
@@ -676,7 +694,9 @@ def done_models_problem(text, spawned):
     done = " ".join(done_items(block_text(text, keep_indent=True)))
     named = {(r.lower(), m.lower()) for roles, m in ROLE_MODEL_RE.findall(done)
              for r in ROLE_RE.findall(roles)}
-    missing = sorted(r for r in spawned.finished if not any(nr == r for nr, _ in named))
+    # A running role Done leaves out is not yet claimed; one Done names must carry a model.
+    required = spawned.finished | {r for r in spawned if re.search(r"\b" + r + r"\b", done, re.I)}
+    missing = sorted(r for r in required if not any(nr == r for nr, _ in named))
     if missing:
         return "no model named for " + ", ".join(missing)
     for role, model in sorted(named):
