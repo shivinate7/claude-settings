@@ -28,6 +28,7 @@ sys.path.insert(0, HERE)
 import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py)
 import _test_temp  # noqa: E402  test-temp-standard: every temp path comes from this run's folder
 from workflow_steps import run_body, step_blocks, step_env, step_with  # noqa: E402  the one home of the step parser
+from _test_event_body import EVENT_BODY_SCRIPT, NO_BODY  # noqa: E402  the one home of the test event-body reader
 RUN_FOLDER = _test_temp.run_folder()
 CHECKOUT = os.path.abspath(os.path.join(HERE, ".."))
 CI_JOB = os.path.join(HERE, "..", "bin", "ci-job")
@@ -495,27 +496,12 @@ class GithubBaseRef(Job):
         self.assertEqual((verdicts, seen), (["PASS"], "main"), out)
 
     SEEN_PR_BODY = "printf '%s' \"${PR_BODY-<unset>}\" > seen.txt"
-    EVENT_BODY_SCRIPT = (  # the reader a CI step runs for the body: its event file, as CI gives it (merge/test_merge.py EVENT_BODY reads it too)
-        "import json, os\n"
-        "path = os.environ.get('GITHUB_EVENT_PATH')\n"
-        "if path is None:\n"
-        "    text = '<no GITHUB_EVENT_PATH>'\n"
-        "else:\n"
-        "    try:\n"
-        "        with open(path, encoding='utf-8') as f:\n"
-        "            pull = json.load(f).get('pull_request')\n"
-        "    except (OSError, ValueError, AttributeError):\n"
-        "        pull = None\n"
-        "    body = pull.get('body') if isinstance(pull, dict) else None\n"
-        "    text = body if isinstance(body, str) else '<no body in the event file>'\n"
-        "with open('seen.txt', 'w', encoding='utf-8', newline='') as f:\n"
-        "    f.write(text)\n")
 
     def event_body_step(self):
         """A step that writes the body it reads from its event file to seen.txt. The reader is a script in the run's lint/ folder."""
         os.makedirs(os.path.join(self.root, "lint"), exist_ok=True)
         with open(os.path.join(self.root, "lint", "seen_event_body.py"), "w", encoding="utf-8") as f:
-            f.write(self.EVENT_BODY_SCRIPT)
+            f.write(EVENT_BODY_SCRIPT)
         return step("seen", "python3 lint/seen_event_body.py")
 
     def test_a_step_that_reads_the_pull_request_body_from_its_event_file_gets_the_body_ci_job_is_given(self):
@@ -543,13 +529,13 @@ class GithubBaseRef(Job):
         self.assertFalse(os.path.exists(path), "the premise: the body file is missing")
         verdicts, seen, out = self.seen_after(self.event_body_step(), args=("--base", "origin/main"),
                                               env={"CI_JOB_PR_BODY_FILE": path})
-        self.assertEqual((verdicts, seen), (["PASS"], "<no body in the event file>"), out)
+        self.assertEqual((verdicts, seen), (["PASS"], NO_BODY), out)
 
     def test_a_body_file_that_is_not_utf_8_gives_the_body_step_the_sentinel_not_an_empty_body(self):
         """A body file of bytes that are not UTF-8 is unreadable, so the step reads the sentinel, never ""."""
         verdicts, seen, out = self.seen_after(self.event_body_step(), args=("--base", "origin/main"),
                                               env={"CI_JOB_PR_BODY_FILE": self.body_file(b"\xff")})
-        self.assertEqual((verdicts, seen), (["PASS"], "<no body in the event file>"), out)
+        self.assertEqual((verdicts, seen), (["PASS"], NO_BODY), out)
 
     def test_a_step_env_that_holds_the_pull_request_body_reads_unknown_even_with_a_body_file(self):
         """The body is data, never an expression: a step env that holds `${{ github.event.pull_request.body }}` reads unknown,
