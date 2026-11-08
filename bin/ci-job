@@ -5,7 +5,7 @@
 # --lint runs only the job's fast lint and check steps, chosen from the step commands in the workflow, never a
 # list: a step whose whole run: is `python3 lint/<script>.py ...`, `python3 actions/<script>.py ...`,
 # `bin/ste-changed ...` or a pinned `pipx run <tool>==<version> ...` (the pin read from the workflow), one command
-# per line, no `&&`, `|` or `;`. A CI step with a `python3 hooks/test_<name>.py` or `python3 merge/test_<name>.py` line, with
+# per line, no `&&`, `|` or `;`. A CI step with a `python3 hooks|lint|merge/test_<name>.py` line, with
 # arguments or other lines around it, runs whole, as CI runs it, only when the one selector, `hooks/mutate_guard.py --lint-suites <base>`,
 # picks that suite for a file of the diff <base>...HEAD. The selector follows imports: a suite is picked for a change to any
 # module that a module it loads imports. A picked suite that fails is FAIL. A line before the suite that fails, so the
@@ -252,12 +252,13 @@ def known_action(step):
 
 
 def is_lint(step):
-    """True when the step's whole run: is fast lint/check commands: each line one lint command, no mutation script.
+    """True when the step's whole run: is fast lint/check commands: each line one lint command, no mutation script and no suite
+    line (a `python3 lint/test_<name>.py` fixture suite is a suite: it runs only when the selector picks it).
     The ste-lint, code-check and zizmor actions count: plan() runs each one's own command for it."""
     if known_action(step):
         return True
     lines = run_lines(step)
-    return bool(lines) and all(LINT_CMD.fullmatch(ln) and "mutate" not in ln.split()[
+    return bool(lines) and all(LINT_CMD.fullmatch(ln) and not SUITE_LINE.fullmatch(ln) and "mutate" not in ln.split()[
         1 if ln.startswith("python3") else 2 if ln.startswith("pipx") else 0] for ln in lines)
 
 
@@ -493,7 +494,9 @@ def main(argv):
             else:
                 print("%-15s %s: --lint runs only lint and install steps; %s" % (
                     "not run", name, "this is an action (uses: %s)" % uses(step) if uses(step) else
-                    "this is a suite the diff does not pick%s" % ("" if base else " (no base to read a diff)") if suites[n - 1]
+                    "this is a %ssuite the diff does not pick%s" % (
+                        "fixture suite (lane lint runs a lint/test_ suite only when picked): " if any(p.startswith("lint/") for p in suites[n - 1]) else "",
+                        "" if base else " (no base to read a diff)") if suites[n - 1]
                     else "its run: is neither a lint nor an install command"))
             continue
         if kind[n - 1] == "install" and (blocker or not any(runs[n:])):

@@ -8,7 +8,7 @@ import re
 
 # The Linux jobs that hold the suites of the one old `checks` job, split for wall time. merge/merge.py reads suites from each.
 CHECKS_SUITE_JOBS = ("checks", "checks-merge-install")
-SUITE_LINE = re.compile(r"python3 ((?:hooks|merge)/test_[\w.-]+\.py)(?: [^|&;`<>]*)?")  # a CI step's suite line, arguments allowed
+SUITE_LINE = re.compile(r"python3 ((?:hooks|lint|merge)/test_[\w.-]+\.py)(?: [^|&;`<>]*)?")  # a CI step's suite line, arguments allowed
 # The unknown text bin/ci-job gives a step whose env NODE_PATH names an install that a skipped uses: step makes, and the reader of it
 # that merge --lane-lint uses to print one `not run` line for it, not unknown.
 MISSING_INSTALL = ("env NODE_PATH names {entry}, which is not installed here: the step that installs it (a uses: action) is not run locally, "

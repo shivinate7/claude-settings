@@ -72,6 +72,7 @@ Shell tools (Bash, PowerShell), in judge_shell order:
   detached-launch      deny. A command that starts a process and detaches it from the session.
   wsl-allow-list       deny. A `wsl` call outside the fixed list of test commands. (wsl-allow-list)
   live-stream, waiter  deny. A command that follows a stream with no end, or polls with sleep.
+  lane-lint-foreground deny. A foreground `merge --lane-lint` call; it is cut at the cloud's command limit with no verdict.
   background-end       deny. A background command with no end note. (background-needs-end-note)
   playwright-browsers-path, playwright-install
                        deny. (playwright-browsers-path, playwright-install-once)
@@ -404,8 +405,8 @@ while True:
         _loading = "guard_stream"
         from guard_stream import (
             BACKGROUND_END_REASON, LIVE_STREAM_REASON, LN_DESCENDS_REASON,
-            NARRATED_TAIL_REASON, PATTERN_POLLER_REASON, WAITER_REASON, background_end_hit,
-            live_stream_hit, ln_descends_hit, loop_condition_polls_a_pattern,
+            LANE_LINT_REASON, NARRATED_TAIL_REASON, PATTERN_POLLER_REASON, WAITER_REASON, background_end_hit,
+            lane_lint_hit, live_stream_hit, ln_descends_hit, loop_condition_polls_a_pattern,
             narrated_tail_hit, waiter_verdict,
         )
         _loading = "guard_rm_var"
@@ -3452,6 +3453,13 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
     matched = narrated_tail_hit(stripped)
     if matched:
         refuse(tool, "deny", "live-stream", NARRATED_TAIL_REASON, matched)
+    # 3b'. Lane lint in the foreground. Incident: lane notes-fix-large-1, 2026-11-08 06:57 CST, two foreground
+    # `merge --lane-lint` runs were cut at the cloud's command limit with no verdict, and the lane lost both runs.
+    # Known false alarm: a short lint, such as a docs-only lane's, is refused in the foreground too; the remedy
+    # (run_in_background) costs one notice wait for it.
+    matched = lane_lint_hit(split_segments(stripped), background)
+    if matched:
+        refuse(tool, "deny", "lane-lint-foreground", LANE_LINT_REASON, matched)
     matched = background_end_hit(split_segments(stripped), background, description)
     if matched:
         refuse(tool, "deny", "background-end", BACKGROUND_END_REASON, matched)

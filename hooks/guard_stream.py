@@ -245,6 +245,39 @@ def waiter_verdict(segments, background: bool) -> str:
     return run_watch or ("" if background else watcher)
 
 
+# ------------------------------------------------------------------ lane lint in the foreground
+#
+# Guard rule lane-lint-foreground. `merge --lane-lint` runs the picked suites, which outlast the cloud's
+# foreground command limit, so a foreground call is cut with no verdict. The command word is judged,
+# never text that only names the flag (an echo, a grep, a commit message).
+LANE_LINT_MERGE_WORDS = ("merge", "merge.cmd", "merge.exe", "merge.py")
+LANE_LINT_FLAG = "--lane-lint"
+LANE_LINT_REASON = (
+    "merge --lane-lint outlasts a foreground call, so the call is cut and its verdict never arrives. "
+    "Remedy: run the same command with run_in_background, keep stderr visible, and read the verdict from the completion notice."
+)
+
+
+def lane_lint_hit(segments, background: bool) -> str:
+    """The matched text when a foreground call runs merge's lane lint, else ''. A call with run_in_background true is allowed."""
+    if background:
+        return ""
+    for segment in segments:
+        tokens = segment_tokens(segment)
+        index = resolve_command(tokens) if tokens else None
+        if index is None:
+            continue
+        word = basename(tokens[index]).lower()
+        if word in ("python", "python3"):  # `python3 .../merge.py`: the script is the first word that is no flag
+            index = next((i for i in range(index + 1, len(tokens)) if not tokens[i].startswith("-")), None)
+            if index is None:
+                continue
+            word = basename(tokens[index]).lower()
+        if word in LANE_LINT_MERGE_WORDS and LANE_LINT_FLAG in tokens[index + 1:]:
+            return basename(tokens[index]) + " " + LANE_LINT_FLAG
+    return ""
+
+
 WAITER_REASON = (
     "a pause between polls turns waiting into a loop of turns that each print a word. "
     "Remedy: wait for the CI-wake notice that follows gh pr ready. "
