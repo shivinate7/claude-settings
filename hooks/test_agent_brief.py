@@ -18,6 +18,9 @@ the hook prints one JSON object on stdout and exits 0:
 - The staged-diff line holds `git diff --cached --stat`. It appears once for each type that
   commits (builder, test-author, record-writer, designer and any other type) and never for a
   read-only type. Decision lanes-start-in-tool-worktrees.
+- The refusal line holds the words refus, final and base64: a refusal from the harness or a guard is final,
+  so report it and never re-send the command in another form. It appears once for every type, reviewer and
+  Explore included. Its place in the brief is not pinned; its words are.
 - A plugin-namespaced type (`my-plugin:builder`) gets the scope of its bare name. The match ignores
   case: `Builder` and `explore` get the scope and the line set of their role.
 - When the payload's cwd holds a .github/stamp.json whose cite.form is set, one brief line
@@ -65,6 +68,13 @@ GENERAL_LINE = ("- Scope: do only what your brief names. A builder never edits t
                 "a record-writer edits Markdown only.")
 STASH_LINE = "- Never run git stash, git reset, git checkout <path>, or git restore."
 STAGED_KEY = "git diff --cached --stat"  # the stable fragment of the staged-diff line; the wording may change
+REFUSAL_WORDS = ("refus", "final", "base64")  # the stable words of the refusal line; its wording may change
+
+
+def is_refusal_line(line):
+    """True when a line holds every refusal word, case-insensitively."""
+    low = line.lower()
+    return all(word in low for word in REFUSAL_WORDS)
 # Non-scope lines in hook order, after the scope line. Builder, test-author, record-writer, designer and any
 # unknown type commit and push; reviewer, Explore, Plan, claude-code-guide and design-reviewer do not, so they
 # get the shorter set. The staged-diff line is not in this list: line_set_check(staged=True) leaves it out.
@@ -285,6 +295,7 @@ def line_set_check(expected, staged=False):
     left out first: its place in the brief is not pinned here, and staged_check pins that it appears once."""
     def check(text):
         rules = [line for line in text.split("\n") if not line.startswith("- Scope")]
+        rules = [line for line in rules if not is_refusal_line(line)]  # refusal_line_check pins it, once per type
         if staged:
             rules = [line for line in rules if STAGED_KEY not in line]
         if rules == expected:
@@ -706,6 +717,30 @@ def read_only_set_check():
 
 add("staged-diff step: agent_brief's READ_ONLY set names exactly the agents whose frontmatter cannot write",
     "custom", fn=read_only_set_check)
+
+
+# REFUSAL LINE. Every type, reviewer and Explore included, gets one line that says a refusal is final: report it,
+# never re-send the command in another form. The words are pinned, not the wording. Each type is one case, so a
+# red names the type that lacks the line.
+REFUSAL_TYPES = TYPES + ["Plan", "claude-code-guide", "my-plugin:reviewer", "ns:Explore", "some-new-agent", MISSING]
+
+
+def refusal_line_check(agent_type):
+    """Build a check: the brief for `agent_type` holds exactly one line that holds every refusal word."""
+    def check():
+        text, problem = context_for(payload(agent_type))
+        if problem:
+            return problem
+        hits = [line for line in text.split("\n") if is_refusal_line(line)]
+        if len(hits) != 1:
+            return "want one line that holds %s, got %d" % (" and ".join(REFUSAL_WORDS), len(hits))
+        return None
+    return check
+
+
+for _t in REFUSAL_TYPES:
+    add("refusal line, %s: one line says a refusal is final" % ("a missing agent type" if _t is MISSING else _t),
+        "custom", fn=refusal_line_check(_t))
 
 
 def main():
