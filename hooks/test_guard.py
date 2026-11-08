@@ -1007,6 +1007,8 @@ if path:
 while "-R" in args:
     i = args.index("-R")
     del args[i:i + 2]
+if state.get("rate_limited") and path:   # gh api on a 403 rate limit: the body, then gh's own line, exit 1
+    api_error(403, "API rate limit exceeded for user ID 1.")
 if state["broken"]:
     print("boom")
     sys.exit(1)
@@ -1069,8 +1071,11 @@ else:
 
 def make_fake_gh(folder, base, delay=0, delay_s=0, checks=None, runs=None, broken=False, need=(),
                  cwd_name="", statuses=None, page_cap=100, others=(), required=("checks",), protection=None,
-                 count_file=None, compares=None, body=None):
+                 count_file=None, compares=None, body=None, rate_limited=False):
     """Put a stand-in for the pull request tool in its own folder on PATH.
+
+    `rate_limited` answers every REST call as gh does on a rate-limit 403 (api_error), so a read gets the reply the
+    merge tool's backoff reads: no headers, since the live read does not pass `-i`.
 
     `count_file`, when given, is a path the stand-in appends one line to per call (the call's argv as
     JSON), before it answers. Only a case that counts calls names one; every other fake writes nothing.
@@ -1134,6 +1139,7 @@ def make_fake_gh(folder, base, delay=0, delay_s=0, checks=None, runs=None, broke
         "runs": runs if runs is not None else [
             {"status": "completed", "conclusion": "success", "name": "checks"}],
         "broken": broken,
+        "rate_limited": rate_limited,   # True: every REST call answers with a rate-limit 403 (see FAKE_GH_PY)
         "cwd_name": cwd_name,   # the folder name a call must run in, or it answers as a broken tool
         "need": list(need),   # words every call must carry, or it answers as a broken tool does
         "delay_s": delay_s,   # seconds to sleep in-process before answering; see the delay_s note above
@@ -14323,19 +14329,23 @@ def read_past_deadline_seconds():
     return None if budget is None else budget + HANG_MARGIN_S
 
 
-def pr_counted_judged(tool, tool_input, folder, config=None):
-    """The guard's (decision, reason) for one call, with the counted fake `folder` on PATH."""
+def pr_counted_judged(tool, tool_input, folder, config=None, max_seconds=None):
+    """The guard's (decision, reason) for one call, with the counted fake `folder` on PATH. `max_seconds` is the
+    limit a slower judgement fails (decide reads it), so a read that waits past it is judged `slow`."""
     return decide({
         "raw": None, "tool": tool, "cwd": NOGIT, "process_cwd": NOGIT, "session": None,
         "env_path": folder + os.pathsep + PY_PATH, "config": config, "agent_id": None, "agent_type": None,
         "temp": None, "load": None, "env": None, "transcript": None, "tool_input": tool_input,
+        "max_seconds": max_seconds,
     })
 
 
-def pr_counted_case(tool, tool_input, want_decision, want_calls, want_path=None, delay_s=0, config=None):
+def pr_counted_case(tool, tool_input, want_decision, want_calls, want_path=None, delay_s=0, config=None,
+                    rate_limited=False, max_seconds=None):
     """A check that one call is judged `want_decision` and makes `want_calls` gh calls, the first of them naming
     `want_path` as one argument. The counted fake answers with a live body of 1700 characters, after `delay_s`
-    seconds, or after the seconds `delay_s` gives when it is a function."""
+    seconds, or after the seconds `delay_s` gives when it is a function. `rate_limited` makes every call a rate-limit
+    403, and `max_seconds` bounds the judgement."""
     def case():
         folder = os.path.join(ROOT, "prbodycount")
         log = os.path.join(folder, ARCHIVE_CALLS)
@@ -14352,8 +14362,9 @@ def pr_counted_case(tool, tool_input, want_decision, want_calls, want_path=None,
             return False, "MERGE_READ_TIMEOUT cannot be read as a number from the guard_merge.py beside the guard under test"
         if seconds > HANG_CEILING_S:   # the hook's 60 s budget must still hold the read
             return False, "the fake waits %gs, past the %gs a read may take inside the hook budget" % (seconds, HANG_CEILING_S)
-        make_fake_gh(folder, "main", body=pr_live_body(1700), count_file=log, delay_s=seconds)
-        decision, reason = pr_counted_judged(tool, tool_input, folder, config)
+        make_fake_gh(folder, "main", body=pr_live_body(1700), count_file=log, delay_s=seconds,
+                     rate_limited=rate_limited)
+        decision, reason = pr_counted_judged(tool, tool_input, folder, config, max_seconds)
         calls = gh_calls_taken(folder)
         if decision != want_decision:
             return False, "wanted %s, got %s: %r" % (want_decision, decision, reason[:90])
@@ -14394,6 +14405,14 @@ for flag in ("-Rowner/repo", "-R=owner/repo", "--repo=owner/repo"):
 pr_counted_check("pr-body-shrink: a live read held past the read deadline passes unread, after one gh call", PR_UPDATE,
                  dict(owner="y", repo="x", pullNumber=12, body=pr_body_of(120)), "allow", 1,
                  want_path="repos/y/x/pulls/12", delay_s=read_past_deadline_seconds, config=MERGECFG)
+
+# A rate-limited read: the merge tool's backoff waits 60 s before a retry when the reply has no reset header, and the
+# live read asks for no headers. Under the shared deadline the read makes no retry: one gh call, then unread, allowed.
+# Without the deadline it waits and calls again, so the judgement runs past the hook budget and stops at it (`slow`).
+# The bound is the harness's max_seconds, the hook budget of this check; the discriminating fact is the wait itself.
+pr_counted_check("pr-body-shrink: a rate-limited live read is one gh call, passes unread, within the hook budget", "Bash",
+                 {"command": 'gh pr edit 5 -Rowner/repo --body "The lane lands the check."'}, "allow", 1,
+                 want_path="repos/owner/repo/pulls/5", rate_limited=True, max_seconds=HOOK_BUDGET_S)
 FAMILY = "lane-closes-after-records"
 
 
