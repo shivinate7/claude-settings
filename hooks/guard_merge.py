@@ -846,13 +846,13 @@ def conflict_markers_hit(stripped: str, cwd: str):
 # `git diff --name-only` (two for a merge). A push in scope adds one lint run (about 1.2 s for a small push),
 # the lint's own reads.
 STE_PUSH_REASON = (
-    "Rule (STE, ste-push): this push sends prose that fails the ste-lint check CI runs on it: {detail}. "
+    "Rule (STE, ste-push; decision ste-lint-at-push): this push sends prose that fails the ste-lint check CI runs on it: {detail}. "
     "Remedy: fix the sentence at the file and line named, commit the fix, then retry. "
     "`python3 lint/ste_lint.py --fix <file>` (in claude-settings; elsewhere the same file under $HOME/.claude/lint) "
-    "covers bloat only, the long-sentence finding; every other finding needs a hand edit."
+    "covers bloat phrases (STE011) only; a long sentence and every other finding need a hand edit."
 )
 STE_PUSH_CHAIN_REASON = (
-    "Rule (STE, ste-push): a commit this call makes before the push (a commit, merge, cherry-pick, am or revert) "
+    "Rule (STE, ste-push; decision ste-lint-at-push): a commit this call makes before the push (a commit, merge, cherry-pick, am or revert) "
     "adds prose the ste-lint check CI runs reads, and this push cannot lint a commit that does not exist yet. "
     "Remedy: run the push in a call of its own, after the commit has landed."
 )
