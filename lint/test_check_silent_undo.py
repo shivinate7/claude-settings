@@ -443,7 +443,7 @@ class PrBodyEscape(unittest.TestCase):
                      "%s\n\n%s\n" % (A.split(" ", 1)[1], S),  # without the emoji
                      "%s\r\n\r\n%s\r\n" % (A, S)):
             with self.subTest(body=body):
-                rc, text = self.run_cli([], env={"PR_BODY": body})
+                rc, text = self.run_cli([], body=body)
                 self.assert_fails_on_app(rc, text)
 
     def test_a_url_other_than_the_session_link_under_the_attribution_is_not_skipped(self):  # control
@@ -514,10 +514,14 @@ class PrBodyEscape(unittest.TestCase):
                 self.assertEqual(notes, [], "a blank paragraph between the posting rule and the footer let the footer skip, "
                                             "so the Drops-lines line above the rule excused app.txt")
 
-    # The CLI reads the PR body from `--pr-body <text>`, or from env PR_BODY, which CI sets from the pull request body
-    # the way it sets BASE_REF and HEAD_SHA. Each positive case first shows the drop is a finding with no body.
-    def run_cli(self, argv, env=None):
-        """The CLI on this repo as CI runs it (--strict). -> (rc, printed text). The one home is PrintedFindings.run_main."""
+    # The CLI reads the PR body from `--pr-body <text>`, or from the event file that CI names in GITHUB_EVENT_PATH (the step gets
+    # no body env). Each positive case first shows the drop is a finding with no body.
+    def run_cli(self, argv, env=None, body=None):
+        """The CLI on this repo as CI runs it (--strict). `body`, when not None, is the pull request body in the event file.
+        -> (rc, printed text). The one home is PrintedFindings.run_main."""
+        env = dict(env or {})
+        if body is not None:
+            env["GITHUB_EVENT_PATH"] = self.event_file(body)
         return PrintedFindings.run_main(self, ["--repo", self.r.dir, "--upstream", "origin/main", "--strict", *argv], "utf-8", env=env)
 
     def event_file(self, body):
@@ -547,27 +551,20 @@ class PrBodyEscape(unittest.TestCase):
         self.assertEqual(rc, 0, "the CLI does not read the body from GITHUB_EVENT_PATH (exit %s):\n%s" % (rc, text))
         self.assertIn("ALLOWED app.txt: the owner wants Card back", text)
 
-    def test_the_pr_body_env_excuses_its_path_on_the_cli(self):
-        rc, text = self.run_cli([])
-        self.assert_fails_on_app(rc, text)  # premise: with no body the drop is a finding
-        rc, text = self.run_cli([], env={"PR_BODY": "Summary.\n\n%s\n" % self.LINE})
-        self.assertEqual(rc, 0, "the CLI ignores env PR_BODY: it printed the FAIL and exited %s:\n%s" % (rc, text))
-        self.assertIn("ALLOWED app.txt: the owner wants Card back", text)
-
-    def test_a_pr_body_env_line_without_a_reason_excuses_nothing_on_the_cli(self):  # control
+    def test_a_pr_body_line_without_a_reason_excuses_nothing_on_the_cli(self):  # control
         for body in ("Summary.\n\nDrops-lines: app.txt\n", "Summary.\n\nDrops-lines: app.txt --\n", "Summary.\n\nDrops-lines: app.txt -- \n"):
             with self.subTest(body=body):
-                rc, text = self.run_cli([], env={"PR_BODY": body})
+                rc, text = self.run_cli([], body=body)
                 self.assert_fails_on_app(rc, text)
 
-    def test_a_pr_body_env_line_outside_the_last_paragraph_excuses_nothing_on_the_cli(self):  # control
-        rc, text = self.run_cli([], env={"PR_BODY": "%s\n\nSome closing prose.\n" % self.LINE})
+    def test_a_pr_body_line_outside_the_last_paragraph_excuses_nothing_on_the_cli(self):  # control
+        rc, text = self.run_cli([], body="%s\n\nSome closing prose.\n" % self.LINE)
         self.assert_fails_on_app(rc, text)
 
-    def test_no_pr_body_still_fails_on_the_cli(self):  # control: unset, and empty (what a null body renders as)
-        for env in ({}, {"PR_BODY": ""}):
-            with self.subTest(env=env):
-                rc, text = self.run_cli([], env=env)
+    def test_no_pr_body_still_fails_on_the_cli(self):  # control: no event file, and an empty body (what a null body renders as)
+        for body in (None, ""):
+            with self.subTest(body=body):
+                rc, text = self.run_cli([], body=body)
                 self.assert_fails_on_app(rc, text)
 
     def test_a_pr_body_starts_no_process_a_run_without_one_does_not(self):  # cost pin: decision silent-undo-check-design

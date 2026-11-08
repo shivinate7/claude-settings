@@ -92,8 +92,18 @@ fails=0
 expect() { # label want-exit work-dir base-ref want-text [head-sha] [pr-body]: runs check.sh as action.yml does
   label=$1 want=$2 dir=$3 base=$4 text=$5 head=${6:-$(git -C "$3" rev-parse HEAD)} body=${7-}
   if [ ! -f "$check" ]; then echo "FAIL $label: check.sh is not built at $check"; fails=$((fails + 1)); return; fi
+  # A pr-body goes in the event file that CI gives the step (GITHUB_EVENT_PATH), never in the step's env.
+  envset=()
+  if [ -n "$body" ]; then
+    event="$work/event-$label.json"
+    python3 -I -c 'import json, sys
+with open(sys.argv[2], "w", encoding="utf-8") as f:
+    json.dump({"pull_request": {"body": sys.argv[1]}}, f)' "$body" "$event" || { echo "fixture setup failed: the event file of $label"; exit 1; }
+    envset=("GITHUB_EVENT_PATH=$event")
+  fi
   # env -u CI: GitHub sets CI, which makes the lint red on UNKNOWN even without --strict. The cases must test --strict itself.
-  out="$(cd "$dir" && env -u CI PR_BODY="$body" BASE_REF="$base" HEAD_SHA="$head" bash "$check" 2>&1)"; got=$?
+  # env -u PR_BODY -u GITHUB_EVENT_PATH: a run on CI has the live event file; no case may read the live pull request body.
+  out="$(cd "$dir" && env -u CI -u PR_BODY -u GITHUB_EVENT_PATH ${envset[@]+"${envset[@]}"} BASE_REF="$base" HEAD_SHA="$head" bash "$check" 2>&1)"; got=$?
   if [ "$got" -ne "$want" ]; then
     echo "FAIL $label: exit $got, wanted $want"; printf '%s\n' "$out" | sed 's/^/     /'; fails=$((fails + 1))
   elif [ -n "$text" ] && ! printf '%s' "$out" | grep -q -F -- "$text"; then
@@ -112,28 +122,10 @@ expect unreadable-base-red 1 "$work/revert" no-such-base "UNKNOWN"
 expect unpersisted-local-base-red 1 "$work/unpersisted" main "FAIL: rules.md"
 expect shallow-unknown-red 1 "$work/shallow" main "UNKNOWN"
 expect single-branch-fetches-base 1 "$work/single" main "FAIL: rules.md"
-# The pull request body, as action.yml passes it in env PR_BODY, excuses its path the way a commit trailer does.
+# The pull request body, in the event file CI gives the step, excuses its path the way a commit trailer does.
 expect body-excuse-green 0 "$work/revert" main "ALLOWED rules.md" "" $'Summary.\n\nDrops-lines: rules.md -- the rules are rolled back on purpose for this test'
 expect body-without-reason-red 1 "$work/revert" main "FAIL: rules.md" "" $'Summary.\n\nDrops-lines: rules.md'
 expect body-other-path-red 1 "$work/revert" main "FAIL: rules.md" "" $'Summary.\n\nDrops-lines: other.md -- a reason for a file that did not change'
-# action.yml gives check.sh the pull request body as env PR_BODY. The step's env is read by the shared step parser
-# (lint/workflow_steps.py). action.yml indents its steps two columns less than a job does, so the steps move to a job's columns first.
-pin_py='
-import sys
-sys.path.insert(0, sys.argv[1])
-from workflow_steps import step_blocks, step_env, step_key
-with open(sys.argv[2], encoding="utf-8") as f:
-    text = f.read()
-steps = text.split("\n  steps:\n", 1)[1]
-shifted = "\n".join(("  " + ln) if ln.strip() else ln for ln in steps.split("\n"))
-found = [s for s in step_blocks(shifted) if step_key(s, "name") == "Check the change drops no earlier work"]
-if len(found) != 1:
-    sys.exit("action.yml has %d check steps by that name, want 1" % len(found))
-got = step_env(found[0]).get("PR_BODY")
-want = "${{ github.event.pull_request.body }}"
-if got != want:
-    sys.exit("action.yml gives check.sh PR_BODY %r, want the pull request body %r" % (got, want))
-'
-if msg=$(python3 -I -c "$pin_py" "$root/lint" "$here/action.yml" 2>&1); then echo "ok   action-gives-pr-body"; else echo "FAIL action-gives-pr-body: $msg"; fails=$((fails + 1)); fi
+# action.yml's step env pin (no body env) is CheckStepPins in lint/test_check_silent_undo.py: one home.
 echo "silent-undo suite: $fails failed"
 exit $((fails > 0))

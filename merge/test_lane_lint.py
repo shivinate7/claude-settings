@@ -519,14 +519,13 @@ class LaneLint(CiJobStub, tm.CloudSession):
 BATCH = "batch-lint-flags"  # the batch the case lints: a pushed branch whose checks job holds the four CI steps below
 BATCH_MISSING = "batch-lint-flags-no-red-run"  # the same batch with the Red-run trailer's script left out
 BASE = "main"  # the base the lint runs against: lane_lint's base, and the PR base the CI steps read
-SILENT_UNDO = "Silent undo check"  # the CI step that reads the pull request body, as env PR_BODY
+SILENT_UNDO = "Silent undo check"  # the CI step that reads the pull request body from its event file
 BATCH_CI_STEPS = (SILENT_UNDO, "Comment narration check", "Red-run trailer", "STE lint")  # checks.yml's job `checks` CI steps this suite lints
 STE = "STE lint"  # the one CI step whose script is bin/ste-changed, not a file of the batch
-PR_BODY_EXPR = "${{ github.event.pull_request.body }}"  # the value checks.yml gives PR_BODY
 REPO = os.path.dirname(HERE)
 CHECKS_YML = os.path.join(REPO, ".github", "workflows", "checks.yml")  # read at test time; no expectation comes from a copy of it
-CALL_STUB = ("import json, os, sys\nwith open(%r, 'a', encoding='utf-8') as f:\n"
-             "    print(json.dumps({'argv': sys.argv, 'pr_body': os.environ.get('PR_BODY')}), file=f)\n")  # logs its argv and env PR_BODY, exits 0
+CALL_STUB = ("import sys\n" + tm.EVENT_BODY + "with open(%r, 'a', encoding='utf-8') as f:\n"
+             "    print(json.dumps({'argv': sys.argv, 'pr_body': event_body()}), file=f)\n")  # logs its argv and the body in its event file, exits 0
 BATCH_NO_LINT = "batch-lint-flags-no-lint"  # a batch whose checks job holds NO_LINT_STEPS: no lint step at all
 NO_LINT_STEPS = (("Build", "      - name: Build\n        run: make build\n"),
                  ("Unit tests", "      - name: Unit tests\n        run: python3 -m pytest -q\n"))
@@ -737,9 +736,9 @@ class BatchLintFlags(tm.Env):
         self.assertEqual(len(lines), 1, text)
         self.assertIn(PUSH_ONLY, lines[0], text)
 
-    def test_the_silent_undo_step_sees_env_pr_body_as_the_pull_requests_body(self):
-        """A pull request's lint gives the silent-undo step env PR_BODY as the PR's body: lane_lint takes the body from the host,
-        ci-job maps it to `${{ github.event.pull_request.body }}`, and checks.yml names it as the step's PR_BODY. The body holds a Drops-lines line."""
+    def test_the_silent_undo_step_reads_the_pull_requests_body_from_its_event_file(self):
+        """A pull request's lint gives the silent-undo step the PR's body in its event file: lane_lint takes the body from the host,
+        and ci-job gives the step the event file that CI gives it, with no body in the step's env. The body holds a Drops-lines line."""
         body = "Summary.\n\nDrops-lines: lint/gone.py -- the file is gone\n\nhttps://claude.ai/code/session_X\n"
         self.push_batch(BATCH)
         self.host.branch, self.host.body = BATCH, body
@@ -749,7 +748,7 @@ class BatchLintFlags(tm.Env):
         self.assertEqual(rc, 0, text)
         calls = self.stub_calls(script_of(dict(self.found)[SILENT_UNDO]))
         self.assertEqual(len(calls), 1, "the silent-undo step's script ran %d times, want once: %s" % (len(calls), text))
-        self.assertEqual(calls[0]["pr_body"], body, "the silent-undo step saw env PR_BODY %r, want the PR's body" % calls[0]["pr_body"])
+        self.assertEqual(calls[0]["pr_body"], body, "the silent-undo step read %r from its event file, want the PR's body" % calls[0]["pr_body"])
 
 
 def under(lines, key, indent):
@@ -780,12 +779,8 @@ def pull_request_types(text):
 
 
 class PrBodyPins(unittest.TestCase):
-    """checks.yml gives the silent-undo step the pull request body as PR_BODY, and its pull_request types leave out `edited`,
-    so a body-only edit does not rerun the checks job. Each pin parses the YAML it reads, never a grep of one of its lines."""
-
-    def test_the_silent_undo_step_takes_pr_body_from_the_pull_request_body(self):
-        env = step_env(dict(real_ci_steps())[SILENT_UNDO])
-        self.assertEqual(env.get("PR_BODY"), PR_BODY_EXPR, "checks.yml's silent-undo step gives PR_BODY %r, want the pull request body" % env.get("PR_BODY"))
+    """checks.yml's pull_request types leave out `edited`, so a body-only edit does not rerun the checks job. The pin parses the YAML it
+    reads, never a grep of one of its lines. The silent-undo step's no-body-env pin is CheckStepPins' (lint/test_check_silent_undo.py)."""
 
     def test_the_pull_request_types_do_not_list_edited(self):
         with open(CHECKS_YML, encoding="utf-8") as f:
