@@ -288,15 +288,19 @@ CHECK_TAIL_REASON = (
 )
 
 
-# A VERDICT CALL PIPED ONWARD, then `&&` or `||` (decision background-check-through-verdict). A
-# pipeline's exit status is its last stage's, so `verdict <cmd> | tail -1 && git commit` runs the commit
-# after a red check: verdict's own exit status is hidden. `set -o pipefail` earlier in the same command
-# keeps it, unless a later `set +o pipefail` clears it. A `;` is not read: without errexit it gates
-# nothing. Under `set -e` it does, and that form is a known gap (note verdict-pipe-newline). A pipeline
-# that ends the command is safe, since nothing reads its status, and so is a bare
-# `verdict` call.
+# A VERDICT CALL, OR A LINT COMMAND RUN WITHOUT IT, PIPED ONWARD, then `&&` or `||` (decision
+# background-check-through-verdict). A pipeline's exit status is its last stage's, so
+# `verdict <cmd> | tail -1 && <next>` runs the next command after a red check: verdict's own exit status
+# is hidden. A lint command run bare hides its status the same way. `set -o pipefail` earlier in the same
+# command keeps it, unless a later `set +o pipefail` clears it. A `;` is not read: without errexit it
+# gates nothing. Under `set -e` it does, and that form is a known gap (note verdict-pipe-newline). A
+# pipeline that ends the command is safe, since nothing reads its status, and so is a bare call. The rule
+# id stays `verdict-pipe-exit`: one id for one harm, a hidden check exit, so the owner's off switch and
+# the guard log keep one name.
 CONTINUING_ENDS = ("&&", "||")
 PIPEFAIL_FLAGS = re.compile(r"[-+][A-Za-z]*o$")
+LINT_SCRIPT_TAIL = "lint/ste_lint.py"
+STE_CHANGED_COMMANDS = ("ste-changed", "ste-changed.cmd")
 
 
 def _pipefail_change(segment: str):
@@ -314,10 +318,42 @@ def _pipefail_change(segment: str):
     return change
 
 
+def _lint_stage(tokens) -> str:
+    """The lint command a segment runs outside `verdict`, else ''. Read through the wrappers and `uv run`
+    that check_stage reads. The merge form reuses `_roster_word`, so no roster is copied."""
+    index = resolve_command(tokens)
+    if index is None:
+        return ""
+    index = _skip_uv_run(tokens, index)
+    word = basename(tokens[index])
+    interpreter = SCRIPT_INTERPRETER.match(word.removesuffix(".exe"))
+    script = _script_operand(tokens, index).replace("\\", "/") if interpreter else ""
+    if script.endswith(LINT_SCRIPT_TAIL):
+        return "ste_lint"
+    if word in STE_CHANGED_COMMANDS:
+        return word
+    if "--lint" in tokens and (word in CHECK_COMMANDS or script.endswith(CHECK_SCRIPT_TAIL)):
+        return CHECK_COMMANDS[0]
+    if "--lane-lint" in tokens:
+        return _roster_word(tokens, index, interpreter_only=True)
+    return ""
+
+
+def _pipe_exit_stage(segment: str) -> str:
+    """The name of a pipeline's first stage when it is a `verdict` call or a lint command, else ''. The
+    one stage test that both kinds share."""
+    tokens = segment_tokens(segment)
+    if not tokens:
+        return ""
+    if _through_verdict(tokens):
+        return "verdict"
+    return _lint_stage(tokens)
+
+
 def verdict_pipe_exit_hit(stripped: str) -> str:
-    """The matched text when a pipeline that starts with a `verdict` call has a later stage and is
-    followed by `&&` or `||` and more commands, with no `set -o pipefail` in force before it: the last
-    `set` that sets or clears pipefail decides."""
+    """The matched text when a pipeline that starts with a `verdict` call or a lint command has a later
+    stage and is followed by `&&` or `||` and more commands, with no `set -o pipefail` in force before
+    it: the last `set` that sets or clears pipefail decides."""
     ends = []
     segments = split_segments(stripped, ends)
     start = 0
@@ -327,19 +363,21 @@ def verdict_pipe_exit_hit(stripped: str) -> str:
         stages, first, start = segments[start:at + 1], start, at + 1
         if len(stages) < 2 or end not in CONTINUING_ENDS or not any(s.strip() for s in segments[start:]):
             continue
-        tokens = segment_tokens(stages[0])
-        if not tokens or not _through_verdict(tokens):
+        name = _pipe_exit_stage(stages[0])
+        if not name:
             continue
         changes = [c for c in map(_pipefail_change, segments[:first]) if c is not None]
         if changes and changes[-1]:
             continue
-        return "verdict | " + (stages[1].split() or [""])[0] + " " + end
+        return name + " | " + (stages[1].split() or [""])[0] + " " + end
     return ""
 
 
 VERDICT_PIPE_EXIT_REASON = (
-    "a pipe after verdict hides verdict's exit status, so the command after it still runs when the "
-    "check is red (decision background-check-through-verdict). "
+    "a pipe after verdict, or after a lint command run without it, hides the check's exit status, so "
+    "the command after it still runs when the check is red "
+    "(decision background-check-through-verdict). "
+    "The rule id stays verdict-pipe-exit: one id for one harm, a hidden check exit. "
     "Remedy: run `verdict <cmd>` with no pipe, or set pipefail first, "
     "as `set -o pipefail; verdict <cmd> | tail -1 && ...`."
 )

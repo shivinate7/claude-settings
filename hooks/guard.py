@@ -74,7 +74,7 @@ Shell tools (Bash, PowerShell), in judge_shell order:
   live-stream, waiter  deny. A command that follows a stream with no end, or polls with sleep.
   background-end       deny. A background command with no end note. (background-needs-end-note)
   check-tail           deny. A named check piped into tail or head. (background-check-through-verdict)
-  verdict-pipe-exit    deny. A verdict call piped onward, then && || or ;, with no pipefail.
+  verdict-pipe-exit    deny. A verdict call or a bare lint command piped onward, then && || or ;, with no pipefail.
                        (background-check-through-verdict)
   playwright-browsers-path, playwright-install
                        deny. (playwright-browsers-path, playwright-install-once)

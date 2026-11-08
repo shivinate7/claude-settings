@@ -24,13 +24,19 @@ Step `check-tail-wrapper-forms` added the `uv run`, `python3.N` and `bin/ci-job`
 
 The coordinator asked for rule `verdict-pipe-exit` at 18:39 CST on 2026-11-07, as step `verdict-pipe-exit`. The owner may change it.
 
+The coordinator widened it at 23:38 CST on 2026-11-07, as step `guard-pipe-on-merge-lint`: a lint command run without `verdict` is refused like a verdict call, with the lint forms below.
+
 Ruling (coordinator, 2026-11-07 19:09 CST, option a: "my brief was wrong on `;`"): the rule does not refuse `;`. It keeps `&&` and `||`.
 
 Incident: lane `silent-undo-reads-retire-run` ran `~/.claude/bin/verdict python3 lint/ste_lint.py <file> 2>&1 | tail -1 && git add ... && git commit ...`. Commit 7ae6f0e1c went in with a hidden lint error.
 
+Incident, lint forms: a lane ran `ste_lint ... | tail`, then a commit and a push, and the pipe masked the lint's exit. Commit b613b336c on PR #1754 went up with an STE error. The coordinator asked for the lint commands to be refused the same way.
+
 Harm: a pipeline's exit status is its last stage's. `verdict` prints FAIL and exits non-zero, `tail` exits 0, so the `&&` after it runs. The check protects nothing.
 
 - A pipeline whose first stage is a `verdict` call (any spelling, behind any wrapper or `uv run`) and that has a later stage is refused when `&&` or `||` follows it and another command comes after. The rule id is `verdict-pipe-exit`, in `hooks/guard_stream.py`.
+- A pipeline whose first stage is a lint command run without `verdict` is refused the same way: it has a later stage, `&&` or `||` follows, and the last `set` left pipefail off. The lint commands are `ste_lint` (an interpreter running a script operand that ends `lint/ste_lint.py`), `ste-changed` (any path, `.cmd` too), `ci-job` with `--lint`, and `merge --lane-lint`. They are read through the same wrappers as `check-tail`: `uv run`, `env` and the python forms. A `merge --lane-lint` pipe into `tail` or `head` is refused by `check-tail` first. The forms that reach this rule are `merge --lane-lint` piped into another filter, such as `grep`.
+- The rule id stays `verdict-pipe-exit`. One id names one harm, a hidden check exit, so the owner's off switch and the guard log keep one name. The reason text says the lint forms are covered.
 - It is refused in the foreground and in the background.
 - `set -o pipefail` (or a cluster such as `set -euo pipefail`) earlier in the same command passes. The last `set` that sets or clears pipefail before the pipeline decides, so `set +o pipefail` after `set -o pipefail` does not pass.
 - A `;` after the pipeline is not read. Without `set -e`, the next command runs after a red check with or without the pipe. Under `set -e`, the pipe hides the failure and the next command runs: a known gap, note verdict-pipe-newline.
