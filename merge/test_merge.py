@@ -12712,8 +12712,8 @@ class ReviewRecordAncestorHead(ReviewEnv):
         self.assertIn((self.ANC, self.LIVE), host.compare_reads, "the ancestry was not read as compare(head, live)")
 
     def test_a_record_with_no_round_on_an_ancestor_head_is_refused_with_no_compare(self):
-        # no round is recorded, so the ancestor rule does not apply: refused, and the refusal reads no compare. docs-only is the case the brief
-        # names; the normal kind is the same record with a kind that reads open with no round, so the no-round clause decides it alone
+        # no round is recorded, so the ancestor rule stops before the compare for either kind: it needs a round to read FAIL. Both kinds run so the
+        # stop is shown for each
         for kind in ("docs-only", "normal"):
             with self.subTest(kind=kind):
                 host = self.record_host(diffs={(self.ANC, self.LIVE): compare_of("ahead")})
@@ -12790,7 +12790,8 @@ class ReviewFixBase(ReviewEnv):
     """`--fix-check BASE:...` with --review-record refuses unless the newest review record already on the pull request has no fix check line,
     and either BASE is that record's Head, or the compare of BASE and that Head shows one an ancestor of the other with only record or notes
     files between them. The fix diff then starts from BASE, and a fix never follows a fix. The earlier records come from review_comments, which
-    PullsHost serves from its comment list, oldest first. A refusal exits 2 and prints no record. A failed compare read exits 1, as every failed read does."""
+    PullsHost serves from its comment list, oldest first. A refusal exits 2 and prints no record. A failed compare read exits 1, as every failed read does.
+    With no review record on the pull request, ReviewFixOwnRounds decides instead."""
 
     EARLIER_HEAD = "1e" * 20  # a head that an earlier record reviewed, and that is not the newest record's
     OTHER_HEAD = "2e" * 20  # a head that no record reviewed
@@ -12840,7 +12841,8 @@ class ReviewFixBase(ReviewEnv):
         self.assert_refused(rc, out, err)
 
     def test_no_earlier_record_on_the_pull_request_refuses_the_fix_check(self):
-        # with no record on this pull request there is no reviewed head to start the fix diff from
+        # with no record on this pull request, the record's rounds name the reviewed head only when the compare of the base and the live head is
+        # ahead (ReviewFixOwnRounds). A diverged base is refused either way, as is a base on another pull request's record
         other_pr = review_comment(1, 8, record_text(n=8, head=REVIEW_OLD_HEAD, rounds=REVIEW_PASS))
         for label, comments in (("no record at all", []), ("a record on another pull request", [other_pr])):
             with self.subTest(label=label):
@@ -12986,6 +12988,127 @@ class ReviewFixBase(ReviewEnv):
         diffs = {(REVIEW_OLD_HEAD, self.NOTES_HEAD): compare_of("ahead", file_entry("docs/decisions/tool.md"))}
         rc, out, err = self.review_with_base(self.NOTES_HEAD, self.record_host(newest, diffs=diffs))
         self.assertEqual(rc, 0, "a Markdown record under docs/decisions was refused:\n" + out + err)
+
+class ReviewFixOwnRounds(ReviewEnv):
+    """`--fix-check BASE:...` with --review-record on a pull request with no review record of its own. The record's own rounds then stand in for
+    the earlier record, and their Head is BASE. That is allowed only when BASE is not the live head and the compare of BASE and the live head is
+    ahead with no behind: the fix diff is every commit from BASE to the live head, code included. No round means nothing stands in, so the record
+    is refused as a record with no earlier record is. With an earlier record on the pull request, ReviewFixBase's rule holds unchanged. A
+    --fix-base-record source keeps its own rule, so the rounds never stand in for it. A refusal exits 2 and prints no record. The cases that pass
+    on the old code are the controls and the pins of today's refusals; the rest are red there."""
+
+    LIVE = REVIEW_HEAD  # the live head of pull request 7 in every case
+    BASE = REVIEW_OLD_HEAD  # the fix base: the head the rounds reviewed
+    EARLIER = "1e" * 20  # the Head of the earlier record in the cases that keep ReviewFixBase's rule
+    CODE = file_entry("merge/merge.py")  # the fix diff holds code, which the record-file rule would refuse
+    PASS_ONE = ("1:reviewer:sonnet:PASS",)
+    ROUNDS_1781 = ("1:reviewer:sonnet:FAIL", "2:reviewer:sonnet:PASS")  # the #1781 shape: round 1 FAILed and round 2 PASSed, on the base
+    ROUNDS_1106 = ("1:reviewer:sonnet:FAIL", "2:reviewer:sonnet:FAIL", "3:reviewer:opus:FAIL")  # the #1106 shape: rounds 1 to 3 FAILed, on the base
+    RECORD_1781 = ("Round 1: reviewer, sonnet, FAIL", "Round 2: reviewer, sonnet, PASS")  # the same two rounds, as a record prints them
+
+    def earlier(self, head, rounds=REVIEW_PASS):
+        """The one earlier record on pull request 7: its Head and its rounds, with no fix check line."""
+        return review_comment(1, 7, record_text(head=head, rounds=rounds))
+
+    def run_fix(self, base, rounds=PASS_ONE, comments=(), diffs=None, verdict="PASS", head=LIVE):
+        """The record for --head `head`, with `rounds` (N:ROLE:MODEL:VERDICT each) and --fix-check `base` at `verdict`, on pull request 7 with the
+        repo's `comments` and the compares `diffs`. -> (rc, out, err, host)."""
+        host = self.record_host(*comments, diffs=diffs or {})
+        argv = ["7", "--review-record", "--kind", "normal", "--guard", "no", "--head", head]
+        argv += [arg for rnd in rounds for arg in ("--round", rnd)]
+        rc, out, err = self.run_args(*argv, "--fix-check", f"{base}:reviewer:haiku:{verdict}", host=host)
+        return rc, out, err, host
+
+    def test_the_1781_shape_takes_its_rounds_as_the_base_when_the_compare_is_ahead(self):
+        # the rounds ran on BASE before the pull request opened, and a fix check from BASE to the live head follows. No earlier record is on the
+        # pull request, so the record's own rounds stand in for it, and the fix diff is the compare of BASE and the live head
+        # control, green on the old code: an earlier record at BASE with the same rounds lets the same fix check print
+        rc, out, err, _ = self.run_fix(self.BASE, self.ROUNDS_1781, comments=(self.earlier(self.BASE, self.RECORD_1781),))
+        self.assertEqual(rc, 0, "control: a fix check from an earlier record's head was refused:\n" + out + err)
+        rc, out, err, host = self.run_fix(self.BASE, self.ROUNDS_1781, diffs={(self.BASE, self.LIVE): compare_of("ahead", self.CODE)})
+        self.assertEqual(rc, 0, "a fix check whose base the live head is ahead of was refused:\n" + out + err)
+        self.assertIn((self.BASE, self.LIVE), host.compare_reads, "the fix check did not read compare(base, live)")
+        body = posted_body(self, out)
+        self.assertEqual(body.splitlines()[2:], [f"Head: {self.LIVE}", "Kind: normal", "Guard or check: no", *self.RECORD_1781,
+                                                 fix_check_line(head=self.BASE), "Net value: not owed", REVIEW_CI_LINE])
+        self.assertEqual(record_verdict(self, body)[0], "done", "the record of the 1781 shape must read done")
+
+    def test_the_1106_shape_reads_done_from_its_own_rounds_when_the_compare_is_ahead(self):
+        # rounds 1 to 3 FAILed on BASE, a merge from main then moved the live head, and a delta fix check PASS runs from BASE to it. Under
+        # FIX_PASS_CLEARS_ROUND3_HOLD the fix PASS clears the round-3 hold, so the record reads done
+        # control, green on the old code: an earlier record at BASE with the same three rounds lets the same fix check print
+        rc, out, err, _ = self.run_fix(self.BASE, self.ROUNDS_1106, comments=(self.earlier(self.BASE, REVIEW_FAILED_THREE),))
+        self.assertEqual(rc, 0, "control: a fix check from an earlier record's head with three FAIL rounds was refused:\n" + out + err)
+        rc, out, err, host = self.run_fix(self.BASE, self.ROUNDS_1106, diffs={(self.BASE, self.LIVE): compare_of("ahead", self.CODE)})
+        self.assertEqual(rc, 0, "a fix check whose base the live head is ahead of, after three FAIL rounds, was refused:\n" + out + err)
+        self.assertIn((self.BASE, self.LIVE), host.compare_reads, "the fix check did not read compare(base, live)")
+        body = posted_body(self, out)
+        self.assertEqual(body.splitlines()[2], f"Head: {self.LIVE}", "the record does not print the live head")
+        with switch("FIX_PASS_CLEARS_ROUND3_HOLD", True):
+            state, why = record_verdict(self, body)
+        self.assertEqual(state, "done", f"a fix PASS after a round-3 FAIL must read done under the switch: {why!r}")
+
+    def test_a_base_the_live_head_has_diverged_from_is_refused_after_its_compare_is_read(self):
+        # a base that diverged from the live head is no ancestor of it, so it is no fix base. The compare is read first, and the refusal names the
+        # divergence
+        # control, green on the old code: an earlier record at BASE lets the same fix check print, with no compare read
+        rc, out, err, _ = self.run_fix(self.BASE, comments=(self.earlier(self.BASE),))
+        self.assertEqual(rc, 0, "control: a fix check from an earlier record's head was refused:\n" + out + err)
+        rc, out, err, host = self.run_fix(self.BASE, diffs={(self.BASE, self.LIVE): compare_of("diverged")})
+        self.assertIn((self.BASE, self.LIVE), host.compare_reads, "the fix check did not read compare(base, live) before refusing")
+        self.assert_refused(rc, out, err)
+        self.assertIn("diverged", err, "the refusal does not name the divergence:\n" + err)
+
+    def test_a_base_equal_to_the_live_head_is_refused_with_no_compare_read(self):
+        # the parser refuses a fix base equal to --head before any record is read, so no compare of a head with itself is read, and the refusal
+        # names that rule
+        # control, green on the old code: an earlier record at BASE lets the fix check from BASE print, and BASE is not the live head
+        rc, out, err, _ = self.run_fix(self.BASE, comments=(self.earlier(self.BASE),))
+        self.assertEqual(rc, 0, "control: a fix check from another head, with an earlier record there, was refused:\n" + out + err)
+        rc, out, err, host = self.run_fix(self.LIVE)
+        self.assert_refused(rc, out, err)
+        self.assertEqual(host.compare_reads, [], "a fix check from the live head read a compare")
+        self.assertIn("must differ from --head", err, "the refusal does not name the same-head rule:\n" + err)
+
+    def test_with_an_earlier_record_the_base_rule_is_unchanged(self):
+        # the earlier record names EARLIER, so the base is EARLIER or a record-only step from it, as before. The rounds here do not stand in, and
+        # the compare of BASE and the live head is ahead, so only the old rule can refuse BASE
+        lure = {(self.BASE, self.LIVE): compare_of("ahead", self.CODE)}
+        rc, out, err, _ = self.run_fix(self.EARLIER, comments=(self.earlier(self.EARLIER),), diffs=lure)
+        self.assertEqual(rc, 0, "control: the newest record's own Head as the base was refused:\n" + out + err)
+        for label, status, reason in (("a code file between them", "ahead", "are not all record or notes files"), ("diverged", "diverged", "have diverged")):
+            with self.subTest(label=label):
+                diffs = {**lure, (self.EARLIER, self.BASE): compare_of(status, self.CODE)}
+                rc, out, err, host = self.run_fix(self.BASE, comments=(self.earlier(self.EARLIER),), diffs=diffs)
+                self.assertIn((self.EARLIER, self.BASE), host.compare_reads, "the base was not compared with the earlier record's Head")
+                self.assert_refused(rc, out, err)
+                self.assertIn(reason, err, f"the refusal does not name its reason ({label}):\n" + err)
+
+    def test_no_rounds_and_no_earlier_record_refuses_the_fix_check(self):
+        # with no round there is nothing for the record to stand in as the earlier record, so it is refused as a record with no earlier record is.
+        # The compare is ahead, so only the missing rounds can refuse it
+        rc, out, err, _ = self.run_fix(self.BASE, rounds=(), diffs={(self.BASE, self.LIVE): compare_of("ahead", self.CODE)})
+        self.assert_refused(rc, out, err)
+        self.assertIn("must exist", err, "the refusal does not name the missing earlier record:\n" + err)
+
+    def test_a_fix_base_record_on_another_pull_request_keeps_its_own_base_rule(self):
+        # --fix-base-record names the record that stands in for the earlier one, so this record's rounds do not stand in, even though the compare of
+        # BASE and the live head is ahead. The source's Head is the base the flag gives, and BASE is not that Head
+        self.set_origin("o/r")
+        link = "https://github.com/o/r/pull/1541#issuecomment-5"
+        argv = ["7", "--review-record", "--head", self.LIVE, "--kind", "normal", "--guard", "no", "--round", "1:reviewer:sonnet:PASS",
+                "--fix-check", f"{self.BASE}:reviewer:haiku:PASS", "--fix-base-record", link]
+        lure = {(self.BASE, self.LIVE): compare_of("ahead", self.CODE)}
+
+        def source(head):
+            return review_comment(5, 1541, record_text(n=1541, head=head, rounds=REVIEW_PASS))
+
+        # control, green on the old code: the source's Head is the fix base, so the flag's base is accepted with no compare
+        rc, out, err = self.run_args(*argv, host=self.record_host(source(self.BASE), diffs=lure))
+        self.assertEqual(rc, 0, "control: a source record whose Head is the fix base was refused:\n" + out + err)
+        rc, out, err = self.run_args(*argv, host=self.record_host(source(self.EARLIER), diffs=lure))
+        self.assert_refused(rc, out, err)
+        self.assertIn("have diverged", err, "the refusal does not name the source's divergence from the base:\n" + err)
 
 class ReviewFixBaseRecord(ReviewEnv):
     """`--fix-base-record URL` goes with --review-record and --fix-check. URL is a GitHub issue-comment link to an earlier review record, on this
