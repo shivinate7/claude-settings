@@ -1,6 +1,6 @@
 name: Code check
 description: >
-  One type check and one bug lint per language, from the table in standard.json beside this file.
+  One type check and one bug lint per language, from the table in lint/code_check_standard.json.
   Fails on a tracked language with no row, on a bug a pinned tool finds, and on a mypy list that shrank
   since the base ref or the default branch on origin, a listed module renamed off the list included.
   The repo's mypy module list and excluded folders live in .code-check.json at its root. The caller
