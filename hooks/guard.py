@@ -1977,23 +1977,59 @@ def _lines_kept(old: str, new: str) -> bool:
     return all(any(line == other for other in kept) for line in old.splitlines())
 
 
+def _head_text(full: str):
+    """The text of `full` at HEAD of the repository that holds it: '' when HEAD has no such file (a new
+    file, or a repository with no commit), None when git could not answer (a read error)."""
+    folder = os.path.dirname(full)
+    while folder and not os.path.isdir(folder):
+        parent = os.path.dirname(folder)
+        if parent == folder:
+            return None
+        folder = parent
+    top = guard_core._git(folder, "rev-parse", "--show-toplevel")
+    if top is None or top.returncode != 0:
+        return None
+    root = os.path.realpath(top.stdout.strip())
+    rel = os.path.relpath(os.path.realpath(full), root).replace(os.sep, "/")
+    if rel.startswith(".."):
+        return None
+    head = guard_core._git(root, "rev-parse", "--verify", "-q", "HEAD")
+    if head is None:
+        return None
+    if head.returncode != 0:
+        return ""   # no commit yet: every line is the builder's own
+    held = guard_core._git(root, "cat-file", "-e", "HEAD:" + rel)
+    if held is None:
+        return None
+    if held.returncode != 0:
+        return ""
+    shown = guard_core._git(root, "show", "HEAD:" + rel)
+    if shown is None or shown.returncode != 0:
+        return None
+    return shown.stdout
+
+
 def builder_add_only_breach(tool_input, full: str) -> bool:
-    """True when a builder's Edit, MultiEdit or Write of an add-only file removes or changes a line of it.
-    The edits are applied to the file on disk, the way the tool would, and the result is read against
-    the disk text. An edit the tool would fail (text not on disk) changes nothing, so it is not judged."""
+    """True when a builder's Edit, MultiEdit or Write of an add-only file removes or changes a line HEAD
+    holds (coordinator pick, 2026-11-07 18:27 CST: an existing line is a line committed at HEAD, so the
+    builder may change its own uncommitted adds). The edits are applied to the file on disk, the way the
+    tool would, and the result is read against HEAD's text. An edit the tool would fail (text not on disk)
+    changes nothing. HEAD unreadable: refuse, never pass."""
     if not isinstance(tool_input, dict):
         return False
-    try:
-        with open(full, encoding="utf-8", errors="replace") as handle:
-            disk = handle.read()
-    except Exception:
-        disk = ""
+    head = _head_text(full)
+    if head is None:
+        return True
     edits = tool_input.get("edits")
     if not isinstance(edits, list):
         edits = [tool_input] if "old_string" in tool_input or "new_string" in tool_input else []
     if isinstance(tool_input.get("content"), str) and not edits:
-        return not _lines_kept(disk, tool_input["content"])
-    result = disk
+        return not _lines_kept(head, tool_input["content"])
+    try:
+        with open(full, encoding="utf-8", errors="replace") as handle:
+            result = handle.read()
+    except Exception:
+        return True
     for edit in edits:
         if not isinstance(edit, dict):
             return True
@@ -2004,7 +2040,61 @@ def builder_add_only_breach(tool_input, full: str) -> bool:
             continue
         replace_all = bool(edit.get("replace_all", tool_input.get("replace_all")))
         result = result.replace(old, new) if replace_all else result.replace(old, new, 1)
-    return not _lines_kept(disk, result)
+    return not _lines_kept(head, result)
+
+
+# A command that rewrites a file it names, though `writes_to` reads it as a mention: a restore from git, a
+# patch, an in-place edit by perl, ruby or awk, an editor, `dd of=`. Used for the add-only file only: a
+# builder restores a changed test file from HEAD as its undo route, so `writes_to` must not read these.
+_ADD_ONLY_SHELL_WRITERS = {"patch", "ed", "ex", "dd", "rsync", "perl", "ruby", "awk", "gawk", "sponge"}
+_ADD_ONLY_GIT_WRITERS = {"checkout", "restore", "checkout-index", "apply", "am", "stash"}
+_IN_PLACE_FLAG = re.compile(r"^-[A-Za-z0-9]*i[A-Za-z0-9.]*$")
+
+
+def builder_add_only_shell_hit(stripped: str, cwd: str) -> str:
+    """The add-only path a builder's shell command names and can write, else ''. The verb is judged
+    beside the path: `cat`, `diff`, `git add`, `python3 hooks/mutate_guard.py` only read it."""
+    ends = []
+    segments = split_segments(stripped, ends)
+    for number, segment in enumerate(segments):
+        tokens = segment_tokens(segment)
+        if tokens is None:
+            tokens = segment.split()
+        if not tokens:
+            continue
+        index = resolve_command(tokens)
+        if index is None:
+            continue
+        command = os.path.basename(str(tokens[index]).replace("\\", "/")).lower().removesuffix(".exe")
+        args = [str(t) for t in tokens[index + 1:]]
+        where = dir_before_segment(segments, number, cwd, ends) or cwd
+
+        def names(words):
+            for word in words:
+                bare = word.split("=", 1)[1] if word.startswith("of=") else word
+                if not bare.startswith("-") and builder_add_only_path(bare, where):
+                    return bare
+            return ""
+        if command == "git":
+            hit = ""
+            for subcommand, rest in git_calls(segment):
+                if subcommand in _ADD_ONLY_GIT_WRITERS:
+                    hit = hit or names(rest)
+            if hit:
+                return hit
+        elif command in guard_core.INLINE_SCRIPT_SHELLS:
+            for word in args:
+                if " " in word:
+                    hit = builder_add_only_shell_hit(word, where)
+                    if hit:
+                        return hit
+        elif command in _ADD_ONLY_SHELL_WRITERS:
+            in_place = command not in ("perl", "ruby", "awk", "gawk") or "inplace" in args or any(
+                _IN_PLACE_FLAG.match(a) for a in args)
+            hit = names(args) if in_place else ""
+            if hit:
+                return hit
+    return ""
 
 
 def builder_shell_test_hit(raw: str, stripped: str, cwd: str) -> str:
@@ -2014,6 +2104,7 @@ def builder_shell_test_hit(raw: str, stripped: str, cwd: str) -> str:
     def refused(path: str, where: str) -> bool:
         return builder_test_path(path, where) or builder_add_only_path(path, where)
     return (_shell_write_hit(stripped, cwd, refused, follow_cd=True, command_position=True)
+            or builder_add_only_shell_hit(stripped, cwd)
             or interpreter_write_hit(raw, cwd, refused))
 
 
@@ -2290,7 +2381,10 @@ def role_offences(root: str, top: str, role: str, paths, old: str, new=None):
         elif role == DESIGNER_ROLE:
             bad = not all(designer_path_ok(n) for n in names)
         else:
-            bad = any(is_test_rel(n) for n in names) or (is_test_config_rel(rel) and disables_tests(
+            bad = any(is_test_rel(n) for n in names) or (
+                any(norm(n).lstrip("/").lower() in BUILDER_ADD_ONLY for n in names)
+                and not _lines_kept(text_at(root, old, rel), text_at(root, new, rel))) or (
+                is_test_config_rel(rel) and disables_tests(
                 text_at(root, new, rel).splitlines(), text_at(root, old, rel).splitlines())) or (
                 is_workflow_rel(rel) and workflow_builder_refused(text_at(root, old, rel), text_at(root, new, rel)))
         if bad:
