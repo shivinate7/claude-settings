@@ -14076,6 +14076,7 @@ class ReviewFixBaseCarry(ReviewFixBaseFixture):
     FIRST_HEAD, SECOND_HEAD = "4d" * 20, "5d" * 20  # the Heads of a chain of two records on this pull request
     LATER_LIVE = "e7" * 20  # a live head past the second record of a chain
     SOURCE_MIDDLE = "4f" * 20  # the Head of the source pull request's second PASS record, whose fix base is EARLIER
+    SOURCE_CREATED = "2026-09-15T00:00:00Z"  # the source pull request's created time: distinct from pull request 7's and the comments', so a since value names it
 
     def tree_map(self, live=TREE):
         """The tree of every head a case names: TREE, except the live head, which holds `live`, and EARLIER, the source's fix base, which holds
@@ -14088,12 +14089,14 @@ class ReviewFixBaseCarry(ReviewFixBaseFixture):
         `verdict` from EARLIER, and the net value and guard given. Its comment is on pull request SOURCE_PR."""
         return self.source(head=self.NEWEST, rounds=rounds, guard=guard, net=net, fix=(fix_check_line(verdict=verdict, head=self.EARLIER),))
 
-    def carry_host(self, *comments, source_state="closed", merged=False, listed=True, body="", trees=None, tree_error=None, diffs=None):
+    def carry_host(self, *comments, source_state="closed", merged=False, listed=True, body="", trees=None, tree_error=None, diffs=None,
+                   source_created="2026-10-01T00:00:00Z"):
         """Pull request 7 at the live head with the body `body`, and the source pull request at NEWEST in `source_state` (`merged` makes it merged),
-        listed as GitHub lists it unless `listed` is False. `trees` defaults to tree_map(); `diffs` holds PullsHost's compare replies."""
+        created at `source_created`, listed as GitHub lists it unless `listed` is False. `trees` defaults to tree_map(); `diffs` holds PullsHost's
+        compare replies."""
         pulls = [{**batch_pull(7, self.LIVE), "body": body}]
         if listed:
-            pulls.append({**batch_pull(self.SOURCE_PR, self.NEWEST), "state": source_state, "merged": merged})
+            pulls.append({**batch_pull(self.SOURCE_PR, self.NEWEST, created_at=source_created), "state": source_state, "merged": merged})
         return PullsHost(pulls, {}, comments=comments, trees=self.tree_map() if trees is None else trees, tree_error=tree_error, diffs=diffs)
 
     def carried(self, host, url=None, fix=None, rounds=round_args(REVIEW_PASSED_THREE), guard="yes", net="positive"):
@@ -14205,13 +14208,20 @@ class ReviewFixBaseCarry(ReviewFixBaseFixture):
         self.assertNotIn(REVIEW_MARKER, out, "a failed read of the source pull request still printed a record")
         self.assertNotIn("Traceback", err)
 
-    def test_a_source_without_a_fix_check_line_reads_no_tree_and_no_source_pull_request(self):
-        # green on the old code: a source with no Fix check line takes the path it always took, which reads neither a commit nor the source pull request
-        host = self.carry_host(self.source(), source_state="closed")
+    def since_reads(self, host):
+        """The `since` value of each comment-list read a run made, in order."""
+        return [fields.get("since") for rel, fields in host.list_calls if rel == "issues/comments"]
+
+    def test_a_source_without_a_fix_check_line_reads_no_tree_and_its_pull_request_once_then_lists_since_its_creation(self):
+        # a plain stand-in counts the chain on its source pull request, so it reads that pull request once, for its created time, and lists the comments
+        # since then, never from the epoch. A source with no Fix check line holds no PASS fix check, a chain of none, so it reads no commit
+        host = self.carry_host(self.source(), source_state="closed", source_created=self.SOURCE_CREATED)
         rc, out, err = self.carried(host, url=self.link(), rounds=("1:reviewer:sonnet:PASS",), guard="no", net="not owed")
         self.assertEqual(rc, 0, "a source with no Fix check line was refused:\n" + out + err)
+        self.assertEqual(host.pr_reads.count(self.SOURCE_PR), 1, "a plain stand-in did not read its source pull request once, for its created time")
+        self.assertIn(self.SOURCE_CREATED, self.since_reads(host), "the source chain was not listed since the source pull request's created time:\n" + str(self.since_reads(host)))
+        self.assertNotIn("1970-01-01T00:00:00Z", self.since_reads(host), "a plain stand-in listed the comments from the epoch, the whole repo's comments")
         self.assertEqual(host.tree_reads, [], "a source with no Fix check line read a commit")
-        self.assertEqual(host.pr_reads.count(self.SOURCE_PR), 0, "a source with no Fix check line read its pull request")
 
     def older_pass(self, cid=3):
         """The source pull request's older record, at EARLIER, with a passed fix check from OLD_BASE. With the source record it makes a chain of two."""
@@ -14337,21 +14347,26 @@ class ReviewFixBaseCarry(ReviewFixBaseFixture):
         self.assert_cap_refused(rc, out, err)
 
     def test_a_plain_stand_in_reads_one_more_comment_list_and_trees_only_when_the_chain_is_between_zero_and_the_cap(self):
-        # a plain stand-in reads this pull request's records, the source's newest record, and then the source chain: three comment lists. Trees are read
-        # only when the chain count is between zero and the cap: one link reads its fix base and its Head, and a chain of two or none reads none
+        # a plain stand-in reads this pull request's records, the source's newest record, and then the source chain: three comment lists. The source
+        # pull request is read once, for its created time, and the source chain is listed since then. Trees are read only when the chain count is between
+        # zero and the cap: one link reads its fix base and its Head, and a chain of two or none reads none
         chain_of_one = (self.passed_source(1, self.EARLIER, self.OLD_BASE), self.plain_copy(3, self.NEWEST))
-        host = self.carry_host(*chain_of_one, trees=self.chain_trees())
+        host = self.carry_host(*chain_of_one, trees=self.chain_trees(), source_created=self.SOURCE_CREATED)
         rc, out, err = self.carried(host, url=self.link(cid=3), rounds=round_args(REVIEW_PASS), guard="no", net="not owed")
         self.assertEqual(rc, 0, "control: a plain copy after a chain of one was refused:\n" + out + err)
+        self.assertEqual(host.pr_reads.count(self.SOURCE_PR), 1, "a plain stand-in did not read its source pull request once")
+        self.assertIn(self.SOURCE_CREATED, self.since_reads(host), "the source chain was not listed since the source pull request's created time")
         self.assertEqual(self.comment_reads(host), 3, "a plain stand-in did not read three comment lists, so the source chain was not read once")
         self.assertEqual(sorted(host.tree_reads), sorted([self.OLD_BASE, self.EARLIER]), "a chain of one did not read its link's fix base and Head once each")
         chain_of_two = (self.passed_source(1, self.EARLIER, self.OLD_BASE), self.passed_source(2, self.SOURCE_MIDDLE, self.EARLIER), self.plain_copy(3, self.NEWEST))
-        host = self.carry_host(*chain_of_two, trees=self.chain_trees())
+        host = self.carry_host(*chain_of_two, trees=self.chain_trees(), source_created=self.SOURCE_CREATED)
         self.carried(host, url=self.link(cid=3), rounds=round_args(REVIEW_PASS), guard="no", net="not owed")
+        self.assertEqual(host.pr_reads.count(self.SOURCE_PR), 1, "a chain of two did not read its source pull request once")
         self.assertEqual(self.comment_reads(host), 3, "a chain of two did not read the source's comment lists once more than the plain stand-in")
         self.assertEqual(host.tree_reads, [], "a chain of two at the cap read a tree")
-        host = self.carry_host(self.source(), source_state="closed")
+        host = self.carry_host(self.source(), source_state="closed", source_created=self.SOURCE_CREATED)
         self.carried(host, url=self.link(), rounds=("1:reviewer:sonnet:PASS",), guard="no", net="not owed")
+        self.assertEqual(host.pr_reads.count(self.SOURCE_PR), 1, "a source with no PASS fix check did not read its source pull request once")
         self.assertEqual(host.tree_reads, [], "a source with no PASS fix check, a chain of none, read a tree")
 
 class ReviewFixKeepsRounds(ReviewChainFixture):
