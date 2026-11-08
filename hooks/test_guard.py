@@ -22626,6 +22626,188 @@ LOG_CHECKS_EXTRA.append(("other-checkout: an owner override lifts a stranded cwd
                          xcl_override_stranded_case))
 
 
+# ------------------------------------------------------------------ other-checkout: git -C into a checkout
+#
+# `git -C <path>` names the folder a git verb runs in, so a verb that changes files there changes that
+# checkout as `cd <path> && git <verb>` would. The cd act refuses that move; the -C form must be refused
+# the same way. The -C target is read by the same resolver (`_segment_git_c_target`, through
+# session_home_git_hit) and judged by the same exemptions as elsewhere() gives a cd: the agent's own
+# checkout, its own red-run folder, a scratch clone under the temp folder, and for a top-level call its
+# own scratchpad worktree (an agent call gets no scratchpad exemption). Each row is one registered case,
+# so a failure names one form. An agent row first asserts its scope: the recording call from its own
+# lane is allowed and writes its home record, so the verdict read is the agent rule's, not a missing home.
+# Decision: an-agent-outside-its-home-tree-must-stop (other-checkout).
+GCX_HOME = "gcxhome01"                 # the agent whose worktree is the recorded home
+GCX_SIB = "gcxsib02"                   # a sibling agent's worktree: another checkout of the same clone
+GCX_SESSION = "gcx-session-0001"       # a session id in the shape SESSION_ID_RE accepts
+GCX_ORIGIN = "https://github.com/example-owner/claude-settings.git"  # names the scratch clones' repo
+GCX_TEMP = os.path.join(ROOT, "gcx_tmp")  # the temp folder the guard reads for these rows
+GCX_FIX = {}                           # the fixture's paths, built once by _gcx_fixture
+# Each @NAME in a command becomes the folder it names, so a command reads as the shell would type it.
+GCX_TOKENS = (("@SCRATCH_WT", "scratch_wt"), ("@SCRATCH_CLONE", "scratch_clone"), ("@TMP_CLONE", "tmp_clone"),
+              ("@PRIMARY", "primary"), ("@HOME", "home"), ("@SIB", "sib"), ("@RED", "red"), ("@EMPTY", "empty"))
+
+
+def _gcx_fixture():
+    """The primary checkout with the agent's lane, a sibling lane, the agent's red-run folder, a scratchpad
+    worktree of the primary, a scratchpad clone of the same repo, a same-repo clone under the temp folder
+    and a linked worktree on an orphan branch, which has no commit yet. Built once. Returns the paths by name."""
+    if GCX_FIX:
+        return GCX_FIX
+    primary, home, sib, _ = _cross_checkout_fixture(
+        "gcx", lanes=("agent-" + GCX_HOME, "agent-" + GCX_SIB), origin=GCX_ORIGIN)
+    red = sh_add_lane(primary, "agent-" + GCX_HOME + "-red")[0]
+    pad = os.path.join(GCX_TEMP, "-home-user-claude-settings", GCX_SESSION, "scratchpad")
+    scratch_wt = os.path.join(pad, "wt-notes")
+    scratch_clone = os.path.join(pad, "clone")
+    tmp_clone = os.path.join(GCX_TEMP, "tmp-clone")
+    empty = os.path.join(primary, ".claude", "worktrees", "gcx-empty")
+    os.makedirs(pad, exist_ok=True)
+    added = run_vcs(primary, "worktree", "add", "-q", scratch_wt, "-b", "gcx-scratch-notes")
+    if added.returncode != 0:
+        sys.exit("fixture setup failed: the scratchpad worktree at %r: %s" % (scratch_wt, added.stderr.strip()))
+    orphaned = run_vcs(primary, "worktree", "add", "-q", "--orphan", "-b", "gcx-empty-notes", empty)
+    if orphaned.returncode != 0 or not os.path.exists(os.path.join(empty, ".git")):
+        sys.exit("fixture setup failed: the orphan worktree at %r: %s" % (empty, orphaned.stderr.strip()))
+    _xcl_clone(scratch_clone, GCX_ORIGIN)
+    _xcl_clone(tmp_clone, GCX_ORIGIN)
+    GCX_FIX.update(primary=primary, home=home, sib=sib, red=red, scratch_wt=scratch_wt,
+                   scratch_clone=scratch_clone, tmp_clone=tmp_clone, empty=empty)
+    return GCX_FIX
+
+
+def _gcx_command(template):
+    """TEMPLATE with each @NAME token replaced by its folder, slashed."""
+    fix = _gcx_fixture()
+    text = template
+    for token, key in GCX_TOKENS:
+        text = text.replace(token, slash(fix[key]))
+    return text
+
+
+def _gcx_listed(fix):
+    """'' when `git worktree list` names every checkout of the fixture, else the key of the first it does not."""
+    listed = run_vcs(fix["primary"], "worktree", "list", "--porcelain")
+    if listed.returncode != 0:
+        return "git worktree list failed: %s" % listed.stderr.strip()
+    named = {os.path.realpath(line[len("worktree "):]) for line in listed.stdout.splitlines()
+             if line.startswith("worktree ")}
+    for key in ("primary", "home", "sib", "red", "scratch_wt", "empty"):
+        if os.path.realpath(fix[key]) not in named:
+            return "git worktree list does not name the %s checkout" % key
+    return ""
+
+
+def _gcx_scope_problem(fix):
+    """'' when the agent's recording call from its own lane is allowed and writes its home record, and git
+    lists every fixture checkout. A -C row reads its target as a checkout only when git lists it."""
+    got, reason = _decide_full("Bash", fix["home"], agent_id=GCX_HOME, temp=GCX_TEMP, command="echo hi")
+    if got != "allow":
+        return "the agent's recording call: want allow, got %s (%s)" % (got, reason[:120])
+    if not os.path.isfile(os.path.join(fix["primary"], ".git", "agent-homes", GCX_HOME)):
+        return "the agent's recording call wrote no home record"
+    return _gcx_listed(fix)
+
+
+def _gcx_row(expect, cwd_key, template, agent=GCX_HOME, session=None):
+    """One case: the verdict on the command TEMPLATE from the folder named CWD_KEY ("home" or "primary"),
+    as the agent GCX_HOME, or as a top-level call when AGENT is None. A deny must name other-checkout and
+    no path. An allow must pass."""
+    def check():
+        fix = _gcx_fixture()
+        if agent:
+            problem = _gcx_scope_problem(fix)
+            if problem:
+                return False, problem
+        command = _gcx_command(template)
+        got, reason = _decide_full("Bash", fix[cwd_key], agent_id=agent, session=session,
+                                   temp=GCX_TEMP, command=command)
+        if got != expect:
+            return False, "%s: want %s, got %s (%s)" % (command, expect, got, reason[:120])
+        if expect == "allow":
+            return True, "allowed"
+        names = [ROOT, slash(ROOT), GCX_TEMP, slash(GCX_TEMP)]
+        names += list(fix.values()) + [slash(path) for path in fix.values()]
+        problems = _other_checkout_problems(command, got, reason, names)
+        return (False, "; ".join(problems)) if problems else (True, "refused as other-checkout, no path named")
+    return check
+
+
+def gcx_scope_case():
+    """The scope the agent rows read: the agent's recording call from its own lane is allowed, writes its
+    home record, and git lists every fixture checkout. A row below is read only once this holds."""
+    problem = _gcx_scope_problem(_gcx_fixture())
+    return (False, problem) if problem else (True, "the agent's recording call is allowed, writes its home "
+                                                   "record, and git lists every checkout")
+
+
+LOG_CHECKS_EXTRA.append(("other-checkout: an agent's own lane call is judged as its own checkout and records its "
+                         "home", gcx_scope_case))
+# Refused: an agent's git -C that changes files in another checkout of the clone, whatever form names it.
+LOG_CHECKS_EXTRA.append(("other-checkout: an agent's git -C commit into the primary checkout is refused",
+                         _gcx_row("deny", "home", "git -C @PRIMARY commit -m x")))
+LOG_CHECKS_EXTRA.append(("other-checkout: an agent's git -C add into the primary checkout is refused",
+                         _gcx_row("deny", "home", "git -C @PRIMARY add f")))
+LOG_CHECKS_EXTRA.append(("other-checkout: an agent's cd into its own lane, then git -C commit into the primary "
+                         "checkout, is refused",
+                         _gcx_row("deny", "home", "cd @HOME && git -C @PRIMARY commit -m x")))
+LOG_CHECKS_EXTRA.append(("other-checkout: an agent's git -C commit by a relative path that resolves to the "
+                         "primary checkout is refused",
+                         _gcx_row("deny", "home", "git -C ../../.. commit -m x")))
+LOG_CHECKS_EXTRA.append(("other-checkout: an agent's git -C commit chained to -C the primary checkout is refused",
+                         _gcx_row("deny", "home", "git -C @HOME -C @PRIMARY commit -m x")))
+LOG_CHECKS_EXTRA.append(("other-checkout: an agent's git -C commit whose relative -C chain ends at the primary "
+                         "checkout is refused",
+                         _gcx_row("deny", "home", "git -C @PRIMARY/.claude -C .. commit -m x")))
+LOG_CHECKS_EXTRA.append(("other-checkout: an agent's git -C commit after && into the primary checkout is refused",
+                         _gcx_row("deny", "home", "true && git -C @PRIMARY commit -m x")))
+LOG_CHECKS_EXTRA.append(("other-checkout: an agent's git -C commit into a sibling agent's worktree is refused",
+                         _gcx_row("deny", "home", "git -C @SIB commit -m x")))
+LOG_CHECKS_EXTRA.append(("other-checkout: an agent's git -C commit into a linked worktree in its own scratchpad "
+                         "is refused",
+                         _gcx_row("deny", "home", "git -C @SCRATCH_WT commit -m x")))
+LOG_CHECKS_EXTRA.append(("other-checkout: an agent's git -C commit into a checkout with no commit yet is refused",
+                         _gcx_row("deny", "home", "git -C @EMPTY commit -m x")))
+# Allowed: the agent's own checkout and red-run folder, the reads, a folder no word names, a text-only
+# git -C, a scratch clone, and a -C chain whose last folder is the agent's own.
+LOG_CHECKS_EXTRA.append(("other-checkout: an agent's git -C commit in its own worktree is allowed",
+                         _gcx_row("allow", "home", "git -C @HOME commit -m x")))
+LOG_CHECKS_EXTRA.append(("other-checkout: an agent's git -C status of the primary checkout is allowed",
+                         _gcx_row("allow", "home", "git -C @PRIMARY status")))
+LOG_CHECKS_EXTRA.append(("other-checkout: an agent's git -C log of the primary checkout is allowed",
+                         _gcx_row("allow", "home", "git -C @PRIMARY log --oneline -1")))
+LOG_CHECKS_EXTRA.append(("other-checkout: an agent's git -C diff of the primary checkout is allowed",
+                         _gcx_row("allow", "home", "git -C @PRIMARY diff")))
+LOG_CHECKS_EXTRA.append(("other-checkout: an agent's git -C add in its own red-run folder is allowed",
+                         _gcx_row("allow", "home", "git -C @RED add f")))
+LOG_CHECKS_EXTRA.append(("other-checkout: an agent's git -C commit into a folder named by an unset variable is "
+                         "allowed",
+                         _gcx_row("allow", "home", "git -C $GCX_TARGET commit -m x")))
+LOG_CHECKS_EXTRA.append(("other-checkout: a git -C commit into the primary checkout, quoted as an echo argument, "
+                         "is allowed",
+                         _gcx_row("allow", "home", 'echo "git -C @PRIMARY commit -m x"')))
+LOG_CHECKS_EXTRA.append(("other-checkout: a git -C commit into the primary checkout, in a comment, is allowed",
+                         _gcx_row("allow", "home", "# git -C @PRIMARY commit -m x\nls")))
+LOG_CHECKS_EXTRA.append(("other-checkout: an agent's git -C commit into a scratch clone in its scratchpad is allowed",
+                         _gcx_row("allow", "home", "git -C @SCRATCH_CLONE commit -m x")))
+LOG_CHECKS_EXTRA.append(("other-checkout: an agent's git -C add into a scratch clone in its scratchpad is allowed",
+                         _gcx_row("allow", "home", "git -C @SCRATCH_CLONE add f")))
+LOG_CHECKS_EXTRA.append(("other-checkout: an agent's git -C commit into a same-repo clone under the temp folder is "
+                         "allowed",
+                         _gcx_row("allow", "home", "git -C @TMP_CLONE commit -m x")))
+LOG_CHECKS_EXTRA.append(("other-checkout: a git -C chain that ends at the agent's own lane is allowed after a -C "
+                         "into the primary checkout",
+                         _gcx_row("allow", "home", "git -C @PRIMARY -C @HOME commit -m x")))
+# A top-level call (no agent_id) passes its own scratchpad worktree and clone, as elsewhere() gives it.
+LOG_CHECKS_EXTRA.append(("other-checkout: a top-level git -C commit into a linked worktree in its own scratchpad is "
+                         "allowed",
+                         _gcx_row("allow", "primary", "git -C @SCRATCH_WT commit -m x", agent=None,
+                                  session=GCX_SESSION)))
+LOG_CHECKS_EXTRA.append(("other-checkout: a top-level git -C commit into a clone in its own scratchpad is allowed",
+                         _gcx_row("allow", "primary", "git -C @SCRATCH_CLONE commit -m x", agent=None,
+                                  session=GCX_SESSION)))
+
+
 # The checkers that read the log. THE COUNT IS READ FROM THIS LIST, never written beside it: a
 # literal count drifts the moment a case is added, and a suite that miscounts its own cases is a
 # suite a reader stops trusting.
