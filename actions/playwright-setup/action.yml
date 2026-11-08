@@ -9,6 +9,8 @@ description: >
   Linux the key holds the OS release. A self-hosted macOS or Windows runner with no ImageOS keys on the OS
   name only, so a runner upgrade there can still restore stale browsers.
   It needs playwright-core reachable from package-dir, so a pnpm strict layout is not supported.
+  Its commands live in install.sh, which this action and bin/ci-job both call. The action runs its `deps` and `browsers`
+  phases around the browser cache step. bin/ci-job runs its `local` phase (npm ci and the pin, no browser, no apt).
 inputs:
   package-dir:
     description: "The folder whose package.json and package-lock.json pin playwright or @playwright/test."
@@ -29,19 +31,13 @@ inputs:
 runs:
   using: composite
   steps:
-    - name: Install the pinned Playwright
-      if: ${{ inputs.npm-ci == 'true' }}
-      shell: bash
-      env:
-        DIR: ${{ inputs.package-dir }}
-      run: npm ci --prefix "$DIR" --ignore-scripts --no-audit --no-fund
-
-    - name: Read the pinned Playwright version and the OS id
+    - name: Install the pinned Playwright and read its version and the OS id
       id: pin
       shell: bash
       env:
         DIR: ${{ inputs.package-dir }}
-      run: bash "${{ github.action_path }}/pin.sh"
+        NPM_CI: ${{ inputs.npm-ci }}
+      run: bash "${{ github.action_path }}/install.sh" deps
 
     - name: Cache the browsers
       uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
@@ -49,40 +45,13 @@ runs:
         path: ~/.cache/ms-playwright
         key: playwright-${{ runner.os }}-${{ steps.pin.outputs.os }}-${{ steps.pin.outputs.version }}-${{ inputs.browsers }}
 
-    # No --with-deps, on purpose. On a cache hit this only checks the browsers are there.
+    # No --with-deps, on purpose. On a cache hit this only checks the browsers are there. The opt-in system-deps
+    # step is inside install.sh: it runs for WebKit and Firefox only, under a 300 s cap. Composite steps have no timeout-minutes.
     - name: Install the browsers
       shell: bash
       env:
         CLI: ${{ steps.pin.outputs.cli }}
         BROWSERS: ${{ inputs.browsers }}
-      run: |
-        # shellcheck disable=SC2086  # BROWSERS is a space-separated list, split on purpose
-        node "$CLI" install $BROWSERS
-
-    # Opt-in apt for WebKit and Firefox only: ubuntu-latest lacks their libraries (libgtk-4, gstreamer).
-    # CAP is 300 s. The slow mirror on 2026-10-26 ran past 11 min, so the cap ends that case in under
-    # half the time. The normal apt time is unmeasured. Composite steps have no timeout-minutes.
-    - name: Install the system libraries
-      if: ${{ inputs.system-deps != '' }}
-      shell: bash
-      env:
-        CLI: ${{ steps.pin.outputs.cli }}
         DEPS: ${{ inputs.system-deps }}
         CAP: "300"
-      run: |
-        # A blank value would run install-deps with no names, which installs every browser's libraries.
-        [ -n "${DEPS//[[:space:]]/}" ] || { echo "::error::system-deps holds no browser name. Name webkit or firefox, or leave it unset."; exit 1; }
-        for b in $DEPS; do
-          case "$b" in
-            webkit|firefox) ;;
-            *) echo "::error::system-deps takes webkit or firefox only, not '$b'. Chromium needs no apt."; exit 1 ;;
-          esac
-        done
-        [ "$RUNNER_OS" = Linux ] || exit 0
-        # shellcheck disable=SC2086  # DEPS is a space-separated list, split on purpose
-        # -k 30: a process that ignores SIGTERM at the cap is killed 30 s later.
-        timeout -k 30 "$CAP" node "$CLI" install-deps $DEPS || {
-          rc=$?
-          [ "$rc" = 124 ] && echo "::error::system-deps apt step passed its $CAP s cap." >&2
-          exit "$rc"
-        }
+      run: bash "${{ github.action_path }}/install.sh" browsers

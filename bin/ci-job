@@ -51,8 +51,17 @@
 # and github.event_name == 'pull_request' as true only with a base. ${{ github.base_ref }} is --base without
 # its remote; ${{ github.event.pull_request.head.sha }} is HEAD; ${{ github.workspace }} is the top folder of the tree under test, as the
 # runner's workspace is the checkout. Any other expression makes the step unknown.
-# An env NODE_PATH entry that is no folder here reads unknown, naming it: the step that installs it is a uses: that never runs here (checks-guard's
-# Playwright). Cost: one stat per entry. A step whose shell or verdict a signal killed, and a step whose verdict printed no verdict line
+# An env NODE_PATH entry that is no folder here reads unknown, naming it (MISSING_INSTALL), unless a --step run finds the step that makes it: an
+# earlier step of the same job, `uses: ./actions/playwright-setup` or `$/actions/playwright-setup`, whose with: package-dir/node_modules is that
+# entry (checks-guard's Playwright). Then ci-job first runs that action's own install.sh with `local` (npm ci and the pin; no browser download, no
+# apt; decision playwright-install-once), once per setup step, in workflow order, and the suite runs after it. The action is not in KNOWN_ACTION:
+# --lint never runs it, since is_lint() would then count it as lint. Run only for a --step, it is an install, not a lint step. A with: system-deps
+# reads unknown ("apt never runs locally") and installs nothing. An install that fails reads unknown with its own text, never MISSING_INSTALL, so
+# merge --lane-lint never reads it as `not run`, and the suite does not run. When the pinned browser is absent after the install (node
+# `require('playwright').chromium.executablePath()` names no file, run from package-dir), ci-job unsets each BROWSER_MARKERS env of that step and
+# prints one `note` line naming the skipped cases and that CI runs them; the suite runs without them. Whether the NODE_PATH folder was missing or
+# not, a step with such a setup step gets that browser check. Cost: one install.sh run (1.1 s for .github/shoot, 1 run, cloud container, warm npm
+# cache) and one node call per setup step; one stat per NODE_PATH entry. A step whose shell or verdict a signal killed, and a step whose verdict printed no verdict line
 # with a nonzero exit, read unknown, never FAIL: the run was cut, so the tree is not shown at fault.
 # Each step's env sets GITHUB_BASE_REF to that value (the step's own env: wins), as GitHub does on a pull-request run; with no --base it is unset, as off one.
 # A tool is missing when a line's command is not on PATH, or the step exits 127.
@@ -79,7 +88,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(BIN), "hooks"))
 sys.path.insert(0, os.path.join(os.path.dirname(BIN), "lint"))
 import _nowindow  # noqa: E402  the one home of a no-window child start (hooks/_nowindow.py)
 from git_bash import find_git_bash  # noqa: E402  the one home of the Git Bash lookup (never the WSL launcher)
-from workflow_steps import MISSING_INSTALL, NOT_RUN_JOB, SUITE_LINE, job_block, run_body, run_lines, step_blocks, step_env, step_key, step_with, suite_paths  # noqa: E402  the one home of the step parser
+from workflow_steps import BROWSER_MARKERS, BROWSER_SKIPPED, MISSING_INSTALL, NOT_RUN_JOB, SUITE_LINE, job_block, run_body, run_lines, step_blocks, step_env, step_key, step_with, suite_paths  # noqa: E402  the one home of the step parser
 
 SELECTOR_LIMIT = 60  # seconds the --lint-suites selector may run (about 7 s on this repo's 118 suites) before it reads unknown
 NO_VERDICT_LINE = "(verdict printed no verdict line)"  # the verdict line's default, when verdict printed none
@@ -216,6 +225,8 @@ INSTALL_CMD = re.compile(r"(?:npm ci|(?:pnpm|yarn) install --(?:frozen-lockfile|
 RUNNER_UNSET = {"GH_TOKEN", "GITHUB_TOKEN", "ZIZMOR_PATHS"}  # absent from a runner step's env unless its env: or the zizmor with: sets them
 KNOWN_ACTION = re.compile(r"(?:\S*/)?actions/(ste-lint|code-check|zizmor)(?:@\S*)?")
 LOCAL_ACTION = re.compile(r"[$.]/actions/\S+")  # this repo's own action: a check --lint should run
+SETUP_ACTION = re.compile(r"[$.]/actions/playwright-setup")  # the install a --step run makes before a suite that reads its node_modules
+SETUP_INSTALL = os.path.join("actions", "playwright-setup", "install.sh")  # the one home of that install: the action runs it too
 CODE_CHECK = os.path.join("actions", "code-check", "code_check.py")  # under a checkout of this repo
 ZIZMOR_RUN = os.path.join("actions", "zizmor", "run.sh")  # the one home of the pinned zizmor run
 
@@ -279,6 +290,59 @@ def could_not_start(log, start):
     errors = re.findall(r"^::error title=code-check::(.*)$", text, re.M)
     unstarted = sorted(set(e for e in errors if re.match(r"\S+ could not start: ", e)))
     return unstarted, bool(errors) and len(unstarted) == len(set(errors))
+
+
+def node_path_folders(step, values, top):
+    """The folders of the step's env NODE_PATH as normal absolute paths; [] when it has none or one this runner cannot read."""
+    raw = step_env(step).get("NODE_PATH")
+    path = expand(raw.strip("'\""), values) if raw else None
+    where = step_key(step, "working-directory") or ""
+    return [os.path.normcase(os.path.normpath(os.path.join(top, where, e))) for e in (path or "").split(os.pathsep) if e]
+
+
+def governing_setup(steps, n, values, top):
+    """(setup step, its node_modules folder) when an EARLIER step of the job is `uses: ./actions/playwright-setup` (or `$/...`) whose
+    with: package-dir/node_modules is an entry of step n's env NODE_PATH; else None. The first such step in workflow order."""
+    entries = node_path_folders(steps[n], values, top)
+    for st in steps[:n]:
+        if not SETUP_ACTION.fullmatch(uses(st)):
+            continue
+        pkg = expand((step_with(st).get("package-dir") or ".").strip("'\""), values)
+        folder = os.path.normcase(os.path.normpath(os.path.join(top, pkg or "", "node_modules"))) if pkg is not None else None
+        if folder in entries:
+            return st, folder
+    return None
+
+
+def prepare_setup(st, folder, values, top, log):
+    """Run the setup step's install (`install.sh local`) when its node_modules folder is missing, then read whether the pinned browser is there.
+    -> (problem, browser): problem is the unknown text, or None; browser is True when `require('playwright').chromium.executablePath()`,
+    run from the package folder, names a file. The install is one bin/verdict run, so its output stays in the log. It downloads no browser, runs no apt."""
+    keys = {k: expand(v.strip("'\""), values) for k, v in step_with(st).items() if k in ("system-deps", "npm-ci", "package-dir")}
+    if None in keys.values():
+        return "with: holds an expression this runner cannot read, so the playwright-setup install is not run", False
+    if (keys.get("system-deps") or "").strip():
+        return "with: system-deps %s: apt never runs locally, so the playwright-setup install is not run" % keys["system-deps"].strip(), False
+    if not os.path.isdir(folder):
+        bash, script = shell_argv("bash"), os.path.join(top, SETUP_INSTALL)
+        if bash is None:
+            return no_shell("bash"), False
+        if not os.path.isfile(script):
+            return "the playwright-setup install failed: no %s in this tree" % SETUP_INSTALL, False
+        env = {**{k: v for k, v in os.environ.items() if k not in RUNNER_UNSET}, "DIR": keys.get("package-dir") or ".",
+               "NPM_CI": keys.get("npm-ci") or "true", "VERDICT_LOG": log}
+        done = _nowindow.run([sys.executable, os.path.join(BIN, "verdict"), *bash, slashed(script), "local"], cwd=top, env=env,
+                             capture_output=True, text=True, stdin=subprocess.DEVNULL)
+        if done.returncode:
+            line = next((ln for ln in done.stdout.splitlines() if ln.startswith(("PASS ", "SKIP ", "FAIL "))), NO_VERDICT_LINE)
+            return "the playwright-setup install failed (install.sh local, exit %d): %s" % (done.returncode, line), False
+    check = "const p = require('playwright').chromium.executablePath(); process.exit(require('fs').existsSync(p) ? 0 : 1)"
+    try:
+        browser = _nowindow.run(["node", "-e", check], cwd=os.path.dirname(folder), capture_output=True, text=True,
+                                stdin=subprocess.DEVNULL, timeout=60).returncode == 0
+    except (OSError, subprocess.TimeoutExpired):
+        browser = False
+    return None, browser
 
 
 def plan(step, pr, values, top):
@@ -478,6 +542,7 @@ def main(argv):
     planned = [plan(st, bool(base), values, top) if k else None for st, k in zip(steps, kind)]
     runs = [k == "lint" and p[0] == "run" for k, p in zip(kind, planned)]  # an install runs only if a lint step after it does
     ran, blocker = 0, None  # blocker: the install step that did not finish
+    prepared = {}  # each playwright-setup step (its text) -> prepare_setup's answer, so the install runs once
     for n, step in enumerate(steps, 1):
         name = names[n - 1]
         if wanted and name not in wanted:
@@ -504,7 +569,19 @@ def main(argv):
             tally["unknown"] += 1
             print("%-15s %s: --lint did not run it: install step %s did not finish" % ("unknown", name, blocker))
             continue
+        setup = governing_setup(steps, n - 1, values, top) if wanted else None
+        if setup:  # one install and one browser read per setup step, before the first step that reads its node_modules
+            if setup[0] not in prepared:
+                prepared[setup[0]] = prepare_setup(*setup, values, top, log)
+            if prepared[setup[0]][0]:
+                tally["unknown"] += 1
+                print("%-15s %s: %s" % ("unknown", name, prepared[setup[0]][0]))
+                continue
         state, detail, shell, env, cwd = planned[n - 1] or plan(step, bool(base), values, top)
+        if state == "run" and setup and not prepared[setup[0]][1]:  # the pinned browser is absent: the suite runs without its marker
+            for marker in [m for m in BROWSER_MARKERS if m in env]:
+                del env[marker]
+                print("%-15s %s" % ("note", BROWSER_SKIPPED.format(cases=BROWSER_MARKERS[marker])))
         if state != "run":
             if wanted and state != "unknown":  # a named step that did not run proved nothing: never a pass
                 state, detail = "unknown", "--step named it, but it did not run (%s): %s" % (state, detail)

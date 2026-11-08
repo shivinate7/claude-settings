@@ -9,11 +9,16 @@ import re
 # The Linux jobs that hold the suites of the one old `checks` job, split for wall time. merge/merge.py reads suites from each.
 CHECKS_SUITE_JOBS = ("checks", "checks-merge-install")
 SUITE_LINE = re.compile(r"python3 ((?:hooks|merge)/test_[\w.-]+\.py)(?: [^|&;`<>]*)?")  # a CI step's suite line, arguments allowed
-# The unknown text bin/ci-job gives a step whose env NODE_PATH names an install that a skipped uses: step makes, and the reader of it
-# that merge --lane-lint uses to print one `not run` line for it, not unknown.
+# The unknown text bin/ci-job gives a step whose env NODE_PATH names a folder that no earlier playwright-setup step of its job makes (the
+# action's install runs locally, as `install.sh local`, only for a --step run of a step after it), and the reader of it
+# that merge --lane-lint uses to print one `not run` line for it, not unknown. An install that fails reads another text, never this one.
 MISSING_INSTALL = ("env NODE_PATH names {entry}, which is not installed here: the step that installs it (a uses: action) is not run locally, "
                    "so the suite cannot run")
 MISSING_INSTALL_LINE = re.compile(r"unknown\s+.*?: env NODE_PATH names (\S+), which is not installed here")
+# A step env that tells a suite a browser is there, and the cases a suite skips when ci-job unsets it because the pinned browser is absent
+# (lane lint never downloads a browser). The one home of this text; bin/ci-job prints BROWSER_SKIPPED once per step it unsets a marker for.
+BROWSER_MARKERS = {"GUARD_CHROMIUM": "the page-item-design browser deny cases in hooks/test_guard.py"}
+BROWSER_SKIPPED = "{cases} skipped: the pinned browser is absent here (lane lint downloads none); CI runs them"
 # The one line bin/ci-job prints for the picked suites of another job, and the reader of it that merge --lane-lint uses.
 NOT_RUN_JOB = "job {job}: picked {suites}; job {job} runs them, not {linted}"
 NOT_RUN_JOB_LINE = re.compile(r"not run\s+job ([\w-]+): picked (\S.*?); job \1 runs them, not ([\w-]+)\s*$")

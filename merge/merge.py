@@ -2506,9 +2506,14 @@ def other_job_runs(wt, others, base):
     of (job, suites) the checks lint picked but did not run. A Linux job (runs-on ubuntu*) runs through `ci-job <job> --step NAME ...`, the
     one runner, one run per job bounded by OTHER_JOB_SECONDS; a job on another OS prints one `not run` line and runs nowhere. A job or step
     this cannot read from the workflow at the head reads unknown, never a pass;
-    so does a runs-on that is not one literal label (an expression, a map, empty). A run whose only unknowns are a NODE_PATH install that CI makes
-    and this box lacks (MISSING_INSTALL_LINE) is one `not run` line and adds nothing to the result. Cost: one ci-job run (its own processes) per Linux job
-    with a picked suite, none when nothing is picked; one read of the workflow. -> [(job, suites, CiRun)]."""
+    so does a runs-on that is not one literal label (an expression, a map, empty). A step whose NODE_PATH folder an earlier playwright-setup step of its
+    job makes needs no special read here: ci-job runs that action's install.sh `local` first (npm ci and the pin, no browser download, no apt), then the
+    suite, so checks-guard's guard suite reads PASS or FAIL. With the pinned browser absent it runs without GUARD_CHROMIUM and ci-job prints one `note`
+    line naming the skipped page-item-design cases (CI runs them). A failed install, or a system-deps input, reads unknown with its own text. A run whose
+    only unknowns are a NODE_PATH folder that no such setup step makes (MISSING_INSTALL_LINE) is one `not run` line and adds nothing to the result.
+    Cost: one ci-job run (its own processes) per Linux job with a picked suite, none when nothing is picked; one read of the workflow; for a job with a
+    playwright-setup step, one npm ci (1.1 s for .github/shoot, 1 run, cloud container, warm npm cache) and one node call, no browser download.
+    -> [(job, suites, CiRun)]."""
     if not others:
         return []
     try:
@@ -2540,8 +2545,9 @@ def other_job_runs(wt, others, base):
         run = ci_job_run(wt, job, *[a for name in names for a in ("--step", name)], "--base", f"origin/{base}", seconds=OTHER_JOB_SECONDS)
         gaps = [workflow_steps.MISSING_INSTALL_LINE.search(l) for l in run.lines]
         if run.state == "unknown" and not run.timed_out and gaps and all(gaps):
-            # Every unknown is an install that a uses: step makes in CI and never runs here (checks-guard's Playwright). Main passes such a lane,
-            # so it is one `not run` line, never an unknown: the lane-lint result stays what the checks lint gave.
+            # Every unknown is a NODE_PATH folder that no earlier playwright-setup step of the job makes here (ci-job installs the ones it can find),
+            # so CI makes it by some other step. Main passes such a lane, so it is one `not run` line, never an unknown: the lane-lint result stays
+            # what the checks lint gave. A failed install is other text and stays unknown.
             say("%-15s job %s: picked %s; not run, %s is not installed here and its install step runs only in CI" % (
                 "not run", job, ", ".join(suites), ", ".join(dict.fromkeys(g.group(1) for g in gaps))))
             continue

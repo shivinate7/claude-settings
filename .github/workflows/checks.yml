@@ -614,6 +614,10 @@ jobs:
         if: ${{ needs.scope.outputs.code == 'true' }}
         run: python3 merge/test_lane_lint.py
 
+      - name: Lane lint guard-suite install fixture suite
+        if: ${{ needs.scope.outputs.code == 'true' }}
+        run: python3 merge/test_lane_lint_guard_suite.py
+
       - name: Idle-lanes reader fixture suite
         if: ${{ needs.scope.outputs.code == 'true' }}
         run: python3 merge/test_idle_lanes.py

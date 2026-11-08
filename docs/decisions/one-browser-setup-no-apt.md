@@ -13,6 +13,7 @@ Roadmap step c78 (one shared browser-test setup), 2026-10-26: one composite acti
 - Runs no apt for Chromium. WebKit and Firefox may opt in with the `system-deps` input, such as `system-deps: webkit`. Its default is empty, so the default path runs no apt.
 - With `system-deps` set, it runs `install-deps` for exactly those browsers, on Linux only. Chromium, any other name, or a blank value fails the job with one line. A blank value would install every browser's libraries.
 - That apt step has a 300 s cap. The slow mirror of 2026-10-26 ran past 11 min, so the cap ends that case in under half the time. The normal apt time is unmeasured. `timeout -k 30` kills a process that ignores SIGTERM 30 s after the cap.
+- Keeps its commands in `install.sh`, which the action and `bin/ci-job` both call. The action runs the `deps` and `browsers` phases around its cache step. Lane lint runs the `local` phase (npm ci and the pin, no browser download, no apt) before a suite that reads the action's `node_modules`.
 - Callers pin it by commit SHA. The `checks-shoot` job is its first caller.
 
 `python3 lint/compliance_probes.py playwright <child root>` flags a Playwright install that runs apt (`--with-deps` or `install-deps`) in a CI or build file. It reads workflows, actions, Makefiles, shell scripts, Dockerfiles, justfiles, Taskfiles, dev container files and package.json scripts. Comments do not count. A folded YAML command (`run: >`) counts as one line. A caller that passes `system-deps:` writes no `install-deps`, so the probe stays quiet on it.
