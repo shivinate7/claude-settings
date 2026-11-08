@@ -4176,10 +4176,11 @@ def _sim_read():
 # sets are never judged: MCP screenshot, describe and list; `hinge` get and posture; `simctl io`, `list`,
 # `get_app_container`, and `ui <device> <setting>` with no value. A boot is left to the boot rules. A shutdown and
 # an erase are drives: `all` names every booted device. Inside `sim-test --hold -- CMD` the lease does not exist
-# yet, so a drive there must target `$SIM_TEST_UDID`, which the hold exports once it has the lease. It must sit in a
-# single-quoted `sh -c '...'` script: elsewhere the caller's shell expands it to empty before the hold runs. A drive
-# that names a booted device the session already holds a live lease for is covered, as outside a hold; a lease on
-# another device is not.
+# yet, so a drive there must target the hold's own `$SIM_TEST_UDID`, which the hold exports once it has the lease, or
+# a booted device this session already holds a live lease for. `$SIM_TEST_UDID` must sit in a single-quoted
+# `sh -c '...'` script: elsewhere the caller's shell expands it to empty before the hold runs. A drive that names a
+# booted device the session already holds a live lease for is covered, as outside a hold; a lease on another device
+# is not.
 SIM_READ_ACTIONS = frozenset({"screenshot", "describe", "list"})
 SIM_DRIVE_SIMCTL = frozenset({"ui", "openurl", "install", "uninstall", "launch", "terminate", "push", "privacy",
                               "status_bar", "location", "addmedia", "keychain", "pbcopy", "spawn",
@@ -4301,9 +4302,9 @@ def sim_hold_refusal(tool: str, names: list, session: str = "", devices: list = 
     if kept:
         refuse(tool, "deny", "simulator-drive-lease",
                "A drive inside `sim-test --hold` names %s, but the hold takes its lease before it runs the "
-               "command, so only `$SIM_TEST_UDID` is covered, and only in single quotes: the caller's shell expands "
-               "any other to empty before the hold exports it. A booted device this session already holds a lease for may be "
-               "named. Drive `$SIM_TEST_UDID` from a shell the hold starts, so the hold expands it: `%s`. "
+               "command, so only the hold's own `$SIM_TEST_UDID` is covered, and only in single quotes: the caller's "
+               "shell expands any other to empty before the hold exports it. A booted phone this session already "
+               "holds a live lease for is covered too. Drive `$SIM_TEST_UDID` from a shell the hold starts, so the hold expands it: `%s`. "
                "(decision sim-test-is-the-one-boot-path)"
                % (", ".join(kept), HOLD_REMEDY), ", ".join(kept))
 
@@ -5132,8 +5133,10 @@ def judge(payload) -> None:
                 held.extend(held_in_seg)
             sid = payload.get("session_id") if isinstance(payload, dict) else ""
             sid = sid if isinstance(sid, str) else ""
+            if (held or drives) and devices is None:
+                devices = _sim_read()[1]  # one `simctl list` for both refusals
             sim_hold_refusal(tool, held, sid, devices)
-            if drives:
+            if drives and devices is not None:  # an unread list fails open, as in sim_drive_refusal
                 sim_drive_refusal(tool, drives, sid, devices)
         return
     if tool == SIM_MCP:
