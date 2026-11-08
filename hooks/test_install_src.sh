@@ -4152,7 +4152,8 @@ guardset4() {
   listed_in "$REPO_ROOT/install.sh" '/^  for gf in .*question_form\.py/p' "install.sh copy loop"
   listed_in "$REPO_ROOT/install.ps1" '/^  for gf in .*question_form\.py/p' "install.ps1 copy loop"
   listed_in "$REPO_ROOT/install.ps1" '/^    foreach (\$shared in /p' "install.ps1 set loop"
-  listed_in "$REPO_ROOT/.github/scripts/ci-scope.sh" '/hooks\/question_form\.py|/p' "ci-scope.sh case"
+  # The guard-set case line is the one that sets `code guard sweep`; the shoot list also names question_form.py.
+  listed_in "$REPO_ROOT/.github/scripts/ci-scope.sh" '/hooks\/question_form\.py|.*code guard sweep /p' "ci-scope.sh case"
   if [ -n "$miss" ]; then
     bad "$name" "own_session.py is not in:$miss"
   else
