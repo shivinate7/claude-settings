@@ -1,0 +1,31 @@
+{
+  "added": "2026-11-08T02:39:00Z",
+  "context": "Goal: every step of the work path is held by a mechanism, end to end (your ask, 2026-11-07 19:05 CST).\nProblem (rule): nothing stops a merge of a lane tip whose head no reviewer passed. A refusal there changes your earlier pick, so it needs your word.\nBased on (measured): #1683 and five hand-written review records show the gap (lane process-held-end-to-end).\nBased on (ruling): docs/decisions/pr-review-record.md Q1, pick a: \"no refusal now\".\nDeparts from: main, where merge --confirm does not read the review record \u2014 merge --confirm refuses a lane tip whose review_state is not `done` for that exact head.\nNot blocking: #1711 and #1735 go to runner 8 now; nothing waits on this answer.",
+  "home": "process-held-end-to-end",
+  "id": "merge-unreviewed-head",
+  "kind": "decision",
+  "n": 382,
+  "options": [
+    {
+      "gain": "A merge of an unreviewed head is held.",
+      "how": "merge --confirm reads the review record and refuses a lane tip whose review_state is not done for that exact head.",
+      "key": "a",
+      "label": "Grant the refusal (recommended)",
+      "lose": "One more refusal, and it can fire on a bad record."
+    },
+    {
+      "gain": "No new refusal yet.",
+      "how": "No change to merge --confirm. Ask again once only the merge tool can post a review record.",
+      "key": "b",
+      "label": "Keep \"no refusal now\" until review-record-provenance lands",
+      "lose": "The gap stays open: an unreviewed head can still merge."
+    }
+  ],
+  "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
+  "pick": "a",
+  "ref": "step process-held-end-to-end; PRs #1711 and #1735; decision pr-review-record (Q1, pick a); step review-record-provenance",
+  "short": "Merge refuses an unreviewed head",
+  "status": "open",
+  "title": "Should the merge tool refuse a lane tip whose exact head no reviewer passed?",
+  "why": "The coordinator recommends a: it closes the one gap in the path that the lane measured, and a bad record is a smaller harm than an unreviewed merge."
+}
