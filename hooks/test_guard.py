@@ -8411,7 +8411,7 @@ sh("env-child: allow, bun x runs vitest, an app's own test command",
    "bun --env-file=" + ENV + " x vitest", "allow", cwd=NOGIT)
 # Each bool flag takes no value, so the word after it is the child. The allow puts vitest after the
 # flag, with env as its filter. The deny puts env after the flag, and env is the child. A bool that
-# ENV_CHILD_BOOL_FLAG drops reads the next word as the flag's value, so the allow turns to a deny.
+# ENV_CHILD_BOOL_FLAGS drops reads the next word as the flag's value, so the allow turns to a deny.
 sh("env-child: deny, uv --dev takes no value, so env after --extra x is the child",
    "uv run --env-file " + ENV + " --extra x --dev env", "deny", "env-file", cwd=NOGIT)
 sh("env-child: allow, uv --dev takes no value, so vitest runs with the filter env",
@@ -8455,16 +8455,52 @@ sh("env-child: allow, npx --silent takes no value, so jest runs with the filter 
    "npx --env-file=" + ENV + " --silent jest -t env", "allow", cwd=NOGIT)
 sh("env-child: deny, npx --silent takes no value, so env is the child, the control for --silent",
    "npx --env-file=" + ENV + " --silent env", "deny", "env-file", cwd=NOGIT)
-sh("env-child: allow, pnpm exec --stream takes no value, so vitest runs with the filter env",
-   "pnpm --env-file=" + ENV + " exec --stream vitest env", "allow", cwd=NOGIT)
+# pnpm reads its own flags before `exec`. After `exec` a word is the command's, so the pins put --stream
+# before it, where it takes no value and the word after it is the program.
+sh("env-child: allow, pnpm --stream before exec takes no value, so vitest runs with the filter env",
+   "pnpm --env-file=" + ENV + " --stream exec vitest env", "allow", cwd=NOGIT)
+sh("env-child: deny, pnpm --stream before exec takes no value, so env is the child, the control for it",
+   "pnpm --env-file=" + ENV + " --stream exec env", "deny", "env-file", cwd=NOGIT)
+sh("env-child: allow, pnpm --stream before exec takes no value, so jest -c env is jest's option",
+   "pnpm --env-file=" + ENV + " --stream exec jest -c env", "allow", cwd=NOGIT)
 sh("env-child: deny, pnpm exec --stream takes no value, so env is the child, the control for it",
    "pnpm --env-file=" + ENV + " exec --stream env", "deny", "env-file", cwd=NOGIT)
-# After --stream, jest's -c is jest's option, so the allow holds. pnpm's own -c stays a shell string,
-# so the deny beside it holds too.
-sh("env-child: allow, pnpm exec --stream takes no value, so jest -c env is jest's option",
-   "pnpm --env-file=" + ENV + " exec --stream jest -c env", "allow", cwd=NOGIT)
 sh("env-child: deny, pnpm exec --stream then -c env, so pnpm's own -c is a shell string, the control",
    "pnpm --env-file=" + ENV + " exec --stream -c env", "deny", "env-file", cwd=NOGIT)
+# npm's --color takes a value (always, true or false), so the word after it is not the child. The deny
+# puts env after that value, and the allow puts jest there.
+sh("env-child: deny, npm exec --color takes a value, so env after always is the child",
+   "npm --env-file=" + ENV + " exec --color always env", "deny", "env-file", cwd=NOGIT)
+sh("env-child: allow, npm exec --color takes a value, so jest after always is the child, the control",
+   "npm --env-file=" + ENV + " exec --color always jest", "allow", cwd=NOGIT)
+sh("env-child: deny, npm exec --color takes a value, so -- ends the options and env is the child",
+   "npm --env-file=" + ENV + " exec --color true -- env", "deny", "env-file", cwd=NOGIT)
+sh("env-child: allow, npm exec --color takes a value, so -- ends the options and jest is the child",
+   "npm --env-file=" + ENV + " exec --color true -- jest", "allow", cwd=NOGIT)
+# nopt reads a literal true or false after a bool flag as that flag's value. So the word after the flag
+# is not the child: the deny puts env there, and the allow puts the program there.
+sh("env-child: deny, pnpm --stream takes a literal true, so exec then env runs env",
+   "pnpm --env-file=" + ENV + " --stream true exec env", "deny", "env-file", cwd=NOGIT)
+sh("env-child: allow, pnpm --stream takes a literal true, so exec then vitest is the child",
+   "pnpm --env-file=" + ENV + " --stream true exec vitest", "allow", cwd=NOGIT)
+sh("env-child: deny, npm --json takes a literal true, so exec then env runs env",
+   "npm --env-file=" + ENV + " --json true exec env", "deny", "env-file", cwd=NOGIT)
+sh("env-child: allow, npm --json takes a literal true, so exec then jest is the child",
+   "npm --env-file=" + ENV + " --json true exec jest", "allow", cwd=NOGIT)
+sh("env-child: deny, npx --json takes a literal true, so env is the child of npx",
+   "npx --env-file=" + ENV + " --json true env", "deny", "env-file", cwd=NOGIT)
+sh("env-child: allow, npx --json takes a literal true, so vitest is the child of npx",
+   "npx --env-file=" + ENV + " --json true vitest", "allow", cwd=NOGIT)
+sh("env-child: deny, npm exec --dry-run takes a literal false, so env is the child",
+   "npm --env-file=" + ENV + " exec --dry-run false env", "deny", "env-file", cwd=NOGIT)
+sh("env-child: allow, npm exec --dry-run takes a literal false, so jest is the child",
+   "npm --env-file=" + ENV + " exec --dry-run false jest", "allow", cwd=NOGIT)
+# npm exec documents --no, which takes no value. The allow runs jest with the filter -t env; the deny
+# puts env in the child's place.
+sh("env-child: allow, npm exec --no takes no value, so jest runs with the filter -t env",
+   "npm --env-file=" + ENV + " exec --no jest -t env", "allow", cwd=NOGIT)
+sh("env-child: deny, npm exec --no takes no value, so env is the child, the control for --no",
+   "npm --env-file=" + ENV + " exec --no env", "deny", "env-file", cwd=NOGIT)
 sh("env-child: allow, bun x --bun takes no value, so vitest runs with the filter -t env",
    "bun --env-file=" + ENV + " x --bun vitest -t env", "allow", cwd=NOGIT)
 sh("env-child: deny, bun x --bun takes no value, so env is the child, the control for --bun",
