@@ -8,7 +8,7 @@ import re
 
 from guard_core import (
     ASSIGNMENT, DURATION, ENV_PATTERN_COMMANDS, INTERPRETER_HEREDOC, REDIRECT, SHELL_HEREDOC,
-    POWERSHELL_CALL, TIMEOUT_FLAGS_BARE, TIMEOUT_FLAGS_WITH_VALUE, _split_heredocs,
+    POWERSHELL_CALL, TIMEOUT_FLAGS_BARE, TIMEOUT_FLAGS_WITH_VALUE, _interpreter_header, _split_heredocs,
     _without_message_values, is_powershell, norm, split_segments,
 )
 
@@ -410,17 +410,94 @@ def env_reference(word: str) -> str:
 _ESCAPED_QUOTE = re.compile(r"""\\\\|\\['"]""")
 
 
+def _rewrite_interpreter_bodies(cmd: str, rewrite) -> str:
+    """Replace each python, node, perl or ruby heredoc body (no shell reads it) with
+    `rewrite(body, header, quoted)`. `quoted` is true for a quoted delimiter, where the shell expands nothing."""
+    for quote, body, header in _split_heredocs(cmd)[1]:
+        header = _without_message_values(header)
+        if body and INTERPRETER_HEREDOC(header) and not SHELL_HEREDOC(header):
+            cmd = cmd.replace(body, rewrite(body, header, bool(quote)), 1)
+    return cmd
+
+
 def _plain_escaped_quotes(cmd: str) -> str:
     """Write a backslash-escaped quote in the body of a python, node, perl or ruby heredoc as a plain
     character. Those languages read the backslash as an escape, but the word reader below does not:
     a `\\'` would flip its quote state, and the prose after it would read as bare shell words."""
     if "<<" not in cmd or "\\" not in cmd:
         return cmd
-    for _, body, header in _split_heredocs(cmd)[1]:
-        header = _without_message_values(header)
-        if body and INTERPRETER_HEREDOC(header) and not SHELL_HEREDOC(header):
-            cmd = cmd.replace(body, _ESCAPED_QUOTE.sub(lambda m: m.group(0) if m.group(0) == "\\\\" else "_", body), 1)
-    return cmd
+    return _rewrite_interpreter_bodies(
+        cmd, lambda body, _header, _quoted: _ESCAPED_QUOTE.sub(
+            lambda m: m.group(0) if m.group(0) == "\\\\" else "_", body))
+
+
+_PYTHON_HEADER = _interpreter_header("python[\\d.]*")
+_NODE_HEADER = _interpreter_header("node")
+# A `//` line of a template literal ends at its line end, or sooner at the backtick or `${` that goes back to code.
+_TEMPLATE_PROSE_END = re.compile(r"\n|`|\$\{|\Z")
+
+
+def _blank_code_prose(body: str, python: bool) -> str:
+    """Cut the comments, and a python triple-quoted string, out of a python or node body.
+
+    The word reader below reads a body as shell words. A comment or a docstring that names an env file
+    in prose then reads as a bare word, and an odd apostrophe in it flips the quote state for the code
+    after it. This reads the body with the language's own rules: a quote opens a string up to its
+    mate (a newline ends a single-line one), and a comment is found only outside a string. Code and
+    its strings stay as written, so a read of an env file there is still judged. A node template
+    literal is left whole except for a line that starts with `//`, which the prose case needs and which
+    the reader can only read as shell words.
+    """
+    out, i, n = [], 0, len(body)
+    while i < n:
+        char = body[i]
+        pair = body[i:i + 2]
+        if python and char == "#":
+            end = body.find("\n", i)
+            i = n if end < 0 else end
+        elif not python and pair == "//":
+            end = body.find("\n", i)
+            i = n if end < 0 else end
+        elif not python and pair == "/*":
+            end = body.find("*/", i + 2)
+            end = n if end < 0 else end + 2
+            out.append("\n" * body.count("\n", i, end))
+            i = end
+        elif python and body[i:i + 3] in ("'''", '"""'):
+            end = body.find(body[i:i + 3], i + 3)
+            end = n if end < 0 else end + 3
+            out.append("\n" * body.count("\n", i, end))
+            out.append('""')
+            i = end
+        elif char in "'\"" or (char == "`" and not python):
+            j = i + 1
+            while j < n and body[j] != char and (char == "`" or body[j] != "\n"):
+                if char == "`" and body.startswith("//", j) and not body[body.rfind("\n", i, j) + 1:j].strip():
+                    k = _TEMPLATE_PROSE_END.search(body, j).start()
+                    out.append(body[i:j])
+                    i, j = k, k
+                    continue
+                j += 2 if body[j] == "\\" else 1
+            out.append(body[i:j + 1])
+            i = j + 1
+        else:
+            out.append(char)
+            i += 1
+    return "".join(out)
+
+
+def _blank_interpreter_prose(cmd: str) -> str:
+    """`_blank_code_prose` over each QUOTED-delimiter python or node heredoc body. An unquoted body is
+    expanded by the shell first, so a `$(...)` in what looks like a comment still runs: it stays whole."""
+    if "<<" not in cmd:
+        return cmd
+
+    def blank(body, header, quoted):
+        python = bool(_PYTHON_HEADER(header))
+        if not quoted or not (python or _NODE_HEADER(header)):
+            return body
+        return _blank_code_prose(body, python)
+    return _rewrite_interpreter_bodies(cmd, blank)
 
 
 def env_refusal(cmd: str, subs_only: bool = False, heredoc: bool = False):
@@ -441,7 +518,7 @@ def env_refusal(cmd: str, subs_only: bool = False, heredoc: bool = False):
     prints text, so its arguments are data. `subs_only` judges the substitutions and not the text
     around them, for the body of a heredoc.
     """
-    cmd = _plain_escaped_quotes(cmd)
+    cmd = _blank_interpreter_prose(_plain_escaped_quotes(cmd))
     texts, too_deep = _substitutions(cmd, powershell=is_powershell(cmd), heredoc=heredoc)
     if too_deep:
         return ENV_DEPTH_REASON, "substitutions nested past %d levels" % ENV_MAX_DEPTH
