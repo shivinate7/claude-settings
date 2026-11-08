@@ -21830,12 +21830,12 @@ LOG_CHECKS_EXTRA.append(("other-checkout: an owner override lifts a stranded cwd
 
 
 # --------------------------------------------------------------------------- relative escape
-# worktree-home, the shell write act: a shell write whose RELATIVE target resolves outside the agent's
-# own checkout is refused. The own checkout is the recorded home when the agent has one, else the
-# checkout that holds cwd. A row that another rule already refuses names both rules (`any_of`), so it
-# pins the deny and does not depend on which rule judges first. Each row is its own case, so a failure
-# names one cause. The incident: an agent's `mkdir ../tmp` from its home, and from a checkout it shared
-# with its caller, made a folder outside the clone.
+# worktree-home, the shell write act: a shell write by an agent with a recorded home, whose RELATIVE
+# target resolves outside that home, is refused. An agent with no record keeps main's behaviour (item
+# 425 c), so its writes are not refused here. A row that another rule already refuses names both rules
+# (`any_of`), so it pins the deny and does not depend on which rule judges first. Each row is its own
+# case, so a failure names one cause. The incident: an agent's `mkdir ../tmp` from its home, and from a
+# checkout it shared with its caller, made a folder outside the clone.
 RELESC_AGENT = "wthomew1"                        # an agent with a recorded home (_home_fixture)
 RELESC_FREE = "wthomew2"                         # an agent with no home record
 RELESC_TMP = os.path.join(ROOT, "wthomew_tmp")   # the temp folder the guard runs read, apart from every target
@@ -21919,17 +21919,18 @@ _relesc_add("worktree-home relative escape: cd .. && mkdir tmp is refused", "den
             "cd .. && mkdir tmp", "home", any_of=("worktree-home", "other-checkout"))
 _relesc_add("worktree-home relative escape: echo x > ../f from the home is refused", "deny",
             "echo x > ../f", "home", any_of=("worktree-home", "other-checkout"))
-# Deny, no record: the own checkout is the one that holds cwd, and the target lands outside it.
-_relesc_add("worktree-home relative escape: mkdir ../tmp from the primary, by an agent with no home "
-            "record, is refused", "deny", "mkdir ../tmp", "free", agent=RELESC_FREE, rule="worktree-home")
-# Deny, no record, from a linked checkout: a mkdir or touch into the primary is another checkout's file.
-# other-checkout does not judge mkdir or touch, so this clause must.
-_relesc_add("worktree-home relative escape: an agent with no record, mkdir ../../../hooks/zz from a linked "
-            "checkout into the primary, is refused", "deny", "mkdir ../../../hooks/zz", "free_lane",
-            agent=RELESC_FREE, rule="worktree-home")
-_relesc_add("worktree-home relative escape: an agent with no record, touch ../../../f from a linked "
-            "checkout into the primary, is refused", "deny", "touch ../../../f", "free_lane",
-            agent=RELESC_FREE, rule="worktree-home")
+# No record: main's behaviour (owner ruling, page item 425 c, 2026-11-08 10:19 CST). An agent with no
+# recorded home keeps main's behaviour, so worktree-home lets its writes through, from the primary and
+# from a linked checkout. main's guard allows each row below, so each expects allow.
+_relesc_add("worktree-home relative escape: no-record: main's behaviour (item 425 c): mkdir ../tmp from "
+            "the primary, by an agent with no home record, is allowed", "allow", "mkdir ../tmp", "free",
+            agent=RELESC_FREE)
+_relesc_add("worktree-home relative escape: no-record: main's behaviour (item 425 c): mkdir "
+            "../../../hooks/zz from a linked checkout into the primary is allowed", "allow",
+            "mkdir ../../../hooks/zz", "free_lane", agent=RELESC_FREE)
+_relesc_add("worktree-home relative escape: no-record: main's behaviour (item 425 c): touch "
+            "../../../f from a linked checkout into the primary is allowed", "allow",
+            "touch ../../../f", "free_lane", agent=RELESC_FREE)
 # Deny, from the recorded home: a parenthesis glued to the verb does not hide the write.
 _relesc_add("worktree-home relative escape: (mkdir ../tmp) from the home is refused", "deny",
             "(mkdir ../tmp)", "home", rule="worktree-home")
@@ -21970,7 +21971,7 @@ _relesc_add("worktree-home relative escape: a heredoc body holding mkdir ../x is
             "allow", "cat <<'EOF'\nmkdir ../x\nEOF", "home")
 _relesc_add("worktree-home relative escape: a call with no agent_id, mkdir ../tmp from the primary, is "
             "allowed as on main", "allow", "mkdir ../tmp", "primary", agent=None)
-# Allow, no record: no own checkout to escape from a folder in no checkout, and a target inside the own one.
+# Allow, no record: main's behaviour (item 425 c). A folder in no checkout, and a target in the src.
 _relesc_add("worktree-home relative escape: an agent with no record, mkdir ../x in a folder in no "
             "checkout, is allowed", "allow", "mkdir ../x", "nogit", agent=RELESC_FREE)
 _relesc_add("worktree-home relative escape: an agent with no record, mkdir ../x from the primary's src, "
