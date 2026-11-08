@@ -1,0 +1,11 @@
+{
+  "phase": "next",
+  "owner": "coordinator",
+  "lane": "session_013NEJL1YxsYqim39RK6JeZP",
+  "status": "todo",
+  "order": 717,
+  "title": "The push-main ask judges the target remote, and stays silent for a repo with no such remote or a local-path remote",
+  "why": "A false alarm reached the owner as a prompt at 10:02 CST Nov 8: an agent of lane review-record-provenance ran `git -C <scratchpad>/pr/src push origin main` in a test fixture repo with no origin remote, and the guard asked.",
+  "note": "Filed 10:05 CST Nov 8 (coordinator 10:03 CST, item 410 a). Decision plain-push-asks. Keep the ask for the real GitHub repo. Red case: that command in a fixture repo with no origin. Given to lane push-head-upstream-name (session_013NEJL1YxsYqim39RK6JeZP), already in the push guard's code, as a new PR after its own.",
+  "updatedAt": "2026-11-08T10:05:00-06:00"
+}

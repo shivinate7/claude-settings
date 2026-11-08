@@ -1,0 +1,11 @@
+{
+  "phase": "next",
+  "owner": "coordinator",
+  "lane": "session_013NEJL2Rd7tasVqys45cgDA",
+  "status": "todo",
+  "order": 719,
+  "title": "The review-range check counts only a range under a review cue",
+  "why": "Any backticked `git diff A B` counts as a range today, so a claim such as a diff being empty refuses (#2088, #2089; 2 of the 38 sweep bodies).",
+  "note": "Filed 10:05 CST Nov 8 from lane pr-review-range-check (#2056). merge/merge.py REVIEW_RANGE. Fix: count only a range under a review cue (\"Review only\", \"Review range\"), or name the body edit in the refusal. Merge after: #2056.",
+  "updatedAt": "2026-11-08T10:05:00-06:00"
+}

@@ -1,11 +1,11 @@
 {
   "title": "A PR body's review range starts at the parent head",
   "phase": "guards",
-  "status": "doing",
+  "status": "ready",
   "order": 663,
   "owner": "coordinator",
   "lane": "session_013NEJL2Rd7tasVqys45cgDA",
   "why": "A review range in #1969's body did not start at the parent head (lane notes-fix-page (session_013NEJKzjkypcToggneCjJN8), 08:12 CST Nov 8). A wrong range lets a reviewer skip commits.",
-  "note": "Done check: a red test where a PR body whose review range starts below or above the parent head is refused. Extends the lane lint's PR-body read (step lane-lint-reads-pr-body, #1969) rather than a second reader. Build lane. Filed by triage 08:14 CST Nov 8. Started by the coordinator 08:16 CST Nov 8 in lane session_013NEJL2Rd7tasVqys45cgDA. Scope answered by triage 09:04 CST Nov 8, no page item: the rule \"start equals the parent head\" is triage's wording in this note, not an owner ruling (P44), and no such check is on main. The lane takes its option a, the ancestry rule: S is an ancestor of the lane head; each parent's merge-base with the lane head is an ancestor of S; S holds no lane commit. Measured basis: 13 of about 35 range-bearing bodies among 601 open PRs fail the equality rule, 11 lagging children and #2026/#2030 on a merge base (lane, 09:01 CST). The #1969 incident is still refused.",
-  "updatedAt": "2026-11-08T09:04:00-06:00"
+  "note": "Done check: a red test where a PR body whose review range starts below or above the parent head is refused. Extends the lane lint's PR-body read (step lane-lint-reads-pr-body, #1969) rather than a second reader. Build lane. Filed by triage 08:14 CST Nov 8. Started by the coordinator 08:16 CST Nov 8 in lane session_013NEJL2Rd7tasVqys45cgDA. Scope answered by triage 09:04 CST Nov 8, no page item: the rule \"start equals the parent head\" is triage's wording in this note, not an owner ruling (P44), and no such check is on main. The lane takes its option a, the ancestry rule: S is an ancestor of the lane head; each parent's merge-base with the lane head is an ancestor of S; S holds no lane commit. Measured basis: 13 of about 35 range-bearing bodies among 601 open PRs fail the equality rule, 11 lagging children and #2026/#2030 on a merge base (lane, 09:01 CST). The #1969 incident is still refused. Ready 10:05 CST Nov 8: #2056 round 3 PASS, net value positive; record posted on head dbdd340c9. The sweep's 14 true wrong ranges, which their lanes may restate: #2055 #1897 #1878 #1866 #1863 #1837 #1733 #1715 #1714 #1637 #1635 #1536 #2063 #1964. Follow-up steps range-claim-false-alarm and range-unjudged-remedy. The lane's two notes (pointer-checkout guard let a mkdir into .claude/scratch through; two briefs named one local branch) ride in the lane (item 386).",
+  "updatedAt": "2026-11-08T10:05:00-06:00"
 }

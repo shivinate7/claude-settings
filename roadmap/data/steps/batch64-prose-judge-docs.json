@@ -1,0 +1,11 @@
+{
+  "phase": "next",
+  "owner": "coordinator",
+  "lane": "",
+  "status": "todo",
+  "order": 718,
+  "title": "Fix the two prose-judge flags from batch 64: CLAUDE.md:54 and GLOSSARY.md:90",
+  "why": "The batch-64 merge tool's prose judge flagged CLAUDE.md:54 (CI-wake claims with no source shown) and GLOSSARY.md:90 (stale against skills/roadmap/SKILL.md:151: a step is disqualified only when an open item homed on it has no lane).",
+  "note": "Filed 10:05 CST Nov 8 (coordinator 10:03 CST, item 410 a). Docs fixes: one record-writer lane, or the lane already in those files. No guard or check change.",
+  "updatedAt": "2026-11-08T10:05:00-06:00"
+}

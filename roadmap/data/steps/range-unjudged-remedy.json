@@ -1,0 +1,11 @@
+{
+  "phase": "next",
+  "owner": "coordinator",
+  "lane": "session_013NEJL2Rd7tasVqys45cgDA",
+  "status": "todo",
+  "order": 720,
+  "title": "A review range that cannot be judged gets a remedy that names the real cause",
+  "why": "The cannot-be-judged refusals (fetch error, unknown ancestor, no merge base, rev-list failure) end with \"restate the range\", which is the wrong cause.",
+  "note": "Filed 10:05 CST Nov 8 from lane pr-review-range-check (#2056). Fix: say to run it again or fetch deeper. Merge after: #2056.",
+  "updatedAt": "2026-11-08T10:05:00-06:00"
+}
