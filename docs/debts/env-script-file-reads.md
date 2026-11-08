@@ -4,3 +4,4 @@
 - **Where.** `hooks/guard_env.py` (`_heredoc_code`), `hooks/guard_core.py` (`heredoc_code`, `code_paths`). The gap is in the run call, which names only the script file.
 - **Decision.** `env-file-stays-unread` (a session never reads an environment file).
 - **Retire.** A record of the script files a session wrote, read when a later call runs one with python or node, so the run is judged as code. A case in `hooks/test_guard.py` denies the run call.
+- **Fix.** none — a per-command guard cannot see a file written in an earlier call. Until: 2026-11-21.

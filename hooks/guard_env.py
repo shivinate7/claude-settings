@@ -11,7 +11,7 @@ from guard_core import (
     ASSIGNMENT, DURATION, ENV_PATTERN_COMMANDS, INTERPRETER_HEREDOC, REDIRECT, SHELL_HEREDOC,
     TIMEOUT_FLAGS_BARE, TIMEOUT_FLAGS_WITH_VALUE, _drop_heredoc_bodies, _runs_written_file,
     _split_heredocs, _without_message_values,
-    JS_DEPTH, code_paths, heredoc_code, inline_code,
+    JS_DEPTH, code_parses, code_paths, heredoc_code, inline_code,
     inline_script, inner_commands, is_powershell, norm, segment_tokens, split_segments,
 )
 
@@ -416,14 +416,17 @@ def _heredoc_code(cmd: str):
     """(reason, log, cmd) for the python and node heredoc bodies of a command. The reason is set when
     the code of a body names an environment file. Else each QUOTED body judged clean is blanked in
     the returned command: its code was read as code, and read again as shell words, its comments
-    would be judged as commands."""
+    would be judged as commands. A body is blanked only when it IS the code the interpreter runs
+    (the heredoc feeds its stdin, `stdin`) and it reads as code (`code_parses`). Any other body, a
+    script's input, a `-c` program's input, a ssh command's text, or a list of names, was never read
+    as code, so its lines stay for the shell reading."""
     bodies = heredoc_code(cmd)
     clean = []
-    for quote, body, language in bodies:
+    for quote, body, language, stdin in bodies:
         refusal = _literal_refusal(body, language)
         if refusal[0]:
             return refusal + (cmd,)
-        if quote:
+        if quote and stdin and code_parses(body, language):
             clean.append(body)
     if clean and not _runs_written_file(
             _without_message_values(_drop_heredoc_bodies(cmd)), [h for _, _, h in _split_heredocs(cmd)[1]]):
