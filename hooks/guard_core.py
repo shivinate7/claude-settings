@@ -432,27 +432,80 @@ def _powershell_values(segment: str) -> str:
     return "".join(out)
 
 
+def _bash_arithmetic_spans(segment: str, steps):
+    """The (start, end) index spans of each bash `$(( ))`, `(( ))` and `${ }` in `segment` that
+    closes in it. `steps` is `list(walk_quotes(segment))`; a quoted bracket counts for nothing. A
+    `((` whose first `)` is single is two subshells (`((cmd)&)`), so it makes no span. An opener with
+    no closer makes no span, as in the quote walk: the rest stays visible."""
+    free = [index for index, _, quote in steps if not quote]
+    spans, at = [], 0
+    while at < len(free):
+        index = free[at]
+        head = segment[index:index + 3]
+        paren = head == "$((" or (head[:2] == "((" and (index == 0 or segment[index - 1] in " \t\r\n;|&!"))
+        brace = head[:2] == "${"
+        skip = 3 if head == "$((" else 2
+        if not (paren or brace) or free[at:at + skip] != list(range(index, index + skip)):
+            at += 1
+            continue
+        depth, end = (2 if paren else 1), None
+        for spot in range(at + skip, len(free)):
+            char = segment[free[spot]]
+            if char == ("(" if paren else "{"):
+                depth += 1
+            elif char == (")" if paren else "}"):
+                if paren and depth == 2:
+                    if segment[free[spot] + 1:free[spot] + 2] == ")" and spot + 1 < len(free) \
+                            and free[spot + 1] == free[spot] + 1:
+                        end = spot + 1
+                    break
+                depth -= 1
+                if not depth:
+                    end = spot
+                    break
+        if end is None:
+            at += 1
+            continue
+        spans.append((index, free[end]))
+        at = end + 1
+    return spans
+
+
 def _amp_cuts(segment: str):
-    """Each unquoted `&` of `segment` that is no part of `&&`, `|&`, `>&` or `<&`, as (index, kind),
-    read with `walk_quotes`, so a quoted `&`, an escaped `\\&` and a `&` inside a multi-line quote
-    are none. `kind` is "glued" (`tail -3&`: the `&` ends the word before it), "redirect" (a glued
-    `&>`, which redirects both streams and ends no job), or "spaced" (`&` after white space, or at
-    the start). In PowerShell a spaced `&` counts only when white space or the end follows, since
-    `&$cmd` and `&"x"` are its call operator."""
+    """Each unquoted `&` of `segment` that ends a job or redirects, as (index, kind), read with
+    `walk_quotes`, so a quoted `&`, an escaped `\\&` and a `&` inside a multi-line quote are none.
+    `kind` is "glued" (`tail -3&`: the `&` ends the word before it), "redirect" (a glued `&>`, which
+    redirects both streams and ends no job), or "spaced" (`&` after white space, or at the start).
+    These are no cut:
+    - a `&` of `&&`, `|&`, `>&` or `<&`;
+    - a `&` that comes first after `(` or `{` (white space may come between). PowerShell's call
+      operator sits there (`(& $tool x)`, `{&$tool $_}`), and in bash a job cannot;
+    - in PowerShell, a `&` before a character other than white space, since `&$cmd` and `&"x"` are
+      its call operator;
+    - in bash, a `&` inside `$(( ))`, `(( ))` or `${ }`, where it is bitwise and or a character."""
     cuts = []
+    if "&" not in segment:
+        return cuts
     powershell = is_powershell(segment)
-    for index, char, quote in walk_quotes(segment):
+    steps = list(walk_quotes(segment))
+    spans = [] if powershell else _bash_arithmetic_spans(segment, steps)
+    opener = ""   # the last step before this one that is not white space (an escaped `\(` is `\`)
+    for index, char, quote in steps:
+        last, opener = opener, (opener if char in " \t\r\n" else char)
         if char != "&" or quote:
             continue
         before, after = (segment[index - 1] if index else " "), segment[index + 1:index + 2]
         if after == "&" or before in ">&<|":
             continue
+        if last in ("(", "{") or any(start < index < end for start, end in spans):
+            continue
+        ends_word = after in ("", " ", "\t", "\r", "\n")
         if before in " \t\r\n":
-            if after != ">" and not (powershell and after not in ("", " ", "\t", "\r", "\n")):
+            if after != ">" and not (powershell and not ends_word):
                 cuts.append((index, "spaced"))
         elif after == ">":
             cuts.append((index, "redirect"))
-        else:
+        elif ends_word or not powershell:
             cuts.append((index, "glued"))
     return cuts
 
