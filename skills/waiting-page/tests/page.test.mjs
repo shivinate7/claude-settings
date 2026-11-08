@@ -2865,7 +2865,7 @@ test("a new answer to an ask older than the newest 3 answered asks stays open in
 
 // The Ask seen stamp is written only while the Ask section is on screen, so the owner has seen the asks. On a hidden tab an answer
 // that arrives would otherwise count as seen at the next load.
-const TAB_SEED = "2026-10-31T00:00:00Z", TAB_HIDE = "2026-10-31T06:00:00Z", TAB_HIDE_STAMP = "2026-10-31T06:00:00.000Z";
+const TAB_SEED = "2026-10-31T00:00:00Z", TAB_HIDE = "2026-10-31T06:00:00Z", TAB_HIDE_STAMP = "2026-10-31T06:00:00.000Z", TAB_CLOSE_STAMP = "2026-10-31T09:00:00.000Z";
 const TAB_ARRIVED_AT = "2026-10-31T08:00:00Z", TAB_CLOSE = "2026-10-31T09:00:00Z";
 const TAB_SHORT = { width: 1280, height: 400 };
 const TAB_ASKS = () => ({
@@ -2911,6 +2911,17 @@ test("the Ask seen stamp moves when the tab hides while the Ask section is on sc
   await page.waitForFunction(() => { const r = document.getElementById("asks").getBoundingClientRect(); return r.bottom > 0 && r.top < window.innerHeight; });
   await hideTab(page);
   assert.equal(await seenStamp(page), TAB_HIDE_STAMP, "hiding the tab with the Ask section on screen did not stamp the asks as seen");
+});
+// pagehide is the second path that stamps: a page closing on a visible tab with the Ask section on screen stamps it too.
+test("the Ask seen stamp moves when the page closes while the Ask section is on screen: pagehide", async (t) => {
+  const page = await tabOpen(t); if (!page) return;
+  await page.locator("#asks").scrollIntoViewIfNeeded();
+  assert.equal(await asksOnScreen(page), true, "the Ask section is off screen after it is scrolled into view, so this case cannot show a closing page's stamp");
+  assert.equal(await page.evaluate(() => document.hidden), false, "the tab reads as hidden, so this case cannot show a visible page closing");
+  assert.equal(await seenStamp(page), TAB_SEED, "scrolling the Ask section into view moved the Ask seen stamp");
+  await page.clock.setFixedTime(new Date(TAB_CLOSE));
+  await page.evaluate(() => window.dispatchEvent(new Event("pagehide")));
+  assert.equal(await seenStamp(page), TAB_CLOSE_STAMP, "the page closing with the Ask section on screen did not stamp the asks as seen");
 });
 test("the Ask seen stamp stays at the hide time when the page closes on a hidden tab after an answer lands: pagehide", async (t) => {
   // The Ask section is below the fold at load. The owner scrolls it into view, as the on-screen case above does, so the hide stamps it.
