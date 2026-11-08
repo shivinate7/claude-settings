@@ -678,11 +678,22 @@ class Hook(unittest.TestCase):
         self.assertEqual(count_lines(prompt), ["Blind designers:   2   "], "scope: the control brief holds only the plain line")
         self.assertEqual(self.spawn(prompt), "", "a plain count line with spaces either side must count as its number")
 
-    def assertCountRefused(self, prompt, lines, case):
-        """Scope first: the brief holds exactly `lines` as its count lines and reads as informed. Then the spawn is
-        refused on the count, the one cause `case` names."""
+    def assertCountScope(self, prompt, lines, case):
+        """Scope first: the brief holds exactly `lines` as its count lines and reads as informed."""
         self.assertEqual(count_lines(prompt), lines, "scope: " + case + ", the probe brief must hold exactly these count lines")
         self.assertEqual(load().kind_of(prompt), "informed", "scope: " + case + ", the probe brief must read as informed")
+
+    def count_verdict(self, prompt, lines, case):
+        """The verdict of the count read, after the same scope step. A ValueError from the read fails on that cause."""
+        self.assertCountScope(prompt, lines, case)
+        try:
+            return load().blind_designers_ok(prompt)
+        except ValueError as exc:
+            self.fail("blind_designers_ok raised ValueError on " + case + ": " + str(exc))
+
+    def assertCountRefused(self, prompt, lines, case):
+        """Scope first, as in assertCountScope. Then the spawn is refused on the count, the one cause `case` names."""
+        self.assertCountScope(prompt, lines, case)
         out = self.spawn(prompt)
         self.assertTrue(out, case + " must be refused, but the spawn passed")
         self.assertRefused(out)
@@ -729,6 +740,24 @@ class Hook(unittest.TestCase):
         prompt = "Designer kind: informed\n- Blind designers: 2\n\n" + DUO_BRIEF
         self.assertEqual(count_lines(prompt), ["- Blind designers: 2"], "scope: the control brief holds only the bulleted line")
         self.assertEqual(self.spawn(prompt), "", "a lone bulleted count line must count as its number")
+
+    def test_plain_non_ascii_digit_count_is_refused_not_a_crash(self):
+        # U+00B2 (superscript two) passes str.isdigit(), but int() raises ValueError on it. It reads as no count: refused.
+        prompt = "Designer kind: informed\nBlind designers: ²\n\n" + DUO_BRIEF
+        self.assertFalse(self.count_verdict(prompt, ["Blind designers: ²"], "a plain non-ASCII digit count"),
+                         "a plain `Blind designers: <superscript two>` must be refused as no count, but it passed")
+
+    def test_marked_non_ascii_digit_count_is_refused_not_a_crash(self):
+        # The same digit on the marked path. The bulleted line is the only count line, so it is read and refused.
+        prompt = "Designer kind: informed\n- Blind designers: ²\n\n" + DUO_BRIEF
+        self.assertFalse(self.count_verdict(prompt, ["- Blind designers: ²"], "a marked non-ASCII digit count"),
+                         "a marked `- Blind designers: <superscript two>` must be refused as no count, but it passed")
+
+    def test_plain_ascii_digit_count_passes(self):
+        # Green control for the two cases above. An ASCII digit still counts, so the verdict is a pass.
+        prompt = "Designer kind: informed\nBlind designers: 2\n\n" + DUO_BRIEF
+        self.assertTrue(self.count_verdict(prompt, ["Blind designers: 2"], "a plain ASCII digit count"),
+                        "a plain `Blind designers: 2` must count as a pass")
 
     def test_fenced_bulleted_count_line_is_refused(self):
         # A count line inside a ``` fence is the pasted template, not the brief's count, so it never counts.
