@@ -11031,7 +11031,7 @@ class PullsHost(merge.Host):
     `base_compare_error` answers only the base branch's read."""
     def __init__(self, pulls, check_rows, pulls_error=None, required=("checks",), workflow_runs=None, ignore=None, compares=None, compare_error=None,
                  base_compare_error=None, comments=(), comments_error=None, count_gh=False, now=None, events=None, events_error=None,
-                 main_runs=(), main_runs_error=None, jobs=None):
+                 main_runs=(), main_runs_error=None, jobs=None, closed=None):
         clock = (lambda: now) if now is not None else time.time  # a case that gives `now` fixes every age it reads
         super().__init__(list(required), base="main", minute=60, now=clock, pause=lambda s: None, ignore=ignore)
         self.pulls, self.check_rows, self.pulls_error = pulls, check_rows, pulls_error
@@ -11047,6 +11047,8 @@ class PullsHost(merge.Host):
         if count_gh:  # the branch protection names the required checks, as a real repo does
             self.required, self.protection = "protection", list(required)
         self.compare_reads = []  # (first operand, second operand) of each compare read
+        self.closed = closed or {}  # number -> a pull outside the open list, as `pulls/<n>` answers it (merged, or closed unmerged)
+        self.posts, self.api_routes = [], []  # (number, body) of each comment POST; (method, route) of each REST call through api
 
     def gh(self, args, cwd=None):
         if args[:2] == ["run", "list"]:
@@ -11064,6 +11066,8 @@ class PullsHost(merge.Host):
         m = re.search(r"/pulls/(\d+)$", route)
         if m:
             found = [d for d in self.pulls if d["number"] == int(m.group(1))]
+            if not found and int(m.group(1)) in self.closed:
+                return 0, json.dumps(self.closed[int(m.group(1))])
             if not found:
                 return 1, "gh: Not Found (HTTP 404)"
             return 0, json.dumps({**found[0], "state": "open", "merged": False, "mergeable": True, "mergeable_state": "clean", "body": ""})
@@ -11095,6 +11099,21 @@ class PullsHost(merge.Host):
         if ev:
             return REST.listing(self.events.get(int(ev.group(1)), []), None, params, flags, None, 100)
         raise AssertionError("unexpected route: " + rel)
+
+    def api(self, rel, *extra, method="GET", fields=None, body=None):
+        """A comment POST joins `comments`, so a later read sees it, and is kept in `posts`. Any other write is a failed case. Every call is
+        logged in `api_routes`, so a case can count the reads it made."""
+        self.api_routes.append((method, rel))
+        if method == "GET":
+            return super().api(rel, *extra, method=method, fields=fields, body=body)
+        m = re.fullmatch(r"issues/(\d+)/comments", rel)
+        if method != "POST" or not m:
+            raise AssertionError(f"unexpected write: {method} {rel}")
+        text = (body or {}).get("body", "")
+        self.posts.append((int(m.group(1)), text))
+        cid = 900 + len(self.posts)
+        self.comments.append(review_comment(cid, int(m.group(1)), text, created="2026-10-02T06:00:00Z"))
+        return 0, json.dumps({"id": cid})
 
     def pages(self, rel, key=None, fields=None):
         if self.count_gh:
@@ -12473,9 +12492,9 @@ class ReviewEnv(Env):
         """A host whose pull request 7 is at `head`, with the repo's review record comments in the order given, oldest first."""
         return PullsHost([batch_pull(7, head)], {}, comments=comments)
 
-    def assert_usage_error(self, *argv):
+    def assert_usage_error(self, *argv, host=None):
         """A usage error: rc 2, from a parser that knows every flag in argv. stderr holds no OLD_PARSER_ERRORS text and no traceback."""
-        rc, out, err = self.run_args(*argv)
+        rc, out, err = self.run_args(*argv, host=host)
         self.assertEqual(rc, 2, out + err)
         for old in OLD_PARSER_ERRORS:  # a parser that has never heard of the flag says one of these
             self.assertNotIn(old, err)
@@ -14140,6 +14159,588 @@ C0_CONTROL = re.compile(r"[\x00-\x08\x0b-\x1f]")  # C0 control characters, but n
 def controls(text):
     """The C0 control characters in `text`, in order."""
     return C0_CONTROL.findall(text)
+
+
+# ------------------------------------------------------------------ merge --build-batch
+# `merge --build-batch [--base BRANCH] [--push BRANCH]` builds an integration branch from PR state alone, with no count limit. The candidates
+# are the open pull requests whose ledger act is batch, joined in PR-number order. Each is trial-merged onto origin/<base> and onto the batch
+# so far: a conflict leaves it out and names the merge that failed, and a conflict only on the records page is none. A stacked PR (its base is
+# another open PR's head) and a merge-after target (a `Merge after #n` line of its body) join only after that base or target has joined, and
+# a group of linked PRs joins whole or not at all. A clean candidate is linted against origin/<base>, in parallel, unless its merge base holds
+# main's newest lint-step change. A red lint leaves it out and posts one comment, `Lint: red <head> <steps>`, which the ledger reads as
+# `lane lint red`. A merge-after target outside origin/<base> and the batch is read once (`pulls/<n>`, only when it is not in the open list),
+# so a merged one counts as on main. Every GitHub call goes through PullsHost, every lint run through merge.ci_job_run, which BuildEnv replaces.
+# On the old code --build-batch is an argparse error: it exits 2 and runs nothing. So each case asserts that the build ran (rc 0, and its last
+# line `batch: N PRs`) before any claim that something did not happen, and a usage error is told by OLD_PARSER_ERRORS.
+
+BUILD_LINT_FILE = "lint/steps.txt"  # a path the lint steps read: a main commit that touches it is main's lint-step change
+BUILD_STEPS = {"check invariants", "lint prose"}  # the steps the fake plan lists
+FAIL_LINES = ["FAIL check invariants: 2 stale lines", "FAIL lint prose: 1 unbacked line"]  # what a red lint run prints
+UNKNOWN_LINES = ["unknown lint prose: the tool is missing"]  # what an unknown lint run prints
+
+
+def lines_with(out, prefix):
+    return [line for line in out.splitlines() if line.startswith(prefix)]
+
+def joins_of(out):
+    return lines_with(out, "joins: ")
+
+def left_of(out):
+    return lines_with(out, "left out: ")
+
+def body_pull(number, sha, body, base="main", head_ref=None):
+    """An open pull request whose body is `body`, as `pages("pulls")` lists it."""
+    pull = batch_pull(number, sha, base=base, head_ref=head_ref)
+    pull["body"] = body
+    return pull
+
+def closed_pull(number, sha, merged, base="main"):
+    """A pull request outside the open list, as `pulls/<n>` answers it: merged (with merged_at), or closed unmerged."""
+    pull = batch_pull(number, sha, base=base)
+    pull.update(state="closed", merged=merged, merged_at="2026-10-03T00:00:00Z" if merged else None)
+    return pull
+
+
+class LintGate:
+    """A lint run that waits until `meet` runs are in flight, then lets them all go. A cap of `meet` shows as a peak of `meet`. A serial build
+    never meets, and its wait ends after `guard` seconds, so the case fails on the peak. The case asserts the peak, never the time (P5)."""
+
+    def __init__(self, meet, guard=5.0):
+        self.meet, self.guard = meet, guard
+        self.cond = threading.Condition()
+        self.inflight = self.peak = 0
+        self.met = False
+
+    def __call__(self, wt, *args):
+        with self.cond:
+            self.inflight += 1
+            self.peak = max(self.peak, self.inflight)
+            self.met = self.met or self.inflight >= self.meet
+            self.cond.notify_all()
+            self.cond.wait_for(lambda: self.met, timeout=self.guard)
+            self.inflight -= 1
+        return ("pass", [], [], False)
+
+
+class BuildEnv(ReviewEnv):
+    """A local origin with PR branches (`lane`, `commit`) and a PullsHost for the GitHub reads. Each lint run is `lint_run`, which replaces
+    merge.ci_job_run; lint_steps and hit_suites are replaced too, so no ci-job runs. The cpu count is 4, so the lint cap is 2 (cpu_count - 2)
+    unless a case sets another. `verdicts` maps a branch to the lint result of a run whose tree holds that branch's file; a branch not listed
+    passes. `gate` (a LintGate) replaces the lint run for a case that needs the runs to overlap."""
+
+    cpus = 4
+
+    def setUp(self):
+        super().setUp()
+        self.lint_calls, self.verdicts, self.gate = [], {}, None  # lint_calls: the branch files each lint tree held, in call order
+        for p in (unittest.mock.patch.object(merge, "ci_job_run", self.lint_run),
+                  unittest.mock.patch.object(merge, "lint_steps", lambda *a, **k: set(BUILD_STEPS)),
+                  unittest.mock.patch.object(merge, "hit_suites", self.suites_hit),
+                  unittest.mock.patch("os.cpu_count", return_value=self.cpus)):
+            p.start()
+            self.addCleanup(p.stop)
+
+    def lint_run(self, wt, *args):
+        present = frozenset(name[:-len(".txt")] for name in os.listdir(wt) if name.endswith(".txt"))
+        self.lint_calls.append(present)
+        if self.gate is not None:
+            return self.gate(wt, *args)
+        return next((verdict for branch, verdict in self.verdicts.items() if branch in present), ("pass", [], [], False))
+
+    def suites_hit(self, root, paths, skip):
+        """The fake lint-step path set: only BUILD_LINT_FILE is read by a lint step, so a suite is hit by it and by no other path."""
+        return [("lint/suite.py", "python3 lint/suite.py")] if BUILD_LINT_FILE in set(paths) else []
+
+    def linted(self):
+        """Every branch whose file one lint tree held, over the case."""
+        return set().union(*self.lint_calls)
+
+    def commit(self, branch, files, base=None):
+        """One commit on `branch` from the second clone, pushed to origin: cut from `base` (a ref or a sha) when given, else added to the
+        branch's own origin head. -> the new head sha."""
+        o = self.other
+        sh(o, "git", "fetch", "-q", "origin")
+        sh(o, "git", "checkout", "-q", "-B", branch, base or f"origin/{branch}")
+        for rel, text in files.items():
+            put(os.path.join(o, rel), text)
+        sh(o, "git", "add", "-A")
+        sh(o, "git", "commit", "-q", "-m", f"{branch}: {', '.join(files)}")
+        sh(o, "git", "push", "-q", "-f", "origin", branch)
+        return sh(o, "git", "rev-parse", "HEAD")
+
+    def lane(self, n, files=None, base="origin/main", branch=None):
+        """PR branch `branch` (feat<n> by default), cut from `base` with its own file and `files`. -> its head sha."""
+        name = branch or f"feat{n}"
+        return self.commit(name, {f"{name}.txt": name + "\n", **(files or {})}, base=base)
+
+    def main_commit(self, files):
+        """One commit on origin/main from the second clone. -> its sha."""
+        return self.commit("main", files)
+
+    def done(self, n, head):
+        """The done review record of pull request n at `head`, as the comment list holds it."""
+        return [ledger_record(900 + n, n, 5, head=head, rounds=REVIEW_PASS)]
+
+    def done_host(self, heads, comments=(), **kw):
+        """A PullsHost whose open pull requests are `heads` ({number: head sha}), each with a done record for its head."""
+        pulls = [batch_pull(n, sha) for n, sha in sorted(heads.items())]
+        records = [c for n, sha in sorted(heads.items()) for c in self.done(n, sha)]
+        return PullsHost(pulls, {}, comments=[*comments, *records], **kw)
+
+    def build(self, host, *argv):
+        """-> (rc, stdout, stderr) of `merge --build-batch <argv>` over `host`."""
+        return self.run_args("--build-batch", *argv, host=host)
+
+    def assert_ran(self, rc, out, err, batch):
+        """The build ran to its end and joined `batch` PRs. Each case asserts this before any claim that something did not happen."""
+        self.assertEqual(rc, 0, f"--build-batch did not run to its end (rc {rc}):\n{err}{out}")
+        self.assertEqual(out.splitlines()[-1:], [f"batch: {batch} PRs"], "the last line is not the batch count:\n" + out + err)
+
+
+class BuildBatchCandidates(BuildEnv):
+    """Which pull requests are candidates, and in what order: a done PR joins unless it conflicts with main or the batch so far, and a PR
+    that is not done is not listed at all."""
+
+    def test_three_done_prs_join_in_pr_order_and_a_conflicting_done_pr_is_left_out_naming_the_batch(self):
+        heads = {7: self.lane(7, {"shared.txt": "seven\n"}), 8: self.lane(8, {"shared.txt": "eight\n"}),
+                 9: self.lane(9), 10: self.lane(10), 11: self.lane(11)}
+        host = self.done_host({n: heads[n] for n in (7, 8, 9, 10)})
+        host.pulls.append(batch_pull(11, heads[11]))  # not done: no record
+        rc, out, err = self.build(host)
+        self.assert_ran(rc, out, err, 3)
+        self.assertEqual(joins_of(out), [f"joins: #{n} feat{n} {heads[n][:9]}" for n in (7, 9, 10)], out)
+        self.assertEqual(left_of(out), ["left out: #8 feat8: conflicts with the batch (#7)"], out)
+        self.assertNotIn("#11", out, "a pull request that is not done was listed:\n" + out)
+
+    def test_a_done_pr_that_conflicts_with_main_is_left_out_naming_main_and_is_never_linted(self):
+        seed = self.head("main")
+        h7 = self.lane(7)
+        h8 = self.lane(8, {"docs/decisions/first.md": "eight\n"}, base=seed)
+        self.main_commit({"docs/decisions/first.md": "main\n"})
+        rc, out, err = self.build(self.done_host({7: h7, 8: h8}))
+        self.assert_ran(rc, out, err, 1)
+        self.assertEqual(left_of(out), ["left out: #8 feat8: conflicts with main"], out)
+        self.assertEqual(len(self.lint_calls), 1, "want one lint run, for #7 alone:\n" + out)
+        self.assertNotIn("feat8", self.linted(), "the conflicting PR was linted")
+
+    def test_a_done_record_for_an_older_head_does_not_join_and_is_not_listed(self):
+        old7 = self.lane(7)
+        new7 = self.commit("feat7", {"feat7-more.txt": "more\n"})
+        h9 = self.lane(9)
+        host = PullsHost([batch_pull(7, new7), batch_pull(9, h9)], {}, comments=self.done(7, old7) + self.done(9, h9))
+        rc, out, err = self.build(host)
+        self.assert_ran(rc, out, err, 1)
+        self.assertEqual(joins_of(out), [f"joins: #9 feat9 {h9[:9]}"], out)
+        self.assertEqual(left_of(out), [], out)
+        self.assertNotIn("feat7", self.linted(), "a PR whose record is stale was linted")
+
+    def test_an_open_pr_that_is_not_done_gives_an_empty_batch_that_exits_zero(self):
+        h7 = self.lane(7)
+        rc, out, err = self.build(PullsHost([batch_pull(7, h7)], {}, comments=[]))
+        self.assert_ran(rc, out, err, 0)
+        self.assertEqual(joins_of(out) + left_of(out), [], out)
+        self.assertEqual(self.lint_calls, [], "a pull request that is not done was linted")
+
+    def test_no_open_pr_gives_an_empty_batch_that_exits_zero(self):
+        rc, out, err = self.build(PullsHost([], {}, comments=[]))
+        self.assert_ran(rc, out, err, 0)
+        self.assertEqual(joins_of(out) + left_of(out), [], out)
+
+
+class BuildBatchStacks(BuildEnv):
+    """A stacked PR (its base is another open PR's head) is tried only after its base has joined."""
+
+    def test_a_stacked_pr_joins_after_its_base(self):
+        h7 = self.lane(7)
+        h8 = self.lane(8, base=h7)
+        host = PullsHost([batch_pull(7, h7), batch_pull(8, h8, base="feat7")], {}, comments=self.done(7, h7) + self.done(8, h8))
+        rc, out, err = self.build(host)
+        self.assert_ran(rc, out, err, 2)
+        self.assertEqual(joins_of(out), [f"joins: #7 feat7 {h7[:9]}", f"joins: #8 feat8 {h8[:9]}"], out)
+        self.assertEqual(left_of(out), [], out)
+
+    def test_a_stacked_pr_whose_base_was_left_out_is_left_out_naming_the_base(self):
+        self.verdicts["feat7"] = ("fail", FAIL_LINES, [], False)
+        h7 = self.lane(7)
+        h8 = self.lane(8, base=h7)
+        host = PullsHost([batch_pull(7, h7), batch_pull(8, h8, base="feat7")], {}, comments=self.done(7, h7) + self.done(8, h8))
+        rc, out, err = self.build(host)
+        self.assert_ran(rc, out, err, 0)
+        left = left_of(out)
+        self.assertEqual(len(left), 2, out)
+        self.assertTrue(left[0].startswith("left out: #7 feat7: lane lint red: "), out)
+        self.assertTrue(left[1].startswith("left out: #8 feat8: ") and "#7" in left[1], "the stacked PR does not name its base:\n" + out)
+        self.assertNotIn("feat8", self.linted(), "a stacked PR whose base did not join was linted")
+
+
+class BuildBatchRecords(BuildEnv, RecordsEnv):
+    """A conflict only on the records page is no conflict: the page is rebuilt on the merge, and both lanes join."""
+
+    def test_a_records_page_only_conflict_between_two_lanes_joins_both(self):
+        self.use_fake_records()
+        h7 = self.lane(7, {"debts/a.md": DEBT_TEXT, "docs/records.md": page("a")})
+        h9 = self.lane(9, {"debts/b.md": DEBT_TEXT, "docs/records.md": page("b")})
+        rc, out, err = self.build(self.done_host({7: h7, 9: h9}))
+        self.assert_ran(rc, out, err, 2)
+        self.assertEqual(joins_of(out), [f"joins: #7 feat7 {h7[:9]}", f"joins: #9 feat9 {h9[:9]}"], out)
+        self.assertEqual(left_of(out), [], out)
+
+
+class BuildBatchPush(BuildEnv):
+    """--push BRANCH puts the batch on a new branch of origin, one --no-ff merge per lane. Without it no ref moves. A base or an existing
+    branch is refused, and nothing moves."""
+
+    def test_push_makes_one_no_ff_merge_per_lane_on_the_new_branch(self):
+        main = self.head("main")
+        h7, h9 = self.lane(7), self.lane(9)
+        rc, out, err = self.build(self.done_host({7: h7, 9: h9}), "--push", "batch-int")
+        self.assert_ran(rc, out, err, 2)
+        pushed = self.head("batch-int")
+        self.assertTrue(pushed, "origin has no batch-int after --push:\n" + out)
+        sh(self.co, "git", "fetch", "-q", "origin")
+        last = sh(self.co, "git", "rev-list", "--parents", "-n1", pushed).split()[1:]
+        self.assertEqual(len(last), 2, "the pushed commit is not a merge:\n" + out)
+        self.assertEqual(last[1], h9, "the last merge's second parent is not feat9's head")
+        first = sh(self.co, "git", "rev-list", "--parents", "-n1", last[0]).split()[1:]
+        self.assertEqual(first, [main, h7], "the first merge is not origin/main with feat7's head")
+
+    def test_without_push_no_ref_moves(self):
+        h7, h9 = self.lane(7), self.lane(9)
+        before = self.refs()
+        rc, out, err = self.build(self.done_host({7: h7, 9: h9}))
+        self.assert_ran(rc, out, err, 2)
+        self.assertEqual(self.refs(), before, "a build without --push moved a ref on origin")
+
+    def test_push_onto_the_base_is_refused_and_moves_nothing(self):
+        host = self.done_host({7: self.lane(7)})
+        before = self.refs()
+        rc, out, err = self.build(host, "--push", "main")
+        self.assertEqual(rc, 1, f"--push main: want a refusal (exit 1), got rc {rc}:\n{err}{out}")
+        for old in OLD_PARSER_ERRORS:
+            self.assertNotIn(old, err)
+        self.assertEqual(self.refs(), before, "a refused --push moved a ref on origin")
+        rc, out, err = self.build(host, "--push", "fresh-int")  # control: the same batch pushes to a new branch
+        self.assert_ran(rc, out, err, 1)
+
+    def test_push_onto_an_existing_branch_is_refused_and_moves_nothing(self):
+        h7, h9 = self.lane(7), self.lane(9)
+        host = self.done_host({7: h7, 9: h9})
+        before = self.refs()
+        rc, out, err = self.build(host, "--push", "feat9")  # feat9 is an open pull request's head, so it exists on origin
+        self.assertEqual(rc, 1, f"--push feat9: want a refusal (exit 1), got rc {rc}:\n{err}{out}")
+        for old in OLD_PARSER_ERRORS:
+            self.assertNotIn(old, err)
+        self.assertEqual(self.refs(), before, "a refused --push moved a ref on origin")
+        rc, out, err = self.build(host, "--push", "fresh-int")  # control
+        self.assert_ran(rc, out, err, 2)
+
+
+class BuildBatchReads(BuildEnv):
+    """The reads: a failed read of the open list or of the comments exits 2 and prints no list. One build reads the open list and the
+    comments once each, whatever the number of PRs."""
+
+    def test_a_failed_pull_list_read_exits_two_and_prints_no_list(self):
+        host = self.done_host({7: self.lane(7)})
+        rc, out, err = self.build(host)
+        self.assert_ran(rc, out, err, 1)  # control: the same host reads fine
+        host.reads.clear()
+        host.pulls_error = "gh: HTTP 502"
+        rc, out, err = self.build(host)
+        self.assertIn("pulls", host.reads, "the build did not read the open pull list")
+        self.assertEqual(rc, 2, f"a failed open-list read: want exit 2, got rc {rc}:\n{err}{out}")
+        self.assertEqual(lines_with(out, "joins: ") + lines_with(out, "left out: ") + lines_with(out, "batch: "), [], "a list was printed:\n" + out)
+
+    def test_a_failed_comments_read_exits_two_and_prints_no_list(self):
+        host = self.done_host({7: self.lane(7)})
+        rc, out, err = self.build(host)
+        self.assert_ran(rc, out, err, 1)  # control
+        host.reads.clear()
+        host.comments_error = "gh: HTTP 502"
+        rc, out, err = self.build(host)
+        self.assertIn("issues/comments", host.reads, "the build did not read the comments")
+        self.assertEqual(rc, 2, f"a failed comments read: want exit 2, got rc {rc}:\n{err}{out}")
+        self.assertEqual(lines_with(out, "joins: ") + lines_with(out, "left out: ") + lines_with(out, "batch: "), [], "a list was printed:\n" + out)
+
+    def test_one_build_reads_the_open_list_and_the_comments_once_whatever_the_pr_count(self):
+        heads = {n: self.lane(n) for n in range(7, 15)}
+        for count in (2, 8):
+            with self.subTest(prs=count):
+                host = self.done_host({n: heads[n] for n in list(heads)[:count]}, count_gh=True)
+                rc, out, err = self.build(host)
+                self.assert_ran(rc, out, err, count)
+                self.assertEqual(host.gh_calls.count("pulls"), 1, "the open list was not read once:\n" + str(host.gh_calls))
+                self.assertEqual(host.gh_calls.count("issues/comments"), 1, "the comments were not read once:\n" + str(host.gh_calls))
+                extra = [c for c in host.gh_calls if c not in ("pulls", "issues/comments", "actions/runs")]
+                self.assertEqual(extra, [], "a read beyond the open list, the comments and the base's runs:\n" + str(host.gh_calls))
+                self.assertLessEqual(host.gh_calls.count("actions/runs"), 1, "the base's runs were read more than once")
+
+
+class BuildBatchUsage(BuildEnv):
+    """--build-batch stands alone: each combination below is a usage error, and the flag alone, with --base, runs."""
+
+    def test_build_batch_stands_alone(self):
+        host = PullsHost([], {})
+        for extra in (("7",), ("--confirm",), ("--reviewed",), ("--unlock",), ("--role", "coordinator"),
+                      ("--idle-lanes", "--live", "live.json"),
+                      ("--review-record", "7", "--head", REVIEW_HEAD, "--kind", "normal", "--guard", "no")):
+            with self.subTest(extra=extra):
+                self.assert_usage_error("--build-batch", *extra, host=host)
+        rc, out, err = self.build(host, "--base", "main")
+        self.assert_ran(rc, out, err, 0)
+
+
+class BuildBatchLint(BuildEnv):
+    """A clean candidate is linted against origin/<base>, unless its merge base holds main's newest lint-step change. A red or unknown lint
+    leaves it out with its steps or its reason. A PR that conflicts is never linted."""
+
+    def test_a_lint_red_candidate_is_left_out_naming_its_failing_steps(self):
+        self.verdicts["feat8"] = ("fail", FAIL_LINES, [], False)
+        heads = {n: self.lane(n) for n in (7, 8, 9)}
+        rc, out, err = self.build(self.done_host(heads))
+        self.assert_ran(rc, out, err, 2)
+        self.assertEqual(joins_of(out), [f"joins: #7 feat7 {heads[7][:9]}", f"joins: #9 feat9 {heads[9][:9]}"], out)
+        left = left_of(out)
+        self.assertEqual(len(left), 1, out)
+        self.assertTrue(left[0].startswith("left out: #8 feat8: lane lint red: "), out)
+        for step in ("check invariants", "lint prose"):
+            self.assertIn(step, left[0], "the reason does not name the failing step " + step + ":\n" + out)
+
+    def test_a_later_pr_that_conflicts_only_with_the_red_one_still_joins(self):
+        self.verdicts["feat8"] = ("fail", FAIL_LINES, [], False)
+        heads = {7: self.lane(7), 8: self.lane(8, {"shared.txt": "eight\n"}), 9: self.lane(9), 10: self.lane(10, {"shared.txt": "ten\n"})}
+        rc, out, err = self.build(self.done_host(heads))
+        self.assert_ran(rc, out, err, 3)
+        self.assertEqual(joins_of(out), [f"joins: #{n} feat{n} {heads[n][:9]}" for n in (7, 9, 10)], out)
+        left = left_of(out)
+        self.assertEqual(len(left), 1, out)
+        self.assertTrue(left[0].startswith("left out: #8 feat8: lane lint red: "), out)
+
+    def test_a_lint_unknown_candidate_is_left_out_naming_why_and_gets_no_red_comment(self):
+        self.verdicts["feat8"] = ("unknown", UNKNOWN_LINES, [], False)
+        heads = {n: self.lane(n) for n in (7, 8, 9)}
+        host = self.done_host(heads)
+        rc, out, err = self.build(host)
+        self.assert_ran(rc, out, err, 2)
+        self.assertEqual(joins_of(out), [f"joins: #7 feat7 {heads[7][:9]}", f"joins: #9 feat9 {heads[9][:9]}"], out)
+        left = left_of(out)
+        self.assertEqual(len(left), 1, out)
+        self.assertTrue(left[0].startswith("left out: #8 feat8: lane lint unknown: ") and "lint prose" in left[0], out)
+        self.assertEqual([b for _, b in host.posts if b.startswith("Lint: red")], [], "an unknown lint posted a red comment")
+
+    def test_a_pr_that_conflicts_is_never_linted(self):
+        seed = self.head("main")
+        h7 = self.lane(7, {"shared.txt": "seven\n"})
+        h8 = self.lane(8, {"shared.txt": "eight\n"})  # conflicts with the batch (#7)
+        h9 = self.lane(9, {"docs/decisions/first.md": "nine\n"}, base=seed)
+        self.main_commit({"docs/decisions/first.md": "main\n"})  # conflicts #9 with main
+        rc, out, err = self.build(self.done_host({7: h7, 8: h8, 9: h9}))
+        self.assert_ran(rc, out, err, 1)
+        self.assertEqual(joins_of(out), [f"joins: #7 feat7 {h7[:9]}"], out)
+        self.assertEqual(left_of(out), ["left out: #8 feat8: conflicts with the batch (#7)", "left out: #9 feat9: conflicts with main"], out)
+        self.assertEqual(len(self.lint_calls), 1, "want one lint run, for #7 alone:\n" + out)
+        self.assertFalse({"feat8", "feat9"} & self.linted(), "a conflicting PR was linted")
+
+    def test_an_up_to_date_head_is_not_linted_and_says_so(self):
+        lint_sha = self.main_commit({BUILD_LINT_FILE: "step input\n"})
+        self.main_commit({"docs/notes.md": "later\n"})
+        h7 = self.lane(7)  # cut from the moved main, so its merge base holds the lint change
+        rc, out, err = self.build(self.done_host({7: h7}))
+        self.assert_ran(rc, out, err, 1)
+        self.assertEqual(lines_with(out, "skipped lint: "), [f"skipped lint: #7 feat7: its merge base holds {lint_sha[:9]}, main's newest lint change"], out)
+        self.assertEqual(joins_of(out), [f"joins: #7 feat7 {h7[:9]}"], out)
+        self.assertEqual(self.lint_calls, [], "a head whose merge base holds main's lint change was linted")
+
+    def test_an_older_head_is_linted(self):
+        seed = self.head("main")
+        h9 = self.lane(9, base=seed)  # cut before main's lint change, so its merge base lacks it
+        self.main_commit({BUILD_LINT_FILE: "step input\n"})
+        self.main_commit({"docs/notes.md": "later\n"})
+        rc, out, err = self.build(self.done_host({9: h9}))
+        self.assert_ran(rc, out, err, 1)
+        self.assertEqual(lines_with(out, "skipped lint: "), [], out)
+        self.assertEqual(joins_of(out), [f"joins: #9 feat9 {h9[:9]}"], out)
+        self.assertEqual(len(self.lint_calls), 1, "an older head was not linted:\n" + out)
+        self.assertIn("feat9", self.lint_calls[0])
+
+    def test_the_cap_line_prints_the_cap_and_its_source(self):
+        rc, out, err = self.build(self.done_host({7: self.lane(7)}))
+        self.assert_ran(rc, out, err, 1)
+        cap = [line for line in out.splitlines() if "cap" in line.lower()]
+        self.assertEqual(len(cap), 1, "want one line that prints the lint cap:\n" + out)
+        self.assertRegex(cap[0], r"\b2\b", "the cap line does not print 2 (cpu_count 4 - 2): " + cap[0])
+        self.assertIn("cpu", cap[0].lower(), "the cap line does not say where the cap came from: " + cap[0])
+
+    def test_the_cap_is_at_least_one(self):
+        host = self.done_host({7: self.lane(7)})
+        with unittest.mock.patch("os.cpu_count", return_value=2):
+            rc, out, err = self.build(host)
+        self.assert_ran(rc, out, err, 1)
+        cap = [line for line in out.splitlines() if "cap" in line.lower()]
+        self.assertEqual(len(cap), 1, "want one line that prints the lint cap:\n" + out)
+        self.assertRegex(cap[0], r"\b1\b", "the cap is not at least 1 when cpu_count - 2 is 0: " + cap[0])
+
+    def test_three_candidates_with_a_cap_of_two_run_at_most_two_lints_at_once(self):
+        self.gate = LintGate(meet=2)
+        heads = {n: self.lane(n) for n in (7, 8, 9)}
+        rc, out, err = self.build(self.done_host(heads))
+        self.assert_ran(rc, out, err, 3)
+        self.assertEqual(len(self.lint_calls), 3, "want one lint run per candidate:\n" + out)
+        self.assertEqual(self.gate.peak, 2, f"the most lints in flight was {self.gate.peak}; the cap is 2, and two should overlap")
+        self.assertEqual(joins_of(out), [f"joins: #{n} feat{n} {heads[n][:9]}" for n in (7, 8, 9)], out)
+
+
+class BuildBatchRedComment(BuildEnv):
+    """A red lint gets one PR comment, `Lint: red <head> <steps>`. The ledger reads it for the live head as `lane lint red`, ahead of batch, and
+    a newer head makes it stale. A PR whose line stands is not linted or joined again."""
+
+    def test_a_red_candidate_gets_exactly_one_comment_naming_the_head_and_steps(self):
+        self.verdicts["feat7"] = ("fail", FAIL_LINES, [], False)
+        h7, h9 = self.lane(7), self.lane(9)
+        host = self.done_host({7: h7, 9: h9})
+        rc, out, err = self.build(host)
+        self.assert_ran(rc, out, err, 1)
+        self.assertEqual(len(host.posts), 1, f"want one comment POST, got {host.posts}:\n{out}")
+        number, body = host.posts[0]
+        self.assertEqual(number, 7, "the comment is on the wrong pull request")
+        self.assertEqual(body.splitlines()[0], f"Lint: red {h7} check invariants, lint prose", "the first line is not the red line")
+
+    def test_the_ledger_reads_a_lint_red_comment_on_the_live_head_before_batch(self):
+        comments = [ledger_record(1, 7, 5, rounds=REVIEW_PASS),
+                    review_comment(2, 7, f"Lint: red {REVIEW_HEAD} check invariants, lint prose\n", created=ago(2))]
+        host = PullsHost([batch_pull(7, REVIEW_HEAD, created_at=ago(50))], {}, comments=comments, now=LEDGER_NOW)
+        rc, out, err = self.run_args("--reviewed", host=host)
+        self.assertRegex(list_line(self, out, 7), r"^#7 feat7 lane lint red: check invariants, lint prose \d+h",
+                         "the ledger does not read the lint-red comment as the next act:\n" + out + err)
+
+    def test_control_a_lint_red_comment_on_another_pr_leaves_this_one_on_batch(self):
+        comments = [ledger_record(1, 7, 5, rounds=REVIEW_PASS),
+                    review_comment(2, 8, f"Lint: red {REVIEW_HEAD} check invariants\n", created=ago(2))]
+        host = PullsHost([batch_pull(7, REVIEW_HEAD, created_at=ago(50))], {}, comments=comments, now=LEDGER_NOW)
+        rc, out, err = self.run_args("--reviewed", host=host)
+        self.assertRegex(list_line(self, out, 7), r"^#7 feat7 batch \d+h", out + err)
+
+    def test_a_newer_head_makes_the_red_line_stale_and_the_pr_is_a_candidate_again(self):
+        self.verdicts["feat7"] = ("fail", FAIL_LINES, [], False)
+        h7 = self.lane(7)
+        host = self.done_host({7: h7})
+        rc, out, err = self.build(host)
+        self.assert_ran(rc, out, err, 0)
+        self.assertEqual(len(host.posts), 1, "the red PR got no comment:\n" + out)
+        self.verdicts.pop("feat7")
+        h7b = self.commit("feat7", {"feat7-more.txt": "more\n"})
+        host.pulls = [batch_pull(7, h7b)]
+        host.comments.extend(self.done(7, h7b))
+        seen = len(self.lint_calls)
+        rc, out, err = self.build(host)
+        self.assert_ran(rc, out, err, 1)
+        self.assertEqual(joins_of(out), [f"joins: #7 feat7 {h7b[:9]}"], out)
+        self.assertTrue(any("feat7" in present for present in self.lint_calls[seen:]), "the newer head was not linted")
+
+    def test_the_next_build_does_not_relint_or_rejoin_a_red_pr_while_its_line_stands(self):
+        self.verdicts["feat7"] = ("fail", FAIL_LINES, [], False)
+        h7, h9 = self.lane(7), self.lane(9)
+        host = self.done_host({7: h7, 9: h9})
+        rc, out, err = self.build(host)
+        self.assert_ran(rc, out, err, 1)
+        self.assertEqual(len(host.posts), 1, f"want one comment after the first build, got {host.posts}")
+        seen = len(self.lint_calls)
+        rc, out, err = self.build(host)
+        self.assert_ran(rc, out, err, 1)
+        self.assertFalse(any("feat7" in present for present in self.lint_calls[seen:]), "the red PR was linted again:\n" + out)
+        self.assertEqual(joins_of(out), [f"joins: #9 feat9 {h9[:9]}"], out)
+        self.assertEqual(left_of(out), [], "a red PR whose line stands was listed:\n" + out)
+        self.assertEqual(len(host.posts), 1, "the red PR got a second comment")
+
+
+class BuildBatchGroups(BuildEnv):
+    """A stack is one group: it joins whole or not at all, and the pushed branch never holds part of it."""
+
+    def test_a_stack_whose_top_conflicts_leaves_out_both_and_pushes_neither(self):
+        main = self.head("main")
+        h1490 = self.lane(1490, {"shared.txt": "1490\n"})
+        h1502 = self.lane(1502, branch="push-report-checks")
+        h1585 = self.lane(1585, {"shared.txt": "1585\n"}, base=h1502)  # stacked on #1502, and conflicts with #1490's shared.txt
+        host = PullsHost([batch_pull(1490, h1490), batch_pull(1502, h1502, head_ref="push-report-checks"),
+                          batch_pull(1585, h1585, base="push-report-checks")], {},
+                         comments=self.done(1490, h1490) + self.done(1502, h1502) + self.done(1585, h1585))
+        rc, out, err = self.build(host, "--push", "pushed-groups")
+        self.assert_ran(rc, out, err, 1)
+        self.assertEqual(joins_of(out), [f"joins: #1490 feat1490 {h1490[:9]}"], out)
+        self.assertEqual(left_of(out), [
+            "left out: #1502 push-report-checks: its group (#1502, #1585) fails: #1585 conflicts with the batch (#1490)",
+            "left out: #1585 feat1585: its group (#1502, #1585) fails: #1585 conflicts with the batch (#1490)"], out)
+        pushed = self.head("pushed-groups")
+        self.assertTrue(pushed, "the batch was not pushed:\n" + out)
+        sh(self.co, "git", "fetch", "-q", "origin")
+        parents = sh(self.co, "git", "rev-list", "--parents", "-n1", pushed).split()[1:]
+        self.assertEqual(parents, [main, h1490], "the pushed branch holds part of the group, or is not the batch of #1490 alone:\n" + out)
+
+    def test_a_clean_stack_joins_whole_and_is_pushed_in_order(self):
+        main = self.head("main")
+        h1502 = self.lane(1502, branch="push-report-checks")
+        h1585 = self.lane(1585, base=h1502)
+        host = PullsHost([batch_pull(1502, h1502, head_ref="push-report-checks"), batch_pull(1585, h1585, base="push-report-checks")], {},
+                         comments=self.done(1502, h1502) + self.done(1585, h1585))
+        rc, out, err = self.build(host, "--push", "pushed-stack")
+        self.assert_ran(rc, out, err, 2)
+        self.assertEqual(joins_of(out), [f"joins: #1502 push-report-checks {h1502[:9]}", f"joins: #1585 feat1585 {h1585[:9]}"], out)
+        pushed = self.head("pushed-stack")
+        self.assertTrue(pushed, "the batch was not pushed:\n" + out)
+        sh(self.co, "git", "fetch", "-q", "origin")
+        last = sh(self.co, "git", "rev-list", "--parents", "-n1", pushed).split()[1:]
+        self.assertEqual(last[1:], [h1585], "the last merge's second parent is not #1585's head:\n" + out)
+        first = sh(self.co, "git", "rev-list", "--parents", "-n1", last[0]).split()[1:]
+        self.assertEqual(first, [main, h1502], "the first merge is not origin/main with #1502's head:\n" + out)
+
+
+class BuildBatchOrderedAfter(BuildEnv):
+    """A `Merge after #n` line (the whole line, case-insensitive, an optional trailing period) makes the PR join only after #n is on
+    origin/<base> or in the batch. A target outside the open list is read once, as `pulls/<n>`: merged, it counts as on main."""
+
+    def test_a_pr_after_targets_neither_on_main_nor_in_the_batch_is_left_out(self):
+        h1675, h1676, h1742 = self.lane(1675), self.lane(1676), self.lane(1742)
+        host = PullsHost([body_pull(1675, h1675, "Merge after: #1676, #1742."), batch_pull(1676, h1676)], {}, comments=[],
+                         closed={1742: closed_pull(1742, h1742, merged=False)})
+        rc, out, err = self.build(host)
+        self.assert_ran(rc, out, err, 0)
+        left = left_of(out)
+        self.assertEqual(len(left), 1, out)
+        self.assertTrue(left[0].startswith("left out: #1675 feat1675: waits on #1676") and left[0].endswith("not on main or in the batch"), out)
+        self.assertIn(("GET", "pulls/1742"), host.api_routes, "the target outside the open list was not read")
+        self.assertNotIn(("GET", "pulls/1676"), host.api_routes, "an open target was read as a pull request")
+
+    def test_a_pr_after_targets_that_join_joins_after_them(self):
+        h1675, h1676, h1742 = self.lane(1675), self.lane(1676), self.lane(1742)
+        host = PullsHost([body_pull(1675, h1675, "Merge after: #1676, #1742."), batch_pull(1676, h1676), batch_pull(1742, h1742)], {},
+                         comments=self.done(1675, h1675) + self.done(1676, h1676) + self.done(1742, h1742))
+        rc, out, err = self.build(host)
+        self.assert_ran(rc, out, err, 3)
+        self.assertEqual(joins_of(out), [f"joins: #1676 feat1676 {h1676[:9]}", f"joins: #1742 feat1742 {h1742[:9]}",
+                                         f"joins: #1675 feat1675 {h1675[:9]}"], out)
+        self.assertEqual(left_of(out), [], out)
+
+    def test_a_pr_after_a_merged_target_joins(self):
+        h1675, h1742 = self.lane(1675), self.lane(1742)
+        host = PullsHost([body_pull(1675, h1675, "Merge after #1742.")], {}, comments=self.done(1675, h1675),
+                         closed={1742: closed_pull(1742, h1742, merged=True)})
+        rc, out, err = self.build(host)
+        self.assert_ran(rc, out, err, 1)
+        self.assertEqual(joins_of(out), [f"joins: #1675 feat1675 {h1675[:9]}"], out)
+        self.assertIn(("GET", "pulls/1742"), host.api_routes, "the merged target was not read")
+
+    def test_merge_after_matches_a_whole_line_only(self):
+        for body, joins in (("merge AFTER #1676", False), ("Please merge after #1676 once it is reviewed.", True)):
+            with self.subTest(body=body):
+                h1675, h1676 = self.lane(1675), self.lane(1676)
+                host = PullsHost([body_pull(1675, h1675, body), batch_pull(1676, h1676)], {}, comments=self.done(1675, h1675))
+                rc, out, err = self.build(host)
+                if joins:
+                    self.assert_ran(rc, out, err, 1)
+                    self.assertEqual(joins_of(out), [f"joins: #1675 feat1675 {h1675[:9]}"], out)
+                else:
+                    self.assert_ran(rc, out, err, 0)
+                    left = left_of(out)
+                    self.assertTrue(left and left[0].startswith("left out: #1675 feat1675: waits on #1676"), out)
 
 
 if __name__ == "__main__":
