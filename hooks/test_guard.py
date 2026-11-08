@@ -8046,6 +8046,14 @@ for _printer in (
        "node --env-file=" + ENV + " " + _printer, "deny", "env-file", cwd=NOGIT)
 sh("env-node-env-file: node with the env file running an app file still allows",
    "node --env-file=" + ENV + " app.js", "allow", cwd=NOGIT)
+# A VALUED NODE FLAG AHEAD OF THE EVAL FLAG DOES NOT HIDE THE EVAL. `--input-type module` and
+# `--conditions dev` each take the next word as their value, so the scan steps past that word to reach `-e`.
+sh("env-node-env-file: node with the env file, a valued --input-type ahead of -e, denies",
+   "node --env-file=" + ENV + " --input-type module -e 'console.log(1)'", "deny", "env-file", cwd=NOGIT)
+sh("env-node-env-file: node with the env file, a valued --conditions ahead of -e, denies",
+   "node --env-file=" + ENV + " --conditions dev -e 'x'", "deny", "env-file", cwd=NOGIT)
+sh("env-node-env-file: node with the env file, a valued --input-type and an app file, still allows",
+   "node --env-file=" + ENV + " --input-type module app.mjs", "allow", cwd=NOGIT)
 sh("waiter: timeout 60 over one short sleep is allowed", "timeout 60 sleep 5", "allow",
    cwd=NOGIT)
 sh("waiter: a timeout wrapper does not hide a 30 s sleep, refused", "timeout 60 sleep 30",
