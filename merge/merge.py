@@ -26,15 +26,19 @@
                           live CI; then the PRs with no record.
   merge --reviewed --root DIR [--root DIR ...]
                           the same list for each repo checkout DIR, in the order given, one block each: `repo OWNER/NAME:`, that repo's lines,
-                          then at most one batch line naming its done PRs on the base, ascending: `open batch now: OWNER/NAME #a #b`, or
-                          `build next batch on the running head: ...` when a ready PR on that base has CI running. The base is the root's
-                          default branch, and its config is read from it. A done PR that another open PR holds, that the base already holds,
-                          or that is itself ready with CI running, is left off the batch line. A root whose read fails, or whose folder is
-                          missing or unreadable, prints `repo DIR: unknown (REASON)`; a failed read for the batch line keeps the root's lines
-                          and prints `batch line unknown (REASON)` in its place. Either way the other roots print in full, and the run exits 1.
-                          Cost: the gh calls of one --reviewed per root; when the base has a done PR, plus the CI reads of each ready PR on
-                          the base, one compare per done PR and other open PR on the base, and one compare per done PR against the base; no
-                          new process, file or timer.
+                          then at most one batch line naming its done PRs on the base or stacked on an open PR, in chain order: ascending,
+                          each stacked PR after its base PR: `open batch now: OWNER/NAME #a #b`, or `build next batch on the running head: ...`
+                          when a ready PR on that base has CI running. The base is the root's default branch, and its config is read from it.
+                          A done PR that another open PR holds (its own stack descendants do not), that the base already holds, or that is
+                          itself ready with CI running, is left off the batch line; so is a stacked PR whose base PR is left off, unless the
+                          base holds that PR's head. A root whose read fails, or whose folder is missing or unreadable, prints
+                          `repo DIR: unknown (REASON)`; a failed read for the batch line keeps the root's lines and prints
+                          `batch line unknown (REASON)` in its place. Either way the other roots print in full, and the run exits 1.
+                          Cost: the gh calls of one --reviewed per root; when a done PR is in reach of the base, plus the CI reads of each
+                          ready PR on the base, one git fetch of the open heads (objects written into the root's object store) and one git
+                          rev-list; no compare read. On the live set at 2026-11-08 10:39 CST (647 open PRs, 438 on main) the old logic made
+                          68,315 compare reads per run, counted with the compares answered locally; the fetch of 645 heads took 18.8 s. No
+                          new file or timer.
   merge --lane-lint <pr|ref> [--base BRANCH] [--lint-unknown-ok "REASON"]
                           the lint a lane passes before it hands its head to the batch runner: `bin/ci-job checks --lint
                           --base origin/<base>` in a temporary detached worktree at the head. A PR gives its head and base; a
@@ -964,6 +968,46 @@ class Host:
             return json.loads(out)["status"] in ("ahead", "identical")
         except (ValueError, KeyError, TypeError) as e:
             raise Stop(f"cannot read whether {other[:9]} holds {head[:9]} {READ_CITE}: {e}")
+
+    def ancestry(self, base, shas):
+        """-> holds(head, other): True when `other` contains `head` (ahead or identical, the meaning of holds_head). `other` is the base branch name
+        or one of `shas`; `head` is one of `shas`. One git fetch of `shas` and one `git rev-list --parents` over them, minus the base, give the
+        commit graph; containment is worked out here from it. A head the listing lacks is held by the base. A head the base holds is answered
+        for `base` only, so ask the base first. The pairwise home is `ancestor()`; this read is separate because a start per pair is up to
+        ~98,000 processes on the live set. Any failed read, or a head or `other` outside `shas`, raises Stop: a wrong False names a pull request twice."""
+        known, cwd, tip = set(shas), self.cwd or ".", f"refs/remotes/origin/{base}"
+        shas = sorted(known)
+        c, out = git(cwd, "fetch", "--no-tags", "--no-write-fetch-head", "origin", f"+refs/heads/{base}:{tip}", *shas)
+        if c:
+            raise Stop(f"cannot fetch the open heads of {base} {READ_CITE}: {out}")
+        c, out = git(cwd, "rev-list", "--parents", *shas, f"^{tip}")
+        if c:
+            raise Stop(f"cannot list the commits of the open heads over {base} {READ_CITE}: {out}")
+        parents = {}
+        for line in out.splitlines():
+            ids = line.split()
+            if ids and all(re.fullmatch(r"[0-9a-f]{40}", i) for i in ids):
+                parents[ids[0]] = ids[1:]
+        reached = {}
+
+        def reach(top):
+            if top not in reached:
+                seen, todo = set(), [top]
+                while todo:
+                    sha = todo.pop()
+                    if sha not in seen and sha in parents:
+                        seen.add(sha)
+                        todo.extend(parents[sha])
+                reached[top] = seen
+            return reached[top]
+
+        def holds(head, other):
+            if head not in known or (other != base and other not in known):
+                raise Stop(f"cannot read whether {other[:9]} holds {head[:9]}: a head the fetch did not name {READ_CITE}")
+            if other == base:
+                return head not in parents
+            return head == other or head in reach(other)
+        return holds
 
     def protection_names(self):
         """-> the required check names of the base's branch protection, or None when the base has none (an HTTP 404 that is not a
@@ -3342,28 +3386,68 @@ def reviewed_lines(h):
     return reviewed_read(h)[0]
 
 def reviewed_block(h):
-    """-> (lines, ok) of one `--root` block: `repo OWNER/NAME:`, that repo's reviewed lines, then at most one batch line. The batch line names the
-    done pull requests on the host's base, ascending, except one whose head another open pull request on that base holds (Host.holds_head, drafts
-    included: the batch would merge it twice), one whose head the base already holds (ahead or identical: nothing is left to merge) and one that
-    is ready with CI running (Host.ready_busy). `open batch now` when no ready pull request on that base has CI running, else `build next batch on
-    the running head`. No pull request left, no batch line. A Stop in a read for the batch line keeps the reviewed lines, prints
-    `batch line unknown (reason)` in place of the batch line, and ok is False; a Stop in reviewed_read raises. Extra cost over reviewed_read:
-    only when a done pull request exists on the base, the branch protection read and each ready pull request's check runs, statuses and workflow
-    runs, then one compare per done pull request and other open pull request on the base, and one compare per done pull request against the base."""
+    """-> (lines, ok) of one `--root` block: `repo OWNER/NAME:`, that repo's reviewed lines, then at most one batch line. The open set is every open
+    pull request whose base chain reaches the host's base: its base is the host's base, or the head branch of exactly one open pull request. A done
+    pull request in it is named when it is not ready with CI running (Host.ready_busy, pull requests on the base only), no other open pull request
+    holds its head (Host.ancestry, drafts included: the batch would merge it twice; a stack descendant, whose base chain passes through it, is not a
+    holder), the base does not hold its head, and, when stacked, its base pull request is named or the base holds that pull request's head. The
+    order is ascending, each named pull request followed by the named ones stacked on it. `open batch now` when no ready pull request on the base
+    has CI running, else `build next batch on the running head`. No pull request named, no batch line. A Stop in a read for the batch line keeps the
+    reviewed lines, prints `batch line unknown (reason)` in place of the batch line, and ok is False; a Stop in reviewed_read raises. Extra cost over
+    reviewed_read: only when a done pull request is in the open set, the branch protection read and each ready pull request's check runs, statuses
+    and workflow runs, then one git fetch of the open heads and one git rev-list (Host.ancestry); no compare read."""
     lines, done, pulls = reviewed_read(h)
     out = [f"repo {h.repo}:", *lines]
-    nums = sorted(n for n, base in done if base == h.base)
-    if not nums:
+    parent = {}  # number -> the open pull request it is stacked on, or None on the base. A pull request whose base is no open head is absent
+    for d in pulls:
+        if d["base"]["ref"] == h.base:
+            parent[d["number"]] = None
+            continue
+        owners = [p["number"] for p in pulls if p["head"]["ref"] == d["base"]["ref"] and p["number"] != d["number"]]
+        if len(owners) == 1:
+            parent[d["number"]] = owners[0]
+
+    def above(n):  # the pull requests n is stacked on, nearest first; None when the chain never reaches the base
+        got = []
+        while n in parent and parent[n] is not None:
+            n = parent[n]
+            if n in got:
+                return None
+            got.append(n)
+        return got if n in parent else None
+    above_of = {n: above(n) for n in parent}
+    opened = {n for n, a in above_of.items() if a is not None}
+    cands = sorted(n for n, _ in done if n in opened)
+    if not cands:
         return out, True
     try:
         busy = h.ready_busy(pulls, h.base)
-        heads = {d["number"]: d["head"]["sha"] for d in pulls if d["base"]["ref"] == h.base}
-        nums = [n for n in nums if n not in busy and not any(h.holds_head(heads[n], sha) for m, sha in heads.items() if m != n)
-                and not h.holds_head(heads[n], h.base)]
+        heads = {d["number"]: d["head"]["sha"] for d in pulls if d["number"] in opened}
+        holds = h.ancestry(h.base, heads.values())
+        named = {}
+
+        def is_named(n):
+            if n not in named:
+                named[n] = n in cands and n not in busy and not any(
+                    holds(heads[n], sha) for m, sha in heads.items() if m != n and n not in above_of[m]) and not holds(heads[n], h.base)
+                if named[n] and parent[n] is not None:
+                    named[n] = is_named(parent[n]) or holds(heads[parent[n]], h.base)
+            return named[n]
+        nums = [n for n in cands if is_named(n)]
     except Stop as e:
         return out + [f"{REVIEW_BATCH_UNKNOWN}({' '.join(str(e).split())})"], False
-    if nums:
-        out.append(f"{REVIEW_BATCH_BUILD if busy else REVIEW_BATCH_OPEN}{h.repo} " + " ".join(f"#{n}" for n in nums))
+    line = []
+
+    def place(n):  # chain order: a named pull request, then the named ones stacked on it
+        line.append(n)
+        for c in nums:
+            if parent[c] == n:
+                place(c)
+    for n in nums:
+        if parent[n] not in nums:
+            place(n)
+    if line:
+        out.append(f"{REVIEW_BATCH_BUILD if busy else REVIEW_BATCH_OPEN}{h.repo} " + " ".join(f"#{n}" for n in line))
     return out, True
 
 def default_branch(root):
@@ -3407,8 +3491,8 @@ def reviewed_roots(roots, hosts, config):
     is missing or unreadable, prints `repo ROOT: unknown (reason)` in its place, and ok is False; a stop in a read for its batch line keeps its
     lines with `batch line unknown (reason)` (reviewed_block), and ok is False; the other roots print in full. The notices a root's config read
     says are held with its block and follow it, so nothing prints until every root is read. Cost: reviewed_block's per root: the gh calls of one
-    --reviewed, plus, when the base has a done pull request, the CI reads of each ready pull request on the base, one compare per done pull
-    request and other open pull request on the base, and one compare per done pull request against the base; no new process, file or timer."""
+    --reviewed, plus, when a done pull request is in reach of the base, the CI reads of each ready pull request on the base, one git fetch and
+    one git rev-list; no compare read, no new file or timer."""
     lines, ok = [], True
     for r in roots:
         config_says, read_says = io.StringIO(), io.StringIO()  # two buffers: the config read, then the GitHub reads (a rate-limit wait says so)
