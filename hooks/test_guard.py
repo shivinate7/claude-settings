@@ -28305,6 +28305,19 @@ rbb_allow("reviewer-brief-blind: allowed: a reviewer brief with a Context: line 
           "Check the floor fix.\nContext: the prior verdict is in the PR thread.\nFiles: hooks/guard.py.")
 rbb_allow("reviewer-brief-blind: allowed: a reviewer brief with a Verdict — line that asks for one word, PASS or FAIL",
           "Check the floor fix.\nVerdict — one word, PASS or FAIL.\nFiles: hooks/guard.py.")
+# A bold round label before its dash (`**Round 1** — FAIL`, `**Round 1 result** — FAIL`) and a dash with no spaces
+# (`Prior verdict—FAIL`) are verdict lines too. The allow rows are the same labels before prose, which must pass.
+rbb_refuse("reviewer-brief-blind: refused: a reviewer brief with a bold **Round 1** — FAIL line, em dash",
+           "Check the floor fix.\n**Round 1** — FAIL\nFiles: hooks/guard.py.")
+rbb_refuse("reviewer-brief-blind: refused: a reviewer brief with a bold **Round 1 result** — FAIL line, em dash",
+           "Check the floor fix.\n**Round 1 result** — FAIL\nFiles: hooks/guard.py.")
+rbb_refuse("reviewer-brief-blind: refused: a reviewer brief with a Prior verdict—FAIL line, em dash with no spaces",
+           "Check the floor fix.\nPrior verdict—FAIL\nFiles: hooks/guard.py.")
+rbb_allow("reviewer-brief-blind: allowed: a reviewer brief with a bold **Round 1** — read the diff first. line",
+          "Check the floor fix.\n**Round 1** — read the diff first.\nFiles: hooks/guard.py.")
+rbb_allow("reviewer-brief-blind: allowed: a reviewer brief with a bold **Verdict** — one word, PASS or FAIL. line",
+          "Check the floor fix.\n**Verdict** — one word, PASS or FAIL.\nFiles: hooks/guard.py.")
+
 # The pins. The round-2 pin runs on sonnet, where the step-up floor allows the round, so only this rule refuses it. The
 # round-1 pin uses an en dash (U+2013), written as an escape so the dash is visible in the source.
 rbb_refuse("reviewer-brief-blind: refused: a reviewer brief with a Round 2 of 3 — FAIL line, em dash, pinned on sonnet",
