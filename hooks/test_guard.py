@@ -10982,10 +10982,10 @@ for _rd_name, _rd_command in (
     ('a commit piped to tail, commit -am x 2>&1 | tail -5', GEN + " && " + VCS + " commit -am x 2>&1 | tail -5"),
     ('a commit redirected to a file, commit -am x > out.txt', GEN + " && " + VCS + " commit -am x > out.txt"),
 ):
-    records_deny("redirect-judged: a chain with %s" % _rd_name, _rd_command, "product")
-records_deny("redirect-judged control: a chain that runs the generator, then commit -am",
+    records_refusal("redirect-judged: a chain with %s" % _rd_name, _rd_command, "product")
+records_refusal("redirect-judged control: a chain that runs the generator, then commit -am",
              GEN + " && " + COMMIT_AM, "product")
-records_deny("redirect-judged control: a chain with a bare target on the generator run, then commit -am",
+records_refusal("redirect-judged control: a chain with a bare target on the generator run, then commit -am",
              GEN + " > out.txt && " + COMMIT_AM, "product")
 records_allow("redirect-judged: a --help run with a spaced target, then commit -am",
               GEN + ' --help > "my out.txt" && ' + COMMIT_AM, REC_LANES["product"])
@@ -10999,11 +10999,11 @@ ADD_REDIRECT_CASES = (
     ("add -A > out.txt", VCS + " add -A > out.txt"),
 )
 for _name, _add in ADD_REDIRECT_CASES:
-    records_deny("add-redirect: a generator run, then git %s, then commit" % _name,
+    records_refusal("add-redirect: a generator run, then git %s, then commit" % _name,
                  GEN + " && " + _add + " && " + COMMIT_X, "product")
-records_deny("add-redirect pin: a generator run, then git add . > out.txt, then commit",
+records_refusal("add-redirect pin: a generator run, then git add . > out.txt, then commit",
              GEN + " && " + VCS + " add . > out.txt && " + COMMIT_X, "product")
-records_deny("add-redirect control: a generator run, then plain add -A, then commit",
+records_refusal("add-redirect control: a generator run, then plain add -A, then commit",
              GEN + " && " + ADD_A + " && " + COMMIT_X, "product")
 records_allow("add-redirect control: a generator run, then git add lint/other.py > /dev/null, then commit",
               GEN + " && " + VCS + " add lint/other.py > /dev/null && " + COMMIT_X, REC_LANES["product"])
