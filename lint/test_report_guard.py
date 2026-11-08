@@ -2683,6 +2683,84 @@ class SentenceSplitBoldTests(unittest.TestCase):
         self.assertIn("STE001", codes)
 
 
+class DoubleBacktickMaskTests(unittest.TestCase):
+    """A two-backtick code span is one span (MASK_PATTERNS in lint/ste_lint.py).
+
+    The tests guard that a double-backtick span is masked as code, so its text is not linted and a
+    backtick inside it does not hide the prose after it. They also guard that an unclosed
+    double-backtick run is literal text: it opens no span, so the prose before a later code span
+    is still linted, and that code span is still masked.
+    """
+
+    LONG_TAIL = ("The reviewer reads every changed line of the test file before the branch is pushed, "
+                 "then checks each new case against the old commit and records the failing run in the trailer")
+
+    def codes(self, text):
+        linter = ste_lint.Linter(dict(ste_lint.DEFAULT_CONFIG))
+        return [f.code for f in linter.check_text("t.md", text)]
+
+    def test_backtick_inside_double_backtick_span_does_not_hide_the_next_sentence(self):
+        single = "Write the span as `a b` in the note. " + self.LONG_TAIL + " with `code` at the end.\n"
+        self.assertIn("STE001", self.codes(single), "fixture sentence is not over budget")
+        double = "Write the span as ``a ` b`` in the note. " + self.LONG_TAIL + " with `code` at the end.\n"
+        self.assertIn("STE001", self.codes(double),
+                      "a backtick inside a double-backtick span hides the sentence after it")
+
+    def test_double_backtick_span_content_is_not_linted(self):
+        words = " ".join(["word"] * 31)
+        self.assertIn("STE001", self.codes("Run " + words + " now.\n"), "fixture sentence is not over budget")
+        self.assertNotIn("STE001", self.codes("Run ``" + words + "`` now.\n"),
+                         "text inside a double-backtick span is linted as prose")
+
+    def test_double_backtick_span_without_inner_backtick_adds_no_finding(self):
+        self.assertNotIn("STE001", self.codes("Set the flag ``a b`` and then stop the pump now.\n"),
+                         "a double-backtick span with no backtick inside adds a finding")
+
+    def test_unclosed_double_backtick_run_does_not_hide_prose_before_a_code_span(self):
+        # The `` run has no closing run of two, so it is literal text and opens no span.
+        words = " ".join(["word"] * 31)
+        self.assertIn("STE001", self.codes("Run status and " + words + ", then `file`.\n"),
+                      "fixture sentence is not over budget")
+        self.assertIn("STE001", self.codes("Run ``status and " + words + ", then `file`.\n"),
+                      "an unclosed double-backtick run hides the words before a later code span")
+
+    def test_unclosed_double_backtick_run_does_not_lint_a_later_code_span_as_prose(self):
+        # The run is literal, so the single-backtick span after it is valid and its words stay masked.
+        words = " ".join(["word"] * 31)
+        self.assertIn("STE001", self.codes("Run status then " + words + " now.\n"),
+                      "fixture sentence is not over budget")
+        self.assertNotIn("STE001", self.codes("Run ``status then `" + words + "` now.\n"),
+                         "an unclosed double-backtick run makes a later code span read as prose")
+
+    def test_lone_backtick_before_a_double_span_does_not_hide_the_words_before_it(self):
+        # The lone backtick is an unclosed run, so it is literal and opens no span. The `` span after
+        # it is masked, and the 31 words before it stay prose.
+        words = " ".join(["word"] * 31)
+        self.assertIn("STE001", self.codes("Use " + words + " ``x`` now.\n"), "fixture sentence is not over budget")
+        self.assertIn("STE001", self.codes("Use ` then " + words + " ``x`` now.\n"),
+                      "a lone backtick before a double-backtick span hides the words before it")
+
+    def test_two_backtick_run_inside_a_three_backtick_run_does_not_close_the_span(self):
+        # The ``` run is not a closing run of two, so the span runs on to the `` after the words and
+        # the words stay inside it.
+        words = " ".join(["word"] * 31)
+        self.assertIn("STE001", self.codes("Use " + words + " now.\n"), "fixture sentence is not over budget")
+        self.assertNotIn("STE001", self.codes("Use ``x ``` " + words + " `` now.\n"),
+                         "a two-backtick run inside a three-backtick run closes the span early")
+
+    def test_single_backtick_span_content_is_not_linted(self):
+        words = " ".join(["word"] * 31)
+        self.assertIn("STE001", self.codes("Run " + words + " now.\n"), "fixture sentence is not over budget")
+        self.assertNotIn("STE001", self.codes("Run `" + words + "` now.\n"),
+                         "text inside a single-backtick span is linted as prose")
+
+    def test_single_backtick_span_budget_is_thirty_words(self):
+        base = ("Set the flag `a b` and then the reviewer checks every changed line in the test file "
+                "before the branch is pushed to the shared remote today for the crew now")
+        self.assertIn("STE001", self.codes(base + " again.\n"), "fixture: a 31-word sentence is not over budget")
+        self.assertNotIn("STE001", self.codes(base + ".\n"), "a 30-word sentence with one span is over budget")
+
+
 class DecisionGlossCollapseTests(unittest.TestCase):
     """STE001 must not count the words a gloss tool inserts after a citation
     (lint/ste_lint.py build_gloss_pattern). A hermetic fixture folder stands
