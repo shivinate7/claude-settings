@@ -382,7 +382,7 @@ while True:
             DRAFT_PR_REASON, MERGE_TOOLS, RECORDS_PAGE_REASON, ROLE_REASON,
             conflict_markers_hit, gh_call_of, git_call_of, merge_call_of, merge_check, merge_check_reason, record_writer_hit, records_page_hit, role_proof_hit,
             DEFAULT_RECORD_BRANCH, RECORD_REASON, settings_roots, TRUST_REASON, archive_hit, brief_hit, trust_card_hit,
-            undrafted_pr_create, uses_merge_tool, REVIEW_COMMENT_TOOL, REVIEW_EDIT_TOOL, review_record_hit, review_shape_hit, review_note, pr_call_target, ansi_c_decoded,
+            undrafted_pr_create, uses_merge_tool, REVIEW_COMMENT_TOOL, REVIEW_EDIT_TOOL, review_record_hit, review_form_hit, review_note, pr_call_target, ansi_c_decoded,
         )
         _loading = "guard_frozen"
         from guard_frozen import (
@@ -1531,7 +1531,7 @@ def review_post_hit(segment: str, raw: str, where: str, before: int, previous: s
     rest = gh_call_of(ansi_c_decoded(segment))   # bash sends a `$'...'` body decoded
     if rest is None:
         return None
-    shape_only = False
+    form_only = False
     if rest[:2] in (["pr", "comment"], ["issue", "comment"]):   # an issue comment reaches the same pull request
         args = rest[2:]
         selector, repo = _comment_target(args)
@@ -1540,7 +1540,7 @@ def review_post_hit(segment: str, raw: str, where: str, before: int, previous: s
         posted = _api_post_bodies(rest)
         if posted is None:
             posted = _api_post_bodies(rest, _COMMENT_EDIT_ROUTE)
-            shape_only = posted is not None   # an edit names a comment, not a pull request: judge its shape, read no head
+            form_only = posted is not None   # an edit names a comment, not a pull request: judge its form, read no head
         if posted is None:
             return None
         repo, selector, texts, files, stdin = posted
@@ -1571,8 +1571,8 @@ def review_post_hit(segment: str, raw: str, where: str, before: int, previous: s
             review_note("the body file " + name + " could not be read")
     if stdin and not judged_stdin:
         review_note("the body comes from stdin and cannot be read")
-    if shape_only:
-        return review_shape_hit(texts)
+    if form_only:
+        return review_form_hit(texts)
     return review_record_hit(texts, repo, selector, where)
 
 
@@ -5018,9 +5018,9 @@ def judge(payload) -> None:
         elif isinstance(tool_input.get("body"), str) and "review-record" in tool_input["body"]:
             review_note("the call names no pull request number")
 
-    # A comment edited in place through the MCP update tool: its shape is judged, its head is not (it names a comment, not a pull request).
+    # A comment edited in place through the MCP update tool: its form is judged, its head is not (it names a comment, not a pull request).
     if tool == REVIEW_EDIT_TOOL:
-        hit = review_shape_hit([tool_input.get("body")])
+        hit = review_form_hit([tool_input.get("body")])
         if hit:
             refuse(tool, "deny", "pr-review-record", hit[1], hit[0])
 
