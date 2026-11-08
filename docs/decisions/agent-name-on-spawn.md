@@ -16,6 +16,7 @@ Guard rule `agent-name-on-spawn`, judged only in a session proved a lane (its ow
   - deny when that spawn had a non-blank `name`. The reason says to send to the name given at spawn. It never carries the agent id or the name (rule `git-remedy-never-names-target`).
   - ask when that spawn had no name, since no name can address it.
 - An Agent or Task spawn with no `name`, or a blank one: deny. The reason says to give the spawn a name, so later messages address it by name.
+- A send to the agent id of the older of two spawns that took one name passes: the newer spawn holds the name, so the raw id is the only route to the older (latest wins). A send to the newer spawn's id still denies.
 - A send to `main`, to a name, or to an id no spawn holds passes. The remote `send_message` is not judged: it names sessions. A missing or unreadable transcript passes.
 
 ## Evidence

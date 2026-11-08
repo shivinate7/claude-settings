@@ -1357,17 +1357,17 @@ def resume_finished_hit(tool: str, tool_input, transcript: str, agent: bool = Fa
 
 # ---- a lane messages its agents by the name given at spawn (rule agent-name-on-spawn, decision agent-name-on-spawn)
 AN_SEND_REASON = (
-    "agent-name-on-spawn: this send names an agent by its bare agent id. A lane messages each of its agents by the "
+    "this send names an agent by its bare agent id. A lane messages each of its agents by the "
     "name given at spawn, because a bare id is easy to mix up and the message then reaches the wrong agent. Send to "
     "the name given at spawn. (decision agent-name-on-spawn)"
 )
 AN_UNNAMED_REASON = (
-    "agent-name-on-spawn: this send names an agent by its bare id, and that spawn was given no name, so no name can "
+    "this send names an agent by its bare id, and that spawn was given no name, so no name can "
     "address it. Allow the send only if you are sure the id is the right agent. Next time, give each spawn a name "
     "at spawn, so later messages address it by that name. (decision agent-name-on-spawn)"
 )
 AN_SPAWN_REASON = (
-    "agent-name-on-spawn: this spawn has no name. Give the spawn a `name` field, such as `overlap-list-a`, so later "
+    "this spawn has no name. Give the spawn a `name` field, such as `overlap-list-a`, so later "
     "messages address it by that name, never by a bare agent id. (decision agent-name-on-spawn)"
 )
 
@@ -1376,7 +1376,8 @@ def agent_name_hit(tool: str, tool_input, transcript: str, agent: bool = False):
     """(decision, reason, matched): judged only when this session is a proved lane (_own_tier_proved). "deny" when the
     call is an Agent or Task spawn from the main session with no `name`, or a blank one. "deny" when a built-in
     SendMessage's `to` (one trailing ` [<ref>]` stripped, as resume_finished_hit does) is the agentId of a spawn that
-    had a non-blank `name`, and "ask" when that spawn had none. A send to main, a name or an id no spawn holds, the
+    had a non-blank `name` that no later spawn took, and "ask" when that spawn had none. A send to the older of two
+    spawns that took one name passes (latest wins: the raw id is its only route). A send to main, a name or an id no spawn holds, the
     remote send_message, a call with an agent_id, a session that is not a proved lane and a missing or unreadable
     transcript pass. The reason never carries the agent id or the name. Cost: the lane proof reads the transcript once
     per judged call (a main-session spawn with no name, or a built-in send); a send adds the shared _main_records read.
@@ -1405,6 +1406,8 @@ def agent_name_hit(tool: str, tool_input, transcript: str, agent: bool = False):
         return "", "", ""
     name = held[-1]["input"].get("name")
     if isinstance(name, str) and name.strip():
+        if any(use["input"].get("name") == name for use in spawns[spawns.index(held[-1]) + 1:]):
+            return "", "", ""  # a newer spawn took the name (latest wins): the raw id is the only route to this one
         return "deny", AN_SEND_REASON, "%s to an agent by its bare id" % tool
     return "ask", AN_UNNAMED_REASON, "%s to an agent with no name, by its bare id" % tool
 
