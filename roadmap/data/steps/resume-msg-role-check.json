@@ -1,0 +1,11 @@
+{
+  "title": "A message to a running agent passes the same role check as its spawn brief",
+  "phase": "now",
+  "status": "doing",
+  "order": 268.62,
+  "owner": "coordinator",
+  "lane": "session_013NEJL3bvXbg7UQvaKpwwq9",
+  "why": "Lane lane-lint-no-silent-pass sent a running builder a test edit at about 21:20 CST Nov 7; it was caught before the builder acted. No guard judges SendMessage by the target agent's role.",
+  "note": "Related: resume-finished-reviewer-no-tree, notes-fix-builder-mutants. Filed from the coordinator, 21:27 CST Nov 7; filed 21:27 CST.",
+  "updatedAt": "2026-11-07T21:27:00-06:00"
+}
