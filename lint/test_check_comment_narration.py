@@ -1263,13 +1263,15 @@ class RuleQuotes(Case):
         rc, out = self.scan({"x.py": "# (see decision hold-unsafe-after-round-3, round 3)\nx = 1\n"})
         self.assertEqual(rc, 0, out)
 
-    def test_decision_gloss_with_a_colon_after_the_id_is_clean(self):
+    def test_decision_gloss_with_a_colon_after_the_id_stays_flagged(self):
         rc, out = self.scan({"x.py": "# (decision hold-unsafe-after-round-3: the net-value hold after round 3)\nx = 1\n"})
-        self.assertEqual(rc, 0, out)
+        self.assertHit(out, "x.py", 1)
+        self.assertEqual(rc, 1, out)
 
-    def test_round_directly_before_a_decision_gloss_is_clean(self):
+    def test_round_directly_before_a_decision_gloss_stays_flagged(self):
         rc, out = self.scan({"x.py": "# Holds a change after round 3 (decision hold-unsafe-after-round-3).\nx = 1\n"})
-        self.assertEqual(rc, 0, out)
+        self.assertHit(out, "x.py", 1)
+        self.assertEqual(rc, 1, out)
 
     def test_decision_pinned_in_the_checker_tree_counts_for_a_gloss(self):
         checker_root = self.home_tree(self.DECISION)
@@ -1303,6 +1305,21 @@ class RuleQuotes(Case):
 
     def test_round_then_a_verb_before_a_real_decision_gloss_stays_flagged(self):
         rc, out = self.scan({"x.py": "# round 3 fixed it (decision hold-unsafe-after-round-3)\nx = 1\n"})
+        self.assertHit(out, "x.py", 1)
+        self.assertEqual(rc, 1, out)
+
+    def test_colon_opener_with_added_after_a_round_before_a_decision_gloss_stays_flagged(self):
+        rc, out = self.scan({"x.py": "# Added the colon opener after round 3 (decision hold-unsafe-after-round-3).\nx = 1\n"})
+        self.assertHit(out, "x.py", 1)
+        self.assertEqual(rc, 1, out)
+
+    def test_round_before_a_decision_gloss_with_a_word_between_stays_flagged(self):
+        rc, out = self.scan({"x.py": "# In round 3 (decision hold-unsafe-after-round-3), we added the net-value line.\nx = 1\n"})
+        self.assertHit(out, "x.py", 1)
+        self.assertEqual(rc, 1, out)
+
+    def test_colon_opener_with_added_after_a_round_inside_the_gloss_stays_flagged(self):
+        rc, out = self.scan({"x.py": "# (decision hold-unsafe-after-round-3: added after round 3)\nx = 1\n"})
         self.assertHit(out, "x.py", 1)
         self.assertEqual(rc, 1, out)
 
