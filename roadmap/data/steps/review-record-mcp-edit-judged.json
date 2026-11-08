@@ -1,11 +1,11 @@
 {
   "title": "The review-record guard judges an MCP issue-comment edit or create on a review record",
   "phase": "now",
-  "status": "doing",
+  "status": "ready",
   "order": 60.01,
   "owner": "coordinator",
-  "lane": "session_013NEJL1rKuNDSwMxwArjXHb",
+  "lane": "",
   "why": "A review record edited or posted through the GitHub MCP tool skips the guard today, so a record can change with no check.",
-  "note": "Stacked on #1707; merges after #1687. Retires debt review-record-mcp-edit-unjudged. Filed from the coordinator, 19:29 CST Nov 7.",
-  "updatedAt": "2026-11-07T19:29:00-06:00"
+  "note": "Stacked on #1707; merges after #1687. Retires debt review-record-mcp-edit-unjudged. Filed from the coordinator, 19:29 CST Nov 7. No new build (19:44 CST, coordinator): #1687, head mcp-safety-gaps at 0424c0594, already judges update_issue_comment. Ready until #1687 merges, then done. The lane's debt was a false alarm; docs-only #1722, stacked on #1707, deletes it.",
+  "updatedAt": "2026-11-07T19:44:00-06:00"
 }
