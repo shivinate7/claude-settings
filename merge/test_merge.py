@@ -11018,7 +11018,7 @@ class PullsHost(merge.Host):
     files GitHub gives the older...newer read. The compare is GitHub's three-dot one: its files are those on the second head's side of the
     merge base, so the reverse read answers "behind" with no file, and a diverged pair answers "diverged" in either order."""
     def __init__(self, pulls, check_rows, pulls_error=None, required=("checks",), workflow_runs=None, ignore=None, compares=None, compare_error=None,
-                 base_compare_error=None, comments=(), comments_error=None, count_gh=False, diffs=None, comment_error=None):
+                 base_compare_error=None, comments=(), comments_error=None, count_gh=False, diffs=None, comment_error=None, trees=None, tree_error=None):
         super().__init__(list(required), base="main", minute=60, pause=lambda s: None, ignore=ignore)
         self.pulls, self.check_rows, self.pulls_error = pulls, check_rows, pulls_error
         self.comments, self.comments_error = list(comments), comments_error  # the repo-wide issue comments, oldest first
@@ -11032,6 +11032,8 @@ class PullsHost(merge.Host):
         if count_gh:  # the branch protection names the required checks, as a real repo does
             self.required, self.protection = "protection", list(required)
         self.compare_reads = []  # (first operand, second operand) of each compare read
+        self.trees, self.tree_error, self.tree_reads = trees or {}, tree_error, []  # sha -> its tree, the reply of commit_tree; every read is kept in tree_reads
+        self.pr_reads = []  # the number of each pulls/<n> read, in order
 
     def gh(self, args, cwd=None):
         if args[:2] == ["run", "list"]:
@@ -11043,10 +11045,12 @@ class PullsHost(merge.Host):
         route = args[1] if args[:1] == ["api"] else ""
         m = re.search(r"/pulls/(\d+)$", route)
         if m:
+            self.pr_reads.append(int(m.group(1)))
             found = [d for d in self.pulls if d["number"] == int(m.group(1))]
             if not found:
                 return 1, "gh: Not Found (HTTP 404)"
-            return 0, json.dumps({**found[0], "state": "open", "merged": False, "mergeable": True, "mergeable_state": "clean", "body": ""})
+            # a pull dict may name its own state, merged or body; the defaults are an open pull request with no body
+            return 0, json.dumps({"state": "open", "merged": False, "mergeable": True, "mergeable_state": "clean", "body": "", **found[0]})
         m = re.search(r"/compare/([^/]+)\.\.\.([^/]+)$", route)
         if m:
             self.compare_reads.append(m.groups())
@@ -11083,6 +11087,16 @@ class PullsHost(merge.Host):
                 number = int(re.search(r"/issues/(\d+)$", c["issue_url"]).group(1))
                 return {"body": c["body"], "issue_number": number, "created_at": c["created_at"]}
         raise merge.Stop(f"comment {comment_id} is not on the repo")
+
+    def commit_tree(self, sha):
+        """The tree of commit `sha`, the one reply of Host.commit_tree, from `trees`. Each read is kept in `tree_reads`, in order. A failed read is a
+        Stop, as the real one is. A sha `trees` does not hold fails the case by name, so a read of the wrong commit cannot pass as a clear one."""
+        self.tree_reads.append(sha)
+        if self.tree_error:
+            raise merge.Stop(self.tree_error)
+        if sha not in self.trees:
+            raise AssertionError(f"unexpected commit read: {sha}")
+        return self.trees[sha]
 
     def answer(self, rel, argv):
         """The reply of one REST route for the request's own flags, as the fake gh gives it (REST.listing): the page asked for, or with
@@ -13777,7 +13791,7 @@ class ReviewFixRemedies(ReviewChainFixture):
         source = review_comment(5, 9, record_text(n=9, head=self.NEWEST, rounds=REVIEW_PASS))
         newer = review_comment(6, 9, record_text(n=9, head=self.NOTES, rounds=REVIEW_PASS))
         other_pr = review_comment(5, 9, record_text(n=10, head=self.NEWEST, rounds=REVIEW_PASS))
-        with_fix = review_comment(5, 9, record_text(n=9, head=self.NEWEST, rounds=REVIEW_PASS, fix=(fix_check_line(head=self.EARLIER),)))
+        with_fix = review_comment(5, 9, record_text(n=9, head=self.NEWEST, rounds=REVIEW_PASS, fix=(fix_check_line(verdict="FAIL", head=self.EARLIER),)))
         own = review_comment(1, 7, record_text(head=self.NEWEST, rounds=REVIEW_PASS))  # its control is the rc 0 run of test_a_pull_request_with_its_own_record_refuses_the_flag_without_the_head_remedy
         for label, comments, url, cause, remedy in (
                 ("a link to another repo", (source,), "https://github.com/x/r/pull/9#issuecomment-5",
@@ -13788,7 +13802,7 @@ class ReviewFixRemedies(ReviewChainFixture):
                  "that record's PR line names #10", "Name a review record on the pull request its PR line names."),
                 ("a record that is not the newest on its pull request", (source, newer), link,
                  "that record is not the newest on #9", "Name the newest review record on that pull request."),
-                ("a record with a fix check line", (with_fix,), link,
+                ("a record with a FAIL fix check line", (with_fix,), link,
                  "a chain never runs through --fix-base-record", "Post this pull request's own review records from round 1: for a normal guard or check change, rounds 1 to 3 with the net-value test at round 3."),
                 ("a pull request with its own record", (own, source), link,
                  "has a review record of its own", self.OWN_RECORD_REMEDY)):
@@ -13826,12 +13840,10 @@ class ReviewFixRemedies(ReviewChainFixture):
         rc, out, err, _ = self.run_chain(self.NEWEST, comments, rounds=round_args(lines[:1]))
         self.assert_own_remedy(rc, out, err, "this record drops or reorders Round 1: design-reviewer, opus, FAIL", self.DROPPED_REMEDY)
 
-class ReviewFixBaseRecord(ReviewEnv):
-    """`--fix-base-record URL` goes with --review-record and --fix-check. URL is a GitHub issue-comment link to an earlier review record, on this
-    pull request or another. That record stands in for the newest earlier record: its Head is the fix base, the same base rules apply (equal
-    heads, or a compare with record and notes files only between), and the round floor counts it. A pull request with its own record refuses the
-    flag, so two bases never compete. A refusal exits 2 and prints no record; a failed read of the comment exits 1. Each case runs a control
-    first, without the flag, that the old code already gets right, so the assert after it is the flag's or the round floor's to pass or refuse."""
+class ReviewFixBaseFixture(ReviewChainFixture):
+    """The one home of a pull request that takes a --fix-base-record source: the link to the source comment, the source record, the flag's argv
+    and its run. SOURCE_PR is the pull request of the source record in every case, and NOTES_HEAD and OTHER_HEAD are heads a case names.
+    No test lives here."""
 
     SOURCE_PR, SOURCE_ID = 1541, 5  # the pull request and the comment of the source record in the cases below
     NOTES_HEAD = ReviewFixBase.NOTES_HEAD  # a notes commit after REVIEW_OLD_HEAD
@@ -13844,9 +13856,9 @@ class ReviewFixBaseRecord(ReviewEnv):
     def link(self, n=SOURCE_PR, cid=SOURCE_ID, owner="o", repo="r", kind="pull"):
         return f"https://github.com/{owner}/{repo}/{kind}/{n}#issuecomment-{cid}"
 
-    def source(self, head=REVIEW_OLD_HEAD, rounds=REVIEW_PASS, cid=SOURCE_ID, n=SOURCE_PR, guard="no", net="not owed"):
-        """The source record: a comment on pull request n, which holds a record of head `head`, with the guard and Net value given."""
-        return review_comment(cid, n, record_text(n=n, head=head, rounds=rounds, guard=guard, net=net))
+    def source(self, head=REVIEW_OLD_HEAD, rounds=REVIEW_PASS, cid=SOURCE_ID, n=SOURCE_PR, guard="no", net="not owed", fix=()):
+        """The source record: a comment on pull request n, which holds a record of head `head`, with the guard, Net value and `fix` lines given."""
+        return review_comment(cid, n, record_text(n=n, head=head, rounds=rounds, guard=guard, net=net, fix=fix))
 
     def fix_of(self, head=REVIEW_OLD_HEAD):
         return f"{head}:reviewer:haiku:PASS"
@@ -13865,6 +13877,13 @@ class ReviewFixBaseRecord(ReviewEnv):
         for old in OLD_PARSER_ERRORS:
             self.assertNotIn(old, err, "merge.py takes no --fix-base-record flag:\n" + err)
         return rc, out, err
+
+class ReviewFixBaseRecord(ReviewFixBaseFixture):
+    """`--fix-base-record URL` goes with --review-record and --fix-check. URL is a GitHub issue-comment link to an earlier review record, on this
+    pull request or another. That record stands in for the newest earlier record: its Head is the fix base, the same base rules apply (equal
+    heads, or a compare with record and notes files only between), and the round floor counts it. A pull request with its own record refuses the
+    flag, so two bases never compete. A refusal exits 2 and prints no record; a failed read of the comment exits 1. Each case runs a control
+    first, without the flag, that the old code already gets right, so the assert after it is the flag's or the round floor's to pass or refuse."""
 
     def test_a_source_record_on_another_pull_request_starts_the_fix_check(self):
         # the #1541 shape: the source record is on pull request 1541 at Head H, and this pull request has no record of its own; the fix check reads from H
@@ -13979,9 +13998,9 @@ class ReviewFixBaseRecord(ReviewEnv):
         rc, out, err = self.flagged(self.argv(self.fix_of(self.NOTES_HEAD), self.link(cid=6)), host)
         self.assertEqual(rc, 0, "the newest record on its pull request was refused:\n" + out + err)
 
-    def test_a_source_record_with_a_fix_check_line_is_refused(self):
+    def test_a_source_record_with_a_failed_fix_check_line_is_refused(self):  # a PASS fix check may stand in (ReviewFixBaseCarry); a FAIL one is refused
         fixed = review_comment(self.SOURCE_ID, self.SOURCE_PR, record_text(n=self.SOURCE_PR, head=REVIEW_OLD_HEAD, rounds=REVIEW_PASS,
-                                                                           fix=(fix_check_line(head=self.NOTES_HEAD),)))
+                                                                           fix=(fix_check_line(verdict="FAIL", head=self.NOTES_HEAD),)))
         rc, out, err = self.run_args(*self.argv(self.fix_of()), host=self.record_host(fixed, head=REVIEW_HEAD))  # control, green on the old code
         self.assert_refused(rc, out, err)
         rc, out, err = self.flagged(self.argv(self.fix_of(), self.link()), self.record_host(fixed, head=REVIEW_HEAD))
@@ -14024,6 +14043,150 @@ class ReviewFixBaseRecord(ReviewEnv):
         self.assertEqual(rc, 1, "a failed read of the source comment did not stop the run:\n" + out + err)
         self.assertNotIn(REVIEW_MARKER, out, "a failed read of the source comment still printed a record")
         self.assertNotIn("Traceback", err)
+
+class ReviewFixBaseCarry(ReviewFixBaseFixture):
+    """A --fix-base-record source whose Fix check is PASS stands in for the newest earlier record when this pull request replaces it (decision
+    pr-review-record). Four things hold together: the --fix-check base is the source's Head; the source Head and the live head have the same tree
+    (commit_tree, one read each); the source pull request is closed or merged, or this pull request's body says `replaces #N`; and the other checks
+    hold. Then the chained ancestor check is skipped, since equal trees stand in for it. A source with a FAIL or WIDE Fix check refuses as before, and
+    a source with no Fix check line reads no commit and no source pull request. Each refusal runs beside a good run that exits 0 and differs only in
+    the property the refusal tests, so the good run is the case's red assert on the old code."""
+
+    EARLIER = ReviewChainFixture.EARLIER  # the head the source's Fix check reviewed
+    TREE, OTHER_TREE = "aa" * 20, "bb" * 20  # two trees: the carry compares the source Head's tree with the live head's
+    CARRIED_ROUNDS = [(1, "reviewer", "sonnet", "FAIL"), (2, "reviewer", "sonnet", "FAIL"), (3, "reviewer", "opus", "PASS")]  # the source's rounds
+
+    def tree_map(self, live=TREE):
+        """The tree of every head a case names: TREE, except the live head, which holds `live`."""
+        heads = (self.NEWEST, self.LIVE, self.EARLIER, self.NOTES_HEAD, self.OTHER_HEAD)
+        return {**{head: self.TREE for head in heads}, self.LIVE: live}
+
+    def fix_source(self, verdict="PASS", rounds=REVIEW_PASSED_THREE, net="positive", guard="yes"):
+        """The source record of the replacement shape: its newest record at NEWEST, with `rounds` (FAIL, FAIL, PASS by default), a Fix check of
+        `verdict` from EARLIER, and the net value and guard given. Its comment is on pull request SOURCE_PR."""
+        return self.source(head=self.NEWEST, rounds=rounds, guard=guard, net=net, fix=(fix_check_line(verdict=verdict, head=self.EARLIER),))
+
+    def carry_host(self, *comments, source_state="closed", merged=False, listed=True, body="", trees=None, tree_error=None, diffs=None):
+        """Pull request 7 at the live head with the body `body`, and the source pull request at NEWEST in `source_state` (`merged` makes it merged),
+        listed as GitHub lists it unless `listed` is False. `trees` defaults to tree_map(); `diffs` holds PullsHost's compare replies."""
+        pulls = [{**batch_pull(7, self.LIVE), "body": body}]
+        if listed:
+            pulls.append({**batch_pull(self.SOURCE_PR, self.NEWEST), "state": source_state, "merged": merged})
+        return PullsHost(pulls, {}, comments=comments, trees=self.tree_map() if trees is None else trees, tree_error=tree_error, diffs=diffs)
+
+    def carried(self, host, url=None, fix=None, rounds=round_args(REVIEW_PASSED_THREE), guard="yes", net="positive"):
+        """The review record of the replacement on `host`: the source's rounds, net value and guard, --fix-check from NEWEST unless `fix` is
+        given, and --fix-base-record `url`, which defaults to the link of the source comment."""
+        return self.flagged(self.argv(fix or self.fix_of(), self.link() if url is None else url, rounds=rounds, guard=guard, net=net), host)
+
+    def assert_carry_refused(self, rc, out, err):
+        """A refused carry: rc 2 and no record (assert_refused), and the line merge prints for the fix check, not argparse's usage error."""
+        self.assert_refused(rc, out, err)
+        self.assertIn("merge: --fix-check:", err, "the refusal is not merge's own --fix-check line:\n" + err)
+
+    def test_a_closed_or_merged_source_with_the_same_tree_stands_in_for_the_newest_record(self):
+        # the replacement shape: the fix base is the source Head, the trees are equal, and the source is closed or merged. The new record copies the
+        # source's three round lines, net value and guard, and reads no compare, since the base is the source Head and the ancestor check is skipped
+        for merged in (False, True):
+            with self.subTest(merged=merged):
+                host = self.carry_host(self.fix_source(), source_state="closed", merged=merged)
+                rc, out, err = self.carried(host, url=self.link())
+                self.assertEqual(rc, 0, "a closed or merged source with the same tree was refused:\n" + out + err)
+                rec = parse_text(self, posted_body(self, out))
+                self.assertEqual(rec.get("fix"), (self.NEWEST, "reviewer", "haiku", "PASS"), "the printed record has no Fix check line for the carry")
+                self.assertEqual((rec["rounds"], rec["net"], rec["guard"]), (self.CARRIED_ROUNDS, "positive", "yes"),
+                                 "the carry did not copy the source's rounds, net value and guard")
+                self.assertEqual(sorted(host.tree_reads), sorted([self.NEWEST, self.LIVE]), "the carry did not read the two trees once each")
+                self.assertEqual(host.pr_reads.count(self.SOURCE_PR), 1, "the carry did not read the source pull request once")
+                self.assertEqual(host.compare_reads, [], "the carry read a compare, so the chained ancestor check ran")
+
+    def test_an_open_source_stands_in_when_this_pull_request_body_names_it(self):
+        # `replaces #N` names the source in any case, with N not followed by another digit. The source is open, so the body is the only test
+        for body in ("This replaces #1541.", "REPLACES #1541"):
+            with self.subTest(body=body):
+                host = self.carry_host(self.fix_source(), source_state="open", body=body)
+                rc, out, err = self.carried(host, url=self.link())
+                self.assertEqual(rc, 0, f"a body that names the open source ({body!r}) refused the carry:\n" + out + err)
+                self.assertEqual(parse_text(self, posted_body(self, out)).get("fix"), (self.NEWEST, "reviewer", "haiku", "PASS"))
+                self.assertEqual(host.compare_reads, [], "the carry read a compare, so the chained ancestor check ran")
+
+    def test_trees_that_differ_refuse_the_carry(self):
+        rc, out, err = self.carried(self.carry_host(self.fix_source()), url=self.link())  # control: equal trees are carried
+        self.assertEqual(rc, 0, "control: a carry with equal trees was refused:\n" + out + err)
+        host = self.carry_host(self.fix_source(), trees=self.tree_map(live=self.OTHER_TREE))
+        rc, out, err = self.carried(host, url=self.link())
+        self.assertEqual(sorted(host.tree_reads), sorted([self.NEWEST, self.LIVE]), "scope: the carry did not read both trees")
+        self.assert_carry_refused(rc, out, err)
+
+    def test_an_open_source_whose_body_is_silent_refuses_the_carry(self):
+        rc, out, err = self.carried(self.carry_host(self.fix_source(), source_state="closed"), url=self.link())  # control: a closed source is carried
+        self.assertEqual(rc, 0, "control: a closed source with the same tree was refused:\n" + out + err)
+        host = self.carry_host(self.fix_source(), source_state="open", body="")
+        rc, out, err = self.carried(host, url=self.link())
+        self.assertIn(self.SOURCE_PR, host.pr_reads, "scope: the source pull request was not read, so its open state was not seen")
+        self.assert_carry_refused(rc, out, err)
+
+    def test_a_body_that_names_a_longer_number_does_not_name_the_source(self):
+        rc, out, err = self.carried(self.carry_host(self.fix_source(), source_state="open", body="This replaces #1541."), url=self.link())  # control
+        self.assertEqual(rc, 0, "control: a body that names the open source was refused:\n" + out + err)
+        host = self.carry_host(self.fix_source(), source_state="open", body="This replaces #15410.")
+        rc, out, err = self.carried(host, url=self.link())
+        self.assertIn(self.SOURCE_PR, host.pr_reads, "scope: the source pull request was not read, so the body was not the only test")
+        self.assert_carry_refused(rc, out, err)
+
+    def test_a_source_whose_fix_check_failed_or_was_wide_still_refuses(self):
+        rc, out, err = self.carried(self.carry_host(self.fix_source(verdict="PASS")), url=self.link())  # control: a PASS source is carried
+        self.assertEqual(rc, 0, "control: a closed PASS source with the same tree was refused:\n" + out + err)
+        for verdict in ("FAIL", "WIDE"):
+            with self.subTest(verdict=verdict):
+                rc, out, err = self.carried(self.carry_host(self.fix_source(verdict=verdict)), url=self.link())
+                self.assert_carry_refused(rc, out, err)
+                self.assertIn("a chain never runs through --fix-base-record", err, "the refusal is not the source's own Fix check refusal:\n" + err)
+
+    def test_a_fix_base_that_is_not_the_source_head_refuses_the_carry(self):
+        # the notes-only neighbour of the source Head is a fix base the base rule accepts, so only the Head rule can refuse it here
+        diffs = {(self.NEWEST, self.NOTES_HEAD): compare_of("ahead", file_entry("docs/debts/notes.md"))}
+        rc, out, err = self.carried(self.carry_host(self.fix_source(), diffs=diffs), url=self.link())  # control: the fix base is the source Head
+        self.assertEqual(rc, 0, "control: a carry from the source Head was refused:\n" + out + err)
+        host = self.carry_host(self.fix_source(), diffs=diffs)
+        rc, out, err = self.carried(host, fix=self.fix_of(self.NOTES_HEAD), url=self.link())
+        self.assert_carry_refused(rc, out, err)
+
+    def test_the_carry_keeps_the_frozen_net_value_and_the_round_floor(self):
+        rc, out, err = self.carried(self.carry_host(self.fix_source()), url=self.link())  # control: the carry is written
+        self.assertEqual(rc, 0, "control: the carry was refused:\n" + out + err)
+        rc, out, err = self.carried(self.carry_host(self.fix_source()), url=self.link(), net="zero")
+        self.assert_refused_naming(rc, out, err, "net", "positive", "zero")
+        rc, out, err = self.carried(self.carry_host(self.fix_source()), url=self.link(), rounds=round_args(REVIEW_FAILED_THREE[:2]))
+        self.assert_carry_refused(rc, out, err)
+        self.assertIn(ReviewFixRemedies.FLOOR_REMEDY, err, "the round floor refusal of the carry lost its remedy:\n" + err)
+
+    def test_a_failed_tree_read_exits_one_and_prints_no_record(self):
+        rc, out, err = self.carried(self.carry_host(self.fix_source()), url=self.link())  # control: the same carry reads its trees without a failure
+        self.assertEqual(rc, 0, "control: the carry was refused:\n" + out + err)
+        rc, out, err = self.carried(self.carry_host(self.fix_source(), tree_error="reading the commit from GitHub failed"), url=self.link())
+        self.assertEqual(rc, 1, "a failed tree read did not stop the run:\n" + out + err)
+        self.assertNotIn(REVIEW_MARKER, out, "a failed tree read still printed a record")
+        self.assertIn("reading the commit from GitHub failed", err, "the failed read's own message is not in the refusal:\n" + err)
+        self.assertNotIn("Traceback", err)
+
+    def test_a_failed_read_of_the_source_pull_request_exits_one_and_prints_no_record(self):
+        rc, out, err = self.carried(self.carry_host(self.fix_source()), url=self.link())  # control: the source pull request is listed
+        self.assertEqual(rc, 0, "control: the carry was refused:\n" + out + err)
+        host = self.carry_host(self.fix_source(), listed=False)  # GitHub answers the source pull request's read with 404
+        rc, out, err = self.carried(host, url=self.link())
+        self.assertIn(self.SOURCE_PR, host.pr_reads, "scope: the source pull request was not read")
+        self.assertEqual(rc, 1, "a failed read of the source pull request did not stop the run, so an unknown state read as clear:\n" + out + err)
+        self.assertNotIn(REVIEW_MARKER, out, "a failed read of the source pull request still printed a record")
+        self.assertNotIn("Traceback", err)
+
+    def test_a_source_without_a_fix_check_line_reads_no_tree_and_no_source_pull_request(self):
+        # green on the old code: a source with no Fix check line takes the path it always took, which reads neither a commit nor the source pull request
+        host = self.carry_host(self.source(), source_state="closed")
+        rc, out, err = self.carried(host, url=self.link(), rounds=("1:reviewer:sonnet:PASS",), guard="no", net="not owed")
+        self.assertEqual(rc, 0, "a source with no Fix check line was refused:\n" + out + err)
+        self.assertEqual(host.tree_reads, [], "a source with no Fix check line read a commit")
+        self.assertEqual(host.pr_reads.count(self.SOURCE_PR), 0, "a source with no Fix check line read its pull request")
 
 class ReviewFixKeepsRounds(ReviewChainFixture):
     """A fix check record copies every Round line of the record it follows (rule roles-review-cap-three, decision pr-review-record). That record is the
