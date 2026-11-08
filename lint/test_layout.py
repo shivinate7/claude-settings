@@ -378,7 +378,44 @@ class RecordBranch(Tree):
                     self.layout.record_branch(self.tree)
 
 
-class WaitingCopy(Tree):
+class GitTree(Tree):
+    """The git steps of a fixture repo: one home for the cases that build one (WaitingCopy, DefaultBranchPage)."""
+
+    def git(self, *args, input=None, env=None):
+        """One git step of the fixture repo. Commit signing is off for the run (lint/_test_git.py)."""
+        done = subprocess.run(["git", "-C", self.tree, "-c", "user.name=test", "-c", "user.email=test@example.invalid", *args],
+                              capture_output=True, text=True, input=input, env=env, timeout=30, check=True)
+        return done.stdout
+
+    def record(self, branch, files):
+        """A branch whose one commit holds `files` ({path: text}): refs/heads/<branch>, or the full ref when `branch`
+        starts with refs/, such as refs/remotes/origin/main. Plumbing only: no checkout moves."""
+        ref = branch if branch.startswith("refs/") else "refs/heads/" + branch
+        env = dict(os.environ, GIT_INDEX_FILE=os.path.join(self.tree, ".git", "index-" + ref.replace("/", "_")))
+        self.git("read-tree", "--empty", env=env)
+        for rel, text in files.items():
+            blob = self.git("hash-object", "-w", "--stdin", input=text, env=env).strip()
+            self.git("update-index", "--add", "--cacheinfo", "100644," + blob + "," + rel, env=env)
+        tree = self.git("write-tree", env=env).strip()
+        commit = self.git("commit-tree", tree, "-m", "record", env=env).strip()
+        self.git("update-ref", ref, commit)
+
+    def ref_exists(self, ref):
+        return subprocess.run(["git", "-C", self.tree, "rev-parse", "--verify", "-q", ref], capture_output=True).returncode == 0
+
+    def origin_only(self, branch):
+        """The branch on a bare origin, with no local ref: what a fetch leaves behind."""
+        bare = tempfile.mkdtemp(prefix="origin-", dir=RUN_FOLDER)
+        self.addCleanup(tracked_tree.rm_tree, bare)
+        subprocess.run(["git", "init", "-q", "--bare", bare], check=True, capture_output=True)
+        self.git("remote", "add", "origin", bare)
+        self.git("push", "-q", "origin", branch)
+        self.git("update-ref", "-d", "refs/heads/" + branch)
+        self.assertTrue(self.ref_exists("refs/remotes/origin/" + branch), "the fixture lost origin's ref")  # scope: the fixture
+        self.assertFalse(self.ref_exists("refs/heads/" + branch), "the fixture kept the local ref")
+
+
+class WaitingCopy(GitTree):
     """The waiting page's copy lives in `waiting/` on the record branch (decision waiting-data-in-repo). A repo whose
     extras file names a waiting page must hold that folder there. The child-repo layout probe runs the check, and it
     reads the branch that record_branch() names, the local ref first, then origin's. A branch that cannot be read is
@@ -400,41 +437,10 @@ class WaitingCopy(Tree):
         self.git("add", "-A", "-f")
         self.git("commit", "-q", "-m", "base")
 
-    def git(self, *args, input=None, env=None):
-        """One git step of the fixture repo. Commit signing is off for the run (lint/_test_git.py)."""
-        done = subprocess.run(["git", "-C", self.tree, "-c", "user.name=test", "-c", "user.email=test@example.invalid", *args],
-                              capture_output=True, text=True, input=input, env=env, timeout=30, check=True)
-        return done.stdout
-
     def extras(self, keys):
         data = {"kinds": {}, "rolled-out": True}
         data.update(keys)
         self.put(EXTRAS, json.dumps(data))
-
-    def record(self, branch, files):
-        """A record branch whose one commit holds `files` ({path: text}). Plumbing only: no checkout moves."""
-        env = dict(os.environ, GIT_INDEX_FILE=os.path.join(self.tree, ".git", "index-" + branch))
-        self.git("read-tree", "--empty", env=env)
-        for rel, text in files.items():
-            blob = self.git("hash-object", "-w", "--stdin", input=text, env=env).strip()
-            self.git("update-index", "--add", "--cacheinfo", "100644," + blob + "," + rel, env=env)
-        tree = self.git("write-tree", env=env).strip()
-        commit = self.git("commit-tree", tree, "-m", "record", env=env).strip()
-        self.git("update-ref", "refs/heads/" + branch, commit)
-
-    def ref_exists(self, ref):
-        return subprocess.run(["git", "-C", self.tree, "rev-parse", "--verify", "-q", ref], capture_output=True).returncode == 0
-
-    def origin_only(self, branch):
-        """The branch on a bare origin, with no local ref: what a fetch leaves behind."""
-        bare = tempfile.mkdtemp(prefix="origin-", dir=RUN_FOLDER)
-        self.addCleanup(tracked_tree.rm_tree, bare)
-        subprocess.run(["git", "init", "-q", "--bare", bare], check=True, capture_output=True)
-        self.git("remote", "add", "origin", bare)
-        self.git("push", "-q", "origin", branch)
-        self.git("update-ref", "-d", "refs/heads/" + branch)
-        self.assertTrue(self.ref_exists("refs/remotes/origin/" + branch), "the fixture lost origin's ref")  # scope: the fixture
-        self.assertFalse(self.ref_exists("refs/heads/" + branch), "the fixture kept the local ref")
 
     def probe(self):
         return run([os.path.join(LINT, "compliance_probes.py"), "layout", self.tree], self.tree)
