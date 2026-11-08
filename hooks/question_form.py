@@ -403,14 +403,30 @@ COMMAND_VERB = re.compile(_RUN_VERB + r"[^.\n]{0,40}\bcommands?\b(?!\s+below)"
 # A task's `command` is {powershell, mac}, each a non-empty string, so the owner's own shell gets a
 # block that runs in it. PowerShell 5.1 has none of the bash syntax below: the operators, the
 # /dev/null path and an export statement, at a line start or after `;`. A line holding one fails there.
+# Four more bash forms are read on the text with strings, comments and here-strings blanked out
+# (_ps_bash_form), so PowerShell text that only looks like one passes: a pipe to a Unix-only program
+# (PowerShell has `Sort-Object`, `Tee-Object` and `more`, so those are left out; `jq` and `less` are in), a leading `NAME=value`
+# before a command (a `}` ends the value, so a hashtable's `b=2}` is none, unless it closes a `${...}` expansion, nested
+# one deep as in `${A:-${B}}`; each expansion holds no other `{` or `;`, so a failed read backtracks in linear time), a `[ ... ]` or `[[ ... ]]` test after a statement start or `if`, and a backslash that ends a line
+# after a space with a line after it (a `C:\repo\` path ends in no space before its backslash, and a
+# lone backslash argument ends the text: `cd \`, and a `cd \` line before a line with no flag is a path).
 COMMAND_SHELLS = ("powershell", "mac")
 PS_BASH_OPERATOR = re.compile(r"&&|\|\||<<|/dev/null|(?:^|;)\s*export\s", re.M)
+PS_BASH_FORMS = re.compile(
+    r"\|[ \t]*(?:head|tail|grep|xargs|sed|awk|cut|wc|uniq|tr|tac|jq|less)(?![\w-])"
+    r"|(?:^|;)[ \t]*[A-Za-z_][A-Za-z0-9_]*=(?:\$\{(?:\$\{[^{}\s;]*\}|[^{}\s;])*\}|[^\s;}])*[ \t]+[A-Za-z./]"
+    r"|(?:^|[;(]|\b(?:if|elif|while|until)\b)[ \t]*(?:\[[ \t]+[^\]\n]*[ \t]\]|\[\[[ \t]+[^\]\n]*[ \t]\]\])",
+    re.M | re.I)
+# A backslash that ends a line after a space, with a line after it. When the backslash is the line's only
+# argument (`cd \`, the drive root) and the next line does not start with a flag, it is a path, not a continuation.
+PS_BASH_CONTINUATION = re.compile(r"^([^\n]*[ \t])\\[ \t]*\r?\n[ \t]*(\S)", re.M)
 # A shell line in a step's backtick span or fence, read by guard_core's quote-aware reader. A span
 # with a chain (an operator, or two lines) is a shell line when one segment plainly runs a command:
 # its command word, after any `VAR=value`, `env`, `time`, `sudo` or `$(` prefix, is in SHELL_PROGRAMS,
 # is a hyphenated cmdlet (`get-process`), or is a lowercase word with an argument after it (`grep -n
 # x`, `cmd /c git log`). A span with no chain is a shell line when its command is a Verb-Noun cmdlet,
-# or a SHELL_PROGRAMS program with an argument. Plain text is no command: `foo|bar` (no space), `title;
+# or a SHELL_PROGRAMS program with an argument, or a lowercase word whose second word is a flag
+# (`chmod +x f`). Plain text is no command: `foo|bar` (no space), `title;
 # subtitle`, `// a | b` and a markdown table row. A program alone (`git`) names the tool in prose, and
 # any other backticked word (`main`) or a file name is not a shell line. A path that starts ./ or ../ is
 # a shell line when an argument follows it, when its name has no extension (`./build`), or when it ends
@@ -419,7 +435,12 @@ PS_BASH_OPERATOR = re.compile(r"&&|\|\||<<|/dev/null|(?:^|;)\s*export\s", re.M)
 SHELL_PROGRAMS = frozenset(("git", "gh", "cd", "npm", "npx", "node", "python", "python3", "pip", "curl",
                             "brew", "bash", "sh", "zsh", "pwsh", "powershell", "claude", "rm", "mv", "cp",
                             "ls", "cat", "echo", "export", "sudo", "make", "pytest", "docker", "mkdir",
-                            "gcloud", "bq", "winget"))
+                            "gcloud", "bq", "winget", "gsutil", "kubectl", "terraform", "yarn", "pnpm", "aws",
+                            "az", "helm"))
+# A span whose command word is any lowercase word and whose second word is a flag (`grep -r x`, `chmod +x
+# f`) is a shell line too, as is one whose program is listed. A command word with a path is read by its
+# basename, so `/usr/bin/chmod +x f` and `scripts/run.py --x` are shell lines.
+SPAN_FLAG = re.compile(r"(?:--?|\+)[A-Za-z]")
 SHELL_CMDLET = re.compile(r"[A-Z][a-z]+-[A-Z][A-Za-z]+")
 # In a chain a cmdlet may be any case (`get-process`), and a command may be any lowercase word.
 CHAIN_CMDLET = re.compile(r"[A-Za-z]+-[A-Za-z]+")
@@ -441,24 +462,46 @@ def _flat_text(value) -> str:
     return ""
 
 
-# A clause whose subject is the session ("The session merges it after your pick.") and that names
+# A clause whose subject is the session ("The session merges it after your pick.", "Claude merges it ...") and that names
 # no `you` and no owner who acts ("the owner clicks Approve", "Shivam approves it"): the session makes
 # that press, so the owner presses nothing. Only that clause is excused. A press in another clause
 # stays ("..., then press Merge", "...: press Merge", "... but click Merge"). An owner's name with no
 # act after it ("as the owner asked", "after Shivam's OK"), a past act ("after he approved it") and a
 # press of the page's own button ("after he hits Send") ask the owner for nothing.
-SESSION_PRESS = re.compile(r"^\s*(?:the|a|this)\s+session\b", re.I)
-_CLAUSE_BREAK = re.compile(r",|;|:|\(|\s-\s|(?<=[.!?])\s+|\n|\b(?:then|and|but|so|or)\b", re.I)
+SESSION_PRESS = re.compile(r"^\s*(?:(?:the|a|this)\s+session|claude)\b", re.I)
+# A session clause that asks someone for something ("Claude asks the owner for a click on Merge"), or names a
+# press that is not past ("after your click on Merge", "after the owner's press"), hands the press on, so it is
+# never excused. "as he asked" and "after he clicked Approve" are past acts and ask for nothing.
+SESSION_HANDS_ON = re.compile(r"\b(?:ask|asks|asking|request|requests|requesting|tell|tells|telling|remind|reminds"
+                          r"|reminding|click|clicks|clicking|press|presses|pressing|tap|taps|tapping)\b", re.I)
+# SESSION_PRESS_OWN is the session's own press verb right after its subject ("The session clicks Merge"): it is
+# no hand-on, so it is cut before SESSION_HANDS_ON reads the clause. "after your click" still hands on.
+SESSION_PRESS_OWN = re.compile(r"^(\s*(?:(?:the|a|this)\s+session|claude)(?:\s+(?:then|also|\w+ly))*)"
+                               r"\s+(?:clicks|presses|taps)\b", re.I)
+# "and approves" stays in its clause: "the owner reviews and approves it" is one owner act, not two clauses.
+# A bare "and approve" is an order to the owner, so it still starts a clause.
+_CLAUSE_BREAK = re.compile(r",|;|:|\(|\s-\s|(?<=[.!?])\s+|\n|\b(?:then|but|so|or)\b"
+                           r"|\band\b(?!\s+approv(?:es|ing)\b)", re.I)
 # The clauses left after the excused ones are joined with `;`: PRESS_VERB reads it as a clause start, so
 # "... but you approve it" stays a press, and mark ... ready reads across it, as across the cut break.
 _CLAUSE_JOIN = "; "
 OWNER_YOU = re.compile(r"\byou\b", re.I)
-OWNER_NAME = re.compile(r"\b(?:the\s+owner|shivam|he)\b", re.I)
-# The act is the verb the name is subject of: a modal or an -ly word may come between, so "Shivam will
-# approve it" acts and "the owner clicked Approve" (the button's name, after a past act) does not.
-OWNER_ACT = re.compile(r"(?:\s+(?:will|can|must|should|may|then|also|first|now|\w+ly))*\s+"
+OWNER_NAME = re.compile(r"\b(?:the\s+(?:owner|user)|shivam|he|him)\b", re.I)
+# The act is the verb the name is subject of: a modal, "to", "just", "please" or an -ly word may come
+# between, so "Shivam will approve it" and "the user to just click Merge" act, and "the owner clicked
+# Approve" (the button's name, after a past act) does not.
+# "the owner's merge" and "the owner's approval" are presses not yet made, as "the owner's click" is, unless the
+# approval is already in ("the owner's approval is in"). "merge" is a press only as the last word of its phrase:
+# a noun after it ("the owner's merge commit", "merge queue", "merge button") names a thing, not his act.
+# "has to", "needs to" and "reviews and" stand before the act as a modal does. A bare "has" does not: "the owner
+# has merge rights" names no act, and "the owner has hit Merge" is a past one.
+OWNER_ACT = re.compile(r"(?:(?:\s+(?:will|can|must|should|may|then|also|first|now|to|just|please"
+                       r"|(?:has|have|needs?)\s+to|\w+ly|\w+s\s+and))*\s+"
                        r"(?:press(?:es|ing)?|click(?:s|ing)?|tap(?:s|ping)?|approv(?:e|es|ing)"
-                       r"|merg(?:e|es|ing)|hit(?:s|ting)?|turn(?:s|ing)?\s+(?:it\s+)?on)\b" + _PAGE_BUTTON, re.I)
+                       r"|merg(?:e|es|ing)|hit(?:s|ting)?|turn(?:s|ing)?\s+(?:it\s+)?on)"
+                       r"|['\u2019]s\s+(?:merge(?=\s*(?:[^\w\s]|$)|\s+(?:on|in|at|of|by|for|from|with|before|after"
+                       r"|first|and|or|then|so|but|once|when)\b)"
+                       r"|approval(?!\s+(?:is|was|has|are|came|comes|arrives?)\b)))\b" + _PAGE_BUTTON, re.I)
 _PRESS_LEAD = frozenset(("you", "and", "then", "or", "please"))
 
 
@@ -476,10 +519,11 @@ def _owner_press_text(label, how) -> tuple:
     text = label + ". " + how
     clauses = [c for c in _CLAUSE_BREAK.split(how) if c and c.strip()]
     session = [c for c in clauses if SESSION_PRESS.search(c) and not OWNER_YOU.search(c)
-               and not _owner_acts(c)]
+               and not SESSION_HANDS_ON.search(SESSION_PRESS_OWN.sub(r"\1", c, count=1)) and not _owner_acts(c)]
     if not session:
         return text, text
-    done = " ".join(session).lower()
+    # The session's own click ("The session clicks Merge") excuses no "Click" in the label: that asks the owner.
+    done = " ".join(SESSION_PRESS_OWN.sub(r"\1", c, count=1) for c in session).lower()
     verbs = [next((w for w in re.findall(r"[a-z]+", m.group().lower()) if w not in _PRESS_LEAD), "")
              for m in PRESS_VERB.finditer(label)]
     label_ok = all(v and re.search(r"\b" + v, done) for v in verbs)
@@ -497,7 +541,11 @@ def _press_field_ok(text, links, context="", press_text=None) -> bool:
     page = text if WEB_MARKER.search(text) else context
     if not WEB_MARKER.search(page):
         return True
-    urls = [l["url"] for l in links or [] if isinstance(l, dict) and isinstance(l.get("url"), str)]
+    # A link counts as the page draws it: a string url and a string label (skills/waiting-page/page.html
+    # isLink). A link the page does not draw shows the owner nothing to press. `links` that is not a
+    # list holds no link.
+    urls = [l["url"] for l in (links if isinstance(links, list) else [])
+            if isinstance(l, dict) and isinstance(l.get("url"), str) and isinstance(l.get("label"), str)]
     if not urls:
         return False
     return all(any(re.search(r"/(?:pull|issues)/%s(?!\d)" % n, u) for u in urls)
@@ -613,7 +661,29 @@ def _shell_line(span, run) -> bool:
             return True
         elif chained and _chain_command(word, len(words) - 1):
             return True
-        elif word in SHELL_PROGRAMS and len(words) >= 2:
+        elif len(words) >= 2 and (word in SHELL_PROGRAMS
+                                  or (CHAIN_COMMAND.fullmatch(word) and SPAN_FLAG.match(words[1]))):
+            return True
+    return False
+
+
+def _ps_bash_form(text) -> bool:
+    """True when PowerShell text holds a bash-only form. PS_BASH_OPERATOR reads the text as it stands;
+    PS_BASH_FORMS reads it with each quoted string, here-string and comment blanked to `_` (newlines kept),
+    found by guard_core's PowerShell quote walk, the one home of that reading."""
+    if PS_BASH_OPERATOR.search(text):
+        return True
+    import guard_core   # loads only for a task that has a command
+    script = guard_core.PowerShellScript(text)
+    out = []
+    for index, char, quote in guard_core.walk_quotes(script, line_comments=True):
+        out.append("_" if quote and char != "\n" else char)
+    blanked = "".join(out)
+    if PS_BASH_FORMS.search(blanked):
+        return True
+    for match in PS_BASH_CONTINUATION.finditer(blanked):
+        lone = len(match.group(1).split()) == 1
+        if not (lone and match.group(2) != "-"):
             return True
     return False
 
@@ -629,7 +699,7 @@ def command_in_item_hit(data) -> str:
     has_command = _command_ok(data.get("command"))
     if "command" in data and not has_command:
         return "command is not {powershell, mac}"
-    if has_command and PS_BASH_OPERATOR.search(data["command"]["powershell"]):
+    if has_command and _ps_bash_form(data["command"]["powershell"]):
         return "powershell command holds a bash operator"
     steps = data.get("steps")
     if not isinstance(steps, list):
@@ -787,6 +857,7 @@ def gh_login_hit(data) -> str:
 # (incident in the record): a waiting-page task handed the owner a job a session on his computer then
 # did. A task carries a "Why yours:" line naming the check that showed no session could do it.
 WHY_YOURS_LINE = re.compile(r"^\s*Why yours:[ \t]*\S", re.I | re.M)
+WHY_YOURS_LABEL = re.compile(r"^[ \t]*Why yours\b", re.I | re.M)
 TASK_REASON = ("A task is yours to hand over only when no session can do it. If the cloud refused the "
                "act, ask a session on the owner's computer first (list_computer_folders, then "
                "request_computer_folder). Then add a line to context that starts \"Why yours: "
@@ -804,14 +875,17 @@ def task_check_hit(op: str, data) -> str:
 
 
 def task_str_replace_hit(entry) -> str:
-    """The matched text when a str_replace on `context` removes the Why yours line. It carries no
-    `data`, so it is read from old_str and new_str; the guard cannot see the stored kind, so it
-    judges a context edit that touches the line, whatever the item's kind."""
+    """The matched text when a str_replace on `context` removes the Why yours line or its label. It carries
+    no `data`, so it is read from old_str and new_str; the guard cannot see the stored kind, so it judges a
+    context edit that touches the line, whatever the item's kind. An edit that removes only the reason
+    after the label passes: the stored line is unseen, so old_str is no different from any prose."""
     if entry.get("field") != "context":
         return ""
     old, new = str(entry.get("old_str") or ""), str(entry.get("new_str") or "")
     if WHY_YOURS_LINE.search(old) and not WHY_YOURS_LINE.search(new):
         return "context edit that removes the Why yours line"
+    if len(WHY_YOURS_LABEL.findall(old)) > len(WHY_YOURS_LABEL.findall(new)):
+        return "context edit that removes the Why yours label"
     return ""
 
 
@@ -1308,7 +1382,8 @@ def _chat_question_hit(question, options):
             return "uniform-pick", "recommended option goes against the uniform ruling"
     for o in options:
         label, desc = _option_text(o, "label"), _option_text(o, "description")
-        links = [{"url": u} for u in CHAT_URL.findall(desc)]
+        # a url in the description shows as its own text, so it is its own label
+        links = [{"label": u, "url": u} for u in CHAT_URL.findall(desc)]
         # the page scans label and how; Gain and Lose text says what the pick does to the owner, not what he presses
         text, press_text = _owner_press_text(label, EFFECT_TEXT.sub("", desc))
         if not _press_field_ok(text, links, press_text=press_text):

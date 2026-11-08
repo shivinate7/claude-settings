@@ -101,6 +101,7 @@ FAMILIES = {
     "lane-closes-after-records": "archive_session of a lane: refused while the lane's repo has an open pull request on its step slug, or when the lane's record cannot be read",
     "lane-one-topic": "one lane, one topic: a send_message brief whose Topic differs from the lane's cs-topic, or names none, is refused; an older lane with no cs-topic is judged by its cs-step tags; a message without the marker passes unread",
     "records-page": "a lane commit of the generated records page: refused unless the page is the base's",
+    "conflict-markers": "a git commit or --continue judged on the index and the files its adds or paths name, and a git push judged on the net change it sends: all three markers in one file's added lines are refused; a blind step before a commit, with a push after it, is refused only when the commit covers a triplet already in the tree; a chain that makes a conflict is refused, and a clean, whitespace-only, unstaged or half-marked file is allowed",
     "cite": "cite by id",
     "frozen": "frozen paths",
     "model-cap": "the agent model cap",
@@ -924,7 +925,8 @@ def make_blind_git(folder):
     os.chmod(script, 0o755)
 
 
-FAKE_GH_PY = r'''import json, os, re, sys, time
+FAKE_GH_PY = r'''import io, json, os, re, sys, time
+sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", newline="")  # the bytes go out as written: a text-mode stdout on Windows turns each \n into \r\n, which real gh never does
 state = json.load(open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "state.json")))
 if state.get("count_file"):  # a test that counts the calls names the file: one line per call, its argv
     with open(state["count_file"], "a", encoding="utf-8") as handle:
@@ -932,6 +934,7 @@ if state.get("count_file"):  # a test that counts the calls names the file: one 
 if state.get("delay_s"):
     time.sleep(state["delay_s"])
 args = sys.argv[1:]
+REPO_ID = 424242424  # the numeric id GitHub names in a Link header; the cloud agent proxy refuses paths that carry it
 GRAPHQL = "HTTP 403: GitHub GraphQL is not available from Claude Code sessions; use the REST API (https://api.github.com/graphql)"
 if state["cwd_name"] and os.path.basename(os.getcwd()) != state["cwd_name"]:
     state["broken"] = True
@@ -958,19 +961,33 @@ def parse(argv):
 
 
 def api_error(code, message):
+    if "-i" in flags:  # gh api -i prints the reply's status line and headers before the body: the status line ends \n, the headers and the blank line \r\n
+        sys.stdout.write("HTTP/1.1 %d %s\nContent-Type: application/json\r\n\r\n" % (code, "Not Found" if code == 404 else "Internal Server Error"))
     print(json.dumps({"message": message, "status": str(code)}, separators=(",", ":")) + "gh: %s (HTTP %d)" % (message, code))
     sys.exit(1)
 
 
-def listing(items, key, fields, flags, top=None):
-    """What gh prints for a list read: one page unless --paginate; array pages joined; object pages back to back; --slurp one array of pages."""
+def listing(items, key, fields, flags, top=None, rel=""):
+    """What gh prints for a list read: one page unless --paginate; array pages joined; object pages back to back; --slurp one array of pages.
+    With -i the status line and headers come first, and a page that more pages follow carries the Link header GitHub sends, on the numeric route."""
     size = max(1, min(int(fields.get("per_page", 30)), state["page_cap"]))
     pages = [items[i:i + size] for i in range(0, len(items), size)] or [[]]
-    chosen = pages if "--paginate" in flags else [pages[max(1, int(fields.get("page", 1))) - 1] if int(fields.get("page", 1)) <= len(pages) else []]
+    asked = max(1, int(fields.get("page", 1)))
+    chosen = pages if "--paginate" in flags else [pages[asked - 1] if asked <= len(pages) else []]
     bodies = [c if key is None else dict(top or {}, **{key: c}) for c in chosen]
     if "--slurp" in flags:
-        return json.dumps(bodies)
-    return json.dumps([x for c in chosen for x in c]) if key is None else "".join(json.dumps(b) for b in bodies)
+        body = json.dumps(bodies)
+    else:
+        body = json.dumps([x for c in chosen for x in c]) if key is None else "".join(json.dumps(b) for b in bodies)
+    if "-i" not in flags:
+        return body
+    link = None
+    if "--paginate" not in flags and asked < len(pages):
+        def url(page):
+            parts = ["%s=%s" % kv for kv in fields.items() if kv[0] != "page"] + ["page=%d" % page]
+            return "<https://api.github.com/repositories/%d/%s?%s>" % (REPO_ID, rel, "&".join(parts))
+        link = '%s; rel="next", %s; rel="last"' % (url(asked + 1), url(len(pages)))
+    return "HTTP/1.1 200 OK\nContent-Type: application/json\r\n%s\r\n%s" % ("Link: %s\r\n" % link if link else "", body)
 
 
 RUN_OF = {"pass": ("completed", "success"), "fail": ("completed", "failure"), "pending": ("in_progress", None),
@@ -1015,20 +1032,20 @@ else:
         rows = [dict(state["pr"], number=state["number"])] + others
         if fields.get("state") == "open":  # GitHub lists a closed or merged pull request only when the read asks for it
             rows = [row for row in rows if row["state"] == "open"]
-        print(listing(rows, None, fields, flags))
+        print(listing(rows, None, fields, flags, rel=rel))
     elif re.fullmatch(r"commits/([^/]+)/(check-runs|status)", rel) and rel.split("/")[1] in rows_of:
         checks, statuses = rows_of[rel.split("/")[1]]
         if rel.endswith("check-runs"):
             runs = [{"id": i, "name": c["name"], "status": RUN_OF.get(c["bucket"], ("completed", c["bucket"]))[0],
                      "conclusion": RUN_OF.get(c["bucket"], ("completed", c["bucket"]))[1], "details_url": c["link"] or None,
                      "started_at": None, "completed_at": None} for i, c in enumerate(checks)]
-            print(listing(runs, "check_runs", fields, flags, {"total_count": len(runs)}))
+            print(listing(runs, "check_runs", fields, flags, {"total_count": len(runs)}, rel=rel))
         else:
             sts = [{"id": 50 + i, "context": c["name"], "state": STATUS_OF.get(c["bucket"], c["bucket"]), "target_url": c["link"] or None}
                    for i, c in enumerate(statuses)]
             states = {s["state"] for s in sts}
             combined = "failure" if states & {"failure", "error"} else "pending" if (not states or "pending" in states) else "success"
-            print(listing(sts, "statuses", fields, flags, {"state": combined, "sha": rel.split("/")[1], "total_count": len(sts)}))
+            print(listing(sts, "statuses", fields, flags, {"state": combined, "sha": rel.split("/")[1], "total_count": len(sts)}, rel=rel))
     elif re.fullmatch(r"branches/[^/]+/protection/required_status_checks", rel):
         if state["protection"] == "absent":
             api_error(404, "Branch not protected")
@@ -1225,10 +1242,11 @@ def materialize_for(case):
 
 
 def materialize_all():
-    """Build every lazy fixture except the diff repos. A log check builds its own diff repos (see
-    diff_repo), so the run loop need not build all ~170 of them for any log check."""
+    """Build every lazy fixture except the diff repos and the conflict-markers repos. A log check builds
+    its own diff repos (see diff_repo), so the run loop need not build all ~170 of them for any log check.
+    No log check reads a conflict-markers repo: a case builds one through materialize_for, when it names it."""
     for key, once in list(LAZY.items()):
-        if slash(DIFFROOT) not in key:
+        if slash(DIFFROOT) not in key and not key.startswith(slash(CMKROOT) + "/"):
             once()
 
 
@@ -1769,6 +1787,13 @@ def _build_push():
             run_vcs(where, "checkout", "-q", "--detach")
         if (head and run_vcs(where, "symbolic-ref", "refs/remotes/origin/HEAD").returncode != 0):
             sys.exit("fixture setup failed in build_fixtures: origin/HEAD in %r unreadable" % where)
+
+    # The feat destination holds the remote-tracking refs that the push cost case's forms read: feat for
+    # a HEAD or bare push, lane/foo for a refspec push or HEAD:lane/foo. A local lane/foo is the source.
+    for args in (("update-ref", "refs/remotes/origin/feat", "HEAD"),
+                 ("update-ref", "refs/remotes/origin/lane/foo", "HEAD"), ("branch", "lane/foo")):
+        if run_vcs(PUSHFEAT, *args).returncode != 0:
+            sys.exit("fixture setup failed in build_fixtures: PUSHFEAT needs git %s" % " ".join(args))
 
     # The fork names its record branch in the extras file, as lint/layout.py reads it (key record-branch).
     write(os.path.join(RECFORK, ".claude", "layout-extras.json"),
@@ -3853,6 +3878,9 @@ def hand_made_refusal_text_case():
     return True, "holds 'Rule (hand-made worktree)', names isolation, EnterWorktree, its shape and the layer"
 
 
+POINTER_OWN_WORKTREE_HINT = "If you already have a worktree, run `git -C <that worktree> ...`"
+
+
 def pointer_remedy_names_enter_worktree_case():
     """The pointer refusal sends Claude to EnterWorktree, so it never contradicts the rule above."""
     got, reason = decide({
@@ -3866,7 +3894,11 @@ def pointer_remedy_names_enter_worktree_case():
         return False, "the pointer remedy does not name EnterWorktree: %s" % reason[:90]
     if ENTER_WORKTREE_SHAPE not in reason:
         return False, "the pointer remedy does not say %s: %s" % (ENTER_WORKTREE_SHAPE, reason[:90])
-    return True, "the pointer remedy names EnterWorktree, its call shape, and no 'worktree add'"
+    # An agent with no readable home record, whose shell directory reset out of its worktree, hits
+    # this rule rather than rule 0, so the remedy also aims git at the worktree it already has.
+    if POINTER_OWN_WORKTREE_HINT not in reason:
+        return False, "the pointer remedy does not say %r: %s" % (POINTER_OWN_WORKTREE_HINT, reason[-120:])
+    return True, "the pointer remedy names EnterWorktree, its call shape, the git -C hint, and no 'worktree add'"
 
 
 # =========================================================================== 2. machine-wide kills
@@ -5416,6 +5448,60 @@ sh("narrate: an ordinary command piped to tail", "make check 2>&1 | tail -40", "
 sh("narrate: tail of a file, no pipe", "tail -n 5 notes.txt", "allow", cwd=NOGIT)
 sh("narrate: merge --confirm named in a quoted argument runs nothing",
    "echo 'merge 12 --confirm' | tail -1", "allow", cwd=NOGIT)
+
+# --- a pipe out of a verdict stage (extends the live-stream rule)
+#
+# verdict prints its FAIL line first, and a pipe cuts it off. A pipeline's exit is its last stage's,
+# so `verdict CMD | tail` reads tail's exit and a red run reads 0. Any pipe out of verdict is refused,
+# whatever the filter. A verdict that is the last stage has no pipe out of it, so it is allowed.
+VERDICT_PIPE = "verdict-pipe"
+
+
+def verdict_pipe(name, command, expected):
+    """One case of the verdict-pipe rule. A deny names the rule; an allow has no reason to name it."""
+    sh("verdict-pipe: " + name, command, expected, VERDICT_PIPE if expected == "deny" else None,
+       cwd=NOGIT)
+
+
+for _name, _command in (
+    ("a bare verdict piped to tail", "verdict false | tail"),
+    ("stderr piped to grep", "verdict false 2>&1 | grep x"),
+    ("a pipe into tee", "verdict false | tee out"),
+    ("the script run by path, piped to tail", "~/.claude/bin/verdict pytest | tail -5"),
+    ("a variable ahead of verdict, piped to head", "VERDICT_LOG=/tmp/x verdict false | head"),
+    ("a cd ahead of verdict, piped to tail", "cd x && verdict false | tail"),
+    ("a pipe that takes stderr too, |&", "verdict false |& tail"),
+    ("the repo's runner form, piped to tail", "python bin/verdict pytest | tail -5"),
+    ("a timeout ahead of verdict, piped to tail", "timeout 600 verdict pytest | tail -5"),
+    ("a lone apostrophe ahead of it", "echo don't; verdict false | tail"),
+    ("a # inside quotes ahead of it", 'echo "a # b"; verdict false | tail'),
+    ("a multi-line quote ahead of it", 'echo "first line\nsecond line"\nverdict false | tail'),
+    ("a pipe at a line end, then tail", "verdict x |\ntail -5"),
+    ("a pipe in a command substitution, to tail", "x=$(verdict pytest | tail -5)"),
+    ("a pipe in a double-quoted substitution, to tail", 'echo "$(verdict x | tail)"'),
+    ("a pipe in bash -c, to tail", "bash -c 'verdict x | tail'"),
+    ("a pipe in sh -c, to head", 'sh -c "verdict x | head"'),
+    ("the .cmd runner, piped to tail", "verdict.cmd pytest | tail -5"),
+):
+    verdict_pipe(_name, _command, "deny")
+for _name, _command in (
+    ("a bare verdict", "verdict false"),
+    ("verdict then a second command, &&", "verdict x && y"),
+    ("verdict then echo, ||", "verdict x || echo red"),
+    ("output redirected to a file", "verdict x > out"),
+    ("a quoted pipe in verdict's own argument", "verdict grep 'a|b' f"),
+    ("a quoted script in verdict's own argument", "verdict bash -c 'a | b'"),
+    ("grep names verdict, pipe out of grep", "grep verdict f | tail"),
+    ("echo names verdict, pipe out of echo", "echo verdict | cat"),
+    ("verdict last in a pipeline", "cat f | verdict pytest"),
+    ("the whole pipe quoted as text", 'echo "verdict false | tail"'),
+    ("a pipe inside a comment", "verdict false # don't | tail"),
+    ("command -v names verdict, piped to head", "command -v verdict | head -1"),
+    ("type names verdict, piped to head", "type verdict | head -1"),
+    ("a substitution that runs verdict, no pipe", "x=$(verdict pytest)"),
+    ("bash -c runs verdict, no pipe", "bash -c 'verdict x'"),
+):
+    verdict_pipe(_name, _command, "allow")
 
 # --- ln -s onto a directory that is already there
 sh("ln: -s over a real directory nests the link inside it",
@@ -7726,6 +7812,34 @@ nm_case("linked-nm: cd into a real folder, then npm ci, is allowed, though the p
 nm_case("linked-nm: cd into a folder with no node_modules, then npm ci, is allowed",
         "cd " + slash(NMABSENT) + " && npm ci", "allow", NMLINKED)
 
+# THE PREFIX FLAG. `npm ci --prefix <dir>` installs into <dir>, so the folder the flag names is the one judged,
+# not the working folder. Each case is the other folder's answer: a real prefix from a linked folder is allowed,
+# and a linked prefix from a real folder is refused.
+nm_case("linked-nm: npm ci --prefix a real folder, run from a linked folder, is allowed",
+        "npm ci --prefix " + slash(NMREAL), "allow", NMLINKED)
+nm_case("linked-nm: npm ci --prefix a linked folder, run from a real folder, is refused",
+        "npm ci --prefix " + slash(NMLINKED), "deny", NMREAL)
+
+# THE PREFIX FLAG, UNRESOLVED AND REPEATED. A prefix the guard cannot name (a shell variable, a command substitution,
+# a home path) must not hide the working folder: the walk from it still decides, so a linked folder stays refused.
+# The other forms of the flag (`--prefix=dir`, a relative dir, a repeated flag) name the folder npm installs into.
+nm_case('linked-nm: npm ci --prefix "$PWD" from a linked folder is refused',
+        'npm ci --prefix "$PWD"', "deny", NMLINKED)
+nm_case('linked-nm: npm ci --prefix "$(git rev-parse --show-toplevel)" from a linked folder is refused',
+        'npm ci --prefix "$(git rev-parse --show-toplevel)"', "deny", NMLINKED)
+nm_case("linked-nm: npm ci --prefix ~/linked from a linked folder is refused",
+        "npm ci --prefix ~/linked", "deny", NMLINKED)
+nm_case("linked-nm: npm ci --prefix=<linked folder>, run from a real folder, is refused",
+        "npm ci --prefix=" + slash(NMLINKED), "deny", NMREAL)
+nm_case("linked-nm: npm ci --prefix=<real folder>, run from a linked folder, is allowed",
+        "npm ci --prefix=" + slash(NMREAL), "allow", NMLINKED)
+nm_case("linked-nm: npm ci --prefix ../nmlinked, relative, run from a real folder, is refused",
+        "npm ci --prefix ../nmlinked", "deny", NMREAL)
+nm_case("linked-nm: npm ci with a repeated --prefix whose last value is linked, from a real folder, is refused",
+        "npm ci --prefix " + slash(NMREAL) + " --prefix " + slash(NMLINKED), "deny", NMREAL)
+nm_case("linked-nm: npm ci with a repeated --prefix whose last value is real, from a linked folder, is allowed",
+        "npm ci --prefix " + slash(NMLINKED) + " --prefix " + slash(NMREAL), "allow", NMLINKED)
+
 # THE CONTROLS IN A LINKED FOLDER. Each is the job of a linked folder, and none is refused.
 for _command, _tool in (("npm run setup", "Bash"), ("npm run build", "Bash"), ("npm test", "Bash"),
                         ("rm node_modules", "Bash"), ("Remove-Item node_modules", "PowerShell")):
@@ -9694,7 +9808,13 @@ def record_push_cost_case():
     `git rev-parse --show-toplevel`. A refspec push adds one `git symbolic-ref`. A HEAD push adds two
     `git symbolic-ref` and one `git config`, and reads no push.default. A bare push adds two
     `git symbolic-ref` and two `git config` reads, and reads push.default. A literal destination
-    (`origin main`, `HEAD:main`, `HEAD:<branch>`) adds no read. The layout and extras files
+    (`origin main`, `HEAD:main`, `HEAD:<branch>`) adds no read. The conflict-markers push check
+    (decision commit-refuses-conflict-markers) runs one `git diff --check` for each base it reads, in
+    order: the remote-tracking ref, then the upstream, then the default base (a three-dot range, so git
+    finds the merge base itself). A push with a tracking ref reads one base. A push with no tracking ref
+    and no upstream reads three, and the third, the default base, costs one `git symbolic-ref` for
+    origin/HEAD and one `git rev-parse --verify` per candidate branch tried, until one exists. A `git show`
+    runs only when a marker finding needs its line read. The layout and extras files
     are read once each. A spawn log cannot show a file read, so that cost is unmeasured here. The
     transcript is read only when the push reaches the record branch: a push to another branch passes
     with an unreadable transcript, and a push to the record branch with one is refused. A stand-in git
@@ -9726,12 +9846,14 @@ def record_push_cost_case():
         return kinds, lines
 
     for label, tail, want in (
-        ("a refspec push to lane/foo", "push origin lane/foo", {"rev-parse": 1, "symbolic-ref": 1}),
-        ("a HEAD push", "push origin HEAD", {"rev-parse": 1, "symbolic-ref": 2, "config": 1}),
-        ("a bare push", "push", {"rev-parse": 1, "symbolic-ref": 2, "config": 2}),
-        ("a literal destination, origin main", "push origin main", {"rev-parse": 1}),
-        ("a literal destination, HEAD:main", "push origin HEAD:main", {"rev-parse": 1}),
-        ("a literal destination, HEAD:lane/foo", "push origin HEAD:lane/foo", {"rev-parse": 1}),
+        ("a refspec push to lane/foo", "push origin lane/foo", {"rev-parse": 1, "symbolic-ref": 1, "diff": 1}),
+        ("a HEAD push", "push origin HEAD", {"rev-parse": 1, "symbolic-ref": 2, "config": 1, "diff": 1}),
+        ("a bare push", "push", {"rev-parse": 1, "symbolic-ref": 2, "config": 2, "diff": 1}),
+        ("a literal destination, origin main", "push origin main", {"rev-parse": 1, "diff": 1}),
+        ("a literal destination, HEAD:main", "push origin HEAD:main", {"rev-parse": 1, "diff": 1}),
+        ("a literal destination, HEAD:lane/foo", "push origin HEAD:lane/foo", {"rev-parse": 1, "diff": 1}),
+        ("a push with no remote-tracking ref and no upstream", "push origin HEAD:lane/bar",
+         {"rev-parse": 2, "symbolic-ref": 1, "diff": 3}),
     ):
         kinds, lines = spawn_kinds(VCS + " " + tail, PUSHFEAT)
         if kinds != want:
@@ -10886,6 +11008,478 @@ records_allow("a commit of a staged page edit where the base page is hand-writte
 records_allow("a chain that runs the generator, then add -A and commit, where the base page is hand-written",
               GEN + " --records-only && " + ADD_A + " && " + COMMIT_X, REC_PLAIN_LANES["product"])
 
+# =========================================================================== 5d. conflict markers
+#
+# `conflict-markers`. A Bash `git commit` is refused when the commit would hold a git conflict marker:
+# one file's added lines hold all three of a `<<<<<<< ` line, a line of exactly `=======`, and a
+# `>>>>>>> ` line. Only the leftover-marker findings of `git diff --check` count, never its whitespace
+# findings. Incident: a conflict-fix script failed, and the next command in its chain
+# (`fix && git add -A && git commit`) committed the markers.
+#
+# THE SEAM. The hook runs BEFORE the shell chain, so it cannot see what an earlier step does to the tree.
+# A commit, or a `--continue`, is judged on the index, plus the working-tree files its adds, `commit -a`
+# or `commit <path>` cover. A blind step (one that can change the tree) before a commit gives no hit,
+# unless a push follows the commit in the call and the commit covers a triplet already in the tree. A git
+# step in the chain that makes a conflict is refused. A `git push` is judged on the net change it sends: upstream..HEAD, or the
+# refspec, or HEAD's range when the refspec does not resolve. A fence does not exempt a full triplet. A
+# read that fails (no HEAD yet) is no hit.
+#
+# NO CONTEXT SKIPS A MARKER. Git writes a marker inside a string, a comment or a template literal too, so
+# a lone apostrophe, a multi-line template literal and a comment opener inside a string do not hide one
+# (building-scanner-respects-strings).
+FAMILY = "conflict-markers"
+# Marker lines are assembled, so this file never holds one at the start of a line.
+CM_START = "<" * 7 + " HEAD\n"
+CM_MID = "=" * 7 + "\n"
+CM_END = ">" * 7 + " topic\n"
+CM_TRIPLET = CM_START + "ours line\n" + CM_MID + "theirs line\n" + CM_END
+MD_FENCE = "`" * 3
+CMK_RULE = "conflict-markers"
+CMKROOT = os.path.join(ROOT, "cmk")
+CMK_MERGE = os.path.join(CMKROOT, "merge")      # a real conflicting merge, left unresolved
+CMK_STAGED = os.path.join(CMKROOT, "staged")    # the triplet staged in a source file
+CMK_AM = os.path.join(CMKROOT, "am")            # the triplet in a tracked file, unstaged; a clean change staged
+CMK_CLEAN = os.path.join(CMKROOT, "clean")      # a clean change staged
+CMK_WS = os.path.join(CMKROOT, "ws")            # a staged change that adds trailing whitespace only
+CMK_MDOK = os.path.join(CMKROOT, "mdok")        # one marker line in a fence, and a setext underline
+CMK_MDFENCE = os.path.join(CMKROOT, "mdfence")  # a full triplet inside a fence
+CMK_NOHEAD = os.path.join(CMKROOT, "nohead")    # no commit yet, the triplet staged
+CMK_LONE = os.path.join(CMKROOT, "lone")        # a lone apostrophe in text, then a staged triplet
+CMK_TPL = os.path.join(CMKROOT, "tpl")          # a staged triplet inside a multi-line template literal
+CMK_OPEN = os.path.join(CMKROOT, "open")        # a string holding comment openers, then a staged triplet
+
+
+def _cmk_run(where, *args):
+    done = run_vcs(where, *IDENT, *args)
+    if done.returncode != 0:
+        sys.exit("fixture setup failed in the conflict-markers fixtures: %s %s in %r: %s"
+                 % (VCS, " ".join(args), where, done.stderr.strip()))
+    return done.stdout.strip()
+
+
+def _cmk_topic(where, files):
+    """A checkout whose base commit holds `files`, moved onto branch `topic`, so the commit under test is
+    no commit on main."""
+    make_repo(where, files)
+    _cmk_run(where, "checkout", "-q", "-b", "topic")
+
+
+def _cmk_stage(where, rel, text):
+    write(os.path.join(where, rel), text)
+    _cmk_run(where, "add", rel)
+
+
+def _build_conflict_markers():
+    run, stage = _cmk_run, _cmk_stage
+    # `theirs` and `topic` both change src/app.py, so merging `theirs` into `topic` leaves a real conflict.
+    _cmk_topic(CMK_MERGE, {"src/app.py": "x = 1\n"})
+    run(CMK_MERGE, "checkout", "-q", "-b", "theirs", "main")
+    write(os.path.join(CMK_MERGE, "src", "app.py"), "x = 2\n")
+    run(CMK_MERGE, "commit", "-q", "-am", "theirs change")
+    run(CMK_MERGE, "checkout", "-q", "topic")
+    write(os.path.join(CMK_MERGE, "src", "app.py"), "x = 3\n")
+    run(CMK_MERGE, "commit", "-q", "-am", "topic change")
+    run_vcs(CMK_MERGE, *IDENT, "merge", "-q", "--no-edit", "theirs")   # conflicts: MERGE_HEAD set, file unmerged
+    _require_conflict(CMK_MERGE, "src/app.py")
+
+    _cmk_topic(CMK_STAGED, {"src/app.py": "x = 1\n"})
+    stage(CMK_STAGED, "src/app.py", "x = 1\n" + CM_TRIPLET)
+
+    _cmk_topic(CMK_AM, {"src/app.py": "x = 1\n", "src/other.py": "y = 1\n"})
+    write(os.path.join(CMK_AM, "src", "app.py"), "x = 1\n" + CM_TRIPLET)   # tracked, modified, unstaged
+    stage(CMK_AM, "src/other.py", "y = 2\n")                                # a clean change, staged
+
+    _cmk_topic(CMK_CLEAN, {"src/app.py": "x = 1\n"})
+    stage(CMK_CLEAN, "src/app.py", "x = 2\n")
+
+    _cmk_topic(CMK_WS, {"src/app.py": "x = 1\n"})
+    stage(CMK_WS, "src/app.py", "x = 2   \n")                               # trailing whitespace only
+
+    _cmk_topic(CMK_MDOK, {"docs/notes.md": "# Notes\n"})
+    stage(CMK_MDOK, "docs/notes.md", "# Notes\n\nSetext heading\n" + CM_MID + "\n" + MD_FENCE + "text\n"
+          + CM_START + MD_FENCE + "\n")
+
+    _cmk_topic(CMK_MDFENCE, {"docs/notes.md": "# Notes\n"})
+    stage(CMK_MDFENCE, "docs/notes.md", "# Notes\n\n" + MD_FENCE + "text\n" + CM_TRIPLET + MD_FENCE + "\n")
+
+    os.makedirs(CMK_NOHEAD, exist_ok=True)
+    run(CMK_NOHEAD, "init", "-q", "-b", "topic", ".")
+    stage(CMK_NOHEAD, "src/app.py", "x = 1\n" + CM_TRIPLET)
+
+    _cmk_topic(CMK_LONE, {"src/view.jsx": "export const a = 1;\n"})
+    stage(CMK_LONE, "src/view.jsx", "export const a = 1;\n<p>Don't</p>\n" + CM_TRIPLET)
+    _cmk_topic(CMK_TPL, {"src/tpl.js": "const a = 1;\n"})
+    stage(CMK_TPL, "src/tpl.js", "const a = 1;\nconst doc = `\n" + CM_TRIPLET + "`;\n")
+    _cmk_topic(CMK_OPEN, {"src/opener.py": "x = 1\n"})
+    stage(CMK_OPEN, "src/opener.py", 'x = 1\nNOTE = "/* // #"\n' + CM_TRIPLET)
+
+
+lazy_fixture([CMK_MERGE, CMK_STAGED, CMK_AM, CMK_CLEAN, CMK_WS, CMK_MDOK, CMK_MDFENCE, CMK_NOHEAD,
+              CMK_LONE, CMK_TPL, CMK_OPEN], _build_conflict_markers)
+
+
+def cmk_refuse(name, command, cwd):
+    sh("conflict-markers: %s is refused" % name, command, "deny", CMK_RULE, cwd=cwd)
+
+
+def cmk_allow(name, command, cwd):
+    sh("conflict-markers: %s is allowed" % name, command, "allow", cwd=cwd)
+
+
+# 1. The index: a real conflict left in the index, or markers staged. A plain commit holds the index.
+cmk_refuse("a real merge conflict left in a file, then add -A and commit",
+         VCS + " add -A && " + VCS + " commit -m x", CMK_MERGE)
+cmk_refuse("a triplet staged in a source file, then commit", VCS + " commit -m x", CMK_STAGED)
+cmk_refuse("a triplet staged, behind a false command in the chain", "false && " + VCS + " commit -m x", CMK_STAGED)
+
+# 2. The working tree: an add in the chain, or a commit that names its file, holds that file's content.
+cmk_refuse("commit -am with the triplet in a tracked, modified file", VCS + " commit -am x", CMK_AM)
+cmk_refuse("add . and commit with the triplet in a tracked, modified file",
+         VCS + " add . && " + VCS + " commit -m x", CMK_AM)
+cmk_refuse("add of the file and commit, the triplet in that file",
+         VCS + " add src/app.py && " + VCS + " commit -m x", CMK_AM)
+cmk_refuse("a commit by path that names the file with the triplet", VCS + " commit -m x src/app.py", CMK_AM)
+
+# 3. Scope: the commit holds what it names, and the markers in an unstaged file it does not name are no hit.
+cmk_allow("a commit with the triplet unstaged in another file, and a clean change staged",
+          VCS + " commit -m x", CMK_AM)
+cmk_allow("a commit by path that names only the clean file, the triplet unstaged in another",
+          VCS + " commit -m x src/other.py", CMK_AM)
+cmk_allow("an add of the clean file and commit, the triplet unstaged in another",
+          VCS + " add src/other.py && " + VCS + " commit -m x", CMK_AM)
+
+# 4. Content that is no conflict marker, and a commit with no HEAD to read.
+cmk_allow("a clean staged change", VCS + " commit -m x", CMK_CLEAN)
+cmk_allow("a staged change that adds trailing whitespace only", VCS + " commit -m x", CMK_WS)
+cmk_allow("a markdown file with one marker line in a fence, and a setext underline of =======",
+          VCS + " commit -m x", CMK_MDOK)
+cmk_allow("a staged triplet in a repository with no commits yet", VCS + " commit -m x", CMK_NOHEAD)
+
+# 5. A fence, a string, a comment or a template literal does not hide a full triplet.
+cmk_refuse("a markdown file with a full triplet inside a fence", VCS + " commit -m x", CMK_MDFENCE)
+cmk_refuse("a staged triplet after a lone apostrophe in text", VCS + " commit -m x", CMK_LONE)
+cmk_refuse("a staged triplet inside a multi-line template literal", VCS + " commit -m x", CMK_TPL)
+cmk_refuse("a staged triplet after a string holding comment openers", VCS + " commit -m x", CMK_OPEN)
+
+
+# The commit check reads the tree only when no earlier segment can change it. The push check judges the
+# commits a push would send, so each push case runs in a checkout whose remote is a bare repository
+# beside it: nothing leaves the machine.
+CMKPUSH = os.path.join(CMKROOT, "push")        # one checkout per push case, on branch `topic`
+CMKREMOTE = os.path.join(CMKROOT, "remote")    # the bare remote of each of those checkouts
+CMK_PU = os.path.join(CMKPUSH, "unpushed")     # an unpushed commit holding a full triplet
+CMK_RB = os.path.join(CMKPUSH, "rebased")      # a commit made by `git rebase --continue`, holding a triplet
+CMK_MP = os.path.join(CMKPUSH, "mergepush")    # a commit made by `git merge --continue`, holding a triplet
+CMK_NF = os.path.join(CMKPUSH, "newfile")      # an unpushed commit that adds a new file holding a triplet
+CMK_CL = os.path.join(CMKPUSH, "clean")        # an unpushed clean commit, and a.txt edited, not staged
+CMK_RT = os.path.join(CMKPUSH, "remotetrip")   # a triplet already on the remote branch, then a clean commit
+CMK_CLT = os.path.join(CMKPUSH, "cltriplet")   # a.txt holding a triplet, tracked and not staged
+CMK_SEQ = os.path.join(CMKPUSH, "seqclean")    # a.txt and b.txt edited, not staged, both clean
+CMK_SEQB = os.path.join(CMKPUSH, "seqtriplet")  # as seqclean, with b.txt holding a triplet
+CMK_REL = os.path.join(CMKPUSH, "relative")    # diff.relative set; a triplet unpushed in sub/f.txt
+CMK_PAREN = os.path.join(CMKPUSH, "fixparen")  # an unpushed triplet on branch fix(x); HEAD on clean topic
+CMK_GONE = os.path.join(CMKROOT, "gone")       # a folder no fixture makes: the cd target of the missing-folder cases
+
+
+def _cmk_commit(where, rel, text, msg):
+    _cmk_stage(where, rel, text)
+    _cmk_run(where, "commit", "-q", "-m", msg)
+
+
+def _cmk_unmerged(where, rel):
+    """Stop the suite unless `rel` is left unmerged in `where`, as a rebase or merge stop leaves it."""
+    lines = [line for line in run_vcs(where, "status", "--porcelain").stdout.splitlines() if rel in line]
+    if not any(line[:2] in ("UU", "AA") for line in lines):
+        sys.exit("fixture setup failed in the conflict-markers fixtures: %r is not unmerged in %r: %r"
+                 % (rel, where, lines))
+
+
+def _cmk_pushed(where, files):
+    """A checkout of `files` on main, pushed to a bare remote beside it, then on branch `topic`, pushed
+    too. What is committed on `topic` after this is unpushed."""
+    remote = os.path.join(CMKREMOTE, os.path.basename(where) + ".git")
+    make_repo(where, files)
+    os.makedirs(remote, exist_ok=True)
+    _cmk_run(remote, "init", "-q", "--bare")
+    _cmk_run(where, "remote", "add", "origin", remote)
+    _cmk_run(where, "push", "-q", "-u", "origin", "main")
+    _cmk_run(where, "checkout", "-q", "-b", "topic")
+    _cmk_run(where, "push", "-q", "-u", "origin", "topic")
+
+
+def _cmk_must_hold(where, rel, marker, what):
+    if marker.strip() not in _cmk_run(where, "show", "HEAD:" + rel):
+        sys.exit("fixture setup failed in the conflict-markers fixtures: %s holds no marker" % what)
+
+
+def _build_conflict_markers_push():
+    run, commit = _cmk_run, _cmk_commit
+
+    _cmk_pushed(CMK_PU, {"src/app.py": "x = 1\n"})
+    commit(CMK_PU, "src/app.py", "x = 1\n" + CM_TRIPLET, "triplet, unpushed")
+
+    _cmk_pushed(CMK_RB, {"a.txt": "base\n"})
+    commit(CMK_RB, "a.txt", "topic\n", "topic change")
+    run(CMK_RB, "push", "-q", "origin", "topic")           # the old topic commit is on the remote
+    run(CMK_RB, "checkout", "-q", "main")
+    commit(CMK_RB, "a.txt", "main\n", "main change")
+    run(CMK_RB, "checkout", "-q", "topic")
+    run_vcs(CMK_RB, *IDENT, "rebase", "main")              # conflicts on a.txt, and the rebase stops
+    _cmk_unmerged(CMK_RB, "a.txt")
+    _cmk_stage(CMK_RB, "a.txt", CM_TRIPLET)                # resolved by keeping the markers
+    run(CMK_RB, "-c", "core.editor=true", "rebase", "--continue")
+    _cmk_must_hold(CMK_RB, "a.txt", CM_START, "the rebased commit")
+
+    _cmk_pushed(CMK_MP, {"a.txt": "base\n"})
+    commit(CMK_MP, "a.txt", "topic\n", "topic change")
+    run(CMK_MP, "push", "-q", "origin", "topic")
+    run(CMK_MP, "checkout", "-q", "main")
+    commit(CMK_MP, "a.txt", "main\n", "main change")
+    run(CMK_MP, "checkout", "-q", "topic")
+    run_vcs(CMK_MP, *IDENT, "merge", "--no-edit", "main")  # conflicts on a.txt
+    _require_conflict(CMK_MP, "a.txt")
+    _cmk_stage(CMK_MP, "a.txt", CM_TRIPLET)
+    run(CMK_MP, "-c", "core.editor=true", "merge", "--continue")
+    _cmk_must_hold(CMK_MP, "a.txt", CM_START, "the merge commit")
+
+    _cmk_pushed(CMK_NF, {"a.txt": "base\n"})
+    write(os.path.join(CMK_NF, "src", "new.txt"), CM_TRIPLET)
+    run(CMK_NF, "add", "-A")
+    run(CMK_NF, "commit", "-q", "-m", "new file holding a triplet")
+
+    _cmk_pushed(CMK_CL, {"a.txt": "base\n"})
+    commit(CMK_CL, "b.txt", "clean\n", "clean change, unpushed")
+    write(os.path.join(CMK_CL, "a.txt"), "edited\n")       # modified, not staged, clean
+
+    _cmk_pushed(CMK_RT, {"a.txt": "base\n"})
+    commit(CMK_RT, "a.txt", CM_TRIPLET, "triplet, already sent")
+    run(CMK_RT, "push", "-q", "origin", "topic")
+    commit(CMK_RT, "b.txt", "clean\n", "clean change, unpushed")
+
+    _cmk_pushed(CMK_CLT, {"a.txt": "base\n"})
+    write(os.path.join(CMK_CLT, "a.txt"), CM_TRIPLET)      # tracked, modified, not staged
+    commit(CMK_CLT, "b.txt", "clean\n", "clean change, unpushed")
+
+    for path, b_text in ((CMK_SEQ, "b2\n"), (CMK_SEQB, CM_TRIPLET)):
+        _cmk_pushed(path, {"a.txt": "base\n", "b.txt": "base\n"})
+        write(os.path.join(path, "a.txt"), "a2\n")         # modified, not staged
+        write(os.path.join(path, "b.txt"), b_text)
+
+    _cmk_pushed(CMK_REL, {"f.txt": "base\n", "sub/f.txt": "base\n"})
+    run(CMK_REL, "config", "diff.relative", "true")
+    commit(CMK_REL, "sub/f.txt", CM_TRIPLET, "triplet in sub, unpushed")
+
+    _cmk_pushed(CMK_PAREN, {"a.txt": "base\n"})
+    run(CMK_PAREN, "checkout", "-q", "-b", "fix(x)")
+    commit(CMK_PAREN, "a.txt", CM_TRIPLET, "triplet on fix(x), unpushed")
+    run(CMK_PAREN, "checkout", "-q", "topic")
+    run(CMK_PAREN, "branch", "fixy", "fix(x)")             # the same commit, under a plain name
+    for gone in (CMK_GONE, os.path.join(CMK_CLT, "nope")):
+        if os.path.exists(gone):
+            sys.exit("fixture setup failed in the conflict-markers fixtures: %r exists, so a cd to it does not fail"
+                     % gone)
+
+
+lazy_fixture([CMK_PU, CMK_RB, CMK_MP, CMK_NF, CMK_CL, CMK_RT, CMK_CLT, CMK_SEQ, CMK_SEQB, CMK_REL, CMK_PAREN],
+             _build_conflict_markers_push)
+
+# A commit that cannot be judged, with no push after it in the call, is no hit. The sed and the fix script
+# below cover a file that holds the triplet before the call, so each one with a push after it is refused.
+CMK_SED_COMMIT = ("sed -i '/^" + "<" * 7 + " /d;/^" + "=" * 7 + "$/d;/^" + ">" * 7 + " /d' src/app.py && "
+                  + VCS + " add src/app.py && " + VCS + " commit -m x")
+CMK_FIX_COMMIT = "./fix.sh; " + VCS + " add -A && " + VCS + " commit -m x"
+cmk_allow("a sed that deletes the marker lines, then add and commit, no push", CMK_SED_COMMIT, CMK_MERGE)
+cmk_allow("a fix script, then add -A and commit, no push", CMK_FIX_COMMIT, CMK_AM)
+cmk_refuse("a sed that deletes the marker lines, then add, commit and push", CMK_SED_COMMIT + " && "
+           + VCS + " push", CMK_MERGE)
+cmk_refuse("a fix script, then add -A, commit and push", CMK_FIX_COMMIT + " && " + VCS + " push", CMK_AM)
+
+# The push check: a push is refused when a commit it would send adds a full triplet, whichever step made it.
+cmk_refuse("a push of an unpushed commit that holds a triplet", VCS + " push", CMK_PU)
+cmk_refuse("a push of a commit made by rebase --continue that holds a triplet", VCS + " push", CMK_RB)
+cmk_refuse("a push of a commit made by merge --continue that holds a triplet", VCS + " push", CMK_MP)
+cmk_refuse("a push of a new file that holds a triplet", VCS + " push", CMK_NF)
+
+# A push sends only what is unpushed: clean commits pass, and so does a triplet already on the remote.
+cmk_allow("a push of unpushed commits that are clean", VCS + " push", CMK_CL)
+cmk_allow("a push of a clean commit, with a triplet already on the remote branch", VCS + " push", CMK_RT)
+
+# A commit then a push in one call: a judged clean commit lets the push through; one that cannot be judged
+# is refused.
+cmk_allow("add a.txt, commit and push, with a clean a.txt",
+          VCS + " add a.txt && " + VCS + " commit -m x && " + VCS + " push", CMK_CL)
+# CMK_CL holds no triplet before the call, so the blind chain is allowed.
+cmk_allow("a fix script, add -A, commit and push, with no triplet in the tree before the call",
+          "./fix.sh && " + VCS + " add -A && " + VCS + " commit -m x && " + VCS + " push", CMK_CL)
+
+# A cd is a safe earlier segment: the commit is judged in the repository it names. These run from a
+# directory that is no repository, so only the cd leads to the repository.
+cmk_allow("a cd into a repo with a clean change, then add -A, commit and push",
+          "cd " + slash(CMK_CL) + " && " + VCS + " add -A && " + VCS + " commit -m x && " + VCS + " push", NOGIT)
+cmk_refuse("a cd into a repo with a triplet in a tracked file, then add -A, commit and push",
+           "cd " + slash(CMK_CLT) + " && " + VCS + " add -A && " + VCS + " commit -m x && " + VCS + " push", NOGIT)
+
+# A failed cd leaves the shell in its cwd. After `;` the commit runs there, so a missing folder does not stop a
+# commit of the triplet in the cwd repository. After `&&` the failed cd ends the chain, so nothing runs.
+cmk_refuse("a cd into a missing folder, then ; add -A and commit, with a triplet tracked in the cwd repo",
+           "cd " + slash(CMK_GONE) + " ; " + VCS + " add -A && " + VCS + " commit -m x", CMK_CLT)
+cmk_refuse("a cd into a missing relative folder, then ; add -A and commit, with a triplet tracked in the cwd repo",
+           "cd nope ; " + VCS + " add -A && " + VCS + " commit -m x", CMK_CLT)
+cmk_allow("a cd into a missing folder, then && add -A and commit, with a triplet tracked in the cwd repo",
+          "cd " + slash(CMK_GONE) + " && " + VCS + " add -A && " + VCS + " commit -m x", CMK_CLT)
+cmk_allow("a cd into a missing folder, then ; add -A and commit, in a cwd repo whose edit is clean",
+          "cd " + slash(CMK_GONE) + " ; " + VCS + " add -A && " + VCS + " commit -m x", CMK_CL)
+
+# A failed cd leaves the shell where it was, so the next command after `;`, a newline or `||` runs there. After
+# `&&` the chain stops. `--work-tree` names the folder an add reads: a missing one fails the add (exit 128), so
+# the `&&` stops the commit, and the same call with a real work tree holding the triplet is refused.
+cmk_allow("a missing --work-tree, then && commit, with a triplet tracked in the cwd repo",
+          VCS + " --work-tree=" + slash(CMK_GONE) + " add -A && " + VCS + " commit -m x", CMK_CLT)
+cmk_refuse("an existing --work-tree holding the triplet, then add -A and commit",
+           VCS + " --work-tree=" + slash(CMK_CLT) + " add -A && " + VCS + " commit -m x", CMK_CLT)
+cmk_refuse("a cd into a missing folder, then && git status, then ; add -A and commit, the triplet in the cwd repo",
+           "cd " + slash(CMK_GONE) + " && " + VCS + " status ; " + VCS + " add -A && " + VCS + " commit -m x", CMK_CLT)
+cmk_refuse("a cd into a missing folder, then && true, then ; add -A and commit, the triplet in the cwd repo",
+           "cd " + slash(CMK_GONE) + " && true ; " + VCS + " add -A && " + VCS + " commit -m x", CMK_CLT)
+cmk_refuse("a cd into a missing folder, then ; add -A and commit, then a cd to a clean repo after the commit",
+           "cd " + slash(CMK_GONE) + " ; " + VCS + " add -A && " + VCS + " commit -m x ; cd " + slash(CMK_CL), CMK_CLT)
+cmk_refuse("a cd into a missing folder, then || true, then ; add -A and commit, the triplet in the cwd repo",
+           "cd " + slash(CMK_GONE) + " || true ; " + VCS + " add -A && " + VCS + " commit -m x", CMK_CLT)
+cmk_refuse("a cd into a missing folder, then a newline, then add -A and commit, the triplet in the cwd repo",
+           "cd " + slash(CMK_GONE) + "\n" + VCS + " add -A && " + VCS + " commit -m x", CMK_CLT)
+
+# `cd -` goes back to the folder before the last cd that worked. A failed cd leaves that folder alone, so the
+# commit lands in the triplet repo. The NOGIT form has no triplet to refuse, so this case starts in CMK_CLT.
+cmk_refuse("a cd into a clean repo, then a cd into a missing folder, then cd -, then add -A and commit",
+           "cd " + slash(CMK_CL) + " ; cd " + slash(CMK_GONE) + " ; cd - ; "
+           + VCS + " add -A && " + VCS + " commit -m x", CMK_CLT)
+cmk_refuse("a cd into a clean repo, then cd -, then add -A and commit, the triplet in the cwd repo",
+           "cd " + slash(CMK_CL) + " ; cd - ; " + VCS + " add -A && " + VCS + " commit -m x", CMK_CLT)
+
+# An earlier commit is a safe segment too, so each commit is judged and the push sees both.
+cmk_allow("two clean commits, each after an add, then a push",
+          VCS + " add a.txt && " + VCS + " commit -m a && " + VCS + " add b.txt && " + VCS + " commit -m b && "
+          + VCS + " push", CMK_SEQ)
+cmk_refuse("two commits, each after an add, the second holding a triplet, then a push",
+           VCS + " add a.txt && " + VCS + " commit -m a && " + VCS + " add b.txt && " + VCS + " commit -m b && "
+           + VCS + " push", CMK_SEQB)
+
+# A push from a subdirectory with `diff.relative` set: `git diff --check` prints each path relative to that
+# directory, so the file it names is read at the top of the tree, under the wrong path. The root push is a
+# green control: the same triplet, pushed from the root, is refused today and stays refused.
+cmk_refuse("a push from sub/ of a triplet in sub/f.txt, with diff.relative set and a clean f.txt at the top",
+           VCS + " push origin topic", os.path.join(CMK_REL, "sub"))
+cmk_refuse("a push from the root of the same repo, the triplet in sub/f.txt, with diff.relative set",
+           VCS + " push origin topic", CMK_REL)
+
+# A refspec that is no plain name, `fix(x)`, is read as HEAD, so the commit it names is never judged. The
+# same commit under the plain name fixy is the green control: it has no tracking ref, so it is judged
+# against the default base, and that base holds the triplet.
+cmk_refuse("a push of a branch named fix(x) holding a triplet, with HEAD on a clean branch",
+           VCS + ' push origin "fix(x)"', CMK_PAREN)
+cmk_refuse("a push of the same commit under the plain name fixy, with HEAD on a clean branch",
+           VCS + " push origin fixy", CMK_PAREN)
+
+
+# A commit or a --continue is judged on what it covers. A blind step before a commit (one that can
+# change the tree) is refused only when a push follows the commit in the call and the commit covers a
+# triplet already in the tree before the call, or when the chain runs a git step that makes a conflict. A
+# push judges the net change it sends.
+R2_DIR = os.path.join(CMKROOT, "r2")
+R2_NEW = os.path.join(R2_DIR, "new")      # new.txt untracked, holding a triplet
+R2_RB = os.path.join(R2_DIR, "rebase")    # a rebase stopped on a.txt, the triplet staged after the stop
+R2_MC = os.path.join(R2_DIR, "merge")     # a merge stopped on a.txt, the triplet staged after the stop
+R2_CP = os.path.join(R2_DIR, "pick")      # a cherry-pick stopped on a.txt, the triplet staged after the stop
+R2_MG = os.path.join(R2_DIR, "mg")        # a clean tree, and a merge of feat that conflicts with it
+R2_NET = os.path.join(R2_DIR, "net")      # a commit adds a triplet, the next removes it, neither pushed
+
+
+def _build_conflict_markers_r2():
+    run, commit = _cmk_run, _cmk_commit
+
+    _cmk_pushed(R2_NEW, {"a.txt": "base\n"})
+    write(os.path.join(R2_NEW, "new.txt"), CM_TRIPLET)      # untracked, not added
+
+    _cmk_pushed(R2_RB, {"a.txt": "base\n"})
+    commit(R2_RB, "a.txt", "topic\n", "topic change")
+    run(R2_RB, "checkout", "main")
+    commit(R2_RB, "a.txt", "main\n", "main change")
+    run(R2_RB, "checkout", "topic")
+    run_vcs(R2_RB, *IDENT, "rebase", "main")                # conflicts on a.txt, and the rebase stops
+    _cmk_unmerged(R2_RB, "a.txt")
+    _cmk_stage(R2_RB, "a.txt", CM_TRIPLET)
+
+    _cmk_pushed(R2_MC, {"a.txt": "base\n"})
+    commit(R2_MC, "a.txt", "topic\n", "topic change")
+    run(R2_MC, "checkout", "main")
+    commit(R2_MC, "a.txt", "main\n", "main change")
+    run(R2_MC, "checkout", "topic")
+    run_vcs(R2_MC, *IDENT, "merge", "--no-edit", "main")    # conflicts on a.txt
+    _require_conflict(R2_MC, "a.txt")
+    _cmk_stage(R2_MC, "a.txt", CM_TRIPLET)
+
+    _cmk_pushed(R2_CP, {"a.txt": "base\n"})
+    run(R2_CP, "checkout", "-b", "pickme")
+    commit(R2_CP, "a.txt", "pick\n", "pick change")
+    run(R2_CP, "checkout", "topic")
+    commit(R2_CP, "a.txt", "topic\n", "topic change")
+    run_vcs(R2_CP, *IDENT, "cherry-pick", "pickme")        # conflicts on a.txt
+    _cmk_unmerged(R2_CP, "a.txt")
+    _cmk_stage(R2_CP, "a.txt", CM_TRIPLET)
+
+    _cmk_pushed(R2_MG, {"a.txt": "base\n"})
+    run(R2_MG, "checkout", "-b", "feat")
+    commit(R2_MG, "a.txt", "feat\n", "feat change")
+    run(R2_MG, "checkout", "topic")
+    commit(R2_MG, "a.txt", "topic\n", "topic change")
+
+    _cmk_pushed(R2_NET, {"a.txt": "base\n"})
+    commit(R2_NET, "a.txt", CM_TRIPLET, "add a triplet")
+    commit(R2_NET, "a.txt", "clean\n", "remove the triplet")
+
+
+lazy_fixture([R2_NEW, R2_RB, R2_MC, R2_CP, R2_MG, R2_NET], _build_conflict_markers_r2)
+
+# 1. An untracked file holding a triplet is in the commit once it is added, by -A or by name.
+cmk_refuse("an untracked new.txt holding a triplet, then add -A, commit and push",
+           VCS + " add -A && " + VCS + " commit -m x && " + VCS + " push", R2_NEW)
+cmk_refuse("an untracked new.txt holding a triplet, then add it by name and commit",
+           VCS + " add new.txt && " + VCS + " commit -m x", R2_NEW)
+
+# 2. A --continue is judged like a commit: the index it would commit holds the triplet.
+cmk_refuse("a triplet staged in a.txt in a rebase conflict, then add, rebase --continue and push",
+           VCS + " add a.txt && " + VCS + " rebase --continue && " + VCS + " push", R2_RB)
+cmk_refuse("a triplet staged in a.txt in a merge conflict, then add, merge --continue and push",
+           VCS + " add a.txt && " + VCS + " merge --continue && " + VCS + " push", R2_MC)
+cmk_refuse("a triplet staged in a.txt in a cherry-pick conflict, then add, cherry-pick --continue and push",
+           VCS + " add a.txt && " + VCS + " cherry-pick --continue && " + VCS + " push", R2_CP)
+
+# 3. A push refspec that does not resolve falls back to HEAD's range, which holds the unpushed triplet.
+cmk_refuse("a push of the current branch by a command substitution, with an unpushed triplet commit",
+           VCS + ' push -u origin "$(' + VCS + ' branch --show-current)"', CMK_PU)
+
+# 4. An add pathspec that does not resolve is a whole-tree add, which covers the tracked triplet.
+cmk_refuse("a tracked triplet, then add of a substituted path list, commit and push",
+           VCS + " add $(" + VCS + " diff --name-only) && " + VCS + " commit -m x && "
+           + VCS + " push -u origin HEAD", CMK_CLT)
+
+# 5. A blind step before a commit is allowed when no triplet sits in the tree.
+cmk_allow("a blind step, then commit -am and push, with no triplet in the tree",
+          "./check.sh && " + VCS + " commit -am x && " + VCS + " push", CMK_CL)
+
+# 6. A blind chain with a triplet already in the tree stays refused.
+cmk_refuse("a fix script, add -A, commit and push, with a triplet in the tree before the call",
+           "./fix.sh && " + VCS + " add -A && " + VCS + " commit -m x && " + VCS + " push", CMK_CLT)
+
+# 7. A chain that runs a git step making a conflict is refused, though the tree starts clean.
+cmk_refuse("a merge that conflicts on a clean tree, then add -A, commit and push",
+           VCS + " merge feat && " + VCS + " add -A && " + VCS + " commit -m x && " + VCS + " push", R2_MG)
+
+# 8. A push judges the net change it sends: a triplet added and removed again is no hit.
+cmk_allow("two commits, the first adding a triplet and the second removing it, then a push",
+          VCS + " push", R2_NET)
+
+
 # =========================================================================== 6. frozen paths
 FAMILY = "frozen"
 #
@@ -10935,6 +11529,10 @@ sh("frozen: cp onto the config-watch baseline store", "cp /tmp/x.json " + CFG_ST
    "frozen-path", cwd=NOGIT)
 sh("frozen: sed -i on the config-watch baseline store", "sed -i '' s/a/b/ " + CFG_STATE, "deny",
    "frozen-path", cwd=NOGIT)
+# A real newline inside a quoted argument does not split the command: the sed -i and the frozen path it names
+# stay one write.
+sh("frozen: sed -i with a newline in its quoted script, onto the frozen settings",
+   "sed -i '1i\\\ntext' " + CFG_SETTINGS, "deny", "frozen-path", cwd=NOGIT)
 add("frozen: Read of the config-watch baseline store is allowed", "allow", tool="Read",
     cwd=NOGIT, file_path=CFG_STATE)
 # OWNER RULING 2026-10-17 11:40 CDT: `cp` FROM a frozen path to a path outside the frozen set only
@@ -11313,6 +11911,11 @@ sh("frozen data: a quoted cat-write onto the config settings, piped to python, d
    "echo \"cat > " + CFG_SETTINGS + "\" | python hooks/guard.py", "deny", "frozen-path", cwd=NOGIT)
 sh("frozen: a real cat-write onto the config settings stays denied",
    "cat > " + CFG_SETTINGS, "deny", "frozen-path", cwd=NOGIT)
+# The PowerShell reading of a `\"` stays fail-closed: the quote may open a string, so the write is
+# still judged and denied. The bash reading of the same text is a plain echo and is allowed.
+sh("frozen: a PowerShell call with a backslash-quote before a config write stays denied",
+   'echo "C:\\" ; Set-Content ' + CFG_SETTINGS + ' x ; echo \\"D"', "deny", "frozen-path",
+   tool="PowerShell", cwd=NOGIT)
 
 # VARIABLE INDIRECTION (incident 2026-10-07): the static parse saw only "$D", never the frozen
 # target. A simple VAR=value assignment earlier in the same command must resolve. An unresolved
@@ -12510,7 +13113,7 @@ for _tool, _field in (("Edit", "file_path"), ("Write", "file_path"), ("MultiEdit
     add("builder-test: %s of a test file is refused" % _tool, "deny", rule=BT, tool=_tool,
         carries=("test-author", "Report"), **{_field: "src/test_app.py"}, **B)
 add("builder-test: the refusal routes a test-file merge conflict", "deny", rule=BT, tool="Edit",
-    file_path="src/test_app.py", carries=("merge conflict",), **B)
+    file_path="src/test_app.py", carries=("merge conflict", "test-author"), **B)
 for _path in ("src/app_test.py", "pkg/app_test.go", "web/a.test.ts", "web/a.test.jsx",
               "web/a.spec.js", "tests/helper.py", "pkg/__tests__/x.js", "spec/models/user.rb",
               "src/tests/data/fixture.json", "test/x.txt", "src/conftest.py"):
@@ -12894,6 +13497,39 @@ sh("builder-test: shell grep of tests/test_guard.py for a mutating word is allow
    "grep -n install tests/test_guard.py", "allow", **BR)
 sh("builder-test: shell pytest -k with a mutating word is allowed",
    "python3 -m pytest -k copy tests/test_guard.py", "allow", **BR)
+# A `bash -c` script is read at its command position, as the shell reads it: a mutating word that is only an
+# argument of a test run inside it reads as a read. A write to a test inside the script stays refused, whether
+# the write is the script's first command or a later one after `;`.
+sh("builder-test: bash -c pytest -k with a mutating word on a test is allowed",
+   'bash -c "pytest -k install tests/test_x.py"', "allow", **BR)
+sh("builder-test: timeout around bash -c pytest -k with a mutating word on a test is allowed",
+   'timeout 300 bash -c "pytest -k move tests/x.py"', "allow", **BR)
+sh("builder-test: bash -c echo redirect onto a test is refused",
+   'bash -c "echo x > tests/test_x.py"', "deny", rule=BT, carries=("test-author",), **BR)
+sh("builder-test: bash -c cp onto a test is refused",
+   'bash -c "cp /tmp/a tests/test_x.py"', "deny", rule=BT, carries=("test-author",), **BR)
+sh("builder-test: bash -c install onto a test is refused",
+   'bash -c "install -m 644 /tmp/a tests/test_x.py"', "deny", rule=BT, carries=("test-author",), **BR)
+sh("builder-test: bash -c pytest read, then a cp onto a test after the semicolon, is refused",
+   'bash -c "pytest -k install tests/test_x.py; cp /tmp/a tests/test_x.py"', "deny", rule=BT,
+   carries=("test-author",), **BR)
+# A real newline inside the bash -c string starts a new command, so a write after it is judged the same way.
+sh("builder-test: bash -c with a newline before a cp onto a test is refused",
+   'bash -c "set -e\ncp /tmp/a tests/test_x.py"', "deny", rule=BT, carries=("test-author",), **BR)
+sh("builder-test: bash -c with a newline before a sed -i on a test is refused",
+   'bash -c "echo hi\nsed -i s/a/b/ tests/test_x.py"', "deny", rule=BT, carries=("test-author",), **BR)
+# A quoted argument with a real newline in it, and an escaped quote in a bash -c string, do not hide the write
+# that follows: each is read at its command position, as the shell reads it.
+sh("builder-test: sed -i with a newline in its quoted script, onto a test, is refused",
+   "sed -i '1i\\\ntext' tests/test_x.py", "deny", rule=BT, carries=("test-author",), **BR)
+sh("builder-test: cp of a quoted argument with a newline onto a test is refused",
+   'cp "a\nb" tests/x.py', "deny", rule=BT, carries=("test-author",), **BR)
+sh("builder-test: bash -c with an escaped quote, then ; and a cp onto a test, is refused",
+   r'bash -c "echo \"x\"; cp /tmp/a tests/test_x.py"', "deny", rule=BT, carries=("test-author",), **BR)
+sh("builder-test: bash -c with an escaped quote, then a pipe into a cp onto a test, is refused",
+   r'bash -c "echo \"x\"|cp /tmp/a tests/test_x.py"', "deny", rule=BT, carries=("test-author",), **BR)
+sh("builder-test: bash -c with an escaped quote, then a newline and a cp onto a test, is refused",
+   'bash -c "echo \\"x\\"\ncp /tmp/a tests/test_x.py"', "deny", rule=BT, carries=("test-author",), **BR)
 sh("builder-test: python heredoc that reads tests/x.py, rebinds the name, then writes src/app.py is allowed",
    "python3 - <<'EOF'\np='tests/x.py'\nprint(open(p).read())\np='src/app.py'\nopen(p,'w').write('x')\nEOF",
    "allow", **BR)
@@ -16389,9 +17025,9 @@ gl("a gh command after a semicolon, with no switch, is denied", "deny", "cd x; g
 gl("a gh command after a pipe, with no switch, is denied", "deny",
    "printf '{}' | gh api -X PUT repos/shivinate7/claude-settings/branches/main/protection --input -",
    "'{}' | gh api -X PUT repos/shivinate7/claude-settings/branches/main/protection --input -")
-gl("a gh api piped to jq, with no switch, is denied", "deny",
+gl("a gh api piped to a parser, with no switch, is denied", "deny",
    "gh api repos/shivinate7/claude-settings/branches/main/protection | jq .",
-   "gh api repos/shivinate7/claude-settings/branches/main/protection | jq .")
+   "gh api repos/shivinate7/claude-settings/branches/main/protection | ConvertFrom-Json")
 gl("a gh api split by line continuations, with no switch, is denied", "deny",
    "gh api -X PATCH \\\n  repos/shivinate7/claude-settings/branches/main/protection/required_status_checks \\\n  -f strict=true",
    "gh api -X PATCH `\n  repos/shivinate7/claude-settings/branches/main/protection/required_status_checks `\n  -f strict=true")
@@ -21070,6 +21706,43 @@ sh("other-checkout: a git -C commit into a clone of a different repo is allowed"
    VCS + " -C " + slash(XCL_DIFF) + " commit -m x", "allow", cwd=XCL_PRIMARY)
 sh("other-checkout: a stranded cwd with CLAUDE_PROJECT_DIR unset takes a git commit",
    VCS + " commit -m x", "allow", cwd=XCL_SEP, env={"CLAUDE_PROJECT_DIR": None})
+
+# A commit message is text. From a lane's own worktree, `../docs` resolves into the primary's
+# `.claude/worktrees` folder, a folder that holds no `docs` checkout. The write scan reads the message's
+# words as paths only when the scan fails closed on the text (an escaped quote, a curly quote, a line break
+# or a hash inside the quotes) and the text also holds a `->` or a move-type word. The rows below are red
+# on a guard that refuses that text as another checkout. A plain message and a quoted heredoc body pass
+# already, so they are green controls for the same path.
+UP_SEP = slash(os.path.relpath(XCL_SEP, XCL_LANE))   # the separate clone, as a path from the lane
+BACKTICK = chr(96)
+sh("other-checkout: a commit message naming ../docs, with an escaped quote and a move word, is allowed",
+   VCS + ' commit -m "move \\"pins\\" to ../docs"', "allow", cwd=XCL_LANE)
+sh("other-checkout: a commit message naming ../docs, with an escaped quote and an arrow, is allowed",
+   VCS + ' commit -m "re-point \\"pins\\" -> ../docs"', "allow", cwd=XCL_LANE)
+sh("other-checkout: a commit message naming ../docs, with a curly apostrophe and an arrow, is allowed",
+   VCS + ' commit -m "re-point pins -> ../docs don’t"', "allow", cwd=XCL_LANE)
+sh("other-checkout: a multi-line commit message naming ../docs, with an escaped quote and an arrow, is allowed",
+   VCS + ' commit -m "re-point \\"pins\\" -> ../docs\n\nsee \\"walk\\""', "allow", cwd=XCL_LANE)
+sh("other-checkout: a commit message naming ../docs, with an escaped quote, an arrow and a hash, is allowed",
+   VCS + ' commit -m "re-point \\"pins\\" -> ../docs # not a comment"', "allow", cwd=XCL_LANE)
+sh("other-checkout: a commit message naming ../docs, with no write word, is allowed",
+   VCS + ' commit -m "re-point pins to ../docs"', "allow", cwd=XCL_LANE)
+sh("other-checkout: a quoted heredoc commit body naming ../docs is allowed",
+   VCS + " commit -F - <<'EOF'\nre-point \"pins\" -> ../docs\nEOF", "allow", cwd=XCL_LANE)
+sh("other-checkout: a quoted heredoc in a substitution, naming ../docs in a commit message, is allowed",
+   VCS + " commit -m \"$(cat <<'EOF'\nfix: walk ../docs\nEOF\n)\"", "allow", cwd=XCL_LANE)
+sh("other-checkout: a commit message with a lone apostrophe, naming ../docs, is allowed",
+   VCS + ' commit -m "re-point pins -> ../docs, don\'t"', "allow", cwd=XCL_LANE)
+
+# Still refused: a real move into a separate clone, from the lane. A relative path to a clone is judged too,
+# and so is a backtick in a message, which the shell runs as a command.
+sh("other-checkout: a cd into a separate clone by a relative path, chained to a commit, is refused",
+   "cd " + UP_SEP + " && " + VCS + ' commit -m "msg"', "deny", "other-checkout", cwd=XCL_LANE)
+sh("other-checkout: a git -C commit into a separate clone by a relative path is refused",
+   VCS + " -C " + UP_SEP + ' commit -m "msg"', "deny", "other-checkout", cwd=XCL_LANE)
+sh("other-checkout: a backtick copy into a separate clone, inside a commit message, is refused",
+   VCS + ' commit -m "' + BACKTICK + "cp note.txt " + UP_SEP + "/note.txt" + BACKTICK + '"',
+   "deny", "other-checkout", cwd=XCL_LANE)
 
 # Two clones whose origin is one local bare repository. A local-path origin names no owner and repo, so the
 # same-repo test must read the two clones as one repo by the bare path they share.

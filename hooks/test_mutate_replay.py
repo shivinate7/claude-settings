@@ -245,6 +245,15 @@ test('nothing imports the broken file', () => {
 });
 """
 CHECK_SRC = "export function gate(n) {\n  if (n > 1) {\n    return true;\n  }\n  return false;\n}\n"
+GRADE_SRC = "export function grade(n) {\n  if (n >= 60) {\n    return 'P';\n  }\n  return 'F';\n}\n"
+GRADE_TEST = JS_HEAD + """
+import { grade } from '../src/grade.mjs';
+
+test('grade passes at sixty', () => {
+  assert.equal(grade(60), 'P');
+  assert.equal(grade(59), 'F');
+});
+"""
 CHECK_TEST = JS_HEAD + """
 import { gate } from '../src/gate.mjs';
 
@@ -384,7 +393,10 @@ def edge_fixture():
                                 {"src/broken.mjs": "export const x = ;\n", "test/broken.test.mjs": BROKEN_TEST}),
                 3: pull_request(repo, 3, "Gate deletes a red suite",
                                 {"src/gate.mjs": CHECK_SRC, "test/gate.test.mjs": CHECK_TEST,
-                                 "test/old.test.mjs": None})}
+                                 "test/old.test.mjs": None}),
+                4: pull_request(repo, 4, "Grade with a file that does not parse",
+                                {"src/grade.mjs": GRADE_SRC, "test/grade.test.mjs": GRADE_TEST,
+                                 "src/broken-late.mjs": "export const x = ;\n"})}
         CACHE["edge"] = {"repo": repo, "sha": shas}
     return CACHE["edge"]
 
@@ -1028,7 +1040,7 @@ def py_rows():
 def edge_rows():
     fixture = edge_fixture()
     if "edge_rows" not in CACHE:
-        CACHE["edge_rows"] = {n: replay(fixture["repo"], fixture["sha"][n], JS_PROFILE) for n in range(1, 4)}
+        CACHE["edge_rows"] = {n: replay(fixture["repo"], fixture["sha"][n], JS_PROFILE) for n in range(1, 5)}
     return CACHE["edge_rows"]
 
 
@@ -1689,6 +1701,13 @@ class EdgeTests(unittest.TestCase):
         row = edge_rows()[3]
         self.assertEqual(row["status"], "OK")
         self.assertNotIn("test/old.test.mjs", row["unusable"])
+
+    def test_a_skipped_file_reads_the_row_unknown_when_other_files_made_mutants(self):
+        row = edge_rows()[4]
+        self.assertEqual(sorted(row["skipped"]), ["src/broken-late.mjs"])
+        self.assertGreater(row["made"], 0, "src/grade.mjs must make mutants, or the row is UNKNOWN for another cause")
+        self.assertEqual(row["status"], "UNKNOWN",
+                         "a file that does not parse is skipped, so the row must not read OK with a rate")
 
 
 class HangTests(unittest.TestCase):

@@ -13,7 +13,8 @@ output style load in each session on each repo.
 
 ## Standing grants
 
-- **Acts the cloud refuses** (owner, 2026-10-30 16:20 CDT, until withdrawn). When the claude-settings
-  coordinator asks, a session on Shivam's computer may do three acts. It may set branch protection to
-  the shared form, with only the all-jobs-passed check required. It may delete merged branches. It may
-  close PRs that the coordinator names as replaced or empty. A request for any other act needs his word.
+- **Acts the cloud refuses** (owner, 2026-10-30 16:20 CDT; changed by Cockpit item 219 a,
+  2026-11-04 17:44 CST, and its follow-up pick a, 17:55 CST; until withdrawn). When any repo's
+  coordinator asks, a session on Shivam's computer may do two acts. It may set branch protection to
+  the shared form, with only the all-jobs-passed check required. It may delete a branch whose last
+  commit is on the default branch or on an archive branch. A request for any other act needs his word.

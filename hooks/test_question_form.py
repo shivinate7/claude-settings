@@ -167,8 +167,11 @@ def call(name, *args):
         return ("RAISED", "%s: %s" % (type(exc).__name__, exc))
 
 
-def guard_hit(op, entry):
-    return guard.data_tool_hit(dict(entry, url=PAGE_URL, action=op), PAGE_REPO)
+def guard_hit(op, entry, repo=PAGE_REPO):
+    try:
+        return guard.data_tool_hit(dict(entry, url=PAGE_URL, action=op), repo)
+    except Exception as exc:  # a crash is a wrong verdict, shown by name, as call() shows it
+        return ("RAISED", "%s: %s" % (type(exc).__name__, exc))
 
 
 def verdict(name, got, want):
@@ -335,6 +338,43 @@ def case_older_rules_keep_their_ids():
          entry_of(dict(task, context="Nothing here.")), ("task-names-check", None))
 
 
+# ------------------------------------------------------------------ a press link needs a string label
+
+def case_press_link_label_is_a_string():
+    # A link counts when it has a url, but the page draws a link only when its label is a string too
+    # (skills/waiting-page/page.html isLink). A press whose only link has no
+    # string label shows the owner no link, so it is refused. A link to the page with an empty-string label is still
+    # a string, so it passes. A labelled link to another PR does not stand for the page, so an unlabelled link to
+    # the page beside it does not save the press.
+    pr, other = "https://github.com/shivinate7/home/pull/374", "https://github.com/shivinate7/home/pull/999"
+    # The option names the pr URL's number, so a link must reach that page: with no number in the text any link passes.
+    base = copy.deepcopy(ITEM92["options"])
+    base[1].update(label="Merge PR #374", how="Press Merge in GitHub.")
+
+    def with_links(links):
+        options = copy.deepcopy(base)
+        options[1]["links"] = links
+        return entry_of(page_item(options=options))
+
+    page("a press whose link to the page has no label is refused as press-link", "set",
+         with_links([{"url": pr}]), ("press-link", None))
+    page("a press whose link to the page has a null label is refused as press-link", "set",
+         with_links([{"label": None, "url": pr}]), ("press-link", None))
+    page("a press whose link to the page has a numeric label is refused as press-link", "set",
+         with_links([{"label": 5, "url": pr}]), ("press-link", None))
+    page("a press with an unlabelled link to the page beside a labelled link to another PR is refused as press-link",
+         "set", with_links([{"label": "the other pull request", "url": other}, {"url": pr}]), ("press-link", None))
+    page("a press with only a labelled link to another PR stays refused as press-link", "set",
+         with_links([{"label": "the other pull request", "url": other}]), ("press-link", None))
+    page("a press whose link to the page has an empty-string label passes", "set",
+         with_links([{"label": "", "url": pr}]), None)
+    task = task_item(["Open PR #374 on GitHub", "Press Merge."], links=[{"url": pr}])
+    page("a task whose step presses in GitHub, with an unlabelled link to the page, is refused as press-link", "set",
+         entry_of(task), ("press-link", None))
+    page("a task whose step presses in GitHub, with a labelled link to the page, passes", "set",
+         entry_of(dict(task, links=[{"label": "PR #374", "url": pr}])), None)
+
+
 # ------------------------------------------------------------------ closed items, stood picks, updates
 
 def case_closed_stood_and_updates():
@@ -398,6 +438,20 @@ def case_batch():
     verdict("page guard: a batch of items that meet the form passes", batch([good, dict(good, doc_id="second")]), None)
     verdict("page guard: a batch whose second write has no Problem line is refused", batch([good, bad]),
             (FORM_RULE, "Problem"))
+
+
+# ------------------------------------------------------------------ a str_replace that says an item is being reworked
+
+def text_edit(new):
+    """A str_replace on a context line of item DOC that adds `new`. It carries no status or kind."""
+    return {"collection": "items", "doc_id": DOC, "field": "context", "old_str": "Context.", "new_str": new}
+
+
+def case_str_replace_rework_is_refused():
+    # Rule rework-off-page judges every kind of item, since a str_replace carries no status or kind (decision
+    # rework-leaves-page). Main refuses a rework line on any item, and the refusal stays.
+    page("a str_replace that adds 'being reworked' is refused as rework-off-page", "str_replace",
+         text_edit("The lane is being reworked."), ("rework-off-page", "being reworked"))
 
 
 # ------------------------------------------------------------------ chat only
@@ -518,6 +572,46 @@ PAGE_BUTTON_OR_PAST_ACT = [
     "The session merges it after he has merged the base PR.",
     "The session merges it after the owner approved the plan.",
 ]
+# A Claude clause that names a press not yet made, as a noun or behind a possessive ("after your click", "after the
+# owner's click"), hands the press to the owner, so it is refused: the option needs a link.
+CLAUDE_NAMES_OWNER_PRESS = [
+    "Claude merges them after your click on Merge.",
+    "Claude merges them after the owner's click on Merge.",
+]
+# A session clause that clicks or presses Merge after the owner's pick is the session's own act, as "merges" is.
+# The owner presses nothing, so the option needs no link.
+SESSION_PRESSES_AFTER_PICK = [
+    "The session clicks Merge after your pick.",
+    "The session presses Merge after your pick.",
+]
+# A Claude clause that waits for, or needs, an owner's press ("the owner's merge", "the owner has to approve it",
+# "the owner reviews and approves it") leaves that press to the owner, so it is refused: the option needs a link.
+CLAUDE_WAITS_ON_OWNER_PRESS = [
+    "Claude waits for the owner's merge.",
+    "Claude merges once the owner has to approve it.",
+    "Claude merges after the owner reviews and approves it.",
+]
+# A session or Claude clause that joins a press by "and" with no subject ("and approve it", "and approve on GitHub"),
+# or that waits on the owner's approval, leaves that press to the owner: the option needs a link.
+SESSION_LEAVES_OWNER_PRESS = [
+    "The session merges PR #374 and approve on GitHub.",
+    "The session clicks Merge and approve it.",
+    "Claude merges PR #374 after the review and approve it.",
+    "The session clicks Merge after the owner's approval.",
+]
+# "the owner's merge commit" names a git object the session keeps, not a press the owner makes: it needs no link.
+SESSION_KEEPS_OWNER_MERGE = ["The session merges PR #374 keeping the owner's merge commit."]
+# The owner's rights, access, queue or method, and a press he has already made ("has hit Merge"), name no press he
+# makes now: the session merges, and he presses nothing. Each passes.
+SESSION_NAMES_OWNER_RIGHTS = [
+    "The session merges PR #374 because the owner has merge rights.",
+    "The session merges PR #374 because Shivam has merge access.",
+    "The session merges PR #374 after the owner has hit Merge.",
+    "The session merges PR #374 through the owner's merge queue.",
+    "The session merges PR #374 with the owner's merge method.",
+]
+# A label that asks him to click is his press whatever the how says: the session's click in the how leaves it his.
+LABEL_ASKS_CLICK_SESSION_HOW = [("Click Merge on GitHub", "The session clicks Merge after your pick.")]
 
 
 def case_session_press_needs_no_link():
@@ -562,6 +656,41 @@ def case_session_press_needs_no_link():
              entry_of(page_item(options=[dict(session, how=how), keep])), ("press-link", None))
         chat("a session clause that hides an owner press, %r, with no url, is refused as press-link" % how,
              chat_box(options=[chat_of(dict(session, how=how)), chat_of(keep)]), ("press-link", None))
+    for how in CLAUDE_NAMES_OWNER_PRESS:
+        page("a Claude clause that names an owner press, %r, with no link, is refused as press-link" % how, "set",
+             entry_of(page_item(options=[dict(session, how=how), keep])), ("press-link", None))
+        chat("a Claude clause that names an owner press, %r, with no url, is refused as press-link" % how,
+             chat_box(options=[chat_of(dict(session, how=how)), chat_of(keep)]), ("press-link", None))
+    for how in SESSION_PRESSES_AFTER_PICK:
+        page("a session clause that clicks or presses after the pick, %r, with no link, passes" % how, "set",
+             entry_of(page_item(options=[dict(session, how=how), keep])), None)
+        chat("a session clause that clicks or presses after the pick, %r, with no url, passes" % how,
+             chat_box(options=[chat_of(dict(session, how=how)), chat_of(keep)]), None)
+    for how in CLAUDE_WAITS_ON_OWNER_PRESS:
+        page("a Claude clause that waits for an owner press, %r, with no link, is refused as press-link" % how, "set",
+             entry_of(page_item(options=[dict(session, how=how), keep])), ("press-link", None))
+        chat("a Claude clause that waits for an owner press, %r, with no url, is refused as press-link" % how,
+             chat_box(options=[chat_of(dict(session, how=how)), chat_of(keep)]), ("press-link", None))
+    for how in SESSION_LEAVES_OWNER_PRESS:
+        page("a session clause that leaves an owner press, %r, with no link, is refused as press-link" % how, "set",
+             entry_of(page_item(options=[dict(session, how=how), keep])), ("press-link", None))
+        chat("a session clause that leaves an owner press, %r, with no url, is refused as press-link" % how,
+             chat_box(options=[chat_of(dict(session, how=how)), chat_of(keep)]), ("press-link", None))
+    for how in SESSION_KEEPS_OWNER_MERGE:
+        page("a session clause that keeps the owner's merge commit, %r, with no link, passes" % how, "set",
+             entry_of(page_item(options=[dict(session, how=how), keep])), None)
+        chat("a session clause that keeps the owner's merge commit, %r, with no url, passes" % how,
+             chat_box(options=[chat_of(dict(session, how=how)), chat_of(keep)]), None)
+    for how in SESSION_NAMES_OWNER_RIGHTS:
+        page("a session clause that names the owner's rights or a past press, %r, with no link, passes" % how, "set",
+             entry_of(page_item(options=[dict(session, how=how), keep])), None)
+        chat("a session clause that names the owner's rights or a past press, %r, with no url, passes" % how,
+             chat_box(options=[chat_of(dict(session, how=how)), chat_of(keep)]), None)
+    for label, how in LABEL_ASKS_CLICK_SESSION_HOW:
+        page("a label %r that asks him to click, with how %r, with no link, is refused as press-link" % (label, how),
+             "set", entry_of(page_item(options=[dict(session, label=label, how=how), keep])), ("press-link", None))
+        chat("a label %r that asks him to click, with how %r, with no url, is refused as press-link" % (label, how),
+             chat_box(options=[chat_of(dict(session, label=label, how=how)), chat_of(keep)]), ("press-link", None))
     for how in SESSION_ONLY:
         page("a session clause with no press, %r, with no link, passes" % how, "set",
              entry_of(page_item(options=[dict(session, how=how), keep])), None)
@@ -577,6 +706,51 @@ def case_session_press_needs_no_link():
              entry_of(page_item(options=[dict(session, label="Merge the PR", how=how), keep])), None)
         chat("a page-button press or a past act, %r, with no url, passes" % how,
              chat_box(options=[chat_of(dict(session, label="Merge the PR", how=how)), chat_of(keep)]), None)
+
+
+# ------------------------------------------------------------------ the session's own merge, named as Claude
+
+def case_claude_own_merge_needs_no_link():
+    # Decision act-in-place: an option whose how says Claude makes the press after the owner's pick is the
+    # session's act, as "The session merges ..." is, so the owner presses nothing and it needs no link. A press in
+    # another clause, an owner's own act, and a label that asks him to click still need one.
+    claude = {"key": "a", "label": "Merge the lane PRs into one batch.", "how": "Claude merges them after your pick.",
+              "gain": "One batch lands at once.", "lose": "A second CI run."}
+    keep = {"key": "b", "label": "Hold it", "how": "Do nothing yet.", "gain": "A reviewer reads it first.",
+            "lose": "The change lands a day later."}
+    hold = {"label": "Hold it", "description": "Gain: a reviewer reads it first. Lose: the change lands a day later."}
+    page("Claude's own merge after the pick, with no link, passes", "set",
+         entry_of(page_item(options=[claude, keep])), None)
+    chat("Claude's own merge after the pick, with no url, passes",
+         chat_box(options=[{"label": "Merge the lane PRs into one batch.",
+                            "description": "Claude merges them after your pick. Gain: one batch lands at once. "
+                                           "Lose: a second CI run."}, hold]),
+         None)
+    # Claude asking the owner to press is the owner's press, however the clause starts with Claude, and however
+    # an adverb, "to", "please" or "for a click" stands between the owner's name and the act.
+    for how in ("Claude merges them after your pick, then you click Merge on GitHub.",
+                "Shivam merges the lane PRs on GitHub.",
+                "Claude asks the owner to press Merge on GitHub.",
+                "Claude asks Shivam to click Merge on GitHub.",
+                "Claude asks the owner to just click Merge.",
+                "Claude asks the owner to please click Merge.",
+                "Claude asks him to press Merge.",
+                "Claude asks the user to press Merge.",
+                "Claude asks the owner for a click on Merge."):
+        page("%r, with no link, is refused as press-link" % how, "set",
+             entry_of(page_item(options=[dict(claude, how=how), keep])), ("press-link", None))
+        chat("%r, with no url, is refused as press-link" % how,
+             chat_box(options=[{"label": claude["label"],
+                                "description": "%s Gain: one batch lands at once. Lose: a second CI run." % how},
+                               hold]),
+             ("press-link", None))
+    page("a label that clicks Merge on GitHub, with Claude's merge as the how, is refused as press-link", "set",
+         entry_of(page_item(options=[dict(claude, label="Click Merge on GitHub."), keep])), ("press-link", None))
+    chat("a label that clicks Merge on GitHub, with Claude's merge in the description, is refused as press-link",
+         chat_box(options=[{"label": "Click Merge on GitHub.",
+                            "description": "Claude merges them after your pick. Gain: one batch lands at once. "
+                                           "Lose: a second CI run."}, hold]),
+         ("press-link", None))
 
 
 # ------------------------------------------------------------------ a press in the how-text only
@@ -900,6 +1074,137 @@ def case_command_in_item_spans():
              entry_of(task_item(["Check the output of `%s`" % span])), ("command-in-item", "shell line"))
     page("a fence holding grep x a | head is refused as a shell line", "set",
          entry_of(task_item(["Check the output:\n```\ngrep x a | head\n```"])), ("command-in-item", "shell line"))
+
+
+# ------------------------------------------------------------------ a PowerShell string and a step's shell span
+
+def ps_task(ps, mac="git log -1"):
+    """A task whose command is {powershell: ps, mac}, with no gh in either, so only the bash-operator check judges it."""
+    return task_item(["Open PowerShell", "Paste the command below and run it"], command={"powershell": ps, "mac": mac})
+
+
+def case_powershell_bash_forms():
+    # A bash form in a PowerShell command is refused: PS_BASH_OPERATOR reads only &&, ||, <<, /dev/null and export,
+    # and PS_BASH_FORMS reads the rest with strings and comments blanked. Each bash form is refused, and its
+    # PowerShell twin passes. The traps
+    # are PowerShell text that looks like a bash form: a cast, a regex escape, a pipe in a string or a comment, and a
+    # backslash path that ends a line.
+    for name, ps in (("a pipe to head", "git log | head -5"), ("a pipe to grep", "git log --oneline | grep -i fix"),
+                     ("a leading NAME=value", "FOO=1 git push"),
+                     ("a bracket test", "if [ -f x ]; then git push; fi"),
+                     ("a backslash line end", "git push origin \\\nmain"),
+                     ("a pipe to jq", "Get-Content x | jq ."), ("a pipe to less", "Get-Content x | less"),
+                     ("a double-bracket test", "if [[ -f x ]]; then git push; fi")):
+        page("a PowerShell command with %s is refused as a bash operator" % name, "set",
+             entry_of(ps_task(ps)), ("command-in-item", "bash operator"))
+    # A backslash that ends the string, with no line after it, is a path or an argument: each passes.
+    for name, ps in (("cd to a backslash", "cd \\"), ("Set-Location to a backslash", "Set-Location \\"),
+                     ("dir of a backslash", "dir \\")):
+        page("a PowerShell command, %s, passes" % name, "set", entry_of(ps_task(ps)), None)
+    # A backslash with a line after it is a continuation, and refuses.
+    page("a PowerShell dir with a continuation backslash and a line after it is refused as a bash operator", "set",
+         entry_of(ps_task("dir \\\n-Force")), ("command-in-item", "bash operator"))
+    # A lone backslash argument is the drive root, a path, so a line that names a tool after it is no continuation.
+    page("a PowerShell cd to a lone backslash, then a line that names a tool, passes", "set",
+         entry_of(ps_task("cd \\\ntool x")), None)
+    # A backslash glued to a word (origin\) is a path end, not a continuation, and passes as it does today.
+    page("a PowerShell push with origin\\ then a line, the backslash glued to a word, passes as today", "set",
+         entry_of(ps_task("git push origin\\\nmain")), None)
+    for name, ps in (("a Select-Object pipe", "Get-ChildItem | Select-Object -First 5"),
+                     ("a PowerShell variable assignment", '$env:FOO = "1"; git push'),
+                     ("a PowerShell if test", "if (Test-Path x) { git push }"),
+                     ("a backtick line continuation", "git push origin `\nmain")):
+        page("a PowerShell twin with %s passes" % name, "set", entry_of(ps_task(ps)), None)
+    for name, ps in (("a backslash path that ends a line", "Set-Location C:\\repo\\\ngit push origin main"),
+                     ("a cast and a regex escape", "[int]$n = 5; if ('a[b' -match '\\[') { git push }"),
+                     ("a pipe inside a string", 'Write-Host "a | head"'),
+                     ("a pipe after a comment opener", "git log # | head"),
+                     ("a here-string holding a pipe", "@'\n| head\n'@")):
+        page("a PowerShell trap, %s, passes" % name, "set", entry_of(ps_task(ps)), None)
+
+
+def case_powershell_hashtable_is_no_bash_form():
+    # The NAME=value form in PS_BASH_FORMS ran its value past a `;`, so the second pair of a hashtable read as a
+    # `NAME=value tool` line and was refused. A hashtable with `;` between its pairs passes. A leading NAME=value
+    # before a command is still refused, and so is one after a `;`.
+    for name, ps in (("a hashtable of three pairs", "$h = @{a=1; b=2; c=3}"),
+                     ("a hashtable of two named pairs", "$o = @{Name='x'; Value=2}")):
+        page("a PowerShell %s passes" % name, "set", entry_of(ps_task(ps)), None)
+    for ps in ("FOO=1 tool run", "tool run;FOO=1 tool run"):
+        page("a PowerShell command %s is refused as a bash operator" % ps, "set",
+             entry_of(ps_task(ps)), ("command-in-item", "bash operator"))
+
+
+def case_powershell_comment_quote_ends_at_its_line():
+    # The quote walk reads `<#` block comments but not `#` line comments, so an unpaired quote in a line comment
+    # opened a quote that ran to the end of the text, and a bash form on the next line was blanked out. A quote in a
+    # line comment is text, so the next line is read as it stands. A contraction in a comment is text too, and a
+    # comment opener inside a string opens no comment.
+    refused = ("command-in-item", "bash operator")
+    page("a PowerShell comment with an unpaired single quote, then a pipe to head on the next line, is refused",
+         "set", entry_of(ps_task("# the 'main branch\ngit log | head -5")), refused)
+    page("a PowerShell comment with an unpaired double quote, then a pipe to head on the next line, is refused",
+         "set", entry_of(ps_task('# the "main branch\ngit log | head -5')), refused)
+    page("a PowerShell comment with a contraction, then Get-ChildItem, passes", "set",
+         entry_of(ps_task("# it's fine\nGet-ChildItem")), None)
+    page("a PowerShell block comment with a contraction, then a pipe to head, is refused", "set",
+         entry_of(ps_task("<# it's #>\ngit log | head -5")), refused)
+    page("a PowerShell string holding a comment opener, then a pipe to head on the next line, is refused", "set",
+         entry_of(ps_task('Write-Host "# ok"\ngit log | head -5')), refused)
+
+
+def case_powershell_bash_prefix_braced_expansion():
+    # A NAME=value prefix holding a braced expansion in its value (`${PORT:-8080}`, `${HOME}/bin`) is a bash form,
+    # so each is refused. A `$` inside the expansion and one nested expansion are refused too. The hashtable controls
+    # pass: their `}` closes the hashtable, not an expansion.
+    refused = ("command-in-item", "bash operator")
+    page("a PowerShell command, PORT=${PORT:-8080} node server.js, is refused as a bash operator", "set",
+         entry_of(ps_task("PORT=${PORT:-8080} node server.js")), refused)
+    page("a PowerShell command, X=${HOME}/bin tool run, is refused as a bash operator", "set",
+         entry_of(ps_task("X=${HOME}/bin tool run")), refused)
+    page("a PowerShell command, PORT=${PORT:-$DEFAULT} node server.js, is refused as a bash operator", "set",
+         entry_of(ps_task("PORT=${PORT:-$DEFAULT} node server.js")), refused)
+    page("a PowerShell command, PORT=${A:-${B}} node server.js, is refused as a bash operator", "set",
+         entry_of(ps_task("PORT=${A:-${B}} node server.js")), refused)
+    for name, ps in (("a hashtable of three pairs", "@{a=1; b=2; c=3}"),
+                     ("a hashtable with no space after its first semicolon", "@{a=1;b=2 }"),
+                     ("a hashtable with a double-quoted underscore name", '@{Name="_"; Value=2}')):
+        page("a PowerShell %s passes" % name, "set", entry_of(ps_task(ps)), None)
+
+
+def case_powershell_hash_mid_token_is_no_comment():
+    # A `#` opens a line comment only at a token start (guard_core.token_start), so a `#` inside a word is text, and
+    # the bash form after it on the same line is read. The next-line and here-string pins hold the refusal too.
+    # Neither depends on that condition: a line comment ends at its newline, and a here-string body is quoted text.
+    refused = ("command-in-item", "bash operator")
+    page("a PowerShell command, a#b | head, is refused: a # inside a word opens no comment", "set",
+         entry_of(ps_task("a#b | head")), refused)
+    page("a PowerShell command, https://x/#frag | head, is refused: a # inside a word opens no comment", "set",
+         entry_of(ps_task("https://x/#frag | head")), refused)
+    page("a PowerShell command, $x#y | head, is refused: a # inside a word opens no comment", "set",
+         entry_of(ps_task("$x#y | head")), refused)
+    page("a PowerShell command, $x#y then | head on the next line, is refused", "set",
+         entry_of(ps_task("$x#y\n| head")), refused)
+    page("a PowerShell here-string holding # x 'y, then git log | head on a later line, is refused", "set",
+         entry_of(ps_task("$h = @'\n# x 'y\n'@\ngit log | head -5")), refused)
+
+
+def case_step_shell_programs_partial():
+    # A single-span step is a shell line only when its first word is in SHELL_PROGRAMS, so a cloud CLI, a span with a
+    # flag after its word, or chmod passes. Each of the six spans below is refused. Controls pass: a bare tool name, a flag alone and a minus between two words. The chained span
+    # stays refused, as on main.
+    for span in ("gsutil ls", "yarn install", "kubectl get pods", "terraform plan", "chmod +x f", "grep -r x"):
+        page("a step holding `%s` is refused as a shell line" % span, "set",
+             entry_of(task_item(["Check the output of `%s`" % span])), ("command-in-item", "shell line"))
+    for span in ("kubectl", "--force", "a - b"):
+        page("a step holding `%s` alone is text and passes" % span, "set",
+             entry_of(task_item(["Check the output of `%s`" % span])), None)
+    page("a fence holding a chained terraform plan with a pipe stays a shell line", "set",
+         entry_of(task_item(["Check the output:\n```\nterraform plan | tee plan.txt\n```"])),
+         ("command-in-item", "shell line"))
+    # A program at a path is judged by its bare name, as `chmod` is alone: the word after the directory is the program.
+    page("a step holding `/usr/bin/chmod +x f` is refused as a shell line", "set",
+         entry_of(task_item(["Check the output of `/usr/bin/chmod +x f`"])), ("command-in-item", "shell line"))
 
 
 # ------------------------------------------------------------------ a question says how it departs from main
@@ -1434,11 +1739,107 @@ def case_item_51_stray_field():
          entry_of(page_item(focus="#fill")), ("item-field-rendered", "focus"))
 
 
+# ------------------------------------------------------------------ a press link that is not a list; a partial edit of the Why yours line
+#
+# Each case below is also a pytest test (the test_ wrappers after it). A check the case records as failed fails
+# its test, by the check's name, so one runner and main() judge the same cases.
+
+def _judged(case):
+    """Run one case under pytest: each check it records as failed fails the test, by the check's name."""
+    before = len(FAILED)
+    case()
+    assert len(FAILED) == before, "; ".join(FAILED[before:])
+
+
+def case_press_link_links_not_a_list_on_a_step():
+    """`links` set to true or to a number is no list of links. The step's press has no valid link, so the hit fires as it
+    does for a missing link. It must not crash or fail open."""
+    for links in (True, 5):
+        page("a task step that presses in GitHub, with links %r, is refused as press-link" % (links,), "set",
+             entry_of(task_item(["Press Merge in GitHub on the pull request."], links=links)),
+             ("press-link", "no link to the page"))
+
+
+def case_press_link_links_not_a_list_on_an_option():
+    """The same for an option's links: true or a number is no valid link, so the press is refused as press-link."""
+    for links in (True, 5):
+        press = copy.deepcopy(ITEM92["options"])
+        press[1].update(label="Press Merge in GitHub", how="Do it by hand.", links=links)
+        page("an option that presses in GitHub, with links %r, is refused as press-link" % (links,), "set",
+             entry_of(page_item(options=press)), ("press-link", "no link to the page"))
+
+
+def case_task_str_replace_removes_only_the_label():
+    """A str_replace that removes only the Why yours label leaves a line with no label. It is refused as task-names-check."""
+    page("a str_replace that removes only the Why yours label is refused as task-names-check", "str_replace",
+         {"collection": "items", "doc_id": DOC, "field": "context", "old_str": "Why yours:", "new_str": ""},
+         ("task-names-check", None))
+
+
+def case_str_replace_blank_prose_line_passes():
+    """A str_replace that blanks one plain prose line of a decision's context passes. The guard cannot read the stored
+    item, so a blank replacement that removes no Why yours line is no task-names-check fault."""
+    page("a str_replace that blanks one plain prose line in a decision's context passes", "str_replace",
+         {"collection": "items", "doc_id": DOC, "field": "context",
+          "old_str": "The lane merge-role-allow would do it.", "new_str": ""}, None)
+
+
+def case_task_str_replace_rewords_the_reason():
+    """A control: an edit that keeps the label and rewords the text after it keeps the line, so it passes."""
+    page("a str_replace that rewords the Why yours reason and keeps the label passes", "str_replace",
+         {"collection": "items", "doc_id": DOC, "field": "context",
+          "old_str": "Why yours: a session on your computer was asked first",
+          "new_str": "Why yours: a session on your desk was asked first"}, None)
+
+
+def case_task_str_replace_renames_the_label():
+    """A str_replace that renames the Why yours label to Why mine takes the label away, so it is refused as task-names-check."""
+    page("a str_replace that renames the Why yours label to Why mine is refused as task-names-check", "str_replace",
+         {"collection": "items", "doc_id": DOC, "field": "context", "old_str": "Why yours:", "new_str": "Why mine:"},
+         ("task-names-check", None))
+
+
+def case_task_str_replace_prose_label_passes():
+    """A prose mention of the label, not at a line start, is no Why yours line. Editing that prose passes."""
+    page('a str_replace that changes prose the "Why yours:" label to the label passes', "str_replace",
+         {"collection": "items", "doc_id": DOC, "field": "context",
+          "old_str": 'the "Why yours:" label', "new_str": "the label"}, None)
+
+
+def test_press_link_links_true_or_a_number_on_a_step_is_no_link():
+    _judged(case_press_link_links_not_a_list_on_a_step)
+
+
+def test_press_link_links_true_or_a_number_on_an_option_is_no_link():
+    _judged(case_press_link_links_not_a_list_on_an_option)
+
+
+def test_task_str_replace_removing_only_the_label_is_refused():
+    _judged(case_task_str_replace_removes_only_the_label)
+
+
+def test_str_replace_blank_prose_line_in_a_decision_passes():
+    _judged(case_str_replace_blank_prose_line_passes)
+
+
+def test_task_str_replace_rewording_the_reason_passes():
+    _judged(case_task_str_replace_rewords_the_reason)
+
+
+def test_task_str_replace_renaming_the_label_is_refused():
+    _judged(case_task_str_replace_renames_the_label)
+
+
+def test_task_str_replace_prose_label_mention_passes():
+    _judged(case_task_str_replace_prose_label_passes)
+
+
 def main():
     for case in (case_item_92, case_item_51_stray_field, case_form_lines, case_form_placeholders_on_edits,
                  case_options_state_gain_and_loss, case_older_rules_keep_their_ids,
                  case_closed_stood_and_updates, case_str_replace, case_batch, case_chat_boxes,
                  case_line_order_and_prose, case_chat_press_scan_skips_gain_and_lose, case_session_press_needs_no_link,
+                 case_claude_own_merge_needs_no_link,
                  case_chat_reasons_name_a_remedy_and_no_page_field, case_page_reasons_are_one_table,
                  case_gh_login_hit_direct, case_gh_login_switch_on_the_page, case_command_in_item_spans,
                  case_departs_missing, case_departs_empty_or_malformed, case_departs_restates_main,
@@ -1452,7 +1853,15 @@ def main():
                  case_past_rulings_caps_and_ranks, case_past_rulings_reads_debts, case_key_overlap,
                  case_key_overlap_resend_and_fact_lists, case_key_overlap_similar_questions_clash,
                  case_past_rulings_skips_the_debt_notes_file,
-                 case_roadmap_broken_pipe_not_a_repo_is_absent, case_roadmap_broken_pipe_other_stderr_stays_unreadable):
+                 case_press_link_label_is_a_string, case_str_replace_rework_is_refused,
+                 case_powershell_bash_forms, case_powershell_hashtable_is_no_bash_form,
+                 case_powershell_comment_quote_ends_at_its_line, case_powershell_bash_prefix_braced_expansion,
+                 case_powershell_hash_mid_token_is_no_comment, case_step_shell_programs_partial,
+                 case_roadmap_broken_pipe_not_a_repo_is_absent, case_roadmap_broken_pipe_other_stderr_stays_unreadable,
+                 case_press_link_links_not_a_list_on_a_step, case_press_link_links_not_a_list_on_an_option,
+                 case_task_str_replace_removes_only_the_label, case_str_replace_blank_prose_line_passes,
+                 case_task_str_replace_rewords_the_reason, case_task_str_replace_renames_the_label,
+                 case_task_str_replace_prose_label_passes):
         try:
             case()
         except Exception as exc:

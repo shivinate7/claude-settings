@@ -137,6 +137,19 @@ is imported here, never copied; CI judges whether the step exists, this check ju
 on a landed Stop with a RECORDED item in a checkout that holds the notes file, one git log of origin/main..HEAD, then
 one git process per commit of the turn (a show limited to the notes and debt paths). No file written, no process left
 running, no timer.
+
+Review-record check (incident: on Nov 7, 3 of 67 open PRs had a review record): in a lane (own get_session record tagged cs-build:lane, or with a parent), a reply line outside fences
+that holds `round <N>` or `reviewer` and a capital PASS or PASSED claims a PASS, in either order; an inline code span counts. A PASS a negation governs ("not PASS",
+"did not PASS") claims nothing, nor does a PASS whose clause places it in the past ("was before the fix", "went stale"). Clauses split on `,`, `;` and `--`; a
+history word in another clause hides no claim. The line claims it for each PR it names, as
+`#<N>`, `PR <N>` or a github pull URL. The Stop is refused unless each such PR has a review record comment for its live head: the newest comment whose first line is
+the review marker, read by merge/merge.py parse_review (never retyped here), naming the PR, and that merge/merge.py review_state calls done for the live head. A claim with no
+PR on its line is refused and asks for the PR. The remedy names the act (`merge <pr> --review-record ...`, then post the
+record) and never the live head. merge/merge.py is loaded by hooks/guard_merge.py merge_module: beside the hooks' real path (the installed symlink), then in the
+checkout the global rules file names (the copied cloud layout); a tool it cannot load is UNKNOWN. Reads: `gh api` REST only, two per claimed PR
+(the PR, then its issue comments, every page); a Stop with no claim, or in an owner-facing session, reads nothing. A failed read, or an error in the check, never
+blocks: it adds a systemMessage that says UNKNOWN. Cost: 2 gh reads per claimed PR in a lane Stop, plus the guard_merge and merge module imports; no file,
+process kept or timer. A stop_hook_active rewrite is not checked.
 """
 import datetime
 import json
@@ -501,8 +514,9 @@ ANSWERED_SOURCE_RE = re.compile(
     r"https?://\S+|\bitem\s+\d+|\bpage:\d+|\bfb-\w+|\bsession_\w+|\b\d{1,2}:\d{2}\b", re.I)
 ANSWERED_REASON = (
     "Answered guard (rule answered-needs-source): each line below says \"answered\" and cites no source. Add "
-    "where the answer came from on the same line (a link, #<n>, a commit, a file path, item <n>, a session or "
-    "inbox id, or the time), or say what is meant in other words. Lines: ")
+    "the source on the same line (link, #<n>, commit, file path, item <n>, session or inbox id, or time), or "
+    "say what is meant in other words. A mention of the word, not a claim, can go in an inline code span. "
+    "Lines: ")
 
 
 def _has_path(line):
@@ -666,8 +680,10 @@ PARENT_TARGETS = {"@parent", "parent"}
 # A "?" ends a question unless a word character follows it, so a URL query (a?b=1) never counts. Quoted
 # text, backticked text and a blockquoted line are past words, never a question asked now. A straight
 # quote, double or single, opens and closes only at a non-word edge, so a lone quote or an apostrophe
-# (Don't) cannot span to the next quote.
-QUOTED_RE = re.compile(r'(?<!\w)"[^"\n]*"(?!\w)|(?<!\w)\'[^\'\n]*\'(?!\w)|\u201c[^\u201d\n]*\u201d|`[^`\n]*`')
+# (Don't) cannot span to the next quote. A word that opens with an elided apostrophe ('til, 'Cause, '25,
+# '90s) is no opening quote either: the space before it looks like one, but the apostrophe stands for dropped
+# letters or digits. Text alone cannot tell a lone opener from a real one, so the elisions are named.
+QUOTED_RE = re.compile(r'(?<!\w)"[^"\n]*"(?!\w)|(?<!\w)\'(?!(?i:til|till|cause|cos|bout|em|round|tis|twas|kay|nuff)\b|\d\d(?:s)?\b)[^\'\n]*\'(?!\w)|\u201c[^\u201d\n]*\u201d|`[^`\n]*`')
 QUESTION_MARK_RE = re.compile(r"\?(?!\w)")
 
 
@@ -897,8 +913,14 @@ def departs_problem(text):
 # so a negator that governs an earlier verb ("I did not run the check and broke it") does not.
 # `step:<slug>` is checked for form only.
 MISTAKE_FIRST_PERSON_RE = re.compile(r"\bI\b|\b[Mm]y\b")
+# "broke the batch into three lanes" splits a thing and admits nothing: "into" is followed by a count or a
+# parts noun. "broke the build into a red state" still admits. The words between may hold no "by", "when"
+# or the like, so "broke main by merging into it" still admits.
+_BROKE_INTO = (r"(?!\s+(?:(?!by\b|when\b|after\b|and\b|then\b|before\b|if\b|so\b)\w+\s+){0,3}into\s+"
+               r"(?:\d+|two|three|four|five|six|seven|eight|nine|ten|several|multiple|smaller|separate|parts?"
+               r"|chunks?|lanes?|steps?|stages?|phases?|tasks?|commits?|batch(?:es)?|prs?)\b)")
 MISTAKE_FAULT_RE = re.compile(
-    r"\b(?:wrong(?:ly)?|mistaken(?:ly)?|mistakes?|by accident|accidental(?:ly)?|broke|clobbered|overwrote|"
+    r"\b(?:wrong(?:ly)?|mistaken(?:ly)?|mistakes?|by accident|accidental(?:ly)?|broke" + _BROKE_INTO + r"|clobbered|overwrote|"
     r"misread|forgot|trusted (?:a stale|an old|an outdated)|"
     r"instead of checking)\b", re.I)
 MISTAKE_NEGATOR_RE = re.compile(r"\bnot\b|n't\b|\bnever\b|\bno\b|\bnothing\b", re.I)
@@ -1552,6 +1574,105 @@ def hand_off_problem(hook, text):
     return (" ".join(unique) + HAND_OFF_TAIL if unique else ""), " ".join(dict.fromkeys(notes))
 
 
+# Review-record check: a lane's round PASS claim needs a review record for the PR's live head. See the module docstring.
+REVIEW_TRIGGER_RE = re.compile(r"(?i:\bround\s+\d+\b|\breviewer\b)")
+REVIEW_PASS_RE = re.compile(r"\bPASS(?:ED)?\b")
+# A PASS that a negator governs: the negator, at most one word, then PASS.
+REVIEW_NEGATED_RE = re.compile(r"(?i:(?:\b(?:not|never|nor|cannot)|n't)\s+(?:\w+\s+)?)PASS(?:ED)?\b")
+# A clause that puts its PASS in the past: stale, replaced, or "was ... before/earlier".
+REVIEW_HISTORY_RE = re.compile(
+    r"(?i:\b(?:stale|outdated|superseded|invalidated|previously|formerly|no longer)\b"
+    r"|\b(?:was|were)\s+(?:\w+\s+){0,2}(?:before|prior|earlier)\b)")
+REVIEW_CLAUSE_SPLIT_RE = re.compile(r"[,;]|--")
+REVIEW_PR_RE = re.compile(r"(?<![\w&])#(\d+)\b|\bPRs?\s*#?(\d+)\b|/pull/(\d+)\b", re.I)
+REVIEW_READ_TIMEOUT = 30  # seconds for one gh read
+REVIEW_NO_PR = (
+    "Review-record guard: a line of this reply claims a review PASS but names no pull request. Name it as #<n> on that "
+    "line, and give it a review record for its live head (`merge <pr> --review-record ...`, then post the record on the PR)."
+)
+REVIEW_NO_RECORD = (
+    "Review-record guard: this reply claims a review PASS for PR #%d, and that PR has no review record for its live head. "
+    "Remedy: have the reviewer run `merge %d --review-record --head <the head the reviewer read> --kind <kind> --guard "
+    "<yes|no> --round <N:ROLE:MODEL:VERDICT>`, post the record it prints as a comment on PR #%d, then report again."
+)
+
+
+def review_claims(text):
+    """The reply lines that claim a review PASS, outside fences: [(line, PR numbers on it)]. Inline code spans are read as
+    their content. A negated PASS, and a PASS whose clause places it in the past, claim nothing."""
+    claims, fence = [], ""
+    for line in text.splitlines():
+        body = QUOTE_PREFIX.sub("", line, count=1).strip()
+        marker = body[:3] if body[:3] in ("```", "~~~") else ""
+        if marker and (not fence or marker == fence):
+            fence = "" if fence else marker
+            continue
+        if fence:
+            continue
+        plain = CODE_SPAN.sub(lambda m: m.group(2), body)
+        if not REVIEW_TRIGGER_RE.search(plain):
+            continue
+        if not any(REVIEW_PASS_RE.search(REVIEW_NEGATED_RE.sub(" ", clause)) and not REVIEW_HISTORY_RE.search(clause)
+                   for clause in REVIEW_CLAUSE_SPLIT_RE.split(plain)):
+            continue
+        numbers = [int(g) for m in REVIEW_PR_RE.finditer(plain) for g in m.groups() if g]
+        claims.append((body, list(dict.fromkeys(numbers))))
+    return claims
+
+
+def _gh_json(args, cwd):
+    """The parsed JSON of one `gh api` read, or raises: a failed or unparseable read is never an answer."""
+    import _nowindow  # the one home of a no-window child start (hooks/_nowindow.py)
+    run = _nowindow.run(["gh", "api", *args], cwd=cwd or None, capture_output=True, text=True,
+                        timeout=REVIEW_READ_TIMEOUT)
+    if run.returncode:
+        raise RuntimeError("gh api exited %d" % run.returncode)
+    return json.loads(run.stdout)
+
+
+def _newest_record(n, comments, merge_mod):
+    """The parsed newest review record comment of `comments` (oldest first), else None."""
+    bodies = [c.get("body") or "" for c in comments if isinstance(c, dict)]
+    marked = [b for b in bodies if b.splitlines()[:1] == [merge_mod.REVIEW_MARKER]]
+    return merge_mod.parse_review(marked[-1]) if marked else None
+
+
+def review_record_problem(hook, text):
+    """(refusal, note) for a lane reply that claims a review PASS. A reply with no claim, or a session that is not a lane,
+    reads nothing. A claim with no PR is refused. Else two REST reads (the PR's live head, its issue comments); the newest
+    review record must name the PR, and merge's review_state must call it done for the live head. A read that could not
+    run, or a merge tool that could not load, is a note with UNKNOWN, never a block."""
+    claims = review_claims(text)
+    if not claims:
+        return "", ""
+    sys.path.insert(0, os.path.join(HERE, "..", "hooks"))
+    from override import remote_session_id
+    own_id = remote_session_id()
+    if not own_id or not _own_lane_read(hook.get("transcript_path"), own_id)[0]:
+        return "", ""
+    unnamed = [c for c in claims if not c[1]]
+    numbers = list(dict.fromkeys(n for _line, nums in claims for n in nums))
+    reasons, notes = ([REVIEW_NO_PR] if unnamed else []), []
+    for n in numbers:
+        try:
+            from guard_merge import merge_module  # the one home of the merge tool lookup (hooks/guard_merge.py)
+            merge_mod = merge_module()
+            if merge_mod is None:
+                raise ImportError("merge/merge.py not found")
+            cwd = hook.get("cwd")
+            live = _gh_json(["repos/{owner}/{repo}/pulls/%d" % n], cwd)["head"]["sha"]
+            pages = _gh_json(["repos/{owner}/{repo}/issues/%d/comments" % n, "-X", "GET", "-f", "per_page=100",
+                              "--paginate", "--slurp"], cwd)
+            comments = [c for page in pages for c in (page if isinstance(page, list) else [page])]
+            rec = _newest_record(n, comments, merge_mod)
+        except Exception as err:  # a read that could not run is UNKNOWN, never clear and never a block
+            notes.append("Review-record guard: UNKNOWN, the check read nothing for PR #%d (%s)." % (n, type(err).__name__))
+            continue
+        if not rec or rec["n"] != n or merge_mod.review_state(rec, live)[0] != "done":
+            reasons.append(REVIEW_NO_RECORD % (n, n, n))
+    return " ".join(reasons), " ".join(notes)
+
+
 def refusal_reason(tools, hold=""):
     """The block reason for refused tools the reply has not raised, and for the triage hold's entries, or ''."""
     held = hold_reason(hold) if hold else ""
@@ -2020,7 +2141,12 @@ def main():
         pick_reason, note = question_problem(records, turn, text, hook)
     except Exception:
         pass
-    note = " ".join(filter(None, [note, hand_note]))
+    review, review_note = "", ""
+    try:
+        review, review_note = review_record_problem(hook, text)
+    except Exception as err:  # a check that could not run is UNKNOWN, never silence and never a block
+        review_note = "Review-record guard: UNKNOWN, the check did not run (%s)." % type(err).__name__
+    note = " ".join(filter(None, [note, hand_note, review_note]))
     relay = []
     if last_human_idx is not None:  # a transcript with no human message never ran the relay and answered checks
         relay = relay_reasons(after, text, hook.get("cwd"))
@@ -2038,6 +2164,7 @@ def main():
             pass
         pick += relay
         pick.append(hand_off)
+        pick.append(review)
         try:
             if report_shape_ok(text):
                 pick.append(recovered_problem(records, text))
@@ -2092,6 +2219,8 @@ def main():
     reasons += [r for r in relay if r]
     if hand_off:
         reasons.append(hand_off)
+    if review:
+        reasons.append(review)
     try:
         rewrite = rewrite_stamp_problem(text, records[last_human_idx].get("timestamp"), hook.get("cwd"))
         if rewrite:

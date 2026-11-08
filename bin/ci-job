@@ -27,7 +27,9 @@
 # step is unknown; any other failure makes it FAIL, its reason naming the tools that could not start.
 # --lint with no --base takes origin/main as CI does and says so
 # in one line, because a run that skipped the pull-request steps read as a pass. With no origin/main, one unknown
-# line names each pull-request step it skips. A lane runs `merge --lane-lint <pr>`, which runs this mode, before it
+# line names each pull-request step it skips, and each such lint step (its if: reads true on a pull-request run) prints
+# unknown, not skipped. A lint CI step whose if: reads false on a pull-request run (it runs only off one) prints
+# skipped and does not fail. A --lint run that runs no lint CI step prints one unknown line and exits 2, never 0. A lane runs `merge --lane-lint <pr>`, which runs this mode, before it
 # joins a batch. Use it with a job such as checks.
 # Workflow: .github/workflows/checks.yml at the git top level of the current folder, unless --workflow names one.
 # Each step runs at that top level (or its working-directory) as GitHub's Linux runner runs it: no shell
@@ -38,7 +40,8 @@
 # it leaves out prints `not run`, which is no verdict.
 # A step's `if:` reads every needs.scope.outputs flag (== 'true' or != 'false') as true, !cancelled(), always() and success() as true,
 # and github.event_name == 'pull_request' as true only with a base. ${{ github.base_ref }} is --base without
-# its remote; ${{ github.event.pull_request.head.sha }} is HEAD. Any other expression makes the step unknown.
+# its remote; ${{ github.event.pull_request.head.sha }} is HEAD; ${{ github.event.pull_request.body }} is env CI_JOB_PR_BODY
+# (the pull request body `merge --lane-lint` passes; empty when unset). Any other expression makes the step unknown.
 # Each step's env sets GITHUB_BASE_REF to that value (the step's own env: wins), as GitHub does on a pull-request run; with no --base it is unset, as off one.
 # A tool is missing when a line's command is not on PATH, or the step exits 127.
 # --step NAME (repeatable) runs only the steps with those names, of any kind, each as a plain run (never with --lint, which
@@ -400,7 +403,8 @@ def main(argv):
                       "steps are skipped: %s" % ", ".join(unread))
                 no_base = True
     values = {"base": base or "", "github.base_ref": base.split("/", 1)[1] if base and "/" in base else (base or ""),
-              "github.event.pull_request.head.sha": git("rev-parse", "HEAD", cwd=top) or ""}
+              "github.event.pull_request.head.sha": git("rev-parse", "HEAD", cwd=top) or "",
+              "github.event.pull_request.body": os.environ.get("CI_JOB_PR_BODY", "")}
     log = os.environ.get("VERDICT_LOG")
     if not log and not dry:
         fd, log = tempfile.mkstemp(prefix="ci-job-%s-" % re.sub(r"[^\w-]", "_", job), suffix=".log")
@@ -410,7 +414,7 @@ def main(argv):
     kind = ["lint" if is_lint(st) else "install" if is_install(st) else "" for st in steps] if lint else [""] * len(steps)
     planned = [plan(st, bool(base), values, top) if k else None for st, k in zip(steps, kind)]
     runs = [k == "lint" and p[0] == "run" for k, p in zip(kind, planned)]  # an install runs only if a lint step after it does
-    ran, blocker = 0, None  # blocker: the install step that did not finish
+    ran, ran_lint, blocker = 0, 0, None  # blocker: the install step that did not finish
     for n, step in enumerate(steps, 1):
         name = names[n - 1]
         if wanted and name not in wanted:
@@ -432,6 +436,9 @@ def main(argv):
             print("%-15s %s: --lint did not run it: install step %s did not finish" % ("unknown", name, blocker))
             continue
         state, detail, shell, env, cwd = planned[n - 1] or plan(step, bool(base), values, top)
+        if lint and kind[n - 1] == "lint" and state == "skipped" and condition(step_key(step, "if"), True) is not False \
+                and not base:  # a required CI step (its if: reads true on a pull-request run) that did not run proved nothing
+            state, detail = "unknown", "a pull-request step, skipped for want of a base (pass --base)"
         if state != "run":
             if wanted and state != "unknown":  # a named step that did not run proved nothing: never a pass
                 state, detail = "unknown", "--step named it, but it did not run (%s): %s" % (state, detail)
@@ -440,6 +447,7 @@ def main(argv):
             blocker = blocker or (name if kind[n - 1] == "install" and state == "unknown" else None)
             continue
         ran += 1
+        ran_lint += kind[n - 1] == "lint"
         if dry:
             print("%-15s %s" % ("would run", name))
             continue
@@ -494,6 +502,10 @@ def main(argv):
         tally["FAIL" if state == "FAIL" else "unknown"] += state not in ("PASS", "SKIP")
         blocker = blocker or (name if kind[n - 1] == "install" and state == "unknown" else None)
         print("%-15s %s: %s" % (state, name, first))
+    if lint and not ran_lint and not tally["FAIL"] and not tally["unknown"]:  # a pass that ran no lint CI step proved nothing; any other line already gives the exit
+        tally["unknown"] += 1
+        print("%-15s no lint CI step %s: %d of the job's %d steps are lint CI steps, and each one is skipped, not run, or unknown" % (
+            "unknown", "would run" if dry else "ran", sum(k == "lint" for k in kind), len(steps)))
     if lint:
         print("summary: %s %d of %d steps" % ("would run" if dry else "ran", ran, len(steps)))
     if not dry:

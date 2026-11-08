@@ -43,10 +43,10 @@ or a session row or pull row has the wrong shape.
 The upkeep list also holds two rows for the stale-ready report (step triage-stale-ready-report): "ready todo
 steps" (each todo step whose note holds the sentence "Ready.", not gated on live phases) and "draft PRs over
 STALE_DRAFT_HOURS h with no live lane" (each draft pull row whose optional createdAt, GitHub's created_at, is
-that far before the live file's readAt, when no live session step equals the pull's branch). A draft row with no
+that far before the live file's readAt, when no live session step equals the pull's branch or its `lane/<id>` form). A draft row with no
 usable createdAt reads "unknown (#N has no createdAt)". A pull names a step when its branch equals the step id or
 its title holds the id as a whole token (names_step), used by the pair line below. The stale-draft row's lane check is
-unlaned's: the branch equals a live session step exactly.
+unlaned's: the branch, bare or as lane/<id>, equals a live session step.
 
 The row "lanes to archive" (idle_lanes) lists each completed or review-ready lane session whose steps have all landed and
 that no open pull (on lane_head_refs) or open page item holds; `merge --idle-lanes` prints the same list.
@@ -1074,8 +1074,9 @@ def stale_drafts(work):
     read = datetime.datetime.fromisoformat(work["read"].replace("Z", "+00:00"))
     out = []
     for p in work["pulls"]:
-        # A lane here is a live session step equal to the bare branch. unlaned also counts a lane/<id> branch.
-        if p.get("draft") is not True or (p.get("branch") and p["branch"] in work["sessionSteps"]):
+        # A lane is a live session step whose head refs (lane_head_refs: bare or lane/<id>) hold the branch.
+        branch = p.get("branch")
+        if p.get("draft") is not True or (branch and any(branch in lane_head_refs(s) for s in work["sessionSteps"])):
             continue
         at = created_at(p)
         if at is None:

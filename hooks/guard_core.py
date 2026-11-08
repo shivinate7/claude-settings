@@ -156,14 +156,18 @@ def token_start(text: str, index: int) -> bool:
     return index == 0 or (text[index - 1] in TOKEN_BOUNDARY and text[index - 2:index - 1] != "`")
 
 
-def quote_advance(text: str, index: int, quote: str):
+def quote_advance(text: str, index: int, quote: str, line_comments: bool = False):
     """Step the walk over `text[index]`: (width consumed, the quote open after it). An escaped
-    pair is one step of width 2. A contraction is the caller's to skip (`is_contraction`)."""
+    pair is one step of width 2. A contraction is the caller's to skip (`is_contraction`).
+    `line_comments` (PowerShell text only) opens state `#` at a token-start `#`; it ends at the
+    newline, so a quote inside the comment opens nothing past its line."""
     char = text[index]
     powershell = is_powershell(text)
     if quote == BLIND:
         return 1, BLIND
     if quote and powershell:
+        if quote == "#":
+            return 1, ("" if char == "\n" else quote)
         if quote == "<#":
             return (2, "") if text.startswith("#>", index) else (1, quote)
         if quote[0] == "@":
@@ -179,6 +183,8 @@ def quote_advance(text: str, index: int, quote: str):
     if powershell:
         if char == "`":
             return 2, ""
+        if line_comments and char == "#" and token_start(text, index):
+            return 1, "#"
         opener = token_start(text, index) and HERE_OPEN.match(text, index)
         if token_start(text, index) and text.startswith("<#", index):
             return 2, ("<#" if text.find("#>", index + 2) >= 0 else BLIND)
@@ -194,16 +200,18 @@ def quote_advance(text: str, index: int, quote: str):
     return 1, ""
 
 
-def walk_quotes(text: str):
+def walk_quotes(text: str, line_comments: bool = False):
     """Yield (index, char, quote open before it) over `text`, one step at a time. A contraction
     that bash never closes is text, as in `_split_reading`'s second reading. BLIND text yields as
-    unquoted."""
+    unquoted. With `line_comments`, a PowerShell `#` line comment yields as quote `#` through its
+    newline; the default leaves every other caller's reading as it was (`split_segments` already
+    drops line comments before this walk sees them)."""
     quote, index = "", 0
     while index < len(text):
         if not quote and text[index] == "'" and is_contraction(text, index):
             width, after = 1, ""
         else:
-            width, after = quote_advance(text, index, quote)
+            width, after = quote_advance(text, index, quote, line_comments)
         yield index, text[index], ("" if quote == BLIND else quote)
         quote, index = after, index + width
 
@@ -1054,7 +1062,7 @@ def shell_abs(path: str, base):
     return path
 
 
-def dir_before_segment(segments, number: int, shell_cwd: str, ends=()):
+def dir_before_segment(segments, number: int, shell_cwd: str, ends=(), failed_cd_stays=False):
     """The directory the shell is in when `segments[number]` runs, or None when it cannot be told.
 
     Walks the segments ahead of it in order, the way `_run_dir` reads them, but keeps the state a
@@ -1062,14 +1070,28 @@ def dir_before_segment(segments, number: int, shell_cwd: str, ends=()):
     back, a `cd` inside `( ... )` ends with the parenthesis, `popd` or a path that holds a variable
     is not tracked, and a `cd` into a folder that does not exist is not trusted (the shell stays
     where it was, and a `;` runs the next command there). `ends` is what `split_segments` gave:
-    in bash each part of a pipe runs in a subshell, so its `cd` moves nothing after the pipe."""
+    in bash each part of a pipe runs in a subshell, so its `cd` moves nothing after the pipe.
+    `failed_cd_stays` reads a `cd` to a folder that does not exist the way the shell does: it
+    leaves the shell where it was, and `cd -` still goes to the folder before the last `cd` that
+    worked. After `&&` the rest of that chain does not run, up to the next `;`, newline or `||`:
+    a segment in it gets None, and its own `cd` moves nothing. Off by default, so a rule that
+    fails closed on an untrusted `cd` keeps doing so."""
     where = shell_cwd if shell_cwd and os.path.isabs(shell_cwd) else None
     prev, stack = None, []
+    skipping = False   # a failed cd ended in `&&`: the rest of the chain does not run
     for at, segment in enumerate(segments[:number + 1]):
         marks = [char for _, char, quote in walk_quotes(segment) if not quote and char in "()"]
         stack.extend([(where, prev)] * marks.count("("))
+        end = ends[at] if at < len(ends) else ""
         if at == number:
-            return where
+            return None if skipping else where
+        if skipping:
+            skipping = end in ("&&", "|")
+            for _ in range(marks.count(")")):
+                if stack:
+                    where, prev = stack.pop()
+                    skipping = False
+            continue
         tokens = segment_tokens(segment)
         move = _segment_cd_move(tokens) if tokens else None
         if move is not None and not is_powershell(segment) and "|" in (
@@ -1086,8 +1108,14 @@ def dir_before_segment(segments, number: int, shell_cwd: str, ends=()):
             elif any(mark in move for mark in "$%`"):
                 where = None
             else:
-                where = shell_abs(move or "~", where)
-                where = where if where and os.path.isdir(where) else None
+                target = shell_abs(move or "~", where)
+                if target and os.path.isdir(target):
+                    where = target
+                elif target and failed_cd_stays:
+                    skipping = end == "&&"   # the cd failed: the shell stays, and an `&&` chain stops
+                    old = prev   # a failed cd leaves the folder `cd -` goes back to alone
+                else:
+                    where = None
             prev = old
         for _ in range(marks.count(")")):
             if stack:

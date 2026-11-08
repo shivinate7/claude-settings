@@ -1,0 +1,21 @@
+# Conflict markers never leave the machine
+
+## The ruling
+
+Rule `conflict-markers` in `hooks/guard.py` refuses a commit or a push that would carry git conflict markers. Its home is `conflict_markers_hit` in `hooks/guard_merge.py`, beside the records-page check. Layer: the coordinator, 2026-11-07 03:10 CST, option b, after review round 1 found the commit-only design both missed and cried wolf.
+
+- The mistake: a conflict-fix step fails, and the next command in the chain still stages and commits the file (incident, lane merge-waits-required-only, 2026-11-07 02:36 CST, local only, removed by a fix commit before push).
+- The harm: markers on a pushed branch break every file they touch, and a review or a later merge may carry them on.
+- A hit: all three markers in one file's added lines, from `git diff --check`'s leftover-conflict-marker findings only, never its whitespace findings. The markers: `<<<<<<< `, a lone `=======`, `>>>>>>> `. A doc that quotes one marker, or a heading underlined by seven `=`, passes. A full triplet inside a markdown fence is refused: a real conflict in a doc looks the same.
+- At commit. The guard runs before the command, so it cannot see what an earlier step in the same call does to the tree. It judges a commit, or a `merge`, `rebase` or `cherry-pick --continue`, only when each earlier segment is a git add, a git read, `cd`, an earlier commit, `true` or `false`. Then it reads the index, and the working-tree files, untracked ones too, that those adds, `commit -a` or `commit <path>` cover. An add path the guard cannot resolve, such as `$(...)`, counts as a whole-tree add. Any other earlier segment gives no hit at commit; the push check catches it.
+- At push, for every session. It judges the net change the push sends: a triplet that one commit adds and a later commit removes never leaves the machine. A refspec the guard cannot resolve falls back to HEAD's range. Committed content is real when the guard runs, so this check has no chain blind spot.
+- A commit then a push in one call, where the commit cannot be judged: refused, with the remedy to push in a call of its own. This happens only when the files the commit covers hold a triplet before the call, or when the chain runs a git step that makes conflicts (`merge`, `pull`, `rebase`, `cherry-pick`, `stash pop` or `apply`, `am`). So `make test && git commit -am x && git push` on a clean tree passes. A non-git script that writes new markers in such a chain is not caught (`guard-guards-mistakes-only`).
+- `push --all`, `--mirror` and a tags-only push name no range, so they are not read.
+- A failed git read, or a repo with no commits, is no hit (`guard-that-cries-wolf-is-spent`). `sh -c` and `eval` are not read (`guard-guards-mistakes-only`).
+- Why not a git pre-commit hook: a global `core.hooksPath` replaces each repo's `.git/hooks`, and a repo that sets its own `core.hooksPath` (such as `scripts/githooks`) overrides the global one, by git-config's order (repository config over global). So it would either break a repo's hooks or skip the repo silently.
+- Cost: one `git diff --check` per judged commit. Per push, one three-dot `git diff --check` against the remote-tracking ref, built from the arguments with no other spawn. Only when that ref is missing: up to two more diffs, against the upstream and then the default base, plus the default base's own reads (a `git symbolic-ref` for origin/HEAD and a `git rev-parse`; up to four `git rev-parse` when origin/HEAD is unset). A source that does not resolve costs one more `git rev-parse`. A `git show` runs only when a marker finding needs its line read. No log, file or process. `record_push_cost_case` in `hooks/test_guard.py` pins these counts (the coordinator, 2026-11-07 10:34 CST: cut the process starts, never raise the budget).
+
+Protected by the `conflict-markers` cases in `hooks/test_guard.py`, red before the rule landed.
+
+Kind: process
+Home: hooks/guard.py
