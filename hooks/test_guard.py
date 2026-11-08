@@ -12184,6 +12184,17 @@ for _n, _c in (
     ("git log --output-indicator-new= is no --output", VCS + " log --output-indicator-new=x -- " + CFG_SETTINGS),
 ):
     sh("frozen shell: " + _n + " on the config settings, allows", _c, "allow", cwd=NOGIT)
+# A sed or perl in-place flag that is the text argument of grep or echo is no flag: the command is grep or echo,
+# which edits nothing, and the config settings is only the file it reads. Each allows. The same flag as a command
+# itself is refused in the block after the perl -pi cases.
+for _n, _c in (
+    ("grep perl -i", "grep perl -i " + CFG_SETTINGS),
+    ("echo perl -i", "echo perl -i " + CFG_SETTINGS),
+    ("grep sed -i", "grep sed -i " + CFG_SETTINGS),
+    ("echo sed -i", "echo sed -i " + CFG_SETTINGS),
+):
+    sh("frozen shell: " + _n + " spells an in-place flag as text on the config settings, allows", _c, "allow",
+       cwd=NOGIT)
 # Quoted text is data for the shell: a redirect or a -i inside quotes names no file the command writes.
 sh("frozen shell: a >&FILE inside echo's quotes is text, allows", 'echo "x >&' + CFG_SETTINGS + '"', "allow",
    cwd=NOGIT)
@@ -12203,6 +12214,35 @@ sh("frozen shell: a # inside perl's script, then perl -pi on the config settings
    "perl -pi -e 's/#.*//' " + CFG_SETTINGS, "deny", "frozen-path", cwd=NOGIT)
 sh("frozen shell: a lone quote inside perl's script, then perl -pi on the config settings, denies",
    "perl -pi -e \"s/'//g\" " + CFG_SETTINGS, "deny", "frozen-path", cwd=NOGIT)
+# The twins of the false alarm above: sed or perl that IS the command writes the config settings wherever it sits, in
+# command position, after a separator, after sudo or env, or under xargs. The bare `perl -pi -e` in command position
+# is already the first case of the -pi loop, so it is not repeated here.
+for _n, _c in (
+    ("sed -i", "sed -i s/a/b/ " + CFG_SETTINGS),
+    ("sed -i after ;", "true; sed -i s/a/b/ " + CFG_SETTINGS),
+    ("sed -i after &&", "true && sed -i s/a/b/ " + CFG_SETTINGS),
+    ("sed -i after |", "cat x | sed -i s/a/b/ " + CFG_SETTINGS),
+    ("sed -i after sudo", "sudo sed -i s/a/b/ " + CFG_SETTINGS),
+    ("sed -i after env", "env sed -i s/a/b/ " + CFG_SETTINGS),
+    ("sed -i under xargs", "xargs sed -i s/a/b/ " + CFG_SETTINGS),
+    ("perl -pi after ;", "true; perl -pi -e 's/a/b/' " + CFG_SETTINGS),
+    ("perl -pi after &&", "true && perl -pi -e 's/a/b/' " + CFG_SETTINGS),
+    ("perl -pi after |", "cat x | perl -pi -e 's/a/b/' " + CFG_SETTINGS),
+    ("perl -pi after sudo", "sudo perl -pi -e 's/a/b/' " + CFG_SETTINGS),
+    ("perl -pi after env", "env perl -pi -e 's/a/b/' " + CFG_SETTINGS),
+    ("perl -pi under xargs", "xargs perl -pi -e 's/a/b/' " + CFG_SETTINGS),
+):
+    sh("frozen shell: " + _n + " writes the config settings, denies", _c, "deny", "frozen-path", cwd=NOGIT)
+# A string before the write hides nothing. A lone quote, a comment opener or a line break inside quotes ends no
+# command, so the sed -i or perl -pi after the ; is still refused. The scan reads the command, not the quoted text.
+for _n, _c in (
+    ("a lone quote inside echo's quotes", "echo \"it's\"; sed -i s/a/b/ " + CFG_SETTINGS),
+    ("a # inside echo's quotes", "echo \"# note\"; sed -i s/a/b/ " + CFG_SETTINGS),
+    ("a line break inside echo's quotes", "echo \"a\nb\"; sed -i s/a/b/ " + CFG_SETTINGS),
+    ("a lone quote inside echo's quotes, then perl -pi", "echo \"it's\"; perl -pi -e 's/a/b/' " + CFG_SETTINGS),
+):
+    sh("frozen shell: " + _n + " then a write to the config settings, denies", _c, "deny", "frozen-path",
+       cwd=NOGIT)
 sh("frozen shell: r2, a PowerShell iex inside Write-Output runs a Set-Content on the config settings, "
    "denies [r2 red]",
    "Write-Output (iex \"Set-Content -Path " + CFG_SETTINGS + " -Value x\")", "deny", "frozen-path",
