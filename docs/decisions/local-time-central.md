@@ -31,14 +31,16 @@ Home: hooks/local_time.py
     - A `str_replace` whose new text is a time fragment, such as `T20:24:00Z`, is judged on the day that puts it nearest the clock. A behind fragment passes, and so does yesterday's late time after UTC midnight.
     - In `roadmap/data/steps/<name>.json`: `updatedAt` in a Write, and each instant in an Edit's or MultiEdit's new text, with or without a key. A step holds only past times.
     - In a Bash command: an `updatedAt` key with a double-quoted value after `:`, `=` or jq's `|=`. The key may be bare, quoted either way, or closed by `]`. A `==` or `>` compare passes.
-  - Passes: every other stamp, such as a quoted owner-ruling time later on the header line, a stamp on a later line, or a message with no header. Also a time in prose (`note`, `why`), another field or collection, a value with no offset, and `updatedAt=$T` from a shell variable. An override lifts it.
+  - Passes: every other stamp, such as a quoted owner-ruling time later on the header line, a stamp on a later line, or a message with no header. Also a time in an items document's prose (`note`, `why`) or other field, another collection, a value with no offset, and `updatedAt=$T` from a shell variable. An override lifts it.
   - Steer: the refusal names two fixes. Re-stamp your own header with the printed time. Or, if the first line quotes someone else's time in header form, open the message with your own label first. The clock is cut to the minute before the compare, so a dated stamp and an undated one judge the same.
   - Known miss: a label of 5 or more words, a stale stamp behind the clock, and an undated stamp more than 60 minutes ahead. Also a sender's time in any other form, such as `13:40 CST, coordinator here`, and commit messages (no incident). Also other page time fields such as `replied` and `ruled` (no incident). In a shell command: a single-quoted `updatedAt` value, and a jq `--arg` value. In any written value: a space as the date separator, an hour-only offset such as `-06`, and a time fragment with no `T`.
-  - Known false alarm, each costing one retry. The refusal names the fix.
+  - Known false alarm, each costing one retry. For the first three, the refusal names the fix.
     - A quoted stamp in header form up to 60 minutes ahead, such as `Owner, 13:40 CST: ...` at 13:22 CST. Open with your own label instead.
     - A first line that names a future time 2 to 60 minutes ahead, such as `ETA: 07:45 CST` or `PR 12 merged - 07:40 CST deadline`. Move the time off the first line.
     - A dated quote from the other DST season, such as `Owner, 2026-10-30 16:20 CDT: grant` sent in winter. The wrong-zone check refuses it whatever the minutes. Open with your own label instead.
     - A Bash fixture with a deliberate future `updatedAt`, such as a `curl -d` body or a heredoc. Write it through the Write tool, or put the value in a shell variable.
     - A read-only grep for an `updatedAt` literal that is ahead of the clock. Put the value in a shell variable.
+    - A step Edit whose prose or other field holds an instant ahead of the clock. Write the whole file with Write, which reads only `updatedAt`.
+    - A fragment fix to an older item, to a time up to 12 hours later in the day than the clock. Example: yesterday's `T18:00Z` set to `T19:00Z` at 08:00Z. Write the whole value.
   - Cost: one clock read per send_message, and per ArtifactData, Write, Edit or Bash call that carries a judged value, inside the guard process the PreToolUse matcher already starts. One local file read, only for an ArtifactData items write that carries `file_path` and no inline data. No transcript read, process or timer.
   - Tests: family `message-time-matches-clock` in `hooks/test_guard.py`.
