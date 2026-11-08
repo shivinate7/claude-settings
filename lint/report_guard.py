@@ -536,6 +536,10 @@ def answered_problem(text):
 # another model. The excuse applies only when no builder, test-author or record-writer spawned, or
 # every BUILT or ref-carrying Done item names a builder, test-author or record-writer pair, since a
 # finished agent build usually carries a ref. Any such pair counts; a reviewer-only pair does not.
+# A non-BUILT Done item marked "(no agent)" owes no model, so that gate skips it. A BUILT item is never skipped.
+# A Done pair is refused only when no spawn of that role anywhere in the session ran that model: an earlier
+# review round can sit before the window. The window still decides which roles must be named. Cost of the
+# session-wide read: one more pass over the in-memory records per Stop, no file or process.
 NAMED_ROLES = {"builder", "reviewer", "test-author", "record-writer"}
 SPAWN_TOOLS = {"Agent", "Task"}
 MODEL_FAMILIES = ("haiku", "sonnet", "opus", "fable")
@@ -613,8 +617,9 @@ def _role_models(text):
             for r in ROLE_RE.findall(roles)}
 
 
-def done_models_problem(text, spawned):
-    """Name what Done gets wrong about the spawned roles' models, else ''."""
+def done_models_problem(text, spawned, session_spawned=None):
+    """Name what Done gets wrong about the spawned roles' models, else ''.
+    `session_spawned` (default `spawned`) holds the models every spawn in the session ran."""
     if not spawned:
         return ""
     items = done_items(block_text(text, keep_indent=True))
@@ -622,10 +627,13 @@ def done_models_problem(text, spawned):
     next_named = _role_models(report_section(text, "Next"))
     missing = sorted(r for r in spawned if not any(nr == r for nr, _ in named))
     builds = spawned.keys() & {"builder", "test-author", "record-writer"}
+    session = spawned if session_spawned is None else session_spawned
     def names_builder(i):
         return any(r != "reviewer" for r, _ in _role_models(i))
-    if missing and (not builds or all(names_builder(i) for i in items
-                                      if "BUILT" in DONE_KIND_RE.findall(i) or DONE_REF_RE.search(i))):
+    def gated(i):
+        built = "BUILT" in DONE_KIND_RE.findall(i)
+        return built or (DONE_REF_RE.search(i) and "(no agent)" not in i.lower())
+    if missing and (not builds or all(names_builder(i) for i in items if gated(i))):
         def named_next(role):
             ran = spawned[role] - {""}
             models = {m for r, m in next_named if r == role}
@@ -634,7 +642,7 @@ def done_models_problem(text, spawned):
     if missing:
         return "no model named for " + ", ".join(missing)
     for role, model in sorted(named):
-        ran = spawned.get(role)
+        ran = session.get(role)
         if ran is not None and "" not in ran and model not in ran:
             return f"'{role} {model}' matches no {role} spawn, which ran " + ", ".join(sorted(ran))
     return ""
@@ -1574,7 +1582,7 @@ def rewrite_problems(hook):
         text = last_reply(hook)
         spawned = spawn_models(spawn_window(records, idx))
         reasons = []
-        models = done_models_problem(text, spawned)
+        models = done_models_problem(text, spawned, spawn_models(records))
         if models:
             reasons.append(MODELS_REASON + models + ".")
         if unstarted_problem(text, spawned):
@@ -2036,7 +2044,7 @@ def main():
             "Report-shape guard: each Done line must say BUILT, RECORDED, or OTHER. BUILT and "
             "RECORDED must also name a PR or commit. This one does not: " + repr(item) + ".")
     spawned = spawn_models(spawn_window(records))
-    models = done_models_problem(text, spawned) if shape_ok else ""
+    models = done_models_problem(text, spawned, spawn_models(records)) if shape_ok else ""
     if models:
         reasons.append(MODELS_REASON + models + ".")
     if shape_ok and unstarted_problem(text, spawned):
