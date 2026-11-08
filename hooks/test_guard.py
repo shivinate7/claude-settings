@@ -5171,6 +5171,20 @@ sh("git-after-cd: a cd that lands, then && true || a test that may be skipped, t
    "deny", "git-after-cd", cwd=NOGIT, carries=("&&", "-C"))
 
 
+# THE REFUSAL BRANCHES. _never_runs and _dir_test_word refuse three forms that a skipped cd could pass for. Each form
+# is refused only because one branch holds: drop that branch and the form is allowed. Each is checked under bash with
+# a stub git. A regular file for M makes -e pass and the cd fail. The push then runs in the start folder.
+sh("git-after-cd: a [ -d M ] test joined by ; to a cd to a missing folder, then ; a git push is refused",
+   "[ -d %s ]; cd %s; %s push" % (AFTER_CD_GONE_TWO, AFTER_CD_GONE_TWO, VCS),
+   "deny", "git-after-cd", cwd=NOGIT, carries=("&&", "-C"))
+sh("git-after-cd: a [ -e M ] test, then && cd to M, then ; a git push is refused",
+   "[ -e %s ] && cd %s; %s push" % (AFTER_CD_GONE_TWO, AFTER_CD_GONE_TWO, VCS),
+   "deny", "git-after-cd", cwd=NOGIT, carries=("&&", "-C"))
+sh("git-after-cd: a [ -d N ] test on a folder that exists, then && cd to a missing folder, then ; a git push is refused",
+   "[ -d %s ] && cd %s; %s push" % (slash(NOGIT), AFTER_CD_GONE_TWO, VCS),
+   "deny", "git-after-cd", cwd=NOGIT, carries=("&&", "-C"))
+
+
 # THE WIDE READ. case, select and a function definition open a compound that errexit must see, so the cd in
 # their body is not bare. Each body is on the left of ||, so errexit is ignored there and the push runs. A select
 # body runs once its menu gets an answer, so it is judged as a body that may run.
