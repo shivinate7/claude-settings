@@ -1,11 +1,11 @@
 {
   "title": "A push of a main merge that the silent-undo check flags, with no Drops-lines trailer, is caught before it leaves",
   "why": "Lane notes-fix-reverify-large, 11:27 CST Nov 8: builders that merge origin/main into a lane branch push without running lint/check_silent_undo.py; the lane lint then fails on re-wrapped or replaced lines, and each case needs an extra empty commit with a Drops-lines trailer. Incidents: #1597 (docs/decisions/ci-job-caps.md) and #1668 (hooks/guard_frozen.py), both Nov 8. Fix: refuse or warn on such a push, or run the check before push. Check overlap first with #2077 (step lane-lint-before-push), which refuses a push whose commits fail the lane lint's fast checks. Under the owner's 11:27 CST ruling (step habit-is-not-a-guard), a brief line is not a fix.",
-  "note": "",
+  "note": "Fix: none — #2077 (step lane-lint-before-push) covers it: its rule lane-lint-push runs the silent-undo step on the commits a push sends and refuses a FAIL (lane, 11:29 CST Nov 8).",
   "phase": "now",
   "owner": "claude-settings",
   "lane": "notes-fix-reverify-large (session_013NEJL4AKgUjS1CWQvcdNwc)",
-  "status": "todo",
+  "status": "done",
   "order": 757,
-  "updatedAt": "2026-11-08T11:29:00-06:00"
+  "updatedAt": "2026-11-08T11:31:00-06:00"
 }

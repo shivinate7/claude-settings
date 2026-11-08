@@ -1,0 +1,11 @@
+{
+  "title": "A path:line cite whose range lands on the wrong symbol is caught",
+  "why": "Lane cannot-claim-needs-tries (session_013NEJL4AtAVhGNb2poKhrsi), 11:29 CST Nov 8: lint/stale_cites.py passes a `path:line` cite whose range now lands on another symbol. After merges shifted lint/report_guard.py, cites in claims-carry-backing.md (`:1485-1494`, meant for hand_off_problem, now in `_cited_refusal`) and notes (`:642-660`, meant for report_section) passed and only reviewers caught them. Two notes on main also pass while wrong: report-guard-url-string-compare (\"about :591\") and report-guard-lazy-import (\":952\", peer_body no longer exists). Proposed fix: when a backticked symbol sits in the same sentence as a cite, check that the symbol is in or near the cited range. Related: step cite-symbol-anchor-excerpt.",
+  "note": "",
+  "phase": "now",
+  "owner": "claude-settings",
+  "lane": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB) to route (outside the finding lane's scope)",
+  "status": "todo",
+  "order": 758,
+  "updatedAt": "2026-11-08T11:31:00-06:00"
+}
