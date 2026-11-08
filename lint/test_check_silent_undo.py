@@ -2417,6 +2417,7 @@ class RevivedNote(unittest.TestCase):
     LATER = "- later-note: a finding main adds after the doubled note (lint/check_later.py)"
     REWORDED = "- retired-note: a finding the branch retires, reworded (lint/check_retired.py)"
     SECOND = "- second-note: a finding the branch deletes with retired-note (lint/check_second.py)"
+    SIDE = "- side-note: a finding the side line adds (lint/check_side.py)"
     IN_PLACE = "an edit in place does not keep a note"  # the refusal's words, compared lowercased
 
     def text(self, *lines):
@@ -2424,6 +2425,19 @@ class RevivedNote(unittest.TestCase):
 
     def notes_at(self, rev):
         return self.r.sh("show", "%s:%s" % (rev, self.NOTES)).splitlines()
+
+    def open_base(self, union, base):
+        """The base repo: main holds the notes file as the lines `base` after the heading, then an unrelated commit, and both are
+        pushed. The union line is the real `.gitattributes` when `union`. -> the repo, on main."""
+        r = self.r = Repo()
+        self.union = union
+        r.put(".claude/layout-extras.json", json.dumps({"kinds": {}, "rolled-out": True}) + "\n")
+        if union:
+            shutil.copyfile(self.ATTRIBUTES, os.path.join(r.dir, ".gitattributes"))
+        r.commit("notes", docs__debts__notes_md=self.text(*base))
+        r.commit("unrelated main commit", other_txt="other v1\n")
+        r.push()
+        return r
 
     def start(self, union, retire=True, base=None, branch=None, main=None, edit_date=None):
         """A base whose notes hold untouched-note and retired-note, then an unrelated main commit, so the fork point is that
@@ -2436,14 +2450,7 @@ class RevivedNote(unittest.TestCase):
         if branch is None:
             branch = (self.UNTOUCHED,) if retire else (self.UNTOUCHED, self.RETIRED, self.OWN)
         main = (self.UNTOUCHED, self.RETIRED, self.MAIN) if main is None else main
-        r = self.r = Repo()
-        self.union = union
-        r.put(".claude/layout-extras.json", json.dumps({"kinds": {}, "rolled-out": True}) + "\n")
-        if union:
-            shutil.copyfile(self.ATTRIBUTES, os.path.join(r.dir, ".gitattributes"))
-        r.commit("notes", docs__debts__notes_md=self.text(*base))
-        r.commit("unrelated main commit", other_txt="other v1\n")
-        r.push()
+        r = self.open_base(union, base)
         r.sh("checkout", "-q", "-b", "feat")
         self.assertEqual(r.sh("check-attr", "merge", "--", self.NOTES).rsplit(": ", 1)[-1], "union" if union else "unspecified",
                          "premise: this variant's driver for the notes file")
@@ -2825,6 +2832,66 @@ class RevivedNote(unittest.TestCase):
         self.assertIn(self.RETIRED, self.notes_at(head), "premise: the head holds retired-note")
         self.assertEqual(self.replay_order(), [self.retire, readd], "premise: the replay lists the delete before the re-add")
         self.assertEqual(self.r.verdict(), [], "a note the branch deleted and re-added on purpose was refused when the re-add is dated after the delete")
+
+    def start_parallel(self, side_first=False):
+        """Two lines off main, which holds retired-note. The branch deletes it on 2026-11-03. The side line deletes it on 2026-10-31
+        and re-adds it on 2026-11-01 beside its own SIDE line, so the re-add is older than the delete and neither line holds the
+        other. A --no-ff merge joins them: the branch is the first parent, or the side line when side_first. The union line keeps
+        the side's copy where the two edits meet at the file's end. -> the merge's head."""
+        self.open_base(union=True, base=(self.UNTOUCHED, self.RETIRED))
+        r = self.r
+        r.sh("checkout", "-q", "-b", "feat")
+        self.retire = r.commit("the branch deletes the note", date="2026-11-03T10:00:00", docs__debts__notes_md=self.text(self.UNTOUCHED))
+        r.sh("checkout", "-q", "-b", "side", "origin/main")
+        self.commit_notes("the side line deletes the note", [self.UNTOUCHED], date="2026-10-31T10:00:00")
+        self.commit_notes("the side line re-adds the note", [self.UNTOUCHED, self.RETIRED, self.SIDE], date="2026-11-01T10:00:00")
+        first, second = ("side", "feat") if side_first else ("feat", "side")
+        r.sh("checkout", "-q", first)
+        r.sh("merge", "--no-ff", "-m", "Merge %s into %s" % (second, first), second, date="2026-11-05T10:00:00")
+        head = r.sh("rev-parse", "HEAD")
+        self.assertEqual(len(r.sh("rev-list", "--parents", "-n", "1", head).split()), 3, "premise: the head is a merge commit")
+        return head
+
+    def assert_last_delete_refuses(self):
+        """The later delete, self.retire, is the last event for retired-note, so the check refuses the head's copy."""
+        got = self.r.verdict()
+        named = [p for p in got if "retired-note" in p and self.retire[:7] in p]
+        self.assertTrue(named, "the check did not replay the later delete %s as the last event, so the older re-add passed retired-note: %r"
+                        % (self.retire[:7], got))
+
+    def test_a_later_delete_refuses_an_older_re_add_when_the_branch_is_the_first_parent(self):
+        head = self.start_parallel(side_first=False)
+        self.assertIn(self.RETIRED, self.notes_at(head), "premise: the union merge brought retired-note back")
+        self.assert_last_delete_refuses()
+
+    def test_a_later_delete_refuses_an_older_re_add_when_the_side_line_is_the_first_parent(self):
+        head = self.start_parallel(side_first=True)
+        self.assertIn(self.RETIRED, self.notes_at(head), "premise: the union merge brought retired-note back")
+        self.assert_last_delete_refuses()
+
+    def test_a_slug_with_a_period_inside_its_backticks_excuses_its_revival(self):
+        self.start(union=True)
+        self.merge_main()
+        self.assert_refused(self.r.verdict())
+        self.trailer_commit("the owner retired it - `retired-note.`")
+        self.assertIn(self.NOTES, C.allowed(self.r.dir, "origin/main..HEAD"), "premise: the trailer is read for the notes path")
+        self.assertEqual(self.r.verdict(), [], "a trailer that names retired-note as `retired-note.` does not excuse its revival")
+
+    def test_a_lone_backtick_before_a_slug_excuses_nothing(self):
+        self.start(union=True)
+        self.merge_main()
+        self.assert_refused(self.r.verdict())
+        self.trailer_commit("the owner retired it - `retired-note")
+        self.assertIn(self.NOTES, C.allowed(self.r.dir, "origin/main..HEAD"), "premise: the trailer is read for the notes path")
+        self.assert_refused(self.r.verdict())
+
+    def test_backticks_that_close_inside_a_slug_excuse_nothing(self):
+        self.start(union=True)
+        self.merge_main()
+        self.assert_refused(self.r.verdict())
+        self.trailer_commit("the owner retired it - `retired`-note`")
+        self.assertIn(self.NOTES, C.allowed(self.r.dir, "origin/main..HEAD"), "premise: the trailer is read for the notes path")
+        self.assert_refused(self.r.verdict())
 
 
 if __name__ == "__main__":
