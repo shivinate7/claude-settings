@@ -2593,9 +2593,14 @@ def builder_third_round(brief) -> bool:
 # form (`X` is refused on main), and the clause ends at ", so", ", and" or ", then". The subject is `main` or
 # `origin/main` with the verb next to it (so "the main session" is no subject), or today with it, they, guard, hook,
 # rule or check. A backticked `main` is still the word. The verb may be negated (doesn't refuse, never refuses) or be
-# "lets ... through". A claim clause with no input of its own that says both, all, them, it, each or these takes the
-# inputs of the sentence, or the run of list lines, right before it; one that ends with ":" takes the list lines after
-# it. Fenced text is read too. A path after in, at, from, under, inside, within or via is a locator, not an input.
+# "lets ... through". The verb may be a base or -ing form before "on main" or "today" ("`a` and `b` pass on main",
+# "listed `X` as passing on main"). A leading "On main," or "Today" before the inputs and the verb is a claim too, and
+# so is a subject with "today" later ("The guard refuses `x` today"). With no input after the verb, the clause takes
+# every input of its own only when nothing but today, now or punctuation follows the verb. A claim clause with no
+# input of its own that says it or them, or says both, all, each or these at its end, before "of them", "of these"
+# or "of those", or before a count word (all three, both cases, each one, both today), takes the inputs of its own
+# sentence if it has any, else those of the sentence, or the run of list lines, right before it; one that ends with ":"
+# takes the list lines after it, up to a "Controls ...:" heading. Fenced text is read too. A NUL in a brief is a space. A path after in, at, from, under, inside, within or via is a locator, not an input.
 # Cost: pure text work inside the one guard call. No process, no file.
 BRIEF_CLAIM_ROLES = ("builder", "test-author")
 _CLAIM_VERB = r"(?:passes|passed|allows|allowed|accepts|accepted|refuses|refused|rejects|rejected|blocks|blocked)"
@@ -2604,19 +2609,47 @@ _CLAIM_THROUGH = r"\b(?=[^.!?;]*\bthrough\b)"   # lets counts as a verb only wit
 _CLAIM_NOT = r"(?:(?:does|did|do)\s+not|(?:does|did|do)n['\u2019]t)\s+"
 _CLAIM_ADVERB = r"(?:(?:still|also|now|today|currently|already|even|always|never)\s+)?"
 _CLAIM_MAIN = r"(?<![\w/.-])(?:origin/main|main)(?![\w/-])(?!\.\w)"
+_CLAIM_ING = r"(?:passing|allowing|accepting|refusing|rejecting|blocking)"
+_CLAIM_ANY = r"(?:" + _CLAIM_VERB + r"|" + _CLAIM_BASE + r"|" + _CLAIM_ING + r")"
+_CLAIM_SUBJECT = r"(?:it|they|guard|hook|rule|check)"
+_CLAIM_ACTS = (_CLAIM_ADVERB + r"(?:" + _CLAIM_VERB + r"\b|lets" + _CLAIM_THROUGH
+               + r"|" + _CLAIM_NOT + _CLAIM_ADVERB + r"(?:" + _CLAIM_BASE + r"\b|let" + _CLAIM_THROUGH + r"))")
+_CLAIM_ACTIVE_LEAD = (r"(?:" + _CLAIM_MAIN + r"|(?<![\w/.-])today,?\s+(?:(?:the|this)\s+)?" + _CLAIM_SUBJECT + r")\s+"
+                      + _CLAIM_ACTS)
+BRIEF_CLAIM_ACTIVE_LEAD = re.compile(_CLAIM_ACTIVE_LEAD, re.IGNORECASE)
 BRIEF_CLAIM_ACTIVE = re.compile(
-    r"(?:" + _CLAIM_MAIN + r"|(?<![\w/.-])today,?\s+(?:(?:the|this)\s+)?(?:it|they|guard|hook|rule|check))\s+"
-    + _CLAIM_ADVERB + r"(?:" + _CLAIM_VERB + r"\b|lets" + _CLAIM_THROUGH
-    + r"|" + _CLAIM_NOT + _CLAIM_ADVERB + r"(?:" + _CLAIM_BASE + r"\b|let" + _CLAIM_THROUGH + r"))", re.IGNORECASE)
+    _CLAIM_ACTIVE_LEAD
+    # A subject first and "today" later in the sentence: "The guard refuses `x` today."
+    + r"|(?<![\w/.-])(?:(?:the|this)\s+)?" + _CLAIM_SUBJECT + r"\s+" + _CLAIM_ACTS + r"(?=[^.!?;]*\btoday\b)",
+    re.IGNORECASE)
+BRIEF_CLAIM_TODAY = re.compile(r"\btoday\b", re.IGNORECASE)
 BRIEF_CLAIM_PASSIVE = re.compile(
-    r"(?:\b(?:is|are|was|were|gets|get)\s+)?\b" + _CLAIM_VERB + r"\b\s+"
+    r"(?:\b(?:is|are|was|were|gets|get)\s+)?\b" + _CLAIM_ANY + r"\b\s+"
     r"(?:(?:on|by)\s+(?:origin/main|main)(?![\w/-])|today\b)", re.IGNORECASE)
+# A leading "On main," or "Today" then the inputs, then the verb: "On main, `a` passes." The inputs are the masked
+# spans between the frame and the verb.
+BRIEF_CLAIM_FRAMED = re.compile(
+    r"(?<![\w/.-])(?:on\s+(?:origin/main|main)(?![\w/-])|today\b),?\s+"
+    r"(?:\x00\d+\x00(?:\s*,\s*(?:and\s+)?|\s+and\s+|\s+)?)+" + _CLAIM_ADVERB + r"(?:" + _CLAIM_NOT + r")?"
+    + _CLAIM_ADVERB + _CLAIM_ANY + r"\b", re.IGNORECASE)
 BRIEF_CLAIM_SPAN = re.compile(
     r"(`+)(.+?)\1(?!`)|`+(.*)$|\"([^\"\n]+)\"|(?<!\w)'([^'`\n]+)'(?!\w)")
 BRIEF_CLAIM_MASK = re.compile(r"\x00(\d+)\x00")
 BRIEF_CLAIM_LOCATOR = re.compile(r"\b(?:in|at|from|under|inside|within|via)\s+$", re.IGNORECASE)
 BRIEF_CLAIM_BREAK = re.compile(r",\s+(?:so|and|then)\b", re.IGNORECASE)
-BRIEF_CLAIM_REFERENT = re.compile(r"\b(?:both|all|them|it|each|these)\b", re.IGNORECASE)
+# it and them are referents anywhere in the clause. both, all, each and these only at the clause end, or before
+# "of them", "of these" or "of those": "main passes all tests" has no referent, "main passes all of them" has one.
+BRIEF_CLAIM_REFERENT = re.compile(
+    r"\b(?:it|them)\b|\b(?:both|all|each|these)\b(?=[\s.!?:;,)]*$|\s+of\s+(?:them|these|those)\b)", re.IGNORECASE)
+# A count word that names the inputs before it: "all three", "both cases", "these two", "each one", "both today".
+_CLAIM_COUNT_WORD = r"(?:one|ones|two|three|four|five|six|seven|eight|nine|ten|\d+|cases?|inputs?)"
+BRIEF_CLAIM_COUNT = re.compile(
+    r"\b(?:both|all|each|these)\s+(?:" + _CLAIM_COUNT_WORD + r"\b(?:\s+(?:today|now)\b)?|(?:today|now)\b)[\s.!?:;,)]*$",
+    re.IGNORECASE)
+# What may follow a verb for the active form to take every input of its clause: today, now and punctuation only.
+BRIEF_CLAIM_BARE = re.compile(r"(?:\s|[.,:;!?)\"']|\b(?:today|now)\b)*", re.IGNORECASE)
+# A heading that closes a claimed list: "Controls that must still pass:", bare, bulleted or numbered.
+BRIEF_CLAIM_HEADING = re.compile(r"(?:(?:[-*+]|\d+[.)])\s+)?controls?\b[^:]*:\s*$", re.IGNORECASE)
 BRIEF_CLAIM_LIST = re.compile(r"(?:[-*+]|\d+[.)])\s")
 BRIEF_CLAIM_COMMAND = re.compile(
     r"(?:(?:cd\s[^&|;\n]*&&|echo\s[^|\n]*\||[A-Za-z_]\w*=\S*|time)\s+)*"
@@ -2635,6 +2668,7 @@ def _claim_mask(text: str):
     """The line with each input masked as \\x00n\\x00, and the inputs in the order met. A backticked main stays the
     word, so it can be a subject."""
     spans = []
+    text = text.replace("\x00", " ")   # a NUL in a brief would read as a marker of its own
 
     def mask(hit):
         body = next((g for g in hit.groups()[1:] if g is not None), "").strip()
@@ -2646,28 +2680,56 @@ def _claim_mask(text: str):
     return BRIEF_CLAIM_SPAN.sub(mask, text), spans
 
 
+def _claim_refers(text: str) -> bool:
+    """True when the clause text says it, them, or a count of inputs (both, all three, each one, these two today)."""
+    return bool(BRIEF_CLAIM_REFERENT.search(text) or BRIEF_CLAIM_COUNT.search(text))
+
+
+def _claim_active(sentence: str):
+    """The leftmost active-form match in one masked sentence, or None. The subject-first form needs "today" later in
+    its sentence, so it is searched only up to the last "today": its lookahead then ends there and the scan stays
+    linear in the sentence."""
+    clause = BRIEF_CLAIM_ACTIVE_LEAD.search(sentence)
+    late = None
+    for late in BRIEF_CLAIM_TODAY.finditer(sentence):
+        pass
+    if late is not None:
+        subject = BRIEF_CLAIM_ACTIVE.search(sentence, 0, late.end())
+        if subject is not None and (clause is None or subject.start() < clause.start()):
+            return subject
+    return clause
+
+
 def _claim_clause(sentence: str, marks: list):
     """The claim in one masked sentence, or None. A claim is (claimed, refer): the inputs its clause names, and, when
     it names none, "after" for a clause that ends with ":", "before" for one that says both, all, them, it, each or
     these, else None. The active form names the inputs after its verb, the passive form those before it; either falls
     back to every input in its clause. marks are the sentence's (offset, input) pairs."""
-    clause = BRIEF_CLAIM_ACTIVE.search(sentence)
+    clause = _claim_active(sentence)
     passive = clause is None
+    framed = False
     if passive:
         clause = BRIEF_CLAIM_PASSIVE.search(sentence)
         if clause is None:
-            return None
+            clause = BRIEF_CLAIM_FRAMED.search(sentence)
+            framed = True
+            if clause is None:
+                return None
     lo = max((b.end() for b in BRIEF_CLAIM_BREAK.finditer(sentence, 0, clause.start())), default=0)
     stop = BRIEF_CLAIM_BREAK.search(sentence, clause.end())
     hi = stop.start() if stop else len(sentence)
-    first, last = (lo, clause.start()) if passive else (clause.end(), hi)
-    claimed = ([item for at, item in marks if first <= at < last]
-               or [item for at, item in marks if lo <= at < hi])
+    first, last = (clause.start(), clause.end()) if framed else (lo, clause.start()) if passive else (clause.end(), hi)
+    claimed = [item for at, item in marks if first <= at < last]
+    if not claimed and (passive or BRIEF_CLAIM_BARE.fullmatch(sentence, clause.end(), hi)):
+        claimed = [item for at, item in marks if lo <= at < hi]
+    refers = _claim_refers(sentence[first:last])
+    if not claimed and not passive and refers:   # "Edit `x`, because main refuses it."
+        claimed = [item for at, item in marks if lo <= at < hi]
     if claimed:
         return claimed, None
     if sentence[lo:hi].rstrip().endswith(":"):
         return [], "after"
-    return [], "before" if BRIEF_CLAIM_REFERENT.search(sentence[first:last]) else None
+    return [], "before" if refers else None
 
 
 def _claim_line(text: str) -> list:
@@ -2716,7 +2778,9 @@ def _claim_rows(brief: str) -> list:
         listed = bool(BRIEF_CLAIM_LIST.match(text))
         sentences = _claim_line(text)
         own = [item for inputs, _ in sentences for item in inputs]
-        if listed and waiting is not None:
+        if waiting is not None and not own and BRIEF_CLAIM_HEADING.match(text):
+            waiting = None
+        elif listed and waiting is not None:
             waiting.extend(own)
         else:
             waiting = None
