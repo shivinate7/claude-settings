@@ -1565,3 +1565,6 @@
 - handoff-premises-wide-forms-untested: `- **P3**` and `- P3:` premises reach the reorient read through `handoff_premises` with no direct case (hooks/precompact_handoff.py `_PREMISE_LINE`). Decision: premise-format.
 - handoff-unclosed-fence-hides: an unclosed fence in the handoff hides every line after it from the ruling check, fail-open (hooks/precompact_handoff.py `_section_body`). Decision: premise-format.
 - handoff-prose-rule-passes: a rule written as plain prose in a handoff, such as "- A guard or check change batches alone." under Next steps, still passes the handoff ruling check; only `[ruling]` premises and NO HOME YET lines are read (hooks/ruling_home.py `handoff_findings`). Fix: step:merge-builds-batches, which takes batch shape from PR state only. A second incident on another path reopens it. Decision: predicate-is-the-act.
+- mail-not-merged-text: docs/decisions/session-messages.md ("it is not in main", "(not merged)") and skill waiting-page section "Message another session" ("not merged") turn false when PR 1371 merges. Decision: session-messages.
+- mail-comment-bug-term: a hooks/mail.py comment says "a bug"; the glossary term is "defect". Decision: none.
+- mail-store-named-public: the public repo names the private mailbox store by its repo name (decision session-messages); a name only, no secret. Decision: session-messages.
