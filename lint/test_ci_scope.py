@@ -265,6 +265,13 @@ class Scope(unittest.TestCase):
         self.assertEqual(run(["hooks/git_reads.py"], existing=["hooks/git_reads.py"]),
                          run(["hooks/guard.py"], existing=["hooks/guard.py"]))
 
+    # lint/hook_catalog.py reaches git_reads and shared_names through layout.path (layout.py imports git_reads on first
+    # use), and the Windows merge job runs that check. Named failure: checks_windows_merge stays off for either file.
+    def test_git_reads_and_shared_names_change_turn_on_the_windows_merge_job(self):
+        for p in ("hooks/git_reads.py", "hooks/shared_names.py"):
+            with self.subTest(path=p):
+                self.assertFlags(run([p], existing=[p]), want_true=["checks_windows_merge"])
+
     # Control: the guard test file keeps today's flags. A family rule must not catch it.
     def test_guard_test_file_keeps_its_current_flags(self):
         p = "hooks/guard_test_x.py"
