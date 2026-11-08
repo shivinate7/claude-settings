@@ -16,7 +16,7 @@ CLAUDE.md names, reads the pin check from it, and with no checkout prints one li
 Also asserts the tree-cites input: off by default, passed to the step as TREE_CITES, and on, the step checks the whole tree.
 Also asserts the step's exit codes when a helper misbehaves (`run.sh exit codes:` cases): with fail=false, an UNKNOWN or a
 crash from lint/stale_cites.py stays red and only a FAIL verdict is zeroed; a linter that exits non-zero or prints non-JSON
-fails the job in both scopes; a git range with no history behind it reads as UNKNOWN and exits 0, while any other failing
+fails the job in both scopes; a git range with no history behind it (a shallow clone, a first commit) reads as UNKNOWN and exits 0, while any other failing
 range exits 1; and the fail input says it opts out of findings only."""
 import ast, atexit, contextlib, json, os, re, shutil, subprocess, sys, tempfile, time, uuid
 
@@ -109,6 +109,16 @@ def make_repo(d, base, change, on_main=False):
     return work
 
 
+def shallow_of(d, work):
+    """A real depth-1 clone of the topic branch, every branch fetched at depth 1: origin/main is present, and the
+    clone holds nothing below its one commit."""
+    git(work, "push", "-q", "origin", "topic")
+    shallow = os.path.join(d, "shallow")
+    git(d, "clone", "-q", "--depth", "1", "--no-single-branch", "--branch", "topic",
+        "file://" + os.path.join(d, "r.git").replace("\\", "/"), shallow)
+    return shallow
+
+
 def run_step(d, work, env, action_dir=HERE):
     """Run the step script from a file, not `bash -c`: Windows argv quoting mangles its heredocs. The step runs
     the run.sh in action_dir."""
@@ -119,12 +129,15 @@ def run_step(d, work, env, action_dir=HERE):
     return p.returncode, p.stdout + p.stderr
 
 
-def run(scope, fail="true", base=BASE_FILES, change=default_change, on_main=False, stubs=None, **over):
+def run(scope, fail="true", base=BASE_FILES, change=default_change, on_main=False, stubs=None, shallow=False, **over):
     """Build a bare remote, commit `base` on main, branch to topic (or stay on main when
     on_main), apply `change(work)`, then run the step script. `over` overrides env vars. `stubs`, the keyword
-    arguments of stub_tree, runs the step from a scratch tree of stub helpers instead of this repo's."""
+    arguments of stub_tree, runs the step from a scratch tree of stub helpers instead of this repo's. `shallow` runs
+    it in a depth-1 clone (shallow_of)."""
     with tempfile.TemporaryDirectory(dir=RUN_FOLDER) as d:  # test-temp-standard: the run folder, never the system temp
         work = make_repo(d, base, change, on_main)
+        if shallow:
+            work = shallow_of(d, work)
         env = dict(os.environ, EVENT_NAME="pull_request", BASE_REF="main", DEFAULT_BRANCH="main",
                    REF_NAME="topic", SCOPE=scope, FAIL=fail, PATHS_GLOB="**/*.md", EXCLUDE="",
                    CHANGED_PATHS_GLOB="*.md", DECISIONS_DIR="", GITHUB_STEP_SUMMARY=os.path.join(d, "sum"))
@@ -1027,6 +1040,29 @@ for fail in ("true", "false"):
           "'ste-lint: UNKNOWN, git diff' line, exits 1" % fail,
           rc == 1 and any(l.startswith("ste-lint: UNKNOWN, git diff") for l in out.splitlines())
           and "no base history" not in out, out)
+
+
+def root_change(work):
+    """A branch whose one commit has no parent, so HEAD~1 does not resolve."""
+    git(work, "checkout", "-q", "--orphan", "root")
+    write(work, "a.md", "# T\n\n" + LONG + "\n", "w")
+    git(work, "add", "-A"); git(work, "commit", "-qm", "root")
+
+
+# Two more history-gap clauses, each on its own. A real depth-1 clone with the base ref present: the shallow repo
+# clause (rev-parse --is-shallow-repository) applies. A push to the default branch whose HEAD is the first commit:
+# HEAD~1 does not resolve. Each prints the UNKNOWN line and exits 0, for fail true and false.
+for fail in ("true", "false"):
+    rc, out = run("changed", fail, change=default_change, shallow=True, stubs={})
+    check("run.sh exit codes: real depth-1 clone, base ref present, scope changed, fail=%s → 'ste-lint: UNKNOWN, git diff' "
+          "line, exits 0" % fail,
+          rc == 0 and any(l.startswith("ste-lint: UNKNOWN, git diff") for l in out.splitlines()), out)
+
+for fail in ("true", "false"):
+    rc, out = run("changed", fail, change=root_change, BASE_REF="", REF_NAME="main", EVENT_NAME="push", stubs={})
+    check("run.sh exit codes: push to the default branch, HEAD is the first commit, fail=%s → 'ste-lint: UNKNOWN, git "
+          "diff' line, exits 0" % fail,
+          rc == 0 and any(l.startswith("ste-lint: UNKNOWN, git diff") for l in out.splitlines()), out)
 
 
 # action.yml: 'false' opts out of findings only, and a check that crashed still fails. The description must say so,
