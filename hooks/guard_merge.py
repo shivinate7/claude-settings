@@ -12,12 +12,12 @@ import re
 import sys
 
 from guard_core import (
-    GIT_WORK_TREE_RE, REDIRECTION, _absolute, _git, _git_subcommand_index, _segment_git_c_target, _walk_wrappers, basename, cap_safe,
+    GIT_WORK_TREE_RE, _absolute, _git, _git_subcommand_index, _segment_git_c_target, _walk_wrappers, basename, cap_safe,
     command_root, dir_before_segment, git_calls, inline_script, inner_commands, resolve_command, resolve_default_base,
     segment_tokens, shell_abs, split_segments,
 )
 import own_session  # the one home of the own get_session read, small so report_guard imports it too
-from shared_names import LANE_TAG, TOPIC_TAG, lane_head_refs  # the one home of the lane tags and head refs, shared with the roadmap build
+from shared_names import BUILD_TAG, LANE_TAG, TOPIC_TAG, lane_head_refs  # the one home of the lane tags and head refs, shared with the roadmap build
 from guard_pointer import (
     pointer_checkout,
 )
@@ -350,11 +350,72 @@ _COMMIT_VALUE_FLAGS = {"--message", "--file", "--reuse-message", "--reedit-messa
 _ADD_ALL_FLAGS = {"-A", "--all", "-u", "--update"}
 
 
+_REDIRECT_OP = re.compile(r"(?:(?:\d*|\{[A-Za-z_]\w*\})(?:>>?[&|]?|<{1,3})|&>>?)")   # a redirect operator, its target not attached
+
+
+def _redirect_length(tokens, index):
+    """How many words of `tokens` from `index` the shell consumes as one redirect, 0 when the word is none.
+    An operator word takes the next word as its target (`> "my out.txt"` is two words); an operator with its
+    target attached (`>f`, `2>&1`, `>"a b"`) is one. A process substitution target (`> >(tee x)`) runs on to
+    its closing parenthesis. The one home of this read: a word the shell spends never reaches the command."""
+    match = _REDIRECT_OP.match(tokens[index])
+    if not match:
+        return 0
+    end, target = index + 1, tokens[index][match.end():]
+    if not target:
+        if end >= len(tokens):
+            return end - index
+        target, end = tokens[end], end + 1
+    substitution = target.lstrip("<>").startswith("(")   # `>(tee x)`, or `(tee x)` after an attached operator
+    depth = target.count("(") - target.count(")") if substitution else 0
+    while depth > 0 and end < len(tokens):
+        depth += tokens[end].count("(") - tokens[end].count(")")
+        end += 1
+    return end - index
+
+
+def _split_glued_redirects(tokens):
+    """`tokens` with a redirect glued to the end of a word cut into its own word (`.>out.txt` becomes `.` and
+    `>out.txt`), so `_redirect_length` reads it. A word that starts with an operator, a digit or `{name}` file
+    descriptor, or holds no `<` or `>` is left whole. Shlex has spent the quotes, so a quoted `a>b` is cut too:
+    the guard fails toward reading a redirect."""
+    out = []
+    for token in tokens:
+        at = next((i for i, char in enumerate(token) if char in "<>"), 0)
+        if at and token[at - 1] == "&" and token[:at - 1]:
+            at -= 1   # `x&>out`: the `&` belongs to the operator
+        if at and not re.fullmatch(r"\d+|\{[A-Za-z_]\w*\}|&", token[:at]):
+            out += [token[:at], token[at:]]
+        else:
+            out.append(token)
+    return out
+
+
+def _strip_redirects(tokens):
+    """`tokens` without the words the shell consumes as redirects (`_redirect_length`), a redirect glued to a
+    word read as its own."""
+    tokens = _split_glued_redirects(tokens)
+    out, index = [], 0
+    while index < len(tokens):
+        step = _redirect_length(tokens, index)
+        if step:
+            index += step
+        else:
+            out.append(tokens[index])
+            index += 1
+    return out
+
+
 def _commit_shape(args):
     """Return (all_flag, pathspecs) of a `git commit` call: `-a` or `--all` (also in a short
-    cluster such as `-am`), and the pathspecs. A value flag's value is never a pathspec."""
+    cluster such as `-am`), and the pathspecs. A value flag's value is never a pathspec, and a
+    redirect is no pathspec."""
     all_flag, specs, index, only_paths = False, [], 0, False
     while index < len(args):
+        step = _redirect_length(args, index)   # read before the flags: a value flag's own branch skips its value
+        if step:
+            index += step
+            continue
         arg = args[index]
         index += 1
         if only_paths:
@@ -381,9 +442,8 @@ def _commit_shape(args):
 
 def _add_shape(args):
     """Return (whole_tree, pathspecs) of a `git add` call. Whole tree: `-A`, `--all`, `-u` or
-    `--update` with no pathspec."""
-    # A redirect glued to a word (`git add .>out.txt`) is the shell's, not part of the pathspec.
-    args = [a for a in (REDIRECTION.sub("", arg) for arg in args) if a]
+    `--update` with no pathspec. A redirect is no pathspec."""
+    args = _strip_redirects(args)
     flags = [a for a in args if a.startswith("-") and a != "--"]
     specs = [a for a in args if not a.startswith("-") and a != "--"]
     whole = any(f in _ADD_ALL_FLAGS or (not f.startswith("--") and set(f[1:]) & set("Au")) for f in flags)
@@ -457,16 +517,24 @@ def _generator_root(args):
     return parsed.root or ""
 
 
-def _page_redirect_root(segment):
-    """The folder above `docs/records.md` ("" for the page in the current folder) when the segment redirects
-    its stdout into a file of that name, else None. A redirect writes the page whatever the command prints, so
+def _page_redirect_root(tokens):
+    """The folder above `docs/records.md` ("" for the page in the current folder) when the words redirect
+    their stdout into a file of that name, else None. A redirect writes the page whatever the command prints, so
     `--print > docs/records.md` writes it though `--print` alone does not. Only a plain write counts: stdout (no
-    fd, or 1), not a read, a duplicated descriptor (`>&2`) or a named descriptor (`{fd}>`)."""
-    for found in REDIRECTION.finditer(segment):
-        op, target = found.group("op"), found.group("target")
-        if ">" not in op or op[0] in "23456789{" or target.startswith("&"):
+    fd, or 1, or `&>`), not a read, a duplicated descriptor (`>&2`) or another descriptor (`2>`, `{fd}>`). The words are
+    read through `_redirect_length`, the one reader of a redirect."""
+    tokens, index = _split_glued_redirects(tokens), 0
+    while index < len(tokens):
+        step = _redirect_length(tokens, index)
+        if not step:
+            index += 1
             continue
-        path = os.path.normpath(target.replace("\\", "").strip("'\""))
+        op = _REDIRECT_OP.match(tokens[index]).group()
+        target = tokens[index][len(op):] or (tokens[index + 1] if step > 1 else "")
+        index += step
+        if ">" not in op or op[0] in "23456789{" or op.endswith("&"):
+            continue
+        path = os.path.normpath(target.strip("'\""))
         if path == RECORDS_PAGE or path.endswith("/" + RECORDS_PAGE):
             return os.path.dirname(os.path.dirname(path))
     return None
@@ -510,10 +578,15 @@ def _runs_generator(segment):
     """None when the segment is no run of lint/hook_catalog.py that writes a page. Else (the --root the run
     names, "" for none; the segment's tokens, for `_env_chdir`). A run is the command word being the generator,
     or a python interpreter whose script argument is it, with arguments that `_generator_root` reads as a
-    write. The shell consumes a redirect (REDIRECTION, the one
-    `git_calls` drops too) and a closing subshell `)`, so neither reaches the generator's parser: a token the
-    shell consumes never turns a run into no run. The caller passes no git call."""
-    tokens = list(segment_tokens(REDIRECTION.sub(" ", segment)) or [])
+    write. The shell consumes a redirect (`_strip_redirects`, read on shlex words, so a quoted target with a
+    space is one) and a closing subshell `)`, so neither reaches the generator's parser: a token the shell
+    consumes never turns a run into no run. A segment shlex cannot read that names the generator and holds a
+    redirect counts as a run with no --root: the guard fails toward a hit. The caller passes no git call."""
+    read = segment_tokens(segment)
+    if read is None:
+        return ("", []) if _GENERATOR in segment and re.search(r"[<>]", segment) else None
+    redirected = list(read)
+    tokens = _strip_redirects(redirected)
     while tokens and tokens[-1].strip(")") == "":
         tokens.pop()
     if tokens and tokens[-1].endswith(")"):
@@ -536,7 +609,7 @@ def _runs_generator(segment):
         return None
     named = _generator_root(rest)
     if named is None:
-        named = _page_redirect_root(segment)
+        named = _page_redirect_root(redirected)
     return None if named is None else (named, tokens)
 
 
@@ -836,7 +909,9 @@ def conflict_markers_hit(stripped: str, cwd: str):
     whole_tops, add_specs = set(), []   # tops an earlier add stages whole / (where, top, specs) of earlier adds
     readable = True                     # every segment so far is one that cannot change the tree
     blind_commit = blind_triplet = conflict_step = False   # a commit after a blind step / that covers a triplet / a conflict step ran
-    for segment in split_segments(stripped):
+    ends = []
+    segments = split_segments(stripped, ends)
+    for number, segment in enumerate(segments):
         if not segment.strip():
             continue
         call = git_call_of(segment)
@@ -853,8 +928,13 @@ def conflict_markers_hit(stripped: str, cwd: str):
             conflict_step = conflict_step or (call is not None and _makes_conflict(call))
             continue
         c_target = _segment_git_c_target(segment_tokens(segment) or [])
-        root = command_root(stripped, cwd)
-        where = _absolute(c_target, root) if c_target is not None else root
+        where = dir_before_segment(segments, number, cwd, ends, failed_cd_stays=True)   # this segment's own folder
+        if c_target is not None:
+            where = _absolute(c_target, where or "")
+            where = where if os.path.isabs(where) else None
+        tree = GIT_WORK_TREE_RE.search(segment)
+        if tree and where:
+            where = _absolute(tree.group(2), where)
         done = _git(where, "rev-parse", "--show-toplevel") if where and os.path.isdir(where) else None
         if done is None or done.returncode != 0 or not done.stdout.strip():
             continue
@@ -901,7 +981,7 @@ def conflict_markers_hit(stripped: str, cwd: str):
 
 # ---- merge --role: the tier is read from this session's own get_session record
 ROLE_TIERS = ("batch-runner",)
-ROLE_TAG_PREFIX = "cs-build:"
+ROLE_TAG_PREFIX = BUILD_TAG
 ROLE_REASON = (
     "merge-role-proof: this session's own record does not prove the merge tier it claims. "
     "If this session is the batch runner: run get_session (no argument) alone in its own "
