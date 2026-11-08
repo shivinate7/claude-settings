@@ -12118,6 +12118,13 @@ sh("frozen shell: output-flag control, jq -o x reads the config settings, allows
 # `>&` onto a file writes it, as `>` does. The config settings are frozen, so a `>&` onto them is refused, as `>` is.
 sh("frozen shell: >& redirect of head onto the config settings, denies",
    "head -n1 src/x >& " + CFG_SETTINGS, "deny", "frozen-path", cwd=NOGIT)
+# The frozen twins: curl and wget write the file their output flag names, so each onto the config settings is refused.
+sh("frozen shell: curl -o writes the config settings, denies",
+   "curl -o " + CFG_SETTINGS + " https://example.com", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen shell: curl --output writes the config settings, denies",
+   "curl --output " + CFG_SETTINGS + " https://example.com", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen shell: wget -O writes the config settings, denies",
+   "wget -O " + CFG_SETTINGS + " https://example.com", "deny", "frozen-path", cwd=NOGIT)
 sh("frozen shell: r2, a PowerShell iex inside Write-Output runs a Set-Content on the config settings, "
    "denies [r2 red]",
    "Write-Output (iex \"Set-Content -Path " + CFG_SETTINGS + " -Value x\")", "deny", "frozen-path",
@@ -13686,6 +13693,13 @@ sh("builder-test: shell write, >& to tests/test_a.py after head in a sed e comma
    "sed 'e head -n1 src/x >& tests/test_a.py' src/app.py", "deny", rule=BT, carries=("test-author",), **BR)
 sh("builder-test: shell write, >& to tests/test_a.py after head, is refused",
    "head -n1 src/x >& tests/test_a.py", "deny", rule=BT, carries=("test-author",), **BR)
+# curl and wget write the file their output flag names, as a redirect does. Each names a test, so each is refused.
+sh("builder-test: shell write, curl -o tests/test_a.py downloads onto a test, is refused",
+   "curl -o tests/test_a.py https://example.com", "deny", rule=BT, carries=("test-author",), **BR)
+sh("builder-test: shell write, curl --output tests/test_a.py downloads onto a test, is refused",
+   "curl --output tests/test_a.py https://example.com", "deny", rule=BT, carries=("test-author",), **BR)
+sh("builder-test: shell write, wget -O tests/test_a.py downloads onto a test, is refused",
+   "wget -O tests/test_a.py https://example.com", "deny", rule=BT, carries=("test-author",), **BR)
 # r5 gap: an output flag of a reader or of git diff writes the file it names, as sort -o does. less -o and
 # less --log-file copy the input into the named file, and git diff --output writes the diff into it. Each
 # names a test, so each is refused. The controls name a product file or /tmp, and are allowed.
