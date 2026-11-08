@@ -12736,6 +12736,93 @@ sh("frozen-scan-crash: pin, python -c that reads a frozen hook through a ten-ter
    "python3 -c 'print(open(\"~\" + \"/\" + \".claude\" + \"/\" + \"hooks\" + \"/\" + \"x\" + \".\" + \"p\" + \"y\").read())'",
    "allow", cwd=NOGIT, env=TILDE_ENV)
 
+# --------------------------------------------------------------------------- frozen-scan-crash: the depth cap and the crash text
+#
+# The composed-path reader raises once an expression nests past its depth cap, and the frozen caller then reads
+# the whole script as plain text. Three claims: a write to a frozen folder is still denied when an unrelated
+# chain of four links, earlier in the script, pushes the reader past its cap; a project's own .claude/hooks and a
+# print of frozen parts stay allowed after that cap; and the plain text the fallback reads is the code, so a
+# comment, a multi-line string and an escaped quote read as the text they are. The controls are the same shapes
+# at three links, which the reader still composes. Each name carries frozen-scan-crash:, so
+# MUTATE_ONLY=frozen-scan-crash: runs them.
+
+
+def depth_chain_command(links, tail):
+    """A python -c script: `v0` is the home folder, then one `vN = vN-1 / "link"` line per link, then `tail`."""
+    body = "import os\nfrom pathlib import Path\nv0 = Path(os.path.expanduser(\"~\"))\n"
+    body += "".join("v%d = v%d / \"%s\"\n" % (i + 1, i, link) for i, link in enumerate(links))
+    return "python3 -c '" + body + tail + "'"
+
+
+DEPTH_FOUR = ["notes"] * 4
+DEPTH_THREE = ["notes"] * 3
+DEPTH_LETTERS_FOUR = ["a", "b", "c", "d"]
+DEPTH_LETTERS_THREE = ["a", "b", "c"]
+# The write reads only v0 and a name, so only the composed reader can see that it is frozen.
+DEPTH_WRITE = 'HOOKS = "hooks"\nopen(os.path.join(str(v0), ".claude", HOOKS, "x.py"), "w")'
+DEPTH_OTHER_WRITE = 'open(os.path.join("/work/proj", ".claude", "hooks", "x.py"), "w")'
+DEPTH_PRINT = 'print(".claude", "hooks", "x.py")'
+
+add("frozen-scan-crash: residual, python -c that writes a frozen hook after an unrelated four-link / chain, the folder held in a name, is denied",
+    "deny", "frozen-path", cwd=NOGIT, env=TILDE_ENV, command=depth_chain_command(DEPTH_FOUR, DEPTH_WRITE))
+add("frozen-scan-crash: residual, python -c that writes a frozen hook after an unrelated four-link chain of a, b, c, d, the folder held in a name, is denied",
+    "deny", "frozen-path", cwd=NOGIT, env=TILDE_ENV, command=depth_chain_command(DEPTH_LETTERS_FOUR, DEPTH_WRITE))
+add("frozen-scan-crash: control, python -c that writes a frozen hook through a three-link / chain, the folder held in a name, is denied",
+    "deny", "frozen-path", cwd=NOGIT, env=TILDE_ENV, command=depth_chain_command(DEPTH_THREE, DEPTH_WRITE))
+add("frozen-scan-crash: control, python -c that writes a frozen hook through a three-link chain of a, b, c, the folder held in a name, is denied",
+    "deny", "frozen-path", cwd=NOGIT, env=TILDE_ENV, command=depth_chain_command(DEPTH_LETTERS_THREE, DEPTH_WRITE))
+add("frozen-scan-crash: residual, python -c that writes a project's own .claude/hooks after an unrelated four-link / chain is allowed",
+    "allow", cwd=NOGIT, env=TILDE_ENV, command=depth_chain_command(DEPTH_FOUR, DEPTH_OTHER_WRITE))
+add("frozen-scan-crash: residual, python -c that prints the parts of a frozen hook after an unrelated four-link / chain is allowed",
+    "allow", cwd=NOGIT, env=TILDE_ENV, command=depth_chain_command(DEPTH_FOUR, DEPTH_PRINT))
+add("frozen-scan-crash: control, python -c that prints the parts of a frozen hook through a three-link / chain is allowed",
+    "allow", cwd=NOGIT, env=TILDE_ENV, command=depth_chain_command(DEPTH_THREE, DEPTH_PRINT))
+add("frozen-scan-crash: control, python -c that writes a project's own .claude/hooks through a three-link / chain is allowed",
+    "allow", cwd=NOGIT, env=TILDE_ENV, command=depth_chain_command(DEPTH_THREE, DEPTH_OTHER_WRITE))
+
+add("frozen-scan-crash: control, python -c with a comment holding a frozen hook's parts is allowed with the reader armed and no trigger",
+    "allow", cwd=NOGIT, env=TILDE_ENV, guard=SCAN_ARMED,
+    command="python3 -c 'import os\n# \".claude\", \"hooks\", \"x.py\"\nprint(\"ok\")'")
+add("frozen-scan-crash: residual, python -c with a comment holding a frozen hook's parts is allowed after the reader crashes on the whole script",
+    "allow", cwd=NOGIT, env=TILDE_ENV, guard=SCAN_WHOLE,
+    command="python3 -c 'import os\n# \".claude\", \"hooks\", \"x.py\"\nprint(\"ok\")'")
+add("frozen-scan-crash: residual, python -c with a multi-line string holding a frozen hook's parts is allowed after the reader crashes on the whole script",
+    "allow", cwd=NOGIT, env=TILDE_ENV, guard=SCAN_WHOLE,
+    command="python3 -c 'import os\n"
+            "doc = \"\"\"\n"
+            "\".claude\", \"hooks\", \"x.py\"\n"
+            "\"\"\"\n"
+            "print(doc)'")
+add("frozen-scan-crash: residual, python -c with an escaped quote in a string before a frozen write on the same line is denied after the reader crashes on the whole script",
+    "deny", "frozen-path", cwd=NOGIT, env=TILDE_ENV, guard=SCAN_WHOLE,
+    command="python3 -c 'import os\n"
+            "h = os.path.expanduser(\"~\")\n"
+            "print(\"a\\\"b\"); open(os.path.join(h, \".claude\", \"hooks\", \"x.py\"), \"w\")'")
+add("frozen-scan-crash: pin, python -c with an escaped quote in a string before a frozen write on its own line is denied after the reader crashes on the whole script",
+    "deny", "frozen-path", cwd=NOGIT, env=TILDE_ENV, guard=SCAN_WHOLE,
+    command="python3 -c 'import os\n"
+            "h = os.path.expanduser(\"~\")\n"
+            "s = \"a\\\"b\"\n"
+            "open(os.path.join(h, \".claude\", \"hooks\", \"x.py\"), \"w\")'")
+add("frozen-scan-crash: pin, python -c with a # inside a string before a frozen write is denied after the reader crashes on the whole script",
+    "deny", "frozen-path", cwd=NOGIT, env=TILDE_ENV, guard=SCAN_WHOLE,
+    command="python3 -c 'import os\n"
+            "h = os.path.expanduser(\"~\")\n"
+            "s = \"#\"; open(os.path.join(h, \".claude\", \"hooks\", \"x.py\"), \"w\")'")
+add("frozen-scan-crash: pin, python -c with a lone apostrophe in a string before a frozen write is denied after the reader crashes on the whole script",
+    "deny", "frozen-path", cwd=NOGIT, env=TILDE_ENV, guard=SCAN_WHOLE,
+    command="python3 -c \"import os; h = os.path.expanduser(\\\"~\\\"); s = \\\"it's\\\"; "
+            "open(os.path.join(h, \\\".claude\\\", \\\"hooks\\\", \\\"x.py\\\"), \\\"w\\\")\"")
+
+# A folder under home that is not the config folder holds no frozen path, and the reader allows it. The fallback
+# judges the `.claude` part and the parts after it, not what sits before `.claude`, so it denies it after a crash.
+add("frozen-scan-crash: control, python -c that writes a .claude/hooks folder under home, not the config folder, with the reader armed and no trigger is allowed",
+    "allow", cwd=NOGIT, env=TILDE_ENV, guard=SCAN_ARMED,
+    command="python3 -c 'import os\nh = os.path.expanduser(\"~\")\nopen(os.path.join(h, \"ab\", \".claude\", \"hooks\", \"x.py\"), \"w\")'")
+add("frozen-scan-crash: residual, python -c that writes a .claude/hooks folder under home, not the config folder, after the reader crashes on the whole script is allowed",
+    "allow", cwd=NOGIT, env=TILDE_ENV, guard=SCAN_WHOLE,
+    command="python3 -c 'import os\nh = os.path.expanduser(\"~\")\nopen(os.path.join(h, \"ab\", \".claude\", \"hooks\", \"x.py\"), \"w\")'")
+
 # --------------------------------------------------------------------------- frozen dup: a descriptor dup
 #
 # `2>&1`, `>&2` and `2>&-` name a file DESCRIPTOR, not a file. The shell scanner must not read the
