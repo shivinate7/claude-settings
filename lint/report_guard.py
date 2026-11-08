@@ -134,7 +134,7 @@ history word in another clause hides no claim. The line claims it for each PR it
 the review marker, read by merge/merge.py parse_review (never retyped here), naming the PR, and that merge/merge.py review_state calls done for the live head. A claim with no
 PR on its line is refused and asks for the PR. The remedy names the act (`merge <pr> --review-record ...`, then post the
 record) and never the live head. A newest record that exists but does not parse is refused in its own words (PR named, "does not parse", the same
-remedy), not as a missing record; it names the CI line as the cause only when text follows that line before the first `---` line. merge/merge.py is loaded by hooks/guard_merge.py merge_module: beside the hooks' real path (the installed symlink), then in the
+remedy as a missing record, with the post as a new comment), not as a missing record; it names the CI line as the cause only when text follows that line before the first `---` line. merge/merge.py is loaded by hooks/guard_merge.py merge_module: beside the hooks' real path (the installed symlink), then in the
 checkout the global rules file names (the copied cloud layout); a tool it cannot load is UNKNOWN. Reads: `gh api` REST only, two per claimed PR
 (the PR, then its issue comments, every page); a Stop with no claim, or in an owner-facing session, reads nothing. A failed read, or an error in the check, never
 blocks: it adds a systemMessage that says UNKNOWN. Cost: 2 gh reads per claimed PR in a lane Stop, plus the guard_merge and merge module imports; no file,
@@ -1604,7 +1604,8 @@ REVIEW_NO_RECORD = (
 )
 REVIEW_UNPARSED = (
     "Review-record guard: this reply claims a review PASS for PR #%d, and the newest review record on that PR does not parse, "
-    "so merge reads no record from it.%s Remedy: re-post the record through `merge %d --review-record ...` as a new comment on "
+    "so merge reads no record from it.%s Remedy: have the reviewer run `merge %d --review-record --head <the head the reviewer "
+    "read> --kind <kind> --guard <yes|no> --round <N:ROLE:MODEL:VERDICT>`, post the record it prints as a new comment on "
     "PR #%d, then report again."
 )
 REVIEW_UNPARSED_CI = (" Cause: the CI line must be the last line before `---`, and nothing may follow it; a line after the CI "
