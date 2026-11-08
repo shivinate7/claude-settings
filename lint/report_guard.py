@@ -316,17 +316,19 @@ def turn_landed(records):
 
 
 def _ends_a_reply(rec):
-    """True for an assistant record that holds text and no tool use: the reply that ends a turn."""
+    """True for an assistant record that ends a turn with a report: text, no tool use, and a shape that
+    passes `report_shape_ok`. A text-only reply with no report leaves the landing owing one."""
     content = (rec.get("message") or {}).get("content")
     if rec.get("type") != "assistant" or not isinstance(content, list):
         return False
     return (any(isinstance(b, dict) and b.get("type") == "text" for b in content)
-            and not any(isinstance(b, dict) and b.get("type") == "tool_use" for b in content))
+            and not any(isinstance(b, dict) and b.get("type") == "tool_use" for b in content)
+            and report_shape_ok(_reply_text(rec) or ""))
 
 
 def landing_turn(records, last_human_idx):
     """The records of the turn that may have landed: those after the owner's last message, or after a
-    later peer message that woke the session once a reply had ended the turn. A peer message that
+    later peer message that woke the session once a report-shaped reply had ended the turn. A peer message that
     lands mid-turn (after a tool result) starts nothing."""
     start, prev = last_human_idx, None
     for i in range(last_human_idx + 1, len(records)):

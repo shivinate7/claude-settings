@@ -653,7 +653,7 @@ def _shell_write_hit(cmd: str, cwd: str, predicate, holds=None, follow_cd=False,
             if runs_nowhere and (quiet or not to_file):
                 data = data | _data_words(kinds[number], raw)
         words, shown, script = [], [], []
-        assigned = _quoted_assignments(raw)
+        assigned = set() if _SINGLE_QUOTED_DOLLAR.search(cmd) else _quoted_assignments(raw)
         for index, word in enumerate(raw):
             if index in assigned:
                 words.append(_ASSIGNMENT_STAND_IN)
@@ -690,6 +690,9 @@ def _shell_write_hit(cmd: str, cwd: str, predicate, holds=None, follow_cd=False,
 # word inside it (`copy`, a path) is no command and no write target. A value that can run (`$`, a backtick,
 # a process substitution) stays in view. The stand-in is an assignment, so the command word still resolves.
 _ASSIGNMENT_STAND_IN = "V=d"
+# A single-quoted `$` is passed unexpanded to a later shell (`sh -c '$X'`, `eval '$X'`), which can run the
+# value. A command that holds one makes no stand-in, so the value stays in view as on main.
+_SINGLE_QUOTED_DOLLAR = re.compile(r"'[^']*\$")
 
 
 def _quoted_assignments(raw):
