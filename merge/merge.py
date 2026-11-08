@@ -31,8 +31,10 @@
                           --lint-unknown-ok gives a reason; it is then logged and no `PASS:` line prints. A lint that ran no lint
                           CI step is an unknown. The `PASS:` line names the CI steps skipped, as a count and names. Takes no merge lock
                           and merges and pushes nothing; any session may run it, cloud included. It waits for a lane-lint slot
-                          (one per CPU) before its ci-job run, holding its worktree meanwhile. Cost per call: one ci-job run (about
-                          550 s, measured once on one PR head), one worktree, one slot lock file.
+                          (one per CPU) and then for the load to fall, holding its worktree meanwhile. Cost per call: one ci-job run
+                          (about 550 s, measured once on one PR head), one worktree; per slot an empty slot-i.lock and run-i.lock
+                          file, no process; each 5 s load poll reads the load and try-locks each existing run marker. Total
+                          bound: the slot wait (no deadline) + LOAD_WAIT_SECONDS (1800 s) + LINT_SECONDS (1200 s).
   merge --idle-lanes --live FILE
                           one line per lane the roadmap's live file shows done and safe to archive, then a summary line. Reads
                           skills/roadmap/build.py (the upkeep row `lanes to archive`). Takes no lock and no merge role, merges and
@@ -2595,7 +2597,7 @@ def read_cpu_load():
 
 def run_marker_paths(create=False):
     """The running markers: <config>/state/lane-lint-slots/run-<i>.lock for i below lint_slots(). A marker is an empty file; a lint holds an OS lock on one
-    while its ci-job runs, and the process's death frees it. With `create`, each is made; else only the ones that exist are listed."""
+    while its ci-job runs, and the process's death frees it. Makes no file: with `create` it lists every path (lint_running makes the files), else only the ones that exist."""
     folder = lint_slot_folder()
     paths = [os.path.join(folder, f"run-{i}.lock") for i in range(lint_slots())]
     return paths if create else [p for p in paths if os.path.exists(p)]
