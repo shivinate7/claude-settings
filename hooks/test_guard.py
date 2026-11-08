@@ -6922,13 +6922,18 @@ def push_case(name, tail, expected, cwd=PUSHFEAT, tool="Bash", rule=None, silent
 RETRY_FORM_RE = re.compile(r"Remedy: retry with (.+?)\.\s*$")
 
 
-def retry_form():
-    """(form, why): the form the push refusal says to retry with, or (None, why) when it names none."""
+def push_module():
+    """The push-delete module of the guard under test, loaded fresh: the one home of its PUSH_REASON read."""
     spec = importlib.util.spec_from_file_location(
         "guard_push_delete_under_test", os.path.join(os.path.dirname(GUARD), "guard_push_delete.py"))
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
-    found = RETRY_FORM_RE.search(module.PUSH_REASON)
+    return module
+
+
+def retry_form():
+    """(form, why): the form the push refusal says to retry with, or (None, why) when it names none."""
+    found = RETRY_FORM_RE.search(push_module().PUSH_REASON)
     if found is None:
         return None, "PUSH_REASON does not end with a 'Remedy: retry with <form>.' sentence"
     return found.group(1), ""
@@ -6967,10 +6972,23 @@ def retry_form_template_check():
     return True, "the push the retry form builds is the sha lease push"
 
 
+def sha_sentence_check():
+    """The sentence before the Remedy line names the tip your own last push left, not a ref a fetch refreshes."""
+    text, marker, _ = push_module().PUSH_REASON.partition("Remedy:")
+    if not marker:
+        return False, "PUSH_REASON has no Remedy: line to end the sha sentence before"
+    if "remote-tracking" in text:
+        return False, "the sha sentence reads the sha from the remote-tracking ref, which a fetch refreshes"
+    if "your own last push" not in text:
+        return False, "the sha sentence does not name the tip your own last push left"
+    return True, "the sha sentence names the tip your own last push left"
+
+
 PUSH_REMEDY_CHECKS.extend([
     ("push: the retry form the refusal prints is a lease naming <branch>:<sha>", retry_form_lease_check),
     ("push: the retry form the refusal prints carries no --force-if-includes", retry_form_no_includes_check),
     ("push: the push the retry form builds is the sha lease push", retry_form_template_check),
+    ("push: the sha sentence names your own last push's tip, not a remote-tracking ref", sha_sentence_check),
 ])
 
 
