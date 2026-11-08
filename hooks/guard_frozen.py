@@ -893,7 +893,7 @@ def _py_hit(body: str, cwd: str, predicate) -> str:
 # holds none of them cannot make a string in it a shell line. Judged by parsed names, never by words in a string.
 _PY_RUNS_TEXT = frozenset((
     "os", "subprocess", "shutil", "importlib", "exec", "eval", "__import__", "compile", "pty", "ctypes",
-    "runpy", "builtins", "getattr", "globals", "vars", "posix", "nt", "_os", "modules"))
+    "runpy", "builtins", "getattr", "globals", "vars", "posix", "nt", "_os", "modules", "asyncio"))
 _PY_PLAIN_DUNDERS = ("__name__", "__file__", "__doc__")
 _PY_CODING = re.compile(r"^[ \t]*#.*coding[:=][ \t]*(?![ \t]|utf-?8\b)", re.IGNORECASE | re.MULTILINE)
 
@@ -909,7 +909,7 @@ def python_body_is_text(body: str) -> bool:
         return False
     try:
         tree = ast.parse(textwrap.dedent(body))
-    except (SyntaxError, ValueError):
+    except Exception:   # a syntax error, a null byte, a tree too deep to parse
         return False
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
@@ -943,11 +943,31 @@ def _python_feeds_on(header: str) -> bool:
             and ends[holding[0]] in ("", ";", "&&", "||", "&"))
 
 
+def _python_writes_a_named_file(body: str, rest: str) -> bool:
+    """True when the parsed BODY writes a file that a word of REST (the command without the body) names, or
+    a file whose path `_py_paths` cannot read. A body that writes `x.sh` while a later line runs `sh x.sh`
+    makes its strings shell lines, so it stays in view."""
+    import ast
+    import textwrap
+    try:
+        tree = ast.parse(textwrap.dedent(body))
+        env_at = _py_env_at(tree)
+        for call, expression in _py_written(tree, env_at):
+            paths = _py_paths(expression, env_at(call))
+            if not paths or any(
+                    not basename(path)
+                    or re.search(r"(?<![\w.-])" + re.escape(basename(path)) + r"(?![\w-])", rest) for path in paths):
+                return True
+    except Exception:
+        return True   # unread: the body stays in view
+    return False
+
+
 def drop_text_python_bodies(raw: str) -> str:
     """RAW with the lines of each quoted python heredoc body that is text (`python_body_is_text`) dropped,
     for a rule that reads shell lines. The header, the closing line and every other body stay. A body
     drops only when all three readings of the walk (bash's, the contraction one, main's) give it the same
-    lines, and its header line holds no other heredoc."""
+    lines, its header line holds no other heredoc, and it writes no file that the rest of the command names."""
     if "<<" not in raw:
         return raw
     walks = []   # (spans, bodies) of each reading
@@ -959,13 +979,15 @@ def drop_text_python_bodies(raw: str) -> str:
         walks.append((spans, bodies))
     spans, bodies = walks[0]
     agreed = [{(span, body[1]) for span, body in zip(*walk)} for walk in walks]
-    drop = set()
+    lines, drop = raw.split("\n"), set()
     for (quote, body, header), span in zip(bodies, spans):
         if (quote and all((span, body) in same for same in agreed)
                 and sum(other == header for _q, _b, other in bodies) == 1
-                and _python_feeds_on(header) and python_body_is_text(body)):
+                and _python_feeds_on(header) and python_body_is_text(body)
+                and not _python_writes_a_named_file(
+                    body, "\n".join(line for at, line in enumerate(lines) if not span[0] <= at < span[1]))):
             drop.update(range(*span))
-    return "\n".join(line for at, line in enumerate(raw.split("\n")) if at not in drop) if drop else raw
+    return "\n".join(line for at, line in enumerate(lines) if at not in drop) if drop else raw
 
 
 _JS_STR = r"""(?:'([^'\n]*)'|"([^"\n]*)"|`([^`$]*)`|([A-Za-z_$][\w$]*)|path\s*\.\s*(?:join|resolve)\s*\(([^()]*)\))"""
@@ -1015,7 +1037,7 @@ _PL_RB_ASSIGN = re.compile(r"""(?<![\w$@])[\$@]?([A-Za-z_]\w*)\s*=\s*(?:'([^'\n]
 _PL_RB_WRITE = (
     re.compile(_PL_OPEN + r"""(?:\+<|\+?>>?)[^'"]*['"]\s*,\s*""" + _RB_STR),              # perl 3-arg open
     re.compile(_PL_OPEN + r"""\+?>>?\s*()([^'"\s]+)['"]()"""),                            # perl 2-arg open
-    re.compile(r"\b(?:rename|copy|move|FileUtils\s*\.\s*(?:cp|mv|cp_r|copy_file|install))\s*\(?\s*"
+    re.compile(r"\b(?:rename|copy|move|FileUtils\s*\.\s*(?:cp|mv|cp_r|copy_file|install))(?:\s*\(\s*|\s+(?=['\"$]))"
                + _RB_STR + r"\s*,\s*" + _RB_STR),                                          # destination of a copy
     re.compile(r"\b(?:File|IO)\s*\.\s*(?:write|binwrite)\s*\(?\s*" + _RB_STR),
     re.compile(r"""\bFile\s*\.\s*open\s*\(?\s*""" + _RB_STR + r"""\s*,\s*['"][^'"]*[wa+][^'"]*['"]"""),
@@ -1074,22 +1096,41 @@ def interpreter_write_hit(raw: str, cwd: str, predicate) -> str:
         return ""
 
 
+def _header_dir(segments, ends, header: str, nth: int, cwd: str) -> str:
+    """The folder the shell is in when the command that holds a heredoc's header runs: the NTH segment (the last, when
+    fewer) of SEGMENTS that sits inside HEADER and holds `<<`, so a leading `cd` moves the body's relative paths as it
+    moves a `python -c` script's. CWD when no such segment is found or the folder cannot be told."""
+    holding = [at for at, segment in enumerate(segments) if "<<" in segment and segment.strip() in header]
+    if not holding:
+        return cwd
+    try:
+        return dir_before_segment(segments, holding[min(nth, len(holding) - 1)], cwd, ends) or cwd
+    except Exception:
+        return cwd
+
+
 def _interpreter_write_hit(raw: str, cwd: str, predicate) -> str:
     if "<<" in raw:
         seen = set()
+        ends = []
+        segments = split_segments(_strip_heredoc_bodies_unconditionally(raw), ends)
         for reading in (False, True):   # bash's own walk, and the one where a contraction's `'` is text
+            earlier = {}   # header line -> bodies seen on it so far in this reading
             for _quote, body, header in _split_heredocs(raw, reading)[1]:
-                if (header, body) in seen:
+                nth = earlier[header] = earlier.get(header, -1) + 1
+                at = _header_dir(segments, ends, header, nth, cwd)
+                if (header, body, at) in seen:
                     continue
-                seen.add((header, body))
+                seen.add((header, body, at))
                 if _PY_HEADER.search(header):
-                    hit = _py_hit(body, cwd, predicate)
+                    reader = _py_hit
                 elif _NODE_HEADER.search(header):
-                    hit = _js_hit(body, cwd, predicate)
+                    reader = _js_hit
                 elif _PERL_HEADER.search(header) or _RUBY_HEADER.search(header):
-                    hit = _pl_rb_hit(body, cwd, predicate)
+                    reader = _pl_rb_hit
                 else:
                     continue
+                hit = reader(body, at, predicate)
                 if hit:
                     return hit
     if any(flag in raw for flag in _INLINE_FLAG_WORDS):
