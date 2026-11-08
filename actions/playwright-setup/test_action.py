@@ -186,6 +186,31 @@ def pin_run(os_release, runner_os="Linux", image_os="ubuntu99", env_extra=None):
         return p.returncode, (p.stdout + p.stderr).strip(), gh
 
 
+def fake_deps(npm_ci):
+    """Run `bash install.sh deps` with a fake `npm` that records each call, and the fake `node` that pin.sh reads. NPM_CI is
+    `npm_ci`, or unset when None. Returns (rc, output, npm calls, GITHUB_OUTPUT lines)."""
+    if not os.path.isfile(INSTALL):
+        return 127, "install.sh is missing", [], []
+    with tempfile.TemporaryDirectory(dir=RUN_FOLDER) as d:
+        calls, out_file = os.path.join(d, "npm-calls"), os.path.join(d, "github-output")
+        open(out_file, "w").close()
+        bindir = fake_node(d, 'case "$2" in\n  *require.resolve*) echo "%s/node_modules/playwright-core/package.json" ;;\n'
+                              '  *) echo 1.55.0 ;;\nesac\n' % d)
+        npm = os.path.join(bindir, "npm")
+        with open(npm, "w") as f:
+            f.write('#!/bin/sh\necho "$*" >> "%s"\n' % calls)
+        os.chmod(npm, os.stat(npm).st_mode | stat.S_IEXEC)
+        env = dict(os.environ, PATH=bindir + os.pathsep + os.environ.get("PATH", ""), DIR=d, GITHUB_OUTPUT=out_file)
+        env.pop("NPM_CI", None)
+        if npm_ci is not None:
+            env["NPM_CI"] = npm_ci
+        p = subprocess.run([BASH, INSTALL, "deps"], env=env, capture_output=True, text=True, timeout=60, cwd=d)
+        recorded = open(calls).read().splitlines() if os.path.exists(calls) else []
+        with open(out_file) as f:
+            gh = f.read().splitlines()
+        return p.returncode, (p.stdout + p.stderr).strip(), recorded, gh
+
+
 def os_line(gh):
     return [l for l in gh if l.startswith("os=")]
 
@@ -242,6 +267,19 @@ check("a run past the cap fails with one line that names the cap",
 
 bad = [n for n, b in all_steps.items() if APT.search("\n".join(l for l in b.splitlines() if not l.strip().startswith("#")))]
 check("the default path runs no apt: no step of the action names install-deps, --with-deps or apt", all_steps and not bad, str(bad))
+
+# install.sh deps reads the npm-ci input as NPM_CI. An explicit empty value skips npm ci, as the old `npm-ci == 'true'` step did.
+rc, out, calls, gh = fake_deps("")
+check("install.sh deps with NPM_CI '' still runs the pin: exit 0 and writes version=",
+      rc == 0 and any(ln.startswith("version=") for ln in gh), "%s %r %s" % (rc, out, gh))
+check("install.sh deps with NPM_CI '' runs no npm ci, as the old `npm-ci == 'true'` step did", calls == [], "%s %r" % (calls, out))
+rc, out, calls, gh = fake_deps("true")
+check("control: install.sh deps with NPM_CI true runs one npm ci", rc == 0 and len(calls) == 1 and calls[0].startswith("ci --prefix"),
+      "%s %r %s" % (rc, out, calls))
+rc, out, calls, gh = fake_deps("false")
+check("control: install.sh deps with NPM_CI false runs no npm ci", rc == 0 and calls == [], "%s %r %s" % (rc, out, calls))
+rc, out, calls, gh = fake_deps(None)
+check("control: install.sh deps with NPM_CI unset runs one npm ci", rc == 0 and len(calls) == 1, "%s %r %s" % (rc, out, calls))
 
 # pin.sh writes the OS id and version of the runner into the browser cache key.
 pins = {ver: pin_run('ID=ubuntu\nVERSION_ID="%s"\n' % ver) for ver in ("24.04", "26.04")}
