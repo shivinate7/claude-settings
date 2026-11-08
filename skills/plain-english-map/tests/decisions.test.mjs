@@ -15,13 +15,14 @@
 //   - `scripts/map-fix.mjs` adds the missing ids and never removes or reorders one. With no flag it prints each id it would add, one line
 //     per id that names the file (assumed: the design does not give the layout), and it writes nothing. A second `--write` changes no byte.
 //
-// Red on the old code. Every config with a decision key, or with version 5, is refused by the old validator before any check runs.
-// So each MAP10 case goes red on its missing `MAP10` verdict, and the validator message shows in its output. The config, upgrade and
+// Red on the old code. Every config at version 6 (the fixture, and each case that writes one) is refused by the old validator before any
+// check runs. So each MAP10 case goes red on its missing `MAP10` verdict, and the validator message shows in its output. The config, upgrade and
 // map-fix cases assert their own effect, and they go red on it. Controls (C3, K-*) hold on both the old code and the new.
 //
 // Cases:
 //   C1, C2   one key alone is a config error that names the missing key. C3 (control): a version 2 map asks for the upgrade.
-//   V1-V4    version 5 loads; version 3 asks for the upgrade; the upgrade from 3 sets 5 and writes no map page; a second run changes no byte.
+//   V1-V7    version 6 loads with both keys; version 6 loads with no decision keys; version 3 asks for the upgrade; version 5 asks for the
+//            upgrade; the upgrade from 3 and from 5 sets 6 and writes no map page; a second run changes no byte.
 //   M1       the fixture is green. M2 (a) a cite with no decisions line. M3 (b) a decisions line naming an id with no record.
 //   M4       an id the file no longer cites is fine. M5 zero-padding: D7 names D007 by value. M6 D1 names no record (D018 is 18).
 //   E1       an empty decisions folder: each decisions line fails and names its id.
@@ -38,7 +39,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { HERE, SKILL, run, scratchRepo } from './helpers.mjs';
+import { HERE, SKILL, run, scratchRepo, setSubLine, subLineIds, tail } from './helpers.mjs';
 import { loadMapConfig } from '../scripts/lib/map-config.mjs';
 import { blankComments, blankShell } from '../scripts/lib/source-text.mjs';
 
@@ -60,41 +61,23 @@ const configFile = (dir) => join(dir, CONFIG);
 const runCheck = (dir) => run([CHECK], dir);
 // The MAP10 verdict line of a run, or '' when the run prints none.
 const ten = (out) => out.split('\n').find((l) => /^\[(PASS|FAIL|SKIP)\] MAP10\b/.test(l)) ?? '';
-const tail = (out) => out.slice(0, 1500);
 
-// ---- The map page: a decisions line is the line right under the map line of its file.
-const DECISION_RE = /^ {2}- Decisions: /;
-const mapIndexOf = (lines, file) => {
-  const found = lines.flatMap((l, i) => (l.startsWith(`- \`${file}\` `) ? [i] : []));
-  assert.equal(found.length, 1, `${MAP} must hold exactly one map line for ${file}`);
-  return found[0];
-};
+// ---- The map page: a decisions line is a sub-line of its map line (helpers.mjs holds the one reader and the one setter).
 /** The ids on the decisions line of `file`, or [] when it has none. */
-const decisionIds = (dir, file) => {
-  const lines = read(dir, MAP).split('\n');
-  const i = mapIndexOf(lines, file);
-  const next = lines[i + 1] ?? '';
-  return DECISION_RE.test(next) ? [...next.matchAll(/`([^`]+)`/g)].map((m) => m[1]) : [];
-};
+const decisionIds = (dir, file) => subLineIds(dir, MAP, file, 'Decisions');
 /** Sets the decisions line of `file` to `ids`, or removes it when `ids` is null. Edits the map page only. */
-const setDecisions = (dir, file, ids) => {
-  const lines = read(dir, MAP).split('\n');
-  const i = mapIndexOf(lines, file);
-  if (DECISION_RE.test(lines[i + 1] ?? '')) lines.splice(i + 1, 1);
-  if (ids) lines.splice(i + 1, 0, `  - Decisions: ${ids.map((d) => `\`${d}\``).join(', ')}`);
-  write(dir, MAP, lines.join('\n'));
-};
+const setDecisions = (dir, file, ids) => setSubLine(dir, MAP, file, 'Decisions', ids);
 
 // ---- Config: both keys or neither.
 test('C1. decisionsDir alone is a config error, and the error names decisionIdPattern', () => {
   const dir = repo();
-  writeConfig(dir, { formatVersion: 5, ...BASE, decisionsDir: `${RECORDS}/` });
+  writeConfig(dir, { formatVersion: 6, ...BASE, decisionsDir: `${RECORDS}/` });
   assert.throws(() => loadMapConfig(configFile(dir), dir), /decisionIdPattern/, 'a config with decisionsDir and no decisionIdPattern must name decisionIdPattern');
 });
 
 test('C2. decisionIdPattern alone is a config error, and the error names decisionsDir', () => {
   const dir = repo();
-  writeConfig(dir, { formatVersion: 5, ...BASE, decisionIdPattern: 'D\\d+' });
+  writeConfig(dir, { formatVersion: 6, ...BASE, decisionIdPattern: 'D\\d+' });
   assert.throws(() => loadMapConfig(configFile(dir), dir), /decisionsDir/, 'a config with decisionIdPattern and no decisionsDir must name decisionsDir');
 });
 
@@ -105,10 +88,10 @@ test('C3. control: a version 2 map asks for the upgrade, on the old code and on 
 });
 
 // ---- Format version.
-test('V1. format version 5 loads, with both decision keys', () => {
+test('V1. format version 6 loads, with both decision keys', () => {
   const dir = repo();
-  assert.match(read(dir, CONFIG), /"formatVersion": 5/, 'scope: the fixture config is version 5');
-  assert.doesNotThrow(() => loadMapConfig(configFile(dir), dir), 'a version 5 config with both keys must load');
+  assert.match(read(dir, CONFIG), /"formatVersion": 6/, 'scope: the fixture config is version 6');
+  assert.doesNotThrow(() => loadMapConfig(configFile(dir), dir), 'a version 6 config with both keys must load');
 });
 
 test('V2. format version 3 asks for the upgrade: the validator refuses it, and the message names map-upgrade.mjs', () => {
@@ -117,12 +100,33 @@ test('V2. format version 3 asks for the upgrade: the validator refuses it, and t
   assert.throws(() => loadMapConfig(configFile(dir), dir), /map-upgrade\.mjs/, 'a version 3 map must be refused with the upgrade command');
 });
 
-test('V3. map-upgrade from version 3 sets formatVersion to 5, and writes no map page', () => {
+test('V5. format version 5 asks for the upgrade: the validator refuses it, and the message names map-upgrade.mjs', () => {
+  const dir = repo();
+  writeConfig(dir, { formatVersion: 5, ...BASE });
+  assert.throws(() => loadMapConfig(configFile(dir), dir), /map-upgrade\.mjs/, 'a version 5 map must be refused with the upgrade command');
+});
+
+test('V6. format version 6 loads with no decision keys', () => {
+  const dir = repo();
+  writeConfig(dir, { formatVersion: 6, ...BASE });
+  assert.doesNotThrow(() => loadMapConfig(configFile(dir), dir), 'a version 6 config with no decision keys must load');
+});
+
+test('V7. map-upgrade from version 5 sets formatVersion to 6, and writes no map page', () => {
+  const dir = repo();
+  writeConfig(dir, { formatVersion: 5, ...BASE });
+  const pageBefore = read(dir, MAP);
+  const r = run([UPGRADE], dir);
+  assert.equal(JSON.parse(read(dir, CONFIG)).formatVersion, 6, `map-upgrade must set formatVersion to 6\n${tail(r.out)}`);
+  assert.equal(read(dir, MAP), pageBefore, 'the upgrade from version 5 changes no map page');
+});
+
+test('V3. map-upgrade from version 3 sets formatVersion to 6, and writes no map page', () => {
   const dir = repo();
   writeConfig(dir, { formatVersion: 3, ...BASE });
   const pageBefore = read(dir, MAP);
   const r = run([UPGRADE], dir);
-  assert.equal(JSON.parse(read(dir, CONFIG)).formatVersion, 5, `map-upgrade must set formatVersion to 5\n${tail(r.out)}`);
+  assert.equal(JSON.parse(read(dir, CONFIG)).formatVersion, 6, `map-upgrade must set formatVersion to 6\n${tail(r.out)}`);
   assert.equal(read(dir, MAP), pageBefore, 'the upgrade from version 3 changes no map page');
 });
 
@@ -130,7 +134,7 @@ test('V4. a second map-upgrade run changes no byte of the config or the map page
   const dir = repo();
   writeConfig(dir, { formatVersion: 3, ...BASE });
   run([UPGRADE], dir);
-  assert.equal(JSON.parse(read(dir, CONFIG)).formatVersion, 5, 'the first run must set formatVersion to 5');
+  assert.equal(JSON.parse(read(dir, CONFIG)).formatVersion, 6, 'the first run must set formatVersion to 6');
   const configOnce = read(dir, CONFIG), pageOnce = read(dir, MAP);
   run([UPGRADE], dir);
   assert.equal(read(dir, CONFIG), configOnce, 'the second run must change no byte of map.config.json');
@@ -304,7 +308,7 @@ test('K-sh. control: the existing shell reader blanks the shell comment and the 
 // ---- Skip.
 test('SK. with neither decision key, MAP10 prints a SKIP line that names the decision setting, and the command exits 0', () => {
   const dir = repo();
-  writeConfig(dir, { formatVersion: 5, ...BASE });
+  writeConfig(dir, { formatVersion: 6, ...BASE });
   const r = runCheck(dir);
   assert.match(ten(r.out), /^\[SKIP\] MAP10 .*decision/, `MAP10 must print a SKIP line when no decision key is set\n${tail(r.out)}`);
   assert.equal(r.status, 0, `a SKIP is no failure, so the command must exit 0\n${tail(r.out)}`);
@@ -325,6 +329,11 @@ test('F2. map-fix --write creates the decisions line right under the map line of
   setDecisions(dir, 'src/retry.ts', null);
   run([MAPFIX, '--write'], dir);
   assert.deepEqual(decisionIds(dir, 'src/retry.ts'), ['D7'], '--write must add a decisions line with D7 right under the map line');
+  // The position, asserted again: the line directly under the map line of src/retry.ts is the decisions line.
+  const lines = read(dir, MAP).split('\n');
+  const at = lines.findIndex((l) => l.startsWith('- `src/retry.ts` '));
+  assert.ok(at >= 0, `scope: the map page holds the map line of src/retry.ts\n${tail(read(dir, MAP))}`);
+  assert.match(lines[at + 1] ?? '', /^ {2}- Decisions: `D7`$/, '--write must put the decisions line directly under the map line of src/retry.ts');
   assert.match(ten(runCheck(dir).out), /^\[PASS\] MAP10$/, 'MAP10 must pass after --write');
 });
 
