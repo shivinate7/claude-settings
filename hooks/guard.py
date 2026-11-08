@@ -392,7 +392,7 @@ while True:
         from guard_push_delete import (
             DELETE_REASON, DESTRUCTIVE_DELETE, LINKED_NM_REASON, PUSH_ASK_REASON, PUSH_MAIN_REASON,
             PUSH_REASON, PUSH_STRAY_REASON, cmd_exe_delete_hit, delete_text, linked_nm_hit,
-            parent_delete_hit, push_ask_hit, push_verdict, rm_delete_hit,
+            parent_delete_hit, push_ask_hit, push_text, push_verdict, rm_delete_hit,
         )
         _loading = "guard_merge"
         from guard_merge import (
