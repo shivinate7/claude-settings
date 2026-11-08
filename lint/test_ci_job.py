@@ -14,6 +14,8 @@ SuiteSteps: --lint runs a CI step that runs a hooks/merge/lint suite only when t
   SuiteSteps also covers a multi-line step with a preamble line, a suite with an argument, a suite that reaches a changed
   module through an import, a selector that hangs, a picked suite whose step is in another job, and a guard preamble
   (`[ -d node_modules/x ] || npm ci`, or an if block) before a picked suite.
+SuitePaths: a CI step's `python3 lint/test_<name>.py` line is a suite line, as a hooks/ or merge/ line is.
+  SuiteSteps: a lint/test_ fixture suite runs under --lint only when the selector picks it; an unpicked one prints `not run`.
 Run: python3 lint/test_ci_job.py
 """
 import functools
@@ -31,7 +33,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py)
 import _test_temp  # noqa: E402  test-temp-standard: every temp path comes from this run's folder
-from workflow_steps import MISSING_INSTALL_LINE, run_body, step_blocks, step_env, step_with  # noqa: E402  the one home of the step parser
+from workflow_steps import MISSING_INSTALL_LINE, SUITE_LINE, run_body, step_blocks, step_env, step_with, suite_paths  # noqa: E402  the one home of the step parser
 RUN_FOLDER = _test_temp.run_folder()
 CHECKOUT = os.path.abspath(os.path.join(HERE, ".."))
 CI_JOB = os.path.join(HERE, "..", "bin", "ci-job")
@@ -739,7 +741,8 @@ class LintMode(unittest.TestCase):
                     name = m.group(1)
                 m = re.match(r"^        run: (python3 (?:lint|actions)/\S+\.py\b.*|bin/ste-changed\b.*|"
                              r"pipx run [\w.-]+==[\w.]+ [^|&;]*)$", line)
-                if m and "mutate" not in m.group(1):
+                # a lint/test_ fixture suite runs under --lint only when picked, so it is no lint step here (decision lanes-run-no-full-ci-job)
+                if m and "mutate" not in m.group(1) and not m.group(1).startswith("python3 lint/test_"):
                     want.append(name)
                 if re.match(r"^        uses: \S*actions/(?:ste-lint|code-check|zizmor)\s*$", line):
                     want.append(name)  # a known action: ci-job runs its one home's command in its place
@@ -936,6 +939,25 @@ def suite_text(parts, code=0):
             "TARGET = os.path.join(HERE, %s)\n"
             "with open(TARGET, encoding='utf-8') as f:\n    f.read()\n"
             "print('one check ran')\nsys.exit(%d)\n") % (", ".join(repr(p) for p in parts), code)
+
+
+class SuitePaths(unittest.TestCase):
+    """A CI step's `python3 lint/test_<name>.py` line is a suite line, as its hooks/ and merge/ lines are: the step parser
+    names the suite, so --lint can pick it (decision lanes-run-no-full-ci-job). A plain lint/<name>.py line is no suite."""
+
+    def test_suite_line_matches_a_lint_fixture_suite_line(self):
+        self.assertIsNotNone(SUITE_LINE.fullmatch("python3 lint/test_check_a.py"),
+                             "SUITE_LINE must match a python3 lint/test_<name>.py line, as it matches hooks/ and merge/ lines")
+
+    def test_suite_paths_names_the_lint_fixture_suite_of_a_step(self):
+        self.assertEqual(suite_paths(step("Check A tests", "python3 lint/test_check_a.py")), ["lint/test_check_a.py"],
+                         "suite_paths must name the lint/test_ suite that a CI step runs")
+
+    def test_control_suite_paths_names_no_plain_lint_step_and_still_names_a_hooks_suite(self):
+        self.assertEqual(suite_paths(step("Check plain", "python3 lint/check_a.py")), [],
+                         "the control: a plain lint step is no suite")
+        self.assertEqual(suite_paths(step("Wiring suite", "python3 hooks/test_wiring.py")), ["hooks/test_wiring.py"],
+                         "the control: a hooks/ suite line is still a suite")
 
 
 class SuiteSteps(Job):
@@ -1211,6 +1233,71 @@ class SuiteSteps(Job):
         rc, lines, out = self.run_job(self.WIRING, job="checks", other=[step("Docs", "echo docs")], args=self.LINT)
         self.assertEqual((rc, by_step(lines).get("Wiring suite")), (0, "PASS"),
                          "--lint must run a picked suite whose step is in the job asked for\n" + out)
+
+    FIXTURE_FILES = {"lint/check_a.py": "A = 1\n", "lint/test_check_a.py": suite_text(("check_a.py",))}  # base: a module and its suite
+    FIXTURE_SUITE = step("Check A tests", "python3 lint/test_check_a.py")
+    PREP_FIXTURE = step("Check A tests", "echo prep\npython3 lint/test_check_a.py")
+    PLAIN_LINT = step("Check plain", "python3 lint/check_a.py")
+    NO_PICK = {"docs/notes.md": "# notes\n"}  # a lane change that no suite opens
+
+    def picked_lint_suites(self):
+        """The suites the real selector picks for this lane's diff: the scope that the picked cases rest on."""
+        done = subprocess.run([sys.executable, self.MUTATE_GUARD, "--lint-suites", "origin/main"], cwd=self.root,
+                              capture_output=True, text=True, env=ENV)
+        return done.stdout.split()
+
+    def detail_of(self, lines, name):
+        """The text after `name: ` on the job's line for that step, or ''."""
+        return next((ln.split(name + ": ", 1)[1] for ln in lines if name + ": " in ln), "")
+
+    def test_an_unpicked_lint_fixture_suite_is_not_run_and_its_line_says_so(self):
+        self.make_repo(self.FIXTURE_FILES, self.NO_PICK)
+        self.assertEqual(self.diff(), ["docs/notes.md"], "the scope: the diff holds no file the fixture suite opens")
+        self.assertEqual(self.picked_lint_suites(), [], "the fixture: the selector picks no suite for this diff")
+        rc, lines, out = self.run_job(self.FIXTURE_SUITE, self.PLAIN_LINT, args=self.LINT)
+        self.assertEqual(by_step(lines).get("Check A tests"), "not run",
+                         "--lint must not run an unpicked lint/test_ fixture suite\n" + out)
+        self.assertIn("fixture suite", self.detail_of(lines, "Check A tests").lower(),
+                      "the not-run line of an unpicked fixture suite must say it is a fixture suite that lane lint does not run\n" + out)
+
+    def test_a_plain_lint_step_passes_beside_an_unpicked_fixture_suite_that_is_not_run(self):
+        self.make_repo(self.FIXTURE_FILES, self.NO_PICK)
+        self.assertEqual(self.diff(), ["docs/notes.md"], "the scope: the diff holds no file the fixture suite opens")
+        rc, lines, out = self.run_job(self.PLAIN_LINT, self.FIXTURE_SUITE, args=self.LINT)
+        self.assertEqual((rc, by_step(lines)), (0, {"Check plain": "PASS", "Check A tests": "not run"}),
+                         "--lint must pass on its plain lint step and leave the unpicked fixture suite not run\n" + out)
+
+    def test_control_a_plain_lint_step_still_runs_with_no_pick(self):
+        self.make_repo(self.FIXTURE_FILES, self.NO_PICK)
+        self.assertEqual(self.diff(), ["docs/notes.md"], "the scope: the diff holds no file the fixture suite opens")
+        rc, lines, out = self.run_job(self.PLAIN_LINT, args=self.LINT)
+        self.assertEqual((rc, by_step(lines)), (0, {"Check plain": "PASS"}),
+                         "--lint must still run a plain lint step with no pick\n" + out)
+
+    def test_a_picked_lint_fixture_suite_under_a_preamble_line_runs_and_passes(self):
+        self.make_repo(self.FIXTURE_FILES, {"lint/check_a.py": "A = 2\n"})
+        self.assertEqual(self.diff(), ["lint/check_a.py"], "the scope: the diff holds only the file the fixture suite opens")
+        self.assertIn("lint/test_check_a.py", self.picked_lint_suites(), "the fixture: the selector picks the fixture suite for this diff")
+        rc, lines, out = self.run_job(self.PREP_FIXTURE, args=self.LINT)
+        self.assertEqual((rc, by_step(lines)), (0, {"Check A tests": "PASS"}),
+                         "--lint must run a picked lint/test_ suite whose step has a line before it, as CI runs the whole step\n" + out)
+
+    def test_a_picked_lint_fixture_suite_under_a_preamble_line_that_fails_reads_fail(self):
+        self.make_repo({"lint/check_a.py": "A = 1\n", "lint/test_check_a.py": suite_text(("check_a.py",), code=1)},
+                       {"lint/check_a.py": "A = 2\n"})
+        self.assertEqual(self.diff(), ["lint/check_a.py"], "the scope: the diff holds only the file the fixture suite opens")
+        self.assertIn("lint/test_check_a.py", self.picked_lint_suites(), "the fixture: the selector picks the fixture suite for this diff")
+        rc, lines, out = self.run_job(self.PREP_FIXTURE, args=self.LINT)
+        self.assertEqual((rc, by_step(lines)), (1, {"Check A tests": "FAIL"}),
+                         "--lint must read a picked lint/test_ suite's exit 1 under a preamble line as FAIL, and exit 1\n" + out)
+
+    def test_control_a_picked_lint_fixture_suite_on_one_line_still_runs_and_passes(self):
+        self.make_repo(self.FIXTURE_FILES, {"lint/check_a.py": "A = 2\n"})
+        self.assertEqual(self.diff(), ["lint/check_a.py"], "the scope: the diff holds only the file the fixture suite opens")
+        self.assertIn("lint/test_check_a.py", self.picked_lint_suites(), "the fixture: the selector picks the fixture suite for this diff")
+        rc, lines, out = self.run_job(self.FIXTURE_SUITE, args=self.LINT)
+        self.assertEqual((rc, by_step(lines)), (0, {"Check A tests": "PASS"}),
+                         "--lint must run a picked lint/test_ suite on one line, and pass it\n" + out)
 
 
 class Progress(Job):
