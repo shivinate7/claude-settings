@@ -40,7 +40,13 @@ Read form. The guard does not judge Read. It returns early for Read and Grep. Th
 
 The printed refusal names no file. It names the shape of the access (`ENV_REDIRECT_REASON`, `ENV_VARIABLE_REASON`, `ENV_RUNNER_REASON`, `ENV_INLINE_REASON`, `ENV_CHILD_REASON`, `ENV_CONTENTS_REASON`, `ENV_DEPTH_REASON`, `ENV_TOOL_REASON`) and a remedy (`ENV_ADVICE`). The log holds the file name, for a person to read.
 
-Gaps, each noted in `docs/debts/notes.md` as a form only an attacker writes (`guard-guards-mistakes-only`), with no fix planned: a perl, ruby or awk script read from stdin or a heredoc (`env-script-stdin-code`); a quote escape inside a script's code string (`env-script-string-escape`); a `$'…'` shell string (`env-ansi-c-string`); a backslash-escaped separator in an unquoted `sh -c` word (`env-sh-c-escaped-separator`); a runner whose child is another runner (`env-runner-child-runner-unread`).
+Gaps. Each is noted in `docs/debts/notes.md` as a form only an attacker writes (`guard-guards-mistakes-only`). No fix is planned.
+
+- A perl, ruby or awk script read from stdin or a heredoc (`env-script-stdin-code`).
+- A quote escape inside a script's code string (`env-script-string-escape`).
+- A `$'…'` shell string (`env-ansi-c-string`).
+- A backslash-escaped separator in an unquoted `sh -c` word (`env-sh-c-escaped-separator`).
+- A runner whose child is another runner (`env-runner-child-runner-unread`).
 
 Known false alarms: debt `env-file-rule-false-alarms` (the env-file false-alarm debt). The guard refuses `ag -f` and `ack -f`, where `-f` is a boolean flag, `grep -r --exclude=.env`, and `rg -t py .env`. All four are safe. None reads a file's contents.
 
