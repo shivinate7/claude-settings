@@ -130,26 +130,42 @@ def _span_end(text: str, start: int, escapes: bool) -> int:
     return -1
 
 
-def _nested_commands(span: str) -> str:
+# The outer call hands its quoted script to a shell that runs it: `bash -c "..."`, `eval "..."`,
+# `ssh host "..."`.
+SCRIPT_RUNNER = re.compile(
+    r"(?:^|[\s;&|(])(?:(?:(?:ba|z|da|k)?sh\s+(?:-\w+\s+)*-\w*c)|eval|ssh(?:\s+[^\s;&|]+)*)\s*$")
+# Inside a script, a call that runs its string argument as a command. print and echo are not here.
+CALL_RUNNER = re.compile(
+    r"(?:\bos\.(?:system|popen|exec\w*|spawn\w*)|\bsubprocess\.\w+|\bPopen|\bexec\w*|\bsystem|\bpopen)"
+    r"\s*\(\s*\[?\s*$")
+
+
+def _nested_commands(span: str, before: str = "") -> str:
     """A double-quoted span that holds escaped quotes is a script handed to an interpreter
-    (`python3 -c "os.system(\\"git push\\")"`). Each escaped-quote pair holds one command, and
-    the text between the pairs is the script's own. Give each command its own line, so the
-    words that follow it in the script (`print(\\"+1\\")`) are not its arguments."""
-    lines, piece, inner, index = ["\n"], [], False, 1
+    (`python3 -c "os.system(\\"git push\\")"`). An escaped-quote pair is a command only when the
+    call it sits in runs it: `os.system`, `subprocess.*`, `Popen`, `exec*`, or when the whole span
+    is the script of `bash -c`, `eval` or `ssh` (`before` is the segment text ahead of the span).
+    A pair inside a print or an echo is text. Give each command its own line, so the words that
+    follow it in the script (`print(\\"+1\\")`) are not its arguments."""
+    lines, piece, inner, run, index = ["\n"], [], False, False, 1
+    shell = SCRIPT_RUNNER.search(before) is not None
     body = span[:-1]
     while index < len(body):
         if body.startswith('\\"', index):
             if inner:
-                lines.append("".join(piece) + "\n")
+                if run:
+                    lines.append("".join(piece) + "\n")
                 piece = []
+            else:
+                run = shell or CALL_RUNNER.search(body[:index]) is not None
             inner = not inner
             width = 2
         else:
             width = 2 if body[index] == "\\" else 1
-            if inner:
+            if inner and run:
                 piece.append(body[index:index + width])
         index += width
-    if inner:
+    if inner and run:
         lines.append("".join(piece) + "\n")
     return "".join(lines)
 
@@ -180,7 +196,8 @@ def _push_scan(segment: str) -> str:
                 index = length
                 continue
             span = segment[index:end + 1]
-            out.append(_nested_commands(span) if char == '"' and '\\"' in span else span)
+            out.append(_nested_commands(span, segment[:index])
+                       if char == '"' and '\\"' in span else span)
             index = end + 1
         else:
             out.append(char)
