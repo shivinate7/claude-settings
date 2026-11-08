@@ -120,10 +120,10 @@ after(async () => { if (browser) await browser.close(); });
 
 // clock: a fixed browser time (an ISO string), so a case reads the page's clock without the real one. keepStorage: each storage key is set
 // only when absent, so a reload keeps what the page wrote on the earlier load (a reload that resets storage would undo it).
-async function open(t, { items = [DECISION, TASK], rawItems = {}, answers = {}, failDelete = false, failDeleteIn = "", failSet = false, failSetText = "", comments = { can: "available" }, storage = {}, meta = null, groups = {}, receipts = {}, holdReceipts = false, designData = null, dbExtra = {}, pageHtml = html, viewport = { width: 1280, height: 900 }, scheme = "light", errors = null, platform = null, noStore = false, hold = {}, clock = null, keepStorage = false, failUpdate = false } = {}) {
+async function open(t, { items = [DECISION, TASK], rawItems = {}, answers = {}, failDelete = false, failDeleteIn = "", failSet = false, failSetText = "", comments = { can: "available" }, storage = {}, meta = null, groups = {}, receipts = {}, holdReceipts = false, designData = null, dbExtra = {}, pageHtml = html, viewport = { width: 1280, height: 900 }, dpr = 1, scheme = "light", errors = null, platform = null, noStore = false, hold = {}, clock = null, keepStorage = false, failUpdate = false } = {}) {
   browser = browser || await needEnv(t, "chromium", async () => require("playwright").chromium.launch());
   if (!browser) return null;
-  const page = await browser.newPage({ viewport });
+  const page = await browser.newPage({ viewport, deviceScaleFactor: dpr });
   // errors: when given, collects each uncaught page error, from the first render on.
   if (errors) page.on("pageerror", (e) => errors.push(e.message));
   page.setDefaultTimeout(Number(process.env.WP_TIMEOUT) || 5000);
@@ -8503,9 +8503,10 @@ for (const width of [390, 1280]) for (const scheme of ["light", "dark"]) for (co
 });
 
 // ---------------------------------------------------------------- the edge width (lane nfp-npc-edge)
-// The roadmap's edge-width cases, on the Status tab's bars. One px either side one layer draws alone and spans the bar. At the edge
-// nothing draws. 0.02px under the edge the runs layer is (edge - width) x 1000px, not the bar's width. A drawn run is 4px or more where
-// it shows. The width is set on the bar, so no viewport is in the case. Layout units are 1/64px, so a width reads within 0.05px.
+// The roadmap's edge-width cases, on the Status tab's bars. The cases set a bar 1px under, 0.02px under, at, and 1px over steps x 5px - 2px.
+// Each checks that exactly one layer draws, that the layer spans the bar, and that each run shows RUN_MIN_PX or more. The 0.02px case
+// checks the runs layer at a gap just past one 1/64px layout unit: a switch that scales the gap by 1000 would give 20px there, short of
+// these bars. The width is set on the bar, so no viewport is in the case. Layout units are 1/64px, so a width reads within LAYOUT_TOL.
 const LAYOUT_TOL = 0.05, RUN_MIN_PX = 4;
 const edgeWidths = (n) => [[5 * n - 3, "1px under the edge"], [5 * n - 2.02, "0.02px under the edge"], [5 * n - 2, "at the edge"], [5 * n - 1, "1px over the edge"]];
 for (const n of [30, 13]) for (const [px, what] of edgeWidths(n)) test(`edge width: a ${n}-step bar set to ${px}px (${what}) draws exactly one layer, cells or runs, and that layer spans the bar`, async (t) => {
@@ -8549,4 +8550,69 @@ test("edge width: a 6-step bar with all five kinds, set to 20px, shows every run
     for (const r of L.runs) if (r.vis < RUN_VISIBLE_PX) problems.push(`${name} at 20px: its ${r.cls || "to-do"} run shows ${r.vis.toFixed(2)}px, under ${RUN_VISIBLE_PX}px`);
   }
   assert.deepEqual(problems, [], `the 6-step bars at 20px:\n  ${problems.join("\n  ")}`);
+});
+
+// ---------------------------------------------------------------- one layer at every scale (lane nfp-npc-r3-red)
+// The cells draw above steps x 5px - 2.01px, and the runs layer draws below steps x 5px - 2px, so a width between the two draws both.
+// Chromium lays a box out in 1/64 of the px its scale maps to: under a page zoom z the grid is 1/(64z) CSS px, and a sweep in that step
+// reaches every grid unit near the edge. In this browser a device scale does not move the grid, so the device-scale cases stay green
+// here. The sweep runs 0.05px either side of steps x 5px - 2px, and reads the layers in the grid's own px (zoomed px under a zoom).
+const oneLayerSweep = async (t, n, { dpr = 1, zoom = 1 }) => {
+  const page = await open(t, { pageHtml: barsBlockedPage(n), dpr }); if (!page) return null;
+  await openStatus(page);
+  if (zoom !== 1) await page.evaluate((z) => { document.documentElement.style.zoom = String(z); }, zoom);
+  const step = 1 / (64 * dpr * zoom), half = Math.round(0.05 / step), tol = LAYOUT_TOL * zoom;
+  const problems = [];
+  for (const [name, scope] of BARS_W) {
+    assert.equal(await page.locator(scope).count(), 1, `${name} is missing (${scope})`);
+    for (let i = -half; i <= half; i++) {
+      const px = 5 * n - 2 + i * step;
+      const L = await barLayers(page.locator(scope), px);
+      assert.equal(L.n, String(n), `${name} reads --n ${L.n}, not ${n}: the fixture did not build a ${n}-step bar`);
+      assert.ok(Math.abs(L.barW - px * zoom) < tol, `${name} did not take the ${px}px width: it measures ${L.barW}px`);
+      const cellsDrawn = L.cells.some((p) => p.w > 0), runsDrawn = L.runsDrawn;
+      if (cellsDrawn === runsDrawn) { problems.push(`${name} at ${px.toFixed(4)}px draws ${cellsDrawn ? "cells and runs both" : "no cell and no run"}`); continue; }
+      const layer = cellsDrawn ? L.cellSpan : L.runsW;
+      if (Math.abs(layer - L.barW) > tol) problems.push(`${name} at ${px.toFixed(4)}px: the drawn ${cellsDrawn ? "cells" : "runs layer"} spans ${layer.toFixed(2)}px of a ${L.barW.toFixed(2)}px bar`);
+    }
+  }
+  return problems;
+};
+for (const n of [30, 13]) test(`control: at device scale 1, a ${n}-step bar swept 0.05px either side of its edge draws exactly one layer, and it spans the bar`, async (t) => {
+  const problems = await oneLayerSweep(t, n, {}); if (problems === null) return;
+  assert.deepEqual(problems, [], `the ${n}-step bars at device scale 1:\n  ${problems.join("\n  ")}`);
+});
+for (const dpr of [2, 1.1]) for (const n of [30, 13]) test(`one layer at device scale ${dpr}: a ${n}-step bar swept 0.05px either side of its edge draws exactly one layer, and it spans the bar`, async (t) => {
+  const problems = await oneLayerSweep(t, n, { dpr }); if (problems === null) return;
+  assert.deepEqual(problems, [], `the ${n}-step bars at device scale ${dpr}:\n  ${problems.join("\n  ")}`);
+});
+for (const zoom of [1.1, 2]) for (const n of [30, 13]) test(`one layer at zoom ${zoom}: a ${n}-step bar swept 0.05px either side of its edge, in steps of 1/(64 x ${zoom})px, draws exactly one layer, and it spans the bar`, async (t) => {
+  const problems = await oneLayerSweep(t, n, { zoom }); if (problems === null) return;
+  assert.deepEqual(problems, [], `the ${n}-step bars at zoom ${zoom}:\n  ${problems.join("\n  ")}`);
+});
+
+// ---------------------------------------------------------------- the run floor (lane nfp-npc-r3-red)
+// A run is RUN_MIN_PX or more wide where it shows, once the bar is 6k - 2px or more: k runs take 4px each and k - 1 gaps take 2px each.
+// The edge cases check the switch, and a 3px floor passes them, so these read the floor itself. Each case reads its bar at its own
+// width on its viewport, then sweeps each width from 6k - 2px up to the edge. The fixture is a 30-step bar with six kinds.
+const FLOOR_STEPS = 30, FLOOR_KINDS = 6;
+for (const [name, scope, width] of [["the rail's cleanup bar at 320 wide", BARS_W[1][1], 320], ["the rail's cleanup bar at 390 wide", BARS_W[1][1], 390], ["the phase head's bar at 1280 wide", BARS_W[2][1], 1280]]) test(`run floor: ${name} shows each run at ${RUN_MIN_PX}px or more, at its own width and at each width from ${6 * FLOOR_KINDS - 2}px up to the edge`, async (t) => {
+  const page = await open(t, { pageHtml: barsBlockedPage(FLOOR_STEPS), viewport: { width, height: 900 } }); if (!page) return;
+  await openStatus(page);
+  assert.equal(await page.locator(scope).count(), 1, `${name} is missing (${scope})`);
+  const natural = await barLayers(page.locator(scope));
+  assert.ok(natural.runsDrawn, `${name} is ${natural.barW.toFixed(1)}px at its own width and draws no runs layer: the case does not reach the run floor`);
+  assert.equal(natural.runs.length, FLOOR_KINDS, `${name} draws ${natural.runs.length} runs at its own width, not ${FLOOR_KINDS}`);
+  const floorProblems = (L, at) => L.runs.filter((r) => r.vis < RUN_MIN_PX - LAYOUT_TOL).map((r) => `${name} at ${at}: its ${r.cls || "to-do"} run shows ${r.vis.toFixed(2)}px, under ${RUN_MIN_PX}px`);
+  const problems = floorProblems(natural, `${natural.barW.toFixed(2)}px, its own width`);
+  const low = 6 * FLOOR_KINDS - 2, high = 5 * FLOOR_STEPS - 3;
+  let swept = 0;
+  for (let px = low; px <= high; px++) {
+    const L = await barLayers(page.locator(scope), px);
+    if (!L.runsDrawn) continue;
+    swept++;
+    problems.push(...floorProblems(L, `${px}px`));
+  }
+  assert.equal(swept, high - low + 1, `the runs layer drew at ${swept} of the ${high - low + 1} widths from ${low}px to ${high}px`);
+  assert.deepEqual(problems.slice(0, 6), [], `${name}: ${problems.length} run(s) under ${RUN_MIN_PX}px, the first ${Math.min(6, problems.length)}:\n  ${problems.slice(0, 6).join("\n  ")}`);
 });
