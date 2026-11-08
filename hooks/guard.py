@@ -125,7 +125,8 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        adjacent words only, with backticks, `origin/` and `refs/heads/` dropped: `PR #N, branch X`,
                        `PR #N branch X`, `PR #N from branch X`, `PR #N with branch X`, `#N (branch X)`,
                        `#N on branch X`, `#N, head X` (also `head branch X`, `head ref X`), `branch X (#N)`,
-                       `branch X, PR #N`, `branch X for PR #N`. `from`, `with` and `for` pair after `PR #N` only. A base
+                       `branch X, PR #N`, `branch X for PR #N`. `from` and `with` pair after `PR #N`; `for` pairs only in
+                       `branch X for PR #N`. A base
                        word right before the branch (base, based on, onto, stacked on, into), a rebase, retarget or stack
                        verb before `#N on branch X`, and `against branch X` make no pairing. A branch paired to its left is
                        not paired again to its right (`PR #N, branch X (#M)`). #N may carry `owner/name#N`, or a short name
@@ -135,12 +136,16 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        PR: allowed. Any other failed read (gh missing too), and a bare #N where the checkout's repo cannot
                        be read, refuse and say unknown. A mismatch is read before every spawn check (9a) and refused after
                        lane-one-topic (9e); a lifted refusal in between still meets it (guard_core.set_lift_gate), so no
-                       lift skips it. The refusal names #N, the shape and the read command, and neither branch.
+                       lift after step 9a skips it. The refusal names #N, the shape and the read command, and neither branch.
                        Cost: one gh read per distinct (repo, N), two at most when a short name falls back, zero with no
                        pairing, and no git start: the repo is git_reads.github_repo(use_git=False), the one reading the
                        lane-repo-tag rule shares (it keeps git, which applies url rewrites). The count_file cases prove it.
+                       A wrong-pairing brief pays its one read (two at most) before the spawn checks and the load brake, even
+                       when an earlier check would refuse it anyway.
                        Misses: a Workflow prompt held in a variable, a create_session `prompt` (unread), a pairing outside the
-                       shapes above, and an in-process SendMessage (another matcher). An override lifts it.
+                       shapes above (`PR #N for branch X`, `PR #N (base branch Y), branch X`), and an in-process SendMessage
+                       (another matcher). Known false alarm: `Diff PR #N with branch main` and `Compare PR #N with branch main`
+                       read as pairings. An override lifts it.
   draft-pr             deny. A `gh pr create` without `--draft`. (draft-until-reviewed)
   records-page         deny. A `git commit` whose docs/records.md differs from the base's page.
                        (records-index-at-merge)
@@ -4764,6 +4769,7 @@ def judge(payload) -> None:
     if not isinstance(cwd, str):
         cwd = ""
     guard_core.set_override_veto(lambda: never_lifted(payload, tool, tool_input, cwd))
+    guard_core.set_lift_gate(None)  # a gate from an earlier judge() in this process must not meet this call
     session_home_keep(payload, tool, cwd)  # rule session-home's record, kept before any refusal can end the call
     # 0, handoff-unread. After compaction, no call the guard judges runs from the main session until it reads its handoff.
     # Not in never_lifted: the owner may mean the call. A failed import allows.
