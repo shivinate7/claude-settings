@@ -33,7 +33,8 @@ Hook: stall_watch.py --hook
   design (bin/verdict) appends its heartbeat there too, and the watcher relays it to its stdout (the
   harness output file), so a redirect in the command cannot hide it from the watcher or the Stop check.
   Each log the original names (named_logs: `> F`, `>> F`, `&> F`, `>& F`, `tee F`, `--log F`)
-  is passed as `--also F`.
+  is passed as `--also F`. A relative F after a `cd` the hook reads is joined to the cd's target. If the
+  target cannot be read (`cd $X`, `cd -`), the hook refuses the wrap, and its text names the absolute form.
   Cost: one append per heartbeat by the tool, and one read of BEAT on each 0.2 s loop pass in the watcher.
 
   The original stays unquoted, as top-level shell code, so a settings deny rule still sees it.
@@ -43,8 +44,10 @@ Watcher: stall_watch.py --watch-pid PID --log LOG [--quiet SECS] [--beat BEAT] [
          [--log-fd N] [--beat-fd N]
   Streams LOG to stdout (from fd N when given: the handle the wrapper opened, else by path). Any new byte, also a bare \\r, resets the timer. It streams each new byte
   of BEAT (a file that need not exist yet) to stdout too, and it resets the timer the same way. After SECS (default
-  300) without new bytes, and with no change to any --also log, it prints a STALL report and exits 3,
-  and the job keeps running. The
+  300) without new bytes, with no change to any --also log and with no CPU time advanced in any process
+  under the job's shell, it prints a STALL report and exits 3, and the job keeps running. The CPU time
+  comes from the once-a-second `ps` that also reads the job's state: no new process, timer or file. On
+  Linux ps gives whole seconds, so a child under 1% CPU may still stall. The job shell's own time does not count. The
   STALL line lists the job's shell and every process under it, parent first. Stopping them in that
   order ends the job, with two limits: an orphan (`(sleep N &); sleep N`) is adopted by init and
   not listed, and a TERM trap that returns respawns a loop body (SIGKILL ends it). When the job
@@ -116,48 +119,111 @@ REDIRECT_OPS = (">", ">>", ">|", "&>", "&>>", ">&")
 LOG_FLAGS = ("--log",)
 
 
+# Words after which a command starts, so a `cd` after one of them is read as a cd.
+COMMAND_STARTERS = ("then", "do", "else", "elif", "if", "while", "until", "{", "!", "time")
+UNREADABLE_PATH = re.compile(r"[$`*?\[]")
+
+
+def _cd_target(args, cwd):
+    """The directory a `cd` leaves the shell in: `args` are the tokens after `cd`, cwd the directory
+    before it. cwd and the result are None (unknown), "" (where the shell started) or a path that is
+    relative to the start. `cd -`, a target with `$`, a backtick or a glob, and any cd from an unknown
+    directory leave the directory unknown."""
+    rest = list(args)
+    while rest and rest[0].startswith("-") and rest[0] != "-":  # options such as -P; `--` ends them
+        if rest.pop(0) == "--":
+            break
+    target = os.path.expanduser(rest[0]) if rest else os.path.expanduser("~")
+    if cwd is None or target == "-" or target.startswith("~") or UNREADABLE_PATH.search(target):
+        return None
+    return target if os.path.isabs(target) else os.path.join(cwd, target) if cwd else target
+
+
+def read_named_logs(command):
+    """Return (paths, unresolved): the files a command names as its own log, and the relative ones
+    whose directory the hook cannot read. See named_logs for the forms read. A relative path that
+    follows a `cd` the tokenizer reads is joined to that cd's target: an absolute one gives an
+    absolute path, a relative one a path relative to where the shell started (the watcher stands
+    there). A `(` saves the directory and a `)` restores it. The tokenizer reads cd, so a cd in quotes
+    or after `#` is text. Newlines are tokens, and a comment that ends a line shows in the line count,
+    so a cd at the start of a line is read."""
+    try:
+        lex = shlex.shlex(strip_heredoc_bodies(command, shells_only=True), posix=True,
+                          punctuation_chars="();<>|&\n")
+        lex.whitespace_split = True
+        lex.whitespace = " \t\r"
+        tokens, fresh = [], []
+        while True:
+            before = lex.lineno
+            tok = lex.get_token()
+            if tok is None:
+                break
+            tokens.append(tok)
+            fresh.append(lex.lineno - before - tok.count("\n") > 0)  # a comment line was skipped first
+    except Exception:
+        return [], []
+    punct = set(lex.punctuation_chars)
+    found, cwd, saved, i = [], "", [], 0
+    while i < len(tokens):
+        tok, nxt = tokens[i], tokens[i + 1] if i + 1 < len(tokens) else None
+        start = i == 0 or fresh[i] or set(tokens[i - 1]) <= punct or tokens[i - 1] in COMMAND_STARTERS
+        if set(tok) <= punct:
+            for ch in tok:
+                if ch == "(":
+                    saved.append(cwd)
+                elif ch == ")" and saved:
+                    cwd = saved.pop()
+            if tok.endswith(REDIRECT_OPS) and nxt is not None:
+                if not (tok.endswith(">&") and (nxt.isdigit() or nxt == "-")):
+                    found.append((nxt, cwd))
+                i += 2
+                continue
+            i += 1
+            continue
+        if start and tok in ("cd", "pushd", "popd"):
+            j = i + 1
+            while j < len(tokens) and not set(tokens[j]) <= punct:
+                j += 1
+            cwd = _cd_target(tokens[i + 1:j], cwd) if tok == "cd" else None
+            i = j
+            continue
+        if os.path.basename(tok) == "tee" and start:
+            j = i + 1
+            while j < len(tokens) and not set(tokens[j]) <= punct:
+                if not tokens[j].startswith("-"):
+                    found.append((tokens[j], cwd))
+                j += 1
+            i = j
+            continue
+        if tok in LOG_FLAGS and nxt is not None:
+            found.append((nxt, cwd))
+        elif tok.startswith(tuple(f + "=" for f in LOG_FLAGS)):
+            found.append((tok.split("=", 1)[1], cwd))
+        i += 1
+    keep, unresolved = [], []
+    for path, where in found:
+        path = os.path.expanduser(path)
+        if not path or UNREADABLE_PATH.search(path) or path.startswith("/dev/"):
+            continue
+        if not os.path.isabs(path):
+            if where is None:
+                if path not in unresolved:
+                    unresolved.append(path)
+                continue
+            path = os.path.join(where, path) if where else path
+        if path not in keep:
+            keep.append(path)
+    return keep, unresolved
+
+
 def named_logs(command):
     """The files a command names as its own log: the target of `> F`, `>> F`, `&> F` or `>& F` (any
     descriptor), each file argument of `tee`, and the value of `--log F` or `--log=F`. shlex reads
     the command, so a path inside quotes or after `#` is text. A heredoc body is dropped first. A
     target with `$`, a backtick or a glob, a descriptor (`>&2`) and a /dev/ path are left out. A
-    command shlex cannot read names none. The paths stay as written: a relative one resolves against
-    the reader's own working directory."""
-    try:
-        lex = shlex.shlex(strip_heredoc_bodies(command, shells_only=True), posix=True,
-                          punctuation_chars=True)
-        lex.whitespace_split = True
-        tokens = list(lex)
-    except Exception:
-        return []
-    punct = set(lex.punctuation_chars)
-    found, i = [], 0
-    while i < len(tokens):
-        tok, nxt = tokens[i], tokens[i + 1] if i + 1 < len(tokens) else None
-        if set(tok) <= punct and tok.endswith(REDIRECT_OPS) and nxt is not None:
-            if not (tok.endswith(">&") and (nxt.isdigit() or nxt == "-")):
-                found.append(nxt)
-            i += 2
-            continue
-        if os.path.basename(tok) == "tee" and (i == 0 or set(tokens[i - 1]) <= punct):
-            j = i + 1
-            while j < len(tokens) and not set(tokens[j]) <= punct:
-                if not tokens[j].startswith("-"):
-                    found.append(tokens[j])
-                j += 1
-            i = j
-            continue
-        if tok in LOG_FLAGS and nxt is not None:
-            found.append(nxt)
-        elif tok.startswith(tuple(f + "=" for f in LOG_FLAGS)):
-            found.append(tok.split("=", 1)[1])
-        i += 1
-    keep = []
-    for path in found:
-        path = os.path.expanduser(path)
-        if path and not re.search(r"[$`*?\[]", path) and not path.startswith("/dev/") and path not in keep:
-            keep.append(path)
-    return keep
+    command shlex cannot read names none. A relative path stays as written unless a `cd` comes
+    before it (read_named_logs), which resolves it; one whose directory is unknown is left out."""
+    return read_named_logs(command)[0]
 
 
 def log_marks(paths, base=None):
@@ -181,10 +247,47 @@ def _run(args):
         return "(%s did not answer: %s)\n" % (args[0], type(exc).__name__)
 
 
+class JobState(str):
+    """The ps state of the job. `cpu` is {pid: CPU seconds} for every process under the job's shell,
+    or None when ps gave no table (a read that could not run)."""
+    cpu = None
+
+
+CPU_TIME = re.compile(r"(?:(?:(\d+)-)?(\d+):)?(\d+):(\d+(?:\.\d+)?)$")
+
+
+def cpu_seconds(text):
+    """Seconds in a ps `time` field, [[dd-]hh:]mm:ss[.cc]; 0 when it does not read."""
+    m = CPU_TIME.match(text)
+    if not m:
+        return 0.0
+    days, hours, mins, secs = m.groups()
+    return int(days or 0) * 86400 + int(hours or 0) * 3600 + int(mins) * 60 + float(secs)
+
+
 def job_state(pid):
     """Return the ps state of pid, or '' when it is gone. A Z state is an ended job whose
-    parent shell has not yet waited for it."""
-    return _run(["ps", "-o", "stat=", "-p", str(pid)]).strip()
+    parent shell has not yet waited for it. The answer's `cpu` holds the CPU seconds of each process
+    under it, from the same one ps call (the watcher reads CPU time as a sign of life)."""
+    out = _run(["ps", "-axo", "pid=,ppid=,stat=,time="])
+    if out.startswith("(ps did not answer"):  # unreadable is not ended
+        return JobState(out.strip())
+    rows, kids = {}, {}
+    for line in out.splitlines():
+        p = line.split()
+        if len(p) >= 4:
+            rows[p[0]] = p
+            kids.setdefault(p[1], []).append(p[0])
+    if str(pid) not in rows:
+        return JobState("")
+    state = JobState(rows[str(pid)][2])
+    state.cpu, stack = {}, list(kids.get(str(pid), []))
+    while stack:  # the job shell's own time is left out: a builtin loop in it, with no child, is no sign of work
+        cur = stack.pop()
+        if cur not in state.cpu and cur != str(pid):
+            state.cpu[cur] = cpu_seconds(rows[cur][3])
+            stack.extend(kids.get(cur, []))
+    return state
 
 
 def ended_state(state):
@@ -275,6 +378,7 @@ def watch(pid, log, quiet, also=(), beat=None, log_fd=None, beat_fd=None):
     marks = log_marks(also)
     next_check = 0.0
     recheck = False
+    seen_cpu = {}
     waited = 0
     lf, bf = held(log_fd), held(beat_fd)
     while lf is None and not os.path.exists(log):  # the shell creates it a moment before this runs
@@ -288,8 +392,14 @@ def watch(pid, log, quiet, also=(), beat=None, log_fd=None, beat_fd=None):
             ended = checked = False
             if now >= next_check or recheck:  # one ps a second, not one per read
                 checked, recheck = True, False
-                ended = ended_state(job_state(pid))
+                state = job_state(pid)
+                ended = ended_state(state)
                 next_check = now + 1.0
+                cpu = getattr(state, "cpu", None)
+                if cpu is not None:  # CPU time that advanced in the job or a process under it is life
+                    if any(secs > seen_cpu.get(p, 0.0) for p, secs in cpu.items()):
+                        last = time.monotonic()
+                    seen_cpu = cpu
                 if also:
                     seen = log_marks(also)
                     if seen != marks:  # the job still writes to a log it named
@@ -344,6 +454,16 @@ def hook():
     except Exception:
         return 0
     quiet = os.environ.get("STALL_WATCH_QUIET") or str(DEFAULT_QUIET)
+    logs, unresolved = read_named_logs(original)
+    if unresolved:  # a wrong path watched in silence would stall falsely: refuse, and name the fix
+        print(json.dumps({"hookSpecificOutput": {
+            "hookEventName": "PreToolUse", "permissionDecision": "deny",
+            "permissionDecisionReason": (
+                "stall-watch: the command names the relative log %s after a `cd` whose target the hook "
+                "cannot read (it uses $, `cd -` or a glob), so it cannot tell which file the job writes. "
+                "Remedy: write each log as an absolute path, such as /full/path/to/%s, and run the "
+                "command again." % (", ".join(unresolved), os.path.basename(unresolved[0])))}}))
+        return 0
     base = os.path.join(os.path.realpath(tempfile.gettempdir()), "stall-watch-%s" % uuid.uuid4().hex)
     log, beat = base + ".log", base + ".beat"  # the job makes the beat file, if a tool writes to it
     q = shlex.quote
@@ -366,7 +486,7 @@ def hook():
         + " ".join(q(a) for a in [sys.executable, os.path.abspath(__file__)])
         + " --watch-pid $pid --log " + q(log) + " --quiet " + q(quiet) + " --beat " + q(beat)
         + " --log-fd 9 --beat-fd 8"
-        + "".join(" --also " + q(p) for p in named_logs(original))
+        + "".join(" --also " + q(p) for p in logs)
         + "; rc=$?; "
         + "[ $rc -eq 3 ] && exit 3; wait $pid; rc=$?; " + cleanup + "; exit $rc\n} 9< "
         + q(log) + " 8< " + q(beat)
