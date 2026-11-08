@@ -1537,11 +1537,17 @@ def case_owner_ruling_forms_and_non_rulings():
 
 
 STEP_TAIL_NOTE = "Ruling (owner, 2026-11-07 13:20): keep it. Incident (shiv, Nov 9): a lane merged by hand."
+# Each row is (note, the second sentence's text that must stay out of the unit). Row one is an owner mark with no lead
+# word, row two a lead word with no owner mark. The join rule refuses either one; an `and` in its place lets both join.
+STEP_TAIL_ROWS = (
+    ("Ruling (owner, 2026-11-07 13:20): keep it. Owner go, Nov 8 09:10 CST: ship it.", "Owner go, Nov 8 09:10 CST"),
+    ("Ruling (owner, 2026-11-07 13:20): keep it. Incident: a lane merged by hand.", "Incident: a lane merged by hand"),
+)
 
 
 def case_step_ruling_tail_stops_at_an_incident():
-    """A ruling unit is its marked sentence, plus the next sentence when that one is detail. An incident right after a
-    ruling is no detail of it, so it joins no unit (decision question-form)."""
+    """A ruling unit is its marked sentence, plus the next sentence when that one is detail. A sentence right after a
+    ruling that has an owner mark or a lead word is no detail of it, so it joins no unit (decision question-form)."""
     import question_form  # the one form check (hooks/question_form.py)
     fn = getattr(question_form, "_step_rulings", None)
     check("step ruling tail: question_form._step_rulings exists", callable(fn), "missing function")
@@ -1556,6 +1562,11 @@ def case_step_ruling_tail_stops_at_an_incident():
           "Ruling (owner, 2026-11-07 13:20): keep it." in text, text[:200])
     check("step ruling tail: the incident sentence after it joins no unit",
           "Incident" not in text and "merged by hand" not in text, text[:200])
+    for note, carried in STEP_TAIL_ROWS:
+        row = str(fn({"s1": (note, None)}, {"keep"}))
+        check("step ruling tail: the marked ruling is offered beside %r" % carried,
+              "Ruling (owner, 2026-11-07 13:20): keep it." in row, row[:200])
+        check("step ruling tail: %r joins no unit" % carried, carried not in row, row[:200])
 
 
 class _BrokenPipeGit:
