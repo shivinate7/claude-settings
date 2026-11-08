@@ -135,6 +135,7 @@ FAMILIES = {
     "handoff-unread": "after compaction, the guard refuses each call it judges until the session reads its handoff: the refusals, the allows, the cost, the fail-open copy, and the override",
     "wsl": "the WSL launch allow list, the refused WSL forms, and quoted or commented text",
     "load-brake": "the machine-load brake: busy and full on start calls, full on an agent's or a lane session's shell or file write (a lane session's own record tags cs-build:lane), the reader seam, no child process, no per-call read, no CPU read or wait, the cloud skip (CLAUDE_CODE_REMOTE=true reads nothing), the neutral load every other family's lane call meets",
+    "heredoc-keep": "a heredoc body a run line reads: its kept body keeps its closing line, a refusal after it stays, and the retire forms of the false alarm pass",
     "misc": "anything outside a tagged section",
 }
 GUARD_FAMILY = os.environ.get("GUARD_FAMILY", "")
@@ -13791,6 +13792,108 @@ LOG_CHECKS_EXTRA.append(("merge: gh_call_of reads the pr verb past a --repo=<rep
                          gh_root_repo_equals_check))
 LOG_CHECKS_EXTRA.append(("merge: gh_call_of reads the pr verb past a spaced --repo <repo> root flag",
                          gh_root_repo_spaced_check))
+
+# ---- heredoc-keep: a body a run line reads (`> run.sh`, then `bash run.sh`) stays in view. The kept body keeps its
+# closing line in the text, so every line after it is judged as the command it is. Class 1 is the re-walk invariant,
+# class 2 the refusals after a kept body, class 3 the retire forms of the false alarm (debt slug
+# heredoc-written-run-false-alarm), class 4 the true refusals that stay. Red on main: class 3 only. Red on the held
+# fix (the closing line dropped): class 1 and the detached-launch forms of class 2.
+FAMILY = "heredoc-keep"
+HK_KEPT = "cat > run.sh <<'EOF'\necho hi\nEOF\n"
+
+
+# CLASS 1. The re-walk invariant. For an input whose heredocs all close, the text strip_heredoc_bodies returns for it
+# re-walks with no heredoc open. Scope first (P7): the raw input must close. A pure data body is not in this set,
+# because main drops its closing line with its body, so its stripped text re-walks open on main too.
+HK_INVARIANT_INPUTS = (
+    ("a kept body, then a detached launch of the file", HK_KEPT + "nohup bash run.sh &"),
+    ("two kept bodies, each run later", "cat > a.sh <<'EOF'\necho a\nEOF\ncat > b.sh <<'EOF'\necho b\nEOF\nbash a.sh\nsh b.sh"),
+    ("a kept body under the legacy header E-1", "cat > run.sh <<'E-1'\necho hi\nE-1\nnohup bash run.sh &"),
+    ("a kept body with a lone apostrophe and comment openers in quotes",
+     "cat > run.sh <<'EOF'\necho don't \"# x // y\"\nEOF\nnohup bash run.sh &"),
+    ("no heredoc at all", "ls -la"),
+)
+
+
+def _heredoc_keep_invariant(label, cmd):
+    """One log check per input: the raw input closes, and each stripped text it yields re-walks closed."""
+    def check():
+        from guard_core import strip_heredoc_bodies, _walk_heredocs   # HERE is on sys.path, the guard's folder
+        if _walk_heredocs(cmd)[2]:
+            return False, "scope: the input itself leaves a heredoc open, so the invariant does not reach it"
+        for shells_only in (False, True):
+            stripped = strip_heredoc_bodies(cmd, shells_only=shells_only)
+            if _walk_heredocs(stripped)[2]:
+                return False, ("shells_only=%s: the stripped text re-walks with a heredoc open, because a kept body "
+                               "lost its closing line" % shells_only)
+        return True, "each stripped text re-walks with every heredoc closed"
+    FIXTURELESS_CHECKS.add(check)
+    LOG_CHECKS_EXTRA.append(("heredoc-keep: the stripped text of %s re-walks closed" % label, check))
+
+
+for _label, _cmd in HK_INVARIANT_INPUTS:
+    _heredoc_keep_invariant(_label, _cmd)
+
+
+# CLASS 2. A refused command after a kept body stays refused. The detached-launch forms are the held fix's hole: its
+# kept body drops the closing line, so the launch after it reads as body. The draft-pr and destructive forms deny on
+# the held fix too; they stay as controls that a fix must not loosen.
+sh("heredoc-keep: a kept body, then nohup of the file, a detached launch, denies",
+   HK_KEPT + "nohup bash run.sh &", "deny", "detached-launch", cwd=NOGIT)
+sh("heredoc-keep: a kept body, a bash run, then a background npm start, denies",
+   HK_KEPT + "bash run.sh\nnpm start &", "deny", "detached-launch", cwd=NOGIT)
+sh("heredoc-keep: a kept body with a lone apostrophe, then a detached launch, denies",
+   "cat > run.sh <<'EOF'\necho don't\nEOF\nnohup bash run.sh &", "deny", "detached-launch", cwd=NOGIT)
+sh("heredoc-keep: a kept body with comment openers in quotes, then a detached launch, denies",
+   "cat > run.sh <<'EOF'\necho \"# x // y\"\nEOF\nnohup bash run.sh &", "deny", "detached-launch", cwd=NOGIT)
+sh("heredoc-keep: a kept body with a multi-line backtick span, then a detached launch, denies",
+   "cat > run.sh <<'EOF'\necho `first\nsecond`\nEOF\nnohup bash run.sh &", "deny", "detached-launch", cwd=NOGIT)
+sh("heredoc-keep: a kept body under the legacy header E-1, then a detached launch, denies",
+   "cat > run.sh <<'E-1'\necho hi\nE-1\nnohup bash run.sh &", "deny", "detached-launch", cwd=NOGIT)
+sh("heredoc-keep: a kept body, a bash run, then gh pr create without --draft, denies",
+   HK_KEPT + "bash run.sh\ngh pr create --title x", "deny", "draft-pr", cwd=NOGIT,
+   carries=DRAFT_REMEDY, lacks=DRAFT_LACKS)
+sh("heredoc-keep: a kept body, a bash run, then rm -rf of the working folder, denies",
+   HK_KEPT + "bash run.sh\nrm -rf ./*", "deny", "destructive-delete", cwd=NOGIT)
+
+
+# CLASS 3. The retire forms of the false alarm. Each is one call: a heredoc write of a data body, then the run of the
+# file it wrote. Each passes. A body that holds `gh pr create --title x` or an env-file word line is text, not a
+# command. Each form has a plain-body control beside it (P2): the same call with `hello` allows on both trees.
+HK_RETIRE_FORMS = (
+    ("python3 check.py brief.md", "brief.md"),
+    ("python3 -m json.tool cfg.json", "cfg.json"),
+    ("sudo cat f", "f"),
+    ("timeout 5 wc f", "f"),
+    ("ls f | xargs wc", "f"),
+)
+HK_RETIRE_BODIES = (
+    ("a gh pr create line", "gh pr create --title x"),
+    ("an env-file word line", "cat " + ENV),
+)
+for _run, _target in HK_RETIRE_FORMS:
+    _write = "cat > %s <<'EOF'\n" % _target
+    sh("heredoc-keep: retire control, a plain body written then run by %s, allowed" % _run,
+       _write + "hello\nEOF\n" + _run, "allow", cwd=NOGIT)
+    for _body_label, _body in HK_RETIRE_BODIES:
+        sh("heredoc-keep: retire, %s written then run by %s, allowed" % (_body_label, _run),
+           _write + _body + "\nEOF\n" + _run, "allow", cwd=NOGIT)
+
+
+# CLASS 4. The true refusals stay. A body a shell runs is code: bash reads a heredoc straight, and a file the header
+# wrote is refused when `bash f`, `sh < f` or `./f` runs it. A real call after a data body is refused as well: the
+# body is text, and the call is not.
+sh("heredoc-keep: bash <<EOF with a body holding gh pr create --title x, denies",
+   "bash <<EOF\ngh pr create --title x\nEOF", "deny", "draft-pr", cwd=NOGIT,
+   carries=DRAFT_REMEDY, lacks=DRAFT_LACKS)
+for _run in ("bash f", "sh < f", "./f"):
+    sh("heredoc-keep: a written file holding gh pr create --title x, run by %s, denies" % _run,
+       "cat > f <<'EOF'\ngh pr create --title x\nEOF\n" + _run, "deny", "draft-pr", cwd=NOGIT,
+       carries=DRAFT_REMEDY, lacks=DRAFT_LACKS)
+sh("heredoc-keep: a real gh pr create after a data body, with no --draft, denies",
+   "cat > notes.md <<'EOF'\nhello\nEOF\ngh pr create --title x", "deny", "draft-pr", cwd=NOGIT,
+   carries=DRAFT_REMEDY, lacks=DRAFT_LACKS)
+
 
 # ---- lane-closes-after-records: the two checks that are log checks, not cases. The override is a story over
 # several calls on one clock (see the owner-override family), and the matcher reads settings.json, as the
