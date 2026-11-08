@@ -72,11 +72,17 @@ BUILD_TAG = "cs-build:"
 LANE_TAG = BUILD_TAG + "lane"
 
 
+# This repo's branch prefixes: a lane's branch, an archived copy, a Claude Code session's branch, a lane's handoff. The
+# guard's rule message-ref-missing reads them, so `lane/x PR #5` is judged against this repo, not as repo `lane/x`.
+LANE_PREFIX = "lane/"
+BRANCH_PREFIXES = (LANE_PREFIX, "archive/", "claude/", "handoff/")
+
+
 def lane_head_refs(slug: str) -> tuple[str, str]:
     """The head refs a lane's pull request may carry for its step `slug`: the bare slug and `lane/<slug>`. The one
     home, read by the roadmap build (idle lanes, stalled steps) and by the archive guard, so the two forms cannot
     drift apart."""
-    return (slug, "lane/" + slug)
+    return (slug, LANE_PREFIX + slug)
 
 
 def repo_tag_names(tag: object, slug: str) -> bool:

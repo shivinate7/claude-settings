@@ -2509,7 +2509,9 @@ MESSAGE_ORIGIN_TAIL = re.compile(r"([^/:\s]+)/([^/\s]+?)(?:\.git)?/?$")
 MESSAGE_REPO_MARKED = re.compile(r"(?<![\w./@:-])([\w.-]+)/([\w.-]+)(?=([#@:]|\s+(?i:PRs?)\b))")
 MESSAGE_LOWER_NAME = re.compile(r"[a-z0-9_.-]+")
 MESSAGE_FILE_END = re.compile(r"\.[A-Za-z0-9]{1,5}$")
-MESSAGE_NOT_A_REPO = ("origin", "upstream")
+from shared_names import BRANCH_PREFIXES  # noqa: E402  the one home of this repo's branch prefixes
+# A remote name or one of this repo's branch prefixes, as the owner part of an owner/repo, is never another repo.
+MESSAGE_NOT_A_REPO = ("origin", "upstream") + tuple(prefix.rstrip("/") for prefix in BRANCH_PREFIXES)
 
 
 def message_origin(where: str):
@@ -2525,7 +2527,8 @@ def message_origin(where: str):
 
 def message_names_other_repo(line: str, this) -> bool:
     """True when `line` holds an owner/repo that is not `this`, followed by `#`, `@`, `:` or the word PR. An owner/repo
-    with no such mark is a branch or a path. `origin/` and `upstream/` never count. The `:` and PR marks count only
+    with no such mark is a branch or a path. `origin/`, `upstream/` and this repo's branch prefixes (`lane/`, `archive/`,
+    `claude/`, `handoff/`) never count. The `:` and PR marks count only
     for a lowercase owner and name that are not all digits, so `CI/CD:`, `Done/Next:` and `2/3:` are labels."""
     bare = REPORT_URL_WORD.sub(" ", MESSAGE_GH_URL.sub(" ", line))
     for owner, repo, mark in MESSAGE_REPO_MARKED.findall(bare):
@@ -2542,9 +2545,12 @@ def message_names_other_repo(line: str, this) -> bool:
 def message_line_prs(line: str) -> list:
     """The PR numbers a line names in words: `PR #N`, `PR: #N`, `PR (#N)`, `PR number N`, `PRs 7 and 8`, `PRs #7 #8`,
     `pull request #N`, `#N (PR)`. After a singular word, a further number in a list needs its own `#`, so
-    `PR #7, 12 files` names one PR."""
+    `PR #7, 12 files` names one PR. After `:` or `(`, the number needs its `#`, so `PR: 2500 lines` names none."""
     prs = []
     for found in MESSAGE_PR.finditer(line):
+        # After `:` or `(`, only a number with `#` is a PR, so `PR: 2500 lines` and `PR (2500 lines)` are counts.
+        if not found.group(2) and re.search(r"[:(]", line[found.end(1):found.start(3)]):
+            continue
         prs.append(found.group(3))
         plural = found.group(1).lower().endswith("s")
         at = found.end()
