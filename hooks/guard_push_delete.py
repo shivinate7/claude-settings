@@ -966,12 +966,14 @@ ARCHIVE_TIP_REASON = (
     "Rule (Git): this would drop the remote tip of <branch> with no other copy. That tip is not on the "
     "default branch, and no archive branch on <remote> holds it. Remedy: push the remote-tracking tip to "
     "an archive branch first, `git push <remote> refs/remotes/<remote>/<branch>:refs/heads/archive/<branch>`, "
-    "then retry. The check reads the local remote-tracking refs, so fetch <remote> first if they are stale."
+    "then retry. The check reads the local remote-tracking refs, so fetch <remote> first if they are stale. "
+    "(decision archive-remote-tip, a remote delete or archive push keeps the old remote tip)"
 )
 ARCHIVE_TIP_ASK_REASON = (
     "Rule (Git): the remote tip of <branch> is unknown here: the source "
     "does not resolve, or git could not answer. So this push may drop a commit that has no other copy. "
-    "Fetch <remote> and check, then approve. Approving the prompt lets this one through; it is not a grant."
+    "Fetch <remote> and check, then approve (decision archive-remote-tip). "
+    "Approving the prompt lets this one through; it is not a grant."
 )
 PUSH_ASK_REASON = (
     "Rule (Git): this forced push may rewrite the default branch, or its target is unreadable. "
