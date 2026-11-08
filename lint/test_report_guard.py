@@ -1039,8 +1039,8 @@ class DoneNamesModelsTests(unittest.TestCase):
                            earlier=[REVIEWER_PINNED])
         self.assertIsNone(out, (out or {}).get("reason"))
 
-    # Ruling: roadmap step `report-model-from-role` (the model-name guard reads each agent's model): every model a
-    # role ran in the window must be named; re-pointed in a429cf4b0.
+    # Roadmap step `report-model-from-role` (the model-name guard reads each agent's model): every model a role ran
+    # in the window must be named, and a model from an earlier window may be named beside it.
     def test_dm_haiku_named_beside_window_sonnet(self):
         # Scope first: with no haiku reviewer spawn anywhere, a haiku name still blocks.
         assert_blocks(self, self.verdict(NAMED_REPORT % "reviewer haiku", [REVIEWER_SONNET]),
@@ -1463,8 +1463,8 @@ class RewriteAfterMissingReportTests(unittest.TestCase):
                         earlier=[REVIEWER_PINNED], later=[REVIEWER_SONNET])
         self.assertIsNone(out, (out or {}).get("reason"))
 
-    # Ruling: roadmap step `report-model-from-role` (the model-name guard reads each agent's model): every model a
-    # role ran in the window must be named; re-pointed in a429cf4b0.
+    # Roadmap step `report-model-from-role` (the model-name guard reads each agent's model): every model a role ran
+    # in the window must be named, and a model from an earlier window may be named beside it.
     def test_rw_haiku_named_beside_window_sonnet(self):
         # Scope first: with no haiku reviewer spawn anywhere, a haiku name still blocks.
         self.missing_report_block(later=[REVIEWER_SONNET])
