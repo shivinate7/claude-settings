@@ -575,7 +575,7 @@ def backing_path(kind, rest):
 
 
 def python_defs(text):
-    """[(first line, last line, name, owner)] of each def and class in the Python `text`, sorted by first line, found through the AST so a
+    """[(first line, last line, name, owner, is a class)] of each def and class in the Python `text`, sorted by first line, found through the AST so a
     comment, a docstring or a string that names one never counts. `owner` is the class that holds the def directly, else None. None when
     `text` is not Python, or is too deep or too large to parse."""
     try:
@@ -589,7 +589,7 @@ def python_defs(text):
         for child in ast.iter_child_nodes(node):
             is_def = isinstance(child, kinds)
             if is_def:
-                found.append((child.lineno, child.end_lineno, child.name, owner))
+                found.append((child.lineno, child.end_lineno, child.name, owner, isinstance(child, ast.ClassDef)))
             stack.append((child, child.name if isinstance(child, ast.ClassDef) else None if is_def else owner))
     return sorted(found)
 
@@ -673,29 +673,29 @@ def named_too_large(text):
 
 
 def named_excerpt(names, text, around=3, limit=40):
-    """The numbered lines of a file's `text`, at most `limit`, a "..." row between two windows that do not touch. Each line that holds
-    one of `names`, each with a trailing `(...)` dropped, as a whole word shows the `around` lines about it. A name that Python `text`
-    defines as a def or class also shows from its def row through its body (python_defs); a dotted name looks up its last segment only.
-    A dotted `B.run` takes the def of `run` in class B, else the earliest def of `run` when the file defines `B`, else no def. The cap fills in this order: the def rows, the
-    windows of the other lines, the def bodies, the rest of the windows. Each row is cut to NAMED_ROW_CHARS characters with a marker.
-    When the `limit` drops later lines, the excerpt ends with a marker line that says so; it has none otherwise. None when no line
-    holds a name and no def is found, or when `text` is over NAMED_MAX_BYTES (named_too_large). A prose judge sends this beside a line
-    that names the file in backticks, so the model reads the code the line talks about. Cost: at most `limit` rows of NAMED_ROW_CHARS
-    characters; one ast.parse of `text` per call."""
+    """The numbered lines of a file's `text`, at most `limit`, a "..." row between two windows that do not touch. Each name is cut at its
+    first `(`, so `run()`, `run(a)` and `run(` all read as `run`; a name that is then empty matches nothing. Each line that holds one of
+    the names as a whole word shows the `around` lines about it. A bare name that Python `text` defines as a def or class also shows
+    from its def row through its body (python_defs), the earliest def when it has several. A dotted `B.run` shows the def of `run`
+    inside class B, and only when the file has a class B that defines `run`: no other def of `run` stands in. The cap fills in this
+    order: the def rows, the windows of the other lines, the def bodies, the rest of the windows. Each row is cut to NAMED_ROW_CHARS
+    characters with a marker. When the `limit` drops later lines, the excerpt ends with a marker line that says so; it has none
+    otherwise. None when no line holds a name and no def is found, or when `text` is over NAMED_MAX_BYTES (named_too_large). A prose
+    judge sends this beside a line that names the file in backticks, so the model reads the code the line talks about. Cost: at most
+    `limit` rows of NAMED_ROW_CHARS characters; one ast.parse of `text` per call."""
     if named_too_large(text):
         return None
     rows = text.replace("\r\n", "\n").split("\n")
-    names = [re.sub(r"\(.*\)$", "", name) for name in names]
+    names = [n for n in (name.split("(", 1)[0].strip() for name in names) if n]
     hits = [re.compile(r"(?<!\w)%s(?!\w)" % re.escape(name)) for name in names]
     defs = python_defs(text) or []
     heads, bodies = [], []
     for name in names:
         parts = name.split(".")
-        same = [d for d in defs if d[2] == parts[-1]]
-        owned = [d for d in same if len(parts) > 1 and d[3] == parts[-2]]
-        if len(parts) > 1 and not any(d[2] == parts[-2] for d in defs):
-            same = []  # the prefix is no def or class of this file (os.path, self.x): the last segment is not its def
-        for first, last, _, _ in (owned or same)[:1]:
+        found = [d for d in defs if d[2] == parts[-1] and (len(parts) == 1 or d[3] == parts[-2])]
+        if len(parts) > 1 and not any(d[2] == parts[-2] and d[4] for d in defs):
+            found = []  # the prefix is no class of this file (os.path, self.x, a function): the last segment is not its def
+        for first, last, _, _, _ in found[:1]:
             heads.append(first)
             bodies.extend(range(first + 1, min(last, len(rows)) + 1))
     calls, near = [], []
