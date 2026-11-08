@@ -99,18 +99,39 @@ def narrating_stage(segment: str) -> str:
 
 # The interpreter flags that take the next word as their value, so `python -W ignore run.py` skips `ignore`.
 INTERPRETER_VALUE_FLAGS = ("-W", "-X")
+# A redirect word the shell strips before the interpreter runs: `2>&1`, `2>/dev/null`, `>file`, `>>file`,
+# `<file`, `&>file`. Group 1 is what follows the operator, empty for a bare `>` or `2>`, whose target is
+# the next word.
+REDIRECT_WORD = re.compile(r"^(?:\d*|&)(?:>>|<<<|<<|>&|<&|>|<|&>)(.*)$")
 
 
 def _script_operand(tokens, index: int) -> str:
-    """The script an interpreter at `index` runs: its first word that is no flag. '' for `-m <module>`
-    and `-c <code>`, which run no script, so what follows them is an argument of theirs."""
+    """The script an interpreter at `index` runs: its first word that is no flag and no redirect. '' for
+    `-m <module>` and `-c <code>`, which run no script, so what follows them is an argument of theirs."""
     at = index + 1
-    while at < len(tokens) and tokens[at].startswith("-"):
-        flag = tokens[at]
-        if flag in ("-m", "-c"):
-            return ""
-        at += 2 if flag in INTERPRETER_VALUE_FLAGS else 1
-    return _whole_word(tokens, at) if at < len(tokens) else ""
+    while at < len(tokens):
+        redirect = REDIRECT_WORD.match(tokens[at])
+        if redirect:
+            at += 1 if redirect.group(1) else 2
+        elif tokens[at].startswith("-"):
+            flag = tokens[at]
+            if flag in ("-m", "-c"):
+                return ""
+            at += 2 if flag in INTERPRETER_VALUE_FLAGS else 1
+        else:
+            return _whole_word(tokens, at)
+    return ""
+
+
+def _script_run(tokens, index: int) -> str:
+    """The script the command at `index` runs, else ''. An interpreter runs its script operand
+    (`_script_operand`). A `.py` command word is the script itself, which is how `uv run lint/x.py` runs
+    it. The one reader of both spellings, for `_roster_word`, `check_stage` and `lint_stage`."""
+    word = basename(tokens[index])
+    script = _script_operand(tokens, index) if SCRIPT_INTERPRETER.match(word.removesuffix(".exe")) else ""
+    if not script and word.endswith(".py"):
+        script = tokens[index]
+    return script
 
 
 def _whole_word(tokens, at: int) -> str:
@@ -139,9 +160,7 @@ def _roster_word(tokens, index: int, interpreter_only: bool = False) -> str:
     if word in NARRATING_COMMANDS:
         return word
     if interpreter_only:
-        script = _script_operand(tokens, index) if SCRIPT_INTERPRETER.match(word.removesuffix(".exe")) else ""
-        if not script and word.endswith(".py"):
-            script = tokens[index]  # `uv run merge/merge.py`: uv runs the script, so it is the command word
+        script = _script_run(tokens, index)
         if script.replace("\\", "/").endswith(NARRATING_SCRIPT_TAILS):
             return word + " " + basename(script)
         return ""
@@ -240,8 +259,7 @@ def check_stage(segment: str, background: bool) -> str:
     index = _skip_uv_run(tokens, index)
     if basename(tokens[index]) in CHECK_COMMANDS:
         return basename(tokens[index]) if background else ""
-    if SCRIPT_INTERPRETER.match(basename(tokens[index]).removesuffix(".exe")) and _script_operand(
-            tokens, index).replace("\\", "/").endswith(CHECK_SCRIPT_TAIL):
+    if _script_run(tokens, index).replace("\\", "/").endswith(CHECK_SCRIPT_TAIL):
         return CHECK_COMMANDS[0] if background else ""
     if "--confirm" in tokens or not any(flag in tokens for flag in CHECK_FLAGS):
         return ""
@@ -252,15 +270,15 @@ LINT_SCRIPT = re.compile(r"(?:^|/)lint/[^/]+\.py$")
 
 
 def lint_stage(segment: str, background: bool) -> str:
-    """`lint` when one segment runs a script under `lint/` through an interpreter, else ''. The
-    `background` argument keeps the signature of check_stage, the other stage reader."""
+    """`lint` when one segment runs a script under `lint/`, through an interpreter or as the `.py`
+    command word (`uv run lint/x.py`), else ''. The `background` argument keeps the signature of
+    check_stage, the other stage reader."""
     tokens = segment_tokens(segment)
     index = resolve_command(tokens) if tokens else None
     if index is None:
         return ""
     index = _skip_uv_run(tokens, index)
-    if SCRIPT_INTERPRETER.match(basename(tokens[index]).removesuffix(".exe")) and LINT_SCRIPT.search(
-            _script_operand(tokens, index).replace("\\", "/")):
+    if LINT_SCRIPT.search(_script_run(tokens, index).replace("\\", "/")):
         return "lint"
     return ""
 
