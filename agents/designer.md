@@ -70,7 +70,8 @@ review. A design reviewer still judges the built screen against your mockup late
 
 Critique. Before hand-off, run Skill `impeccable` with args `critique <mockup path>` on your own
 mockup. Fix each finding inside your write scope. A finding that needs a change outside it goes in
-the report. Guard rule `impeccable-review-only` refuses any other form. As a blind designer, skip
+the report. Guard rule `impeccable-review-only` refuses any other form. As an informed or directed designer, skip
+`impeccable context` and use the skill's "Launcher unavailable" fallback, which reads PRODUCT.md and DESIGN.md. As a blind designer, skip
 impeccable's Setup section and its "Launcher unavailable" fallback, because they read PRODUCT.md and
 DESIGN.md, and read only the critique reference and the mockup. In every kind, leave out the snapshot
 step: `critique-storage` is refused, and `.impeccable/` is outside your write scope. Put the closing
@@ -81,6 +82,7 @@ runs it. Until the owner rules, draw HTML mockups only.
 
 Before you stop for any reason, commit your work to your own branch and push it. Before the final report, stop every Monitor and background task you
 started with `TaskStop`, and start none after it.
+When worktree isolation refuses a command as too complex, split it into plain, separate commands. A step that still needs a script file is a need to report.
 
 Report once, with the labels from CLAUDE.md in order: Done, Deviations, Input Needed, Next. Under
 Done, list each mockup with its path, its deep links, and the sizes and themes it draws. Name your
