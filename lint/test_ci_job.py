@@ -974,7 +974,9 @@ class SuiteSteps(Job):
     import or a path constant. A suite the diff does not pick prints `not run`. A selector that cannot run reads unknown
     and exits 2, never a pass with no suite run. A listed file (REPORT_TARGETS) still gets each suite that loads it.
     Each fixture suite sits outside the folder of the file it opens, so only its path constant can pick it.
-    A picked suite outside hooks/ and merge/ (janitor/, skills/) prints one `not run` line that says it was picked and why."""
+    A picked suite outside hooks/ and merge/ (janitor/, skills/) prints one `not run` line that says it was picked and why.
+    Under --lint --plan a picked suite step plans as `suite would run <name>`, never `would run`: merge.py reads
+    `would run` lines as lint steps."""
 
     MUTATE_GUARD = os.path.join(HERE, "..", "hooks", "mutate_guard.py")
     LINT = ("--lint", "--base", "origin/main")
@@ -1061,6 +1063,18 @@ class SuiteSteps(Job):
         rc, lines, out = self.run_job(self.WIRING, args=self.LINT)
         self.assertEqual((rc, by_step(lines)), (1, {"Wiring suite": "FAIL"}),
                          "--lint must read a picked suite that exits 1 as FAIL, and exit 1\n" + out)
+
+    def test_a_picked_suite_step_under_lint_plan_plans_as_suite_would_run_and_no_would_run_line_names_it(self):
+        self.make_repo({"hooks/bridge.py": "V = 1\n", "hooks/test_wiring.py": suite_text(("bridge.py",))},
+                       {"hooks/bridge.py": "V = 2\n"}, lint=True)
+        self.assertEqual(self.diff(), ["hooks/bridge.py"], "the scope: the diff holds only the file the suite opens")
+        rc, lines, out = self.run_job(self.WIRING, self.LINT_STEP, args=self.LINT + ("--plan",))
+        self.assertEqual(rc, 0, out)
+        self.assertIn("Python lint", selected(lines), "the control: the lint step in the same job plans as `would run`\n" + out)
+        self.assertIn("suite would run Wiring suite", lines,
+                      "--lint --plan must plan a picked suite step as `suite would run <name>`\n" + out)
+        self.assertNotIn("Wiring suite", selected(lines),
+                         "no `would run ` line may name a picked suite step: merge.py's lint_steps would read it as a lint step\n" + out)
 
     def test_a_changed_suite_that_exits_one_reads_fail_and_the_job_exits_one(self):
         self.make_repo({"hooks/bridge.py": "V = 1\n", "hooks/test_wiring.py": suite_text(("bridge.py",))},
