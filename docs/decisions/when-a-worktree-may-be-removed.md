@@ -12,7 +12,7 @@ Every idle limit reads idle the same way: the newest mtime of the worktree's own
 
 | Idle limit | Route | Case it governs | Why this limit |
 |---|---|---|---|
-| 30 min or more | Agent-end reap, at each SubagentStop | A finished agent's worktree. The ending agent's own worktree waits the same limit. | A follow-up message to a finished agent resumes it in its own worktree. A hook cannot remove the tree its own shells stand in. |
+| 30 min or more | Agent-end reap, at each SubagentStop | A finished agent's worktree. The ending agent's own worktree waits the same limit. | A follow-up message to a finished agent resumes it in its own worktree. A hook cannot remove the tree its own shells stand in, so the ending agent's tree waits for a later hook. |
 | 1 hour | Unattended `--confirm` run: the daily job and SessionEnd | Every worktree this route removes, together with the merged-or-pushed test below. | Unrecorded. |
 | 4 hours | Session-end sweep, agent rule (`sweep.py --confirm`, no `--attended`) | A finished agent's worktree at `<repo>/.claude/worktrees/agent-*`, in every repo. | Unrecorded. |
 | 24 hours | Unattended `--confirm` run | A pushed tree that is not merged. A merged tree goes at 1 hour. | Pushed proves that a copy exists, not that the work is done. The remote keeps every commit. |
@@ -53,14 +53,35 @@ Owner rulings, 2026-10-15 and 2026-10-16 (including the 30 min wait, 00:47 CDT).
 
 At each SubagentStop, the reaper (`janitor/agent_end_reap.py`) removes each finished agent's worktree that is idle 30 min or more. The ending agent's own worktree is not removed at its own end. It waits the same idle limit as the others, and so do its build folders (`build-dirs-reaped-at-agent-end`). A later agent end, or the session-end sweep, removes it. Reason: the hook cannot remove the tree its own shells stand in, so a tree is removed only from a later hook, whose cwd is in another tree. The wait also keeps follow-ups working: a message to a finished agent resumes it in its own worktree, and a removed worktree makes the agent stop (`an-agent-outside-its-home-tree-must-stop`).
 
-Owner ruling, 2026-10-15 19:43 CDT: remove the tree even when it holds git-ignored files, such as build output, packages or `.env.local`. The same ruling wants the agent's own shells stopped first. That half is the debt `finished-agent-shells-keep-tree`.
+Owner ruling, 2026-10-15 19:43 CDT: remove the tree even when it holds git-ignored files, such as build output, packages or `.env.local`. The same ruling wants the agent's own shells stopped first. That half is not built: see "A finished agent's tree" below and the debt `finished-agent-shells-keep-tree`.
 
 A worktree is removed only when all of these hold. A read that cannot tell keeps it.
 
 - It is idle 30 min or more.
 - It is clean: no uncommitted and no untracked file.
-- It is pushed and unlocked.
+- It is pushed and unlocked, or it is locked by this session's host and the agent is proven finished (next section).
 - No live session uses it (read 2 of the reaper, `agent-end-reap-stops-what-a-finished-agent-left`), and no process has a cwd inside it.
+
+#### A finished agent's tree
+
+Coordinator picks, 2026-11-07 14:43 CST and 15:05 CST (pick B), under the owner's ruling of 2026-10-15 19:43 CDT. A finished agent's own shells, such as a dev server, have the live host as parent. At a later agent end, a tree locked by the host is unlocked and removed only when all of these hold:
+
+- The agent's own SubagentStop row is in the agent-end payload log (`state/agent-end-payloads.jsonl`), and the row's `at` is not older than the agent's transcript. An older row is from before the agent was resumed. A missing row keeps the tree.
+- The agent is not listed as running in the SubagentStop payload's `background_tasks` (each entry has `id`, `type`, `status`, `agent_type` and `description`; `id` is the agent id). A running entry keeps the tree. A missing or malformed field keeps it too. This is an extra safety, not the proof.
+- `<transcript_path minus .jsonl>/subagents/agent-<id>.jsonl` exists and has been idle 30 min or more.
+- The tree is clean and pushed. A dirty tree is always kept.
+- No process has a cwd inside the tree.
+
+Any process inside keeps the tree, and nothing is stopped. The reaper stops no shell yet. Why:
+
+- No process can be shown to be the agent's own. A session's own process (the host, its tool shells, a sibling lane's shell) has a cwd and a parent chain like the agent's shell. A rule that stops the agent's shells would stop a process that is not the agent's.
+- `background_tasks` is not proof that an agent still runs. 64 of 213 mid-run (payload, agent) pairs were unlisted in `background_tasks`, with quiet gaps of 6.4-16.2 min (measured 2026-11-07 from the session payload log). That is why the stop row is required.
+
+Stopping the agent's own shells waits for a per-agent process marker (debt `finished-agent-shells-keep-tree`, fix `step:agent-process-marker`). Until then a tree with any process is kept.
+
+The live lock reads `claude agent agent-<id> (pid N start S)`, where S is clock ticks since boot, field 22 of `/proc/<N>/stat` (measured: host 159, start 181). On Linux the host proof matches S against that field: a match is the live host, a mismatch or a dead pid is a stale lock. A platform that cannot read it (macOS, Windows, where the unit is unmeasured) leaves the host unproven: the lock stays and the tree is kept. The lock is re-read and lifted just before the removal; a failed re-read or unlock keeps the tree. An unlocked tree keeps the rule above.
+
+Home: `janitor/agent_end_reap.py` (`stopped_agents`, `agent_finished`), `janitor/sweep.py` (`decide_worktree`, `finished_host_lock`).
 
 Session start warns when more than 50 agent worktrees exist. An agent leaves its worktree clean and pushed, and a later agent end removes it. The builder and test-author agent definitions say so.
 

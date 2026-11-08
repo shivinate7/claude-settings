@@ -427,10 +427,33 @@ def _is_primary_checkout(entry_path: str):
 AGENT_LOCK_RE = re.compile(r"^claude agent agent-[\w-]+ \(pid (\d+)(?: start (.+))?\)$")
 
 
+def _ticks_lock_stale(pid: int, ticks: int):
+    """The `stale_agent_lock_verdict` answer for a lock `(pid N start S)` whose S is clock ticks since
+    boot, the harness's own form (measured: host pid 159 holds start 181, field 22 of /proc/159/stat).
+    Linux only: True when pid N is gone or its field 22 is not S (the pid was reused), False when it is
+    S. None where /proc cannot answer, on any other platform too, since its unit there is unmeasured:
+    the host is then unproven, and the caller keeps the tree and stops nothing."""
+    if not sys.platform.startswith("linux"):
+        return None
+    try:
+        with open("/proc/%d/stat" % pid, encoding="utf-8") as handle:
+            text = handle.read()
+    except (FileNotFoundError, ProcessLookupError):
+        return True
+    except OSError:
+        return None
+    try:
+        return int(text.rsplit(")", 1)[1].split()[22 - 3]) != ticks  # fields after ')' start at field 3
+    except (ValueError, IndexError):
+        return None
+
+
 def stale_agent_lock_verdict(reason: str):
-    """True when REASON is a claude agent lock that may go. Two forms: the Agent tool's own
-    lock `claude agent agent-<id> (pid N start <date>)`, and `claude agent agent-<id> (pid N)`
-    with no start time. N is the HOST claude process, not the agent.
+    """True when REASON is a claude agent lock that may go. Three forms: the Agent tool's own
+    lock `claude agent agent-<id> (pid N start <date>)`, the harness's live form
+    `claude agent agent-<id> (pid N start <ticks>)` (S is clock ticks since boot; Linux only,
+    `_ticks_lock_stale`), and `claude agent agent-<id> (pid N)` with no start time. N is the HOST
+    claude process, not the agent.
     A lock goes when N is dead; with a start time, also when N is alive with another start time (pid
     reuse). LIMIT: with no start time there is no pid-reuse check, so a dead host whose pid a live
     process now holds keeps its lock. False when the holder still runs, or the reason is any other
@@ -439,6 +462,8 @@ def stale_agent_lock_verdict(reason: str):
     if not found:
         return False
     pid, start = int(found.group(1)), found.group(2)
+    if start is not None and start.isdigit():  # the harness's live form: clock ticks since boot
+        return _ticks_lock_stale(pid, int(start))
     locked_ms = None
     if start is not None:
         try:
@@ -759,7 +784,8 @@ def _idle_then_dirty(entry: dict, attended: bool):
 
 
 def decide_worktree(where: str, entry: dict, attended: bool = False, agent_rule: bool = True,
-                    batch=None, fast: bool = False, own_lock_rule: bool = True):
+                    batch=None, fast: bool = False, own_lock_rule: bool = True,
+                    finished_host_lock: bool = False):
     """Return one decision dict: {"path", "action": "reap"|"keep", "reason"}. Strict by default: a
     worktree also needs to be merged and idle 1 hour, so a stale installed job fails safe.
     ATTENDED (a person's run) skips those two keeps. AGENT_RULE (on by default) lets a clean,
@@ -768,10 +794,23 @@ def decide_worktree(where: str, entry: dict, attended: bool = False, agent_rule:
     default branch. FAST reads no remote and no push state: the tree goes only when its HEAD is
     in the default branch (and idle 1 hour, unless attended), and with no BATCH nothing is
     proven, so it stays. OWN_LOCK_RULE (on by default) frees the calling session's own agent
-    lock once the tree is clean, merged, idle 30 minutes and unused; the agent-end reap turns it off."""
+    lock once the tree is clean, merged, idle 30 minutes and unused; the agent-end reap turns it off.
+    FINISHED_HOST_LOCK (off by default; only the agent-end reap sets it, for a tree whose agent is
+    proven finished) lets a live agent lock pass when its holder is this process's own ancestor
+    (`own_agent_lock_verdict`, the calling session's host). A tree it passes still needs every other
+    check, and any process inside keeps it: nothing is stopped. It is then `reap` with `unlock` and
+    `host_lock` set."""
     lock_idle = None  # an agent lock's idle is read even when attended, and before any status
     if AGENT_LOCK_RE.match(entry.get("locked_reason") or ""):
         lock_idle = entry["idle"] if "idle" in entry else worktree_idle_seconds(entry["path"])
+    # A finished agent's host lock passes the lock check below by hiding the lock from it; the
+    # holder is kept for the unlock.
+    host_lock, host_holder = False, None
+    if finished_host_lock and entry.get("locked_reason") is not None:
+        host_holder = entry["locked_reason"]
+        host_lock = own_agent_lock_verdict(host_holder) is True
+        if host_lock:
+            entry = dict(entry, locked_reason=None)
     if "idle" in entry:  # a pass's sort read it before any status ran: one read per tree
         idle, path = (None if attended else entry["idle"]), entry["path"]
         dirty = git_reads.porcelain(path)
@@ -842,6 +881,9 @@ def decide_worktree(where: str, entry: dict, attended: bool = False, agent_rule:
     if inside:
         return {"path": path, "action": "keep",
                 "reason": "process-inside: pid %s" % ", ".join(str(p) for p in sorted(inside))}
+    if host_lock:
+        return {"path": path, "action": "reap", "unlock": True, "host_lock": True,
+                "lock_reason": host_holder, "reason": "removable: finished agent, host lock lifted"}
     if stale_agent_lock or own_lock:
         return {"path": path, "action": "reap",
                 "reason": "removable: " + ("stale agent lock" if stale_agent_lock else "own agent lock"),
@@ -858,7 +900,9 @@ def decide_agent_end_worktree(where: str, entry: dict, min_idle=None):
     """The keep-or-reap decision for one `.claude/worktrees/agent-*` tree at agent end. MIN_IDLE is
     the seconds of git quiet the tree needs (None: none). Idle is read first, or taken from
     ENTRY["idle"] when the caller read it: `git status` can rewrite the index and make every tree
-    look active. The rest is
+    look active. ENTRY["finished"] says the caller proved the agent finished
+    (`agent_end_reap.agent_finished`): only then may a live host lock pass. No process is ever stopped:
+    any process inside keeps the tree. The rest is
     `decide_worktree` with the person's run flag, which skips its merged and idle keeps and keeps
     the clean, lock, session, live-ls-remote and process checks. Then HEAD must be on a
     remote-tracking ref. Any failed read keeps. A tree an earlier remove left half done
@@ -873,7 +917,8 @@ def decide_agent_end_worktree(where: str, entry: dict, min_idle=None):
             return {"path": path, "action": "keep",
                     "reason": "recently-active: git activity %d minutes ago" % (idle // 60)}
     _restore_cut_short(where, entry)
-    decision = decide_worktree(where, entry, attended=True, own_lock_rule=False)
+    decision = decide_worktree(where, entry, attended=True, own_lock_rule=False,
+                               finished_host_lock=bool(entry.get("finished")))
     if decision["action"] != "reap":
         return decision
     return _remote_tracking_keep(path) or decision
