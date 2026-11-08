@@ -134,9 +134,15 @@ def _span_end(text: str, start: int, escapes: bool) -> int:
 # `ssh host "..."`.
 SCRIPT_RUNNER = re.compile(
     r"(?:^|[\s;&|(])(?:(?:(?:ba|z|da|k)?sh\s+(?:-\w+\s+)*-\w*c)|eval|ssh(?:\s+[^\s;&|]+)*)\s*$")
-# ... or to an interpreter that runs it: `python3 -c "..."`, `node -e "..."`, `perl -e "..."`.
+# ... or to an interpreter that runs it: `python3 -c "..."`, `node -e "..."`, `perl -e "..."`,
+# `php -r "..."`.
 INTERPRETER_RUNNER = re.compile(
-    r"(?:^|[\s;&|(])(?:python[\d.]*|node(?:js)?|ruby|perl|php|deno)\s+(?:-\w+\s+)*-\w*[ce]\s*$")
+    r"(?:^|[\s;&|(])(?:(?:python[\d.]*|node(?:js)?|ruby|perl|php|deno)\s+(?:-\w+\s+)*-\w*[ce]"
+    r"|php\s+(?:-\w+\s+)*-\w*r|deno\s+(?:-\w+\s+)*eval)\s*$")
+# An argv call: `new Deno.Command("git", {args: ["push", "-f"]})` names its program and its
+# arguments as separate strings, so the pairs of one call are read as one command line.
+ARGV_CALL = re.compile(r"\bDeno\.Command\s*\(\s*$")
+ARGV_GAP = re.compile(r"[\s,]*(?:\{\s*args\s*:\s*\[)?[\s,]*")
 # Inside a script, a call that runs its string argument as a command, even inside a print.
 CALL_RUNNER = re.compile(
     r"(?:\bos\.(?:system|popen|exec\w*|spawn\w*)|\bsubprocess\.\w+|\bPopen|\bexec\w*|\bsystem|\bpopen)"
@@ -166,17 +172,30 @@ def _nested_commands(span: str, before: str = "") -> str:
     (`before` is the segment text ahead of the span). Give each command its own line, so the
     words that follow it in the script (`print(\\"+1\\")`) are not its arguments."""
     lines, piece, inner, run, index = ["\n"], [], False, False, 1
+    words, argv, closed = [], False, 0
     script = (SCRIPT_RUNNER.search(before) or INTERPRETER_RUNNER.search(before)) is not None
     body = span[:-1]
+
+    def emit():
+        nonlocal words
+        if words:
+            lines.append(" ".join(words) + "\n")
+            words = []
+
     while index < len(body):
         if body.startswith('\\"', index):
             if inner:
                 if run:
-                    lines.append("".join(piece) + "\n")
+                    # an argv call's pairs gather as words; any other pair is a line of its own
+                    (words if argv else lines).append("".join(piece) if argv else "".join(piece) + "\n")
                 piece = []
+                closed = index + 2
             else:
                 ahead = body[:index]
-                run = CALL_RUNNER.search(ahead) is not None or (script and not _printed(ahead))
+                if not (argv and ARGV_GAP.fullmatch(body[closed:index])):
+                    emit()
+                    run = CALL_RUNNER.search(ahead) is not None or (script and not _printed(ahead))
+                    argv = run and ARGV_CALL.search(ahead) is not None
             inner = not inner
             width = 2
         else:
@@ -185,7 +204,8 @@ def _nested_commands(span: str, before: str = "") -> str:
                 piece.append(body[index:index + width])
         index += width
     if inner and run:
-        lines.append("".join(piece) + "\n")
+        (words if argv else lines).append("".join(piece) if argv else "".join(piece) + "\n")
+    emit()
     return "".join(lines)
 
 
