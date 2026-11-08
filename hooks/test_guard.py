@@ -13486,7 +13486,9 @@ def _build_dotroot():
                         # A root .py that no test pattern matches, so a shell glob `*.py` expands to a file.
                         "main.py": "x = 1\n",
                         # hooks/ holds a test beside product code, as this repo's hooks/ folder does.
-                        "hooks/test_a.py": "def test_a():\n    assert True\n", "hooks/guard.py": "x = 1\n"})
+                        "hooks/test_a.py": "def test_a():\n    assert True\n", "hooks/guard.py": "x = 1\n",
+                        # docs/ holds no test. Its gen.py is product code, so a walk of docs reads one file.
+                        "docs/gen.py": "x = 1\n"})
 
 
 lazy_fixture([DOTROOT], _build_dotroot)
@@ -13543,6 +13545,20 @@ for _name, _command in (
 ):
     sh("builder-test: shell write, %s, is refused" % _name, _command, "deny", rule=BT,
        carries=("test-author",), **DR)
+# A write that names hooks/ through a brace list, the absolute folder, or a cd into docs is a write to
+# hooks/test_a.py, so each form is refused. HOOKS_ABS is the fixture's own path, slashed for Windows.
+HOOKS_ABS = slash(os.path.join(DOTROOT, "hooks"))
+for _name, _command in (
+    ("grep -rl over a brace list of docs and hooks, sed -i", "grep -rl old {docs,hooks} | xargs sed -i s/a/b/"),
+    ("find a brace list of docs and hooks for test_*.py, sed -i",
+     "find {docs,hooks} -name 'test_*.py' | xargs sed -i s/a/b/"),
+    ("grep -rl over the absolute hooks folder, sed -i", "grep -rl old " + HOOKS_ABS + " | xargs sed -i s/a/b/"),
+    ("find the absolute hooks folder for test_*.py, sed -i",
+     "find " + HOOKS_ABS + " -name 'test_*.py' | xargs sed -i s/a/b/"),
+    ("cd docs, then grep -rl over ../hooks, sed -i", "cd docs && grep -rl old ../hooks | xargs sed -i s/a/b/"),
+):
+    sh("builder-test: shell write, %s, is refused" % _name, _command, "deny", rule=BT,
+       carries=("test-author",), **DR)
 # A root with no tests in it is still allowed, in the same checkout.
 sh("builder-test: shell write, grep -rl over src piped to xargs, sed -i, is allowed",
    "grep -rl old src | xargs sed -i s/a/b/", "allow", **DR)
@@ -13561,12 +13577,22 @@ sh("builder-test: shell write, sed -i over the src/*.py glob, is allowed",
 # crossed the `/` would name tests/test_a.py.
 sh("builder-test: shell write, sed -i over the *.py glob at the root, is allowed",
    "sed -i s/a/b/ *.py", "allow", **DR)
-# A find or a loop over src names product files only, since src holds no test. Pins: each passes today.
+# A find or a loop over docs names product files only: docs holds gen.py, and no test.
 for _name, _command in (
-    ("find src for *.py piped to xargs, sed -i", "find src -name '*.py' | xargs sed -i s/a/b/"),
-    ("for loop over src/*.py, sed -i on the loop variable", 'for f in src/*.py; do sed -i s/a/b/ "$f"; done'),
+    ("find docs for *.py piped to xargs, sed -i", "find docs -name '*.py' | xargs sed -i s/a/b/"),
+    ("for loop over docs/*.py, sed -i on the loop variable", 'for f in docs/*.py; do sed -i s/a/b/ "$f"; done'),
 ):
     sh("builder-test: shell write, %s, is allowed" % _name, _command, "allow", **DR)
+# A glob that stops short of test_*.py lists guard.py only, which is product code, so both are allowed.
+for _name, _command in (
+    ("grep -rl over hooks with --include guard*.py, sed -i",
+     "grep -rl old hooks --include='guard*.py' | xargs sed -i s/a/b/"),
+    ("find hooks for guard*.py, sed -i", "find hooks -name 'guard*.py' | xargs sed -i s/a/b/"),
+):
+    sh("builder-test: shell write, %s, is allowed" % _name, _command, "allow", **DR)
+# The same folder with *.py names test_a.py, so the find stays refused. It is the control beside the allows.
+sh("builder-test: shell write, find hooks for *.py piped to xargs, sed -i, is refused",
+   "find hooks -name '*.py' | xargs sed -i s/a/b/", "deny", rule=BT, carries=("test-author",), **DR)
 # Pin for the `""` skip after a cd: the script word of sed -i is data, and the file it writes is
 # ../src/app.py, outside the tests folder the cd entered. Without the skip, the data word reads as a
 # test in tests/, so the case is refused.
