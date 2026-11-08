@@ -95,7 +95,7 @@ transcript (the result of a Bash run of build.py) has an entry line, `stalled st
 `stalled step: item <n> (...)`. An unknown line is no entry. The hold also covers a Stop after a refusal
 (stop_hook_active), which it releases only when the report's Input Needed section names every entry's id and item
 number. An owner `override` typed for the session lifts it, taken as guard_core's refuse() takes it, and the Stop
-it lifts spends a one-act override. A held Stop never carries the report's correction tail. A build run through
+it lifts spends a one-act override. A held Stop carries the report's correction tail only when the report has a defect of its own. A build run through
 verdict is read from the log file verdict printed (a missing log reads as no entries for that run). Cost: no
 transcript read of its own on a plain Stop (it shares main's read). Only when a Bash run of build.py is in it: the
 build module's import, and one log read for a verdict run. Only when an entry prints: the own-record read and one
@@ -1885,22 +1885,63 @@ RUNNER_SEND_REASON = (
     "Batch runner hold: the review sent #%d back to %s and no send_message to that session names #%d. Send it, "
     "then end; or name the PR under Input Needed to escalate (decision session-tiers, the batch runner)."
 )
-# A Bash command that runs the merge tool: `merge` or `merge.py` as a word, past any path. A `merge --idle-lanes` run
-# is the lane sweep. A grep or cat of merge.py names the word too, but its result holds no merged line to read.
-MERGE_RUN_RE = re.compile(r"(?:^|[\s/;&|(])merge(?:\.py)?(?=[\s;&|)]|$)")
-IDLE_RUN_RE = re.compile(r"(?:^|[\s/;&|(])merge(?:\.py)?\s[^;&|\n]*--idle-lanes(?=[\s;&|)]|$)")
+# A cheap prefilter: a Bash command that has `merge` or `merge.py` as a word. The segment splitter then decides which
+# segments start with the merge tool (_merge_calls).
+MERGE_RUN_RE = re.compile(r"""(?:^|[\s/;&|(])merge(?:\.py)?(?=[\s;&|)"']|$)""")
 COMPLETION_RE = re.compile(r"<tool-use-id>([^<\s]+)</tool-use-id>.*?<output-file>([^<]+)</output-file>", re.S)
+# Words a segment may put before the merge tool: a runner (python3, verdict), its flags and environment assignments.
+LAUNCHER_RE = re.compile(r"(?:python[\d.]*|verdict)$")
+ENV_WORD_RE = re.compile(r"\w+=")
 
 
 def _merge_constants():
-    """(MERGED_LINE, REVIEW_SEND_BACK) from merge/merge.py, the one emitter, loaded only when a merge run is in
-    the transcript."""
+    """(MERGED_LINE, IDLE_SUMMARY, NO_LIST, REVIEW_SEND_BACK) from merge/merge.py, the one emitter, loaded only when a
+    merge run is in the transcript."""
     import importlib.util
     path = os.path.join(HERE, "..", "merge", "merge.py")
     spec = importlib.util.spec_from_file_location("merge_for_hold", path)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
-    return module.MERGED_LINE, module.REVIEW_SEND_BACK
+    return module.MERGED_LINE, module.IDLE_SUMMARY, module.NO_LIST, module.REVIEW_SEND_BACK
+
+
+def _line_re(template):
+    """A regex for a line that starts with `template`, its {n} and {commit} fields read as a number and a word."""
+    return re.compile("^" + re.escape(template).replace(re.escape("{n}"), r"(\d+)").replace(re.escape("{commit}"), r"\w+"),
+                      re.M)
+
+
+def _merge_tool_args(segment):
+    """The arguments of a segment that starts with the merge tool (merge, a path ending /merge, merge.py), past a
+    launcher such as `python3` or `verdict`, else None."""
+    tokens = guard.segment_tokens(segment)
+    i = 0
+    while tokens and i < len(tokens):
+        word = tokens[i]
+        if (LAUNCHER_RE.match(os.path.basename(word)) or ENV_WORD_RE.match(word)
+                or (i and word.startswith("-") and LAUNCHER_RE.match(os.path.basename(tokens[i - 1])))):
+            i += 1
+        else:
+            break
+    if tokens and i < len(tokens) and os.path.basename(tokens[i]) in ("merge", "merge.py"):
+        return tokens[i + 1:]
+    return None
+
+
+def _merge_calls(command):
+    """The argument list of each segment of `command` that starts with the merge tool, split as the guard splits. A
+    merge named inside another command's arguments or quotes (a grep, a comment body) is no call."""
+    global guard
+    if guard is None:
+        _load_guard()
+    if guard is None:
+        return []
+    calls = []
+    for segment in guard.split_segments(guard.strip_heredoc_bodies(command)):
+        args = _merge_tool_args(segment)
+        if args is not None:
+            calls.append(args)
+    return calls
 
 
 def _run_text(shown):
@@ -1910,50 +1951,46 @@ def _run_text(shown):
 
 
 def _merge_runs(records):
-    """[(record index, command, text)] for each finished Bash run of the merge tool, in order. `text` is the result a
-    direct run shows, the output file a background run's completion record names, or the log a verdict line names; it
-    is None when that file is missing or unreadable."""
-    calls, runs = {}, []
-    for i, rec in enumerate(records):
+    """(runs, sends) in transcript order. A run is (seq, calls, text, refused) for each finished Bash run whose command
+    names the merge tool: `calls` are the argument lists of its merge segments, `text` is the result a direct run shows,
+    the output file a background run's completion record names, or the log a verdict line names (None when that file
+    is missing or unreadable), `refused` is a hook refusal of the call. A send is (seq, session id, message) for each
+    claude-code-remote send_message. `seq` counts tool calls in the order the model issued them, so two calls in one
+    assistant message keep their order; a background run counts from its completion record."""
+    pending, runs, sends, seq = {}, [], [], 0
+    for rec in records:
         if rec.get("isSidechain"):
             continue
         for use in tool_uses(rec):
+            seq += 1
             inp = use.get("input")
-            if use.get("name") == "Bash" and isinstance(inp, dict) and MERGE_RUN_RE.search(str(inp.get("command", ""))):
-                calls[use.get("id")] = (str(inp.get("command", "")), bool(inp.get("run_in_background")))
+            if not isinstance(inp, dict):
+                continue
+            if use.get("name") == SEND_MESSAGE and isinstance(inp.get("session_id"), str):
+                sends.append((seq, inp["session_id"], str(inp.get("message", ""))))
+            command = inp.get("command")
+            if use.get("name") == "Bash" and isinstance(command, str) and MERGE_RUN_RE.search(command):
+                calls = _merge_calls(command)
+                if calls:
+                    pending[use.get("id")] = (seq, calls, bool(inp.get("run_in_background")))
         for result in tool_results(rec):
-            call = calls.get(result.get("tool_use_id"))
-            if call and not call[1]:  # a background run's result holds no output: its completion record names the file
-                runs.append((i, call[0], _run_text(_result_text(result.get("content")))))
+            call = pending.get(result.get("tool_use_id"))
+            if call and not call[2]:  # a background run's result holds no output: its completion record names the file
+                shown = _result_text(result.get("content"))
+                refused = bool(result.get("is_error")) and "hook error" in shown
+                runs.append((call[0], call[1], _run_text(shown), refused))
         attachment = rec.get("attachment")
         prompt = attachment.get("prompt") if rec.get("type") == "attachment" and isinstance(attachment, dict) else None
         found = COMPLETION_RE.search(prompt) if isinstance(prompt, str) else None
-        if found and calls.get(found.group(1), (None, False))[1]:
+        if found and pending.get(found.group(1), (0, 0, False))[2]:
+            seq += 1
             try:
                 with open(found.group(2).strip(), encoding="utf-8", errors="replace") as handle:
                     text = _run_text(handle.read())
             except Exception:
                 text = None
-            runs.append((i, calls[found.group(1)][0], text))
-    return runs
-
-
-def _owed_sends(records, backs):
-    """The (n, session id) of each send-back line in `backs` ((record index, n, id), newest per pair) that no later
-    send_message to that id names. Only the claude-code-remote send_message counts; #640 does not name #64."""
-    owed = []
-    for at, n, sid in backs:
-        named = re.compile(r"#%d(?!\d)" % n)
-        sent = False
-        for rec in records[at + 1:]:
-            for use in tool_uses(rec):
-                inp = use.get("input")
-                if (use.get("name") == SEND_MESSAGE and isinstance(inp, dict) and inp.get("session_id") == sid
-                        and named.search(str(inp.get("message", "")))):
-                    sent = True
-        if not sent:
-            owed.append((n, sid))
-    return owed
+            runs.append((seq, pending[found.group(1)][1], text, False))
+    return sorted(runs, key=lambda run: run[0]), sends
 
 
 def runner_hold(hook, records, active):
@@ -1961,55 +1998,71 @@ def runner_hold(hook, records, active):
     hooks/guard_merge.py _own_tier_proved) that owes an act, else ''. Two acts are owed:
 
     - A merge result (merge.MERGED_LINE, `merge: #N merged as <sha>.`) newer than the newest `merge --idle-lanes` run:
-      the runner runs it and archives each lane it lists (decision session-tiers). Any --idle-lanes result after the
-      merge releases it, exit 1 included.
-    - A send-back line (merge.REVIEW_SEND_BACK, then `#N <session id> (<reason>)`, from `merge --reviewed`) with no
+      the runner runs it and archives each lane it lists (decision session-tiers). The merge counts only from a run with
+      a segment that starts with the merge tool and gives `N --confirm`, so a merged line quoted in a grep or a log
+      never holds. The release counts only from a segment-start `merge --idle-lanes` run whose result is no hook refusal
+      and holds the summary line (merge.IDLE_SUMMARY) or merge's own no-list line (merge.NO_LIST), exit 1 included. A
+      `gh pr comment` that names the command releases nothing. Order is the order the model issued the calls, so
+      two calls in one assistant message keep theirs.
+    - A send-back line (merge.REVIEW_SEND_BACK, then `#N <session id> (<reason>)`, from a `merge --reviewed` run) with no
       later claude-code-remote send_message to that session id that names #N. `no session` in the id's place is not
-      owed.
+      owed. This half is dormant until lane reviewed-sends-back's `merge --reviewed` prints the line.
 
     A Stop after a refusal releases each entry whose PR the report's Input Needed names. An owner override lifts the
     hold, and a one-act override is spent here, after every other release has been ruled out. Fails open on any error.
-    Known limit: a merge run through verdict that PASSES prints no log path (bin/verdict), so its result is unread; a
-    run that exits 1 shows the log and is read.
-    Cost: no process, no file written; it reads the transcript the Stop already read. Only when a Bash command names
-    the merge tool: merge/merge.py's import, and one log or output file read for a verdict or background run. Only when
-    an act is owed: the own-record read and one override read."""
+    Known limits (debts, not fixed): a merge whose output is redirected or piped away (`> out.txt`, `| tail`) shows
+    no merged line, so it holds nothing; and a merge run through verdict that PASSES prints no log path (bin/verdict),
+    so its result is unread. A verdict run that exits 1 shows the log and is read.
+    Cost: no process; it reads the transcript the Stop already read. Only when a Bash command names the merge tool:
+    the imports of guard_merge, the guard's parser and merge/merge.py, and one log or output file read for a verdict or background
+    run. Only when an act is owed: the own-record read in _own_tier_proved (a second open of the transcript), and one
+    override read, which writes the override's claim marker when a one-act override lifts the hold. No other file is
+    written."""
     try:
-        runs = _merge_runs(records)
+        if not any(MERGE_RUN_RE.search(str((use.get("input") or {}).get("command", "")))
+                   for rec in records if not rec.get("isSidechain") for use in tool_uses(rec)
+                   if use.get("name") == "Bash" and isinstance(use.get("input"), dict)):
+            return ""  # no Bash command names the merge tool: nothing is loaded
+        # Loaded before the shell parser, which loads its own copy of guard_merge: an import error here fails open.
+        sys.path.insert(0, os.path.join(HERE, "..", "hooks"))
+        from guard_merge import _own_tier_proved
+        runs, sends = _merge_runs(records)
         if not runs:
             return ""
-        merged_line, back_prefix = _merge_constants()
-        merged_re = re.compile(
-            "^" + re.escape(merged_line).replace(re.escape("{n}"), r"(\d+)").replace(re.escape("{commit}"), r"\w+"), re.M)
+        merged_line, idle_summary, no_list, back_prefix = _merge_constants()
+        merged_re, idle_re = _line_re(merged_line), _line_re(idle_summary)
         back_re = re.compile(r"^%s#(\d+) (?!no session\b)(\S+) \(" % re.escape(back_prefix), re.M)
-        idle_at, merges, backs = -1, [], {}
-        for at, command, text in runs:
-            if IDLE_RUN_RE.search(command):
-                idle_at = at
-            for n in merged_re.findall(text or ""):
-                merges.append((at, int(n)))
-            for n, sid in back_re.findall(text or ""):
-                backs[(int(n), sid)] = at
+        idle_at, merges, backs = 0, [], {}
+        for at, calls, text, refused in runs:
+            text = text or ""
+            if (any("--idle-lanes" in args for args in calls) and not refused
+                    and (idle_re.search(text) or no_list in text)):
+                idle_at = max(idle_at, at)
+            confirmed = {int(word) for args in calls if "--confirm" in args for word in args if word.isdigit()}
+            merges += [(at, int(n)) for n in merged_re.findall(text) if int(n) in confirmed]
+            if any("--reviewed" in args for args in calls):
+                for n, sid in back_re.findall(text):
+                    backs[(int(n), sid)] = at
         merged = []
         for at, n in merges:
             if at > idle_at and n not in merged:
                 merged.append(n)
-        sends = _owed_sends(records, [(at, n, sid) for (n, sid), at in backs.items()])
+        owed = [(n, sid) for (n, sid), at in backs.items()
+                if not any(s_at > at and s_sid == sid and re.search(r"#%d(?!\d)" % n, message)
+                           for s_at, s_sid, message in sends)]
         if active:  # a Stop after a refusal: an entry whose PR Input Needed names is released
             section = input_needed_section(last_reply(hook))
             merged = [n for n in merged if not re.search(r"#%d(?!\d)" % n, section)]
-            sends = [(n, sid) for n, sid in sends if not re.search(r"#%d(?!\d)" % n, section)]
-        if not merged and not sends:
+            owed = [(n, sid) for n, sid in owed if not re.search(r"#%d(?!\d)" % n, section)]
+        if not merged and not owed:
             return ""
-        sys.path.insert(0, os.path.join(HERE, "..", "hooks"))
-        from guard_merge import _own_tier_proved
         if not _own_tier_proved(hook.get("transcript_path"), RUNNER_TIER):
             return ""
         import override
         if override.take(hook.get("session_id"), None, override.now()) in override.LIFTS:
             return ""
         reasons = [RUNNER_MERGE_REASON % ", ".join("#%d" % n for n in merged)] if merged else []
-        reasons += [RUNNER_SEND_REASON % (n, sid, n) for n, sid in sends]
+        reasons += [RUNNER_SEND_REASON % (n, sid, n) for n, sid in owed]
         return " ".join(reasons)
     except (Exception, SystemExit) as exc:
         print("runner hold failed open: %s: %s" % (type(exc).__name__, exc), file=sys.stderr)
@@ -2053,8 +2106,8 @@ def main():
         if held:
             reasons.insert(0, hold_reason(hold, runner))
         if reasons:
-            tail = "" if held else CORRECTION_TAIL  # a held Stop is refused for its entries, not for the report's shape
-            print(json.dumps({"decision": "block", "reason": " ".join(reasons) + " (rule reports-order-of-labels)" + tail}))
+            # Here a held Stop that reaches this line has another defect in `reasons` (a held Stop with none returned above), so it keeps the tail.
+            print(json.dumps({"decision": "block", "reason": " ".join(reasons) + " (rule reports-order-of-labels)" + CORRECTION_TAIL}))
         return
     # A marker left by a rewrite that never ran must not reach a later turn: only the Stop
     # straight after a missing-report block may consume one.
@@ -2139,10 +2192,11 @@ def main():
         except Exception:
             pass
         try:
+            other_defect = bool(pending) or any(pick)  # a defect besides the holds: the tail still tells how to fix it
             pick.append(refusal)
             pick = [r for r in pick if r]
             if pick:
-                reason = " ".join(pick) + " (rule reports-order-of-labels)" + (CORRECTION_TAIL if report_shape_ok(text) and not held else "")
+                reason = " ".join(pick) + " (rule reports-order-of-labels)" + (CORRECTION_TAIL if report_shape_ok(text) and (other_defect or not held) else "")
                 finish({"decision": "block", "reason": reason})
             else:
                 finish({"systemMessage": note} if note else None)
@@ -2198,10 +2252,11 @@ def main():
         reasons.append(
             "Cite-gloss guard: " + repr(cite) + " is a record id with no short gloss. Write the id "
             "plus a few words, like \"D12, short titles for records\".")
+    other_defect = bool(pending) or bool(reasons)  # a defect besides the holds: the tail still tells how to fix it
     if refusal:
         reasons.append(refusal)
     if reasons:
-        reason = " ".join(reasons) + " (rule reports-order-of-labels)" + (CORRECTION_TAIL if shape_ok and not held else "")
+        reason = " ".join(reasons) + " (rule reports-order-of-labels)" + (CORRECTION_TAIL if shape_ok and (other_defect or not held) else "")
         if not shape_ok:
             write_marker(hook, last_human_idx)
         finish({"decision": "block", "reason": reason})

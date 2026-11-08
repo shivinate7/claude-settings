@@ -108,6 +108,8 @@ REVIEW_CITE = "(decision pr-review-record, a review record names the head it rev
 OFF_CITE = "(decision standing-merge-grant, the owner's grant for a repo decides whether a session merges there)"
 
 MERGED_LINE = "merge: #{n} merged as {commit}."  # the one home of the merged line; lint/report_guard.py runner_hold reads it back
+IDLE_SUMMARY = "merge: {n} lanes to archive"  # the start of merge --idle-lanes' summary line; lint/report_guard.py runner_hold reads it back
+NO_LIST = "No list was made."  # the end of each merge --idle-lanes line that says no list was made; runner_hold reads it back
 REVIEW_SEND_BACK = "send back: "  # the prefix of merge --reviewed's send-back line, read by lint/report_guard.py runner_hold
 SH_TIMEOUT = None  # seconds; the guard sets it, so a hung `gh` cannot outlast its hook
 
@@ -3271,7 +3273,7 @@ def idle_lanes(live):
     """merge --idle-lanes: print lane lines (a lane to archive) and `hold (` lines (a lane not to archive now: no cs-step tag, a step off the record branch with no Step trailer on main, or a step still doing under the lane; the last clears when the step moves or closes), then the summary line. A lane that waits (a step not done, an open pull, an open item) prints no line. Exit 1 with no summary when the
     live file is not named or the roadmap build cannot be loaded or run, so an unread list never reads as an empty one."""
     if not live:
-        print("merge: --idle-lanes needs --live FILE, the publisher's live-work file. No list was made.", file=sys.stderr)
+        print("merge: --idle-lanes needs --live FILE, the publisher's live-work file. " + NO_LIST, file=sys.stderr)
         return 1
     try:
         import importlib.util
@@ -3279,16 +3281,16 @@ def idle_lanes(live):
         build = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(build)
     except (Exception, SystemExit) as e:  # a build that exits at import is unloadable too
-        print(f"merge: cannot load the roadmap build {IDLE_BUILD}: {type(e).__name__}: {e}. No list was made.", file=sys.stderr)
+        print(f"merge: cannot load the roadmap build {IDLE_BUILD}: {type(e).__name__}: {e}. {NO_LIST}", file=sys.stderr)
         return 1
     c, root = sh(["git", "rev-parse", "--show-toplevel"])
     if c:
-        print("merge: not in a git checkout. No list was made.", file=sys.stderr)
+        print("merge: not in a git checkout. " + NO_LIST, file=sys.stderr)
         return 1
     try:
         entries = build.idle_lanes_report(root, live)
     except (Exception, SystemExit) as e:
-        print(f"merge: the roadmap build could not read the lanes: {type(e).__name__}: {e}. No list was made.", file=sys.stderr)
+        print(f"merge: the roadmap build could not read the lanes: {type(e).__name__}: {e}. {NO_LIST}", file=sys.stderr)
         return 1
     holds = [x for x in entries if x.startswith("hold (")]
     lanes = [x for x in entries if not x.startswith("unknown (") and x not in holds]
@@ -3297,7 +3299,7 @@ def idle_lanes(live):
     if not unread:
         held = f", {len(holds)} held" if holds else ""
         tail = "Run get_session on each lane line alone, then archive it; never archive a hold line." if holds else "Run get_session on each alone, then archive it."
-        entries = [*entries, f"merge: {len(lanes)} lanes to archive{held}. {tail}"]
+        entries = [*entries, f"{IDLE_SUMMARY.format(n=len(lanes))}{held}. {tail}"]
     say(*entries)
     return 1 if unread else 0
 
