@@ -5520,6 +5520,40 @@ sh("git-after-cd: an if ! check whose then body echoes a greater-than in quotes,
    'if ! pytest -q; then echo "x>y" && exit 1; fi; %s push -u origin b' % VCS, "allow", cwd=NOGIT)
 sh("git-after-cd: an if ! check whose then body echoes an apostrophe in quotes, then && exit 1, then ; a git push, passes",
    "if ! pytest -q; then echo \"don't\" && exit 1; fi; %s push -u origin b" % VCS, "allow", cwd=NOGIT)
+# A PIPE OR A GROUP THAT HIDES A CHECK'S STATUS. A pipe's status is its last stage's, so `make check | tee l` succeeds
+# when make fails, and an `||` exit after the pipe never fires. A `{ }` group around the check does not change that. A
+# test of a command's output reads the test's status, so `[ -z "$(make x)" ]` passes when make fails silently. Each
+# push below runs when the check fails, so each is refused. The controls are the `pytest -q || exit 1; push` pass and
+# the `set -o pipefail` pipe pass in this family.
+sh("git-after-cd: a check piped to tee, then || exit 1 and ; a git push -u, is refused",
+   "make check | tee l || exit 1; %s push -u origin b" % VCS, "deny", "git-after-cd", cwd=NOGIT,
+   carries=("&&",))
+sh("git-after-cd: a check piped to tee, then || a braced exit 1 and ; a git push -u, is refused",
+   "make check | tee l || { exit 1; }; %s push -u origin b" % VCS, "deny", "git-after-cd", cwd=NOGIT,
+   carries=("&&",))
+sh("git-after-cd: a braced check piped to tee, then && a git push -u, is refused",
+   "{ make check; } | tee l && %s push -u origin b" % VCS, "deny", "git-after-cd", cwd=NOGIT,
+   carries=("&&",))
+sh("git-after-cd: a test of a silent check's output, then || exit 1 and ; a git push -u, is refused",
+   '[ -z "$(make x)" ] || exit 1; %s push -u origin b' % VCS, "deny", "git-after-cd", cwd=NOGIT,
+   carries=("&&",))
+# A CHECK INSIDE `bash -c`. The string runs in its own shell, and its `;` joins the push to the check, so the push
+# runs when the check fails.
+sh("git-after-cd: a check and a push in bash -c joined by ;, is refused",
+   'bash -c "pytest -q; %s push -u origin b"' % VCS, "deny", "git-after-cd", cwd=NOGIT,
+   carries=("&&",))
+# NO CHECK BEFORE THE PUSH. A push, a `||` pull and a push after `&&` hold no check, so nothing here runs a push on a
+# failed check. The controls are the `pytest -q && push` pass and the `pytest -q || exit 1; push` pass.
+sh("git-after-cd: a push, then || a pull --rebase, then && a git push -u, with no check, passes",
+   "%s push origin b || %s pull --rebase && %s push origin b" % (VCS, VCS, VCS), "allow", cwd=NOGIT)
+# A BRACED EXIT THAT ENDS THE SHELL, THEN && A PUSH. The exit runs when pytest fails, so the push after `&&` never runs.
+# The control is the `pytest || { echo bad; exit 1; }; push` pass.
+sh("git-after-cd: a check protected by || a braced exit 1, then && a git push -u, passes",
+   "pytest || { exit 1; } && %s push -u origin b" % VCS, "allow", cwd=NOGIT)
+# ERREXIT WITH PIPEFAIL. Both options set, a failing pytest in a pipe ends the shell before the `;` push, so the push
+# never runs. The control is the `set -o pipefail` pipe pass with `&&`.
+sh("git-after-cd: set -eo pipefail, a check piped to tail, then ; a git push -u, passes",
+   "set -eo pipefail; pytest | tail; %s push -u origin b" % VCS, "allow", cwd=NOGIT)
 # A CRASH IN THE CD WALK. The walk runs inside cd_walk's try, and a raise there must read as stranded: the
 # git-after-cd rule refuses the push after the cd, and the crash is logged as a guard crash. The planted copy
 # raises at that try. The intact copy, on the same landing cd, is the control, so the refusal can only come
