@@ -149,7 +149,7 @@ class HistoryPhrase:
 
     def finditer(self, text):
         run = (m for m in self.RUN.finditer(text)
-               if not self.CONDITION.search(re.split(r"[.;:!?]", text[:m.start()])[-1]))
+               if not self.CONDITION.search(re.split(r"[.;:!?,]", text[:m.start()])[-1]))
         return itertools.chain(self.FORMS.finditer(text), run)
 
 
@@ -533,6 +533,7 @@ SH_CMD_WORD = re.compile(r"(?:case|esac|then|do|else|elif|if|while|until|time)" 
 SH_FUNCTION = re.compile(r"function[ \t]+[^\s;&|()<>`]+")
 SH_TEST_OPEN = re.compile(r"\[\[(?=\s)")
 SH_TEST_CLOSE = re.compile(r"\]\]" + SH_BOUNDARY)
+SH_BRACKET_EXPR = re.compile(r"\[[!^]?\]?(?:\[:\w+:\]|[^\]\s$`'\"\\])*\]")
 SH_IN_WORD = re.compile(r"in" + SH_BOUNDARY)
 SH_ESAC_WORD = re.compile(r"esac" + SH_BOUNDARY)
 
@@ -545,7 +546,8 @@ def sh_code_end(src, i, spans, pending, close=None):
     `;`, `&`, `|`, `$(`, a backtick, `{`, `then` or `do`, or a `(` that opens a subshell. `parens` holds one kind per
     open `(`: cmd for a subshell or a process substitution, list for an array, where a newline or `|` starts no
     command, and word for a paren that is part of a word, an extglob group (right after `?*+@!`), a regex group or a
-    case pattern group, where `)#b` holds no comment. Inside `[[ ... ]]` (`test`) nothing starts a command either.
+    case pattern group, where `)#b` holds no comment. A bracket expression `[(]` inside `[[ ]]` or a case pattern is
+    one word that pushes and pops no paren. Inside `[[ ... ]]` (`test`) nothing starts a command either.
     `<<` is a shift, not a heredoc, inside an array subscript `a[1<<2]` (`sub` counts the open `[`); `((` and `$((`
     are read by sh_try_arith. Each open `case` is one entry in `cases`, [state, paren depth where it opened]: word0
     and word1 before `in`, pat for the arm patterns, body for an arm's commands. A pattern's `)` ends the pattern,
@@ -647,6 +649,8 @@ def sh_code_end(src, i, spans, pending, close=None):
         elif ws and src.startswith("((", i) and (j := sh_try_arith(src, i + 2, spans, pending)) is not None:
             i = j
             ws = cmd = False
+        elif c == "[" and (test or (st and st[0] == "pat" and len(parens) == st[1])) and (m := SH_BRACKET_EXPR.match(src, i)):
+            i, ws, cmd = m.end(), False, False  # a bracket expression is one word: a ( or ) in it opens and closes nothing
         elif c == "[" and i and (src[i - 1].isalnum() or src[i - 1] in "_]"):
             sub += 1
             i += 1
