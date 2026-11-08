@@ -671,9 +671,13 @@ MUTATIONS = [
      '        if False:\n            return (ENV_CONTENTS_REASON,', "guard",
      'env: fd duplication or a read after the write, echo .env > f; cat f'),
     ("env-file: a runner given the file never reads as running inline code",
-     '    if command.lower() not in ENV_INLINE_RUNNERS:\n        return False\n    fed = stdin_fed',
-     '    return False\n    fed = stdin_fed', "guard",
+     '    if command.lower() not in ENV_INLINE_RUNNERS:\n        return False\n    hit, stdin = _runner_scan',
+     '    return False\n    hit, stdin = _runner_scan', "guard",
      'inline code under a runner given the file denies, node --env-file=.env -e'),
+    ("env-file: a runner given the file never reads as starting a printing child",
+     '                    if _runner_child_prints(words, position, command, stdin_piped):\n',
+     '                    if False:\n', "guard",
+     'env-child: deny, a runner given the file must not print it through a child'),
     ("frozen-path: name the path in the frozen reason",
      '    refuse(tool, "deny", "frozen-path", FROZEN_REASON, target)',
      '    refuse(tool, "deny", "frozen-path", FROZEN_REASON + " " + target, target)', "guard", 'frozen: Write of a config hook'),
@@ -2256,9 +2260,21 @@ MUTATIONS = [
      'NPM_NO_CHANGE = {"--help", "-h", "--dry-run"}',
      "guard", 'linked-nm: npm i -g x (Bash) in a linked folder is allowed'),
     ('linked-node-modules: a value flag before the subcommand is read as the subcommand',
-     '    "--loglevel", "--prefix", "--cache",',
-     '    "--never-a-flag", "--prefix", "--cache",',
-     "guard", 'linked-nm: refuse npm --loglevel error ci (Bash) in a linked folder'),
+     '"--logs-dir", "-C", "-L",',
+     '"--logs-dir", "--never-a-flag", "-L",',
+     "guard", 'linked-nm: npm -C . ls (Bash) in a linked folder is allowed'),
+    ('linked-node-modules: a subcommand off the read-only list is allowed',
+     '                if word not in NPM_READ_ONLY or (word == "audit"',
+     '                if False or (word == "audit"',
+     "guard", 'linked-nm: refuse npm prune (Bash) in a linked folder'),
+    ('linked-node-modules: audit fix is read as a plain audit',
+     '(word == "audit" and "fix" in words[at + 1:])',
+     'False',
+     "guard", 'linked-nm: refuse npm audit fix (Bash) in a linked folder'),
+    ('linked-node-modules: run is missing from the read-only list',
+     '    "run", "rum", "urn", "sbom",',
+     '    "rum", "urn", "sbom",',
+     "guard", 'linked-nm: npm run build (Bash) in a linked folder is allowed'),
     ('linked-node-modules: a recursive delete inside a linked node_modules goes unread',
      '        if _nm_recursive_delete(args) and any(',
      '        if False and any(',
@@ -2279,6 +2295,14 @@ MUTATIONS = [
      '("package.json", "node_modules")',
      '("package.json",)',
      "guard", 'linked-nm: walk: npm ci in a sub folder with a real node_modules and no package.json is allowed'),
+    ('linked-node-modules: a workspace flag on npm version is read as a plain version',
+     'version_in_workspace):',
+     'False):',
+     "guard", 'linked-nm: refuse npm version patch -w a (Bash) in a linked folder'),
+    ('linked-node-modules: a dry run is exempt again for rebuild, rb and edit',
+     'NPM_DRY_RUN_WRITERS = {"rebuild", "rb", "edit"}',
+     'NPM_DRY_RUN_WRITERS = set()',
+     "guard", 'linked-nm: refuse npm rebuild --dry-run (Bash) in a linked folder'),
     # ---- the always-silent stub. A hook whose main() exits 0 with no output passes every
     # "nothing printed" case on its own. Each suite pairs that silence with a known-bad input in
     # the same case (`known-bad pair`), and these mutants are the stub itself.
@@ -2688,8 +2712,8 @@ MUTATIONS = [
      '    return [e for e in data["leases"] if isinstance(e, dict) and is_live(e)]', "simlease",
      "the lease read writes nothing", "posix"),
     ("sim-lease: the pro slot maps to another device",
-     '"pro": "8787FE1C-48CC-4213-9B5C-8605AFE7F9B3",',
-     '"pro": "8787FE1C-48CC-4213-9B5C-8605AFE7F9B4",', "simlease",
+     '"pro": "86F9268A-A905-4B82-9BC0-D7EBB682D341",',
+     '"pro": "86F9268A-A905-4B82-9BC0-D7EBB682D342",', "simlease",
      "lease allow: this session's live pro lease", "posix"),
     # ---- handoff-unread (decision precompact-handoff, item 9): one mutant per arm. The anchors sit in
     # guard.py and in reread_check.py; a "guard" mutant lands in whichever module holds the anchor.
@@ -3498,8 +3522,25 @@ def _loads_module(source: str, stem: str) -> bool:
     `importlib.import_module` and `__import__` with a literal name, and `spec_from_file_location`, `SourceFileLoader` and
     `runpy.run_path` with a string literal of the basename `<stem>.py` in the path argument (never the module-name argument),
     directly or through a name bound to such an expression by an assignment in any scope of the file (module, function or
-    class level; one name bound in two scopes pools both values). A path that arrives as a function parameter is not
-    followed, so a loader fed only by a parameter reads False (debt tests-for-misses-param-loads).
+    class level; one name bound in two scopes pools both values). A path that arrives as a function parameter is followed
+    to the calls of that function in the same file: a call by a bare name, with the argument by position or by keyword
+    for that parameter, counts as a binding of the parameter, read only inside the def that owns the parameter. Two functions
+    with different names that share a parameter name keep their calls apart.
+    Only the forms above are followed. Any other form reads False, and this list is not complete. Examples: a loader
+    imported from another file, a wrapper that is called through another wrapper's parameter, an attribute call such as
+    `obj.load(..., "widget.py")` or `self.load(...)`, a path parameter whose default holds the file when no call passes
+    it (`def load(name, path=WIDGET)` called as `load("x")`), a lambda loader, a bare alias of the loader
+    (`helper = load`), a loader that takes the path as `*args` or `**kwargs` (a `**kwargs` loader that copies the
+    keyword into a local of the same name, `path = kwargs["path"]`, is followed; `p = kwargs["path"]` is not), a call
+    that spreads the path in (a starred
+    argument before it, as `load(*names, "widget.py")`, or `**{"path": ...}`), a name bound only as a `for` or
+    comprehension target (`for path in ["widget.py"]`), and a name bound by tuple unpacking, augmented assignment,
+    `with ... as` or an attribute store (`self.path = "widget.py"`). Also a class constructor that takes the path
+    (`Loader("widget.py")`), `functools.partial(load, "widget.py")`, `map(load, [...])`, a walrus binding, and a split
+    literal (`"widget" + ".py"`).
+    Known false selections, so each reads True: a bare call `load(path=X)` also feeds a method `Loader.load` of the same
+    name in the file, as every def of that name takes the call, and a loader that reassigns its path before the load reads
+    the argument its calls pass, not the new value.
 
     It assumes module stems are unique across the repository, so a name match is a load of this file (only
     `test_action.py` repeats a stem today). A text that does not parse reads False."""
@@ -3518,15 +3559,45 @@ def _loads_module(source: str, stem: str) -> bool:
         elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name) and node.value is not None:
             bound.setdefault(node.target.id, []).append(node.value)
 
-    def names_base(expr, seen) -> bool:
+    parent = {}  # a node -> its parent, built with `fed` on the first file loader, so a file with none pays nothing
+    fed = {}  # (a def, a parameter name) -> the argument expressions its calls pass for it
+
+    def read_params() -> None:
+        defs = {}  # a function name -> its defs, in any scope
+        for node in ast.walk(tree):
+            for child in ast.iter_child_nodes(node):
+                parent[child] = node
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                defs.setdefault(node.name, []).append(node)
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id in defs:
+                for function in defs[node.func.id]:
+                    params = [arg.arg for arg in function.args.posonlyargs + function.args.args]
+                    for index, value in enumerate(node.args):
+                        if isinstance(value, ast.Starred):
+                            break
+                        if index < len(params):
+                            fed.setdefault((function, params[index]), []).append(value)
+                    for keyword in node.keywords:
+                        if keyword.arg:
+                            fed.setdefault((function, keyword.arg), []).append(keyword.value)
+
+    def names_base(expr, seen, scope=()) -> bool:
         for part in ast.walk(expr):
             if isinstance(part, ast.Constant) and isinstance(part.value, str):
                 if part.value.replace("\\", "/").rsplit("/", 1)[-1] == base:
                     return True
-            elif isinstance(part, ast.Name) and part.id in bound and part.id not in seen:
-                seen.add(part.id)
-                if any(names_base(value, seen) for value in bound[part.id]):
-                    return True
+            elif isinstance(part, ast.Name):
+                if part.id in bound and part.id not in seen:
+                    seen.add(part.id)
+                    if any(names_base(value, seen, scope) for value in bound[part.id]):
+                        return True
+                for function in scope:
+                    key = (function, part.id)
+                    if key in fed and key not in seen:
+                        seen.add(key)
+                        if any(names_base(value, seen) for value in fed[key]):
+                            return True
         return False
 
     def last_part(dotted: str) -> bool:
@@ -3548,7 +3619,15 @@ def _loads_module(source: str, stem: str) -> bool:
             elif func in ("spec_from_file_location", "SourceFileLoader", "run_path"):
                 skip = 0 if func == "run_path" else 1  # the first argument of the other two is the module name
                 parts = list(node.args[skip:]) + [kw.value for kw in node.keywords if kw.arg not in ("name", "fullname")]
-                if any(names_base(part, set()) for part in parts):
+                if not parent:
+                    read_params()
+                scope = []  # the defs around this call, innermost first: the parameters it can read
+                up = parent.get(node)
+                while up is not None:
+                    if isinstance(up, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                        scope.append(up)
+                    up = parent.get(up)
+                if any(names_base(part, set(), scope) for part in parts):
                     return True
     return False
 
