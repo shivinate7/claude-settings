@@ -355,10 +355,15 @@ class LexiconTests(unittest.TestCase):
         self.assertEqual(set(clause.ADVERBS), words, "ADVERBS")
 
     def test_writer_pattern_is_built_from_the_one_adverb_pattern(self):
-        # Catches: the check's writer pattern built from its own adverb list rather than from ADVERB_PATTERN, so an -ly
-        # adverb outside the list ("temporarily") is not written by the writer.
-        self.assertIn(clause.ADVERB_PATTERN, report_guard.CANNOT_WRITER_RE.pattern,
+        # Catches: the check's writer pattern built from its own adverb list, or as a literal copy of ADVERB_PATTERN, so an
+        # -ly adverb outside the list ("temporarily") is not written by the writer. A literal copy holds the same text, so the
+        # probe swaps ADVERB_PATTERN for a sentinel and reads the sentinel in the built pattern.
+        self.assertIn(clause.ADVERB_PATTERN, clause.WRITER_BEFORE_RE.pattern,
                       "the writer pattern is not built from ADVERB_PATTERN")
+        probe = clause_with("ADVERB_PATTERN", "zqxvadv")
+        self.assertEqual(probe.ADVERB_PATTERN, "zqxvadv", "scope: the probe does not read the sentinel")
+        self.assertIn("zqxvadv", probe.WRITER_BEFORE_RE.pattern,
+                      "WRITER_BEFORE_RE is a copy of the adverb pattern, not built from ADVERB_PATTERN")
 
     def fresh_report_guard(self, name, words):
         """A fresh load of lint/report_guard.py while _clause.<name> holds `words`. The probe is not in sys.modules, so the
