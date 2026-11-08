@@ -265,6 +265,15 @@ class SeparatorFieldTests(unittest.TestCase):
         self.assertEqual(found[1].lead_end, sentence.index(";") + 1,
                          "lead_end: the separator before the second clause ends elsewhere")
 
+    def test_lead_end_after_a_masked_span_is_the_later_separator(self):
+        # Catches: a masked span between two separators. The later separator is dropped (`elif sep and not lead`), so the
+        # clause after it keeps the earlier separator's lead_end. The span is the code span `not connected`.
+        sentence = "MCP status: `not connected`; I cannot open a PR."
+        found = clause.clauses(sentence, code_mask(sentence))
+        self.assertEqual(len(found), 2, "two clauses wanted, %d found" % len(found))
+        self.assertEqual(found[1].lead_end, sentence.index(";") + 1,
+                         "lead_end: the separator before the claim ends at the colon, not at the later semicolon")
+
     def test_hard_end_is_the_nearest_hard_stop_at_or_after_the_clause_start(self):
         # Catches: hard_end always the sentence end, or a comma or a dot inside a token read as the hard stop. The comma is
         # no hard stop, so the first clause ends at the semicolon; api.github.com has no hard stop, so its clause ends at
