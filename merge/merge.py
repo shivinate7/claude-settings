@@ -126,18 +126,25 @@ def drop_cite(text, cite):
 
 def first_wait_stop(ok, why):
     """The Stop for the wait on the head's own checks, before any claim. `why` from the wait already ends in the cite of its kind
-    (the deadline, a red check, a moved head or base, a failed read), so each kind prints its own cite once, and `why` loses its copy.
-    A reason with no cite of its own is a check that did not pass, and cites the failing-CI rule."""
+    (the deadline, a red check, a moved head or base, a failed read, a protection read), so each kind prints its own cite once, and
+    `why` loses its copy. Only a red check cites the failing-CI rule. A reason with no cite of its own, such as an ignored required
+    check, cites the rule that the required checks must pass on the head."""
     lead, bare = "the head's own checks are not green, so nothing was claimed or pushed", why
     if ok is None:
         return Stop(f"{lead} {WAIT_CITE}: {drop_cite(bare, WAIT_CITE)}")
+    if GREEN_CITE in why:
+        return Stop(f"{lead} {GREEN_CITE}: {drop_cite(bare, GREEN_CITE)}")
     if HEAD_CITE in why:
         return Stop(f"{lead} {HEAD_CITE}: {drop_cite(bare, HEAD_CITE)}")
     if BASE_CITE in why:
         return Stop(f"{lead} {BASE_CITE}: {drop_cite(bare, BASE_CITE)}")
     if READ_CITE in why:
         return Stop(f"{lead} {READ_CITE}: {drop_cite(bare, READ_CITE)}")
-    return Stop(f"{lead} {GREEN_CITE}: {drop_cite(bare, GREEN_CITE)}")
+    if PIN_CITE in why:
+        return Stop(f"{lead} {PIN_CITE}: {drop_cite(bare, PIN_CITE)}")
+    if BATCH_CITE in why:
+        return Stop(f"{lead} {BATCH_CITE}: {drop_cite(bare, BATCH_CITE)}")
+    return Stop(f"{lead} {HEAD_CITE}: {bare}")
 
 SH_TIMEOUT = None  # seconds; the guard sets it, so a hung `gh` cannot outlast its hook
 
