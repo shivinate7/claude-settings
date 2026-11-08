@@ -33,6 +33,7 @@ Screen: ____ Size: ____ Theme: ____
 - [ ] ux-full-height-fits: Does each `vh` value in the changed CSS have an `svh` or `dvh` declaration on the same property, after the `vh` line?
 - [ ] ux-vitals-measured: In a mobile lab trace, are LCP, INP (or Total Blocking Time) and CLS "good"? Where field data at the 75th percentile exists, is it "good" too?
 - [ ] ux-feature-baseline-or-fallback: Does each new feature that the browser target does not cover sit behind a feature test, with a fallback seen working?
+- [ ] ux-text-zooms (guidance): At 200% zoom and a larger browser default font size, does web text grow and lose no content?
 - [ ] ux-gap-on-parent: Does each flex or grid parent space its children with `gap`, with no child margin between siblings? A `margin-inline: auto` or other one-item offset passes. Prose and flow margins outside flex or grid pass.
 - [ ] ux-control-beside-area (guidance): Does each control sit next to the area it changes? Is each element between them the same in every state of the control?
 - [ ] ux-layout-primitives: Is each page region built from a named layout primitive (stack, cluster, sidebar, grid, center)?
