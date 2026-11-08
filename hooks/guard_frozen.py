@@ -951,8 +951,12 @@ def _code_literal_hit(raw: str, cwd: str, predicate, modes) -> str:
             literals = code_paths(code, language, frozen=True)
         except ValueError:
             return ""   # node code nested past JS_DEPTH: the reader names no path
-        return next((text.strip() for text, mode in literals
-                     if mode in modes and predicate(text.strip(), where)), "")
+        for text, mode in literals:
+            text = text.strip()
+            if mode in modes and (predicate(text, where)
+                                  or (mode == "write" and predicate(text + "/_", where))):
+                return text   # a write to a bare frozen folder (rmtree, copytree, copy into it) is a write of what is in it
+        return ""
 
     for _quote, body, language in heredoc_code(raw):
         found = hit(body, language, cwd)
