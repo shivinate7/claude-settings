@@ -11,6 +11,8 @@ Owner, 2026-10-27, roadmap step c95 (the cap rule):
 - A job that ends at its cap with no red test step is re-capped or split, never left (skill `ci-hygiene`, step 5).
 - A cap rises only with a measured figure in the comment beside it. This item is suspended while the stopgap holds, and comes back when roadmap step `time-pinned-tests-go` (time-pinned tests are gone) closes (owner, 2026-11-01 18:44 CST, above).
 
+Coordinator, 2026-11-08 03:35 CST, option c (the repo sets its own deadline): a repo changes to fit the shared merge tool. The tool never guesses a cap.
+
 ## The table
 
 Window: each row names its own. A row marked "window of 2026-11-05" or "window of 2026-11-06" uses the window of that name in the first two notes below. An unmarked row uses the newest 30 completed runs of each job in `checks.yml`, from run 39969158671 (2026-10-23) to run 40551443745 (2026-10-27); checks-windows-sweep is projected from that window. Times are minutes from job start to job end.
@@ -48,7 +50,11 @@ Window: each row names its own. A row marked "window of 2026-11-05" or "window o
 ## How to measure again
 
 1. List completed runs of `checks.yml` with `gh run list --workflow checks.yml --status completed`, and read each run's jobs with `gh run view <id> --json jobs`. Per job, take the newest 30 green runs in which the job ran a CI step. A job that runs a slice on pull_request counts only its other runs.
-2. For each job, take minutes with `job_minutes` in `merge/merge.py` and the cap with `job_caps` in the same file. Do not write a second reader.
+2. For each job, take minutes with `job_minutes` in `merge/merge.py` and the cap with `job_caps` in the same file. Do not write a second reader. `job_caps` reads a cap as follows:
+   - `timeout-minutes: ${{ matrix.<key> }}`, bare or quoted, is the largest literal number for `<key>` in the job's own `strategy.matrix`. Flow lists, block lists and `include:` entries count. `exclude:` is ignored.
+   - Any other expression is unknown, for example `fromJSON`, an operator, or a missing key. So is a matrix the scan cannot read, such as a dynamic `include:` or an include item it cannot read. An unknown cap sets no floor.
+   - With no `merge.deadlineMinutes` in the config, the merge tool prints one line naming each unknown-cap job. The repo sets its own deadline (see The ruling).
+   - With no config file at all, the same reading applies (owner item 386: the cap rule with no config file).
 3. A cap end is a run whose job minutes reach the cap, whose conclusion is cancelled or failure, and with no failed test step.
 4. Per-step times come from the GitHub API job steps (`started_at` and `completed_at`).
 5. A run cancelled before its cap by another act, such as a newer push or a batch rebuild, is left out of the sample, and the record names it.
