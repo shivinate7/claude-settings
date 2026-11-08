@@ -4,6 +4,6 @@
   "status": "todo",
   "order": 529,
   "why": "Owner picked a on page item 167 (Nov 3 18:16 CST).",
-  "note": "Nov 6 12:01 CST (coordinator replan: Opus plan and critic, main 7975f6d8, roadmap 01995020): HELD until foundations F1-F3 (guard files) land.\nLane session_013NEJL2Yi1iyx98kfwkRJxW, PR #1099. Close item 167 when the ruling lands in its home record. Named by the coordinator Nov 3 18:19 CST.",
-  "updatedAt": "2026-11-06T18:03:00Z"
+  "note": "Nov 6 12:01 CST (coordinator replan: Opus plan and critic, main 7975f6d8, roadmap 01995020): HELD until foundations F1-F3 (guard files) land.\nLane session_013NEJL2Yi1iyx98kfwkRJxW, PR #1099. Close item 167 when the ruling lands in its home record. Named by the coordinator Nov 3 18:19 CST. #1099 waits on #1521 (mixed-merge conflict route) (coordinator, 23:52 CST Nov 7).",
+  "updatedAt": "2026-11-07T23:52:00-06:00"
 }
