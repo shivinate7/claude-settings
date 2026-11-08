@@ -1111,9 +1111,10 @@ def _settings_place(path: str, cwd: str) -> bool:
             if parent == folder_up:
                 break
             folder_up = parent
-    # A relative target joins onto the raw cwd, so a Git-Bash `/c/` folder is read through `_expanded`, the
-    # one reader of the drive spelling, as `here` is.
-    return os.path.normcase(os.path.realpath(_expanded(folder, ""))) in here
+    # On Windows `here` holds the drive spelling of each folder, so the folder is read the same way: a
+    # Git-Bash `/c/` folder becomes `C:`. Elsewhere `/c/` is a plain folder and the spelling stays raw.
+    where = _expanded(folder, "") if os.name == "nt" else folder
+    return os.path.normcase(os.path.realpath(where)) in here
 
 
 def is_settings_file(path: str, cwd: str = "") -> bool:
