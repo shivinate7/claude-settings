@@ -23,8 +23,8 @@ Three reads, one verdict. Design: docs/decisions/silent-undo-check-design.md.
   revived     A note the branch deleted is back at head. The notes file merges by union (decision
               notes-merge-union), so a merge of the base can put a deleted note back with no conflict. A note is
               its slug (`- <slug>:` at line start), so a reworded copy counts. Copies are counted per slug. The
-              branch's own non-merge commits (upstream..head) are replayed oldest first, each counted from its file
-              state and its parent's. A slug is refused when its last count change was a delete and head holds more
+              branch's own non-merge commits (upstream..head) are replayed parents before children, and parallel lines by commit date,
+              each counted from its file state and its parent's. A slug is refused when its last count change was a delete and head holds more
               copies than that commit left. A note re-added by a non-merge commit passes, and so does a dedupe that
               keeps a copy. An edit in place changes no count, so it does not keep a note. A Drops-lines trailer
               for the notes path excuses a revived note only when its reason names the slug as `- <slug>`
@@ -169,9 +169,9 @@ def _unquote(slug):
 def named_slugs(reasons):
     """The slugs the reasons of one path's trailers name, each as `- <slug>` after a space or at the start. A slug is read
     as the note form reads it (NOTE: no space, no colon), then trailing `,.;:` drops off, so `- slug,` and `- slug.` name `slug`,
-    then one surrounding pair of backticks drops off.
+    then one surrounding pair of backticks drops off, then trailing `,.;:` drops off inside it, so `- `slug.`` names `slug`.
     The match against a note is exact: a prefix of a slug, or a longer slug, names another note."""
-    return {_unquote(m.rstrip(",.;:")) for r in reasons for m in NAMED.findall(r)} - {""}
+    return {_unquote(m.rstrip(",.;:")).rstrip(",.;:") for r in reasons for m in NAMED.findall(r)} - {""}
 
 
 def misplaced(cwd, rng):
@@ -608,8 +608,8 @@ class Revived(str):
 
 def revived_notes(cwd, upstream, head, named=None, kept=None):
     """[(notes path, Revived problem line)] for each note the branch lowered and head holds more copies of than it left. Notes are
-    counted per slug. The branch's own non-merge commits (upstream..head) are replayed oldest first, each read from its file
-    state and its parent's, never from diff lines. A commit that changes a slug's count is that slug's last event so far.
+    counted per slug. The branch's own non-merge commits (upstream..head) are replayed parents before children, and parallel lines by commit date,
+    each read from its file state and its parent's, never from diff lines. A commit that changes a slug's count is that slug's last event so far.
     The slug is refused when its last event lowered the count and head holds more copies than that commit left: a merge
     put a copy back. A last event that raised the count is a deliberate re-add and passes. An edit in place changes no
     count, so it keeps nothing: a sweep edit, such as a mass `Until:` change, would otherwise keep every revived note. A
@@ -630,9 +630,10 @@ def revived_notes(cwd, upstream, head, named=None, kept=None):
         if not present:
             continue
         # --full-history: a merge that brought the file back is TREESAME to the base's side, and default history
-        # simplification would then drop the branch's own delete commit from the walk. --topo-order: replay by ancestry,
-        # not commit date, so a re-add dated before the delete still replays after it.
-        _, out = git(cwd, "log", "--no-merges", "--full-history", "--topo-order", "--reverse", "--format=%H %P", "%s..%s" % (upstream, head), "--", path)
+        # simplification would then drop the branch's own delete commit from the walk. --date-order: every parent replays before its
+        # children, and commits on parallel lines replay by commit date. A re-add dated before the delete but a child of it
+        # still replays after it. --topo-order would order parallel lines by merge parent, not time.
+        _, out = git(cwd, "log", "--no-merges", "--full-history", "--date-order", "--reverse", "--format=%H %P", "%s..%s" % (upstream, head), "--", path)
         commits = [line.split() for line in out.splitlines() if line.strip()]
         if not commits:
             continue
