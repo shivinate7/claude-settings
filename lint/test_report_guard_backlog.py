@@ -13,7 +13,7 @@ finished lanes not archived (rule reports-backlog-counts). A count not read says
   colon inside the bold word, with three fields, each a whole number or `unknown`. The item word and the labels come from
   hooks/shared_names.py (BACKLOG_ITEM, BACKLOG_FIELDS).
 - Check: counts 1 and 2 equal the newest `merge --reviewed` read in the transcript after its newest compact_boundary, and
-  count 3 the newest `merge --idle-lanes` read. A read is found by its output line, not by its command form. A failed run
+  count 3 the finished-lanes line of the newest `merge --idle-lanes` read. A read is found by its output line, not by its command form. A failed run
   has no output line, so it is found by its command: a merge or merge.py token must stand before the flag. A run through
   verdict is read from the log its FAIL line names, at that log's last run. No read in the window, or a failed read, means
   `unknown`. `unknown` always passes.
@@ -42,6 +42,10 @@ import test_report_guard as trg  # noqa: E402  the fixture, helpers and run fold
 import test_report_guard_stalled as trs  # noqa: E402  the own-record, tag and tool-call helpers (one home)
 import build  # noqa: E402  the idle-lanes row label, IDLE_LANES_LINE (one home, skills/roadmap/build.py)
 from shared_names import BACKLOG_FIELDS, BACKLOG_ITEM  # noqa: E402  the Backlog item word and field labels, one home each
+try:
+    from shared_names import FINISHED_LANES_LINE  # noqa: E402  the third field's label, the finished-lanes line's (hooks/shared_names.py)
+except ImportError:  # the stand-in until the constant lands there; ItemWordTests pins the constant and its text
+    FINISHED_LANES_LINE = "finished lanes not archived"
 
 human = trg.human
 assistant_text = trg.assistant_text
@@ -120,14 +124,35 @@ def reviewed_read(past, none=0, wait=6, rc=1, command=REVIEWED_CMD):
     return read_run(command, ["#7 feat7 batch %dh" % wait, reviewed_summary(past, none, wait)], rc=rc)
 
 
-def idle_summary(lanes):
-    """The last line `merge --idle-lanes` prints, with the row label from its one home."""
-    return "merge: %d %s. Run get_session on each alone, then archive it." % (lanes, build.IDLE_LANES_LINE)
+def idle_summary(archive):
+    """The archive summary `merge --idle-lanes` prints after its list, with the row label from its one home."""
+    return "merge: %d %s. Run get_session on each alone, then archive it." % (archive, build.IDLE_LANES_LINE)
 
 
-def idle_read(lanes, command=IDLE_CMD):
-    """A `merge --idle-lanes` run that read the live file."""
-    return read_run(command, ["c1 lane-c1 completed", idle_summary(lanes)])
+def finished_line(lanes):
+    """The finished-lanes line `merge --idle-lanes` prints after the archive summary: the count the third Backlog field reads."""
+    return "merge: %d %s." % (lanes, FINISHED_LANES_LINE)
+
+
+def finished_unknown_line(why="the live file has no sessions list"):
+    """The unknown form of the finished-lanes line, with its reason."""
+    return "merge: %s unknown (%s)." % (FINISHED_LANES_LINE, why)
+
+
+def idle_read(lanes, archive=1, command=IDLE_CMD):
+    """A `merge --idle-lanes` run that read the live file. It prints its archive list and summary (`archive` lanes), then the
+    finished-lanes line (`lanes`). The two counts differ, so a guard that reads the archive summary as the third field fails."""
+    return read_run(command, ["c1 lane-c1 completed", idle_summary(archive), finished_line(lanes)])
+
+
+def archive_only_read(archive=3, command=IDLE_CMD):
+    """A `merge --idle-lanes` run that printed its archive summary and no finished-lanes line."""
+    return read_run(command, ["c1 lane-c1 completed", idle_summary(archive)])
+
+
+def unknown_finished_read(archive=1, command=IDLE_CMD):
+    """A `merge --idle-lanes` run whose finished-lanes line reads unknown, beside a readable archive summary."""
+    return read_run(command, ["c1 lane-c1 completed", idle_summary(archive), finished_unknown_line()])
 
 
 def failed_reviewed_read(command=REVIEWED_CMD):
@@ -144,6 +169,12 @@ def verdict_reviewed(log_path):
     """A `merge --reviewed` run through the verdict wrapper: its FAIL line names the log that holds the run's own lines."""
     return tool_pair("Bash", {"command": "~/.claude/bin/verdict merge --reviewed"},
                      "FAIL merge --reviewed rc=1 (0.3s) log=%s" % log_path, is_error=True)
+
+
+def verdict_idle(log_path):
+    """A `merge --idle-lanes` run through the verdict wrapper: its FAIL line names the log that holds the run's own lines."""
+    return tool_pair("Bash", {"command": "~/.claude/bin/verdict " + IDLE_CMD},
+                     "FAIL merge --idle-lanes --live roadmap-live.json rc=1 (0.3s) log=%s" % log_path, is_error=True)
 
 
 def reads(past=2, none=1, lanes=3):
@@ -286,6 +317,40 @@ class BacklogCountTests(BacklogFixture, unittest.TestCase):
         records = [human("wake"), coordinator(), reviewed_read(past=0, none=0), failed_idle_read(),
                    assistant_text(report(backlog(past=0, none=0, lanes=0)))]
         self.names_unknown_for(self.run_stop(records), BACKLOG_FIELDS[2])
+
+    def test_bk_red_the_third_count_reads_the_finished_line_not_the_archive_summary(self):
+        # Catches: the third count reads the archive list's summary, so a count of the lanes to archive passes as the finished count.
+        # The control is the finished line's own count, which passes.
+        self.released(self.run_stop([human("wake"), coordinator(), idle_read(lanes=3, archive=1),
+                                     assistant_text(report(backlog(lanes=3)))]))
+        records = [human("wake"), coordinator(), idle_read(lanes=3, archive=1), assistant_text(report(backlog(lanes=1)))]
+        self.names_value(self.run_stop(records), 3)
+
+    def test_bk_red_an_archive_summary_with_no_finished_line_expects_unknown_for_the_third_count(self):
+        # Catches: a run that printed only its archive summary (the run before the count) gives the third count a number.
+        # The control is the same count from a run with its finished line, which passes.
+        self.released(self.run_stop([human("wake"), coordinator(), idle_read(lanes=3), assistant_text(report(backlog(lanes=3)))]))
+        records = [human("wake"), coordinator(), archive_only_read(archive=3), assistant_text(report(backlog(lanes=3)))]
+        self.names_unknown_for(self.run_stop(records), FINISHED_LANES_LINE)
+
+    def test_bk_red_an_older_finished_line_does_not_stand_in_for_a_newer_run_without_one(self):
+        # Catches: the guard falls back to an older run's finished line when the newest run has none, so a stale count passes.
+        records = [human("wake"), coordinator(), idle_read(lanes=3), archive_only_read(archive=1),
+                   assistant_text(report(backlog(lanes=3)))]
+        self.names_unknown_for(self.run_stop(records), FINISHED_LANES_LINE)
+
+    def test_bk_red_an_unknown_finished_line_expects_unknown_for_the_third_count(self):
+        # Catches: the unknown form of the finished line is read as a count, so a number beside it passes.
+        records = [human("wake"), coordinator(), unknown_finished_read(), assistant_text(report(backlog(lanes=3)))]
+        self.names_unknown_for(self.run_stop(records), FINISHED_LANES_LINE)
+
+    def test_bk_red_a_verdict_log_of_an_idle_run_reads_its_finished_line(self):
+        # Catches: a verdict-logged idle run is read for its archive summary, so the finished count in its log goes unchecked.
+        # The control is the finished count the log holds, which passes.
+        log = self.write_log("verdict-idle.log", [(IDLE_CMD, ["c1 lane-c1 completed", idle_summary(1), finished_line(3)])])
+        self.released(self.run_stop([human("wake"), coordinator(), verdict_idle(log), assistant_text(report(backlog(lanes=3)))]))
+        records = [human("wake"), coordinator(), verdict_idle(log), assistant_text(report(backlog(lanes=1)))]
+        self.names_value(self.run_stop(records), 3)
 
     def test_bk_red_a_failed_reviewed_read_expects_unknown_for_its_two_counts(self):
         # Catches: a merge --reviewed run that did not read (exit 2, no summary line) passes its two counts.
@@ -624,6 +689,17 @@ class ItemWordTests(unittest.TestCase):
         # Catches: the item word is a literal in the guard or in the report writer, so it has no one home beside BACKLOG_FIELDS.
         self.assertEqual(getattr(shared_names, "BACKLOG_ITEM", None), "Backlog",
                          "hooks/shared_names.py does not define BACKLOG_ITEM, so the item word has no one home beside BACKLOG_FIELDS")
+
+    def test_bk_red_the_third_field_is_the_finished_lanes_label(self):
+        # Catches: the third Backlog field still names the archive list, so the count it reads is the archive summary's.
+        self.assertEqual(BACKLOG_FIELDS[2], FINISHED_LANES_LINE,
+                         "the third Backlog field is %r, not the finished-lanes label" % (BACKLOG_FIELDS[2],))
+
+    def test_bk_red_the_finished_lanes_label_is_a_constant_with_its_text(self):
+        # Catches: the label has no constant in hooks/shared_names.py, or the constant reads other text. The stand-in above would
+        # hide either, so the constant and its text are pinned here.
+        self.assertEqual(getattr(shared_names, "FINISHED_LANES_LINE", None), "finished lanes not archived",
+                         "hooks/shared_names.py does not define FINISHED_LANES_LINE as the finished-lanes label's text")
 
     def test_bk_green_the_guard_reads_an_item_written_with_the_constant(self):
         # Control: a block written with the constant reads its three counts, so the word the report writer uses is the word the guard reads.

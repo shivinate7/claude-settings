@@ -3048,6 +3048,190 @@ class IdleLanes(UpkeepFixture):
         self.assertEqual(count, 1, "wrong-form buckets read as %r, not one unknown entry" % (entries,))
         self.assertTrue(entries and entries[0].startswith("unknown ("), entries)
 
+    # The finished-lanes count (spec, lane pick). A lane session row counts when it carries cs-build:lane and this repo's
+    # cs-repo tag, is not archived, and its bucket is completed or failed, or review ready with no open pull on any of its
+    # steps' head refs (lane_head_refs). Working and blocked never count, and a completed or failed lane is counted whatever
+    # its step, pull or page item says. A row with no usable bucket reads the count unknown, never 0. The count is
+    # build.finished_lanes(work, slug): an int, or a string that starts `unknown (`.
+
+    def live_work_direct(self):
+        """build.live_work on the fixture's live file, with the steps the build reads."""
+        source, why = build.record_source(self.repo, "roadmap")
+        self.assertIsNotNone(source, why)
+        steps = build.load(source)["steps"]
+        return build.live_work(str(self.live), steps, self.SLUG)
+
+    def finished_of(self, work):
+        """build.finished_lanes on `work`, with the slug the build reads. A build with no function of that name fails by name."""
+        fn = getattr(build, "finished_lanes", None)
+        if fn is None:
+            self.fail("build.finished_lanes is absent: no function counts the finished lanes not archived")
+        return fn(work, self.SLUG)
+
+    def finished_count(self):
+        """The count on the fixture's live file. The file must read its sessions first, so a count is never taken from an unread file."""
+        work = self.live_work_direct()
+        self.assertIsNotNone(work.get("laneSessions"), "the live file did not read its sessions: %r" % (work.get("read"),))
+        return self.finished_of(work)
+
+    @staticmethod
+    def unknown_reading(value):
+        return isinstance(value, str) and value.startswith("unknown (")
+
+    def finished_steps(self):
+        """The count fixture's steps: c1 and c3 still doing, c2, c4 and c5 done. One commit on the record branch, none on main."""
+        self.land({"c1": {"status": "doing", "order": 1}, "c2": {"status": "done", "order": 2},
+                   "c3": {"status": "doing", "order": 3}, "c4": {"status": "done", "order": 4},
+                   "c5": {"status": "done", "order": 5}})
+
+    def finished_rows(self):
+        """The count fixture's sessions, by key. a, b, c and e are counted; rp, d, f, g, h and i are not."""
+        return {
+            # Completed, its step still doing, and an open pull on its lane head: counted, as no step or pull holds it.
+            "a": self.lane("session_a", "c1"),
+            # Failed, with an open page item on its step: counted.
+            "b": self.lane("session_b", "c2", bucket=BUCKET_FAILED),
+            # Completed, with no cs-step tag: counted, as no step test applies.
+            "c": session_row("session_c", "SESSION_STATUS_IDLE", "cs-build:lane", self.REPO, status_bucket=BUCKET_COMPLETED),
+            # Review ready, with no pull on its head refs: counted.
+            "e": self.lane("session_e", "c4", bucket=BUCKET_REVIEW_READY),
+            # Review ready, held by an open pull on lane/c5: not counted.
+            "rp": self.lane("session_rp", "c5", bucket=BUCKET_REVIEW_READY),
+            # Working, and blocked: never counted.
+            "d": self.lane("session_d", "c3", bucket=BUCKET_WORKING, status="SESSION_STATUS_RUNNING"),
+            "f": self.lane("session_f", "c3", bucket=BUCKET_BLOCKED),
+            # Archived: not counted.
+            "g": self.lane("session_g", "c1", status="SESSION_STATUS_ARCHIVED"),
+            # Completed in another repo, and completed on a triage session: not counted.
+            "h": session_row("session_h", "SESSION_STATUS_IDLE", "cs-build:lane", "cs-step:c1", "cs-repo:other/repo",
+                             status_bucket=BUCKET_COMPLETED),
+            "i": session_row("session_i", "SESSION_STATUS_IDLE", "cs-build:triage", "cs-step:c1", self.REPO,
+                             status_bucket=BUCKET_COMPLETED),
+        }
+
+    def publish_finished(self, keys=None):
+        """The count fixture's live file: the named sessions (all by default), the pull on lane/c1 and on lane/c5, and one open
+        page item on c2."""
+        rows = self.finished_rows()
+        self.publish(sessions=[rows[k] for k in (keys or rows)],
+                     pulls=[{"number": 61, "title": "lane c1", "branch": "lane/c1"},
+                            {"number": 62, "title": "lane c5", "branch": "lane/c5"}],
+                     items=[{"n": 5, "status": "open", "home": "step c2", "lane": "c2"}])
+
+    def test_completed_failed_and_unheld_review_ready_lanes_are_counted_whatever_holds_their_step_or_item(self):
+        self.finished_steps()
+        self.publish_finished()
+        self.assertEqual(self.finished_count(), 4,
+                         "the count is not 4: a completed lane with an open pull, a failed lane with a page item, a completed "
+                         "lane with no step and a review-ready lane with no pull are the four counted lanes")
+
+    def test_idle_lanes_list_is_unchanged_on_the_count_fixture(self):
+        # Green on the old code: the count is a separate reading, so idle_lanes still lists only the review-ready lane with no pull.
+        self.finished_steps()
+        self.publish_finished()
+        self.assertEqual(self.ids(self.idle_direct()), ["session_e"], "idle_lanes changed the lanes it lists")
+
+    def test_a_review_ready_lane_is_held_by_an_open_pull_on_any_of_its_step_head_refs(self):
+        # The control is a review-ready lane with no pull, which counts. Each head-ref form of a step holds its lane: the bare
+        # step id and lane/<step>. A two-step lane is held by a pull on its second step.
+        self.finished_steps()
+        control = self.lane("session_e", "c4", bucket=BUCKET_REVIEW_READY)
+        for label, branch in (("bare step id", "c5"), ("lane head", "lane/c5")):
+            with self.subTest(form=label):
+                held = self.lane("session_held", "c5", bucket=BUCKET_REVIEW_READY)
+                self.publish(sessions=[control, held], pulls=[{"number": 71, "title": "lane c5", "branch": branch}])
+                self.assertEqual(self.finished_count(), 1,
+                                 "a review-ready lane whose step's %s holds an open pull is counted: the count is not 1" % label)
+        two_steps = session_row("session_two", "SESSION_STATUS_IDLE", "cs-build:lane", "cs-step:c4", "cs-step:c5",
+                                self.REPO, status_bucket=BUCKET_REVIEW_READY)
+        self.publish(sessions=[control, two_steps], pulls=[{"number": 72, "title": "lane c5", "branch": "lane/c5"}])
+        self.assertEqual(self.finished_count(), 1,
+                         "a two-step review-ready lane held by a pull on its second step is counted: the count is not 1")
+
+    def test_a_review_ready_lane_with_a_pull_on_another_lane_is_counted(self):
+        # The pull names lane/c2, which is no head ref of this lane, so it does not hold the lane.
+        self.finished_steps()
+        self.publish(sessions=[self.lane("session_e", "c4", bucket=BUCKET_REVIEW_READY)],
+                     pulls=[{"number": 73, "title": "lane c2", "branch": "lane/c2"}])
+        self.assertEqual(self.finished_count(), 1, "a pull on another lane held this review-ready lane out of the count")
+
+    def test_working_and_blocked_lanes_never_count(self):
+        # The control is one completed lane, which counts, so a zero is read from a readable file.
+        self.finished_steps()
+        rows = self.finished_rows()
+        self.publish(sessions=[rows["d"], rows["f"]])
+        self.assertEqual(self.finished_count(), 0, "a working or blocked lane was counted: the count is not 0")
+        self.publish(sessions=[rows["d"], rows["f"], rows["a"]])
+        self.assertEqual(self.finished_count(), 1, "the completed control lane beside them is not the one counted")
+
+    def test_a_lane_row_with_no_usable_bucket_reads_the_count_unknown_not_a_number(self):
+        # The control is one completed lane, which counts. Beside it, each row below has a bucket the count cannot read.
+        self.finished_steps()
+        good = self.lane("session_a", "c1")
+        self.publish(sessions=[good])
+        self.assertEqual(self.finished_count(), 1, "the control lane is not counted")
+        bad_rows = (("the lowercase completed name", session_row("session_lower", "SESSION_STATUS_IDLE", "cs-build:lane",
+                                                                 "cs-step:c2", self.REPO, status_bucket="completed")),
+                    ("no bucket key", session_row("session_none", "SESSION_STATUS_IDLE", "cs-build:lane",
+                                                  "cs-step:c2", self.REPO)),
+                    ("a name that is no bucket", session_row("session_done", "SESSION_STATUS_IDLE", "cs-build:lane",
+                                                             "cs-step:c2", self.REPO,
+                                                             status_bucket="SESSION_STATUS_BUCKET_DONE")),
+                    ("a bucket that is not a string", session_row("session_num", "SESSION_STATUS_IDLE", "cs-build:lane",
+                                                                  "cs-step:c2", self.REPO, status_bucket=7)))
+        for label, bad in bad_rows:
+            with self.subTest(row=label):
+                self.publish(sessions=[good, bad])
+                value = self.finished_count()
+                self.assertTrue(self.unknown_reading(value),
+                                "a lane row with %s reads the count %r, not unknown" % (label, value))
+
+    def test_an_archived_lane_row_with_no_bucket_does_not_read_the_count_unknown(self):
+        # Follows idle_lanes, which reads the buckets of live rows only: an archived row is no lane to count. The completed
+        # lane beside it is the control.
+        self.finished_steps()
+        archived = session_row("session_old", "SESSION_STATUS_ARCHIVED", "cs-build:lane", "cs-step:c1", self.REPO)
+        self.publish(sessions=[archived, self.lane("session_a", "c1")])
+        self.assertEqual(self.finished_count(), 1, "an archived row with no bucket changed the count")
+
+    def test_an_empty_sessions_list_reads_zero_and_a_missing_one_reads_unknown(self):
+        self.finished_steps()
+        self.publish(sessions=[])
+        self.assertEqual(self.finished_count(), 0, "an empty sessions list is a readable zero")
+        self.publish(sessions=None)
+        value = self.finished_of(self.live_work_direct())
+        self.assertTrue(self.unknown_reading(value), "a live file with no sessions list reads the count %r, not unknown" % (value,))
+
+    def test_no_live_file_reads_the_count_unknown(self):
+        self.finished_steps()
+        self.publish(sessions=[self.lane("session_a", "c1")])
+        self.assertEqual(self.finished_count(), 1, "the control lane is not counted")
+        value = self.finished_of(build.live_work(None, None, self.SLUG))
+        self.assertTrue(self.unknown_reading(value), "no live file reads the count %r, not unknown" % (value,))
+
+    def test_repo_and_lane_tags_are_read_as_idle_lanes_reads_them(self):
+        # A repo tag with a space or a trailing space is not this repo, as idle_lanes reads it. A lane tag with a leading space
+        # is still the lane tag, since idle_lanes strips a lane tag before it reads it. The completed lane is the control.
+        self.finished_steps()
+        spaced = session_row("session_spaced", "SESSION_STATUS_IDLE", "cs-build:lane", "cs-step:c1",
+                             "cs-repo: " + self.SLUG, status_bucket=BUCKET_COMPLETED)
+        trailing = session_row("session_trailing", "SESSION_STATUS_IDLE", "cs-build:lane", "cs-step:c2",
+                               "cs-repo:" + self.SLUG + " ", status_bucket=BUCKET_COMPLETED)
+        leading_lane = session_row("session_leading", "SESSION_STATUS_IDLE", " cs-build:lane", "cs-step:c4", self.REPO,
+                                   status_bucket=BUCKET_COMPLETED)
+        self.publish(sessions=[spaced, trailing, leading_lane, self.lane("session_a", "c3")])
+        self.assertEqual(self.finished_count(), 2,
+                         "the count is not 2: the leading-space lane and the control, with the two repo-tag rows left out")
+
+    def test_thirty_two_finished_lanes_are_all_counted_beside_a_working_one(self):
+        # Full size: 32 lanes, completed and failed in turn, and one working lane that is not counted.
+        self.land({"L%02d" % n: {"status": "done", "order": n} for n in range(1, 34)})
+        rows = [self.lane("session_%02d" % n, "L%02d" % n, bucket=BUCKET_FAILED if n % 2 else BUCKET_COMPLETED)
+                for n in range(1, 33)]
+        rows.append(self.lane("session_work", "L33", bucket=BUCKET_WORKING, status="SESSION_STATUS_RUNNING"))
+        self.publish(sessions=rows)
+        self.assertEqual(self.finished_count(), 32, "the full-size count is not 32")
+
 
 class SharedTagNames(unittest.TestCase):
     """The roadmap's tag names have one home, hooks/shared_names.py. build reads the very objects, so a
