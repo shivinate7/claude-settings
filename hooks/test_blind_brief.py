@@ -767,6 +767,17 @@ class Hook(unittest.TestCase):
         self.assertEqual(count_lines(prompt), ["- Blind designers: 2"], "scope: the control holds only the outside line")
         self.assertEqual(self.spawn(prompt), "", "a count line outside any fence must count beside a fenced template")
 
+    def test_fenced_marked_count_line_never_adds_to_the_outside_count(self):
+        # A count line inside a fence is the pasted template, so it adds no count. The outside `- Blind designers: 2`
+        # is the brief's count. The fenced `- Blind designers: 5` must not make a second marked line, which would
+        # refuse the brief.
+        prompt = ("Designer kind: informed\n- Blind designers: 2\n\nKeep the notes in this shape:\n\n"
+                  "```\nDesigner: <name>\n- Blind designers: 5\nJob: <one line>\n```\n\n" + DUO_BRIEF)
+        self.assertEqual(count_lines(prompt), ["- Blind designers: 2", "- Blind designers: 5"],
+                         "scope: the probe brief must hold the outside count line, then the fenced one")
+        self.assertEqual(load().kind_of(prompt), "informed", "scope: the probe brief must read as informed")
+        self.assertEqual(self.spawn(prompt), "", "a fenced count line must not add to the outside count, so the brief must pass")
+
     def test_bulleted_count_after_a_closed_fence_passes(self):
         # Green control. The fence closes before the count line, so the count line is outside it and counts.
         prompt = ("Designer kind: informed\n\n```\nDesigner: <name>\n```\n\n- Blind designers: 2\n\n" + DUO_BRIEF)
