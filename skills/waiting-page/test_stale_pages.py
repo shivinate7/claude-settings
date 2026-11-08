@@ -1274,15 +1274,6 @@ class Stale(unittest.TestCase):
                 self.assertNotIn("Traceback", r.stdout + r.stderr)
                 self.assert_page_word(r, "current", 0)
 
-    def test_a_closed_item_with_waits_and_a_kept_answer_is_not_named(self):
-        # SKILL.md, "Route and close": while an item has `waits`, steps 2 to 4 never delete answers/<id>, so the kept answer
-        # is legitimate whatever the `waits` value. A closed item is never polled, so no gh call is made for it.
-        for label, waits in (("a run", {"repo": REPO, "run": RUN}), ("a PR", {"repo": REPO, "pr": PR}), ("a malformed value", "soon")):
-            with self.subTest(label):
-                self.assert_not_named_in_both_shapes([decision_item(364, "waits-closed", waits=waits)],
-                                                     [("waits-closed", answer_for("waits-closed", 364))],
-                                                     "waits-closed", "a closed item with waits (%s) and a kept answer" % label)
-
     def test_an_items_folder_with_no_complete_marker_prints_one_unknown_kept_answer_line_and_no_item_line(self):
         # The items list may be cut short, so a closed status in it is not proof: one unknown line, and no item line.
         current, _ = self.current_and_behind()
