@@ -521,6 +521,58 @@ class LaneLint(CiJobStub, tm.CloudSession):
         refspec. The lint's own fetches name their refs on the command line, so they still reach origin."""
         tm.sh(self.co, "git", "config", "remote.origin.fetch", "+refs/heads/gone:refs/remotes/origin/gone")
 
+    @contextlib.contextmanager
+    def stalled_unshallow_fetch(self):
+        """Each `git fetch --unshallow` in the block meets a stalled origin: the fake raises subprocess.TimeoutExpired at once, at the
+        bound the call was given. A call given no bound returns a failed exit instead, so the case reads the missing bound as its
+        failed assert and never waits on a real hang. -> the bound of each unshallow fetch, None for no bound."""
+        bounds = []
+        real = merge._nowindow.run
+
+        def run(args, *rest, **kwargs):
+            if "fetch" in args and "--unshallow" in args:
+                bounds.append(kwargs.get("timeout"))
+                if kwargs.get("timeout") is None:
+                    return subprocess.CompletedProcess(args, 124, "", "no bound on the unshallow fetch")
+                raise subprocess.TimeoutExpired(args, kwargs["timeout"])
+            return real(args, *rest, **kwargs)
+
+        with unittest.mock.patch.object(merge._nowindow, "run", run):
+            yield bounds
+
+    @contextlib.contextmanager
+    def odd_shallow_probe(self, answer):
+        """The probe `git rev-parse --is-shallow-repository` answers `answer` with exit 0, as a probe that prints neither true nor
+        false does. Every other call runs as it is. -> the counts of probe calls and of `git fetch --unshallow` calls."""
+        seen = {"probes": 0, "unshallow_fetches": 0}
+        real = merge.sh
+
+        def sh(args, *rest, **kwargs):
+            if "--is-shallow-repository" in args:
+                seen["probes"] += 1
+                return 0, answer
+            if "fetch" in args and "--unshallow" in args:
+                seen["unshallow_fetches"] += 1
+            return real(args, *rest, **kwargs)
+
+        with unittest.mock.patch.object(merge, "sh", sh):
+            yield seen
+
+    @contextlib.contextmanager
+    def traced_shallow_probe(self):
+        """The probe `git rev-parse --is-shallow-repository` runs with GIT_TRACE=1: git writes its trace to stderr while the answer
+        stays on stdout. Only the probe's child gets the variable. In the whole run's environment, merge's own reads of git's
+        combined output (the root discovery) would take the trace as part of the path, which is not this case's claim."""
+        real = merge.sh
+
+        def sh(args, *rest, **kwargs):
+            if "--is-shallow-repository" in args:
+                kwargs["env"] = {**os.environ, "GIT_TRACE": "1"}
+            return real(args, *rest, **kwargs)
+
+        with unittest.mock.patch.object(merge, "sh", sh):
+            yield
+
     def lint_shallow_lane_passes_unshallowed(self, *argv):
         """A shallow lane checkout linted by merge `argv`: it is unshallowed before the lint runs, and the lint passes."""
         pin = self.make_shallow_lane()
@@ -567,8 +619,56 @@ class LaneLint(CiJobStub, tm.CloudSession):
         self.assertEqual(rc, 1, "a lane checkout that stayed shallow after the unshallow fetch read as a pass: " + out)
         self.assertEqual(pass_lines(out), [], "a PASS line printed on a clone that stayed shallow: " + out)
         self.assertIn("unknown", out.lower(), "the refusal does not say the lint is unknown: " + out)
-        self.assertIn("git fetch --unshallow origin", out, "the refusal does not name the command to run: " + out)
+        self.assertRegex(out, r"(?i)origin (?:itself )?is (?:itself )?shallow", "the refusal does not say origin itself is shallow, the cause to fix: " + out)
+        self.assertNotIn("git fetch --unshallow origin", out, "the refusal tells the reader to run the command that just ran, which cannot fix a shallow origin: " + out)
         self.assertEqual(self.lint_calls(), [], "ci-job ran on a clone that stayed shallow")
+
+    def test_a_shallow_lane_whose_unshallow_fetch_times_out_ends_unknown_at_a_plain_stop_and_lints_nothing(self):
+        pin = self.make_shallow_lane()
+        self.assertTrue(self.is_shallow_lane(pin), "precondition: the lane checkout is not shallow, so the case proves nothing")
+        self.use_ci_job(PASSING, 0)
+        with self.stalled_unshallow_fetch() as bounds:
+            rc, out = self.run_lane("--lane-lint", "7")
+        self.assertTrue(bounds, "the lint never ran `git fetch --unshallow origin`: " + out)
+        self.assertIsNotNone(bounds[0], "the unshallow fetch has no timeout, so a stalled origin hangs the lint with no Stop: " + out)
+        self.assertNotIn("Traceback", out, "the timed-out unshallow fetch raised instead of ending the lint: " + out)
+        self.assertNotEqual(rc, 0, "a lane whose unshallow fetch timed out read as a pass: " + out)
+        self.assertEqual(pass_lines(out), [], "a PASS line printed after the unshallow fetch timed out: " + out)
+        self.assertIn("unknown", out.lower(), "the refusal does not say the lint is unknown: " + out)
+        self.assertRegex(out, r"(?i)timed out|timeout", "the refusal does not name the timeout: " + out)
+        self.assertIn("No override lifts this refusal", out, "the refusal is not a plain Stop, which no flag lifts: " + out)
+        self.assertEqual(self.lint_calls(), [], "ci-job ran after the unshallow fetch timed out")
+
+    def test_a_probe_answer_other_than_true_or_false_ends_unknown_at_a_plain_stop_and_fetches_and_lints_nothing(self):
+        pin = self.make_shallow_lane()
+        self.assertTrue(self.is_shallow_lane(pin), "precondition: the lane checkout is not shallow, so the case proves nothing")
+        self.use_ci_job(PASSING, 0)
+        with self.odd_shallow_probe("maybe") as seen:
+            rc, out = self.run_lane("--lane-lint", "7")
+        self.assertGreater(seen["probes"], 0, "the probe never ran, so the case proves nothing: " + out)
+        self.assertNotEqual(rc, 0, "a probe that answered neither true nor false read as a pass: " + out)
+        self.assertEqual(pass_lines(out), [], "a PASS line printed after a probe that answered neither true nor false: " + out)
+        self.assertEqual(seen["unshallow_fetches"], 0, "the lint ran `git fetch --unshallow` after a probe that answered neither true nor false")
+        self.assertIn("unknown", out.lower(), "the refusal does not say the lint is unknown: " + out)
+        self.assertIn("No override lifts this refusal", out, "the refusal is not a plain Stop, which no flag lifts: " + out)
+        self.assertEqual(self.lint_calls(), [], "ci-job ran after a probe that answered neither true nor false")
+
+    def test_git_trace_on_stderr_does_not_change_the_probe_and_a_shallow_lane_still_unshallows_and_lints(self):
+        pin = self.make_shallow_lane()
+        self.assertTrue(self.is_shallow_lane(pin), "precondition: the lane checkout is not shallow, so the case proves nothing")
+        traced = subprocess.run(["git", "-C", self.co, "rev-parse", "--is-shallow-repository"], capture_output=True, text=True,
+                                env={**os.environ, "GIT_TRACE": "1"})
+        self.assertTrue(traced.stderr.strip(), "precondition: GIT_TRACE=1 wrote nothing to stderr, so the case proves nothing")
+        self.assertEqual(traced.stdout.strip(), "true", "precondition: the probe under GIT_TRACE=1 did not answer true")
+        self.use_ci_job(PASSING, 0)
+        with self.traced_shallow_probe():
+            rc, out = self.run_lane("--lane-lint", "7")
+        self.assertFalse(self.is_shallow_lane(pin), "the probe read git's trace on stderr as part of its answer, so the shallow lane was never unshallowed: " + out)
+        self.assertEqual(rc, 0, "a shallow lane lint with GIT_TRACE=1 did not pass: " + out)
+        self.assertEqual(len(pass_lines(out)), 1, out)
+        runs = self.lint_calls()
+        self.assertEqual(len(runs), 1, "the lint ran %d times, want once: %s" % (len(runs), out))
+        self.assertFalse(runs[0]["shallow"], "the lint ran on a shallow clone, so its history checks read the cut history")
 
     def test_lint_unknown_ok_does_not_lift_a_failed_unshallow_fetch(self):
         pin = self.make_shallow_lane()
