@@ -553,7 +553,7 @@ def answered_problem(text):
 # finished agent build usually carries a ref. Any such pair counts; a reviewer-only pair does not.
 # A non-BUILT Done item marked "(no agent)" owes no model, so that gate skips it. A BUILT item is never skipped.
 # A Done pair is refused only when no spawn of that role anywhere in the session ran that model: an earlier
-# review round can sit before the window. The window still decides which roles must be named. Cost of the
+# reviewer spawn can sit before the window. The window still decides which roles must be named. Cost of the
 # session-wide read: one more pass over the in-memory records per Stop, plus one agents/<role>.md read per
 # spawn with no model field; no file written, no process.
 NAMED_ROLES = {"builder", "reviewer", "test-author", "record-writer"}
