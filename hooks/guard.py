@@ -2503,15 +2503,17 @@ MESSAGE_REF_LIMIT = 5   # seconds, for each git (config, cat-file, rev-parse, ls
 MESSAGE_REF_MAX = 20    # pull requests, and shas, judged in one message; the rest are named unchecked
 MESSAGE_GH_READS = 5    # comment links read with gh in one message; the rest are named unchecked
 # A PR word, then marks a writer puts between it and the number (`:`, `(`, `**`, a backtick, `number`), then the number.
-MESSAGE_PR = re.compile(r"\b(PRs?|pull\s+requests?)\b[\s:*`(]*(?:number\s+)?(#?)(\d+)", re.IGNORECASE)
+MESSAGE_PR = re.compile(r"\b(PRs?|pull\s+requests?)\b[\s:*`(]*(?:number\s+)?(#?)(\d+)(?!\w)", re.IGNORECASE)
 # A PR word that may be followed by a number, and the `#N` that comes after other words or marks: `PR is #N`,
 # `PR opened: #N`, `PR - #N`, `PR [#N]`, `Opened the PR as #N`, `pull #N`. The gap holds no digit, `#` or sentence end,
 # so it never reaches a count (`PR: 2500 lines`) or a later sentence.
+# A number ends at a non-word character, so a hex colour (`#0b0f14`) is no PR number. In the gap, a number of exactly
+# 6 or 8 digits is an all-digit colour (`#000000`, `#00000080`), also no PR number.
 # The word stands alone: `pr` inside a name (`msg-ref-pr-forms`, `hooks/pr.py`) is no PR word. `pull` counts only
 # right before its number (`pull #N`) or in `pull request`, so the verb (`pull the list at #8`) is no PR word.
 MESSAGE_PR_WORD = re.compile(
     r"(?<![\w/.-])(PRs?|pull\s+requests?|pull(?=\s*#\d))(?![\w-]|\.\w)", re.IGNORECASE)
-MESSAGE_PR_GAP = re.compile(r"([^#\d.;!?]*?)#(\d+)")
+MESSAGE_PR_GAP = re.compile(r"([^#\d.;!?]*?)#(?!(?:\d{6}|\d{8})(?!\d))(\d+)(?!\w)")
 MESSAGE_PR_GAP_WORDS = 6   # most words between the PR word and its `#N`; a longer gap is a different sentence
 # A word in the gap that says the `#N` is an issue or another item, so `PR merged, see issue #3` names no PR. A verb
 # that closes an issue (`This PR closes #8`) says the same.
@@ -2525,10 +2527,10 @@ MESSAGE_OWN_REF = re.compile(r"(?<![\w./@:-])([\w.-]+)/([\w.-]+)#(\d+)")
 MESSAGE_PR_NUMBERED = re.compile(r"#(\d+)\s*\(\s*(?:PR|pull\s+request)\s*\)", re.IGNORECASE)
 # A further number of a list: after `,`, `and`, `or`, `&` or `+`, with or without its own `#`; or after a space, with `#`.
 MESSAGE_PR_ITEMS = (
-    re.compile(r"\s*,\s*(?:(?:and|or)\s+)?(#?)(\d+)", re.IGNORECASE),
-    re.compile(r"\s+(?:and|or)\s+(#?)(\d+)", re.IGNORECASE),
-    re.compile(r"\s*[&+]\s*(#?)(\d+)"),
-    re.compile(r"\s+(#)(\d+)"),
+    re.compile(r"\s*,\s*(?:(?:and|or)\s+)?(#?)(\d+)(?!\w)", re.IGNORECASE),
+    re.compile(r"\s+(?:and|or)\s+(#?)(\d+)(?!\w)", re.IGNORECASE),
+    re.compile(r"\s*[&+]\s*(#?)(\d+)(?!\w)"),
+    re.compile(r"\s+(#)(\d+)(?!\w)"),
 )
 MESSAGE_GH_URL = re.compile(
     r"(?:https?://)?github\.com/([\w.-]+)/([\w.-]+?)(?:\.git)?/(pull|issues|commit)/([0-9A-Za-z]+)[^\s#]*"
