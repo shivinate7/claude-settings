@@ -59,12 +59,13 @@ def head(d):
 
 
 def check(files, base_files=None, base=None, main_files=None, main=None, send_base=True, path_tools=True, unset=(),
-          head_message=None, head_date=None, **env):
+          head_message=None, head_date=None, uncommitted=None, **env):
     """Commit base_files (when given) as the base, then files on top (None deletes); run the runner.
     main_files (when given) are a commit on top of the base that the PR does not hold, passed as --main;
     the PR's files then go on the base. `base` and `main` name a ref outright; send_base=False omits --base.
     unset names are dropped from the run env; env adds or replaces variables there. head_message and head_date,
-    when given, are the head commit's whole message and its author date. Returns (exit, output)."""
+    when given, are the head commit's whole message and its author date. uncommitted (None deletes) is written after the
+    head commit and left unstaged: a modified tracked file, or an untracked one. Returns (exit, output)."""
     with tempfile.TemporaryDirectory(dir=RUN_FOLDER) as d:
         git(d, "init", "-q", "-b", "main")
         if base_files is not None:
@@ -83,6 +84,7 @@ def check(files, base_files=None, base=None, main_files=None, main=None, send_ba
         else:
             git(d, "commit", "-q", "--allow-empty", "-F", "-", input=head_message.encode("utf-8"),
                 env=dict(os.environ, GIT_AUTHOR_DATE=head_date) if head_date else None)
+        put(d, uncommitted or {})
         args = [sys.executable, RUNNER, "--root", d] + (["--base", base] if base and send_base else []) + (["--main", main] if main else [])
         run_env = dict(os.environ, **env)
         for name in unset:
@@ -665,17 +667,29 @@ class RulingCheck(unittest.TestCase):
                      base_files=base_files or {"README.md": "# Widget\n"}, main_files=main_files, send_base=send_base,
                      head_message=subject + "\n\n" + body + "\n", head_date=when, **env)
 
+    def tool_shims(self):
+        """(log, PATH): a PATH whose tool names each append their call to log and exit 0. log exists only if one ran."""
+        log = os.path.join(tempfile.mkdtemp(dir=RUN_FOLDER), "calls.log")
+        folders = [path_shim(tool, 'echo "%s $*" >> %s' % (tool, shlex.quote(log))) for tool in self.TOOLS]
+        return log, os.pathsep.join(folders + [os.environ["PATH"]])
+
+    def run_tree(self, files, base_files=None, uncommitted=None, base="HEAD"):
+        """check() with the tool shims on PATH. The one commit holds files, on base_files when given, which then sets
+        --base; otherwise --base is base. uncommitted is left unstaged. Returns (exit, output, log)."""
+        log, path = self.tool_shims()
+        rc, out = check(files, base_files=base_files, base=base, uncommitted=uncommitted, PATH=path)
+        return rc, out, log
+
     def run_pr(self, body, when, files=None, extra_base=None, send_base=True, subject="Drop the widget docs"):
         """A PR in a repo with a package.json and no node_modules. The base holds .code-check.json, so the shrink check
         reads a list, and main has moved on past it. extra_base adds files to the base; files replaces the head's files.
         Returns (exit, output, log): read_calls(log) names each tool that started."""
-        log = os.path.join(tempfile.mkdtemp(dir=RUN_FOLDER), "calls.log")
-        shims = os.pathsep.join(path_shim(tool, 'echo "%s $*" >> %s' % (tool, shlex.quote(log))) for tool in self.TOOLS)
+        log, path = self.tool_shims()
         base = {".code-check.json": config([]), "README.md": "# Widget\n", "package.json": self.PACKAGE_JSON}
         base.update(extra_base or {})
         rc, out = self.run_head(body, when, files=files, base_files=base,
                                 main_files={"CHANGELOG.md": "Main moved on.\n"}, send_base=send_base, subject=subject,
-                                PATH=shims + os.pathsep + os.environ["PATH"])
+                                PATH=path)
         return rc, out, log
 
     def test_uncited_claim_after_the_cutoff_fails_the_action(self):
@@ -810,6 +824,42 @@ class RulingCheck(unittest.TestCase):
                                      extra_base=self.PY_BASE, subject="Add the widget picture")
         self.assertEqual(read_calls(calls), "", "a .png and .md diff started a tool:\n" + out)
         self.assertEqual(rc, 0, "a .png and .md diff failed the action:\n" + out)
+
+    def test_empty_diff_on_a_clean_tree_starts_the_layers(self):
+        """--base HEAD on a clean tree names no changed path. That is not a docs-only diff, so the layers start."""
+        rc, out, calls = self.run_tree({"src/a.py": GOOD_PY})
+        self.assertIn("ruff check", read_calls(calls), "an empty diff on a clean tree skipped the layers:\n" + out)
+
+    def test_dirty_py_edit_with_base_head_starts_the_layers(self):
+        """A lane worktree: a clean commit, then an uncommitted .py edit, run with --base HEAD. The layers run."""
+        rc, out, calls = self.run_tree({"src/a.py": GOOD_PY}, uncommitted={"src/a.py": BAD_PY})
+        self.assertIn("ruff check", read_calls(calls),
+                      "an uncommitted .py edit with --base HEAD skipped the layers:\n" + out)
+
+    def test_untracked_py_file_with_base_head_starts_the_layers(self):
+        """A new .py file git does not track, run with --base HEAD. The layers run."""
+        rc, out, calls = self.run_tree({"src/a.py": GOOD_PY}, uncommitted={"src/new.py": GOOD_PY})
+        self.assertIn("ruff check", read_calls(calls),
+                      "an untracked .py file with --base HEAD skipped the layers:\n" + out)
+
+    def test_makefile_only_diff_starts_the_layers(self):
+        """Control: a Makefile has no extension, so it counts as code and the layers run."""
+        rc, out, calls = self.run_tree({"Makefile": "all:\n\techo two\n"},
+                                       base_files={"src/a.py": GOOD_PY, "Makefile": "all:\n\techo one\n"})
+        self.assertIn("ruff check", read_calls(calls), "a Makefile-only diff did not start the layers:\n" + out)
+
+    def test_unreadable_base_starts_the_layers(self):
+        """Control: a base sha that is not in the clone makes the diff unreadable, so the layers run."""
+        rc, out, calls = self.run_tree({"src/a.py": GOOD_PY}, base="deadbeef" * 5)
+        self.assertIn("ruff check", read_calls(calls), "an unreadable diff skipped the layers:\n" + out)
+
+    def test_uncommitted_md_on_a_docs_only_commit_still_skips_the_layers(self):
+        """Control: base..HEAD is one .md commit, so an uncommitted .md edit on top does not start the layers."""
+        rc, out, calls = self.run_tree({"docs/widget.md": "Widget v2.\n"},
+                                       base_files={"src/a.py": GOOD_PY, "docs/widget.md": "Widget v1.\n"},
+                                       uncommitted={"docs/widget.md": "Widget v3.\n"})
+        self.assertEqual(read_calls(calls), "", "an uncommitted .md edit on a docs-only commit started a tool:\n" + out)
+        self.assertEqual(rc, 0, "an uncommitted .md edit on a docs-only commit failed the action:\n" + out)
 
 
 def tearDownModule():
