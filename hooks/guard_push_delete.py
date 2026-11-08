@@ -1063,7 +1063,7 @@ def review_record_hit(transcript: str, destinations=lambda: []):
                 _, role, word, kind, number = event
                 verdicts = merge.REVIEW_FIX_VERDICTS if kind == "fix" else merge.REVIEW_VERDICTS
                 if (known and role in merge.REVIEW_ROLES and word in verdicts
-                        and (kind == "round" or role == merge.REVIEW_ROLES[0])):
+                        and (kind == "round")):
                     pending.append((role, word, kind, number))
             else:
                 record = _record_of(merge, event[1], event[2])
