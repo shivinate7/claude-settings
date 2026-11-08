@@ -15,7 +15,7 @@ bin/ste-changed where its own folder holds no actions/. The command still finds 
 CLAUDE.md names, reads the pin check from it, and with no checkout prints one line, never a traceback.
 Also asserts the pin note (STE_CHANGED_PIN_NOTE=1, set by ci-job on its ste-lint step): a drifted pin with a
 passing lint exits 0 with the drift on stderr, a failing lint still exits 1, and ci-job's ste-lint step reads PASS
-with `pin note` on its line, and that line holds the drift line's marker and its whole text.
+with `pin note` on its line, and that line holds the drift line's marker and its whole text. Without --lint (`--step`, as merge's ready checks run it), a drifted pin still FAILs.
 Also asserts the tree-cites input: off by default, passed to the step as TREE_CITES, and on, the step checks the whole tree."""
 import ast, atexit, contextlib, os, re, shutil, subprocess, sys, tempfile, time, uuid
 
@@ -26,6 +26,8 @@ ROOT = os.path.normpath(os.path.join(HERE, "..", ".."))
 CMD = os.path.join(ROOT, "bin", "ste-changed")
 EXCLUDE_FILE = os.path.join(ROOT, ".ste-lint-exclude")
 EXCLUDE_TEXT = open(EXCLUDE_FILE, encoding="utf-8").read()  # run_pair writes this as the target's file
+sys.path.append(os.path.join(ROOT, "hooks"))  # append: the pin note's names (hooks/pin_note.py)
+from pin_note import ENV as PIN_NOTE_ENV, MARKER as PIN_NOTE_MARKER  # noqa: E402  the one home of the pin note's names (hooks/pin_note.py)
 # Stdlib only: the step's `run: |` block is the lines after "      run: |", indented 8 spaces.
 text = open(os.path.join(HERE, "action.yml")).read()
 block = text.split("      run: |\n", 1)[1]
@@ -38,18 +40,17 @@ BASH = "/bin/bash" if os.path.exists("/bin/bash") else (
 LONG = " ".join(["word"] * 40) + " end."
 BASE_FILES = {"a.md": "# T\n\nShort line.\n"}
 STEP_ENV = ("EVENT_NAME", "BASE_REF", "DEFAULT_BRANCH", "REF_NAME", "SCOPE", "FAIL", "PATHS_GLOB",
-            "EXCLUDE", "CHANGED_PATHS_GLOB", "DECISIONS_DIR", "STE_EXCLUDE_FILE", "TREE_CITES", "STE_CHANGED_PIN_NOTE")
+            "EXCLUDE", "CHANGED_PATHS_GLOB", "DECISIONS_DIR", "STE_EXCLUDE_FILE", "TREE_CITES", PIN_NOTE_ENV)
 FINDING = re.compile(r"^\S.*:\d+: [A-Z]+\d+ ")
 
 # Test temp files (decision test-temp-standard): one run folder for this run, from the repo's one helper.
 # Every case below makes its folder inside it, and the run folder is removed at exit.
 sys.path.append(os.path.join(ROOT, "lint"))
 sys.path.append(os.path.join(ROOT, "testing"))
-sys.path.append(os.path.join(ROOT, "hooks"))  # append: the pin note's names (hooks/pin_note.py)
 import _test_temp  # noqa: E402
 import tracked_tree  # noqa: E402  copies what git lists, so no case here lists files
 import shallow_clone  # noqa: E402  the one shallow-clone fixture (testing/shallow_clone.py)
-from pin_note import MARKER as PIN_NOTE_MARKER  # noqa: E402  the one home of the pin note's marker (hooks/pin_note.py)
+from workflow_steps import job_block, step_blocks, step_key  # noqa: E402  the one home of the step parser (lint/workflow_steps.py)
 RUN_FOLDER = _test_temp.run_folder()
 atexit.register(tracked_tree.rm_tree, RUN_FOLDER)
 
@@ -570,16 +571,17 @@ def scratch_clone(cs, zizmor_step=False):
     return shas
 
 
-def pin_child(d, shas, pin, change=lambda work: None, dead=None, zizmor=None):
+def pin_child(d, shas, pin, change=lambda work: None, dead=None, zizmor=None, step_name=None):
     """A child repo under `d` whose CI pins ste-lint at `pin` and zizmor at `zizmor`: each a label of `shas`, or a sha,
-    or None for no pin of that action. The ste-lint pin is written first, so it is line 5. `dead` is a label that is
-    pinned in a comment only. Returns its working folder."""
-    uses = []
+    or None for no pin of that action. The ste-lint pin is written first, so it is line 5, and `step_name`, when given,
+    names that step on line 6. `dead` is a label that is pinned in a comment only. Returns its working folder."""
+    steps = []
     if pin is not None:
-        uses.append("o/claude-settings/actions/ste-lint@%s # main" % shas.get(pin, pin))
+        steps.append("      - uses: o/claude-settings/actions/ste-lint@%s # main\n" % shas.get(pin, pin)
+                     + ("        name: %s\n" % step_name if step_name else ""))
     if zizmor is not None:
-        uses.append("o/claude-settings/actions/zizmor@%s # main" % shas.get(zizmor, zizmor))
-    wf = "on: pull_request\njobs:\n  l:\n    steps:\n" + "".join("      - uses: %s\n" % u for u in uses)
+        steps.append("      - uses: o/claude-settings/actions/zizmor@%s # main\n" % shas.get(zizmor, zizmor))
+    wf = "on: pull_request\njobs:\n  l:\n    steps:\n" + "".join(steps)
     if dead:
         wf += "      # - uses: o/claude-settings/actions/ste-lint@%s\n" % shas[dead]
     return make_repo(d, {**BASE_FILES, ".github/workflows/ci.yml": wf}, change)
@@ -663,7 +665,7 @@ check("lint red and drift: the lint's exit code wins, and the drift line still p
 
 # The pin note (decision action-pins-follow-sessions). With STE_CHANGED_PIN_NOTE=1 a drifted pin never turns a passing
 # lint into exit 3: the drift stays on stderr, and a failing lint keeps its own exit code. Without the variable, exit 3.
-PIN_NOTE = {"STE_CHANGED_PIN_NOTE": "1"}
+PIN_NOTE = {PIN_NOTE_ENV: "1"}
 
 
 def short_change(work):
@@ -686,22 +688,31 @@ check("pin note, failing lint: exit 1, never masked as a note", rc == 1, out)
 
 # ci-job's ste-lint step (bin/ci-job runs bin/ste-changed in place) in a child whose CI pins ste-lint. The job runs from
 # the scratch clone's own bin/ci-job, so the step's ste-changed and its pin check are that clone's too.
-def ci_job_case(change, pin="A"):
-    """`bin/ci-job l --lint --base origin/main` in a child repo whose CI pins ste-lint at `pin`. Returns (rc, stdout,
-    the job's verdict log, {label: sha}). The log is read before the run folder is removed."""
+def ci_job_case(change, pin="A", step=False):
+    """`bin/ci-job l --lint --base origin/main` in a child repo whose CI pins ste-lint at `pin`. With `step`, the child's
+    ste-lint step is named in its workflow and run as `--step NAME`, with no --lint, as merge's ready checks run it.
+    Returns (rc, stdout, the job's verdict log, {label: sha}, the step's name, or "" without `step`). The log is read
+    before the run folder is removed."""
     with scratch("cijob") as d:
         cs = os.path.join(d, "claude-settings")
         shas = scratch_clone(cs)
-        work = pin_child(d, shas, pin, change)
+        work = pin_child(d, shas, pin, change, step_name="ste-lint" if step else None)
+        name = ""
+        if step:  # read back from the workflow the fixture wrote, through the one step parser (lint/workflow_steps.py)
+            with open(os.path.join(work, ".github", "workflows", "ci.yml"), encoding="utf-8") as f:
+                wf = f.read()
+            name = next((step_key(st, "name") for st in step_blocks(job_block(wf, "l"))
+                         if "actions/ste-lint@" in st), None) or ""
         log, tmp = os.path.join(d, "verdict.log"), os.path.join(d, "tmp")
         os.makedirs(tmp)
         env = {k: v for k, v in os.environ.items() if k not in STEP_ENV + ("CLAUDE_CONFIG_DIR",)}
         env.update(VERDICT_LOG=log, TMPDIR=tmp)  # the job's logs and step scripts stay in this run's folder
+        mode = ["--step", name] if step else ["--lint"]
         p = subprocess.run([sys.executable, os.path.join(cs, "bin", "ci-job"), "l", "--workflow",
-                            os.path.join(".github", "workflows", "ci.yml"), "--lint", "--base", "origin/main"],
+                            os.path.join(".github", "workflows", "ci.yml"), *mode, "--base", "origin/main"],
                            cwd=work, env=env, capture_output=True, text=True)
         text = open(log, encoding="utf-8", errors="replace").read() if os.path.exists(log) else ""
-        return p.returncode, p.stdout, text, shas
+        return p.returncode, p.stdout, text, shas, name
 
 
 def step_line(stdout):
@@ -710,7 +721,7 @@ def step_line(stdout):
     return next((l for l in stdout.splitlines() if l.startswith(words)), "")
 
 
-rc, stdout, log, shas = ci_job_case(short_change)
+rc, stdout, log, shas, _ = ci_job_case(short_change)
 line = step_line(stdout)
 check("ci-job pin note scope: the drift is in the step's log, and the lint passed",
       "CI pins ste-lint at %s" % shas["A"][:7] in log and "ste-lint: PASS" in log, log)
@@ -720,18 +731,30 @@ check("ci-job pin note: its line holds the drift line's marker", PIN_NOTE_MARKER
 check("ci-job pin note: its line holds the whole drift line, `A line can pass here and fail CI`",
       "A line can pass here and fail CI" in line, stdout)
 check("ci-job pin note: the job exits 0", rc == 0, stdout)
-rc, stdout, log, shas = ci_job_case(default_change)
+rc, stdout, log, shas, _ = ci_job_case(default_change)
 line = step_line(stdout)
 check("ci-job pin note, failing lint: scope, the drift is in the log and the lint FAILs",
       "CI pins ste-lint at %s" % shas["A"][:7] in log and "ste-lint: FAIL" in log, log)
 check("ci-job pin note, failing lint: the step reads FAIL and its line never says `pin note`",
       line.startswith("FAIL ") and "pin note" not in line, stdout)
 check("ci-job pin note, failing lint: the job exits 1", rc == 1, stdout)
-rc, stdout, log, shas = ci_job_case(short_change, pin="C")
+rc, stdout, log, shas, _ = ci_job_case(short_change, pin="C")
 line = step_line(stdout)
 check("ci-job, no drift: scope, the pin is the same lint as this copy", "the same lint as this copy" in log, log)
 check("ci-job, no drift: the step reads PASS with no `pin note`, and the job exits 0",
       rc == 0 and line.startswith("PASS ") and "pin note" not in line, stdout)
+
+# merge's ready checks run ci-job with --step and no --lint (merge/merge.py run_ready_checks). The pin note is set under
+# --lint only (decision action-pins-follow-sessions), so a drifted pin there keeps its exit 3, and the named step reads FAIL.
+rc, stdout, log, shas, name = ci_job_case(short_change, step=True)
+line = step_line(stdout)
+check("ci-job --step, drifted pin: scope, the step is named in its workflow, and its lint PASSes under the drift",
+      bool(name) and "CI pins ste-lint at %s" % shas["A"][:7] in log and "ste-lint: PASS" in log, log)
+check("ci-job --step, drifted pin: the named step reads FAIL", line.startswith("FAIL ") and name + ":" in line, stdout)
+check("ci-job --step, drifted pin: the job exits 1", rc == 1, stdout)
+rc, stdout, log, shas, name = ci_job_case(short_change, pin="C", step=True)
+check("ci-job --step, no drift: the named step reads PASS and the job exits 0",
+      rc == 0 and step_line(stdout).startswith("PASS "), stdout)
 
 # The zizmor pin. The check reads `<owner>/claude-settings/actions/zizmor@<sha>` pins in the same workflows and compares
 # actions/zizmor/run.sh at each pinned commit with this copy's, with the same verdict lines, each naming its action.
