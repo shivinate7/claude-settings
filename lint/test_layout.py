@@ -341,6 +341,42 @@ class WaitingPage(Tree):
             with self.subTest(url=url):
                 self.assertFalse(self.layout.is_waiting_page_url(self.tree, url))
 
+    def test_a_bare_id_or_a_url_that_is_no_artifact_link_is_not_the_page(self):
+        # Catches: the last path segment of any URL counts as an id, so a bare id, another site's or a chat's URL
+        # that ends in the page's id, or an artifact URL with an extra segment, names the page.
+        self.set_page(self.URL)
+        for url in ("abc123", "https://example.com/abc123", "https://claude.ai/chat/abc123",
+                    "https://claude.ai/artifact/zzz/abc123"):
+            with self.subTest(url=url):
+                self.assertFalse(self.layout.is_waiting_page_url(self.tree, url), "%s names the page" % url)
+                self.assertEqual(self.layout.artifact_id(url), "", "%s has an artifact id" % url)
+
+    def test_a_real_artifact_link_with_a_query_or_slash_is_the_page(self):
+        # A control: the forms that must keep counting once a bare id stops counting.
+        self.set_page(self.URL)
+        for url in ("https://claude.ai/artifact/abc123", "https://claude.ai/code/artifact/abc123",
+                    "https://claude.ai/code/artifact/abc123/?x=1"):
+            with self.subTest(url=url):
+                self.assertTrue(self.layout.is_waiting_page_url(self.tree, url), "%s does not name the page" % url)
+
+    def test_a_link_without_scheme_or_www_or_in_upper_case_or_padded_is_the_page(self):
+        # Checks each link form a stored page URL may take: no scheme, http, www, an upper-case scheme or host, and
+        # leading spaces. Each names the same artifact, so the page is recognised in any of them.
+        self.set_page(self.URL)
+        for url in ("claude.ai/artifact/abc123", "http://claude.ai/artifact/abc123",
+                    "www.claude.ai/artifact/abc123", "HTTPS://claude.ai/artifact/abc123",
+                    "https://Claude.AI/artifact/abc123", "  https://claude.ai/artifact/abc123"):
+            with self.subTest(url=url):
+                self.assertEqual(self.layout.artifact_id(url), "abc123", "%r has no artifact id" % url)
+                self.assertTrue(self.layout.is_waiting_page_url(self.tree, url), "%r does not name the page" % url)
+
+    def test_a_link_with_trailing_spaces_or_a_newline_names_its_id(self):
+        # Checks that trailing spaces and a trailing newline are ignored, as leading spaces are: a link pasted with
+        # padding names the same artifact.
+        for url in ("https://claude.ai/artifact/abc123 ", "https://claude.ai/artifact/abc123\n"):
+            with self.subTest(url=url):
+                self.assertEqual(self.layout.artifact_id(url), "abc123", "trailing padding %r is not ignored" % url)
+
     def test_a_repo_with_no_page_has_no_page_url(self):
         self.assertFalse(self.layout.is_waiting_page_url(self.tree, self.URL))
         self.roll_out()
