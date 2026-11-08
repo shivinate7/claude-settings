@@ -36,7 +36,7 @@ Mistake it stops: an agent met a refusal of a command, then sent the same comman
 
 Outcome protected: a refusal stays final, so the owner or the orchestrator decides the next step.
 
-False-alarm cost: an ordinary decode into a shell within ten minutes of an unrelated refusal in the same session is refused once, and the agent reports. An override lifts it. A guard.log deny from one agent brakes the orchestrator's own decode-and-run for ten minutes (accepted, the log names no agent). A decoded variable used as data in a shell's script, as `bash -c "./deploy.sh $PW"`, is refused too (accepted, a note).
+False-alarm cost: an ordinary decode into a shell within ten minutes of an unrelated refusal in the same session is refused once, and the agent reports. An override lifts it. A guard.log deny from one agent brakes the orchestrator's own decode-and-run for ten minutes (accepted, the log names no agent). A decoded variable used as data in a shell's script, as `bash -c "./deploy.sh $PW"`, is refused too.
 
 Not read:
 
@@ -44,7 +44,7 @@ Not read:
 - A decode through `openssl`, `xxd` or a language runtime.
 - An ANSI-C word inside the script of `eval` or `bash -c`.
 - A glob spelling of a command word.
-- A substitution after a backtick that never closes. Bash runs no part of that call.
+- A backtick pair after a backtick that never closes. Bash runs no part of that call.
 - A PowerShell call.
 
 Kind: process
