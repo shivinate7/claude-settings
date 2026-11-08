@@ -138,10 +138,12 @@ class HistoryPhrase:
     match does what a lookbehind cannot: take a variable run of words."""
     # Each form names the words around it, so a mid-sentence "previously" and "the user changed the value" stay
     # clean. The "previously" form needs the start of a sentence, since only there it opens a history clause.
+    # A "changed from" form whose noun is a snapshot or run is change detection, not history: the noun after
+    # the adjective decides, so the same form with any other noun still flags.
     # "the old behaviour expected by ..." is a participle naming who relies on it, not a past-tense verb.
     FORMS = re.compile(
         r"(?:^[\s#/*\"']*|[.;:]\s+)previously\b,?\s+(?:this|it|they|we|was|were|returned|used|did|had)\b"
-        r"|\bchanged\s+from\s+(?:the\s+(?:old|previous|original|former)\b|an?\s+\w+\s+to\b|\w+ing\s+\w+\s+to\b)"
+        r"|\bchanged\s+from\s+(?:the\s+(?:old|previous|original|former)\b(?!\s+(?:snapshot|run)\b)|an?\s+\w+\s+to\b|\w+ing\s+\w+\s+to\b)"
         r"|\badded\s+after\s+(?:code\s+)?review\b"
         r"|\bformerly\b"
         r"|\bthe\s+old\s+behaviou?r\s+(?:(?!\w+ed\s+(?:by|for|on|in|at|with|from)\b)\w+ed|was|were|had|did|used|let|ran|took|gave|made|kept)\b", re.I)
