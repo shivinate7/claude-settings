@@ -1626,7 +1626,9 @@ _SEND_PR_URL = re.compile(r"(?<![\w./-])(?:https?://)?(?:www\.)?github\.com/([A-
 # `#41`, `PR#41`, and each `#n` of `#41/#42`; not `&#39;`, a colour, `name#41`, `docs/#41`, or a number in a longer digit run
 _SEND_PR_BARE = re.compile(r"(?:(?<![\w&/])|(?<=\d/)|(?<=\b[Pp][Rr]))#(\d{1,5})(?!\w)")
 _SEND_PR_QUALIFIED = re.compile(r"(?<![\w/.-])([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)#(\d{1,5})(?!\w)")  # `owner/name#41`; a bare `name#41` has no owner and is not judged
-_SEND_REPO = re.compile(r"[A-Za-z0-9][A-Za-z0-9-]{0,38}/(?!\.\.?$)[A-Za-z0-9_.-]{1,100}")  # a GitHub owner/name; any other token is read as nothing
+# GitHub's own owner/name shape: an owner holds no `.` or `_` and starts with no `-`. Stricter than _REPO_NAME, the token shape the
+# ref patterns match, which any ref already fits; a token that fails this is no repo, so it is not read.
+_SEND_REPO = re.compile(r"[A-Za-z0-9][A-Za-z0-9-]{0,38}/(?!\.\.?$)[A-Za-z0-9_.-]{1,100}")
 LANE_SEND_CITE = "(decision lane-lint-send, a lane hands a batch runner only a pull request whose live head passed its lint)"
 LANE_SEND_REASON = (
     "this hand-off names %s, with no review record at its live head. Run `merge --lane-lint <pr>` on the lane's pushed head, fix any "
@@ -1638,7 +1640,7 @@ LANE_SEND_LINT_REASON = (
     "the live head, then send again. "
 )
 LANE_SEND_NO_RECORD_REASON = (
-    "lane-lint-send: this hand-off names a pull request, and this session's transcript holds no get_session, create_session or "
+    "this hand-off names a pull request, and this session's transcript holds no get_session, create_session or "
     "list_sessions record of the target, so the guard cannot tell whether the target is a batch runner. Run get_session on the "
     "target alone, in its own turn, then send this message again: once a get_session on the target follows this refusal, the "
     "exact retry passes, or is judged by the record that get_session read. " + LANE_SEND_CITE

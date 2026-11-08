@@ -2510,7 +2510,7 @@ def lane_lint_marker(head):
     return pathlib.Path(os.environ.get("CLAUDE_CONFIG_DIR") or os.path.join(os.path.expanduser("~"), ".claude"), *LANE_LINT_MARKER_DIR, head)
 
 def lane_lint_passed(head):
-    """True when `head` has its lint marker on this machine: the one reader of a marker."""
+    """True when `head` has its lint marker in this container: the one reader of a marker."""
     return lane_lint_marker(head).exists()
 
 def write_lane_lint_marker(head):
