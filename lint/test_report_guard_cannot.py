@@ -1929,6 +1929,45 @@ class CannotClaimTests(unittest.TestCase):
         self.assert_passes(self.stop(by_number), "the control: a later success of PR 12 by number and --repo o/r cancels it")
         self.assert_passes(self.stop(by_url), "a later success of PR 12 by its URL cancels a failure whose --repo is o/r")
 
+    def test_cc_red_a_masked_status_span_does_not_hide_a_claim(self):
+        # Catches: the code span `not connected` between a colon and a semicolon. The later separator is dropped, so the
+        # claim's clause starts at the colon and its negation is read from the masked span. The turn has no try.
+        line = "MCP status: `not connected`; I cannot open a PR."
+        out = self.stop([trg.human("open a PR"), trg.assistant_text(line)])
+        self.assert_blocked_for(out, NO_TRY, line)
+
+    def test_cc_red_a_masked_quoted_negation_does_not_hide_a_claim(self):
+        # Catches: the quote "not connected" between a colon and a semicolon, read as a negation of the claim after it.
+        # The turn has no try.
+        line = 'GitHub MCP said: "not connected"; I can\'t open a PR.'
+        out = self.stop([trg.human("open a PR"), trg.assistant_text(line)])
+        self.assert_blocked_for(out, NO_TRY, line)
+
+    def test_cc_red_a_masked_no_tools_before_a_comma_does_not_hide_a_claim(self):
+        # Catches: the code span `no tools` before a comma, read as a negator of the claim after the comma. The turn has
+        # no try.
+        line = "The notice said: `no tools`, I cannot open a PR."
+        out = self.stop([trg.human("open a PR"), trg.assistant_text(line)])
+        self.assert_blocked_for(out, NO_TRY, line)
+
+    def test_cc_green_a_masked_if_needed_before_a_semicolon_still_blocks(self):
+        # Control of the current verdict: the base already blocks this line, so no case here is red. It pins the verdict
+        # the fix must keep. The conditional read of masked text has no red case behind it.
+        line = "The note said `if needed`; I cannot push."
+        out = self.stop([trg.human("push the branch"), trg.assistant_text(line)])
+        self.assert_blocked_for(out, NO_TRY, line)
+
+    def test_cc_green_a_masked_connected_status_still_blocks(self):
+        # Control: the same shape with `connected` in the span. Nothing negates the claim, so it blocks as no try.
+        line = "MCP status: `connected`; I cannot open a PR."
+        out = self.stop([trg.human("open a PR"), trg.assistant_text(line)])
+        self.assert_blocked_for(out, NO_TRY, line)
+
+    def test_cc_pass_a_true_negation_of_a_push_claim_still_passes(self):
+        # Control: "did not say" negates the telling, so the reply claims no act and the turn passes.
+        out = self.stop([trg.human("push the branch"), trg.assistant_text("I did not say I cannot push.")])
+        self.assert_passes(out, "a true negation of a push claim")
+
 
 if __name__ == "__main__":
     unittest.main()
