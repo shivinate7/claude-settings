@@ -40,11 +40,12 @@ Stop hook's): Sonnet, item 8 alone, PAST_RULING_TIMEOUT s.
   Every write's text reaches the dedicated call, uncut. Each question needs its own `Unvetted:` line to pass a check
   that could not run, and a form-judge error refuses as Unvetted too.
   Owner-question send: a `mcp__claude-code-remote__send_message` or `SendMessage` whose message holds a Goal line
-  and a stake Problem line (question_form.GOAL_LINE, PROBLEM_LINE) gets the dedicated call before it is sent,
-  whoever the target is. A refusal is rule `past-ruling`. Any other send exits before a heavy import. The form lines
-  are read outside code, after the marks a page uses (bold, bullet, quote) are cut. Cap rule (send_question): a
-  message over report_guard.ASK_TEXT_MAX characters goes as that many characters from its first form line, so the
-  text sent starts at the first form line; the `Unvetted:` line is read in the whole message.
+  and a Problem line (question_form.GOAL_LINE, PROBLEM_LABEL; the Problem line needs no stake) gets the dedicated
+  call before it is sent, whoever the target is. A refusal is rule `past-ruling`. Any other send exits before a heavy
+  import. The form lines are read outside code, after the marks a page uses (bold, bullet, heading, quote) are cut.
+  Cap rule (send_question): a message over report_guard.ASK_TEXT_MAX characters goes as that many characters from its
+  first form line (Goal, Problem, Based on or Departs from). Each question in a send needs its own `Unvetted:` line,
+  read in the whole message, one unit per Goal/Problem pair.
 When the check cannot run (a model error, a source that exists and cannot be read, or a refusal that cites a record
 the model was not shown), the question is refused with the Unvetted remedy, unless its own text carries an
 `Unvetted:` line. An absent source allows, with one stderr line.
@@ -71,6 +72,7 @@ Cost: one more haiku call (low effort, OPUS_SCOPE_TIMEOUT s) for such an ask, no
 """
 import json
 import os
+import re
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -420,15 +422,23 @@ def past_ruling_check(payload, asked, marked, tool=None):
     return (PAST_RULING_RULE_NAME if relay else QUESTION_RULE), problem
 
 
+SEND_HEADING_MARK = re.compile(r"^#{1,6}[ \t]+")  # a Markdown heading mark, cut like a list bullet
+
+
 def send_question(message):
-    """(text for the dedicated call, whether its Unvetted line is there) for a send that is an owner question: a Goal
-    line and a stake Problem line in its prose, else None. Plain string tests first, so a send without the form never
-    imports question_form or report_guard. The form lines are read after the marks a page uses are cut (`**`, `*`, `_`,
-    a list bullet; prose_lines cuts `>`), and outside a code fence, through report_guard.prose_lines, the one reader
-    of what is code. question_form's regexes are unchanged.
+    """(text for the dedicated call, whether every question's Unvetted line is there) for a send that is an owner
+    question: a Goal line and a Problem line in its prose, else None. Plain string tests first, so a send without the
+    form never imports question_form or report_guard (a send that holds both words in prose, with no form line, does
+    import them, and then returns None). The form lines are read after the marks a page uses are cut (`**`, `*`, `_`,
+    a list bullet, a heading mark; prose_lines cuts `>`), and outside a code fence, through report_guard.prose_lines,
+    the one reader of what is code. The Problem line is question_form.PROBLEM_LABEL, with or without a stake, so a
+    plain `Problem:` line or a `Problem (<any word>):` line counts. question_form's regexes are unchanged.
     The cap rule: a message up to report_guard.ASK_TEXT_MAX characters goes whole. A longer one goes as the
-    ASK_TEXT_MAX characters that start at its first form line (the first Goal or Problem line), because the question
-    sits there and the tail of a long send is its log. The `Unvetted:` line is read in the whole message."""
+    ASK_TEXT_MAX characters that start at its first form line (a Goal, Problem, Based on or Departs from line), because
+    the question sits there and the tail of a long send is its log.
+    Each question needs its own `Unvetted:` line, as each page write does. The message is split into one unit per
+    Goal/Problem pair, read in the whole message; a unit runs from the line that opens it to the line that opens the
+    next, so a marker counts for the question above it."""
     if not isinstance(message, str):
         return None
     low = message.lower().replace("*", "").replace("_", "")
@@ -437,22 +447,35 @@ def send_question(message):
     sys.path.insert(0, os.path.join(HERE, "..", "lint"))
     import question_form
     import report_guard
-    goal = problem = None
+    forms = []  # (line index, kind) of each Goal and Problem line, in order
+    first = None  # the first form line of any kind: where the capped text starts
     for index, body in report_guard.prose_lines(message):
         body = report_guard.LIST_ITEM.sub("", body.replace("*", "").replace("_", ""), count=1).strip()
-        if goal is None and question_form.GOAL_LINE.search(body):
-            goal = index
-        if problem is None and question_form.PROBLEM_LINE.search(body):
-            problem = index
-    if goal is None or problem is None:
+        body = SEND_HEADING_MARK.sub("", body, count=1)
+        kind = ("goal" if question_form.GOAL_LINE.search(body) else
+                "problem" if question_form.PROBLEM_LABEL.search(body) else None)
+        if kind:
+            forms.append((index, kind))
+        if kind or question_form.BASED_LABEL.search(body) or question_form.DEPARTS_LINE.search(body):
+            first = index if first is None else first
+    starts, seen = [], set()  # a unit opens at the form line that repeats a kind its unit already holds
+    for index, kind in forms:
+        if not starts or kind in seen:
+            starts.append([index, set()])
+            seen = set()
+        seen.add(kind)
+        starts[-1][1].add(kind)
+    whole = [start for start, kinds in starts if len(kinds) == 2]  # a unit with one kind is no question
+    if not whole:
         return None
+    lines = message.splitlines(keepends=True)
+    bounds = [0] + whole[1:] + [len(lines)]
+    marked = all(question_form.has_unvetted("".join(lines[bounds[i]:bounds[i + 1]])) for i in range(len(whole)))
     asked = message
     if len(message) > report_guard.ASK_TEXT_MAX:
-        first = min(goal, problem)
-        lines = message.splitlines(keepends=True)
         start = sum(len(line) for line in lines[:first])
         asked = message[start:start + report_guard.ASK_TEXT_MAX]
-    return asked, question_form.has_unvetted(message)
+    return asked, marked
 
 
 def judge_send(payload, tool, args):
