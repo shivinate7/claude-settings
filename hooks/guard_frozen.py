@@ -224,6 +224,9 @@ _MUTATING_ANYWHERE = (
 # The full list, for a command already in command position and for a quick hint.
 MUTATING_COMMAND = r"\b(?:" + _MUTATING_ANYWHERE + "|" + _ALIAS_COMMAND + r")\b"
 _MUTATING_ANYWHERE_RE = r"\b" + _MUTATING_ANYWHERE + r"\b"
+# Where an alias is a command: first in the segment, or the first word of a `{`, `(` or `$(` block, or after a
+# dot-source (`.`) or call (`&`) word. In `grep -n ac F` or `diff ni F` it is only a word.
+_ALIAS_POSITION = r"(?:^\s*|[{(]\s*|(?:^|\s)[.&]\s+)" + _ALIAS_COMMAND + r"\b"
 
 
 # A command that hands its arguments to another program, so a mutating word in them may run.
@@ -284,9 +287,11 @@ def writes_to(path: str, cmd: str, command=None, words=()) -> bool:
         return command == "sed" and bool(re.search(r"\bsed\b[^\n;|&]*-i\b[^\n;|&]*" + target, cmd))
     if re.search(_MUTATING_ANYWHERE_RE + r"[^\n;|&]*" + target, cmd):
         return True
-    # No command given: an alias writes only when it is the segment's own command.
+    # No command given: an alias writes only as the segment's own command (through a wrapper such as `env`
+    # too) or where `_ALIAS_POSITION` reads it as one.
     name = _segment_command(cmd.split())[0]
-    if re.fullmatch(_ALIAS_COMMAND, name) and re.search(r"\b" + _ALIAS_COMMAND + r"\b[^\n;|&]*" + target, cmd):
+    if re.search(_ALIAS_POSITION + r"[^\n;|&]*" + target, cmd) or (
+            re.fullmatch(_ALIAS_COMMAND, name) and re.search(r"\b" + _ALIAS_COMMAND + r"\b[^\n;|&]*" + target, cmd)):
         return True
     if re.search(r"\bsed\b[^\n;|&]*-i\b[^\n;|&]*" + target, cmd):
         return True
@@ -573,6 +578,13 @@ def _only_read(operands, words, target, predicate, cwd, is_folder=False):
             if not predicate(head + "/" + re.split(r"[/\\]", words[i].rstrip("/\\"))[-1], cwd)}
 
 
+def _comma_joined(words, index, start) -> bool:
+    """True when the word at `index` belongs to a comma list: it ends with a comma, starts with one, or
+    follows a word that ends with one."""
+    word = words[index]
+    return word.endswith(",") or (index > start + 1 and (word.startswith(",") or words[index - 1].endswith(",")))
+
+
 def _ps_reads(name, raw, words, start, predicate, cwd, plain):
     """`_copy_reads` for a PowerShell `Copy-Item` (its sources) or `Add-Content` / `Set-Content` (the
     quoted text after the path): the indexes of the words that are only read or only text. A `;`, `|` or
@@ -583,7 +595,8 @@ def _ps_reads(name, raw, words, start, predicate, cwd, plain):
     for index in range(start + 1, len(words)):
         word = words[index]
         # A comma list is one argument naming several paths: `a.md, 'b'` writes both, so no word is text.
-        if word.endswith(",") or (index > start + 1 and word.startswith(",")):
+        # A copy's comma list of SOURCES is a read; a list that reaches its target is judged below.
+        if name in _PS_CONTENT and _comma_joined(words, index, start):
             return set()
         if ">" in word or "<" in word or (word.startswith("-") and not _PS_SWITCH.fullmatch(word)):
             return set()
@@ -594,6 +607,8 @@ def _ps_reads(name, raw, words, start, predicate, cwd, plain):
     if len(operands) < 2:
         return set()
     target = words[operands[-1]]
+    if "," in target or _comma_joined(words, operands[-1], start):
+        return set()
     if _CP_DEST_UNSAFE.search(target) or predicate(target, cwd) or predicate(target.rstrip("/\\") + "/_", cwd):
         return set()
     return _only_read(operands[:-1], words, target, predicate, cwd)
@@ -784,14 +799,80 @@ def _shell_write_hit(cmd: str, cwd: str, predicate, holds=None, follow_cd=False,
         if command_args and scripts_run and command_args[0] in _PS_SHELLS:
             # the script this shell runs was judged above by PowerShell's own rules; only a redirect on the shell is left
             command_args = ("", ())
+        powershell = is_powershell(segments[number])
+        if command_position and powershell:
+            # A command inside a scriptblock is a command of its own; `ls | % { Set-Content $_ x }` writes
+            # each listed file, so `$_` is judged as the folder listed (`_listed_folder`).
+            listed = _listed_folder(parsed, ends, number)
+            block_predicate = predicate if listed is None else _pipe_variable_predicate(predicate, holds, listed)
+            for inner in _ps_blocks(segments[number]):
+                hit = _shell_write_hit(inner, at, block_predicate, holds, follow_cd, command_position,
+                                       predicate_command)
+                if hit:
+                    return hit
         for word in words:
             if word.startswith("-") or REDIRECT.fullmatch(word):
                 continue
             if not word or word in (">", ">>"):
                 continue
-            if (predicate(word, at, verb) if predicate_command else predicate(word, at)) and writes_to(word, text, *command_args):
-                return word
+            # A PowerShell comma joins paths into one argument: each piece is a path of its own.
+            pieces = [word] + ([piece for piece in word.split(",") if piece] if powershell and "," in word else [])
+            for piece in pieces:
+                if (predicate(piece, at, verb) if predicate_command else predicate(piece, at)) and \
+                        writes_to(piece, text, *command_args):
+                    return piece
     return ""
+
+
+_LISTERS = frozenset(("ls", "dir", "gci", "get-childitem"))
+_PIPE_VARIABLE = re.compile(r"\$(?:_|psitem)(?:\.\w+)*", re.IGNORECASE)
+
+
+def _listed_folder(parsed, ends, number):
+    """The folder a listing (`ls`, `dir`, `gci`, `Get-ChildItem`) hands to segment `number` through a pipe, else
+    None. Its first plain argument, or `.` when it has none."""
+    if number == 0 or ends[number - 1] != "|":
+        return None
+    words = [_unquoted(word) for word in parsed[number - 1]]
+    command, rest = _segment_command(words)
+    if command not in _LISTERS:
+        return None
+    return next((word for word in rest if not word.startswith("-")), ".")
+
+
+def _pipe_variable_predicate(predicate, holds, folder):
+    """`predicate` that also accepts the pipeline variable (`$_`, `$PSItem`) when `folder` holds a path it accepts:
+    the variable may name that path."""
+    def judge(path, where, *verb):
+        return predicate(path, where, *verb) or (bool(_PIPE_VARIABLE.fullmatch(path)) and holds(folder, where))
+    return judge
+
+
+def _ps_blocks(segment: str):
+    """The text inside each top-level `{ ... }` of a PowerShell segment. Quoted text is skipped, so a brace in
+    a string is no block. An unclosed brace gives its rest."""
+    text, out, depth, start, quote, index = _straight(segment), [], 0, 0, "", 0
+    while index < len(text):
+        char = text[index]
+        if quote:
+            if char == "`" and quote == '"':
+                index += 1
+            elif char == quote:
+                quote = ""
+        elif char in "'\"":
+            quote = char
+        elif char == "{":
+            if depth == 0:
+                start = index + 1
+            depth += 1
+        elif char == "}" and depth:
+            depth -= 1
+            if depth == 0:
+                out.append(text[start:index])
+        index += 1
+    if depth:
+        out.append(text[start:])
+    return out
 
 
 _PS_SHELLS = frozenset(("pwsh", "powershell", "cmd"))
