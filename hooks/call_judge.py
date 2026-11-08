@@ -141,7 +141,9 @@ PAST_RULING_ITEM = (
     "Past rulings. The text after the reply line lists past rulings, one per line as `<id>: <text>`. Refuse when "
     "the question asks the owner to decide what a listed ruling already decides, or when its premise is "
     "something a standing decision already explains (such as asking what a rule means when a decision says why "
-    "it was set so). A question whose `Based on (ruling): ...` line names that ruling (its id or slug) passes: "
+    "it was set so). Cite only a listed line that holds an owner answer or a sentence that names the owner as its "
+    "source (such as `Owner, <date>` or `(owner, <date>)`). A line that holds only an incident, a recommendation "
+    "or a pick the owner has not answered is no ruling: never cite it. A question whose `Based on (ruling): ...` line names that ruling (its id or slug) passes: "
     "a re-ask the ruling allows is fine. This item passes when no list follows. "
     "When you refuse, the reason names the listed id, such as decisions/<name>, and gives the ruling's date."
 )

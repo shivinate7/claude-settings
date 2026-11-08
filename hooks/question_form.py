@@ -1383,7 +1383,18 @@ UNREADABLE = "unreadable"
 CLOSED_ITEMS = "closed page items"
 INDEX_CAP, STEP_TOP, STEP_GIT_TIMEOUT = 800, 30, 10
 RULING_HEADING = re.compile(r"^##[ \t]+The ruling[ \t]*$", re.I | re.M)
-RULING_WORDS = re.compile(r"ruling|owner|shiv", re.I)
+# The one home of an owner marker: text that names the owner as its source. Only text holding one is a ruling the
+# judge may cite (decision question-form): a step note that holds an incident, or a recommended pick the owner has
+# not answered, names him in passing and gives no ruling. Forms read from the records and step notes:
+# `Owner, 2026-10-21`, `Ruling (owner, Nov 9 14:20 CST)`, `(shiv, page item 9, a)`, `Owner, page item 150, pick a`,
+# `owner picked a`. A passing mention does not match: "the owner's review", "the owner has not answered", "co-owner".
+_WHO = r"(?:owner|shiv)"
+_MONTH = r"(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*"
+OWNER_RULING_RE = re.compile(
+    r"\(\s*" + _WHO + r"(?=[\s,:)'])"
+    r"|(?<![\w'-])" + _WHO + r"\s*,\s*(?:\d|chat\b|" + _MONTH + r"\s+\d)"
+    r"|(?<![\w'-])" + _WHO + r"(?:\s*,)?\s+(?:page\s+)?item\s+\d"
+    r"|(?<![\w'-])owner\s+(?:ruling|picked|pick|chose|ruled|answered|decided)\b", re.I)
 SENTENCE_SPLIT = re.compile(r"(?<=[.!?])\s+")
 WORD = re.compile(r"[a-z]{4,}")
 STOPWORDS = frozenset(("that", "this", "with", "from", "have", "will", "should", "would", "could", "there", "their",
@@ -1420,8 +1431,9 @@ def _ruling_text(body) -> str:
 
 
 def _record_index(root, folder, unknown, label, seen):
-    """(folder exists, index lines `<folder>/<stem>: <ruling>`) for the records of root/docs/<folder>. A record
-    or folder that cannot be read adds an unreadable source to `unknown`."""
+    """(folder exists, index lines `<folder>/<stem>: <ruling>`) for the records of root/docs/<folder>. A record or
+    folder that cannot be read adds an unreadable source to `unknown`. No owner-marker test here: 92 of the 188
+    decisions on main name no owner in their ruling, so a marker test would drop real rulings."""
     path = os.path.join(root, "docs", folder)
     if not os.path.isdir(path):
         return False, []
@@ -1528,15 +1540,16 @@ def _read_steps(root):
 
 def _step_rulings(steps, words):
     """The top STEP_TOP ruling units of the step notes by word overlap with `words`, as `<step id>: <text>`
-    lines. A unit is a sentence holding Ruling, owner or shiv, plus the sentence after it (a ruling's detail
-    often sits there). Overlap 0 never counts."""
+    lines. A unit is a sentence holding an owner marker (OWNER_RULING_RE), plus the sentence after it (a ruling's
+    detail often sits there). A sentence with no marker is no unit: an incident or an unanswered recommendation
+    is no ruling. Overlap 0 never counts."""
     scored = []
     for step_id, fields in sorted(steps.items()):
         sentences = [s for f in fields if isinstance(f, str) for s in SENTENCE_SPLIT.split(f.strip()) if s]
         for i, sentence in enumerate(sentences):
-            if not RULING_WORDS.search(sentence):
+            if not OWNER_RULING_RE.search(sentence):
                 continue
-            tail = sentences[i + 1] if i + 1 < len(sentences) and not RULING_WORDS.search(sentences[i + 1]) else ""
+            tail = sentences[i + 1] if i + 1 < len(sentences) and not OWNER_RULING_RE.search(sentences[i + 1]) else ""
             unit = (sentence + " " + tail).strip()
             overlap = len(_words(unit) & words)
             if overlap:
@@ -1545,8 +1558,8 @@ def _step_rulings(steps, words):
 
 
 def past_rulings(question_text, repo_root):
-    """(candidates, unknown). `candidates` are lines `<id>: <text>`: every decision and debt record, then the step
-    rulings that share words with the question. `unknown` lists each source not searched: "<source> (absent)"
+    """(candidates, unknown). `candidates` are lines `<id>: <text>`: every decision and debt record, then the
+    owner-marked step rulings that share words with the question. `unknown` lists each source not searched: "<source> (absent)"
     for a source the repo does not have, "<source> (unreadable: ...)" for one that exists and failed, and always
     "closed page items". Absent sources never refuse; unreadable ones do (see unreadable_sources)."""
     candidates, unknown, seen = [], [], set()
