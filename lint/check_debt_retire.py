@@ -157,11 +157,11 @@ def judge_head_run(head, url, head_run):
 
 
 def in_branch(wt, sha, head, base):
-    """True when `sha` is a lane tip the head holds: an ancestor of the head and, when a base is known, not an older commit of it. A cite on
-    a commit below the base is an old main run, never a lane tip, so it is not deferred. The base tip itself still is (the fixtures cite it)."""
+    """True when `sha` is in base..head: an ancestor of the head and, when a base is known, not an ancestor of the base. A cite on a commit
+    the base holds, its tip included, is a main run, never a lane tip, so it is not deferred."""
     def ancestor(a, b):
         return _nowindow.run(["git", "-C", wt, "merge-base", "--is-ancestor", a, b], capture_output=True).returncode == 0
-    return ancestor(sha, head) and not (base is not None and ancestor(sha, base) and not ancestor(base, sha))
+    return ancestor(sha, head) and not (base is not None and ancestor(sha, base))
 
 
 def judge_run(wt, head, url, run_state, head_run=None, defer=False, base=None):
