@@ -32,6 +32,10 @@ NAMED = " named in a Cost sentence with no pin"
 UNBALANCED = "unbalanced backtick in a Cost paragraph"
 # The count rule's row. The file cases leave it out, so a count the rule flags fails only the count cases.
 COUNT = "count in a Cost sentence with no reader"
+# A plain count beside a cost noun, which the rule flags. Each count case prints it, so a case whose other
+# sentences pass still shows that the rule ran on its record.
+CONTROL = "- **Cost:** two `simctl list` reads per call.\n"
+CONTROL_NEEDLE = "- **Cost:** two `simctl list`"
 FINDING = re.compile(r"^(?P<path>.+\.md):(?P<line>[0-9]+): (?P<what>.+)$")
 RUN_FOLDER = None  # made in setUpModule, so an import leaks no folder
 
@@ -462,6 +466,79 @@ class CostPinTests(unittest.TestCase):
                            "It also reads `state/g2.json` once.\n")
         self.assert_found([row("bare-hash.md", text, "state/g1.json", "state/g1.json"),
                            row("bare-hash.md", text, "state/g2.json", "state/g2.json")])
+
+    def test_count_beside_a_cost_noun_with_no_reader_is_flagged(self):
+        text = self.decide("count.md", "- **Cost:** one `simctl list` read per call.\n")
+        self.assert_found([count_row("count.md", text, "- **Cost:**")], counts=True)
+
+    def test_bound_words_pass_a_count_and_the_unbounded_control_is_flagged(self):
+        bounded = ["- **Cost:** at most three `simctl list` reads per call.\n",
+                   "- **Cost:** up to two `simctl list` reads per call.\n",
+                   "- **Cost:** no more than two `simctl list` reads per call.\n",
+                   "- **Cost:** fewer than four `simctl list` reads per call.\n",
+                   "- **Cost:** at least one `simctl list` read per call.\n"]
+        text = self.decide("bound.md", "".join(bounded) + CONTROL)
+        self.assert_found([count_row("bound.md", text, CONTROL_NEEDLE)], counts=True)
+
+    def test_count_pinned_only_by_a_test_that_holds_the_span(self):
+        # Both tests exist, so a miss below is the span check, not a missing file.
+        self.put("lint/test_x.py", "# x cases\n\nthe `simctl list` read is stubbed\n")
+        self.put("lint/test_y.py", "# y cases\n\nthe status file is read\n")
+        for rel in ("lint/test_x.py", "lint/test_y.py"):
+            self.assertTrue(os.path.isfile(os.path.join(self.tree, *rel.split("/"))), rel)
+        text = self.decide("pin.md",
+                           "- **Cost:** one `simctl list` read per call, pinned by `lint/test_x.py`.\n"
+                           "- **Cost:** one `simctl list` read per call, pinned by `lint/test_y.py`.\n")
+        self.assert_found([count_row("pin.md", text, "pinned by `lint/test_y.py`")], counts=True)
+
+    def test_unmeasured_not_pinned_unpinned_and_no_test_wording_pass_a_count(self):
+        exempt = ["- **Cost:** one read per call, unmeasured.\n",
+                  "- **Cost:** one read per call, not pinned.\n",
+                  "- **Cost:** one read per call, unpinned.\n",
+                  "- **Cost:** one read per call, no test counts it.\n"]
+        text = self.decide("exempt-count.md", "".join(exempt) + CONTROL)
+        self.assert_found([count_row("exempt-count.md", text, CONTROL_NEEDLE)], counts=True)
+
+    def test_trailing_count_after_a_cost_noun_is_flagged_on_its_own_line(self):
+        # The count is flagged on the line that holds its count word, not on the paragraph's first line.
+        text = self.decide("trailing.md",
+                           "- **Cost:** it reads the list\n"
+                           "  twice.\n"
+                           "\n"
+                           "- **Cost:** it writes the file thrice.\n"
+                           "\n"
+                           "- **Cost:** it reads the list once.\n")
+        self.assert_found([count_row("trailing.md", text, "  twice."),
+                           count_row("trailing.md", text, "thrice."),
+                           count_row("trailing.md", text, "list once.")], counts=True)
+
+    def test_count_inside_a_code_span_is_not_counted(self):
+        text = self.decide("span.md",
+                           "- **Cost:** `read 2 files`.\n"
+                           "- **Cost:** read 2 files.\n")
+        self.assert_found([count_row("span.md", text, "- **Cost:** read 2 files.")], counts=True)
+
+    def test_ids_dates_and_times_beside_a_cost_noun_are_not_counted(self):
+        # Each id, date and time sits one or two words from a cost noun, so a rule that reads them as counts flags it.
+        clean = ["- **Cost:** step 4 reads the list.\n",
+                 "- **Cost:** the 08:34 run reads it.\n",
+                 "- **Cost:** the 2026-11-08 run reads it.\n",
+                 "- **Cost:** ruling 12 calls it.\n",
+                 "- **Cost:** see #1992 for the reads.\n"]
+        text = self.decide("ids.md", "".join(clean) + CONTROL)
+        self.assert_found([count_row("ids.md", text, CONTROL_NEEDLE)], counts=True)
+
+    def test_brief_non_claims_are_not_counted(self):
+        text = self.decide("none.md",
+                           "- **Cost:** none. Source: owner, 2026-11-08 08:34 CST, ruling 12.\n"
+                           "- **Cost:** one home for the rule.\n"
+                           "- **Cost:** see item 386 and #1992.\n"
+                           + CONTROL)
+        self.assert_found([count_row("none.md", text, CONTROL_NEEDLE)], counts=True)
+
+    def test_one_count_claim_is_one_finding_per_sentence(self):
+        text = self.decide("one-per.md", "- **Cost:** one `simctl list` read and two writes per call.\n")
+        self.assert_found([count_row("one-per.md", text, "- **Cost:**")], counts=True)
 
 
 class CorpusTests(unittest.TestCase):
