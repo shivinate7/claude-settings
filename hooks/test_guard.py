@@ -28133,6 +28133,9 @@ rbb_allow("reviewer-brief-blind: allowed: a finding whose line opens with a back
           "Check the floor fix.\n`Round 1: FAIL` is the line the guard refuses.\nFiles: hooks/guard.py.")
 rbb_allow("reviewer-brief-blind: allowed: a reviewer brief that asks for a verdict in bold, Give a verdict: **PASS** or **FAIL**",
           "Check the floor fix in hooks/guard.py.\nGive a verdict: **PASS** or **FAIL**.\nFiles: hooks/guard.py.")
+# The marks of a choice list include the backtick, as they include `*` and `_`, so a backticked format line passes.
+rbb_allow("reviewer-brief-blind: allowed: a reviewer brief that asks for a verdict in backticks, Give a verdict: `PASS` or `FAIL`",
+          "Check the floor fix in hooks/guard.py.\nGive a verdict: `PASS` or `FAIL`.\nFiles: hooks/guard.py.")
 rbb_allow("reviewer-brief-blind: allowed: a backticked report header quoted at line start, `FAIL, round 1 of 3, 2 findings`",
           "Check the floor fix.\n`FAIL, round 1 of 3, 2 findings`\nFiles: hooks/guard.py.")
 # A verdict-word choice list that ends its sentence is a format line, however the sentence ends. The split at `.`, `;`,
