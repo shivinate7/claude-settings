@@ -1,11 +1,11 @@
 {
   "title": "A session that cites a standing grant reads it from origin/main, not from its own checkout",
   "why": "Coordinator 16:56 CST Nov 8, its own mistake: it read the standing grants from a stale checkout (.claude/CLAUDE.md on branch lane-hold-ends-on-cause) and told triage that a Mac session could close PRs. Main's grant \"acts the cloud refuses\" names only two acts. Triage caught it at 16:55 CST. Harm: a session acts, or asks another session to act, on a grant the owner never gave. Fix shape: when a session cites a standing grant, it reads it with `git show origin/main:.claude/CLAUDE.md`, or the session-start hook warns when the checkout's .claude/CLAUDE.md differs from origin/main's. Red case: a checkout whose .claude/CLAUDE.md differs from origin/main gets the warning.",
-  "note": "",
+  "note": "Scope added (owner ask ask-mw8gfqzlws, coordinator fold 17:20 CST Nov 8): one `git fetch --prune origin` at session start, with a timeout, reading unknown on failure. Read at 17:23 CST on main 2ac382cc6: hooks/session_start.sh already fetches through bounded_fetch (2 s bound, CLAUDE_SETTINGS_FETCH_TIMEOUT), but only when the session sits on the default branch, so a lane on its own branch never fetches; that matches the Banchi case (local origin/main 78398f4, GitHub 40483e3). Extend bounded_fetch, its one home, rather than add a second hook. The ask also wants: report (never move) a local main that differs from origin/main, report how far the current branch is behind, about 20 s timeout, no checkout/restore/reset/stash, no change to existing guards; red cases: stale origin/main on a non-default branch gets the new sha, and an offline session still starts.",
   "phase": "now",
   "owner": "claude-settings",
   "lane": "session_013NEJKzp1xjTHtzDvmMRpKj",
   "status": "doing",
   "order": 841,
-  "updatedAt": "2026-11-08T16:57:00-06:00"
+  "updatedAt": "2026-11-08T17:21:00-06:00"
 }
