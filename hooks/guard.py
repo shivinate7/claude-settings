@@ -207,7 +207,10 @@ Other tools, in `judge` order:
                        each at line start) or a verdict line (a line with `verdict`, or a round label
                        with or without `result`, before its colon and a REVIEWER_VERDICT_WORDS word
                        right after it, or a report's `FAIL, round N of 3, ...` line). Marks (`-`, `*`,
-                       `#`, bold) before a line's first word are skipped. The verdict scan reads the
+                       `#`, bold) before a line's first word are skipped, and so are marks right after the
+                       colon (`**Verdict:** FAIL`). A dash after a round label and before a verdict word
+                       reads as the colon (`Round 1 - FAIL`), and `round result` reads as `verdict`
+                       (`Prior round result: FAIL`). The verdict scan reads the
                        brief after three steps: each backtick span is blanked (a quote) unless it
                        holds only a verdict word (``Prior verdict: `FAIL` `` is refused), each line is
                        split at sentence ends (`.`, `;`, `!`, `?`) so each sentence starts its own
@@ -2668,6 +2671,13 @@ _BRIEF_BLIND_SEP = r"[ \t]*(?:,[ \t]*(?:(?:or|and)\b[ \t]*)?|/[ \t]*|(?:or|and)\
 BRIEF_BLIND_CHOICES = re.compile(
     r"[*_`]*\b(?:%(w)s)\b[*_`]*(?:%(sep)s[*_`]*\b(?:%(w)s)\b[*_`]*)+" % {"w": BRIEF_BLIND_VERDICT_WORDS, "sep": _BRIEF_BLIND_SEP})
 _BRIEF_BLIND_LINE_END = re.compile(r"[ \t]*$", re.M)
+# Three spellings of a verdict label that the regex reads after a plain rewrite, each a single linear pass. Emphasis marks
+# after a colon (`**Verdict:** FAIL`) go. A dash after a round label and before a verdict word (`Round 1 - FAIL`) reads as
+# a colon. `round result` reads as `verdict` (`Prior round result: FAIL`).
+BRIEF_BLIND_COLON_MARKS = re.compile(r"(?<=:)[*_]+")
+BRIEF_BLIND_ROUND_DASH = re.compile(
+    r"(\b[Rr]ound[ \t]+\d+(?:[ \t]+of[ \t]+\d+)?)[ \t]*[\u2014\u2013-][ \t]*(?=[*_`\"'(]*(?:%s)\b)" % BRIEF_BLIND_VERDICT_WORDS)
+BRIEF_BLIND_ROUND_RESULT = re.compile(r"\b[Rr]ound[ \t]+[Rr]esult\b")
 BRIEF_BLIND_REASON = ("A reviewer's brief holds a builder's report or a prior verdict, so the reviewer anchors on it. "
                       "Send the task, the diff or a pointer to it, and the governing rulings. For a later round, send the "
                       "prior findings as a list of file, line and claim, with no verdict (decision reviewer-brief-blind).")
@@ -2675,8 +2685,10 @@ BRIEF_BLIND_REASON = ("A reviewer's brief holds a builder's report or a prior ve
 
 def brief_blind_verdict_text(brief: str) -> str:
     """The brief as the verdict scan reads it: backtick spans blanked except a lone verdict word, one sentence per line,
-    and each choice list that ends its sentence blanked."""
+    the three label spellings rewritten, and each choice list that ends its sentence blanked."""
     text = BRIEF_BLIND_SENTENCE_END.sub("\n", BRIEF_BLIND_SPAN.sub(lambda m: m.group(0) if m.group(1) else " ", brief))
+    text = BRIEF_BLIND_ROUND_RESULT.sub("verdict", BRIEF_BLIND_COLON_MARKS.sub("", text))
+    text = BRIEF_BLIND_ROUND_DASH.sub(r"\1: ", text)
     return BRIEF_BLIND_CHOICES.sub(
         lambda m: " " if _BRIEF_BLIND_LINE_END.match(text, m.end()) else m.group(0), text)
 
