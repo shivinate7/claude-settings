@@ -2372,6 +2372,16 @@ MUTATIONS = [
      '    while rest and _gh_root_repo_flag(rest, 0):',
      '    while False and _gh_root_repo_flag(rest, 0):',
      "guard", "merge: gh_call_of reads the pr verb past a -R root flag"),
+    # The held-branch rule (hooks/guard_branch_worktree.py sibling_held_branches). The own tree is the one
+    # `rev-parse --show-toplevel` answers, and a sibling is any other listed tree. Each mutant breaks one half.
+    ("held-branch: the run folder is taken for the own tree, so a run from a subfolder finds none",
+     '    own = root.stdout.strip()',
+     '    own = where',
+     "guard", "same branch: from a subfolder, a linked worktree: checkout -B of the branch the primary holds is refused"),
+    ("held-branch: a symlinked worktree path is compared as text, so its own tree is not found",
+     '    return os.path.normcase(os.path.realpath(left)) == os.path.normcase(os.path.realpath(right))',
+     '    return left == right',
+     "guard", "same branch: through a symlink, a linked worktree: checkout -B of the branch the primary holds is refused"),
 ]
 
 

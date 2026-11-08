@@ -541,6 +541,8 @@ SBOTHER = os.path.join(ROOT, "samebranch-other")  # on `lane-y`: the checkout a 
 SBMAIN = os.path.join(ROOT, "samebranch-main")    # on `main`, and its config holds no pointer line
 SBPRIME = os.path.join(ROOT, "samebranch-prime")  # the primary of a clone with a linked worktree, on `lane-p`
 SBLINK = os.path.join(ROOT, "samebranch-link")    # the linked worktree of SBPRIME, on `lane-q`
+SBSYM = os.path.join(ROOT, "samebranch-sym")      # a link to SBSYMREAL, the linked worktree of SBPRIME on `lane-s`
+SBSYMREAL = os.path.join(ROOT, "samebranch-sym-real")
 
 # --------------------------------------------------------------- branch delete / worktree fixtures
 #
@@ -1674,16 +1676,36 @@ def _build_samebranch():
     # A CLONE WITH TWO WORKTREES. SBPRIME is the primary, on `lane-p`; SBLINK is a linked worktree of it,
     # on `lane-q`. Each tree holds a branch that a command in the other tree can name. No other clone is
     # involved, so only the clone's own worktrees can make the hold.
-    make_repo(SBPRIME, {"f.txt": "base\n"})
+    # `sub/` is a real folder in both trees, so a `cd sub` case runs in a subfolder of each.
+    make_repo(SBPRIME, {"f.txt": "base\n", "sub/keep.txt": "base\n"})
     run_vcs(SBPRIME, "checkout", "-q", "-b", "lane-p")
     _set_origin_main(SBPRIME, "HEAD")
     link = run_vcs(SBPRIME, "worktree", "add", "-q", "-b", "lane-q", SBLINK)
     if link.returncode != 0:
         sys.exit("fixture setup failed in build_fixtures: the linked worktree SBLINK. stderr: %s"
                  % link.stderr.strip())
+    holds = {SBPRIME: "lane-p", SBLINK: "lane-q"}
+    # THE SYMLINKED WORKTREE. SBSYM is a linked worktree of SBPRIME on `lane-s`, added under its own
+    # path. Its directory then moves to SBSYMREAL and SBSYM is left as a link to it. git keeps the
+    # link path in its list, while the tree answers with the real path, so the two strings differ.
+    if LINKS_MADE:
+        sym = run_vcs(SBPRIME, "worktree", "add", "-q", "-b", "lane-s", SBSYM)
+        if sym.returncode != 0:
+            sys.exit("fixture setup failed in build_fixtures: the linked worktree SBSYM. stderr: %s"
+                     % sym.stderr.strip())
+        os.rename(SBSYM, SBSYMREAL)
+        os.symlink(SBSYMREAL, SBSYM, target_is_directory=True)
+        listed = [slash(line[len("worktree "):]) for line in
+                  run_vcs(SBPRIME, "worktree", "list", "--porcelain").stdout.splitlines()
+                  if line.startswith("worktree ")]
+        if slash(SBSYM) not in listed:
+            sys.exit("fixture setup failed in build_fixtures: git's list holds no link path for SBSYM, so "
+                     "the symlink case would prove nothing. list says: %r" % listed)
+        _require_clean(SBSYMREAL)
+        holds[SBSYM] = "lane-s"
     _require_clean(SBPRIME)
     _require_clean(SBLINK)
-    _require_worktree_holds(SBPRIME, {SBPRIME: "lane-p", SBLINK: "lane-q"})
+    _require_worktree_holds(SBPRIME, holds)
 
 
 def _build_conflict():
@@ -2299,7 +2321,7 @@ lazy_fixture([SUBJCLEAN, SUBJCLEANWT, SUBJDIRTY, SUBJSTASH, SUBJSTASHWT, SUBJSTA
 lazy_fixture([PRIVREPO], _build_privrepo)
 lazy_fixture([PTRMAIN, PTRWT, PTRCFG, PTROFF, PTROFFCFG, PTRAHEAD, PTRAHEADCFG, PTRNOORIGIN,
               PTRNOORIGINCFG, PTRBADCFG, PTRGONECFG, PTRNOCFG, GITBLIND], _build_pointer)
-lazy_fixture([SBCUR, SBDET, SBOTHER, SBMAIN, SBPRIME, SBLINK], _build_samebranch)
+lazy_fixture([SBCUR, SBDET, SBOTHER, SBMAIN, SBPRIME, SBLINK, SBSYM], _build_samebranch)
 lazy_fixture([CONFLICT], _build_conflict)
 lazy_fixture([BRANCHREMOTE, BRANCHREPO, BRANCHFALLBACKMAIN, BRANCHFALLBACKMASTER, BRANCHNOBASE],
              _build_branch)
@@ -2758,10 +2780,9 @@ sh("checkout: tracking a remote branch", VCS + " checkout --track origin/main", 
 
 # THE HELD-BRANCH RULE, rule id CURRENT_BRANCH_RULE. A `checkout -B <name>` or `switch -C <name>` is
 # refused when a worktree OTHER than the command's own holds <name>: the primary of the clone, or a
-# linked worktree beside it. The command's own checkout is allowed. Coordinator ruling 04:50 CST Nov 8.
-# Round 2 of PR 1889 measured that on git 2.43.0 `git checkout -B lane-x other` in the worktree holding
-# lane-x moves its files and index cleanly. Which checkout runs the command is the one `-C <path>`
-# names, else the cwd.
+# linked worktree beside it. The command's own checkout is allowed. Coordinator ruling 04:50 CST Nov 8,
+# see decision checkout-b-held-branch: an own-worktree reset is clean on git 2.43.0. Which checkout runs
+# the command is the one `-C <path>` names, else the cwd.
 # A refusal names the rule and a remedy in words only. It never echoes the held branch, and never
 # offers the forcing flag git has for this case.
 CURRENT_BRANCH_RULE = "checkout-b-current-branch"
@@ -2829,6 +2850,25 @@ sh("same branch: -C names the primary, switch form, from a linked worktree besid
    VCS + " -C " + slash(SBPRIME) + " switch -C lane-p origin/main", "allow", cwd=SBLINK)
 held_refuse("-C names a linked worktree, checkout form, from another clone, is refused for the branch the primary holds",
             VCS + " -C " + slash(SBLINK) + " checkout -B lane-p origin/main", SBOTHER, "lane-p")
+# A SIBLING HOLDER, RUN FROM A SUBFOLDER. The call runs in `sub/`, so the checkout that holds the
+# branch is the top of the tree above it. A guard that takes the run folder for the own tree finds
+# no own tree there, and the refusal is lost.
+held_refuse("same branch: from a subfolder, a linked worktree: checkout -B of the branch the primary holds is refused",
+            "cd sub && " + VCS + " checkout -B lane-p origin/main", SBLINK, "lane-p")
+held_refuse("same branch: from a subfolder, a linked worktree: switch -C of the branch the primary holds is refused",
+            "cd sub && " + VCS + " switch -C lane-p origin/main", SBLINK, "lane-p")
+held_refuse("same branch: from a subfolder, the primary: checkout -B of the branch the linked worktree holds is refused",
+            "cd sub && " + VCS + " checkout -B lane-q origin/main", SBPRIME, "lane-q")
+# A SYMLINKED PATH TO A LINKED WORKTREE. The call runs in SBSYM, a link to the worktree that git lists
+# under the link path. The own tree is found only when the list's path and the tree's own answer are
+# compared as the same folder, so a plain string compare finds no own tree and lets the reset through.
+if LINKS_MADE:
+    held_refuse("same branch: through a symlink, a linked worktree: checkout -B of the branch the primary holds is refused",
+                VCS + " checkout -B lane-p origin/main", SBSYM, "lane-p")
+    held_refuse("same branch: through a symlink, a linked worktree: switch -C of the branch the primary holds is refused",
+                VCS + " switch -C lane-p origin/main", SBSYM, "lane-p")
+    sh("same branch: through a symlink, a linked worktree: checkout -B of the branch it is on is allowed",
+       VCS + " checkout -B lane-s origin/main", "allow", cwd=SBSYM)
 
 # CONTROLS, EACH STAYS ALLOWED. The name is exact; the holder must sit in the same clone; a plain
 # checkout and a `switch -c` of a new name are not the rule's form at all.
