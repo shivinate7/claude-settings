@@ -35,8 +35,9 @@ Hook: stall_watch.py --hook
   harness output file), so a redirect in the command cannot hide it from the watcher or the Stop check.
   Each log the original names (named_logs: `> F`, `>> F`, `&> F`, `>& F`, `tee F`, `--log F`)
   is passed as `--also F`. A relative F after a `cd` or `pushd` that surely runs in the main shell is
-  joined to its target. If the directory is unknown (`cd $X`, `cd -`, a cd behind `||`, `&` or `then`,
-  or inside `{ }`), the hook leaves F out of `--also` and passes `--unwatched F`. The STALL report names it.
+  joined to its target. The directory can be unknown: `cd $X`, `cd -`, a cd behind `||`, `&` or `then`,
+  or inside `{ }`. Then the hook leaves F out of `--also` and passes `--unwatched F`. The STALL report names it.
+  A list that ends in `&` runs in a background subshell, so its cd does not move the main shell.
   Cost: one append per heartbeat by the tool, and one read of BEAT on each 0.2 s loop pass in the watcher.
 
   The original stays unquoted, as top-level shell code, so a settings deny rule still sees it.
@@ -51,6 +52,7 @@ Watcher: stall_watch.py --watch-pid PID --log LOG [--quiet SECS] [--beat BEAT] [
   The CPU time comes from the once-a-second `ps` that also reads the job's state. It adds no process,
   timer or file. The job shell's own time does not count.
   On Linux ps gives whole seconds, so a child under 1/SECS of a core (0.33% at 300 s) may still stall.
+  So may a serial chain of sub-second children (`for t in ...; do python $t; done | tail -1`).
   --unwatched F (repeatable) names a log whose directory is unknown; the report lists it. The
   STALL line lists the job's shell and every process under it, parent first. Stopping them in that
   order ends the job, with two limits: an orphan (`(sleep N &); sleep N`) is adopted by init and
@@ -126,6 +128,9 @@ LOG_FLAGS = ("--log",)
 # Words after which a command starts. A cd after one of them may not run, so it leaves the directory unknown.
 COMMAND_STARTERS = ("then", "do", "else", "elif", "if", "while", "until", "{", "!", "time")
 UNREADABLE_PATH = re.compile(r"[$`*?\[]")
+# Reserved words that open and close a compound command. Its body is a list of its own.
+BLOCK_OPENERS = ("{", "if", "while", "until", "for", "case", "select")
+BLOCK_CLOSERS = ("}", "fi", "done", "esac")
 
 
 def expand_home(path):
@@ -153,18 +158,36 @@ def _cd_target(args, cwd):
     return target if os.path.isabs(target) else os.path.join(cwd, target) if cwd else target
 
 
+def _background_amp(tok, k):
+    """True when tok[k], an `&` in a punctuation token, ends a list. `&&`, `&>`, `>&` and `|&` do not."""
+    prev, nxt = tok[k - 1] if k else "", tok[k + 1] if k + 1 < len(tok) else ""
+    return prev not in ("&", "|", "<", ">") and nxt not in ("&", ">")
+
+
+def _continues_list(prior, before, punct):
+    """True when a newline follows `&&`, `||` or `|`, so the list goes on to the next line. prior is
+    the text before the newline in its token; with none, the token before it is read."""
+    prior = prior.rstrip("\n")
+    if not prior:
+        prior = before if before and set(before) <= punct else ""
+    return prior.endswith(("&&", "||", "|"))
+
+
 def read_named_logs(command):
     """Return (paths, unresolved): the files a command names as its own log, and the relative ones
     whose directory the hook cannot read. See named_logs for the forms read.
 
-    A relative path that follows a `cd` or `pushd` the tokenizer reads is joined to its target: an
-    absolute target gives an absolute path, a relative one a path relative to where the shell
-    started (the watcher stands there). The tokenizer reads cd, so a cd in quotes or after `#` is
-    text. Only a cd that surely runs in the main shell moves the directory: the first command of a
-    list item (after the start, `;`, a newline or `(`), or one that follows only cds joined by `&&`.
-    A cd after `||`, `&`, `|`, `then`, `do`, `{`, a `)` or a command joined by `&&`, a cd that ends in
-    `&` or `|`, a cd inside `{ }`, and `popd` leave the directory unknown. A `(` saves the directory and
-    a `)` restores it. Newlines are tokens, and a comment that ends a line shows in the line count."""
+    A relative path after a `cd` or `pushd` the tokenizer reads is joined to its target. An absolute
+    target gives an absolute path. A relative target gives a path relative to where the shell started,
+    where the watcher stands. The tokenizer reads cd, so a cd in quotes or after `#` is
+    text. Only a cd that surely runs in the main shell moves the directory. That is the first command
+    of a list item (after the start, `;`, a newline or `(`), or one after only cds joined by `&&`.
+    These leave the directory unknown: a cd after `||`, `&`, `|`, `then`, `do`, `{` or `)`, and a cd
+    after a command joined by `&&`. So do a cd that ends in `&` or `|`, a cd inside `{ }`, and `popd`.
+    A `(` saves the directory and a `)` restores it. A list that ends in a lone `&` runs in a
+    background subshell. Its logs resolve against its own directory, and after the `&` the directory
+    is the one where that list started. A compound command (`{ }`, `if`, `while`, `for`, `case`) has
+    lists of its own. Newlines are tokens, and a comment that ends a line shows in the line count."""
     try:
         lex = shlex.shlex(strip_heredoc_bodies(command, shells_only=True), posix=True,
                           punctuation_chars="();<>|&\n")
@@ -182,16 +205,30 @@ def read_named_logs(command):
         return [], []
     punct = set(lex.punctuation_chars)
     found, cwd, saved, braces, only_cds, i = [], "", [], 0, True, 0
+    list_dir, blocks = "", []  # where the current list started; the start of each enclosing list
     while i < len(tokens):
         tok, nxt = tokens[i], tokens[i + 1] if i + 1 < len(tokens) else None
         before = tokens[i - 1] if i else None
         start = i == 0 or fresh[i] or set(before) <= punct or before in COMMAND_STARTERS
+        if fresh[i]:
+            list_dir = cwd  # a comment line ended the list before it
         if set(tok) <= punct:
-            for ch in tok:
+            for k, ch in enumerate(tok):
                 if ch == "(":
-                    saved.append(cwd)
-                elif ch == ")" and saved:
-                    cwd = saved.pop()
+                    saved.append((cwd, list_dir))
+                    list_dir = cwd
+                elif ch == ")":
+                    if saved:
+                        cwd, list_dir = saved.pop()
+                    else:
+                        list_dir = cwd  # a case pattern ends, and its list starts
+                elif ch == ";" or (ch == "\n" and not _continues_list(tok[:k], before, punct)):
+                    list_dir = cwd
+                elif ch == "&" and _background_amp(tok, k):
+                    # The list before a lone `&` runs in a background subshell: the main shell stays.
+                    if cwd is not None:
+                        cwd = list_dir
+                    list_dir = cwd
             if tok.endswith(REDIRECT_OPS) and nxt is not None:
                 if not (tok.endswith(">&") and (nxt.isdigit() or nxt == "-")):
                     found.append((nxt, cwd))
@@ -208,6 +245,13 @@ def read_named_logs(command):
                 braces += 1
             elif tok == "}":
                 braces = max(0, braces - 1)
+            if tok in BLOCK_OPENERS:  # a compound command opens a list inside the current one
+                blocks.append(list_dir)
+                list_dir = cwd
+            elif tok in BLOCK_CLOSERS and blocks:
+                list_dir = blocks.pop()
+            elif tok in ("then", "do", "else", "elif"):
+                list_dir = cwd
         if start and tok in ("cd", "pushd", "popd"):
             j = i + 1
             while j < len(tokens) and not set(tokens[j]) <= punct:
