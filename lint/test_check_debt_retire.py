@@ -40,6 +40,7 @@ FAIL = "Delete the old helper. Check: `tests/test_fail.py`."
 PROSE = "Delete the old helper once nothing reads it."
 RUN_URL = "https://github.com/fixture/repo/actions/runs/42"
 ATTRIBUTION = "\U0001F916 Generated with [Claude Code](https://claude.com/claude-code)"
+SESSION_LINK = "https://claude.ai/code/session_01MVD32PXm1757wMqHinaZZG"  # the bare link a lane PR body ends with, under the attribution
 NO_RETIRED = "check_debt_retire has no retired(): a Retire-run cite cannot excuse a debt close (decision debt-close-runs-retire)"
 
 
@@ -354,6 +355,22 @@ class RetireRun(Case):
         found = self.findings(head=pr_head, pr_body="Retire-run: d-prose -- %s\n" % RUN_URL, run_state=runs)
         self.assertEqual(runs.urls, [RUN_URL], "the cited run was not read")
         self.assertEqual(pairs(found), [], "a green run on a descendant of the PR head did not clear the debt")
+
+    def test_r1c_a_retire_run_above_the_attribution_and_a_session_link_clears_the_prose_debt(self):
+        self.closed_prose()
+        runs = Runs(("success", self.head))
+        body = "Summary.\n\nRetire-run: d-prose -- %s\n\n%s\n\n%s\n" % (RUN_URL, ATTRIBUTION, SESSION_LINK)
+        found = self.findings(pr_body=body, run_state=runs)
+        self.assertEqual(runs.urls, [RUN_URL], "the cite above the attribution and a session link was not read")
+        self.assertEqual(pairs(found), [], "a green run cited above the attribution and a session link did not clear the prose debt")
+
+    def test_r1d_a_url_other_than_the_session_link_under_the_attribution_leaves_the_cite_unread(self):  # control
+        self.closed_prose()
+        runs = Runs(("success", self.head))
+        body = "Summary.\n\nRetire-run: d-prose -- %s\n\n%s\n\nhttps://example.com/run/42\n" % (RUN_URL, ATTRIBUTION)
+        found = self.findings(pr_body=body, run_state=runs)
+        self.assertEqual(runs.urls, [], "a cite above the attribution was read when another URL closes the body")
+        self.assertEqual(pairs(found), [("d-prose", "prose")], "a cite above the attribution cleared the prose debt under another URL")
 
     def test_r2_a_cite_of_a_failing_run_is_red(self):
         self.closed_prose()
