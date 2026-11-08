@@ -1494,6 +1494,12 @@ def _piped_cat_file(previous) -> str:
     return words[1] if len(words) == 2 and words[0] == "cat" and not words[1].startswith("-") else ""
 
 
+def _api_input_named(args) -> bool:
+    """True when a `gh api` call takes its request body from `--input`, bare (`--input FILE`) or glued (`--input=FILE`). The guard
+    does not read that body, and a heredoc on the call feeds it, not a `body` field."""
+    return any(a == "--input" or a.startswith("--input=") for a in args)
+
+
 def _api_post_bodies(args, routes=_COMMENTS_ROUTE):
     """Return (repo, number, texts, files, stdin) for a `gh api repos/O/R/issues/<n>/comments` call, else None; `routes`
     names another route to read (the edit route returns the comment id as `number`). A `body` field
@@ -1565,7 +1571,7 @@ def review_post_hit(segment: str, raw: str, where: str, before: int, previous: s
             texts.remove(text)
             files.append(named)
     judged_stdin = False
-    if "<<" in segment and "--input" not in rest:
+    if "<<" in segment and not _api_input_named(rest):
         heredocs = own_heredoc_bodies(segment, raw, before)
         texts.extend(heredocs)
         judged_stdin = bool(heredocs)
@@ -1581,9 +1587,10 @@ def review_post_hit(segment: str, raw: str, where: str, before: int, previous: s
                 texts.append(handle.read(MESSAGE_FILE_MAX))
         except Exception:
             unread = unread or name
-            review_note("the body file " + name + " could not be read")
-    unseen = (stdin and not judged_stdin) or "--input" in rest   # an edit's new body the guard cannot see
-    if stdin and not judged_stdin:
+            if edit is None:   # the not-checked note is a post's fail-open line; an edit fails closed
+                review_note("the body file " + name + " could not be read")
+    unseen = (stdin and not judged_stdin) or _api_input_named(rest)   # an edit's new body the guard cannot see
+    if stdin and not judged_stdin and edit is None:
         review_note("the body comes from stdin and cannot be read")
     return review_record_hit(texts, repo, selector, where, edit, variable=rest[:1] == ["api"] and not selector.isdigit(),
                              unseen=bool(unseen), unread=unread)

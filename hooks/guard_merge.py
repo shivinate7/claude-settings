@@ -480,10 +480,7 @@ def _old_body(host, edit):
         if code:
             raise RuntimeError("reading the comment failed")
         return str(json.loads(out).get("body") or "")
-    code, out = host.api("issues/%d/comments" % host.pr_number(ref), "--paginate", "--slurp")   # --slurp: one JSON array of the pages
-    if code:
-        raise RuntimeError("reading the comments failed")
-    rows = [row for page in json.loads(out) for row in (page if isinstance(page, list) else [page])]
+    rows = host.pages("issues/%d/comments" % host.pr_number(ref))   # 100 a page, so a long thread stays inside MERGE_READ_TIMEOUT
     return str(rows[-1].get("body") or "") if rows else ""
 
 
