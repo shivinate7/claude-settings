@@ -779,6 +779,26 @@ class NpxPath(Case):
         self.assertTrue(any(a.endswith("comment_scan.mjs") for a in argv), out)
 
 
+class LandedTree(Case):
+    """The install lands lint/ and hooks/ under ~/.claude, not actions/. The check reads its standard from lint/."""
+
+    def setUp(self):
+        self.assertTrue(os.path.isfile(MODULE), "module absent: lint/check_comment_narration.py")
+        self.tree = tempfile.mkdtemp(prefix="landed_", dir=RUN_FOLDER)
+        self.addCleanup(shutil.rmtree, self.tree, True)
+        tracked_tree.copy_tracked(self.tree, "lint", "hooks")
+        self.git("init", "-q")
+        self.git("symbolic-ref", "HEAD", "refs/heads/main")
+
+    def test_check_finds_standard_json_in_its_own_lint_folder(self):
+        self.base({"a.py": "x = 1\n"})
+        self.change({"a.py": "# fixed in round 2\nx = 1\n"})
+        rc, out = self.lint()
+        self.assertNotIn("cannot read", out, "the check cannot find standard.json beside itself:\n" + out)
+        self.assertEqual(rc, 1, out)
+        self.assertHit(out, "a.py", 1)
+
+
 def tearDownModule():
     shutil.rmtree(RUN_FOLDER, ignore_errors=True)
 
