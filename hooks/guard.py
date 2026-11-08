@@ -2342,9 +2342,10 @@ CREATE_SESSION_TOOL = REMOTE_SERVER + "__create_session"
 # The one lane effort. lint/check_agent_models.py reads it from here and checks the lane row of the model table.
 LANE_EFFORT = "medium"
 AGENT_NO_REMOTE_REASON = (
-    "An agent never starts, messages, tags or archives sessions, and never sets scheduled tasks. The session that "
-    "spawned this agent does that. Finish your own work and put the request in your report so that session can act "
-    "on it. (decision lanes-start-as-agents, an agent is not a lane)"
+    "An agent never starts, messages, tags, interrupts or archives sessions, and never sets scheduled tasks, "
+    "watches, pull request subscriptions, repos, computer folders or the owner's trust card. The session that spawned this agent does "
+    "that. Finish your own work and put the request in your report so that session can act on it. "
+    "(decision lanes-start-as-agents, an agent is not a lane)"
 )
 LANE_TAG = "cs-build:lane"
 LANE_EFFORT_REASON = (
