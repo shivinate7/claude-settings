@@ -93,7 +93,8 @@ Object.assign(PAGES, {
   // An in-flow sticky element at page y 1500, below the first viewport: it has no top offset to stick to before then.
   "/sticky.html": `<!doctype html><style>body{margin:0;background:#00f}@media (pointer:coarse){body{background:#f00}}
     #top{height:1500px}#stk{position:sticky;top:0;height:40px;background:#0f0}#after{height:1000px}</style><div id="top"></div><div id="stk"></div><div id="after"></div>`,
-  "/tall20k.html": `<!doctype html><style>body{margin:0;background:#00f}@media (pointer:coarse){body{background:#f00}}#rest{height:20000px}</style><div id="rest"></div>`,
+  // A 20000 px page in bands: red at the top, yellow at 10000, green near the bottom. One colour would be a blank image.
+  "/tall20k.html": `<!doctype html><style>body{margin:0}#rest{height:20000px;background:linear-gradient(#f00 0 100px,#00f 100px 10000px,#ff0 10000px 10100px,#00f 10100px 19900px,#0f0 19900px)}</style><div id="rest"></div>`,
   // Root scroll snap, and a 3900 px page banded every 100 px in two colours.
   "/snap.html": `<!doctype html><style>html{scroll-snap-type:y mandatory}body{margin:0}
     #rest{height:3900px;background:repeating-linear-gradient(#f00 0 100px,#00f 100px 200px)}</style><div id="rest"></div>`,
@@ -615,7 +616,7 @@ test("an in-flow sticky element below the first viewport shows once, at its page
   assert.equal(px.column, "R@0 G@1500 R@1540", `the sticky element is not shown once at page y 1500 (runs ${px.column})`);
 });
 
-test("a 20000 px touch page: the full-page shot passes, and the PNG is 20000 px tall", async (t) => {
+test("a 20000 px touch page: the full-page shot passes, the PNG is 20000 px tall, and each band sits at its page y", async (t) => {
   const b = await chromium(t);
   if (!b) return;
   const r = await run({ routes: [{ name: "tall", path: "/tall20k.html" }], sizes: [390], themes: ["light"] });
@@ -624,7 +625,7 @@ test("a 20000 px touch page: the full-page shot passes, and the PNG is 20000 px 
   const px = await pixels(b, path.join(r.dir, "tall-390-light.png"));
   assert.equal(px.width, 390, "scope: the shot is at 390");
   assert.equal(px.height, 20000, "the full-page PNG is not the 20000 px page");
-  assert.equal(px.column, "R@0", `the full-page PNG is not one touch colour from top to bottom (runs ${px.column})`);
+  assert.equal(px.column, "R@0 B@100 Y@10000 B@10100 G@19900", `a band is at the wrong page y in the 20000 px PNG (runs ${px.column})`);
 });
 
 test("root scroll-snap mandatory: the full-page PNG has no transparent or seam rows", async (t) => {
