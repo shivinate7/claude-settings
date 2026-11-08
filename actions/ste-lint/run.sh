@@ -60,22 +60,39 @@ else
     # stale-cites-at-merge, rule verification-report-unknown-reads). stale-cites prints its own unknown line.
     UNKNOWN="no merge base between origin/$BASE and HEAD, so no changed file was read. Nothing was checked. Check out with fetch-depth 0 (actions/checkout) so the history is there."
   # The one changed set, for both steps below: the diff from FROM to WORK, plus the files git does not track.
-  # WORK is the commit `git stash create` builds from the tracked files as they are now, staged or not. It stores no
-  # ref and leaves the working tree alone, but it refreshes the index's file stats under the index lock, so a held
-  # lock fails it. For a clean tree, as in CI, it prints nothing and WORK is HEAD. So one diff holds the commits and
-  # the working tree: a tracked file edited, staged or removed and not yet committed counts, with its working-tree
-  # line numbers. A new file that git does not track and .gitignore does not match is all new lines (UNTRACKED).
+  # First git's content check says whether the tracked files differ from HEAD. It runs on a private copy of the
+  # index (GIT_INDEX_FILE): `git diff` refreshes stale file stats and writes the index back even under
+  # --no-optional-locks (measured, git 2.43: the index mtime moved), and that write takes the index lock, so a held
+  # lock would fail a read of a clean tree. A copy leaves the real index and its lock alone. cp -p keeps the index mtime: a fresh one would hide an edit made in the same clock tick as the entry's stat. A clean tree, as in CI
+  # or a touched file with the same bytes, is WORK=HEAD, and `git stash create` is never called. A dirty tree is
+  # snapshotted: WORK is the commit `git stash create` builds from the tracked files as they are now, staged or
+  # not. It stores no ref and leaves the working tree alone, but it needs the index lock. Exit 1 with no output
+  # is not "clean" here: it is also a real failure (an unreadable file, a full disk), so any failure or empty
+  # output is unknown. So one diff holds the commits and the working tree: a tracked file edited, staged or removed
+  # and not yet committed counts, with its working-tree line numbers. A new file that git does not track and
+  # .gitignore does not match is all new lines (UNTRACKED).
   elif LOCK="$(git rev-parse --git-path index.lock)"
-       WORK_RC=0
-       WORK="$(git -c user.name=ste-lint -c user.email=ste-lint@localhost stash create)" || WORK_RC=$?
-       # Exit 1 with no output is "no local changes" (a touched file, the same bytes): a clean tree. A held lock stays a failure.
-       [ "$WORK_RC" -eq 1 ] && [ -z "$WORK" ] && [ ! -e "$LOCK" ] && WORK_RC=0
-       [ "$WORK_RC" -ne 0 ]; then
+       WORK=""
+       WHY=""
+       DIFF_RC=0
+       TMP_INDEX="$(mktemp)"
+       cp -p "$(git rev-parse --git-path index)" "$TMP_INDEX" || DIFF_RC=2
+       [ "$DIFF_RC" -ne 0 ] || GIT_INDEX_FILE="$TMP_INDEX" git --no-optional-locks diff --quiet HEAD -- || DIFF_RC=$?
+       rm -f "$TMP_INDEX"
+       if [ "$DIFF_RC" -eq 1 ]; then
+         WORK_RC=0
+         WORK="$(git -c user.name=ste-lint -c user.email=ste-lint@localhost stash create)" || WORK_RC=$?
+         if [ "$WORK_RC" -ne 0 ] || [ -z "$WORK" ]; then
+           WHY="git stash create failed"
+           [ ! -e "$LOCK" ] || WHY="another git process holds $LOCK"
+         fi
+       elif [ "$DIFF_RC" -ne 0 ]; then
+         WHY="the content check of the tracked files failed (exit $DIFF_RC)"
+       fi
+       [ -n "$WHY" ]; then
     # The working tree was not read, so the committed range alone would be a false PASS: stale-cites is skipped too.
     STALE_RANGE=""
-    WHY="git stash create failed"
-    [ ! -e "$LOCK" ] || WHY="another git process holds $LOCK"
-    UNKNOWN="$WHY, so the working tree was not read. Nothing was checked. Run again when no git process holds the index."
+    UNKNOWN="$WHY, so the working tree was not read. Nothing was checked. Run again once git can read the tree."
   else
     if [ -n "$WORK" ]; then STALE_RANGE="$FROM..$WORK"; else WORK="HEAD"; fi
     while IFS= read -r -d '' f; do
