@@ -933,6 +933,7 @@ if state.get("count_file"):  # a test that counts the calls names the file: one 
 if state.get("delay_s"):
     time.sleep(state["delay_s"])
 args = sys.argv[1:]
+REPO_ID = 424242424  # the numeric id GitHub names in a Link header; the cloud agent proxy refuses paths that carry it
 GRAPHQL = "HTTP 403: GitHub GraphQL is not available from Claude Code sessions; use the REST API (https://api.github.com/graphql)"
 if state["cwd_name"] and os.path.basename(os.getcwd()) != state["cwd_name"]:
     state["broken"] = True
@@ -959,19 +960,33 @@ def parse(argv):
 
 
 def api_error(code, message):
+    if "-i" in flags:  # gh api -i prints the reply's status line and headers before the body
+        print("HTTP/1.1 %d %s\r\nContent-Type: application/json\r\n" % (code, "Not Found" if code == 404 else "Internal Server Error"))
     print(json.dumps({"message": message, "status": str(code)}, separators=(",", ":")) + "gh: %s (HTTP %d)" % (message, code))
     sys.exit(1)
 
 
-def listing(items, key, fields, flags, top=None):
-    """What gh prints for a list read: one page unless --paginate; array pages joined; object pages back to back; --slurp one array of pages."""
+def listing(items, key, fields, flags, top=None, rel=""):
+    """What gh prints for a list read: one page unless --paginate; array pages joined; object pages back to back; --slurp one array of pages.
+    With -i the status line and headers come first, and a page that more pages follow carries the Link header GitHub sends, on the numeric route."""
     size = max(1, min(int(fields.get("per_page", 30)), state["page_cap"]))
     pages = [items[i:i + size] for i in range(0, len(items), size)] or [[]]
-    chosen = pages if "--paginate" in flags else [pages[max(1, int(fields.get("page", 1))) - 1] if int(fields.get("page", 1)) <= len(pages) else []]
+    asked = max(1, int(fields.get("page", 1)))
+    chosen = pages if "--paginate" in flags else [pages[asked - 1] if asked <= len(pages) else []]
     bodies = [c if key is None else dict(top or {}, **{key: c}) for c in chosen]
     if "--slurp" in flags:
-        return json.dumps(bodies)
-    return json.dumps([x for c in chosen for x in c]) if key is None else "".join(json.dumps(b) for b in bodies)
+        body = json.dumps(bodies)
+    else:
+        body = json.dumps([x for c in chosen for x in c]) if key is None else "".join(json.dumps(b) for b in bodies)
+    if "-i" not in flags:
+        return body
+    link = None
+    if "--paginate" not in flags and asked < len(pages):
+        def url(page):
+            parts = ["%s=%s" % kv for kv in fields.items() if kv[0] != "page"] + ["page=%d" % page]
+            return "<https://api.github.com/repositories/%d/%s?%s>" % (REPO_ID, rel, "&".join(parts))
+        link = '%s; rel="next", %s; rel="last"' % (url(asked + 1), url(len(pages)))
+    return "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n%s\r\n%s" % ("Link: %s\r\n" % link if link else "", body)
 
 
 RUN_OF = {"pass": ("completed", "success"), "fail": ("completed", "failure"), "pending": ("in_progress", None),
@@ -1016,20 +1031,20 @@ else:
         rows = [dict(state["pr"], number=state["number"])] + others
         if fields.get("state") == "open":  # GitHub lists a closed or merged pull request only when the read asks for it
             rows = [row for row in rows if row["state"] == "open"]
-        print(listing(rows, None, fields, flags))
+        print(listing(rows, None, fields, flags, rel=rel))
     elif re.fullmatch(r"commits/([^/]+)/(check-runs|status)", rel) and rel.split("/")[1] in rows_of:
         checks, statuses = rows_of[rel.split("/")[1]]
         if rel.endswith("check-runs"):
             runs = [{"id": i, "name": c["name"], "status": RUN_OF.get(c["bucket"], ("completed", c["bucket"]))[0],
                      "conclusion": RUN_OF.get(c["bucket"], ("completed", c["bucket"]))[1], "details_url": c["link"] or None,
                      "started_at": None, "completed_at": None} for i, c in enumerate(checks)]
-            print(listing(runs, "check_runs", fields, flags, {"total_count": len(runs)}))
+            print(listing(runs, "check_runs", fields, flags, {"total_count": len(runs)}, rel=rel))
         else:
             sts = [{"id": 50 + i, "context": c["name"], "state": STATUS_OF.get(c["bucket"], c["bucket"]), "target_url": c["link"] or None}
                    for i, c in enumerate(statuses)]
             states = {s["state"] for s in sts}
             combined = "failure" if states & {"failure", "error"} else "pending" if (not states or "pending" in states) else "success"
-            print(listing(sts, "statuses", fields, flags, {"state": combined, "sha": rel.split("/")[1], "total_count": len(sts)}))
+            print(listing(sts, "statuses", fields, flags, {"state": combined, "sha": rel.split("/")[1], "total_count": len(sts)}, rel=rel))
     elif re.fullmatch(r"branches/[^/]+/protection/required_status_checks", rel):
         if state["protection"] == "absent":
             api_error(404, "Branch not protected")
