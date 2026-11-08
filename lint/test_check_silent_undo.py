@@ -2185,14 +2185,15 @@ class RetireCite(unittest.TestCase):
         for p in paths:
             self.assertIn("D\t" + p, names, "the PR does not delete %s, so the case proves nothing" % p)
 
-    def cut_then_main_adds_the_note(self):
-        """Cut `retire` from main, then main adds NOTE_LINE to the debt, then `retire` merges main in: it holds that line."""
+    def cut_then_main_adds_the_note(self, retire=PROSE):
+        """Cut `retire` from main, then main adds NOTE_LINE to the debt, then `retire` merges main in: it holds that line.
+        The debt keeps the Retire line `retire` names, so the cut and main's debt agree on it."""
         self.r.sh("checkout", "-q", "-b", "retire")
         self.r.put("other.txt", "branch work\n")
         self.r.sh("add", "-A")
         self.r.sh("commit", "-q", "-m", "branch work")
         self.r.sh("checkout", "-q", "main")
-        self.r.put(self.DEBT, debt(PROSE) + self.NOTE_LINE)
+        self.r.put(self.DEBT, debt(retire) + self.NOTE_LINE)
         self.r.sh("add", "-A")
         self.r.sh("commit", "-q", "-m", "main adds a line to the debt")
         self.r.push()
@@ -2206,15 +2207,15 @@ class RetireCite(unittest.TestCase):
         self.assertIn(self.NOTE_LINE, text, "the branch does not hold main's line, so the case proves nothing")
         self.r.put(path, text.replace(self.NOTE_LINE, ""))
 
-    def two_cited_closes(self):
+    def two_cited_closes(self, retire=PROSE):
         """Two debts. DEBT: landed by a PR, then main adds NOTE_LINE after the cut; the branch deletes it, so the delete undoes
         main's line and has a finding with no cite. OTHER: on main with no PR, so its delete has no finding. Both are cited."""
         self.r.put(self.OTHER, debt("Delete the other helper once nothing reads it."))
         self.r.sh("add", "-A")
         self.r.sh("commit", "-q", "-m", "add the other debt on main with no PR")
         self.r.push()
-        self.land({self.DEBT: debt(PROSE)})
-        self.cut_then_main_adds_the_note()
+        self.land({self.DEBT: debt(retire)})
+        self.cut_then_main_adds_the_note(retire)
         self.r.sh("rm", "-q", self.DEBT, self.OTHER)
         self.r.sh("commit", "-q", "-m", "delete both debts")
         head = self.r.sh("rev-parse", "HEAD")
@@ -2566,6 +2567,79 @@ class RetireCite(unittest.TestCase):
         self.assertEqual(built, [], "the merge tool's Host was built on a branch with no finding: the reader is built only for a finding")
         self.assertEqual(runs.urls, [], "the run reader was asked on a branch with no finding")
         self.assertEqual(code, 0, out)
+
+    PASS_RETIRE = "Delete the old helper. Check: `tests/test_pass.py`."  # a runnable test: it passes on the head when it runs
+
+    @staticmethod
+    def judgment_raises(error):
+        """Patch the debt-close judgment (check_debt_retire.judged) to raise `error`: the judgment cannot be read."""
+        def raising(*a, **k):
+            raise error
+        return unittest.mock.patch.object(D, "judged", raising)
+
+    def cited_edit(self):
+        """A debt landed by a PR, then main adds NOTE_LINE after the cut; the branch takes that line out of the debt in place. The
+        edit undoes main's line, so the debt has a finding and is edited, not deleted. -> (head, body)."""
+        self.land({self.DEBT: debt(PROSE)})
+        self.cut_then_main_adds_the_note()
+        self.drop_note(self.DEBT)
+        self.r.sh("add", "-A")
+        self.r.sh("commit", "-q", "-m", "take main's line out of the debt")
+        head = self.r.sh("rev-parse", "HEAD")
+        names = self.r.sh("diff", "--name-status", "-M", "origin/main", head).splitlines()
+        self.assertIn("M\t" + self.DEBT, names, "the PR does not edit the debt in place, so the case proves nothing")
+        return head, self.CITE % (self.SLUG, RUN_URL)
+
+    def test_a_cited_edit_prints_no_cite_line_when_the_judgment_cannot_be_read(self):  # F1: a modified debt is no delete
+        head, body = self.cited_edit()
+        bare, _ = self.silent(head)
+        self.assertTrue(self.finding(bare, self.DEBT), "premise: the edit undoes main's line, so the debt has a finding with no cite")
+        with self.judgment_raises(D.Unknown("the history read failed: boom")):
+            problems, notes = self.silent(head, body, Runs(("success", head)))
+        self.assertTrue(self.finding(problems, self.DEBT), (problems, notes))
+        self.assert_no_cite_line(notes, "a modified debt, judgment unreadable")
+
+    def test_a_cited_delete_prints_exactly_one_cite_line_when_the_judgment_cannot_be_read(self):  # F1: one line per deleted debt
+        head, body = self.two_cited_closes()
+        bare, _ = self.silent(head)
+        self.assertTrue(self.finding(bare, self.DEBT), "premise: the delete undoes main's line, so the debt has a finding with no cite")
+        with self.judgment_raises(D.Unknown("the history read failed: boom")):
+            problems, notes = self.silent(head, body, Runs(("success", head)))
+        self.assertTrue(self.finding(problems, self.DEBT), (problems, notes))
+        self.assert_not_accepted(notes, "boom", "a deleted debt, judgment unreadable")
+
+    def test_a_cited_delete_prints_no_cite_line_when_the_status_read_also_fails(self):  # F1: the status read fails too
+        head, body = self.two_cited_closes()
+        bare, _ = self.silent(head)
+        self.assertTrue(self.finding(bare, self.DEBT), "premise: the delete undoes main's line, so the debt has a finding with no cite")
+
+        def status_fails(*a, **k):
+            raise D.Unknown("the status read failed: boom")
+        with self.judgment_raises(D.Unknown("the history read failed: boom")), \
+                unittest.mock.patch.object(D.records, "changes", status_fails):
+            problems, notes = self.silent(head, body, Runs(("success", head)))
+        self.assertTrue(self.finding(problems, self.DEBT), (problems, notes))
+        self.assert_no_cite_line(notes, "judgment and status read both unreadable")
+
+    def test_an_unrunnable_retire_with_a_failed_cited_run_gives_the_run_verdict_without_wrapping(self):  # F2
+        head, body = self.two_cited_closes(retire=self.PASS_RETIRE)
+
+        def cannot_run(wt, span, timeout):
+            return "unknown", "%s did not start" % span
+        with unittest.mock.patch.object(D, "run_span", cannot_run):
+            self.assertIn((self.SLUG, "red"), self.scope(head, body, Runs(("failure", head))), "scope: the cited red run gives the flagged close its kind")
+            problems, notes = self.silent(head, body, Runs(("failure", head)))
+        self.assertTrue(self.finding(problems, self.DEBT), (problems, notes))
+        want = "cite for %s not accepted: debt %s: the cited run %s ended failure, not success" % (self.SLUG, self.SLUG, RUN_URL)
+        self.assertIn(want, notes, "the note does not give the run verdict as the debt-close check words it:\n%r" % (notes,))
+
+    def test_a_judgment_that_raises_a_plain_error_names_its_type(self):  # F3
+        head, body = self.two_cited_closes()
+        with self.judgment_raises(KeyError("x")):
+            problems, notes = self.silent(head, body, Runs(("success", head)))
+        self.assertTrue(self.finding(problems, self.DEBT), (problems, notes))
+        self.assert_not_accepted(notes, "KeyError", "a plain error")
+        self.assertNotIn("the debt read failed", [n for n in notes if n.startswith("cite for ")][0], "the note names the read, not the type")
 
 
 CHECKS_YML = os.path.join(HERE, "..", ".github", "workflows", "checks.yml")
