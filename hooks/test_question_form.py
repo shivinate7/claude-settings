@@ -1172,6 +1172,14 @@ def case_gh_login_switch_on_the_page():
     page("gh login switch: a full write of a gh line that names a shivinate7/ repo with no switch is refused",
          "set", entry_of(gh_task("gh pr view 3 -R shivinate7/repo", "gh pr view 3 -R shivinate7/repo")),
          ("gh-login-switch", None))
+    # A gh command inside a substitution glued to its word is a command the shell runs. _gh_calls reads only the
+    # words that open a segment, so each glued form passes on main. The plain `echo $(gh pr merge 5)` is refused.
+    for command in ("x=$(gh pr merge 5)", 'echo "$(gh pr merge 5)"', "echo a$(gh pr merge 5)"):
+        page("gh login switch: a glued substitution holding a gh command with no switch is refused: %s" % command,
+             "set", entry_of(gh_task(command, command)), ("gh-login-switch", None))
+    # A false alarm: the same gh command held in single quotes is text.
+    page("gh login switch: a gh command in single quotes inside a substitution is text", "set",
+         entry_of(gh_task("echo '$(gh pr merge 5)'", "echo '$(gh pr merge 5)'")), None)
 
 # ------------------------------------------------------------------ a step's span or fence holds a shell line only as a command
 
@@ -1207,6 +1215,14 @@ def case_command_in_item_spans():
              entry_of(task_item(["Check the output of `%s`" % span])), ("command-in-item", "shell line"))
     page("a fence holding grep x a | head is refused as a shell line", "set",
          entry_of(task_item(["Check the output:\n```\ngrep x a | head\n```"])), ("command-in-item", "shell line"))
+    # A substitution glued to its word (`x=$(`, `"$(`, `a$(`) is a command the shell runs, but _shell_line reads only
+    # the words that open a segment, so each glued span passes. The plain `$(git status)` span is refused.
+    for span in ("x=$(git status)", '"$(git status)"', "a$(git status)"):
+        page("a step holding `%s` is refused as a shell line" % span, "set",
+             entry_of(task_item(["Check the output of `%s`" % span])), ("command-in-item", "shell line"))
+    # A false alarm: the same substitution held in single quotes is text, so the step passes.
+    page("a step holding a single-quoted dollar paren is no shell line", "set",
+         entry_of(task_item(["Check the output of `'$(git status)'`"])), None)
 
 
 # ------------------------------------------------------------------ a question says how it departs from main
