@@ -12950,13 +12950,21 @@ class ReviewFixFiling(ReviewEnv):
         self.assertEqual(merge.review_state(merge.parse_review(out), new)[0], "done", out)
 
 
+# The owner's cut-off for the Findings line (owner item 386 b, ruled 2026-11-07 22:25 CST, which is 04:25:00Z on Nov 8). A review record created at
+# or after it with no Findings line reads not done. The cut-off is the owner's literal here, never read from merge.py, so a wrong constant there cannot pass.
+LEGACY_CUTOFF_AT = datetime(2026, 11, 8, 4, 25, 0, tzinfo=timezone.utc)
+LEGACY_CUTOFF = LEGACY_CUTOFF_AT.strftime("%Y-%m-%dT%H:%M:%SZ")  # the same instant, as created_at reads it
+LEGACY_BEFORE = (LEGACY_CUTOFF_AT - timedelta(seconds=1)).strftime("%Y-%m-%dT%H:%M:%SZ")  # one second before the cut-off
+LEGACY_CAUSE = "review record lacks Findings"  # the cause the lane line names
+LEGACY_LATE_NOW = LEGACY_CUTOFF_AT + timedelta(hours=6)  # the ledger's clock for the cut-off cases: a record at the cut-off is 6h old
+
 class ReviewedList(ReviewEnv):
     """`merge --reviewed` over scripted reads. PullsHost serves the open pulls, the check runs of each head and the repo-wide comments, at the
     fixed clock LEDGER_NOW. The record parse, the newest-record rule and the next act are the real code. Output: one line per open pull request
     (`ReviewedLedger` has the rules), then the summary line."""
 
-    def listing(self, pulls, comments=(), check_rows=None, **reads):
-        host = PullsHost(pulls, check_rows or {}, comments=comments, now=LEDGER_NOW, **reads)
+    def listing(self, pulls, comments=(), check_rows=None, now=None, **reads):
+        host = PullsHost(pulls, check_rows or {}, comments=comments, now=now or LEDGER_NOW, **reads)
         rc, out, err = self.run_args("--reviewed", host=host)
         return host, rc, out, err
 
@@ -13105,16 +13113,63 @@ class ReviewedList(ReviewEnv):
         host, rc, out, err = self.listing([batch_pull(7, REVIEW_HEAD)], comments, check_rows=self.GREEN_CI, count_gh=True)
         self.assertEqual(rc, 0, out + err)
         self.assertRegex(list_line(self, out, 7), r"^#7 feat7 batch \d+h$")
-        legacy = self.listing([batch_pull(7, REVIEW_HEAD)], [review_comment(1, 7, record_text(rounds=REVIEW_PASS))], check_rows=self.GREEN_CI, count_gh=True)[0]
+        legacy = self.listing([batch_pull(7, REVIEW_HEAD)], [review_comment(1, 7, record_text(rounds=REVIEW_PASS), created="2026-10-02T00:00:00Z")],
+                              check_rows=self.GREEN_CI, count_gh=True)[0]  # written before the cut-off: a legacy record
         self.assertEqual(sorted(host.gh_calls), sorted(legacy.gh_calls), "a `none` record read more than a record with no Findings line")
 
     def test_a_legacy_record_with_no_findings_line_lists_done_with_its_reads(self):
-        # control, green on main: a record with no Findings line keeps its verdict and its cost
-        comments = [review_comment(1, 7, record_text(rounds=REVIEW_PASS))]
+        # control, green on main: a record with no Findings line keeps its verdict and its cost. Written before the cut-off, so it is legacy.
+        comments = [review_comment(1, 7, record_text(rounds=REVIEW_PASS), created="2026-10-02T00:00:00Z")]
         host, rc, out, err = self.listing([batch_pull(7, REVIEW_HEAD)], comments, check_rows=self.GREEN_CI, count_gh=True)
         self.assertEqual(rc, 0, out + err)
         self.assertRegex(list_line(self, out, 7), r"^#7 feat7 batch \d+h$")
         self.assertEqual(sorted(host.gh_calls), sorted(self.READY_READS), "a record with no Findings line read more than the five calls")
+
+    # ---- a record with no Findings line, written at or after the owner's cut-off, reads not done: its act is the lane's cause, at the lane round
+    # age limit. The ledger reads created_at, so these cases run at LEGACY_LATE_NOW, after the cut-off. A record before it keeps the legacy verdict.
+
+    def late_record(self, cid, n, created, **kw):
+        """The review record of pull request n, written at `created`: a passed round, and no Findings line unless `kw` gives one."""
+        return review_comment(cid, n, record_text(n=n, rounds=REVIEW_PASS, **kw), created=created)
+
+    def test_a_no_findings_line_record_after_the_cutoff_reads_not_done(self):
+        host, rc, out, err = self.listing([batch_pull(7, REVIEW_HEAD)], [self.late_record(1, 7, "2026-11-08T05:25:00Z")], now=LEGACY_LATE_NOW)
+        self.assertEqual(rc, 0, out + err)
+        self.unfiled_line(out, LEGACY_CAUSE, "5h")
+
+    def test_a_no_findings_line_record_created_at_the_cutoff_reads_not_done(self):
+        host, rc, out, err = self.listing([batch_pull(7, REVIEW_HEAD)], [self.late_record(1, 7, LEGACY_CUTOFF)], now=LEGACY_LATE_NOW)
+        self.assertEqual(rc, 0, out + err)
+        self.unfiled_line(out, LEGACY_CAUSE, "6h")
+
+    def test_a_no_findings_line_record_before_the_cutoff_keeps_the_legacy_verdict(self):
+        # control, green on main: one second before the cut-off, and a day earlier, the record is done as before
+        for created, tail in ((LEGACY_BEFORE, "6h"), ("2026-11-07T12:00:00Z", "22h")):
+            with self.subTest(created=created):
+                host, rc, out, err = self.listing([batch_pull(7, REVIEW_HEAD)], [self.late_record(1, 7, created)], now=LEGACY_LATE_NOW)
+                self.assertEqual(rc, 0, out + err)
+                self.assertEqual(list_line(self, out, 7), f"#7 feat7 batch {tail}", "a record written before the cut-off lost its legacy verdict")
+
+    def test_the_cutoff_cause_keeps_the_lane_round_age_limit(self):
+        # the act kind is still `lane round`: green one hour inside its limit, RED one hour past it
+        for hours, want in ((inside("lane round"), 0), (past("lane round"), 1)):
+            with self.subTest(hours=hours):
+                host, rc, out, err = self.listing([batch_pull(7, REVIEW_HEAD)], [self.late_record(1, 7, LEGACY_CUTOFF)],
+                                                  now=LEGACY_CUTOFF_AT + timedelta(hours=hours))
+                self.assertEqual(rc, want, out + err)
+                self.unfiled_line(out, LEGACY_CAUSE, f"{hours}h" + (" RED" if want else ""))
+
+    def test_a_newer_no_findings_line_record_after_the_cutoff_does_not_clear_an_unfiled_this_pr_record(self):
+        # scope first: the older record alone is unfiled, so the newer one is the only record that could clear it
+        older = self.late_record(1, 7, "2026-11-07T20:00:00Z", findings="2, this PR")
+        newer = self.late_record(2, 7, "2026-11-08T05:25:00Z")
+        files = {7: [pull_file("src/widget.py", status="modified", additions=3, deletions=1)]}
+        host, rc, out, err = self.listing([batch_pull(7, REVIEW_HEAD)], [older], now=LEGACY_LATE_NOW, files=files, count_gh=True)
+        self.assertEqual(rc, 0, out + err)
+        self.unfiled_line(out, "findings not filed: this PR", "14h")
+        host, rc, out, err = self.listing([batch_pull(7, REVIEW_HEAD)], [older, newer], now=LEGACY_LATE_NOW, files=files, count_gh=True)
+        self.assertEqual(rc, 0, out + err)
+        self.unfiled_line(out, LEGACY_CAUSE, "5h")
 
     def test_findings_this_pr_with_a_debt_file_added_is_done_and_reads_its_files_once(self):
         host, out = self.this_pr([pull_file("docs/debts/missing-cache.md", additions=12)])
@@ -14891,6 +14946,30 @@ class BuildBatchFindingsUnknown(BuildEnv):
                 self.assertEqual(joins_of(out), [], out)
                 self.assertIn("--findings-unknown-ok", out, "a blank reason does not name the reason flag")
         self.assertNotIn("feat7", self.linted(), "a blank reason lifted the unknown read and linted the pull request")
+
+
+class BuildBatchLegacyCutoff(BuildEnv):
+    """A done record with no Findings line, written at or after the owner's cut-off (owner item 386 b), reads not done, so --build-batch leaves
+    its pull request out and does not lint it. Written before the cut-off, the same record joins, as before."""
+
+    def host_with_record(self, head, created):
+        """Pull request 7 at `head`, with one review record of a passed round and no Findings line, written at `created`."""
+        comment = review_comment(901, 7, record_text(head=head, rounds=REVIEW_PASS), created=created)
+        return PullsHost([batch_pull(7, head)], {}, comments=[comment])
+
+    def test_a_no_findings_line_record_after_the_cutoff_keeps_the_pr_out_of_the_batch(self):
+        head = self.lane(7)
+        rc, out, err = self.build(self.host_with_record(head, "2026-11-08T05:25:00Z"))
+        self.assertEqual(rc, 0, out + err)
+        self.assertEqual(joins_of(out), [], "a record with no Findings line, written after the cut-off, joined the batch:\n" + out)
+        self.assertNotIn("feat7", self.linted(), "a record with no Findings line, written after the cut-off, was linted for the batch")
+        self.assert_ran(rc, out, err, 0)
+
+    def test_a_no_findings_line_record_one_second_before_the_cutoff_still_joins(self):
+        head = self.lane(7)
+        rc, out, err = self.build(self.host_with_record(head, LEGACY_BEFORE))
+        self.assert_ran(rc, out, err, 1)
+        self.assertEqual(joins_of(out), [f"joins: #7 feat7 {head[:9]}"], out)
 
 
 class BuildBatchStacks(BuildEnv):
