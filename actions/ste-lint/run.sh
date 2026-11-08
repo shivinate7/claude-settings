@@ -24,7 +24,7 @@ done < <([ -f .ste-lint-exclude ] && cat .ste-lint-exclude; echo; printf '%s\n' 
 
 RAW_FILES=()
 FILES=()
-NO_BASE=0
+UNKNOWN=""  # why no changed file was read; the step then exits 0 unless stale-cites fails
 if [ "$SCOPE" = "all" ]; then
   # ':(glob)' turns on real double-star matching. Without it, git's default
   # pathspec needs a literal '/' for '**/', so a root file such as README.md
@@ -54,22 +54,26 @@ else
     FROM="$(git merge-base "origin/$BASE" HEAD 2>/dev/null)" || FROM=""
   fi
   UNTRACKED=()
-  WORK=""
+  STALE_RANGE="$RANGE"  # a clean tree, as in CI, passes RANGE to stale-cites unchanged, as main does
   if [ -z "$FROM" ]; then
     # No merge base (an unrelated history, or a shallow clone): the base is unknown, not a finding (decision
-    # stale-cites-at-merge, rule verification-report-unknown-reads). No changed file is read and the exit stays 0.
-    NO_BASE=1
-    echo "ste-lint: unknown, no merge base between origin/$BASE and HEAD, so no changed file was read. Nothing was checked. Check out with fetch-depth 0 (actions/checkout) so the history is there."
+    # stale-cites-at-merge, rule verification-report-unknown-reads). stale-cites prints its own unknown line.
+    UNKNOWN="no merge base between origin/$BASE and HEAD, so no changed file was read. Nothing was checked. Check out with fetch-depth 0 (actions/checkout) so the history is there."
+  # The one changed set, for both steps below: the diff from FROM to WORK, plus the files git does not track.
+  # WORK is the commit `git stash create` builds from the tracked files as they are now, staged or not. It stores no
+  # ref and leaves the working tree alone, but it refreshes the index's file stats under the index lock, so a held
+  # lock fails it. For a clean tree, as in CI, it prints nothing and WORK is HEAD. So one diff holds the commits and
+  # the working tree: a tracked file edited, staged or removed and not yet committed counts, with its working-tree
+  # line numbers. A new file that git does not track and .gitignore does not match is all new lines (UNTRACKED).
+  elif ! WORK="$(git -c user.name=ste-lint -c user.email=ste-lint@localhost stash create)"; then
+    # The working tree was not read, so the committed range alone would be a false PASS: stale-cites is skipped too.
+    STALE_RANGE=""
+    LOCK="$(git rev-parse --git-path index.lock)"
+    WHY="git stash create failed"
+    [ ! -e "$LOCK" ] || WHY="another git process holds $LOCK"
+    UNKNOWN="$WHY, so the working tree was not read. Nothing was checked. Run again when no git process holds the index."
   else
-    # The one changed set, for both steps below: the diff from FROM to WORK, plus the files git does not track.
-    # WORK is the commit `git stash create` builds from the tracked files as they are now, staged or not. It stores
-    # no ref, leaves the index and the working tree alone, and writes only unreachable objects. For a clean tree,
-    # as in CI, it prints nothing and WORK is HEAD. So one diff holds the commits and the working tree: a tracked
-    # file edited, staged or removed and not yet committed counts, with its working-tree line numbers.
-    # A new file that git does not track and .gitignore does not match is all new lines (UNTRACKED). The stale-cites
-    # step reads committed trees, so it sees the removals in WORK but never reads an untracked file.
-    WORK="$(git -c user.name=ste-lint -c user.email=ste-lint@localhost stash create)"
-    [ -n "$WORK" ] || WORK="$(git rev-parse HEAD)"
+    if [ -n "$WORK" ]; then STALE_RANGE="$FROM..$WORK"; else WORK="HEAD"; fi
     while IFS= read -r -d '' f; do
       UNTRACKED+=("$f")
     done < <(git ls-files -z --others --exclude-standard -- "$CHANGED_PATHS_GLOB")
@@ -82,6 +86,7 @@ else
     done < <(git diff -z --name-only --diff-filter=AMR "$FROM" "$WORK" -- "$CHANGED_PATHS_GLOB" ${EXCLUDE_PATHSPECS[@]+"${EXCLUDE_PATHSPECS[@]}"}
              git ls-files -z --others --exclude-standard -- "$CHANGED_PATHS_GLOB" ${EXCLUDE_PATHSPECS[@]+"${EXCLUDE_PATHSPECS[@]}"})
   fi
+  [ -z "$UNKNOWN" ] || echo "ste-lint: unknown, $UNKNOWN"
 fi
 
 # In-script fallback: a caller that passes a plain glob (no ':(exclude)' magic
@@ -136,16 +141,23 @@ LOG_OUT="$(mktemp)"
 # script below: every stale line is untouched by the range, and the split makes an untouched line
 # report-only. FAIL=false prints them and keeps the exit 0, as it does for the STE findings.
 STALE_EXIT=0
-if [ "$SCOPE" != "all" ]; then
+if [ -n "${STALE_RANGE:-}" ]; then
   STALE_OUT="$(mktemp)"
   set +e
-  # FROM..WORK is the changed set the STE step reads (above). With no merge base there is no FROM, and the
-  # committed range makes stale_cites print its own unknown line.
-  if [ "$NO_BASE" -eq 1 ]; then STALE_RANGE="$RANGE"; else STALE_RANGE="$FROM..$WORK"; fi
   python3 "$STALE_CITES" --range "$STALE_RANGE" > "$STALE_OUT"
   STALE_EXIT=$?
   set -e
-  cat "$STALE_OUT"
+  # stale-cites reads committed trees, so it never reads an untracked Markdown file: no PASS while one exists.
+  UNREAD=""
+  for u in ${UNTRACKED[@]+"${UNTRACKED[@]}"}; do
+    case "$u" in *.md) UNREAD="$UNREAD, $u" ;; esac
+  done
+  if [ -n "$UNREAD" ]; then
+    sed '/^stale-cites: PASS$/d' "$STALE_OUT"
+    echo "stale-cites: unknown, untracked Markdown is not read, so its cites were not checked: ${UNREAD#, }. git add a file to check it."
+  else
+    cat "$STALE_OUT"
+  fi
   # The report lines (anchors that changed, decisions whose Home is a changed file) join the step summary, in
   # a fence so a `*` or `_` in a path stays literal. They never change the exit.
   if grep -q '^stale-cites: report, ' "$STALE_OUT"; then
@@ -170,12 +182,12 @@ fi
 [ "${FAIL:-true}" = "true" ] || STALE_EXIT=0
 
 if [ ${#FILES[@]} -eq 0 ]; then
-  # An unknown merge base already printed its own line, and "no markdown changed" would be false: none was read.
-  [ "$NO_BASE" -eq 1 ] || echo "ste-lint: no markdown changed"
+  # An unknown read already printed its own line, and "no markdown changed" would be false: none was read.
+  [ -n "$UNKNOWN" ] || echo "ste-lint: no markdown changed"
   {
     echo "### STE lint"
     echo
-    echo "No markdown changed."
+    if [ -n "$UNKNOWN" ]; then echo "Unknown: $UNKNOWN"; else echo "No markdown changed."; fi
     if [ "$EXCLUDED_COUNT" -gt 0 ]; then
       echo
       echo "Excluded: $EXCLUDED_COUNT file(s)."
@@ -236,7 +248,7 @@ cat > "$HUNK_MAP_PY" <<'PYEOF'
 import re, sys
 cur = None
 out = []
-header = re.compile(r"^\+\+\+ b/(.*)$")
+header = re.compile(r"^\+\+\+ b/(.*?)\t?$")  # git ends a name that holds a space with a tab
 hunk = re.compile(r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@")
 for path in sys.argv[1:]:  # an untracked file: every line is new
     with open(path, encoding="utf-8", errors="replace") as f:
