@@ -2399,12 +2399,9 @@ class RetireCite(unittest.TestCase):
         self.assertIn(RUN_URL, flagged.urls, "the close with the finding did not read its own cited run")
 
 
-class RevivedNote(unittest.TestCase):
-    """A note the branch deleted must not come back when a merge brings the base in. The notes file merges by union (the
-    real `.gitattributes` line), so a merge that conflicts at the file's end keeps the base's copy with no clash. Each of the
-    first six cases runs twice: with that line, and with no `.gitattributes`, where the same merge conflicts and is resolved by
-    hand. The doubled-note cases and the reworded and in-place cases run with the union line only: the doubling and the reword come from the
-    union driver, which a plain merge does not use."""
+class NotesFixture:
+    """The notes-file fixture the revival cases and the row-edit cases share: a base, a branch and main, each a list of note
+    rows under one heading. The notes file merges by union (the real `.gitattributes` line) when `union` is set."""
 
     ATTRIBUTES = os.path.join(os.path.dirname(HERE), ".gitattributes")  # the real file: its union line is what is under test
     NOTES = "docs/debts/notes.md"
@@ -2424,11 +2421,12 @@ class RevivedNote(unittest.TestCase):
     def notes_at(self, rev):
         return self.r.sh("show", "%s:%s" % (rev, self.NOTES)).splitlines()
 
-    def start(self, union, retire=True, base=None, branch=None, main=None):
+    def start(self, union, retire=True, base=None, branch=None, main=None, base_file=True):
         """A base whose notes hold untouched-note and retired-note, then an unrelated main commit, so the fork point is that
         commit and not the one that added the notes. The branch deletes retired-note, or with retire False appends a line of
         its own. Main then appends main-note after retired-note, so the two edits meet at the end of the file. `base`, `branch`
-        and `main` replace those notes lines (after the heading) for the cases that need other text. -> the branch's commit.
+        and `main` replace those notes lines (after the heading) for the cases that need other text. With base_file False the
+        base holds no notes file at all. -> the branch's commit.
         The layout file makes the notes path docs/debts/notes.md, as RetireCite does."""
         base = (self.UNTOUCHED, self.RETIRED) if base is None else base
         if branch is None:
@@ -2439,7 +2437,10 @@ class RevivedNote(unittest.TestCase):
         r.put(".claude/layout-extras.json", json.dumps({"kinds": {}, "rolled-out": True}) + "\n")
         if union:
             shutil.copyfile(self.ATTRIBUTES, os.path.join(r.dir, ".gitattributes"))
-        r.commit("notes", docs__debts__notes_md=self.text(*base))
+        if base_file:
+            r.commit("notes", docs__debts__notes_md=self.text(*base))
+        else:
+            r.commit("notes", other_txt="no notes file yet\n")
         r.commit("unrelated main commit", other_txt="other v1\n")
         r.push()
         r.sh("checkout", "-q", "-b", "feat")
@@ -2502,6 +2503,14 @@ class RevivedNote(unittest.TestCase):
         deleted = deleted or self.retire
         named = [p for p in got if slug in p and deleted[:7] in p]
         self.assertTrue(named, "%s came back through the merge, and no problem names it with %s: %r" % (slug, deleted[:7], got))
+
+
+class RevivedNote(NotesFixture, unittest.TestCase):
+    """A note the branch deleted must not come back when a merge brings the base in. The notes file merges by union (the
+    real `.gitattributes` line), so a merge that conflicts at the file's end keeps the base's copy with no clash. Each of the
+    first six cases runs twice: with that line, and with no `.gitattributes`, where the same merge conflicts and is resolved by
+    hand. The doubled-note cases and the reworded and in-place cases run with the union line only: the doubling and the reword come from the
+    union driver, which a plain merge does not use."""
 
     def test_union_merge_that_brings_back_a_deleted_note_is_refused(self):
         self.start(union=True)
@@ -2632,6 +2641,127 @@ class RevivedNote(unittest.TestCase):
         self.commit_notes("re-add the note on purpose", self.body(head))
         self.assertIn(self.RETIRED, self.notes_at("HEAD"), "premise: the re-add put retired-note back in the head")
         self.assertEqual(self.r.verdict(), [], "a note a merge brought back, then deleted and re-added on purpose, was refused")
+
+
+class NoteRowEdits(NotesFixture, unittest.TestCase):
+    """An edit in place to a note row the base holds is a finding. Rows the branch adds, rows it deletes, one wording of a
+    duplicated slug that it deletes, and main's edits to base rows that a merge brings in all pass. Each case that expects a
+    pass first asserts its scope: the same branch edits a base row and gets a finding. That keeps the case red on a check that
+    never reads rows, and keeps a pass from being a check that flags nothing."""
+
+    BASE = "- base-note: a finding the base holds (lint/check_base.py)"
+    BASE_EDITED = "- base-note: a finding the base holds, reworded (lint/check_base.py)"
+    OTHER = "- other-note: a finding the base holds (lint/check_other.py)"
+    OTHER_EDITED = "- other-note: a finding the base holds, reworded (lint/check_other.py)"
+    OTHER_ALT = "- other-note: a second wording of the same slug (lint/check_other.py)"
+    THIRD = "- third-note: a finding the base holds (lint/check_third.py)"
+    OWN_EDITED = "- branch-note: a finding the branch adds, reworded (lint/check_branch.py)"
+    OWN2 = "- second-branch-note: a finding the branch adds (lint/check_second.py)"
+
+    @staticmethod
+    def sweep(edited=False):
+        """Twelve base rows, as a sweep edits them: each row gets a Fix note at its end when `edited`."""
+        return tuple("- sweep-%02d: a finding the base holds (lint/check_sweep_%02d.py)%s"
+                     % (i, i, " Fix: moved to the new path." if edited else "") for i in range(1, 13))
+
+    def named(self, got, slug, path=None):
+        """The problem lines that name `slug`, and `path` when given."""
+        return [p for p in got if slug in p and (path is None or path in p)]
+
+    def test_an_edit_of_a_base_row_is_a_finding(self):
+        self.start(union=True, retire=False, base=(self.BASE, self.OTHER), branch=(self.BASE_EDITED, self.OTHER),
+                   main=(self.BASE, self.OTHER, self.MAIN))
+        got = self.r.verdict()
+        self.assertEqual(len(self.named(got, "base-note", self.NOTES)), 1,
+                         "an edit in place to base-note is not a finding: %r" % got)
+        self.assertEqual(len(got), 1, "the edit of one base row gives more than one finding: %r" % got)
+
+    def test_an_edit_of_a_row_the_branch_added_passes(self):
+        self.start(union=True, retire=False, base=(self.BASE, self.OTHER), branch=(self.BASE_EDITED, self.OTHER, self.OWN),
+                   main=(self.BASE, self.OTHER, self.MAIN))
+        self.commit_notes("reword the branch's own row", (self.BASE_EDITED, self.OTHER, self.OWN_EDITED))
+        got = self.r.verdict()
+        self.assertEqual(len(self.named(got, "base-note", self.NOTES)), 1, "scope: the base-note edit is not a finding: %r" % got)
+        self.assertIn(self.OWN_EDITED, self.notes_at("HEAD"), "premise: the branch's own row is reworded at head")
+        self.assertEqual(self.named(got, "branch-note"), [], "an edit of a row the branch added is a finding: %r" % got)
+
+    def test_a_row_the_branch_adds_passes(self):
+        self.start(union=True, retire=False, base=(self.BASE, self.OTHER), branch=(self.BASE_EDITED, self.OTHER),
+                   main=(self.BASE, self.OTHER, self.MAIN))
+        self.commit_notes("add a row", (self.BASE_EDITED, self.OTHER, self.OWN))
+        got = self.r.verdict()
+        self.assertEqual(len(self.named(got, "base-note", self.NOTES)), 1, "scope: the base-note edit is not a finding: %r" % got)
+        self.assertIn(self.OWN, self.notes_at("HEAD"), "premise: the branch adds its row")
+        self.assertEqual(self.named(got, "branch-note"), [], "a row the branch added is a finding: %r" % got)
+
+    def test_a_branch_that_only_adds_a_row_passes(self):  # control
+        self.start(union=True, retire=False, base=(self.BASE, self.OTHER), branch=(self.BASE, self.OTHER, self.OWN),
+                   main=(self.BASE, self.OTHER, self.MAIN))
+        self.assertEqual(self.r.verdict(), [], "a branch that adds a row and edits no base row got a finding")
+
+    def test_a_deleted_base_row_passes(self):
+        self.start(union=True, retire=False, base=(self.BASE, self.OTHER, self.THIRD), branch=(self.BASE_EDITED, self.THIRD),
+                   main=(self.BASE, self.OTHER, self.THIRD, self.MAIN))
+        got = self.r.verdict()
+        self.assertEqual(len(self.named(got, "base-note", self.NOTES)), 1, "scope: the base-note edit is not a finding: %r" % got)
+        self.assertNotIn(self.OTHER, self.notes_at("HEAD"), "premise: the branch deletes other-note")
+        self.assertEqual(self.named(got, "other-note"), [], "a base row the branch deletes is a finding: %r" % got)
+
+    def test_a_sweep_of_twelve_base_rows_names_each_row(self):
+        self.start(union=True, retire=False, base=self.sweep(), branch=self.sweep(edited=True),
+                   main=self.sweep() + (self.MAIN,))
+        got = self.r.verdict()
+        slugs = ["sweep-%02d" % i for i in range(1, 13)]
+        per_slug = {s: len(self.named(got, s, self.NOTES)) for s in slugs}
+        self.assertEqual(per_slug, dict.fromkeys(slugs, 1), "a row edited in place has no finding, or more than one: %r" % got)
+        self.assertEqual(len(got), 12, "the sweep gives findings beyond its twelve rows: %r" % got)
+
+    def test_a_merge_of_main_that_edited_a_base_row_passes(self):
+        self.start(union=True, retire=False, base=(self.BASE, self.THIRD, self.OTHER),
+                   branch=(self.BASE, self.THIRD, self.OTHER_EDITED), main=(self.BASE_EDITED, self.THIRD, self.OTHER))
+        head = self.merge_main()
+        self.assertIn(self.BASE_EDITED, self.notes_at(head), "premise: the merge brought main's edit of base-note in")
+        got = self.r.verdict()
+        self.assertEqual(len(self.named(got, "other-note", self.NOTES)), 1,
+                         "scope: the branch's own edit of other-note is not a finding: %r" % got)
+        self.assertEqual(self.named(got, "base-note"), [], "main's edit of base-note, brought in by the merge, is a finding: %r" % got)
+
+    def test_a_drops_lines_trailer_excuses_an_edit_of_a_base_row(self):
+        self.start(union=True, retire=False, base=(self.BASE, self.OTHER), branch=(self.BASE_EDITED, self.OTHER),
+                   main=(self.BASE, self.OTHER, self.MAIN))
+        got = self.r.verdict()
+        self.assertEqual(len(self.named(got, "base-note", self.NOTES)), 1, "scope: the edit is not a finding before the trailer: %r" % got)
+        self.r.sh("commit", "-q", "--amend", "-m", "Reword the base note\n\nDrops-lines: %s -- the owner reworded the note" % self.NOTES)
+        self.assertEqual(self.r.verdict(), [], "a Drops-lines trailer for the notes file did not excuse the edit")
+        self.assertEqual(self.r.notes, ["ALLOWED %s: the owner reworded the note" % self.NOTES], self.r.notes)
+
+    def test_one_commit_that_edits_one_row_and_adds_another_names_only_the_edit(self):
+        self.start(union=True, retire=False, base=(self.BASE, self.OTHER), branch=(self.BASE_EDITED, self.OTHER, self.OWN),
+                   main=(self.BASE, self.OTHER, self.MAIN))
+        got = self.r.verdict()
+        self.assertEqual(len(self.named(got, "base-note", self.NOTES)), 1, "scope: the base-note edit is not a finding: %r" % got)
+        self.assertEqual(self.named(got, "branch-note"), [], "the row the commit added is named with the edit: %r" % got)
+        self.assertEqual(len(got), 1, "more than the edited slug is named: %r" % got)
+
+    def test_a_notes_file_absent_at_the_base_passes(self):
+        self.start(union=True, retire=False, base=(self.BASE, self.OTHER), branch=(self.BASE_EDITED, self.OTHER),
+                   main=(self.BASE, self.OTHER, self.MAIN))
+        self.assertEqual(len(self.named(self.r.verdict(), "base-note", self.NOTES)), 1, "scope: the base-note edit is not a finding")
+        self.start(union=True, retire=False, base_file=False, branch=(self.OWN, self.OWN2), main=(self.MAIN,))
+        self.commit_notes("reword the branch's own row", (self.OWN_EDITED, self.OWN2))
+        self.assertEqual(self.r.sh("ls-tree", "--name-only", "origin/main^", "--", self.NOTES), "",
+                         "premise: the notes file is absent at the merge base")
+        self.assertIn(self.OWN_EDITED, self.notes_at("HEAD"), "premise: the branch's own row is reworded at head")
+        self.assertEqual(self.r.verdict(), [], "a notes file the branch adds, with no base copy, got a finding")
+
+    def test_a_dedupe_of_one_wording_of_a_duplicated_slug_passes(self):
+        self.start(union=True, retire=False, base=(self.BASE, self.OTHER, self.OTHER_ALT), branch=(self.BASE_EDITED, self.OTHER),
+                   main=(self.BASE, self.OTHER, self.OTHER_ALT, self.MAIN))
+        got = self.r.verdict()
+        self.assertEqual(len(self.named(got, "base-note", self.NOTES)), 1, "scope: the base-note edit is not a finding: %r" % got)
+        self.assertNotIn(self.OTHER_ALT, self.notes_at("HEAD"), "premise: the branch deletes the second wording")
+        self.assertEqual(self.named(got, "other-note"), [],
+                         "deleting one wording of a duplicated slug, with the other kept, is a finding: %r" % got)
 
 
 if __name__ == "__main__":
