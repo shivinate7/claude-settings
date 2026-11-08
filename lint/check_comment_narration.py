@@ -40,12 +40,16 @@ class DatedText:
     an optional `date`, `on`, `from` or `through`, and an optional colon come right before it. Such a date says
     why, so it is not history. A phrase check on the text before the date does what a lookbehind cannot:
     take a variable run of spaces and any case. A ruling cite is exempt too: the word owner (any case) and a
-    comma right before the date, and a 24-hour time and a zone abbreviation such as CST, CDT or UTC right
-    after it. A cite without the time, or with another lead word, stays flagged."""
+    comma right before the date, and a time and a zone right after it. The owner word must open the comment's
+    text (after its `#`, `//`, `/*`, `*`, `\"\"\"` or `'''` marker and spaces) or follow a `(`. The time is
+    an hour of 0 to 23 with one or two digits, a colon and two minute digits. The zone is one of ZONES.
+    A cite without the time, with another lead word, or with another zone stays flagged. A cite in parentheses
+    after history wording still passes, as in "Changed from None to 0 (owner, 2026-11-01 16:30 CST)"."""
+    ZONES = ("CST", "CDT", "CT", "EST", "EDT", "ET", "MST", "MDT", "MT", "PST", "PDT", "PT", "UTC", "GMT")
     DATE = re.compile(r"\b20\d\d-\d\d-\d\d\b")
     EXEMPT = re.compile(r"\b(?:effective|valid|until|expires?)(?:\s+(?:date|on|from|through))?\s*:?\s*$", re.I)
-    CITE_BEFORE = re.compile(r"\bowner\s*,\s*$", re.I)
-    CITE_AFTER = re.compile(r"\s+(?:[01]\d|2[0-3]):[0-5]\d\s+[A-Z]{3,4}\b")
+    CITE_BEFORE = re.compile(r"(?:^(?:\s|#|//|/\*|\*|\"\"\"|''')*|\()\s*owner\s*,\s*$", re.I)
+    CITE_AFTER = re.compile(r"\s+(?:2[0-3]|[01]?\d):[0-5]\d\s+(?:%s)\b" % "|".join(ZONES))
 
     def finditer(self, text):
         return (m for m in self.DATE.finditer(text) if not self.exempt(text, m))
