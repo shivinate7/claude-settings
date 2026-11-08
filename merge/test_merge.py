@@ -12122,6 +12122,26 @@ class ReviewStampForm(unittest.TestCase):
         self.assertEqual(lines[i].split(": ", 1)[1], review_fn(self, "review_stamp")(lines[:i]),
                          "the Stamp line is not review_stamp of the lines above it:\n" + text)
 
+    def test_trailing_spaces_on_the_body_lines_still_parse_to_the_same_fields(self):
+        # the MCP tool may add spaces at a line's end. The marker line stays exact: it is what makes a body a record at all.
+        text = record_text(rounds=REVIEW_PASS)
+        lines = text.splitlines()
+        spaced = "\n".join([lines[0]] + [line + "  " for line in lines[1:]]) + "\n"
+        self.assertEqual(parse_text(self, spaced), parse_text(self, text), "trailing spaces changed what the record parses to")
+
+    def test_crlf_line_ends_still_parse_to_the_same_fields(self):
+        text = record_text(rounds=REVIEW_PASS)
+        self.assertEqual(parse_text(self, text.replace("\n", "\r\n")), parse_text(self, text), "CRLF line ends changed what the record parses to")
+
+    def test_an_edited_guard_kind_pr_or_net_in_a_stamped_body_is_not_a_record(self):
+        text = record_text(rounds=REVIEW_PASS)
+        parse_text(self, text)  # control
+        for prefix, line in (("Guard or check: ", "Guard or check: yes"), ("Kind: ", "Kind: delete-only"), ("PR: ", "PR: #8"),
+                             ("Net value: ", "Net value: positive")):
+            with self.subTest(field=prefix):
+                edited = replace_line(self, text, prefix, line)
+                self.assertIsNone(review_fn(self, "parse_review")(edited), f"parse_review accepted a stamped record whose {prefix.rstrip(': ')} was edited:\n" + edited)
+
 class ReviewRecordRules(unittest.TestCase):
     """review_state over records the form gives. A change is done by the review cap rule (roles-review-cap-three): the last round is PASS
     and the last design-reviewer line is PASS or absent, or the third round is done and Guard or check is no, or the third round is done
@@ -12704,6 +12724,77 @@ class ReviewLaneLint(ReviewEnv):
             rc, out, err = self.run_args("7", "--review-record", *flags)
         self.assertEqual(rc, 0, out + err)
         self.assertEqual(parse_text(self, posted_body(self, out))["rounds"], [(1, "reviewer", "sonnet", "FAIL")])
+
+    @contextlib.contextmanager
+    def lint_raising(self, error):
+        """lane_lint raises `error` for every call, the way it raises an unknown lint. The calls are logged in the list the context yields."""
+        calls = []
+
+        def stub(*args, **kwargs):
+            calls.append((args, kwargs))
+            raise error
+
+        with unittest.mock.patch.object(merge, "lane_lint", stub):
+            yield calls
+
+    def assert_unknown_held(self, error):
+        """An unknown lint refuses the record and names the lint step. It offers no override, because the review record path has none."""
+        with self.lint_raising(error) as calls:
+            rc, out, err = self.run_args("7", "--review-record", *self.flags())
+        self.assertNotEqual(rc, 0, "an unknown lint printed a PASS record:\n" + out + err)
+        self.assertNotIn(REVIEW_MARKER, out, "a held PASS record still printed its body")
+        self.assertIn("merge --lane-lint", out + err, "the refusal does not name merge --lane-lint:\n" + out + err)
+        self.assertNotIn("--lint-unknown-ok", out + err, "the refusal tells the caller to pass --lint-unknown-ok:\n" + out + err)
+        self.assertNotIn("No override lifts this refusal", out + err, "the refusal says no override lifts it:\n" + out + err)
+        self.assertTrue(calls, "the record did not ask lane_lint about its head")
+
+    def test_an_unknown_lint_that_lifts_is_refused_without_an_override_offer(self):
+        # lane_lint raises a Liftable for an unknown step: its own text names --lint-unknown-ok, and the record path must not pass that on
+        self.assert_unknown_held(merge.Liftable("the lint of " + REVIEW_HEAD[:9] + " against main is unknown, not a pass:\n"
+                                                'Run it where the missing tool is present, or run again with --lint-unknown-ok "<reason>".'))
+
+    def test_an_unknown_lint_that_does_not_lift_is_refused_without_an_override_offer(self):
+        # a plain Stop for an unknown step is the one that gets the generic "No override lifts this refusal" line
+        self.assert_unknown_held(merge.Stop("the lint of " + REVIEW_HEAD[:9] + " against main is unknown, not a pass:"))
+
+    def test_a_done_record_on_a_failed_round_is_refused_when_lint_fails(self):
+        # a delete-only change with guard no is done after round one whatever its verdict, and a done record is the handoff, so lint must pass
+        flags = ("--kind", "delete-only", "--guard", "no", "--round", "1:reviewer:sonnet:FAIL", "--head", self.head())
+        with self.lint("FAIL") as calls:
+            rc, out, err = self.run_args("7", "--review-record", *flags)
+        self.assertNotEqual(rc, 0, "a done record printed although its lint fails:\n" + out + err)
+        self.assertNotIn(REVIEW_MARKER, out, "a held done record still printed its body")
+        self.assertIn("merge --lane-lint", out + err, "the refusal does not name merge --lane-lint:\n" + out + err)
+        self.assertTrue(calls, "the done record did not ask lane_lint about its head")
+
+    def test_a_docs_only_record_with_no_round_is_refused_when_lint_fails(self):
+        # a docs-only record with no round is done, so it is a handoff too
+        flags = ("--kind", "docs-only", "--guard", "no", "--head", self.head())
+        with self.lint("FAIL") as calls:
+            rc, out, err = self.run_args("7", "--review-record", *flags)
+        self.assertNotEqual(rc, 0, "a done docs-only record printed although its lint fails:\n" + out + err)
+        self.assertNotIn(REVIEW_MARKER, out, "a held done record still printed its body")
+        self.assertIn("merge --lane-lint", out + err, "the refusal does not name merge --lane-lint:\n" + out + err)
+        self.assertTrue(calls, "the done record did not ask lane_lint about its head")
+
+    def test_a_pass_round_held_open_by_a_design_fail_prints_whatever_the_lint_says(self):
+        # a design-reviewer FAIL in round one keeps the record open, so the lint does not hold its PASS line
+        flags = ("--kind", "normal", "--guard", "no", "--round", "1:reviewer:sonnet:PASS", "--round", "1:design-reviewer:opus:FAIL",
+                 "--head", self.head())
+        with self.lint("FAIL"):
+            rc, out, err = self.run_args("7", "--review-record", *flags)
+        self.assertEqual(rc, 0, out + err)
+        self.assertEqual(parse_text(self, posted_body(self, out))["rounds"], [(1, "reviewer", "sonnet", "PASS"), (1, "design-reviewer", "opus", "FAIL")])
+
+    def test_lane_lint_is_run_on_the_checked_head_and_the_pr_base(self):
+        # the lint checks the head the review read (--head) against the pull request's base, not the pull request number
+        with self.lint("PASS") as calls:
+            rc, out, err = self.run_args("7", "--review-record", *self.flags())
+        self.assertEqual(rc, 0, out + err)
+        self.assertTrue(calls, "the record did not ask lane_lint about its head")
+        target, base = calls[0][0][1], calls[0][0][3]
+        self.assertEqual(target, self.head(), f"lane_lint was given {target!r}, not the checked head {self.head()!r}")
+        self.assertEqual(base, "main", f"lane_lint was given base {base!r}, not the pull request's base")
 
 class ReviewedList(ReviewEnv):
     """`merge --reviewed` over scripted reads. PullsHost serves the open pulls, the check runs of each head and the repo-wide comments. The
