@@ -8942,6 +8942,12 @@ sh("git env set: PowerShell, a glued Set-Content on env:GIT_DIR after an if bloc
    cwd=NOGIT)
 sh("git env set: PowerShell, a glued if block that sets nothing, then GIT_DIR set, denies",
    r'if($x){1}$env:GIT_DIR="x"', "deny", GIT_ENV_RULE, tool="PowerShell", cwd=NOGIT)
+sh("git env set: PowerShell, a call operator on a glued block that sets nothing, then GIT_DIR set, denies",
+   r'&{1}$env:GIT_DIR="x"', "deny", GIT_ENV_RULE, tool="PowerShell", cwd=NOGIT)
+sh("git env set: PowerShell, a dot on a glued block that sets nothing, then GIT_DIR set, denies",
+   r'.{1}$env:GIT_DIR="x"', "deny", GIT_ENV_RULE, tool="PowerShell", cwd=NOGIT)
+sh("git env set: PowerShell, a glued bare block that sets nothing, then GIT_DIR set, denies",
+   r'{1}$env:GIT_DIR="x"', "deny", GIT_ENV_RULE, tool="PowerShell", cwd=NOGIT)
 # A set after a space past a closing `}` is still a set. Decision git-env-set-refused allows only reads and unsets.
 sh("git env set: PowerShell, a GIT_WORK_TREE set after a spaced if block that nulls GIT_DIR, denies",
    r'if($x){$env:GIT_DIR=$null} $env:GIT_WORK_TREE="x"', "deny", GIT_ENV_RULE, tool="PowerShell", cwd=NOGIT)
