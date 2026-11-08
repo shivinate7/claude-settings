@@ -733,9 +733,12 @@ def _shell_write_hit(cmd: str, cwd: str, predicate, holds=None, follow_cd=False,
             if runs_nowhere and (quiet or not to_file):
                 data = data | _data_words(kinds[number], raw)
         words, shown, script, held = [], [], [], []
+        heads = []   # `words` but a leading assignment stays one word, so the command behind it keeps its place
+        head_script = []
         leading = True   # no command word yet: an assignment here sets the command's environment
         for index, word in enumerate(raw):
-            if leading and _ASSIGNMENT.match(word):
+            held_whole = bool(leading and _ASSIGNMENT.match(word))
+            if held_whole:
                 if _is_env_assignment(word):
                     continue
             elif word != "!" and not _is_redirect(word):
@@ -752,15 +755,18 @@ def _shell_write_hit(cmd: str, cwd: str, predicate, holds=None, follow_cd=False,
                 pieces = _words_of(word) if "'" in word or '"' in word else [word]
                 words.extend(pieces)
                 shown.extend(pieces)
+                heads.extend([_unquoted(word)] if held_whole else pieces)
                 if "'" in word or '"' in word:
                     held.extend(_quoted_commands(word))
                 kept = scripts[number][index]
                 script.extend(_words_of(kept) if "'" in kept or '"' in kept else [kept])
+                head_script.extend([_unquoted(kept)] if held_whole else
+                                   _words_of(kept) if "'" in kept or '"' in kept else [kept])
         text = " ".join(shown)
         at = (dir_before_segment(segments, number, cwd, ends) or cwd) if follow_cd else cwd
-        commands = [position for start in _command_starts(words) for position in _segment_commands(start)]
+        commands = [position for start in _command_starts(heads) for position in _segment_commands(start)]
         # The whole segment read with its quoted newlines kept, so a `sh -c` script is read at its own commands.
-        positions = commands + _segment_commands(script) if command_position else commands
+        positions = commands + _segment_commands(head_script) if command_position else commands
         verb = commands[0][0] if predicate_command and commands else ""
         # `dd of=PATH`: the path is glued to its operand name, so it is judged on its own too.
         for word in words + [w[3:] for w in words if w.startswith("of=") and len(w) > 3]:
@@ -793,6 +799,15 @@ def _is_env_assignment(word: str) -> bool:
     return bool(_ASSIGNMENT.match(word)) and not _SUBSTITUTION_OPEN.search(_SINGLE_QUOTED.sub("", word))
 
 
+def _substitution_words(text: str):
+    """The words of the text after a `$(` in one word. A word that holds spaces (an assignment value kept
+    whole, `FOO=$(cp a b)`) reads as the words the shell reads; a plain tail stays one word."""
+    try:
+        return shlex.split(text)
+    except ValueError:
+        return text.split()
+
+
 def _command_starts(words):
     """The word lists a segment's commands start: its own, with a leading `(`, `$(` or backtick cut
     off the first word, then one after each `$(` or backtick in a word (`echo $(cp a b)`, `D=$(cp a b)`).
@@ -803,7 +818,8 @@ def _command_starts(words):
     first = _LEADING_GROUP.match(words[0])
     starts = [[words[0][first.end():], *words[1:]] if first else words]
     for index, word in enumerate(words):
-        starts.extend([word[opener.end():], *words[index + 1:]] for opener in _SUBSTITUTION_OPEN.finditer(word))
+        starts.extend([*_substitution_words(word[opener.end():]), *words[index + 1:]]
+                      for opener in _SUBSTITUTION_OPEN.finditer(word))
         if index and word.startswith("(") and words[index - 1] in ("<", ">"):   # `>(tee P)`, spaced by the redirect split
             starts.append([word[1:], *words[index + 1:]])
     return [[word for word in start if word] for start in starts]

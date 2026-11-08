@@ -530,22 +530,73 @@ def _segment_tokens(segment: str):
 POWERSHELL_CALL = [False]   # set per call by judge_shell: the tool being judged is PowerShell
 
 
+# A redirect ahead of the command (`2>/dev/null cp`, `>f cp`, `<f cat`, `&>log cp`), glued to its target or
+# not. `>(` and `<(` open a process substitution, which holds a command, so they are no redirect.
+LEADING_REDIRECT = re.compile(r"^(?:\d*|&)(?:>>?\|?|<)(?!\()(.*)$")
+# A function header ahead of its body: `f()` or `f(){` as one word, and `function f`.
+FUNCTION_HEADER = re.compile(r"^[A-Za-z_][\w.:-]*\(\)(\{?)$")
+
+
+def _after_assignment(tokens, index):
+    """The index after the assignment word at `index`, and after each later word its `$(` or backtick
+    still holds open: shlex splits `FOO=$(echo a b)` into three tokens, but the shell reads one word, so
+    the command is the word after `)`. An opener nothing closes holds nothing, so a literal `$(` that shlex
+    dequoted (`X='$(' cp x y`) never hides the command. RESIDUAL GAP: a `)` that a later word closes
+    still ends such a literal early."""
+    depth, tick, end, at = 0, False, len(tokens), index
+    while at < end:
+        text, char_at = tokens[at], 0
+        while char_at < len(text):
+            char = text[char_at]
+            if char == "`":
+                tick = not tick
+            elif char == "$" and text[char_at + 1:char_at + 2] == "(":
+                depth, char_at = depth + 1, char_at + 1
+            elif char == ")" and depth:
+                depth -= 1
+            char_at += 1
+        at += 1
+        if not depth and not tick:
+            return at
+    return index + 1
+
+
 def _skip_assignments_and_keywords(tokens, index=0):
-    """Return the index of the first token that is neither an assignment (POSIX `VAR=value` or
-    PowerShell `$name` `=`) nor a leading loop keyword, starting from `index`. Shared by
+    """Return the index of the first token that is not an assignment (POSIX `VAR=value`, its value
+    kept whole when it holds a substitution with spaces, or PowerShell `$name` `=`), a redirect ahead of
+    the command, a function header, or a leading loop keyword, starting from `index`. Shared by
     `resolve_command`, which then unwraps wrappers from there, and by the detached-launch
     checks below, which must see a wrapper such as `nohup` BEFORE any unwrap, not after."""
     end = len(tokens)
     while index < end:
-        if ASSIGNMENT.match(tokens[index]) or tokens[index] in LOOP_KEYWORDS:
+        token = tokens[index]
+        if ASSIGNMENT.match(token):
+            index = _after_assignment(tokens, index)
+            continue
+        if token in LOOP_KEYWORDS:
             index += 1
             continue
-        if tokens[index][:1] == "(" and ASSIGNMENT.match(tokens[index][1:]):
+        if token[:1] == "(" and ASSIGNMENT.match(token[1:]):
             index += 1   # `(VAR=x cmd`: a subshell paren glued to the first assignment
+            continue
+        redirect = LEADING_REDIRECT.match(token)
+        if redirect:
+            # `2>` and `>` alone take the next word as their target; `2>&` takes the descriptor after it.
+            index += 2 if redirect.group(1) in ("", "&") else 1
+            continue
+        header = FUNCTION_HEADER.match(token)
+        if header and (header.group(1) or tuple(tokens[index + 1:index + 2]) in (("{",), ("(",))):
+            index += 1   # the body starts after the header: `f() { cp x y; }`
+            continue
+        if token == "function" and index + 1 < end:
+            index += 3 if tuple(tokens[index + 2:index + 3]) == ("()",) else 2   # `function f {`, `function f () {`
             continue
         if (POWERSHELL_ASSIGNMENT.match(tokens[index]) and index + 1 < end
                 and tokens[index + 1] == "="):
             index += 2
+            continue
+        if index + 1 < end and tokens[index + 1] == "()" and re.fullmatch(r"[A-Za-z_][\w.:-]*", token):
+            index += 2   # `f () { cp x y; }`
             continue
         break
     return index
