@@ -1585,6 +1585,149 @@ def case_step_ruling_tail_stops_at_an_incident():
         check("step ruling tail: %r joins no unit" % carried, carried not in row, row[:200])
 
 
+# ------------------------------------------------------------------ the step pool: origin/main's, less the label openers (decision question-form)
+# The step candidate pool is origin/main's: a sentence is a candidate when it names ruling, owner or shiv, with no
+# owner-marker gate. The one exclusion kept is a sentence that OPENS with an Incident, Gripe or Deferred label. Each row
+# names one sentence and what the pool does with it. MAIN_POOL_RE is origin/main's RULING_WORDS, pinned as the reference.
+# LABEL_OPENER_RE is the exclusion as this test states it: the label at the clause start, after bullet or emphasis marks,
+# an enumerator, or at most two words (as in "Second incident"). A label mid-sentence is no opener.
+MAIN_POOL_RE = re.compile(r"ruling|owner|shiv", re.I)
+LABEL_OPENER_RE = re.compile(r"\A[\s*_>#+-]*(?:\(\d+\)\s*)?(?:[\w'-]+\s+){0,2}(?:incident|gripe|deferred)s?\b", re.I)
+SENTENCE_BREAK = re.compile(r"(?<=[.!?])\s+")
+# Recall rows: sentences origin/main's pool keeps and 284dafb3c drops, none opening with a label. Each is verbatim from a
+# step note (field note or why) on origin/roadmap, the corpus docs/decisions/question-form.md counts. A step with one
+# sentence gives one unit, so the sentence is the unit.
+STEP_POOL_RECALL = (
+    ("o15", "Done: lane PR 632 (rulings and tasks from owner feedback need a tracked home) landed in batch PR 637, "
+            "merged to main as 54be9f1 on Oct 26."),
+    ("execpath-path-fallback", "Owner ask, Nov 3 15:53 CST; decision precompact-handoff, item 12: with "
+                               "CLAUDE_CODE_EXECPATH unset, the handoff hook cannot find the claude binary."),
+    ("sim-lease-gaps", "Owner ask ask-mw6q8p58kl, 12:18 CST Nov 7: commit b7bc81da (branch claude/sim-lease-592a4d, "
+                       "docs/plans/sim-lease-gaps.md) records issues the Mac had in sharing iOS simulators."),
+    ("page-reply-uncollapse", "Owner ask ask-mw5b4vigxh (12:27 CST)."),
+    ("idle-lane-archive-at-merge", "Owner item 436 (archive-at-handoff) posted 12:04 CST Nov 8: archive a lane at "
+                                   "hand-off (a) or keep archive at merge (b)."),
+    ("relay-answer-kept-until-done", "The owner's settings paste is item 267, open."),
+    ("one-load-definition", "Owner page answer."),
+    ("process-held-end-to-end", "Rule outcomes-mechanize-rules is the standing ruling."),
+    ("impeccable-cd-false-alarms", "Ruling uniform-over-variants rules out widening guard impeccable-review-only."),
+    ("lint-config-guard-paths", "Coordinator 12:09 CST Nov 8: #1353 waits on #1957 for a second fix check; coordinator "
+                                "ruling (process-only): no review record carries across a new head."),
+    ("process-held-end-to-end", "At 13:25 CST, 14 now-steps had no lane and nothing started them; they started only "
+                                "because the owner asked."),
+    ("c46", "Parallel-work review, Oct 26 (your ask): two owner rulings on parallel lanes are recorded in "
+            "claude-settings debts but never built, and neither is on the roadmap."),
+    ("stall-watch-quiet-lint", "Owner question filed as page item 405 (stall-log-kept): keep a stalled job's log for 7 "
+                               "days, recorded line in decision stall-watch has no owner ruling behind it."),
+    ("c164", "Note: a non-writer owner that rewrites an item may republish a design, which only the writer should do."),
+    ("waiting-data-in-repo", "Owner hold: its draft PR merges only on the owner's word."),
+)
+# Exclusion rows: sentences origin/main's pool keeps that OPEN with an Incident, Gripe or Deferred label. The pool drops
+# each one, so its step gives no unit at all (the empty state). The label may carry a qualifier, a bullet or an enumerator.
+STEP_POOL_LABEL_OPENERS = (
+    "Incident: the owner's ruling was read as a yes.",
+    "Incident today (shiv, Nov 6): a lane merged without the owner's ruling.",
+    "Gripe: the owner's ruling on the page took three days to show.",
+    "(2) Your gripe, same day: the shiv ruling on the page was read as a yes.",
+    "Deferred (shiv, Nov 5): the owner's ruling waits behind all work that needs none.",
+    "Second incident (shiv, Nov 3): a lane merged the owner's ruling by hand.",
+    "Deferred (shiv, Oct 27 04:22 CDT): the live waiting pages (home-app, degen, mailaudit) belong to a third account; "
+    "both the cloud and the Mac get 404.",
+    "Gripe, Oct 28 (shiv, in triage 11's session): on a task item (no option picker) the page offers only Mark done and "
+    "a note.",
+    "Deferred (needs shiv): does the designer run /design itself, or does shiv run it and hand the canvas over.",
+    "Incident the same hour: a question's 'Departs from' line described main wrongly (owner, 16:23 CST).",
+)
+# Controls: the same label words mid-sentence are no opener, so the pool keeps each sentence.
+STEP_POOL_MID_SENTENCE = (
+    "Ruling (shiv, Nov 6): no incident today",
+    "Ruling (owner, Nov 6): the gripe on the page is closed.",
+    "Ruling (owner, Nov 6): the deferred item stays open.",
+)
+
+
+def case_step_pool_keeps_recall_rows():
+    """Each row is a sentence origin/main's pool keeps and this pool drops, with no label opening it: the pool keeps it."""
+    import question_form  # the one form check (hooks/question_form.py)
+    fn = getattr(question_form, "_step_rulings", None)
+    check("step pool recall: question_form._step_rulings exists", callable(fn), "missing function")
+    if not callable(fn):
+        return
+    outside = [step_id for step_id, s in STEP_POOL_RECALL if not MAIN_POOL_RE.search(s) or LABEL_OPENER_RE.search(s)]
+    check("step pool recall scope: every row is in origin/main's pool and opens with no label", not outside,
+          "outside the scope: %r" % outside)
+    for number, (step_id, sentence) in enumerate(STEP_POOL_RECALL, 1):
+        lines = fn({step_id: (sentence, None)}, question_form._words(sentence))
+        check("step pool recall %d: kept, %s" % (number, step_id), any(sentence in line for line in lines),
+              "dropped; the pool gave %r" % (lines,))
+
+
+def case_step_pool_keeps_main_ruling_sentences_but_label_openers():
+    """Aggregate over the corpus: every sentence origin/main's pool keeps, less the label openers, is kept by this pool.
+    The step notes come from the production reader (question_form._read_steps) on this checkout's origin/roadmap. A read
+    that fails, or a ref that is absent, fails the row by name."""
+    import question_form  # the one form check (hooks/question_form.py)
+    fn = getattr(question_form, "_step_rulings", None)
+    read = getattr(question_form, "_read_steps", None)
+    check("step pool corpus: question_form._step_rulings and _read_steps exist", callable(fn) and callable(read),
+          "missing function")
+    if not (callable(fn) and callable(read)):
+        return
+    steps, state = read(REPO)
+    check("step pool corpus scope: origin/roadmap's step notes are read (%d steps)" % len(steps),
+          state == "ok" and len(steps) > 0, "state %r; fetch origin roadmap in this checkout" % (state,))
+    if state != "ok" or not steps:
+        return
+    required = []
+    for step_id in sorted(steps):
+        for field in steps[step_id]:
+            if isinstance(field, str):
+                for sentence in SENTENCE_BREAK.split(field.strip()):
+                    if sentence and MAIN_POOL_RE.search(sentence) and not LABEL_OPENER_RE.search(sentence):
+                        required.append((step_id, sentence))
+    check("step pool corpus scope: origin/main's pool holds sentences to measure", len(required) > 0,
+          "no sentence in the corpus names ruling, owner or shiv")
+    missed = [(step_id, s) for step_id, s in required
+              if not any(s in line for line in fn({step_id: (s, None)}, question_form._words(s)))]
+    detail = ""
+    if missed:
+        detail = "%d of %d dropped; first %s: %s" % (len(missed), len(required), missed[0][0], missed[0][1][:100])
+    check("step pool corpus: every origin/main pool sentence with no label opener is kept (%d sentences)" % len(required),
+          not missed, detail)
+
+
+def case_step_pool_drops_sentences_opening_with_a_label():
+    """Each row is a sentence origin/main's pool keeps that OPENS with an Incident, Gripe or Deferred label. This pool
+    drops it, so its step gives no unit: the empty state."""
+    import question_form  # the one form check (hooks/question_form.py)
+    fn = getattr(question_form, "_step_rulings", None)
+    check("step pool label: question_form._step_rulings exists", callable(fn), "missing function")
+    if not callable(fn):
+        return
+    outside = [s for s in STEP_POOL_LABEL_OPENERS if not (MAIN_POOL_RE.search(s) and LABEL_OPENER_RE.search(s))]
+    check("step pool label scope: every row is in origin/main's pool and opens with a label", not outside,
+          "outside the scope: %r" % outside[:2])
+    for number, sentence in enumerate(STEP_POOL_LABEL_OPENERS, 1):
+        lines = fn({"label-%d" % number: (sentence, None)}, question_form._words(sentence))
+        check("step pool label %d: dropped, %s" % (number, sentence[:40]), lines == [], "kept %r" % (lines,))
+
+
+def case_step_pool_keeps_label_words_mid_sentence():
+    """A control: the same label words mid-sentence are no opener, so the pool keeps each sentence."""
+    import question_form  # the one form check (hooks/question_form.py)
+    fn = getattr(question_form, "_step_rulings", None)
+    check("step pool mid-sentence: question_form._step_rulings exists", callable(fn), "missing function")
+    if not callable(fn):
+        return
+    outside = [s for s in STEP_POOL_MID_SENTENCE if LABEL_OPENER_RE.search(s) or not MAIN_POOL_RE.search(s)]
+    check("step pool mid-sentence scope: every row is in origin/main's pool and opens with no label", not outside,
+          "outside the scope: %r" % outside[:2])
+    for number, sentence in enumerate(STEP_POOL_MID_SENTENCE, 1):
+        lines = fn({"mid-%d" % number: (sentence, None)}, question_form._words(sentence))
+        check("step pool mid-sentence %d: kept" % number, any(sentence in line for line in lines),
+              "dropped; the pool gave %r" % (lines,))
+
+
 class _BrokenPipeGit:
     """A git child that dies before its stdin is read: the write raises BrokenPipeError, and stderr holds the text."""
 
@@ -1757,6 +1900,22 @@ def test_task_str_replace_prose_label_mention_passes():
     _judged(case_task_str_replace_prose_label_passes)
 
 
+def test_step_pool_keeps_recall_rows():
+    _judged(case_step_pool_keeps_recall_rows)
+
+
+def test_step_pool_keeps_main_ruling_sentences_but_label_openers():
+    _judged(case_step_pool_keeps_main_ruling_sentences_but_label_openers)
+
+
+def test_step_pool_drops_sentences_opening_with_a_label():
+    _judged(case_step_pool_drops_sentences_opening_with_a_label)
+
+
+def test_step_pool_keeps_label_words_mid_sentence():
+    _judged(case_step_pool_keeps_label_words_mid_sentence)
+
+
 def main():
     for case in (case_item_92, case_item_51_stray_field, case_form_lines, case_form_placeholders_on_edits,
                  case_options_state_gain_and_loss, case_older_rules_keep_their_ids,
@@ -1781,7 +1940,9 @@ def main():
                  case_task_str_replace_removes_only_the_label, case_str_replace_blank_prose_line_passes,
                  case_task_str_replace_rewords_the_reason, case_task_str_replace_renames_the_label,
                  case_task_str_replace_prose_label_passes, case_owner_ruling_forms_and_non_rulings,
-                 case_step_ruling_tail_stops_at_an_incident):
+                 case_step_ruling_tail_stops_at_an_incident, case_step_pool_keeps_recall_rows,
+                 case_step_pool_keeps_main_ruling_sentences_but_label_openers,
+                 case_step_pool_drops_sentences_opening_with_a_label, case_step_pool_keeps_label_words_mid_sentence):
         try:
             case()
         except Exception as exc:
