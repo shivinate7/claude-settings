@@ -55,7 +55,7 @@ record ids and no incident text.
     lints) reads git diff through process substitution. It has no fail-closed check.
   - lint/test_all_jobs_passed.py reads only the cs checks workflow, through CHECKS_YML (the
     variable that sets that path).
-  - actions/code-check/standard.json:53 skips the typecheck for javascript. checkJs is not adopted.
+  - lint/code_check_standard.json:53 skips the typecheck for javascript. checkJs is not adopted.
   - .github/workflows/checks.yml:89-90 runs zizmor (a GitHub workflow linter) as a plain step.
   - lint/rule_audit.py reads only CLAUDE.md and the shiv-stylisms output style (RULE_FILES).
   - lint/stale_cites.py takes --range only. It has no whole-tree mode.

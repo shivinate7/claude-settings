@@ -102,7 +102,7 @@ jobs:
           echo "$PWD/actions/code-check/tools/node_modules/.bin" >> "$GITHUB_PATH"
 
       # Ruff, mypy (strict, over the .code-check.json list), ShellCheck, tsc and astro-check, from the table in
-      # actions/code-check/standard.json. Fails on a tracked language with no row. No format step.
+      # lint/code_check_standard.json. Fails on a tracked language with no row. No format step.
       - name: Code check
         uses: $/actions/code-check
         with:
