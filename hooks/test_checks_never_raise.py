@@ -42,7 +42,9 @@ in_own_agent_worktree past its first line (ps never answers, so it returns False
 transcript-folder check never run). The rest of foreign_pid_kill past pid_is_owned: _under_init, holds_session_tag
 and the refusal after them (pid_is_owned never says False with ps absent). The taskkill, Stop-Process, fuser -k and
 kill-port arms of kill_hit: no fragment names them. The git-backed commit reads: own_changes returns None without
-git, so diff_violation stops before role_offences, and no input here reaches role_offences.
+git, so diff_violation stops before role_offences, and no input here reaches role_offences. The other-checkout arm of
+the shell write judge (guard.py `elsewhere`, which reads RED_RUN_ROOT_VERBS): clone_checkouts returns None without git,
+so no input here reaches it.
 
 Env shapes: every check runs twice, under two shapes that the host never sets: both remote variables
 unset, and CLAUDE_CODE_REMOTE=true with a session id. The branches that read them (is_cloud,
@@ -133,8 +135,11 @@ os.environ[ROOT_ENV] = ROOT_PID
 import guard  # noqa: E402  the global PreToolUse guard (hooks/guard.py)
 import guard_core  # noqa: E402  the shared code the guard and its families import
 import guard_env  # noqa: E402  the env reads of the search and script commands (hooks/guard_env.py)
+import guard_frozen  # noqa: E402  the frozen-path reads of shell writes, cp among them (hooks/guard_frozen.py)
 import guard_kill  # noqa: E402  the kill checks and the session root (hooks/guard_kill.py)
+import guard_push_delete  # noqa: E402  the push and delete checks, npm installs among them (hooks/guard_push_delete.py)
 import guard_shared_tree  # noqa: E402  the shared-tree verbs (hooks/guard_shared_tree.py)
+import guard_stream  # noqa: E402  the stream and waiter checks, ln among them (hooks/guard_stream.py)
 import override  # noqa: E402  the lane id a session env names (hooks/override.py)
 import question_form  # noqa: E402  the ArtifactData item shape (hooks/question_form.py)
 import shared_names  # noqa: E402  the one home of the markers a spawn shape carries
@@ -162,10 +167,10 @@ SETTINGS_FRAGMENT = CONFIG_TOKEN + os.sep + "settings.json"   # SETTINGS_PATH wi
 KILL_SHARE = 0.25   # the share of inputs that open with a kill of one pid: the act that reaches pid_is_owned
 COMMAND_SHARE = 0.25   # the share of inputs that open with a COMMANDS line: a direct check reads it as a command
 COMMIT_HEREDOC = "git commit -m \"$(cat <<'EOF'\nx\nEOF\n)\""   # the shape a commit's message heredoc takes
+COMMIT_F_HEREDOC = "git commit -F - <<EOF\nmsg\nEOF\n"   # a commit whose message is read from stdin: the -F reading
 COMMANDS = (   # real command lines, each also in FRAGMENTS after a separator
     "grep -n x f", "rg -n x f", "sed -n 1p f", "cp a b", "ln -s a b", "python3 -c 'print(1)'", "npm test",
-    "pkill -f node", "killall node", "pkill -P 12 node", "pkill --parent 12", COMMIT_HEREDOC,
-    "git commit -F - <<EOF\nmsg\nEOF\n",
+    "pkill -f node", "killall node", "pkill -P 12 node", "pkill --parent 12", COMMIT_HEREDOC, COMMIT_F_HEREDOC,
 )
 FRAGMENTS = (
     "git ", "env:GIT_DIR", "rm -rf", "wsl -e", "pwsh -Command", "sh -c", "<<EOF", "$(", "${",
@@ -588,6 +593,32 @@ def judge_shell_on(text):
             pass
 
 
+def judges_called(run):
+    """The names of the judges that guard_push_delete._command_hit calls while `run()` runs. Each judge is wrapped, so a
+    judge counts only when it is called, not when it is merely passed in."""
+    names, real = [], guard_push_delete._command_hit
+
+    def hit(segment, command_names, judge, *args, **kwargs):
+        def counted(*call_args, **call_kwargs):
+            names.append(judge.__name__)
+            return judge(*call_args, **call_kwargs)
+        return real(segment, command_names, counted, *args, **kwargs)
+
+    guard_push_delete._command_hit = hit
+    try:
+        run()
+    finally:
+        guard_push_delete._command_hit = real
+    return names
+
+
+def _ln_folder():
+    """A folder under the run folder that holds a directory named b, so `ln -s a b` would link inside it."""
+    folder = os.path.join(RUN, "ln-probe")
+    os.makedirs(os.path.join(folder, "b"), exist_ok=True)
+    return folder
+
+
 def _probe(problems, cause, probe):
     """Run one reach probe. A False result or a raise is a problem named by `cause`: a raise is the check failing, so
     it is reported here and the fuzz still runs."""
@@ -639,6 +670,26 @@ def fixture_proof():
                lambda: guard_kill.kill_hit(tokens_of("pkill -f node")) == "pkill")
         _probe(problems, "'pkill -P 12 node' reaches no parent_filter_pids (the parent filter read moved)",
                lambda: calls_function(guard_kill, "parent_filter_pids", lambda: judge_shell_on("pkill -P 12 node")))
+        _probe(problems, "'rg -n x f' reaches no _pattern_words (the pattern-command list of rg moved)",
+               lambda: calls_function(guard_env, "_pattern_words", lambda: judge_shell_on("rg -n x f")))
+        _probe(problems, "'sed -n 1p f' reaches no _pattern_words (the script-command list of sed moved)",
+               lambda: calls_function(guard_env, "_pattern_words", lambda: judge_shell_on("sed -n 1p f")))
+        _probe(problems, "'killall node' does not read as a kill in kill_hit (KILL_COMMAND_WORDS moved)",
+               lambda: guard_kill.kill_hit(tokens_of("killall node")) == "killall")
+        _probe(problems, "'pkill --parent 12' reads no parent value in parent_filter_pids (PARENT_FLAG_RE moved)",
+               lambda: guard_kill.parent_filter_pids(tokens_of("pkill --parent 12")[1:]) == ["12"])
+        _probe(problems, "the stdin commit heredoc 'git commit -F - <<EOF' reaches no own_heredoc_bodies (the -F "
+                         "reading in message_texts moved)",
+               lambda: calls_function(guard, "own_heredoc_bodies", lambda: judge_shell_on(COMMIT_F_HEREDOC)))
+        _probe(problems, "'python3 -c' is not read past its own word in _walk_wrappers (the python branch moved)",
+               lambda: guard_core._walk_wrappers(tuple(tokens_of("python3 -c 'print(1)'")))[0] == 0)
+        _probe(problems, "'npm test' does not invoke guard_push_delete.install (the npm arm of linked_nm_hit moved)",
+               lambda: "install" in judges_called(lambda: judge_shell_on("npm test")))
+        _probe(problems, "'cp a b' takes no cp branch in guard_frozen._copy_reads (the cp name test moved)",
+               lambda: guard_frozen._copy_reads(["cp", "a", "b"], lambda path, where: False, CHECKOUT) == {1})
+        _probe(problems, "'ln -s a b' into a folder that holds b is not caught by guard_stream.ln_descends_hit (the ln "
+                         "name test moved)",
+               lambda: guard_stream.ln_descends_hit("ln -s a b", _ln_folder()) != "")
     _probe(problems, "a drawn fragment holds the run folder's name, so the drawn inputs differ on each run "
                      "(CONFIG_TOKEN moved, or a fragment takes RUN)",
            lambda: not any(os.path.basename(RUN) in piece for piece in [*FRAGMENTS, *CHARS, *WEIGHTED, *EDGE]))
