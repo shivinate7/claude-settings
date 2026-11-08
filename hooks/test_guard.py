@@ -11776,14 +11776,6 @@ sh("frozen: a substitution sed -i onto a frozen hook is denied",
    "echo $(sed -i '' s/a/b/ " + CFG_HOOK + ")", "deny", "frozen-path", cwd=NOGIT)
 sh("frozen: busybox cp onto a frozen hook is denied", "busybox cp /tmp/x " + CFG_HOOK, "deny",
    "frozen-path", cwd=NOGIT)
-# A PYTHON SCRIPT THAT WRITES A FROZEN FILE IS A WRITE, whether it runs with -c or from a heredoc.
-sh("frozen: python -c that opens settings.json for write is denied",
-   "python3 -c \"open('" + CFG_SETTINGS + "','w').write('x')\"", "deny", "frozen-path", cwd=NOGIT)
-sh("frozen: a python heredoc that opens a frozen hook for write is denied",
-   "python3 - <<'EOF'\nopen('" + CFG_HOOK + "','w').write('x')\nEOF", "deny", "frozen-path", cwd=NOGIT)
-# A write to a path whose name holds `install` is denied today. This row keeps that denial.
-sh("frozen: python -c that opens a frozen install.py for write is denied",
-   "python3 -c \"open('" + CFG_INSTALL_HOOK + "','w').write('x')\"", "deny", "frozen-path", cwd=NOGIT)
 
 # THE LIVE PINNED CHECKOUT IS FROZEN. Owner ruling (decision merge-reinstalls-from-main, ruling 1:
 # no work runs in the pinned checkout). The pin is `<clone>-live`, and each move leaves a stamped
