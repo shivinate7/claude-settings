@@ -1,0 +1,31 @@
+{
+  "added": "2026-11-07T20:27:00Z",
+  "context": "Goal: a write into the main checkout from a session that stands outside any checkout gets caught.\nProblem (rule): the guard lets it pass, because the ruling says a working folder in no checkout has no \"other\" checkout. Closing the gap changes that ruling.\nBased on (ruling): decision an-agent-outside-its-home-tree-must-stop, section other-checkout. Asked again because the notes sort found this gap, and only you change that ruling.\nDeparts from: main, where a working folder in no checkout passes every write. Option b counts the main checkout as \"other\" for such a session, and the scratchpad and notes-folder passes stay.",
+  "home": "lane notes-fix-guard-2",
+  "id": "other-checkout-cwd-outside",
+  "kind": "decision",
+  "n": 370,
+  "options": [
+    {
+      "gain": "No new false alarm.",
+      "key": "a",
+      "label": "Keep main; the note gets `Fix: none \u2014 owner decides` (recommended until an incident names it)",
+      "lose": "A cd to the scratchpad, then a write into main, still slips through."
+    },
+    {
+      "gain": "Closes the gap.",
+      "key": "b",
+      "label": "Change the ruling: the main checkout counts as \"other\" for a session outside every checkout",
+      "lose": "A top-level session that works from its scratchpad may get a false refusal."
+    }
+  ],
+  "owner": "coordinator",
+  "pick": "a",
+  "rank": 2,
+  "ref": "decision an-agent-outside-its-home-tree-must-stop",
+  "reply": "Withdrawn by the coordinator at 14:29 CST: not a question. The ruling an-agent-outside-its-home-tree-must-stop already says each session writes only inside its own checkout, and the debt says to close the gap by refusing. Lane notes-fix-guard-2 builds the refusal.",
+  "short": "Other-checkout guard: cwd outside any checkout",
+  "status": "closed",
+  "title": "Should the guard catch a write into the main checkout from a session that stands outside every checkout?",
+  "why": "Lane notes-fix-guard-2 (row other-checkout-cwd-outside), sent by the coordinator at 14:28 CST."
+}

@@ -36,9 +36,10 @@
   "owner": "lane judge-timeout-retries-once (session_013NEJKzQsAzQkvsohtkLuJP)",
   "pick": "a",
   "ref": "your ask ask-mw74r3oubd (\"increase the time maybe\"), 19:04 CST; step judge-timeout-retries-once; PR #1422 (one retry); PR #1431 (timeout log)",
-  "reply": "Your pick a is sent to lane judge-timeout-retries-once: Stop hook 50 s, first try 25 s, retry 15 s. One step stays yours: the 50 s limit is in settings.json, and a settings.json change needs your typed word in the acting session's chat. Type a in that lane's chat (session_013NEJKzQsAzQkvsohtkLuJP). This item stays open until the lane reports it built. Triage, 21:29 CST.",
+  "replied": "2026-11-08T03:47:00Z",
+  "reply": "Built. You typed a in lane judge-timeout-retries-once's chat at 21:33 CST. Home: PR #1766 (head c35385ac3), handed to runner 8: the Stop hook goes to 50 s, the first try to 25 s and the retry to 15 s, and decision question-form is rewritten. Step judge-timeout-retries-once is ready. Triage, 21:47 CST.",
   "short": "Past-ruling check time limit",
-  "status": "open",
+  "status": "closed",
   "title": "How long may the past-ruling check wait for its model?",
   "why": "The coordinator and the lane recommend a: your ask was to give the check more time, and a gives the most. A stuck call costs at most about 50 s at a turn's end."
 }

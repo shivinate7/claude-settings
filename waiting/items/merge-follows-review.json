@@ -1,0 +1,37 @@
+{
+  "added": "2026-11-08T03:47:00Z",
+  "context": "Goal: no reviewed PR waits, and a tool, not a hand, keeps it so.\nProblem (goal): PRs are made about 7 times faster than they merge. Lanes find gaps, each gap becomes a new lane, and the batch runner builds each batch by hand. You called the hold options bandaids (21:44 CST).\nBased on (notes): the coordinator counts about 380 PRs opened (#1384 to #1763) against 26 batches of 1-5 lanes.\nBased on (notes): root cause found by runner 8: a coordinator handoff line with no ruling, \"a guard or check change batches alone\", put most done PRs one per batch, at 21-37 min of CI each. The coordinator withdrew it at 21:46 CST. Runner 8 now batches every clean done PR together and builds the next batch while one runs.\nDeparts from: main, where each finding becomes its own step and lane, and the runner builds each batch by hand from messages \u2014 the merge tool batches every reviewed PR itself, and a lane's findings ride in its own PR or one follow-up per topic.\nMeanwhile: your hold on new lanes stays, except lanes that land these fixes.",
+  "home": "pr-backlog-clear",
+  "id": "merge-follows-review",
+  "kind": "decision",
+  "n": 386,
+  "options": [
+    {
+      "gain": "Merges keep pace with reviews, finding PRs stop multiplying, and a stall shows in the counts.",
+      "how": "(1) The merge tool builds each batch from PR state: every PR with a done review record on its live head and a lane lint pass. It splits a red batch itself, and builds the next batch while one runs, on top of #1561's ledger. (2) A lane's findings join its next commit, or one follow-up PR per topic. (3) Every runner and coordinator report gives three counts: reviewed PRs waiting past one batch cycle, open PRs with no next act, and finished lanes not archived. A count not read says unknown.",
+      "key": "a",
+      "label": "All three parts (recommended)",
+      "lose": "Two process changes and one large merge-tool lane. Findings land bundled."
+    },
+    {
+      "gain": "One change, and the queue drains.",
+      "how": "Only part (1) above.",
+      "key": "b",
+      "label": "Part 1 only: the merge tool builds batches",
+      "lose": "New PRs keep piling in."
+    },
+    {
+      "gain": "Fewer new PRs at once.",
+      "how": "Only part (2) above.",
+      "key": "c",
+      "label": "Part 2 only: findings ride in their lane",
+      "lose": "The backlog drains slowly."
+    }
+  ],
+  "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
+  "ref": "steps pr-backlog-clear and pr-state-is-on-the-pr; #1561 (the PR ledger)",
+  "short": "Merges keep pace with reviews",
+  "status": "open",
+  "title": "Make merges keep pace with reviews: which parts?",
+  "why": "The coordinator recommends a: part 1 alone drains the queue but does not slow new PRs, and part 2 alone does not drain it."
+}
