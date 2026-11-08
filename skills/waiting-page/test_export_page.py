@@ -31,6 +31,7 @@ Contract the page cases assume (the builder builds to it):
 """
 import collections
 import glob
+import importlib.util
 import json
 import os
 import re
@@ -38,6 +39,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -1360,6 +1362,103 @@ class NoExport(Base):
         self.assertTrue(says(r, "unknown"), "no unknown verdict printed for a waiting-page entry with export false. Output:\n" + shown(r))
         self.assertNotIn("%s: skipped - no export" % self.WAIT, verdict_lines(r),
                          "the waiting page was skipped instead of refused. Output:\n" + shown(r))
+
+
+# The cookie-header shape of kinds_in. The old pattern, `\bCookie:\s*[^\s=;]+=\S+`, scans from each `cookie:` to the end of a
+# run with no space, so a run of `cookie:` is quadratic. A rewrite must keep every verdict below and stay linear.
+COOKIE_PATHO = "cookie:" * 5700  # about 40k characters with no `=`
+COOKIE_CONTROL = ("cookie: " * 5700)[:len(COOKIE_PATHO)]  # the same length, a space after each colon
+COOKIE_RATIO_LIMIT = 10  # the old pattern is far above this on the pathological text; a linear pattern is far below it
+COOKIE_REPEATS = 5
+
+# (label, text, cookie-header found). Each row is what the old pattern, `\bCookie:\s*[^\s=;]+=\S+`, returns on 174b005c1.
+# A text whose literal would read as a cookie header in this source is joined from parts.
+COOKIE_VERDICTS = [
+    ("empty text", "", False),
+    ("a header with a space after the colon", "Cookie: " + "sid=abc", True),
+    ("no space after the colon", "cookie:" + "a=b", True),
+    ("a name that repeats the keyword", "Cookie:" + "Cookie:=x", True),
+    ("a name with a colon", "Cookie: " + "a:b=c", True),
+    ("a name of 300 characters", "Cookie: " + "n" * 300 + "=v", True),
+    ("a name of 5000 characters", "Cookie: " + "n" * 5000 + "=v", True),
+    ("Set-Cookie", "Set-" + "Cookie: " + "sid=abc", True),
+    ("X-Cookie", "X-" + "Cookie: " + "a=b", True),
+    ("the keyword twice", "cookie: " + "cookie:" + " x=1", True),
+    ("upper-case keyword", "COOKIE: " + "a=b", True),
+    ("a double equals sign", "Cookie: " + "a==b", True),
+    ("a dot in the name", "Cookie: " + "a.b=c", True),
+    ("a no-break space after the colon", "Cookie: " + "a=b", True),
+    ("a tab after the colon", "Cookie:\t" + "a=b", True),
+    ("a newline and a blank line after the colon", "Cookie:\n\n " + "a=b", True),
+    ("a semicolon in the value", "Cookie: " + "a=b;c", True),
+    ("an equals sign with no value after it", "Cookie: " + "a=", False),
+    ("a 5000-character name with no value", "Cookie: " + "a" * 5000 + "=", False),
+    ("a trailing space after an empty value", "Cookie: " + "a= ", False),
+    ("a semicolon before the equals sign", "Cookie: " + "a;b=c", False),
+    ("two cookies joined by a semicolon", "Cookie: " + "a; b=c", False),
+    ("a keyword inside a longer word", "fooCookie: " + "a=b", False),
+    ("a keyword glued to a letter with no space", "x" + "Cookie:" + "abc=def", False),
+    ("a hyphenated header with no space after the colon", "Set-" + "Cookie:" + "sid=abc", True),
+    ("a header after an equals sign with no space", "x=" + "Cookie:" + "a=b", True),
+    ("a header after a semicolon in a name-value list", "a=1;" + "Cookie:" + "sid=abc", True),
+    ("a keyword followed by a semicolon before the equals sign", "cookie:" + "a;b=c", False),
+    ("a Unicode letter before the keyword", "éCookie: " + "a=b", False),
+    ("an underscore before the keyword", "_Cookie: " + "a=b", False),
+    ("a digit before the keyword", "1Cookie: " + "a=b", False),
+    ("a plural keyword", "Cookies: " + "a=b", False),
+    ("a space before the colon", "Cookie : " + "a=b", False),
+    ("an empty name after the colon", "Cookie:" + "=x", False),
+    ("an empty name after the space", "Cookie: " + "=x", False),
+    ("a run of the keyword with no equals sign", "cookie:" * 5700, False),
+    ("a run of the keyword ending in a match", "cookie:" * 5700 + "x=1", True),
+    ("the same-length control with no equals sign", COOKIE_CONTROL, False),
+]
+
+
+def load_export_page(test):
+    """export_page.py as a module, loaded from CMD, so each verdict is the one the script returns. A missing file fails the test."""
+    if not os.path.isfile(CMD):
+        test.fail("export_page.py is not built: no file at %s" % CMD)
+    spec = importlib.util.spec_from_file_location("export_page_under_test", CMD)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def timed(kinds_in, text):
+    """Seconds one call of kinds_in takes on text. The clock is read only to take a ratio, never as a limit."""
+    start = time.perf_counter()
+    kinds_in(text)
+    return time.perf_counter() - start
+
+
+class CookieHeaderShape(unittest.TestCase):
+    """The cookie-header shape: its verdicts hold, and its time on a long run stays linear in the run's length."""
+
+    def test_pinned_verdicts_hold(self):
+        export_page = load_export_page(self)
+        for label, text, want in COOKIE_VERDICTS:
+            with self.subTest(case=label):
+                kinds = export_page.kinds_in(text)
+                self.assertIsInstance(kinds, list, "kinds_in did not return a list for %s" % label)
+                self.assertEqual("cookie-header" in kinds, want,
+                                 "%s: cookie-header is %s on 174b005c1 (the old pattern) and is not now" % (label, want))
+
+    def test_a_repeated_keyword_with_no_space_is_not_quadratic(self):
+        export_page = load_export_page(self)
+        # The scope comes first: both texts have the same length, and neither holds a cookie header, so their times compare.
+        self.assertEqual(len(COOKIE_PATHO), len(COOKIE_CONTROL), "the pathological text and its control differ in length")
+        self.assertNotIn("cookie-header", export_page.kinds_in(COOKIE_PATHO), "the pathological text now holds a cookie header")
+        self.assertNotIn("cookie-header", export_page.kinds_in(COOKIE_CONTROL), "the control now holds a cookie header")
+        patho, control = [], []
+        for _ in range(COOKIE_REPEATS):  # interleaved, so CPU drift falls on both sides
+            control.append(timed(export_page.kinds_in, COOKIE_CONTROL))
+            patho.append(timed(export_page.kinds_in, COOKIE_PATHO))
+        ratio = min(patho) / min(control)
+        self.assertLess(ratio, COOKIE_RATIO_LIMIT,
+                        "kinds_in, which runs every secret shape and not only cookie-header, took %.1f times the same-length "
+                        "control (limit %d) on a run of `cookie:` with no space. Min of %d: pathological %.4f s, control %.4f s."
+                        % (ratio, COOKIE_RATIO_LIMIT, COOKIE_REPEATS, min(patho), min(control)))
 
 
 if __name__ == "__main__":
