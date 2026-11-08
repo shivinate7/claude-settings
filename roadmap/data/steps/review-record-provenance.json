@@ -6,6 +6,6 @@
   "owner": "coordinator",
   "lane": "session_013NEJKzUe9U19voH62VbCNA",
   "why": "Third incident of a hand-written review record: lane notes-fix-reverify-large on #1494, #1506, #1597, #1667 and #1668, after #1512 and #1472.",
-  "note": "Fix: the guard refuses `gh pr comment` or `gh api \u2026/comments` whose body has the review-record header, unless the merge tool sends it. The coordinator reverses its earlier `Fix: none` (its own pick, 18:42 CST Nov 7, can be undone). The five PRs wait for #1634 and records re-posted from the tool. Same post point as step review-record-post-parses (lane session_013NEJL1rKuNDSwMxwArjXHb), which checks that a posted record parses: one guard home for both. Coordinator 18:43 CST: stacked on #1601 (review-record-from-render); it adds the marker only the tool writes, not a second guard.",
-  "updatedAt": "2026-11-07T18:43:00-06:00"
+  "note": "Fix: the guard refuses `gh pr comment` or `gh api \u2026/comments` whose body has the review-record header, unless the merge tool sends it. The coordinator reverses its earlier `Fix: none` (its own pick, 18:42 CST Nov 7, can be undone). The five PRs wait for #1634 and records re-posted from the tool. Same post point as step review-record-post-parses (lane session_013NEJL1rKuNDSwMxwArjXHb), which checks that a posted record parses: one guard home for both. Coordinator 18:43 CST: stacked on #1601 (review-record-from-render); it adds the marker only the tool writes, not a second guard. 18:45 CST: stacked on #1671, not #1601 directly.",
+  "updatedAt": "2026-11-07T18:44:00-06:00"
 }
