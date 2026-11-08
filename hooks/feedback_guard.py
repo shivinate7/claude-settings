@@ -24,10 +24,12 @@ a turn end in these cases:
     open or closed, may instead name `step:<slug>`: it passes when roadmap/data/steps/<slug>.json is a blob
     on some ref, resolved as a closed note's step home is (Homes._held). A ruling never names a step. Cost:
     the rev-parse, for-each-ref and cat-file reads a closed note runs, inside the Stop process, once per
-    task item homed to a step. A repo whose layout or git cannot be read (LayoutError, _GitFailure) is
-    skipped, and a readable repo still decides; the block reason then names the skipped repo
-    (Homes.unread_note). Only when no repo reads (neither folder is in a git repo, or every repo is
-    unreadable) do these homes pass unchecked, and a systemMessage says so;
+    task item homed to a step. A file home (Homes.problem, _judge) skips a repo whose layout or git
+    cannot be read (LayoutError, _GitFailure). A step or closed-note home (Homes._held) skips a repo
+    whose git read fails only. A readable repo still decides; the block reason names each skipped repo
+    (Homes.unread_note). A repo whose rev-parse exits non-zero is dropped unnamed (Homes._root). Only
+    when no repo reads (neither folder is in a git repo, or every repo is unreadable) do these homes
+    pass unchecked, and a systemMessage says so;
   - an open page item (`[page] -> page:<n>`: the owner answers waiting-page item n; checked in
     every block that holds one, burst or not; a `[closed]` one is never checked) has a home that is not
     `page:<digits>`, or the session's transcript shows no send after the owner's message: send_message
