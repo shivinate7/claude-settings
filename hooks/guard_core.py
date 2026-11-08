@@ -755,7 +755,7 @@ def _split_heredocs(cmd: str, contractions_are_text: bool = False):
 
 
 def _walk_heredocs(cmd: str, contractions_are_text: bool = False, legacy: bool = False,
-                   kept_at: "list | None" = None):
+                   kept_at: "list | None" = None, body_spans: "list | None" = None):
     """Return (kept lines, [(quote, body, header)], unclosed): every header line kept, every body set apart,
     each body with the text of the header line that opened it (two headers share one line).
     The walk is bash's own reading, where a later `'` closes a contraction's mark. With
@@ -764,7 +764,8 @@ def _walk_heredocs(cmd: str, contractions_are_text: bool = False, legacy: bool =
     bash runs walks both.
     The one walk `_drop_heredoc_bodies` and the environment layer both need. A header is read as
     heredoc_heads reads it, so one in quoted text, a comment or a here-string strips nothing.
-    A caller that passes `kept_at` gets the line index of each kept line appended to it."""
+    A caller that passes `kept_at` gets the line index of each kept line appended to it, and one that
+    passes `body_spans` gets each body's (first line, end line) appended, the end not held, in body order."""
     lines = cmd.split("\n")
     last = -1 if contractions_are_text else max(
         (i for i, line in enumerate(lines) if "'" in line), default=-1)
@@ -785,6 +786,8 @@ def _walk_heredocs(cmd: str, contractions_are_text: bool = False, legacy: bool =
             while index < len(lines) and lines[index].strip() != delimiter:
                 index += 1
             bodies.append((quote, "\n".join(lines[start:index]), header_line))
+            if body_spans is not None:
+                body_spans.append((start, index))
             if index < len(lines):
                 index += 1  # drop the closing delimiter line too
             else:

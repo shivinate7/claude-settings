@@ -8,8 +8,8 @@ import re
 
 import guard_core
 from guard_core import (
-    REDIRECT, _expanded, _resolved, _split_heredocs, _strip_heredoc_bodies_unconditionally, basename,
-    dir_before_segment, is_powershell, norm, resolve_command, segment_tokens, split_segments,
+    REDIRECT, _expanded, _resolved, _split_heredocs, _strip_heredoc_bodies_unconditionally, _walk_heredocs,
+    basename, dir_before_segment, is_powershell, norm, resolve_command, segment_tokens, split_segments,
 )
 from guard_env import _quoted_words
 
@@ -243,6 +243,31 @@ def _mutates_as_command(command: str, words) -> bool:
 _SCRIPT_RUNS_HIDDEN = re.compile(r"[$`(){}\\]")
 
 
+def _perl_in_place(words) -> bool:
+    """True when a perl command's switches hold `-i` (an in-place edit, as `sed -i`), alone or in a
+    cluster (`-pi`, `-i.bak`, `-pie`). A switch that takes the rest of its word as an argument ends the
+    cluster; a word that is no switch ends the switches, so `-i` after a script file is the script's."""
+    words = iter(words)
+    for word in words:
+        if word == "--" or not re.match(r"-[A-Za-z0-9]", word):
+            return False
+        for at, char in enumerate(word[1:], 1):
+            if char == "i":
+                return True
+            if char in "eE" and at == len(word) - 1:
+                next(words, None)   # `-e` at the end of its word: the script is the next word
+            if char in "eEFIMmVdDCx":
+                break
+    return False
+
+
+def _perl_edits(path: str, cmd: str) -> bool:
+    """True when a perl command in CMD edits in place (`_perl_in_place`) and names PATH. CMD is one
+    segment of `_shell_write_hit`, so a `;` in a quoted script ends nothing."""
+    return any(_perl_in_place(match.group(1).split()) and re.search(re.escape(path), match.group(1))
+               for match in re.finditer(r"\bperl(?:\.exe)?\b([^\n]*)", cmd))
+
+
 def _script_mutates(script: str) -> bool:
     """True when a `sh -c` script may change files through a command of its own. No script found, or one
     with a substitution or group in it, counts as a write, as it always did."""
@@ -252,7 +277,8 @@ def _script_mutates(script: str) -> bool:
         command, rest = _segment_command([_unquoted(word) for word in _quoted_words(segment, True)])
         # `sed -i` is no mutating word: `writes_to` reads it by its own pattern, so it must get that far.
         if _mutates_as_command(command, rest) or (
-                command == "sed" and any(re.match(r"-[a-z]*i\b|--in-place", word) for word in rest)):
+                command == "sed" and any(re.match(r"-[a-z]*i\b|--in-place", word) for word in rest)) or (
+                command == "perl" and _perl_in_place(rest)):
             return True
     return False
 
@@ -274,12 +300,13 @@ def writes_to(path: str, cmd: str, command=None, words=()) -> bool:
     # `command` is the segment's resolved command name, given by a caller that reads a mutating
     # word only in command position (`grep -n install tests/x.py` reads, never writes).
     if command is not None and not _mutates_as_command(command, words):
-        return command == "sed" and bool(re.search(r"\bsed\b[^\n;|&]*-i\b[^\n;|&]*" + target, cmd))
+        return (command == "sed" and bool(re.search(r"\bsed\b[^\n;|&]*-i\b[^\n;|&]*" + target, cmd))
+                ) or (command == "perl" and _perl_edits(path, cmd))
     if re.search(MUTATING_COMMAND + r"[^\n;|&]*" + target, cmd):
         return True
     if re.search(r"\bsed\b[^\n;|&]*-i\b[^\n;|&]*" + target, cmd):
         return True
-    return False
+    return _perl_edits(path, cmd)
 
 
 # VARIABLE INDIRECTION. In `D=~/.claude/state/handoff/x.md; ...; cp "$S/handoff.md" "$D"` the parse
@@ -718,9 +745,11 @@ def project_config_shell_hit(cmd: str, cwd: str) -> str:
 # never names, so `_shell_write_hit` cannot see it. `interpreter_write_hit` reads the script itself.
 # A quoted `<<'EOF'` body is read too: the interpreter runs it. Python is read with `ast`, so a path
 # in a printed string or a comment is text and a path held in a variable is still found. A body
-# `ast` cannot parse is read by a literal path beside a write call. Node is read by pattern.
+# `ast` cannot parse is read by a literal path beside a write call. Node, perl and ruby are read by pattern.
 _PY_HEADER = re.compile(r"(?<![\w.-])python[\d.]*(?:\.exe)?(?![\w.-])")
 _NODE_HEADER = re.compile(r"(?<![\w.-])(?:node|nodejs|bun|deno)(?:\.exe)?(?![\w.-])")
+_PERL_HEADER = re.compile(r"(?<![\w.-])perl(?:\.exe)?(?![\w.-])")
+_RUBY_HEADER = re.compile(r"(?<![\w.-])ruby(?:\.exe)?(?![\w.-])")
 _PY_COMMAND = re.compile(r"^python[\d.]*(?:\.exe)?$")
 _NODE_COMMAND = re.compile(r"^(?:node|nodejs|bun|deno)(?:\.exe)?$")
 _PY_C_FLAG = re.compile(r"^-[A-Za-z]*c$")
@@ -860,6 +889,85 @@ def _py_hit(body: str, cwd: str, predicate) -> str:
     return ""
 
 
+# Names that let a python script hand text to a shell or run it as code. A script whose parse tree
+# holds none of them cannot make a string in it a shell line. Judged by parsed names, never by words in a string.
+_PY_RUNS_TEXT = frozenset((
+    "os", "subprocess", "shutil", "importlib", "exec", "eval", "__import__", "compile", "pty", "ctypes",
+    "runpy", "builtins", "getattr", "globals", "vars", "posix", "nt", "_os", "modules"))
+_PY_PLAIN_DUNDERS = ("__name__", "__file__", "__doc__")
+_PY_CODING = re.compile(r"^[ \t]*#.*coding[:=][ \t]*(?![ \t]|utf-?8\b)", re.IGNORECASE | re.MULTILINE)
+
+
+def python_body_is_text(body: str) -> bool:
+    """True when BODY parses with `ast` and its tree names none of _PY_RUNS_TEXT and no dunder but
+    `__name__`, `__file__` and `__doc__`, in an import, a name or an attribute. A string, a comment and an
+    f-string's text are never read as names. A body that does not parse, or declares a source encoding
+    other than utf-8, is not text. What such a body writes to a file is `_py_hit`'s to judge."""
+    import ast
+    import textwrap
+    if _PY_CODING.search("\n".join(body.split("\n")[:2])):
+        return False
+    try:
+        tree = ast.parse(textwrap.dedent(body))
+    except (SyntaxError, ValueError):
+        return False
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            names = [alias.name.split(".")[0] for alias in node.names]
+        elif isinstance(node, ast.ImportFrom):
+            names = [(node.module or "").split(".")[0]] + [alias.name for alias in node.names]
+        elif isinstance(node, (ast.Name, ast.Attribute)):
+            names = [node.id if isinstance(node, ast.Name) else node.attr]
+        else:
+            continue
+        for name in names:
+            if name in _PY_RUNS_TEXT or (name.startswith("__") and name not in _PY_PLAIN_DUNDERS):
+                return False
+    return True
+
+
+_PY_ARGUMENT = re.compile(r"-|-[BEIORSbdqsuv]+|<<.*")
+
+
+def _python_feeds_on(header: str) -> bool:
+    """True when the one command on HEADER that holds `<<` is a python that reads its program from the
+    heredoc (`python3 -`, plain flags only) and whose output goes to no pipe. A pipe after it, a redirect,
+    a script file or `-c` is not: the output of a quoted body can be a shell line that a later stage runs."""
+    ends = []
+    segments = split_segments(header, ends)
+    holding = [at for at, segment in enumerate(segments) if "<<" in segment]
+    tokens = segment_tokens(segments[holding[0]]) if len(holding) == 1 else []
+    index = resolve_command(tokens) if tokens else None
+    return (index is not None and bool(_PY_COMMAND.match(basename(tokens[index])))
+            and all(_PY_ARGUMENT.fullmatch(word) for word in tokens[index + 1:])
+            and ends[holding[0]] in ("", ";", "&&", "||", "&"))
+
+
+def drop_text_python_bodies(raw: str) -> str:
+    """RAW with the lines of each quoted python heredoc body that is text (`python_body_is_text`) dropped,
+    for a rule that reads shell lines. The header, the closing line and every other body stay. A body
+    drops only when all three readings of the walk (bash's, the contraction one, main's) give it the same
+    lines, and its header line holds no other heredoc."""
+    if "<<" not in raw:
+        return raw
+    walks = []   # (spans, bodies) of each reading
+    for contractions, legacy in ((False, False), (True, False), (False, True)):
+        spans = []
+        _, bodies, unclosed = _walk_heredocs(raw, contractions, legacy, body_spans=spans)
+        if unclosed:
+            return raw
+        walks.append((spans, bodies))
+    spans, bodies = walks[0]
+    agreed = [{(span, body[1]) for span, body in zip(*walk)} for walk in walks]
+    drop = set()
+    for (quote, body, header), span in zip(bodies, spans):
+        if (quote and all((span, body) in same for same in agreed)
+                and sum(other == header for _q, _b, other in bodies) == 1
+                and _python_feeds_on(header) and python_body_is_text(body)):
+            drop.update(range(*span))
+    return "\n".join(line for at, line in enumerate(raw.split("\n")) if at not in drop) if drop else raw
+
+
 _JS_STR = r"""(?:'([^'\n]*)'|"([^"\n]*)"|`([^`$]*)`|([A-Za-z_$][\w$]*)|path\s*\.\s*(?:join|resolve)\s*\(([^()]*)\))"""
 _JS_ONE = re.compile(
     r"\b(?:writeFileSync|writeFile|appendFileSync|appendFile|createWriteStream)\s*\(\s*" + _JS_STR)
@@ -898,6 +1006,35 @@ def _js_hit(body: str, cwd: str, predicate) -> str:
     return ""
 
 
+# A perl or ruby body is read by literal path, as node is: the written operand of a write call is a string,
+# or a variable a plain assignment bound. Each pattern ends in the three groups of that operand (_RB_STR):
+# single-quoted, double-quoted, a name.
+_RB_STR = r"""(?:'([^'\n]*)'|"([^"\n]*)"|[\$@]?([A-Za-z_]\w*))"""
+_PL_OPEN = r"""\bopen\s*\(?\s*(?:my\s+)?[\$\w]+\s*,\s*['"]\s*"""
+_PL_RB_ASSIGN = re.compile(r"""(?<![\w$@])[\$@]?([A-Za-z_]\w*)\s*=\s*(?:'([^'\n]*)'|"([^"\n]*)")""")
+_PL_RB_WRITE = (
+    re.compile(_PL_OPEN + r"""(?:\+<|\+?>>?)[^'"]*['"]\s*,\s*""" + _RB_STR),              # perl 3-arg open
+    re.compile(_PL_OPEN + r"""\+?>>?\s*()([^'"\s]+)['"]()"""),                            # perl 2-arg open
+    re.compile(r"\b(?:rename|copy|move|FileUtils\s*\.\s*(?:cp|mv|cp_r|copy_file|install))\s*\(?\s*"
+               + _RB_STR + r"\s*,\s*" + _RB_STR),                                          # destination of a copy
+    re.compile(r"\b(?:File|IO)\s*\.\s*(?:write|binwrite)\s*\(?\s*" + _RB_STR),
+    re.compile(r"""\bFile\s*\.\s*open\s*\(?\s*""" + _RB_STR + r"""\s*,\s*['"][^'"]*[wa+][^'"]*['"]"""),
+)
+
+
+def _pl_rb_hit(body: str, cwd: str, predicate) -> str:
+    env = {}
+    for match in _PL_RB_ASSIGN.finditer(body):
+        env.setdefault(match.group(1), []).append(match.group(2) if match.group(2) is not None else match.group(3))
+    for pattern in _PL_RB_WRITE:
+        for match in pattern.finditer(body):
+            single, double, name = match.groups()[-3:]
+            for path in [single or double] if single or double else env.get(name, ()):
+                if predicate(path, cwd):
+                    return path
+    return ""
+
+
 def _inline_scripts(command: str):
     """Yield (kind, script, segment number, segments, ends) for each `python -c` and `node -e` script."""
     ends = []
@@ -922,13 +1059,14 @@ def interpreter_may_write(raw: str) -> bool:
     """True when `raw` holds a heredoc or an inline flag and a write call an interpreter body could make:
     the cheap match that gates `interpreter_write_hit` for a caller that pays to learn its predicate."""
     return ("<<" in raw or any(flag in raw for flag in _INLINE_FLAG_WORDS)) and bool(
-        _PY_WRITE_CALL.search(raw) or _JS_ONE.search(raw) or _JS_TWO.search(raw))
+        _PY_WRITE_CALL.search(raw) or _JS_ONE.search(raw) or _JS_TWO.search(raw)
+        or any(pattern.search(raw) for pattern in _PL_RB_WRITE))
 
 
 def interpreter_write_hit(raw: str, cwd: str, predicate) -> str:
-    """Return the path a python or node script in `raw` writes that `predicate(path, cwd)` accepts, else ''.
-    Read: the body of each heredoc fed to python or node, quoted or not, and each `python -c` and
-    `node -e` script. A script that only reads a path, or names it in a string, hits nothing.
+    """Return the path a python, node, perl or ruby script in `raw` writes that `predicate(path, cwd)`
+    accepts, else ''. Read: the body of each heredoc fed to one of them, quoted or not, and each
+    `python -c` and `node -e` script. A script that only reads a path, or names it in a string, hits nothing.
     A crash of the scan reads as no hit: it must never skip the rules after it."""
     try:
         return _interpreter_write_hit(raw, cwd, predicate)
@@ -948,6 +1086,8 @@ def _interpreter_write_hit(raw: str, cwd: str, predicate) -> str:
                     hit = _py_hit(body, cwd, predicate)
                 elif _NODE_HEADER.search(header):
                     hit = _js_hit(body, cwd, predicate)
+                elif _PERL_HEADER.search(header) or _RUBY_HEADER.search(header):
+                    hit = _pl_rb_hit(body, cwd, predicate)
                 else:
                     continue
                 if hit:
