@@ -9106,12 +9106,12 @@ sh("draft-pr: a perl body with a backtick span left unclosed, holding a $( ) gh 
    cwd=NOGIT, carries=DRAFT_REMEDY, lacks=DRAFT_LACKS)
 # A PowerShell here-string is shell text when a shell runs it. It may be piped or passed to `iex` or
 # Invoke-Expression, or piped to `pwsh -Command -`. It may be the `-Command` or `-c` argument of pwsh or
-# powershell, or built into a scriptblock. The pipe into the shell may pass through Out-String first, and a `&` call operator may start the
-# pwsh that reads stdin. A bare gh pr create line in such a body runs, so it is refused. A here-string held in a
-# variable is not read, even when a later line runs it (`iex $b`, `$b | iex`), so it is allowed, and so is a `$( )`
-# in a single-quoted body (literal). A `$( )` in a double-quoted body runs while the string is built.
-# A POSIX shell given the here-string as its `-c` argument runs it as a script, whether the shell is
-# bash or sh, takes -lc, or sits behind sudo or timeout.
+# powershell, or built into a scriptblock. The pipe into the shell may pass through Out-String first, and a
+# `&` call operator may start the pwsh that reads stdin. A bare gh pr create line in such a body runs, so it
+# is refused. A here-string held in a variable is not read, even when a later line runs it (`iex $b`,
+# `$b | iex`). It is allowed, and so is a `$( )` in a single-quoted body (literal). A `$( )` in a
+# double-quoted body runs while the string is built. A POSIX shell that takes the here-string as its `-c`
+# argument runs it: bash, sh or -lc, behind sudo or timeout too.
 PS_PR_LINE = "gh pr create -t x"
 PS_RUN_CASES = (
     ("piped to Invoke-Expression", '@"\n' + PS_PR_LINE + '\n"@ | Invoke-Expression'),
@@ -9126,8 +9126,8 @@ PS_RUN_CASES = (
     ("piped to pwsh with -ExecutionPolicy Bypass before the stdin dash", '@"\n' + PS_PR_LINE + '\n"@ | pwsh -NoProfile -ExecutionPolicy Bypass -'),
     ("piped to powershell.exe with -ExecutionPolicy Bypass before -Command -", '@"\n' + PS_PR_LINE + '\n"@ | powershell.exe -ExecutionPolicy Bypass -Command -'),
     ("piped to pwsh -NonInteractive -Command -", '@"\n' + PS_PR_LINE + '\n"@ | pwsh -NonInteractive -Command -'),
-    # A switch and its value joined by a colon (-ExecutionPolicy:Bypass, -ep:Bypass) is one word that takes no
-    # next word, so the lone `-` after it still reads the body from stdin.
+    # A switch joined to its value by a colon (-ExecutionPolicy:Bypass, -ep:Bypass) is one word, so the lone
+    # `-` after it still reads stdin.
     ("piped to pwsh with -ExecutionPolicy:Bypass before the stdin dash", '@"\n' + PS_PR_LINE + '\n"@ | pwsh -ExecutionPolicy:Bypass -'),
     ("piped to pwsh with -ep:Bypass before the stdin dash", '@"\n' + PS_PR_LINE + '\n"@ | pwsh -ep:Bypass -'),
     ("piped to powershell.exe with -ExecutionPolicy:Bypass before -Command -", '@"\n' + PS_PR_LINE + '\n"@ | powershell.exe -ExecutionPolicy:Bypass -Command -'),
@@ -9141,10 +9141,32 @@ PS_RUN_CASES = (
     ("passed to bash -lc", 'bash -lc @"\n' + PS_PR_LINE + '\n"@'),
     ("passed to sudo bash -c", 'sudo bash -c @"\n' + PS_PR_LINE + '\n"@'),
     ("passed to timeout 5 bash -c", 'timeout 5 bash -c @"\n' + PS_PR_LINE + '\n"@'),
+    # A here-string in parentheses still runs: pwsh -Command takes the text, a `$( )` pipes it into iex, and
+    # Out-String passes it on. Each is refused, as each runs the body.
+    ("passed to pwsh -Command in parentheses", 'pwsh -Command (@"\n' + PS_PR_LINE + '\n"@)'),
+    ("piped to iex inside a $( ) subexpression", '$(@"\n' + PS_PR_LINE + '\n"@ | iex)'),
+    ("piped through Out-String in parentheses to iex", '(@"\n' + PS_PR_LINE + '\n"@ | Out-String) | iex'),
 )
 for _name, _command in PS_RUN_CASES:
     sh("draft-pr: a PowerShell here-string body run " + _name + " holds gh pr create, is refused",
        _command, "deny", "draft-pr", tool="PowerShell", cwd=NOGIT, carries=DRAFT_REMEDY, lacks=DRAFT_LACKS)
+# An unclosed quote in the segment before a here-string used to crash the guard. The crash allowed the call and ran
+# no later check. The body iex runs holds a bare gh pr create line, so the call is refused.
+DRAFT_CRASH_CMD = 'Write-Host "Dont\n@"\n' + PS_PR_LINE + '\n"@ | iex'
+sh("draft-pr: a PowerShell unclosed double quote ahead of a here-string run by iex, holding gh pr create, is refused",
+   DRAFT_CRASH_CMD, "deny", "draft-pr", tool="PowerShell", cwd=NOGIT, carries=DRAFT_REMEDY, lacks=DRAFT_LACKS)
+# The green twin: the same body with the quote closed, so no segment is unparsed.
+sh("draft-pr: a PowerShell closed double quote ahead of a here-string run by iex, holding gh pr create, is refused",
+   'Write-Host "Dont"\n@"\n' + PS_PR_LINE + '\n"@ | iex', "deny", "draft-pr", tool="PowerShell", cwd=NOGIT,
+   carries=DRAFT_REMEDY, lacks=DRAFT_LACKS)
+# The control reaches a later check: an unclosed quote, a here-string that iex runs with a draft line, then a wide
+# delete. The delete is refused by destructive-delete. Its closed-quote twin is the green control.
+UNCLOSED_THEN_DELETE = 'Write-Host "Dont\n@"\ngh pr create --draft -t x\n"@ | iex\nRemove-Item -Recurse -Force C:\\'
+CLOSED_THEN_DELETE = 'Write-Host "Dont"\n@"\ngh pr create --draft -t x\n"@ | iex\nRemove-Item -Recurse -Force C:\\'
+sh("draft-pr: a PowerShell unclosed quote, then a here-string iex runs with a draft line, then a wide delete, is refused by the delete",
+   UNCLOSED_THEN_DELETE, "deny", "destructive-delete", tool="PowerShell", cwd=NOGIT)
+sh("draft-pr: a PowerShell closed quote, then a here-string iex runs with a draft line, then a wide delete, is refused by the delete",
+   CLOSED_THEN_DELETE, "deny", "destructive-delete", tool="PowerShell", cwd=NOGIT)
 sh("draft-pr: a PowerShell double-quoted here-string whose $( ) runs gh pr create, held in a variable, is refused",
    '$b = @"\n$(' + PS_PR_LINE + ')\n"@', "deny", "draft-pr", tool="PowerShell", cwd=NOGIT,
    carries=DRAFT_REMEDY, lacks=DRAFT_LACKS)
@@ -9165,8 +9187,8 @@ sh("draft-pr: a PowerShell double-quoted here-string passed to Write-Output and 
    'Write-Output @"\n' + PS_PR_LINE + '\n"@', "allow", tool="PowerShell", cwd=NOGIT)
 sh("draft-pr: a PowerShell single-quoted here-string given to Set-Content f.ps1 and not run by a shell, with a bare gh pr create line, is allowed",
    "Set-Content f.ps1 -Value @'\n" + PS_PR_LINE + "\n'@", "allow", tool="PowerShell", cwd=NOGIT)
-# The bash -c control: a draft body is allowed. The file control: a file that Set-Content writes is not read
-# by the guard, so a later `bash f.sh` in its own line is allowed, as the shell run of a file is not followed here.
+# The bash -c control: a draft body is allowed. The file control: the guard does not follow a Set-Content file
+# that a later `bash f.sh` runs on its own line, so that line is allowed.
 sh("draft-pr: a PowerShell double-quoted here-string passed to bash -c, with a draft gh pr create line, is allowed",
    'bash -c @"\n' + "gh pr create --draft -t x" + '\n"@', "allow", tool="PowerShell", cwd=NOGIT)
 sh("draft-pr: a PowerShell Set-Content of a single-quoted here-string with a bare gh pr create line, then bash f.sh, is allowed",
@@ -14029,6 +14051,33 @@ LOG_CHECKS_EXTRA.append(("merge: gh_call_of reads the pr verb past a --repo=<rep
                          gh_root_repo_equals_check))
 LOG_CHECKS_EXTRA.append(("merge: gh_call_of reads the pr verb past a spaced --repo <repo> root flag",
                          gh_root_repo_spaced_check))
+
+
+# ---- draft-pr: the crash that allowed a call and skipped its later checks. Each run's log holds no guard-crash line;
+# the verdicts are the sh() cases in the draft-pr section.
+def draft_here_string_no_crash_case():
+    """No run of the unclosed-quote here-string bodies logs a guard-crash line."""
+    for name, command in (("the iex-run body", DRAFT_CRASH_CMD), ("the control with a later delete", UNCLOSED_THEN_DELETE)):
+        folder = os.path.join(ROOT, "draft-here-crash")
+        os.makedirs(folder, exist_ok=True)
+        path = os.path.join(folder, "guard.log")
+        if os.path.exists(path):
+            os.remove(path)
+        decide({"raw": None, "tool": "PowerShell", "cwd": NOGIT, "session": None, "env_path": None,
+                "config": folder, "tool_input": {"command": command}})
+        rows = []
+        if os.path.exists(path):
+            with open(path, encoding="utf-8") as handle:
+                rows = handle.read().splitlines()
+        for row in rows:
+            fields = row.split("\t")
+            if fields[2:4] == ["crash", "guard-crash"]:
+                return False, "%s crashed the guard: %s" % (name, fields[4][:100])
+    return True, "no guard-crash line for the iex-run body or the control"
+
+
+LOG_CHECKS_EXTRA.append(("draft-pr: an unclosed quote ahead of a PowerShell here-string logs no guard-crash line",
+                         draft_here_string_no_crash_case))
 
 # ---- lane-closes-after-records: the two checks that are log checks, not cases. The override is a story over
 # several calls on one clock (see the owner-override family), and the matcher reads settings.json, as the
