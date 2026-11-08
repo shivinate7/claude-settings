@@ -75,12 +75,15 @@ import sys
 import uuid
 from datetime import datetime, timedelta, timezone
 
-try:  # stdlib only: the one home of the machine-text tags and the config dir
-    from shared_names import MACHINE_TAGS, NOTICE_FRAMES, config_dir
+try:  # stdlib only: the one home of the machine-text tags
+    from shared_names import MACHINE_TAGS, NOTICE_FRAMES
     NOTICE_TAGS = MACHINE_TAGS + NOTICE_FRAMES
 except ImportError:  # a missing or stale helper: the keyword grants still run, the plain ask grants nothing
     NOTICE_TAGS = ()
 
+try:  # its own import, so a helper that lacks config_dir keeps the tags above
+    from shared_names import config_dir
+except ImportError:
     def config_dir():  # a copy by need: an override file must stay readable while the helper lands late
         return os.environ.get("CLAUDE_CONFIG_DIR") or os.path.join(os.path.expanduser("~"), ".claude")
 
