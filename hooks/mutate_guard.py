@@ -278,6 +278,14 @@ MUTATIONS = [
     ("heredoc: a body written to a shell script is kept only when run, run.sh stays out of view",
      'if written & ran or any(map(_SHELL_SCRIPT, written))}',
      'if written & ran}', "guard", 'draft-pr: a pull request in a body written to run.sh, run by no command in this call, is denied'),
+    # The source a strip's output carries: a repeat strip of that output reads the source, never the output's
+    # header with no closer, which would take every line after it for the body.
+    ("heredoc: a repeat strip ignores the source its first strip carried, a nohup kept tail reads its unclosed header",
+     '    cmd = getattr(cmd, "source", "") or cmd',
+     '    pass', "guard", "misc: heredoc-kept-tail: a kept body's tail survives the second strip the callers run"),
+    ("heredoc: the unconditional strip ignores the source a strip carried, a notes.md body's reset runs in the clean tree",
+     '    return _drop_heredoc_bodies(getattr(cmd, "source", "") or cmd)',
+     '    return _drop_heredoc_bodies(cmd)', "guard", 'run-dir heredoc-tail: a body written to notes.md, then a cd into a dirty tree and a hard reset, denies'),
     ("frozen-path: freeze nothing",
      '    if not path:\n        return False\n    try:\n        literal = _literal_resolved(path, cwd)\n'
      '        resolved = _resolved(path, cwd)',

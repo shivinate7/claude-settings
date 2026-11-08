@@ -9183,6 +9183,8 @@ KEPT_BODY_TAILS = (
     "cat > run.sh <<'EOT'\necho hi\nEOT\npython3 server.py &",
     "cat > run.sh <<'EOT'\necho hi\nEOT\nnpm start &",
     "cat > f <<'EOT'\necho hi\nEOT\nbash f\nnpm start &",
+    # A line equal to the closer after the job: the repeat strip must read the source, or it takes the job for a body.
+    "cat > run.sh <<'EOT'\necho hi\nEOT\nnohup bash run.sh &\nEOT",
 )
 
 
@@ -9199,6 +9201,8 @@ def kept_body_second_strip_case():
         once = guard.strip_heredoc_bodies(command)
         if guard.strip_heredoc_bodies(once) != once:
             return False, "strip_heredoc_bodies changes its own kept text on a second pass: %r" % once
+    for command in KEPT_BODY_TAILS:
+        once = guard.strip_heredoc_bodies(command)
         want = guard._strip_heredoc_bodies_unconditionally(command)
         got = guard._strip_heredoc_bodies_unconditionally(once)
         if got != want:
