@@ -12,6 +12,7 @@ from guard_core import (
     _absolute, _git, _git_subcommand_index, _segment_git_c_target, basename, cap_safe, command_root, GIT_WORK_TREE_RE,
     dir_before_segment, git_calls, inline_script, inner_commands, resolve_command, resolve_default_base, segment_tokens, split_segments,
 )
+from guard_env import substitution_commands
 import own_session  # the one home of the own get_session read, small so report_guard imports it too
 from shared_names import BUILD_TAG, LANE_TAG, TOPIC_TAG, lane_head_refs  # the one home of the lane tags and head refs, shared with the roadmap build
 from guard_pointer import (
@@ -928,6 +929,7 @@ def _push_calls(segment: str, script: str, cwd: str):
             yield _command_words(args), where, overrides
     tokens = segment_tokens(segment)
     inner = inner_commands(tokens) if tokens else []
+    inner += substitution_commands(segment, segment)   # the shell runs each `$( )` and backtick text
     if inner:
         inner_cwd = push_target(segment, script, cwd)[0] or cwd
         for text in inner:
