@@ -24,8 +24,8 @@
 //    so one PowerShell helper holds the job for the suite's life and lists and kills its members on
 //    request. If the watchdog is killed, the helper's pipe closes, the helper ends, and the job closes
 //    with every member in it. The child waits on a go-file until the helper has put it in the job, so
-//    no test runs outside it. On CI a run that cannot get a job fails by name; off CI it falls back to
-//    a walk of the process tree, with a printed note.
+//    on CI no test runs outside it: a run that cannot get a job fails by name. Off CI the child is
+//    released anyway, and leftovers are found by a walk of the process tree, with a printed note.
 // An unreadable sweep is unknown, never "nothing found": on CI it exits 1 too.
 // Cost: one extra PowerShell process on Windows, for the suite's own run only.
 
@@ -79,8 +79,9 @@ export function leftoverExit(code, { lines = [], alive = [], unknown = [] } = {}
   return code ?? 1;
 }
 
-// The child calls it before its first test. Windows: no test runs until the watchdog has put this
-// process in its job. A bound, not a wait.
+// The child calls it before its first test. Windows: it waits for the go file, which the watchdog
+// writes once this process is in its job, or, off CI with no job, once it has chosen the fallback.
+// It waits at most 40 s, so a dead watchdog cannot hold it.
 export function waitForGo(env = process.env) {
   if (!env[GO]) return;
   for (const t0 = Date.now(); !existsSync(env[GO]) && Date.now() - t0 < 40_000;) sleepMs(50);
