@@ -2776,18 +2776,19 @@ class LostSentence(unittest.TestCase):
                 "The finder lists only for triage. Decision: test-practices (P5).")
     FOLD_TARGET = "- fold-target: The finder lists calendar reads in the sweep. Decision: test-practices (P5)."
     FOLD_KEEP = ("- fold-target: The finder lists calendar reads in the sweep. The fake clock hides each calendar read. "
-                 "The sleep scan reads fake timers the same way. The finder lists only for triage. Decision: test-practices (P5).")
+                 "The sleep scan reads fake timers the same way. The finder lists only for triage. Folded in from fold-source. "
+                 "Decision: test-practices (P5).")
     FOLD_DROP = ("- fold-target: The finder lists calendar reads in the sweep. The fake clock hides each calendar read. "
-                 "The finder lists only for triage. Decision: test-practices (P5).")
+                 "The finder lists only for triage. Folded in from fold-source. Decision: test-practices (P5).")
     RETIRE = "- retire-note: The old sweep no longer runs. Its folder is removed by hand. Decision: retired with the sweep (P9)."
-    # The notes lines of d4163eceb, copied from its old and new text (its parent is c5b82f0ac): the rewritten line and the added line.
+    # The notes lines of a real rewrite, copied from its old and new text: the rewritten line and the line it added.
     TIME_OLD = ('- time-pinned-plan-stale: plan `time-pinned-tests` has no calendar column and its Total counts hang guards the finder no longer '
                 'counts; test-practices still calls the P5 lint "not built", though the finder lists those reads (ungated); the `joyous PR 68` '
                 'incident cited in P5 cannot be checked from this repo and may name the wrong PR. Decision: test-practices (P5).')
     TIME_NEW = ('- time-pinned-plan-stale: plan `time-pinned-tests` has no calendar column. Its Total counts hang guards, which the finder no '
                 'longer counts. Test-practices still calls the P5 lint "not built", though the finder now lists those reads without a gate. '
                 'P5 cites the `joyous PR 68` incident, which this repo cannot confirm. Decision: test-practices (P5).')
-    # The same line as 3c9078248 wrote it, which keeps the clause d4163eceb dropped.
+    # The same line as a later rewrite wrote it, with the clause the first rewrite dropped kept.
     TIME_FIXED = ('- time-pinned-plan-stale: plan `time-pinned-tests` has no calendar column. Its Total counts hang guards, which the finder no '
                   'longer counts. Test-practices still calls the P5 lint "not built", though the finder now lists those reads without a gate. '
                   'P5 cites the `joyous PR 68` incident, which this repo cannot confirm and may name the wrong PR. Decision: test-practices (P5).')
@@ -2897,7 +2898,7 @@ class LostSentence(unittest.TestCase):
                         "the rewrite that dropped `and may name the wrong PR` from time-pinned-plan-stale was not refused by a problem "
                         "that names both")
 
-    def test_the_same_rewrite_with_the_clause_kept_passes(self):  # control: the 3c9078248 wording of the same line
+    def test_the_same_rewrite_with_the_clause_kept_passes(self):  # control: the wording that keeps the wrong-PR clause
         self.start([self.TIME_OLD])
         head = self.rewrite("Split the plan-stale sentence and keep the wrong-PR clause", [self.TIME_FIXED, self.LOCAL])
         self.assertIn("and may name the wrong PR", "\n".join(self.body(head)), "premise: the head lost the wrong-PR clause")
@@ -2912,7 +2913,7 @@ class LostSentence(unittest.TestCase):
         self.assertNotIn("old sweep no longer runs", "\n".join(self.body(head)), "premise: the head holds a sentence of retire-note")
         self.assertEqual(self.r.verdict(), [], "a plain retire of a whole note added a finding")
 
-    def test_a_rewrite_of_three_sentences_that_drops_two_under_the_same_slug_is_refused(self):  # control: green on 4149c0b2d
+    def test_a_rewrite_of_three_sentences_that_drops_two_under_the_same_slug_is_refused(self):  # control: pairs by slug
         self.start([self.THREE_OLD])
         head = self.rewrite("Cut the three-sentence note to one sentence", [self.THREE_SAME])
         self.premises(head, self.THREE_OLD, "three-sentence-note", "sweep lists each stale fixture")
@@ -2936,8 +2937,8 @@ class LostSentence(unittest.TestCase):
                         "names the note and both sentences")
 
     def test_a_retire_beside_added_notes_that_share_the_tag_and_topic_words_is_not_refused(self):
-        # The shape of 6a5465ea9: two added notes share the deleted note's tag and several of its words, but neither carries
-        # its slug or names it, so nothing pairs and the retire passes.
+        # The two added notes share the deleted note's tag and several of its words, but neither carries its slug or names
+        # it, so nothing pairs and the retire passes. The fixture text is the real commit's lines.
         self.start([self.REAL_OLD])
         head = self.rewrite("Drop the map-kind clash line, add two layout-repeat notes", [self.REAL_NEW_A, self.REAL_NEW_B])
         self.assertIn(self.REAL_OLD, self.notes_at("main"), "premise: main does not hold map-kind-extra-clash-unread")
@@ -2948,8 +2949,8 @@ class LostSentence(unittest.TestCase):
         self.assertEqual(self.r.verdict(), [], "a retire was refused because two added notes share its tag and topic words")
 
     def test_a_deliberate_retire_beside_an_unrelated_note_with_the_same_tag_is_not_refused(self):
-        # The smallest shape of the false alarm in 6a5465ea9. The tag's word `layout` and one topic word, `probe`, hold half of
-        # the deleted note's first clause, so the unrelated note reads as its fold target and the next clause reads as lost.
+        # The tag's word `layout` and one topic word, `probe`, hold half of the deleted note's first clause. Nothing names the
+        # retired slug, so the note is a plain retire, and the unrelated note is no fold target.
         self.start([self.TAG_OLD])
         head = self.rewrite("Drop the layout probe note and add an unrelated note", [self.TAG_NEW])
         self.assertIn(self.TAG_OLD, self.notes_at("main"), "premise: main does not hold layout-probe-note")
