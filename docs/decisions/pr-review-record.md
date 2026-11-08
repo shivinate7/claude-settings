@@ -65,8 +65,7 @@ Counted as real `gh` calls, one call per page of a list read. Most reads fit one
 - Each ready PR that has a record adds three reads: the check runs, the commit statuses and the branch protection (required checks mode `protection`). A draft, and a PR with no record, add none.
 - One ready PR with a record: five calls. With a pinned `merge.requiredChecks` list: also five, because the one protection compare moves to the start of the run and the per-PR protection read goes.
 - `merge <pr> --review-record`: one PR read per call. `--fix-check` adds one paged read of the repo's issue comments since the PR opened. It writes nothing.
-- The guard's push ask (rule `reviewed-head-push`) makes no `gh` call outside a merge-tool repo, for a dry-run push, or for a delete push. Otherwise it makes one list read of the open PRs per push. When an open PR has the pushed branch as its head, it makes one more paged read of the repo's issue comments since that PR opened.
-- In a cloud session the PR reads return 403 until PR #1634 (the cloud merge-tool read fix) merges. There the guard lets every push through, with one stderr line.
+- The guard's push ask (rule `reviewed-head-push`) makes no `gh` call outside a merge-tool repo, for a dry-run push, or for a delete push. Otherwise it makes one list read of the open PRs per push. When an open PR has the pushed branch as its head and the push sends something, it reads the repo's issue comments since that PR opened, one call per page.
 - No new long-lived process, file, cache or timer. The batch runner calls the list at each wake. A lane calls the render at each round.
 - The test `ReviewedList` in `merge/test_merge.py` pins the two list reads and the five calls for one ready PR.
 
