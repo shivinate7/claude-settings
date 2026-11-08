@@ -164,7 +164,8 @@ class Case(unittest.TestCase):
     def change(self, files):
         self.commit("change", files)
 
-    def lint(self, *args, path_tools=False, env=None):
+    def lint(self, *args, path_tools=False, env=None, split=False):
+        """Run the check. Returns (rc, stdout + stderr), or (rc, stdout, stderr) with split=True."""
         args = args or ("--base", "origin/main")
         run_env = dict(GIT_ENV, **(env or {}))
         run_env.pop("CODE_CHECK_TOOLS", None)
@@ -173,6 +174,8 @@ class Case(unittest.TestCase):
         r = subprocess.run([sys.executable, os.path.join(self.tree, "lint", "check_comment_narration.py"), *args],
                            cwd=self.tree, capture_output=True, text=True, encoding="utf-8", errors="replace",
                            env=run_env)
+        if split:
+            return r.returncode, r.stdout, r.stderr
         return r.returncode, r.stdout + r.stderr
 
     def fake_tool(self, name, body):
@@ -895,6 +898,138 @@ class SwiftScan(Case):
         self.base({"keep.py": "x = 1\n"})
         self.change({"Urls.swift": 'let u = "http://x red on main"\nlet v = "/* green on the base */"\n'})
         self.assertClean()
+
+
+class ShellScan(Case):
+    def lint_shell(self, path, src, later, traps=()):
+        """Add one shell file on a base and lint it. The hit on the later line comes first, since it shows the file
+        was scanned. Then no hit on each trap needle's line, then exit 1. Returns the output."""
+        self.base({"keep.py": "x = 1\n"})
+        self.change({path: src})
+        rc, out = self.lint()
+        self.assertHit(out, path, at(src, later))
+        for needle in traps:
+            self.assertNoHit(out, path, at(src, needle))
+        self.assertEqual(rc, 1, out)
+        return out
+
+    def test_full_line_comment_in_an_sh_file_is_flagged(self):
+        self.lint_shell("x.sh", "echo ok\n# fixed in round 2\n", "fixed in round 2")
+
+    def test_trailing_comment_after_a_command_is_flagged(self):
+        self.lint_shell("x.sh", "make  # fixed in round 2\n", "fixed in round 2")
+
+    def test_exact_incident_comment_in_hooks_is_flagged_as_a_date(self):
+        out = self.lint_shell("hooks/x.sh", "echo ok\n# (incident 2026-11-07, /base_run.txt)\n", "(incident 2026-11-07")
+        self.assertIn("2026-11-07", self.hit_line(out, "hooks/x.sh", 2), out)
+
+    def test_extensionless_file_with_a_bin_sh_shebang_is_flagged(self):
+        self.lint_shell("bin/tool", "#!/bin/sh\n# fixed in round 2\n", "fixed in round 2")
+
+    def test_extensionless_file_with_a_bin_bash_shebang_is_flagged(self):
+        self.lint_shell("bin/tool", "#!/bin/bash\n# fixed in round 2\n", "fixed in round 2")
+
+    def test_extensionless_file_with_a_usr_bin_env_bash_shebang_is_flagged(self):
+        self.lint_shell("bin/tool", "#!/usr/bin/env bash\n# fixed in round 2\n", "fixed in round 2")
+
+    def test_bash_file_comment_is_flagged(self):
+        self.lint_shell("x.bash", "echo ok\n# fixed in round 2\n", "fixed in round 2")
+
+    def test_comment_after_a_multi_line_double_quoted_string_is_flagged(self):
+        self.lint_shell("x.sh", 'MSG="first\nsecond"  # fixed in round 2\n', "fixed in round 2")
+
+    def test_hash_in_double_quotes_after_an_escaped_quote_is_text(self):
+        src = r'echo "a \" # fixed on 2026-10-28"' + "\n# fixed in round 2\n"
+        self.lint_shell("x.sh", src, "fixed in round 2", traps=["fixed on 2026-10-28"])
+
+    def test_hash_in_single_quotes_is_text(self):
+        src = "echo '# fixed on 2026-10-28'\n# fixed in round 2\n"
+        self.lint_shell("x.sh", src, "fixed in round 2", traps=["fixed on 2026-10-28"])
+
+    def test_hash_in_ansi_c_quotes_after_an_escaped_quote_is_text(self):
+        src = r"echo $'it\'s # fixed on 2026-10-28'" + "\n# fixed in round 2\n"
+        self.lint_shell("x.sh", src, "fixed in round 2", traps=["fixed on 2026-10-28"])
+
+    def test_escaped_hash_is_text(self):
+        src = r"echo \# fixed on 2026-10-28" + "\n# fixed in round 2\n"
+        self.lint_shell("x.sh", src, "fixed in round 2", traps=["fixed on 2026-10-28"])
+
+    def test_hash_inside_a_word_is_text(self):
+        src = "echo a# fixed on 2026-10-28\n# fixed in round 2\n"
+        self.lint_shell("x.sh", src, "fixed in round 2", traps=["fixed on 2026-10-28"])
+
+    def test_dollar_hash_is_a_parameter_not_a_comment(self):
+        src = "echo $# fixed on 2026-10-28\n# fixed in round 2\n"
+        self.lint_shell("x.sh", src, "fixed in round 2", traps=["fixed on 2026-10-28"])
+
+    def test_length_expansion_hash_is_a_parameter_not_a_comment(self):
+        src = "echo ${#var} fixed on 2026-10-28\n# fixed in round 2\n"
+        self.lint_shell("x.sh", src, "fixed in round 2", traps=["fixed on 2026-10-28"])
+
+    def test_suffix_removal_hash_is_a_parameter_not_a_comment(self):
+        src = "echo ${x#*/} fixed on 2026-10-28\n# fixed in round 2\n"
+        self.lint_shell("x.sh", src, "fixed in round 2", traps=["fixed on 2026-10-28"])
+
+    def test_long_suffix_removal_hash_is_a_parameter_not_a_comment(self):
+        src = "echo ${x##*/} fixed on 2026-10-28\n# fixed in round 2\n"
+        self.lint_shell("x.sh", src, "fixed in round 2", traps=["fixed on 2026-10-28"])
+
+    def test_hash_in_a_plain_heredoc_body_is_text(self):
+        src = "cat <<EOF\n# fixed on 2026-10-28\nEOF\n# fixed in round 2\n"
+        self.lint_shell("x.sh", src, "fixed in round 2", traps=["# fixed on 2026-10-28"])
+
+    def test_hash_in_a_single_quoted_heredoc_body_is_text(self):
+        src = "cat <<'EOF'\n# fixed on 2026-10-28\nEOF\n# fixed in round 2\n"
+        self.lint_shell("x.sh", src, "fixed in round 2", traps=["# fixed on 2026-10-28"])
+
+    def test_hash_in_a_double_quoted_heredoc_body_is_text(self):
+        src = 'cat <<"EOF"\n# fixed on 2026-10-28\nEOF\n# fixed in round 2\n'
+        self.lint_shell("x.sh", src, "fixed in round 2", traps=["# fixed on 2026-10-28"])
+
+    def test_hash_in_a_backslash_heredoc_body_is_text(self):
+        src = r"cat <<\EOF" + "\n# fixed on 2026-10-28\nEOF\n# fixed in round 2\n"
+        self.lint_shell("x.sh", src, "fixed in round 2", traps=["# fixed on 2026-10-28"])
+
+    def test_hash_in_a_tab_stripped_heredoc_body_with_a_tab_terminator_is_text(self):
+        src = "cat <<-EOF\n\t# fixed on 2026-10-28\n\tEOF\n# fixed in round 2\n"
+        self.lint_shell("x.sh", src, "fixed in round 2", traps=["# fixed on 2026-10-28"])
+
+    def test_two_heredocs_on_one_line_each_hold_their_own_body(self):
+        src = "cat <<A <<B\none # fixed on 2026-10-28\nA\ntwo # fixed on 2026-10-28\nB\n# fixed in round 2\n"
+        self.lint_shell("x.sh", src, "fixed in round 2", traps=["one # fixed on 2026-10-28", "two # fixed on 2026-10-28"])
+
+    def test_here_string_does_not_swallow_the_next_line(self):
+        src = "cat <<<EOF fixed on 2026-10-28\n# fixed in round 2\n"
+        self.lint_shell("x.sh", src, "fixed in round 2", traps=["fixed on 2026-10-28"])
+
+    def test_lone_apostrophe_in_a_comment_does_not_hide_the_next_comment(self):
+        self.lint_shell("x.sh", "# don't rely on this\n# fixed in round 2\n", "fixed in round 2",
+                        traps=["# don't rely on this"])
+
+    def test_lone_apostrophe_in_an_unquoted_heredoc_body_does_not_hide_the_next_comment(self):
+        src = "cat <<EOF\ndon't fixed on 2026-10-28\nEOF\n# fixed in round 2\n"
+        self.lint_shell("x.sh", src, "fixed in round 2", traps=["don't fixed on 2026-10-28"])
+
+    def test_why_comment_gives_no_hit(self):
+        self.lint_shell("x.sh", "# git may be missing in a fresh container\n# fixed in round 2\n", "fixed in round 2",
+                        traps=["git may be missing"])
+
+    def test_shebang_on_line_one_gives_no_hit(self):
+        self.lint_shell("bin/run", "#!/bin/sh\n# fixed in round 2\n", "fixed in round 2", traps=["#!/bin/sh"])
+
+    def test_unclosed_double_quote_exits_unknown_with_the_path_on_stderr(self):
+        self.base({"keep.py": "x = 1\n"})
+        self.change({"open.sh": 'echo "never closed\n# fixed in round 2\n'})
+        rc, out, err = self.lint(split=True)
+        self.assertEqual(rc, 2, out + err)
+        self.assertIn("open.sh", err, out + err)
+
+    def test_unclosed_heredoc_exits_unknown_with_the_path_on_stderr(self):
+        self.base({"keep.py": "x = 1\n"})
+        self.change({"heredoc.sh": "cat <<EOF\n# fixed in round 2\n"})
+        rc, out, err = self.lint(split=True)
+        self.assertEqual(rc, 2, out + err)
+        self.assertIn("heredoc.sh", err, out + err)
 
 
 class Degraded(Case):
