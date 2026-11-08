@@ -1,11 +1,11 @@
 {
   "title": "An agent stopped and resumed under the same id is listed again when it stalls",
   "phase": "now",
-  "status": "doing",
+  "status": "ready",
   "order": 53,
   "owner": "coordinator",
   "lane": "session_013NEJKzPiiVLh3Sr1Jdoj76",
   "why": "A resumed agent keeps its old id, and the stall watch does not list it again.",
-  "note": "Third of three. Stacked on #1682. Filed from lane stall-watch-agents, 18:38 CST Nov 7. Started 19:37 CST Nov 7, stacked on #1682.",
-  "updatedAt": "2026-11-07T19:37:00-06:00"
+  "note": "Third of three. Stacked on #1682. Filed from lane stall-watch-agents, 18:38 CST Nov 7. Started 19:37 CST Nov 7, stacked on #1682. Built as #1730 (review record at 6653345), with runner 8 (20:10 CST).",
+  "updatedAt": "2026-11-07T20:10:00-06:00"
 }
