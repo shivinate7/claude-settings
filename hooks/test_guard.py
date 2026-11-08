@@ -5582,6 +5582,11 @@ sh("lane-lint-foreground: a comment line that names it is text, allowed",
 # forms in the foreground. Each is judged by its own rule or by none.
 sh("lane-lint-foreground: echo of the flag is text, allowed", "echo merge --lane-lint", "allow",
    cwd=NOGIT)
+# A wrapper around that echo is text too: the shell it hands on runs echo, never merge.
+sh('lane-lint-foreground: bash -c around an echo of the flag is text, allowed',
+   'bash -c "echo merge --lane-lint 1"', "allow", cwd=NOGIT)
+sh('lane-lint-foreground: a $(...) around an echo of the flag is text, allowed',
+   'echo "$(echo merge --lane-lint 1)"', "allow", cwd=NOGIT)
 sh("lane-lint-foreground: grep for the flag in merge.py is text, allowed",
    "grep -n lane-lint merge/merge.py", "allow", cwd=NOGIT)
 sh('lane-lint-foreground: a commit message that names the flag is text, allowed',
