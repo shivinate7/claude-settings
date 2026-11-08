@@ -9171,7 +9171,7 @@ d['updatedAt']='2026-11-02T05:40:00Z';json.dump(d,open(p,'w'),indent=1,ensure_as
 EOF
 git -C $W commit -am "Triage 5: notes
 
-Co-Authored-By: x" 2>&1|tail -1; git -C $W push origin roadmap 2>&1|tail -1; git -C $W log --oneline -1""".replace("@DOTENV@", ENV)
+Co-Authored-By: x" 2>&1|tail -1 && git -C $W push origin roadmap 2>&1|tail -1; git -C $W log --oneline -1""".replace("@DOTENV@", ENV)
 
 
 # A heredoc body that no shell or interpreter runs is data, even when it names an env file. Incident
