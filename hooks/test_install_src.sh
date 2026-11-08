@@ -3071,8 +3071,8 @@ cloud_env_path3() {
 }
 
 cloud_env_config1() {
-  name="cloud_env_config1: a cloud install with CLAUDE_CONFIG_DIR in a folder with a space writes a PATH line that finds verdict and wait-pid under that config dir's bin"
-  h=$(new_home); co="$work/cloud_env_config1-checkout"; cfg="$h/config dir"
+  name="cloud_env_config1: a cloud install with CLAUDE_CONFIG_DIR in a folder whose name has a space and a single quote writes a PATH line that finds verdict and wait-pid under that config dir's bin"
+  h=$(new_home); co="$work/cloud_env_config1-checkout"; cfg="$h/o'brien dir"
   code_check_fixture "$co" || { bad "$name" "fixture build failed"; rm -rf "$h"; return; }
   envf="$h/claude-env"; : > "$envf"
   hk_envrun "$co" PATH="$PATH" HOME="$h" CLAUDE_CODE_REMOTE=true CLAUDE_ENV_FILE="$envf" CLAUDE_CONFIG_DIR="$cfg"

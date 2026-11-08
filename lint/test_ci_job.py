@@ -1188,11 +1188,11 @@ def pipx_runs_pinned_ruff():
 
 class CodeCheckFromCopiedInstall(Job):
     """A cloud install copies bin/ci-job into ~/.claude/bin, with no symlink. install() copies no action beside it, so a
-    remote uses: finds only the checkout the global rules file names. land_code_check() adds the two files install.sh
-    lands in ~/.claude/actions/code-check, and then the copy beside bin is the one a remote uses: finds first. A remote
-    uses: reaches code_check.py through the copy beside ci-job, else that checkout, or reads unknown. A local uses: runs
-    the repo under test's own code_check.py: from a copy it never borrows another checkout's, and in the repo under test
-    with no actions/code-check it must FAIL."""
+    remote uses: finds only the checkout the global rules file names. land_code_check() adds the two files code_check.py
+    reads, copied as install.sh lands them in ~/.claude/actions/code-check. Then the copy beside bin is the one a remote
+    uses: finds first. A remote uses: reaches code_check.py through the copy beside ci-job, else that checkout, or reads
+    unknown. A local uses: runs the repo under test's own code_check.py: from a copy it never borrows another checkout's,
+    and in the repo under test with no actions/code-check it must FAIL."""
 
     # The branch builder and the git helper are LintTools' (one home): this class calls them, it does not copy them.
     git = LintTools.git
@@ -1221,8 +1221,9 @@ class CodeCheckFromCopiedInstall(Job):
         return os.path.join(cfg, "bin", "ci-job"), cfg
 
     def land_code_check(self, cfg):
-        """The two files code_check.py reads, copied to ~/.claude/actions/code-check as install.sh lands them: it
-        reads standard.json beside itself and imports nothing else from the folder."""
+        """Copies the two files code_check.py reads to ~/.claude/actions/code-check. install.sh lands every plain file
+        directly in that folder; these two are enough, since code_check.py reads standard.json beside itself and
+        imports nothing else from the folder."""
         dst = os.path.join(cfg, "actions", "code-check")
         os.makedirs(dst)
         for name in ("code_check.py", "standard.json"):
@@ -1243,12 +1244,17 @@ class CodeCheckFromCopiedInstall(Job):
         if not pipx_runs_pinned_ruff():
             self.skipTest("pipx cannot run code_check's pinned ruff here: no pipx, or offline with no cached copy")
         self.lane({"a.py": 'print("fine")\n'})
-        empty = os.path.join(self.root, "empty-checkout")  # the rules file names this: it holds no code_check.py
-        os.makedirs(empty)
-        ci_job, cfg = self.install(empty)
-        self.land_code_check(cfg)  # so the only code_check.py the remote uses: can reach is the landed copy
+        # The checkout the rules file names has its own code_check.py, which fails. A remote uses: that reaches it reads FAIL.
+        pointer = os.path.join(self.root, "pointer-checkout")
+        os.makedirs(os.path.join(pointer, "actions", "code-check"))
+        with open(os.path.join(pointer, "actions", "code-check", "code_check.py"), "w", encoding="utf-8", newline="\n") as f:
+            f.write("raise SystemExit(1)\n")
+        ci_job, cfg = self.install(pointer)
+        self.land_code_check(cfg)  # the landed copy beside bin: the real code_check.py, which passes the clean diff
         rc, lines, out = self.run_job(self.CODE, args=self.LINT, script=ci_job, env={"CLAUDE_CONFIG_DIR": cfg})
         self.assertEqual((rc, self.verdicts(lines)), (0, ["PASS"]), out)
+        beside = os.path.join(cfg, "actions", "code-check", "code_check.py")
+        self.assertIn(beside, lines[0], out)  # the verdict line names the path the step ran: the copy beside bin
         with open(self.log, encoding="utf-8") as f:
             log = f.read()
         self.assertRegex(log, r"(?m)^code-check: PASS$", out + log)
