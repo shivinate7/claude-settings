@@ -413,8 +413,8 @@ MUTATIONS = [
      'return "stray" if merge != current() else ""', "guard", 'stacked lane, -u HEAD is silent'),
     # push-new-branch (the stray-branch refusal of a push at another branch's tip). Each mutant undoes one
     # arm of the judgement, and its required case is the allow or deny that arm alone decides. The HEAD
-    # exclusion in the tips read has no mutant: an origin/HEAD symref names a branch already in the tips, so
-    # dropping the exclusion changes no verdict a case can reach.
+    # exclusion in the tips read has no mutant: git writes origin/HEAD only as a symref to one of the remote's
+    # branches, so its sha is already a tip. Only a hand-made origin/HEAD, detached or off the remote, reaches it.
     ("push-new-branch: the call site is never taken",
      'if push_new_branch_hit(args, where, overrides):',
      'if False:', "guard", "push: a new branch at another branch's tip denies, the stray-branch incident"),
