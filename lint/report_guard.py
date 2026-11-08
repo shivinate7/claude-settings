@@ -543,8 +543,10 @@ NAMED_ROLES = {"builder", "reviewer", "test-author", "record-writer"}
 SPAWN_TOOLS = {"Agent", "Task"}
 MODEL_FAMILIES = ("haiku", "sonnet", "opus", "fable")
 # A model names the roles just before it: "builder sonnet", "builder: sonnet", "builder (sonnet)",
-# and "builder and reviewer sonnet" all count, and a full id ("reviewer claude-sonnet-5-5") reads as its family. A role matches as a whole token: "design reviewer" and
-# "design-reviewer" are matched whole, so they never read as "reviewer", and then dropped as untracked.
+# and "builder and reviewer sonnet" all count. A full id of the form claude-<family>-... ("reviewer
+# claude-sonnet-5-5") reads as its family; an older-order id such as claude-3-5-haiku-... is not read.
+# A role matches as a whole token: "design reviewer" and "design-reviewer" are matched whole, so they
+# never read as "reviewer", and then dropped as untracked.
 _ROLE = r"(?<![\w-])(?:design[\s-]+reviewer|builder|reviewer|test-author|record-writer)(?![\w-])"
 ROLE_MODEL_RE = re.compile(
     r"(" + _ROLE + r"(?:\s*(?:,|/|&|\band\b)\s*" + _ROLE + r")*)\s*[:(]?\s*(?:`+)?(?:claude-)?(haiku|sonnet|opus|fable)\b",
