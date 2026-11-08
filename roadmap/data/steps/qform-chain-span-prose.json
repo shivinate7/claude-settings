@@ -1,11 +1,11 @@
 {
   "title": "The question-form chain reader passes a step code span that holds prose joined by ;",
   "phase": "guards",
-  "status": "todo",
+  "status": "doing",
   "order": 680,
   "owner": "coordinator",
-  "lane": "",
+  "lane": "session_013NEJL2gUM72J6NNfjNQWrR",
   "why": "hooks/question_form.py's chain reader refuses a step code span that holds prose joined by `;`, such as `red flag; blue flag` or `the -x flag; the -v flag`. Found in #2024 round 2 (lane notes-fix-page, session_013NEJKzjkypcToggneCjJN8, 08:49 CST Nov 8). Main does the same.",
-  "note": "A false alarm. How often a real step holds such a span is unmeasured, so the lane first counts them on the page and in step text; if none, this becomes a note, not a build (roles-findings-are-debts-or-notes). Done check: a red test where a code span of prose joined by `;` passes and a real shell chain is still read. Filed by triage 08:49 CST Nov 8.",
-  "updatedAt": "2026-11-08T08:49:00-06:00"
+  "note": "A false alarm. How often a real step holds such a span is unmeasured, so the lane first counts them on the page and in step text; if none, this becomes a note, not a build (roles-findings-are-debts-or-notes). Done check: a red test where a code span of prose joined by `;` passes and a real shell chain is still read. Filed by triage 08:49 CST Nov 8. Sent by the coordinator 08:50 CST Nov 8 to lane notes-fix-other-2a (session_013NEJL2gUM72J6NNfjNQWrR), which has #1507 open in hooks/question_form.py.",
+  "updatedAt": "2026-11-08T08:50:00-06:00"
 }
