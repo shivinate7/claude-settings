@@ -14099,7 +14099,8 @@ unexpected(method + " " + rel)
             put(os.path.join(other, ".github/stamp.json"), json.dumps(config))
         sh(other, "git", "commit", "-qam", "stamp for a gh cost case")
         sh(other, "git", "push", "-q", "origin", "main")
-        sh(root, "git", "fetch", "-q", "origin")
+        # Keep origin/HEAD as the case left it: git 2.48+ creates a missing one on a plain fetch, which would skip the gh read the case counts.
+        sh(root, "git", "-c", "remote.origin.followRemoteHEAD=never", "fetch", "-q", "origin")
         listed = sh(root, "git", "ls-tree", "--name-only", "origin/main", "--", ".github/stamp.json")
         self.assertEqual(bool(listed), config is not None, "origin/main does not hold the stamp file this case names:\n" + listed)
         if config is not None:
@@ -14115,7 +14116,8 @@ unexpected(method + " " + rel)
                              f"the gh calls of {folder} are not the formula's ({sum(want.values())} wanted):\n" + repr(calls))
 
     def test_gh_calls_per_root_match_the_formula_with_and_without_a_done_pr(self):
-        """The gh calls per root are exact: the fake gh counts each one (gh_cost_per_root). The formula, per root, with D the done pull requests on
+        """The fake gh counts each gh call per root (gh_cost_per_root), and the calls match the formula below, bar the two exceptions after it.
+        The formula, per root, with D the done pull requests on
         the base, R the ready (not draft) ones on it, O the open ones on it, and P 1 when merge.requiredChecks is a list, else 0:
           repo reads     1, plus 1 when origin/HEAD is unset (the default branch: the same route as the repo name), plus 1 when the base has no
                          .github/stamp.json (load_config reads the default branch then, even when origin/HEAD is set)
@@ -14129,7 +14131,11 @@ unexpected(method + " " + rel)
         The batch and compare terms are exact when no done pull request is CI-busy and no compare reads ahead or identical, because `and` and
         `any` stop at the first hit. alpha: 1 + 2 + 3 + (1 + 3*2) + 1*3 = 16. bravo: 2 + 2 + 3 = 7, with no batch read. o/self, the test's own
         folder, reads nothing. The three variant cases below change one term each: two run ids on head 5 (18 and 8), no stamp.json (17 and 8),
-        and a pinned list (15 and 7)."""
+        and a pinned list (15 and 7).
+        The two exceptions, both outside the formula: a stamp.json with no defaultBranch adds one repo read (load_config calls
+        host_default_branch for it, as it does for a missing stamp), and each extra page of a list read adds one call (pages asks for
+        page n+1 only while the Link header has rel="next"). Every list here fits on one page, and the stamps the cases write (CONFIG)
+        name defaultBranch, so neither exception applies to a case here."""
         calls = self.gh_cost_per_root()
         self.assert_gh_kinds(calls, self.COST_ALPHA, self.COST_BRAVO)
 
