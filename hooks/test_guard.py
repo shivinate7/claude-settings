@@ -1264,7 +1264,8 @@ def build_fixtures():
                    os.path.join(CHECK, "hooks"), os.path.join(EXPORT, "hooks"),
                    os.path.join(MIXED, ".git"), os.path.join(MIXED, "sub", "hooks"),
                    os.path.join(MIXED, "nested", ".git"), os.path.join(MIXED, "nested", "hooks"),
-                   os.path.join(NESTINST, "inner", "hooks")):
+                   os.path.join(NESTINST, "inner", "hooks"),
+                   os.path.join(CHECK, "sub"), os.path.join(EXPORT, "sub")):   # plain subfolders, no marker
         os.makedirs(folder, exist_ok=True)
     write(os.path.join(CFG, "settings.json"), "{}\n")
     write(os.path.join(CFG, "CLAUDE.md"), "rules\n")
@@ -12619,6 +12620,17 @@ add("cap: a Write of a checkout's root settings.json from a hooks folder of a ch
 add("cap: a Write of a checkout's root settings.json that sets no model variable, from a nested checkout, stays allowed",
     "allow", tool="Write", cwd=NESTED_HOOKS, file_path=slash(os.path.join(MIXED, "settings.json")),
     content=json.dumps({"theme": "dark"}))
+
+# THE PLACE CLAUSE IS NO WIDER THAN A ROOT. A folder under a checkout is not a place: `CHECK/sub` holds no install
+# script, and the checkout's root is `CHECK`, so no link reads `sub`'s settings file. The same holds under an install
+# folder: `EXPORT/sub` is not the install folder, and its own settings file is none of the places. Each write sets the
+# model variable, so the place alone decides, and each stays allowed from a folder outside both.
+CHECK_SUB_SETTINGS = slash(os.path.join(CHECK, "sub", "settings.json"))
+EXPORT_SUB_SETTINGS = slash(os.path.join(EXPORT, "sub", "settings.json"))
+add("cap: a Write of a settings file in a plain subfolder of a checkout, from a folder outside it, stays allowed",
+    "allow", tool="Write", cwd=NOGIT, file_path=CHECK_SUB_SETTINGS, content=cap_settings())
+add("cap: a Write of a settings file in a plain subfolder of an install folder, from a folder outside it, stays allowed",
+    "allow", tool="Write", cwd=NOGIT, file_path=EXPORT_SUB_SETTINGS, content=cap_settings())
 
 sh("cap: a heredoc writing a project settings file asks",
    "cat <<'JSON' > " + PROJ_LOCAL + "\n" + cap_settings() + "\nJSON",
