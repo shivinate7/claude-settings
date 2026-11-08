@@ -13453,6 +13453,9 @@ SHELL_TEST_WRITES = (
     ("heredoc, unquoted EOF, open-write of tests/x.py",
      "python3 - <<EOF\nopen('tests/x.py', 'w').write('x')\nEOF"),
     ("python -c open-write of tests/x.py", PY_C_WRITE),
+    # The python3 -c form of this write is refused. The `uv run python -c` form is the same act, and it is not
+    # refused, on main or on 0343b6758.
+    ("uv run python -c open-write of tests/t.py", "uv run python -c \"open('tests/t.py','w')\""),
     ("node -e writeFileSync of web/a.test.js",
      "node -e \"require('fs').writeFileSync('web/a.test.js','x')\""),
     ("echo redirect onto src/test_app.py", TEST_REDIRECTS[0]),
@@ -13520,6 +13523,15 @@ sh("builder-test: shell pytest -k with a mutating word is allowed",
 # CONTROL. A bare `pytest` is an interpreter's runner too, so it reads its path words like `python3 -m pytest`.
 sh("builder-test: shell bare pytest -k with a mutating word is allowed",
    "pytest -k copy tests/test_guard.py", "allow", **BR)
+# A test run through a runner's wrapper or an env prefix reads its path words, as the bare runner does.
+sh("builder-test: shell uv run pytest -k with a mutating word naming a test file is allowed",
+   "uv run pytest -k copy hooks/test_guard.py", "allow", **BR)
+sh("builder-test: shell npm test -t with a mutating word naming a test file is allowed",
+   "npm test -- -t copy hooks/test_guard.py", "allow", **BR)
+sh("builder-test: shell pytest -rA -k with a mutating word naming a test file is allowed",
+   "pytest -rA -k copy hooks/test_guard.py", "allow", **BR)
+sh("builder-test: shell MUTATE_ONLY env prefix on a run of the guard's test file is allowed",
+   "MUTATE_ONLY=touch python3 hooks/test_guard.py", "allow", **BR)
 sh("builder-test: python heredoc that reads tests/x.py, rebinds the name, then writes src/app.py is allowed",
    "python3 - <<'EOF'\np='tests/x.py'\nprint(open(p).read())\np='src/app.py'\nopen(p,'w').write('x')\nEOF",
    "allow", **BR)
