@@ -2290,6 +2290,44 @@ class RefusalCiteFixtureTests(unittest.TestCase):
         self.assertEqual(status_of(src, "loop-id"), ["not resolved"],
                          "the run-time rebinding after the read reaches it when the loop re-enters")
 
+    def test_a_run_time_walrus_in_a_conditional_test_reaches_the_read_before_it(self):
+        src = branch_src('    hit = helper(seg)\n'
+                         '    refuse(tool, "deny", "cond-id", hit[1] if (hit := pick(seg)) else "", hit[0])\n'
+                         '    return None\n')
+        self.assertEqual(status_of(src, "cond-id"), ["not resolved"],
+                         "a conditional runs its test before its body, so the walrus in the test reaches hit[1]")
+
+    def test_a_run_time_walrus_in_a_comprehension_if_reaches_its_element(self):
+        src = branch_src('    hit = helper(seg)\n'
+                         '    return [refuse(tool, "deny", "comp-id", hit[1], hit[0])\n'
+                         '            for x in seg if (hit := pick(x))]\n')
+        self.assertEqual(status_of(src, "comp-id"), ["not resolved"],
+                         "a comprehension's if runs before its element, so the walrus in the if reaches the element")
+
+    def test_a_while_test_reads_a_run_time_rebind_in_the_body(self):
+        src = branch_src('    hit = helper(seg)\n'
+                         '    while refuse(tool, "deny", "while-id", hit[1], hit[0]) or pick(seg):\n'
+                         '        hit = pick(seg)\n'
+                         '    return None\n')
+        self.assertEqual(status_of(src, "while-id"), ["not resolved"],
+                         "the body rebinds hit before the test runs again, so the test's read is not resolved")
+
+    def test_a_lambda_called_after_a_run_time_rebind_stays_not_resolved(self):
+        src = branch_src('    hit = helper(seg)\n'
+                         '    later = lambda: refuse(tool, "deny", "lambda-id", hit[1], hit[0])\n'
+                         '    hit = pick(seg)\n'
+                         '    return later()\n')
+        self.assertEqual(status_of(src, "lambda-id"), ["not resolved"],
+                         "the lambda runs after the rebind, so the read it makes is of the run-time hit")
+
+    def test_a_lambda_defined_after_a_run_time_rebind_stays_not_resolved(self):
+        src = branch_src('    hit = helper(seg)\n'
+                         '    hit = pick(seg)\n'
+                         '    later = lambda: refuse(tool, "deny", "lambda-guard", hit[1], hit[0])\n'
+                         '    return later()\n')
+        self.assertEqual(status_of(src, "lambda-guard"), ["not resolved"],
+                         "the run-time rebind comes before the lambda, so the read is of the run-time hit")
+
     def test_an_empty_reason_is_not_resolved(self):
         self.assertEqual(status_of('refuse(t, "deny", "empty-id", "", m)\n', "empty-id"), ["not resolved"])
 
