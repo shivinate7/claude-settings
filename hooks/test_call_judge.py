@@ -2175,7 +2175,7 @@ def case_past_ruling_owner_answered_page_item_stays_refused():
 
 
 def case_past_ruling_owner_decision_stays_refused():
-    # Control, green today: a decision whose ruling line names the owner ("Owner, 2026-10-27: ...") is still refused.
+    # Control: a decision whose ruling line names the owner still refuses a question it settles. The owner-only change does not reach decisions.
     box = good_box(goal=CAPS_GOAL, problem=CAPS_PROBLEM, based=CAPS_BASED, options=CAPS_OPTIONS)
     r = run_hook(question_input(box=box, cwd=DECISIONS_REPO), answer=ALLOW, cite_shown="generous on purpose")
     check("owner-only control: a decision whose ruling line names the owner still refuses a question it settles",

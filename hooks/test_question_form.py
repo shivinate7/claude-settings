@@ -1480,7 +1480,7 @@ def case_past_rulings_skips_the_debt_notes_file():
           notes_mark not in text, text[:200])
 
 
-# ------------------------------------------------------------------ owner ruling forms (decision question-form)
+# ------------------------------------------------------------------ OWNER_RULING_RE: which sentences count (decision question-form)
 # OWNER_RULING_RE marks a sentence that names the owner as its source. A ruling sentence matches; an incident, a
 # gripe, a deferral, or a passing mention of the owner does not.
 OWNER_RULING_MUST_MATCH = (
