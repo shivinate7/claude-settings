@@ -5458,6 +5458,38 @@ sh("git-after-cd: an if ! check whose then body is echo to fd 3 && exit 1, then 
 sh("git-after-cd: an if ! check whose then body is printf of a non-number && exit 1, then ; a git push -u, is refused",
    "if ! pytest -q; then printf '%%d' abc && exit 1; fi; %s push -u origin b" % VCS, "deny", "git-after-cd",
    cwd=NOGIT, carries=("&&",))
+# A `||` TAIL THAT SUCCEEDS ON A FAILED CHECK. An echo or a command builtin after `||` exits 0 whatever the check did,
+# so the `&&` after it reaches the push, and the push runs on the check's failure. A subshell of an echo, an echo piped
+# to cat, and a `cat log` of a file that may be missing read the same way. Bash runs each push here on a failed check,
+# so each one is refused.
+sh("git-after-cd: an echo of a make substitution, then || exit 1 and && a git push -u, is refused",
+   "echo $(make x) || exit 1 && %s push -u origin b" % VCS, "deny", "git-after-cd", cwd=NOGIT,
+   carries=("&&",))
+sh("git-after-cd: a make a, then || echo bad, then || exit 1 and ; a git push -u, is refused",
+   "make a || echo bad || exit 1; %s push -u origin b" % VCS, "deny", "git-after-cd", cwd=NOGIT,
+   carries=("&&",))
+sh("git-after-cd: a check, then || command echo and && a git push -u, is refused",
+   "pytest -q || command echo x && %s push -u origin b" % VCS, "deny", "git-after-cd", cwd=NOGIT,
+   carries=("&&",))
+sh("git-after-cd: a check, then || /bin/echo and && a git push -u, is refused",
+   "pytest -q || /bin/echo x && %s push -u origin b" % VCS, "deny", "git-after-cd", cwd=NOGIT,
+   carries=("&&",))
+sh("git-after-cd: a check, then || a subshell echo and && a git push -u, is refused",
+   "pytest -q || (echo x) && %s push -u origin b" % VCS, "deny", "git-after-cd", cwd=NOGIT,
+   carries=("&&",))
+sh("git-after-cd: a check, then || an echo piped to cat and && a git push -u, is refused",
+   "pytest -q || echo x | cat && %s push -u origin b" % VCS, "deny", "git-after-cd", cwd=NOGIT,
+   carries=("&&",))
+sh("git-after-cd: a check, then || cat of a log file and && a git push -u, is refused",
+   "pytest -q || cat log && %s push -u origin b" % VCS, "deny", "git-after-cd", cwd=NOGIT,
+   carries=("&&",))
+# A SUBSTITUTION ASSIGNED TO A NAME, AND A TEST OF GIT STATUS. The assignment's status is its substitution's, so the
+# `|| exit 1` runs when make fails and the push after `;` is never reached. The test is true only on a clean tree, so
+# the `|| exit 1` stops the push on a dirty one. Both push forms pass.
+sh("git-after-cd: a substitution assigned to a name, then || exit 1 and ; a git push -u, passes",
+   "out=$(make x) || exit 1; %s push -u origin b" % VCS, "allow", cwd=NOGIT)
+sh("git-after-cd: a test of git status output, then || exit 1 and ; a git push -u, passes",
+   '[ -z "$(%s status --porcelain)" ] || exit 1; %s push -u origin b' % (VCS, VCS), "allow", cwd=NOGIT)
 # A CRASH IN THE CD WALK. The walk runs inside cd_walk's try, and a raise there must read as stranded: the
 # git-after-cd rule refuses the push after the cd, and the crash is logged as a guard crash. The planted copy
 # raises at that try. The intact copy, on the same landing cd, is the control, so the refusal can only come
@@ -9155,6 +9187,12 @@ sh("env: heredoc-allow: a cat write, the same body with a bash <<X inner word, i
    "cat > /tmp/b.md <<'EOF'\nbash <<X cat " + ENV + "\nEOF", "allow", cwd=NOGIT)
 sh("env: heredoc-allow: a cat write, the same body with a lone apostrophe and a hash, is allowed",
    "cat > /tmp/b.md <<'EOF'\nDon't stop here\nbash <<EOF cat " + ENV + "\n# a note\nEOF", "allow", cwd=NOGIT)
+# A LONE QUOTE IN A PYTHON BODY DOES NOT HIDE THE PUSH AFTER THE EOF. The body is data, so the `;` after EOF starts
+# the commands: the commit, then the push, which runs whatever the commit did. The unmatched `'` in the body must not
+# open a quote that runs to the end of the command.
+sh("env: heredoc-refuse: a python heredoc body with a lone quote, then ; a git commit and a git push, is refused",
+   "python3 - <<'EOF'\nprint('don't')\nEOF\n%s commit -m x; %s push origin b" % (VCS, VCS), "deny", "git-after-cd",
+   cwd=NOGIT, carries=("&&",))
 
 # A body that a shell or an interpreter runs stays in view, and its env read still refuses.
 sh("env: heredoc-refuse: a bash heredoc with a quoted delimiter and an env read in the body, denies",
