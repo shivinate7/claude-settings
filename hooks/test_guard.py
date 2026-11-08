@@ -28759,6 +28759,10 @@ role_model_refuse("role-model: fix check: reviewer on sonnet with Round 1 of 3 f
                   carries=(ROLE_REMEDY, FIX_MARKER))
 role_model_refuse("role-model: fix check: reviewer on sonnet with Re: ahead of the marker on line one is denied",
                   "reviewer", "sonnet", "Re: " + FIX_MARKER + " of PR 7", carries=(ROLE_REMEDY, FIX_MARKER))
+# The row ends on \b, so a longer word that starts with the marker does not lift a reviewer on Sonnet.
+role_model_refuse("role-model: fix check: reviewer on sonnet with Fix checkpoint on line one is denied",
+                  "reviewer", "sonnet", FIX_MARKER + "point for PR 2296",
+                  carries=(ROLE_REMEDY, ROUND_MARKER, FIX_MARKER) + FREE_ROUND_MARKERS)
 role_model_allow("role-model: fix check: reviewer on sonnet with the marker after blank lines, as its first non-blank "
                  "line, is allowed", "reviewer", "sonnet", "\n\n" + FIX_MARKER + ". Re-run the cases.")
 role_model_allow("role-model: fix check: the same reviewer spawn as a Task on sonnet is allowed", "reviewer", "sonnet",
