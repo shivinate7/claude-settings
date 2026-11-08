@@ -5742,6 +5742,26 @@ for _bg in (False, True):
     add("wait-until: gh run watch 7 stays refused%s" % (" under run_in_background" if _bg else ""),
         "deny", "waiter", cwd=NOGIT, command="gh run watch 7", **({"run_in_background": True} if _bg else {}))
 
+# DENY under run_in_background, each aimed at a branch of clock_loop or waiter_verdict. Each is refused on
+# the builder's head. Four of them go green under one revert of their own branch. The two-loop case goes
+# green only when its single-loop check and the two-pause rule are both reverted. The reverts are named in
+# the commit message.
+add("wait-until: a loop on a literal time with no date stays refused under run_in_background", "deny",
+    "waiter", cwd=NOGIT, command="until [ -s 2026-11-06T22:48:00 ]; do sleep 15; done; cmd", run_in_background=True)
+add("wait-until: a loop on date with no literal time stays refused under run_in_background", "deny",
+    "waiter", cwd=NOGIT, command='until [ "$(date +%s)" -gt "$X" ]; do sleep 15; done; cmd', run_in_background=True)
+add("wait-until: a loop whose test has a && clause after it stays refused under run_in_background", "deny",
+    "waiter", cwd=NOGIT,
+    command=r'until [ "$(date -u +%Y-%m-%dT%H:%M:%S)" \> "2026-11-06T22:48:00" ] && true; do sleep 15; done; cmd',
+    run_in_background=True)
+add("wait-until: two clock loops in one command stay refused under run_in_background", "deny",
+    "waiter", cwd=NOGIT,
+    command=(r'until [ "$(date -u +%Y-%m-%dT%H:%M:%S)" \> "2026-11-06T22:48:00" ]; do sleep 15; done; '
+             r'until [ "$(date -u +%Y-%m-%dT%H:%M:%S)" \> "2026-11-07T00:00:00" ]; do sleep 15; done; cmd'),
+    run_in_background=True)
+add("wait-until: a bare sleep of 600 s with nothing after it stays refused under run_in_background", "deny",
+    "waiter", cwd=NOGIT, command="sleep 600", run_in_background=True)
+
 # The remedy of a pause names the time form in backticks, so the remedy check below reads it.
 sh("wait-until: the remedy of a pause names the time form", "sleep 30", "deny", "waiter", cwd=NOGIT,
    carries=("`wait-until",))
