@@ -4,16 +4,16 @@
     python3 lint/test_check_plan_refuter.py
 
 A plan record is a file that the range adds directly in the plans home (lint/layout.json, kind "plans"),
-named <name>.md. Each such plan must carry a `Refuter:` line at line start, optionally wrapped as
-`**Refuter:**`, followed by a word after the colon (and any `**`), and outside a fenced code block. The check
-reads the file as it stands at HEAD. Plans that the range only modifies, plans in a subfolder of the plans home, and files that
-are not .md are not judged.
+named <name>.md. Each such plan must carry a `Refuter:` line at line start, optionally wrapped as `**Refuter:**`,
+outside a fenced code block. The first word after the colon (and any `**`) must be the refuter role, compared
+case-insensitively with REFUTER_ROLE in hooks/guard_core.py. The check reads the file as it stands at HEAD. Plans
+that the range only modifies, plans in a subfolder of the plans home, and files that are not .md are not judged.
 
     python3 lint/check_plan_refuter.py --base <sha> [--root <dir>]
         # the base is env BASE_SHA when no flag is given; the repo is the current directory unless --root names one
 
-Exit 0: clean. Exit 1: a judged plan lacks the line, and its path is named. Exit 2: UNKNOWN, because no
-base was given or git could not read the range. Unknown is never 0.
+Exit 0: clean. Exit 1: a judged plan lacks a line that names the refuter role, and its path is named.
+Exit 2: UNKNOWN, because no base was given or git could not read the range. Unknown is never 0.
 
 Each case builds a fixture repo under this run's folder (lint/_test_temp.py): a base commit that marks the
 repo rolled out to the layout, then change commits on top. The check runs as the copy at
@@ -31,6 +31,8 @@ sys.path.insert(0, HERE)
 import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py)
 import _test_temp  # noqa: E402  test-temp-standard: one run folder per test run (lint/_test_temp.py)
 import layout  # noqa: E402  the one home of the plans kind: lint/layout.json, kinds.plans
+sys.path.append(os.path.join(HERE, "..", "hooks"))  # appended, so no hooks module shadows a lint one
+from guard_core import REFUTER_ROLE  # noqa: E402  the one home of the refuter role's name (hooks/guard_core.py)
 MODULE = os.path.abspath(os.environ.get("CHECK_PLAN_REFUTER_UNDER_TEST") or os.path.join(HERE, "check_plan_refuter.py"))
 sys.path.insert(0, os.path.join(HERE, "..", "testing"))
 import tracked_tree  # noqa: E402  rm_tree clears read-only git objects (testing/tracked_tree.py)
@@ -39,8 +41,8 @@ PLANS = layout.layout()["kinds"]["plans"]["path"]  # the default plans home, rea
 EXTRAS_REL = ".claude/layout-extras.json"  # the layout's extras file; rolled out, so layout.path() reads PLANS
 EXTRAS_TEXT = '{"kinds": {}, "rolled-out": true}\n'
 TITLE = "# Plan: widget rollout\n\nWhat we build, and why.\n\n"
-REFUTER = "Refuter: Plan opus, 2026-11-06, PASS with two changes"
-BOLD_REFUTER = "**Refuter:** reviewer sonnet, 2026-11-06, PASS"
+REFUTER = "Refuter: %s opus, 2026-11-06, PASS with two changes" % REFUTER_ROLE
+BOLD_REFUTER = "**Refuter:** %s sonnet, 2026-11-06, PASS" % REFUTER_ROLE
 OLD_PLAN = TITLE + "No review line. Written before the rule.\n"
 SRC = "def widget():\n    return 1\n"
 BIG_LINES = 3000  # a full-size plan: far more lines than a verdict needs
@@ -172,17 +174,66 @@ class PlanRefuterCase(Fixture):
                 self.assertStatus(rel, "A")
                 self.assertNamed(rel)
 
-    def test_refuter_with_a_word_after_it_passes(self):
-        """Control for the case above: a verdict with a word after the colon still passes."""
+    def test_refuter_with_the_role_and_a_verdict_passes(self):
+        """Control for the cases above: a refuter role and a verdict after the colon pass."""
         rel = PLANS + "/word-refuter.md"
-        self.commit("add plan", {rel: plan("Refuter: Plan opus, 2026-11-06, PASS")})
+        self.commit("add plan", {rel: plan("Refuter: %s opus, 2026-11-06, PASS" % REFUTER_ROLE)})
         self.assertStatus(rel, "A")
         self.assertClean()
+
+    def test_refuter_line_with_the_role_and_holds_passes(self):
+        """The line a refuter writes, plain and wrapped: the refuter role first, then the model, date and verdict."""
+        for index, line in enumerate(["Refuter: %s opus, 2026-11-08, holds" % REFUTER_ROLE,
+                                      "**Refuter:** %s opus, 2026-11-08, holds" % REFUTER_ROLE]):
+            with self.subTest(line=line):
+                self.rebase_here()
+                rel = PLANS + "/holds-%d.md" % index
+                self.commit("add holds plan", {rel: plan(line)})
+                self.assertStatus(rel, "A")
+                self.assertClean()
+
+    def test_refuter_role_matches_in_any_case(self):
+        """The role is compared case-insensitively, so the upper-case form of the constant passes too."""
+        rel = PLANS + "/upper-role.md"
+        self.commit("add plan", {rel: plan("Refuter: %s opus, 2026-11-08, holds" % REFUTER_ROLE.upper())})
+        self.assertStatus(rel, "A")
+        self.assertClean()
+
+    def test_planner_graded_refuter_line_is_flagged(self):
+        """A planner who grades its own plan is no refuter: the role field names the planner, so the plan is named."""
+        for index, line in enumerate(["Refuter: Plan opus, 2026-11-06, PASS",
+                                      "**Refuter:** Plan opus, 2026-11-06, PASS"]):
+            with self.subTest(line=line):
+                self.rebase_here()
+                rel = PLANS + "/planner-graded-%d.md" % index
+                self.commit("add planner-graded plan", {rel: plan(line)})
+                self.assertStatus(rel, "A")
+                self.assertNamed(rel)
+
+    def test_reviewer_graded_refuter_line_is_flagged(self):
+        rel = PLANS + "/reviewer-graded.md"
+        self.commit("add reviewer-graded plan", {rel: plan("Refuter: reviewer sonnet, 2026-11-06, PASS")})
+        self.assertStatus(rel, "A")
+        self.assertNamed(rel)
+
+    def test_refuter_role_not_first_is_flagged(self):
+        """The role is the first word after the colon. The refuter word later in the line does not name the role."""
+        rel = PLANS + "/role-not-first.md"
+        self.commit("add plan", {rel: plan("Refuter: Plan %s opus, 2026-11-06, PASS" % REFUTER_ROLE)})
+        self.assertStatus(rel, "A")
+        self.assertNamed(rel)
+
+    def test_refuter_role_as_prefix_of_a_longer_word_is_flagged(self):
+        """A prefix of the role is not the role: a check that reads startswith would pass this line."""
+        rel = PLANS + "/role-prefix.md"
+        self.commit("add plan", {rel: plan("Refuter: %sx opus, 2026-11-08, holds" % REFUTER_ROLE)})
+        self.assertStatus(rel, "A")
+        self.assertNamed(rel)
 
     def test_the_retired_word_is_no_refuter_line(self):
         """The line is `Refuter:` now. The retired word, with a verdict after it, is no line, so the plan is named."""
         rel = PLANS + "/retired-word.md"
-        self.commit("add plan with the retired word", {rel: plan("Critic: Plan opus, 2026-11-06, PASS")})
+        self.commit("add plan with the retired word", {rel: plan("Critic: %s opus, 2026-11-06, PASS" % REFUTER_ROLE)})
         self.assertStatus(rel, "A")
         self.assertNamed(rel)
 
@@ -196,8 +247,8 @@ class PlanRefuterCase(Fixture):
                 self.assertNamed(rel)
 
     def test_refuter_mid_line_is_flagged(self):
-        for index, line in enumerate(["The refuter: none", "See Refuter: Plan opus, PASS",
-                                      "Review by Refuter: Plan opus, PASS"]):
+        for index, line in enumerate(["The refuter: none", "See Refuter: %s opus, PASS" % REFUTER_ROLE,
+                                      "Review by Refuter: %s opus, PASS" % REFUTER_ROLE]):
             with self.subTest(line=line):
                 self.rebase_here()
                 rel = PLANS + "/mid-line-%d.md" % index
@@ -234,10 +285,11 @@ class PlanRefuterCase(Fixture):
         self.assertClean()
 
     def test_refuter_after_a_closed_fence_passes(self):
-        """The fence closes, and a real line after it counts. The quote and the # inside the fence are plain text to it."""
+        """The fence closes, so a real line after it counts: a fence that never closed would hide that line. The
+        quote and the # inside the fence are plain text to it."""
         rel = PLANS + "/fence-then-refuter.md"
         self.commit("add plan", {rel: plan("Don't skip the review.", "```", "# not a heading",
-                                           "Refuter: example only", "```", "", REFUTER)})
+                                           "Refuter: %s opus, example only" % REFUTER_ROLE, "```", "", REFUTER)})
         self.assertStatus(rel, "A")
         self.assertClean()
 
