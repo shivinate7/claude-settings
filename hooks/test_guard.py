@@ -10488,7 +10488,8 @@ MCP_COMMENT = "mcp__github__add_issue_comment"
 MCP_UPDATE = "mcp__github__update_issue_comment"
 REVIEW_PR = 12
 REVIEW_COMMENT = 4242                         # a conversation comment on REVIEW_PR, answered by the record fakes; not 12, so a read that takes it for a pull request number finds none
-REVIEW_COMMENTS = {REVIEW_COMMENT: REVIEW_PR}
+REVIEW_TEXT_ID = "6723721346"                 # a second conversation comment on REVIEW_PR, named as a string of digits, as an MCP call may send it
+REVIEW_COMMENTS = {REVIEW_COMMENT: REVIEW_PR, int(REVIEW_TEXT_ID): REVIEW_PR}
 REVIEW_LIVE = "3a7c9e21" * 5                  # the PR's live head, in every fake below
 REVIEW_TAIL = REVIEW_LIVE[:32] + "0badbeef"   # the live head with a wrong tail, the way a hand-typed sha goes wrong
 REVIEW_OLD = "5e0f1a2b" * 5                   # the head before a push
@@ -11015,6 +11016,13 @@ mcp_post("review-record: a marker with no record is refused, MCP update_issue_co
          rule=REVIEW_RULE, comment_id=REVIEW_COMMENT)
 mcp_post("review-record: a record with a round skipped is refused, MCP update_issue_comment", REVIEW_SKIPPED_ROUND, "deny",
          rule=REVIEW_RULE, comment_id=REVIEW_COMMENT)
+# The update tool's comment id may arrive as a string of digits. Each case below takes the verdict and the gh reads of its int-id twin above.
+mcp_post("review-record: a record at the live head is allowed, MCP update_issue_comment with a string comment id", review_record(),
+         "allow", comment_id=REVIEW_TEXT_ID)
+mcp_post("review-record: a wrong head tail is refused, MCP update_issue_comment with a string comment id", review_record(head=REVIEW_TAIL),
+         "deny", rule=REVIEW_RULE, carries=(REVIEW_RENDER,), comment_id=REVIEW_TEXT_ID)
+mcp_post("review-record: a record with no Stamp line is refused, MCP update_issue_comment with a string comment id", REVIEW_NO_STAMP,
+         "deny", rule=REVIEW_RULE, comment_id=REVIEW_TEXT_ID)
 
 
 def comment_read_check():
@@ -11049,6 +11057,15 @@ REVIEW_LOG_CHECKS.append(("review-record:a marker in prose below the first line 
 REVIEW_LOG_CHECKS.append(("review-record:a marked update whose comment cannot be read is allowed and noted on stderr, MCP update_issue_comment",
                          review_note(MCP_UPDATE, mcp_input(review_record(), comment_id=REVIEW_COMMENT),
                                      GHRECORDBROKEN + os.pathsep + PY_PATH)))
+# The string-id twins of the read counts above: the same verdict and the same gh reads as the int id.
+REVIEW_LOG_CHECKS.append(("review-record:a marked update at the live head with a string comment id makes two gh reads, MCP update_issue_comment",
+                         review_reads(MCP_UPDATE, mcp_input(review_record(), comment_id=REVIEW_TEXT_ID), "allow", 2)))
+REVIEW_LOG_CHECKS.append(("review-record:a marked update with a wrong head tail and a string comment id makes two gh reads, and is refused, MCP update_issue_comment",
+                         review_reads(MCP_UPDATE, mcp_input(review_record(head=REVIEW_TAIL), comment_id=REVIEW_TEXT_ID), "deny", 2)))
+REVIEW_LOG_CHECKS.append(("review-record:a malformed marked update with a string comment id is refused before any gh read, MCP update_issue_comment",
+                         review_reads(MCP_UPDATE, mcp_input(REVIEW_NO_STAMP, comment_id=REVIEW_TEXT_ID), "deny", 0)))
+REVIEW_LOG_CHECKS.append(("review-record:a comment with no marker and a string comment id makes no gh read, MCP update_issue_comment",
+                         review_reads(MCP_UPDATE, mcp_input("Round 1 ran. No review record yet.", comment_id=REVIEW_TEXT_ID), "allow", 0)))
 
 
 # =========================================================================== 5g. archive of a lane

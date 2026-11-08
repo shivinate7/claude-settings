@@ -12695,9 +12695,11 @@ def posted_body(test, out):
     test.assertTrue(ends, "the printed record has no CI line:\n" + out)
     return "\n".join(lines[start:ends[0] + 1]) + "\n"
 
-def review_comment(cid, number, body, created="2026-10-02T00:00:00Z"):
-    """A comment on issue or pull request `number`, as the repo-wide comment list gives it."""
-    return {"id": cid, "created_at": created, "issue_url": f"https://api.github.com/repos/o/r/issues/{number}", "body": body}
+def review_comment(cid, number, body, created="2026-10-02T00:00:00Z", updated=None):
+    """A comment on issue or pull request `number`, as the repo-wide comment list gives it. GitHub keeps created_at when a comment is
+    edited and sets updated_at to the edit's time; `updated` is that time, and without it the comment was never edited."""
+    return {"id": cid, "created_at": created, "updated_at": updated or created,
+            "issue_url": f"https://api.github.com/repos/o/r/issues/{number}", "body": body}
 
 def list_line(test, out, n):
     """The one `merge --reviewed` line for pull request n."""
@@ -15334,6 +15336,17 @@ class ReviewCutover(ReviewEnv):
             rc, out, err = self.run_args("--reviewed", host=host)
         self.assertEqual(rc, 0, out + err)
         self.assertRegex(list_line(self, out, 7), rf"^#7 feat7 {REVIEW_HEAD[:9]} done: ", "the unstamped record created before the cutover is not done")
+
+    def test_reviewed_reads_an_unstamped_record_edited_after_the_cutover_as_bad(self):
+        # The comment was created before the cutover and its body was edited after it, with no stamp. The cutover reads the
+        # comment's time, so the edit must be read by its updated time. It reads bad, not done.
+        comment = review_comment(1, 7, without_stamp(record_text(rounds=REVIEW_PASS)), created=REVIEW_BEFORE, updated=REVIEW_AFTER)
+        with cutover_at(REVIEW_CUTOVER):
+            host = PullsHost([batch_pull(7, REVIEW_HEAD)], {REVIEW_HEAD: [batch_run("checks", "completed", "success")]}, comments=[comment])
+            rc, out, err = self.run_args("--reviewed", host=host)
+        self.assertEqual(rc, 0, out + err)
+        self.assertRegex(list_line(self, out, 7), rf"^#7 feat7 {REVIEW_HEAD[:9]} bad: ",
+                         "an unstamped body edited after the cutover reads done, not bad:\n" + out)
 
     def test_an_unstamped_record_created_after_the_cutover_reads_bad(self):
         rec = parse_at(self, without_stamp(record_text(rounds=REVIEW_PASS)), created=REVIEW_AFTER, cutover=REVIEW_CUTOVER)
