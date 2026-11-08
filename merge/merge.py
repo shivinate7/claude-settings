@@ -3117,16 +3117,14 @@ def review_parse(text, created=None, cutover=None):
         return bad(0)
     pats = (r"PR: #(\d+)", rf"Head: ({REVIEW_SHA})", r"Kind: (\S+)", r"Guard or check: (\S+)")
     found = []
-    for i, pat in enumerate(pats, 1):
+    for i, pat in enumerate(pats, 1):  # each value is checked on its own line, so the earliest bad line is named
         m = re.fullmatch(pat, line(i) or "", re.ASCII)
-        if not m:
+        if not m or (i == 3 and m.group(1) not in REVIEW_KINDS):
+            return bad(i)
+        if i == 4 and (m.group(1) not in REVIEW_GUARDS or (found[2] == "docs-only" and m.group(1) == "yes")):  # docs-only means no guard or check (decision docs-only-prs-skip-review)
             return bad(i)
         found.append(m.group(1))
     n, head, kind, guard = found
-    if kind not in REVIEW_KINDS:
-        return bad(3)
-    if guard not in REVIEW_GUARDS or (kind == "docs-only" and guard == "yes"):  # docs-only means no guard or check (decision docs-only-prs-skip-review)
-        return bad(4)
     i, rounds, last, fix = 5, [], 0, None
     while line(i) is not None and not line(i).startswith("Net value: "):
         if fix:  # nothing but Net value follows the fix check line

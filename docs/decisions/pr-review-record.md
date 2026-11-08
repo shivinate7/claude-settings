@@ -112,7 +112,7 @@ Rule `pr-review-record`, in `hooks/guard.py` (PreToolUse).
 
 ## The cutover
 
-A record created before the stamp's merge commit reads as it did before: with no Stamp line, it still parses. A Stamp line that is there must match. A record created at or after that commit needs the stamp, so an unstamped one reads `bad`. The cutover is `review_stamp_since`: the committer time of the first first-parent commit on `origin/<base>` whose `merge/merge.py` holds `REVIEW_STAMP_SALT =`. When no such commit is found, or the read fails, every record reads as before. `Host.review_comments` gives each body with its created time. `merge --reviewed` and the `--fix-check` earlier read pass that time and the cutover to `parse_review`. A new post has no created time, so the guard always needs the stamp. Open PRs keep their old records. Each record a lane renders after the cutover carries the stamp.
+A record created before the stamp's merge commit reads as it did before: with no Stamp line, it still parses. A Stamp line that is there must match. A record created at or after that commit needs the stamp, so an unstamped one reads `bad`. The cutover is `review_stamp_since`: the committer time of the first first-parent commit on `origin/<base>` whose `merge/merge.py` holds `REVIEW_STAMP_SALT =`. When no such commit is found, or the read fails, every record reads as before. `Host.review_comments` gives each body with its created time. `merge --reviewed` and the `--fix-check` earlier read pass that time and the cutover to `review_parse`. A new post has no created time, so the guard always needs the stamp. Open PRs keep their old records. Each record a lane renders after the cutover carries the stamp.
 
 ## Lane picks
 
