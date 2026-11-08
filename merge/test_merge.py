@@ -1255,6 +1255,62 @@ class GitLockListing(Env):
                 self.fail("listed read a dropped listing as no stop at all")
         self.assertIsInstance(stopped, merge.NetStop, "listed stopped a dropped listing as a plain Stop, not as a network stop")
 
+@contextlib.contextmanager
+def module_as(name, module):
+    """sys.modules[name] is `module` inside the block, and what it was before after it (or no entry again). Other entries are left alone."""
+    had, prior = name in sys.modules, sys.modules.get(name)
+    sys.modules[name] = module
+    try:
+        yield
+    finally:
+        if had:
+            sys.modules[name] = prior
+        else:
+            sys.modules.pop(name, None)
+
+class StaleGitReads(unittest.TestCase):
+    """merge.py imports hooks/git_reads.py by name. A copy-mode install can leave an older git_reads in sys.modules, with no lists_refs
+    or listing_text. merge.py must still load over it, and its sh must read a successful ls-remote from stdout alone (decision merge-lock).
+    The control loads merge.py over the real git_reads and must pass, so the stale case goes red only on the stale module."""
+
+    def load_fresh(self, git_reads_module):
+        """-> merge/merge.py loaded again under a private name, its `git_reads` import served by `git_reads_module`. sys.modules and sys.path
+        are put back after the load: merge.py inserts its folders into sys.path when it loads."""
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("merge_fresh_load", os.path.join(HERE, "merge.py"))
+        fresh = importlib.util.module_from_spec(spec)
+        with unittest.mock.patch.object(sys, "path", list(sys.path)), module_as("git_reads", git_reads_module):
+            spec.loader.exec_module(fresh)
+        return fresh
+
+    def assert_ls_remote_reads_stdout_alone(self, fresh):
+        ref, sha = "refs/heads/main", "1" * 40
+        seen, real_run = [], fresh._nowindow.run
+        def run_with_stderr_line(args, *a, **kw):
+            if args[3:4] == ["ls-remote"]:
+                seen.append(args)
+                return subprocess.CompletedProcess(args, 0, stdout=f"{sha}\t{ref}\n", stderr="trace: built-in: git ls-remote origin\n")
+            return real_run(args, *a, **kw)
+        with unittest.mock.patch.object(fresh._nowindow, "run", run_with_stderr_line):
+            rc, out = fresh.sh(["git", "-C", "checkout", "ls-remote", "origin", ref])
+        self.assertTrue(seen, "scope: ls-remote never reached the faked run, so the case proves nothing")
+        self.assertEqual((rc, out), (0, f"{sha}\t{ref}"), "merge.sh read a successful ls-remote's stderr line into its text")
+
+    def test_a_fresh_load_over_the_real_git_reads_reads_ls_remote_from_stdout_alone(self):
+        self.assert_ls_remote_reads_stdout_alone(self.load_fresh(sys.modules["git_reads"]))
+
+    def test_a_fresh_load_over_a_stale_git_reads_still_loads_and_reads_stdout_alone(self):
+        real = sys.modules["git_reads"]
+        stale = types.ModuleType("git_reads")  # an older copy: the names merge.py imports from it are absent
+        self.assertFalse(hasattr(stale, "lists_refs") or hasattr(stale, "listing_text"),
+                         "scope: the stand-in has the names merge.py imports, so the load proves nothing")
+        try:
+            fresh = self.load_fresh(stale)
+        except ImportError as e:
+            self.fail(f"merge.py did not load over a stale git_reads that lacks lists_refs: {e}")
+        self.assertIs(sys.modules.get("git_reads"), real, "the stale git_reads was not put back after the load")
+        self.assert_ls_remote_reads_stdout_alone(fresh)
+
 class Guards(Env):
     def test_moved_head_is_refused_and_nothing_is_claimed(self):
         old = self.head()
