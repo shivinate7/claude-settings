@@ -2504,7 +2504,7 @@ MUTATIONS = [
      "or _message_noun_use(words, at)):",
      "or False):",
      "guard", "message-role: a message adding red cases for the guard fix in a product file, to a test-author, is allowed"),
-    ("message-role: a participle before at or in never makes a path a locator",
+    ("message-role: a participle before at never makes a path a locator",
      "words[at - 2][0] in MESSAGE_LOCATOR_PARTICIPLES:",
      "words[at - 2][0] in ():",
      "guard", "message-role: a message fixing the failure reported at a test path, to a builder, is allowed"),

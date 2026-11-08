@@ -18,13 +18,13 @@ This rule saves a wasted round. It does not stop an unseen test change. `role_wr
 
 ## What a message edits
 
-The verdict is per clause. A refusal needs an edit verb: edit, change, fix, update, modify, replace, rewrite, add, remove, delete, drop, re-point, write, append, make (`make the fix in X`). After a determiner or a preposition, `fix`, `update` and `change` are nouns (`the guard fix in X`, `a bug fix`). Each edit verb governs one object:
+The verdict is per clause. A refusal needs an edit verb: edit, change, fix, update, modify, replace, rewrite, add, remove, delete, drop, re-point, write, append, make (`make the fix in X`). `fix`, `update` and `change` are nouns when the words before them run back to a determiner with no stop word between (`the guard fix in X`, `a bug fix`). Each edit verb governs one object:
 
 - `only` or `just` may sit between the verb and its object (`Edit only X`).
 - A path followed by `is not your job`, `is not yours`, `isn't your job` or `isn't yours` is not an object (`Fix X is not your job`).
 - The object is the first path after the verb in its clause, and a path joined to it by `and`, `or` or a comma. A later path is a spec or a target: `Make guard.py handle the case in tests/x.py` and `Fix guard.py for/as/to satisfy ... tests/x.py` edit guard.py only.
 - With no path right after the verb (a determiner or `file` may sit between), a noun phrase then `in`, `at`, `of`, `to` or `into` and the path governs that path (`Fix the failing case in X`, `Make the fix in X`, `Add a case to X`). After another preposition (`for`, `as`, `with`) the path is a spec.
-- A participle right before `at` makes the path a locator, not an object (`Fix the failure reported at X:120`). The participles are reported, raised, shown, logged and seen (`MESSAGE_LOCATOR_PARTICIPLES` in hooks/guard.py). Before `in`, the path stays the object (`Fix the bug raised in X`). Ruling: lane, 2026-11-08 11:30 CST, process-only.
+- A participle right before `at` makes the path a locator, not an object (`Fix the failure reported at X:120`). The participles are reported, raised, shown, logged and seen (`MESSAGE_LOCATOR_PARTICIPLES` in hooks/guard.py). Before `in`, the path stays the object (`Fix the bug raised in X`). Ruling: lane, 2026-11-08 11:30 CST, narrowed to `at` and the five participles 13:03 CST, process-only.
 - A gerund after `by` governs its own direct path (`Make it pass by fixing X`, `Fix the bug by updating X`).
 - A noun phrase whose head is note, report or summary governs nothing (`Make a note of the failures in X`).
 - A test noun as the head (case, cases, test, assert) makes the path a spec when a test-author is sent it (`Add red cases for the empty brief in hooks/guard.py`). A builder is still judged on that path.
@@ -44,6 +44,9 @@ The guard stops Claude's mistakes, not an attacker (`guard-guards-mistakes-only`
 - A message that names no path (`fix the failing case`) passes. The sender names the file in the incident form and in most messages; the builder's own write guards stay behind it.
 - A path built in a way the reader does not see (a glob, a variable, `the file above`) passes.
 - A verb outside the list (`touch`, `tweak`, `patch`) passes.
+- A run-on clause can read an edit verb as a noun. The walk back to a determiner does not stop at a copula, a subordinator or a dash, so `The cases are broken fix the bug in X` and `The test is wrong — fix the assert in X` pass. A comma, a colon, `;`, `and` or `then` still stops it.
+- The `at` locator applies to any edit verb, not only to a failure, so `Delete the case logged at X:120` passes.
+- A file tag reads as an order: `Files: X (edit), Y (read only)` governs Y. A negated object (`change nothing in X`, `add no case to X`) also asks. Each costs one ask or one deny.
 - A carry reaches the nearest earlier clause of the sentence, else one sentence back. A path two sentences back is not read. `Run X. Fix the failure` carries nothing, because X was run, though the failure may sit in X.
 - A read path, or a path that led its clause, carries only to an anaphor right after the verb, and only across clauses. `Read X. Fix the failing case.`, `Read X and fix it` and `X is wrong. Fix the failing assert.` pass.
 - A noun compound is no anaphor, so `Read tests/x.py. Fix the fixture bug.` and `Fix the guard tests` pass. A role noun before `and` is a compound too: `Fix the tests and the guard` carries nothing.
