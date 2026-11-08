@@ -991,7 +991,7 @@ def _name_filters(words) -> tuple:
     for a `find` that holds `-o`, `!`, `-not` or a group, which can widen or invert what `-name` picks, and
     for a value that holds `$` or a backtick, a brace sequence (`{a..b}`, which `_brace_split` reads as text),
     a backslash left after one unescape pass (`\\\\`), or a brace list of `_BRACE_LIMIT` words or more. A value's
-    brace list is several filters (`_brace_words`), and a backslash escape reads as its literal character (a quoted
+    unquoted brace list is several filters (`_brace_words`, run before quote removal; a quoted brace is text), and a backslash escape reads as its literal character (a quoted
     `\\*`, `\\?` or `\\[` as a one-character class outside a bracket expression and the bare character inside one, `_quoted_glob_escapes`), so a walk counts a file that any of them matches. A `find` stops at its first `-exec`."""
     index = resolve_command(tuple(words))
     if index is None:
@@ -1014,12 +1014,13 @@ def _name_filters(words) -> tuple:
                 values.append(word.partition("=")[2])
             elif word == "--include" and at + 1 < len(args):
                 values.append(args[at + 1])
-    values = [_unquoted(_quoted_glob_escapes(value)) for value in values]
-    if any(re.search(r"[$`]", value) for value in values):
+    values = [_quoted_glob_escapes(value) for value in values]
+    if any(re.search(r"[$`]", _unquoted(value)) for value in values):
         return ()
     filters = []
     for value in values:
-        variants = _brace_words(value)
+        # split on braces before quote removal, so a quoted `{a,b}` stays text as `find` and `grep` read it
+        variants = [_unquoted(variant) for variant in _brace_words(value)]
         if len(variants) >= _BRACE_LIMIT:
             return ()
         for variant in variants:
