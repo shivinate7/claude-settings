@@ -3555,7 +3555,7 @@ def main(argv, host=None, lock=None):
                     if found["behind_by"]:
                         problem = f"the fix base {a.fix_check[0][:9]} is {'behind' if not found['ahead_by'] else 'diverged from'} the live head {info['head'][:9]}: it must be an ancestor of it"
                 if not problem and max((i for i, *_ in last["rounds"]), default=0) >= REVIEW_LAST_ROUND:  # a passing fix keeps what the final round gave (decision hold-unsafe-after-round-3); the record it follows is the newest earlier one, or the --fix-base-record source, first fix check or chained
-                    moved = [f"{flag} may not be {new}, the record it follows has {old}" for flag, old, new in (("--net-value", last["net"], a.net_value), ("--guard", last["guard"], a.guard), ("--kind", last["kind"], a.kind)) if old != new]
+                    moved = [f"{label} {old}, so {flag} may not be {new}" for label, flag, old, new in (("Net value", "--net-value", last["net"], a.net_value), ("Guard or check", "--guard", last["guard"], a.guard), ("Kind", "--kind", last["kind"], a.kind)) if old != new]
                     if moved:
                         problem = f"the record on head {last['head'][:9]} is at the final round, and a fix check keeps its net value, guard and kind: " + "; ".join(moved)
                 if problem:
