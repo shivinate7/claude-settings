@@ -9023,6 +9023,21 @@ sh("draft-pr: a perl body whose backtick span nests $( ) with gh pr create, run 
 sh("draft-pr: a perl body whose backtick span nests <( ) with gh pr create, fed to perl, is refused",
    "\n".join(["perl - <<'EOF'", "print `cat <(gh pr create -t x)`;", "EOF"]), "deny", "draft-pr",
    cwd=NOGIT, carries=DRAFT_REMEDY, lacks=DRAFT_LACKS)
+# A lone backtick inside a quoted string opens no span. The span rule must not pair it with the next backtick, or the
+# real span after it goes unread. Each body below holds such a stray backtick before a real span with the gh call.
+sh("draft-pr: a node file with a stray backtick in a single-quoted string, then an execSync gh pr create span, is refused",
+   "\n".join(["cat > f.js <<'EOF'", "const b = 'Fixes `foo';", "execSync(`gh pr create -t x`);", "EOF", "node f.js"]),
+   "deny", "draft-pr", cwd=NOGIT, carries=DRAFT_REMEDY, lacks=DRAFT_LACKS)
+sh("draft-pr: a ruby file with a stray backtick in a single-quoted string, then a backtick gh pr create span, is refused",
+   "\n".join(["cat > f.rb <<'EOF'", "puts 'use ` here'", "puts `gh pr create -t x`", "EOF", "ruby f.rb"]),
+   "deny", "draft-pr", cwd=NOGIT, carries=DRAFT_REMEDY, lacks=DRAFT_LACKS)
+sh("draft-pr: a perl file with an escaped backtick in a double-quoted string, then a span nesting $( gh pr create ), is refused",
+   "\n".join(["cat > f.pl <<'EOF'", r'print "\`npm\`";', "print `$(gh pr create -t x)`;", "EOF", "perl f.pl"]),
+   "deny", "draft-pr", cwd=NOGIT, carries=DRAFT_REMEDY, lacks=DRAFT_LACKS)
+# A quote in a comment opens no string. A lone apostrophe in `# don't` must not swallow the real span after it.
+sh("draft-pr: a perl file with an apostrophe in a comment, then a backtick gh pr create span, is refused",
+   "\n".join(["cat > f.pl <<'EOF'", "# don't", "print `gh pr create -t x`;", "EOF", "perl f.pl"]),
+   "deny", "draft-pr", cwd=NOGIT, carries=DRAFT_REMEDY, lacks=DRAFT_LACKS)
 # Limits of the draft-pr rule (decision `draft-until-reviewed`), no case: `gh api -X POST .../pulls`,
 # `hub pull-request`, and short-flag clusters such as `-dt x` (refused, a rare false alarm).
 
