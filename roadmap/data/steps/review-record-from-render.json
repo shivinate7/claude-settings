@@ -6,6 +6,6 @@
   "owner": "coordinator",
   "lane": "session_013NEJL3KYY5NYuanNGEoyjW",
   "why": "Incident about 15:10 CST Nov 7: lane notes-fix-page posted a review record on #1475 with a hand-typed wrong head tail.",
-  "note": "The guard refuses a GitHub comment post whose body holds the review-record marker unless the record's Head is the PR's live head and its PR line names the target PR. Topic review-rounds. Guard change, full review rounds. Red test first.",
-  "updatedAt": "2026-11-07T15:15:00-06:00"
+  "note": "The guard refuses a GitHub comment post whose body holds the review-record marker unless the record's Head is the PR's live head and its PR line names the target PR. Topic review-rounds. Guard change, full review rounds. Red test first. Sighting and scope add (lane lane-lint-hook-suites, 05:49 CST Nov 8; its proposed step review-record-sha-exists is folded here): at 05:27 CST the lane posted a #1916 review record with a hand-typed Head whose tail it invented, and fixed it within a minute. The live-head check here covers Head; also refuse a Fix check sha that is no commit (`git cat-file -e`).",
+  "updatedAt": "2026-11-08T05:50:00-06:00"
 }
