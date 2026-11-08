@@ -188,9 +188,9 @@ def body_at(start):
     return PR_1969_BODY.replace(BELOW_START, start)
 
 
-def ancestry_body(start):
-    """A lane body that names parent #1785 and reads `git diff <start> feat`."""
-    return "Merge after: #%d\n\nReview only `git diff %s feat`.\n" % (PARENT_PR, start)
+def ancestry_body(start, end="feat"):
+    """A lane body that names parent #1785 and reads `git diff <start> <end>`, the end the lane branch by default."""
+    return "Merge after: #%d\n\nReview only `git diff %s %s`.\n" % (PARENT_PR, start, end)
 
 
 class ParentHost(tm.FakeHost):
@@ -594,6 +594,16 @@ class LaneLint(CiJobStub, tm.CloudSession):
             self.assertIn(head[:7], text, "the refusal for %s does not name the head of #%d:\n%s" % (what, number, text))
         self.assertEqual(self.worktrees(), 1, "the refused lint left a tree behind")
 
+    def assert_review_range_end_refused(self, body, end, what, parents):
+        """The lint refuses `body` before ci-job runs for its end: rc 1, no lint run, and a refusal that names the end. `what` names the range."""
+        self.assertRegex(body, "(?i)merge after", "the body names no parent, so the check is not in play")  # scope before subject (P7)
+        self.assertIn("`git diff", body, "the body holds no backticked range, so the check is not in play")
+        rc, text, runs = self.review_range_run(body, parents)
+        self.assertEqual(rc, 1, "the lint passed %s, whose end %s is not the lane head, its branch or a prefix of the head:\n%s" % (what, end, text))
+        self.assertEqual(runs, [], "ci-job ran for %s, whose end %s is refused: %s" % (what, end, runs))
+        self.assertIn(end, text, "the refusal for %s does not name its end %s:\n%s" % (what, end, text))
+        self.assertEqual(self.worktrees(), 1, "the refused lint left a tree behind")
+
     def assert_review_range_passes(self, body, what, parents):
         """The check passes `body` and the lint runs once: rc 0, one lint run, one PASS line. `what` names the body in each message."""
         rc, text, runs = self.review_range_run(body, parents)
@@ -858,6 +868,36 @@ class LaneLint(CiJobStub, tm.CloudSession):
         self.assertEqual(rc, 1, "the check passed a start that is on no remote:\n%s" % text)
         self.assertEqual(runs, [], "ci-job ran for a start that is on no remote: %s" % runs)
         self.assertEqual(self.worktrees(), 1, "the refused lint left a tree behind")
+
+    def test_review_range_refuses_an_end_that_is_an_older_lane_commit_before_ci_job_runs(self):
+        """The range ends at a lane commit below the lane head, so the commits above that end are skipped: refused."""
+        self.use_ci_job(PASSING, 0)
+        h = self.fork_history()
+        older = h["L"]
+        self.push_ref("feat", self.commit_in_other(older, "lane-above.txt", "lane commit above the first"))
+        self.assertEqual(tm.sh(self.co, "git", "merge-base", older, "origin/feat"), older, "the fixture's end is not below the lane head")
+        self.assert_review_range_end_refused(ancestry_body(h["P"][:9], older[:9]), older[:9], "a range that ends at an older lane commit", one_parent(h["P"]))
+
+    def test_review_range_refuses_an_end_that_names_another_branch_before_ci_job_runs(self):
+        self.use_ci_job(PASSING, 0)
+        h = self.fork_history()
+        self.assert_review_range_end_refused(ancestry_body(h["P"][:9], PARENT_BRANCH), PARENT_BRANCH, "a range that ends at another branch", one_parent(h["P"]))
+
+    def test_review_range_refuses_a_hex_end_under_seven_characters_before_ci_job_runs(self):
+        self.use_ci_job(PASSING, 0)
+        h = self.fork_history()
+        short = h["L"][:6]  # a prefix of the lane head, one character short of the seven an end needs
+        self.assert_review_range_end_refused(ancestry_body(h["P"][:9], short), short, "a range with a 6-character end", one_parent(h["P"]))
+
+    def test_review_range_passes_an_end_that_is_the_lane_branch_or_a_prefix_of_its_head(self):
+        """The end may be the lane branch, bare or as origin/<branch>, or a 7-character-or-longer prefix of the lane head, with the .. and ... forms too."""
+        self.use_ci_job(PASSING, 0)
+        h = self.fork_history()
+        start = h["P"][:9]
+        for rng in ("git diff %s feat", "git diff %s origin/feat", "git diff %s " + h["L"][:7], "git diff %s..feat", "git diff %s...feat"):
+            with self.subTest(range=rng):
+                body = "Merge after: #%d\n\nReview only `%s`.\n" % (PARENT_PR, rng % start)
+                self.assert_review_range_passes(body, "a range that reads `%s`" % (rng % start), one_parent(h["P"]))
 
     def test_review_range_refuses_a_start_below_a_bold_merge_after_line(self):
         self.use_ci_job(PASSING, 0)
