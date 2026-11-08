@@ -1,11 +1,11 @@
 {
   "title": "A message to a running agent passes the same role check as its spawn brief",
   "phase": "now",
-  "status": "doing",
+  "status": "ready",
   "order": 268.62,
   "owner": "coordinator",
   "lane": "session_013NEJL3bvXbg7UQvaKpwwq9",
   "why": "Lane lane-lint-no-silent-pass sent a running builder a test edit at about 21:20 CST Nov 7; it was caught before the builder acted. No guard judges SendMessage by the target agent's role.",
-  "note": "Related: resume-finished-reviewer-no-tree, notes-fix-builder-mutants. Filed from the coordinator, 21:27 CST Nov 7; filed 21:27 CST.",
-  "updatedAt": "2026-11-07T21:27:00-06:00"
+  "note": "Related: resume-finished-reviewer-no-tree, notes-fix-builder-mutants. Filed from the coordinator, 21:27 CST Nov 7; filed 21:27 CST. Follow-up msg-role-false-alarms built as PR #1849, head 208c0c0b4: lane lint PASS, round 3 PASS, net value positive; merges after #1805 in the same batch, with runner 8. #1798 closes as replaced when #1805 merges. Records on #1849: debt message-role-go-green; notes message-role-plural-nouns, message-role-gerund-other, message-role-product-noun-prep, message-role-odd-quotes, session-worktree-strands-agents (lane, 03:04 CST Nov 8). The last is a gap and became step session-worktree-strands-agents.",
+  "updatedAt": "2026-11-08T03:04:00-06:00"
 }
