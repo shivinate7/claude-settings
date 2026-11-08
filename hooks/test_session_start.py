@@ -34,8 +34,10 @@ TMP_SEAM = "CLAUDE_SETTINGS_TMP_CANDIDATE"  # the hook's /tmp candidate, read on
 WINDOWS_UNAMES = ("MINGW64_NT-10.0-26200", "MSYS_NT-10.0-26200", "CYGWIN_NT-10.0-26200")
 ON_WINDOWS = os.name == "nt"  # a Windows runner: the hook writes no TMPDIR line there
 # Git's sh.exe builds PATH with /usr/bin, which holds the real uname, ahead of the Windows PATH, so a fake uname
-# set in the environment is shadowed there. The shell prepends the fake folder itself. Derived from the PATH_FIRST
-# of hooks/test_wrappers.py, which replaces PATH whole; a whole replace would drop the /usr/bin tools the hook needs.
+# set in the environment is shadowed there. The shell prepends the fake folder itself. Every start of sh.exe does
+# that, so the hook is sourced in this same shell (`. "$0"`, the hook path as $0), never exec'd: a second start
+# would shadow the fake again. Derived from the PATH_FIRST of hooks/test_wrappers.py, which replaces PATH whole;
+# a whole replace would drop the /usr/bin tools the hook needs.
 PREPEND_FAKE = ('if command -v cygpath >/dev/null 2>&1; then FAKE_BIN=$(cygpath -u "$FAKE_BIN"); fi; '
                 'PATH="$FAKE_BIN:$PATH"; export PATH; ')
 
@@ -71,6 +73,17 @@ def sh_exe():
         if os.path.isfile(candidate):
             return candidate
     sys.exit("fixture setup failed: Git sh.exe not found")
+
+
+def shell_path(path):
+    """`path` in the shell's own form: Git Bash's /c/... on Windows, from cygpath -u. Elsewhere, `path` as it is."""
+    if os.name != "nt":
+        return path
+    answer = subprocess.run([sh_exe(), "-c", 'cygpath -u "$1"', "sh", path], capture_output=True, text=True,
+                            timeout=60)
+    if answer.returncode != 0 or not answer.stdout.strip():
+        sys.exit("fixture setup failed: cygpath could not convert %r: %s" % (path, answer.stderr.strip()))
+    return answer.stdout.strip()
 
 
 def vcs(where, *args):
@@ -156,9 +169,7 @@ class SessionStartAgentWorktreeNoticeTests(unittest.TestCase):
             argv = [sh_exe(), HOOK]
         else:
             env["FAKE_BIN"] = self.fake_uname(uname)
-            env["HOOK_SH"] = sh_exe().replace("\\", "/")
-            env["HOOK"] = HOOK.replace("\\", "/")
-            argv = [sh_exe(), "-c", PREPEND_FAKE + 'exec "$HOOK_SH" "$HOOK"']
+            argv = [sh_exe(), "-c", PREPEND_FAKE + '. "$0"', HOOK.replace("\\", "/")]
         answer = subprocess.run(argv, input=payload, capture_output=True, text=True,
                                 env=env, cwd=where, timeout=120)
         self.last_stderr = answer.stderr
@@ -924,21 +935,25 @@ class SessionStartTmpdirTests(SessionStartAgentWorktreeNoticeTests):
                 self.assertNotRegex(text, TMPDIR_LINE, "the filesystem root got an export TMPDIR= line: %r" % text)
 
     def test_a_python_answer_naming_no_dir_is_never_exported(self):
-        candidate = os.path.join(self.root, "no-candidate-dir")
-        gone = os.path.join(self.root, "answered-but-absent")
-        self.assertFalse(os.path.isdir(candidate), "the candidate names a dir, so the case tests nothing")
-        self.assertFalse(os.path.isdir(gone), "the python answer names a dir, so the case tests nothing")
+        candidate_dir = os.path.join(self.root, "no-candidate-dir")
+        gone_dir = os.path.join(self.root, "answered-but-absent")
+        self.assertFalse(os.path.isdir(candidate_dir), "the candidate names a dir, so the case tests nothing")
+        self.assertFalse(os.path.isdir(gone_dir), "the python answer names a dir, so the case tests nothing")
+        # The shell gets both paths in its own form, so the hook refuses each for being absent, not for its form.
+        # The fake uname answers Linux on every host: the python fallback runs only off Windows.
+        candidate, gone = shell_path(candidate_dir), shell_path(gone_dir)
         for fixture in FIXTURES:
             with self.subTest(fixture=fixture):
                 bin_dir, log = self.fake_python(gone)
-                path = self.env_run("gone-%s.sh" % fixture, fixture, None, tmp_candidate=candidate, path_dir=bin_dir)
+                path = self.env_run("gone-%s.sh" % fixture, fixture, None, tmp_candidate=candidate, path_dir=bin_dir,
+                                    uname="Linux")
                 self.assertTrue(os.path.exists(log), "the hook never reached the python fallback, so the case tests nothing")
                 text = self.read(path)
                 self.assertNotRegex(text, TMPDIR_LINE, "a python answer naming no dir got an export TMPDIR= line: %r" % text)
 
     def uname_probe(self, uname):
         """The answer `uname -s` gets in the hook's shell with the fake set: the fake's answer, once PREPEND_FAKE works."""
-        env = dict(os.environ, FAKE_BIN=self.fake_uname(uname), HOOK_SH=sh_exe().replace("\\", "/"))
+        env = dict(os.environ, FAKE_BIN=self.fake_uname(uname))
         answer = subprocess.run([sh_exe(), "-c", PREPEND_FAKE + "uname -s"], capture_output=True, text=True,
                                 env=env, timeout=60)
         self.assertEqual(answer.returncode, 0, "the uname probe exited %d: %r" % (answer.returncode, answer.stderr))
