@@ -1864,7 +1864,7 @@ def inner_commands(tokens):
     found = [nested_script(tokens), ssh_remote_script(tokens)]
     for at in command_indexes(tokens):
         found.extend(wrapped_commands(tokens, at))
-    return [strip_heredoc_bodies(text) for text in found if text]
+    return [type(text)(strip_heredoc_bodies(text)) for text in found if text]   # keep a script type (PosixScript...)
 
 
 def _command_starts(tokens):
