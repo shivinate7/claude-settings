@@ -416,13 +416,18 @@ PS_BASH_OPERATOR = re.compile(r"&&|\|\||<<|/dev/null|(?:^|;)\s*export\s", re.M)
 # (one nested level) with spaces, read whole so a failed read backtracks in linear time. A value ending in `,` that
 # another `Name=` follows is a wrapped attribute list (`Mandatory=$true, Position=0`), not a prefix before a command.
 # A bracket test is one whitespace char, then any text, then whitespace and the closing bracket: `[ \t]` then
-# `[^\]\n]*` never take the same run twice, so one match start costs one pass over its line.
+# `[^\]\n]*` never take the same run twice, so one match start costs one pass over its line. A single `[` is a test
+# only when a test operator stands inside it as its own word: a `-flag` (`-f`, `-eq`) or `=`, `==`, `!=`. So a spaced
+# PowerShell cast `( [ int ] 5 )` or array `[ 1, 2 ]` is text. A lookahead reads the operator: it stops at the first
+# `]` or line end and does not backtrack once it holds, so the start still costs one pass for the lookahead and one
+# for the bracket.
 PS_BASH_FORMS = re.compile(
     r"\|[ \t]*(?:\r?\n[ \t]*)?(?:head|tail|grep|xargs|sed|awk|cut|wc|uniq|tr|tac|jq|less)(?![\w-])"
     r"|(?:^|;)[ \t]*[A-Za-z_][A-Za-z0-9_]*="
     r"(?:\$\{(?:\$\{(?:\$\{[^{}\s;]*\}|[^{}\s;])*\}|[^{}\s;])*\}|\$\((?:[^()]|\([^()]*\))*\)|(?!\$\()[^\s;}])*"
     r"(?:(?<!,)[ \t]+[A-Za-z./]|(?<=,)[ \t]+(?![A-Za-z_][A-Za-z0-9_]*=)[A-Za-z./])"
-    r"|(?:^|[;(]|\b(?:if|elif|while|until)\b)[ \t]*(?:\[[ \t][^\]\n]*[ \t]\]|\[\[[ \t][^\]\n]*[ \t]\]\])",
+    r"|(?:^|[;(]|\b(?:if|elif|while|until)\b)[ \t]*"
+    r"(?:\[(?=[^\]\n]*?[ \t](?:-[A-Za-z]+|!?==?)[ \t])[ \t][^\]\n]*[ \t]\]|\[\[[ \t][^\]\n]*[ \t]\]\])",
     re.M | re.I)
 # A backslash that ends a line after a space, with a line after it. When the backslash is the line's only
 # argument (`cd \`, the drive root) and the next line does not start with a flag, it is a path, not a continuation.
@@ -450,9 +455,25 @@ SHELL_PROGRAMS = frozenset(("git", "gh", "cd", "npm", "npx", "node", "python", "
 SPAN_FLAG = re.compile(r"(?:--?|\+)[A-Za-z]")
 # A determiner first word marks prose: `the -x flag` names a flag and runs nothing, so the span-flag rule skips it.
 SPAN_DETERMINERS = frozenset(("the", "a", "an", "this", "its"))
-# A Verb-Noun cmdlet at a Windows drive path (`C:\tools\Get-Thing`). guard_core's POSIX reader strips the backslashes, so
-# the raw segment is read. Each component ends in a separator, so the run reads in one pass.
-WIN_CMDLET_PATH = re.compile(r"[A-Za-z]:[\\/](?:[^\s\\/]+[\\/])*[A-Z][a-z]+-[A-Z][A-Za-z]+(?=\s|$)")
+# The approved PowerShell verbs, the Get-Verb list. A Verb-Noun at an absolute path is a cmdlet only when its verb is one
+# of these, so a folder whose last segment is Title-Hyphen (`~/Documents/Claude-Settings`) is text.
+PS_VERBS = ("Add", "Clear", "Close", "Copy", "Enter", "Exit", "Find", "Format", "Get", "Hide", "Join", "Lock", "Move",
+            "New", "Open", "Optimize", "Pop", "Push", "Redo", "Remove", "Rename", "Reset", "Resize", "Search", "Select",
+            "Set", "Show", "Skip", "Split", "Step", "Switch", "Undo", "Unlock", "Watch",
+            "Backup", "Checkpoint", "Compare", "Compress", "Convert", "ConvertFrom", "ConvertTo", "Dismount", "Edit",
+            "Expand", "Export", "Group", "Import", "Initialize", "Limit", "Merge", "Mount", "Out", "Publish", "Restore",
+            "Save", "Sync", "Unpublish", "Update",
+            "Approve", "Assert", "Build", "Complete", "Confirm", "Deny", "Deploy", "Disable", "Enable", "Install",
+            "Invoke", "Register", "Request", "Restart", "Resume", "Start", "Stop", "Submit", "Suspend", "Uninstall",
+            "Unregister", "Wait",
+            "Debug", "Measure", "Ping", "Repair", "Resolve", "Test", "Trace",
+            "Connect", "Disconnect", "Read", "Receive", "Send", "Write",
+            "Block", "Grant", "Protect", "Revoke", "Unblock", "Unprotect", "Use")
+# A PS_VERBS cmdlet at an absolute path: a drive (`C:`), `~`, `$HOME` or `${HOME}`, or none, then `/` or `\`. It reads a
+# word (`C:/tools/Get-Thing`, `$HOME/bin/Get-Item`) and the raw segment, since guard_core's POSIX reader strips the
+# backslashes of `C:\tools\Get-Thing` and `~\Get-Item`. Each component ends in a separator, so the run reads in one pass.
+ABS_CMDLET_PATH = re.compile(r"(?:[A-Za-z]:|~|\$HOME|\$\{HOME\})?[\\/](?:[^\s\\/]+[\\/])*"
+                             r"(?:" + "|".join(PS_VERBS) + r")-[A-Z][A-Za-z]+(?=\s|$)")
 SHELL_CMDLET = re.compile(r"[A-Z][a-z]+-[A-Z][A-Za-z]+")
 # In a chain a cmdlet may be any case (`get-process`), and a command may be any lowercase word.
 CHAIN_CMDLET = re.compile(r"[A-Za-z]+-[A-Za-z]+")
@@ -645,12 +666,11 @@ def _chain_command(word, args) -> bool:
 
 
 def _cmdlet_at_path(first, segment) -> bool:
-    """True when the first word `first` of `segment` is a Verb-Noun cmdlet, bare or at an absolute path (Unix,
-    `~/`, or a Windows drive). A relative path (`docs/Read-Me`, `Microsoft.PowerShell.Management/Get-Item`) or a
-    URL names a doc or a module, not a program. The basename keeps its case."""
-    if not SHELL_CMDLET.fullmatch(first.rsplit("/", 1)[-1]):
-        return bool(WIN_CMDLET_PATH.match(segment.lstrip()))
-    return "/" not in first or first.startswith(("/", "~/"))
+    """True when the first word `first` of `segment` is a Verb-Noun cmdlet, bare, or at an absolute path with a
+    PS_VERBS verb (see ABS_CMDLET_PATH). A relative path (`docs/Read-Me`, `Microsoft.PowerShell.Management/Get-Item`)
+    or a URL names a doc or a module, not a program. The basename keeps its case."""
+    return bool(SHELL_CMDLET.fullmatch(first) or ABS_CMDLET_PATH.fullmatch(first)
+                or ABS_CMDLET_PATH.match(segment.lstrip()))
 
 
 def _shell_line(span, run) -> bool:
