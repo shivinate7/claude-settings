@@ -681,7 +681,8 @@ class CostPinTests(unittest.TestCase):
 
     def test_note_round_and_try_phrases_are_not_claims(self):
         self.note_control("- record-round: Round 3 of 3 passed and Try 2 of 3 ran.\n"
-                          "- record-round-wide: Round 3 of 12 passed and Try 2 of 10 ran.\n")
+                          "- record-round-wide: Round 3 of 12 passed and Try 2 of 10 ran.\n"
+                          "- record-round-word: Round two of 12 passed.\n")
 
     def test_note_decimal_tail_is_not_a_claim(self):
         self.note_control("- windows-rest: the slowest green run was 20.2 of 28 min.\n")
@@ -726,6 +727,44 @@ class CostPinTests(unittest.TestCase):
         # The span runs over the line break and its count word is inside code. The claim after the span is on line 2.
         text = self.note("- a: it reads `list\n  of files` and is among 266 folder cites.\n")
         self.assert_found([note_row(text, "is among 266")], counts=True)
+
+    def test_note_heading_ends_a_note_so_a_line_after_it_is_not_part_of_it(self):
+        # The heading ends the note above it. The exempt word on the line after the heading is not in that note's
+        # sentence, so the claim above is flagged.
+        text = self.note("- a: the list is among 266 folder cites\n"
+                         "## Later\n"
+                         "unmeasured for now.\n")
+        self.assert_found([note_row(text, "among 266")], counts=True)
+
+    def test_note_fence_ends_a_note_so_a_line_after_it_is_not_part_of_it(self):
+        # An empty fence ends the note above it. The exempt word on the line after the fence is not in that note's
+        # sentence, so the claim above is flagged.
+        text = self.note("- a: the list is among 266 folder cites\n"
+                         "```\n"
+                         "```\n"
+                         "unmeasured for now.\n")
+        self.assert_found([note_row(text, "among 266")], counts=True)
+
+    def test_note_one_digit_total_is_not_a_claim(self):
+        self.note_control("- a: 2 of 5 runs passed.\n")
+
+    def test_note_date_in_a_code_span_does_not_pass_a_claim(self):
+        # The date is code, so it is blanked before the date check: it passes nothing.
+        text = self.note("- a: among 266 cites `2026-11-08`.\n")
+        self.assert_found([note_row(text, "among 266")], counts=True)
+
+    def test_note_each_claim_in_a_sentence_is_read_not_only_the_first(self):
+        # The first claim is pinned by the test that holds its nearest span. The second is not, so it is flagged.
+        self.put("lint/test_x.py", "# x cases\n\nx.json is read\n")
+        self.assert_exists("lint/test_x.py")
+        text = self.note("- a: reads `x.json` 2 of 40 times\n"
+                         "  and `y.json` among 266, in `lint/test_x.py`.\n")
+        self.assert_found([note_row(text, "among 266")], counts=True)
+
+    def test_note_lone_backtick_before_a_letter_keeps_that_letter(self):
+        # The letter after a lone backtick starts the count word. Skipping it leaves no claim, so the finding is lost.
+        text = self.note("- a: x`among 266 cites.\n")
+        self.assert_found([note_row(text, "x`among 266")], counts=True)
 
     def test_note_lone_backtick_is_no_unbalanced_finding_and_its_count_is_still_read(self):
         # Pinned: a lone backtick in a note is plain text. It prints no unbalanced-backtick finding, and a count
