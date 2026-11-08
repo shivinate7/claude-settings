@@ -1894,19 +1894,47 @@ class CiCoverageScope(unittest.TestCase):
         with self.subTest("rename"):
             self.assertIn("_test_", text, "the gap report does not name the rename remedy, _test_<name>")
 
+    def test_a_test_dot_file_gets_a_run_step_remedy_only(self):
+        # Named failure: the report offers a rename to _test_<name> for a `.test.*` file. That name still matches the
+        # scope, so the rename would not clear the gap.
+        text = gap_text(make_repo(tracked=["lint/test_ok.py", "lib/_test_x.test.mjs"], checks=TEST_FILE_CHECKS))
+        with self.subTest("file"):
+            self.assertIn("lib/_test_x.test.mjs", text, "a tracked .test.mjs with no run line is not reported")
+        with self.subTest("run step"):
+            self.assertIn("run step", text, "the gap report does not name the run-step remedy")
+        with self.subTest("no rename"):
+            self.assertNotIn("rename", text, "the gap report offers a rename for a .test.* file, which stays in scope")
+
+
+# Node's default `node --test` patterns (Node 22), matched against a file's name and against its path under the folder
+# the run starts in. The collector must list the same files for the skill's tests.
+NODE_TEST_NAME = re.compile(r"(?:.*\.test|.*-test|.*_test|test-.*|test)\.(?:cjs|mjs|js)$")
+NODE_TEST_DIR = re.compile(r"(?:^|/)test/.+\.(?:cjs|mjs|js)$")
+SKILL_TESTS = "skills/plain-english-map/tests"
+
+
+def node_test_files(folder):
+    """Repo-relative paths of the files a default Node test run finds under `folder`: recursive, node_modules skipped."""
+    found = []
+    for dirpath, dirs, names in os.walk(folder):
+        dirs[:] = [d for d in dirs if d != "node_modules"]
+        for name in names:
+            path = os.path.join(dirpath, name)
+            inside = os.path.relpath(path, folder).replace(os.sep, "/")
+            if NODE_TEST_NAME.match(name) or NODE_TEST_DIR.search(inside):
+                found.append(os.path.relpath(path, REPO).replace(os.sep, "/"))
+    return found
+
 
 class CiCoverageCollector(unittest.TestCase):
     def test_mod_tests_list_prints_what_both_phases_run(self):
-        # The oracle is the find each phase runs: mods (node_modules pruned) and the skill's test folder.
+        # The oracle: the mods find (node_modules pruned), and Node's default test run under the skill's tests.
         bash = shutil.which("bash")
-        finds = [subprocess.run([bash, "-c", command], cwd=REPO, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                                text=True)
-                 for command in ("find mods -name node_modules -prune -o \\( -name '*.test.mjs' -o -name '*.test.js' \\) -print",
-                                 "find skills/plain-english-map/tests -maxdepth 1 -name '*.test.mjs' -print")]
-        for found in finds:
-            self.assertEqual(found.returncode, 0, "a find the case relies on exits %d: %s" % (found.returncode, found.stderr))
-        expected = sorted(line for found in finds for line in found.stdout.splitlines())
-        self.assertTrue(expected, "the two finds list no file, so the case proves nothing")
+        mods = subprocess.run([bash, "-c", "find mods -name node_modules -prune -o \\( -name '*.test.mjs' -o -name '*.test.js' \\) -print"],
+                              cwd=REPO, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        self.assertEqual(mods.returncode, 0, "the mods find exits %d: %s" % (mods.returncode, mods.stderr))
+        expected = sorted(mods.stdout.splitlines() + node_test_files(os.path.join(REPO, SKILL_TESTS)))
+        self.assertTrue(expected, "the two oracles list no file, so the case proves nothing")
         # An npm shim that fails and logs. A list run must never reach the skill phase's install.
         shim = tempfile.mkdtemp(prefix="npm-", dir=RUN_FOLDER)
         npm_log = os.path.join(shim, "npm.log")
@@ -1978,6 +2006,36 @@ class CiCoverageCollector(unittest.TestCase):
                 self.assertIn(path, find_test_files(root),
                               "%s is not a scoped test file, so its coverage proves nothing" % path)
                 self.assertIn(path, gap_text(root), "a %s line that spells the collector counts as its run" % label)
+
+    def test_a_run_line_counts_for_the_collector_only_when_it_is_the_collector_command(self):
+        # Named failure: a run line that adds an argument, or echoes the command, counted as the collector's run.
+        path = COLLECTED[0]
+        rows = (("list argument", "%s list" % MOD_CMD), ("mods argument", "%s mods" % MOD_CMD),
+                ("echo", "echo %s" % MOD_CMD))
+        for label, command in rows:
+            with self.subTest(label):
+                checks = checks_yml(("checks", "ubuntu-latest", ["python3 lint/test_ok.py", command]))
+                root = make_repo(tracked=["lint/test_ok.py", path], collected=[path], checks=checks)
+                self.assertIn(path, find_test_files(root),
+                              "%s is not a scoped test file, so its coverage proves nothing" % path)
+                self.assertIn(path, gap_text(root),
+                              "a run line that is not exactly the collector command counts as its run: %s" % label)
+
+    def test_the_collector_lists_the_files_a_default_node_run_finds(self):
+        # Named failure: the collector lists only top-level *.test.mjs under the skill's tests, so a nested file, a
+        # `_test.mjs` file or a file under test/ is missed. node_modules is never listed.
+        planted = [SKILL_TESTS + "/nested/deep.test.mjs", SKILL_TESTS + "/b_test.mjs", SKILL_TESTS + "/test/c.js",
+                   SKILL_TESTS + "/test-e.mjs", SKILL_TESTS + "/test.mjs"]
+        root = make_repo(untracked=["mods/a/x.test.mjs"] + planted + [SKILL_TESTS + "/node_modules/pkg/d.test.mjs"])
+        shutil.copyfile(MOD_SCRIPT, os.path.join(root, ".github", "scripts", "mod-tests.sh"))
+        listed = subprocess.run([shutil.which("bash"), COLLECTOR, "list"], cwd=root,
+                                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        with self.subTest("exit code"):
+            self.assertEqual(listed.returncode, 0,
+                             "mod-tests.sh list exits %d: %s" % (listed.returncode, listed.stderr.strip()))
+        with self.subTest("files"):
+            self.assertEqual(sorted(listed.stdout.splitlines()), sorted(["mods/a/x.test.mjs"] + planted),
+                             "mod-tests.sh list misses a file the default Node run finds under the skill's tests")
 
     def test_a_failing_collector_fails_the_scan(self):
         checks = checks_yml(("checks", "ubuntu-latest", ["python3 lint/test_ok.py", MOD_CMD]))
