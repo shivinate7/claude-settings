@@ -5741,6 +5741,12 @@ sh("verdict-pipe-exit: the lint module run by python3 -W ignore -m, piped to tai
    "python3 -W ignore -m lint.ste_lint x.md | tail -3 && git push", "deny", VERDICT_PIPE, cwd=NOGIT)
 sh("verdict-pipe-exit: python3 -Im pytest piped to tail, then && echo, is allowed",
    "python3 -Im pytest x | tail -3 && echo ok", "allow", cwd=NOGIT)
+# The lint match is by basename. A name that only ends in ste_lint.py runs no lint, so its pipe then && is
+# allowed. A suffix match (endswith) would refuse both: the pins are green on the head and red on that mutant.
+sh("verdict-pipe-exit: test_ste_lint.py, not the lint script, piped to tail, then && push, is allowed",
+   "python3 lint/test_ste_lint.py x | tail -3 && git push", "allow", cwd=NOGIT)
+sh("verdict-pipe-exit: old_ste_lint.py, a name that only ends in ste_lint.py, piped to tail, then && push, is allowed",
+   "python3 lint/old_ste_lint.py x | tail -3 && git push", "allow", cwd=NOGIT)
 
 # --- ln -s onto a directory that is already there
 sh("ln: -s over a real directory nests the link inside it",
