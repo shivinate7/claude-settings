@@ -351,6 +351,57 @@ def push_ask_hit(args, cwd: str, overrides=None) -> str:
     return "stray" if merge != current() and not upstream else ""
 
 
+def push_new_branch_hit(args, cwd: str, overrides=None) -> str:
+    """The refspec of a push that creates a branch at another branch's tip, else '' (rule push-new-branch).
+
+    The mistake: a PR head's sha pushed to a NEW branch name instead of to the PR's own branch. A refspec
+    is judged when it is `<source>:<destination>` with a source that is neither `HEAD`, `@` nor a local
+    branch (a sha, `HEAD~1`, a remote-tracking ref), its destination is a branch the remote does not hold,
+    `archive/*` apart, and its source commit equals the tip of a branch the remote holds. Reads local
+    `refs/remotes/<remote>/*` only, never the network: one `for-each-ref`, plus up to two `rev-parse` per
+    judged refspec. A colon-less push, `HEAD:name` and `lane:name` are the ruled-silent forms of
+    plain-push-asks and stay allowed. So do a deletion, a forced push, a mirror, `--all`, tags, a glob, a
+    remote named by URL and any read that fails: this judges only what it can read.
+    """
+    force, mirror, every, _includes, _unpinned, leased, delete, _upstream, remote, plain = _push_parse(args)
+    if force or leased or mirror or every or delete or not plain:
+        return ""
+    if any(spec.startswith(("+", ":")) for spec in plain):
+        return ""
+    if not remote:
+        current = _push_current_branch(cwd)
+        remote = (_push_config(cwd, "branch." + current + ".remote", overrides) if current else "") or "origin"
+    if not re.fullmatch(r"[\w.-]+", remote):
+        return ""
+    refs = guard_core._git(cwd, "for-each-ref", "--format=%(objectname) %(refname)", "refs/remotes/" + remote)
+    if refs is None or refs.returncode != 0:
+        return ""
+    prefix = "refs/remotes/" + remote + "/"
+    tips = {}   # branch name on the remote -> its tip commit
+    for line in refs.stdout.splitlines():
+        sha, _, name = line.partition(" ")
+        if name.startswith(prefix) and name != prefix + "HEAD":
+            tips[name[len(prefix):]] = sha
+    for spec in plain:
+        source, colon, target = spec.partition(":")
+        # Only `<source>:<destination>`, and only a source that is not a branch of this checkout: `HEAD:name`
+        # and `lane:name` are the lane's own branch (decision plain-push-asks), a sha or `HEAD~1` is not.
+        if not colon or not source or source.startswith("-") or source in ("HEAD", "@") or "*" in spec:
+            continue
+        if target.startswith("refs/") and not target.startswith("refs/heads/"):
+            continue   # a tag or another ref, not a branch
+        target = target.removeprefix("refs/heads/")
+        if not target or target in tips or target.startswith("archive/"):
+            continue
+        found = guard_core._git(cwd, "rev-parse", "--verify", "-q", source + "^{commit}")
+        if found is None or found.returncode != 0 or found.stdout.strip() not in tips.values():
+            continue
+        own = guard_core._git(cwd, "rev-parse", "--verify", "-q", "refs/heads/" + source)
+        if own is not None and own.returncode != 0:
+            return spec
+    return ""
+
+
 # ------------------------------------------------------------------ a rewrite and a wide delete
 #
 # A force push rewrites a branch other people have pulled. It is sometimes right, so it asks rather
@@ -833,6 +884,12 @@ PUSH_REASON = (
 PUSH_MAIN_REASON = (
     "Rule (Git): this push writes the default branch, main or master. Main moves only by pull request "
     "(rule git-main-only-by-pr, decision plain-push-asks). Approving the prompt lets this one push through; it is not a grant."
+)
+PUSH_NEW_BRANCH_REASON = (
+    "Rule (Git): this push creates a new branch at the same commit as a branch origin already holds. "
+    "That is the stray-branch mistake: a pull request head's sha pushed to a new name, which leaves a branch "
+    "only the computer session can delete. Remedy: push to the pull request's own branch. Find it with "
+    "`git ls-remote origin 'refs/heads/*' | grep <sha>`."
 )
 PUSH_STRAY_REASON = (
     "Rule (Git): this push writes a branch name other than the one this branch tracks (its upstream), "

@@ -375,8 +375,8 @@ while True:
         _loading = "guard_push_delete"
         from guard_push_delete import (
             DELETE_REASON, DESTRUCTIVE_DELETE, LINKED_NM_REASON, PUSH_ASK_REASON, PUSH_MAIN_REASON,
-            PUSH_REASON, PUSH_STRAY_REASON, cmd_exe_delete_hit, delete_text, linked_nm_hit,
-            parent_delete_hit, push_ask_hit, push_target, push_text, push_verdict, rm_delete_hit,
+            PUSH_NEW_BRANCH_REASON, PUSH_REASON, PUSH_STRAY_REASON, cmd_exe_delete_hit, delete_text, linked_nm_hit,
+            parent_delete_hit, push_ask_hit, push_new_branch_hit, push_target, push_text, push_verdict, rm_delete_hit,
         )
         _loading = "guard_merge"
         from guard_merge import (
@@ -3522,6 +3522,9 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
             elif subcommand == "push" and not read_verb("push", args):
                 # Owner rulings 206 a and 207 a: a non-forced push that writes main or master, or an
                 # implied destination off the branch's upstream. A dry run writes nothing.
+                # A new branch at another branch's tip is refused (rule push-new-branch).
+                if push_new_branch_hit(args, where, overrides):
+                    refuse(tool, "deny", "push-new-branch", PUSH_NEW_BRANCH_REASON, "git push " + " ".join(args))
                 kind = push_ask_hit(args, where, overrides)
                 if kind == "main":
                     ask_command("push-main", PUSH_MAIN_REASON, "git push " + " ".join(args),
