@@ -97,7 +97,9 @@ def gh_call_of(segment: str):
 
 
 # ---- a merge made outside the merge tool
-MERGE_TOOLS = ("mcp__github__merge_pull_request",)
+# enable_pr_auto_merge takes the same owner, repo and pullNumber keys, and merges the head once its checks pass.
+MERGE_TOOLS = ("mcp__github__merge_pull_request", "mcp__github__enable_pr_auto_merge")
+CREATE_PR_TOOL = "mcp__github__create_pull_request"
 MERGE_VALUE_FLAGS = {"-R", "--repo", "-b", "--body", "-F", "--body-file", "-t", "--subject",
                      "--match-head-commit", "-A", "--author-email"}
 # Seconds for the WHOLE read, shared: Host.head_read makes 4 `gh` REST calls (5 with a branch selector, 1 more run-list read when the check runs link more than one run; a settled head adds the
@@ -334,9 +336,14 @@ def undrafted_pr_create(segment: str) -> bool:
 # on and name that pull request's live head (`review_record_hit`). A hand-typed head is how a record goes stale the moment it is
 # posted. The remedy is the render, which fills the live head itself.
 # Cost: the form check reads no pull request and no file. One pull request read per marked post that passes it (`Host.pr`), none
-# for a post with no marker and none for an edit, whose input names a comment, not a pull request. A read that fails allows the
+# for a post with no marker. A marked update through the MCP tool adds one comment read (its input names a comment, not a pull request);
+# a shell edit in place makes no read. A read that fails allows the
 # post with a note on stderr: a network blip must not block every post. A malformed body is refused before any read.
 REVIEW_COMMENT_TOOL = "mcp__github__add_issue_comment"
+# The update tool's input names a comment, not a pull request: the pull request comes from one read of the comment.
+UPDATE_COMMENT_TOOL = "mcp__github__update_issue_comment"
+# The host's file-write tools each push a commit to the `branch` they name, as `git push` does.
+FILE_WRITE_TOOLS = ("mcp__github__push_files", "mcp__github__create_or_update_file", "mcp__github__delete_file")
 REVIEW_RENDER = "merge %s --review-record --head %s --kind <%s> --guard <%s> --round <N:ROLE:MODEL:VERDICT>"
 REVIEW_REASON = (
     "Rule (pr-review-record): %s. A review record is rendered by the merge tool for the live head, never typed by hand. "
@@ -390,6 +397,19 @@ def review_note(why: str) -> None:
     sys.stderr.write("review-record: not checked, " + why + "\n")
 
 
+def comment_pull_request(comment_id):
+    """A selector for review_record_hit: the pull request number a conversation comment sits on, from one read of the comment."""
+    def read(host):
+        code, out = host.api("issues/comments/%d" % comment_id)
+        if code:
+            raise RuntimeError("reading the comment failed")
+        found = re.search(r"/issues/(\d+)$", str(json.loads(out).get("issue_url", "")))
+        if not found:
+            raise RuntimeError("the comment names no issue")
+        return found.group(1)
+    return read
+
+
 def _review_render(module, number, head):
     return REVIEW_RENDER % (number, head, "|".join(module.REVIEW_KINDS), "|".join(module.REVIEW_GUARDS))
 
@@ -409,7 +429,7 @@ def _marked_bodies(bodies):
 
 def _form_refusal(module, marked, selector):
     """Return (matched, reason) for the first marked body that does not parse, else None. Reads nothing."""
-    named = str(selector).strip()
+    named = "" if callable(selector) else str(selector).strip()
     for body in marked:
         if module.parse_review(body) is None:
             return "review record that does not parse", REVIEW_FORM_REASON % _review_render(
@@ -428,7 +448,8 @@ def review_record_hit(bodies, repo: str, selector, where: str):
     """Return (matched, reason) when a comment post must be refused, else None.
 
     `bodies` are the texts the post would send, `selector` names the pull request it goes to (a number, a URL, a branch,
-    or '' for the current branch's), `repo` is OWNER/NAME or ''. No body holding the marker: None, and no read."""
+    or '' for the current branch's), `repo` is OWNER/NAME or ''. A callable `selector` takes the Host and returns that name,
+    so its read happens only once the body parses. No body holding the marker: None, and no read."""
     found = _marked_bodies(bodies)
     if not found:
         return None
@@ -439,7 +460,7 @@ def review_record_hit(bodies, repo: str, selector, where: str):
     try:
         with module.shared_deadline(MERGE_READ_TIMEOUT):
             host = module.Host(repo=repo or None, cwd=where or None)
-            number = host.pr_number(selector)
+            number = host.pr_number(selector(host) if callable(selector) else selector)
             live = str(host.pr(number)["head"])
     except (Exception, SystemExit) as e:
         review_note("the live head could not be read (" + cap_safe((str(e).splitlines() or [type(e).__name__])[0], 80) + ")")

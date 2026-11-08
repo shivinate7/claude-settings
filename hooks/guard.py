@@ -87,13 +87,16 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        refspec refuses. A push that reaches the default branch asks.
                        (stale-safe-force-push)
   push-main            ask. A non-forced push whose destination is literally main or master,
-                       `--all` included. The remote's HEAD is not read. A dry run passes.
+                       `--all` included. The remote's HEAD is not read. A dry run passes. The MCP push_files,
+                       create_or_update_file and delete_file tools ask when their `branch` is main or master.
   push-stray-branch    ask. A push with an implied destination (bare, `HEAD`, `@`, or a colon-less
                        refspec naming the current branch) that writes a name other than the branch's
                        upstream. Only with an upstream on the pushed remote that is not main or master.
   env-file             deny. Any read or write of an environment file.
   merge-checks         deny. A merge while the head has a check pending or red, while another
-                       ready PR on the base runs CI, or when the read could not run. `--auto` too.
+                       ready PR on the base runs CI, or when the read could not run. `--auto` too, and the MCP
+                       merge_pull_request and enable_pr_auto_merge tools.
+                       The same two MCP tools ask (bare-merge) on a green head in a repo that uses the merge tool.
   merge-role-proof     deny. A merge-tool call with a role flag whose tier the session's own get_session
                        record (read from the transcript) does not show in its cs-build tags.
   roadmap-one-writer   deny. A `git push`, also one inside `bash -c`, `sh -c` or `eval`, whose destination is
@@ -118,7 +121,10 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        without case, after optional markdown lead characters. A set_session_tags call on the target after
                        its record, and a marker brief with no record of the target, are refusals. A message without the marker reads no transcript. An
                        override lifts it.
-  draft-pr             deny. A `gh pr create` without `--draft`. (draft-until-reviewed)
+  draft-pr             deny. A `gh pr create` without `--draft`, or an MCP create_pull_request without
+                       draft true. (draft-until-reviewed)
+  pr-review-record     deny. A marked review record posted with a wrong or hand-typed head or number, as a comment
+                       or as an MCP add_issue_comment or update_issue_comment (the update finds its pull request from the comment).
   records-page         deny. A `git commit` whose docs/records.md differs from the base's page.
                        (records-index-at-merge)
   conflict-markers     deny. A `git commit` that would hold a start, a lone mid and an end conflict marker
@@ -373,7 +379,7 @@ while True:
         _loading = "guard_push_delete"
         from guard_push_delete import (
             DELETE_REASON, DESTRUCTIVE_DELETE, LINKED_NM_REASON, PUSH_ASK_REASON, PUSH_MAIN_REASON,
-            PUSH_REASON, PUSH_STRAY_REASON, cmd_exe_delete_hit, delete_text, linked_nm_hit,
+            PUSH_REASON, PUSH_STRAY_REASON, cmd_exe_delete_hit, names_default_branch, delete_text, linked_nm_hit,
             parent_delete_hit, push_ask_hit, push_target, push_text, push_verdict, rm_delete_hit,
         )
         _loading = "guard_merge"
@@ -382,7 +388,8 @@ while True:
             DRAFT_PR_REASON, MERGE_TOOLS, RECORDS_PAGE_REASON, ROLE_REASON,
             conflict_markers_hit, gh_call_of, git_call_of, merge_call_of, merge_check, merge_check_reason, record_writer_hit, records_page_hit, role_proof_hit,
             DEFAULT_RECORD_BRANCH, RECORD_REASON, settings_roots, TRUST_REASON, archive_hit, brief_hit, trust_card_hit,
-            undrafted_pr_create, uses_merge_tool, REVIEW_COMMENT_TOOL, review_record_hit, review_form_hit, review_note, pr_call_target, ansi_c_decoded,
+            undrafted_pr_create, uses_merge_tool, CREATE_PR_TOOL, REVIEW_COMMENT_TOOL, review_record_hit, review_form_hit, review_note, pr_call_target, ansi_c_decoded,
+            FILE_WRITE_TOOLS, UPDATE_COMMENT_TOOL, comment_pull_request,
         )
         _loading = "guard_frozen"
         from guard_frozen import (
@@ -5001,9 +5008,19 @@ def judge(payload) -> None:
         if verdict != "green":
             refuse(tool, "deny", "merge-checks", merge_check_reason(verdict, detail),
                    "merge tool " + verdict)
+        # As `gh pr merge` does: a green merge in a repo that uses the merge tool asks. A deny above wins.
+        if uses_merge_tool(cwd):
+            refuse(tool, "ask", "bare-merge", BARE_MERGE_REASON, "merge tool bare merge")
+
+    # A file write through the host's tools pushes a commit to the branch it names. Every one of them requires `branch`
+    # in its schema, so a call with none fails at the host and is not judged here.
+    if tool in FILE_WRITE_TOOLS:
+        branch = tool_input.get("branch")
+        if isinstance(branch, str) and names_default_branch(branch.strip()):
+            refuse(tool, "ask", "push-main", PUSH_MAIN_REASON, tool + " to " + branch.strip())
 
     # The MCP create tool carries its own `draft` field.
-    if tool == "mcp__github__create_pull_request" and tool_input.get("draft") is not True:
+    if tool == CREATE_PR_TOOL and tool_input.get("draft") is not True:
         refuse(tool, "deny", "draft-pr", DRAFT_PR_REASON, "create_pull_request without draft")
 
     # A review record posted through the MCP comment tool (rule pr-review-record). One pull request read per marked post.
@@ -5017,6 +5034,17 @@ def judge(payload) -> None:
                 refuse(tool, "deny", "pr-review-record", hit[1], hit[0])
         elif isinstance(tool_input.get("body"), str) and "review-record" in tool_input["body"]:
             review_note("the call names no pull request number")
+
+    # The update tool names a comment, not a pull request. Its one comment read runs only once a marked body parses.
+    if tool == UPDATE_COMMENT_TOOL:
+        owner, name, comment_id = (tool_input.get(k) for k in ("owner", "repo", "comment_id"))
+        repo = owner + "/" + name if isinstance(owner, str) and isinstance(name, str) else ""
+        if isinstance(comment_id, int) and not isinstance(comment_id, bool):
+            hit = review_record_hit([tool_input.get("body")], repo, comment_pull_request(comment_id), cwd)
+            if hit:
+                refuse(tool, "deny", "pr-review-record", hit[1], hit[0])
+        elif isinstance(tool_input.get("body"), str) and "review-record" in tool_input["body"]:
+            review_note("the call names no comment id")
 
     # A trust-card call from a session whose own record is not proved untagged (rule trust-card-in-build).
     trust_transcript = payload.get("transcript_path")
