@@ -9896,6 +9896,102 @@ sh("env: walk control, conditional cd, neither folder holds an env file, allowed
 sh("env: walk, conditional cd into a sub folder that holds an env file, refused: " + _COND_NO_ENV,
    _COND_NO_ENV, "deny", "env-file", cwd=ENVWALK_NESTED)
 
+# ---- env walk: a cd in an all-&& chain, the cd alternatives, the substitutions, the cap for an include suffix.
+# A search after a cd in an all-&& chain runs only when every cd before it ran, and a skipped cd skips the search
+# too. So the search runs in D alone, and an env file in the start folder cannot reach it. The guard also judges
+# the start folder, where the search never runs, so it refuses these: that is the false alarm pinned here.
+_ALL_AND_TEST = "test -d src && cd src && rg --hidden K"
+sh("env: walk false alarm, test then an all-&& cd into a sub folder with no env file, allowed: " + _ALL_AND_TEST,
+   _ALL_AND_TEST, "allow", cwd=ENVWALK_HELD)
+_ALL_AND_PULL = "git pull && cd src && rg --hidden K"
+sh("env: walk false alarm, git pull then an all-&& cd into a sub folder with no env file, allowed: " + _ALL_AND_PULL,
+   _ALL_AND_PULL, "allow", cwd=ENVWALK_HELD)
+# The same chain into the env folder is refused: the search runs there when the test passes.
+_ALL_AND_INTO_HELD = "test -d " + slash(ENVWALK_HELD) + " && cd " + slash(ENVWALK_HELD) + " && rg --hidden K"
+sh("env: walk safety hole, all-&& cd into the env folder, then a search, refused: " + _ALL_AND_INTO_HELD,
+   _ALL_AND_INTO_HELD, "deny", "env-file", cwd=ENVWALK_CLEAN)
+# Still refused. A cd after || may be skipped, and then the search runs in the start folder, which holds an env file.
+# `test -f x && cd src; rg --hidden K` is _COND_START_HELD above.
+_OR_CD_START_HELD = "test -f x || cd src; rg --hidden K"
+sh("env: walk safety hole, cd after ||, the start folder holds an env file, refused: " + _OR_CD_START_HELD,
+   _OR_CD_START_HELD, "deny", "env-file", cwd=ENVWALK_HELD)
+# A cd after && that a later || skips leaves the search in the start folder.
+_AND_CD_OR_START_HELD = "test -f x && cd src || rg --hidden K"
+sh("env: walk safety hole, cd after &&, then a search after ||, the start folder holds an env file, refused: "
+   + _AND_CD_OR_START_HELD, _AND_CD_OR_START_HELD, "deny", "env-file", cwd=ENVWALK_HELD)
+# A cd into the env folder inside a substitution moves the search there, however the substitutions nest.
+_NESTED_CD_SUB = "$(cd " + slash(ENVWALK_HELD) + " && echo $(rg --hidden K))"
+sh("env: walk safety hole, a cd into the env folder inside nested substitutions, refused: " + _NESTED_CD_SUB,
+   _NESTED_CD_SUB, "deny", "env-file", cwd=ENVWALK_CLEAN)
+_CD_BACKTICK_INTO_HELD = "cd " + slash(ENVWALK_HELD) + " && x=`rg --hidden K`"
+sh("env: walk safety hole, cd into the env folder, then a search in a backtick substitution, refused: "
+   + _CD_BACKTICK_INTO_HELD, _CD_BACKTICK_INTO_HELD, "deny", "env-file", cwd=ENVWALK_CLEAN)
+# `cd D || cd E` may leave the search in D or in E, so an env file in either one refuses it.
+_CD_OR_CD_ENV_D = "cd " + slash(ENVWALK_HELD) + " || cd " + slash(ENVWALK_SUB_CLEAN) + "; rg --hidden K"
+sh("env: walk safety hole, cd D or cd E, the env file in D, refused: " + _CD_OR_CD_ENV_D,
+   _CD_OR_CD_ENV_D, "deny", "env-file", cwd=ENVWALK_CLEAN)
+_CD_OR_CD_ENV_E = "cd " + slash(ENVWALK_SUB_CLEAN) + " || cd " + slash(ENVWALK_HELD) + "; rg --hidden K"
+sh("env: walk safety hole, cd D or cd E, the env file in E, refused: " + _CD_OR_CD_ENV_E,
+   _CD_OR_CD_ENV_E, "deny", "env-file", cwd=ENVWALK_CLEAN)
+# A shell string after a conditional cd into the env folder runs its grep in that folder too.
+_COND_CD_SHELL_STRING = "test -f x && cd " + slash(ENVWALK_HELD) + "; bash -c -- 'grep -r K .'"
+sh("env: walk safety hole, conditional cd into the env folder, then a grep in a bash -c string, refused: "
+   + _COND_CD_SHELL_STRING, _COND_CD_SHELL_STRING, "deny", "env-file", cwd=ENVWALK_CLEAN)
+
+# Past the cap, the walk judges an include glob by the env file it would pick, as the cap checks above do.
+ENVCAP_YAML = "grep -rn --include='*.yaml' KEY ."
+
+
+def env_cap_include_suffix_case():
+    """Past the cap, an include glob that picks an env file ending .yaml is refused, and a glob that picks no env
+    file is allowed over the same folder. An env file the glob picks is refused at any size, so a small folder
+    holding one is refused too, and an empty folder is allowed."""
+    big = envcap_folder("envcap-big-yaml", ENVCAP_LOW + 1, {ENV + ".yaml": "FIXTURE=1\n"})
+    if len(os.listdir(big)) <= ENVCAP_LOW:
+        return False, "the fixture is not past the lowered cap"
+    got = envcap_reason(ENVCAP_YAML, big)
+    if not got:
+        return False, "%s past the cap, over a folder that holds an env file ending .yaml, was allowed" % ENVCAP_YAML
+    got = envcap_reason(ENVCAP_PY, big)
+    if got:
+        return False, "%s past the cap, over a folder whose env file no glob picks, was refused: %s" % (
+            ENVCAP_PY, got[:90])
+    small = envcap_folder("envcap-small-yaml", 0, {ENV + ".yaml": "FIXTURE=1\n"})
+    if len(os.listdir(small)) > ENVCAP_LOW:
+        return False, "the control fixture is past the lowered cap"
+    if not envcap_reason(ENVCAP_YAML, small):
+        return False, "%s over a small folder that holds an env file ending .yaml was allowed" % ENVCAP_YAML
+    got = envcap_reason(ENVCAP_YAML, envcap_folder("envcap-empty-yaml", 0))
+    if got:
+        return False, "%s over an empty folder was refused: %s" % (ENVCAP_YAML, got[:90])
+    return True, ("past the cap the .yaml glob is refused and a glob that picks no env file is allowed; "
+                  "a small folder and an empty one hold")
+
+
+def env_substitution_places_case():
+    """`_substitutions` fills `places` with one entry per text, in step with the texts, for nested, backtick and mixed
+    input. `_env_walk` falls back to the parent's folders when the two lists differ, so a mismatch would drop the cd of
+    a substitution without a word. The command itself is the last text, at place (-1, 0)."""
+    import guard_env
+    inputs = (
+        "echo $(echo $(rg --hidden K))",
+        "x=`rg --hidden K`",
+        "echo $(echo `ls`) && cd D && y=$(rg K) && z=`date`",
+    )
+    for cmd in inputs:
+        places = []
+        texts, too_deep = guard_env._substitutions(cmd, places=places)
+        if too_deep:
+            return False, "_substitutions(%r) says too deep for a short input" % cmd
+        if len(places) != len(texts):
+            return False, "_substitutions(%r) filled %d places for %d texts" % (cmd, len(places), len(texts))
+        if places[-1] != (-1, 0):
+            return False, "_substitutions(%r) places the command itself at %r, not (-1, 0)" % (cmd, places[-1])
+    return True, "places has one entry per text for nested, backtick and mixed input, and the command sits at (-1, 0)"
+
+
+FIXTURELESS_CHECKS.update((env_cap_include_suffix_case, env_substitution_places_case))
+
 
 # =========================================================================== git env set
 # A command that SETS GIT_DIR, GIT_WORK_TREE or GIT_INDEX_FILE retargets every git call after it.
@@ -15190,6 +15286,14 @@ for _constant in REMEDY_CONSTANTS:
     _remedy_label = "wait-until remedy: every command form the %s names is allowed" % _constant
     LOG_CHECKS_EXTRA.append((_remedy_label, remedy_check(_constant)))
     LOG_FAMILY[_remedy_label] = "stream"
+# The env walk's two in-process checks are defined in the env section, which comes before this list exists. Their
+# family is set in LOG_RULE_FAMILY, the one home for a log check's family by its label.
+for _label, _check in (
+        ("env: walk cap, an include glob picks an env file ending .yaml, refused past the cap",
+         env_cap_include_suffix_case),
+        ("env: walk, _substitutions gives one place per text for nested, backtick and mixed input",
+         env_substitution_places_case)):
+    LOG_CHECKS_EXTRA.append((_label, _check))
 for _name, _change in BUILDER_GREEN:
     if getattr(_change, "needs_link", False) and not LINKS_MADE:
         continue
@@ -30588,6 +30692,8 @@ LOG_RULE_FAMILY = (
     ("env: walk cap, a glob that names no env file is allowed past the cap", "env"),
     ("env: walk cap, the same glob past the cap in a gitignored node_modules", "env"),
     ("env: walk cap, a positive glob that names an env file is refused too large", "env"),
+    ("env: walk cap, an include glob picks an env file ending .yaml, refused past the cap", "env"),
+    ("env: walk, _substitutions gives one place per text for nested, backtick and mixed input", "env"),
 )
 for _prefix, _family_name in LOG_RULE_FAMILY:
     _hits = [label for label in LOG_FAMILY if label.startswith(_prefix)]
