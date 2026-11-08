@@ -1720,27 +1720,34 @@ def _joined_blocker(lead, before, after, tail):
     return bool(CANNOT_BLOCKER_AFTER_RE.match(tail) or CANNOT_BLOCKER_PAREN_RE.search(after))
 
 
-_RULE_IDS = []  # the live rule anchors, read once per hook run on the first slug that follows a claim
+_RULE_IDS = []  # (roots, anchors), read once per hook run on the first slug that follows a claim
 
 
 def _names_rule_id(clause):
     """True when a slug in parentheses in `clause` (CANNOT_RULE_ID_RE) is a real rule or decision id: a `rule:<id>`
-    anchor in the rule files (rule_audit.RULE_FILES, the one home of that list) or a docs/decisions/<id>.md file in
-    this repo. Cost: on the first such slug of a hook run, one read of each rule file; per slug, one file stat. A rule
-    file that cannot be read lets the slug skip: a guard that cannot read cannot accuse."""
+    anchor in the rule files (rule_audit.RULE_FILES, the one home of that list) or a docs/decisions/<id>.md file. Both
+    are read in this file's checkout and in the checkout the global CLAUDE.md points at (guard.pointer_checkout): an
+    installed copy holds only the pointer and no decisions. Cost: on the first such slug of a hook run, one read of the
+    pointer and of each rule file per checkout; per slug, one file stat per checkout. When no checkout's rule files can
+    be read, the slug skips: a guard that cannot read cannot accuse."""
     slugs = [m.group(1).lower() for m in CANNOT_RULE_ID_RE.finditer(clause)]
     if not slugs:
         return False
-    root = os.path.join(HERE, "..")
     if not _RULE_IDS:
         import rule_audit
-        try:
-            _RULE_IDS.append(frozenset(rule_audit.claude_md_anchors(rule_audit.rule_text(root))))
-        except (OSError, UnicodeDecodeError):
-            _RULE_IDS.append(None)
-    ids = _RULE_IDS[0]
-    return any(ids is None or slug in ids or os.path.isfile(os.path.join(root, "docs", "decisions", slug + ".md"))
-               for slug in slugs)
+        pointer = guard.pointer_checkout() if guard is not None else ""
+        roots = list(dict.fromkeys(os.path.realpath(r) for r in (os.path.join(HERE, ".."), pointer) if r))
+        ids, read = set(), False
+        for root in roots:
+            try:
+                ids.update(rule_audit.claude_md_anchors(rule_audit.rule_text(root)))
+                read = True
+            except (OSError, UnicodeDecodeError):
+                continue
+        _RULE_IDS.append((roots, ids if read else None))
+    roots, ids = _RULE_IDS[0]
+    return ids is None or any(slug in ids or any(os.path.isfile(os.path.join(root, "docs", "decisions", slug + ".md"))
+                                                 for root in roots) for slug in slugs)
 
 
 def _report_label_end(body):
