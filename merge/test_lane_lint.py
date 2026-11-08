@@ -8,6 +8,7 @@ case reads what the tool ran, in which tree, at which head. The repo builder, th
 fixture come from merge/test_merge.py: a case extends that fixture, it does not copy it. The draft step's ready check
 (class ReadyChecks) runs the same stub, through CiJobStub.
 The SIGTERM case runs merge in a subprocess through HARNESS, which names the same stub; it is the one case that does not patch CI_JOB.
+The stub also logs the PR body it finds in the file that CI_JOB_PR_BODY_FILE names (pr_body), so a case reads what merge handed over.
 Temp files: this run's folder (lint/_test_temp.py), removed at exit.
 """
 import atexit, json, os, shutil, signal, subprocess, sys, tempfile, time, unittest, unittest.mock, uuid
@@ -25,14 +26,22 @@ atexit.register(shutil.rmtree, RUN_FOLDER, True)
 PASSING = [("PASS", "record slugs"), ("PASS", "ste lint")]
 FAILING = [("PASS", "record slugs"), ("FAIL", "comment narration")]
 UNKNOWN = [("PASS", "record slugs"), ("unknown", "shellcheck")]
+PR_BODY = "Drops-lines: docs/old.md -- the lines are dead\nRetire-run: 12345\n"  # the lane's PR body, as the fake host reports it
 
 STUB = '''import json, os, subprocess, sys, time
 LOG, STEPS, RC, STEP_LOG, SLEEP, PARENT = __LOG__, __STEPS__, __RC__, __STEP_LOG__, __SLEEP__, os.getppid()
 def git(*args):
     return subprocess.run(["git", *args], capture_output=True, text=True).stdout.strip()
 detached = subprocess.run(["git", "symbolic-ref", "-q", "HEAD"], capture_output=True).returncode != 0
+pr_body = None  # the lane's PR body, read from the file merge names; None when no file is named
+if os.environ.get("CI_JOB_PR_BODY_FILE"):
+    try:
+        with open(os.environ["CI_JOB_PR_BODY_FILE"], encoding="utf-8", newline="") as f:
+            pr_body = f.read()
+    except OSError as e:
+        pr_body = "unreadable: %s" % e
 with open(LOG, "a", encoding="utf-8") as f:
-    print(json.dumps({"argv": sys.argv[1:], "cwd": os.getcwd(), "head": git("rev-parse", "HEAD"), "detached": detached}), file=f)
+    print(json.dumps({"argv": sys.argv[1:], "cwd": os.getcwd(), "head": git("rev-parse", "HEAD"), "detached": detached, "pr_body": pr_body}), file=f)
 if "--plan" in sys.argv:
     for state, name in STEPS:
         print("would run " + name)
@@ -312,6 +321,28 @@ class LaneLint(CiJobStub, tm.CloudSession):
         self.use_ci_job(PASSING, 0)
         rc, out = self.lint_run("--lane-lint", "7", base="release")
         self.assertEqual(rc, 0, out)
+
+    def test_a_pr_target_hands_the_pull_requests_body_to_ci_job(self):
+        self.use_ci_job(PASSING, 0)
+        self.host.body = PR_BODY
+        rc, out = self.lint_run("--lane-lint", "7")
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(self.lint_calls()[0]["pr_body"], PR_BODY, "the lint did not hand the lane's PR body to ci-job")
+
+    def test_a_failed_pr_read_refuses_and_ci_job_never_lints_with_a_blank_body(self):
+        self.use_ci_job(PASSING, 0)
+        reads = []
+
+        def failing_read(n):
+            reads.append(n)
+            raise merge.Stop("reading the pull request failed: HTTP 500")
+
+        self.host.pr = failing_read
+        rc, out = self.run_lane("--lane-lint", "7")
+        self.assertEqual(reads, [7], "the lint did not read the pull request")
+        self.assertEqual(rc, 1, out)
+        self.assertEqual(self.lint_calls(), [], "ci-job linted after the pull request read failed, so with a blank body")
+        self.assertNotIn("PASS:", out)
 
     def test_an_exception_in_the_lint_run_still_removes_the_worktree(self):
         self.use_ci_job(PASSING, 0)
