@@ -37,7 +37,7 @@ Each is a lane pick, 2026-11-08 CST. None is an owner ruling.
 - A `/` after a digit separates refs. Lane pick, 2026-11-08 CST. `#1463/#1513/#1583` judges all three. A `/` after a letter still blocks the match, so `docs/#41` names no pull request.
 - With no transcript to read, the refusal could never be spent, so the send passes with one note.
 - `owner/name#n` is judged and takes its repo from the prefix. A `name#n` with no owner is not judged: it names no repo the guard can read. `PR#n` is judged as a bare `#n`.
-- The newest review record decides, as in `merge --reviewed`. A record with `Head` equal to the live head clears the pull request whatever its round verdicts say: the lint is the gate here, and the done rules stay the batch runner's.
+- The newest review record decides, as in `merge --reviewed`. A record with `Head` equal to the live head clears the pull request whatever its round verdicts say: the lint is the check here, and the done rules stay the batch runner's.
 - Skip a closed or merged pull request. A hand-off may name one in a status line.
 - More than five pull requests is unknown, not a refusal: five reads fit the cap, and a larger message is a status report. Debt `lane-send-five-pr-cap`.
 - The 404 of `pulls/<n>` is checked against `issues/<n>` before a number is skipped as an issue, so a repo the guard cannot read never passes as a list of issues.
