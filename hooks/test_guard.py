@@ -1915,7 +1915,7 @@ def _build_push():
                  "and push.default simple")
 
     # ste-push: a checkout whose CI pins the ste-lint step (one origin/main commit, then a note on `feat` that
-    # holds a 38-word sentence). No origin/feat ref, so the range base is origin/main, the default branch.
+    # holds a 35-word sentence). No origin/feat ref, so the range base is origin/main, the default branch.
     make_repo(PUSHSTE, {"base.txt": "base\n", ".github/workflows/checks.yml": STE_PIN_WORKFLOW})
     run_vcs(PUSHSTE, "remote", "add", "origin", slash(BRANCHREMOTE))
     run_vcs(PUSHSTE, "update-ref", "refs/remotes/origin/main", "HEAD")
