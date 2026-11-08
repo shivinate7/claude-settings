@@ -980,11 +980,24 @@ class SessionStartGrantsFromMainTests(SessionStartAgentWorktreeNoticeTests):
     # Refs. The ref the check reads, origin/main or origin/HEAD's target, and what it says when neither reads.
 
     def test_no_origin_main_and_no_origin_head_prints_one_unknown_line(self):
+        # A grant file at HEAD is something to cite, and no ref is there to read it against: the one unknown case.
         self.assertIsNone(self.resolve("origin/main"), "scope: origin/main resolves")
         self.assertIsNone(self.resolve("origin/HEAD"), "scope: origin/HEAD resolves")
+        self.assertTrue(any(self.blob("HEAD", rel) for rel in GRANT_FILES), "scope: HEAD holds no grant file")
         grant = self.grant_lines_of(self.run_checked())
         self.assertEqual(len(grant), 1, "want one unknown line, got %r" % grant)
         self.assertRegex(grant[0], GRANT_UNKNOWN, "the line is not the unknown line: %r" % grant[0])
+
+    def test_no_grant_file_at_head_and_no_origin_ref_prints_no_grant_line(self):
+        # Control: nothing to cite and no ref to read it against, so the check stays silent rather than unknown.
+        self.set_grants(None, None)
+        self.commit("no grants")
+        self.assertIsNone(self.resolve("origin/main"), "scope: origin/main resolves")
+        self.assertIsNone(self.resolve("origin/HEAD"), "scope: origin/HEAD resolves")
+        for rel in GRANT_FILES:
+            self.assertIsNone(self.blob("HEAD", rel), "scope: HEAD has %s" % rel)
+        self.assertEqual(self.grant_lines_of(self.run_checked()), [],
+                         "an unknown line printed with no grant file at HEAD")
 
     def test_origin_head_target_is_read_when_origin_main_is_absent(self):
         trunk = self.tip_with(GRANT_FRESH, GRANT_STALE_DOT)
