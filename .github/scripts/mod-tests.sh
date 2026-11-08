@@ -42,7 +42,8 @@ phase_mods() {
   echo "mod tests: $n files"
   # Each exit code lands in fail, so a failing first or last file fails the phase.
   while IFS= read -r f; do
-    node "$f" || fail=1
+    # node reads its own stdin from /dev/null, so a test that reads stdin cannot swallow the rest of the list.
+    node "$f" < /dev/null || fail=1
   done <<< "$list"
   return "$fail"
 }

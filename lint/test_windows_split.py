@@ -1290,7 +1290,7 @@ class ScriptRun:
 
 def run_mod_script(arg, files, dirs=(), find_exit=None, cwd=".", script=None):
     """Run the script file in a scratch repo, with `arg` (None for no argument). files maps a path to True
-    (passes) or False (fails). dirs are empty folders to make. find_exit, when set, puts a `find` first on
+    (passes), False (fails), or the source text to write as is. dirs are empty folders to make. find_exit, when set, puts a `find` first on
     PATH that runs the real find and then exits with that code, as a find does that meets an error after it
     listed files. An `npm` shim records its arguments, so no run reaches the network. cwd is a repo-relative
     folder to start in."""
@@ -1312,8 +1312,9 @@ def run_mod_script(arg, files, dirs=(), find_exit=None, cwd=".", script=None):
         for rel, ok in files.items():
             full = os.path.join(work, rel)
             os.makedirs(os.path.dirname(full), exist_ok=True)
+            text = ok if isinstance(ok, str) else ("// fixture\n" if ok else 'throw new Error("planted failure");\n')
             with open(full, "w", encoding="utf-8") as f:
-                f.write("// fixture\n" if ok else 'throw new Error("planted failure");\n')
+                f.write(text)
         target = os.path.join(work, ".github", "scripts", MOD_SCRIPT_NAME)
         shutil.copyfile(script or MOD_SCRIPT, target)
         r = subprocess.run([shutil.which("bash"), "--noprofile", "--norc", target.replace("\\", "/")] + ([arg] if arg is not None else []),
@@ -1325,6 +1326,8 @@ def run_mod_script(arg, files, dirs=(), find_exit=None, cwd=".", script=None):
 
 SKILL_OK = {"skills/plain-english-map/tests/ok.test.mjs": True}
 NPM_CI = "ci --ignore-scripts --no-audit --no-fund"
+# A mod test that reads its input, as a test that reads stdin does: it takes every line the loop has left.
+STDIN_READER = 'import { readFileSync } from "node:fs";\nreadFileSync(0, "utf8");\n'
 
 
 class ModTestStep(unittest.TestCase):
@@ -1379,6 +1382,21 @@ class ModTestScript(unittest.TestCase):
             with self.subTest(case=label):
                 r = run_mod_script("mods", files)
                 self.assertEqual(r.rc == 0, ok, f"{label}: exit {r.rc}\n{r.out}")
+
+    def test_a_mod_test_that_reads_stdin_does_not_hide_the_files_after_it(self):
+        # Named cause: phase_mods feeds the file list on the loop's stdin, so a file that reads stdin takes the lines
+        # after it, and the loop ends before the failing file runs. find does not sort, so the script's own list order
+        # sets the roles: the reader first, the failing file second, a passing file third.
+        names = ["mods/a/a.test.mjs", "mods/b/b.test.mjs", "mods/c/c.test.mjs"]
+        probe = run_mod_script("list", {**SKILL_OK, **{name: True for name in names}})
+        self.assertEqual(probe.rc, 0, probe.out)
+        listed = [line for line in probe.out.splitlines() if line in names]
+        self.assertEqual(len(listed), 3, "list does not name the three fixture files:\n" + probe.out)
+        for label, first in (("file reads stdin", STDIN_READER), ("control: first file reads no stdin", True)):
+            with self.subTest(case=label):
+                r = run_mod_script("mods", {listed[0]: first, listed[1]: False, listed[2]: True})
+                self.assertIn("planted failure", r.out, f"{label}: the failing second file did not run\n{r.out}")
+                self.assertNotEqual(r.rc, 0, f"{label}: the phase exited 0 although the second file fails\n{r.out}")
 
     def test_the_script_fails_when_it_finds_no_test_or_find_errors(self):
         """`done < <(find ...)` drops find's exit code, and an empty loop exits 0 with nothing run."""
@@ -1651,13 +1669,9 @@ class CiCoverage(unittest.TestCase):
             commands = run_commands(handle.read())
         collected = set(collected_files(REPO)) if runs_collector(commands) else set()
         missing = [p for p in find_test_files(REPO) if p not in collected and not names_path(commands, p)]
-        # A rename to _test_<name> clears the gap only when the new name leaves the scope, so a .test.* file gets
-        # the run-step remedy alone.
-        renamable = [p for p in missing if TEST_FILE.match("_" + p.split("/")[-1]) is None]
-        advice = "Add a run step in .github/workflows/checks.yml"
-        if renamable:
-            advice += ", or, for a helper that holds no tests, rename it to _test_<name>"
-        self.assertEqual(missing, [], "no run step in checks.yml covers: " + ", ".join(missing) + ". " + advice + ".")
+        # No rename remedy: a `_test_` name is outside the scope, so a rename would hide a real test from this check.
+        self.assertEqual(missing, [], "no run step in checks.yml covers: " + ", ".join(missing)
+                         + ". Add a run step in .github/workflows/checks.yml.")
 
     def test_a_comment_line_is_not_a_run(self):
         # Rows: a comment line, a trailing comment, and a comment line inside a block. Named failure: a
@@ -1892,16 +1906,18 @@ class CiCoverageScope(unittest.TestCase):
         text = gap_text(make_repo(tracked=["lint/test_ok.py", "lint/test_win.py"], checks=checks))
         self.assertNotIn("lint/test_win.py", text, "a file that only a windows-latest job names is reported")
 
-    def test_the_gap_report_names_both_remedies(self):
-        # Named failure: the report names the files with no run step, but not the rename that a helper with no
-        # tests takes, to `_test_<name>`.
+    def test_the_gap_report_names_the_run_step_and_no_rename(self):
+        # Named failure: the report offers a rename to `_test_<name>`. A `_test_` name is outside the scope, so the
+        # rename hides a real test from the check.
         text = gap_text(make_repo(tracked=["lint/test_x.py"], checks=TEST_FILE_CHECKS))
         with self.subTest("file"):
             self.assertIn("lint/test_x.py", text, "an unnamed test file is not reported")
         with self.subTest("add a run step"):
             self.assertIn("run step", text, "the gap report does not name the add-a-run-step remedy")
-        with self.subTest("rename"):
-            self.assertIn("_test_", text, "the gap report does not name the rename remedy, _test_<name>")
+        with self.subTest("no rename"):
+            self.assertNotIn("rename", text, "the gap report offers a rename, which hides a real test from the scope")
+        with self.subTest("no _test_ name"):
+            self.assertNotIn("_test_", text, "the gap report names a _test_ file, which the scope does not read")
 
     def test_a_test_dot_file_gets_a_run_step_remedy_only(self):
         # Named failure: the report offers a rename to _test_<name> for a `.test.*` file. That name still matches the
