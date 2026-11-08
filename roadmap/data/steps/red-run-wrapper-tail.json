@@ -1,11 +1,11 @@
 {
   "title": "The red-run check strips every wrapper form before it reads the lead word, and its tests cover each wrapper",
   "phase": "now",
-  "status": "doing",
+  "status": "ready",
   "order": 60.02,
   "owner": "coordinator",
   "lane": "session_013NEJL1rKuNDSwMxwArjXHb",
   "why": "Wrapped mutant lines still pass, and no test turns red if a wrapper form is dropped.",
-  "note": "After #1728 lands. Three non-blocking findings from #1728's round 2 reviewer (sonnet): (1) lint/check_red_run.py lines 20-22: the docstring omits `#`, curly quotes and the underscore rule, and says 26 where the record says 15 to 26. (2) lead_word strips an outer underscore last, so `_**mutant**_`, `_(none)_`, `~mutant~`, `> mutant` and `1) mutant` pass, and the record's limits do not list them. (3) lint/test_check_red_run.py lines 66-85: no test uses a backtick, `{` or `<` wrapper, or `**mutant**`. Second follow-up on this check tonight (after red-run-first-word-limits). Filed from lane notes-fix-large-3, 20:23 CST Nov 7 (decision cull-rules). Doing in lane notes-fix-large-3 (coordinator 20:24 CST): one normalising function for the red-run label, with a table-driven test; branch red-run-wrapper-tail stacked on #1728.",
-  "updatedAt": "2026-11-07T20:24:00-06:00"
+  "note": "After #1728 lands. Three non-blocking findings from #1728's round 2 reviewer (sonnet): (1) lint/check_red_run.py lines 20-22: the docstring omits `#`, curly quotes and the underscore rule, and says 26 where the record says 15 to 26. (2) lead_word strips an outer underscore last, so `_**mutant**_`, `_(none)_`, `~mutant~`, `> mutant` and `1) mutant` pass, and the record's limits do not list them. (3) lint/test_check_red_run.py lines 66-85: no test uses a backtick, `{` or `<` wrapper, or `**mutant**`. Second follow-up on this check tonight (after red-run-first-word-limits). Filed from lane notes-fix-large-3, 20:23 CST Nov 7 (decision cull-rules). Doing in lane notes-fix-large-3 (coordinator 20:24 CST): one normalising function for the red-run label, with a table-driven test; branch red-run-wrapper-tail stacked on #1728. Built as #1745 (one label_word normaliser plus a table test); with runner 8 after #1728. Round 3 sonnet left three non-blocking limits, kept as notes (outbox): list-marker forms outside the set, a wrong cite in record item 1a, and 'from both ends' wording. Lane notes-fix-large-3, 21:18 CST Nov 7.",
+  "updatedAt": "2026-11-07T21:18:00-06:00"
 }

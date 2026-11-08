@@ -15,3 +15,6 @@ Checked Nov 2 12:58 CST: none of these is in docs/debts/notes.md on main. Triage
 
 - 2026-11-07: owner-feedback audit (#1008, closed by owner 334 b): six rows stayed unknown and cannot be recovered: F39, F82 (waiting page at 360-430 px, never re-checked), F84, F93, F251, F252. F82 is the only one a check could still settle.
 - gap-check-no-merge-base-wording (lane gap-check-merge-rebase, #1757, via the coordinator Nov 7 21:13 CST): the gap check's "did not run" line also prints when the two branches share no merge-base, so the wording names the wrong cause. A note, not a debt.
+- red-run-marker-forms (lane notes-fix-large-3, #1745 round 3, Nov 7 21:17 CST): list-marker forms outside the set, such as `(1) mutant A`, `[x] mutant A`, `a) mutant`, `• mutant` and `step 1: mutant A`, still pass, and the record's "Limits that stay" omits them (lint/check_red_run.py:88-91). A debt after a real incident.
+- red-run-record-cite (same source): record item 1a cites 457071b62 for `(mutant: code_check.py:266 ...)`; the text is in 29816b9f5.
+- red-run-strip-wording (same source): the docstring and the record say list markers strip "from both ends", but `-` and `+` strip only at the start (lint/check_red_run.py:122).
