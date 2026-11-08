@@ -36,6 +36,8 @@ BATCH_LABEL = "batch"
 # merge/merge.py prints them, lint/report_guard.py reads them back, and skills/roadmap/build.py names the row (rule
 # reports-backlog-counts). The row label of the lanes finished and not archived:
 IDLE_LANES_LINE = "lanes to archive"
+# The word that starts the Backlog item of a report: `Backlog: <field> <N>; ...`.
+BACKLOG_ITEM = "Backlog"
 # The three Backlog fields, in report order: PRs reviewed and waiting past one batch cycle, open PRs with no next act, lanes to archive.
 BACKLOG_FIELDS = ("reviewed past one batch cycle", "no next act", IDLE_LANES_LINE)
 REVIEWED_WAIT_LABEL = "longest wait since a done record"

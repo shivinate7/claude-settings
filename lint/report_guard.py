@@ -117,12 +117,15 @@ fields, each a whole number or `unknown`: `Backlog: reviewed past one batch cycl
 or after "; " or ". ". It holds on every Stop whose reply has the report shape, landed or not, and in the rewrite after a
 missing-report block. A lane, a triage session, an untagged session and a session with no own record owe nothing. Each number
 must equal the newest read in the transcript after the newest `compact_boundary`: counts one and two from the newest
-`merge --reviewed` summary line, count three from the newest `merge --idle-lanes` summary line (found by the output line;
-shared_names holds both writers and patterns). A run through verdict is read from the log its FAIL line names; a PASS verdict
-of `merge --reviewed` has no RED line, so both its counts read 0; a PASS verdict of `merge --idle-lanes` names no log, so it
-reads unknown. No read, or a failed one, means `unknown`. `unknown` always passes. A count blocks once: the correction after the
-block is not checked. Cost: no process and no network call. The transcript is already read; only for a tagged session with a
-report shape: the own-record read (the guard_merge import) and at most two verdict log reads. No file written, no timer, no log.
+`merge --reviewed` summary line, count three from the newest `merge --idle-lanes` summary line (shared_names holds both
+writers and patterns). A read is a Bash run whose own program is merge, past the wrappers verdict, `timeout N`, env and
+`python3 [-I]` (the guard's shell reader splits it, so quoted text, a heredoc or a grep that names the flag is no read). A run
+through verdict is read from the log its FAIL line names; a PASS verdict of `merge --reviewed` has no RED line, so both its
+counts read 0; a PASS verdict of `merge --idle-lanes` names no log, so it reads unknown. No read, or a failed one, means
+`unknown`. `unknown` always passes. A count blocks once: the correction after the block is not checked. Cost: no process and
+no network call. The transcript is already read; only for a tagged session with a report shape: the own-record read (the
+guard_merge import) and at most two verdict log reads, the newest log of each command, never one per run. No file written,
+no timer, no log.
 
 Hand-off cite (rule output-never-hand-off-doable-step): a "Why yours:" line, in prose above the report or in the Input
 Needed or Next item (plain, behind a list marker, or in bold), that gives a capability reason (can't, cannot, refuse,
@@ -148,6 +151,8 @@ from _transcript import (  # noqa: E402
     ARTIFACT_DATA, is_last_human, items_write, last_incoming_index, last_reply, page_writer_id, peer_sender,
     read_transcript, records_after_last_human, send_targets, tool_results, tool_uses)
 import layout  # noqa: E402
+sys.path.insert(0, os.path.join(HERE, "..", "hooks"))
+import shared_names  # noqa: E402  stdlib only: the Backlog item word, its field labels and the ledger's summary patterns
 
 # guard.py owns the one shell parser this repo trusts: quote-aware segment splitting,
 # heredoc-body stripping, and `git_calls`, which resolves each `git` invocation past `sudo`
@@ -207,7 +212,7 @@ LABEL_ORDER = ["Done", "Deviations", "Input Needed", "Next"]
 # A bold "**Departs from:**" starts a line of the item (rule `question-departs`), and a bold
 # "**Recovered:**" or "**Handoff gave:**" is a compaction-carry line below, and a bold "**Backlog:**" is the Backlog line;
 # none is a report label.
-LABEL_RE = re.compile(r"^\*\*(?!(?i:Departs from|Recovered|Handoff gave|Backlog))(.+?)\*\*")
+LABEL_RE = re.compile(r"^\*\*(?!(?i:Departs from|Recovered|Handoff gave|%s))(.+?)\*\*" % re.escape(shared_names.BACKLOG_ITEM))
 # A label may carry its colon inside the bold, as in "**Done:**". Both forms read the same,
 # so the colon is stripped before the label is matched against LABEL_ORDER.
 
@@ -1886,20 +1891,15 @@ def triage_hold(hook, records, active):
 
 
 BACKLOG_TIERS = ("coordinator",)  # plus guard_merge.ROLE_TIERS, read when the check runs
-BACKLOG_START = re.compile(CARRY_START + r"backlog(?:\*\*)?:[ \t]*", re.I | re.M)
+# The word, then its colon: plain, `**Backlog**:` or `**Backlog:**` (the colon inside the bold, as `**Done:**` reads).
+BACKLOG_START = re.compile(CARRY_START + re.escape(shared_names.BACKLOG_ITEM) + r"(?:\*\*:|:(?:\*\*)?)[ \t]*", re.I | re.M)
 BACKLOG_NUMBER = r"(\d+|unknown)"
 
 
 def _backlog_item_re():
     """One Backlog item: the three fields of shared_names.BACKLOG_FIELDS, in order, each a whole number or `unknown`."""
-    fields = r"[ \t]*;[ \t]*".join(re.escape(label) + r"[ \t]*:?[ \t]*" + BACKLOG_NUMBER for label in _names().BACKLOG_FIELDS)
+    fields = r"[ \t]*;[ \t]*".join(re.escape(label) + r"[ \t]*:?[ \t]*" + BACKLOG_NUMBER for label in shared_names.BACKLOG_FIELDS)
     return re.compile(fields, re.I)
-
-
-def _names():
-    sys.path.insert(0, os.path.join(HERE, "..", "hooks"))
-    import shared_names
-    return shared_names
 
 
 def _backlog_item(block):
@@ -1914,47 +1914,76 @@ def _backlog_item(block):
     return True, [None if v.lower() == "unknown" else int(v) for v in m.groups()]
 
 
-MERGE_CALL = r"(?:^|[;&|(]\s*)(?:\w+=\S+\s+)*(?:(?:\S*/)?verdict\s+)?(?:python[\d.]*\s+(?:\S*/)?merge\.py|(?:\S*/)?merge)\s+"
-REVIEWED_CALL_RE = re.compile(MERGE_CALL + r"--reviewed(?![\w-])", re.M)
-IDLE_CALL_RE = re.compile(MERGE_CALL + r"--idle-lanes(?![\w-])", re.M)
+LEDGER_FLAGS = {"reviewed": "--reviewed", "idle": "--idle-lanes"}
+# The merge program as a command word: bare `merge`, a path ending `bin/merge`, or a path ending `merge/merge.py`.
+MERGE_PROGRAM_RE = re.compile(r"^merge$|(?:^|/)bin/merge$|(?:^|/)merge/merge\.py$")
+PYTHON_WORD_RE = re.compile(r"^python[\d.]*(?:\.exe)?$")
 VERDICT_PASS_RE = re.compile(r"^PASS \S", re.M)
+
+
+def _ledger_kinds(command):
+    """The ledger reads ("reviewed", "idle") that `command` runs: a segment whose own program is merge, past the wrappers
+    `verdict`, `timeout N`, `env ...`, and `python3 [-I]`, with the ledger flag among its arguments. The guard's shell
+    reader splits the segments and strips heredoc bodies, so quoted or heredoc text that names the flag, and a `grep` of
+    the script, run nothing."""
+    if guard is None:
+        _load_guard()
+    core = guard.guard_core
+    kinds = set()
+    for segment in guard.split_segments(guard.strip_heredoc_bodies(command)):
+        text = core.REDIRECTION.sub(" ", segment)
+        tokens = core.segment_tokens(text) or text.split()
+        at = core.resolve_command(tokens) if tokens else None
+        if at is not None and PYTHON_WORD_RE.match(core.basename(tokens[at])):
+            at += 1
+            while at < len(tokens) and tokens[at].startswith("-"):
+                at += 1
+        if at is None or at >= len(tokens) or not MERGE_PROGRAM_RE.search(tokens[at]):
+            continue
+        kinds.update(kind for kind, flag in LEDGER_FLAGS.items() if flag in tokens[at + 1:])
+    return kinds
 
 
 def backlog_reads(records):
     """(reviewed, idle) read from the transcript after its newest compact_boundary. `reviewed` is (past, none) and `idle` is the
     lane count; each is None when the newest run of its command gave no number (a failed read, an unreadable log, an idle run
-    through a PASS verdict) or when no run is in the window. A run counts by its output line, or, when it printed none, by
-    its command. Cost: no process; one log read for each run through verdict that failed."""
-    names = _names()
+    through a PASS verdict) or when no run is in the window. A run is a Bash call whose own program is merge (_ledger_kinds);
+    its count is its output summary line, and a run with none gives no number. Only the newest run of each command decides,
+    so a run through verdict opens at most one log for each command. Cost: no process; at most two log reads."""
     start = 0
     for i, rec in enumerate(records):
         if rec.get("type") == "system" and rec.get("subtype") == "compact_boundary":
             start = i + 1
-    reviewed = idle = None
-    commands = {}
+    kinds_of = {}
+    newest = {}  # kind -> the output of its newest run
     for rec in records[start:]:
         if rec.get("isSidechain"):
             continue
         for use in tool_uses(rec):
             inp = use.get("input")
             if use.get("name") == "Bash" and isinstance(inp, dict):
-                commands[use.get("id")] = str(inp.get("command", ""))
+                kinds_of[use.get("id")] = _ledger_kinds(str(inp.get("command", "")))
         for result in tool_results(rec):
             shown = _result_text(result.get("content"))
-            command = commands.get(result.get("tool_use_id"), "")
-            logged = VERDICT_LOG_RE.search(shown)
-            body = (_verdict_log_text(logged.group(1)) or "") if logged else shown  # a missing log reads as no lines
-            passed = bool(VERDICT_PASS_RE.search(shown)) and not logged
-            sums = names.REVIEWED_SUMMARY_RE.findall(body)
-            if sums:
-                reviewed = (int(sums[-1][2]), int(sums[-1][1]))
-            elif REVIEWED_CALL_RE.search(command):
-                reviewed = (0, 0) if passed else None  # a PASS ledger has no RED line: none past a cycle, none without a next act
-            lanes = names.IDLE_LANES_SUMMARY_RE.findall(body)
-            if lanes:
-                idle = int(lanes[-1])
-            elif IDLE_CALL_RE.search(command):
-                idle = None
+            for kind in kinds_of.get(result.get("tool_use_id"), ()):
+                newest[kind] = shown
+
+    def body_of(shown):
+        logged = VERDICT_LOG_RE.search(shown)
+        return shown if not logged else _verdict_log_text(logged.group(1)) or ""  # a missing log reads as no lines
+
+    reviewed = idle = None
+    if "reviewed" in newest:
+        shown = newest["reviewed"]
+        sums = shared_names.REVIEWED_SUMMARY_RE.findall(body_of(shown))
+        if sums:
+            reviewed = (int(sums[-1][2]), int(sums[-1][1]))
+        elif VERDICT_PASS_RE.search(shown) and not VERDICT_LOG_RE.search(shown):
+            reviewed = (0, 0)  # a PASS ledger has no RED line: none past a cycle, none without a next act
+    if "idle" in newest:
+        lanes = shared_names.IDLE_LANES_SUMMARY_RE.findall(body_of(newest["idle"]))
+        if lanes:
+            idle = int(lanes[-1])
     return reviewed, idle
 
 
@@ -1967,7 +1996,7 @@ def backlog_problem(hook, records, text):
         import guard_merge
         if not any(guard_merge._own_tier_proved(hook.get("transcript_path"), tier) for tier in BACKLOG_TIERS + guard_merge.ROLE_TIERS):
             return ""
-        labels = _names().BACKLOG_FIELDS
+        labels = shared_names.BACKLOG_FIELDS
         form = "`Backlog: %s <N>; %s <N>; %s <N>`, each a whole number or `unknown`" % labels
         found, counts = _backlog_item(block_text(text))
         if not found:
