@@ -12622,6 +12622,62 @@ sh("frozen-scan-crash: gap, python -c that runs less -o on a frozen hook built b
    "subprocess.run([\"less\", \"-o%s\" % (h + \"/.claude/hooks/x\"), \"src\"])'",
    "deny", "frozen-path", cwd=NOGIT, env=TILDE_ENV)
 
+# Four more frozen writes in spellings the reader does not follow yet. Each denies.
+sh("frozen-scan-crash: gap, python -c that opens a frozen hook joined by parts.extend and os.path.join is denied",
+   "python3 -c 'import os\n"
+   "h = os.path.expanduser(\"~\")\n"
+   "parts=[h]\n"
+   "parts.extend([\".claude\",\"hooks\",\"x.py\"])\n"
+   "open(os.path.join(*parts),\"w\")'",
+   "deny", "frozen-path", cwd=NOGIT, env=TILDE_ENV)
+sh("frozen-scan-crash: gap, python -c that opens a frozen hook formatted with ** from an inline dict is denied",
+   "python3 -c 'import os\n"
+   "h = os.path.expanduser(\"~\")\n"
+   "open(\"{h}/.claude/hooks/x.py\".format(**dict(h=h)),\"w\")'",
+   "deny", "frozen-path", cwd=NOGIT, env=TILDE_ENV)
+sh("frozen-scan-crash: gap, python -c that opens a frozen hook formatted by format_map is denied",
+   "python3 -c 'import os\n"
+   "h = os.path.expanduser(\"~\")\n"
+   "open(\"{h}/.claude/hooks/x.py\".format_map({\"h\":h}),\"w\")'",
+   "deny", "frozen-path", cwd=NOGIT, env=TILDE_ENV)
+sh("frozen-scan-crash: gap, python -c that opens a frozen hook built by % formatting with a dict is denied",
+   "python3 -c 'import os\n"
+   "h = os.path.expanduser(\"~\")\n"
+   "open(\"%(h)s/.claude/hooks/x.py\" % {\"h\":h},\"w\")'",
+   "deny", "frozen-path", cwd=NOGIT, env=TILDE_ENV)
+
+# Five reads of frozen hooks, one in each spelling #2227 added. Each is allowed: the reader's new reach
+# must never turn a read into a deny.
+sh("frozen-scan-crash: pin, python -c that reads a frozen hook joined by os.sep.join is allowed",
+   "python3 -c 'import os\n"
+   "h = os.path.expanduser(\"~\")\n"
+   "print(open(os.sep.join([h, \".claude\", \"hooks\", \"x.py\"])).read())'",
+   "allow", cwd=NOGIT, env=TILDE_ENV)
+sh("frozen-scan-crash: pin, python -c that reads a frozen hook joined from a list appended to, then join, is allowed",
+   "python3 -c 'import os\n"
+   "h = os.path.expanduser(\"~\")\n"
+   "parts = [h]\n"
+   "parts.append(\".claude/hooks/x.py\")\n"
+   "print(open(\"/\".join(parts)).read())'",
+   "allow", cwd=NOGIT, env=TILDE_ENV)
+sh("frozen-scan-crash: pin, python -c that reads a frozen hook formatted with ** from a dict is allowed",
+   "python3 -c 'import os\n"
+   "h = os.path.expanduser(\"~\")\n"
+   "d = {\"h\": h}\n"
+   "print(open(\"{h}/.claude/hooks/x.py\".format(**d)).read())'",
+   "allow", cwd=NOGIT, env=TILDE_ENV)
+sh("frozen-scan-crash: pin, python -c that reads a frozen hook through a format string held in a name is allowed",
+   "python3 -c 'import os\n"
+   "h = os.path.expanduser(\"~\")\n"
+   "t = \"{}/.claude/hooks/x.py\"\n"
+   "print(open(t.format(h)).read())'",
+   "allow", cwd=NOGIT, env=TILDE_ENV)
+sh("frozen-scan-crash: pin, python -c that runs less with no write flag on a frozen hook built by % formatting is allowed",
+   "python3 -c 'import os, subprocess\n"
+   "h = os.path.expanduser(\"~\")\n"
+   "subprocess.run([\"less\", \"%s/.claude/hooks/x.py\" % h])'",
+   "allow", cwd=NOGIT, env=TILDE_ENV)
+
 # --------------------------------------------------------------------------- frozen dup: a descriptor dup
 #
 # `2>&1`, `>&2` and `2>&-` name a file DESCRIPTOR, not a file. The shell scanner must not read the
