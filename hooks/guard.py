@@ -2055,6 +2055,15 @@ MESSAGE_PREPOSITIONS = MESSAGE_LOCATIONS | {"for", "from", "with", "on", "by", "
 MESSAGE_DIRECT = MESSAGE_NOT_VERB_BEFORE | {"file", "files"}
 # The word right after an edit verb that points back to a path a read verb named (`Read X. Replace it.`).
 MESSAGE_ANAPHORS = {"it", "that", "them"}
+# A role noun after one of these determiners is an anaphor too (`Fix the tests`). A test-side noun carries only a test
+# path, a product-side noun only a product path, so `X_test.py:12 holds. Fix the guard.` carries nothing. `expected
+# value` is two words.
+MESSAGE_DETERMINERS = {"the", "this", "that", "these"}
+MESSAGE_TEST_SIDE_NOUNS = {"assert", "assertion", "case", "cases", "test", "tests", "expected value", "fixture"}
+MESSAGE_PRODUCT_SIDE_NOUNS = {"guard", "bug", "code", "hook", "function", "fix"}
+# `make it pass by changing ...` is an edit of the carried path, not a goal.
+MESSAGE_EDIT_GERUNDS = {"editing", "changing", "fixing", "updating", "modifying", "replacing", "rewriting", "adding",
+                        "removing", "deleting", "dropping", "re-pointing", "writing"}
 # What follows ` and ` inside one clause: another edit, or a thing to edit. Anything else starts a new clause.
 MESSAGE_AND_KEEPS = MESSAGE_EDIT_VERBS | MESSAGE_NOT_VERB_BEFORE
 MESSAGE_GREEN = {"green", "pass", "passes", "passing", "passed", "red", "fails", "failing"}
@@ -2072,6 +2081,8 @@ MESSAGE_SENTENCE = re.compile(r"(?<=[.!?])\s+|\n+")
 MESSAGE_CLAUSE = re.compile(r"\s*;\s*|\s*,\s*then\b\s*|\s+then\b\s*|\s*,\s*so\b\s*|\s+so\b\s*|\s+and\s+(?=\S)", re.I)
 MESSAGE_NAME = re.compile(r"^[\w@+-][\w@+.-]*\.([A-Za-z][A-Za-z0-9]{0,5})$")
 MESSAGE_SPAN_MASK = " cmdspan "
+MESSAGE_QUOTE_MASK = "quotespan"  # a quoted span of several words, numbered: its paths are read, not ordered
+MESSAGE_QUOTE_WORD = re.compile(MESSAGE_QUOTE_MASK + r"\d+")
 
 
 def _message_token(raw: str) -> str:
@@ -2092,12 +2103,13 @@ def _message_path(raw: str) -> str:
 
 
 def _message_words(clause: str):
-    """(word, path) per word of one clause. A word after a command word is part of that command and names no path."""
+    """(word, path, stop) per word of one clause. A word after a command word is part of that command and names no path.
+    `stop` is True when the raw word ends in a comma, `;` or `:`."""
     words, in_command = [], False
     for raw in clause.split():
         word = _message_token(raw).lower()
         in_command = in_command or word in MESSAGE_COMMANDS
-        words.append((word, "" if in_command else _message_path(raw)))
+        words.append((word, "" if in_command else _message_path(raw), raw.endswith((",", ";", ":"))))
     return words
 
 
@@ -2119,14 +2131,35 @@ def _message_goal(words, at: int) -> bool:
     """True when the path at `at` is a goal, not an object: it goes green or passes, or follows `pass`, `match` or
     `satisfy`."""
     return ((at > 0 and words[at - 1][0] in MESSAGE_TARGET_VERBS)
-            or any(w in MESSAGE_GREEN and words[at + k][0] != "to" for k, (w, _) in enumerate(words[at + 1:at + 4])))
+            or any(w in MESSAGE_GREEN and words[at + k][0] != "to" for k, (w, _, _) in enumerate(words[at + 1:at + 4])))
+
+
+def _anaphor_end(words, at: int):
+    """(last index, side) of the anaphor that starts at `at`, else (-1, ''). `it`, `that` and `them` are anaphors of any
+    path (side 'any'). A role noun after the/this/that/these is one of its side's paths: 'test' or 'product'."""
+    word = words[at][0] if at < len(words) else ""
+    if word in MESSAGE_DETERMINERS:
+        for size in (2, 1):
+            noun = " ".join(w for w, _, _ in words[at + 1:at + 1 + size])
+            if len(noun.split()) == size and noun in MESSAGE_TEST_SIDE_NOUNS | MESSAGE_PRODUCT_SIDE_NOUNS:
+                return at + size, "test" if noun in MESSAGE_TEST_SIDE_NOUNS else "product"
+    return (at, "any") if word in MESSAGE_ANAPHORS else (-1, "")
 
 
 def _anaphor_goal(words, at: int) -> bool:
-    """True when the anaphor at `at` is followed at once by a green word, `them green` or `that case green`. A green
-    word further on describes a replacement (`Replace it with a passing assert`), not the anaphor."""
-    skip = 2 if words[at][0] in ("the", "that") else 1
-    return any(w in MESSAGE_GREEN for w, _ in words[at + skip:at + skip + 1])
+    """True when the anaphor at `at` is followed at once by a green word, `them green` or `that case green`. A green word
+    further on describes a replacement (`Replace it with a passing assert`), and a comma ends the anaphor (`Replace it,
+    passing ...`). `make it pass by changing ...` is no goal: it edits the path."""
+    end, _ = _anaphor_end(words, at)
+    if end < 0 or words[end][2] or end + 1 >= len(words) or words[end + 1][0] not in MESSAGE_GREEN:
+        return False
+    after = [w for w, _, _ in words[end + 2:end + 4]]
+    return not (len(after) == 2 and after[0] == "by" and after[1] in MESSAGE_EDIT_GERUNDS)
+
+
+def _message_path_side(path: str) -> str:
+    """'test' for a test path, else 'product'."""
+    return "test" if is_test_rel(norm(path).removeprefix("./")) else "product"
 
 
 def _message_edits(words):
@@ -2134,24 +2167,24 @@ def _message_edits(words):
     (path, test_object) per path its edit verbs govern. An edit verb governs the first path after it, and a path joined
     to that one by `and`, `or` or a comma; a later path is a spec or a target. With no edit verb's path, a path that
     leads the clause is governed. `named` is (path, kind, test_object) per path a later pathless clause may mean: kind
-    'read' carries only to an anaphor. `anaphor` is True when an edit verb is followed by it, that, them or
-    the/that + a test noun."""
+    'read' carries only to an anaphor. `anaphor` is the set of sides of the anaphors an edit verb is followed by (see
+    _anaphor_end); it is empty when none is."""
     named, governed, led = [], [], []
-    edit_seen = actor_seen = anaphor = False
+    edit_seen = actor_seen = False
+    anaphor = set()
     kind = verb = ""
     slot = head_open = note = test_object = False
     verb_at = last_object = -1
-    for at, (word, path) in enumerate(words):
+    for at, (word, path, _) in enumerate(words):
         before = words[at - 1][0] if at else ""
         act = "" if actor_seen else _message_edit_verb(words, at)
         if act:
             kind, verb, verb_at, slot, head_open, note, test_object = act, word, at, act == "edit", True, False, False
             if act == "edit":
                 edit_seen = True
-                ahead = [w for w, _ in words[at + 1:at + 3]]
-                anaphor = anaphor or ((bool(ahead) and ahead[0] in MESSAGE_ANAPHORS) or (
-                    len(ahead) == 2 and ahead[0] in ("the", "that") and ahead[1] in MESSAGE_TEST_NOUNS)) and not (
-                    _anaphor_goal(words, at + 1))
+                side = _anaphor_end(words, at + 1)[1]
+                if side and not _anaphor_goal(words, at + 1):
+                    anaphor.add(side)
             continue
         if word in MESSAGE_READ_VERBS:
             kind, verb, slot = "read", word, False
@@ -2165,7 +2198,7 @@ def _message_edits(words):
         joined = last_object >= 0 and (at - 1 == last_object or (before in ("and", "or") and at - 2 == last_object))
         if kind == "edit" and (slot or joined):
             slot = False
-            direct = joined or all(w in MESSAGE_DIRECT for w, _ in words[verb_at + 1:at])
+            direct = joined or all(w in MESSAGE_DIRECT for w, _, _ in words[verb_at + 1:at])
             if note or _message_goal(words, at) or not (direct or before in MESSAGE_LOCATIONS):
                 continue
             governed.append((path, test_object and not direct))
@@ -2185,11 +2218,20 @@ def message_edit_paths(message: str):
     (_message_edits), or the verb's clause names no path at all and an earlier clause of the sentence (`Look at X, then
     fix it`), else the sentence right before, names it (`X.py ~683: ... . Replace it ...`). A path a read verb named,
     or one that led its clause, carries only when the verb is followed by an anaphor that does not go green
-    (`Make them green`). `test_object` marks a path a test noun object makes a spec
+    (`Make them green`). A role noun anaphor (`Fix the tests`) carries only a path of its side. A path inside a quote
+    is data for an order, but a read path for a carry (`Quote: "X:12 is wrong". Fix it.`). `test_object` marks a path a test noun object makes a spec
     for a test-author (`Add red cases for ... in X`)."""
+    quoted = []
+
     def mask(found):
         return found.group(1) if len(found.group(1).split()) == 1 else MESSAGE_SPAN_MASK
-    text = MESSAGE_QUOTE.sub(mask, MESSAGE_SPAN.sub(mask, MESSAGE_FENCE.sub(MESSAGE_SPAN_MASK, message)))
+
+    def mask_quote(found):
+        if len(found.group(1).split()) == 1:
+            return found.group(1)
+        quoted.append([path for path in map(_message_path, found.group(1).split()) if path])
+        return f" {MESSAGE_QUOTE_MASK}{len(quoted) - 1} "
+    text = MESSAGE_QUOTE.sub(mask_quote, MESSAGE_SPAN.sub(mask, MESSAGE_FENCE.sub(MESSAGE_SPAN_MASK, message)))
     hits, before = [], []
     for sentence in (s for s in MESSAGE_SENTENCE.split(text) if s.strip()):
         pieces, joins = MESSAGE_CLAUSE.split(sentence), MESSAGE_CLAUSE.findall(sentence)
@@ -2204,11 +2246,14 @@ def message_edit_paths(message: str):
         for clause in clauses:
             words = _message_words(clause)
             governed, seen, anaphor = _message_edits(words)
+            seen = seen + [(path, "read", False) for word, _, _ in words if MESSAGE_QUOTE_WORD.fullmatch(word)
+                           for path in quoted[int(word[len(MESSAGE_QUOTE_MASK):])]]
             named += seen
             if governed:
                 hits += governed
-            elif governed is not None and not any(path for _, path in words):
-                hits += [(path, test) for path, kind, test in earlier or before if kind == "edit" or anaphor]
+            elif governed is not None and not any(path for _, path, _ in words):
+                hits += [(path, test) for path, kind, test in earlier or before
+                         if kind == "edit" or "any" in anaphor or _message_path_side(path) in anaphor]
             earlier = seen or earlier
         before = named
     return hits
