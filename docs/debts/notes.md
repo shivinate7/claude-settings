@@ -27,9 +27,9 @@
 - cap-basename-false-alarm: a heredoc writing a fixture named settings.json with the cap key asks, because is_settings_file tests the basename only (hooks/guard.py)
 - cap-until-field-taught-late: the _agentCapUntil field is taught only in the revoke message after a bad cap write (hooks/config_watch.py, hooks/guard.py)
 - cap-write-by-python-unseen: a cap write made by a Python script, or text piped or written to a script and run later, is not asked (hooks/guard_frozen.py)
-- cap-write-glued-ampersand: `(W)&` and `W&` (a cap write backgrounded with a glued `&`) allow, while the spaced form denies as a detached launch (hooks/guard_frozen.py _shell_write_hit)
-- frozen-trim-quoted-backtick: _shell_write_hit trims a trailing backtick inside a quote too, so a write to a file literally named with a trailing ` reads as the bare name (hooks/guard_frozen.py)
-- push-calls-substitution-mutant: no mutant removes only the substitution read in _push_calls; the three wrapper-substitution deny cases would catch it (hooks/mutate_guard.py)
+- cap-write-glued-ampersand: `(W)&` and `W&` (a cap write backgrounded with a glued `&`) allow, while the spaced form denies as a detached launch (hooks/guard_frozen.py _shell_write_hit). Fix: none — Claude rarely backgrounds a cap write, and the spaced form denies. Until: 2026-11-21
+- frozen-trim-quoted-backtick: _shell_write_hit trims a trailing backtick inside a quote too, so a write to a file literally named with a trailing ` reads as the bare name (hooks/guard_frozen.py). Fix: none — no protected file name ends in a backtick; the error can only refuse. Until: 2026-11-21
+- push-calls-substitution-mutant: no mutant removes only the substitution read in _push_calls; the three wrapper-substitution deny cases would catch it (hooks/mutate_guard.py). Fix: step:push-calls-substitution-mutant
 - catalog-mode-detect-flags: hook catalog finds modes only from a "$g" --flag argument; a script registered twice with a positional arg or -x looks like one mode (lint/hook_catalog.py)
 - cite-by-id-skips-merge-subject: the cite-by-id rule does not read a gh pr merge subject; the lane-by-slug rule does (hooks/guard.py)
 - cites-lack-gloss-unchecked: some cites of record ids in decisions and debts carry no gloss and no check requires one (decisions, debts)
@@ -97,7 +97,7 @@
 - guard-split-ignores-backslash: no guard test refuses the \' and \" forms; background_commands counts echo \" & echo b as one command (guard_core, guard.py)
 - guard-split-mutant-needs-git: the root-scope mutant (_git drops -C) is killed only inside a git checkout; CI does (hooks/mutate_guard.py)
 - guard-split-sibling-mutant-case: PR2 needs a case in the in-process load that kills a sibling mutant (hooks/test_guard.py)
-- guard-substitution-in-token: open items only. The command_indexes callers (guard_stream, guard_wsl, guard_push_delete, question_form) miss a glued substitution. An inner `cd` is judged against the session root (`echo $(cd /x && git reset --hard)`). Rm after cd reads `stripped` only, so `$(cd x && rm -rf y)` is not read. A `$( )` in a quoted interpreter heredoc body is judged as shell, a possible false alarm.
+- guard-substitution-in-token: open items only. The command_indexes callers (guard_stream, guard_wsl, guard_push_delete, question_form) miss a glued substitution. An inner `cd` is judged against the session root (`echo $(cd /x && git reset --hard)`). Rm after cd reads `stripped` only, so `$(cd x && rm -rf y)` is not read. A `$( )` in a quoted interpreter heredoc body is judged as shell, a possible false alarm. Fix: step:substitution-in-token-callers
 - guard-timing-case-flaky: the 2000-span rm-var case keeps a wall-clock bound that can fail on a busy runner; no check measures the 60 s hook timeout (hooks/test_guard.py)
 - guard-untied-from-rule-map: merge-checks, draft-pr and pointer-head guard rules have no rule-map row, so a guard deleted with its tests passes rule_audit (lint/rule_mechanisms.json)
 - guard-wrapper-lists-closed: an unlisted wrapper such as stdbuf or chrt hides the real command word (guard_core COMMAND_WRAPPERS)
