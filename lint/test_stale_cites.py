@@ -18,7 +18,8 @@ STALE009 (range mode only) reports an added decision line that states what code 
 and a behaviour verb) with no cite. It is report only too (CodeClaimTests).
 STALE010 (range mode) is a finding: an added line that cites a Python name the head does not bind, or a file absent
 at head in a tracked top folder, in a STALE002 form or a node id. A cite into an untracked top folder is no cite here,
-as for STALE003 (NameCiteTests). A dead cite is STALE010 and never STALE009 (NameCiteTests).
+as for STALE003 (NameCiteTests), unless that folder is one edit from a tracked one or differs only in case: a likely
+typo (decision record-cites-live-code). A dead cite is STALE010 and never STALE009 (NameCiteTests).
 
 
 `--tree [REV]` reads every tracked Markdown file at REV instead of a range: STALE003 for a path cite that names
@@ -1277,9 +1278,11 @@ def touched(rng):
     return set(git(rng.repo, "diff", "--name-only", rng.base, rng.head).split())
 
 
-def top_folders(rng):
-    """The first folder of each tracked path at head: the folders a cite's first segment is tested against (STALE003)."""
-    return {p.split("/", 1)[0] for p in git(rng.repo, "ls-tree", "-r", "--name-only", rng.head).split() if "/" in p}
+def top_folders(rng, rev=None):
+    """The first folder of each tracked path at `rev` (head by default): the folders a cite's first segment is tested
+    against (STALE003, STALE010)."""
+    listed = git(rng.repo, "ls-tree", "-r", "--name-only", rev or rng.head).split()
+    return {p.split("/", 1)[0] for p in listed if "/" in p}
 
 
 NONE = re.compile(r"\bnone\b")
@@ -3179,9 +3182,10 @@ INCIDENT_LINE = (  # the line the incident added to docs/debts/notes.md, verbati
 class NameCiteTests(StaleCase):
     """STALE010, range mode, a finding. An ADDED line that cites a Python name in a STALE002 form, or a node id, is
     flagged when its file is absent at head in a tracked top folder, or the name is not bound there at head (names_in).
-    A cite into an untracked top folder is no cite, as STALE003 reads it. A cite of a JavaScript
-    or shell file keeps the unknown form, and a cite of a .py file that does not parse at head is one unknown line with
-    no finding. A fenced cite counts as prose, as STALE002 reads fences (its docstring). STALE010 judges only the
+    A cite into an untracked top folder is no cite, as STALE003 reads it, unless that folder is one edit from a tracked
+    one or differs from one only in case: a likely typo, flagged too (decision record-cites-live-code). A cite of a
+    JavaScript or shell file keeps the unknown form, and a cite of a .py file that does not parse at head is one unknown
+    line with no finding. A fenced cite counts as prose, as STALE002 reads fences (its docstring). STALE010 judges only the
     lines the PR adds, so the check stays never red on work the PR did not do."""
 
     def test_the_incident_line_is_flagged_while_its_name_is_unbound_and_silent_once_it_is_bound(self):
@@ -3431,14 +3435,17 @@ class NameCiteTests(StaleCase):
 
     def test_a_cite_into_an_untracked_top_folder_is_no_stale010_and_starts_no_git_process_past_the_four(self):
         """`mypkg` is no tracked top folder: its package lives under `src/`. `django` is no folder of the repo. Both
-        cited files are absent at head, and STALE003 reads such a cite as no path cite."""
+        cited files are absent at head, and STALE003 reads such a cite as no path cite. `li` is two edits from the
+        tracked `lint`, so it is no likely typo of it (decision record-cites-live-code): its cite stays silent too."""
         foo_src = "def foo():\n    return 1\n"
-        rows = [("- (mypkg/x.py foo)", False), ("- (django/db/models.py Model)", False)]
+        rows = [("- (mypkg/x.py foo)", False), ("- (django/db/models.py Model)", False), ("- (li/x.py fn)", False)]
         rng, _ = self.route_range(rows, extra={"src/mypkg/x.py": foo_src})
         self.assertEqual(binding_kind(foo_src, "foo"), "def")  # scope: the file under src binds the cited name
         self.assertIn("src", top_folders(rng))  # scope: src is a tracked top folder
+        self.assertIn("lint", top_folders(rng))  # scope: lint is tracked, two edits from li
         self.assertNotIn("mypkg", top_folders(rng))  # scope: mypkg is no tracked top folder
         self.assertNotIn("django", top_folders(rng))  # scope: django is no tracked top folder
+        self.assertNotIn("li", top_folders(rng))  # scope: li is no tracked top folder
         rc, out, commands = self.run_traced_commands(rng)
         self.assertEqual(rc, 0, out)
         self.assertIn("stale-cites: PASS", out)
@@ -3471,6 +3478,76 @@ class NameCiteTests(StaleCase):
         self.assertEqual(top_folders(rng), set())  # scope: no tracked path has a folder
         self.assertIn("notes.md", touched(rng))  # scope: the range adds the cite on a Markdown file at the root
         self.assert_passes(rng)
+
+    def test_a_one_edit_typo_of_a_tracked_top_folder_is_flagged_and_its_bound_twin_is_silent(self):
+        """A top folder one insert, delete or substitution from a tracked one is a likely typo, so its cite of a file
+        absent at head is flagged (decision record-cites-live-code). The bound cite into the tracked folder is the
+        control, silent in the same range."""
+        rows = [
+            ("- (hook/guard.py fn)", True),  # one deletion from hooks/
+            ("- (hookss/guard.py fn)", True),  # one insertion
+            ("- (hooxs/guard.py fn)", True),  # one substitution
+            ("- (hooks/guard.py keep)", False),  # the tracked folder, bound at head
+        ]
+        rng, flagged = self.route_range(rows)
+        self.assertIn("hooks", top_folders(rng))  # scope: hooks is a tracked top folder
+        self.assertNotIn("hook", top_folders(rng))  # scope: hook is no tracked top folder
+        self.assertEqual(binding_kind(GUARD, "keep"), "def")  # scope: the control's name is bound at head
+        _, out = self.run_check(rng)
+        found = sorted((p, n, c) for p, n, c, _ in parse(out))
+        self.assertEqual(found, sorted((NOTES, n, "STALE010") for n in flagged),
+                         "a one-edit typo of the tracked hooks/ was skipped as an untracked top folder\n%s" % out)
+
+    def test_a_case_only_typo_of_a_tracked_top_folder_is_flagged_and_its_bound_twin_is_silent(self):
+        """A top folder that differs from a tracked one only in case is a likely typo (decision record-cites-live-code).
+        `Lint` is one substitution from `lint`. `LINT` is four, so only the case clause flags it. The bound cite into
+        `lint` is the control."""
+        rows = [
+            ("- (Lint/x.py fn)", True),
+            ("- (LINT/x.py fn)", True),
+            ("- (lint/x.py check)", False),
+        ]
+        rng, flagged = self.route_range(rows)
+        self.assertIn("lint", top_folders(rng))  # scope: lint is a tracked top folder
+        self.assertNotIn("Lint", top_folders(rng))  # scope: Lint is no tracked top folder
+        self.assertNotIn("LINT", top_folders(rng))  # scope: LINT is no tracked top folder
+        self.assertEqual(binding_kind(CODE["lint/x.py"], "check"), "def")  # scope: the control's name is bound at head
+        _, out = self.run_check(rng)
+        found = sorted((p, n, c) for p, n, c, _ in parse(out))
+        self.assertEqual(found, sorted((NOTES, n, "STALE010") for n in flagged),
+                         "a case-only typo of the tracked lint/ was skipped as an untracked top folder\n%s" % out)
+
+    def test_a_top_folder_present_only_at_head_is_read_at_head_for_its_cites(self):
+        """`newdir` is a top folder only at head. Its cite of a name the new file does not bind is a finding, and its
+        cite of the bound name is silent. A check that read the base tree's folders would skip the first (decision
+        record-cites-live-code)."""
+        newdir = "def real():\n    return 1\n"
+        rows = [("- (newdir/x.py missing)", True), ("- (newdir/x.py real)", False)]
+        rng, flagged = self.route_range(rows, head_extra={"newdir/x.py": newdir})
+        self.assertIn(NOTES, touched(rng))  # scope: the range adds the cites on a Markdown line
+        self.assertIn("newdir", top_folders(rng))  # scope: newdir is a tracked top folder at head
+        self.assertNotIn("newdir", top_folders(rng, rng.base))  # scope: newdir is no top folder at base
+        self.assertEqual(binding_kind(newdir, "real"), "def")  # scope: the new file binds the bound cite's name
+        self.assertIsNone(binding_kind(newdir, "missing"))  # scope: the new file does not bind the flagged name
+        _, out = self.run_check(rng)
+        found = sorted((p, n, c) for p, n, c, _ in parse(out))
+        self.assertEqual(found, sorted((NOTES, n, "STALE010") for n in flagged),
+                         "a cite of a missing name in newdir/, a top folder only at head, was not flagged\n%s" % out)
+
+    def test_stale003_keeps_a_one_edit_typo_of_a_top_folder_silent_and_a_dead_path_beside_it_still_prints(self):
+        """STALE003 keeps its verdict under the typo rule (decision record-cites-live-code). `hook/x.py` names no
+        tracked file and is silent, as `hook` is no tracked top folder. `lint/gone.py` in the same tree is a dead path
+        cite that still prints, so the silence is not from an empty tree."""
+        notes = "# Notes\n\n- the guard is `hook/x.py`\n- the old check was in lint/gone.py\n"
+        rng = self.tree(notes)
+        self.assertIn("hooks", top_folders(rng))  # scope: hooks is a tracked top folder
+        self.assertNotIn("hook", top_folders(rng))  # scope: hook is no tracked top folder
+        self.assertIn("lint", top_folders(rng))  # scope: lint is tracked, so lint/gone.py is a dead path cite
+        self.assertNotIn("hook/x.py", git(rng.repo, "ls-tree", "-r", "--name-only", rng.head).split())  # scope: absent
+        _, out = self.run_tree(rng)
+        found = sorted((p, n, c) for p, n, c, _ in parse(out))
+        self.assertEqual(found, [(NOTES, 4, "STALE003")],
+                         "STALE003 flagged a line other than the dead twin lint/gone.py\n%s" % out)
 
 
 if __name__ == "__main__":
