@@ -1091,8 +1091,10 @@ def archive_hit(tool: str, tool_input, transcript: str):
     while any open pull request of its cs-repo has a head ref in lane_head_refs of its cs-step slug, except an open draft whose
     head commit is already in its base (compare: behind or identical). A lane is also refused while a branch of
     its record (external_metadata.current_branches) is ahead of its repo's default branch with no pull request
-    in any state (_stranded_branch). Fails closed: any error in the reads is a refusal, because the guard-wide
-    crash path fails open. A failed open-list read and a failed branch read each refuse with their own reason."""
+    in any state (_stranded_branch). Fails closed on the network reads, because the guard-wide crash path fails
+    open: a failed open-list read and a failed branch read each refuse with their own reason. The one exception is
+    the second transcript read (own_session_ccr): it never raises and returns None for a transcript it cannot read,
+    and a None record skips the branch check, so the lane passes it instead of being refused."""
     if tool != ARCHIVE_TOOL:
         return None
     target = tool_input.get("session_id") if isinstance(tool_input, dict) else None

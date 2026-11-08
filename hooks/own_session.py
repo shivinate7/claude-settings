@@ -68,7 +68,7 @@ def own_session_ccr(transcript, own_id):
         return None
     try:
         return _scan(transcript, own_id, False)[3]
-    except (OSError, TypeError, ValueError):
+    except (OSError, TypeError, ValueError, RecursionError):
         return None
 
 
