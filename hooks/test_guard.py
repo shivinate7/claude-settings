@@ -29197,6 +29197,12 @@ CTM_REPO_JANE = ctm_repo("jane", ["Jane <opus@example.com>"],
                          local=[ctm_message("Co-Authored-By: Jane <opus@example.com>")])
 CTM_REPO_OPUSCULUM = ctm_repo("opusculum", ["Opusculum Jones"],
                               local=[ctm_message("Co-Authored-By: Opusculum Jones")])
+# A minor version that differs from the agent's is a different model, in the model id form and with the version
+# before the family word. Each is read as written.
+CTM_REPO_HAIKU54ID = ctm_repo("haiku54id", [ctm_value("claude-haiku-5-4")],
+                              local=[ctm_message(ctm_trailer("claude-haiku-5-4"))])
+CTM_REPO_CLAUDE54HAIKU = ctm_repo("claude54haiku", [ctm_value("Claude 5-4 Haiku")],
+                                  local=[ctm_message(ctm_trailer("Claude 5-4 Haiku"))])
 
 
 def ctm_case(name, repo, expected, agent, command=CTM_PUSH, transcript=CTM_TRANSCRIPT):
@@ -29304,6 +29310,8 @@ ctm_case("a Claude_Haiku_4.5 trailer from a Haiku 5.5 agent is refused", CTM_REP
 ctm_case("a Claude Haiku 5.4 trailer from a Haiku 5.5 agent is refused", CTM_REPO_HAIKU54, "deny", CTM_HAIKU)
 ctm_case("a Jane <opus@example.com> trailer from a Haiku agent passes", CTM_REPO_JANE, "allow", CTM_HAIKU)
 ctm_case("an Opusculum Jones trailer from a Haiku agent passes", CTM_REPO_OPUSCULUM, "allow", CTM_HAIKU)
+ctm_case("a claude-haiku-5-4 trailer from a Haiku 5.5 agent is refused", CTM_REPO_HAIKU54ID, "deny", CTM_HAIKU)
+ctm_case("a Claude 5-4 Haiku trailer from a Haiku 5.5 agent is refused", CTM_REPO_CLAUDE54HAIKU, "deny", CTM_HAIKU)
 ctm_case("a Claude Code 2.1 trailer from a Haiku agent passes (no family word)", CTM_REPO_CLAUDECODE, "allow",
          CTM_HAIKU)
 ctm_case("a GPT-4 trailer from a Haiku agent passes (no family word)", CTM_REPO_GPT4, "allow", CTM_HAIKU)
