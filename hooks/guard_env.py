@@ -11,6 +11,7 @@ from guard_core import (
     ASSIGNMENT, DURATION, ENV_PATTERN_COMMANDS, INTERPRETER_HEREDOC, REDIRECT, SHELL_HEREDOC,
     TIMEOUT_FLAGS_BARE, TIMEOUT_FLAGS_WITH_VALUE, _drop_heredoc_bodies, _runs_written_file,
     _split_heredocs, _without_message_values,
+    JS_DEPTH, code_paths, heredoc_code, inline_code,
     inline_script, inner_commands, is_powershell, norm, segment_tokens, split_segments,
 )
 
@@ -138,6 +139,9 @@ ENV_RUNNER_REASON = (
 )
 ENV_CONTENTS_REASON = (
     "this command would read, write or commit the contents of an environment file"
+)
+ENV_CODE_REASON = (
+    "interpreter code would read, write or commit the contents of an environment file"
 )
 ENV_TOOL_REASON = (
     "an environment file holds the user's own secrets, and this tool would put the contents "
@@ -368,6 +372,60 @@ def _plain_escaped_quotes(cmd: str) -> str:
     return cmd
 
 
+# ------------------------------------------------------------------ interpreter code
+#
+# Decision env-file-stays-unread, "Interpreter code": the code `python -c`, `node -e` and a python
+# or node heredoc run opens a file as the interpreter does, so it is judged by its STRING LITERALS
+# (guard_core `code_paths` reads them), each read as one path with `env_reference`. Prose that holds
+# the name among other words, an example file and a comment all stay out. A literal that only asks
+# whether the file exists stays out too, as `test -f` does in the shell form. Every other mode,
+# "unknown" too, is refused.
+
+
+def _literal_refusal(code: str, language: str):
+    try:
+        paths = code_paths(code, language)
+    except ValueError:
+        return ENV_DEPTH_REASON, "%s code nested past %d levels" % (language, JS_DEPTH)
+    for literal, mode in paths:
+        named = env_reference(literal.strip())  # a template literal may carry its line breaks
+        if named and mode != "exists":
+            return ENV_CODE_REASON, "%s code holds the path '%s' in a string" % (language, named)
+    return "", ""
+
+
+def _code_refusal(text: str):
+    """(reason, log) for the `-c` or `-e` code of one text that names an environment file."""
+    for piece in split_segments(text):
+        for segment in _env_parts(piece):
+            tokens = segment_tokens(segment)
+            for code, language in inline_code(tokens) if tokens else ():
+                refusal = _literal_refusal(code, language)
+                if refusal[0]:
+                    return refusal
+    return "", ""
+
+
+def _heredoc_code(cmd: str):
+    """(reason, log, cmd) for the python and node heredoc bodies of a command. The reason is set when
+    the code of a body names an environment file. Else each QUOTED body judged clean is blanked in
+    the returned command: its code was read as code, and read again as shell words, its comments
+    would be judged as commands."""
+    bodies = heredoc_code(cmd)
+    clean = []
+    for quote, body, language in bodies:
+        refusal = _literal_refusal(body, language)
+        if refusal[0]:
+            return refusal + (cmd,)
+        if quote:
+            clean.append(body)
+    if clean and not _runs_written_file(
+            _without_message_values(_drop_heredoc_bodies(cmd)), [h for _, _, h in _split_heredocs(cmd)[1]]):
+        for body in clean:   # a body written to a file that is then run stays in view as text
+            cmd = cmd.replace(body, ":", 1)
+    return "", "", cmd
+
+
 def env_refusal(cmd: str, subs_only: bool = False, heredoc: bool = False, depth: int = 0):
     """Return (printed reason, logged text) when the command touches an environment file.
 
@@ -392,6 +450,9 @@ def env_refusal(cmd: str, subs_only: bool = False, heredoc: bool = False, depth:
     """
     if depth > ENV_MAX_DEPTH:
         return ENV_DEPTH_REASON, "substitutions nested past %d levels" % ENV_MAX_DEPTH
+    reason, logged, cmd = _heredoc_code(cmd)  # before the quotes are made plain: the code reads them
+    if reason:
+        return reason, logged
     cmd = _plain_escaped_quotes(cmd)
     texts, too_deep = _substitutions(cmd, depth, powershell=is_powershell(cmd), heredoc=heredoc)
     if too_deep:
@@ -405,6 +466,9 @@ def env_refusal(cmd: str, subs_only: bool = False, heredoc: bool = False, depth:
         # name among the arguments is text. A substitution's output is an ARGUMENT of the command
         # around it, so only a message value may treat it as text.
         refusal = _env_flat(text, in_message or index == len(texts) - 1)
+        if refusal[0]:
+            return refusal
+        refusal = _code_refusal(text)
         if refusal[0]:
             return refusal
         for script in _handed_on_scripts(text):

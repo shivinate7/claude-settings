@@ -7,14 +7,17 @@ checkout, a tree's status, the default branch, a branch's proof, session livenes
 git_reads.py, shared with the janitor: a test or the janitor that patches one of them patches it
 there, on the one object that every caller reads.
 """
+import ast
 import errno
 import functools
+import io
 import json
 import os
 import re
 import shlex
 import sys
 import time
+import tokenize
 from datetime import datetime
 
 # No try/except: a guard copy without git_reads.py judges nothing, so it fails closed (guard.py).
@@ -1880,6 +1883,277 @@ def command_indexes(tokens):
         at = resolve_command(tokens[start:])
         if at is not None and start + at not in found:
             found.append(start + at)
+    return found
+
+
+# ------------------------------------------------------------------ the code an interpreter runs
+#
+# `python -c`, `node -e` and a python or node heredoc run code that opens files as the interpreter
+# does. These three helpers are the one reader of that code, for every rule that judges a path in
+# it (the env-file rule, and any rule that judges a write). They are stdlib only.
+
+CODE_EXISTS_CALLS = frozenset({"exists", "lexists", "isfile", "isdir", "islink", "access"})
+CODE_EXISTS_METHODS = frozenset({"exists", "is_file", "is_dir", "is_symlink"})
+# Python calls by the mode they give the path in their first argument. The destination is judged
+# apart: `shutil.copy(src, dst)` reads src and writes dst, and a move or rename changes both.
+PY_READ_METHODS = frozenset({"read_text", "read_bytes"})
+PY_WRITE_CALLS = frozenset({"remove", "unlink", "rmdir", "rmtree", "mkdir", "makedirs", "removedirs",
+                            "truncate", "chmod", "chown", "utime", "touch", "write_text", "write_bytes",
+                            "symlink_to", "hardlink_to", "rename", "replace", "move"})
+PY_COPY_CALLS = frozenset({"copy", "copy2", "copyfile", "copytree", "copymode", "copystat"})
+PY_MOVE_CALLS = frozenset({"rename", "replace", "move"})
+# Node calls (fs, fs.promises) by the mode they give the path in the first argument, and a second
+# path that is written.
+JS_READ_CALLS = frozenset({"readFileSync", "readFile", "createReadStream", "readdirSync", "readdir",
+                           "copyFileSync", "copyFile", "cpSync", "cp"})
+JS_WRITE_CALLS = frozenset({"writeFileSync", "writeFile", "appendFileSync", "appendFile",
+                            "createWriteStream", "unlinkSync", "unlink", "rmSync", "rm", "rmdirSync",
+                            "rmdir", "mkdirSync", "mkdir", "truncateSync", "truncate", "renameSync",
+                            "rename", "chmodSync", "chmod", "utimesSync", "utimes"})
+JS_DEST_CALLS = frozenset({"copyFileSync", "copyFile", "cpSync", "cp", "renameSync", "rename"})
+JS_EXISTS_CALLS = frozenset({"exists", "existsSync", "access", "accessSync"})
+JS_FIRST_ARG = re.compile(r"(\w+)\s*\(\s*$")
+JS_SECOND_ARG = re.compile(r"(\w+)\s*\(\s*(?:'[^']*'|\"[^\"]*\"|[\w.$]+)\s*,\s*$")
+JS_EVAL_FLAGS = ("-e", "-p", "--eval", "--print")
+# After one of these a `/` opens a regex, and after anything else it divides.
+JS_REGEX_AFTER = frozenset("(,=:[!&|?{};+-*%<>~^}")
+JS_REGEX_WORDS = frozenset({"return", "typeof", "case", "in", "of", "delete", "void", "throw", "new",
+                            "else", "do", "yield", "await"})
+JS_DEPTH = 64
+
+
+def _call_name(call) -> str:
+    func = call.func
+    return func.attr if isinstance(func, ast.Attribute) else getattr(func, "id", "")
+
+
+def _stdlib_call(call) -> bool:
+    """True for a bare call (`open(p)`) and a call on os, shutil, io or a `.path` (`os.path.exists`).
+    A method of some other object (`names.remove(x)`, `text.replace(a, b)`) is no file call."""
+    func = call.func
+    if isinstance(func, ast.Name):
+        return True
+    owner = func.value if isinstance(func, ast.Attribute) else None
+    return (isinstance(owner, ast.Name) and owner.id in ("os", "shutil", "io", "path")) or (
+        isinstance(owner, ast.Attribute) and owner.attr == "path")
+
+
+def _open_mode(call, mode_at: int) -> str:
+    """"write" for an `open` call whose mode string holds w, a, x or +, "read" when it holds none
+    (the default too), "unknown" when the mode is not a string literal."""
+    mode = call.args[mode_at] if len(call.args) > mode_at else next(
+        (k.value for k in call.keywords if k.arg == "mode"), None)
+    if mode is None:
+        return "read"
+    if isinstance(mode, ast.Constant) and isinstance(mode.value, str):
+        return "write" if set(mode.value) & set("wax+") else "read"
+    return "unknown"
+
+
+def _python_mode(node, parents) -> str:
+    """The mode a python string constant gives its path, from the call that holds it."""
+    call = parents.get(node)
+    if not isinstance(call, ast.Call):
+        return "unknown"
+    name, position = _call_name(call), call.args.index(node) if node in call.args else -1
+    if name.endswith("Path") and position == 0:
+        method = parents.get(call)
+        outer = parents.get(method)
+        if not (isinstance(method, ast.Attribute) and isinstance(outer, ast.Call) and outer.func is method):
+            return "unknown"
+        if method.attr in CODE_EXISTS_METHODS:
+            return "exists"
+        if method.attr in PY_READ_METHODS:
+            return "read"
+        if method.attr == "open":
+            return _open_mode(outer, 0)
+        return "write" if method.attr in PY_WRITE_CALLS else "unknown"
+    if position < 0 or position > 1 or not _stdlib_call(call):
+        return "unknown"
+    if name in CODE_EXISTS_CALLS:
+        return "exists" if position == 0 else "unknown"
+    if name == "open":
+        return _open_mode(call, 1) if position == 0 else "unknown"
+    if name in PY_COPY_CALLS:
+        return "read" if position == 0 else "write"
+    if name in PY_MOVE_CALLS:
+        return "write"
+    return "write" if position == 0 and name in PY_WRITE_CALLS else "unknown"
+
+
+def _python_paths(code: str):
+    try:
+        tree = ast.parse(code)
+    except (SyntaxError, ValueError, RecursionError):
+        return [(text, "unknown") for text in _python_token_strings(code)]
+    parents = {child: parent for parent in ast.walk(tree) for child in ast.iter_child_nodes(parent)}
+    return [(node.value, _python_mode(node, parents)) for node in ast.walk(tree)
+            if isinstance(node, ast.Constant) and isinstance(node.value, str)]
+
+
+def _python_token_strings(code: str):
+    found = []
+    middle = getattr(tokenize, "FSTRING_MIDDLE", None)
+    try:
+        for token in tokenize.generate_tokens(io.StringIO(code).readline):
+            if token.type == tokenize.STRING:
+                text = token.string.lstrip("rRbBuUfF")
+                for quote in ('"""', "'''", '"', "'"):
+                    if text.startswith(quote) and text.endswith(quote) and len(text) >= 2 * len(quote):
+                        text = text[len(quote):-len(quote)]
+                        break
+                found.append(text)
+            elif middle is not None and token.type == middle:
+                found.append(token.string)
+    except (tokenize.TokenError, SyntaxError):
+        pass  # what was read before the break still counts
+    return found
+
+
+def _js_mode(before: str) -> str:
+    """The mode a node string gives its path, from the call text just before it: the call it is
+    the first argument of, or the second of a call that writes its destination."""
+    first = JS_FIRST_ARG.search(before[-200:])
+    if first:
+        name = first.group(1)
+        return ("exists" if name in JS_EXISTS_CALLS else "read" if name in JS_READ_CALLS
+                else "write" if name in JS_WRITE_CALLS else "unknown")
+    second = JS_SECOND_ARG.search(before[-200:])
+    return "write" if second and second.group(1) in JS_DEST_CALLS else "unknown"
+
+
+def _js_paths(code: str):
+    found, stack, prev = [], [], ""
+    i, n = 0, len(code)
+    while i < n:
+        if len(stack) > JS_DEPTH:
+            raise ValueError("nest")
+        if stack and stack[-1] == "`":
+            j, part = i, []
+            while j < n and code[j] != "`" and not code.startswith("${", j):
+                step = 2 if code[j] == "\\" else 1
+                part.append(code[j:j + step])
+                j += step
+            # Only the part right after the opening backtick can be a call's whole argument.
+            found.append(("".join(part), _js_mode(code[:i - 1]) if i and code[i - 1] == "`" else "unknown"))
+            if j < n and code[j] == "`":
+                stack.pop()
+                prev, i = "a", j + 1
+            elif j < n:
+                stack.append("${")
+                prev, i = "{", j + 2
+            else:
+                i = n
+            continue
+        char = code[i]
+        if code.startswith("//", i):
+            end = code.find("\n", i)
+            i = n if end < 0 else end
+        elif code.startswith("/*", i):
+            end = code.find("*/", i + 2)
+            i = n if end < 0 else end + 2
+        elif char in "'\"":
+            j = i + 1
+            while j < n and code[j] != char and code[j] != "\n":
+                j += 2 if code[j] == "\\" else 1
+            found.append((code[i + 1:j], _js_mode(code[:i])))
+            prev, i = "a", j + 1
+        elif char == "`":
+            stack.append("`")
+            i += 1
+        elif char == "/" and (not prev or prev in JS_REGEX_AFTER or prev == "kw"):
+            j, in_class = i + 1, False
+            while j < n and code[j] != "\n" and (in_class or code[j] != "/"):
+                if code[j] == "[":
+                    in_class = True
+                elif code[j] == "]":
+                    in_class = False
+                j += 2 if code[j] == "\\" else 1
+            prev, i = "a", j + 1
+        elif char in "{}":
+            if char == "{":
+                stack.append("{")
+            elif stack:
+                stack.pop()
+            prev, i = char, i + 1
+        elif char.isalnum() or char in "_$":
+            j = i
+            while j < n and (code[j].isalnum() or code[j] in "_$"):
+                j += 1
+            prev, i = ("kw" if code[i:j] in JS_REGEX_WORDS else "a"), j
+        else:
+            if not char.isspace():
+                prev = char
+            i += 1
+    return found
+
+
+def code_paths(code: str, language: str):
+    """[(string literal, mode)] for each string literal of the code that could be a path.
+
+    `language` is "python" or "node". Python is read with `ast` (the literal parts of an f-string
+    too) and, when the code does not parse, with `tokenize`; node is read by one left-to-right
+    scan that skips comments and regex literals and reads each template literal's literal parts
+    and the code in its `${...}`. A comment is never read. The mode comes from the call the
+    literal is an argument of: "read" (`open(p)`, `Path(p).read_text()`, `shutil.copy(p, d)`,
+    `fs.readFileSync(p)`), "write" (`open(p, 'w')`, the destination of a copy, a move, a rename,
+    `fs.writeFileSync(p)`), "exists" (`os.path.exists(p)`, `Path(p).is_file()`, `fs.existsSync(p)`),
+    and "unknown" for any other literal: a name handed to some other call, bound to a variable, or
+    built from parts. A caller that refuses a path must refuse "unknown" as well as the modes it
+    names. Raises ValueError for a template nest deeper than JS_DEPTH."""
+    return _python_paths(code) if language == "python" else _js_paths(code)
+
+
+def code_language(word: str) -> str:
+    """"python" for `python`, `python3.12` and `py`, "node" for `node`, `nodejs` and `bun`, else ''."""
+    name = re.sub(r"\.exe$", "", word.rsplit("/", 1)[-1].rsplit("\\", 1)[-1])
+    if re.fullmatch(r"python[\d.]*|py", name):
+        return "python"
+    return "node" if name in ("node", "nodejs", "bun") else ""
+
+
+def inline_code(tokens):
+    """[(code, language)] for the code one segment hands to python or node by flag: `python -c`,
+    `node -e` or `-p`, `bun --eval`, and `deno eval`. `tokens` are the segment's `segment_tokens`,
+    so the quotes and wrappers around the code are already read. A segment with no such code
+    gives []. The heredoc form is `heredoc_code`."""
+    found = []
+    for at in command_indexes(tokens):
+        language, rest = code_language(tokens[at]), tokens[at + 1:]
+        if language == "python":
+            for k, token in enumerate(rest[:-1]):
+                if re.fullmatch(r"-[A-Za-z]*c", token):
+                    found.append((rest[k + 1], "python"))
+                    break
+        elif language == "node":
+            for k, token in enumerate(rest):
+                if token.startswith(("--eval=", "--print=")):
+                    found.append((token.partition("=")[2], "node"))
+                elif (token in JS_EVAL_FLAGS or re.fullmatch(r"-[pe]{2}", token)) and k + 1 < len(rest):
+                    found.append((rest[k + 1], "node"))
+        elif re.sub(r"\.exe$", "", tokens[at].rsplit("/", 1)[-1]) == "deno" and rest[:1] == ["eval"]:
+            found.extend((code, "node") for code in [t for t in rest[1:] if not t.startswith("-")][:1])
+    return found
+
+
+def heredoc_code(cmd: str):
+    """[(quote, body, language)] for each heredoc of the command whose header runs python or node.
+    `quote` is the delimiter's quote character, '' when unquoted. The header test is the
+    one `_plain_escaped_quotes` uses (INTERPRETER_HEREDOC and not SHELL_HEREDOC); the language is
+    read from the header's own command words."""
+    if "<<" not in cmd:
+        return []
+    found = []
+    for quote, body, header in _split_heredocs(cmd)[1]:
+        header = _without_message_values(header)
+        if not (body and INTERPRETER_HEREDOC(header) and not SHELL_HEREDOC(header)):
+            continue
+        for piece in split_segments(header):
+            tokens = segment_tokens(piece)
+            for at in command_indexes(tokens) if tokens else ():
+                language = code_language(tokens[at])
+                if language:
+                    found.append((quote, body, language))
     return found
 
 # The installer swaps the next line for `INSTALL_ID = "<id>"` at copy time; guard.py compares the
