@@ -6,6 +6,6 @@
   "owner": "coordinator",
   "lane": "session_013NEJL448rTgL9ZZJPUnxU1",
   "why": "Owner item 396 a (06:08 CST Nov 8) gave the held builder-probe fix a fourth round, but the merge tool caps records at round 3.",
-  "note": "Done check: a red test where `merge --review-record --round 4` with no owner grant cite refuses, and with a page-item grant cite records. Doing in lane session_013NEJL448rTgL9ZZJPUnxU1 (07:04 CST Nov 8). Related: step builder-probe-false-alarm. Title by triage. Wording question (coordinator 08:46 CST Nov 8) answered from the rule by triage, 08:55 CST, no page item (P38): roles-review-cap-three already says a held change gets no more work \"until the owner decides\", so an owner-granted round (item 396 a) is inside the rule as written. #2005's Grant line records that decision; the rule text needs no change.",
-  "updatedAt": "2026-11-08T08:46:00-06:00"
+  "note": "Done check: a red test where `merge --review-record --round 4` with no owner grant cite refuses, and with a page-item grant cite records. Doing in lane session_013NEJL448rTgL9ZZJPUnxU1 (07:04 CST Nov 8). Related: step builder-probe-false-alarm. Title by triage. Wording question (coordinator 08:46 CST Nov 8) answered from the rule by triage, 08:47 CST, no page item (P38): roles-review-cap-three already says a held change gets no more work \"until the owner decides\", so an owner-granted round (item 396 a) is inside the rule as written. #2005's Grant line records that decision; the rule text needs no change.",
+  "updatedAt": "2026-11-08T08:58:00-06:00"
 }

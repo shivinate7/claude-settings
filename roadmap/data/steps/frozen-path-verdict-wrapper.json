@@ -1,11 +1,11 @@
 {
   "title": "The frozen-path guard judges a command the same with or without the `verdict` wrapper",
   "why": "The frozen-path guard refused `MUTATE_ONLY=\"worktree-home: a copy\" verdict python3 hooks/test_guard.py`, while the same command without `verdict` passed (lane other-checkout-cp-own (session_013NEJL3R2CBFavz7grtbJY8); coordinator, 04:13 CST Nov 8).",
-  "note": "Fix: the frozen-path guard unwraps `verdict` (and reads a leading env assignment as data) before it matches, as it does for the bare command. Red case first: the `verdict` form is refused today; control: a `verdict`-wrapped write to a frozen path still refuses. Owner: lane other-checkout-cp-own, a fix in that lane (coordinator, 04:13 CST Nov 8). Queue fix. Filed 04:20 CST Nov 8. Possible false alarm (lane bg-tail-loses-verdict (session_013NEJL3ZjZdzrS8tBezxY85), 08:58 CST Nov 8; reader not traced): guard.log 2026-11-08T14:51:34Z denied frozen-path on the installed verdict wrapper in a test-author's read-only red run: verdict wrapping `sh <red-run folder>/hooks/test_install_src_red.sh guardset3`, with INSTALL_SH_UNDER_TEST set to a mutant install.sh in the scratchpad. The guard is right only if that mutant writes the real installed config; the test is meant to use its own temp HOME. Fold awaits this lane's scope confirmation (triage, 09:06 CST).",
+  "note": "Fix: the frozen-path guard unwraps `verdict` (and reads a leading env assignment as data) before it matches, as it does for the bare command. Red case first: the `verdict` form is refused today; control: a `verdict`-wrapped write to a frozen path still refuses. Owner: lane other-checkout-cp-own, a fix in that lane (coordinator, 04:13 CST Nov 8). Queue fix. Filed 04:20 CST Nov 8. Possible false alarm (lane bg-tail-loses-verdict (session_013NEJL3ZjZdzrS8tBezxY85), 08:58 CST Nov 8; reader not traced): guard.log 2026-11-08T14:51:34Z denied frozen-path on the installed verdict wrapper in a test-author's read-only red run: verdict wrapping `sh <red-run folder>/hooks/test_install_src_red.sh guardset3`, with INSTALL_SH_UNDER_TEST set to a mutant install.sh in the scratchpad. The guard is right only if that mutant writes the real installed config; the test is meant to use its own temp HOME. Fold awaits this lane's scope confirmation (triage, 08:57 CST).",
   "phase": "now",
   "status": "todo",
   "order": 593,
   "owner": "triage",
   "lane": "session_013NEJL3R2CBFavz7grtbJY8",
-  "updatedAt": "2026-11-08T08:57:00-06:00"
+  "updatedAt": "2026-11-08T08:58:00-06:00"
 }
