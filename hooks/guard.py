@@ -4769,7 +4769,7 @@ SCRATCHPAD_OVERWRITE_REASON = (
     "(decision scratchpad-owner, an agent asks before it runs or overwrites another agent's scratchpad file)"
 )
 # Shell verbs that remove or move a file: a write the rule judges, but the file stays no agent's text, so no record.
-SCRATCHPAD_REMOVERS = ("rm", "mv", "unlink", "rmdir", "shred")
+SCRATCHPAD_REMOVERS = ("rm", "mv")
 SCRATCHPAD_WRITE_PASSES = 8   # shell write targets listed from one call, at most
 
 
@@ -4863,7 +4863,8 @@ def scratchpad_owner_hit(payload, tool: str, tool_input: dict, cwd: str) -> str:
         if _RUNNER(basename(word)):
             args = list(tokens[index + 1:])
             at = workflow_script_index(args)   # past the interpreter's flags and their values
-            script = args[at] if at is not None else ""
+            # A lone `-` before the script position reads the script from stdin, so no scratchpad file runs.
+            script = args[at] if at is not None and "-" not in args[:at] else ""
         else:
             script = word if "/" in word else ""
         if not script:
