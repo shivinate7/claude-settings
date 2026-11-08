@@ -4430,6 +4430,8 @@ UL_ROOT = os.path.join(ULDIR, "root")    # a.txt staged and b.txt left unstaged,
 UL_FULL = os.path.join(ULDIR, "full")    # 20 files staged and 20 left unstaged, all in docs/
 UL_FULL_STAGED = ["docs/s%02d.md" % number for number in range(20)]
 UL_FULL_LEFT = ["docs/u%02d.md" % number for number in range(20)]
+UL_RMCHAIN = os.path.join(ULDIR, "rmchain")      # docs/a.md tracked and clean, docs/b.md edited and left unstaged
+UL_ADDCHAIN = os.path.join(ULDIR, "addchain")    # docs/a.md and docs/b.md both edited and left unstaged
 
 
 def _ul_must(ok, what):
@@ -4520,6 +4522,19 @@ def _build_ulfull():
     _ul_state(UL_FULL, UL_FULL_STAGED, UL_FULL_LEFT)
 
 
+def _build_ulrmchain():
+    make_repo(UL_RMCHAIN, {"docs/a.md": "base\n", "docs/b.md": "base\n"})
+    _ul_edit(UL_RMCHAIN, "docs/b.md")
+    _ul_state(UL_RMCHAIN, [], ["docs/b.md"])
+
+
+def _build_uladdchain():
+    make_repo(UL_ADDCHAIN, {"docs/a.md": "base\n", "docs/b.md": "base\n"})
+    _ul_edit(UL_ADDCHAIN, "docs/a.md")
+    _ul_edit(UL_ADDCHAIN, "docs/b.md")
+    _ul_state(UL_ADDCHAIN, [], ["docs/a.md", "docs/b.md"])
+
+
 lazy_fixture([UL_ASK], _build_ulask)
 lazy_fixture([UL_EDIT], _build_uledit)
 lazy_fixture([UL_OTHER], _build_ulother)
@@ -4527,6 +4542,8 @@ lazy_fixture([UL_NEW], _build_ulnew)
 lazy_fixture([UL_ALL], _build_ulall)
 lazy_fixture([UL_ROOT], _build_ulroot)
 lazy_fixture([UL_FULL], _build_ulfull)
+lazy_fixture([UL_RMCHAIN], _build_ulrmchain)
+lazy_fixture([UL_ADDCHAIN], _build_uladdchain)
 
 
 def _ul_ask(name, command, cwd, carries="docs/b.md"):
@@ -4577,6 +4594,22 @@ _ul_allow("commit --include -m x docs/b.md is allowed", VCS + " commit --include
 _ul_allow("git status with docs/b.md unstaged is allowed", VCS + " status", UL_EDIT)
 _ul_allow("a read that fails passes: a commit aimed at a folder that is no git tree is allowed",
           VCS + " -C " + slash(NOGIT) + " commit -m x", NOGIT)
+
+
+# THE CHAINS. An earlier `git rm` or `git add` of a named path puts that path in the commit, and the check
+# still runs on what stays out. A chained ask runs alone, so a chain that holds that ask is denied (ask-alone,
+# decision ask-commands-run-alone), the same as a per-file ask in a chain. An earlier `git add` that names a
+# path with nothing left out, or `git add -A` or `-u`, leaves nothing out, so the commit is allowed.
+chained_ask("a chained git rm of docs/a.md, then a commit, with docs/b.md unstaged, is denied as a chained ask",
+            VCS + " rm docs/a.md && " + VCS + " commit -m x", cwd=UL_RMCHAIN)
+chained_ask("a chained git add of docs/a.md, then a commit, with docs/b.md unstaged, is denied as a chained ask",
+            VCS + " add docs/a.md && " + VCS + " commit -m x", cwd=UL_ADDCHAIN)
+_ul_allow("a chained git add of docs/b.md, then a commit, with docs/b.md the only unstaged edit is allowed",
+          VCS + " add docs/b.md && " + VCS + " commit -m x", UL_EDIT)
+_ul_allow("a chained git add -A, then a commit, with docs/b.md unstaged is allowed",
+          VCS + " add -A && " + VCS + " commit -m x", UL_EDIT)
+_ul_allow("a chained git add -u, then a commit, with docs/b.md unstaged is allowed",
+          VCS + " add -u && " + VCS + " commit -m x", UL_EDIT)
 
 
 # THE COST. The rule's two reads are the only git processes it starts. Each check judges its own guard run
