@@ -815,3 +815,19 @@ test('T11b. a uses fact through an alias, with a truncated tsconfig: the alias r
   assert.equal(verdicts(r.out), expected({ MAP9: 'FAIL' }), `only MAP9 must fail, on the unknown read\n${out1500(r)}`);
   assert.match(mapLine(r.out), /could not read 1 JavaScript fact: tsconfig\.json cannot be parsed/, `MAP9 must say the read is unknown and name tsconfig.json, not a missing import\n${out1500(r)}`);
 });
+
+// T11c. The same truncated tsconfig, and a reader with a relative import of the cited file and a package import: the relative link needs no alias, so the use reads.
+test('T11c. a uses fact through a relative import, with a truncated tsconfig and a package import in the same file: the relative link reads the use, so MAP9 passes', () => {
+  needFile('scripts/map-check.mjs');
+  const dir = scratchRepo();
+  addFile(dir, 'tsconfig.json', TRUNCATED_TSCONFIG);
+  addFile(dir, 'src/import-reader.mjs', 'export const code = 1;\n');
+  addFile(dir, 'src/reader.mjs', "import * as r from './import-reader.mjs';\nimport { z } from 'zod';\nexport const pick = () => [r.code, z];\n");
+  insertCore(dir, READER_LINES);
+  // The scope first: the tsconfig does not parse, the reader holds a package import that the unread aliases could hide, and it reaches the cited file by a relative import.
+  assert.throws(() => JSON.parse(read(dir, 'tsconfig.json')), SyntaxError, 'the tsconfig must not parse as JSON');
+  assert.ok(read(dir, 'src/reader.mjs').includes("from './import-reader.mjs'"), 'src/reader.mjs must import the cited file by a relative path');
+  assert.ok(read(dir, 'src/reader.mjs').includes("from 'zod'"), "src/reader.mjs must hold a package import, so the unread aliases may hide a link");
+  const r = check(dir);
+  assert.equal(verdicts(r.out), expected(), `the relative import reaches the cited file, so the use reads and every check passes\n${out1500(r)}`);
+});

@@ -43,6 +43,8 @@
 //        from a package. T11k: an unreadable tsconfig with an alias-only test is unknown, and its message names `npm ci`.
 //        T11l: a test that reaches the file only through an index file whose import is an alias, under an unreadable tsconfig: the index read
 //        is unknown. T11m: a `paths` that is a string, with no baseUrl: the option error leaves no paths, so the alias read is unknown.
+//        T11n to T11r pin the joins: the `baseUrl` join (T11n), the longest `paths` prefix (T11o), an exact name over `*` (T11p), the first
+//        target that exists (T11q), and the `types` flag of a `loads` read (T11r). Each goes red on one mutant of `import-reader.mjs` or `fact-readers.mjs`.
 //   C0   control, green on the old code: the import reader MAP11 uses reads the fixture's imports the way these cases assume.
 
 import { test } from 'node:test';
@@ -474,9 +476,11 @@ const testedPaths = (dir) => readAt(dir, CORE).split('\n').filter((l) => l.inclu
 const addTracked = (dir, rel, text) => { writeAt(dir, rel, text); gitIn(dir, 'add', '-N', rel); };
 /** Adds the map line of a new test file under the code files of docs/map/core.md, as each test of the fixture has one. Else MAP1 fails on the new file. */
 const mapTest = (dir, rel, prose) => insertAfter(dir, CORE, '- `src/home.spec.ts` ', `- \`${rel}\` — ${prose}`);
-/** A test that imports `specifier` and nothing else, tracked and mapped. */
-const writeAliasSpec = (dir, specifier) => {
-  addTracked(dir, ALIAS, `import { homeTitle } from '${specifier}';\n\nexport const title = homeTitle;\n`);
+/** Adds the map line of a new code file after `src/screens.ts`, the code section of docs/map/core.md. Without it MAP1 fails on the file. */
+const mapCode = (dir, rel, prose) => insertAfter(dir, CORE, '- `src/screens.ts` ', `- \`${rel}\` — ${prose}`);
+/** A test that imports `name` from `specifier` and nothing else, tracked and mapped. */
+const writeAliasSpec = (dir, specifier, name = 'homeTitle') => {
+  addTracked(dir, ALIAS, `import { ${name} } from '${specifier}';\n\nexport const title = ${name};\n`);
   mapTest(dir, ALIAS, 'Tests the home title by an alias.');
 };
 /** The scope of a case: the file `rel` imports by `prefix`, such as `@/`. */
@@ -708,4 +712,93 @@ test('T11m. a tsconfig whose paths is a string, with no baseUrl: the option erro
   const r = check(dir);
   mustFail(r, ALIAS);
   assert.match(map11(r), /unknown read: could not read src\/alias\.spec\.ts: tsconfig\.json cannot be parsed: .*'paths'/, `the bad paths value must make the alias read unknown, and the message must name tsconfig.json and paths\n${map11(r)}`);
+});
+
+// ---- T11n to T11r. The joins of an alias import, and the type-only links of a `loads` read. Each case goes red on one mutant:
+// T11n on the `baseUrl` join, T11o on the longest prefix, T11p on the exact name, T11q on the order of the targets, T11r on the `types` flag of `mayHide`.
+const T11N_TSCONFIG = '{\n  "compilerOptions": {\n    "baseUrl": "src"\n  }\n}\n';
+const T11O_TSCONFIG = '{\n  "compilerOptions": {\n    "baseUrl": ".",\n    "paths": {"@/*": ["./elsewhere/*"], "@/lib/*": ["./src/*"]}\n  }\n}\n';
+const T11P_TSCONFIG = '{\n  "compilerOptions": {\n    "baseUrl": ".",\n    "paths": {"@/*": ["./elsewhere/*"], "@/home": ["./src/home"]}\n  }\n}\n';
+const T11Q_TSCONFIG = '{\n  "compilerOptions": {\n    "baseUrl": ".",\n    "paths": {"@/*": ["./missing/*", "./src/*", "./lib/*"]}\n  }\n}\n';
+const RETRY = 'src/retry.ts';
+const SECOND_HOME = 'lib/home.ts';
+const TYPE_ONLY_SPEC = 'src/typeonly.spec.ts';
+
+test('T11n. a tsconfig with a plain baseUrl of src and no paths: a test that imports retry reads src/retry.ts, so MAP11 passes', () => {
+  needFile(REL);
+  const dir = scratchRepo();
+  addTracked(dir, TSCONFIG, T11N_TSCONFIG);
+  addTracked(dir, RETRY, 'export const waitS = 30;\n');
+  mapCode(dir, RETRY, 'Holds the retry wait of the alias case.');
+  writeAliasSpec(dir, 'retry', 'waitS');
+  setTestedBy(dir, RETRY, tested(ALIAS));
+  // The scope first: the tsconfig sets baseUrl to src and no paths, src/retry.ts is the file that the bare name `retry` names, and the test imports by that name.
+  assert.ok(existsSync(join(dir, TSCONFIG)), 'tsconfig.json must exist');
+  assert.ok(!readAt(dir, TSCONFIG).includes('paths'), 'the tsconfig must set no paths');
+  assert.ok(existsSync(join(dir, RETRY)), 'src/retry.ts must exist');
+  assert.ok(readAt(dir, ALIAS).includes("from 'retry'"), "the test must import by the bare name 'retry'");
+  mustPass(check(dir));
+});
+
+test('T11o. paths with @/* listed first and @/lib/* after it: the longer prefix wins, so @/lib/home reads src/home.ts, and MAP11 passes', () => {
+  needFile(REL);
+  const dir = scratchRepo();
+  addTracked(dir, TSCONFIG, T11O_TSCONFIG);
+  writeAliasSpec(dir, '@/lib/home');
+  setTestedBy(dir, 'src/home.ts', tested(ALIAS));
+  // The scope first: the shorter prefix is listed first and maps to elsewhere/, so it would reach elsewhere/lib/home. No elsewhere folder may exist, and src/home.ts must.
+  assert.ok(existsSync(join(dir, TSCONFIG)), 'tsconfig.json must exist');
+  assert.ok(readAt(dir, TSCONFIG).indexOf('"@/*"') < readAt(dir, TSCONFIG).indexOf('"@/lib/*"'), 'the shorter prefix must be listed first');
+  assert.ok(!existsSync(join(dir, 'elsewhere')), 'no elsewhere folder may exist, or the shorter prefix would hit');
+  assert.ok(existsSync(join(dir, 'src/home.ts')), 'src/home.ts must exist');
+  importsBy(dir, ALIAS, '@/');
+  mustPass(check(dir));
+});
+
+test('T11p. paths with @/* and an exact @/home listed after it: @/home reads src/home.ts, not the @/* target, so MAP11 passes', () => {
+  needFile(REL);
+  const dir = scratchRepo();
+  addTracked(dir, TSCONFIG, T11P_TSCONFIG);
+  writeAliasSpec(dir, '@/home');
+  setTestedBy(dir, 'src/home.ts', tested(ALIAS));
+  // The scope first: `@/*` maps to elsewhere/, so a star match would reach elsewhere/home. No elsewhere folder may exist, and the exact name must be listed.
+  assert.ok(existsSync(join(dir, TSCONFIG)), 'tsconfig.json must exist');
+  assert.ok(readAt(dir, TSCONFIG).includes('"@/home": ["./src/home"]'), 'the tsconfig must map the exact name @/home');
+  assert.ok(!existsSync(join(dir, 'elsewhere')), 'no elsewhere folder may exist, or the star pattern would hit');
+  importsBy(dir, ALIAS, '@/');
+  mustPass(check(dir));
+});
+
+test('T11q. paths whose targets are missing, src, lib, in that order, with a home file in src and one in lib: the first target that exists wins, so @/home reads src/home.ts, and MAP11 passes', () => {
+  needFile(REL);
+  const dir = scratchRepo();
+  addTracked(dir, TSCONFIG, T11Q_TSCONFIG);
+  addTracked(dir, SECOND_HOME, 'export const homeTitle = 2;\n');
+  mapCode(dir, SECOND_HOME, 'Holds a second home title for the alias case.');
+  writeAliasSpec(dir, '@/home');
+  setTestedBy(dir, 'src/home.ts', tested(ALIAS));
+  // The scope first: the first target folder is missing, src and lib both hold a home file, and the tsconfig lists them in that order.
+  assert.ok(existsSync(join(dir, TSCONFIG)), 'tsconfig.json must exist');
+  assert.ok(!existsSync(join(dir, 'missing')), 'no missing folder may exist, or the first target would hit');
+  assert.ok(existsSync(join(dir, 'src/home.ts')) && existsSync(join(dir, SECOND_HOME)), 'src/home.ts and lib/home.ts must both exist');
+  assert.ok(readAt(dir, TSCONFIG).indexOf('"./src/*"') < readAt(dir, TSCONFIG).indexOf('"./lib/*"'), 'src must be listed before lib');
+  importsBy(dir, ALIAS, '@/');
+  mustPass(check(dir));
+});
+
+test('T11r. a test that holds only a type-only import of a package, under a truncated tsconfig, does not load the file: the type-only import links nothing, so MAP11 FAILs and never reads unknown', () => {
+  needFile(REL);
+  const dir = scratchRepo();
+  addTracked(dir, TSCONFIG, T11_TRUNCATED);
+  addTracked(dir, TYPE_ONLY_SPEC, "import type { Shape } from 'some-pkg';\n\nexport const title = 'home';\n");
+  mapTest(dir, TYPE_ONLY_SPEC, 'Tests a type of a package.');
+  setTestedBy(dir, 'src/home.ts', tested(TYPE_ONLY_SPEC));
+  // The scope first: the tsconfig does not parse, the test holds a type-only import of a package, and it names no relative path.
+  assert.ok(existsSync(join(dir, TSCONFIG)), 'tsconfig.json must exist');
+  assert.ok(!parses(readAt(dir, TSCONFIG)), 'the tsconfig must not parse');
+  assert.ok(readAt(dir, TYPE_ONLY_SPEC).includes("import type { Shape } from 'some-pkg'"), 'the test must hold a type-only import of a package');
+  assert.ok(!readAt(dir, TYPE_ONLY_SPEC).includes('./'), 'the test must hold no relative path');
+  const r = check(dir);
+  mustFail(r, CORE, TYPE_ONLY_SPEC, 'src/home.ts');
+  assert.doesNotMatch(map11(r), /unknown read/, `a type-only import is erased, so it may not make the read unknown\n${map11(r)}`);
 });
