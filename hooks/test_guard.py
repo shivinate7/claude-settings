@@ -598,6 +598,8 @@ PUSHAGENTNOTES = os.path.join(ROOT, "pushagentnotes")  # agent-notes: a prefix w
 PUSHAGENTMYABC = os.path.join(ROOT, "pushagentmyabc")  # my-agent-abc: a prefix, too short to hold hex
 PUSHAGENTMYHEX = os.path.join(ROOT, "pushagentmyhex")  # my-agent-<hex>: hex behind a prefix, not the shape
 PUSHAGENTSHORT = os.path.join(ROOT, "pushagentshort")  # agent-<7 hex>: a hex tail one character short of the shape
+PUSHAGENTEIGHT = os.path.join(ROOT, "pushagenteight")  # agent-<8 hex>: the exact shape, at its lower bound
+PUSHAGENTCFG = os.path.join(ROOT, "pushagentcfg")      # claude/agent-<hex> with push.autoSetupRemote in its own config
 # The rule ids the push asks name. Each is the one home for its id in this file.
 PUSH_STRAY_RULE = "push-stray-branch"   # ruling 206 a: a push with an implied destination off its upstream
 PUSH_MAIN_RULE = "push-main"            # ruling 207 a: a non-forced push whose destination is main or master
@@ -1939,7 +1941,8 @@ def _build_push():
                           (PUSHAGENTNOTES, "agent-notes"),
                           (PUSHAGENTMYABC, "my-agent-abc"),
                           (PUSHAGENTMYHEX, "my-agent-a22bb0ed47825117b"),
-                          (PUSHAGENTSHORT, "agent-1234567")):
+                          (PUSHAGENTSHORT, "agent-1234567"),
+                          (PUSHAGENTEIGHT, "agent-12345678")):
         make_repo(where, {"base.txt": "base\n"})
         run_vcs(where, "remote", "add", "origin", slash(BRANCHREMOTE))
         run_vcs(where, "update-ref", "refs/remotes/origin/main", "HEAD")
@@ -1949,6 +1952,18 @@ def _build_push():
             sys.exit("fixture setup failed in build_fixtures: %r must be on branch %s" % (where, branch))
         if run_vcs(where, "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}").returncode == 0:
             sys.exit("fixture setup failed in build_fixtures: %r must have no upstream" % where)
+    # The config-file autoSetupRemote (rule push-agent-branch). The key is written to this repo's own config,
+    # so a bare push reads it there, not from a `-c` override on the call.
+    make_repo(PUSHAGENTCFG, {"base.txt": "base\n"})
+    run_vcs(PUSHAGENTCFG, "remote", "add", "origin", slash(BRANCHREMOTE))
+    run_vcs(PUSHAGENTCFG, "update-ref", "refs/remotes/origin/main", "HEAD")
+    run_vcs(PUSHAGENTCFG, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main")
+    run_vcs(PUSHAGENTCFG, "checkout", "-q", "-b", "claude/agent-0c1d2e3f4a5b6c7d")
+    run_vcs(PUSHAGENTCFG, "config", "push.autoSetupRemote", "true")
+    if run_vcs(PUSHAGENTCFG, "config", "--get", "push.autoSetupRemote").stdout.strip() != "true":
+        sys.exit("fixture setup failed in build_fixtures: %r must set push.autoSetupRemote in its config" % PUSHAGENTCFG)
+    if run_vcs(PUSHAGENTCFG, "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}").returncode == 0:
+        sys.exit("fixture setup failed in build_fixtures: %r must have no upstream" % PUSHAGENTCFG)
 
 def _build_worktrees():
     """The worktree remove and prune repos: locked, live, dead, stale and clean linked trees."""
@@ -2253,7 +2268,7 @@ lazy_fixture([PUSHFEAT, PUSHMAIN, PUSHTRUNK, PUSHTRUNKLOCAL, PUSHNOHEAD, PUSHDET
               PUSHONLYMASTER, PUSHUPSTREAM, PUSHUP, PUSHUPSELF, PUSHNOUP, PUSHMATCH, RECROADMAP, RECFORK,
               PUSHSTRAY, PUSHLANE, PUSHLANEMASTER, PUSHSELF, PUSHMAINUP, PUSHSTACK,
               PUSHAGENT, PUSHAGENTWT, PUSHAGENTBARE, PUSHAGENTNOTES, PUSHAGENTMYABC, PUSHAGENTMYHEX,
-              PUSHAGENTSHORT],
+              PUSHAGENTSHORT, PUSHAGENTEIGHT, PUSHAGENTCFG],
              _build_push)
 lazy_fixture([WTMAIN, WTCLEAN, WTDIRTY, WTLOCKED, WTLIVE, WTDEADSESSION, WTSTALESTART, WTPRUNE,
               WTPRUNESTALE, WTLIVECFG, WTDEADCFG, WTSTALESTARTCFG], _build_worktrees)
@@ -7131,6 +7146,15 @@ sh("push: agent branch, origin under autoSetupRemote asks",
    VCS + " -c push.autoSetupRemote=true push origin", "ask", PUSH_AGENT_RULE, cwd=PUSHAGENT)
 sh("push: agent branch, -u origin under autoSetupRemote asks",
    VCS + " -c push.autoSetupRemote=true push -u origin", "ask", PUSH_AGENT_RULE, cwd=PUSHAGENT)
+# The config-file form: push.autoSetupRemote is in the repo's own config, not on the call, so a bare push asks.
+sh("push: agent branch, a bare push under a config autoSetupRemote asks",
+   VCS + " push", "ask", PUSH_AGENT_RULE, cwd=PUSHAGENTCFG)
+# The exact shape: eight hex characters after the prefix ask.
+push_case("agent-12345678, -u HEAD asks (8 hex is the exact shape)", "-u origin HEAD", "ask",
+          cwd=PUSHAGENTEIGHT, rule=PUSH_AGENT_RULE)
+# A side effect pin: under push.autoSetupRemote, a bare push from main with no upstream writes main, so push-main asks.
+sh("push: main with no upstream, a bare push under autoSetupRemote asks push-main",
+   VCS + " -c push.autoSetupRemote=true push", "ask", PUSH_MAIN_RULE, cwd=PUSHMAIN)
 
 # SILENT, rule push-agent-branch. Each is an allow that prints nothing. The lane and feature branch controls
 # are the no-upstream rows above (PUSHFEAT, `feat`): their -u and HEAD pushes stay silent under this rule too.
