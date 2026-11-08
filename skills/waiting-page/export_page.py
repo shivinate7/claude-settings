@@ -88,12 +88,10 @@ STATE_CODES = ("AL|AK|AZ|AR|CA|CO|CT|DE|DC|FL|GA|HI|ID|IL|IN|IA|KS|KY|LA|ME|MD|M
 # Each shape is a token or a value that names a person or opens an account. The lookbehinds keep a match
 # from starting inside a longer word ("risk-" and "btn-sk-" are not "sk-").
 # Everyday words that end in `key`. A `key` that ends one of them as a whole word is no key word, so `monkey: Banana12345`
-# passes. The stem must start a word: at the string start, after a non-letter, or as a camelCase hump (an upper-case
-# letter after a lower-case one), so `globalHotkey` passes. `commonKey` and `returnKey` hold the stems `mon` and `turn`
-# mid-word and are credential names. Any other `key`, `secret`, `token` or `cookie` in a name counts.
+# passes. The stem must start the word (string start or a non-letter before it): `commonKey` and `returnKey` hold the
+# stems `mon` and `turn` but are credential names. Any other `key`, `secret`, `token` or `cookie` in a name counts.
 EVERYDAY_KEY_WORDS = ("monkey", "hotkey", "turkey", "turnkey", "donkey", "whiskey", "jockey", "hockey", "lackey")
-WORD_START = r"(?:(?<![A-Za-z])|(?-i:(?<=[a-z])(?=[A-Z])))"
-KEY_WORD = r"(?:secret|token|cookie|" + "".join("(?<!%s%s)" % (WORD_START, w[:-3]) for w in EVERYDAY_KEY_WORDS) + r"key)"
+KEY_WORD = r"(?:secret|token|cookie|" + "".join("(?<!(?<![A-Za-z])%s)" % w[:-3] for w in EVERYDAY_KEY_WORDS) + r"key)"
 # The letter and the digit of a random-looking value are looked for in its first characters only: a lookahead to the
 # end of a long run, from each key word in it (`key=key=...`), makes the scan quadratic.
 VALUE_LOOKAHEAD_MAX = 256
@@ -170,10 +168,10 @@ PROSE_FUNCTION_WORDS = ("a", "an", "the", "for", "to", "in", "on", "at", "of", "
 PROSE_REST = re.compile(
     r"[ \t]+(?:" + "|".join(PROSE_FUNCTION_WORDS) + r")"
     r"(?:[ \t,;]+[A-Za-z][A-Za-z'-]*)*[.,;:!?]*[ \t]*", re.I)
-# One of these words right after the value joins a second value (`none and swordfish`), so only function words may
-# follow it. Any other opening word starts prose about the value, and the words after it are free.
-PROSE_SEPARATORS = frozenset(("and", "or", "but"))
-PROSE_WORD = re.compile(r"[A-Za-z][A-Za-z'-]*")  # one pass over the line: bounded, no nested repeat
+# After a `;`, a `,` or one of these words, a word that is no function word may be a second value (`default is
+# swordfish`, `none and swordfish`), so the prose is refused. Only function words may follow such a separator.
+PROSE_SEPARATORS = frozenset(("and", "or", "but", "is", "are"))
+PROSE_TOKEN = re.compile(r"[A-Za-z][A-Za-z'-]*|[;,]")  # one pass over the line: bounded, no nested repeat
 WRAP_PAIRS = frozenset(('""', "''", "[]", "()"))  # one pair around the value is no part of it
 SHELL_PATH = re.compile(r"[~/][\w./~-]*")  # path characters only: no `;`, `&`, `=` or space can hide a second keyword
 SHELL_PWD = "PWD"  # the shell's working-directory variable; with a path value it is no password
@@ -229,8 +227,14 @@ def rest_is_prose(rest):
     """True when `rest` is plain prose after a password value and holds no second value after a separator."""
     if not PROSE_REST.fullmatch(rest):
         return False
-    first, *others = (word.lower() for word in PROSE_WORD.findall(rest))
-    return first not in PROSE_SEPARATORS or all(word in PROSE_FUNCTION_WORDS for word in others)
+    after_separator = False
+    for token in PROSE_TOKEN.findall(rest):
+        token = token.lower()
+        if token in PROSE_SEPARATORS or token in ";,":
+            after_separator = True
+        elif after_separator and token not in PROSE_FUNCTION_WORDS:
+            return False
+    return True
 
 
 def password_is_no_secret(found):
