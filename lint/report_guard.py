@@ -420,7 +420,7 @@ def _heads_of_git_push(args, output, folder, ci_wake, budget):
     bare = {r.lstrip("+") for r in refspecs if ":" not in r and r.lstrip("+") != "HEAD"}
     heads = []
     for sha, branch in seen:
-        if "\n" in branch or branch.startswith("refs/tags/") or branch in new_tags:
+        if "\n" in branch or branch.startswith("refs/tags/") or (sha is None and branch in new_tags):
             continue
         branch = branch[len("refs/heads/"):] if branch.startswith("refs/heads/") else branch
         why = None
