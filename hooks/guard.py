@@ -1994,13 +1994,13 @@ def merge_conflict_target(full: str) -> bool:
         rel = os.path.relpath(os.path.realpath(full), os.path.realpath(root))
         if rel == os.pardir or rel.startswith(os.pardir + os.sep):
             return False
-        unmerged = git_names(root, "ls-files", "-u", "-z")
+        unmerged = git_names(root, "diff", "--name-only", "--diff-filter=U", "-z")
         if unmerged is None:
             return False
-        # ls-files names are posix. Only the platform separator maps to "/": a backslash in a root
+        # git's names are posix. Only the platform separator maps to "/": a backslash in a root
         # file's name on Linux stays a name character, so `src\app.py` is not `src/app.py`.
         want = os.path.normcase(rel.replace(os.sep, "/"))
-        return any(os.path.normcase(entry.split("\t", 1)[-1]) == want for entry in unmerged)
+        return any(os.path.normcase(entry) == want for entry in unmerged)
     except (OSError, ValueError):
         return False
 
