@@ -561,9 +561,12 @@ _CP_DEST_UNSAFE = re.compile(r"[$`*?\[{<>]")
 # and `Set-Content PATH TEXT...` write only PATH: a quoted word after it is the text written. Only the
 # switches below and plain positional words are read; any other parameter (`-Destination`, `-Value`,
 # `-Path`) or a redirect fails closed to a hit, as `-Destination` does for `cp`.
-_PS_COPY = frozenset(("copy-item", "copy", "cpi"))
+_PS_COPY = frozenset(("copy-item", "copy", "cpi", "cp"))
 _PS_CONTENT = frozenset(("add-content", "set-content", "ac", "sc"))
-_PS_SWITCH = re.compile(r"-(?i:recurse|force|container|passthru|verbose|confirm|whatif|nonewline)")
+# The parameters that take no value. Any parameter not known to take a value or none may take the next word.
+_PS_SWITCH_FLAGS = ("recurse", "force", "container", "passthru", "verbose", "confirm", "whatif", "nonewline",
+                    "append", "noclobber", "debug")
+_PS_SWITCH = re.compile(r"-(?i:" + "|".join(_PS_SWITCH_FLAGS) + ")")
 
 
 def _is_folder(target, cwd) -> bool:
@@ -608,16 +611,23 @@ def _ps_reads(name, raw, words, start, predicate, cwd, plain):
     operands = []
     for index in range(start + 1, len(words)):
         word = words[index]
-        # A comma list is one argument naming several paths: `a.md, 'b'` writes both, so no word is text.
-        # A copy's comma list of SOURCES is a read; a list that reaches its target is judged below.
-        if name in _PS_CONTENT and _comma_joined(words, raw, index, start):
-            return set()
         if ">" in word or "<" in word or (word.startswith("-") and not _PS_SWITCH.fullmatch(word)):
             return set()
         if not _PS_SWITCH.fullmatch(word):
             operands.append(index)
     if name in _PS_CONTENT:
-        return {i for i in operands[1:] if _has_quote(raw[i])}
+        # A comma list is one argument: in a path slot it names several paths (`a.md, 'b'` writes both), so no
+        # word is text; after the path slots it is the text written. A copy's comma list is judged below.
+        arguments = []
+        for at, index in enumerate(operands):
+            if at and (_outside_quotes(raw[operands[at - 1]]).endswith(",") or raw[index].startswith(",")):
+                arguments[-1].append(index)
+            else:
+                arguments.append([index])
+        paths = _PATH_POSITIONS[name]
+        if any(len(argument) > 1 for argument in arguments[:paths]):
+            return set()
+        return {i for argument in arguments[paths:] for i in argument if _has_quote(raw[i])}
     if len(operands) < 2:
         return set()
     target = words[operands[-1]]
@@ -634,7 +644,8 @@ def _copy_reads(raw, predicate, cwd, plain=""):
     words = [_unquoted(word) for word in raw]
     start = next((i for i, word in enumerate(raw) if not _ASSIGNMENT.match(word)), len(raw))
     name = _name(raw[start] if start < len(raw) else "")
-    if name in _PS_COPY or name in _PS_CONTENT:
+    # `cp` is read by the Bash parser below in both shells: its flags (`-t`, `-l`) are Bash's.
+    if (name in _PS_COPY and name != "cp") or name in _PS_CONTENT:
         return _ps_reads(name, raw, words, start, predicate, cwd, plain)
     if name != "cp":
         return set()
@@ -740,8 +751,8 @@ def _shell_write_hit(cmd: str, cwd: str, predicate, holds=None, follow_cd=False,
     `holds(path, cwd)` tells a folder that holds such a path, for a linking `cp` (`_cp_link_source`).
     `follow_cd` hands `predicate` the folder a leading `cd` moved to (`dir_before_segment`), or `cwd`
     when that folder cannot be told. `predicate_command` also hands `predicate` the segment's command
-    name as a third argument (`''` when none). `listed` is the folder a listing piped into the text, so
-    `$_` may name a file in it (`_pipe_variable_target`)."""
+    name as a third argument (`''` when none). `listed` holds the folders a listing piped into the text may
+    be, so `$_` may name a file in one (`_pipe_variable_hit`)."""
     holds = holds or (lambda path, where: _holds(path, where, predicate))
     cmd = _resolve_vars(cmd)
     ends = []
@@ -777,6 +788,10 @@ def _shell_write_hit(cmd: str, cwd: str, predicate, holds=None, follow_cd=False,
         from_reads = bool(data)
         if from_reads:
             raw = read_words[number]
+        powershell = is_powershell(segments[number])
+        # A `( )` group outside the command's path slots is judged as a command of its own, below.
+        groups = _ps_inner_groups(raw) if powershell else []
+        grouped = {index: span[0] for span, _inner in groups for index in span}
         if kinds[number] in ("printer", "message"):
             last = number
             while last + 1 < len(kinds) and ends[last] == "|":
@@ -788,7 +803,12 @@ def _shell_write_hit(cmd: str, cwd: str, predicate, holds=None, follow_cd=False,
                 data = data | _data_words(kinds[number], raw)
         words, shown, script = [], [], []
         for index, word in enumerate(raw):
-            if index in data:
+            if index in grouped:
+                if grouped[index] == index:   # the group is one argument of the outer command
+                    words.append('""')
+                    shown.append('""')
+                    script.append('""')
+            elif index in data:
                 words.append('""')   # data, or a `cp` source: no redirect or `tee` in it runs
                 shown.append('""')
                 script.append('""')
@@ -817,7 +837,6 @@ def _shell_write_hit(cmd: str, cwd: str, predicate, holds=None, follow_cd=False,
         if command_args and scripts_run and command_args[0] in _PS_SHELLS:
             # the script this shell runs was judged above by PowerShell's own rules; only a redirect on the shell is left
             command_args = ("", ())
-        powershell = is_powershell(segments[number])
         current = listed
         if command_position and powershell:
             # A command inside a scriptblock is a command of its own; `ls | % { Set-Content $_ x }` writes
@@ -832,6 +851,11 @@ def _shell_write_hit(cmd: str, cwd: str, predicate, holds=None, follow_cd=False,
                                        predicate_command, current)
                 if hit:
                     return hit
+        for _span, inner in groups:
+            hit = _shell_write_hit(_typed(inner, segments[number]), at, predicate, holds, follow_cd,
+                                   command_position, predicate_command, current)
+            if hit:
+                return hit
         pipe_hit = _pipe_variable_hit(command_args, current, at, predicate, holds) if current is not None else ""
         if pipe_hit:
             return pipe_hit
@@ -861,12 +885,13 @@ _PIPE_VARIABLE = re.compile(
     r"(?:-\w+:)?\(*(?:\$\(+)?(?:\$(?:_|psitem)|\$\{(?:_|psitem)\})(?:\.\w+(?:\([^()]*\))?)*\)*", re.IGNORECASE)
 # The common parameters that take a value, with their aliases. The word after one is its value, never a path.
 _PS_COMMON_VALUE_FLAGS = ("erroraction", "warningaction", "informationaction", "errorvariable", "warningvariable",
-                          "informationvariable", "outvariable", "outbuffer", "pipelinevariable",
-                          "ea", "wa", "infa", "ev", "wv", "iv", "ov", "ob", "pv")
+                          "informationvariable", "outvariable", "outbuffer", "pipelinevariable", "progressaction",
+                          "ea", "wa", "infa", "ev", "wv", "iv", "ov", "ob", "pv", "proga")
 # What a `Get-ChildItem` parameter takes: a value that is the listed folder, a value that only filters it, or
 # nothing. Matching is by prefix, as PowerShell does.
 _LIST_PATH_FLAGS = ("path", "literalpath")
 _LIST_FILTER_FLAGS = ("filter", "include", "exclude", "depth", "attributes")
+_LIST_SWITCH_FLAGS = ("name", "directory", "file", "hidden", "readonly", "system", "followsymlink") + _PS_SWITCH_FLAGS
 
 
 def _flag_is(name: str, full_names, shortest: int = 1) -> bool:
@@ -875,10 +900,8 @@ def _flag_is(name: str, full_names, shortest: int = 1) -> bool:
 
 
 def _listed_folder(parsed, ends, number):
-    """The folder a listing (`ls`, `dir`, `gci`, `Get-ChildItem`) hands to segment `number` through a pipe, else
-    None. A `Where-Object` or `Select-Object` stage between them passes the listing on. The folder is the
-    `-Path` value or the first plain word; a filtering parameter's value (`-Filter *.py`) is not it. `.` when
-    the listing names none."""
+    """The folders a listing (`ls`, `dir`, `gci`, `Get-ChildItem`) may hand to segment `number` through a pipe
+    (`_listed_path`), else None. A `Where-Object` or `Select-Object` stage between them passes the listing on."""
     stage = number - 1
     while stage >= 0 and ends[stage] == "|":
         words = [_unquoted(word) for word in parsed[stage]]
@@ -891,25 +914,33 @@ def _listed_folder(parsed, ends, number):
     return None
 
 
-def _listed_path(rest) -> str:
-    """The folder a listing's arguments name, else `.`."""
-    plain, index = None, 0
+def _listed_path(rest) -> tuple:
+    """The folders a listing's arguments may name: the `-Path` value, else the first plain word, else `.`. A
+    filtering parameter's value (`-Filter *.py`) is no folder. The word after a parameter not known to take a
+    value or none may be its value or the folder, so each reading gives a folder (`-New v hooks`: `v`, `hooks`)."""
+    plain, index, sure, maybe = [], 0, False, False
     while index < len(rest):
         word = rest[index]
         if not word.startswith("-"):
-            plain = plain or word
+            if not sure:
+                plain.append(word)
+                sure = not maybe
+            maybe = False
         else:
+            maybe = False
             name, colon, value = word[1:].partition(":")
             name = name.lower()
             if _flag_is(name, _LIST_PATH_FLAGS):
                 if colon and value:
-                    return value
+                    return (value,)
                 if index + 1 < len(rest):
-                    return rest[index + 1]
+                    return (rest[index + 1],)
             elif not colon and _flag_is(name, _LIST_FILTER_FLAGS + _PS_COMMON_VALUE_FLAGS, 2):
                 index += 1   # its value filters the listing; it is no folder
+            elif not colon and not _flag_is(name, _LIST_SWITCH_FLAGS):
+                maybe = True
         index += 1
-    return plain or "."
+    return tuple(plain) + (() if sure else (".",))
 
 
 # What a mutating command's parameters take, for `_pipe_variable_hit`: the path it writes (or the destination
@@ -927,25 +958,30 @@ def _ps_argument_slots(command, rest):
     """The `(role, word)` pairs of a PowerShell command's arguments. A role is `write` (a path the command
     writes), `source` (the path a copy reads) or `destination` (where a copy writes). A value of a filtering or
     text parameter has no role and is left out, and so is a switch. Where PowerShell would bind a word by
-    position, the command's own order decides it. An unknown parameter is read as a switch, so the word after
-    it still counts as a path."""
+    position, the command's own order decides it. A parameter not known to take a value or none may take the
+    plain word after it, or not: that word, and each word after it, gets every role some reading gives it, so
+    a word may come twice."""
     copies = command in _PS_COPY
     # A path parameter given by name takes the place of a positional path, so the plain words that are left
     # are values (`Add-Content -Path docs/list.txt $_.Name` writes `$_.Name` into the file).
     named = sum(1 for word in rest if word.startswith("-") and len(word) > 1
                 and _flag_is(word[1:].partition(":")[0].lower(), _PS_TARGET_FLAGS))
     limit = _PATH_POSITIONS.get(command)
-    slots, positional, index = [], 0, 0
+    # `fewest` counts the plain words before this one that are positional in every reading, `most` those that
+    # are in some reading. `maybe` marks a word an unknown parameter may take as its value.
+    slots, fewest, most, index, maybe = [], 0, 0, 0, False
     while index < len(rest):
         word = rest[index]
         if word.startswith("-") and len(word) > 1:
             name, colon, value = word[1:].partition(":")
             name = name.lower()
-            takes_value = _flag_is(name, _PS_TARGET_FLAGS) or _flag_is(name, _PS_VALUE_FLAGS, 2)
+            target = _flag_is(name, _PS_TARGET_FLAGS)
+            takes_value = target or _flag_is(name, _PS_VALUE_FLAGS, 2)
+            unknown = not takes_value and not _flag_is(name, _PS_SWITCH_FLAGS)
             if not colon and takes_value and index + 1 < len(rest):
                 value = rest[index + 1]
                 index += 1
-            if value and _flag_is(name, _PS_TARGET_FLAGS):
+            if value and target:
                 if copies and _flag_is(name, ("path", "literalpath")):
                     role = "source"
                 elif copies and _flag_is(name, ("destination",)):
@@ -953,30 +989,42 @@ def _ps_argument_slots(command, rest):
                 else:
                     role = "write"
                 slots.append((role, value))
+            maybe = unknown and not colon
         else:
-            if limit is not None and positional + named >= limit:
-                pass
-            elif copies:
+            if copies:
                 taken = {role for role, _word in slots}
-                role = "source" if "source" not in taken and positional == 0 else "destination"
-                slots.append((role, word))
-            else:
+                if "source" not in taken and fewest == 0:
+                    slots.append(("source", word))
+                if "source" in taken or most > 0:
+                    slots.append(("destination", word))
+            elif limit is None or fewest + named < limit:
                 slots.append(("write", word))
-            positional += 1
+            fewest += 0 if maybe else 1
+            most += 1
+            maybe = False
         index += 1
     return slots
 
 
-def _pipe_variable_hit(command_args, folder, at, predicate, holds) -> str:
+def _pipe_variable_hit(command_args, folders, at, predicate, holds) -> str:
     """The word that is the pipeline variable (`$_`, `$PSItem`) as a path the command writes into a place that
-    `predicate` accepts, else ''. `folder` is the listing the variable comes from: a write of `$_` lands on a
-    path in it, so it counts when `holds(folder, at)`. A copy's source is only read; it is written when the
-    destination is a folder, as `FOLDER/<listed name>`, so it counts when that path is accepted for any
-    name the listing holds."""
+    `predicate` accepts, else ''. `folders` are the folders the listing the variable comes from may be
+    (`_listed_path`): a write of `$_` lands on a path in one, so it counts when `holds(folder, at)` for any. A
+    copy's source is only read; it is written when the destination is a folder, as `FOLDER/<listed name>`, so
+    it counts when that path is accepted for any name a listing holds."""
     command, rest = command_args if command_args else ("", ())
     if not _mutates_as_command(command, rest):
         return ""
     slots = _ps_argument_slots(command, rest)
+    for folder in folders:
+        hit = _listed_hit(slots, folder, at, predicate, holds)
+        if hit:
+            return hit
+    return ""
+
+
+def _listed_hit(slots, folder, at, predicate, holds) -> str:
+    """`_pipe_variable_hit` for one listed folder."""
     for role, word in slots:
         if role != "source" and _PIPE_VARIABLE.fullmatch(word) and holds(folder, at):
             return word
@@ -991,6 +1039,56 @@ def _pipe_variable_hit(command_args, folder, at, predicate, holds) -> str:
         if any(predicate(head + "/" + name, at) for name in names):
             return sources[0]
     return ""
+
+
+# What may stand before a PowerShell command's name in its word: casts and the parens they open (`[void](`).
+_PS_COMMAND_LEAD = re.compile(r"(?:\[[^\]]*\]|[$@]?\()*")
+_PS_GROUP_OPEN = re.compile(r"[$@]?\(")
+
+
+def _ps_inner_groups(raw):
+    """The `( )` groups among a PowerShell segment's arguments that fill no path slot of its command, as
+    (indexes into `raw`, the text inside the group). A path in such a group is read or written by the group's
+    own commands, not by the outer one: `Set-Content docs/a.md (Get-Content hooks/test_x.py)` writes only
+    docs/a.md. A group in a path slot (`Set-Content (Get-Item P) x`) names the target, so it is none of these.
+    A shape this does not read (an unclosed group, a command name it does not know) gives none, so every word
+    stays judged as part of the outer command."""
+    plain = [_outside_quotes(word) for word in raw]
+    start = 1 if plain and (plain[0].lower() == "return" or re.fullmatch(r"(?:\[[^\]]*\])+", plain[0])) else 0
+    if start >= len(raw):
+        return []
+    lead = _PS_COMMAND_LEAD.match(plain[start]).group()
+    name = plain[start][len(lead):]
+    if not re.fullmatch(r"[A-Za-z][\w-]*", name):
+        return []
+    base = depth = lead.count("(")
+    rest, spans, index = [], [], start + 1
+    while index < len(raw):
+        first = index
+        opens = depth == base and _PS_GROUP_OPEN.match(plain[index])
+        depth += plain[index].count("(") - plain[index].count(")")
+        while opens and depth > base and index + 1 < len(raw):
+            index += 1
+            depth += plain[index].count("(") - plain[index].count(")")
+        if depth != base and (opens or depth > base):
+            return []   # an unclosed group, or a word that opens one mid-word
+        if opens:
+            spans.append(range(first, index + 1))
+            rest.append("\0" + str(len(spans) - 1))
+        else:
+            rest.append(_unquoted(raw[index]))
+        if depth < base:
+            break   # the paren that closes the command's own group ends its arguments
+        index += 1
+    targets = {word for role, word in _ps_argument_slots(name.lower(), rest) if role != "source"}
+    groups = []
+    for number, span in enumerate(spans):
+        if "\0" + str(number) in targets:
+            continue
+        text = _straight(" ".join(raw[i] for i in span))
+        inner = text[_PS_GROUP_OPEN.match(text).end():]
+        groups.append((span, inner[:-1] if inner.endswith(")") else inner))
+    return groups
 
 
 def _lead_command(segment):
