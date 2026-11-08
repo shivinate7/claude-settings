@@ -1449,3 +1449,4 @@
 - stale-cites-value-top-level-only: py-facts `assigned` reads top-level Name targets only, so a constant in a module-level `if`, or a tuple target, makes a value cite of it a false alarm or a miss. STALE002's `names_in` reads into if and try. Decision: stale-cites-at-merge. Step: value-cites-nested-binds
 - stale-cites-value-span-wraps: a code span wrapped across a line break is missed, since a span is read one line at a time. Decision: stale-cites-at-merge. Step: value-cites-wrapped-span
 - restore-staged-no-guard: a builder ran git restore --staged in its own worktree; it only unstages, nothing is lost. Fix: none — rare and harmless
+- map-alias-links-unread: `jsconfig.json`, nested tsconfigs and vitest or jest aliases are unread (skills/plain-english-map/scripts/lib/tsconfig-paths.mjs). Decision: map-tested-by-line.
