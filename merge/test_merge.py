@@ -13625,6 +13625,91 @@ class ReviewGuardKinds(unittest.TestCase):
         self.assertEqual(kind_misfits("docs-only", []), [])
         self.assertEqual(kind_misfits("delete-only", []), [])
 
+# The guard's import closure in `--review-record`. hooks/guard.py imports modules outside the GUARD_PATHS folders (janitor/, skills/waiting-page/),
+# so guard_hits also counts each non-test .py module that hooks/guard.py reaches through its imports as a guard change. The seam is
+# merge.REPO_ROOT: the checkout whose hooks/guard.py is read when guard_hits runs (the tool's own repo by default). The cases set it with
+# create=True, so on a merge.py without the name a case still runs and fails on the result, never on a crash.
+GUARD_CLOSURE_HITS = ("janitor/sweep.py", "janitor/temp_sweep.py", "skills/waiting-page/stale_pages.py", "skills/waiting-page/splice.py",
+                      "skills/waiting-page/export_page.py")
+GUARD_CLOSURE_NO_HITS = ("janitor/test_sweep.py", "janitor/install_launchd.py", "skills/waiting-page/SKILL.md")
+
+class ReviewGuardImportClosure(unittest.TestCase):
+    """guard_hits counts a repo module that hooks/guard.py reaches through an import as a guard change: an Import or ImportFrom, or
+    importlib.import_module with a literal name, followed transitively. The scan reads the file's AST, so a name in a comment or a string is
+    no import. A module that no import reaches is no hit, and a test path never is one."""
+
+    def closure_root(self, guard_text=None, files=None):
+        """A checkout with hooks/guard.py holding `guard_text` (when given), and each path of `files` ({path: text}). Its folder is under this
+        run's folder and is removed at teardown."""
+        root = os.path.realpath(tempfile.mkdtemp(prefix="closure-", dir=run_folder()))
+        self.addCleanup(shutil.rmtree, root, True)
+        if guard_text is not None:
+            put(os.path.join(root, "hooks", "guard.py"), guard_text)
+        for rel, text in (files or {}).items():
+            put(os.path.join(root, rel), text)
+        return root
+
+    def hits_at(self, root, *paths):
+        """guard_hits(paths) with merge.REPO_ROOT set to `root`."""
+        guard_hits = review_fn(self, "guard_hits")
+        with unittest.mock.patch.object(merge, "REPO_ROOT", root, create=True):
+            return guard_hits(list(paths))
+
+    def stop_text(self, root, *paths):
+        """The text of the Stop that guard_hits(paths) raises under `root`. A call that returns instead fails by name."""
+        guard_hits = review_fn(self, "guard_hits")
+        with unittest.mock.patch.object(merge, "REPO_ROOT", root, create=True):
+            try:
+                got = guard_hits(list(paths))
+            except merge.Stop as e:
+                return str(e)
+        self.fail(f"guard_hits returned {got} for a guard import list it cannot read; it must stop")
+
+    def test_import_closure_hits_are_the_five_modules_on_the_real_repo(self):
+        for path in GUARD_CLOSURE_HITS:  # scope: each module is a file in this checkout, so only the closure can leave it out
+            self.assertTrue(os.path.isfile(os.path.join(os.path.dirname(HERE), path)), f"{path} is not a file in this checkout")
+        self.assertEqual(review_fn(self, "guard_hits")(list(GUARD_CLOSURE_HITS)), sorted(GUARD_CLOSURE_HITS),
+                         "guard_hits leaves out a module that hooks/guard.py reaches through its imports")
+
+    def test_import_closure_controls_are_no_hit(self):
+        for path in GUARD_CLOSURE_NO_HITS:  # scope: each control is a file in this checkout
+            self.assertTrue(os.path.isfile(os.path.join(os.path.dirname(HERE), path)), f"{path} is not a file in this checkout")
+        for path in GUARD_CLOSURE_NO_HITS:
+            with self.subTest(path=path):
+                self.assertEqual(review_fn(self, "guard_hits")([path]), [],
+                                 f"{path} is a guard change, but it is a test path or a module that hooks/guard.py does not import")
+
+    def test_import_closure_derives_a_module_named_by_import_module(self):
+        root = self.closure_root('import importlib\nimportlib.import_module("zz_made_up")\n', {"newdir/zz_made_up.py": "X = 1\n"})
+        for rel in ("hooks/guard.py", "newdir/zz_made_up.py"):  # scope: the fixture holds the literal import and the module it names
+            self.assertTrue(os.path.isfile(os.path.join(root, rel)), f"the fixture has no {rel}")
+        self.assertEqual(self.hits_at(root, "newdir/zz_made_up.py"), ["newdir/zz_made_up.py"],
+                         'guard_hits does not derive newdir/zz_made_up.py from importlib.import_module("zz_made_up") in hooks/guard.py')
+
+    def test_import_closure_ignores_a_name_only_in_a_comment_or_a_string(self):
+        names = ("zz_comment", "zz_string", "zz_triple", "zz_other")
+        guard = "\n".join(["# don't import zz_comment", 'NOTE = "import zz_string"', 'DOC = """', "import zz_triple", '"""', ""])
+        root = self.closure_root(guard, {f"newdir/{n}.py": "X = 1\n" for n in names})
+        for n in names:  # scope: each module is in the tree, so a hit could only come from a scan of the text
+            self.assertTrue(os.path.isfile(os.path.join(root, "newdir", n + ".py")), f"the fixture has no newdir/{n}.py")
+        for n in names:
+            with self.subTest(module=n):
+                self.assertEqual(self.hits_at(root, f"newdir/{n}.py"), [],
+                                 f"newdir/{n}.py is a guard change, but hooks/guard.py never imports it (a name in a comment, a string or a docstring is no import)")
+
+    def test_import_closure_stops_on_a_guard_file_that_does_not_parse(self):
+        broken = "def broken(:\n"
+        with self.assertRaises(SyntaxError):  # scope: the fixture does not parse, so the stop is for the read
+            ast.parse(broken)
+        msg = self.stop_text(self.closure_root(broken), "janitor/sweep.py")
+        self.assertIn("guard import list is unknown", msg, "guard_hits stops on a hooks/guard.py that does not parse, but the message does not say the guard import list is unknown")
+
+    def test_import_closure_stops_when_the_guard_file_is_missing(self):
+        root = self.closure_root()  # no hooks/guard.py in this checkout
+        self.assertFalse(os.path.exists(os.path.join(root, "hooks", "guard.py")), "the fixture has a hooks/guard.py")  # scope
+        msg = self.stop_text(root, "janitor/sweep.py")
+        self.assertIn("guard import list is unknown", msg, "guard_hits with no hooks/guard.py does not say the guard import list is unknown")
+
 class ReviewGuardEnv(ReviewEnv):
     """The guard and kind cases' one home: the record's argv at the feature branch's head (the fake host reports it as live), and the refusal's shape."""
 
@@ -13744,6 +13829,11 @@ class ReviewGuardRefusal(ReviewGuardEnv):
         rc, out, err = self.run_args(*self.review_argv("delete-only"))
         self.assertEqual(rc, 0, out + err)
         self.assertEqual(parse_text(self, posted_body(self, out))["kind"], "delete-only")
+
+    def test_import_closure_sweep_only_pr_refuses_guard_no(self):
+        # janitor/sweep.py is in no GUARD_PATHS folder; hooks/guard.py imports it, so a diff that changes only it is a guard change
+        self.host.changed = [("janitor/sweep.py", "modified", 0)]
+        self.assert_refused(*self.run_args(*self.review_argv()), "janitor/sweep.py")
 
 class ReviewGuardFiles(ReviewGuardEnv):
     """The guard and the kind read the files through the real Host.pr_files, so a rename counts by both its names and every page of the list is
