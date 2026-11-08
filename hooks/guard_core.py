@@ -2473,6 +2473,14 @@ def _py_bound_value(name, bound):
     return entry[1] if entry is not None else None
 
 
+class _ComposeDepth(ValueError):
+    """A path built from expressions nested past the cap of `_py_composed_text`. It is never read as a
+    harmless part: `_py_composed_paths` lets it through, and the frozen caller reads the script as plain text."""
+
+
+_PY_EXPANDING = set()   # the bound values `_py_composed_text` is reading now, so a value that holds itself ends
+
+
 def _py_composed_text(node, bound, depth=0) -> str:
     """The path an expression builds, as text: literals joined as `os.path.join`, `Path(a, b)` and
     `a / b` join them, `a + b` joins them as is, a name reads as the value last bound before it,
@@ -2480,19 +2488,34 @@ def _py_composed_text(node, bound, depth=0) -> str:
     directory reads as `~`. `_` stands for a part it cannot tell (a call, a name never bound), so a
     frozen folder followed by an unknown child reads `<frozen folder>/_`."""
     if depth > 8:
-        return "_"
+        raise _ComposeDepth("a path built from expressions nested past 8 levels")
     step = depth + 1
     if isinstance(node, ast.Constant):
         return node.value if isinstance(node.value, str) else "_"
     if isinstance(node, ast.Name):
         value = _py_bound_value(node, bound)
-        return _py_composed_text(value, bound, step) if value is not None else "_"
+        if value is None or id(value) in _PY_EXPANDING:
+            return "_"   # a name never bound, or a value that holds itself (`p = p + x` in a loop)
+        _PY_EXPANDING.add(id(value))
+        try:
+            return _py_composed_text(value, bound, step)
+        finally:
+            _PY_EXPANDING.discard(id(value))
     if isinstance(node, ast.JoinedStr):
         return "".join(_py_composed_text(part.value if isinstance(part, ast.FormattedValue) else part,
                                          bound, step) for part in node.values)
     if isinstance(node, ast.BinOp) and isinstance(node.op, (ast.Div, ast.Add)):
-        left, right = _py_composed_text(node.left, bound, step), _py_composed_text(node.right, bound, step)
-        return _join_text(left, right) if isinstance(node.op, ast.Div) else left + right
+        # A flat chain (`a + b + c + ...`) nests to the left: walk it as a loop, so the depth cap counts the
+        # nesting of the expression and not the number of its terms.
+        links = []
+        while isinstance(node, ast.BinOp) and isinstance(node.op, (ast.Div, ast.Add)):
+            links.append((node.op, node.right))
+            node = node.left
+        text = _py_composed_text(node, bound, step)
+        for op, right in reversed(links):
+            part = _py_composed_text(right, bound, step)
+            text = _join_text(text, part) if isinstance(op, ast.Div) else text + part
+        return text
     if _py_is_format(node):
         holes = node.right.elts if isinstance(node.right, ast.Tuple) else [node.right]
         texts = iter(_py_composed_text(hole, bound, step) for hole in holes)
@@ -2558,6 +2581,8 @@ def _py_composed_paths(tree, parents, names, bound):
     for node in [*ast.walk(tree), *augmented]:
         try:
             found.extend(_py_composed_node(node, parents, names, bound))
+        except _ComposeDepth:
+            raise   # the depth cap read nothing of the path: the script goes to the crash fallback
         except Exception:   # one unreadable expression must not hide a write later in the script
             continue
     return found

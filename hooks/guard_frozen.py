@@ -943,6 +943,26 @@ FROZEN_CRASH_NOTE = " The frozen reader crashed on this script, so it was read a
 _CRASH_WORD = re.compile(r"[^\s\"'`()\[\]{},;=+]*[/\\][^\s\"'`()\[\]{},;=+]*")
 
 
+_CRASH_LITERAL = re.compile(r"\"([^\"\n]*)\"|'([^'\n]*)'")
+_CRASH_PARTS = 6   # string parts after the config directory's name that one path may span
+
+
+def _crash_parts_hit(text: str, cwd: str, predicate, config: str, name: str) -> str:
+    """A path the script joins from string parts with no `/` between them (`os.path.join(h, ".claude",
+    "hooks", "x")`, `Path(h) / ".claude" / "hooks" / "x"`): the config directory's name as a part, or as
+    the last folder of one, followed by the parts after it, judged under the config directory. The
+    predicate holds the frozen names, so no list is copied here. '' when no such path is frozen."""
+    parts = [first or second for first, second in _CRASH_LITERAL.findall(text)]
+    for at, part in enumerate(parts):
+        if part.rstrip("/\\") != name and not part.rstrip("/\\").endswith(("/" + name, "\\" + name)):
+            continue
+        for end in range(at + 2, min(len(parts), at + 1 + _CRASH_PARTS) + 1):
+            candidate = os.path.join(config, *(piece.strip("/\\") for piece in parts[at + 1:end]))
+            if predicate(candidate, cwd):
+                return candidate
+    return ""
+
+
 def _crash_text_hit(text: str, cwd: str, predicate) -> str:
     """The first path-like word of `text` that `predicate` accepts, tagged with FROZEN_CRASH_TAG, else ''."""
     try:
@@ -955,6 +975,10 @@ def _crash_text_hit(text: str, cwd: str, predicate) -> str:
                 spellings.append(os.path.join(parent, word[at:]))
             if any(predicate(spelling, cwd) for spelling in spellings):
                 return word + FROZEN_CRASH_TAG
+        if name:
+            found = _crash_parts_hit(text, cwd, predicate, config, name)
+            if found:
+                return found + FROZEN_CRASH_TAG
     except Exception:
         pass   # the last fallback: it never raises into the rules after it
     return ""
