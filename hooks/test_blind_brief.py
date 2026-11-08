@@ -438,11 +438,13 @@ class Cli(unittest.TestCase):
 
     def test_long_digit_runs_finish_under_the_hang_guard(self):
         # A hang guard, not a speed check: each folder is one run of the real check in a child process,
-        # capped by run_cli at 60 s. Measured here: this case takes 0.2 s with both folders. A pattern that
-        # backtracks on a digit run takes 45 s on 40000 digits, so it reaches the cap on the 80000-digit
-        # brief. The sizes are 20000 and 80000 digits, against a 20000-character filler with no digits.
+        # capped by run_cli at 60 s. A digit-run pattern with overlapping quantifiers, such as
+        # (?<![\w.])\d+(?:\.?\d+)?\s?(?:px|rem|dp)\b, is quadratic here: 0.59 s, 2.72 s, 10.86 s and 44.99 s
+        # at 5000, 10000, 20000 and 40000 digits, about 4x per doubling. At 400000 digits it would take about
+        # 4300 s, far over the cap. The real module runs this case in 0.5 s, so the cap sits well above
+        # the run. The sizes are 20000 and 400000 digits, against a 20000-character filler with no digits.
         briefs = [(name, brief(job=JOB + "\n" + text, header="Designer kind: blind\nDesigner: %s-blind-1" % name))
-                  for name, text in (("digits-20000", "1" * 20000), ("digits-80000", "1" * 80000),
+                  for name, text in (("digits-20000", "1" * 20000), ("digits-400000", "1" * 400000),
                                      ("filler-20000", "." * 20000))]
         done = self.check_folder(briefs)
         self.assertEqual(done.returncode, 0, "a long run of digits or of filler was judged a fault: "
