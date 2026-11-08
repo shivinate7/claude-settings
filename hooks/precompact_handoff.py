@@ -56,6 +56,17 @@ the desktop app has none.
   prompt file's step 4. A lower bucket (after compaction) is stored silently. Nothing
   prints when stop_hook_active is true or on any error. Cost: one extra small JSON file read
   (~/.claude.json) at each Stop; no process start, no file written.
+  The same Stop also checks the handoff's sections: when the session's handoff exists and
+  missing_sections() finds a required section absent, it blocks once per handoff mtime, naming the
+  missing ones, and keeps that mtime as "sections_mtime" in the same <session_id>.nudge.json (no new
+  file). Silent when the handoff is absent or complete. Cost: one small read of the prompt file and of
+  the handoff at each Stop; no new log, hook, file or process start. Spec: docs/decisions/precompact-handoff.md,
+  item 14.
+
+  The required sections are the names on the marker line `<!-- handoff-sections: A | B | ... -->` in
+  step 4 of the installed prompt file, read at run time by missing_sections(); no code holds the list.
+  A prompt or marker that cannot be read gives none, so the check fails open. hooks/guard.py calls
+  missing_sections() to refuse a write to a handoff that drops one (rule handoff-sections).
 
   SessionEnd --session-end (stdin: session_id, reason, cwd) -- reason `clear` writes
   one pointer file, ~/.claude/state/handoff/pointers/<session_id>.json, holding the old
@@ -118,7 +129,9 @@ DEFAULT_WINDOW = 500_000
 # The source kinds of a handoff premise, strongest first. docs/decisions/premise-format.md says what
 # each means and lists the same names; case_premise_kinds_one_home keeps the two equal.
 PREMISE_KINDS = ("ruling", "measured", "read", "notes", "assumed")
-_PREMISES_HEAD = re.compile(r"^##[ \t]+Working premises[ \t]*$", re.I | re.M)
+# The required sections are named once, in the prompt file's step 4 marker line (SECTIONS_MARKER). No code
+# copies that list: the premises section is the marker name that holds the word "premises".
+SECTIONS_MARKER = re.compile(r"<!--[ \t]*handoff-sections:[ \t]*(.*?)[ \t]*-->")
 _PREMISE_LINE = re.compile(r"^[ \t]*[-*][ \t]+(P\d+)\b(?:[ \t]*\[([^\]\n]*)\])?", re.M)
 
 
@@ -153,6 +166,56 @@ def prompt_path():
     repo's own copy -- the reorient message must name the path the session actually
     reads, under CLAUDE_CONFIG_DIR, the way `claude-settings` installs hooks."""
     return os.path.join(config_dir(), "hooks", "precompact_handoff_prompt.md")
+
+
+def _marker_names(path):
+    """The section names on the marker line of the prompt file at `path`, in order. [] when the file
+    cannot be read, is not UTF-8, or has no marker. Never raises."""
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            m = SECTIONS_MARKER.search(f.read())
+    except Exception:  # OSError (missing, a directory), ValueError (not UTF-8)
+        return []
+    return [n.strip() for n in m.group(1).split("|") if n.strip()] if m else []
+
+
+def required_sections():
+    """The sections a handoff must hold, from the installed prompt's marker. [] when it cannot be read:
+    the check then fails open."""
+    return _marker_names(prompt_path())
+
+
+def premises_section():
+    """The marker's name for the premises section (the one that holds the word "premises"), or None.
+    Reads the installed prompt, then the copy beside this module, which is the installed one in an
+    install and the repo's own in a checkout."""
+    for path in (prompt_path(), os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                             "precompact_handoff_prompt.md")):
+        for name in _marker_names(path):
+            if "premises" in name.lower():
+                return name
+    return None
+
+
+def _premises_head():
+    name = premises_section()
+    body = re.escape(name) if name else r"(?:[A-Za-z]+[ \t]+)?premises"
+    return re.compile(r"^##[ \t]+%s[ \t]*$" % body, re.I | re.M)
+
+
+def missing_sections(text):
+    """The required sections that `text` lacks, in the marker's order. A section is present when a
+    `#` or `##` heading line starts with its name (any case, text may follow). [] when the marker
+    cannot be read. Never raises."""
+    try:
+        names = required_sections()
+        if not names:
+            return []
+        text = text if isinstance(text, str) else ""
+        return [n for n in names
+                if not re.search(r"^#{1,2}[ \t]+%s\b" % re.escape(n), text, re.I | re.M)]
+    except Exception:
+        return []
 
 
 def _entry_time(entry):
@@ -514,7 +577,7 @@ def inbox_note(session_id):
 
 
 def handoff_premises(path):
-    """[(id, kind)] of the premise lines in the handoff's Working premises section, in order,
+    """[(id, kind)] of the premise lines in the handoff's premises section, in order,
     one entry per id. [] when the file is unreadable or the section is missing or has no line.
     Reads text only. A kind outside PREMISE_KINDS is kept as written, so the caller lists it."""
     try:
@@ -522,7 +585,7 @@ def handoff_premises(path):
             text = f.read()
     except (OSError, ValueError):  # ValueError: a byte that is not UTF-8
         return []
-    head = _PREMISES_HEAD.search(text)
+    head = _premises_head().search(text)
     if not head:
         return []
     body = text[head.end():]
@@ -542,7 +605,7 @@ def premise_note(path, everyone):
         return ""
     prem = handoff_premises(path)
     if not prem:
-        note = " The handoff has no Working premises section. Add it per step 4."
+        note = " The handoff has no %s section. Add it per step 4." % (premises_section() or "premises")
     else:
         weak = ["%s (%s)" % (i, k or "no kind") for i, k in prem if everyone or k != PREMISE_KINDS[0]]
         note = (" Premises are statements. Check each before you act on it, then rewrite its "
@@ -738,6 +801,63 @@ def window_limit(model=None):
     return parse(settings.get("autoCompactWindow")) or DEFAULT_WINDOW
 
 
+def _checkpoint_facts(payload, state):
+    """(size, messages) when the context size passed a new checkpoint, else None. Sets state["bucket"]
+    when the transcript gave a size."""
+    size = overhead = model = None
+    with open(payload.get("transcript_path", ""), "r", encoding="utf-8") as f:
+        for line in f:
+            try:
+                entry = json.loads(line)
+            except ValueError:
+                continue
+            if entry.get("type") != "assistant" or entry.get("isSidechain") is True:
+                continue
+            msg = entry.get("message") or {}
+            u = msg.get("usage")
+            if msg.get("model") == "<synthetic>" or not isinstance(u, dict):
+                continue
+            n = sum(u.get(k) or 0 for k in (
+                "input_tokens", "cache_creation_input_tokens", "cache_read_input_tokens"))
+            if n > 0:
+                if overhead is None:
+                    overhead = n
+                size = n
+                model = msg.get("model") or model
+    if size is None:
+        return None
+    # Proxy (record hook-inputs-carry-token-counts): the first turn is mostly overhead.
+    messages = max(size - overhead, 0)
+    if messages == 0:
+        bucket = -1  # nothing to hand off, even when the room left is zero or negative
+    else:
+        bucket = sum(1 for c in checkpoints(compact_threshold(window_limit(model)) - overhead)
+                     if messages >= c) - 1
+    try:
+        stored = int(state["bucket"])
+    except Exception:
+        stored = -1
+    state["bucket"] = bucket
+    return (size, messages) if bucket > stored else None
+
+
+def _unflagged_missing(session_id, state):
+    """The required sections the session's handoff lacks, when it exists and this mtime was not flagged
+    yet (state["sections_mtime"], set here), else []."""
+    path = handoff_path(session_id)
+    try:
+        mtime = os.stat(path).st_mtime_ns
+        with open(path, "r", encoding="utf-8") as f:
+            text = f.read()
+    except (OSError, ValueError):  # no handoff, or a byte that is not UTF-8
+        return []
+    missing = missing_sections(text)
+    if not missing or state.get("sections_mtime") == mtime:
+        return []
+    state["sections_mtime"] = mtime
+    return missing
+
+
 def run_nudge(payload):
     try:
         record_dir(payload.get("session_id", ""), payload.get("cwd"))
@@ -745,53 +865,47 @@ def run_nudge(payload):
         sys.stderr.write("precompact_handoff: could not record the dir: %s\n" % e)
     if payload.get("stop_hook_active"):
         return 0
+    session_id = payload.get("session_id", "")
+    path = os.path.join(config_dir(), "state", "handoff", "%s.nudge.json" % session_id)
+    state = {}
     try:
-        session_id = payload.get("session_id", "")
-        size = overhead = model = None
-        with open(payload.get("transcript_path", ""), "r", encoding="utf-8") as f:
-            for line in f:
-                try:
-                    entry = json.loads(line)
-                except ValueError:
-                    continue
-                if entry.get("type") != "assistant" or entry.get("isSidechain") is True:
-                    continue
-                msg = entry.get("message") or {}
-                u = msg.get("usage")
-                if msg.get("model") == "<synthetic>" or not isinstance(u, dict):
-                    continue
-                n = sum(u.get(k) or 0 for k in (
-                    "input_tokens", "cache_creation_input_tokens", "cache_read_input_tokens"))
-                if n > 0:
-                    if overhead is None:
-                        overhead = n
-                    size = n
-                    model = msg.get("model") or model
-        if size is None:
-            return 0
-        # Proxy (record hook-inputs-carry-token-counts): the first turn is mostly overhead.
-        messages = max(size - overhead, 0)
-        if messages == 0:
-            bucket = -1  # nothing to hand off, even when the room left is zero or negative
-        else:
-            bucket = sum(1 for c in checkpoints(compact_threshold(window_limit(model)) - overhead)
-                         if messages >= c) - 1
-        path = os.path.join(config_dir(), "state", "handoff", "%s.nudge.json" % session_id)
+        with open(path, "r", encoding="utf-8") as f:
+            loaded = json.load(f)
+        if isinstance(loaded, dict):
+            state = loaded
+    except Exception:
+        pass
+    before = dict(state)
+    facts, missing = None, []
+    try:
+        facts = _checkpoint_facts(payload, state)
+    except Exception as e:
+        sys.stderr.write("precompact_handoff: nudge error: %s\n" % e)
+    if not facts:  # a checkpoint block already says to rewrite the handoff; the sections wait for the next Stop
         try:
-            with open(path, "r", encoding="utf-8") as f:
-                stored = int(json.load(f)["bucket"])
-        except Exception:
-            stored = -1
-        os.makedirs(os.path.dirname(path), exist_ok=True)
-        with open(path, "w", encoding="utf-8") as f:
-            json.dump({"bucket": bucket}, f)
-        if bucket > stored:
+            missing = _unflagged_missing(session_id, state)
+        except Exception as e:
+            sys.stderr.write("precompact_handoff: nudge error: %s\n" % e)
+    try:
+        if state != before:
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump(state, f)
+        if facts:
+            size, messages = facts
             ensure_handoff_dir(session_id)
-            print(json.dumps({"decision": "block", "reason": (
-                "Context is about %dk tokens, messages about %dk. Rewrite your handoff at %s now, the whole "
-                "file; never append. Follow step 4 of %s for its sections and their order. "
-                "Then continue. (decision precompact-handoff)"
-                % (size // 1000, messages // 1000, handoff_path(session_id), prompt_path()))}))
+            reason = ("Context is about %dk tokens, messages about %dk. Rewrite your handoff at %s now, the "
+                      "whole file; never append. Follow step 4 of %s for its sections and their order. "
+                      "Then continue. (decision precompact-handoff)"
+                      % (size // 1000, messages // 1000, handoff_path(session_id), prompt_path()))
+        elif missing:
+            reason = ("Your handoff at %s lacks these sections: %s. Rewrite the whole file with each under "
+                      "its own ## heading, per step 4 of %s. (decision precompact-handoff)"
+                      % (handoff_path(session_id), ", ".join(missing), prompt_path()))
+        else:
+            reason = ""
+        if reason:
+            print(json.dumps({"decision": "block", "reason": reason}))
     except Exception as e:
         sys.stderr.write("precompact_handoff: nudge error: %s\n" % e)
     return 0

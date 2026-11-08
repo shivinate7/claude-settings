@@ -259,6 +259,16 @@ Other tools, in `judge` order:
                        (sim-test-is-the-one-boot-path)
   builder-test-edit, test-author-scope, record-writer-scope, designer-scope
                        deny. A role's write outside its scope. (builders-cannot-edit-tests)
+  handoff-sections     deny. A Write, Edit or MultiEdit to a session handoff (a `.md` file in
+                       `<config dir>/handoffs/`) whose resulting text lacks a section that step 4 of the
+                       installed `precompact_handoff_prompt.md` lists on its `handoff-sections` marker
+                       line, one `#` or `##` heading per name. The reason names the missing sections. An
+                       Edit or MultiEdit is judged on the file as the edit leaves it; an edit that cannot
+                       be applied, an unreadable file, a prompt with no marker or one that cannot be read,
+                       and a failed import allow. Another file, a repo's own HANDOFF.md included, passes.
+                       An override lifts it. Cost: reads on demand inside this call, one small read of the
+                       prompt file and, for an edit, of the handoff; no new log, hook, file or process start.
+                       (precompact-handoff, item 14)
   env-file, frozen-path, config-edit, agent-model-cap
                        the write-tool forms of the rules above. Every deny runs over all path
                        fields of a call before any ask.
@@ -991,6 +1001,63 @@ HANDOFF_UNREAD_REASON = (
     "Rule (handoff unread): context was compacted and this session has not read its handoff. "
     "Remedy: Read %s now. The Read clears this check. Then repeat the call."
 )
+
+HANDOFF_SECTIONS_REASON = (
+    "Rule (handoff-sections): this write would leave the session handoff without a section the "
+    "installed handoff prompt requires. Missing: %s. "
+    "Remedy: write the whole handoff again with every required section under its own `## ` heading, "
+    "as step 4 of the installed precompact_handoff_prompt.md lists them, then repeat the call. "
+    "(decision precompact-handoff, a handoff keeps its required sections)"
+)
+
+
+def handoff_sections_result(tool, tool_input, target, cwd):
+    """The text a Write, Edit or MultiEdit would leave in a session handoff file, or None when the target
+    is not a session handoff (a `.md` file in <config dir>/handoffs/) or the result cannot be worked out
+    (an edit whose old text is absent, an unreadable file): the tool fails on its own then, and the rule
+    allows. Reads the target only for an Edit or MultiEdit."""
+    if tool not in ("Write", "Edit", "MultiEdit") or not target.lower().endswith(".md"):
+        return None
+    path = os.path.expanduser(target)
+    path = path if os.path.isabs(path) else os.path.join(cwd or "", path)
+    folder = os.path.join(guard_core.config_dir(), "handoffs")
+    here = os.path.dirname(path)
+    same = (os.path.normcase(os.path.normpath(here)) == os.path.normcase(os.path.normpath(folder))
+            or os.path.normcase(os.path.realpath(here)) == os.path.normcase(os.path.realpath(folder)))
+    if not same:
+        return None
+    if tool == "Write":
+        content = tool_input.get("content")
+        return content if isinstance(content, str) else None
+    edits = tool_input.get("edits") if tool == "MultiEdit" else [tool_input]
+    if not isinstance(edits, list):
+        return None
+    try:
+        with open(path, "r", encoding="utf-8") as handle:
+            text = handle.read()
+    except (OSError, ValueError):
+        return None
+    for edit in edits:
+        old, new = (edit.get("old_string"), edit.get("new_string")) if isinstance(edit, dict) else (None, None)
+        if not isinstance(old, str) or not isinstance(new, str) or not old or old not in text:
+            return None
+        text = text.replace(old, new) if edit.get("replace_all") is True else text.replace(old, new, 1)
+    return text
+
+
+def handoff_sections_hit(tool, tool_input, target, cwd):
+    """The required handoff sections a write to a session handoff would drop, as one text, else "". The
+    list is the prompt's marker, read by precompact_handoff.missing_sections, which fails open: an unread
+    prompt or marker gives none. A failed import allows."""
+    result = handoff_sections_result(tool, tool_input, target, cwd)
+    if result is None:
+        return ""
+    try:
+        from precompact_handoff import missing_sections
+    except Exception:
+        return ""
+    return ", ".join(missing_sections(result))
+
 
 OTHER_CHECKOUT_REASON = (
     "Rule (other checkout): this write lands in another checkout of this clone, not the one this "
@@ -5360,6 +5427,12 @@ def judge(payload) -> None:
         # 7. A frozen path. Only a writing tool reaches here, so a frozen path stays readable.
         if is_frozen(target, cwd):
             refuse(tool, "deny", "frozen-path", FROZEN_REASON, target)
+
+        # 7a. A write that leaves a session handoff without a required section (rule handoff-sections).
+        # Not in never_lifted: the owner may mean the write.
+        dropped = handoff_sections_hit(tool, tool_input, target, cwd)
+        if dropped:
+            refuse(tool, "deny", "handoff-sections", HANDOFF_SECTIONS_REASON % dropped, dropped)
     for target in targets:
         # 7b. A project config edit: allowed (Decision 7), and noted in the log only.
         if is_project_config(target, cwd):
