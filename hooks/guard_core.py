@@ -574,7 +574,8 @@ def _wrapper_flags(word: str, tokens, index: int):
     """Read a wrapper's flags from `index`, getopt-style. Return (the index after them,
     [(flag, value)]). A short-flag cluster is read letter by letter: the first letter that takes a
     value (WRAPPER_VALUE_FLAGS) takes the rest of the cluster, or the next word when it is the last
-    letter. So `sudo -Eu root cmd`, `xargs -rn 1 pkill` and `env -iS 'cmd'` each skip the value."""
+    letter. So `sudo -Eu root cmd`, `xargs -rn 1 pkill` and `env -iS 'cmd'` each skip the value. Each
+    flag is (flag, value, the index after it and its value): `env -S` reads the words after that."""
     takes = WRAPPER_VALUE_FLAGS.get(word, ())
     end = len(tokens)
     found = []
@@ -586,18 +587,18 @@ def _wrapper_flags(word: str, tokens, index: int):
             if not glued and flag in takes:
                 value = tokens[index] if index < end else ""
                 index += 1
-            found.append((flag, value))
+            found.append((flag, value, index))
             continue
         for at in range(1, len(token)):
             flag = "-" + token[at]
             if flag not in takes:
-                found.append((flag, ""))
+                found.append((flag, "", index))
                 continue
             value = token[at + 1:]
             if not value:
                 value = tokens[index] if index < end else ""
                 index += 1
-            found.append((flag, value))
+            found.append((flag, value, index))
             break
     return index, found
 
@@ -1780,12 +1781,14 @@ CMD_EXE_NAMES = {"cmd", "cmd.exe"}
 def _env_split_string(tokens) -> str:
     """The command string `env -S STRING` (or `--split-string`, `-iS STRING`) runs, else ''. Only
     an `env` the segment runs as a wrapper counts, at its start or after a `(` or `$(`:
-    `echo env -S x` runs echo."""
+    `echo env -S x` runs echo. `env` appends the words after STRING to it, so `env -S pwsh -c 'x'`
+    runs `pwsh -c x`: those words are joined on, each quoted as one word."""
     for start in _command_starts(tokens):
-        for word, flags in _walk_wrappers(tuple(tokens[start:]))[1]:
-            for flag, value in flags if word == "env" else ():
+        here = tuple(tokens[start:])
+        for word, flags in _walk_wrappers(here)[1]:
+            for flag, value, after in flags if word == "env" else ():
                 if flag in ("-S", "--split-string"):
-                    return value
+                    return " ".join([value, *map(shlex.quote, here[after:])])
     return ""
 
 

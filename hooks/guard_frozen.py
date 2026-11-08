@@ -537,11 +537,46 @@ _OPEN_REDIRECT = re.compile(r"\d*>>?|&>>?")
 _CP_DEST_UNSAFE = re.compile(r"[$`*?\[{<>]")
 
 
-def _copy_reads(raw, predicate, cwd):
-    """The indexes of the words of a `cp` segment that are only read, else an empty set."""
+# The PowerShell twins of `cp` and of a write of text. `Copy-Item SRC DEST` writes only DEST. `Add-Content`
+# and `Set-Content PATH TEXT...` write only PATH: a quoted word after it is the text written. Only the
+# switches below and plain positional words are read; any other parameter (`-Destination`, `-Value`,
+# `-Path`) or a redirect fails closed to a hit, as `-Destination` does for `cp`.
+_PS_COPY = frozenset(("copy-item", "copy", "cpi"))
+_PS_CONTENT = frozenset(("add-content", "set-content", "ac", "sc"))
+_PS_SWITCH = re.compile(r"-(?i:recurse|force|container|passthru|verbose|confirm|whatif|nonewline)")
+
+
+def _ps_reads(name, raw, words, start, predicate, cwd, plain):
+    """`_copy_reads` for a PowerShell `Copy-Item` (its sources) or `Add-Content` / `Set-Content` (the
+    quoted text after the path): the indexes of the words that are only read or only text."""
+    if _GROUP_MARK.search(_FD_DUP.sub("", plain)):
+        return set()
+    operands = []
+    for index in range(start + 1, len(words)):
+        word = words[index]
+        if ">" in word or "<" in word or (word.startswith("-") and not _PS_SWITCH.fullmatch(word)):
+            return set()
+        if not _PS_SWITCH.fullmatch(word):
+            operands.append(index)
+    if name in _PS_CONTENT:
+        return {i for i in operands[1:] if _has_quote(raw[i])}
+    if len(operands) < 2:
+        return set()
+    target = words[operands[-1]]
+    if _CP_DEST_UNSAFE.search(target) or predicate(target, cwd) or predicate(target.rstrip("/\\") + "/_", cwd):
+        return set()
+    return set(operands[:-1])
+
+
+def _copy_reads(raw, predicate, cwd, plain=""):
+    """The indexes of the words of a `cp` segment that are only read, else an empty set. `plain` is the
+    segment's text outside quotes, for the PowerShell twins (`_ps_reads`)."""
     words = [_unquoted(word) for word in raw]
     start = next((i for i, word in enumerate(raw) if not _ASSIGNMENT.match(word)), len(raw))
-    if _name(raw[start] if start < len(raw) else "") != "cp":
+    name = _name(raw[start] if start < len(raw) else "")
+    if name in _PS_COPY or name in _PS_CONTENT:
+        return _ps_reads(name, raw, words, start, predicate, cwd, plain)
+    if name != "cp":
         return set()
     operands, target, index = [], None, start + 1
     while index < len(words):
@@ -658,13 +693,18 @@ def _shell_write_hit(cmd: str, cwd: str, predicate, holds=None, follow_cd=False,
                if command_position else parsed)
     closed = any(unsafe or _runs_stored_text(segment, words, plain)
                  for segment, words, (unsafe, plain) in zip(segments, parsed, scans))
+    # A copy or a written text is read through PowerShell's own quotes: a smart quote is a quote there, so the
+    # straightened text is what PowerShell sees. Only a printer's data stays closed by a smart quote.
+    straight = [_scan(_straight(segment)) for segment in segments]
+    reading_closed = any(unsafe or _runs_stored_text(segment, words, plain)
+                         for segment, words, (unsafe, plain) in zip(segments, parsed, straight))
     kinds = ["" if closed else _kind(words, plain) for words, (_u, plain) in zip(parsed, scans)]
     quiet = all(kind in ("printer", "cd") or not words for kind, words in zip(kinds, parsed))
     for number, raw in enumerate(parsed):
         linked = _cp_link_source(raw, holds, cwd)
         if linked:
             return linked
-        data = set() if closed else _copy_reads(raw, predicate, cwd)
+        data = set() if reading_closed else _copy_reads(raw, predicate, cwd, straight[number][1])
         if kinds[number] in ("printer", "message"):
             last = number
             while last + 1 < len(kinds) and ends[last] == "|":
@@ -693,21 +733,27 @@ def _shell_write_hit(cmd: str, cwd: str, predicate, holds=None, follow_cd=False,
         text = " ".join(shown)
         at = (dir_before_segment(segments, number, cwd, ends) or cwd) if follow_cd else cwd
         verb = _segment_command(words)[0] if predicate_command else ""
-        for nested in _powershell_scripts_of(segments[number]):
+        scripts_run = _powershell_scripts_of(segments[number])
+        for nested in scripts_run:
             # a script pwsh, `cmd /c` or iex runs is PowerShell text: judge it by PowerShell's rules too
             hit = _shell_write_hit(nested, at, predicate, holds, follow_cd, command_position, predicate_command)
             if hit:
                 return hit
+        command_args = _segment_command(script) if command_position else ()
+        if command_args and scripts_run and command_args[0] in _PS_SHELLS:
+            # the script this shell runs was judged above by PowerShell's own rules; only a redirect on the shell is left
+            command_args = ("", ())
         for word in words:
             if word.startswith("-") or REDIRECT.fullmatch(word):
                 continue
             if not word or word in (">", ">>"):
                 continue
-            if (predicate(word, at, verb) if predicate_command else predicate(word, at)) and writes_to(word, text, *(_segment_command(script) if command_position else ())):
+            if (predicate(word, at, verb) if predicate_command else predicate(word, at)) and writes_to(word, text, *command_args):
                 return word
     return ""
 
 
+_PS_SHELLS = frozenset(("pwsh", "powershell", "cmd"))
 _PS_LAUNCHER = re.compile(r"pwsh|powershell|cmd|iex|invoke-expression", re.IGNORECASE)
 
 
