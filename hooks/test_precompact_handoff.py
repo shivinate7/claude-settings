@@ -2200,10 +2200,10 @@ def case_nudge_sections_count_numbered_headings():
 
 
 def case_one_reader_for_the_premises_section():
-    """Both readers of the prompt's marker agree on the premises section. With no installed prompt, required_sections()
-    reads nothing, so premises_section() must name nothing either. Today it falls back to the repo's copy beside the
-    module and names "Working premises". The control installs the prompt: there the two agree, and the premises name
-    is one of the required names."""
+    """Both readers of the prompt's marker agree on the premises section. With no installed prompt file,
+    required_sections() falls back to the prompt beside the module, and premises_section() names the premises entry of
+    that same list. The control installs the prompt: there the two agree, and the premises name is one of the required
+    names."""
     repo_copy = os.path.join(os.path.dirname(os.path.abspath(MODULE)), "precompact_handoff_prompt.md")
     c = Case("reader")
     try:
