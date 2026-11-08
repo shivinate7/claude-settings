@@ -3542,7 +3542,7 @@ def guard_import_closure(root, is_test_rel):
             with open(os.path.join(root, rel), encoding="utf-8") as fh:
                 names = _imported_names(ast.parse(fh.read(), filename=rel))
         except (OSError, SyntaxError, ValueError) as e:  # ValueError: a null byte in the source
-            raise Stop(f"the guard import list is unknown: cannot read {rel} under {root} ({type(e).__name__}: {e}). Fix the file, then record the review again.")
+            raise Stop(f"the guard import list is unknown: cannot read {rel} under {root} ({type(e).__name__}: {e}). Fix the file, then record the review again. " + REVIEW_CITE)
         for name in names:
             todo.extend(by_name.get(name, ()))
     return seen
