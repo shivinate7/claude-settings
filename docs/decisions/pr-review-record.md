@@ -65,6 +65,8 @@ Counted as real `gh` calls, one call per list read however many pages it pages.
 - Each ready PR that has a record adds three calls: the check runs, the commit statuses and the branch protection (required checks mode `protection`). A draft, and a PR with no record, add none.
 - One ready PR with a record: five calls. With a pinned `merge.requiredChecks` list: also five, because the one protection compare moves to the start of the run and the per-PR protection read goes.
 - `merge <pr> --review-record`: one PR read per call. `--fix-check` adds one paged read of the repo's issue comments since the PR opened. It writes nothing.
+- The guard's push ask (rule `reviewed-head-push`) makes no `gh` call outside a merge-tool repo, for a dry-run push, or for a delete push. Otherwise it makes one list read of the open PRs per push. When an open PR has the pushed branch as its head, it makes one more paged read of the repo's issue comments since that PR opened.
+- In a cloud session the PR reads return 403 until PR #1634 (the cloud merge-tool read fix) merges. There the guard lets every push through, with one stderr line.
 - No new long-lived process, file, cache or timer. The batch runner calls the list at each wake. A lane calls the render at each round.
 - The test `ReviewedList` in `merge/test_merge.py` pins the two list reads and the five calls for one ready PR.
 
@@ -74,7 +76,7 @@ Counted as real `gh` calls, one call per list read however many pages it pages.
 - Open: an integration PR has no record of its own.
 - A `delete-only` change with Guard or check `no` and a round 1 FAIL reads done (rule `roles-review-cap-three`, the three-round review cap). The lane fixes the defect and posts a new review record for the new head, before the batch runner batches it. The fix push makes the old record stale.
 - Unmeasured: whether the auto-mode classifier allows `merge --reviewed` and `merge <pr> --review-record`. Both are off `merge/cloud_allow.json`, which allows only `--confirm` and `--role`.
-- One fix check per record. A second fix on a fixed head starts a new lane at round 1. `--fix-check` refuses unless its reviewed head equals the Head of the newest earlier record on the PR and that record has no Fix check line.
+- One fix check per record. A second fix on a fixed head starts a new lane at round 1. `--fix-check` refuses unless its reviewed head equals the Head of the newest earlier record on the PR and that record has no Fix check line. A push onto a head whose newest record is done with a Fix check asks (rule `reviewed-head-push`, the guard's push ask). The remedy is a new branch. The guard reads the record through the merge tool's own `review_comments`, `parse_review` and `review_state`. It checks the current branch's destination only, never `--all`, `--mirror` or a remote other than origin. It fails open, the opposite of the merge check: a read that fails lets the push through, with one stderr line.
 
 ## Lane picks
 

@@ -91,7 +91,9 @@ Shell tools (Bash, PowerShell), in judge_shell order:
   push-stray-branch    ask. A push with an implied destination (bare, `HEAD`, `@`, or a colon-less
                        refspec naming the current branch) that writes a name other than the branch's
                        upstream. Only with an upstream on the pushed remote that is not main or master.
-  env-file             deny. Any read or write of an environment file.
+  reviewed-head-push   ask. A push onto the head of an open pull request whose newest review record is done
+                       and already holds its fix check. Only in a merge-tool repo. A read that fails lets the push through.
+  env-file            deny. Any read or write of an environment file.
   merge-checks         deny. A merge while the head has a check pending or red, while another
                        ready PR on the base runs CI, or when the read could not run. `--auto` too.
   merge-role-proof     deny. A merge-tool call with a role flag whose tier the session's own get_session
@@ -382,7 +384,7 @@ while True:
             DRAFT_PR_REASON, MERGE_TOOLS, RECORDS_PAGE_REASON, ROLE_REASON,
             conflict_markers_hit, gh_call_of, git_call_of, merge_call_of, merge_check, merge_check_reason, record_writer_hit, records_page_hit, role_proof_hit,
             DEFAULT_RECORD_BRANCH, RECORD_REASON, settings_roots, TRUST_REASON, archive_hit, brief_hit, trust_card_hit,
-            undrafted_pr_create, uses_merge_tool,
+            undrafted_pr_create, uses_merge_tool, REVIEWED_HEAD_PUSH_REASON, reviewed_head_push_hit,
         )
         _loading = "guard_frozen"
         from guard_frozen import (
@@ -3523,6 +3525,13 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
                 elif kind == "stray":
                     ask_command("push-stray-branch", PUSH_STRAY_REASON, "git push " + " ".join(args),
                                 "push to a stray branch")
+                # Rule reviewed-head-push. Cost: zero gh calls outside a merge-tool repo, for a dry run (skipped by
+                # read_verb above) and for a delete push; one pull request list read per push; one more paged repo-wide
+                # comment read when an open pull request has the destination as its head. Limit: only the current
+                # branch's destinations are checked, never `--all`, `--mirror` or a remote other than origin.
+                elif uses_merge_tool(where) and reviewed_head_push_hit(args, where, overrides):
+                    ask_command("reviewed-head-push", REVIEWED_HEAD_PUSH_REASON, "git push " + " ".join(args),
+                                "push onto a reviewed head")
 
     # 5. The environment file. This layer reads the command BEFORE normalization.
     refusal, logged = env_refusal(stripped)
