@@ -37,6 +37,11 @@
 //   N15      a README.md in decisionsDir is no record: a file only it names needs no map line.
 //   N16      map-show <decision-id> lists a non-code file whose Decisions line carries that id.
 //   N17      a notes.md directly in decisionsDir is no record: a file only it names needs no map line.
+//   N18      README and notes under a slug-style decisionIdPattern: an id of either names no record, and MAP10 fails on each by name.   [green]
+//   N19      map-show README and notes name no record: exit 1, nothing on stdout, and no record file printed.                          [green]
+//   N20      a tracked .svg inside decisionsDir, and no record, that a decision record names needs a map line: MAP1 fails and names it.
+//   N21      a record that names README.md or notes.md in decisionsDir asks for no map line: MAP1 passes.                                 [green]
+//   N22      a record that names a nested .md under decisionsDir asks for a map line: MAP1 fails and names it.                          [green]
 //   DB1      a .svg a debt record names needs a map line: MAP1 fails and names it.
 //   DB2      its map line needs a Debts line with the slug: the failure names the file and the slug.
 //   DB3      control: a map line with `  - Debts: ` naming the slug: no check fails.                     [green]
@@ -48,11 +53,14 @@
 //   DB9      control: a debt that names a code file adds no requirement.                                 [green]
 //   DB10     empty state: no debts folder at all, no check fails, and nothing reads a missing folder.    [green]
 //   DB11     full size: two debt records name one .svg, and its map line must hold both slugs.
+//   DB12     a tracked .svg inside the debts folder, and no debt, that a debt names needs a map line: MAP1 fails and names it.
+//   DB13     a debt that names README.md or notes.md in the debts folder asks for no map line: MAP1 passes.                              [green]
+//   DB14     a debt that names a nested .md under the debts folder asks for a map line: MAP1 fails and names it.                        [green]
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync, mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { HERE, SKILL, debtsDirOf, failLines, gitIn, readIn, run, scratchRepo, subLineIds, tail, verdictOf, writeIn } from './helpers.mjs';
+import { HERE, SKILL, debtsDirOf, failLines, gitIn, readIn, run, scratchRepo, setSubLine, subLineIds, tail, verdictOf, writeIn } from './helpers.mjs';
 import { MAP_FORMAT_VERSION, loadMapConfig } from '../scripts/lib/map-config.mjs';
 
 const CHECK = join(SKILL, 'scripts', 'map-check.mjs');
@@ -79,14 +87,14 @@ const mapLine = (file, sentence) => `- \`${file}\` — ${sentence}`;
 
 /**
  * A scratch repository on the decisions fixture. Its config is at MAP_FORMAT_VERSION, and its layout is rolled out, so the debts folder is the one
- * lint/layout.json gives. `keys: false` leaves out both decision keys. `mapPaths` adds that key.
+ * lint/layout.json gives. `keys: false` leaves out both decision keys. `mapPaths` adds that key. `idPattern` is the decision id pattern, D\d+ by default.
  */
-const scratch = ({ keys = true, mapPaths } = {}) => {
+const scratch = ({ keys = true, mapPaths, idPattern = 'D\\d+' } = {}) => {
   const dir = scratchRepo({ fixture: FIXTURE, track: TRACK });
   const cfg = {
     formatVersion: MAP_FORMAT_VERSION,
     ...BASE,
-    ...(keys ? { decisionsDir: `${RECORDS}/`, decisionIdPattern: 'D\\d+' } : {}),
+    ...(keys ? { decisionsDir: `${RECORDS}/`, decisionIdPattern: idPattern } : {}),
     ...(mapPaths ? { mapPaths } : {}),
   };
   writeIn(dir, CONFIG, `${JSON.stringify(cfg, null, 2)}\n`);
@@ -284,6 +292,85 @@ test('N17. a notes.md directly in decisionsDir is no record: a file only it name
   assert.equal(verdictOf(out, 'MAP1'), 'PASS', `MAP1 must pass: a notes.md in the decisions folder is no record\n${tail(out)}`);
 });
 
+// A slug-style id: the pattern accepts `README` and `notes` as ids, so only the record readers' skip stops either one naming a record.
+const SLUG_ID = '[A-Za-z][A-Za-z0-9-]*';
+
+/** A README.md and a notes.md in the decisions folder, the files a record reader must skip. */
+const addNonRecords = (dir) => {
+  addFile(dir, `${RECORDS}/README.md`, '# Records\n\nThe index of this folder.\n');
+  addFile(dir, `${RECORDS}/notes.md`, '# Notes\n\nA note, and no record.\n');
+};
+
+test('N18. README and notes are no record: an id of either on a Decisions line names none, and MAP10 fails on each by name', () => {
+  const dir = scratch({ idPattern: SLUG_ID });
+  addNonRecords(dir);
+  setSubLine(dir, MAP, 'src/strings.ts', 'Decisions', ['README', 'notes']);
+  // The scope first: the folder holds notes.md, and the decisions line of the code file holds both ids.
+  assert.ok(existsSync(join(dir, RECORDS, 'notes.md')), 'scope: the decisions folder holds notes.md');
+  assert.deepEqual(subLineIds(dir, MAP, 'src/strings.ts', 'Decisions'), ['README', 'notes'], 'scope: the decisions line of src/strings.ts holds README and notes');
+  const out = run([CHECK], dir).out;
+  assert.ok(failed(out, 'MAP10', 'lists README, and no record in docs/records/ names it'), `MAP10 must fail on the id README: no record names it\n${tail(out)}`);
+  assert.ok(failed(out, 'MAP10', 'lists notes, and no record in docs/records/ names it'), `MAP10 must fail on the id notes: no record names it\n${tail(out)}`);
+});
+
+test('N19. map-show README and notes name no record: each exits 1 with nothing on stdout, and no record file is printed', () => {
+  const dir = scratch({ idPattern: SLUG_ID });
+  addNonRecords(dir);
+  setSubLine(dir, MAP, 'src/strings.ts', 'Decisions', ['README', 'notes']);
+  // The scope first: under the slug pattern a real id still prints its citing line, or "no record" holds for a command that printed nothing.
+  const scope = run([SHOW, 'D18'], dir);
+  assert.equal(scope.status, 0, `the real id D18 must exit 0 under the slug pattern\n${tail(scope.out)}`);
+  assert.ok(scope.stdout.includes('src/cache.ts'), `D18 must print the map line of src/cache.ts\n${tail(scope.out)}`);
+  for (const id of ['README', 'notes']) {
+    const r = run([SHOW, id, '--full'], dir);
+    assert.equal(r.status, 1, `${id} names no record, so map-show must exit 1\n${tail(r.out)}`);
+    assert.equal(r.stdout.trim(), '', `${id} names no record, so nothing may print on stdout\n${tail(r.out)}`);
+    assert.equal(r.out.trim(), `no record names ${id} in docs/records/`, `stderr must hold one line: no record names ${id}\n${tail(r.out)}`);
+  }
+});
+
+// The target side of `recordIn`: a folder's README.md and notes.md are no record, so a record that names one asks for no map line.
+test('N21. a record that names README.md or notes.md in decisionsDir asks for no map line: MAP1 passes', () => {
+  const dir = scratch();
+  addFile(dir, `${RECORDS}/README.md`, '# Records\n\nThe index of this folder.\n');
+  addFile(dir, `${RECORDS}/notes.md`, '# Notes\n\nA note, and no record.\n');
+  addFile(dir, `${RECORDS}/D033-index.md`, record('D033 Index', [`${RECORDS}/README.md`, `${RECORDS}/notes.md`]));
+  // The scope first: D033 names both files by their backticked paths, and the map page has no line for either.
+  assert.ok(readIn(dir, `${RECORDS}/D033-index.md`).includes(`\`${RECORDS}/README.md\``), 'scope: D033 names README.md by its backticked path');
+  assert.ok(readIn(dir, `${RECORDS}/D033-index.md`).includes(`\`${RECORDS}/notes.md\``), 'scope: D033 names notes.md by its backticked path');
+  assert.doesNotMatch(readIn(dir, MAP), /README\.md|notes\.md/, 'scope: the map page has no line for either file');
+  const out = run([CHECK], dir).out;
+  assert.equal(verdictOf(out, 'MAP1'), 'PASS', `MAP1 must pass: README.md and notes.md are no record, so a record that names them asks for no map line\n${tail(out)}`);
+});
+
+// The nested side of `recordIn`: only a file directly in decisionsDir is a record, so a record that names a nested file asks for a map line.
+test('N22. a record that names a nested .md under decisionsDir asks for a map line: MAP1 fails and names it', () => {
+  const dir = scratch();
+  const nested = `${RECORDS}/sub/x.md`;
+  addFile(dir, nested, '# A nested note\n\nA file under a sub-folder, and no record.\n');
+  addFile(dir, `${RECORDS}/D034-nested.md`, record('D034 Nested', [nested]));
+  // The scope first: the nested file has no map line, and D034 names it by its backticked path.
+  assert.doesNotMatch(readIn(dir, MAP), /sub\/x\.md/, 'scope: the map page has no line for the nested file');
+  assert.ok(readIn(dir, `${RECORDS}/D034-nested.md`).includes(`\`${nested}\``), 'scope: D034 names the nested file by its backticked path');
+  const out = run([CHECK], dir).out;
+  assert.ok(failed(out, 'MAP1', nested), `MAP1 must fail on the nested file that D034 names: only a file directly in decisionsDir is a record\n${tail(out)}`);
+});
+
+// A file inside the decisions folder that is no record: a decision record names it, so it needs a map line.
+const DIAGRAM = `${RECORDS}/diagram.svg`;
+const DIAGRAM_RECORD = `${RECORDS}/D031-diagram.md`;
+
+test('N20. a tracked .svg inside decisionsDir, and no record, that a decision record names needs a map line: MAP1 fails and names it', () => {
+  const dir = scratch();
+  addFile(dir, DIAGRAM, SVG);
+  addFile(dir, DIAGRAM_RECORD, record('D031 Diagram', [DIAGRAM]));
+  // The scope first: the svg has no map line, and D031 names it by its backticked path.
+  assert.doesNotMatch(readIn(dir, MAP), /diagram\.svg/, 'scope: the map page has no line for the svg');
+  assert.ok(readIn(dir, DIAGRAM_RECORD).includes(`\`${DIAGRAM}\``), 'scope: D031 names the svg by its backticked path');
+  const out = run([CHECK], dir).out;
+  assert.ok(failed(out, 'MAP1', DIAGRAM), `MAP1 must fail on the svg inside the decisions folder that D031 names, with no map line\n${tail(out)}`);
+});
+
 // ---- Debt records: a non-code file that a debt record names needs a map line, and the debt's slug on a Debts line.
 
 test('DB1. a .svg that a debt record names needs a map line: MAP1 fails and names the file', () => {
@@ -400,4 +487,44 @@ test('DB11. full size: two debt records name one .svg, and its map line must hol
   assert.deepEqual(subLineIds(dir, MAP, SVG_PATH, 'Debts'), ['retry-backoff'], 'scope: the Debts line holds retry-backoff only');
   const out = run([CHECK], dir).out;
   assert.ok(failLines(out).some((l) => l.includes(SVG_PATH) && l.includes('cache-warm')), `a check must fail naming the .svg and the missing slug cache-warm\n${tail(out)}`);
+});
+
+test('DB12. a tracked .svg inside the debts folder, and no debt, that a debt record names needs a map line: MAP1 fails and names it', () => {
+  const dir = scratch();
+  const debts = debtsDirOf(dir);
+  const svg = `${debts}/diagram.svg`;
+  addFile(dir, svg, SVG);
+  addFile(dir, `${debts}/retry-backoff.md`, record('Retry backoff', [svg]));
+  // The scope first: the svg has no map line, and the debt names it by its backticked path.
+  assert.ok(!readIn(dir, MAP).includes(`\`${svg}\``), 'scope: the map page has no line for the svg');
+  assert.ok(readIn(dir, `${debts}/retry-backoff.md`).includes(`\`${svg}\``), 'scope: retry-backoff names the svg by its backticked path');
+  const out = run([CHECK], dir).out;
+  assert.ok(failed(out, 'MAP1', svg), `MAP1 must fail on the svg inside the debts folder that retry-backoff names, with no map line\n${tail(out)}`);
+});
+
+test('DB13. a debt that names README.md or notes.md in the debts folder asks for no map line: MAP1 passes', () => {
+  const dir = scratch();
+  const debts = debtsDirOf(dir);
+  addFile(dir, `${debts}/README.md`, '# Debts\n\nThe index of this folder.\n');
+  addFile(dir, `${debts}/notes.md`, '# Notes\n\nA note, and no debt.\n');
+  addFile(dir, `${debts}/retry-backoff.md`, record('Retry backoff', [`${debts}/README.md`, `${debts}/notes.md`]));
+  // The scope first: retry-backoff names both files by their backticked paths, and the map page has no line for either.
+  assert.ok(readIn(dir, `${debts}/retry-backoff.md`).includes(`\`${debts}/README.md\``), 'scope: retry-backoff names README.md by its backticked path');
+  assert.ok(readIn(dir, `${debts}/retry-backoff.md`).includes(`\`${debts}/notes.md\``), 'scope: retry-backoff names notes.md by its backticked path');
+  assert.doesNotMatch(readIn(dir, MAP), /README\.md|notes\.md/, 'scope: the map page has no line for either file');
+  const out = run([CHECK], dir).out;
+  assert.equal(verdictOf(out, 'MAP1'), 'PASS', `MAP1 must pass: README.md and notes.md in the debts folder are no record, so a debt that names them asks for no map line\n${tail(out)}`);
+});
+
+test('DB14. a debt that names a nested .md under the debts folder asks for a map line: MAP1 fails and names it', () => {
+  const dir = scratch();
+  const debts = debtsDirOf(dir);
+  const nested = `${debts}/sub/x.md`;
+  addFile(dir, nested, '# A nested note\n\nA file under a sub-folder, and no debt.\n');
+  addFile(dir, `${debts}/retry-backoff.md`, record('Retry backoff', [nested]));
+  // The scope first: the nested file has no map line, and retry-backoff names it by its backticked path.
+  assert.doesNotMatch(readIn(dir, MAP), /sub\/x\.md/, 'scope: the map page has no line for the nested file');
+  assert.ok(readIn(dir, `${debts}/retry-backoff.md`).includes(`\`${nested}\``), 'scope: retry-backoff names the nested file by its backticked path');
+  const out = run([CHECK], dir).out;
+  assert.ok(failed(out, 'MAP1', nested), `MAP1 must fail on the nested file that retry-backoff names: only a file directly in the debts folder is a debt\n${tail(out)}`);
 });
