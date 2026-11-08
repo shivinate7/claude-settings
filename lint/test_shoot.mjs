@@ -606,6 +606,84 @@ test("control: a 1440 shot has no touch, so the PNG shows the fine-pointer colou
   assert.match(page, /<nav id="phone-nav" class="touch-only" hidden="">/, "1440 px: the coarse-only element should be marked hidden in the .html");
 });
 
+// ---- touchWidths: a repo lists its own touch widths, and the list replaces the width-under-1024 default ----
+// One shared run per list (building-one-home-per-capability). Each case reads its own shots from it and
+// asserts the scope (width, then height) before the claim.
+const TOUCH_LIST = { routes: [{ name: "touch", path: "/touch.html" }], sizes: [1440, 390], themes: ["light"], touchWidths: [1440] };
+let touchListShots;
+const shotsForTouchList = () => (touchListShots ??= run(TOUCH_LIST));
+
+test("touchWidths [1440]: the 1440 shot is coarse, so its PNG's spacer is the coarse colour", async (t) => {
+  const b = await chromium(t);
+  if (!b) return;
+  const r = await shotsForTouchList();
+  assert.equal(r.code, 0, r.out);
+  const px = await pixels(b, path.join(r.dir, "touch-1440-light.png"));
+  assert.equal(px.width, 1440, "scope: the shot is at 1440");
+  assert.equal(px.height, 2900, "scope: the PNG is the full page");
+  assert.equal(px.column, "G@0 Y@850 R@900", "1440 px is listed in touchWidths, so touch should be on (the spacer is the coarse colour)");
+});
+
+test("touchWidths [1440]: the 1440 .html does not mark the coarse-only element hidden", async (t) => {
+  if (!(await chromium(t))) return;
+  const r = await shotsForTouchList();
+  assert.equal(r.code, 0, r.out);
+  const page = html(r, "touch-1440-light");
+  assert.match(page, /<nav id="phone-nav"/, "scope: the coarse-only element is in the .html");
+  assert.doesNotMatch(page, /<nav id="phone-nav"[^>]*\bhidden\b/, "1440 px is listed in touchWidths, but the .html marks the coarse-only element hidden: the page was computed without touch");
+});
+
+test("touchWidths [1440]: the 390 shot is not coarse, so the list replaces the width-under-1024 default", async (t) => {
+  const b = await chromium(t);
+  if (!b) return;
+  const r = await shotsForTouchList();
+  assert.equal(r.code, 0, r.out);
+  const px = await pixels(b, path.join(r.dir, "touch-390-light.png"));
+  assert.equal(px.width, 390, "scope: the shot is at 390");
+  assert.equal(px.column, "G@0 Y@850 B@900", "390 px is not listed in touchWidths, so touch should be off (the spacer is the fine-pointer colour)");
+});
+
+test("touchWidths [1440]: the 390 .html marks the coarse-only element hidden, since 390 is not listed", async (t) => {
+  if (!(await chromium(t))) return;
+  const r = await shotsForTouchList();
+  assert.equal(r.code, 0, r.out);
+  const page = html(r, "touch-390-light");
+  assert.match(page, /<nav id="phone-nav"/, "scope: the coarse-only element is in the .html");
+  assert.match(page, /<nav id="phone-nav" class="touch-only" hidden="">/, "390 px is not listed in touchWidths, so the coarse-only element should be marked hidden in the .html");
+});
+
+const TOUCH_EMPTY = { routes: [{ name: "touch", path: "/touch.html" }], sizes: [390, 1440], themes: ["light"], touchWidths: [] };
+let touchEmptyShots;
+const shotsForTouchEmpty = () => (touchEmptyShots ??= run(TOUCH_EMPTY));
+
+test("touchWidths []: the 390 shot is not coarse, so no size gets touch", async (t) => {
+  const b = await chromium(t);
+  if (!b) return;
+  const r = await shotsForTouchEmpty();
+  assert.equal(r.code, 0, r.out);
+  const px = await pixels(b, path.join(r.dir, "touch-390-light.png"));
+  assert.equal(px.width, 390, "scope: the shot is at 390");
+  assert.equal(px.column, "G@0 Y@850 B@900", "390 px: touchWidths is empty, so touch should be off (the width-under-1024 default does not apply)");
+});
+
+test("control: touchWidths []: the 1440 shot is not coarse either", async (t) => {
+  const b = await chromium(t);
+  if (!b) return;
+  const r = await shotsForTouchEmpty();
+  assert.equal(r.code, 0, r.out);
+  const px = await pixels(b, path.join(r.dir, "touch-1440-light.png"));
+  assert.equal(px.width, 1440, "scope: the shot is at 1440");
+  assert.equal(px.column, "G@0 Y@850 B@900", "1440 px: touchWidths is empty, so touch should be off");
+});
+
+test("touchWidths lists a width that is not in sizes: not a config error, and no shot is made at it", async (t) => {
+  if (!(await chromium(t))) return;
+  const r = await run({ routes: [{ name: "touch", path: "/touch.html" }], sizes: [390], themes: ["light"], touchWidths: [1440] });
+  assert.equal(r.code, 0, r.out);
+  assert.match(r.out, /shoot: PASS 1 shots, 0 failed, out=/);
+  assert.deepEqual(r.pngs, ["touch-390-light.png"]);
+});
+
 test("a page shorter than one viewport: the full-page PNG is one viewport tall, not shorter", async (t) => {
   const b = await chromium(t);
   if (!b) return;
@@ -899,10 +977,22 @@ const STORAGE_BAD = [
   ["a good value, then a bad one", { a: "x", b: 2 }],
 ];
 const HTTPS_BAD = [["a string", "yes"], ["the string true", "true"], ["the number 1", 1], ["the number 0", 0], ["a list", []], ["an object", {}]];
+const TOUCH_WIDTHS_BAD = [
+  ["a number", 1440],
+  ["a string", "1440"],
+  ["an object", { w: 1440 }],
+  ["a list holding a fraction", [1.5]],
+  ["a list holding a string", ["390"]],
+  ["a list holding null", [null]],
+  ["a list holding 0", [0]],
+  ["a list holding a negative width", [-390]],
+  ["a good width, then 0", [1440, 0]],
+];
 const REFUSED = [
   ...STEPS_BAD.map(([label, v]) => [`steps: ${label}`, /step|state|click|wait/i, route({ steps: v })]),
   ...STORAGE_BAD.map(([label, v]) => [label, /localStorage/i, route({ localStorage: v })]),
   ...HTTPS_BAD.map(([label, v]) => [`ignoreHTTPSErrors is ${label}`, /ignoreHTTPSErrors/i, { ...route({}), ignoreHTTPSErrors: v }]),
+  ...TOUCH_WIDTHS_BAD.map(([label, v]) => [`touchWidths is ${label}`, /touchWidths/, { ...route({}), touchWidths: v }]),
 ];
 for (const [label, key, cfg] of REFUSED) {
   test(`config refused: ${label}`, async () => {
