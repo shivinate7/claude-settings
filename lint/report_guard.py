@@ -881,8 +881,14 @@ def departs_problem(text):
 # so a negator that governs an earlier verb ("I did not run the check and broke it") does not.
 # `step:<slug>` is checked for form only.
 MISTAKE_FIRST_PERSON_RE = re.compile(r"\bI\b|\b[Mm]y\b")
+# "broke the batch into three lanes" splits a thing and admits nothing: "into" is followed by a count or a
+# parts noun. "broke the build into a red state" still admits. The words between may hold no "by", "when"
+# or the like, so "broke main by merging into it" still admits.
+_BROKE_INTO = (r"(?!\s+(?:(?!by\b|when\b|after\b|and\b|then\b|before\b|if\b|so\b)\w+\s+){0,3}into\s+"
+               r"(?:\d+|two|three|four|five|six|seven|eight|nine|ten|several|multiple|smaller|separate|parts?"
+               r"|chunks?|lanes?|steps?|stages?|phases?|tasks?|commits?|batch(?:es)?|prs?)\b)")
 MISTAKE_FAULT_RE = re.compile(
-    r"\b(?:wrong(?:ly)?|mistaken(?:ly)?|mistakes?|by accident|accidental(?:ly)?|broke|clobbered|overwrote|"
+    r"\b(?:wrong(?:ly)?|mistaken(?:ly)?|mistakes?|by accident|accidental(?:ly)?|broke" + _BROKE_INTO + r"|clobbered|overwrote|"
     r"misread|forgot|trusted (?:a stale|an old|an outdated)|"
     r"instead of checking)\b", re.I)
 MISTAKE_NEGATOR_RE = re.compile(r"\bnot\b|n't\b|\bnever\b|\bno\b|\bnothing\b", re.I)
