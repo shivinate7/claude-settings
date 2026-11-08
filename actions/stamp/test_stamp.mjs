@@ -1805,15 +1805,18 @@ const HANG_KIND = "STAMP_SUITE_HANG_KIND"; // "hold", "orphan" or "escape", as h
 
 // node -e code, by kind. "hold": the child holds the pipe and the command sleeps too. "orphan": the
 // command exits, so the child holds the pipe and its parent pid names a dead process. "escape": the
-// child is detached with no pipe, and the command exits 0, so nothing waits on the child. Both pids
-// go to pidFile first. Both command lines carry pidFile raw, in a comment, so a check can tell them
-// from a reused pid. JSON.stringify doubles a Windows backslash, so a quoted copy alone would not match.
+// child is detached with no pipe, and the command exits 0, so nothing waits on the child. "grace": as
+// escape, but the child exits 2 s later, inside the watchdog's 3 s grace. "clean": no child at all. Both
+// pids go to pidFile first; a clean run writes its own pid twice. Both command lines carry pidFile raw,
+// in a comment, so a check can tell them from a reused pid. JSON.stringify doubles a Windows backslash,
+// so a quoted copy alone would not match.
 function hangCommand(pidFile, kind) {
-  const sleeper = `setInterval(() => {}, 1e9); // ${pidFile}`;
-  const escape = kind === "escape";
+  const escape = kind === "escape" || kind === "grace";
+  const sleeper = kind === "grace" ? `setTimeout(() => {}, 2000); // ${pidFile}` : `setInterval(() => {}, 1e9); // ${pidFile}`;
   const spawnOpts = escape ? `{ detached: true, stdio: "ignore" }` : `{ stdio: "inherit" }`;
-  return `const c = require("child_process").spawn(process.execPath, ["-e", ${JSON.stringify(sleeper)}], ${spawnOpts});
-${escape ? "c.unref();\n" : ""}require("fs").writeFileSync(${JSON.stringify(pidFile)}, process.pid + " " + c.pid);
+  const start = kind === "clean" ? "const c = { pid: process.pid };\n"
+    : `const c = require("child_process").spawn(process.execPath, ["-e", ${JSON.stringify(sleeper)}], ${spawnOpts});\n${escape ? "c.unref();\n" : ""}`;
+  return `${start}require("fs").writeFileSync(${JSON.stringify(pidFile)}, process.pid + " " + c.pid);
 ${kind === "hold" ? "setInterval(() => {}, 1e9);" : "process.exit(0);"}
 // ${pidFile}`;
 }
@@ -1831,8 +1834,15 @@ test("watchdog: the Windows orphan sweep runs only in CI or with STAMP_SUITE_SWE
   assert.equal(sweepAllowed(false, { STAMP_SUITE_SWEEP: "1" }), true);
 });
 
+const hangLabels = {
+  hold: "a command's child holds its pipe and sleeps forever",
+  orphan: "a command's child holds its pipe and sleeps forever",
+  escape: "a command's detached child outlives it, holding no pipe",
+  grace: "a command's detached child exits inside the grace, holding no pipe",
+  clean: "a command that exits fast and leaves nothing",
+};
 const hangFixture = (kind) => ({
-  name: `hang fixture (${kind}): ${kind === "escape" ? "a command's detached child outlives it, holding no pipe" : "a command's child holds its pipe and sleeps forever"}`,
+  name: `hang fixture (${kind}): ${hangLabels[kind]}`,
   fn: () => { shSync(process.execPath, ["-e", hangCommand(process.env[HANG], kind)]); },
 });
 
@@ -1910,7 +1920,7 @@ for (const kind of ["hold", "orphan"]) {
       if (orphanEndsOnItsOwn(kind)) {
         assert.equal(r.status, 1, out);
         assert.match(out, /ok - hang fixture \(orphan\)/, out);
-        assert.match(out, /FAIL - the suite left processes running:/, out);
+        assert.match(out, new RegExp(`\\b${found.pids[1]}\\b`), `the suite did not name the leftover orphan pid ${found.pids[1]}\n${out}`);
         assert.deepEqual(found.left, [], `still running: ${found.left}\n${out}`);
         return;
       }
@@ -1971,6 +1981,79 @@ test("watchdog: a detached process the suite started, holding no pipe, is named,
     assert.match(out, new RegExp(`\\b${found.pids[1]}\\b`), `the suite's output does not name the leftover sleeper pid ${found.pids[1]}\n${out}`);
     assert.deepEqual(found.left, [], `the sleeper is still running after the suite ended: ${found.left}\n${out}`);
   }));
+
+// Round 2. A run that leaves nothing, and a process that exits inside the grace, both end green: they
+// guard against a false alarm, a leftover that is not one. Both read the hang fixture's pid file, so the
+// watchdog arms on it as it does for the other fixtures. A file, not a pipe, takes the output.
+function watchdogRun(env, dir) {
+  const outFile = join(dir, "out.txt");
+  const fd = openSync(outFile, "w");
+  let r;
+  try {
+    r = shSync(process.execPath, [SELF], { env, stdio: ["ignore", fd, fd], timeout: 120_000 });
+  } finally {
+    closeSync(fd);
+  }
+  return { status: r.status, out: readFileSync(outFile, "utf8") };
+}
+
+test("watchdog: a command that exits fast and leaves nothing exits 0 and names no leftover", () =>
+  withTempDir((dir) => {
+    const pidFile = join(dir, "pids");
+    const env = { ...process.env, STAMP_SUITE_CAP_S: "20", STAMP_SUITE_SWEEP: "1", [HANG]: pidFile, [HANG_KIND]: "clean" };
+    delete env[CHILD];
+    let r, found;
+    try {
+      r = watchdogRun(env, dir);
+    } finally {
+      found = leftovers(pidFile);
+    }
+    assert.equal(found.pids.length, 2, r.out); // scope: the fixture ran and wrote its pids
+    assert.match(r.out, /ok - hang fixture \(clean\)/, r.out);
+    assert.equal(r.status, 0, r.out);
+    assert.doesNotMatch(r.out, /left processes running|Still running after the kill/, r.out);
+    assert.deepEqual(found.left, [], `still running: ${found.left}\n${r.out}`);
+  }));
+
+test("watchdog: a detached child that exits inside the 3 s grace is no leftover, so the run exits 0", () =>
+  withTempDir((dir) => {
+    const pidFile = join(dir, "pids");
+    const env = { ...process.env, STAMP_SUITE_CAP_S: "20", STAMP_SUITE_SWEEP: "1", [HANG]: pidFile, [HANG_KIND]: "grace" };
+    delete env[CHILD];
+    let r, found;
+    try {
+      r = watchdogRun(env, dir);
+    } finally {
+      found = leftovers(pidFile);
+    }
+    assert.equal(found.pids.length, 2, r.out); // scope: the fixture ran, and its child was started
+    assert.match(r.out, /ok - hang fixture \(grace\)/, r.out);
+    assert.equal(r.status, 0, r.out);
+    assert.doesNotMatch(r.out, /left processes running|Still running after the kill/, r.out);
+    assert.deepEqual(found.left, [], `still running: ${found.left}\n${r.out}`);
+  }));
+
+// Windows only: the Job Object is the kill guarantee there. On CI a run without one must fail by name,
+// not pass on the tree walk alone. STAMP_SUITE_NO_JOB=1 makes the job assignment fail: the builder must
+// honour it. GITHUB_ACTIONS=true is the CI flag the watchdog reads. Windows red: unmeasured. On Linux
+// this case returns at once, so its ok line is no evidence of anything.
+test("watchdog, CI on Windows: no Job Object fails the run with a line starting FAIL - no job object", () => {
+  if (POSIX) return;
+  withTempDir((dir) => {
+    const pidFile = join(dir, "pids");
+    const env = { ...process.env, GITHUB_ACTIONS: "true", STAMP_SUITE_NO_JOB: "1", STAMP_SUITE_CAP_S: "60",
+      [HANG]: pidFile, [HANG_KIND]: "clean" };
+    delete env[CHILD];
+    let r;
+    try {
+      r = watchdogRun(env, dir);
+    } finally {
+      leftovers(pidFile); // reaps anything the run left, so nothing outlives the test
+    }
+    assert.equal(r.status, 1, r.out);
+    assert.match(r.out, /^FAIL - no job object/m, r.out);
+  });
+});
 
 // ---------------------------------------------------------------- run
 // LIST_TESTS=1 prints each registered name as `LISTED <JSON>` and exits before any test body runs.
