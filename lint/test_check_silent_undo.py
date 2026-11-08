@@ -2835,6 +2835,21 @@ class LostSentence(unittest.TestCase):
                 "elapsed time uses a synthetic clock).")
     ORDER_NEW = ("- find-time-pinned-doc-order: the finder prints its rows in file order, so a diff reads top to bottom. "
                  "Decision: test-practices (P5).")
+    # A split, a move of a clause into an existing note, and a retire beside a sibling that keeps one sentence of it.
+    SPLIT_SRC = "- split-src: Clause alpha reads fake timers on each run. Clause beta lists the calendar rows for triage."
+    SPLIT_A = "- split-a: Clause alpha reads fake timers on each run."
+    SPLIT_B = "- split-b: The finder reports the calendar rows the triage step needs."
+    SPLIT_B_VERBATIM = "- split-b: Clause beta lists the calendar rows for triage."
+    MOVED_SRC = "- moved-src: Clause one reads fake timers on each run. Clause two lists the calendar rows for triage."
+    MOVED_TO = "- existing-e: The finder lists calendar reads in the sweep. Decision: test-practices (P5)."
+    MOVED_TO_NEW = ("- existing-e: The finder lists calendar reads in the sweep. Clause two lists the calendar rows for triage. "
+                    "Decision: test-practices (P5).")
+    MOVED_RENAMED_A = "- renamed-a: Clause one reads fake timers on each run."
+    MOVED_RENAMED_B = "- renamed-b: Clause two lists the calendar rows for triage."
+    RETIRE_X = "- retire-x: The sleep scan reads fake timers the same way. The finder lists each calendar read once."
+    RETIRE_X_SIBLING = "- sibling-x: The sleep scan reads fake timers the same way. Decision: test-practices (P5)."
+    RETIRE_X_READD = "- retire-x: The sleep scan reads fake timers the same way."
+    RETIRE_X_TRAILER = "Drops-lines: docs/debts/notes.md -- the calendar-read sentence is retired - retire-x"
 
     def start(self, lines):
         """The notes file holds the filler and `lines` on main, then an unrelated main commit, so the fork point is that commit and
@@ -3107,6 +3122,89 @@ class LostSentence(unittest.TestCase):
                 self.assertNotIn("- <slug>", lines[0],
                                  "the footer %s prints for a plain lost line outside the notes path gives the `- <slug>` form: %r"
                                  % (surface, lines[0]))
+
+    def test_a_split_whose_second_part_is_reworded_passes(self):
+        self.start([self.SPLIT_SRC])
+        head = self.rewrite("Split the split-src note", [self.SPLIT_A, self.SPLIT_B])
+        self.assertIn(self.SPLIT_SRC, self.notes_at("main"), "premise: main does not hold split-src")
+        self.assertEqual(sum(line.startswith("- split-src:") for line in self.body(head)), 0, "premise: the head holds split-src")
+        self.assertNotIn("split-src", "\n".join(self.body(head)), "premise: the head names split-src")
+        self.assertNotIn("Clause beta lists the calendar rows for triage.", "\n".join(self.body(head)),
+                         "premise: the head holds clause beta verbatim")
+        self.assertEqual(sum(line.startswith("- split-a:") for line in self.body(head)), 1, "premise: the head does not hold split-a once")
+        self.assertEqual(sum(line.startswith("- split-b:") for line in self.body(head)), 1, "premise: the head does not hold split-b once")
+        got = self.r.verdict()
+        self.assertEqual(got, [], "a split whose second part rewords a clause was refused as a drop: %r" % got)
+
+    def test_a_split_whose_second_part_keeps_its_clause_verbatim_passes(self):  # control: the split above with split-b verbatim
+        self.start([self.SPLIT_SRC])
+        head = self.rewrite("Split the split-src note", [self.SPLIT_A, self.SPLIT_B_VERBATIM])
+        self.assertIn(self.SPLIT_SRC, self.notes_at("main"), "premise: main does not hold split-src")
+        self.assertNotIn("split-src", "\n".join(self.body(head)), "premise: the head names split-src")
+        self.assertIn("Clause beta lists the calendar rows for triage.", "\n".join(self.body(head)), "premise: the head lost clause beta")
+        got = self.r.verdict()
+        self.assertEqual(got, [], "a split with each clause kept verbatim was refused as a drop: %r" % got)
+
+    def test_a_clause_moved_verbatim_into_an_existing_note_that_does_not_name_the_old_slug_passes(self):
+        self.start([self.MOVED_SRC, self.MOVED_TO])
+        head = self.rewrite("Rename moved-src to renamed-a and move its second clause into existing-e",
+                            [self.MOVED_RENAMED_A, self.MOVED_TO_NEW])
+        self.assertIn(self.MOVED_SRC, self.notes_at("main"), "premise: main does not hold moved-src")
+        self.assertIn(self.MOVED_TO, self.notes_at("main"), "premise: main does not hold existing-e")
+        self.assertEqual(sum(line.startswith("- moved-src:") for line in self.body(head)), 0, "premise: the head holds moved-src")
+        self.assertNotIn("moved-src", "\n".join(self.body(head)), "premise: the head names moved-src")
+        self.assertEqual(sum(line.startswith("- renamed-a:") for line in self.body(head)), 1, "premise: the head does not hold renamed-a once")
+        existing = [line for line in self.body(head) if line.startswith("- existing-e:")]
+        self.assertEqual(len(existing), 1, "premise: the head does not hold existing-e once")
+        self.assertIn("Clause two lists the calendar rows for triage.", existing[0], "premise: existing-e does not hold clause two")
+        got = self.r.verdict()
+        self.assertEqual(got, [], "a clause moved verbatim into an existing note was refused as a drop: %r" % got)
+
+    def test_a_clause_moved_verbatim_into_a_new_note_passes(self):  # control: the same move into a note the commit adds
+        self.start([self.MOVED_SRC, self.MOVED_TO])
+        head = self.rewrite("Split moved-src into two new notes", [self.MOVED_RENAMED_A, self.MOVED_RENAMED_B, self.MOVED_TO])
+        self.assertIn(self.MOVED_SRC, self.notes_at("main"), "premise: main does not hold moved-src")
+        self.assertNotIn("moved-src", "\n".join(self.body(head)), "premise: the head names moved-src")
+        self.assertEqual(sum(line.startswith("- renamed-b:") for line in self.body(head)), 1, "premise: the head does not hold renamed-b once")
+        self.assertIn(self.MOVED_TO, self.body(head), "premise: existing-e changed")
+        got = self.r.verdict()
+        self.assertEqual(got, [], "a clause moved verbatim into a new note was refused as a drop: %r" % got)
+
+    def test_a_retire_beside_a_sibling_that_keeps_the_first_sentence_is_refused_and_names_the_dropped_sentence(self):
+        # pins the ruling: a sibling that keeps one sentence of a retired note does not excuse the sentence it drops
+        self.start([self.RETIRE_X])
+        head = self.rewrite("Retire retire-x beside a sibling note", [self.RETIRE_X_SIBLING])
+        self.assertIn(self.RETIRE_X, self.notes_at("main"), "premise: main does not hold retire-x")
+        self.assertEqual(sum(line.startswith("- retire-x:") for line in self.body(head)), 0, "premise: the head holds retire-x")
+        self.assertEqual(sum(line.startswith("- sibling-x:") for line in self.body(head)), 1, "premise: the head does not hold sibling-x once")
+        self.assertNotIn("finder lists each calendar read once", "\n".join(self.body(head)), "premise: the head holds the dropped sentence")
+        got = self.r.verdict()
+        self.assertTrue(self.named(got, "retire-x", "finder lists each calendar read once"),
+                        "a retire beside a sibling that dropped the second sentence of retire-x was not refused by a problem that names "
+                        "both: %r" % got)
+
+    def test_the_same_retire_under_a_trailer_naming_the_slug_passes(self):
+        # pins the ruling: a Drops-lines reason that names the retired slug as `- <slug>` excuses the dropped sentence
+        self.start([self.RETIRE_X])
+        head = self.rewrite("Retire retire-x beside a sibling note\n\n%s" % self.RETIRE_X_TRAILER, [self.RETIRE_X_SIBLING])
+        self.assertIn(self.RETIRE_X, self.notes_at("main"), "premise: main does not hold retire-x")
+        self.assertEqual(sum(line.startswith("- retire-x:") for line in self.body(head)), 0, "premise: the head holds retire-x")
+        self.assertIn(self.RETIRE_X_TRAILER, self.r.sh("log", "-1", "--format=%B", head).splitlines(), "premise: no Drops-lines trailer")
+        got = self.r.verdict()
+        self.assertEqual(got, [], "a retire beside a sibling under a trailer naming the slug was refused: %r" % got)
+
+    def test_a_retired_slug_re_added_later_with_a_sentence_dropped_is_refused_and_names_it(self):
+        # pins the ruling: a retired slug that comes back in a later commit is judged against main, as a rewrite
+        self.start([self.RETIRE_X])
+        self.rewrite("Retire retire-x", [])
+        head = self.rewrite("Re-add retire-x with its second sentence dropped", [self.RETIRE_X_READD])
+        self.assertEqual(len(self.r.sh("rev-list", "--no-merges", "origin/main..%s" % head).split()), 2,
+                         "premise: the range is not two non-merge commits")
+        self.premises(head, self.RETIRE_X, "retire-x", "finder lists each calendar read once")
+        got = self.r.verdict()
+        self.assertTrue(self.named(got, "retire-x", "finder lists each calendar read once"),
+                        "a retired slug re-added with its second sentence dropped was not refused by a problem that names the slug "
+                        "and the dropped sentence: %r" % got)
 
 
 if __name__ == "__main__":
