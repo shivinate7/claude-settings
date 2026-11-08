@@ -26,6 +26,10 @@
                           read from the PR's issue comments since the PR opened. A chained fix check (after a PASS) on a record whose last
                           round is 3 must carry that record's Net value.
                           --fix-base-record names a record comment on another PR of this repo to stand in when this PR has none of its own.
+                          Every Round line below the record's top round must already stand, with the same round, role, model and verdict, in an
+                          earlier record on this PR (or the --fix-base-record source), or it refuses (exit 2). So does a top round that is all
+                          PASS when an earlier record whose top round has a FAIL line has the same Head. A plain record with a top round of 2
+                          or more makes one more comment-list read; a fix check makes none.
   merge --reviewed        one line per open PR that has a review record comment, with its state (bad when the newest does not parse) and its
                           live CI; then the PRs with no record.
   merge --lane-lint <pr|ref> [--base BRANCH] [--lint-unknown-ok "REASON"]
@@ -120,6 +124,8 @@ FIX_CHAIN_CAP = 2  # a chain holds at most this many fix checks; the next change
 FIX_WIDE_REMEDY = "Start a new lane at round 1."
 FIX_MISSING_REMEDY = "Post the round's review record first."
 FIX_FINAL_FAIL_REMEDY = "This FAIL holds the change: its finding starts a new lane at round 1."
+FIX_OWN_ROUNDS_REMEDY = "Post each round's review record while its head is live; for a replacement pull request, name the earlier record with --fix-base-record."
+FIX_SAME_HEAD_REMEDY = "Push a fix commit, review the new head, then post the passing record for that head."
 FIX_DROPPED_REMEDY = "Copy every Round line of that record unchanged and in its order, then add the new lines after them."
 REVIEW_CITE = "(decision pr-review-record, a review record names the head it reviewed and only an open pull request takes one)"
 OFF_CITE = "(decision standing-merge-grant, the owner's grant for a repo decides whether a session merges there)"
@@ -3342,6 +3348,27 @@ def dropped_round_lines(last, rec):
     if lost:
         return f"this record drops or reorders {'; '.join(lost)} of the record on head {last['head'][:9]}", FIX_DROPPED_REMEDY
 
+def own_round_problem(earlier, rec):
+    """-> (why, remedy), when the parsed record `rec` writes rounds it did not earn on its own heads; else None. `earlier` is the parsed records of this
+    pull request, oldest first, or the one source record a --fix-base-record names (a record that did not parse is already dropped).
+    Rule 1: every Round line below the top round of `rec` must already stand, with the same round number, role, model and verdict, in a record of
+    `earlier`; the first line that does not is named. Rule 2: a record whose top round is all PASS is refused when a record of `earlier`
+    whose top round has a FAIL line has the same Head, since no fix commit came between the two. A fix check names a different Head, so it stays
+    allowed. Cost: none beyond the comment list the caller already read. The --fix-check path adds no read. The plain path adds one `review_comments`
+    read, and only for a record whose top round is 2 or more."""
+    top = max((i for i, *_ in rec["rounds"]), default=0)
+    held = {line for e in earlier for line in e["rounds"]}
+    for line in rec["rounds"]:
+        if line[0] < top and line not in held:
+            other = next((l for e in earlier for l in e["rounds"] if l[:2] == line[:2]), None)  # an earlier line of the same round and role, so a changed model or verdict shows what was held
+            why = "this record's lower round line is in no earlier review record of this pull request: Round {}: {}, {}, {}".format(*line)
+            return why + (". An earlier record holds Round {}: {}, {}, {}".format(*other) if other else ""), FIX_OWN_ROUNDS_REMEDY
+    if rec["rounds"] and all(v == "PASS" for i, _, _, v in rec["rounds"] if i == top):
+        for e in earlier:
+            e_top = max((i for i, *_ in e["rounds"]), default=0)
+            if e["head"] == rec["head"] and any(i == e_top and v == "FAIL" for i, _, _, v in e["rounds"]):
+                return f"round {top} passes on head {rec['head'][:9]}, where an earlier record's round {e_top} failed, and no fix commit came between them", FIX_SAME_HEAD_REMEDY
+
 def reviewed_lines(h):
     """-> the lines of `merge --reviewed`, built before any is printed so a failed read prints none. Two list reads (the open pull requests, then the
     repo's comments since the oldest one) and, for each ready pull request that has a record, three `gh` calls: the check runs, the commit statuses and
@@ -3655,7 +3682,7 @@ def main(argv, host=None, lock=None):
             if info["head"] != a.head and not open_fail_on_ancestor(h, info["head"], a, info["base"]):  # a push after the review must not relabel the old rounds as current; only an open all-FAIL record may name an ancestor, because it reads open and clears nothing
                 raise Stop(f"the pull request head is {info['head'][:9]}, not the reviewed {a.head[:9]}. Review the new head, then write its record. " + REVIEW_CITE)
             if a.fix_check:  # a fix follows no FAIL or WIDE fix, and the fix diff starts from the Head the newest earlier record reviewed, or from a record-file-only step from it
-                recs = h.review_comments(info.get("created") or "1970-01-01T00:00:00Z").get(a.pr, [])
+                recs = h.review_comments(info.get("created") or "1970-01-01T00:00:00Z").get(a.pr, [])  # the one comment-list read of the fix path, shared with own_round_problem
                 problem, earlier = None, []
                 remedy = FIX_HEAD_REMEDY  # a refusal that is not a head refusal sets its own remedy beside its problem
                 if a.fix_base_record:  # a source record on another pull request stands in for the one this pull request lacks
@@ -3691,6 +3718,8 @@ def main(argv, host=None, lock=None):
                     remedy = FIX_WIDE_REMEDY if held["fix"][3] == "WIDE" else FIX_FINAL_FAIL_REMEDY
                 if not problem:
                     problem, remedy = dropped_round_lines(last, parse_review(review_body(a.pr, a.head, a.kind, a.guard, a.round, a.net_value, fix=a.fix_check))) or (None, remedy)
+                if not problem:
+                    problem, remedy = own_round_problem(earlier, parse_review(review_body(a.pr, a.head, a.kind, a.guard, a.round, a.net_value, fix=a.fix_check))) or (None, remedy)
                 if not problem and last["head"] != a.fix_check[0]:
                     problem, remedy = fix_base_problem(h, root, a.fix_check[0], last["head"])
                 if not problem and last["fix"]:  # a chained fix diff must start inside the live head's history
@@ -3706,6 +3735,15 @@ def main(argv, host=None, lock=None):
                         remedy = FIX_FROZEN_REMEDY
                 if problem:
                     print(f"merge: --fix-check: {problem}. " + (remedy + " " if remedy else "") + REVIEW_CITE, file=sys.stderr)
+                    return 2
+            else:
+                new = parse_review(review_body(a.pr, a.head, a.kind, a.guard, a.round, a.net_value))
+                problem = None
+                if max((i for i, *_ in new["rounds"]), default=0) >= 2:  # a record that ends at round 1 has no lower round and no earlier round to repeat, so it reads no comment
+                    recs = h.review_comments(info.get("created") or "1970-01-01T00:00:00Z").get(a.pr, [])
+                    problem = own_round_problem([r for r in map(parse_review, recs) if r and r["n"] == a.pr], new)
+                if problem:
+                    print(f"merge: {problem[0]}. {problem[1]} " + REVIEW_CITE, file=sys.stderr)
                     return 2
             say(review_body(a.pr, a.head, a.kind, a.guard, a.round, a.net_value, fix=a.fix_check).rstrip("\n"))
             if info["head"] != a.head:

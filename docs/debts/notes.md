@@ -1515,3 +1515,4 @@
 - wide-fix-cleared-by-copy: after a WIDE fix check, a plain copy of the same Round lines and then a fix PASS reads done, so the WIDE's new lane is skipped. It needs a hand-copied record. merge/merge.py `fix_chain_count`. Decision: pr-review-record (the review record).
 - copy-record-new-net-value: a plain copy of a round-3 record may carry a different Net value than the round-3 reviewer gave. merge/merge.py `--review-record`. Decision: hold-unsafe-after-round-3 (net-value hold after round 3).
 - chain-reset-on-any-line-change: the fix-chain count resets on any change in the Round lines, so a hand-added Round line with no new review lifts the cap. merge/merge.py `fix_chain_count`. Decision: pr-review-record (the review record).
+- plain-copy-at-new-head: A plain record that copies an earlier record's top round at a new head names a head no reviewer read; no incident yet (step record-rounds-name-own-head, coordinator 13:16 CST Nov 8).
