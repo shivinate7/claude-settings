@@ -14060,25 +14060,60 @@ unexpected(method + " " + rel)
         self.assertEqual(batch_lines_of(alpha), [], "alpha names a batch line as well as unknown:\n" + out)
         self.assertEqual(batch_lines_of(lines[j:]), ["open batch now: o/bravo #9"], out)
 
-    def test_a_shallow_root_reads_the_batch_line_unknown(self):
-        # The root is a shallow clone of its origin, with #5's head fetched at depth 1 (shallow_clone.make, the one fixture of a cut history). A
-        # containment read over a cut graph cannot be trusted, so the batch line is unknown: #5 is not named, and rc is 1. The root's own lines print.
-        head5 = self.lane_commit(self.alpha, 5)
+    def shallow_root(self, head):
+        """The root `shallow`: a shallow clone of alpha's origin, with `head` fetched at depth 1 (shallow_clone.make, the one fixture of a cut
+        history). The clone must read shallow and hold `head`. -> its path."""
         origin, shallow = os.path.join(os.path.dirname(self.alpha), "origin.git"), os.path.join(os.path.dirname(self.alpha), "shallow")
-        self.assertEqual(shallow_clone.make(origin, shallow, head5), "", "the shallow fixture could not be built")
-        facts = shallow_clone.facts(shallow, head5)
+        self.assertEqual(shallow_clone.make(origin, shallow, head), "", "the shallow fixture could not be built")
+        facts = shallow_clone.facts(shallow, head)
         self.assertTrue(facts["shallow"], f"the fixture is no shallow clone: {facts}")
         self.assertTrue(facts["pin_present"], f"the fixture lacks the pinned head: {facts}")
+        return shallow
+
+    def test_a_shallow_root_is_unshallowed_and_its_batch_line_names_the_done_pr(self):
+        # #5's head is a lane commit on old_main, and main moves on past it. The clone's cut (its depth 1 at main) lies above old_main, so
+        # head5's history is cut too. The batch line's one sha fetch adds --unshallow: the history is read, #5 is named, rc is 0, and the root
+        # reads not shallow afterwards.
+        old_main = self.main_sha(self.alpha)
+        head5 = self.lane_commit(self.alpha, 5, parent=old_main)
+        self.advance_main(self.alpha, self.lane_commit(self.alpha, 4, parent=old_main))
+        shallow = self.shallow_root(head5)
+        cut = subprocess.run(["git", "-C", shallow, "cat-file", "-e", old_main + "^{commit}"], capture_output=True)
+        self.assertNotEqual(cut.returncode, 0, "the clone holds old main, so the cut does not lie below #5's head")
         self.per_root_gh({shallow: self.root_state("o/alpha", pulls=[batch_pull(5, head5)], comments=[record_of(5, head5)],
                                                   check_rows={head5: green()})})
         rc, out, err = self.run_roots("--reviewed", "--root", shallow, hosts=None)
+        self.assertEqual(rc, 0, out + err)
+        block = by_repo(self, out, "o/alpha")["o/alpha"]
+        self.assert_done(block, 5)
+        self.assertEqual(batch_lines_of(block), ["open batch now: o/alpha #5"], "the shallow root's batch line does not name #5:\n" + out)
+        self.assertFalse(shallow_clone.facts(shallow, head5)["shallow"], "the root still reads shallow after the batch line:\n" + out)
+
+    def test_a_shallow_root_whose_shallowness_is_unknown_stops_before_its_fetch(self):
+        # is_shallow reads None: git could not tell whether the root is shallow. The batch line stops before its sha fetch, so it is unknown,
+        # names no pull request, and the root is left as it was: still shallow. #5's own line still prints.
+        head5 = self.lane_commit(self.alpha, 5)
+        shallow = self.shallow_root(head5)
+        self.per_root_gh({shallow: self.root_state("o/alpha", pulls=[batch_pull(5, head5)], comments=[record_of(5, head5)],
+                                                  check_rows={head5: green()})})
+        real_git, calls = merge.git, []
+
+        def counting(cwd, *a, input=None):  # the one git helper of merge.py: each start is one call, with its verb and whether it names a sha
+            calls.append((os.path.realpath(cwd), a[0], any(re.fullmatch(r"[0-9a-f]{40}", x) for x in a[1:])))
+            return real_git(cwd, *a, input=input)
+        import git_reads  # hooks/git_reads.py: the probe merge.py makes is git_reads.is_shallow
+        with unittest.mock.patch.object(git_reads, "is_shallow", lambda where: None), unittest.mock.patch.object(merge, "git", counting):
+            rc, out, err = self.run_roots("--reviewed", "--root", shallow, hosts=None)
         self.assertEqual(rc, 1, out + err)
         lines = out.splitlines()
-        self.assertEqual(batch_lines_of(lines), [], "a batch line names a pull request in a shallow root:\n" + out)
+        self.assertEqual(batch_lines_of(lines), [], "a batch line names a pull request with the probe unknown:\n" + out)
         unknown = [l for l in lines if l.startswith("batch line unknown (")]
         self.assertEqual(len(unknown), 1, "want one `batch line unknown (...)`:\n" + out)
-        self.assertIn("shallow", unknown[0], "the batch line unknown does not name the shallow root:\n" + out)
-        self.assertIn(" done: ", pr_lines(lines, 5)[0], "the root's own lines did not print:\n" + out)
+        self.assertRegex(unknown[0], r"^batch line unknown \(.+\)$", "the unknown line gives no reason:\n" + out)
+        self.assert_done(lines, 5)
+        fetched = [c for c in calls if c[0] == os.path.realpath(shallow) and c[1] == "fetch" and c[2]]
+        self.assertEqual(fetched, [], f"a fetch by sha started with the probe unknown: {calls}")
+        self.assertTrue(shallow_clone.facts(shallow, head5)["shallow"], "the root was changed: it no longer reads shallow:\n" + out)
 
     def stacked_hosts(self, compares=None, draft9=False):
         """alpha: done #5, done #6 stacked on #5 (its base is #5's head branch), and #9, the integration pull request, open with no record."""
