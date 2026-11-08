@@ -672,7 +672,8 @@ class LintMode(unittest.TestCase):
                 if re.match(r"^        uses: \S*actions/(?:ste-lint|code-check|zizmor)\s*$", line):
                     want.append(name)  # a known action: ci-job runs its one home's command in its place
         self.assertGreater(len(want), 20)
-        done = plan_job("checks", "--lint", "--plan", "--base", "origin/main", cwd=os.path.join(HERE, ".."))
+        # --base HEAD: an empty diff, so the selector picks no suite and only the lint steps are planned.
+        done = plan_job("checks", "--lint", "--plan", "--base", "HEAD", cwd=os.path.join(HERE, ".."))
         lines = [ln for ln in done.stdout.splitlines() if ln.startswith("would run ") and not SUMMARY.match(ln)]
         self.assertEqual(len(lines), len(want), done.stdout + done.stderr)
         for expected in want:
@@ -957,6 +958,14 @@ class SuiteSteps(Job):
         rc, lines, out = self.run_job(self.WIRING, args=self.LINT)
         self.assertEqual((rc, by_step(lines)), (1, {"Wiring suite": "FAIL"}),
                          "--lint must read a picked suite that exits 1 as FAIL, and exit 1\n" + out)
+
+    def test_a_changed_suite_that_exits_one_reads_fail_and_the_job_exits_one(self):
+        self.make_repo({"hooks/bridge.py": "V = 1\n", "hooks/test_wiring.py": suite_text(("bridge.py",))},
+                       {"hooks/test_wiring.py": suite_text(("bridge.py",), code=1)})
+        self.assertEqual(self.diff(), ["hooks/test_wiring.py"], "the scope: the diff holds only the suite file")
+        rc, lines, out = self.run_job(self.WIRING, args=self.LINT)
+        self.assertEqual((rc, by_step(lines)), (1, {"Wiring suite": "FAIL"}),
+                         "--lint must run a suite step its own diff changes, and read its exit 1 as FAIL\n" + out)
 
     def test_a_selector_that_cannot_list_the_repository_reads_unknown_and_the_job_exits_two(self):
         self.make_repo({"hooks/bridge.py": "V = 1\n", "hooks/test_wiring.py": suite_text(("bridge.py",))},
