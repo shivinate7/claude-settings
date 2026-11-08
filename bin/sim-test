@@ -43,7 +43,7 @@
 # expires under a live run (coordinator pick, 2026-11-07). A renew that exits 1 means the lease is lost: one stderr line, once, and the run goes on. Any other failed renew is ignored. The take runs in the background and
 # this tool waits on it, so INT and TERM act at once. After the grant of an own-boot take it reads the booted list again, under
 # the lock, and reruns the reuse, cross-role and cap checks before the boot: a simulator a dead holder left booted is
-# reused or refused. A reused device of the slot just granted keeps that lease; one of another slot gets the lease given back and the `--reuse` lease of its own slot. A boot that fails shuts nothing down; a TERM during the boot still
+# reused or refused. A reused device of the slot just granted keeps that lease; one of another slot gets the lease given back and the `--reuse` lease of its own slot. When the grant came from the queueing `--reuse` take and the re-scan finds that Duo shut down, the run gives that lease back and takes an own-boot lease under the load bars before any `simctl boot`, and boots the UDID that take grants. A boot that fails shuts nothing down; a TERM during the boot still
 # records, then shuts it down.
 # Hold (--hold, no xcodebuild): takes the lock and a device as above, prints `sim-test: holding <UDID> as pid <PID> for
 # <S>s` on stdout, and exports SIM_TEST_UDID. --for S is the length: default 300, max 900 (the lease is held for all of
@@ -283,7 +283,8 @@ else
   # Every booted device is a Duo that another pid leases (queued, set by scan): one take waits in queue order for whichever
   # Duo's slot frees first. Otherwise it is an own-boot take.
   lease_args=(--udid)
-  for u in $queued; do lease_args+=(--reuse "$u"); done
+  reuse_take=
+  for u in $queued; do lease_args+=(--reuse "$u"); reuse_take=1; done
   take_lease "${lease_args[@]}"
   if [ -z "$granted" ] || [ "$granted" = none ]; then
     echo "sim-test: no lease was taken (CI, or not macOS), so no simulator is booted. Booted nothing, ran nothing." >&2
@@ -292,6 +293,17 @@ else
   # The wait may have been long: a holder that died can have left its simulator booted. Judge the reuse, cross-role and
   # cap checks again under the lock before the boot. A device that is now reusable is used, and the lease just granted is kept.
   scan
+  if [ -z "$udid" ] && [ -n "$reuse_take" ]; then
+    # The grant came from a --reuse take, which skips the load bars, and its Duo is down: this run now boots. Give that
+    # lease back and take an own-boot lease under the bars (sim-lease holds the grant logic), then judge the checks again.
+    "$(dirname "$0")/sim-lease" give --pid $$
+    take_lease --udid
+    if [ -z "$granted" ] || [ "$granted" = none ]; then
+      echo "sim-test: no lease was taken (CI, or not macOS), so no simulator is booted. Booted nothing, ran nothing." >&2
+      exit 1
+    fi
+    scan
+  fi
   if [ -z "$udid" ]; then
     udid=$granted
     # Marked before the boot: a TERM during the boot runs its trap only after the boot returns, and must still shut this
