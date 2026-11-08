@@ -9916,6 +9916,8 @@ RECORD_BODY_FILES = {"trailing.md": REVIEW_TRAILING, "full-trailing.md": REVIEW_
 FORM_TEXT = ("a line exactly `---`", "footer")
 REVIEW_COMMENT_ID = 4417
 API_EDIT_CMD = "gh api -X PATCH repos/y/x/issues/comments/%d" % REVIEW_COMMENT_ID
+# A well-formed record at the live head with its Stamp line taken out: the shape of a body typed by hand (PR #1512).
+REVIEW_NO_STAMP = "\n".join(line for line in review_record().splitlines() if not line.startswith("Stamp:")) + "\n"
 
 
 def build_record_fixtures():
@@ -10029,6 +10031,12 @@ bash_post("review-record: a record with no Head line is refused, gh pr comment -
           "deny", rule=REVIEW_RULE)
 bash_post("review-record: a record with a 39-digit Head is refused, gh api -f body=",
           "%s -f 'body=%s'" % (API_CMD, REVIEW_SHORT_HEAD), "deny", rule=REVIEW_RULE)
+
+# A record with no Stamp line is refused, through the MCP tool and through gh pr comment. Its refusal names the render command for the pull request.
+mcp_post("review-record: a record with no Stamp line is refused, MCP add_issue_comment", REVIEW_NO_STAMP, "deny",
+         rule=REVIEW_RULE, carries=("merge %d --review-record" % REVIEW_PR,))
+bash_post("review-record: a record with no Stamp line is refused, gh pr comment --body",
+          "%s --body '%s'" % (PR_CMD, REVIEW_NO_STAMP), "deny", rule=REVIEW_RULE, carries=("merge %d --review-record" % REVIEW_PR,))
 
 
 # The form cases. A record is its lines up to the CI line: prose after that line, with no `---`, is refused. The judge sees
@@ -10299,6 +10307,8 @@ def review_fixtures_check():
         return False, "the record for another pull request does not parse as pull request %d" % (REVIEW_PR + 1)
     if form.parse_review(REVIEW_MARKER_TEXT) is not None:
         return False, "a marker-only body parses as a record"
+    if form.parse_review(REVIEW_NO_STAMP) is not None:
+        return False, "a record with no Stamp line parses as a record"
     if form.parse_review(REVIEW_SKIPPED_ROUND) is not None:
         return False, "a record with a skipped round parses as a record"
     full = form.parse_review(REVIEW_FULL)
