@@ -30,7 +30,7 @@ Credentials in a URL, `scheme://user:password@host`, refuse on any host, an IP h
 read as latin-1; only a file with a NUL byte is binary and not scanned, whatever its name. Only the shape counts:
 words such as "token budget" or "password manager" pass. So do a password word with a placeholder, a mask or a plain
 word as its value and only blanks or plain prose after it on its line (a function word, then letter words, with no
-non-function word right after a `,` `;` or and/or/but/is/are),
+non-function word anywhere after a `,` `;` or and/or/but/is/are),
 `PWD=<path>`, a no-reply address and an ssh remote of a public git host.
 A personal fact in plain words passes too. A postal address (street, PO box, "City, ST ZIP") is a shape.
 A doc is written with sorted keys, two-space indent and a final newline, so an unchanged doc is byte-identical. A doc no
