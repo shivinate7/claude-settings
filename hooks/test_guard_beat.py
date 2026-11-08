@@ -22,12 +22,14 @@ import tempfile
 import types
 import unittest
 from collections import namedtuple
+from unittest import mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "..", "lint"))
 import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (the one home, lint/_test_temp.py)
 sys.path.insert(0, HERE)
 import stall_watch  # noqa: E402  the watcher, and its exit code on a stall (STALL_EXIT)
+import stall_beat  # noqa: E402  the one home of the beat's append (hooks/stall_beat.py)
 
 RUN_FOLDER = _test_temp.run_folder()
 CONFIG_DIR = os.path.join(RUN_FOLDER, "config")
@@ -129,7 +131,7 @@ class Defs:
     fake print (`printed`), so a beat is measured without running the suite. A def that is missing from the
     file fails here, so a moved beat cannot pass by vanishing."""
 
-    def __init__(self, names, heartbeat=60.0, beat_file=""):
+    def __init__(self, names, heartbeat=60.0):
         with open(SUITE, encoding="utf-8") as f:
             tree = ast.parse(f.read(), SUITE)
         found = {node.name: node for node in tree.body if isinstance(node, ast.FunctionDef)}
@@ -145,7 +147,7 @@ class Defs:
             "time": types.SimpleNamespace(monotonic=lambda: self.now),
             "print": lambda *args, **kw: self.printed.append(" ".join(str(a) for a in args)),
             "GUARD_HEARTBEAT": float(heartbeat),
-            "BEAT_FILE": beat_file,
+            "stall_beat": stall_beat,  # reads STALL_WATCH_BEAT at each call, so a caller sets it
             "QUIET_SINCE": [0.0],
         }
         module = ast.Module(body=[found[name] for name in names], type_ignores=[])
@@ -250,8 +252,9 @@ class BeatCost(unittest.TestCase):
     def test_a_full_quiet_stretch_writes_one_line_per_interval(self):
         beat_file = os.path.join(RUN_FOLDER, "cost-full.txt")
         open(beat_file, "w").close()
-        defs = Defs(["beat"], heartbeat=10.0, beat_file=beat_file)
-        count = self.checkpoints(defs, seconds=100, step=0.5)  # 200 checkpoints in 100 s at I = 10 s
+        with mock.patch.dict(os.environ, {"STALL_WATCH_BEAT": beat_file}):
+            defs = Defs(["beat"], heartbeat=10.0)
+            count = self.checkpoints(defs, seconds=100, step=0.5)  # 200 checkpoints in 100 s at I = 10 s
         with open(beat_file, encoding="utf-8") as f:
             lines = f.read().splitlines()
         self.assertEqual(len(lines), 100 // 10, "%d s of quiet at I = 10 s over %d checkpoints wrote %d beat "
@@ -261,9 +264,10 @@ class BeatCost(unittest.TestCase):
     def test_a_stretch_with_no_quiet_time_writes_nothing(self):
         beat_file = os.path.join(RUN_FOLDER, "cost-empty.txt")
         open(beat_file, "w").close()
-        defs = Defs(["beat"], heartbeat=10.0, beat_file=beat_file)
-        for i in range(50):  # the clock never moves: no quiet time at all
-            defs.call("beat", "case %d, before it runs" % i)
+        with mock.patch.dict(os.environ, {"STALL_WATCH_BEAT": beat_file}):
+            defs = Defs(["beat"], heartbeat=10.0)
+            for i in range(50):  # the clock never moves: no quiet time at all
+                defs.call("beat", "case %d, before it runs" % i)
         with open(beat_file, encoding="utf-8") as f:
             self.assertEqual(f.read(), "", "a beat was written with no quiet time: the interval check is gone")
 

@@ -70,6 +70,7 @@ import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py
 from precompact_handoff import PREMISE_KINDS  # noqa: E402  the one home of the premise kinds
 import precompact_handoff as ph  # noqa: E402  the one home of the handoff and flag paths
 import mutate_shared  # noqa: E402  module_files: every module a copied guard may import
+import stall_beat  # noqa: E402  the one home of an append to $STALL_WATCH_BEAT (hooks/stall_beat.py)
 
 # Assembled, so this file never holds the token whole.
 ENV = "." + "env"
@@ -165,7 +166,6 @@ def parse_heartbeat(value):
 
 
 GUARD_HEARTBEAT = parse_heartbeat(os.environ.get("GUARD_HEARTBEAT", ""))
-BEAT_FILE = os.environ.get("STALL_WATCH_BEAT", "")  # the stall watch reads this file (hooks/stall_watch.py)
 QUIET_SINCE = [time.monotonic()]  # the import counts as quiet time, so a slow import is a stretch too
 
 
@@ -187,12 +187,7 @@ def beat(where):
     QUIET_SINCE[0] = now
     line = "test_guard: still running, %.0fs quiet, %s" % (quiet, where)
     print(line, file=sys.stderr, flush=True)
-    if BEAT_FILE:
-        try:
-            with open(BEAT_FILE, "a", encoding="utf-8") as f:
-                f.write(line + "\n")
-        except OSError:
-            pass
+    stall_beat.beat(line)
 
 
 def parse_shard(value):
