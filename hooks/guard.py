@@ -5059,7 +5059,7 @@ def handoff_cite_hit(tool, tool_input, session_id):
                 if not old or old not in text:
                     return ""
                 text = text.replace(old, new) if edit.get("replace_all") else text.replace(old, new, 1)
-        return _lint_module("report_guard").bare_item_cite(text) if isinstance(text, str) else ""
+        return _lint_module("report_guard").bare_item_cite(text, scoped=False) if isinstance(text, str) else ""
     except Exception:
         return ""
 
