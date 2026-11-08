@@ -132,7 +132,7 @@ def allowed(cwd, rng, pr_body=""):
     for line in out.splitlines() + body:
         m = re.match(r"\s*(\S.*?)\s+--\s+(\S.*?)\s*$", line)
         if m:
-            res[m.group(1)] = m.group(2)
+            res[re.sub(r"^(?:\./)+", "", m.group(1))] = m.group(2)   # a diff path has no leading ./
     return res
 
 

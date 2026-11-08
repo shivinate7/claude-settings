@@ -398,6 +398,40 @@ class PrBodyEscape(unittest.TestCase):
 BLOCK = "alpha one\nbeta two\ngamma three\ndelta four\nepsilon five\nzeta six\n"
 
 
+class DotSlashDrops(unittest.TestCase):
+    """A `Drops-lines:` path written `./path` names the same file as `path`, in a commit trailer and in the
+    PR body. A `./` path for another file excuses nothing. Each use prints ALLOWED."""
+
+    def setUp(self):
+        r = self.r = base_repo()
+        r.sh("checkout", "-q", "-b", "pr1")
+        r.commit("delete Card", app_txt=BODY)
+        r.sh("checkout", "-q", "main")
+        r.sh("merge", "-q", "--no-ff", "-m", "Merge pull request #1", "pr1")
+        r.push()
+        r.sh("checkout", "-q", "-b", "oops")
+        r.commit("tidy other", other_txt="other v2\n")
+        r.sh("revert", "--no-edit", "-m", "1", "main")
+
+    def test_a_dot_slash_path_in_a_commit_trailer_excuses_its_file(self):
+        r = self.r
+        r.sh("commit", "-q", "--amend", "-m", "Bring Card back\n\nDrops-lines: ./app.txt -- the owner wants Card back")
+        got, notes = C.check(r.dir, "origin/main", "HEAD")
+        self.assertEqual(got, [], notes)
+        self.assertTrue(any(n.startswith("ALLOWED") and "app.txt" in n for n in notes), notes)
+
+    def test_a_dot_slash_path_in_the_pr_body_excuses_its_file(self):
+        got, notes = C.check(self.r.dir, "origin/main", "HEAD",
+                             pr_body="Drops-lines: ./app.txt -- the owner wants Card back\n")
+        self.assertEqual(got, [], notes)
+        self.assertTrue(any(n.startswith("ALLOWED") and "app.txt" in n for n in notes), notes)
+
+    def test_a_dot_slash_path_for_another_file_excuses_nothing(self):  # control
+        got, notes = C.check(self.r.dir, "origin/main", "HEAD", pr_body="Drops-lines: ./other.txt -- wrong file\n")
+        self.assertTrue(any("app.txt" in p and "undoing" in p for p in got), got)
+        self.assertFalse(any(n.startswith("ALLOWED") for n in notes), notes)
+
+
 class Debt19(unittest.TestCase):
     """The three shapes that walked past the banchi revert guard: age, re-wording, a widened hunk."""
 

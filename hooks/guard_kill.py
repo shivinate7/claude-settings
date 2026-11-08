@@ -22,7 +22,7 @@ from guard_core import (
     QUOTE_MARKS,
     ASSIGNMENT, CMD_EXE_NAMES, ENV_PATTERN_COMMANDS, PLAYWRIGHT_PS_SHELLS,
     POWERSHELL_CALL, PowerShellScript, SILENT_WRITE_REDIRECT, _pwsh_script, _skip_assignments_and_keywords,
-    _split_heredocs, _strip_heredoc_bodies_unconditionally, basename, inline_script,
+    _split_heredocs, _strip_heredoc_bodies_unconditionally, _walk_wrappers, basename, inline_script,
     resolve_command, segment_tokens, split_segments,
 )
 from guard_env import substitution_commands
@@ -68,6 +68,10 @@ def kill_hit(tokens) -> str:
     if index is None:
         return ""
     word = tokens[index]
+    chain = _walk_wrappers(tuple(tokens))[1]
+    if chain and chain[-1][0] == "watch" and re.search(r"\s", word):
+        inner = segment_tokens(word)   # `watch 'pkill foo'` hands one word to `sh -c`: read it as the bare form
+        return kill_hit(inner) if inner else ""
     tool = basename(word)
     rest = tokens[index + 1:]
     if tool == "pkill" and any(not (value in OWN_PID_VARIABLES or KILL_PID_RE.match(value))

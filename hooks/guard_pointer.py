@@ -251,6 +251,12 @@ def reset_drops_nothing(root: str) -> bool:
     return answer is not None and answer.returncode == 0
 
 
+def moves_head(segment: str) -> bool:
+    """True when one segment holds a call that would move HEAD: the cheap text read that
+    `pointer_head_hit` starts with, so a caller finds the folder only for a segment that needs it."""
+    return any(head_move_target(subcommand, args) for subcommand, args in git_calls(segment))
+
+
 def pointer_head_hit(segment: str, root: str) -> str:
     """Return the matched text when one segment moves HEAD in the pointer checkout, else ''.
 

@@ -3332,6 +3332,26 @@ sh("substitution: shared tree, a hash at a word start allowed", "echo hi #$(" + 
    "allow", cwd=NOGIT)
 
 
+# heredoc close: bash ends a heredoc only on a line that is exactly the delimiter. `<<-`
+# strips leading tabs from the close and nothing else, so a space-indented EOF is body text.
+sh("heredoc close: an indented EOF inside a heredoc body does not close it, so a reset in the body is allowed",
+   "cat <<EOF\n  EOF\n" + VCS + " reset --hard origin/main\nEOF", "allow", cwd=NOGIT)
+sh("heredoc close: under <<-, a space-indented EOF does not close the body either, so a reset in it is allowed",
+   "cat <<-EOF\n  EOF\n" + VCS + " reset --hard origin/main\nEOF", "allow", cwd=NOGIT)
+sh("heredoc close: a lone apostrophe in the body, then an indented EOF, does not close the body",
+   "cat <<EOF\ndon't\n  EOF\n" + VCS + " reset --hard origin/main\nEOF", "allow", cwd=NOGIT)
+sh("heredoc close: a comment opener in a quoted body line, then an indented EOF, does not close the body",
+   "cat <<EOF\necho \"# note\"\n  EOF\n" + VCS + " reset --hard origin/main\nEOF", "allow", cwd=NOGIT)
+sh("heredoc close: a quote that spans body lines, with an indented EOF inside it, does not close the body",
+   "cat <<EOF\necho \"first\n  EOF\nsecond\"\n" + VCS + " reset --hard origin/main\nEOF", "allow", cwd=NOGIT)
+# Controls: a tab-indented EOF under <<- does close, so the reset after it is a command, and an exact
+# EOF closes a body whose indented twin came before it.
+sh("heredoc close: under <<-, a tab-indented EOF closes the body, so a reset after it is refused",
+   "cat <<-EOF\n\tEOF\n" + VCS + " reset --hard origin/main", "deny", "shared-tree", cwd=NOGIT)
+sh("heredoc close: an exact EOF closes the body after an indented twin, so a status after it is allowed",
+   "cat <<EOF\n  EOF\nEOF\n" + VCS + " status", "allow", cwd=NOGIT)
+
+
 # ============================================================ 1. branch delete / worktree remove/prune
 FAMILY = "branch-worktree"
 #
@@ -3733,6 +3753,59 @@ sh("pointer: -C reaches the pointer checkout from anywhere",
    VCS + " -C " + slash(PTRMAIN) + " switch somebranch", "deny", "pointer-head", cwd=NOGIT,
    config=PTRCFG)
 
+# guard-cd-walk-extra-reading: the pointer checkout is the folder the switch RUNS in. A cd after the
+# switch moves nothing before it, so the switch is still a switch in the pointer checkout.
+sh("guard-cd-walk-extra-reading: a switch in the pointer checkout, then a cd out, is refused",
+   VCS + " switch other; cd " + slash(NOGIT), "deny", "pointer-head", cwd=PTRMAIN, config=PTRCFG)
+sh("guard-cd-walk-extra-reading: a switch in the pointer checkout, then an && cd out, is refused",
+   VCS + " switch other && cd " + slash(NOGIT), "deny", "pointer-head", cwd=PTRMAIN, config=PTRCFG)
+sh("guard-cd-walk-extra-reading: a switch in the pointer checkout, then a cd after a lone apostrophe, is refused",
+   VCS + " switch other\necho don't\ncd " + slash(NOGIT), "deny", "pointer-head", cwd=PTRMAIN,
+   config=PTRCFG)
+# The near form: a cd first moves the switch out of the pointer checkout, so it is no pointer act.
+sh("guard-cd-walk-extra-reading: a cd out, then a switch there, is allowed",
+   "cd " + slash(NOGIT) + " && " + VCS + " switch other", "allow", cwd=PTRMAIN, config=PTRCFG)
+
+# pointer-failed-cd-walk: a cd that fails leaves the shell where it was, so the switch after it still runs in
+# the folder the shell stood in. A folder that does not exist is never entered. POINTER_NONEXIST is one.
+POINTER_NONEXIST = slash(os.path.join(ROOT, "no-such-folder"))
+sh("pointer-failed-cd-walk: a cd into the pointer checkout, a failed cd, then a switch, is refused",
+   "cd " + slash(PTRMAIN) + "; cd " + POINTER_NONEXIST + "; " + VCS + " switch other",
+   "deny", "pointer-head", cwd=NOGIT, config=PTRCFG)
+sh("pointer-failed-cd-walk: a failed cd from the pointer checkout, then a switch, is refused",
+   "cd " + POINTER_NONEXIST + "; " + VCS + " switch other", "deny", "pointer-head",
+   cwd=PTRMAIN, config=PTRCFG)
+# The control for the refusal above: with no failed cd after the cd into the pointer checkout, the switch is still refused.
+sh("pointer-failed-cd-walk: a cd into the pointer checkout, then a switch, is refused (control)",
+   "cd " + slash(PTRMAIN) + "; " + VCS + " switch other", "deny", "pointer-head", cwd=NOGIT,
+   config=PTRCFG)
+# The first cd moves the shell out of the pointer checkout. The failed cd after it leaves the shell in a folder that is not a checkout, so the switch is allowed.
+sh("pointer-failed-cd-walk: a cd out of the pointer checkout, a failed cd, then a switch, is allowed",
+   "cd " + slash(NOGIT) + "; cd " + POINTER_NONEXIST + "; " + VCS + " switch other",
+   "allow", cwd=PTRMAIN, config=PTRCFG)
+# Run from the pointer checkout, the switch is refused. The first case goes red if the guard reads a
+# folder that a mkdir made as entered: the cd would then move the switch out of the pointer checkout.
+sh("pointer-failed-cd-walk: run from the pointer checkout, a switch after a mkdir and a cd into its folder is refused",
+   "mkdir sub && cd sub && " + VCS + " switch y", "deny", "pointer-head", cwd=PTRMAIN, config=PTRCFG)
+sh("pointer-failed-cd-walk: run from the pointer checkout, a switch after a mkdir and a failed cd is refused",
+   "mkdir x; cd " + POINTER_NONEXIST + "; " + VCS + " switch y", "deny", "pointer-head", cwd=PTRMAIN,
+   config=PTRCFG)
+
+# guard-first-c-reads-wrong-tree: the pointer rule judges the checkout each git call RUNS in. A -C on
+# another call is that call's folder, so the first -C of the line does not decide for the switch.
+sh("guard-first-c-reads-wrong-tree: a status of another folder, then a switch -C of the pointer checkout, is refused",
+   VCS + " -C " + slash(NOGIT) + " status; " + VCS + " -C " + slash(PTRMAIN) + " switch other",
+   "deny", "pointer-head", cwd=NOGIT, config=PTRCFG)
+sh("guard-first-c-reads-wrong-tree: a status of the pointer checkout, then a switch in its linked worktree, is allowed",
+   VCS + " -C " + slash(PTRMAIN) + " status; " + VCS + " -C " + slash(PTRWT) + " switch other",
+   "allow", cwd=NOGIT, config=PTRCFG)
+sh("guard-first-c-reads-wrong-tree: a status of another folder, then a switch in the linked worktree, is allowed",
+   VCS + " -C " + slash(NOGIT) + " status; " + VCS + " -C " + slash(PTRWT) + " switch other",
+   "allow", cwd=NOGIT, config=PTRCFG)
+sh("guard-first-c-reads-wrong-tree: a status of a clean checkout, then a reset -C of a dirty one, is refused",
+   VCS + " -C " + slash(SUBJCLEAN) + " status; " + VCS + " -C " + slash(SUBJDIRTY) + " reset --hard",
+   "deny", "shared-tree", cwd=NOGIT)
+
 # THE MOVE TO MAIN IS THE REPAIR. A deny there would wall off the one command that restores the
 # invariant this rule exists to protect.
 sh("pointer: a move back to main restores the invariant and passes",
@@ -4008,6 +4081,26 @@ sh("kill: pkill by name reaches every match", "pkill node", "deny", "machine-wid
 sh("kill: pkill with the long flag", 'pkill --full "node server.ts"', "deny", "machine-wide-kill",
    cwd=NOGIT)
 sh("kill: killall by name", "killall node", "deny", "machine-wide-kill", cwd=NOGIT)
+# kill wrapper: a wrapper that runs its argument is judged by the command it runs, as `timeout`
+# is. `gtimeout` (GNU timeout under Homebrew) and `watch` run their argument, so each reads the same way.
+sh("kill wrapper: gtimeout runs its argument, so gtimeout 5 pkill foo is refused",
+   "gtimeout 5 pkill foo", "deny", "machine-wide-kill", cwd=NOGIT)
+sh("kill wrapper: watch runs its argument, so watch pkill foo is refused",
+   "watch pkill foo", "deny", "machine-wide-kill", cwd=NOGIT)
+sh("kill wrapper: timeout runs its argument, so timeout 5 pkill foo is refused (parity)",
+   "timeout 5 pkill foo", "deny", "machine-wide-kill", cwd=NOGIT)
+sh("kill wrapper: a quoted echo of the gtimeout form calls nothing",
+   'echo "gtimeout 5 pkill foo"', "allow", cwd=NOGIT)
+sh("kill wrapper: gtimeout around a command that kills nothing is allowed",
+   "gtimeout 5 ls", "allow", cwd=NOGIT)
+# kill-quoted-wrapper: watch runs its argument, and the argument may be one quoted word. The quoted form
+# runs the same pkill as the bare one, so the kill rule judges it the same way.
+sh("kill-quoted-wrapper: watch with a single-quoted pkill is refused, as watch pkill is",
+   "watch 'pkill foo'", "deny", "machine-wide-kill", cwd=NOGIT)
+sh("kill-quoted-wrapper: watch with a double-quoted pkill is refused, as watch pkill is",
+   'watch "pkill foo"', "deny", "machine-wide-kill", cwd=NOGIT)
+sh("kill-quoted-wrapper: watch of a quoted command that kills nothing is allowed",
+   "watch 'ls -la'", "allow", cwd=NOGIT)
 # Re-pointed (rule shared-trees-no-machine-wide-kill, refusal-vs-rule row machine-wide-kill): a list
 # of pids kills nothing, so `lsof -t` alone passes. Its kill is refused where it feeds one, below.
 sh("kill: lsof -t lists the pids on a port, kills nothing", "lsof -t -i :3000", "allow", cwd=NOGIT)
@@ -7626,6 +7719,32 @@ sh("push: setting the upstream", VCS + " push -u origin claude/lane", "allow", c
 
 sh("delete: the home directory", "rm -fr ~", "deny", "destructive-delete", cwd=NOGIT)
 sh("delete: the home variable", "rm -rf $HOME", "deny", "destructive-delete", cwd=NOGIT)
+# home folder literal: the home folder written out is the home folder, as `$HOME` is. The rule
+# guards the folder, so another user's home folder counts too. HOME is this run's own home, read here.
+sh("home folder literal: the home folder written out is refused, as $HOME is",
+   "rm -rf " + HOME, "deny", "destructive-delete", cwd=NOGIT)
+sh("home folder literal: the home folder's contents written out are refused, as $HOME/* is",
+   "rm -rf " + HOME + "/*", "deny", "destructive-delete", cwd=NOGIT)
+sh("home folder literal: another user's home folder written out is refused",
+   "rm -rf /home/someone", "deny", "destructive-delete", cwd=NOGIT)
+sh("home folder literal: rd /s /q of another user's home folder is refused",
+   "rd /s /q C:\\Users\\someone", "deny", "destructive-delete", cwd=NOGIT)
+sh("home folder literal: rd /s /q of another user's home folder, PowerShell, is refused",
+   "rd /s /q C:\\Users\\someone", "deny", "destructive-delete", tool="PowerShell", cwd=NOGIT)
+# The near forms: a folder inside the home folder is no home delete, and stays allowed.
+sh("home folder literal: a folder inside the home folder is allowed",
+   "rm -rf " + HOME + "/build", "allow", cwd=NOGIT)
+sh("home folder literal: rd /s /q of a folder inside another user's home is allowed",
+   "rd /s /q C:\\Users\\someone\\build", "allow", cwd=NOGIT)
+# home-parent-delete: the folder that holds every home folder is the same kind of delete. Removing it removes
+# each home with it, so it is refused as a home folder is, whatever user's home it holds.
+sh("home-parent-delete: rm -rf /home, the folder holding every home folder, is refused",
+   "rm -rf /home", "deny", "destructive-delete", cwd=NOGIT)
+sh("home-parent-delete: rm -rf /Users, the folder holding every macOS home folder, is refused",
+   "rm -rf /Users", "deny", "destructive-delete", cwd=NOGIT)
+# home-parent-control: a folder inside a home folder is not a home folder, so a delete of one stays allowed.
+sh("home-parent-control: rm -rf of a project build folder, under a home folder, stays allowed",
+   "rm -rf /home/user/project/build", "allow", cwd=NOGIT)
 sh("delete: the working directory", "rm -rf .", "deny", "destructive-delete", cwd=NOGIT)
 sh("delete: a glob", "rm -rf *", "deny", "destructive-delete", cwd=NOGIT)
 sh("delete: a drive root", "rm -rf C:/", "deny", "destructive-delete", cwd=NOGIT)
@@ -12424,6 +12543,83 @@ sh("frozen: a redirect onto the global CLAUDE.md", "echo x > " + CFG_CLAUDEMD, "
    "frozen-path", cwd=NOGIT)
 sh("frozen: a redirect onto a config hook", "cat template.py > " + CFG_HOOK, "deny", "frozen-path",
    cwd=NOGIT)
+# interpreter write: an interpreter that writes a file, in place or from a heredoc body, writes it as `sed -i` does.
+sh("interpreter write: perl -pi -e on a config hook is refused, as sed -i is",
+   "perl -pi -e 's/a/b/' " + CFG_HOOK, "deny", "frozen-path", cwd=NOGIT)
+sh("interpreter write: ruby -i -pe on a config hook is refused, as sed -i is",
+   "ruby -i -pe 's/a/b/' " + CFG_HOOK, "deny", "frozen-path", cwd=NOGIT)
+sh("interpreter write: a perl heredoc body that writes a config hook is refused",
+   "perl <<'EOF'\nopen(F, '>', '" + CFG_HOOK + "');\nEOF", "deny", "frozen-path", cwd=NOGIT)
+sh("interpreter write: a ruby heredoc body that writes a config hook is refused",
+   "ruby <<'EOF'\nFile.write('" + CFG_HOOK + "', 'x')\nEOF", "deny", "frozen-path", cwd=NOGIT)
+sh("interpreter write: sed -i on a config hook is refused (parity)",
+   "sed -i s/a/b/ " + CFG_HOOK, "deny", "frozen-path", cwd=NOGIT)
+# The near forms: a read of a frozen file, and an in-place edit of a file that is not frozen, stay allowed.
+sh("interpreter write: perl -ne reads a config hook and writes nothing, allowed",
+   "perl -ne 'print' " + CFG_HOOK, "allow", cwd=NOGIT)
+sh("interpreter write: perl -pi -e on a file that is not frozen is allowed",
+   "perl -pi -e 's/a/b/' notes.txt", "allow", cwd=NOGIT)
+# frozen-digit-switch: perl takes its switches in a cluster, and a digit may come before the `i`: `-0pi`
+# sets the record separator, then edits in place. The in-place switch reads that cluster as perl does.
+sh("frozen-digit-switch: perl -0pi -e on a config hook is refused, as perl -pi is",
+   "perl -0pi -e 's/a/b/' " + CFG_HOOK, "deny", "frozen-path", cwd=NOGIT)
+# The near form: the same digit cluster with no in-place letter reads the hook and writes nothing.
+sh("frozen-digit-switch: perl -0ne reads a config hook and writes nothing, allowed",
+   "perl -0ne 'print' " + CFG_HOOK, "allow", cwd=NOGIT)
+# frozen-perl-ruby-inline: perl -e and ruby -e take their script on the command line. A write to a frozen
+# file in that script is a write, as it is in a heredoc body. A read of the same file stays allowed.
+sh("frozen-perl-ruby-inline: perl -e open-writes a config hook is refused",
+   "perl -e 'open(F,\">\",\"" + CFG_HOOK + "\")'", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen-perl-ruby-inline: ruby -e File.write of a config hook is refused",
+   "ruby -e 'File.write(\"" + CFG_HOOK + "\",\"x\")'", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen-perl-ruby-inline: a # inside a -e string does not hide the write after it",
+   "perl -e 'print \"#\"; open(F,\">\",\"" + CFG_HOOK + "\")'", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen-perl-ruby-inline: perl -e opens a config hook for reading and writes nothing, allowed",
+   "perl -e 'open(F,\"<\",\"" + CFG_HOOK + "\")'", "allow", cwd=NOGIT)
+sh("frozen-perl-ruby-inline: ruby -e reads a config hook and writes nothing, allowed",
+   "ruby -e 'print File.read(\"" + CFG_HOOK + "\")'", "allow", cwd=NOGIT)
+# perl-ruby-near-forms: a perl or ruby body that writes no frozen file is allowed, however it reads. A write
+# call in a `#` comment is no write, and an apostrophe or `/*` inside a string is text, not a comment.
+NEAR_SCRATCH = slash(os.path.join(ROOT, "near-scratch.txt"))
+sh("perl-ruby-near-forms: a perl heredoc reads a config hook and writes a scratch file, allowed",
+   "perl <<'EOF'\nopen(F, '<', '" + CFG_HOOK + "');\nopen(O, '>', '" + NEAR_SCRATCH + "');\nEOF",
+   "allow", cwd=NOGIT)
+sh("perl-ruby-near-forms: a ruby heredoc reads a config hook and writes a scratch file, allowed",
+   "ruby <<'EOF'\nputs File.read('" + CFG_HOOK + "')\nFile.write('" + NEAR_SCRATCH + "', 'x')\nEOF",
+   "allow", cwd=NOGIT)
+sh("perl-ruby-near-forms: a perl heredoc whose write call sits in a # comment is allowed",
+   "perl <<'EOF'\n# open(F, '>', '" + CFG_HOOK + "');\nprint \"ok\\n\";\nEOF", "allow", cwd=NOGIT)
+sh("perl-ruby-near-forms: a ruby heredoc whose File.write sits in a # comment is allowed",
+   "ruby <<'EOF'\n# File.write('" + CFG_HOOK + "', 'x')\nputs 'ok'\nEOF", "allow", cwd=NOGIT)
+sh("perl-ruby-near-forms: a lone apostrophe in the # comment that holds the write is allowed",
+   "perl <<'EOF'\n# don't open(F, '>', '" + CFG_HOOK + "');\nprint \"ok\\n\";\nEOF", "allow", cwd=NOGIT)
+sh("perl-ruby-near-forms: perl -e prints the -i switch and a config hook as text, allowed",
+   "perl -e 'print \" -i " + CFG_HOOK + "\"'", "allow", cwd=NOGIT)
+sh("perl-ruby-near-forms: a ruby heredoc File.read of a config hook, then a File.write elsewhere, is allowed",
+   "ruby <<'EOF'\nx = File.read('" + CFG_HOOK + "')\nFile.write('" + NEAR_SCRATCH + "', x)\nEOF",
+   "allow", cwd=NOGIT)
+sh("perl-ruby-near-forms: perl -e with a write call in a # comment is allowed",
+   "perl -e 'print 1; # open(F, \">\", \"" + CFG_HOOK + "\")'", "allow", cwd=NOGIT)
+# Controls: the apostrophe and the /* are text inside the string, and the write after the string is real.
+sh("perl-ruby-near-forms: a /* and an apostrophe inside a perl string do not hide the write after it",
+   "perl <<'EOF'\nprint \"don't /* not a comment\";\nopen(O, '>', '" + CFG_HOOK + "');\nEOF",
+   "deny", "frozen-path", cwd=NOGIT)
+sh("perl-ruby-near-forms: a # line inside a multi-line perl string does not end the string before a write",
+   "perl <<'EOF'\nprint \"first line\n# not a comment\nlast line\";\nopen(O, '>', '" + CFG_HOOK + "');\nEOF",
+   "deny", "frozen-path", cwd=NOGIT)
+sh("perl-ruby-near-forms: a write call inside a perl string is text, and the real write is refused",
+   "perl <<'EOF'\nprint \"open(F, '>', '" + CFG_HOOK + "')\";\nopen(O, '>', '" + CFG_HOOK + "');\nEOF",
+   "deny", "frozen-path", cwd=NOGIT)
+# Controls: a # in a string or a ruby #{...} on the write's own line is not a comment, so the write beside it is still refused.
+sh("perl-ruby-near-forms: a # inside a perl heredoc string, on the write's own line, does not hide the write",
+   "perl <<'EOF'\nprint \"#\"; open(O, '>', '" + CFG_HOOK + "');\nEOF", "deny", "frozen-path", cwd=NOGIT)
+sh("perl-ruby-near-forms: a ruby #{...} interpolation, on the write's own line, does not hide File.write",
+   "ruby <<'EOF'\nputs \"#{1}\"; File.write('" + CFG_HOOK + "', 'x')\nEOF", "deny", "frozen-path", cwd=NOGIT)
+# The real in-place edits beside the -i-in-text red: each edits the hook, so each is refused.
+sh("perl-ruby-near-forms: perl -i.bak edits a config hook in place and is refused",
+   "perl -i.bak -pe 's/a/b/' " + CFG_HOOK, "deny", "frozen-path", cwd=NOGIT)
+sh("perl-ruby-near-forms: perl with -i after the script edits a config hook in place and is refused",
+   "perl -pe 's/a/b/' -i " + CFG_HOOK, "deny", "frozen-path", cwd=NOGIT)
 sh("config-edit: rm of a project settings file is allowed", "rm " + PROJ_SETTINGS, "allow",
    cwd=NOGIT)
 sh("config-edit: mv of a project settings file is allowed",
