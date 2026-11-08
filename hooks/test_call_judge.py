@@ -2334,10 +2334,10 @@ def case_would_claim_is_refused():
               (r.deny() or {}).get("permissionDecision") == "deny", detail(r))
 
 
-# ------------------------------------------------------------------ verdict claim, round 2 (red on de7d56500)
+# ------------------------------------------------------------------ verdict claim: forecasts, peer turn bound, cite bar
 #
-# Each group below is the rule the builder implements for round 2, and each group is red on the head this round starts
-# from. A forecast needs a check subject (a check, guard, hook, test, rule, CI, or a PR number) and a future or modal
+# Each group below pins one rule of the verdict claim check: an unchecked forecast is refused, a checked one is not.
+# A forecast needs a check subject (a check, guard, hook, test, rule, CI, or a PR number) and a future or modal
 # verdict verb whose object is it, this, that, them, the send, the change or a PR, or else the verb is passive. A run
 # before the newest peer message (a cross-session message record) does not clear a claim after it. A test cite clears
 # only when its name is defined in its file. A read cite clears only when its path is a file the claim names, or one
@@ -2392,7 +2392,7 @@ def write_records(name, records):
     return path
 
 
-def deny_lines(r):
+def refuse_lines(r):
     """The PreToolUse deny decisions the child printed: one JSON object per output line."""
     found = []
     for line in r.out.splitlines():
@@ -2426,7 +2426,7 @@ def case_round2_allowed_claims_pass():
 
 
 def case_run_before_a_peer_message_does_not_clear_a_later_claim():
-    # The round 2 turn bound. The run is in the owner's turn both times, so the reader's scope is the same; only the
+    # The turn bound. The run is in the owner's turn both times, so the reader's scope is the same; only the
     # peer message's place differs. A run before the peer message is refused. After it, it clears (the green control).
     before = write_records("r2-peer-before", [owner_record(), *bash_records("b1", "cat " + CLAIM_CHECK),
                                               peer_record("Peer note: the lane is up.")])
@@ -2481,7 +2481,7 @@ def case_verdict_and_question_failures_give_one_refusal_naming_both():
           "the form lines")
     for tool in SEND_TOOLS:
         r = run_hook(send_input(tool, message), answer=ruled(WORKTREE_SLUG))
-        denies = deny_lines(r)
+        denies = refuse_lines(r)
         check("both failures, via %s: one refusal, not two" % tool, len(denies) == 1, detail(r))
         reason = denies[0].get("permissionDecisionReason", "") if len(denies) == 1 else ""
         check("both failures, via %s: the refusal names the verdict claim rule" % tool, VERDICT_CLAIM_RULE in reason,
@@ -2492,12 +2492,12 @@ def case_verdict_and_question_failures_give_one_refusal_naming_both():
               len(r.calls) == 1 and WORKTREE_MARK in r.calls[0]["prompt"], detail(r))
 
 
-# ------------------------------------------------------------------ verdict claim, round 3 (red on afdfa806d)
+# ------------------------------------------------------------------ verdict claim: allowed and refused sentences, remedy
 #
-# The round 3 groups, red on the head this round starts from. Allowed: each sentence is a false alarm today, because its
-# verb acts on a pronoun or is passive, or its subject is a CI or a test name. Refused: each sentence is a miss today,
-# because its modal and verb are split by an adverb, the verb is missing from the list, the apostrophe is curly, or the
-# subject is a file path. The remedy of a refusal that names the read form also says what a read cite may name.
+# Allowed: each sentence is a false alarm if refused, because its verb acts on a pronoun or is passive, or its subject
+# is a CI or a test name. Refused: each sentence is a miss if it passes, because its modal and verb are split by an
+# adverb, the verb is missing from the list, the apostrophe is curly, or the subject is a file path. The remedy of a
+# refusal that names the read form also says what a read cite may name.
 # Each allowed sentence carries its own turn: the guard sentence names hooks/guard.py, and its turn ran that file.
 ROUND3_ALLOWED = (
     ("a passive verb, CI as the subject", "The merge will be blocked until CI is green.", ()),
@@ -2556,12 +2556,12 @@ def case_round3_refusal_remedy_says_what_a_read_may_name():
               "defines the named rule" in tail, tail[:200])
 
 
-# ------------------------------------------------------------------ verdict claim, round 4 (red on f84a70aa8)
+# ------------------------------------------------------------------ verdict claim: quoted and asked forecasts
 #
 # Two false alarms a normal turn hits. A forecast inside quotes or inside a code span is a mention, not a claim. A
 # question about a verdict ("verify", "whether", "find out if", "probe whether", "confirm") is an ask, not a claim. Each
-# allowed send is red today: the gate refuses it. The control is a plain claim with no run, which stays refused. The
-# remedy pin: a refusal says the file must be named in the sentence outside the cite.
+# allowed send must pass, since a refusal of it is a false alarm. The control is a plain claim with no run, which
+# stays refused. The remedy pin: a refusal says the file must be named in the sentence outside the cite.
 ROUND4_ALLOWED = (
     ("quoted text", 'She said "the check will refuse it"'),
     ("inline code", "Quoted from the lane: `the check will refuse it`."),
