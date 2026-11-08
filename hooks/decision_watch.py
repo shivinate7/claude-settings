@@ -956,6 +956,7 @@ def collect_paths(records, cwd):
                 cmd = inp.get("command") or ""
                 if not isinstance(cmd, str) or not cmd.strip():
                     continue
+                guard.POWERSHELL_CALL[0] = name == "PowerShell"
                 try:
                     matched = guard.project_config_shell_hit(cmd, cwd)
                 except Exception:
