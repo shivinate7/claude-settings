@@ -2196,6 +2196,7 @@ class PickClaims(UpkeepFixture):
     def test_the_claim_row_starts_no_process_writes_no_file_and_reads_only_the_live_file(self):
         self.commit_step("c153", note="Ruling: item 9 a.")
         self.publish(items=[], answers=[self.answer(9, "b")])
+        self.out_with_live()  # uncounted warm-up: the first build refreshes .git/index
         with_row = self.counted_build()
         self.assertEqual(self.flagged(with_row["out"]), (1, ['c153 (claim "item 9 a")']),
                          "the row does not run on this file, so its cost is not measured")  # scope first
