@@ -40,14 +40,14 @@ def hook_tier_line():
     return found[0]
 
 
-def normal_tier_line():
-    """The tier line with its whitespace folded and its letters lower-cased, so a test reads a phrase's words, not their casing."""
-    return " ".join(hook_tier_line().split()).lower()
+def sentences(line):
+    """The line's sentences, cut at each ". " as merge_role_sentence cuts."""
+    return re.split(r"(?<=\.) ", line)
 
 
-def merge_role_sentence(line, anchor="merge --role"):
-    """The sentence of the tier line that holds `anchor`: from the ". " before it to the ". " after it, or to the line's ends."""
-    at = line.index(anchor)
+def merge_role_sentence(line):
+    """The sentence of the tier line that holds `merge --role`: from the ". " before it to the ". " after it, or to the line's ends."""
+    at = line.index("merge --role")
     start = line.rfind(". ", 0, at)
     end = line.find(". ", at)
     return line[0 if start < 0 else start + 2:len(line) if end < 0 else end + 1]
@@ -100,10 +100,12 @@ class SessionStartAgentWorktreeNoticeTests(unittest.TestCase):
             path = os.path.join(self.primary, ".claude", "worktrees", "agent-s%03d" % self.made)
             vcs(self.primary, "worktree", "add", "-q", "--detach", "--no-checkout", path, "HEAD")
 
-    def run_hook(self, remote=None, fetch_timeout="30", session_cwd=None, source=None, compact=False):
+    def run_hook(self, remote=None, fetch_timeout="30", session_cwd=None, source=None, compact=False,
+                 remote_session_id=None):
         """The hook's stdout lines. Its stderr lands in self.last_stderr.
 
         remote: the CLAUDE_CODE_REMOTE value, or None to unset it as a non-cloud runner does.
+        remote_session_id: the CLAUDE_CODE_REMOTE_SESSION_ID value, "" for an empty one, or None to unset it.
         session_cwd: the session's cwd, in the payload and as the process cwd; None means the primary checkout.
         source: the payload's "source" (startup, resume, ...), or None to send none.
         compact: send the payload with no spaces after its separators, the way the hook's sed must also read it.
@@ -117,8 +119,11 @@ class SessionStartAgentWorktreeNoticeTests(unittest.TestCase):
         env = dict(os.environ, CLAUDE_CONFIG_DIR=self.config, CLAUDE_SETTINGS_FETCH_TIMEOUT=fetch_timeout)
         # The test runner may itself be a cloud session, so each run sets the variable it means.
         env.pop("CLAUDE_CODE_REMOTE", None)
+        env.pop("CLAUDE_CODE_REMOTE_SESSION_ID", None)
         if remote is not None:
             env["CLAUDE_CODE_REMOTE"] = remote
+        if remote_session_id is not None:
+            env["CLAUDE_CODE_REMOTE_SESSION_ID"] = remote_session_id
         answer = subprocess.run([sh_exe(), HOOK], input=payload, capture_output=True, text=True,
                                 env=env, cwd=where, timeout=120)
         self.last_stderr = answer.stderr
@@ -209,13 +214,24 @@ class SessionStartCautionTests(SessionStartAgentWorktreeNoticeTests):
 
 
 class SessionStartTierLineTests(SessionStartAgentWorktreeNoticeTests):
-    """The cloud session-tier line prints once, after the checkout line, only when CLAUDE_CODE_REMOTE is "true"."""
+    """The session-tier line prints once, after the checkout line, when CLAUDE_CODE_REMOTE is exactly "true" or
+    CLAUDE_CODE_REMOTE_SESSION_ID is non-empty. A local lane session sets only the id, so it still reads its record."""
 
     # The 51-worktree case builds 51 worktrees; this class does not repeat it.
     test_no_notice_at_fifty_and_one_notice_at_fifty_one = None
 
     def tier_lines(self, lines):
         return [line for line in lines if line.startswith("session tier:")]
+
+    def outside_a_git_tree(self):
+        """A folder under the run root that is no git tree. The probe proves it, or the case tests nothing."""
+        outside = os.path.join(self.root, "outside")
+        os.makedirs(outside)
+        probe = subprocess.run([VCS, "-C", outside, "rev-parse", "--show-toplevel"], capture_output=True,
+                               text=True, timeout=60)
+        self.assertNotEqual(probe.returncode, 0, "the folder is inside a git tree, so the case tests nothing: %r"
+                            % outside)
+        return outside
 
     def test_cloud_prints_the_tier_line_once_right_after_the_checkout_line(self):
         expected = hook_tier_line()
@@ -241,16 +257,43 @@ class SessionStartTierLineTests(SessionStartAgentWorktreeNoticeTests):
 
     def test_cloud_prints_the_tier_line_once_outside_any_git_tree(self):
         # The line needs no git, so a cloud session whose cwd is no checkout still gets it, with no stderr.
-        outside = os.path.join(self.root, "outside")
-        os.makedirs(outside)
-        probe = subprocess.run([VCS, "-C", outside, "rev-parse", "--show-toplevel"], capture_output=True,
-                               text=True, timeout=60)
-        self.assertNotEqual(probe.returncode, 0, "the folder is inside a git tree, so the case tests nothing: %r"
-                            % outside)
+        outside = self.outside_a_git_tree()
         expected = hook_tier_line()
         lines = self.run_hook(remote="true", session_cwd=outside)
         self.assertEqual(self.last_stderr, "", "the hook wrote to stderr: %r" % self.last_stderr)
         self.assertEqual(self.tier_lines(lines), [expected], "the tier line is not printed once: %r" % lines)
+
+    # A local lane session sets CLAUDE_CODE_REMOTE_SESSION_ID and not CLAUDE_CODE_REMOTE, so the id alone must print the line.
+    def test_a_session_id_alone_prints_the_tier_line_in_a_git_tree(self):
+        lines = self.run_hook(remote_session_id="cse_abc")
+        self.assertTrue(lines and lines[0].startswith("checkout "), "no checkout line first: %r" % lines)
+        self.assertEqual(self.tier_lines(lines), [hook_tier_line()],
+                         "no tier line in a git tree with CLAUDE_CODE_REMOTE unset and a session id set: %r" % lines)
+
+    def test_a_session_id_alone_prints_the_tier_line_outside_a_git_tree(self):
+        outside = self.outside_a_git_tree()
+        lines = self.run_hook(session_cwd=outside, remote_session_id="cse_abc")
+        self.assertEqual(self.last_stderr, "", "the hook wrote to stderr: %r" % self.last_stderr)
+        self.assertEqual(self.tier_lines(lines), [hook_tier_line()],
+                         "no tier line outside a git tree with CLAUDE_CODE_REMOTE unset and a session id set: %r"
+                         % lines)
+
+    # Green controls: with neither variable set, or the id empty, the hook must print no tier line.
+    def test_no_tier_line_with_both_variables_unset_in_a_git_tree(self):
+        lines = self.run_hook()
+        self.assertTrue(lines and lines[0].startswith("checkout "), "no checkout line first: %r" % lines)
+        self.assertEqual(self.tier_lines(lines), [], "a tier line printed with both variables unset: %r" % lines)
+
+    def test_no_tier_line_with_both_variables_unset_outside_a_git_tree(self):
+        outside = self.outside_a_git_tree()
+        lines = self.run_hook(session_cwd=outside)
+        self.assertEqual(self.last_stderr, "", "the hook wrote to stderr: %r" % self.last_stderr)
+        self.assertEqual(self.tier_lines(lines), [], "a tier line printed with both variables unset: %r" % lines)
+
+    def test_no_tier_line_with_an_empty_session_id_in_a_git_tree(self):
+        lines = self.run_hook(remote_session_id="")
+        self.assertTrue(lines and lines[0].startswith("checkout "), "no checkout line first: %r" % lines)
+        self.assertEqual(self.tier_lines(lines), [], "a tier line printed with an empty session id: %r" % lines)
 
 
 class SessionStartSessionHomeTests(SessionStartAgentWorktreeNoticeTests):
@@ -328,9 +371,37 @@ def tearDownModule():
     shutil.rmtree(RUN_FOLDER, ignore_errors=True)  # test-temp-standard: teardown removes the run folder
 
 class SessionStartMergeRoleTests(unittest.TestCase):
-    """The tier line tells a cloud session how to record its merge role: `merge --role <tier>`, for the two tiers that may run
-    `merge <pr> --confirm` (merge/merge.py MERGE_ROLES). It reads the hook's own text, so no repo fixture is built. The existing
-    SessionStartTierLineTests prove the line prints once and only in the cloud."""
+    """The tier line tells a cloud session how to record its merge role: `merge --role <tier>`, for the one tier that may run
+    `merge <pr> --confirm` (merge/merge.py MERGE_ROLES; decision session-tiers: the coordinator never merges).
+    It reads the hook's own text, so no repo fixture is built. The existing SessionStartTierLineTests prove the line prints
+    once and only in the cloud."""
+
+    @staticmethod
+    def merge_is_negated(sentence):
+        """True when the sentence negates a merge: `never merges`, `not merge`, `no merges`."""
+        return re.search(r"\b(?:never|not|no)\s+merges?\b", sentence, re.IGNORECASE) is not None
+
+    @staticmethod
+    def says_coordinator_merges(sentence):
+        """True when the sentence names a coordinator and a merge the sentence does not negate."""
+        return ("coordinator" in sentence.lower() and re.search(r"\bmerges?\b", sentence, re.IGNORECASE) is not None
+                and not SessionStartMergeRoleTests.merge_is_negated(sentence))
+
+    @staticmethod
+    def says_coordinator_never_merges(sentence):
+        """True when the sentence names a coordinator and says `never merges`."""
+        return "coordinator" in sentence.lower() and re.search(r"\bnever merges\b", sentence, re.IGNORECASE) is not None
+
+    @staticmethod
+    def is_no_parent_merge(sentence):
+        """True when a session with no parent, or one the owner started, merges its own PR under the merge grant, not negated."""
+        return (re.search(r"no parent|owner started", sentence, re.IGNORECASE) is not None and "own PR" in sentence
+                and "merge grant" in sentence and not SessionStartMergeRoleTests.merge_is_negated(sentence))
+
+    @staticmethod
+    def names_a_lane(sentence):
+        """True when the sentence names the lane session: its cs-build:lane tag, or the words `lane session`."""
+        return "cs-build:lane" in sentence or "lane session" in sentence
 
     def test_the_tier_line_names_the_role_writer(self):
         self.assertIn("merge --role", hook_tier_line())
@@ -339,11 +410,53 @@ class SessionStartMergeRoleTests(unittest.TestCase):
         # Bare `merge` is not on a cloud session's PATH, so the sentence gives the shim's full path.
         self.assertIn("~/.claude/bin/merge --role", merge_role_sentence(hook_tier_line()))
 
-    def test_the_tier_line_names_both_merge_tiers(self):
-        line = hook_tier_line()
-        for tier in ("coordinator", "batch-runner"):
-            with self.subTest(tier=tier):
-                self.assertIn(tier, line)
+    # decision session-tiers: re-pointed from both tiers to the batch runner alone
+    def test_the_merge_role_sentence_names_only_the_batch_runner_tag(self):
+        role = [s for s in sentences(hook_tier_line()) if "merge role" in s.lower()]
+        self.assertEqual(len(role), 1, role)
+        self.assertIn("cs-build:batch-runner", role[0])
+        self.assertNotIn("coordinator", role[0].lower(), role[0])
+
+    # decision session-tiers: no sentence of the tier line says a coordinator merges; "never merges" is not a merge
+    def test_no_sentence_of_the_tier_line_says_a_coordinator_merges(self):
+        told = [s for s in sentences(hook_tier_line()) if self.says_coordinator_merges(s)]
+        self.assertEqual(told, [], "the tier line says a coordinator merges: %r" % told)
+
+    # decision session-tiers: the coordinator never merges, so one sentence of the tier line says so
+    def test_some_sentence_of_the_tier_line_says_the_coordinator_never_merges(self):
+        told = [s for s in sentences(hook_tier_line()) if self.says_coordinator_never_merges(s)]
+        self.assertTrue(told, "no sentence of the tier line says the coordinator never merges")
+
+    # decision session-tiers: a session the owner started (no parent) merges its own PR under the merge grant, affirmatively
+    def test_a_session_with_no_parent_merges_its_own_pr_under_the_merge_grant(self):
+        told = [s for s in sentences(hook_tier_line()) if self.is_no_parent_merge(s)]
+        self.assertTrue(told, "no affirmative sentence says a session with no parent merges its own PR under the merge grant")
+
+    # decision session-tiers: only a solo or one-lane session the owner started merges its own PR, so its sentence names that shape
+    def test_the_no_parent_merge_sentence_names_solo_or_one_lane(self):
+        told = [s for s in sentences(hook_tier_line()) if self.is_no_parent_merge(s)]
+        self.assertTrue(told, "no affirmative sentence says a session with no parent merges its own PR under the merge grant")
+        for sentence in told:
+            self.assertIn("solo or one-lane", sentence, "the no-parent merge sentence does not name solo or one-lane: %r" % sentence)
+
+    def hand_off_sentence(self):
+        """The tier line's one sentence that hands a branch to the batch runner. Asserts that scope before any content."""
+        found = [s for s in sentences(hook_tier_line()) if "hands" in s and "batch runner" in s]
+        self.assertEqual(len(found), 1, "expected one hand-off sentence, found %d: %r" % (len(found), found))
+        return found[0]
+
+    # decision session-tiers: only a lane (a session with a parent_session_id) hands its branch to the batch runner
+    def test_the_hand_off_sentence_names_a_parent_session_id(self):
+        self.assertIn("parent_session_id", self.hand_off_sentence(), "the hand-off sentence names no parent_session_id")
+
+    # decision session-tiers: only a lane session hands its branch to the batch runner; a parent_session_id alone is not one
+    def test_the_hand_off_sentence_names_the_lane_session(self):
+        sentence = self.hand_off_sentence()
+        self.assertTrue(self.names_a_lane(sentence), "the hand-off sentence names no cs-build:lane tag and no lane session: %r" % sentence)
+
+    # decision session-tiers: only a lane session hands its branch to the batch runner
+    def test_the_hand_off_sentence_does_not_say_any_other_session(self):
+        self.assertNotIn("any other session", self.hand_off_sentence().lower(), "the hand-off sentence says any other session hands off")
 
     def test_the_tier_line_says_the_role_is_recorded_again_after_a_resume(self):
         # A resumed session keeps its id, but the role file may be gone (a fresh container): the line must not say the call is a one-time act.
@@ -353,29 +466,35 @@ class SessionStartMergeRoleTests(unittest.TestCase):
     def test_the_tier_line_does_not_say_once(self):
         self.assertNotRegex(hook_tier_line(), r"(?i)\bonce\b")
 
-    def test_the_tier_line_says_only_the_batch_runner_merges(self):
-        # A coordinator build has one merger, the batch runner. The tier line must say so (waiting-page item 111 a).
-        line = normal_tier_line()
-        anchor = "only the batch runner merges"
-        self.assertIn(anchor, line, "the tier line does not say that only the batch runner merges")
-        self.assertIn("coordinator build", merge_role_sentence(line, anchor),
-                      "the sentence that says only the batch runner merges is not scoped to a coordinator build")
-
-    def test_the_handoff_sentence_is_scoped_to_a_coordinator_build(self):
-        # The hand-off to the batch runner binds a session in a coordinator build only: every other session in that build,
-        # the coordinator too. A solo or one-lane session keeps merging its own work, so the line must not bind it.
-        line = normal_tier_line()
-        anchor = "hands the branch, head and pr to the batch runner"
-        self.assertIn(anchor, line, "the tier line does not say who hands the branch, head and PR to the batch runner")
-        sentence = merge_role_sentence(line, anchor)
-        self.assertIn("coordinator build", sentence, "the hand-off is not scoped to a coordinator build: %r" % sentence)
-        self.assertIn("the coordinator too", sentence, "the hand-off does not bind the coordinator: %r" % sentence)
-
     def test_the_merge_role_sentence_is_found_by_its_edges(self):
         # The helper cuts at ". ": from the one before `merge --role` to the one after it, or to the line's ends.
         self.assertEqual(merge_role_sentence("A one. B runs `merge --role x` now. C two."), "B runs `merge --role x` now.")
         self.assertEqual(merge_role_sentence("merge --role x. C two."), "merge --role x.")
         self.assertEqual(merge_role_sentence("A one. B runs merge --role x"), "B runs merge --role x")
+
+    # decision session-tiers: the coordinator predicate flags a merging coordinator and passes a negated one (green control)
+    def test_the_coordinator_merge_predicate_flags_a_merge_and_passes_a_negated_one(self):
+        self.assertTrue(self.says_coordinator_merges("The coordinator merges its own PR."))
+        self.assertFalse(self.says_coordinator_merges("The coordinator never merges."))
+
+    # decision session-tiers: the never-merges predicate takes only "never merges" with a coordinator (green control)
+    def test_the_coordinator_never_merges_predicate_takes_only_the_negated_coordinator(self):
+        self.assertTrue(self.says_coordinator_never_merges("The coordinator never merges."))
+        self.assertFalse(self.says_coordinator_never_merges("The coordinator merges its own PR."))
+        self.assertFalse(self.says_coordinator_never_merges("A lane session never merges its own PR."))
+
+    # decision session-tiers: the no-parent predicate takes only an affirmative merge, so a negated one never satisfies it (green control)
+    def test_the_no_parent_merge_predicate_rejects_a_negated_merge(self):
+        self.assertTrue(self.is_no_parent_merge("A solo or one-lane session with no parent_session_id merges its own PR under the repo merge grant."))
+        self.assertFalse(self.is_no_parent_merge("A session with no parent_session_id never merges its own PR under the merge grant."))
+        self.assertFalse(self.is_no_parent_merge("A session with a parent_session_id merges its own PR under the merge grant."))
+
+    # decision session-tiers: a hand-off that names no lane session does not scope to the lane (green control)
+    def test_the_lane_predicate_rejects_a_hand_off_that_names_no_lane(self):
+        self.assertFalse(self.names_a_lane("A session with a parent_session_id hands its reviewed branch, head and PR to the batch "
+                                           "runner (list_sessions, tag cs-build:batch-runner, same repo) and never merges."))
+        self.assertTrue(self.names_a_lane("A lane session (tag cs-build:lane) hands its reviewed branch, head and PR to the batch "
+                                          "runner and never merges."))
 
 
 class SessionStartLivePinNoticeTests(SessionStartAgentWorktreeNoticeTests):

@@ -83,9 +83,14 @@ class Repo:
             self.write(path + "/a.md" if "." not in os.path.basename(path) else path)
         return self
 
-    def run(self, group):
+    def probe(self, group):
+        """(exit code, stdout, stderr) of the probes' `group` on this repo."""
         done = subprocess.run([sys.executable, PROBES, group, self.root], capture_output=True, text=True)
-        return done.returncode, done.stdout
+        return done.returncode, done.stdout, done.stderr
+
+    def run(self, group):
+        code, out, _ = self.probe(group)
+        return code, out
 
 
 class Layout(unittest.TestCase):
@@ -145,7 +150,16 @@ class Layout(unittest.TestCase):
     def test_this_repo_is_in_shape(self):
         root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         done = subprocess.run([sys.executable, PROBES, "layout", root], capture_output=True, text=True)
-        self.assertEqual((done.returncode, done.stdout.strip()), (0, "layout: in shape"))
+        out = done.stdout.strip()
+        if done.returncode == 2 and out.startswith("layout: unknown - waiting copy:"):
+            # Unknown is accepted only where the record branch is absent, as in a shallow clone (decision waiting-data-in-repo).
+            branch = layout.record_branch(root)
+            here = any(subprocess.run(["git", "-C", root, "rev-parse", "--verify", "-q", ref + "^{commit}"],
+                                      capture_output=True).returncode == 0
+                       for ref in ("refs/heads/" + branch, "refs/remotes/origin/" + branch))
+            self.assertFalse(here, "the record branch is here, so the copy must be read: " + out)
+            return
+        self.assertEqual((done.returncode, out), (0, "layout: in shape"))
 
     def test_this_repos_extras_name_real_folders_and_no_wildcard(self):
         root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -158,6 +172,9 @@ class Layout(unittest.TestCase):
             self.assertNotIn("*", where, name)
             self.assertTrue(any(f.startswith(where + "/") for f in files), "%s: no tracked file under %s" % (name, where))
         repo = Repo(self).core().write(EXTRAS, text)
+        # The waiting copy lives on the record branch, so the fixture holds it there (decision waiting-data-in-repo).
+        repo.commit("base").branch(layout.record_branch(repo.root)).write("waiting/items/a.json", '{"id": "a"}\n')
+        repo.commit("waiting copy").git("checkout", "-q", "-")
         for kind in kinds.values():
             repo.write(kind["path"].strip("/") + "/a.x")
         self.assertEqual(repo.run("layout")[1].strip(), "layout: in shape")
@@ -865,6 +882,7 @@ def dropping(word):
     return rows
 
 
+CHILD_ROW = 9  # the line of the first term row that child_glossary writes
 CHILD_MARK = "<!-- child glossary -->"  # a patched rows() tells the child's file from this repo's by it
 
 
@@ -1004,7 +1022,10 @@ class Words(unittest.TestCase):
                 with self.subTest(word=word, term=term):
                     repo = child_glossary(Repo(self), term).write("src/%s_list.py" % term)
                     code, out = repo.run("words")
-                    self.assertEqual((code, hits(out)), (1, [(word, "src/%s_list.py" % term, "-")]), out)
+                    # A tagged word retires one sense, so only the untagged one is a glossary clash. Neither spans.
+                    clashes = [] if prose else [(term, "GLOSSARY.md", str(CHILD_ROW))]
+                    self.assertEqual((code, sorted(hits(out))), (1, sorted(
+                        clashes + [(word, "src/%s_list.py" % term, "-")])), out)
 
     def test_a_child_term_that_repeats_a_claude_settings_term_is_not_honoured(self):
         # This repo's glossary never lets a repo define a term again that it defines. Here it defines `ad <word>` too.
@@ -1018,9 +1039,45 @@ class Words(unittest.TestCase):
             return found if CHILD_MARK in text else found + [(term, ["README.md"], [])]
         with mock.patch.object(check_glossary, "rows", repeated):
             code, out = in_process(repo.root)
-        self.assertEqual((code, hits(out)), (1, [(word, path, "-")]), out)
+        self.assertEqual((code, sorted(hits(out))), (1, sorted([(term, "GLOSSARY.md", str(CHILD_ROW)), (word, path, "-")])), out)
         code, out = in_process(repo.root)  # the same child file, with the term this repo's own: honoured
         self.assertEqual((code, hits(out)), (0, []), out)
+
+    def test_a_child_term_that_defines_a_claude_settings_term_again_is_red(self):
+        # Plan c146 section 6 item 2: a child glossary adds terms and never defines a claude-settings term again.
+        table = check_glossary.rows(check_glossary.read(check_glossary.GLOSSARY))
+        term = next(t for t, _homes, _names in table if ":" not in t)
+        for child in (term, term + "s", term.upper()):  # the term, its plural and another case all read as the term
+            with self.subTest(child=child):
+                code, out = child_glossary(Repo(self), "ad lane", child).run("words")
+                self.assertEqual((code, head(out), hits(out)), (1, "words: out", [(child, "GLOSSARY.md", str(CHILD_ROW + 1))]), out)
+                self.assertIn("defines the claude-settings term '%s' again" % term, out)
+
+    def test_a_tagged_or_camel_child_term_that_defines_a_claude_settings_term_again_is_red(self):
+        table = check_glossary.rows(check_glossary.read(check_glossary.GLOSSARY))
+        term = next(t for t, _homes, _names in table if ":" not in t)
+        pair = next(t for t, _homes, _names in table if re.fullmatch(r"[a-z]+ [a-z]+", t))
+        camel = pair.split()[0] + pair.split()[1].capitalize()
+        for child, shared in ((term + " (this sense)", term), ("`%s` (This Sense)" % term, term), (camel, pair)):
+            with self.subTest(child=child):
+                code, out = child_glossary(Repo(self), "ad lane", child).run("words")
+                self.assertEqual((code, [h[1:] for h in hits(out)]), (1, [("GLOSSARY.md", str(CHILD_ROW + 1))]), out)
+                self.assertIn("defines the claude-settings term '%s' again" % shared, out)
+
+    def test_a_child_term_may_name_its_own_sense_of_a_tagged_word(self):
+        # GLOSSARY.md: a "not" name tagged (this sense) retires one sense of an everyday word, so `block` in an ad
+        # blocker's glossary names its own sense.
+        word = planted(prose=True, one_word=True)
+        code, out = child_glossary(Repo(self), word).run("words")
+        self.assertEqual((code, head(out), hits(out)), (0, "words: in shape", []), out)
+
+    def test_an_unreadable_child_glossary_is_unknown(self):
+        repo = child_glossary(Repo(self), "ad lane").write("README.md")  # one readable file, so the read is not empty
+        with open(os.path.join(repo.root, "GLOSSARY.md"), "w", encoding="utf-16") as handle:
+            handle.write("# Glossary\n")
+        code, out = repo.run("words")
+        self.assertEqual(code, 2, out)
+        self.assertTrue(head(out).startswith("words: unknown"), out)
 
     def test_no_child_glossary_at_the_root_changes_nothing(self):
         word = planted(one_word=True)
@@ -1219,6 +1276,24 @@ class Slugs(unittest.TestCase):
 def live_anchors():
     """The anchors of the live shared rules, read through rule_audit on each call: no case writes one."""
     return rule_audit.claude_md_anchors(rule_audit.rule_text())
+
+
+def settings_copy(test, drop=(), keep=None, merged=False):
+    """A second claude-settings checkout: the rule files of this one at another path, less the anchors in `drop`.
+    `keep`: only the first `keep` of them. `merged`: the text of all of them in the first file alone."""
+    files = []
+    for rel in rule_audit.RULE_FILES:
+        with open(os.path.join(rule_audit.ROOT, rel), encoding="utf-8") as handle:
+            text = handle.read()
+        for anchor in drop:
+            text = text.replace("<!-- rule:%s -->" % anchor, "")
+        files.append((rel.replace(os.sep, "/"), text))
+    if merged:
+        files = [(files[0][0], "\n".join(text for _, text in files))]
+    repo = Repo(test)
+    for rel, text in files[:keep]:
+        repo.write(rel, text)
+    return repo
 
 
 class Supersede(unittest.TestCase):
@@ -1470,28 +1545,11 @@ class Supersede(unittest.TestCase):
         code, out = self.child("`legacy/` is a known exemption from the no-print check.").run("supersede")
         self.assertEqual((code, out.splitlines()), (0, ["supersede: in shape - 1 file(s) read"]), out)
 
-    def settings_copy(self, drop=(), keep=None, merged=False):
-        """A second claude-settings checkout: the rule files of this one at another path, less the anchors in `drop`.
-        `keep`: only the first `keep` of them. `merged`: the text of all of them in the first file alone."""
-        files = []
-        for rel in rule_audit.RULE_FILES:
-            with open(os.path.join(rule_audit.ROOT, rel), encoding="utf-8") as handle:
-                text = handle.read()
-            for anchor in drop:
-                text = text.replace("<!-- rule:%s -->" % anchor, "")
-            files.append((rel.replace(os.sep, "/"), text))
-        if merged:
-            files = [(files[0][0], "\n".join(text for _, text in files))]
-        repo = Repo(self)
-        for rel, text in files[:keep]:
-            repo.write(rel, text)
-        return repo
-
     def test_a_second_claude_settings_checkout_is_na(self):
         every = list(dict.fromkeys(live_anchors()))
         # Rule files all present, and nearly all the live anchors: the copy may lag a little behind this checkout.
         for name, drop in (("same anchors", []), ("one anchor less", every[5:6]), ("5% less", every[:len(every) // 20])):
-            repo = self.settings_copy(drop=drop)
+            repo = settings_copy(self, drop=drop)
             with self.subTest(copy=name):
                 held = set(rule_audit.claude_md_anchors(rule_audit.rule_text(repo.root)))
                 self.assertEqual(len(held), len(every) - len(drop))  # the fixture holds what the case says
@@ -1500,10 +1558,10 @@ class Supersede(unittest.TestCase):
 
     def test_a_copy_with_too_few_anchors_or_a_missing_rule_file_is_read_as_a_child(self):
         every = list(dict.fromkeys(live_anchors()))
-        cases = (("30% of the anchors less", self.settings_copy(drop=every[:len(every) * 3 // 10])),
-                 ("the first rule file alone", self.settings_copy(keep=1)),
+        cases = (("30% of the anchors less", settings_copy(self, drop=every[:len(every) * 3 // 10])),
+                 ("the first rule file alone", settings_copy(self, keep=1)),
                  # All the anchors, but not in the rule files: the second path is missing.
-                 ("all the anchors in one file", self.settings_copy(merged=True)))
+                 ("all the anchors in one file", settings_copy(self, merged=True)))
         for name, repo in cases:
             with self.subTest(copy=name):
                 code, out = repo.run("supersede")
@@ -1906,6 +1964,270 @@ class BadRoot(unittest.TestCase):
                 self.assertTrue(done.stdout.startswith("layout: "), (done.stdout, done.stderr))
                 self.assertNotIn("usage:", done.stderr)
                 self.assertIn(done.returncode, (0, 1), done.stdout)
+
+
+# The restates group: a child unit that copies claude-settings record text is refused. A unit that names a record is a
+# citation, with or without its ruling time, and passes. The fixtures read the records of this checkout at test time,
+# so no case pastes record text.
+CHECKOUT = os.path.dirname(os.path.dirname(PROBES))
+RECORDS = os.path.join(CHECKOUT, layout.path(CHECKOUT, "decisions"))
+GRANT = "standing-merge-grant"
+DATE_TIME = re.compile(r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}")
+COMMON = "the owner withdraws it in chat"  # a short phrase the records use
+RUN = "the merge tool of each repo"  # a six-word run the grant record holds
+# Words that no record holds in a run of five: the filler a case joins to a copied run.
+FILLER = ("Our lanes keep private labels for each sprint, and the squad reads them at the Friday sync "
+          "before any folder moves; the wiki page stays the only index for the team.")
+
+
+def record(slug):
+    """One record's text, read on each call: a case never copies it."""
+    with open(os.path.join(RECORDS, slug + ".md"), encoding="utf-8") as handle:
+        return handle.read()
+
+
+def record_slugs():
+    return sorted(name[:-len(".md")] for name in os.listdir(RECORDS) if name.endswith(".md"))
+
+
+def plain_tokens(text):
+    """The lowercase letter runs of `text`. A case joins them with spaces, so every reader counts the same words."""
+    return re.findall(r"[a-z]+", text.lower())
+
+
+def grant_line():
+    """The first body line of the grant record of 15 or more words, with no quote, code span, angle bracket, heading,
+    colon or digit: nothing a reader strips or cuts."""
+    for line in record(GRANT).splitlines():
+        body = line.strip().lstrip("-").strip()
+        if len(body.split()) >= 15 and not re.search(r"[\"`<>#:\d]", body):
+            return body
+    raise AssertionError("the grant record holds no plain body line of 15 words")
+
+
+def grant_time():
+    """The first `YYYY-MM-DD HH:MM` the grant record holds."""
+    return DATE_TIME.search(record(GRANT)).group(0)
+
+
+def other_time():
+    """A time that another record holds and the grant record does not."""
+    grant = record(GRANT)
+    for slug in record_slugs():
+        if slug == GRANT:
+            continue
+        for found in DATE_TIME.findall(record(slug)):
+            if found not in grant:
+                return found
+    raise AssertionError("no other record holds a time the grant record lacks")
+
+
+def grant_quote():
+    """The first double-quoted span of 15 or more words in the grant record."""
+    for quote in re.findall(r'"([^"\n]+)"', record(GRANT)):
+        if len(quote.split()) >= 15:
+            return quote
+    raise AssertionError("the grant record holds no quote of 15 words")
+
+
+def item_for(out, where):
+    """The item line that names `where`, a file and line, or None."""
+    pattern = re.compile(re.escape(where) + r"(?!\d)")
+    return next((line for line in out.splitlines()[1:] if pattern.search(line)), None)
+
+
+class Restates(unittest.TestCase):
+    """A unit that copies a run of record text is refused. A unit with under 12 shared words passes, a record citation
+    included."""
+
+    def child(self, *units, rel="CLAUDE.md"):
+        """A child whose `rel` holds `units`, a blank line between each: each one is a unit of its own."""
+        return Repo(self).write(rel, "\n\n".join(units) + "\n")
+
+    def assert_refused(self, repo, where, slug=GRANT):
+        """The probe refuses exactly one unit, at `where`, and that item names the record `slug`. The item comes first:
+        it shows the unit was read at all, before the verdict is checked."""
+        code, out, err = repo.probe("restates")
+        item = item_for(out, where)
+        self.assertIsNotNone(item, "the unit at %s was not refused: %s%s" % (where, out, err))
+        self.assertTrue(head(out).startswith("restates: out - 1 line(s)"), "the verdict is not one refusal: " + out)
+        self.assertEqual(code, 1, "the refusal exits with the wrong code: %s%s" % (out, err))
+        self.assertIn(slug, item, "the item at %s names no record %s: %s" % (where, slug, item))
+
+    def assert_passes(self, repo, files=1):
+        """The probe reads `files` file(s) and refuses nothing. The file count comes first: it shows what was read."""
+        code, out, err = repo.probe("restates")
+        self.assertEqual(head(out), "restates: in shape - %d file(s) read" % files,
+                         "the unit was refused, or the file was not read: %s%s" % (out, err))
+        self.assertEqual(code, 0, "the verdict is in shape but the exit is not 0: %s%s" % (out, err))
+
+    def test_a_copied_record_line_is_refused(self):
+        self.assert_refused(self.child("- " + grant_line()), "CLAUDE.md:1")
+
+    def test_a_named_record_with_its_ruling_time_passes(self):
+        # A citation: it names the record and its ruling time, and copies no run of the record's words.
+        unit = "- Merge grant (owner, %s): see claude-settings %s. Batch runner details here." % (grant_time(), GRANT)
+        self.assert_passes(self.child(unit))
+
+    def test_a_record_named_in_backticks_with_no_time_passes(self):
+        self.assert_passes(self.child(
+            "- Merge grant: claude-settings `standing-merge-grant`. In this repo, records-only PRs need green checks."))
+
+    def test_a_short_phrase_the_records_also_use_passes(self):
+        self.assert_passes(self.child("- Lane note: %s. This repo runs its own check on drafts only." % COMMON))
+
+    def test_a_short_quoted_owner_phrase_passes(self):
+        # Two phrases under 12 shared words: the records' own phrase, and eleven words of a record line.
+        for phrase in (COMMON, " ".join(plain_tokens(grant_line())[:11])):
+            with self.subTest(phrase=phrase):
+                unit = '- Owner words: "%s". This repo runs its own check on drafts only.' % phrase
+                self.assert_passes(self.child(unit))
+
+    def test_a_quoted_record_name_passes(self):
+        self.assert_passes(self.child('- The "%s" record names the grant, and this repo keeps its own check.' % GRANT))
+
+    # A copy in quotes is still a copy.
+    def test_a_quoted_owner_quote_beside_a_quoted_record_name_is_refused(self):
+        unit = ('- The "%s" record names the grant, and this repo keeps its own check. Owner words: "%s"'
+                % (GRANT, grant_quote()))
+        self.assert_refused(self.child(unit), "CLAUDE.md:1")
+
+    def test_a_copy_in_straight_double_quotes_is_refused(self):
+        self.assert_refused(self.child('- "' + grant_line() + '"'), "CLAUDE.md:1")
+
+    def test_a_copy_in_curly_double_quotes_is_refused(self):
+        self.assert_refused(self.child("- “" + grant_line() + "”"), "CLAUDE.md:1")
+
+    def test_a_lone_double_quote_does_not_hide_a_copy_after_it(self):
+        # The lone quote would pair with the quote before "later" and hide the copy between them.
+        unit = '- A lone " mark comes first, then %s and the word "later" ends it.' % grant_line()
+        self.assert_refused(self.child(unit), "CLAUDE.md:1")
+
+    def test_a_lone_curly_quote_does_not_hide_a_copy_after_it(self):
+        unit = "- A lone “ mark comes first, then %s and the word “later” ends it." % grant_line()
+        self.assert_refused(self.child(unit), "CLAUDE.md:1")
+
+    def test_a_repo_rule_sharing_one_six_word_run_passes(self):
+        unit = ("- Lane note for the team: %s stays the same, while our folder names, review tiers and draft labels "
+                "follow the squad calendar that the wiki page keeps current for every sprint." % RUN)
+        self.assert_passes(self.child(unit))
+
+    def test_a_ruling_time_with_no_record_named_passes(self):
+        self.assert_passes(self.child("- Owner pick, %s, sets the switch for this repo." % grant_time()))
+
+    def test_a_record_named_with_a_time_from_another_record_passes(self):
+        unit = "- Merge grant (owner, %s): see claude-settings %s. Batch runner details here." % (other_time(), GRANT)
+        self.assert_passes(self.child(unit))
+
+    def test_the_child_own_decisions_folder_is_not_a_record_source(self):
+        # The child's own record holds FILLER, and no claude-settings record does: the copy in CLAUDE.md is ordinary text.
+        repo = Repo(self).write("docs/decisions/own-rule.md", "# Own rule\n\n" + FILLER + "\n")
+        self.assert_passes(repo.write("CLAUDE.md", "- " + FILLER + "\n"))
+
+    def test_a_copy_in_a_heading_kind_line_comment_or_code_span_passes(self):
+        line = grant_line()
+        for wrap in ("# %s", "Kind: %s", "<!-- %s -->", "`%s`"):
+            with self.subTest(wrap=wrap):
+                self.assert_passes(self.child(wrap % line))
+
+    def test_twelve_shared_words_of_twenty_four_are_refused(self):
+        # Half the words, and twelve of them: both bounds are inclusive.
+        unit = " ".join(plain_tokens(grant_line())[:12] + plain_tokens(FILLER)[:12])
+        self.assert_refused(self.child("- " + unit), "CLAUDE.md:1")
+
+    def test_twelve_shared_words_of_twenty_five_pass(self):
+        unit = " ".join(plain_tokens(grant_line())[:12] + plain_tokens(FILLER)[:13])
+        self.assert_passes(self.child("- " + unit))
+
+    def test_eleven_shared_words_pass_even_at_half(self):
+        unit = " ".join(plain_tokens(grant_line())[:11] + plain_tokens(FILLER)[:11])
+        self.assert_passes(self.child("- " + unit))
+
+    def test_runs_of_four_shared_words_never_count(self):
+        shared, filler = plain_tokens(grant_line()), plain_tokens(FILLER)
+        # Four runs of four shared words, each followed by two words that no record holds.
+        unit = " ".join(" ".join(shared[5 * i:5 * i + 4] + filler[2 * i:2 * i + 2]) for i in range(4))
+        self.assert_passes(self.child("- " + unit))
+
+    def test_a_lone_backtick_does_not_hide_a_copy_in_the_next_unit(self):
+        lone = "- A lone ` mark sits in this path."
+        self.assert_passes(self.child(lone, "- Run `x` here, and keep this rule short."))
+        self.assert_refused(self.child(lone, "- " + grant_line() + " Run `x` here."), "CLAUDE.md:3")
+
+    def test_a_lone_quote_in_text_does_not_hide_a_copy(self):
+        self.assert_passes(self.child("- Don't merge a red pull request, and keep this rule short."))
+        self.assert_refused(self.child("- Don't merge: " + grant_line() + " The owner's grant decides."), "CLAUDE.md:1")
+
+    def test_comment_marks_inside_a_code_span_do_not_cut_the_unit(self):
+        self.assert_passes(self.child("- Run `git log # main` and `curl //host` before merge."))
+        self.assert_refused(self.child("- Run `git log # main` and `curl //host`, then " + grant_line()), "CLAUDE.md:1")
+
+    def test_a_copy_inside_a_fenced_block_is_not_read(self):
+        fenced = "```\n- " + grant_line() + "\n```"
+        self.assert_passes(self.child(fenced, "- Repo note: this repo keeps its own lane labels."))
+
+    def test_an_unclosed_fence_makes_the_group_unknown(self):
+        code, out, err = self.child("```\n- " + grant_line()).probe("restates")
+        self.assertEqual(code, 2, "an unclosed fence was not unknown: %s%s" % (out, err))
+        self.assertTrue(head(out).startswith("restates: unknown"), "the verdict is not unknown: " + out)
+
+    def test_claude_settings_itself_is_na(self):
+        done = subprocess.run([sys.executable, PROBES, "restates", CHECKOUT], capture_output=True, text=True)
+        self.assertEqual((done.returncode, done.stdout.strip()), (0, "restates: n/a - this is claude-settings"), done.stderr)
+
+    def test_a_claude_settings_copy_that_holds_record_text_is_na(self):
+        repo = settings_copy(self)
+        with open(os.path.join(repo.root, "CLAUDE.md"), encoding="utf-8") as handle:
+            text = handle.read()
+        repo.write("CLAUDE.md", text + "\n- " + grant_line() + "\n")
+        code, out = repo.run("restates")
+        self.assertEqual((code, out.strip()), (0, "restates: n/a - this is claude-settings"), out)
+
+    def test_an_empty_file_is_read_and_passes(self):
+        self.assert_passes(Repo(self).write("CLAUDE.md", ""))
+
+    def test_a_copy_at_the_end_of_a_long_file_is_refused_at_its_own_line(self):
+        # 300 ordinary units, then one copy: the item names the copy's line, and no other unit is refused.
+        units = ["- Repo note %d: %s" % (n, FILLER) for n in range(300)] + ["- " + grant_line()]
+        self.assert_refused(self.child(*units), "CLAUDE.md:%d" % (2 * len(units) - 1))
+
+    def agents_symlink_child(self, *units):
+        """A child whose CLAUDE.md holds `units`, and whose root AGENTS.md is a symlink to it, as real child repos keep it."""
+        repo = self.child(*units)
+        os.symlink("CLAUDE.md", os.path.join(repo.root, "AGENTS.md"))
+        return repo.git("add", "-f", "AGENTS.md")
+
+    def test_an_agents_symlink_to_a_clean_claude_md_is_read_once(self):
+        self.assert_passes(self.agents_symlink_child("- Repo note: this repo keeps its own lane labels."))
+
+    def test_a_copy_read_through_an_agents_symlink_names_claude_md(self):
+        # AGENTS.md is a symlink, so it is read last, after CLAUDE.md. The item still names CLAUDE.md, where the copy is.
+        repo = self.agents_symlink_child("- Own rule for this repo.", "- " + grant_line())
+        self.assert_refused(repo, "CLAUDE.md:3")
+        self.assertNotIn("AGENTS.md", repo.run("restates")[1], "the item names the symlink AGENTS.md, not CLAUDE.md")
+
+
+class RestatesFixtures(unittest.TestCase):
+    """Green controls: the record text the restates cases read is there, in the shape they need. They pass on main."""
+
+    def test_the_records_are_the_checkouts_decisions_folder(self):
+        self.assertTrue(os.path.isdir(RECORDS), RECORDS)
+        self.assertIn(GRANT, record_slugs())
+
+    def test_the_grant_record_gives_a_plain_line_a_time_and_a_quote(self):
+        self.assertGreaterEqual(len(grant_line().split()), 15)
+        self.assertRegex(grant_time(), DATE_TIME)
+        self.assertGreaterEqual(len(grant_quote().split()), 15)
+
+    def test_the_common_phrase_is_in_a_record(self):
+        self.assertTrue(any(COMMON in record(slug) for slug in record_slugs()), "no record holds the common phrase")
+
+    def test_the_six_word_run_is_in_the_grant_record(self):
+        self.assertEqual(len(RUN.split()), 6)
+        self.assertIn(RUN, record(GRANT))
+
+    def test_another_record_holds_a_time_the_grant_record_lacks(self):
+        self.assertNotIn(other_time(), record(GRANT))
 
 
 def tearDownModule():

@@ -347,6 +347,9 @@ meets each item below. What the tool does when it runs is written in `confirm` i
    standing merge grant for the repo: `standing-merge-grant`. The coordinator holds it in a coordinator
    build, and the batch runner runs every merge under it.
    Absent means true. When it is false, a cloud session's `merge <pr> --confirm` stops.
+8. `merge.readyChecks` is an optional list of step names of the repo's `checks` job. On a draft, `merge <pr> --confirm` runs
+   them through `bin/ci-job checks --step NAME ...` before any push and before the ready mark. A FAIL or unknown stops the
+   draft: `lanes-run-no-full-ci-job`, a lane runs no full CI job. Absent: no ready check runs, and one line says so.
 
 ## Adoption checklist, the merge tool
 

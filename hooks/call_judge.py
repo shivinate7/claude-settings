@@ -16,9 +16,12 @@ For the rest, question_form.page_item_hit picks the item writes of this repo's w
 that item_hit refuses gets no model call: guard.py refuses it. The writes that pass and carry options,
 context or steps (question_form.judged_item_writes) go into one prompt, so the call makes one model call, however
 many writes a batch holds. A write that is a re-ask (new `options` plus a `lastAnswer` note) adds NONE_DIRECTION_RULE
-to that one prompt, once, and no other write changes the prompt. The page and the chat box share the seven judge
+to that one prompt, once. A set or update with non-empty `options` adds WIDENING_RULE once: an option that widens what a
+shared tool accepts must carry `widens: true`, and the judge refuses an unmarked one by its option key (decision
+uniform-over-variants). WIDENING_RULE is built from question_form.WIDENS_KEY on each read (module `__getattr__`, no cache), so an
+Agent spawn or a non-item ArtifactData call never imports question_form for it. No other write changes the prompt. The page and the chat box share the eight judge
 items, so both places get the same review. A task item (kind task, or any write that carries `steps`) that carries context, steps or
-options is judged too, on the same seven items and one task rule in PAGE_PROMPT: a step that replaces text
+options is judged too, on the same eight items and one task rule in PAGE_PROMPT: a step that replaces text
 quotes the whole line or value and shows the line after the change in full. A str_replace on `context`
 that passes item_hit is judged on its new_str alone, as a fragment: the prompt tells the model to judge
 only plain words, unexplained ids and pointers outside the item, and never to flag a missing line or
@@ -28,7 +31,22 @@ practice (note page-judge-dead-fragment-fields).
 Veto (an act no override lifts): an Explore spawn whose model field is neither sonnet nor opus. That
 is the Explore row of agent-model-cap, a model guard. Every other refusal is liftable.
 
-Fail open. Any model error, odd answer or unreadable input allows, with one stderr line.
+A question (a box with 2+ options, a page decision) also gets item 8, the past-ruling check: question_form.past_rulings
+adds the decision, debt and step rulings to the same one model call. The check always runs; a task gets it too. When it cannot
+run (a model error, a source that exists and cannot be read, or a refusal that cites a record the model was not
+shown), the question is refused with the Unvetted remedy, unless its own text carries an `Unvetted:` line. An absent
+source allows, with one stderr line.
+
+Fail open. Any other model error, odd answer or unreadable input allows, with one stderr line.
+
+One exception, opus_ask(): the owner's plain Opus ask (decision owner-override, the Opus word) fails CLOSED. It grants
+an override, so a model error, a timeout or an odd answer grants nothing, with one stderr line. override.grant_opus_ask
+calls it, from the prompt hook hooks/local_time.py, only for an owner prompt that carries the whole word `opus` and
+no keyword form. Cost: one haiku call (low effort, OPUS_ASK_TIMEOUT s) for such a prompt, none for any other.
+Its companion opus_scope() only narrows: for a plain ask that opus_ask said yes to, that names no role, and that has
+earlier owner prompts, it names the roles those prompts name. It fails OPEN to every role (None) with one stderr line,
+because the rule is "scope from context, fall back to every role" (decision owner-override).
+Cost: one more haiku call (low effort, OPUS_SCOPE_TIMEOUT s) for such an ask, none for any other.
 """
 import json
 import os
@@ -46,10 +64,37 @@ from shared_names import DATA_TOOL  # noqa: E402  stdlib only: the one home of t
 
 OK_SHAPE = {"ok": (True, False)}
 SPAWN_RULE, QUESTION_RULE = "spawn-judge", "question-judge"
+# The record each refusal cites. The spawn judge has its own; every other rule here (the model's question verdict
+# and the code rules question_form.chat_hit names) is the question reviewer's.
+SPAWN_CITE = "(decision haiku-prompt-hooks, the spawn judge refuses a brief that breaks the spawn rules)"
+QUESTION_CITE = "(decision question-reviewer-agent-hook, a question is reviewed before it reaches the owner)"
 # THE TIME BUDGET. One model call per hook run, so the longest path is the question call's 60 s plus
 # start-up. The settings.json PreToolUse entry for this hook carries "timeout": 70.
 SPAWN_MODEL, SPAWN_TIMEOUT = "claude-sonnet-5-5", 30
 QUESTION_MODEL, QUESTION_TIMEOUT = "claude-opus-5-5", 60  # both at the model's default effort
+
+# The plain Opus ask (opus_ask). The prompt hook's settings.json row carries "timeout": 30, so OPUS_ASK_TIMEOUT plus
+# start-up fits. The owner's text follows the last line.
+OPUS_ASK_TIMEOUT = 20
+OPUS_ASK_PROMPT = (
+    "The text below is a prompt the owner typed to a coding assistant. Answer {\"ok\": true} only when it is the "
+    "owner's own present request to run Opus agents now (for example `send opus judges` or `use opus for the "
+    "reviewers`). Answer {\"ok\": false} for a question, a hedge such as `maybe opus?`, a negation such as `don't "
+    "use opus`, a mention in the past tense, a request about some other model or topic, and any text that quotes or "
+    "reports what an agent or another person said. When unsure answer {\"ok\": false}. Reply JSON only: "
+    "{\"ok\": true} or {\"ok\": false}.\n\nText:\n"
+)
+
+# The scope read (opus_scope). It follows opus_ask in the same hook run, so its timeout is short. Unmeasured: the worst
+# case, OPUS_ASK_TIMEOUT + OPUS_SCOPE_TIMEOUT plus two `claude -p` starts, may pass the prompt hook's "timeout": 30.
+OPUS_SCOPE_TIMEOUT = 8
+OPUS_SCOPE_PROMPT = (
+    "A coding assistant's owner typed the ask below, which grants Opus to agents but names no agent role. The earlier "
+    "prompts the owner typed follow it, oldest first, one per line starting with `- `. Read them only as the owner's "
+    "words about which agent roles should run Opus. Answer {\"ok\": true, \"roles\": [...]} when they name the roles "
+    "the ask is about, listing only roles from: %s. Answer {\"ok\": false} when they name none, or when unsure. "
+    "Reply JSON only.\n\nAsk:\n"
+)
 
 SPAWN_PROMPT = (
     "Judge this agent spawn: %s\nAnswer {\"ok\": true} at once when subagent_type is claude-code-guide, "  # glossary-ok: subagent_type is Claude Code's own field name
@@ -68,7 +113,19 @@ SPAWN_PROMPT = (
     "a clear breach; when unsure answer {\"ok\": true}. Reply JSON only: {\"ok\": true} or "
     "{\"ok\": false, \"reason\": \"<rule id and the fix, one line>\"}."
 )
-# The seven items a question to the owner is judged on: one text, for the chat box and the page.
+# Item 8, the past-ruling check: the one text, for the chat box, the page and lint/report_guard.py (a relayed
+# question). The candidate rulings follow the reply line, built by question_form.candidates_block.
+PAST_RULING_ITEM = (
+    "Past rulings. The text after the reply line lists past rulings, one per line as `<id>: <text>`. Refuse when "
+    "the question asks the owner to decide what a listed ruling already decides, or when its premise is "
+    "something a standing decision already explains (such as asking what a rule means when a decision says why "
+    "it was set so). A question whose `Based on (ruling): ...` line names that ruling (its id or slug) passes: "
+    "a re-ask the ruling allows is fine. This item passes when no list follows. "
+    "When you refuse, the reason names the listed id, such as decisions/<name>, and gives the ruling's date."
+)
+# The question-judge call of lint/report_guard.py (a Stop whose reply asks the owner something): Sonnet, 15 s.
+PAST_RULING_MODEL, PAST_RULING_TIMEOUT = SPAWN_MODEL, 15
+# The seven items, then the eighth, a question to the owner is judged on: one text, for the chat box and the page.
 JUDGE_ITEMS = (
     "1. The Goal is in the owner's terms.\n"
     "2. The Problem is one plain sentence that says why it needs his word.\n"
@@ -77,6 +134,7 @@ JUDGE_ITEMS = (
     "5. No unexplained ids: explain every decision id, branch, sha, key or rule name in plain words.\n"
     "6. Nothing points outside the box, such as an earlier message or an item number.\n"
     "7. One option is recommended.\n"
+    "8. " + PAST_RULING_ITEM + "\n"
     "Reply JSON only: {\"ok\": true} or {\"ok\": false, \"reason\": \"<the item that misses, and the fix, "
     "one line>\"}."
 )
@@ -104,8 +162,8 @@ PAGE_PROMPT = (
     "\"find X and change it to Y\", misses that rule, because the owner then drops the rest of the line. "
     "That rule reaches a task's `steps` and `context` on a set or update; a str_replace reaches only the "
     "top-level string field `context`, never `steps`. A task item is judged only on plain words, "
-    "unexplained ids, pointers outside the item, and that whole-unit rule, and never on the Goal, the "
-    "Problem or a recommended option, because a task has none of them. "
+    "unexplained ids, pointers outside the item, that whole-unit rule and item 8, and never on the Goal, "
+    "the Problem or a recommended option, because a task has none of them. "
     "Block only on a clear miss; when unsure answer {\"ok\": true}.\n" + JUDGE_ITEMS
 )
 # A re-ask write gives an answered item new options and carries the owner's `lastAnswer` note. The text is appended to
@@ -118,6 +176,29 @@ NONE_DIRECTION_RULE = (
     "further pick from the owner, block it: the item should close and the note be filed as a step. "
     "The reason names no target."
 )
+# A write that sets options may widen what a shared tool accepts (decision uniform-over-variants). Appended like
+# NONE_DIRECTION_RULE, only for such a call. The mark's key comes from question_form, the one home, so the text is built
+# where it is used: the light-import exit paths never import question_form for it.
+WIDENING_TEMPLATE = (
+    "This call sets options. An option that widens what a shared tool accepts (a second accepted form, an allow-list "
+    "entry, a per-repo exception) must carry `%s: true`, the JSON boolean true, not the string \"true\". Block an unmarked widening option, and name its option key in "
+    "the reason. An option that only names a repo, or changes a repo to fit the shared tool, is not widening. A marked "
+    "option passes this rule. When unsure, allow."
+)
+
+
+def widening_rule():
+    """The widening rule's text, with the mark's key from question_form.WIDENS_KEY."""
+    import question_form
+    return WIDENING_TEMPLATE % question_form.WIDENS_KEY
+
+
+def __getattr__(name):  # PEP 562: the module constant WIDENING_RULE costs no import until it is read
+    if name == "WIDENING_RULE":
+        return widening_rule()
+    raise AttributeError("module %r has no attribute %r" % (__name__, name))
+
+
 # tool name -> (prompt, model, timeout, rule, fallback reason)
 JUDGES = {
     "Agent": (SPAWN_PROMPT, SPAWN_MODEL, SPAWN_TIMEOUT, SPAWN_RULE,
@@ -141,12 +222,18 @@ def writes_an_item(args):
     return args.get("collection") == "items"
 
 
+def sets_options(write):
+    """True for a judged set or update whose data has non-empty `options`."""
+    data = write.get("data") if write.get("op") in ("set", "update") else None
+    return isinstance(data, dict) and bool(data.get("options"))
+
+
 def is_reask(write):
     """True for a judged set or update whose data has non-empty `options` and a `lastAnswer` dict with no `choice` or
     choice "none", and a note that is a string, non-empty after strip."""
-    data = write.get("data") if write.get("op") in ("set", "update") else None
-    if not isinstance(data, dict) or not data.get("options"):
+    if not sets_options(write):
         return False
+    data = write["data"]
     answer = data.get("lastAnswer")
     if not isinstance(answer, dict) or answer.get("choice", "none") != "none":
         return False  # step 4 keeps a picked choice: that write is no "none of these" re-ask
@@ -158,6 +245,51 @@ def invoke_model(*args, **kwargs):
     """The model call. A module-level name, so a test can replace it."""
     from decision_watch import invoke_model as home
     return home(*args, **kwargs)
+
+
+def opus_ask(text):
+    """True only when the model answers {"ok": true} to the owner's prompt `text` as a present request to run Opus
+    agents. Fails closed: an error, a timeout or an odd answer is False with one stderr line; a plain
+    {"ok": false} is False with none."""
+    try:
+        import decision_watch  # lazy: the one home of the model's name
+        verdict, error = invoke_model(OPUS_ASK_PROMPT + text, model=decision_watch.MODEL,
+                                      timeout=OPUS_ASK_TIMEOUT, shape=OK_SHAPE, effort="low")
+        if error:
+            raise ValueError(" ".join(str(error).split()))
+        ok = verdict.get("ok") if isinstance(verdict, dict) else None
+        if ok is True:
+            return True
+        if ok is not False:
+            raise ValueError("the answer has no true or false ok")
+        return False
+    except Exception as exc:
+        print("call judge: opus ask grants nothing: %s" % " ".join(str(exc).split()), file=sys.stderr)
+        return False
+
+
+def opus_scope(text, context):
+    """The roles the owner's earlier prompts `context` (a list of strings, oldest first) name for the plain ask `text`,
+    as the model's raw role strings (a list), or None for every role. Fails open to None with one stderr line: an
+    error, a timeout or an odd answer. It does not filter: override._scoped_roles is the one filter, against ASK_ROLES."""
+    try:
+        import decision_watch  # lazy: the one home of the model's name
+        from override import ASK_ROLES  # the one home of the roles; a copy would drift
+        prompt = (OPUS_SCOPE_PROMPT % ", ".join(ASK_ROLES) + text + "\n\nEarlier prompts:\n"
+                  + "\n".join("- " + " ".join(entry.split()) for entry in context))
+        verdict, error = invoke_model(prompt, model=decision_watch.MODEL, timeout=OPUS_SCOPE_TIMEOUT,
+                                      shape=OK_SHAPE, effort="low")
+        if error:
+            raise ValueError(" ".join(str(error).split()))
+        if verdict.get("ok") is not True:
+            return None
+        roles = verdict.get("roles")
+        if not isinstance(roles, list) or not all(isinstance(role, str) for role in roles):
+            raise ValueError("the answer has no list of roles")
+        return roles
+    except Exception as exc:
+        print("call judge: opus scope grants every role: %s" % " ".join(str(exc).split()), file=sys.stderr)
+        return None
 
 
 def explore_off_model(tool, args):
@@ -174,18 +306,46 @@ def refuse(payload, tool, args, rule, reason):
     if reason.startswith(rule):
         reason = reason[len(rule):].lstrip(" :-")
     vetoed = explore_off_model(tool, args)
+    text = reason + " " + {SPAWN_RULE: SPAWN_CITE}.get(rule, QUESTION_CITE)  # the text both paths below carry
     try:
         import guard_core
         guard_core.set_log_session(payload.get("session_id"))
         guard_core.set_override_context(payload.get("session_id"), payload.get("agent_id"))
         guard_core.set_override_veto(lambda: vetoed)
-        guard_core.refuse(tool, "deny", rule, reason, "")
+        guard_core.refuse(tool, "deny", rule, text, "")
     except Exception:  # no guard_core: no override can be read, so the refusal stands
         pass
     print(json.dumps({"hookSpecificOutput": {"hookEventName": "PreToolUse",
                                              "permissionDecision": "deny",
-                                             "permissionDecisionReason": rule + ": " + reason}}))
+                                             "permissionDecisionReason": rule + ": " + text}}))
     return 0
+
+
+UNVETTED_REMEDY = (
+    "the past-ruling check could not run (%s), so this question would reach the owner unchecked. Add the line "
+    "`Unvetted: <why it could not be checked>` to the question (a page item: to `context`) and send it again. "
+    "The owner then reads it marked as unchecked.")
+
+
+def unvetted(payload, tool, args, rule, why, units):
+    """The check could not run. Refuse with the Unvetted remedy, unless every question's own text carries the
+    `Unvetted:` line (a session cannot write it ahead of time to skip a check that can run)."""
+    import question_form
+    if all(question_form.has_unvetted(marker) for marker, _ in units):
+        return 0
+    return refuse(payload, tool, args, rule, UNVETTED_REMEDY % why)
+
+
+def past_ruling_context(payload, units):
+    """(prompt tail, candidate ids, unreadable sources) for the questions in `units`. Prints the one stderr line for
+    the sources not searched. The only process of a judged call besides the model runs here."""
+    import question_form
+    cwd = payload.get("cwd") or ""
+    candidates, unknown = question_form.past_rulings(" ".join(words for _, words in units),
+                                                     question_form._git_root_of(cwd) or cwd or os.getcwd())
+    print(question_form.unknown_line(unknown), file=sys.stderr)
+    return (question_form.candidates_block(candidates, unknown), question_form.candidate_ids(candidates),
+            question_form.unreadable_sources(unknown))
 
 
 def main():
@@ -197,7 +357,8 @@ def main():
         if not isinstance(args, dict):
             raise ValueError("tool_input is not an object")
         prompt, model, timeout, rule, fallback = JUDGES[tool]
-        reask = False
+        units = []  # (Unvetted marker text, words) of each question this call asks the owner
+        reask = widening = False
         if tool == "AskUserQuestion":
             import question_form
             code_rule, matched = question_form.chat_hit(args)
@@ -205,6 +366,7 @@ def main():
                 reason = "%s (%s)" % (question_form.CHAT_REASONS[code_rule], matched)
                 return refuse(payload, tool, args, code_rule, reason)
             shown = json.dumps(args, ensure_ascii=False)
+            units = question_form.chat_units(args)
         elif tool == DATA_TOOL:
             if args.get("action") not in PAGE_WRITE_ACTIONS or not writes_an_item(args):
                 return 0
@@ -214,23 +376,38 @@ def main():
             if not judged:  # guard.py refuses a hit; no write carries options, context or steps
                 return 0
             shown = json.dumps(judged, ensure_ascii=False)
+            units = question_form.page_units(judged)
             reask = any(is_reask(w) for w in judged)
+            widening = any(sets_options(w) for w in judged)
         else:
             shown = json.dumps(args, ensure_ascii=False)
+        tail, ids = "", []
+        if units:
+            tail, ids, unreadable = past_ruling_context(payload, units)
+            if unreadable:
+                return unvetted(payload, tool, args, rule, "; ".join(unreadable), units)
         full = prompt % shown
         if reask:
             full += "\n" + NONE_DIRECTION_RULE  # after `%`, so the rule's text never meets the formatter
-        verdict, error = invoke_model(full, model=model, timeout=timeout, shape=OK_SHAPE, effort=None)
+        if widening:
+            full += "\n" + widening_rule()
+        verdict, error = invoke_model(full + tail, model=model, timeout=timeout, shape=OK_SHAPE, effort=None)
     except Exception as exc:
         print("call judge failed open: %s" % " ".join(("%s: %s" % (type(exc).__name__, exc)).split()),
               file=sys.stderr)
         return 0
+    if error and units:  # a question is never judged silently: no verdict means Unvetted
+        return unvetted(payload, tool, args, rule, " ".join(str(error).split()), units)
     if error:
         print("call judge failed open: %s" % " ".join(str(error).split()), file=sys.stderr)
         return 0
     if verdict.get("ok") is False:
         reason = verdict.get("reason")
-        return refuse(payload, tool, args, rule, reason if isinstance(reason, str) and reason.strip() else fallback)
+        reason = reason if isinstance(reason, str) and reason.strip() else fallback
+        cite = question_form.ruling_cite(reason, ids) if units else ""
+        if cite == "bogus":  # the answer cites a record the model was not shown: no usable verdict
+            return unvetted(payload, tool, args, rule, "the review cited a record that was not in the list", units)
+        return refuse(payload, tool, args, question_form.PAST_RULING_RULE if cite else rule, reason)
     return 0
 
 

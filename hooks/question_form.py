@@ -4,10 +4,13 @@ chat question box (AskUserQuestion) and a write of a waiting-page item (Artifact
 question-form holds the ruling; rule `style-question-form` holds the text.
 
     chat_hit(tool_input) -> (rule, matched)   an AskUserQuestion input; judges each question with 2+ options
-    item_hit(op, entry)  -> (rule, matched)   one waiting-page write: set, update or str_replace
+    item_hit(op, entry, cwd) -> (rule, matched)   one waiting-page write: set, update or str_replace
 
 ("", "") is a pass. hooks/call_judge.py calls chat_hit and page_item_hit; hooks/guard.py data_tool_hit calls
-page_item_hit, which filters the ArtifactData writes by url and collection and then calls item_hit. Nothing here writes a file or starts a process.
+page_item_hit, which filters the ArtifactData writes by collection and url and then calls item_hit; a write to another page gets only the check for an option keyed none. Nothing here writes a file. The only process it starts is the one git read of past_rulings, for a caller that makes a model call anyway.
+
+    past_rulings(text, repo_root) -> (candidates, unknown)   the decision, debt and step rulings the judge reads
+    key_overlap(reply, earlier)   -> clashing option keys     lint/report_guard.py rule question-keys
 
 THE FORM. A decision on the page (in `context`), or a chat question with 2+ options (in `question`):
 
@@ -107,7 +110,8 @@ CHAT_FORM_REASON = FORM_REASON + (" In the question box the lines go in the ques
 STAKE_REASON = ("A decision is the owner's only when he can judge it. Write the Problem line as "
                 "\"Problem (<stake>): <the problem, and why it needs his word>\", where stake is one of %s. "
                 "A stood pick may write \"Problem: <text>\". If no stake fits, take your own pick and set "
-                "stands: true." % ", ".join(OWNER_STAKES))
+                "stands: true. (decision owner-judge-test, a decision reaches the owner only when he can judge it)"
+                % ", ".join(OWNER_STAKES))
 
 
 def _lines_hit(text, stands=False):
@@ -282,13 +286,14 @@ def port_item_hit(op: str, data) -> str:
     return ""
 
 
-def _write_data(entry):
-    """The data of one write: `data`, else the JSON in `file_path`. None when neither reads."""
+def _write_data(entry, cwd=""):
+    """The data of one write: `data`, else the JSON in `file_path`, a relative path read against the
+    payload's `cwd` (the hook process's own cwd is not the session's). None when neither reads."""
     data = entry.get("data")
     path = entry.get("file_path")
     if data is None and isinstance(path, str) and path:
         try:
-            with open(path, encoding="utf-8") as f:
+            with open(os.path.join(cwd, path) if cwd else path, encoding="utf-8") as f:
                 data = json.load(f)
         except Exception:
             return None
@@ -324,6 +329,9 @@ WIDENS_MARK = re.compile("|".join(_words_pattern(t) for t in (WIDENS_TEXT, LEGAC
 RECOMMENDED = re.compile(r"\(Recommended\)", re.I)
 
 
+WIDENS_KEY = "widens"  # the Python home of the mark's key; call_judge.WIDENING_RULE names it too, and skills/waiting-page/page.html reads the literal in JS
+
+
 def widens_pick_hit(data) -> str:
     """The matched text when this write's `pick` (a str, or a list of keys) names an option it marks
     `widens: true`. An update that carries `pick` without `options` cannot see the stored options and passes."""
@@ -336,7 +344,7 @@ def widens_pick_hit(data) -> str:
         return ""  # an absent or null pick picks nothing, so it never matches a keyless option
     keys = {p for p in pick if isinstance(p, str)}
     if any(isinstance(o, dict) and isinstance(o.get("key"), str) and o["key"] in keys
-           and o.get("widens") is True for o in options):
+           and o.get(WIDENS_KEY) is True for o in options):
         return "pick names a widening option"
     return ""
 
@@ -361,9 +369,11 @@ COMMAND_REASON = ("A step never sends the owner to a file for a command, and nev
 # A press: press, click, tap in any form; an imperative approve, merge, hit, turn on at the start of
 # a clause, `you` allowed before it (a command to the owner, so "the PR merged" and "to merge"
 # pass); mark ... ready with a PR or #N as its object, or with "on <ref>" after ready. "press on"
-# is not a press, and neither is a press of the waiting page's own buttons: it needs no link.
-_CLAUSE = r"(?:^|[.;:!?\n]\s*|,\s*|\b(?:and|then|or|please)\s+)(?:you\s+)?"
-_PAGE_BUTTON = r"(?!\s+(?:the\s+)?[\"'“‘]?(?:send|mark\s+done|take\s+my\s+pick)\b)"
+# is not a press, and neither is a press of the waiting page's own buttons or of this item on the
+# page: it needs no link. "this item's" link may lead off the page, so it stays a press.
+_CLAUSE = r"(?:^\s*|[.;:!?\n]\s*|,\s*|\b(?:and|then|or|please)\s+)(?:you\s+)?"
+_PAGE_BUTTON = (r"(?!\s+(?:the\s+)?[\"'“‘]?(?:send|mark\s+done|take\s+my\s+pick)\b"
+                r"|\s+this\s+item\b(?!['’]s))")
 # An item or step number on the page, "item #47" or "step #2", is not a PR ref.
 _REF = r"(?<!\bitem\s)(?<!\bstep\s)(?<!\bitem)(?<!\bstep)#\s*(\d+)"
 PRESS_VERB = re.compile(r"\b(?:press(?!\s+on\b(?!\s+(?:the|this|that)\b))(?:es|ed|ing)?"
@@ -432,12 +442,29 @@ def _flat_text(value) -> str:
 
 
 # A clause whose subject is the session ("The session merges it after your pick.") and that names
-# no `you`: the session makes that press, so the owner presses nothing. Only that clause is excused. A
-# press in another clause stays ("..., then press Merge"), and so does a clause that names `you`.
+# no `you` and no owner who acts ("the owner clicks Approve", "Shivam approves it"): the session makes
+# that press, so the owner presses nothing. Only that clause is excused. A press in another clause
+# stays ("..., then press Merge", "...: press Merge", "... but click Merge"). An owner's name with no
+# act after it ("as the owner asked", "after Shivam's OK"), a past act ("after he approved it") and a
+# press of the page's own button ("after he hits Send") ask the owner for nothing.
 SESSION_PRESS = re.compile(r"^\s*(?:the|a|this)\s+session\b", re.I)
-_CLAUSE_BREAK = re.compile(r",|;|(?<=[.!?])\s+|\n|\b(?:then|and)\b", re.I)
+_CLAUSE_BREAK = re.compile(r",|;|:|\(|\s-\s|(?<=[.!?])\s+|\n|\b(?:then|and|but|so|or)\b", re.I)
+# The clauses left after the excused ones are joined with `;`: PRESS_VERB reads it as a clause start, so
+# "... but you approve it" stays a press, and mark ... ready reads across it, as across the cut break.
+_CLAUSE_JOIN = "; "
 OWNER_YOU = re.compile(r"\byou\b", re.I)
+OWNER_NAME = re.compile(r"\b(?:the\s+owner|shivam|he)\b", re.I)
+# The act is the verb the name is subject of: a modal or an -ly word may come between, so "Shivam will
+# approve it" acts and "the owner clicked Approve" (the button's name, after a past act) does not.
+OWNER_ACT = re.compile(r"(?:\s+(?:will|can|must|should|may|then|also|first|now|\w+ly))*\s+"
+                       r"(?:press(?:es|ing)?|click(?:s|ing)?|tap(?:s|ping)?|approv(?:e|es|ing)"
+                       r"|merg(?:e|es|ing)|hit(?:s|ting)?|turn(?:s|ing)?\s+(?:it\s+)?on)\b" + _PAGE_BUTTON, re.I)
 _PRESS_LEAD = frozenset(("you", "and", "then", "or", "please"))
+
+
+def _owner_acts(clause) -> bool:
+    """True when an owner's name in `clause` is the subject of a present or future press or act."""
+    return any(OWNER_ACT.match(clause, m.end()) for m in OWNER_NAME.finditer(clause))
 
 
 def _owner_press_text(label, how) -> tuple:
@@ -448,15 +475,16 @@ def _owner_press_text(label, how) -> tuple:
     after your pick." is the session's act, and "Click Merge on GitHub" is the owner's."""
     text = label + ". " + how
     clauses = [c for c in _CLAUSE_BREAK.split(how) if c and c.strip()]
-    session = [c for c in clauses if SESSION_PRESS.search(c) and not OWNER_YOU.search(c)]
+    session = [c for c in clauses if SESSION_PRESS.search(c) and not OWNER_YOU.search(c)
+               and not _owner_acts(c)]
     if not session:
         return text, text
     done = " ".join(session).lower()
     verbs = [next((w for w in re.findall(r"[a-z]+", m.group().lower()) if w not in _PRESS_LEAD), "")
              for m in PRESS_VERB.finditer(label)]
     label_ok = all(v and re.search(r"\b" + v, done) for v in verbs)
-    rest = [c for c in clauses if c not in session]
-    return text, " ".join(([] if label_ok else [label]) + rest)
+    rest = _CLAUSE_JOIN.join(c for c in clauses if c not in session)
+    return text, ("" if label_ok else label + ".\n") + rest
 
 
 def _press_field_ok(text, links, context="", press_text=None) -> bool:
@@ -856,9 +884,9 @@ def form_str_replace_hit(entry):
     return PASS
 
 
-def item_hit(op, entry):
+def item_hit(op, entry, cwd=""):
     """(rule, matched) for one write of a waiting item that a rule refuses, else ("", "")."""
-    data = _write_data(entry)
+    data = _write_data(entry, cwd)
     hit = item_field_hit(op, entry, data)
     if hit:
         return "item-field-rendered", hit
@@ -933,15 +961,38 @@ def _git_root_of(cwd):
         here = parent
 
 
-def waiting_page_root(tool_input, cwd):
-    """The git root of cwd's repo when the call's url is that repo's waiting page (lint/layout.py, the one
-    home), else None. A repo with no page reads as unknown, and its calls are not judged."""
+def _layout():
+    """lint/layout.py, the one home of the layout and the mockup home."""
     lint = os.path.join(HERE, "..", "lint")
     if lint not in sys.path:
         sys.path.append(lint)
     import layout
+    return layout
+
+
+def waiting_page_root(tool_input, cwd):
+    """The git root of cwd's repo when the call's url is that repo's waiting page (lint/layout.py, the one
+    home), else None. A repo with no page reads as unknown; only the none-key check judges its calls."""
+    layout = _layout()
     root = _git_root_of(cwd)
     return root if root and layout.is_waiting_page_url(root, tool_input.get("url")) else None
+
+
+def design_file_problems(writes, root):
+    """[(doc_id, slug, sentence)] for each `designs` entry in `writes` (design_writes' picture writes) that has no
+    `file`, or whose `file` lint/layout.py mockup_home_problem refuses against this machine's home. The sentence names
+    the design folder and the field, never the refused path. An entry that is no dict has no file. Judges the shape
+    only: it does not ask origin, and starts no process (rule mockup-home)."""
+    layout = _layout()
+    found = []
+    for _op, doc_id, data in design_writes(writes):
+        designs = data.get("designs")
+        for entry in designs if isinstance(designs, list) else []:
+            entry = entry if isinstance(entry, dict) else {}
+            problem = layout.mockup_home_problem(root, entry.get("file"))
+            if problem:
+                found.append((doc_id, str(entry.get("slug") or "?"), problem))
+    return found
 
 
 def is_waiting_page(tool_input, cwd) -> bool:
@@ -951,7 +1002,7 @@ def is_waiting_page(tool_input, cwd) -> bool:
 
 def page_item_hit(tool_input, cwd=""):
     """((rule, matched), writes) for one ArtifactData call. `writes` are the (op, entry) item writes of
-    this repo's waiting page, empty for a read, another collection or another page. The hit is the first
+    this repo's waiting page, empty for a read, another collection or another page (such a write still gets the check for an option keyed none). The hit is the first
     write that a rule refuses, else ("", "")."""
     if not isinstance(tool_input, dict):
         return PASS, []
@@ -960,13 +1011,33 @@ def page_item_hit(tool_input, cwd=""):
     else:
         entries = [(tool_input.get("action"), tool_input)]
     writes = [(op, e) for op, e in entries if op in ITEM_OPS and e.get("collection") == WAITING_ITEMS]
-    if not writes or not is_waiting_page(tool_input, cwd):  # a read or another collection loads nothing more
+    if not writes:  # a read or another collection loads nothing more
         return PASS, []
+    if not is_waiting_page(tool_input, cwd):
+        # The cwd's page is unknown, or the url is another's: only the option-key check still reads the
+        # write, and refuses only a key none. No writes return, so no other check or model review follows.
+        return keyed_options_hit(writes, cwd), []
     for op, entry in writes:
-        hit = item_hit(op, entry)
+        hit = item_hit(op, entry, cwd)
         if hit[0]:
             return hit, writes
     return PASS, writes
+
+
+def keyed_options_hit(writes, cwd=""):
+    """(rule, matched) for the first of `writes` that has the waiting-page decision shape (an `options`
+    list) and an option keyed none, else ("", ""). Only the key none: the page reserves it, so it blocks the
+    item. Judged whatever page the call names, since the page cannot be named reliably (another checkout's
+    page, or a repo with no page key). Any other key, and any other shape, is no waiting-page item to this
+    check, so it passes. A task, a note and a closed item pass, as in option_letter_hit."""
+    for op, entry in writes:
+        if op == "str_replace":  # carries no options: its shape, and so its page, is unseen
+            continue
+        data = _write_data(entry, cwd)
+        options = data.get("options") if _open_decision(data) else None
+        if isinstance(options, list) and any(_keyed_none(o) for o in options):
+            return "option-letter-keys", NONE_KEY_HIT
+    return PASS
 
 
 def design_writes(writes):
@@ -1075,14 +1146,26 @@ def key_named_hit(texts) -> str:
     return ""
 
 
+NONE_KEY_HIT = "option keyed none"
+
+
+def _open_decision(data) -> bool:
+    """True for the data of an open decision. A task, a note and a closed item are not judged. The one filter
+    of option_letter_hit and keyed_options_hit."""
+    return isinstance(data, dict) and data.get("kind", "decision") == "decision" and data.get("status") != "closed"
+
+
+def _keyed_none(option) -> bool:
+    """True for an option keyed none, the key the page reserves for its own "none of these"."""
+    return isinstance(option, dict) and option.get("key") == OPTION_NONE_KEY
+
+
 def option_letter_hit(op: str, data) -> str:
     """The matched text when this write of a waiting-page decision keys an option by anything but its
     position's letter, has a label that opens with another letter's tag, or names an option in its text by a
     letter-and-digit key. A task, a note and a
     closed item pass; an update that carries no `options` has no keys to judge."""
-    if not isinstance(data, dict) or data.get("kind", "decision") != "decision":
-        return ""
-    if data.get("status") == "closed":
+    if not _open_decision(data):
         return ""
     options = data.get("options")
     if isinstance(options, list):
@@ -1091,8 +1174,8 @@ def option_letter_hit(op: str, data) -> str:
             key = o.get("key") if isinstance(o, dict) else None
             if not isinstance(key, str):
                 return "option with no string key"
-            if key == OPTION_NONE_KEY:
-                return "option keyed none"
+            if _keyed_none(o):
+                return NONE_KEY_HIT
             if key in seen:
                 return "option key that repeats"
             seen.add(key)
@@ -1142,7 +1225,8 @@ ITEM_FIELDS_PAGE = os.path.join(HERE, "..", "skills", "waiting-page", "page.html
 ITEM_FIELD_REASON = ("The waiting page draws only the top-level item fields that its itemFields block "
                      "lists (skills/waiting-page/page.html). Draw the field on the page and add it to "
                      "that block, or leave it out of the write. An update may remove a stored field "
-                     "with {\"__delete__\": true}.")
+                     "with {\"__delete__\": true}. "
+                     "(decision item-field-rendered, a waiting item names only fields the page draws)")
 
 
 def _item_fields(path):
@@ -1251,7 +1335,359 @@ PAGE_REASONS = {"port-question": PORT_REASON, "uniform-pick": WIDENS_REASON, "pr
                 DEPARTS_RULE: PAGE_DEPARTS_REASON,
                 "option-letter-keys": LETTER_KEYS_REASON, "rework-off-page": REWORK_REASON}
 CHAT_STAKE_REASON = ("A question is the owner's only when he can judge it. Write the Problem line as "
-                     "\"Problem (<stake>): <the problem, and why it needs his word>\", where stake is one of %s."
+                     "\"Problem (<stake>): <the problem, and why it needs his word>\", where stake is one of %s. "
+                     "(decision owner-judge-test, a decision reaches the owner only when he can judge it)"
                      % ", ".join(OWNER_STAKES))
 CHAT_REASONS = {"uniform-pick": CHAT_WIDENS_REASON, "press-link": CHAT_PRESS_LINK_REASON,
                 FORM_RULE: CHAT_FORM_REASON, STAKE_RULE: CHAT_STAKE_REASON, DEPARTS_RULE: DEPARTS_REASON}
+
+
+# ------------------------------------------------------------------ past rulings: the owner is never asked twice
+#
+# Decision question-form holds the ruling. `past_rulings` gathers what the owner already decided, so the one
+# question judge (hooks/call_judge.py, and lint/report_guard.py for a relayed question) can refuse a question a
+# standing record settles. Sources: docs/decisions and docs/debts (every record, one index line each), and the
+# ruling sentences of the `roadmap` ref's step notes (the 30 with the most word overlap). Closed page items are
+# always unknown: a hook cannot call the Artifact tool, and the decision records carry their rulings.
+# Cost: one git process, only when the caller already makes a model call; no file written.
+PAST_RULING_RULE = "past-ruling"
+UNVETTED_LINE = re.compile(r"^[ \t>*+-]*Unvetted:[ \t]*\S", re.I | re.M)
+UNREADABLE = "unreadable"
+CLOSED_ITEMS = "closed page items"
+INDEX_CAP, STEP_TOP, STEP_GIT_TIMEOUT = 800, 30, 10
+RULING_HEADING = re.compile(r"^##[ \t]+The ruling[ \t]*$", re.I | re.M)
+RULING_WORDS = re.compile(r"ruling|owner|shiv", re.I)
+SENTENCE_SPLIT = re.compile(r"(?<=[.!?])\s+")
+WORD = re.compile(r"[a-z]{4,}")
+STOPWORDS = frozenset(("that", "this", "with", "from", "have", "will", "should", "would", "could", "there", "their",
+                       "about", "which", "when", "what", "were", "been", "into", "than", "then", "them", "they",
+                       "your", "also", "only", "does", "each", "more", "most", "must", "never", "other", "some",
+                       "such", "same", "after", "before", "because", "owner", "ruling", "rulings"))
+# An id a refusal may cite: `decisions/<stem>` or `debts/<stem>`.
+RECORD_REF = re.compile(r"(?<![\w/-])(?:decisions|debts)/[\w.-]*\w")
+
+
+def has_unvetted(text) -> bool:
+    """True when the text carries an `Unvetted: <reason>` line: the question was sent knowingly unchecked."""
+    return bool(UNVETTED_LINE.search(text or ""))
+
+
+def _words(text) -> set:
+    return set(WORD.findall(str(text).lower())) - STOPWORDS
+
+
+def _ruling_text(body) -> str:
+    """The whole `## The ruling` section (to the next `## `), else the body after the title line, white space
+    collapsed and capped."""
+    match = RULING_HEADING.search(body)
+    if match:
+        section = body[match.end():]
+        nxt = re.search(r"^##[ \t]", section, re.M)
+        text = " ".join((section[:nxt.start()] if nxt else section).split())
+        if text:
+            return text[:INDEX_CAP]
+    lines = body.splitlines()
+    if lines and lines[0].startswith("#"):
+        lines = lines[1:]
+    return " ".join(" ".join(lines).split())[:INDEX_CAP]
+
+
+def _record_index(root, folder, unknown, label, seen):
+    """(folder exists, index lines `<folder>/<stem>: <ruling>`) for the records of root/docs/<folder>. A record
+    or folder that cannot be read adds an unreadable source to `unknown`."""
+    path = os.path.join(root, "docs", folder)
+    if not os.path.isdir(path):
+        return False, []
+    lines = []
+    try:
+        names = sorted(n for n in os.listdir(path) if n.endswith(".md") and n.lower() != "readme.md"
+                       and not (folder == "debts" and n.lower() == "notes.md"))  # the notes file holds no ruling
+    except OSError as exc:
+        unknown.append("%s (%s: %s)" % (label, UNREADABLE, type(exc).__name__))
+        return True, lines
+    for name in names:
+        record_id = "%s/%s" % (folder, name[:-3])
+        if record_id in seen:
+            continue
+        try:
+            with open(os.path.join(path, name), encoding="utf-8") as handle:
+                body = handle.read()
+        except (OSError, UnicodeDecodeError):
+            unknown.append("%s (%s: %s)" % (label, UNREADABLE, name))
+            continue
+        seen.add(record_id)
+        lines.append("%s: %s" % (record_id, _ruling_text(body)))
+    return True, lines
+
+
+def _tree_names(body, hash_size):
+    """(name, hex sha) for each file entry of a raw git tree object."""
+    out, pos = [], 0
+    while pos < len(body):
+        end = body.index(b"\0", pos)
+        mode, _, name = body[pos:end].partition(b" ")
+        sha = body[end + 1:end + 1 + hash_size]
+        pos = end + 1 + hash_size
+        if mode != b"40000":
+            out.append((name.decode("utf-8", "replace"), sha.hex()))
+    return out
+
+
+def _read_steps(root):
+    """({step id: (note, why)}, state) from roadmap/data/steps of the local ref `roadmap`, else `origin/roadmap`,
+    through ONE `git cat-file --batch` process. state is "ok", "absent" (no repo, no ref or no folder) or
+    "unreadable: <why>" (git failed, odd answer, bad JSON). Never fetches."""
+    if _git_root_of(root) is None:
+        return {}, "absent"
+    import subprocess
+    import _nowindow  # the one home of a no-window child start
+    try:
+        proc = _nowindow.Popen(["git", "-C", root, "cat-file", "--batch"], stdin=subprocess.PIPE,
+                               stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    except OSError:
+        return {}, UNREADABLE + ": git did not start"
+    try:
+        entries = None
+        for ref in ("roadmap", "origin/roadmap"):
+            try:
+                proc.stdin.write(("%s:roadmap/data/steps\n" % ref).encode())
+                proc.stdin.flush()
+            except BrokenPipeError:
+                # git exited before it read the request; its stderr says why. The wait is bounded, and the
+                # `finally` below kills and reaps the process on every path.
+                proc.wait(timeout=STEP_GIT_TIMEOUT)
+                if b"not a git repository" in proc.stderr.read(4096):
+                    return {}, "absent"
+                return {}, UNREADABLE + ": git exited early"
+            head = proc.stdout.readline().split()
+            if len(head) == 2 and head[1] == b"missing":
+                continue
+            if not head and b"not a git repository" in proc.stderr.read():
+                return {}, "absent"  # a folder with a .git entry that is no repository holds no roadmap
+            if len(head) != 3 or head[1] != b"tree":
+                return {}, UNREADABLE + ": git gave no tree"
+            body = proc.stdout.read(int(head[2]))
+            proc.stdout.read(1)
+            entries = [(n, s) for n, s in _tree_names(body, len(head[0]) // 2) if n.endswith(".json")]
+            break
+        if entries is None:
+            return {}, "absent"
+        out, _ = proc.communicate("".join(s + "\n" for _, s in entries).encode(), timeout=STEP_GIT_TIMEOUT)
+        steps, pos = {}, 0
+        for name, _sha in entries:
+            nl = out.index(b"\n", pos)
+            head = out[pos:nl].split()
+            if len(head) != 3 or head[1] != b"blob":
+                return {}, UNREADABLE + ": git gave no blob for " + name
+            size = int(head[2])
+            data = json.loads(out[nl + 1:nl + 1 + size].decode("utf-8"))
+            pos = nl + 1 + size + 1
+            if not isinstance(data, dict):
+                return {}, UNREADABLE + ": bad JSON in " + name
+            steps[name[:-5]] = (data.get("note"), data.get("why"))
+        return steps, "ok"
+    except Exception as exc:
+        return {}, "%s: %s" % (UNREADABLE, type(exc).__name__)
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+        proc.wait()
+        for pipe in (proc.stdin, proc.stdout, proc.stderr):
+            try:
+                pipe.close()
+            except Exception:
+                pass
+
+
+def _step_rulings(steps, words):
+    """The top STEP_TOP ruling units of the step notes by word overlap with `words`, as `<step id>: <text>`
+    lines. A unit is a sentence holding Ruling, owner or shiv, plus the sentence after it (a ruling's detail
+    often sits there). Overlap 0 never counts."""
+    scored = []
+    for step_id, fields in sorted(steps.items()):
+        sentences = [s for f in fields if isinstance(f, str) for s in SENTENCE_SPLIT.split(f.strip()) if s]
+        for i, sentence in enumerate(sentences):
+            if not RULING_WORDS.search(sentence):
+                continue
+            tail = sentences[i + 1] if i + 1 < len(sentences) and not RULING_WORDS.search(sentences[i + 1]) else ""
+            unit = (sentence + " " + tail).strip()
+            overlap = len(_words(unit) & words)
+            if overlap:
+                scored.append((-overlap, len(scored), "%s: %s" % (step_id, unit)))
+    return [line for _, _, line in sorted(scored)[:STEP_TOP]]
+
+
+def past_rulings(question_text, repo_root):
+    """(candidates, unknown). `candidates` are lines `<id>: <text>`: every decision and debt record, then the step
+    rulings that share words with the question. `unknown` lists each source not searched: "<source> (absent)"
+    for a source the repo does not have, "<source> (unreadable: ...)" for one that exists and failed, and always
+    "closed page items". Absent sources never refuse; unreadable ones do (see unreadable_sources)."""
+    candidates, unknown, seen = [], [], set()
+    roots = [repo_root]
+    try:
+        import guard_pointer  # the claude-settings checkout: the one home of the pointer line
+        other = guard_pointer.pointer_checkout()
+    except Exception:
+        other = ""
+    if not other:
+        unknown.append("claude-settings decision records (absent)")
+    elif os.path.realpath(other) != os.path.realpath(repo_root):
+        roots.append(other)
+    for folder, label in (("decisions", "decision records"), ("debts", "debt records")):
+        found = False
+        for root in roots if folder == "decisions" else roots[:1]:
+            exists, lines = _record_index(root, folder, unknown, label, seen)
+            found = found or exists
+            candidates += lines
+        if not found:
+            unknown.append("%s (absent)" % label)
+    steps, state = _read_steps(repo_root)
+    if state == "ok":
+        candidates += _step_rulings(steps, _words(question_text))
+    elif state == "absent":
+        unknown.append("roadmap step notes (absent)")
+    else:
+        unknown.append("roadmap step notes (%s)" % state)
+    unknown.append(CLOSED_ITEMS)
+    return candidates, unknown
+
+
+def unreadable_sources(unknown) -> list:
+    """The unknown sources that exist and failed to read: they refuse as Unvetted. Absent ones and the closed page
+    items never do."""
+    return [u for u in unknown if "(%s" % UNREADABLE in u]
+
+
+def unknown_line(unknown) -> str:
+    """The one stderr line for the sources not searched."""
+    return "past-ruling search unknown: " + ", ".join(unknown)
+
+
+def candidate_ids(candidates) -> list:
+    return [c.split(": ", 1)[0] for c in candidates]
+
+
+def candidates_block(candidates, unknown) -> str:
+    """The text added after the judge prompt's reply line: the candidate rulings, then the sources not searched."""
+    text = "\n\nPast rulings (item 8), one per line as `<id>: <text>`:\n" + (
+        "\n".join(candidates) if candidates else "(none found)")
+    if unknown:
+        text += ("\nNot searched: %s. A source not searched never means the question is clear."
+                 % ", ".join(unknown))
+    return text
+
+
+def ruling_cite(reason, ids, strict=False) -> str:
+    """Classify a refusal reason against the ids the model was shown. "bogus" when the reason opens with a
+    `decisions/..` or `debts/..` record that was not shown. With `strict` (a call that judges item 8 alone), also
+    "bogus" when it names such a record anywhere, or names no shown id. "cited" when it names a shown id and is not
+    bogus. "" for any other refusal (a form item): without `strict`, an unshown id named mid-reason stays one."""
+    # `docs/decisions/<stem>.md` is the same record as `decisions/<stem>`.
+    reason = re.sub(r"(?<=[\w-])\.md\b", "", re.sub(r"(?<![\w/-])docs/(?=(?:decisions|debts)/)", "", reason))
+
+    def names(i):
+        return re.search(r"(?<![\w/-])%s(?![\w/-])" % re.escape(i), reason)
+    shown = [i for i in ids if names(i) or ("/" in i and names(i.split("/", 1)[1]))]
+    opening = RECORD_REF.match(reason.lstrip(" \t\n*_`'\"([>"))
+    if opening and opening.group(0) not in ids:
+        return "bogus"
+    if strict and [r for r in RECORD_REF.findall(reason) if r not in ids]:
+        return "bogus"
+    if shown:
+        return "cited"
+    return "bogus" if strict else ""
+
+
+def _all_strings(value):
+    if isinstance(value, str):
+        yield value
+    elif isinstance(value, dict):
+        for v in value.values():
+            yield from _all_strings(v)
+    elif isinstance(value, list):
+        for v in value:
+            yield from _all_strings(v)
+
+
+def chat_units(tool_input) -> list:
+    """(marker text, words text) for each question of a box with 2+ options: the question text that may carry the
+    Unvetted line, and every string of the question, for the word overlap."""
+    questions = tool_input.get("questions") if isinstance(tool_input, dict) else None
+    units = []
+    for q in questions if isinstance(questions, list) else []:
+        options = q.get("options") if isinstance(q, dict) else None
+        if isinstance(options, list) and len([o for o in options if isinstance(o, dict)]) >= 2:
+            units.append((str(q.get("question") or ""), " ".join(_all_strings(q))))
+    return units
+
+
+def page_units(judged) -> list:
+    """(marker text, words text) for each write of `judged_item_writes`, a task too (every question is vetted).
+    The marker text is the item's `context`, or a str_replace's new_str."""
+    units = []
+    for write in judged:
+        data = write.get("data")
+        if "new_str" in write:
+            units.append((write["new_str"], write["new_str"]))
+        elif isinstance(data, dict):
+            units.append((str(data.get("context") or ""), " ".join(_all_strings(data))))
+    return units
+
+
+# ------------------------------------------------------------------ option keys: one letter, one question
+
+# The key of an option line: `a)`, `(a)`, `a.`, `a:`, `**a**`, `**a)**`, with a bullet and a digit prefix (`1a`)
+# allowed. The line must go on with text, so a sentence that opens with a one-letter word is no key. A bullet with
+# a colon (`- a: 3 files`) is a list item, never a key.
+OPTION_KEY = re.compile(r"^[ \t]*(?P<bullet>[-*+][ \t]+)?(?:\*\*|\()?(?P<key>\d*[A-Za-z])(?P<close>\)|\.|:|\*\*)"
+                        r"(?:\*\*)?[ \t]+\S", re.M)
+
+
+def _option_keys(reply) -> list:
+    """(key, question line, option text) for each option line of the reply's Input Needed item. The question line
+    is the last non-option line with a `?` before the option, else the item's first line. The option text is the
+    line after its key. Both are lowercased with spaces folded."""
+    lint = os.path.join(HERE, "..", "lint")
+    if lint not in sys.path:
+        sys.path.append(lint)
+    from report_guard import input_needed_section  # the one reader of the Input Needed item
+    found, asked, first = [], "", ""
+    for line in input_needed_section(reply).splitlines():
+        match = OPTION_KEY.match(line)
+        if match and not (match.group("bullet") and match.group("close") == ":"):
+            option = " ".join(line[match.end() - 1:].lower().split())
+            found.append((match.group("key").lower(), asked or first, option))
+            continue
+        plain = " ".join(line.lower().split())
+        if plain:
+            first = first or plain
+            asked = plain if "?" in plain else asked
+    return found
+
+
+def _same_question(one, other) -> bool:
+    """True when two (question line, option text) pairs are one question sent again: the option texts are equal,
+    and the question lines, reworded or not, share at least half of their words (lowercase words of 4+ letters,
+    minus the stop words). Lines with no such word compare as text."""
+    (one_q, one_option), (other_q, other_option) = one, other
+    if one_option != other_option:
+        return False
+    a, b = _words(one_q), _words(other_q)
+    return one_q == other_q or (bool(a | b) and len(a & b) * 2 >= len(a | b))
+
+
+def key_overlap(reply, earlier_replies) -> str:
+    """The option keys, comma joined, that two questions share. A key used twice in the Input Needed of `reply` is
+    a clash. So is a key that an assistant reply since the last human message also uses under a different question
+    line or option text. The same key, option text and question, reworded or not, is a question sent again, never a
+    clash. '' when none clash."""
+    seen, clash = {}, set()
+    for key, question, option in _option_keys(reply):
+        if key in seen:
+            clash.add(key)
+        seen.setdefault(key, (question, option))
+    for earlier in earlier_replies:
+        for key, question, option in _option_keys(earlier):
+            if key in seen and not _same_question(seen[key], (question, option)):
+                clash.add(key)
+    return ", ".join(sorted(clash))

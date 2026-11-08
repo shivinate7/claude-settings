@@ -47,8 +47,18 @@ Interface the hook must match:
   holds call_judge.NONE_DIRECTION_RULE exactly once when a write in the call is a re-ask (a batch too), and not at
   all otherwise. The cases read the constant with load_file_module, never a copy of its text. A missing constant
   fails those checks, with no crash.
+- The widening rule (decision uniform-over-variants, a shared tool never grows a second accepted form): call_judge.WIDENING_RULE
+  is appended to the formatted PAGE_PROMPT exactly once when a judged waiting-page write (question_form.judged_item_writes) is a
+  set or update whose data has non-empty `options`, and never otherwise, never on AskUserQuestion or Agent. question_form.WIDENS_KEY
+  is the one home of the mark's key, "widens", and WIDENING_RULE contains it. The cases read both with load_file_module, never a
+  copy, and a missing name fails its checks with a named cause, never a crash.
 - settings.json: one command hook on `Agent|AskUserQuestion|ArtifactData` runs call_judge.py with a timeout
   above the longest model call (60 s). No `prompt` or `agent` hook is left on any of the three tools.
+- Past rulings (spec past-rulings): a judged AskUserQuestion or waiting-page item write also carries the decision
+  records and the `roadmap` step rulings that question_form.past_rulings finds, and an eighth item that refuses a
+  question a standing ruling already decides. Each case builds its own real git repo (make_repo), and a fixture
+  ruling is found in the prompt with the call's JSON cut out. A search that cannot read a source prints one stderr
+  line, `past-ruling search unknown:`, and never says clear.
 """
 import atexit
 import json
@@ -90,6 +100,68 @@ os.makedirs(os.path.join(PAGE_REPO, ".claude"))
 with open(os.path.join(PAGE_REPO, ".claude", "layout-extras.json"), "w", encoding="utf-8") as _f:
     json.dump({"kinds": {}, "waiting-page": PAGE_URL}, _f)
 
+# ------------------------------------------------------------------ real git fixtures (past rulings)
+#
+# make_repo builds a real git repo under ROOT. `decisions` maps a slug to its ruling paragraph (docs/decisions/<slug>.md).
+# `steps` maps a step id to its note (roadmap/data/steps/<id>.json on a local `roadmap` branch). Every repo carries the
+# waiting page (PAGE_URL) in .claude/layout-extras.json, unless the `page` option names another url or None
+# (no page key). These git calls run in the test process, not in the hook.
+GIT_ENV = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+REPOS = {}
+REPO_PAGES = {}
+
+
+def git(repo, *args):
+    return subprocess.run(["git", "-C", repo, "-c", "user.name=test", "-c", "user.email=test@example.invalid",
+                           "-c", "commit.gpgsign=false", *args],
+                          capture_output=True, text=True, env=GIT_ENV, check=True)
+
+
+def make_repo(name, decisions=None, steps=None, debts=None, page=PAGE_URL):
+    """`page` is the repo's waiting-page url. None writes no page key: a repo with no page, which layout reads as unknown.
+    A name is cached, so a second call must name the same page: a different one would silently get the first repo."""
+    if name in REPOS:
+        if REPO_PAGES[name] != page:
+            raise ValueError("make_repo %r was made with page %r, not %r" % (name, REPO_PAGES[name], page))
+        return REPOS[name]
+    repo = os.path.join(ROOT, "repo-" + name)
+    os.makedirs(os.path.join(repo, ".claude"))
+    extras = {"kinds": {}} if page is None else {"kinds": {}, "waiting-page": page}
+    with open(os.path.join(repo, ".claude", "layout-extras.json"), "w", encoding="utf-8") as f:
+        json.dump(extras, f)
+    REPO_PAGES[name] = page
+    git(repo, "init", "-q")
+    git(repo, "commit", "-q", "--allow-empty", "-m", "init")
+    if decisions:
+        folder = os.path.join(repo, "docs", "decisions")
+        os.makedirs(folder)
+        for slug, ruling in decisions.items():
+            with open(os.path.join(folder, slug + ".md"), "w", encoding="utf-8") as f:
+                f.write("# %s\n\n## The ruling\n\n%s\n" % (slug, ruling))
+        git(repo, "add", "docs")
+        git(repo, "commit", "-q", "-m", "decision records")
+    if debts:
+        folder = os.path.join(repo, "docs", "debts")
+        os.makedirs(folder)
+        for slug, what in debts.items():
+            with open(os.path.join(folder, slug + ".md"), "w", encoding="utf-8") as f:
+                f.write("# %s\n\nWhat: %s\n" % (slug, what))
+        git(repo, "add", "docs")
+        git(repo, "commit", "-q", "-m", "debt records")
+    if steps:
+        git(repo, "checkout", "-q", "-b", "roadmap")
+        folder = os.path.join(repo, "roadmap", "data", "steps")
+        os.makedirs(folder)
+        for step_id, note in steps.items():
+            with open(os.path.join(folder, step_id + ".json"), "w", encoding="utf-8") as f:
+                json.dump({"title": "Step " + step_id, "phase": "test", "status": "done", "note": note, "why": ""}, f)
+        git(repo, "add", "roadmap")
+        git(repo, "commit", "-q", "-m", "step notes")
+        git(repo, "checkout", "-q", "-")
+    REPOS[name] = repo
+    return repo
+
+
 try:
     import override
 except ImportError:
@@ -113,6 +185,20 @@ def _fake_run(argv, **kwargs):
     return subprocess.CompletedProcess(argv, 0, stdout=json.dumps({"result": os.environ["CJ_ANSWER"]}), stderr="")
 
 
+_real_popen = subprocess.Popen
+
+
+class _CountingPopen(_real_popen):
+    # Records each git process start, so a case counts the git processes a judged call spawns.
+    def __init__(self, args, *rest, **kwargs):
+        argv = args if isinstance(args, (list, tuple)) else [args]
+        if argv and os.path.basename(str(argv[0])).lower() in ("git", "git.exe"):
+            with open(os.path.join(os.environ["CJ_LOADED_DIR"], "git.log"), "a", encoding="utf-8") as f:
+                f.write("git\n")
+        _real_popen.__init__(self, args, *rest, **kwargs)
+
+
+subprocess.Popen = _CountingPopen
 subprocess.run = _fake_run
 with open(os.path.join(os.environ["CJ_LOADED_DIR"], "loaded"), "w", encoding="utf-8") as f:
     f.write("1")
@@ -154,6 +240,8 @@ class Run:
         if os.path.exists(path):
             with open(path, encoding="utf-8") as f:
                 self.calls = [json.loads(line) for line in f if line.strip()]
+        gitlog = os.path.join(base, "git.log")
+        self.git = len(open(gitlog, encoding="utf-8").read().split()) if os.path.exists(gitlog) else 0
         log = os.path.join(base, "config", "guard.log")
         self.log = open(log, encoding="utf-8").read() if os.path.exists(log) else ""
 
@@ -167,8 +255,8 @@ class Run:
 
 
 def detail(r):
-    return "code=%s out=%r err=%r calls=%d loaded=%s imports=%s log=%r" % (
-        r.code, r.out[:200], r.err[-200:], len(r.calls), r.loaded, r.imports, r.log[-200:])
+    return "code=%s out=%r err=%r calls=%d git=%d loaded=%s imports=%s log=%r" % (
+        r.code, r.out[:200], r.err[-200:], len(r.calls), r.git, r.loaded, r.imports, r.log[-200:])
 
 
 def write_pass(cfg, session, body):
@@ -233,8 +321,9 @@ def good_box(goal=GOAL_LINE, problem=PROBLEM_LINE, based=BASED_LINES, options=No
                            "options": options or good_options()}]}
 
 
-def question_input(session=SID_A, agent=None, box=None):
-    payload = {"session_id": session, "tool_name": "AskUserQuestion", "tool_input": box or good_box()}
+def question_input(session=SID_A, agent=None, box=None, cwd=PAGE_REPO):
+    payload = {"session_id": session, "tool_name": "AskUserQuestion", "tool_input": box or good_box(),
+               "cwd": cwd}
     if agent:
         payload["agent_id"] = agent
     return json.dumps(payload)
@@ -285,7 +374,7 @@ def good_task_item(step=GOOD_TASK_STEP, **over):
 
 
 def page_input(action="set", data=None, collection=PAGE_ITEMS, doc_id="p1", url=PAGE_URL, session=SID_A,
-               agent=None, **extra):
+               agent=None, cwd=PAGE_REPO, **extra):
     """One ArtifactData call, as the harness sends it, with the payload's cwd set to the fixture repo.
     `doc_id` None leaves the key out (a list). `extra` holds the str_replace fields."""
     tool_input = {"action": action, "url": url, "collection": collection}
@@ -294,7 +383,7 @@ def page_input(action="set", data=None, collection=PAGE_ITEMS, doc_id="p1", url=
     if data is not None:
         tool_input["data"] = data
     tool_input.update(extra)
-    payload = {"session_id": session, "tool_name": "ArtifactData", "tool_input": tool_input, "cwd": PAGE_REPO}
+    payload = {"session_id": session, "tool_name": "ArtifactData", "tool_input": tool_input, "cwd": cwd}
     if agent:
         payload["agent_id"] = agent
     return json.dumps(payload)
@@ -455,7 +544,8 @@ def case_question():
           and "$ARGUMENTS" not in prompt, prompt[:160])
     # Code reads the form lines (chat_hit), so the model prompt no longer asks for them. The call's own JSON
     # holds those lines, so it is cut out before the words are read.
-    asks = prompt.replace(json.dumps(good_box(), ensure_ascii=False), "")
+    # Items 1 to 7 only: item 8 (past rulings) names the Based on (ruling) line on purpose.
+    asks = prompt.replace(json.dumps(good_box(), ensure_ascii=False), "").split("\n8. ")[0]
     check("question: the prompt leaves the Goal, Problem and Based on lines to the code check",
           MARK not in asks and not any(t in asks for t in ("Goal:", "Problem:", "Based on", "premise-format")), asks[:400])
     kept = ("gain", "lose", "unexplained", "outside the box", "recommend")
@@ -617,11 +707,9 @@ def case_page_override():
 
 def case_page_model_failure_fails_open():
     r = run_hook(page_input("set", good_page_item()), answer=PAGE_FLAG, model_fail=True)
-    errs = [line for line in r.err.splitlines() if line.strip()]
-    check("page fail open: a model failure on an item write allows, after one model call",
-          r.code == 0 and r.out == "" and len(r.calls) == 1 and "\tdeny\t" not in r.log, detail(r))
-    check("page fail open: one stderr line from the hook", len(errs) == 1 and r.code == 0
-          and "can't open file" not in errs[0], detail(r))
+    check("page unvetted: a model failure on an item write refuses once, the remedy names Unvetted:",
+          r.code == 0 and (r.deny() or {}).get("permissionDecision") == "deny" and "Unvetted:" in r.reason()
+          and len(r.calls) == 1, detail(r))
 
 
 def case_page_str_replace_judged():
@@ -761,13 +849,14 @@ def case_page_reads_and_other_collections_skip_question_form():
     # import. The last check is a control: a judged items write imports it, so an empty record means an early exit.
     item = good_page_item()
     for label, inp in (
-        ("an items get", page_input("get", None, doc_id="p1")),
-        ("an items list", page_input("list", None, doc_id=None)),
-        ("a receipts write", page_input("set", item, collection="receipts", doc_id="r1")),
+        ("an items get", page_input("get", None, doc_id="p1", cwd=CI_REPO)),
+        ("an items list", page_input("list", None, doc_id=None, cwd=CI_REPO)),
+        ("a receipts write", page_input("set", item, collection="receipts", doc_id="r1", cwd=CI_REPO)),
     ):
         r = run_hook(inp, answer=PAGE_FLAG)
         check("page import: %s does not import question_form in the hook" % label,
               r.code == 0 and r.out == "" and r.calls == [] and "question_form" not in r.imports, detail(r))
+        check("page import: %s runs no git process" % label, r.git == 0, detail(r))
     r = run_hook(page_input("set", item), answer=ALLOW)
     check("page import: a judged items write imports question_form (the record sees the import)",
           "question_form" in r.imports, detail(r))
@@ -932,16 +1021,192 @@ def case_none_choice_with_note_holds_rule_once():
           bool(rule) and prompt.count(rule) == 1, rule_detail(rule, r))
 
 
+# ------------------------------------------------------------------ the widening rule (decision uniform-over-variants)
+#
+# An option that widens what a shared tool accepts is marked `widens: true`, and an unmarked widening option is
+# refused. The judge is told in call_judge.WIDENING_RULE, appended once to the
+# formatted PAGE_PROMPT for a judged write that sets or updates options. The mark's key is question_form.WIDENS_KEY.
+# A build without that name gets the sentinel, so a marked option carries no mark and the scope check fails on its cause.
+WIDENS_SENTINEL = "__no-WIDENS_KEY-in-question_form__"
+QF_PATH = os.path.join(HERE, "question_form.py")
+WIDENING_FLAG = '{"ok": false, "reason": "option `b` widens a shared tool; mark it widens: true"}'
+
+
+def widening_rule():
+    """WIDENING_RULE's text, read from call_judge.py. "" when the constant is missing or blank."""
+    value = getattr(load_file_module(HOOK, "call_judge_widen_probe"), "WIDENING_RULE", "")
+    return value if isinstance(value, str) and value.strip() else ""
+
+
+def widens_key():
+    """question_form.WIDENS_KEY, the one home of the mark's key. "" when the constant is missing or blank."""
+    value = getattr(load_file_module(QF_PATH, "question_form_widen_probe"), "WIDENS_KEY", "")
+    return value if isinstance(value, str) and value.strip() else ""
+
+
+def hook_template(name):
+    """A prompt template of call_judge.py (PAGE_PROMPT, QUESTION_PROMPT or SPAWN_PROMPT), read at test time."""
+    value = getattr(load_file_module(HOOK, "call_judge_widen_probe"), name, "")
+    return value if isinstance(value, str) else ""
+
+
+def widening_region(prompt, template_name):
+    """The text a judged prompt adds after its formatted template and before the past-ruling tail, where the widening
+    rule goes. None when the prompt does not hold the template formatted with the call's JSON."""
+    head, mark, suffix = hook_template(template_name).partition("%s")
+    if not mark or not prompt.startswith(head) or suffix not in prompt:
+        return None
+    after = prompt[prompt.index(suffix) + len(suffix):]
+    import question_form  # the one home of the past-ruling tail (candidates_block)
+    return after.split(question_form.candidates_block([], []).split("(none found)", 1)[0], 1)[0]
+
+
+def rule_once(prompt, rule):
+    """(ok, cause) for one judged item prompt: WIDENING_RULE is in it exactly once, after the question-format prompt.
+    The cause names one thing: no text in that slot, a missing constant, or a count other than one."""
+    region = widening_region(prompt, "PAGE_PROMPT")
+    if region is None:
+        return False, "the judge's prompt is not the question-format prompt"
+    if not region.strip():
+        return False, "no text after the question-format prompt: the judge is not told the widening mark"
+    if not rule:
+        return False, "WIDENING_RULE is not defined in call_judge.py"
+    count = prompt.count(rule)
+    return count == 1, "WIDENING_RULE is in the judge's prompt %d times, not once" % count
+
+
+def no_widening_rule(prompt, template_name):
+    """(ok, cause) for a prompt that must carry no widening rule: nothing in its widening slot."""
+    region = widening_region(prompt, template_name)
+    if region is None:
+        return False, "the prompt is not %s formatted with the call" % template_name
+    return region.strip() == "", "%s carries text in the widening slot with no widening option: %r" % (
+        template_name, region.strip()[:60])
+
+
+def case_widening_set_holds_rule_once():
+    # Case 1: a set with options, none marked, makes one model call, and the one prompt holds the rule once.
+    rule = widening_rule()
+    r = run_hook(page_input("set", good_page_item()), answer=ALLOW)
+    check("widening set: one model call, and no deny", len(r.calls) == 1 and r.code == 0 and r.out == ""
+          and "\tdeny\t" not in r.log, detail(r))
+    prompt = r.calls[0]["prompt"] if r.calls else ""
+    ok, cause = rule_once(prompt, rule)
+    check("widening set: the one prompt holds WIDENING_RULE exactly once, after the question-format prompt", ok, cause)
+
+
+def case_widening_batch_holds_rule_once():
+    # Case 2: two option writes in one batch make one model call, and the one prompt holds the rule exactly once.
+    rule = widening_rule()
+    writes = [{"op": "set", "collection": PAGE_ITEMS, "doc_id": "p1", "data": good_page_item(PAGE_MARK)},
+              {"op": "update", "collection": PAGE_ITEMS, "doc_id": "p2",
+               "data": {"options": good_page_item(PAGE_MARK_B)["options"]}}]
+    r = run_hook(page_batch_input(writes), answer=ALLOW)
+    check("widening batch: two option writes make one model call, and no deny", len(r.calls) == 1 and r.code == 0
+          and r.out == "" and "\tdeny\t" not in r.log, detail(r))
+    prompt = r.calls[0]["prompt"] if r.calls else ""
+    check("widening batch: the one prompt carries both writes", PAGE_MARK in prompt and PAGE_MARK_B in prompt,
+          prompt[:160])
+    ok, cause = rule_once(prompt, rule)
+    check("widening batch: the one prompt holds WIDENING_RULE exactly once, after the question-format prompt", ok, cause)
+
+
+def case_widening_absent_without_options():
+    # Case 3: a write with no options, a write with an empty options list, a box and a spawn get no widening rule. Each
+    # absence first asserts that its call was made, so an early exit cannot pass it. The box has options and still gets none.
+    context = good_page_item()["context"]
+    for label, inp, template in (
+        ("a context-only update", page_input("update", {"context": context}), "PAGE_PROMPT"),
+        ("an update with context and empty options", page_input("update", {"context": context, "options": []}),
+         "PAGE_PROMPT"),
+        ("an AskUserQuestion box with options", question_input(), "QUESTION_PROMPT"),
+        ("an Agent spawn", spawn_input("builder", model="sonnet"), "SPAWN_PROMPT"),
+    ):
+        r = run_hook(inp, answer=ALLOW)
+        check("widening absent: %s is judged once, and no deny" % label, len(r.calls) == 1 and r.code == 0
+              and r.out == "" and "\tdeny\t" not in r.log, detail(r))
+        prompt = r.calls[0]["prompt"] if r.calls else ""
+        ok, cause = no_widening_rule(prompt, template)
+        check("widening absent: %s gets no widening rule" % label, ok, cause)
+
+
+def case_widening_refusal_names_the_option():
+    # Case 4: an unmarked option that widens a shared tool is refused, and the refusal names its key. The model is faked,
+    # so the deny is the hook passing the reason through. The rule check reads what the judge is told before it answers.
+    import question_form  # the one form check (hooks/question_form.py)
+    rule = widening_rule()
+    item = good_page_item(PAGE_MARK)
+    item["options"][1]["label"] = "Accept a second accepted form"
+    got = question_form.item_hit("set", {"collection": PAGE_ITEMS, "doc_id": "p1", "data": item})
+    check("widening refusal fixture: the item passes question_form.item_hit, so a refusal below is the judge's",
+          got == ("", ""), got)
+    r = run_hook(page_input("set", item), answer=WIDENING_FLAG)
+    d = r.deny() or {}
+    check("widening refusal: the unmarked option is denied, rule question-judge, and the reason names its key",
+          r.code == 0 and d.get("permissionDecision") == "deny" and r.reason().startswith("question-judge: ")
+          and "option `b`" in r.reason() and r.log.count("\tdeny\tquestion-judge\t") == 1 and len(r.calls) == 1,
+          detail(r))
+    prompt = r.calls[0]["prompt"] if r.calls else ""
+    ok, cause = rule_once(prompt, rule)
+    check("widening refusal: the judge's prompt holds WIDENING_RULE exactly once, after the question-format prompt",
+          ok, cause)
+
+
+def case_widening_fair_option_passes_code_path():
+    # Case 5: a fair option whose label only names a repo, and a marked option that is not the pick. The fake model allows, and
+    # the guard path (question_form.page_item_hit, the filter guard.py reads) does not refuse the write either. The scope
+    # check proves the mark is read: the same marked option, picked, is refused as uniform-pick.
+    # The model's false-flag rate on real items is unmeasured, since the model is faked.
+    import question_form  # the one form check (hooks/question_form.py)
+    rule, key = widening_rule(), widens_key()
+    mark_key = key or WIDENS_SENTINEL
+    fair = {"key": "a", "label": "Keep the change in claude-settings",
+            "gain": "The change lands in the repo today. " + PAGE_MARK, "lose": "The shared tool keeps its one form."}
+    marked = {"key": "b", "label": "Accept a second accepted form", "gain": "Other repos read the shared tool alike.",
+              "lose": "The shared tool takes a second form.", mark_key: True}
+    item = good_page_item(PAGE_MARK, pick="a", options=[fair, marked])
+    got = question_form.item_hit("set", {"collection": PAGE_ITEMS, "doc_id": "p1", "data": item})
+    check("fair option fixture: the item passes question_form.item_hit with the pick on the fair option",
+          got == ("", ""), got)
+    tool_input = {"action": "set", "url": PAGE_URL, "collection": PAGE_ITEMS, "doc_id": "p1", "data": item}
+    hit, _writes = question_form.page_item_hit(tool_input, PAGE_REPO)
+    check("fair option code path: question_form.page_item_hit does not refuse it", hit == ("", ""), hit)
+    r = run_hook(page_input("set", item), answer=ALLOW)
+    check("fair option code path: one judge call and no deny from call_judge", len(r.calls) == 1 and r.code == 0
+          and r.out == "" and "\tdeny\t" not in r.log, detail(r))
+    picked = dict(item, pick="b")
+    got = question_form.item_hit("set", {"collection": PAGE_ITEMS, "doc_id": "p1", "data": picked})
+    check("widening scope: the marked option, picked, is refused as uniform-pick, so the mark is read",
+          got[0] == "uniform-pick", "the marked option carries no mark: question_form.WIDENS_KEY is not defined"
+          if not key else got)
+    prompt = r.calls[0]["prompt"] if r.calls else ""
+    ok, cause = rule_once(prompt, rule)
+    check("fair option code path: the judge's prompt holds WIDENING_RULE exactly once, after the question-format prompt",
+          ok, cause)
+
+
+def case_widening_rule_names_the_mark():
+    # Case 6: WIDENING_RULE contains question_form.WIDENS_KEY. Each name is its own check, so a missing name fails with
+    # its own cause, and a blank key cannot pass the containment check.
+    rule, key = widening_rule(), widens_key()
+    check("widening key: call_judge.WIDENING_RULE is defined as non-blank text", bool(rule),
+          "WIDENING_RULE is not defined in call_judge.py")
+    check("widening key: question_form.WIDENS_KEY is defined as non-blank text", bool(key),
+          "WIDENS_KEY is not defined in question_form.py")
+    cause = ("WIDENING_RULE is not defined" if not rule else "WIDENS_KEY is not defined" if not key
+             else "WIDENING_RULE does not contain WIDENS_KEY")
+    check("widening key: WIDENING_RULE contains WIDENS_KEY", bool(rule) and bool(key) and key in rule, cause)
+
+
 def case_fail_open():
     for label, inp, kwargs in (
         ("a model failure on a spawn", spawn_input("builder", model="sonnet"), {"model_fail": True}),
-        ("a model failure on a question", question_input(), {"model_fail": True}),
         ("an odd answer", spawn_input("builder", model="sonnet"), {"answer": '{"ok": "maybe"}'}),
         ("unreadable stdin", "not json", {}),
         ("an empty payload", "{}", {}),
     ):
         r = run_hook(inp, **kwargs)
-        errs = [line for line in r.err.splitlines() if line.strip()]
+        errs = failed_open_lines(r)
         check("fail open: %s allows" % label, r.code == 0 and r.out == "" and "\tdeny\t" not in r.log, detail(r))
         if label != "an empty payload":
             check("fail open: %s prints one stderr line, from the hook" % label,
@@ -975,6 +1240,294 @@ def case_settings_row():
           proc.returncode == 0 and proc.stdout == "" and len(errs) == 1, (proc.returncode, proc.stderr[-160:]))
 
 
+# ------------------------------------------------------------------ past rulings (spec past-rulings)
+#
+# A judged question carries the decision records and the step rulings of the `roadmap` ref as candidates, and an eighth
+# item that refuses a question a standing ruling already decides. Each fixture ruling holds a marker the question never
+# holds, so a check that finds the marker in the prompt, with the call's JSON cut out, proves the ruling reached the model.
+PAST_UNKNOWN = "past-ruling search unknown:"
+APPS_SLUG, CAPS_SLUG = "github-apps-keep-access", "ci-job-caps"
+APPS_RULING = ("Owner, 2026-10-28, page item 9: keep the apps' access to claude-settings as is, because it makes "
+               "calling into a repo straightforward; revisit if it gets bloated. Marker apps-7b1e.")
+CAPS_RULING = ("Owner, 2026-10-27: the job caps are generous on purpose, a stopgap until time-pinned tests go "
+               "(decision test-strategy-reset). Marker caps-4c09.")
+CI_STEP_ID = "c95"
+CI_STEP_SENTENCE = ("Ruling (owner, Oct 27): a CI milestone run is red only when a test is broken, never because a "
+                    "job ran out of time. Marker c95-1f2a.")
+DECISIONS_REPO = make_repo("decisions", decisions={APPS_SLUG: APPS_RULING, CAPS_SLUG: CAPS_RULING})
+CI_REPO = make_repo("ci", steps={CI_STEP_ID: CI_STEP_SENTENCE})
+BARE_REPO = make_repo("bare")
+
+APPS_GOAL = "Goal: decide whether the GitHub apps keep access to claude-settings"
+APPS_PROBLEM = "Problem (risk): the apps can reach the repo, so keeping or removing them needs your word"
+APPS_BASED = ("Based on (read): the GitHub audit lists Cloudflare, Render and Renovate beside Claude",)
+APPS_CITED = ("Based on (ruling): %s says revisit only if the apps get bloated; Renovate opened 2 PRs here" % APPS_SLUG,)
+APPS_OPTIONS = [
+    {"label": "Keep the apps (Recommended)",
+     "description": "Gain: calls into the repo stay straightforward. Lose: an unused app keeps its access."},
+    {"label": "Remove the apps",
+     "description": "Gain: fewer apps can write to the repo. Lose: each call into the repo needs a manual step."}]
+CAPS_GOAL = "Goal: know whether the CI job cap rule means about 2x or under 80%"
+CAPS_PROBLEM = "Problem (rule): the cap decides when a full CI run goes red, so the rule needs your word"
+CAPS_BASED = ("Based on (measured): the slowest checks job ran at about 2x its cap in the last 30 runs",)
+CAPS_OPTIONS = [
+    {"label": "Set the cap to about 2x (Recommended)",
+     "description": "Gain: jobs keep their headroom. Lose: a slow job can still end at its cap."},
+    {"label": "Set the cap under 80%",
+     "description": "Gain: a slow job gets a tighter bar. Lose: a normal run ends at its cap more often."}]
+CI_GOAL = "Goal: finish CI milestone runs without a false red"
+CI_PROBLEM = "Problem (risk): a milestone run ended at its job cap again, so the cap needs your word"
+CI_BASED = ("Based on (measured): the milestone job ran out of time at its cap on the last run",)
+CI_CHAT_OPTIONS = [
+    {"label": "Raise the cap (Recommended)",
+     "description": "Gain: the milestone run stops ending at its cap. Lose: each run takes longer."},
+    {"label": "Keep the cap",
+     "description": "Gain: nothing changes on main. Lose: the milestone run may end at its cap again."}]
+CI_PAGE_CONTEXT = "\n".join((CI_GOAL, CI_PROBLEM, CI_BASED[0], DEPARTS_LINE))
+CI_PAGE_OPTIONS = [
+    {"key": "a", "label": "Raise the cap", "gain": "The milestone run stops ending at its cap.",
+     "lose": "Each run takes longer and uses more minutes."},
+    {"key": "b", "label": "Keep the cap", "gain": "Nothing changes on main.",
+     "lose": "The milestone run may end at its cap again."}]
+
+
+def item_text(prompt, number):
+    # The text of judge item `number`, from its line to the reply line; "" when the prompt holds no such item.
+    start = prompt.find("\n%d. " % number)
+    if start < 0:
+        return ""
+    end = prompt.find("Reply JSON only", start)
+    return prompt[start:end if end > start else len(prompt)]
+
+
+def without_call(prompt, call):
+    # The prompt with the call's own JSON cut out, so a check reads only the text the hook added.
+    return prompt.replace(json.dumps(call, ensure_ascii=False), "")
+
+
+def failed_open_lines(r):
+    # The stderr lines of a failed-open run: the past-ruling notice is not one of them.
+    return [line for line in r.err.splitlines() if line.strip() and PAST_UNKNOWN not in line]
+
+
+def case_past_ruling_replay_item_145():
+    import question_form  # the one form check (hooks/question_form.py)
+    box = good_box(goal=APPS_GOAL, problem=APPS_PROBLEM, based=APPS_BASED, options=APPS_OPTIONS)
+    check("past ruling 145 fixture: the box passes chat_hit, so the model judges it",
+          question_form.chat_hit(box) == ("", ""), question_form.chat_hit(box))
+    r = run_hook(question_input(box=box, cwd=DECISIONS_REPO), answer=ALLOW)
+    prompt = r.calls[0]["prompt"] if r.calls else ""
+    check("past ruling 145: the prompt holds the keep-the-apps ruling's slug and its line",
+          len(r.calls) == 1 and APPS_SLUG in without_call(prompt, box) and APPS_RULING in without_call(prompt, box),
+          detail(r))
+
+
+def case_past_ruling_replay_item_133():
+    import question_form  # the one form check (hooks/question_form.py)
+    item = good_page_item(title="Raise the CI milestone job cap?", context=CI_PAGE_CONTEXT, options=CI_PAGE_OPTIONS)
+    got = question_form.item_hit("set", {"collection": PAGE_ITEMS, "doc_id": "c133", "data": item})
+    check("past ruling 133 fixture: the item passes item_hit, so the model judges it", got == ("", ""), got)
+    r = run_hook(page_input("set", item, doc_id="c133", cwd=CI_REPO), answer=ALLOW)
+    prompt = r.calls[0]["prompt"] if r.calls else ""
+    check("past ruling 133: the prompt holds the step c95 ruling sentence",
+          len(r.calls) == 1 and CI_STEP_SENTENCE in without_call(prompt, item), detail(r))
+
+
+def case_past_ruling_cited_passes():
+    import question_form  # the one form check (hooks/question_form.py)
+    box = good_box(goal=APPS_GOAL, problem=APPS_PROBLEM, based=APPS_CITED, options=APPS_OPTIONS)
+    check("past ruling cited fixture: the box passes chat_hit", question_form.chat_hit(box) == ("", ""),
+          question_form.chat_hit(box))
+    r = run_hook(question_input(box=box, cwd=DECISIONS_REPO), answer=ALLOW)
+    check("past ruling cited: a Based on (ruling) question is still sent, one model call", len(r.calls) == 1, detail(r))
+    check("past ruling cited: the ok answer allows it, with no deny",
+          r.code == 0 and r.out == "" and "\tdeny\t" not in r.log, detail(r))
+    prompt = r.calls[0]["prompt"] if r.calls else ""
+    check("past ruling cited: the eighth item names the Based on (ruling) citation rule",
+          "based on (ruling)" in item_text(prompt, 8).lower(), item_text(prompt, 8)[:200])
+
+
+def case_past_ruling_explained_premise():
+    import question_form  # the one form check (hooks/question_form.py)
+    box = good_box(goal=CAPS_GOAL, problem=CAPS_PROBLEM, based=CAPS_BASED, options=CAPS_OPTIONS)
+    check("past ruling premise fixture: the box passes chat_hit", question_form.chat_hit(box) == ("", ""),
+          question_form.chat_hit(box))
+    r = run_hook(question_input(box=box, cwd=DECISIONS_REPO), answer=ALLOW)
+    prompt = r.calls[0]["prompt"] if r.calls else ""
+    check("past ruling premise: the ci-job-caps record's slug and line reach the prompt",
+          len(r.calls) == 1 and CAPS_SLUG in without_call(prompt, box) and CAPS_RULING in without_call(prompt, box),
+          detail(r))
+    item8 = item_text(prompt, 8).lower()
+    check("past ruling premise: the eighth item covers a premise a standing decision already explains",
+          "premise" in item8 and "explain" in item8 and "standing decision" in item8, item8[:300])
+
+
+def case_past_ruling_unknown_is_named():
+    box = good_box()
+    r = run_hook(question_input(box=box, cwd=BARE_REPO), answer=ALLOW)
+    check("past ruling unknown: the call is allowed, after one model call",
+          r.code == 0 and r.out == "" and "\tdeny\t" not in r.log and len(r.calls) == 1, detail(r))
+    notes = [line for line in r.err.splitlines() if PAST_UNKNOWN in line]
+    line = notes[0].lower() if len(notes) == 1 else ""
+    check("past ruling unknown: one stderr line names the unread sources, closed page items among them",
+          len(notes) == 1 and "decision" in line and "roadmap" in line and "closed page items" in line, detail(r))
+    check("past ruling unknown: the line never says clear",
+          len(notes) == 1 and re.search(r"\bclear\b", line) is None, detail(r))
+    prompt = r.calls[0]["prompt"] if r.calls else ""
+    check("past ruling unknown: the model is told which sources were not searched",
+          "closed page items" in without_call(prompt, box), prompt[:200])
+
+
+def case_past_ruling_cost():
+    import question_form  # the one form check (hooks/question_form.py)
+    box = good_box(goal=CI_GOAL, problem=CI_PROBLEM, based=CI_BASED, options=CI_CHAT_OPTIONS)
+    check("past ruling cost fixture: the box passes chat_hit", question_form.chat_hit(box) == ("", ""),
+          question_form.chat_hit(box))
+    r = run_hook(question_input(box=box, cwd=CI_REPO), answer=ALLOW)
+    check("past ruling cost: a judged question runs one git process, the roadmap read",
+          len(r.calls) == 1 and r.git == 1, detail(r))
+    item = good_page_item(title="Raise the CI milestone job cap?", context=CI_PAGE_CONTEXT, options=CI_PAGE_OPTIONS)
+    p = run_hook(page_input("set", item, doc_id="c133", cwd=CI_REPO), answer=ALLOW)
+    check("past ruling cost: a judged page write runs one git process", len(p.calls) == 1 and p.git == 1, detail(p))
+    q = run_hook(question_input(box=good_box(), cwd=BARE_REPO), answer=ALLOW)
+    check("past ruling cost: a judged question with no roadmap ref runs at most one git process",
+          len(q.calls) == 1 and q.git <= 1, detail(q))
+    f = run_hook(question_input(box=good_box(problem=None), cwd=CI_REPO), answer=ALLOW)
+    check("past ruling cost: a box refused by the form makes no model call and no git process",
+          f.calls == [] and f.git == 0 and (f.deny() or {}).get("permissionDecision") == "deny", detail(f))
+
+
+# ------------------------------------------------------------------ unvetted marker and docs/debts
+#
+# When the model review cannot run (a model error, or a decisions folder or roadmap ref that cannot be read), a question
+# is refused once, and its remedy adds an `Unvetted: <reason>` line. A question that already carries the line gets one
+# model attempt. If that attempt fails, the question passes, because the line tells the owner no check ran.
+# The closed page items notice alone never triggers it. docs/debts/*.md records reach the candidates, one line each.
+UNVETTED_LINE = "Unvetted: the model review could not run, so the owner reads this question unchecked."
+DEBT_SLUG = "settled-question-unchecked"
+DEBT_WHAT = "a settled question reached the owner with no past-ruling check. Marker debt-9d3e."
+FULL_REPO = make_repo("full", decisions={APPS_SLUG: APPS_RULING}, steps={CI_STEP_ID: CI_STEP_SENTENCE})
+DEBTS_REPO = make_repo("debts", decisions={APPS_SLUG: APPS_RULING}, steps={CI_STEP_ID: CI_STEP_SENTENCE},
+                       debts={DEBT_SLUG: DEBT_WHAT})
+
+
+def case_unvetted_marker():
+    box = good_box(goal=APPS_GOAL, problem=APPS_PROBLEM, based=APPS_BASED, options=APPS_OPTIONS)
+    r = run_hook(question_input(box=box, cwd=DECISIONS_REPO), answer=ALLOW, model_fail=True)
+    check("unvetted box: a model error refuses the question once, the remedy names Unvetted:",
+          r.code == 0 and (r.deny() or {}).get("permissionDecision") == "deny" and "Unvetted:" in r.reason()
+          and len(r.calls) == 1, detail(r))
+    marked = good_box(goal=APPS_GOAL, problem=APPS_PROBLEM, based=APPS_BASED, options=APPS_OPTIONS)
+    marked["questions"][0]["question"] += "\n" + UNVETTED_LINE
+    r = run_hook(question_input(box=marked, cwd=DECISIONS_REPO), answer=ALLOW, model_fail=True)
+    check("unvetted box: the same question with an Unvetted: line passes after one model attempt, the check always runs",
+          r.code == 0 and r.out == "" and len(r.calls) == 1 and "\tdeny\t" not in r.log, detail(r))
+
+
+def case_unvetted_page_marker():
+    item = good_page_item()
+    r = run_hook(page_input("set", item, cwd=DECISIONS_REPO), answer=ALLOW, model_fail=True)
+    check("unvetted page: a model error refuses the item write once, the remedy names Unvetted:",
+          r.code == 0 and (r.deny() or {}).get("permissionDecision") == "deny" and "Unvetted:" in r.reason()
+          and len(r.calls) == 1, detail(r))
+    marked = good_page_item(context=item["context"] + "\n" + UNVETTED_LINE)
+    r = run_hook(page_input("set", marked, cwd=DECISIONS_REPO), answer=ALLOW, model_fail=True)
+    check("unvetted page: the same item with an Unvetted: line in context passes after one model attempt",
+          r.code == 0 and r.out == "" and len(r.calls) == 1 and "\tdeny\t" not in r.log, detail(r))
+
+
+def case_unvetted_not_for_closed_items():
+    # Every source reads (decisions and roadmap). Only the closed page items notice is unknown, so it never refuses.
+    r = run_hook(question_input(box=good_box(), cwd=FULL_REPO), answer=ALLOW)
+    check("unvetted: the closed page items notice alone does not refuse, the call is allowed",
+          r.code == 0 and r.out == "" and len(r.calls) == 1 and "\tdeny\t" not in r.log and "Unvetted" not in r.err,
+          detail(r))
+
+
+def case_past_ruling_debt_candidates():
+    box = good_box(goal=APPS_GOAL, problem=APPS_PROBLEM, based=APPS_BASED, options=APPS_OPTIONS)
+    r = run_hook(question_input(box=box, cwd=DEBTS_REPO), answer=ALLOW)
+    prompt = r.calls[0]["prompt"] if r.calls else ""
+    rest = without_call(prompt, box)
+    check("past ruling debts: a docs/debts record's slug and What line reach the candidates",
+          len(r.calls) == 1 and DEBT_SLUG in rest and DEBT_WHAT in rest, detail(r))
+
+
+def case_unshown_id_takes_the_unvetted_path():
+    # Index shape (spec, Nov 1 18:58 CST): a refusal whose reason cites a record id the index did not show is a model
+    # error, so it takes the Unvetted path and never stands as a plain refusal.
+    box = good_box(goal=APPS_GOAL, problem=APPS_PROBLEM, based=APPS_BASED, options=APPS_OPTIONS)
+    bogus = json.dumps({"ok": False, "reason": "decisions/no-such-record: this was already decided."})
+    r = run_hook(question_input(box=box, cwd=DECISIONS_REPO), answer=bogus)
+    check("unshown id: a refusal citing an id not shown takes the Unvetted path, not a plain refusal",
+          r.code == 0 and (r.deny() or {}).get("permissionDecision") == "deny" and "Unvetted:" in r.reason(),
+          detail(r))
+
+
+def case_marker_does_not_skip_the_check():
+    # The Unvetted line never skips the check. A marker written ahead of time, with a working model, still runs the
+    # check, which refuses a ruled question.
+    box = good_box(goal=APPS_GOAL, problem=APPS_PROBLEM, based=APPS_BASED, options=APPS_OPTIONS)
+    box["questions"][0]["question"] += "\n" + UNVETTED_LINE
+    refuse = json.dumps({"ok": False, "reason": "decisions/%s: already decided by the keep-the-apps ruling." % APPS_SLUG})
+    r = run_hook(question_input(box=box, cwd=DECISIONS_REPO), answer=refuse)
+    check("unvetted marker: a marker written ahead of time does not skip the check, which refuses the ruled question",
+          len(r.calls) == 1 and (r.deny() or {}).get("permissionDecision") == "deny" and "Unvetted:" not in r.reason(),
+          detail(r))
+
+
+def case_unknown_names_the_claude_settings_records():
+    # The claude-settings checkout comes from guard_pointer.pointer_checkout(). This repo has its own docs/decisions and
+    # no pointer, so the claude-settings records are unread, and the unknown notice names them.
+    r = run_hook(question_input(box=good_box(), cwd=DECISIONS_REPO), answer=ALLOW)
+    notes = [line for line in r.err.splitlines() if PAST_UNKNOWN in line]
+    check("past ruling unknown: with its own decisions and no pointer, the notice names the claude-settings records",
+          len(notes) == 1 and "claude-settings" in notes[0], detail(r))
+
+
+def case_cite_of_a_shown_record_is_not_bogus():
+    # A reason citing a shown record with a .md suffix, with or without the docs/ prefix, is a real cite. It is a plain
+    # refusal, never the Unvetted path.
+    box = good_box(goal=APPS_GOAL, problem=APPS_PROBLEM, based=APPS_BASED, options=APPS_OPTIONS)
+    for cite in ("decisions/%s.md" % APPS_SLUG, "docs/decisions/%s.md" % APPS_SLUG):
+        answer = json.dumps({"ok": False, "reason": "%s: already decided by the keep-the-apps ruling." % cite})
+        r = run_hook(question_input(box=box, cwd=DECISIONS_REPO), answer=answer)
+        check("cite: a refusal citing %s (a shown record) is a plain refusal, not Unvetted" % cite,
+              r.code == 0 and (r.deny() or {}).get("permissionDecision") == "deny" and "Unvetted:" not in r.reason(),
+              detail(r))
+
+
+def case_page_task_gets_item_8_and_is_refused():
+    # A page task gets item 8 too. A task that asks a ruled question carries the ruling and item 8, and the judge refuses
+    # it. The item text never exempts a task.
+    import question_form  # the one form check (hooks/question_form.py)
+    task = good_task_item(step="Decide whether the GitHub apps keep their access to claude-settings, then say so in chat.")
+    got = question_form.item_hit("set", {"collection": PAGE_ITEMS, "doc_id": "t8", "data": task})
+    check("page task fixture: the task passes item_hit, so the model judges it", got == ("", ""), got)
+    refuse = json.dumps({"ok": False, "reason": "decisions/%s: already decided by the keep-the-apps ruling." % APPS_SLUG})
+    r = run_hook(page_input("set", task, doc_id="t8", cwd=DECISIONS_REPO), answer=refuse)
+    prompt = r.calls[0]["prompt"] if r.calls else ""
+    check("page task: the one model call carries item 8 and the ruling, and the item never exempts a task",
+          len(r.calls) == 1 and item_text(prompt, 8) != "" and "never applies to a task" not in item_text(prompt, 8).lower()
+          and APPS_RULING in without_call(prompt, task), detail(r))
+    check("page task: a ruled task is refused by the judge", (r.deny() or {}).get("permissionDecision") == "deny"
+          and "Unvetted:" not in r.reason(), detail(r))
+
+
+def case_mid_reason_unlisted_id_is_a_plain_refusal():
+    # An item 1 to 7 refusal that names an unlisted id mid-reason is a plain refusal. A reason that opens with an
+    # unlisted id is still a bogus cite, and takes the Unvetted path.
+    box = good_box(goal=APPS_GOAL, problem=APPS_PROBLEM, based=APPS_BASED, options=APPS_OPTIONS)
+    mid = json.dumps({"ok": False, "reason": "Item 5: explain decisions/zzz in plain words."})
+    r = run_hook(question_input(box=box, cwd=DECISIONS_REPO), answer=mid)
+    check("unlisted id mid-reason: an item 5 refusal that names decisions/zzz stays a plain refusal, not Unvetted",
+          (r.deny() or {}).get("permissionDecision") == "deny" and "Unvetted:" not in r.reason(), detail(r))
+    opens = json.dumps({"ok": False, "reason": "decisions/zzz: already decided."})
+    r = run_hook(question_input(box=box, cwd=DECISIONS_REPO), answer=opens)
+    check("unlisted id opening the reason: still a bogus cite, takes the Unvetted path",
+          "Unvetted:" in r.reason(), detail(r))
+
+
 def main():
     for case in (case_agent_refusal, case_spawn_prompt_bars_a_lane_waiting_page_write, case_agent_override, case_explore_row_is_vetoed,
                  case_explore_remedy_names_marker, case_agent_fallback_names_marker, case_question,
@@ -987,7 +1540,17 @@ def main():
                  case_options_without_note_lacks_rule, case_blank_note_lacks_rule,
                  case_context_only_note_lacks_rule, case_reask_batch_one_call_rule_once, case_reask_refusal_denies,
                  case_picked_choice_with_note_lacks_rule, case_none_choice_with_note_holds_rule_once,
-                 case_fail_open, case_settings_row):
+                 case_widening_set_holds_rule_once, case_widening_batch_holds_rule_once,
+                 case_widening_absent_without_options, case_widening_refusal_names_the_option,
+                 case_widening_fair_option_passes_code_path, case_widening_rule_names_the_mark,
+                 case_fail_open, case_settings_row, case_past_ruling_replay_item_145,
+                 case_past_ruling_replay_item_133, case_past_ruling_cited_passes,
+                 case_past_ruling_explained_premise, case_past_ruling_unknown_is_named,
+                 case_past_ruling_cost, case_unvetted_marker, case_unvetted_page_marker,
+                 case_unvetted_not_for_closed_items, case_past_ruling_debt_candidates,
+                 case_unshown_id_takes_the_unvetted_path, case_marker_does_not_skip_the_check,
+                 case_unknown_names_the_claude_settings_records, case_cite_of_a_shown_record_is_not_bogus,
+                 case_page_task_gets_item_8_and_is_refused, case_mid_reason_unlisted_id_is_a_plain_refusal):
         try:
             case()
         except Exception as exc:

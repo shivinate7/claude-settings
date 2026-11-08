@@ -19,5 +19,5 @@ slices you covered and the slices you propose.
 
 Before the final report, stop every Monitor and background task you started with `TaskStop`, and start none after it.
 
-Report once. Start with the point. Write in Simplified Technical English. Report in under 25
+Report once. Start with the point. Write plainly (rule output-write-in-ste). Report in under 25
 lines unless the brief names another cap.

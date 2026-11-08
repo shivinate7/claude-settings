@@ -4,11 +4,12 @@
 
 A builder that cannot pass a test must not delete, skip or rewrite it. A green run must mean the code is right. The guard stops mistakes, not an attacker (`guard-guards-mistakes-only`). The reviewer reads every diff.
 
-Judge the result, not the commands. The act is a test path in a change the builder made (`predicate-is-the-act`), not `rm`, `mv`, `sed -i` or a redirect. `hooks/guard.py` reads that change at three points:
+Judge the result, not the commands. The act is a test path in a change the builder made (`predicate-is-the-act`), not `rm`, `mv`, `sed -i` or a redirect. `hooks/guard.py` reads that change at three points. A fourth point reads a builder's shell command, as an early warning:
 
 - A builder's `git commit` and `git push` (PreToolUse, Bash and PowerShell). A test change refuses with `builder-diff`. The refusal names no path and gives the undo route: restore a changed test file, delete a new one. No override lifts it.
 - A builder's SubagentStop. A test change refuses the first stop with `builder-diff`. A second stop (`stop_hook_active`) is allowed and logs `role-diff-unresolved`, so an agent that cannot fix its tree never loops.
 - A write tool call (Edit, Write, MultiEdit, NotebookEdit). This is the early warning, by path. It refuses. Every path field the call carries is judged, and every refusal runs on all fields before any ask, so a decoy field cannot hide a refused path.
+- A builder's Bash or PowerShell call that writes a test path. It refuses with `builder-test-edit`, the same reason as the write tool. The shell check below says what it reads.
 
 An unreadable state logs `role-diff-unread` and is allowed. A second stop with an unreadable state logs `role-diff-unresolved`.
 
@@ -32,8 +33,8 @@ An unreadable state logs `role-diff-unread` and is allowed. A second stop with a
 
 The payload must carry an `agent_id`. The main session, reviewers, Explore, and a session started with `--agent builder` (no `agent_id`) stay allowed.
 
-- `builder`: refused at commit, push and stop when the diff holds a test path. The write tool refuses it too. A test conflict mid-merge is refused. The route is `git merge --abort`, then report to the orchestrator.
-- `test-author`: the inverse. Logged when the diff holds anything but a test path, test config or a dev dependency list (`author-diff`). Never refused at commit, push or stop.
+- `builder`: refused at commit, push and stop when the diff holds a test path. The write tool and the shell check refuse it too. A test conflict mid-merge is refused. The route is `git merge --abort`, then report to the orchestrator.
+- `test-author`: the inverse. Logged when the diff holds anything but a test path, test config, a dev dependency list or a whole workflow test step (`author-diff`). Never refused at commit, push or stop.
 - `record-writer`: may change only `*.md` files: records, README, CLAUDE.md-style docs, agent files, skills and output styles. It never changes product code, tests, CI or config. The write tool refuses any other path (`record-writer-scope`). At commit, push and stop, a diff that holds one is logged only (`writer-diff`).
   - Reason: a role name is only a label on the spawn. With no path limit, a Haiku `record-writer` is a Haiku builder under a new name, and the floor means nothing (`agent-model-cap`).
 - `designer`: at commit, push and stop, an offence is logged only (`designer-diff`).
@@ -46,6 +47,8 @@ The payload must carry an `agent_id`. The main session, reviewers, Explore, and 
 - A builder change to a test-runner config file that ADDS a line disabling tests counts as a test change.
 - A test-author owns test config files and `requirements-dev.txt`. Two files are partly owned: `package.json` (only `devDependencies`, `jest` and the test scripts) and `pyproject.toml` (only the `[tool.pytest*]` sections).
 - A builder may add a dependency or a dev dependency.
+- A test-author owns a CI step that only runs a test suite. In `.github/workflows/*.yml` or `*.yaml`, it may add or remove a whole test-run step. The step holds only the keys `name`, `if`, `run`, `shell`, `working-directory` and `timeout-minutes`. Its one `run:` is a single line: an optional interpreter (`python`, `python3`, `node`, `bash`, `sh` or `pwsh`), a test path, and arguments that disable no test. No shell operators, `$(` or backtick. The write tool refuses any other workflow change by a test-author (`test-author-scope`), and commit, push and stop log it (`author-diff`). `workflow_test_steps_only` in `hooks/guard.py` judges it, reading `workflow_changed_lines`.
+- A builder keeps every other workflow edit, and may add a test step or move one. Its change counts as a test change (`builder-test-edit`) when it does one of three things. It adds a test-disabling flag or name on a line that names a test runner or runs a test path. It adds `continue-on-error: true` or `if: false` under a test-run step. It drops a test path that the workflow ran before. `workflow_builder_refused` in `hooks/guard.py` judges it, through `workflow_disables_tests`, `workflow_disables_step` and `workflow_drops_tests`; the first reads `workflow_changed_lines`. The builder is not refused for the whole file, because CI work (lint and build steps) is a builder's.
 
 **False alarms pinned** (`guard-that-cries-wolf-is-spent`). A builder may still do these:
 
@@ -54,6 +57,15 @@ The payload must carry an `agent_id`. The main session, reviewers, Explore, and 
 - Use a name that only looks like a test, such as `src/contest.py`.
 - Write a file in no repository, such as a probe in the session scratchpad, from a call that runs in a repository. A path with no enclosing checkout is no test of the repo. A test path in any repository stays refused, also one in a different repository. A call that runs in no repository still judges the path by its shape.
 - Write a document in a `spec` folder, such as `docs/spec/api.md`. `spec` is a test folder for code and fixtures only. A `.md`, `.mdx`, `.markdown`, `.txt`, `.rst` or `.adoc` file there is a document. `spec/foo_spec.rb` and `src/x.spec.ts` stay refused.
+
+## The shell check
+
+The shell check does not replace the act. The act stays a test path in the builder's change. The shell check flags common mistake forms first. The diff log at commit, push and stop catches every other form. Recovery stays allowed: `git checkout -- <test>` and `git restore` are not read as writes.
+
+- Reads: a redirect, `tee`, `sed -i` or `cp` onto a test path (`_shell_write_hit`, with `command_position`). It also reads a python or node heredoc body, or a `-c` or `-e` script, that opens a test path for write (`interpreter_write_hit`). Both use the Edit path's predicate (`builder_test_path`).
+- Basis: named incident, 2026-11-01. In lane `refusal-cite-reach`, a builder changed `lint/test_rule_audit.py` through a python heredoc. It then restored the file with `git show HEAD:... > file`.
+- Landed: 2026-11-02.
+- Cost: no process, no file, no timer. The scan runs inside the guard hook that already runs for a builder's shell call. `ast` is imported only when a python body is read. A refusal writes its one guard.log line, as every refusal does. A scan error in the python or node reader is no hit. Any other scan error ends the judge: the guard logs `guard-crash` and allows the call.
 
 Kind: process
 Home: hooks/guard.py

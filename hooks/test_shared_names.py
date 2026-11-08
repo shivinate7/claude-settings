@@ -279,6 +279,42 @@ def case_local_time_fails_open_on_bad_shared_names():
     return not bad, "bad states: %s" % (bad or "none")
 
 
+def case_lane_head_refs_pinned():
+    """lane_head_refs(slug) is the one home of the head refs a lane's pull request may carry: the bare step slug and
+    `lane/<slug>`. Both forms are real (a pull request on `lane/reviewer-spawn-model` exists). A missing name is a
+    failed case, not a crash, so the report names the cause."""
+    shared = _shared()
+    fn = getattr(shared, "lane_head_refs", None)
+    if not callable(fn):
+        return False, "shared_names.lane_head_refs is absent"
+    got = fn("lane-x")
+    return (isinstance(got, (tuple, list)) and tuple(got) == ("lane-x", "lane/lane-x"),
+            "lane_head_refs('lane-x')=%r" % (got,))
+
+
+def case_one_home_for_lane_heads():
+    """build.py and the archive guard (hooks/guard_merge.py) import lane_head_refs from shared_names. Neither defines
+    its own copy, and neither holds the `lane/` prefix as a literal, so the two forms cannot drift apart."""
+    problems = []
+    for rel in ("hooks/guard_merge.py", "skills/roadmap/build.py"):
+        with open(os.path.join(HERE, "..", rel), encoding="utf-8") as handle:
+            tree = ast.parse(handle.read())
+        imported = any(isinstance(node, ast.ImportFrom) and node.module == "shared_names"
+                       and any(alias.name == "lane_head_refs" for alias in node.names)
+                       for node in ast.walk(tree))
+        copied = [node.lineno for node in ast.walk(tree)
+                  if isinstance(node, ast.FunctionDef) and node.name == "lane_head_refs"]
+        literal = [node.lineno for node in ast.walk(tree)
+                   if isinstance(node, ast.Constant) and node.value == "lane/"]
+        if not imported:
+            problems.append("%s does not import lane_head_refs from shared_names" % rel)
+        if copied:
+            problems.append("%s defines its own lane_head_refs at line %d" % (rel, copied[0]))
+        if literal:
+            problems.append("%s holds the literal 'lane/' at line %d" % (rel, literal[0]))
+    return not problems, "; ".join(problems) or "both read the one home"
+
+
 # ---- the merge role reader: MERGE_ROLES, role_path and read_merge_role live here, and merge/merge.py imports them.
 # The role file is {"session": <CLAUDE_CODE_REMOTE_SESSION_ID>, "role": <tier>}. The id has the cse_ prefix a live
 # coordinator's environment holds; the reader never reads a hook payload's session_id.
@@ -317,7 +353,7 @@ def case_merge_role_names_live_in_shared_names():
     shared = _shared()
     roles = getattr(shared, "MERGE_ROLES", None)
     missing = [name for name in ROLE_NAMES if not hasattr(shared, name)]
-    ok = not missing and set(roles) == {"coordinator", "batch-runner"} and all(
+    ok = not missing and set(roles) == {"batch-runner"} and all(
         callable(getattr(shared, name)) for name in ROLE_NAMES[1:])
     return ok, "missing from shared_names: %s, MERGE_ROLES=%r" % (missing or "none", roles)
 
@@ -346,17 +382,17 @@ def case_read_merge_role_matches_the_env_session_only():
         with role_env(config, session):
             return shared.read_merge_role()
 
-    for role in ("coordinator", "batch-runner"):
+    for role in ("batch-runner",):
         got = read(json.dumps({"session": ROLE_SESSION, "role": role}))
         if got != role:
             bad.append("%s read as %r" % (role, got))
-    for role in ("lane", "triage", "Coordinator", "coordinator ", "", None, ["coordinator"]):
+    for role in ("coordinator", "lane", "triage", "Batch-runner", "batch-runner ", "", None, ["batch-runner"]):
         got = read(json.dumps({"session": ROLE_SESSION, "role": role}))
         if got is not None:
             bad.append("role %r read as %r, want None" % (role, got))
     # The file's session must equal the environment's id as written: no mapping of cse_<id> to session_<id>.
     for recorded in ("cse_01OtherSession", "session_013NEJL2pASwRjgJDnsvnpNe", ""):
-        got = read(json.dumps({"session": recorded, "role": "coordinator"}))
+        got = read(json.dumps({"session": recorded, "role": "batch-runner"}))
         if got is not None:
             bad.append("a file for session %r read as %r, want None" % (recorded, got))
     for text in ("", '{"session": ', "[]", "null"):
@@ -364,7 +400,7 @@ def case_read_merge_role_matches_the_env_session_only():
         if got is not None:
             bad.append("file text %r read as %r, want None" % (text, got))
     for session in (None, ""):
-        got = read(json.dumps({"session": session or "", "role": "coordinator"}), session)
+        got = read(json.dumps({"session": session or "", "role": "batch-runner"}), session)
         if got is not None:
             bad.append("env session %r read as %r, want None" % (session, got))
     shutil.rmtree(os.path.join(config, "state"))
@@ -435,14 +471,17 @@ CASES = [
      case_local_time_output_unchanged),
     ("(j) local_time keeps the time line and an override grant when shared_names.py is absent or stale",
      case_local_time_fails_open_on_bad_shared_names),
-    ("(k) shared_names holds MERGE_ROLES, role_path and read_merge_role", case_merge_role_names_live_in_shared_names),
-    ("(l) role_path is the state file under the config dir, or under ~/.claude",
+    ("(k) shared_names holds lane_head_refs: the bare step slug and lane/<slug>", case_lane_head_refs_pinned),
+    ("(k2) build.py and the archive guard import lane_head_refs, with no copy of it or the lane/ prefix",
+     case_one_home_for_lane_heads),
+    ("(l) shared_names holds MERGE_ROLES, role_path and read_merge_role", case_merge_role_names_live_in_shared_names),
+    ("(m) role_path is the state file under the config dir, or under ~/.claude",
      case_role_path_is_the_state_file_under_the_config_dir),
-    ("(m) read_merge_role gives the role for the env's own cse_ session id and None for every other state",
+    ("(n) read_merge_role gives the role for the env's own cse_ session id and None for every other state",
      case_read_merge_role_matches_the_env_session_only),
-    ("(n) merge.py's three names are shared_names' own objects", case_merge_uses_the_shared_objects),
-    ("(o) no module outside shared_names.py defines the three names", case_no_second_home_for_the_merge_role_reader),
-    ("(p) the run folder sweep removes an old sibling and keeps a new one",
+    ("(o) merge.py's three names are shared_names' own objects", case_merge_uses_the_shared_objects),
+    ("(p) no module outside shared_names.py defines the three names", case_no_second_home_for_the_merge_role_reader),
+    ("(q) the run folder sweep removes an old sibling and keeps a new one",
      case_the_run_folder_sweep_removes_an_old_sibling_and_keeps_a_new_one),
 ]
 

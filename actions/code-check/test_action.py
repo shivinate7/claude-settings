@@ -5,10 +5,11 @@ a listed module renamed off the list is red, a shrink against --main (current ma
 Swift, .entitlements and zsh files have rows and zsh skips ShellCheck, web app data and image files have rows, archive, sheet, model and node config files have rows, an excluded folder is not scanned, an .astro type error is red and a clean Astro project green, and the
 standard's table is whole (every layer runs or has a one-line reason). The comment check reads only added
 lines; with no base it is skipped with a reason, and with a base outside the clone it is unknown, never red.
+A .mjs file's broken or extensionless relative import, and TS-only syntax in it, is red; its builtin, bare, JSON, .cjs and type-error imports, a JSDoc type, and npm notice lines on stderr are not; a .js or .cjs file is not checked, and a clean .mjs with no tsc on PATH is red.
 The tools run from PATH (CODE_CHECK_TOOLS=path), so ruff, mypy, shellcheck (the --pins specs, via pipx) and
 astro-check (the tools/ lockfile, via npm ci, bin on PATH) must be installed. Without astro-check the Astro tests
 skip and say so, except under CI, where they fail."""
-import functools, json, os, shutil, subprocess, sys, tempfile, unittest
+import functools, json, os, shlex, shutil, subprocess, sys, tempfile, unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "..", "..", "lint"))
@@ -55,11 +56,11 @@ def head(d):
     return subprocess.run(["git", "rev-parse", "HEAD"], cwd=d, capture_output=True, text=True).stdout.strip()
 
 
-def check(files, base_files=None, base=None, main_files=None, main=None, send_base=True, path_tools=True, **env):
+def check(files, base_files=None, base=None, main_files=None, main=None, send_base=True, path_tools=True, unset=(), **env):
     """Commit base_files (when given) as the base, then files on top (None deletes); run the runner.
     main_files (when given) are a commit on top of the base that the PR does not hold, passed as --main;
     the PR's files then go on the base. `base` and `main` name a ref outright; send_base=False omits --base.
-    Returns (exit, output)."""
+    unset names are dropped from the run env; env adds or replaces variables there. Returns (exit, output)."""
     with tempfile.TemporaryDirectory(dir=RUN_FOLDER) as d:
         git(d, "init", "-q", "-b", "main")
         if base_files is not None:
@@ -75,6 +76,8 @@ def check(files, base_files=None, base=None, main_files=None, main=None, send_ba
         git(d, "add", "-A"); git(d, "commit", "-qm", "head", "--allow-empty")
         args = [sys.executable, RUNNER, "--root", d] + (["--base", base] if base and send_base else []) + (["--main", main] if main else [])
         run_env = dict(os.environ, **env)
+        for name in unset:
+            run_env.pop(name, None)
         run_env.pop("CODE_CHECK_TOOLS", None)
         if path_tools:
             run_env["CODE_CHECK_TOOLS"] = "path"
@@ -320,6 +323,144 @@ class CodeCheck(unittest.TestCase):
         for name, row in std["languages"].items():
             self.assertNotIn("run", row["format"], name)
 
+    @NEEDS_TSC
+    def test_mjs_import_of_missing_relative_file_is_red(self):
+        rc, out = check({".code-check.json": config([]),
+                         "app.mjs": 'import { x } from "./gone.mjs";\nexport default x;\n'})
+        self.assertEqual(rc, 1, out)
+        self.assertIn("app.mjs", out)
+        self.assertIn("gone.mjs", out)
+
+    @NEEDS_TSC
+    def test_mjs_named_import_the_sibling_does_not_export_is_red(self):
+        rc, out = check({".code-check.json": config([]), "lib.mjs": "export const a = 1;\n",
+                         "app.mjs": 'import { b } from "./lib.mjs";\nexport default b;\n'})
+        self.assertEqual(rc, 1, out)
+        self.assertIn("app.mjs", out)
+        self.assertIn("lib.mjs", out)
+
+    @NEEDS_TSC
+    def test_mjs_side_effect_import_of_missing_file_is_red(self):
+        rc, out = check({".code-check.json": config([]), "app.mjs": 'import "./gone.mjs";\n'})
+        self.assertEqual(rc, 1, out)
+        self.assertIn("app.mjs", out)
+        self.assertIn("gone.mjs", out)
+
+    @NEEDS_TSC
+    def test_mjs_imports_that_resolve_or_are_out_of_scope_are_green(self):
+        # Node builtins, a bare package that is not installed, a JSON file with an import attribute, a .cjs file by
+        # default import, and a type error (checkJs reports it; the import check drops it): none is a broken import.
+        rc, out = check({".code-check.json": config([]), "d.json": '{"a": 1}\n',
+                         "c.cjs": "module.exports = { a: 1 };\n",
+                         "app.mjs": ('import fs from "node:fs";\n'
+                                     'import x from "somepkg";\n'
+                                     'import data from "./d.json" with { type: "json" };\n'
+                                     'import c from "./c.cjs";\n'
+                                     'const n = 1;\nn.foo;\n'
+                                     'export { fs, x, data, c };\n')})
+        self.assertIn("javascript typecheck: mjs-imports pass", out, out)
+        self.assertEqual(rc, 0, out)
+
+    @NEEDS_TSC
+    def test_broken_import_in_js_or_cjs_is_not_checked(self):
+        rc, out = check({".code-check.json": config([]),
+                         "app.js": 'import { x } from "./gone.js";\nexport default x;\n',
+                         "app.cjs": 'const { y } = require("./gone.cjs");\nmodule.exports = y;\n'})
+        self.assertIn("javascript typecheck", out, out)
+        self.assertEqual(rc, 0, out)
+
+    def test_mjs_import_check_fails_closed_when_tsc_cannot_start(self):
+        # No tsc on PATH: a clean .mjs must still be red, since the import check cannot say that it is clean.
+        rc, out = check({".code-check.json": config([]), "lib.mjs": "export const a = 1;\n",
+                         "app.mjs": 'import { a } from "./lib.mjs";\nexport default a;\n'}, PATH=path_with("git"))
+        self.assertEqual(rc, 1, out)
+        self.assertIn("could not", out)
+
+    def test_mjs_import_check_whose_tsc_exits_1_with_no_stdout_is_red(self):
+        # tsc fails and writes only to stderr: no diagnostic on stdout, so the import check cannot call the .mjs clean.
+        shim = path_shim("tsc", "echo 'tsc: failed before it checked the file' >&2\nexit 1")
+        rc, out = check({".code-check.json": config([]), "app.mjs": "export const a = 1;\n"},
+                        PATH=shim + os.pathsep + os.environ["PATH"])
+        self.assertEqual(rc, 1, out)
+        self.assertIn("printed no diagnostics", out)
+
+    @NEEDS_TSC
+    def test_mjs_extensionless_import_of_a_sibling_is_red(self):
+        # Node 22 rejects "./lib" for lib.mjs: the specifier needs its extension (TS2835).
+        rc, out = check({".code-check.json": config([]), "lib.mjs": "export const a = 1;\n",
+                         "app.mjs": 'import { a } from "./lib";\nexport default a;\n'})
+        self.assertEqual(rc, 1, out)
+        self.assertIn("app.mjs", out)
+        self.assertIn("TS2835", out)
+
+    @NEEDS_TSC
+    def test_mjs_extensionless_import_of_a_missing_file_is_red(self):
+        # Node 22 rejects "./nope" before it looks for the file: the specifier needs its extension (TS2834).
+        rc, out = check({".code-check.json": config([]), "app.mjs": 'import { a } from "./nope";\nexport default a;\n'})
+        self.assertEqual(rc, 1, out)
+        self.assertIn("app.mjs", out)
+        self.assertIn("TS2834", out)
+
+    @NEEDS_TSC
+    def test_mjs_import_of_a_directory_is_red(self):
+        # Node 22 rejects "./dir" for a folder with an index.mjs: a directory is not a module (TS2834).
+        rc, out = check({".code-check.json": config([]), "dir/index.mjs": "export const q = 1;\n",
+                         "app.mjs": 'import { q } from "./dir";\nexport default q;\n'})
+        self.assertEqual(rc, 1, out)
+        self.assertIn("app.mjs", out)
+        self.assertIn("TS2834", out)
+
+    @NEEDS_TSC
+    def test_mjs_type_annotation_is_red(self):
+        # Node 22 cannot parse a type annotation in a .mjs file (TS8010).
+        rc, out = check({".code-check.json": config([]), "app.mjs": "const x: number = 1;\nexport default x;\n"})
+        self.assertEqual(rc, 1, out)
+        self.assertIn("app.mjs", out)
+        self.assertIn("TS8010", out)
+
+    @NEEDS_TSC
+    def test_mjs_type_assertion_is_red(self):
+        # Node 22 cannot parse an `as` assertion in a .mjs file (TS8016).
+        rc, out = check({".code-check.json": config([]),
+                         "app.mjs": "const z = 1;\nconst y = z as number;\nexport default y;\n"})
+        self.assertEqual(rc, 1, out)
+        self.assertIn("app.mjs", out)
+        self.assertIn("TS8016", out)
+
+    @NEEDS_TSC
+    def test_mjs_ts_only_forms_are_each_red_by_their_code(self):
+        # Node 22 cannot parse these in a .mjs file: `satisfies` is TS8037; enum, interface and import type are TS8006.
+        # Each form has its own file, so each output row must name that file and its code.
+        forms = {"sat.mjs": ("const c = {} satisfies object;\nexport default c;\n", "TS8037"),
+                 "en.mjs": ("enum E {}\n", "TS8006"),
+                 "ifc.mjs": ("interface I {}\n", "TS8006"),
+                 "it.mjs": ('import type { X } from "./x.mjs";\n', "TS8006")}
+        _, out = check({".code-check.json": config([]), "x.mjs": "export class X {}\n",
+                        **{name: text for name, (text, _) in forms.items()}})
+        for name, (_, code) in forms.items():
+            with self.subTest(form=name):
+                self.assertTrue(one_line_with(out, name, code), "%s: no %s row in:\n%s" % (name, code, out))
+
+    @NEEDS_TSC
+    def test_mjs_jsdoc_type_annotation_is_green(self):
+        # The control for the two cases above: a JSDoc type is plain comment syntax to Node, so it stays green.
+        rc, out = check({".code-check.json": config([]),
+                         "app.mjs": "/** @type {number} */\nconst x = 1;\nexport default x;\n"})
+        self.assertIn("javascript typecheck: mjs-imports pass", out, out)
+        self.assertEqual(rc, 0, out)
+
+    @NEEDS_TSC
+    def test_npm_notice_on_stderr_is_not_an_mjs_problem(self):
+        # The shim fakes the npm update notice that npm prints on stderr when CI is unset. A .mjs with only a type
+        # error stays green: the notice is no diagnostic, and it is not a problem.
+        real = shutil.which("tsc")
+        self.assertIsNotNone(real, "tsc not on PATH")
+        shim = path_shim("tsc", "echo 'npm notice New minor version of npm available' >&2\nexec %s \"$@\"" % shlex.quote(real))
+        rc, out = check({".code-check.json": config([]), "app.mjs": "const n = 1;\nn.foo;\nexport default n;\n"},
+                        PATH=shim + os.pathsep + os.environ["PATH"], unset=("CI",))
+        self.assertIn("javascript typecheck: mjs-imports pass", out, out)
+        self.assertEqual(rc, 0, out)
+
 
 NARRATED = "# fixed on 2026-10-28\n"
 NARRATED_FN = "def add(a: int, b: int) -> int:\n    # fixed on 2026-10-28\n    return a + b\n"
@@ -336,6 +477,16 @@ def path_with(*tools):
     folder = tempfile.mkdtemp(dir=RUN_FOLDER)
     for tool in tools:
         os.symlink(shutil.which(tool), os.path.join(folder, tool))
+    return folder
+
+
+def path_shim(name, body):
+    """A PATH folder holding one executable `name`, an sh script of `body`. Returns the folder."""
+    folder = tempfile.mkdtemp(dir=RUN_FOLDER)
+    path = os.path.join(folder, name)
+    with open(path, "w", newline="\n") as f:
+        f.write("#!/bin/sh\n" + body + "\n")
+    os.chmod(path, 0o755)
     return folder
 
 
