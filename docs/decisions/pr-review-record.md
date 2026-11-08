@@ -69,8 +69,8 @@ Counted as real `gh` calls, one call per list read however many pages it pages.
 - Not a `gh` call: each `--reviewed` run also runs one `git fetch origin main` (`load_config`) and local git reads.
 - Each ready PR that has a record adds three calls: the check runs, the commit statuses and the branch protection (required checks mode `protection`). A draft, and a PR with no record, add none.
 - One ready PR with a record: five calls. With a pinned `merge.requiredChecks` list: also five, because the one protection compare moves to the start of the run and the per-PR protection read goes.
-- `merge <pr> --review-record`: one PR read per call. `--fix-check` adds one paged read of the repo's issue comments since the PR opened. It writes nothing. A render whose record is done also runs `lane_lint` once: one PR read, one temporary worktree and one `ci-job checks --lint` run, removed on exit. A render whose record is open runs none. The Stamp is one sha256 hash in the process that renders or parses, with no extra call, file or process.
-- No new long-lived process, file, cache or timer. The batch runner calls the list at each wake. A lane calls the render at each round, and a PASS render costs one lint run (above).
+- `merge <pr> --review-record`: one PR read per call. `--fix-check` adds one paged read of the repo's issue comments since the PR opened. It writes nothing. A render whose record is done also runs `lane_lint` once on the checked head sha: no PR read, one `git fetch origin <base>` (more when the head is not local), one temporary worktree and one `ci-job checks --lint` run, removed on exit. A render whose record is open runs none. The Stamp is one sha256 hash in the process that renders or parses, with no extra call, file or process.
+- No new long-lived process, file, cache or timer. The batch runner calls the list at each wake. A lane calls the render at each round, and a render of a done record costs one lint run (above).
 - The test `ReviewedList` in `merge/test_merge.py` pins the two list reads and the five calls for one ready PR.
 
 ## The guard
