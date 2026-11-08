@@ -1998,8 +1998,8 @@ test("watchdog: a detached process the suite started, holding no pipe, is named,
     assert.deepEqual(found.left, [], `the sleeper is still running after the suite ended: ${found.left}\n${out}`);
   }));
 
-// Round 2. A run that leaves nothing, and a process that exits inside the grace, both end green: they
-// guard against a false alarm, a leftover that is not one. Both read the hang fixture's pid file, so the
+// A run that leaves nothing, and a process that exits inside the grace, both end green: they guard
+// against a false alarm, a leftover that is not one. Both read the hang fixture's pid file, so the
 // watchdog arms on it as it does for the other fixtures. A file, not a pipe, takes the output.
 function watchdogRun(env, dir) {
   const outFile = join(dir, "out.txt");
