@@ -273,7 +273,7 @@ def counts(sentence):
     for i, word in enumerate(words):
         if not COUNT_WORD.fullmatch(word.group()):
             continue
-        # once, twice and thrice count only after the noun ("reads it once"); "one of" is a pronoun
+        # once, twice and thrice count only after a verb of work ("reads it once"); "one of" is a pronoun
         leading = not TIMES_WORD.fullmatch(word.group()) and not (
             word.group().lower() == "one" and words[i + 1:i + 2] and words[i + 1].group().lower() == "of")
         after = leading and any(COST_NOUN.fullmatch(w.group()) for w in words[i + 1:i + 5])
