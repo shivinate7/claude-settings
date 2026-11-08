@@ -25,6 +25,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py)
 import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (lint/_test_temp.py)
+import layout  # noqa: E402  the one home of where records live (lint/layout.json)
 MODULE = os.environ.get("RECORD_SLUGS_UNDER_TEST") or os.path.join(HERE, "check_record_slugs.py")
 sys.path.insert(0, os.path.join(HERE, "..", "testing"))
 import tracked_tree  # noqa: E402  copies what git lists, so no fixture lists files (testing/tracked_tree.py)
@@ -48,6 +49,28 @@ DEBT_README = "debts/README.md"  # the folder's README: it describes the markers
 DEBT_NOTES = "debts/notes.md"  # the folder's notes file: it is not a debt either
 README_FEEL_TEXT = "# Debts\n\nOne debt per file.\n\n- **Feel.** a marker shown as an example, not a debt\n"
 NOTES_FEEL_TEXT = "# Notes\n\n- **Feel.** a note that is not a debt\n"
+# A notes row is `- <slug>: text`. A slug on two rows is one finding recorded twice. The text of a row can hold a
+# lone quote and comment openers, and a slug named mid-row is not a row.
+NOTE_UNIQUE_TEXT = ("# Notes\n\n"
+                    "- alpha-slug: the first row. Don't scroll `list` while it loads.\n"
+                    "- beta-slug: another finding.\n"
+                    "- gamma-slug: a third finding.\n")
+NOTE_DUP_TEXT = ("# Notes\n\n"
+                 "- alpha-slug: the first row. Don't scroll `list` while it loads.\n"
+                 "- beta-slug: another finding.\n"
+                 "- alpha-slug: the same finding, recorded again.\n")
+NOTE_MID_ROW_TEXT = ("# Notes\n\n"
+                     "- beta-slug: the cause is alpha-slug: unmeasured, see its row.\n"
+                     "- gamma-slug: alpha-slug: is named again inside this row's text.\n"
+                     "- alpha-slug: the only row that starts with the slug.\n"
+                     "- delta-slug: see - alpha-slug: quoted.\n")  # `- ` before the slug in a row's text: no row
+NOTE_OPENERS_TEXT = ("# Notes\n\n"
+                     "- beta-slug: a row with `/*`, `//` and # in its text. Don't stop there.\n"
+                     "- beta-slug: the second row, which makes the duplicate.\n")
+NOTE_CASE_TEXT = NOTE_DUP_TEXT.replace("- alpha-slug: the same", "- Alpha-slug: the same")  # the slug in another case
+NOTE_SPACE_TEXT = NOTE_DUP_TEXT.replace("- alpha-slug: the same", "- alpha-slug : the same")  # a space before the colon
+FULL_UNIQUE = "# Notes\n\n" + "".join("- row-%03d-slug: finding %d.\n" % (i, i) for i in range(300))  # full size
+FULL_DUP = FULL_UNIQUE + "- row-000-slug: the first row, written again at the end.\n"
 
 RUN_FOLDER = None  # made in setUpModule, so an import leaks no folder
 
@@ -65,6 +88,14 @@ def flagged(out):
     """The paths the check named as FAIL: each FAIL line ends with its path."""
     return [line.rsplit(" ", 1)[1] for line in out.splitlines()
             if line.startswith("check_record_slugs: FAIL:")]
+
+
+def load_under_test():
+    """The module under test, loaded without running its command line."""
+    spec = importlib.util.spec_from_file_location("record_slugs_under_test", MODULE)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 class RecordSlugsTests(unittest.TestCase):
@@ -124,6 +155,13 @@ class RecordSlugsTests(unittest.TestCase):
         sha = subprocess.run(["git", "-C", self.tree, "rev-parse", "origin/main:" + ref_path],
                              capture_output=True, text=True, check=True).stdout.strip()
         return os.path.join(self.tree, ".git", "objects", sha[:2], sha[2:])
+
+    def break_git_show(self, ref_path):
+        """Makes `git show origin/main:<ref_path>` fail. A packed blob would survive the removal, and git show
+        would not fail, so the case would prove nothing."""
+        loose = self.loose_blob(ref_path)
+        self.assertTrue(os.path.isfile(loose), loose)
+        os.remove(loose)
 
     # Positive controls first: a red case means nothing if the clean case fails.
 
@@ -306,16 +344,28 @@ class RecordSlugsTests(unittest.TestCase):
     def test_failed_git_show_prints_unknown(self):
         self.put(FEEL_DEBT, FEEL_TEXT)
         self.commit_base()
-        loose = self.loose_blob(FEEL_DEBT)
-        # A packed blob would survive the removal, and git show would not fail, so the case would prove nothing.
-        self.assertTrue(os.path.isfile(loose), loose)
-        os.remove(loose)
+        self.break_git_show(FEEL_DEBT)
         self.delete(FEEL_DEBT)
         self.commit_change()
         rc, out = self.lint()
         self.assertIn("check_record_slugs: UNKNOWN", out, out)
         self.assertEqual(rc, 0, out)  # locally an unknown is not red; CI reads it as red
         self.assertNotIn("feel-fix debt deleted", out)
+
+    def test_duplicate_note_slug_still_fails_when_git_cannot_say(self):
+        # The added files are unknown, but a duplicate note is a verdict of its own, so the exit is red.
+        self.assertEqual(NOTE_DUP_TEXT.count("- alpha-slug:"), 2)  # scope: the notes hold the duplicate
+        self.put(FEEL_DEBT, FEEL_TEXT)
+        self.put(self.notes_path(), NOTE_DUP_TEXT)
+        self.commit_base()
+        self.break_git_show(FEEL_DEBT)
+        self.delete(FEEL_DEBT)
+        self.commit_change()
+        rc, out = self.lint()
+        self.assertNotEqual(rc, 0, "a duplicate notes slug exits 0 when git cannot say: " + out)
+        self.assertIn("check_record_slugs: UNKNOWN", out, "git cannot say, but no UNKNOWN line: " + out)
+        named = [line for line in out.splitlines() if line.startswith("check_record_slugs: FAIL:")]
+        self.assertTrue(any("alpha-slug" in line for line in named), "no FAIL line names the duplicate: " + out)
 
     def test_debt_readme_edited_to_drop_a_feel_line_passes(self):
         self.put(DEBT_README, README_FEEL_TEXT)
@@ -354,19 +404,100 @@ class RecordSlugsTests(unittest.TestCase):
         self.assertNotIn("UNKNOWN", out)
         self.assertEqual(rc, 0, out)
 
+    def notes_path(self):
+        """The notes file the check reads: the first layout candidate, so a rolled-out repo's path is used too."""
+        return layout.candidates(self.tree, "debt-notes")[0]
+
+    def test_notes_with_unique_slugs_pass_the_check(self):
+        # Green control: the same notes file with one more unique row passes, so the case below is the duplicate.
+        notes = self.notes_path()
+        self.put(notes, NOTE_UNIQUE_TEXT)
+        self.commit_base()
+        self.put(notes, NOTE_UNIQUE_TEXT + "- delta-slug: a fourth finding.\n")
+        self.commit_change()
+        self.assert_passes()
+
+    def test_duplicate_note_slug_fails_the_check_and_names_it(self):
+        notes = self.notes_path()
+        self.put(notes, NOTE_UNIQUE_TEXT)
+        self.commit_base()
+        self.put(notes, NOTE_UNIQUE_TEXT + "- alpha-slug: the same finding, recorded again.\n")
+        self.commit_change()
+        rc, out = self.lint()  # no file arguments: the diff against origin/main
+        self.assertNotIn("Traceback", out)
+        self.assertNotEqual(rc, 0, out)
+        named = [line for line in out.splitlines() if line.startswith("check_record_slugs: FAIL:")]
+        self.assertTrue(any("alpha-slug" in line for line in named), out)
+        self.assertFalse(any(other in line for line in named for other in ("beta-slug", "gamma-slug")), out)
+
+
+class DuplicateNoteSlugTests(unittest.TestCase):
+    """duplicate_note_slugs(text): the slugs that a notes text writes on two or more rows. No git, no temp tree."""
+
+    def under_test(self):
+        self.assertTrue(os.path.isfile(MODULE), "module absent: lint/check_record_slugs.py")
+        # getattr, so a missing name fails this assert and not an ImportError.
+        fn = getattr(load_under_test(), "duplicate_note_slugs", None)
+        self.assertTrue(callable(fn), "lint/check_record_slugs.py has no duplicate_note_slugs(text): "
+                                      "a slug written twice in the notes file is not refused")
+        return fn
+
+    def test_one_slug_written_twice_is_returned(self):
+        fn = self.under_test()
+        self.assertEqual(NOTE_DUP_TEXT.count("- alpha-slug:"), 2)  # scope: the fixture holds the two rows
+        self.assertEqual(fn(NOTE_DUP_TEXT), ["alpha-slug"])
+
+    def test_one_slug_written_twice_in_a_full_size_notes_file_is_returned(self):
+        fn = self.under_test()
+        self.assertEqual(FULL_DUP.count("- row-000-slug:"), 2)  # scope: 300 rows, the first one repeated at the end
+        self.assertEqual(fn(FULL_DUP), ["row-000-slug"])
+
+    def test_unique_slugs_return_nothing(self):
+        fn = self.under_test()
+        self.assertEqual(fn(NOTE_UNIQUE_TEXT), [])
+        self.assertEqual(fn(FULL_UNIQUE), [])  # full size, no repeat
+        self.assertEqual(fn("# Notes\n"), [])  # the empty state: a header and no rows
+        self.assertEqual(fn(""), [])
+
+    def test_slug_named_mid_row_is_not_counted(self):
+        fn = self.under_test()
+        starts = [line for line in NOTE_MID_ROW_TEXT.splitlines() if line.startswith("- alpha-slug:")]
+        self.assertEqual(len(starts), 1)  # scope: one row starts with the slug
+        self.assertEqual(NOTE_MID_ROW_TEXT.count("alpha-slug:"), 4)  # three more name it inside a row's text
+        self.assertEqual(fn(NOTE_MID_ROW_TEXT), [], "a slug named inside a row's text is counted as a row")
+
+    def test_comment_openers_and_a_lone_quote_in_row_text_do_not_hide_a_duplicate(self):
+        fn = self.under_test()
+        self.assertEqual(NOTE_OPENERS_TEXT.count("- beta-slug:"), 2)  # scope: the two rows
+        self.assertEqual(fn(NOTE_OPENERS_TEXT), ["beta-slug"])
+
+    def test_one_slug_in_two_cases_is_one_duplicate(self):
+        fn = self.under_test()
+        self.assertEqual(fn("# Notes\n\n- Alpha-slug: one row alone.\n- beta-slug: another row.\n"), [])  # control
+        self.assertEqual(NOTE_CASE_TEXT.count("- alpha-slug:"), 1)  # scope: the two rows differ only in case
+        self.assertEqual(NOTE_CASE_TEXT.count("- Alpha-slug:"), 1)
+        self.assertEqual([slug.lower() for slug in fn(NOTE_CASE_TEXT)], ["alpha-slug"],
+                         "`- Alpha-slug:` and `- alpha-slug:` are not counted as one duplicate")
+
+    def test_one_slug_with_a_space_before_the_colon_is_one_duplicate(self):
+        fn = self.under_test()
+        self.assertEqual(fn("# Notes\n\n- alpha-slug : one row alone.\n- beta-slug: another row.\n"), [])  # control
+        self.assertEqual(NOTE_SPACE_TEXT.count("- alpha-slug :"), 1)  # scope: one row has the space
+        self.assertEqual(NOTE_SPACE_TEXT.count("- alpha-slug:"), 1)
+        self.assertEqual(fn(NOTE_SPACE_TEXT), ["alpha-slug"],
+                         "`- alpha-slug :` and `- alpha-slug:` are not counted as one duplicate")
+
 
 class ImportTests(unittest.TestCase):
     """lint/compliance_probes.py imports the module and calls its functions on a child's root, so the command line
     runs only behind `__main__`. The command line itself stays as RecordSlugsTests pins it."""
 
     def test_importing_the_module_runs_no_check(self):
-        spec = importlib.util.spec_from_file_location("record_slugs_under_import", MODULE)
-        module = importlib.util.module_from_spec(spec)
         out = io.StringIO()
         # An option the command line refuses: run on import, it would print a FAIL line and exit.
         with mock.patch.object(sys, "argv", ["check_record_slugs.py", "--bogus"]), contextlib.redirect_stdout(out):
             try:
-                spec.loader.exec_module(module)
+                load_under_test()
             except SystemExit as err:
                 self.fail("importing the module ran the check and exited %r: %s" % (err.code, out.getvalue().strip()))
         self.assertEqual(out.getvalue(), "")
