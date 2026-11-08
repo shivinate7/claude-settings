@@ -4536,13 +4536,16 @@ class PendingRefusalTests(unittest.TestCase):
     def refusals_file(self, sid=SID):
         return os.path.join(self.cfg, "state", "refusals", sid + ".jsonl")
 
-    def write_rows(self, rows, sid=SID):
-        """The refusals file with one row per (tool_name, reason) pair, in the shape hooks/refusal_note.py writes."""
+    def write_rows(self, rows, sid=SID, agent_id=None):
+        """The refusals file with one row per (tool_name, reason) pair, in the shape hooks/refusal_note.py writes.
+        With `agent_id`, each row is an agent's refused call, as the hook writes it."""
         os.makedirs(os.path.dirname(self.refusals_file(sid)), exist_ok=True)
         with open(self.refusals_file(sid), "w", encoding="utf-8") as handle:
             for tool, reason in rows:
-                handle.write(json.dumps({"ts": "2026-11-01T10:00:00-05:00", "tool_name": tool,
-                                         "reason": reason}) + "\n")
+                row = {"ts": "2026-11-01T10:00:00-05:00", "tool_name": tool, "reason": reason}
+                if agent_id:
+                    row["agent_id"] = agent_id
+                handle.write(json.dumps(row) + "\n")
 
     def write_refusals(self, tools, sid=SID):
         self.write_rows([(tool, "refused") for tool in tools], sid)
@@ -4848,6 +4851,26 @@ class PendingRefusalTests(unittest.TestCase):
                 self.assertEqual(out.get("decision"), "block")
                 self.assertIn("`%s`" % self.BASH, out["reason"], "the block does not name the blank-reason refusal")
                 self.assertEqual(self.pending_tools(), [self.BASH], "the blank-reason refusal left the file")
+
+    def test_r_an_agent_row_is_never_recorded_as_raised(self):
+        # Catches: an agent's refused call is recorded as raised, so the same tool and reason refused to the
+        # orchestrator later passes unseen. The agent row clears by the agent rule; the orchestrator row must block.
+        agent = [(self.BASH, self.REASON)]
+        followers = (("unlanded prose", False, self.PROSE), ("landed clean report", True, self.LANDED_CLEAN))
+        for label, landed, reply in followers:
+            with self.subTest(next_reply=label):
+                self.use_fresh_config()
+                self.write_rows(agent, agent_id="agent-r1")
+                self.assertEqual(self.pending_tools(), [self.BASH], "scope: the fixture file does not hold the agent row")
+                run = self.stop(self.input_needed_reply(agent))
+                self.assertEqual(run.stdout.strip(), "", "the reply that names the agent row blocked: %s" % run.stdout)
+                self.assertEqual(self.pending_tools(), [], "the reply left the agent row in the file")
+                self.write_rows(agent)
+                out = self.blocked(self.stop(reply, landed=landed))
+                self.assertIsNotNone(out, "an orchestrator row passed on the strength of an agent row that was named")
+                self.assertEqual(out.get("decision"), "block")
+                self.assertIn(self.BASH, out["reason"], "the block does not name the orchestrator refusal")
+                self.assertEqual(self.pending_tools(), [self.BASH], "a blocked Stop cleared the orchestrator row")
 
 
 # building-mistake-names-its-guard (decision mistake-means-missing-guard): a Deviations admission of a
