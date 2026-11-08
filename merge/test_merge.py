@@ -1815,6 +1815,20 @@ def lane_batch(env, *names):
     env.set_pr_body(lanes_body(names))
     return tips
 
+@contextlib.contextmanager
+def lane_log_fails(first_only=False):
+    """The one git log that reads a batch's merge commits (read_lanes) fails: every call, or only the first when first_only (the
+    dropped-lane check's read, which runs first). Later reads answer. The one home of this failure for every case that makes it."""
+    real, n = merge.sh, [0]
+    def broken(args, *a, **k):
+        if "log" in args and any("%x01" in a for a in args):
+            n[0] += 1
+            if not first_only or n[0] == 1:
+                return 128, "fatal: bad revision"
+        return real(args, *a, **k)
+    with unittest.mock.patch.object(merge, "sh", broken):
+        yield
+
 def lane_lines(out, b):
     """Every line that names lane origin/b with a deleted outcome."""
     return [l for l in out.splitlines() if f"origin/{b}" in l and "deleted" in l and "not deleted" not in l]
@@ -2370,12 +2384,7 @@ class CutLanes(Env):
 
     def unreadable_lane_log(self):
         """c110: the one git log that reads the batch's merge commits fails. -> the merge's (rc, out)."""
-        real = merge.sh
-        def broken(args, *a, **k):
-            if "log" in args and any("%x01" in a for a in args):
-                return 128, "fatal: bad revision"
-            return real(args, *a, **k)
-        with unittest.mock.patch.object(merge, "sh", broken):
+        with lane_log_fails():
             return self.go()
 
     def test_a_failed_dropped_lane_read_refuses_and_claims_nothing(self):
@@ -2425,14 +2434,7 @@ class CutLanes(Env):
     @contextlib.contextmanager
     def first_lane_log_fails(self):
         """Only the first git log that reads the batch's merge commits fails: the dropped-lane check's read. Later reads answer."""
-        real, n = merge.sh, [0]
-        def first_fails(args, *a, **k):
-            if "log" in args and any("%x01" in a for a in args):
-                n[0] += 1
-                if n[0] == 1:
-                    return 128, "fatal: bad revision"
-            return real(args, *a, **k)
-        with unittest.mock.patch.object(merge, "sh", first_fails):
+        with lane_log_fails(first_only=True):
             yield
 
     def test_the_reason_flag_lifts_a_failed_dropped_lane_read_and_logs_it(self):
@@ -15142,6 +15144,101 @@ class HandedLaneCheck(RecordsEnv):
         self.assertRegex(blocked[0], r"#9\b", f"the BLOCKED line does not name #9:\n{out}")
         self.assertEqual(self.refs(), refs, "the preview pushed")
         self.assertEqual(self.host.readies, [], "the preview marked a PR ready")
+
+    def assert_in_batch(self, *numbers):
+        """The scope, read first: each of `numbers` is a handed pull request whose head the integration head holds."""
+        self.assert_handed(*numbers)
+        feat = self.head("feat")
+        for n in numbers:
+            self.assertTrue(self.host.holds_head(handed_sha(n), feat), f"the fixture does not put #{n} in the batch head")
+
+    def assert_line_names(self, out, n, fact):
+        """A line of `out` names #n and holds `fact`."""
+        self.assertTrue(any(re.search(rf"#{n}\b", l) and fact in l for l in out.splitlines()), f"no line names #{n} with {fact!r}:\n{out}")
+
+    def merge_parents(self):
+        """-> the parents of each merge commit above origin/main on origin/feat, one list of shas per merge."""
+        sh(self.co, "git", "fetch", "-q", "origin")
+        out = sh(self.co, "git", "log", "--merges", "--format=%P", "origin/main..origin/feat")
+        return [line.split() for line in out.splitlines() if line.strip()]
+
+    def assert_head_merges_lane(self, name):
+        """The scope, read first: the head merges lane `name`'s tip (a merge commit's second parent), and the body has no Lanes line."""
+        self.assertTrue(any(self.tips[name] in parents[1:] for parents in self.merge_parents()), f"the head does not merge {name}")
+        self.assertNotIn(merge.BATCH_LANES, self.host.body, "the body has a Lanes line, so the no-Lanes check does not apply")
+
+    def assert_lanes_variant_read(self, line):
+        """The body's `line` is read as the Lanes line: #9 is in the batch head and the body names only #12, so the full check refuses #9."""
+        self.fixture(line, handed=[9, 12], held=[9, 12])
+        self.assert_in_batch(9, 12)
+        self.assert_refused(9)
+
+    def test_handed_lane_bold_lanes_line_is_read_as_the_lanes_line(self):
+        self.assert_lanes_variant_read("**Lanes:** #12")
+
+    def test_handed_lane_bulleted_lanes_line_is_read_as_the_lanes_line(self):
+        self.assert_lanes_variant_read("- Lanes: #12")
+
+    def test_handed_lane_lowercase_lanes_line_is_read_as_the_lanes_line(self):
+        self.assert_lanes_variant_read("lanes: #12")
+
+    def test_handed_lane_label_colon_in_parens_keeps_the_reason_from_a_url(self):
+        self.fixture("Lanes: #12\nDropped (red CI, see https://x/y): #9", handed=[9, 12], held=[12])  # #9 is handed, and not in the batch head
+        self.assert_handed(9, 12)
+        self.assertFalse(self.host.holds_head(handed_sha(9), self.head("feat")), "the fixture puts #9 in the batch head")
+        self.assert_passes(1, 1)
+
+    def test_handed_lane_label_colon_in_parens_keeps_the_reason_from_a_note(self):
+        self.fixture("Lanes: #12\nDropped (see note: lint): #8", handed=[8, 12], held=[12])  # #8 is handed, and not in the batch head
+        self.assert_handed(8, 12)
+        self.assertFalse(self.host.holds_head(handed_sha(8), self.head("feat")), "the fixture puts #8 in the batch head")
+        self.assert_passes(1, 1)
+
+    def test_handed_lane_in_batch_and_dropped_without_reason_names_both_facts(self):
+        self.fixture("Lanes: #12\nDropped earlier: #9", handed=[9, 12], held=[9, 12])  # #9 is in the batch head, not on Lanes, and on a reasonless line
+        self.assert_in_batch(9, 12)
+        refs = self.refs()
+        rc, out = self.run_merge("7", "--confirm")
+        self.assert_refused_untouched(rc, out, refs)
+        self.assertEqual(self.host.readies, [], out)
+        self.assert_line_names(out, 9, "in the batch head but not on the Lanes line")
+        self.assert_line_names(out, 9, "on a left-out line with no reason")
+
+    def test_handed_lane_no_lanes_head_merging_a_lane_is_refused(self):
+        lane_batch(self, "lane-a")  # the head merges lane-a's tip; the fixture below clears the Lanes line lane_batch gave the body
+        self.fixture("", handed=[])
+        self.assert_head_merges_lane("lane-a")
+        tip = self.tips["lane-a"]
+        refs = self.refs()
+        rc, out = self.run_merge("7", "--confirm")
+        self.assert_refused_untouched(rc, out, refs)
+        self.assertEqual(self.host.readies, [], out)
+        self.assertIn(tip[:9], out, f"the refusal does not name lane-a's tip:\n{out}")
+        self.assertIn(merge.HANDED_CITE, out, f"the refusal is not the no-Lanes check's:\n{out}")
+
+    def test_handed_lane_no_lanes_failed_read_with_the_flag_goes_on_with_one_line(self):
+        lane_batch(self, "lane-a")
+        self.fixture("", handed=[])
+        self.assert_head_merges_lane("lane-a")
+        with lane_log_fails():  # the draft step's only lane read is handed_local's
+            rc, out = self.run_merge("7", "--confirm", "--undo-check-unknown-ok", "git log flaked in the test")
+        lifts = [l for l in out.splitlines() if "handed-lane check UNKNOWN" in l]
+        self.assertEqual(rc, 0, f"the reason flag did not lift the failed lane read on the draft step:\n{out}")
+        self.assertEqual(len(lifts), 1, f"the lift is not one line:\n{out}")
+        self.assertIn("git log flaked in the test", lifts[0], "the lift line does not name the reason")
+        self.assertIn(merge.UNDO_FLAG, lifts[0], "the lift line does not name the flag")
+        self.assertEqual(self.host.readies, [7], f"the draft step did not mark #7 ready after the lift:\n{out}")
+
+    def test_handed_lane_no_lanes_failed_read_without_the_flag_stops(self):
+        lane_batch(self, "lane-a")
+        self.fixture("", handed=[])
+        self.assert_head_merges_lane("lane-a")
+        refs = self.refs()
+        with lane_log_fails():
+            rc, out = self.run_merge("7", "--confirm")
+        self.assertIn("could not read the merge commits", out, f"the failed read's stop is not printed:\n{out}")
+        self.assert_refused_untouched(rc, out, refs)
+        self.assertEqual(self.host.readies, [], out)
 
 if __name__ == "__main__":
     if len(sys.argv) == 3 and sys.argv[1] == "--sigchild":
