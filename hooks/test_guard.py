@@ -5696,6 +5696,13 @@ sh("check-tail: merge --lane-lint through grep -m1, with no tail or head, is ref
    "merge --lane-lint 7 | grep -m1 FAIL", "deny", "check-tail", cwd=NOGIT)
 sh("check-tail: merge --review-record through awk, with no tail or head, is refused",
    "merge --review-record 7 | awk 'END{print}'", "deny", "check-tail", cwd=NOGIT)
+# A writer spelling (tee.exe, Tee-Object, Out-File) is no filter, but a filter after it still reaches the check.
+sh("check-tail: merge --lane-lint through tee.exe, then tail, is refused",
+   "merge --lane-lint 7 | tee.exe x | tail", "deny", "check-tail", cwd=NOGIT)
+sh("check-tail: merge --lane-lint through Tee-Object, then Select-Object -Last 3, is refused",
+   "merge --lane-lint 7 | Tee-Object x | Select-Object -Last 3", "deny", "check-tail", cwd=NOGIT)
+sh("check-tail: merge --lane-lint through Out-File, then tail, is refused",
+   "merge --lane-lint 7 | Out-File x | tail", "deny", "check-tail", cwd=NOGIT)
 sh("check-tail: merge --lane-lint with no pipe is allowed",
    "merge --lane-lint 7", "allow", cwd=NOGIT)
 sh("check-tail: merge --lane-lint with output to a file is allowed",
