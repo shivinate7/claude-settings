@@ -392,6 +392,12 @@ PRESS_VERB = re.compile(r"\b(?:press(?!\s+on\b(?!\s+(?:the|this|that)\b))(?:es|e
 WEB_MARKER = re.compile(r"github|\bpr\b|\bprs\b|pull\s+requests?|" + _REF +
                         r"|(?-i:(?<![\w-])Settings\b(?!\.\w))|\bsettings\s+page\b", re.I)
 PRESS_REF = re.compile(_REF, re.I)
+# "Press Copy" is a button of the waiting page and of the chat. When the page is the task title, a sentence that
+# presses Copy alone, or then pastes it in the chat, is left out of the press read. Any other word after Copy
+# (an app, "and Submit") may name a web page, so that sentence stays a press.
+TITLE_PAGE_COPY = re.compile(r"(?:^|(?<=[.!?\n]))[ \t]*(?:press|click|tap)\s+(?:the\s+)?[\"'“‘]?copy[\"'”’]?"
+                             r"(?:\s+button)?(?:,?\s+(?:and\s+)?then\s+paste\s+(?:it|this|that|the\s+text)"
+                             r"(?:\s+(?:in|into)\s+(?:the|this)\s+chat)?)?[ \t]*(?:[.!]|$)", re.I | re.M)
 _FILE = (r"[\w./-]+\.(?:md|txt|sh|json|py|ps1|ya?ml|toml|html|log|csv)\b"
          r"|\b(?:plans|docs|notes)/[\w./-]+")
 COMMAND_FILE = re.compile(_FILE, re.I)
@@ -401,6 +407,8 @@ COMMAND_FILE = re.compile(_FILE, re.I)
 COMMAND_IN_FILE = re.compile(r"\bcommands?\s+(?:in|from|of|inside)\s+(?:the\s+|this\s+)?(?:file\s+)?(?:"
                              + _FILE + ")", re.I)
 COMMAND_ITS = re.compile(r"\bits\s+commands?\b", re.I)
+# "the /doctor command" names a slash command typed in Claude Code, not a command kept in a file.
+SLASH_COMMAND = re.compile(r"(?<![\w./-])/[a-z][\w-]*\s+commands?\b", re.I)
 _RUN_VERB = r"\b(?:run|runs|copy|paste|execute|use|type)\b"
 COMMAND_VERB = re.compile(_RUN_VERB + r"[^.\n]{0,40}\bcommands?\b(?!\s+below)"
                           r"|\bcommands?\s+(?:in|from|of|inside)\b", re.I)
@@ -496,9 +504,11 @@ def _press_field_ok(text, links, context="", press_text=None) -> bool:
     press verb is read in `press_text`, which is `text` unless the caller leaves out a press the
     session makes (_owner_press_text). The page, and each `#N` that needs a url with /pull/N or
     /issues/N at a number boundary, is read in `text`, or in `context` when `text` names no page."""
-    if not PRESS_VERB.search(text if press_text is None else press_text):
+    press = text if press_text is None else press_text
+    from_title = not WEB_MARKER.search(text)
+    if not PRESS_VERB.search(TITLE_PAGE_COPY.sub("", press) if from_title else press):
         return True
-    page = text if WEB_MARKER.search(text) else context
+    page = context if from_title else text
     if not WEB_MARKER.search(page):
         return True
     urls = [l["url"] for l in links or [] if isinstance(l, dict) and isinstance(l.get("url"), str)]
@@ -622,6 +632,12 @@ def _shell_line(span, run) -> bool:
     return False
 
 
+def _without_slash_commands(texts) -> str:
+    """The steps, joined, with each slash command removed from a step that names no file. A step that names a
+    file anywhere keeps it, since "run the /sync command. See plans/x.md." sends the owner to that file."""
+    return "\n".join(text if COMMAND_FILE.search(text) else SLASH_COMMAND.sub("", text) for text in texts)
+
+
 def command_in_item_hit(data) -> str:
     """The matched text when a task's `command` is not {powershell, mac}, when its powershell string
     holds bash syntax, when its steps, joined, send the owner to a file for a command, or when a
@@ -642,7 +658,7 @@ def command_in_item_hit(data) -> str:
     joined = "\n".join(texts)
     has_file = COMMAND_FILE.search(joined)
     if COMMAND_IN_FILE.search(joined) or (has_file and COMMAND_ITS.search(joined)) \
-            or (has_file and not has_command and COMMAND_VERB.search(joined)):
+            or (has_file and not has_command and COMMAND_VERB.search(_without_slash_commands(texts))):
         return "steps send the owner to a file for a command"
     if any(_shell_line(body, fenced or bool(SPAN_RUN_VERB.search(text[:start])))
            for text in texts for start, body, fenced in _code_spans(text)):
