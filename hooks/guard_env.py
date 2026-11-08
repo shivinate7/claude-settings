@@ -223,20 +223,35 @@ ENV_PRINT_PROGRAMS = ("env", "env.exe", "printenv", "printenv.exe")
 ENV_GROUP_WORDS = ("(", "{", "!", "if", "then", "else", "elif", "do", "while", "until")
 # The process environment as a file: `cat /proc/self/environ`, `/proc/<pid>/environ`, `/proc/$$/environ`.
 # A pid may be a glob: `/proc/*/environ`, `/proc/[0-9]*/environ`.
-ENV_PROC_ENVIRON = re.compile(r"/proc/(?:self|thread-self|[\d*?\[\]!^-]+|\$\$|\$\{?\w+\}?)/environ")
+ENV_PROC_ENVIRON = re.compile(r"/proc/(?:self|thread-self|[\d*?\[\]!^-]+|\$\$|\$\{?\w+\}?)/environ(?!\w)")
 # An inline script that names the environment: perl `%ENV` and `$ENV{`, ruby `ENV[` and `ENV.`, awk
 # `ENVIRON`. A bare word ENV is text (`perl -pe 's/ENV/prod/'`), except ruby's own `p ENV`: there it
-# is the constant, when no slash, quote, bar or brace sits against it.
+# is the constant, when no slash, quote, bar or brace sits against it and it is outside a string
+# literal (`puts "the ENV var"` is text). Only the code is read (`_script_code`), never a script
+# name, its arguments or a file name (`ruby script.rb ENV`, `awk '{print}' ENV.txt`).
 ENV_SCRIPT_PROGRAM = re.compile(r"(?:perl|ruby|[gmn]?awk)[\d.]*(?:\.exe)?")
 ENV_SCRIPT_ENV_WORD = re.compile(r"[%$@]ENV\b|\bENVIRON\b|\bENV(?=[\[.])")
 ENV_RUBY_ENV_WORD = re.compile(r"(?<![\w/'\"|{}])ENV(?![\w/'\"|{}])")
+# A ruby string literal, `"..."` or `'...'`, with its backslash escapes. A quote with no mate is
+# no literal. A `#{...}` in a double-quoted one is code, so its text stays.
+ENV_RUBY_STRING = re.compile(r""""(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'""", re.S)
+ENV_RUBY_INTERPOLATION = re.compile(r"#\{([^{}]*)\}")
+# The perl and ruby option letters whose value is code (`-e`, `-ne`, `-E`), and the letters whose
+# value is the rest of the word (`-Mstrict`, `-i.bak`, `-rjson`), so an `e` in that rest is no `-e`.
+ENV_SCRIPT_CODE_LETTERS = {"perl": "eE", "ruby": "e"}
+ENV_SCRIPT_VALUE_LETTERS = {"perl": "CDFIMdimx", "ruby": "CEFIKTWirx"}
+# awk options that take a value. `-f` and `-E` name a program file; `-e` and `--source` hold code.
+ENV_AWK_VALUE_FLAGS = (
+    "-F", "-v", "-f", "-E", "-e", "-i", "-l", "--field-separator", "--assign", "--file", "--exec",
+    "--source", "--include", "--load")
+ENV_AWK_PROGRAM_FLAGS = ("-f", "--file", "-E", "--exec", "-e", "--source")
 # The shell strings that perl and ruby code runs: `system("env")`, `exec 'env'`, a backtick pair,
 # `qx(env)`, `%x(env)`. Each is judged by `_shell_string_prints`.
 ENV_SCRIPT_SHELL_STRING = re.compile(
     r"""(?:system|exec|spawn|popen)\s*\(?\s*(["'])((?:(?!\1).)*)\1|`([^`]*)`"""
     r"""|(?:qx|%x)\s*(?:\(([^)]*)\)|\{([^}]*)\}|\[([^\]]*)\]|\|([^|]*)\||/([^/]*)/)""")
 # `docker compose config` prints each service's resolved environment, the file's values among them.
-# With one of the listing flags it prints names, hashes or nothing.
+# With one of the listing flags it prints names, hashes or nothing, glued `=` forms too (`--hash="*"`).
 ENV_COMPOSE_PRINTERS = ("config", "convert")
 ENV_COMPOSE_LISTING_FLAGS = (
     "--services", "--volumes", "--profiles", "--images", "--hash", "-q", "--quiet")
@@ -851,26 +866,56 @@ def _first_positional(words, i: int, flags) -> int:
     return min(i, len(words))
 
 
+def _shell_word(word: str) -> str:
+    """The text the shell hands a program for one word (`sh -c <word>`, `ruby -e <word>`). Pieces
+    quoted apart join: `'it'"'"'s'` and `'it'\''s'` are both `it's`. In single quotes every
+    character is text. In double quotes the shell drops the backslash of `\$`, `` \` ``, `\"` and
+    `\\`, and a backslash and newline. Out of quotes a backslash escapes the next character. A quote
+    with no mate is a plain character, as `_quoted_words` reads it. An unescaped `$( )` stays: the
+    parent's `_substitutions` judges it. Not shlex: it keeps the backslash of `\$` in double quotes
+    and raises on a quote with no mate."""
+    out, i, n = [], 0, len(word)
+    while i < n:
+        char = word[i]
+        close = word.find("'", i + 1) if char == "'" else -1
+        if close > 0:
+            out.append(word[i + 1:close])
+            i = close + 1
+        elif char == '"':
+            j, piece = i + 1, []
+            while j < n and word[j] != '"':
+                if word[j] == "\\" and j + 1 < n and word[j + 1] in '$`"\\\n':
+                    piece.append("" if word[j + 1] == "\n" else word[j + 1])
+                    j += 2
+                else:
+                    piece.append(word[j])
+                    j += 1
+            if j >= n:  # no mate: a plain character
+                out.append(char)
+                i += 1
+            else:
+                out.append("".join(piece))
+                i = j + 1
+        elif char == "\\" and i + 1 < n:
+            out.append(word[i + 1])
+            i += 2
+        else:
+            out.append(char)
+            i += 1
+    return "".join(out)
+
+
 def _shell_string_prints(text: str, depth: int = 0) -> bool:
     """A shell string (`sh -c "<s>"`, `npm exec -c "<s>"`) is judged segment by segment, the way the
-    parent shell form reads a command: `_env_flat` is its one reader of a file name, and
-    `_substitutions` cuts out each `$(...)`, backtick pair and `<(...)`, so each body is judged as a
-    command of its own (`_segments_print`). A segment prints the environment when its command is a
+    parent shell form reads a command. `text` is the string the child shell gets: a caller that holds
+    the shell word passes its `_shell_word`. A perl or ruby shell string is that text already.
+    `_env_flat` is its one reader of a file name, and `_substitutions` cuts out each `$(...)`,
+    backtick pair and `<(...)`, so each body is judged as a command of its own (`_segments_print`). A segment prints the environment when its command is a
     printing child (`_child_prints`), `set` or `export` with no variable to name, or `echo` or
     `printf` over a `$` variable that is no substitution. A `$` in any other segment is an ordinary
     argument (`cd $APP_DIR && npm start`). A string nested past ENV_MAX_DEPTH counts as printing."""
     if depth > ENV_MAX_DEPTH:
         return True
-    text = text.strip()
-    if len(text) > 1 and text[0] == text[-1] and text[0] in "'\"":
-        double = text[0] == '"'
-        text = text[1:-1]
-        if double:
-            # The parent shell drops the backslash of `\$`, `\``, `\"` and `\\` in double quotes, so
-            # the child runs `$(env)` for `\$(env)`. An unescaped `$( )` was expanded by the parent.
-            text = re.sub(r'\\([$`"\\])', r'\1', text)
-        else:
-            text = text.replace("'\\''", "'")  # the idiom for a quote inside single quotes
     if _env_flat(text, True)[0]:
         return True
     for piece in split_segments(text):
@@ -888,7 +933,8 @@ def _shell_string_prints(text: str, depth: int = 0) -> bool:
 def _lists_variables(name: str, args) -> bool:
     """True when the shell builtin `name` over `args` (redirects taken out) lists the shell's
     variables: `set`, `export`, `declare` and `typeset` with no name to set, `export -p`,
-    `declare -p`, `declare -x`, and `compgen -v` or `-e` (names only)."""
+    `declare -p` and `declare -x`. With `-f` or `-F`, `declare` prints functions only. `compgen`
+    prints names, not values."""
     clusters = "".join(a[1:] for a in args if a.startswith("-") and not a.startswith("--"))
     names = [a for a in args if not a.startswith("-")]
     if name == "set":
@@ -896,10 +942,9 @@ def _lists_variables(name: str, args) -> bool:
     if name == "export":
         return not args or "p" in clusters
     if name in ("declare", "typeset"):
+        if "f" in clusters or "F" in clusters:
+            return False
         return "p" in clusters or (not names and (not args or "x" in clusters))
-    if name == "compgen":
-        return "v" in clusters or "e" in clusters or any(
-            a == "-A" and b in ("variable", "export") for a, b in zip(args, args[1:]))
     return False
 
 
@@ -931,14 +976,65 @@ def _segments_print(text: str, depth: int) -> bool:
     return False
 
 
-def _script_prints(word: str, program: str, depth: int) -> bool:
-    """True when a word of a perl, ruby or awk command names the environment, or holds a shell string
-    that prints it (`system("env")`, backticks, `qx(env)`)."""
-    if len(word) > 1 and word[0] == word[-1] and word[0] in "'\"":
-        word = word[1:-1]  # the shell's own quotes are no part of the code
-    if ENV_SCRIPT_ENV_WORD.search(word) or (program.startswith("ruby") and ENV_RUBY_ENV_WORD.search(word)):
+def _script_code(words, program: str):
+    """The code words of a perl, ruby or awk command (`words` past the program name), as the shell
+    hands them on (`_shell_word`). perl and ruby: the value of each option word with a code letter
+    (`-e`, `-ne`, `-lane`), glued (`-e'code'`) or the next word. awk: each `-e` or `--source` value,
+    else the first word that is no option, unless `-f` names a program file. A here-string
+    (`ruby <<< 'p ENV'`) is code too. A word that may be code is read as code: reading too much
+    costs a false alarm, too little a hole."""
+    perl = program.startswith("perl")
+    awk = not perl and not program.startswith("ruby")
+    letters = ENV_SCRIPT_CODE_LETTERS["perl" if perl else "ruby"]
+    stops = ENV_SCRIPT_VALUE_LETTERS["perl" if perl else "ruby"]
+    code = [words[k + 1] for k in range(len(words) - 1) if words[k] == "<<<"]
+    words = _operands(words)
+    i, n, options, has_program = 0, len(words), True, False
+    while i < n:
+        word = words[i]
+        if awk and options and word.startswith("-") and word != "-":
+            flag, _, glued = word.partition("=") if word.startswith("--") else (word[:2], "", word[2:])
+            options = word != "--"
+            if flag in ENV_AWK_VALUE_FLAGS:
+                if flag in ("-e", "--source"):
+                    code.append(glued if glued else (words[i + 1] if i + 1 < n else ""))
+                has_program = has_program or flag in ENV_AWK_PROGRAM_FLAGS
+                i += 1 if glued else 2
+            else:
+                i += 1
+        elif awk:  # the first word that is no option is the program, unless a flag gave it
+            if not has_program:
+                code.append(word)
+            options, has_program = False, True
+            i += 1
+        elif word.startswith("-") and not word.startswith("--"):
+            for at, letter in enumerate(word[1:], 1):
+                if letter in stops:
+                    break
+                if letter in letters:
+                    if word[at + 1:]:
+                        code.append(word[at + 1:])
+                    elif i + 1 < n:
+                        code.append(words[i + 1])
+                        i += 1
+                    break
+            i += 1
+        else:
+            i += 1
+    return [_shell_word(w) for w in code]
+
+
+def _script_prints(code: str, program: str, depth: int) -> bool:
+    """True when the code of a perl, ruby or awk command (`_script_code`) names the environment, or
+    holds a shell string that prints it (`system("env")`, backticks, `qx(env)`). A ruby bare `ENV`
+    in a string literal is text, and one in a `#{...}` is code."""
+    if ENV_SCRIPT_ENV_WORD.search(code):
         return True
-    for match in ENV_SCRIPT_SHELL_STRING.finditer(word.replace("\\`", "`")):
+    if program.startswith("ruby") and ENV_RUBY_ENV_WORD.search(ENV_RUBY_STRING.sub(
+            lambda m: " %s " % " ".join(ENV_RUBY_INTERPOLATION.findall(m.group()))
+            if m.group()[0] == '"' else " ", code)):
+        return True
+    for match in ENV_SCRIPT_SHELL_STRING.finditer(code.replace("\\`", "`")):
         body = match.group(2) if match.group(2) is not None else next(g for g in match.groups()[2:] if g is not None)
         if _shell_string_prints(body, depth + 1):
             return True
@@ -961,12 +1057,12 @@ def _child_prints(words, at: int, fed: bool = False, depth: int = 0) -> bool:
             ENV_PROC_ENVIRON.search(w) for w in words[at + 1:]):
         return True
     if ENV_SCRIPT_PROGRAM.fullmatch(name):  # perl `%ENV`, ruby `ENV`, awk `ENVIRON`
-        return any(_script_prints(w, name, depth) for w in words[at + 1:])
+        return any(_script_prints(c, name, depth) for c in _script_code(words[at + 1:], name))
     if shell or re.fullmatch(r"python[\d.]*(\.exe)?", name):
         hit, stdin = _runner_scan(words, at, fed, ENV_SHELL_C_FLAG.match)
         if hit < 0 or not shell or words[hit] == "-":
             return hit >= 0 or stdin
-        return hit + 1 >= len(words) or _shell_string_prints(words[hit + 1], depth)
+        return hit + 1 >= len(words) or _shell_string_prints(_shell_word(words[hit + 1]), depth)
     return _runner_inline_code(words, at, name, fed)
 
 
@@ -1033,7 +1129,7 @@ def _compose_prints(words, at: int) -> bool:
     """True when words[at] is a compose `config` or `convert` that prints resolved values: none of
     its listing flags (`--services`, `-q`) follows it."""
     return words[at] in ENV_COMPOSE_PRINTERS and not any(
-        w in ENV_COMPOSE_LISTING_FLAGS for w in words[at + 1:])
+        w.split("=", 1)[0] in ENV_COMPOSE_LISTING_FLAGS for w in words[at + 1:])
 
 
 def _container_child_prints(words, at: int, fed: bool) -> bool:
@@ -1084,9 +1180,9 @@ def _runner_child_prints(words, position: int, command: str, fed: bool = False) 
                 break
             if word in ("-c", "--call"):  # past `pnpm exec`, `-c` may be the child's own flag
                 return child_prints() or (
-                    i + 1 < len(words) and _shell_string_prints(words[i + 1]))
+                    i + 1 < len(words) and _shell_string_prints(_shell_word(words[i + 1])))
             if word.startswith("--call="):
-                return child_prints() or _shell_string_prints(word[7:])
+                return child_prints() or _shell_string_prints(_shell_word(word[7:]))
             if word in flags:
                 i += 2
             elif word.startswith("-"):
