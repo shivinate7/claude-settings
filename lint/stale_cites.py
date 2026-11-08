@@ -69,11 +69,12 @@ Refuses a range that leaves a tracked Markdown line naming a name the range remo
             form (`file.py` `name`, (file.py name)) or as a test node id, when the .py file is absent at head or does
             not bind the name there (`names_in`; a node id is judged one segment at a time). A cite whose first folder
             is no tracked top folder at head (another repo, a library, a src-layout package) is no cite, the test STALE003
-            applies (`in_tracked_top`), unless that folder is one edit, or a case change, from a tracked one
-            (`typo_of_tracked_top`), and only when the cite with that tracked folder in its place is a file at head: a
-            likely typo of a real file, checked as a normal cite. A near folder with no such file stays silent, as a
-            far folder does. The top folders and that file come from reads of head through the one `cat-file`,
-            so it starts no process of its own. Fenced lines count as
+            applies (`in_tracked_top`). Two exceptions are checked as normal cites. A folder one edit, or a case change,
+            from a tracked one (`typo_of_tracked_top`), only when the cite with that tracked folder in its place is a
+            file at head: a likely typo of a real file. A folder absent at head that head's history tracked
+            (`history_tops`): it moved. A folder that passes neither test stays silent. The top folders and that file
+            come from reads of head through the one `cat-file`, so they start no process of their own. The history is
+            one `git log`, started only for a folder at neither place; a failed log is unknown. Fenced lines count as
             prose, as for STALE002. It judges each line the range adds, a moved or reworded line too, never a line it
             left, and not in --tree mode. A cite path outside the repo (`outside_repo`) is no path cite. It
             leaves a cite of a path the range removed or renamed to STALE001 and a name the range unbound to
@@ -134,7 +135,8 @@ look for. STALE010 reads the added lines the one diff already carries, and for e
 at head through the one `cat-file` the run opens, once per range, plus head's root tree for the top-folder test. That `cat-file` is one start, and it opens only when an
 added line cites a .py file by a path with a folder part; no Markdown blob is read. A range that adds a folder .py cite and
 removes nothing starts 4 (rev-parse, merge-base, diff, that `cat-file`), one more than the same range with no such cite
-(NameCiteTests pins the 4); a range that already opens the `cat-file` for another read adds no start for it. A cite led
+(NameCiteTests pins the 4); a range that already opens the `cat-file` for another read adds no start for it.
+One more start, a `git log`, runs when an added cite's top folder is absent at head. It runs once per range. A cite led
 by `..`, `~` or `/` (`outside_repo`) names a path outside the repo and reads nothing: it opens no `cat-file`.
 A touched .py also loads the py-facts script once, in-process (no start, no .pyc). It writes no file and leaves no process running.
 STALE008 starts at most the one `cat-file`. It reads every tracked .md, through the same `ls-tree` and `cat-file`, only
@@ -632,6 +634,7 @@ class Range:
         self.bound_names = {}  # path -> names bound at head (`head_names`), read once
         self.removed_names = {}  # file (base and head path) -> names the range unbound there (NameReader.prepare)
         self.tops = None  # the root folders at head (`BlobReader.root_folders`), read once by the first cite that needs them
+        self.history_tops = None  # the top folders of every path head's history deleted (`history_tops`), read once
         self.tree = None  # the head tree entries once a read listed the whole tree; the report reuses it
         self.changed = set(removed) | set(renamed) | set(renamed.values()) | set(modified) | set(added)
         self.py_files = {p: p for p in modified if p.endswith(".py")}
@@ -1337,13 +1340,30 @@ def python_cites(text):
     return [(path, name) for _, path, name in sorted(cites, key=lambda c: c[0])]
 
 
+def history_tops(rng):
+    """The top folders of each path the history of head deleted, or renamed away: one `git log`, cached on `rng`, started
+    only for a cite whose top folder is absent at head. A folder absent at head had every file of it deleted, so the
+    deletions name it. Only deletions are listed, so the output stays small, and `--no-renames` makes a rename-from path a
+    deletion. `-z` keeps a path unquoted. A log that fails is unknown, and the folder stays silent."""
+    if rng.history_tops is None:
+        try:
+            out = git("log", "--format=", "--name-only", "--no-renames", "--diff-filter=D", "-z", rng.head)
+            paths = (p.strip("\n") for p in out.decode("utf-8", "replace").split("\0"))
+            rng.history_tops = {p.split("/", 1)[0] for p in paths if "/" in p}
+        except Unknown as exc:
+            rng.unknowns.append("%s; a cite into a folder absent at head was not checked" % exc)
+            rng.history_tops = set()
+    return rng.history_tops
+
+
 def dead_name_cites(rng):
     """STALE010, a finding: {(path, line, code): [messages]} for each cite of a Python name on a line the range adds to
     governed Markdown, whose file is absent at head or does not bind the name there. A cite of a file the range removed
-    or renamed is STALE001's, and a name the range unbound is STALE002's. A cite into a far untracked top folder is
-    no cite; so is a near folder (one edit or a case change from a tracked one) whose corrected path is absent
-    at head. With the corrected path at head it is a likely typo and is checked.
-    Fenced lines count as prose, as for STALE002. The blobs and the root tree come from the one `cat-file`, and only for a line that cites a .py file."""
+    or renamed is STALE001's, and a name the range unbound is STALE002's. A cite into a top folder is checked when the
+    folder is tracked at head, is one edit or a case change from a tracked one whose corrected path is a file at head,
+    or is absent at head but tracked in its history (the folder moved). Any other top folder is no cite.
+    Fenced lines count as prose, as for STALE002. The blobs and the root tree come from the one `cat-file`, and only for
+    a line that cites a .py file."""
     found, excludes = {}, exclude_patterns(".")
     gone = set(rng.removed) | set(rng.renamed)
 
@@ -1362,8 +1382,9 @@ def dead_name_cites(rng):
                     continue  # no folder part, or a lead outside the repo: no path cite, the STALE003 test
                 if rng.tops is None:
                     rng.tops = rng.batch.root_folders(rng.head)
-                if not in_tracked_top(path, rng.tops) and not typo_of_tracked_top(path, rng.tops, head_has):
-                    continue  # a cite into a far or near untracked top folder, as STALE003 reads it
+                if (not in_tracked_top(path, rng.tops) and not typo_of_tracked_top(path, rng.tops, head_has)
+                        and not in_tracked_top(path, history_tops(rng))):
+                    continue  # a folder that is not tracked, not a typo of a file, and never moved: as STALE003 reads it
                 names = None if path in gone else head_names(rng, path)
                 if names is None or name in names or name in rng.removed_names.get(path, ()):
                     continue
