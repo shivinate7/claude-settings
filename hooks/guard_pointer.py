@@ -33,7 +33,8 @@ from guard_core import (
 #
 #   fires   `checkout <branch>` and `switch <branch>`, including the `-` shorthand
 #           `checkout -b|-B|--orphan <name>` and `switch -c|-C|--orphan <name>`
-#           `checkout --detach` and `switch --detach|-d`, which leave no branch named at all
+#           `checkout --detach` and `switch --detach|-d`, which leave no branch named at all,
+#           a detach to `main` included (HEAD stops naming `main`)
 #   passes  a move whose one target is `main`. That call RESTORES the invariant this rule
 #           protects, and it is how a checkout left on a branch gets repaired. A deny there would
 #           wall off the only repair, which is the "fix the cause" failure in miniature.

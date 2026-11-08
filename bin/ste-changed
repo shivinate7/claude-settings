@@ -33,10 +33,14 @@ def find_root():
     try:
         import guard_pointer  # noqa: E402  the one reader of the pointer line (hooks/guard_pointer.py)
         pointed = guard_pointer.pointer_checkout()
-    except ImportError:
-        pointed = ""
+        missing = ""
+    except ImportError as err:
+        pointed, missing = "", err
     if pointed and os.path.isfile(os.path.join(pointed, LINT_ACTION)):
         return pointed
+    if missing:
+        sys.exit("ste-changed: the installed hooks cannot load guard_pointer.py, the reader of the pointer "
+                 "line (%s). Reinstall the hooks." % missing)
     sys.exit("ste-changed: no claude-settings checkout found. Looked at the `@<dir>/CLAUDE.md` pointer line "
              "in the CLAUDE.md of the config dir.")
 

@@ -393,6 +393,33 @@ WRAPPER_VALUE_FLAGS["timeout"] = TIMEOUT_FLAGS_WITH_VALUE
 # command word sees the command inside the block, never the keyword that opens it.
 LOOP_KEYWORDS = {"do", "then", "else", "elif", "while", "until", "if", "{", "(", "$("}
 
+# Commands that print a `{ ... }` argument, in PowerShell and in POSIX shells.
+PRINTING_COMMANDS = ("write-host", "write-output", "write-verbose", "write-debug", "echo")
+# A word after a block that makes the block run: a member call on it (`}.Invoke()`, `.Invoke(`),
+# or a standalone `&` or `.` word. `./x` is a path argument, not a call.
+_BLOCK_RUNS = re.compile(r"^[&.]$|\}\s*\.|\.\s*Invoke")
+_STORED_NAME = re.compile(r"\$\{?([\w:]+)\}?\s*[-+*/]?=")
+
+
+def block_is_printed(tokens, at=0, piped=False, later=None) -> bool:
+    """True when the printing command at `tokens[at]` prints its `{ ... }` argument and never runs it.
+
+    False when its output goes down a pipe (`Write-Output {..} | % { & $_ }` runs the block in
+    the next segment), when a later word is a call on the block, and when the segment stores the
+    output (`$b = echo {..}`) and `later`, the text after the segment, names that variable
+    (`; & $b`). A caller that passes no `later` cannot tell, so a stored block counts as run."""
+    if not tokens[at:] or basename(tokens[at]).lower() not in PRINTING_COMMANDS or piped:
+        return False
+    if any(_BLOCK_RUNS.search(t) for t in tokens[at + 1:]):
+        return False
+    head = "".join(tokens[:at])
+    if "=" not in head:
+        return True
+    names = _STORED_NAME.findall(head)
+    return later is not None and bool(names) and not any(
+        re.search(r"\$\{?(?:\w+:)?" + re.escape(name.rpartition(":")[2]) + r"\b", later, re.I)
+        for name in names)
+
 
 # What a PowerShell backtick escape stands for, outside quotes and inside `"..."` (parser, 2026-10-15).
 BACKTICK_CHARS = {"n": "\n", "r": "\r", "t": "\t", "0": "\0", "a": "\a", "b": "\b", "e": "\x1b",
