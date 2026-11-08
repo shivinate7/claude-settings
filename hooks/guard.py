@@ -121,6 +121,16 @@ Shell tools (Bash, PowerShell), in judge_shell order:
   draft-pr             deny. A `gh pr create` without `--draft`. (draft-until-reviewed)
   records-page         deny. A `git commit` whose docs/records.md differs from the base's page.
                        (records-index-at-merge)
+  conflict-markers     deny. A `git commit` that would hold a start, a lone mid and an end conflict marker
+                       line in one file's added lines, read with `git diff --check`: the index, or the working
+                       tree (untracked files too) when `-a`, a pathspec or an earlier add reaches the file; a
+                       `merge`, `rebase` or `cherry-pick --continue` counts as a commit. It judges a commit only
+                       when each earlier segment is a git add, commit or read, `true`, `false` or `cd`. Also a
+                       `git push` whose net range (remote-tracking tip, else upstream, else default base, up
+                       to the pushed ref, else HEAD) adds such a file; and a push after a commit the guard
+                       could not judge, when that commit covers a triplet already in the tree or the chain
+                       runs merge, pull, rebase, cherry-pick, stash pop or apply, or am.
+                       (commit-refuses-conflict-markers)
   frozen-path          deny. A write to the settings, hooks or global CLAUDE.md under
                        `${CLAUDE_CONFIG_DIR:-$HOME/.claude}`. (frozen-path-resolves-shell-vars)
   config-edit          noted. A write to a project's own settings or hooks. See below.
@@ -368,8 +378,9 @@ while True:
         )
         _loading = "guard_merge"
         from guard_merge import (
-            BARE_MERGE_REASON, DRAFT_PR_REASON, MERGE_TOOLS, RECORDS_PAGE_REASON, ROLE_REASON, gh_call_of, git_call_of,
-            merge_call_of, merge_check, merge_check_reason, record_writer_hit, records_page_hit, role_proof_hit,
+            BARE_MERGE_REASON, CONFLICT_MARKERS_CHAIN_REASON, CONFLICT_MARKERS_PUSH_REASON, CONFLICT_MARKERS_REASON,
+            DRAFT_PR_REASON, MERGE_TOOLS, RECORDS_PAGE_REASON, ROLE_REASON,
+            conflict_markers_hit, gh_call_of, git_call_of, merge_call_of, merge_check, merge_check_reason, record_writer_hit, records_page_hit, role_proof_hit,
             DEFAULT_RECORD_BRANCH, RECORD_REASON, settings_roots, TRUST_REASON, archive_hit, brief_hit, trust_card_hit,
             undrafted_pr_create, uses_merge_tool,
         )
@@ -3555,6 +3566,14 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
     matched = records_page_hit(stripped, cwd)
     if matched:
         refuse(tool, "deny", "records-page", RECORDS_PAGE_REASON, matched)
+
+    # 6c2. A commit or push that would carry all three conflict markers in one file (rule conflict-markers).
+    # Cost: a few short `git` reads per commit or push segment, and none for a command with neither.
+    kind, matched = conflict_markers_hit(stripped, cwd)
+    if matched:
+        markers_reason = (CONFLICT_MARKERS_CHAIN_REASON if kind == "chain" else
+                          CONFLICT_MARKERS_PUSH_REASON if kind == "push" else CONFLICT_MARKERS_REASON)
+        refuse(tool, "deny", "conflict-markers", markers_reason.format(file=matched), matched)
 
     # 7. A frozen path.
     matched = frozen_shell_hit(stripped, cwd)

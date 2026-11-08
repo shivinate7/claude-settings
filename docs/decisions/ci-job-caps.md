@@ -27,6 +27,7 @@ Window: the newest 30 completed runs of each job in `checks.yml`, from run 39969
 | checks-macos-b (split off checks-macos; window of 2026-11-05) | macos | 29 | 18.3 | 21.5 | none | 60 (provisional) | 36 | 0 | yes |
 | checks-windows-guard (window of 2026-11-05) | windows | 32 | 8.4 | 19.7 | 20 | 20 | 99 | 0 | no |
 | checks-windows-guard-2 (window of 2026-11-05) | windows | 14 | 17.0 | 19.9 | 20 | 20 | 99 | 0 | no |
+| checks-windows-guard-3 (split off the 2-shard guard suite, 2026-11-07) | windows | 0 | unmeasured | unmeasured | none | 20 | unmeasured | unmeasured | unmeasured |
 | checks-windows-merge (window of 2026-11-05) | windows | 26 | 8.2 | 13.6 | 15 | 15 | 90 | 0 | no |
 | checks-windows-merge-2 to -5 (window of 2026-11-05) | windows | 14 each | 10.6 to 13.4 | 12.2 to 14.0 | 15 | 15 | 82 to 94 | 0 | no |
 | pointer-windows | windows | 30 | 3.8 | 4.2 | 10 | 10 | 42 | 0 | yes |
