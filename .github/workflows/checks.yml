@@ -1077,7 +1077,7 @@ jobs:
         if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() && needs.scope.outputs.code == 'true' }}
         run: python3 janitor/test_install_schtasks.py
 
-  # The Windows suites run in four jobs (checks-windows, checks-windows-guard, checks-windows-merge, checks-windows-rest), and the guard and merge jobs add shard jobs (the merge shards run off pull_request only; the guard shard runs on a pull_request when guard_windows_full is on). Six python suites in the checks job need a real Windows box to prove: no other
+  # The Windows suites run in four jobs (checks-windows, checks-windows-guard, checks-windows-merge, checks-windows-rest), and the guard and merge jobs add shard jobs (the merge shards run off pull_request only; the guard shards run on a pull_request when guard_windows_full is on). Six python suites in the checks job need a real Windows box to prove: no other
   # job in this workflow can show whether they pass there. This job runs those
   # suites on Windows and reports the environment first. It is blocking: run
   # 35766479009 went green here for the first time, on its own merit, not through
@@ -1251,12 +1251,13 @@ jobs:
         with:
           profile: claude_settings
 
-  # The guard fixture suite on Windows, split off checks-windows by cut F. Two shards run it in full: shard 1 here and
-  # shard 2 in checks-windows-guard-2 (the shard switch in hooks/test_guard.py; lint/test_windows_split.py proves each case
-  # runs once). They run on push, schedule and workflow_dispatch, and on a pull_request when guard_windows_full is on (a file
+  # The guard fixture suite on Windows, split off checks-windows by cut F. Three shards run it in full: shard 1 here, shard 2
+  # in checks-windows-guard-2 and shard 3 in checks-windows-guard-3 (the shard switch in hooks/test_guard.py;
+  # lint/test_windows_split.py proves each case runs once). They run on push, schedule and workflow_dispatch, and on a
+  # pull_request when guard_windows_full is on (a file
   # the guard suite loads changed, as GuardClosure in lint/test_ci_scope.py derives and checks, or hooks/test_guard.py,
-  # hooks/mutate_guard.py or settings.json). On any other guard pull_request only the cases tagged windows run, whole,
-  # in this job (the slice step, on guard_windows_slice).
+  # hooks/mutate_guard.py or settings.json). On any other guard pull_request the three shards skip their steps and only the
+  # cases tagged windows run, whole, in this job (the slice step, on guard_windows_slice).
   checks-windows-guard:
     runs-on: windows-latest
     needs: scope
@@ -1315,21 +1316,23 @@ jobs:
   checks-windows-guard-3:
     runs-on: windows-latest
     needs: scope
-    if: ${{ github.event_name != 'pull_request' }}
-    # A shard of checks-windows-guard: its figures and cap are there.
+    # A shard of checks-windows-guard: its figures and cap are there. all-jobs-passed needs it, so it has no job-level if (a draft
+    # skips it through needs: scope), and on a ready pull_request its steps skip unless guard_windows_full is on.
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        if: ${{ needs.scope.outputs.guard_windows_full == 'true' || github.event_name != 'pull_request' }}
         with:
           fetch-depth: 0
           persist-credentials: false
 
       - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
+        if: ${{ needs.scope.outputs.guard_windows_full == 'true' || github.event_name != 'pull_request' }}
         with:
           python-version: "3.11"
 
       - name: Guard fixture suite (shard 3 of 3)
-        if: ${{ !cancelled() && github.event_name != 'pull_request' && needs.scope.outputs.code == 'true' }}
+        if: ${{ !cancelled() && (needs.scope.outputs.guard_windows_full == 'true' || github.event_name != 'pull_request') && needs.scope.outputs.code == 'true' }}
         env:
           GUARD_SHARD: 3/3
         run: python hooks/test_guard.py
@@ -1704,6 +1707,7 @@ jobs:
       - mutation-report
       - checks-windows-guard
       - checks-windows-guard-2
+      - checks-windows-guard-3
       - checks-windows-merge
       - checks-windows-rest
       - checks-windows-sweep
