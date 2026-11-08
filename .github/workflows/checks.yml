@@ -182,6 +182,9 @@ jobs:
       - name: Question form option-key gap suite
         run: python3 hooks/test_question_form_option_gap.py
 
+      - name: Pick ack fixture suite
+        run: python3 hooks/test_pick_ack.py
+
       - name: Remove-prompt answer fixture suite
         run: python3 hooks/test_rm_prompt_answer.py
 
