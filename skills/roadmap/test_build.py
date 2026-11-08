@@ -3911,6 +3911,24 @@ class IdleLanes(UpkeepFixture):
     def named(entries, sid):
         return any(sid in entry for entry in entries)
 
+    def reported(self):
+        """build.idle_lanes_report on the fixture's live file: the entries `merge --idle-lanes` prints, unjoined."""
+        return build.idle_lanes_report(self.repo, str(self.live))
+
+    def line_for(self, entries, sid):
+        """The one entry of lane `sid`: its archive line `<sid> (...)`, or its hold line, which ends `; lane <sid>)`."""
+        found = [e for e in entries if e.startswith(sid + " (") or e.endswith("; lane %s)" % sid)]
+        self.assertEqual(len(found), 1, "lane %s has %d lines, not one: %r" % (sid, len(found), entries))
+        return found[0]
+
+    def assert_held(self, line, sid):
+        """A per-lane verdict that cannot archive reads `hold (<why>; lane <sid>)`."""
+        self.assertTrue(line.startswith("hold (") and line.endswith("; lane %s)" % sid), "not a hold line: %r" % (line,))
+
+    def assert_no_unknown_line(self, entries):
+        """`unknown (` is the form for a read the whole list cannot make. A per-lane reason never reads that way."""
+        self.assertFalse([e for e in entries if e.startswith("unknown (")], "a per-lane reason reads unknown: %r" % (entries,))
+
     def test_control_the_live_file_builds_and_an_existing_upkeep_row_reads(self):
         # Green on the old code too: the fixture builds with a live file, and a row that exists now reads. So the red
         # cases in this class fail on the new row, not on the fixture.
@@ -4019,14 +4037,22 @@ class IdleLanes(UpkeepFixture):
         count, entries = self.archive()
         self.assertEqual((count, self.ids(entries)), (1, ["session_a"]))
 
-    def test_lane_with_no_cs_step_is_never_listed(self):
+    def test_lane_with_no_cs_step_is_held_with_its_reason_and_never_listed(self):
+        # A completed lane with no cs-step tag is held, and the hold names the missing tag. A working lane with no step is
+        # not idle, so it reads no line. session_a is the listed control.
         self.land({"c1": {"status": "done", "order": 1}})
         no_step = session_row("session_nostep", "SESSION_STATUS_IDLE", "cs-build:lane", self.REPO,
                               status_bucket=BUCKET_COMPLETED)
-        self.publish(sessions=[no_step, self.lane("session_a", "c1")])
-        count, entries = self.archive()
-        self.assertFalse(self.named(entries, "session_nostep"), entries)
-        self.assertTrue(self.named(entries, "session_a"), "the control lane is not listed: %r" % (entries,))
+        busy = session_row("session_busy", "SESSION_STATUS_RUNNING", "cs-build:lane", self.REPO,
+                           status_bucket=BUCKET_WORKING)
+        self.publish(sessions=[no_step, busy, self.lane("session_a", "c1")])
+        entries = self.reported()
+        self.assertEqual(self.line_for(entries, "session_a"), "session_a (c1; topic -)", entries)
+        line = self.line_for(entries, "session_nostep")
+        self.assert_held(line, "session_nostep")
+        self.assertIn("no cs-step tag", line)
+        self.assertEqual([e for e in entries if "session_busy" in e], [], "a working lane with no step got a line: %r" % (entries,))
+        self.assert_no_unknown_line(entries)
 
     def test_session_without_the_lane_tag_is_ignored(self):
         self.land({"c1": {"status": "done", "order": 1}, "c2": {"status": "done", "order": 2}})
@@ -4043,15 +4069,18 @@ class IdleLanes(UpkeepFixture):
         count, entries = self.archive()
         self.assertEqual((count, self.ids(entries)), (1, ["session_a"]))
 
-    def test_step_id_not_on_the_record_branch_reads_the_lane_unknown(self):
+    def test_step_id_not_on_the_record_branch_with_no_trailer_holds_the_lane_and_is_never_unknown(self):
+        # No Step trailer on main and no other repo tag, so the step cannot be shown landed. The hold names the step and
+        # the missing trailer. session_a is the listed control.
         self.land({"c1": {"status": "done", "order": 1}})
-        self.publish(sessions=[self.lane("session_ghost", "ghost"), self.lane("session_a", "c1")])
-        count, entries = self.archive()
-        unknown = [entry for entry in entries if "unknown (" in entry]
-        self.assertEqual(count, 2, entries)
-        self.assertEqual(len(unknown), 1, entries)
-        self.assertIn("step ghost not on the record branch", unknown[0])
-        self.assertTrue(self.named(entries, "session_a"), "the control lane is not listed: %r" % (entries,))
+        self.publish(sessions=[self.lane("session_orphan", "ghost"), self.lane("session_a", "c1")])
+        entries = self.reported()
+        self.assertEqual(self.line_for(entries, "session_a"), "session_a (c1; topic -)", entries)
+        line = self.line_for(entries, "session_orphan")
+        self.assert_held(line, "session_orphan")
+        self.assertIn("ghost", line)
+        self.assertIn("no Step trailer on main", line)
+        self.assert_no_unknown_line(entries)
 
     def test_stale_live_read_is_one_unknown_entry_and_no_lane_is_listed(self):
         self.land({"c1": {"status": "done", "order": 1}})
@@ -4106,6 +4135,58 @@ class IdleLanes(UpkeepFixture):
         count, entries = self.archive()
         self.assertEqual(count, 32)
         self.assertEqual(self.ids(entries), sorted("session_%02d" % n for n in range(1, 33)))
+
+    def test_absent_step_with_a_step_trailer_on_main_is_landed_and_its_lane_is_listed(self):
+        # The step is not on the record branch, and a Step trailer on main names it, so the step reads as landed.
+        # session_a is the listed control.
+        self.land({"c1": {"status": "done", "order": 1}})
+        self.trailer_on_main("ghost")
+        self.publish(sessions=[self.lane("session_orphan", "ghost"), self.lane("session_a", "c1")])
+        entries = self.reported()
+        self.assertEqual(self.line_for(entries, "session_a"), "session_a (c1; topic -)", entries)
+        self.assertEqual(self.line_for(entries, "session_orphan"), "session_orphan (ghost; topic -)", entries)
+        self.assert_no_unknown_line(entries)
+
+    def test_absent_step_with_a_trailer_held_by_an_open_pull_has_no_line(self):
+        # A lane that waits on an open pull reads no line, whether or not its step has a trailer. session_a is the control.
+        self.land({"c1": {"status": "done", "order": 1}})
+        self.trailer_on_main("ghost")
+        self.publish(sessions=[self.lane("session_orphan", "ghost"), self.lane("session_a", "c1")],
+                     pulls=[{"number": 61, "title": "lane ghost", "branch": "lane/ghost"}])
+        entries = self.reported()
+        self.assertEqual(self.line_for(entries, "session_a"), "session_a (c1; topic -)", entries)
+        self.assertEqual([e for e in entries if "session_orphan" in e], [],
+                         "a lane held by an open pull got a line: %r" % (entries,))
+        self.assert_no_unknown_line(entries)
+
+    def test_absent_step_with_another_repo_tag_holds_the_lane_and_names_that_tag(self):
+        # No Step trailer on main, and the lane also carries another repo's cs-repo tag. The hold names that tag.
+        # session_a is the listed control.
+        self.land({"c1": {"status": "done", "order": 1}})
+        other = session_row("session_orphan", "SESSION_STATUS_IDLE", "cs-build:lane", "cs-step:ghost", self.REPO,
+                            "cs-repo:owner/other", status_bucket=BUCKET_COMPLETED)
+        self.publish(sessions=[other, self.lane("session_a", "c1")])
+        entries = self.reported()
+        self.assertEqual(self.line_for(entries, "session_a"), "session_a (c1; topic -)", entries)
+        line = self.line_for(entries, "session_orphan")
+        self.assert_held(line, "session_orphan")
+        self.assertIn("cs-repo:owner/other", line)
+        self.assert_no_unknown_line(entries)
+
+    def test_lanes_to_archive_row_lists_a_trailer_landed_lane_and_holds_an_absent_step_lane(self):
+        # The row prints the list merge --idle-lanes prints, so its raw detail carries the archive line and the hold
+        # line. The detail is read raw: a hold reason is not split on the row's ", " joiner. session_a is the control.
+        self.land({"c1": {"status": "done", "order": 1}})
+        self.trailer_on_main("gone")
+        self.publish(sessions=[self.lane("session_landed", "gone"), self.lane("session_orphan", "ghost"),
+                               self.lane("session_a", "c1")])
+        _, out = self.build_from_main("--live", str(self.live), expect=(0, 1))
+        _, detail = self.row(out, self.ROW)
+        self.assertIn("session_a (c1; topic -)", detail, out)
+        self.assertIn("session_landed (gone; topic -)", detail, out)
+        self.assertIn("hold (", detail, out)
+        self.assertIn("; lane session_orphan)", detail, out)
+        self.assertNotIn("unknown (", detail, out)
 
     def test_only_a_closed_page_item_releases_its_lane(self):
         # The waiting page's statuses are open and closed (skill waiting-page, the item fields). An answered item is
