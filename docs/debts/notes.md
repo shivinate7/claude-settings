@@ -2185,4 +2185,3 @@
 - tests-for-silent-empty: `tests_for_main` in `hooks/mutate_guard.py` prints nothing on a runner parse error or a non-static SECTION_DIR. Found in PR 2635. Decision: roles-findings-are-debts-or-notes.
 - scratchpad-rm-rf-unguarded: no guard refuses `rm -rf` on a scratchpad folder that another agent of the session wrote. A builder deleted one. Queued as a debt. Decision: scratchpad-owner (the pattern).
 - sweep-proof-no-suite: no lint/ test proves `_test_temp.sweep`, so a broken sweep of temp dirs would pass CI (lint/_test_temp.py). Found by lane builder-report-in-head, 2026-11-08. Decision: test-temp-standard.
-- report-in-head-false-alarms: `**a.py**:10-20`, a trailing period (`b.py.`), `a.py (new)` and spaces round a range dash each exit 1 on a real changed file; the output names the entry, so the cost is one wrongful send-back (lint/check_report_in_head.py `reported_paths`). Decision: builder-report-in-head.
