@@ -10158,9 +10158,10 @@ def rr_bash(tool_id, command):
     return [role_use(tool_id, "Bash", {"command": command}), role_result(tool_id, "")]
 
 
-def rr_spawn_error(tool_id, subagent_type):
-    """A spawn of `subagent_type` that another guard refused: the call's result is an error, and it never ran."""
-    return [rr_spawn(tool_id, subagent_type)[0],
+def rr_spawn_error(tool_id, subagent_type, name=None):
+    """A spawn of `subagent_type` that another guard refused: the call's result is an error, and it never ran.
+    `name` gives the spawn its name, for a case that resumes it by name."""
+    return [rr_spawn(tool_id, subagent_type, name=name)[0],
             role_result_block(tool_id, is_error=True, content=[{"type": "text", "text": "Refused before it ran."}])]
 
 
@@ -10362,6 +10363,11 @@ RF_SHARED = "worker-pr12"
 RF_SHARED_REVIEWER_AGENT, RF_SHARED_BUILDER_AGENT = "a9f2c6e1d7b04385", "b1c4e8a2f7d93056"
 RF_UNKNOWN = "reviewer-pr14"
 RF_NOTICE, RF_NOTICE_AGENT = "reviewer-pr15", "a4e7b0d3c9f15862"
+RF_TASKID, RF_TASKID_AGENT = "reviewer-pr16", "a6f3d9c2e8b14750"
+RF_STOPPED, RF_STOPPED_AGENT = "reviewer-pr17", "a8e4b1d7f2c90316"
+RF_FOREGROUND, RF_FOREGROUND_AGENT = "reviewer-pr18", "a0c7e5f9b3d16428"
+RF_ERRORED = "reviewer-pr19"
+RF_RUNNING, RF_RUNNING_AGENT = "reviewer-pr20", "a3b8d0e6f4c17295"
 RF_DIR = os.path.join(ROOT, "resumefinished")
 
 
@@ -10389,11 +10395,17 @@ def rf_launch_unknown(tool_id, subagent_type, name):
     return rr_spawn(tool_id, subagent_type, name=name, result=json.dumps(record))
 
 
-def rf_finish(tool_id, kind="queue-operation"):
+def rf_finish(tool_id, kind="queue-operation", status="completed", task_id=None):
     """The finish notice of background spawn `tool_id`, in the record type it arrives as: a queue-operation or an
-    attachment. Its text names the tool use and a status, as the real notice does."""
-    text = ("<task-notification>\n<tool-use-id>%s</tool-use-id>\n<status>completed</status>\n"
-            "</task-notification>" % tool_id)
+    attachment. Its text names the tool use and a status, as the real notice does. `tool_id` None, with `task_id` (the
+    agent id), gives a notice that names the spawn by its agent id alone."""
+    lines = []
+    if task_id is not None:
+        lines.append("<task-id>%s</task-id>" % task_id)
+    if tool_id is not None:
+        lines.append("<tool-use-id>%s</tool-use-id>" % tool_id)
+    lines.append("<status>%s</status>" % status)
+    text = "<task-notification>\n" + "\n".join(lines) + "\n</task-notification>"
     if kind == "attachment":
         return [json.dumps({"type": "attachment", "attachment": {"type": "queued_command", "prompt": text}})]
     return [json.dumps({"type": "queue-operation", "operation": "enqueue", "content": text})]
@@ -10403,6 +10415,21 @@ def rf_notice_no_status(tool_id):
     """A task notice that names the tool use and carries no <status>: the spawn's state is not known from it."""
     text = "<task-notification>\n<tool-use-id>%s</tool-use-id>\n</task-notification>" % tool_id
     return [json.dumps({"type": "queue-operation", "operation": "enqueue", "content": text})]
+
+
+def rf_stop(tool_id, agent_id):
+    """A TaskStop call on background spawn `agent_id`, and its result: the JSON text a stop returns, whose message
+    starts 'Successfully stopped task:' and names the agent id."""
+    body = json.dumps({"message": "Successfully stopped task: %s (reviewer)" % agent_id, "task_id": agent_id})
+    return [role_use(tool_id, "TaskStop", {"task_id": agent_id}), role_result(tool_id, body)]
+
+
+def rf_foreground(tool_id, subagent_type, name, agent_id, status):
+    """A foreground spawn named `name`: its result is the plain text, and its toolUseResult is a dict that holds
+    `status` and the agent id, as a spawn that ran to its end records it."""
+    record = json.loads(role_result(tool_id, "Verdict: PASS."))
+    record["toolUseResult"] = {"status": status, "agentId": agent_id}
+    return rr_spawn(tool_id, subagent_type, name=name, result=json.dumps(record))
 
 
 RF_TRANSCRIPTS = {
@@ -10442,6 +10469,23 @@ RF_TRANSCRIPTS = {
     # A reviewer whose notice names its id with no status.
     "reviewer-notice-no-status": rr_session(rf_launch("r1", "reviewer", RF_NOTICE, RF_NOTICE_AGENT),
                                             rf_notice_no_status("r1"), rr_comment("c1", rr_record())),
+    # A background reviewer whose finish notice names only its agent id: no tool-use id in the notice.
+    "bg-reviewer-agent-id-notice": rr_session(rf_launch("r1", "reviewer", RF_TASKID, RF_TASKID_AGENT),
+                                              rf_finish(None, task_id=RF_TASKID_AGENT),
+                                              rr_comment("c1", rr_record())),
+    # A background reviewer that a TaskStop closed: the stop's result names its agent id.
+    "bg-reviewer-stopped": rr_session(rf_launch("r1", "reviewer", RF_STOPPED, RF_STOPPED_AGENT),
+                                      rf_stop("s1", RF_STOPPED_AGENT), rr_comment("c1", rr_record())),
+    # A foreground reviewer whose toolUseResult carries a terminal status.
+    "fg-reviewer-status-completed": rr_session(
+        rf_foreground("r1", "reviewer", RF_FOREGROUND, RF_FOREGROUND_AGENT, "completed"),
+        rr_comment("c1", rr_record())),
+    # A reviewer whose spawn result is an error: the spawn did not run, and the result has no toolUseResult.
+    "reviewer-spawn-errored": rr_session(rr_spawn_error("r1", "reviewer", name=RF_ERRORED),
+                                         rr_comment("c1", rr_record())),
+    # A background reviewer whose finish notice says it is still running.
+    "reviewer-notice-running": rr_session(rf_launch("r1", "reviewer", RF_RUNNING, RF_RUNNING_AGENT),
+                                          rf_finish("r1", status="running"), rr_comment("c1", rr_record())),
     # No spawn at all: the empty state.
     "no-spawn": rr_session(),
 }
@@ -10486,6 +10530,12 @@ rf_refuse("a finished reviewer far up a long transcript is refused",
           {"to": RF_REVIEW, "message": RF_MSG}, rf_path("long-reviewer-finished"))
 rf_refuse("the latest spawn with the name wins: an older running builder, then a newer finished reviewer, is refused",
           {"to": RF_SHARED, "message": RF_MSG}, rf_path("shared-name-running-builder-then-finished-reviewer"))
+rf_refuse("a finish notice that names only the agent id, with no tool-use id, is refused",
+          {"to": RF_TASKID_AGENT, "message": RF_MSG}, rf_path("bg-reviewer-agent-id-notice"))
+rf_refuse("a reviewer that a TaskStop closed is refused",
+          {"to": RF_STOPPED_AGENT, "message": RF_MSG}, rf_path("bg-reviewer-stopped"))
+rf_refuse("a foreground reviewer whose toolUseResult carries a terminal status is refused",
+          {"to": RF_FOREGROUND, "message": RF_MSG}, rf_path("fg-reviewer-status-completed"))
 # Allowed: the target runs, is not a reviewer, is not in the transcript, or the send is not the main session's.
 rf_allow("a running reviewer is allowed, though another spawn's finish notice is in the transcript",
          {"to": RF_REVIEW, "message": RF_MSG}, rf_path("bg-reviewer-running"))
@@ -10507,6 +10557,10 @@ rf_ask("a reviewer whose launch result holds a bare string asks",
        {"to": RF_UNKNOWN, "message": RF_MSG}, rf_path("reviewer-unknown-result"))
 rf_ask("a reviewer whose notice names its id with no status asks",
        {"to": RF_NOTICE_AGENT, "message": RF_MSG}, rf_path("reviewer-notice-no-status"))
+rf_ask("a reviewer whose spawn result is an error asks",
+       {"to": RF_ERRORED, "message": RF_MSG}, rf_path("reviewer-spawn-errored"))
+rf_ask("a reviewer whose finish notice says it is still running asks",
+       {"to": RF_RUNNING_AGENT, "message": RF_MSG}, rf_path("reviewer-notice-running"))
 
 
 # =========================================================================== 5d. cite by id
