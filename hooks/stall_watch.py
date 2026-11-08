@@ -133,6 +133,11 @@ BLOCK_OPENERS = ("{", "if", "while", "until", "for", "case", "select")
 BLOCK_CLOSERS = ("}", "fi", "done", "esac")
 
 
+# A quoted `&&` or `|` is a word. It gets this prefix so no check reads it as an operator.
+QUOTED_WORD = "\0"
+QUOTE_CHARS = ("'", '"', "\\")
+
+
 def expand_home(path):
     """path with a leading `~`, `$HOME` or `${HOME}` replaced by HOME from the environment."""
     path = os.path.expanduser(path)
@@ -201,23 +206,31 @@ def read_named_logs(command):
     text. Only a cd that surely runs in the main shell moves the directory. That is the first command
     of a list item (after the start, `;`, a newline or `(`), or one after only cds joined by `&&`.
     These leave the directory unknown: a cd after `||`, `&`, `|`, `then`, `do`, `{` or `)`, and a cd
-    after a command joined by `&&`. So do a cd that ends in `&` or `|`, a cd inside `{ }`, and `popd`.
+    after a command joined by `&&`. So do a cd that ends in `&`, a cd inside `{ }`, and `popd`. A cd
+    that ends in `|`, also across a newline, runs in a pipeline subshell and leaves the directory as it was.
     A `(` saves the directory and a `)` restores it. A list that ends in a lone `&` runs in a
     background subshell. Its logs resolve against its own directory, and after the `&` the directory
     is the one where that list started. A compound command (`{ }`, `if`, `while`, `for`, `case`) has
     lists of its own. Newlines are tokens. A comment stops before its newline, so that newline is a
     token too."""
     try:
-        lex = shlex.shlex(_KeepNewline(strip_heredoc_bodies(command, shells_only=True)), posix=True,
-                          punctuation_chars="();<>|&\n")
+        text = strip_heredoc_bodies(command, shells_only=True)
+        lex = shlex.shlex(_KeepNewline(text), posix=True, punctuation_chars="();<>|&\n")
         lex.whitespace_split = True
         lex.whitespace = " \t\r"
-        tokens = []
+        tokens, seen = [], 0
         while True:
             tok = lex.get_token()
             if tok is None:
                 break
+            end = lex.instream.tell() - len(lex._pushback_chars)  # shlex reads one char ahead of a token
+            if set(tok) <= set(lex.punctuation_chars):
+                raw = text[seen:end].rstrip(" \t\r")  # shlex also eats the space after a token
+                # Quotes and escapes are gone from tok. An operator is the last text of its raw span.
+                if not tok or not raw.endswith(tok) or raw[:-len(tok)].endswith(QUOTE_CHARS):
+                    tok = QUOTED_WORD + tok
             tokens.append(tok)
+            seen = end
     except Exception:
         return [], []
     punct = set(lex.punctuation_chars)
@@ -272,7 +285,9 @@ def read_named_logs(command):
             while j < len(tokens) and not set(tokens[j]) <= punct:
                 j += 1
             ends = tokens[j] if j < len(tokens) else ""
-            if tok == "popd" or not only_cds or braces or ends in ("&", "|", "|&"):
+            if ends.rstrip("\n") in ("|", "|&"):
+                pass  # the cd is one part of a pipeline: a subshell, so the shell keeps its directory
+            elif tok == "popd" or not only_cds or braces or ends == "&":
                 cwd = None
             else:
                 cwd = _cd_target(tokens[i + 1:j], cwd)
@@ -295,7 +310,7 @@ def read_named_logs(command):
         i += 1
     keep, unresolved = [], []
     for path, where in found:
-        path = expand_home(path)
+        path = expand_home(path.removeprefix(QUOTED_WORD))
         if not path or UNREADABLE_PATH.search(path) or path.startswith("/dev/"):
             continue
         if not os.path.isabs(path):
