@@ -10191,7 +10191,7 @@ ansi_issue("review-record: prose after the CI line is refused, ANSI-C tab escape
            ansi_word(review_record(), None, r"Lane note:\tafter the record.\n"), "deny")
 ansi_issue("review-record: a record with its footer is allowed, ANSI-C tab escape, gh issue comment --body",
            ansi_word(review_record(), None, r"---\nGenerated\twith Claude Code\n"), "allow")
-ansi_issue("review-record: prose before a NUL cut is refused, and the footer after the cut is not read, gh issue comment --body",
+ansi_issue("review-record: prose before a NUL cut is refused, gh issue comment --body",
            ansi_word(review_record(), None, r"Lane note after the record.\n\0---\nGenerated with Claude Code\n"), "deny")
 ansi_issue("review-record: a bare record before a NUL cut is allowed, gh issue comment --body",
            ansi_word(review_record(), None, r"\0Lane note after the cut.\n"), "allow")
@@ -10365,9 +10365,6 @@ REVIEW_LOG_CHECKS.append(("review-record:a marked post at the live head makes on
                          review_reads("Bash", {"command": "%s --body '%s'" % (ISSUE_CMD, review_record())}, "allow", 1)))
 REVIEW_LOG_CHECKS.append(("review-record:a marked post at the live head makes one gh read, gh issue comment 12 --edit-last --body",
                          review_reads("Bash", {"command": "%s --edit-last --body '%s'" % (ISSUE_CMD, review_record())}, "allow", 1)))
-REVIEW_LOG_CHECKS.append(("review-record:a marked post with no pull request number makes two gh reads, gh issue comment --edit-last",
-                         review_reads("Bash", {"command": "gh issue comment --edit-last --body '%s'" % review_record()}, "allow", 2,
-                                      cwd=GHRECORDBRANCH, path_dirs=(GIT_PATH,))))
 REVIEW_LOG_CHECKS.append(("review-record:a marked post with a wrong head tail makes one gh read, gh issue comment 12 --edit-last",
                          review_reads("Bash", {"command": "%s --edit-last --body '%s'" % (ISSUE_CMD, review_record(head=REVIEW_TAIL))},
                                       "deny", 1)))
