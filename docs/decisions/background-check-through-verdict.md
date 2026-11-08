@@ -25,6 +25,8 @@ No owner ruling yet. The coordinator asked for this guard rule after the inciden
 
 Step `check-tail-wrapper-forms` added the `uv run`, `python3.N` and `bin/ci-job` forms, at the coordinator's request (2026-11-07 18:09 CST).
 
+- The guard-set lists (the install.sh copy loop, the install.ps1 copy and set loops, and the ci-scope.sh case) now hold every module the guard imports, at load time or lazily in a function body: `override.py` and `_nowindow.py` joined the earlier ones. A module missing from a list fails its import in the shipped guard, which drops the owner override lift and the no-window spawn. The check `guardset4` derives that set from the imports of `guard.py` and each `guard_*.py`, so a new import needs no edit to it (coordinator request, 2026-11-08 02:23 CST).
+
 ## A verdict call piped onward
 
 The coordinator asked for rule `verdict-pipe-exit` at 18:39 CST on 2026-11-07, as step `verdict-pipe-exit`. The owner may change it.

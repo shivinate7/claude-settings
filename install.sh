@@ -722,7 +722,7 @@ land_guard_set() {
   gdir="$2/guard.d/$INSTALL_ID_VALUE"
   prev_id=$(sed -n 's/^INSTALL_ID = "\([^"]*\)".*/\1/p' "$2/guard.py" 2>/dev/null | head -n1)
   mkdir -p "$gdir" || { log "could not make $gdir; the guard files stay as they were"; INSTALL_FAILED=1; return 1; }
-  for gf in "$1"/guard.py "$1"/guard_*.py "$1"/shared_names.py "$1"/git_reads.py "$1"/question_form.py "$1"/own_session.py "$1"/precompact_handoff.py "$1"/merge_options.py; do
+  for gf in "$1"/guard.py "$1"/guard_*.py "$1"/shared_names.py "$1"/git_reads.py "$1"/question_form.py "$1"/own_session.py "$1"/precompact_handoff.py "$1"/merge_options.py "$1"/override.py "$1"/_nowindow.py; do
     [ -f "$gf" ] || continue
     put_file "$gf" "$gdir/$(basename "$gf")" || { rm -rf "$gdir"; log "the guard files stay as they were"; return 1; }
   done
