@@ -5787,6 +5787,22 @@ sh("check-tail: ci-job checks | tail -3 # a& b, a glued & after a comment's #, i
 sh("check-tail: ci-job checks | grep \"x& y\" over a newline \"z\", a glued & inside a multi-line quote, is allowed",
    'ci-job checks | grep "x& y\nz"', "allow", cwd=NOGIT)
 
+# A quoted lone `&` ends no job (decision detached-launch-refused), so each of these is allowed. The quotes keep
+# the `&` from reading as a spaced background `&`, and a `&` that is a word of a grep or a cut is no job.
+sh("check-tail: grep '&' file, a quoted lone &, is allowed", "grep '&' file", "allow", cwd=NOGIT)
+sh("check-tail: cut -d '&' -f1 q | head -3, a quoted lone &, is allowed", "cut -d '&' -f1 q | head -3", "allow",
+   cwd=NOGIT)
+sh("check-tail: ci-job checks | grep -c '&', a quoted lone &, is allowed", "ci-job checks | grep -c '&'", "allow",
+   cwd=NOGIT)
+sh("check-tail: grep \"&\" file | tail -3, a double-quoted lone &, is allowed", 'grep "&" file | tail -3', "allow",
+   cwd=NOGIT)
+# A `&` after an `&&` list backgrounds the whole list, so the ci-job pipeline before the `&&` runs as a job and
+# its cut verdict is lost. check-tail refuses each; the pid capture on the line keeps detached-launch out.
+add("check-tail: ci-job checks | tail -3 && echo done & echo $!, a spaced & backgrounds the && list, is refused",
+    "deny", "check-tail", cwd=NOGIT, description=TAIL_BG_UNTIL, command="ci-job checks | tail -3 && echo done & echo $!")
+add("check-tail: ci-job checks | tail -3 && echo done& echo $!, a glued & backgrounds the && list, is refused",
+    "deny", "check-tail", cwd=NOGIT, description=TAIL_BG_UNTIL, command="ci-job checks | tail -3 && echo done& echo $!")
+
 # Controls, each held in the foreground and each allowed. A reading that takes any `&` in a word for a
 # background job would refuse every one: the `&` of `|&` (also glued to the next word), `&&`, a quoted
 # `&`, a `>&` or `2>&` redirect, a `&` after a comment's `#`, and a `&` at a line's end in a multi-line quote.
@@ -8011,6 +8027,9 @@ rm_parent("rm -rf ..& is refused by detached-launch", "rm -rf ..&", rule="detach
 # is red on fd92ee52a, and a fix to the job reader alone leaves it red.
 rm_parent("rm -rf ..& echo $!, a glued & with the pid captured, is refused by destructive-delete",
           "rm -rf ..& echo $!", rule="destructive-delete")
+# `&>` redirects both streams, so `..` is the target and the delete is refused by destructive-delete. Only
+# the `>` after the `&` is read, so no job is formed. `rm -rf ..>x` stays a known open case below.
+rm_parent("rm -rf ..&>/dev/null, a glued &> redirect, is refused by destructive-delete", "rm -rf ..&>/dev/null")
 # KNOWN OPEN. A shell operator glued to the target (`..>x`, `.>/dev/null`) leaves the target unread by
 # both the token read and the raw read. These cases record today's verdict and are not a ruling that
 # it is right: when a fix makes one deny, re-point it here.
