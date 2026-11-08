@@ -24,13 +24,14 @@
                           PR's issue comments since the PR opened.
   merge --reviewed        one line per open PR that has a review record comment, with its state (bad when the newest does not parse) and its
                           live CI; then the PRs with no record.
-  merge --reviewed --root DIR [--root DIR ...]
+  merge --reviewed --root OWNER/NAME=DIR [--root OWNER/NAME=DIR ...]
                           the same list for each repo checkout DIR, in the order given, one block each: `repo OWNER/NAME:`, that repo's lines,
-                          then at most one batch line naming its done PRs on the base, ascending: `open batch now: OWNER/NAME #a #b`, or
+                          then at most one batch line naming its done PRs on the base, ascending (a bare DIR is a usage error): `open batch now: OWNER/NAME #a #b`, or
                           `build next batch on the running head: ...` when a ready PR on that base has CI running. The base is the root's
                           default branch, and its config is read from it. A done PR that another open PR holds, that the base already holds,
                           or that is itself ready with CI running, is left off the batch line. A root whose read fails, or whose folder is
-                          missing or unreadable, prints `repo DIR: unknown (REASON)`; a failed read for the batch line keeps the root's lines
+                          missing or unreadable, or that is another repo than its OWNER/NAME (names compare in any case), prints
+                          `repo OWNER/NAME: unknown (REASON)`; a failed read for the batch line keeps the root's lines
                           and prints `batch line unknown (REASON)` in its place. Either way the other roots print in full, and the run exits 1.
                           Cost per root: the gh calls of one --reviewed, one to three repo reads, the batch-line reads when the base has a
                           done PR, a git fetch of the base and local git reads. The exact gh formula is the docstring of the ReviewedRoots case
@@ -3278,24 +3279,39 @@ def root_host(root, hosts, config):
     h.refuse_pinned_mismatch()
     return h
 
+ROOT_SPEC = re.compile(r"([\w.-]+/[\w.-]+)=(.+)", re.ASCII | re.DOTALL)
+
+def root_arg(text):
+    """argparse type of --root OWNER/NAME=DIR -> (name, dir). The name is the repo the checkout at DIR must be; a bare DIR is no root."""
+    m = ROOT_SPEC.fullmatch(text)
+    if not m:
+        raise argparse.ArgumentTypeError(f"{text!r} is not OWNER/NAME=DIR")
+    return m.group(1, 2)
+
 def reviewed_roots(roots, hosts, config):
-    """-> (lines, ok) of `merge --reviewed --root ...`: each root's block in the order given. A root whose read or config stops, or whose folder
-    is missing or unreadable, prints `repo ROOT: unknown (reason)` in its place, and ok is False; a stop in a read for its batch line keeps its
+    """-> (lines, ok) of `merge --reviewed --root ...`: each root's block in the order given; `roots` is [(OWNER/NAME, DIR)], and `hosts` is keyed
+    by DIR. A root whose read or config stops, whose folder is missing or unreadable, or whose checkout is another repo than its OWNER/NAME
+    (compared in any case) prints `repo OWNER/NAME: unknown (reason)` in its place, and ok is False; a stop in a read for its batch line keeps its
     lines with `batch line unknown (reason)` (reviewed_block), and ok is False; the other roots print in full. The notices a root's config read
     says are held with its block and follow it, so nothing prints until every root is read. Cost: reviewed_block's per root: the gh calls of one
     --reviewed, plus, when the base has a done pull request, the CI reads of each ready pull request on the base, one compare per done pull
     request and other open pull request on the base, and one compare per done pull request against the base; no new process, file or timer."""
     lines, ok = [], True
-    for r in roots:
+    for name, r in roots:
         config_says, read_says = io.StringIO(), io.StringIO()  # two buffers: the config read, then the GitHub reads (a rate-limit wait says so)
         try:
             with contextlib.redirect_stdout(config_says):
                 h = root_host(r, hosts, config)
+            if h.repo.lower() != name.lower():  # a report line, not a refusal: the run goes on to the other roots
+                lines.append(f"repo {name}: unknown (the checkout at {r} is {h.repo}, not {name})")
+                lines += config_says.getvalue().splitlines()
+                ok = False
+                continue
             with contextlib.redirect_stdout(read_says):
                 block, block_ok = reviewed_block(h)
             ok = ok and block_ok
         except Stop as e:
-            block, ok = [f"repo {r}: unknown ({' '.join(str(e).split())})"], False
+            block, ok = [f"repo {name}: unknown ({' '.join(str(e).split())})"], False
         lines += [*block, *config_says.getvalue().splitlines(), *read_says.getvalue().splitlines()]
     return lines, ok
 
@@ -3408,7 +3424,7 @@ def main(argv, host=None, lock=None, hosts=None):
     p.add_argument("--idle-lanes", action="store_true", help="list the lanes to archive from the roadmap's live file; takes no lock, merges and posts nothing")
     p.add_argument("--live", default=None, metavar="FILE", help="with --idle-lanes: the publisher's live-work file")
     p.add_argument("--reviewed", action="store_true", help="list the open pull requests with their review record state and live CI")
-    p.add_argument("--root", action="append", default=[], metavar="DIR", help="with --reviewed: a repo checkout to list, in place of the working directory's; repeat it for each repo")
+    p.add_argument("--root", action="append", default=[], type=root_arg, metavar="OWNER/NAME=DIR", help="with --reviewed: a repo checkout to list, in place of the working directory's; OWNER/NAME is the repo it must be; repeat it for each repo")
     p.add_argument("--review-record", action="store_true", help="print the review record for the pull request's live head (posts nothing)")
     p.add_argument("--head", type=head_arg, metavar="SHA", help="with --review-record: the 40-hex head the review read; the live head must equal it")
     p.add_argument("--kind", choices=REVIEW_KINDS, help="with --review-record: the kind of change")

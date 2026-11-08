@@ -96,6 +96,9 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        ready PR on the base runs CI, or when the read could not run. `--auto` too.
   merge-role-proof     deny. A merge-tool call with a role flag whose tier the session's own get_session
                        record (read from the transcript) does not show in its cs-build tags.
+  merge-roots-cover    deny. A batch runner's `merge --reviewed --root` whose OWNER/NAME roots are not exactly
+                       the repos its own get_session record (read from the transcript) tags cs-repo; the reason
+                       names each missing and extra repo. No readable own record refuses too.
   roadmap-one-writer   deny. A `git push`, also one inside `bash -c`, `sh -c` or `eval`, whose destination is
                        the checkout's record branch (lint/layout.py record_branch) or `roadmap`, except a
                        dry run, unless the session's own get_session record (read
@@ -379,8 +382,8 @@ while True:
         _loading = "guard_merge"
         from guard_merge import (
             BARE_MERGE_REASON, CONFLICT_MARKERS_CHAIN_REASON, CONFLICT_MARKERS_PUSH_REASON, CONFLICT_MARKERS_REASON,
-            DRAFT_PR_REASON, MERGE_TOOLS, RECORDS_PAGE_REASON, ROLE_REASON,
-            conflict_markers_hit, gh_call_of, git_call_of, merge_call_of, merge_check, merge_check_reason, record_writer_hit, records_page_hit, role_proof_hit,
+            DRAFT_PR_REASON, MERGE_TOOLS, RECORDS_PAGE_REASON, ROLE_REASON, ROOTS_REASON, ROOTS_REMEDY,
+            conflict_markers_hit, gh_call_of, git_call_of, merge_call_of, merge_check, merge_check_reason, merge_roots_hit, record_writer_hit, records_page_hit, role_proof_hit,
             DEFAULT_RECORD_BRANCH, RECORD_REASON, settings_roots, TRUST_REASON, archive_hit, brief_hit, trust_card_hit,
             undrafted_pr_create, uses_merge_tool,
         )
@@ -3549,6 +3552,12 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
     matched = role_proof_hit(stripped, transcript)
     if matched:
         refuse(tool, "deny", "merge-role-proof", ROLE_REASON, matched)
+
+    # 6a1. A batch runner's `merge --reviewed --root` whose roots are not its own cs-repo tags (rule merge-roots-cover).
+    matched = merge_roots_hit(stripped, transcript)
+    if matched:
+        refuse(tool, "deny", "merge-roots-cover", ROOTS_REASON + " " + (
+            "Its own record cannot be read here: " + ROOTS_REMEDY + "." if matched == ROOTS_REMEDY else matched), "merge roots")
 
     # 6a2. A push to the record branch from a session its own record does not prove triage (rule
     # roadmap-one-writer). Cost: one `git rev-parse` and one small file read per push, and one

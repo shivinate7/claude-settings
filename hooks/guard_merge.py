@@ -807,11 +807,11 @@ ROLE_REASON = (
 )
 
 
-def role_call_of(segment: str):
-    """Return the tier word after the role flag when the segment runs the merge tool with it, else None.
+def merge_args_of(segment: str):
+    """Return the arguments after the command word when the segment runs the merge tool, else None.
 
     The command word is the shim (`merge`, `~/.claude/bin/merge`, `bin/merge`) or python on
-    `merge/merge.py` or `merge/launch.py`. A role flag with no value gives ''.
+    `merge/merge.py` or `merge/launch.py`; for python, the arguments follow the script.
     """
     tokens = segment_tokens(segment)
     if not tokens:
@@ -826,8 +826,15 @@ def role_call_of(segment: str):
         if script is None or basename(script) not in ("merge.py", "launch.py") \
                 or basename(os.path.dirname(script.replace("\\", "/"))) != "merge":
             return None
-        rest = rest[rest.index(script) + 1:]
-    elif word != "merge":
+        return rest[rest.index(script) + 1:]
+    return rest if word == "merge" else None
+
+
+def role_call_of(segment: str):
+    """Return the tier word after the role flag when the segment runs the merge tool with it, else None.
+    A role flag with no value gives ''."""
+    rest = merge_args_of(segment)
+    if rest is None:
         return None
     for at, arg in enumerate(rest):
         if arg == "--role":
@@ -867,6 +874,60 @@ def role_proof_hit(stripped: str, transcript: str) -> str:
         except Exception:
             pass
         return "merge role " + tier
+    return ""
+
+
+# ---- merge --reviewed --root: the batch runner's roots are its own cs-repo tags (rule merge-roots-cover)
+ROOTS_REASON = (
+    "a batch runner's `merge --reviewed --root` must name exactly the repos its own get_session record tags "
+    "cs-repo, one --root OWNER/NAME=DIR each, so it never forgets or adds a repo "
+    "(decision session-tiers, the batch runner owns the repos in its cs-repo tags)."
+)
+ROOTS_REMEDY = "run get_session (no argument) alone in its own turn, then retry"
+_ROOT_REPO_NAME = re.compile(r"[\w.-]+/[\w.-]+", re.ASCII)
+
+
+def _root_names(rest):
+    """The OWNER/NAME of each `--root OWNER/NAME=DIR` (or `--root=...`) in a merge call's arguments."""
+    names = []
+    for at, arg in enumerate(rest):
+        value = None
+        if arg == "--root":
+            value = rest[at + 1] if at + 1 < len(rest) else ""
+        elif arg.startswith("--root="):
+            value = arg[len("--root="):]
+        if value is not None:
+            names.append(value.split("=", 1)[0])
+    return names
+
+
+def merge_roots_hit(stripped: str, transcript: str) -> str:
+    """Return the reason detail when a segment runs `merge --reviewed` with `--root` and the roots do not equal the repos
+    the own get_session record tags cs-repo, else ''. Only a batch runner's record is compared; a record that is not one's
+    allows. No readable own record gives ROOTS_REMEDY. A call with no `--root`, or with no `--reviewed`, is not this rule's.
+    Fails closed inside the clause, like role_proof_hit: the guard-wide crash path fails open."""
+    for segment in split_segments(stripped):
+        rest = merge_args_of(segment) if segment.strip() else None
+        if rest is None or "--reviewed" not in rest or not any(a == "--root" or a.startswith("--root=") for a in rest):
+            continue
+        try:  # cost: one transcript read, only on a --reviewed call with --root
+            from override import remote_session_id
+            from shared_names import REPO_TAG, repo_tag_names
+            names = _root_names(rest)
+            own_id = remote_session_id()
+            tags = _own_get_session_tags(transcript, own_id) if own_id and transcript else None
+            if not isinstance(tags, (list, tuple)):
+                return ROOTS_REMEDY
+            if ROLE_TAG_PREFIX + "batch-runner" not in tags:
+                continue
+            tagged = [t[len(REPO_TAG):] for t in tags
+                      if isinstance(t, str) and t.startswith(REPO_TAG) and _ROOT_REPO_NAME.fullmatch(t[len(REPO_TAG):])]
+            missing = [t for t in tagged if not any(repo_tag_names(REPO_TAG + t, n) for n in names)]
+            extra = [n for n in names if not any(repo_tag_names(tag, n) for tag in tags)]
+        except Exception:
+            return ROOTS_REMEDY
+        if missing or extra:
+            return "Missing: " + (", ".join(missing) or "none") + ". Extra: " + (", ".join(extra) or "none") + "."
     return ""
 
 
