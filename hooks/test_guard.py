@@ -12115,6 +12115,9 @@ sh("frozen shell: output-flag control, echo --output= names the config settings 
    "echo --output=" + CFG_SETTINGS, "allow", cwd=NOGIT)
 sh("frozen shell: output-flag control, jq -o x reads the config settings, allows",
    "jq -o x " + CFG_SETTINGS, "allow", cwd=NOGIT)
+# `>&` onto a file writes it, as `>` does. The config settings are frozen, so a `>&` onto them is refused, as `>` is.
+sh("frozen shell: >& redirect of head onto the config settings, denies",
+   "head -n1 src/x >& " + CFG_SETTINGS, "deny", "frozen-path", cwd=NOGIT)
 sh("frozen shell: r2, a PowerShell iex inside Write-Output runs a Set-Content on the config settings, "
    "denies [r2 red]",
    "Write-Output (iex \"Set-Content -Path " + CFG_SETTINGS + " -Value x\")", "deny", "frozen-path",
@@ -13677,6 +13680,12 @@ sh("builder-test: shell, quote control, sed e command runs echo of a quoted a & 
    "sed \"e echo 'a & b'\" src/app.py", "allow", **BR)
 sh("builder-test: shell, quote control, sed e command runs echo of a quoted a & tee tests/x, no -i, on src/app.py, is allowed",
    "sed \"e echo 'a & tee tests/x'\" src/app.py", "allow", **BR)
+# `>&` onto a file writes that file, as `&>` does: bash sends stdout and stderr into it. A plain `>` to a test is
+# refused, so a `>&` to one must be refused too, in a sed e command and in the shell.
+sh("builder-test: shell write, >& to tests/test_a.py after head in a sed e command, no -i, on src/app.py, is refused",
+   "sed 'e head -n1 src/x >& tests/test_a.py' src/app.py", "deny", rule=BT, carries=("test-author",), **BR)
+sh("builder-test: shell write, >& to tests/test_a.py after head, is refused",
+   "head -n1 src/x >& tests/test_a.py", "deny", rule=BT, carries=("test-author",), **BR)
 # r5 gap: an output flag of a reader or of git diff writes the file it names, as sort -o does. less -o and
 # less --log-file copy the input into the named file, and git diff --output writes the diff into it. Each
 # names a test, so each is refused. The controls name a product file or /tmp, and are allowed.
