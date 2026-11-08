@@ -26,9 +26,8 @@
 //   So a touch shot with fullPage is stitched: one viewport screenshot per tile, scrolled to each, joined in a canvas on a second page of
 //   the same browser. Tiles cover the root element's scroll width and height. A page that scrolls its body, not its root, gets a
 //   smaller PNG than a plain full-page capture.
-//   Tiles after the first hide position:fixed elements, so each shows once, at its first-tile place. A fixed pseudo-element or a
-//   fixed background still repeats on each tile. Sticky elements
-//   sit in the flow and the root does not scroll-snap, for the whole stitch. A canvas Chromium cannot read back fails that shot.
+//   Tiles after the first hide position:fixed elements and fixed ::before and ::after, so each shows once, at its first-tile place.
+//   For the whole stitch, sticky elements sit in the flow, fixed backgrounds scroll, and the root does not scroll-snap. A canvas Chromium cannot read back fails that shot.
 //   A desktop width takes the plain full-page capture.
 // Cost: one browser process per run, closed at exit. Two files per shot (PNG and HTML). A stitched shot adds one screenshot per viewport tile
 //   (columns across the scroll width times rows down the scroll height) and one extra page for the join. No daemon, no watcher.
@@ -159,29 +158,59 @@ function isBlank(buf) {
   return true;
 }
 
-// Runs in the page: for the whole stitch, sticky elements sit in the flow (a sticky one would otherwise jump per tile) and the
-// root does not snap (a snap point would move a tile off its scroll offset). on false restores the inline values.
+// Runs in the page: for the whole stitch, sticky elements sit in the flow (a sticky one would otherwise jump per tile), as
+// position:relative with no offsets, not static, so an absolute child keeps the element as its containing block. A fixed
+// background scrolls with its element (a fixed one would repaint at each tile's viewport). The root does not snap (a snap point
+// would move a tile off its scroll offset). on false restores the inline values, each with its priority.
 function settleForStitch(on) {
   const root = document.documentElement;
   if (on) { if (root.__shootSnap === undefined) root.__shootSnap = root.style.scrollSnapType; root.style.scrollSnapType = "none"; }
   else if (root.__shootSnap !== undefined) { root.style.scrollSnapType = root.__shootSnap; delete root.__shootSnap; }
+  const names = ["position", "top", "right", "bottom", "left", "background-attachment"];
+  const set = (el, prop, value) => {
+    if (el.__shootInline === undefined) el.__shootInline = {};
+    if (!(prop in el.__shootInline)) el.__shootInline[prop] = [el.style.getPropertyValue(prop), el.style.getPropertyPriority(prop)];
+    el.style.setProperty(prop, value, "important");
+  };
   for (const el of document.querySelectorAll("*")) {
     if (on) {
-      if (getComputedStyle(el).position !== "sticky") continue;
-      if (el.__shootPos === undefined) el.__shootPos = el.style.position;
-      el.style.position = "static";
-    } else if (el.__shootPos !== undefined) { el.style.position = el.__shootPos; delete el.__shootPos; }
+      const cs = getComputedStyle(el);
+      if (cs.position === "sticky") {
+        set(el, "position", "relative");
+        for (const side of ["top", "right", "bottom", "left"]) set(el, side, "auto");
+      }
+      if (cs.backgroundAttachment.includes("fixed")) set(el, "background-attachment", "scroll");
+    } else if (el.__shootInline !== undefined) {
+      for (const prop of names) if (prop in el.__shootInline) el.style.setProperty(prop, ...el.__shootInline[prop]);
+      delete el.__shootInline;
+    }
   }
 }
 
-// Runs in the page: hide (or restore) each fixed element, so a tile after the first repeats none of them.
+// Runs in the page: hide (or restore) each fixed element and each fixed ::before or ::after, so a tile after the first repeats
+// none of them. A pseudo-element has no inline style, so its host carries a mark and one style element hides the marked ones.
 function hideFixed(on) {
+  const sides = ["before", "after"];
+  const styleId = "shoot-fixed-pseudo-style";
   for (const el of document.querySelectorAll("*")) {
     if (on) {
-      if (getComputedStyle(el).position !== "fixed") continue;
-      if (el.__shootVis === undefined) el.__shootVis = el.style.visibility;
-      el.style.visibility = "hidden";
-    } else if (el.__shootVis !== undefined) { el.style.visibility = el.__shootVis; delete el.__shootVis; }
+      if (getComputedStyle(el).position === "fixed") {
+        if (el.__shootVis === undefined) el.__shootVis = el.style.visibility;
+        el.style.visibility = "hidden";
+      }
+      for (const s of sides) if (getComputedStyle(el, "::" + s).position === "fixed") el.setAttribute("data-shoot-fixed-" + s, "");
+    } else {
+      if (el.__shootVis !== undefined) { el.style.visibility = el.__shootVis; delete el.__shootVis; }
+      for (const s of sides) el.removeAttribute("data-shoot-fixed-" + s);
+    }
+  }
+  const old = document.getElementById(styleId);
+  if (old) old.remove();
+  if (on) {
+    const style = document.createElement("style");
+    style.id = styleId;
+    style.textContent = sides.map((s) => `[data-shoot-fixed-${s}]::${s}{visibility:hidden!important}`).join("");
+    document.head.appendChild(style);
   }
 }
 
