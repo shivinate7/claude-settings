@@ -83,8 +83,9 @@ demand; the current reply counts by its blockquote. A bare `Recovered:` takes th
 its items; with nothing below, it is missing. While the Recovered demand is pending, each item of
 the current Recovered line (split on ";" outside parentheses) names a source, matched ignoring case: git,
 page or digest as whole words, `commit <hex>`, `commits <hex>` or `sha <hex>` (7-40 hex characters with a digit;
-a colon or a backtick pair may sit between), `PR <n>`, `PR #<n>`, `PR#<n>`, `pull request #<n>`, `pull #<n>`,
-`issue #<n>` (`issue` needs the `#`), or a github.com URL; the space before `#` is optional; a bare `#<n>` is no source. An item that starts with "none" or "nothing" needs no source. The demand holds on landed turns and unlanded turns
+a colon or a backtick pair may sit between), `PR #<n>`, `PR#<n>`, `pull request #<n>`, `pull #<n>`,
+`issue #<n>` (`issue` needs the `#`), or a github.com URL; the space before `#` is optional; a bare `#<n>` is no source,
+and a PR with no `#` (`PR 3`) is no source even beside git, page or digest. An item that starts with "none" or "nothing" needs no source. The demand holds on landed turns and unlanded turns
 whose reply has the report shape, and in the rewrite after a missing-report block when the rewrite
 has the report shape. Cost: a scan of the records main()
 already loaded (the rewrite reads the transcript once, as before); no file, log or process.
@@ -787,11 +788,16 @@ CARRY_LINES = (
     ("Handoff gave", re.compile(CARRY_START + r"handoff gave(?:\*\*)?:", re.I | re.M)),
 )
 # A source word or form, matched ignoring case: git, page, digest, `commit <hex>`, `commits <hex>` or `sha <hex>` (a
-# colon or a backtick pair may sit between), `PR <n>`, `PR #<n>`, `PR#<n>`, `pull request #<n>`, `pull #<n>`,
+# colon or a backtick pair may sit between), `PR #<n>`, `PR#<n>`, `pull request #<n>`, `pull #<n>`,
 # `issue #<n>` (`issue` needs the `#`), a github.com link. A space before `#` is optional (`pull#1`). A bare `#<n>` is no source. The hex has 7 to 40 characters and holds
 # a digit, so a word such as "commit defaced" names no source.
-SOURCE_RE = re.compile(r"\b(?:git|page|digest)\b|\b(?:commits?|sha)(?::\s*|\s+)`?(?=[0-9a-f]*\d)[0-9a-f]{7,40}\b"
-                       r"|\bPR\s*#?\d+\b|\bissue\s*#\d+\b|\bpull(?:\s+request)?\s*#\d+\b|\bgithub\.com/\S", re.I)
+# A PR with no `#` is no source, and the word beside it (git, page, digest) does not rescue it (see
+# item_names_source): "PR 978", "PR978", "PR-978", "PR: 978", "PR number 978", "PR no. 978", "PRs 978", "pull 978",
+# "pull request 978", "pull requests 978".
+SOURCE_WORD_RE = re.compile(r"\b(?:git|page|digest)\b", re.I)
+SOURCE_FORM_RE = re.compile(r"\b(?:commits?|sha)(?::\s*|\s+)`?(?=[0-9a-f]*\d)[0-9a-f]{7,40}\b"
+                            r"|\bPR\s*#\d+\b|\bissue\s*#\d+\b|\bpull(?:\s+request)?\s*#\d+\b|\bgithub\.com/\S", re.I)
+BARE_PR_RE = re.compile(r"\b(?:PRs?|pull(?:\s+requests?)?)(?:\s*[-:]?\s*|\s+(?:number|no\.?)\s+)\d", re.I)
 NONE_ITEM_RE = re.compile(r"(?:none|nothing)\b", re.I)
 
 
@@ -864,12 +870,19 @@ def carry_present(name, text):
     return bool(dict(CARRY_LINES)[name].search(text))
 
 
+def item_names_source(item):
+    """Whether a Recovered item names a source: a source form, or a source word unless the item cites a PR with no `#`."""
+    if SOURCE_FORM_RE.search(item):
+        return True
+    return not BARE_PR_RE.search(item) and bool(SOURCE_WORD_RE.search(item))
+
+
 def unsourced_recovered_item(block):
-    """The first item of a Recovered line in `block` that names no source (see SOURCE_RE), else ''.
+    """The first item of a Recovered line in `block` that names no source (see item_names_source), whole, else ''.
     An item that starts with "none" or "nothing" needs no source."""
     for item in recovered_items(block) or []:
-        if not NONE_ITEM_RE.match(item) and not SOURCE_RE.search(item):
-            return item[:60]
+        if not NONE_ITEM_RE.match(item) and not item_names_source(item):
+            return item
     return ""
 
 
@@ -907,8 +920,10 @@ def recovered_problem(records, text):
         reasons.append("a compaction came before this report and no %s line has landed since" %
                        " or ".join(missing))
     bad = unsourced_recovered_item(block) if "Recovered" in pending else ""
-    if bad:
-        reasons.append("the Recovered item %r names no source (git, page or digest)" % bad)
+    if bad and BARE_PR_RE.search(bad):  # the whole item: a PR past the 60 quoted characters still names the fix
+        reasons.append("the Recovered item %r names a PR with no #, which is no source (the form is PR #<n>)" % bad[:60])
+    elif bad:
+        reasons.append("the Recovered item %r names no source (git, page or digest)" % bad[:60])
     return owner_line("Recovered guard", "; ".join(reasons)) if reasons else ""
 
 
