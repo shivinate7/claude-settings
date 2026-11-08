@@ -108,3 +108,4 @@ Checked Nov 2 12:58 CST: none of these is in docs/debts/notes.md on main. Triage
 - diff-failed-shallow-wording (lane ste-lint-fetch-base, #2270): diff_failed still says "shallow clone" after a full fetch of unrelated history.
 - tag-base-ref-unknown (lane ste-lint-fetch-base, #2270): a tag BASE_REF reads as UNKNOWN.
 - scope-all-ls-files-exit (lane ste-lint-fetch-base, from #2262; #1330 has a finding plus an unread case): `scope all` drops git ls-files' exit code.
+- pr-body-powershell-session-unmeasured (lane pr-body-placeholder-check): unmeasured whether a PowerShell call keeps variables from an earlier call.
