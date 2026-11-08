@@ -12276,6 +12276,28 @@ sh("frozen form: python -c that opens a frozen hook through a %-format of expand
    "python3 -c 'import os; home = os.path.expanduser(\"~\"); open(\"%s/.claude/hooks/x.py\" % home, \"w\")'",
    "deny", "frozen-path", cwd=NOGIT, env=TILDE_ENV)
 
+# BUILT PATHS THE SCANNER DID NOT JOIN. The home directory `h` is built with expanduser("~"), as the rows
+# above build it. Each write then joins `.claude/hooks` to `h` in a form the scanner did not read: a
+# str.format, a "/".join of a list, an os.path.join that takes its parts with *, a pathlib /= on a Path,
+# or a + then += on a bound string. Each is a write to a new file in the frozen hooks folder, so each is denied.
+sh("frozen form gap: python -c that opens a frozen hook joined by str.format is denied",
+   "python3 -c 'import os; h = os.path.expanduser(\"~\"); open(\"{}/.claude/hooks/x.py\".format(h), \"w\")'",
+   "deny", "frozen-path", cwd=NOGIT, env=TILDE_ENV)
+sh("frozen form gap: python -c that opens a frozen hook joined by a list and str.join is denied",
+   "python3 -c 'import os; h = os.path.expanduser(\"~\"); "
+   "open(\"/\".join([h, \".claude\", \"hooks\", \"x.py\"]), \"w\")'",
+   "deny", "frozen-path", cwd=NOGIT, env=TILDE_ENV)
+sh("frozen form gap: python -c that opens a frozen hook joined by os.path.join with star args is denied",
+   "python3 -c 'import os; h = os.path.expanduser(\"~\"); "
+   "open(os.path.join(*[h, \".claude\", \"hooks\", \"x.py\"]), \"w\")'", "deny", "frozen-path",
+   cwd=NOGIT, env=TILDE_ENV)
+sh("frozen form gap: python -c that writes a frozen hook through a pathlib join with /= is denied",
+   "python3 -c 'import os; from pathlib import Path; h = os.path.expanduser(\"~\"); p = Path(h) / \".claude\"; "
+   "p /= \"hooks/x.py\"; p.write_text(\"x\")'", "deny", "frozen-path", cwd=NOGIT, env=TILDE_ENV)
+sh("frozen form gap: python -c that opens a frozen hook joined by a bound + then += is denied",
+   "python3 -c 'import os; h = os.path.expanduser(\"~\"); p = h + \"/.claude\"; p += \"/hooks/x.py\"; "
+   "open(p, \"w\")'", "deny", "frozen-path", cwd=NOGIT, env=TILDE_ENV)
+
 # FALSE ALARMS. A frozen guard path that a script prints, names, runs as a subprocess argument, loads as a
 # module spec, compares, splits or relates is a read of that path, so each is allowed.
 sh("frozen form: python -c that prints the parent of a Path.home() join under .claude is allowed",
@@ -12295,6 +12317,22 @@ sh("frozen form: python -c that splits the extension of a frozen guard path is a
    "allow", cwd=NOGIT, env=TILDE_ENV)
 sh("frozen form: python -c that relates a frozen guard path to the cwd with relpath is allowed",
    "python3 -c 'import os; print(os.path.relpath(os.path.expanduser(\"~/.claude/hooks/guard.py\")))'",
+   "allow", cwd=NOGIT, env=TILDE_ENV)
+
+# FALSE ALARMS IN THE SAME SPELLINGS. A frozen path that a script hands to subprocess.run as an argument,
+# to py_compile, or to a name a later line rebinds, is read or names a file it does not open for write.
+# Each row is allowed.
+sh("frozen form gap: python -c that runs diff on a frozen guard path through subprocess is allowed",
+   "python3 -c 'import subprocess; subprocess.run([\"diff\", \"~/.claude/hooks/guard.py\", \"/tmp/a\"])'",
+   "allow", cwd=NOGIT, env=TILDE_ENV)
+sh("frozen form gap: python -c that runs cat on a frozen settings path through subprocess is allowed",
+   "python3 -c 'import subprocess; subprocess.run([\"cat\", \"~/.claude/settings.json\"])'",
+   "allow", cwd=NOGIT, env=TILDE_ENV)
+sh("frozen form gap: python -c that compiles a frozen guard path with py_compile is allowed",
+   "python3 -c 'import py_compile; py_compile.compile(\"~/.claude/hooks/guard.py\")'",
+   "allow", cwd=NOGIT, env=TILDE_ENV)
+sh("frozen form gap: python -c that reads a frozen settings path by a bound name, then rebinds it, is allowed",
+   "python3 -c 'import json; p = \"~/.claude/settings.json\"; json.load(open(p)); p = \"/tmp/o\"; open(p, \"w\")'",
    "allow", cwd=NOGIT, env=TILDE_ENV)
 
 # --------------------------------------------------------------------------- frozen dup: a descriptor dup
