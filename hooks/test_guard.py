@@ -7648,6 +7648,81 @@ for _command in ("rm -rf ..&", "rm -rf ..>x", "rm -rf .>/dev/null"):
     rm_parent("known open: " + _command, _command, "allow")
 
 
+# ARCHIVE GATES DELETE. Rule archive-gates-delete (CLAUDE.md, shared-trees-archive-then-delete): a branch is
+# lossless to delete only once its archive push has succeeded. Incident 2026-11-07: the archive pushes
+# failed (zsh read `$b:r` as a filename modifier), `| tail` hid each failure, and the delete after them
+# removed six branches on GitHub with no archive copy. A delete is judged against the nearest earlier
+# archive push of its branch. It may run only when that push's failure stops the chain first: `&&`, `set -e`
+# with no pipe, `set -euo pipefail` (pipefail makes a pipe report the push's status), `|| exit`, `|| return`,
+# `|| continue`, `|| break`, or the condition of an `if`.
+GATE_RULE = "archive-gates-delete"
+ZSH_RULE = "zsh-var-modifier"
+
+# THE FENCE. A delete with no archive push of its branch keeps today's verdict: allow, and silent.
+sh("archive gate fence: a bare delete with no archive push is allowed", VCS + " push origin --delete b",
+   "allow", cwd=PUSHFEAT, silent=True)
+sh("archive gate fence: a colon-refspec delete with no archive push is allowed", VCS + " push origin :b",
+   "allow", cwd=PUSHFEAT, silent=True)
+
+# REFUSED. The archive push can fail and the delete still runs: a pipe hides the push's status, `;` and a
+# newline do not wait, and `||` runs the delete only after the push has failed.
+sh("archive gate: a pipe to tail hides the failed archive push, the delete is refused",
+   VCS + " push origin b:archive/b | tail -1; " + VCS + " push origin --delete b", "deny", GATE_RULE,
+   cwd=PUSHFEAT)
+sh("archive gate: a semicolon does not wait for the archive push, the delete is refused",
+   VCS + " push origin b:archive/b; " + VCS + " push origin --delete b", "deny", GATE_RULE, cwd=PUSHFEAT)
+sh("archive gate: || runs the delete after a failed archive push, the delete is refused",
+   VCS + " push origin b:archive/b || " + VCS + " push origin --delete b", "deny", GATE_RULE, cwd=PUSHFEAT)
+sh("archive gate: a for loop with a semicolon between the pushes is refused",
+   'for b in x y; do ' + VCS + ' push origin "${b}:archive/${b}"; ' + VCS + ' push origin --delete "${b}"; done',
+   "deny", GATE_RULE, cwd=PUSHFEAT)
+sh("archive gate: a newline between the archive push and the colon delete is refused",
+   VCS + " push origin b:refs/heads/archive/b\n" + VCS + " push origin :b", "deny", GATE_RULE, cwd=PUSHFEAT)
+sh("archive gate: set -e does not stop a pipe, the delete is refused",
+   "set -e; " + VCS + " push origin b:archive/b | tail -1; " + VCS + " push origin --delete b",
+   "deny", GATE_RULE, cwd=PUSHFEAT)
+sh("archive gate: pipefail alone does not stop the delete, the delete is refused",
+   "set -o pipefail; " + VCS + " push origin b:archive/b | tail -1; " + VCS + " push origin --delete b",
+   "deny", GATE_RULE, cwd=PUSHFEAT)
+
+# REFUSED, zsh. In zsh an unbraced `$name:` followed by a letter takes a filename modifier (zsh manual,
+# Parameter Expansion, Modifiers: `:a`, `:r`, `:e` and the rest), so `$b:archive/` or `$b:refs/` changes the
+# word the push sends. Unmeasured here: the container has no zsh. A brace ends the name, so `${b}:archive`
+# carries no modifier.
+sh("zsh modifier: $b:archive in a push word is refused",
+   VCS + " push origin $b:archive/$b && " + VCS + " push origin --delete $b", "deny", ZSH_RULE, cwd=PUSHFEAT)
+sh("zsh modifier: the incident form, $b:refs in a push word, is refused",
+   VCS + " push origin $b:refs/heads/archive/$b && " + VCS + " push origin --delete $b", "deny", ZSH_RULE,
+   cwd=PUSHFEAT)
+
+# SILENT. Each form stops the delete when the archive push fails, so the gate has nothing to say.
+sh("archive gate: && runs the delete only after the archive push succeeds, silent",
+   VCS + " push origin b:archive/b && " + VCS + " push origin --delete b", "allow", cwd=PUSHFEAT,
+   silent=True)
+sh("archive gate: a for loop with && between the pushes and braced names is silent",
+   'for b in x y; do ' + VCS + ' push origin "${b}:archive/${b}" && ' + VCS + ' push origin --delete "${b}"; done',
+   "allow", cwd=PUSHFEAT, silent=True)
+sh("archive gate: set -e stops at a failed archive push, silent",
+   "set -e; " + VCS + " push origin b:archive/b; " + VCS + " push origin --delete b", "allow", cwd=PUSHFEAT,
+   silent=True)
+sh("archive gate: set -euo pipefail stops at a failed piped archive push, silent",
+   "set -euo pipefail; " + VCS + " push origin b:archive/b | tail -1; " + VCS + " push origin --delete b",
+   "allow", cwd=PUSHFEAT, silent=True)
+for _exit in ("exit 1", "return", "continue", "break"):
+    sh("archive gate: || " + _exit + " stops the chain before the delete, silent",
+       VCS + " push origin b:archive/b || " + _exit + "; " + VCS + " push origin --delete b",
+       "allow", cwd=PUSHFEAT, silent=True)
+sh("archive gate: an if holds the archive push, the delete is in the then branch, silent",
+   "if " + VCS + " push origin b:archive/b; then " + VCS + " push origin --delete b; fi", "allow", cwd=PUSHFEAT,
+   silent=True)
+sh("archive gate: each delete pairs with the nearest earlier archive push, silent",
+   VCS + " push origin a:archive/a && " + VCS + " push origin --delete a; " + VCS + " push origin c:archive/c && "
+   + VCS + " push origin --delete c", "allow", cwd=PUSHFEAT, silent=True)
+sh("archive gate: a braced ${b} gives no zsh modifier, silent",
+   VCS + " push origin ${b}:archive/${b} && " + VCS + " push origin --delete ${b}", "allow", cwd=PUSHFEAT,
+   silent=True)
+
+
 # =========================================================================== 3b. linked node_modules
 # q_max links a worktree's node_modules to main's install with a Windows junction. Through that link a
 # hand-run `npm ci` empties main's node_modules (measured on npm 12.0.2). The guard refuses a
