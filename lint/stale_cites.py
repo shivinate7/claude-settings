@@ -154,11 +154,6 @@ def resolves(rev):
     return done.returncode == 0
 
 
-def head_resolves(head):
-    """The name ResolveTests still pins; it is `resolves`."""
-    return resolves(head)
-
-
 # A first-parent suffix: `~`, `^`, `~1`, `^1`, also zero-padded (`~01`). `~0` and `^0` name the commit itself: no match.
 FIRST_PARENT_SUFFIX = re.compile(r"\A(.+?)[~^](?:0*1)?\Z")
 
