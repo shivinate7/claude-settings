@@ -2184,3 +2184,7 @@
 - load-sections-skips-non-py-silently: `load_sections` in `hooks/test_guard.py` skips non-.py files with no message. Found in PR 2635. Decision: roles-findings-are-debts-or-notes.
 - tests-for-silent-empty: `tests_for_main` in `hooks/mutate_guard.py` prints nothing on a runner parse error or a non-static SECTION_DIR. Found in PR 2635. Decision: roles-findings-are-debts-or-notes.
 - scratchpad-rm-rf-unguarded: no guard refuses `rm -rf` on a scratchpad folder that another agent of the session wrote. A builder deleted one. Queued as a debt. Decision: scratchpad-owner (the pattern).
+- ruling-cite-pick-letter-unpinned: no case puts a letterless `item N` inside a claim form, so making the pick letter required again stays green (lint/test_check_red_run.py, pick-letter case). Decision: none.
+- ruling-cite-amend-remedy: when only the ruling rule fails, the remedy's `--amend -m <subject> -m "Ruling: ..."` drops the body and any `Red-run:` trailer, and the next run goes red (lint/check_red_run.py remedy lines). Decision: none.
+- ruling-cite-test-docstring: the test file's docstring still lists a bare `owner ruling` as a claim phrase (lint/test_check_red_run.py line 16). Decision: none.
+- ruling-cite-decision-path: a decision home in path form, `decision docs/decisions/<slug>.md`, is not checked against a file on disk, though the slug form is (lint/check_red_run.py). Decision: none.
