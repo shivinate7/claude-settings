@@ -1496,3 +1496,5 @@
 - ruling-cite-amend-remedy: when only the ruling rule fails, the remedy's `--amend -m <subject> -m "Ruling: ..."` drops the body and any `Red-run:` trailer, and the next run goes red (lint/check_red_run.py remedy lines). Decision: none.
 - ruling-cite-test-docstring: the test file's docstring still lists a bare `owner ruling` as a claim phrase (lint/test_check_red_run.py line 16). Decision: none.
 - ruling-cite-decision-path: a decision home in path form, `decision docs/decisions/<slug>.md`, is not checked against a file on disk, though the slug form is (lint/check_red_run.py). Decision: none.
+- ruling-check-hint-count: code-check counts each stdout line of the ruling-only check as a problem, so its hint lines inflate the count ("5 problems" for 2 commits) (actions/code-check/code_check.py `ruling_check`). Decision: none.
+- ruling-check-unknown-passes: code-check reads a ruling-only exit 2 (no base, shallow range) as no problems, as it does for the comment check (actions/code-check/code_check.py `ruling_check`). Decision: none.
