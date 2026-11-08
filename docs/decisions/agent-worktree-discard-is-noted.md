@@ -49,7 +49,8 @@ These discard forms join the rule: refused in a shared checkout, ask in a linked
   not the file extension, so `Makefile` and `tools/runner` count as `a.json` does. It reads the name
   only to skip an empty name and one that starts with `-` or `:`. A name that is both a branch and a
   file stays a branch, as git reads it. A clean file and a branch keep their answers. In a hand-made
-  worktree the call moves from allow to ask, as every discard form does. Incident: 2026-11-08 03:37
+  worktree the named-file allow stays (`names_only_files` and `one_place`, "Named files in a linked
+  worktree" above), and the call asks only when it holds a `cd`. Incident: 2026-11-08 03:37
   CST, with coordinator rulings at 04:38 and 05:16 CST. An agent-owned worktree keeps its named-file
   allow.
   - Cost: 0 git starts when no file of that name exists, 1 when it is a revision, 2 otherwise.

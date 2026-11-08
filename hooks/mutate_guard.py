@@ -160,6 +160,14 @@ MUTATIONS = [
      '    return any(line[:2] != "??" for line in lines)\n',
      '    return True\n', "guard",
      'per-file bare: checkout of an untracked extensionless file in the shared checkout allows'),
+    ("shared-tree: a revision read that gets no answer is no longer logged as subject-unread",
+     '    if rev is None:\n        guard_core.record("Bash", "noted", "subject-unread", "git checkout " + name)\n',
+     '    if rev is None:\n        pass\n', "guard",
+     'a bare checkout of a dirty file with no git on PATH is allowed and logged once as subject-unread'),
+    ("shared-tree: a status read that gets no answer is no longer logged as subject-unread",
+     '    if lines is None:\n        guard_core.record("Bash", "noted", "subject-unread", "git checkout " + name)\n',
+     '    if lines is None:\n        pass\n', "guard",
+     'a bare checkout of a dirty file whose status git cannot read is allowed and logged once as subject-unread'),
 
     # ---- rule 1's three new git forms: branch delete, worktree remove, worktree prune. Each
     # mutation breaks one arm of the state read the plan named as the safety hole in this rule.
