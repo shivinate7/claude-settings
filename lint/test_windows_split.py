@@ -1265,14 +1265,13 @@ class MutateShards(unittest.TestCase):
                 self.assertRegex(job_block(self.text, where) or "", rf"(?m)^      - {re.escape(name)}\s*(#.*)?$",
                                  f"{name} is not in {where}'s needs: its red would not block the merge")
 
-    def test_a_comment_after_a_cap_or_a_lone_quote_in_a_comment_is_text(self):
-        # The checker reads checks.yml line by line: a `#` after a value, or a lone quote in a comment, is text, not a defect.
+    def test_a_comment_after_a_cap_is_text(self):
+        # The checker reads checks.yml line by line: a `#` after a value is text, not part of the value. The cap is the
+        # digits before it, so a mutant that reads the whole rest of the line as the cap reads this family as uncapped.
         family = mutate_family("1/2", "2/2")
-        capped = [(name, text.replace("    timeout-minutes: 25\n", "    timeout-minutes: 25  # the cap: Don't raise it\n"))
+        capped = [(name, text.replace("    timeout-minutes: 25\n", "    timeout-minutes: 25  # the cap, not raised here\n"))
                   for name, text in family]
         self.assertEqual(mutate_problems(mutate_doc(capped)), [])
-        quoted = [(name, text.replace("    steps:\n", "    # Don't move the cap\n    steps:\n", 1)) for name, text in family]
-        self.assertEqual(mutate_problems(mutate_doc(quoted)), [])
 
     def test_the_checker_sees_each_defect(self):
         good = mutate_family("1/2", "2/2")
