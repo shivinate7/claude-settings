@@ -3042,6 +3042,52 @@ def ci_job_run(wt, *args, notes=None):
         return "unknown", [l.rstrip() for l in lines if l.startswith("unknown")] or [f"(no unknown line read; ci-job exit {c})"], log, True
     return "unknown", [f"ci-job exited {c}"], log, False
 
+LINT_SLOT_POLL = 0.25  # seconds between looks for a free slot
+
+def lint_slots():
+    """How many lane lints run ci-job at once on this machine: one per CPU. Measured at ~400 CPU-s per lint on 4 CPUs: N = CPUs
+    runs with no slowdown, 2 x CPUs doubles each lint's wall time and makes a load-sensitive test FAIL."""
+    return os.cpu_count() or 1
+
+def take_lint_slot():
+    """One free slot of lint_slots(), taken: an exclusive non-blocking OS lock on <config>/state/lane-lint-slots/slot-<i>.lock, which the
+    process's death frees. Polls until one is free, and prints one stderr line before the first wait. -> the open fd, or None when
+    the lock folder cannot be made or read (the lint then runs ungated, and says so on stderr). Cost: one lock file per slot, no process, no timer."""
+    import guard_core, shared_names  # hooks/, on sys.path from the top of this file
+    folder = os.path.join(shared_names.config_dir(), "state", "lane-lint-slots")
+    told = False
+    try:
+        os.makedirs(folder, exist_ok=True)
+        while True:
+            count = lint_slots()
+            for i in range(count):
+                fd = os.open(os.path.join(folder, f"slot-{i}.lock"), os.O_RDWR | os.O_CREAT, 0o666)
+                try:
+                    if guard_core.try_lock_fd(fd):
+                        return fd
+                except BaseException:
+                    os.close(fd)
+                    raise
+                os.close(fd)
+            if not told:
+                told = True
+                print(f"merge: waiting for a lane-lint slot ({count} of {count} held)", file=sys.stderr, flush=True)
+            time.sleep(LINT_SLOT_POLL)
+    except OSError as e:
+        print(f"merge: no lane-lint slot taken ({e}); the lint runs without one", file=sys.stderr, flush=True)
+        return None
+
+@contextlib.contextmanager
+def lint_slot():
+    """Hold a lane-lint slot for the body, freed on every exit. Only lane_lint's ci-job run takes one: the merge's own lint and the draft
+    step's ready checks may hold the merge lock and never wait for a slot (decision merge-lock)."""
+    fd = take_lint_slot()
+    try:
+        yield
+    finally:
+        if fd is not None:
+            os.close(fd)  # closing the fd frees the lock
+
 def lane_lint(root, target, host, base="", unknown_ok="", with_prs=()):
     """The lint a lane passes before its head goes to the batch runner (decision lanes-run-no-full-ci-job): `ci-job checks --lint --base origin/<base>`
     in a temporary detached worktree at the head, removed on every exit. Takes no lock; merges and pushes nothing. -> 0 on a pass, else raises Stop.
@@ -3082,7 +3128,8 @@ def lane_lint(root, target, host, base="", unknown_ok="", with_prs=()):
             fails += cross_fails
         if fails or stop:  # as on main, a counted FAIL or an unknown ends the run before the ci-job
             raise Stop("\n".join([*([f"the lint of {head[:9]} against {base} FAILs:", *fails] if fails else []), stop if stop else LANE_LINT_REMEDY]))
-        state, lines, log, liftable = ci_job_run(wt, "checks", "--lint", "--base", f"origin/{base}", notes=pin_notes)
+        with lint_slot():  # the bound of ci_job_run counts from here: the wait for a slot is outside it
+            state, lines, log, liftable = ci_job_run(wt, "checks", "--lint", "--base", f"origin/{base}", notes=pin_notes)
     finally:
         drop_worktree(root, tmp, wt)
     short = head[:9]
