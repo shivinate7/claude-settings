@@ -3764,7 +3764,7 @@ STANDING_ONCE_TEXT = "approved, always merge green PRs"
 
 def case_standing_grant_reason_names_the_once_bar():
     """When a standing word bars a `once:` home, the reason says so, and names the homes that fit a standing grant:
-    a ruling home or the page. Debt once-home-reason-silent-on-standing."""
+    a ruling home or the page."""
     mod = guard_module()
     line = "- fb-0958-1 [note] -> once:merge-green-prs"
     out = mod.problems(mod.parse(render_block(STANDING_ONCE_TEXT, items=(line,))), "")
