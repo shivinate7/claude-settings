@@ -20,6 +20,7 @@ Owner, 2026-10-15 12:00 CDT. The owner's words:
   - A fix check is a fresh reviewer that reads only the diff from the reviewed head to the new head (`git diff <reviewed-head>..<head>`). It confirms the diff fixes the named finding and adds nothing else.
   - PASS: the head merges on green, with no further round.
   - A filing-only diff passes too. It adds files under `docs/debts/` or adds lines to `docs/debts/notes.md`, and nothing else. The fix-check reviewer judges it; it passes only when the record's Findings is `<n>, this PR` (owner item 394 a, 2026-11-08 06:08 CST; record `pr-review-record`). The tool does not check it.
+  - A fix check never follows a fix check: `--fix-check` refuses unless the newest earlier record on the pull request has no Fix check line, so a later filing needs a full round record first (a second fix check is decided at owner page item 418, fix-checks-chain).
   - FAIL, or a diff wider than the finding: the fix starts a new lane at round 1.
   - FAIL also when the diff touches a guard or check path (the list below) while the review record says `Guard or check: no`. The merge tool reads no diff, so a wrong `no` would skip the net-value test (owner, 2026-11-05 07:45 CST, typed "go" in the lane).
   - A fix check is not a review round. It runs on the reviewer row of the model table (decision `agent-model-cap`), haiku. Its brief carries no `Round N of 3` marker, so no guard changes.
