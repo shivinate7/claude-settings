@@ -1339,6 +1339,18 @@ def task_with_options():
     return good_task_item(options=good_page_item()["options"])
 
 
+def task_without_steps():
+    """A task that sets 2 options and no `steps`: its kind alone keeps it out of the pick-of-one gate."""
+    item = task_with_options()
+    del item["steps"]
+    return item
+
+
+def steps_update_with_options():
+    """An update with `steps` and 2 options and no `kind`: its steps alone keep it out of the pick-of-one gate."""
+    return {"steps": [GOOD_TASK_STEP], "options": good_page_item()["options"]}
+
+
 def one_option_decision():
     """A decision that sets one option only: a single option is no choice, so it carries no tradeoff."""
     return good_page_item(options=good_page_item()["options"][:1])
@@ -1371,15 +1383,21 @@ def case_tradeoff_fixtures_pass_the_form():
                         ("a decision with ranked", ranked_decision())):
         got = question_form.item_hit("set", {"collection": PAGE_ITEMS, "doc_id": "p1", "data": item})
         check("tradeoff fixture: %s passes question_form.item_hit" % label, got == ("", ""), got)
+    got = question_form.item_hit("update", {"collection": PAGE_ITEMS, "doc_id": "p1",
+                                            "data": steps_update_with_options()})
+    check("tradeoff fixture: an update with steps and 2 options passes question_form.item_hit", got == ("", ""), got)
+    got = question_form.item_hit("set", {"collection": PAGE_ITEMS, "doc_id": "p1", "data": task_without_steps()})
+    check("tradeoff fixture: a task with 2 options and no steps passes question_form.item_hit", got == ("", ""), got)
     got = question_form.chat_hit(multiselect_box())
     check("tradeoff fixture: the multiSelect box passes question_form.chat_hit", got == ("", ""), got)
 
 
 def case_tradeoff_absent():
     # A context-only update, an update with empty options, a box whose only question has one option, an Agent spawn, a
-    # task with 2 options, a decision with one option, a decision with `multi`, a decision with `ranked` and no `multi`, a
-    # box whose only 2+ option question is multiSelect, and a str_replace on context never get TRADEOFF_RULE. Each absence
-    # first asserts that its call was made, so an early exit cannot pass it.
+    # task with 2 options, a task with 2 options and no steps, an update with steps and 2 options and no kind, a
+    # decision with one option, a decision with `multi`, a decision with `ranked` and no `multi`, a box whose only 2+
+    # option question is multiSelect, and a str_replace on context never get TRADEOFF_RULE. Each absence first asserts
+    # that its call was made, so an early exit cannot pass it.
     context = good_page_item()["context"]
     one = good_box()
     one["questions"][0].update(question="Ship it?", options=[{"label": "Yes", "description": "go"}])
@@ -1389,6 +1407,8 @@ def case_tradeoff_absent():
         ("a box whose only question has one option", question_input(box=one)),
         ("an Agent spawn", spawn_input("builder", model="sonnet")),
         ("a task with 2 options", page_input("set", task_with_options())),
+        ("a task with 2 options and no steps", page_input("set", task_without_steps())),
+        ("an update with steps and 2 options and no kind", page_input("update", steps_update_with_options())),
         ("a decision with one option", page_input("set", one_option_decision())),
         ("a decision with multi and 2 options", page_input("set", multi_decision())),
         ("a decision with ranked and 2 options", page_input("set", ranked_decision())),
@@ -1449,6 +1469,7 @@ def case_tradeoff_rule_text():
         ("names the page field `lose`", "`lose`"),
         ("names the box part Lose:", "Lose:"),
         ("says multi-select options are skipped", "multi"),
+        ("says tasks are skipped", "task"),
         ("says when unsure, allow", "When unsure, allow"),
     ):
         check("tradeoff text: the rule %s" % label, bool(rule) and phrase in rule,
