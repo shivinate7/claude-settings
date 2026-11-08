@@ -102,6 +102,7 @@ FAMILIES = {
     "lane-one-topic": "one lane, one topic: a send_message brief whose Topic differs from the lane's cs-topic, or names none, is refused; an older lane with no cs-topic is judged by its cs-step tags; a message without the marker passes unread",
     "review-record-after-round": "a lane's builder or test-author spawn, or its send_message, after a reviewer or design-reviewer spawn with no review record after it: the record marker from the merge tool, the transcript read, and its cost",
     "resume-finished-reviewer": "a SendMessage from the main session to a reviewer or design-reviewer spawn that has finished (a background finish notice, or a foreground result): the target resolved by agentId or spawn name, the latest spawn with that name wins; a result of unknown shape asks; an agent's send, a send to main, a name no spawn holds and a missing transcript are allowed",
+    "agent-name-on-spawn": "a lane's built-in SendMessage to a spawn by its agent id: refused when the spawn had a name, asked when it had none; a lane's Agent or Task spawn with no name, or an empty or blank name, is refused; a send to the name, to main or to an id no spawn holds, an agent's own call, a named spawn, the remote send_message, a session that is not a proved lane and a missing or unreadable transcript pass",
     "records-page": "a lane commit of the generated records page: refused unless the page is the base's",
     "conflict-markers": "a git commit or --continue judged on the index and the files its adds or paths name, and a git push judged on the net change it sends: all three markers in one file's added lines are refused; a blind step before a commit, with a push after it, is refused only when the commit covers a triplet already in the tree; a chain that makes a conflict is refused, and a clean, whitespace-only, unstaged or half-marked file is allowed",
     "cite": "cite by id",
@@ -10132,10 +10133,10 @@ def rr_path(name):
     return os.path.join(RR_DIR, name + ".jsonl")
 
 
-def rr_session(*parts):
-    """A lane's transcript: the owner's message, the lane's own get_session record (tags cs-build:lane), then the
-    records of each part in order. ROLE_ENV names the same session, so the rule reads it as a lane."""
-    return [RR_HUMAN] + role_call("g0", LANE_TAGS) + [line for part in parts for line in part]
+def rr_session(*parts, tags=LANE_TAGS):
+    """A lane's transcript: the owner's message, the session's own get_session record (tags `tags`, the lane's by
+    default), then the records of each part in order. ROLE_ENV names the same session, so the rule reads it as a lane."""
+    return [RR_HUMAN] + role_call("g0", tags) + [line for part in parts for line in part]
 
 
 def rr_spawn(tool_id, subagent_type, tool="Agent", name=None, result=None):
@@ -10693,6 +10694,168 @@ def rf_cost_case():
     if opened != 1:
         return False, "the transcript was opened %d time(s) by one SendMessage to a finished reviewer, want 1" % opened
     return True, "one SendMessage to a finished reviewer opens the transcript once, as a send to main does"
+
+
+# =========================================================================== 5k. agent name on spawn
+#
+# Rule agent-name-on-spawn. A lane messages its agents by the name it gave each at spawn, never by a bare agent id.
+# It is judged only for a proved lane (its own record tags cs-build:lane, _own_tier_proved in guard_merge.py):
+#   - a built-in SendMessage from the main session whose `to` is the agent id of a spawn that had a `name`: deny. The
+#     reason says to use the name given at spawn. One trailing ` [<ref>]` is stripped from `to` first;
+#   - the same send to a spawn with no `name`: ask, since no name can address that spawn;
+#   - an Agent or Task spawn from the main session with no `name`, or a name that is empty or only spaces: deny.
+# The rest passes: a send to the spawn's name, to main or to an id no spawn holds; a call with agent_id (an agent's
+# own); a named spawn; the remote send_message, which names sessions; a session that is not a proved lane; a missing
+# or unreadable transcript. Why: a lane sent three overlap lists to the wrong agents by bare id (2026-11-08).
+FAMILY = "agent-name-on-spawn"
+AN_RULE = "agent-name-on-spawn"
+AN_CARRIES = "name given at spawn"
+AN_MSG = "Overlap list for PR #12: rows 1 to 40."
+AN_PROMPT = "Build the overlap list for PR #12."
+AN_BUILDER = {"subagent_type": "builder", "prompt": AN_PROMPT, "model": "sonnet"}   # a spawn's input, no name
+AN_NAMED, AN_NAMED_AGENT = "overlap-a", "a553a8c1e9f0d427"  # a builder named at spawn; its id starts a553a8
+AN_REF = " [a553a8]"                                       # the ref SendMessage writes for that id
+AN_NAKED_AGENT = "a9c1e5f3d7b20468"                        # a builder spawned with no name
+AN_REV, AN_REV_AGENT = "overlap-rev", "a0d4b8e2f6c19573"   # a reviewer named at spawn, still running
+AN_UNKNOWN = "a1f0e9d8c7b6a590"                            # an agent id no spawn holds
+AN_PEER = "session_PEER01"                                 # the session a remote send_message names
+AN_DIR = os.path.join(ROOT, "agentname")
+
+
+def an_path(name):
+    return os.path.join(AN_DIR, name + ".jsonl")
+
+
+AN_NAMED_SPAWN = rf_launch("b1", "builder", AN_NAMED, AN_NAMED_AGENT)
+AN_NAKED_SPAWN = rr_spawn("b2", "builder", name=None, result=rf_launch_result("b2", AN_NAKED_AGENT))
+# The reviewer's round has its review record after the spawn, so review-record-after-round does not refuse first.
+AN_REV_SPAWN = rf_launch("r1", "reviewer", AN_REV, AN_REV_AGENT) + rr_comment("c1", rr_record())
+# A set_session_tags call that names this session after its record: the record no longer proves the lane's tag.
+AN_TAGS_AFTER = [role_use("t1", SET_SESSION_TAGS, {"session_ids": [ROLE_OWN], "add": ["cs-note:checked"]}),
+                 role_result("t1", '{"ok": true}')]
+AN_TRANSCRIPTS = {
+    "lane": rr_session(AN_NAMED_SPAWN, AN_NAKED_SPAWN),
+    "reviewer-recorded": rr_session(AN_REV_SPAWN),
+    "long": rr_session(AN_NAMED_SPAWN, RR_FILLER),   # the named spawn far up a transcript of about a megabyte
+    "empty": rr_session(),                           # no spawn at all: the empty state
+    "coordinator": rr_session(AN_NAMED_SPAWN, AN_NAKED_SPAWN, tags=COORD_TAGS),
+    "no-record": [RR_HUMAN] + AN_NAMED_SPAWN + AN_NAKED_SPAWN,   # no get_session record of the own session
+    "tags-after": rr_session(AN_NAMED_SPAWN, AN_NAKED_SPAWN, AN_TAGS_AFTER),
+}
+
+
+def write_an_transcripts():
+    write_transcripts(AN_TRANSCRIPTS, AN_DIR)
+    os.makedirs(an_path("unreadable"), exist_ok=True)   # a folder: the guard's open() fails on it
+
+
+# `missing` is never written: the guard's read of it fails, and the rule allows.
+lazy_fixture([an_path(name) for name in AN_TRANSCRIPTS] + [an_path("unreadable")], write_an_transcripts)
+
+
+def an_call(name, expected, tool, tool_input, transcript, rule=None, carries=(), lacks=(), env=ROLE_ENV,
+            silent=False, agent_id=None):
+    """Register one call the guard judges over `transcript`. add() takes its own `name` argument, so the call's input
+    is set on the case after it is made: an Agent spawn's `name` key is one of its input fields."""
+    add("agent-name-on-spawn: " + name, expected, rule=rule, tool=tool, cwd=NOGIT, transcript=transcript,
+        carries=carries, lacks=lacks, env=env, silent=silent, agent_id=agent_id)
+    CASES[-1]["tool_input"] = dict(tool_input)
+
+
+# Refused: a send to the agent id of a spawn that had a name. The reason names the rule and the name given at spawn, and
+# carries no agent id, since the remedy is the name.
+an_call("a bare agent id of a builder named at spawn is refused", "deny", RR_BUILTIN_SEND,
+        {"to": AN_NAMED_AGENT, "message": AN_MSG}, an_path("lane"), rule=AN_RULE, carries=AN_CARRIES,
+        lacks=AN_NAMED_AGENT)
+an_call("a bare agent id with the [ref] suffix of a builder named at spawn is refused", "deny", RR_BUILTIN_SEND,
+        {"to": AN_NAMED_AGENT + AN_REF, "message": AN_MSG}, an_path("lane"), rule=AN_RULE, carries=AN_CARRIES,
+        lacks=AN_NAMED_AGENT)
+an_call("a bare agent id of a reviewer named at spawn is refused, though its round has a record", "deny",
+        RR_BUILTIN_SEND, {"to": AN_REV_AGENT, "message": AN_MSG}, an_path("reviewer-recorded"), rule=AN_RULE,
+        carries=AN_CARRIES, lacks=AN_REV_AGENT)
+an_call("a bare agent id of a builder named at spawn, far up a full-size transcript, is refused", "deny",
+        RR_BUILTIN_SEND, {"to": AN_NAMED_AGENT, "message": AN_MSG}, an_path("long"), rule=AN_RULE,
+        carries=AN_CARRIES, lacks=AN_NAMED_AGENT)
+# Asked: a send to a spawn with no name, since no name can address it.
+an_call("a bare agent id of a builder with no name asks", "ask", RR_BUILTIN_SEND,
+        {"to": AN_NAKED_AGENT, "message": AN_MSG}, an_path("lane"), rule=AN_RULE)
+# Refused: an Agent or Task spawn from the main session with no name, or a name that is empty or only spaces.
+an_call("an Agent spawn with no name is refused", "deny", "Agent", dict(AN_BUILDER), an_path("empty"), rule=AN_RULE)
+an_call("an Agent spawn with an empty name is refused", "deny", "Agent", dict(AN_BUILDER, name=""),
+        an_path("empty"), rule=AN_RULE)
+an_call("an Agent spawn with a blank name is refused", "deny", "Agent", dict(AN_BUILDER, name="   "),
+        an_path("empty"), rule=AN_RULE)
+an_call("a Task spawn with no name is refused", "deny", "Task", dict(AN_BUILDER), an_path("empty"), rule=AN_RULE)
+an_call("a Task spawn with a blank name is refused", "deny", "Task", dict(AN_BUILDER, name="  "),
+        an_path("empty"), rule=AN_RULE)
+# Allowed (controls): a send to the spawn's name, to main or to an id no spawn holds; an agent's own call; a named spawn;
+# the remote send_message.
+an_call("a send to the name a builder was given at spawn is allowed (control)", "allow", RR_BUILTIN_SEND,
+        {"to": AN_NAMED, "message": AN_MSG}, an_path("lane"), silent=True)
+an_call("a send to main is allowed (control)", "allow", RR_BUILTIN_SEND, {"to": "main", "message": AN_MSG},
+        an_path("lane"), silent=True)
+an_call("a send to an id no spawn holds is allowed (control)", "allow", RR_BUILTIN_SEND,
+        {"to": AN_UNKNOWN, "message": AN_MSG}, an_path("lane"), silent=True)
+an_call("a send to an id no spawn holds, in a transcript with no spawn, is allowed (control)", "allow",
+        RR_BUILTIN_SEND, {"to": AN_UNKNOWN, "message": AN_MSG}, an_path("empty"), silent=True)
+an_call("a send with agent_id set, an agent's own send, is not judged (control)", "allow", RR_BUILTIN_SEND,
+        {"to": AN_NAMED_AGENT, "message": AN_MSG}, an_path("lane"), silent=True, agent_id=RR_AGENT)
+an_call("an Agent spawn with no name and agent_id set, an agent's own spawn, is not judged (control)", "allow",
+        "Agent", dict(AN_BUILDER), an_path("empty"), silent=True, agent_id=RR_AGENT)
+an_call("an Agent spawn with a name is allowed (control)", "allow", "Agent", dict(AN_BUILDER, name="overlap-b"),
+        an_path("empty"), silent=True)
+an_call("a Task spawn with a name is allowed (control)", "allow", "Task", dict(AN_BUILDER, name="overlap-b"),
+        an_path("empty"), silent=True)
+an_call("the remote send_message is not judged: a send to a bare agent id is allowed (control)", "allow",
+        SEND_MESSAGE, {"session_id": AN_PEER, "to": AN_NAMED_AGENT, "message": AN_MSG}, an_path("lane"), silent=True)
+# A missing or unreadable transcript passes: the lane's tier cannot be read, so the rule does not judge.
+an_call("a missing transcript is allowed for a send to a bare agent id (control)", "allow", RR_BUILTIN_SEND,
+        {"to": AN_NAMED_AGENT, "message": AN_MSG}, an_path("missing"), silent=True)
+an_call("a missing transcript is allowed for a nameless spawn (control)", "allow", "Agent", dict(AN_BUILDER),
+        an_path("missing"), silent=True)
+an_call("an unreadable transcript (a folder) is allowed for a send to a bare agent id (control)", "allow",
+        RR_BUILTIN_SEND, {"to": AN_NAMED_AGENT, "message": AN_MSG}, an_path("unreadable"), silent=True)
+an_call("an unreadable transcript (a folder) is allowed for a nameless spawn (control)", "allow", "Agent",
+        dict(AN_BUILDER), an_path("unreadable"), silent=True)
+
+
+# Allowed (controls): the session is not a proved lane, so a bare-id send and a nameless spawn pass. Each variant is one
+# transcript shape, and the same two calls are refused on the lane's own transcript (the scope check below).
+AN_NOT_LANE = (
+    ("a coordinator's record", "coordinator", ROLE_ENV),
+    ("no get_session record of its own", "no-record", ROLE_ENV),
+    ("a lane tag set by set_session_tags after its record", "tags-after", ROLE_ENV),
+    ("no own session id in the environment", "lane", None),
+)
+AN_NOT_LANE_CALLS = (
+    ("a send to a builder's agent id", RR_BUILTIN_SEND, {"to": AN_NAMED_AGENT, "message": AN_MSG}),
+    ("a nameless Agent spawn", "Agent", dict(AN_BUILDER)),
+)
+for _why, _where, _env in AN_NOT_LANE:
+    for _what, _tool, _input in AN_NOT_LANE_CALLS:
+        an_call("%s is allowed when the session is not a proved lane (%s) (control)" % (_what, _why), "allow", _tool,
+                _input, an_path(_where), silent=True, env=_env)
+
+
+def an_case(tool, tool_input, transcript, env=None):
+    """The case dict decide() judges one call with: the keys add() registers, for a check that judges two calls itself."""
+    return {"raw": None, "tool": tool, "cwd": NOGIT, "session": None, "env_path": None, "tool_input": dict(tool_input),
+            "transcript": transcript, "env": env}
+
+
+def an_not_lane_check(tool, tool_input, transcript, env):
+    """The check of a call the rule passes because the session is not a proved lane. The scope is proved first: the same
+    call judged over the lane's own transcript is refused. Then the call judged over `transcript` is allowed silently."""
+    def check():
+        got, reason = decide(an_case(tool, tool_input, an_path("lane"), env=ROLE_ENV))
+        if got != "deny" or AN_RULE not in reason:
+            return False, "scope: the same call on the lane's own transcript gives %s, want a deny that names %s: %s" % (
+                got, AN_RULE, reason[:80])
+        got, reason = decide(an_case(tool, tool_input, transcript, env=env))
+        if got != "allow" or reason:
+            return False, "subject: want a silent allow, got %s: %s" % (got, reason[:80])
+        return True, "the call is refused on a lane's own transcript and allowed silently here"
+    return check
 
 
 # =========================================================================== 5d. cite by id
@@ -14333,6 +14496,16 @@ FIXTURELESS_CHECKS.add(rf_cost_case)
 LOG_CHECKS_EXTRA.append((RF_UNPARSED_LABEL, rf_unparsed_case))
 LOG_FAMILY[RF_UNPARSED_LABEL] = "resume-finished-reviewer"
 FIXTURELESS_CHECKS.add(rf_unparsed_case)
+# The agent-name-on-spawn scope checks of section 5k are appended here too, as the 5j checks are. Each builds only the
+# transcripts its two calls name: decide() materializes them.
+for _why, _where, _env in AN_NOT_LANE:
+    for _what, _tool, _input in AN_NOT_LANE_CALLS:
+        _label = "agent-name-on-spawn: scope first, %s is refused on a lane's transcript and allowed here (%s)" % (
+            _what, _why)
+        _check = an_not_lane_check(_tool, _input, an_path(_where), _env)
+        LOG_CHECKS_EXTRA.append((_label, _check))
+        LOG_FAMILY[_label] = "agent-name-on-spawn"
+        FIXTURELESS_CHECKS.add(_check)
 for _name, _change in BUILDER_GREEN:
     if getattr(_change, "needs_link", False) and not LINKS_MADE:
         continue
