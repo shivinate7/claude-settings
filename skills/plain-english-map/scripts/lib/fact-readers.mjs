@@ -13,7 +13,8 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import ts from './lazy-typescript.mjs';
-import { importTargets, resolveSpecifier } from './import-reader.mjs';
+import { importEntries, importTargets, resolveSpecifier } from './import-reader.mjs';
+import { readPathAliases } from './tsconfig-paths.mjs';
 import { blankCommentsAndStrings, blankShell } from './source-text.mjs';
 
 const PY_FACTS = fileURLToPath(new URL('./py-facts.py', import.meta.url));
@@ -90,9 +91,9 @@ const moduleBindings = (sf) => {
 // The local names that hold the whole module of `target`: `import * as ns`, a default `import lib`, `import m = require(...)`,
 // `const m = require(...)` and `const m = await import(...)`. Each specifier goes through the import reader's resolver, so an
 // alias of any other module is no alias of `target`.
-const targetAliases = (sf, file, target, tracked) => {
+const targetAliases = (sf, file, target, tracked, pathAliases) => {
   const aliases = new Set();
-  const namesTarget = (spec) => ts.isStringLiteralLike(spec) && resolveSpecifier(file, spec.text, tracked) === target;
+  const namesTarget = (spec) => ts.isStringLiteralLike(spec) && resolveSpecifier(file, spec.text, tracked, pathAliases) === target;
   const visit = (n) => {
     if (ts.isImportDeclaration(n) && n.importClause && namesTarget(n.moduleSpecifier)) {
       const { name, namedBindings } = n.importClause;
@@ -163,13 +164,29 @@ const namedFiles = (sf, file, files) => {
   return [...out].sort();
 };
 
-const readTs = (req, text, files) => {
+// `readAliases()` is the one tsconfig read of the call: `{ ok, aliases }` or `{ ok: false, reason }`. It runs only for an import read.
+const readTs = (req, text, files, readAliases) => {
   let sf;
   try { sf = ts.createSourceFile(req.file, text, ts.ScriptTarget.Latest, true); } catch (e) { return fail(req, `${req.file} cannot be parsed: ${e.message}`); }
-  if (req.op === 'loads') return good(req, { imports: importTargets(req.file, text, files, { types: false }).filter((f) => f !== req.file), named: namedFiles(sf, req.file, files) });
+  let aliases = null;
+  let blind = null; // why the aliases are unread, when a package import may hide a link
+  if (req.op === 'loads' || req.op === 'uses') {
+    const read = readAliases();
+    aliases = read.ok ? read.aliases : null;
+    // Unreadable aliases hide a link that a bare specifier may hold. A relative import, a `node:` import and an import the build erases
+    // (for `loads`) need none. A `uses` read counts a type-only import as a link, so it counts it here too.
+    const mayHide = () => importEntries(text, { file: req.file, types: req.op === 'uses' }).some(({ spec }) => !spec.startsWith('.') && !spec.startsWith('node:'));
+    if (!read.ok && mayHide()) blind = read.reason;
+  }
+  if (req.op === 'loads') {
+    const imports = importTargets(req.file, text, files, { types: false, aliases }).filter((f) => f !== req.file);
+    return good(req, { imports, named: namedFiles(sf, req.file, files), ...(blind && { blind }) });
+  }
   if (req.op === 'uses') {
-    const imports = importTargets(req.file, text, files).includes(req.target);
-    const uses = req.symbol == null ? null : identifiers(sf, targetAliases(sf, req.file, req.target, files)).has(req.symbol);
+    const imports = importTargets(req.file, text, files, { aliases }).includes(req.target);
+    // The wanted file is linked by a relative import, so the unread aliases hide nothing. Else the read is unknown.
+    if (blind && !imports) return fail(req, blind);
+    const uses = req.symbol == null ? null : identifiers(sf, targetAliases(sf, req.file, req.target, files, aliases)).has(req.symbol);
     return good(req, { imports, uses });
   }
   const bindings = moduleBindings(sf);
@@ -227,13 +244,15 @@ const readPython = (reqs, root, tracked) => {
 export const readFacts = (requests, root, { tracked = [] } = {}) => {
   const results = new Array(requests.length);
   const files = new Set(tracked);
+  let aliasRead;
+  const readAliases = () => (aliasRead ??= readPathAliases(root));
   const py = [];
   requests.forEach((req, i) => {
     if (req.file.endsWith('.py')) { py.push(i); return; }
     let text;
     try { text = readFileSync(path.join(root, req.file), 'utf8'); } catch (e) { results[i] = fail(req, `${req.file} cannot be read: ${e.code ?? e.message}`); return; }
     try {
-      results[i] = req.file.endsWith('.json') ? readJson(req, text) : TS_EXT.test(req.file) ? readTs(req, text, files) : readRegex(req, text);
+      results[i] = req.file.endsWith('.json') ? readJson(req, text) : TS_EXT.test(req.file) ? readTs(req, text, files, readAliases) : readRegex(req, text);
     } catch (e) {
       results[i] = fail(req, `${req.file} could not be read: ${e.message}`);
     }
