@@ -242,6 +242,18 @@ def _mutates_as_command(command: str, words) -> bool:
     return bool(re.fullmatch(MUTATING_COMMAND, command))
 
 
+# An in-place editor on the segment. `sed` (or `gsed`, GNU sed on macOS) takes `-i` (alone or with a
+# suffix) or `--in-place`; `perl` takes `-i` as the last letter of a cluster of flags that take no value
+# (`-pi`, `-0777pi.bak`). A flag starts a word (`(?<!\S)`), so `--in-place` inside a quoted pattern is text.
+# A cluster is `-Ei`, `-ni`, `-ie`: letters that take no value, then `i`, and what follows is the backup
+# suffix. `e`, `f` and `l` take a value, so `-ei` is a script, not `-i`. `_SED_IN_PLACE_FLAG` is the one
+# home of the flag; a `sed` word and a `sed` segment are both read by it.
+_SED_NAMES = ("sed", "gsed")
+_SED_IN_PLACE_FLAG = r"(?<!\S)(?:-[A-Za-dg-km-z]*i|--in-place)"
+_SED_IN_PLACE = r"\b(?:g?sed)\b[^\n;|&]*" + _SED_IN_PLACE_FLAG + r"[^\n;|&]*"
+_PERL_IN_PLACE = r"\bperl\b[^\n;|&]*\s-[0-9aCcFlnpsStTuUvwW]*i[^\n;|&]*"
+
+
 # A character that lets a script run text the segment split cannot see: a substitution, a group, a brace,
 # or a backslash (an escaped quote or separator the split would read wrongly).
 _SCRIPT_RUNS_HIDDEN = re.compile(r"[$`(){}\\]")
@@ -256,7 +268,7 @@ def _script_mutates(script: str) -> bool:
         command, rest = _segment_command([_unquoted(word) for word in _quoted_words(segment, True)])
         # `sed -i` is no mutating word: `writes_to` reads it by its own pattern, so it must get that far.
         if _mutates_as_command(command, rest) or (
-                command == "sed" and any(re.match(r"-[a-z]*i\b|--in-place", word) for word in rest)):
+                command in _SED_NAMES and any(re.match(_SED_IN_PLACE_FLAG, word) for word in rest)):
             return True
     return False
 
@@ -286,11 +298,11 @@ def writes_to(path: str, cmd: str, command=None, words=()) -> bool:
     # `command` is the segment's resolved command name, given by a caller that reads a mutating
     # word only in command position (`grep -n install tests/x.py` reads, never writes).
     if command is not None and not _mutates_as_command(command, words):
-        in_place = {"sed": _SED_IN_PLACE, "perl": _PERL_IN_PLACE}.get(command)
+        in_place = {"sed": _SED_IN_PLACE, "gsed": _SED_IN_PLACE, "perl": _PERL_IN_PLACE}.get(command)
         return bool(in_place) and bool(re.search(in_place + target, cmd))
     if re.search(MUTATING_COMMAND + r"[^\n;|&]*" + target, cmd):
         return True
-    if re.search(r"\bsed\b[^\n;|&]*-i\b[^\n;|&]*" + target, cmd):
+    if re.search(_SED_IN_PLACE + target, cmd):
         return True
     return False
 
@@ -1651,8 +1663,12 @@ def _shell_write_scan(cmd, cwd, predicate, holds, follow_cd, command_position, p
         data = set() if closed else _copy_reads(raw, predicate, cwd, command_position)
         sed_targets = {}
         if command_position and not closed:
-            sed_targets = _sed_script_words(raw)   # the builder test check only: a script names no file but w, W, e
+            sed_targets = _sed_script_words(scripts[number])   # the builder test check only: a script names no file but w, W, e; read with its newlines
             data = data | set(sed_targets)
+        if not closed:
+            # A sed with no in-place option reads its script as text: an in-place flag spelled inside it is no flag.
+            data = data | {at for at in _sed_script_words(parsed[number], False)
+                           if re.search(_SED_IN_PLACE_FLAG, _unquoted(raw[at]))}
         found = None if closed or not script_data else _inline_script_at([_unquoted(word) for word in raw])
         if found:
             data.add(found[1])
@@ -1864,12 +1880,20 @@ def _sed_script_targets(script):
     line after a `w` or `W` command (a file), an `e` command (a command), and the `w` flag of `s` (a
     file). Every other word of a script is text. Walks the script as sed reads it: an address
     (`3`, `$`, `/re/`, a regex in other delimiters) is skipped, so are the regex and replacement of `s` and the sets
-    of `y`, and the text of `a`, `i`, `c`, `r`, `R` and a label runs to the line's end."""
+    of `y`, and the text of `a`, `i`, `c`, `r`, `R` runs to the line's end. A label (`:`, `b`, `t`, `T`) ends at `;` or
+    the line's end."""
     targets, at, size = [], 0, len(script)
 
     def line_end(start):
         end = script.find("\n", start)
         return size if end < 0 else end
+
+    def label_end(start):
+        # a label (`:`, `b`, `t`, `T`) ends at `;` or the line's end, whichever comes first
+        end = start
+        while end < size and script[end] not in ";\n":
+            end += 1
+        return end
 
     while at < size:
         char = script[at]
@@ -1900,22 +1924,25 @@ def _sed_script_targets(script):
                     at = end
                     break
                 at += 1
-        elif char in "aicrR:btT":
+        elif char in "aicrR":
             at = line_end(at)
+        elif char in ":btT":
+            at = label_end(at)
         else:
             at += 1
     return targets
 
 
-def _sed_script_words(raw):
+def _sed_script_words(raw, in_place_only=True):
     """{index: names} for the words of an in-place `sed` segment that are not files it writes: its
     script (the first operand, or the value of each `-e` and `--expression`) and the value of `-f`,
     `--file` and `-l`. A script is text, so `s/N/tests\\/a.py/` names no test. `names` are the files
     and commands the script's `w`, `W`, `e` and `s///w` name (`_sed_script_targets`), judged as words
     of the segment: `sed -i 'w tests/a.py' src/app.py` writes tests/a.py. Empty when the segment is no
-    `sed -i` or `sed --in-place`."""
+    `sed -i` or `sed --in-place`; with `in_place_only` false, a sed with no in-place option gives its
+    script words too, each with no names."""
     index = resolve_command(tuple(raw))
-    if index is None or _name(raw[index]) != "sed":
+    if index is None or _name(raw[index]) not in _SED_NAMES:
         return {}
     skip, scripts, in_place, scripted, operands, flags_over = set(), {}, False, False, [], False
     at = index + 1
@@ -1950,12 +1977,12 @@ def _sed_script_words(raw):
                     at = at if glued else at + 1
                     break
         at += 1
-    if not in_place:
+    if not in_place and in_place_only:
         return {}
     if not scripted and operands:
         skip.add(operands[0])
         scripts[operands[0]] = _unquoted(raw[operands[0]])
-    return {where: _sed_script_targets(scripts.get(where, "")) for where in skip}
+    return {where: _sed_script_targets(scripts.get(where, "")) if in_place else [] for where in skip}
 
 
 def _segment_command(words):
