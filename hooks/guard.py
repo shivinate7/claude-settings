@@ -214,7 +214,8 @@ Other tools, in `judge` order:
                        `#`, bold) before a line's first word are skipped, and so are marks right after the
                        colon (`**Verdict:** FAIL`). A dash after a round label or the word `verdict`
                        and before a verdict word
-                       reads as the colon (`Round N - FAIL`, `Round N result - FAIL`, `Prior round
+                       reads as the colon, also after closing bold marks (`**Round N** - FAIL`) and, after
+                       `verdict`, as an em or en dash with no space (`Prior verdict—FAIL`) (`Round N - FAIL`, `Round N result - FAIL`, `Prior round
                        result - FAIL`, `Prior verdict - FAIL`, `Verdict - FAIL`) unless the verdict word
                        runs on into a hyphenated word
                        (`Round N - FAIL-safe`), and `round result` reads as `verdict`
@@ -2691,12 +2692,13 @@ BRIEF_BLIND_CHOICES = re.compile(
 _BRIEF_BLIND_LINE_END = re.compile(r"[ \t]*$", re.M)
 # Three spellings of a verdict label that the regex reads after a plain rewrite, each a single linear pass. Emphasis marks
 # after a colon (`**Verdict:** FAIL`) go. A dash after a round label or the word `verdict` and before a verdict word
-# (`Round N - FAIL`, `Prior verdict - FAIL`) reads as a colon, with or without `result` (`Round N result - FAIL`, `Prior round
+# (`Round N - FAIL`, `Prior verdict - FAIL`) reads as a colon, with closing marks before the dash (`**Round N** - FAIL`) and,
+# after `verdict`, an em or en dash with no space (`Prior verdict—FAIL`; a hyphen there needs a space), with or without `result` (`Round N result - FAIL`, `Prior round
 # result - FAIL`), but not inside a hyphenated word (`Round N - FAIL-safe`). `round result` then reads as `verdict` (`Prior round result: FAIL`).
 BRIEF_BLIND_COLON_MARKS = re.compile(r"(?<=:)[*_]+")
 BRIEF_BLIND_ROUND_DASH = re.compile(
-    r"(\b[Rr]ound[ \t]+(?:\d+(?:[ \t]+of[ \t]+\d+)?(?:[ \t]+[Rr]esult)?|[Rr]esult)|\b[Vv]erdict(?=[ \t]))"
-    r"[ \t]*[\u2014\u2013-][ \t]*"
+    r"(\b[Rr]ound[ \t]+(?:\d+(?:[ \t]+of[ \t]+\d+)?(?:[ \t]+[Rr]esult)?|[Rr]esult)|\b[Vv]erdict(?=[*_]*(?:[ \t]|[\u2014\u2013])))"
+    r"[*_]*[ \t]*[\u2014\u2013-][ \t]*"
     r"(?=[*_`\"'(]*(?:%s)(?![\w-]))" % BRIEF_BLIND_VERDICT_WORDS)
 BRIEF_BLIND_ROUND_RESULT = re.compile(r"\b[Rr]ound[ \t]+[Rr]esult\b")
 BRIEF_BLIND_REASON = ("A reviewer's brief holds a builder's report or a prior verdict, so the reviewer anchors on it. "
