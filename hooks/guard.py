@@ -3940,16 +3940,19 @@ def impeccable_shell_hit(segment: str) -> str:
 # A PowerShell here-string: `@'` ... `'@` is text, `@"` ... `"@` runs its `$(...)`.
 _HERE_STRING = re.compile(r"@(['\"])[ \t]*\r?\n(.*?)\r?\n\1@", re.S)
 # What runs a here-string, by the command word around it. Before it: `iex` or `Invoke-Expression` takes it as
-# its argument (a `(` may open it), or `[scriptblock]::Create(` builds a block from it. After it, the closing
-# parens of such a call, then a pipe into iex, Invoke-Expression, or a pwsh that reads stdin. A here-string
-# given to Set-Content, or held in a variable that no word on its own line runs, matches neither: a later line
-# that runs the variable (`$b = @"..."@` then `iex $b`) is not read.
+# its argument (a `(` may open it), `[scriptblock]::Create(` builds a block from it, or a pwsh or powershell
+# launch ends in `-Command` or `-c` and takes it as the script. After it, the closing parens of such a call,
+# then a pipe into iex, Invoke-Expression, or a pwsh that reads stdin, through any `Out-String` stages. A
+# here-string given to Set-Content, or held in a variable that no word on its own line runs, matches neither: a
+# later line that runs the variable (`$b = @"..."@` then `iex $b`) is not read.
 # The before side keeps its own word list. `nested_script` (guard_core.py) answers a different question: it
 # returns the text that follows a word, and the text here is the here-string cut out of the command, so it
 # cannot say whether the word is there. After a pipe it has no argument to return either.
 _HERE_RUN_BEFORE = re.compile(r"(?:(?:^|[\s;&|(){}])(?:iex|Invoke-Expression)[ \t]+(?:-Command[ \t]+)?\(?"
-                              r"|\[scriptblock\]::Create\()[ \t]*\Z", re.I).search
-_HERE_PIPE_AFTER = re.compile(r"[ \t)]*\|[ \t]*([^\n]*)").match
+                              r"|\[scriptblock\]::Create\("
+                              r"|(?:^|[\s;&|(){}])(?:pwsh|powershell)(?:\.exe)?(?=[ \t])[^\n;&|]*?[ \t]-c(?:ommand)?[ \t]+)"
+                              r"[ \t]*\Z", re.I).search
+_HERE_PIPE_AFTER = re.compile(r"[ \t)]*\|([^\n]*)").match
 # A pwsh switch that takes the next word as its value, by the name without its dash. `-ExecutionPolicy` may be
 # cut to any prefix of two letters or more.
 _PWSH_VALUE_SWITCHES = {"ep", "workingdirectory", "wd", "configurationname", "config", "inputformat",
@@ -3981,10 +3984,16 @@ def _here_string_is_run(found) -> bool:
     if _HERE_RUN_BEFORE(found.string[:found.start()]):
         return True
     piped = _HERE_PIPE_AFTER(found.string, found.end())
-    parts = split_segments(piped.group(1)) if piped else []
-    tokens = segment_tokens(parts[0]) if parts else []
-    word = re.sub(r"\.exe$", "", basename(tokens[0]).lower()) if tokens else ""
-    return word in ("iex", "invoke-expression") or (word in ("pwsh", "powershell") and _pwsh_reads_stdin(tokens))
+    for stage in piped.group(1).split("|") if piped else []:
+        parts = split_segments(stage)
+        tokens = segment_tokens(parts[0]) if parts else []
+        at = resolve_command(tokens)   # steps over the `&` call operator and a wrapper word
+        tokens = tokens[at:] if at is not None else []
+        word = re.sub(r"\.exe$", "", basename(tokens[0]).lower()) if tokens else ""
+        if word == "out-string" and len(parts) == 1:   # the text passes on to the next stage
+            continue
+        return word in ("iex", "invoke-expression") or (word in ("pwsh", "powershell") and _pwsh_reads_stdin(tokens))
+    return False
 
 
 def shell_run_texts(raw: str) -> list:
