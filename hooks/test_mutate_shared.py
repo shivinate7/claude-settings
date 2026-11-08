@@ -22,7 +22,7 @@ The fourth part pins the layout of a guard mutant's folder: its copy must import
 its own root, the folder beside its hooks/.
 
 The fifth part pins the shard split: with MUTATE_SHARD=i/n, `run_mutants` runs only entries[i-1::n], so each
-mutant runs in exactly one shard. Each shard prints its slice size, and a malformed or empty shard exits 1.
+mutant runs in exactly one shard. Each shard prints its slice size, and a malformed, empty, or all-skipped shard exits 1.
 
 The sixth part pins the environment a suite gets: `run_suite_file` passes the caller's environment minus the
 mutation test's own variables, and a shard value must not reach a suite.
@@ -519,14 +519,22 @@ SHARD_VAR = "MUTATE_SHARD"
 SHARD_LINE = re.compile(r"^MUTATE_SHARD=(\d+)/(\d+): (\d+) of (\d+) mutations run in this shard$")
 
 
-def run_sharded(entries, shard):
-    """`run_mutants(entries, stub)` with MUTATE_SHARD=shard (None leaves it unset). Return (code, printed lines, the
-    entries the stub was given). The stub kills every mutant it is given, so the code reads 0 unless the run itself
-    refuses the shard."""
+def skipped_elsewhere(entry):
+    """The skip reason for any mutant: each one is marked for the platform this run is not on."""
+    return mutate_shared.skip_reason("posix" if sys.platform.startswith("win") else "windows")
+
+
+def run_sharded(entries, shard, skip=None):
+    """`run_mutants(entries, stub)` with MUTATE_SHARD=shard (None leaves it unset). `skip(entry)` gives the reason a
+    mutant is skipped, or None to run it. Return (code, printed lines, the entries the stub was given). The stub kills
+    every mutant it is given and does not skip, so the code reads 0 unless the run itself refuses the shard."""
     given = []
 
     def stub(entry):
         given.append(entry)
+        why = skip(entry) if skip else None
+        if why:
+            return "mutant", 0, [], REQUIRED, why
         return "mutant", 1, RED_RIGHT, REQUIRED, None
 
     out = io.StringIO()
@@ -542,7 +550,8 @@ def run_sharded(entries, shard):
 class ShardSplitTests(unittest.TestCase):
     """`run_mutants` reads MUTATE_SHARD=i/n and runs only entries[i-1::n] of its list, one shard per run. The slices
     are read off the stub's calls, not off the code's own arithmetic. Named failures: a mutant runs in no shard or in
-    two, a shard runs the whole list or prints no slice size, or a malformed or empty shard does not stop the run."""
+    two, a shard runs the whole list or prints no slice size, a malformed or empty shard does not stop the run, or a
+    shard whose every mutant is skipped reads green."""
 
     def test_every_mutant_runs_in_exactly_one_shard(self):
         runs = {i: run_sharded(mutate_guard.MUTATIONS, "%d/3" % i) for i in (1, 2, 3)}
@@ -579,6 +588,34 @@ class ShardSplitTests(unittest.TestCase):
         self.assertEqual(code, 1, "the empty shard 3/3 exits %d, want 1" % code)
         self.assertIn("Nothing ran", "\n".join(lines), "the empty shard 3/3 printed no 'Nothing ran'")
         self.assertEqual(given, [], "the empty shard 3/3 ran %d mutants" % len(given))
+
+    def test_a_shard_whose_every_mutant_is_skipped_exits_one(self):
+        # The slice 1/2 is a and c, both skipped on this platform, so the shard runs nothing. It must exit 1: a shard
+        # that ran nothing proved nothing, so it must not read green.
+        code, lines, _given = run_sharded(["a", "b", "c", "d"], "1/2", skip=skipped_elsewhere)
+        self.assertTrue(any(SHARD_LINE.match(line) for line in lines),  # scope first: this run was a shard run
+                        "shard 1/2 printed no MUTATE_SHARD line, so it did not run as a shard")
+        self.assertEqual(code, 1, "the all-skipped shard 1/2 exits %d, want 1" % code)
+        self.assertIn("Nothing ran", "\n".join(lines), "the all-skipped shard 1/2 printed no 'Nothing ran'")
+
+    def test_without_a_shard_every_skipped_mutant_still_exits_zero(self):
+        # An unset MUTATE_SHARD is not a shard: the run covers the whole list, and with every mutant skipped it still
+        # exits 0. The stub must be given all four mutants, so the exit code is read against a full run.
+        code, _lines, given = run_sharded(["a", "b", "c", "d"], None, skip=skipped_elsewhere)
+        self.assertEqual(sorted(given), ["a", "b", "c", "d"],
+                         "an unset MUTATE_SHARD left mutants out: the stub was given %r, want all four" % sorted(given))
+        self.assertEqual(code, 0, "an unset MUTATE_SHARD with every mutant skipped exits %d, want 0" % code)
+
+    def test_a_shard_with_one_killed_and_one_skipped_mutant_exits_zero(self):
+        # The slice 1/2 is a and c: a runs and is killed, c is skipped. A shard that ran one mutant is not empty, so it
+        # exits 0.
+        def skip_c(entry):
+            return skipped_elsewhere(entry) if entry == "c" else None
+
+        code, lines, _given = run_sharded(["a", "b", "c", "d"], "1/2", skip=skip_c)
+        self.assertTrue(any(SHARD_LINE.match(line) for line in lines),  # scope first: this run was a shard run
+                        "shard 1/2 printed no MUTATE_SHARD line, so it did not run as a shard")
+        self.assertEqual(code, 0, "the shard 1/2 with one killed and one skipped mutant exits %d, want 0" % code)
 
     def test_without_a_shard_every_mutant_runs_once(self):
         # Control, green on the old code: an unset MUTATE_SHARD runs the whole list in one run.

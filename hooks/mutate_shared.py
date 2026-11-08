@@ -290,7 +290,8 @@ def run_mutants(entries, run_one):
 
     MUTATE_SHARD=i/n (1 <= i <= n) runs only `entries[i-1::n]`, so n parallel jobs that each set one i run every
     mutant once. The slice is cut before any skip, so a skipped mutant stays in its own shard. A malformed value
-    returns 1 before any mutant runs, and so does an empty slice: a shard that ran nothing proved nothing.
+    returns 1 before any mutant runs. A shard in which no mutant ran also returns 1, whether its slice is empty or
+    every mutant in it is skipped: a shard that ran nothing proved nothing.
     """
     shard = os.environ.get("MUTATE_SHARD")
     if shard is not None:
@@ -325,6 +326,9 @@ def run_mutants(entries, run_one):
     killed = ran - survivors - wrong_cause
     print("%d of %d mutations killed (%d survived, %d wrong cause, %d skipped)" % (
         killed, ran, survivors, wrong_cause, skipped))
+    if shard is not None and ran == 0:
+        print("Nothing ran: every mutation in shard %s is skipped on this platform" % shard)
+        return 1
     return 1 if (survivors or wrong_cause) else 0
 
 
