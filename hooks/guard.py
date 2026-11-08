@@ -2405,8 +2405,8 @@ def report_sha_token(token: str) -> bool:
             and re.search(r"[0-9]", token) is not None and re.search(r"[a-f]", token) is not None)
 
 
-def report_shas(text) -> list:
-    """The sha-like tokens of a report, each once, in order of first sight."""
+def report_shas(text, limit=REPORT_SHA_MAX) -> list:
+    """The sha-like tokens of a report, each once, in order of first sight, up to `limit` (None: all)."""
     if not isinstance(text, str):
         return []
     found = []
@@ -2419,34 +2419,51 @@ def report_shas(text) -> list:
             token = run.group()
             if report_sha_token(token) and token not in found and report_sha_judged(line, run):
                 found.append(token)
-    return found[:REPORT_SHA_MAX]
+    return found if limit is None else found[:limit]
 
 
-def sha_resolve(tool: str, where: str, shas: list) -> list:
-    """The shas of `shas` that are no commit in the repo at `where`. [] when git fails, `where` is no repo, or the
-    repo is shallow (noted `report-sha-shallow`). One `git cat-file --batch-check` call, and one more on a miss."""
-    if not shas or not where or not os.path.isdir(where):
-        return []
+def sha_git(where: str, limit: int, *args):
+    """One git read in `where` with a limit of `limit` seconds: the finished process, or None when it cannot run."""
+    try:
+        return git_reads._nowindow.run(
+            ["git", "-C", where, *args], capture_output=True, encoding="utf-8", errors="replace", timeout=limit)
+    except Exception:
+        return None
+
+
+def sha_resolve_state(tool: str, where: str, shas: list, limit: int = 10):
+    """(missing, unchecked) for `shas` in the repo at `where`: the shas that are no commit, and the shas git gave no
+    clear answer for (git fails, `where` is no repo, or a miss in a shallow clone, noted `report-sha-shallow`). One
+    `git cat-file --batch-check` call, and one `rev-parse` more on a miss, each limited to `limit` seconds."""
+    if not shas:
+        return [], []
+    if not where or not os.path.isdir(where):
+        return [], list(shas)
     try:
         done = git_reads._nowindow.run(
             ["git", "-C", where, "cat-file", "--batch-check"],
             input="".join(sha + "^{commit}\n" for sha in shas),
-            capture_output=True, encoding="utf-8", errors="replace", timeout=10)
+            capture_output=True, encoding="utf-8", errors="replace", timeout=limit)
     except Exception:
-        return []
+        return [], list(shas)
     answers = done.stdout.splitlines()
     if done.returncode != 0 or len(answers) != len(shas):
-        return []
+        return [], list(shas)
     missing = [sha for sha, answer in zip(shas, answers) if answer.rstrip().endswith(" missing")]
     if not missing:
-        return []
-    shallow = guard_core._git(where, "rev-parse", "--is-shallow-repository")
+        return [], []
+    shallow = sha_git(where, limit, "rev-parse", "--is-shallow-repository")
     if shallow is None or shallow.returncode != 0:
-        return []
+        return [], missing
     if shallow.stdout.strip() == "true":
         record(tool, "noted", "report-sha-shallow", " ".join(missing))
-        return []
-    return missing
+        return [], missing
+    return missing, []
+
+
+def sha_resolve(tool: str, where: str, shas: list) -> list:
+    """The shas of `shas` that are no commit in the repo at `where`. [] when git gives no clear answer."""
+    return sha_resolve_state(tool, where, shas)[0]
 
 
 def report_sha_missing(tool: str, payload, text, where: str) -> list:
@@ -2471,18 +2488,26 @@ MESSAGE_REF_REASON = (
     "Your message names refs this repo does not hold: %s. Check each with git or gh before you send it, and "
     "name only what exists. Then send it again. (decision send-message-refs-resolve)"
 )
-MESSAGE_REF_LIMIT = 5   # seconds, for each ls-remote or gh read
-MESSAGE_REF_MAX = 20    # pull requests, and comments, named in one message
+MESSAGE_REF_LIMIT = 5   # seconds, for each git (config, cat-file, rev-parse, ls-remote) and gh read
+MESSAGE_REF_MAX = 20    # pull requests, and shas, judged in one message; the rest are named unchecked
 MESSAGE_GH_READS = 5    # comment links read with gh in one message; the rest are named unchecked
-MESSAGE_PR = re.compile(r"\b(PRs?|pull\s+requests?)(?:\s*#|\s+)(\d+)((?:\s*(?:,|and|&)\s*#?\d+)*)", re.IGNORECASE)
+# A PR word, then marks a writer puts between it and the number (`:`, `(`, `**`, a backtick, `number`), then the number.
+MESSAGE_PR = re.compile(r"\b(PRs?|pull\s+requests?)\b[\s:*`(]*(?:number\s+)?(#?)(\d+)", re.IGNORECASE)
 MESSAGE_PR_NUMBERED = re.compile(r"#(\d+)\s*\(\s*(?:PR|pull\s+request)\s*\)", re.IGNORECASE)
-MESSAGE_PR_ITEM = re.compile(r"\s*(?:,|and|&)\s*#?(\d+)")
-MESSAGE_PR_ITEM_MARKED = re.compile(r"\s*(?:,|and|&)\s*#(\d+)")
+# A further number of a list: after `,`, `and`, `or`, `&` or `+`, with or without its own `#`; or after a space, with `#`.
+MESSAGE_PR_ITEMS = (
+    re.compile(r"\s*,\s*(?:(?:and|or)\s+)?(#?)(\d+)", re.IGNORECASE),
+    re.compile(r"\s+(?:and|or)\s+(#?)(\d+)", re.IGNORECASE),
+    re.compile(r"\s*[&+]\s*(#?)(\d+)"),
+    re.compile(r"\s+(#)(\d+)"),
+)
 MESSAGE_GH_URL = re.compile(
     r"(?:https?://)?github\.com/([\w.-]+)/([\w.-]+?)(?:\.git)?/(pull|issues|commit)/([0-9A-Za-z]+)[^\s#]*"
     r"(?:#issuecomment-(\d+))?", re.IGNORECASE)
 MESSAGE_ORIGIN_TAIL = re.compile(r"([^/:\s]+)/([^/\s]+?)(?:\.git)?/?$")
-MESSAGE_REPO_MARKED = re.compile(r"(?<![\w./@:-])([\w.-]+)/([\w.-]+)(?=[#@:])")
+# An owner/repo and the mark right after it: `#` or `@`, `:`, or the word PR.
+MESSAGE_REPO_MARKED = re.compile(r"(?<![\w./@:-])([\w.-]+)/([\w.-]+)(?=([#@:]|\s+(?i:PRs?)\b))")
+MESSAGE_LOWER_NAME = re.compile(r"[a-z0-9_.-]+")
 MESSAGE_FILE_END = re.compile(r"\.[A-Za-z0-9]{1,5}$")
 MESSAGE_NOT_A_REPO = ("origin", "upstream")
 
@@ -2491,7 +2516,7 @@ def message_origin(where: str):
     """(owner, repo) lowercased from the raw `remote.origin.url` of the checkout at `where`, or None."""
     if not where or not os.path.isdir(where):
         return None
-    done = guard_core._git(where, "config", "--get", "remote.origin.url")
+    done = sha_git(where, MESSAGE_REF_LIMIT, "config", "--get", "remote.origin.url")
     if done is None or done.returncode != 0:
         return None
     found = MESSAGE_ORIGIN_TAIL.search(done.stdout.strip())
@@ -2499,11 +2524,15 @@ def message_origin(where: str):
 
 
 def message_names_other_repo(line: str, this) -> bool:
-    """True when `line` holds an owner/repo that is not `this`, followed by `#`, `@` or `:`. An owner/repo with no such
-    mark is a branch or a path. `origin/` and `upstream/` never count."""
+    """True when `line` holds an owner/repo that is not `this`, followed by `#`, `@`, `:` or the word PR. An owner/repo
+    with no such mark is a branch or a path. `origin/` and `upstream/` never count. The `:` and PR marks count only
+    for a lowercase owner and name that are not all digits, so `CI/CD:`, `Done/Next:` and `2/3:` are labels."""
     bare = REPORT_URL_WORD.sub(" ", MESSAGE_GH_URL.sub(" ", line))
-    for owner, repo in MESSAGE_REPO_MARKED.findall(bare):
+    for owner, repo, mark in MESSAGE_REPO_MARKED.findall(bare):
         if owner.lower() in MESSAGE_NOT_A_REPO or MESSAGE_FILE_END.search(repo):
+            continue
+        if mark not in ("#", "@") and not (MESSAGE_LOWER_NAME.fullmatch(owner) and MESSAGE_LOWER_NAME.fullmatch(repo)
+                                           and not owner.isdigit() and not repo.isdigit()):
             continue
         if (owner.lower(), repo.lower()) != this:
             return True
@@ -2511,18 +2540,23 @@ def message_names_other_repo(line: str, this) -> bool:
 
 
 def message_line_prs(line: str) -> list:
-    """The PR numbers a line names in words: `PR #N`, `PRs 7 and 8`, `pull request #N`, `#N (PR)`. After a singular
-    word, a further number in a list needs its own `#`, so `PR #7, 12 files` names one PR."""
+    """The PR numbers a line names in words: `PR #N`, `PR: #N`, `PR (#N)`, `PR number N`, `PRs 7 and 8`, `PRs #7 #8`,
+    `pull request #N`, `#N (PR)`. After a singular word, a further number in a list needs its own `#`, so
+    `PR #7, 12 files` names one PR."""
     prs = []
     for found in MESSAGE_PR.finditer(line):
-        prs.append(found.group(2))
-        tail, item = found.group(3), MESSAGE_PR_ITEM if found.group(1).lower().endswith("s") else MESSAGE_PR_ITEM_MARKED
+        prs.append(found.group(3))
+        plural = found.group(1).lower().endswith("s")
+        at = found.end()
         while True:
-            more = item.match(tail)
-            if not more:
+            for item in MESSAGE_PR_ITEMS:
+                more = item.match(line, at)
+                if more and (plural or more.group(1) == "#"):
+                    break
+            else:
                 break
-            prs.append(more.group(1))
-            tail = tail[more.end():]
+            prs.append(more.group(2))
+            at = more.end()
     prs += MESSAGE_PR_NUMBERED.findall(line)
     return prs
 
@@ -2539,7 +2573,7 @@ def message_refs(text: str, where: str):
 
     shas, prs, comments = [], [], []
     for line in text.split("\n"):
-        found, numbers = report_shas(line), message_line_prs(line)
+        found, numbers = report_shas(line, None), message_line_prs(line)
         if (found or numbers) and MESSAGE_REPO_MARKED.search(line) and this() is not None \
                 and message_names_other_repo(line, this()):
             continue
@@ -2547,17 +2581,24 @@ def message_refs(text: str, where: str):
         prs += [n for n in numbers if n not in prs]
     if re.search(r"github\.com", text, re.IGNORECASE):
         for owner, repo, kind, ident, comment in MESSAGE_GH_URL.findall(text):
-            if (owner.lower(), repo.lower()) != this():
+            # With no origin no link can be matched to this repo, so a pull or comment link is named unchecked below.
+            if this() is not None and (owner.lower(), repo.lower()) != this():
                 continue
             if kind.lower() == "pull" and ident.isdigit() and ident not in prs:
                 prs.append(ident)
-            if kind.lower() == "commit" and report_sha_token(ident.lower()) and ident.lower() not in shas:
+            if kind.lower() == "commit" and this() is not None and report_sha_token(ident.lower()) \
+                    and ident.lower() not in shas:
                 shas.append(ident.lower())
             if comment and comment not in comments:
                 comments.append(comment)
-    if prs and this() is None:
-        prs = []
-    return shas[:REPORT_SHA_MAX], prs[:MESSAGE_REF_MAX], comments[:MESSAGE_REF_MAX], (origin[0] if origin else None)
+    unchecked = []
+    if (prs or comments) and this() is None:
+        unchecked = ["PR #" + n for n in prs] + ["comment " + c for c in comments]
+        prs, comments = [], []
+    unchecked += list(shas[MESSAGE_REF_MAX:]) + ["PR #" + n for n in prs[MESSAGE_REF_MAX:]]
+    unchecked += ["comment " + c for c in comments[MESSAGE_GH_READS:]]
+    return (shas[:MESSAGE_REF_MAX], prs[:MESSAGE_REF_MAX], comments[:MESSAGE_GH_READS],
+            (origin[0] if origin else None), unchecked)
 
 
 def message_pr_missing(where: str, prs: list):
@@ -2594,14 +2635,16 @@ def message_ref_check(tool: str, tool_input, cwd: str):
     text = tool_input.get("message")
     if not isinstance(text, str) or not text or not cwd:
         return [], []
-    shas, prs, comments, origin = message_refs(text, cwd)
-    missing, unchecked = list(sha_resolve(tool, cwd, shas)), []
+    shas, prs, comments, origin, unchecked = message_refs(text, cwd)
+    missing, unknown_shas = sha_resolve_state(tool, cwd, shas, MESSAGE_REF_LIMIT)
+    missing = list(missing)
+    unchecked += unknown_shas
     if prs:
         gone, unknown = message_pr_missing(cwd, prs)
         missing += ["PR #" + n for n in gone]
         unchecked += ["PR #" + n for n in unknown]
-    for number, comment in enumerate(comments):
-        state = message_comment_state(origin, comment) if number < MESSAGE_GH_READS else "unchecked"
+    for comment in comments:
+        state = message_comment_state(origin, comment)
         if state == "missing":
             missing.append("comment " + comment)
         elif state == "unchecked":
@@ -2612,7 +2655,7 @@ def message_ref_check(tool: str, tool_input, cwd: str):
 def message_unchecked_note(unchecked: list) -> None:
     """The allow that names each ref no answer was read for. It carries no git or gh error text, and no log is written."""
     note = ("message-ref-missing: could not check " + ", ".join(unchecked)
-            + " (no clear answer from the remote); the message was sent unchecked.")
+            + " (no clear answer from git, the remote or gh, or over the limit of a send); the message was sent unchecked.")
     # No permissionDecision: an explicit allow would skip a permission prompt the main session shows.
     print(json.dumps({"hookSpecificOutput": {"hookEventName": "PreToolUse", "additionalContext": note}}))
 
