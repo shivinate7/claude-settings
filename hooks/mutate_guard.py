@@ -2849,8 +2849,9 @@ def _loads_module(source: str, stem: str) -> bool:
     (`Loader("widget.py")`), `functools.partial(load, "widget.py")`, `map(load, [...])`, a walrus binding, and a split
     literal (`"widget" + ".py"`).
     Known false selections, so each reads True: a bare call `load(path=X)` also feeds a method `Loader.load` of the same
-    name in the file, as every def of that name takes the call, and a loader that reassigns its path before the load reads
-    the argument its calls pass, not the new value.
+    name in the file, as every def of that name takes the call; a loader that reassigns its path before the load reads
+    the argument its calls pass, not the new value; and a `**kwargs` loader that copies the path into a local
+    (`path = kwargs["path"]`) reads the keyword its calls pass, so it is followed, not skipped as `**kwargs` above.
 
     It assumes module stems are unique across the repository, so a name match is a load of this file (only
     `test_action.py` repeats a stem today). A text that does not parse reads False."""
