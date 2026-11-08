@@ -614,6 +614,19 @@ class PushCheckTests(unittest.TestCase):
                         "a block item with a tab after its dash, at the key's own indent, was read as no item, "
                         "so no run is due for src/a.py")
 
+    def test_block_item_with_a_tab_after_its_dash_reads_its_pattern_exactly(self):
+        # The tab item reads as the plain `- 'docs/**'` item: docs/a.md owes a run, src/a.py owes none. A reader that
+        # gives up on the item (the _Unparsed fallback) keeps a run due for every file, so the src/a.py control fails.
+        text = checks_workflow("    paths:\n    -\t'docs/**'\n")
+        self.assertIn((4, "-\t'docs/**'"), ci_wake._workflow_lines(text),
+                      "scope: the push block holds no item line with a tab after its dash")
+        self.assertTrue(ci_wake.workflow_runs_for(text, ["docs/a.md"]),
+                        "a block item with a tab after its dash, at the key's own indent, was read as no item, "
+                        "so no run is due for docs/a.md")
+        self.assertFalse(ci_wake.workflow_runs_for(text, ["src/a.py"]),
+                         "a block item with a tab after its dash was read as an unreadable key, not the pattern "
+                         "docs/**, so a run is due for src/a.py")
+
     def test_paths_alias_with_a_dot_in_its_name_keeps_a_run_due_for_a_matching_file(self):
         text = checks_workflow("    paths: *p.x\n", prefix="x-filters: &p.x ['src/**']\n")
         self.assertIn((4, "paths: *p.x"), ci_wake._workflow_lines(text),
