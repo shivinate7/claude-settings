@@ -2156,6 +2156,18 @@ test("a Change on a reopened card keeps its fold locked open, and the New reply 
   assert.equal(await markName(page, it), NEW_MARK, `Change dropped the New reply mark on No. ${it.n}`);
 });
 
+// Change, then an emptied draft: Send will withdraw the saved answer. The fold stays locked open until the withdraw is sent or cancelled.
+test("a fold stays locked open while a Change's emptied draft waits to be withdrawn", async (t) => {
+  const it = repliedCard();
+  const page = await open(t, { items: [it], answers: answerOf(it, "a"), storage: VISIT }); if (!page) return;
+  const c = card(page, it), fold = c.locator("button.unfold");
+  await c.getByRole("button", { name: "Change" }).click();
+  await choose(page, it, "a");
+  assert.equal(await page.locator("#send").textContent(), "Withdraw answer", `No. ${it.n} does not offer Withdraw once its draft is emptied`);
+  await need(fold, `No. ${it.n} has no fold control under a pending withdraw`);
+  assert.equal(await fold.getAttribute("aria-disabled"), "true", `No. ${it.n} unlocks its fold under a pending withdraw`);
+});
+
 // A reply older than the last Send stays folded, with no mark.
 test("a reply older than the last Send stays folded, with no New reply mark", async (t) => {
   const it = repliedCard({ replied: "2026-10-26T00:30:00Z" });
@@ -2942,6 +2954,33 @@ test("the Ask seen stamp stays at the hide time when the page closes on a hidden
   await page.reload();
   await shownBox(page, "Seen answer 1");
   assert.equal(await page.locator(`#row-${TAB_ARRIVED.id} .newmark`).count(), 1, "the answer that arrived while the tab was hidden has no New answer mark at the next load");
+});
+
+// An answer the owner has not seen, listed below the fold: answered after the seen stamp and before the tab hides.
+const BELOW_ASK = { id: "ask-below", text: "An answer listed below the fold", at: "2026-10-31T03:00:00Z", owner: "triage", answered: "2026-10-31T04:00:00Z", reply: "It is below the fold." };
+// A phone height. At this height the answers list starts below the fold when the section's top sits 300 px down.
+const PHONE_SHORT = { width: 390, height: 700 };
+const scrollTopTo = (page, sel, px) => page.evaluate(([s, p]) => window.scrollTo(0, document.querySelector(s).getBoundingClientRect().top + scrollY - p), [sel, px]);
+const listOnScreen = (page) => page.evaluate(() => { const r = document.getElementById("askList").getBoundingClientRect(); return r.bottom > 0 && r.top < window.innerHeight; });
+
+test("an answer listed below the fold is not seen when the tab hides, so its New answer mark survives the next load", async (t) => {
+  const page = await open(t, { dbExtra: { asks: { ...TAB_ASKS(), [BELOW_ASK.id]: BELOW_ASK } }, storage: { "waiting.askSeen": TAB_SEED }, keepStorage: true, clock: TAB_HIDE, viewport: PHONE_SHORT }); if (!page) return;
+  await scrollTopTo(page, "#asks", 300);
+  assert.equal(await asksOnScreen(page), true, "the Ask section is off screen, so this case cannot show a hidden tab's stamp");
+  assert.equal(await listOnScreen(page), false, "the answers list is on screen, so this case cannot show an answer below the fold");
+  await hideTab(page);
+  assert.equal(await seenStamp(page), TAB_SEED, "hiding the tab with the answers list below the fold moved the Ask seen stamp");
+  await page.clock.setFixedTime(new Date(TAB_CLOSE));
+  await page.reload();
+  await shownBox(page, "Seen answer 1");
+  assert.equal(await page.locator(`#row-${BELOW_ASK.id} .newmark`).count(), 1, "the answer below the fold has no New answer mark at the next load");
+});
+test("the Ask seen stamp moves when the tab hides with the answers list on screen, at a phone height", async (t) => {
+  const page = await open(t, { dbExtra: { asks: { ...TAB_ASKS(), [BELOW_ASK.id]: BELOW_ASK } }, storage: { "waiting.askSeen": TAB_SEED }, keepStorage: true, clock: TAB_HIDE, viewport: PHONE_SHORT }); if (!page) return;
+  await scrollTopTo(page, "#askList", 300);
+  assert.equal(await listOnScreen(page), true, "the answers list is off screen, so this case cannot show a hidden tab's stamp");
+  await hideTab(page);
+  assert.equal(await seenStamp(page), TAB_HIDE_STAMP, "hiding the tab with the answers list on screen did not stamp the asks as seen");
 });
 
 test("Send ask never cuts a text over 4000 characters: it stores the full text, or writes nothing and shows a notice", async (t) => {
