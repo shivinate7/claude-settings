@@ -367,12 +367,15 @@ def calendar_judge(case, path, text, listed=(), clean=(), root=None):
     return out
 
 
-def fake_clock_judge(case, root, categories):
-    """Scope first (P7): the fixture was read. Then no row of each named category. Each failure names one category."""
-    proc = run(root, "--json")
+def fake_clock_judge(case, path, text, proof, categories):
+    """Scope first (P7): the fixture was read. The proof row is an elapsed-assert, which a fake clock keeps, so a
+    file the finder skips has no row there and fails. Then no row of each named category. Each failure names one cause."""
+    proc = run(case.root, "--json")
     case.assertIn(proc.returncode, (0, 1), proc.stdout + proc.stderr)
     out = json.loads(proc.stdout)
     case.assertFalse(out["unread"], "scope: the fixture was not read: %s" % out["unread"])
+    case.assertIn((path, lineno(text, proof), "elapsed-assert"), case.rows(out),
+                  "scope: the fixture was not read, so its elapsed-assert row is not listed")
     for cat in categories:
         rows = sorted(r for r in case.rows(out) if r[2] == cat)
         case.assertFalse(rows, "%s listed under a fake clock: %s" % (cat, rows))
@@ -384,6 +387,12 @@ JS_DATE_READ = [
     "  const f_now = new Date();",
     "  expect(f_now.getUTCFullYear()).toBe(2024);",
     "});",
+]
+# A JS clock difference. A fake clock keeps its elapsed-assert row, so a fake-clock case lists it as the proof
+# that the finder read its file (fake_clock_judge).
+JS_ELAPSED = [
+    "const t0 = Date.now();",
+    "expect(Date.now() - t0).toBeLessThan(100);",
 ]
 
 
@@ -942,14 +951,14 @@ class JsCategoriesTest(FinderCase):
             "tests/fake.test.js", text, ("expect(Date.now() - t0)", "elapsed-assert")))
 
     def test_jest_fake_clock_skips_new_date_calendar(self):
-        text = src("jest.useFakeTimers();", "jest.setSystemTime(new Date(0));", *JS_DATE_READ)
+        text = src("jest.useFakeTimers();", "jest.setSystemTime(new Date(0));", *JS_DATE_READ, *JS_ELAPSED)
         self.put("tests/jest_clock.test.js", text)
-        fake_clock_judge(self, self.root, ("calendar",))
+        fake_clock_judge(self, "tests/jest_clock.test.js", text, "expect(Date.now() - t0)", ("calendar",))
 
     def test_vi_fake_clock_skips_new_date_calendar(self):
-        text = src("vi.useFakeTimers();", "vi.setSystemTime(new Date(0));", *JS_DATE_READ)
+        text = src("vi.useFakeTimers();", "vi.setSystemTime(new Date(0));", *JS_DATE_READ, *JS_ELAPSED)
         self.put("tests/vi_clock.test.js", text)
-        fake_clock_judge(self, self.root, ("calendar",))
+        fake_clock_judge(self, "tests/vi_clock.test.js", text, "expect(Date.now() - t0)", ("calendar",))
 
     def test_new_date_without_a_fake_clock_still_lists_calendar(self):
         text = src(*JS_DATE_READ)
