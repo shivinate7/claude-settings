@@ -4430,6 +4430,8 @@ UL_ROOT = os.path.join(ULDIR, "root")    # a.txt staged and b.txt left unstaged,
 UL_FULL = os.path.join(ULDIR, "full")    # 20 files staged and 20 left unstaged, all in docs/
 UL_FULL_STAGED = ["docs/s%02d.md" % number for number in range(20)]
 UL_FULL_LEFT = ["docs/u%02d.md" % number for number in range(20)]
+UL_RMCHAIN = os.path.join(ULDIR, "rmchain")      # docs/a.md tracked and clean, docs/b.md edited and left unstaged
+UL_ADDCHAIN = os.path.join(ULDIR, "addchain")    # docs/a.md and docs/b.md both edited and left unstaged
 
 
 def _ul_must(ok, what):
@@ -4520,6 +4522,19 @@ def _build_ulfull():
     _ul_state(UL_FULL, UL_FULL_STAGED, UL_FULL_LEFT)
 
 
+def _build_ulrmchain():
+    make_repo(UL_RMCHAIN, {"docs/a.md": "base\n", "docs/b.md": "base\n"})
+    _ul_edit(UL_RMCHAIN, "docs/b.md")
+    _ul_state(UL_RMCHAIN, [], ["docs/b.md"])
+
+
+def _build_uladdchain():
+    make_repo(UL_ADDCHAIN, {"docs/a.md": "base\n", "docs/b.md": "base\n"})
+    _ul_edit(UL_ADDCHAIN, "docs/a.md")
+    _ul_edit(UL_ADDCHAIN, "docs/b.md")
+    _ul_state(UL_ADDCHAIN, [], ["docs/a.md", "docs/b.md"])
+
+
 lazy_fixture([UL_ASK], _build_ulask)
 lazy_fixture([UL_EDIT], _build_uledit)
 lazy_fixture([UL_OTHER], _build_ulother)
@@ -4527,6 +4542,8 @@ lazy_fixture([UL_NEW], _build_ulnew)
 lazy_fixture([UL_ALL], _build_ulall)
 lazy_fixture([UL_ROOT], _build_ulroot)
 lazy_fixture([UL_FULL], _build_ulfull)
+lazy_fixture([UL_RMCHAIN], _build_ulrmchain)
+lazy_fixture([UL_ADDCHAIN], _build_uladdchain)
 
 
 def _ul_ask(name, command, cwd, carries="docs/b.md"):
@@ -4577,6 +4594,27 @@ _ul_allow("commit --include -m x docs/b.md is allowed", VCS + " commit --include
 _ul_allow("git status with docs/b.md unstaged is allowed", VCS + " status", UL_EDIT)
 _ul_allow("a read that fails passes: a commit aimed at a folder that is no git tree is allowed",
           VCS + " -C " + slash(NOGIT) + " commit -m x", NOGIT)
+
+
+# THE CHAINS. An earlier `git rm` or `git add` of a named path puts that path in the commit, and the check
+# still runs on what stays out, so the chain asks. The rule raises its ask on the commit segment itself,
+# outside ask-alone, so the chain keeps the ask. An earlier `git add` that names a path with nothing left
+# out, or `git add -A` or `-u`, leaves nothing out, so the commit is allowed. A plain commit with nothing
+# staged has nothing in it to share a folder with, so it is allowed beside the same unstaged edit.
+_ul_ask("a chained git rm of docs/a.md, then a commit, with docs/b.md unstaged, asks",
+        VCS + " rm docs/a.md && " + VCS + " commit -m x", UL_RMCHAIN)
+_ul_ask("a chained git add of docs/a.md, then a commit, with docs/b.md unstaged, asks",
+        VCS + " add docs/a.md && " + VCS + " commit -m x", UL_ADDCHAIN)
+_ul_allow("a plain commit with nothing staged and docs/b.md unstaged is allowed",
+          VCS + " commit -m x", UL_RMCHAIN)
+_ul_allow("a plain commit with nothing staged and docs/a.md and docs/b.md unstaged is allowed",
+          VCS + " commit -m x", UL_ADDCHAIN)
+_ul_allow("a chained git add of docs/b.md, then a commit, with docs/b.md the only unstaged edit is allowed",
+          VCS + " add docs/b.md && " + VCS + " commit -m x", UL_EDIT)
+_ul_allow("a chained git add -A, then a commit, with docs/b.md unstaged is allowed",
+          VCS + " add -A && " + VCS + " commit -m x", UL_EDIT)
+_ul_allow("a chained git add -u, then a commit, with docs/b.md unstaged is allowed",
+          VCS + " add -u && " + VCS + " commit -m x", UL_EDIT)
 
 
 # THE COST. The rule's two reads are the only git processes it starts. Each check judges its own guard run
@@ -11889,8 +11927,10 @@ def _build_conflict_markers():
     _cmk_topic(CMK_STAGED, {"src/app.py": "x = 1\n"})
     stage(CMK_STAGED, "src/app.py", "x = 1\n" + CM_TRIPLET)
 
-    _cmk_topic(CMK_AM, {"src/app.py": "x = 1\n", "src/other.py": "y = 1\n"})
-    write(os.path.join(CMK_AM, "src", "app.py"), "x = 1\n" + CM_TRIPLET)   # tracked, modified, unstaged
+    # The triplet file sits in lib/, not beside the staged src/other.py: a plain commit asks on a left-out
+    # edit in the same folder as a staged path (commit-leaves-edit-unstaged), and this case tests markers only.
+    _cmk_topic(CMK_AM, {"lib/app.py": "x = 1\n", "src/other.py": "y = 1\n"})
+    write(os.path.join(CMK_AM, "lib", "app.py"), "x = 1\n" + CM_TRIPLET)   # tracked, modified, unstaged
     stage(CMK_AM, "src/other.py", "y = 2\n")                                # a clean change, staged
 
     _cmk_topic(CMK_CLEAN, {"src/app.py": "x = 1\n"})
@@ -11941,8 +11981,8 @@ cmk_refuse("commit -am with the triplet in a tracked, modified file", VCS + " co
 cmk_refuse("add . and commit with the triplet in a tracked, modified file",
          VCS + " add . && " + VCS + " commit -m x", CMK_AM)
 cmk_refuse("add of the file and commit, the triplet in that file",
-         VCS + " add src/app.py && " + VCS + " commit -m x", CMK_AM)
-cmk_refuse("a commit by path that names the file with the triplet", VCS + " commit -m x src/app.py", CMK_AM)
+         VCS + " add lib/app.py && " + VCS + " commit -m x", CMK_AM)
+cmk_refuse("a commit by path that names the file with the triplet", VCS + " commit -m x lib/app.py", CMK_AM)
 
 # 3. Scope: the commit holds what it names, and the markers in an unstaged file it does not name are no hit.
 cmk_allow("a commit with the triplet unstaged in another file, and a clean change staged",

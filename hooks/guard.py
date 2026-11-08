@@ -3132,15 +3132,17 @@ def opus_without_grant(tool_input) -> bool:
 # harmless lead or tail (harmless_commands, below). The deny
 # names the command by its kind, never its text. Only the first ask command is held: it is the one that
 # printed before.
-PENDING_ASK = []   # [(rule, reason, matched, command)], at most one
+PENDING_ASK = []   # [(rule, reason, matched, command, alone)], at most one
 ASK_ALONE_REASON = ("this shell call chains a command that needs the owner's answer (%s) with "
                     "other commands. Run that command alone, in its own call, or drop it. "
                     "(decision ask-commands-run-alone, a command that asks the owner runs alone)")
 
 
-def ask_command(rule: str, reason: str, matched: str, command: str) -> None:
+def ask_command(rule: str, reason: str, matched: str, command: str, alone: bool = True) -> None:
+    """Hold an ask until the other rules have run. `alone=False` keeps the ask in a chain: the rule reads
+    each commit segment of the chain itself, so ask-alone does not refuse the chain."""
     if not PENDING_ASK:
-        PENDING_ASK.append((rule, reason, matched, rule + ", " + command))
+        PENDING_ASK.append((rule, reason, matched, rule + ", " + command, alone))
 
 
 def background_commands(segment: str) -> int:
@@ -3243,11 +3245,11 @@ def harmless_commands(text: str) -> int:
 def settle_ask(tool: str, raw: str) -> None:
     if not PENDING_ASK:
         return
-    rule, reason, matched, command = PENDING_ASK[0]
+    rule, reason, matched, command, alone = PENDING_ASK[0]
     # An interpreter heredoc (python, node, perl, ruby) is one command: its body is not counted line by line.
     # Strip the RAW command once. A second strip of stripped text reads a stray delimiter line as a new body.
     text = strip_heredoc_bodies(raw, shells_only=True)
-    if count_commands(text) > 1:
+    if alone and count_commands(text) > 1:
         if count_commands(text) - harmless_commands(text) > 1:
             refuse(tool, "deny", "ask-alone", ASK_ALONE_REASON % command, matched)
     refuse(tool, "ask", rule, reason, matched)
@@ -3387,8 +3389,9 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
         if segment.strip():
             matched = unstaged_edit_commit_hit(segments, number, cwd, ends)
             if matched:
-                refuse(tool, "ask", "commit-leaves-edit-unstaged",
-                       UNSTAGED_EDIT_REASON.format(paths=matched), matched)
+                ask_command("commit-leaves-edit-unstaged", UNSTAGED_EDIT_REASON.format(paths=matched),
+                            matched, "commit", alone=False)
+                break
 
     # 1c2. A worktree made by hand, outside the tool's own folder.
     for number, segment in enumerate(segments):

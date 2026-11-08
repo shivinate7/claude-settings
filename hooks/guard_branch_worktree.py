@@ -338,13 +338,13 @@ def _named_by(name, paths, where, top):
     return False
 
 
-def _commit_site(segments, number: int, cwd: str, ends=()):
-    """(arguments, tree) of `segments[number]` when it is a `git commit` and its tree is a folder, else
-    None. The tree is the shell's cwd after earlier `cd` steps (`dir_before_segment`), then the call's own
-    `-C`. Only a commit makes a git call."""
+def _git_site(segments, number: int, cwd: str, ends=()):
+    """(calls, tree) of `segments[number]`: its git calls as (subcommand, arguments), and the folder they
+    run in, or None when the segment's command word is not `git` or the folder is unknown. The tree is
+    the shell's cwd after earlier `cd` steps (`dir_before_segment`), then the call's own `-C`."""
     segment = segments[number]
-    commits = [args for subcommand, args in git_calls(segment) if subcommand == "commit"]
-    if not commits:
+    calls = git_calls(segment)
+    if not calls:
         return None
     tokens = segment_tokens(segment)
     index = resolve_command(tokens) if tokens else None
@@ -356,7 +356,15 @@ def _commit_site(segments, number: int, cwd: str, ends=()):
         where = None if any(mark in named for mark in "$%`") else shell_abs(named, where)
     if not where or not os.path.isdir(where):
         return None
-    return commits[0], where
+    return calls, where
+
+
+def _commit_site(segments, number: int, cwd: str, ends=()):
+    """(arguments, tree) of `segments[number]` when it is a `git commit` and its tree is a folder, else
+    None. Only a commit makes a git call."""
+    site = _git_site(segments, number, cwd, ends)
+    commits = [args for subcommand, args in site[0] if subcommand == "commit"] if site else []
+    return (commits[0], site[1]) if commits else None
 
 
 def stale_tree_commit_hit(segments, number: int, cwd: str, ends=()) -> str:
@@ -391,19 +399,25 @@ def _name_list(where, *args):
     return [line for line in answer.stdout.split("\n") if line]
 
 
-def unstaged_edit_hit(where, args) -> str:
+def unstaged_edit_hit(where, args, added=()) -> str:
     """The left-out paths, comma-joined, when a plain `git commit` with these arguments, run in `where`,
     leaves a tracked edit out beside a staged path in the same folder, else ''. A commit that picks its
-    files (`-a`, `-o`, `-i`, named paths) is not read."""
+    files (`-a`, `-o`, `-i`, named paths) is not read. ADDED are tree-top-relative paths that an earlier
+    `git add` or `git rm` of the same command puts in the commit: they join the staged set and leave the
+    left-out set."""
     every, include, paths, only, _dry = commit_scope(args)
     if every or include or only or paths:
         return ""
     staged = _name_list(where, "diff", "--cached", "--name-only")
+    if staged is None:
+        return ""
+    staged = staged + [name for name in added if name not in staged]
     if not staged:
         return ""
     left = _name_list(where, "diff", "--name-only")
     if not left:
         return ""
+    left = [name for name in left if name not in added]
     folders = {os.path.dirname(name) for name in staged}
     beside = [name for name in left if os.path.dirname(name) in folders]
     if not beside:
@@ -414,22 +428,91 @@ def unstaged_edit_hit(where, args) -> str:
 
 
 # Git subcommands that change the index or the work tree. An earlier segment of the same command that
-# runs one makes the state at guard time stale (`git add -A && git commit`), so the commit passes.
+# runs one makes the state at guard time stale (`git reset && git commit`), so the commit passes. Only an
+# earlier `add` or `rm` of named paths is read (`_named_paths`); the check then runs with those paths added.
 INDEX_CHANGING_SUBCOMMANDS = {
     "add", "stage", "rm", "mv", "restore", "reset", "checkout", "switch", "apply", "stash", "merge",
     "rebase", "cherry-pick", "revert", "pull", "clean", "commit", "am", "read-tree", "update-index",
 }
 
+# Flags of `git add` and `git rm` that leave the named paths as the whole effect.
+NAMED_PATH_FLAGS = {
+    "add": {"-v", "--verbose", "-f", "--force"},
+    "rm": {"-f", "--force", "-q", "--quiet", "--cached", "--ignore-unmatch", "-r"},
+}
+
+
+def _named_paths(subcommand, args):
+    """The literal paths a `git add` or `git rm` call names, or None when it names anything else: a flag
+    that changes the scope (`-A`, `-u`, `-p`, `--dry-run`), no path, a glob, a pathspec magic, a variable, or
+    `.`. Whether a path is a folder is read by the caller."""
+    flags = NAMED_PATH_FLAGS.get(subcommand)
+    if flags is None:
+        return None
+    names, ended = [], False
+    for arg in args:
+        if not ended and arg == "--":
+            ended = True
+        elif not ended and arg.startswith("-"):
+            if arg not in flags:
+                return None
+        elif not arg or arg == "." or arg.startswith(":") or any(mark in arg for mark in "*?[\\$%`"):
+            return None
+        else:
+            names.append(arg)
+    return names or None
+
+
+def _tree_top(where):
+    """The work tree's top folder above `where` (the nearest folder holding `.git`), else None. A file
+    system read: it starts no git process."""
+    while True:
+        if os.path.exists(os.path.join(where, ".git")):
+            return where
+        parent = os.path.dirname(where)
+        if parent == where:
+            return None
+        where = parent
+
+
+def _added_by_chain(segments, number: int, cwd: str, ends, tree):
+    """The tree-top-relative paths that earlier `git add` and `git rm` calls of this command put in the
+    commit run in TREE, or None when an earlier call makes the state unreadable: any other index-changing
+    call, or an add or rm that names a folder, a glob or `.`, or whose tree has no top. A call that runs in
+    another tree does not touch this index and is skipped."""
+    top = _tree_top(tree)
+    added = []
+    for earlier in range(number):
+        site = _git_site(segments, earlier, cwd, ends)
+        for subcommand, args in (site[0] if site else git_calls(segments[earlier])):
+            if subcommand not in INDEX_CHANGING_SUBCOMMANDS:
+                continue
+            names = _named_paths(subcommand, args)
+            if names is None or not site or not top:
+                return None
+            there = _tree_top(site[1])
+            if there is None:
+                return None
+            if there != top:
+                continue
+            for name in names:
+                full = shell_abs(name, site[1])
+                if not full or os.path.isdir(full):
+                    return None
+                added.append(os.path.relpath(full, top).replace(os.sep, "/"))
+    return added
+
 
 def unstaged_edit_commit_hit(segments, number: int, cwd: str, ends=()) -> str:
     """The left-out paths when `segments[number]` is a plain `git commit` that leaves a tracked edit
-    unstaged beside a staged path in the same folder, else ''. A commit that follows a git call that
-    changes the index in the same command passes: its state is not read yet."""
+    unstaged beside a staged path in the same folder, else ''. The guard reads the index before the
+    command runs, so earlier `git add <paths>` and `git rm <paths>` calls of the same command count as
+    in the commit; any other earlier index-changing git call makes the commit pass."""
     site = _commit_site(segments, number, cwd, ends)
-    if site and any(subcommand in INDEX_CHANGING_SUBCOMMANDS
-                    for earlier in segments[:number] for subcommand, _args in git_calls(earlier)):
+    if not site:
         return ""
-    return unstaged_edit_hit(site[1], site[0]) if site else ""
+    added = _added_by_chain(segments, number, cwd, ends, site[1])
+    return "" if added is None else unstaged_edit_hit(site[1], site[0], added)
 
 
 UNSTAGED_EDIT_REASON = (
