@@ -58,6 +58,12 @@ class Matcher(unittest.TestCase):
         self.assertTrue(any(re.fullmatch(m, "ExitWorktree") for m in matchers),
                         "no guard matcher covers ExitWorktree: %r" % matchers)
 
+    def test_guard_matcher_covers_enter_worktree(self):
+        # Rule worktree-strands-agents refuses an EnterWorktree while this session's agents run, so the guard must see that call.
+        matchers = guard_matchers()
+        self.assertTrue(any(re.fullmatch(m, "EnterWorktree") for m in matchers),
+                        "no guard matcher covers EnterWorktree: %r" % matchers)
+
     def test_guard_matcher_covers_artifact(self):
         # Rule page-stale refuses a waiting-page publish made by the Artifact tool, so the guard must see that call.
         matchers = guard_matchers()

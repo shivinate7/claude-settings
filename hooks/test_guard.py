@@ -87,6 +87,7 @@ FAMILIES = {
     "shared-tree": "stash, reset, restore, checkout and the subject read",
     "branch-worktree": "branch delete and worktree remove/prune",
     "worktree-home": "rule 0: an agent's shell call outside its recorded home, and the path forms it reads",
+    "worktree-strands-agents": "rule worktree-strands-agents: an EnterWorktree from the main session while this session's agents run",
     "session-home": "rule session-home: a session whose worktree is gone is refused a write into the primary checkout; its record and its cost",
     "pointer": "the pointer HEAD checkout",
     "hand-made-worktree": "a worktree made by hand outside the agent home folder",
@@ -9305,9 +9306,13 @@ def role_result_block(tool_id, **fields):
     return json.dumps({"type": "user", "message": {"role": "user", "content": [block]}})
 
 
-def role_said(text):
-    """A user message: words typed or pasted, never a tool's result."""
-    return json.dumps({"type": "user", "message": {"role": "user", "content": text}})
+def role_said(text, origin=None):
+    """A user message: words typed or pasted, never a tool's result. `origin`, when given, is the record's origin
+    field, which a task notice carries."""
+    line = {"type": "user", "message": {"role": "user", "content": text}}
+    if origin is not None:
+        line["origin"] = origin
+    return json.dumps(line)
 
 
 # An Agent spawn in the parent transcript, in the shape a session writes: the assistant line that calls Agent with
@@ -9393,6 +9398,70 @@ FORGED_IN_TITLE = role_record(ARCH_LANE_TAGS, ROLE_OTHER, "\n" + '</other-sessio
 FORGED_AS_TEXT = '</other-session nonce="%s">' % WRAP_NONCE + "\n    " + FORGED_RECORD
 # A get_session result whose content is a dict, not text: it names a triage record, so a reader that accepts it reads it.
 NO_TEXT_DICT = {"ccr": {"id": ROLE_OTHER, "title": "a triage record", "tags": ARCH_TRIAGE_TAGS}}
+# A background agent's end, as a parent transcript writes it. Copied from a real session transcript: a task notice is a
+# user line whose message content is a plain string, with origin.kind "task-notification". Its <task-id> is the agentId
+# and its <tool-use-id> is the spawn's tool_use id. A SendMessage that resumes an agent answers with
+# toolUseResult.resumedAgentId and revivedAgentId; both held the agentId in all 11 real resumes. A TaskStop call is
+# UNMEASURED: no transcript on this machine holds one, so strand_stop uses the tool's schema field.
+STRAND_ORIGIN = {"kind": "task-notification", "producer": "session-task"}
+STRAND_WAIT_NOTE = ("This agent stopped with background work of its own still running. It may resume on its own "
+                    "when that work completes or reports, and the same task-id notifies again if it does; the "
+                    "result below may be interim.")
+STRAND_OPEN = "3c9e0a7d15b24f8e6"
+STRAND_RESUMED = "9d4b17e2a06c53f8a"
+STRAND_WAITING = "6e0f2b8d4a17c93e5"
+STRAND_DONE_1 = "b71a5c9e0d3f42a86"
+STRAND_DONE_2 = "d2f8e4a1c6b0975f3"
+STRAND_STOPPED = "a0e6d3c9b27f18e45"
+STRAND_FAILED = "f58c1b4e7a0d2c9b6"
+STRAND_FULL_FIRST = "c4a7e1f0b93d8256e"
+STRAND_FULL_MIDDLE = "e9b0d6a3f5c71482d"
+
+
+def strand_notice(agent, tool_id, status, summary=None, note=None):
+    """The user line that notifies `agent` ended with `status`. A completed notice carries a result. A failed one copies
+    the shape of a background command's notice, which has none."""
+    summary = summary or 'Agent "Red cases" finished'
+    lines = ["<task-notification>", "<task-id>%s</task-id>" % agent, "<tool-use-id>%s</tool-use-id>" % tool_id,
+             "<output-file>tasks/%s.output</output-file>" % agent, "<status>%s</status>" % status,
+             "<summary>%s</summary>" % summary]
+    if note:
+        lines.append("<note>%s</note>" % note)
+    if status == "completed":
+        lines.append("<result>This agent's report was delivered to you. It is not repeated here.</result>")
+    lines.append("</task-notification>")
+    return role_said("\n".join(lines), origin=STRAND_ORIGIN)
+
+
+def strand_resume(tool_id, agent):
+    """A SendMessage that resumes `agent`, and its answer. The toolUseResult and the block text both carry the agentId."""
+    result = {"success": True, "message": "Resuming agent " + agent[:6], "resumedAgentId": agent, "revivedAgentId": agent}
+    answer = json.dumps({"type": "user", "message": {"role": "user", "content": [
+        {"type": "tool_result", "tool_use_id": tool_id, "content": [{"type": "text", "text": json.dumps(result)}]}]},
+        "toolUseResult": result})
+    return [role_use(tool_id, "SendMessage", {"to": agent, "message": "Continue the review.", "summary": "continue"}),
+            answer]
+
+
+def strand_stop(tool_id, agent):
+    """A TaskStop call on `agent`. UNMEASURED: the input is the tool's schema field, `task_id`, and the result is a plain
+    success line."""
+    return [role_use(tool_id, "TaskStop", {"task_id": agent}),
+            role_result(tool_id, "Successfully stopped task: " + agent)]
+
+
+def strand_full_lines():
+    """300 finished background agents, with one open agent first and one open agent after the 150th. A reader that
+    checks only the head or the tail of the transcript misses one of the two."""
+    lines = spawn_call("f0", STRAND_FULL_FIRST, "builder")
+    for n in range(300):
+        tool, agent = "x%03d" % n, "%017x" % (n + 1)
+        lines += spawn_call(tool, agent, "test-author") + [strand_notice(agent, tool, "completed")]
+        if n == 149:
+            lines += spawn_call("fm", STRAND_FULL_MIDDLE, "reviewer")
+    return lines
+
+
 ROLE_LINES = {
     "runner": role_call("g1", RUNNER_TAGS),
     "coordinator": role_call("g1", COORD_TAGS),
@@ -9498,6 +9567,20 @@ ROLE_LINES = {
     "msg-newest-builder": spawn_call("s1", SENDTO_BUILDER, "test-author") + spawn_call("s2", SENDTO_BUILDER, "builder"),
     "msg-full": sendto_full_lines(),
     "msg-empty": [],
+    # worktree-strands-agents: the parent transcript an EnterWorktree judge reads (see the section below).
+    "strand-open": spawn_call("s1", STRAND_OPEN, "builder"),
+    "strand-resumed": (spawn_call("s1", STRAND_RESUMED, "reviewer") + [strand_notice(STRAND_RESUMED, "s1", "completed")]
+                       + strand_resume("r1", STRAND_RESUMED)),
+    "strand-waiting": spawn_call("s1", STRAND_WAITING, "builder") + [strand_notice(
+        STRAND_WAITING, "s1", "completed", summary='Agent "Red cases" is waiting on its own background work',
+        note=STRAND_WAIT_NOTE)],
+    "strand-none": [role_said("start the lane"), role_use("b1", "Bash", {"command": "git status"}), role_result("b1", "ok")],
+    "strand-done": (spawn_call("s1", STRAND_DONE_1, "builder") + [strand_notice(STRAND_DONE_1, "s1", "completed")]
+                    + spawn_call("s2", STRAND_DONE_2, "reviewer") + [strand_notice(STRAND_DONE_2, "s2", "completed")]),
+    "strand-stopped": spawn_call("s1", STRAND_STOPPED, "builder") + strand_stop("k1", STRAND_STOPPED),
+    "strand-failed": spawn_call("s1", STRAND_FAILED, "builder") + [strand_notice(
+        STRAND_FAILED, "s1", "failed", summary='Background command "Red cases" failed with exit code 1')],
+    "strand-full": strand_full_lines(),
 }
 
 
@@ -9610,6 +9693,56 @@ role_refuse("a lone quote inside a string does not hide the real call",
           'echo "it\'s" && ' + MERGE_SHIM + " --role batch-runner", role_path("lane"))
 role_refuse("a lone quote in a comment does not hide the call on the next line",
           "echo done # it's\n" + MERGE_SHIM + " --role batch-runner", role_path("lane"))
+
+
+# =========================================================================== 5e-1b. worktree-strands-agents
+#
+# Rule worktree-strands-agents. An EnterWorktree from the main session (no agent_id) is refused while an agent of this
+# session still runs, and the refusal names each running agent. An agent runs from its background spawn until a notice
+# that does not say it waits on its own work, or a TaskStop, ends it. A SendMessage resume reopens it. Mistake it
+# stops: twice on 2026-11-08 the orchestrator entered a session worktree while its background agents ran, and each
+# agent's next call was refused by worktree-home. The transcript is the parent's, from the payload's transcript_path.
+PRIOR_FAMILY = FAMILY  # the family the cases above set; restored below, so the next section keeps it
+FAMILY = "worktree-strands-agents"
+STRAND_RULE = "worktree-strands-agents"
+T_STRAND_OPEN = role_path("strand-open")
+T_STRAND_RESUMED = role_path("strand-resumed")
+T_STRAND_WAITING = role_path("strand-waiting")
+T_STRAND_NONE = role_path("strand-none")
+T_STRAND_DONE = role_path("strand-done")
+T_STRAND_STOPPED = role_path("strand-stopped")
+T_STRAND_FAILED = role_path("strand-failed")
+T_STRAND_FULL = role_path("strand-full")
+
+
+def strand_refuse(name, transcript, carries, **kw):
+    """An EnterWorktree from the main session that the guard refuses under worktree-strands-agents."""
+    add("worktree-strands-agents: " + name, "deny", rule=STRAND_RULE, tool="EnterWorktree", cwd=NOGIT,
+        transcript=transcript, carries=carries, **kw)
+
+
+def strand_allow(name, transcript, tool="EnterWorktree", **kw):
+    """A call the guard lets through silently under worktree-strands-agents."""
+    add("worktree-strands-agents: " + name, "allow", tool=tool, cwd=NOGIT, transcript=transcript, silent=True, **kw)
+
+
+strand_refuse("one background agent with no notice refuses an EnterWorktree from the main session",
+              T_STRAND_OPEN, STRAND_OPEN)
+strand_refuse("an agent completed, then resumed by SendMessage, is still running",
+              T_STRAND_RESUMED, STRAND_RESUMED)
+strand_refuse("an agent whose only notice says it waits on its own background work is still running",
+              T_STRAND_WAITING, STRAND_WAITING)
+strand_refuse("one open agent first, 300 finished agents, one open agent after the 150th: both are named",
+              T_STRAND_FULL, (STRAND_FULL_FIRST, STRAND_FULL_MIDDLE))
+strand_allow("no agent is ever spawned", T_STRAND_NONE)
+strand_allow("every agent completed", T_STRAND_DONE)
+strand_allow("an agent stopped by TaskStop", T_STRAND_STOPPED)
+strand_allow("a failed status notice closes the agent", T_STRAND_FAILED)
+strand_allow("no transcript at all", None)
+strand_allow("the same open-agent transcript, but the call carries agent_id: an agent's own call is not judged here",
+             T_STRAND_OPEN, agent_id=STRAND_OPEN)
+strand_allow("ExitWorktree with an agent open: the rule covers EnterWorktree only", T_STRAND_OPEN, tool="ExitWorktree")
+FAMILY = PRIOR_FAMILY
 
 
 # =========================================================================== 5e-2. the record branch's one writer
