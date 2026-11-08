@@ -12982,18 +12982,30 @@ class ReviewRoundCheckEnv(Env):
         pulls += [lane_pull(8 + i, b, tip) for i, (b, tip) in enumerate(tips.items())]
         return LanePulls(self.co, self.other, pulls=pulls + list(others), comments=list(comments), windowed=windowed)
 
-    def stacked_pr_on_lane1(self, lane1, main_tip):
-        """Pull request 7 is stacked on agent/lane1, not main: agent/stack is cut from `lane1`, merges origin/main at `main_tip` and adds one own
-        commit. The caller cuts lane1 before it pushes main_tip to main, so lane1 does not hold main_tip. The own head has a done record, the only one.
-        -> (the stack's head, the host)."""
+    def stacked_pr_on_lane1(self, lane1, main_tip, start=None, reviewed_tip=None, own=True):
+        """Pull request 7 is stacked on agent/lane1, not main: agent/stack is cut from `start` (default `lane1`), merges `reviewed_tip` when given (a
+        lane tip whose done record is on pull request 8), merges origin/main at `main_tip` and, when `own`, adds one own commit. When `start` is given,
+        the base joins the stack by a merge, so the stack holds the base's tip. The caller cuts lane1 before it pushes main_tip to main, so lane1 does
+        not hold main_tip. With `own` the own head has a done record, the only one. Without it the own head has no record and no commit of its own:
+        an integration head. -> (the stack's head, the host)."""
         o = self.other
-        sh(o, "git", "checkout", "-q", "-B", "agent/stack", lane1)
+        sh(o, "git", "checkout", "-q", "-B", "agent/stack", start or lane1)
+        if start:
+            sh(o, "git", "merge", "-q", "--no-ff", "-m", "Merge origin/agent/lane1 into agent/stack", lane1)
+        comments = []
+        if reviewed_tip:
+            sh(o, "git", "merge", "-q", "--no-ff", "-m", "Merge a reviewed lane into agent/stack", reviewed_tip)
+            comments.append(round_check_comment(2, 8, reviewed_tip, guard="no", rounds=REVIEW_PASS))
         sh(o, "git", "merge", "-q", "--no-ff", "-m", "Merge origin/main into agent/stack", main_tip)
-        put(os.path.join(o, "agent-stack.txt"), "stack\n")
-        sh(o, "git", "add", "-A"); sh(o, "git", "commit", "-q", "-m", "agent/stack: own commit"); sh(o, "git", "push", "-q", "origin", "agent/stack")
+        if own:
+            put(os.path.join(o, "agent-stack.txt"), "stack\n")
+            sh(o, "git", "add", "-A"); sh(o, "git", "commit", "-q", "-m", "agent/stack: own commit")
+        sh(o, "git", "push", "-q", "origin", "agent/stack")
         stack = sh(o, "git", "rev-parse", "HEAD")
-        host = self.batch_host({}, [round_check_comment(1, 7, stack, guard="no", rounds=REVIEW_PASS)])
-        host.records_default = False  # the own head's done record is the only one
+        if own:
+            comments.append(round_check_comment(1, 7, stack, guard="no", rounds=REVIEW_PASS))
+        host = self.batch_host({}, comments)
+        host.records_default = False  # the records scripted here are the only ones
         host.branch, host.base = "agent/stack", "agent/lane1"
         host.pulls = [{**batch_pull(7, stack, base="agent/lane1"), "head": {"ref": "agent/stack", "sha": stack}}]
         return stack, host
@@ -13573,7 +13585,10 @@ class ReviewUnreviewedHead(ReviewRoundCheckEnv):
     Case 5's integration head holds only its lanes' merges. Case 8 adds an own commit beyond a lane tip and is refused. Case 9 is an integration head with
     a FAIL on its own head, which passes. Cases 8, 9 and 11 are red on the old code. Cases 10 and 12 are green controls: the newest record across pull
     requests decides, and a merged main tip in a stacked branch's history is no lane tip. Case 13 is the green control for case 14, which is red
-    on the default-branch cut: main's revert of a lane's merge, read through a stacked pull request on a lane branch, must refuse as a dropped lane."""
+    on the default-branch cut: main's revert of a lane's merge, read through a stacked pull request on a lane branch, must refuse as a dropped lane.
+    Case 15 is green on the old code and kills the `h not in on_default` clause of read_lanes' own_out: a stacked pull request that starts at a main
+    commit, merges a reviewed lane tip and main, and adds no commit of its own is an integration head. Case 16 is red on the old code: confirm must
+    fetch origin/<default> before the read, or main's newer commit merged into a stacked pull request reads as an unreviewed lane tip."""
 
     ROUND_ONE_FAIL = ("Round 1: reviewer, sonnet, FAIL",)
 
@@ -13782,6 +13797,49 @@ class ReviewUnreviewedHead(ReviewRoundCheckEnv):
         self.assertIn(f"(lane tip {t[:9]})", out, "the refusal does not name lane2's tip as the dropped lane:\n" + out)
         self.assertIn("rebuild the integration branch from main without the lane", out, "the refusal is not the dropped-lane one:\n" + out)
         self.assert_nothing_pushed(host, before)
+
+    def test_unreviewed_head_stacked_pr_with_a_main_commit_on_its_first_parent_owes_no_record(self):  # case 15
+        # agent/stack starts at main's commit c, merges the base, the reviewed lane tip t and then main's newer tip m, and adds no commit of its own. c
+        # is on main and on the stack's first-parent chain, so it is an own commit unless the default-branch cut takes it out of own_out
+        o = self.other
+        lane1 = cut_branch(o, "agent/lane1")[-1]
+        t = cut_branch(o, "agent/lane2")[-1]  # cut before main moves, so no main commit is in its history
+        c = cut_branch(o, "agent/main-first")[-1]
+        sh(o, "git", "push", "-q", "origin", f"{c}:refs/heads/main")
+        m = cut_branch(o, "agent/main-moves")[-1]
+        sh(o, "git", "push", "-q", "origin", f"{m}:refs/heads/main")
+        stack, host = self.stacked_pr_on_lane1(lane1, m, start=c, reviewed_tip=t, own=False)
+        self.assertEqual(self.history_exit(c, "origin/main"), 0, "main's commit is not on origin/main")
+        self.assertEqual(self.history_exit(c, "origin/agent/lane1"), 1, "main's commit is in the history of the stacked base, so it is not new to the stack")
+        self.assertEqual(self.history_exit(c, t), 1, "main's commit is in the history of the lane tip, so a lane tip holds it")
+        self.assertEqual(self.history_exit(m, t), 1, "main's newer commit is in the history of the lane tip, so a lane tip holds it")
+        self.assertEqual(self.history_exit(t, "origin/agent/lane1"), 1, "the lane tip is in the history of the stacked base, so it is no lane of the stack")
+        self.assertEqual(self.history_exit(t, stack), 0, "the stacked head does not merge the lane tip")
+        self.assertEqual(sh(self.co, "git", "rev-list", "--first-parent", "--no-merges", f"origin/agent/lane1..{stack}").split(), [c],
+                         "the first-parent chain of the stack does not hold main's commit as its one non-merge commit")
+        self.assertEqual(sh(self.co, "git", "rev-list", "--no-merges", f"origin/agent/lane1..{stack}", "^origin/main").split(), [t],
+                         "the stack holds a non-merge commit of its own, so it is not an integration head")
+        self.assertFalse(any(stack in cm["body"] for cm in host.comments), "a record names the stacked head, so its own head has one")
+        rc, out, _before = self.run_round_check(host, "--confirm")
+        self.assertNotIn(f"#7 (head {stack[:9]})", out, "the round-3 check names the stacked head, which adds no commit of its own:\n" + out)
+        self.assert_allowed(rc, out, host)
+
+    def test_unreviewed_head_stacked_pr_reads_a_fresh_default_branch_before_the_cut(self):  # case 16
+        # the clone's origin/main is older than main: the stacked pull request merged main's newer commit m, which the clone has not fetched. confirm must
+        # fetch origin/<default> before the read, or m reads as an unreviewed lane tip. Nothing in this case fetches the clone before the run
+        o = self.other
+        stale = sh(self.co, "git", "rev-parse", "refs/remotes/origin/main")
+        lane1 = cut_branch(o, "agent/lane1")[-1]
+        m = cut_branch(o, "agent/main-moves")[-1]
+        sh(o, "git", "push", "-q", "origin", f"{m}:refs/heads/main")
+        stack, host = self.stacked_pr_on_lane1(lane1, m)
+        self.assertEqual(self.head("main"), m, "the remote's main is not the newer commit")
+        self.assertEqual(sh(self.co, "git", "rev-parse", "refs/remotes/origin/main"), stale, "the clone's origin/main is not older than main, so the case is not stale")
+        self.assertIn(m, sh(o, "git", "rev-list", f"{lane1}..{stack}").split(), "the stacked head does not merge main's newer commit")
+        self.assertNotIn(m, sh(o, "git", "rev-list", lane1).split(), "the stacked base holds main's newer commit, so it is not new to the stack")
+        rc, out, _before = self.run_round_check(host, "--confirm")
+        self.assertNotIn(f"tip {m[:9]}", out, "the round-3 check reads main's newer commit as an unreviewed lane tip, because the clone's origin/main is older:\n" + out)
+        self.assert_allowed(rc, out, host)
 
 # The report-only model judge at merge. The merge reads each governed Markdown file at head, selects a file whose line
 # cites a changed backing file (lint/stale_cites.py backed_lines), and sends it to decision_watch.invoke_model once. The
