@@ -7168,7 +7168,7 @@ push_case("stray branch, a second refspec that names the current branch asks",
 sh("push: stray branch, a bare push under push.default current asks",
    VCS + " -c push.default=current push", "ask", PUSH_STRAY_RULE, cwd=PUSHSTRAY)
 
-# UNREAD FOLDER (decision plain-push-asks): a push whose folder cannot be read asks, as the forced push
+# UNREAD FOLDER. Owner ruling 413 a (2026-11-08): a push whose folder cannot be read asks, as the forced push
 # does on the same folder (the lease cases above). A bare push's destination is read from its folder, so with
 # no readable folder the destination is unknown. A `cd $(...)` is a second command, so its ask is chained and
 # denies, as the lease cases above do. A `cd X &&` to a folder that is not there is one command, so it asks alone.

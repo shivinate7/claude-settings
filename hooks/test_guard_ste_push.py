@@ -812,7 +812,8 @@ def want_chained_unread_ask(out, label):
     return None
 
 
-# Decision plain-push-asks: a push whose folder cannot be read asks, as the forced push does. A `cd "$(...)"` is a second command, so its ask chains
+# Owner ruling 413 a (2026-11-08 06:11 CST) and coordinator ruling under item 410 a (2026-11-08 06:22 CST): a push
+# whose folder cannot be read asks, as the forced push does. A `cd "$(...)"` is a second command, so its ask chains
 # with the push and denies; a `cd` to a folder that is not there is one command and asks alone.
 def unread_folder_push(template, chained):
     """A bare push after a `cd` the guard cannot read. `%(a)s` is the bad checkout the push would send the bad note
