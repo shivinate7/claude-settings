@@ -966,7 +966,7 @@ class CannotClaimTests(unittest.TestCase):
         out = self.stop([trg.human("merge PR 12"), trg.assistant_text(line)])
         self.assert_blocks(out, line)
 
-    def test_cc_green_a_ci_failure_still_blocks_a_merge_claim(self):
+    def test_cc_green_a_ci_failure_passes_a_merge_claim(self):
         # Control: CI failing, or CI red, names the blocker of a merge, so the merge claim passes.
         for line in ("I can't merge PR 12 because CI failed.", "CI is red and I can't merge PR 12."):
             with self.subTest(line=line):
@@ -999,6 +999,38 @@ class CannotClaimTests(unittest.TestCase):
         line = "I could not open the CI logs and PR."
         out = self.stop([trg.human("open the PR"), trg.assistant_text(line)])
         self.assert_passes(out, "an open whose object is the CI logs and a bare PR")
+
+    # ---- an and or or after create or raise stops the object window; a failed word before to, with, a colon or a paren is an outage; a failed CI state passes a merge claim
+
+    def test_cc_red_a_create_or_raise_claim_with_and_or_or_still_blocks(self):
+        # Catches: the and or or stop of the object window applied to open only, so "create the branch and PR" read its PR as
+        # outside the claim, and the claim passed with no try.
+        for line in ("I could not create the branch and PR.", "I couldn't create a branch and PR.",
+                     "I can't create the branch or PR.", "I could not raise the issue and PR."):
+            with self.subTest(line=line):
+                out = self.stop([trg.human("open the PR"), notice("github: failed to connect"), trg.assistant_text(line)])
+                self.assert_blocks(out, line)
+
+    def test_cc_red_a_failed_word_before_to_with_a_colon_or_a_paren_is_no_blocker(self):
+        # Catches: "failed" or "failing" followed by to, with, a colon or a paren read as a CI blocker, so a merge claim beside
+        # an outage passed as backed. A health-check that failed is an outage too, with a hyphen as with a space.
+        for line in ("The health-check failed and I can't merge PR 12.",
+                     "I can't merge PR 12 because CI failed: connection refused.",
+                     "I can't merge PR 12 because CI failed (connection refused).",
+                     "I can't merge PR 12 because CI failed with a connection error.",
+                     "I can't merge PR 12 because the checks failed to fetch.",
+                     "The connectivity check failed and I can't merge PR 12.",
+                     "I can't merge PR 12 because CI is failing to start."):
+            with self.subTest(line=line):
+                out = self.stop([trg.human("merge PR 12"), trg.assistant_text(line)])
+                self.assert_blocks(out, line)
+
+    def test_cc_red_a_ci_that_has_failed_passes_a_merge_claim(self):
+        # Catches: "CI has failed" read as no blocker, so the merge claim it stated blocked as having no try. The tail has
+        # failed names the CI state of a merge.
+        line = "I can't merge PR 12 because CI has failed."
+        out = self.stop([trg.human("merge PR 12"), trg.assistant_text(line)])
+        self.assert_passes(out, "a merge claim whose blocker is CI that has failed")
 
     # ---- a claim after a bold report label. "**Input Needed** Could not open the PR" is a hand-off form.
     # The label is no subject: the clause after it opens, so the phrase has an empty subject and is a claim.
