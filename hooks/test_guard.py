@@ -20492,7 +20492,9 @@ def worktree_home_cross_checkout_heredoc_text_case():
     A quoted python body that only quotes the path is text, so it passes. A body that runs the write
     through os, subprocess, shutil, exec, eval or __import__, under any alias, is refused, and so is a
     body that does not parse. A perl or ruby body that writes into another checkout is refused, and so
-    is a perl in-place edit of a file there. Why: docs/decisions/an-agent-outside-its-home-tree-must-stop.md.
+    is a perl in-place edit of a file there. A comment opener, a quote or a write word inside a perl or
+    ruby string is text, so a body that only quotes a write passes. Why:
+    docs/decisions/an-agent-outside-its-home-tree-must-stop.md.
     """
     primary, lane_a, lane_b, _ = _cross_checkout_fixture("xcoheredoc")
     other = slash(lane_b)
@@ -20515,6 +20517,21 @@ def worktree_home_cross_checkout_heredoc_text_case():
                   "json.dumps({'n': 'cp a %s/x $f'}))\nPY" % other)
     check("quoted python body that prints a shell line naming another checkout", "allow", "Bash",
           lane_a, command="python3 - <<'PY'\nprint(\"os.system('cp a %s/x')\")\nPY" % other)
+    # A cd into a folder of this checkout, then a relative write: the write lands in its own checkout.
+    os.makedirs(os.path.join(lane_a, "src"), exist_ok=True)
+    check("mkdir and cd within its own checkout, then a python write to ../out.txt", "allow", "Bash",
+          lane_a, command="mkdir -p src && cd src && python3 - <<'PY'\nopen('../out.txt','w').write('1')\nPY")
+    # Scanner traps: a perl or ruby body reads a comment opener, a quote or a write word in a string as text.
+    check("perl body with a comment opener and a write word inside its strings", "allow", "Bash",
+          lane_a, command="perl - <<'PL'\nprint \"# not a comment\"; print \"File.write %s/x\";\nPL" % other)
+    check("ruby body with a write inside a single-quoted string", "allow", "Bash", lane_a,
+          command="ruby - <<'RB'\nputs 'File.write(\"%s/x\")'\nRB" % other)
+    check("ruby body with a multi-line string that quotes a write", "allow", "Bash", lane_a,
+          command="ruby - <<'RB'\ns = \"a\nFile.write('%s/x')\nb\"\nputs s\nRB" % other)
+    check("perl body with a lone quote in a comment", "allow", "Bash", lane_a,
+          command="perl - <<'PL'\n# don't\nprint 1;\nPL")
+    check("ruby body with a lone quote in a string", "allow", "Bash", lane_a,
+          command="ruby - <<'RB'\nputs \"it's\"\nRB")
 
     # Controls: each write into another checkout, run by an interpreter body, stays refused.
     check("control: python f-string os.system copies into another checkout", "deny", "Bash", lane_a,
@@ -20549,6 +20566,28 @@ def worktree_home_cross_checkout_heredoc_text_case():
           command="ruby - <<'RB'\nFile.write(\"%s/x\", \"1\")\nRB" % other)
     check("perl -pi edits a file in another checkout in place", "deny", "Bash", lane_a,
           command="perl -pi -e 's/a/b/' %s/x" % other)
+    # A python body writes a script that names a copy into another checkout; a command then runs it.
+    check("python body writes a script that copies into another checkout, then sh runs it", "deny",
+          "Bash", lane_a,
+          command="python3 - <<'PY'\nopen('x.sh','w').write('cp a %s/x')\nPY\nsh x.sh" % other)
+    # A relative write that climbs out of a folder of this checkout into lane-b is judged from that folder.
+    check("control: cd into a folder of its own checkout, then a python write up into lane-b", "deny",
+          "Bash", lane_a, command="cd src && python3 - <<'PY'\nopen('../../lane-b/x','w').write('1')\nPY")
+    # Controls for each scanner trap above: the same body with a real write after the trap stays refused.
+    check("control: perl comment opener in a string, then an open for write into another checkout",
+          "deny", "Bash", lane_a,
+          command="perl - <<'PL'\nprint \"# not a comment\"; open(F, \">\", \"%s/x\");\nPL" % other)
+    check("control: ruby write in a string, then a File.write into another checkout", "deny", "Bash",
+          lane_a, command="ruby - <<'RB'\nputs 'File.write(\"%s/x\")'\nFile.write(\"%s/x\", \"1\")\nRB"
+                          % (other, other))
+    check("control: ruby multi-line string, then a File.write into another checkout", "deny", "Bash",
+          lane_a, command="ruby - <<'RB'\ns = \"a\nFile.write('%s/x')\nb\"\nFile.write(\"%s/x\", \"1\")\nRB"
+                          % (other, other))
+    check("control: perl lone quote in a comment, then an open for write into another checkout",
+          "deny", "Bash", lane_a,
+          command="perl - <<'PL'\n# don't\nopen(F, \">\", \"%s/x\");\nPL" % other)
+    check("control: ruby lone quote in a string, then a File.write into another checkout", "deny",
+          "Bash", lane_a, command="ruby - <<'RB'\nputs \"it's\"\nFile.write(\"%s/x\", \"1\")\nRB" % other)
 
     if problems:
         return False, "; ".join(problems)
