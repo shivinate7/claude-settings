@@ -2253,7 +2253,7 @@ def refuse_owed_round(tips, info, n, host, unknown_ok="", root=None, tips_unread
     A read that fails refuses (unknown is red, READ_CITE), unless the run has the reason flag --undo-check-unknown-ok "<reason>", as refuse_dropped_lane does:
     the same flag lifts the dropped-lane check. A lift returns its reason; a lifted date read reads every comment, so the own head is still checked.
     `root`: a checkout that holds the pull request's head and its base. The refusal's last line is its remedy, by the states found: held, failed fix check,
-    a new head with a done record, net-value test owed, the third round owed. It never prints a passing record line."""
+    a record posted on the wrong pull request (each posting pull request paired with the one its record names), a new head with a done record, net-value test owed, the third round owed. It never prints a passing record line."""
     epoch = "1970-01-01T00:00:00Z"  # a host that cannot date the read gets every comment, never a missed record
     base_ref, lifted = f"origin/{info['base']}", None
     if tips_unread:
@@ -2276,14 +2276,14 @@ def refuse_owed_round(tips, info, n, host, unknown_ok="", root=None, tips_unread
                        f"If the cause is known, run again with the reason flag {UNDO_FLAG} \"<reason>\". {READ_CITE}")
     heads = list(dict.fromkeys([*tips, info["head"]]))
     lanes = [(info["head"], n)] + [(t, num) for t in tips for num in sorted(records)]
-    named = []  # the pull requests that records posted on the wrong pull request name
+    named = []  # (posting pull request, the pull request its record names), for each record posted on the wrong pull request
     found = []
     for sha, num in dict.fromkeys(lanes):
         kind, why, pr = owed_round(num, records.get(num, []), sha) or (None, None, None)
         if kind:
             found.append((kind, f"#{num} ({'head' if sha == info['head'] and num == n else 'tip'} {sha[:9]}) {why}."))
-            if pr is not None and pr not in named:
-                named.append(pr)
+            if pr is not None and (num, pr) not in named:
+                named.append((num, pr))
     def new_to_batch(h):  # the own head's history first: once it holds `h`, the clone holds `h`, so an exit 128 on the base read is a bad base and refuses
         return head_in_history(root, h, info["head"]) and not head_in_history(root, h, base_ref)
     try:
@@ -2297,7 +2297,7 @@ def refuse_owed_round(tips, info, n, host, unknown_ok="", root=None, tips_unread
         lifted = unknown_ok.strip()
     if found:  # a lane found owing still refuses when the stale-record read was lifted
         kinds = [k for k in ROUND_REMEDY if any(k == f[0] for f in found)]
-        raise RoundOwed(" ".join(f[1] for f in found) + "\n" + " ".join(ROUND_REMEDY[k].format(named=", ".join(f"#{p}" for p in named)) for k in kinds) + f" {ROUND3_CITE}")
+        raise RoundOwed(" ".join(f[1] for f in found) + "\n" + " ".join(ROUND_REMEDY[k].format(named=", ".join(f"#{posted} names #{pr}" for posted, pr in sorted(named))) for k in kinds) + f" {ROUND3_CITE}")
     return lifted
 
 def cut_lanes(root, lanes, commit, host=None, base=None, skip=(), keep=(), dropped=()):
