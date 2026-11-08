@@ -22108,7 +22108,7 @@ _relesc_add("worktree-home relative escape: an agent with no record, mkdir ../x 
 # (`%(red_from_home)s`), or by a cd, pushd or -C. A restore that names red in its own segment, or runs in red after a
 # chained cd, resolves in red, and passes. Each deny checks its logged detail, which the printed reason does not carry.
 # Decision: an-agent-outside-its-home-tree-must-stop.
-RED_RESTORE_DETAIL = "relative restore meant for the red-run folder"
+RED_RESTORE_DETAIL = _load_guard_module().RED_RESTORE_DETAIL   # the guard's own detail: the rows check its prefix
 
 # Deny, from the recorded home: a relative restore whose command names the agent's own red-run folder in another segment.
 _relesc_add("worktree-home red restore: git -C <red> status && git restore src/app.py, a relative restore after a "
@@ -22172,6 +22172,32 @@ _relesc_add("worktree-home red restore: git restore src/app.py && cat <<'EOF' wi
             "is text, is allowed", "allow", "git restore src/app.py && cat <<'EOF'\n%(red)s\nEOF", "home")
 _relesc_add("worktree-home red restore: git -C <red> status && echo \"git restore src/app.py\", the restore is text in "
             "quotes, is allowed", "allow", 'git -C %(red)s status && echo "git restore src/app.py"', "home")
+# The checkout spelling and the other restore flags. A checkout names a file only with a file operand that exists, a
+# branch switch names none; `--work-tree` and `--git-dir` name the tree the restore runs in, so a red folder there
+# passes. `--source` takes a rev the same way `checkout` does. `$X` is a folder the clause cannot read: shared-tree
+# refuses that restore, and the clause does not judge it.
+_relesc_add("worktree-home red restore: git -C <red> status && git checkout HEAD t.py, a checkout with a rev and a "
+            "relative file, is refused", "deny", "git -C %(red)s status && git checkout HEAD t.py", "home",
+            rule="worktree-home", detail=RED_RESTORE_DETAIL)
+_relesc_add("worktree-home red restore: git -C <red> status && git checkout t.py, a checkout of a relative file with no "
+            "--, is refused", "deny", "git -C %(red)s status && git checkout t.py", "home",
+            rule="worktree-home", detail=RED_RESTORE_DETAIL)
+_relesc_add("worktree-home red restore: git checkout t.py, no red folder named, is allowed", "allow",
+            "git checkout t.py", "home")
+_relesc_add("worktree-home red restore: git -C <red> status && git checkout main, a branch switch names no file, is "
+            "allowed", "allow", "git -C %(red)s status && git checkout main", "home")
+_relesc_add("worktree-home red restore: git --work-tree=<red> restore t.py, the tree it runs in is the red folder, is "
+            "allowed", "allow", "git --work-tree=%(red)s restore t.py", "home")
+_relesc_add("worktree-home red restore: git --git-dir=<red>/.git restore t.py, the git dir is the red folder, is "
+            "allowed", "allow", "git --git-dir=%(red)s/.git restore t.py", "home")
+_relesc_add("worktree-home red restore: git -C <red> status && git restore --source HEAD t.py, a --source with a "
+            "separate rev, is refused", "deny", "git -C %(red)s status && git restore --source HEAD t.py", "home",
+            rule="worktree-home", detail=RED_RESTORE_DETAIL)
+_relesc_add("worktree-home red restore: git restore --source HEAD t.py, no red folder named, is allowed", "allow",
+            "git restore --source HEAD t.py", "home")
+_relesc_add("worktree-home red restore: git -C <red> status && git -C $X restore t.py, a variable folder the clause does "
+            "not read, is refused by shared-tree", "deny", "git -C %(red)s status && git -C $X restore t.py", "home",
+            rule="shared-tree")
 
 
 # The cost pins, measured on the unchanged code: the git spawns and worktree-list spawns each call makes

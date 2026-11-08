@@ -1375,6 +1375,10 @@ MUTATIONS = [
      "        if not words or not at or red[number] or not any(red[:number] + red[number + 1:]):",
      "        if not words or not at or red[number]:",
      "guard", "worktree-home red restore"),
+    ("worktree-home: the restore clause judges no command, so a red-named restore of a relative file is allowed",
+     '    if not own or not primary:\n        return ""\n    command = _padded_shell_command(tool, tool_input)\n',
+     '    return ""\n    command = _padded_shell_command(tool, tool_input)\n',
+     "guard", "worktree-home red restore: git -C <red> status && git checkout HEAD t.py"),
     ("worktree-home: an unreadable home record denies instead of allowing",
      '    home_status, home, home_primary = agent_worktree_home(payload, home_cwd)\n'
      '    if home_status != "home":',
