@@ -7,7 +7,8 @@ The contract these cases pin (the builder implements it):
   A clause also starts at `because`. start and end are offsets into the sentence and exclude the terminator.
 - mask: one bool per character, True inside a code span or a quote. The caller builds it. The parser reads no quotes.
 - Clause fields: start, end, join, subject, verb, aux, modal, negated, conditional, tense, passive, object, complement,
-  reason_for. Words are lowercase. join is the word that opens the clause, or None.
+  reason_for, lead, term, hard_end, sent_end, lead_at, lead_end. Words are lowercase. join is the word that opens the
+  clause, or None.
 - Lexicons: NEGATORS, ADVERBS, CONDITIONALS, REASON_LINKS, DETERMINERS, CANNOT_FORMS.
 
 Sentences marked "constructed" are not in test_report_guard_cannot.py. The others are from it.
@@ -217,6 +218,78 @@ class ClauseFieldTests(unittest.TestCase):
         self.assertIsNone(found[0].reason_for, "reason_for: the claim clause names a reason link")
         self.assertEqual(found[1].reason_for, "because", "reason_for: the reason clause names no link")
         self.assertEqual(found[1].join, "because", "join: the reason clause does not open with because")
+
+
+class SeparatorFieldTests(unittest.TestCase):
+    """The fields that place a clause among its separators and stops. Each is named here, so no field of Clause is untested."""
+
+    def test_lead_is_the_separator_before_the_clause_and_empty_for_the_first(self):
+        # Catches: lead always "", so the comma, semicolon or dash that opens a later clause is lost.
+        cases = (("I can't merge PR 12, but the CI is red.", ["", ","]),
+                 ("I can't merge PR 12; the CI is red.", ["", ";"]),
+                 ("I can't merge PR 12 -- the CI is red.", ["", "--"]))
+        for sentence, leads in cases:
+            with self.subTest(sentence=sentence):
+                self.assertEqual([c.lead for c in parse(sentence)], leads,
+                                 "lead: wrong separator before a clause in %r" % sentence)
+
+    def test_term_is_the_separator_after_the_clause_and_the_period_closes_the_last(self):
+        # Catches: term always "", so the comma, semicolon or period that closes a clause is lost. A sentence with no
+        # terminator closes its last clause with nothing.
+        cases = (("I can't merge PR 12, but the CI is red.", [",", "."]),
+                 ("I can't merge PR 12; the CI is red.", [";", "."]),
+                 ("I can't merge PR 12", [""]))
+        for sentence, terms in cases:
+            with self.subTest(sentence=sentence):
+                self.assertEqual([c.term for c in parse(sentence)], terms,
+                                 "term: wrong separator after a clause in %r" % sentence)
+
+    def test_lead_at_is_where_the_separator_before_the_clause_starts(self):
+        # Catches: lead_at always 0, so the place of the separator is lost. The first clause has no separator, so its
+        # offset is 0.
+        sentence = "Run it; I can't merge PR 12."
+        found = parse(sentence)
+        self.assertEqual(found[0].lead_at, 0, "lead_at: the first clause has no separator, so its offset is not 0")
+        self.assertEqual(found[1].lead_at, sentence.index(";"), "lead_at: the separator before the second clause starts elsewhere")
+
+    def test_lead_end_is_where_the_separator_before_the_clause_ends(self):
+        # Catches: lead_end always 0 or equal to lead_at, so the width of the separator is lost. A one-character mark ends
+        # one past where it starts.
+        sentence = "Run it; I can't merge PR 12."
+        found = parse(sentence)
+        self.assertEqual(found[0].lead_end, 0, "lead_end: the first clause has no separator, so its offset is not 0")
+        self.assertEqual(found[1].lead_end, sentence.index(";") + 1,
+                         "lead_end: the separator before the second clause ends elsewhere")
+
+    def test_hard_end_is_the_nearest_hard_stop_at_or_after_the_clause_start(self):
+        # Catches: hard_end always the sentence end, or a comma or a dot inside a token read as the hard stop. The comma is
+        # no hard stop, so the first clause ends at the semicolon; api.github.com has no hard stop, so its clause ends at
+        # the period.
+        sentence = "I can't merge PR 12, but the CI is red; I wait."
+        self.assertEqual([c.hard_end for c in parse(sentence)],
+                         [sentence.index(";"), sentence.index(";"), sentence.rindex(".")],
+                         "hard_end: wrong hard stop for a clause in %r" % sentence)
+        sentence = "Reach api.github.com today, I can't merge PR 12."
+        self.assertEqual(parse(sentence)[0].hard_end, sentence.rindex("."),
+                         "hard_end: a dot inside a token is read as a hard stop")
+
+    def test_hard_end_is_the_text_end_when_no_hard_stop_follows(self):
+        # Catches: hard_end read past the text, or the stop taken from another clause. With no stop after the clause,
+        # hard_end is the length of the sentence.
+        sentence = "I can't merge PR 12"
+        self.assertEqual(parse(sentence)[0].hard_end, len(sentence), "hard_end: no stop follows the clause")
+
+    def test_sent_end_is_the_nearest_sentence_stop_and_a_dot_inside_a_token_counts(self):
+        # Catches: sent_end read from the hard stops only, so the dot inside api.github.com is skipped and the clause runs to
+        # the period at the end of the sentence.
+        sentence = "Reach api.github.com today, I can't merge PR 12."
+        self.assertEqual(parse(sentence)[0].sent_end, sentence.index("api.") + len("api"),
+                         "sent_end: the dot inside api.github.com is not the nearest stop")
+
+    def test_sent_end_is_the_text_end_when_no_stop_follows(self):
+        # Catches: sent_end read past the text. With no sentence stop after the clause, sent_end is the length of the sentence.
+        sentence = "I can't merge PR 12"
+        self.assertEqual(parse(sentence)[0].sent_end, len(sentence), "sent_end: no stop follows the clause")
 
 
 class LexiconTests(unittest.TestCase):
