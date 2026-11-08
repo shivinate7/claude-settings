@@ -4662,12 +4662,17 @@ class AnsweredNeedsSourceTests(unittest.TestCase):
 
 class PendingRefusalTests(unittest.TestCase):
     """refusal-note, the Stop half: a refused tool stays pending until the reply names it under
-    Input Needed. The refusals file is written here by hand, so these cases do not depend on
-    hooks/refusal_note.py. Each case works in its own folder under this run's folder (test-temp-standard)."""
+    Input Needed or says the refusal was right. A reply that raises a refusal also records it as raised,
+    so the same tool refused again for the same reason passes silently. The refusals file is written here
+    by hand, so these cases do not depend on hooks/refusal_note.py. Each case works in its own folder under
+    this run's folder (test-temp-standard)."""
 
     SID = "pd-sid-1"
     ARCHIVE = "mcp__claude-code-remote__archive_session"
     ADD_REPO = "mcp__claude-code-remote__add_repo"
+    BASH = "Bash"
+    REASON = "auto mode refused the call: it archives a session the owner did not name"
+    OTHER_REASON = "auto mode refused the call: it adds a repo outside the allowed list"
     PAGE = "https://claude.ai/artifact/waitpage3"
     PROSE = "Nothing landed. The state is unchanged."
     LANDED_OTHER_ASK = ("> **Done** BUILT abc123\n> **Deviations** none\n"
@@ -4690,12 +4695,19 @@ class PendingRefusalTests(unittest.TestCase):
     def refusals_file(self, sid=SID):
         return os.path.join(self.cfg, "state", "refusals", sid + ".jsonl")
 
-    def write_refusals(self, tools, sid=SID):
+    def write_rows(self, rows, sid=SID, agent_id=None):
+        """The refusals file with one row per (tool_name, reason) pair, in the shape hooks/refusal_note.py writes.
+        With `agent_id`, each row is an agent's refused call, as the hook writes it."""
         os.makedirs(os.path.dirname(self.refusals_file(sid)), exist_ok=True)
         with open(self.refusals_file(sid), "w", encoding="utf-8") as handle:
-            for tool in tools:
-                handle.write(json.dumps({"ts": "2026-11-01T10:00:00-05:00", "tool_name": tool,
-                                         "reason": "refused"}) + "\n")
+            for tool, reason in rows:
+                row = {"ts": "2026-11-01T10:00:00-05:00", "tool_name": tool, "reason": reason}
+                if agent_id:
+                    row["agent_id"] = agent_id
+                handle.write(json.dumps(row) + "\n")
+
+    def write_refusals(self, tools, sid=SID):
+        self.write_rows([(tool, "refused") for tool in tools], sid)
 
     def pending_tools(self, sid=SID):
         """The tool_name of each line still in the refusals file, [] when the file is gone."""
@@ -4721,6 +4733,41 @@ class PendingRefusalTests(unittest.TestCase):
     def blocked(run):
         """The block decision the guard printed, or None when the Stop passed."""
         return json.loads(run.stdout) if run.stdout.strip() else None
+
+    def use_fresh_config(self):
+        """A config folder of its own, so one subtest's raised refusals never settle the next subtest's."""
+        self.cfg = tempfile.mkdtemp(dir=self.scratch)
+
+    @staticmethod
+    def raising_reply(rows):
+        """A reply that raises each (tool, reason) row: its tool's name, then "refusal was right"."""
+        return "\n".join("`%s` refusal was right." % tool for tool, _ in rows) + "\nNothing landed."
+
+    @staticmethod
+    def input_needed_reply(rows):
+        """A reply that raises each row by naming its tool under Input Needed, with no question for the owner."""
+        names = ", ".join("`%s`" % tool for tool, _ in rows)
+        return ("> **Done** OTHER read the state\n> **Deviations** none\n"
+                "> **Input Needed** %s was refused; nothing for the owner to decide.\n> **Next** wait" % names)
+
+    def raise_refusal(self, rows, reply, active=False, sid=SID):
+        """Raise `rows` with `reply`. Scope first: the rows are in the file. Then the reply passes and clears them."""
+        self.write_rows(rows, sid)
+        self.assertEqual(self.pending_tools(sid), [tool for tool, _ in rows],
+                         "scope: the fixture file does not hold the rows")
+        run = self.stop(reply, active=active, sid=sid)
+        self.assertEqual(run.stdout.strip(), "", "the reply that raises the refusal blocked: %s" % run.stdout)
+        self.assertEqual(self.pending_tools(sid), [], "the reply that raises the refusal left its row in the file")
+
+    def config_files(self):
+        """Every file under this test's config folder, as {relative path: bytes}."""
+        found = {}
+        for root, _, names in os.walk(self.cfg):
+            for name in names:
+                path = os.path.join(root, name)
+                with open(path, "rb") as handle:
+                    found[os.path.relpath(path, self.cfg)] = handle.read()
+        return found
 
     def test_d_pending_refusal_not_named_under_input_needed_blocks(self):
         rows = (("unlanded prose reply", False, self.PROSE),
@@ -4860,6 +4907,129 @@ class PendingRefusalTests(unittest.TestCase):
             handle.write("not json\n")
         run = self.stop(self.PROSE)
         self.assertEqual(run.stdout.strip(), "", "an unreadable refusals file blocked the Stop: %s" % run.stdout)
+
+    def test_l_a_raised_refusal_does_not_block_again_for_the_same_tool_and_reason(self):
+        # Catches: a refusal the owner was already told of blocks again, when the classifier refuses the same tool
+        # for the same reason and a later reply does not name it.
+        one = [(self.ARCHIVE, self.REASON)]
+        two = [(self.ARCHIVE, self.REASON), (self.ADD_REPO, self.REASON)]
+        raises = (("refusal was right, one row", self.raising_reply, one),
+                  ("Input Needed, one row", self.input_needed_reply, one),
+                  ("refusal was right, two rows", self.raising_reply, two))
+        followers = (("unlanded prose", False, self.PROSE), ("landed clean report", True, self.LANDED_CLEAN))
+        for raise_label, make_reply, rows in raises:
+            for next_label, landed, reply in followers:
+                with self.subTest(raised=raise_label, next_reply=next_label):
+                    self.use_fresh_config()
+                    self.raise_refusal(rows, make_reply(rows))
+                    self.write_rows(rows)
+                    out = self.blocked(self.stop(reply, landed=landed))
+                    self.assertIsNone(out, "a refusal already raised with the owner blocked again: %s" % out)
+                    self.assertEqual(self.pending_tools(), [], "the Stop left the repeated refusal in the file")
+
+    def test_m_a_new_refusal_still_blocks_after_a_raise(self):
+        # Catches: a raise settles a different refusal of the same tool, or of another tool with the same reason.
+        cases = (("same tool, new reason", [(self.BASH, self.REASON)], [(self.BASH, self.OTHER_REASON)], self.BASH),
+                 ("new tool, same reason", [(self.ARCHIVE, self.REASON)], [(self.ADD_REPO, self.REASON)], self.ADD_REPO))
+        for label, raised, new, tool in cases:
+            with self.subTest(label):
+                self.use_fresh_config()
+                self.raise_refusal(raised, self.raising_reply(raised))
+                self.write_rows(new)
+                out = self.blocked(self.stop(self.PROSE))
+                self.assertIsNotNone(out, "a new refusal passed on the strength of an earlier raise")
+                self.assertEqual(out.get("decision"), "block")
+                self.assertIn("`%s`" % tool, out["reason"], "the block does not name the new refusal")
+                self.assertEqual(self.pending_tools(), [tool], "the new refusal left the file")
+
+    def test_n_an_empty_reason_is_never_matched(self):
+        # Catches: refusals with no reason read as one refusal, so a second one with no reason passes unraised.
+        cases = (("empty, then empty", [(self.BASH, "")], [(self.BASH, "")]),
+                 ("a reason, then empty", [(self.BASH, self.REASON)], [(self.BASH, "")]))
+        for label, raised, new in cases:
+            with self.subTest(label):
+                self.use_fresh_config()
+                self.raise_refusal(raised, self.raising_reply(raised))
+                self.write_rows(new)
+                out = self.blocked(self.stop(self.PROSE))
+                self.assertIsNotNone(out, "a refusal with no reason passed on the strength of an earlier raise")
+                self.assertEqual(out.get("decision"), "block")
+                self.assertIn("`%s`" % self.BASH, out["reason"])
+                self.assertEqual(self.pending_tools(), [self.BASH], "the empty-reason refusal left the file")
+
+    def test_o_a_stop_hook_active_raise_is_recorded_and_never_blocks(self):
+        # Catches: a rewrite Stop clears a refusal without recording it, so the next reply blocks on it again.
+        rows = [(self.ARCHIVE, self.REASON)]
+        raises = (("refusal was right", self.raising_reply), ("Input Needed", self.input_needed_reply))
+        for raise_label, make_reply in raises:
+            with self.subTest(raised=raise_label):
+                self.use_fresh_config()
+                self.raise_refusal(rows, make_reply(rows), active=True)  # the rewrite never blocks, and clears the row
+                self.write_rows(rows)
+                out = self.blocked(self.stop(self.PROSE))
+                self.assertIsNone(out, "a refusal raised by a stop_hook_active rewrite blocked again: %s" % out)
+                self.assertEqual(self.pending_tools(), [], "the Stop left the repeated refusal in the file")
+
+    def test_p_a_raise_in_one_session_does_not_settle_another(self):
+        # Catches: the raised record is shared across sessions, so one session's raise settles another's refusal.
+        other = "pd-other-sid-raised"
+        rows = [(self.ARCHIVE, self.REASON)]
+        self.raise_refusal(rows, self.raising_reply(rows))
+        self.write_rows(rows, sid=other)
+        self.assertEqual(self.pending_tools(other), [self.ARCHIVE],
+                         "scope: the other session's file does not hold the row")
+        out = self.blocked(self.stop(self.PROSE, sid=other))
+        self.assertIsNotNone(out, "another session's raise settled this session's refusal")
+        self.assertEqual(out.get("decision"), "block")
+        self.assertIn(self.ARCHIVE, out["reason"])
+        self.assertEqual(self.pending_tools(other), [self.ARCHIVE], "a blocked Stop cleared the other session's row")
+
+    def test_q_a_stop_with_no_refusals_file_writes_nothing(self):
+        # Catches: a Stop writes state under the config folder when no refusal is pending. The cost is one stat.
+        for label, landed, reply in (("unlanded", False, self.PROSE), ("landed clean report", True, self.LANDED_CLEAN)):
+            with self.subTest(label):
+                self.use_fresh_config()
+                self.assertFalse(os.path.exists(self.refusals_file()), "scope: a refusals file exists")
+                before = self.config_files()
+                run = self.stop(reply, landed=landed)
+                self.assertEqual(run.stdout.strip(), "", run.stdout)
+                self.assertEqual(self.config_files(), before, "the Stop wrote a file with no refusal pending")
+
+    def test_s_a_blank_reason_is_never_matched(self):
+        # Catches: a reason of spaces only counts as a reason, so a second refusal with that blank reason passes
+        # on the strength of an earlier raise. A blank reason identifies nothing, as an empty one does.
+        raises = (("refusal was right", self.raising_reply), ("Input Needed", self.input_needed_reply))
+        for raise_label, make_reply in raises:
+            with self.subTest(raised=raise_label):
+                self.use_fresh_config()
+                rows = [(self.BASH, "   ")]
+                self.raise_refusal(rows, make_reply(rows))
+                self.write_rows(rows)
+                out = self.blocked(self.stop(self.PROSE))
+                self.assertIsNotNone(out, "a refusal with a blank reason passed on the strength of an earlier raise")
+                self.assertEqual(out.get("decision"), "block")
+                self.assertIn("`%s`" % self.BASH, out["reason"], "the block does not name the blank-reason refusal")
+                self.assertEqual(self.pending_tools(), [self.BASH], "the blank-reason refusal left the file")
+
+    def test_r_an_agent_row_is_never_recorded_as_raised(self):
+        # Catches: an agent's refused call is recorded as raised, so the same tool and reason refused to the
+        # orchestrator later passes unseen. The agent row clears by the agent rule; the orchestrator row must block.
+        agent = [(self.BASH, self.REASON)]
+        followers = (("unlanded prose", False, self.PROSE), ("landed clean report", True, self.LANDED_CLEAN))
+        for label, landed, reply in followers:
+            with self.subTest(next_reply=label):
+                self.use_fresh_config()
+                self.write_rows(agent, agent_id="agent-r1")
+                self.assertEqual(self.pending_tools(), [self.BASH], "scope: the fixture file does not hold the agent row")
+                run = self.stop(self.input_needed_reply(agent))
+                self.assertEqual(run.stdout.strip(), "", "the reply that names the agent row blocked: %s" % run.stdout)
+                self.assertEqual(self.pending_tools(), [], "the reply left the agent row in the file")
+                self.write_rows(agent)
+                out = self.blocked(self.stop(reply, landed=landed))
+                self.assertIsNotNone(out, "an orchestrator row passed on the strength of an agent row that was named")
+                self.assertEqual(out.get("decision"), "block")
+                self.assertIn(self.BASH, out["reason"], "the block does not name the orchestrator refusal")
+                self.assertEqual(self.pending_tools(), [self.BASH], "a blocked Stop cleared the orchestrator row")
 
 
 # building-mistake-names-its-guard (decision mistake-means-missing-guard): a Deviations admission of a
