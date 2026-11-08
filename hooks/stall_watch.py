@@ -30,11 +30,11 @@ Hook: stall_watch.py --hook
   drops the trap; the wrapper's `rm -f` after `wait` still cleans up a job that never stalled.
 
   BEAT is stall-watch-<id>.beat next to LOG. A tool that is quiet by
-  design appends there too (hooks/stall_beat.py: bin/verdict's heartbeat, bin/ci-job's start line per step, and its `fetch:` line once on a shallow clone), and the watcher relays it to its stdout (the
+  design appends there too (hooks/stall_beat.py: bin/verdict's heartbeat, and bin/ci-job's start line per step), and the watcher relays it to its stdout (the
   harness output file), so a redirect in the command cannot hide it from the watcher or the Stop check.
   Each log the original names (named_logs: `> F`, `>> F`, `&> F`, `>& F`, `tee F`, `--log F`)
   is passed as `--also F`.
-  Cost: one append per heartbeat, step start or unshallow fetch by the tool, and one read of BEAT on each 0.2 s loop pass in the watcher.
+  Cost: one append per verdict heartbeat or ci-job step start, and one read of BEAT on each 0.2 s loop pass in the watcher.
 
   The original stays unquoted, as top-level shell code, so a settings deny rule still sees it.
   STALL_WATCH_QUIET overrides the default quiet time (for tests and proofs only).
@@ -250,7 +250,7 @@ def report(pid, quiet, log, also=(), beat=None, logf=None, beatf=None):
     except (OSError, ValueError):
         beat_used = False
     if beat_used:
-        lines.append("Beat file (verdict heartbeat, ci-job start and fetch lines), no growth: " + os.path.abspath(beat))
+        lines.append("Beat file (verdict heartbeat, ci-job start lines), no growth: " + os.path.abspath(beat))
     sys.stdout.write("\n".join(lines) + "\n")
     sys.stdout.flush()
 
@@ -267,7 +267,7 @@ def held(fd):
 def watch(pid, log, quiet, also=(), beat=None, log_fd=None, beat_fd=None):
     """Stream LOG and BEAT; report a stall after quiet seconds with no new byte on either and no
     change to any named log (named_logs). The named logs cost one stat each a second, in this loop.
-    BEAT is where a quiet-by-design tool (bin/verdict) appends its heartbeat; it may not exist at
+    BEAT is where a quiet-by-design tool appends (bin/verdict its heartbeat, bin/ci-job each step's start line); it may not exist at
     start, so it is opened at the first check that finds it. The wrapper creates both files and opens
     both before the job starts, and the job removes them when it ends; log_fd and beat_fd are those
     handles, so a job that ends at once loses no output."""
