@@ -1187,13 +1187,13 @@ def step_dup_hit(tool: str, tool_input, transcript: str, cwd: str = ""):
     With no carrier found, anything short of a whole read, or a subject with no cs-repo tag, is an ask: unknown, never
     an allow. After a whole read with no carrier, two more reads can still ask: an open pull request of the cs-repo
     whose head is lane_head_refs(step), when the target does not carry the step, and the step record on origin/roadmap
-    (`lane` field) naming a session id other than the target. A failed pull request or record read is an ask; a lane
-    field with no session id gives no verdict. Fails closed: an error in the reads is an ask, because the guard-wide
+    (`lane` field) naming a session id other than the target. A failed pull request or record read, or an unreadable ref, is an ask; a readable ref with no record of the step, and a lane
+    field with no session id, give no verdict. Fails closed: an error in the reads is an ask, because the guard-wide
     crash path fails open. Known limit: only this transcript is read, so a session started after the newest list
     read is not seen.
     Cost: one transcript read per brief or create with a step, no file written, no process, no extra tool call; the
     coordinator pays about one list_sessions call per session. Only after a whole read found no carrier: one gh read
-    (open pull requests per cs-repo tag) plus one local git read (the step record)."""
+    (open pull requests per cs-repo tag) plus two local git reads (the step record: ls-tree, then show)."""
     if not isinstance(tool_input, dict) or tool not in (BRIEF_TOOL, CREATE_TOOL):
         return None
     target = None
@@ -1256,7 +1256,13 @@ def _step_held_hit(steps, subject, target_tags, target, cwd: str):
                     if str(row["head"]["ref"]) in lane_head_refs(step):
                         return ("lane step " + step + " has open pull request " + str(row.get("number", "?")),
                                 STEP_DUP_PR_REASON % (row.get("number", "?"), step))
-        shown = _git(cwd, "show", override.STEP_REF + ":" + override.STEP_DIR + step + ".json") if cwd else None
+        record = override.STEP_DIR + step + ".json"
+        listed = _git(cwd, "ls-tree", "--name-only", override.STEP_REF, "--", record) if cwd else None
+        if listed is None or listed.returncode != 0:  # an unreadable ref or checkout is unknown
+            raise ValueError("the record branch could not be read")
+        if not listed.stdout.strip():  # a readable ref with no record of the step names no lane
+            continue
+        shown = _git(cwd, "show", override.STEP_REF + ":" + record)
         if shown is None or shown.returncode != 0:
             raise ValueError("the step record could not be read")
         lane = json.loads(shown.stdout).get("lane")
