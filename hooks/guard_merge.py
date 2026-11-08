@@ -922,12 +922,6 @@ def _top_of(where):
     return os.path.normpath(done.stdout.strip()) if done is not None and done.returncode == 0 and done.stdout.strip() else ""
 
 
-def _segment_top(segments, number, ends, cwd):
-    """The top folder of the checkout `segments[number]` lands in (see `_commit_folder`), or ''."""
-    folder = _commit_folder(segments, number, cwd, ends)
-    return _top_of(folder[0]) if folder else ""
-
-
 def _ste_dirty(top, scope, added):
     """The first in-scope file a commit made now would add (staged or dirty and tracked, plus untracked when the
     call ran a `git add`), '' for none, None when git could not tell."""
