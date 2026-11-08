@@ -1983,10 +1983,11 @@ class PickClaims(UpkeepFixture):
     """The upkeep row for each open step whose note, why or ask states an owner pick that the page's recorded answers
     do not match. A claim is `the owner picked <letter>`, `owner picked <letter>` or `item <n> <letter>` (`item #<n>
     <letter>` too), any case, with the letter one whole word: "subitem 9 a", "items 9 a", "homeowner picked a" and
-    "item 9 ab" are not claims. A claim that names item n matches the answers row with n, when that row's choice is
-    the letter (any case). A claim with no item number matches no row. The row reads `<step id> (claim "<claim as
-    written>")` per unmatched claim, or one unknown entry when the live file cannot say. A missing answers list
-    reads unknown, never an empty row."""
+    "item 9 ab" are not claims. A claim that names item n matches the answers row with n, or the lastAnswer of the
+    live items row with n, when its choice is the letter (any case). A choice that is a list of letters matches when
+    it holds the letter. A claim with no item number matches no row. An answers row with no integer n (answers/park.<id>)
+    is skipped. The row reads `<step id> (claim "<claim as written>")` per unmatched claim, or one unknown entry when
+    the live file cannot say. A missing answers list reads unknown, never an empty row."""
 
     ROW = "owner-pick claims with no matching answer"
 
@@ -1998,6 +1999,12 @@ class PickClaims(UpkeepFixture):
     def answer(self, n, choice):
         """One row of the --live file's answers list, as the publisher copies it from answers/<id>: n, choice and at."""
         return {"n": n, "choice": choice, "at": "2026-11-08T10:00:00-06:00"}
+
+    def item_answer(self, n, choice, status="closed", home="c153"):
+        """One items row that carries the owner's last answer, as the publisher copies it from the item's lastAnswer."""
+        row = self.item(n, home=home, status=status, lane=None)
+        row["lastAnswer"] = {"choice": choice, "note": "accepted pick", "at": "2026-11-08T10:00:00-06:00"}
+        return row
 
     def snapshot(self):
         """{path: (mtime_ns, size)} of each file under the test's folder, so a write to any of them shows."""
@@ -2102,8 +2109,9 @@ class PickClaims(UpkeepFixture):
         self.assertEqual(self.flagged(self.out_with_live()), (1, ['c154 (claim "item 201 a")']))
 
     def test_a_live_file_with_no_answers_list_reads_the_row_unknown_once(self):
+        """Unknown without an answers list, even when an item's lastAnswer would match: the list is the one switch."""
         self.commit_step("c153", note="Ruling: item 9 a.")
-        value = self.publish(items=[])  # no answers key
+        value = self.publish(items=[self.item_answer(9, "a")])  # no answers key
         for label, answers in (("missing", _ABSENT), ("null", None), ("an object", {}), ("a string", "item 9 a")):
             with self.subTest(answers=label):
                 self.write_live(dict(value) if answers is _ABSENT else dict(value, answers=answers))
@@ -2112,20 +2120,54 @@ class PickClaims(UpkeepFixture):
     def test_an_answers_row_of_the_wrong_shape_reads_the_row_unknown_once(self):
         self.commit_step("c153", note="Ruling: item 10 a.")  # the good row matches, so a script that skips the bad row reads clean
         good = self.answer(10, "a")
-        bad_rows = [
-            "item 9 a",
-            {"choice": "a", "at": "2026-11-08T10:00:00-06:00"},
-            {"n": "9", "choice": "a"},
-            {"n": True, "choice": "a"},
-            {"n": 9.0, "choice": "a"},
-            {"n": 9, "choice": ["a"]},  # a multi-item list is not one letter, as the answers shape says
+        bad_rows = [  # each has an integer n, so it is not skipped: its other fields are wrong
             {"n": 9, "choice": 7},
+            {"n": 9, "choice": [7]},
+            {"n": 9, "choice": ["a", 7]},
             {"n": 9, "choice": "a", "at": 1731000000},
         ]
         for bad in bad_rows:
             with self.subTest(row=bad):
                 self.publish(items=[], answers=[good, bad])
                 self.assert_row_unknown(self.out_with_live(), self.ROW)
+
+    def test_an_answers_row_with_no_integer_n_is_skipped_not_unknown(self):
+        """answers/park.<id> rows carry no n. Such a row matches nothing and blanks nothing."""
+        self.commit_step("c153", note="Ruling: item 9 a.")  # the skipped rows name item 9, so this claim stays listed
+        self.commit_step("c154", note="Ruling: item 10 a.", order=2)  # control: the integer-n row matches and reads clean
+        park = {"parked": True, "id": "p1", "act": "unpark", "ref": "x", "note": "", "at": "2026-11-08T10:00:00-06:00"}
+        skipped = [park, "item 9 a", {"n": "9", "choice": "a"}, {"n": True, "choice": "a"}, {"n": 9.0, "choice": "a"},
+                   {"choice": "a"}]
+        for row in skipped:
+            with self.subTest(row=row):
+                self.publish(items=[], answers=[self.answer(10, "a"), row])
+                self.assertEqual(self.flagged(self.out_with_live()), (1, ['c153 (claim "item 9 a")']))
+
+    def test_a_multi_item_choice_list_matches_when_it_holds_the_letter(self):
+        self.commit_step("c153", note="Ruling: item 9 a.")  # the list holds a
+        self.commit_step("c154", note="Ruling: item 9 b.", order=2)  # the list does not hold b: listed
+        self.commit_step("c155", note="Ruling: item #9 C.", order=3)  # the list holds c, in any case
+        self.commit_step("c156", note="Ruling: item 11 c.", order=4)  # the item's lastAnswer list holds c
+        self.publish(items=[self.item_answer(11, ["a", "c"])], answers=[self.answer(9, ["A", "c"])])
+        self.assertEqual(self.flagged(self.out_with_live()), (1, ['c154 (claim "item 9 b")']))
+
+    def test_a_claim_matched_only_by_an_items_last_answer_reads_clean(self):
+        self.commit_step("c153", note="Ruling: item 9 a.")  # matched by the open item's lastAnswer, with no answers row
+        self.commit_step("c154", note="Ruling: item 10 a.", order=2)  # control: no row and no lastAnswer, so it is listed
+        self.publish(items=[self.item_answer(9, "a", status="open")], answers=[])
+        self.assertEqual(self.flagged(self.out_with_live()), (1, ['c154 (claim "item 10 a")']))
+
+    def test_a_last_answer_with_a_different_choice_is_flagged(self):
+        self.commit_step("c153", note="Ruling: item 9 a.")
+        self.commit_step("c154", note="Ruling: item 9 b.", order=2)  # control: the lastAnswer letter reads clean
+        self.publish(items=[self.item_answer(9, "b", status="open")], answers=[])
+        self.assertEqual(self.flagged(self.out_with_live()), (1, ['c153 (claim "item 9 a")']))
+
+    def test_a_closed_item_with_no_answers_row_and_a_matching_last_answer_reads_clean(self):
+        self.commit_step("c153", note="Ruling: item 9 a.")  # the answers row is gone once filed; lastAnswer keeps the pick
+        self.commit_step("c154", note="Ruling: item 10 a.", order=2)  # control: no row and no lastAnswer, so it is listed
+        self.publish(items=[self.item_answer(9, "a", status="closed")], answers=[])
+        self.assertEqual(self.flagged(self.out_with_live()), (1, ['c154 (claim "item 10 a")']))
 
     def test_a_skipped_session_row_does_not_make_the_row_unknown(self):
         self.commit_step("c153", note="Ruling: item 9 a.")
