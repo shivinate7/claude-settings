@@ -5,8 +5,8 @@
 An item write whose picture the page would refuse, or would draw as a thin strip, is refused at write, with the page's own sentence. The owner never sees it (decision `questions-go-to-owner`, skill `waiting-page`, "Add a design").
 
 - Guard rule `page-item-design` (`hooks/guard.py`, `page_design_hit`) judges an `ArtifactData` write of this repo's waiting page. It judges a `set`, or an `update` that carries both `options` and `designs`, when its data carries a picture: a `designs` list, or an option with `design` (`question_form.design_writes`, the one home of "carries a picture"). A write with no picture never starts node.
-- It runs `skills/waiting-page/check_designs.mjs --page <file> --item <json>` once per judged item, through `_run_check_designs`, the one seam that starts node.
-  - The checker loads the published page in headless Chromium at 390 px wide, with a stub database that holds only the item. It then asks the page's own code. `pictureProblem(item)` gives the sentence. The page's `MIN_PIC` gives the floor.
+- It runs `skills/waiting-page/check_designs.mjs --page <file> --item <json>` once per judged item, through `skills/waiting-page/page_check.py` `run_check_designs`, the one home that starts node (decision `page-check-at-export`).
+  - The checker loads the published page in headless Chromium at 390 px wide, with a stub database that holds the item, and the answers when the caller passes `--answers` (the guard passes none). It then asks the page's own code. `pictureProblem(item)` gives the sentence. The page's `MIN_PIC` gives the floor.
   - It measures every option card picture, ranked cards too: the `.opic .dfitwrap` of the card that holds the option's input, read with `getBoundingClientRect`.
   - The stub item gets `kind` "decision" when the write has none. The page draws option cards only for a decision, so an `update` with no `kind` is still measured.
   - The floor: a picture is a miss when the page drew it under `MIN_PIC` high and scaled it below 0.5 (`SHRUNK` in `check_designs.mjs`).
