@@ -23,6 +23,8 @@ Rule `lane-lint-send` in `hooks/guard.py` refuses a `send_message` to a batch ru
 None is an owner ruling. Lane pick, 2026-11-08 CST.
 
 - A target with no usable record, or one retagged after its record, is refused once per target per session with a steer to `get_session` on the target alone, then retry. The retry passes, found by an earlier send to that target in the transcript whose result names this rule. This matches `brief_hit`. Not taken: refuse every send until a record exists, which would loop for a target the sender cannot read.
+- The once-per-target steer is new code (`_send_refused_before`): `brief_hit` refuses every brief with no record and never refuses once, and no other hook keeps a once-per-session steer. With no transcript to read, the refusal could never be spent, so the send passes with one note.
+- `owner/name#n` is judged and takes its repo from the prefix. A `name#n` with no owner is not judged: it names no repo the guard can read.
 - The newest review record decides, as in `merge --reviewed`. A record with `Head` equal to the live head clears the pull request whatever its round verdicts say: the lint is the gate here, and the done rules stay the batch runner's.
 - Skip a closed or merged pull request. A hand-off may name one in a status line.
 - More than five pull requests is unknown, not a refusal: five reads fit the cap, and a larger message is a status report.

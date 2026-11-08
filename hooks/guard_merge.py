@@ -1624,6 +1624,7 @@ LANE_SEND_MAX = 5  # pull requests judged in one message; a sixth makes the whol
 RUNNER_TAG = ROLE_TAG_PREFIX + ROLE_TIERS[0]
 _SEND_PR_URL = re.compile(r"https?://github\.com/([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)/pull/(\d+)(?!\d)")
 _SEND_PR_BARE = re.compile(r"(?<![\w&/])#(\d{1,5})(?!\w)")  # `#41`; not `&#39;`, a colour, or a number in a longer digit run
+_SEND_PR_QUALIFIED = re.compile(r"(?<![\w/.-])([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)#(\d{1,5})(?!\w)")  # `owner/name#41`; a bare `name#41` has no owner and is not judged
 LANE_SEND_REASON = (
     "lane-lint-send: this hand-off names %s, with no review record at its live head. Run `merge --lane-lint <pr>` on the "
     "lane's pushed head, fix any finding, write the review record with `merge <pr> --review-record`, post it on the pull "
@@ -1638,8 +1639,9 @@ LANE_SEND_NO_RECORD_REASON = (
 
 
 def _send_refs(message: str):
-    """The pull requests a message names, in order, without repeats: (repo or '', number). A pull URL names its repo; a bare `#n` names none."""
+    """The pull requests a message names, in order, without repeats: (repo or '', number). A pull URL and `owner/name#n` name their repo; a bare `#n` names none."""
     found = [(m.start(), m.group(1), int(m.group(2))) for m in _SEND_PR_URL.finditer(message)]
+    found += [(m.start(), m.group(1), int(m.group(2))) for m in _SEND_PR_QUALIFIED.finditer(message)]
     covered = [(m.start(), m.end()) for m in _SEND_PR_URL.finditer(message)]
     found += [(m.start(), "", int(m.group(1))) for m in _SEND_PR_BARE.finditer(message)
               if not any(lo <= m.start() < hi for lo, hi in covered)]
@@ -1719,10 +1721,13 @@ def lane_lint_send_hit(tool: str, tool_input, transcript: str, cwd: str, note):
     except Exception:
         tags, tagged_after = None, False
     if tags is None or tagged_after:
-        try:
-            spent = bool(transcript) and _send_refused_before(transcript, target)
-        except Exception:
-            spent = False
+        try:  # with no transcript to read the refusal could never be spent: that is unknown, and the hand-off passes
+            if not transcript:
+                raise OSError("no transcript path")
+            spent = _send_refused_before(transcript, target)
+        except Exception as err:
+            note("the transcript could not be read (%s)" % cap_safe(str(err), 100))
+            return None
         return None if spent else ("hand-off to a target with no record", LANE_SEND_NO_RECORD_REASON)
     if RUNNER_TAG not in tags:
         return None

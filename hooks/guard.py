@@ -129,7 +129,7 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        refusal passes. A read that fails, a read past LANE_LINT_SEND_SECONDS (25 s), an unknown repo
                        (a bare #n with no cs-repo tag and no GitHub origin) and a sixth pull request read as unknown:
                        allowed, with one guard.log line and one stderr line. An override lifts it. (lane-lint-send)
-  draft-pr            deny. A `gh pr create` without `--draft`. (draft-until-reviewed)
+  draft-pr             deny. A `gh pr create` without `--draft`. (draft-until-reviewed)
   records-page         deny. A `git commit` whose docs/records.md differs from the base's page.
                        (records-index-at-merge)
   conflict-markers     deny. A `git commit` that would hold a start, a lone mid and an end conflict marker

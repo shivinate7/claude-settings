@@ -49,13 +49,17 @@ def _record_json(body):
 def _listed_rows(body):
     """The session records a list_sessions result holds: each `ccr` object, and each object that carries a string `id` and a list `tags`, at any
     depth of its JSON. [] when the body is not JSON."""
+    text = body.strip()
+    wrapped = _OTHER_SESSION.fullmatch(text)
+    if wrapped:  # a wrapped list opens with `[` or `{`, whichever comes first after the preamble
+        text = wrapped.group(2)
+    starts = [at for at in (text.find("["), text.find("{")) if at >= 0]
+    if not starts:
+        return []
     try:
-        parsed = _record_json(body)
-    except (ValueError, KeyError):
-        try:
-            parsed = json.loads(body)
-        except ValueError:
-            return []
+        parsed = json.JSONDecoder().raw_decode(text, min(starts))[0]
+    except ValueError:
+        return []
     rows, todo = [], [parsed]
     while todo:
         item = todo.pop()
