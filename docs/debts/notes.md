@@ -95,7 +95,7 @@
 - guard-split-ignores-backslash: no guard test refuses the \' and \" forms; background_commands counts echo \" & echo b as one command (guard_core, guard.py)
 - guard-split-mutant-needs-git: the root-scope mutant (_git drops -C) is killed only inside a git checkout; CI does (hooks/mutate_guard.py)
 - guard-split-sibling-mutant-case: PR2 needs a case in the in-process load that kills a sibling mutant (hooks/test_guard.py)
-- guard-substitution-in-token: open item only. A `$( )` in a quoted interpreter heredoc body is judged as shell, a possible false alarm. Fix: read a quoted interpreter heredoc body as the interpreter's text, not shell (hooks/guard_env.py substitution_commands).
+- guard-substitution-in-token: open item only. A `$( )` in a quoted interpreter heredoc body is judged as shell, a possible false alarm. Fix: read a quoted interpreter heredoc body as the interpreter's text, not shell (hooks/guard_env.py substitution_commands). guard_push_delete.SUBST_OPEN stays: it is the only reader of a substitution inside a single-quoted `bash -c` script, which substitution_commands does not cut.
 - guard-timing-case-flaky: the 2000-span rm-var case keeps a wall-clock bound that can fail on a busy runner; no check measures the 60 s hook timeout (hooks/test_guard.py)
 - guard-untied-from-rule-map: merge-checks, draft-pr and pointer-head guard rules have no rule-map row, so a guard deleted with its tests passes rule_audit (lint/rule_mechanisms.json)
 - guard-wrapper-lists-closed: an unlisted wrapper such as stdbuf or chrt hides the real command word (guard_core COMMAND_WRAPPERS)

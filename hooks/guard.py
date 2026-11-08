@@ -398,7 +398,7 @@ while True:
         _loading = "guard_kill"
         from guard_kill import (
             DETACHED_LAUNCH_REASON, GIT_ENV_REASON, KILL_PID_REASON, KILL_REASON,
-            PLAYWRIGHT_INSTALL_REASON, PLAYWRIGHT_PATH_REASON, detached_launch_hit, foreign_pid_kill,
+            PLAYWRIGHT_INSTALL_REASON, PLAYWRIGHT_PATH_REASON, _SUBSTITUTION_OPEN, detached_launch_hit, foreign_pid_kill,
             git_env_command_hit, kill_fed_by_name, kill_fed_by_pipe, kill_hit, kills_group_pid,
             lsof_pids_reach_kill, playwright_command_hit, playwright_install_hit,
         )
@@ -3269,13 +3269,18 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
     # read as a command of its own, after the command (the wsl, live-stream, linked-node_modules, delete and
     # rm-after-cd rules read `texts` the same way).
     # Not a recursive judge_shell: that clears PENDING_ASK and would lose a deny.
-    # The rule reads each text in the folder its own `cd` names, and reads the command itself with each
-    # substitution as `x`: a `git` call inside `$( )` is judged once, in its own text, never again in
-    # the command's segment that holds its closing `)`.
+    # The rule reads each text in the folder its own `cd` names, starting from the folder the outer command's
+    # `cd` names, and reads the command itself with each substitution as `x`: a `git` call inside `$( )` is
+    # judged once, in its own text. A segment of `stripped` that holds a substitution is read as well: the
+    # paths a checkout or restore takes from `$( )` are unknown, and as `x` they would pass as a clean word.
     shared_texts = substitution_commands(raw, stripped, outer=True)
     texts = [stripped, *shared_texts[:-1]]
+    outer_root = command_root(shared_texts[-1], cwd)   # an inner `cd` does not move the outer command
     text_roots = {}   # command_root reads the whole text: once per text, never per segment
-    for text, segment in ((text, part) for text in shared_texts for part in split_segments(text)):
+    judged = [(text, part) for text in shared_texts for part in split_segments(text)]
+    if shared_texts[-1] != stripped:
+        judged += [(stripped, part) for part in split_segments(stripped) if _SUBSTITUTION_OPEN.search(part)]
+    for text, segment in judged:
         if not segment.strip():
             continue
         words = segment_tokens(segment)
@@ -3285,7 +3290,8 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
             root = command_root(segment, cwd) if GIT_WORK_TREE_RE.search(segment) else _absolute(own_c, cwd)
         else:
             if text not in text_roots:
-                text_roots[text] = command_root(text, cwd)
+                text_roots[text] = outer_root if text is shared_texts[-1] or text is stripped \
+                    else command_root(text, outer_root)
             root = text_roots[text]
         match = shared_tree_match(segment, root)
         if match is None:
