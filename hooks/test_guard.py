@@ -14105,8 +14105,10 @@ rpush_case("reviewed-head-push: a newer record without a fix check after an olde
            "allow", RPUSH_BOTH, comments=rpush_record_comments({"fix": RPUSH_FIX}, {}))
 rpush_case("reviewed-head-push: a newer fix check after an older record without one asks",
            "ask", RPUSH_BOTH, comments=rpush_record_comments({}, {"fix": RPUSH_FIX}))
+# Two pages of comments, one read each: merge.py's pages() asks each page by number.
 rpush_case("reviewed-head-push: a record on page two of the comments still asks",
-           "ask", RPUSH_BOTH, page_cap=2, comments=rpush_record_comments({"fix": RPUSH_FIX}, before=2))
+           "ask", (RPUSH_PULLS, RPUSH_COMMENTS, RPUSH_COMMENTS), page_cap=2,
+           comments=rpush_record_comments({"fix": RPUSH_FIX}, before=2))
 
 # The allow controls. Each names its two reads, so it cannot pass on a read that never happened.
 rpush_case("reviewed-head-push: a done record with no fix check allows, after both reads",
