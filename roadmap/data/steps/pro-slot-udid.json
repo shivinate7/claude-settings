@@ -1,11 +1,11 @@
 {
   "title": "#1709 goes into the next batch",
   "why": "Owner chat ask at 06:19 CST Nov 8 to get #1709 into the next batch (coordinator, 06:25 CST).",
-  "note": "Doing in lane session_013NEJL3qFTVRyGAJWFkrALJ (coordinator, 06:25 CST Nov 8). Owner ask, so it starts under item 410 a.",
+  "note": "Doing in lane session_013NEJL3qFTVRyGAJWFkrALJ (coordinator, 06:25 CST Nov 8). Owner ask, so it starts under item 410 a. #1709 is replaced by #1961 (same tree, red-run trailer added); runner 8 closes #1709 when #1961 is handed over (coordinator, 06:33 CST Nov 8).",
   "phase": "now",
   "status": "doing",
   "order": 630,
   "owner": "triage",
   "lane": "session_013NEJL3qFTVRyGAJWFkrALJ",
-  "updatedAt": "2026-11-08T06:21:00-06:00"
+  "updatedAt": "2026-11-08T06:35:00-06:00"
 }

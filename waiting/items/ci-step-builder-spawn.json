@@ -1,0 +1,19 @@
+{
+  "added": "2026-11-08T12:37:00Z",
+  "context": "Goal: the guard fix for the test-author CI-step false alarm gets built.\nWhy you: the auto-mode safety check refused the lane's builder spawn (sonnet) for the guard.py fix and gave no reason. Only your approval in that session lets the spawn run, and the lane did not route around it.\nSteps: open the lane with the link below. Read the builder brief in the refused call. Approve it there, or tell the lane to drop the step. Then press Done here.\nMeanwhile: the red cases sit at 451011060, and the lane waits.",
+  "home": "test-author-ci-step-false-alarm",
+  "id": "ci-step-builder-spawn",
+  "kind": "task",
+  "links": [
+    {
+      "label": "Open lane test-author-ci-step-false-alarm",
+      "url": "https://claude.ai/code/session_013NEJKzayeNCJa4csSCBG7k"
+    }
+  ],
+  "n": 417,
+  "owner": "lane test-author-ci-step-false-alarm (session_013NEJKzayeNCJa4csSCBG7k), via the coordinator",
+  "ref": "step test-author-ci-step-false-alarm; red cases at 451011060",
+  "short": "Refused builder spawn in a lane",
+  "status": "open",
+  "title": "Approve or drop the refused builder spawn in lane test-author-ci-step-false-alarm"
+}
