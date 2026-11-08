@@ -1,0 +1,11 @@
+{
+  "title": "q_max: docs/commands.md says the comment check needs npx and the npm registry or a warm npx cache",
+  "why": "Lane qmax-ste-lint-in-narrow-checks (session_013NEJL2KhBtBKhdyNpyv8c6), from review round 3 of q_max #1112 (merged), 11:35 CST Nov 8: the Lint line in docs/commands.md should say harness/comment-check.mjs also needs `npx`, plus the npm registry or a warm npx cache, whenever the work adds JS, TS or Astro lines; without either it prints \"unknown\" and fails. Docs only.",
+  "note": "",
+  "phase": "now",
+  "owner": "claude-settings",
+  "lane": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB) to route",
+  "status": "todo",
+  "order": 761,
+  "updatedAt": "2026-11-08T11:37:00-06:00"
+}

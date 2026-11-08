@@ -1,0 +1,11 @@
+{
+  "title": "The merge tool records a past review round for a head that is no longer live",
+  "why": "Lane reviewed-sends-back (#2177), via the coordinator 11:36 CST Nov 8: `merge --review-record` refuses a head that is not live, so a lane that opens its PR after a fix cannot record a past round with the tool; it hand-posted one through merge.review_body. A hand-written record skips the tool's checks (step record-via-merge-tool).",
+  "note": "",
+  "phase": "now",
+  "owner": "claude-settings",
+  "lane": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB) to route",
+  "status": "todo",
+  "order": 760,
+  "updatedAt": "2026-11-08T11:37:00-06:00"
+}
