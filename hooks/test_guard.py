@@ -15135,6 +15135,7 @@ RSHA_MAIN = os.path.join(ROOT, "rsha-main")        # a main checkout: a base com
 RSHA_LANE = os.path.join(ROOT, "rsha-lane")        # a worktree on branch work, cut from the base commit
 RSHA_SHALLOW = os.path.join(ROOT, "rsha-shallow")  # a shallow clone of main: its last commit only
 RSHA_OTHER = os.path.join(ROOT, "rsha-other")      # another repo, with a commit no repo above holds
+RSHA_AGENT = os.path.join(RSHA_OTHER, ".claude", "worktrees", "agent-a632f54b2f884e669")  # an agent's own worktree
 RSHA_SHA = {}                                      # the shas rsha_build records: base, main, tree, other
 
 
@@ -15171,6 +15172,7 @@ def rsha_build():
     os.makedirs(RSHA_OTHER, exist_ok=True)
     _rsha_git(RSHA_OTHER, "init", "-q", "-b", "main", ".")
     RSHA_SHA["other"] = _rsha_commit(RSHA_OTHER, "y = 1\n", "elsewhere", RSHA_DATE)
+    _rsha_git(RSHA_OTHER, "worktree", "add", "-q", "-b", "worktree-agent-a632f54b2f884e669", RSHA_AGENT)
     if _rsha_git(RSHA_SHALLOW, "rev-parse", "--is-shallow-repository") != "true":
         sys.exit("fixture setup failed in rsha_build: the clone is not shallow")
     gone = subprocess.run([VCS, "cat-file", "-e", RSHA_SHA["base"] + "^{commit}"],
@@ -15183,7 +15185,7 @@ def rsha_build():
         sys.exit("fixture setup failed in rsha_build: the commit on main is an ancestor of the lane's HEAD")
 
 
-lazy_fixture([RSHA_MAIN, RSHA_LANE, RSHA_SHALLOW, RSHA_OTHER], rsha_build)
+lazy_fixture([RSHA_MAIN, RSHA_LANE, RSHA_SHALLOW, RSHA_OTHER, RSHA_AGENT], rsha_build)
 RSHA_BUILDER = diff_repo("rsha-builder", _put("tests/test_a.py", "pass\n"))
 
 
@@ -15378,6 +15380,37 @@ add("report-sha-missing: a double-quoted span ends at the line end, so a made-up
     message='He wrote "see the lane.\nFixed in 3f8e0a5d2c7 on the lane.', carries=("3f8e0a5d2c7",))
 
 
+# Round 2 (decision agent-report-shas-resolve, What counts as a sha): a range judges each side, a sentence mark
+# around a bold or bracketed token does not hide it, and a hex run is not a sha by its length or a touching mark.
+add("report-sha-missing: the two sides of a made-up a..b range are each named",
+    "deny", RSHA_RULE, tool=HANDBACK, cwd=RSHA_LANE, agent_id="rev1", agent_type="reviewer",
+    message="Diff 8c1f0e2a7..5b7d10a42 is open.", carries=("8c1f0e2a7", "5b7d10a42"))
+add("report-sha-missing: the two sides of a made-up a...b range are each named",
+    "deny", RSHA_RULE, tool=HANDBACK, cwd=RSHA_LANE, agent_id="rev1", agent_type="reviewer",
+    message="Diff 8c1f0e2a7...5b7d10a42 is open.", carries=("8c1f0e2a7", "5b7d10a42"))
+add("report-sha-missing: a made-up sha in brackets, before a period, is refused",
+    "deny", RSHA_RULE, tool=HANDBACK, cwd=RSHA_LANE, agent_id="rev1", agent_type="reviewer",
+    message="(fixed in 8c1f0e2a7.)", carries=("8c1f0e2a7",))
+add("report-sha-missing: a made-up sha inside bold markers is refused",
+    "deny", RSHA_RULE, tool=HANDBACK, cwd=RSHA_LANE, agent_id="rev1", agent_type="reviewer",
+    message="The fix is **8c1f0e2a7** here.", carries=("8c1f0e2a7",))
+add("report-sha-missing: a 17-character agent id is not a sha",
+    "allow", tool=HANDBACK, cwd=RSHA_LANE, agent_id="rev1", agent_type="reviewer",
+    message="agent a632f54b2f884e669 finished")
+add("report-sha-missing: a 32-character hex digest is not a sha",
+    "allow", tool=HANDBACK, cwd=RSHA_LANE, agent_id="rev1", agent_type="reviewer",
+    message="Checksum %s matched." % hashlib.sha1(b"report-sha-missing: a digest").hexdigest()[:32])
+add("report-sha-missing: a 64-character hex digest is not a sha",
+    "allow", tool=HANDBACK, cwd=RSHA_LANE, agent_id="rev1", agent_type="reviewer",
+    message="Checksum %s matched." % hashlib.sha256(b"report-sha-missing: a digest").hexdigest())
+add("report-sha-missing: a hex run after = is not a sha",
+    "allow", tool=HANDBACK, cwd=RSHA_LANE, agent_id="rev1", agent_type="reviewer",
+    message="The handle is ptr=7f3a9c1e2b in the log.")
+add("report-sha-missing: a 13-character hex token is not a sha",
+    "allow", tool=HANDBACK, cwd=RSHA_LANE, agent_id="rev1", agent_type="reviewer",
+    message="Token 6c2e9a0f4b7d1 is in the log.")
+
+
 # --- the cases that need a real sha, read at run time: log checks, so the fixtures are built by the check.
 def rsha_mixed_case():
     """One real sha and one made-up sha: the made-up one is named, and the real commit is not."""
@@ -15514,6 +15547,41 @@ FIXTURELESS_CHECKS.update((rsha_mixed_case, rsha_tree_case, rsha_other_repo_case
                            rsha_cost_none_case, rsha_note_shallow_case, rsha_note_unresolved_case,
                            rsha_short_real_case, rsha_full_real_case, rsha_main_only_case,
                            rsha_shallow_decision_case))
+
+
+def rsha_short12_real_case():
+    """A real 12-character sha is judged (7 to 12 characters), resolves, and is allowed."""
+    rsha_ready()
+    short = RSHA_SHA["base"][:12]
+    if not rsha_sha_like(short):
+        return False, "the 12-character prefix %r is not sha-like, so the control proves nothing" % short
+    got, reason = rsha_judge(RSHA_LANE, "Fixed in %s, the first commit." % short)
+    return rsha_allowed(got, reason, "a 12-character sha that resolves")
+
+
+def rsha_agent_clean_cost_case():
+    """A clean hand-back from an agent's own worktree starts no git process at all: a hand-back is judged before any
+    other rule reads git (decision agent-report-shas-resolve, Cost)."""
+    if os.name == "nt":
+        return SKIP, "skipped: a stand-in git is not reached through CreateProcess"
+    log, path, problem = rsha_stand_in_ready()
+    if problem:
+        return False, problem
+    if os.path.exists(log):
+        os.remove(log)
+    rsha_judge(RSHA_AGENT, "Verdict: pass, nothing to name.", env_path=path,
+               agent_id="a632f54b2f884e669", agent_type="reviewer")
+    started = open(log, encoding="utf-8").read().splitlines() if os.path.exists(log) else []
+    if started:
+        return False, "a clean hand-back from an agent's worktree started %d git process(es), want none: %r" % (
+            len(started), started[0])
+    return True, "a clean hand-back from an agent's worktree starts no git process"
+
+
+LOG_CHECKS_EXTRA.append(("report-sha-missing: a 12-character sha that resolves is allowed", rsha_short12_real_case))
+LOG_CHECKS_EXTRA.append(("report-sha-missing: a clean hand-back from an agent's worktree starts no git process",
+                         rsha_agent_clean_cost_case))
+FIXTURELESS_CHECKS.update((rsha_short12_real_case, rsha_agent_clean_cost_case))
 
 
 # =========================================================================== failing open
