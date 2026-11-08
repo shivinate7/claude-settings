@@ -407,7 +407,10 @@ def _module_bindings(tree, base_dir, seen):
         if isinstance(node, ast.Assign):
             pairs = [(t.id, node.value) for t in node.targets if isinstance(t, ast.Name)]
             for t in node.targets:
-                if not isinstance(t, ast.Name):
+                if isinstance(t, (ast.Tuple, ast.List)) and isinstance(node.value, (ast.Tuple, ast.List)) \
+                        and len(t.elts) == len(node.value.elts) and all(isinstance(e, ast.Name) for e in t.elts):
+                    pairs += [(e.id, v) for e, v in zip(t.elts, node.value.elts)]  # `A, B = "a", "b"` binds each
+                elif not isinstance(t, ast.Name):
                     out.update({n.id: None for n in ast.walk(t) if isinstance(n, ast.Name)})
         elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name) and node.value:
             pairs = [(node.target.id, node.value)]
@@ -426,7 +429,22 @@ def _module_bindings(tree, base_dir, seen):
 
 
 _SCOPES = (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)
-_PASS = object()  # a binding the reader does not follow: a parameter or a tuple-unpack element
+_PASS = object()  # a binding the reader does not follow: a parameter, or an unpack element it cannot place
+
+
+class _Unpack:
+    """A name bound by `a, b = src` or `for a, b in src`: the `index`-th of `size` names. `src` is the
+    assigned expression, or an `_Each` for a loop's iterable."""
+
+    def __init__(self, src, index, size):
+        self.src, self.index, self.size = src, index, size
+
+
+class _Each:
+    """The rows a `for` loop walks: each element of `iter`."""
+
+    def __init__(self, iter_):
+        self.iter = iter_
 
 
 def _call_scopes(tree):
@@ -445,8 +463,9 @@ def _call_scopes(tree):
 def _scope_bindings(fn):
     """{name: [binding]} for the names `fn` binds in its own scope; a nested def, lambda or class
     is another scope. A binding is the value of a plain assignment to the bare name (`=`, an
-    annotated `=`, `:=`), `_PASS` for a parameter or a tuple-unpack element, or else the binding
-    node itself (a loop or with target, `+=`, an import), which the reader cannot resolve."""
+    annotated `=`, `:=`), an `_Unpack` for a tuple-unpack or loop-tuple element, an `_Each` for a loop's
+    bare name target, `_PASS` for a parameter or a nested unpack, or else the binding node itself (a
+    with target, `+=`, an import), which the reader cannot resolve."""
     a = fn.args
     out = {x.arg: [_PASS] for x in a.posonlyargs + a.args + a.kwonlyargs + [a.vararg, a.kwarg] if x}
     unpacked = set()
@@ -459,15 +478,25 @@ def _scope_bindings(fn):
         if isinstance(n, ast.Lambda):
             continue
         todo.extend(ast.iter_child_nodes(n))
-        if isinstance(n, ast.Assign):
+        if isinstance(n, (ast.For, ast.AsyncFor)):
+            t = n.target
+            if isinstance(t, ast.Name):
+                out.setdefault(t.id, []).append(_Each(n.iter))  # a name that holds one row of the iterable
+                unpacked.add(id(t))
+            elif isinstance(t, (ast.Tuple, ast.List)) and all(isinstance(e, ast.Name) for e in t.elts):
+                for i, e in enumerate(t.elts):
+                    out.setdefault(e.id, []).append(_Unpack(_Each(n.iter), i, len(t.elts)))
+                    unpacked.add(id(e))
+        elif isinstance(n, ast.Assign):
             for t in n.targets:
                 if isinstance(t, ast.Name):
                     out.setdefault(t.id, []).append(n.value)
                     unpacked.add(id(t))
                 elif isinstance(t, (ast.Tuple, ast.List)):
-                    for e in ast.walk(t):
+                    flat = all(isinstance(e, ast.Name) for e in t.elts)
+                    for i, e in enumerate(t.elts if flat else ast.walk(t)):
                         if isinstance(e, ast.Name):
-                            out.setdefault(e.id, []).append(_PASS)
+                            out.setdefault(e.id, []).append(_Unpack(n.value, i, len(t.elts)) if flat else _PASS)
                             unpacked.add(id(e))
         elif isinstance(n, (ast.AnnAssign, ast.NamedExpr)) and isinstance(n.target, ast.Name):
             if n.value is not None:
@@ -481,15 +510,80 @@ def _scope_bindings(fn):
     return out
 
 
-def _literal_ids(value):
-    """The ids a local's assigned value names: a string literal, or a conditional whose branches
-    are each one of these. None for anything else."""
-    if isinstance(value, ast.Constant) and isinstance(value.value, str):
-        return {value.value}
-    if isinstance(value, ast.IfExp):
-        body, orelse = _literal_ids(value.body), _literal_ids(value.orelse)
-        return None if body is None or orelse is None else body | orelse
+def _module_values(tree):
+    """{name: value node} for each module-level name assigned exactly once by a plain `=`: the literal
+    tables a call's rule id can be read from."""
+    seen, out = {}, {}
+    for node in tree.body:
+        pairs = []
+        if isinstance(node, ast.Assign):
+            pairs = [(t.id, node.value) for t in node.targets if isinstance(t, ast.Name)]
+        elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name) and node.value is not None:
+            pairs = [(node.target.id, node.value)]
+        for name, value in pairs:
+            seen[name] = seen.get(name, 0) + 1
+            out[name] = value
+    return {n: v for n, v in out.items() if seen[n] == 1}
+
+
+def _rows_of(expr, values):
+    """The items of a literal collection: the elements of a tuple or list, the values of a dict. `expr` may
+    be a module-level name bound once to one. None for anything else."""
+    if isinstance(expr, ast.Name):
+        expr = values.get(expr.id)
+    if isinstance(expr, (ast.Tuple, ast.List)):
+        return list(expr.elts)
+    if isinstance(expr, ast.Dict):
+        return list(expr.values)
     return None
+
+
+def _params(fn):
+    return fn.args.posonlyargs + fn.args.args
+
+
+def _def_emitters(tree):
+    """{name: (position, parameter name, default value node or None)} for each module-level def whose
+    call takes a rule id, or {name: None} for a def named like a guard call that takes none.
+    A def named refuse, record or ask_command that has a `rule` parameter takes it there; one with none
+    (blind_brief's refuse(payload, tool, reason, matched)) takes its id from a constant in its own body,
+    so a call to it names nothing here. Any other def whose body hands one of its parameters to such a
+    call as the rule forwards that parameter (call_judge's refuse(payload, tool, args, rule, reason),
+    and unvetted() that calls it); its calls name an id where the parameter sits."""
+    defs = {n.name: n for n in tree.body if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))}
+    out = {}
+
+    def entry(fn, at):
+        params = _params(fn)
+        pad = len(params) - len(fn.args.defaults)
+        return at, params[at].arg, (fn.args.defaults[at - pad] if at >= pad else None)
+
+    for name, fn in defs.items():
+        if name in GUARD_RULE_ARG:
+            names = [p.arg for p in _params(fn)]
+            out[name] = entry(fn, names.index("rule")) if "rule" in names else None
+    changed = True
+    while changed:
+        changed = False
+        for name, fn in defs.items():
+            if name in out:
+                continue
+            params = [p.arg for p in _params(fn)]
+            for call in (n for n in ast.walk(fn) if isinstance(n, ast.Call)):
+                callee = call.func.id if isinstance(call.func, ast.Name) else getattr(call.func, "attr", "")
+                if callee == name:
+                    continue
+                spot = out[callee] if isinstance(call.func, ast.Name) and callee in out else (
+                    (GUARD_RULE_ARG[callee], "rule", None) if callee in GUARD_RULE_ARG else None)
+                if spot is None:
+                    continue
+                got = call.args[spot[0]] if len(call.args) > spot[0] else next(
+                    (k.value for k in call.keywords if k.arg == spot[1]), None)
+                if isinstance(got, ast.Name) and got.id in params:
+                    out[name] = entry(fn, params.index(got.id))
+                    changed = True
+                    break
+    return out
 
 
 def guard_rule_names(text: str, path: str = "<source>", base_dir=None):
@@ -497,54 +591,144 @@ def guard_rule_names(text: str, path: str = "<source>", base_dir=None):
     that shows a call names nothing. Three shapes write an id: a string literal in refuse() or
     record() (third argument) or ask_command() (first), by position or as `rule=`; the table in
     diff_rule(); and the `code, why = {...}` role-scope table.
-    A module-level string constant resolves to its value, also one imported from a module under
-    `base_dir`. A name bound in the innermost def or lambda that holds the call lists the string
-    literals assigned to it there, both branches of a conditional included. A parameter or a
-    tuple-unpack element there is a pass-through, as is a name bound only in an outer def or bound
-    nowhere: the ids come from the call sites and tables read here. Anything else cannot be
-    listed, so it raises ValueError naming `path:line`: a rule that can fire but is not listed
-    would hide from a never-fired cull. That covers an f-string, a name bound at module level to
-    anything but a string constant, a local with any other binding, and any other expression but
+    A def of the same file that takes a rule id in its own place counts the same: a def named like a
+    guard call takes it at its `rule` parameter (one with no `rule` parameter takes none: its call names
+    no id), and any other def that hands one of its parameters to such a call forwards it, so a call to
+    it names the id it passes (`_def_emitters`). An omitted argument names the parameter's default.
+    The id expression resolves to its ids when it is a string literal; a module-level string constant, also
+    one imported from a module under `base_dir`, or `module.NAME` for an `import module` of such a file; a
+    conditional of these (inline or assigned to a local); a name bound in the innermost def or lambda that
+    holds the call, by `=` to any of these, by a literal tuple unpack (`a, b = "x", "y"`), by an unpack of a
+    row of a literal module table (`rule, why = TABLE[key]`, or `for rule, why in TABLE` or
+    `for hit in TABLE: rule, why = hit`: the element in that place of each row), or by a loop over a
+    literal tuple of strings; and `min(found)[i]` or `max(found)[i]` when `found` is a local list
+    comprehension of tuples whose element `i` is the loop name over a literal module tuple of strings
+    (reply_judge's JUDGED_RULES). A parameter, an unpack the reader cannot place, and a name bound only
+    in an outer def or bound nowhere are pass-throughs: the ids come from the call sites and tables read
+    here. Anything else cannot be listed, so it raises ValueError naming `path:line`: a rule that can fire
+    but is not listed would hide from a never-fired cull. That covers an f-string, a name bound at module
+    level to anything but a string constant, a local with any other binding, and any other expression but
     the diff_rule() call."""
     tree = ast.parse(text)
     ids = set()
     bound = _module_bindings(tree, base_dir, set())
+    values = _module_values(tree)
+    emitters = _def_emitters(tree)
     scopes = _call_scopes(tree)
-    held = {}
+    held, imported = {}, {}
 
     def bindings(fn):  # a def's own-scope bindings, read once per def
         if id(fn) not in held:
             held[id(fn)] = _scope_bindings(fn)
         return held[id(fn)]
 
+    def module_of(name):  # the bindings of a sibling module that `import name` names, or None
+        if name not in imported:
+            imported[name] = None
+            src = os.path.join(base_dir, name + ".py") if base_dir else ""
+            if src and os.path.isfile(src) and any(
+                    isinstance(n, ast.Import) and any((a.asname or a.name) == name and a.name == name
+                                                      for a in n.names) for n in ast.walk(tree)):
+                imported[name] = _module_bindings(ast.parse(read(src)), base_dir, {src})
+        return imported[name]
+
+    def rows_for(src, defs):  # the rows an unpack or a loop reads, or None
+        if isinstance(src, _Each):
+            return _rows_of(src.iter, values)
+        if isinstance(src, ast.Subscript):
+            return _rows_of(src.value, values)
+        if isinstance(src, ast.Name) and defs:
+            own = bindings(defs[0]).get(src.id, [])
+            if len(own) == 1 and isinstance(own[0], _Each):
+                return _rows_of(own[0].iter, values)
+        return None
+
+    def of_binding(b, defs, depth):  # the ids one binding gives its name, or None when it cannot say
+        if b is _PASS:
+            return set()
+        if isinstance(b, _Each):  # `for r in ("a", "b")`: one string of the literal tuple
+            rows = _rows_of(b.iter, values)
+            found = None if rows is None else [of(r, (), depth + 1) for r in rows]
+            return None if found is None or None in found else set().union(*found)
+        if isinstance(b, _Unpack):
+            src = b.src
+            if isinstance(src, (ast.Tuple, ast.List)) and len(src.elts) == b.size:
+                return of(src.elts[b.index], defs, depth + 1)
+            rows = rows_for(src, defs)
+            looped = isinstance(src, _Each) or (  # `for hit in T: a, b = hit` walks T's rows too
+                isinstance(src, ast.Name) and defs and any(isinstance(o, _Each) for o in bindings(defs[0]).get(src.id, [])))
+            if looped and (rows is None or any(
+                    not (isinstance(r, (ast.Tuple, ast.List)) and len(r.elts) == b.size) for r in rows)):
+                return None  # a loop over rows the reader cannot read would list no id: an id could hide
+            out = set()
+            for row in rows or []:  # a table row or an element the reader cannot place names no id
+                if isinstance(row, (ast.Tuple, ast.List)) and len(row.elts) == b.size:
+                    out |= of(row.elts[b.index], (), depth + 1) or set()
+            return out
+        return of(b, defs, depth + 1) if isinstance(b, ast.expr) else None
+
+    def of(expr, defs, depth=0):  # the ids an expression names, or None when the reader cannot list them
+        if depth > 20:
+            return None
+        if isinstance(expr, ast.Constant):
+            return {expr.value} if isinstance(expr.value, str) else None
+        if isinstance(expr, ast.IfExp):
+            body, orelse = of(expr.body, defs, depth + 1), of(expr.orelse, defs, depth + 1)
+            return None if body is None or orelse is None else body | orelse
+        if isinstance(expr, ast.Name):
+            own = bindings(defs[0]) if defs else {}
+            if expr.id in own:
+                found = [of_binding(b, defs, depth) for b in own[expr.id]]
+                return None if None in found else set().union(*found)
+            if any(expr.id in bindings(f) for f in defs[1:]) or expr.id not in bound:
+                return set()
+            return None if bound[expr.id] is None else {bound[expr.id]}
+        if isinstance(expr, ast.Attribute) and isinstance(expr.value, ast.Name):
+            theirs = module_of(expr.value.id)
+            const = theirs.get(expr.attr) if theirs else None
+            return None if const is None else {const}
+        if (isinstance(expr, ast.Subscript) and isinstance(expr.value, ast.Call) and defs
+                and isinstance(expr.value.func, ast.Name) and expr.value.func.id in ("min", "max")
+                and len(expr.value.args) == 1 and isinstance(expr.value.args[0], ast.Name)
+                and isinstance(expr.slice, ast.Constant) and isinstance(expr.slice.value, int)):
+            lists = bindings(defs[0]).get(expr.value.args[0].id, [])
+            found = []
+            for comp in lists:
+                elt = comp.elt if isinstance(comp, (ast.ListComp, ast.GeneratorExp)) else None
+                if not (isinstance(elt, ast.Tuple) and len(elt.elts) > expr.slice.value
+                        and isinstance(elt.elts[expr.slice.value], ast.Name)):
+                    return None
+                gen = next((g for g in comp.generators if isinstance(g.target, ast.Name)
+                            and g.target.id == elt.elts[expr.slice.value].id), None)
+                rows = _rows_of(gen.iter, values) if gen else None
+                if rows is None or any(not (isinstance(r, ast.Constant) and isinstance(r.value, str))
+                                       for r in rows):
+                    return None
+                found.append({r.value for r in rows})
+            return set().union(*found) if found else None
+        return None
+
     for node in ast.walk(tree):
         if isinstance(node, ast.Call):
             name = node.func.id if isinstance(node.func, ast.Name) else getattr(node.func, "attr", "")
-            at = GUARD_RULE_ARG.get(name)
-            if at is None:
+            if isinstance(node.func, ast.Name) and name in emitters:
+                spot = emitters[name]
+            else:
+                spot = (GUARD_RULE_ARG[name], "rule", None) if name in GUARD_RULE_ARG else None
+            if spot is None:
                 continue
-            args = [kw.value for kw in node.keywords if kw.arg == "rule"]
+            at, pname, default = spot
+            args = [kw.value for kw in node.keywords if kw.arg == pname]
             if len(node.args) > at:
                 args = [node.args[at]]
+            elif not args and default is not None:
+                args = [default]  # the call omits the rule: the parameter's default is the id it writes
             for arg in args:
-                if isinstance(arg, ast.Constant) and isinstance(arg.value, str):
-                    ids.add(arg.value)
+                if isinstance(arg, ast.Call) and isinstance(arg.func, ast.Name) and arg.func.id == "diff_rule":
                     continue
-                if isinstance(arg, ast.Name):
-                    defs = scopes.get(id(node), ())
-                    own = bindings(defs[0]) if defs else {}
-                    if arg.id in own:
-                        found = [_PASS if b is _PASS else _literal_ids(b) for b in own[arg.id]]
-                        if None not in found:
-                            ids.update(*[f for f in found if f is not _PASS])
-                            continue
-                    elif any(arg.id in bindings(f) for f in defs[1:]) or arg.id not in bound:
-                        continue
-                    elif bound[arg.id] is not None:
-                        ids.add(bound[arg.id])
-                        continue
-                elif (isinstance(arg, ast.Call) and isinstance(arg.func, ast.Name)
-                      and arg.func.id == "diff_rule"):
+                got = of(arg, scopes.get(id(node), ()))
+                if got is not None:
+                    ids |= got
                     continue
                 what = "an f-string" if isinstance(arg, ast.JoinedStr) else "a rule id the reader cannot resolve"
                 raise ValueError(f"{path}:{node.lineno}: {name}() takes {what}; "
@@ -560,13 +744,21 @@ def guard_rule_names(text: str, path: str = "<source>", base_dir=None):
     return ids
 
 
+def hook_paths(root: str) -> List[str]:
+    """Every hook module under root: each hooks/*.py but a test module (`test_*.py`, `*_test.py`). A test
+    module holds fixture refusals that no hook writes."""
+    return sorted(p for p in glob.glob(os.path.join(root, "hooks", "*.py"))
+                  if not os.path.basename(p).startswith("test_") and not p.endswith("_test.py"))
+
+
 def emitted_rule_ids(root: str = ROOT) -> set:
-    """Every rule id the guard can write to guard.log: the one home for that list.
-    Guard ids come from hooks/guard*.py and hooks/config_watch.py (it logs `agent-model-cap`
-    reverts). No hook writes an STE code now."""
+    """Every rule id a hook can write to guard.log: the one home for that list.
+    Ids come from every hooks/*.py but the test modules (`hook_paths`): the guard modules, config_watch.py
+    (it logs `agent-model-cap` reverts), and the hooks that refuse or note through guard_core (blind_brief,
+    call_judge, prose_judge, reply_judge, sendmessage_state, override). mutate_*.py are read too: they
+    hold the guard's source as strings, never a call. No hook writes an STE code now."""
     ids = set()
-    config_watch = os.path.join(root, "hooks", "config_watch.py")
-    for path in guard_paths(root) + ([config_watch] if os.path.exists(config_watch) else []):
+    for path in hook_paths(root):
         ids |= guard_rule_names(read(path), os.path.relpath(path, root), os.path.dirname(path))
     return ids
 

@@ -847,7 +847,9 @@ class Hook(unittest.TestCase):
     def test_refusal_is_logged(self):
         self.assertRefused(self.spawn(brief(job=JOB + "\nKeep the current layout.")))
         with open(os.path.join(self.config.name, "guard.log"), encoding="utf-8") as handle:
-            self.assertIn("blind-brief", handle.read())
+            rows = [line.split("\t") for line in handle.read().splitlines() if line.strip()]
+        # Column 2 is the decision and column 3 the rule id: the id must be exactly blind-brief, not a longer one.
+        self.assertEqual([r[3] for r in rows if len(r) > 3 and r[2] == "deny"], ["blind-brief"])
 
 
 IOS_DEVICE = (
