@@ -12247,11 +12247,11 @@ sh("frozen pin: gh pr create --title naming the global CLAUDE.md allows [cap-ask
    "gh pr create --draft --title \"Update " + CFG_CLAUDEMD + "\" --body \"notes\"", "allow", cwd=NOGIT)
 
 
-# The mark constants. A guard module marks words and globs with one-character control-byte strings,
-# and two marks on one byte read as one mark to the other. The case reads each module's own top-level
-# constants from the loaded module, so it copies no value here.
-MARK_CONSTANT_FILES = ("guard_frozen.py", "guard_core.py")
-MARK_CONSTANT_NAMES = ("_WORD_MARK", "_GLOB_MARK", "_SEGMENT_GLOB")  # the scan must find each one
+# The mark constants. A guard module marks words, globs and newlines with one-character control-byte
+# strings, and two marks on one byte read as one mark to the other. The case reads each module's own
+# top-level constants from the loaded module, so it copies no value here.
+MARK_CONSTANT_FILES = ("guard_frozen.py", "guard_core.py", "guard_env.py")
+MARK_CONSTANT_NAMES = ("_WORD_MARK", "_GLOB_MARK", "_SEGMENT_GLOB", "_NEWLINE_MARK")  # the scan must find each one
 
 
 def _control_byte_constants(file_name):
@@ -12277,7 +12277,7 @@ def _control_byte_constants(file_name):
 
 
 def frozen_mark_constants_case():
-    """The control-byte mark constants of guard_frozen.py and guard_core.py are pairwise distinct.
+    """The control-byte mark constants of guard_frozen.py, guard_core.py and guard_env.py are pairwise distinct.
 
     The scope comes first: each named mark must be found, so a rename cannot empty the scan. Then no
     two marks found may share a byte.
@@ -14168,8 +14168,8 @@ LOG_CHECKS_EXTRA.append((BASE_COPY_COST_LABEL, base_copies_read_cost_case))
 LOG_FAMILY[BASE_COPY_COST_LABEL] = "branch-worktree"
 # The mark-constant check is defined in the frozen section, above LOG_CHECKS_EXTRA. Its family is the
 # frozen section's, set by hand.
-MARK_CONSTANTS_LABEL = ("frozen: the control-byte mark constants of guard_frozen.py and guard_core.py "
-                        "are pairwise distinct")
+MARK_CONSTANTS_LABEL = ("frozen: the control-byte mark constants of guard_frozen.py, guard_core.py and "
+                        "guard_env.py are pairwise distinct")
 LOG_CHECKS_EXTRA.append((MARK_CONSTANTS_LABEL, frozen_mark_constants_case))
 LOG_FAMILY[MARK_CONSTANTS_LABEL] = "frozen"
 for _name, _change in BUILDER_GREEN:
