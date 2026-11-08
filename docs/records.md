@@ -139,6 +139,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `ci-unknown-is-red` | A lint that cannot read its input prints UNKNOWN. | [`docs/decisions/ci-unknown-is-red.md`](../docs/decisions/ci-unknown-is-red.md) |
 | `cite-by-id-refuses-unread-file` | Owner, 2026-10-17 11:40 CDT (guard audit, finding 7): the guard refuses `git commit -F <file>` when it cannot read the file at hook time. | [`docs/decisions/cite-by-id-refuses-unread-file.md`](../docs/decisions/cite-by-id-refuses-unread-file.md) |
 | `claude-md-shrink` | Owner, 2026-10-16 23:53 CDT and 2026-10-17 00:40 CDT: | [`docs/decisions/claude-md-shrink.md`](../docs/decisions/claude-md-shrink.md) |
+| `commit-refuses-conflict-markers` | Rule `conflict-markers` in `hooks/guard.py` refuses a commit or a push that would carry git conflict markers. | [`docs/decisions/commit-refuses-conflict-markers.md`](../docs/decisions/commit-refuses-conflict-markers.md) |
 | `config-watch-fast-exit` | Owner, 2026-10-20. | [`docs/decisions/config-watch-fast-exit.md`](../docs/decisions/config-watch-fast-exit.md) |
 | `copy-mode-overwrites-no-backup` | Owner: in copy mode, an installer overwrites its own old copy and keeps no backup. | [`docs/decisions/copy-mode-overwrites-no-backup.md`](../docs/decisions/copy-mode-overwrites-no-backup.md) |
 | `cull-rules` | Owner ruling, 2026-10-17 11:56 CDT. | [`docs/decisions/cull-rules.md`](../docs/decisions/cull-rules.md) |
@@ -345,6 +346,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `inbox-send-window-unbounded` | The feedback Stop guard accepts any matching send after the owner's message, in any later turn. | [`docs/debts/inbox-send-window-unbounded.md`](../docs/debts/inbox-send-window-unbounded.md) |
 | `inplace-edit-under-0-9-flagged` | A branch can edit a line that main only added. | [`docs/debts/inplace-edit-under-0-9-flagged.md`](../docs/debts/inplace-edit-under-0-9-flagged.md) |
 | `install-checkout-flake` | On Windows CI two session-start freshness cases failed, then passed on rerun, twice on 2026-10-20: caseF1 in the morning (#527), and caseG1 at 23:00 (#533, run 39528566602; "expected ... | [`docs/debts/install-checkout-flake.md`](../docs/debts/install-checkout-flake.md) |
+| `jobs-over-80pct-of-cap` | In the window of 2026-11-05 (decision `ci-job-caps`, each job's cap leaves its slowest run under 80%), nine jobs had a green run past 80% of the cap. | [`docs/debts/jobs-over-80pct-of-cap.md`](../docs/debts/jobs-over-80pct-of-cap.md) |
 | `kept-mockup-never-merged` | A kept mockup reaches no main branch. | [`docs/debts/kept-mockup-never-merged.md`](../docs/debts/kept-mockup-never-merged.md) |
 | `lane-ack-skips-every-reply` | In `last_incoming_index`, a send's first reply from its target is its ack, so a new question in that reply passes with no send. | [`docs/debts/lane-ack-skips-every-reply.md`](../docs/debts/lane-ack-skips-every-reply.md) |
 | `lane-cycle-delete-order` | `cut_lanes` deletes dependents first. | [`docs/debts/lane-cycle-delete-order.md`](../docs/debts/lane-cycle-delete-order.md) |
@@ -422,7 +424,6 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `verdict-rewritten-xcode-output` | `verdict` needs a sign of a test run to fail a run with no test count. | [`docs/debts/verdict-rewritten-xcode-output.md`](../docs/debts/verdict-rewritten-xcode-output.md) |
 | `verdict-skip-colon-line` | `bin/verdict` counts marker lines that start `SKIP ` or `SKIPPED`. | [`docs/debts/verdict-skip-colon-line.md`](../docs/debts/verdict-skip-colon-line.md) |
 | `windows-main-run-flakes` | Two main push runs went red on Windows only, and each blocked the next batch until a rerun went green. | [`docs/debts/windows-main-run-flakes.md`](../docs/debts/windows-main-run-flakes.md) |
-| `windows-shards-outgrow-caps` | Off pull_request, the guard suite runs in 2 Windows shards and the merge git-half suite in 5. | [`docs/debts/windows-shards-outgrow-caps.md`](../docs/debts/windows-shards-outgrow-caps.md) |
 | `workflow-wrapped-test-run` | A builder who wraps a bare test run in a workflow is refused as a dropped test path. | [`docs/debts/workflow-wrapped-test-run.md`](../docs/debts/workflow-wrapped-test-run.md) |
 | `worktree-guard-loop-var` | Guard rule `hand-made-worktree` refuses `git worktree add /tmp/x <ref>`. | [`docs/debts/worktree-guard-loop-var.md`](../docs/debts/worktree-guard-loop-var.md) |
 | `wp-batch-reads-installed-copy` | `stale_pages.py` batch mode (no `--page`) compares each live page with the `page.html` installed at session start, not with claude-settings main. | [`docs/debts/wp-batch-reads-installed-copy.md`](../docs/debts/wp-batch-reads-installed-copy.md) |
