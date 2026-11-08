@@ -1,15 +1,15 @@
 #!/usr/bin/env bash
 # The one install script of actions/playwright-setup. The composite action and bin/ci-job both call it, so each command lives here once.
-#   install.sh deps      npm ci in $DIR (unless NPM_CI=false), then pin.sh, which writes version, os and cli to $GITHUB_OUTPUT.
+#   install.sh deps      npm ci in $DIR (only when NPM_CI is true or unset; any other value, empty too, skips it), then pin.sh, which writes version, os and cli to $GITHUB_OUTPUT.
 #   install.sh browsers  `node "$CLI" install $BROWSERS`, then the opt-in apt step when $DEPS is set (webkit, firefox; Linux only; CAP s).
 #   install.sh local     bin/ci-job's call: npm ci and pin.sh into a temp GITHUB_OUTPUT. It downloads no browser and runs no apt:
 #                        decision playwright-install-once, one Playwright install, never from an agent.
-# Cost of `local`: one npm ci of $DIR (1.1 s for .github/shoot, 1 run, cloud container, warm npm cache) and one node call in pin.sh.
+# Cost of `local`: one npm ci of $DIR (1.1 s for .github/shoot, 1 run, cloud container, warm npm cache) and two node calls in pin.sh (the playwright-core path, then its version).
 set -euo pipefail
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 
 npm_ci() {
-  [ "${NPM_CI:-true}" = true ] || return 0
+  [ "${NPM_CI-true}" = true ] || return 0
   npm ci --prefix "${DIR:?}" --ignore-scripts --no-audit --no-fund
 }
 

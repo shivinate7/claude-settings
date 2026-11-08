@@ -57,11 +57,15 @@
 # apt; decision playwright-install-once), once per setup step, in workflow order, and the suite runs after it. The action is not in KNOWN_ACTION:
 # --lint never runs it, since is_lint() would then count it as lint. Run only for a --step, it is an install, not a lint step. A with: system-deps
 # reads unknown ("apt never runs locally") and installs nothing. An install that fails reads unknown with its own text, never MISSING_INSTALL, so
-# merge --lane-lint never reads it as `not run`, and the suite does not run. When the pinned browser is absent after the install (node
-# `require('playwright').chromium.executablePath()` names no file, run from package-dir), ci-job unsets each BROWSER_MARKERS env of that step and
-# prints one `note` line naming the skipped cases and that CI runs them; the suite runs without them. Whether the NODE_PATH folder was missing or
-# not, a step with such a setup step gets that browser check. Cost: one install.sh run (1.1 s for .github/shoot, 1 run, cloud container, warm npm
-# cache) and one node call per setup step; one stat per NODE_PATH entry. A step whose shell or verdict a signal killed, and a step whose verdict printed no verdict line
+# merge --lane-lint never reads it as `not run`, and the suite does not run; so does an install that exits 0 and leaves the NODE_PATH folder missing.
+# Then ci-job probes the pinned browser as hooks/test_guard.py's pd_node_ready does: node, run from package-dir, checks that
+# `require('playwright').chromium.executablePath()` names a file and launches Chromium. When the browser is absent or does not launch, ci-job
+# unsets each BROWSER_MARKERS env of that step, inherited ones too, and prints one `noted` line naming the skipped cases and that CI runs them;
+# the suite runs without them. A probe that errors or times out (SETUP_PROBE_SECONDS) reads unknown and the suite does not run. A --plan runs
+# no install and no probe: it plans the step as if the install made its folder. Whether the NODE_PATH folder was missing or not, a step with such a
+# setup step gets the browser probe. Cost per setup step: one install.sh run when the folder is missing (one npm ci, 1.1 s for .github/shoot, 1 run,
+# cloud container, warm npm cache; two node calls in pin.sh) and one node call for the probe, which starts a headless Chromium (unmeasured: no
+# pinned browser on the box that measured the rest); one stat per NODE_PATH entry. A step whose shell or verdict a signal killed, and a step whose verdict printed no verdict line
 # with a nonzero exit, read unknown, never FAIL: the run was cut, so the tree is not shown at fault.
 # Each step's env sets GITHUB_BASE_REF to that value (the step's own env: wins), as GitHub does on a pull-request run; with no --base it is unset, as off one.
 # A tool is missing when a line's command is not on PATH, or the step exits 127.
@@ -225,6 +229,7 @@ INSTALL_CMD = re.compile(r"(?:npm ci|(?:pnpm|yarn) install --(?:frozen-lockfile|
 RUNNER_UNSET = {"GH_TOKEN", "GITHUB_TOKEN", "ZIZMOR_PATHS"}  # absent from a runner step's env unless its env: or the zizmor with: sets them
 KNOWN_ACTION = re.compile(r"(?:\S*/)?actions/(ste-lint|code-check|zizmor)(?:@\S*)?")
 LOCAL_ACTION = re.compile(r"[$.]/actions/\S+")  # this repo's own action: a check --lint should run
+SETUP_PROBE_SECONDS = 120  # the bound on the browser probe, as hooks/test_guard.py bounds its pd_node_ready launch
 SETUP_ACTION = re.compile(r"[$.]/actions/playwright-setup")  # the install a --step run makes before a suite that reads its node_modules
 SETUP_INSTALL = os.path.join("actions", "playwright-setup", "install.sh")  # the one home of that install: the action runs it too
 CODE_CHECK = os.path.join("actions", "code-check", "code_check.py")  # under a checkout of this repo
@@ -315,9 +320,11 @@ def governing_setup(steps, n, values, top):
 
 
 def prepare_setup(st, folder, values, top, log):
-    """Run the setup step's install (`install.sh local`) when its node_modules folder is missing, then read whether the pinned browser is there.
-    -> (problem, browser): problem is the unknown text, or None; browser is True when `require('playwright').chromium.executablePath()`,
-    run from the package folder, names a file. The install is one bin/verdict run, so its output stays in the log. It downloads no browser, runs no apt."""
+    """Run the setup step's install (`install.sh local`) when its node_modules folder is missing, then probe the pinned browser.
+    -> (problem, browser): problem is the unknown text, or None; browser is True when Chromium launched. The install is one bin/verdict run, so
+    its output stays in the log. It downloads no browser, runs no apt. The probe is one node call run from the package folder, as
+    hooks/test_guard.py's pd_node_ready is, with PROBE_EXIT: 0 launched, 1 the browser file is absent or the launch failed, 3 the probe itself
+    could not load playwright. Any other exit, a start failure and a timeout are a problem, never an absent browser."""
     keys = {k: expand(v.strip("'\""), values) for k, v in step_with(st).items() if k in ("system-deps", "npm-ci", "package-dir")}
     if None in keys.values():
         return "with: holds an expression this runner cannot read, so the playwright-setup install is not run", False
@@ -330,22 +337,30 @@ def prepare_setup(st, folder, values, top, log):
         if not os.path.isfile(script):
             return "the playwright-setup install failed: no %s in this tree" % SETUP_INSTALL, False
         env = {**{k: v for k, v in os.environ.items() if k not in RUNNER_UNSET}, "DIR": keys.get("package-dir") or ".",
-               "NPM_CI": keys.get("npm-ci") or "true", "VERDICT_LOG": log}
+               "NPM_CI": keys.get("npm-ci", "true"), "VERDICT_LOG": log}
         done = _nowindow.run([sys.executable, os.path.join(BIN, "verdict"), *bash, slashed(script), "local"], cwd=top, env=env,
                              capture_output=True, text=True, stdin=subprocess.DEVNULL)
         if done.returncode:
             line = next((ln for ln in done.stdout.splitlines() if ln.startswith(("PASS ", "SKIP ", "FAIL "))), NO_VERDICT_LINE)
             return "the playwright-setup install failed (install.sh local, exit %d): %s" % (done.returncode, line), False
-    check = "const p = require('playwright').chromium.executablePath(); process.exit(require('fs').existsSync(p) ? 0 : 1)"
+        if not os.path.isdir(folder):  # a clean exit that made no folder: never MISSING_INSTALL, which lane lint reads as `not run`
+            return "the playwright-setup install ran (install.sh local, exit 0) but %s is still missing" % folder, False
+    probe = ("let c; try { c = require('playwright').chromium; } catch (e) { console.error(String(e)); process.exit(3); }\n"
+             "if (!require('fs').existsSync(c.executablePath())) process.exit(1);\n"
+             "try { c.launch().then(b => b.close()).then(() => process.exit(0), e => { console.error(String(e)); process.exit(1); }); }\n"
+             "catch (e) { console.error(String(e)); process.exit(3); }")
     try:
-        browser = _nowindow.run(["node", "-e", check], cwd=os.path.dirname(folder), capture_output=True, text=True,
-                                stdin=subprocess.DEVNULL, timeout=60).returncode == 0
-    except (OSError, subprocess.TimeoutExpired):
-        browser = False
-    return None, browser
+        done = _nowindow.run(["node", "-e", probe], cwd=os.path.dirname(folder), capture_output=True, text=True, env=dict(os.environ),
+                             stdin=subprocess.DEVNULL, timeout=SETUP_PROBE_SECONDS)
+    except (OSError, subprocess.TimeoutExpired) as e:
+        return "the playwright-setup browser probe did not finish (%s: %s), so the suite does not run" % (type(e).__name__, e), False
+    if done.returncode in (0, 1):
+        return None, done.returncode == 0
+    why = (done.stderr.strip().splitlines() or ["no message"])[-1]
+    return "the playwright-setup browser probe failed (node exit %d: %s), so the suite does not run" % (done.returncode, why), False
 
 
-def plan(step, pr, values, top):
+def plan(step, pr, values, top, assume=()):
     """(state, detail, argv, env, cwd): state is run, not run locally, skipped or unknown."""
     if step_key(step, "continue-on-error") not in (None, "false"):
         return "unknown", "continue-on-error: this runner reads no step as allowed to fail", None, None, None
@@ -399,7 +414,8 @@ def plan(step, pr, values, top):
     if EXPR.search(body):
         return "unknown", "run: holds an expression this runner cannot read", None, None, None
     for entry in filter(None, env.get("NODE_PATH", "").split(os.pathsep)):  # a node install that a skipped uses: step makes: absent here, the suite cannot run
-        if not os.path.isdir(os.path.join(top, step_key(step, "working-directory") or "", entry)):
+        folder = os.path.join(top, step_key(step, "working-directory") or "", entry)
+        if not os.path.isdir(folder) and os.path.normcase(os.path.normpath(folder)) not in assume:  # assume: a --plan, where the install is not run
             return "unknown", MISSING_INSTALL.format(entry=entry), None, None, None
     shell = step_key(step, "shell")
     if shell not in SHELLS:
@@ -570,18 +586,20 @@ def main(argv):
             print("%-15s %s: --lint did not run it: install step %s did not finish" % ("unknown", name, blocker))
             continue
         setup = governing_setup(steps, n - 1, values, top) if wanted else None
-        if setup:  # one install and one browser read per setup step, before the first step that reads its node_modules
+        if setup and not dry:  # one install and one browser probe per setup step, before the first step that reads its node_modules
             if setup[0] not in prepared:
                 prepared[setup[0]] = prepare_setup(*setup, values, top, log)
             if prepared[setup[0]][0]:
                 tally["unknown"] += 1
                 print("%-15s %s: %s" % ("unknown", name, prepared[setup[0]][0]))
                 continue
-        state, detail, shell, env, cwd = planned[n - 1] or plan(step, bool(base), values, top)
-        if state == "run" and setup and not prepared[setup[0]][1]:  # the pinned browser is absent: the suite runs without its marker
-            for marker in [m for m in BROWSER_MARKERS if m in env]:
-                del env[marker]
-                print("%-15s %s" % ("note", BROWSER_SKIPPED.format(cases=BROWSER_MARKERS[marker])))
+        state, detail, shell, env, cwd = planned[n - 1] or plan(step, bool(base), values, top, {setup[1]} if setup and dry else ())
+        dropped = set()  # a marker env the step must not see: the pinned browser is absent, so the suite runs without it
+        if state == "run" and setup and not dry and not prepared[setup[0]][1]:
+            for marker in [m for m in BROWSER_MARKERS if m in env or m in os.environ]:
+                env.pop(marker, None)
+                dropped.add(marker)
+                print("%-15s %s" % ("noted", BROWSER_SKIPPED.format(cases=BROWSER_MARKERS[marker])))
         if state != "run":
             if wanted and state != "unknown":  # a named step that did not run proved nothing: never a pass
                 state, detail = "unknown", "--step named it, but it did not run (%s): %s" % (state, detail)
@@ -609,7 +627,7 @@ def main(argv):
             with _nowindow.Popen([sys.executable, os.path.join(BIN, "verdict"), *shell, script],
                                  cwd=os.path.join(top, cwd) if cwd else top, stdout=subprocess.PIPE,
                                  stderr=subprocess.STDOUT, text=True,
-                                 env={**{k: v for k, v in os.environ.items() if k not in RUNNER_UNSET | {"GITHUB_BASE_REF"}},
+                                 env={**{k: v for k, v in os.environ.items() if k not in RUNNER_UNSET | {"GITHUB_BASE_REF"} | dropped},
                                       **({"GITHUB_BASE_REF": values["github.base_ref"]} if base else {}),
                                       **env, "VERDICT_LOG": log}) as proc:
                 for line in proc.stdout:  # relay each heartbeat at once: the stall watch reads this job's output

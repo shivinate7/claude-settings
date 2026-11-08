@@ -2508,11 +2508,12 @@ def other_job_runs(wt, others, base):
     this cannot read from the workflow at the head reads unknown, never a pass;
     so does a runs-on that is not one literal label (an expression, a map, empty). A step whose NODE_PATH folder an earlier playwright-setup step of its
     job makes needs no special read here: ci-job runs that action's install.sh `local` first (npm ci and the pin, no browser download, no apt), then the
-    suite, so checks-guard's guard suite reads PASS or FAIL. With the pinned browser absent it runs without GUARD_CHROMIUM and ci-job prints one `note`
-    line naming the skipped page-item-design cases (CI runs them). A failed install, or a system-deps input, reads unknown with its own text. A run whose
+    suite, so checks-guard's guard suite reads PASS or FAIL. With the pinned browser absent it runs without GUARD_CHROMIUM and ci-job prints one `noted`
+    line naming the skipped page-item-design cases (CI runs them), when the browser is absent or does not launch. A failed install, or a system-deps input, reads unknown with its own text. A run whose
     only unknowns are a NODE_PATH folder that no such setup step makes (MISSING_INSTALL_LINE) is one `not run` line and adds nothing to the result.
     Cost: one ci-job run (its own processes) per Linux job with a picked suite, none when nothing is picked; one read of the workflow; for a job with a
-    playwright-setup step, one npm ci (1.1 s for .github/shoot, 1 run, cloud container, warm npm cache) and one node call, no browser download.
+    playwright-setup step, one npm ci (1.1 s for .github/shoot, 1 run, cloud container, warm npm cache) with two node calls in pin.sh, and one node call that
+    probes the browser by launching it (unmeasured: no pinned browser on the box that measured the rest); no browser download.
     -> [(job, suites, CiRun)]."""
     if not others:
         return []

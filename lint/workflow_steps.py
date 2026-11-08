@@ -16,9 +16,9 @@ MISSING_INSTALL = ("env NODE_PATH names {entry}, which is not installed here: th
                    "so the suite cannot run")
 MISSING_INSTALL_LINE = re.compile(r"unknown\s+.*?: env NODE_PATH names (\S+), which is not installed here")
 # A step env that tells a suite a browser is there, and the cases a suite skips when ci-job unsets it because the pinned browser is absent
-# (lane lint never downloads a browser). The one home of this text; bin/ci-job prints BROWSER_SKIPPED once per step it unsets a marker for.
+# (lane lint never downloads a browser) or it does not launch. The one home of this text; bin/ci-job prints BROWSER_SKIPPED once per step it unsets a marker for.
 BROWSER_MARKERS = {"GUARD_CHROMIUM": "the page-item-design browser deny cases in hooks/test_guard.py"}
-BROWSER_SKIPPED = "{cases} skipped: the pinned browser is absent here (lane lint downloads none); CI runs them"
+BROWSER_SKIPPED = "{cases} skipped: the pinned browser is absent or does not launch here (lane lint downloads none); CI runs them"
 # The one line bin/ci-job prints for the picked suites of another job, and the reader of it that merge --lane-lint uses.
 NOT_RUN_JOB = "job {job}: picked {suites}; job {job} runs them, not {linted}"
 NOT_RUN_JOB_LINE = re.compile(r"not run\s+job ([\w-]+): picked (\S.*?); job \1 runs them, not ([\w-]+)\s*$")
