@@ -140,6 +140,7 @@ FAMILIES = {
     "handoff-unread": "after compaction, the guard refuses each call it judges until the session reads its handoff: the refusals, the allows, the cost, the fail-open copy, and the override",
     "wsl": "the WSL launch allow list, the refused WSL forms, and quoted or commented text",
     "load-brake": "the machine-load brake: busy and full on start calls, full on an agent's or a lane session's shell or file write (a lane session's own record tags cs-build:lane), the reader seam, no child process, no per-call read, no CPU read or wait, the cloud skip (CLAUDE_CODE_REMOTE=true reads nothing), the neutral load every other family's lane call meets",
+    "agent-remote-tools": "an agent's call to an outward claude-code-remote tool is refused; the session's own call, an agent_type with no agent_id, and the read tools keep their verdict",
     "misc": "anything outside a tagged section",
 }
 GUARD_FAMILY = os.environ.get("GUARD_FAMILY", "")
@@ -19881,6 +19882,125 @@ for _model in ("sonnet", "claude-sonnet-5-5", "opus", "claude-opus-5-5"):
     add("floor: create_session naming %s is allowed" % (_model,), "allow",
         tool=CREATE_SESSION_CALL, prompt="x", model=_model)
 add("floor: create_session with no model is allowed", "allow", tool=CREATE_SESSION_CALL, prompt="x")
+
+# ---- An agent's outward remote tools. An agent's call to a claude-code-remote tool that acts on another
+# session, a trigger or a repo is refused. No agent role needs the server, and a general-purpose agent without an
+# agent file holds it (measured). The payload's agent_id marks the agent (AGENT_ID, hooks/guard.py).
+# The session's own call (no agent_id), an agent_type with no agent_id, and the read tools keep today's verdict.
+# The payload is built whole, not through add()'s keywords: create_trigger's input is `name`, which add() takes.
+FAMILY = "agent-remote-tools"
+AGENT_NO_REMOTE = "agent-no-remote-tools"  # the rule id the refusal names
+REMOTE_PREFIX = "mcp__claude-code-remote__"
+AGENT_ID_VALUE = "a1b2c3d4e5f607182"  # 17 hex characters, the measured agent_id shape
+# archive_session is judged by lane-closes-after-records, which refuses a target it cannot read as a non-lane. A
+# triage target is the allowed one (archive_allow above), so the archive rows reach the agent rule on old code.
+OUTWARD_CALLS = (
+    ("create_session", {"prompt": "x"}, None),
+    ("archive_session", {"session_id": ROLE_OTHER}, role_path("archive-triage")),
+    ("send_message", {"session_id": "session_AGENTSEND01", "message": "x"}, None),
+    ("set_session_tags", {"session_ids": ["session_AGENTTAG01"], "add": ["x"]}, None),
+    ("create_trigger", {"name": "x", "prompt": "x", "initiation": "own_followup"}, None),
+)
+READ_CALLS = (
+    ("get_session", {"session_id": "session_AGENTREAD01"}),
+    ("list_sessions", {"limit": 5}),
+)
+AGENT_SHAPES = (
+    ("a general-purpose agent", AGENT_ID_VALUE, "general-purpose"),
+    ("an agent with no agent_type", AGENT_ID_VALUE, None),
+)
+
+
+def remote_call(tool, tool_input, agent_id=None, agent_type=None, transcript=None):
+    """The PreToolUse payload of one claude-code-remote call as the hook receives it. An agent's payload carries
+    agent_id and agent_type beside tool_name and tool_input. The session's own payload carries neither."""
+    body = {"tool_name": REMOTE_PREFIX + tool, "tool_input": tool_input, "cwd": NOGIT}
+    if agent_id:
+        body["agent_id"] = agent_id
+    if agent_type:
+        body["agent_type"] = agent_type
+    if transcript:
+        body["transcript_path"] = transcript
+    return json.dumps(body)
+
+
+def outward_case(name, expected, tool, tool_input, transcript, agent_id=None, agent_type=None, **kw):
+    """One case on a claude-code-remote payload. A transcript-reading call runs in ROLE_ENV, as archive_allow does."""
+    add(name, expected, raw=remote_call(tool, tool_input, agent_id, agent_type, transcript),
+        env=ROLE_ENV if transcript else None, **kw)
+
+
+for _tool, _input, _transcript in OUTWARD_CALLS:
+    for _shape, _id, _type in AGENT_SHAPES:
+        outward_case("agent-no-remote-tools: %s from %s is refused" % (_tool, _shape), "deny", _tool, _input,
+                     _transcript, _id, _type, rule=AGENT_NO_REMOTE, lacks=_tool)
+# A truthy agent_id that fails the AGENT_ID shape is still a carried agent_id: the rule keys on the field, so a
+# harness id that drifts from the measured form stays refused rather than turning the rule off.
+outward_case("agent-no-remote-tools: create_session with an agent_id that fails the AGENT_ID shape is refused", "deny",
+             "create_session", {"prompt": "x"}, None, "agent:1", "general-purpose", rule=AGENT_NO_REMOTE,
+             lacks="create_session")
+for _tool, _input, _transcript in OUTWARD_CALLS:
+    outward_case("agent-no-remote-tools: %s from the session itself keeps today's verdict" % _tool, "allow",
+                 _tool, _input, _transcript)
+    outward_case("agent-no-remote-tools: %s from an agent_type with no agent_id keeps today's verdict" % _tool,
+                 "allow", _tool, _input, _transcript, None, "general-purpose")
+for _tool, _input in READ_CALLS:
+    for _shape, _id, _type in AGENT_SHAPES:
+        add("agent-no-remote-tools: %s from %s is allowed" % (_tool, _shape), "allow", silent=True,
+            raw=remote_call(_tool, _input, _id, _type))
+# The twenty outward tools, pinned by full name. Each name gets its own deny case from a general-purpose agent, so a
+# REMOTE_OUTWARD_TOOLS that drops one name goes red on that name. The equality check holds the constant to this set.
+PINNED_OUTWARD_TOOLS = (
+    "mcp__claude-code-remote__create_session",
+    "mcp__claude-code-remote__send_message",
+    "mcp__claude-code-remote__archive_session",
+    "mcp__claude-code-remote__unarchive_session",
+    "mcp__claude-code-remote__interrupt_session",
+    "mcp__claude-code-remote__set_session_tags",
+    "mcp__claude-code-remote__set_session_title",
+    "mcp__claude-code-remote__create_trigger",
+    "mcp__claude-code-remote__update_trigger",
+    "mcp__claude-code-remote__delete_trigger",
+    "mcp__claude-code-remote__fire_trigger",
+    "mcp__claude-code-remote__send_later",
+    "mcp__claude-code-remote__watch_url",
+    "mcp__claude-code-remote__unwatch_url",
+    "mcp__claude-code-remote__subscribe_pr_activity",
+    "mcp__claude-code-remote__unsubscribe_pr_activity",
+    "mcp__claude-code-remote__add_repo",
+    "mcp__claude-code-remote__register_repo_root",
+    "mcp__claude-code-remote__confirm_repository_trust",
+    "mcp__claude-code-remote__request_computer_folder",
+)
+for _full in PINNED_OUTWARD_TOOLS:
+    _short = _full[len(REMOTE_PREFIX):]
+    outward_case("agent-no-remote-tools: pinned %s from a general-purpose agent is refused" % _short, "deny",
+                 _short, {}, None, AGENT_ID_VALUE, "general-purpose", rule=AGENT_NO_REMOTE, lacks=_short)
+
+
+def pinned_outward_check():
+    """REMOTE_OUTWARD_TOOLS in hooks/shared_names.py is the pinned set: it holds each pinned name, once, and no other.
+    It reads the copy beside this file, so a copy under test is the one checked."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("shared_names_pinned", os.path.join(HERE, "shared_names.py"))
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    constant = tuple(module.REMOTE_OUTWARD_TOOLS)
+    for name in PINNED_OUTWARD_TOOLS:
+        if name not in constant:
+            return False, "REMOTE_OUTWARD_TOOLS lacks %s" % name
+    for name in constant:
+        if name not in PINNED_OUTWARD_TOOLS:
+            return False, "REMOTE_OUTWARD_TOOLS holds %s, which is not pinned" % name
+    if len(set(constant)) != len(constant):
+        return False, "REMOTE_OUTWARD_TOOLS repeats a name"
+    return True, "REMOTE_OUTWARD_TOOLS holds exactly the 20 pinned names"
+
+
+FIXTURELESS_CHECKS.add(pinned_outward_check)
+LOG_CHECKS_EXTRA.append(("agent-remote-tools: REMOTE_OUTWARD_TOOLS holds exactly the pinned outward names",
+                         pinned_outward_check))
+FAMILY = "rule9"  # the family the cases below had before this section
 
 # ---- Lane effort pin. A lane session runs Opus at medium effort. On a cloud session the only
 # prompt that sets it is exactly "/effort medium": text after it on a new line runs no slash

@@ -36,6 +36,36 @@ def guard_matchers():
             if any("guard.py" in h.get("command", "") for h in e["hooks"])]
 
 
+SHARED_NAMES = os.environ.get("SHARED_NAMES_UNDER_TEST") or os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), "..", "hooks", "shared_names.py")
+
+
+def remote_outward_tools():
+    """REMOTE_OUTWARD_TOOLS of hooks/shared_names.py, the one home of the claude-code-remote tools an agent may not
+    call. SHARED_NAMES_UNDER_TEST points the test at another copy (a red run on a stand-in list)."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("shared_names_under_test", SHARED_NAMES)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return tuple(module.REMOTE_OUTWARD_TOOLS)
+
+
+class RemoteOutwardMatcher(unittest.TestCase):
+    def test_guard_matcher_covers_every_outward_tool(self):
+        # The guard refuses an agent's call to each outward tool, so the guard's matcher must see every one.
+        # The list is read from its one home, never copied into this file.
+        tools = remote_outward_tools()
+        self.assertTrue(tools, "REMOTE_OUTWARD_TOOLS is empty: the matcher has no outward list to check")
+        matchers = guard_matchers()
+        self.assertTrue(matchers, "no guard.py entry in settings.json PreToolUse")
+        for tool in tools:
+            with self.subTest(tool=tool):
+                self.assertTrue(tool.startswith("mcp__claude-code-remote__"),
+                                "%r is not a full claude-code-remote tool name" % tool)
+                self.assertTrue(any(re.fullmatch(m, tool) for m in matchers),
+                                "no guard matcher covers %s" % tool)
+
+
 class Matcher(unittest.TestCase):
     def test_guard_matcher_covers_model_floor_tools(self):
         matchers = guard_matchers()

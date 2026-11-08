@@ -120,6 +120,11 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        without case, after optional markdown lead characters. A set_session_tags call on the target after
                        its record, and a marker brief with no record of the target, are refusals. A message without the marker reads no transcript. An
                        override lifts it.
+  agent-no-remote-tools
+                       deny. A call by an agent (the payload carries a non-empty agent_id) to a claude-code-remote
+                       tool in shared_names.REMOTE_OUTWARD_TOOLS: starting, messaging, tagging or archiving sessions,
+                       scheduled tasks, repos and computers. The session's own call, and the read tools, pass.
+                       An override lifts it.
   draft-pr             deny. A `gh pr create` without `--draft`. (draft-until-reviewed)
   records-page         deny. A `git commit` whose docs/records.md differs from the base's page.
                        (records-index-at-merge)
@@ -2350,11 +2355,16 @@ def judge_stop(payload) -> None:
 
 SPAWN_TOOLS = ("Agent", "Task")
 SESSION_TOOL = "mcp__ccd_session__start_session"
-# The one home of the claude-code-remote server name. lint/check_agent_models.py reads it from here.
-REMOTE_SERVER = "mcp__claude-code-remote"
+from shared_names import REMOTE_OUTWARD_TOOLS, REMOTE_SERVER  # noqa: E402  the one home; lint/check_agent_models.py reads REMOTE_SERVER from here
 CREATE_SESSION_TOOL = REMOTE_SERVER + "__create_session"
 # The one lane effort. lint/check_agent_models.py reads it from here and checks the lane row of the model table.
 LANE_EFFORT = "medium"
+AGENT_NO_REMOTE_REASON = (
+    "An agent never starts, messages, tags, interrupts or archives sessions, and never sets scheduled tasks, "
+    "watches, pull request subscriptions, repos, computer folders or the owner's trust card. The session that spawned this agent does "
+    "that. Finish your own work and put the request in your report so that session can act on it. "
+    "(decision lanes-start-as-agents, an agent is not a lane)"
+)
 LANE_TAG = "cs-build:lane"
 LANE_EFFORT_REASON = (
     "A lane session's start prompt is `/effort %s` alone. A slash command runs only when it is the whole "
@@ -5094,6 +5104,12 @@ def judge(payload) -> None:
     session_hit = session_home_hit(payload, tool, tool_input, cwd)
     if session_hit:
         refuse(tool, "deny", "session-home", SESSION_HOME_REASON, session_hit)
+
+    # 8b. agent-no-remote-tools. An agent never starts, messages, tags or archives sessions, nor sets scheduled tasks;
+    # the session that spawned it does. Keyed on a truthy agent_id of any shape, so a drifted id stays refused. Before
+    # the rules that would judge these tools first (lane-effort-pin, lane-closes-after-records). An override lifts it.
+    if payload.get("agent_id") and tool in REMOTE_OUTWARD_TOOLS:
+        refuse(tool, "deny", "agent-no-remote-tools", AGENT_NO_REMOTE_REASON, tool)
 
     # 9. The agent model floor. A spawn that names a Haiku model is refused. The reason names no
     # model; the log holds what the call asked for.
