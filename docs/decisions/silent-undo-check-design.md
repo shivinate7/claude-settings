@@ -16,19 +16,23 @@
 - **Revived line.** A merge commit puts back a line that one parent deleted, in a file with `merge=union`
   (decision `notes-merge-union`). Union merge keeps the line when the other parent adds next to it, with
   no conflict. The read covers every merge of upstream..head: a lane's own merge, a merge of main into a
-  lane, and the batch's merge of each lane. It reads the union rule as of the merge's first parent. A line
+  lane, and the batch's merge of each lane. A file counts as union when either parent has `merge=union`:
+  a lane cut before the rule landed has it only in the parent that is main. A line
   counts when the merge base of the two parents has it, one parent holds fewer copies, and the merge holds
   more. A lane fast-forwarded into the batch is read through the merge that follows. A row main re-added
-  after the deletion is in no merge base, so it is no finding. It needs git 2.40 or newer, and reads
-  UNKNOWN on an older git. Known limits:
+  after the deletion is in no merge base, so it is no finding. It needs git 2.40 or newer. On an older
+  git that read alone is UNKNOWN, printed beside any lost-line or reversal finding, never in place of one.
+  A finding with an UNKNOWN is a refusal, and the reason flag does not lift it. Known limits:
   - A lane rebased, cherry-picked or squashed onto main drops its deletion with no merge commit, so this
     read cannot see it.
   - A row one lane deletes while another lane rewrites it keeps only the rewrite. Nothing is read.
   - A section-separator line in both a deleted and an appended block can read as restored. A
     `Drops-lines` trailer excuses it.
+  - A lane moves a row while another lane appends beside its old place. Union keeps a second copy: each
+    parent holds one copy and the merge holds two. That is a duplicate, not a loss, so there is no finding.
   - A finding stays after a fix-forward commit. Redo the merge, or add the trailer.
 
-  Cost: a few git reads per merge, no process, no log.
+  Cost: about 5 git calls per two-parent merge, no long-lived process, no log.
 
 The escape is the line `Drops-lines: <path> -- <reason>`, one path per line. `bin/merge` reads it from the
 commit trailers of the branch and from the PR body. A bare path excuses nothing, and no reason excuses

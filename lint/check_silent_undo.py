@@ -67,12 +67,14 @@ WORD = re.compile(r"[A-Za-z0-9]")
 
 
 class Unknown(Exception):
-    pass
+    """A read that could not run. `problems` and `notes` hold what the reads that did run found, so the caller
+    can print them beside the UNKNOWN and never lose them (see check)."""
+    problems, notes = (), ()
 
 
-def git(cwd, *a, ok=(0,)):
+def git(cwd, *a, ok=(0,), input=None):
     # literal pathspecs: a path that starts with `:` is a name, never magic. surrogateescape keeps a non-UTF-8 name exact.
-    r = _nowindow.run(["git", "-C", cwd, *a], capture_output=True, encoding="utf-8", errors="surrogateescape", env=dict(os.environ, GIT_LITERAL_PATHSPECS="1"))
+    r = _nowindow.run(["git", "-C", cwd, *a], capture_output=True, encoding="utf-8", errors="surrogateescape", input=input, env=dict(os.environ, GIT_LITERAL_PATHSPECS="1"))
     if r.returncode not in ok:
         raise Unknown("git %s failed: %s" % (" ".join(a[:3]), r.stderr.strip() or r.returncode))
     return r.returncode, r.stdout
@@ -620,11 +622,22 @@ def retire_excuses(cwd, upstream, head, pr_body, run_state, paths):
     return {p: why for p, why in got.items() if p in paths}
 
 
+def union_paths(cwd, parent, paths):
+    """The set of `paths` that carry merge=union as of `parent`. The paths go in on stdin, never in the command line:
+    a merge that changes hundreds of files stays under the Windows 32K command-line limit."""
+    try:
+        out = git(cwd, "check-attr", "-z", "--stdin", "--source=" + parent, "merge", input="".join(p + "\0" for p in paths))[1].split("\0")
+    except Unknown as e:  # --source is git 2.40; the command's failure, never a version string, says it is missing
+        raise Unknown("needs git 2.40 or newer to read merge=union (%s)" % e)
+    return {out[i] for i in range(0, len(out) - 2, 3) if out[i + 2] == "union"}
+
+
 def revived_lines(cwd, m):
-    """[(path, parent, [line])] for merge commit m: a file with merge=union (read as of m's first parent, through
+    """[(path, parent, [line])] for merge commit m: a file with merge=union (as of either parent, read through
     check-attr, the one home of that rule) where a line is in the merge base of the two parents, one parent holds fewer
-    copies of it, and m holds more copies than that parent. A union merge restored what the parent deleted. Octopus
-    merges are Unknown in lost_lines; here they read as nothing."""
+    copies of it, and m holds more copies than that parent. A union merge restored what the parent deleted. Either parent
+    counts: a lane cut before the rule landed, merging main, has the rule only in its second parent. Octopus merges are
+    Unknown in lost_lines; here they read as nothing."""
     parents = git(cwd, "rev-list", "--parents", "-n", "1", m)[1].split()[1:]
     if len(parents) != 2:
         return []
@@ -635,15 +648,11 @@ def revived_lines(cwd, m):
     paths = sorted(set(raw_files(cwd, base, parents[0])) | set(raw_files(cwd, base, parents[1])))
     if not paths:
         return []
-    try:
-        out = git(cwd, "check-attr", "-z", "--source=" + parents[0], "merge", "--", *paths)[1].split("\0")
-    except Unknown as e:  # --source is git 2.40; the command's failure, never a version string, says it is missing
-        raise Unknown("needs git 2.40 or newer to read merge=union (%s)" % e)
+    union = union_paths(cwd, parents[0], paths) | union_paths(cwd, parents[1], paths)
     found = []
-    for i in range(0, len(out) - 2, 3):
-        if out[i + 2] != "union":
+    for path in paths:
+        if path not in union:
             continue
-        path = out[i]
         in_b, in_m = counts(blob(cwd, base, path)), counts(blob(cwd, m, path))
         for p in parents:
             in_p = counts(blob(cwd, p, path))
@@ -671,10 +680,14 @@ def check(cwd, upstream, head, default=None, tool=None, pr_body="", run_state=No
     ok = allowed(cwd, "%s..%s" % (upstream, h), pr_body)
     refs = [upstream] + [r for r in ((default,) if default else ("origin/HEAD", "origin/main", "main")) if r != upstream and git(
         cwd, "rev-parse", "--verify", "-q", r + "^{commit}", ok=(0, 1))[0] == 0][:1]  # the default branch too
-    items = []
+    items, unread = [], None  # unread: the union read that failed. It never drops the other reads' findings.
     for m in git(cwd, "rev-list", "--merges", "%s..%s" % (upstream, h))[1].split():
         items += [(x[0], fmt_lost(m, *x)) for x in lost_lines(cwd, m, refs)]
-        items += [(x[0], fmt_revived(m, *x)) for x in revived_lines(cwd, m)]
+        if unread is None:
+            try:
+                items += [(x[0], fmt_revived(m, *x)) for x in revived_lines(cwd, m)]
+            except Unknown as e:
+                unread = e
     rc, out = git(cwd, "merge-tree", "--write-tree", upstream, h, ok=(0, 1))
     if rc == 0:
         old, new = upstream, out.split()[0]
@@ -696,7 +709,11 @@ def check(cwd, upstream, head, default=None, tool=None, pr_body="", run_state=No
     if open_paths:
         ok = dict(retire_excuses(cwd, upstream, retire_head or h, pr_body, run_state, open_paths), **ok)
     bad, notes = judge(items, ok)
-    return bad, notes + (misplaced(cwd, "%s..%s" % (upstream, h)) if bad else [])
+    notes += misplaced(cwd, "%s..%s" % (upstream, h)) if bad else []
+    if unread is not None:  # raised with what the other reads found; main prints both, the merge tool refuses on the findings
+        unread.problems, unread.notes = bad, notes
+        raise unread
+    return bad, notes
 
 
 def history(cwd, rev, window):
@@ -744,8 +761,12 @@ def main(argv):
             return 0
         problems, notes = check(a.repo, a.upstream, a.head)
     except Unknown as e:
+        for n in e.notes:
+            say("silent-undo: " + n)
+        for p in e.problems:
+            say("silent-undo: FAIL: " + p)
         say("silent-undo: UNKNOWN: %s" % e)
-        return 1 if (a.strict or os.environ.get("CI")) else 0
+        return 1 if (e.problems or a.strict or os.environ.get("CI")) else 0
     for n in notes:
         say("silent-undo: " + n)
     for p in problems:

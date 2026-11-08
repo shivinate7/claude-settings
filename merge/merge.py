@@ -331,6 +331,10 @@ def undo_check(wt, base_ref, unknown_ok="", pr_body="", run_state=None, retire_h
         res = UNDO_MEMO[key] = e
     if isinstance(res, Exception):  # an Unknown; the scanner is never asked for its class here
         e = res
+        if e.problems:  # an Unknown that came with findings is a refusal: the reason flag lifts an unreadable history, never a finding
+            for n in e.notes:
+                say("merge: " + n)
+            raise Dropped("the branch silently undoes earlier work:\n  " + "\n  ".join(e.problems) + f"\n(one read was also UNKNOWN: {e})\nPut it back, or add the trailer `{undo.TRAILER}: <path> -- <reason>` to a commit message. {UNDO_CITE}")
         if unknown_ok.strip():
             say(f"merge: silent-undo check UNKNOWN ({e}). {UNDO_FLAG}, reason: {unknown_ok.strip()}")
             return unknown_ok.strip()
