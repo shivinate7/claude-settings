@@ -833,7 +833,7 @@ def _call_pieces(segment: str):
     """The calls one segment holds. The segment splitter cuts at `&&`, `||`, `;`, `|` and a newline, but not at `)` or
     a lone `&`: an unquoted `)` closes the subshell the call sits in and an unquoted `&` sends it to the background, so
     each ends a call, glued to a word or not, and the text after it is a call of its own. Quotes are read by
-    walk_quotes, so a `)` or `&` inside one ends nothing. Nor does a `&` in a redirect (`2>&1`, `&> out`), or a `)`
+    walk_quotes, so a `)` or `&` inside one ends nothing. Nor does a `&` in a redirect (`2>&1`, `&> out`), a `&&` (it reaches here only inside a `$( )`, whose span the splitter keeps whole), or a `)`
     that closes a `$(` opened after the call's first word (`--root o/a=$( pwd )`). Empty pieces are dropped."""
     pieces, start, depth = [], 0, 0
     for index, char, quote in walk_quotes(segment):
@@ -843,8 +843,8 @@ def _call_pieces(segment: str):
             depth += 1
         elif char == ")" and depth:
             depth -= 1
-        elif char == ")" or (char == "&" and segment[index - 1:index] not in ("<", ">")
-                             and segment[index + 1:index + 2] != ">"):
+        elif char == ")" or (char == "&" and segment[index - 1:index] not in ("<", ">", "&")
+                             and segment[index + 1:index + 2] not in (">", "&")):
             pieces.append(segment[start:index])
             start = index + 1
     pieces.append(segment[start:])
