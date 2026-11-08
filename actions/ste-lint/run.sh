@@ -24,6 +24,7 @@ done < <([ -f .ste-lint-exclude ] && cat .ste-lint-exclude; echo; printf '%s\n' 
 
 RAW_FILES=()
 FILES=()
+NO_FROM=""  # why the start of the diff is missing, when it is
 UNKNOWN=""  # why no changed file was read; the step then exits 0 unless stale-cites fails
 if [ "$SCOPE" = "all" ]; then
   # ':(glob)' turns on real double-star matching. Without it, git's default
@@ -49,6 +50,11 @@ else
     # A push to the default branch itself has no other side to diff against.
     RANGE="HEAD~1..HEAD"
     FROM="HEAD~1"
+    # A root commit, or a shallow clone, has no HEAD~1: the diff would read nothing. Unknown, not "no markdown changed".
+    if ! git rev-parse --verify -q "$FROM^{commit}" >/dev/null; then
+      FROM=""
+      NO_FROM="HEAD~1 does not exist (a root commit or a shallow clone), so no changed file was read. Nothing was checked. Check out with fetch-depth 0 (actions/checkout) so the history is there."
+    fi
   else
     RANGE="origin/$BASE...HEAD"
     FROM="$(git merge-base "origin/$BASE" HEAD 2>/dev/null)" || FROM=""
@@ -58,7 +64,7 @@ else
   if [ -z "$FROM" ]; then
     # No merge base (an unrelated history, or a shallow clone): the base is unknown, not a finding (decision
     # stale-cites-at-merge, rule verification-report-unknown-reads). stale-cites prints its own unknown line.
-    UNKNOWN="no merge base between origin/$BASE and HEAD, so no changed file was read. Nothing was checked. Check out with fetch-depth 0 (actions/checkout) so the history is there."
+    UNKNOWN="${NO_FROM:-no merge base between origin/$BASE and HEAD, so no changed file was read. Nothing was checked. Check out with fetch-depth 0 (actions/checkout) so the history is there.}"
   # The one changed set, for both steps below: the diff from FROM to WORK, plus the files git does not track.
   # First git's content check says whether the tracked files differ from HEAD. It runs on a private copy of the
   # index (GIT_INDEX_FILE): `git diff` refreshes stale file stats and writes the index back even under
@@ -95,17 +101,30 @@ else
     UNKNOWN="$WHY, so the working tree was not read. Nothing was checked. Run again once git can read the tree."
   else
     if [ -n "$WORK" ]; then STALE_RANGE="$FROM..$WORK"; else WORK="HEAD"; fi
-    while IFS= read -r -d '' f; do
-      UNTRACKED+=("$f")
-    done < <(git ls-files -z --others --exclude-standard -- "$CHANGED_PATHS_GLOB" ${EXCLUDE_PATHSPECS[@]+"${EXCLUDE_PATHSPECS[@]}"})
-    while IFS= read -r -d '' f; do
-      [ -n "$f" ] && RAW_FILES+=("$f")
-    done < <(git diff -z --name-only --diff-filter=AMR "$FROM" "$WORK" -- "$CHANGED_PATHS_GLOB"
-             git ls-files -z --others --exclude-standard -- "$CHANGED_PATHS_GLOB")
-    while IFS= read -r -d '' f; do
-      [ -n "$f" ] && FILES+=("$f")
-    done < <(git diff -z --name-only --diff-filter=AMR "$FROM" "$WORK" -- "$CHANGED_PATHS_GLOB" ${EXCLUDE_PATHSPECS[@]+"${EXCLUDE_PATHSPECS[@]}"}
-             printf '%s\0' ${UNTRACKED[@]+"${UNTRACKED[@]}"})
+    # Each git read goes to a file first, so its exit status is checked: inside `< <(...)` it is dropped, and a refused
+    # read (a pathspec outside the repository, say) would look like "no markdown changed". Any failed read is unknown.
+    READ_DIR="$(mktemp -d)"
+    READ_FAILED=""
+    git ls-files -z --others --exclude-standard -- "$CHANGED_PATHS_GLOB" ${EXCLUDE_PATHSPECS[@]+"${EXCLUDE_PATHSPECS[@]}"} > "$READ_DIR/untracked" || READ_FAILED="the list of untracked files"
+    git diff -z --name-only --diff-filter=AMR "$FROM" "$WORK" -- "$CHANGED_PATHS_GLOB" > "$READ_DIR/raw_diff" || READ_FAILED="the list of changed files"
+    git ls-files -z --others --exclude-standard -- "$CHANGED_PATHS_GLOB" > "$READ_DIR/raw_untracked" || READ_FAILED="the list of untracked files"
+    git diff -z --name-only --diff-filter=AMR "$FROM" "$WORK" -- "$CHANGED_PATHS_GLOB" ${EXCLUDE_PATHSPECS[@]+"${EXCLUDE_PATHSPECS[@]}"} > "$READ_DIR/diff" || READ_FAILED="the list of changed files"
+    if [ -n "$READ_FAILED" ]; then
+      # Nothing was read, so stale-cites over the committed range alone would be a false PASS: it is skipped too.
+      STALE_RANGE=""
+      UNKNOWN="git could not read $READ_FAILED, so no changed file was read. Nothing was checked. Check the .ste-lint-exclude and EXCLUDE pathspecs, then run again."
+    else
+      while IFS= read -r -d '' f; do
+        UNTRACKED+=("$f")
+      done < "$READ_DIR/untracked"
+      while IFS= read -r -d '' f; do
+        [ -n "$f" ] && RAW_FILES+=("$f")
+      done < <(cat "$READ_DIR/raw_diff" "$READ_DIR/raw_untracked")
+      while IFS= read -r -d '' f; do
+        [ -n "$f" ] && FILES+=("$f")
+      done < <(cat "$READ_DIR/diff"; printf '%s\0' ${UNTRACKED[@]+"${UNTRACKED[@]}"})
+    fi
+    rm -rf "$READ_DIR"
   fi
   [ -z "$UNKNOWN" ] || echo "ste-lint: unknown, $UNKNOWN"
 fi
