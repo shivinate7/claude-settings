@@ -1959,7 +1959,7 @@ MUTATIONS = [
      '        calls = [(verb.rstrip(")}"), args) for verb, args in git_calls(segment)]',
      '        calls = [(verb, args) for verb, args in git_calls(segment)]',
      "guard", "git-after-cd: a cd in a subshell, then ; then a git push inside it is refused"),
-    # The required case names below are the cases the test-author adds for these verbs (round 2 brief).
+    # The required case names below are the cases the test-author adds for these verbs.
     ("git-after-cd: update-ref is no write",
      '    return verb in ("push", "update-ref") or verb in GIT_FILE_VERBS or verb in SESSION_HOME_GIT_VERBS',
      '    return verb in ("push",) or verb in GIT_FILE_VERBS or verb in SESSION_HOME_GIT_VERBS',
@@ -1992,6 +1992,14 @@ MUTATIONS = [
      '("-f", "--force", "-m", "-M", "--move", "-d", "-D", "--delete")',
      '("-f", "--force", "-m", "-M", "--move", "-d", "-D")',
      "guard", "git-after-cd: a cd then ; then git branch --delete is refused"),
+    ("git-after-cd: branch -d is no write",
+     '("-f", "--force", "-m", "-M", "--move", "-d", "-D", "--delete")',
+     '("-f", "--force", "-m", "-M", "--move", "-D", "--delete")',
+     "guard", "git-after-cd: a cd then ; then git branch -d is refused"),
+    ("git-after-cd: branch --move is no write",
+     '("-f", "--force", "-m", "-M", "--move", "-d", "-D", "--delete")',
+     '("-f", "--force", "-m", "-M", "-d", "-D", "--delete")',
+     "guard", "git-after-cd: a cd then ; then git branch --move a b is refused"),
     ("git-after-cd: a dry run is a write",
      '    if read_verb(verb, args):\n        return False\n    if verb == "branch":',
      '    if verb == "branch":',

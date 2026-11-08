@@ -4921,11 +4921,16 @@ sh("git-after-cd: a cd then ; then git branch -m is refused",
    "cd /tmp/w; %s branch -m old new" % VCS, "deny", "git-after-cd", cwd=NOGIT, carries=("&&", "-C"))
 sh("git-after-cd: a cd then ; then git branch -M is refused",
    "cd /tmp/w; %s branch -M main" % VCS, "deny", "git-after-cd", cwd=NOGIT, carries=("&&", "-C"))
-# shared-tree refuses a named branch delete in any folder, so these two cases use the nameless forms.
+# shared-tree refuses a named branch delete in this harness, so the delete cases use the nameless forms.
 sh("git-after-cd: a cd then ; then git branch -D is refused",
    "cd /tmp/w; %s branch -D" % VCS, "deny", "git-after-cd", cwd=NOGIT, carries=("&&", "-C"))
+sh("git-after-cd: a cd then ; then git branch -d is refused",
+   "cd /tmp/w; %s branch -d" % VCS, "deny", "git-after-cd", cwd=NOGIT, carries=("&&", "-C"))
 sh("git-after-cd: a cd then ; then git branch --delete is refused",
    "cd /tmp/w; %s branch --delete" % VCS, "deny", "git-after-cd", cwd=NOGIT,
+   carries=("&&", "-C"))
+sh("git-after-cd: a cd then ; then git branch --move a b is refused",
+   "cd /tmp/w; %s branch --move a b" % VCS, "deny", "git-after-cd", cwd=NOGIT,
    carries=("&&", "-C"))
 sh("git-after-cd: a cd then ; then a bare git fetch, a read, passes",
    "cd /tmp/w; %s fetch" % VCS, "allow", cwd=NOGIT)
@@ -11313,7 +11318,7 @@ cmk_refuse("a cd into a missing relative folder, then ; add -A and commit, with 
 cmk_allow("a cd into a missing folder, then && add -A and commit, with a triplet tracked in the cwd repo",
           "cd " + slash(CMK_GONE) + " && " + VCS + " add -A && " + VCS + " commit -m x", CMK_CLT)
 # A write after a failed cd joined by `;` is refused in any cwd repo (decision git-after-cd-joins-with-and).
-# Ruling: lane brief, coordinator 2026-11-07 16:22 CST.
+# lane brief git-write-after-failed-cd (coordinator, 2026-11-07).
 sh("git-after-cd: a cd into a missing folder, then ; add -A and commit, in a cwd repo whose edit is clean is refused",
    "cd " + slash(CMK_GONE) + " ; " + VCS + " add -A && " + VCS + " commit -m x", "deny", "git-after-cd",
    cwd=CMK_CL, carries=("&&", "-C"))
