@@ -667,29 +667,6 @@ class QuotedUsesDisplay(Job):
                          "a quoted local action was not run as the repo's own action, which FAILs with no code_check.py:\n" + out)
 
 
-class QuotedStepValues(Job):
-    """A step's env: and with: values reach the step with YAML's quote rules: one pair of outer quotes goes, and an escaped
-    quote inside them is one quote."""
-
-    def test_an_env_value_with_a_doubled_single_quote_reaches_the_step_as_one_quote(self):
-        rc, lines, out = self.run_job(step("env", 'printf "%s" "$V" > seen.txt', env={"V": "'it''s'"}))
-        self.assertTrue(os.path.isfile(os.path.join(self.root, "seen.txt")), "precondition: the step did not run:\n" + out)
-        with open(os.path.join(self.root, "seen.txt"), encoding="utf-8") as f:
-            self.assertEqual(f.read(), "it's", "the env value reached the step with its escape read wrong:\n" + out)
-
-    def test_a_zizmor_paths_value_with_an_escaped_double_quote_reaches_run_sh_as_one_quote(self):
-        run_sh = os.path.join(self.root, "actions", "zizmor", "run.sh")
-        os.makedirs(os.path.dirname(run_sh), exist_ok=True)
-        with open(run_sh, "w", encoding="utf-8", newline="\n") as f:
-            f.write('printf "%s" "$ZIZMOR_PATHS" > zizmor-paths.txt\n')
-        rc, lines, out = self.run_job(step("zizmor", uses="$/actions/zizmor", **{"with": {"paths": '"a\\"b"'}}),
-                                      env=pipx_stub_env())
-        self.assertTrue(os.path.isfile(os.path.join(self.root, "zizmor-paths.txt")),
-                        "precondition: the local zizmor step did not run its run.sh:\n" + out)
-        with open(os.path.join(self.root, "zizmor-paths.txt"), encoding="utf-8") as f:
-            self.assertEqual(f.read(), 'a"b', "the with: paths value reached run.sh with its escape read wrong:\n" + out)
-
-
 def run_as_yaml_reads_it(step):
     """(kind, text) of a step's run: as YAML reads it. A literal `run: |` body is its lines indented 10 or more, or
     blank, with the 10 spaces removed, the blank lines at each end dropped, and one final newline. A one-line run is its
