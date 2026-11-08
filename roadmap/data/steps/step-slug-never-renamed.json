@@ -1,0 +1,11 @@
+{
+  "title": "The roadmap build refuses a step file whose slug left while a lane still names it",
+  "why": "Triage renamed resume-guard-subagent-sends at 10:25 CST Nov 8 on a lane's ask; the rename orphaned its lanes' cs-step tags, and 41 lanes already read unknown for missing or renamed step files (coordinator audit 10:30 CST).",
+  "note": "Filed 10:36 CST Nov 8 by triage for its own mistake (rule building-mistake-names-its-guard). Rename undone in a032cf194. Fix: roadmap/build.py compares the step slugs against the previous commit and refuses a removed slug that a lane or session tag still names. Related: idle-lane-steps-unknown (ready).",
+  "phase": "now",
+  "owner": "claude-settings",
+  "lane": "",
+  "status": "todo",
+  "order": 738,
+  "updatedAt": "2026-11-08T10:36:00-06:00"
+}
