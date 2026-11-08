@@ -18,8 +18,9 @@
 //   - the known places of T11, in JS and Python, and a file is a place too (T11j, T11ah, T11ai). A join from a Python file place is a place
 //     only under an outer normpath, abspath or realpath (T11ab, T11ag, T11ak, T11al, T11n). The bare join names nothing (T11aa, T11af, T11aj).
 //   - a `/` piece resets `path.resolve`, so the call names nothing (T10aa).
-// The ruling does not name the `URL` import. T11am and T11an follow the coordinator's round-1 fix ruling (2026-11-07 13:20 CST): a `URL`
-// imported from `node:url` is the global and counts (T11am), and a `URL` imported from another module does not (T11an).
+// The ruling does not name the `URL` import. T11am, T11an and T11ao are fixed under the coordinator's found-gap ruling (2026-11-07 13:20 CST):
+// a `URL` imported from `node:url` is the global and counts (T11am), a `URL` imported from another module does not (T11an), and a `URL`
+// that the file shadows does not count (T11ao).
 //
 // Cases:
 //   T1   the clean fixture passes. T1b: no tested-by line at all passes. T1c, T1d: full size, 40 tests on one line, all pass; one that does not load the file fails.
@@ -54,11 +55,11 @@
 //        `abspath(os.path.join(__file__, ...))` (T11al); a folder from `Path(__file__).parent.parent` (T11ac). Each Python wrapper has its own
 //        pin: normpath (T11ag, T11ak), abspath (T11al), realpath (T11n). T11ab keeps an abspath anchor under normpath. The repo pairs read this repository's own files through readFacts: the loads fact of
 //        skills/waiting-page/tests/page.test.mjs names its page (T11v), and that of lint/test_stale_cites.py names bin/ste-changed (T11w).
-//        T11n is a control, green on main, and the realpath pin: realpath wraps a join from the file, which is no place without it.
+//        T11n is the realpath pin: realpath wraps a join from the file, which is no place without it.
 //        Not a load, a FAIL, green on the old code and the guard of the allow side: the twins of those forms with an anchor that is shadowed
 //        (T11g), a temp folder (T11h, T11p, T11r), a foreign function (T11i), a function-local name (T11k), a parameter (T11o),
 //        a name bound twice (T11q), a place outside the repository (T11s), a URL on another base (T11y), a `URL` from another module (T11an),
-//        a `file:` scheme (T11z), a negative index (T11ad), a parameter under normpath (T11ae), or a bare join from `__file__`, or a bare pathlib chain from it,
+//        a `URL` the file shadows (T11ao), a `file:` scheme (T11z), a negative index (T11ad), a parameter under normpath (T11ae), or a bare join from `__file__`, or a bare pathlib chain from it,
 //        which keeps `..` (T11aa, T11af, T11aj).
 //   C0   control, green on the old code: the import reader MAP11 uses reads the fixture's imports the way these cases assume.
 
@@ -1088,8 +1089,8 @@ def test_wait():
   mustLoad(check(dir), testFile, 'src/retry.py', 'the anchor is a module-level name bound to Path(__file__).resolve().parents[1]');
 });
 
-// Control, green on main, and the realpath pin: a realpath around a join from the file keeps its place. Red on a realpath that stops wrapping.
-test('T11n. control, green on main, and the realpath pin: HERE = os.path.abspath(__file__) and ROOT = os.path.realpath(os.path.join(HERE, "..", "..")) loads src/retry.py through ROOT: MAP11 passes', () => {
+// The realpath pin: a realpath around a join from the file keeps its place. Red on a realpath that stops wrapping.
+test('T11n. the realpath pin: HERE = os.path.abspath(__file__) and ROOT = os.path.realpath(os.path.join(HERE, "..", "..")) loads src/retry.py through ROOT: MAP11 passes', () => {
   needFile(REL);
   const testFile = 'tests/realpath_root.py';
   const text = `import os
@@ -1480,6 +1481,24 @@ export const page = path.join(SRC, 'home.ts');
   assert.match(text, /^import \{ URL \} from '\.\/utils';$/m, 'the test must import URL from another module');
   const dir = pieceCase(testFile, text, 'src/home.ts', ['../src', 'home.ts']);
   mustNotLoad(check(dir), CORE, testFile, 'src/home.ts', 'a URL imported from another module is no node:url URL, so the call is no load');
+});
+
+test("T11ao. const URL = class {} in a function shadows the URL that the file imports from node:url, so new URL('../src/retry.mjs', import.meta.url) there is no global, and path.join(fileURLToPath(...), '..', 'home.ts') names nothing: MAP11 fails and names the page, the test and the file", () => {
+  needFile(REL);
+  const testFile = 'tests/url_shadow.spec.mjs';
+  const text = `import path from 'node:path';
+import { fileURLToPath, URL } from 'node:url';
+
+export function page() {
+  const URL = class {};
+  return path.join(fileURLToPath(new URL('../src/retry.mjs', import.meta.url)), '..', 'home.ts');
+}
+`;
+  // The scope first: URL is imported from node:url, and a function of the file shadows it, so the URL that the join builds is the shadow.
+  assert.match(text, /^import \{ fileURLToPath, URL \} from 'node:url';$/m, 'the test must import URL from node:url');
+  assert.match(text, /^  const URL = class \{\};$/m, 'the test must shadow URL in a function');
+  const dir = pieceCase(testFile, text, 'src/home.ts', ['../src/retry.mjs', '..', 'home.ts']);
+  mustNotLoad(check(dir), CORE, testFile, 'src/home.ts', 'a URL that the file shadows is no node:url global, so the call is no load');
 });
 
 // T11aj and T11ak, the pathlib twins of T11af and T11ag (lane pick 2026-11-07 16:38 CST). `Path(__file__) / ".." / ...` is a bare chain: it keeps
