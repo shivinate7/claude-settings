@@ -74,6 +74,10 @@ OVERRIDE = os.path.join(HERE, "override.py")
 CALL_JUDGE = os.path.join(HERE, "call_judge.py")
 CALL_JUDGE_SUITE = os.path.join(HERE, "test_call_judge.py")
 SIM_LEASE = os.path.join(HERE, "..", "bin", "sim-lease")
+PICK_SUITE = os.path.join(HERE, "test_pick_ack.py")
+PICK_SUITE_FILES = ("test_pick_ack.py", "test_call_judge.py")  # the suite and the git fixtures it imports
+# Targets that run in a copy of the whole guard family, with the anchor in the one module that holds it.
+GUARD_TREE_TARGETS = ("guard", "simlease", "pick")
 
 # A mutation names the file it breaks and the suite that must catch it. "guard" is the default, so
 # every mutation written before the watch existed reads unchanged.
@@ -86,6 +90,8 @@ TARGETS = {
     "calljudge": (CALL_JUDGE, CALL_JUDGE_SUITE, "CALL_JUDGE_UNDER_TEST", "call_judge"),
     # bin/sim-lease, which the guard loads by path (hooks/guard.py sim_lease_holds). The suite is the guard's.
     "simlease": (SIM_LEASE, SUITE, "GUARD_UNDER_TEST", "sim_lease"),
+    # hooks/guard_merge.py pick_ack_hit. Its suite runs from the mutant's own hooks folder (run_mutant copies it there).
+    "pick": (os.path.join(HERE, "guard_merge.py"), PICK_SUITE, "GUARD_UNDER_TEST", "pick_ack"),
 }
 
 # (label, anchor text found once in the source, its mutated replacement, target, required case
@@ -2372,6 +2378,27 @@ MUTATIONS = [
      '    while rest and _gh_root_repo_flag(rest, 0):',
      '    while False and _gh_root_repo_flag(rest, 0):',
      "guard", "merge: gh_call_of reads the pr verb past a -R root flag"),
+    # RULE pick-names-rulings (hooks/guard_merge.py pick_ack_hit), judged by hooks/test_pick_ack.py (target "pick").
+    ("pick-names-rulings: a Departs from line is no trigger, so a pick with no Checked line passes",
+     '    if departs.search(message):\n        matched = "pick that departs from main"',
+     '    if False:\n        matched = "pick that departs from main"',
+     "pick", "A: a departs pick with no Checked line asks"),
+    ("pick-names-rulings: the Checked line goes unread, so a pick that names a real decision still asks",
+     'for line in _CHECKED_LINE.findall(message) for word',
+     'for line in [] for word',
+     "pick", "A: a departs pick whose Checked line names a real decision passes"),
+    ("pick-names-rulings: any Checked line counts, so a made-up decision id passes",
+     'if any(word in known or "decisions/" + word in known or "debts/" + word in known for word in named):',
+     'if named:',
+     "pick", "A: a Checked line naming a made-up decision asks"),
+    ("pick-names-rulings: the bare slug is not read as a decision id",
+     'if any(word in known or "decisions/" + word in known or',
+     'if any(word in known or',
+     "pick", "A: a Checked line naming a real decision by its bare slug passes"),
+    ("pick-names-rulings: the past-ruling search runs on a send that has no pick",
+     '            if not transcript or not isinstance(target, str) or not target or not _inbound_pick(transcript, target, departs):\n                return None',
+     '            if not transcript or not isinstance(target, str) or not target or not _inbound_pick(transcript, target, departs):\n                question_form.past_rulings(message, os.getcwd())\n                return None',
+     "pick", "no pick and no inbound pick: past_rulings is not called"),
 ]
 
 
@@ -3008,7 +3035,7 @@ def run_mutant(sources, work: str, entry):
     if skip:
         return label, None, [], required, skip
     _path, suite, variable, stem = TARGETS[target]
-    if target in ("guard", "simlease"):
+    if target in GUARD_TREE_TARGETS:
         # The whole guard family goes in the mutant's own hooks folder, and the anchor lands in the one
         # module that holds it. The suite loads the copied guard.py, which finds its siblings. The
         # simulator refusal imports janitor/sweep.py from ../janitor and fails open when it cannot, so
@@ -3033,6 +3060,10 @@ def run_mutant(sources, work: str, entry):
         # it the role-model table reads as unread and every role-model arm passes unjudged.
         shutil.copytree(os.path.join(HERE, "..", "lint"), os.path.join(root, "lint"),
                         ignore=shutil.ignore_patterns("__pycache__"))
+        if target == "pick":
+            for name in PICK_SUITE_FILES:
+                shutil.copy(os.path.join(HERE, name), tree)
+            suite = os.path.join(tree, os.path.basename(PICK_SUITE))
     else:
         copy_path = os.path.join(work, "%s_%s.py" % (stem, mutate_shared.safe_name(label)))
         mutated = sources[target].replace(old, new, 1)
@@ -3064,7 +3095,7 @@ def run_mutant(sources, work: str, entry):
         copy_path = os.path.join(tree, "call_judge.py")
         with open(copy_path, "w", encoding="utf-8", newline="\n") as handle:
             handle.write(mutated)
-    elif target not in ("guard", "simlease"):
+    elif target not in GUARD_TREE_TARGETS:
         with open(copy_path, "w", encoding="utf-8", newline="\n") as handle:
             handle.write(mutated)
     config_dir = os.path.join(work, "cfg_%s" % mutate_shared.safe_name(label))
@@ -3107,7 +3138,7 @@ def main() -> int:
         if target not in TARGETS:
             print("ERROR unknown mutation target %r: %s" % (target, label))
             return 1
-        if target == "guard":
+        if target in ("guard", "pick"):
             # Across every guard module: exactly one match, or the mutant breaks the wrong spot.
             try:
                 mutate_shared.find_anchor(HERE, old)

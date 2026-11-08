@@ -1594,6 +1594,17 @@ def candidate_ids(candidates) -> list:
     return [c.split(": ", 1)[0] for c in candidates]
 
 
+PICK_TOP = 5
+
+
+def pick_candidates(candidates, text, top=PICK_TOP) -> list:
+    """The ids of the `top` candidates whose line shares the most words with `text` (overlap 0 never counts), best
+    first, ties by id. It ranks the one index past_rulings returns and builds none."""
+    words = _words(text)
+    scored = sorted((-len(_words(c) & words), c.split(": ", 1)[0]) for c in candidates)
+    return [record_id for score, record_id in scored if score][:top]
+
+
 def candidates_block(candidates, unknown) -> str:
     """The text added after the judge prompt's reply line: the candidate rulings, then the sources not searched."""
     text = "\n\nPast rulings (item 8), one per line as `<id>: <text>`:\n" + (

@@ -7,6 +7,7 @@ import fnmatch
 import json
 import os
 import re
+import sys
 
 from guard_core import (
     _absolute, _git, _git_subcommand_index, _segment_git_c_target, basename, cap_safe, command_root, GIT_WORK_TREE_RE,
@@ -1134,6 +1135,94 @@ def brief_hit(tool: str, tool_input, transcript: str):
     if step not in steps:
         return "lane brief for step " + str(step) + " to a lane with no topic tag", BRIEF_STEP_REASON
     return None
+
+
+# ---- send_message: a pick that departs from main names the decisions it checked (rule pick-names-rulings)
+_CHECKED_LINE = re.compile(r"^[ \t>*+-]*(?:\*\*)?Checked(?:\*\*)?:(?:\*\*)?([^\n]*)", re.IGNORECASE | re.MULTILINE)
+_PEER_FRAME = re.compile(r"<cross-session-message[^>]*>(.*)</cross-session-message>", re.DOTALL)
+PICK_UNREAD = "the transcript could not be read, so an inbound pick was not looked for"
+PICK_REASON = (
+    "a pick that departs from main, or a reply that agrees to one, names the decisions it checked. %sSearch the "
+    "decision records for the ones that bear on this pick, then add a line `Checked: <id>[, <id>...]` to the message "
+    "with the id of each decision you read (`decisions/<slug>` or the bare slug). %s(decision pick-names-rulings)"
+)
+
+
+def _transcript_module():
+    """lint/_transcript.py, the one home of the transcript readers, imported from the lint folder beside this one."""
+    lint = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "lint")
+    if lint not in sys.path:
+        sys.path.insert(0, lint)
+    import _transcript
+    return _transcript
+
+
+def _peer_body(rec) -> str:
+    """The text a peer message record carries: its origin body, else the text inside its frame."""
+    body = (rec.get("origin") or {}).get("body")
+    if isinstance(body, str):
+        return body
+    content = (rec.get("message") or {}).get("content")
+    if isinstance(content, list):
+        content = "".join(b.get("text", "") for b in content if isinstance(b, dict))
+    found = _PEER_FRAME.search(content) if isinstance(content, str) else None
+    return found.group(1) if found else ""
+
+
+def _inbound_pick(transcript: str, target: str, departs) -> bool:
+    """True when the newest peer message from `target` has a Departs from line and no send to `target` came after it."""
+    module = _transcript_module()
+    newest = None  # [the newest frame is a pick, no send to the target since]
+    for rec in module.read_transcript(transcript):
+        if module.peer_sender(rec) == target:
+            newest = [bool(departs.search(_peer_body(rec))), True]
+        elif newest and not rec.get("isSidechain"):
+            if any(target in module.send_targets(use) for use in module.tool_uses(rec)):
+                newest[1] = False
+    return bool(newest and newest[0] and newest[1])
+
+
+def pick_ack_hit(tool: str, tool_input, transcript: str):
+    """Return (matched, reason) when this send_message is a pick that departs from main (a `Departs from:` line), or the
+    first reply to a peer whose newest message carried one, and it has no `Checked:` line naming a decision, debt or
+    step that question_form.past_rulings returns; else None. A transcript that cannot be read passes with one stderr
+    line (the inbound trigger is unknown). A past-ruling search that fails after a trigger fired is an ask. Cost: a
+    message with no Departs line reads the transcript once; the past-ruling search runs only after a trigger fired."""
+    if tool != BRIEF_TOOL or not isinstance(tool_input, dict):
+        return None
+    message = tool_input.get("message")
+    if not isinstance(message, str):
+        return None
+    import question_form
+    departs = question_form.DEPARTS_LINE  # the one line matcher of a Departs from line (departs_hit reads it)
+    if departs.search(message):
+        matched = "pick that departs from main"
+    else:
+        target = tool_input.get("session_id")
+        try:
+            if not transcript or not isinstance(target, str) or not target or not _inbound_pick(transcript, target, departs):
+                return None
+        except Exception:
+            print("pick-names-rulings: " + PICK_UNREAD, file=sys.stderr)
+            return None
+        matched = "reply to a pick that departs from main"
+    named = [word.strip("`'\"*.()[]") for line in _CHECKED_LINE.findall(message) for word in re.split(r"[,;\s]+", line)]
+    named = [word[:-3] if word.endswith(".md") else word for word in named if word]
+    try:
+        candidates, unknown = question_form.past_rulings(message, question_form._git_root_of("") or os.getcwd())
+    except Exception:
+        return matched + " with a failed past-ruling search", PICK_REASON % (
+            "The search of the decision records failed, so the guard cannot tell which ids are real. ", "")
+    known = set(question_form.candidate_ids(candidates))
+    if any(word in known or "decisions/" + word in known or "debts/" + word in known for word in named):
+        return None
+    ranked = question_form.pick_candidates(candidates, message)
+    detail = ("Records that may bear on it: " + ", ".join(ranked) + ". ") if ranked else ""
+    unread = question_form.unreadable_sources(unknown)
+    if unread:
+        detail += "A source of rulings could not be read: " + ", ".join(unread) + ". "
+    return matched + " with no Checked line that names a known decision", PICK_REASON % (
+        "The `Checked:` line is missing or names no decision the search finds. ", detail)
 
 
 # The installer swaps the next line for `INSTALL_ID = "<id>"` at copy time; guard.py compares the

@@ -120,6 +120,10 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        without case, after optional markdown lead characters. A set_session_tags call on the target after
                        its record, and a marker brief with no record of the target, are refusals. A message without the marker reads no transcript. An
                        override lifts it.
+  pick-names-rulings  ask. A send_message with a `Departs from:` line, or the first send to a session whose newest
+                       message to this one carried one, that has no `Checked: <id>[, <id>...]` line naming a decision,
+                       debt or step that question_form.past_rulings returns. The past-ruling search runs only after a
+                       trigger fires. A transcript that cannot be read passes with one stderr line. An override lifts it.
   draft-pr             deny. A `gh pr create` without `--draft`. (draft-until-reviewed)
   records-page         deny. A `git commit` whose docs/records.md differs from the base's page.
                        (records-index-at-merge)
@@ -383,7 +387,7 @@ while True:
             BARE_MERGE_REASON, CONFLICT_MARKERS_CHAIN_REASON, CONFLICT_MARKERS_PUSH_REASON, CONFLICT_MARKERS_REASON,
             DRAFT_PR_REASON, MERGE_TOOLS, RECORDS_PAGE_REASON, ROLE_REASON,
             conflict_markers_hit, gh_call_of, git_call_of, merge_call_of, merge_check, merge_check_reason, record_writer_hit, records_page_hit, role_proof_hit,
-            DEFAULT_RECORD_BRANCH, RECORD_REASON, settings_roots, TRUST_REASON, archive_hit, brief_hit, trust_card_hit,
+            DEFAULT_RECORD_BRANCH, RECORD_REASON, settings_roots, TRUST_REASON, archive_hit, brief_hit, pick_ack_hit, trust_card_hit,
             undrafted_pr_create, uses_merge_tool,
         )
         _loading = "guard_frozen"
@@ -4893,6 +4897,11 @@ def judge(payload) -> None:
     briefed = brief_hit(tool, tool_input, trust_transcript if isinstance(trust_transcript, str) else "")
     if briefed:
         refuse(tool, "deny", "lane-one-topic", briefed[1], briefed[0])
+
+    # A pick that departs from main, or a reply that agrees to one, with no Checked line naming a known decision (rule pick-names-rulings).
+    picked = pick_ack_hit(tool, tool_input, trust_transcript if isinstance(trust_transcript, str) else "")
+    if picked:
+        refuse(tool, "ask", "pick-names-rulings", picked[1], picked[0])
 
     if tool == "Skill":
         matched = impeccable_skill_hit(tool_input)
