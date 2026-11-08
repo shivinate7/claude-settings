@@ -570,19 +570,33 @@ def scratchpad_writer_record(where: str, session_id: str) -> str:
     return os.path.join(root, SCRATCHPAD_WRITERS, hashlib.sha1(key).hexdigest()[:24])
 
 
-def scratchpad_record_writer(where: str, session_id: str, agent_id: str) -> None:
-    """Record `agent_id` as the writer of the scratchpad file `where`. A failed write leaves no record:
-    the rule then passes that file, and the call goes on."""
+def _scratchpad_mtime(where: str) -> str:
+    """The file's modification time in nanoseconds, as text, or '' when there is no file. Records compare it
+    for equality only, never by order: two writes inside one filesystem tick tie."""
+    try:
+        return str(os.stat(where).st_mtime_ns)
+    except OSError:
+        return ""
+
+
+def scratchpad_record_writer(where: str, session_id: str, agent_id: str, previous=None) -> None:
+    """Record `agent_id` as the writer of the scratchpad file `where`, before its write lands. The record holds
+    three lines: the writer, the writer judged before it (`previous`; read here when the caller has none), and
+    the file's mtime now. A write that never lands leaves that mtime as it is, and `scratchpad_writer_of` then
+    judges by the previous writer. `agent_id` may be '': the file is then no agent's. A failed write leaves no
+    record: the rule then passes that file, and the call goes on."""
     try:
         record = scratchpad_writer_record(where, session_id)
         if not record:
             return
+        if previous is None:
+            previous = scratchpad_writer_of(where, session_id)
         folder = os.path.dirname(record)
         os.makedirs(folder, exist_ok=True)
         handle, temp = tempfile.mkstemp(dir=folder, prefix=".tmp-")
         try:
             with os.fdopen(handle, "w", encoding="utf-8") as out:
-                out.write(agent_id)
+                out.write("\n".join((agent_id, previous, _scratchpad_mtime(where))))
             os.replace(temp, record)   # one step: a reader never sees half an id
         except BaseException:
             try:
@@ -596,13 +610,18 @@ def scratchpad_record_writer(where: str, session_id: str, agent_id: str) -> None
 
 def scratchpad_writer_of(where: str, session_id: str) -> str:
     """The agent id recorded as the writer of the scratchpad file `where`, or '' when none is recorded or the
-    file no longer exists: the record of a removed file is stale, and a new file at its path is a first write."""
+    file no longer exists: the record of a removed file is stale, and a new file at its path is a first write.
+    While the file's mtime still equals the one the record holds, the write the record was made for has not
+    landed (a denied ask), so the previous writer is the answer."""
     try:
         record = scratchpad_writer_record(where, session_id)
         if not record or not os.path.lexists(where):
             return ""
         with open(record, encoding="utf-8") as handle:
-            return handle.read().strip()
+            lines = handle.read().split("\n")
+        if len(lines) >= 3 and lines[2] == _scratchpad_mtime(where):
+            return lines[1].strip()
+        return lines[0].strip()
     except Exception:
         return ""
 

@@ -812,7 +812,7 @@ def _drop_heredoc_bodies(cmd: str) -> str:
 _WRITE_TARGET = re.compile(r"(?:>>?\|?(?!&)|(?<![\w-])tee(?:[ \t]+-[\w-]+)*[ \t])[ \t]*[\"']?([^\s;&|<>()\"'`]+)")
 _WORDS = re.compile(r"[^\s;&|<>()\"'`]+").findall
 _RUNNER = re.compile(r"(?:" + _INTERPRETERS + r"|source|\.|eval|exec|xargs|sudo|env|timeout|nohup|nice|command"
-                     r"|time|ssh)(?:\.exe|\.cmd)?").fullmatch
+                     r"|time|ssh|uv|npx|tsx|ts-node|bun|deno|pytest|py|stdbuf|setsid)(?:\.exe|\.cmd)?").fullmatch
 
 
 def _plain_words(words):
