@@ -382,7 +382,7 @@ while True:
             DRAFT_PR_REASON, MERGE_TOOLS, RECORDS_PAGE_REASON, ROLE_REASON,
             conflict_markers_hit, gh_call_of, git_call_of, merge_call_of, merge_check, merge_check_reason, record_writer_hit, records_page_hit, role_proof_hit,
             DEFAULT_RECORD_BRANCH, RECORD_REASON, settings_roots, TRUST_REASON, archive_hit, brief_hit, trust_card_hit,
-            undrafted_pr_create, uses_merge_tool, REVIEW_COMMENT_TOOL, review_record_hit, review_form_hit, review_note, pr_call_target, ansi_c_decoded,
+            undrafted_pr_create, uses_merge_tool, REVIEW_COMMENT_TOOL, REVIEW_EDIT_TOOL, review_record_hit, review_form_hit, review_note, pr_call_target, ansi_c_decoded,
         )
         _loading = "guard_frozen"
         from guard_frozen import (
@@ -5017,6 +5017,12 @@ def judge(payload) -> None:
                 refuse(tool, "deny", "pr-review-record", hit[1], hit[0])
         elif isinstance(tool_input.get("body"), str) and "review-record" in tool_input["body"]:
             review_note("the call names no pull request number")
+
+    # A comment edited in place through the MCP update tool: its form is judged, its head is not (it names a comment, not a pull request).
+    if tool == REVIEW_EDIT_TOOL:
+        hit = review_form_hit([tool_input.get("body")])
+        if hit:
+            refuse(tool, "deny", "pr-review-record", hit[1], hit[0])
 
     # A trust-card call from a session whose own record is not proved untagged (rule trust-card-in-build).
     trust_transcript = payload.get("transcript_path")
