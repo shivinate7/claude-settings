@@ -97,7 +97,7 @@ Why: the guard's remedy (`guard_branch_worktree.BRANCH_DELETE_DENY_REASON`) hand
 
 Owner grant, typed in lane lease-push-c-and-d, 2026-11-07 13:28 CST: `go: add the "Own Branch Lease Push" entry to settings.json autoMode.allow, as drafted in lane lease-push-c-and-d`.
 
-A lease push to a branch this session pushed earlier loses nothing this session did not write. The entry's Covers text says "a lane's own branch"; its real bound is the earlier push, so a batch branch the session pushed is also covered. It is allowed only when this session pushed the same branch to the same remote earlier, and the push is one of:
+A lease push to a branch this session pushed earlier loses nothing this session did not write. The entry's Covers text says "a lane's own branch"; its real bound is the earlier push, so an integration branch the session pushed is also covered. It is allowed only when this session pushed the same branch to the same remote earlier, and the push is one of:
 
 - `git push --force-with-lease --force-if-includes origin <branch>`
 - `git push --force-with-lease=<branch>:<sha> origin <branch>`, where `<sha>` is the tip this session last pushed.
