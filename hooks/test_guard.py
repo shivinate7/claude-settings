@@ -19463,6 +19463,33 @@ repo_case("adjacent quoted pieces ending in ) before -C naming this checkout are
           f'{MERGE_SHIM} 5 --confirm --base-red-ok "a""b (x)" -C {REPO_A}', REPO_A, TX_A)
 repo_case("an escaped quote in a reason ending in ) before -C naming this checkout is allowed", "allow",
           rf'{MERGE_SHIM} 5 --confirm --base-red-ok "say \"x\" (y)" -C {REPO_A}', REPO_A, TX_A)
+# Decision merge-confirm-repo (a cloud merge acts only in the checkout its own record names). Debt merge-subst-paren-closes: the merge
+# clause reads an unquoted `$(...)` as the command's closing `)`, so the flags after it are not judged. A PR number taken from
+# `$(gh pr list ...)` is a likely mistake. Each deny names another checkout with -C beside a substitution. Its controls name this
+# checkout, or give no -C, and are allowed: the deny turns on the -C that the substitution hid.
+repo_case("a $(date) before -C naming another checkout is denied", "deny",
+          f"{MERGE_SHIM} 5 --confirm --base-red-ok $(date) -C {REPO_B}", REPO_A, TX_A)
+repo_case("a $(echo 5) PR number before -C naming another checkout is denied", "deny",
+          f"{MERGE_SHIM} -C {REPO_B} $(echo 5) --confirm", REPO_A, TX_A)
+repo_case("a $(gh ...) PR number with a quote inside, before -C naming another checkout, is denied", "deny",
+          f"{MERGE_SHIM} -C {REPO_B} $(gh pr list --json number -q '.[0].number') --confirm", REPO_A, TX_A)
+repo_case("a backtick PR number before -C naming another checkout is denied", "deny",
+          f"{MERGE_SHIM} -C {REPO_B} `echo 5` --confirm", REPO_A, TX_A)
+repo_case("a $(date) before -C naming this checkout is allowed", "allow",
+          f"{MERGE_SHIM} 5 --confirm --base-red-ok $(date) -C {REPO_A}", REPO_A, TX_A)
+repo_case("a $(date) with no -C is allowed", "allow", f"{MERGE_SHIM} 5 --confirm --base-red-ok $(date)", REPO_A, TX_A)
+repo_case("a $(echo 5) PR number before -C naming this checkout is allowed", "allow",
+          f"{MERGE_SHIM} -C {REPO_A} $(echo 5) --confirm", REPO_A, TX_A)
+repo_case("a $(echo 5) PR number with no -C is allowed", "allow", f"{MERGE_SHIM} $(echo 5) --confirm", REPO_A, TX_A)
+repo_case("a $(gh ...) PR number with a quote inside, before -C naming this checkout, is allowed", "allow",
+          f"{MERGE_SHIM} -C {REPO_A} $(gh pr list --json number -q '.[0].number') --confirm", REPO_A, TX_A)
+repo_case("a $(gh ...) PR number with a quote inside and no -C is allowed", "allow",
+          f"{MERGE_SHIM} $(gh pr list --json number -q '.[0].number') --confirm", REPO_A, TX_A)
+# A backtick span is not read as a PR number: the flag reader refuses its `5`` word, so the merge is denied with or without -C. The pin
+# above holds that denial. Its allow controls are not here until backticks are read, since they fail for that cause, not this debt's.
+# A real subshell close, unquoted, still ends the merge's arguments. The -C form checks that the close is not read as part of the path.
+repo_case("a merge in a subshell whose ) closes is allowed", "allow", f"({MERGE_SHIM} 5 --confirm)", REPO_A, TX_A)
+repo_case("a -C naming this checkout, then a subshell's ), is allowed", "allow", f"({MERGE_SHIM} 5 --confirm -C {REPO_A})", REPO_A, TX_A)
 # Not judged: a merge named in quoted text, --lane-lint (no lock, no merge), and any session outside the cloud.
 repo_case("a merge named in a quoted echo is not judged", "allow", f"echo '{MERGE_SHIM} --repo-dir {REPO_B} 5 --confirm'", REPO_A, TX_A)
 repo_case("--lane-lint is not judged, whatever the record", "allow", f"{MERGE_SHIM} --lane-lint --repo-dir {REPO_B} 5", REPO_A, TX_NONE)
