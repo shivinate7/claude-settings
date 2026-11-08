@@ -1,0 +1,11 @@
+{
+  "title": "The red-main check judges the base by its required check, not a by-hand dispatch-only run",
+  "why": "Degen merges are blocked since 2026-11-04: merge.py's red-main check reads each workflow's latest completed run, and the by-hand milestone-proof run 41747042457 (sha 73f66dbfc, never green, outside all-jobs-passed) is red, while main's head c3d1d2197 has green checks (runner 9, degen #509; coordinator 00:20 CST Nov 8).",
+  "note": "Proposed fix (coordinator): judge the base by the runs of the required check at the base head; red case first on a stale red dispatch-only run, and a control where a real red at the head still refuses. Triage found two conflicts before a lane starts: (1) decision no-merge-onto-red-main (owner, 2026-11-04 15:21 and 15:27 CST) judges every workflow file per event group, and says a green dispatch run clears an older red dispatch run, so this fix departs from an owner ruling; (2) degen's rule tests-once-per-batch says a failed milestone-proof run blocks the next merge (coordinator's process-only reading; degen debt milestone-red-no-enforcer), so today's refusal is that rule working. Not started until the coordinator reshapes it or the owner rules. Slug from the coordinator. Filed 00:24 CST Nov 8.",
+  "phase": "now",
+  "status": "todo",
+  "order": 549,
+  "owner": "triage",
+  "lane": "",
+  "updatedAt": "2026-11-08T00:20:00-06:00"
+}
