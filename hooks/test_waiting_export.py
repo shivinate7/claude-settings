@@ -139,9 +139,11 @@ def roadmap_repo(name, commits, extras=None):
     return root
 
 
-def base_repo(name):
-    """The base fixture: the copy's last commit at 17:00, then a commit at 21:00 that touches no copy folder."""
-    return roadmap_repo(name, [(at(17), item(FOLDER, 1)), (at(21), {"roadmap/data/steps/x.json": "{}\n"})])
+def base_repo(name, extras=None):
+    """The base fixture: the copy's last commit at 17:00, then a commit at 21:00 that touches no copy folder.
+    `extras` is the repo's extras file text (None: the default registry)."""
+    return roadmap_repo(name, [(at(17), item(FOLDER, 1)), (at(21), {"roadmap/data/steps/x.json": "{}\n"})],
+                        extras=extras)
 
 
 def item(folder, n):
@@ -701,6 +703,49 @@ def case_n20_newer_get_of_another_page_does_not_overrule_the_writer():
     check("N20: no systemMessage", not obj.get("systemMessage"), obj.get("systemMessage"))
 
 
+def layout_read_fails(root):
+    """True when the layout cannot read the extras file of `root`."""
+    import layout
+    try:
+        layout.waiting_page(root)
+    except layout.LayoutError:
+        return True
+    return False
+
+
+def broken_repo(name):
+    """base_repo whose extras file is not JSON, so the layout read fails. The scope of N21 to N23: checked before
+    the case, so a case cannot pass because the layout read happened to work."""
+    root = base_repo(name, extras="{not json")
+    check("%s scope: the layout read fails on this repo's extras file" % name.upper(), layout_read_fails(root),
+          "the layout read did not fail")
+    return root
+
+
+def case_n21_broken_layout_other_writer_passes_with_no_note():
+    """The layout cannot be read, and the waiting page's get names another session as the writer. A session that the
+    transcript names as not the page writer owes no export note, even when the layout read fails."""
+    root = broken_repo("n21")
+    records = [owner(at(18, 50))] + page_write(at(19))
+    obj = expect_pass("N21", run_stop("n21", root, records, writer="session_other"))
+    check("N21: no systemMessage", not obj.get("systemMessage"), obj.get("systemMessage"))
+
+
+def case_n22_broken_layout_writer_session_gets_the_note():
+    """The control for N21: the same broken layout, with the waiting page's get naming this session. This session is
+    the writer, so the failed read is noted as not checked."""
+    root = broken_repo("n22")
+    expect_note("N22", run_stop("n22", root, [owner(at(18, 50))] + page_write(at(19))))
+
+
+def case_n23_broken_layout_no_writer_named_with_export_history_gets_the_note():
+    """The control for N21 with no writer named: an export run before the write makes this session the writer, so
+    the failed read is noted as not checked."""
+    root = broken_repo("n23")
+    records = [owner(at(18, 50))] + export_run(at(18, 30), verdict="changed 1") + page_write(at(19))
+    expect_note("N23", run_stop("n23", root, records, writer=None))
+
+
 # --------------------------------------------------------------------------- unit cases
 
 def guard_module():
@@ -791,6 +836,9 @@ CASES.extend((
     case_n18_another_pages_writer_get_does_not_block,
     case_n19_waiting_pages_own_writer_get_blocks,
     case_n20_newer_get_of_another_page_does_not_overrule_the_writer,
+    case_n21_broken_layout_other_writer_passes_with_no_note,
+    case_n22_broken_layout_writer_session_gets_the_note,
+    case_n23_broken_layout_no_writer_named_with_export_history_gets_the_note,
     case_u1_export_check_returns_the_reason,
     case_u2_git_failure_gives_a_note_and_no_reason,
 ))
