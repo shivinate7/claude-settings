@@ -13,12 +13,16 @@ The contract these cases pin (the builder implements it):
 
 Sentences marked "constructed" are not in test_report_guard_cannot.py. The others are from it.
 """
+import importlib.util
+import os
 import re
 import sys
 import unittest
 
 import _clause as clause
 import report_guard
+
+REPORT_GUARD = os.path.join(os.path.dirname(os.path.abspath(__file__)), "report_guard.py")
 
 
 def none(text):
@@ -308,6 +312,41 @@ class LexiconTests(unittest.TestCase):
         # adverb outside the list ("temporarily") is not written by the writer.
         self.assertIn(clause.ADVERB_PATTERN, report_guard.CANNOT_WRITER_RE.pattern,
                       "the writer pattern is not built from ADVERB_PATTERN")
+
+    def fresh_report_guard(self, name, words):
+        """A fresh load of lint/report_guard.py while _clause.<name> holds `words`. The probe is not in sys.modules, so the
+        shared report_guard is not touched, and the list is set back when the case ends."""
+        original = getattr(clause, name)
+        setattr(clause, name, words)
+        self.addCleanup(setattr, clause, name, original)
+        spec = importlib.util.spec_from_file_location("report_guard_lexicon_probe", REPORT_GUARD)
+        probe = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(probe)
+        return probe
+
+    def test_preposition_pattern_is_built_from_the_shared_preposition_list(self):
+        # Catches: _PREPOSITION held as a literal copy of PREPOSITIONS, so a preposition added to the shared list never ends
+        # a pr-open object, and the copy stays the same when the list changes.
+        probe = self.fresh_report_guard("PREPOSITIONS", ("zqxvprep",))
+        self.assertEqual(probe._clause.PREPOSITIONS, ("zqxvprep",), "scope: the probe does not read the sentinel list")
+        self.assertNotIn("zqxvprep", report_guard._PREPOSITION, "control: the shared report_guard reads the sentinel")
+        self.assertIn("zqxvprep", probe._PREPOSITION, "_PREPOSITION is not built from _clause.PREPOSITIONS")
+
+    def test_fail_end_is_built_from_the_shared_outage_verbs(self):
+        # Catches: _FAIL_END held as a literal copy of OUTAGE_VERBS, so a verb added to the shared list does not stop
+        # "failing to <verb>" from reading as an outage rather than a red check.
+        probe = self.fresh_report_guard("OUTAGE_VERBS", ("zqxvverb",))
+        self.assertEqual(probe._clause.OUTAGE_VERBS, ("zqxvverb",), "scope: the probe does not read the sentinel list")
+        self.assertNotIn("zqxvverb", report_guard._FAIL_END, "control: the shared report_guard reads the sentinel")
+        self.assertIn("zqxvverb", probe._FAIL_END, "_FAIL_END is not built from _clause.OUTAGE_VERBS")
+
+    def test_ci_checks_is_built_from_the_shared_outage_nouns(self):
+        # Catches: _CI_CHECKS held as a literal copy of OUTAGE_NOUNS, so a noun added to the shared list does not make
+        # "<noun> checks" read as an outage rather than a red CI check.
+        probe = self.fresh_report_guard("OUTAGE_NOUNS", ("zqxvnoun",))
+        self.assertEqual(probe._clause.OUTAGE_NOUNS, ("zqxvnoun",), "scope: the probe does not read the sentinel list")
+        self.assertNotIn("zqxvnoun", report_guard._CI_CHECKS, "control: the shared report_guard reads the sentinel")
+        self.assertIn("zqxvnoun", probe._CI_CHECKS, "_CI_CHECKS is not built from _clause.OUTAGE_NOUNS")
 
     def test_conditionals_are_the_words_that_make_a_clause_conditional(self):
         # Catches: a conditional word dropped from CONDITIONALS.
