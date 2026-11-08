@@ -17,7 +17,8 @@ not load on a push turn.
 Each case runs the real Stop hook as a subprocess. The gh stand-in leads its PATH (setUpModule of
 lint/test_report_guard.py, which takes the stand-in's program from hooks/test_ci_wake.py) and answers
 the fixture the case writes. No real gh runs, no network is reached and no clock is read. The budget
-cases run in process with a fake clock.
+cases run in process with a fake clock. The path-filter reader cases call ci_wake's filter functions in process, on real
+temp repos (or on a string, for the scanner cases).
 
 Cost, proved by the stand-in's call log: a turn with no push, and a Stop with stop_hook_active, make no
 gh call. A push reads at most 3 gh calls for its head: the PR read, the run list, and the workflow list when the run
@@ -73,9 +74,25 @@ REMOTE_LINE = "To %s\n" % REMOTE_URL  # the header git prints for a push; it nam
 TAG = "v1.0"  # a short-name tag: a push names it without `refs/tags/`
 FEAT = "feat"  # a bare name a push gives with no ref line: a branch, a tag or both, by the case
 UNNAMED_HEAD_TEXT = "no remote-tracking ref names the pushed head"  # the reason a head no read named gives
+def checks_workflow(push_block):
+    """A `checks` workflow whose `push:` event holds `push_block`, the lines under `push:` as written (indented 4)."""
+    return ("name: checks\non:\n  push:\n" + push_block + "jobs:\n  unit:\n"
+            "    runs-on: ubuntu-latest\n    steps:\n      - run: echo ok\n")
+
+
 # A workflow that runs for a push that touches docs/ only. A push that touches other files starts no run of it.
-DOCS_ONLY_WORKFLOW = ("name: checks\non:\n  push:\n    paths:\n      - 'docs/**'\njobs:\n  unit:\n"
-                      "    runs-on: ubuntu-latest\n    steps:\n      - run: echo ok\n")
+DOCS_ONLY_WORKFLOW = checks_workflow("    paths:\n      - 'docs/**'\n")
+SRC_ONLY_WORKFLOW = checks_workflow("    paths:\n      - 'src/**'\n")
+FLOW_PATHS = ("api/**", "docs/**", "hooks/**", "lint/**", "migrations/**", "scripts/**", "src/**", "web/**")
+SOURCE = "value = 1\n" * 20  # long enough that a moved copy is still the same file to rename detection
+
+
+def flow_paths_workflow(spread):
+    """A `checks` workflow whose push `paths` is FLOW_PATHS, as one flow line or as a flow list spread over lines."""
+    if not spread:
+        return checks_workflow("    paths: [%s]\n" % ", ".join('"%s"' % p for p in FLOW_PATHS))
+    lines = "".join('      "%s",\n' % p for p in FLOW_PATHS[:-1]) + '      "%s"\n' % FLOW_PATHS[-1]
+    return checks_workflow("    paths: [\n" + lines + "    ]\n")
 
 
 def pr_entry(draft=False, branch=BRANCH, sha=HEAD, number=1430):
@@ -161,12 +178,13 @@ GIT_IDENTITY = {"GIT_AUTHOR_NAME": "test", "GIT_AUTHOR_EMAIL": "test@example.inv
                 "GIT_COMMITTER_NAME": "test", "GIT_COMMITTER_EMAIL": "test@example.invalid"}
 
 
-def git_commit(folder, remote_branch=BRANCH, on_branch=None, detach=False, tag=None, files=None):
+def git_commit(folder, remote_branch=BRANCH, on_branch=None, detach=False, tag=None, files=None, remove=None):
     """Make `folder` a git repo, and commit on it. -> the full hash. Local git only.
     on_branch: the local branch the commit lands on, made from the current HEAD when it is new (None keeps the
     default branch). remote_branch: the branch whose remote-tracking ref is set to the commit (None sets none).
     detach: HEAD is left detached at the commit, so no branch is checked out. tag: a local tag of that name at the
-    commit (None makes none). files: {relative path: text}, written and committed (None commits no file)."""
+    commit (None makes none). files: {relative path: text}, written and committed (None commits no file). remove:
+    relative paths deleted in the commit (a rename is one removal and one new file, with the same text)."""
     env = dict(os.environ, **GIT_IDENTITY)
 
     def run_git(*args):
@@ -180,6 +198,8 @@ def git_commit(folder, remote_branch=BRANCH, on_branch=None, detach=False, tag=N
         os.makedirs(os.path.dirname(os.path.join(folder, rel)), exist_ok=True)
         with open(os.path.join(folder, rel), "w", encoding="utf-8") as f:
             f.write(text)
+    for rel in remove or ():
+        run_git("rm", "-q", "--", rel)
     if files:
         run_git("add", "--", *files)
     run_git("commit", "-q", "--allow-empty", "-m", "x")
@@ -345,6 +365,122 @@ class PushCheckTests(unittest.TestCase):
         self.assertEqual(decision, "block", "a push that a workflow path filter matches, with no run listed, "
                          "passed with no CI line")
         self.assertIn("CI running on " + head[:7], reason, "the due run is not named running: %s" % reason)
+
+    def due_read(self, folder, new, old, cwd=None):
+        """push_may_start_run for the push old..new, read from `cwd` (the repo when None). The budget's clock never
+        moves, so no read runs out and the verdict is the filter's own."""
+        budget = ci_wake.Budget(total=20, per_read=8, clock=StepClock([0.0]))
+        return ci_wake.push_may_start_run(new, old, cwd or folder, budget)
+
+    def git_names(self, folder, *args):
+        """The names one git read lists, run in the repo: the scope a case checks before it asserts the reader."""
+        return subprocess.run(["git", *args], cwd=folder, capture_output=True, text=True, check=True,
+                              timeout=30).stdout.split()
+
+    def subfolder_push(self):
+        """A repo with a src/** workflow, a lint/ folder and a docs-only push. -> (folder, base, head)."""
+        folder = self.case_folder()
+        base = git_commit(folder, remote_branch=None, files={".github/workflows/checks.yml": SRC_ONLY_WORKFLOW,
+                                                             "lint/x.py": "x = 1\n", "docs/guide.md": "guide\n"})
+        head = git_commit(folder, remote_branch=None, files={"docs/guide.md": "guide v2\n"})
+        return folder, base, head
+
+    # The path-filter reader (ci_wake.workflow_runs_for, push_may_start_run). Each finding has one red case, which
+    # names the defect, and green controls beside it. Each red case checks its scope first.
+
+    def test_multi_line_flow_paths_list_keeps_a_run_due_for_a_matching_file(self):
+        # Eight patterns as one flow line, then spread over lines. src/a.py matches the last one. A list the reader
+        # cannot read must keep the run due, not read as no pattern at all.
+        self.assertTrue(ci_wake.workflow_runs_for(flow_paths_workflow(spread=False), ["src/a.py"]),
+                        "scope: the one-line form does not keep a run due for src/a.py")
+        self.assertTrue(ci_wake.workflow_runs_for(flow_paths_workflow(spread=True), ["src/a.py"]),
+                        "a flow paths list spread over lines was read as no pattern, so no run is due for src/a.py")
+
+    def test_one_line_flow_paths_list_owes_no_run_for_an_unmatched_file(self):
+        self.assertFalse(ci_wake.workflow_runs_for(flow_paths_workflow(spread=False), ["other/x.py"]),
+                         "a one-line flow paths list kept a run due for a file none of its patterns matches")
+
+    def test_empty_workflow_file_keeps_a_run_due(self):
+        # The empty state of the reader: no `on:` block reads as a form it does not parse, so a run stays due.
+        self.assertTrue(ci_wake.workflow_runs_for("", ["docs/x.md"]), "an empty workflow file was read as owing no run")
+
+    def test_rename_out_of_a_watched_path_keeps_a_run_due(self):
+        folder = self.case_folder()
+        base = git_commit(folder, remote_branch=None, files={".github/workflows/checks.yml": SRC_ONLY_WORKFLOW,
+                                                             "src/a.py": SOURCE})
+        head = git_commit(folder, remote_branch=None, files={"docs/a.py": SOURCE}, remove=["src/a.py"])
+        # Scope: the push takes src/a.py out of src/. Rename detection hides that old path from a plain name list.
+        self.assertEqual(self.git_names(folder, "diff", "--name-only", "--no-renames", base, head),
+                         ["docs/a.py", "src/a.py"], "scope: the push does not remove src/a.py")
+        self.assertTrue(self.due_read(folder, head, base),
+                        "a rename out of src/ dropped the old path from the push's names, so no run is due for src/**")
+
+    def test_plain_edit_of_a_watched_file_keeps_a_run_due(self):
+        folder = self.case_folder()
+        base = git_commit(folder, remote_branch=None, files={".github/workflows/checks.yml": SRC_ONLY_WORKFLOW,
+                                                             "src/a.py": SOURCE})
+        head = git_commit(folder, remote_branch=None, files={"src/a.py": SOURCE + "x = 2\n"})
+        self.assertTrue(self.due_read(folder, head, base), "an edit of src/a.py owes no run of the src/** workflow")
+
+    def test_move_between_unwatched_paths_owes_no_run(self):
+        folder = self.case_folder()
+        base = git_commit(folder, remote_branch=None, files={".github/workflows/checks.yml": SRC_ONLY_WORKFLOW,
+                                                             "docs/x.md": SOURCE})
+        head = git_commit(folder, remote_branch=None, files={"docs/y.md": SOURCE}, remove=["docs/x.md"])
+        self.assertFalse(self.due_read(folder, head, base), "a move between docs/ paths kept a run due for src/**")
+
+    def test_push_read_from_a_subfolder_finds_the_workflows_at_the_root(self):
+        folder, base, head = self.subfolder_push()
+        # Scope: the head holds the workflow at the root, where a read from lint/ must find it.
+        self.assertEqual(self.git_names(folder, "ls-tree", "-r", "--name-only", head, ".github/workflows"),
+                         [".github/workflows/checks.yml"], "scope: the head holds no workflow at the root")
+        self.assertFalse(self.due_read(folder, head, base, cwd=os.path.join(folder, "lint")),
+                         "a push read from lint/ found no workflow and kept a run due for a docs-only push")
+
+    def test_docs_only_push_from_the_repo_root_owes_no_run(self):
+        folder, base, head = self.subfolder_push()
+        self.assertFalse(self.due_read(folder, head, base), "a docs-only push kept a run due for src/** from the root")
+
+    def test_src_push_read_from_a_subfolder_keeps_a_run_due(self):
+        folder, base, head = self.subfolder_push()
+        src = git_commit(folder, remote_branch=None, files={"src/a.py": "x = 2\n"})
+        self.assertTrue(self.due_read(folder, src, head, cwd=os.path.join(folder, "lint")),
+                        "a src/ push read from lint/ owes no run of the src/** workflow")
+
+    def test_quoted_path_holding_space_hash_matches_its_file(self):
+        text = checks_workflow('    paths:\n      - "docs/a #b.md"\n')
+        self.assertTrue(ci_wake._path_passes("docs/a #b.md", ["docs/a #b.md"]),
+                        "scope: the matcher does not take the path itself")
+        self.assertTrue(ci_wake.workflow_runs_for(text, ["docs/a #b.md"]),
+                        "a quoted path holding ' #' was cut as a comment, so its own file kept no run due")
+
+    def test_trailing_comment_after_a_quoted_path_is_still_read(self):
+        text = checks_workflow('    paths:\n      - "docs/a.md"  # the docs\n')
+        self.assertTrue(ci_wake.workflow_runs_for(text, ["docs/a.md"]),
+                        "a real trailing comment after a quoted path hid the path")
+        self.assertFalse(ci_wake.workflow_runs_for(text, ["docs/b.md"]), "a path after the comment matched the filter")
+
+    def test_quoted_path_holding_space_hash_does_not_match_another_file(self):
+        text = checks_workflow('    paths:\n      - "docs/a #b.md"\n')
+        self.assertFalse(ci_wake.workflow_runs_for(text, ["docs/a.md"]),
+                         "a quoted path holding ' #' matched a different file")
+
+    def test_lone_quote_in_a_name_and_a_comment_does_not_hide_the_filter(self):
+        # A lone apostrophe is text, not the start of a string: the path and the comment after it still read.
+        text = ("name: Don't build\non:\n  push:\n    paths:\n      - docs/don't.md  # don't widen this\n"
+                "jobs:\n  unit:\n    runs-on: ubuntu-latest\n    steps:\n      - run: echo ok\n")
+        self.assertTrue(ci_wake.workflow_runs_for(text, ["docs/don't.md"]),
+                        "a lone apostrophe hid the path docs/don't.md")
+        self.assertFalse(ci_wake.workflow_runs_for(text, ["src/a.py"]),
+                         "a lone apostrophe widened the filter to src/a.py")
+
+    def test_block_scalar_text_does_not_change_the_push_filter(self):
+        # A run script after the on: block holds filter-looking text and a `#` line. Only the on: block is the filter.
+        text = ("on:\n  push:\n    paths: [src/**]\njobs:\n  unit:\n    steps:\n      - run: |\n"
+                "          # a shell comment, not a workflow one\n          paths: [docs/**]\n          on: push\n")
+        self.assertTrue(ci_wake.workflow_runs_for(text, ["src/a.py"]), "the on: block's own filter was lost")
+        self.assertFalse(ci_wake.workflow_runs_for(text, ["docs/guide.md"]),
+                         "text in a run script widened the push filter to docs/")
 
     def test_rewrite_that_still_lacks_the_ci_line_is_blocked(self):
         # The first reply holds a report but no CI line, so the Stop blocks for the CI line alone. Its rewrite, the
