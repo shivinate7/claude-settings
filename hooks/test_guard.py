@@ -21170,11 +21170,11 @@ def _expect_call(problems, label, expect, tool, cwd, agent_id, command, rule=Non
         problems.append("%s: the refusal names a path (%s)" % (label, reason[:120]))
     elif got == "deny" and reason_starts and not reason.startswith(reason_starts):
         problems.append("%s: the printed reason does not begin with %r (%s)" % (label, reason_starts, reason[:160]))
-    elif got == "deny" and detail and not _logged_deny_detail(config, detail):
+    elif got == "deny" and detail and not _logged_refuse_detail(config, detail):
         problems.append("%s: no logged deny carries the detail %r" % (label, detail))
 
 
-def _logged_deny_detail(folder, detail):
+def _logged_refuse_detail(folder, detail):
     """True when guard.log in FOLDER holds a deny whose matched field (field 4) starts with DETAIL."""
     if not folder:
         return False
