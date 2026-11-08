@@ -13556,7 +13556,7 @@ class ReviewFixRemedies(ReviewChainFixture):
                 ("a record that is not the newest on its pull request", (source, newer), link,
                  "that record is not the newest on #9", "Name the newest review record on that pull request."),
                 ("a record with a fix check line", (with_fix,), link,
-                 "a chain never runs through --fix-base-record", "Post a review record for this pull request, from round 1.")):
+                 "a chain never runs through --fix-base-record", "Post this pull request's own review records from round 1: for a guard or check change, rounds 1 to 3 with the net-value test at round 3.")):
             with self.subTest(label=label):
                 host = self.record_host(*comments, head=self.LIVE)
                 rc, out, err = self.run_args("7", "--review-record", "--head", self.LIVE, "--kind", "normal", "--guard", "no",
