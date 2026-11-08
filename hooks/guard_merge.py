@@ -1262,7 +1262,7 @@ def review_record_hit(tool: str, tool_input, transcript: str, agent: bool = Fals
 # ---- a reviewer brief names its pull request (rule review-needs-pr, decision pr-review-record)
 # A spawn of a RECORD_REVIEWER_ROLES role whose brief carries a round marker must name the pull request it reviews.
 NEEDS_PR_NAMED = re.compile(
-    r"(?:\bPR|\bpull\s+request)\s*#?\d+|github\.com/[^/\s]+/[^/\s]+/pull/\d+", re.IGNORECASE)
+    r"(?:\bPRs?|\bpull\s+requests?)[\s-]*#?\d+|github\.com/[^/\s]+/[^/\s]+/pull/\d+", re.IGNORECASE)
 NEEDS_PR_REMOTE_URL = re.compile(r"(?:^|[/@])github\.com[:/]", re.IGNORECASE)
 NEEDS_PR_REASON = (
     "review-needs-pr: this reviewer brief names no pull request. Open the draft pull request first and name it in "
