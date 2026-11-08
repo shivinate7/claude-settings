@@ -27,7 +27,9 @@ actions/ste-lint/run.sh with the step's env. TMPDIR is the case folder, so temp 
 import ast
 import atexit
 import collections
+import contextlib
 import importlib.util
+import io
 import json
 import os
 import re
@@ -36,6 +38,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.normpath(os.path.join(HERE, ".."))
@@ -1132,8 +1135,8 @@ class ReadAtHeadTests(StaleCase):
 class UnknownTests(StaleCase):
     """A base a shallow clone cannot resolve is unknown, not a finding: the check exits 0 and says so. A base that
     does not resolve in a full clone is a read that could not run (UnreadableReadTests), except a root commit's
-    HEAD~1: a first push to the default branch reads that range by design (actions/ste-lint/run.sh), so it exits 0
-    as on main. The root commit's cases sit here for that reason."""
+    parent (HEAD~1, HEAD^1): a first push to the default branch reads that range by design (actions/ste-lint/run.sh),
+    so it exits 0 as on main. The root commit's cases sit here for that reason."""
 
     def test_an_unresolvable_base_in_a_depth_one_clone_prints_unknown_and_exits_zero(self):
         def change(repo):
@@ -1160,13 +1163,80 @@ class UnknownTests(StaleCase):
         self.assertEqual(done.returncode, 0, out)
         self.assertIn("stale-cites: unknown", out)
 
-    def test_a_root_commit_range_in_a_full_clone_exits_zero_as_on_main(self):
-        rng = self.tree("# Notes\n")._replace(base="HEAD~1")  # the one commit is the root: HEAD~1 names nothing
+    def root_repo(self):
+        """A full clone whose one commit is the root. Its base, HEAD~1, names nothing."""
+        rng = self.tree("# Notes\n")._replace(base="HEAD~1")
         self.assertFalse(has_object(rng.repo, "HEAD~1"), "scope: the root commit has no parent")
         self.assertEqual(git(rng.repo, "rev-parse", "--is-shallow-repository"), "false", "scope: the repo is a full clone")
-        rc, out = self.run_check(rng, spec="HEAD~1..HEAD")
+        return rng
+
+    def assert_root_range_exits_zero(self, rng, spec):
+        rc, out = self.run_check(rng, spec=spec)
         self.assertNotIn("stale-cites: UNKNOWN,", out, "a root commit's first push printed the exit-2 read failure\n" + out)
-        self.assertEqual(rc, 0, "a root commit's first push in a full clone did not exit 0 as on main\n" + out)
+        self.assertEqual(rc, 0, "a root commit's first push (%s) in a full clone did not exit 0 as on main\n%s" % (spec, out))
+        self.assertIn("stale-cites: unknown, the base of %s does not resolve" % spec, out,
+                      "a root commit's first push (%s) did not print its unknown line\n%s" % (spec, out))
+        self.assertNotIn("stale-cites: PASS", out, "a root commit's first push (%s) printed PASS\n%s" % (spec, out))
+
+    def assert_root_range_exits_two(self, rng, spec):
+        """A base past the root commit's first parent, such as its grandparent, stays unread: the range exits 2."""
+        rc, out = self.run_check(rng, spec=spec)
+        self.assertEqual(rc, 2, "a base past the root commit's first parent (%s) did not exit 2\n%s" % (spec, out))
+        self.assertNotIn("stale-cites: PASS", out,
+                         "a base past the root commit's first parent (%s) printed PASS\n%s" % (spec, out))
+        self.assertRegex(out, "(?i)unknown", out)
+
+    def test_a_root_commit_range_in_a_full_clone_exits_zero_as_on_main(self):
+        self.assert_root_range_exits_zero(self.root_repo(), "HEAD~1..HEAD")
+
+    def test_a_root_commit_range_with_its_parent_spelled_caret_one_exits_zero_as_on_main(self):
+        rng = self.root_repo()
+        head = git(rng.repo, "rev-parse", "HEAD")
+        for spec in ("HEAD^1..HEAD", "%s^1..%s" % (head, head)):
+            with self.subTest(spec=spec):
+                self.assert_root_range_exits_zero(rng, spec)
+
+    def test_a_root_commit_range_with_its_parent_spelled_tilde_one_and_the_head_as_a_sha_exits_zero_as_on_main(self):
+        rng = self.root_repo()
+        self.assert_root_range_exits_zero(rng, "HEAD~1..%s" % rng.head)
+
+    def test_a_root_commit_three_dot_range_with_its_parent_spelled_tilde_one_exits_zero_as_on_main(self):
+        rng = self.root_repo()
+        self.assert_root_range_exits_zero(rng, "HEAD~1...%s" % rng.head)
+
+    def test_a_root_commit_range_with_the_head_spelled_at_sign_exits_zero_as_on_main(self):
+        self.assert_root_range_exits_zero(self.root_repo(), "@~1..HEAD")
+
+    def test_a_root_commit_range_with_its_parent_spelled_zero_padded_exits_zero_as_on_main(self):
+        self.assert_root_range_exits_zero(self.root_repo(), "HEAD~01..HEAD")
+
+    def test_a_root_commit_range_whose_base_is_two_back_exits_two(self):
+        rng = self.root_repo()
+        self.assertFalse(has_object(rng.repo, "HEAD~2"), "scope: the root commit has no grandparent")
+        self.assert_root_range_exits_two(rng, "HEAD~2..HEAD")
+
+    def test_a_root_commit_range_whose_base_is_caret_caret_exits_two(self):
+        rng = self.root_repo()
+        self.assertFalse(has_object(rng.repo, "HEAD^^"), "scope: the root commit has no grandparent")
+        self.assert_root_range_exits_two(rng, "HEAD^^..HEAD")
+
+    def test_a_root_commit_range_whose_base_is_tilde_one_then_tilde_zero_exits_two(self):
+        rng = self.root_repo()
+        self.assertFalse(has_object(rng.repo, "HEAD~1~0"), "scope: the root commit has no parent")
+        self.assert_root_range_exits_two(rng, "HEAD~1~0..HEAD")
+
+    def test_the_first_parent_of_a_different_root_commit_exits_two_as_before(self):
+        """A control: a base that is the first parent of another root commit is not the first parent of HEAD, so
+        the range stays unread and exits 2."""
+        rng = self.root_repo()
+        other = git(rng.repo, "commit-tree", EMPTY_TREE, "-m", "a second root")
+        git(rng.repo, "update-ref", "refs/heads/orphan-root", other)
+        self.assertFalse(has_object(rng.repo, "orphan-root^1"), "scope: the orphan branch's root commit has no parent")
+        self.assertNotEqual(other, rng.head, "scope: the orphan root is not HEAD")
+        rc, out = self.run_check(rng, spec="orphan-root^1..HEAD")
+        self.assertEqual(rc, 2, "the first parent of a different root commit exited %d, not 2\n%s" % (rc, out))
+        self.assertNotIn("stale-cites: PASS", out, "the first parent of a different root commit printed PASS\n" + out)
+        self.assertRegex(out, "(?i)unknown", out)
 
     def test_a_root_commit_range_in_a_depth_one_clone_prints_unknown_and_exits_zero(self):
         rng = self.tree("# Notes\n")._replace(base="HEAD~1")
@@ -1175,6 +1245,61 @@ class UnknownTests(StaleCase):
         self.assertEqual(rc, 0, "a depth-1 clone's root-commit range exited non-zero, the carve-out is lost\n" + out)
         self.assertTrue(unknown_lines(out), out)
         self.assertIn("fetch-depth", out, "the shallow clone's unknown line does not name fetch-depth\n" + out)
+
+    def parent_gone_range(self):
+        """A full clone whose head is no root, and whose parent commit object is gone, so the base names nothing readable."""
+        def change(repo):
+            write(repo, NOTES, "# Notes\n\n- one more line\n")
+            commit(repo)
+        rng = self.make_range(base_files(), change)
+        drop_loose_object(rng.repo, rng.base)
+        self.assertFalse(has_object(rng.repo, rng.base), "scope: the parent commit is gone")
+        self.assertTrue(has_object(rng.repo, "HEAD"), "scope: the head resolves")
+        self.assertEqual(git(rng.repo, "rev-parse", "--is-shallow-repository"), "false", "scope: the repo is a full clone")
+        return rng
+
+    def test_a_non_root_range_whose_parent_object_is_gone_exits_two_in_both_spellings(self):
+        rng = self.parent_gone_range()
+        for spec in ("HEAD~1..HEAD", "HEAD^1..HEAD"):
+            with self.subTest(spec=spec):
+                rc, out = self.run_check(rng, spec=spec)
+                self.assertEqual(rc, 2, "a non-root head whose parent is gone did not exit 2 (%s)\n%s" % (spec, out))
+                self.assertNotIn("stale-cites: PASS", out, "a non-root head whose parent is gone printed PASS\n" + out)
+                self.assertRegex(out, "(?i)unknown", out)
+
+    def main_in_process(self, stale, rng, spec):
+        """(exit code, output) of the loaded module's main on `spec`, run in this process with the repo as cwd."""
+        here = os.getcwd()
+        self.addCleanup(os.chdir, here)
+        os.chdir(rng.repo)
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            rc = stale.main(["--range", spec])
+        return rc, buf.getvalue()
+
+    def test_a_rev_list_that_prints_the_head_then_exits_nonzero_is_unknown_and_not_a_root(self):
+        rng = self.parent_gone_range()
+        stale = load_module_under_test()
+        real_run = stale._nowindow.run
+        starts = []
+
+        def rev_list_prints_head_then_fails(argv, *args, **kwargs):
+            if "rev-list" not in argv:
+                return real_run(argv, *args, **kwargs)
+            starts.append(argv)
+            text = "text" in kwargs or "encoding" in kwargs
+            shown = rng.head + "\n"
+            return subprocess.CompletedProcess(argv, 1, stdout=shown if text else shown.encode(), stderr="" if text else b"")
+
+        rc, out = self.main_in_process(stale, rng, "HEAD~1..HEAD")
+        self.assertEqual(rc, 2, "scope: the in-process run with the real rev-list does not exit 2\n" + out)
+        with mock.patch.object(stale._nowindow, "run", rev_list_prints_head_then_fails):
+            rc, out = self.main_in_process(stale, rng, "HEAD~1..HEAD")
+        self.assertTrue(starts, "the mocked rev-list never ran, so the case did not reach the rev-list it names\n" + out)
+        self.assertEqual(rc, 2, "a rev-list that printed the head then exited non-zero was read as a root commit "
+                         "(rev-list starts: %d)\n%s" % (len(starts), out))
+        self.assertNotIn("stale-cites: PASS", out, "a rev-list that failed printed PASS\n" + out)
+        self.assertRegex(out, "(?i)unknown", out)
 
 
 class PinTests(unittest.TestCase):
