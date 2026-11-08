@@ -159,9 +159,10 @@ def sh(args, cwd=None, input=None, env=None, timeout=None, live_stderr=False):
 def git(cwd, *a, input=None):
     return sh(["git", "-C", cwd, *a], input=input)
 
-def fetch_branch(root, name):
-    """-> (exit code, output) of the one fetch of origin's branch `name` into refs/remotes/origin/<name>: the home of this refspec."""
-    return git(root, "fetch", "-q", "origin", f"+refs/heads/{name}:refs/remotes/origin/{name}")
+def fetch_branch(root, name, deepen=None):
+    """-> (exit code, output) of the one fetch of origin's branch `name` into refs/remotes/origin/<name>: the home of this refspec.
+    `deepen` is None, or a number of commits to add below a shallow clone's boundary (`--deepen`)."""
+    return git(root, "fetch", "-q", *([f"--deepen={deepen}"] if deepen else []), "origin", f"+refs/heads/{name}:refs/remotes/origin/{name}")
 
 def ancestor(cwd, tip, base):
     """True when `tip` is reachable from `base`, False when it is not, None when git could not tell. A shallow clone
@@ -3083,6 +3084,7 @@ def review_marked(text):
 
 
 _stamp_since = {}
+REVIEW_DEEPEN_STEP, REVIEW_DEEPEN_TRIES = 100, 3  # a shallow clone whose first salt commit is the boundary deepens 100 commits at a time, at most 3 times, then stops
 _default_branch = {}
 
 def default_branch_once(root):
@@ -3104,7 +3106,7 @@ def shallow_boundary(root):
     """-> the set of commit shas whose parents this clone cut off (its `shallow` file); empty for a full clone. Only a missing `shallow` file
     means full history. Any other read error, or a `.git` file that names no git dir, raises Stop naming the file: reading it as full history
     would read every unstamped record as old."""
-    # A file read, not a git call: the one `git log` is the whole cost of the cutover read (a test pins it). A linked worktree's `.git` is a
+    # A file read, not a git call: on a full clone the one `git log` is the whole cost of the cutover read (a test pins it). A linked worktree's `.git` is a
     # file naming its git dir, and the `shallow` file lives in that dir's common dir.
     path = os.path.join(root, ".git")
     try:
@@ -3131,21 +3133,29 @@ def review_stamp_since(root, base):
     """-> the committer time, UTC as `YYYY-MM-DDTHH:MM:SSZ`, of the first first-parent commit on origin/<default branch> whose merge/merge.py holds
     `REVIEW_STAMP_SALT =`, or None when the read ran and found none. It reads the default branch (host_default_branch), never the PR's `base`: the stamp
     merged into the default branch, and a stacked base may lack that commit, which would read every unstamped record as old. A read that cannot run
-    (git errors, no origin/<default branch> ref, a shallow clone whose first salt commit is the boundary, or a shallow file that cannot be read)
-    raises Stop naming it, never None: an unknown cutover must not read every unstamped record as old
+    (git errors, no origin/<default branch> ref, a shallow clone whose first salt commit is still the boundary after REVIEW_DEEPEN_TRIES deepens of
+    REVIEW_DEEPEN_STEP commits or whose deepen fetch fails, or a shallow file that cannot be read) raises Stop naming it, never None: an unknown cutover must not read every unstamped record as old
     (rule verification-report-unknown-reads). The caller fetches first (fetch_default_branch). One call per (root, `base`) in a process. A record
     created before this time may carry no Stamp line."""
     # `base` is only a cache key, since the answer reads the default branch. It stays because both callers and their test doubles pass it.
     key = (root, base)
     if key not in _stamp_since:
         default = default_branch_once(root)
-        c, out = git(root, "log", "--first-parent", "--reverse", "-S", "REVIEW_STAMP_SALT =", "--format=%H %ct", f"origin/{default}", "--", "merge/merge.py")
-        if c:
-            raise Stop(f"could not read origin/{default} to find the review stamp cutover (git log exited {c}): {out[:300]}. Fetch origin, then run the command again. " + REVIEW_CITE)
-        first = out.split()[:2]
-        if first and first[0] in shallow_boundary(root):  # its parent is missing, so an older salt commit may exist: the cutover is unknown
-            raise Stop(f"origin/{default} is a shallow history, too shallow to read the review stamp cutover: the first commit holding the salt, {first[0][:9]}, is the shallow boundary. "
-                       "Run `git fetch --unshallow origin`, then run the command again. " + REVIEW_CITE)
+        for deepened in range(REVIEW_DEEPEN_TRIES + 1):
+            c, out = git(root, "log", "--first-parent", "--reverse", "-S", "REVIEW_STAMP_SALT =", "--format=%H %ct", f"origin/{default}", "--", "merge/merge.py")
+            if c:
+                raise Stop(f"could not read origin/{default} to find the review stamp cutover (git log exited {c}): {out[:300]}. Fetch origin, then run the command again. " + REVIEW_CITE)
+            first = out.split()[:2]
+            if not (first and first[0] in shallow_boundary(root)):
+                break
+            # The first salt commit is the boundary: its parent is missing, so an older salt commit may exist and the cutover is unknown. Deepen, then read again.
+            if deepened == REVIEW_DEEPEN_TRIES:
+                raise Stop(f"origin/{default} is a shallow history, too shallow to read the review stamp cutover: the first commit holding the salt, {first[0][:9]}, is still the shallow boundary "
+                           f"after {REVIEW_DEEPEN_TRIES} deepens of {REVIEW_DEEPEN_STEP} commits. Run `git fetch --unshallow origin`, then run the command again. " + REVIEW_CITE)
+            fc, fout = fetch_branch(root, default, deepen=REVIEW_DEEPEN_STEP)
+            if fc:
+                raise Stop(f"origin/{default} is a shallow history, too shallow to read the review stamp cutover: the first commit holding the salt, {first[0][:9]}, is the shallow boundary, "
+                           f"and the deepen fetch failed (git fetch exited {fc}): {fout[:300]}. Run `git fetch --unshallow origin`, then run the command again. " + REVIEW_CITE)
         _stamp_since[key] = (datetime.datetime.fromtimestamp(int(first[1]), datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
                              if len(first) == 2 and first[1].isdigit() else None)
     return _stamp_since[key]
