@@ -820,9 +820,8 @@ _SHELL_RUNNER = re.compile(r"(?:" + _SHELLS + _RUNNER_TAIL).fullmatch
 
 
 # The runners a body of python, or of anything else, can have: python alone, and the rest.
-_PYTHON_HEADER = _interpreter_header("python[\\d.]*")
-_OTHER_HEADER = _interpreter_header(_SHELLS + "|perl|ruby|node")
 _PYTHON_RUNNER = re.compile(r"python[\d.]*(?:\.exe|\.cmd)?").fullmatch
+_OTHER_INTERPRETER = re.compile(r"(?:" + _SHELLS + "|perl|ruby|node)(?:\\.exe|\\.cmd)?").fullmatch
 _OTHER_RUNNER = re.compile(r"(?:" + _SHELLS + "|perl|ruby|node" + _RUNNER_TAIL).fullmatch
 
 
@@ -830,17 +829,19 @@ def _plain_words(words):
     return [word[2:] if word.startswith("./") else word for word in words if not re.match(r"\w+=", word)]
 
 
-def _runs_written_file(text: str, headers, shells_only: bool = False, runner=None) -> bool:
+def _runs_written_file(text: str, headers, shells_only: bool = False, runner=None, files_run_nothing=False) -> bool:
     """True when a file a heredoc writes is run later: its pipeline holds a shell, an interpreter or a runner
     (`sh < f`, `cat f | sh`, `timeout 5 sh f`), or it is the command itself (`./f`). A read such as `wc -c f`
     runs nothing. The word is compared as written, so `$HOME/f` matches only itself. `shells_only` drops the
     bare interpreters (python, perl, ruby, node) from the runners. `runner` names the runner words to match.
+    `files_run_nothing` stops a written file's own name from counting as a runner word (`cat > python3 <<EOF`).
     """
     runner = runner or (_SHELL_RUNNER if shells_only else _RUNNER)
     written = {word for header in headers for word in _plain_words(_WRITE_TARGET.findall(header))}
     for pipeline in re.split(r"\n|;|&&|\|\||&", _WRITE_TARGET.sub(" ", text)) if written else ():
         stages = [_plain_words(_WORDS(stage)) for stage in pipeline.split("|")]
-        runs = any(runner(word.rsplit("/", 1)[-1]) for words in stages for word in words)
+        runs = any(runner(word.rsplit("/", 1)[-1]) for words in stages for word in words
+                   if not (files_run_nothing and word in written))
         if any(word in written and (runs or at == 0) for words in stages for at, word in enumerate(words)):
             return True
     return False
@@ -865,19 +866,23 @@ def _own_stage(header: str, nth: int) -> str:
 def python_runs_body(raw: str, header: str, nth: int = 0) -> bool:
     """True when python, and no other interpreter, runs the heredoc body that `header` opens as its `nth`
     heredoc (0-based among those on the line, modulo their count: two lines may share one text). Only the
-    body's own stage of the header is judged: it is fed to python (`python3 - <<'EOF'`), or it is written to
-    a file that only a bare python word runs. A python word in another stage of the line, or beside a second
-    heredoc, makes nothing python. A wrapper (`env python3 f`), `./f` or an unrecognised runner word is not
-    python, so the body stays in view."""
+    body's own stage of the header line is judged: it is fed to python (`python3 - <<'EOF'`), or it is written
+    to a file that only a bare python word runs. Words decide, never a path: `python/t.pl` holds no python
+    word, and a written file's own name is no runner. A python word in another stage of the line, or beside a
+    second heredoc, makes nothing python. A runner word the guard does not know stands apart: `stdbuf -o0
+    python3 f.py` is python's, and so is `python3 f.py && ash f.py`. A body fed to python stays python's behind
+    a known wrapper (`env python3 -`). A written file run through one (`env python3 f`), `./f`, or a shell or
+    other interpreter word is not python, so the body stays in view."""
     header = _without_message_values(header)
     heads = len(heredoc_heads(header)[0])
     stage = _own_stage(header, nth % heads) if heads else ""
     if not stage:
         return False   # the body's stage is unknown: keep it in view
-    if _PYTHON_HEADER(stage):
-        return not _OTHER_HEADER(stage)
+    words = [word.rsplit("/", 1)[-1] for word in _plain_words(_WORDS(_WRITE_TARGET.sub(" ", stage)))]
+    if any(_PYTHON_RUNNER(word) for word in words):
+        return not any(_OTHER_INTERPRETER(word) for word in words)
     text = _without_message_values(_drop_heredoc_bodies(raw))
-    return (_runs_written_file(text, [stage], runner=_PYTHON_RUNNER)
+    return (_runs_written_file(text, [stage], runner=_PYTHON_RUNNER, files_run_nothing=True)
             and not _runs_written_file(text, [stage], runner=_OTHER_RUNNER))
 
 
