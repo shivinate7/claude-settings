@@ -1,0 +1,11 @@
+{
+  "title": "In each child repo, the ruling cite rule judges a PR that changes only Markdown",
+  "why": "The code-check step is gated by ci-scope.sh, so a docs-only PR skips it and the ruling cite rule never judges its commits (joyous checks.yml:78-79, ci-scope.sh:29).",
+  "note": "Filed 09:59 CST Nov 8 from lane ruling-cite-child-repos (session_013NEJL4B7Z8T1QiJsywtHYt, #2107), for debt ruling-cite-docs-only-prs, whose Fix line points here. Fix: an ungated step in each child repo, or move the ruling check out of the gated step. Child-repo work; runner 9 batches it. No owner question.",
+  "phase": "now",
+  "owner": "coordinator",
+  "lane": "",
+  "status": "todo",
+  "order": 714,
+  "updatedAt": "2026-11-08T09:59:00-06:00"
+}
