@@ -9,6 +9,7 @@ import re
 # A `uses:` of one of this repo's own actions at a ref: `<owner>/claude-settings/actions/<name>@<ref>`.
 SETTINGS_ACTION = re.compile(r"[\w.-]+/claude-settings/actions/([\w-]+)@([\w.+/-]+)")
 COMMIT_SHA = re.compile(r"[0-9a-f]{40}")
+BLOCK_HEADER = re.compile(r"([|>])([+-]?)")  # a block scalar's header: `|` or `>`, with an optional `-` or `+`
 
 # The Linux jobs that hold the suites of the one old `checks` job, split for wall time. merge/merge.py reads suites from each.
 CHECKS_SUITE_JOBS = ("checks", "checks-merge-install")
@@ -55,7 +56,7 @@ def block_scalar(style, lines, floor):
     block joins the lines of a paragraph with a space; a blank line between two lines is a newline, and a line indented
     deeper than the body keeps its own line. `-` drops the final newline and `+` keeps the blank lines at the end;
     otherwise the text ends in one newline. None when `style` is not a block header."""
-    kind = re.fullmatch(r"([|>])([+-]?)", style)
+    kind = BLOCK_HEADER.fullmatch(style)
     if not kind:
         return None
     body = block_lines(lines, floor)
@@ -85,16 +86,26 @@ def block_scalar(style, lines, floor):
     return text + {"-": "", "": "\n", "+": "\n" * (1 + trailing)}[kind.group(2)]
 
 
+def run_header(lines):
+    """(i, raw, style) for the `run:` line of a step's `lines`: its index, the text after `run:`, and that text without its
+    inline comment when it is a block header (`|` or `>`), else None. None when the step has no `run:`. The one test for
+    where a run block starts: run_body reads its text and settings_pins skips its lines, both from this."""
+    for i, line in enumerate(lines):
+        m = re.match(r"^(?:      - |        )run:[ \t]*(.*?)[ \t]*$", line)
+        if m:
+            style = drop_comment(m.group(1))  # a comment after the header is no script
+            return i, m.group(1), style if BLOCK_HEADER.fullmatch(style) else None
+    return None
+
+
 def run_body(step):
     """A step's `run:` text: the one line, or a block scalar with its 10-space indent removed. None if absent."""
     lines = step_lines(step)
-    for i, line in enumerate(lines):
-        m = re.match(r"^(?:      - |        )run:[ \t]*(.*?)[ \t]*$", line)
-        if not m:
-            continue
-        text = block_scalar(m.group(1), lines[i + 1:], 10)
-        return m.group(1) if text is None else text
-    return None
+    head = run_header(lines)
+    if head is None:
+        return None
+    i, raw, style = head
+    return raw if style is None else block_scalar(style, lines[i + 1:], 10)
 
 
 def drop_comment(value):
@@ -187,12 +198,10 @@ def settings_pins(text):
         at = text.index(st, at)  # the blocks are slices of `text` in order, so each search starts at the last
         first = text.count("\n", 0, at)
         body = step_lines(st)
-        for i, ln in enumerate(body):
-            m = re.match(r"^(?:      - |        )run:[ \t]*(.*?)[ \t]*$", ln)
-            if m:
-                skip.update(range(first + i, first + i + 1 + (len(block_lines(body[i + 1:], 10)) if re.fullmatch(
-                    r"[|>][+-]?", m.group(1)) else 0)))
-                break
+        head = run_header(body)
+        if head:
+            i, _, style = head  # the `run:` line is skipped, and its block lines after it
+            skip.update(range(first + i, first + i + 1 + (len(block_lines(body[i + 1:], 10)) if style else 0)))
     found = []
     for n, ln in enumerate(lines):
         if n not in skip:
