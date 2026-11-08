@@ -9,8 +9,9 @@ sleep, a synthetic clock for a verdict that depends on elapsed time, a hang guar
 date read counted as a real clock. The tool fixes none, and it writes nothing. Each finding has one category:
 - sleep: a real wait in a test file. Not a poll interval: a `sleep` in a Python loop that has both a
   condition and a cap is a wait-cap. A condition is a while-test term other than a bare `True` and a
-  clock comparison, or an `if` in the body that returns, breaks, raises or fails and tests something
-  other than a clock. A cap is a clock compared in the while test or in such an `if`, or
+  clock comparison, or an `if` in the body that returns or breaks and tests something
+  other than a clock. A cap is a clock compared in the while test or in such an `if`, or, when the while
+  test holds the condition, in an `if` that only raises or fails, or
   `range(<literal>)` in a `for`. A bare sleep, `while True` with no exit, a condition with no cap, a cap
   with no condition and a sleep after the loop stay sleep.
 - elapsed-assert: an assert that reads a wall-clock reading or a difference of two.
@@ -695,9 +696,33 @@ def scan_python(text):
                     todo.append(child)
 
     def exits(ifnode):
-        """True when the if's own branch returns, breaks, raises or fails the test."""
+        """True when the if's own branch ends the wait normally: a `return`, or a `break` of the loop that
+        holds the if. A raise or a fail only stops a hang, so it is no exit. A `break` inside a nested loop
+        leaves that loop, so the walk reads that loop's body for a `return` only. Its `else` is read in full."""
+        def leaves(stmts, in_inner_loop):
+            for n in stmts:
+                if isinstance(n, ast.Return) or (isinstance(n, ast.Break) and not in_inner_loop):
+                    return True
+                if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda, ast.ClassDef)):
+                    continue
+                if isinstance(n, (ast.While, ast.For, ast.AsyncFor)):
+                    if leaves(n.body, True) or leaves(n.orelse, in_inner_loop):
+                        return True
+                    continue
+                for field in ("body", "orelse", "finalbody"):
+                    if leaves(getattr(n, field, None) or [], in_inner_loop):
+                        return True
+                if isinstance(n, ast.Try) and any(leaves(h.body, in_inner_loop) for h in n.handlers):
+                    return True
+                if hasattr(ast, "Match") and isinstance(n, ast.Match) and any(leaves(c.body, in_inner_loop) for c in n.cases):
+                    return True
+            return False
+        return leaves(ifnode.body, False)
+
+    def stops(ifnode):
+        """True when the if's own branch raises or fails the test: it ends a hang, not the wait."""
         for n in own_nodes(ifnode.body):
-            if isinstance(n, (ast.Return, ast.Break, ast.Raise)):
+            if isinstance(n, ast.Raise):
                 return True
             if isinstance(n, ast.Call) and (n.func.attr if isinstance(n.func, ast.Attribute)
                                             else getattr(n.func, "id", "")) == "fail":
@@ -717,8 +742,11 @@ def scan_python(text):
     def is_hang_guard_poll(call):
         """A sleep in a loop that has both a condition and a clock or count cap is a hang guard, not a fixed
         wait (decision test-practices P5). A condition is a while-test term that is neither `True` nor a clock
-        comparison, or an if in the body that exits and tests something other than a clock. A cap is a clock
-        comparison in the while test or in an exiting if, or `range(<literal>)` in a for."""
+        comparison, or an if in the body that returns or breaks and tests something other than a clock. A cap
+        is a clock comparison in the while test or in such an if, or `range(<literal>)` in a for. An if that
+        only raises or fails is never the condition. Its clock comparison is a cap only when the while test
+        holds the condition: in `while True` the return or break is the wait's end, and a deadline that only
+        fails leaves the sleep a fixed window."""
         loop = poll_loop_of(call)
         if loop is None:
             return False
@@ -733,13 +761,18 @@ def scan_python(text):
         def always_true(t):
             return isinstance(t, ast.Constant) and bool(t.value)
 
-        ifs = [n for n in own_nodes(loop.body) if isinstance(n, ast.If) and exits(n)]
+        all_ifs = [n for n in own_nodes(loop.body) if isinstance(n, ast.If)]
+        ifs = [n for n in all_ifs if exits(n)]
         has_cond = any(not all(clock_term(t) or always_true(t) for t in terms_of(i.test)) for i in ifs)
         cap = any(clock_term(t) for i in ifs for t in terms_of(i.test))
         if isinstance(loop, ast.While):
             terms = terms_of(loop.test)
-            has_cond = has_cond or any(not (clock_term(t) or always_true(t)) for t in terms)
+            while_cond = any(not (clock_term(t) or always_true(t)) for t in terms)
+            has_cond = has_cond or while_cond
             cap = cap or any(clock_term(t) for t in terms)
+            if while_cond:
+                cap = cap or any(clock_term(t) for i in all_ifs if not exits(i) and stops(i)
+                                 for t in terms_of(i.test))
         else:
             it = loop.iter
             cap = cap or (isinstance(it, ast.Call) and isinstance(it.func, ast.Name) and it.func.id == "range"
