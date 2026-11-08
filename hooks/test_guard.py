@@ -427,6 +427,7 @@ REVERTSTALE = os.path.join(ROOT, "revertstale")  # a revert stopped on a product
 REBASESTALE = os.path.join(ROOT, "rebasestale")  # a rebase stopped on a product conflict, with a stale MERGE_HEAD in its git dir
 MIXEDBAD = os.path.join(ROOT, "mixedbadindex")  # a merge in progress whose index file is junk: rev-parse answers, ls-files fails
 MIXEDSLASH = os.path.join(ROOT, "mixedslash")  # a merge in progress, and a root file literally named src\app.py (POSIX only)
+SQUASHED = os.path.join(ROOT, "squashconflict")  # a `merge --squash` stopped on a product conflict: unmerged paths, no MERGE_HEAD
 SUBJCLEAN = os.path.join(ROOT, "subjclean")  # a real checkout with a clean tree and no stash
 SUBJCLEANWT = os.path.join(ROOT, "subjcleanlane")  # a real, clean linked worktree of that one
 SUBJDIRTY = os.path.join(ROOT, "subjdirty")  # a real checkout with real uncommitted work
@@ -1786,6 +1787,27 @@ def _build_mixed_slash():
         write(os.path.join(MIXEDSLASH, "src\\app.py"), "a root file, not the unmerged product file\n")
 
 
+def _build_squashed():
+    """A `git merge --squash` of `feature` that conflicts on src/app.py. It leaves unmerged paths and no MERGE_HEAD,
+    and none of the replay marks that a cherry-pick, a revert or a rebase leaves."""
+    make_repo(SQUASHED, {"src/app.py": "base\n"})
+    _must(SQUASHED, "checkout", "-q", "-b", "feature")
+    write(os.path.join(SQUASHED, "src/app.py"), "feature\n")
+    _must(SQUASHED, "add", "-A")
+    _must(SQUASHED, *IDENT, "commit", "-q", "-m", "feature change")
+    _must(SQUASHED, "checkout", "-q", "main")
+    write(os.path.join(SQUASHED, "src/app.py"), "main\n")
+    _must(SQUASHED, "add", "-A")
+    _must(SQUASHED, *IDENT, "commit", "-q", "-m", "main change")
+    run_vcs(SQUASHED, *IDENT, "merge", "--squash", "feature")
+    if _unmerged(SQUASHED) != ["src/app.py"]:
+        sys.exit("fixture setup failed: the squash in %r left %r unmerged" % (SQUASHED, _unmerged(SQUASHED)))
+    _check_merge_head(SQUASHED, stale=False)
+    for mark in ("CHERRY_PICK_HEAD", "REVERT_HEAD", "rebase-merge", "rebase-apply"):
+        if os.path.exists(os.path.join(SQUASHED, ".git", mark)):
+            sys.exit("fixture setup failed: the squash in %r set %s" % (SQUASHED, mark))
+
+
 def _build_other():
     make_repo(OTHER, {"src/app.py": "plain\n"})
 
@@ -2387,6 +2409,7 @@ lazy_fixture([OTHER], _build_other)
 lazy_fixture([MIXEDLINK, MIXEDLINK + "-main"], _build_mixed_linked)
 lazy_fixture([MIXEDBAD], _build_mixed_bad_index)
 lazy_fixture([MIXEDSLASH], _build_mixed_slash)
+lazy_fixture([SQUASHED], _build_squashed)
 lazy_fixture([BRANCHREMOTE, BRANCHREPO, BRANCHFALLBACKMAIN, BRANCHFALLBACKMASTER, BRANCHNOBASE],
              _build_branch)
 lazy_fixture([PUSHFEAT, PUSHMAIN, PUSHTRUNK, PUSHTRUNKLOCAL, PUSHNOHEAD, PUSHDETACHED, PUSHSAMETAG, PUSHDANGLING, PUSHNOHEADMAIN,
@@ -13312,6 +13335,11 @@ else:
     add("test-author: Edit of a root file named src\\app.py is refused while src/app.py is unmerged", "deny",
         rule=TA, tool="Edit", file_path=os.path.join(MIXEDSLASH, "src\\app.py"), carries=MERGE_CARRIES,
         **_author_at(MIXEDSLASH))
+# A squash conflict has unmerged paths and no MERGE_HEAD. The carve-out needs the MERGE_HEAD that a merge sets, so
+# a conflict that leaves none is refused. The mutant that drops that MERGE_HEAD check is killed by this case.
+add("test-author: Edit of a conflicted product file after a squash merge with no MERGE_HEAD is refused", "deny",
+    rule=TA, tool="Edit", file_path=os.path.join(SQUASHED, "src", "app.py"), carries=MERGE_CARRIES,
+    **_author_at(SQUASHED))
 
 # ---- workflow test-run steps. A test-author may add or remove a whole test-run step in a workflow; nothing else there.
 # A builder may change any workflow line, except one that disables tests in a test-runner line. Each author row and
