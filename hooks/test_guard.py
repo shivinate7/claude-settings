@@ -3259,8 +3259,8 @@ sh("substitution: shared tree, a hash at a word start allowed", "echo hi #$(" + 
 # THE INNER cd ROOT. The text inside `$( )` is judged in the folder its own cd names, not the session's folder.
 # SUBJCLEAN is the session folder (clean), SUBJDIRTY holds real uncommitted work in f.txt. Each plain cd form
 # is the scope control: it already denies. Inside the substitution the same checkout is judged against the
-# clean session folder, so `checkout` and `restore` of the dirty file are allowed: a hole. A reset in a clean
-# checkout, named by a cd in a dirty session folder, is refused: a false alarm.
+# clean session folder, so `checkout` and `restore` of the dirty file are allowed: a safety hole. A reset in a
+# clean checkout, named by a cd in a dirty session folder, is refused: a false alarm.
 sh("substitution: shared tree, the plain cd into the dirty checkout denies",
    "cd " + slash(SUBJDIRTY) + " && " + VCS + " reset --hard HEAD", "deny", "shared-tree", cwd=SUBJCLEAN)
 sh("substitution: shared tree, the plain cd into the dirty checkout, a checkout of its file, denies",
@@ -3274,6 +3274,23 @@ sh("substitution: shared tree, a reset in a clean checkout named by a cd in a do
 # ALLOW control: the same checkout held in single quotes runs nothing.
 sh("substitution: shared tree, a checkout after a cd held in single quotes is text",
    "echo '$(cd " + slash(SUBJDIRTY) + " && " + VCS + " checkout -- f.txt)'", "allow", cwd=SUBJCLEAN)
+# PATHS FROM A SUBSTITUTION, IN A DIRTY CHECKOUT. The paths a checkout or restore names are unknown when a
+# dollar paren supplies them, so the call discards whatever the paths match. Each form is refused.
+sh("substitution: shared tree, a checkout of paths from a dollar paren in a dirty checkout denies",
+   VCS + " checkout -- $(" + VCS + " diff --name-only)", "deny", "shared-tree", cwd=SUBJDIRTY)
+sh("substitution: shared tree, a checkout with no -- and paths from a dollar paren in a dirty checkout denies",
+   VCS + " checkout $(" + VCS + " diff --name-only)", "deny", "shared-tree", cwd=SUBJDIRTY)
+sh("substitution: shared tree, a restore of paths from a dollar paren in a dirty checkout denies",
+   VCS + " restore $(echo f.txt)", "deny", "shared-tree", cwd=SUBJDIRTY)
+# AN OUTER cd CARRIES INTO A SUBSTITUTION TEXT. The folder an outer `cd` names is the folder the text inside
+# `$( )` or backticks runs in, so the verdict reads that folder: dirty refused from a clean session, clean allowed
+# from a dirty session.
+sh("substitution: shared tree, an outer cd into a dirty checkout, then a reset in a dollar paren, denies",
+   "cd " + slash(SUBJDIRTY) + " && out=$(" + VCS + " reset --hard HEAD)", "deny", "shared-tree", cwd=SUBJCLEAN)
+sh("substitution: shared tree, an outer cd into a dirty checkout, then a reset in backticks, denies",
+   "cd " + slash(SUBJDIRTY) + " && out=`" + VCS + " reset --hard HEAD`", "deny", "shared-tree", cwd=SUBJCLEAN)
+sh("substitution: shared tree, an outer cd into a clean checkout, then a checkout in a dollar paren, is allowed",
+   "cd " + slash(SUBJCLEAN) + " && out=$(" + VCS + " checkout -- f.txt)", "allow", cwd=SUBJDIRTY)
 
 
 # ============================================================ 1. branch delete / worktree remove/prune
@@ -4934,6 +4951,12 @@ sh("rm-var: a cd then a relative delete in single quotes is text",
    "echo '$(cd x && rm -rf y)'", "allow", cwd=NOGIT)
 sh("rm-var: a cd then a relative delete in a quoted heredoc body is text",
    "cat <<'EOF'\n$(cd x && rm -rf y)\nEOF", "allow", cwd=NOGIT)
+# AN OUTER cd INTO A FOLDER THAT IS NOT GIT, THEN A DELETE IN A SUBSTITUTION. The plain form is refused; the same
+# delete inside `$( )` runs in that folder too, so it is refused as well.
+sh("rm-var: the plain cd into a folder that is not git, then rm -rf y, is refused",
+   "cd /tmp/w && rm -rf y", "deny", "rm-after-cd", cwd=NOGIT)
+sh("rm-var: a cd into a folder that is not git, then a delete inside a dollar paren, is refused",
+   "cd /tmp/w && echo $(rm -rf y)", "deny", "rm-after-cd", cwd=NOGIT)
 
 sh("playwright: the bare PowerShell read is allowed", "$env:PLAYWRIGHT_BROWSERS_PATH", "allow",
    tool="PowerShell", cwd=NOGIT)
