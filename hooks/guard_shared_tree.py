@@ -614,6 +614,8 @@ def source_pathspecs(subcommand: str, args) -> list:
     if subcommand == "checkout":
         if dashed:   # `checkout -- <path>` names no revision: it restores from the index
             return specs if any(not a.startswith("-") for a in head) else []
+        if any(a in ("-b", "-B", "--orphan") for a in specs):   # `checkout -b <new> <start>` names no path
+            return []
         return [a for a in specs if not a.startswith("-")][1:]   # a branch switch has one operand
     if subcommand != "restore":
         return []

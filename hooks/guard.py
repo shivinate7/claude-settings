@@ -243,7 +243,8 @@ Other tools, in `judge` order:
                        (sim-test-is-the-one-boot-path)
   builder-test-edit, test-author-scope, record-writer-scope, designer-scope
                        deny. A role's write outside its scope, a builder's `git checkout <rev> -- <test>`
-                       or `git restore --source <rev> <test>` too. (builders-cannot-edit-tests)
+                       or `git restore --source <rev> <test>` too, a folder or `.` by the test files
+                       under it. Cost: one git ls-files, only on that form. (builders-cannot-edit-tests)
   env-file, frozen-path, config-edit, agent-model-cap
                        the write-tool forms of the rules above. Every deny runs over all path
                        fields of a call before any ask.
@@ -1970,7 +1971,9 @@ def builder_shell_test_hit(raw: str, stripped: str, cwd: str) -> str:
 
 def git_source_test_hit(stripped: str, cwd: str) -> str:
     """The test pathspec a `git checkout <rev> -- <path>` or `git restore --source <rev> <path>` copies from an
-    older revision, else ''. Paths are read from the folder a leading `cd` or `git -C` moves to."""
+    older revision, else ''. Paths are read from the folder a leading `cd` or `git -C` moves to. A pathspec
+    that is no existing file (a folder, `.`, a glob) is expanded with one `git ls-files` of the index, run
+    only on this form; an unreadable list allows."""
     ends = []
     segments = split_segments(stripped, ends)
     for number, segment in enumerate(segments):
@@ -1982,6 +1985,11 @@ def git_source_test_hit(stripped: str, cwd: str) -> str:
             for spec in source_pathspecs(subcommand, args):
                 if builder_test_path(spec, at):
                     return spec
+                if os.path.isfile(os.path.join(at, spec)):
+                    continue
+                for name in git_names(at, "ls-files", "-z", "--", spec) or ():
+                    if builder_test_path(name, at):
+                        return name
     return ""
 
 
