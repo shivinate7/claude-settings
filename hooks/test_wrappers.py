@@ -364,7 +364,8 @@ def split_tree(mutant):
     hooks/ holds guard.py and its guard_* siblings, and merge/, lint/ and actions/ci-alarm/ sit beside it.
     guard_merge loads merge/merge.py from one folder above the copy's hooks/. merge.py imports
     lint/hook_catalog.py at import and reads events.json, so a copy without them reads the merge tool as
-    unloadable, and the review-record fixture raises.
+    unloadable. The split check's materialize_all builds every lazy fixture, so the review-record one raises
+    before the check runs.
     With `mutant`, the sibling guard_core.py (created if absent) ends in SPLIT_MUTANT, so a load that
     takes split_segments from that sibling shows it. Without it, the sibling is left as it is.
     Returns the checkout root. The guard under test is root/hooks/guard.py."""
