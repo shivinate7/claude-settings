@@ -2173,6 +2173,19 @@ def _norm_dir(path: str):
         return None
 
 
+def checkout_root_by_stat(folder: str) -> str:
+    """The nearest folder at or above `folder` that holds a `.git` entry (a folder, or a linked
+    worktree's file), found by stat alone, else ''. No git is spawned."""
+    while folder:
+        if os.path.exists(os.path.join(folder, ".git")):
+            return folder
+        parent = os.path.dirname(folder)
+        if parent == folder:
+            return ""
+        folder = parent
+    return ""
+
+
 def path_is_inside(path: str, root: str):
     """True when `path` sits at or under `root`, False when it plainly does not, None when
     either could not be resolved. Existence of either is never required."""
