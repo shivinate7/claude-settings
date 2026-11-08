@@ -1,0 +1,11 @@
+{
+  "title": "The push guard asks before an agent-worktree branch with no upstream is pushed",
+  "why": "claude/agent-a22bb0ed47825117b, an agent-worktree branch with no upstream, was pushed to origin (coordinator, 01:13 CST Nov 8). Rule push-stray-branch does not cover a branch with no upstream.",
+  "note": "Built in lane push-head-upstream-name as a follow-up PR after #1814 (coordinator). Source correction: the push came from session_013NEJL42jmjfd1eLhrpSQx6, not the q_max lane; whether it was a mistake is unread. Queue fix (owner 13:20 CST Nov 7). Slug from the coordinator. Filed 01:15 CST Nov 8.",
+  "phase": "now",
+  "status": "doing",
+  "order": 557,
+  "owner": "triage",
+  "lane": "session_013NEJL1YxsYqim39RK6JeZP",
+  "updatedAt": "2026-11-08T01:08:00-06:00"
+}

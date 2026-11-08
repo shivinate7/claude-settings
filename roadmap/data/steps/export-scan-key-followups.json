@@ -1,11 +1,11 @@
 {
   "title": "The export scan passes everyday hyphen and snake_case keys, and its comments say what the code does",
   "why": "Lane export-scan-option-key (01:06 CST Nov 8): everyday hyphen keys with a 4-consonant run still refuse (`page-length-limit`, `strength-meter`, `bright-lights-city`), and so does the snake_case twin `key: 'tight_compact'`. In export_page.py the CONSONANT_RUN comment (\"at most three consonants\") and the `letters_are_words` docstring (\"a third\" vowels where the code uses 30%; \"few vowels do not\", false for the lower-case hyphen form) are untrue.",
-  "note": "Fix: pass these keys with a red case each, and a control where a random value still refuses; rewrite the two comments to match the code (\"length\" and \"strength\" are refused by the vowel share, not the run; use `monstrous` as the run example). The lane's own comment-fix commit failed its fix check on that point. Queue fix (owner 13:20 CST Nov 7). Title by triage. Filed 01:10 CST Nov 8.",
+  "note": "Fix: pass these keys with a red case each, and a control where a random value still refuses; rewrite the two comments to match the code (\"length\" and \"strength\" are refused by the vowel share, not the run; use `monstrous` as the run example). The lane's own comment-fix commit failed its fix check on that point. Queue fix (owner 13:20 CST Nov 7). Title by triage. Filed 01:10 CST Nov 8. Lane session_013NEJL2A4zgwDKTvUq4Vaai (export-scan-option-key) started it (coordinator, 01:13 CST Nov 8).",
   "phase": "now",
-  "status": "todo",
+  "status": "doing",
   "order": 555,
   "owner": "triage",
-  "lane": "",
-  "updatedAt": "2026-11-08T01:07:00-06:00"
+  "lane": "session_013NEJL2A4zgwDKTvUq4Vaai",
+  "updatedAt": "2026-11-08T01:08:00-06:00"
 }
