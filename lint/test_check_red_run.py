@@ -178,6 +178,11 @@ LABEL_FORMS = (
     ("Red-run: 1) mutant x -> 1 failed on SHA", "refused", "#1728 open"),
     ("Red-run: {mutant} x -> 1 failed on SHA", "refused", "#1728 open"),
     ("Red-run: <mutant> x -> 1 failed on SHA", "refused", "#1728 open"),
+    # #1745 round 1: a list marker inside a leading underscore, which the strip misses.
+    ("Red-run: _-mutant A (x) -> 1 failed on SHA", "refused", "#1745 round 1"),
+    ("Red-run: _+mutant A -> 1 failed on SHA", "refused", "#1745 round 1"),
+    ("Red-run: _- mutant A -> 1 failed on SHA", "refused", "#1745 round 1"),
+    ("Red-run: _+none -> 1 failed on SHA", "refused", "#1745 round 1"),
     # A fixed point, not a fixed count of passes: forty wrappers each side still read as the word.
     ("Red-run: " + "(" * 40 + "mutant" + ")" * 40 + " x -> 1 failed on SHA", "refused", "fixed point"),
     # Real commands pass as the failed form. These are the must-pass rows.
@@ -207,7 +212,8 @@ LABEL_FORMS = (
     ("Red-run: none: re-points fixtures", "valid", "control"),
 )
 # The normalised label word of a line: the first word after `Red-run:`, with its wrappers, list markers, emphasis and
-# trailing closers and colons stripped, in lower case. A leading underscore that closes no underscore stays (a real name).
+# trailing closers and colons stripped, in lower case. A leading underscore that closes no underscore stays (a real name),
+# unless the core is bare letters: `_-mutant` reads `mutant`.
 LABEL_WORDS = (
     ("Red-run:", ""),  # the empty state: no word
     ("Red-run: (mutant A) -> 1 failed on SHA", "mutant"),
@@ -228,6 +234,11 @@ LABEL_WORDS = (
     ("Red-run: _mutant_ x -> 1 failed on SHA", "mutant"),
     ("Red-run: _mutant A_ x -> 1 failed on SHA", "mutant"),
     ("Red-run: _mutnat_ x -> 1 failed on SHA", "mutnat"),
+    # #1745 round 1: a list marker inside a leading underscore strips to the word.
+    ("Red-run: _-mutant A (x) -> 1 failed on SHA", "mutant"),
+    ("Red-run: _+mutant A -> 1 failed on SHA", "mutant"),
+    ("Red-run: _- mutant A -> 1 failed on SHA", "mutant"),
+    ("Red-run: _+none -> 1 failed on SHA", "none"),
     ("Red-run: **none** x -> 1 failed on SHA", "none"),
     ("Red-run: (none) x -> 1 failed on SHA", "none"),
     ("Red-run: _(none)_ x -> 1 failed on SHA", "none"),
@@ -891,8 +902,14 @@ class CheckCase(Fixture):
         self.assertGap(out, sha, "add widget tests", normal)
 
 
+def word_of(result):
+    """The word of a label_word result: the first element of its (word, ended_in_colon) pair. A bare string is the word
+    itself, so a word row fails on its own word, and the pair test names the shape. Pure."""
+    return result[0] if isinstance(result, tuple) else result
+
+
 class LabelForms(unittest.TestCase):
-    """Each LABEL_FORMS row alone and beside a valid line, and the LABEL_WORDS table of label_word."""
+    """Each LABEL_FORMS row alone and beside a valid line, and the LABEL_WORDS table and the pair of label_word."""
 
     @classmethod
     def setUpClass(cls):
@@ -918,7 +935,24 @@ class LabelForms(unittest.TestCase):
         self.assertIsNotNone(fn, "label_word absent: the red-run label has no one normaliser yet")
         for line, word in LABEL_WORDS:
             with self.subTest(line=line):
-                self.assertEqual(fn(line), word, "label_word(%r) must be %r" % (line, word))
+                self.assertEqual(word_of(fn(line)), word, "label_word(%r) must read the word %r" % (line, word))
+
+    def test_label_word_returns_the_word_and_whether_it_ended_in_a_colon(self):
+        fn = getattr(self.check, "label_word", None)
+        self.assertIsNotNone(fn, "label_word absent: the red-run label has no one normaliser yet")
+        for line, pair in (("Red-run:", ("", False)),
+                           ("Red-run: mutant x -> 1 failed on SHA", ("mutant", False)),
+                           ("Red-run: mutant: x -> 1 failed on SHA", ("mutant", True)),
+                           ("Red-run: (mutant:) x -> 1 failed on SHA", ("mutant", True))):
+            with self.subTest(line=line):
+                got = fn(line)
+                self.assertIsInstance(got, tuple,
+                                      "label_word must return a (word, ended_in_colon) pair, not %r: %s" % (got, line))
+                self.assertEqual(got, pair, "label_word(%r) must be %r" % (line, pair))
+
+    def test_label_parts_is_not_a_second_home(self):
+        self.assertFalse(hasattr(self.check, "_label_parts"),
+                         "_label_parts is a second home for the label: label_word must hold the parse itself")
 
 
 class LabelFormHints(Fixture):
