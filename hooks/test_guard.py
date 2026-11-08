@@ -5049,6 +5049,16 @@ sh("kill: a pkill inside a loop's do-block, MEASURED wrongly allowed",
 sh("kill: a pkill inside an if's then-block, MEASURED wrongly allowed",
    "if true; then pkill -f server; fi", "deny", "machine-wide-kill", cwd=NOGIT)
 
+# A separator inside a `$( )` cuts the span's inner call, so the pkill after it is judged. Each of these runs one.
+sh("kill: a pkill after ; inside a dollar paren denies",
+   "echo $(cd d; pkill -f foo)", "deny", "machine-wide-kill", cwd=NOGIT)
+sh("kill: a pkill after && inside a dollar paren denies",
+   "echo $(cd d && pkill -f foo)", "deny", "machine-wide-kill", cwd=NOGIT)
+sh("kill: a pkill after || inside a dollar paren denies",
+   "echo $(cd d || pkill -f foo)", "deny", "machine-wide-kill", cwd=NOGIT)
+sh("kill: a pkill after | inside a dollar paren denies",
+   "echo $(cd d | pkill -f foo)", "deny", "machine-wide-kill", cwd=NOGIT)
+
 
 # =========================================================================== 2b. detached launches
 #
@@ -5460,6 +5470,9 @@ sh("waiter: one short sleep ahead of a poll is allowed", "sleep 5 && gh pr list"
 sh("waiter: a short sleep ahead of a later call is allowed", "cd a && sleep 15; gh run list",
    "allow", cwd=NOGIT)
 sh("waiter: a 30 s sleep ahead of a later call is refused", "cd a && sleep 30; gh run list",
+   "deny", "waiter", cwd=NOGIT)
+# A `&&` inside a `$( )` does not hide the 30 s sleep it runs.
+sh("waiter: a 30 s sleep after a && inside a dollar paren is refused", "echo $(cd d && sleep 30)",
    "deny", "waiter", cwd=NOGIT)
 sh("waiter: an until-loop waiting on a file is refused", "until [ -s f ]; do sleep 2; done",
    "deny", "waiter", cwd=NOGIT)
@@ -6095,6 +6108,8 @@ for _name, _command in (
     ("a leading bang", "! wsl --shutdown"),
     ("a dollar paren", "$(wsl --shutdown)"),
     ("a dollar paren inside echo", "echo $(wsl --shutdown)"),
+    ("a && before the call in a dollar paren", "echo $(cd d && wsl --shutdown)"),
+    ("a && before the call in a backtick", "echo `cd d && wsl --shutdown`"),
     ("a glued subshell", "(wsl --shutdown)"),
     ("cmd /c", "cmd /c wsl --shutdown"),
     ("bash -c with the call in quotes", 'bash -c "wsl --shutdown"'),
@@ -9827,6 +9842,29 @@ role_refuse("merge --reviewed --root o/a=$( pwd ) --role batch-runner is refused
             "merge --reviewed --root o/a=$( pwd ) --role batch-runner", role_path("lane"))
 roots_allow("merge --reviewed --root o/alpha=$( pwd ) --root o/bravo=/w/b with two tagged repos allows",
             "merge --reviewed --root o/alpha=$( pwd ) --root o/bravo=/w/b", role_path("roots-runner"))
+# A `&&` inside a `$( )` in a --root value is part of that argument, so both --root flags are read and the call allows.
+roots_allow("merge --reviewed --root o/alpha=$(cd d && pwd) --root o/bravo=/w/b with two tagged repos allows",
+            "merge --reviewed --root o/alpha=$(cd d && pwd) --root o/bravo=/w/b", role_path("roots-runner"))
+# The same `&&` inside `$( )`, with o/bravo missing: the call is refused, and the reason names o/bravo.
+roots_refuse("merge --reviewed --root o/alpha=$(cd d && pwd) for two tagged repos is refused, and the reason names o/bravo",
+             "merge --reviewed --root o/alpha=$(cd d && pwd)", role_path("roots-runner"), carries=("o/bravo",))
+# A real `&&` still splits: the merge after `cd /w &&` is read, and o/bravo has no --root, so the call is refused.
+roots_refuse("cd /w && merge --reviewed --root o/alpha=/w/a is refused for two tagged repos, and the reason names o/bravo",
+             "cd /w && merge --reviewed --root o/alpha=/w/a", role_path("roots-runner"), carries=("o/bravo",))
+# A backtick span joins as a $( ) span does: the second --root after a && inside the backticks is read, so the call allows.
+roots_allow("merge --reviewed --root o/alpha=`cd d && pwd` --root o/bravo=/w/b with two tagged repos allows",
+            "merge --reviewed --root o/alpha=`cd d && pwd` --root o/bravo=/w/b", role_path("roots-runner"))
+# A merge after a `;` inside a $( ) is read: with both roots it allows, and with o/bravo missing it is refused, naming o/bravo.
+roots_allow("echo $(cd d; merge --reviewed --root o/alpha=/x --root o/bravo=/y) with two tagged repos allows",
+            "echo $(cd d; merge --reviewed --root o/alpha=/x --root o/bravo=/y)", role_path("roots-runner"))
+roots_refuse("echo $(cd d; merge --reviewed --root o/alpha=/x) with o/bravo missing is refused, and the reason names o/bravo",
+             "echo $(cd d; merge --reviewed --root o/alpha=/x)", role_path("roots-runner"), carries=("o/bravo",))
+# An escaped \$( opens no span, so the `;` after it splits and the merge after it is a call of its own: o/bravo is missing.
+roots_refuse("echo \\$(x; merge --reviewed --root o/alpha=/z) with an escaped $( is refused, and the reason names o/bravo",
+             "echo \\$(x; merge --reviewed --root o/alpha=/z)", role_path("roots-runner"), carries=("o/bravo",))
+# A `$( )` with a `&&` in it, ahead of a chain: the merge after the chain is read, and a lane's --role refuses it.
+role_refuse("x=$(cd d && pwd) && merge --reviewed --role batch-runner is refused on a lane record",
+            "x=$(cd d && pwd) && merge --reviewed --role batch-runner", role_path("lane"))
 roots_refuse("(merge --reviewed) 2>&1 with a two-tag runner's bare call is refused, and the reason says to pass one --root per tag",
              roots_cmd([], "(", "merge", close=") 2>&1"), role_path("roots-runner"), carries=ROOTS_BARE_CARRIES,
              lacks=(ROOTS_REMEDY,))
@@ -19968,6 +20006,32 @@ def split_segments_comment_case():
     return (not problems), "; ".join(problems) if problems else "comment rule holds"
 
 
+def split_segments_substitution_case():
+    """A `&&` inside a `$( )` or backtick span splits here, as on main, so each guard that reads a
+    segment sees the inner call. The `&&` after the span splits too. A single-quoted span is text, so
+    it stays one segment.
+    """
+    guard = _load_guard_module()
+    problems = []
+
+    got = guard.split_segments("a $(b && c) && d")
+    want = ["a $(b ", " c) ", " d"]
+    if got != want:
+        problems.append("$( ) span: got %r want %r" % (got, want))
+
+    got = guard.split_segments("a `b && c` && d")
+    want = ["a `b ", " c` ", " d"]
+    if got != want:
+        problems.append("backtick span: got %r want %r" % (got, want))
+
+    got = guard.split_segments("echo '$(b && c)' && d")
+    want = ["echo '$(b && c)' ", " d"]
+    if got != want:
+        problems.append("single-quoted $( ) span: got %r want %r" % (got, want))
+
+    return (not problems), "; ".join(problems) if problems else "a && in a $( ) or backtick span splits as on main, and a single-quoted span stays whole"
+
+
 def process_start_ms_case():
     """`_process_start_ms` must tell apart three outcomes: alive, CONFIRMED dead, and
     unreadable. A regression that folds unreadable back into dead would let a live session's
@@ -22001,6 +22065,8 @@ LOG_CHECKS = (
      pointer_remedy_names_enter_worktree_case),
     ("split_segments: a comment starting a word ends its line, "
      "letter-before-# and quoted-# stay literal", split_segments_comment_case),
+    ("split_segments: a && inside a $( ) or backtick span splits as on main, and a single-quoted span stays whole",
+     split_segments_substitution_case),
     ("env: heredoc-allow-strip: strip_heredoc_bodies keeps no body line of the incident cat write",
      incident_write_strip_case),
     ("liveness: process_start_ms splits alive/dead/unreadable apart", process_start_ms_case),
@@ -29065,6 +29131,7 @@ LOG_RULE_FAMILY = (
     ("stack: the refusal never names", "shared-tree"),
     ("playwright: the refusal names the stale", "env"),
     ("split_segments: a comment starting a word", "paths"),
+    ("split_segments: a && inside a $( ) or backtick span", "paths"),
     ("liveness: process_start_ms splits", "kill"),
     ("liveness: windows arm splits", "kill"),
     ("liveness: session_is_live carries", "branch-worktree"),

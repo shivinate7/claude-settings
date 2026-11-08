@@ -829,11 +829,49 @@ def _script_folder(path: str, cd) -> str:
     return (cd or "").replace("\\", "/").rstrip("/") if folder in ("", ".") else folder
 
 
+def _span_open(text: str) -> bool:
+    """True when `text` ends inside an unclosed `$(` or backtick span. Quotes are read by walk_quotes,
+    which skips the character a backslash escapes, so `\\$(` and an escaped backtick open no span."""
+    depth = ticks = 0
+    escaped = -1   # the index of the character an unquoted backslash escapes
+    for index, char, quote in walk_quotes(text):
+        if quote:
+            continue
+        if char == "\\":
+            escaped = index + 1
+        elif char == "`":
+            ticks ^= 1
+        elif char == "(" and (depth or (text[index - 1:index] == "$" and escaped != index - 1)):
+            depth += 1
+        elif char == ")" and depth:
+            depth -= 1
+    return bool(depth or ticks)
+
+
+def _joined_span(segments, ends, at: int) -> str:
+    """Segment `at` joined with the segments after it, each behind the separator that cut it, until
+    the `$(` or backtick it leaves open closes, else ''. The splitter cuts a `&&`, `;` or `|` inside
+    a span, so `merge --reviewed --root o/a=$(cd d && pwd) --root o/b=/w/b` reaches its rules as two
+    segments and the second `--root` is lost. Only the merge call's reading joins; every other rule
+    keeps the splitter's segments, and merge_calls still reads each later segment on its own, so a
+    call after a separator inside the span stays in view. `ends` holds the separators of both of
+    split_segments' readings, and the last segment of a reading has '' there: a join stops at it, so
+    it never crosses into the second reading. A span left open to the end of its reading is read as
+    the splitter cut it."""
+    text, last = segments[at], at
+    while _span_open(text):
+        if not ends[last] or last + 1 >= len(segments):
+            return ""
+        text += ends[last] + segments[last + 1]
+        last += 1
+    return text if last > at else ""
+
+
 def _call_pieces(segment: str):
     """The calls one segment holds. The segment splitter cuts at `&&`, `||`, `;`, `|` and a newline, but not at `)` or
     a lone `&`: an unquoted `)` closes the subshell the call sits in and an unquoted `&` sends it to the background, so
     each ends a call, glued to a word or not, and the text after it is a call of its own. Quotes are read by
-    walk_quotes, so a `)` or `&` inside one ends nothing. Nor does a `&` in a redirect (`2>&1`, `&> out`), or a `)`
+    walk_quotes, so a `)` or `&` inside one ends nothing. Nor does a `&` in a redirect (`2>&1`, `&> out`), a `&&` (it reaches here only inside a `$( )` or backtick span that `_joined_span` put back together), or a `)`
     that closes a `$(` opened after the call's first word (`--root o/a=$( pwd )`). Empty pieces are dropped."""
     pieces, start, depth = [], 0, 0
     for index, char, quote in walk_quotes(segment):
@@ -843,8 +881,8 @@ def _call_pieces(segment: str):
             depth += 1
         elif char == ")" and depth:
             depth -= 1
-        elif char == ")" or (char == "&" and segment[index - 1:index] not in ("<", ">")
-                             and segment[index + 1:index + 2] != ">"):
+        elif char == ")" or (char == "&" and segment[index - 1:index] not in ("<", ">", "&")
+                             and segment[index + 1:index + 2] not in (">", "&")):
             pieces.append(segment[start:index])
             start = index + 1
     pieces.append(segment[start:])
@@ -860,8 +898,9 @@ def merge_args_of(segment: str, cd=None):
     A merge.py or launch.py counts when its folder is named `merge`. A script named with no folder or with `.`
     (`merge.py`, `./merge.py`) runs from the folder of `cd`, the last cd target of the segments before this one (see
     merge_calls): after `cd merge`, `merge.py`, `./merge.py` and `python3 [./]merge.py` all count, launch.py the same.
-    A segment is judged as its first call only: `_call_pieces` cuts it at each `)` or `&` that ends a call, so neither
-    hides a flag, and merge_calls reads each piece.
+    A segment is judged as its first call only: `_call_pieces` cuts it at each `)` or `&` that ends a call, and
+    merge_calls reads each piece. A lone `&` inside a `$( )` still ends a call there, so a flag after it is
+    read as a call of its own (known limit, Fix: none).
     """
     segment = (_call_pieces(segment) or [""])[0]
     tokens = segment_tokens(segment)
@@ -891,10 +930,12 @@ def merge_calls(stripped: str, cd=None):
     target of the segments before a segment is its folder (guard_core's `_segment_cd_target`, the reader the push and
     delete rules use); a script starts in its segment's folder. A `)` or `&` that ends a call (`_call_pieces`) starts a
     call of its own."""
-    for whole in split_segments(stripped):
+    ends = []
+    segments = split_segments(stripped, ends)
+    for at, whole in enumerate(segments):
         if not whole.strip():
             continue
-        for segment in _call_pieces(whole):
+        for segment in _call_pieces(_joined_span(segments, ends, at) or whole):
             rest = merge_args_of(segment, cd)
             if rest is not None:
                 yield segment, rest
