@@ -146,6 +146,19 @@ class GuardTreeTests(unittest.TestCase):
         self.assertEqual(read_file(self.dest, "own_session.py"), "BROKEN\n")
         self.assertEqual(read_file(self.dest, "guard.py"), "alpha\n")
 
+    def test_a_mutant_anchored_in_shared_names_mutates_shared_names(self):
+        # The brief marker rows live in shared_names.py, the one home the guard reads them from. A mutant aimed at a row
+        # must land there and not read as STALE, so it can break the row it names. An assert, not a crash, on the old code.
+        write_files(self.src, {"shared_names.py": "names-anchor\n"})
+        mutate_shared.guard_tree(self.dest)
+        try:
+            where = os.path.basename(mutate_shared.apply_mutant(self.dest, "names-anchor", "BROKEN"))
+        except mutate_shared.StaleMutant:
+            where = None
+        self.assertEqual(where, "shared_names.py")
+        self.assertEqual(read_file(self.dest, "shared_names.py"), "BROKEN\n")
+        self.assertEqual(read_file(self.dest, "guard.py"), "alpha\n")
+
     def test_one_match_in_a_sibling_mutates_the_sibling(self):
         mutate_shared.guard_tree(self.dest)
         where = mutate_shared.apply_mutant(self.dest, "beta-anchor", "BROKEN")
