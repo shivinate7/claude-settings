@@ -737,10 +737,13 @@ def _shell_write_hit(cmd: str, cwd: str, predicate, holds=None, follow_cd=False,
         head_script = []
         leading = True   # no command word yet: an assignment here sets the command's environment
         for index, word in enumerate(raw):
-            held_whole = bool(leading and _ASSIGNMENT.match(word))
+            # An assignment stays one word in `heads` wherever the resolver reads one: ahead of the command
+            # and behind a wrapper (`env -i FOO="a b" cp`). Only a leading one sets the environment and drops.
+            held_whole = bool(_ASSIGNMENT.match(word))
+            if held_whole and leading and _is_env_assignment(word):
+                continue
             if held_whole:
-                if _is_env_assignment(word):
-                    continue
+                pass
             elif word != "!" and not _is_redirect(word):
                 leading = False
             if index in data:
@@ -751,6 +754,8 @@ def _shell_write_hit(cmd: str, cwd: str, predicate, holds=None, follow_cd=False,
                 # Never judged as a path. `dup` stays in the text so `2> PATH` is not read as `> PATH`.
                 # The raw word is unquoted: a quoted "&1" is a file and is judged.
                 shown.append("dup")
+                heads.append(word)   # the resolver skips the redirect's own word, so `2>&1 cp` keeps `cp` in place
+                head_script.append(scripts[number][index])
             else:
                 pieces = _words_of(word) if "'" in word or '"' in word else [word]
                 words.extend(pieces)

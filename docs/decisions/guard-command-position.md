@@ -4,8 +4,8 @@
 
 One resolver in `hooks/guard_core.py` finds the command word for every rule.
 
-- It skips assignments and leading loop keywords, `(` and `$(`. An assignment value that holds `$(...)` with spaces is one word. It also skips a leading redirect (`2>/dev/null`, `>f`, `<f`) and a function header (`f()`, `function f`), so the body's first command is the command word.
-- It unwraps `sudo`, `env`, `command`, `nohup`, `nice`, `time`, `doas`, `xargs`, `timeout`, `verdict`, `exec`, `builtin`, `!` and PowerShell `&`.
+- It skips assignments and leading loop keywords, `(` and `$(`. An assignment value that holds `$(...)` with spaces is one word. It also skips a leading redirect (`2>/dev/null`, `>f`, `<f`) and an fd redirect (`2>&1`, `>&2`, `&>f`) and a function header (`f()`, `function f`), so the body's first command is the command word.
+- It unwraps `sudo`, `env`, `command`, `nohup`, `nice`, `time`, `doas`, `xargs`, `timeout`, `verdict`, `exec`, `builtin`, `busybox`, `stdbuf`, `watch`, `taskset`, `chrt`, `fakeroot`, `pkexec`, `uv run`, `!` and PowerShell `&`.
 - It reads each wrapper's flags getopt-style against the one table `WRAPPER_VALUE_FLAGS`. A short-flag cluster such as `sudo -Eu root` or `xargs -rn 1` skips its value.
 - `nested_script` reads the script that `sh -c`, `cmd /c`, `pwsh -c`, `iex` and `env -S` run. `env -S` counts only when `env` is a wrapper of the segment.
 - `heredoc_heads` is the one quote-aware reader of heredoc headers.

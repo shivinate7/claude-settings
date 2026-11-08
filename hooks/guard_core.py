@@ -356,7 +356,7 @@ POWERSHELL_ASSIGNMENT = re.compile(r"^\$[A-Za-z_][A-Za-z0-9_]*$")
 # the rest: the token after it, once its own flags are skipped, is what actually runs.
 COMMAND_WRAPPERS = {"sudo", "env", "command", "nohup", "nice", "time", "doas", "xargs",
                     "timeout", "verdict", "python", "python3", "exec", "builtin", "!", "&",
-                    "busybox", "stdbuf", "watch"}
+                    "busybox", "stdbuf", "watch", "taskset", "chrt", "fakeroot", "pkexec", "uv"}
 # The flags of a wrapper that take the NEXT word as their value: `nice -n 5 git` runs git, not `5`.
 # Long flags are listed too: `sudo --user root git ...` runs git. A `--flag=value` is one token and
 # needs no entry.
@@ -376,6 +376,15 @@ WRAPPER_VALUE_FLAGS = {
 # the runners that are no `COMMAND_WRAPPERS` entry. They sit here so `_wrapper_flags` skips the same way.
 WRAPPER_VALUE_FLAGS.update({
     "stdbuf": {"-i", "-o", "-e"}, "caffeinate": {"-t", "-w"},
+    # `taskset` and `chrt` take no flag value of their own (`-c` is bare, the CPU list or priority is the next
+    # word, skipped in `_walk_wrappers`), but `chrt` has deadline times. `uv` reads only `uv [flags] run [flags] cmd`.
+    "taskset": set(), "chrt": {"-T", "--sched-runtime", "-P", "--sched-period", "-D", "--sched-deadline"},
+    "fakeroot": {"-l", "--lib", "-f", "--faked", "-i", "-s", "-b"}, "pkexec": {"-u", "--user"},
+    "uv": {"--directory", "--project", "--config-file", "--cache-dir", "--color", "--python", "-p",
+           "--with", "--with-editable", "--with-requirements", "--env-file", "--group", "--extra",
+           "--package", "--index", "--default-index", "--index-url", "-i", "--extra-index-url",
+           "--find-links", "-f", "--upgrade-package", "-P", "--exclude-newer", "--only-group",
+           "--no-group", "--constraints", "-c", "--overrides"},
     "flock": {"-w", "-E", "--timeout", "--conflict-exit-code"},
     "docker": {"-e", "--env", "-u", "--user", "-w", "--workdir", "--env-file", "--detach-keys"},
     "podman": {"-e", "--env", "-u", "--user", "-w", "--workdir", "--env-file", "--detach-keys"},
@@ -577,6 +586,9 @@ def _skip_assignments_and_keywords(tokens, index=0):
             index += 1   # `(VAR=x cmd`: a subshell paren glued to the first assignment
             continue
         redirect = LEADING_REDIRECT.match(token)
+        if token == "&" and index + 1 < end and LEADING_REDIRECT.match(tokens[index + 1]):
+            index += 1   # `&>f` split as `&` `>f`: the next word is the redirect
+            continue
         if redirect:
             # `2>` and `>` alone take the next word as their target; `2>&` takes the descriptor after it.
             index += 2 if redirect.group(1) in ("", "&") else 1
@@ -662,6 +674,12 @@ def _walk_wrappers(tokens):
             if not (index < end and basename(tokens[index]) == "verdict"):
                 return start, tuple(chain)
             index += 1
+        if word in ("taskset", "chrt"):
+            index += index < end   # the CPU mask or the priority
+        if word == "uv":
+            if not (index < end and tokens[index] == "run"):
+                return start, tuple(chain)   # `uv pip install` runs no program
+            index, _ = _wrapper_flags(word, tokens, index + 1)
         while index < end and ASSIGNMENT.match(tokens[index]):
             index += 1
     return (index if index < end else None), tuple(chain)
@@ -1913,7 +1931,7 @@ def wrapped_commands(tokens, at: int):
 def bare_words(segment: str):
     """(words, bare): one segment's shell words, dequoted, and the indexes of the words that hold
     no quote at all. A rule that reads a danger word at ANY bare position keeps main's breadth, so
-    a runner no reader names (`docker run`, `watch`, `uv run`) still shows its inner command, and
+    a runner no reader names (`docker run`) still shows its inner command, and
     quoted text (`echo 'tail -f x'`, a commit message) still reads as text. A search command's
     words are patterns and paths, never a command (ENV_PATTERN_COMMANDS): `grep -rn tail -F x`
     has no bare word."""
