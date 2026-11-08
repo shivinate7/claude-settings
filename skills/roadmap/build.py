@@ -49,7 +49,8 @@ its title holds the id as a whole token (names_step), used by the pair line belo
 unlaned's: the branch equals a live session step exactly.
 
 The row "lanes to archive" (idle_lanes) lists each completed or review-ready lane session whose steps have all landed and
-that no open pull (on lane_head_refs) or open page item holds; `merge --idle-lanes` prints the same list.
+that no open pull (on lane_head_refs) or open page item holds; `merge --idle-lanes` prints the same list. An idle lane
+that cannot be archived reads `hold (<reason>; lane <session id>)`, and the row's count leaves holds out.
 
 This script goes red (step roadmap-pr-without-step) when a todo step is named by an open pull: it prints
 "todo step with an open PR: <id> (#N)" per pair, writes the page, then exits 1. Without a usable readAt and pulls read (sessions are not
@@ -1288,18 +1289,21 @@ def unfiled(steps, work):
     return out
 
 
-def idle_lanes(work, steps, marks, slug, repo, main_branch="main", marks_why=None):
-    """Entries for each lane of this repo that can be archived, or one `unknown (<why>)` entry, never an empty list
-    when a read could not run. Each entry reads `<session id> (<steps>; topic <topic or ->)`, sorted.
+def idle_lanes(work, steps, marks, slug, repo, main_branch="main", marks_why=None, trailer_ids=None):
+    """Entries for each idle lane of this repo, sorted: `<session id> (<steps>; topic <topic or ->)` to archive, or
+    `hold (<reason>; lane <session id>)` for a lane that cannot be archived. A lane with no cs-step tag, or a step that
+    is neither on the record branch nor named by a Step trailer on main, is held. `unknown (<why>)` is only for a
+    whole read that could not run, never an empty list then.
 
     A session is listed only when it carries cs-build:lane and this repo's cs-repo tag, is not archived, has status
     bucket completed or review ready, and names at least one cs-step with every one of them landed (a Step trailer
-    on main, or status done). It is held back by an open pull on one of its steps' head refs (lane_head_refs) unless
+    on main, or status done; a step off the record branch counts only by its trailer). It is held back by an open pull on one of its steps' head refs (lane_head_refs) unless
     that pull is a draft whose head sha is already in the default branch, and by an open waiting-page item whose
     `lane` is one of its steps, or whose `owner` is the session itself (the item is the lane's own question); only
-    status `closed` releases an item. A step missing from the record branch reads the lane unknown. When no live
+    status `closed` releases an item. When no live
     lane row of this repo carries a SESSION_BUCKETS name, the list reads unknown. `marks_why` is landed_marks' why:
-    when main could not be read, no step can be shown landed, so the list reads unknown."""
+    when main could not be read, no step can be shown landed, so the list reads unknown. `trailer_ids` is the set of
+    step ids named by a Step trailer on main; left out, it is read from main when a lane's step is off the record branch."""
     why = live_why(work)
     if why:
         return [why]
@@ -1334,22 +1338,31 @@ def idle_lanes(work, steps, marks, slug, repo, main_branch="main", marks_why=Non
         tags = [t.strip() for t in row["tags"] if isinstance(t, str)]
         if row["session_status"] == ARCHIVED_SESSION or row.get("status_bucket") not in IDLE_BUCKETS:
             continue
+        sid = row["id"]
         mine = sorted({t[len(STEP_TAG):].strip() for t in tags if t.startswith(STEP_TAG)} - {""})
         if not mine:
+            # The archive guard (hooks/guard_merge.py) refuses a lane with no cs-step tag, so archiving is not the act.
+            out.append("hold (no cs-step tag; lane %s)" % sid)
             continue
         absent = [k for k in mine if k not in steps]
-        if absent:
-            out.append("unknown (step %s not on the record branch; lane %s)" % (" ".join(absent), row["id"]))
+        if absent and trailer_ids is None:
+            found = step_trailers(repo, ref) if ref else None
+            trailer_ids = {t[0] for t in found} if found is not None else set()
+        unproven = [k for k in absent if k not in trailer_ids]
+        if unproven:
+            others = sorted({t for t in tags if t.startswith(REPO_TAG) and not repo_tag_names(t, slug)})
+            out.append("hold (step %s not on the record branch and no Step trailer on main%s; lane %s)" % (
+                " ".join(unproven), "; also tagged " + " ".join(others) if others else "", sid))
             continue
-        if any(steps[k].get("status") != "done" and k not in marks for k in mine):
+        if any(k in steps and steps[k].get("status") != "done" and k not in marks for k in mine):
             continue
         heads = {name for k in mine for name in lane_head_refs(k)}
         if any(p.get("branch") in heads and not head_landed(p) for p in work["pulls"]):
             continue
-        if any(r.get("lane") in mine or r.get("owner") == row["id"] for r in open_items):
+        if any(r.get("lane") in mine or r.get("owner") == sid for r in open_items):
             continue
         topic = next((t[len(TOPIC_TAG):].strip() for t in tags if t.startswith(TOPIC_TAG) and t[len(TOPIC_TAG):].strip()), "-")
-        out.append("%s (%s; topic %s)" % (row["id"], " ".join(mine), topic))
+        out.append("%s (%s; topic %s)" % (sid, " ".join(mine), topic))
     return sorted(out)
 
 
@@ -1414,7 +1427,9 @@ def upkeep(steps, added, marks, strays, work=None, slug=None, repo=None, main_br
             ("Step trailers naming no step", strays),
             ("live threads naming no open step", (work or {}).get("strays", [])),
             ("live file entries skipped", (work or {}).get("skipped", []))]
-    print("upkeep: " + "; ".join(f"{label}: {len(v)}" for label, v in rows))
+    # A hold line is shown, never counted as a lane to archive.
+    print("upkeep: " + "; ".join(
+        f"{label}: {len([x for x in v if not (label == IDLE_LANES_LINE and x.startswith('hold ('))])}" for label, v in rows))
     for label, v in rows:
         if v:
             print(f"  {label}: {', '.join(v)}")
