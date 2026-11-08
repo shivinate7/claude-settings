@@ -968,7 +968,9 @@ def case_powershell_bash_forms():
     for name, ps in (("a pipe to head", "git log | head -5"), ("a pipe to grep", "git log --oneline | grep -i fix"),
                      ("a leading NAME=value", "FOO=1 git push"),
                      ("a bracket test", "if [ -f x ]; then git push; fi"),
-                     ("a backslash line end", "git push origin \\\nmain")):
+                     ("a backslash line end", "git push origin \\\nmain"),
+                     ("a pipe to jq", "Get-Content x | jq ."), ("a pipe to less", "Get-Content x | less"),
+                     ("a double-bracket test", "if [[ -f x ]]; then git push; fi")):
         page("a PowerShell command with %s is refused as a bash operator" % name, "set",
              entry_of(ps_task(ps)), ("command-in-item", "bash operator"))
     # A backslash that ends the string, with no line after it, is a path or an argument: each passes.
@@ -978,6 +980,12 @@ def case_powershell_bash_forms():
     # A backslash with a line after it is a continuation, and refuses.
     page("a PowerShell dir with a continuation backslash and a line after it is refused as a bash operator", "set",
          entry_of(ps_task("dir \\\n-Force")), ("command-in-item", "bash operator"))
+    # A lone backslash argument is the drive root, a path, so a line that names a tool after it is no continuation.
+    page("a PowerShell cd to a lone backslash, then a line that names a tool, passes", "set",
+         entry_of(ps_task("cd \\\ntool x")), None)
+    # A backslash glued to a word (origin\) is a path end, not a continuation, and passes as it does today.
+    page("a PowerShell push with origin\\ then a line, the backslash glued to a word, passes as today", "set",
+         entry_of(ps_task("git push origin\\\nmain")), None)
     for name, ps in (("a Select-Object pipe", "Get-ChildItem | Select-Object -First 5"),
                      ("a PowerShell variable assignment", '$env:FOO = "1"; git push'),
                      ("a PowerShell if test", "if (Test-Path x) { git push }"),
@@ -1005,6 +1013,9 @@ def case_step_shell_programs_partial():
     page("a fence holding a chained terraform plan with a pipe stays a shell line", "set",
          entry_of(task_item(["Check the output:\n```\nterraform plan | tee plan.txt\n```"])),
          ("command-in-item", "shell line"))
+    # A program at a path is judged by its bare name, as `chmod` is alone: the word after the directory is the program.
+    page("a step holding `/usr/bin/chmod +x f` is refused as a shell line", "set",
+         entry_of(task_item(["Check the output of `/usr/bin/chmod +x f`"])), ("command-in-item", "shell line"))
 
 
 # ------------------------------------------------------------------ a question says how it departs from main
