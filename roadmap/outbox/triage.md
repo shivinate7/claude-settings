@@ -113,3 +113,6 @@ Checked Nov 2 12:58 CST: none of these is in docs/debts/notes.md on main. Triage
 - handoff-guard-any-md (lane handoff-sections-kept, #2320): guard.py judges any dot-free X.md in handoffs/, not only session ids.
 - handoff-guard-dotted-id (lane handoff-sections-kept, #2320): a session id with a dot is skipped.
 - handoff-guard-cost-untested (lane handoff-sections-kept, #2320): no test pins the one-prompt-read cost claim.
+- batch-fetch-lift-text (lane runner-drops-handed-lane, #2260 round 3, Decision: batch-body-names-handed): in handed_local, a failed fetch of the default branch raises a plain Stop, so the refusal says "No override lifts this refusal", though --undo-check-unknown-ok lifts it. Note batch-draft-lift-text's claim (confirm and preview reach the liftable refusal first) does not hold for this fetch. Fix: raise Liftable naming the flag.
+- batch-fetch-only-with-tip-untested (lane runner-drops-handed-lane, #2260 round 3, Decision: batch-body-names-handed): no test pins that the default-branch fetch runs only when the head merges a lane tip; an always-fetch mutant passes all 26 HandedLaneCheck cases.
+- batch-cost-doc-fetch (lane runner-drops-handed-lane, #2260 round 3, Decision: batch-body-names-handed): the decision's Cost section omits the default-branch fetch and the per-tip ancestry read; merge/merge.py's usage text states both.
