@@ -1,0 +1,30 @@
+{
+  "added": "2026-11-08T04:00:00Z",
+  "context": "Goal: no reviewed PR waits, and your own asks do not stall.\nProblem (rule): your 21:42 CST hold lets only the lanes that land the queue fixes start. It says nothing about lanes for asks you made yourself, so the coordinator needs your word.\nBased on (ruling): your words at 21:42 CST, \"ill allow holding off on spawning new lanes but u shd still be able to spawn the lanes that will result in these fixes landing\" (item 384; record lane-inflow-hold on PR #1768).\nDeparts from: main \u2014 adds your own asks to the lanes the hold lets start.\nMeanwhile: your asks wait, the stricter reading. One waits now: blank roadmap pages (your ask of Nov 4).",
+  "home": "pr-backlog-clear",
+  "id": "hold-covers-owner-asks",
+  "kind": "decision",
+  "n": 387,
+  "options": [
+    {
+      "gain": "Your asks land on time.",
+      "how": "A lane for an ask you made starts during the hold, as the queue-fix lanes do.",
+      "key": "a",
+      "label": "Your own asks still start (recommended)",
+      "lose": "More lanes feed the queue while it drains."
+    },
+    {
+      "gain": "The queue drains fastest.",
+      "how": "Only the queue-fix lanes start until you lift the hold.",
+      "key": "b",
+      "label": "They wait too",
+      "lose": "Your asks wait until you lift the hold."
+    }
+  ],
+  "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
+  "ref": "item 384 (lane-inflow-hold); PR #1768",
+  "short": "Your asks during the lane hold",
+  "status": "open",
+  "title": "Do your own asks still start new lanes during the hold?",
+  "why": "The coordinator recommends a: your asks are few, so they add little to the queue."
+}
