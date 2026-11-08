@@ -5785,6 +5785,36 @@ sh("check-tail: a nested $(dirname $(git rev-parse)) script path piped to tail i
 sh("check-tail: a one-token backtick script path piped to tail is refused",
    "python3 `pwd`/merge/merge.py --lane-lint 7 | tail -3", "deny", "check-tail", cwd=NOGIT)
 
+# --- a redirect-only segment, a redirect before the filter, and a commit inside a substitution (rule check-tail)
+#
+# `> out.txt` and `2>&1` are a redirect with no command after it. check_tail_hit once read past the end of
+# such a segment: the guard logged a crash and allowed the call, so every later rule was skipped, the
+# lint-then-commit gate included. Each allow below must print nothing. A crash also allows, so the log check
+# registered after LOG_CHECKS_EXTRA reads each command's guard.log for a guard-crash line.
+TAIL_REDIRECT_ONLY = (
+    ("a redirect alone", "> out.txt"),
+    ("a redirect after &&", "echo hi && > out.txt"),
+    ("a redirect append after ;", "true; >> log.txt"),
+    ("a 2>&1 alone", "2>&1"),
+    ("a redirect before uv run's command", "uv run >out"),
+    ("a redirect after a pipe", "cat f | > out.txt"),
+)
+for _name, _command in TAIL_REDIRECT_ONLY:
+    sh("check-tail: " + _name + " is no command, and is allowed", _command, "allow", cwd=NOGIT)
+TAIL_REDIRECT_THEN_COMMIT = ("a redirect segment, then a lint piped to tail and && a commit",
+                             "> x; python3 lint/ste_lint.py d.md | tail -2 && " + VCS + " commit -m m")
+sh("check-tail: " + TAIL_REDIRECT_THEN_COMMIT[0] + ", is refused", TAIL_REDIRECT_THEN_COMMIT[1],
+   "deny", "check-tail", cwd=NOGIT)
+# A redirect word between a pipe and its filter is skipped, so `| 2>/dev/null tail` still reads as tail.
+sh("check-tail: merge --lane-lint piped to a redirect word, then tail, is refused",
+   "merge --lane-lint 7 | 2>/dev/null tail -3", "deny", "check-tail", cwd=NOGIT)
+# A commit or a push inside `$(...)` is a follow-up of a lint piped to tail before it, as a commit outside is.
+sh("check-tail: a lint piped to tail, then && out=$(commit) in a substitution, is refused",
+   "python3 lint/ste_lint.py d.md | tail -2 && out=$(" + VCS + " commit -m m 2>&1)", "deny", "check-tail",
+   cwd=NOGIT)
+sh("check-tail: a lint piped to tail, then ; echo $(push) in a substitution, is refused",
+   "python3 lint/ste_lint.py d.md | tail -2; echo $(" + VCS + " push)", "deny", "check-tail", cwd=NOGIT)
+
 # A pipe out of verdict is refused whatever wraps the call (uv run, env VAR=x) and whatever follows
 # the pipeline (;, &&, ||), since the pipe hides verdict's exit. A verdict call with no pipe is allowed.
 verdict_pipe("env VAR=x then verdict merge --lane-lint piped to tail is refused",
@@ -14240,6 +14270,26 @@ LOG_CHECKS_EXTRA = _TaggedLogs([
 ])
 for _label, _check in LOG_CHECKS_EXTRA:  # the literal above is not appended: tag it here
     LOG_FAMILY.setdefault(_label, _family(_label))
+# The check-tail crash check, appended here because LOG_CHECKS_EXTRA is defined here. A crash allows the call,
+# so a decision row cannot see it: each command must log no guard-crash line. The run is pd_run, the one
+# guard-run step, which returns the decision and the guard.log rows of a run in a folder of its own.
+def tail_no_crash_case(index, command):
+    """check-tail: one guard run of `command` logs no guard-crash line (see TAIL_REDIRECT_ONLY)."""
+    def check():
+        decision, reason, rows = pd_run("tail-no-crash-%d" % index, {
+            "tool_name": "Bash", "tool_input": {"command": command}, "cwd": NOGIT})
+        if decision == "error":
+            return False, reason
+        crashes = [row[4] for row in rows if len(row) == 6 and row[2:4] == ["crash", "guard-crash"]]
+        if crashes:
+            return False, "the guard crashed and allowed the call: %s" % crashes[0]
+        return True, "no guard-crash line"
+    return check
+
+
+for _index, (_name, _command) in enumerate(TAIL_REDIRECT_ONLY + (TAIL_REDIRECT_THEN_COMMIT,)):
+    LOG_CHECKS_EXTRA.append(("check-tail: %s, the guard logs no crash" % _name,
+                             tail_no_crash_case(_index, _command)))
 # The base-copy cost check is appended here because LOG_CHECKS_EXTRA is defined here. Its family is the
 # base-copy section's, set by hand. MUTATE_ONLY="base copies" runs it.
 BASE_COPY_COST_LABEL = ("base copies: the pushed-copy read on the incident tree stays within its stated git "

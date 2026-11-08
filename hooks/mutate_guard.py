@@ -1927,6 +1927,11 @@ MUTATIONS = [
      '        index = _skip_redirects(tokens, start + at)\n',
      '        index = start + at\n',
      "guard", 'a 2>/dev/null redirect after uv run'),
+    # A redirect word between a pipe and its filter is skipped before the filter word is read.
+    ('check-tail lint: a redirect word between a pipe and its filter is skipped',
+     '            at = _skip_redirects(tokens, at)\n',
+     '',
+     "guard", 'check-tail: merge --lane-lint piped to a redirect word, then tail, is refused'),
     ('check-tail: a substitution is not read as its own text',
      '    texts = [_pipelines(text) for text, _in_message in texts]\n',
      '    texts = [_pipelines(stripped)]\n',
