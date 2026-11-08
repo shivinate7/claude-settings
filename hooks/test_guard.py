@@ -12298,6 +12298,77 @@ sh("frozen form gap: python -c that opens a frozen hook joined by a bound + then
    "python3 -c 'import os; h = os.path.expanduser(\"~\"); p = h + \"/.claude\"; p += \"/hooks/x.py\"; "
    "open(p, \"w\")'", "deny", "frozen-path", cwd=NOGIT, env=TILDE_ENV)
 
+# A LOOP THAT REBINDS A NAME. Each pass writes through the value the name holds on that pass, and the read
+# after the loop goes through the last binding. Both bindings are frozen, so each write is denied. The `+=`
+# form rebinds the name to a longer path under the same folder, so it is denied the same way.
+sh("frozen form gap: python -c that rebinds a frozen path in a loop, then reads it, is denied",
+   "python3 -c 'import json, os\n"
+   "h = os.path.expanduser(\"~\")\n"
+   "p = h + \"/.claude/hooks/x.py\"\n"
+   "for i in range(2): open(p, \"w\"); p = h + \"/.claude/hooks/y.py\"\n"
+   "json.load(open(p))'",
+   "deny", "frozen-path", cwd=NOGIT, env=TILDE_ENV)
+sh("frozen form gap: python -c that appends to a frozen path in a loop, then reads it, is denied",
+   "python3 -c 'import json, os\n"
+   "h = os.path.expanduser(\"~\")\n"
+   "p = h + \"/.claude/hooks/x.py\"\n"
+   "for i in range(2): open(p, \"w\"); p += \"/x\"\n"
+   "json.load(open(p))'",
+   "deny", "frozen-path", cwd=NOGIT, env=TILDE_ENV)
+
+# A LOOP WHOSE FIRST BINDING IS OUTSIDE THE FROZEN FOLDER. Pass one writes /tmp/a, which is allowed. Pass
+# two writes through the name's second binding, a frozen path, so the write is denied. A judge that reads
+# only the first binding at the write site lets the second pass through.
+sh("frozen form gap: python -c that writes a frozen path on the second pass of a loop, after a rebind from /tmp, is denied",
+   "python3 -c 'import json, os\n"
+   "h = os.path.expanduser(\"~\")\n"
+   "p = \"/tmp/a\"\n"
+   "for i in range(2): open(p, \"w\"); p = h + \"/.claude/hooks/y.py\"\n"
+   "json.load(open(p))'",
+   "deny", "frozen-path", cwd=NOGIT, env=TILDE_ENV)
+
+# A FORMAT CALL THAT RAISES. A str.format with more slots than arguments raises while the scanner reads
+# it, so the write on the next line must still be judged. The control row is that write with no format
+# line before it, and it is denied already.
+sh("frozen form gap: python -c that opens a frozen hook after a format call with too few arguments is denied",
+   "python3 -c 'import os\n"
+   "h = os.path.expanduser(\"~\")\n"
+   "a = \"x\"\n"
+   "\"{}{}{}\".format(a)\n"
+   "open(h + \"/.claude/hooks/x.py\", \"w\")'",
+   "deny", "frozen-path", cwd=NOGIT, env=TILDE_ENV)
+sh("frozen form gap: python -c that opens a frozen hook joined from expanduser, with no format line, is denied",
+   "python3 -c 'import os\n"
+   "h = os.path.expanduser(\"~\")\n"
+   "open(h + \"/.claude/hooks/x.py\", \"w\")'",
+   "deny", "frozen-path", cwd=NOGIT, env=TILDE_ENV)
+
+# A STAR ARGUMENT INTO str.format. The frozen folder is built by a format whose one argument is unpacked
+# from a list, so the write is to a new file in the frozen hooks folder and is denied.
+sh("frozen form gap: python -c that opens a frozen hook joined by format with star args is denied",
+   "python3 -c 'import os; h = os.path.expanduser(\"~\"); "
+   "open(\"{}/.claude/hooks/x.py\".format(*[h]), \"w\")'",
+   "deny", "frozen-path", cwd=NOGIT, env=TILDE_ENV)
+
+# A READER THAT WRITES. less -o and file -C each write a file named by a path argument, so a frozen hook
+# as that argument is a write. The read-only pairs are allowed below.
+sh("frozen form gap: python -c that runs less -o onto a frozen hook through subprocess is denied",
+   "python3 -c 'import os, subprocess; h = os.path.expanduser(\"~\"); "
+   "subprocess.run([\"less\", \"-o\", h + \"/.claude/hooks/x.py\", \"src\"])'",
+   "deny", "frozen-path", cwd=NOGIT, env=TILDE_ENV)
+sh("frozen form gap: python -c that runs file -C -m on a frozen hook through subprocess is denied",
+   "python3 -c 'import os, subprocess; h = os.path.expanduser(\"~\"); "
+   "subprocess.run([\"file\", \"-C\", \"-m\", h + \"/.claude/hooks/x.py\"])'",
+   "deny", "frozen-path", cwd=NOGIT, env=TILDE_ENV)
+
+# A SHELL WRITE RUN BY A SUBPROCESS. sh -c runs the redirect, so the frozen hook named inside the shell
+# string is a write. The control row is the same redirect run directly, and it is denied already.
+sh("frozen form gap: python -c that runs sh -c with a redirect onto a frozen hook through subprocess is denied",
+   "python3 -c 'import subprocess; subprocess.run([\"sh\", \"-c\", \"cat x > ~/.claude/hooks/x.py\"])'",
+   "deny", "frozen-path", cwd=NOGIT, env=TILDE_ENV)
+sh("frozen form gap: a plain cat redirect onto a frozen hook through ~ is denied",
+   "cat x > ~/.claude/hooks/x.py", "deny", "frozen-path", cwd=NOGIT, env=TILDE_ENV)
+
 # FALSE ALARMS. A frozen guard path that a script prints, names, runs as a subprocess argument, loads as a
 # module spec, compares, splits or relates is a read of that path, so each is allowed.
 sh("frozen form: python -c that prints the parent of a Path.home() join under .claude is allowed",
@@ -12334,6 +12405,13 @@ sh("frozen form gap: python -c that compiles a frozen guard path with py_compile
 sh("frozen form gap: python -c that reads a frozen settings path by a bound name, then rebinds it, is allowed",
    "python3 -c 'import json; p = \"~/.claude/settings.json\"; json.load(open(p)); p = \"/tmp/o\"; open(p, \"w\")'",
    "allow", cwd=NOGIT, env=TILDE_ENV)
+# The read-only pair of the less -o and file -C rows above: the same frozen argument, with no write flag.
+sh("frozen form gap: python -c that runs less on a frozen hook through subprocess is allowed",
+   "python3 -c 'import os, subprocess; h = os.path.expanduser(\"~\"); "
+   "subprocess.run([\"less\", h + \"/.claude/hooks/x.py\"])'", "allow", cwd=NOGIT, env=TILDE_ENV)
+sh("frozen form gap: python -c that runs file on a frozen hook through subprocess is allowed",
+   "python3 -c 'import os, subprocess; h = os.path.expanduser(\"~\"); "
+   "subprocess.run([\"file\", h + \"/.claude/hooks/x.py\"])'", "allow", cwd=NOGIT, env=TILDE_ENV)
 
 # --------------------------------------------------------------------------- frozen dup: a descriptor dup
 #
