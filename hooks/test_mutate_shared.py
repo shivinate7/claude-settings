@@ -1071,6 +1071,18 @@ class GuardSuiteListTests(unittest.TestCase):
         self.assertNotEqual(code, 0, "a FAIL from test_guard_zz.py left the guard run's exit at 0, so a mutant it "
                                      "kills reads as a survivor")
 
+    def test_a_fail_from_the_first_file_reaches_the_red_lines(self):
+        _started, (_code, red, _ran, _diag) = self.guard_run(("test_guard.py", "test_guard_zz.py"),
+                                                             fail_in="test_guard.py")
+        self.assertTrue(any("test_guard.py" in line for line in red),
+                        "a FAIL printed only by test_guard.py did not reach run_suite's red lines: %r" % red)
+
+    def test_a_fail_from_the_first_file_makes_the_run_exit_nonzero(self):
+        _started, (code, _red, _ran, _diag) = self.guard_run(("test_guard.py", "test_guard_zz.py"),
+                                                             fail_in="test_guard.py")
+        self.assertNotEqual(code, 0, "a FAIL from test_guard.py left the guard run's exit at 0, so a mutant it "
+                                     "kills reads as a survivor")
+
     def test_control_a_single_file_fail_reaches_the_red_lines(self):
         started, (code, red, _ran, _diag) = self.guard_run(("test_guard.py",), fail_in="test_guard.py")
         self.assertEqual(started, ["test_guard.py"], "a one-file guard run must start that one file: started %r" % started)
