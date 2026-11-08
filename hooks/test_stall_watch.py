@@ -1341,10 +1341,10 @@ def same_line_pipe_forms_read_the_start_folder():
 
 @posix_case
 def backslash_newline_after_and_continues_the_list():
-    """27q. a backslash-newline after && continues the list, so the cd after it is read and its log resolves in the cd's folder"""
+    """27q. a backslash-newline after && is whitespace, so the continued form reads like the single-line form: a cd after a && command leaves the log's folder unknown"""
     problems = read_rows_problems([
-        ("export A=1 && \\\n cd /x && \\\n make > log", ["/x/log"], []),
-        ("export A=1 && \n cd /x && \n make > log", ["/x/log"], []),  # control: a newline with no backslash
+        ("export A=1 && \\\n cd /x && \\\n make > log", [], ["log"]),
+        ("export A=1 && \n cd /x && \n make > log", ["/x/log"], []),  # control: a newline with no backslash starts a list item, so its cd is read
     ])
     for shell in ("/bin/sh", "/bin/bash"):  # the premise: the continuation joins the lines, so the cd runs in x
         got = log_folders_after(shell, "export A=1 && \\\n cd x && \\\n make > log")
