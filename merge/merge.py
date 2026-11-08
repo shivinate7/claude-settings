@@ -3084,6 +3084,7 @@ def review_marked(text):
 
 
 _stamp_since = {}
+REVIEW_RACE_TRIES = 3  # the cutover's log and its boundary reads must agree within this many tries, or the read stops
 REVIEW_DEEPEN_STEP, REVIEW_DEEPEN_TRIES = 100, 3  # a shallow clone whose first salt commit is the boundary deepens 100 commits at a time, at most 3 times, then stops
 _default_branch = {}
 
@@ -3134,7 +3135,7 @@ def review_stamp_since(root, base):
     `REVIEW_STAMP_SALT =`, or None when the read ran and found none. It reads the default branch (host_default_branch), never the PR's `base`: the stamp
     merged into the default branch, and a stacked base may lack that commit, which would read every unstamped record as old. A read that cannot run
     (git errors, no origin/<default branch> ref, a shallow clone whose first salt commit is still the boundary after REVIEW_DEEPEN_TRIES deepens of
-    REVIEW_DEEPEN_STEP commits or whose deepen fetch fails, or a shallow file that cannot be read) raises Stop naming it, never None: an unknown cutover must not read every unstamped record as old
+    REVIEW_DEEPEN_STEP commits or whose deepen fetch fails, a boundary that changes on each of REVIEW_RACE_TRIES reads, or a shallow file that cannot be read) raises Stop naming it, never None: an unknown cutover must not read every unstamped record as old
     (rule verification-report-unknown-reads). The caller fetches first (fetch_default_branch). One call per (root, `base`) in a process. A record
     created before this time may carry no Stamp line."""
     # `base` is only a cache key, since the answer reads the default branch. It stays because both callers and their test doubles pass it.
@@ -3142,11 +3143,21 @@ def review_stamp_since(root, base):
     if key not in _stamp_since:
         default = default_branch_once(root)
         for deepened in range(REVIEW_DEEPEN_TRIES + 1):
-            c, out = git(root, "log", "--first-parent", "--reverse", "-S", "REVIEW_STAMP_SALT =", "--format=%H %ct", f"origin/{default}", "--", "merge/merge.py")
-            if c:
-                raise Stop(f"could not read origin/{default} to find the review stamp cutover (git log exited {c}): {out[:300]}. Fetch origin, then run the command again. " + REVIEW_CITE)
+            # Another process may deepen this clone between the log and the boundary read, which would pair the log's old history with a new boundary.
+            # Read the boundary before and after the log, and run the log again until the two reads agree.
+            for _ in range(REVIEW_RACE_TRIES):
+                before = shallow_boundary(root)
+                c, out = git(root, "log", "--first-parent", "--reverse", "-S", "REVIEW_STAMP_SALT =", "--format=%H %ct", f"origin/{default}", "--", "merge/merge.py")
+                if c:
+                    raise Stop(f"could not read origin/{default} to find the review stamp cutover (git log exited {c}): {out[:300]}. Fetch origin, then run the command again. " + REVIEW_CITE)
+                boundary = shallow_boundary(root)
+                if boundary == before:
+                    break
+            else:
+                raise Stop(f"another process kept changing this clone's shallow boundary while the review stamp cutover was read ({REVIEW_RACE_TRIES} reads disagreed). "
+                           "Wait for it to finish, then run the command again. " + REVIEW_CITE)
             first = out.split()[:2]
-            if not (first and first[0] in shallow_boundary(root)):
+            if not (first and first[0] in boundary):
                 break
             # The first salt commit is the boundary: its parent is missing, so an older salt commit may exist and the cutover is unknown. Deepen, then read again.
             if deepened == REVIEW_DEEPEN_TRIES:
@@ -3155,7 +3166,8 @@ def review_stamp_since(root, base):
             fc, fout = fetch_branch(root, default, deepen=REVIEW_DEEPEN_STEP)
             if fc:
                 raise Stop(f"origin/{default} is a shallow history, too shallow to read the review stamp cutover: the first commit holding the salt, {first[0][:9]}, is the shallow boundary, "
-                           f"and the deepen fetch failed (git fetch exited {fc}): {fout[:300]}. Run `git fetch --unshallow origin`, then run the command again. " + REVIEW_CITE)
+                           f"and the fetch that deepens it by {REVIEW_DEEPEN_STEP} commits (`git fetch --deepen={REVIEW_DEEPEN_STEP} origin`) failed (git exited {fc}): {fout[:300]}. "
+                           "Run the command again to retry the fetch. If it keeps failing, `git fetch --unshallow origin` fetches the full history instead. " + REVIEW_CITE)
         _stamp_since[key] = (datetime.datetime.fromtimestamp(int(first[1]), datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
                              if len(first) == 2 and first[1].isdigit() else None)
     return _stamp_since[key]
