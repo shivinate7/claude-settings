@@ -126,14 +126,17 @@ def _mac_write(entry):
 def cloud_twin(tool, tool_input):
     """(tool, tool_input) of the cloud call a Mac artifact call stands for. Any other call, and a Mac call whose input
     is not the shape item 440 gives, comes back unchanged. One db_write op becomes a single write, several a cloud
-    batch. Assumed, not in item 440: a db_query input carries `collection` or `path` (any other key is kept as is);
-    a publish_files names its page by the `files` entry whose `as` is index.html, else the first entry with a path."""
+    batch; a non-dict op is skipped, as the cloud judges skip a non-dict write. Assumed, not in item 440: a db_query
+    input carries `collection` or `path` (any other key is kept as is); a publish_files names its page by the `files`
+    entry whose `as` is index.html, else the first .html path, else the first entry with a path."""
     if not isinstance(tool, str) or not isinstance(tool_input, dict):
         return tool, tool_input
     twin = _mac_url(tool_input)
     if tool in MAC_PAGE_TOOLS:
         files = [f for f in tool_input.get("files") or [] if isinstance(f, dict) and isinstance(f.get("path"), str)]
-        page = next((f for f in files if f.get("as") == "index.html"), files[0] if files else None)
+        page = (next((f for f in files if f.get("as") == "index.html"), None)
+                or next((f for f in files if f["path"].lower().endswith(".html")), None)
+                or (files[0] if files else None))
         twin.update({key: tool_input[key] for key in ("title", "icon") if key in tool_input})
         if page:
             twin["file_path"] = page["path"]
@@ -143,9 +146,9 @@ def cloud_twin(tool, tool_input):
     name = tool[len(MAC_PREFIX):]
     if name == "db_write":
         ops = tool_input.get("ops")
-        if not isinstance(ops, list) or not all(isinstance(o, dict) for o in ops):
+        writes = [_mac_write(o) for o in ops if isinstance(o, dict)] if isinstance(ops, list) else []
+        if not writes:
             return tool, tool_input
-        writes = [_mac_write(o) for o in ops]
         if len(writes) == 1:
             write = writes[0]
             twin.update(action=write.pop("op"), **write)
