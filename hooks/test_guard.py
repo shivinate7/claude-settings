@@ -8066,6 +8066,24 @@ sh("env: a smart-double-quoted bare .env closed by a straight quote, denies",
 sh("env: a smart-double-quoted folder with a space inside a backslash path, denies",
    "Get-Content C:\\" + SMART_DQ + "My Dir" + SMART_DQ_END + "\\" + ENV, "deny", "env-file",
    tool="PowerShell", cwd=NOGIT)
+# The straight-quote twin of the case above. PowerShell joins the bare `C:\`, the quoted `My Dir` and the
+# `\.env` after it into one path, so this reads the file. The straight marks must deny as the smart ones do.
+sh("env: a straight-quoted folder with a space inside a backslash path, denies",
+   'Get-Content C:\\"My Dir"\\' + ENV, "deny", "env-file", tool="PowerShell", cwd=NOGIT)
+# PowerShell has no backslash escape: the `\"` after `My Dir\` closes the string, so the .env read after
+# the `;` is a real read. Bash reads `\"` as an escaped quote, so the same text is one word, `C:\My Dir" ;
+# cat .env ` (POSIX double-quote rule), and no shell command reads the file. Bash is pinned to allow.
+sh("env: PowerShell: a backslash before the closing quote ends the string, then Get-Content .env, denies",
+   'Get-Content "C:\\My Dir\\" ; Get-Content ' + ENV, "deny", "env-file", tool="PowerShell", cwd=NOGIT)
+sh("env: Bash: an escaped quote keeps the .env between the quotes in one word, allowed",
+   'cat "C:\\My Dir\\" ; cat ' + ENV + ' "', "allow", cwd=NOGIT)
+# Get-Content takes its argument as a path, never a pattern, so a relative backslash path to a dot file
+# that Claude could write to read a subfolder's .env denies. Text and a read command differ by position,
+# so the head alone is not the test. The forward-slash form is the control: it denies already.
+sh("env: PowerShell: a quoted relative backslash path with a space to .env, denies",
+   'Get-Content "My Dir\\' + ENV + '"', "deny", "env-file", tool="PowerShell", cwd=NOGIT)
+sh("env: PowerShell: a quoted relative forward-slash path with a space to .env, denies (the control)",
+   'Get-Content "My Dir/' + ENV + '"', "deny", "env-file", tool="PowerShell", cwd=NOGIT)
 
 sh("env: ls reads no contents", "ls " + ENV, "allow", cwd=NOGIT)
 sh("env: test -f reads no contents", "test -f " + ENV, "allow", cwd=NOGIT)
