@@ -62,9 +62,9 @@
 - ghlock-no-compare-and-swap: GitHub API has no compare-and-swap; an expiring lock between read and PATCH could overwrite a rival's lock (merge/merge.py GhLock)
 - git-env-glued-block: a glued PowerShell block opener followed by a group hides a git-env set from the guard (hooks/guard_kill.py)
 - git-env-lower-case-fold: lower-case git env names fold to the rule; no record names this as accepted (guard hooks)
+- git-env-set-false-alarms: `Write-Host {$env:GIT_DIR=1}` is refused, though the block is only printed (hooks/guard_kill.py `_open_script_blocks`). Decision: git-env-set-refused. Fix: none — a printed block can run later or through a pipe, and no narrow rule kept every running form refused
 - git-env-set-indirect-forms: indirect sets (function wrapper, iex, EncodedCommand, run-time names) pass the git-env guard (hooks/guard_kill.py)
 - git-env-set-untested-forms: no case pins the PowerShell backtick escape, group-opener pattern or heredoc quote text (hooks/test_guard.py)
-- git-env-stored-printed-block: a printed block stored and never called (`$b = Write-Output {...}` with a set inside) is refused by git-env, as on main, while the waiter allows the same shape. Fix: none — the narrowest change passes no later text to the git-env walk; refusing is the safe side, and no case asks for the allow (hooks/guard_core.py block_is_printed)
 - git-env-try-two-scrubs: `try{$env:GIT_DIR=$null; $env:GIT_WORK_TREE=$null}catch{}` is still refused. The trigger is a block with a `;` and two sets, whose `}` is glued to the second value. The same block with no `catch` is refused too. A space before `}` passes. A false alarm on main too. Where: hooks/guard_kill.py `_open_script_blocks`. Decision: git-env-set-refused. Fix: none — rare and harmless
 - wsl-literal-bracket-path: `wsl -e node app/[id]/x.test.mjs` is refused. A literal `[` or `]` in a test path reads as a glob. Where: hooks/guard_wsl.py `_literal_test_path`. Decision: wsl-allow-list. Fix: none — rare and harmless
 - git-env-warn-session-start: the git env warning runs at session start only, so mid-session damage shows at next start (guard hooks)
@@ -498,6 +498,9 @@
 - waiter-subshell-bodies-unparsed: bash -c bodies and subshells such as (sleep 30) and $(sleep 30) are not parsed. the owner accepted this. Decision: agents-wait-with-monitor
 - waiter-sleep-multi-arg-reads-first: sleep 20 20 reads as 20 s, not 40 s, and passes. an agent may still burn up to 25 s per call on one pause. Decision: agents-wait-with-monitor
 - waiter-loop-flag-spans-command: the loop flag spans the whole command, so a pause after any unrelated loop is refused. a loop with no loop word, such as a PowerShell ForEach with Start-Sleep, is unseen. Decision: agents-wait-with-monitor
+- waiter-watch-false-alarms: `echo {sleep}` is refused, though the block is only printed (hooks/guard_stream.py `waiter_verdict`). Decision: agents-wait-with-monitor. Fix: none — a printed block can run later or through a pipe, and no narrow rule kept every running form refused
+- gh-checks-r-watch-value: `gh pr checks 5 -R --watch` is refused because `-R` takes `--watch` as its value. Refused by design (hooks/guard_stream.py). Decision: agents-wait-with-monitor. Fix: none — rare and harmless
+- pointer-detach-start-hook-mismatch: hooks/session_start.sh:179 counts a detach at main as on main, while the pointer guard refuses that detach (hooks/guard_pointer.py). Decision: recovery-independent-of-state, Rule 1b. Fix: none — owner decides
 - main-protection-skipped-job-passes: a skipped job counts as passing, so a draft run that skips satisfies every required check. the merge tool refuses that head, GitHub does not. Decision: main-branch-protection
 - main-protection-strict-false: strict is false, so a PR green on an old base can merge over a newer main. the merge tool read and CI on main after the push cover it. Decision: main-branch-protection
 - frozen-var-open-value-shapes: rule 7 misses a variable value built by $(...), backticks, read, ${D:-x}, a loop variable or eval, and a variable set in another tool call. Decision: frozen-path-resolves-shell-vars

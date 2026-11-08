@@ -20,7 +20,7 @@ except ImportError:  # same fallback as _nowindow above: no read, so a PPID-1 pi
 
 from guard_core import (
     QUOTE_MARKS,
-    ASSIGNMENT, CMD_EXE_NAMES, ENV_PATTERN_COMMANDS, PLAYWRIGHT_PS_SHELLS, block_is_printed,
+    ASSIGNMENT, CMD_EXE_NAMES, ENV_PATTERN_COMMANDS, PLAYWRIGHT_PS_SHELLS,
     POWERSHELL_CALL, PowerShellScript, SILENT_WRITE_REDIRECT, _pwsh_script, _skip_assignments_and_keywords,
     _split_heredocs, _strip_heredoc_bodies_unconditionally, basename, inline_script,
     resolve_command, segment_tokens, split_segments,
@@ -701,21 +701,16 @@ _PS_BLOCK_OPEN = re.compile(r"[&.]?\{|[&.$@]?\(")
 _PS_GLUED_BRACE = re.compile(r"(?<!\$)\{")
 
 
-def _open_script_blocks(tokens, piped=False):
+def _open_script_blocks(tokens):
     """Split each glued script block or paren group (`{$env:X=1}`, `&{...}`, `($env:X=1)`) into
     its opener and its body, after any token: `if (...) {...}`, `ForEach-Object {...}`,
     `try {...}`. A token that starts inside quotes (`'{$env:X=1}'`, `tokens.quoted`) is text and
-    stays whole, and so does a glued block handed to a printing cmdlet (`Write-Host {...}`) that
-    prints it and never runs it (`block_is_printed`: not piped onward, not stored, no call on
-    the block).
-    Known ceiling: an unquoted block passed as an argument to
-    any other command, or spaced from its braces (`Write-Host { ... }`), is read as code too, a
-    false deny, the safe side."""
+    stays whole. Known ceiling: an unquoted block passed as a plain argument (`Write-Host {...}`)
+    is read as code too, a false deny, the safe side."""
     quoted = getattr(tokens, "quoted", ())
     out = []
     for i, tok in enumerate(tokens):
-        if i in quoted or (len(tok) > 1 and tok[0] == "{" and tok[-1] == "}" and i and i - 1 not in quoted
-                           and block_is_printed(tokens, i - 1, piped)):
+        if i in quoted:
             out.append(tok)
             continue
         while (opens := _PS_BLOCK_OPEN.match(tok)) and len(tok) > opens.end():
@@ -737,13 +732,13 @@ def _open_script_blocks(tokens, piped=False):
     return out
 
 
-def _ps_env_set(tokens, watch, piped=False) -> str:
+def _ps_env_set(tokens, watch) -> str:
     """Return the matched text when a PowerShell statement sets a watched name in the process
     environment, else ''. Reads the statement's own tokens, so a name inside quoted text, which
     is one token, never fires. A statement starts at the first token, or after `{`, `(` or `&`.
     `$env:X = $null` and an empty value unset the name and pass."""
     alt = "|".join(map(re.escape, watch[0]))
-    tokens = _open_script_blocks(tokens, piped)
+    tokens = _open_script_blocks(tokens)
     start = _skip_assignments_and_keywords(tokens)
     for i, tok in enumerate(tokens):
         if i != start and not (i and (tokens[i - 1] in ("{", "(", "&") or tokens[i - 1].endswith("{"))):
@@ -885,13 +880,12 @@ def _playwright_tokens_hit(tokens, depth=0, install=None, watch=PLAYWRIGHT_WATCH
 
 
 def playwright_path_hit(segment: str, depth=0, to_file=False, ps_inner=False,
-                        install=None, watch=PLAYWRIGHT_WATCH, piped=False) -> str:
+                        install=None, watch=PLAYWRIGHT_WATCH) -> str:
     """Return the matched text when a segment sets a watched name (PLAYWRIGHT_BROWSERS_PATH
     unless `watch` names others), else ''.
 
     `to_file` says the segment's output goes to a profile (a `tee` further down the pipe). The
-    file-write form counts only when the written text starts with the assignment. `piped` says the
-    segment's output goes down a pipe, so a block it prints may run in the next segment.
+    file-write form counts only when the written text starts with the assignment.
     """
     tokens = segment_tokens(segment) or []
     if watch is not PLAYWRIGHT_WATCH and segment_tokens(segment) is None:
@@ -912,7 +906,7 @@ def playwright_path_hit(segment: str, depth=0, to_file=False, ps_inner=False,
     if (POWERSHELL_CALL[0] or outer_ps or ps_inner) and word not in (
             ENV_PATTERN_COMMANDS + PLAYWRIGHT_PS_READERS):
         if watch is not PLAYWRIGHT_WATCH:
-            hit = _ps_env_set(tokens, watch, piped)
+            hit = _ps_env_set(tokens, watch)
             if hit:
                 return hit
         found = PLAYWRIGHT_PS_SET.search(segment) if watch is PLAYWRIGHT_WATCH else None
@@ -936,10 +930,8 @@ def playwright_path_hit(segment: str, depth=0, to_file=False, ps_inner=False,
 def playwright_command_hit(raw: str, stripped: str, watch=PLAYWRIGHT_WATCH) -> str:
     """Judge a whole command: each segment, plus a profile-bound heredoc body and `tee` pipe."""
     to_file = bool(re.search(r"\btee\b[^|;&]*" + PLAYWRIGHT_PROFILE.pattern, stripped))
-    ends = []
-    for at, segment in enumerate(split_segments(stripped, ends)):
-        matched = playwright_path_hit(segment, to_file=to_file, watch=watch,
-                                      piped=at < len(ends) and ends[at] == "|")
+    for segment in split_segments(stripped):
+        matched = playwright_path_hit(segment, to_file=to_file, watch=watch)
         if matched:
             return matched
     for _, body, header in _split_heredocs(raw)[1]:

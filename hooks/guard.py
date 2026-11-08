@@ -3444,8 +3444,7 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
         if matched:
             refuse(tool, "deny", "live-stream", LIVE_STREAM_REASON, matched)
         poller = loop_condition_polls_a_pattern(segment) or poller
-    ends = []
-    matched = waiter_verdict(split_segments(stripped, ends), background, ends)
+    matched = waiter_verdict(split_segments(stripped), background)
     if matched:
         if poller:
             refuse(tool, "deny", "waiter", PATTERN_POLLER_REASON, poller + " " + matched)
