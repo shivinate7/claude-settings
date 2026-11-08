@@ -2632,6 +2632,27 @@ class NotesUnionRevival(unittest.TestCase):
                 self.assertIn(self.GAMMA_NEW, rows, "premise: the rewrite is in the final head")
                 self.assert_fails_naming(r, head, self.GAMMA)
 
+    def test_a_git_without_check_attr_source_is_unknown_not_a_pass_or_a_crash(self):
+        r, head = self.build(self.PATH, self.ROWS[:2], self.ROWS + [self.NEW], ("A", "B"))
+        self.assertIn(self.GAMMA, self.rows_at(r, head, self.PATH), "premise: the union merge revived the deleted row")
+        real, hits = C.git, []
+
+        def old_git(cwd, *a, **k):  # a git below 2.40 refuses check-attr --source; every other call is real
+            if a and a[0] == "check-attr":
+                hits.append(a)
+                raise C.Unknown("git check-attr failed: unknown option: --source")
+            return real(cwd, *a, **k)
+
+        with unittest.mock.patch.object(C, "git", old_git):
+            with self.assertRaises(C.Unknown) as caught:
+                C.check(r.dir, "origin/main", head)
+            rc, text = PrintedFindings.run_main(self, ["--upstream", "origin/main", "--head", head, "--repo", r.dir, "--strict"], "utf-8")
+        self.assertTrue(hits, "premise: the union read reached check-attr")
+        self.assertIn("git 2.40", str(caught.exception), "the Unknown does not name the git floor")
+        self.assertEqual(rc, 1, "an unreadable union read does not exit 1 under --strict")
+        self.assertIn("UNKNOWN", text, "the printed verdict is not UNKNOWN")
+        self.assertIn("git 2.40", text, "the printed UNKNOWN does not name the git floor")
+
 
 if __name__ == "__main__":
     unittest.main()
