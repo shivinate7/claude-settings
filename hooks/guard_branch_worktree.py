@@ -6,7 +6,8 @@ Other files reach these names through `guard`.
 import shlex
 
 from guard_core import (
-    branch_is_empty, resolve_default_base,
+    _git, branch_is_ancestor, branch_is_empty, branch_on_remote, design_files,
+    resolve_default_base,
 )
 
 
@@ -49,6 +50,116 @@ def branch_delete_subject(args, where: str):
         if empty is False:
             return False
     return True
+
+
+# A design file on a branch's tip is the only copy of that file when no ref on origin holds the tip
+# (the incident: an unmerged design branch deleted, with its picked mockup). A local delete leaves
+# origin's copy, so it is judged only when the default branch cannot be read (rule shared-trees-
+# archive-then-delete). A remote delete removes origin's copy, so a tip that is on the default
+# branch, or that any `archive/*` ref on origin holds, keeps the file; a tip it cannot read asks.
+# The tip is the last-fetched tracking ref. `<branch>` is a placeholder (rule git-remedy-never-names-target).
+_ARCHIVE_REMEDY = (
+    "Remedy: push the branch to an archive name first, `git push origin "
+    "<branch>:refs/heads/archive/<branch>`, with <branch> the branch you are deleting, never "
+    "with force. Once the archive holds the tip, this rule allows the delete. Nothing is lost, "
+    "so this needs no question to the owner."
+)
+DESIGN_DELETE_REFUSE_REASON = (
+    "Archive before delete (rule shared-trees-archive-then-delete): the tip of this remote branch holds a file under "
+    "the design folder that the default branch lacks, and no archive branch on origin holds that "
+    "tip. Deleting the branch loses the file. " + _ARCHIVE_REMEDY
+)
+DESIGN_DELETE_ASK_REASON = (
+    "Archive before delete (rule shared-trees-archive-then-delete): a read that says whether this "
+    "branch's design file survives the delete did not answer (the branch tip, its design files, "
+    "the archive refs or the default branch). " + _ARCHIVE_REMEDY
+)
+
+
+def _tip_of(where: str, *refs):
+    """The commit id of the first of `refs` that resolves, else None (none does, or git failed)."""
+    for ref in refs:
+        answer = _git(where, "rev-parse", "--verify", "--quiet", ref + "^{commit}")
+        if answer is None:
+            return None
+        if answer.returncode == 0 and answer.stdout.strip():
+            return answer.stdout.strip()
+    return None
+
+
+def _is_tag(where: str, name: str) -> bool:
+    """True when `refs/tags/<name>` resolves. False when it does not, or git cannot answer."""
+    answer = _git(where, "rev-parse", "--verify", "--quiet", "refs/tags/" + name)
+    return answer is not None and answer.returncode == 0
+
+
+def design_branch_delete_ask(args, where: str, folder) -> bool:
+    """True when a `git branch -d/-D` names a branch whose tip holds a design file, no remote ref
+    holds that tip, and the default branch is unreadable. Callers send only a call whose subject
+    read came back unreadable. An unread design folder (FOLDER None) asks for any named branch,
+    since no design file can be told from none. A read that fails here is False: the unread note
+    stays."""
+    if not folder:
+        # An unread design folder cannot tell a design file from none: it asks, never allows.
+        return bool(branch_delete_names(args))
+    for name in branch_delete_names(args):
+        tip = _tip_of(where, "refs/heads/" + name)
+        if tip is None:
+            continue
+        files = design_files(where, tip, folder, resolve_default_base(where))
+        if files and branch_on_remote(where, tip) is False:
+            return True
+    return False
+
+
+def design_push_delete_verdict(where: str, remote: str, names, folder) -> str:
+    """'deny', 'ask' or '' for a push that deletes `names` on `remote`. A name counts when its tip
+    (the remote-tracking ref, else the local branch) is not on the default branch, holds a file
+    under `folder` that the default branch lacks, and no `archive/*` ref on the remote holds the
+    tip. A tip that does not resolve, a failed read of the design files or of the archive refs, an
+    unreadable default branch and an unread design folder (FOLDER None) each ask: the delete
+    removes origin's copy, so an unread tip never allows. Only a delete pushed to `origin` is judged; another remote keeps the other push rules.
+    A name with no tip that is a local tag is skipped: a tag is not a branch. The default branch is
+    read at the first resolved tip, so a name with no tip starts no git beyond the tip and tag
+    lookups."""
+    if remote != "origin":
+        return ""
+    if not folder:
+        # An unread design folder cannot tell a design file from none: it asks, never allows. A name
+        # that is only a local tag is not a branch, so it alone does not ask.
+        for name in names:
+            tip = _tip_of(where, "refs/remotes/%s/%s" % (remote, name), "refs/heads/" + name)
+            if tip is not None or not _is_tag(where, name):
+                return "ask"
+        return ""
+    base = None
+    base_read = False
+    verdict = ""
+    for name in names:
+        tip = _tip_of(where, "refs/remotes/%s/%s" % (remote, name), "refs/heads/" + name)
+        if tip is None and _is_tag(where, name):
+            continue
+        if tip is None:
+            verdict = "ask"
+            continue
+        if not base_read:
+            base, base_read = resolve_default_base(where, remote), True
+        if base is not None and branch_is_ancestor(where, base, tip):
+            continue
+        files = design_files(where, tip, folder, base)
+        if files is None:
+            verdict = "ask"
+            continue
+        if not files:
+            continue
+        archived = branch_on_remote(where, tip, "refs/remotes/%s/archive" % remote)
+        if archived:
+            continue
+        if archived is None or base is None:
+            verdict = "ask"
+        else:
+            return "deny"
+    return verdict
 
 
 def worktree_remove_forced(args) -> bool:
