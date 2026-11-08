@@ -73,6 +73,9 @@ REMOTE_LINE = "To %s\n" % REMOTE_URL  # the header git prints for a push; it nam
 TAG = "v1.0"  # a short-name tag: a push names it without `refs/tags/`
 FEAT = "feat"  # a bare name a push gives with no ref line: a branch, a tag or both, by the case
 UNNAMED_HEAD_TEXT = "no remote-tracking ref names the pushed head"  # the reason a head no read named gives
+# A workflow that runs for a push that touches docs/ only. A push that touches other files starts no run of it.
+DOCS_ONLY_WORKFLOW = ("name: checks\non:\n  push:\n    paths:\n      - 'docs/**'\njobs:\n  unit:\n"
+                      "    runs-on: ubuntu-latest\n    steps:\n      - run: echo ok\n")
 
 
 def pr_entry(draft=False, branch=BRANCH, sha=HEAD, number=1430):
@@ -158,12 +161,12 @@ GIT_IDENTITY = {"GIT_AUTHOR_NAME": "test", "GIT_AUTHOR_EMAIL": "test@example.inv
                 "GIT_COMMITTER_NAME": "test", "GIT_COMMITTER_EMAIL": "test@example.invalid"}
 
 
-def git_commit(folder, remote_branch=BRANCH, on_branch=None, detach=False, tag=None):
-    """Make `folder` a git repo with one empty commit. -> the full hash. Local git only.
+def git_commit(folder, remote_branch=BRANCH, on_branch=None, detach=False, tag=None, files=None):
+    """Make `folder` a git repo, and commit on it. -> the full hash. Local git only.
     on_branch: the local branch the commit lands on, made from the current HEAD when it is new (None keeps the
     default branch). remote_branch: the branch whose remote-tracking ref is set to the commit (None sets none).
     detach: HEAD is left detached at the commit, so no branch is checked out. tag: a local tag of that name at the
-    commit (None makes none)."""
+    commit (None makes none). files: {relative path: text}, written and committed (None commits no file)."""
     env = dict(os.environ, **GIT_IDENTITY)
 
     def run_git(*args):
@@ -173,6 +176,12 @@ def git_commit(folder, remote_branch=BRANCH, on_branch=None, detach=False, tag=N
     run_git("init", "-q")
     if on_branch:
         run_git("checkout", "-q", "-B", on_branch)
+    for rel, text in (files or {}).items():
+        os.makedirs(os.path.dirname(os.path.join(folder, rel)), exist_ok=True)
+        with open(os.path.join(folder, rel), "w", encoding="utf-8") as f:
+            f.write(text)
+    if files:
+        run_git("add", "--", *files)
     run_git("commit", "-q", "--allow-empty", "-m", "x")
     head = run_git("rev-parse", "HEAD")
     if tag:
@@ -295,6 +304,71 @@ class PushCheckTests(unittest.TestCase):
         self.assertEqual(decision, "block", "a report-less push to main was not blocked (scope check)")
         decision, reason, _ = self.stop(turn(REPORT, steps), fixture_)
         self.assertIsNone(decision, "a push to main in a repo with no workflows was blocked for CI: " + reason)
+
+    def test_pr_read_that_lags_the_push_still_owes_a_ci_line(self):
+        # The PR's REST read can lag the push: it still names the head the push moved from, which is not the pushed
+        # commit. That read clears nothing, so the report must name the pushed head's CI state.
+        steps = push(push_out(HEAD7))
+        fixture_ = answers(prs=[pr_entry(sha=OLD)], runs=[PENDING])
+        decision, _, _ = self.stop(turn(NO_REPORT, steps), fixture_)
+        self.assertEqual(decision, "block", "a report-less push turn was not blocked (scope check)")
+        decision, reason, _ = self.stop(turn(REPORT, steps), fixture_)
+        self.assertEqual(decision, "block", "a push whose PR still named the head before it passed with no CI line: "
+                         "the lagging read was taken as no CI")
+        self.assertIn(HEAD7, reason, "the lagging PR read left the pushed head unnamed: %s" % reason)
+
+    def test_push_that_no_workflow_path_filter_matches_owes_no_ci_line(self):
+        # The one workflow runs only for a push that touches docs/. This push touches lint/ alone, so no run is due
+        # and the report needs no CI line.
+        folder = self.case_folder()
+        base = git_commit(folder, remote_branch=None, files={".github/workflows/checks.yml": DOCS_ONLY_WORKFLOW})
+        head = git_commit(folder, remote_branch=None, files={"lint/x.py": "x = 1\n"})
+        steps = push(push_out(head[:7], old=base[:7]))
+        fixture_ = answers(prs=[pr_entry(sha=head)], runs=[])
+        decision, _, _ = self.stop(turn(NO_REPORT, steps), fixture_, folder=folder)
+        self.assertEqual(decision, "block", "a report-less push turn was not blocked (scope check)")
+        decision, reason, _ = self.stop(turn(REPORT, steps), fixture_, folder=folder)
+        self.assertIsNone(decision, "a push that no workflow's path filter matches was held for a run that never "
+                          "starts: " + reason)
+
+    def test_push_that_a_workflow_path_filter_matches_still_owes_a_running_ci_line(self):
+        # The same workflow, and a push that touches docs/: the run is due, so with no run listed yet the report must
+        # name the head as running.
+        folder = self.case_folder()
+        base = git_commit(folder, remote_branch=None, files={".github/workflows/checks.yml": DOCS_ONLY_WORKFLOW})
+        head = git_commit(folder, remote_branch=None, files={"docs/guide.md": "guide\n"})
+        steps = push(push_out(head[:7], old=base[:7]))
+        fixture_ = answers(prs=[pr_entry(sha=head)], runs=[])
+        decision, _, _ = self.stop(turn(NO_REPORT, steps), fixture_, folder=folder)
+        self.assertEqual(decision, "block", "a report-less push turn was not blocked (scope check)")
+        decision, reason, _ = self.stop(turn(REPORT, steps), fixture_, folder=folder)
+        self.assertEqual(decision, "block", "a push that a workflow path filter matches, with no run listed, "
+                         "passed with no CI line")
+        self.assertIn("CI running on " + head[:7], reason, "the due run is not named running: %s" % reason)
+
+    def test_rewrite_that_still_lacks_the_ci_line_is_blocked(self):
+        # The first reply holds a report but no CI line, so the Stop blocks for the CI line alone. Its rewrite, the
+        # stop_hook_active Stop of the same turn, must still hold the line, so a rewrite without it is blocked.
+        session = uuid.uuid4().hex
+        steps = push(push_out(HEAD7))
+        fixture_ = answers(prs=[pr_entry()], runs=[PENDING])
+        decision, _, _ = self.stop(turn(REPORT, steps), fixture_, session_id=session)
+        self.assertEqual(decision, "block", "a report with no CI line was not blocked for the pending push")
+        decision, reason, _ = self.stop(turn(REPORT, steps), fixture_, stop_active=True, session_id=session)
+        self.assertEqual(decision, "block",
+                         "the rewrite of a CI-only block still lacks the CI line and passed unchecked")
+        self.assertIn("CI running on " + HEAD7, reason,
+                      "the rewrite's block does not name the pending head: %s" % reason)
+
+    def test_rewrite_that_names_the_ci_line_passes(self):
+        # The rewrite of a CI-only block that adds the running line passes.
+        session = uuid.uuid4().hex
+        steps = push(push_out(HEAD7))
+        fixture_ = answers(prs=[pr_entry()], runs=[PENDING])
+        decision, _, _ = self.stop(turn(REPORT, steps), fixture_, session_id=session)
+        self.assertEqual(decision, "block", "a report with no CI line was not blocked for the pending push")
+        decision, reason, _ = self.stop(turn(RUNNING, steps), fixture_, stop_active=True, session_id=session)
+        self.assertIsNone(decision, "a rewrite that names the running CI line was blocked: " + reason)
 
     def test_pending_run_on_ready_pr_blocks_until_next_names_running(self):
         decision, reason, _ = self.stop(turn(REPORT, push(push_out(HEAD7))),
@@ -567,8 +641,8 @@ class PushCheckTests(unittest.TestCase):
         self.assertIsNone(decision, "a colon-form push of tag %s was blocked for CI, though the name is a tag: %s"
                           % (TAG, reason))
 
-    # The branch read of a push with no ref line (report_guard._heads_of_git_push). The cases kill two mutants of that
-    # read: one that gives [] on a failed read, and one that names one constant branch whatever is checked out.
+    # A push with no ref line names the head of the checked-out branch (report_guard._heads_of_git_push). These cases
+    # check that the named head is that branch's own, and that a failed branch read names HEAD as unknown.
 
     def test_bare_push_names_the_checked_out_branch_head(self):
         for command in ("git push", "git push origin HEAD"):
@@ -662,10 +736,26 @@ class PushCheckTests(unittest.TestCase):
                          "the name was read as a tag")
         self.assertIn("CI running on " + head[:7], reason, "the bare-name push's head is not named running")
 
+    def test_first_push_of_a_branch_on_a_single_branch_clone_reads_the_local_head(self):
+        # A single-branch clone has no remote-tracking ref for a branch it has not pushed before. The head is read from
+        # the local branch the push sends, so the report must name that commit, not an unknown read.
+        folder = self.case_folder()
+        head = git_commit(folder, remote_branch=None, on_branch=FEAT)
+        steps = push(REMOTE_LINE + " * [new branch]      %s -> %s\n" % (FEAT, FEAT),
+                     command="git push origin %s" % FEAT)
+        fixture_ = answers(prs=[pr_entry(branch=FEAT, sha=head)],
+                           runs=[run_entry(None, sha=head, status="in_progress")])
+        decision, _, _ = self.stop(turn(NO_REPORT, steps), fixture_, folder=folder)
+        self.assertEqual(decision, "block", "a report-less first push on a single-branch clone was not blocked (scope "
+                         "check)")
+        running = "> **Done** BUILT abc123\n> **Next** CI running on %s" % head[:7]
+        decision, reason, _ = self.stop(turn(running, steps), fixture_, folder=folder)
+        self.assertIsNone(decision, "the first push of %s on a single-branch clone read its head unknown, not from the "
+                          "local commit %s: %s" % (FEAT, head[:7], reason))
+
     def test_bare_name_with_a_tag_and_a_local_branch_reads_the_branch_unknown(self):
-        # The tag sits on an older commit. The branch has no remote-tracking ref, so its head is unnamed and the name
-        # reads unknown: the branch is checked, never dropped for the tag. This case kills the mutant that reads a bare
-        # name as a tag whenever a tag has it, since that mutant drops the push.
+        # The tag and the local branch share a name, and the branch has no remote-tracking ref, so its head is unnamed.
+        # The name reads unknown: the branch is checked, and the tag does not drop the push.
         folder = self.case_folder()
         git_commit(folder, remote_branch=None, tag=FEAT)
         git_commit(folder, remote_branch=None, on_branch=FEAT)
@@ -699,9 +789,7 @@ class PushCheckTests(unittest.TestCase):
         self.assertIn("CI running on " + head[:7], reason, "the bare-name push's branch head is not named running")
 
     def test_bare_name_with_only_a_local_tag_reads_as_a_tag(self):
-        # With no branch of the name, a local tag makes the name a tag, so it names no head and no CI line is due. This
-        # case kills the mutant that never reads a name as a tag. The mutant `bare or has_tag` gives the same answer
-        # here, since the bare name is a tag either way, so this case does not kill it.
+        # With no branch of the name, a local tag makes the bare name a tag: it names no head, so no CI line is due.
         folder = self.case_folder()
         git_commit(folder, remote_branch=None, tag=FEAT)
         steps = push(REMOTE_LINE, command="git push origin %s" % FEAT)
@@ -711,6 +799,37 @@ class PushCheckTests(unittest.TestCase):
         decision, reason, _ = self.stop(turn(REPORT, steps), fixture_, folder=folder)
         self.assertIsNone(decision, "a bare-name push of a local tag was blocked for CI, though the name is a tag: "
                           + reason)
+
+    def test_ref_line_to_a_refs_tags_name_reads_no_branch_head(self):
+        # git writes the full ref, refs/tags/<name>, as the destination when a branch of that name exists too. That line
+        # names a tag, so the check reads no PR or run for it and asks for no CI line.
+        folder = self.case_folder()
+        git_commit(folder, remote_branch=FEAT, on_branch=FEAT)
+        steps = push(push_out(HEAD7, dst="refs/tags/%s" % FEAT), command="git push origin HEAD:refs/tags/%s" % FEAT)
+        fixture_ = answers(prs=[pr_entry(branch=FEAT)], runs=[PENDING])
+        decision, _, _ = self.stop(turn(NO_REPORT, steps), fixture_, folder=folder)
+        self.assertEqual(decision, "block", "a report-less tag push was not blocked (scope check)")
+        decision, reason, calls = self.stop(turn(REPORT, steps), fixture_, folder=folder)
+        self.assertIsNone(decision, "a push whose ref line names the tag refs/tags/%s was blocked for CI: %s"
+                          % (FEAT, reason))
+        self.assertFalse([arg for call in calls for arg in call if "refs/tags" in arg],
+                         "the tag %s was read as a branch head: gh was asked %s" % (FEAT, calls))
+
+    def test_tags_push_with_no_ref_line_names_no_head_and_reports_no_unknown_check(self):
+        # A `git push origin --tags` that prints no ref line names no head. The check reads nothing: it asks for no CI
+        # line and does not report that the check failed to run.
+        folder = self.case_folder()
+        git_commit(folder, remote_branch=None, on_branch=FEAT, tag=TAG)
+        steps = push(REMOTE_LINE + " * [new tag]         %s -> %s\n" % (TAG, TAG), command="git push origin --tags")
+        fixture_ = answers(prs=[pr_entry(branch=FEAT)], runs=[PENDING])
+        decision, _, _ = self.stop(turn(NO_REPORT, steps), fixture_, folder=folder)
+        self.assertEqual(decision, "block", "a report-less --tags push was not blocked (scope check)")
+        done, _ = self.run_stop(turn(REPORT, steps), fixture_, folder=folder)
+        decision, reason = block_of(done)
+        self.assertIsNone(decision, "a --tags push with no ref line was blocked for CI, though it names no head: "
+                          + reason)
+        self.assertNotIn(PUSH_UNKNOWN_NOTE, done.stdout, "a --tags push with no ref line reported that the push check "
+                         "did not run")
 
     def test_green_run_on_ready_pr_passes(self):
         decision, reason, _ = self.stop(turn(REPORT, push(push_out(HEAD7))),
