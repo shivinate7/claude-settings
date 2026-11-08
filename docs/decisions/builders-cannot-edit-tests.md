@@ -11,7 +11,7 @@ Judge the result, not the commands. The act is a test path in a change the build
 - A write tool call (Edit, Write, MultiEdit, NotebookEdit). This is the early warning, by path. It refuses. Every path field the call carries is judged, and every refusal runs on all fields before any ask, so a decoy field cannot hide a refused path.
 - A builder's Bash or PowerShell call that writes a test path. It refuses with `builder-test-edit`, the same reason as the write tool. The shell check below says what it reads.
 
-An unreadable state logs `role-diff-unread` and is allowed. A second stop with an unreadable state logs `role-diff-unresolved`.
+An unreadable state logs `role-diff-unread` and is allowed. A merge path whose bytes git could not read logs `role-diff-unread` too, and is still judged: a failed read never drops a path. A second stop with an unreadable state logs `role-diff-unresolved`.
 
 **Ruling.** Coordinator, 2026-11-01 20:32 CST, restored the refusal. Coordinator, 2026-11-01 21:40 CST, narrowed the refused act to the test changes the builder wrote itself: a tree rebuilt from the reflog broke wherever git combines other people's commits. Incident 95b4348b (lane page-item-checked-at-write, 2026-11-01) is pinned by the first `builder-refuse` case.
 
@@ -25,9 +25,11 @@ An unreadable state logs `role-diff-unread` and is allowed. A second stop with a
 
 **Known gap.** A squash merge or a `cherry-pick -n`, once committed, is a plain own commit: git removes its marker at the commit. Its test change is refused at push and stop.
 
-**Cost.** Git reads only, plus the objects `merge-tree` writes. No timer and no long-lived process. Each commit, push and stop costs one reflog read, three rev-parse calls, one diff and one untracked list. Commits of the builder's own add one rev-list, and one parent read and one diff each. A merge commit or a merge in progress adds one `merge-tree`, and, in a merge only, one `git show` per path that differs from git's merge (two for a committed merge), plus a file read for an open merge's working tree. `own_changes` re-reads each merge commit the builder made that HEAD still holds, on each commit, push and stop. A plain commit adds no call. The bytes are compared, so a line ending, an invalid byte or an empty file added or deleted is a change; only a conflict marker's label is ignored. Each rebase in the reflog adds one ancestry check, and two diffs while HEAD holds it. A log line is written only for an offence, a logged change or an unread state. `merge-tree --write-tree` needs git 2.38 or newer: older git reads a merge as unread.
+**Cost.** Git reads only, plus the objects `merge-tree` writes. No timer and no long-lived process. Each commit, push and stop costs one reflog read, three rev-parse calls, one diff and one untracked list. Commits of the builder's own add one rev-list, and one parent read and one diff each. A merge commit or a merge in progress adds one `merge-tree`. In a merge, its diff is read in raw form, so each path's mode comes with it. Each path that differs from git's merge adds one `git show`, or two for a committed merge. An open merge reads its working-tree file instead of the second. `own_changes` re-reads each merge commit the builder made that HEAD still holds, on each commit, push and stop. A plain commit adds no call. The bytes and the mode are compared, so a line ending, an invalid byte, a chmod +x, a gitlink or an empty file added or deleted is a change. Only a conflict marker's label is ignored.
 
-**Measure.** `GUARD_FAMILY=builder-refuse hooks/test_guard.py`: 53 of 53 `builder-refuse` cases pass on this tip.
+**Named limit.** With `core.autocrlf=true`, an open merge's label-only test conflict is still refused: the working tree holds CRLF and the blob LF. That is a refusal, never a pass. Each rebase in the reflog adds one ancestry check, and two diffs while HEAD holds it. A log line is written only for an offence, a logged change or an unread state. `merge-tree --write-tree` needs git 2.38 or newer: older git reads a merge as unread.
+
+**Measure.** `GUARD_FAMILY=builder-refuse hooks/test_guard.py`: 79 of 79 `builder-refuse` cases pass on this tip.
 
 ## Roles
 
