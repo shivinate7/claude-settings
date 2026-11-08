@@ -265,7 +265,7 @@ is main's `page.html` with the live `designData` and roadmap blocks kept, never 
    `wait:` line per open item with `waits` (`ended`, `waiting` or `unknown`), and one `waiting` lane line per open item with
    `lane` and `lastAnswer` and no `waits`. Last, one `kept-answer:` line per closed item whose `answers/<id>` is still kept
    (never an open item, an item with `waits`, an arbiter ruling or a park answer). With `--asks`, last, one `open-ask: <id> at <time>: <text>` line per
-   owner ask with no `reply` (a dismissed root is not listed), one `open-item:` line per open item the owner answered that has no `reply`, `lane` or `waits`, and then one `FAIL:` line the writer
+   owner ask with no `reply` (a dismissed root is not listed), with `--items` and `--answers` one `open-item:` line per open item that still holds a kept `answers/<id>` and has no `reply`, `lane` or `waits` (an unreadable or cut-short items or answers list is `open-item: unknown`), and then one `FAIL:` line the writer
    cannot skip: answer each on the page ("Route an ask") before the wake ends. A waiting ask makes a `current` page exit 1; an asks list that cannot be read or is cut short prints `open-ask: unknown` and exits 2. Without `--asks` the exit code stays the page's.
 3. Keep a copy of the page in the repo, from the same file ("Keep a copy in the repo"). Do it before any
    republish, so the copy holds the page as it was.

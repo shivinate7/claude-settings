@@ -62,8 +62,8 @@ a park answer (`park.<id>`, `parked: true` or `act: "park"`), an answer with no 
 unreadable items, an items folder without the marker, or --answers without --items print one `kept-answer: unknown (...)` line, with no other kept-answer line.
 The folder loader is export_page.docs_in, the one home of reading that folder.
 --asks names the asks the session saved with `ArtifactData list asks`, in the same two shapes. After the other lines, one `open-ask: <id> at <time>: <text>`
-line per ask with no non-blank `reply` (a root the owner dismissed is not listed; an owner reply under an answer, with `re`, waits like an ask), and, with --items, one `open-item:`
-line per open item with `lastAnswer` and no `reply`, `lane` or `waits`. Then one `FAIL:` line. A waiting ask turns exit 0 into 1; a cut-short or unreadable asks list prints `open-ask: unknown`
+line per ask with no non-blank `reply` (a root the owner dismissed is not listed; an owner reply under an answer, with `re`, waits like an ask), and, with --items and --answers, one `open-item:`
+line per open item that holds a kept answers/<id> and has no `reply`, `lane` or `waits` (--items alone, or an unreadable or cut-short list, is `open-item: unknown`). Then one `FAIL:` line. A waiting ask turns exit 0 into 1; a cut-short or unreadable asks list prints `open-ask: unknown`
 and turns exit 0 into 2 (never clear). Behind (1) and unknown (2) keep their codes. Cost: one more file read at the wake already running; no process, file written, timer or log.
 Session-start mode, run by hooks/session_start.sh in a repo whose extras name a waiting page:
 
@@ -568,17 +568,28 @@ def open_ask_lines(asks, complete=True):
             for at, ask_id, text in sorted(waiting, key=lambda row: row[0])]
 
 
-def open_item_lines(items, complete=True):
-    """One open-item line per open item the owner answered (`lastAnswer`) whose `reply` is empty, with no `lane` (the lane line
-    names a routed answer) and no `waits`: the owner spoke and the writer said nothing back. An open item the owner never answered is not listed."""
-    if not complete:
-        return []
+def open_item_lines(items, answers, complete=True, answers_complete=True):
+    """One open-item line per open item whose kept answers/<id> has no `reply`, `lane` or `waits` beside it: the owner spoke and the writer has
+    not routed, replied or closed (SKILL.md, "Route and close"). `lastAnswer` is not the signal: it outlives a consumed answer.
+    A park answer, an arbiter item and an answer with no item are never named. A cut-short list gives one unknown line."""
+    if not (complete and answers_complete):
+        return ["open-item: unknown (the %s folder has no .complete marker, so its list may be cut short)" % ("items" if not complete else "answers")]
+    kept = {}
+    for doc_id, data in answers:
+        if not isinstance(data, dict):
+            continue
+        doc_id = doc_id if doc_id is not None else data.get("item")
+        if isinstance(doc_id, str) and not doc_id.startswith("park.") and data.get("parked") is not True and data.get("act") != "park":
+            kept[doc_id] = data
     lines = []
     for doc_id, item in items:
-        if (isinstance(item, dict) and item.get("status") != "closed" and isinstance(item.get("lastAnswer"), dict)
-                and not has_text(item.get("reply")) and not has_text(item.get("lane")) and "waits" not in item):
+        if not isinstance(item, dict):
+            continue
+        item_id = doc_id if doc_id is not None else item.get("id")
+        if (item.get("status") != "closed" and item_id in kept and not item.get("arbiter") and not has_text(item.get("reply"))
+                and not has_text(item.get("lane")) and not item.get("waits")):
             lines.append("open-item: item %s (%s): the owner answered at %s and the item has no reply"
-                         % (item.get("n", doc_id), doc_id if doc_id is not None else item.get("id"), item["lastAnswer"].get("at") or "unknown"))
+                         % (item.get("n", item_id), item_id, kept[item_id].get("at") or "unknown"))
     return lines
 
 
@@ -596,12 +607,16 @@ def single_page(argv):
     ap.add_argument("--asks")
     args = ap.parse_args(argv)
     code = page_verdict(args)
+    items = answers = None
+    complete = answers_complete = True
+    item_problem = None
     if args.items is not None:
         try:
             items, complete = load_docs(args.items, keyed=True)
             lines = wait_lines([data for _, data in items], complete)
         except ValueError as err:
             items, lines = None, ["wait: the items cannot be read: unknown (%s)" % err]
+            item_problem = "the items cannot be read"
         if args.answers is not None:
             try:
                 if items is None:
@@ -609,18 +624,22 @@ def single_page(argv):
                 answers, answers_complete = load_docs(args.answers, "answers", keyed=True)
                 lines += kept_answer_lines(items, answers, complete, answers_complete)
             except ValueError as err:
+                answers = None
                 lines.append("kept-answer: unknown (%s)" % err)
+                item_problem = item_problem or "the answers cannot be read"
         for line in lines:
             print(line)
     elif args.answers is not None:
         print("kept-answer: unknown (--answers needs --items)")
     if args.asks is not None:
-        return open_asks_mode(args, items if args.items is not None else None, code)
+        if args.items is not None and args.answers is None:
+            item_problem = "--asks with --items needs --answers"
+        return open_asks_mode(args, (items, answers, complete, answers_complete) if args.items is not None else None, item_problem, code)
     return code
 
 
-def open_asks_mode(args, items, code):
-    """With --asks: print each owner ask with no reply (and, with --items, each answered open item with no reply), then one FAIL line
+def open_asks_mode(args, state, item_problem, code):
+    """With --asks: print each owner ask with no reply (and, with --items and --answers, each open item holding a kept answer and no reply, lane or waits), then one FAIL line
     the writer cannot skip. A waiting ask makes a current page exit 1; a cut-short or unreadable asks list exits 2. A behind or unknown
     page keeps its own code."""
     try:
@@ -629,8 +648,15 @@ def open_asks_mode(args, items, code):
         unknown = not complete
     except ValueError as err:
         lines, unknown = ["open-ask: unknown (%s)" % err], True
-    if items:
-        lines += open_item_lines(items, True)
+    if state is not None:
+        if item_problem:
+            lines.append("open-item: unknown (%s)" % item_problem)
+            unknown = True
+        else:
+            items, answers, complete, answers_complete = state
+            found = open_item_lines(items, answers, complete, answers_complete)
+            lines += found
+            unknown = unknown or any(line.startswith("open-item: unknown") for line in found)
     for line in lines:
         print(line)
     if unknown:

@@ -1326,18 +1326,61 @@ class Stale(unittest.TestCase):
         self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
         self.assertEqual(len(self.open_ask_lines(r)), 1)
 
-    def test_an_open_item_the_owner_answered_with_no_reply_is_listed_with_asks_and_items(self):
+    def open_item_run(self, items, answers, extra_items=None, asks=None):
         current, _ = self.current_and_behind()
-        quiet = decision_item(500, "quiet", status="open", lastAnswer={"choice": "a", "note": "x", "at": ANSWER_AT})
-        fresh = decision_item(501, "fresh", status="open")
-        replied = decision_item(502, "replied", status="open", reply="ok", lastAnswer={"choice": "a", "note": "x", "at": ANSWER_AT})
-        r = self.page_run(current, "--main", TEMPLATE, "--items", self.items_file([quiet, fresh, replied]),
-                          "--asks", self.list_file([], "asks"))
-        lines = [line for line in r.stdout.splitlines() if line.startswith("open-item:")]
+        return self.page_run(current, "--main", TEMPLATE, "--items", extra_items or self.items_file(items),
+                             "--answers", self.list_file([a for _, a in answers], "answers") if answers is not None else self.list_file([], "answers"),
+                             "--asks", asks or self.list_file([], "asks"))
+
+    def open_item_lines_of(self, r):
+        return [line for line in r.stdout.splitlines() if line.startswith("open-item:")]
+
+    def test_an_open_item_holding_a_kept_answer_and_no_reply_is_listed_and_fails(self):
+        quiet = decision_item(500, "quiet", status="open")
+        r = self.open_item_run([quiet], [("quiet", answer_for("quiet", 500))])
+        lines = self.open_item_lines_of(r)
         self.assertEqual(len(lines), 1, r.stdout + r.stderr)
         self.assertIn("500", lines[0])
         self.assertIn("FAIL:", r.stdout)
         self.assertEqual(r.returncode, 1)
+
+    def test_open_items_the_writer_has_handled_or_that_hold_no_answer_are_not_listed(self):
+        # A consumed answer leaves lastAnswer on an open item (withdraw, rework, unpark): lastAnswer alone is never the signal.
+        last = {"choice": "a", "note": "x", "at": ANSWER_AT}
+        items = [decision_item(501, "fresh", status="open"),
+                 decision_item(502, "consumed", status="open", lastAnswer=last),
+                 decision_item(503, "replied", status="open", reply="ok"),
+                 decision_item(504, "laned", status="open", lane="some-lane", lastAnswer=last),
+                 decision_item(505, "waiting", status="open", waits={"repo": "o/r", "run": 5}),
+                 decision_item(506, "closed", status="closed"),
+                 decision_item(507, "arb", status="open", arbiter=True)]
+        answers = [(i["id"], answer_for(i["id"], i["n"])) for i in items if i["id"] not in ("fresh", "consumed")]
+        r = self.open_item_run(items, answers)
+        self.assertEqual(self.open_item_lines_of(r), [], r.stdout + r.stderr)
+        self.assertNotIn("FAIL", r.stdout)
+        self.assertEqual(r.returncode, 0)
+
+    def test_a_null_waits_is_no_wait_and_the_item_is_listed(self):
+        item = decision_item(508, "nullwait", status="open", waits=None)
+        r = self.open_item_run([item], [("nullwait", answer_for("nullwait", 508))])
+        self.assertEqual(len(self.open_item_lines_of(r)), 1, r.stdout + r.stderr)
+
+    def test_an_unreadable_or_cut_short_items_list_with_asks_is_unknown_never_clear(self):
+        bad = write_text(os.path.join(tempfile.mkdtemp(dir=self.tmp.name, prefix="items-"), "items.json"), "[{")
+        cut = self.items_folder([])
+        os.remove(os.path.join(cut, ".complete"))
+        for label, items in (("unreadable items", bad), ("items folder with no marker", cut)):
+            with self.subTest(label):
+                r = self.open_item_run(None, [], extra_items=items)
+                self.assertIn("open-item: unknown", r.stdout)
+                self.assertIn("FAIL:", r.stdout)
+                self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
+
+    def test_items_with_asks_but_no_answers_is_unknown(self):
+        current, _ = self.current_and_behind()
+        r = self.page_run(current, "--main", TEMPLATE, "--items", self.items_file([]), "--asks", self.list_file([], "asks"))
+        self.assertIn("open-item: unknown", r.stdout)
+        self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
 
     def test_a_closed_run_without_asks_prints_no_fail_line(self):
         current, _ = self.current_and_behind()
