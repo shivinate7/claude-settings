@@ -114,12 +114,12 @@ def scrubbed_env(config_dir):
     return env
 
 
-def probe(args, stdin="", config_dir=None, tmp=None):
-    """Run hooks/probe.py the way a reviewer runs it, from NOGIT. Returns (rc, stdout, stderr)."""
+def probe(args, stdin="", config_dir=None, tmp=None, script=None):
+    """Run hooks/probe.py (or `script`) the way a reviewer runs it, from NOGIT. Returns (rc, stdout, stderr)."""
     env = scrubbed_env(config_dir or new_dir())
     if tmp is not None:
         env["TMPDIR"] = tmp
-    result = subprocess.run([PY, PROBE] + list(args), input=stdin, capture_output=True, text=True,
+    result = subprocess.run([PY, script or PROBE] + list(args), input=stdin, capture_output=True, text=True,
                             env=env, cwd=NOGIT, timeout=120)
     return result.returncode, result.stdout, result.stderr
 
@@ -364,6 +364,36 @@ def bad_input_exits_nonzero_with_a_message():
     for label, args, stdin in BAD_INPUT:
         rc, out, err = probe(args, stdin=stdin)
         problems += ["%s: %s" % (label, p) for p in bad_input_problems(rc, out, err)]
+    return problems
+
+
+GUARD_FAILURES = (
+    ("a guard that exits 3 with no output", "import sys\nsys.stdin.read()\nsys.exit(3)\n"),
+    ("a guard that crashes", "import sys\nsys.stdin.read()\nraise RuntimeError('guard crashed')\n"),
+)
+SILENT_GUARD = "import sys\nsys.stdin.read()\n"
+
+
+@case
+def guard_failure_is_never_allow():
+    """Probe: a guard that exits nonzero or crashes gives no verdict and a nonzero exit, never `allow`."""
+    folder = new_dir()
+    # probe.py finds guard.py beside itself, so the stub guard needs a copy of the probe beside it.
+    probe_copy = os.path.join(folder, "probe.py")
+    shutil.copyfile(PROBE, probe_copy)
+    guard_copy = os.path.join(folder, "guard.py")
+    # Scope first: a silent guard that exits 0 prints exactly `allow`, so the copy and the stub really ran.
+    write(guard_copy, SILENT_GUARD.encode("utf-8"))
+    rc, out, err = probe(flags(HARMLESS), script=probe_copy)
+    bad = scope(rc, out, err)
+    if bad or out != "allow\n":
+        return ["control, a silent guard: " + (bad[0] if bad else "printed %r, want 'allow'" % out[:60])]
+    problems = []
+    for label, source in GUARD_FAILURES:
+        write(guard_copy, source.encode("utf-8"))
+        rc, out, err = probe(flags(HARMLESS), script=probe_copy)
+        problems += ["%s: %s" % (label, p) for p in bad_input_problems(rc, out, err)]
+        problems += ["%s: %s" % (label, p) for p in expect("guard" in err, "stderr does not name the guard")]
     return problems
 
 
