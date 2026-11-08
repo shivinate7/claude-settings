@@ -8461,6 +8461,17 @@ sh("env: interpreter code: allow, a quoted node heredoc with an existence test t
    "node <<'EOF'\nconst fs=require('fs'), path=require('path');\n"
    "console.log(fs.existsSync(path.join(__dirname, '" + ENV + "')));\nEOF", "allow", cwd=NOGIT)
 
+# A PATH MADE BY pathlib FROM THE FILE NAME. resolve() and exists() read the name, so they are allowed.
+# open() of the resolved path reads the file itself, so it is denied.
+sh("env: interpreter code: allow, python3 -c, a pathlib resolve of the file printed",
+   "python3 -c \"from pathlib import Path; print(Path('" + ENV + "').resolve())\"", "allow", cwd=NOGIT)
+sh("env: interpreter code: allow, python3 -c, an os.path.exists test of a Path to the file",
+   "python3 -c \"import os; from pathlib import Path; print(os.path.exists(Path('" + ENV + "')))\"",
+   "allow", cwd=NOGIT)
+sh("env: interpreter code: deny, python3 -c, an open of a resolved Path to the file",
+   "python3 -c \"from pathlib import Path; print(open(Path('" + ENV + "').resolve()).read())\"",
+   "deny", "env-file", cwd=NOGIT)
+
 sh("env: interpreter code: deny, python3 -c, a getsize of the file",
    "python3 -c \"import os; print(os.path.getsize('" + ENV + "'))\"", "deny", "env-file", cwd=NOGIT)
 sh("env: interpreter code: deny, python3 -c, a subprocess cat of the file",
@@ -12225,6 +12236,65 @@ sh("frozen form: python -c that binds a frozen hook path to a variable and reads
    "print(p.read_text())'", "allow", cwd=NOGIT, env=TILDE_ENV)
 sh("frozen form: node -e that stats a frozen hook from homedir is allowed",
    "node -e 'require(\"fs\").statSync(require(\"os\").homedir() + \"/.claude/hooks/guard.py\")'",
+   "allow", cwd=NOGIT, env=TILDE_ENV)
+
+# A BARE FROZEN FOLDER AS A WRITE TARGET. A reinstall or cleanup script can remove the hooks folder, copy
+# into it, or copy a file into it by name, so each is denied. Putting the folder on sys.path or changing
+# into it reads nothing, so those rows are allowed.
+sh("frozen form: python -c that removes a frozen hooks folder with shutil.rmtree is denied",
+   "python3 -c 'import os, shutil; shutil.rmtree(os.path.expanduser(\"~/.claude/hooks\"))'",
+   "deny", "frozen-path", cwd=NOGIT, env=TILDE_ENV)
+sh("frozen form: python -c that copies a tree into a frozen hooks folder with shutil.copytree is denied",
+   "python3 -c 'import os, shutil; shutil.copytree(\"src\", os.path.expanduser(\"~/.claude/hooks\"), "
+   "dirs_exist_ok=True)'", "deny", "frozen-path", cwd=NOGIT, env=TILDE_ENV)
+sh("frozen form: python -c that copies a file into a frozen hooks folder with shutil.copy is denied",
+   "python3 -c 'import os, shutil; shutil.copy(\"x\", os.path.expanduser(\"~/.claude/hooks/\"))'",
+   "deny", "frozen-path", cwd=NOGIT, env=TILDE_ENV)
+sh("frozen form: python -c that puts a frozen hooks folder on sys.path is allowed",
+   "python3 -c 'import os, sys; sys.path.insert(0, os.path.expanduser(\"~/.claude/hooks\"))'",
+   "allow", cwd=NOGIT, env=TILDE_ENV)
+sh("frozen form: python -c that changes into a frozen hooks folder is allowed",
+   "python3 -c 'import os; os.chdir(os.path.expanduser(\"~/.claude/hooks\"))'",
+   "allow", cwd=NOGIT, env=TILDE_ENV)
+
+# A BUILT PATH KEEPS ITS HEAD. The write target is the frozen folder joined from str(Path.home()), from
+# Path.home().joinpath, from a variable holding an expanded Path, from a chain of / steps, or from a
+# %-format of expanduser. The head is the ~/.claude part, so each write is denied.
+sh("frozen form: python -c that opens a frozen hook joined from str(Path.home()) and + is denied",
+   "python3 -c 'from pathlib import Path; open(str(Path.home()) + \"/.claude/hooks/x.py\", \"w\")'",
+   "deny", "frozen-path", cwd=NOGIT, env=TILDE_ENV)
+sh("frozen form: python -c that writes a frozen hook through Path.home().joinpath is denied",
+   "python3 -c 'from pathlib import Path; Path.home().joinpath(\".claude\", \"hooks\", \"x.py\").write_text(\"x\")'",
+   "deny", "frozen-path", cwd=NOGIT, env=TILDE_ENV)
+sh("frozen form: python -c that writes a frozen hook joined from an expanded Path variable is denied",
+   "python3 -c 'from pathlib import Path; d = Path(\"~/.claude/hooks\").expanduser(); "
+   "d.joinpath(\"x.py\").write_text(\"x\")'", "deny", "frozen-path", cwd=NOGIT, env=TILDE_ENV)
+sh("frozen form: python -c that writes a frozen hook through a chain of Path / steps is denied",
+   "python3 -c 'from pathlib import Path; p = Path.home(); p = p / \".claude\"; p = p / \"hooks\" / \"x.py\"; "
+   "p.write_text(\"x\")'", "deny", "frozen-path", cwd=NOGIT, env=TILDE_ENV)
+sh("frozen form: python -c that opens a frozen hook through a %-format of expanduser is denied",
+   "python3 -c 'import os; home = os.path.expanduser(\"~\"); open(\"%s/.claude/hooks/x.py\" % home, \"w\")'",
+   "deny", "frozen-path", cwd=NOGIT, env=TILDE_ENV)
+
+# FALSE ALARMS. A frozen guard path that a script prints, names, runs as a subprocess argument, loads as a
+# module spec, compares, splits or relates is a read of that path, so each is allowed.
+sh("frozen form: python -c that prints the parent of a Path.home() join under .claude is allowed",
+   "python3 -c 'from pathlib import Path; p = Path.home() / \".claude\" / \"settings.json\"; print(p.parent)'",
+   "allow", cwd=NOGIT, env=TILDE_ENV)
+sh("frozen form: python -c that runs a frozen guard script as a subprocess with input is allowed",
+   "python3 -c 'import os, subprocess; subprocess.run([\"python3\", os.path.expanduser(\"~/.claude/hooks/guard.py\")], "
+   "input=\"{}\", text=True)'", "allow", cwd=NOGIT, env=TILDE_ENV)
+sh("frozen form: python -c that builds a module spec from a frozen guard file is allowed",
+   "python3 -c 'import importlib.util, os; importlib.util.spec_from_file_location(\"g\", "
+   "os.path.expanduser(\"~/.claude/hooks/guard.py\"))'", "allow", cwd=NOGIT, env=TILDE_ENV)
+sh("frozen form: python -c that compares a frozen guard file with filecmp is allowed",
+   "python3 -c 'import filecmp, os; print(filecmp.cmp(os.path.expanduser(\"~/.claude/hooks/guard.py\"), "
+   "\"hooks/guard.py\"))'", "allow", cwd=NOGIT, env=TILDE_ENV)
+sh("frozen form: python -c that splits the extension of a frozen guard path is allowed",
+   "python3 -c 'import os; print(os.path.splitext(os.path.expanduser(\"~/.claude/hooks/guard.py\")))'",
+   "allow", cwd=NOGIT, env=TILDE_ENV)
+sh("frozen form: python -c that relates a frozen guard path to the cwd with relpath is allowed",
+   "python3 -c 'import os; print(os.path.relpath(os.path.expanduser(\"~/.claude/hooks/guard.py\")))'",
    "allow", cwd=NOGIT, env=TILDE_ENV)
 
 # --------------------------------------------------------------------------- frozen dup: a descriptor dup
