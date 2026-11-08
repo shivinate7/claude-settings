@@ -1324,33 +1324,39 @@ def pull_holds_lane(work, steps_of_lane, head_landed):
     return any(p.get("branch") in heads and not head_landed(p) for p in work["pulls"])
 
 
-def finished_lanes(work, slug, repo=None, main_branch="main"):
+def row_steps(row):
+    """The sorted step ids a lane row names: each cs-step tag, read stripped."""
+    tags = [t.strip() for t in row["tags"] if isinstance(t, str)]
+    return sorted({t[len(STEP_TAG):].strip() for t in tags if t.startswith(STEP_TAG)} - {""})
+
+
+def finished_lanes(work, slug, repo=None, main_branch="main", head_landed=None):
     """The count of lanes finished and not archived (`finished lanes not archived`), or an `unknown (<why>)` string.
 
     A lane session row of this repo (lane_rows) counts when it is not archived and its status bucket is completed or
     failed, or review ready with no open pull holding one of its steps (pull_holds_lane, as idle_lanes reads it).
     Working and blocked never count. No step, page item or age is read. `repo` lets a draft pull whose head is on
     main release a review-ready lane; with no `repo` no draft does. A missing sessions list, a stale readAt, skipped
-    rows, or a live lane row with no status bucket enum name reads unknown, never 0."""
+    rows, or a live lane row with no status bucket enum name reads unknown, never 0. `head_landed` is a shared
+    draft_head_landed test; with none, one is made."""
     why = live_why(work)
     if why:
         return why
     live = [row for row in lane_rows(work, slug) if row["session_status"] != ARCHIVED_SESSION]
     if any(row.get("status_bucket") not in SESSION_BUCKETS for row in live):
         return "unknown (a live lane session row has no status_bucket enum name)"
-    head_landed = draft_head_landed(repo, main_branch)
+    head_landed = head_landed or draft_head_landed(repo, main_branch)
     count = 0
     for row in live:
         if row["status_bucket"] in FINISHED_BUCKETS:
             count += 1
         elif row["status_bucket"] == REVIEW_READY_BUCKET:
-            mine = {t[len(STEP_TAG):].strip() for t in row["tags"] if isinstance(t, str) and t.strip().startswith(STEP_TAG)} - {""}
-            if not pull_holds_lane(work, mine, head_landed):
+            if not pull_holds_lane(work, row_steps(row), head_landed):
                 count += 1
     return count
 
 
-def idle_lanes(work, steps, marks, slug, repo, main_branch="main", marks_why=None):
+def idle_lanes(work, steps, marks, slug, repo, main_branch="main", marks_why=None, head_landed=None):
     """Entries for each lane of this repo that can be archived, or one `unknown (<why>)` entry, never an empty list
     when a read could not run. Each entry reads `<session id> (<steps>; topic <topic or ->)`, sorted.
 
@@ -1361,7 +1367,8 @@ def idle_lanes(work, steps, marks, slug, repo, main_branch="main", marks_why=Non
     `lane` is one of its steps, or whose `owner` is the session itself (the item is the lane's own question); only
     status `closed` releases an item. A step missing from the record branch reads the lane unknown. When no live
     lane row of this repo carries a SESSION_BUCKETS name, the list reads unknown. `marks_why` is landed_marks' why:
-    when main could not be read, no step can be shown landed, so the list reads unknown."""
+    when main could not be read, no step can be shown landed, so the list reads unknown. `head_landed` is a shared
+    draft_head_landed test; with none, one is made."""
     why = live_why(work)
     if why:
         return [why]
@@ -1371,7 +1378,7 @@ def idle_lanes(work, steps, marks, slug, repo, main_branch="main", marks_why=Non
         return ["unknown (%s)" % marks_why]
     if work.get("pageItems") is None:
         return [work.get("itemsWhy") or "unknown (the page items could not be read)"]
-    head_landed = draft_head_landed(repo, main_branch)
+    head_landed = head_landed or draft_head_landed(repo, main_branch)
 
     open_items = [r for r in work["pageItems"] if r["status"] not in ITEM_DONE_STATUSES]
     ours = lane_rows(work, slug)
@@ -1383,7 +1390,7 @@ def idle_lanes(work, steps, marks, slug, repo, main_branch="main", marks_why=Non
         tags = [t.strip() for t in row["tags"] if isinstance(t, str)]
         if row["session_status"] == ARCHIVED_SESSION or row.get("status_bucket") not in IDLE_BUCKETS:
             continue
-        mine = sorted({t[len(STEP_TAG):].strip() for t in tags if t.startswith(STEP_TAG)} - {""})
+        mine = row_steps(row)
         if not mine:
             continue
         absent = [k for k in mine if k not in steps]
@@ -1420,8 +1427,9 @@ def idle_and_finished_report(repo, live, record_branch=None, main_branch="main")
     extra, _where = extras(repo, source)
     slug = github_slug(repo, extra)
     work = live_work(live, steps, slug)
-    return (idle_lanes(work, steps, marks, slug, repo, main_branch, unread),
-            finished_lanes(work, slug, repo, main_branch))
+    head_landed = draft_head_landed(repo, main_branch)  # one merge-base read per draft head, for both counts
+    return (idle_lanes(work, steps, marks, slug, repo, main_branch, unread, head_landed),
+            finished_lanes(work, slug, repo, main_branch, head_landed))
 
 
 def upkeep(steps, added, marks, strays, work=None, slug=None, repo=None, main_branch="main", unread=None):

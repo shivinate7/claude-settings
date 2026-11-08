@@ -34,7 +34,7 @@ BATCH_LABEL = "batch"
 
 # The ledger's and the idle-lane list's summary lines, and the Backlog line of a runner's or coordinator's report. One home:
 # merge/merge.py prints them, lint/report_guard.py reads them back, and skills/roadmap/build.py names the row (rule
-# reports-backlog-counts). The row label of the lanes finished and not archived:
+# reports-backlog-counts). The row label of the lanes that can be archived:
 IDLE_LANES_LINE = "lanes to archive"
 # The label of the third Backlog count: the lane sessions finished and not archived (build.finished_lanes). It is a count,
 # apart from the list above, which holds only the lanes with every step landed and nothing open on them.
@@ -59,7 +59,7 @@ def idle_lanes_summary(count: int) -> str:
     return f"merge: {count} {IDLE_LANES_LINE}."
 
 
-def finished_lanes_line(count) -> str:
+def finished_lanes_line(count: int | str) -> str:
     """The line `merge --idle-lanes` prints after its summary: the count, or `unknown (<why>)` for a count that could not be read."""
     if isinstance(count, int):
         return f"merge: {count} {FINISHED_LANES_LINE}."

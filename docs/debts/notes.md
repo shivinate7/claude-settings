@@ -1510,3 +1510,4 @@
 - backlog-proof-home-name: the docstrings of lint/report_guard.py and lint/test_report_guard_backlog.py name `_own_tier_proved` as the tier proof, but the Backlog check calls `_own_tiers_proved` (hooks/guard_merge.py). Rule: reports-backlog-counts.
 - backlog-read-windows-paths: `MERGE_PROGRAM_RE` matches case-sensitively and does not read backslash paths, so a Windows `Merge\merge.py --reviewed` run is no ledger read (lint/report_guard.py). Rule: reports-backlog-counts.
 - backlog-read-subshell: a ledger run inside `bash -c '...'`, `( )`, `$( )` or `uv run python` is no read, so its count must say unknown (lint/report_guard.py `_ledger_kinds`). Rule: reports-backlog-counts.
+- backlog-finished-merge-base-fail: a failed merge-base read counts a draft-held lane as held, so the finished count reads low as a number, as idle_lanes does (skills/roadmap/build.py). Rule: reports-backlog-counts.
