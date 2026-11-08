@@ -1060,6 +1060,19 @@ class CannotClaimTests(unittest.TestCase):
                 out = self.stop([trg.human(prompt), trg.assistant_text(line)])
                 self.assert_blocked_for(out, NO_TRY, line)
 
+    def test_cc_red_an_ly_adverb_before_i_tried_names_no_check(self):
+        # Catches: the writer adverbs read from the twelve listed words only, so "I genuinely tried" let the bare check word
+        # tried name a check. Any -ly adverb between I and tried is the writer's own, so tried names no call.
+        line = "I genuinely tried, and I cannot push."
+        out = self.stop([trg.human("push the branch"), *failed_bash("git push origin HEAD", "tu_p"), landed_reply(line)])
+        self.assert_blocked_for(out, NO_CHECK, line)
+
+    def test_cc_green_a_listed_adverb_before_i_tried_names_no_check(self):
+        # Control: actually is a listed adverb, so the writer reads as the subject and the line blocks for naming no check.
+        line = "I actually tried, and I cannot push."
+        out = self.stop([trg.human("push the branch"), *failed_bash("git push origin HEAD", "tu_p"), landed_reply(line)])
+        self.assert_blocked_for(out, NO_CHECK, line)
+
     def test_cc_red_a_why_yours_line_with_a_capability_phrase_is_judged_as_a_claim(self):
         # Catches: a Why yours line skipped by the cannot-claim check, so "I am not able to push from here" passed with no try.
         line = "Why yours: I am not able to push from here, so you must run it."
@@ -1122,6 +1135,32 @@ class CannotClaimTests(unittest.TestCase):
         out = self.stop([trg.human("merge PR 12"), *failed_bash("gh pr merge 12", "tu_1"),
                          *ok_bash("gh pr merge 13", "tu_2"), landed_reply(line)])
         self.assert_passes(out, "a failed merge of PR 12, not cancelled by a merge of PR 13")
+
+    def test_cc_red_a_url_of_another_repo_does_not_cancel_a_repo_less_failure(self):
+        # Catches: a PR URL keyed by its number alone, so a merge of o/x PR 12 cancelled a failed merge of PR 12 whose repo
+        # the call never named. The failure stands, so the line that says it could not merge names no check and blocks.
+        line = "I could not merge PR 12 at first."
+        out = self.stop([trg.human("merge PR 12"), *failed_bash("gh pr merge 12", "tu_1"),
+                         *ok_bash("gh pr merge https://github.com/o/x/pull/12", "tu_2"), landed_reply(line)])
+        self.assertIsNotNone(out, "the merge of o/x PR 12 cancelled the failed merge of PR 12 with no repo named")
+        self.assert_blocked_for(out, NO_CHECK, line)
+
+    def test_cc_red_a_same_repo_url_cancels_a_failure_made_with_the_repo_flag(self):
+        # Catches: a PR URL's repo dropped from its key, so the merge of o/x PR 12 by URL did not cancel the failed merge of
+        # PR 12 made with --repo o/x. The same repo and number cancel, so the past failure is no claim.
+        line = "I could not merge PR 12 at first."
+        out = self.stop([trg.human("merge PR 12"), *failed_bash("gh pr merge 12 --repo o/x", "tu_1"),
+                         *ok_bash("gh pr merge https://github.com/o/x/pull/12", "tu_2"), landed_reply(line)])
+        self.assert_passes(out, "the URL merge of o/x PR 12 did not cancel the failed merge made with --repo o/x")
+
+    def test_cc_green_a_same_url_retry_cancels_a_failed_url_merge(self):
+        # Control: a merge by URL that fails, then a retry of the same URL. Both keys name the same repo and number, so the
+        # retry cancels the failure, and the line that says it could not merge at first passes.
+        line = "I could not merge PR 12 at first."
+        url = "https://github.com/o/x/pull/12"
+        out = self.stop([trg.human("merge PR 12"), *failed_bash("gh pr merge " + url, "tu_1"),
+                         *ok_bash("gh pr merge " + url, "tu_2"), landed_reply(line)])
+        self.assert_passes(out, "a failed merge by URL, then a successful retry of the same URL")
 
     # ---- a reason after a failed try names its check, whatever the mark that sets it off, and a check in one sentence backs the next
 
