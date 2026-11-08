@@ -3,6 +3,7 @@
 
     python3 lint/check_silent_undo.py [--upstream origin/main] [--head HEAD] [--strict]
     python3 lint/check_silent_undo.py --history [REV] [--window 60]   # audit, always exit 0
+    python3 lint/check_silent_undo.py --pr-body-env NAME [--head SHA]   # CI: the PR body is env NAME
 
 Two reads, one verdict. Design: docs/decisions/silent-undo-check-design.md.
 
@@ -30,8 +31,9 @@ excuses its path. A trailer or line with no reason excuses nothing. A deleted de
 `Retire-run: <slug> -- <run URL>` line in the PR body's last paragraph that the debt-close check
 (check_debt_retire.retired) accepts: a green run on the PR head or above, a Retire that holds. It needs a
 run reader (run_state); with none, or a read that fails, the finding stays. Only a whole delete is excused, not a rename out of
-the debts folder. Only the merge tool passes a PR body and a run reader: the CLI and CI read no body, as with a Drops-lines line
-in the body, and CI's way out is a Drops-lines commit trailer. Each use prints
+the debts folder. The merge tool passes a PR body and a run reader. The CLI reads the body only with `--pr-body-env NAME` (the
+body is env NAME; unset or empty is no body); CI passes it. The flag also gives the run reader, merge.Host.cited_run, and
+judges the cite against --head. Without the flag the CLI reads no body. Each use prints
 `ALLOWED <path>: <reason>`. On a branch it may be on any commit of the branch. In history it is
 the commit, plus the branch it merged for a reversal.
 
@@ -680,6 +682,17 @@ def say(line):
     print(line.encode(enc, "backslashreplace").decode(enc))
 
 
+def run_reader(repo):
+    """The merge tool's Host.cited_run for `repo`: the one home of the run read. None when merge cannot be imported or
+    the Host cannot be built, so a cite excuses nothing."""
+    try:
+        sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "merge"))
+        import merge  # lazy: the merge tool imports this module
+        return merge.Host(cwd=repo).cited_run
+    except Exception:
+        return None
+
+
 def main(argv):
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--upstream", default="origin/main")
@@ -688,6 +701,7 @@ def main(argv):
     ap.add_argument("--strict", action="store_true", help="unknown exits 1 (also when env CI is set)")
     ap.add_argument("--history", nargs="?", const="HEAD", metavar="REV")
     ap.add_argument("--repo", default=os.getcwd())
+    ap.add_argument("--pr-body-env", metavar="NAME", help="read the PR body from env NAME, and cited runs through merge.Host.cited_run")
     a = ap.parse_args(argv)
     try:
         if a.history:
@@ -695,7 +709,11 @@ def main(argv):
             say("\n".join(hits))
             say("silent-undo: %d commit(s) read, %d hit(s)." % (n, len(hits)))
             return 0
-        problems, notes = check(a.repo, a.upstream, a.head)
+        if a.pr_body_env:
+            problems, notes = check(a.repo, a.upstream, a.head, pr_body=os.environ.get(a.pr_body_env) or "",
+                                    run_state=run_reader(a.repo), retire_head=a.head)
+        else:
+            problems, notes = check(a.repo, a.upstream, a.head)
     except Unknown as e:
         say("silent-undo: UNKNOWN: %s" % e)
         return 1 if (a.strict or os.environ.get("CI")) else 0
