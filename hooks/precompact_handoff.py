@@ -132,6 +132,14 @@ PREMISE_KINDS = ("ruling", "measured", "read", "notes", "assumed")
 # The required sections are named once, in the prompt file's step 4 marker line (SECTIONS_MARKER). No code
 # copies that list: the premises section is the marker name that holds the word "premises".
 SECTIONS_MARKER = re.compile(r"<!--[ \t]*handoff-sections:[ \t]*(.*?)[ \t]*-->")
+
+
+def section_heading(name_rx):
+    """The one heading matcher: a `#` or `##` heading line that starts with the name, which may carry the
+    prompt's step number first (`## 2. `) and may be followed by text. `N)` is no step number."""
+    return re.compile(r"^#{1,2}[ \t]+(?:\d+\.[ \t]+)?(?:%s)\b" % name_rx, re.I | re.M)
+
+
 _PREMISE_LINE = re.compile(r"^[ \t]*[-*][ \t]+(P\d+)\b(?:[ \t]*\[([^\]\n]*)\])?", re.M)
 
 
@@ -180,27 +188,27 @@ def _marker_names(path):
 
 
 def required_sections():
-    """The sections a handoff must hold, from the installed prompt's marker. [] when it cannot be read:
-    the check then fails open."""
-    return _marker_names(prompt_path())
+    """The sections a handoff must hold, from the marker: the installed prompt's, or, when no installed
+    prompt file exists, the copy beside this module (the installed one in an install, the repo's own in a
+    checkout). The one reader of the marker: the section check and the premises name both call it. []
+    when the prompt cannot be read: the check then fails open."""
+    path = prompt_path()
+    if not os.path.exists(path):
+        path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "precompact_handoff_prompt.md")
+    return _marker_names(path)
 
 
 def premises_section():
-    """The marker's name for the premises section (the one that holds the word "premises"), or None.
-    Reads the installed prompt, then the copy beside this module, which is the installed one in an
-    install and the repo's own in a checkout."""
-    for path in (prompt_path(), os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                                             "precompact_handoff_prompt.md")):
-        for name in _marker_names(path):
-            if "premises" in name.lower():
-                return name
+    """The marker's name for the premises section (the one that holds the word "premises"), or None."""
+    for name in required_sections():
+        if "premises" in name.lower():
+            return name
     return None
 
 
 def _premises_head():
     name = premises_section()
-    body = re.escape(name) if name else r"(?:[A-Za-z]+[ \t]+)?premises"
-    return re.compile(r"^##[ \t]+%s[ \t]*$" % body, re.I | re.M)
+    return section_heading(re.escape(name) if name else r"(?:[A-Za-z]+[ \t]+)?premises")
 
 
 def missing_sections(text):
@@ -212,8 +220,7 @@ def missing_sections(text):
         if not names:
             return []
         text = text if isinstance(text, str) else ""
-        return [n for n in names
-                if not re.search(r"^#{1,2}[ \t]+%s\b" % re.escape(n), text, re.I | re.M)]
+        return [n for n in names if not section_heading(re.escape(n)).search(text)]
     except Exception:
         return []
 
