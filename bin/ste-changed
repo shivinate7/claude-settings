@@ -76,7 +76,7 @@ def pins():
 
 
 def pin_report(note=False):
-    """One stderr line per pinned action and commit. The set of actions whose pinned files differ from this copy's.
+    """One stderr line per pinned action and commit. Returns the set of actions whose pinned files differ from this copy's.
     `note`: a drift line starts with NOTE instead of `ste-changed: `."""
     head, drift = here("rev-parse", "HEAD"), set()
     for (action, sha), where in pins().items():
