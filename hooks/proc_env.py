@@ -10,7 +10,6 @@ shell stub reads untagged. Read on macOS and on Linux; lint/test_wait_pid.py rea
 
 Stdlib only, no child process. Every failure (EPERM, EINVAL, a dead pid, a bad id) answers False.
 """
-import ctypes
 import sys
 
 TAG_NAME = "CLAUDE_CODE_SESSION_ID"
@@ -25,6 +24,7 @@ def _environ_entries_macos(pid: int):
     read as env. ponytail: an EMPTY argv[0] is eaten by the padding skip, which shifts the env
     by one entry, so a read can miss the tag (foreign) and never invent one.
     """
+    import ctypes  # here, not at the top: a Python without _ctypes still loads this file, and the read answers False
     libc = ctypes.CDLL(None, use_errno=True)
     libc.sysctl.argtypes = [ctypes.POINTER(ctypes.c_int), ctypes.c_uint, ctypes.c_void_p,
                             ctypes.POINTER(ctypes.c_size_t), ctypes.c_void_p, ctypes.c_size_t]

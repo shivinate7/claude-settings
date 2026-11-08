@@ -27,6 +27,8 @@ No owner ruling yet. The coordinator asked for this guard rule after the inciden
 
 Step `check-tail-wrapper-forms` added the `uv run`, `python3.N` and `bin/ci-job` forms, at the coordinator's request (2026-11-07 18:09 CST).
 
+- The guard-set lists (the install.sh copy loop, the install.ps1 copy and set loops, and the ci-scope.sh case) hold every module the guard imports, at load time or lazily in a function body: `override.py`, `_nowindow.py`, `proc_env.py` and `reread_check.py` joined the earlier ones. The lists name each module the guard imports, so the guard set stays whole when the flat landing fails or lands late. The check `guardset4` derives the required set from the imports of `guard.py` and each `guard_*.py` outside a try block, so a new import needs no edit to it. A module imported only inside a try (`_nowindow` in `guard_kill.py` and `git_reads.py`) is listed too, and `guardset5` requires it, read from the try bodies the same way (coordinator request, 2026-11-08 02:23 CST).
+
 ## The incident
 
 Lane `notes-fix-other-2`, 2026-11-07, about 15:15 CST. The lane backgrounded `~/.claude/bin/merge --lane-lint 1476 2>&1 | tail -8`. Its verdict was lost.

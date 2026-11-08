@@ -12,11 +12,9 @@ try:
 except ImportError:  # install-hooks-whole: the install lists land the helper with the guard; a failed landing or an older install can lack it, and the guard still judges
     _nowindow = subprocess
 import sys
-try:
-    from proc_env import holds_session_tag  # the one home of the exec-environment read (hooks/proc_env.py)
-except ImportError:  # same fallback as _nowindow above: no read, so a PPID-1 pid stays foreign
-    def holds_session_tag(pid, session_id):
-        return False
+# Not in a try: a failed import fails guard.py's load, which waits and refuses as guard-crash (decision
+# install-hooks-whole). A guard that judged a kill with the read missing would call every PPID-1 pid foreign.
+from proc_env import holds_session_tag  # the one home of the exec-environment read (hooks/proc_env.py)
 
 from guard_core import (
     QUOTE_MARKS,
