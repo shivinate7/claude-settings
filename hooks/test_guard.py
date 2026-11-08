@@ -21854,11 +21854,12 @@ def _relesc_fixture():
             sh_add_lane(primary, "agent-" + RELESC_AGENT + "-red")
         free = os.path.join(ROOT, "wthomew_free_primary")
         make_repo(free, {"src/app.py": "print(1)\n"})
+        free_lane, _branch = sh_add_lane(free, "wthomew_lane")   # a linked checkout the no-record agent stands in
         nogit = os.path.join(ROOT, "wthomew_nogit")
         os.makedirs(nogit, exist_ok=True)
         RELESC_CACHE["folders"] = {
             "primary": primary, "home": home, "sub": os.path.join(home, "sub"),
-            "free": free, "free_src": os.path.join(free, "src"), "nogit": nogit,
+            "free": free, "free_src": os.path.join(free, "src"), "nogit": nogit, "free_lane": free_lane,
             "abs_scratch": os.path.join(ROOT, "relesc_scratch"),
             "abs_outside": os.path.join(ROOT, "relesc_outside"),
         }
@@ -21921,7 +21922,27 @@ _relesc_add("worktree-home relative escape: echo x > ../f from the home is refus
 # Deny, no record: the own checkout is the one that holds cwd, and the target lands outside it.
 _relesc_add("worktree-home relative escape: mkdir ../tmp from the primary, by an agent with no home "
             "record, is refused", "deny", "mkdir ../tmp", "free", agent=RELESC_FREE, rule="worktree-home")
+# Deny, no record, from a linked checkout: a mkdir or touch into the primary is another checkout's file.
+# other-checkout does not judge mkdir or touch, so this clause must.
+_relesc_add("worktree-home relative escape: an agent with no record, mkdir ../../../hooks/zz from a linked "
+            "checkout into the primary, is refused", "deny", "mkdir ../../../hooks/zz", "free_lane",
+            agent=RELESC_FREE, rule="worktree-home")
+_relesc_add("worktree-home relative escape: an agent with no record, touch ../../../f from a linked "
+            "checkout into the primary, is refused", "deny", "touch ../../../f", "free_lane",
+            agent=RELESC_FREE, rule="worktree-home")
+# Deny, from the recorded home: a parenthesis glued to the verb does not hide the write.
+_relesc_add("worktree-home relative escape: (mkdir ../tmp) from the home is refused", "deny",
+            "(mkdir ../tmp)", "home", rule="worktree-home")
+_relesc_add("worktree-home relative escape: (touch ../f) from the home is refused", "deny",
+            "(touch ../f)", "home", rule="worktree-home")
+_relesc_add("worktree-home relative escape: (rm -rf ../../../../tmp) from the home is refused", "deny",
+            "(rm -rf ../../../../tmp)", "home", rule="worktree-home")
 # Allow, from the recorded home: the controls that must stay green.
+_relesc_add("worktree-home relative escape: (mkdir fresh) inside the home is allowed", "allow",
+            "(mkdir fresh)", "home")
+_relesc_add("worktree-home relative escape: a write into the clone's common git directory, echo x >> "
+            "../../../.git/info/exclude, is allowed as other-checkout allows it", "allow",
+            "echo x >> ../../../.git/info/exclude", "home")
 _relesc_add("worktree-home relative escape: mkdir fresh inside the home is allowed", "allow",
             "mkdir fresh", "home")
 _relesc_add("worktree-home relative escape: mkdir -p a/../b inside the home is allowed", "allow",
