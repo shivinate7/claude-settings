@@ -693,6 +693,112 @@ def folder_chain_case(template, dirty, start, want=want_chain_denied_unlinted):
     return check
 
 
+# ---- a push read in the folder it runs in: a heredoc commit's body does not hide the push, a repeated push is read
+# where it runs, a `mkdir` makes the folder a later `cd` enters, and a folder the guard cannot read is noted
+
+BAD_TOPIC = {"docs/notes/c.md": note(BAD)}   # the topic commit holds the bad note, so a push from it is refused
+
+
+def bad_clone(case_dir):
+    """The clone, on topic, one commit past main with the bad note: a push from it sends prose the lint refuses."""
+    clone = make_pair(case_dir, MAIN_C, BAD_TOPIC)
+    require_range(clone, ["docs/notes/c.md"])
+    require_lint(clone, ["docs/notes/c.md"], [])
+    return clone
+
+
+def bad_checkout(case_dir):
+    """A second checkout of make_pair's origin, on topic, with the bad note committed. The clone the shell starts in
+    stays clean, so a push read in the wrong folder is allowed."""
+    other = os.path.join(case_dir, "other")
+    git(case_dir, "clone", "-q", os.path.join(case_dir, "origin.git"), other)
+    git(other, "checkout", "-q", "-b", "topic")
+    write_c_bad(other)
+    git(other, "add", "-A")
+    git(other, "commit", "-q", "-m", "bad note")
+    require_range(other, ["docs/notes/c.md"], base="origin/main")
+    require_lint(other, ["docs/notes/c.md"], [])
+    return other
+
+
+def want_denied_in(out, label, folder):
+    """want_denied, and the one lint ran in `folder`, the checkout the push runs in."""
+    cause = want_denied(out, label)
+    if cause:
+        return cause
+    ran = lint_starts(out)[0]["cwd"]
+    if os.path.realpath(ran) != os.path.realpath(folder):
+        return "the lint ran in %r, want %r (%s)" % (ran, folder, label)
+    return None
+
+
+HEREDOC_PUSH = "git commit -F - <<'EOF'\nmsg\nEOF\ngit push origin topic"
+COMMIT_M_PUSH = "git commit -m msg\ngit push origin topic"
+
+
+def case_heredoc_commit_then_push(case_dir):
+    clone = bad_clone(case_dir)
+    return want_denied_in(guard_run(clone, HEREDOC_PUSH, case_dir), "a push after a heredoc commit", clone)
+
+
+def case_commit_m_then_push_control(case_dir):
+    clone = bad_clone(case_dir)
+    return want_denied_in(guard_run(clone, COMMIT_M_PUSH, case_dir), "the control: a push after git commit -m", clone)
+
+
+def case_cd_heredoc_commit_then_push(case_dir):
+    clone = make_pair(case_dir, MAIN_C, None)
+    other = bad_checkout(case_dir)
+    command = "cd %s && git commit -F - <<'EOF'\nmsg\nEOF\ngit push origin topic" % shlex.quote(other)
+    return want_denied_in(guard_run(clone, command, case_dir), "a cd, a heredoc commit, then a push", other)
+
+
+def two_pushes_case(template, label):
+    """`template` names the clone B (%(b)s) and the bad checkout A (%(a)s). B's push sends nothing. The second push,
+    from A after the commit, sends the bad note, so it is read in A."""
+    def check(case_dir):
+        clone = make_pair(case_dir, MAIN_C, None)
+        other = bad_checkout(case_dir)
+        command = template % {"a": shlex.quote(other), "b": shlex.quote(clone)}
+        return want_denied_in(guard_run(clone, command, case_dir), label, other)
+    return check
+
+
+def case_mkdir_cd_push(case_dir):
+    """`mkdir -p` a folder inside A, `cd` into it, then push. The folder exists before the push runs, so the push is
+    A's: git walks up from the new folder to A's repo. The shell starts in B, which has nothing to send."""
+    clone = make_pair(case_dir, MAIN_C, None)
+    other = bad_checkout(case_dir)
+    fresh = shlex.quote(os.path.join(other, "fresh"))
+    command = "mkdir -p %s; cd %s; git push origin topic" % (fresh, fresh)
+    return want_denied_in(guard_run(clone, command, case_dir), "mkdir, cd into a new folder of A, then a push", other)
+
+
+def case_cd_then_push_control(case_dir):
+    clone = make_pair(case_dir, MAIN_C, None)
+    other = bad_checkout(case_dir)
+    command = "cd %s; git push origin topic" % shlex.quote(other)
+    return want_denied_in(guard_run(clone, command, case_dir), "the control: cd into A, then a push", other)
+
+
+def unknown_folder_bare_push(template):
+    """A bare push after a `cd` the guard cannot read. The push is allowed, and the guard notes the lint it could not
+    run. `%(a)s` is the bad checkout the push would send the bad note from, if its folder were read."""
+    def check(case_dir):
+        clone = make_pair(case_dir, MAIN_C, None)
+        other = bad_checkout(case_dir)
+        command = template % {"a": shlex.quote(other)}
+        return want_unknown_note(guard_run(clone, command, case_dir), command, lints=0)
+    return check
+
+
+def case_cd_bare_push_control(case_dir):
+    clone = make_pair(case_dir, MAIN_C, None)
+    other = bad_checkout(case_dir)
+    command = "cd %s && git push" % shlex.quote(other)
+    return want_denied_in(guard_run(clone, command, case_dir), "the control: cd into A, then a bare push", other)
+
+
 # ---- the pin compare: the real bin/ste-changed, run on a clone whose pinned commit's lint files differ
 
 DRIFT_FILE = "hooks/route_match.py"   # a lint file in bin/ste-changed's LINT_FILES: a change to it is drift
@@ -885,6 +991,31 @@ CASES = [
     ("ste-push: `git -C \"$X\" commit -am m && git push` from B, with B's note dirty, is denied to push in its own "
      "call (an unreadable commit folder counts in the pushed tree)",
      folder_chain_case('git -C "$X" commit -am m && git push origin topic', ("b",), "b")),
+    # A push is read in the folder it runs in. A heredoc commit's body must not hide the push, a repeated push is read
+    # where it runs, a `mkdir` makes the folder a later `cd` enters, and a folder the guard cannot read is noted.
+    ("ste-push: a push after a `git commit -F -` heredoc is denied in its own checkout, whose topic holds the bad note",
+     case_heredoc_commit_then_push),
+    ("ste-push: the control, the same push after `git commit -m` is denied in the same checkout",
+     case_commit_m_then_push_control),
+    ("ste-push: `cd <A> && git commit -F - <<EOF` then a push is denied in A, the folder the push runs in",
+     case_cd_heredoc_commit_then_push),
+    ("ste-push: a second push after a heredoc commit is read in its own folder A, not the first push's folder B",
+     two_pushes_case("cd %(b)s\ngit push origin topic\ncd %(a)s\n"
+                     "git commit -F - <<'EOF'\nmsg\nEOF\ngit push origin topic",
+                     "a second push after a heredoc commit")),
+    ("ste-push: the control, the same second push after `git commit -m` is denied in A",
+     two_pushes_case("cd %(b)s\ngit push origin topic\ncd %(a)s\ngit commit -m msg\ngit push origin topic",
+                     "the control: a second push after git commit -m")),
+    ("ste-push: `mkdir -p <A>/fresh; cd <A>/fresh; git push` is denied in A, the repo the new folder sits in",
+     case_mkdir_cd_push),
+    ("ste-push: the control, `cd <A>; git push` with a known folder is denied in A",
+     case_cd_then_push_control),
+    ("ste-push: a bare push after `cd \"$(...)\"` is allowed and noted unknown, since its folder cannot be read",
+     unknown_folder_bare_push('cd "$(echo %(a)s)" && git push')),
+    ("ste-push: a bare push after `cd $HOME/x` is allowed and noted unknown, since its folder cannot be read",
+     unknown_folder_bare_push("cd $HOME/x && git push")),
+    ("ste-push: the control, a bare push after `cd <A>` with a known folder is denied in A",
+     case_cd_bare_push_control),
     ("ste-push: a pinned fail: false (report only) is allowed with no unknown note",
      with_case("with: fail: false", pinned_with('fail: "false"'), want_allowed_no_note)),
     ("ste-push: a pinned exclude naming the bad note is allowed with no unknown note",
