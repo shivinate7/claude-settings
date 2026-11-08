@@ -12,8 +12,8 @@ into a hook or check. This file is the fallback, not the enforcement. Tracking, 
 
 **Roles, if this session can spawn agents.** Pick the session's shape from my request: solo, one
 lane, or coordinator (`session-tiers`, the session shapes). One lane: one line of work, run with its own agents; a lane session is one, and runs Opus (`agent-model-cap`). Coordinator: a standing build. It starts triage and the batch runner, then lane sessions. Say the pick in one line before you start.<!-- rule:roles-pick-mode-from-request --> Solo: the request is a short list of edits with
-nothing to run in parallel. Build them yourself.<!-- rule:roles-solo-builds-short-edit-list --> In solo, a fresh reviewer reads the diff before merge only when it touches one of four things.
-They are a rule's behaviour, a guard's or check's verdict, program logic, or a record that files an owner ruling (round 1 checks two things only, decision `docs-only-prs-skip-review`). Other edits merge on passing checks alone.<!-- rule:roles-solo-reviews-logic-diffs-only --> A shape can grow: solo to one lane, one lane to coordinator. Say each switch in one line.<!-- rule:roles-solo-grows-switch-to-orchestrate --> Every session that spawns agents is an orchestrator.
+nothing to run in parallel. Build them yourself.<!-- rule:roles-solo-builds-short-edit-list --> In solo, a fresh reviewer reads the diff before merge only when it touches a rule's behaviour, a guard's or check's verdict, program logic, or an owner-ruling record.
+Round 1 checks two things only (decision `docs-only-prs-skip-review`). Other edits merge on passing checks alone.<!-- rule:roles-solo-reviews-logic-diffs-only --> A shape can grow: solo to one lane, one lane to coordinator. Say each switch in one line.<!-- rule:roles-solo-grows-switch-to-orchestrate --> Every session that spawns agents is an orchestrator.
 Every orchestrator but a solo session plans, briefs, verifies, reports. It writes records, docs, and briefs. It builds
 only when the change cannot move a verdict, one bounded command proves it, and the report
 names both. A change that touches a rule's behaviour, a guard's or check's verdict, or product code a
