@@ -2851,7 +2851,7 @@ class PrBase(unittest.TestCase):
         self.r.commit("lane edits other", other_txt="other v2\n")
         self.r.sh("update-ref", "-d", "refs/remotes/origin/main")
         rc, text = self.run_default()
-        self.assertIn("origin/main", text, "the run fell back to local main with no note naming the missing origin/main")
+        self.assertIn("no origin/main here, compared against the local main", text, "the run fell back to local main with no note saying so")
         self.assertEqual(rc, 0, "a clean lane on local main exited %d" % rc)
 
     def test_clean_stack_stays_quiet_against_its_base(self):  # control: a merge with no conflict is quiet on either base
