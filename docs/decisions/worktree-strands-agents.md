@@ -13,6 +13,7 @@ The call is the main session's when its payload has no `agent_id`. An agent's ow
 - An agent opens on the answer to its spawn: a user line whose `toolUseResult` has `status` `async_launched` and an `agentId`.
 - An agent reopens on the answer to a SendMessage whose `toolUseResult` has a `resumedAgentId`.
 - An agent closes on a terminal task notice for its id (completed, failed, killed or stopped). Only a record whose text starts with the tag counts as a notice. The record is a user record, a queued attachment or a queue-operation enqueue line. A hand-back that quotes a notice mid-text closes nothing. A notice whose summary says the agent "is waiting on its own background work" closes nothing: the agent may resume.
+- A notice text closes an agent only at its first record. The harness writes one notice on several records, and after a resume it can replay the old notice. The replay closes nothing.
 - An agent closes on the result of a TaskStop call, read by `stopped_ids`.
 
 Only lines that hold one of the keys are parsed. An unreadable file, a missing transcript and a failed import pass.

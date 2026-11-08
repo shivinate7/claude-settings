@@ -506,7 +506,8 @@ def once_per_notice(ids, text, seen):
     """ids, the first time this notice text is read, else none. The harness writes one notice on several
     records (the enqueue, the queued attachment, a queue-operation remove, the user record). After a
     SendMessage resume, a copy of the old notice can arrive again, and must not close the running agent.
-    A later notice of the same agent differs: it carries the resume call's tool-use id."""
+    A later notice of the same agent differs: it carries the resume call's tool-use id, or at least its own
+    `<usage>` counts."""
     if not ids:
         return ids
     key = text.strip()
