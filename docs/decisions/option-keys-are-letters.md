@@ -52,7 +52,7 @@ A letter also means the same option in the chat and on the page. Guard rule `opt
   - Known limit: only the writing session's own transcript is read. A chat question asked in another session is not compared.
   - Known limit: the chat and the page must match in punctuation. The compare drops only case, spacing and the marks `*`, `_` and `` ` ``, so a chat `-role` and a page `--role` differ and refuse.
   - Known limit: a reply that puts one cite above its options and another below is read by one side, so one of its items reads another item's lines. So is a reply that cites its items once before any option line and again below each question's options.
-  - Known limit: any line that opens with one letter and `)`, `.` or `:` plus a space reads as an option line, so a trailing `A: I recommend b.` after a footer cite flips the reply to the header read and can refuse a matching write. Rare; found in round 3 review.
+  - Known limit: a line that opens with one letter, a `)`, `.` or `:` and a space reads as an option line. A trailing `A: I recommend b.` can flip the read and refuse a matching write. It is rare.
   - Known limit: a cite's id ends at a space or at `*`, `_` or `` ` ``, the markdown marks (`PAGE_ITEM_CITE`). An item id is a slug of letters, digits and hyphens, so it holds none of them. An id with `_` would be cut short.
   - Known limit: an unreadable or missing transcript allows the write and logs one `noted` line.
   - Known limit: the prefix match works both ways, so a chat "Allow" matches a page "Allow merge --role", and the reverse passes too.
