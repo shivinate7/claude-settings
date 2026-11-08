@@ -9073,8 +9073,9 @@ sh("draft-pr: a perl body with a backtick span left unclosed, holding a $( ) gh 
    cwd=NOGIT, carries=DRAFT_REMEDY, lacks=DRAFT_LACKS)
 # A PowerShell here-string is shell text when a shell runs it: piped to or passed to `iex` or Invoke-Expression,
 # piped to `pwsh -Command -`, or built into a scriptblock. A bare gh pr create line in such a body runs, so it is
-# refused. A here-string held in a variable is data: a bare line in it runs nothing, so it is allowed, and so is
-# a `$( )` in a single-quoted body (literal). A `$( )` in a double-quoted body runs while the string is built.
+# refused. A here-string held in a variable is not read, even when a later line runs it (`iex $b`, `$b | iex`),
+# so it is allowed, and so is a `$( )` in a single-quoted body (literal). A `$( )` in a double-quoted body runs
+# while the string is built.
 PS_PR_LINE = "gh pr create -t x"
 PS_RUN_CASES = (
     ("piped to Invoke-Expression", '@"\n' + PS_PR_LINE + '\n"@ | Invoke-Expression'),
