@@ -13675,6 +13675,24 @@ class ReviewFixKeepsRounds(ReviewChainFixture):
         self.assert_refused(rc, out, err)
         self.assert_names(err, "Round 1", "design-reviewer")
 
+    def test_a_fix_check_that_drops_the_middle_of_three_round_lines_names_only_that_line(self):
+        # the middle line is the design FAIL that holds the earlier record open. The lines on either side are kept, and the refusal must name only the
+        # dropped line: a miss must not read the kept lines after it as missing too
+        lines = ("Round 1: reviewer, sonnet, PASS", "Round 1: design-reviewer, opus, FAIL", "Round 2: reviewer, sonnet, PASS")
+        dropped = (lines[0], lines[2])
+        comments = self.newest(lines)
+        self.assertEqual(record_state(self, comments[0]["body"], self.NEWEST), "open", "scope: the earlier record with the design FAIL in its middle does not read open")
+        self.assertEqual(record_state(self, record_text(head=self.LIVE, rounds=dropped, fix=(fix_check_line(verdict="PASS", head=self.NEWEST),)), self.LIVE),
+                         "done", "scope: the copy without the middle line does not read done on its own rules")
+        # control, green on the old code: every line, kept in order, is written
+        rc, out, err, _ = self.run_chain(self.NEWEST, comments, rounds=round_args(lines))
+        self.assertEqual(rc, 0, "control: a fix check that keeps every round line in order was refused:\n" + out + err)
+        rc, out, err, _ = self.run_chain(self.NEWEST, comments, rounds=round_args(dropped))
+        self.assert_refused(rc, out, err)
+        self.assert_names(err, "design-reviewer")
+        self.assertNotIn(lines[0], err, "the refusal names the kept line before the dropped one:\n" + err)
+        self.assertNotIn(lines[2], err, "the refusal names the kept line after the dropped one:\n" + err)
+
     def test_a_fix_check_that_keeps_every_round_line_is_written(self):
         comments = self.newest(self.DESIGN_FAIL)
         rc, out, err, _ = self.run_chain(self.NEWEST, comments, rounds=round_args(self.DESIGN_FAIL))
