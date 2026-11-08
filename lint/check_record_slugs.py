@@ -4,14 +4,17 @@
 Records live in the folders lint/layout.json marks as records. The UI crops long file names, so a slug is 32
 characters or fewer, not counting `.md`. Existing files are not checked or renamed.
 
-Also fails when the notes file holds two rows that start with the same `- <slug>:` (duplicate_note_slugs).
+Also fails when the lane's own diff adds a notes row whose `- <slug>:` the notes file already holds, or adds the same
+slug twice (lane_duplicate_slugs). A duplicate that main already holds does not fail a lane that adds none.
 
 Also fails when a debt file deleted, renamed out of the debt folder, or edited to drop its Feel line against
 origin/main was a feel-fix (a line starting `**Feel.**`) with no valid device-trial line (`**Device check.**`, then
 simulator or device, then an ISO time with a zone): a fix CI passes can still feel wrong on a device.
 
     python3 lint/check_record_slugs.py [file ...]
-        # files given: check those, skip git
+        # files given: check those, skip git; a duplicate anywhere in the notes file fails
+    python3 lint/check_record_slugs.py --list
+        # print every duplicate note slug, main's included, and exit 0
 
 The functions take a repo root, so lint/compliance_probes.py reads a child's records with them.
 """
@@ -139,16 +142,30 @@ def too_long(files, dirs):
 NOTE_ROW = re.compile(r"^- ([A-Za-z0-9][\w.-]*)[ \t]*:", re.M)
 
 
-def duplicate_note_slugs(text):
-    """The slugs that `text`, a notes file, writes as the start of two or more rows (`- <slug>:` at line start, spaces
-    before the colon allowed), in first-seen order, spelled as first written. Case does not tell slugs apart.
-    A slug named inside a row's text is not a row."""
+def note_slug_counts(text):
+    """({lowercased slug: slug as first written}, {lowercased slug: row count}) of the rows of `text`, a notes file."""
     first, seen = {}, {}
     for slug in NOTE_ROW.findall(text):
         key = slug.lower()
         first.setdefault(key, slug)
         seen[key] = seen.get(key, 0) + 1
+    return first, seen
+
+
+def duplicate_note_slugs(text):
+    """The slugs that `text`, a notes file, writes as the start of two or more rows (`- <slug>:` at line start, spaces
+    before the colon allowed), in first-seen order, spelled as first written. Case does not tell slugs apart.
+    A slug named inside a row's text is not a row."""
+    first, seen = note_slug_counts(text)
     return [first[key] for key, n in seen.items() if n > 1]
+
+
+def lane_duplicate_slugs(text, base_text):
+    """The duplicate slugs of `text` that the lane adds against `base_text`: a slug with more rows than the base held
+    that now has two or more. Editing a row of a duplicate the base already holds adds none."""
+    first, seen = note_slug_counts(text)
+    base = note_slug_counts(base_text)[1]
+    return [first[key] for key, n in seen.items() if n > 1 and n > base.get(key, 0)]
 
 
 def report_duplicates(dup):
@@ -157,17 +174,41 @@ def report_duplicates(dup):
               "or give each its own slug." % slug)
 
 
-def notes_text(root):
-    """The text of the first notes file that exists among layout.candidates, or "" when none does."""
+def notes_file(root):
+    """The path of the first notes file that exists among layout.candidates, or None when none does."""
     for rel in layout.candidates(root, "debt-notes"):
-        full = os.path.join(root, rel)
-        if os.path.isfile(full):
-            with open(full, encoding="utf-8", errors="replace") as fh:
-                return fh.read()
-    return ""
+        if os.path.isfile(os.path.join(root, rel)):
+            return rel
+    return None
+
+
+def notes_text(root):
+    """The text of the notes file, or "" when none exists."""
+    rel = notes_file(root)
+    if rel is None:
+        return ""
+    with open(os.path.join(root, rel), encoding="utf-8", errors="replace") as fh:
+        return fh.read()
+
+
+def base_notes_text(root, rel, base="origin/main"):
+    """The text of `rel` at the merge base of `base` and HEAD, or "" when the base has no such file. Raises Unknown when
+    git cannot say, or cannot show a file the base holds."""
+    sha = git_names(root, "merge-base", base, "HEAD")[0].strip()
+    if not git_names(root, "ls-tree", "-z", "--name-only", sha, "--", rel):
+        return ""
+    return "\n".join(show(root, sha, rel)) + "\n"
 
 
 def main(args):
+    if args == ["--list"]:
+        try:
+            for slug in duplicate_note_slugs(notes_text(ROOT)):
+                print("check_record_slugs: duplicate note slug: %s" % slug)
+        except layout.LayoutError as err:
+            print("check_record_slugs: FAIL: " + str(err))
+            return 1
+        return 0
     unknown = [a for a in args if a.startswith("-")]
     if unknown:  # read as a file name, an unknown option would skip git and check nothing
         print("check_record_slugs: FAIL: unknown option: %s" % " ".join(unknown))
@@ -188,6 +229,9 @@ def main(args):
         else:
             files, moved = changes(ROOT)
             feel = unchecked_feel_debts(ROOT, moved)
+            rel = notes_file(ROOT)
+            if rel is not None:  # only rows the lane adds fail; --list names the duplicates main holds
+                dup = lane_duplicate_slugs(notes_text(ROOT), base_notes_text(ROOT, rel))
     except layout.LayoutError as err:
         print("check_record_slugs: FAIL: " + str(err))
         return 1
