@@ -103,7 +103,9 @@ through the same `cat-file`, so the second read adds no process start. A finder 
 find_stale (STALE001, STALE002, STALE008) reads every tracked .md when the range removes or renames a path, or a touched
 .py no longer binds a name it bound at base, or changes or removes a module-level literal. Otherwise it reads only the
 touched .md whose added lines hold a value cite of a code file. find_rewords (STALE006) reads every tracked .md when a
-rule sentence in a RULE_FILES file is removed or changed, with no removed path or name needed.
+rule sentence in a RULE_FILES file loses a 5-word run that no rule sentence holds at head (`removed_rule_runs`), with no
+removed path or name needed. A rule sentence that only gains words, none a negator, or is only reflowed lists no tree
+and starts 4.
 A touched .py also loads the py-facts script once, in-process (no start, no .pyc). It writes no file and leaves no process running.
 STALE008 starts at most the one `cat-file`. It reads every tracked .md, through the same `ls-tree` and `cat-file`, only
 when a touched .py changed or removed a module-level literal, as the removed-name read does. Otherwise it reads only the touched .md
