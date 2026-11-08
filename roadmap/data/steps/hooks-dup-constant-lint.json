@@ -1,0 +1,11 @@
+{
+  "title": "A lint fails when a hooks/*.py module assigns the same top-level name twice",
+  "why": "Lane record-after-each-round (session_013NEJL3gDkEvHawhJUPygWa), 16:42 CST Nov 8. Incident: #1678 defined RECORD_REASON a second time in hooks/guard_merge.py. That silently replaced the RECORD_REASON of roadmap-one-writer, which guard.py imports, so roadmap-one-writer refusals printed the review-record text. No test pinned the reason text. A builder found it while fixing round 1, and it was fixed in e2f1acd9c (renamed REVIEW_RECORD_*). Harm: a wrong refusal text sends the reader to the wrong remedy. Fix shape: an ast lint over hooks/*.py, top-level Assign and AnnAssign only, with an allow list for deliberate reassignments. Red case: a module that assigns one top-level name twice fails.",
+  "note": "",
+  "phase": "now",
+  "owner": "claude-settings",
+  "lane": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB) to route",
+  "status": "todo",
+  "order": 838,
+  "updatedAt": "2026-11-08T16:43:00-06:00"
+}
