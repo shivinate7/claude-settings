@@ -345,6 +345,31 @@ def approved_heredoc(project):
     return {"pre": decision, "lifted": project.lifted(), "message": message}
 
 
+# A PowerShell call whose text holds `\"` before its write. PowerShell reads `\` as a path character,
+# so `"C:\"` closes at its quote and the write is a plain Set-Content. The bash reading takes `\"` as
+# an escaped quote, so the text is one open string and the write is hidden. The watch must read a
+# PowerShell call the way PowerShell does, so an approved lift in such a call is explained and kept.
+PS_QUOTED_WRITE = ('echo "C:\\" ; Set-Content .claude/settings.local.json \'' + LIFT
+                   + '\' ; echo \\"D"')
+PS_QUOTED_NO_WRITE = 'echo "C:\\" ; Get-Date ; echo \\"D"'
+
+
+@case("a PowerShell call that writes an approved cap lift is NOT reverted", "pass")
+def approved_powershell_write(project):
+    project.settle()
+    write(project.settings, LIFT)  # the write the approved call made
+    message = project.post("PowerShell", {"command": PS_QUOTED_WRITE})
+    return {"pre": "n/a", "lifted": project.lifted(), "message": message}
+
+
+@case("a PowerShell call that writes no cap lift leaves an unexplained lift reverted", "bypass")
+def unexplained_powershell_lift(project):
+    project.settle()
+    write(project.settings, LIFT)  # a lift that no part of the call writes
+    message = project.post("PowerShell", {"command": PS_QUOTED_NO_WRITE})
+    return {"pre": "n/a", "lifted": project.lifted(), "message": message}
+
+
 @case("a write to an unrelated file triggers nothing", "pass")
 def unrelated_file(project):
     project.settle()
