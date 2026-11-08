@@ -15618,11 +15618,12 @@ SUB_FILES = {**BASE_FILES, "tests/test_b.py": "def test_top():\n    assert 1\n",
 SUB_EDIT = "def test_sub():\n    assert 2\n"
 
 
-def _sub_names(where, *revs):
-    """The names `git diff --name-only` prints from sub/. A fixture checks them before a case relies on them."""
-    done = run_vcs(os.path.join(where, "sub"), "diff", "--name-only", *revs)
+def _folder_names(where, folder, *revs, flags=()):
+    """The names `git diff --name-only` prints from `folder`, with `flags` added. A fixture checks them before a case
+    relies on them."""
+    done = run_vcs(os.path.join(where, folder), "diff", *flags, "--name-only", *revs)
     if done.returncode != 0:
-        sys.exit("fixture setup failed: git diff in sub/ of %r: %s" % (where, done.stderr.strip()))
+        sys.exit("fixture setup failed: git diff in %s/ of %r: %s" % (folder, where, done.stderr.strip()))
     return done.stdout.split()
 
 
@@ -15632,9 +15633,9 @@ def _sub_open_edit(w, relative):
     write(os.path.join(w, SUB_TEST), SUB_EDIT)
     if relative:
         _must(w, "config", "diff.relative", "true")
-        if _sub_names(w, "HEAD") != ["tests/test_b.py"]:
+        if _folder_names(w, "sub", "HEAD") != ["tests/test_b.py"]:
             sys.exit("fixture setup failed: diff.relative did not name %r relative to sub/ in %r" % (SUB_TEST, w))
-    elif SUB_TEST not in _sub_names(w, "HEAD"):
+    elif SUB_TEST not in _folder_names(w, "sub", "HEAD"):
         sys.exit("fixture setup failed: the default config did not name %r from sub/ in %r" % (SUB_TEST, w))
 
 
@@ -15644,7 +15645,7 @@ def _sub_commit_edit(w):
     write(os.path.join(w, SUB_TEST), SUB_EDIT)
     _commit_merge(w)
     _must(w, "config", "diff.relative", "true")
-    if _sub_names(w, "HEAD^1", "HEAD") != ["tests/test_b.py"]:
+    if _folder_names(w, "sub", "HEAD^1", "HEAD") != ["tests/test_b.py"]:
         sys.exit("fixture setup failed: diff.relative did not name the merge commit's %r relative to sub/ in %r"
                  % (SUB_TEST, w))
 
@@ -15660,6 +15661,95 @@ sh("builder-refuse: a builder's merge commit that edits sub/tests/test_b.py, fro
 _bd_sub_open_default = diff_repo("bd-sub-open-default", lambda w: _sub_open_edit(w, False), files=SUB_FILES)
 sh("builder-refuse: the same open-merge edit to sub/tests/test_b.py under the default config, from sub/, is denied "
    "at commit", COMMIT, "deny", rule=BDIFF, cwd=os.path.join(_bd_sub_open_default, "sub"), agent_id="bld1",
+   agent_type="builder")
+
+# With `diff.relative` set, `git diff` names only the paths under the folder it runs in, so from docs/ a builder's edit
+# to the top-level tests/test_a.py is named by no plain diff. Only `--no-relative` on each name-producing diff keeps the
+# refusal. Each red row runs from docs/ and reads the edit down one call path: the working tree against HEAD, against
+# git's open merge, a committed change at push, and a merge commit at commit. Each fixture checks that premise first.
+# Each control builds the same change under the default config, where the refusal holds with or without the flag.
+DOCS_FILES = {**BASE_FILES, "docs/notes.md": "notes\n"}
+
+
+def _docs_edit(w):
+    write(os.path.join(w, TEST_A), "def test_a():\n    assert 2\n")
+
+
+def _docs_relative(w, relative, *revs):
+    """With `relative`, set diff.relative and check that the plain diff from docs/ names no path while --no-relative
+    names the test file. Without it, check that the default diff from docs/ names the test file."""
+    if not relative:
+        if TEST_A not in _folder_names(w, "docs", *revs):
+            sys.exit("fixture setup failed: the default config did not name %r from docs/ in %r" % (TEST_A, w))
+        return
+    _must(w, "config", "diff.relative", "true")
+    if _folder_names(w, "docs", *revs):
+        sys.exit("fixture setup failed: diff.relative still named a path from docs/ in %r" % w)
+    if TEST_A not in _folder_names(w, "docs", *revs, flags=("--no-relative",)):
+        sys.exit("fixture setup failed: --no-relative did not name %r from docs/ in %r" % (TEST_A, w))
+
+
+def _docs_plain(w, relative):
+    """A builder's uncommitted edit to the top-level test file."""
+    _docs_edit(w)
+    _docs_relative(w, relative, "HEAD")
+
+
+def _docs_open(w, relative):
+    """A builder's edit to the top-level test file, made while git's clean merge of main is still open."""
+    _clean_merge_open(w)
+    _docs_edit(w)
+    _docs_relative(w, relative, "HEAD")
+
+
+def _docs_committed(w, relative):
+    """A builder's plain commit of the top-level test file, read again at push."""
+    _docs_edit(w)
+    _must(w, "add", "-A")
+    _must(w, *IDENT, "commit", "-q", "-m", "builder edit")
+    _docs_relative(w, relative, "HEAD^", "HEAD")
+
+
+def _docs_merge_committed(w, relative):
+    """A builder's merge commit that edits the top-level test file, read again at commit."""
+    _clean_merge_open(w)
+    _docs_edit(w)
+    _commit_merge(w)
+    _docs_relative(w, relative, "HEAD^1", "HEAD")
+
+
+_bd_docs_plain = diff_repo("bd-docs-plain-rel", lambda w: _docs_plain(w, True), files=DOCS_FILES)
+sh("builder-refuse: a builder's edit to tests/test_a.py, from docs/ with diff.relative set, is denied at commit",
+   COMMIT, "deny", rule=BDIFF, cwd=os.path.join(_bd_docs_plain, "docs"), agent_id="bld1", agent_type="builder")
+_bd_docs_plain_ctl = diff_repo("bd-docs-plain-ctl", lambda w: _docs_plain(w, False), files=DOCS_FILES)
+sh("builder-refuse: the same edit to tests/test_a.py, from docs/ under the default config, is denied at commit",
+   COMMIT, "deny", rule=BDIFF, cwd=os.path.join(_bd_docs_plain_ctl, "docs"), agent_id="bld1", agent_type="builder")
+
+_bd_docs_open = diff_repo("bd-docs-open-rel", lambda w: _docs_open(w, True), files=DOCS_FILES)
+sh("builder-refuse: a builder's edit to tests/test_a.py in an open merge, from docs/ with diff.relative set, is "
+   "denied at commit", COMMIT, "deny", rule=BDIFF, cwd=os.path.join(_bd_docs_open, "docs"), agent_id="bld1",
+   agent_type="builder")
+_bd_docs_open_ctl = diff_repo("bd-docs-open-ctl", lambda w: _docs_open(w, False), files=DOCS_FILES)
+sh("builder-refuse: the same open-merge edit to tests/test_a.py, from docs/ under the default config, is denied "
+   "at commit", COMMIT, "deny", rule=BDIFF, cwd=os.path.join(_bd_docs_open_ctl, "docs"), agent_id="bld1",
+   agent_type="builder")
+
+_bd_docs_committed = diff_repo("bd-docs-committed-rel", lambda w: _docs_committed(w, True), files=DOCS_FILES)
+sh("builder-refuse: a builder's committed edit to tests/test_a.py, from docs/ with diff.relative set, is denied at "
+   "push", PUSH, "deny", rule=BDIFF, cwd=os.path.join(_bd_docs_committed, "docs"), agent_id="bld1",
+   agent_type="builder")
+_bd_docs_committed_ctl = diff_repo("bd-docs-committed-ctl", lambda w: _docs_committed(w, False), files=DOCS_FILES)
+sh("builder-refuse: the same committed edit to tests/test_a.py, from docs/ under the default config, is denied at "
+   "push", PUSH, "deny", rule=BDIFF, cwd=os.path.join(_bd_docs_committed_ctl, "docs"), agent_id="bld1",
+   agent_type="builder")
+
+_bd_docs_merge = diff_repo("bd-docs-merge-rel", lambda w: _docs_merge_committed(w, True), files=DOCS_FILES)
+sh("builder-refuse: a builder's merge commit that edits tests/test_a.py, from docs/ with diff.relative set, is denied "
+   "at commit", COMMIT, "deny", rule=BDIFF, cwd=os.path.join(_bd_docs_merge, "docs"), agent_id="bld1",
+   agent_type="builder")
+_bd_docs_merge_ctl = diff_repo("bd-docs-merge-ctl", lambda w: _docs_merge_committed(w, False), files=DOCS_FILES)
+sh("builder-refuse: the same merge commit that edits tests/test_a.py, from docs/ under the default config, is denied "
+   "at commit", COMMIT, "deny", rule=BDIFF, cwd=os.path.join(_bd_docs_merge_ctl, "docs"), agent_id="bld1",
    agent_type="builder")
 
 # An untracked file is listed from the checkout's top, whatever folder the command runs in. The builder's test file
