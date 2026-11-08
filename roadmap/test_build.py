@@ -18,6 +18,7 @@ import build  # noqa: E402
 STEP = {"title": "t", "status": "open", "phase": "p", "order": 1, "note": "n", "updatedAt": "2026-10-26T00:00:00Z"}
 HERE = pathlib.Path(__file__).resolve().parent
 CONFLICT = "<<<<<<< HEAD\na\n=======\nb\n>>>>>>> 1234567 (other)\n"
+NO_KEY = object()  # step() writes no gap field at all
 
 
 def words(n):
@@ -151,15 +152,33 @@ class NoteCapHook(unittest.TestCase):
             self.fail(f"git {' '.join(args)}: {r.stdout}{r.stderr}")
         return r
 
-    def step(self, sid, n, status="open", where=None):
+    def write(self, sid, d, where=None):
         path = (where or self.repo) / "roadmap" / "data" / "steps" / f"{sid}.json"
-        path.write_text(json.dumps(dict(STEP, status=status, note=words(n))), encoding="utf-8")
+        path.parent.mkdir(parents=True, exist_ok=True)  # git drops an emptied folder on a branch switch
+        path.write_text(json.dumps(d), encoding="utf-8")
+
+    def step(self, sid, n, status="open", gap=None, where=None):
+        """Write step sid with n note words. gap defaults to gap-<sid>; NO_KEY omits the field."""
+        d = dict(STEP, status=status, note=words(n))
+        if gap is None:
+            d["gap"] = f"gap-{sid}"
+        elif gap is not NO_KEY:
+            d["gap"] = gap
+        self.write(sid, d, where)
+
+    def stage(self, *sids):
+        """Stage every change, then assert the named step files are staged: the scope a gap test probes."""
+        self.git("add", "-A")
+        staged = self.git("diff", "--cached", "--name-only").stdout.split()
+        for sid in sids:
+            self.assertIn(f"roadmap/data/steps/{sid}.json", staged,
+                          "scope: the step is not staged, so the test probes nothing")
 
     def commit(self, msg="m", *extra, cwd=None):
         return self.git("commit", "-q", "-m", msg, *extra, cwd=cwd, check=False)
 
-    def assert_refused(self, r, *names):
-        self.assertNotEqual(r.returncode, 0, r.stdout + r.stderr)
+    def assert_refused(self, r, *names, why=None):
+        self.assertNotEqual(r.returncode, 0, why or r.stdout + r.stderr)
         for name in names:
             self.assertIn(name, r.stdout + r.stderr)
 
@@ -175,7 +194,7 @@ class NoteCapHook(unittest.TestCase):
         self.assert_refused(self.commit("grow c122"), "c122 (263 words)")
 
     def seed(self, *steps):
-        """Commit steps (sid, words[, status]) with the hook off, as if an older writer had."""
+        """Commit steps (sid, words[, status[, gap]]) with the hook off, as if an older writer had."""
         for st in steps:
             self.step(*st)
         self.git("add", "-A")
@@ -288,7 +307,7 @@ class NoteCapHook(unittest.TestCase):
     def test_non_utf8_filename_does_not_crash(self):
         steps = os.fsencode(self.repo / "roadmap" / "data" / "steps")
         with open(steps + b"/c\xff.json", "w", encoding="utf-8") as f:
-            f.write(json.dumps(dict(STEP, note=words(5))))
+            f.write(json.dumps(dict(STEP, note=words(5), gap="key-nonutf8")))
         self.git("add", "-A")
         r = self.commit()
         self.assert_passed(r)
@@ -469,6 +488,112 @@ exit 0
         self.step("c2", 300)
         self.git("add", "-A")
         self.assert_refused(self.commit(), "c2 (300 words)")
+
+    # Gap keys: a step's "gap" names the gap it closes, and two open steps may not hold one key.
+    # Keys compare after strip and lowercase. A key of a done step never blocks.
+
+    def test_gap_new_step_on_an_open_key_is_refused(self):
+        self.seed(("c1", 10, "open", "shared-key"))
+        self.step("c2", 10, gap="shared-key")
+        self.stage("c2")
+        self.assert_refused(self.commit(), "c1", "c2", why="a new step on a key an open step holds was committed")
+
+    def test_gap_shared_words_with_different_keys_pass(self):
+        self.step("c1", 10, gap="key-one")
+        self.step("c2", 10, gap="key-two")
+        self.stage("c1", "c2")
+        self.assert_passed(self.commit())
+
+    def test_gap_key_of_a_done_step_does_not_block(self):
+        self.seed(("c1", 10, "done", "shared-key"))
+        self.step("c2", 10, gap="shared-key")
+        self.stage("c2")
+        self.assert_passed(self.commit())
+
+    def test_gap_new_done_step_on_an_open_key_passes(self):
+        self.seed(("c1", 10, "open", "shared-key"))
+        self.step("c2", 10, "done", gap="shared-key")
+        self.stage("c2")
+        self.assert_passed(self.commit())
+
+    def test_gap_done_to_open_flip_onto_an_open_key_is_refused(self):
+        self.seed(("c1", 10, "open", "shared-key"), ("c2", 10, "done", "shared-key"))
+        self.step("c2", 10, "open", gap="shared-key")
+        self.stage("c2")
+        self.assert_refused(self.commit(), "c1", "c2", why="a done step flipped open onto a held key was committed")
+
+    def test_gap_two_new_steps_on_one_key_in_one_commit_are_refused(self):
+        self.step("c1", 10, gap="shared-key")
+        self.step("c2", 10, gap="shared-key")
+        self.stage("c1", "c2")
+        self.assert_refused(self.commit(), "c1", "c2", why="two new steps on one key were committed together")
+
+    def test_gap_new_open_step_with_no_key_is_refused(self):
+        self.step("c1", 10, gap=NO_KEY)
+        self.stage("c1")
+        self.assert_refused(self.commit(), "c1", "gap", why="a new open step with no gap field was committed")
+
+    def test_gap_empty_blank_null_or_non_string_key_counts_as_no_key(self):
+        self.write("c1", dict(STEP, note=words(10), gap=""))
+        self.write("c2", dict(STEP, note=words(10), gap="   "))
+        self.write("c3", dict(STEP, note=words(10), gap=7))
+        self.write("c4", dict(STEP, note=words(10), gap=None))
+        self.stage("c1", "c2", "c3", "c4")
+        self.assert_refused(self.commit(), "c1", "c2", "c3", "c4", "gap",
+                            why="a new open step whose gap is blank, null or not a string was committed")
+
+    def test_gap_edit_of_a_keyless_step_passes(self):
+        self.seed(("c1", 10, "open", NO_KEY))
+        self.step("c1", 12, gap=NO_KEY)
+        self.stage("c1")
+        self.assert_passed(self.commit())
+
+    def test_gap_edit_inside_a_pair_that_shared_a_key_at_head_passes(self):
+        self.seed(("c1", 10, "open", "shared-key"), ("c2", 10, "open", "shared-key"))
+        self.step("c1", 12, gap="shared-key")
+        self.step("c2", 12, gap="shared-key")
+        self.stage("c1", "c2")
+        self.assert_passed(self.commit())
+
+    def test_gap_merge_of_two_same_key_adds_is_refused(self):
+        self.git("checkout", "-q", "-b", "other")
+        self.step("c2", 10, gap="shared-key")
+        self.stage("c2")
+        self.assert_passed(self.commit("other side adds c2"))
+        self.git("checkout", "-q", "roadmap")
+        self.step("c1", 10, gap="shared-key")
+        self.stage("c1")
+        self.assert_passed(self.commit("roadmap side adds c1"))
+        self.git("merge", "-q", "--no-commit", "--no-ff", "other")
+        self.stage("c2")
+        self.assert_refused(self.commit("merge"), "c1", "c2",
+                            why="a merge that brings a second step onto a held key was committed")
+
+    def test_gap_closing_the_holder_in_the_same_commit_frees_its_key(self):
+        self.seed(("c1", 10, "open", "shared-key"))
+        self.step("c1", 10, "done", gap="shared-key")
+        self.step("c2", 10, gap="shared-key")
+        self.stage("c1", "c2")
+        self.assert_passed(self.commit())
+
+    def test_gap_key_compare_ignores_case_and_trailing_space(self):
+        self.seed(("c1", 10, "open", "Foo "))
+        self.step("c2", 10, gap="foo")
+        self.stage("c2")
+        self.assert_refused(self.commit(), "c1", "c2",
+                            why="a key differing only in case and trailing space was not matched")
+
+    def test_gap_key_compare_ignores_leading_space(self):
+        self.seed(("c1", 10, "open", "foo"))
+        self.step("c2", 10, gap=" foo")
+        self.stage("c2")
+        self.assert_refused(self.commit(), "c1", "c2", why="a key differing only in leading space was not matched")
+
+    def test_gap_collision_is_found_among_a_full_size_index(self):
+        self.seed(*[(f"s{i:03d}", 10, "open", f"key-{i:03d}") for i in range(200)])
+        self.step("fresh", 10, gap="key-117")
+        self.stage("fresh")
+        self.assert_refused(self.commit(), "s117", "fresh", why="a key held by one of 200 open steps was not matched")
 
 
 if __name__ == "__main__":
