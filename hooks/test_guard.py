@@ -10099,6 +10099,15 @@ bash_post("review-record: a record with no Head line is refused, gh pr comment -
           "deny", rule=REVIEW_RULE)
 bash_post("review-record: a record with a 39-digit Head is refused, gh api -f body=",
           "%s -f 'body=%s'" % (API_CMD, REVIEW_SHORT_HEAD), "deny", rule=REVIEW_RULE)
+# Two bodies in one call: `gh api -f body=` twice posts both, and the guard judges both. A good record and a stale one
+# are refused whichever comes first, so a check that reads only the first or only the last body fails here.
+TWO_BODIES = "%s -f 'body=%s' -f 'body=%s'"
+bash_post("review-record: a good record then a stale one in one call is refused, gh api -f body= twice",
+          TWO_BODIES % (API_CMD, review_record(), review_record(head=REVIEW_OLD)), "deny", rule=REVIEW_RULE,
+          carries=(REVIEW_RENDER,))
+bash_post("review-record: a stale record then a good one in one call is refused, gh api -f body= twice",
+          TWO_BODIES % (API_CMD, review_record(head=REVIEW_OLD), review_record()), "deny", rule=REVIEW_RULE,
+          carries=(REVIEW_RENDER,))
 
 
 # The form cases. A record is its lines up to the CI line: prose after that line, with no `---`, is refused. The judge sees
