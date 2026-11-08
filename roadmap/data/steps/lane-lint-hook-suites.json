@@ -1,11 +1,11 @@
 {
   "title": "Lane lint runs the hooks test suites that load a file the lane changed",
   "why": "`merge --lane-lint` and `ci-job checks --lint` run no hooks/test_*.py suite, so a hooks/ fixture change that breaks another hooks suite reaches the batch. That happened with #1678: test_wrappers.py split cases, and the batch dropped #1794 (coordinator, 02:04 CST Nov 8).",
-  "note": "Fix: lane lint also runs each hooks/test_*.py suite that imports or loads a file the diff touches. Bound it within decision lanes-run-no-full-ci-job (touched tests only, never the full run), and state the cost in the record (suites run, process starts, per lane lint). Red case first: a diff that touches a hooks fixture another suite loads, and today's lane lint passes it. Control: a diff that touches no hooks file runs no hooks suite. Related: step windows-tests-for-touched-files. #1678 is re-handed at 29e938909. Queue fix (owner 13:20 CST Nov 7). Slug from the coordinator. Filed 02:05 CST Nov 8. Lane session_013NEJL3JoPTyn7Ny4jUb88L started it (coordinator, 02:07 CST Nov 8).",
+  "note": "Fix: lane lint also runs each hooks/test_*.py suite that imports or loads a file the diff touches. Bound it within decision lanes-run-no-full-ci-job (touched tests only, never the full run), and state the cost in the record (suites run, process starts, per lane lint). Red case first: a diff that touches a hooks fixture another suite loads, and today's lane lint passes it. Control: a diff that touches no hooks file runs no hooks suite. Related: step windows-tests-for-touched-files. #1678 is re-handed at 29e938909. Queue fix (owner 13:20 CST Nov 7). Slug from the coordinator. Filed 02:05 CST Nov 8. Lane session_013NEJL3JoPTyn7Ny4jUb88L started it (coordinator, 02:07 CST Nov 8). Ready as #1844 (bfe1d837d), with runner 8; review record posted, round 3 PASS, net value positive, lane lint PASS (lane, 04:09 CST Nov 8). Lane lint covers the `checks` job only (coordinator, 02:57 CST Nov 8). Follow-up PR in the same lane, started 04:09 CST: the merge and guard suites under their own time limit, Merge after: #1844. The lane files four notes in it: the import chain misses path loads inside an intermediate module; a loop-variable path is missed; two concurrent lane lints collide on `git fetch origin main`; a lane-lint time-out mid-run prints \"no verdict line\" FAILs.",
   "phase": "now",
-  "status": "doing",
+  "status": "ready",
   "order": 565,
   "owner": "triage",
   "lane": "session_013NEJL3JoPTyn7Ny4jUb88L",
-  "updatedAt": "2026-11-08T01:44:00-06:00"
+  "updatedAt": "2026-11-08T04:10:00-06:00"
 }
