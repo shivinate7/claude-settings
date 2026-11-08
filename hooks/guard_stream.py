@@ -71,7 +71,7 @@ LIVE_STREAM_REASON = (
     "and the agent that started it. "
     "Remedy: run the command in the foreground with a timeout, or in the background and "
     "wait for its completion notice. To wait on a pid, use `bin/wait-pid PID [--timeout SECS]`. "
-    "To wait until a clock time, use `wait-until TIME [--timeout SECS]`."
+    "To wait until a clock time, use `bin/wait-until TIME [--timeout SECS]`."
 )
 
 
@@ -392,7 +392,7 @@ def waiter_verdict(segments, background: bool) -> str:
 WAITER_REASON = (
     "a pause between polls turns waiting into a loop of turns that each print a word. "
     "Remedy: wait for the CI-wake notice that follows gh pr ready. "
-    "To wait until a clock time, use `wait-until TIME [--timeout SECS]`, with TIME an ISO-8601 instant "
+    "To wait until a clock time, use `bin/wait-until TIME [--timeout SECS]`, with TIME an ISO-8601 instant "
     "that has a zone. To wait on one pid, use `bin/wait-pid PID [--timeout SECS]`. "
     "To wait for another condition, run the long command in the background and wait for its completion "
     "notice. In the background, one pause of any length followed by a command is allowed, and so is a "
@@ -563,7 +563,7 @@ PATTERN_POLLER_REASON = (
     "every process whose command line names it, including this session's own wrapper for the "
     "same wait, so the condition can stay true long after the work is done. "
     "Remedy: wait on one pid with `bin/wait-pid PID [--timeout SECS]`, which also takes a job a stall "
-    "left behind. To wait until a clock time, use `wait-until TIME [--timeout SECS]`. "
+    "left behind. To wait until a clock time, use `bin/wait-until TIME [--timeout SECS]`. "
     "To wait for CI, wait for the CI-wake notice that follows gh pr ready."
 )
 
