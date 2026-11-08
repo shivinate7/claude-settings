@@ -1143,6 +1143,15 @@ path = os.path.join("docs", "guide.md")  # a checks suite that reads one tracked
 sys.exit(1 if os.path.exists(path) and "BROKEN" in open(path, encoding="utf-8").read() else 0)
 '''
 
+BODY_LINT = '''import os
+with open(__RECORD__, "w", encoding="utf-8", newline="") as f:  # the merge's own lint writes the PR body its step saw
+    f.write(os.environ.get("PR_BODY", "<unset>"))
+'''
+BODY_CHECKS_YML = CHECKS_YML + ("      - name: Record the PR body\n        env:\n          PR_BODY: ${{ github.event.pull_request.body }}\n"
+                                "        run: python3 lint/record_body.py\n")  # a lint step: the merge's own lint runs it with the PR body
+MERGE_PR_BODY = "The lane's PR body, read by the merge's own lint.\n"
+INHERITED_PR_BODY = "An inherited body, never the lane's.\n"
+
 class SmallBaseMove(Env):
     """Main moved, but only by paths that no CI job of the batch reads (merge-needs-current-base, step c150).
     The real ci-scope.sh and the real bin/ci-job run against a fixture workflow whose `checks` job holds one cross-file lint:
@@ -1208,8 +1217,8 @@ class SmallBaseMove(Env):
         self.assertIsNotNone(refusal)
         self.assertIn("does not hold main", refusal)
 
-    def scoped(self, workflow=CHECKS_YML, scope=True):
-        """Main and feat both gain the CI files; feat then holds main's tip."""
+    def scoped(self, workflow=CHECKS_YML, scope=True, extra=None):
+        """Main and feat both gain the CI files, and the `extra` files ({path: text}); feat then holds main's tip."""
         o = self.other
         sh(o, "git", "fetch", "-q", "origin"); sh(o, "git", "checkout", "-q", "-B", "main", "origin/main")
         if scope:
@@ -1221,6 +1230,8 @@ class SmallBaseMove(Env):
         put(os.path.join(o, "hooks/test_reads_guide.py"), DOC_SUITE)
         put(os.path.join(o, "hooks/x.py"), "X = 1\n")
         put(os.path.join(o, "docs/shared.md"), "one\ntwo\nthree\nfour\nfive\n")
+        for path, text in (extra or {}).items():
+            put(os.path.join(o, path), text)
         sh(o, "git", "add", "-A"); sh(o, "git", "commit", "-qm", "ci files"); sh(o, "git", "push", "-q", "origin", "main")
         sh(o, "git", "checkout", "-q", "-B", "feat", "origin/feat"); sh(o, "git", "merge", "-q", "--no-edit", "main"); sh(o, "git", "push", "-q", "origin", "feat")
 
@@ -1256,6 +1267,36 @@ class SmallBaseMove(Env):
         rc, out = self.run_merge("7", "--confirm")
         self.assertEqual(rc, 0, out)
         self.assertTrue(self.host.merged, out)
+
+    def record_body_scoped(self, record):
+        """A docs-only main move, and a checks step that writes the PR body its lint sees to `record`."""
+        self.scoped(workflow=BODY_CHECKS_YML, extra={"lint/record_body.py": BODY_LINT.replace("__RECORD__", repr(record))})
+        self.on("main", {"docs/guide.md": "# Guide\n"})
+
+    def test_the_merges_own_lint_hands_the_pr_body_to_ci_job(self):
+        record = os.path.join(self.t, "body-seen.txt")
+        self.host.body = MERGE_PR_BODY
+        self.record_body_scoped(record)
+        rc, out = self.run_merge("7", "--confirm")
+        self.assertEqual(rc, 0, out)
+        self.assertTrue(self.host.merged, out)
+        self.assertTrue(os.path.exists(record), "the merge's own lint never ran the record step: " + out)
+        with open(record, encoding="utf-8", newline="") as f:
+            self.assertEqual(f.read(), MERGE_PR_BODY, "the merge's own lint did not get the lane's PR body")
+
+    def test_an_inherited_pr_body_file_never_reaches_the_merges_own_lint(self):
+        record = os.path.join(self.t, "body-seen.txt")
+        inherited = os.path.join(self.t, "inherited-body.md")
+        with open(inherited, "w", encoding="utf-8", newline="") as f:
+            f.write(INHERITED_PR_BODY)
+        self.host.body = MERGE_PR_BODY
+        self.record_body_scoped(record)
+        with unittest.mock.patch.dict(os.environ, {"CI_JOB_PR_BODY_FILE": inherited}):
+            rc, out = self.run_merge("7", "--confirm")
+        self.assertEqual(rc, 0, out)
+        self.assertTrue(os.path.exists(record), "the merge's own lint never ran the record step: " + out)
+        with open(record, encoding="utf-8", newline="") as f:
+            self.assertNotEqual(f.read(), INHERITED_PR_BODY, "an inherited CI_JOB_PR_BODY_FILE reached the merge's own lint")
 
     def test_the_preview_says_a_docs_only_move_keeps_the_green_run(self):
         self.scoped()
