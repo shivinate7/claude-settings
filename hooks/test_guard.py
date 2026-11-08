@@ -552,6 +552,8 @@ ARCHNEAR_C10 = os.path.join(ROOT, "archnear-c10")      # an open head `c10`: con
 ARCHNEAR_C10X = os.path.join(ROOT, "archnear-c10x")    # an open head `claude/c10-x1`: contains `c1`, is not it
 ARCHNEAR_CI = os.path.join(ROOT, "archnear-ci")        # an open head `claude/fix-ci-retry-x1`: contains `ci`, is not it
 ARCHOPEN_LANE = os.path.join(ROOT, "archopen-lane")    # the slug's pull request is open on the `lane/<slug>` head form
+ARCH_AGENT_SLUG = "lane-agent-own-step"                # the step an agent's own record names, a second step in the same repo
+ARCHOPEN_AGENT = os.path.join(ROOT, "archopen-agent-step")  # the agent record's step's pull request is open; the main step's is not
 # The containment read of an open lane pull request's head against main, by its status. Each fake holds one open
 # pull request on the slug, its head the slug's head sha; the read's answer is what the name says.
 ARCHDRAFT_BEHIND = os.path.join(ROOT, "archdraft-behind")      # an open draft, head behind main: its commits landed
@@ -1399,6 +1401,8 @@ def build_fixtures():
     make_fake_gh(ARCHMERGED, "main", need=["o/r"], others=[dict(slug_head, state="closed", merged=True)])
     # The same lane's pull request on the `lane/<slug>` head form (decision session-tiers names both forms).
     make_fake_gh(ARCHOPEN_LANE, "main", need=["o/r"], others=[dict(slug_head, ref="lane/" + ARCHIVE_SLUG)])
+    # The agent record's step has the open pull request, and the main record's step has none (see the agent cases).
+    make_fake_gh(ARCHOPEN_AGENT, "main", need=["o/r"], others=[dict(slug_head, ref=ARCH_AGENT_SLUG)])
     # Page two of the open list (two rows a page): the slug's pull request is the third row, so only a read of
     # every page sees it. The two rows before it name other lanes.
     make_fake_gh(ARCHPAGE, "main", need=["o/r"], page_cap=2, others=[
@@ -9877,6 +9881,8 @@ STEP_COLORS_TAGS = ["cs-build:lane", "cs-step:colors-a", "cs-topic:colors", "cs-
 
 # lane-closes-after-records: the tags of the target's record. A lane names its step slug and its repo.
 ARCH_LANE_TAGS = ["cs-build:lane", "cs-step:" + ARCHIVE_SLUG, "cs-repo:o/r"]
+# An agent's own record that is a lane on a second step, in the same repo as ARCH_LANE_TAGS.
+ARCH_AGENT_LANE_TAGS = ["cs-build:lane", "cs-step:" + ARCH_AGENT_SLUG, "cs-repo:o/r"]
 # Lanes whose step ids are a substring of a near-miss open head (see ARCHNEAR_C10): their own pull requests are absent.
 ARCH_LANE_C1_TAGS = ["cs-build:lane", "cs-step:c1", "cs-repo:o/r"]
 ARCH_LANE_CI_TAGS = ["cs-build:lane", "cs-step:ci", "cs-repo:o/r"]
@@ -10570,6 +10576,10 @@ AGENT_FIXTURES = {
                                [(AGENT_OWN_ID, role_target_call("g1", ARCH_TRIAGE_TAGS))]),
     "agent-malformed-id": (AGENT_QUIET, [("../x", role_target_call("g1", ARCH_TRIAGE_TAGS))]),
     "agent-own-triage-slug": (AGENT_QUIET, [(AGENT_OWN_ID, role_target_call("g1", ARCH_TRIAGE_SLUG_TAGS))]),
+    "agent-file-absent": (role_target_call("g1", ARCH_TRIAGE_TAGS), []),
+    "agent-dir-at-file": (role_target_call("g1", ARCH_TRIAGE_TAGS), [(AGENT_OWN_ID, None)]),
+    "main-lane-agent-second-step": (role_target_call("g1", ARCH_LANE_TAGS),
+                                    [(AGENT_OWN_ID, role_target_call("g1", ARCH_AGENT_LANE_TAGS))]),
 }
 
 
@@ -10587,8 +10597,13 @@ def write_agent_transcripts():
         for agent_id, lines in agents:
             path = agent_transcript(name, agent_id)
             os.makedirs(os.path.dirname(path), exist_ok=True)
+            if lines is None:  # a folder where the agent's file would be: reading it fails, and not as a missing file
+                os.makedirs(path, exist_ok=True)
+                continue
             with open(path, "w", encoding="utf-8") as handle:
                 handle.write("\n".join(lines) + "\n")
+        if not agents:  # the scope of the no-file case: nothing at its agent path, so the read finds no file
+            assert not os.path.exists(agent_transcript(name, AGENT_OWN_ID)), name
 
 
 lazy_fixture([role_path(name) for name in AGENT_FIXTURES], write_agent_transcripts)
@@ -10627,6 +10642,26 @@ archive_refuse("a lane in the main record is refused though the agent's own reco
 archive_refuse("a malformed agent_id reads no agent file: a non-lane record at its raw path is not read, and the call is refused for no record",
                role_path("agent-malformed-id"), fake_gh_path(ARCHOPEN), agent_id="../x",
                carries=ARCHIVE_NO_RECORD_PIN, lacks=ARCHIVE_OPEN_PIN)
+# No file at the agent's path, and a non-lane main record: no agent record is read, so the main record decides and the
+# archive is allowed. A reader that refused on a missing agent file would refuse every agent that has no file of its own.
+archive_allow("an agent with no file at its agent path is allowed: the main record is non-lane and decides",
+              role_path("agent-file-absent"), fake_gh_path(ARCHOPEN), agent_id=AGENT_OWN_ID)
+# A folder at the agent's file path, and a non-lane main record: the read fails with an error other than a missing file, so
+# the archive is refused for no record. A reader that caught every read error as a missing file would allow it.
+archive_refuse("an agent whose file path is a folder is refused, for no record: a read error is not a missing agent file",
+               role_path("agent-dir-at-file"), fake_gh_path(ARCHOPEN), agent_id=AGENT_OWN_ID,
+               carries=ARCHIVE_NO_RECORD_PIN, lacks=ARCHIVE_OPEN_PIN)
+# Both records are lanes on different steps of the same repo. The open pull request is on the agent record's step only, so
+# the archive is refused for it only when the agent record's step is read too. A reader that kept only the main record's
+# step would allow it.
+archive_refuse("a lane in both records, with the open pull request on the agent record's step only, is refused for that pull request",
+               role_path("main-lane-agent-second-step"), fake_gh_path(ARCHOPEN_AGENT), agent_id=AGENT_OWN_ID,
+               carries=ARCHIVE_OPEN_PIN, lacks=ARCHIVE_NO_RECORD_PIN + ARCHIVE_READ_PIN)
+# The mirror: the open pull request is on the main record's step only. A reader that kept only the agent record's step
+# would allow it. Together with the case above, each record's step alone fails, whichever record comes first.
+archive_refuse("a lane in both records, with the open pull request on the main record's step only, is refused for that pull request",
+               role_path("main-lane-agent-second-step"), fake_gh_path(ARCHOPEN), agent_id=AGENT_OWN_ID,
+               carries=ARCHIVE_OPEN_PIN, lacks=ARCHIVE_NO_RECORD_PIN + ARCHIVE_READ_PIN)
 
 
 # =========================================================================== 5h. one lane, one topic
