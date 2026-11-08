@@ -258,11 +258,14 @@ def scaffold_sources(**extra):
 
 class BuildScaffoldSiblingTests(unittest.TestCase):
     """`build_scaffold` writes every guard module in `sources` (a key `guard_<name>` is
-    hooks/guard_<name>.py) into <scaffold>/hooks, and a mutant aimed at one lands in that file."""
+    hooks/guard_<name>.py) into <scaffold>/hooks, and a mutant aimed at one lands in that file.
+    It also lays down <scaffold>/lint with every lint/*.py module that is not a test, and the
+    lint/layout.json the guard reads."""
 
     def setUp(self):
-        self.scaffold = tempfile.mkdtemp()
-        self.addCleanup(shutil.rmtree, self.scaffold, True)
+        self.run = _test_temp.run_folder()
+        self.scaffold = os.path.join(self.run, "scaffold")
+        self.addCleanup(shutil.rmtree, self.run, True)
 
     def sources(self, **extra):
         return scaffold_sources(**extra)
@@ -290,6 +293,24 @@ class BuildScaffoldSiblingTests(unittest.TestCase):
         # import, so every mutant reads killed for a cause that is not the mutation.
         mutate_sweep.build_scaffold(self.scaffold, self.sources(), "sweep", "X")
         self.assertTrue(os.path.exists(os.path.join(self.scaffold, "hooks", "git_reads.py")))
+
+    def test_scaffold_lint_holds_every_lint_module_and_layout_json(self):
+        # A suite and the copied guard load lint modules by name, from any import form. A module the
+        # scaffold lacks fails the run on import, so every mutant reads survived for a cause that is
+        # not the mutation. The guard also reads lint/layout.json from the scaffold.
+        lint_dir = os.path.join(mutate_sweep.REPO_ROOT, "lint")
+        expected = {name for name in os.listdir(lint_dir)
+                    if name.endswith(".py") and not name.startswith("test_")}
+        self.assertIn("layout.py", expected,
+                      "the real lint/ holds no layout.py, saw %r" % (sorted(expected),))
+        mutate_sweep.build_scaffold(self.scaffold, self.sources(), "sweep", "X")
+        scaffold_lint = os.path.join(self.scaffold, "lint")
+        self.assertTrue(os.path.isfile(os.path.join(scaffold_lint, "_test_git.py")),
+                        "the scaffold lacks its control, lint/_test_git.py")
+        missing = sorted(expected - set(os.listdir(scaffold_lint)))
+        self.assertEqual(missing, [], "scaffold lint/ lacks module(s): " + ", ".join(missing))
+        self.assertTrue(os.path.isfile(os.path.join(scaffold_lint, "layout.json")),
+                        "scaffold lint/ lacks lint/layout.json, the data file the guard reads")
 
 
 class FakeRun:
