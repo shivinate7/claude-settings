@@ -114,7 +114,7 @@ class PosixScript(str):
     PowerShell call. `split_segments` keeps the type on each segment, as for PowerShellScript."""
 
 
-# PowerShell reads each of these as the ASCII quote beside it (parser, 2026-10-15): the double family
+# PowerShell reads each of these as the ASCII quote beside it: the double family
 # opens and ends a `"` string, the single family a `'` string. Bash reads them as ordinary characters.
 PS_DOUBLE_QUOTES = "\u201c\u201d\u201e"
 PS_SINGLE_QUOTES = "\u2018\u2019\u201a\u201b"
