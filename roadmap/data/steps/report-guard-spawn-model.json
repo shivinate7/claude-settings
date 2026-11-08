@@ -1,0 +1,11 @@
+{
+  "title": "The report guard reads a spawn with no model field as the role's frontmatter model, not as sonnet",
+  "why": "Coordinator 12:32 CST Nov 8, from lane silent-undo-checks-pr-base (12:31 CST): the report guard's model-name check reads a reviewer or test-author spawn with no model field as sonnet, but agents/reviewer.md and agents/test-author.md set model: haiku and the agents report claude-haiku-5-5. It blocks true \"reviewer haiku\" Done lines; the records on #1869 and #2136 say sonnet wrongly. Fix: the guard reads the role's frontmatter model when the spawn names none, with one home, the agents/*.md file. Related: agent-model-unnamed-spawn (done; the spawn guard).",
+  "note": "",
+  "phase": "now",
+  "owner": "claude-settings",
+  "lane": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB) to route",
+  "status": "todo",
+  "order": 787,
+  "updatedAt": "2026-11-08T12:34:00-06:00"
+}

@@ -1,0 +1,11 @@
+{
+  "title": "A coordinator's handoff lists every item in its session that waits on the owner, and a check refuses a handoff without that list",
+  "why": "Owner ask ask-mw864dcumn, 12:30 CST Nov 8: \"coordinators should be required to keep in their handoff memory all the items that are waiting on me on the specific session like always allows or allow once etc\". Answered by the coordinator in thread 56da503a, 12:31 CST. A permission prompt or a typed-grant wait lives only in that session, so a compaction or rotation can drop it.",
+  "note": "",
+  "phase": "now",
+  "owner": "claude-settings",
+  "lane": "session_013NEJL1h7mKMtSVohetjaW1",
+  "status": "doing",
+  "order": 786,
+  "updatedAt": "2026-11-08T12:34:00-06:00"
+}
