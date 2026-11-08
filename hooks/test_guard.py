@@ -14964,12 +14964,46 @@ def builder_cap_list_limit_check():
     return True, "a filtered find past the list cap in a checkout with a test is refused as too large to check"
 
 
+def builder_cap_list_remedy_check():
+    """A filtered find past _LIST_LIMIT, in a checkout with a test, is refused with a remedy that does not advise a
+    -name filter: the find already has one, so the remedy can only name a narrower path."""
+    command = "find . -name '*.pyc' | xargs rm -f"
+    calls = {("guard_frozen", "_first_test_under"): None}
+    decision, reason, _took = _cap_judge(command, FINDDEEP, patches={"guard_frozen": {"_LIST_LIMIT": 0}}, calls=calls)
+    named = [call for call in calls[("guard_frozen", "_first_test_under")].call_args_list
+             if len(call.args) > 3 and call.args[3] is not None]
+    if not named:
+        return False, "the find's name filter never reached the walk"
+    if decision != "deny":
+        return False, "the filtered find past the list cap got %s %r, want deny" % (decision, reason)
+    if "-name filter" in reason:
+        return False, "the filtered find past the list cap advises a -name filter it already has: %r" % reason
+    return True, "a filtered find past the list cap is refused with a remedy that names no -name filter"
+
+
+def builder_cap_unfiltered_remedy_check():
+    """An unfiltered find past _WALK_LIMIT keeps today's remedy: BUILDER_TOO_LARGE_REASON, which names both a narrower
+    path and a find -name filter."""
+    guard = _load_guard_module()
+    decision, reason, _took = _cap_judge("find . | xargs sed -i s/a/b/", FINDDEEP,
+                                         patches={"guard_frozen": {"_WALK_LIMIT": 1}})
+    if decision != "deny" or guard.BUILDER_TOO_LARGE_REASON not in reason:
+        return False, "the unfiltered capped walk got %s %r, want deny with BUILDER_TOO_LARGE_REASON" % (decision, reason)
+    if "narrower path" not in reason or "-name filter" not in reason:
+        return False, "the unfiltered capped walk's remedy no longer names both a narrower path and a -name filter"
+    return True, "an unfiltered capped walk's remedy names both a narrower path and a find -name filter"
+
+
 LOG_CHECKS_EXTRA.append(("builder-cap: a builder's find past the walk cap is too large to check, not a test write",
                          builder_cap_too_large_check))
 LOG_CHECKS_EXTRA.append(("builder-cap: an unfiltered find past the walk cap over a tree outside every checkout is allowed",
                          builder_cap_outside_allowed_check))
 LOG_CHECKS_EXTRA.append(("builder-cap: a filtered find past the list cap in a checkout with a test is too large to check",
                          builder_cap_list_limit_check))
+LOG_CHECKS_EXTRA.append(("builder-cap: a filtered find past the list cap is refused with a remedy that names no -name filter",
+                         builder_cap_list_remedy_check))
+LOG_CHECKS_EXTRA.append(("builder-cap: an unfiltered capped walk's remedy names both a narrower path and a -name filter",
+                         builder_cap_unfiltered_remedy_check))
 # ---- round 3 of PR #2211: three findings the guard still gets wrong. Each case is red on the base (6b9f338a1),
 # and MUTATE_ONLY="builder-find:" runs these alone.
 # (a) A cp destination is not a walk root. FINDDEEP holds a test two folders down, under src/, so a copy into src/
