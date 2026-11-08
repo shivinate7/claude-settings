@@ -13294,7 +13294,6 @@ sh(SHELL_CD + "a non-test name written by tee after a cd into a test folder is r
    "cd tests; echo x | tee helper.py", "deny", rule=BT, **B)
 # A quoted > is text, so a grep that reads it reads. The guard misreads a > that a quoted word ends, or that a
 # quoted word names a test path after, as a redirect onto the next word, when a sed, awk or head stage follows.
-# The brief's command and its twins pin that shape: the red cases name a quoted > beside a test path.
 BRIEF_CD_GREP = ("cd %s && grep -n \"^mtc_bash\\|^def mtc_bash\" hooks/test_guard.py; "
                  "grep -n 'lastUpdatedAt\\|==\\| > ' hooks/test_guard.py | sed -n '1,400p' | grep -i \"updatedAt\"")
 sh(SHELL_CD + "a grep of a quoted > beside a sed and a grep pipe, after a cd into the worktree, is allowed",
@@ -13315,6 +13314,48 @@ sh(SHELL_CD + "a real redirect after an echo of a quoted > onto a test file is r
    "echo 'a > b' > hooks/test_guard.py", "deny", rule=BT, **B)
 sh(SHELL_CD + "a sed -i on a test file is refused",
    "sed -i 's/a/b/' hooks/test_guard.py", "deny", rule=BT, **B)
+# A quoted > piped into a filter is data only when the filter cannot run its input. A path qualifier
+# (./sed) names a local program, so that pipe fails closed like a path-qualified printer's.
+sh(SHELL_CD + "a quoted > piped into a path-qualified ./sed is not a filter, so it is refused",
+   "echo 'echo a > hooks/test_guard.py' | ./sed p", "deny", rule=BT, **B)
+sh(SHELL_CD + "a quoted > piped into sed p with no path qualifier is allowed",
+   "echo 'echo a > hooks/test_guard.py' | sed p", "allow", **B)
+sh(SHELL_CD + "a quoted > piped into an awk program that writes with > is refused",
+   "grep 'a > hooks/test_guard.py' f | awk -v f=hooks/test_guard.py '{print > f}'", "deny", rule=BT, **B)
+sh(SHELL_CD + "a quoted > piped into an awk program that prints a field is allowed",
+   "grep -n 'a >' hooks/test_guard.py | awk -F: '{print $1}'", "allow", **B)
+sh(SHELL_CD + "a quoted > piped into a sed s command with the e flag, which runs the line, is refused",
+   "grep 'x > hooks/test_guard.py' f | sed 's/a/b/e'", "deny", rule=BT, **B)
+sh(SHELL_CD + "a quoted > piped into sed -f, which runs a program file, is refused",
+   "grep 'x > hooks/test_guard.py' f | sed -f prog", "deny", rule=BT, **B)
+sh(SHELL_CD + "a quoted > piped into an awk program that calls system is refused",
+   "grep 'x > hooks/test_guard.py' f | awk '{system($0)}'", "deny", rule=BT, **B)
+sh(SHELL_CD + "a quoted > piped into python3 is refused, since an interpreter is not a filter",
+   "grep 'x > hooks/test_guard.py' f | python3", "deny", rule=BT, **B)
+# The cases with a quoted > that ends the pattern put the test path after the >, so dropping awk, head
+# or tail from the filter set turns each allow into a refusal. The `'a > b'` cases pin the same pipes.
+sh(SHELL_CD + "a grep of a quoted > in single quotes, then an awk pipe, is allowed",
+   "grep -n 'a > b' hooks/test_guard.py | awk -F: '{print $1}'", "allow", **B)
+sh(SHELL_CD + "a grep of a quoted > in single quotes, then a head pipe, is allowed",
+   "grep -n 'a > b' hooks/test_guard.py | head -5", "allow", **B)
+sh(SHELL_CD + "a grep of a quoted > in single quotes, then a tail pipe, is allowed",
+   "grep -n 'a > b' hooks/test_guard.py | tail -5", "allow", **B)
+sh(SHELL_CD + "a quoted > that ends a grep pattern, then a head pipe, is allowed",
+   "grep -n 'a >' hooks/test_guard.py | head -5", "allow", **B)
+sh(SHELL_CD + "a quoted > that ends a grep pattern, then a tail pipe, is allowed",
+   "grep -n 'a >' hooks/test_guard.py | tail -5", "allow", **B)
+# A comment opener, a newline or a lone quote inside a filter's program is text. Each case is allowed:
+# a scanner that cut the program at that character would fail closed and refuse it.
+sh(SHELL_CD + "a quoted > then a sed program with # in it is allowed",
+   "grep 'x > hooks/test_guard.py' f | sed -n '/#/p'", "allow", **B)
+sh(SHELL_CD + "a quoted > then an awk program with // in it is allowed",
+   "grep 'x > hooks/test_guard.py' f | awk '// {print}'", "allow", **B)
+sh(SHELL_CD + "a quoted > then an awk program with /* in it is allowed",
+   "grep 'x > hooks/test_guard.py' f | awk 'BEGIN { s = \"/*\" } { print }'", "allow", **B)
+sh(SHELL_CD + "a quoted > then a multi-line awk program in single quotes is allowed",
+   "grep 'x > hooks/test_guard.py' f | awk '{\nprint $0\n}'", "allow", **B)
+sh(SHELL_CD + "a quoted > then a sed program with a lone quote in double quotes is allowed",
+   "grep 'x > hooks/test_guard.py' f | sed -n \"/'/p\"", "allow", **B)
 add("test-author: Edit of product code is refused", "deny", rule=TA, tool="Edit",
     file_path="src/app.py", carries=("builder", "Report"), **A)
 add("builder-test: a ruff --ignore script added to package.json is allowed", "allow", tool="Edit",
