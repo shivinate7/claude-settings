@@ -117,6 +117,9 @@ FIX_PROSE_REMEDY = "Keep prose below the --- line, then post the record again."
 FIX_OWN_RECORD_REMEDY = "Drop --fix-base-record: this pull request's own record takes the fix check."
 FIX_CAP_REMEDY = "Start a fresh chain at round 1: post the review records again from round 1, with no Fix check line."
 FIX_CHAIN_CAP = 2  # a chain holds at most this many fix checks; the next change starts a fresh chain at round 1
+FIX_CARRY_BASE_REMEDY = "A carried fix check starts from the source record's Head: pass that head as the --fix-check base."
+FIX_CARRY_OPEN_REMEDY = "Close the source pull request, or write `replaces #N` for it in this pull request's body, then run the fix check again."
+FIX_CARRY_TREE_REMEDY = "A carry needs the source Head and this head to hold the same files. Post this pull request's own review records from round 1."
 FIX_WIDE_REMEDY = "Start a new lane at round 1."
 FIX_MISSING_REMEDY = "Post the round's review record first."
 FIX_FINAL_FAIL_REMEDY = "This FAIL holds the change: its finding starts a new lane at round 1."
@@ -960,6 +963,19 @@ class Host:
             return found
         except (ValueError, KeyError, TypeError) as e:
             raise Stop(f"cannot read the compare of {base[:9]} and {head[:9]} {READ_CITE}: {e}")
+
+    def commit_tree(self, sha):
+        """-> the tree sha of commit `sha`: ONE read. Any failed or malformed read raises Stop."""
+        c, out = self.api(f"git/commits/{sha}")
+        try:
+            if c:
+                raise ValueError(out)
+            tree = json.loads(out)["tree"]["sha"]
+            if not isinstance(tree, str) or not re.fullmatch(r"[0-9a-f]{40}", tree):
+                raise ValueError("the tree is not a 40-hex sha")
+            return tree
+        except (ValueError, KeyError, TypeError) as e:
+            raise Stop(f"cannot read the commit {sha[:9]} {READ_CITE}: {e}")
 
     def protection_names(self):
         """-> the required check names of the base's branch protection, or None when the base has none (an HTTP 404 that is not a
@@ -3411,7 +3427,7 @@ def fix_base_record_arg(text):
 def source_record_problem(h, root, a, own_records):
     """-> (source record or None, problem or None, remedy) for --fix-base-record: the record that stands in for the newest earlier record of a pull request
     with none of its own. It must be on this repo, parse, name the pull request its comment is on, be the newest record there, and have no Fix check
-    line. A failed read raises Stop."""
+    line, or a passed one (a carry, which carry_problem then checks). A failed read raises Stop."""
     repo, cid = a.fix_base_record
     if own_records:
         return None, "this pull request has a review record of its own, so --fix-base-record is not needed and two bases would compete", FIX_OWN_RECORD_REMEDY
@@ -3430,9 +3446,36 @@ def source_record_problem(h, root, a, own_records):
         return None, f"--fix-base-record: that record's PR line names #{rec['n']}, but its comment is on #{c['issue_number']}", "Name a review record on the pull request its PR line names."
     if h.review_comments(c["created_at"]).get(c["issue_number"], [""])[-1] != c["body"]:
         return None, f"--fix-base-record: that record is not the newest on #{c['issue_number']}", "Name the newest review record on that pull request."
-    if rec["fix"]:
+    if rec["fix"] and rec["fix"][3] != "PASS":
         return None, "--fix-base-record: that record has a Fix check line, and a chain never runs through --fix-base-record", "Post this pull request's own review records from round 1: for a normal guard or check change, rounds 1 to 3 with the net-value test at round 3."
     return rec, None, ""
+
+def fix_chain(records):
+    """-> (count, index of the oldest) of the records at the end that each carry a passed fix check, back to the last record with none."""
+    count, oldest = 0, None
+    for i in range(len(records) - 1, -1, -1):
+        if not (records[i]["fix"] and records[i]["fix"][3] == "PASS"):
+            break
+        count, oldest = count + 1, i
+    return count, oldest
+
+def carry_problem(h, a, info, src):
+    """-> (problem, remedy), or (None, None) when the passed Fix check of the source record `src` may be carried onto this pull request, which replaces
+    the source's. The --fix-check base is the source's Head, the source pull request is closed or merged or this body says `replaces #N`, the source Head
+    and --head hold the same tree (which stands in for the chained ancestor check), and the source's own chain leaves room for one more link. A failed
+    read raises Stop."""
+    base, n = a.fix_check[0], src["n"]
+    if base != src["head"]:
+        return f"a carried fix check starts from the source record's Head {src['head'][:9]}, not {base[:9]}", FIX_CARRY_BASE_REMEDY
+    source = h.pr(n)
+    if source["state"] == "OPEN" and not re.search(rf"\breplaces #{n}(?!\d)", info["body"], re.I):
+        return f"the source pull request #{n} is still open and this pull request's body does not say `replaces #{n}`", FIX_CARRY_OPEN_REMEDY
+    if h.commit_tree(src["head"]) != h.commit_tree(a.head):
+        return f"the source Head {src['head'][:9]} and --head {a.head[:9]} hold different files, so the fix check cannot be carried", FIX_CARRY_TREE_REMEDY
+    chain, _ = fix_chain([r for r in map(parse_review, h.review_comments(source.get("created") or "1970-01-01T00:00:00Z").get(n, [])) if r and r["n"] == n])
+    if chain >= FIX_CHAIN_CAP:
+        return f"the chain on the source pull request #{n} already holds {chain} fix checks, and the carry adds one", FIX_CAP_REMEDY
+    return None, None
 
 MERGE_ROLES = {"batch-runner"}  # the one tier that may run `merge <pr> --confirm` in a cloud session; the coordinator never merges
 
@@ -3649,11 +3692,11 @@ def main(argv, host=None, lock=None):
                             remedy = f"Post round {reached + 1}'s review record: a FAIL line for round {reached + 1} and no Fix check line."
                     else:  # the record's rounds may not fall below the floor the earlier records set, or a later record could copy them and relabel the final round's net value
                         earlier = [r for r in map(parse_review, recs) if r and r["n"] == a.pr]
-                        chain = 0  # the records at the end that each carry a passed fix check, back to the last record with none
-                        for r in reversed(earlier):
-                            if not (r["fix"] and r["fix"][3] == "PASS"):
-                                break
-                            chain += 1
+                        chain, oldest = fix_chain(earlier)
+                        if 0 < chain < FIX_CHAIN_CAP:  # the chain's oldest record is a stand-in when no earlier record has its fix base as Head; a carry (equal trees) counts as the whole cap
+                            r = earlier[oldest]
+                            if r["fix"][0] not in {e["head"] for e in earlier[:oldest]} and h.commit_tree(r["fix"][0]) == h.commit_tree(r["head"]):
+                                chain = FIX_CHAIN_CAP
                         if chain >= FIX_CHAIN_CAP:
                             problem, remedy = f"the chain on this pull request already holds {chain} fix checks", FIX_CAP_REMEDY
                         else:
@@ -3664,9 +3707,12 @@ def main(argv, host=None, lock=None):
                     remedy = FIX_WIDE_REMEDY if held["fix"][3] == "WIDE" else FIX_FINAL_FAIL_REMEDY
                 if not problem:
                     problem, remedy = dropped_round_lines(last, parse_review(review_body(a.pr, a.head, a.kind, a.guard, a.round, a.net_value, fix=a.fix_check))) or (None, remedy)
+                carry = bool(a.fix_base_record and last and last["fix"])  # a PASS source stands in only through carry_problem
+                if not problem and carry:
+                    problem, remedy = carry_problem(h, a, info, last)
                 if not problem and last["head"] != a.fix_check[0]:
                     problem, remedy = fix_base_problem(h, root, a.fix_check[0], last["head"])
-                if not problem and last["fix"]:  # a chained fix diff must start inside the live head's history
+                if not problem and last["fix"] and not carry:  # a chained fix diff must start inside the live head's history
                     found = h.compare_files(a.fix_check[0], info["head"])
                     if found["behind_by"]:  # compare of base...live head: behind_by counts the base's commits the live head lacks, so no ahead_by means the base holds the live head
                         problem = f"the fix base {a.fix_check[0][:9]} is {'ahead of' if not found['ahead_by'] else 'diverged from'} the live head {info['head'][:9]}"
