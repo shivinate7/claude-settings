@@ -440,14 +440,22 @@ def _edit_reason(module):
     return "edit of a review record comment", REVIEW_EDIT_REASON % _review_render(module, "<pr>", "<live head>")
 
 
-def review_record_hit(bodies, repo: str, selector, where: str, edit: bool = False):
+def _variable_reason(module):
+    """Return (matched, reason) for a record posted to an issue number held in a shell variable: its pull request cannot be
+    checked. The refusal sits one call below its caller, so the rule audit reads its reason within its depth limit."""
+    return "review record posted to a variable issue number", REVIEW_REASON % (
+        "this record goes to an issue number the guard cannot read, held in a shell variable", _review_render(module, "<pr>", "<live head>"))
+
+
+def review_record_hit(bodies, repo: str, selector, where: str, edit: bool = False, variable: bool = False):
     """Return (matched, reason) when a comment post must be refused, else None.
 
     `bodies` are the texts the post would send, `selector` names the pull request it goes to (a number, a URL, a branch,
     or '' for the current branch's), `repo` is OWNER/NAME or ''. No body holding the marker: None, and no read. `edit` is true when the
     body replaces a comment's text (a PATCH of the comment, `--edit-last`, the MCP update tool): a marked body is refused
     after the form check and before any read, because an edited record was rendered by no run. Limit: an edit that strips
-    the marker is not seen without a read of the old body, and a stripped record reads as no record."""
+    the marker is not seen without a read of the old body, and a stripped record reads as no record. `variable` is true when
+    the number is a shell variable: a marked body is refused with no read, as its pull request cannot be checked."""
     found = _marked_bodies(bodies)
     if not found:
         return None
@@ -456,6 +464,8 @@ def review_record_hit(bodies, repo: str, selector, where: str, edit: bool = Fals
         return _form_reason(module, selector)
     if edit:
         return _edit_reason(module)
+    if variable:
+        return _variable_reason(module)
     try:
         with module.shared_deadline(MERGE_READ_TIMEOUT):
             host = module.Host(repo=repo or None, cwd=where or None)

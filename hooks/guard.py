@@ -1461,8 +1461,9 @@ def message_texts(segment: str, raw: str, where: str, before: int, titles: bool 
 
 # ---- a review record posted as a comment (rule pr-review-record; the judge is guard_merge.review_record_hit)
 GH_API_FIELD_FLAGS = ("-f", "-F", "--field", "--raw-field")
-_COMMENTS_ROUTE = re.compile(r"/?repos/([^/\s]+/[^/\s]+)/issues/(\d+)/comments/?")
-_COMMENT_EDIT_ROUTE = re.compile(r"/?repos/([^/\s]+/[^/\s]+)/issues/comments/(\d+)/?")   # a comment edited in place, by comment id
+_ROUTE_NUMBER = r"(\d+|\$\w+|\$\{\w+\})"   # a number, or a shell variable holding one: the guard sees the word before the shell fills it
+_COMMENTS_ROUTE = re.compile(r"/?repos/([^/\s]+/[^/\s]+)/issues/" + _ROUTE_NUMBER + r"/comments/?")
+_COMMENT_EDIT_ROUTE = re.compile(r"/?repos/([^/\s]+/[^/\s]+)/issues/comments/" + _ROUTE_NUMBER + r"/?")   # a comment edited in place, by comment id
 PR_COMMENT_VALUE_FLAGS = {"-b", "--body", "-F", "--body-file", "-R", "--repo"}
 _CAT_BODY = re.compile(r"\$\(\s*cat\s+([^|;&<>()]+?)\s*\)")
 
@@ -1527,7 +1528,7 @@ def _api_post_bodies(args, routes=_COMMENTS_ROUTE):
                 files.append(text[1:])
         else:
             texts.append(text)
-    return repo, int(number), texts, files, stdin
+    return repo, number, texts, files, stdin
 
 
 def review_post_hit(segment: str, raw: str, where: str, before: int, previous: str = ""):
@@ -1542,7 +1543,7 @@ def review_post_hit(segment: str, raw: str, where: str, before: int, previous: s
     edit = False
     if rest[:2] in (["pr", "comment"], ["issue", "comment"]):   # an issue comment reaches the same pull request
         args = rest[2:]
-        edit = any(a in ("--edit-last", "--edit-last=true", "-e") for a in args)
+        edit = any(a in ("--edit-last", "--edit-last=true") for a in args)
         selector, repo = _comment_target(args)
         texts, files, stdin = message_sources(args, "comment")
     elif rest[:1] == ["api"]:
@@ -1580,7 +1581,7 @@ def review_post_hit(segment: str, raw: str, where: str, before: int, previous: s
             review_note("the body file " + name + " could not be read")
     if stdin and not judged_stdin:
         review_note("the body comes from stdin and cannot be read")
-    return review_record_hit(texts, repo, selector, where, edit)
+    return review_record_hit(texts, repo, selector, where, edit, variable=rest[:1] == ["api"] and not selector.isdigit())
 
 
 def cited_record_path(segment: str, raw: str, where: str, before: int) -> str:
