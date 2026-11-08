@@ -126,7 +126,7 @@ Design:
   to 10 s: ls-remote 3 s, fetch 4 s, grep 2 s, log 1 s. A timeout prints `mail unknown: timeout`. A failed
   age lookup prints "age unknown" and keeps the line. No prompt can open: GIT_TERMINAL_PROMPT=0,
   GCM_INTERACTIVE=never, and ssh in BatchMode with a 3 s ConnectTimeout, unless the caller set its own
-  ssh command. A failure prints "mail unknown: <reason>", never "no mail". Cost per turn: one git start
+  ssh command. A failure prints "mail unknown: <reason>", never "no mail". Cost per turn: one git start (unmeasured)
   and one network call when the sha is unchanged. When it moved, at most four git starts. Files are
   written only in the cache, and only on a move. Test: a process-start stand-in and a files-written
   snapshot, as in `hooks/test_daily_note.py`.

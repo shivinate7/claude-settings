@@ -18,7 +18,7 @@ The window is the days since the stamp, the stamp day through the day before tod
 
 Reader: `hooks/daily_note.py`, for each file above. Each failed line names the file to read next. The output goes to the session that started.
 
-Cost: one hook process per `startup`, the existing SessionStart hook. Each startup also reads the stamp and runs the Claude Code version check: a cache read and one stat, no process. On the first start of a Central day the checks run: one read of guard.log, one read of the payload log (at most 200 rows), and one stat of the err log. It also reads the drops file, which grows only on a failed write. The note writes the stamp, and the version cache when the installed binary is new. It starts no process of its own.
+Cost: one hook process per `startup` (unmeasured), the existing SessionStart hook. Each startup also reads the stamp and runs the Claude Code version check: a cache read and one stat (unmeasured), no process. On the first start of a Central day the checks run: one read of guard.log, one read of the payload log (at most 200 rows), and one stat of the err log. It also reads the drops file, which grows only on a failed write. The note writes the stamp, and the version cache when the installed binary is new. It starts no process of its own.
 
 No hook writes `STE-fallback` or `STE-unchecked` lines (owner, 2026-10-22 10:10 CDT; `ste-guard-fixes-not-nags`). Old rows stay in guard.log and show in `lint/guard_log_report.py` like any other row.
 
