@@ -27211,6 +27211,43 @@ role_model_allow("role-model: reviewer on sonnet with a Round 3 of 3 line is all
 # The row reads a round line on line three too: the same scan the step-up reads.
 role_model_allow("role-model: reviewer on sonnet with a Round 2 of 3 line three is allowed", "reviewer", "sonnet",
            "Check the diff.\nThe lane is c204.\nRound 2 of 3. Re-check the diff.")
+# ---- Granted round 4 (the owner's grant of a fourth review round, item 396 a, 2026-11-08 06:08 CST). A reviewer's
+# fourth round runs on Sonnet only when its brief opens with `Round 4 of 4` and carries a `Grant: <cite>` line in the
+# form the review record takes (merge/merge.py REVIEW_GRANT, grant_valid). Each refusal names one cause: the marker,
+# the cite, or the model. Every case here shares the prefix "role-model: granted round 4", so MUTATE_ONLY selects them.
+GRANT_ROUND_4 = "Round 4 of 4. Re-check the diff."
+GRANT_CITE = "Grant: item 396 a, owner, 2026-11-08 06:08 CST"
+role_model_allow("role-model: granted round 4 on sonnet with a Grant line is allowed", "reviewer", "sonnet",
+           GRANT_ROUND_4 + "\n" + GRANT_CITE)
+role_model_allow("role-model: granted round 4 on sonnet with a CDT Grant line is allowed", "reviewer", "sonnet",
+           GRANT_ROUND_4 + "\n" + GRANT_CITE.replace("CST", "CDT"))
+role_model_allow("role-model: granted round 4 on the full sonnet id with a Grant line is allowed", "reviewer",
+           "claude-sonnet-5-5", GRANT_ROUND_4 + "\n" + GRANT_CITE)
+# The Grant line is read past a lone quote and comment openers ahead of it, the same scan the round lines use.
+role_model_allow("role-model: granted round 4 on sonnet with a Grant line after a lone quote and comment openers is allowed",
+           "reviewer", "sonnet", GRANT_ROUND_4 + "\nDon't skip /* the // check # now.\n" + GRANT_CITE)
+role_model_refuse("role-model: granted round 4 on sonnet with no Grant line is denied", "reviewer", "sonnet",
+           GRANT_ROUND_4)
+# A malformed cite is refused, whatever its shape: the pattern and a real date both have to hold (grant_valid).
+for _label, _cite in (("with an upper-case item letter in its Grant line", "Grant: item 396 A, owner, 2026-11-08 06:08 CST"),
+                      ("with an approver other than owner in its Grant line", "Grant: item 396 a, lead, 2026-11-08 06:08 CST"),
+                      ("with a month of 13 in its Grant line", "Grant: item 396 a, owner, 2026-13-08 06:08 CST"),
+                      ("with a day of February 30 in its Grant line", "Grant: item 396 a, owner, 2026-02-30 06:08 CST"),
+                      ("with an hour of 25 in its Grant line", "Grant: item 396 a, owner, 2026-11-08 25:08 CST"),
+                      ("with a zone other than CST or CDT in its Grant line", "Grant: item 396 a, owner, 2026-11-08 06:08 PST"),
+                      ("with text after the zone in its Grant line", "Grant: item 396 a, owner, 2026-11-08 06:08 CST (round 4)"),
+                      ("with no item number in its Grant line", "Grant: owner, 2026-11-08 06:08 CST"),
+                      ("with no cite after Grant:", "Grant:"),
+                      ("with the cite inside a prose line, not on a Grant line", "Owner's word: Grant: item 396 a, owner, 2026-11-08 06:08 CST")):
+    role_model_refuse("role-model: granted round 4 on sonnet %s is denied" % _label,
+               "reviewer", "sonnet", GRANT_ROUND_4 + "\n" + _cite)
+# Every other marker keeps main's verdict: a valid Grant line frees a fourth round only, not another round or Opus.
+role_model_refuse("role-model: granted round 4 on sonnet, but the brief reads Round 4 of 3, is denied", "reviewer",
+           "sonnet", "Round 4 of 3. Re-check the diff.\n" + GRANT_CITE)
+role_model_refuse("role-model: granted round 4 on sonnet, but the brief reads Round 5 of 5, is denied", "reviewer",
+           "sonnet", "Round 5 of 5. Re-check the diff.\n" + GRANT_CITE)
+role_opus_refuse("role-model: granted round 4 on opus with a valid Grant line is denied under agent-model-cap",
+           "reviewer", "opus", GRANT_ROUND_4 + "\n" + GRANT_CITE)
 role_model_allow("role-model: builder on sonnet with no round line is allowed", "builder", "sonnet",
            "Fix the failing case.")
 role_model_allow("role-model: designer on opus is allowed (standing grant)", "designer", "opus",
