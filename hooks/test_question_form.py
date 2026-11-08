@@ -1494,12 +1494,36 @@ def case_step_folder_with_title_hyphen_is_text():
 
 
 def case_step_absolute_path_cmdlet_is_refused_in_every_form():
-    # A Verb-Noun cmdlet at an absolute path is a shell line in every form of path. Head passes the forward-slash drive,
-    # the `$HOME/` form and the `~\` form, so each is a bypass (main passes them too). The `~/` form already refuses.
+    # A Verb-Noun cmdlet at an absolute path is a shell line in every form of path, and a step that names it in prose
+    # refuses too. Each form is pinned, so none can pass by its own spelling.
     refused = ("command-in-item", "shell line")
-    for span in ("C:/tools/Get-Thing", "$HOME/bin/Get-Item", r"~\Get-Item", "~/bin/Get-Item"):
+    for span in ("C:/tools/Get-Thing", "$HOME/bin/Get-Item", "${HOME}/bin/Get-Item", r"~\Get-Item", "~/bin/Get-Item"):
         page("a step holding `%s` is refused as a shell line" % span, "set",
              entry_of(task_item(["Check the output of `%s`" % span])), refused)
+
+
+def case_step_verb_noun_folder_with_slash_is_text():
+    # A folder path that ends in `/` is text: the slash marks a folder, not a cmdlet, so a Verb-Noun name in it passes.
+    # These pass on main already, since a cmdlet name must end the span. They keep passing once the slash rule is built.
+    for folder in ("~/Documents/Test-Results/", "C:\\Users\\x\\Documents\\Read-Me\\"):
+        page("a step naming the folder `%s` in prose is text and passes" % folder, "set",
+             entry_of(task_item(["Save the notes in `%s` before the review" % folder])), None)
+    # Controls, passing on main: a path as the argument of a command word that is no shell program, and a PowerShell
+    # command, which no shell-line check reads. A rule that refuses a path by its position must keep these passing.
+    for span in ("open ~/Documents/Open-Items", "show /Users/x/Projects/Build-Tools"):
+        page("a step holding `%s` is text and passes, its path an argument" % span, "set",
+             entry_of(task_item(["Check the output of `%s`" % span])), None)
+    for ps in ("cd ~/Documents/Open-Items", "ls /Users/x/Projects/Build-Tools",
+               r"Copy-Item a.txt C:\Users\x\Documents\Read-Me"):
+        page("a PowerShell command, %s, passes" % ps, "set", entry_of(ps_task(ps)), None)
+
+
+def case_step_folder_without_slash_names_the_slash_remedy():
+    # A folder name with no trailing slash, in prose, is still refused, because its Verb-Noun reads as a cmdlet. The
+    # refusal names the remedy: end the folder with `/`. Main refuses it and names no remedy, so the remedy is the red.
+    page("a step naming the folder `~/Documents/Test-Results` with no slash is refused and names the remedy", "set",
+         entry_of(task_item(["Save the notes in `~/Documents/Test-Results` before the review"])),
+         ("command-in-item", "end it with /"))
 
 
 # A same-process ratio, not a wall clock: a linear form reads about 2 when a run of spaces doubles, the overlapping
@@ -2220,6 +2244,7 @@ def main():
                  case_powershell_two_deep_expansion,
                  case_step_path_cmdlet_is_a_shell_line, case_step_span_flag_after_a_determiner_is_text,
                  case_step_folder_with_title_hyphen_is_text, case_step_absolute_path_cmdlet_is_refused_in_every_form,
+                 case_step_verb_noun_folder_with_slash_is_text, case_step_folder_without_slash_names_the_slash_remedy,
                  case_powershell_spaced_literals_are_no_bash_test,
                  case_bracket_test_alternative_is_linear):
         try:
