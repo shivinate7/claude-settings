@@ -1074,21 +1074,61 @@ def _text_constants(node):
     return {n.value for n in ast.walk(node) if isinstance(n, ast.Constant) and isinstance(n.value, str)}
 
 
+def _module_constants(tree):
+    """Module-level names bound once, to a string literal: {name: text}. A name bound twice, or to anything
+    but a literal, is no constant. Written here from the source, not read from lint/rule_audit.py."""
+    bound, literal = {}, {}
+    for node in tree.body:
+        if isinstance(node, ast.Assign):
+            pairs = [(target, node.value) for target in node.targets]
+        elif isinstance(node, ast.AnnAssign) and node.value is not None:
+            pairs = [(node.target, node.value)]
+        else:
+            continue
+        for target, value in pairs:
+            for name in (n for n in ast.walk(target) if isinstance(n, ast.Name)):
+                bound[name.id] = bound.get(name.id, 0) + 1
+                if name is target and isinstance(value, ast.Constant) and isinstance(value.value, str):
+                    literal[name.id] = value.value
+    return {name: text for name, text in literal.items() if bound[name] == 1}
+
+
+def _names_bound_in_defs(tree):
+    """{id(call): the names the defs around that call bind: parameters and assigned names}. A name the def
+    binds is that local, not a module constant of the same name."""
+    held = {}
+    for fn in ast.walk(tree):
+        if isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
+            args = fn.args
+            names = {a.arg for a in args.posonlyargs + args.args + args.kwonlyargs}
+            names |= {n.id for n in ast.walk(fn) if isinstance(n, ast.Name) and isinstance(n.ctx, ast.Store)}
+            for call in ast.walk(fn):
+                if isinstance(call, ast.Call):
+                    held.setdefault(id(call), set()).update(names)
+    return held
+
+
 def emitted_guard_rules(source):
     """The rule ids one guard source can write to guard.log, read with `ast`.
 
     Three shapes write an id: a literal in refuse()/record() (third argument) or ask_command()
-    (first argument); the table in diff_rule(); and the `code, why = {...}` role-scope table.
-    A call that passes a variable (`record(tool, decision, rule, ...)`) names no id.
+    (first argument), or a module-level string constant in that place; the table in diff_rule(); and the
+    `code, why = {...}` role-scope table. A call that passes any other variable (`record(tool, decision,
+    rule, ...)`, or a parameter or local of the def around it) names no id.
     """
+    tree = ast.parse(source)
+    constants, held = _module_constants(tree), _names_bound_in_defs(tree)
     ids = set()
-    for node in ast.walk(ast.parse(source)):
+    for node in ast.walk(tree):
         if isinstance(node, ast.Call):
             name = node.func.id if isinstance(node.func, ast.Name) else getattr(node.func, "attr", "")
             at = RULE_ARG.get(name)
-            if at is not None and len(node.args) > at and isinstance(node.args[at], ast.Constant) \
-                    and isinstance(node.args[at].value, str):
-                ids.add(node.args[at].value)
+            if at is not None and len(node.args) > at:
+                arg = node.args[at]
+                if isinstance(arg, ast.Constant) and isinstance(arg.value, str):
+                    ids.add(arg.value)
+                elif isinstance(arg, ast.Name) and arg.id in constants and arg.id not in held.get(id(node), ()):
+                    ids.add(constants[arg.id])
         elif isinstance(node, ast.FunctionDef) and node.name == "diff_rule":
             for stmt in node.body:  # a docstring is a bare string statement: it names no id
                 if not (isinstance(stmt, ast.Expr) and isinstance(stmt.value, ast.Constant)):
@@ -1146,6 +1186,14 @@ class EmittedRuleReaderTests(unittest.TestCase):
 
     def test_a_variable_rule_names_no_id(self):
         self.assertEqual(emitted_guard_rules("record(tool, decision, rule, matched)\n"), set())
+
+    def test_a_module_constant_rule_id_is_read_to_its_value(self):
+        self.assertEqual(emitted_guard_rules('RID = "const-rule-id"\nrefuse(tool, "deny", RID, R, m)\n'),
+                         {"const-rule-id"})
+
+    def test_a_parameter_named_like_a_constant_is_no_constant(self):
+        src = 'RID = "const-rule-id"\ndef go(RID):\n    refuse(tool, "deny", RID, R, m)\n'
+        self.assertEqual(emitted_guard_rules(src), set())
 
 
 def run_cli(argv):

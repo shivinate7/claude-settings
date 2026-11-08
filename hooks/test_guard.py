@@ -18016,8 +18016,9 @@ FAMILY = "owner-judge"
 # title, an option, why or elsewhere in context never do. A stood pick (`stands: true`) may write
 # `Problem: <text>` with no stake. A task, a status-only or rank-only update, another artifact's page and a
 # decision with status closed (the chat-answer flow writes one already answered) pass.
-# A missing line is refused by `question-form`. The contract does not say whether `question-form` or
-# `owner-judge` names a bare Problem line or a stake outside the set, so those cases accept either id.
+# A missing line is refused by `question-form`. A bare Problem line, or one whose stake is outside the set, is
+# refused by `owner-judge` (hooks/question_form.py). The cases that name OJ_PROBLEM_RULES accept either id; the
+# case that says "keyed owner-judge, not question-form" pins the id.
 
 OJ_KINDS = ("goal", "money", "risk", "rule", "cannot undo")
 OJ_DOC = "ci-check-job"
@@ -18106,6 +18107,11 @@ oj("a stake with no colon and no text is denied", "deny",
 oj("a Problem line with no stake, on a decision that is not a stood pick, is denied", "deny",
    oj_item(context=oj_ctx(problem="Problem: which job runs the check, and why it needs your word")),
    rule=OJ_PROBLEM_RULES)
+# Exact: the refusal is keyed owner-judge, the id the guard logs, never question-form. The printed reason
+# opens with the id (refuse() prints `rule: reason` and logs the same rule), and no question-form text is in it.
+oj("a bare Problem line on a decision that is not a stood pick is keyed owner-judge, not question-form", "deny",
+   oj_item(context=oj_ctx(problem="Problem: which job runs the check, and why it needs your word")),
+   rule="owner-judge", carries=("owner-judge: ",), lacks=("question-form",))
 oj("no Based on line is denied", "deny", oj_item(context=oj_ctx(based=())))
 oj("four Based on lines are denied", "deny",
    oj_item(context=oj_ctx(based=(OJ_BASED, "Based on (notes): two", "Based on (notes): three",
