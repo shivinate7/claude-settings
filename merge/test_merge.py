@@ -13410,25 +13410,33 @@ class ReviewFixCountsRound(ReviewEnv):
 
 class ReviewFixRemedies(ReviewChainFixture):
     """A refused fix check names the remedy for its own cause. The head remedy, "The reviewed head must be the Head of the newest earlier review
-    record", fits only a head refusal: a fix base that is not the newest earlier record's Head (fix_base_problem). The round floor, the net value,
-    guard and kind freeze, the ancestor read and the FAIL or WIDE chain each name their own remedy and print no head remedy. Every case asserts
-    the refusal (assert_refused), then the cause it names, then the subject: the head remedy absent and the cause's own remedy present. The head
-    control passes on the old code; the other cases are red there."""
+    record", fits only a head refusal: a fix base that is not the newest earlier record's Head (fix_base_problem). Every other refusal names its own
+    remedy and prints no head remedy: the round floor, a failed fix slot with no FAIL line, the net value, guard and kind freeze, the ancestor read,
+    the FAIL or WIDE chain, a missing review record, and each refused --fix-base-record. Every case asserts the refusal (assert_refused), then the
+    cause it names, then the subject: the head remedy absent and the remedy's text present. Each remedy's text is written out in its case, so a
+    remedy that is blanked or swapped for another fails the case."""
 
     HEAD_REMEDY = "The reviewed head must be the Head of the newest earlier review record"
+    FLOOR_REMEDY = "Carry every round up to the floor: pass each round line with --round."
+    FROZEN_REMEDY = "Pass the old values."
+    ANCESTOR_REMEDY = "The fix base must be an ancestor of the live head."
+    WIDE_REMEDY = "Start a new lane at round 1."
+    FAIL_FINAL_REMEDY = "This FAIL holds the change: its finding starts a new lane at round 1."
+    MISSING_REMEDY = "Post the round's review record first."
     ALL_PASS = ("Round 1: reviewer, sonnet, PASS", "Round 2: reviewer, sonnet, PASS", "Round 3: reviewer, opus, PASS")  # every round of a record passed
     ALL_PASS_ARGS = round_args(ALL_PASS)
+    FAIL_ONE = ("Round 1: reviewer, sonnet, FAIL",)
+    FAIL_THEN_PASS = ("Round 1: reviewer, sonnet, FAIL", "Round 2: reviewer, sonnet, PASS")  # the slot a failed fix check fills holds a PASS
 
     def assert_own_remedy(self, rc, out, err, cause, remedy):
-        """A refused fix check (assert_refused) whose stderr names `cause`, prints no head remedy, and names its own remedy, a regex `remedy`."""
+        """A refused fix check (assert_refused) whose stderr names `cause`, prints no head remedy, and holds the text `remedy`."""
         self.assert_refused(rc, out, err)
         self.assertIn(cause, err, "scope: the refusal does not name its cause:\n" + err)
         self.assertNotIn(self.HEAD_REMEDY, err, "the refusal prints the head remedy, which fits only a head refusal:\n" + err)
-        self.assertRegex(err, remedy, "the refusal names no remedy for its cause:\n" + err)
+        self.assertIn(remedy, err, "the refusal does not hold the remedy for its cause:\n" + err)
 
     def test_a_head_mismatch_refused_by_the_base_rule_keeps_the_head_remedy(self):
-        # control, green on the old code: a base that is not the newest earlier record's Head is refused by the base rule, and that head refusal
-        # keeps the head remedy
+        # a base that is not the newest earlier record's Head is refused by the base rule, and that head refusal keeps the head remedy
         diffs = {(self.NEWEST, self.OTHER): compare_of("ahead", self.CODE)}
         rc, out, err, host = self.run_chain(self.OTHER, self.pair("PASS"), diffs=diffs)
         self.assertTrue(self.compared(host, self.NEWEST, self.OTHER), "scope: the base was not compared with the newest record's Head")
@@ -13447,32 +13455,81 @@ class ReviewFixRemedies(ReviewChainFixture):
                 short = parse_text(self, record_text(head=self.LIVE, rounds=self.ALL_PASS[:lines], net="negative", guard="yes"))
                 why = review_fn(self, "round_floor")(earlier, short)
                 self.assertIsNotNone(why, "scope: round_floor does not hold the short record")
-                self.assert_own_remedy(rc, out, err, why, r"--round\b")
+                self.assert_own_remedy(rc, out, err, why, self.FLOOR_REMEDY)
 
-    def test_a_fix_check_that_moves_the_final_net_value_names_the_flag_and_the_old_value_as_its_remedy(self):
-        # the final net value is held (decision hold-unsafe-after-round-3): a fix check keeps the value it was given, so the refusal names that
-        # value and the flag that carries it
+    def test_a_record_that_leaves_the_failed_fix_slot_names_the_missing_fail_line(self):
+        # a failed fix check counts as the next round, and only a FAIL line fills that slot. The remedy names that line, not the generic floor
+        failed = review_comment(1, 7, record_text(head=self.EARLIER, rounds=self.FAIL_ONE, fix=(fix_check_line(verdict="FAIL", head=self.OTHER),)))
+        for label, rounds, remedy in (
+                ("no round 2", self.FAIL_ONE, "Carry every round up to round 2, and make round 2 a FAIL line: pass each round line with --round."),
+                ("a PASS on round 2", self.FAIL_THEN_PASS, "Round 2 needs a FAIL line: pass it with --round.")):
+            with self.subTest(label=label):
+                newest = review_comment(2, 7, record_text(head=self.NEWEST, rounds=rounds))
+                rc, out, err, _ = self.run_chain(self.NEWEST, (failed, newest), rounds=round_args(rounds))
+                self.assert_own_remedy(rc, out, err, "a failed fix check on head", remedy)
+                self.assertNotIn(self.FLOOR_REMEDY, err, "the failed slot got the generic round floor remedy:\n" + err)
+
+    def test_a_fix_check_that_moves_a_frozen_field_of_the_final_record_names_the_old_values_as_its_remedy(self):
+        # the final round's net value, guard and kind are held (decision hold-unsafe-after-round-3): a fix check keeps the value it was given, so
+        # the refusal names that value and the flag that carries it
         diffs = {(self.NEWEST, self.LIVE): compare_of("ahead", self.CODE)}
-        comments = self.pair("PASS", rounds=REVIEW_FAILED_THREE, net="negative")
-        for net in ("zero", "positive", "not owed"):
-            with self.subTest(net=net):
-                rc, out, err, _ = self.run_chain(self.NEWEST, comments, diffs=diffs, net=net, rounds=round_args(REVIEW_FAILED_THREE))
-                self.assert_own_remedy(rc, out, err, "negative", r"--net-value\b")
+        for field, old, new in (("net", "negative", "zero"), ("net", "negative", "positive"), ("net", "negative", "not owed"),
+                                ("guard", "yes", "no"), ("kind", "delete-only", "normal")):
+            with self.subTest(field=field, new=new):
+                held = {"net": "negative", "guard": "no", "kind": "normal"}
+                comments = self.pair("PASS", rounds=REVIEW_FAILED_THREE, **{**held, field: old})
+                rc, out, err, _ = self.run_chain(self.NEWEST, comments, diffs=diffs, rounds=round_args(REVIEW_FAILED_THREE), **{**held, field: new})
+                label, flag = self.FIELD_CLAUSES[field]
+                self.assert_own_remedy(rc, out, err, f"{label} {old}, so {flag} must be {old}", self.FROZEN_REMEDY)
 
     def test_a_fix_base_the_live_head_has_diverged_from_names_the_ancestor_remedy(self):
         # the base is the newest Head, so the base rule does not apply. Its one compare with the live head reads diverged, and the remedy is
         # an ancestor of the live head
         rc, out, err, host = self.run_chain(self.NEWEST, self.pair("PASS"))
         self.assertEqual(host.compare_reads, [(self.NEWEST, self.LIVE)], "scope: the ancestor read was not the one compare of base and live head")
-        self.assert_own_remedy(rc, out, err, "diverged", r"(?i)\bancestor\b")
+        self.assert_own_remedy(rc, out, err, "diverged", self.ANCESTOR_REMEDY)
 
     def test_a_newest_fix_check_that_failed_or_was_wide_names_its_own_remedy(self):
-        # a FAIL leaves the next round open, and a WIDE is a new lane. Each names its own remedy, and neither prints the head one
+        # a FAIL before the final round leaves the next round open, a FAIL after it holds the change, and a WIDE is a new lane. Each names its own
+        # remedy, and none prints the head one
         diffs = {(self.NEWEST, self.LIVE): compare_of("ahead", self.CODE)}
-        for verdict, remedy in (("FAIL", r"(?i)\bround\b"), ("WIDE", r"(?i)\bnew lane\b")):
-            with self.subTest(verdict=verdict):
-                rc, out, err, _ = self.run_chain(self.NEWEST, self.pair(verdict), diffs=diffs)
-                self.assert_own_remedy(rc, out, err, verdict, remedy)
+        for label, verdict, rounds, remedy in (
+                ("a FAIL before the final round", "FAIL", REVIEW_PASS, "Post round 2's review record: a FAIL line for round 2 and no Fix check line."),
+                ("a FAIL after the final round", "FAIL", REVIEW_FAILED_THREE, self.FAIL_FINAL_REMEDY),
+                ("a WIDE", "WIDE", REVIEW_PASS, self.WIDE_REMEDY)):
+            with self.subTest(label=label):
+                rc, out, err, _ = self.run_chain(self.NEWEST, self.pair(verdict, rounds=rounds), diffs=diffs)
+                self.assert_own_remedy(rc, out, err, f"Fix check is {verdict}", remedy)
+
+    def test_a_pull_request_with_no_review_record_names_posting_the_round_record_first(self):
+        rc, out, err, _ = self.run_chain(self.NEWEST)
+        self.assert_own_remedy(rc, out, err, "must exist", self.MISSING_REMEDY)
+
+    def test_each_refused_fix_base_record_names_its_own_remedy(self):
+        # the source record is refused for its own cause, and each cause names its own remedy
+        self.set_origin("o/r")
+        link = "https://github.com/o/r/pull/9#issuecomment-5"
+        source = review_comment(5, 9, record_text(n=9, head=self.NEWEST, rounds=REVIEW_PASS))
+        newer = review_comment(6, 9, record_text(n=9, head=self.NOTES, rounds=REVIEW_PASS))
+        other_pr = review_comment(5, 9, record_text(n=10, head=self.NEWEST, rounds=REVIEW_PASS))
+        with_fix = review_comment(5, 9, record_text(n=9, head=self.NEWEST, rounds=REVIEW_PASS, fix=(fix_check_line(head=self.EARLIER),)))
+        for label, comments, url, cause, remedy in (
+                ("a link to another repo", (source,), "https://github.com/x/r/pull/9#issuecomment-5",
+                 "names x/r, not this repo", "Name a review record on this repo."),
+                ("a comment that is no record", (review_comment(5, 9, "LGTM"),), link,
+                 "not a well-formed review record", "Name the comment of a review record."),
+                ("a record whose PR line names another pull request", (other_pr,), link,
+                 "that record's PR line names #10", "Name a review record on the pull request its PR line names."),
+                ("a record that is not the newest on its pull request", (source, newer), link,
+                 "that record is not the newest on #9", "Name the newest review record on that pull request."),
+                ("a record with a fix check line", (with_fix,), link,
+                 "a chain never runs through --fix-base-record", "Post a review record for this pull request, from round 1.")):
+            with self.subTest(label=label):
+                host = self.record_host(*comments, head=self.LIVE)
+                rc, out, err = self.run_args("7", "--review-record", "--head", self.LIVE, "--kind", "normal", "--guard", "no",
+                                             "--round", "1:reviewer:sonnet:PASS", "--fix-check", f"{self.NEWEST}:reviewer:haiku:PASS",
+                                             "--fix-base-record", url, host=host)
+                self.assert_own_remedy(rc, out, err, cause, remedy)
 
 class ReviewFixBaseRecord(ReviewEnv):
     """`--fix-base-record URL` goes with --review-record and --fix-check. URL is a GitHub issue-comment link to an earlier review record, on this
