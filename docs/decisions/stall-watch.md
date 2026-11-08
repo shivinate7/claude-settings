@@ -63,6 +63,10 @@ guard rule, so the watcher does the waiting and the session is told once.
   tokenizer reads the cd, so a cd in quotes, a comment or a heredoc body is text. Only a cd that surely
   runs in the main shell moves the directory: the first command of a list item, or one that follows only
   cds joined by `&&`. A cd behind `||`, `&`, `|` or `then`, or inside `{ }`, leaves it unknown.
+  A cd that ends in `|` (`cd /x | cmd`) runs in a subshell, so the directory stays as it was.
+  A quoted operator word such as `";"` or `"&&"` is a word. It never ends a list or joins a path.
+  A cd with that word as its target leaves the directory unknown, and `cd ""` leaves it as it was.
+  A backslash-newline joins two lines, so it is whitespace and not a word.
   A list that ends in `&` runs in a background subshell, so after the `&` the directory is the list's start.
   Limit: `builtin cd`, `command cd` and `eval "cd ..."` are not read as a cd.
   Limit: a cd inside a shell heredoc body (`bash <<EOF`) is read as moving the main shell.

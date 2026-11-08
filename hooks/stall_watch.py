@@ -238,6 +238,9 @@ def read_named_logs(command):
             if tok is None:
                 break
             end = lex.instream.tell() - len(lex._pushback_chars)  # shlex reads one char ahead of a token
+            if tok == "\n" and text[seen:end].lstrip(" \t\r").startswith("\\\n"):
+                seen = end  # a backslash-newline joins the lines: it is whitespace, not a word
+                continue
             if set(tok) <= set(lex.punctuation_chars) and not _is_operator(text[seen:end], tok):
                 tok = QUOTED_WORD + tok
             tokens.append(tok)
