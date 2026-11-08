@@ -3437,9 +3437,9 @@ def handed_check(host, n, info):
         if not left[m]:
             found[m] = "is on a left-out line with no reason"
     if found:
-        raise Unnamed("\n".join([f"#{m} {why} of #{n}." for m, why in sorted(found.items())]
-                                + [f"Name each in the body of #{n}: on the {BATCH_LANES} line, or on a {'/'.join(BATCH_LEFT_OUT)} line with a reason. "
-                                   f"Nothing was pushed, marked ready, locked, claimed or merged. {HANDED_CITE}"]))
+        named_lines = "\n".join(f"#{m} {why} of #{n}." for m, why in sorted(found.items()))
+        raise Unnamed(f"{named_lines}\nName each in the body of #{n}: on the {BATCH_LANES} line, or on a {'/'.join(BATCH_LEFT_OUT)} line with a reason. "
+                      f"Nothing was pushed, marked ready, locked, claimed or merged. {HANDED_CITE}")
     return f"merge: handed-lane check: {len(named)} lanes in the batch, {len(left)} named as left out."
 
 def default_branch(root):
