@@ -46,18 +46,15 @@
 # of the job has prints one `unknown` line, and when any name is missing no step runs: exit 2. A named step that does not
 # run (an action, a false if:) is also one `unknown` line, never a pass. The merge's ready checks run its declared
 # merge.readyChecks this way. Exit codes as below.
-# --step runs in the claude-settings commit the job pins, as CI does: the one 40-hex sha of its
-# `<owner>/claude-settings/actions/<name>@<sha>` uses: lines (lint/workflow_steps.py settings_pins), checked out as a
-# detached worktree of CI_JOB_SETTINGS_CLONE, else this file's own clone, else the clone the global rules file names;
-# the sha is fetched from that clone's origin when it lacks it. Each named step gets CLAUDE_SETTINGS_DIR set to that
-# tree (the step's own env: wins), and a remote ste-lint, code-check or zizmor action runs from it only (ste-lint as its
-# bin/ste-changed). With no pin, a step
-# runs as before. Two pinned refs, a ref that is no sha, a sha that cannot be fetched or a failed `npm ci` makes each
-# named step one `unknown` line naming the reason, exit 2, and none runs. The worktree is removed on every exit.
-# A remote action step (code-check, zizmor, ste-lint) runs from a worktree of its own pinned sha, as CI downloads each pinned sha
-# separately. CLAUDE_SETTINGS_DIR is set only when the job has exactly one distinct pin. With two or more pins, a plain run step is
-# unknown and names both shas, while an action step still runs from its own pin. A ref that is no sha on an action step makes that
-# step unknown. Only the steps that need a missing or unfetchable tree are unknown; the others run.
+# --step runs claude-settings at the commits the job pins, as CI does: the 40-hex shas of its
+# `<owner>/claude-settings/actions/<name>@<sha>` uses: lines (lint/workflow_steps.py settings_pins). Each pinned sha is a
+# detached worktree of CI_JOB_SETTINGS_CLONE, else this file's own clone, else the clone the global rules file names,
+# fetched from that clone's origin when it lacks the sha. A remote ste-lint, code-check or zizmor step runs from the
+# worktree of its own pin only (ste-lint as its bin/ste-changed), as CI downloads each pinned sha separately.
+# CLAUDE_SETTINGS_DIR is set to the tree only when the job has exactly one distinct pin (the step's own env: wins).
+# With two or more pins, a plain run step is one `unknown` line naming the shas. A ref that is no sha, a sha that cannot
+# be fetched or a failed `npm ci` makes each step that needs that tree one `unknown` line; the other steps run. With no
+# pin, a step runs as before. Each worktree is removed on every exit.
 # --plan prints each step's verdict-to-be and runs nothing. Output of each run: $VERDICT_LOG, else one new
 # temp log per call, named on the last line. Exit: 1 if a step fails, else 2 if one is unknown, else 0.
 # CI checks out with fetch-depth: 0. When the job's checkout step says so and the clone is shallow, ci-job first
@@ -67,10 +64,10 @@
 # stderr as it arrives, so a quiet step still feeds the stall watch (decision stall-watch: a quiet tool prints a
 # line at least every 120 s).
 # Cost: one process per step (bin/verdict and the step's shell), one log file; no timer, no lasting process. Under
-# --step with a pin: one worktree (a temp folder named by this run's pid, removed after, on a SIGTERM too), a git fetch
-# only when the sha is absent, an `npm ci --ignore-scripts` only when the pinned tree has a package-lock.json, and one
-# `git worktree list` of the clone to remove the trees of dead runs (a SIGKILL leaves one; only a tree whose pid is not
-# alive goes). Each worktree made runs that list once. With two or more pins: one worktree per distinct pinned sha a named step needs.
+# --step with pins: one worktree per distinct pinned sha a named step needs (a temp folder named by this run's pid,
+# removed after, on a SIGTERM too), a git fetch only when the sha is absent, an `npm ci --ignore-scripts` only when the
+# pinned tree has a package-lock.json, and one `git worktree list` of the clone per worktree made, to remove the trees
+# of dead runs (a SIGKILL leaves one; only a tree whose pid is not alive goes).
 # --plan with a pin reads the clone for the sha and makes no fetch and no worktree. Under
 # --lint each install CI step adds its processes, plus network and disk only when a job has one; a pip install writes to the active Python. Each `not run` line,
 # the summary and each step's `start: <name>` line on stderr (before it runs, so a caller sees which step is running)

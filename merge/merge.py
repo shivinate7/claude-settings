@@ -11,9 +11,10 @@
                           the step would push, before any push and before the ready mark, on every path (default base, other base,
                           Record-claim head). A FAIL or an unknown stops the step with the step lines and the log: nothing pushed, not
                           marked ready, and no flag lifts it. A repo with no list runs no ready check, and one line says so.
-                          Each step runs in the claude-settings commit the repo's workflow pins (one sha), as CI does; two pins, a
-                          ref that is no sha or a pin that cannot be fetched is an unknown, which stops the step too.
-                          Cost per draft-step ready: one ci-job run and one worktree, plus ci-job's pinned worktree (a git fetch
+                          Each step runs in the claude-settings commit its workflow job pins, as CI does: a pinned action step at its
+                          own sha. A plain step in a job with two pins, a ref that is no sha or a pin that cannot be
+                          fetched is an unknown, which stops the step too.
+                          Cost per draft-step ready: one ci-job run and one worktree, plus ci-job's pinned worktrees, one per pinned sha (a git fetch
                           only when the sha is absent, an npm ci only when that tree has a lockfile); the run time is unmeasured
                           for a step subset (the 1200 s lint bound applies). No new file but ci-job's own log.
                           On a ready PR a stale records page with no claim to make or resume is refused before any push; only the draft step heals it.
