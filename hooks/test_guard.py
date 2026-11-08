@@ -13655,6 +13655,35 @@ sendto_allow("red cases in a test file, then Make the cases pass, is allowed to 
              SENDTO_BUILDER, "Red cases are in tests/x.py. Make the cases pass.", T_SENDTO_BUILDER)
 sendto_allow("red cases in a test file, then Make that case green, is allowed to a builder",
              SENDTO_BUILDER, "Red cases are in tests/x.py. Make that case green.", T_SENDTO_BUILDER)
+# Each deny names a path in the sentence before, then edits it without a pronoun: by a noun for the path (`the
+# assertion`, `the tests`, `the expected value`, `the guard`, `the bug`), by a quoted path, or by a participle
+# after `it` (`it, passing an exact assert`). The control keeps `Make that pass` a goal, so it is allowed.
+sendto_refuse("an edit of the assertion, with the path in the sentence before, is refused to a builder, naming test-author",
+              SENDTO_BUILDER, "hooks/test_guard.py:683 holds for any input. Replace the assertion with an exact one.",
+              T_SENDTO_BUILDER, "test-author", lacks=("hooks/test_guard.py",))
+sendto_refuse("an edit of the tests, with the path in the sentence before, is refused to a builder, naming test-author",
+              SENDTO_BUILDER, "hooks/test_guard.py:683 holds for any input. Fix the tests.",
+              T_SENDTO_BUILDER, "test-author", lacks=("hooks/test_guard.py",))
+sendto_refuse("an edit of the expected value, with the path in the sentence before, is refused to a builder",
+              SENDTO_BUILDER, "hooks/test_guard.py:683 holds for any input. Replace the expected value with 3.",
+              T_SENDTO_BUILDER, "test-author", lacks=("hooks/test_guard.py",))
+sendto_refuse("a path quoted from a reviewer, then Fix it, is refused to a builder, naming test-author",
+              SENDTO_BUILDER, 'Quote the reviewer: "tests/x.py:12 is wrong". Fix it.',
+              T_SENDTO_BUILDER, "test-author", lacks=("tests/x.py",))
+sendto_refuse("a path in the sentence before, then Make it pass by changing the expected value, is refused to a builder",
+              SENDTO_BUILDER, "tests/x.py:12 holds. Make it pass by changing the expected value to 3.",
+              T_SENDTO_BUILDER, "test-author", lacks=("tests/x.py",))
+sendto_refuse("a path in the sentence before, then Replace it, passing an exact assert, is refused to a builder",
+              SENDTO_BUILDER, "hooks/test_guard.py:683 holds for any input. Replace it, passing an exact assert.",
+              T_SENDTO_BUILDER, "test-author", lacks=("hooks/test_guard.py",))
+sendto_refuse("a product path named in a CI red line, then Fix the guard, is refused to a test-author, naming builder",
+              SENDTO_AUTHOR, "CI is red on hooks/guard.py. Fix the guard.", T_SENDTO_AUTHOR, "builder",
+              lacks=("hooks/guard.py",))
+sendto_refuse("a product path in the sentence before, then Fix the bug, is refused to a test-author, naming builder",
+              SENDTO_AUTHOR, "hooks/guard.py:683 holds. Fix the bug.", T_SENDTO_AUTHOR, "builder",
+              lacks=("hooks/guard.py",))
+sendto_allow("red cases in a test file, then Make that pass, is allowed to a builder",
+             SENDTO_BUILDER, "Red cases are in hooks/test_guard.py. Make that pass.", T_SENDTO_BUILDER)
 
 # ---- the diff, judged at commit, push and SubagentStop
 FAMILY = "diff"
