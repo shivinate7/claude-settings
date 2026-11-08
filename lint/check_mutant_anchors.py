@@ -9,7 +9,7 @@ mutants share a path. So `merge --lane-lint` shows a bad anchor before review, a
 Prints one `FAIL <kind> ...: <label>` line per error and exits 1; exits 0 when the table is sound.
 The name holds no "mutate" on purpose: bin/ci-job drops such steps from `--lint`.
 
-Cost: one process, no suite, no network. It reads each anchor file once per mutant (561 mutants, 18 files). Measured about 0.4 s.
+Cost: one process, no suite, no network. Each guard mutant reads every anchor file; any other mutant reads its own file. Measured about 0.4 s.
 """
 import argparse
 import os
