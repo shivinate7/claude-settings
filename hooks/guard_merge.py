@@ -231,8 +231,13 @@ def merge_check_reason(verdict: str, detail: str) -> str:
 
 REVIEWED_HEAD_PUSH_REASON = (
     "Rule (Git, reviewed-head-push): this push lands on the head of an open pull request whose newest review record "
-    "has used its one fix check or is held, so the change takes no more work on that head (decision pr-review-record). "
+    "has used its one fix check, so the change takes no more work on that head (decision pr-review-record). "
     "Remedy: stack the change on a new branch, and open its own pull request."
+)
+REVIEWED_HEAD_HELD_REASON = (
+    "Rule (Git, reviewed-head-push): this push lands on the head of an open pull request whose newest review record "
+    "is held, so the change takes no more work until the owner decides (rule roles-review-cap-three, decision "
+    "pr-review-record). Remedy: stop work on the change, and leave the decision to the owner."
 )
 
 
@@ -252,12 +257,12 @@ def _is_fork(row) -> bool:
     return bool(head and base and head != base)
 
 
-def reviewed_head_push_hit(args, where: str, overrides=None, first=False) -> bool:
-    """True when this push writes the head branch of an open pull request whose newest review record, on the live
-    head, already holds its fix check, whatever the record's state, or is held with or without a fix check (rule
-    reviewed-head-push). A stale record (another head) allows. A pull request whose head repo differs from its base repo is
+def reviewed_head_push_hit(args, where: str, overrides=None, first=False) -> str:
+    """"held" or "fix" when this push writes the head branch of an open pull request whose newest review record, on the
+    live head, is held with or without a fix check ("held", which wins), or already holds its fix check, whatever the
+    record's state ("fix"); else "" (rule reviewed-head-push). A stale record (another head) allows. A pull request whose head repo differs from its base repo is
     a fork and is skipped before the comment read; a row with no repo field counts as the same repo. Fails open, the opposite of merge_check: a tool that
-    cannot load, a failed or unreadable read, or any other error is False, with exactly one stderr line naming the rule.
+    cannot load, a failed or unreadable read, or any other error is "", with exactly one stderr line naming the rule.
     The record is read and judged by the merge tool's own `review_comments` and `parse_review`, so no
     parse rule is copied here. Every destination the push names is read, globs and unresolved names skipped: a push
     of `--all`, `--mirror`, a tag alone, a deletion, or a push whose remote (named, or implied by `push_remote`) is not origin
@@ -268,37 +273,40 @@ def reviewed_head_push_hit(args, where: str, overrides=None, first=False) -> boo
     has the destination as its head, one paged repo-wide issue comment read."""
     scope = push_refspecs(args)
     if scope is None:
-        return False
+        return ""
     try:
         if push_remote(args, where, overrides) != "origin":
-            return False
+            return ""
         module = merge_module()
         if module is None:
             raise RuntimeError("the merge tool could not be loaded")
         branches = {b for b in push_destinations(args, where, overrides) if b and "*" not in b}
         if not branches:
-            return False
+            return ""
         host = module.Host(repo=None, cwd=where or None)
         with module.shared_deadline(MERGE_READ_TIMEOUT):
             rows = [d for d in host.pages("pulls", fields={"state": "open"})
                     if d["head"]["ref"] in branches and not _is_fork(d)
                     and not (first and _sends_nothing(scope[1], where, d["head"]["sha"]))]
             if not rows:
-                return False
+                return ""
             since = min(str(d.get("created_at") or "1970-01-01T00:00:00Z") for d in rows)
             found = host.review_comments(since)
+        hit = ""
         for row in rows:
             n, sha = row["number"], row["head"]["sha"]
             records = found.get(n, [])
             rec = module.parse_review(records[-1]) if records else None
             if rec and rec["n"] == n and rec["head"] == sha and (
                     rec["fix"] is not None or module.review_state(rec, sha)[0] == "held"):
-                return True
-        return False
+                if module.review_state(rec, sha)[0] == "held":
+                    return "held"
+                hit = "fix"
+        return hit
     except (Exception, SystemExit) as e:
         print("guard: reviewed-head-push could not read the pull request, so the push goes through: "
               + cap_safe(" ".join(str(e).split()), 160), file=sys.stderr)
-        return False
+        return ""
 
 
 def _merge_config_at(root: str):

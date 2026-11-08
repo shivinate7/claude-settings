@@ -92,7 +92,8 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        refspec naming the current branch) that writes a name other than the branch's
                        upstream. Only with an upstream on the pushed remote that is not main or master.
   reviewed-head-push   ask. A push onto the head of an open pull request whose newest review record carries
-                       its fix check, whatever the record's state, or is held. Only in a merge-tool repo. A read that fails lets the push through.
+                       its fix check, whatever the record's state (remedy: a new branch), or is held (remedy: the
+                       owner decides). Only in a merge-tool repo. A read that fails lets the push through.
   env-file             deny. Any read or write of an environment file.
   merge-checks         deny. A merge while the head has a check pending or red, while another
                        ready PR on the base runs CI, or when the read could not run. `--auto` too.
@@ -384,7 +385,7 @@ while True:
             DRAFT_PR_REASON, MERGE_TOOLS, RECORDS_PAGE_REASON, ROLE_REASON,
             conflict_markers_hit, gh_call_of, git_call_of, merge_call_of, merge_check, merge_check_reason, record_writer_hit, records_page_hit, role_proof_hit,
             DEFAULT_RECORD_BRANCH, RECORD_REASON, settings_roots, TRUST_REASON, archive_hit, brief_hit, trust_card_hit,
-            undrafted_pr_create, uses_merge_tool, REVIEWED_HEAD_PUSH_REASON, reviewed_head_push_hit,
+            undrafted_pr_create, uses_merge_tool, REVIEWED_HEAD_PUSH_REASON, REVIEWED_HEAD_HELD_REASON, reviewed_head_push_hit,
         )
         _loading = "guard_frozen"
         from guard_frozen import (
@@ -3533,10 +3534,11 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
                 # destination as its head. Limit: every destination the push names is checked, globs and unresolved
                 # names skipped, never `--all`, `--mirror` or a remote other than origin. Only a push that is the first
                 # command may count as sending nothing: a commit chained before it has not run when the guard reads HEAD.
-                elif uses_merge_tool(where) and reviewed_head_push_hit(
-                        args, where, overrides, first=not any(s.strip() for s in push_segments[:number])):
-                    ask_command("reviewed-head-push", REVIEWED_HEAD_PUSH_REASON, "git push " + " ".join(args),
-                                "push onto a reviewed head")
+                elif uses_merge_tool(where) and (held_kind := reviewed_head_push_hit(
+                        args, where, overrides, first=not any(s.strip() for s in push_segments[:number]))):
+                    ask_command("reviewed-head-push",
+                                REVIEWED_HEAD_HELD_REASON if held_kind == "held" else REVIEWED_HEAD_PUSH_REASON,
+                                "git push " + " ".join(args), "push onto a reviewed head")
 
     # 5. The environment file. This layer reads the command BEFORE normalization.
     refusal, logged = env_refusal(stripped)
