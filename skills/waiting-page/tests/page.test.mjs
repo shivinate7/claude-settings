@@ -6434,17 +6434,37 @@ test("the row tint: a paused row takes the hover fill when the pointer is on it,
     assert.equal(bg, wantBg, `in ${scheme} the hovered paused row's background is ${bg}, not the to-do row's hover fill ${wantBg}`);
   }
 });
-// Control: a hovered to-do row takes a fill, and no rule overrides it. It stays green on a page without the paused-row hover rule.
+// Control: a hovered to-do row takes the fill that the page's .rrow:hover rule declares, and no rule overrides it. The expected fill is read
+// from that rule's declaration, not from a row: a row compared with itself could never fail. A tint change moves the declaration and the
+// test follows. The declared fill must not read transparent, or the test would pass on a page that draws no fill at all. It stays green on a page without the paused-row hover rule.
 test("control: the row tint: a to-do row takes the hover fill when the pointer is on it, in light and dark", async (t) => {
   const page = await open(t, { pageHtml: stalledWithTodoPage() }); if (!page) return;
   await openStatus(page);
   assert.match(await page.locator("#s-t7 .rrow").getAttribute("aria-label"), /To do/, "step t7 does not read To do");
   const row = page.locator("#s-t7 .rrow");
+  const declared = await page.evaluate(() => {
+    const find = (rules) => {
+      for (const r of rules) {
+        if (r.selectorText === ".rrow:hover") return r.style.getPropertyValue("background");
+        if (r.cssRules) { const v = find(r.cssRules); if (v) return v; }
+      }
+      return "";
+    };
+    for (const sheet of document.styleSheets) {
+      let v = "";
+      try { v = find(sheet.cssRules); } catch { continue; }  // a sheet from another origin has no readable rules
+      if (v) return v;
+    }
+    return "";
+  });
+  assert.ok(declared, "the page has no .rrow:hover rule with a background to read the hover fill from");
   for (const scheme of ["light", "dark"]) {
     await page.emulateMedia({ colorScheme: scheme });
+    const wantBg = await probeOf(row, "backgroundColor", declared);
+    assert.notEqual(wantBg, await probeOf(row, "backgroundColor", "transparent"), `in ${scheme} the .rrow:hover fill ${declared} reads as transparent here, so there is no fill to compare`);
     await row.hover();
     const bg = await computedOf(row, "backgroundColor");
-    assert.notEqual(bg, await probeOf(row, "backgroundColor", "transparent"), `in ${scheme} the hovered to-do row takes no fill: its background is ${bg}`);
+    assert.equal(bg, wantBg, `in ${scheme} the hovered to-do row's background is ${bg}, not the .rrow:hover fill ${wantBg}`);
   }
 });
 
