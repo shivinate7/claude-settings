@@ -112,7 +112,7 @@ def last_paragraph(pr_body):
     Generated-by line, as one paragraph or two)."""
     prose = re.sub(r"^ {0,3}(```|~~~).*?(?:^ {0,3}\1[^\n]*|\Z)", "", pr_body, flags=re.M | re.S)  # an unclosed fence runs to the end
     prose = re.sub(r"<!--.*?(?:-->|\Z)", "", prose, flags=re.S)
-    paras = re.split(r"\n[ \t]*\n", prose.replace("\r\n", "\n").strip())
+    paras = [p for p in re.split(r"\n[ \t]*\n", prose.replace("\r\n", "\n")) if norm(p)]  # a blank or emptied paragraph is no paragraph
     while len(paras) > 1:
         lines = [n for n in map(norm, paras[-1].splitlines()) if n]
         if lines == ["---", lines[-1]] and POSTED_BY.fullmatch(lines[-1]):
@@ -125,7 +125,7 @@ def last_paragraph(pr_body):
             del paras[-2:]
         else:
             break
-    return paras[-1]
+    return paras[-1] if paras else ""
 
 
 def allowed(cwd, rng, pr_body=""):
