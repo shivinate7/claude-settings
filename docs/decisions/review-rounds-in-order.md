@@ -5,8 +5,8 @@
 Coordinator, 2026-11-08 10:04 CST (roadmap step `review-rounds-in-order`, shape b). The guard refuses a reviewer spawn whose brief carries `Round 2 of 3` or `Round 3 of 3`. It refuses while a reviewer of an earlier round on the same pull request still runs in this session.
 
 - Rule `review-rounds-in-order`, decision deny, in `hooks/guard.py` (`round_order_hit`). The marker is read by `brief_markers`, the one marker scanner. A brief with no marker is round 1 and is never refused.
-- The pull request is each `#<n>`, `PR <n>` or `PR#<n>` the brief names, matched as a whole number. `#2038` does not match `#20380`. A brief that names no pull request is not refused.
-- A reviewer runs while its call has no result, or its background launch (`async_launched`, with an agentId) has no terminal task notice. The notice is read by `stall_watch.closed_by_notice`, in the user and queued-command forms.
+- The pull request is each `#<n>`, `PR <n>`, `PR#<n>` or `PR<n>` the brief names, matched as a whole number. `#2038` does not match `#20380`. A brief that names no pull request is not refused.
+- A reviewer runs while its call has no result, or its background launch (`async_launched`, with an agentId) has no terminal task notice and no successful TaskStop. The notice is read by `stall_watch.closed_by_notice`, in the user and queued-command forms.
 - A foreground reviewer whose call returned, and a spawn that a hook refused (an error result), do not run. A builder's `Round 3 of 3` is not a reviewer spawn and is not judged.
 - The reason names the earlier round that runs. It tells the session to wait for that round's notice, then spawn this reviewer again.
 
@@ -28,7 +28,7 @@ One read of the session transcript for each round-2 or round-3 reviewer spawn. N
 - Fail open. A transcript that cannot be read, a bad line, or a failed import allows the spawn. A refusal needs a read that worked.
 - It sees this session only. A reviewer that another session started is not seen.
 - A brief that names the pull request in other words matches nothing and passes. Examples: a branch name, a URL, `pr 2038`, `PR: 2038` or `PR-2038`. The match is case-sensitive.
-- A background reviewer that ended with no notice in the transcript still counts as running. A successful TaskStop on its agent closes it, as `stall_watch.stopped_ids` reads it, from the same transcript read. The remedy is to wait for the notice or to stop the agent.
+- A background reviewer that ended with no notice in the transcript still counts as running. A successful TaskStop on its agent closes it, as `stall_watch.stopped_ids` reads it, from the same transcript read. The remedy is to wait for the notice or to stop the agent. A TaskStop that answers "No task found" does not close it, so a reviewer that ended with no notice stays open; the owner's override lifts that refusal.
 - It judges rounds of reviewers only. The model rows are in `agent-model-cap`.
 - It judges the Agent and Task tools only. A workflow reviewer (`agentType: 'reviewer'`) is not judged. Debt `round-order-workflow-reviewer`.
 - Every pull request number the brief names counts. A brief that cites another PR can be refused while that PR's reviewer runs. Debt `round-order-cited-pr`.
