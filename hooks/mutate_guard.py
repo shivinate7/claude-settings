@@ -2391,7 +2391,7 @@ MUTATIONS = [
     ("git-after-cd: a || or | before the push's chain is a ; join",
      '                        return "push"\n                    break\n                head = _pipeline_head',
      '                        return "push"\n                head = _pipeline_head',
-     "guard", "git-after-cd: a check joined to a push by ||, then a git push -u, passes"),
+     "guard", "a check protected by || exit 1, then && a git push -u, passes"),
     ("git-after-cd: a for is no compound head, so the check before the loop is not read",
      '(["if"], ["for"], ["while"], ["until"])',
      '(["if"], ["while"], ["until"])',
