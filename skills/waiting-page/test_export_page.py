@@ -1930,5 +1930,27 @@ class AnswersPassed(Copied):
         self.assertEqual(json.loads(seen["answers"]), {}, "the --answers file is not the empty map the export gave")
 
 
+class RepublishChecksFirst(Base):
+    """SKILL.md "Update a repo's pages" step 3: `export_page.py --check` runs on the `stale_pages.py --write` output before
+    the republish. The step's text is read from SKILL.md, never copied here, so a change to that step is what this case
+    checks. Not gated: no node runs."""
+
+    def step3(self):
+        sections = read_text(os.path.join(HERE, "SKILL.md")).split("## Update a repo's pages", 1)
+        self.assertEqual(len(sections), 2, "SKILL.md has no 'Update a repo's pages' section")
+        steps = sections[1].split("\n## ", 1)[0].split("\n3. ", 1)
+        self.assertEqual(len(steps), 2, "the 'Update a repo's pages' section has no step 3")
+        return steps[1].split("\n4. ", 1)[0]
+
+    def test_step_3_runs_the_check_on_the_write_output_before_the_republish(self):
+        step = self.step3()
+        check = re.search(r"export_page\.py\s+--check\b[^\n]*--page\s+<new page>", step)
+        self.assertIsNotNone(check, "step 3 names no `export_page.py --check --page <new page>` run on the `stale_pages.py "
+                             "--write` output, so a bad item reaches the page at republish. Step 3:\n" + step)
+        republish = step.find("Republish")
+        self.assertGreaterEqual(republish, 0, "step 3 has no Republish sentence, so the order cannot be read. Step 3:\n" + step)
+        self.assertLess(check.start(), republish, "step 3 runs the check after the republish. Step 3:\n" + step)
+
+
 if __name__ == "__main__":
     unittest.main()
