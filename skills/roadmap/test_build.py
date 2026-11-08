@@ -2060,10 +2060,11 @@ class ReadyAndDraftRows(UpkeepFixture):
 class DoneWithoutCheck(UpkeepFixture):
     """The upkeep row `done without check`, the last row. It reads the done steps whose updatedAt is on or after
     build.DONE_CHECK_SINCE (an ISO UTC time), and lists each whose note, why and ask (joined) fail the close check:
-    no Done check named, `<id>`; a Done check named, but no sentence holds `green on main` or `met on main` (whole
-    words, any case) with a source (`#<digits>`, `PR <n>`, a /pull/<n> URL, or a 6-40 character hex commit hash with a digit), `<id> (not shown green on main)`;
-    an updatedAt that is missing or unparsable, `<id> (updatedAt unreadable)`. A sentence ends at ". " or at the end
-    of the text. The row reads the step files only, so it needs no --live file."""
+    no Done check named (whole words, any case), `<id>`; a Done check named, but no field holds the phrase
+    `Done check green on main:` (any case) followed, after optional spaces, by a ref that lint/report_guard.py
+    DONE_REF_RE accepts, `<id> (not shown green on main)`; an updatedAt that is missing or unparsable,
+    `<id> (updatedAt unreadable)`. Nothing else shows a Done check green: not `met on main`, not a bare
+    `Green on main:`, and no negator or future word. The row reads the step files only, so it needs no --live file."""
 
     ROW = "done without check"
     NOT_SHOWN = " (not shown green on main)"
@@ -2182,11 +2183,11 @@ class DoneWithoutCheck(UpkeepFixture):
                          "a done step with an unreadable updatedAt is not listed as unreadable")
 
     def test_a_well_formed_close_is_not_listed(self):
-        # False-alarm class: a Done check, and a green-on-main sentence that holds a source, are not listed.
-        closes = {"colon-ref": "Done check: X. Green on main: #1312.",
-                  "met-short-hash": "Done check met on main (a1b2c3d).",
-                  "any-case": "DONE CHECK: X. GREEN ON MAIN: #1312.",
-                  "met-long-hash": "Done check: X. Met on main (%s)." % self.HASH_40}
+        # False-alarm class: a Done check, and the phrase `Done check green on main:` with a ref after it, are not listed.
+        closes = {"colon-ref": "Done check: X. Done check green on main: #1312.",
+                  "lower-short-hash": "done check green on main: a1b2c3d.",
+                  "any-case": "DONE CHECK: X. DONE CHECK GREEN ON MAIN: #1312.",
+                  "long-hash": "Done check: X. Done check green on main: %s." % self.HASH_40}
         steps = {"bad-control": self.done_step(note="Shipped.")}
         steps.update({sid: self.done_step(note=note) for sid, note in closes.items()})
         self.commit_steps(steps)
@@ -2194,7 +2195,7 @@ class DoneWithoutCheck(UpkeepFixture):
         self.assertIn("bad-control", entries)  # scope first: the in-scope close with no check is listed
         self.assertEqual(entries, ["bad-control"], "a well-formed close is listed")
 
-    def test_a_named_check_with_no_green_on_main_sentence_is_listed_as_not_shown(self):
+    def test_a_named_check_with_no_shown_green_line_is_listed_as_not_shown(self):
         steps = {"named-only": self.done_step(note="Done check: the feed loads."),
                  "named-upper": self.done_step(note="DONE CHECK: the feed loads."),
                  "named-in-why": self.done_step(note="Shipped.", why="done check: the feed loads."),
@@ -2205,160 +2206,135 @@ class DoneWithoutCheck(UpkeepFixture):
         self.assertIn("plain-control", entries)
         expected = sorted(["plain-control"] + [sid + self.NOT_SHOWN for sid in
                                                ("named-only", "named-upper", "named-in-why", "named-in-ask")])
-        self.assertEqual(entries, expected, "a named check with no green-on-main sentence is not listed as not shown")
+        self.assertEqual(entries, expected, "a named check with no shown green line is not listed as not shown")
 
-    def test_the_source_must_share_the_green_sentence(self):
-        # Miss class: a source in another sentence does not back a green-on-main sentence.
+    def test_the_ref_must_follow_the_phrase_at_once(self):
+        # Miss class: the ref must come right after `Done check green on main:`. A word first, or no ref at all, does
+        # not show it green, even with a ref later in the same field.
         self.commit_steps({
-            "ok-same-sentence": self.done_step(note="Done check: X. Green on main: #1312."),
-            "no-source": self.done_step(note="Done check: X. Green on main."),
-            "source-after": self.done_step(note="Done check: X. Green on main. Fixed in #1312."),
-            "source-before": self.done_step(note="Done check: X. Fixed in #1312. Green on main."),
+            "bad-control": self.done_step(note="Shipped."),
+            "exact": self.done_step(note="Done check green on main: #1312."),
+            "see-ref": self.done_step(note="Done check green on main: see #1312."),
+            "word-then-ref": self.done_step(note="Done check green on main: soon #1312."),
+            "no-ref": self.done_step(note="Done check green on main: soon."),
         })
         _, entries = self.listed()
-        self.assertIn("no-source" + self.NOT_SHOWN, entries)
-        self.assertEqual(entries, sorted(["no-source" + self.NOT_SHOWN, "source-after" + self.NOT_SHOWN,
-                                          "source-before" + self.NOT_SHOWN]),
-                         "a green-on-main sentence with its source in another sentence is not listed")
+        self.assertIn("bad-control", entries)  # scope first: the in-scope close with no check is listed
+        self.assertEqual(entries, sorted(["bad-control", "see-ref" + self.NOT_SHOWN,
+                                          "word-then-ref" + self.NOT_SHOWN, "no-ref" + self.NOT_SHOWN]),
+                         "a word, or no ref, after the colon shows the Done check green")
+
+    def test_the_colon_is_required(self):
+        # Miss class: `green on main` with no colon after `main` does not show it green, even with a ref after it or
+        # in another sentence.
+        self.commit_steps({
+            "bad-control": self.done_step(note="Shipped."),
+            "exact": self.done_step(note="Done check green on main: #1312."),
+            "no-colon": self.done_step(note="Done check green on main #5"),
+            "ref-after": self.done_step(note="Done check green on main. Fixed in #1312."),
+            "ref-before": self.done_step(note="Fixed in #1312. Done check green on main."),
+        })
+        _, entries = self.listed()
+        self.assertIn("bad-control", entries)  # scope first: the in-scope close with no check is listed
+        self.assertEqual(entries, sorted(["bad-control", "no-colon" + self.NOT_SHOWN, "ref-after" + self.NOT_SHOWN,
+                                          "ref-before" + self.NOT_SHOWN]),
+                         "a phrase with no colon after main shows the Done check green")
 
     def test_the_phrase_must_be_whole_words(self):
-        # Miss class: `green on main` must be whole words. `met on main` with a source still counts.
+        # Miss class: `green on main` must be whole words in the phrase. A word that only contains a phrase word does not count.
         self.commit_steps({
-            "ok-met": self.done_step(note="Done check: X. Met on main: #1312."),
+            "bad-control": self.done_step(note="Shipped."),
+            "exact": self.done_step(note="Done check green on main: #1312."),
             "red-green": self.done_step(note="Done check: red on main and green on the fix #1312."),
-            "mainline": self.done_step(note="Done check: X. Green on mainline #1312."),
-            "greens": self.done_step(note="Done check: X. Greens on main #1312."),
+            "mainline": self.done_step(note="Done check green on mainline: #1312."),
+            "greens": self.done_step(note="Done check greens on main: #1312."),
         })
         _, entries = self.listed()
-        self.assertIn("mainline" + self.NOT_SHOWN, entries)
-        self.assertEqual(entries, sorted(["red-green" + self.NOT_SHOWN, "mainline" + self.NOT_SHOWN,
+        self.assertIn("bad-control", entries)  # scope first: the in-scope close with no check is listed
+        self.assertEqual(entries, sorted(["bad-control", "red-green" + self.NOT_SHOWN, "mainline" + self.NOT_SHOWN,
                                           "greens" + self.NOT_SHOWN]),
-                         "a green-on-main phrase that is not whole words is not listed as not shown")
+                         "a phrase that is not whole words shows the Done check green")
 
     def test_the_source_must_have_the_shape_of_a_ref(self):
         # Miss class: `#` with no digits and a 41-character hash are not sources. 6 to 40 hex characters with a
         # digit are, as lint/report_guard.py DONE_REF_RE takes them (one home).
         self.commit_steps({
-            "ok-seven": self.done_step(note="Done check: X. Green on main: a1b2c3d."),
-            "ok-six": self.done_step(note="Done check: X. Green on main: a1b2c3."),
-            "ok-forty": self.done_step(note="Done check: X. Green on main: %s." % self.HASH_40),
-            "hash-only": self.done_step(note="Done check: X. Green on main: #."),
-            "forty-one": self.done_step(note="Done check: X. Green on main: %s0." % self.HASH_40),
+            "ok-seven": self.done_step(note="Done check green on main: a1b2c3d."),
+            "ok-six": self.done_step(note="Done check green on main: a1b2c3."),
+            "ok-forty": self.done_step(note="Done check green on main: %s." % self.HASH_40),
+            "hash-only": self.done_step(note="Done check green on main: #."),
+            "forty-one": self.done_step(note="Done check green on main: %s0." % self.HASH_40),
         })
         _, entries = self.listed()
         self.assertIn("hash-only" + self.NOT_SHOWN, entries)
         self.assertEqual(entries, sorted(["hash-only" + self.NOT_SHOWN, "forty-one" + self.NOT_SHOWN]),
                          "a source that is not a PR number or a 6-40 character hash with a digit is not accepted")
 
-    def test_a_negated_green_on_main_sentence_is_listed_as_not_shown(self):
-        # Miss class: a negator (not, never, no, isn't, yet) in the same clause, before `green on main` or
-        # `met on main`, says the check is not shown green, even with a source after it. A clause breaks at `,` `;` `:`.
+    def test_the_phrase_must_be_exact_and_contiguous(self):
+        # Miss class, one cause per case: `met on main` is not the phrase; `Green on main:` with no `Done check`
+        # right before it is not the phrase; a word or a break between `Done check` and `green on main` breaks it.
         self.commit_steps({
             "bad-control": self.done_step(note="Shipped."),
-            "not-met": self.done_step(note="Done check not met on main, see #1312."),
-            "not-green-yet": self.done_step(note="Done check: X. Not green on main yet, see #1312."),
-            "never-met": self.done_step(note="Done check: X. Never met on main: #1312."),
-            "no-green": self.done_step(note="Done check: X. No green on main: #1312."),
-            "isnt-green": self.done_step(note="Done check: X. Isn't green on main: #1312."),
-            "after-break-not": self.done_step(note="Done check: X, not green on main #6."),
+            "met": self.done_step(note="Done check met on main (a1b2c3d)."),
+            "bare": self.done_step(note="Done check: X. Green on main: #1312."),
+            "not-yet": self.done_step(note="Done check not yet; green on main #5"),
+            "should-be": self.done_step(note="Done check should be green on main after PR #5"),
         })
         _, entries = self.listed()
         self.assertIn("bad-control", entries)  # scope first: the in-scope close with no check is listed
-        self.assertEqual(entries, sorted(["bad-control"] + [sid + self.NOT_SHOWN for sid in
-                                                            ("not-met", "not-green-yet", "never-met", "no-green",
-                                                             "isnt-green", "after-break-not")]),
-                         "a green-on-main sentence with a negator before the phrase is listed as shown green")
+        for sid, cause in (("met", "met on main is not the phrase"),
+                           ("bare", "a break between Done check and green on main"),
+                           ("not-yet", "words between Done check and green on main"),
+                           ("should-be", "words between Done check and green on main")):
+            with self.subTest(case=sid):
+                self.assertIn(sid + self.NOT_SHOWN, entries, cause)
 
-    def test_a_negator_in_an_earlier_clause_does_not_negate_green_on_main(self):
-        # Miss class: a negator counts only in the clause of `green on main` or `met on main`. A clause breaks at
-        # `,` `;` `:` (lint/report_guard.py ANSWERED_CLAUSE_BREAK_RE), so `no`, `never` or `can't` before a break
-        # says nothing about the phrase after it.
+    def test_words_after_the_ref_do_not_change_a_shown_green_line(self):
+        # The rule reads the phrase and the ref after it. A future word later in the same sentence does not unshow it.
         self.commit_steps({
             "bad-control": self.done_step(note="Shipped."),
-            "comma-no": self.done_step(note="Done check no longer red, green on main: #1"),
-            "comma-never": self.done_step(note="Done check was never red, met on main #5"),
-            "semicolon-no": self.done_step(note="No failures; Done check green on main: #12"),
-            "semicolon-cant": self.done_step(note="Done check can't fail; green on main #3"),
-            "colon-never": self.done_step(note="Done check never failed: green on main #2"),
+            "after-ref": self.done_step(note="Done check green on main: #1312, fixed after the merge."),
         })
         _, entries = self.listed()
         self.assertIn("bad-control", entries)  # scope first: the in-scope close with no check is listed
-        self.assertEqual(entries, ["bad-control"],
-                         "a negator in an earlier clause is read as negating green on main")
+        self.assertEqual(entries, ["bad-control"], "a future word after the ref unshows a Done check green line")
 
-    def test_a_green_on_main_claim_with_a_future_marker_is_listed_as_not_shown(self):
-        # Miss class: a sentence whose green-on-main claim has a future marker in the same sentence (will, expected,
-        # once, pending, or after ... merge, merges or lands) claims a check that is not green yet, even with a source.
+    def test_the_ref_forms_after_the_colon_show_green_on_main(self):
+        # The ref forms lint/report_guard.py DONE_REF_RE accepts after the colon: `PR <n>`, a /pull/<n> URL (the ref is
+        # inside the word, and DONE_REF_RE finds it there), and no space at all. The phrase counts in why and ask too.
         self.commit_steps({
             "bad-control": self.done_step(note="Shipped."),
-            "will-after-merge": self.done_step(note="Done check not yet met — will be green on main after the merge #5"),
-            "expected": self.done_step(note="Done check: not yet; green on main expected #5"),
-            "once-lands": self.done_step(note="Done check: X. Green on main once #12 lands."),
-            "pending": self.done_step(note="Done check pending: green on main #5."),
-            "after-merges": self.done_step(note="Done check: X. Green on main after the fix merges #12."),
+            "pr-word": self.done_step(note="Done check green on main: PR 1312."),
+            "pull-url": self.done_step(note="Done check green on main: https://github.com/o/r/pull/1312."),
+            "no-space": self.done_step(note="Done check green on main:#1312."),
+            "in-why": self.done_step(note="Shipped.", why="Done check green on main: #1312."),
+            "in-ask": self.done_step(note="Shipped.", ask="Done check green on main: #1312."),
         })
         _, entries = self.listed()
         self.assertIn("bad-control", entries)  # scope first: the in-scope close with no check is listed
-        self.assertEqual(entries, sorted(["bad-control"] + [sid + self.NOT_SHOWN for sid in
-                                                            ("will-after-merge", "expected", "once-lands", "pending",
-                                                             "after-merges")]),
-                         "a green-on-main claim with a future marker in its sentence is shown green")
-
-    def test_a_green_on_main_claim_with_no_future_marker_is_not_listed(self):
-        # Control, green now: a present or past claim with a source is shown green. A future word in another
-        # sentence does not reach the green-on-main sentence.
-        self.commit_steps({
-            "bad-control": self.done_step(note="Shipped."),
-            "no-longer": self.done_step(note="Done check no longer red, green on main: #1"),
-            "colon-ref": self.done_step(note="Done check: X. Green on main: #1312."),
-            "merged-after": self.done_step(note="Done check green on main after fix #12 merged."),
-            "future-elsewhere": self.done_step(note="Done check: will fix later. Green on main: #5."),
-        })
-        _, entries = self.listed()
-        self.assertIn("bad-control", entries)  # scope first: the in-scope close with no check is listed
-        self.assertEqual(entries, ["bad-control"],
-                         "a green-on-main claim with no future marker in its sentence is listed as not shown")
-
-    def test_a_negator_after_a_dash_still_negates_green_on_main(self):
-        # Miss class: a dash breaks a clause, so the negator after it sits in the clause of `met on main`.
-        self.commit_steps({
-            "bad-control": self.done_step(note="Shipped."),
-            "dash-not": self.done_step(note="Done check — not met on main, see #7"),
-        })
-        _, entries = self.listed()
-        self.assertIn("bad-control", entries)  # scope first: the in-scope close with no check is listed
-        self.assertEqual(entries, sorted(["bad-control", "dash-not" + self.NOT_SHOWN]),
-                         "a negator after a dash is not read as negating met on main")
-
-    def test_a_pr_word_or_pull_url_ref_shows_green_on_main(self):
-        # The ref forms lint/report_guard.py DONE_REF_RE accepts: `PR <n>` and a /pull/<n> URL.
-        self.commit_steps({
-            "bad-control": self.done_step(note="Shipped."),
-            "pr-word": self.done_step(note="Done check: X. Green on main: PR 1312."),
-            "pull-url": self.done_step(note="Done check: X. Green on main: https://github.com/o/r/pull/1312."),
-        })
-        _, entries = self.listed()
-        self.assertIn("bad-control", entries)  # scope first: the in-scope close with no check is listed
-        self.assertEqual(entries, ["bad-control"], "a green-on-main sentence with a PR ref is listed as not shown")
+        self.assertEqual(entries, ["bad-control"], "a ref form after the colon is listed as not shown")
 
     def test_a_hex_letter_word_is_no_commit_ref(self):
         # Miss class: `effaced` is hex letters with no digit. DONE_REF_RE needs a digit in a hex run, so it is no ref.
         self.commit_steps({
             "bad-control": self.done_step(note="Shipped."),
-            "effaced": self.done_step(note="Done check met on main, effaced."),
+            "effaced": self.done_step(note="Done check green on main: effaced."),
         })
         _, entries = self.listed()
         self.assertIn("bad-control", entries)  # scope first: the in-scope close with no check is listed
         self.assertEqual(entries, sorted(["bad-control", "effaced" + self.NOT_SHOWN]),
                          "a hex-letter word with no digit is read as a commit ref")
 
-    def test_done_checks_without_the_colon_form_counts_as_unnamed(self):
+    def test_done_checks_and_undone_check_are_not_named(self):
+        # Named is whole words `done check`: `Done checks` and `Undone check` do not name a check.
         self.commit_steps({
             "plural": self.done_step(note="Done checks: green on main #1312."),
+            "undone": self.done_step(note="Undone check green on main: #1312."),
             "no-name": self.done_step(note="Green on main: #1312."),
         })
         _, entries = self.listed()
-        self.assertEqual(entries, ["no-name", "plural"], "a `Done checks` phrase is read as a named check")
+        self.assertEqual(entries, ["no-name", "plural", "undone"],
+                         "a `Done checks` or `Undone check` phrase is read as a named check")
 
     def test_no_done_step_in_scope_reads_zero_with_no_detail(self):
         self.commit_steps({
@@ -2372,7 +2348,7 @@ class DoneWithoutCheck(UpkeepFixture):
         steps, bad = {}, []
         for n in range(120):
             steps["bad-%03d" % n] = self.done_step(note="Shipped.")
-            steps["good-%03d" % n] = self.done_step(note="Done check: X. Green on main: #1312.")
+            steps["good-%03d" % n] = self.done_step(note="Done check green on main: #1312.")
             bad.append("bad-%03d" % n)
         self.commit_steps(steps)
         count, entries = self.listed()
