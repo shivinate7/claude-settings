@@ -478,6 +478,9 @@ PS_VERBS = ("Add", "Clear", "Close", "Copy", "Enter", "Exit", "Find", "Format", 
 ABS_CMDLET_PATH = re.compile(r"(?:[A-Za-z]:|~|\$HOME|\$\{HOME\})?[\\/](?:[^\s\\/]+[\\/])*"
                              r"(?:" + "|".join(PS_VERBS) + r")-[A-Z][A-Za-z]+(?=\s|$)")
 SHELL_CMDLET = re.compile(r"[A-Z][a-z]+-[A-Z][A-Za-z]+")
+# What the refusal prints for a Verb-Noun at an absolute path: a folder written with a trailing `/` is text.
+SHELL_LINE_HIT = "step holds a shell line"
+ABS_CMDLET_HIT = SHELL_LINE_HIT + " (a Verb-Noun at a path reads as a cmdlet). If it names a folder, end it with /."
 # In a chain a cmdlet may be any case (`get-process`), and a command may be any lowercase word.
 CHAIN_CMDLET = re.compile(r"[A-Za-z]+-[A-Za-z]+")
 CHAIN_COMMAND = re.compile(r"[a-z][a-z0-9._-]*")
@@ -676,8 +679,9 @@ def _cmdlet_at_path(first, segment) -> bool:
                 or ABS_CMDLET_PATH.match(segment.lstrip()))
 
 
-def _shell_line(span, run) -> bool:
-    """True when a segment of this code span runs a shell line (see SHELL_PROGRAMS). `run` is as for
+def _shell_line(span, run) -> str:
+    """The refusal text when a segment of this code span runs a shell line (see SHELL_PROGRAMS), else "". The text
+    is ABS_CMDLET_HIT when the line is a Verb-Noun at an absolute path, SHELL_LINE_HIT otherwise. `run` is as for
     _relative_run. The segments, their prefixes and their command words come from guard_core, the one
     quote-aware shell reader, so a quote or a comment opener in text hides no command. A line that
     starts with `|` (a table row) or `//` is text and is left out."""
@@ -700,16 +704,16 @@ def _shell_line(span, run) -> bool:
         word = guard_core.basename(words[0])
         if words[0].startswith(("./", "../")):
             if _relative_run(words, run):
-                return True
+                return SHELL_LINE_HIT
         elif _cmdlet_at_path(words[0], segment):
-            return True
+            return SHELL_LINE_HIT if SHELL_CMDLET.fullmatch(words[0]) else ABS_CMDLET_HIT
         elif chained and _chain_command(word, len(words) - 1):
-            return True
+            return SHELL_LINE_HIT
         elif len(words) >= 2 and (word in SHELL_PROGRAMS
                                   or (CHAIN_COMMAND.fullmatch(word) and word not in SPAN_DETERMINERS
                                       and SPAN_FLAG.match(words[1]))):
-            return True
-    return False
+            return SHELL_LINE_HIT
+    return ""
 
 
 def _ps_bash_form(text) -> bool:
@@ -755,9 +759,11 @@ def command_in_item_hit(data) -> str:
     if COMMAND_IN_FILE.search(joined) or (has_file and COMMAND_ITS.search(joined)) \
             or (has_file and not has_command and COMMAND_VERB.search(joined)):
         return "steps send the owner to a file for a command"
-    if any(_shell_line(body, fenced or bool(SPAN_RUN_VERB.search(text[:start])))
-           for text in texts for start, body, fenced in _code_spans(text)):
-        return "step holds a shell line"
+    for text in texts:
+        for start, body, fenced in _code_spans(text):
+            hit = _shell_line(body, fenced or bool(SPAN_RUN_VERB.search(text[:start])))
+            if hit:
+                return hit
     return ""
 
 
