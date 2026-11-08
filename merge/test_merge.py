@@ -14133,6 +14133,7 @@ class ReviewStampSince(unittest.TestCase):
         self.addCleanup(shutil.rmtree, parent, True)
         clone = os.path.join(parent, "clone")
         subprocess.run(["git", "clone", "-q", "--depth", "2", "file://" + src, clone], check=True, capture_output=True)
+        self.cut_origin(clone)  # a fetchable origin would let the read deepen the clone; the cut origin keeps the stop this case pins
         self.assertEqual(sh(clone, "git", "rev-parse", "--is-shallow-repository"), "true", "the depth-2 clone is not shallow")
         self.assertIn("REVIEW_STAMP_SALT =", sh(clone, "git", "show", "HEAD~1:merge/merge.py"), "the boundary is not the salt commit")
         self.assertNotEqual(subprocess.run(["git", "-C", clone, "cat-file", "-e", "HEAD~2^{commit}"], capture_output=True).returncode, 0,
@@ -14157,6 +14158,10 @@ class ReviewStampSince(unittest.TestCase):
         subprocess.run(["git", "clone", "-q", "--depth", str(depth), "file://" + bare, clone], check=True, capture_output=True)
         return clone
 
+    def cut_origin(self, clone):
+        """Point the clone's origin at a path that does not exist, so a fetch from it fails. The clone's own refs stay as they were."""
+        sh(clone, "git", "remote", "set-url", "origin", os.path.join(os.path.dirname(clone), "gone.git"))
+
     def test_a_shallow_clone_whose_window_holds_the_parent_of_the_salt_commit_returns_the_cutover(self):
         # The salt commit is the last commit. A depth-2 clone keeps it and its parent and cuts the parent's parents, so the boundary is the
         # parent, not the salt commit. The first salt commit is known and is not the boundary, so the read returns its time and does not stop.
@@ -14180,6 +14185,7 @@ class ReviewStampSince(unittest.TestCase):
         # A linked worktree's `.git` is a file that names the clone's git dir, and the shallow file lives in that dir's common dir. The read
         # must find that file and stop, as the clone does.
         clone = self.shallow_origin(self.repo(salt_at=2, branch="fixture"), depth=2)
+        self.cut_origin(clone)  # as in the case above: the deepen fetch must fail, so the clone and its worktree both stop
         self.assertEqual(sh(clone, "git", "rev-parse", "--is-shallow-repository"), "true", "the depth-2 clone is not shallow")
         self.assertIn("REVIEW_STAMP_SALT =", sh(clone, "git", "show", "HEAD~1:merge/merge.py"), "the boundary is not the salt commit")
         worktree = clone + "-worktree"
@@ -14207,6 +14213,36 @@ class ReviewStampSince(unittest.TestCase):
                 self.assertIn(os.path.join(".git", "shallow"), str(stop), "the Stop does not name the unreadable shallow file:\n" + str(stop))
             else:
                 self.fail("review_stamp_since read an unreadable shallow file as full history and returned %r instead of stopping" % (got,))
+
+    def test_a_shallow_clone_whose_deepen_reaches_the_salt_parent_returns_the_cutover(self):
+        # The salt commit is the boundary of a depth-2 clone, and its parent is cut. `git fetch --deepen` brings the parent in, so the salt
+        # commit is no longer the boundary, and the read returns its time. The read must deepen before it stops, and it stops only if the
+        # clone is still shallow at the boundary or the fetch fails.
+        clone = self.shallow_origin(self.repo(salt_at=2, branch="fixture"), depth=2)
+        self.assertEqual(sh(clone, "git", "rev-parse", "--is-shallow-repository"), "true", "the depth-2 clone is not shallow")
+        self.assertIn("REVIEW_STAMP_SALT =", sh(clone, "git", "show", "HEAD~1:merge/merge.py"), "the boundary is not the salt commit")
+        self.assertNotEqual(subprocess.run(["git", "-C", clone, "cat-file", "-e", "HEAD~2^{commit}"], capture_output=True).returncode, 0,
+                            "the clone holds the parent of the salt commit before any deepen")
+        with unittest.mock.patch.object(merge, "host_default_branch", lambda r: "fixture"):
+            try:
+                got = review_fn(self, "review_stamp_since")(clone, "fixture")
+            except merge.Stop as stop:
+                self.fail("review_stamp_since stopped on a shallow clone that git fetch --deepen reaches, instead of deepening it:\n" + str(stop))
+        self.assertEqual(got, "2026-10-21T15:04:05Z", "the deepened clone's cutover is %r, not the salt commit's committer time" % (got,))
+        self.assertEqual(subprocess.run(["git", "-C", clone, "cat-file", "-e", "HEAD~2^{commit}"], capture_output=True).returncode, 0,
+                         "the read returned without deepening the clone: the parent of the salt commit is still absent")
+
+    def test_a_shallow_clone_whose_origin_cannot_be_fetched_stops_naming_the_unshallow_fetch(self):
+        # The pin. The salt commit is the boundary of a depth-2 clone, and the origin cannot be fetched. The deepen fetch fails, so the read
+        # stops, and its message names `git fetch --unshallow origin`. Today's read stops on the boundary with the same command.
+        clone = self.shallow_origin(self.repo(salt_at=2, branch="fixture"), depth=2)
+        self.assertEqual(sh(clone, "git", "rev-parse", "--is-shallow-repository"), "true", "the depth-2 clone is not shallow")
+        self.assertIn("REVIEW_STAMP_SALT =", sh(clone, "git", "show", "HEAD~1:merge/merge.py"), "the boundary is not the salt commit")
+        self.cut_origin(clone)
+        with unittest.mock.patch.object(merge, "host_default_branch", lambda r: "fixture"):
+            with self.assertRaises(merge.Stop) as cm:
+                review_fn(self, "review_stamp_since")(clone, "fixture")
+        self.assertIn("git fetch --unshallow origin", str(cm.exception), "the Stop does not name `git fetch --unshallow origin`:\n" + str(cm.exception))
 
     def git_at(self, root, date, *args):
         """Run git in the temp repo with its author and committer times set to `date`."""
