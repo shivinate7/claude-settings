@@ -58,7 +58,7 @@ Folder walk:
 - A folder with no env file stays allowed. So does `rg --files`, which lists names and reads nothing.
 - Grep decides each file by its last matching `--include` or `--exclude` glob, so an exclude before an include re-includes the env file. An exclude glob or `--exclude-dir` that skips the env file clears the search. The refusal names `--exclude` and `--exclude-dir` as the remedy, and prints no file name.
 - `--include`, `-g`, `--glob` and `--exclude-from` stay judged, since each can name the file.
-- The walk is `_env_walk`. It expands an unquoted brace list in each word, as bash does. It expands a glob in a path word as the shell does, with no dotfile match. A path word that starts with `$PWD`, `${PWD}` or a `pwd` substitution is the working folder.
+- The walk is `_env_walk`. It expands an unquoted comma brace list, such as `{a,b}`, in each word, as bash does. It expands a glob in a path word as the shell does, with no dotfile match. A path word that starts with `$PWD`, `${PWD}` or a `pwd` substitution is the working folder.
 - For rg and ag with no flag that turns the ignore rules off, an ignored file or folder is not read or counted. The walk does not enter an ignored folder. The list is git's own, read once per walk. grep reads ignored files, so they count for grep.
 - The ignore rules are off with `-u` (any count), `--no-ignore` and its variants. For ag, `-U`, `-a`, `--skip-vcs-ignores` and `--all-types` also turn them off. A tracked file is never ignored.
 - The walk stops at 50000 entries, `node_modules` included. It then refuses with a reason that says the folder is too large to check, never that it holds an env file.
@@ -70,6 +70,7 @@ Known limits:
 - rg fails closed. An rg flag in neither of its flag tables might take a value, so the guard may walk the working folder too.
 - ag and grep do not fail closed. An unknown flag there is read as a switch, so the walk can miss a folder the search reads.
 - An rg `!` glob is not read.
+- A brace sequence, such as `{a..c}`, is not expanded.
 - A `cd` earlier in the command is not followed. Other variables and substitutions in a path word are not resolved.
 - A search in a heredoc body is not walked.
 - The walk sees a search behind a subshell paren, a `{ ...; }` group, `command`, `env` (with `--` too) or `nice` (with any form of its adjustment flag). A search behind `sudo`, `xargs` or `env -C` is not walked.

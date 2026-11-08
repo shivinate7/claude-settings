@@ -1283,7 +1283,7 @@ def _env_walk(texts, cwd: str):
     --files` lists names and reads no contents.
 
     The search is found behind a subshell paren, a brace group, `command`, `env` and `nice`
-    (`_env_words`). An unquoted brace list in a word is expanded as bash expands it. A path
+    (`_env_words`). An unquoted comma brace list in a word (`{a,b}`) is expanded as bash expands it. A path
     word that starts with `$PWD`, `${PWD}` or a `pwd` substitution is `cwd`. A glob word is expanded
     against `cwd` as the shell does (no dotfile).
 
@@ -1304,7 +1304,7 @@ def _env_walk(texts, cwd: str):
     ACCEPTED LIMITS: a path word with any other variable or substitution is not resolved, a `cd`
     earlier in the command is not followed (a path reads against `cwd`), any other wrapper
     (`sudo`, `xargs`, `env -C`) is not looked through, a search in the body of a heredoc is not
-    walked, an rg `!` glob is not read, and an ignore
+    walked, an rg `!` glob is not read, a brace sequence (`{a..c}`) is not expanded, and an ignore
     file other than the checkout's own that skips the file is not read, so such a search of a folder
     with an env file is refused.
     """
