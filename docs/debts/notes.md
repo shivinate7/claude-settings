@@ -988,6 +988,8 @@
 - feel-trial-older-than-fix: the step row never compares a trial's `at` with the landing time, so a later feel PR on a step with an old trial passes (skills/roadmap/build.py).
 - lane-lint-digit-sha-refused: an all-digit short sha is read as a PR number by `merge --lane-lint` and refused, never a false pass (merge/merge.py lane_lint). Decision: lanes-run-no-full-ci-job.
 - lane-lint-hex-branch-read-as-sha: a local-only branch named like hex (cafe123) is read as a sha by `merge --lane-lint` (merge/merge.py). Decision: lanes-run-no-full-ci-job.
+- lane-lint-other-job-suite-silent: a picked suite outside hooks/ and merge/ whose CI step sits in another job (janitor/ in checks-merge-install and checks-macos-b, lint/ in checks-macos) prints no `not run` line: `elsewhere` in bin/ci-job holds only hooks/ and merge/ suites (suite_paths). #1916 (lane lint covers other jobs) changes this area. Decision: lanes-run-no-full-ci-job.
+- lane-lint-pass-hides-not-run: `merge --lane-lint` (`ci_job_run` in merge/merge.py) passes only `skipped` lines to its PASS line, so the `not run` lines show only when ci-job runs directly. Decision: lanes-run-no-full-ci-job.
 - lane-lint-sigterm-leaks-worktree: a SIGTERM between `git worktree add` and the try in lane_lint can leak a locked worktree (merge/merge.py lane_lint). Decision: lanes-run-no-full-ci-job.
 - lane-lint-stale-origin-ref: after a branch is deleted on origin, a stale origin/<name> makes `merge --lane-lint` lint the old head (merge/merge.py). Decision: lanes-run-no-full-ci-job.
 - answered-check-case: the ref, hash and path patterns match case, so a capitalised source reads as no source (lint/report_guard.py).
