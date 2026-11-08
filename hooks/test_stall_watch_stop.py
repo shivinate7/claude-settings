@@ -948,9 +948,12 @@ def stop_lists_quiet_job_without_notes_when_guard_stream_is_missing():
     output_file(base, "bnoimp600", 600)
     recs = flagged("bnoimp600", desc="Serve q_max files on 3202. until: round 1 bids are served")
     path = transcript(recs)
-    lone = new_dir()
+    root = new_dir()
+    lone = os.path.join(root, "hooks")
+    os.makedirs(lone)
     shutil.copy(MODULE, os.path.join(lone, "stall_watch.py"))
     shutil.copy(os.path.join(HERE, "shared_names.py"), lone)
+    lint_beside(root)
     rc, out, err = run_stop(path, base, module=os.path.join(lone, "stall_watch.py"))
     problems = expect(rc == 0, f"exit {rc}, want 0: {err.strip()[:200]}")
     msg = system_message(out, problems)
@@ -965,16 +968,27 @@ def stop_lists_quiet_job_without_notes_when_guard_stream_is_missing():
     return problems
 
 
+def lint_beside(root):
+    """Lay lint/_transcript.py at `root`/lint, where a copy in `root`/hooks reads it (`../lint`). Without it the
+    Stop check has no finish reader, so it prints nothing for any job."""
+    os.makedirs(os.path.join(root, "lint"), exist_ok=True)
+    shutil.copy(os.path.join(os.path.dirname(HERE), "lint", "_transcript.py"), os.path.join(root, "lint"))
+
+
 def hooks_copy(shared):
-    """A scratch copy of hooks/*.py. shared None leaves out shared_names.py; "stale" writes one with no
-    TASK_NOTIFICATION_TAG; "real" keeps the real one. Returns the copy's stall_watch.py."""
-    lone = new_dir()
+    """A scratch copy of hooks/*.py in `root`/hooks, with lint/_transcript.py beside it. shared None leaves out
+    shared_names.py; "stale" writes one with no TASK_NOTIFICATION_TAG; "real" keeps the real one. Returns the
+    copy's stall_watch.py."""
+    root = new_dir()
+    lone = os.path.join(root, "hooks")
+    os.makedirs(lone)
     for name in os.listdir(HERE):
         if name.endswith(".py") and not (name == "shared_names.py" and shared != "real"):
             shutil.copy(os.path.join(HERE, name), os.path.join(lone, name))
     if shared == "stale":
         with open(os.path.join(lone, "shared_names.py"), "w", encoding="utf-8") as f:
             f.write("PROJECT_FROZEN_FILES = ()\n")
+    lint_beside(root)
     return os.path.join(lone, os.path.basename(MODULE))
 
 
