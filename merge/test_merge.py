@@ -17,6 +17,7 @@ sys.path.insert(0, HERE)
 import merge  # noqa: E402
 from required_check import REQUIRED_CHECK  # noqa: E402  the one home of the required check's name (hooks/required_check.py)
 from shared_names import BATCH_LABEL  # noqa: E402  the one home of the integration pull request's label (hooks/shared_names.py)
+import shared_names  # noqa: E402  the one home of the Backlog field labels, BACKLOG_FIELDS (hooks/shared_names.py)
 import decision_watch  # noqa: E402  the one model caller (hooks/decision_watch.py); merge.py puts hooks on sys.path
 sys.path.append(os.path.join(os.path.dirname(HERE), "lint"))  # append: no lint module shadows one this suite imports
 import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py)
@@ -12866,11 +12867,22 @@ def kind_case(kind, n, hours, cid):
     return ([batch_pull(n, REVIEW_HEAD, created_at=ago(hours + 100), labels=(kind,))],
             [waits_comment(cid, n, hours, f"Waits on: debt:await-{kind}")], {n: [label_event(kind, hours)]})
 
+# The Backlog labels in item order: reviewed past one batch cycle, no next act, lanes to archive. The one home is
+# BACKLOG_FIELDS in hooks/shared_names.py. Until that name exists, the owner's ruling words stand in, so a case fails on
+# its own cause, not on the missing name. test_the_backlog_labels_have_one_home fails on the missing name, and this
+# stand-in goes once the name exists.
+SPEC_BACKLOG_FIELDS = ("reviewed past one batch cycle", "no next act", "lanes to archive")
+
+def backlog_fields():
+    """The three Backlog labels, from hooks/shared_names.py BACKLOG_FIELDS when that name exists, else the stand-in."""
+    return tuple(getattr(shared_names, "BACKLOG_FIELDS", SPEC_BACKLOG_FIELDS))
+
 def summary_numbers(test, out):
-    """The two numbers on the last line of `out`, in order: the longest wait since a done record in hours, then the count with no next act."""
+    """The three numbers on the last line of `out`, in order: the longest wait since a done record in hours, the count with no next act,
+    then the count of batch lines past one batch cycle (PR_STATE_AGE_HOURS["batch"])."""
     lines = [l for l in out.splitlines() if l.strip()]
     numbers = [int(x) for x in re.findall(r"\d+", lines[-1])] if lines else []
-    test.assertEqual(len(numbers), 2, "the last line holds no two summary numbers:\n" + out)
+    test.assertEqual(len(numbers), 3, "the last line holds no three summary numbers (the third is the count of batch lines past one batch cycle):\n" + out)
     return numbers
 
 class ReviewedLedger(ReviewEnv):
@@ -12881,8 +12893,8 @@ class ReviewedLedger(ReviewEnv):
     4. a base that is the head of another open pull request #N: blocked on #N;
     5. else NO NEXT ACT.
     A line is `#n <branch> <act> <age>` in whole hours, plus RED when the act is NO NEXT ACT or the age is past the act's limit. Blocked has no
-    limit. The last line holds the longest wait since a done record and the count with no next act. Exit 0 when nothing is red, 1 when something
-    is, 2 on a failed read, with nothing printed."""
+    limit. The last line holds the longest wait since a done record, the count with no next act, and the count of batch lines past one batch
+    cycle. Exit 0 when nothing is red, 1 when something is, 2 on a failed read, with nothing printed."""
 
     def ledger(self, pulls, comments=(), events=None, main_runs=(), jobs=None, **reads):
         """-> (host, rc, out, err) of `merge --reviewed` over the scripted reads, at LEDGER_NOW."""
@@ -13054,7 +13066,7 @@ class ReviewedLedger(ReviewEnv):
                 self.assertEqual(rc, 2, out + err)
                 self.assertEqual(out.strip(), "", out)
 
-    # The summary, and the gold state: every age 0 and no next act reads 0 0.
+    # The summary, and the gold state: every age 0, no next act and no batch line past its cycle reads 0 0 0.
 
     def test_the_summary_gives_the_longest_done_wait_and_the_count_of_no_next_act(self):
         pulls = [batch_pull(7, REVIEW_HEAD, created_at=ago(100)), batch_pull(8, REVIEW_OLD_HEAD, created_at=ago(30)),
@@ -13062,7 +13074,7 @@ class ReviewedLedger(ReviewEnv):
         comments = [ledger_record(1, 7, 5, rounds=REVIEW_PASS), ledger_record(2, 9, 12, rounds=REVIEW_PASS)]
         host, rc, out, err = self.ledger(pulls, comments)
         self.assertEqual(rc, 1, out + err)
-        self.assertEqual(summary_numbers(self, out), [12, 1], out)
+        self.assertEqual(summary_numbers(self, out), [12, 1, 0], out)
 
     def test_an_all_green_list_exits_zero_and_its_summary_reads_zero(self):
         p7, c7, _ = kind_case("batch", 7, 0, 1)
@@ -13073,12 +13085,65 @@ class ReviewedLedger(ReviewEnv):
         self.assertEqual(list_line(self, out, 7), "#7 feat7 batch 0h")
         self.assertEqual(list_line(self, out, 8), "#8 feat8 waits on debt:await-held 0h")
         self.assertRegex(list_line(self, out, 9), r"^#9 feat9 blocked on #7 \d+h$")
-        self.assertEqual(summary_numbers(self, out), [0, 0], out)
+        self.assertEqual(summary_numbers(self, out), [0, 0, 0], out)
 
-    def test_no_open_pull_request_exits_zero_with_both_summary_numbers_zero(self):
+    def test_no_open_pull_request_exits_zero_with_every_summary_number_zero(self):
         host, rc, out, err = self.ledger([])
         self.assertEqual(rc, 0, out + err)
-        self.assertEqual(summary_numbers(self, out), [0, 0], out)
+        self.assertEqual(summary_numbers(self, out), [0, 0, 0], out)
+
+    # The third field: the count of batch lines (a done record on the live head) past PR_STATE_AGE_HOURS["batch"]. A batch run, a hold,
+    # a lane round, a blocked line and a line with no next act are not counted. The labels come from the one home, BACKLOG_FIELDS.
+
+    def test_the_backlog_labels_have_one_home(self):
+        # Red until hooks/shared_names.py names BACKLOG_FIELDS: the three labels are read from that one home, never retyped.
+        self.assertTrue(hasattr(shared_names, "BACKLOG_FIELDS"), "hooks/shared_names.py names no BACKLOG_FIELDS, so the Backlog labels have no one home")
+
+    def test_the_third_field_carries_the_backlog_label(self):
+        pulls, comments, events = kind_case("batch", 7, past("batch"), 1)
+        host, rc, out, err = self.ledger(pulls, comments, events=events)
+        self.assertIn(backlog_fields()[0], out.splitlines()[-1], "the last line does not carry the label of the third field:\n" + out)
+
+    def test_the_third_field_counts_a_batch_line_past_one_batch_cycle(self):
+        pulls, comments, events = kind_case("batch", 7, past("batch"), 1)
+        host, rc, out, err = self.ledger(pulls, comments, events=events)
+        self.assertEqual(rc, 1, out + err)
+        self.assertEqual(summary_numbers(self, out), [past("batch"), 0, 1], out)
+
+    def test_the_third_field_does_not_count_a_batch_line_inside_one_batch_cycle(self):
+        pulls, comments, events = kind_case("batch", 7, inside("batch"), 1)
+        host, rc, out, err = self.ledger(pulls, comments, events=events)
+        self.assertEqual(rc, 0, out + err)
+        self.assertEqual(summary_numbers(self, out), [inside("batch"), 0, 0], out)
+
+    def test_the_third_field_does_not_count_a_batch_run_past_its_limit(self):
+        pulls = [batch_pull(7, REVIEW_OLD_HEAD, created_at=ago(past("batch") + 100), labels=(BATCH_LABEL,))]
+        host, rc, out, err = self.ledger(pulls, events={7: [label_event(BATCH_LABEL, past("batch"))]})
+        self.assertEqual(rc, 1, out + err)
+        self.assertRegex(list_line(self, out, 7), r"^#7 feat7 batch run \d+h RED$", out)  # the precondition: the run is RED
+        self.assertEqual(summary_numbers(self, out), [0, 0, 0], out)
+
+    def test_the_third_field_counts_only_the_batch_lines_in_a_mixed_list(self):
+        p7, c7, e7 = kind_case("batch", 7, past("batch"), 1)  # counted: a done record past its cycle
+        p8, c8, e8 = kind_case("batch", 8, inside("batch"), 2)  # not: a done record inside its cycle
+        p9 = [batch_pull(9, REVIEW_OLD_HEAD, labels=(BATCH_LABEL,), created_at=ago(past("batch") + 100))]  # not: a batch run
+        e9 = {9: [label_event(BATCH_LABEL, past("batch"))]}
+        p10, c10, e10 = kind_case("held", 10, past("held"), 3)  # not: a hold
+        p11, c11, _ = kind_case("lane round", 11, past("lane round"), 4)  # not: a lane round
+        p12 = [batch_pull(12, REVIEW_OLD_HEAD, created_at=ago(2))]  # not: no next act
+        p13 = [batch_pull(13, REVIEW_OLD_HEAD, base="feat7", created_at=ago(40))]  # not: blocked on #7
+        host, rc, out, err = self.ledger(p7 + p8 + p9 + p10 + p11 + p12 + p13, c7 + c8 + c10 + c11,
+                                         events={**e7, **e8, **e9, **e10})
+        self.assertEqual(rc, 1, out + err)
+        # The precondition: each line keeps its act and its RED, as the ledger gives them today.
+        self.assertEqual(list_line(self, out, 7), f"#7 feat7 batch {past('batch')}h RED")
+        self.assertEqual(list_line(self, out, 8), f"#8 feat8 batch {inside('batch')}h")
+        self.assertEqual(list_line(self, out, 9), f"#9 feat9 batch run {past('batch')}h RED")
+        self.assertEqual(list_line(self, out, 10), f"#10 feat10 waits on debt:await-held {past('held')}h RED")
+        self.assertEqual(list_line(self, out, 11), f"#11 feat11 lane round 2 {past('lane round')}h RED")
+        self.assertRegex(list_line(self, out, 12), r"^#12 feat12 NO NEXT ACT 2h RED$")
+        self.assertEqual(list_line(self, out, 13), "#13 feat13 blocked on #7 40h RED")
+        self.assertEqual(summary_numbers(self, out), [past("batch"), 1, 1], out)
 
     # The read cost: one comment list, no head read, and at most one event list for each held pull request.
 
