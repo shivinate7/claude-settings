@@ -1552,7 +1552,7 @@ CANNOT_DEPENDENCY_RE = re.compile(r"\b(?:until|before)\b|\bwithout\s+your\b", re
 # it, past a semicolon, a colon or a dash, or in parentheses in the clause ("I can't merge PR 12 (CI is red).").
 _BLOCKER_TAIL = (
     r"(?:is|are|was|were)\s+(?:still\s+)?(?:red|failing|running|pending|in\s+progress)"
-    r"|(?:is|are|was|were)(?:\s+not|n['’]t)\s+green|ha(?:s|ve)(?:\s+not|n['’]t)\s+passed")
+    r"|(?:is|are|was|were)(?:\s+not|n['’]t)\s+green|ha(?:s|ve)(?:\s+not|n['’]t)\s+passed|fail(?:ed|s)")
 # Each blocker state gates the acts it stops (None: every table act). A red check, a pending review or a hold stops a
 # merge, and main's protection stops a push or a merge. A claim of any other act has no blocker among them.
 _BLOCKER_STATES = (
@@ -1569,16 +1569,18 @@ _BLOCKER_RES = {}
 
 def _blocker_res(act):
     """The compiled blocker readers for a claim of `act`, cached: (state, reason word then state, a state that ends just
-    before the claim, a state that follows it past a semicolon, colon or dash, a state in parentheses). All read the
-    states in _BLOCKER_STATES that gate `act`."""
+    before the claim, a state that follows it past a semicolon, colon or dash, a state in parentheses, a state that and
+    the subject of the claim follow). All read the states in _BLOCKER_STATES that gate `act`."""
     if act not in _BLOCKER_RES:
         state = "|".join(pattern for acts, pattern in _BLOCKER_STATES if acts is None or act in acts)
         _BLOCKER_RES[act] = (
             re.compile(r"(?:%s)\b" % state, re.I),
-            re.compile(r"\b(?:because|while|since|as\s+long\s+as|unless)\b[^;]{0,60}?(?:%s)\b" % state, re.I),
+            re.compile(r"\b(?:because|while|since|as\s+long\s+as|as|unless)\b[^;]{0,60}?(?:%s)\b" % state, re.I),
             re.compile(r"(?:%s)\b[\s)*_]*(,|[;:—–]|\s-{1,2}\s)$" % state, re.I),
             re.compile(r"^(?:[;:—–]|\s-{1,2}\s)\s*(?:%s)\b" % state, re.I),
-            re.compile(r"\(\s*(?:%s)\b" % state, re.I))
+            re.compile(r"\(\s*(?:%s)\b" % state, re.I),
+            re.compile(r"(?:%s)\b\s+and\s+\S+(?:\s+(?:am|are|was|were|have|has|had|still|also|just|really|now))*\s*$" % state,
+                       re.I))
     return _BLOCKER_RES[act]
 
 
@@ -1603,7 +1605,9 @@ CANNOT_PR_RE = re.compile(r"\b" + _PR + r"\b", re.I)
 # Act -> the words that name it, read from the verb the phrase governs: each pattern is anchored at the start of the
 # window, so a later noun ("the merge commit") names no act. A claim of an act outside this table is no claim.
 CANNOT_ACTS = (
-    ("pr-open", re.compile(r"^(?:open|create|make|raise|file|submit)\b(?:\s+(?!%s(?![\w-]))\S+){0,4}?\s+%s\b" % (_PREPOSITION, _PR), re.I)),
+    ("pr-open", re.compile(
+        r"^(?:open|create|make|raise|file|submit)\b(?:\s+(?:and|or)\s+\w+)?(?:\s+(?!(?:%s|and|or)(?![\w-]))\S+){0,4}?\s+%s\b"
+        % (_PREPOSITION, _PR), re.I)),
     ("pr-merge", re.compile(r"^(?:be\s+)?merged?\b", re.I)),
     ("push", re.compile(r"^(?:git\s+)?(?:be\s+)?push(?:ed)?\b", re.I)),
     ("pr-edit", re.compile(r"^(?:close|comment|mark|edit|update)\b(?:\s+\S+){0,3}\s+%s\b" % _PR, re.I)),
@@ -1744,12 +1748,13 @@ def _joined_blocker(act, lead, before, after, tail):
     """True when a bare blocker state of `act` is joined to the claim clause. `lead` is the sentence up to the clause start,
     `before` the words from there to the phrase, `after` the clause after it, and `tail` the sentence from the clause
     break on. Before: the state ends at a semicolon, colon or dash, or at a comma that so follows. After: a semicolon,
-    colon or dash, then the state, or the state in parentheses in the clause."""
-    _, _, before_re, after_re, paren_re = _blocker_res(act)
+    colon or dash, then the state, or the state in parentheses in the clause. In the clause before the phrase: the state, and,
+    then the subject ("CI is red and I can't merge PR 12.")."""
+    _, _, before_re, after_re, paren_re, and_re = _blocker_res(act)
     hit = before_re.search(lead)
     if hit and (hit.group(1) != "," or CANNOT_SO_RE.match(before)):
         return True
-    return bool(after_re.match(tail) or paren_re.search(after))
+    return bool(after_re.match(tail) or paren_re.search(after) or and_re.search(before))
 
 
 _RULE_IDS = []  # (roots, anchors), read once per hook run on the first slug that follows a claim
@@ -1996,6 +2001,19 @@ def _cited(line, refused):
     return bool(ids) and _route_verdict(ids)[0] == "ok"
 
 
+def _backed(tries, act, sentence):
+    """True when a failed try of `act` backs `sentence`. A try read from a command's name (a script, a make target; its key
+    starts with "script") backs only a line that names it: the name as a whole token. A name that is only the act word
+    (merge, push) is named only inside a backtick span, since the prose of any such claim holds that word."""
+    for key in tries.get(act, ()):
+        if key[0] != "script":
+            return True
+        token = r"(?<![\w.-])%s(?![\w-])" % re.escape(key[1])
+        if re.search(r"`[^`\n]*%s[^`\n]*`" % token if re.fullmatch(r"\w+", key[1]) else token, sentence, re.I):
+            return True
+    return False
+
+
 def cannot_problem(records, text, refused=()):
     """The refusal for reply sentences that claim a table act cannot be done, else ''. `records` are those after the last
     human message. A sentence passes when a failed try of its act sits in them (failed_tries) or it carries a cite
@@ -2016,12 +2034,13 @@ def cannot_problem(records, text, refused=()):
     tries = failed_tries(records, refused, recovered)
     no_try, no_check = [], []
     for sentence, act, _, past in claims:
-        if past and not tries.get(act) and act in recovered:  # the try failed once and a later call of it worked
+        backed = _backed(tries, act, sentence)
+        if past and not backed and act in recovered:  # the try failed once and a later call of it worked
             continue
-        if not tries.get(act) and not _cited(sentence, refused):
+        if not backed and not _cited(sentence, refused):
             if sentence not in no_try:
                 no_try.append(sentence)
-        elif not (CANNOT_CHECK_RE.search(sentence) or tries.get(act) and CANNOT_REASON_RE.search(sentence)) \
+        elif not (CANNOT_CHECK_RE.search(sentence) or backed and CANNOT_REASON_RE.search(sentence)) \
                 and sentence not in no_check:
             no_check.append(sentence)
     return " ".join(head + "".join("\n- " + line for line in lines)
