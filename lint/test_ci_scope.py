@@ -132,6 +132,16 @@ class Scope(unittest.TestCase):
             with self.subTest(path=p):
                 self.assertFlags(run([p]), want_true=["guard"])
 
+    def test_ste_lint_action_and_lint_program_changes_turn_on_the_guard_suite(self):
+        # Rule ste-push runs bin/ste-changed and reads the action's defaults and verdict line (guard_ste.py), so a
+        # change to any of them changes the guard's verdict and `guard` must run. bin/ste-changed and guard_ste.py
+        # already reach `guard` today, through the unmapped default and the guard_*.py arm; their pins hold until
+        # either narrows.
+        for p in ("actions/ste-lint/action.yml", "actions/ste-lint/run.sh", "actions/ste-lint/test_action.py",
+                  "bin/ste-changed", "hooks/guard_ste.py"):
+            with self.subTest(path=p):
+                self.assertFlags(run([p]), want_true=["guard"])
+
     def test_a_merge_change_leaves_a_job_that_never_runs_merge_suites_off(self):
         got = run(["merge/merge.py"])
         self.assertFlags(got, want_false=["pointer_windows", "shell_macos"])
