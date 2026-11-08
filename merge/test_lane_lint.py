@@ -645,6 +645,7 @@ class LaneLint(CiJobStub, tm.CloudSession):
         self.assertTrue(os.path.exists(slot), "the lint took no slot: " + out)
         self.assertTrue(slot_is_free(slot), "the slot's lock was still held once lane_lint returned: the slot's fd was not closed")
 
+    @unittest.skipIf(os.name == "nt", "a signal to the holder ends it on Windows, so its liveness cannot be read there")
     def test_with_two_slots_a_lint_starts_beside_a_hung_one_and_reads_it_alive(self):
         """The control for the holder check: a hung run that still holds its slot reads as alive to the next lint's start."""
         hung = self.write_stub(PASSING, 0, sleep=60)
