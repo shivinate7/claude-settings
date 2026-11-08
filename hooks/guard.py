@@ -4176,10 +4176,8 @@ def _sim_read():
 # sets are never judged: MCP screenshot, describe and list; `hinge` get and posture; `simctl io`, `list`,
 # `get_app_container`, and `ui <device> <setting>` with no value. A boot is left to the boot rules. A shutdown and
 # an erase are drives: `all` names every booted device. Inside `sim-test --hold -- CMD` the lease does not exist
-# yet, so a drive there must target `$SIM_TEST_UDID`, which the hold exports once it has the lease. It must reach the
-# hold unexpanded: in a single-quoted `sh -c '...'` script, or as `\$SIM_TEST_UDID` (one backslash) inside double
-# quotes. Elsewhere the caller's shell expands it to empty before the hold runs. A drive that names a booted device
-# the session already holds a live lease for is covered, as outside a hold; a lease on another device is not.
+# yet, so a drive there must target `$SIM_TEST_UDID`, which the hold exports once it has the lease. It must sit in a
+# single-quoted `sh -c '...'` script: elsewhere the caller's shell expands it to empty before the hold runs.
 SIM_READ_ACTIONS = frozenset({"screenshot", "describe", "list"})
 SIM_DRIVE_SIMCTL = frozenset({"ui", "openurl", "install", "uninstall", "launch", "terminate", "push", "privacy",
                               "status_bar", "location", "addmedia", "keychain", "pbcopy", "spawn",
@@ -4199,14 +4197,11 @@ def _sim_hold_command(word: str, rest: list):
 
 
 def _sim_hold_quoted(text: str) -> bool:
-    """True when each `$SIM_TEST_UDID` (any SIM_HOLD_UDID spelling) in TEXT reaches the hold unexpanded: it sits in
-    single quotes, or one backslash before it escapes the `$` inside double quotes. One pass of `walk_quotes`,
-    which respects strings: an escaped `$` is never read at its own index, so the backslash is read instead. A
-    doubled backslash is an escaped pair that the walk skips, so its `$` is left to the caller's shell, which
-    expands it: that stays outside."""
+    """True when each `$SIM_TEST_UDID` (any SIM_HOLD_UDID spelling) in TEXT sits in single quotes, so the shell
+    that reads TEXT hands it on unexpanded. One pass of `walk_quotes`, which respects strings: an escaped `$` is
+    never read at its own index, so it counts as outside single quotes."""
     quotes = {index: quote for index, _, quote in walk_quotes(text)}
-    return all(quotes.get(at) == "'" or (at > 0 and text[at - 1] == "\\" and quotes.get(at - 1) == '"')
-               for spelling in SIM_HOLD_UDID
+    return all(quotes.get(at) == "'" for spelling in SIM_HOLD_UDID
                for at in (m.start() for m in re.finditer(re.escape(spelling), text)))
 
 
@@ -4215,8 +4210,7 @@ def _sim_drive_targets(segment: str, hold: bool = False):
     open|close|half|N`, `xcrun simctl <drive verb> X`), and, in HELD, those named inside `sim-test --hold -- CMD`.
     HOLD says SEGMENT is such a CMD whose `$SIM_TEST_UDID` reaches the hold: its names leave it out. It reaches the
     hold only in the script of `sh -c '...'` (`inline_script`) when every one in the hold's text sits in single
-    quotes or behind one backslash in double quotes (`_sim_hold_quoted`); the caller's shell expands any other to
-    empty. Found by `_sim_commands`, so a quoted text and a
+    quotes; the caller's shell expands any other to empty. Found by `_sim_commands`, so a quoted text and a
     comment are no drive. A command that names no device is not judged."""
     found, held = [], []
     for command, rest, text in _sim_commands(segment, True):
@@ -4285,32 +4279,17 @@ def sim_drive_refusal(tool: str, names: list, session: str = "", devices: list =
 HOLD_REMEDY = "sim-test --hold -- sh -c 'hinge -d \"$SIM_TEST_UDID\" open'"
 
 
-def sim_hold_refusal(tool: str, names: list, session: str = "", devices: list = None) -> None:
+def sim_hold_refusal(tool: str, names: list) -> None:
     """Refuse a drive inside `sim-test --hold -- CMD` that targets NAMES, not `$SIM_TEST_UDID` in a single-quoted
-    `sh -c '...'` or behind one backslash in a double-quoted one (rule simulator-drive-lease). The caller's shell
-    expands a bare `"$SIM_TEST_UDID"` before the hold exports it, so the remedy runs the drive under `sh -c` with
-    single quotes. A name that resolves to booted devices SESSION already holds a live lease for is covered
-    (ruling 12), as outside a hold, and is dropped; a lease on another device covers nothing. DEVICES is the list
-    the boot rules read, else it is read here; with no list no name is dropped."""
-    if names and devices is None:
-        devices = _sim_read()[1]
-    kept = []
-    for name in names:
-        key = name.strip().casefold()
-        hit = [d["udid"] for d in devices or []
-               if d["state"] == "Booted" and (key == "booted" or key == d["udid"].casefold()
-                                              or key == d["name"].strip().casefold())]
-        if not (hit and sim_lease_holds(session, hit)):
-            kept.append(name)
-    if kept:
+    `sh -c '...'` (rule simulator-drive-lease). The caller's shell expands `"$SIM_TEST_UDID"` before the hold
+    exports it, so the remedy runs the drive under `sh -c` with single quotes."""
+    if names:
         refuse(tool, "deny", "simulator-drive-lease",
                "A drive inside `sim-test --hold` names %s, but the hold takes its lease before it runs the "
-               "command, so only `$SIM_TEST_UDID` is covered, and only where it reaches the hold unexpanded: in "
-               "single quotes, or behind one backslash in double quotes. The caller's shell expands any other to "
-               "empty before the hold exports it. A booted device this session already holds a lease for may be "
-               "named. Drive `$SIM_TEST_UDID` from a shell the hold starts, so the hold expands it: `%s`. "
-               "(decision sim-test-is-the-one-boot-path)"
-               % (", ".join(kept), HOLD_REMEDY), ", ".join(kept))
+               "command, so only `$SIM_TEST_UDID` is covered, and only in single quotes: the caller's shell expands "
+               "any other to empty before the hold exports it. Drive `$SIM_TEST_UDID` from a shell the hold starts, "
+               "so the hold expands it: `%s`. (decision sim-test-is-the-one-boot-path)"
+               % (", ".join(names), HOLD_REMEDY), ", ".join(names))
 
 
 def sim_boot_refusal(tool: str, names: list, remedies: dict = None, session: str = "") -> None:
@@ -5135,11 +5114,10 @@ def judge(payload) -> None:
                 names_in_seg, held_in_seg = _sim_drive_targets(seg)
                 drives.extend(names_in_seg)
                 held.extend(held_in_seg)
-            sid = payload.get("session_id") if isinstance(payload, dict) else ""
-            sid = sid if isinstance(sid, str) else ""
-            sim_hold_refusal(tool, held, sid, devices)
+            sim_hold_refusal(tool, held)
             if drives:
-                sim_drive_refusal(tool, drives, sid, devices)
+                sid = payload.get("session_id") if isinstance(payload, dict) else ""
+                sim_drive_refusal(tool, drives, sid if isinstance(sid, str) else "", devices)
         return
     if tool == SIM_MCP:
         # `udid` is an alias of `device`: judge each non-empty name, so one field hides no other.
