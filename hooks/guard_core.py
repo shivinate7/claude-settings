@@ -249,6 +249,34 @@ def split_segments(cmd: str, ends=None):
     return segments
 
 
+def _substitution_end(cmd: str, index: int) -> int:
+    """The index after the bash substitution that opens at `index` (`$(` or a backtick), or -1 when
+    it never closes. A `)` closes the innermost `(` or `$(`; quotes, escapes and nested backtick
+    spans inside are read as the quote walk reads them. -1 sends the caller back to the plain
+    reading, so an unbalanced opener hides no separator after it."""
+    backtick = cmd[index] == "`"
+    depth, quote, at = 1, "", index + (1 if backtick else 2)
+    while at < len(cmd):
+        char = cmd[at]
+        if not quote and backtick and char == "`":
+            return at + 1
+        if not quote and not backtick and char == "`":
+            inner = _substitution_end(cmd, at)
+            if inner < 0:
+                return -1
+            at = inner
+            continue
+        if not quote and not backtick and char in "()":
+            depth += 1 if char == "(" else -1
+            if not depth:
+                return at + 1
+        width, quote = quote_advance(cmd, at, quote)
+        at += width
+        if quote == BLIND:
+            return -1
+    return -1
+
+
 def _split_reading(cmd: str, ends, contractions_are_text: bool):
     """One reading of split_segments: (segments, the quote open at the end, whether an unquoted
     `'` has a contraction's shape). The first reading is bash's own: every unquoted `'` opens a
@@ -311,6 +339,13 @@ def _split_reading(cmd: str, ends, contractions_are_text: bool):
                 current = []
                 index += 1
             continue
+        # An unquoted `$( )` or backtick span is one word: a separator inside it cuts no segment.
+        if not powershell and (char == "`" or cmd[index:index + 2] == "$("):
+            end = _substitution_end(cmd, index)
+            if end > 0:
+                current.append(cmd[index:end])
+                index = end
+                continue
         if char == "&" and cmd[index:index + 2] == "&&":
             segments.append("".join(current))
             ends is None or ends.append("&&")
