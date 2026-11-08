@@ -989,58 +989,100 @@ def named_too_large(text):
     return len(text) > NAMED_MAX_BYTES or (len(text) * 4 > NAMED_MAX_BYTES and len(text.encode("utf-8", "replace")) > NAMED_MAX_BYTES)
 
 
-QUOTED = re.compile(r'"([^"\n]*)"|\u201c([^\u201d\n]*)\u201d')
+CURLY_QUOTED = re.compile("\u201c([^\u201d\n]*)\u201d")
 
 
 def quoted_phrases(row):
-    """The phrases of two or more words that `row` puts in straight or curly double quotes, in order, no repeats. Text inside a code span is
-    no quote, and a lone quote pairs with nothing. A prose judge matches these against a named file, since a quoted test title is the one
-    exact string the line gives for the row it means."""
+    """The phrases of two or more words that `row` puts in straight or curly double quotes, in order, no repeats. Text inside a code span
+    is no quote. A straight quote opens a phrase only when no word character is before it, and closes one only when none is after it, so a
+    stray inch mark such as `5"` pairs with nothing and never eats the title after it; a quote that opens while one is already open
+    replaces it. A single quote is never a quote mark. A prose judge matches these against a named file, since a quoted test title is the
+    one exact string the line gives for the row it means."""
     plain = CODE_SPAN.sub(lambda m: " " * len(m.group(0)), row)
-    found = (" ".join((m.group(1) or m.group(2) or "").split()) for m in QUOTED.finditer(plain))
-    return list(dict.fromkeys(p for p in found if len(p.split()) >= 2))
+    found = [(m.start(), m.group(1)) for m in CURLY_QUOTED.finditer(plain)]
+    opened = None
+    for at, char in enumerate(plain):
+        if char != '"':
+            continue
+        before_ok = at == 0 or not (plain[at - 1].isalnum() or plain[at - 1] == "_")
+        after_ok = at + 1 >= len(plain) or not (plain[at + 1].isalnum() or plain[at + 1] == "_")
+        if opened is not None and after_ok:
+            found.append((opened, plain[opened + 1:at]))
+            opened = None
+        elif before_ok:
+            opened = at
+    words = (" ".join(text.split()) for _, text in sorted(found))
+    return list(dict.fromkeys(p for p in words if len(p.split()) >= 2))
 
 
 def named_excerpt(names, text, around=3, limit=40, phrases=()):
-    """The numbered lines of a file's `text` within `around` lines of each line that holds one of `names` as a whole word, at most
-    `limit` lines, a "..." row between two windows that do not touch. Each row is cut to NAMED_ROW_CHARS characters with a marker.
-    A line that holds one of `phrases` (a quoted title, as quoted_phrases gives them) counts too and is kept first: the cap drops the
-    window rows of a name before the rows around a phrase, so a weak name that hits many lines never crowds the exact title out.
-    When the `limit` drops later lines, the excerpt ends with a marker line that says so; it has none otherwise. None when no line holds
-    a name or a phrase, or when `text` is over NAMED_MAX_BYTES (named_too_large). A prose judge sends this beside a line that names the file in
-    backticks, so the model reads the code the line talks about. Cost: at most `limit` rows of NAMED_ROW_CHARS characters, with or without phrases."""
+    """The numbered lines of a file's `text` that a prose line points at, at most `limit` lines, a "..." row between two windows that do
+    not touch. Each row is cut to NAMED_ROW_CHARS characters with a marker. Two kinds of line count:
+    a name line holds one of `names` as a whole word, and a phrase line holds one of `phrases` (a quoted title, as quoted_phrases gives
+    them) with a non-word character or the row edge on both sides, so a mid-word fragment finds no line. Each such line is shown with the
+    `around` lines on both sides. Words of a phrase may be separated by any run of white space.
+    When the `limit` drops rows, the phrase rows win, in this order: a row that holds a phrase as a whole string literal (a quote
+    character on both sides), a row that only contains one, the window rows around either; then the window rows of a name. The first
+    `limit // 2` window rows of the names, in line order, are kept before any phrase row is ranked, so a phrase never takes them.
+    A row cut at NAMED_ROW_CHARS that holds a phrase beyond that column is shown from just before the phrase instead of from its start.
+    When rows are dropped at the `limit`, the excerpt ends with a marker line that says so; it has none otherwise. None when no line holds
+    a name or a phrase, or when `text` is over NAMED_MAX_BYTES (named_too_large). A prose judge sends this beside a line that names the file
+    in backticks, so the model reads the code the line talks about. Cost: at most `limit` rows of NAMED_ROW_CHARS characters, with or
+    without phrases; one pass over the rows."""
     if named_too_large(text):
         return None
     rows = text.replace("\r\n", "\n").split("\n")
     hits = [re.compile(r"(?<!\w)%s(?!\w)" % re.escape(name)) for name in names]
-    flat = [" ".join(row.split()) for row in rows] if phrases else []
-    rank = {}  # line number -> 0 a row that holds a phrase, 1 within `around` of one, 2 within `around` of a name
+    bodies = [r"\s+".join(re.escape(w) for w in p.split()) for p in phrases if p.split()]
+    contains = [re.compile(r"(?<!\w)%s(?!\w)" % body) for body in bodies]
+    whole = [re.compile("""(?P<q>['"`])%s(?P=q)""" % body) for body in bodies]
+    named, rank = set(), {}  # rank: line number -> 0 a whole-literal phrase row, 1 a row that contains a phrase, 2 within `around` of one
+    at = {}  # line number -> the match of the phrase that ranks the row, to cut a long row around it
 
-    def keep(n, level):
-        for m in range(max(n - around, 1), min(n + around, len(rows)) + 1):
-            rank[m] = min(rank.get(m, 2), level)
+    def spread(n):
+        return range(max(n - around, 1), min(n + around, len(rows)) + 1)
     for n, row in enumerate(rows, 1):
-        if phrases and any(p in flat[n - 1] for p in phrases):
-            keep(n, 1)
-            rank[n] = 0
+        found = next((m for w in whole for m in [w.search(row)] if m), None)
+        level = 0
+        if found is None:
+            found = next((m for c in contains for m in [c.search(row)] if m), None)
+            level = 1
+        if found is not None:
+            at[n] = found
+            for m in spread(n):
+                rank[m] = min(rank.get(m, 2), 2)
+            rank[n] = min(rank.get(n, level), level)
         if any(h.search(row) for h in hits):
-            keep(n, 2)
-    ordered = sorted(rank)
-    shown = sorted(sorted(rank, key=lambda m: (rank[m], m))[:limit])
-    if not shown:
+            named.update(spread(n))
+    reserved = sorted(named)[:limit // 2]
+    ordered = sorted(set(rank) | named)
+    if not ordered:
         return None
+    rest = sorted((m for m in ordered if m not in reserved), key=lambda m: (rank.get(m, 3), m))
+    shown = sorted(reserved + rest[:limit - len(reserved)])
     out, last = [], None
     for n in shown:
         if last is not None and n != last + 1:
             out.append("...")
-        row = rows[n - 1]
-        if len(row) > NAMED_ROW_CHARS:
-            row = row[:NAMED_ROW_CHARS] + " [row cut at %d characters]" % NAMED_ROW_CHARS
-        out.append("%d: %s" % (n, row))
+        out.append("%d: %s" % (n, cut_row(rows[n - 1], at.get(n))))
         last = n
     if len(ordered) > limit:
         out.append("[more lines left out at the %d-row cap]" % limit)
     return "\n".join(out)
+
+
+def cut_row(row, found):
+    """`row` cut to NAMED_ROW_CHARS characters with a marker. When `found` (a match in `row`) lies past that column, the cut starts just
+    before it, centred when it fits, and a marker at the front says where the shown part starts."""
+    if len(row) <= NAMED_ROW_CHARS:
+        return row
+    start = 0
+    if found is not None and found.end() > NAMED_ROW_CHARS:
+        start = found.start() - min(found.start(), max(0, (NAMED_ROW_CHARS - (found.end() - found.start())) // 2))
+    shown = row[start:start + NAMED_ROW_CHARS]
+    front = "[row starts at character %d] " % (start + 1) if start else ""
+    back = " [row cut at %d characters]" % NAMED_ROW_CHARS if start + NAMED_ROW_CHARS < len(row) else ""
+    return front + shown + back
 
 
 def blanked(text):

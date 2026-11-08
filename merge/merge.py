@@ -2656,7 +2656,8 @@ def prose_judge_prompt(wt, path, by_line, read=None):
     """The prompt for one prose file: each selected line numbered as in the file, with each cite as written and the text it points at.
     `read(wt, backing)` fetches a backing file's text, read_backing by default; lint/prove_route_judge.py passes a reader that goes through git at a rev.
     A line also gets an excerpt of each backticked path it names but does not cite: the lines within 3 of each line that holds another backticked
-    name or number of the line, with the rows that hold a title the line quotes kept first. Each path is read once per prompt build. Cost: still one model call per prose file; the prompt grows by at most
+    name or number of the line or a title the line quotes (named_excerpt holds the ranking under the 40-row cap). A line that quotes a title but gives no
+    other name still gets its named path read. Each path is read once per prompt build. Cost: still one model call per prose file; the prompt grows by at most
     40 rows of 200 characters per named path, and a named file over 256 KB is skipped with a one-line note."""
     import stale_cites
     fetch, seen = read or read_backing, {}
@@ -2683,12 +2684,13 @@ def prose_judge_prompt(wt, path, by_line, read=None):
             parts.append(f"  cite: ({cite})\n  cited text of {backing}:\n" + "\n".join("    " + r for r in shown.split("\n")))
         cited = {stale_cites.backing_path(*stale_cites.cite_kind(c)) for c in cites}
         paths, names = stale_cites.named_in_code_spans(text)
+        phrases = stale_cites.quoted_phrases(text)
         for named in paths:
-            body = read(wt, named) if named not in cited and names else None
+            body = read(wt, named) if named not in cited and (names or phrases) else None
             if body and stale_cites.named_too_large(body):
                 parts.append(f"  named path: {named} skipped for size (over 256 KB), no excerpt shown")
                 continue
-            shown = stale_cites.named_excerpt(names, body, phrases=stale_cites.quoted_phrases(text)) if body else None
+            shown = stale_cites.named_excerpt(names, body, phrases=phrases) if body else None
             if shown is not None:
                 parts.append(f"  named path: {named}\n  lines of {named} around the names this line gives:\n" + "\n".join("    " + r for r in shown.split("\n")))
     return plain_text("\n".join(parts))
