@@ -1,0 +1,11 @@
+{
+  "title": "The builder-brief check accepts a done-check label followed by a blank line and bullets, or a fence with a blank or # line",
+  "why": "Lane builder-brief-code-check (session_013NEJL2nvHYs3wA2QnMZfJG), 12:22 CST Nov 8: PR #2204 files debt builder-done-label-blank-line. Rule builder-brief-code-check refuses a valid brief whose done-check label is followed by a blank line then bullets naming the lint, and one whose done check is a fence holding a blank or `#` line. A fix was tried and reverted: an unclosed fence, or a fence opened on the label line, let a later paragraph pass as the done check. Run as its own lane after #2204.",
+  "note": "",
+  "phase": "now",
+  "owner": "claude-settings",
+  "lane": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB) to route",
+  "status": "todo",
+  "order": 784,
+  "updatedAt": "2026-11-08T12:26:00-06:00"
+}

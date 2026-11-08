@@ -1,11 +1,11 @@
 {
   "title": "A builder brief whose done check names neither the code check nor `merge --lane-lint` is refused",
   "why": "Lane lane-lint-cloud-time-limit (session_013NEJL1PUcS4Dxhd9Rr1sk2, 10:11 CST Nov 8) found builder briefs whose done check skips the code check, so a builder reports done on a branch the code check would fail.",
-  "note": "Filed 10:14 CST Nov 8 from that lane. Fix: hooks/agent_brief.py refuses a builder brief whose done check names neither the code check nor `merge --lane-lint`. Related, not the same: brief-builder-no-test-grant, builder-runs-comment-check. A gap fix: may start a lane under owner item 410 a. Doing 10:25 CST Nov 8 in lane session_013NEJL2nvHYs3wA2QnMZfJG (coordinator 10:20 CST).",
+  "note": "Filed 10:14 CST Nov 8 from that lane. Fix: hooks/agent_brief.py refuses a builder brief whose done check names neither the code check nor `merge --lane-lint`. Related, not the same: brief-builder-no-test-grant, builder-runs-comment-check. A gap fix: may start a lane under owner item 410 a. Doing 10:25 CST Nov 8 in lane session_013NEJL2nvHYs3wA2QnMZfJG (coordinator 10:20 CST). Lane 12:22 CST Nov 8: PR #2204 handed to runner 8.",
   "phase": "now",
   "owner": "claude-settings",
   "lane": "session_013NEJL2nvHYs3wA2QnMZfJG",
-  "status": "doing",
+  "status": "ready",
   "order": 722,
-  "updatedAt": "2026-11-08T10:25:00-06:00"
+  "updatedAt": "2026-11-08T12:26:00-06:00"
 }

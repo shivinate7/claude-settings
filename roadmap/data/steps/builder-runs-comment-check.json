@@ -6,6 +6,6 @@
   "owner": "coordinator",
   "lane": null,
   "why": "Lane stall-watch-quiet-lint's builder ran only the stall-watch tests as its done check, so a narration hit (a date and \"Owner ruling\" in comments) reached lane lint and cost an extra lint run (lane, 07:18 CST Nov 8).",
-  "note": "Done check: a red test where hooks/agent_brief.py flags a builder brief whose done check omits the comment-narration scan on the files it touches. Related: step brief-builder-no-test-grant (same checker). A fix for a found gap (item 410 a). Slug from the lane; title by triage.",
-  "updatedAt": "2026-11-08T07:18:00-06:00"
+  "note": "Done check: a red test where hooks/agent_brief.py flags a builder brief whose done check omits the comment-narration scan on the files it touches. Related: step brief-builder-no-test-grant (same checker). A fix for a found gap (item 410 a). Slug from the lane; title by triage. Lane builder-brief-code-check 12:22 CST Nov 8: re-point from hooks/agent_brief.py (it only adds text at agent start and cannot refuse) to hooks/guard.py, where builder_code_check_hit is the home for builder done-check checks. May already be covered: `merge --lane-lint` runs the comment narration check.",
+  "updatedAt": "2026-11-08T12:26:00-06:00"
 }

@@ -6,6 +6,6 @@
   "owner": "coordinator",
   "lane": null,
   "why": "Lane guard-relative-write-escape's round-2 builder brief said \"you may add test rows\"; the builder-diff guard then refused every commit and left a dirty worktree (lane report, 06:53 CST Nov 8).",
-  "note": "Done check: a red test where hooks/agent_brief.py flags a builder brief that grants test edits, and passes a builder brief that names a test-author for them. A fix for a found gap (item 410 a). Slug from the lane; title by triage.",
-  "updatedAt": "2026-11-08T06:55:00-06:00"
+  "note": "Done check: a red test where hooks/agent_brief.py flags a builder brief that grants test edits, and passes a builder brief that names a test-author for them. A fix for a found gap (item 410 a). Slug from the lane; title by triage. Lane builder-brief-code-check 12:22 CST Nov 8: re-point from hooks/agent_brief.py (it only adds text at agent start and cannot refuse) to hooks/guard.py, where builder_code_check_hit is the home for builder done-check checks.",
+  "updatedAt": "2026-11-08T12:26:00-06:00"
 }
