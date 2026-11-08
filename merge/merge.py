@@ -2909,9 +2909,29 @@ def draft_step(root, cfg, n, host, info):
 
 WAITS = 3  # the host.wait_checks calls in confirm, none in a loop: the head, the claim, the merge commit that heals the page
 
-def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=None, red_ok=""):
+def relayed_head_holds(root, branch, relayed, live):
+    """True when the live head is the head a relayed yes named, or sits on it with only this tool's own commits between: a Record-claim
+    commit (head_claim's trailer) or its revert (claim_under_head's subject). The branch is fetched for the commits. A fetch or a log
+    that fails, or a live head the fetch did not read, counts as a head that moved: the yes needs no more than a refusal."""
+    if live == relayed:
+        return True
+    c, out = git(root, "fetch", "-q", "origin", f"refs/heads/{branch}")
+    if c or git(root, "rev-parse", "FETCH_HEAD")[1].strip() != live:
+        return False
+    c, out = git(root, "log", "--format=%H%x09%s%x09%(trailers:key=Record-claim,valueonly,separator=%x2C)", f"{relayed}..{live}")
+    if c or not out.strip():
+        return False
+    for line in out.splitlines():
+        sha, subject, ids = (line.split("\t") + ["", ""])[:3]
+        if not (ids.strip() or subject.startswith('Revert "Claim record numbers"')):
+            return False
+    return True
+
+HEAD_MOVED = "the head of #{n} moved since the owner's yes was relayed, so that yes does not cover it (decision auto-mode-owner-acts, a relayed yes binds to the head at relay time). A new yes from the owner is needed. Nothing was claimed or pushed."
+
+def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=None, red_ok="", expected_head=None):
     m = cfg.get("merge", {})
-    info = info or host.pr(n)  # main read it once already, and the config came from that base. A read: acquire never waits, so the head cannot move before the lock is ours
+    info = info or host.pr(n)  # main read it once already, and the config came from that base. A read; the head compare after the lock covers a head that moves before the lock is ours
     base = info["base"]  # the PR's own base; read again under the lock
     base_ref = f"origin/{base}"
     if info["draft"]:  # the records step: no lock, no claim, no wait, never a merge
@@ -2925,6 +2945,8 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
         host.before_wait = getattr(lock, "extend_for", None)  # a rate wait extends the lock first (standing-merge-grant); the TTL spare is for the checks waits
         info = host.pr(n)
         refuse_bad_pr(info)
+        if expected_head and not relayed_head_holds(root, info["branch"], expected_head, info["head"]):  # moved between main's read and the lock: still before any claim
+            raise Stop(HEAD_MOVED.format(n=n))
         if info["base"] != base:
             raise Stop(f"the base of #{n} changed from {base} to {info['base']} while the lock was taken {BASE_CITE}. Nothing was claimed or pushed.")
         host.take_base = base
@@ -3506,7 +3528,7 @@ def main(argv, host=None, lock=None, hosts=None):
     p.add_argument("--reviewed", action="store_true", help="list the open pull requests with their review record state and live CI")
     p.add_argument("--root", action="append", default=[], metavar="DIR", help="with --reviewed: a repo checkout to list, in place of the working directory's; repeat it for each repo")
     p.add_argument("--review-record", action="store_true", help="print the review record for the pull request's live head (posts nothing)")
-    p.add_argument("--head", type=head_arg, metavar="SHA", help="with --review-record: the 40-hex head the review read; the live head must equal it")
+    p.add_argument("--head", type=head_arg, metavar="SHA", help="with --review-record: the 40-hex head the review read; the live head must equal it. With --confirm: the 40-hex head a relayed yes named; a moved head is refused before anything is claimed")
     p.add_argument("--kind", choices=REVIEW_KINDS, help="with --review-record: the kind of change")
     p.add_argument("--guard", choices=REVIEW_GUARDS, help="with --review-record: whether the change touches a guard or check")
     p.add_argument("--round", action="append", type=round_arg, default=[], metavar="N:ROLE:MODEL:VERDICT", help="with --review-record: one reviewer line; repeat it")
@@ -3514,8 +3536,8 @@ def main(argv, host=None, lock=None, hosts=None):
     p.add_argument("--net-value", choices=REVIEW_NETS, default="not owed", help="with --review-record: the net value of a guard or check change after round 3")
     a = p.parse_args(argv)
     UNDO_MEMO.clear()  # one merge run owns the memo: equal shas in another run (or test) must not reuse its verdict
-    if (a.head or a.kind or a.guard or a.round or a.fix_check or a.net_value != "not owed") and not a.review_record:
-        p.error("--head, --kind, --guard, --round, --fix-check and --net-value go with --review-record")
+    if ((a.head and not a.confirm) or a.kind or a.guard or a.round or a.fix_check or a.net_value != "not owed") and not a.review_record:
+        p.error("--head, --kind, --guard, --round, --fix-check and --net-value go with --review-record (--head also goes with --confirm)")
     if a.live is not None and not a.idle_lanes:
         p.error("--live goes with --idle-lanes")
     if a.root and not a.reviewed:
@@ -3603,6 +3625,8 @@ def main(argv, host=None, lock=None, hosts=None):
             return 0
         if not a.reviewed:
             refuse_bad_pr(info)  # a closed PR stops before the config notice; a draft is previewed, or gets the records step under --confirm
+        if a.confirm and a.head and not relayed_head_holds(root, info["branch"], a.head, info["head"]):  # a relayed yes binds to the head at relay time (decision auto-mode-owner-acts): refused before the lock, a claim or any write
+            raise Stop(HEAD_MOVED.format(n=a.pr))
         if not (a.reviewed and host):  # a test host brings its own checks, so --reviewed reads no config for it
             cfg = load_config(root, h.base if a.reviewed else info["base"], a.config)
         if a.reviewed:
@@ -3619,7 +3643,7 @@ def main(argv, host=None, lock=None, hosts=None):
             h.refuse_pinned_mismatch()
         if a.confirm:
             with release_on_signals():
-                return confirm(root, cfg, a.config, a.pr, h, lock, a.undo_check_unknown_ok, a.session, info, a.base_red_ok) or 0
+                return confirm(root, cfg, a.config, a.pr, h, lock, a.undo_check_unknown_ok, a.session, info, a.base_red_ok, a.head) or 0
         return (preview(root, cfg, a.config, a.pr, h, lock, info, a.undo_check_unknown_ok)) or 0
     except Stop as e:
         print(f"merge: {e}" + ("" if isinstance(e, (Liftable, Unproven)) else " No override lifts this refusal, because this tool runs after the guard."), file=sys.stderr)
