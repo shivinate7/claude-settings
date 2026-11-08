@@ -1893,14 +1893,14 @@ COMPLETION_RE = re.compile(r"<tool-use-id>([^<\s]+)</tool-use-id>.*?<output-file
 
 
 def _merge_constants():
-    """(MERGED_LINE, REVIEW_SEND_BACK or None) from merge/merge.py, the one emitter, loaded only when a merge run is in
-    the transcript. REVIEW_SEND_BACK is read with getattr: while merge.py lacks it, no send-back is read."""
+    """(MERGED_LINE, REVIEW_SEND_BACK) from merge/merge.py, the one emitter, loaded only when a merge run is in
+    the transcript."""
     import importlib.util
     path = os.path.join(HERE, "..", "merge", "merge.py")
     spec = importlib.util.spec_from_file_location("merge_for_hold", path)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
-    return module.MERGED_LINE, getattr(module, "REVIEW_SEND_BACK", None)
+    return module.MERGED_LINE, module.REVIEW_SEND_BACK
 
 
 def _run_text(shown):
@@ -1965,7 +1965,7 @@ def runner_hold(hook, records, active):
       merge releases it, exit 1 included.
     - A send-back line (merge.REVIEW_SEND_BACK, then `#N <session id> (<reason>)`, from `merge --reviewed`) with no
       later claude-code-remote send_message to that session id that names #N. `no session` in the id's place is not
-      owed. A merge.py without REVIEW_SEND_BACK leaves send-backs unread.
+      owed.
 
     A Stop after a refusal releases each entry whose PR the report's Input Needed names. An owner override lifts the
     hold, and a one-act override is spent here, after every other release has been ruled out. Fails open on any error.
@@ -1981,14 +1981,14 @@ def runner_hold(hook, records, active):
         merged_line, back_prefix = _merge_constants()
         merged_re = re.compile(
             "^" + re.escape(merged_line).replace(re.escape("{n}"), r"(\d+)").replace(re.escape("{commit}"), r"\w+"), re.M)
-        back_re = re.compile(r"^%s#(\d+) (?!no session\b)(\S+) \(" % re.escape(back_prefix), re.M) if back_prefix else None
+        back_re = re.compile(r"^%s#(\d+) (?!no session\b)(\S+) \(" % re.escape(back_prefix), re.M)
         idle_at, merges, backs = -1, [], {}
         for at, command, text in runs:
             if IDLE_RUN_RE.search(command):
                 idle_at = at
             for n in merged_re.findall(text or ""):
                 merges.append((at, int(n)))
-            for n, sid in back_re.findall(text or "") if back_re else ():
+            for n, sid in back_re.findall(text or ""):
                 backs[(int(n), sid)] = at
         merged = []
         for at, n in merges:

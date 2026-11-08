@@ -108,6 +108,7 @@ REVIEW_CITE = "(decision pr-review-record, a review record names the head it rev
 OFF_CITE = "(decision standing-merge-grant, the owner's grant for a repo decides whether a session merges there)"
 
 MERGED_LINE = "merge: #{n} merged as {commit}."  # the one home of the merged line; lint/report_guard.py runner_hold reads it back
+REVIEW_SEND_BACK = "send back: "  # the prefix of merge --reviewed's send-back line, read by lint/report_guard.py runner_hold
 SH_TIMEOUT = None  # seconds; the guard sets it, so a hung `gh` cannot outlast its hook
 
 def resolve_program(name, env=None):
