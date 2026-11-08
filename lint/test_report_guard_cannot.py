@@ -949,6 +949,57 @@ class CannotClaimTests(unittest.TestCase):
                 out = self.stop([trg.human("open the PR"), trg.assistant_text(line)])
                 self.assert_blocks(out, line)
 
+    # ---- a failed connection or health check is no blocker; the merge tool names the merge script; an and or or before a bare PR stops the object window only when no article precedes the PR
+
+    def test_cc_red_a_failed_connection_is_no_blocker_for_a_merge_claim(self):
+        # Catches: "CI failed to connect" and "the checks failed to connect" read as a CI blocker, so the merge claim beside
+        # them passed as backed. A failure to connect is an outage, so the claim has no try and blocks.
+        for line in ("I can't merge PR 12 because CI failed to connect.",
+                     "I can't merge PR 12 because the checks failed to connect."):
+            with self.subTest(line=line):
+                out = self.stop([trg.human("merge PR 12"), trg.assistant_text(line)])
+                self.assert_blocks(out, line)
+
+    def test_cc_red_a_failed_health_check_is_no_blocker_for_a_merge_claim(self):
+        # Catches: "the MCP health check failed" read as a CI check blocker, so the merge claim it sat beside passed.
+        line = "The MCP health check failed and I can't merge PR 12."
+        out = self.stop([trg.human("merge PR 12"), trg.assistant_text(line)])
+        self.assert_blocks(out, line)
+
+    def test_cc_green_a_ci_failure_still_blocks_a_merge_claim(self):
+        # Control: CI failing, or CI red, names the blocker of a merge, so the merge claim passes.
+        for line in ("I can't merge PR 12 because CI failed.", "CI is red and I can't merge PR 12."):
+            with self.subTest(line=line):
+                out = self.stop([trg.human("merge PR 12"), trg.assistant_text(line)])
+                self.assert_passes(out, "a merge claim whose blocker is CI")
+
+    def test_cc_red_the_merge_tool_names_the_merge_script(self):
+        # Catches: "the merge tool" not read as naming the merge script, so a failed merge 12 did not back its claim
+        # (the script try backs a claim only when the line names it).
+        line = "I couldn't merge PR 12: the merge tool exited 1."
+        out = self.stop([trg.human("merge PR 12"), *exit_bash("merge 12", 1, "tu_m"), landed_reply(line)])
+        self.assert_passes(out, "a failed merge 12, named in the line as the merge tool")
+
+    def test_cc_green_a_failed_other_script_is_no_merge_tool(self):
+        # Control: a failed ./lint.sh is no merge tool, so the same line blocks.
+        line = "I couldn't merge PR 12: the merge tool exited 1."
+        out = self.stop([trg.human("merge PR 12"), *exit_bash("./lint.sh", 1, "tu_l"), landed_reply(line)])
+        self.assert_blocks(out, line)
+
+    def test_cc_red_an_article_before_the_pr_after_and_or_still_claims(self):
+        # Catches: an and or or before a bare PR stopping the object window even when the noun after it has an article, so
+        # the open or create claim went unread.
+        for line in ("I could not create the branch and the PR.", "I could not open the logs or the PR."):
+            with self.subTest(line=line):
+                out = self.stop([trg.human("open the PR"), notice("github: failed to connect"), trg.assistant_text(line)])
+                self.assert_blocks(out, line)
+
+    def test_cc_green_an_and_joined_noun_before_a_bare_pr_is_no_claim(self):
+        # Control: "the CI logs and PR" joins a bare PR to a noun, so the open is of the logs and no claim.
+        line = "I could not open the CI logs and PR."
+        out = self.stop([trg.human("open the PR"), trg.assistant_text(line)])
+        self.assert_passes(out, "an open whose object is the CI logs and a bare PR")
+
     # ---- a claim after a bold report label. "**Input Needed** Could not open the PR" is a hand-off form.
     # The label is no subject: the clause after it opens, so the phrase has an empty subject and is a claim.
 
