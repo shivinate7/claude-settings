@@ -588,9 +588,11 @@ PUSHLANEMASTER = os.path.join(ROOT, "pushlanemaster")
 PUSHSELF = os.path.join(ROOT, "pushself")
 PUSHMAINUP = os.path.join(ROOT, "pushmainup")  # main itself, tracking origin/main
 PUSHSTACK = os.path.join(ROOT, "pushstack")    # lane/fix cut from origin/lane/base: its upstream is another lane
+PUSHNEWBR = os.path.join(ROOT, "pushnewbr")    # origin/lane/base at commit A; lane/fix one commit on it, at B
 # The rule ids the two new asks name. Each is the one home for its id in this file.
 PUSH_STRAY_RULE = "push-stray-branch"   # ruling 206 a: a push with an implied destination off its upstream
 PUSH_MAIN_RULE = "push-main"            # ruling 207 a: a non-forced push whose destination is main or master
+PUSH_NEWBRANCH_RULE = "push-new-branch"  # a push that creates a branch at another branch's tip (the stray-branch incident)
 # roadmap-one-writer fixtures. RECROADMAP sits on the record branch, `roadmap`. RECFORK sits on `roadmap-fork`,
 # and its extras file names that branch as the record branch, so `roadmap` is not its record.
 RECROADMAP = os.path.join(ROOT, "recroadmap")
@@ -1900,6 +1902,19 @@ def _build_push():
     run_vcs(PUSHSTACK, "update-ref", "refs/remotes/origin/lane/base", "HEAD")
     run_vcs(PUSHSTACK, "checkout", "-q", "--track", "-b", "lane/fix", "origin/lane/base")
 
+    # origin/lane/base holds commit A. lane/fix sits one commit on top of it, B, and is never pushed. A new
+    # branch name at A is the stray-branch incident; a new name at B is a stacked lane.
+    make_repo(PUSHNEWBR, {"base.txt": "base\n"})
+    run_vcs(PUSHNEWBR, "remote", "add", "origin", slash(BRANCHREMOTE))
+    run_vcs(PUSHNEWBR, "update-ref", "refs/remotes/origin/lane/base", "HEAD")
+    run_vcs(PUSHNEWBR, "checkout", "-q", "--track", "-b", "lane/fix", "origin/lane/base")
+    write(os.path.join(PUSHNEWBR, "stacked.txt"), "stacked\n")
+    run_vcs(PUSHNEWBR, "add", "-A")
+    run_vcs(PUSHNEWBR, *IDENT, "commit", "-q", "-m", "stacked")
+    if (run_vcs(PUSHNEWBR, "rev-parse", "HEAD~1").stdout.strip()
+            != run_vcs(PUSHNEWBR, "rev-parse", "origin/lane/base").stdout.strip()):
+        sys.exit("fixture setup failed in build_fixtures: PUSHNEWBR needs HEAD~1 at origin/lane/base")
+
     make_repo(PUSHMAINUP, {"base.txt": "base\n"})
     run_vcs(PUSHMAINUP, "remote", "add", "origin", slash(BRANCHREMOTE))
     run_vcs(PUSHMAINUP, "update-ref", "refs/remotes/origin/main", "HEAD")
@@ -2222,7 +2237,7 @@ lazy_fixture([BRANCHREMOTE, BRANCHREPO, BRANCHFALLBACKMAIN, BRANCHFALLBACKMASTER
              _build_branch)
 lazy_fixture([PUSHFEAT, PUSHMAIN, PUSHTRUNK, PUSHTRUNKLOCAL, PUSHNOHEAD, PUSHDETACHED, PUSHSAMETAG, PUSHDANGLING, PUSHNOHEADMAIN,
               PUSHONLYMASTER, PUSHUPSTREAM, PUSHUP, PUSHUPSELF, PUSHNOUP, PUSHMATCH, RECROADMAP, RECFORK,
-              PUSHSTRAY, PUSHLANE, PUSHLANEMASTER, PUSHSELF, PUSHMAINUP, PUSHSTACK],
+              PUSHSTRAY, PUSHLANE, PUSHLANEMASTER, PUSHSELF, PUSHMAINUP, PUSHSTACK, PUSHNEWBR],
              _build_push)
 lazy_fixture([WTMAIN, WTCLEAN, WTDIRTY, WTLOCKED, WTLIVE, WTDEADSESSION, WTSTALESTART, WTPRUNE,
               WTPRUNESTALE, WTLIVECFG, WTDEADCFG, WTSTALESTARTCFG], _build_worktrees)
@@ -7134,6 +7149,15 @@ push_case("stray branch, a second refspec that names the current branch asks",
           "origin HEAD:push-guard-asks mylocal", "ask", cwd=PUSHSTRAY, rule=PUSH_STRAY_RULE)
 sh("push: stray branch, a bare push under push.default current asks",
    VCS + " -c push.default=current push", "ask", PUSH_STRAY_RULE, cwd=PUSHSTRAY)
+
+# DENY, finding `push-new-branch-check` (lane nfp-push-chain-guards, test-author). A push that creates a
+# new branch name at the tip of a branch origin already holds is refused. PUSHNEWBR: origin/lane/base holds
+# commit A, and lane/fix sits one commit on top, B. A push of A to a new name is the incident (the sha of
+# a PR head pushed as a stray branch). A push of B to a new name is a stacked lane, and stays allowed.
+sh("push: a new branch at another branch's tip denies, the stray-branch incident",
+   VCS + " push origin HEAD~1:refs/heads/skc-ste", "deny", PUSH_NEWBRANCH_RULE, cwd=PUSHNEWBR)
+sh("push: a new branch on top of another branch, a stacked lane, allows",
+   VCS + " push origin HEAD:refs/heads/skc-stacked", "allow", cwd=PUSHNEWBR)
 
 # ASK, owner rulings 207 a. A non-forced push whose destination is the literal
 # name main or master asks. The name is literal: origin/HEAD does not decide it.
