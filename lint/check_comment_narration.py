@@ -55,11 +55,16 @@ PATTERNS = {
     # Each form names the words around it, so a mid-sentence "previously" and "the user changed the value" stay
     # clean. The "previously" form needs the start of a sentence, since only there it opens a history clause.
     # "the old behaviour expected by ..." is a participle naming who relies on it, not a past-tense verb.
+    # Run-state history is a past result of a test or check: red, green, passing or failing "on <head|main|base>", or
+    # a past-tense "red before" form. It goes stale once the code moves. Red and green as state data or a condition stay clean
+    # ("a green head", "returns red when a job fails"). "is" before the word marks a live condition, so it skips the form.
     "history phrase": re.compile(
         r"(?:^[\s#/*\"']*|[.;:]\s+)previously\b,?\s+(?:this|it|they|we|was|were|returned|used|did|had)\b"
         r"|\bchanged\s+from\s+(?:the\s+(?:old|previous|original|former)\b|an?\s+\w+\s+to\b|\w+ing\s+\w+\s+to\b)"
         r"|\badded\s+after\s+(?:code\s+)?review\b"
         r"|\bformerly\b"
+        r"|(?<!\bis\s)\b(?:red|green|passed|passing|failed|failing)\s+(?:on|at)\s+(?:the\s+)?(?:origin/)?(?:head|main|base)\b(?![/-]|\.\w)"
+        r"|\b(?:was|were|went|been|turned|stayed)\s+(?:red|green|passing|failing)\s+before\b"
         r"|\bthe\s+old\s+behaviou?r\s+(?:(?!\w+ed\s+(?:by|for|on|in|at|with|from)\b)\w+ed|was|were|had|did|used|let|ran|took|gave|made|kept)\b", re.I),
     "owner order": re.compile(r"\bowner(?:'s)?\s+(?:ruling|order|request|ask)\b", re.I),
 }
