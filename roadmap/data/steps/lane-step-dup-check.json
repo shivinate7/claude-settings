@@ -1,11 +1,11 @@
 {
   "title": "Refuse a brief or a new session for a roadmap step that another live session already carries",
   "why": "Coordinator 15:00 CST Nov 8, its own mistake: at 11:45 CST it routed step draft-pr-guard-heredoc to session_013NEJL43F31tNPDKT4u3HJv, while session_013NEJKzzx35nAWSwPacHRXt already ran that step and had handed #1820, #1863, #1897 and #1915. The duplicate is archived; branch archive/draft-pr-guard-heredoc-restart holds its work. Red case: a create_session or brief for a cs-step tag that a live session already carries is refused, naming that session.",
-  "note": "",
+  "note": "Sighting (coordinator 15:42 CST Nov 8): it started lane session_013NEJL33qiuVEZBa4bipxtY for step review-state-guard-needs-round-3, whose PR #2252 already existed. The check should read a step's handed PR too, not only live sessions.",
   "phase": "now",
   "owner": "claude-settings",
   "lane": "session_013NEJL2hXLvodLuczRGgNHP",
   "status": "doing",
   "order": 821,
-  "updatedAt": "2026-11-08T15:05:00-06:00"
+  "updatedAt": "2026-11-08T15:43:00-06:00"
 }

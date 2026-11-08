@@ -75,3 +75,6 @@ Checked Nov 2 12:58 CST: none of these is in docs/debts/notes.md on main. Triage
 - message-ref-short-colour (#2265, Decision: send-message-refs-resolve): a 3- or 4-digit colour after a PR word (`The PR changes the border to #000.`) reads as a PR and refuses if missing.
 - message-ref-colour-cut-gap-only (#2265, Decision: send-message-refs-resolve): the 6/8-digit colour cut covers the gap form only, so `PR #99999, #000000` refuses #000000.
 - message-ref-gap-token-stops (#2265, Decision: send-message-refs-resolve): a `#token` in the gap stops the scan, so `PR #7 sets #000000 and #99999.` passes #99999.
+- report-sha-hex-word (#1842, Decision: agent-report-shas-resolve): a hex-looking word (`ed25519`, `dec2024`, `cafe123`) is judged as a sha and refused (hooks/guard.py report_shas).
+- report-sha-plain-other-repo (#1842, Decision: agent-report-shas-resolve): another repo's sha in plain text, and a tree or blob id, read as missing; the refusal text "make no commit, give no sha" misleads for these.
+- report-sha-handback-agent-id (#1842, Decision: agent-report-shas-resolve): unmeasured whether the harness sends agent_id on the SubagentHandback PreToolUse payload; if not, the SubagentStop fallback judges the report.
