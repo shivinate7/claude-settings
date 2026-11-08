@@ -16,12 +16,13 @@
                           On a ready PR a stale records page with no claim to make or resume is refused before any push; only the draft step heals it.
   merge --unlock [branch] remove the merge lock on the branch (default: the default branch). Never checks the holder. A cloud run reads the lock first and skips one already released.
   merge <pr> --review-record --head SHA --kind K --guard yes|no [--round N:ROLE:MODEL:VERDICT ...]
-                          [--fix-check HEAD:reviewer:MODEL:PASS|FAIL] [--net-value V]
+                          [--fix-check HEAD:reviewer:MODEL:PASS|FAIL] [--net-value V] [--lint-unknown-ok "REASON"]
                           print the review record for the head SHA that was reviewed. Stops (exit 1) when the PR's live head is another
                           sha. Posts nothing: the lane posts it as a PR comment. --fix-check adds the optional `Fix check:` line after
                           the rounds; HEAD is the reviewed head the fix diff starts from, and differs from SHA. It refuses (exit 2)
                           unless HEAD is the Head of the newest earlier record on the PR with no Fix check line, read from the
-                          PR's issue comments since the PR opened.
+                          PR's issue comments since the PR opened. A done record prints only when `merge --lane-lint` passes on SHA: a
+                          FAIL refuses, and an unknown refuses unless --lint-unknown-ok gives a reason, which lane_lint logs.
   merge --reviewed        one line per open PR that has a review record comment, with its state (bad when the newest does not parse) and its
                           live CI; then the PRs with no record.
   merge --lane-lint <pr|ref> [--base BRANCH] [--lint-unknown-ok "REASON"]
@@ -72,9 +73,6 @@ class Stop(Exception):
 
 class Liftable(Stop):
     """A refusal that a reason flag lifts. Its message names the flag, so main() does not add the no-override line."""
-
-class LintHold(Liftable):
-    """A refusal whose message is its whole remedy, and which no flag lifts: main() adds no override line to it. The review record render raises it when the lane lint does not pass."""
 
 class NetStop(Stop):
     """A `gh` call kept failing with a network error. Not a refusal: the caller must not revert a claim for it."""
@@ -3295,7 +3293,7 @@ def main(argv, host=None, lock=None):
     p.add_argument("--confirm", action="store_true")
     p.add_argument("--lane-lint", action="store_true", help="lint the head of a lane (PR number, commit or ref) as the batch runner's lint does; takes no lock, merges nothing")
     p.add_argument("--base", default="", metavar="BRANCH", help="with --lane-lint on a commit or ref: the base branch to lint against (default main)")
-    p.add_argument("--lint-unknown-ok", default="", metavar="REASON", help="with --lane-lint: go on when a lint step is unknown (never when one FAILs); logged")
+    p.add_argument("--lint-unknown-ok", default="", metavar="REASON", help="with --lane-lint or --review-record: go on when a lint step is unknown (never when one FAILs); logged")
     p.add_argument("--role", metavar="TIER", help="cloud only: record this session's merge role (batch-runner only)")
     p.add_argument("--unlock", nargs="?", const=True, metavar="BRANCH")
     p.add_argument("--undo-check-unknown-ok", default="", metavar="REASON", help="go on when the silent-undo check cannot read the history; logged")
@@ -3322,8 +3320,10 @@ def main(argv, host=None, lock=None):
                          or a.review_record or a.lane_lint):
         p.error("--idle-lanes stands alone")
     if not a.lane_lint:
-        if a.base or a.lint_unknown_ok:
-            p.error("--base and --lint-unknown-ok go with --lane-lint")
+        if a.base:
+            p.error("--base goes with --lane-lint")
+        if a.lint_unknown_ok and not a.review_record:
+            p.error("--lint-unknown-ok goes with --lane-lint or --review-record")
         if a.pr is not None and not a.pr.isdigit():
             p.error(f"argument pr: invalid int value: {a.pr!r}")
     if a.idle_lanes:
@@ -3397,10 +3397,13 @@ def main(argv, host=None, lock=None):
             if review_state(parse_review(body), a.head)[0] == "done":  # a done record is the handoff, so the lane lint must pass on the head it names (decision pr-review-record)
                 try:
                     with release_on_signals(), contextlib.redirect_stdout(sys.stderr):  # a signal removes lane_lint's worktree; its PASS line is no part of the record
-                        lane_lint(root, a.head, h, info["base"], "")
-                except Stop as e:  # no unknown-ok flag reaches this path, so the message drops lane_lint's offer of one
+                        lane_lint(root, a.head, h, info["base"], a.lint_unknown_ok)  # lane_lint logs a given unknown reason, as under --lane-lint
+                except Liftable as e:  # an unknown step: the reason flag lifts it, so the remedy names the flag in this command's form
                     why = "\n".join(line for line in str(e).splitlines() if "--lint-unknown-ok" not in line)
-                    raise LintHold(f"no done record is printed while the lint of {a.head[:9]} does not pass: {why}\nRun `merge --lane-lint {a.pr}` until it passes, then print the record again. " + REVIEW_CITE)
+                    raise Liftable(f"no done record is printed while the lint of {a.head[:9]} does not pass: {why}\nRun `merge --lane-lint {a.pr}` "
+                                   f'where the missing tool is present, or, when the cause is known, print the record again with --lint-unknown-ok "REASON". ' + REVIEW_CITE)
+                except Stop as e:  # a FAIL, or an unknown no flag lifts: main() adds the no-override line
+                    raise Stop(f"no done record is printed while the lint of {a.head[:9]} does not pass: {e}\nRun `merge --lane-lint {a.pr}` until it passes, then print the record again. " + REVIEW_CITE)
             say(body.rstrip("\n"))
             print("merge: nothing was posted. Post the lines above as a comment on the pull request.", file=sys.stderr)
             return 0
