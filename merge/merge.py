@@ -112,7 +112,6 @@ FIX_FLOOR_REMEDY = "Carry every round up to the floor: pass each round line with
 FIX_FROZEN_REMEDY = "Pass the old values."
 FIX_ANCESTOR_REMEDY = "The fix base must be an ancestor of the live head. Base the fix check on a head that sits inside the live head's history."
 FIX_LAYOUT_REMEDY = "Fix or restore lint/layout.json so the record folders can be read."
-FIX_LAYOUT_MODULE_REMEDY = "Fix or restore lint/layout.py so it loads and the record folders can be read."
 FIX_WIDE_REMEDY = "Start a new lane at round 1."
 FIX_MISSING_REMEDY = "Post the round's review record first."
 FIX_DROPPED_REMEDY = "Copy every Round line of that record unchanged and in its order, then add the new lines after them."
@@ -3318,8 +3317,7 @@ def fix_base_problem(host, root, base, last_head):
         import layout
         folders, files = layout.record_places(layout.layout(), root)
     except Exception as e:  # LayoutError, or a module that will not load: the record places are unknown
-        # the remedy names the file that failed: lint/layout.py when it will not import, else the layout JSON
-        return f"the record paths cannot be read from the layout ({type(e).__name__}), so the files between the heads cannot be told from code", FIX_LAYOUT_MODULE_REMEDY if isinstance(e, ImportError) else FIX_LAYOUT_REMEDY
+        return f"the record paths cannot be read from the layout ({type(e).__name__}), so the files between the heads cannot be told from code", FIX_LAYOUT_REMEDY
     files = files | {RECORDS_PAGE}
     found = host.compare_files(last_head, base)
     if found["ahead_by"] and found["behind_by"]:

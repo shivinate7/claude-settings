@@ -13465,22 +13465,6 @@ class ReviewFixRemedies(ReviewChainFixture):
         self.assertNotIn(self.HEAD_REMEDY, remedy, "the layout refusal prints the head remedy, which does not fix an unreadable layout:\n" + err)
         self.assertIn("layout", remedy, "the layout refusal does not name the layout as its remedy:\n" + err)
 
-    def test_a_fix_base_whose_layout_will_not_import_names_lint_layout_py_as_its_remedy(self):
-        # a layout.py that will not import refuses the fix base in fix_base_problem before any compare, as an unreadable layout does. Its remedy
-        # names the file that failed, lint/layout.py, not the layout JSON. The control runs the same fix base with the module importable
-        diffs = {(self.NEWEST, self.OTHER): compare_of("ahead", self.CODE)}
-        rc, out, err, host = self.run_chain(self.OTHER, self.pair("PASS"), diffs=diffs)  # control, green on the old code
-        self.assertTrue(self.compared(host, self.NEWEST, self.OTHER), "control: the base was not compared with the newest record's Head")
-        self.assertIn("are not all record or notes files", err, "control: the importable layout did not reach the base rule:\n" + err)
-        with unittest.mock.patch.dict(sys.modules, {"layout": None}):  # `import layout` now raises, as a layout.py that will not load does
-            rc, out, err, host = self.run_chain(self.OTHER, self.pair("PASS"))
-        self.assert_refused(rc, out, err)
-        self.assertIn("cannot be read from the layout", err, "scope: the refusal is not the import failure's:\n" + err)
-        self.assertEqual(host.compare_reads, [], "scope: a compare was read before the layout, so the refusal is not the layout's")
-        self.assertIn("cannot be told from code", err, "scope: the cause sentence is not in the refusal:\n" + err)
-        remedy = err.split("cannot be told from code", 1)[1]
-        self.assertIn("layout.py", remedy, "the import failure does not name lint/layout.py as its remedy:\n" + err)
-
     def test_a_record_below_the_round_floor_names_the_round_flag_as_its_remedy(self):
         # the floor is the highest round an earlier record reached, here every round. A record that carries fewer round lines is refused where it
         # is written, and its remedy is the round lines, not the head
