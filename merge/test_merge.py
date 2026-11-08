@@ -1297,7 +1297,25 @@ class SmallBaseMove(Env):
         self.assertEqual(rc, 0, out)
         self.assertTrue(os.path.exists(record), "the merge's own lint never ran the record step: " + out)
         with open(record, encoding="utf-8", newline="") as f:
-            self.assertNotEqual(f.read(), INHERITED_PR_BODY, "an inherited CI_JOB_PR_BODY_FILE reached the merge's own lint")
+            self.assertEqual(f.read(), MERGE_PR_BODY, "the merge's own lint did not get exactly the PR's body (an inherited CI_JOB_PR_BODY_FILE may have reached it)")
+
+    def test_an_inherited_pr_body_file_naming_no_file_does_not_refuse_the_small_move_proof(self):
+        self.scoped()
+        self.on("main", {"docs/guide.md": "# Guide\n"})
+        calls = []
+        real_sh = merge.sh
+        def spy(args, *a, **k):
+            calls.append((list(args), dict(k.get("env") or {})))
+            return real_sh(args, *a, **k)
+        missing = os.path.join(self.t, "no-such-body.md")
+        with unittest.mock.patch.dict(os.environ, {"CI_JOB_PR_BODY_FILE": missing}), unittest.mock.patch.object(merge, "sh", spy):
+            rc, out = self.run_merge("7", "--confirm")
+        self.assertEqual(rc, 0, "the small-move proof refused on an inherited body file: " + out)
+        self.assertTrue(self.host.merged, out)
+        ci_envs = [env for args, env in calls if merge.CI_JOB in args]
+        self.assertTrue(ci_envs, "no ci-job run was seen, so the proof's lint was not read: " + out)
+        self.assertEqual([env for env in ci_envs if "CI_JOB_PR_BODY_FILE" in env], [],
+                         "an inherited CI_JOB_PR_BODY_FILE reached a ci-job run of the small-move proof")
 
     def test_the_draft_step_hands_the_pr_body_to_the_small_move_lint(self):
         record = os.path.join(self.t, "body-seen.txt")
