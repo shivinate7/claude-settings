@@ -5,7 +5,7 @@
   "order": 270.0,
   "lane": "session_013NEJL33wvLc6xtDnBTJDAw",
   "why": "Incident 15:00 CST Nov 7, lane pr-state-is-on-the-pr: a record-writer added \"the ledger reads no CI state\" to decision pr-ledger (#1419), while the code on that branch reads main's latest CI run. Caught by reading; no check compares a record's claim about a tool's reads with the tool's code.",
-  "note": "Candidate: each record that claims a tool's reads or cost cites the docstring line that states it, as fresh-prose binds claims to checks. Done step prose-governance-workflow bound prose to code in general; this is the gap it left for read and cost claims. Coordinator to judge scope: fold into the fresh-prose skill or a lint. Coordinator scope, 15:05 CST: it goes into the fresh-prose skill and its existing record check, not a new lint. A record sentence about what code does cites the code symbol; the check confirms the symbol exists; the reviewer checks the sentence is true.",
+  "note": "Candidate: each record that claims a tool's reads or cost cites the docstring line that states it, as fresh-prose binds claims to checks. Done step prose-governance-workflow bound prose to code in general; this is the gap it left for read and cost claims. Coordinator to judge scope: fold into the fresh-prose skill or a lint. Coordinator scope, 15:05 CST: it goes into the fresh-prose skill and its existing record check, not a new lint. A record sentence about what code does cites the code symbol; the check confirms the symbol exists; the reviewer checks the sentence is true. Follow-up in progress (lane, 04:03 CST Nov 8): a guard that turns lane-lint red when a PR adds a Markdown cite to a Python code name missing in the PR's own tree; its PR branches from #1539's head with Merge after: #1539. The lane cites page item 386 (merge-follows-review) as its go.",
   "owner": "coordinator",
-  "updatedAt": "2026-11-07T15:06:00-06:00"
+  "updatedAt": "2026-11-08T04:02:00-06:00"
 }
