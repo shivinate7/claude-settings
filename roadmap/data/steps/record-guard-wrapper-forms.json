@@ -1,0 +1,11 @@
+{
+  "title": "The review-record guard reads gh behind a wrapper: timeout, bash -c, sh -c, eval, and a GraphQL addComment",
+  "why": "Lane review-record-provenance (session_013NEJKzUe9U19voH62VbCNA), relayed by the coordinator 13:45 CST Nov 8: the review-record guard takes only `gh` as the command word (hooks/guard_merge.py gh_call_of). It misses `timeout N gh ...`, a GraphQL addComment, and `bash -c`, `sh -c` or `eval` wrappers. The lane takes it after its stack refresh.",
+  "note": "",
+  "phase": "now",
+  "owner": "claude-settings",
+  "lane": "session_013NEJKzUe9U19voH62VbCNA",
+  "status": "todo",
+  "order": 811,
+  "updatedAt": "2026-11-08T13:45:00-06:00"
+}
