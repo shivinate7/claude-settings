@@ -320,6 +320,7 @@ import os
 import re
 import shlex
 import sys
+import tempfile
 import time
 
 # The shared code lives in guard_core.py, and the rule families in guard_<family>.py, beside this
@@ -2351,9 +2352,13 @@ BRIEF_SCOPE_REASON = (
     "(decision agent-commit-file-scope)"
 )
 BRIEF_LINES = 50   # the lines of a transcript read to find its first user message
-# A path-shaped run: the characters of a path and of a glob. Any other character ends a run, so a lone
-# apostrophe, a colon or a bracket in the prose cannot hide a name or break the read.
-BRIEF_RUN = re.compile(r"[\w.\-/*?@\\]+")
+# A path-shaped run: the characters of a path and of a glob, with the brackets, parens and plus a framework
+# route uses (`app/[id]/page.tsx`). Any other character ends a run, so a lone apostrophe or a colon in the
+# prose cannot hide a name or break the read. `clean_run` strips the prose's own brackets and parens.
+BRIEF_RUN = re.compile(r"[\w.\-/*?@\\\[\]()+]+")
+BRIEF_LINK = re.compile(r"\]\(")   # a markdown link `[text](path)`: the path is its own run
+BRIEF_POINTER_BYTES = 64 * 1024   # the largest brief file a pointer is read from
+BRIEF_POINTER_EXT = (".md", ".txt")
 BRIEF_PREFIX = re.compile(r"`([\w.\-/]*[A-Za-z0-9][\w.\-/]*-)`")   # a backticked name prefix: `verdict-`
 BRIEF_EMPHASIS = re.compile(r"\*+([^*?]+)\*+\Z")   # `**src/app.py**` names src/app.py
 BRIEF_EXT = re.compile(r"\.[A-Za-z][A-Za-z0-9]{0,9}\Z")
@@ -2405,46 +2410,132 @@ def brief_text(path: str):
     return None
 
 
-def glob_regex(pattern: str):
-    """A path glob as a regex: `**` crosses a `/`, `*` and `?` do not."""
-    out, i = [], 0
-    while i < len(pattern):
-        if pattern.startswith("**/", i):
-            out.append("(?:.*/)?")
-            i += 3
-        elif pattern.startswith("**", i):
-            out.append(".*")
-            i += 2
-        elif pattern[i] == "*":
-            out.append("[^/]*")
+def _segment_match(pattern: str, text: str) -> bool:
+    """One path segment against a pattern of `*` (any run) and `?` (one character), with no backtracking
+    past the last `*`: the time is the product of the two lengths, however many stars the pattern holds."""
+    i = j = 0
+    star, mark = -1, 0
+    while j < len(text):
+        if i < len(pattern) and pattern[i] == "*":
+            star, mark = i, j
             i += 1
-        elif pattern[i] == "?":
-            out.append("[^/]")
+        elif i < len(pattern) and (pattern[i] == "?" or pattern[i] == text[j]):
             i += 1
+            j += 1
+        elif star >= 0:
+            mark += 1
+            i, j = star + 1, mark
         else:
-            out.append(re.escape(pattern[i]))
-            i += 1
-    return re.compile("".join(out) + r"\Z")
+            return False
+    while i < len(pattern) and pattern[i] == "*":
+        i += 1
+    return i == len(pattern)
+
+
+def glob_segments(pattern: str):
+    """A path glob as segments. A segment that is only `**` crosses `/`; any other run of stars is one `*`."""
+    return [seg if seg == "**" else re.sub(r"\*+", "*", seg) for seg in pattern.split("/")]
+
+
+def glob_match(segments, path: str) -> bool:
+    """`path` against `glob_segments`: `**` takes zero or more whole segments, `*` and `?` stay inside one."""
+    parts = path.split("/")
+    seen = {}
+
+    def walk(i: int, j: int) -> bool:
+        key = (i, j)
+        if key not in seen:
+            if i == len(segments):
+                seen[key] = j == len(parts)
+            elif segments[i] == "**":
+                seen[key] = walk(i + 1, j) or (j < len(parts) and walk(i, j + 1))
+            else:
+                seen[key] = j < len(parts) and _segment_match(segments[i], parts[j]) and walk(i + 1, j + 1)
+        return seen[key]
+
+    return walk(0, 0)
+
+
+def clean_run(run: str) -> str:
+    """A path-shaped run as the path it names: backslashes as `/`, markdown emphasis, a leading `./`, the
+    sentence's own dot or question mark, and a bracket or paren the run closes or opens without its mate,
+    stripped. The case is kept."""
+    token = norm(run)
+    emphasis = BRIEF_EMPHASIS.match(token)
+    token = emphasis.group(1) if emphasis else token
+    while True:
+        before = token
+        token = token.rstrip(".?")
+        for opener, closer in ("()", "[]"):
+            while token.endswith(closer) and token.count(closer) > token.count(opener):
+                token = token[:-1]
+            while token.startswith(opener) and token.count(opener) > token.count(closer):
+                token = token[1:]
+            if token.startswith(opener) and token.endswith(closer) and opener not in token[1:-1] \
+                    and closer not in token[1:-1]:
+                token = token[1:-1]   # a whole run in parens: `(src/app.py)`
+        while token.startswith("./"):
+            token = token[2:]
+        if token == before:
+            return token
+
+
+def brief_runs(text: str):
+    """The cleaned path-shaped runs of a brief, in order."""
+    return [clean_run(run) for run in BRIEF_RUN.findall(BRIEF_LINK.sub(" ", text))]
+
+
+def pointer_read(token: str, top: str):
+    """The text of the brief file a pointer token names, or None. A pointer is a path whose file name holds
+    `brief` and ends `.md` or `.txt`; it is read only from the checkout or the temp folder (where a
+    session's scratchpad is), as a plain file of at most BRIEF_POINTER_BYTES."""
+    name = basename(token)
+    if "brief" not in name or not name.endswith(BRIEF_POINTER_EXT):
+        return None
+    try:
+        path = token if os.path.isabs(token) else os.path.join(top, token)
+        real = os.path.realpath(path)
+        homes = [os.path.realpath(top), os.path.realpath(tempfile.gettempdir())]
+        if not any((os.path.normcase(real) + os.sep).startswith(os.path.normcase(home) + os.sep) for home in homes):
+            return None
+        if not os.path.isfile(real) or os.path.getsize(real) > BRIEF_POINTER_BYTES:
+            return None
+        with open(real, encoding="utf-8", errors="replace") as handle:
+            return handle.read()
+    except (OSError, ValueError):
+        return None
+
+
+def brief_pointer(text: str, top: str):
+    """`(pointed text, pointer tokens)` for a brief that points at a file that holds the brief. The first
+    pointer that reads gives its text, and the chain stops there: that text is never searched for a
+    pointer. With none that reads, the text is None and the tokens are the pointers that did not."""
+    missed = []
+    for token in brief_runs(text):
+        if "brief" not in basename(token) or not token.lower().endswith(BRIEF_POINTER_EXT):
+            continue
+        found = pointer_read(token, top)
+        if found is not None:
+            return found, []
+        missed.append(token.lower())
+    return None, missed
 
 
 class BriefScope:
     """The paths a brief names, lower case. A path is named by an equal path, a folder it sits under (whole
-    segments), a glob, a bare file name, or the prefix of its file name (only when the brief backticks it)."""
+    segments), a glob, a bare file name, or the prefix of its file name (only when the brief backticks it).
+    `skip` lists tokens that name nothing: a pointer that could not be read."""
 
-    def __init__(self, text: str, top: str):
+    def __init__(self, text: str, top: str, skip=()):
         self.exact, self.dirs, self.bare, self.globs, self.prefixes = set(), set(), set(), [], set()
         for found in BRIEF_PREFIX.finditer(text):
             self.prefixes.add(norm(found.group(1)).lower())
         top = norm(top).lower().rstrip("/")
-        for run in BRIEF_RUN.findall(text):
-            self.add(run, top)
+        for token in brief_runs(text):
+            if token.lower() not in skip:
+                self.add(token.lower(), top)
 
-    def add(self, run: str, top: str) -> None:
-        token = norm(run).lower()
-        emphasis = BRIEF_EMPHASIS.match(token)
-        token = (emphasis.group(1) if emphasis else token).rstrip(".?")
-        while token.startswith("./"):
-            token = token[2:]
+    def add(self, token: str, top: str) -> None:
         if not re.search(r"[a-z0-9]", token):
             return
         if token.startswith("/"):
@@ -2455,12 +2546,14 @@ class BriefScope:
             token = token[len(top) + 1:]
         if "*" in token or "?" in token:
             if "/" in token or BRIEF_EXT.search(token):
-                self.globs.append((glob_regex(token), "/" not in token))
+                self.globs.append((glob_segments(token), "/" not in token))
         elif token.endswith("/"):
             if token.strip("/"):
                 self.dirs.add(token.rstrip("/"))
         elif "/" in token:
             self.exact.add(token)
+            if not BRIEF_EXT.search(token):
+                self.dirs.add(token)   # a folder written with no trailing slash
         elif BRIEF_EXT.search(token):
             self.bare.add(token)
 
@@ -2472,7 +2565,7 @@ class BriefScope:
         name = basename(path)
         return (path in self.exact or name in self.bare
                 or any(path.startswith(d + "/") for d in self.dirs)
-                or any(rx.match(name if on_name else path) for rx, on_name in self.globs)
+                or any(glob_match(seg, name if on_name else path) for seg, on_name in self.globs)
                 or any(path.startswith(p) if "/" in p else name.startswith(p) for p in self.prefixes))
 
 
@@ -2497,21 +2590,32 @@ def existed_at(root: str, old: str, rel: str):
     return None if answer is None else answer.returncode == 0
 
 
+def agent_base(root: str) -> str:
+    """The commit the agent's branch started from: its merge base with the default branch (`origin/main`).
+    '' when that cannot be read, and then a file is judged against the change's own parent."""
+    name = resolve_default_base(root)
+    answer = guard_core._git(root, "merge-base", "HEAD", name) if name else None
+    return answer.stdout.strip() if answer is not None and answer.returncode == 0 else ""
+
+
 def brief_scope_hit(root: str, top: str, brief: str, changes):
     """Judge the agent's own change (`changes`, from `own_changes`) against its brief. Returns
     `(offence, facts)`: the first modified or deleted existing file the brief does not name ('' when none),
     and the log lines `(kind, matched)` (see `note_scope`) for a new unnamed file ("new"), a brief that
     names no path ("unnamed"), and a brief or page list that could not be read ("unread"). Only OWN
-    entries count, as for a builder's test change. Nothing is read when the change holds no path."""
+    entries count, as for a builder's test change. A brief that points at a brief file is judged by that
+    file's text (`brief_pointer`). A file is new when the agent's base (`agent_base`) does not hold it.
+    Nothing is read when the change holds no path."""
     if not any(kind == OWN and paths for _old, _new, paths, kind in changes):
         return "", []
     text = brief_text(brief) if brief else None
     if text is None:
         return "", [("unread", brief or "no transcript path")]
-    scope = BriefScope(text, top)
+    pointed, missed = brief_pointer(text, top)
+    scope = BriefScope(text if pointed is None else pointed, top, skip=missed)
     if scope.empty():
-        return "", [("unnamed", brief)]
-    implied, fresh = None, ""
+        return "", [("unread" if missed else "unnamed", missed[0] if missed else brief)]
+    implied, fresh, base = None, "", None
     for old, _new, paths, kind in changes:
         if kind != OWN:
             continue
@@ -2525,7 +2629,9 @@ def brief_scope_hit(root: str, top: str, brief: str, changes):
             low = norm(rel).lower()
             if low in implied[0] or any(low.startswith(d + "/") for d in implied[1]):
                 continue
-            existed = existed_at(root, old, rel)
+            if base is None:
+                base = agent_base(root)
+            existed = existed_at(root, base or old, rel)
             if existed is None:
                 return "", [("unread", rel)]
             if existed:
