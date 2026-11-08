@@ -393,38 +393,6 @@ def _common_git_dir_from_files(cwd: str):
     return dirs[1] if dirs else None
 
 
-def _head_commit_from_files(cwd: str):
-    """The commit HEAD names in the checkout holding CWD, read from files alone, else None. None means a
-    layout this read does not know (reftable, a symbolic ref off `refs/`, a value that is not an object
-    id, any unreadable file), and the caller asks the VCS instead. No process is spawned."""
-    dirs = _git_dirs_from_files(cwd)
-    if not dirs or os.path.isdir(os.path.join(dirs[1], "reftable")):
-        return None
-    git_dir, common = dirs
-    try:
-        with open(os.path.join(git_dir, "HEAD"), encoding="utf-8") as handle:
-            head = handle.readline(512).strip()
-        if _OBJECT_ID.fullmatch(head):
-            return head   # a detached HEAD
-        if not head.startswith("ref: refs/"):
-            return None
-        ref = head[len("ref: "):]
-        for base in (git_dir, common):
-            path = os.path.join(base, *ref.split("/"))
-            if os.path.isfile(path):
-                with open(path, encoding="utf-8") as handle:
-                    sha = handle.readline(256).strip()
-                return sha if _OBJECT_ID.fullmatch(sha) else None
-        with open(os.path.join(common, "packed-refs"), encoding="utf-8") as handle:
-            for line in handle:
-                sha, _, name = line.rstrip("\n").partition(" ")
-                if name == ref:
-                    return sha if _OBJECT_ID.fullmatch(sha) else None
-    except (OSError, UnicodeDecodeError):
-        return None
-    return None
-
-
 def _remote_tips_from_files(cwd: str, remote: str):
     """{branch: sha} of `refs/remotes/<remote>/*` read from the ref files (loose over packed), else None.
     None means a layout this read does not know, and the caller asks the VCS instead: a reftable store,
@@ -463,20 +431,34 @@ def _remote_tips_from_files(cwd: str, remote: str):
     return tips
 
 
+_REVISION_SOURCE = re.compile(r"[0-9a-f]{7,64}|.*(?:[~^]|@\{).*")
+
+
+def _source_is_judged(source: str, remote: str) -> bool:
+    """True for a source this rule judges: a sha, a remote-tracking ref (`<remote>/x`, `refs/remotes/...`) or a
+    revision expression (`HEAD~1`, `<sha>^`). `~`, `^` and `@{` are no ref-name characters, so an expression
+    never names a local branch. HEAD, `@` and a plain local-branch name are not judged: main allows them
+    (decision plain-push-asks, an explicit `HEAD:<branch>` is silent)."""
+    return (source.startswith("refs/remotes/") or source.startswith(remote + "/")
+            or bool(_REVISION_SOURCE.fullmatch(source)))
+
+
 def push_new_branch_hit(args, cwd: str, overrides=None) -> str:
-    """The refspec of a push that creates a branch at another branch's tip, else '' (rule push-new-branch).
+    """The refspec of a push that creates a branch at another branch's tip, else '' (rule push-new-branch,
+    decision push-new-branch).
 
     The mistake: a PR head's sha pushed to a NEW branch name instead of to the PR's own branch. Each refspec
     is judged alone: `<source>:<destination>` where the destination is a branch the remote does not hold
     and the source commit equals the tip of a branch the remote holds. A `+` prefix is dropped (a forced
-    refspec is judged too) and a deleting refspec (`:ref`) is skipped. The source may be a sha, `HEAD`, `@`,
-    a local branch or a remote-tracking ref. Exempt: a destination named `archive/*`; a push to the
-    source's own name (`lane:lane`, or `HEAD` while on that branch); and a source at the tip of the remote's
-    `main` or `master`, the batch runner's first push of an integration branch. Reads local
+    refspec is judged too) and a deleting refspec (`:ref`) is skipped. Only a sha, a remote-tracking ref or a
+    revision expression is a judged source (`_source_is_judged`). Exempt: a destination named `archive/*`,
+    `main` or `master`; a source at the tip of the remote's `main` or `master` or of the branch
+    `<remote>/HEAD` names, the batch runner's first push of an integration branch. Reads local
     `refs/remotes/<remote>/*` only, never the network: the ref files with no spawn (`for-each-ref` only for a
-    layout the file read does not know), plus one `rev-parse` per judged refspec. A colon-less push stays
-    allowed (plain-push-asks). So do `--force` and a lease, a mirror, `--all`, `--delete`, tags, a glob, a
-    remote named by URL and any read that fails: this judges only what it can read.
+    layout the file read does not know), plus one `rev-parse` per judged refspec, plus the default-branch
+    read only when a judged sha sits at a remote tip. A colon-less push stays allowed (plain-push-asks). So
+    do `--force` and a lease, a mirror, `--all`, `--delete`, tags, a glob, a remote named by URL and any
+    read that fails: this judges only what it can read.
     """
     force, mirror, every, _includes, _unpinned, leased, delete, _upstream, remote, plain = _push_parse(args)
     if force or leased or mirror or every or delete or not plain:
@@ -488,7 +470,7 @@ def push_new_branch_hit(args, cwd: str, overrides=None) -> str:
         return ""
     tips = _remote_tips_from_files(cwd, remote)   # branch name on the remote -> its tip commit
     if tips is None:
-        # A layout the file read does not know (no checkout, reftable, a symbolic ref): ask git, as before.
+        # A layout the file read does not know (no checkout, reftable, a symbolic ref): ask the VCS, as before.
         refs = guard_core._git(cwd, "for-each-ref", "--format=%(objectname) %(refname)", "refs/remotes/" + remote)
         if refs is None or refs.returncode != 0:
             return ""
@@ -498,12 +480,15 @@ def push_new_branch_hit(args, cwd: str, overrides=None) -> str:
             sha, _, name = line.partition(" ")
             if name.startswith(prefix) and name != prefix + "HEAD":
                 tips[name[len(prefix):]] = sha
-    main_tips = {tips[name] for name in DEFAULT_BRANCH_FALLBACK if name in tips}
+    main_tips: set = set()   # the default branches' tips, read once and only when a judged sha sits at a tip
+    main_read = False
     for spec in plain:
         spec = spec.removeprefix("+")
         source, colon, target = spec.partition(":")
         if not colon or not source or source.startswith("-") or "*" in spec:
             continue   # colon-less, a deletion (`:ref`), an option or a glob
+        if not _source_is_judged(source, remote):
+            continue
         if target.startswith("refs/") and not target.startswith("refs/heads/"):
             continue   # a tag or another ref, not a branch
         target = target.removeprefix("refs/heads/")
@@ -511,18 +496,17 @@ def push_new_branch_hit(args, cwd: str, overrides=None) -> str:
             continue   # main and master are push-main's to ask about, never a new name
         if not target or target in tips or target.startswith("archive/"):
             continue
-        sha = _head_commit_from_files(cwd) if source in ("HEAD", "@") else None   # no spawn for HEAD
-        if sha is None:
-            found = guard_core._git(cwd, "rev-parse", "--verify", "-q", source + "^{commit}")
-            if found is None or found.returncode != 0:
-                continue
-            sha = found.stdout.strip()
+        found = guard_core._git(cwd, "rev-parse", "--verify", "-q", source + "^{commit}")
+        if found is None or found.returncode != 0:
+            continue
+        sha = found.stdout.strip()
+        if sha in tips.values() and not main_read:
+            names = _push_default_branches(cwd, remote) or ()
+            main_tips = {tips[name] for name in set(DEFAULT_BRANCH_FALLBACK + tuple(names)) if name in tips}
+            main_read = True
         if sha not in tips.values() or sha in main_tips:
             continue
-        # The branch's own name is no new name for its work: `lane:lane`, or `HEAD` while on `lane`.
-        own = _push_current_branch(cwd) if source in ("HEAD", "@") else source.removeprefix("refs/heads/")
-        if own != target:
-            return spec
+        return spec
     return ""
 
 
@@ -1010,7 +994,8 @@ PUSH_MAIN_REASON = (
     "(rule git-main-only-by-pr, decision plain-push-asks). Approving the prompt lets this one push through; it is not a grant."
 )
 PUSH_NEW_BRANCH_REASON = (
-    "Rule (Git): this push creates a new branch at the commit another branch on origin already holds. "
+    "Rule (Git): this push creates a new branch at the commit another branch on origin already holds "
+    "(rule push-new-branch, decision push-new-branch). "
     "A pull request head's sha pushed to a new name is the stray-branch mistake: it leaves a branch "
     "only the computer session can delete. Remedy: push to the pull request's own branch (find it with "
     "`git ls-remote origin 'refs/heads/*' | grep <sha>`). To keep work under a new name, push it to "
