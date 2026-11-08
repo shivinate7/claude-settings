@@ -11978,6 +11978,16 @@ cmk_refuse("a cd into a clean repo, then a cd into a missing folder, then cd -, 
 cmk_refuse("a cd into a clean repo, then cd -, then add -A and commit, the triplet in the cwd repo",
            "cd " + slash(CMK_CL) + " ; cd - ; " + VCS + " add -A && " + VCS + " commit -m x", CMK_CLT)
 
+# A `false &&` skips the `cd` after it, so the shell stays where it was and the commit is judged there. The walk
+# that reads a skipped `cd` is shared with the records-page rule. These pins hold it for conflict-markers.
+cmk_refuse("false && cd to a clean repo, the triplet staged in the cwd repo, then commit",
+           "false && cd " + slash(CMK_CLEAN) + " ; " + VCS + " commit -m x", CMK_STAGED)
+cmk_allow("false && cd to the triplet repo, the clean change staged in the cwd repo, then commit",
+          "false && cd " + slash(CMK_STAGED) + " ; " + VCS + " commit -m x", CMK_CLEAN)
+# `! false` succeeds, so the `&&` after it runs the `cd`, and the commit is judged in the triplet repo.
+cmk_refuse("! false && cd to the triplet repo, the clean change staged in the cwd repo, then commit",
+           "! false && cd " + slash(CMK_STAGED) + " ; " + VCS + " commit -m x", CMK_CLEAN)
+
 # An earlier commit is a safe segment too, so each commit is judged and the push sees both.
 cmk_allow("two clean commits, each after an add, then a push",
           VCS + " add a.txt && " + VCS + " commit -m a && " + VCS + " add b.txt && " + VCS + " commit -m b && "
