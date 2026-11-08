@@ -20660,7 +20660,9 @@ def worktree_home_cross_checkout_heredoc_list_argv_case():
     """Rule 0, `other-checkout`, a quoted python judge script that runs the guard over a list argv with
     no shell, beside `worktree_home_cross_checkout_heredoc_text_case`. Roadmap step python-text-list-argv:
     such a script is text, so it passes, with its `check_output` form too. A list argv that starts with a
-    shell, a string argv, shell=True, or an argv held in a variable is a shell run, so it is refused.
+    shell, a string argv, shell=True, or an argv held in a variable is a shell run, so it is refused. Python
+    code a child reads from stdin or `-c`, and a node or perl `-e` script, are refused when they copy into
+    another checkout.
     Why: docs/decisions/an-agent-outside-its-home-tree-must-stop.md.
     """
     primary, lane_a, lane_b, _ = _cross_checkout_fixture("xcolistargv")
@@ -20702,9 +20704,50 @@ def worktree_home_cross_checkout_heredoc_list_argv_case():
           "Bash", lane_a,
           command=judge("argv = ['bash', '-c', '%s']\nsubprocess.run(argv, %s" % (shell_line, feed)))
 
+    # Python code that a child interpreter reads from its stdin or from its `-c` argument runs in that child,
+    # so a copy it makes into another checkout is refused. A `-e` script of node or perl runs the same way.
+    # Each body keeps the code in a string that the body itself never runs.
+    run_os = "CODE = %r\n" % ("import os; os.system('cp x %s/y')" % other)
+    run_shutil = "CODE = %r\n" % ("import shutil; shutil.copy('x', '%s/y')" % other)
+    check("judge script runs python code from stdin with no argument, the code copying into another checkout",
+          "deny", "Bash", lane_a,
+          command=judge(run_os + "subprocess.run([sys.executable], input=CODE, text=True)"))
+    check("judge script runs python code from stdin with a dash, the code copying into another checkout",
+          "deny", "Bash", lane_a,
+          command=judge(run_os + "subprocess.run([sys.executable, '-'], input=CODE, text=True)"))
+    # `subprocess.PIPE` keeps this body out of the text path, so this deny comes from the body's scan of its
+    # code string, not from the list-argv rule. It guards a change that would clear `subprocess.PIPE`.
+    check("judge script pipes python code into a Popen over a dash argv, copying into another checkout",
+          "deny", "Bash", lane_a,
+          command=judge(run_shutil + "p = subprocess.Popen([sys.executable, '-'], stdin=subprocess.PIPE, "
+                                     "text=True)\np.communicate(CODE)"))
+    check("judge script checks python code's output over a dash argv, the code copying into another checkout",
+          "deny", "Bash", lane_a,
+          command=judge(run_shutil + "subprocess.check_output([sys.executable, '-'], input=CODE, text=True)"))
+    check("judge script runs python code as -Ic over a list argv, the code copying into another checkout",
+          "deny", "Bash", lane_a,
+          command=judge(run_os + "subprocess.run([sys.executable, '-Ic', CODE], text=True)"))
+    check("judge script runs python code from a starred argv holding -c, the code copying into another checkout",
+          "deny", "Bash", lane_a,
+          command=judge("args = ['-c', %r]\nsubprocess.run([sys.executable, *args], text=True)"
+                        % ("import os; os.system('cp x %s/y')" % other)))
+    check("judge script runs node -e over a list argv, the script copying into another checkout with fs",
+          "deny", "Bash", lane_a,
+          command=judge("subprocess.run(['node', '-e', \"require('fs').copyFileSync('x', '%s/y')\"], text=True)"
+                        % other))
+    check("judge script runs node -e over a list argv, the script running cp into another checkout",
+          "deny", "Bash", lane_a,
+          command=judge("subprocess.run(['node', '-e', \"require('child_process').execSync('cp x %s/y')\"], "
+                        "text=True)" % other))
+    check("judge script runs perl -e over a list argv, the script copying into another checkout",
+          "deny", "Bash", lane_a,
+          command=judge("subprocess.run(['perl', '-e', \"use File::Copy; copy('x', '%s/y')\"], text=True)"
+                        % other))
+
     if problems:
         return False, "; ".join(problems)
-    return True, "a list argv to the guard with no shell passes; a shell argv, shell=True or a variable argv is refused"
+    return True, ("a list argv to the guard with no shell passes; a shell argv, shell=True, a variable argv, "
+                  "python code from stdin or -c, or a node or perl -e copy into another checkout is refused")
 
 
 def _stand_in_git(tag):
@@ -22204,7 +22247,8 @@ LOG_CHECKS = (
      "perl or ruby write into another checkout, or an interpreter body that runs one, is refused",
      worktree_home_cross_checkout_heredoc_text_case),
     ("worktree-home: a quoted python judge script that runs the guard over a list argv with no shell "
-     "is allowed; a shell argv, shell=True, or an argv held in a variable is refused",
+     "is allowed; a shell argv, shell=True, an argv held in a variable, python code from stdin or -c, "
+     "or a node or perl -e copy into another checkout is refused",
      worktree_home_cross_checkout_heredoc_list_argv_case),
     ("worktree-home: a write into a worktree in the session's own scratchpad is allowed; another "
      "session's, an agent's, a sessionless, a symlinked and a climbing write are refused",
