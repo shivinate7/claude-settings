@@ -23,7 +23,7 @@ owner about a branch delete after the archive push that guard_branch_worktree's 
   Its Covers text lets a message that asks for no act (pull request number, batch heads) through.
   Its Covers text names a report that relays a grant or hands off an act, and `next: merge`, and
   limits the already granted act to messages that ask.
-- One "Own CI Run Cancel:" entry quotes the run cancel command and names its method. Its Covers text
+- One "Own CI Run Cancel:" entry names its cancel method and quotes no run id or measured example. Its Covers text
   requires a run whose head branch this session itself pushed earlier in the session and binds the
   repo to shivinate7; its Never covers names each run act it refuses (decision auto-mode-owner-acts).
 - One "Own Check-in Delete:" entry names the delete tool and the create and send tools that make a
@@ -97,7 +97,8 @@ RELAYED_REFUSED = (("peer session's message", "peer session's message"), ("page 
 MERGE_GO_REFUSED = (("any other session", "any other session"),
                     ("not a coordinator", "not a coordinator"))
 OWN_CI = "Own CI Run Cancel:"
-CI_CANCEL = "gh api -X POST repos/shivinate7/q_max/actions/runs/41377928751/cancel"
+# The run id and "Measured example" sentence the entry must not quote; its one measured refusal is outside it.
+CI_EXAMPLE_TEXT = ("41377928751", "Measured example")
 CI_METHOD = "cancel_workflow_run"
 # (name, case-insensitive pattern) for each run act the Own CI Run Cancel "Never covers" must name.
 CI_REFUSED = (("default branch", "default branch"),
@@ -396,10 +397,11 @@ class OwnCiRunCancelIsAllowed(unittest.TestCase):
     def test_one_entry_names_the_own_ci_run_cancel(self):
         self.assertIsNotNone(allow_entry(OWN_CI), "need exactly one '%s' entry in autoMode.allow" % OWN_CI)
 
-    def test_entry_quotes_the_run_cancel_command(self):
+    def test_entry_quotes_no_measured_run(self):
         entry = allow_entry(OWN_CI)
         self.assertIsNotNone(entry, "need exactly one '%s' entry in autoMode.allow" % OWN_CI)
-        self.assertIn("`%s`" % CI_CANCEL, entry, "entry must quote the run cancel command")
+        for text in CI_EXAMPLE_TEXT:
+            self.assertNotIn(text, entry, "entry must not quote %r" % text)
 
     def test_entry_names_the_cancel_method(self):
         entry = allow_entry(OWN_CI)
