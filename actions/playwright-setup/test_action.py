@@ -280,6 +280,11 @@ rc, out, calls, gh = fake_deps("false")
 check("control: install.sh deps with NPM_CI false runs no npm ci", rc == 0 and calls == [], "%s %r %s" % (rc, out, calls))
 rc, out, calls, gh = fake_deps(None)
 check("control: install.sh deps with NPM_CI unset runs one npm ci", rc == 0 and len(calls) == 1, "%s %r %s" % (rc, out, calls))
+# GitHub compares `npm-ci == 'true'` without regard to case, so any case of true runs npm ci, as the old step did.
+for value in ("True", "TRUE", "tRuE"):
+    rc, out, calls, gh = fake_deps(value)
+    check("install.sh deps with NPM_CI %r runs one npm ci, as GitHub's case-insensitive == 'true' did" % value,
+          rc == 0 and len(calls) == 1 and calls[0].startswith("ci --prefix"), "%s %r %s" % (rc, out, calls))
 
 # pin.sh writes the OS id and version of the runner into the browser cache key.
 pins = {ver: pin_run('ID=ubuntu\nVERSION_ID="%s"\n' % ver) for ver in ("24.04", "26.04")}
