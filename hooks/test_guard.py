@@ -7112,6 +7112,16 @@ sh("push: lease with -c push.default=current ignores the repository's upstream",
    VCS + " -c push.default=current push " + LE.strip(), "allow", cwd=PUSHUP)
 sh("push: lease with -c push.default=matching asks",
    VCS + " -c push.default=matching push " + LE.strip(), "ask", "force-push", cwd=PUSHFEAT)
+# A `cd` whose target runs through `$(...)` names a folder the guard cannot read. The parentheses are no
+# subshell's, so the cd moves the shell to that unknown folder, and the lease asks. The literal cd case above
+# is the control: its folder is known.
+chained_ask("push: a lease after a cd through $(...) to the default branch's checkout is denied as a chained ask, "
+            "the folder unknown",
+            "cd $(dirname $PWD)/" + os.path.basename(PUSHMAIN) + " && " + VCS + " push " + LE + "origin feat",
+            cwd=PUSHFEAT, carries=("force-push",))
+# A `$(...)` that is no cd leaves the push in the shell's own folder, so the lease to feat is judged there.
+sh("push: a $(...) that is no cd leaves the lease in the shell's folder, and a lease to feat is allowed",
+   "echo $(dirname $PWD) && " + VCS + " push " + LE + "origin feat", "allow", cwd=PUSHFEAT, silent=True)
 
 # FALSE ALARMS: a guard that cries wolf is spent.
 # Re-pointed from allow by ruling 207 a: a non-forced push of main asks.
@@ -7181,6 +7191,16 @@ sh("push: main, a bare push under push.default current on main asks",
    VCS + " -c push.default=current push", "ask", PUSH_MAIN_RULE, cwd=PUSHMAIN)
 sh("push: main, a bare push under push.default upstream from a branch tracking main asks",
    VCS + " push", "ask", PUSH_MAIN_RULE, cwd=PUSHUP)
+# Two equal `git push` segments in different folders: each is judged in the folder its own `cd` names. The bare
+# push in PUSHFEAT is git's refusal (no upstream), so the ask is the second push, in PUSHMAINUP, whose upstream
+# is main. The control writes that second push as `git push origin`, which the guard refuses the same way.
+chained_ask("push: a bare push in a feature checkout, then a bare push in main, is denied as a chained ask "
+            "judged in main",
+            "cd " + slash(PUSHFEAT) + " && " + VCS + " push; cd " + slash(PUSHMAINUP) + " && " + VCS + " push",
+            cwd=PUSHFEAT, carries=("push-main",))
+chained_ask("push: the control, the same chain with `git push origin` in main, is denied as a chained ask",
+            "cd " + slash(PUSHFEAT) + " && " + VCS + " push; cd " + slash(PUSHMAINUP) + " && " + VCS + " push origin",
+            cwd=PUSHFEAT, carries=("push-main",))
 
 # SILENT, the false alarms of both rulings. Each is an allow that prints nothing.
 # Inherited and own upstreams: a lane cut from main or master, and a branch that tracks its own name.
