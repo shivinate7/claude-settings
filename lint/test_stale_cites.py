@@ -2108,6 +2108,19 @@ class RouteClaimTests(StaleCase):
         self.assert_route_claims(rng, flagged)
 
 
+EVIDENCE_SHAPE = r"^[0-9a-f]{40}: \S.*\.$"  # an optional row's evidence: the fix commit's sha, then a sentence
+
+
+def repo_relative_md(path):
+    """A full repo-relative path to a Markdown file: no leading slash, and no empty, `.` or `..` segment."""
+    return (path.endswith(".md") and not any(part in ("", ".", "..") for part in path.split("/"))
+            and not re.search(r"\s", path))
+
+
+def known_commit(sha):
+    return subprocess.run(["git", "cat-file", "-e", sha + "^{commit}"], cwd=ROOT, capture_output=True).returncode == 0
+
+
 class RouteClaimFixtureTests(unittest.TestCase):
     """The labelled route claims, hand-judged stale or true, that measure the judge's false alarms: one entry per labelled line.
     A span is one entry at its first line, and `line` is a string, such as "16" or "16-20"."""
@@ -2118,15 +2131,69 @@ class RouteClaimFixtureTests(unittest.TestCase):
             rows = json.load(f)
         self.assertIsInstance(rows, list)
         for row in rows:
-            self.assertEqual(sorted(row), ["file", "label", "line", "text_summary"], row)
-            self.assertRegex(row["file"], r"^(?:docs|\.claude)/\S+\.md$", row)  # a full repo-relative path
+            self.assertIn("rev", row, row)  # the commit the row was judged at, or null
+            keys = sorted(set(row) - {"evidence"})  # evidence is optional: the fix commit that made the line false, and why
+            if row["rev"] is None:
+                self.assertEqual(keys, ["file", "label", "line", "note", "rev", "text_summary"], row)
+                self.assertTrue(row["note"].strip(), row)  # a null rev says why
+            else:
+                self.assertEqual(keys, ["file", "label", "line", "rev", "text", "text_summary"], row)
+                self.assertRegex(row["rev"], r"^[0-9a-f]{7,40}$", row)
+                self.assertIsInstance(row["text"], str, row)
+            if "evidence" in row:
+                self.assertRegex(row["evidence"], EVIDENCE_SHAPE, row)
+            self.assertTrue(repo_relative_md(row["file"]), row)  # a full repo-relative path to a Markdown file
             self.assertRegex(row["line"], r"^[1-9][0-9]*(?:-[1-9][0-9]*)?$", row)
             self.assertIn(row["label"], LABELS, row)
             self.assertTrue(row["text_summary"].strip(), row)
-        self.assertEqual(len({(row["file"], row["line"]) for row in rows}), len(rows), "a (file, line) repeats")
+        self.assertEqual(len({(row["file"], row["line"], row["rev"]) for row in rows}), len(rows),
+                         "a (file, line, rev) repeats")  # one line judged at two revs is two rows
+        # The pinned label mix. Adding or removing a row changes this pin, on purpose.
         self.assertEqual(collections.Counter(row["label"] for row in rows),
-                         collections.Counter({"STALE": 2, "PARTLY_STALE": 1, "HALF": 1, "TRUE": 13,
-                                              "HISTORY": 1, "UNKNOWN": 3}))
+                         collections.Counter({"STALE": 19, "PARTLY_STALE": 1, "HALF": 1, "TRUE": 13,
+                                              "HISTORY": 1, "UNKNOWN": 3}),
+                         "the label mix of the labelled file moved: pin it here if the change is on purpose")
+        unknown = [row["evidence"][:40] for row in rows if "evidence" in row and not known_commit(row["evidence"][:40])]
+        if unknown and git(ROOT, "rev-parse", "--is-shallow-repository") == "true":
+            self.skipTest("evidence sha missing from this shallow clone: %s" % ", ".join(unknown))
+        self.assertEqual(unknown, [], "evidence sha is not a commit of this repo")
+
+
+def fixture_rows():
+    with open(FIXTURE, encoding="utf-8") as f:
+        return json.load(f)
+
+
+def line_span(line):
+    """The first and last line numbers of a row's `line`: "16" gives (16, 16), "16-20" gives (16, 20)."""
+    first, _, last = line.partition("-")
+    return int(first), int(last or first)
+
+
+class RouteClaimRevTests(unittest.TestCase):
+    """Each row replays at its `rev`: the lines its `line` names, at that commit, join to its `text`. A null `rev` has none."""
+
+    def test_each_row_holds_its_text_at_its_rev(self):
+        rows = fixture_rows()
+        self.assertEqual([row["file"] + ":" + row["line"] for row in rows if "rev" not in row], [],
+                         "rows with no rev key")
+        self.assertTrue(any(row["rev"] for row in rows), "no row has a non-null rev, so none replays")
+        shallow = git(ROOT, "rev-parse", "--is-shallow-repository") == "true"
+        for row in rows:
+            if row["rev"] is None:
+                continue
+            with self.subTest(row=row["file"] + ":" + row["line"]):
+                known = known_commit(row["rev"])
+                if not known and shallow:
+                    self.skipTest("rev %s is missing from this shallow clone" % row["rev"])
+                self.assertTrue(known, "rev %s is not a commit of this repo" % row["rev"])
+                shown = subprocess.run(["git", "show", "%s:%s" % (row["rev"], row["file"])], cwd=ROOT,
+                                       capture_output=True)
+                self.assertEqual(shown.returncode, 0, "%s is absent at rev %s" % (row["file"], row["rev"]))
+                first, last = line_span(row["line"])
+                lines = shown.stdout.decode("utf-8").split("\n")
+                self.assertEqual("\n".join(lines[first - 1:last]), row["text"],
+                                 "%s line %s at rev %s is not the text" % (row["file"], row["line"], row["rev"]))
 
 
 def load_module_under_test():
