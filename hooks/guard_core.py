@@ -2321,9 +2321,10 @@ def _py_is_format(node) -> bool:
 
 def _py_list_items(node, bound):
     """The items of a list or tuple literal, or of the one a name holds where it is read
-    (`parts = [h, "x"]`), else None. A list a name holds also takes what `parts.append(x)` adds after the
-    binding and before the read, in source order (`_python_paths` records each in `bound`, under the key
-    `parts.append`)."""
+    (`parts = [h, "x"]`), else None. A list a name holds also takes what `parts.append(x)` and
+    `parts.extend([x, y])` add after the binding and before the read, in source order (`_python_paths`
+    records each in `bound`, under the keys `parts.append` and `parts.extend`). An extend of something
+    that is not a list literal or a name bound to one adds nothing."""
     if not (isinstance(node, ast.Name) and bound is not None):
         return node.elts if isinstance(node, (ast.List, ast.Tuple)) else None
     entry = _py_bound_entry(node, bound)
@@ -2331,8 +2332,12 @@ def _py_list_items(node, bound):
         return None
     end, value = entry
     here = (node.lineno, node.col_offset)
-    added = [item for at, item in bound.get(node.id + ".append", ()) if end < at <= here]
-    return [*value.elts, *added] if isinstance(value, ast.List) else value.elts
+    if not isinstance(value, ast.List):
+        return value.elts
+    adds = [(at, [item]) for at, item in bound.get(node.id + ".append", ()) if end < at <= here]
+    adds += [(at, _py_list_items(arg, bound) or []) for at, arg in bound.get(node.id + ".extend", ())
+             if end < at <= here]   # an extend ends after its argument starts, so a name reads only what is before it
+    return [*value.elts, *(item for _, items in sorted(adds, key=lambda add: add[0]) for item in items)]
 
 
 def _py_literal_text(node, bound=None):
@@ -2373,7 +2378,8 @@ def _py_is_str_join(node, bound=None) -> bool:
 
 def _py_is_str_format(node, bound=None) -> bool:
     """True for `"{}/x".format(a)`: a `.format` call on a string literal, or on a name bound to one."""
-    return (isinstance(node, ast.Call) and _call_name(node) == "format" and isinstance(node.func, ast.Attribute)
+    return (isinstance(node, ast.Call) and _call_name(node) in ("format", "format_map")
+            and isinstance(node.func, ast.Attribute)
             and _py_literal_text(node.func.value, bound) is not None and bool(node.args or node.keywords))
 
 
@@ -2391,13 +2397,15 @@ def _py_join_parts(call, bound=None):
 
 
 def _py_dict_items(node, bound):
-    """{key: value expression} for each string key of a dict literal, or of the one a name holds where it
-    is read (a few hops); {} for anything else."""
+    """{key: value expression} for each string key of a dict literal, of a `dict(k=v)` call, or of the one a
+    name holds where it is read (a few hops); {} for anything else."""
     for _ in range(4):
         if isinstance(node, ast.Name) and bound is not None:
             node = _py_bound_value(node, bound)
         else:
             break
+    if isinstance(node, ast.Call) and _call_name(node) == "dict" and isinstance(node.func, ast.Name):
+        return {key.arg: key.value for key in node.keywords if key.arg}
     if not isinstance(node, ast.Dict):
         return {}
     return {key.value: value for key, value in zip(node.keys, node.values)
@@ -2409,7 +2417,8 @@ def _py_format_text(call, bound, depth) -> str:
     cannot tell: a slot with no argument, a keyword the call does not name, and every positional slot at
     or after a star argument that is not a list or tuple literal (a `*[a, b]` is spread, and so is a
     `*parts` of a name bound to one). The template is a literal or a name bound to one, and a `**d` of a
-    dict literal (or a name bound to one) names its string keys."""
+    dict literal, a `dict(k=v)` call or a name bound to one names its string keys, as does the dict a
+    `.format_map(d)` takes."""
     args, unknown_from = [], None
     for arg in call.args:
         if isinstance(arg, ast.Starred):
@@ -2427,6 +2436,9 @@ def _py_format_text(call, bound, depth) -> str:
         if key.arg is None:
             named.update({name: _py_composed_text(value, bound, depth)
                           for name, value in _py_dict_items(key.value, bound).items()})
+    if _call_name(call) == "format_map" and len(call.args) == 1:
+        named.update({name: _py_composed_text(value, bound, depth)
+                      for name, value in _py_dict_items(call.args[0], bound).items()})
     auto = iter(range(len(args) + 1))
 
     def hole(match):
@@ -2484,7 +2496,14 @@ def _py_composed_text(node, bound, depth=0) -> str:
     if _py_is_format(node):
         holes = node.right.elts if isinstance(node.right, ast.Tuple) else [node.right]
         texts = iter(_py_composed_text(hole, bound, step) for hole in holes)
-        return re.sub(r"%[sdr]", lambda _match: next(texts, "_"), node.left.value)
+        named = {} if isinstance(node.right, ast.Tuple) else _py_dict_items(node.right, bound)   # `%(h)s` fields
+
+        def field(match):
+            if match.group(1) is None:
+                return next(texts, "_")
+            return _py_composed_text(named[match.group(1)], bound, step) if match.group(1) in named else "_"
+
+        return re.sub(r"%(?:\((\w+)\))?[sdr]", field, node.left.value)
     if isinstance(node, ast.Subscript):
         key = node.slice
         return "~" if isinstance(key, ast.Constant) and key.value in PY_HOME_ENV else "_"
@@ -2584,11 +2603,13 @@ def _python_paths(code: str, frozen=False):
             names.setdefault(node.id, []).append(node)
         elif isinstance(node, ast.Assign) and len(node.targets) == 1 and isinstance(node.targets[0], ast.Name):
             bound.setdefault(node.targets[0].id, []).append(((node.end_lineno, node.end_col_offset), node.value))
-        elif (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr == "append"
+        elif (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+              and node.func.attr in ("append", "extend")
               and isinstance(node.func.value, ast.Name) and len(node.args) == 1 and not node.keywords
               and isinstance(parents.get(node), ast.Expr)):
-            # `parts.append(x)` as a statement: read by `_py_list_items`, under a key no name can have
-            bound.setdefault(node.func.value.id + ".append", []).append(
+            # `parts.append(x)` or `parts.extend(xs)` as a statement: read by `_py_list_items`, under a key
+            # no name can have
+            bound.setdefault(node.func.value.id + "." + node.func.attr, []).append(
                 ((node.end_lineno, node.end_col_offset), node.args[0]))
         elif isinstance(node, ast.AugAssign) and isinstance(node.target, ast.Name) \
                 and isinstance(node.op, (ast.Add, ast.Div)):
