@@ -189,6 +189,9 @@ class FakeHost:
         self.draft = False
         return True, ""
 
+    def review_comments(self, since):  # no review record comment: a case that needs one reads it through PullsHost
+        return {}
+
 def wait_sites(src):
     """-> (count, in_loop) over the `wait_checks` calls in a Python source. A call inside a for or while may run many
     times, so a caller trusts the count only when in_loop is False."""
@@ -13187,6 +13190,23 @@ class ReviewRecordRoundsOwnHead(ReviewEnv):
         rc, out, err = self.post(earlier, rounds=self.SHAPE, guard="yes", net="positive",
                                  extra=("--fix-check", f"{self.ANCESTOR}:reviewer:haiku:PASS"))
         self.assertEqual(rc, 0, "control: a fix check at the head, whose fix base is the FAIL record's head, was refused:\n" + out + err)
+
+    def test_a_round_one_pass_at_the_head_of_an_earlier_round_one_fail_is_refused(self):
+        # the round 1 shape of the #2235 mistake: round 1 FAILed at this head, and round 1 PASSed at it, with no fix commit between them
+        earlier = review_comment(1, 7, record_text(head=REVIEW_HEAD, rounds=("Round 1: reviewer, sonnet, FAIL",)))
+        rc, out, err = self.post(earlier, rounds=("1:reviewer:sonnet:PASS",))
+        self.assert_refused_without_record(rc, out, err, "a round 1 PASS at the head of an earlier round 1 FAIL")
+
+    def test_a_round_one_pass_after_a_round_one_fail_at_an_earlier_ancestor_head_is_written(self):
+        # control: the earlier round 1 FAIL is at a head the live head descends from, not at the live head, so the same round 1 PASS is written
+        earlier = review_comment(1, 7, record_text(head=self.ANCESTOR, rounds=("Round 1: reviewer, sonnet, FAIL",)))
+        rc, out, err = self.post(earlier, rounds=("1:reviewer:sonnet:PASS",))
+        self.assertEqual(rc, 0, "control: a round 1 PASS after a round 1 FAIL at an earlier head was refused:\n" + out + err)
+
+    def test_a_first_round_one_pass_with_no_earlier_record_is_written(self):
+        # control: no earlier record on this pull request, and a round 1 PASS has no lower round to hold
+        rc, out, err = self.post(rounds=("1:reviewer:sonnet:PASS",))
+        self.assertEqual(rc, 0, "control: a first round 1 PASS record was refused:\n" + out + err)
 
 class ReviewFixFlag(ReviewEnv):
     """`--fix-check REVIEWED_HEAD:reviewer:MODEL:VERDICT` goes with --review-record and prints the fix check line after the rounds. A usage
