@@ -23,7 +23,8 @@
                           one gh api compare per open PR on the base that reads done (against the base), one per handed PR against the integration
                           head, and one per Lanes-named open PR not in the batch. Without a `Lanes:` line, no gh call: one `git log` in the worktree,
                           then one `git merge-base --is-ancestor` per merged-in parent (plus a shallow-repo probe on exit 1); on a base that is not the
-                          default branch, add one `git fetch` of the default branch and one ancestry read per lane tip. No long-lived process, file or timer.
+                          default branch, when it finds a lane tip, add one `git fetch` of the default branch and one ancestry read per lane tip.
+                          No long-lived process, file or timer.
   merge --unlock [branch] remove the merge lock on the branch (default: the default branch). Never checks the holder. A cloud run reads the lock first and skips one already released.
   merge <pr> --review-record --head SHA --kind K --guard yes|no [--round N:ROLE:MODEL:VERDICT ...]
                           [--fix-check HEAD:reviewer:MODEL:PASS|FAIL] [--net-value V]
@@ -3475,14 +3476,14 @@ def handed_local(wt, base_ref, n, info, unknown_ok="", default=""):
     default branch merged into the head, not a lane. origin/<default> is fetched first: open_worktree and load_config fetch only the base
     and the head, and a stale ref reads a default-branch tip as a lane. A failed fetch or ancestry read is an unknown read, as above.
     A body with a Lanes line is handed_check's. Cost, no gh call: read_lanes runs one `git log`, then one `git merge-base --is-ancestor`
-    per merged-in parent, plus a shallow-repo probe when one exits 1. On a base that is not the default branch, add one `git fetch` of
-    the default branch and one ancestry read per lane tip (plus the probe on exit 1)."""
+    per merged-in parent, plus a shallow-repo probe when one exits 1. On a base that is not the default branch, when it finds a lane tip,
+    add one `git fetch` of the default branch and one ancestry read per lane tip (plus the probe on exit 1)."""
     if body_lanes(info.get("body") or "")[0] is not None:
         return None
     try:
         tips, dropped = read_lanes(wt, base_ref, info["head"])
         tips = [t for t in tips if t not in dropped]  # a reverted lane is refuse_dropped_lane's
-        if default and info["base"] != default:
+        if tips and default and info["base"] != default:  # no tip, nothing to read: a plain PR never depends on the default branch's fetch
             c, out = git(wt, "fetch", "-q", "origin", f"+refs/heads/{default}:refs/remotes/origin/{default}")  # worktrees share refs/remotes
             if c:
                 raise ValueError(f"git fetch origin {default} failed: " + (out.splitlines() or ["?"])[-1])
