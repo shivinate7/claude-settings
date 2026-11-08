@@ -13316,7 +13316,7 @@ class ReviewRecordRoundsOwnHead(ReviewEnv):
 
     def test_round_heads_a_pass_top_round_on_the_head_an_earlier_fail_named_is_refused(self):
         # the #2235 mistake with named heads: round 2 FAILed on OWN_TWO, and round 3 PASSed on that head, with no fix commit between them
-        rounds = (f"1:reviewer:haiku:FAIL:{self.OWN}", f"2:reviewer:haiku:FAIL:{self.OWN_TWO}", f"3:reviewer:opus:PASS:{self.OWN_TWO}")
+        rounds = (f"1:reviewer:haiku:FAIL:{self.OWN}", f"2:reviewer:haiku:FAIL:{self.OWN}", f"3:reviewer:opus:PASS:{self.OWN_TWO}")
         diffs = self.own_replies(self.OWN, self.OWN_TWO, self.OWN_THREE)
         for verdict in ("FAIL", "PARTIAL"):
             with self.subTest(earlier_top_round=verdict):
@@ -13339,7 +13339,7 @@ class ReviewRecordRoundsOwnHead(ReviewEnv):
         # control: the earlier record's fix check PASS follows its FAIL, so the PASS top round on the same head is written
         fix = (fix_check_line(verdict="PASS", head=REVIEW_OLD_HEAD),)
         host = self.record_host(self.earlier_top_fail(fix=fix), diffs=self.own_replies(self.OWN, self.OWN_TWO))
-        rc, out, err = self.write_at(host, (f"1:reviewer:haiku:FAIL:{self.OWN}", f"2:reviewer:haiku:FAIL:{self.OWN_TWO}", f"3:reviewer:opus:PASS:{self.OWN_TWO}"),
+        rc, out, err = self.write_at(host, (f"1:reviewer:haiku:FAIL:{self.OWN}", f"2:reviewer:haiku:FAIL:{self.OWN}", f"3:reviewer:opus:PASS:{self.OWN_TWO}"),
                                      guard="yes", net="positive")
         self.assertEqual(rc, 0, "control: a PASS top round after a passed fix check on the earlier FAIL was refused:\n" + out + err)
 
@@ -13349,7 +13349,7 @@ class ReviewRecordRoundsOwnHead(ReviewEnv):
         self.assertIsNone(review_fn(self, "parse_review")(bad), "scope: the earlier body parses, so the case tests nothing")
         diffs = self.own_replies(self.OWN, self.OWN_TWO, self.OWN_THREE)
         host = self.record_host(review_comment(1, 7, bad), diffs=diffs)
-        rc, out, err = self.write_at(host, (f"1:reviewer:haiku:FAIL:{self.OWN}", f"2:reviewer:haiku:FAIL:{self.OWN_TWO}", f"3:reviewer:opus:PASS:{self.OWN_TWO}"),
+        rc, out, err = self.write_at(host, (f"1:reviewer:haiku:FAIL:{self.OWN}", f"2:reviewer:haiku:FAIL:{self.OWN}", f"3:reviewer:opus:PASS:{self.OWN_TWO}"),
                                      guard="yes", net="positive")
         self.assert_pass_refused(host, rc, out, err, self.OWN_TWO)
         # control: the same unparsable body does not refuse a PASS top round on a head its FAIL line does not name
