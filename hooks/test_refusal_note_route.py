@@ -19,7 +19,7 @@ Contract the builder codes against, pinned by these cases:
 - A row matches a call when its surface is the current one, its outcome is "works", and its pattern matches the
   call. The target is the Bash command text for a Bash call, and the tool name for any other call. Cases use
   patterns where a whole-target match and a search agree.
-- A contradicted refusal adds one key, `note`, to its own row. The note names the row id and says "contradicted".
+- A contradicted refusal adds one key, `route_flag`, to its own row. The flag names the row id and says "contradicted".
   The hook prints nothing: PermissionDenied reads only a retry decision.
 - A refusal with no matching row, or whose matching row says refused, adds no key: the row keeps its base keys.
 - A missing or unreadable rows file: the row is still written, the hook prints nothing and exits 0.
@@ -79,7 +79,7 @@ class RouteNoteTests(base.HookCase):
         return found[0]
 
     def note_of(self, row):
-        self.assertIn("route_flag", row, "the refusal row carries no note: %r" % row)
+        self.assertIn("route_flag", row, "the refusal row carries no route_flag: %r" % row)
         return row["route_flag"]
 
     def assert_no_note(self, row):

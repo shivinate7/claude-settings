@@ -6258,8 +6258,10 @@ for _label, _command in (("a pid", "wait-pid 12345"), ("a pid and a timeout", "w
     sh("wait-pid: %s is allowed in the foreground" % _label, _command, "allow", cwd=NOGIT)
     add("wait-pid: %s is allowed under run_in_background" % _label, "allow", cwd=NOGIT,
         command=_command, run_in_background=True)
+# The pid is past every platform's pid range, so no process holds it. A live process the session did not start
+# would read as machine-wide-kill, which is refused before the waiter rule.
 sh("wait-pid: a kill -0 loop stays refused, and its remedy names the helper",
-   "while kill -0 12345; do sleep 5; done", "deny", "waiter", cwd=NOGIT, carries=(WAIT_PID,))
+   "while kill -0 2147483646; do sleep 5; done", "deny", "waiter", cwd=NOGIT, carries=(WAIT_PID,))
 sh("wait-pid: tail --pid with a follow stays refused", "tail --pid=12345 -f /dev/null", "deny",
    "live-stream", cwd=NOGIT)
 sh("wait-pid: a pgrep loop stays refused", "while pgrep x; do sleep 5; done", "deny", "waiter",

@@ -249,8 +249,8 @@ class OwnerSessionMessageIsAllowed(unittest.TestCase):
 
     def test_covers_names_the_already_granted_act(self):
         covers = bounds_text(allow_entry(OWNER_MESSAGE))
-        self.assertRegex(covers, r"(?i)already granted",
-                         "Covers text must limit the message to acts already granted")
+        self.assertRegex(covers, r"(?i)may ask only for acts the owner already granted",
+                         "Covers text must say the message may ask only for acts the owner already granted")
         self.assertRegex(covers, r"(?i)the already granted limit applies to messages that ask",
                          "Covers text must say the already granted limit applies to messages that ask")
 
