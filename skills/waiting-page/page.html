@@ -2340,13 +2340,17 @@ const ASK_SEEN = readStamp("waiting.askSeen");
 const ASK_LOADED = Date.now();
 const askFresh = (a) => { const t = Date.parse(a.answered) || Date.parse(a.at); return ASK_SEEN !== null ? t > ASK_SEEN : ASK_LOADED - t < ASK_NEW_MS; };
 const askIsOpen = (t) => (t.id in askState.open ? askState.open[t.id] : askFresh(askLatest(t) || t));
-// The stamp moves only while the answer list (#askList, below the form) is on screen: an answer that lands on a hidden tab or below the fold has not been seen.
+// The stamp moves only while the answer list (#askList, below the form) is on screen and every New answer row in it is in view: an answer that lands on a hidden tab or below the fold has not been seen.
 // Hiding the tab stamps once, at the hide time. A visibilitychange or pagehide of a tab already hidden stamps nothing.
-const asksOnScreen = () => { const r = $("askList").getBoundingClientRect(); return r.bottom > 0 && r.top < innerHeight; };
+// A placeholder (Loading, cannot be read) lists no answer, and a row marked New answer that sits below the fold has not been read.
+const inView = (el) => { const r = el.getBoundingClientRect(); return r.bottom > 0 && r.top < innerHeight; };
+const asksOnScreen = () => askKnown() && inView($("askList")) && [...$("askList").querySelectorAll("li.askc")].filter((li) => li.querySelector(".newmark")).every(inView);
 const markAsksSeen = () => { if (asksOnScreen()) writeStamp("waiting.askSeen"); };
 let tabWasHidden = document.hidden;
 document.addEventListener("visibilitychange", () => { const hiding = document.hidden && !tabWasHidden; tabWasHidden = document.hidden; if (hiding) markAsksSeen(); });
 window.addEventListener("pagehide", () => { if (!document.hidden) markAsksSeen(); });
+// A restore from the back-forward cache may send no visibilitychange, so the page reads its visibility again.
+window.addEventListener("pageshow", () => { tabWasHidden = document.hidden; });
 const saveAskDraft = () => { try { const v = $("askText").value; if (v) localStorage.setItem("waiting.askDraft", v); else localStorage.removeItem("waiting.askDraft"); } catch (e) {} };
 try { $("askText").value = localStorage.getItem("waiting.askDraft") || ""; } catch (e) {}
 // The stack is kept beside the draft, so a reload shows it again. An ask already written to the store is not kept. An edit left open keeps its words.
