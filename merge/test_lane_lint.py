@@ -7,7 +7,9 @@ prints scripted step lines and exits with a scripted code, so no real lint runs.
 case reads what the tool ran, in which tree, at which head. The repo builder, the fakes and the cloud-session
 fixture come from merge/test_merge.py: a case extends that fixture, it does not copy it. The draft step's ready check
 (class ReadyChecks) runs the same stub, through CiJobStub.
-The SIGTERM case runs merge in a subprocess through HARNESS, which names the same stub; it is the one case that does not patch CI_JOB.
+The SIGTERM case and the slot cases run merge in a subprocess through HARNESS, which names the same stub; they do not patch CI_JOB
+in this process. The slot cases (lint slots: a lane lint waits for one of merge.lint_slots() slots) set the slot count and the bound
+(merge.LINT_SECONDS) in that subprocess, and read the order of the stub's starts and ends, never the clock.
 Temp files: this run's folder (lint/_test_temp.py), removed at exit.
 """
 import atexit, json, os, shutil, signal, subprocess, sys, tempfile, time, unittest, unittest.mock, uuid
@@ -27,12 +29,21 @@ FAILING = [("PASS", "record slugs"), ("FAIL", "comment narration")]
 UNKNOWN = [("PASS", "record slugs"), ("unknown", "shellcheck")]
 
 STUB = '''import json, os, subprocess, sys, time
-LOG, STEPS, RC, STEP_LOG, SLEEP, PARENT = __LOG__, __STEPS__, __RC__, __STEP_LOG__, __SLEEP__, os.getppid()
+LOG, STEPS, RC, STEP_LOG, SLEEP, PARENT, HOLD = __LOG__, __STEPS__, __RC__, __STEP_LOG__, __SLEEP__, os.getppid(), __HOLD__
 def git(*args):
     return subprocess.run(["git", *args], capture_output=True, text=True).stdout.strip()
+def alive(pid):  # os.kill(pid, 0) only tests the pid on POSIX; a case that sets HOLD skips on Windows, where a signal ends the process
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except OSError:  # a process this user may not signal is alive
+        return True
+    return True
 detached = subprocess.run(["git", "symbolic-ref", "-q", "HEAD"], capture_output=True).returncode != 0
 with open(LOG, "a", encoding="utf-8") as f:
-    print(json.dumps({"argv": sys.argv[1:], "cwd": os.getcwd(), "head": git("rev-parse", "HEAD"), "detached": detached}), file=f)
+    print(json.dumps({"argv": sys.argv[1:], "cwd": os.getcwd(), "head": git("rev-parse", "HEAD"), "detached": detached,
+                      "pid": os.getpid(), "holder_alive": alive(HOLD) if HOLD is not None and os.name != "nt" else None}), file=f)
 if "--plan" in sys.argv:
     for state, name in STEPS:
         print("would run " + name)
@@ -40,6 +51,8 @@ if "--plan" in sys.argv:
 end = time.time() + SLEEP  # a lint that runs long: it ends after SLEEP s, or at once when the run that started it is gone
 while time.time() < end and os.getppid() == PARENT:
     time.sleep(0.05)
+with open(LOG, "a", encoding="utf-8") as f:  # this run's end: the slot cases read the order of starts and ends, never a clock
+    print(json.dumps({"pid": os.getpid(), "end": True}), file=f)
 lines = ["%-15s %s: stub step" % (state, name) for state, name in STEPS]
 print("\\n".join(lines))
 if RC == 1:
@@ -86,6 +99,32 @@ jobs:
 def pass_lines(text):
     return [line for line in text.splitlines() if line.startswith("PASS:")]
 
+def wait_lines(text):
+    """The lines of `text` that say a lint is waiting for a slot: each says both `wait` and `slot`."""
+    return [line for line in text.splitlines() if "wait" in line.lower() and "slot" in line.lower()]
+
+def most_running(events):
+    """The most ci-job runs at once, read from the order of CiJobStub.lint_events: a run is running from its start to its end."""
+    running, most = set(), 0
+    for e in events:
+        if e["kind"] == "start":
+            running.add(e["pid"])
+        else:
+            running.discard(e["pid"])
+        most = max(most, len(running))
+    return most
+
+def harness_text(stub, slots=None, bound=None):
+    """HARNESS, with the seams a case gives set before main runs: merge.lint_slots (the slot count) and merge.LINT_SECONDS (the bound).
+    Both are plain assignments, so a name the code lacks still takes the value: a case reads the behaviour, never a missing name."""
+    seams = ""
+    if slots is not None:
+        seams += "merge.lint_slots = lambda: %d\n" % slots
+    if bound is not None:
+        seams += "merge.LINT_SECONDS = %d\n" % bound
+    text = HARNESS.replace("merge.CI_JOB = __STUB__\n", "merge.CI_JOB = __STUB__\n" + seams)
+    return text.replace("__HERE__", repr(HERE)).replace("__STUB__", repr(stub))
+
 
 class NoLock:
     """The lane run takes no merge lock: a lock call fails the case."""
@@ -121,11 +160,17 @@ class CiJobStub:
         self.stub = os.path.join(self.t, "ci-job-stub.py")
         self.step_log = os.path.join(self.t, "ci-job-step.log")
 
-    def write_stub(self, steps, rc, sleep=0):
-        """Write the stub ci-job: it prints `steps` ((state, step name) pairs), exits with `rc`, and runs `sleep` s first when it is set."""
+    def stub_text(self, steps, rc, sleep=0, hold=None):
+        """The text of a stub ci-job (STUB), each argument written as its Python literal."""
         text = STUB.replace("__STEP_LOG__", repr(self.step_log)).replace("__LOG__", repr(self.log))
-        tm.put(self.stub, text.replace("__STEPS__", repr(steps)).replace("__RC__", repr(rc)).replace("__SLEEP__", repr(sleep)))
-        return self.stub
+        return text.replace("__STEPS__", repr(steps)).replace("__RC__", repr(rc)).replace("__SLEEP__", repr(sleep)).replace("__HOLD__", repr(hold))
+
+    def write_stub(self, steps, rc, sleep=0, hold=None, path=None):
+        """Write the stub ci-job: it prints `steps` ((state, step name) pairs), exits with `rc`, and runs `sleep` s first when it is set.
+        `hold` is the pid of a run ahead of it: the stub's start record reads back whether that run is alive. -> the stub's path."""
+        path = path or self.stub
+        tm.put(path, self.stub_text(steps, rc, sleep, hold))
+        return path
 
     def use_ci_job(self, steps, rc):
         """merge.CI_JOB becomes a stub that prints `steps` ((state, step name) pairs) and exits with `rc`."""
@@ -135,12 +180,29 @@ class CiJobStub:
         self.addCleanup(patch.stop)
 
     def lint_calls(self):
-        """The stub's calls that ran the lint, not the plan."""
+        """The stub's calls that ran the lint, not the plan. The end records the stub writes after each run carry no argv."""
         if not os.path.exists(self.log):
             return []
         with open(self.log, encoding="utf-8") as f:
             calls = [json.loads(line) for line in f if line.strip()]
-        return [c for c in calls if "--plan" not in c["argv"]]
+        return [c for c in calls if "argv" in c and "--plan" not in c["argv"]]
+
+    def lint_events(self):
+        """The stub's lint runs in the order they were written: {"kind": "start", ...the start record} when a run's ci-job starts,
+        {"kind": "end", "pid": pid} when it ends. A run killed before its end has no end event. The plan is no run."""
+        events = []
+        if not os.path.exists(self.log):
+            return events
+        with open(self.log, encoding="utf-8") as f:
+            for line in f:
+                if not line.endswith("\n"):  # a record still being written
+                    break
+                rec = json.loads(line)
+                if "argv" in rec and "--plan" not in rec["argv"]:
+                    events.append({"kind": "start", **rec})
+                elif "end" in rec:
+                    events.append({"kind": "end", "pid": rec["pid"]})
+        return events
 
 
 class LaneLint(CiJobStub, tm.CloudSession):
@@ -194,8 +256,7 @@ class LaneLint(CiJobStub, tm.CloudSession):
         stderr is read live: the case creates the GO file at the first `start:` line, so a stderr that merge captures
         instead of passing on reads to the end only after the stub's bound."""
         go = os.path.join(self.t, "go")
-        text = STUB.replace("__STEP_LOG__", repr(self.step_log)).replace("__LOG__", repr(self.log))
-        text = text.replace("__STEPS__", repr(steps)).replace("__RC__", repr(rc)).replace("__SLEEP__", repr(0))
+        text = self.stub_text(steps, rc)
         tm.put(self.stub, text.replace("lines = [", PROGRESS.replace("__GO__", repr(go)) + "lines = [", 1))
         harness = os.path.join(self.t, "lane_lint_progress.py")
         tm.put(harness, HARNESS.replace("__HERE__", repr(HERE)).replace("__STUB__", repr(self.stub)))
@@ -461,6 +522,170 @@ class LaneLint(CiJobStub, tm.CloudSession):
         self.assertNotIn("coordinator", err.lower())
         self.assertNotIn("batch-runner", err.lower())
         self.assertFalse(os.path.exists(self.role_file), "a refused role wrote the role file")
+
+    def lane_checkout(self, name):
+        """A clone of origin of its own, for one lint: a lane has a checkout of its own. Concurrent lints in one shared clone race
+        in git's fetch and worktree calls, which is not the claim these cases test."""
+        path = os.path.join(self.t, name)
+        tm.sh(self.t, "git", "clone", "-q", self.bare, path)
+        return path
+
+    def start_lane(self, stub, *argv, checkout=None, slots=None, bound=None):
+        """Start `merge <argv>` in `checkout` (default: the lane checkout), in a process of its own, with the ci-job stub at `stub` and
+        the seams of harness_text. Its temp files land in this case's folder. -> the Popen; finish() reads its result."""
+        harness = os.path.join(self.t, "lane-lint-%s.py" % uuid.uuid4().hex)
+        tm.put(harness, harness_text(stub, slots, bound))
+        tmp = os.path.join(self.t, "tmp")
+        os.makedirs(tmp, exist_ok=True)
+        env = {**os.environ, "CLAUDE_CONFIG_DIR": self.cfg, "TMPDIR": tmp, "TMP": tmp, "TEMP": tmp}
+        env.pop("CLAUDE_CODE_REMOTE", None)
+        proc = subprocess.Popen([sys.executable, harness, *argv], cwd=checkout or self.co, env=env,
+                                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        self.addCleanup(self.stop_run, proc)
+        return proc
+
+    def finish(self, proc):
+        """-> (rc, stdout, stderr) of a start_lane process, once it has ended."""
+        out, err = proc.communicate(timeout=120)
+        return proc.returncode, out, err
+
+    def quick_stub(self, hold=None):
+        """A stub that ends at once, for a lint that runs after the holder. `hold` is the pid of the run ahead of it."""
+        return self.write_stub(PASSING, 0, path=os.path.join(self.t, "ci-job-quick.py"), hold=hold)
+
+    def wait_for_starts(self, n):
+        """Poll the stub's log until `n` lint runs have started, for 60 s at most. -> the start events read so far."""
+        deadline = time.time() + 60
+        while True:
+            starts = [e for e in self.lint_events() if e["kind"] == "start"]
+            if len(starts) >= n or time.time() > deadline:
+                return starts
+            time.sleep(0.05)
+
+    def lint_ended(self, pid):
+        return any(e["kind"] == "end" and e["pid"] == pid for e in self.lint_events())
+
+    def test_four_lane_lints_at_once_run_at_most_two_ci_jobs_with_two_slots(self):
+        """With two slots, four lane lints at once run their ci-jobs two at a time, and each passes."""
+        stub = self.write_stub(PASSING, 0, sleep=3)
+        head = self.head("feat")
+        procs = [self.start_lane(stub, "--lane-lint", head, checkout=self.lane_checkout("lane-%d" % i), slots=2) for i in range(4)]
+        results = [self.finish(proc) for proc in procs]
+        events = self.lint_events()
+        self.assertEqual(len([e for e in events if e["kind"] == "start"]), 4,
+                         "not all four lints reached ci-job: " + "".join(out + err for _, out, err in results))
+        for rc, out, err in results:
+            self.assertEqual(rc, 0, "a lint did not pass: " + out + err)
+            self.assertEqual(len(pass_lines(out)), 1, out + err)
+        self.assertLessEqual(most_running(events), 2, "%d ci-job runs ran at once; with 2 slots at most 2 may" % most_running(events))
+
+    def test_two_lane_lints_with_two_slots_run_their_ci_jobs_together(self):
+        """The control for the overlap count: with two slots, two lints run at once, and the count reads two."""
+        stub = self.write_stub(PASSING, 0, sleep=3)
+        head = self.head("feat")
+        procs = [self.start_lane(stub, "--lane-lint", head, checkout=self.lane_checkout("lane-%d" % i), slots=2) for i in range(2)]
+        results = [self.finish(proc) for proc in procs]
+        events = self.lint_events()
+        self.assertEqual(len([e for e in events if e["kind"] == "start"]), 2,
+                         "not both lints reached ci-job: " + "".join(out + err for _, out, err in results))
+        for rc, out, err in results:
+            self.assertEqual(rc, 0, out + err)
+            self.assertEqual(len(pass_lines(out)), 1, out + err)
+        self.assertEqual(most_running(events), 2, "two lints with two slots did not run their ci-jobs together")
+
+    def test_a_lint_that_waits_for_a_slot_keeps_the_full_bound_for_its_own_run(self):
+        """The bound starts when the slot is held. The first assert is the wait: the second ci-job starts only after the first one
+        ends. Then both lints pass: a run that fits the bound by itself must not time out for the time it waited."""
+        stub = self.write_stub(PASSING, 0, sleep=3.5)
+        head = self.head("feat")
+        procs = [self.start_lane(stub, "--lane-lint", head, checkout=self.lane_checkout("lane-%d" % i), slots=1, bound=6) for i in range(2)]
+        results = [self.finish(proc) for proc in procs]
+        events = self.lint_events()
+        starts = [e for e in events if e["kind"] == "start"]
+        self.assertEqual(len(starts), 2, "the two lints did not both reach ci-job: " + "".join(out + err for _, out, err in results))
+        order = [(e["kind"], e["pid"]) for e in events]
+        self.assertIn(("end", starts[0]["pid"]), order, "the first lint's ci-job never ended")
+        self.assertLess(order.index(("end", starts[0]["pid"])), order.index(("start", starts[1]["pid"])),
+                        "the second lint's ci-job started before the first's ended: two ci-jobs ran with one slot")
+        for rc, out, err in results:
+            self.assertEqual(rc, 0, "a lint whose run fits the bound did not pass: " + out + err)
+            self.assertEqual(len(pass_lines(out)), 1, out + err)
+
+    def test_a_lint_whose_run_fits_the_bound_passes_with_one_slot(self):
+        """The control for the bound: the stub's run fits the bound by itself, so a timeout in the case above comes from the wait."""
+        stub = self.write_stub(PASSING, 0, sleep=3.5)
+        rc, out, err = self.finish(self.start_lane(stub, "--lane-lint", self.head("feat"), slots=1, bound=6))
+        self.assertEqual(rc, 0, out + err)
+        self.assertEqual(len(pass_lines(out)), 1, out + err)
+
+    def test_a_hung_lint_ends_at_the_bound_and_frees_its_slot_for_the_next_lint(self):
+        """A hung ci-job ends unknown at the bound and frees its slot. The next lint's ci-job starts only then: its start record
+        reads that the hung run is no longer alive (holder_alive). The next lint then passes."""
+        hung = self.write_stub(PASSING, 0, sleep=60)  # it runs past the bound, so the bound ends it
+        head = self.head("feat")
+        first = self.start_lane(hung, "--lane-lint", head, checkout=self.lane_checkout("holder"), slots=1, bound=8)
+        holders = self.wait_for_starts(1)
+        self.assertEqual(len(holders), 1, "the hung lint's ci-job never started")
+        second = self.start_lane(self.quick_stub(hold=holders[0]["pid"]), "--lane-lint", head, checkout=self.lane_checkout("next"), slots=1, bound=8)
+        rc1, out1, err1 = self.finish(first)
+        rc2, out2, err2 = self.finish(second)
+        starts = [e for e in self.lint_events() if e["kind"] == "start"]
+        self.assertEqual(len(starts), 2, "the next lint's ci-job never ran: " + out2 + err2)
+        self.assertIs(starts[1]["holder_alive"], False,
+                      "the next lint's ci-job started while the hung one still ran: no slot was held")
+        self.assertEqual(rc1, 1, out1 + err1)
+        self.assertIn("did not finish", out1 + err1)
+        self.assertEqual(pass_lines(out1), [], out1)
+        self.assertEqual(rc2, 0, out2 + err2)
+        self.assertEqual(len(pass_lines(out2)), 1, out2 + err2)
+
+    def test_with_two_slots_a_lint_starts_beside_a_hung_one_and_reads_it_alive(self):
+        """The control for the holder check: a hung run that still holds its slot reads as alive to the next lint's start."""
+        hung = self.write_stub(PASSING, 0, sleep=60)
+        head = self.head("feat")
+        first = self.start_lane(hung, "--lane-lint", head, checkout=self.lane_checkout("holder"), slots=2, bound=8)
+        holders = self.wait_for_starts(1)
+        self.assertEqual(len(holders), 1, "the hung lint's ci-job never started")
+        second = self.start_lane(self.quick_stub(hold=holders[0]["pid"]), "--lane-lint", head, checkout=self.lane_checkout("next"), slots=2, bound=8)
+        rc2, out2, err2 = self.finish(second)
+        self.finish(first)
+        starts = [e for e in self.lint_events() if e["kind"] == "start"]
+        self.assertEqual(len(starts), 2, "the next lint's ci-job never ran: " + out2 + err2)
+        self.assertIs(starts[1]["holder_alive"], True, "the next lint's start read the hung run as ended while it still ran")
+        self.assertEqual(rc2, 0, out2 + err2)
+        self.assertEqual(len(pass_lines(out2)), 1, out2 + err2)
+
+    def test_a_lint_that_waits_for_a_slot_prints_one_wait_line_on_stderr_while_it_waits(self):
+        """The waiting lint prints one stderr line that says it waits for a slot, and prints it while the holder's ci-job still runs."""
+        busy = self.write_stub(PASSING, 0, sleep=5)
+        head = self.head("feat")
+        first = self.start_lane(busy, "--lane-lint", head, checkout=self.lane_checkout("holder"), slots=1)
+        holders = self.wait_for_starts(1)
+        self.assertEqual(len(holders), 1, "the holding lint's ci-job never started")
+        second = self.start_lane(self.quick_stub(), "--lane-lint", head, checkout=self.lane_checkout("next"), slots=1)
+        err_lines, held_when_read = [], []
+        for line in second.stderr:  # read live: each line is judged when it arrives, not at the end
+            err_lines.append(line)
+            if wait_lines(line) and not held_when_read:
+                held_when_read.append(not self.lint_ended(holders[0]["pid"]))
+        out, rest = second.communicate(timeout=120)
+        rc = second.returncode
+        err = "".join(err_lines) + rest
+        self.finish(first)
+        waits = wait_lines("".join(err_lines))
+        self.assertEqual(len(waits), 1, "the waiting lint printed %d stderr lines that say it waits for a slot, want one: %s" % (len(waits), err))
+        self.assertEqual(held_when_read, [True], "the wait line came after the holder's ci-job had ended")
+        self.assertEqual(wait_lines(out), [], "the wait line went to stdout, not stderr: " + out)
+        self.assertEqual(rc, 0, out + err)
+        self.assertEqual(len(pass_lines(out)), 1, out + err)
+
+    def test_a_lint_that_finds_a_free_slot_prints_no_wait_line(self):
+        """The control for the wait line: a lint with a free slot prints none."""
+        stub = self.write_stub(PASSING, 0)
+        rc, out, err = self.finish(self.start_lane(stub, "--lane-lint", self.head("feat"), slots=1))
+        self.assertEqual(rc, 0, out + err)
+        self.assertEqual(len(pass_lines(out)), 1, out + err)
+        self.assertEqual(wait_lines(err), [], "a lint with a free slot printed a wait line: " + err)
 
 
 class ReadyChecks(CiJobStub, tm.RecordsEnv):
