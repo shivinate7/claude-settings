@@ -23,10 +23,15 @@ the diff, any duplicate in the file fails. `--list` prints every duplicate in th
 main's included, and exits 0 (1 only when the layout cannot be read). It names slugs, not lanes. The
 batch runner calls it under ci-hygiene step 8 (Batch lanes).
 A rewrite that union keeps twice goes red when the lane raises the count. A deleted
-row that union restores has one slug; the silent-undo check catches it (decision silent-undo-check-design,
-the check for undone work). Incidents: the #1449 main merge left 9 slugs twice on main. Union merges into
-#1863, #2081 and #2108 each kept two copies of a note. PR #1920 was dropped from batch 65 for a duplicate
-slug. Only a fix check caught them (roadmap step notes-slug-unique, Nov 8).
+row that union restores has one slug. The silent-undo check (decision silent-undo-check-design,
+the check for undone work) catches a revival only when the deletion is already on main and a lane
+merges main in. It does not catch the batch case: lane A deletes a row, lane B appends after it, and
+the integration merge revives the row. `check_silent_undo.py --strict` exits 0 on that merge. Step
+`notes-union-batch-revival` (the batch revival case, filed with triage) tracks it.
+Incidents: main held 9 duplicate slugs at commit e2703c611 (PR #1824). Merging PR #1449 into batch 64
+took the integration branch to 13 duplicate slugs. PR #1824 brought main back to 9. PR #1920 was dropped
+from batch 65 for a duplicate slug (runner 8's message, 10:35 CST, 2026-11-08). Only a fix check caught
+them (roadmap step notes-slug-unique, Nov 8).
 
 Scope: this repo only. Another repo with its own notes file adds the same line to its own
 `.gitattributes`.
