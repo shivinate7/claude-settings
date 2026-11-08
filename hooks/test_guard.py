@@ -1460,6 +1460,9 @@ def _build_gitmain():
     run_vcs(GITMAIN, "add", "-A")
     run_vcs(GITMAIN, *IDENT, "commit", "-q", "-m", "files")
     run_vcs(GITMAIN, "worktree", "add", "-q", GITWT, "-b", "lane")
+    # The shell-cd cases cd into a test folder of the worktree, and a cd needs its folder on disk. An empty
+    # folder is no git change, so the worktree's status is the same as before.
+    os.makedirs(os.path.join(GITWT, "tests"), exist_ok=True)
     # AGENTWT: a real linked worktree whose path sits under GITMAIN's own .claude/worktrees/.
     # FARWT: a real linked worktree elsewhere, at a path that merely contains the word
     # "worktrees" (mimics an unrelated /tmp/worktrees/x), so the agent-owned check must read the
@@ -13272,6 +13275,23 @@ if LINKS_MADE:
 else:
     skip_case(SHELL_CD + "a test write after a cd into a link to the worktree's hooks folder is refused", NO_LINK)
     skip_case(SHELL_CD + "a test write after a cd -P into a link to the worktree's hooks folder is refused", NO_LINK)
+# A non-test name in a test folder of the builder's own worktree, after a cd joined by `;`, a newline or `||`.
+# The guard reads such a cd as not certain, but when it runs the write lands in the test folder, so each write
+# is refused. The folder exists at hook time, so the cd is followed. Only the folder makes the name a test.
+sh(SHELL_CD + "a non-test name written after a relative cd into a test folder of the worktree is refused",
+   "cd tests; : > helper.py", "deny", rule=BT, **B)
+sh(SHELL_CD + "a non-test name written after an absolute cd into a test folder of the worktree is refused",
+   "cd %s/tests; : > helper.py" % slash(GITWT), "deny", rule=BT, **B)
+sh(SHELL_CD + "a non-test name written on the line after a cd into a test folder is refused",
+   "cd tests\n: > helper.py", "deny", rule=BT, **B)
+sh(SHELL_CD + "a non-test name written after a cd that `||` may skip is refused",
+   "cd tests || exit 1; : > helper.py", "deny", rule=BT, **B)
+sh(SHELL_CD + "a non-test name redirected to after a cd into a test folder is refused",
+   "cd tests; echo x > helper.py", "deny", rule=BT, **B)
+sh(SHELL_CD + "a non-test name edited by sed -i after a cd into a test folder is refused",
+   "cd tests; sed -i s/a/b/ helper.py", "deny", rule=BT, **B)
+sh(SHELL_CD + "a non-test name written by tee after a cd into a test folder is refused",
+   "cd tests; echo x | tee helper.py", "deny", rule=BT, **B)
 add("test-author: Edit of product code is refused", "deny", rule=TA, tool="Edit",
     file_path="src/app.py", carries=("builder", "Report"), **A)
 add("builder-test: a ruff --ignore script added to package.json is allowed", "allow", tool="Edit",
