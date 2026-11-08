@@ -1153,6 +1153,37 @@ def case_powershell_comment_quote_ends_at_its_line():
          entry_of(ps_task('Write-Host "# ok"\ngit log | head -5')), refused)
 
 
+def case_powershell_bash_prefix_braced_expansion():
+    # A NAME=value prefix holding a braced expansion in its value (`${PORT:-8080}`, `${HOME}/bin`) is a bash form,
+    # so each is refused. The hashtable controls pass: their `}` closes the hashtable, not an expansion.
+    refused = ("command-in-item", "bash operator")
+    page("a PowerShell command, PORT=${PORT:-8080} node server.js, is refused as a bash operator", "set",
+         entry_of(ps_task("PORT=${PORT:-8080} node server.js")), refused)
+    page("a PowerShell command, X=${HOME}/bin tool run, is refused as a bash operator", "set",
+         entry_of(ps_task("X=${HOME}/bin tool run")), refused)
+    for name, ps in (("a hashtable of three pairs", "@{a=1; b=2; c=3}"),
+                     ("a hashtable with no space after its first semicolon", "@{a=1;b=2 }"),
+                     ("a hashtable with a double-quoted underscore name", '@{Name="_"; Value=2}')):
+        page("a PowerShell %s passes" % name, "set", entry_of(ps_task(ps)), None)
+
+
+def case_powershell_hash_mid_token_is_no_comment():
+    # A `#` opens a line comment only at a token start (guard_core.token_start), so a `#` inside a word is text, and
+    # the bash form after it on the same line is read. The next-line and here-string pins hold the refusal too.
+    # Neither depends on that condition: a line comment ends at its newline, and a here-string body is quoted text.
+    refused = ("command-in-item", "bash operator")
+    page("a PowerShell command, a#b | head, is refused: a # inside a word opens no comment", "set",
+         entry_of(ps_task("a#b | head")), refused)
+    page("a PowerShell command, https://x/#frag | head, is refused: a # inside a word opens no comment", "set",
+         entry_of(ps_task("https://x/#frag | head")), refused)
+    page("a PowerShell command, $x#y | head, is refused: a # inside a word opens no comment", "set",
+         entry_of(ps_task("$x#y | head")), refused)
+    page("a PowerShell command, $x#y then | head on the next line, is refused", "set",
+         entry_of(ps_task("$x#y\n| head")), refused)
+    page("a PowerShell here-string holding # x 'y, then git log | head on a later line, is refused", "set",
+         entry_of(ps_task("$h = @'\n# x 'y\n'@\ngit log | head -5")), refused)
+
+
 def case_step_shell_programs_partial():
     # A single-span step is a shell line only when its first word is in SHELL_PROGRAMS, so a cloud CLI, a span with a
     # flag after its word, or chmod passes. Each of the six spans below is refused. Controls pass: a bare tool name, a flag alone and a minus between two words. The chained span
@@ -1819,7 +1850,8 @@ def main():
                  case_past_rulings_skips_the_debt_notes_file,
                  case_press_link_label_is_a_string, case_str_replace_rework_is_refused,
                  case_powershell_bash_forms, case_powershell_hashtable_is_no_bash_form,
-                 case_powershell_comment_quote_ends_at_its_line, case_step_shell_programs_partial,
+                 case_powershell_comment_quote_ends_at_its_line, case_powershell_bash_prefix_braced_expansion,
+                 case_powershell_hash_mid_token_is_no_comment, case_step_shell_programs_partial,
                  case_roadmap_broken_pipe_not_a_repo_is_absent, case_roadmap_broken_pipe_other_stderr_stays_unreadable,
                  case_press_link_links_not_a_list_on_a_step, case_press_link_links_not_a_list_on_an_option,
                  case_task_str_replace_removes_only_the_label, case_str_replace_blank_prose_line_passes,
