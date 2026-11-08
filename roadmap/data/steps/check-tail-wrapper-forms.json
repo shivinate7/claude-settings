@@ -1,11 +1,11 @@
 {
   "title": "The check-tail gate sees a command behind a wrapper such as uv run",
   "phase": "now",
-  "status": "doing",
+  "status": "ready",
   "order": 50,
   "owner": "coordinator",
   "lane": "session_013NEJL3ZjZdzrS8tBezxY85",
   "why": "check-tail misses `uv run python merge/merge.py --lane-lint | tail`, because the gate reads only the first word.",
-  "note": "Coordinator pick, 18:09 CST Nov 7, can be undone. Related: step bg-tail-loses-verdict (#1666). Absorbs proposed step verdict-pipe-exit from lane silent-undo-reads-retire-run (coordinator 18:39 CST).",
-  "updatedAt": "2026-11-07T18:40:00-06:00"
+  "note": "Coordinator pick, 18:09 CST Nov 7, can be undone. Related: step bg-tail-loses-verdict (#1666). Absorbs proposed step verdict-pipe-exit from lane silent-undo-reads-retire-run (coordinator 18:39 CST). Built as #1717 (verdict-pipe-exit folded in), with runner 8, stacked on #1666 (19:54 CST).",
+  "updatedAt": "2026-11-07T19:54:00-06:00"
 }
