@@ -899,6 +899,18 @@ class LaneLint(CiJobStub, tm.CloudSession):
                 body = "Merge after: #%d\n\nReview only `%s`.\n" % (PARENT_PR, rng % start)
                 self.assert_review_range_passes(body, "a range that reads `%s`" % (rng % start), one_parent(h["P"]))
 
+    def test_review_range_refuses_a_wrong_start_with_a_placeholder_end_before_ci_job_runs(self):
+        """A start below the parent head is judged even when its end is a placeholder such as `<head>`: refused, with no lint run."""
+        self.use_ci_job(PASSING, 0)
+        h = self.fork_history()
+        below = h["O"][:9]
+        self.assert_review_range_refused(ancestry_body(below, "<head>"), below, "a range from a start below the parent head to a placeholder end", one_parent(h["P"]))
+
+    def test_review_range_passes_a_correct_start_with_a_placeholder_end(self):
+        self.use_ci_job(PASSING, 0)
+        h = self.fork_history()
+        self.assert_review_range_passes(ancestry_body(h["P"][:9], "<head>"), "a range from the parent head to a placeholder end", one_parent(h["P"]))
+
     def test_review_range_refuses_a_start_below_a_bold_merge_after_line(self):
         self.use_ci_job(PASSING, 0)
         h = self.fork_history()
