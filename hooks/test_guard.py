@@ -132,7 +132,7 @@ FAMILIES = {
     "fail-closed": "a missing sibling module refuses the call, and never allows it",
     "reload-stamp": "a hook file broken, missing or mis-stamped: the guard waits and reloads, then refuses, never allows",
     "override": "the owner override: one act or a timed override, one session, the exclusions it never lifts",
-    "handoff-unread": "after compaction, the guard refuses each call it judges until the session reads its handoff: the refusals, the allows, the cost, the copy without reread_check.py (refused, never allowed), and the override",
+    "handoff-unread": "after compaction, the guard refuses each call it judges until the session reads its handoff: the refusals, the allows, the cost, the copies without reread_check.py or precompact_handoff.py (refused, never allowed), and the override",
     "wsl": "the WSL launch allow list, the refused WSL forms, and quoted or commented text",
     "load-brake": "the machine-load brake: busy and full on start calls, full on an agent's or a lane session's shell or file write (a lane session's own record tags cs-build:lane), the reader seam, no child process, no per-call read, no CPU read or wait, the cloud skip (CLAUDE_CODE_REMOTE=true reads nothing), the neutral load every other family's lane call meets",
     "misc": "anything outside a tagged section",
@@ -25660,17 +25660,17 @@ def hu_cost_check():
     return True, "one existence check (%s) on the flag, no write, no process start" % name
 
 
-def hu_copy_check():
-    """install-hooks-whole (decision install-hooks-whole): with reread_check.py missing beside guard.py, the
-    guard never allows a call. A failed import of reread_check takes the same wait-then-refuse path as a
-    missing sibling: the guard loads again for about 5 s, then refuses each call as guard-crash. The intact
+def hu_copy_check(drop="reread_check.py"):
+    """install-hooks-whole (decision install-hooks-whole): with `drop` missing beside guard.py, the guard never
+    allows a call. A failed import of reread_check or of precompact_handoff takes the same wait-then-refuse path
+    as a missing sibling: the guard loads again for about 5 s, then refuses each call as guard-crash. The intact
     copy is the control, so the fixture is shown to bite. `echo hi` is allowed by every rule, so the dropped
     copy must also refuse a call another rule denies: an Agent spawn on Haiku, which the intact copy refuses
     for the model floor. The dropped copy refuses that spawn as guard-crash too, never by a rule it cannot run."""
     cfg = os.path.join(ROOT, "hu-copy")
     hu_files(cfg, flag=True, handoff=True)
     intact = _guard_copy("hu-intact", None)
-    dropped = _guard_copy("hu-no-reread", "reread_check.py")
+    dropped = _guard_copy("hu-no-" + drop[:-3], drop)
     control = _hu_copy_run(intact, cfg)
     why = ov_want(*_decision(control), "deny", HU_RULE)
     if why:
@@ -25678,15 +25678,15 @@ def hu_copy_check():
     run = _hu_copy_run(dropped, cfg)
     decision, reason = _decision(run)
     if run.returncode != 0 or decision != "deny" or GUARD_CRASH not in reason:
-        return False, "without reread_check.py the call is %r as %r (exit %d), want deny as guard-crash" % (
-            decision, reason[:70], run.returncode)
+        return False, "without %s the call is %r as %r (exit %d), want deny as guard-crash" % (
+            drop, decision, reason[:70], run.returncode)
     spawn = _hu_copy_run(dropped, cfg, "Agent", {"prompt": "do it", "model": "haiku"})
     decision, reason = _decision(spawn)
     if spawn.returncode != 0 or decision != "deny" or GUARD_CRASH not in reason:
-        return False, "without reread_check.py a Haiku spawn is %r as %r (exit %d), want deny as guard-crash" % (
-            decision, reason[:70], spawn.returncode)
-    return True, ("reread_check.py missing: the call is refused as guard-crash, exit 0, and so is a Haiku "
-                  "spawn; the intact copy refuses the call for the unread handoff")
+        return False, "without %s a Haiku spawn is %r as %r (exit %d), want deny as guard-crash" % (
+            drop, decision, reason[:70], spawn.returncode)
+    return True, ("%s missing: the call is refused as guard-crash, exit 0, and so is a Haiku "
+                  "spawn; the intact copy refuses the call for the unread handoff" % drop)
 
 
 def _hu_copy_run(folder, config, tool="Bash", tool_input=None):
@@ -25805,6 +25805,8 @@ for _label, _check in (
      hu_cost_check),
     ("handoff-unread: install-hooks-whole: a guard copy without reread_check.py refuses as guard-crash, never allows",
      hu_copy_check),
+    ("handoff-unread: install-hooks-whole: a guard copy without precompact_handoff.py refuses as guard-crash, never allows",
+     lambda: hu_copy_check("precompact_handoff.py")),
     ("handoff-unread: an owner override lifts the refusal once, and the spent override refuses again",
      hu_override_check),
     ("handoff-unread: unread_handoff returns the path only when every condition holds, and never raises",
