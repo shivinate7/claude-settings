@@ -39,6 +39,8 @@ Contract the page cases assume (the builder builds to it):
     `checks pass` and exits 0; a check that cannot run prints `checks unknown: <why>` and exits 3.
   --all, a waiting-page entry whose own `collections` lacks `items` or `answers`: `<id>: checks unknown: collections lack
     <name>`, the copy written, exit 2, and no item held for that entry (an unread answers collection holds answered items).
+  The picture checks of one run share one time budget. Items not checked when it runs out print
+    `checks unknown: time budget spent, <k> item(s) not checked`; --check exits 3; export keeps its copy and its exit code.
 """
 import collections
 import contextlib
@@ -1854,8 +1856,13 @@ class AnsweredOnPage(PictureChecks):
 
 
 class CheckBudget(Copied):
-    """No overall time budget: every pictured item is checked however slow each run is. The per-run seam is stubbed in
-    process, and the clock is fake: it moves only when a stubbed run ends, so no wall clock is read. Not gated: no node runs."""
+    """One time budget for the whole run: the picture checks of one export, or of one --check, share it. A stubbed run takes
+    SLOW_RUN seconds on the fake clock, longer than any budget a run is given, so the first run spends the budget and the
+    rest are unknown. The per-run seam and the clock are stubbed in process, and the clock is fake: it moves only when a
+    stubbed run ends, so no wall clock is read. Not gated: no node runs."""
+
+    SLOW_RUN = 100000.0  # seconds one stubbed run takes on the fake clock
+    UNKNOWN = "checks unknown: time budget spent, 2 item(s) not checked"  # 3 pictured items, and the first is checked
 
     class Clock:
         def __init__(self):
@@ -1864,35 +1871,69 @@ class CheckBudget(Copied):
         def monotonic(self):
             return self.now
 
+        def perf_counter(self):
+            return self.now
+
+        def time(self):
+            return self.now
+
     def slow_runs(self, clock, calls):
+        """A stubbed run that takes SLOW_RUN on the fake clock and passes, so an item the budget leaves unchecked is the only
+        unknown a case can see."""
         def run(page_file, item, *args, **kwargs):
             calls.append(item["id"])
-            clock.now += 60.0  # each run takes 60 s on the fake clock, past the 100 s budget after two runs
-            return 1, HELD_SENTENCE
+            clock.now += self.SLOW_RUN
+            return 0, ""
         return run
+
+    def patched(self, clock, calls):
+        """The per-run seam and the clock, stubbed in both modules that read the budget: `with self.patched(clock, calls):`."""
+        stack = contextlib.ExitStack()
+        stack.enter_context(mock.patch.object(page_check, "run_check_designs", self.slow_runs(clock, calls)))
+        for module in (page_check, export_page):
+            stack.enter_context(mock.patch.object(module, "time", clock, create=True))
+        return stack
 
     def pictured(self):
         return {"budget-%d" % k: picture_item(300 + k, "budget-%d" % k) for k in range(1, 4)}
 
-    def test_export_checks_every_pictured_item_when_each_run_is_slow(self):
+    def test_export_stops_at_the_budget_when_each_run_is_slow(self):
         clock, calls = self.Clock(), []
-        with mock.patch.object(page_check, "run_check_designs", self.slow_runs(clock, calls)), \
-                mock.patch.object(page_check, "time", clock, create=True):
+        with self.patched(clock, calls):
             held, unknown = export_page.picture_checks(PAGE_FILE, {"items": self.pictured(), "answers": {}})
-        self.assertEqual(len(calls), 3, "the export checked %d of 3 pictured items: an overall budget stopped the rest" % len(calls))
-        self.assertIsNone(unknown, "the export printed an unknown for a budget it should not have: %s" % unknown)
-        self.assertEqual(len(held), 3, "the export held %d of 3 items" % len(held))
+        self.assertEqual(len(calls), 1, "the export ran %d of 3 pictured items past a spent budget: %r" % (len(calls), calls))
+        self.assertEqual(unknown, self.UNKNOWN, "the export did not name the unchecked items. Got %r" % (unknown,))
+        self.assertEqual(held, [], "a passing run held an item: %r" % (held,))
 
-    def test_check_mode_checks_every_pictured_item_when_each_run_is_slow(self):
+    def test_check_mode_stops_at_the_budget_when_each_run_is_slow(self):
         clock, calls = self.Clock(), []
         fetched = self.fetch(items=self.pictured())
         page = write_text(os.path.join(self.tmp.name, "page-budget.html"), page_with_mockups(MOCKS_292))
         printed = io.StringIO()
-        with mock.patch.object(page_check, "run_check_designs", self.slow_runs(clock, calls)), \
-                mock.patch.object(page_check, "time", clock, create=True), contextlib.redirect_stdout(printed):
+        with self.patched(clock, calls), contextlib.redirect_stdout(printed):
             code = export_page.check_only(fetched, page)
-        self.assertEqual(len(calls), 3, "--check checked %d of 3 pictured items: an overall budget stopped the rest" % len(calls))
-        self.assertEqual(code, 4, "--check with three held items must exit 4. Output:\n" + printed.getvalue())
+        lines = [line.strip() for line in printed.getvalue().splitlines()]
+        self.assertEqual(len(calls), 1, "--check ran %d of 3 pictured items past a spent budget: %r" % (len(calls), calls))
+        self.assertIn(self.UNKNOWN, lines, "--check did not name the unchecked items. Output:\n" + printed.getvalue())
+        self.assertNotIn("checks pass", lines, "--check read the unchecked items as a pass. Output:\n" + printed.getvalue())
+        self.assertEqual(code, 3, "--check with the budget spent must exit 3, unknown. Output:\n" + printed.getvalue())
+
+    def test_export_keeps_its_copy_and_its_exit_when_the_budget_is_spent(self):
+        clock, calls = self.Clock(), []
+        fetched = self.fetch(items=self.pictured(), meta={"page": META})
+        page = write_text(os.path.join(self.tmp.name, "page-budget-export.html"), page_with_mockups(MOCKS_292))
+        out = self.out()
+        printed = io.StringIO()
+        with self.patched(clock, calls), contextlib.redirect_stdout(printed):
+            code = export_page.main(["--fetched", fetched, "--out", out, "--page", page])
+        lines = [line.strip() for line in printed.getvalue().splitlines()]
+        for n in (1, 2, 3):
+            self.assertTrue(os.path.isfile(os.path.join(out, "items", "budget-%d.json" % n)),
+                            "scope: budget-%d is not in the copy, so the export did not write every item. Output:\n%s"
+                            % (n, printed.getvalue()))
+        self.assertIn(self.UNKNOWN, lines, "the export did not name the unchecked items. Output:\n" + printed.getvalue())
+        self.assertEqual(code, 0, "an export with the budget spent and no held item must keep its exit code, 0. Output:\n"
+                         + printed.getvalue())
 
 
 class AnswersPassed(Copied):
