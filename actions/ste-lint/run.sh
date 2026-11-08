@@ -46,15 +46,26 @@ else
   if [ -z "$BASE_REF" ] && [ "$REF_NAME" = "$BASE" ]; then
     # A push to the default branch itself has no other side to diff against.
     RANGE="HEAD~1..HEAD"
+    FROM="HEAD~1"
   else
     RANGE="origin/$BASE...HEAD"
+    FROM="$(git merge-base "origin/$BASE" HEAD)"
   fi
+  # Files and lines are read against FROM, the range's start, so one diff holds the commits and the working
+  # tree: a tracked file edited or staged and not yet committed counts, with its working-tree line numbers.
+  # A new file that git does not track and .gitignore does not match is all new lines (UNTRACKED).
+  # A clean tree, as in CI, adds nothing.
+  UNTRACKED=()
+  while IFS= read -r f; do
+    [ -n "$f" ] && UNTRACKED+=("$f")
+  done < <(git ls-files --others --exclude-standard -- "$CHANGED_PATHS_GLOB")
   while IFS= read -r f; do
     [ -n "$f" ] && RAW_FILES+=("$f")
-  done < <(git diff --name-only --diff-filter=AMR "$RANGE" -- "$CHANGED_PATHS_GLOB")
+  done < <(git diff --name-only --diff-filter=AMR "$FROM" -- "$CHANGED_PATHS_GLOB"; printf '%s\n' ${UNTRACKED[@]+"${UNTRACKED[@]}"})
   while IFS= read -r f; do
     [ -n "$f" ] && FILES+=("$f")
-  done < <(git diff --name-only --diff-filter=AMR "$RANGE" -- "$CHANGED_PATHS_GLOB" ${EXCLUDE_PATHSPECS[@]+"${EXCLUDE_PATHSPECS[@]}"})
+  done < <(git diff --name-only --diff-filter=AMR "$FROM" -- "$CHANGED_PATHS_GLOB" ${EXCLUDE_PATHSPECS[@]+"${EXCLUDE_PATHSPECS[@]}"}
+           git ls-files --others --exclude-standard -- "$CHANGED_PATHS_GLOB" ${EXCLUDE_PATHSPECS[@]+"${EXCLUDE_PATHSPECS[@]}"})
 fi
 
 # In-script fallback: a caller that passes a plain glob (no ':(exclude)' magic
@@ -207,6 +218,9 @@ cur = None
 out = []
 header = re.compile(r"^\+\+\+ b/(.*)$")
 hunk = re.compile(r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@")
+for path in sys.argv[1:]:  # an untracked file: every line is new
+    with open(path, encoding="utf-8", errors="replace") as f:
+        out.extend("%s\t%d" % (path, n) for n, _ in enumerate(f, 1))
 for line in sys.stdin:
     line = line.rstrip("\n")
     m = header.match(line)
@@ -223,7 +237,7 @@ print("\n".join(out))
 PYEOF
 
 HUNKS="$(mktemp)"
-git diff -U0 "$RANGE" -- ${FILES[@]+"${FILES[@]}"} | python3 "$HUNK_MAP_PY" > "$HUNKS"
+git diff -U0 "$FROM" -- ${FILES[@]+"${FILES[@]}"} | python3 "$HUNK_MAP_PY" ${UNTRACKED[@]+"${UNTRACKED[@]}"} > "$HUNKS"
 
 # Split findings into in-hunk (can fail the job) and out-of-hunk (pre-existing, report only).
 # A finding without a line number counts as in-hunk.
