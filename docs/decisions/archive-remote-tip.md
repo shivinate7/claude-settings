@@ -9,7 +9,8 @@ A push that would drop the remote tip of a branch, with no other copy, is refuse
 |---|---|
 | A remote delete of X (`--delete`, `-d`, `:X`), X's tip on the default base or on an archive ref | allow |
 | The same delete, X's tip on neither | deny |
-| The same delete, X has no remote-tracking ref, or git cannot answer | ask (unknown tip) |
+| The same delete, X has no remote-tracking ref | allow (no tip to lose; the incident needed a tracking tip) |
+| The same delete, git cannot answer | ask (unknown tip) |
 | An archive push `<src>:archive/<name>` (or `:refs/heads/archive/<name>`), the tip of `<name>` an ancestor of `<src>`, of the default base, or of an archive ref | allow |
 | The same archive push, the tip in none of them | deny |
 | The same archive push, `<name>` has no remote-tracking ref | allow |

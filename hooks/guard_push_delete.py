@@ -432,10 +432,10 @@ def archive_tip_hit(args, cwd: str, overrides=None):
     (`<src>:archive/<name>` or `<src>:refs/heads/archive/<name>`).
 
     A delete passes when the remote-tracking tip of X is an ancestor of the default base or of an archive
-    ref. A tip that is not there, or a read git cannot answer, asks. An archive push passes when the tip
-    of <name> is an ancestor of the source, the default base or an archive ref, and when <name> has no
-    remote-tracking ref at all. A source that does not resolve, or a read git cannot answer, asks. Reads
-    run only for a delete or an archive target, and each stops at the first arm that passes."""
+    ref. An archive push passes when the tip of <name> is an ancestor of the source, the default base or
+    an archive ref. Either passes when the name has no remote-tracking ref at all: there is no tip to lose.
+    A source that does not resolve, or a read git cannot answer, asks. Reads run only for a delete or an
+    archive target, and each stops at the first arm that passes."""
     _force, mirror, every, _inc, _unp, _leased, delete, _upstream, remote, plain = _push_parse(args)
     if mirror or every or not plain:
         return "", ""
@@ -448,10 +448,10 @@ def archive_tip_hit(args, cwd: str, overrides=None):
     asked = ""
     for source, name in [(None, each) for each in deleted] + pushed:
         state, tip = _ref_tip(cwd, "refs/remotes/" + remote + "/" + name)
-        if state == "none" and source is not None:
-            continue   # an archive push to a name the remote has never held loses nothing
+        if state == "none":
+            continue   # no tracking tip, so nothing this rule can name is lost
         if state != "ok":
-            asked = asked or "no readable remote-tracking tip for " + name
+            asked = asked or "git could not read the remote-tracking tip for " + name
             continue
         arms = []
         if source is not None:
@@ -971,7 +971,7 @@ ARCHIVE_TIP_REASON = (
     "then retry. The check reads the local remote-tracking refs, so fetch <remote> first if they are stale."
 )
 ARCHIVE_TIP_ASK_REASON = (
-    "Rule (Git): the remote tip of <branch> is unknown here: its remote-tracking ref is missing, the source "
+    "Rule (Git): the remote tip of <branch> is unknown here: the source "
     "does not resolve, or git could not answer. So this push may drop a commit that has no other copy. "
     "Fetch <remote> and check, then approve. Approving the prompt lets this one through; it is not a grant."
 )

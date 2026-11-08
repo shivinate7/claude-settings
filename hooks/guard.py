@@ -96,8 +96,8 @@ Shell tools (Bash, PowerShell), in judge_shell order:
   archive-remote-tip   deny, or ask. A remote delete (`--delete`, `-d`, `:name`), or an archive push
                        (`<src>:archive/<name>`), unless the local remote-tracking tip of the name is an
                        ancestor of the default base or of a `refs/remotes/<remote>/archive/*` ref (and, for
-                       an archive push, of the source). Asks when the tip, the source or git's answer is
-                       unknown. A name with no tracking ref passes an archive push. A dry run passes.
+                       an archive push, of the source). Asks when the source does not resolve or git cannot
+                       answer. A name with no tracking ref passes, delete or archive push. A dry run passes.
   env-file             deny. Any read or write of an environment file.
   merge-checks         deny. A merge while the head has a check pending or red, while another
                        ready PR on the base runs CI, or when the read could not run. `--auto` too.
