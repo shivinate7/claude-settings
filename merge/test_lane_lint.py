@@ -664,6 +664,31 @@ class LaneLint(CiJobStub, tm.CloudSession):
         self.assertEqual(len(runs), 1, "the lint ran %d times, want once: %s" % (len(runs), out))
         self.assertFalse(runs[0]["shallow"], "the lint ran on a shallow clone, so its history checks read the cut history")
 
+    def test_git_trace_variables_in_the_environment_leave_the_root_discovery_on_the_real_root_and_the_lint_passes(self):
+        pin = self.head("feat")
+        self.assertFalse(self.is_shallow_lane(pin), "precondition: the lane checkout is shallow, so the case proves nothing")
+        self.use_ci_job(PASSING, 0)
+        if os.path.exists(self.log):
+            os.remove(self.log)
+        roots = []
+        real = merge.sh
+
+        def sh(args, *rest, **kwargs):  # records what root discovery reads back, the call's own text
+            c, out = real(args, *rest, **kwargs)
+            if list(args) == ["git", "rev-parse", "--show-toplevel"]:
+                roots.append(out)
+            return c, out
+
+        with unittest.mock.patch.dict(os.environ, {"GIT_TRACE": "1", "GIT_TRACE_SETUP": "1"}), unittest.mock.patch.object(merge, "sh", sh):
+            rc, out = self.run_lane("--lane-lint", "7")
+        self.assertEqual(roots, [os.path.realpath(self.co)], "root discovery did not read back the lane checkout's root: " + out)
+        self.assertEqual(rc, 0, "a lane lint with the git trace variables set did not pass: " + out)
+        self.assertEqual(len(pass_lines(out)), 1, out)
+        runs = self.lint_calls()
+        self.assertEqual(len(runs), 1, "the lint ran %d times, want once: %s" % (len(runs), out))
+        self.assertEqual(runs[0]["head"], pin, "the lint ran on a head other than the lane's: " + out)
+        self.assertFalse(os.path.exists(runs[0]["cwd"]), "the lint tree is still on disk: " + out)
+
     def test_lint_unknown_ok_does_not_lift_a_failed_unshallow_fetch(self):
         pin = self.make_shallow_lane()
         self.assertTrue(self.is_shallow_lane(pin), "precondition: the lane checkout is not shallow, so the case proves nothing")
