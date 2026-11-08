@@ -13684,6 +13684,56 @@ sendto_refuse("a product path in the sentence before, then Fix the bug, is refus
               lacks=("hooks/guard.py",))
 sendto_allow("red cases in a test file, then Make that pass, is allowed to a builder",
              SENDTO_BUILDER, "Red cases are in hooks/test_guard.py. Make that pass.", T_SENDTO_BUILDER)
+# A read of a path, then an edit whose object is a role noun for the other side (`Fix the assertion error`,
+# `Write the guard tests`), or a goal reached through an anaphor (`Make them all pass`). Each refused control keeps
+# one noun or anaphor rule in force: the same shape with the object on the other side is refused.
+sendto_allow("a read of a test path, then Fix the assertion error, is allowed to a builder",
+             SENDTO_BUILDER, "Read tests/x.py. Fix the assertion error.", T_SENDTO_BUILDER)
+sendto_allow("a read of a test path, then Fix the fixture bug, is allowed to a builder",
+             SENDTO_BUILDER, "Read tests/x.py. Fix the fixture bug.", T_SENDTO_BUILDER)
+sendto_allow("a CI red line on a test path, then Make it pass by fixing the guard, is allowed to a builder",
+             SENDTO_BUILDER, "CI is red on tests/x.py. Make it pass by fixing the guard.", T_SENDTO_BUILDER)
+sendto_allow("a read of a test path, then Make them pass by changing the guard, is allowed to a builder",
+             SENDTO_BUILDER, "Read tests/x.py. Make them pass by changing the guard.", T_SENDTO_BUILDER)
+sendto_allow("a read of a test path, then Make them all pass, is allowed to a builder",
+             SENDTO_BUILDER, "Read tests/x.py. Make them all pass.", T_SENDTO_BUILDER)
+sendto_allow("a read of a test path, then Make that new case pass, is allowed to a builder",
+             SENDTO_BUILDER, "Read tests/x.py. Make that new case pass.", T_SENDTO_BUILDER)
+sendto_refuse("a read of a test path, then Fix the assertion, is refused to a builder, naming test-author",
+              SENDTO_BUILDER, "Read tests/x.py. Fix the assertion.", T_SENDTO_BUILDER, "test-author",
+              lacks=("tests/x.py",))
+sendto_refuse("a read of a test path, then Fix the fixture, is refused to a builder, naming test-author",
+              SENDTO_BUILDER, "Read tests/x.py. Fix the fixture.", T_SENDTO_BUILDER, "test-author",
+              lacks=("tests/x.py",))
+sendto_allow("a read of a product path, then Write the guard tests, is allowed to a test-author",
+             SENDTO_AUTHOR, "Read hooks/guard.py. Write the guard tests.", T_SENDTO_AUTHOR)
+sendto_allow("a read of a product path, then Add the hook cases, is allowed to a test-author",
+             SENDTO_AUTHOR, "Read hooks/guard.py. Add the hook cases.", T_SENDTO_AUTHOR)
+sendto_allow("a read of a product path, then Write the bug repro, is allowed to a test-author",
+             SENDTO_AUTHOR, "Read hooks/guard.py. Write the bug repro.", T_SENDTO_AUTHOR)
+sendto_refuse("a read of a product path, then Fix the guard, is refused to a test-author, naming builder",
+              SENDTO_AUTHOR, "Read hooks/guard.py. Fix the guard.", T_SENDTO_AUTHOR, "builder",
+              lacks=("hooks/guard.py",))
+
+
+# The crash pin. The guard's main fails open on any exception, so the hook shows a silent allow for a message whose
+# judging raises. A plain word `quotespan0` is read as a masked quote that is not there, so only this direct call
+# shows the defect. Registered as a log check where LOG_CHECKS_EXTRA exists (see below).
+MESSAGE_ROLE_CRASH_LABEL = ("message-role: message_edit_paths does not raise on a plain word quotespan0 "
+                            "(The guard masks quotespan0 here. Fix guard.py.)")
+
+
+def message_edit_quotespan_check():
+    """(ok, note): message_edit_paths returns for the message, with no exception."""
+    guard = _load_guard_module()
+    if not hasattr(guard, "message_edit_paths"):
+        return False, "the guard has no message_edit_paths to read the message with"
+    try:
+        guard.message_edit_paths("The guard masks quotespan0 here. Fix guard.py.")
+    except Exception as exc:
+        return False, "message_edit_paths raised %s on the plain word quotespan0: %s" % (type(exc).__name__, exc)
+    return True, "message_edit_paths returns for the message, with no exception"
+
 
 # ---- the diff, judged at commit, push and SubagentStop
 FAMILY = "diff"
@@ -14108,6 +14158,11 @@ LOG_CHECKS_EXTRA.append(("merge: gh_call_of reads the pr verb past a --repo=<rep
                          gh_root_repo_equals_check))
 LOG_CHECKS_EXTRA.append(("merge: gh_call_of reads the pr verb past a spaced --repo <repo> root flag",
                          gh_root_repo_spaced_check))
+# The message-role crash pin (see message_edit_quotespan_check). The append tags the family in force here, so the
+# family is set by hand after it.
+FIXTURELESS_CHECKS.add(message_edit_quotespan_check)
+LOG_CHECKS_EXTRA.append((MESSAGE_ROLE_CRASH_LABEL, message_edit_quotespan_check))
+LOG_FAMILY[MESSAGE_ROLE_CRASH_LABEL] = "message-role"
 
 # ---- lane-closes-after-records: the two checks that are log checks, not cases. The override is a story over
 # several calls on one clock (see the owner-override family), and the matcher reads settings.json, as the
