@@ -13008,6 +13008,161 @@ class ReviewedList(ReviewEnv):
         self.assertEqual(rc, 0, out + err)
         self.assertEqual(list_line(self, out, 7), "#7 feat7 batch 6h")
 
+    # ---- the Findings line on the read path (decision pr-review-record). A record's Findings line is read only when its rounds would
+    # otherwise be done, against the live head. `none` reads nothing; `<n>, this PR` reads the pull request's files, every page; each
+    # follow-up names a pull request, read once. Each case counts the reads (count_gh), so a read that should not happen fails by name.
+
+    GREEN_CI = {REVIEW_HEAD: [batch_run("checks", "completed", "success")]}  # the ready head's checks, so the head's own reads are the same in each case
+    READY_READS = ["actions/runs", "issues/comments", "pulls"]  # the reads of one ready pull request's line with a green head, on this base
+
+    def this_pr(self, files, rounds=REVIEW_PASS, **record):
+        """`--reviewed` for pull request 7: a record that says `2, this PR`, with the rounds and fields given, and the pull request's files. -> (host, out)."""
+        comments = [review_comment(1, 7, record_text(rounds=rounds, findings="2, this PR", **record))]
+        host, rc, out, err = self.listing([batch_pull(7, REVIEW_HEAD)], comments, check_rows=self.GREEN_CI, files={7: files}, count_gh=True)
+        self.assertEqual(rc, 0, out + err)
+        return host, out
+
+    def follow_up(self, findings, rounds=REVIEW_PASS, pulls=(), closed=None):
+        """`--reviewed` for pull request 7: a record that names `findings`, with the rounds given, beside the open pulls and the closed ones given. -> (host, out)."""
+        comments = [review_comment(1, 7, record_text(rounds=rounds, findings=findings))]
+        host, rc, out, err = self.listing([batch_pull(7, REVIEW_HEAD), *pulls], comments, check_rows=self.GREEN_CI, count_gh=True, closed=closed or {})
+        self.assertEqual(rc, 0, out + err)
+        return host, out
+
+    def test_findings_none_reads_no_more_than_a_legacy_record(self):
+        comments = [review_comment(1, 7, record_text(rounds=REVIEW_PASS, findings="none"))]
+        host, rc, out, err = self.listing([batch_pull(7, REVIEW_HEAD)], comments, check_rows=self.GREEN_CI, count_gh=True)
+        self.assertEqual(rc, 0, out + err)
+        self.assertRegex(list_line(self, out, 7), r"^#7 feat7 batch \d+h$")
+        legacy = self.listing([batch_pull(7, REVIEW_HEAD)], [review_comment(1, 7, record_text(rounds=REVIEW_PASS))], check_rows=self.GREEN_CI, count_gh=True)[0]
+        self.assertEqual(sorted(host.gh_calls), sorted(legacy.gh_calls), "a `none` record read more than a record with no Findings line")
+
+    def test_a_legacy_record_with_no_findings_line_lists_done_with_its_reads(self):
+        # control, green on main: a record with no Findings line keeps its verdict and its cost
+        comments = [review_comment(1, 7, record_text(rounds=REVIEW_PASS))]
+        host, rc, out, err = self.listing([batch_pull(7, REVIEW_HEAD)], comments, check_rows=self.GREEN_CI, count_gh=True)
+        self.assertEqual(rc, 0, out + err)
+        self.assertRegex(list_line(self, out, 7), r"^#7 feat7 batch \d+h$")
+        self.assertEqual(sorted(host.gh_calls), sorted(self.READY_READS), "a record with no Findings line read more than the five calls")
+
+    def test_findings_this_pr_with_a_debt_file_added_is_done_and_reads_its_files_once(self):
+        host, out = self.this_pr([pull_file("docs/debts/missing-cache.md", additions=12)])
+        self.assertRegex(list_line(self, out, 7), r"^#7 feat7 batch \d+h$")
+        self.assertEqual(sorted(host.gh_calls), sorted([*self.READY_READS, "pulls/7/files"]), "the files of the pull request were not read once")
+
+    def test_findings_this_pr_with_the_debt_file_on_page_two_is_done(self):
+        # full size: 100 source files fill page one, so the added debt file is on page two, which the read follows (rel="next")
+        src = [pull_file(f"src/module_{i}.py", status="modified", additions=1, deletions=1) for i in range(100)]
+        host, out = self.this_pr([*src, pull_file("docs/debts/late-finding.md")])
+        self.assertRegex(list_line(self, out, 7), r"^#7 feat7 batch \d+h$")
+        self.assertEqual(sorted(host.gh_calls), sorted([*self.READY_READS, "pulls/7/files", "pulls/7/files"]),
+                         "the files read did not follow page two: one call per page is the cost")
+
+    def test_findings_this_pr_with_notes_lines_added_is_done(self):
+        host, out = self.this_pr([pull_file("docs/debts/notes.md", status="modified", additions=2, deletions=0)])
+        self.assertRegex(list_line(self, out, 7), r"^#7 feat7 batch \d+h$")
+
+    def test_findings_this_pr_with_no_debt_file_is_open(self):
+        host, out = self.this_pr([pull_file("src/widget.py", status="modified", additions=3, deletions=1)])
+        line = list_line(self, out, 7)
+        self.assertRegex(line, r"^#7 feat7 lane round \d+ \d+h( RED)?$")
+        self.assertEqual(host.gh_calls.count("pulls/7/files"), 1, "the files were not read, so the open reason is not a read")
+
+    def test_findings_this_pr_with_no_files_at_all_is_open(self):
+        host, out = self.this_pr([])
+        self.assertRegex(list_line(self, out, 7), r"^#7 feat7 lane round \d+ \d+h( RED)?$")
+
+    def test_findings_this_pr_with_only_deleted_notes_lines_is_open(self):
+        host, out = self.this_pr([pull_file("docs/debts/notes.md", status="modified", additions=0, deletions=3)])
+        self.assertRegex(list_line(self, out, 7), r"^#7 feat7 lane round \d+ \d+h( RED)?$")
+
+    def test_findings_this_pr_with_no_debt_file_added_is_open(self):
+        # a debt file that was removed, changed, or filed beside the store, and a decision file: none is an added file under docs/debts/
+        for row in (pull_file("docs/debts/old-debt.md", status="removed", additions=0, deletions=9),
+                    pull_file("docs/debts/old-debt.md", status="modified", additions=1, deletions=0),
+                    pull_file("docs/debts-archive/old-debt.md", status="added", additions=5),
+                    pull_file("docs/decisions/new-decision.md", status="added", additions=5)):
+            with self.subTest(file=row["filename"], status=row["status"]):
+                host, out = self.this_pr([row])
+                self.assertRegex(list_line(self, out, 7), r"^#7 feat7 lane round \d+ \d+h( RED)?$")
+
+    def test_findings_this_pr_on_an_open_round_reads_no_files(self):
+        host, out = self.this_pr([pull_file("docs/debts/x.md")], rounds=("Round 1: reviewer, sonnet, FAIL",))
+        self.assertRegex(list_line(self, out, 7), r"^#7 feat7 lane round \d+ \d+h( RED)?$")
+        self.assertNotIn("pulls/7/files", host.gh_calls, "the files were read for a record that was open on its rounds")
+
+    def test_findings_this_pr_on_a_stale_record_reads_no_files(self):
+        host, out = self.this_pr([pull_file("docs/debts/x.md")], head=REVIEW_OLD_HEAD)
+        self.assertRegex(list_line(self, out, 7), r"^#7 feat7 lane round \d+ \d+h( RED)?$")
+        self.assertNotIn("pulls/7/files", host.gh_calls, "the files were read for a stale record")
+
+    def test_findings_this_pr_on_a_held_record_reads_no_files(self):
+        host, out = self.this_pr([pull_file("docs/debts/x.md")], net="negative")
+        self.assertRegex(list_line(self, out, 7), r"^#7 feat7 (?!batch )\S.*\d+h( RED)?$")
+        self.assertNotIn("pulls/7/files", host.gh_calls, "the files were read for a held record")
+
+    def test_findings_follow_up_to_an_open_pr_is_done(self):
+        host, out = self.follow_up("2, follow-up #8", pulls=[batch_pull(8, OTHER_SHA)])
+        self.assertRegex(list_line(self, out, 7), r"^#7 feat7 batch \d+h$")
+        self.assertEqual(host.gh_calls.count("pulls/8"), 1, "the follow-up pull request was not read once")
+
+    def test_findings_follow_up_to_a_merged_pr_is_done(self):
+        host, out = self.follow_up("2, follow-up #8", closed={8: closed_pull(8, OTHER_SHA, merged=True)})
+        self.assertRegex(list_line(self, out, 7), r"^#7 feat7 batch \d+h$")
+        self.assertEqual(host.gh_calls.count("pulls/8"), 1, "the follow-up pull request was not read once")
+
+    def test_findings_follow_up_to_a_closed_unmerged_pr_is_open(self):
+        host, out = self.follow_up("2, follow-up #8", closed={8: closed_pull(8, OTHER_SHA, merged=False)})
+        self.assertRegex(list_line(self, out, 7), r"^#7 feat7 lane round \d+ \d+h( RED)?$")
+
+    def test_findings_follow_up_to_this_pr_is_open(self):
+        host, out = self.follow_up("2, follow-up #7")
+        self.assertRegex(list_line(self, out, 7), r"^#7 feat7 lane round \d+ \d+h( RED)?$")
+
+    def test_findings_follow_up_to_a_pr_that_does_not_exist_is_open_and_names_it(self):
+        # no pull request 8: the read answers 404, so the record is not done, and its line names the missing number. The list still prints.
+        host, out = self.follow_up("2, follow-up #8")
+        line = list_line(self, out, 7)
+        self.assertRegex(line, r"^#7 feat7 lane round \d+ \d+h( RED)?$")
+        self.assertIn("#8", line, "the line does not name the follow-up pull request that does not exist")
+
+    def test_findings_follow_up_whose_read_fails_is_unknown_and_holds(self):
+        # a read that cannot run is unknown, never clear (rule verification-report-unknown-reads). The record holds, and its line names the
+        # follow-up that could not be read. A failure that is not a 404 is no proof the pull request is missing, so the line is not `open`.
+        for failure in ("error connecting to api.github.com", "gh: Server Error (HTTP 502)"):
+            with self.subTest(failure=failure):
+                comments = [review_comment(1, 7, record_text(rounds=REVIEW_PASS, findings="2, follow-up #8"))]
+                host, rc, out, err = self.listing([batch_pull(7, REVIEW_HEAD)], comments, check_rows=self.GREEN_CI, count_gh=True,
+                                                  pull_errors={8: failure})
+                self.assertEqual(rc, 0, "a failed follow-up read stopped the whole list instead of holding its line:\n" + out + err)
+                line = list_line(self, out, 7)
+                self.assertNotRegex(line, r"^#7 feat7 batch ", "a failed follow-up read let the record read done")
+                self.assertIn("unknown", out, "a failed follow-up read did not print unknown")
+                self.assertIn("#8", line, "the unknown line does not name the follow-up pull request that could not be read")
+
+    def test_findings_follow_up_needs_every_named_pr_to_pass(self):
+        host, out = self.follow_up("2, follow-up #8, #9", pulls=[batch_pull(8, OTHER_SHA), batch_pull(9, OTHER_SHA)])  # control: both open
+        self.assertRegex(list_line(self, out, 7), r"^#7 feat7 batch \d+h$")
+        host, out = self.follow_up("2, follow-up #8, #9", pulls=[batch_pull(8, OTHER_SHA)], closed={9: closed_pull(9, OTHER_SHA)})
+        self.assertRegex(list_line(self, out, 7), r"^#7 feat7 lane round \d+ \d+h( RED)?$")
+
+    def test_findings_follow_up_on_an_open_round_reads_no_pull(self):
+        host, out = self.follow_up("2, follow-up #8", rounds=("Round 1: reviewer, sonnet, FAIL",), pulls=[batch_pull(8, OTHER_SHA)])
+        self.assertRegex(list_line(self, out, 7), r"^#7 feat7 lane round \d+ \d+h( RED)?$")
+        self.assertNotIn("pulls/8", host.gh_calls, "the follow-up pull request was read for a record that was open on its rounds")
+
+    def test_findings_follow_up_reads_each_named_pr_once(self):
+        host, out = self.follow_up("2, follow-up #8, #9", pulls=[batch_pull(8, OTHER_SHA), batch_pull(9, OTHER_SHA)])
+        self.assertRegex(list_line(self, out, 7), r"^#7 feat7 batch \d+h$")
+        self.assertEqual(sorted(host.gh_calls), sorted([*self.READY_READS, "pulls/8", "pulls/9"]), "one read per named pull request is the cost")
+
+    def test_findings_follow_up_on_another_base_does_not_move_the_ready_pr_protection_read(self):
+        # Host.pr sets the base of the host to the one it reads, so a follow-up on `release` must not change the protection read of pull request 7
+        host, out = self.follow_up("2, follow-up #8", pulls=[batch_pull(8, OTHER_SHA, base="release")])
+        self.assertRegex(list_line(self, out, 7), r"^#7 feat7 batch \d+h$")
+        self.assertEqual([c for c in host.gh_calls if c.startswith("branches/")], ["branches/main/protection/required_status_checks"],
+                         "reading the follow-up pull request moved the protection read of the ready pull request off main")
+
 
 # The ledger: `merge --reviewed` gives every open pull request one next act, read from GitHub alone. Ages come from one clock, LEDGER_NOW, so no
 # case reads the real one. A limit is read by name from merge.py's one constant, PR_STATE_AGE_HOURS, and never retyped here.
@@ -13398,162 +13553,6 @@ class ReviewedLedger(ReviewEnv):
         self.assertRegex(list_line(self, out, 14), r"^#14 feat14 blocked on #15 \d+h$", out)
         self.assertRegex(list_line(self, out, 15), r"^#15 feat15 blocked on #14 \d+h$", out)
         self.assertEqual(rc, 0, out + err)
-
-    # ---- the Findings line on the read path (decision pr-review-record). A record's Findings line is read only when its rounds would
-    # otherwise be done, against the live head. `none` reads nothing; `<n>, this PR` reads the pull request's files, every page; each
-    # follow-up names a pull request, read once. Each case counts the reads (count_gh), so a read that should not happen fails by name.
-
-    GREEN_CI = {REVIEW_HEAD: [batch_run("checks", "completed", "success")]}  # the ready head's checks, so the head's own reads are the same in each case
-
-    def this_pr(self, files, rounds=REVIEW_PASS, **record):
-        """`--reviewed` for pull request 7: a record that says `2, this PR`, with the rounds and fields given, and the pull request's files. -> (host, out)."""
-        comments = [review_comment(1, 7, record_text(rounds=rounds, findings="2, this PR", **record))]
-        host, rc, out, err = self.listing([batch_pull(7, REVIEW_HEAD)], comments, check_rows=self.GREEN_CI, files={7: files}, count_gh=True)
-        self.assertEqual(rc, 0, out + err)
-        return host, out
-
-    def follow_up(self, findings, rounds=REVIEW_PASS, pulls=(), closed=None):
-        """`--reviewed` for pull request 7: a record that names `findings`, with the rounds given, beside the open pulls and the closed ones given. -> (host, out)."""
-        comments = [review_comment(1, 7, record_text(rounds=rounds, findings=findings))]
-        host, rc, out, err = self.listing([batch_pull(7, REVIEW_HEAD), *pulls], comments, check_rows=self.GREEN_CI, count_gh=True, closed=closed or {})
-        self.assertEqual(rc, 0, out + err)
-        return host, out
-
-    def test_findings_none_lists_done_with_the_five_calls_and_no_other_read(self):
-        comments = [review_comment(1, 7, record_text(rounds=REVIEW_PASS, findings="none"))]
-        host, rc, out, err = self.listing([batch_pull(7, REVIEW_HEAD)], comments, check_rows=self.GREEN_CI, count_gh=True)
-        self.assertEqual(rc, 0, out + err)
-        self.assertRegex(list_line(self, out, 7), rf"^#7 feat7 {REVIEW_HEAD[:9]} done: ")
-        self.assertEqual(sorted(host.gh_calls), sorted(ready_calls(REVIEW_HEAD)), "a `none` record read more than the five calls of a ready pull request")
-
-    def test_a_legacy_record_with_no_findings_line_lists_done_with_the_five_calls(self):
-        # control, green on main: a record with no Findings line keeps its verdict and its cost
-        comments = [review_comment(1, 7, record_text(rounds=REVIEW_PASS))]
-        host, rc, out, err = self.listing([batch_pull(7, REVIEW_HEAD)], comments, check_rows=self.GREEN_CI, count_gh=True)
-        self.assertEqual(rc, 0, out + err)
-        self.assertRegex(list_line(self, out, 7), rf"^#7 feat7 {REVIEW_HEAD[:9]} done: ")
-        self.assertEqual(sorted(host.gh_calls), sorted(ready_calls(REVIEW_HEAD)), "a record with no Findings line read more than the five calls")
-
-    def test_findings_this_pr_with_a_debt_file_added_is_done_and_reads_its_files_once(self):
-        host, out = self.this_pr([pull_file("docs/debts/missing-cache.md", additions=12)])
-        self.assertRegex(list_line(self, out, 7), rf"^#7 feat7 {REVIEW_HEAD[:9]} done: ")
-        self.assertEqual(sorted(host.gh_calls), sorted([*ready_calls(REVIEW_HEAD), "pulls/7/files"]), "the files of the pull request were not read once")
-
-    def test_findings_this_pr_with_the_debt_file_on_page_two_is_done(self):
-        # full size: 100 source files fill page one, so the added debt file is on page two, which the read follows (rel="next")
-        src = [pull_file(f"src/module_{i}.py", status="modified", additions=1, deletions=1) for i in range(100)]
-        host, out = self.this_pr([*src, pull_file("docs/debts/late-finding.md")])
-        self.assertRegex(list_line(self, out, 7), rf"^#7 feat7 {REVIEW_HEAD[:9]} done: ")
-        self.assertEqual(sorted(host.gh_calls), sorted([*ready_calls(REVIEW_HEAD), "pulls/7/files", "pulls/7/files"]),
-                         "the files read did not follow page two: one call per page is the cost")
-
-    def test_findings_this_pr_with_notes_lines_added_is_done(self):
-        host, out = self.this_pr([pull_file("docs/debts/notes.md", status="modified", additions=2, deletions=0)])
-        self.assertRegex(list_line(self, out, 7), rf"^#7 feat7 {REVIEW_HEAD[:9]} done: ")
-
-    def test_findings_this_pr_with_no_debt_file_is_open(self):
-        host, out = self.this_pr([pull_file("src/widget.py", status="modified", additions=3, deletions=1)])
-        line = list_line(self, out, 7)
-        self.assertRegex(line, rf"^#7 feat7 {REVIEW_HEAD[:9]} open: ")
-        self.assertIn("2 findings, none filed", line)
-        self.assertEqual(host.gh_calls.count("pulls/7/files"), 1, "the files were not read, so the open reason is not a read")
-
-    def test_findings_this_pr_with_no_files_at_all_is_open(self):
-        host, out = self.this_pr([])
-        self.assertRegex(list_line(self, out, 7), rf"^#7 feat7 {REVIEW_HEAD[:9]} open: ")
-        self.assertIn("2 findings, none filed", list_line(self, out, 7))
-
-    def test_findings_this_pr_with_only_deleted_notes_lines_is_open(self):
-        host, out = self.this_pr([pull_file("docs/debts/notes.md", status="modified", additions=0, deletions=3)])
-        self.assertRegex(list_line(self, out, 7), rf"^#7 feat7 {REVIEW_HEAD[:9]} open: ")
-        self.assertIn("2 findings, none filed", list_line(self, out, 7))
-
-    def test_findings_this_pr_with_no_debt_file_added_is_open(self):
-        # a debt file that was removed, changed, or filed beside the store, and a decision file: none is an added file under docs/debts/
-        for row in (pull_file("docs/debts/old-debt.md", status="removed", additions=0, deletions=9),
-                    pull_file("docs/debts/old-debt.md", status="modified", additions=1, deletions=0),
-                    pull_file("docs/debts-archive/old-debt.md", status="added", additions=5),
-                    pull_file("docs/decisions/new-decision.md", status="added", additions=5)):
-            with self.subTest(file=row["filename"], status=row["status"]):
-                host, out = self.this_pr([row])
-                self.assertRegex(list_line(self, out, 7), rf"^#7 feat7 {REVIEW_HEAD[:9]} open: ")
-                self.assertIn("2 findings, none filed", list_line(self, out, 7))
-
-    def test_findings_this_pr_on_an_open_round_reads_no_files(self):
-        host, out = self.this_pr([pull_file("docs/debts/x.md")], rounds=("Round 1: reviewer, sonnet, FAIL",))
-        self.assertRegex(list_line(self, out, 7), rf"^#7 feat7 {REVIEW_HEAD[:9]} open: ")
-        self.assertNotIn("pulls/7/files", host.gh_calls, "the files were read for a record that was open on its rounds")
-
-    def test_findings_this_pr_on_a_stale_record_reads_no_files(self):
-        host, out = self.this_pr([pull_file("docs/debts/x.md")], head=REVIEW_OLD_HEAD)
-        self.assertRegex(list_line(self, out, 7), rf"^#7 feat7 {REVIEW_HEAD[:9]} stale: ")
-        self.assertNotIn("pulls/7/files", host.gh_calls, "the files were read for a stale record")
-
-    def test_findings_this_pr_on_a_held_record_reads_no_files(self):
-        host, out = self.this_pr([pull_file("docs/debts/x.md")], net="negative")
-        self.assertRegex(list_line(self, out, 7), rf"^#7 feat7 {REVIEW_HEAD[:9]} held: ")
-        self.assertNotIn("pulls/7/files", host.gh_calls, "the files were read for a held record")
-
-    def test_findings_follow_up_to_an_open_pr_is_done(self):
-        host, out = self.follow_up("2, follow-up #8", pulls=[batch_pull(8, OTHER_SHA)])
-        self.assertRegex(list_line(self, out, 7), rf"^#7 feat7 {REVIEW_HEAD[:9]} done: ")
-        self.assertEqual(host.gh_calls.count("pulls/8"), 1, "the follow-up pull request was not read once")
-
-    def test_findings_follow_up_to_a_merged_pr_is_done(self):
-        host, out = self.follow_up("2, follow-up #8", closed={8: closed_pull(8, OTHER_SHA, merged=True)})
-        self.assertRegex(list_line(self, out, 7), rf"^#7 feat7 {REVIEW_HEAD[:9]} done: ")
-        self.assertEqual(host.gh_calls.count("pulls/8"), 1, "the follow-up pull request was not read once")
-
-    def test_findings_follow_up_to_a_closed_unmerged_pr_is_open(self):
-        host, out = self.follow_up("2, follow-up #8", closed={8: closed_pull(8, OTHER_SHA, merged=False)})
-        self.assertRegex(list_line(self, out, 7), rf"^#7 feat7 {REVIEW_HEAD[:9]} open: ")
-
-    def test_findings_follow_up_to_this_pr_is_open(self):
-        host, out = self.follow_up("2, follow-up #7")
-        self.assertRegex(list_line(self, out, 7), rf"^#7 feat7 {REVIEW_HEAD[:9]} open: ")
-
-    def test_findings_follow_up_to_a_pr_that_does_not_exist_is_open_and_names_it(self):
-        # no pull request 8: the read answers 404, so the record is not done, and its line names the missing number. The list still prints.
-        host, out = self.follow_up("2, follow-up #8")
-        line = list_line(self, out, 7)
-        self.assertRegex(line, rf"^#7 feat7 {REVIEW_HEAD[:9]} open: ")
-        self.assertIn("#8", line, "the line does not name the follow-up pull request that does not exist")
-
-    def test_findings_follow_up_whose_read_fails_is_unknown_and_holds(self):
-        # a read that cannot run is unknown, never clear (rule verification-report-unknown-reads). The record holds, and its line names the
-        # follow-up that could not be read. A failure that is not a 404 is no proof the pull request is missing, so the line is not `open`.
-        for failure in ("error connecting to api.github.com", "gh: Server Error (HTTP 502)"):
-            with self.subTest(failure=failure):
-                comments = [review_comment(1, 7, record_text(rounds=REVIEW_PASS, findings="2, follow-up #8"))]
-                host, rc, out, err = self.listing([batch_pull(7, REVIEW_HEAD)], comments, check_rows=self.GREEN_CI, count_gh=True,
-                                                  pull_errors={8: failure})
-                self.assertEqual(rc, 0, "a failed follow-up read stopped the whole list instead of holding its line:\n" + out + err)
-                line = list_line(self, out, 7)
-                self.assertRegex(line, rf"^#7 feat7 {REVIEW_HEAD[:9]} unknown: ", "a failed follow-up read did not read unknown")
-                self.assertIn("#8", line, "the unknown line does not name the follow-up pull request that could not be read")
-
-    def test_findings_follow_up_needs_every_named_pr_to_pass(self):
-        host, out = self.follow_up("2, follow-up #8, #9", pulls=[batch_pull(8, OTHER_SHA), batch_pull(9, OTHER_SHA)])  # control: both open
-        self.assertRegex(list_line(self, out, 7), rf"^#7 feat7 {REVIEW_HEAD[:9]} done: ")
-        host, out = self.follow_up("2, follow-up #8, #9", pulls=[batch_pull(8, OTHER_SHA)], closed={9: closed_pull(9, OTHER_SHA)})
-        self.assertRegex(list_line(self, out, 7), rf"^#7 feat7 {REVIEW_HEAD[:9]} open: ")
-
-    def test_findings_follow_up_on_an_open_round_reads_no_pull(self):
-        host, out = self.follow_up("2, follow-up #8", rounds=("Round 1: reviewer, sonnet, FAIL",), pulls=[batch_pull(8, OTHER_SHA)])
-        self.assertRegex(list_line(self, out, 7), rf"^#7 feat7 {REVIEW_HEAD[:9]} open: ")
-        self.assertNotIn("pulls/8", host.gh_calls, "the follow-up pull request was read for a record that was open on its rounds")
-
-    def test_findings_follow_up_reads_each_named_pr_once(self):
-        host, out = self.follow_up("2, follow-up #8, #9", pulls=[batch_pull(8, OTHER_SHA), batch_pull(9, OTHER_SHA)])
-        self.assertRegex(list_line(self, out, 7), rf"^#7 feat7 {REVIEW_HEAD[:9]} done: ")
-        self.assertEqual(sorted(host.gh_calls), sorted([*ready_calls(REVIEW_HEAD), "pulls/8", "pulls/9"]), "one read per named pull request is the cost")
-
-    def test_findings_follow_up_on_another_base_does_not_move_the_ready_pr_protection_read(self):
-        # Host.pr sets the base of the host to the one it reads, so a follow-up on `release` must not change the protection read of pull request 7
-        host, out = self.follow_up("2, follow-up #8", pulls=[batch_pull(8, OTHER_SHA, base="release")])
-        self.assertRegex(list_line(self, out, 7), rf"^#7 feat7 {REVIEW_HEAD[:9]} done: ")
-        self.assertEqual([c for c in host.gh_calls if c.startswith("branches/")], ["branches/main/protection/required_status_checks"],
-                         "reading the follow-up pull request moved the protection read of the ready pull request off main")
 
 
 # The report-only model judge at merge. The merge reads each governed Markdown file at head, selects a file whose line
