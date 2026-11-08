@@ -5059,7 +5059,8 @@ class AnsweredNeedsSourceTests(StopVerdictMixin, unittest.TestCase):
 class PreExistingNeedsMainRunTests(StopVerdictMixin, unittest.TestCase):
     """The pre-existing verdict, in report_guard.py's Stop hook (rule pre-existing-needs-main-run). A reply line
     that calls a failure pre-existing, calls it already red on main, or says it fails on a commit "too" must name
-    a run on main on the same line: "on main at <sha>", "on origin/main", or a CI run URL on main. Incident
+    a run on the base branch on the same line: "on main at <sha>", "on origin/<branch> at <sha>", or a CI run URL
+    on main. A bare "on origin/main" names no run (coordinator ruling 2026-11-08 03:52 CST). Incident
     2026-11-07: a lane report said a failure "fails on 32b5f8b8e too, pre-existing"; 32b5f8b8e was the PR's own
     head, not main, so the failure came from the PR."""
 
