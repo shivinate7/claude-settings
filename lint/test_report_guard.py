@@ -1073,6 +1073,16 @@ class DoneNamesModelsTests(unittest.TestCase):
             "> **Done** BUILT the guard, PR #5 (reviewer haiku, reviewer sonnet)\n> **Next** Unstarted: none",
             [self.REVIEWER_R1, self.REVIEWER_R2], between=[stop_hook_feedback()]))
 
+    def test_dm_red_builder_before_stop_hook_feedback_unnamed_blocks(self):
+        # Catches: stop-hook feedback that starts the window after the builder spawn before it, so a report that
+        # names only the reviewer passes with the builder unnamed.
+        out = self.verdict(
+            "> **Done** BUILT the guard, PR #5 (reviewer sonnet)\n> **Next** Unstarted: none",
+            [self.BUILDER, self.REVIEWER_R2], between=[stop_hook_feedback()])
+        self.assertIsNotNone(out, "the report passed: the builder spawn before the stop-hook feedback went unnamed")
+        self.assertEqual(out["decision"], "block")
+        self.assertIn("no model named for builder", out["reason"])
+
     def test_dm_false_alarm_lane_builder_then_reviewer_passes(self):
         # A lane: its input is a peer brief. A finish sequence comes before the round-1 and round-2 reviewers.
         # Catches: on main the finish sequence's reminder, read as the owner's message, moves the window to the
@@ -1081,6 +1091,16 @@ class DoneNamesModelsTests(unittest.TestCase):
             "> **Done** BUILT the guard, PR #5 (builder sonnet, reviewer haiku, reviewer sonnet)\n> **Next** Unstarted: none",
             [self.BUILDER, self.REVIEWER_R1, self.REVIEWER_R2], lead=[peer_brief()], between=task_notice())
         self.assertIsNone(out, "the report blocked: the finish sequence moved the window past the earlier reviewer spawns")
+
+    def test_dm_red_lane_builder_before_a_finish_sequence_unnamed_blocks(self):
+        # Catches: a finish sequence that starts the window after the builder spawn, so a report that names only
+        # the reviewers passes with the builder unnamed.
+        out = self.verdict(
+            "> **Done** BUILT the guard, PR #5 (reviewer haiku, reviewer sonnet)\n> **Next** Unstarted: none",
+            [self.BUILDER, self.REVIEWER_R1, self.REVIEWER_R2], lead=[peer_brief()], between=task_notice())
+        self.assertIsNotNone(out, "the report passed: the builder spawn before the finish sequence went unnamed")
+        self.assertEqual(out["decision"], "block")
+        self.assertIn("no model named for builder", out["reason"])
 
     def test_dm_false_alarm_reviewer_before_a_fired_wake_is_not_required_passes(self):
         # Catches: a fired wake starts a turn, so the reviewer spawn before it is out of the window and need not be
@@ -1572,9 +1592,13 @@ class RewriteAfterMissingReportTests(unittest.TestCase):
         out = self.run_hook(records, True)
         self.assertIn("Unstarted guard", out["reason"])
 
-    def reviewer_turn(self, reply, active):
+    def reviewer_turn(self, reply, active, builder_first=False):
         # One turn: a round-1 reviewer, the real finish sequence, a round-2 reviewer, the landing commit, the reply.
-        records = [human("do the task"), tool_use_msg("Agent", DoneNamesModelsTests.REVIEWER_R1), tool_result_msg()]
+        # `builder_first` puts a builder spawn before the round-1 reviewer, so it sits before the finish sequence.
+        records = [human("do the task")]
+        if builder_first:
+            records += [tool_use_msg("Agent", self.BUILDER), tool_result_msg()]
+        records += [tool_use_msg("Agent", DoneNamesModelsTests.REVIEWER_R1), tool_result_msg()]
         records += task_notice()
         records += [tool_use_msg("Agent", DoneNamesModelsTests.REVIEWER_R2), tool_result_msg(),
                     tool_use_msg("Bash", {"command": "git commit -m x"}), tool_result_msg(), assistant_text(reply)]
@@ -1589,6 +1613,18 @@ class RewriteAfterMissingReportTests(unittest.TestCase):
                                  "> **Next** Unstarted: none", True)
         self.assertIsNone(out, "the rewrite was refused: the finish sequence moved the rewrite's window past the "
                                "round-1 haiku spawn")
+
+    def test_rw_red_rewrite_naming_only_reviewers_after_a_builder_blocks(self):
+        # Catches: a rewrite whose window starts after the builder spawn before the finish sequence, so a rewrite
+        # that names only the reviewers passes with the builder unnamed.
+        first = self.reviewer_turn("All done.", False, builder_first=True)
+        self.assertIn("Send the report now", first["reason"])
+        out = self.reviewer_turn("> **Done** BUILT the guard, PR #5 (reviewer haiku, reviewer sonnet)\n"
+                                 "> **Next** Unstarted: none", True, builder_first=True)
+        self.assertIsNotNone(out, "the rewrite passed: the builder spawn before the finish sequence went unnamed")
+        self.assertEqual(out["decision"], "block")
+        self.assertIn("Model-name guard", out["reason"])
+        self.assertIn("no model named for builder", out["reason"])
 
 
 REPORT_NO_LINE = "> **Done** BUILT abc123\n> **Deviations** none\n> **Next** ship it"
