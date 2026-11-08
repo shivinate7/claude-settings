@@ -528,24 +528,38 @@ def answered_problem(text):
     return ANSWERED_REASON + "".join("\n- " + b for b in bad) if bad else ""
 
 
-# pre-existing-needs-main-run: a reply sentence that calls a failure pre-existing, says it was already red or
-# already there, or says it fails on a commit or on the base "too", "also" or "as well" must name a run on the
-# base branch's tip on the same line: "on <base> at <sha>", or a CI run URL on a line that says "on <base>". The
-# base is main, master or origin/<branch>. A bare base name is no run. The word forms count only in a sentence that
-# holds a failure word. Quoted text and code spans are no claim. A negator in the same clause before the claim
-# (the answered check's list) exempts it; a clause ends at a conjunction as well as at the answered check's
-# breaks. A sentence that ends in `?` asks and claims nothing. Fenced blocks are skipped.
+# pre-existing-needs-main-run: a reply sentence that makes a pre-existing claim must name a run on the base
+# branch's tip on the same line. The base is main, master or origin/<branch>. A run is "on <base> at <sha>",
+# "on <base> at commit <sha>", "on <base> (<sha>)", "<base>@<sha>", or a CI run URL on a line that says
+# "on <base>". A bare base name is no run. A claim is one of three forms, in a sentence that holds a failure word:
+# - "pre-existing" that describes the failure: next comes a failure noun, a preposition or no word, or before it
+#   comes is/was/it. "A pre-existing test" or "the pre-existing guard" modifies another noun and is no claim.
+# - "already red" (fails, broken, there, present), in a sentence that names a base or "before this change".
+#   "Already red on the old code" names neither.
+# - a failure word, "too", "also" or "as well", and "on" or "at" a sha or a base. A clause that starts with the
+#   ref ("..., on main too") takes the failure word from an earlier clause.
+# Quoted text and code spans are no claim. A negator in the same clause before the claim (the answered check's
+# list) exempts it. A clause ends at a conjunction, "as" and "which" as well as at the answered check's breaks.
+# A sentence that ends in `?` asks and claims nothing. Fenced blocks are skipped.
 PRE_EXISTING_RE = re.compile(r"(?<![\w-])pre[- ]?existing(?![\w-])", re.I)
+PRE_DESCRIBES_AFTER_RE = re.compile(
+    r"\s*(?:$|[^\w\s]|(?:on|at|in|since|before|from|too|also)\b"
+    r"|(?:[\w-]+\s+)?(?:failures?|errors?|regressions?|breakage|flakes?|flakiness|red)\b)", re.I)
+PRE_DESCRIBES_BEFORE_RE = re.compile(
+    r"\b(?:is|was|are|were|be|been|it|them)\s+(?:(?!(?:an?|the|this|that|its|my|our)\b)\w+\s+)?$", re.I)
 ALREADY_RE = re.compile(r"\balready\s+(?:red|fail\w*|broken|there|present)\b", re.I)
 FAILURE_RE = re.compile(r"\b(?:fail\w*|red|broken|breaks?|errors?|regress\w*|flak\w*)\b", re.I)
 SHA_WORD = r"\b(?=[0-9a-f]*\d)[0-9a-f]{7,40}\b"
 BASE_REF = r"(?:origin/\w[\w./-]*|main|master)"
+BASE_WORD_RE = re.compile(r"\b%s\b|\bbefore\s+(?:this|the|my)\s+change\b" % BASE_REF, re.I)
 FAIL_REF_RE = re.compile(r"\b(?:on|at)\s+(?:%s|%s)" % (BASE_REF, SHA_WORD), re.I)
 TOO_RE = re.compile(r"\b(?:too|also|as\s+well)\b", re.I)
 PRE_CLAUSE_BREAK_RE = re.compile(
-    ANSWERED_CLAUSE_BREAK_RE.pattern + r"|\b(?:and|but|so|while|because|since|although)\b", re.I)
+    ANSWERED_CLAUSE_BREAK_RE.pattern
+    + r"|\b(?:and|but|so|while|because|since|although|which)\b|\bas\b(?!\s+well\b)", re.I)
 SENTENCE_BREAK_RE = re.compile(r"(?<=[.!?])\s+")
-MAIN_RUN_RE = re.compile(r"\bon\s+%s\s+at\s+%s" % (BASE_REF, SHA_WORD), re.I)
+MAIN_RUN_RE = re.compile(
+    r"\bon\s+{b}\s+(?:at\s+(?:commit\s+)?{s}|\(\s*{s}\s*\))|\b{b}@{s}".format(b=BASE_REF, s=SHA_WORD), re.I)
 MAIN_RUN_URL_RE = re.compile(r"https?://\S*/actions/runs/\d+\S*", re.I)
 ON_BASE_RE = re.compile(r"\bon\s+%s\b" % BASE_REF, re.I)
 PRE_EXISTING_REASON = (
@@ -555,18 +569,36 @@ PRE_EXISTING_REASON = (
     "or say the failure comes from this change. A bare \"on origin/main\" is no run. Lines: ")
 
 
+def _pre_existing_describes_failure(clause, m):
+    """True when the word at `m` describes the failure, not another noun such as test or guard."""
+    return bool(PRE_DESCRIBES_AFTER_RE.match(clause, m.end())
+                or PRE_DESCRIBES_BEFORE_RE.search(clause[:m.start()]))
+
+
+def _unnegated(clause, pos):
+    return not ANSWERED_NEGATOR_RE.search(clause[:pos])
+
+
 def _claims_pre_existing(sentence):
     """True when `sentence` holds a pre-existing claim with no negator in its clause before it."""
     plain = QUOTED_RE.sub(" ", MISTAKE_URL_RE.sub(" ", sentence))
-    failing = bool(FAILURE_RE.search(plain))
+    if not FAILURE_RE.search(plain):
+        return False
+    names_base = bool(BASE_WORD_RE.search(plain))
+    earlier_fail = False
     for clause in PRE_CLAUSE_BREAK_RE.split(plain):
-        for rx in (PRE_EXISTING_RE, ALREADY_RE):
-            for m in rx.finditer(clause):
-                if failing and not ANSWERED_NEGATOR_RE.search(clause[:m.start()]):
-                    return True
+        for m in PRE_EXISTING_RE.finditer(clause):
+            if _pre_existing_describes_failure(clause, m) and _unnegated(clause, m.start()):
+                return True
+        for m in ALREADY_RE.finditer(clause):
+            if names_base and _unnegated(clause, m.start()):
+                return True
         fail = FAILURE_RE.search(clause)
-        if (fail and TOO_RE.search(clause) and FAIL_REF_RE.search(clause)
-                and not ANSWERED_NEGATOR_RE.search(clause[:fail.start()])):
+        if fail:
+            if TOO_RE.search(clause) and FAIL_REF_RE.search(clause) and _unnegated(clause, fail.start()):
+                return True
+            earlier_fail = earlier_fail or _unnegated(clause, fail.start())
+        elif earlier_fail and TOO_RE.search(clause) and FAIL_REF_RE.match(clause.strip()):
             return True
     return False
 
