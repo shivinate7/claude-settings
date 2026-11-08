@@ -79,12 +79,15 @@ when the live file is missing or unreadable, its readAt is bad (the stale-step r
 items list, or it holds an item row of the wrong shape. A skipped session row does not blank this row.
 
 The upkeep list also names each open step whose note, why or ask holds an owner-pick claim that the page's recorded
-answers do not match (step pick-claims-match-page). A claim is `the owner picked <letter>`, `owner picked <letter>` or
-`item <n> <letter>` (`item #<n>` too), any case, the letter one whole word; "Owner picked none of these" is not one. A
+answers do not match (step pick-claims-match-page). A claim is `[the] owner picked [option] <letter>` or
+`item <n> <letter>` (`item #<n>` too), any case, the letter one whole word, with markup or punctuation allowed around it
+(`**b**`, `(b)`, `: b`, backticks). An `item` claim ends at the end of the text or before `. , ; ) ] ? * ``, after
+optional whitespace, so "item 9 a decision" is not one; "Owner picked none of these" and "items 9 and 10 a" are not
+claims either. A
 claim naming item n matches the live file's "answers" row {"n", "choice"?, "at"?} with that n, or that item's
 `lastAnswer` {"choice"?, "note"?, "at"?} on its "items" row, when its choice (a letter, or a list of letters) holds the
 letter. A claim with no item number matches nothing. An answers row with no integer n (answers/park.<id>) is skipped.
-Each entry reads `<step id> (claim "<claim as written>")`. The row reads one unknown entry, never an empty list, when
+Each entry reads `<step id> (claim "<claim>")`, its whitespace collapsed to one space. The row reads one unknown entry, never an empty list, when
 the live file is missing or unreadable, its readAt is bad, it has no answers list or no items list, or an answers row
 or a lastAnswer has the wrong shape. A skipped session row does not blank it. Cost: it reads only the live file the
 build already takes; 0 process starts, 0 files written, no timer or watcher.
@@ -1446,14 +1449,19 @@ def unfiled(steps, work):
     return out
 
 
-# An owner-pick claim: `the owner picked <letter>` or `item [#]<n> <letter>`, any case. No word character may touch either
-# end, so "homeowner picked a", "subitem 9 a", "items 9 a" and "item 9 ab" are not claims.
-PICK_CLAIM = re.compile(r"(?<![\w-])(?:(?i:(?:the\s+)?owner\s+picked)\s+(?P<pick>[A-Za-z])"
-                        r"|(?i:item)\s+#?(?P<n>\d+)\s+(?P<letter>[A-Za-z]))(?!\w)")
+# An owner-pick claim: `[the] owner picked [option] <letter>` or `item [#]<n> <letter>`, any case. The letter may sit behind
+# markup or punctuation (`**b**`, `(b)`, `: b`, backticks). No word character may touch either end, so "homeowner picked a",
+# "subitem 9 a", "items 9 a" and "item 9 ab" are not claims. An item claim must also end at the end of the text, or before
+# `. , ; ) ] ? * ` ` (after optional whitespace), so the article in "item 9 a decision" is no pick.
+_SEP = r"[\s:*`(\[]+"
+_CLOSE = r"[*`)\]]*"
+PICK_CLAIM = re.compile(
+    r"(?<![\w-])(?:(?i:(?:the\s+)?owner\s+picked)" + _SEP + r"(?:(?i:option)" + _SEP + r")?(?P<pick>[A-Za-z])" + _CLOSE +
+    r"(?!\w)|(?i:item)\s+#?(?P<n>\d+)" + _SEP + r"(?P<letter>[A-Za-z])" + _CLOSE + r"(?=\s*(?:\Z|[.,;)\]?*`])))")
 
 
 def pick_claims(open_, work):
-    """Entries `<step> (claim "<text as written>")` for each owner-pick claim in an open step's note, why or ask that the
+    """Entries `<step> (claim "<text>")` (whitespace collapsed to one space) for each owner-pick claim in an open step's note, why or ask that the
     page's recorded answers do not match, or one unknown entry. A claim naming item n matches when the answers row with n,
     or that item's lastAnswer, holds its letter. A claim with no item number matches nothing. Reads the live file only."""
     work = work or {"read": "unknown (no --live file)"}
@@ -1469,9 +1477,10 @@ def pick_claims(open_, work):
             for m in PICK_CLAIM.finditer(text if isinstance(text, str) else ""):
                 if m.group("n") is not None and m.group("letter").lower() in work["answerPicks"].get(int(m.group("n")), ()):
                     continue
-                if m.group(0) not in seen:
-                    seen.add(m.group(0))
-                    out.append('%s (claim "%s")' % (k, m.group(0)))
+                claim = " ".join(m.group(0).split())  # an entry is one line
+                if claim not in seen:
+                    seen.add(claim)
+                    out.append('%s (claim "%s")' % (k, claim))
     return out
 
 
