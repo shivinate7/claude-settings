@@ -5453,6 +5453,30 @@ sh("narrate: tail of a file, no pipe", "tail -n 5 notes.txt", "allow", cwd=NOGIT
 sh("narrate: merge --confirm named in a quoted argument runs nothing",
    "echo 'merge 12 --confirm' | tail -1", "allow", cwd=NOGIT)
 
+# --- a tee between the wait and tail or head (extends the live-stream rule)
+#
+# tee keeps every byte in its file, but a tail or head after it still cuts what the agent reads, so the
+# heartbeat is hidden as before. narrated_tail_hit walks past the tee, as the check rule does. A tee
+# with nothing after it is the tee-only row above, and stays allowed.
+sh("narrate: a tee, then tail, after merge --confirm is refused",
+   "merge --confirm | tee x | tail -3", "deny", "live-stream", cwd=NOGIT)
+sh("narrate: a tee, then head, after merge --confirm is refused",
+   "merge 12 --confirm 2>&1 | tee -a log | head -5", "deny", "live-stream", cwd=NOGIT)
+sh("narrate: a tee, then grep, then tail, after merge --confirm is refused",
+   "merge 12 --confirm 2>&1 | tee run.out | grep FAIL | tail -3", "deny", "live-stream", cwd=NOGIT)
+sh("narrate: merge --confirm through tee with nothing after it is allowed",
+   "merge --confirm | tee x", "allow", cwd=NOGIT)
+# The scanner reads the pipeline's text, so a lone apostrophe, a comment or a quote near the tee must not
+# change which stages it reads (building-scanner-respects-strings).
+sh("narrate: scanner: a lone apostrophe ahead of a tee, then tail, is refused",
+   "echo don't; merge 12 --confirm 2>&1 | tee x | tail -3", "deny", "live-stream", cwd=NOGIT)
+sh("narrate: scanner: a tail after # is a comment, so the tee is the last stage and is allowed",
+   "merge 12 --confirm 2>&1 | tee x # | tail -3", "allow", cwd=NOGIT)
+sh("narrate: scanner: a pipe and a # inside the tee's quoted file name is no follow",
+   "merge 12 --confirm 2>&1 | tee 'a # | tail -3'", "allow", cwd=NOGIT)
+sh("narrate: scanner: a tee and tail pipe quoted as text is no follow",
+   'echo "merge 12 --confirm | tee x | tail -3"', "allow", cwd=NOGIT)
+
 # --- a pipe out of a verdict stage (extends the live-stream rule)
 #
 # verdict prints its FAIL line first, and a pipe cuts it off. A pipeline's exit is its last stage's,
