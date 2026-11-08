@@ -84,4 +84,4 @@ The grant covers the spawn only. Each tool call the agent makes still meets the 
 Why: the owner had to type a grant again in each session (plan, section "The problem").
 
 Kind: process
-Home: this record.
+Home: docs/decisions/grant-reaches-lanes.md
