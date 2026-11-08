@@ -38,6 +38,9 @@ Limits:
 - Not read: a pipe split across lines before `iex`, `iex ("" + @"…"@)`, and a here-string written with `Set-Content` and run later.
 - A here-string given to `Set-Content` is allowed.
 - A rare false alarm: `Write-Output iex @'…'@` is refused, because the word `iex` sits before the here-string.
+- Another rare false alarm: `pwsh -File x.ps1 -c @"…"@` and `pwsh x.ps1 -c @"…"@` are refused. Any earlier `-c` counts, even a script's own argument.
+- Not read, as on main: a pwsh named by path before `-c` (`/usr/bin/pwsh -c @"`), and `pwsh -c:@"`.
+- Not read, as on main: a here-string given to `bash -c`, piped to `bash`, or given to `cmd /c`.
 - A here-string held in a variable is not read, even when a later line runs it (`iex $b`, `$b | iex`). Main allows it too.
 - The guard does not judge a `gh api` POST to the pulls endpoint, or `hub pull-request`. Each can open a non-draft PR.
 - A short-flag cluster such as `-dt x` is refused, a rare false alarm.

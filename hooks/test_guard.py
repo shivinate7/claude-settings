@@ -9104,9 +9104,9 @@ sh("draft-pr: a perl body whose backtick span runs on past a backslash-newline i
 sh("draft-pr: a perl body with a backtick span left unclosed, holding a $( ) gh pr create, fed to perl, is refused",
    "\n".join(["perl - <<'EOF'", "print `echo $(gh pr create -t x);", "EOF"]), "deny", "draft-pr",
    cwd=NOGIT, carries=DRAFT_REMEDY, lacks=DRAFT_LACKS)
-# A PowerShell here-string is shell text when a shell runs it: piped to or passed to `iex` or Invoke-Expression,
-# piped to `pwsh -Command -`, passed as the `-Command` or `-c` argument of pwsh or powershell, or built into a
-# scriptblock. The pipe into the shell may pass through Out-String first, and a `&` call operator may start the
+# A PowerShell here-string is shell text when a shell runs it. It may be piped or passed to `iex` or
+# Invoke-Expression, or piped to `pwsh -Command -`. It may be the `-Command` or `-c` argument of pwsh or
+# powershell, or built into a scriptblock. The pipe into the shell may pass through Out-String first, and a `&` call operator may start the
 # pwsh that reads stdin. A bare gh pr create line in such a body runs, so it is refused. A here-string held in a
 # variable is not read, even when a later line runs it (`iex $b`, `$b | iex`), so it is allowed, and so is a `$( )`
 # in a single-quoted body (literal). A `$( )` in a double-quoted body runs while the string is built.

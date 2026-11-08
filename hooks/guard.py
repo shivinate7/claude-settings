@@ -3939,12 +3939,12 @@ def impeccable_shell_hit(segment: str) -> str:
 
 # A PowerShell here-string: `@'` ... `'@` is text, `@"` ... `"@` runs its `$(...)`.
 _HERE_STRING = re.compile(r"@(['\"])[ \t]*\r?\n(.*?)\r?\n\1@", re.S)
-# What runs a here-string, by the command word around it. Before it: `iex` or `Invoke-Expression` takes it as
-# its argument (a `(` may open it), `[scriptblock]::Create(` builds a block from it, or a pwsh or powershell
-# launch ends in `-Command` or `-c` and takes it as the script. After it, the closing parens of such a call,
+# What runs a here-string, by the command word around it. Before it, three forms run it. `iex` or
+# `Invoke-Expression` takes it as its argument, and a `(` may open it. `[scriptblock]::Create(` builds a block
+# from it. A pwsh or powershell launch ends in `-Command` or `-c`. After it, the closing parens of such a call,
 # then a pipe into iex, Invoke-Expression, or a pwsh that reads stdin, through any `Out-String` stages. A
-# here-string given to Set-Content, or held in a variable that no word on its own line runs, matches neither: a
-# later line that runs the variable (`$b = @"..."@` then `iex $b`) is not read.
+# here-string given to Set-Content matches neither. Nor does one held in a variable that no word on its own
+# line runs. A later line that runs the variable (`$b = @"..."@` then `iex $b`) is not read.
 # The before side keeps its own word list. `nested_script` (guard_core.py) answers a different question: it
 # returns the text that follows a word, and the text here is the here-string cut out of the command, so it
 # cannot say whether the word is there. After a pipe it has no argument to return either.
