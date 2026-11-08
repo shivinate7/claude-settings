@@ -998,6 +998,11 @@ ARCHIVE_READ_REASON = (
     "the open pull requests of the lane's repo could not be read, so the guard cannot tell whether its "
     "records have landed. Retry once gh answers. (decision session-tiers, a lane closes only after its records pull request has landed)"
 )
+ARCHIVE_SCOPE_REASON = (
+    "the lane's repo is not in this session's GitHub scope, so no read from here can reach its pull requests. "
+    "Route the archive to the batch runner whose session holds that repo (the lane's cs-repo tag names it). "
+    "(decision session-tiers, a lane closes only after its records pull request has landed)"
+)
 ARCHIVE_NO_PR_REASON = (
     "a branch of the lane is ahead of its repo's default branch and has no pull request, so closing the lane now "
     "strands that work. Open a draft pull request for that branch and hand it to the batch runner, then retry. "
@@ -1005,6 +1010,12 @@ ARCHIVE_NO_PR_REASON = (
 )
 _REPO_NAME = re.compile(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+")
 _SOURCE_REPO = re.compile(r"github\.com[/:]([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+?)(?:\.git)?/?\Z")
+
+
+def _scope_checked(module, code, out):
+    """Raise the merge tool's ScopeStop when a failed read is the proxy's scope 403, so archive_hit tells it from a transient failure."""
+    if module.is_scope(code, out):
+        raise module.ScopeStop(out)
 
 
 def _head_landed(module, repo: str, row) -> bool:
@@ -1052,6 +1063,7 @@ def _stranded_branch(module, ccr, tag_repos) -> bool:
         host = module.Host(repo=repo)
         with module.shared_deadline(MERGE_READ_TIMEOUT):
             code, out = host.api("")
+        _scope_checked(module, code, out)
         try:
             if code:
                 raise ValueError(out)
@@ -1063,6 +1075,7 @@ def _stranded_branch(module, ccr, tag_repos) -> bool:
                 continue
             with module.shared_deadline(MERGE_READ_TIMEOUT):
                 code, out = host.api("compare/" + default + "..." + branch)
+            _scope_checked(module, code, out)
             if code and not module.is_net(code, out) and re.search(r"\bHTTP 404\b", out):
                 continue
             try:
@@ -1104,6 +1117,7 @@ def archive_hit(tool: str, tool_input, transcript: str):
     slugs, repos = [x for x in slugs if x], [x for x in repos if x]
     if not slugs or not repos or not all(_REPO_NAME.fullmatch(r) for r in repos):
         return "archive of a lane with no step or repo tag", ARCHIVE_TAGS_REASON
+    module = None
     try:  # cost: one paged gh REST read per cs-repo tag (one in practice), through the merge tool's page reader;
         # then one transcript read for each lane that clears the open list, and, for a record that names branches:
         # one repo read per repo, one compare read per repo x branch, and one pulls read per branch that is ahead
@@ -1123,7 +1137,9 @@ def archive_hit(tool: str, tool_input, transcript: str):
         ccr = own_session.own_session_ccr(transcript, target)
         if isinstance(ccr, dict) and _stranded_branch(module, ccr, repos):
             return "archive of a lane with a branch that has no pull request", ARCHIVE_NO_PR_REASON
-    except (Exception, SystemExit):
+    except (Exception, SystemExit) as e:
+        if module is not None and isinstance(e, module.ScopeStop):  # typed, never read from the message: waiting never passes it
+            return "archive of a lane whose repo is outside this session's GitHub scope", ARCHIVE_SCOPE_REASON
         return "archive with an unreadable pull request list", ARCHIVE_READ_REASON
     return None
 

@@ -76,6 +76,9 @@ class Liftable(Stop):
 class NetStop(Stop):
     """A `gh` call kept failing with a network error. Not a refusal: the caller must not revert a claim for it."""
 
+class ScopeStop(Stop):
+    """A read the cloud proxy refused because the repo is not in this session's GitHub scope. No retry from this session can pass it."""
+
 class Dropped(Stop):
     """The silent-undo check found a dropped line."""
 
@@ -202,6 +205,16 @@ def is_net(c, out):
     """A failed call whose output is a network error line. JSON is gh's answer (a check named EOF), not its error line,
     unless gh's own 5xx line ends it."""
     return bool(c and (GH_API_TAIL.search(out) or (NET_ERROR.search(out) and not out.lstrip().startswith(("[", "{")))))
+
+# The cloud proxy's 403 for a repo outside the session's GitHub scope. `gh api` prints the JSON body, then its own tail line
+# `gh: GitHub access to this repository is not enabled for this session. ... (HTTP 403)`, which ends the output. Anchored on that
+# tail or on the start of the JSON body, never free text: a PR title that quotes the sentence is no match.
+_SCOPE_TEXT = "GitHub access to this repository is not enabled for this session"
+SCOPE_DENIED = re.compile(r"gh: " + _SCOPE_TEXT + r"\b[^\n]*\(HTTP 403\)\s*\Z|\A\s*\{\s*\"message\"\s*:\s*\"" + _SCOPE_TEXT)
+
+def is_scope(c, out):
+    """A failed call whose output is the proxy's scope 403. A rate limit or a network error is no match: those are is_net."""
+    return bool(c and SCOPE_DENIED.search(out))
 
 _HEAD_BLOCK = re.compile(r"HTTP/\d(?:\.\d)? \d{3}\b[^\n]*(?:\n(.*?\r?\n)?\r?\n|\n?.*\Z)", re.S)  # what `gh api -i` prints first: the status line, the headers, a blank line. An empty body leaves no blank line: the block then runs to the end
 
@@ -776,6 +789,8 @@ class Host:
         for n in range(1, PAGE_CEILING + 1):
             c, out = self.api(rel, "-i", fields={**(fields or {}), "per_page": 100, "page": n})
             headers, out = split_headers(out)
+            if is_scope(c, out):
+                raise ScopeStop(f"reading {rel} from GitHub failed: {out}")
             try:
                 if c:
                     raise ValueError(out)
