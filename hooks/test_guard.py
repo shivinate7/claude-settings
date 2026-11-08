@@ -14982,9 +14982,9 @@ def _top_test_conflict_open(w):
     write(os.path.join(w, "src", TOP_TEST), "def test_x_builder():\n    assert 3\n")
 
 
-# An empty test file is still a test file. text_at reads '' for a missing file and for an empty one alike, so a merge
-# check that compares text alone reads an empty file added or deleted in a merge as no change. Line endings and
-# invalid bytes are the same kind of change: the bytes differ, and the text, read in text mode, does not.
+# An empty test file is still a test file: the rows below refuse one added or deleted in a merge. They also refuse a
+# test file whose only change is one invalid UTF-8 byte. Both bytes decode to the same character, so only a comparison
+# of the bytes tells the two versions apart.
 EMPTY_TEST = "tests/test_empty.py"
 TEST_BYTES = "tests/test_bytes.py"
 COST_PATHS = ["src/app.py", "tests/test_cost_one.py", "tests/test_cost_two.py"]
@@ -15067,11 +15067,10 @@ def _invalid_byte_open(w):
     _put_bytes(os.path.join(w, TEST_BYTES), b"# \x81\n")
 
 
-# A gitlink (a submodule entry) and a mode-only change are changes to a test path, refused as on main. The merge check
-# keeps a path whose mode differs at its two sides, whatever its bytes. A gitlink has no bytes in this repository, and
-# a mode-only change keeps the same bytes, so the mode alone keeps each of these paths: a gitlink to a commit the clone
-# lacks, a gitlink to a commit the clone holds, and a mode-only change. The fixtures read each change back with git
-# first: a change that did not land would give an allow for the wrong reason.
+# A gitlink (a submodule entry) and a mode-only change under a test path are refused, as on main. A gitlink has no
+# bytes in this repository, and a mode-only change keeps the same bytes, so only the mode can refuse either. The rows
+# check a gitlink to a commit the clone lacks, a gitlink to a commit the clone holds, and a mode-only change. The
+# fixtures read each change back with git first: a change that did not land would give an allow for the wrong reason.
 GITLINK = "tests/sub_lib"
 GITLINK_MISSING = "0123456789abcdef0123456789abcdef01234567"   # a commit this clone does not hold
 
@@ -15540,10 +15539,9 @@ diff_repo("bd-i1-rebase-ours", _i1_rebase_ours)
 LOG_CHECKS_EXTRA.append(("builder-refuse: a rebase conflict in a test file resolved to the upstream side is logged only",
                          logged_builder_case("bd-i1-rebase-ours")))
 
-# Owner, 2026-11-08 12:16 CST, page item 437 a (builder-test-edit-scope): builders never write test content. A test
-# file that still holds git's conflict markers is a builder's test change, so the builder's commit is refused while
-# the file is unresolved, as on main. The test-author resolves that file. The same merge is denied once the builder
-# rewrites the conflicted file to its own side. Both share one setup.
+# A builder never writes test content. A test file that still holds git's conflict markers is a builder's test change,
+# so the builder's commit is refused while the file is unresolved, as on main. The test-author resolves that file. The
+# same merge is denied once the builder rewrites the conflicted file to its own side. Both share one setup.
 _bd_m_left = diff_repo("bd-m-test-left", _open_test_conflict_left)
 sh("builder-refuse: a builder's merge in progress, with a product edit staged and a conflicted test file left as git "
    "wrote it, is denied at commit by builder-diff", COMMIT, "deny", rule=BDIFF, cwd=_bd_m_left, agent_id="bld1",
@@ -15584,9 +15582,9 @@ LOG_CHECKS_EXTRA.append(("builder-refuse: a builder's merge commit that carries 
                          "builder edit, is allowed at commit, push and stop, and logs no builder-diff line",
                          clean_builder_case("bd-m-main-test-merge-clean")))
 
-# git's three conflict markers left in a conflicted test file of an open merge are denied by builder-diff: a test file
-# that still holds markers is the builder's change (owner ruling 437 a, 2026-11-08 12:16 CST). An unmerged file that is
-# not staged is refused by builder-diff too, pinned by the bd-m-test-left row above, so these rows stage the markers first.
+# git's three conflict markers left in a conflicted test file of an open merge are denied by builder-diff, since a test
+# file that still holds markers is the builder's change. An unmerged file that is not staged is refused by builder-diff
+# too, pinned by the bd-m-test-left row above, so these rows stage the markers first.
 _bd_m_markers_chain = diff_repo("bd-m-markers-chain", _f2_conflict_open)
 sh("builder-refuse: a builder's open merge that leaves git's markers in a conflicted test file, staged and committed in "
    "one call, is denied by builder-diff", VCS + " add -A && " + COMMIT, "deny", rule=BDIFF,
@@ -15610,10 +15608,10 @@ _bd_m_blend = diff_repo("bd-m-blend", _strip_test_conflict_markers)
 sh("builder-refuse: a builder's merge in progress that strips git's markers from a conflicted test file and keeps both "
    "sides is denied at commit", COMMIT, "deny", rule=BDIFF, cwd=_bd_m_blend, agent_id="bld1", agent_type="builder")
 
-# A builder run from sub/ with `diff.relative` set: git prints each path relative to sub/, so the edit to
-# sub/tests/test_b.py is named tests/test_b.py. The guard reads that name at the checkout's top, where the top-level
-# tests/test_b.py is unchanged, so the edit drops out and is allowed. The default-config row is the control. The sibling
-# pin for `git diff --check` under diff.relative is CMK_REL (conflict-markers).
+# A builder's edit to sub/tests/test_b.py is refused when it runs from sub/ with `diff.relative` set, as it is under the
+# default config. With diff.relative, git prints the path relative to sub/ (tests/test_b.py), so the rows check that the
+# refusal holds when git names the file that way. The default-config row is the control. The sibling pin for
+# `git diff --check` under diff.relative is CMK_REL (conflict-markers).
 SUB_TEST = "sub/tests/test_b.py"
 SUB_FILES = {**BASE_FILES, "tests/test_b.py": "def test_top():\n    assert 1\n",
              SUB_TEST: "def test_sub():\n    assert 1\n"}
@@ -15699,7 +15697,8 @@ _bd_m_empty_del_c = diff_repo("bd-m-empty-del-commit", _empty_delete_committed)
 sh("builder-refuse: a builder's merge commit that deletes an empty test file git's merge has is denied at commit",
    COMMIT, "deny", rule=BDIFF, cwd=_bd_m_empty_del_c, agent_id="bld1", agent_type="builder")
 
-# A conflicted test file whose bytes change only in line endings is the builder's change: text mode folds the CR.
+# A conflicted test file whose bytes change only in line endings, LF to CRLF or a lone CR, is the builder's change. A
+# line-ending change alters the bytes of the file, so the two rows check that each is refused.
 _bd_m_crlf = diff_repo("bd-m-crlf", _conflict_crlf)
 sh("builder-refuse: a builder's merge in progress that changes only the line endings of a conflicted test file "
    "(LF to CRLF) is denied at commit", COMMIT, "deny", rule=BDIFF, cwd=_bd_m_crlf, agent_id="bld1",
@@ -15792,9 +15791,9 @@ if os.name != "nt":
                              lambda: _reaches_merge_check_case(_bd_m_conf_mode, TEST_A, False)))
 
 
-# The readers a guard call goes through. `_git` always; `_git_bytes` once a bytes read has its own reader. A name the
-# core does not have is not patched, so the counts hold before and after that move.
-COUNTED_READERS = ("_git", "_git_bytes")
+# The git reader a guard call goes through: `_git`, which guard_core imports from git_reads. The guard calls it as
+# guard_core._git, so a patch on the core module counts each call the guard makes.
+COUNTED_READERS = ("_git",)
 
 
 def _counted_own_changes(where):
@@ -15834,7 +15833,7 @@ def _calls_naming(calls, rels):
 
 
 def plain_commit_reads_case():
-    """A builder's plain commit: own_changes reads none of its paths with git, since the merge check runs in a merge only."""
+    """A builder's plain commit: own_changes makes no git call that names one of its changed paths."""
     where = diff_repo("bd-cost-plain", _cost_files, commit=True)
     materialize(where)
     changes, calls = _counted_own_changes(where)
