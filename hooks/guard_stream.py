@@ -110,7 +110,22 @@ def _script_operand(tokens, index: int) -> str:
         if flag in ("-m", "-c"):
             return ""
         at += 2 if flag in INTERPRETER_VALUE_FLAGS else 1
-    return tokens[at] if at < len(tokens) else ""
+    return _whole_word(tokens, at) if at < len(tokens) else ""
+
+
+def _whole_word(tokens, at: int) -> str:
+    """The word at `at`, joined across the tokens an unquoted substitution split. A `$(` or a backtick
+    opens a substitution that reads as several tokens, so the word reads on to the token that closes it
+    and the roster tail is judged on the joined word. A quoted substitution is one token and joins nothing."""
+    word = tokens[at]
+    depth = word.count("$(") - word.count(")")
+    ticks = word.count("`") % 2
+    while (depth > 0 or ticks) and at + 1 < len(tokens):
+        at += 1
+        word += " " + tokens[at]
+        depth += tokens[at].count("$(") - tokens[at].count(")")
+        ticks = (ticks + tokens[at].count("`")) % 2
+    return word
 
 
 def _roster_word(tokens, index: int, interpreter_only: bool = False) -> str:
