@@ -12,6 +12,7 @@ from guard_core import (
 
 
 BRANCH_DELETE_FLAGS = {"-d", "-D", "--delete"}
+HEADS_PREFIX = "refs/heads/"
 
 
 def branch_delete_names(args):
@@ -117,36 +118,81 @@ WORKTREE_PRUNE_ASK_REASON = (
 #   `checkout -B <name>`, `switch -C <name>` (also `--force-create`): refused when another worktree holds <name>.
 #   `worktree add -f|--force`: refused when another worktree holds the branch the add would take.
 #   `checkout|switch --ignore-other-worktrees`: refused with any branch, so no list is read.
+#   `update-ref [-d] refs/heads/<name> ...`: refused when another worktree holds <name>. Git checks no worktree
+#     for a ref write, so a move or delete leaves the holder's index at the old commit.
+#   `symbolic-ref HEAD refs/heads/<name>`: refused when another worktree holds <name>, since the running tree
+#     would then hold it too. A `symbolic-ref HEAD` with no target only reads, and passes.
+# `update-ref --stdin` names its refs on stdin, which the guard cannot read, so it passes.
 # Any other call, a plain `checkout x` and an unforced add included, is git's own refusal to make.
 # The list is read once, only for a refused form; a read that fails refuses.
 TWO_WORKTREES_REFUSE_REASON = (
     "Rule (shared trees): another worktree of this clone holds this branch, or the call turns off "
-    "git's check that no two worktrees hold one branch. A commit in either tree then moves the "
+    "git's check that no two worktrees hold one branch. `update-ref` and `symbolic-ref HEAD` write "
+    "the branch with no such check. A commit in either tree then moves the "
     "branch under the other tree, whose files stay at the old commit, and a commit there reverts "
     "the other tree's work with a diff that looks like a normal edit. "
     "Remedy: in your own worktree, run `git -C <own worktree> checkout --detach origin/<branch>`, "
     "commit there, then `git -C <own worktree> push origin HEAD:<branch>`. Name the worktree with "
     "-C, because a shell's cwd can reset to another checkout. To read the other tree, use "
-    "`git -C <dir>`. "
+    "`git -C <dir>`. To move or delete the branch itself with `update-ref`, run the call in the "
+    "tree that holds it, as `git -C <holder> update-ref ...`. "
     "(decision two-worktrees-one-branch, two worktrees never hold one branch)"
 )
 
 
 def _ref_name(name: str) -> str:
     """A branch name as `refs/heads/` writes it, for a commit-ish that may spell the full or short ref."""
-    for prefix in ("refs/heads/", "heads/"):
+    for prefix in (HEADS_PREFIX, "heads/"):
         if name.startswith(prefix):
             return name[len(prefix):]
     return name
+
+
+def _positionals(args, value_flags: str):
+    """The words of `args` that are not options, in order. `value_flags` are the short options whose
+    value is the rest of the cluster or the next word (`-m <msg>`). Words after `--` are all positional."""
+    words = []
+    take = False
+    for index, arg in enumerate(args):
+        if take:
+            take = False
+        elif arg == "--":
+            words.extend(args[index + 1:])
+            break
+        elif arg.startswith("--") or (arg.startswith("-") and arg != "-"):
+            if not arg.startswith("--"):
+                for offset, char in enumerate(arg[1:], start=2):
+                    if char in value_flags:
+                        take = not arg[offset:]
+                        break
+        else:
+            words.append(arg)
+    return words
+
+
+def _branch_of_ref(ref: str):
+    """The branch name when `ref` spells a full `refs/heads/` ref, else None."""
+    if ref.startswith(HEADS_PREFIX) and len(ref) > len(HEADS_PREFIX):
+        return ref[len(HEADS_PREFIX):]
+    return None
 
 
 def two_worktrees_form(subcommand: str, args):
     """Return (ignore, names) for a call this rule reads, else None.
 
     `ignore` is True when the call carries `--ignore-other-worktrees`. `names` are the branch names
-    the call would take: a `-B`/`-C` value, or the branch a forced `worktree add` checks out. A
+    the call would take: a `-B`/`-C` value, the branch a forced `worktree add` checks out, the
+    `refs/heads/` ref an `update-ref` writes, or the branch a `symbolic-ref HEAD` points at. A
     call that is none of the forms, or a forced add that takes no branch, returns None.
     """
+    if subcommand == "update-ref":
+        words = _positionals(args, "m")
+        name = _branch_of_ref(words[0]) if words else None
+        return (False, [name]) if name else None
+    if subcommand == "symbolic-ref":
+        words = _positionals(args, "m")
+        name = _branch_of_ref(words[1]) if len(words) >= 2 and words[0] == "HEAD" else None
+        return (False, [name]) if name else None
     if subcommand in ("checkout", "switch"):
         reset, create = ("C", "c") if subcommand == "switch" else ("B", "b")
         ignore = False
@@ -248,7 +294,7 @@ def two_worktrees_hit(segment: str, root: str) -> str:
             return matched   # a failed read refuses; [] is no clone at all, where git refuses the call itself
         own = max((tree for tree, _ref in trees if path_is_inside(root, tree)), key=len, default=None)
         held = {ref for tree, ref in trees if ref and tree != own}
-        if any("refs/heads/" + name in held for name in names):
+        if any(HEADS_PREFIX + name in held for name in names):
             return matched
     return ""
 

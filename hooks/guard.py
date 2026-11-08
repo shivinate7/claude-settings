@@ -59,8 +59,9 @@ Shell tools (Bash, PowerShell), in judge_shell order:
   two-worktrees-one-branch
                        deny. A `checkout -B` or `switch -C` of a branch another worktree of the clone holds, a
                        forced `worktree add` of one, or `checkout` or `switch` with
-                       `--ignore-other-worktrees` and any branch. The worktree list is read only for these forms,
-                       and a read that fails refuses. An override lifts it.
+                       `--ignore-other-worktrees` and any branch, an `update-ref` of a `refs/heads/` ref another
+                       worktree holds, or a `symbolic-ref HEAD` onto one. The worktree list is read only for
+                       these forms, and a read that fails refuses. An override lifts it.
   silent-write         deny. A git write whose own trace is silenced, by a null redirect or by
                        git's `-q`. The measured carve-outs are the comments above
                        SILENT_WRITE_SUBCOMMANDS and QUIET_FLAG_SUBCOMMANDS.
@@ -3636,7 +3637,7 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
         if matched:
             refuse(tool, "deny", "pointer-head", POINTER_HEAD_REASON, matched)
 
-    # 1b2. A checkout, switch or forced worktree add that takes a branch another worktree holds.
+    # 1b2. A checkout, switch, forced worktree add, update-ref or symbolic-ref HEAD that takes a branch another worktree holds.
     # Each segment is judged in the tree it runs in: its own `git -C` or `--git-dir`, else the cwd as
     # earlier `cd` segments left it. Placed after the pointer rule and before the silent-write rule;
     # the worktree list is read only for a call of the refused forms.
