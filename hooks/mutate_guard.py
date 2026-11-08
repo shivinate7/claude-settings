@@ -2382,6 +2382,12 @@ MUTATIONS = [
      '    return os.path.normcase(os.path.realpath(left)) == os.path.normcase(os.path.realpath(right))',
      '    return left == right',
      "guard", "same branch: through a symlink, a linked worktree: checkout -B of the branch the primary holds is refused"),
+    # The own tree is matched on the run folder instead of the top `rev-parse --show-toplevel` answers. From a
+    # subfolder the own branch is then left in the held set, so its own reset is refused.
+    ("held-branch: the own tree is matched on the run folder, so a subfolder's own branch counts as held",
+     'elif line.startswith("branch refs/heads/") and not _same_path(path, own):',
+     'elif line.startswith("branch refs/heads/") and not _same_path(path, where):',
+     "guard", "same branch: from a folder inside a linked worktree, checkout -B of the branch it is on is allowed"),
 ]
 
 

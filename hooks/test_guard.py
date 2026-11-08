@@ -2862,6 +2862,15 @@ held_refuse("from a subfolder, a linked worktree: switch -C of the branch the pr
             "cd sub && " + VCS + " switch -C lane-p origin/main", SBLINK, "lane-p")
 held_refuse("from a subfolder, the primary: checkout -B of the branch the linked worktree holds is refused",
             "cd sub && " + VCS + " checkout -B lane-q origin/main", SBPRIME, "lane-q")
+# THE OWN CHECKOUT, RUN FROM A SUBFOLDER: ALLOWED. The reset names the branch the own tree holds, and the
+# call runs in `sub/`. Git lists each tree by its top, so the own tree is found by that top, not by the run
+# folder. A guard that leaves the own tree in the held set refuses the own branch's reset here.
+sh("same branch: from a folder inside a linked worktree, checkout -B of the branch it is on is allowed",
+   "cd sub && " + VCS + " checkout -B lane-q origin/main", "allow", cwd=SBLINK)
+sh("same branch: from a folder inside a linked worktree, switch -C of the branch it is on is allowed",
+   "cd sub && " + VCS + " switch -C lane-q", "allow", cwd=SBLINK)
+sh("same branch: from a folder inside that checkout, switch -C of the branch it is on is allowed",
+   "cd sub && " + VCS + " switch -C lane-x origin/lane-x", "allow", cwd=SBCUR)
 # A SYMLINKED PATH TO A LINKED WORKTREE. The call runs in SBSYM, a link to the worktree that git lists
 # under the link path. The own tree is found only when the list's path and the tree's own answer are
 # compared as the same folder, so a plain string compare finds no own tree and lets the reset through.
