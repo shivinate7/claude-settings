@@ -34,7 +34,7 @@ def git(*args):
     return subprocess.run(["git", *args], capture_output=True, text=True).stdout.strip()
 detached = subprocess.run(["git", "symbolic-ref", "-q", "HEAD"], capture_output=True).returncode != 0
 with open(LOG, "a", encoding="utf-8") as f:
-    print(json.dumps({"argv": sys.argv[1:], "cwd": os.getcwd(), "head": git("rev-parse", "HEAD"), "detached": detached}), file=f)
+    print(json.dumps({"argv": sys.argv[1:], "cwd": os.getcwd(), "head": git("rev-parse", "HEAD"), "detached": detached, "pr_body": os.environ.get("CI_JOB_PR_BODY")}), file=f)
 if "--plan" in sys.argv:
     for state, name in STEPS:
         print("would run " + name)
@@ -251,6 +251,23 @@ class LaneLint(CiJobStub, tm.CloudSession):
         self.assertIn("Push-only lint A", lines[0], out)
         self.assertIn("Push-only lint B", lines[0], out)
         self.assertRegex(lines[0], r"\b2\b", out)
+
+    def test_lane_lint_gives_ci_job_the_live_pr_body_as_ci_job_pr_body(self):
+        """The silent-undo step reads the PR body from env PR_BODY, and ci-job takes that from env CI_JOB_PR_BODY, so lane_lint passes
+        the body the host reports for the pull request now. The states are an empty body and the largest body GitHub keeps."""
+        self.use_ci_job(PASSING, 0)
+        bodies = ("", "Summary.\n\nDrops-lines: lint/gone.py -- the file is gone\n\nGenerated with Claude Code\n\nhttps://claude.ai/code/session_X",
+                  "x" * 65536)
+        for body in bodies:
+            with self.subTest(length=len(body)):
+                self.host.body = body
+                rc, out = self.lint_run("--lane-lint", "7")
+                self.assertEqual(rc, 0, out)
+                runs = self.lint_calls()
+                self.assertEqual(len(runs), 1, "the lint ran %d times, want once: %s" % (len(runs), out))
+                got = runs[0].get("pr_body")
+                self.assertTrue(got == body, "lane_lint gave ci-job CI_JOB_PR_BODY %s, want the PR's body of %d characters"
+                                % ("nothing" if got is None else "a value of %d characters" % len(got), len(body)))
 
     def test_a_lane_lint_merges_nothing_takes_no_lock_and_waits_for_no_check(self):
         self.use_ci_job(PASSING, 0)
