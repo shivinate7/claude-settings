@@ -2527,17 +2527,53 @@ def ci_job_run(wt, *args, pr_body=""):
         return "unknown", [l.rstrip() for l in lines if l.startswith("unknown")] or [f"(no unknown line read; ci-job exit {c})"], log, True
     return "unknown", [f"ci-job exited {c}"], log, False
 
+PARENT_LINE = re.compile(r"^[ \t]*merge after:?[ \t]*#(\d+)", re.I | re.M)
+REVIEW_RANGE = re.compile(r"`git diff\s+([^\s`]+?)(?:\.\.\.?|\s+)(?!-)[^\s`]+`")
+
+def parent_prs(body):
+    """The PR numbers of each `Merge after: #N` line in a PR body (case and colon free), in order, once each."""
+    return list(dict.fromkeys(int(n) for n in PARENT_LINE.findall(body or "")))
+
+def review_range_starts(body):
+    """The start of each backticked `git diff <start> <end>`, `<start>..<end>` or `<start>...<end>` in a PR body. It reads the whole body: the range sits in the first paragraph."""
+    return REVIEW_RANGE.findall(body or "")
+
+def check_review_ranges(host, body):
+    """A lane that names a parent (`Merge after: #N`) asks its reviewer to read `git diff <start> <end>`; a start below the parent's head makes the reviewer re-read
+    the parent's commits. Each range must start at a named parent's head (a prefix of 7 or more hex digits) or at that parent's branch, bare or as origin/<branch>.
+    A parent with no range passes with one note line. Raises Stop on the first bad start. Reads each parent's PR once."""
+    parents = parent_prs(body)
+    if not parents:
+        return
+    starts = review_range_starts(body)
+    if not starts:
+        say(f"note: the body names {', '.join('#%d' % n for n in parents)} as parent, but holds no `git diff <start> <end>` range, so no review range was checked.")
+        return
+    infos = {n: host.pr(n) for n in parents}
+    for start in starts:
+        for info in infos.values():
+            head, branch = info["head"], info["branch"]
+            if (re.fullmatch(r"[0-9a-fA-F]{7,}", start) and head.lower().startswith(start.lower())) or start in (branch, f"origin/{branch}"):
+                break
+        else:
+            named = "; ".join(f"#{n} is at {i['head'][:9]} on {i['branch']}" for n, i in infos.items())
+            raise Stop(f"the review range starts at {start}, which is not the head of a parent the body names ({named}). A range that starts below the parent's head "
+                       f"makes the reviewer re-read the parent's commits. Restate the range from the parent PR's current head (7 or more hex digits). {LANE_LINT_CITE}")
+
 def lane_lint(root, target, host, base="", unknown_ok=""):
     """The lint a lane passes before its head goes to the batch runner (decision lanes-run-no-full-ci-job): `ci-job checks --lint --base origin/<base>`
     in a temporary detached worktree at the head, removed on every exit. Takes no lock; merges and pushes nothing. -> 0 on a pass, else raises Stop.
     A target of digits is a PR number: its head and base come from the PR. Any other target is a commit or ref.
     ci-job's stderr (a `start: <step>` line per step, verdict's heartbeat) passes live to this process's stderr; only its stdout is read.
     Exit 1 of ci-job (a FAIL) refuses always. Exit 2 (an unknown) refuses unless `unknown_ok` is a non-blank reason; it is then logged, with no PASS line.
+    A PR-number target first runs check_review_ranges on its body, before any ci-job run.
     A lint that ran no lint CI step is ci-job's exit 2, so it refuses as an unknown. The PASS line names the CI steps ci-job skipped, as a count and their names."""
     pr_body = ""  # a commit or ref has no PR body
     if target.isdigit():
-        info = (host or Host()).pr(int(target))
+        host = host or Host()
+        info = host.pr(int(target))
         head, base, pr_body = info["head"], info["base"], info.get("body", "")
+        check_review_ranges(host, pr_body)
         tmp, wt = open_worktree(root, info, base)
     else:
         head, base = lane_head_and_base(root, target, base)
