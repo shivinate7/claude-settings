@@ -10,16 +10,16 @@
 // goes red on that refusal, and its output names it. Once the skill reads version 5, each case goes red on its own MAP11 verdict, which
 // the old code never prints. Every MAP11 failure assertion names the page, the test and the file it is about.
 //
-// Assumed. The spec names the cases but not the messages, so these read the spec's own claims:
-//   - an unindented tested-by line, a line with no backticks, and a `;` separator each fail, and the failure names the page (T7d to T7f).
-//   - `import pkgpy` loads `pkgpy/__init__.py` by its package name (T8d, T8e).
-//   - a map line whose tested-by line is missing passes: the line is optional (T1b).
+// The picks. Decision `map-tested-by-line` (the tested-by line ruling, docs/decisions/map-tested-by-line.md) records each rule these
+// cases read:
+//   - the line's form and placement (T7d to T7f), `import pkgpy` through its `__init__.py` (T8d, T8e), and an optional line (T1b).
 //   - a join whose anchor is a string literal reads that literal as its first piece (T10e), and `posixpath.dirname` counts as
-//     `os.path.dirname` (T10m). The rule's list of known anchors names neither. Both are Assumed, and Input Needed: a strict reading turns each to FAIL.
-//   - the known places of T11 (the ESM and Python forms below) are the brief's direction. The rule's list names none of them, so the
-//     decision must name them before the builder merges, or a strict reading turns each should-name case to FAIL. A file is a place too
-//     (T11j, T11ah, T11ai). A Python join from `__file__`, or a pathlib chain from it, is a place only under an outer normpath, abspath
-//     or realpath (T11ab, T11ag, T11ak); the bare join names nothing (T11aa, T11af, T11aj). Input Needed.
+//     `os.path.dirname` (T10m).
+//   - the known places of T11, in JS and Python, and a file is a place too (T11j, T11ah, T11ai). A join from a Python file place is a place
+//     only under an outer normpath, abspath or realpath (T11ab, T11ag, T11ak, T11al, T11n). The bare join names nothing (T11aa, T11af, T11aj).
+//   - a `/` piece resets `path.resolve`, so the call names nothing (T10aa).
+// The ruling does not name the `URL` import. T11am and T11an follow the coordinator's round-1 fix ruling (2026-11-07 13:20 CST): a `URL`
+// imported from `node:url` is the global and counts (T11am), and a `URL` imported from another module does not (T11an).
 //
 // Cases:
 //   T1   the clean fixture passes. T1b: no tested-by line at all passes. T1c, T1d: full size, 40 tests on one line, all pass; one that does not load the file fails.
@@ -39,23 +39,26 @@
 //   T10  a join of literal pieces loads the file when its anchor is a known place: `__dirname`, `os.path.dirname(__file__)`,
 //        `Path(__file__).parent`, or a module-level name bound to one of those, with literal pieces after it. The tail resolves from the
 //        anchor's real place only. Loads: os.path.join, posixpath.join, pathlib, path.join, path.posix.join, resolve (T10b to T10d, T10m,
-//        T10n, T10p, T10w, T10z); T10e loads from a literal anchor (Assumed, above). T10p keeps path.join's leading-slash piece.
+//        T10n, T10p, T10w, T10z); T10e loads from a literal anchor (decision `map-tested-by-line`). T10p keeps path.join's leading-slash piece.
 //        Not a load, a FAIL: an anchor that is no known place (T10a, T10o, T10r, T10s, T10t, T10u, T10y), a tail that names no tracked
-//        file from the real place (T10h, T10q), a name or a starred piece (T10f, T10j), an absolute piece (T10i), an array join (T10g),
+//        file from the real place (T10h, T10q), a name or a starred piece (T10f, T10j), an absolute piece (T10i), a `/` piece that resets
+//        `path.resolve` (T10aa), an array join (T10g),
 //        a join from another module (T10k, T10v, T10x), a join in a comment, docstring or string (T10l).
 //   T11  known places the rule's list does not name yet. Loads, red on the old code: a JS folder from `path.dirname(fileURLToPath(import.meta.url))`
 //        (`url.fileURLToPath` too), `import.meta.dirname`, `path.dirname(import.meta.filename)`, `path.dirname(__filename)`,
 //        `fileURLToPath(new URL('.', import.meta.url))`, or a bare `dirname` from 'node:path' (T11a to T11f, T11t); a relative URL literal
-//        on the file's own URL, `fileURLToPath(new URL('../src', import.meta.url))` (T11x), and the empty literal, which is the file itself
-//        (T11ai); a file, from `fileURLToPath(import.meta.url)`, inline or bound (T11j, T11ah); a Python folder from `os.path.normpath` (T11l),
-//        `Path(__file__).resolve().parents[1]` (T11m) or `Path(__file__).parents[1]` (T11u); a file, from `normpath(os.path.join(__file__, ...))`
-//        (T11ab, T11ag), or from `normpath(Path(__file__) / ...)` (T11ak); a folder from `Path(__file__).parent.parent` (T11ac). The repo pairs read this repository's own files through readFacts: the loads fact of
+//        on the file's own URL, `fileURLToPath(new URL('../src', import.meta.url))` (T11x), a `URL` imported from `node:url` (T11am), and the
+//        empty literal, which is the file itself (T11ai); a file, from `fileURLToPath(import.meta.url)`, inline or bound (T11j, T11ah); a Python
+//        folder from `os.path.normpath` (T11l), `Path(__file__).resolve().parents[1]` (T11m) or `Path(__file__).parents[1]` (T11u); a file, from
+//        `normpath(os.path.join(__file__, ...))` (T11ab, T11ag), from `normpath(Path(__file__) / ...)` (T11ak), or from
+//        `abspath(os.path.join(__file__, ...))` (T11al); a folder from `Path(__file__).parent.parent` (T11ac). Each Python wrapper has its own
+//        pin: normpath (T11ag, T11ak), abspath (T11al), realpath (T11n). T11ab keeps an abspath anchor under normpath. The repo pairs read this repository's own files through readFacts: the loads fact of
 //        skills/waiting-page/tests/page.test.mjs names its page (T11v), and that of lint/test_stale_cites.py names bin/ste-changed (T11w).
-//        T11n is a control, green on main: realpath and abspath already keep a known place.
+//        T11n is a control, green on main, and the realpath pin: realpath wraps a join from the file, which is no place without it.
 //        Not a load, a FAIL, green on the old code and the guard of the allow side: the twins of those forms with an anchor that is shadowed
 //        (T11g), a temp folder (T11h, T11p, T11r), a foreign function (T11i), a function-local name (T11k), a parameter (T11o),
-//        a name bound twice (T11q), a place outside the repository (T11s), a URL on another base (T11y), a `file:` scheme (T11z),
-//        a negative index (T11ad), a parameter under normpath (T11ae), or a bare join from `__file__`, or a bare pathlib chain from it,
+//        a name bound twice (T11q), a place outside the repository (T11s), a URL on another base (T11y), a `URL` from another module (T11an),
+//        a `file:` scheme (T11z), a negative index (T11ad), a parameter under normpath (T11ae), or a bare join from `__file__`, or a bare pathlib chain from it,
 //        which keeps `..` (T11aa, T11af, T11aj).
 //   C0   control, green on the old code: the import reader MAP11 uses reads the fixture's imports the way these cases assume.
 
@@ -549,7 +552,7 @@ export const page = path.join(__dirname, '..', 'src', 'home.ts');
   mustLoad(check(dir), testFile, 'src/home.ts');
 });
 
-// Assumed, Input Needed: the anchor is a string literal, which the rule's list of known places does not name. Read as the first piece here.
+// A literal anchor is the first piece, per decision `map-tested-by-line`.
 test("T10e. resolve('src', 'home.ts') with `import { resolve } from 'path'` loads src/home.ts: MAP11 passes", () => {
   needFile(REL);
   const testFile = 'tests/resolve.spec.ts';
@@ -656,7 +659,7 @@ def test_wait():
   mustNotLoad(check(dir), CORE, testFile, 'src/retry.py', 'a join in a comment, a docstring or a plain string is no call');
 });
 
-// Assumed, Input Needed: posixpath.dirname is read as os.path.dirname, the same module on POSIX. The rule's list names os.path only.
+// posixpath is os.path on POSIX, and decision `map-tested-by-line` names `posixpath` as the same.
 test('T10m. posixpath.join(ROOT, "src", "retry.py") with `import posixpath` loads src/retry.py: MAP11 passes', () => {
   needFile(REL);
   const testFile = 'tests/posix_join.py';
@@ -854,6 +857,19 @@ def test_wait():
   mustLoad(check(dir), testFile, 'src/retry.py');
 });
 
+test("T10aa. path.resolve(path.dirname(__dirname), '/home.ts') in src/sub: the '/' piece resets resolve to the absolute path /home.ts, which is no repo file, so the call is no load: MAP11 fails and names the page, the test and the file", () => {
+  needFile(REL);
+  const testFile = 'src/sub/resolve_reset.spec.ts';
+  const text = `import path from 'node:path';
+
+export const page = path.resolve(path.dirname(__dirname), '/home.ts');
+`;
+  // The scope first: the anchor is the folder above the test, src, and a kept slash would join it to src/home.ts. A reset does not.
+  assert.match(text, /path\.resolve\(path\.dirname\(__dirname\), '\/home\.ts'\)/, 'the test must resolve a "/" piece from the folder above the test');
+  const dir = pieceCase(testFile, text, 'src/home.ts', ['/home.ts']);
+  mustNotLoad(check(dir), CORE, testFile, 'src/home.ts', 'path.resolve resets at a leading "/" piece, so the call names no repo file');
+});
+
 // ---- T11. Known places the rule's list does not name yet. A JS folder is `path.dirname(fileURLToPath(import.meta.url))` (`url.fileURLToPath`
 // too), `path.dirname(import.meta.filename)`, `path.dirname(__filename)`, `import.meta.dirname`, `fileURLToPath(new URL('.', import.meta.url))`,
 // or `fileURLToPath(new URL('<literal>', import.meta.url))` with a relative literal, which is that literal from the file's folder (T11x).
@@ -863,11 +879,10 @@ def test_wait():
 // does, the file's name being one segment, so its first `..` reaches the file's folder (T11j, T11ah). A Python join from `__file__` keeps `..`
 // as written, so it is a place only when an outer normpath, abspath or realpath wraps it (T11ab, T11ag, T11ak); the bare join names nothing
 // (T11aa, T11af, T11aj). A negative index is no known place (T11ad).
-// Each allow case (T11g to T11i, T11k, T11o to T11s, T11y, T11z, T11aa, T11ad, T11ae, T11af, T11aj) is the twin of a should-name form, with the anchor unbound,
+// Each allow case (T11g to T11i, T11k, T11o to T11s, T11y, T11an, T11z, T11aa, T11ad, T11ae, T11af, T11aj) is the twin of a should-name form, with the anchor unbound,
 // shadowed, rebound, a temp folder, a foreign function, a function-local name, outside the repository, on another URL base (T11y), a `file:` scheme (T11z),
 // a bare join or chain from `__file__` with no outer wrap (T11aa, T11af, T11aj), a negative index (T11ad), or a parameter under normpath (T11ae).
-// Assumed, Input Needed: the decision's list of known places names none of these forms, so the decision must name them before the builder
-// merges. Until then a strict reading turns each should-name case to FAIL.
+// The forms of these cases are known places in decision `map-tested-by-line`.
 
 test("T11a. const HERE = path.dirname(fileURLToPath(import.meta.url)), with path from 'node:path' and fileURLToPath from 'node:url': path.join(HERE, '..', 'src', 'home.ts') loads src/home.ts: MAP11 passes", () => {
   needFile(REL);
@@ -1073,21 +1088,24 @@ def test_wait():
   mustLoad(check(dir), testFile, 'src/retry.py', 'the anchor is a module-level name bound to Path(__file__).resolve().parents[1]');
 });
 
-// Control, green on main: realpath and abspath keep a known place, and that already works. A regression guard for the forms above.
-test('T11n. control, green on main: HERE = os.path.abspath(os.path.dirname(__file__)) and ROOT = os.path.realpath(os.path.join(HERE, "..")) loads src/retry.py through ROOT: MAP11 passes', () => {
+// Control, green on main, and the realpath pin: a realpath around a join from the file keeps its place. Red on a realpath that stops wrapping.
+test('T11n. control, green on main, and the realpath pin: HERE = os.path.abspath(__file__) and ROOT = os.path.realpath(os.path.join(HERE, "..", "..")) loads src/retry.py through ROOT: MAP11 passes', () => {
   needFile(REL);
   const testFile = 'tests/realpath_root.py';
-  const dir = pieceCase(testFile, `import os
+  const text = `import os
 
-HERE = os.path.abspath(os.path.dirname(__file__))
-ROOT = os.path.realpath(os.path.join(HERE, ".."))
+HERE = os.path.abspath(__file__)
+ROOT = os.path.realpath(os.path.join(HERE, "..", ".."))
 
 
 def test_wait():
     path = os.path.join(ROOT, "src", "retry.py")
     assert os.path.isfile(path)
-`, 'src/retry.py', ['..', 'src', 'retry.py']);
-  mustLoad(check(dir), testFile, 'src/retry.py', 'abspath and realpath around a known place keep it');
+`;
+  // The scope first: ROOT is a realpath around a join from the file itself, so the verdict is about that wrap and no other.
+  assert.match(text, /^ROOT = os\.path\.realpath\(os\.path\.join\(HERE, "\.\.", "\.\."\)\)$/m, 'the test must wrap a join from the file in realpath');
+  const dir = pieceCase(testFile, text, 'src/retry.py', ['..', 'src', 'retry.py']);
+  mustLoad(check(dir), testFile, 'src/retry.py', 'realpath wraps a join from the file, so its ".." resolves');
 });
 
 test('T11o. the twin of T11l with the anchor a parameter: os.path.join(os.path.normpath(os.path.join(tmp_path, "..")), "src", "retry.py") names nothing, since tmp_path is no known place: MAP11 fails and names the page, the test and the file', () => {
@@ -1431,6 +1449,39 @@ export const page = path.join(fileURLToPath(new URL('', import.meta.url)), '..',
   mustLoad(check(dir), testFile, 'src/home.ts', "the anchor is fileURLToPath(new URL('', import.meta.url)), which is the file and not its folder");
 });
 
+test("T11am. const SRC = fileURLToPath(new URL('../src', import.meta.url)) with URL imported from 'node:url', beside fileURLToPath, then path.join(SRC, 'home.ts') loads src/home.ts: the URL is the global, so the place counts: MAP11 passes", () => {
+  needFile(REL);
+  const testFile = 'tests/url_import.spec.ts';
+  const text = `import path from 'node:path';
+import { fileURLToPath, URL } from 'node:url';
+
+const SRC = fileURLToPath(new URL('../src', import.meta.url));
+
+export const page = path.join(SRC, 'home.ts');
+`;
+  // The scope first: URL is imported from node:url, so the URL in the place is that import and no other binding.
+  assert.match(text, /^import \{ fileURLToPath, URL \} from 'node:url';$/m, 'the test must import URL from node:url');
+  const dir = pieceCase(testFile, text, 'src/home.ts', ['../src', 'home.ts']);
+  mustLoad(check(dir), testFile, 'src/home.ts', 'URL imported from node:url is the same global as a bare URL, so the fileURLToPath place counts');
+});
+
+test("T11an. the twin of T11am: const SRC = fileURLToPath(new URL('../src', import.meta.url)) with URL imported from './utils', not from 'node:url': that URL is no global, so SRC is no known place and path.join(SRC, 'home.ts') names nothing: MAP11 fails and names the page, the test and the file", () => {
+  needFile(REL);
+  const testFile = 'tests/url_local.spec.ts';
+  const text = `import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { URL } from './utils';
+
+const SRC = fileURLToPath(new URL('../src', import.meta.url));
+
+export const page = path.join(SRC, 'home.ts');
+`;
+  // The scope first: URL comes from another module, so the URL in the place is no node:url URL.
+  assert.match(text, /^import \{ URL \} from '\.\/utils';$/m, 'the test must import URL from another module');
+  const dir = pieceCase(testFile, text, 'src/home.ts', ['../src', 'home.ts']);
+  mustNotLoad(check(dir), CORE, testFile, 'src/home.ts', 'a URL imported from another module is no node:url URL, so the call is no load');
+});
+
 // T11aj and T11ak, the pathlib twins of T11af and T11ag (lane pick 2026-11-07 16:38 CST). `Path(__file__) / ".." / ...` is a bare chain: it keeps
 // `..` as written, so it names nothing (T11aj). An outer normpath resolves the `..`, so the same chain names the file's sibling folder (T11ak).
 test('T11aj. Path(__file__) / ".." / "src" / "retry.py" in a test at the repository root names nothing: the pathlib chain keeps ".." as written, so `<file>/..` is no folder: MAP11 fails and names the page, the test and the file', () => {
@@ -1465,4 +1516,21 @@ def test_wait():
   assert.match(text, /os\.path\.normpath\(Path\(__file__\) \/ "\.\." \/ "src" \/ "retry\.py"\)/, 'the test must wrap the chain in normpath');
   const dir = pieceCase(testFile, text, 'src/retry.py', ['..', 'src', 'retry.py']);
   mustLoad(check(dir), testFile, 'src/retry.py', 'the anchor is Path(__file__), and an outer normpath wraps the chain');
+});
+
+test('T11al. os.path.abspath(os.path.join(__file__, "..", "..", "src", "retry.py")) in tests/join_file_abspath.py loads src/retry.py: abspath is the only wrap, and it resolves the ".." as normpath does: MAP11 passes', () => {
+  needFile(REL);
+  const testFile = 'tests/join_file_abspath.py';
+  const text = `import os
+
+
+def test_wait():
+    path = os.path.abspath(os.path.join(__file__, "..", "..", "src", "retry.py"))
+    assert os.path.isfile(path)
+`;
+  // The scope first: abspath is the one wrap of the join, so a verdict on the join is a verdict on abspath.
+  assert.match(text, /os\.path\.abspath\(os\.path\.join\(__file__, "\.\.", "\.\.", "src", "retry\.py"\)\)/, 'the test must wrap the join in abspath');
+  assert.doesNotMatch(text, /normpath|realpath/, 'the test must not wrap the join in another function');
+  const dir = pieceCase(testFile, text, 'src/retry.py', ['..', 'src', 'retry.py']);
+  mustLoad(check(dir), testFile, 'src/retry.py', 'the anchor is __file__, and an outer abspath wraps the join');
 });
