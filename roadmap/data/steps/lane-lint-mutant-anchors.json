@@ -1,11 +1,11 @@
 {
   "title": "The lane lint runs the mutation anchor pre-check, so a stale or ambiguous anchor fails before CI",
   "why": "On #1820 a mutant's anchor matched twice in hooks/guard_core.py, and it passed both review and `merge --lane-lint`; only the full mutation run catches it, so CI would turn red (lane draft-pr-guard-heredoc, session_013NEJKzzx35nAWSwPacHRXt, 04:15 CST Nov 8).",
-  "note": "Fix: `merge --lane-lint` runs mutate_guard.py's stale and ambiguous anchor pre-check on its own; it is cheap and runs no mutants. Red case first: a lane whose mutant anchor matches twice passes the lane lint today; control: a lane with unique anchors passes as today. Topic: lane checks. Related steps lane-lint-hook-suites and lane-lint-runs-local-tools. Queue fix (owner 13:20 CST Nov 7). Filed 04:13 CST Nov 8.",
+  "note": "Fix: `merge --lane-lint` runs mutate_guard.py's stale and ambiguous anchor pre-check on its own; it is cheap and runs no mutants. Red case first: a lane whose mutant anchor matches twice passes the lane lint today; control: a lane with unique anchors passes as today. Topic: lane checks. Related steps lane-lint-hook-suites and lane-lint-runs-local-tools. Queue fix (owner 13:20 CST Nov 7). Filed 04:13 CST Nov 8. Doing (lane draft-pr-guard-heredoc, 04:21 CST Nov 8): branch lane-lint-mutant-anchors from #1820's head e7c7e4461, Merge after: #1820.",
   "phase": "now",
-  "status": "todo",
+  "status": "doing",
   "order": 590,
   "owner": "triage",
-  "lane": "",
-  "updatedAt": "2026-11-08T04:09:00-06:00"
+  "lane": "session_013NEJKzzx35nAWSwPacHRXt",
+  "updatedAt": "2026-11-08T04:11:00-06:00"
 }
