@@ -655,16 +655,19 @@ class Pages:
         """The page urls of the read-backs of item n (_read_backs)."""
         return {use["input"].get("url") for use, _ in self._read_backs(text, k, n, stamp)}
 
-    def read_pairs(self, text, k, n, stamp):
+    def read_pairs(self, text, k, n, stamp, is_page=None):
         """A function from a tool_use to the set of (page url, doc id) of the items whose read-backs (_read_backs)
         returned n == n and came before that use. A write that closes one of them proves a send of item n though it
-        carries no n (_proves). A read-back counts only when the meta/page get of its own page names this session as
-        the writer: only the writer's own close of an item reaches no one else (writer_is)."""
+        carries no n (_proves). `is_page` is a function from a url to whether it names the waiting page. Only reads
+        of that page count, and only when its own meta/page get names this session as the writer: only the writer's
+        own close of an item on that page reaches no one else (writer_is). With no `is_page`, the repo names no
+        waiting page: a read counts when the meta/page get of its own page names this session."""
         self._load()
         reads = [
             (self._pos.get(id(use)), use["input"].get("url"), doc_id)
             for use, result in self._read_backs(text, k, n, stamp)
-            if writer_is(self.records, self.session_id, _is_page_of(use["input"].get("url"))) is True
+            if (is_page is None or is_page(use["input"].get("url")))
+            and writer_is(self.records, self.session_id, is_page or _is_page_of(use["input"].get("url"))) is True
             for doc_id, data in local_time._documents(result.get("content"))
             if _is_n(data.get("n"), n) and isinstance(doc_id, str)]
         return lambda use: {(u, d) for q, u, d in reads
@@ -689,6 +692,15 @@ def _is_page_of(*urls):
     except ImportError:
         same = lambda a, b: a.rstrip("/") == b.rstrip("/")
     return lambda other: isinstance(other, str) and any(isinstance(u, str) and same(u, other) for u in urls)
+
+
+def _waiting_page_test(homes):
+    """A function from a url to whether it names the waiting page of the cwd's repo (Homes.reads_waiting_page, the
+    one home of that test). None when the repo names no waiting page, or there are no homes: the send check then
+    keeps the read's own page (Pages.read_pairs), as the filing check stands down in such a repo."""
+    if homes is None or not homes.has_waiting_page()[0]:
+        return None
+    return lambda url: homes.reads_waiting_page([url])
 
 
 def writer_is(records, session_id, is_page=None):
@@ -733,7 +745,7 @@ def page_problem(item_id, rest, text, k, stamp, pages, homes=None):
     if m is None:
         return "%s [page] has a malformed page home: it needs `page:<digits>`" % item_id
     n = m.group(1)
-    closes = (lambda use: set()) if pages is None else pages.read_pairs(text, k, n, stamp)
+    closes = (lambda use: set()) if pages is None else pages.read_pairs(text, k, n, stamp, _waiting_page_test(homes))
     state = None if pages is None else pages.proof_state(text, k, lambda use: _proves(use, n, closes(use)), stamp)
     if state is None:
         return None
@@ -808,7 +820,7 @@ def answer_problem(b, text, k, homes, pages):
             own.add(m.group(1))
     unsent = []
     for n in dict.fromkeys(numbers):
-        closes = pages.read_pairs(text, k, n, b["stamp"]) if n not in own else (lambda use: set())
+        closes = pages.read_pairs(text, k, n, b["stamp"], _waiting_page_test(homes)) if n not in own else (lambda use: set())
         if n not in own and not pages.sent(text, k, lambda use: _proves(use, n, closes(use)), b["stamp"]):
             unsent.append(n)
     if not unsent:
