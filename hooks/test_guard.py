@@ -11114,10 +11114,38 @@ def rr_session(*parts):
     return [RR_HUMAN] + role_call("g0", LANE_TAGS) + [line for part in parts for line in part]
 
 
-def rr_spawn(tool_id, subagent_type, tool="Agent"):
-    """A spawn of `subagent_type` and its result, as the transcript holds them."""
+# A background spawn's launch result, and the completion notice the harness writes when that agent stops. The launch
+# names the agent in `agentId:`; the notice names it in `<task-id>` and names the spawning call in `<tool-use-id>`.
+RR_LAUNCH = ("Async agent launched successfully. (This tool result is internal metadata - never quote or paste any part "
+             "of it, including the agentId below, into a user-facing reply.)\n"
+             "agentId: %s (internal ID - do not mention to user. Use SendMessage with to: '%s', summary: "
+             "'<5-10 word recap>' to continue this agent.)\n"
+             "The agent is working in the background. You will be notified automatically when it completes.\n"
+             "output_file: /tmp/claude-0/rr/tasks/%s.output")
+RR_NOTICE = ("<task-notification>\n<task-id>%s</task-id>\n<tool-use-id>%s</tool-use-id>\n"
+             "<output-file>/tmp/claude-0/rr/tasks/%s.output</output-file>\n<status>completed</status>\n"
+             "<summary>Agent \"Review PR #12\" finished</summary>")
+RR_AGENT_ONE = "a5e0c1d7b2f94e381"
+RR_AGENT_TWO = "b7d2f9e4a0c13658e"
+
+
+def rr_spawn(tool_id, subagent_type, tool="Agent", agent=None):
+    """A spawn of `subagent_type` and its result, as the transcript holds them. With `agent`, the spawn runs in the
+    background: its result is the launch notice that names `agent`, not the report."""
+    result = "Verdict: PASS." if agent is None else RR_LAUNCH % (agent, agent, agent)
     return [role_use(tool_id, tool, {"subagent_type": subagent_type, "prompt": "Review PR #12.", "model": "sonnet"}),
-            role_result(tool_id, "Verdict: PASS.")]
+            role_result(tool_id, result)]
+
+
+def rr_notice(tool_id, agent):
+    """The completion notice of background agent `agent`, as an attachment line."""
+    return json.dumps({"type": "user", "isSidechain": False,
+                       "attachment": {"type": "queued_command", "prompt": RR_NOTICE % (agent, tool_id, agent)}})
+
+
+def rr_notice_line(tool_id, agent):
+    """The same completion notice as a user line whose content is the notice text."""
+    return json.dumps({"type": "user", "message": {"role": "user", "content": RR_NOTICE % (agent, tool_id, agent)}})
 
 
 def rr_comment(tool_id, body):
@@ -11175,6 +11203,15 @@ RR_TRANSCRIPTS = {
     "reviewer-padded": rr_session(rr_spawn("r1", " reviewer ")),
     "reviewer-capital-record": rr_session(rr_spawn("r1", "Reviewer"), rr_comment("c1", rr_record())),
     "design-reviewer-capital": rr_session(rr_spawn("d1", "Design-reviewer")),
+    "async-pending": rr_session(rr_spawn("r1", "reviewer", agent=RR_AGENT_ONE)),
+    "async-completed": rr_session(rr_spawn("r1", "reviewer", agent=RR_AGENT_ONE), rr_notice("r1", RR_AGENT_ONE)),
+    "async-completed-line": rr_session(rr_spawn("r1", "reviewer", agent=RR_AGENT_ONE),
+                                       rr_notice_line("r1", RR_AGENT_ONE)),
+    "async-completed-recorded": rr_session(rr_spawn("r1", "reviewer", agent=RR_AGENT_ONE),
+                                           rr_notice("r1", RR_AGENT_ONE), rr_comment("c1", rr_record())),
+    "async-recorded-then-pending": rr_session(rr_spawn("r1", "reviewer", agent=RR_AGENT_ONE),
+                                              rr_notice("r1", RR_AGENT_ONE), rr_comment("c1", rr_record()),
+                                              rr_spawn("r2", "reviewer", agent=RR_AGENT_TWO)),
 }
 
 
@@ -11294,6 +11331,23 @@ rr_refuse("the reviewer remedy names --kind, --guard and --round, the flags merg
           "Agent", RR_BUILDER, rr_path("reviewer"), carries=RR_CARRIES + RR_REMEDY_FLAGS)
 rr_refuse("the design-reviewer remedy names --kind, --guard and --round, the flags merge takes with --review-record",
           "Agent", RR_BUILDER, rr_path("design-reviewer"), carries=RR_CARRIES + ("design-reviewer",) + RR_REMEDY_FLAGS)
+# A background reviewer opens the gate only once its completion notice is in the transcript: its launch result is not
+# the report, and no record can be posted before the agent stops. A foreground reviewer, whose result is the report,
+# counts at once. A completion comes as an attachment line or as a user line; each names the spawn by its agentId.
+rr_allow("an async reviewer with no completion yet: a builder spawn is allowed, since no record can be posted",
+         "Agent", RR_BUILDER, rr_path("async-pending"))
+rr_allow("an async reviewer with no completion yet: a send_message handoff is allowed",
+         SEND_MESSAGE, RR_SEND, rr_path("async-pending"))
+rr_refuse("an async reviewer completed with no record: a builder spawn after its completion is refused",
+          "Agent", RR_BUILDER, rr_path("async-completed"))
+rr_refuse("an async reviewer completed as a user line, with no record: a builder spawn after it is refused",
+          "Agent", RR_BUILDER, rr_path("async-completed-line"))
+rr_allow("an async reviewer completed and recorded: a builder spawn after the record is allowed",
+         "Agent", RR_BUILDER, rr_path("async-completed-recorded"))
+rr_refuse("a foreground reviewer, its result the report, counts at once: a builder spawn with no record is refused",
+          "Agent", RR_BUILDER, rr_path("reviewer"))
+rr_allow("a first reviewer completed and recorded, a second still pending: a builder spawn is allowed",
+         "Agent", RR_BUILDER, rr_path("async-recorded-then-pending"))
 
 
 def rr_cost_case():
