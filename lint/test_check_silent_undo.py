@@ -2543,7 +2543,7 @@ class NotesUnionRevival(unittest.TestCase):
                 self.assertEqual(problems, [], "a file without merge=union is read as a union revival")
 
     def test_a_drops_lines_trailer_on_an_integ_merge_excuses_the_revival(self):
-        reason = "the revived row is kept on purpose"
+        reason = "kept the note gamma row on purpose"
         msg = "Merge lane B\n\nDrops-lines: %s -- %s" % (self.PATH, reason)
         for order in self.ORDERS:
             with self.subTest(order=order):
