@@ -55,9 +55,9 @@ Coordinator, 2026-11-07 12:15 and 13:28 CST, process-only (lane picks relayed by
 
 Built, report-only. `merge/merge.py` selects prose lines, packs them into calls, and makes the calls after the lock is released (read merge/merge.py:2483-2520; read merge/merge.py:2662-2707; read merge/merge.py:3169-3170).
 
-- Selection: each line that cites a changed backing file, from `backed_lines`, the reverse map of code to the prose that cites it (read lint/stale_cites.py:615-632). Plus each non-heading line the range adds to a governed file (read merge/merge.py:2504-2513).
-- Call: `decision_watch.invoke_model` with the `LINE_VERDICTS` shape, which reads `holds`, `stale` or `unbacked` per line (read hooks/decision_watch.py:675; read merge/merge.py:2739). The prompt also carries, for each line, an excerpt of each backticked path the line names but does not cite, when the line also names another backticked name or number: the lines of that file within 3 of each line that holds one of the line's own names. A name that the Python file defines as a def or class also shows its def row and its body, which take the 40-row cap first. An identical excerpt in a call shows once; a later line gets a note that names the line that shows it (read merge/merge.py:2548-2561; read merge/merge.py:2582-2587; read merge/merge.py:2600-2607; read lint/stale_cites.py:661-698).
-- Packing: lines are taken in order, by path, then line. A call takes lines while its built prompt, excerpts included, stays within `PROSE_JUDGE_CALL_BYTES` = 24000 UTF-8 bytes (`merge/merge.py:2478`). Each line's block is built once, and its bytes are summed as it joins a call. A file splits across calls at a line boundary. A lone line over the budget gets a call of its own. No later line joins that call. The line is cut to `PROSE_JUDGE_LINE_CHARS` = 2000 characters (`merge/merge.py:2546`), and its cited rows to `NAMED_ROW_CHARS` = 200 (`lint/stale_cites.py:646`). If it is still over the room left, its whole block is cut to the bytes left. No call goes over `PROSE_JUDGE_CALL_BYTES` (read merge/merge.py:2652-2660; read merge/merge.py:2676-2679).
+- Selection: each line that cites a changed backing file, from `backed_lines`, the reverse map of code to the prose that cites it (read lint/stale_cites.py:631-647). Plus each non-heading line the range adds to a governed file (read merge/merge.py:2504-2513).
+- Call: `decision_watch.invoke_model` with the `LINE_VERDICTS` shape, which reads `holds`, `stale` or `unbacked` per line (read hooks/decision_watch.py:675; read merge/merge.py:2739). The prompt also carries, for each line, an excerpt of each backticked path the line names but does not cite, when the line also names another backticked name or number: the lines of that file within 3 of each line that holds one of the line's own names. A name that the Python file defines as a def or class also shows its def row and its body, which take the 40-row cap first. An identical excerpt in a call shows once; a later line gets a note that names the line that shows it (read merge/merge.py:2548-2561; read merge/merge.py:2582-2587; read merge/merge.py:2600-2607; read lint/stale_cites.py:675-714).
+- Packing: lines are taken in order, by path, then line. A call takes lines while its built prompt, excerpts included, stays within `PROSE_JUDGE_CALL_BYTES` = 24000 UTF-8 bytes (`merge/merge.py:2478`). Each line's block is built once, and its bytes are summed as it joins a call. A file splits across calls at a line boundary. A lone line over the budget gets a call of its own. No later line joins that call. The line is cut to `PROSE_JUDGE_LINE_CHARS` = 2000 characters (`merge/merge.py:2546`), and its cited rows to `NAMED_ROW_CHARS` = 200 (`lint/stale_cites.py:662`). If it is still over the room left, its whole block is cut to the bytes left. No call goes over `PROSE_JUDGE_CALL_BYTES` (read merge/merge.py:2652-2660; read merge/merge.py:2676-2679).
 - Cap: at most `PROSE_JUDGE_MAX_CALLS` = 3 calls per merge (`merge/merge.py:2476`). Lines that fit no call count under "past the call cap" (read merge/merge.py:2703-2704; read merge/merge.py:2793).
 - Parallel: the calls run at once, on at most `PROSE_JUDGE_MAX_CALLS` threads (read merge/merge.py:2744).
 - Timeout: each call runs under `PROSE_JUDGE_TIMEOUT` = 300 s (`merge/merge.py:2477`). Only this judge passes it. Every other `invoke_model` caller keeps `MODEL_TIMEOUT` = 120 s (`hooks/decision_watch.py:113`).
@@ -108,12 +108,12 @@ A route row is read as unmeasured when its `measured` date is more than N days o
 
 No daemon and no timer.
 
-- The range scan starts one `git diff -M --raw -p -z -U0`. It carries the changed names and the added lines that STALE005 reads (read lint/stale_cites.py:1124; read lint/stale_cites.py:257-266).
-- Blob reads share one `git cat-file --batch` process. It starts on the first read and closes at the end of the run (read lint/stale_cites.py:150-175; read lint/stale_cites.py:1135).
-- The head blob of a file is read only when one of its added lines holds a verb or a route word (read lint/stale_cites.py:780-801).
-- A range that changes `hooks/route_rows.json` reads it at base and at head (read lint/stale_cites.py:862-865). A sentence with a route cite reads the head blob once more (read lint/stale_cites.py:886-904).
-- When a row id is removed, one `git ls-tree` runs and each tracked `.md` is read (read lint/stale_cites.py:859-884; read lint/stale_cites.py:917-920).
-- STALE005's judge, `judge()`, is rule-based and starts no model (read lint/stale_cites.py:827-857).
+- The range scan starts one `git diff -M --raw -p -z -U0`. It carries the changed names and the added lines that STALE005 reads (read lint/stale_cites.py:1153; read lint/stale_cites.py:257-266).
+- Blob reads share one `git cat-file --batch` process. It starts on the first read and closes at the end of the run (read lint/stale_cites.py:150-175; read lint/stale_cites.py:1154; read lint/stale_cites.py:1163-1164).
+- The head blob of a file is read only when one of its added lines holds a verb or a route word (read lint/stale_cites.py:816-819).
+- A range that changes `hooks/route_rows.json` reads it at base and at head (read lint/stale_cites.py:891-894). A sentence with a route cite reads the head blob once more (read lint/stale_cites.py:929).
+- When a row id is removed, one `git ls-tree` runs and each tracked `.md` is read (read lint/stale_cites.py:897-903; read lint/stale_cites.py:946-950).
+- STALE005's judge, `judge()`, is rule-based and starts no model (read lint/stale_cites.py:856-886).
 - The merge takes the changed names from a `--name-only` diff (read merge/merge.py:3122). The merge judge runs its own `git diff -U0` (read merge/merge.py:2504) and up to 3 model starts per merge (`merge/merge.py:2476`). One real merge, batch 55, made 2 (see Model judge at merge).
 
 ## Owner-only
@@ -128,7 +128,7 @@ Built:
 - The falsifier flags: `route_flag` in `hooks/refusal_note.py` (read hooks/refusal_note.py:43) and the Stop read (read lint/report_guard.py:1327-1345).
 - Part (v) layer (a), `hand_off_problem`, run at Stop (read lint/report_guard.py:1461-1470; read lint/report_guard.py:1928).
 - The reply judge's route block (read hooks/reply_judge.py:146-152).
-- STALE005, report-only (read lint/stale_cites.py:763-768).
+- STALE005, report-only (read lint/stale_cites.py:793-799).
 - The merge's model judge, report-only (see Model judge at merge).
 - A labelled set that can score the merge judge (see Model judge at merge).
 

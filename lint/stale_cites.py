@@ -574,17 +574,31 @@ def backing_path(kind, rest):
     return None
 
 
-def defined_line(text, name, end=False):
-    """The first line where `name` is a def or class in the Python `text`, found through the AST so a comment, a docstring or a string
-    that names it is never the answer. With `end`, the last line of that def's body instead. 0 when the text parses and defines no
-    such name; None when it is not Python."""
+def python_defs(text):
+    """[(first line, last line, name, owner)] of each def and class in the Python `text`, sorted by first line, found through the AST so a
+    comment, a docstring or a string that names one never counts. `owner` is the class that holds the def directly, else None. None when
+    `text` is not Python, or is too deep or too large to parse."""
     try:
         tree = ast.parse(text)
-    except (SyntaxError, ValueError):
+    except (SyntaxError, ValueError, RecursionError, MemoryError):
         return None
     kinds = (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)
-    found = sorted((n.lineno, n.end_lineno) for n in ast.walk(tree) if isinstance(n, kinds) and n.name == name)
-    return found[0][1 if end else 0] if found else 0
+    found, stack = [], [(tree, None)]
+    while stack:
+        node, owner = stack.pop()
+        for child in ast.iter_child_nodes(node):
+            is_def = isinstance(child, kinds)
+            if is_def:
+                found.append((child.lineno, child.end_lineno, child.name, owner))
+            stack.append((child, child.name if isinstance(child, ast.ClassDef) else None if is_def else owner))
+    return sorted(found)
+
+
+def defined_line(text, name):
+    """The first line where `name` is a def or class in the Python `text` (python_defs). 0 when the text parses and defines no such
+    name; None when it is not Python."""
+    found = python_defs(text)
+    return None if found is None else next((d[0] for d in found if d[2] == name), 0)
 
 
 def cited_excerpt(cite, text, limit=40, row_chars=None):
@@ -659,32 +673,34 @@ def named_too_large(text):
 
 
 def named_excerpt(names, text, around=3, limit=40):
-    """The numbered lines of a file's `text`, at most `limit`, a "..." row between two windows that do not touch. A name, or the last
-    segment of a dotted name, that Python `text` defines as a def or class (defined_line) shows from its def row through its body;
-    those rows take the cap first. Each line that holds one of `names` as a whole word also shows the `around` lines about it, in
-    the cap that is left. Each row is cut to NAMED_ROW_CHARS characters with a marker. When the `limit` drops later lines, the
-    excerpt ends with a marker line that says so; it has none otherwise. None when no line holds a name, or when `text` is over
-    NAMED_MAX_BYTES (named_too_large). A prose judge sends this beside a line that names the file in backticks, so the model reads
-    the code the line talks about. Cost: at most `limit` rows of NAMED_ROW_CHARS characters; two ast.parse calls of `text` per name."""
+    """The numbered lines of a file's `text`, at most `limit`, a "..." row between two windows that do not touch. Each line that holds
+    one of `names` as a whole word shows the `around` lines about it. A name, with a trailing `(...)` dropped and, for a dotted name,
+    its last segment only, that Python `text` defines as a def or class also shows from its def row through its body (python_defs).
+    A dotted `B.run` takes the def of `run` in class B, else the earliest def of `run`. The cap fills in this order: the def rows, the
+    windows of the other lines, the def bodies, the rest of the windows. Each row is cut to NAMED_ROW_CHARS characters with a marker.
+    When the `limit` drops later lines, the excerpt ends with a marker line that says so; it has none otherwise. None when no line
+    holds a name and no def is found, or when `text` is over NAMED_MAX_BYTES (named_too_large). A prose judge sends this beside a line
+    that names the file in backticks, so the model reads the code the line talks about. Cost: at most `limit` rows of NAMED_ROW_CHARS
+    characters; one ast.parse of `text` per call."""
     if named_too_large(text):
         return None
     rows = text.replace("\r\n", "\n").split("\n")
     hits = [re.compile(r"(?<!\w)%s(?!\w)" % re.escape(name)) for name in names]
-    keep = set()
+    defs = python_defs(text) or []
+    heads, bodies = [], []
+    for name in names:
+        parts = re.sub(r"\(.*\)$", "", name).split(".")
+        same = [d for d in defs if d[2] == parts[-1]]
+        owned = [d for d in same if len(parts) > 1 and d[3] == parts[-2]]
+        for first, last, _, _ in (owned or same)[:1]:
+            heads.append(first)
+            bodies.extend(range(first + 1, min(last, len(rows)) + 1))
+    calls, near = [], []
     for n, row in enumerate(rows, 1):
         if any(h.search(row) for h in hits):
-            keep.update(range(max(n - around, 1), min(n + around, len(rows)) + 1))
-    first = []
-    for name in names:
-        short = name.rsplit(".", 1)[-1]
-        start = defined_line(text, short)
-        if start:
-            first.extend(range(start, min(defined_line(text, short, end=True), len(rows)) + 1))
-    first = list(dict.fromkeys(first))
-    total = len(set(first) | keep)
-    first = first[:limit]
-    rest = sorted(keep - set(first))
-    shown = sorted(set(first) | set(rest[:limit - len(first)]))
+            (near if n in heads else calls).extend(range(max(n - around, 1), min(n + around, len(rows)) + 1))
+    order = list(dict.fromkeys(heads + calls + bodies + near))
+    shown = sorted(order[:limit])
     if not shown:
         return None
     out, last = [], None
@@ -693,7 +709,7 @@ def named_excerpt(names, text, around=3, limit=40):
             out.append("...")
         out.append("%d: %s" % (n, cut_row(rows[n - 1])))
         last = n
-    if total > limit:
+    if len(order) > limit:
         out.append("[more lines left out at the %d-row cap]" % limit)
     return "\n".join(out)
 
