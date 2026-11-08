@@ -1508,3 +1508,9 @@
 - conflict-markers-chain-clean-refuse: `git stash pop`, `git pull --rebase` or `git merge`, then commit and push in one call, is refused on a clean tree; the remedy is a separate push (hooks/guard_merge.py `_makes_conflict`). Decision: commit-refuses-conflict-markers.
 - conflict-markers-show-uncapped: the push check runs one `git cat-file` per file with a marker finding, with no cap, and no cost case holds a finding (hooks/guard_merge.py `_kinds_of`). Decision: commit-refuses-conflict-markers.
 - conflict-markers-stale-tracking: a tracking ref left at a markers tip after the remote was rewound hides those commits from `git push origin <branch>` (hooks/guard_merge.py `_push_hit`). Decision: commit-refuses-conflict-markers.
+- lint-slot-windows-hung-pipe: on Windows, `sh`'s timeout kill calls `communicate()` again. A grandchild that holds the stdout pipe can block it, so the lane-lint slot never frees and later lints wait forever. Unverified on Windows (merge/merge.py `sh`). Decision: merge-lock.
+- lint-slot-orphan-run: on POSIX, a timed-out ci-job's children run on after the slot frees, so the next lint shares the CPU with them (merge/merge.py `sh`). Decision: none.
+- lint-slot-count-uncased: no case pins the default count, `os.cpu_count()`, and it ignores a cgroup CPU limit (merge/merge.py `lint_slots`). Decision: none.
+- lint-slot-fallback-uncased: an unusable slot folder runs the lint ungated with one stderr line; no case covers it (merge/merge.py `take_lint_slot`). Decision: none.
+- session-start-fetch-load-flaky: `hooks/test_session_start.py` caseF4 and caseF6 (origin fetch timeouts) FAILed in 3 of 8 identical lane lints run at once on 4 CPUs, and passed at 4 or fewer. Decision: none.
+- lane-lint-shared-clone-race: one of over 300 parallel lane lints in a shared clone failed its `git fetch origin main` with `bad object worktrees/tree2/HEAD`, before its slot; not reproduced (merge/merge.py `lane_head_and_base`). Decision: none.
