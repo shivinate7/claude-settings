@@ -1033,16 +1033,26 @@ def _script_runs(text: str):
                     yield word, words[at + script]
 
 
-# What a script source names when it loads code: an import, a require, a perl `do`, a ruby `load`. The word
-# `load` also matches `json.load`, a false alarm that keeps every body, the safe side.
-_LOADS_CODE = re.compile(r"\b(?:import|require|load|do|__import__|importlib)\b").search
+# What a script source loads by a name the guard cannot read: `__import__(`, `importlib`, or a `require`, `load`
+# or perl `do` whose argument is not one whole quoted string (`require("./"+f)`, `do $f`, `load f`). A `.` before
+# `load` or `require` makes it a method call (`json.load`), not a loader. Perl `do` is read only before `$`, a quote
+# or `(`, since ruby's `each do |f|` is a block.
+_LOADS_BY_NAME = re.compile(r"(__import__\s*\(|\bimportlib\b)|(?<![.\w])(?:require|load|require_relative)\b"
+                            r"|(?<![.\w])do\s*(?=[$\"'(])").finditer
+_LITERAL_ARG = re.compile(r"""\s*\(?\s*(["'])[^"'\n]*\1\s*\)?\s*(?:[;}]|$)""").match
 
 
 def _source_loads_code(source: str, written) -> bool:
-    """True when SOURCE loads code (`_LOADS_CODE`) or names the stem of a file in WRITTEN, the file names a
-    heredoc wrote: it may run a body no word of it shows."""
+    """True when SOURCE may load a file a heredoc wrote, WRITTEN being their names: it imports or requires a
+    module named like the stem of one (`import helper`, `from helper import x`, `require("./helper")`), or it
+    loads by a name that is not one quoted literal (`_LOADS_BY_NAME`). `import sys` and `require("fs")` load
+    no written file, so they stay data."""
+    for found in _LOADS_BY_NAME(source):
+        if found.group(1) or not _LITERAL_ARG(source[found.end():].split("\n", 1)[0]):
+            return True
     stems = {name.rsplit("/", 1)[-1].rsplit(".", 1)[0] for name in written}
-    return bool(_LOADS_CODE(source)) or any(stem and stem in source for stem in stems)
+    return any(re.search(r"\b(?:import|from|use|do|load|require|require_relative)\b[^\n]*\b%s\b" % re.escape(stem), source)
+               for stem in stems if stem)
 
 
 def _script_body_runs_nothing(text: str, header: str, sources) -> bool:
