@@ -1,5 +1,6 @@
 {
   "added": "2026-11-07T19:33:00Z",
+  "answeredAt": "2026-11-07T19:41:50.035Z",
   "context": "Goal: the three-round cap holds, and a gap is fixed, not filed.\nProblem (risk): now that a failed fix check counts as a round (your 347 a), a run of failed fix checks on a change that touches no guard or check reaches round 3 sooner. Under the cap as written it then merges on green, with the open finding filed as a debt.\nBased on (ruling): decision hold-unsafe-after-round-3 (owner, 2026-10-15 12:00 CDT): an unfinished change merges at zero or positive net value, and a change that touches no guard merges on green. Asked again because of your 13:28 CST question, and because 347 a lets failed fix checks reach round 3 faster.\nDeparts from: main, where a round-3 FAIL on a change with no guard merges on green with its finding filed \u2014 a holds it, and the finding becomes a new lane at round 1.",
   "home": "lane review-fix-check-round (session_013NEJL1PyP6demZ4Pyj8fYX)",
   "id": "round3-fail-holds",
@@ -31,7 +32,7 @@
   "ref": "item 347; decision hold-unsafe-after-round-3",
   "reply": "a, 13:41 CST: a round-3 FAIL holds the change, and the finding becomes a new lane at round 1. Lane review-fix-check-round builds it. Your question about reworking the 3-round program (models and prompts per round): yes, it is worth a look. Step review-rounds-rework first measures what each round catches, then proposes changes.",
   "short": "Round-3 FAIL: hold, or merge with a debt",
-  "status": "open",
+  "status": "closed",
   "title": "Should a failed review at round 3 hold the change until the finding is fixed?",
   "why": "Your 13:28 CST question: \"is it caused by my rule that after a third reviewer round it just leaves a debt and gets sent forward?\""
 }

@@ -1,5 +1,6 @@
 {
   "added": "2026-11-07T19:30:00Z",
+  "answeredAt": "2026-11-07T20:44:58.216Z",
   "context": "Goal: a guard PR's fix check catches a defect that Haiku misses.\nProblem (rule): a reviewer's model is a role rule, which needs your word.\nBased on (ruling): rule agent-model-cap, where reviewers run Sonnet from round 2 on.\nDeparts from: main, where the fix check runs on Haiku \u2014 a moves it to Sonnet for guard and check PRs.",
   "home": "step guard-fix-check-sonnet (lane session_013NEJKz9HoqeRzdjbw9Fnga)",
   "id": "guard-fix-check-sonnet",
@@ -31,7 +32,7 @@
   "ref": "item 279 option c",
   "reply": "a, 14:44 CST, counted by lane guard-fix-check-sonnet. Your question: no agent split, but more than prose. Today the spawn guard refuses a reviewer above Haiku unless its brief says round 2 or 3, and a fix check carries no round. So the lane builds three parts: a fix-check marker in the brief that the guard reads (one shared constant); agents/reviewer.md line 73 and the model-per-role table row; and a merge-tool refusal of a Haiku fix check on a guard or check PR, so Sonnet is required, not only allowed. It is a guard change, so it gets full review rounds. This closes on the lane's done report.",
   "short": "Guard fix checks: Sonnet or Haiku?",
-  "status": "open",
+  "status": "closed",
   "title": "Should the fix check on a guard or check PR run on Sonnet instead of Haiku?",
   "why": "You asked on item 279 (Nov 6) how option c made sense there: \"isn't that a separate thign?\". This is it, on its own."
 }

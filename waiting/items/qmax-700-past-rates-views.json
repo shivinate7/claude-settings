@@ -1,5 +1,6 @@
 {
   "added": "2026-11-07T18:44:00Z",
+  "answeredAt": "2026-11-07T18:44:43.273Z",
   "context": "Goal: q_max shows past rates the way you look them up.\nProblem (goal): PR #700, \"Past Rates: By Year and By City views\" (Oct 12), never merged. Its history no longer shares a base with main, so it cannot merge as it is: 65 commits, about 3,500 lines.\nBased on (read): lane qmax-revive-idle found the feature is not on main.\nDeparts from: main, where Past Rates has no By Year or By City view \u2014 option a adds both.\nNo recommendation: it depends on whether you still look up past rates by year or by city. #700 stays open until you answer.",
   "home": "lane qmax-revive-idle (coordinator)",
   "id": "qmax-700-past-rates-views",
@@ -36,7 +37,7 @@
   "ref": "q_max #700",
   "reply": "a, with your condition, sent to the coordinator for lane qmax-revive-idle at 12:47 CST. First the lane checks main for the By Year and By City views in any shape: the routes, the components, and any grouping of past rates by year or city. It ports the views only if none exists. If a partial form exists, it brings that back to you before it builds.",
   "short": "#700 Past Rates views: port or close",
-  "status": "open",
+  "status": "closed",
   "title": "q_max PR #700 (Past Rates by year and by city) cannot merge: rebuild the two views, or close it?",
   "why": "The PR has sat since Oct 12 and its history no longer fits main."
 }

@@ -1,5 +1,6 @@
 {
   "added": "2026-11-07T20:25:00Z",
+  "answeredAt": "2026-11-07T20:41:09.600Z",
   "context": "Goal: records stay readable and linked without hand checks.\nProblem (rule): no lint checks that a record cites an id with a plain gloss, or that a debt's Decision line names a decision that names the debt back. Most existing records would fail both.\nBased on (code): lint/report_guard.py bare_cite reads replies only. No lint reads a debt's **Decision.** line.\nBased on (ruling): rule speak-cite-id-plus-gloss. Asked because no check holds it for records, and a full check means a large rewrite.\nDeparts from: main, which checks glosses in replies only. Each of a and b adds a check on records.",
   "home": "step records-gloss-link-sweep (lane session_013NEJL1DTMYoLhbUX1pHGkU)",
   "id": "records-gloss-link-check",
@@ -37,7 +38,7 @@
   "ref": "rule speak-cite-id-plus-gloss",
   "reply": "b, 14:41 CST: check every record, and rewrite the old ones in one lane. Relayed to lane notes-keep-reverify; this closes on its done report.",
   "short": "Records: check id glosses and debt-decision links",
-  "status": "open",
+  "status": "closed",
   "title": "Should a lint check that records gloss their cited ids and that debts link back to their decision?",
   "why": "Lane notes-keep-reverify, from kept notes cites-lack-gloss-unchecked and debt-decision-link-unchecked (one answer covers both)."
 }

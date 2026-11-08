@@ -1,5 +1,6 @@
 {
   "added": "2026-11-07T20:14:00Z",
+  "answeredAt": "2026-11-07T21:01:51.965Z",
   "context": "Goal: rewording a line that main only added stops reading as a silent undo, and real undos stay red.\nProblem (risk): the fix opens one hole in the silent-undo check. When both sides add a similar line at one spot, `rebase -X theirs` keeps the branch's wording and passes with no flag. Only a change of words passes. Numbers, operators and negation must still match.\nBased on (measured): on main, `alpha one two three four` changed to `alpha one two three five` is flagged \"hunk reversed\". A prototype of the fix passes all 118 existing tests.\nBased on (read): decision silent-undo-check-design, line 44, leaves room for a rule that separates an edit from a reversal.\nDeparts from: main, where every in-place edit under 0.9 similarity is flagged. Option a lets an edit pass when it keeps the first word, the word kinds and the numbers, has similarity 0.6 or more, and restores no earlier line.",
   "home": "lane notes-fix-large-1",
   "id": "silent-undo-edit-pass",
@@ -37,7 +38,7 @@
   "ref": "decision silent-undo-check-design; step notes-fix-large-1",
   "reply": "a, 15:01 CST: accept the one hole and record it. Lane notes-fix-large-1 builds it as its row 6, once PR #1099 (refuse a lane commit that undoes its own lane's work) merges; that PR is still a draft. This closes on the lane's done report.",
   "short": "Silent-undo check: pass reworded lines, or keep the false alarm",
-  "status": "open",
+  "status": "closed",
   "title": "May the silent-undo check let a reworded line pass, at the cost of one small hole?",
   "why": "Lane notes-fix-large-1 (row inplace-edit-under-0-9-flagged), sent by the coordinator at 14:15 CST. A check's verdict changes, so the hole is yours to accept."
 }

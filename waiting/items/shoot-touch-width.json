@@ -1,6 +1,6 @@
 {
   "added": "2026-11-08T14:24:00Z",
-  "answeredAt": "2026-11-08T14:29:00Z",
+  "answeredAt": "2026-11-08T16:20:56.475Z",
   "context": "Goal: each phone or tablet screenshot from bin/shoot shows the page as a touch screen sees it.\nProblem (rule): no record says which widths count as touch. #2028's design-review line says a phone or tablet gets touch and a desktop none, but gives no width, and bin/shoot needs one.\nBased on (read): bin/shoot's default sizes are 1440, 820 and 390 px wide (decision shoot-is-one-shared-command).\nBased on (read): the design checklist asks for 44 px touch targets on touch screens and 24 px for a mouse (docs/design/checklist.md, ux-a11y-floor).\nDeparts from: main, where bin/shoot never sets touch \u2014 shots below a width cutoff get touch.\nMeanwhile: the lane builds option a. Your answer changes only the cutoff.",
   "home": "shoot-touch-per-size",
   "id": "shoot-touch-width",
@@ -41,9 +41,9 @@
   "owner": "lane shoot-touch-per-size (session_013NEJL3cfg1yrBuezf45D4i)",
   "pick": "a",
   "ref": "step shoot-touch-per-size; #2028 review note 10; decision shoot-is-one-shared-command",
-  "reply": "Withdrawn 08:29 CST Nov 8. The coordinator took option a (under 1024 px is touch, no override key) as its own pick at 08:22 CST, because the cutoff can be undone (rule parallelism-keep-going). Home: step shoot-touch-per-size, recorded as a coordinator pick, process only. Nothing waits on you.",
+  "reply": "You picked c (10:20 CST Nov 8): under 1024 px is touch, and a repo may list its own widths in touchWidths. This replaces the coordinator's pick a. It was the option marked against your ruling that a repo changes to fit a shared tool; your pick overrides it for this tool. Routed to lane shoot-touch-per-size (session_013NEJL3cfg1yrBuezf45D4i) and the coordinator; home: step shoot-touch-per-size. Closed 10:24 CST Nov 8.",
   "short": "bin/shoot: which widths get touch",
-  "status": "withdrawn",
+  "status": "closed",
   "title": "Which screenshot widths should bin/shoot take as touch screens?",
   "version": 2
 }

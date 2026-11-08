@@ -7,6 +7,7 @@
   "n": 398,
   "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
   "ref": "step roadmap-blank-pages; step degen-page-export; lane session_013NEJKyqU19UoQgbHWPzXBz; #1779; #1784",
+  "reply": "10:24 CST Nov 8: you were right. Nine items you had answered and that were already routed stayed open; triage closed them now (343, 344, 346, 347, 351, 356, 364, 365, 368). The ones still open wait on you or on a test: 240, 252, 264, 273, 291-293 (parked), 324, 328, 354, 361, 424. This task stays open until it is done.",
   "short": "Fix banchi's and degen's pages",
   "status": "open",
   "title": "Ask a Mac session to fill banchi's blank roadmap block and degen's missing page data"

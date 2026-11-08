@@ -1,5 +1,6 @@
 {
   "added": "2026-11-07T18:50:00Z",
+  "answeredAt": "2026-11-07T19:12:42.618Z",
   "context": "Goal: q_max shows past rates the way you look them up.\nProblem (goal): your 12:44 CST condition on item 343. Part of #700 is on main in a generic form: Past Rates has a Group By list in More Filters with year and city. It groups rows by count and year span, with a Year column. The dedicated By Year and By City views are not on main: the median rate per year or city, a year where every rate was refused shown as its own row, and each refusal's own reason.\nBased on (read): lane qmax-revive-idle's read of q_max main 58cad3bfb: src/components/SliceExplorer.tsx (Group By); src/utils/corpusSlice.ts (CORPUS_DIMENSIONS); no PastRatesView, decision or tests on main. A stray debt, docs/debts/past-rates-by-year-spacing.md, describes the By Year view that main lacks.\nDeparts from: main's generic Group By \u2014 a adds the dedicated views, with median and refusal logic, beside it.",
   "home": "lane qmax-revive-idle (coordinator); q_max #700",
   "id": "qmax-700-generic-vs-views",
@@ -37,7 +38,7 @@
   "ref": "item 343; q_max #700",
   "reply": "a, saved 13:12 CST. Sent to the coordinator: a lane ports #700's By Year and By City views (median per year and city, refusals with reasons) beside main's Group By, with a designer and a design check.",
   "short": "#700: generic Group By is on main; port the views?",
-  "status": "open",
+  "status": "closed",
   "title": "Main already groups Past Rates by year and city, with no medians or refusal reasons. Port #700's dedicated views anyway?",
   "why": "Your 343 a said: first confirm it is not on main in any form. The lane found part of it."
 }

@@ -1,5 +1,6 @@
 {
   "added": "2026-11-08T06:15:00Z",
+  "answeredAt": "2026-11-08T16:20:56.475Z",
   "checked_with": "session_013NEJL3KvrWSBxStMe8hDMw (the q_max lane that owns the fix, relayed by the coordinator 00:07 CST Nov 8); q_max main decisions grepped for a Past Rates pill exception: none",
   "context": "Goal: Past Rates shows every bar control at 1440 with the sidebar shut, and the tabs stay where they are, so browser check EPI2B-3 goes green on q_max main.\nProblem (rule): the only fit with room to spare pads the Past Rates pills 8px, not 12px. That departs from your ruling that every pill pads the same, so it needs your word.\nBased on (measured): the bar is 77.4px short at 1440 on main's build, and 83.6 to 115.4px short in CI. The lane sizes to CI's worst case. More Filters as an icon saves 81.5px, compact pills save 48px, and a tighter tab gap saves 48px.\nBased on (ruling): decisions/control-primitives-2b (D-684, the control primitives draw one select pill; owner): every pill pads --f2-gap-bar. Asked again because each fit that keeps it either folds a control or merges the tabs.\nBased on (ruling): decisions/worded-controls-become-icons (D-729, worded controls become icon buttons; owner): supports More Filters as an icon.\nDeparts from: D-684, every pill pads --f2-gap-bar \u2014 the Past Rates pills pad 8px.\nEach card shows the bar at 1440x900, sidebar shut, at CI's worst row width, cut into four slices left to right; the Wide picture shows it whole. Triage's copies of the mockup open at the option and CI's row, and add the sliced view. The mockup's own readout (11.5px spare for a and b, 14px short for c) measures its drawn copy of the bar. The lane's figures come from main's real build, so they are the ones to trust. Either way, a and b fit, and c does not.\nMeanwhile: the lane waits on this answer. #1117 (the D-300 locator fix) is with runner 9.",
   "designs": [
@@ -86,8 +87,9 @@
   "owner": "lane qmax-browser-main-red (session_013NEJL3KvrWSBxStMe8hDMw), q_max branch claude/qmax-pastrates-1440-design",
   "pick": "a",
   "ref": "q_max mockup docs/design/mockups/past-rates-bar-1440.html and -notes.md on branch claude/qmax-pastrates-1440-design at 59df19df (designer opus); CI run 42449067365",
+  "reply": "You picked none (10:20 CST Nov 8) and asked for picture mockups. The lane renders a picture of the bar for each option, placed inside each option card, and the question comes back as a new item. Routed to lane qmax-browser-main-red (session_013NEJL3KvrWSBxStMe8hDMw). Closed 10:24 CST Nov 8.",
   "repo": "q_max",
   "short": "Past Rates bar at 1440",
-  "status": "open",
+  "status": "closed",
   "title": "How should the Past Rates bar fit at 1440 with the sidebar shut?"
 }
