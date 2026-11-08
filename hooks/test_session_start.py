@@ -32,7 +32,7 @@ UNKNOWN_LINE = "repo caution: unknown, the level could not be read"  # the hook'
 KEEP = object()  # run_hook's tmpdir default: the runner's own TMPDIR is kept
 TMP_SEAM = "CLAUDE_SETTINGS_TMP_CANDIDATE"  # the hook's /tmp candidate, read only so these tests can name it
 WINDOWS_UNAMES = ("MINGW64_NT-10.0-26200", "MSYS_NT-10.0-26200", "CYGWIN_NT-10.0-26200")
-ON_WINDOWS = os.name == "nt"  # a Windows runner: the hook writes no TMPDIR line there (ruling 2026-11-08 00:38 CST)
+ON_WINDOWS = os.name == "nt"  # a Windows runner: the hook writes no TMPDIR line there
 # Git's sh.exe builds PATH with /usr/bin, which holds the real uname, ahead of the Windows PATH, so a fake uname
 # set in the environment is shadowed there. The shell prepends the fake folder itself. Derived from the PATH_FIRST
 # of hooks/test_wrappers.py, which replaces PATH whole; a whole replace would drop the /usr/bin tools the hook needs.
@@ -949,7 +949,7 @@ class SessionStartTmpdirTests(SessionStartAgentWorktreeNoticeTests):
                             "the env file got an export TMPDIR= line on a Windows host, though Git Bash has /tmp: %r" % text)
 
     def test_a_windows_uname_gets_no_tmpdir_line(self):
-        """Git Bash always has /tmp, so the hook writes no export TMPDIR= line on a Windows host (ruling 2026-11-08 00:38 CST)."""
+        """Git Bash always has /tmp, so the hook writes no export TMPDIR= line on a Windows host."""
         for uname in WINDOWS_UNAMES:
             with self.subTest(uname=uname):
                 # Scope first: if the shell did not run the fake, these cases would read the real host.
