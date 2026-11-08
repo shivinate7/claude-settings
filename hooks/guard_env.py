@@ -98,6 +98,31 @@ ENV_VALUE_LONG = (
 # names, or a glob that includes the file, and stays judged.
 ENV_EXCLUDE_LONG = ("--exclude", "--exclude-dir")
 ENV_VALUE_SHORT = "ABCmgd"
+# rg reads its flags by its own table, kept whole so a flag outside it can be told from one inside:
+# the flags that take a value (a word after them is no pattern and no path), and the plain switches.
+# A `--no-...` flag is always a switch. A flag in neither table might take a value, so the search is
+# read as if it might have swallowed a path word (`_env_walk`, "fails closed").
+ENV_RG_VALUE_LONG = (
+    "--after-context", "--before-context", "--color", "--colors", "--context", "--context-separator",
+    "--dfa-size-limit", "--encoding", "--engine", "--field-context-separator",
+    "--field-match-separator", "--generate", "--glob", "--hostname-bin", "--hyperlink-format",
+    "--iglob", "--ignore-file", "--max-columns", "--max-count", "--max-depth", "--maxdepth",
+    "--max-filesize", "--path-separator", "--pre", "--pre-glob", "--regex-size-limit", "--replace",
+    "--sort", "--sortr", "--threads", "--type", "--type-add", "--type-clear", "--type-not",
+)
+ENV_RG_SWITCH_LONG = (
+    "--auto-hybrid-regex", "--binary", "--block-buffered", "--byte-offset", "--case-sensitive",
+    "--column", "--count", "--count-matches", "--crlf", "--debug", "--files", "--files-with-matches",
+    "--files-without-match", "--fixed-strings", "--follow", "--glob-case-insensitive", "--heading",
+    "--help", "--hidden", "--ignore-case", "--ignore-file-case-insensitive", "--include-zero",
+    "--invert-match", "--json", "--line-buffered", "--line-number", "--line-regexp",
+    "--max-columns-preview", "--mmap", "--multiline", "--multiline-dotall", "--null", "--null-data",
+    "--one-file-system", "--only-matching", "--passthru", "--pcre2", "--pcre2-version", "--pretty",
+    "--quiet", "--search-zip", "--smart-case", "--sort-files", "--stats", "--stop-on-nonmatch",
+    "--text", "--trace", "--trim", "--type-list", "--unicode", "--unrestricted", "--version",
+    "--vimgrep", "--with-filename", "--word-regexp",
+)
+ENV_RG_SWITCH_SHORT = ".0HILNPSUVabchilnopqsuvwxz"
 # `sed` and `awk` read a script, and its first plain word is a regex, never a path. `awk -F` and
 # `-v` take a value of their own.
 ENV_SCRIPT_COMMANDS = ("sed", "awk", "gawk", "mawk", "nawk")
@@ -108,7 +133,7 @@ ENV_SCRIPT_VALUE_SHORT = "Fv"
 ENV_BOOLEAN_F_COMMANDS = ("ag", "ack")
 # `ag -G` takes a regex that picks the files to search, and `ag -p` a file of ignore patterns, which
 # is judged as a path. In grep `-G` is a plain switch, so the letters are not shared.
-ENV_VALUE_SHORT_BY_COMMAND = {"rg": "tT", "ag": "Gp"}
+ENV_VALUE_SHORT_BY_COMMAND = {"rg": "tTjrEM", "ag": "Gp"}
 # The value of these letters is no path, so it is skipped: after rg `-t` or `-T` a file type name,
 # after ag `-G` a file regex, judged by `_ag_hidden_regex_refusal` instead.
 ENV_NO_PATH_SHORT_BY_COMMAND = {"rg": "tT", "ag": "G"}
@@ -466,10 +491,23 @@ def _env_parts(piece: str):
     return _ampersand_split(piece)
 
 
+def _flag_word(word: str) -> str:
+    """A word that is one whole quoted string and starts with `-` is a flag to the shell, whatever its
+    quotes: `'--exclude=GLOB'` is `--exclude=GLOB`. Any other word is returned as it stands."""
+    if len(word) > 2 and word[0] in "'\"" and word[-1] == word[0] and word[1] == "-":
+        return word[1:-1]
+    return word
+
+
 def _pattern_words(words, position: int, command: str):
     """Read the flags of a search or script command. Return (the indexes of the words that are a
     PATTERN or a program, never a path, {index: the file name glued to a flag word}, whether a
-    hidden flag is set, the indexes of the positional words, whether a flag turns the ignore rules off).
+    hidden flag is set, the indexes of the positional words, whether a flag turns the ignore rules off,
+    and a dict of what `_env_walk` also needs). In that dict, "pattern" is the index of the plain
+    word read as the pattern, skipped or not. For rg, "unknown" counts the flags in neither rg
+    table, each of which might have taken a word; "globs" holds the `-g` and `--iglob` values as
+    (glob, ignores case); "types" holds the `-t` type names; "types_open" is set when `--type-add` or
+    `--type-clear` changes the stock types, so a type narrows nothing.
 
     The words after the command go flag by flag. A short cluster is read letter by letter, so `-nf`
     and `-ex` are seen. `-e` and the long pattern flags take the pattern (the word itself when it
@@ -481,13 +519,16 @@ def _pattern_words(words, position: int, command: str):
     """
     skip, glued, plain, given, ended = set(), {}, [], False, False
     hidden, type_not, unrestricted, no_ignore = False, False, 0, False
+    extras = {"pattern": None, "unknown": 0, "globs": [], "types": [], "types_open": False}
+    rg = command == "rg"
+    fold = rg and "--glob-case-insensitive" in words
     program = command in ENV_PROGRAM_COMMANDS
     value_short = (ENV_PROGRAM_VALUE_SHORT[command] if program
                    else ENV_VALUE_SHORT + ENV_VALUE_SHORT_BY_COMMAND.get(command, "")
                    + (ENV_SCRIPT_VALUE_SHORT if command in ENV_SCRIPT_COMMANDS else ""))
     i = position + 1
     while i < len(words):
-        word = words[i]
+        word = _flag_word(words[i])
         if REDIRECT.fullmatch(word):
             i += 2
             continue
@@ -512,7 +553,16 @@ def _pattern_words(words, position: int, command: str):
                 given = True
             elif name in ENV_EXCLUDE_LONG or (command == "ag" and name == ENV_AG_REGEX_LONG):
                 skip.update({i} if attached else {i + 1})
-            i += 1 if attached or name not in ENV_PATTERN_LONG + ENV_FILE_LONG + ENV_VALUE_LONG else 2
+            takes = rg and name in ENV_RG_VALUE_LONG
+            if rg:
+                if takes:
+                    value = attached if "=" in word else (words[i + 1] if i + 1 < len(words) else "")
+                    _rg_value(extras, name, value, fold)
+                elif not (name in ENV_RG_SWITCH_LONG or name.startswith("--no-") or "=" in word
+                          or name in ENV_PATTERN_LONG + ENV_FILE_LONG + ENV_EXCLUDE_LONG):
+                    extras["unknown"] += 1
+            i += 1 if attached or not (takes or name in ENV_PATTERN_LONG + ENV_FILE_LONG
+                                       + ENV_VALUE_LONG) else 2
             continue
         step = 1
         for k, letter in enumerate(word[1:], 1):
@@ -534,11 +584,16 @@ def _pattern_words(words, position: int, command: str):
                 step = 1 if rest else 2
                 break
             if letter in value_short:
+                if rg:
+                    _rg_value(extras, "-" + letter, rest or (words[i + 1] if i + 1 < len(words) else ""),
+                              fold)
                 if not rest and letter in ENV_NO_PATH_SHORT_BY_COMMAND.get(command, ""):
                     skip.add(i + 1)  # a file type name or an ag file regex, never a path
                 type_not = type_not or (command == "rg" and letter in ENV_RG_TYPE_NOT_SHORT)
                 step = 1 if rest else 2
                 break
+            if rg and letter not in ENV_RG_SWITCH_SHORT:
+                extras["unknown"] += 1
         i += step
     hidden = hidden or unrestricted >= ENV_UNRESTRICTED_FOR_HIDDEN.get(command, 2)
     if program and not given and plain:
@@ -547,9 +602,24 @@ def _pattern_words(words, position: int, command: str):
         lead = 1 if command == "yq" and words[plain[0]] in ENV_YQ_SUBCOMMANDS else 0
         if len(plain) > lead + 1:
             skip.update(plain[:lead + 1])
-    elif not given and plain and not (hidden and type_not):
-        skip.add(plain[0])
-    return skip, glued, hidden, plain, no_ignore or unrestricted > 0
+    elif not given and plain:
+        extras["pattern"] = plain[0]
+        if not (hidden and type_not):
+            skip.add(plain[0])
+    return skip, glued, hidden, plain, no_ignore or unrestricted > 0, extras
+
+
+def _rg_value(extras, flag: str, value: str, fold: bool):
+    """Record what an rg flag's value says about the files read: a `-g` or `--iglob` glob (a glob
+    that starts with `!` is a negative one and narrows nothing), a `-t` type, or a changed type
+    table."""
+    value = re.sub(r"[\"']", "", value)
+    if flag in ("-g", "--glob", "--iglob") and value and not value.startswith("!"):
+        extras["globs"].append((value, fold or flag == "--iglob"))
+    elif flag in ("-t", "--type"):
+        extras["types"].append(value)
+    elif flag in ("--type-add", "--type-clear"):
+        extras["types_open"] = True
 
 
 def _git_grep_at(words, position: int, command: str) -> int:
@@ -835,9 +905,21 @@ def _quoted_words(segment: str, keep_newlines=False):
     return [w.replace("\0", " ").replace("\1", "\n") for w in "".join(chunks).split()]
 
 
-def _env_words(segment: str):
-    """Return (words, command word) of one segment, redirects spaced into words of their own."""
+def _env_words(segment: str, walk: bool = False):
+    """Return (words, index of the command word, command word) of one segment, redirects spaced
+    into words of their own. `walk` also looks through the wrappers a folder search hides behind:
+    a subshell paren, `command [-p]`, `env [-i] [-u NAME] [VAR=value]...` and `nice [-n N]`. The
+    other callers read each of those as the command itself."""
     words = _quoted_words(_blank_messages(segment))
+    if walk and words:
+        if words[0].startswith("("):
+            words[0] = words[0].lstrip("(")
+            if not words[0]:
+                words.pop(0)
+        if words and words[-1].endswith(")") and not words[-1].startswith(("'", '"')):
+            words[-1] = words[-1].rstrip(")")
+            if not words[-1]:
+                words.pop()
     # The command is the first word that is not a `VAR=value` assignment.
     # A `(` glued to the first assignment is a subshell paren, not part of the name.
     if words and words[0][:1] == "(" and ASSIGNMENT.match(words[0][1:]):
@@ -859,6 +941,25 @@ def _env_words(segment: str):
                 break
             position = after + 1
         elif word == "do" or _wrapper_name(word) == "verdict":
+            position = after
+        elif walk and word == "command":
+            position = after + (after < len(words) and words[after] == "-p")
+        elif walk and word == "nice":
+            if after < len(words) and words[after] == "-n":
+                after += 2
+            elif after < len(words) and re.fullmatch(r"-\d+|--adjustment=\S+", words[after]):
+                after += 1
+            position = after
+        elif walk and word == "env":
+            while after < len(words):
+                if ASSIGNMENT.match(words[after]):
+                    after = _assignment_end(words, after)
+                elif words[after] in ("-i", "-0", "--ignore-environment"):
+                    after += 1
+                elif words[after] in ("-u", "--unset"):
+                    after += 2
+                else:
+                    break
             position = after
         elif word == "time":
             position = after + (after < len(words) and words[after] == "-p")
@@ -962,11 +1063,76 @@ def _ignored_paths(folder: str):
     return frozenset(p for p in answer.stdout.split("\0") if p)
 
 
-def _env_file_in(folder: str, include=(), exclude=(), exclude_dir=(), ignored=frozenset()) -> str:
+# The file types of rg that a `-t` flag can name here, each with its globs. A type outside this table
+# (or a type table changed by `--type-add`) may pick any file, so it narrows nothing.
+ENV_RG_TYPE_GLOBS = {
+    "py": ("*.py", "*.pyi"), "js": ("*.js", "*.jsx", "*.mjs", "*.cjs", "*.vue"),
+    "ts": ("*.ts", "*.tsx", "*.cts", "*.mts"), "rust": ("*.rs",), "go": ("*.go",),
+    "md": ("*.md", "*.markdown", "*.mdown", "*.mkdn"),
+    "markdown": ("*.md", "*.markdown", "*.mdown", "*.mkdn"),
+    "json": ("*.json",), "yaml": ("*.yaml", "*.yml"), "toml": ("*.toml",),
+    "html": ("*.htm", "*.html"), "css": ("*.css", "*.scss"), "java": ("*.java",),
+    "ruby": ("*.rb",), "php": ("*.php",), "sql": ("*.sql",), "xml": ("*.xml",),
+    "c": ("*.c", "*.h"), "cpp": ("*.cpp", "*.cc", "*.hpp", "*.h"), "lua": ("*.lua",),
+    "swift": ("*.swift",), "kotlin": ("*.kt", "*.kts"),
+}
+
+
+def _brace_expand(word: str):
+    """The words bash makes of one unquoted word with a brace list: `--exclude-dir={a,b}` is
+    `--exclude-dir=a --exclude-dir=b`. A word with a quote, a backslash or a `$` is returned as it
+    stands, because bash leaves a quoted brace list literal."""
+    if re.search(r"[\"'\\$]", word):
+        return [word]
+    open_at = word.find("{")
+    while open_at != -1:
+        depth, parts, last = 0, [], open_at + 1
+        for j in range(open_at, len(word)):
+            if word[j] == "{":
+                depth += 1
+            elif word[j] == "}":
+                depth -= 1
+                if depth == 0:
+                    if parts:
+                        parts.append(word[last:j])
+                        return [e for part in parts
+                                for e in _brace_expand(word[:open_at] + part + word[j + 1:])]
+                    break
+            elif word[j] == "," and depth == 1:
+                parts.append(word[last:j])
+                last = j + 1
+        open_at = word.find("{", open_at + 1)
+    return [word]
+
+
+def _glob_picks(name: str, relative: str, glob: str, fold: bool) -> bool:
+    """True when a file named `name`, at `relative` from the searched folder, matches `glob`. A glob
+    with no `/` is matched on the name. One with a `/` is matched on the relative path, and a leading
+    `**/` also matches at the top. `*` crosses a `/`, so a doubtful glob picks more, never less."""
+    if fold:
+        name, relative, glob = name.lower(), relative.lower(), glob.lower()
+    glob = glob.lstrip("/")
+    if "/" not in glob:
+        return fnmatch.fnmatchcase(name, glob)
+    return fnmatch.fnmatchcase(relative, glob) or (
+        glob.startswith("**/") and fnmatch.fnmatchcase(relative, glob[3:]))
+
+
+def _glob_picked(name: str, relative: str, rules) -> tuple:
+    """(whether a file is read, whether the rule that read it overrides the ignore rules), by the
+    include and exclude `rules` as grep applies them: the LAST rule whose glob matches the file
+    decides. With no match, a file is read unless the first rule is an include."""
+    for kind, glob, fold, overrides in reversed(rules):
+        if _glob_picks(name, relative, glob, fold):
+            return kind == "include", kind == "include" and overrides
+    return not rules or rules[0][0] != "include", False
+
+
+def _env_file_in(folder: str, rules=(), exclude_dir=(), ignored=frozenset()) -> str:
     """The first env file under `folder`, or ENV_TOO_LARGE past ENV_WALK_LIMIT entries, else ''. A symlink is not followed, as rg and ag do not.
-    `.git` holds no env file and is skipped. The grep globs narrow it: a file is read only when it
-    matches an `include` glob (when any is given) and no `exclude` glob, and a folder that matches an
-    `exclude_dir` glob is not entered. `ignored` is `_ignored_paths`: a file or folder in it is skipped."""
+    `.git` holds no env file and is skipped. `rules` narrow it, as `_glob_picked` reads them, and a
+    folder that matches an `exclude_dir` glob is not entered. `ignored` is `_ignored_paths`: a file
+    or folder in it is skipped, except a file that a rule with `overrides` set picks."""
     seen = 0
     for top, dirs, files in os.walk(folder):
         relative = os.path.relpath(top, folder).replace(os.sep, "/")
@@ -976,10 +1142,10 @@ def _env_file_in(folder: str, include=(), exclude=(), exclude_dir=(), ignored=fr
                    and prefix + d + "/" not in ignored]
         seen += len(dirs) + len(files)
         for name in files:
-            if (names_env_file(name)
-                    and (not include or any(fnmatch.fnmatchcase(name, g) for g in include))
-                    and not any(fnmatch.fnmatchcase(name, g) for g in exclude)
-                    and prefix + name not in ignored):
+            if not names_env_file(name):
+                continue
+            read, overrides = _glob_picked(name, prefix + name, rules)
+            if read and (overrides or prefix + name not in ignored):
                 return os.path.join(top, name)
         if seen > ENV_WALK_LIMIT:
             return ENV_TOO_LARGE
@@ -992,7 +1158,7 @@ def _grep_recursive(words, position: int) -> bool:
     value, as in `_pattern_words`."""
     i = position + 1
     while i < len(words):
-        word = words[i]
+        word = _flag_word(words[i])
         i += 1
         if word == "--":
             return False
@@ -1016,67 +1182,116 @@ def _grep_recursive(words, position: int) -> bool:
 
 
 def _grep_globs(words, position: int):
-    """The (include, exclude, exclude-dir) globs of a grep command line, as the shell passes them."""
-    found = {"--include": [], "--exclude": [], "--exclude-dir": []}
-    for i in range(position + 1, len(words)):
-        name, attached, value = words[i].partition("=")
-        if name in found:
-            if not attached and i + 1 < len(words):
-                value = words[i + 1]
-            found[name].append(re.sub(r"[\"']", "", value))
-    return found["--include"], found["--exclude"], found["--exclude-dir"]
+    """The (rules, exclude-dir globs) of a grep command line, as the shell passes them. A rule is
+    (`include` or `exclude`, glob, False, False), in command-line order. An unquoted brace list is
+    expanded, and a whole quoted flag word is read as the flag."""
+    shaped = [_flag_word(e) for word in words[position + 1:] for e in _brace_expand(word)]
+    rules, exclude_dir = [], []
+    for i, word in enumerate(shaped):
+        name, attached, value = word.partition("=")
+        if name in ("--include", "--exclude", "--exclude-dir"):
+            if not attached and i + 1 < len(shaped):
+                value = shaped[i + 1]
+            value = re.sub(r"[\"']", "", value)
+            if name == "--exclude-dir":
+                exclude_dir.append(value.rstrip("/"))
+            else:
+                rules.append((name[2:], value, False, False))
+    return rules, exclude_dir
+
+
+def _rg_rules(extras):
+    """The include rules an rg command line makes: each positive `-g` or `--iglob` glob, which
+    overrides the ignore rules, and each `-t` type's globs. A type outside `ENV_RG_TYPE_GLOBS` may
+    pick any file, so it is one catch-all rule. No rule when no glob and no type is given."""
+    rules = [("include", glob, fold, True) for glob, fold in extras["globs"]]
+    types = extras["types"]
+    if extras["types_open"] or any(t not in ENV_RG_TYPE_GLOBS for t in types):
+        return rules + [("include", "*", False, bool(rules))]
+    return rules + [("include", g, False, False) for t in types for g in ENV_RG_TYPE_GLOBS[t]]
+
+
+def _pwd_rest(word: str, pwd_text: bool):
+    """The rest of a path word after `$PWD`, `${PWD}` or a `pwd` substitution (`x` in the text around
+    it, from `_substitutions`), or None when the word starts with none of them."""
+    found = re.fullmatch(r"(?:\$PWD|\$\{PWD\}%s)(/.*)?" % ("|x|`x`" if pwd_text else ""), word)
+    return None if found is None else (found.group(1) or "")
 
 
 def _env_walk(texts, cwd: str):
-    """Return (reason, log) when `rg` or `ag` with a hidden flag, or a recursive grep, walks a
-    folder that holds an env file on disk. The folder is each path word that is a folder, or `cwd`
-    when no path is named. For rg and ag no pipe or `<` may feed the search either; a recursive
-    grep walks `cwd` whatever feeds it. `rg --files` lists names and reads no contents. A grep
-    `--include`, `--exclude` or `--exclude-dir` glob that skips the env file clears it.
+    """Return (reason, log) when `rg` or `ag` with a hidden flag, `rg` with a positive glob that
+    could name an env file, or a recursive grep, walks a folder that holds an env file on disk. The
+    folder is each path word that is a folder, or `cwd` when no path is named. For rg and ag no
+    pipe or `<` may feed the search either; a recursive grep walks `cwd` whatever feeds it. `rg
+    --files` lists names and reads no contents.
 
-    A glob word is expanded against `cwd` as the shell does (no dotfile). For rg and ag with no flag
-    that turns the ignore rules off, a file or folder that the checkout ignores is not read, so it is
-    skipped (`_ignored_paths`, one call, made only when the first walk found a file or ran past the cap).
+    The search is found behind a subshell paren, `command`, `env` and `nice` (`_env_words`). A path
+    word that starts with `$PWD`, `${PWD}` or a `pwd` substitution is `cwd`. A glob word is expanded
+    against `cwd` as the shell does (no dotfile).
 
-    ACCEPTED LIMITS: a word that holds a variable or a substitution is not resolved, a `cd` earlier
-    in the command is not followed (a path reads against `cwd`), a search in the body of a heredoc is
-    not walked, and a `-g '!...'` or an ignore file other than the checkout's own that skips the file
-    is not read, so such a search of a folder with an env file is refused.
+    The files read are narrowed as the tool narrows them. A grep `--include` and `--exclude` glob
+    decides each file by the last of them that matches. An rg positive `-g` or `--iglob` glob picks
+    the files read, and reads a file that is hidden or ignored too; an rg `-t` type picks by its
+    globs, and a type the guard does not list picks every file. For rg and ag with no flag that turns
+    the ignore rules off, a file or folder that the checkout ignores is not read, so it is skipped
+    (`_ignored_paths`, one call, made only when the first walk found a file or ran past the cap).
+
+    FAILS CLOSED: an rg flag that is in neither of the guard's flag tables might take a word, so the
+    search is walked as if it took one, and `cwd` is walked when the words left could all be that
+    flag's value.
+
+    ACCEPTED LIMITS: a path word with any other variable or substitution is not resolved, a `cd`
+    earlier in the command is not followed (a path reads against `cwd`), any other wrapper
+    (`sudo`, `xargs`, `env -C`) is not looked through, a search in the body of a heredoc is not
+    walked, an rg `!` glob is not read, a brace list in a path word is not expanded, and an ignore
+    file other than the checkout's own that skips the file is not read, so such a search of a folder
+    with an env file is refused.
     """
+    pwd_text = any(text.strip() in ("pwd", "pwd -P", "pwd -L") for text, _ in texts[:-1])
     for text, _ in texts:
         ends = []
         for number, piece in enumerate(split_segments(text, ends)):
             fed = number > 0 and ends[number - 1] == "|"
             for part, segment in enumerate(_env_parts(piece)):
-                words, position, command = _env_words(segment)
+                words, position, command = _env_words(segment, walk=True)
                 grep = command in ENV_GREP_COMMANDS + (ENV_GREP_RECURSIVE_COMMAND,)
                 if not (command in ENV_WALK_COMMANDS or grep) or "--files" in words:
                     continue
-                skip, _, hidden, plain, no_ignore = _pattern_words(
+                skip, _, hidden, plain, no_ignore, extras = _pattern_words(
                     words, position, "grep" if grep else command)
+                named = any(_glob_could_name_env(glob.rsplit("/", 1)[-1].lower() if fold
+                                                 else glob.rsplit("/", 1)[-1])
+                            for glob, fold in extras["globs"])
                 if grep:
                     if command != ENV_GREP_RECURSIVE_COMMAND and not _grep_recursive(words, position):
                         continue
-                elif not hidden:
+                elif not (hidden or named):
                     continue
-                paths = [re.sub(r"[\\\"']", "", words[i]) for i in plain if i not in skip]
+                paths = [i for i in plain if i not in skip and i != extras["pattern"]]
                 folders = []
-                for i in (i for i in plain if i not in skip):
+                for i in paths:
                     word = re.sub(r"[\\\"']", "", words[i])
-                    if re.search(r"[$`]", word):
+                    rest = None if words[i].startswith("'") else _pwd_rest(word, pwd_text)
+                    if rest is not None:
+                        word = "." + rest
+                    elif re.search(r"[$`]", word):
                         continue
                     target = os.path.join(cwd, os.path.expanduser(word))
                     # A quoted glob is no glob to the shell, so it is not expanded.
                     expand = re.search(r"[*?\[]", word) and words[i] == word
                     folders += [f for f in (glob.glob(target) if expand else [target])
                                 if os.path.isdir(f) and f not in folders]
-                if not paths and (grep or not ((fed and part == 0) or "<" in words)):
-                    folders = [cwd]
-                globs = _grep_globs(words, position) if grep else ((), (), ())
+                if len(paths) <= extras["unknown"] and (
+                        grep or not ((fed and part == 0) or "<" in words)):
+                    folders += [cwd] * (cwd not in folders)
+                if grep:
+                    rules, exclude_dir = _grep_globs(words, position)
+                else:
+                    rules, exclude_dir = (_rg_rules(extras) if command == "rg" else []), ()
                 for folder in folders:
-                    found = _env_file_in(folder, *globs)
+                    found = _env_file_in(folder, rules, exclude_dir)
                     if found and not grep and not no_ignore:
-                        found = _env_file_in(folder, *globs, ignored=_ignored_paths(folder))
+                        found = _env_file_in(folder, rules, exclude_dir, ignored=_ignored_paths(folder))
                     if found == ENV_TOO_LARGE:
                         return (ENV_WALK_LARGE_REASON,
                                 "'%s' %s walks '%s', which is past the walk cap"
