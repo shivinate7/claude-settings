@@ -1081,5 +1081,14 @@ need "steps are run only" steps_are "run "
 need "no lease held during xcodebuild" lease_not_held_at_xc
 end_case "86 control: a reused Duo in no slot runs with no lease"
 
+# A reused Duo of slot 2 while another live holder has slot 1: the run still holds slot 2's lease. Slot 2 is granted with
+# slot 1 held under either reading of the slot-2 rule, so this case does not depend on that ruling.
+fresh; hold_slot1; booted "iPhone Duo" $DUO2; run SIM_LEASE_WAIT=2
+need "exit code" rc_is 0
+need "the lease held during xcodebuild is slot 2" lease_at_xc_slot 2
+need "lease released after the run" lease_released
+release_slot1
+end_case "87 reuse of the Duo of slot 2 while slot 1 is held by another: slot 2's lease is held during xcodebuild and released after"
+
 echo "sim-test suite: $pass_n passed, $fail_n failed${failed:+: $failed}"
 exit $fail
