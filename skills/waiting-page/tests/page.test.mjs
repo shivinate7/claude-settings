@@ -8503,17 +8503,17 @@ for (const scheme of ["light", "dark"]) test(`control: --muted and --holds, read
 // A run gets RUN_MIN_PX (4px) once the bar is 6k - 2px or more (k kinds), as the run floor cases below check. The cells stay in the DOM at 0 width.
 const RULE_PX = 30 * 5 - 2;
 // The bar's layers from the layout: its own width, and its cells and runs with their widths (a cell at 0 width is not drawn).
-// A run keeps its 4px minimum past a 0px runs layer, and the layer clips it, so a run counts as drawn only in a drawn layer.
+// The runs layer is 0px or the full bar. At 0px its runs get 0px, since their min-width clamps to 0 against that layer, so a run counts as
+// drawn only in a drawn layer. A run paints only inside its layer, so the bar's overflow:hidden is the only clip left.
 // With px, the bar is set to that width in the same step as the read, so a re-render cannot undo it. A run's vis is its part inside the
-// bar and the runs layer, the two boxes that clip it. cellSpan is the span the drawn cells cover, and runsW the runs layer's width.
+// bar, the box that clips it. cellSpan is the span the drawn cells cover, and runsW the runs layer's width.
 const barLayers = (loc, px) => loc.evaluate((bar, set) => {
   if (set !== undefined) { bar.style.setProperty("width", set + "px"); bar.style.flex = "0 0 auto"; }
   const box = (e) => e.getBoundingClientRect();
   const w = (e) => box(e).width;
   const b = box(bar);
   const runs = bar.querySelector(":scope > .runs");
-  const clip = runs ? box(runs) : b;
-  const vis = (e) => { const r = box(e); return Math.max(0, Math.min(r.right, b.right, clip.right) - Math.max(r.left, b.left, clip.left)); };
+  const vis = (e) => { const r = box(e); return Math.max(0, Math.min(r.right, b.right) - Math.max(r.left, b.left)); };
   const cells = [...bar.querySelectorAll(":scope > i")];
   const drawn = cells.filter((e) => w(e) > 0);
   return {
