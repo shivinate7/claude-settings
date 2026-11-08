@@ -1208,6 +1208,9 @@ def case_powershell_param_attribute_at_line_start():
          entry_of(ps_task("[Parameter(\n    Mandatory=$true, Position=0)]")), None)
     page("a PowerShell one-line [Parameter(Mandatory=$true, Position=0)] passes", "set",
          entry_of(ps_task("[Parameter(Mandatory=$true, Position=0)]")), None)
+    # Only an attribute list (`Name=..., Name=...`) may follow a comma. `A=1, node x` is a prefix before `node`.
+    page("a PowerShell command, A=1, node x, is refused as a bash operator", "set",
+         entry_of(ps_task("A=1, node x")), ("command-in-item", "bash operator"))
 
 
 def case_powershell_bash_prefix_command_substitution():
@@ -1244,12 +1247,40 @@ def case_step_shell_programs_partial():
 
 
 def case_step_path_cmdlet_is_a_shell_line():
-    # A command word at a path is read by its basename, as `/usr/bin/chmod +x f` is. A Verb-Noun cmdlet at a path is
-    # then a shell line on its own. A file name at a path is text.
+    # A command word at a path is read by its basename, as `/usr/bin/chmod +x f` is. A Verb-Noun cmdlet at a Unix or a
+    # Windows path is then a shell line on its own. A file name at a path is text, with or without an extension. So is
+    # a module-qualified cmdlet, or a URL whose last segment is a cmdlet name: those name docs, not a program.
+    refused = ("command-in-item", "shell line")
     page("a step holding `/opt/bin/Get-Thing` is refused as a shell line", "set",
-         entry_of(task_item(["Check the output of `/opt/bin/Get-Thing`"])), ("command-in-item", "shell line"))
+         entry_of(task_item(["Check the output of `/opt/bin/Get-Thing`"])), refused)
+    page(r"a step holding `C:\tools\Get-Thing` is refused as a shell line", "set",
+         entry_of(task_item([r"Check the output of `C:\tools\Get-Thing`"])), refused)
     page("a step holding `docs/Read-Me.md` alone is text and passes", "set",
          entry_of(task_item(["Check the output of `docs/Read-Me.md`"])), None)
+    page("a step holding `docs/Read-Me` alone, with no extension, is text and passes", "set",
+         entry_of(task_item(["Check the output of `docs/Read-Me`"])), None)
+    page("a step holding `Microsoft.PowerShell.Management/Get-Item` alone is text and passes", "set",
+         entry_of(task_item(["Check the output of `Microsoft.PowerShell.Management/Get-Item`"])), None)
+    page("a step holding a learn.microsoft.com URL ending in Get-Item alone is text and passes", "set",
+         entry_of(task_item(["Check the output of `https://learn.microsoft.com/en-us/powershell/module/"
+                             "microsoft.powershell.management/Get-Item`"])), None)
+
+
+def case_bracket_test_alternative_is_linear():
+    # The `[ ... ]` test alternative of PS_BASH_FORMS runs `[ \t]+` and then `[^\]\n]*`, and both take spaces. On a `[`
+    # with many spaces after it, each split between the two rescans the run, so one match is quadratic in its length.
+    # Python's re has no step count, so the pin reads the pattern's source: no such overlapping pair, in the single or
+    # the double bracket form. The controls, a real single or double bracket test, stay refused.
+    pattern = getattr(question_form, "PS_BASH_FORMS", None)
+    source = pattern.pattern if pattern is not None else ""
+    check("PS_BASH_FORMS holds no `[ \\t]+` run before `[^\\]\\n]*` (quadratic on a `[` with many spaces)",
+          pattern is not None and r"[ \t]+[^\]\n]*" not in source,
+          "PS_BASH_FORMS holds the overlapping pair `[ \\t]+[^\\]\\n]*`, which rescans a run of spaces")
+    refused = ("command-in-item", "bash operator")
+    page("a PowerShell test, [ -f x ] on a line of its own, is refused as a bash operator", "set",
+         entry_of(ps_task("[ -f x ]\ngit log")), refused)
+    page("a PowerShell test, [[ -f x ]] on a line of its own, is refused as a bash operator", "set",
+         entry_of(ps_task("[[ -f x ]]\ngit log")), refused)
 
 # ------------------------------------------------------------------ a question says how it departs from main
 #
@@ -1909,7 +1940,7 @@ def main():
                  case_powershell_pipe_then_newline_then_head, case_powershell_param_attribute_at_line_start,
                  case_powershell_bash_prefix_command_substitution,
                  case_powershell_two_deep_expansion_in_single_quotes_passes,
-                 case_step_path_cmdlet_is_a_shell_line):
+                 case_step_path_cmdlet_is_a_shell_line, case_bracket_test_alternative_is_linear):
         try:
             case()
         except Exception as exc:
