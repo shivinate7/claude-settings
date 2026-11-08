@@ -179,7 +179,9 @@ def _fake_run(argv, **kwargs):
     prompt = kwargs.get("input") or b""
     prompt = prompt.decode("utf-8", "replace") if isinstance(prompt, bytes) else str(prompt)
     with open(os.environ["CJ_RECORD"], "a", encoding="utf-8") as f:
-        f.write(json.dumps({"argv": list(argv), "prompt": prompt}) + "\n")
+        f.write(json.dumps({"argv": list(argv), "prompt": prompt, "timeout": kwargs.get("timeout")}) + "\n")
+    if os.environ.get("CJ_MODEL_TIMEOUT"):
+        raise subprocess.TimeoutExpired(argv, kwargs.get("timeout"))  # the run ends at once: no wall-clock wait
     if os.environ.get("CJ_MODEL_FAIL"):
         return subprocess.CompletedProcess(argv, 1, stdout="", stderr="stub model failure")
     return subprocess.CompletedProcess(argv, 0, stdout=json.dumps({"result": os.environ["CJ_ANSWER"]}), stderr="")
@@ -1419,6 +1421,28 @@ def case_past_ruling_cost():
           f.calls == [] and f.git == 0 and (f.deny() or {}).get("permissionDecision") == "deny", detail(f))
 
 
+def stop_hook_timeout():
+    """The timeout of the one Stop hook in settings.json that runs lint/report_guard.py. None when there is no such
+    hook, or more than one."""
+    with open(os.path.join(HERE, "..", "settings.json"), encoding="utf-8") as f:
+        stop_groups = json.load(f)["hooks"]["Stop"]
+    found = [hook.get("timeout") for group in stop_groups for hook in group.get("hooks", [])
+             if "report_guard.py" in str(hook.get("command", ""))]
+    return found[0] if len(found) == 1 else None
+
+
+def case_past_ruling_budget_leaves_stop_headroom():
+    import call_judge  # the one home of item 8's model and its time limit (PAST_RULING_TIMEOUT)
+    stop = stop_hook_timeout()
+    check("past ruling budget: one Stop hook in settings.json runs report_guard.py, and it has a timeout",
+          stop is not None, "Stop hooks naming report_guard.py in settings.json: none, or more than one")
+    check("past ruling budget: the past-ruling model call is given at least 30 s",
+          call_judge.PAST_RULING_TIMEOUT >= 30, "PAST_RULING_TIMEOUT is %r" % (call_judge.PAST_RULING_TIMEOUT,))
+    check("past ruling budget: the model call ends at least 5 s before the Stop hook's timeout",
+          stop is not None and call_judge.PAST_RULING_TIMEOUT <= stop - 5,
+          "PAST_RULING_TIMEOUT %r, Stop hook timeout %r" % (call_judge.PAST_RULING_TIMEOUT, stop))
+
+
 # ------------------------------------------------------------------ unvetted marker and docs/debts
 #
 # When the model review cannot run (a model error, or a decisions folder or roadmap ref that cannot be read), a question
@@ -1569,7 +1593,8 @@ def main():
                  case_fail_open, case_settings_row, case_past_ruling_replay_item_145,
                  case_past_ruling_replay_item_133, case_past_ruling_cited_passes,
                  case_past_ruling_explained_premise, case_past_ruling_unknown_is_named,
-                 case_past_ruling_cost, case_unvetted_marker, case_unvetted_page_marker,
+                 case_past_ruling_cost, case_past_ruling_budget_leaves_stop_headroom,
+                 case_unvetted_marker, case_unvetted_page_marker,
                  case_unvetted_not_for_closed_items, case_past_ruling_debt_candidates,
                  case_unshown_id_takes_the_unvetted_path, case_marker_does_not_skip_the_check,
                  case_unknown_names_the_claude_settings_records, case_cite_of_a_shown_record_is_not_bogus,
