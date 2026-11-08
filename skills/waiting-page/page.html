@@ -714,6 +714,8 @@ button.tile:hover { background: color-mix(in srgb, var(--chip) 60%, var(--surfac
 /* The closed Answered head's hint sits inside the button, so the whole line is one press target. On a narrow screen it moves whole to a second row, never split. */
 .rhead .rhint { font: 400 14px/1.35 var(--body); color: var(--muted); white-space: nowrap; }
 .tier.sunk .rhead { flex-wrap: wrap; row-gap: 0; }
+/* A reply that came after load, on the closed head: the page's one New reply mark, after the count. */
+.rhead .newmark { font: 600 14px/1 var(--body); }
 .rhead[aria-expanded="false"] .chev::before { content: "\25B8"; }
 .rhead[aria-expanded="true"] .chev::before { content: "\25BE"; }
 .rsub { margin: 0; font-size: 14px; color: var(--muted); }
@@ -1823,16 +1825,27 @@ function releaseSent() {
 // the anchor, so the next card takes the sent card's top. `ids` are the cards that move. The returned function carries `tops`: each moving card's viewport top now, kept by a Send.
 // `back` (Undo) is that map from the Send. A card that left from above the band comes back to its old top: the first such card in page order is the anchor.
 // It holds nothing under SENT_MOVE "stay" (no card moves), and not while the rail is in view above the list: the owner sees the rail change, so the list below it follows.
-// A Send can shrink the page (the sent card leaves the open list and the Answered section starts closed), and the browser then clamps the scroll up the page, which moves every card in view.
-// A pad at the page's end keeps the old scroll reachable, so the render can put it back. It gives back only what the scroll no longer needs, on each scroll, so nothing in view moves as it goes.
+// A Send can shrink the page (the sent card leaves the open list and the Answered section starts closed), and the browser then clamps the scroll up the page.
+// A sent card that starts in the band has cards above it that must hold still, so a pad at the page's end keeps the old scroll reachable and the render puts it back.
+// The pad is never more than a third of the screen: past that the page shrinks as the browser makes it, so the screen is never mostly blank.
+// It gives back only what the scroll no longer needs, on each scroll, and at once on a scroll down by the owner's own wheel, swipe or key: the owner can always scroll the blank away.
+// A sent card that starts above the band needs no pad: the first thing after it that is in view is the anchor, and the scroll follows it.
 const viewPad = document.body.appendChild(Object.assign(document.createElement("div"), { id: "viewpad", ariaHidden: "true" }));
-const fitPad = (y) => { const nat = document.documentElement.scrollHeight - viewPad.offsetHeight; viewPad.style.height = Math.max(0, Math.ceil(y + innerHeight - nat)) + "px"; };
+const padNow = () => parseFloat(viewPad.style.height) || 0;
+const natH = () => document.documentElement.scrollHeight - padNow();
+const fitPad = (y) => { viewPad.style.height = Math.max(0, Math.ceil(y + innerHeight - natH())) + "px"; };
 function keepScroll(y) {
-  if (Math.abs(scrollY - y) <= 0.5) return;
+  if (Math.abs(scrollY - y) <= 0.5 || y + innerHeight - natH() > innerHeight / 3) return;
   fitPad(y);
   window.scrollTo(scrollX, y);
 }
-addEventListener("scroll", () => { if (viewPad.offsetHeight) fitPad(scrollY); }, { passive: true });
+const giveBack = (px) => { if (px > 0 && padNow()) viewPad.style.height = Math.max(0, padNow() - px) + "px"; };
+addEventListener("scroll", () => { if (padNow()) fitPad(scrollY); }, { passive: true });
+addEventListener("wheel", (e) => { if (!e.ctrlKey) giveBack(e.deltaY * (e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? innerHeight : 1)); }, { passive: true });
+let touchY = 0;
+addEventListener("touchstart", (e) => { touchY = e.touches[0].clientY; }, { passive: true });
+addEventListener("touchmove", (e) => { const y = e.touches[0].clientY; giveBack(touchY - y); touchY = y; }, { passive: true });
+addEventListener("keydown", (e) => { if (["ArrowDown", "PageDown", "End"].includes(e.key) || (e.key === " " && !e.shiftKey)) if (!e.target.closest || !e.target.closest("input, textarea, select, button, [contenteditable]")) giveBack(innerHeight); });
 function holdView(ids, back) {
   const tops = new Map(), none = Object.assign(() => {}, { tops });
   if (SENT_MOVE !== "sink") return none;
@@ -1842,17 +1855,21 @@ function holdView(ids, back) {
   movers.forEach((c) => tops.set(c.id.slice(5), c.getBoundingClientRect().top));
   const returns = back ? ids.filter((id) => back.has(id) && back.get(id) < band0) : [];
   let key = null, a0 = $("list").getBoundingClientRect().top;
-  const first = movers[0];
-  if (!returns.length && first && !first.closest("#tier-answered") && first.getBoundingClientRect().top < band0) {
-    const c = cardsNow.find((x) => { const r = x.getBoundingClientRect(); return !movers.includes(x) && first.compareDocumentPosition(x) & Node.DOCUMENT_POSITION_FOLLOWING && r.bottom > band0 && r.top < innerHeight; });
-    if (c) { key = c.id.slice(5); a0 = c.getBoundingClientRect().top; }
+  const first = movers[0], plain = !returns.length && first && !first.closest("#tier-answered");
+  const pad = plain && first.getBoundingClientRect().top >= band0;
+  if (plain && !pad && first.getBoundingClientRect().top < band0) {
+    // A card, the Answered section or the Ask box: whatever comes first after the moving card and shows on screen.
+    const after = [...cardsNow, $("tier-answered"), $("asks")].filter((x) => x && !movers.includes(x) && first.compareDocumentPosition(x) & Node.DOCUMENT_POSITION_FOLLOWING)
+      .sort((x, y) => (x.compareDocumentPosition(y) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1))
+      .find((x) => { const r = x.getBoundingClientRect(); return r.bottom > band0 && r.top < innerHeight; });
+    if (after) { key = after.id; a0 = after.getBoundingClientRect().top; }
   }
   if (!returns.length && !key && rail.bottom <= a0 + 1 && rail.bottom > band0) return none;
   const y0 = scrollY;
   return Object.assign(() => {
-    keepScroll(y0);
+    if (pad) keepScroll(y0);
     const ret = returns.map(el).filter(Boolean).sort((x, y) => x.compareDocumentPosition(y) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1)[0];
-    const a = ret || (key && el(key)) || $("list"), d = a.getBoundingClientRect().top - (ret ? back.get(ret.id.slice(5)) : a0);
+    const a = ret || (key && document.getElementById(key)) || $("list"), d = a.getBoundingClientRect().top - (ret ? back.get(ret.id.slice(5)) : a0);
     if (Math.abs(d) > 0.5) window.scrollBy(0, d);
   }, { tops });
 }
@@ -1958,6 +1975,10 @@ function sectionEl(k, o) {
   e.head.setAttribute("aria-expanded", String(o.open));
   e.sub.textContent = o.sub;
   e.sub.hidden = !!o.subHidden;
+  // A mark after the count (the closed Answered head's New reply); rebuilt each render, so it goes when its reason does.
+  if (e.mark) e.mark.remove();
+  e.mark = o.mark || null;
+  if (e.mark) e.ct.after(e.mark);
   // The hint is in the head only while it has words; the hidden word names what "one" is for a screen reader.
   if (o.hint) { e.hint.textContent = o.hint; if (!e.hint.isConnected) e.head.append(e.hint, e.hintSr); } else { e.hint.remove(); e.hintSr.remove(); }
   e.list.hidden = !o.open;
@@ -1977,7 +1998,11 @@ function answeredEl(items, place) {
   const on = state.answeredOpen;
   const body = [], done = new Set();
   items.forEach((it) => { if (!done.has(it.id)) place(items, it, done, body); });
-  return sectionEl("answered", { cls: "sunk", glyph: "done", name: "Answered", count: items.length, open: on, listId: "ab", btnId: "b-answered", body,
+  // A reply that lands on a card inside the closed section shows on its head and opens nothing. The words show once on a screen (ux-label-once): the head carries them unless an open tier's card has a New reply.
+  const by = sorted(), mark = on || !items.some(newReply) ? null
+    : TIERS.some((T) => by[T.k].some(newReply)) ? h("span", { class: "newmark dot", title: REPLY_WORDS.join("") }, h("span", { class: "sr" }, REPLY_WORDS.join("")))
+    : h("span", { class: "newmark" }, REPLY_WORDS[0], h("span", { class: "sr" }, " inside," + REPLY_WORDS[1]));
+  return sectionEl("answered", { cls: "sunk", glyph: "done", name: "Answered", count: items.length, open: on, listId: "ab", btnId: "b-answered", body, mark,
     toggle: () => { state.answeredOpen = !state.answeredOpen; render(); },
     subHidden: !on, hint: on ? "" : "Show to change one",
     sub: (SENT_MOVE === "sink" ? "Your sent answers, newest first." : "Sent before this visit, newest first.") + " Each leaves the page once its session closes it." });
