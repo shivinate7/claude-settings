@@ -60,6 +60,25 @@ def parse(sentence):
     return clause.clauses(sentence, none(sentence))
 
 
+# A regex-like string holds a group, a word boundary or a space class. Such a string names the writer when it holds a writer
+# lead-in (I or we as the subject) or a subject word (here, the cloud, this session, there).
+REGEX_MARKS = ("(?:", "\\b", "\\s")
+WRITER_WORDS = re.compile(r"\bI\|we\b|\bwe\|I\b|\b(?:here|cloud|session|there)\b", re.I)
+
+
+def writer_words(source):
+    """(scanned, hits): how many regex-like string constants `source` holds, and [(line, text)] of those that name the
+    writer (WRITER_WORDS). The parser reads the source, so a comment is no constant and a string is read whole."""
+    scanned, hits = 0, []
+    for node in ast.walk(ast.parse(source)):
+        if isinstance(node, ast.Constant) and isinstance(node.value, str) and any(
+                mark in node.value for mark in REGEX_MARKS):
+            scanned += 1
+            if WRITER_WORDS.search(node.value):
+                hits.append((node.lineno, node.value))
+    return scanned, hits
+
+
 def calls_of(fn):
     """The Python and C calls fn makes, counted by sys.setprofile. The count does not depend on the clock."""
     count = [0]
@@ -484,6 +503,29 @@ class DerivationTests(unittest.TestCase):
         probe = clause_with("_BE_NT_FORMS", ("zqxvbe",))
         self.assertIn("zqxvbe able to", probe.CANNOT_FORMS,
                       "CANNOT_FORMS holds a copy of the be-forms with n't, not the forms built from _BE_NT_FORMS")
+
+    def test_writer_scan_reads_a_pattern_and_no_comment(self):
+        # Control for the one-home pin below: a pattern that names the writer is a hit, and the same words in a comment or in
+        # a plain string are not. The parser reads the constants, so a comment and a lone quote move nothing.
+        source = r'''BAD = r"\b(?:I|we)\b"  # a comment that names this session
+OK = r"\bdone\b"  # the comment names (?:I|we) too
+TEXT = "it's a plain string, not a pattern: this session"
+'''
+        scanned, hits = writer_words(source)
+        self.assertEqual(scanned, 2, "scope: the scan did not read the two pattern constants")
+        self.assertEqual([line for line, _ in hits], [1], "the scan read a comment or a plain string, or missed the pattern")
+
+    def test_report_guard_holds_no_writer_lead_in_or_subject_words_of_its_own(self):
+        # Catches: a writer lead-in or a list of subject words kept in report_guard beside the one in _clause, so the two read
+        # the writer apart: CANNOT_WRITER_RE's (?:I|we) against _WRITER_START, and CANNOT_FROM_HERE_RE's here, the cloud and
+        # this session against _OWN_RE. The one home is _clause.py, and report_guard imports it.
+        with open(REPORT_GUARD, encoding="utf-8") as handle:
+            scanned, hits = writer_words(handle.read())
+        self.assertGreater(scanned, 0, "scope: the scan read no regex-like constant of report_guard.py")
+        with open(CLAUSE_PATH, encoding="utf-8") as handle:
+            _, home_hits = writer_words(handle.read())
+        self.assertTrue(home_hits, "control: the scan finds no writer word in _clause.py, the one home")
+        self.assertEqual(hits, [], "report_guard holds a writer lead-in or subject words of its own: %r" % (hits,))
 
 
 if __name__ == "__main__":
