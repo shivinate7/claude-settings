@@ -12,8 +12,8 @@
 //   unreadable   a map page the command cannot read: one plain stderr line, exit 3, no stack trace.
 //
 // A map line is a list line whose path the config's `codeExtensions` accepts, as MAP1 reads it. The fixture names
-// only `ts`, so a `.py` or `.json` line is no map line there. A case that needs one sets `codeExtensions` in its own
-// scratch copy. A Tables row is never a map line.
+// only `ts`, so a `.py` or `.json` line is no code map line there: map-show lists it only with a Decisions or Debts line.
+// A case that needs a code line of another extension sets `codeExtensions` in its own scratch copy. A Tables row is never a map line.
 //
 // Every case calls `needFile` first, so on a checkout with no command each case fails for the missing file.
 // The fixture holds one area (`core`), one Homes page and one trace page, so `src/home.ts` reaches every kind of line.
@@ -145,18 +145,18 @@ test('3. a file path prints its fact line', () => {
   assert.ok(r.stdout.includes(HOME_FACT), `the output must print the fact line of src/home.ts\n${dump(r)}`);
 });
 
-// Owner ruling, page item 268 (a): the map lists any file. A file with a map line prints it, code or not, even with no Decisions or Debts line.
-// The fact line of a non-code file is not pinned by that ruling, so this case asserts no fact line either way.
-test('3b. a .py file with a map line prints that map line while codeExtensions is ts: the map lists any file (item 268 a)', () => {
+// This case asserts that a non-code file no record names, with no Decisions or Debts line, prints no map line. A non-code map line is
+// listed only through the record that names its file (decision `map-lists-record-named`).
+test('3b. a .py file is no map line while codeExtensions is ts, so its value fact does not print', () => {
   const dir = scratchRepo();
   // The scope first: a ts file must print, so the command reads the map.
   const ts = show(['src/home.ts'], dir);
   assert.equal(ts.status, 0, `a ts file with a map line must exit 0\n${dump(ts)}`);
   assert.ok(ts.stdout.includes(HOME_LINE), `the ts file must print its map line\n${dump(ts)}`);
-  assert.ok(readFileSync(join(dir, 'docs', 'map', 'core.md'), 'utf8').includes('`src/retry.py`'), 'scope: the map page holds a map line for src/retry.py');
   const py = show(['src/retry.py'], dir);
-  assert.equal(py.status, 0, `src/retry.py has a map line, so it prints it and must exit 0\n${dump(py)}`);
-  assert.ok(py.stdout.includes('Holds the retry wait.'), `the output must print the map line of src/retry.py\n${dump(py)}`);
+  assert.equal(py.status, 1, `src/retry.py is not a code file under ["ts"], so it is no map line and must exit 1\n${dump(py)}`);
+  assert.equal(stderrOf(py).trim(), 'no map line for src/retry.py', 'stderr must hold one line: no map line for src/retry.py');
+  assert.equal(py.stdout.trim(), '', 'nothing prints on stdout');
 });
 
 test('3c. with codeExtensions that name py, a .py file prints its map line and its value fact', () => {
