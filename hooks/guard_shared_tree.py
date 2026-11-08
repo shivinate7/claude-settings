@@ -79,7 +79,9 @@ def clean_deletes_files(args) -> bool:
     return False
 
 
-STASH_READ_ACTIONS = {"list", "show", "help"}
+# `create` only writes an unreachable commit object and prints its hash: no entry, no ref, no
+# index or tree change. It reads like `list` and `show`.
+STASH_READ_ACTIONS = {"list", "show", "help", "create"}
 # `push`, `save` and a bare `git stash` PUT work onto the stack. They take it from the working
 # tree, so the working tree is their subject. Every other action that is not a read TAKES an
 # entry off the stack, so the stack is theirs.
@@ -123,7 +125,7 @@ def stash_action(args) -> str:
     reads it as a push anyway, to fail closed, so the tree is judged and nothing falls through.
 
     No word is left unknown, so none lands on the stack side. What lands there is a KNOWN word
-    that is not a read and not a push: pop, apply, drop, clear, branch, create, store, export and
+    that is not a read and not a push: pop, apply, drop, clear, branch, store, export and
     import. Git 2.55 lists `export` and `import` in `git stash -h`, so they are known words.
     """
     args = list(args)
@@ -145,12 +147,12 @@ def stash_takes_the_stack(args) -> bool:
     """True when a `git stash` call takes an entry OFF the shared stack.
 
     The predicate is the DIRECTION of the act, not a list of action words. A call reads the
-    stack, puts work onto it, or takes an entry off it. `list` and `show` read. `push`, `save`
+    stack, puts work onto it, or takes an entry off it. `list`, `show` and `create` read. `push`, `save`
     and a bare `git stash` put work on. Every other action takes an entry off: `pop` and
     `branch` consume the entry they use, `drop` and `clear` destroy entries outright, and
-    `apply` reads another session's work into this tree without that session's word. `create`,
-    `store`, `export` and `import` touch the stack's entries or refs, so the stack is their
-    subject too, and they fall on its side with the rest.
+    `apply` reads another session's work into this tree without that session's word. `store`,
+    `export` and `import` touch the stack's entries or refs, so the stack is their subject too,
+    and they fall on its side with the rest.
 
     A word that is no known action is a pathspec, which stash_action reads as a push. Only a
     known action word that is neither a read nor a push falls on the stack side, the side where
@@ -163,7 +165,7 @@ def stash_takes_the_stack(args) -> bool:
 def stash_discards(args) -> bool:
     """True when a `git stash` call can lose work.
 
-    `list` and `show` read the stash and change nothing, so they pass. Every other action can
+    `list`, `show` and `create` read the stash and change nothing, so they pass. Every other action can
     lose work, and the SUBJECT READ below decides whether this call would lose any.
 
     `apply` and `pop` count: the thing at risk is not this tree but the shared stack. The entry
