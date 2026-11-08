@@ -838,9 +838,10 @@ _SUBSTITUTION = re.compile(r"\$\(|`|<\(")
 # of Python modules (`-m`) that only read, check or serve the files they are given. Any other module may run its
 # file (streamlit, coverage, flask, a project's own pkg.mod), so an unknown module counts as a run, as a wrapper's
 # unknown operand does: a module missing here costs a false alarm, never a hidden run.
+# tox (its config's commands) and timeit (its statement text) run code, so they stay out.
 _READERS = frozenset("cat tac nl wc ls head tail less more grep egrep fgrep rg diff cmp file stat od xxd hexdump strings "
                      "md5sum sha1sum sha256sum cksum sort uniq cut du touch chmod rm mv cp tee".split())
-_READ_ONLY_MODULES = frozenset("json.tool py_compile pip http.server timeit black mypy ruff tox".split())
+_READ_ONLY_MODULES = frozenset("json.tool py_compile pip http.server black mypy ruff".split())
 
 
 def _runner(word) -> bool:
