@@ -2914,6 +2914,149 @@ path_case4() {
   rm -rf "$h"
 }
 
+# ---- code-check landing, and the PATH line a cloud install writes to CLAUDE_ENV_FILE -------------------
+# code_check_fixture builds the checkout these cases share: the folders they read, copied as git lists them.
+# standard_check imports the installed lint and reads the STANDARD path it resolves.
+code_check_fixture() {
+  cc_co=$1
+  make_checkout "$cc_co" "# code-check content"
+  copy_tracked "$cc_co" bin lint hooks actions/code-check || return 1
+  cp "$INSTALL_SH" "$cc_co/install.sh"
+  ( cd "$cc_co" && git add -A && git commit -q -m code-check )
+}
+# The plain files git lists directly under actions/code-check in checkout $1. land_dir lands plain files only,
+# so the subfolder tools/ is not among them.
+cc_direct_files() {
+  git -C "$1" ls-files -- actions/code-check/ | sed -n 's#^actions/code-check/\([^/]*\)$#\1#p'
+}
+# Imports the lint at argv[1] from its installed folder, with no bytecode written, and checks its STANDARD file exists.
+cc_standard_py='import importlib.util, os, sys
+spec = importlib.util.spec_from_file_location("check_comment_narration", sys.argv[1])
+mod = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(mod)
+if not os.path.isfile(mod.STANDARD):
+    sys.exit("STANDARD is not a file: " + os.path.normpath(mod.STANDARD))'
+standard_check() {
+  sc_out=$(python3 -B -I -c "$cc_standard_py" "$1" 2>&1); sc_rc=$?
+}
+# True when path $1 is a file under $2/.claude/bin.
+under_bin() {
+  case "$1" in "$2/.claude/bin/"?*) return 0 ;; esac
+  return 1
+}
+
+cloud_code_check1() {
+  name="cloud_code_check1: a cloud install lands each file git lists directly under actions/code-check, and the installed lint's STANDARD file exists"
+  h=$(new_home); co="$work/cloud_code_check1-checkout"
+  code_check_fixture "$co" || { bad "$name" "fixture build failed"; rm -rf "$h"; return; }
+  want=$(cc_direct_files "$co")
+  if [ -z "$want" ]; then
+    bad "$name" "fixture precondition failed: git lists no file directly under actions/code-check"
+  else
+    hk_envrun "$co" PATH="$PATH" HOME="$h" CLAUDE_CODE_REMOTE=true
+    miss=""
+    for f in $want; do [ -f "$h/.claude/actions/code-check/$f" ] || miss="$miss $f"; done
+    if [ "$rc" -ne 0 ]; then
+      bad "$name" "install.sh exited $rc: $err"
+    elif [ -n "$miss" ]; then
+      bad "$name" "not landed under \$HOME/.claude/actions/code-check:$miss"
+    else
+      standard_check "$h/.claude/lint/check_comment_narration.py"
+      if [ "$sc_rc" -ne 0 ]; then bad "$name" "the installed lint cannot read its standard: $sc_out"
+      else ok "$name"; fi
+    fi
+  fi
+  rm -rf "$h"
+}
+
+local_code_check1() {
+  name="local_code_check1: a local install links each file git lists directly under actions/code-check, and the installed lint's STANDARD file exists"
+  if [ "$SYMLINK_CAPABLE" != 1 ]; then skip "$name" "$NO_SYMLINK_REASON"; return; fi
+  h=$(new_home); co="$work/local_code_check1-checkout"
+  code_check_fixture "$co" || { bad "$name" "fixture build failed"; rm -rf "$h"; return; }
+  want=$(cc_direct_files "$co")
+  if [ -z "$want" ]; then
+    bad "$name" "fixture precondition failed: git lists no file directly under actions/code-check"
+  else
+    out=$(run_local_install "$co" "$h" "$h/.claude"); rc=$?
+    miss=""
+    for f in $want; do [ -f "$h/.claude/actions/code-check/$f" ] || miss="$miss $f"; done
+    if [ "$rc" -ne 0 ]; then bad "$name" "install.sh exited $rc: $out"
+    elif [ -n "$miss" ]; then bad "$name" "not linked under \$HOME/.claude/actions/code-check:$miss"
+    else
+      standard_check "$h/.claude/lint/check_comment_narration.py"
+      if [ "$sc_rc" -ne 0 ]; then bad "$name" "the installed lint cannot read its standard: $sc_out"
+      else ok "$name"; fi
+    fi
+  fi
+  rm -rf "$h"
+}
+
+cloud_env_path1() {
+  name="cloud_env_path1: a cloud install writes the PATH line to CLAUDE_ENV_FILE, and a clean sh that sources it finds verdict and wait-pid under the home's .claude/bin"
+  h=$(new_home); co="$work/cloud_env_path1-checkout"
+  code_check_fixture "$co" || { bad "$name" "fixture build failed"; rm -rf "$h"; return; }
+  envf="$h/claude-env"; : > "$envf"
+  hk_envrun "$co" PATH="$PATH" HOME="$h" CLAUDE_CODE_REMOTE=true CLAUDE_ENV_FILE="$envf"
+  if [ "$rc" -ne 0 ]; then
+    bad "$name" "install.sh exited $rc: $err"
+  else
+    # Scope first: the tools are landed as executables, and no clean sh finds them before the env file is sourced.
+    scope=""
+    for t in verdict wait-pid; do [ -x "$h/.claude/bin/$t" ] || scope="$scope $t"; done
+    pre=$(env -i PATH=/usr/bin:/bin HOME="$h" /bin/sh -c 'command -v verdict; command -v wait-pid')
+    if [ -n "$scope" ]; then
+      bad "$name" "not landed as executables under the home's .claude/bin:$scope"
+    elif [ -n "$pre" ]; then
+      bad "$name" "fixture precondition failed: a clean sh finds a tool before the env file is sourced: $pre"
+    else
+      v=$(env -i PATH=/usr/bin:/bin HOME="$h" /bin/sh -c '. "$1"; command -v verdict' sh "$envf")
+      w=$(env -i PATH=/usr/bin:/bin HOME="$h" /bin/sh -c '. "$1"; command -v wait-pid' sh "$envf")
+      if ! under_bin "$v" "$h"; then
+        bad "$name" "after sourcing CLAUDE_ENV_FILE, verdict does not resolve under the home's .claude/bin (got: ${v:-nothing})"
+      elif ! under_bin "$w" "$h"; then
+        bad "$name" "after sourcing CLAUDE_ENV_FILE, wait-pid does not resolve under the home's .claude/bin (got: ${w:-nothing})"
+      else ok "$name"; fi
+    fi
+  fi
+  rm -rf "$h"
+}
+
+cloud_env_path2() {
+  name="cloud_env_path2: two cloud installs with one CLAUDE_ENV_FILE write the PATH line to it once and keep the file's own line"
+  h=$(new_home); co="$work/cloud_env_path2-checkout"
+  code_check_fixture "$co" || { bad "$name" "fixture build failed"; rm -rf "$h"; return; }
+  envf="$h/claude-env"; printf 'export KEEP_ME=1\n' > "$envf"
+  hk_envrun "$co" PATH="$PATH" HOME="$h" CLAUDE_CODE_REMOTE=true CLAUDE_ENV_FILE="$envf"
+  rc1=$rc; err1=$err
+  hk_envrun "$co" PATH="$PATH" HOME="$h" CLAUDE_CODE_REMOTE=true CLAUDE_ENV_FILE="$envf"
+  rc2=$rc; err2=$err
+  paths=$(grep -cxF "$PATH_LINE" "$envf"); keep=$(grep -cxF 'export KEEP_ME=1' "$envf")
+  if [ "$rc1" -ne 0 ] || [ "$rc2" -ne 0 ]; then
+    bad "$name" "install.sh exited rc1=$rc1 rc2=$rc2: $err1 / $err2"
+  elif [ "$keep" != 1 ]; then
+    bad "$name" "the install dropped the env file's own line"
+  elif [ "$paths" != 1 ]; then
+    bad "$name" "CLAUDE_ENV_FILE holds $paths PATH lines after two runs, expected 1"
+  else ok "$name"; fi
+  rm -rf "$h"
+}
+
+cloud_env_path3() {
+  name="cloud_env_path3: a cloud install with CLAUDE_ENV_FILE unset exits 0 and writes the PATH line to no file under HOME"
+  h=$(new_home); co="$work/cloud_env_path3-checkout"
+  code_check_fixture "$co" || { bad "$name" "fixture build failed"; rm -rf "$h"; return; }
+  hk_envrun "$co" PATH="$PATH" HOME="$h" CLAUDE_CODE_REMOTE=true
+  if [ "$rc" -ne 0 ]; then
+    bad "$name" "install.sh exited $rc: $err"
+  else
+    hits=$(grep -rlxF "$PATH_LINE" "$h" 2>/dev/null)
+    if [ -n "$hits" ]; then bad "$name" "a file under HOME holds the PATH line: $hits"
+    else ok "$name"; fi
+  fi
+  rm -rf "$h"
+}
+
 caseF5() {
   name="caseF5: outside a git tree with no pointer file, stays fully silent, exit 0"
   outside="$work/caseF5-not-a-repo"; cfg="$work/caseF5-cfg"
@@ -5270,6 +5413,11 @@ run path_case1
 run path_case2
 run path_case3
 run path_case4
+run cloud_code_check1
+run local_code_check1
+run cloud_env_path1
+run cloud_env_path2
+run cloud_env_path3
 run caseF1
 run caseF2
 run caseF3
