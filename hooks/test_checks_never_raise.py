@@ -14,8 +14,8 @@ Standard library only. The checks are read from the dispatch in hooks/guard.py: 
 attribute (`question_form.page_item_hit`, for one). A call that resolves to no hook function fails
 the run. The tools are the names that `judge` and the functions it reaches compare a tool against.
 
-Each check gets COUNT seeded random command strings (one stream per check, seed SEED), built from
-shell and PowerShell characters and fragments, plus fixed edge inputs. Each input carries one tool:
+Each check gets COUNT seeded random command strings per env shape (one stream per check and shape, seed
+SEED), built from shell and PowerShell characters and fragments, plus fixed edge inputs. Each input carries one tool:
 two of every three are Bash or PowerShell, the others go round the rest. A payload carries the keys
 of every tool's shape, filled with random strings, with typed values where a string reaches
 nothing. `judge` gets whole payloads. A refusal is a SystemExit after refuse() prints a
@@ -24,6 +24,14 @@ permissionDecision on stdout. Any other exit, and any raise, is a failure.
 Isolation: CLAUDE_CONFIG_DIR is a run folder, so guard.log and the override state stay out of the
 real config. PATH is an empty folder, so git and gh are absent and every read fails as on a machine
 without them. The parsers of git and gh output are not fuzzed here.
+
+Env shapes: every check runs twice, under two shapes that the host never sets: both remote variables
+unset, and CLAUDE_CODE_REMOTE=true with a session id. The branches that read them (is_cloud,
+remote_session_id, and the trust-card check under a session id) run only under the shape that reaches them.
+
+Fixtures: CHECKOUT is a plain folder. PAGE_CHECKOUT is a repository root (a .git folder) whose extras file
+names a waiting page, so the item checks and the workflow check run on a real path. fixture_proof asserts
+that each fixture reaches its check, so a moved key or path fails by name instead of leaving the fuzz blind.
 
 The self-test feeds a raising check, a silent exit and a real refusal through the same harness. A
 sweep case proves the shared run-folder sweep (lint/_test_temp.py) removes an old sibling and keeps
@@ -51,15 +59,16 @@ sys.path.insert(0, os.path.join(os.path.dirname(HERE), "lint"))
 import _test_temp  # noqa: E402  the one home of the run folder (decision test-temp-standard)
 
 SEED = "checks-never-raise"
-COUNT = 2000   # random inputs per check, on top of the fixed edge inputs below
+COUNT = 1000   # random inputs per check and env shape, on top of the fixed edge inputs below (both shapes: ~65 s)
 GUARD = "guard"
 DISPATCH = ("judge_shell", "judge")      # the two entry points the guard's PreToolUse hook runs
 TOOL_VARIABLES = ("tool", "tool_name")   # the names judge's branches compare a tool by
 UNLISTED_TOOL = "mcp__fuzz__unlisted_tool"   # a name no branch lists: the default shape
 REQUIRED_CHECKS = ("judge_shell", "git_env_command_hit", "kill_hit", "rm_var_hits", "opus_spawn_hit",
-                   "page_item_hit", "is_worktree", "data_tool_judge")
+                   "page_item_hit", "is_worktree", "data_tool_judge", "role_write_hit", "shared_tree_match",
+                   "trust_card_hit")
 REQUIRED_TOOLS = ("Agent", "Task", "Workflow", "Bash", "PowerShell", "Edit", "Write", "ArtifactData",
-                  "Artifact", "mcp__github__merge_pull_request")
+                  "Artifact", "mcp__github__merge_pull_request", "mcp__claude-code-remote__confirm_repository_trust")
 # Hook functions reached by a call but not fuzzed directly, each with the reason. The rest are fuzzed.
 OUTSIDE = {
     ("own_session", "own_session_read"): "raises OSError on a transcript that is missing, by design; every caller in "
@@ -71,11 +80,20 @@ RUN = _test_temp.run_folder()
 CONFIG = os.path.join(RUN, "config")        # guard.log and override state land here, not in the real config
 NO_TOOLS = os.path.join(RUN, "no-tools")    # an empty PATH: git and gh are absent
 CHECKOUT = os.path.join(RUN, "checkout")    # a plain folder, not a repository
+PAGE_CHECKOUT = os.path.join(RUN, "page-checkout")   # a repository root whose waiting page is PAGE_URL
+PAGE_URL = "https://claude.ai/artifact/fuzzpage"
+WORKFLOW_TARGET = ".github/workflows/ci.yml"    # a workflow file: guard.workflow_builder_refused judges its edits
+REMOTE_ID = "cse_fuzz01"   # the lane id a cloud session names in CLAUDE_CODE_REMOTE_SESSION_ID (override.LANE_ENV)
 TRANSCRIPT = os.path.join(RUN, "transcript.jsonl")
 EMPTY_TRANSCRIPT = os.path.join(RUN, "empty.jsonl")
 MISSING_TRANSCRIPT = os.path.join(RUN, "missing.jsonl")
-for folder in (CONFIG, NO_TOOLS, CHECKOUT):
+for folder in (CONFIG, NO_TOOLS, CHECKOUT, os.path.join(PAGE_CHECKOUT, ".git")):
     os.makedirs(folder)
+import layout  # noqa: E402  the one home of the layout and of the waiting-page key (lint/layout.py)
+EXTRAS = os.path.join(PAGE_CHECKOUT, *layout.layout()["extras"].split("/"))   # the extras file the page key lives in
+os.makedirs(os.path.dirname(EXTRAS))
+with open(EXTRAS, "w", encoding="utf-8") as handle:
+    json.dump({"kinds": {}, layout.WAITING_PAGE: PAGE_URL}, handle)
 with open(TRANSCRIPT, "w", encoding="utf-8") as handle:
     handle.write('{"type": "user", "message": {"role": "user", "content": "hello"}}\n')
 open(EMPTY_TRANSCRIPT, "w", encoding="utf-8").close()
@@ -84,6 +102,8 @@ os.environ["PATH"] = NO_TOOLS
 
 import guard  # noqa: E402  the global PreToolUse guard (hooks/guard.py)
 import guard_core  # noqa: E402  the shared code the guard and its families import
+import guard_shared_tree  # noqa: E402  the shared-tree verbs (hooks/guard_shared_tree.py)
+import override  # noqa: E402  the lane id a session env names (hooks/override.py)
 import question_form  # noqa: E402  the ArtifactData item shape (hooks/question_form.py)
 import shared_names  # noqa: E402  the one home of the markers a spawn shape carries
 
@@ -95,6 +115,7 @@ FRAGMENTS = (
     "${X:?", "git push --force", "git stash", "git worktree remove", "xargs kill", "pgrep x | ",
     "lsof -t", "gh pr merge", "cd ", "&& ", "| ", "'", '"', "`", "\\", "\n", "-Command ",
     "Remove-Item ", "$env:", "kill -9 ", "git -C ", "--force-with-lease", "node -e ",
+    "git reset --hard", "git clean -fd", "git checkout -- x", "git restore", "git switch", WORKFLOW_TARGET,
 )
 WEIGHTED = ("${", "$(", "'", '"', "<<EOF", "${X", "`")   # the incident class, drawn more often
 LONG = "sh -c \"git stash ${X:-$(pwd)} | rm -rf '\" <<EOF\n" * 80   # several KB, unclosed quotes and expansions
@@ -153,7 +174,7 @@ class Env:
 
     def __init__(self, rng, tool):
         self.tool = tool
-        self.cwd = rng.choice((RUN, CHECKOUT, CHECKOUT))
+        self.cwd = rng.choice((RUN, CHECKOUT, CHECKOUT, PAGE_CHECKOUT, PAGE_CHECKOUT))
         self.session = rng.choice(("", "sess-1"))
         self.transcript = rng.choice((TRANSCRIPT, EMPTY_TRANSCRIPT, MISSING_TRANSCRIPT, ""))
         self.role = rng.choice(ROLES)
@@ -181,13 +202,20 @@ def tool_input_for(tool, rng, text, env):
         tool_input["model"] = rng.choice(SPAWN_MODELS + (text,))
         tool_input["subagent_type"] = rng.choice(SPAWN_ROLES + (text,))
         tool_input["prompt"] = rng.choice((text, shared_names.EXPLORE_AUDIT_MARKER + "\n" + text))
+    # Typed values for the waiting-page item checks: the page's link, the item collection and op, an option list.
+    tool_input["url"] = rng.choice((text, PAGE_URL))
+    if rng.random() < 0.5:
+        tool_input["collection"] = question_form.WAITING_ITEMS
+        tool_input["action"] = rng.choice(question_form.ITEM_OPS)
+    if rng.random() < 0.5:
+        tool_input["data"] = {"question": text, "options": [{"key": rng.choice(("a", "b", "none")), "label": text}]}
     return tool_input
 
 
 def make_payload(rng, env, text, event="PreToolUse"):
     return {"hook_event_name": event, "tool_name": env.tool, "tool_input": tool_input_for(env.tool, rng, text, env),
             "cwd": env.cwd, "session_id": env.session, "agent_id": rng.choice(("", "agent-1")),
-            "agent_transcript_path": env.transcript, "transcript_path": env.transcript}
+            "agent_type": env.role, "agent_transcript_path": env.transcript, "transcript_path": env.transcript}
 
 
 def tokens_of(text):
@@ -203,6 +231,8 @@ def value_for(fn, name, param, rng, text, env, state):
         return guard.rm_var_hits(text, env.cwd)
     if fn.__name__ == "rm_after_cd_reason" and name == "hits":
         return guard.rm_after_cd_hits(text)
+    if fn.__name__ == "role_write_hit" and name == "target":   # a builder's workflow edit reaches the workflow check
+        return rng.choice((WORKFLOW_TARGET, text, env.cwd))
     if name in CALLABLES:
         return CALLABLES[name]
     if name == "tool":
@@ -309,18 +339,19 @@ def tool_for(index, shells, others):
     return others[(index // 3) % len(others)]
 
 
-def run_checks(checks, count, tools):
+def run_checks(checks, count, tools, shape=""):
     """Feed each check its edge inputs and `count` seeded random inputs. Return one row per failing check.
 
     `checks` is a list of (label, function, mode). Mode "direct" calls the function with keyword arguments from
     build_kwargs; mode "judge" calls guard.judge with a whole payload. A row is (label, failed, total, tools
-    that failed, (first input, its tool, its error)).
+    that failed, (first input, its tool, its error)). The caller pins the env shape `shape` names; the streams
+    differ per shape, so each shape reads its own inputs.
     """
     shells = [tool for tool in tools if tool in SHELL_TOOLS]
     others = [tool for tool in tools if tool not in SHELL_TOOLS]
     failures = []
     for label, fn, mode in checks:
-        rng = random.Random("%s:%s" % (SEED, label))
+        rng = random.Random("%s:%s:%s" % (SEED, shape, label))
         inputs = EDGE + [draw_text(rng) for _ in range(count)]
         bad = []
         for index, text in enumerate(inputs):
@@ -350,10 +381,10 @@ def run_checks(checks, count, tools):
     return failures
 
 
-def report(failures):
+def report(failures, shape):
     for label, hits, total, tools, (first, first_tool, error) in failures:
-        print("FAIL %s: %d of %d inputs failed, tools %s. First input %r with tool %s: %s"
-              % (label, hits, total, ", ".join(tools), first[:80], first_tool, error))
+        print("FAIL [%s] %s: %d of %d inputs failed, tools %s. First input %r with tool %s: %s"
+              % (shape, label, hits, total, ", ".join(tools), first[:80], first_tool, error))
 
 
 def self_test():
@@ -398,6 +429,68 @@ def sweep_proof():
           % ("ok" if ok else "FAILED", "removed" if not os.path.exists(old) else "KEPT",
              "kept" if os.path.exists(new) else "REMOVED", "kept" if os.path.exists(own) else "REMOVED"))
     return ok
+
+
+# ------------------------------------------------------------------ the env shapes and the fixtures
+
+REMOTE_VARS = ("CLAUDE_CODE_REMOTE", "CLAUDE_CODE_REMOTE_SESSION_ID")   # read by is_cloud and remote_session_id
+SHAPES = (   # (name, values of REMOTE_VARS; a variable not listed is unset)
+    ("remote unset", {}),
+    ("remote set with a session id", {"CLAUDE_CODE_REMOTE": "true", "CLAUDE_CODE_REMOTE_SESSION_ID": REMOTE_ID}),
+)
+
+
+@contextlib.contextmanager
+def pinned_env(values):
+    """Set REMOTE_VARS to `values`, unset the rest, and restore the prior values on exit, so no host value reaches a check."""
+    before = {name: os.environ.get(name) for name in REMOTE_VARS}
+    for name in REMOTE_VARS:
+        if name in values:
+            os.environ[name] = values[name]
+        else:
+            os.environ.pop(name, None)
+    try:
+        yield
+    finally:
+        for name, value in before.items():
+            if value is None:
+                os.environ.pop(name, None)
+            else:
+                os.environ[name] = value
+
+
+def _probe(problems, cause, probe):
+    """Run one reach probe. A False result or a raise is a problem named by `cause`: a raise is the check failing, so
+    it is reported here and the fuzz still runs."""
+    try:
+        if not probe():
+            problems.append(cause)
+    except Exception as exc:
+        problems.append("%s; the probe raised %s" % (cause, describe(exc)))
+
+
+def fixture_proof():
+    """[problem] for each fixture that fails to reach the check it exists for. Each problem names its cause, so a
+    moved key, path or env read fails here rather than leaving the fuzz green and blind."""
+    problems = []
+    _probe(problems, "PAGE_CHECKOUT is not its repository's waiting page (the .git folder or the extras key moved)",
+           lambda: question_form.is_waiting_page({"url": PAGE_URL}, PAGE_CHECKOUT))
+    _probe(problems, "WORKFLOW_TARGET under PAGE_CHECKOUT is no workflow path (the repo root or WORKFLOW_REL moved)",
+           lambda: guard.is_workflow_rel(guard.repo_rel(WORKFLOW_TARGET, PAGE_CHECKOUT) or ""))
+    _probe(problems, "'git reset --hard' no longer reads as a discarding call (the shared-tree reading moved)",
+           lambda: bool(guard_shared_tree.shared_tree_match("git reset --hard")))
+    expected = override.LANE_PREFIX + REMOTE_ID[len(override.LANE_ENV_PREFIX):]
+    with pinned_env(SHAPES[0][1]):
+        _probe(problems, "remote unset, yet remote_session_id() names a session (the session env read moved)",
+               lambda: override.remote_session_id() is None)
+        _probe(problems, "remote unset, yet is_cloud() is true (the CLAUDE_CODE_REMOTE read moved)",
+               lambda: not guard_core.is_cloud())
+    with pinned_env(SHAPES[1][1]):
+        _probe(problems, "remote set, yet remote_session_id() names no session (the session env read moved)",
+               lambda: override.remote_session_id() == expected)
+        _probe(problems, "CLAUDE_CODE_REMOTE=true, yet is_cloud() is false (the CLAUDE_CODE_REMOTE read moved)",
+               guard_core.is_cloud)
+    return problems
 
 
 # ------------------------------------------------------------------ the dispatch, read from the AST
@@ -598,8 +691,12 @@ def family_list_is_whole():
 def main():
     started = time.monotonic()
     try:
-        if not (self_test() and sweep_proof()):
-            return 1
+        with pinned_env(SHAPES[0][1]):
+            if not (self_test() and sweep_proof()):
+                return 1
+        problems = fixture_proof()
+        for problem in problems:
+            print("FAIL fixture: %s" % problem)   # the fuzz still runs, so each family's own rows show too
         if not family_list_is_whole():
             print("FAIL the guard_*.py files and guard._FAMILY_MODULES differ: a family module is not fuzzed")
             return 1
@@ -621,15 +718,19 @@ def main():
                 return 1
         checks = [("%s.%s" % key, _callable(key), "direct") for key in sorted(direct)]
         checks.append(("judge (end to end)", guard.judge, "judge"))
-        failures = run_checks(checks, COUNT, tools)
-        report(failures)
+        failing = 0
+        for shape, values in SHAPES:
+            with pinned_env(values):
+                failures = run_checks(checks, COUNT, tools, shape)
+            report(failures, shape)
+            failing += len(failures)
         elapsed = time.monotonic() - started
-        print("checks-never-raise: %d direct checks and judge, %d tools, %d inputs each (%d random + %d edge), "
-              "%d failing, %.1f s"
-              % (len(direct), len(tools), COUNT + len(EDGE), COUNT, len(EDGE), len(failures), elapsed))
+        print("checks-never-raise: %d direct checks and judge, %d tools, %d env shapes, %d inputs each per shape "
+              "(%d random + %d edge), %d failing rows, %.1f s"
+              % (len(direct), len(tools), len(SHAPES), COUNT + len(EDGE), COUNT, len(EDGE), failing, elapsed))
         print("not fuzzed directly: %s" % ", ".join("%s.%s (%s)" % (key[0], key[1], why)
                                                   for key, why in sorted(outside.items())))
-        return 1 if failures else 0
+        return 1 if failing or problems else 0
     finally:
         shutil.rmtree(RUN, ignore_errors=True)
 
