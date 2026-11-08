@@ -8782,6 +8782,7 @@ ENVWALK_EMPTY = os.path.join(ROOT, "envwalk-empty")  # no files at all
 def build_envwalk_folders():
     write(os.path.join(ENVWALK_HELD, ENV), "FIXTURE=1\n")
     write(os.path.join(ENVWALK_HELD, "README.md"), "held\n")
+    write(os.path.join(ENVWALK_HELD, "src", "app.txt"), "X\n")  # a subfolder that holds no env file
     write(os.path.join(ENVWALK_CLEAN, "README.md"), "clean\n")
     os.makedirs(ENVWALK_EMPTY, exist_ok=True)
 
@@ -8820,6 +8821,27 @@ for _cmd in ("rg -uuu X .", "rg --hidden X .", "ag --hidden X ."):
        cwd=ENVWALK_HELD)
     sh("env: walk control, folder has no env file, allowed: " + _cmd, _cmd, "allow", cwd=ENVWALK_CLEAN)
     sh("env: walk control, folder is empty, allowed: " + _cmd, _cmd, "allow", cwd=ENVWALK_EMPTY)
+
+# grep -r reads dotfiles, so a recursive grep of a folder that holds an env file reads that file. Owner
+# ruling (decision env-file-stays-unread, Queue item 159 a, 2026-11-02 00:56 CST): each form below is
+# refused over a folder that holds an env file. The `dir` form names the held folder by its path.
+for _cmd, _cwd in (
+    ("grep -r X .", ENVWALK_HELD),
+    ("grep -rn X", ENVWALK_HELD),
+    ("grep -rl X .", ENVWALK_HELD),
+    ("grep -R X " + slash(ENVWALK_HELD), NOGIT),
+):
+    sh("env: grep walk hole, folder holds an env file, refused: " + _cmd, _cmd, "deny", "env-file",
+       cwd=_cwd)
+# The same ruling allows each form below. An env name as an exclude glob reads nothing, and a path
+# that holds no env file reads none, even from a folder that holds one.
+for _cmd in ("grep -r X . --exclude='.env*'", "grep -r X . --exclude=" + ENV):
+    sh("env: grep walk control, env name as an exclude glob, allowed: " + _cmd, _cmd, "allow",
+       cwd=ENVWALK_HELD)
+sh("env: grep walk control, path holds no env file, allowed: grep -r X src", "grep -r X src", "allow",
+   cwd=ENVWALK_HELD)
+sh("env: grep walk control, folder has no env file, allowed: grep -r X .", "grep -r X .", "allow",
+   cwd=ENVWALK_CLEAN)
 
 
 # Select-String -NotMatch is a switch, so the next word is the pattern. A word after the pattern is a
