@@ -12016,6 +12016,15 @@ RR_FULL = "def test_x():\n    assert 1 == 1\n    assert 2 == 2\n    assert 3 == 
 RR_TRIM1 = "def test_x():\n    assert 1 == 1\n    assert 2 == 2\n"
 RR_TRIM2 = "def test_x():\n    assert 1 == 1\n"
 RR_FULL_PLUS = RR_FULL + "    assert 4 == 4\n"
+RR_CMTPLAIN = os.path.join(RRROOT, "rr-cmtplain")      # a comment-only reword of a pushed test file, no trailer
+RR_CMTNONE = os.path.join(RRROOT, "rr-cmtnone")        # the same reword, with `Red-run: none: comment only`
+RR_CMTLANE = os.path.join(RRROOT, "rr-cmtlane")        # a lane: two trailered commits, then the reword with none
+RR_CMT_V1 = "# Verdict for the push check.\n# Read before a push.\ndef test_x():\n    assert 1 == 1\n"
+RR_CMT_V2 = "# Verdict for each push, read at push time.\n# Read before a push is sent.\ndef test_x():\n    assert 1 == 1\n"
+RR_CMT_SUBJECT = "reword test_x comments"
+RR_CMT_NONE_LINE = "Red-run: none: comment only"
+RR_LANE_TEST = "hooks/test_lane.py"
+RR_LANE_SUBJECT = "add hooks/test_lane.py"
 
 
 def _rr_run(where, *args):
@@ -12052,6 +12061,13 @@ def _rr_added(where, *revs):
     """Lines added by `git diff --numstat <revs>`. A binary file adds nothing here."""
     rows = _rr_read(where, "diff", "--numstat", *revs).stdout.splitlines()
     return sum(int(row.split("\t")[0]) for row in rows if row.split("\t")[0].isdigit())
+
+
+def _rr_comment_only(where, *revs):
+    """True when `git diff -U0 <revs>` changes some lines, and every changed line is a comment line."""
+    rows = _rr_read(where, "diff", "-U0", *revs).stdout.splitlines()
+    changed = [row[1:] for row in rows if row[:1] in ("+", "-") and not row.startswith(("+++", "---"))]
+    return bool(changed) and all(text.lstrip().startswith("#") for text in changed)
 
 
 def _rr_commit(where, files, message):
@@ -12128,6 +12144,17 @@ def _rr_fresh(where, untracked):
     _rr_must(where, _rr_subjects(where, "origin/main..fresh") == [], "fresh holds no commit main lacks")
     status = _rr_read(where, "status", "--porcelain", "--untracked-files=all").stdout.splitlines()
     _rr_must(where, all("?? " + rel in status for rel in untracked), "the new files are untracked")
+
+
+def _rr_reword(where, trailer=None):
+    """A test file pushed with two comment lines, then a comment-only reword of them as the one unpushed commit."""
+    _cmk_pushed(where, {"a.txt": "base\n", RR_TEST: RR_CMT_V1})
+    _rr_commit(where, {RR_TEST: RR_CMT_V2}, _rr_msg(RR_CMT_SUBJECT, trailer))
+    _rr_must(where, _rr_subjects(where, "origin/topic..HEAD") == [RR_CMT_SUBJECT],
+             "the reword is the one unpushed commit")
+    _rr_must(where, _rr_read(where, "diff", "--name-only", "HEAD~1", "HEAD").stdout.split() == [RR_TEST],
+             "the reword touches the test file alone")
+    _rr_must(where, _rr_comment_only(where, "HEAD~1", "HEAD"), "the reword changes comment lines only")
 
 
 def _build_red_run():
@@ -12371,16 +12398,33 @@ def _build_red_run():
     must(RR_MCONT, "A\t" + RR_TEST in _rr_read(RR_MCONT, "diff", "--cached", "--name-status").stdout.splitlines(),
          "the test addition is staged")
 
+    _rr_reword(RR_CMTPLAIN)
+    _rr_reword(RR_CMTNONE, RR_CMT_NONE_LINE)
+
+    # A lane: a test commit and a test file each with a trailer, then the comment-only reword with none.
+    _cmk_pushed(RR_CMTLANE, {"a.txt": "base\n"})
+    _rr_commit(RR_CMTLANE, {RR_TEST: RR_CMT_V1}, _rr_msg(RR_SUBJECT, RR_RED_LINE))
+    _rr_commit(RR_CMTLANE, {RR_LANE_TEST: RR_TEST_TEXT}, _rr_msg(RR_LANE_SUBJECT, RR_NONE_LINE))
+    _rr_commit(RR_CMTLANE, {RR_TEST: RR_CMT_V2}, _rr_msg(RR_CMT_SUBJECT))
+    must(RR_CMTLANE, _rr_subjects(RR_CMTLANE, "origin/topic..HEAD") == [RR_SUBJECT, RR_LANE_SUBJECT, RR_CMT_SUBJECT],
+         "the lane's three commits are unpushed")
+    must(RR_CMTLANE, _rr_read(RR_CMTLANE, "log", "-1", "--format=%B").stdout.strip() == RR_CMT_SUBJECT,
+         "the last commit's message holds no trailer")
+    must(RR_CMTLANE, _rr_read(RR_CMTLANE, "diff", "--name-only", "HEAD~1", "HEAD").stdout.split() == [RR_TEST],
+         "the last commit touches the test file alone")
+    must(RR_CMTLANE, _rr_comment_only(RR_CMTLANE, "HEAD~1", "HEAD"), "the last commit changes comment lines only")
+
 
 lazy_fixture([RR_PLAIN, RR_RED, RR_NONE, RR_ZERO, RR_NOARROW, RR_DOCS, RR_MERGE, RR_REBASE, RR_LANEMERGE,
               RR_LANEREBASE, RR_FEAT, RR_CLEANREF, RR_NOBASE, RR_DELETE, RR_SIX, RR_ROLLOLD, RR_ROLLNEW,
               RR_NODEFAULT, RR_TAG, RR_NOLINT, RR_PARENNONE, RR_TREEBACK, RR_LANETREE, RR_NEARMISS, RR_SIBLING,
-              RR_RAWREF, RR_RAWOK, RR_CHAIN, RR_CHAINDOCS, RR_NEW, RR_COST, RR_TRACKED, RR_MCONT],
+              RR_RAWREF, RR_RAWOK, RR_CHAIN, RR_CHAINDOCS, RR_NEW, RR_COST, RR_TRACKED, RR_MCONT,
+              RR_CMTPLAIN, RR_CMTNONE, RR_CMTLANE],
              _build_red_run)
 
 
-def rr_refuse(name, command, cwd, carries=()):
-    sh("red-run: %s is refused" % name, command, "deny", RR_RULE, cwd=cwd, carries=carries)
+def rr_refuse(name, command, cwd, carries=(), lacks=()):
+    sh("red-run: %s is refused" % name, command, "deny", RR_RULE, cwd=cwd, carries=carries, lacks=lacks)
 
 
 def rr_allow(name, command, cwd):
@@ -12520,6 +12564,16 @@ rr_refuse("merge --continue, then a bare push, with the lane's test addition sta
 # Control: the same staged test addition, a commit, and no push in the call. The commit is allowed.
 rr_allow("commit -m m, then cd /tmp and echo, with no push in the call, and a staged test addition",
          VCS + " commit -m m && cd /tmp && echo x", RR_COST)
+
+
+# A comment-only reword of a pushed test file is still a test edit: its reworded lines are added lines. Pushed
+# with no trailer it is refused; with `none` and a reason it is allowed.
+rr_refuse("a comment-only reword of a pushed test file, pushed with no Red-run line", VCS + " push", RR_CMTPLAIN)
+rr_allow("the same comment-only reword with Red-run: none: comment only", VCS + " push", RR_CMTNONE)
+# A lane whose earlier commits carry trailers, then a comment-only reword with none. The refusal names the reword,
+# and names neither trailered commit.
+rr_refuse("a lane whose earlier commits carry trailers, then a comment-only reword with none, names the reword",
+          VCS + " push", RR_CMTLANE, carries=(RR_CMT_SUBJECT,), lacks=(RR_SUBJECT, RR_LANE_SUBJECT))
 
 
 # The commit cost. The red-run push check runs on a push only, so a lone commit must read nothing for red-run:
