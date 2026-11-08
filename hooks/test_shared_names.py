@@ -272,6 +272,61 @@ def case_local_time_fails_open_on_bad_shared_names():
     return not bad, "bad states: %s" % (bad or "none")
 
 
+def case_lane_head_refs_pinned():
+    """lane_head_refs(slug) is the one home of the head refs a lane's pull request may carry: the bare step slug and
+    `lane/<slug>`. Both forms are real (a pull request on `lane/reviewer-spawn-model` exists). A missing name is a
+    failed case, not a crash, so the report names the cause."""
+    shared = _shared()
+    fn = getattr(shared, "lane_head_refs", None)
+    if not callable(fn):
+        return False, "shared_names.lane_head_refs is absent"
+    got = fn("lane-x")
+    return (isinstance(got, (tuple, list)) and tuple(got) == ("lane-x", "lane/lane-x"),
+            "lane_head_refs('lane-x')=%r" % (got,))
+
+
+def case_one_home_for_lane_heads():
+    """build.py and the archive guard (hooks/guard_merge.py) import lane_head_refs from shared_names. Neither defines
+    its own copy, and neither holds the `lane/` prefix as a literal, so the two forms cannot drift apart."""
+    problems = []
+    for rel in ("hooks/guard_merge.py", "skills/roadmap/build.py"):
+        with open(os.path.join(HERE, "..", rel), encoding="utf-8") as handle:
+            tree = ast.parse(handle.read())
+        imported = any(isinstance(node, ast.ImportFrom) and node.module == "shared_names"
+                       and any(alias.name == "lane_head_refs" for alias in node.names)
+                       for node in ast.walk(tree))
+        copied = [node.lineno for node in ast.walk(tree)
+                  if isinstance(node, ast.FunctionDef) and node.name == "lane_head_refs"]
+        literal = [node.lineno for node in ast.walk(tree)
+                   if isinstance(node, ast.Constant) and node.value == "lane/"]
+        if not imported:
+            problems.append("%s does not import lane_head_refs from shared_names" % rel)
+        if copied:
+            problems.append("%s defines its own lane_head_refs at line %d" % (rel, copied[0]))
+        if literal:
+            problems.append("%s holds the literal 'lane/' at line %d" % (rel, literal[0]))
+    return not problems, "; ".join(problems) or "both read the one home"
+
+
+def case_guard_merge_binds_tag_prefixes_to_shared_names():
+    """hooks/guard_merge.py binds ROLE_TAG_PREFIX and TOPIC_TAG_PREFIX to the shared_names tags, by an imported name,
+    not to a copied literal. TOPIC_TAG_PREFIX already reads TOPIC_TAG, so it is the green control beside ROLE_TAG_PREFIX."""
+    with open(os.path.join(HERE, "guard_merge.py"), encoding="utf-8") as handle:
+        tree = ast.parse(handle.read())
+    imported = {alias.asname or alias.name for node in ast.walk(tree)
+                if isinstance(node, ast.ImportFrom) and node.module == "shared_names" for alias in node.names}
+    bound = {node.targets[0].id: node.value for node in tree.body
+             if isinstance(node, ast.Assign) and len(node.targets) == 1 and isinstance(node.targets[0], ast.Name)}
+    problems = []
+    for name, tag in (("ROLE_TAG_PREFIX", "BUILD_TAG"), ("TOPIC_TAG_PREFIX", "TOPIC_TAG")):
+        value = bound.get(name)
+        if value is None:
+            problems.append("%s is not bound at module level" % name)
+        elif not (isinstance(value, ast.Name) and value.id == tag and tag in imported):
+            problems.append("%s is not %s from shared_names (line %d)" % (name, tag, value.lineno))
+    return not problems, "; ".join(problems) or "both prefixes read the shared tags"
+
+
 CASES = [
     ("(a) shared_names.py exists", case_module_exists),
     ("(a) shared_names.py imports only the standard library", case_stdlib_only),
@@ -292,6 +347,11 @@ CASES = [
      case_local_time_output_unchanged),
     ("(j) local_time keeps the time line and an override grant when shared_names.py is absent or stale",
      case_local_time_fails_open_on_bad_shared_names),
+    ("(k) shared_names holds lane_head_refs: the bare step slug and lane/<slug>", case_lane_head_refs_pinned),
+    ("(k2) build.py and the archive guard import lane_head_refs, with no copy of it or the lane/ prefix",
+     case_one_home_for_lane_heads),
+    ("(l) guard_merge binds ROLE_TAG_PREFIX and TOPIC_TAG_PREFIX to shared_names' tags, not literals",
+     case_guard_merge_binds_tag_prefixes_to_shared_names),
 ]
 
 
