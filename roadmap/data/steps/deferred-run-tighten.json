@@ -1,11 +1,11 @@
 {
   "title": "A deferred CI run is accepted only when the batch's branch holds its sha",
   "phase": "now",
-  "status": "doing",
+  "status": "ready",
   "order": 269.31,
   "owner": "coordinator",
   "lane": "session_013NEJL4TDRWqka4aSU2Bv7L",
   "why": "judge_run can defer to a run for a sha the batch does not hold, so an old main run can stand in for today's.",
-  "note": "head_checks_run filters runs by head_sha itself. judge_run defers only a cited sha that the batch's branch holds (in base..head), and an old main run is judged as today. Stacked on #1743. Coordinator 20:34 CST Nov 7, relayed by lane silent-undo-reads-retire-run; filed 20:35 CST Nov 7.",
-  "updatedAt": "2026-11-07T20:35:00-06:00"
+  "note": "head_checks_run filters runs by head_sha itself. judge_run defers only a cited sha that the batch's branch holds (in base..head), and an old main run is judged as today. Stacked on #1743. Coordinator 20:34 CST Nov 7, relayed by lane silent-undo-reads-retire-run; filed 20:35 CST Nov 7. Built as draft #1753 (head cea25a643, merges after #1743): round 1 haiku FAIL, round 2 sonnet PASS; with runner 8. The lane has handed off all its PRs: #1677, #1712, #1726, #1743, #1753 (coordinator 20:58 CST; updated 20:58 CST).",
+  "updatedAt": "2026-11-07T20:58:00-06:00"
 }
