@@ -1279,12 +1279,12 @@ def review_record_hit(tool: str, tool_input, transcript: str, agent: bool = Fals
 RESUME_TOOL = "SendMessage"  # the built-in send: it resumes a named spawn. The remote send_message names a session.
 RESUME_MAIN = "main"
 RESUME_REASON = (
-    "resume-finished-reviewer: a reviewer or design-reviewer that has finished has no worktree any more, so a resume "
+    "a reviewer or design-reviewer that has finished has no worktree any more, so a resume "
     "runs with no tree. Spawn a fresh reviewer and pass it the prior report. "
     "(rule roles-resume-by-name: resume a dead agent by name, never fresh; a finished reviewer's worktree is gone)"
 )
 RESUME_ASK_REASON = (
-    "resume-finished-reviewer: the guard cannot tell whether this reviewer or design-reviewer has finished. A finished "
+    "the guard cannot tell whether this reviewer or design-reviewer has finished. A finished "
     "one has no worktree, so a resume runs with no tree; then spawn a fresh reviewer and pass it the prior report. "
     "Allow this send only if the reviewer is still running. (rule roles-resume-by-name)"
 )
@@ -1293,7 +1293,7 @@ RESUME_ASK_REASON = (
 RESUME_UNREAD_NOTE = "resume-finished-reviewer-unread"      # the guard.log rule of a send whose transcript could not be read
 RESUME_UNPARSED_NOTE = "resume-finished-reviewer-unparsed"  # the guard.log rule of a send whose records could not be parsed
 RESUME_UNPARSED_REASON = (
-    "resume-finished-reviewer: the guard read a record in this session's transcript that has the wrong shape, so it "
+    "the guard read a record in this session's transcript that has the wrong shape, so it "
     "cannot tell whether this reviewer or design-reviewer has finished. A finished one has no worktree, so a resume runs with no tree; then "
     "spawn a fresh reviewer and pass it the prior report. Allow this send only if the reviewer is still running. "
     "(rule roles-resume-by-name)"
