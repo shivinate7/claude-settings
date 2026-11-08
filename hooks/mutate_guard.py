@@ -2388,6 +2388,11 @@ MUTATIONS = [
      '            sim_hold_refusal(tool, held, sid, devices)',
      '            sim_hold_refusal(tool, [], sid, devices)', "guard",
      "drive: a hinge open of Duo 1 by its UDID inside sim-test --hold is refused"),
+    ("simulator-drive-lease: a hold with no device list allows a drive that names a device",
+     '    if names and devices is None:\n        devices = _sim_read()[1]\n    kept = []\n',
+     '    if names and devices is None:\n        devices = _sim_read()[1]\n'
+     '    if devices is None:\n        return\n    kept = []\n', "guard",
+     "drive: a hinge open of Duo 1 by its UDID inside sim-test --hold with no simctl on the PATH is refused"),
     ("simulator-drive-lease: the hold refusal is an ask, not a deny",
      '    if kept:\n        refuse(tool, "deny", "simulator-drive-lease",',
      '    if kept:\n        refuse(tool, "ask", "simulator-drive-lease",', "guard",

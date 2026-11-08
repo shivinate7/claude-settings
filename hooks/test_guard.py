@@ -28875,7 +28875,8 @@ def register_simulator_lease_cases():
 #       remedy (HOLD_CARRIES).
 #   `booted` names every booted device, so each of them needs a lease. A lease covers a UDID when its slot
 #   maps to it (SLOT_UDID), or, for slot `other`, when its udid field does. A device that is not booted is
-#   the boot rules' job. With no simctl, or an unreadable device list, the rule allows (fail open).
+#   the boot rules' job. With no simctl, or an unreadable device list, a drive outside a hold is allowed (fail open).
+#   Inside a hold, a name that the list cannot resolve is refused: no list can show that a lease covers it.
 # The cases here name phones: Duo 1, Duo 2, the 18 Pro, and a phone no slot maps, which an `other` lease holds.
 # A booted device that no phone slot maps (Beta Air) is judged the same way: see the lease section.
 DRIVE_RULE = "simulator-drive-lease"
@@ -29277,7 +29278,8 @@ def register_simulator_drive_cases():
     drive_sh("drive: a hinge drive after a quote in text, no lease, is refused",
              "grep -n \"Don't\" notes.md && hinge -d %s open" % D1, "deny", nolease)
 
-    # Fail open: no simctl on the PATH, or a device list that does not read, lets the drive through.
+    # Fail open: with no simctl on the PATH, or a device list that does not read, a drive outside a hold is allowed.
+    # A hold does not fail open: a drive naming a device or `booted` is refused, as no lease can be shown to cover it.
     drive_sh("control: a simctl ui on a booted Duo 1 with no simctl on the PATH is allowed (fail open)",
              "xcrun simctl ui %s appearance dark" % D1, "allow", nosim)
     drive_sh("control: hinge open on a booted Duo 1 with no simctl on the PATH is allowed (fail open)",
@@ -29288,6 +29290,20 @@ def register_simulator_drive_cases():
              "xcrun simctl ui %s appearance dark" % D1, "allow", unreadable)
     drive_mcp("control: an MCP tap of a booted Duo 1 with an unreadable device list is allowed (fail open)",
               "allow", unreadable, "tap", udid=D1)
+    # The hold has no fail open: with no list, a name it cannot resolve is kept and refused, by UDID or by `booted`.
+    drive_sh("drive: a hinge open of Duo 1 by its UDID inside sim-test --hold with no simctl on the PATH is refused",
+             "bin/sim-test --hold -- hinge -d %s open" % D1, "deny", nosim, carries=HOLD_CARRIES)
+    drive_sh("drive: a simctl ui of Duo 1 by its UDID inside sim-test --hold with an unreadable device list is refused",
+             "bin/sim-test --hold -- xcrun simctl ui %s appearance dark" % D1, "deny", unreadable, carries=HOLD_CARRIES)
+    drive_sh("drive: a simctl ui of booted inside sim-test --hold with no simctl on the PATH is refused",
+             "bin/sim-test --hold -- xcrun simctl ui booted appearance dark", "deny", nosim, carries=HOLD_CARRIES)
+    drive_sh("drive: a simctl ui of booted inside sim-test --hold with an unreadable device list is refused",
+             "bin/sim-test --hold -- xcrun simctl ui booted appearance dark", "deny", unreadable, carries=HOLD_CARRIES)
+    # The control: the hold's own $SIM_TEST_UDID, in single quotes, names no device, so no list is needed to allow it.
+    drive_sh("control: a hold's single-quoted $SIM_TEST_UDID is allowed with no simctl on the PATH",
+             "bin/sim-test --hold -- sh -c 'hinge -d \"$SIM_TEST_UDID\" open'", "allow", nosim)
+    drive_sh("control: a hold's single-quoted $SIM_TEST_UDID is allowed with an unreadable device list",
+             "bin/sim-test --hold -- sh -c 'hinge -d \"$SIM_TEST_UDID\" open'", "allow", unreadable)
 
 
 # The simulator cases need a POSIX shell for the fake xcrun and ps. Windows has neither to fake, so
