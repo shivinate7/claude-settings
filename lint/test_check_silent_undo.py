@@ -474,6 +474,23 @@ class PrBodyEscape(unittest.TestCase):
                 rc, text = self.run_cli([], env=env)
                 self.assert_fails_on_app(rc, text)
 
+    def test_a_pr_body_starts_no_process_a_run_without_one_does_not(self):  # cost pin: decision silent-undo-check-design
+        """The body costs one string read: no process starts for it. Its one line names a path this change does not touch, so
+        it excuses nothing. The diff reads are memoized in one process (C._hunks): a second run in the same process reads
+        fewer diffs, so each measured run starts with that memo empty."""
+        body = "Summary.\n\nDrops-lines: gone.txt -- the file is not in this change\n"
+        without, with_body = SpawnCount(every=True), SpawnCount(every=True)
+        with without.armed(), unittest.mock.patch.dict(C._hunks, clear=True):
+            rc, text = self.run_cli([])
+        self.assert_fails_on_app(rc, text)
+        with with_body.armed(), unittest.mock.patch.dict(C._hunks, clear=True), \
+                unittest.mock.patch.object(C, "last_paragraph", wraps=C.last_paragraph) as read:
+            rc, text = self.run_cli(["--pr-body", body])
+        self.assert_fails_on_app(rc, text)
+        self.assertIn(unittest.mock.call(body), read.call_args_list, "the run did not read the body, so the count proves nothing")
+        self.assertGreater(without.n, 0, "the spawn count saw no process start, so the count is not armed")
+        self.assertEqual(with_body.n, without.n, "a run with a PR body started %d processes, one without started %d" % (with_body.n, without.n))
+
 
 BLOCK = "alpha one\nbeta two\ngamma three\ndelta four\nepsilon five\nzeta six\n"
 
@@ -1814,14 +1831,14 @@ class BodyReadFails:
 
 
 class SpawnCount:
-    """Counts the `git` processes started while the block is armed. Every spawn, `subprocess.run` too, goes through Popen,
-    so Popen is the one place counted. A count, never a clock."""
+    """Counts the processes started while the block is armed: the `git` ones, or every one when `every` is set. Every spawn,
+    `subprocess.run` too, goes through Popen, so Popen is the one place counted. A count, never a clock."""
 
-    def __init__(self):
-        self.n, self.real = 0, subprocess.Popen
+    def __init__(self, every=False):
+        self.n, self.real, self.every = 0, subprocess.Popen, every
 
     def popen(self, args, *a, **k):
-        if list(args)[:1] == ["git"]:
+        if self.every or list(args)[:1] == ["git"]:
             self.n += 1
         return self.real(args, *a, **k)
 
