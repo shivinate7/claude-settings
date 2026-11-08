@@ -14950,6 +14950,168 @@ def controls(text):
     return C0_CONTROL.findall(text)
 
 
+# The handed-lane check: an integration PR's body names every handed lane PR. A handed PR is an open PR whose newest review record reads done.
+# Each case is the integration PR #7 on feat with the lanes its body names. HandedHost serves the open pulls, the records and the
+# containment reads; FakeHost does the rest. The check runs on the draft step and on a ready confirm, before the lock.
+
+HOLDS_ERROR = "fake read failure: holds_head could not read the compare"
+
+def handed_sha(n):
+    """A 40-hex head that names pull request n, so each pull request of a case has its own head."""
+    return "%040x" % n
+
+def count_line(lanes, left):
+    """The one count line a passing check prints."""
+    return f"merge: handed-lane check: {lanes} lanes in the batch, {left} named as left out."
+
+class HandedHost(FakeHost):
+    """FakeHost plus the reads of the handed-lane check. `pulls`: the open pull rows (batch_pull). `comments`: the repo's issue comments
+    (record_of). `holds`: the (head, other) pairs whose compare reads ahead or identical, so `other` contains `head`; any other pair is not
+    contained. `holds_error`: the text of the Stop that every holds_head call raises. `holds_calls`: each (head, other) asked."""
+    review_comments = merge.Host.review_comments  # the one record reader, as the real Host runs it
+
+    def __init__(self, root, other):
+        FakeHost.__init__(self, root, other)
+        self.pulls, self.comments, self.holds, self.holds_error, self.holds_calls = [], [], set(), None, []
+
+    def pages(self, rel, key=None, fields=None):
+        if rel == "pulls":
+            return self.pulls
+        if rel == "issues/comments":
+            return self.comments
+        raise AssertionError("unexpected read: " + rel)
+
+    def head_state(self, n, sha=None):  # the CI column of reviewed_read; no case reads CI
+        return "green"
+
+    def holds_head(self, head, other):
+        self.holds_calls.append((head, other))
+        if self.holds_error:
+            raise merge.Stop(self.holds_error)
+        return (head, other) in self.holds
+
+class HandedLaneCheck(RecordsEnv):
+    """The handed-lane check on the draft step and on a ready confirm. A refusal leaves nothing pushed, marked ready, locked or merged, and a
+    line names each PR it refuses. A pass marks the draft ready and prints the count line once. A skip prints nothing from the check."""
+
+    def setUp(self):
+        super().setUp()
+        self.use_fake_records()
+        self.kinds_off()
+        self.host = HandedHost(self.co, self.other)
+        self.on("feat", {"docs/records.md": page("ghost")})  # a stale page: a draft step that passes the check pushes its page
+
+    def fixture(self, body, handed, held=(), draft=True):
+        """The integration PR #7 with `body`, open and a draft unless draft is False; the open handed lanes `handed`, each with a done record at
+        its own head; and the handed numbers in `held`, whose head the integration head holds. -> the integration head."""
+        feat = self.head("feat")
+        self.host.draft, self.host.body = draft, body
+        self.host.pulls = [batch_pull(7, feat, draft=draft)] + [batch_pull(n, handed_sha(n)) for n in handed]
+        self.host.comments = [record_of(n, handed_sha(n)) for n in handed]
+        self.host.holds = {(handed_sha(n), feat) for n in held}
+        return feat
+
+    def assert_handed(self, *numbers):
+        """The scope, read first: each of `numbers` is a handed pull request, in the done set reviewed_read gives for the base."""
+        done = merge.reviewed_read(self.host)[1]
+        for n in numbers:
+            self.assertIn((n, "main"), done, f"the fixture does not make #{n} a handed pull request")
+
+    def assert_names(self, out, *numbers):
+        """A line of `out` names each of `numbers`."""
+        lines = out.splitlines()
+        for n in numbers:
+            self.assertTrue(any(re.search(rf"#{n}\b", l) for l in lines), f"no line names #{n}:\n{out}")
+
+    def assert_refused(self, *named):
+        """The draft step refuses: exit 1, nothing pushed, not marked ready, nothing waited on, and a line names each of `named`."""
+        refs = self.refs()
+        rc, out = self.run_merge("7", "--confirm")
+        self.assertEqual(rc, 1, f"the handed-lane check did not refuse the draft step:\n{out}")
+        self.assertEqual(self.host.readies, [], f"the draft step marked #7 ready past the check:\n{out}")
+        self.assert_refused_untouched(rc, out, refs)
+        self.assert_names(out, *named)
+
+    def assert_passes(self, lanes, left):
+        """The draft step passes the check: exit 0, marked ready, and the count line printed once."""
+        rc, out = self.run_merge("7", "--confirm")
+        self.assertEqual(rc, 0, f"the handed-lane check refused a batch it should pass:\n{out}")
+        lines = [l for l in out.splitlines() if l.startswith("merge: handed-lane check:")]
+        self.assertEqual(lines, [count_line(lanes, left)], f"the count line is not printed once, as read:\n{out}")
+        self.assertEqual(self.host.readies, [7], f"the draft step did not mark #7 ready:\n{out}")
+
+    def assert_skipped(self):
+        """The check does not apply: exit 0, marked ready, and no line from the check."""
+        rc, out = self.run_merge("7", "--confirm")
+        self.assertEqual(rc, 0, out)
+        self.assertNotIn("handed-lane check", out, f"the check said something about a PR it does not apply to:\n{out}")
+        self.assertEqual(self.host.readies, [7], out)
+
+    def test_handed_lane_in_the_batch_head_but_not_on_lanes_is_refused(self):
+        self.fixture("Lanes: #12", handed=[9, 12], held=[9, 12])  # #9 is in the batch, and the Lanes line names only #12
+        self.assert_refused(9)
+
+    def test_handed_lane_not_in_the_batch_and_named_nowhere_is_refused(self):
+        self.fixture("Lanes: #12", handed=[9, 12], held=[12])
+        self.assert_refused(9)
+
+    def test_handed_lane_on_a_dropped_line_with_no_reason_is_refused(self):
+        self.fixture("Lanes: #12\nDropped earlier: #1552", handed=[12, 1552], held=[12])
+        self.assert_refused(1552)
+
+    def test_handed_lane_named_on_lanes_but_missing_from_the_head_is_refused(self):
+        self.fixture("Lanes: #12 #15", handed=[12, 15], held=[12])
+        self.assert_refused(15)
+
+    def test_handed_lane_on_a_late_next_batch_line_passes_and_prints_the_count(self):
+        self.fixture("Lanes: #12 #15\nNext batch (late): #21", handed=[12, 15, 21], held=[12, 15])
+        self.assert_handed(21)
+        self.assert_passes(2, 1)
+
+    def test_handed_lane_all_named_passes_and_prints_the_count(self):
+        self.fixture("Lanes: #12 #15\nDropped from #9: #20 (macOS CI red)\nDropped by the round-3 filter (owner item 402 a): #31 #32",
+                     handed=[12, 15, 20, 31, 32], held=[12, 15])
+        self.assert_handed(20, 31, 32)
+        self.assert_passes(2, 3)
+
+    def test_handed_lane_lone_lane_with_other_handed_prs_open_is_not_refused_by_the_check(self):
+        self.fixture("", handed=[9], held=[])  # no Lanes line and the head holds no handed head: a lone lane, so the check does not apply
+        self.assert_handed(9)
+        self.assert_skipped()
+
+    def test_handed_lane_failed_read_stops_the_draft_step(self):
+        self.fixture("Lanes: #12", handed=[12], held=[12])
+        self.host.holds_error = HOLDS_ERROR
+        refs = self.refs()
+        rc, out = self.run_merge("7", "--confirm")
+        self.assertEqual(rc, 1, f"a failed read in the handed-lane check let the draft step pass:\n{out}")
+        self.assertIn(HOLDS_ERROR, out, f"the failed read's stop is not printed:\n{out}")
+        self.assertEqual(self.host.readies, [], f"the draft step marked #7 ready after a failed read:\n{out}")
+        self.assert_refused_untouched(rc, out, refs)
+
+    def test_handed_lane_with_no_open_handed_pr_says_nothing(self):  # the empty state: no open pull request has a done record
+        self.fixture("", handed=[])
+        self.assertEqual(merge.reviewed_read(self.host)[1], [], "a handed pull request in the empty fixture")
+        self.assert_skipped()
+
+    def test_handed_lane_full_size_batch_prints_the_count(self):
+        lanes = list(range(101, 113))  # twelve lanes in the batch, two more left out
+        body = "Lanes: " + " ".join(f"#{n}" for n in lanes) + "\nDropped from #9: #120 (macOS CI red)\nDropped earlier: #121 (superseded)"
+        self.fixture(body, handed=lanes + [120, 121], held=lanes)
+        self.assert_handed(120, 121)
+        self.assert_passes(12, 2)
+
+    def test_handed_lane_refuses_the_ready_merge_before_any_lock_claim_or_merge(self):
+        self.on("feat", {"docs/records.md": page()})  # a current page: a stale one is refused for its own reason
+        self.fixture("Lanes: #12", handed=[9, 12], held=[12], draft=False)  # #9 is handed, not in the batch, and named nowhere
+        refs = self.refs()
+        with unittest.mock.patch.object(self.lock, "acquire", wraps=self.lock.acquire) as acquire:
+            rc, out = self.run_merge("7", "--confirm")
+        self.assertEqual(rc, 1, f"the handed-lane check did not refuse the ready merge:\n{out}")
+        self.assertEqual(acquire.call_count, 0, f"the ready merge took the lock before the check refused:\n{out}")
+        self.assert_refused_untouched(rc, out, refs)
+        self.assert_names(out, 9)
+
 if __name__ == "__main__":
     if len(sys.argv) == 3 and sys.argv[1] == "--sigchild":
         # A run waiting on its checks for a minute, for a signal to reach. It prints READY once it holds the lock.
