@@ -608,12 +608,13 @@ def records_page_hit(stripped: str, cwd: str) -> str:
         if call is None or call[0] not in ("add", "commit"):
             run = _runs_generator(segment) if call is None and segment.strip() else None
             if run is not None:
-                generated.append((run[0], _env_chdir(run[1], dir_before_segment(segments, number, cwd, ends))))
+                generated.append((run[0], _env_chdir(run[1], dir_before_segment(segments, number, cwd, ends, failed_cd_stays=True))))
             continue
         c_target = _segment_git_c_target(segment_tokens(segment) or [])
         # The segment's own directory (a `cd` inside `( ... )` ends with the parenthesis), moved by its own
         # `--work-tree`. The chain's `command_root` stands in only when that directory cannot be told.
-        root, work_tree = dir_before_segment(segments, number, cwd, ends), GIT_WORK_TREE_RE.search(segment)
+        root, work_tree = (dir_before_segment(segments, number, cwd, ends, failed_cd_stays=True),
+                            GIT_WORK_TREE_RE.search(segment))
         root = command_root(stripped, cwd) if root is None else (
             _absolute(work_tree.group(2), root) if work_tree else root)
         where = _absolute(c_target, root) if c_target is not None else root

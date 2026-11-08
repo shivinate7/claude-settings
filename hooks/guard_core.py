@@ -1054,6 +1054,12 @@ def shell_abs(path: str, base):
     return path
 
 
+def _runs_false(tokens):
+    """True when the tokenized segment's command word is `false`."""
+    index = resolve_command(tokens) if tokens else None
+    return index is not None and basename(tokens[index]) == "false"
+
+
 def dir_before_segment(segments, number: int, shell_cwd: str, ends=(), failed_cd_stays=False):
     """The directory the shell is in when `segments[number]` runs, or None when it cannot be told.
 
@@ -1063,14 +1069,15 @@ def dir_before_segment(segments, number: int, shell_cwd: str, ends=(), failed_cd
     is not tracked, and a `cd` into a folder that does not exist is not trusted (the shell stays
     where it was, and a `;` runs the next command there). `ends` is what `split_segments` gave:
     in bash each part of a pipe runs in a subshell, so its `cd` moves nothing after the pipe.
-    `failed_cd_stays` reads a `cd` to a folder that does not exist the way the shell does: it
-    leaves the shell where it was, and `cd -` still goes to the folder before the last `cd` that
+    `failed_cd_stays` reads a `cd` that does not run the way the shell does: a `cd` to a folder that
+    does not exist, and a `cd` in the chain after `false &&`, leave the shell where it was, and `cd -` still goes to the folder before the last `cd` that
     worked. After `&&` the rest of that chain does not run, up to the next `;`, newline or `||`:
     a segment in it gets None, and its own `cd` moves nothing. Off by default, so a rule that
     fails closed on an untrusted `cd` keeps doing so."""
     where = shell_cwd if shell_cwd and os.path.isabs(shell_cwd) else None
     prev, stack = None, []
     skipping = False   # a failed cd ended in `&&`: the rest of the chain does not run
+    false_chain = False   # inside the `&&` chain after a `false`
     for at, segment in enumerate(segments[:number + 1]):
         marks = [char for _, char, quote in walk_quotes(segment) if not quote and char in "()"]
         stack.extend([(where, prev)] * marks.count("("))
@@ -1086,6 +1093,13 @@ def dir_before_segment(segments, number: int, shell_cwd: str, ends=(), failed_cd
             continue
         tokens = segment_tokens(segment)
         move = _segment_cd_move(tokens) if tokens else None
+        if failed_cd_stays:
+            # `false &&`: the rest of that chain never runs, so a `cd` in it moves nothing. The other
+            # segments of it stay judged here, as a failing step stands in for any step that may fail.
+            if false_chain and move is not None:
+                move = None
+            false_chain = end in ("&&", "|") and (false_chain or (
+                end == "&&" and _runs_false(tokens) and not (at and ends[at - 1] == "||")))
         if move is not None and not is_powershell(segment) and "|" in (
                 ends[at] if at < len(ends) else "", ends[at - 1] if 0 < at <= len(ends) else ""):
             move = None   # a bash pipe's part: a subshell, so the shell stays where it was
