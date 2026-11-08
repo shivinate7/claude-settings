@@ -14047,6 +14047,11 @@ HK_PIN_FORMS = (
     ("env -u X ./f", "f", "env -u X ./f", "deny"),
     ("timeout -s KILL 5 ./f", "f", "timeout -s KILL 5 ./f", "deny"),
     ("xargs -n 1 ./f", "f", "ls f | xargs -n 1 ./f", "deny"),
+    # The wrapper's value word is skipped, so the reader after it reads f as data and nothing runs it.
+    ("nice -n 5 cat f", "f", "nice -n 5 cat f", "allow"),
+    ("env -u X cat f", "f", "env -u X cat f", "allow"),
+    ("timeout -s KILL 5 wc f", "f", "timeout -s KILL 5 wc f", "allow"),
+    ("xargs -n 1 wc after ls f", "f", "ls f | xargs -n 1 wc", "allow"),
 )
 for _label, _file, _call, _want in HK_PIN_FORMS:
     _body = "cat > %s <<'EOF'\ngh pr create --title x\nEOF\n%s" % (_file, _call)
