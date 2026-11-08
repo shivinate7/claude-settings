@@ -25,7 +25,7 @@ date read counted as a real clock. The tool fixes none, and it writes nothing. E
   `dayjs()`, `dayjs.utc()`, `new dayjs()`, `moment()`, `moment.utc()` and `Temporal.Now.*()`).
   `new Date(0)`, `new Date(EPOCH_MS)` with a declared constant, `dayjs(0)`, `moment.utc(EPOCH)`,
   `arrow.get(0)`, `timezone.localtime(fixed_dt)` and `pendulum.datetime(...)` read no clock and are
-  not listed. A fake clock hides the calendar rows of the reads it fakes: in Python a
+  not listed. A fake clock hides every calendar row in its scope, even a read it does not fake: in Python a
   `@freeze_time(...)` def or class, or the body of a `with freeze_time(...)`; in JS a file that calls
   `jest.useFakeTimers()` or `vi.useFakeTimers()`. Its elapsed-assert rows stay. `time.tzname` and
   `time.timezone` stay listed under `freeze_time`, because freezegun fakes no zone. `Temporal.Now.*()`
