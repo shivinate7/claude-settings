@@ -395,8 +395,6 @@ jobs:
       - name: Waiting page splice fixture suite
         run: python3 skills/waiting-page/test_splice.py
 
-      - name: Waiting page export fixture suite
-        run: python3 skills/waiting-page/test_export_page.py
       - name: Waiting page grant check suite
         run: python3 skills/waiting-page/test_page_grant.py
       - name: Waiting page park relay prose suite
@@ -672,8 +670,9 @@ jobs:
   checks-shoot:
     runs-on: ubuntu-latest
     needs: scope
-    # Cap 10 min, 10x the slowest of 30 runs, 1.0 min (decision ci-job-caps). The browser install is
-    # the only network step, and it no longer waits on apt.
+    # Cap 10 min, 10x the slowest of 30 runs, 1.0 min (decision ci-job-caps), before the export suite joined.
+    # That suite ran 57 s locally, so the cap is re-measured after 5 green runs (provisional). The browser
+    # install is the only network step, and it no longer waits on apt.
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
@@ -703,6 +702,13 @@ jobs:
         run: |
           python3 --version && git --version
           NODE_PATH="$PWD/.github/shoot/node_modules" node --test skills/waiting-page/tests/page.test.mjs skills/waiting-page/tests/test_check_designs.mjs
+
+      # The export suite's picture cases run check_designs.mjs in Playwright. A case that cannot run fails, so
+      # this suite cannot sit in `checks`, which installs no browser. loadPlaywright reads NODE_PATH.
+      - name: Waiting page export fixture suite
+        if: ${{ needs.scope.outputs.shoot == 'true' || github.event_name != 'pull_request' }}
+        shell: bash
+        run: NODE_PATH="$PWD/.github/shoot/node_modules" python3 skills/waiting-page/test_export_page.py
 
       - name: roadmap page suite
         if: ${{ needs.scope.outputs.shoot == 'true' || github.event_name != 'pull_request' }}
