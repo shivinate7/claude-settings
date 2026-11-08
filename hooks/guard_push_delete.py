@@ -11,7 +11,7 @@ import guard_core
 from guard_core import (
     CMD_EXE_NAMES, GIT_OPT_WITH_VALUE, _absolute, _segment_cd_move, _segment_cd_target,
     _segment_git_c_target, shell_abs, CONTRACTION, quote_advance, _git_subcommand_index,
-    _strip_heredoc_bodies_unconditionally, bare_words, basename, command_indexes, inner_commands,
+    _strip_heredoc_bodies_unconditionally, bare_words, basename, command_indexes, git_calls, inner_commands,
     is_powershell, norm, resolve_command, segment_tokens, split_segments,
 )
 
@@ -809,6 +809,161 @@ def cmd_exe_delete_hit(segment: str) -> str:
         if re.fullmatch("(?i)" + WIDE_TARGET, arg):
             return word + " /s " + arg
     return ""
+
+
+# ARCHIVE GATES DELETE. Decision archive-gates-delete (rule shared-trees-archive-then-delete): a remote
+# branch is lossless to delete only once its archive push has succeeded. A delete that follows an archive
+# push of the same branch must run only when that push's failure stops the chain first. Segments and ends
+# come from `split_segments`; each push is read by `_push_parse` alone. `bash -c` bodies, heredocs,
+# script files and PowerShell are not read (`guard-guards-mistakes-only`).
+GATE_EXITS = ("exit", "return", "continue", "break")
+GATE_BRACED = re.compile(r"\$\{(\w+)\}")
+GATE_OPENERS = ("do", "then", "{", "(", "!")
+GATE_ENDS_BRANCH = ("else", "elif", "fi")
+ZSH_MODIFIER = re.compile(r"\$(?:[A-Za-z_]\w*|\d):[A-Za-z]")
+SINGLE_QUOTED = re.compile(r"'[^']*'")
+IF_CONDITION = re.compile(r"\s*if\s+(?!!)")
+
+
+def _gate_name(text: str) -> str:
+    """A branch name as two spellings of it agree: no quotes, `${x}` as `$x`, no `refs/heads/`."""
+    text = GATE_BRACED.sub(r"$\1", text.replace('"', "").replace("'", "").lstrip("+"))
+    return text.removeprefix("refs/heads/")
+
+
+def _gate_events(segment: str):
+    """[(kind, names)] for each `git push` in one segment: 'archive' for a refspec whose destination is
+    `archive/<name>`, 'delete' for a deleted branch. An archive's names hold its source and its suffix."""
+    events = []
+    for subcommand, args in git_calls(push_text(segment)):
+        if subcommand != "push":
+            continue
+        _f, _m, _e, _i, _u, _l, delete, _up, _remote, plain = _push_parse(args)
+        deleted = {_gate_name(spec[1:] if spec.startswith(":") else spec)
+                   for spec in plain if spec.startswith(":") or delete}
+        if deleted:
+            events.append(("delete", deleted))
+        if delete:
+            continue
+        for spec in plain:
+            source, colon, dest = spec.lstrip("+").partition(":")
+            dest = _gate_name(dest if colon else source)
+            if dest.startswith("archive/") and source:
+                events.append(("archive", {_gate_name(source), dest[len("archive/"):]}))
+    return events
+
+
+def _first_word(segment: str) -> str:
+    """The segment's command word, after the shell keywords that open a body (`do`, `then`, `{`)."""
+    words = _body_words(segment)
+    return words[0] if words else ""
+
+
+def _body_words(segment: str):
+    words = segment_tokens(segment)
+    words = list(words) if words else segment.split()
+    while words and words[0] in GATE_OPENERS:
+        words.pop(0)
+    return words
+
+
+def _shell_options(segments, upto: int):
+    """(errexit, pipefail) as the `set` calls in the segments before `upto` leave them."""
+    errexit = pipefail = False
+    for segment in segments[:upto]:
+        words = _body_words(segment)
+        if not words or words[0] != "set":
+            continue
+        args, number = words[1:], 0
+        while number < len(args):
+            arg = args[number]
+            if arg[:1] in ("-", "+") and len(arg) > 1 and arg[1] != "-":
+                on, letters = arg[0] == "-", arg[1:]
+                errexit = on if "e" in letters else errexit
+                if "o" in letters and number + 1 < len(args):
+                    number += 1
+                    errexit = on if args[number] == "errexit" else errexit
+                    pipefail = on if args[number] == "pipefail" else pipefail
+            number += 1
+    return errexit, pipefail
+
+
+def _if_gates(segments, ends, first: int, last: int) -> bool:
+    """True for `if <archive push>; then ... <delete>`: the delete is in the then branch, which runs
+    only when the condition's last command, the push, succeeded."""
+    if not IF_CONDITION.match(segments[first]) or ends[first] not in (";", "\n"):
+        return False
+    if not segments[first + 1].lstrip().startswith("then"):
+        return False
+    return not any(_first_word(text) in GATE_ENDS_BRANCH for text in segments[first + 2:last + 1])
+
+
+def _delete_is_gated(segments, ends, first: int, last: int) -> bool:
+    """True when a failed archive push in segment `first` stops the chain before the delete in segment `last`."""
+    reach = first
+    while reach < len(ends) and ends[reach] == "|":
+        reach += 1
+    if reach >= last:
+        return False   # the delete runs in the archive push's own pipeline
+    errexit, pipefail = _shell_options(segments, first)
+    if reach > first and not pipefail:
+        return False   # a pipe reports its last command's status, not the push's
+    if all(ends[k] == "&&" or (ends[k] == "|" and (k > first or pipefail)) for k in range(first, last)):
+        return True
+    if ends[first] == "||":
+        return last > first + 1 and _first_word(segments[first + 1]) in GATE_EXITS
+    if errexit and ends[reach] in (";", "\n"):
+        return True
+    return _if_gates(segments, ends, first, last)
+
+
+def archive_gate_hits(segments, ends):
+    """The deletes that follow an archive push of their branch with nothing to stop the chain, each as
+    `<name> deleted after its archive push`. `ends` is what `split_segments` filled in. A second reading
+    of the text (contractions as text) follows the first in both lists, and each is judged alone."""
+    if len(segments) != len(ends):
+        return []
+    hits = []
+    start = 0
+    for stop in [number + 1 for number, end in enumerate(ends) if end == ""]:
+        reading, closes = segments[start:stop], ends[start:stop]
+        start = stop
+        archives = []   # (segment number, names), in order
+        for number, segment in enumerate(reading):
+            for kind, names in _gate_events(segment):
+                if kind == "archive":
+                    archives.append((number, names))
+                    continue
+                for name in sorted(names):
+                    paired = [at for at, found in archives if at < number and name in found]
+                    if paired and not _delete_is_gated(reading, closes, paired[-1], number):
+                        hits.append(name + " deleted after its archive push")
+    return hits
+
+
+GATE_REASON = (
+    "Rule (shared-trees-archive-then-delete, decision archive-gates-delete): this delete can run after "
+    "its archive push failed, which loses the branch with no copy. "
+    "Remedy: run the delete only when the archive push has succeeded. Join the two with `&&`, "
+    "or put the push in an `if` condition, or add `|| exit` after the push."
+)
+
+
+def zsh_modifier_hits(segments):
+    """Each word of a `git push` that holds an unbraced `$name:` and a letter. Single-quoted text is not read."""
+    hits = []
+    for segment in segments:
+        words = SINGLE_QUOTED.sub(" ", push_text(segment)).split()
+        if "push" in words:
+            hits += [word for word in words[words.index("push") + 1:] if ZSH_MODIFIER.search(word)]
+    return hits
+
+
+ZSH_REASON = (
+    "Rule (zsh manual, Parameter Expansion, Modifiers; decision archive-gates-delete): zsh reads a letter "
+    "after `$name:` as a modifier (`:r`, `:a`, `:e`), so the word sent to git changes. "
+    "Remedy: write the name in braces, `${name}:`."
+)
 
 
 PUSH_REASON = (

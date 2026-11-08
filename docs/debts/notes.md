@@ -1507,3 +1507,7 @@
 - conflict-markers-chain-clean-refuse: `git stash pop`, `git pull --rebase` or `git merge`, then commit and push in one call, is refused on a clean tree; the remedy is a separate push (hooks/guard_merge.py `_makes_conflict`). Decision: commit-refuses-conflict-markers.
 - conflict-markers-show-uncapped: the push check runs one `git cat-file` per file with a marker finding, with no cap, and no cost case holds a finding (hooks/guard_merge.py `_kinds_of`). Decision: commit-refuses-conflict-markers.
 - conflict-markers-stale-tracking: a tracking ref left at a markers tip after the remote was rewound hides those commits from `git push origin <branch>` (hooks/guard_merge.py `_push_hit`). Decision: commit-refuses-conflict-markers.
+- archive-gate-bash-c-body: a `bash -c`, heredoc or script-file body that archives and then deletes is not read (hooks/guard_push_delete.py `archive_gate_hits`). Decision: archive-gates-delete.
+- archive-gate-powershell: a PowerShell call is not judged by either archive-gate rule; `&&` and `$name:` are POSIX forms (hooks/guard.py rule 3b2). Decision: archive-gates-delete.
+- archive-gate-gh-api-delete: `gh api -X DELETE …/git/refs/heads/<name>` after an archive push is not read (hooks/guard_push_delete.py `archive_gate_hits`). Decision: archive-gates-delete.
+- archive-gate-one-push-both: one push call that names `b:archive/b` and `:b` in one refspec list, with no `--atomic`, is not paired; a delete pairs only with an earlier segment (hooks/guard_push_delete.py `_gate_events`). Decision: archive-gates-delete.
