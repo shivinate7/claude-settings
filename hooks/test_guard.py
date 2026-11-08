@@ -19231,6 +19231,168 @@ add("ceiling: Task on sonnet is allowed", "allow", tool="Task", prompt="x", mode
 sh("ceiling: a shell command that only names a spawn on opus is not a spawn",
    "echo spawn the agent with model opus", "allow", cwd=NOGIT)
 
+# ---- Brief claims need a probe (rule brief-claim-has-probe). A brief to a builder or a test-author that claims what
+# main, origin/main or "today" passes, allows, accepts or refuses for an input is refused, unless the brief carries
+# the probe that showed it: a command line and its result line. A claim written from memory of main is the mistake
+# this stops. Selector: MUTATE_ONLY=brief-claim: runs these cases alone. Each deny is red on a guard that lets the
+# claim through. Each allow is a control the rule must leave alone.
+BRIEF_PROBE = "brief-claim-has-probe"
+REPRO_TEST_AUTHOR = ("Round 1 passed but found that the fix adds false alarms that main does not have.\n"
+                     "Move `adHocKey: ...` and `globalHotkey: Ctrl+Alt+2` to the passing list: main passes both.\n"
+                     "Also main passes `password: none for guests and visitors`.")
+add("brief-claim: test-author brief that says main passes two inputs, with no probe, is denied",
+    "deny", BRIEF_PROBE, tool="Agent", prompt=REPRO_TEST_AUTHOR, subagent_type="test-author")
+add("brief-claim: builder brief that says main passes a password input, with no probe, is denied",
+    "deny", BRIEF_PROBE, tool="Agent", prompt="Make these green; main passes `password: none for the guest`.",
+    subagent_type="builder", model="sonnet")
+add("brief-claim: builder brief that says origin/main accepts an input, with no command, is denied",
+    "deny", BRIEF_PROBE, tool="Agent",
+    prompt="Make the failing case green. origin/main accepts `user: root` as a valid name.",
+    subagent_type="builder", model="sonnet", carries=(("probe", "command"),))
+add("brief-claim: test-author brief that says today main refuses an input, with no command, is denied",
+    "deny", BRIEF_PROBE, tool="Agent",
+    prompt="Write the case. Today main refuses `port: 0`, so the new case expects a refusal.",
+    subagent_type="test-author")
+add("brief-claim: test-author brief that says today the guard refuses an input, with no main named, is denied",
+    "deny", BRIEF_PROBE, tool="Agent", prompt="Write the case. Today it refuses `password: none for the guest`.",
+    subagent_type="test-author")
+add("brief-claim: builder brief that says main allows an input, with no probe, is denied",
+    "deny", BRIEF_PROBE, tool="Agent", prompt="Keep the scan as it is. main allows `port: 0`.",
+    subagent_type="builder", model="sonnet")
+add("brief-claim: builder brief with a main claim and a result line but no command is denied",
+    "deny", BRIEF_PROBE, tool="Agent", prompt="Keep the scan as it is.\nmain allows `port: 0`.\nPASS",
+    subagent_type="builder", model="sonnet")
+add("brief-claim: builder brief with a main claim and a command but no result line is denied",
+    "deny", BRIEF_PROBE, tool="Agent",
+    prompt="Keep the scan as it is.\nmain allows `port: 0`.\n`python3 hooks/probe_main.py 'port: 0'`",
+    subagent_type="builder", model="sonnet")
+add("brief-claim: test-author brief whose probe is for another input does not show the claim, and is denied",
+    "deny", BRIEF_PROBE, tool="Agent",
+    prompt="main refuses `password: none for the guest`.\n```\n$ python3 hooks/probe_main.py 'port: 0'\nrefused\n```",
+    subagent_type="test-author")
+LONG_BRIEF = "\n".join("Keep the export scan narrow. Line %d of the brief." % n for n in range(1, 30))
+add("brief-claim: builder brief with the claim on line 30 of a long brief, with no probe, is denied",
+    "deny", BRIEF_PROBE, tool="Agent", prompt=LONG_BRIEF + "\nNote: main refuses `password: none for the guest`.",
+    subagent_type="builder", model="sonnet")
+add("brief-claim: builder brief with a lone quote and an unmatched backtick around a main claim is denied",
+    "deny", BRIEF_PROBE, tool="Agent",
+    prompt="Don't skip the scan. Main refuses `password: none for the guest, and the guest passes.\nMake these green.",
+    subagent_type="builder", model="sonnet")
+add("brief-claim: builder brief with a main refusal and a fenced git show probe with its result is allowed",
+    "allow", tool="Agent",
+    prompt="Make these green. Main refuses `password: none for the guest`.\n```\n"
+           "$ git show origin/main:hooks/guard.py | python3 -I - 'password: none for the guest'\n"
+           "origin_main RRRR\n```",
+    subagent_type="builder", model="sonnet")
+add("brief-claim: test-author brief with a main refusal and an inline python3 probe with its refused line is allowed",
+    "allow", tool="Agent",
+    prompt="Main refuses `globalHotkey: Ctrl+Alt+2`.\n"
+           "`python3 hooks/probe_main.py 'globalHotkey: Ctrl+Alt+2'`\nrefused",
+    subagent_type="test-author")
+add("brief-claim: builder brief with origin/main passes an input and a PASS result line is allowed",
+    "allow", tool="Agent",
+    prompt="origin/main passes `user: root`.\n$ python3 hooks/probe_main.py 'user: root'\nPASS",
+    subagent_type="builder", model="sonnet")
+add("brief-claim: builder brief with no claim about main is allowed",
+    "allow", tool="Agent",
+    prompt="Make these green. The guard must refuse `password: none for the guest` for every role.",
+    subagent_type="builder", model="sonnet")
+add("brief-claim: reviewer brief with the main claim is allowed (out of scope)",
+    "allow", tool="Agent", prompt="Check the diff. Main passes `password: none for the guest`, so the fix is wrong.",
+    subagent_type="reviewer")
+add("brief-claim: Explore brief with the main claim is allowed (out of scope)",
+    "allow", tool="Agent",
+    prompt="Find where the guest password rule lives. Main passes `password: none for the guest`.",
+    subagent_type="Explore")
+add("brief-claim: designer brief with the main claim is allowed (out of scope)",
+    "allow", tool="Agent", prompt="Draw the mockup. Main passes `password: none for the guest`.",
+    subagent_type="designer")
+add("brief-claim: main and today as plain words are allowed",
+    "allow", tool="Agent",
+    prompt="The main point of this lane is the probe rule. The main branch is the base. Today the lane starts on it.",
+    subagent_type="builder", model="sonnet")
+add("brief-claim: an empty brief is allowed", "allow", tool="Agent", prompt="", subagent_type="builder",
+    model="sonnet")
+
+
+# ---- Brief-claim edges (rule brief-claim-has-probe). A claim can hide behind a backticked subject, a fence, a passive
+# form, another verb, a probe for a longer input, a plain-quoted input, a path locator, or a quoted red-case text. It
+# can also sit apart from its inputs (both, them, or a list above it), be negated, use "lets ... through", or sit
+# unquoted in a Must deny: line. Each deny is red on a guard that lets the claim through. Each allow is a false alarm
+# the rule must not raise: a double-quoted claim with backticks, a claim whose clause ends at "so", or a real probe
+# shape (a cd, a pipe, an env prefix or time before python3). Each text is data: the prompt a brief carries, verbatim.
+# Selector: MUTATE_ONLY=brief-claim: runs these with the cases above.
+BRIEF_CLAIM_EDGES = (
+    ("brief-claim: test-author brief with a backticked main subject and a refusal is denied",
+     "deny", "test-author", "`main` refuses `git push --force`, so keep that."),
+    ("brief-claim: builder brief with a backticked origin/main subject and a pass is denied",
+     "deny", "builder", "`origin/main` passes `user: root`."),
+    ("brief-claim: test-author brief with a claim inside a fence after Cases: is denied",
+     "deny", "test-author", "Cases:\n```\nmain refuses `git push --force`\n```"),
+    ("brief-claim: builder brief whose claim line is its own probe is denied",
+     "deny", "builder", "`git push --force` refused on main"),
+    ("brief-claim: test-author brief whose probe is for a longer input than the claim is denied",
+     "deny", "test-author",
+     "main refuses `git push`.\n$ python3 hooks/probe_main.py 'git push --force'\nrefused"),
+    ("brief-claim: builder brief with main rejects an input is denied",
+     "deny", "builder", "main rejects `git push --force`."),
+    ("brief-claim: test-author brief with main blocks an input is denied",
+     "deny", "test-author", "main blocks `git push --force`."),
+    ("brief-claim: builder brief with an input refused on main in passive form is denied",
+     "deny", "builder", "- `git push --force` is refused on main"),
+    ("brief-claim: test-author brief where main passes a plain-quoted input is denied",
+     "deny", "test-author", 'main passes "password: none for guests and visitors"'),
+    ("brief-claim: builder brief with main as an adjective before a refusal is allowed",
+     "allow", "builder", "The main session refuses `git push --force` on this checkout."),
+    ("brief-claim: builder brief with main as an adjective before a pass is allowed",
+     "allow", "builder", "The main checkout passes `verdict` for every lane."),
+    ("brief-claim: builder brief with today as a time word and the builder as subject is allowed",
+     "allow", "builder", "Today the builder passes `verdict` results to the lane."),
+    ("brief-claim: test-author brief with a path locator after a probed refusal is allowed",
+     "allow", "test-author",
+     "main refuses `git push --force` in `hooks/guard.py`.\n$ python3 hooks/probe_main.py 'git push --force'\nrefused"),
+    ("brief-claim: test-author brief quoting a claim after Add a case: is allowed",
+     "allow", "test-author", 'Add a case: "main refuses `git push --force`, so keep that."'),
+    ("brief-claim: test-author brief quoting a claim after Must deny: is allowed",
+     "allow", "test-author", 'Must deny: "main passes `user: root`."'),
+    ("brief-claim: test-author brief where main passes both, with its inputs in the sentence before, is denied",
+     "deny", "test-author", "Move `user: root` and `port: 0` to the passing list. Main passes both."),
+    ("brief-claim: builder brief where as main refuses it, with its inputs in a list below, is denied",
+     "deny", "builder", "Each must be refused, as main refuses it:\n- `git push --force`\n- `port: 0`"),
+    ("brief-claim: test-author brief where main passes all of them, after a list of inputs, is denied",
+     "deny", "test-author", "- `user: root`\n- `port: 0`\nmain passes all of them."),
+    ("brief-claim: builder brief where main doesn't refuse an input is denied",
+     "deny", "builder", "main doesn't refuse `git push --force`."),
+    ("brief-claim: test-author brief where main never refuses an input is denied",
+     "deny", "test-author", "main never refuses `git push --force`."),
+    ("brief-claim: builder brief where main lets an input through is denied",
+     "deny", "builder", "main lets `port: 0` through."),
+    ("brief-claim: test-author brief with an unquoted claim inside a Must deny: line is denied",
+     "deny", "test-author", "Must deny: `x: y` (main allows `x: y` today)."),
+    ("brief-claim: test-author brief with a backticked main claim in double quotes, no prefix, is allowed",
+     "allow", "test-author", '- "`main` refuses `git push --force`"'),
+    ("brief-claim: builder brief whose main claim is followed by so and a backticked command is allowed",
+     "allow", "builder", "origin/main passes CI, so run `verdict pytest` first."),
+    ("brief-claim: test-author brief whose main claim is followed by so and a backticked edit is allowed",
+     "allow", "test-author", "main passes CI, so only edit `hooks/guard.py`."),
+    ("brief-claim: builder brief with a cd-and-python3 probe and its result line is allowed",
+     "allow", "builder", "Main refuses `x: y`.\n$ cd /w && python3 probe.py 'x: y'\nrefused"),
+    ("brief-claim: test-author brief with a piped echo probe and its result line is allowed",
+     "allow", "test-author", "Main refuses `x: y`.\n$ echo 'x: y' | python3 probe.py\nrefused"),
+    ("brief-claim: builder brief with an env-prefixed python3 probe and its result line is allowed",
+     "allow", "builder", "Main refuses `x: y`.\n$ PYTHONPATH=. python3 probe.py 'x: y'\nrefused"),
+    ("brief-claim: test-author brief with a time-prefixed python3 probe and its result line is allowed",
+     "allow", "test-author", "Main refuses `x: y`.\n$ time python3 probe.py 'x: y'\nrefused"),
+)
+for _name, _expected, _role, _prompt in BRIEF_CLAIM_EDGES:
+    add(_name, _expected, BRIEF_PROBE if _expected == "deny" else None, tool="Agent", prompt=_prompt,
+        subagent_type=_role, **({"model": "sonnet"} if _role == "builder" else {}))
+# A brief with two unprobed claims names every input in its refusal, not only the first.
+add("brief-claim: builder brief with two unprobed claims names both inputs in its refusal, and is denied",
+    "deny", BRIEF_PROBE, tool="Agent",
+    prompt="Make these green.\nMain refuses `git push --force`.\nMain allows `port: 0`.",
+    subagent_type="builder", model="sonnet", carries=("git push --force", "port: 0"))
+
 
 def _flow(model, role=None):
     spec = "model: '%s'" % model + (", agentType: '%s'" % role if role else "")
