@@ -24,7 +24,8 @@ The PreToolUse guard judges `mcp__claude-code-remote__send_message`, from any se
 
 "This repo" is the `owner/repo` of the `cwd` checkout's `origin`. Text that names another repo is skipped:
 
-- A URL to another repo.
+- A URL to another repo, and a PR number in that URL's link text (`[PR #5](https://github.com/acme/widgets/pull/5)`).
+- A sha, PR number or comment link on a `> ` quoted line or inside a double-quoted span. Quoted text may come from another repo (the quote rule of `agent-report-shas-resolve`).
 - A sha or PR number on a line that names another repo. A line names another repo when it holds an `owner/repo` that is not this repo, with a mark:
   - `#` or `@` right after it, in any case (`acme/widgets#5`).
   - `:` or the word `PR` right after it (`acme/widgets: PR #5`, `acme/widgets PR #5`). This mark counts only when owner and name are lowercase letters, digits, `-`, `_` or `.`, and neither is all digits. So `CI/CD:`, `Done/Next:` and `2/3:` are no marks.
