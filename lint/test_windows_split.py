@@ -1233,7 +1233,7 @@ class MutateShards(unittest.TestCase):
 
     def family(self):
         names = sorted(n for n, _ in mutate_homes(self.text))
-        self.assertGreaterEqual(len(names), 2, f"{MUTATE_CMD!r} runs in {names}: one job holds every mutant, so no shard is a shard")
+        self.assertGreaterEqual(len(names), 2, f"{MUTATE_CMD!r} runs in {names}: one job holds every mutant, so the job is not sharded")
         return names
 
     def test_the_guard_mutation_is_a_family_of_at_least_two_shards(self):

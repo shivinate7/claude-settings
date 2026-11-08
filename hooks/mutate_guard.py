@@ -27,7 +27,7 @@ its place among the other targets, in order of first appearance, mod n, plus 1. 
 exits 1 with an ERROR line before any suite runs.
 
 THE GUARD SUITES. The guard, override and simlease targets run every hooks/test_guard*.py, one process per file, test_guard.py
-first (`guard_suites`). A FAIL line from any file is red for the mutant. The load_os cases skip off Windows, so on the Linux
+first (`guard_suites`). A FAIL line from any file is red for the mutant. The load_os cases skip on Linux, so on the Linux
 job only the other test_guard*.py files can kill a mutant.
 
 The mutants run IN PARALLEL, one suite process per mutant, up to the CPU count at once
