@@ -2503,14 +2503,16 @@ def lane_head_and_base(root, target, base):
         raise Stop(f"cannot find {target} as a commit or ref in this clone or on origin {LANE_LINT_CITE}")
     return head, base
 
-def ci_job_run(wt, *args):
+def ci_job_run(wt, *args, pr_body=""):
     """Run `bin/ci-job <args>` in the tree `wt`, the one home of that run: lane_lint and the draft step's ready checks call it.
+    `pr_body` reaches ci-job as env CI_JOB_PR_BODY, its value for `${{ github.event.pull_request.body }}`: a step that reads the PR body (silent-undo) sees what CI gives it.
     ci-job's stderr (a `start: <step>` line per step, verdict's heartbeat) passes live to this process's stderr; only its stdout is read.
     -> (state, lines, log, liftable). state: "pass" (exit 0), "fail" (exit 1) or "unknown" (exit 2, a timeout, any other exit).
     lines: the FAIL or unknown lines ci-job printed, or one line saying what was read instead; on a pass, the names of the CI steps ci-job skipped (from its
     `skipped <step>: <why>` lines), so no pass hides a CI step that did not run. log: ci-job's log line, as a list of
     0 or 1 (the last one: the FAIL lines name it too). liftable: True only for ci-job's own exit 2, which names its unknown steps."""
     env = {k: v for k, v in os.environ.items() if not k.startswith("GITHUB_")}  # as the merge's own lint run reads it
+    env["CI_JOB_PR_BODY"] = pr_body
     try:
         c, out = sh([sys.executable, CI_JOB, *args], cwd=wt, env=env, timeout=LINT_SECONDS, live_stderr=True)
     except subprocess.TimeoutExpired:
@@ -2532,15 +2534,16 @@ def lane_lint(root, target, host, base="", unknown_ok=""):
     ci-job's stderr (a `start: <step>` line per step, verdict's heartbeat) passes live to this process's stderr; only its stdout is read.
     Exit 1 of ci-job (a FAIL) refuses always. Exit 2 (an unknown) refuses unless `unknown_ok` is a non-blank reason; it is then logged, with no PASS line.
     A lint that ran no lint CI step is ci-job's exit 2, so it refuses as an unknown. The PASS line names the CI steps ci-job skipped, as a count and their names."""
+    pr_body = ""  # a commit or ref has no PR body
     if target.isdigit():
         info = (host or Host()).pr(int(target))
-        head, base = info["head"], info["base"]
+        head, base, pr_body = info["head"], info["base"], info.get("body", "")
         tmp, wt = open_worktree(root, info, base)
     else:
         head, base = lane_head_and_base(root, target, base)
         tmp, wt = add_worktree(root, head)
     try:  # a SIGTERM reaches here as a SystemExit (release_on_signals in main), so this `finally` removes the tree
-        state, lines, log, liftable = ci_job_run(wt, "checks", "--lint", "--base", f"origin/{base}")
+        state, lines, log, liftable = ci_job_run(wt, "checks", "--lint", "--base", f"origin/{base}", pr_body=pr_body)
     finally:
         drop_worktree(root, tmp, wt)
     short = head[:9]

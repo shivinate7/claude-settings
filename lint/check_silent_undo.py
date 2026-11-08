@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Fails when a merge or branch silently drops or reverts earlier work. Stdlib and git only.
 
-    python3 lint/check_silent_undo.py [--upstream origin/main] [--head HEAD] [--strict]
+    python3 lint/check_silent_undo.py [--upstream origin/main] [--head HEAD] [--strict] [--pr-body TEXT]
     python3 lint/check_silent_undo.py --history [REV] [--window 60]   # audit, always exit 0
 
 Two reads, one verdict. Design: docs/decisions/silent-undo-check-design.md.
@@ -30,8 +30,9 @@ excuses its path. A trailer or line with no reason excuses nothing. A deleted de
 `Retire-run: <slug> -- <run URL>` line in the PR body's last paragraph that the debt-close check
 (check_debt_retire.retired) accepts: a green run on the PR head or above, a Retire that holds. It needs a
 run reader (run_state); with none, or a read that fails, the finding stays. Only a whole delete is excused, not a rename out of
-the debts folder. Only the merge tool passes a PR body and a run reader: the CLI and CI read no body, as with a Drops-lines line
-in the body, and CI's way out is a Drops-lines commit trailer. Each use prints
+the debts folder. Only the merge tool passes a run reader, so the CLI never excuses a Retire-run line. The CLI reads the PR body
+from `--pr-body <text>`, else from env PR_BODY (CI sets it from the pull request body, as `merge --lane-lint` does), so a
+Drops-lines line in the body counts there as it does at the merge. Each use prints
 `ALLOWED <path>: <reason>`. On a branch it may be on any commit of the branch. In history it is
 the commit, plus the branch it merged for a reversal.
 
@@ -688,14 +689,16 @@ def main(argv):
     ap.add_argument("--strict", action="store_true", help="unknown exits 1 (also when env CI is set)")
     ap.add_argument("--history", nargs="?", const="HEAD", metavar="REV")
     ap.add_argument("--repo", default=os.getcwd())
+    ap.add_argument("--pr-body", default=None, metavar="TEXT", help="the pull request body, read as the merge tool reads it (default: env PR_BODY)")
     a = ap.parse_args(argv)
+    pr_body = a.pr_body if a.pr_body is not None else os.environ.get("PR_BODY", "")
     try:
         if a.history:
             n, hits = history(a.repo, a.history, a.window)
             say("\n".join(hits))
             say("silent-undo: %d commit(s) read, %d hit(s)." % (n, len(hits)))
             return 0
-        problems, notes = check(a.repo, a.upstream, a.head)
+        problems, notes = check(a.repo, a.upstream, a.head, pr_body=pr_body)
     except Unknown as e:
         say("silent-undo: UNKNOWN: %s" % e)
         return 1 if (a.strict or os.environ.get("CI")) else 0
