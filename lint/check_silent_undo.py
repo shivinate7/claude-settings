@@ -604,10 +604,18 @@ def note_counts(text):
     return collections.Counter(slug for slug, _ in note_bodies(text.splitlines()))
 
 
-class Revived(str):
-    """A revived note's problem line. It prints and compares as its text, and its class is the marker trailer_hint reads:
-    a lost line can hold any text, so the footer never finds a revival by its words. It rides through check's
-    (problems, notes) and the merge tool's memo of that answer unchanged."""
+class SlugKept(str):
+    """A problem line that only a trailer reason naming the note's slug excuses. It prints and compares as its text, and its
+    class is the marker trailer_hint reads: the line can hold any text, so the footer never finds one by its words. It rides
+    through check's (problems, notes) and the merge tool's memo of that answer unchanged."""
+
+
+class Revived(SlugKept):
+    """A revived note's problem line."""
+
+
+class LostSentence(SlugKept):
+    """A lost sentence's problem line."""
 
 
 def revived_notes(cwd, upstream, head, named=None, kept=None, each=None):
@@ -763,10 +771,10 @@ def gather_dropped(lost, path, found):
 
 
 def lost_sentence_problem(path, slug, folded, dropped):
-    return ("%s: note `%s` loses %s when a commit rewrites it%s. Put %s back. To drop %s on purpose, name the note in a %s "
+    return LostSentence(("%s: note `%s` loses %s when a commit rewrites it%s. Put %s back. To drop %s on purpose, name the note in a %s "
             "trailer for %s: put `- %s` in the trailer's reason."
             % (path, slug, "; ".join('"%s"' % c for c in dropped), " (folded into `%s`)" % "`, `".join(folded) if folded else "",
-               "it" if len(dropped) == 1 else "them", "it" if len(dropped) == 1 else "them", TRAILER, path, slug))
+               "it" if len(dropped) == 1 else "them", "it" if len(dropped) == 1 else "them", TRAILER, path, slug)))
 
 
 # ----------------------------------------------------------------------- modes
@@ -908,11 +916,11 @@ def history(cwd, rev, window):
 
 
 def trailer_hint(problems):
-    """The footer's extra sentence for a refusal that holds a revived note, for the CLI and the merge tool alike: a path-only
-    trailer cannot keep a revived note, only a reason that names its slug can. Empty for any other refusal. A revival is
-    read by its class (Revived, from revived_notes), never by its text."""
-    if any(isinstance(p, Revived) for p in problems):
-        return "To keep a revived note, put `- <slug>` in the trailer's reason."
+    """The footer's extra sentence for a refusal that holds a revived note or a lost sentence, for the CLI and the merge tool
+    alike: a path-only trailer cannot keep either, only a reason that names its slug can. Empty for any other refusal. Each is
+    read by its class (SlugKept, from revived_notes and lost_sentence_problem), never by its text."""
+    if any(isinstance(p, SlugKept) for p in problems):
+        return "To keep a revived note or a dropped sentence, put `- <slug>` in the trailer's reason."
     return ""
 
 
