@@ -4292,6 +4292,10 @@ def worktree_home_hit(payload, tool: str, tool_input: dict, cwd: str) -> str:
 # redirect onto a stream (`2>&1`) or the null device writes no checkout, so it is dropped first.
 SHELL_QUIET_REDIRECT = re.compile(r"\d*>>?[ \t]*(?:&[0-9-]|/dev/null\b)")
 SHELL_WRITE_HINT = re.compile(r">|" + MUTATING_COMMAND + r"|\bsed\b")
+# A lane's own `touch` or `make` writes files with no `>` and no word of MUTATING_COMMAND, so a lane
+# call that holds either, even inside `$(...)` or `<(...)`, may write. MUTATING_COMMAND stays as is,
+# since it also decides frozen-file verdicts.
+SESSION_LIVED_WRITE_HINT = re.compile(SHELL_WRITE_HINT.pattern + r"|\b(?:touch|make)\b")
 
 
 def _owning_checkout(path: str, roots) -> str:
@@ -4742,6 +4746,8 @@ def session_home_record(payload, primary: str):
 def _only_quiet_commands(command: str) -> bool:
     """True when each segment of COMMAND runs a printer or a `cd` (guard_frozen's `_QUIET`)."""
     for segment in split_segments(command):
+        if not segment.strip():
+            continue   # a trailing newline or `;` leaves an empty segment, which runs nothing
         tokens = segment_tokens(segment)
         index = resolve_command(tokens) if tokens else None
         if index is None or basename(tokens[index]).lower().removesuffix(".exe") not in _QUIET:
@@ -4772,7 +4778,7 @@ def _session_lived(payload, tool: str, where: str, folder: str) -> bool:
             if "git" in stripped and session_home_git_hit(stripped, where, lambda at, _from: inside(at)):
                 return True
             if (_only_quiet_commands(stripped)
-                    and not SHELL_WRITE_HINT.search(SHELL_QUIET_REDIRECT.sub(" ", stripped))):
+                    and not SESSION_LIVED_WRITE_HINT.search(SHELL_QUIET_REDIRECT.sub(" ", stripped))):
                 return False   # a call that only prints or moves about is a look, so the lane stays a visit
             return (inside(os.path.realpath(where))
                     or any(inside(move) for move in _cd_targets(tool, command, where))
