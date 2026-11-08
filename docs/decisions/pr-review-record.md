@@ -33,6 +33,7 @@ CI: read live by merge --reviewed
 - The first line is the marker. A line `---` after the CI line ends the record, so the attribution footer may follow.
 - One `Round` line per reviewer. A round can hold more than one line.
 - The `Fix check` line is optional, comes once after the Round lines, and a PASS is not a round (record `hold-unsafe-after-round-3`). `--fix-check HEAD:reviewer:MODEL:VERDICT` writes it. Its reviewed head must differ from Head. A PASS counts as its round passing in any round; after round 3 it keeps the net value round 3 gave; with no round recorded it reads open.
+- Coordinator's relay of owner page item 359 c, saved 2026-11-07 14:41 CST, not the owner's typed words. Each `Round` and `Fix check` line names its model. The merge tool refuses `unknown`. Refusing `unknown` in any case, and passing names that only contain it, is the lane's reading of item 359 c.
 - A FAIL is open until the next record. It counts as the next round, N+1: that record carries `Round N+1: reviewer, <model>, FAIL` and no Fix check line, so `--fix-check` may follow again. A FAIL that counts as round 3 makes that record a round-3 record. After round 3 a FAIL holds the change (owner item 356 a).
 - A WIDE is open. Its fix starts a new lane at round 1.
 - No reset: a round count never goes down on a PR. The floor is the highest last round over every earlier record that parses, plus 1 when that record has a Fix check FAIL before round 3. A newest record below the floor reads open. Why: `the record on head <9-hex> reached round <F>, so this record's last round <M> is below it; a new lane is a new pull request`, or, when the floor comes from a Fix check FAIL, `a failed fix check on head <9-hex> counts as round <F>, but this record's last round is <M>`. A WIDE sets the floor at its own last round. A new lane is a new branch and PR, so it starts over.
@@ -61,6 +62,8 @@ A change is done when one of these holds (rule `roles-review-cap-three`):
 - A round 3 FAIL or PARTIAL holds the change, so the record is open (owner items 356 a and 362 b, relayed by the coordinator). A passing fix check clears a round-3 hold (owner item 363 b, relayed by the coordinator; not a design reviewer's line, see above), and then the round-3 done rules apply. Otherwise, when Guard or check is `yes`, Net value decides done, even after a round 3 PASS: `not owed` is open, and `negative` holds the change (record `hold-unsafe-after-round-3`).
 - A `delete-only` change with Guard or check `yes` and a round 1 FAIL is open unless a fix check PASSes. The rule owes rounds 2 and 3 when round 1 finds a safety hole.
 - `docs-only` with Guard or check `yes` is not a record: docs-only means no guard or check. The tool refuses it when it writes, and the parser rejects it.
+
+Round 3 for a guard or check change is prose only. The merge tool still reads a `Guard or check: yes` record as done after a round-1 or round-2 PASS, by the first rule above.
 
 ## The cost
 
