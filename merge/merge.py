@@ -120,6 +120,25 @@ LANE_LINT_CITE = "(decision lanes-run-no-full-ci-job, a lane hands off only a he
 REVIEW_CITE = "(decision pr-review-record, a review record names the head it reviewed and only an open pull request takes one)"
 OFF_CITE = "(decision standing-merge-grant, the owner's grant for a repo decides whether a session merges there)"
 
+def drop_cite(text, cite):
+    """`text` without `cite`: the caller prints that cite itself, once, so a Stop's own copy must not print it again."""
+    return text.replace(" " + cite, "").replace(cite, "")
+
+def first_wait_stop(ok, why):
+    """The Stop for the wait on the head's own checks, before any claim. `why` from the wait already ends in the cite of its kind
+    (the deadline, a red check, a moved head or base, a failed read), so each kind prints its own cite once, and `why` loses its copy.
+    A reason with no cite of its own is a check that did not pass, and cites the failing-CI rule."""
+    lead, bare = "the head's own checks are not green, so nothing was claimed or pushed", why
+    if ok is None:
+        return Stop(f"{lead} {WAIT_CITE}: {drop_cite(bare, WAIT_CITE)}")
+    if HEAD_CITE in why:
+        return Stop(f"{lead} {HEAD_CITE}: {drop_cite(bare, HEAD_CITE)}")
+    if BASE_CITE in why:
+        return Stop(f"{lead} {BASE_CITE}: {drop_cite(bare, BASE_CITE)}")
+    if READ_CITE in why:
+        return Stop(f"{lead} {READ_CITE}: {drop_cite(bare, READ_CITE)}")
+    return Stop(f"{lead} {GREEN_CITE}: {drop_cite(bare, GREEN_CITE)}")
+
 SH_TIMEOUT = None  # seconds; the guard sets it, so a hung `gh` cannot outlast its hook
 
 def resolve_program(name, env=None):
@@ -2998,7 +3017,7 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
                 except Stop as e:
                     ok, why = False, str(e)
                 if not ok:
-                    raise Stop("the head's own checks are not green, so nothing was claimed or pushed " + WAIT_CITE + ": " + why)
+                    raise first_wait_stop(ok, why)
                 claim_sha = commit_claim(wt, trailer)
                 push_branch(wt, branch)
                 say(f"merge: {trailer or 'the records page'} pushed to {branch} at {claim_sha[:9]}.")
@@ -3025,7 +3044,7 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
 
         def unproven(what, detail):  # a read after the claim push could not run: the result is unknown, so the claim stays
             if not kept:  # nothing was pushed, so nothing is kept
-                raise Stop(f"{what} {READ_CITE}\n{detail}")
+                raise Stop(f"{what} {READ_CITE}\n{drop_cite(detail, READ_CITE)}")
             raise Unproven(f"the result is unknown: {what}. The claim {kept[:9]} stays on {branch} and no revert was made. Rerun merge to resume {REFUSED_CITE}.\n{detail}")
 
         def unknown_unless_denied(e, what):  # a read GitHub refused (401, 403) is a proven refusal, and returns. Any other failed read is unknown
