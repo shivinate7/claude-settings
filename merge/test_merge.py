@@ -162,10 +162,10 @@ class FakeHost:
     def head_state(self, n):
         return self.state
 
-    def review_comments(self, since):  # the third-round gate's comment read: no record unless a case scripts one (LanePulls, PullsHost)
+    def review_comments(self, since):  # the round-three check's comment read: no record unless a case scripts one (LanePulls, PullsHost)
         return {}
 
-    def open_heads(self):  # the third-round gate's open-PR read: none unless a case scripts it (LaneHost, LanePulls)
+    def open_heads(self):  # the round-three check's open-PR read: none unless a case scripts it (LaneHost, LanePulls)
         return merge.OpenHeads()
 
     def base_state(self, base, flows):  # main's latest run is green unless a case says so (RedMainBrake)
@@ -327,6 +327,19 @@ class Env(unittest.TestCase):
         p = os.path.join(self.t, "hook.sh")
         put(p, fn_script)
         os.environ["MERGE_TEST_HOOK"] = p
+
+    @contextlib.contextmanager
+    def first_lane_log_fails(self):
+        """Only the first git log that reads the batch's merge commits fails: the dropped-lane check's read. Later reads answer."""
+        real, n = merge.sh, [0]
+        def first_fails(args, *a, **k):
+            if "log" in args and any("%x01" in a for a in args):
+                n[0] += 1
+                if n[0] == 1:
+                    return 128, "fatal: bad revision"
+            return real(args, *a, **k)
+        with unittest.mock.patch.object(merge, "sh", first_fails):
+            yield
 
     PUSH_REFUSAL = "refused by the test"  # the text the refusing pre-receive hook prints on stderr
 
@@ -2208,19 +2221,6 @@ class CutLanes(Env):
         self.assertIn("git merge-base failed", out)
         self.assertEqual(self.claims("feat"), 0)
 
-    @contextlib.contextmanager
-    def first_lane_log_fails(self):
-        """Only the first git log that reads the batch's merge commits fails: the dropped-lane check's read. Later reads answer."""
-        real, n = merge.sh, [0]
-        def first_fails(args, *a, **k):
-            if "log" in args and any("%x01" in a for a in args):
-                n[0] += 1
-                if n[0] == 1:
-                    return 128, "fatal: bad revision"
-            return real(args, *a, **k)
-        with unittest.mock.patch.object(merge, "sh", first_fails):
-            yield
-
     def test_the_reason_flag_lifts_a_failed_dropped_lane_read_and_logs_it(self):
         lane_batch(self, "lane1", "lane2")
         with self.first_lane_log_fails():
@@ -2455,8 +2455,8 @@ class CutLanes(Env):
         self.assertTrue(self.has_local("stray"), f"a local branch at no lane tip was deleted; out: {out!r}")
         self.assertNotIn("stray", out)
 
-    def test_deleteBranch_false_keeps_every_lane_and_the_gate_reads_no_open_prs(self):
-        # The third-round gate reads no open pull request (decision pr-review-record, the cost). The deletion's read does not run here either:
+    def test_deleteBranch_false_keeps_every_lane_and_the_round_check_reads_no_open_prs(self):
+        # The round-three check reads no open pull request (decision pr-review-record, the cost). The deletion's read does not run here either:
         # cut_lanes runs only with deleteBranch on, so no open-PR read runs at all.
         put_base_config(self, json.dumps(dict(CONFIG, merge=dict(CONFIG["merge"], deleteBranch=False))))
         lane_batch(self, "lane1", "lane2")
@@ -3359,7 +3359,7 @@ try:
             finish(listing(cur["check_runs"], "check_runs", params, flags, jq, cap, {"total_count": len(cur["check_runs"])}), 0, include)
         finish(listing(cur["statuses"], "statuses", params, flags, jq, cap, {"state": combined_state(cur["statuses"]), "sha": sha, "total_count": len(cur["statuses"])}), 0, include)
 
-    elif method == "GET" and rel == "issues/comments":  # the repo's comments, which the third-round gate reads for review records: none in this fake
+    elif method == "GET" and rel == "issues/comments":  # the repo's comments, which the round-three check reads for review records: none in this fake
         finish(listing([], None, params, flags, jq, cap), 0, include)
 
     elif method == "GET" and rel.startswith("compare/"):  # the batch brake's containment read: diverged, so no other ready pull request holds this head
@@ -3614,7 +3614,7 @@ class GhHalf(Env):
     def test_the_dropped_lane_lift_is_written_into_the_merge_commit_message(self):
         # the dropped-lane check's read is lifted by the same flag, so its line goes into the merge call too
         lane_batch(self, "lane1", "lane2")
-        with CutLanes.first_lane_log_fails(self):
+        with self.first_lane_log_fails():
             rc, out = self.run_merge("7", "--confirm", "--undo-check-unknown-ok", "octopus read it", host=self.gh_host())
         self.assertEqual(rc, 0, out)
         self.assertIn("dropped-lane check UNKNOWN", out)  # the scope: the lift happened
@@ -12362,7 +12362,7 @@ class ReviewGuardRoundThreeRules(unittest.TestCase):
 
 class ReviewGuardFieldForms(unittest.TestCase):
     """The Guard or check field takes exactly yes or no. A value with a comma, colon or semicolon after yes is not a record: parse_review
-    returns None, so the gate reads the newest record as bad, and never as guard no."""
+    returns None, so the check reads the newest record as bad, and never as guard no."""
 
     def test_a_guard_value_with_a_comma_colon_or_semicolon_after_yes_does_not_parse(self):
         parse_text(self, record_text(rounds=REVIEW_PASS, guard="yes"))  # control: the same record with the plain value parses
@@ -12739,9 +12739,9 @@ class ReviewedList(ReviewEnv):
         self.assertRegex(list_line(self, out, 7), rf"^#7 feat7 {REVIEW_HEAD[:9]} done: ")
 
 
-# ------------------------------------------------------------------ the third-round gate on a batch
+# ------------------------------------------------------------------ the round-three check on a batch
 # A ready pull request whose batch holds a lane that still owes its third round is refused before any claim or push (decision
-# pr-review-record, the lane gate; rule roles-review-cap-three). Each lane tip is read with read_lanes and mapped to its open pull request
+# pr-review-record, the lane check; rule roles-review-cap-three). Each lane tip is read with read_lanes and mapped to its open pull request
 # by head sha, and the newest record for that exact head decides. A lone pull request with no lane tips reads its own record. One real batch
 # (lane_batch) is the fixture. The open pull requests and the repo's comments are scripted at `pages`, the one read seam, so open_heads and
 # review_comments run as the code does.
@@ -12771,12 +12771,12 @@ def lane_pull(number, branch, sha):
     """An open pull request whose head is `branch` at `sha`, as `pages("pulls")` lists it."""
     return {**batch_pull(number, sha), "head": {"ref": branch, "sha": sha}}
 
-def gate_comment(cid, number, head, **kw):
+def round_check_comment(cid, number, head, **kw):
     """The record a lane posts on pull request `number` for `head`, as the repo's comment list holds it. The keywords are record_text's."""
     return review_comment(cid, number, record_text(n=number, head=head, **kw))
 
-class ReviewGateEnv(Env):
-    """The round-three gate's one home for its fixtures: a batch of lanes into feat, each lane an open pull request, and pull request 7 for feat.
+class ReviewRoundCheckEnv(Env):
+    """The round-three check's one home for its fixtures: a batch of lanes into feat, each lane an open pull request, and pull request 7 for feat.
     The assertions every case shares sit here too. No test lives here."""
 
     def batch_host(self, tips, comments=()):
@@ -12786,7 +12786,7 @@ class ReviewGateEnv(Env):
         return LanePulls(self.co, self.other, pulls=pulls, comments=list(comments))
 
     def scope(self, tips, host):
-        """Scope before subject: each lane is a lane of the batch, and an open pull request at its tip, before a case probes the gate on it."""
+        """Scope before subject: each lane is a lane of the batch, and an open pull request at its tip, before a case probes the check on it."""
         sh(self.co, "git", "fetch", "-q", "origin")
         lanes, _dropped = merge.read_lanes(self.co, "origin/main", self.head("feat"))
         open_now = host.open_heads()
@@ -12794,7 +12794,7 @@ class ReviewGateEnv(Env):
             self.assertIn(tip, lanes, f"{b} is not a lane of the batch")
             self.assertEqual(open_now.get(b), (tip, "main"), f"{b} is not an open pull request at its tip")
 
-    def run_gate(self, host, *argv):
+    def run_round_check(self, host, *argv):
         """-> (rc, output, refs before the run) of `merge 7` with the flags in argv."""
         before = self.refs()
         rc, out = self.run_merge("7", *argv, host=host)
@@ -12809,7 +12809,7 @@ class ReviewGateEnv(Env):
     def assert_refused(self, rc, out, host, before, pr_no):
         """A refusal: exit 1, the lane's pull request named, a cite to a decision or rule, no net value named as the remedy (rule
         git-remedy-never-names-target), and no claim or push."""
-        self.assertEqual(rc, 1, "the gate let the batch through, though a lane owes round 3:\n" + out)
+        self.assertEqual(rc, 1, "the round-three check let the batch through, though a lane owes round 3:\n" + out)
         self.assertIn(f"#{pr_no}", out, f"the refusal does not name pull request #{pr_no}:\n" + out)
         self.assertNotIn("Net value: zero", out, "the refusal names `Net value: zero` as a remedy")
         self.assertNotIn("Net value: positive", out, "the refusal names `Net value: positive` as a remedy")
@@ -12818,19 +12818,19 @@ class ReviewGateEnv(Env):
 
     def assert_allowed(self, rc, out, host):
         """Not refused: the run goes on through the merge, which this fixture lets through."""
-        self.assertEqual(rc, 0, "the run stopped before the merge, though the lane should pass the gate:\n" + out)
+        self.assertEqual(rc, 0, "the run stopped before the merge, though the lane should pass the check:\n" + out)
         self.assertTrue(getattr(host, "merged", False), "the run did not reach the merge:\n" + out)
 
-class ReviewGateRefusal(ReviewGateEnv):
+class ReviewRoundCheckRefusal(ReviewRoundCheckEnv):
     """`merge 7 --confirm` on a ready batch refuses a lane whose newest record for its tip is not done and whose Guard or check is yes. Each
-    refusal sits beside a control that is not refused, so a gate that refuses every lane fails here too."""
+    refusal sits beside a control that is not refused, so a check that refuses every lane fails here too."""
 
     def test_an_integration_pr_with_a_guard_lane_at_round_one_is_refused_before_any_push(self):
         # the integration pull request has no record of its own, so only the lane's record can owe the third round
         tips = lane_batch(self, "agent/lane1")
-        host = self.batch_host(tips, [gate_comment(1, 8, tips["agent/lane1"], guard="yes", rounds=REVIEW_PASS)])
+        host = self.batch_host(tips, [round_check_comment(1, 8, tips["agent/lane1"], guard="yes", rounds=REVIEW_PASS)])
         self.scope(tips, host)
-        rc, out, before = self.run_gate(host, "--confirm")
+        rc, out, before = self.run_round_check(host, "--confirm")
         self.assert_refused(rc, out, host, before, 8)
         self.assertIn("round 3", out, "the refusal does not say round 3 is owed:\n" + out)
         self.assertIn("owed", out, "the refusal does not say round 3 is owed:\n" + out)
@@ -12838,120 +12838,120 @@ class ReviewGateRefusal(ReviewGateEnv):
     def test_a_lane_whose_round_three_passed_with_a_positive_net_value_is_not_refused(self):
         tips = lane_batch(self, "agent/lane1")
         round_three = REVIEW_FAILED_THREE[:2] + ("Round 3: reviewer, opus, PASS",)
-        host = self.batch_host(tips, [gate_comment(1, 8, tips["agent/lane1"], guard="yes", rounds=round_three, net="positive")])
+        host = self.batch_host(tips, [round_check_comment(1, 8, tips["agent/lane1"], guard="yes", rounds=round_three, net="positive")])
         self.scope(tips, host)
-        rc, out, _before = self.run_gate(host, "--confirm")
+        rc, out, _before = self.run_round_check(host, "--confirm")
         self.assert_allowed(rc, out, host)
 
     def test_a_delete_only_lane_passed_in_round_one_is_not_refused(self):
         tips = lane_batch(self, "agent/lane1")
-        host = self.batch_host(tips, [gate_comment(1, 8, tips["agent/lane1"], kind="delete-only", guard="yes", rounds=REVIEW_PASS)])
+        host = self.batch_host(tips, [round_check_comment(1, 8, tips["agent/lane1"], kind="delete-only", guard="yes", rounds=REVIEW_PASS)])
         self.scope(tips, host)
-        rc, out, _before = self.run_gate(host, "--confirm")
+        rc, out, _before = self.run_round_check(host, "--confirm")
         self.assert_allowed(rc, out, host)
 
     def test_a_docs_only_lane_with_no_round_is_not_refused(self):
         # the false-alarm class: a docs-only change has no guard or check and no round, and must merge on its own record
         tips = lane_batch(self, "agent/lane1")
-        host = self.batch_host(tips, [gate_comment(1, 8, tips["agent/lane1"], kind="docs-only", guard="no", rounds=())])
+        host = self.batch_host(tips, [round_check_comment(1, 8, tips["agent/lane1"], kind="docs-only", guard="no", rounds=())])
         self.scope(tips, host)
-        rc, out, _before = self.run_gate(host, "--confirm")
+        rc, out, _before = self.run_round_check(host, "--confirm")
         self.assert_allowed(rc, out, host)
 
     def test_a_lone_pr_whose_guard_change_passed_round_two_is_refused(self):
         # no lane tips: the pull request is its own lane, and it reads its own record
-        comments = [gate_comment(1, 7, self.head("feat"), guard="yes", rounds=("Round 1: reviewer, sonnet, FAIL", "Round 2: reviewer, sonnet, PASS"))]
+        comments = [round_check_comment(1, 7, self.head("feat"), guard="yes", rounds=("Round 1: reviewer, sonnet, FAIL", "Round 2: reviewer, sonnet, PASS"))]
         host = self.batch_host({}, comments)
-        rc, out, before = self.run_gate(host, "--confirm")
+        rc, out, before = self.run_round_check(host, "--confirm")
         self.assert_refused(rc, out, host, before, 7)
         self.assertIn("round 3", out, "the refusal does not say round 3 is owed:\n" + out)
 
     def test_a_lone_pr_whose_guard_change_has_round_three_positive_is_not_refused(self):
         round_three = REVIEW_FAILED_THREE[:2] + ("Round 3: reviewer, opus, PASS",)
-        host = self.batch_host({}, [gate_comment(1, 7, self.head("feat"), guard="yes", rounds=round_three, net="positive")])
-        rc, out, _before = self.run_gate(host, "--confirm")
+        host = self.batch_host({}, [round_check_comment(1, 7, self.head("feat"), guard="yes", rounds=round_three, net="positive")])
+        rc, out, _before = self.run_round_check(host, "--confirm")
         self.assert_allowed(rc, out, host)
 
-    def test_a_lane_with_no_record_is_not_refused_by_this_gate(self):
+    def test_a_lane_with_no_record_is_not_refused_by_this_check(self):
         # decision pr-review-record, Q1: no record is no refusal here
         tips = lane_batch(self, "agent/lane1")
         host = self.batch_host(tips, [])
         self.scope(tips, host)
-        rc, out, _before = self.run_gate(host, "--confirm")
+        rc, out, _before = self.run_round_check(host, "--confirm")
         self.assert_allowed(rc, out, host)
 
     def test_a_record_for_an_older_head_of_the_lane_is_ignored(self):
         tips = lane_batch(self, "agent/lane1")
-        host = self.batch_host(tips, [gate_comment(1, 8, REVIEW_OLD_HEAD, guard="yes", rounds=REVIEW_PASS)])
+        host = self.batch_host(tips, [round_check_comment(1, 8, REVIEW_OLD_HEAD, guard="yes", rounds=REVIEW_PASS)])
         self.scope(tips, host)
-        rc, out, _before = self.run_gate(host, "--confirm")
+        rc, out, _before = self.run_round_check(host, "--confirm")
         self.assert_allowed(rc, out, host)
 
     def test_a_stale_open_record_does_not_block_a_done_record_for_the_tip(self):
         tips = lane_batch(self, "agent/lane1")
         round_three = REVIEW_FAILED_THREE[:2] + ("Round 3: reviewer, opus, PASS",)
-        comments = [gate_comment(1, 8, REVIEW_OLD_HEAD, guard="yes", rounds=REVIEW_PASS),
-                    gate_comment(2, 8, tips["agent/lane1"], guard="yes", rounds=round_three, net="zero")]
+        comments = [round_check_comment(1, 8, REVIEW_OLD_HEAD, guard="yes", rounds=REVIEW_PASS),
+                    round_check_comment(2, 8, tips["agent/lane1"], guard="yes", rounds=round_three, net="zero")]
         host = self.batch_host(tips, comments)
         self.scope(tips, host)
-        rc, out, _before = self.run_gate(host, "--confirm")
+        rc, out, _before = self.run_round_check(host, "--confirm")
         self.assert_allowed(rc, out, host)
 
     def test_the_newest_record_for_the_tip_decides_when_the_tip_has_two(self):
         # an open record, then a done one for the same tip: the newer one decides
         tips = lane_batch(self, "agent/lane1")
         round_three = REVIEW_FAILED_THREE[:2] + ("Round 3: reviewer, opus, PASS",)
-        comments = [gate_comment(1, 8, tips["agent/lane1"], guard="yes", rounds=REVIEW_PASS),
-                    gate_comment(2, 8, tips["agent/lane1"], guard="yes", rounds=round_three, net="positive")]
+        comments = [round_check_comment(1, 8, tips["agent/lane1"], guard="yes", rounds=REVIEW_PASS),
+                    round_check_comment(2, 8, tips["agent/lane1"], guard="yes", rounds=round_three, net="positive")]
         host = self.batch_host(tips, comments)
         self.scope(tips, host)
-        rc, out, _before = self.run_gate(host, "--confirm")
+        rc, out, _before = self.run_round_check(host, "--confirm")
         self.assert_allowed(rc, out, host)
 
     def test_the_tip_record_decides_even_when_a_stale_done_record_is_newer(self):
         # the newest record overall is for an old head and is done; the tip's own record is open, and only that one counts
         tips = lane_batch(self, "agent/lane1")
-        comments = [gate_comment(1, 8, tips["agent/lane1"], guard="yes", rounds=REVIEW_PASS),
-                    gate_comment(2, 8, REVIEW_OLD_HEAD, guard="no", rounds=REVIEW_PASS)]
+        comments = [round_check_comment(1, 8, tips["agent/lane1"], guard="yes", rounds=REVIEW_PASS),
+                    round_check_comment(2, 8, REVIEW_OLD_HEAD, guard="no", rounds=REVIEW_PASS)]
         host = self.batch_host(tips, comments)
         self.scope(tips, host)
-        rc, out, before = self.run_gate(host, "--confirm")
+        rc, out, before = self.run_round_check(host, "--confirm")
         self.assert_refused(rc, out, host, before, 8)
 
     def test_a_lane_at_round_three_with_its_net_value_not_owed_is_refused(self):
         tips = lane_batch(self, "agent/lane1")
         round_three = REVIEW_FAILED_THREE[:2] + ("Round 3: reviewer, opus, PASS",)
-        host = self.batch_host(tips, [gate_comment(1, 8, tips["agent/lane1"], guard="yes", rounds=round_three, net="not owed")])
+        host = self.batch_host(tips, [round_check_comment(1, 8, tips["agent/lane1"], guard="yes", rounds=round_three, net="not owed")])
         self.scope(tips, host)
-        rc, out, before = self.run_gate(host, "--confirm")
+        rc, out, before = self.run_round_check(host, "--confirm")
         self.assert_refused(rc, out, host, before, 8)
 
     def test_a_held_lane_is_refused(self):
         tips = lane_batch(self, "agent/lane1")
-        host = self.batch_host(tips, [gate_comment(1, 8, tips["agent/lane1"], guard="yes", rounds=REVIEW_FAILED_THREE, net="negative")])
+        host = self.batch_host(tips, [round_check_comment(1, 8, tips["agent/lane1"], guard="yes", rounds=REVIEW_FAILED_THREE, net="negative")])
         self.scope(tips, host)
-        rc, out, before = self.run_gate(host, "--confirm")
+        rc, out, before = self.run_round_check(host, "--confirm")
         self.assert_refused(rc, out, host, before, 8)
 
     def test_in_a_batch_of_two_lanes_only_the_lane_that_owes_round_three_is_named(self):
         # full size: two lanes in one batch. The guard lane is refused; the delete-only lane passed its first round and must not be named
         tips = lane_batch(self, "agent/lane1", "agent/lane2")
-        comments = [gate_comment(1, 8, tips["agent/lane1"], guard="yes", rounds=REVIEW_PASS),
-                    gate_comment(2, 9, tips["agent/lane2"], kind="delete-only", guard="yes", rounds=REVIEW_PASS)]
+        comments = [round_check_comment(1, 8, tips["agent/lane1"], guard="yes", rounds=REVIEW_PASS),
+                    round_check_comment(2, 9, tips["agent/lane2"], kind="delete-only", guard="yes", rounds=REVIEW_PASS)]
         host = self.batch_host(tips, comments)
         self.scope(tips, host)
-        rc, out, before = self.run_gate(host, "--confirm")
+        rc, out, before = self.run_round_check(host, "--confirm")
         self.assert_refused(rc, out, host, before, 8)
         self.assertNotRegex(out, r"#9\b", "the refusal names a lane that owes no round 3:\n" + out)
 
-class ReviewGatePreview(ReviewGateEnv):
+class ReviewRoundCheckPreview(ReviewRoundCheckEnv):
     """`merge 7` with no --confirm shows the same refusal as one blocker line, and no blocker line for a lane that owes nothing."""
 
     def test_preview_shows_the_round_three_refusal_as_one_blocker_line(self):
         tips = lane_batch(self, "agent/lane1")
-        host = self.batch_host(tips, [gate_comment(1, 8, tips["agent/lane1"], guard="yes", rounds=REVIEW_PASS)])
+        host = self.batch_host(tips, [round_check_comment(1, 8, tips["agent/lane1"], guard="yes", rounds=REVIEW_PASS)])
         self.scope(tips, host)
-        rc, out, before = self.run_gate(host)
+        rc, out, before = self.run_round_check(host)
         blocked = [l for l in out.splitlines() if l.startswith("BLOCKED")]
         self.assertEqual(len(blocked), 1, "preview does not show one blocker line for the lane:\n" + out)
         self.assertIn("#8", blocked[0], "the blocker line does not name the lane's pull request:\n" + out)
@@ -12963,19 +12963,19 @@ class ReviewGatePreview(ReviewGateEnv):
     def test_preview_shows_no_blocker_line_for_a_lane_whose_round_three_is_done(self):
         tips = lane_batch(self, "agent/lane1")
         round_three = REVIEW_FAILED_THREE[:2] + ("Round 3: reviewer, opus, PASS",)
-        host = self.batch_host(tips, [gate_comment(1, 8, tips["agent/lane1"], guard="yes", rounds=round_three, net="positive")])
+        host = self.batch_host(tips, [round_check_comment(1, 8, tips["agent/lane1"], guard="yes", rounds=round_three, net="positive")])
         self.scope(tips, host)
-        rc, out, _before = self.run_gate(host)
+        rc, out, _before = self.run_round_check(host)
         self.assertEqual([l for l in out.splitlines() if l.startswith("BLOCKED")], [], "preview blocks a lane that is done:\n" + out)
         self.assertEqual(rc, 0, out)
 
-class ReviewGateCost(ReviewGateEnv):
-    """What the third-round gate reads (decision pr-review-record, the cost): the repo's comment list once, and no open pull request. A preview
-    runs the gate alone. A confirm also runs cut_lanes, which reads the open pull requests after the merge, but only with deleteBranch on. The
+class ReviewRoundCheckCost(ReviewRoundCheckEnv):
+    """What the round-three check reads (decision pr-review-record, the cost): the repo's comment list once, and no open pull request. A preview
+    runs the check alone. A confirm also runs cut_lanes, which reads the open pull requests after the merge, but only with deleteBranch on. The
     confirm case keeps its branches, so no open-PR read runs at all."""
 
     def counted(self, host):
-        """Counts the gate's reads on `host`, after scope() has made its own. -> (comment reads, open-PR reads): each gains one entry a call."""
+        """Counts the check's reads on `host`, after scope() has made its own. -> (comment reads, open-PR reads): each gains one entry a call."""
         comments, opens = [], []
         real_comments, real_opens = host.review_comments, host.open_heads
         def review_comments(since):
@@ -12987,9 +12987,9 @@ class ReviewGateCost(ReviewGateEnv):
         host.review_comments, host.open_heads = review_comments, open_heads
         return comments, opens
 
-    def test_a_batch_with_lane_tips_reads_the_comment_list_once_and_the_gate_reads_no_open_prs(self):
+    def test_a_batch_with_lane_tips_reads_the_comment_list_once_and_the_round_check_reads_no_open_prs(self):
         tips = lane_batch(self, "agent/lane1", "agent/lane2")
-        host = self.batch_host(tips, [gate_comment(1, 8, tips["agent/lane1"], guard="no", rounds=REVIEW_PASS)])
+        host = self.batch_host(tips, [round_check_comment(1, 8, tips["agent/lane1"], guard="no", rounds=REVIEW_PASS)])
         self.scope(tips, host)
         comments, opens = self.counted(host)
         rc, out = self.run_merge("7", host=host)
@@ -12998,17 +12998,17 @@ class ReviewGateCost(ReviewGateEnv):
         self.assertEqual(len(opens), 0, f"the open pull requests were read {len(opens)} times, want 0:\n" + out)
 
     def test_a_pull_request_with_no_lane_tips_reads_the_comment_list_once_and_no_open_prs(self):
-        host = self.batch_host({}, [gate_comment(1, 7, self.head("feat"), guard="no", rounds=REVIEW_PASS)])
+        host = self.batch_host({}, [round_check_comment(1, 7, self.head("feat"), guard="no", rounds=REVIEW_PASS)])
         comments, opens = self.counted(host)
         rc, out = self.run_merge("7", host=host)
         self.assertEqual(rc, 0, out)
         self.assertEqual(len(comments), 1, f"the comment list was read {len(comments)} times, want 1:\n" + out)
         self.assertEqual(len(opens), 0, f"the open pull requests were read {len(opens)} times, want 0 with no lane tips:\n" + out)
 
-    def test_a_confirm_that_keeps_its_branches_reads_the_comment_list_once_and_the_gate_reads_no_open_prs(self):
+    def test_a_confirm_that_keeps_its_branches_reads_the_comment_list_once_and_the_round_check_reads_no_open_prs(self):
         put_base_config(self, json.dumps(dict(CONFIG, merge=dict(CONFIG["merge"], deleteBranch=False))))
         tips = lane_batch(self, "agent/lane1", "agent/lane2")
-        host = self.batch_host(tips, [gate_comment(1, 8, tips["agent/lane1"], guard="no", rounds=REVIEW_PASS)])
+        host = self.batch_host(tips, [round_check_comment(1, 8, tips["agent/lane1"], guard="no", rounds=REVIEW_PASS)])
         self.scope(tips, host)
         comments, opens = self.counted(host)
         rc, out = self.run_merge("7", "--confirm", host=host)
