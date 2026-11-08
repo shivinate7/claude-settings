@@ -2579,10 +2579,10 @@ def lint_slot():
         if fd is not None:
             os.close(fd)  # closing the fd frees the lock
 
-# The wait for a high load (step lane-lint-load-timeout). Incident 2026-11-08 08:29 and 09:10 CST: a lint ended "unknown, ci-job did not finish in
-# 1200 s" twice, with a load of 10 to 22 on 4 CPUs from other processes. A lint that holds a slot now waits, before ci_job_run, while the 1-minute load
-# less the lints that run ci-job is at or above the CPU count, so LINT_SECONDS counts the run alone.
-# LOAD_WAIT_SECONDS 1800: 1.5 x LINT_SECONDS, so a load that clears within the window the incident's lints ran in still gets its verdict, and a load that
+# The wait for a high load (step lane-lint-load-timeout). Two lints ended "unknown, ci-job did not finish in 1200 s" with a load of 10 to 22 on
+# 4 CPUs from other processes. A lint that holds a slot waits, before ci_job_run, while the 1-minute load less the lints that run ci-job is at or
+# above the CPU count, so LINT_SECONDS counts the run alone.
+# LOAD_WAIT_SECONDS 1800: 1.5 x LINT_SECONDS, so a load that clears within the window those lints ran in still gets its verdict, and a load that
 # never clears ends in a line, not an open wait. How long a load of 10 to 22 lasts is unmeasured; 1800 is a guess to revise from the first unknown it prints.
 # LOAD_POLL 5 s: the 1-minute load average moves over tens of seconds, so a finer look reads the same number; a look costs the reads below.
 LOAD_WAIT_SECONDS = 1800
