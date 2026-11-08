@@ -643,9 +643,12 @@ PUSHSTACK = os.path.join(ROOT, "pushstack")    # lane/fix cut from origin/lane/b
 # Rule push-main reads the remote a push names (ruling 207 a, judged on its URL). Every push fixture's origin is
 # PUSHREMOTE, a network URL the guard never contacts, so the existing push-main asks keep their meaning.
 # PUSHLOCAL has a local origin (a bare path), PUSHSSH an scp-form origin, and PUSHNOREMOTE no remote at all.
+# PUSHLOCALSTRAY has the same local origin, and its branch `feat` tracks origin/other, so an implied destination
+# on it is a stray push. PUSHLOCAL's `feat` has no upstream.
 PUSHREMOTE = "https://example.invalid/repo.git"
 PUSHSSHURL = "git@github.com:o/r.git"
 PUSHLOCAL = os.path.join(ROOT, "pushlocal")
+PUSHLOCALSTRAY = os.path.join(ROOT, "pushlocalstray")
 PUSHSSH = os.path.join(ROOT, "pushssh")
 PUSHNOREMOTE = os.path.join(ROOT, "pushnoremote")
 # Agent-worktree branch names (rule push-agent-branch). A branch is named by HEAD, so each name has its own
@@ -1850,11 +1853,12 @@ def _build_push():
                                 (PUSHNOHEAD, None, "feat"), (PUSHDETACHED, "main", None),
                                 (PUSHSAMETAG, "main", "main"), (RECROADMAP, "main", "roadmap"),
                                 (RECFORK, "main", "roadmap-fork"),
-                                (PUSHLOCAL, "main", "feat"), (PUSHSSH, "main", "feat"),
-                                (PUSHNOREMOTE, None, "feat")):
+                                (PUSHLOCAL, "main", "feat"), (PUSHLOCALSTRAY, "main", "feat"),
+                                (PUSHSSH, "main", "feat"), (PUSHNOREMOTE, None, "feat")):
         make_repo(where, {"base.txt": "base\n"})
         if head:
-            origin = {PUSHLOCAL: slash(BRANCHREMOTE), PUSHSSH: PUSHSSHURL}.get(where, PUSHREMOTE)
+            origin = {PUSHLOCAL: slash(BRANCHREMOTE), PUSHLOCALSTRAY: slash(BRANCHREMOTE),
+                      PUSHSSH: PUSHSSHURL}.get(where, PUSHREMOTE)
             run_vcs(where, "remote", "add", "origin", origin)
             run_vcs(where, "update-ref", "refs/remotes/origin/" + head, "HEAD")
             run_vcs(where, "symbolic-ref", "refs/remotes/origin/HEAD",
@@ -1868,11 +1872,20 @@ def _build_push():
 
     # Each remote fixture reads back the origin it was given (P7), so a case never judges a remote the build did
     # not set. PUSHNOREMOTE must have no remote at all.
-    for where, want in ((PUSHLOCAL, slash(BRANCHREMOTE)), (PUSHSSH, PUSHSSHURL)):
+    for where, want in ((PUSHLOCAL, slash(BRANCHREMOTE)), (PUSHLOCALSTRAY, slash(BRANCHREMOTE)),
+                        (PUSHSSH, PUSHSSHURL)):
         if run_vcs(where, "config", "--get", "remote.origin.url").stdout.strip() != want:
             sys.exit("fixture setup failed in build_fixtures: %r needs origin %s" % (where, want))
     if run_vcs(PUSHNOREMOTE, "remote").stdout.strip():
         sys.exit("fixture setup failed in build_fixtures: PUSHNOREMOTE must have no remote")
+
+    # PUSHLOCALSTRAY's upstream is set by git (--set-upstream-to), then read back, so a case never judges a
+    # fixture without it.
+    run_vcs(PUSHLOCALSTRAY, "update-ref", "refs/remotes/origin/other", "HEAD")
+    run_vcs(PUSHLOCALSTRAY, "branch", "--set-upstream-to=origin/other", "feat")
+    if run_vcs(PUSHLOCALSTRAY, "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}").stdout.strip() \
+            != "origin/other":
+        sys.exit("fixture setup failed in build_fixtures: PUSHLOCALSTRAY needs upstream origin/other")
 
     # The feat destination holds the remote-tracking refs that the push cost case's forms read: feat for
     # a HEAD or bare push, lane/foo for a refspec push or HEAD:lane/foo. A local lane/foo is the source.
@@ -2342,7 +2355,7 @@ lazy_fixture([BRANCHREMOTE, BRANCHREPO, BRANCHFALLBACKMAIN, BRANCHFALLBACKMASTER
 lazy_fixture([PUSHFEAT, PUSHMAIN, PUSHTRUNK, PUSHTRUNKLOCAL, PUSHNOHEAD, PUSHDETACHED, PUSHSAMETAG, PUSHDANGLING, PUSHNOHEADMAIN,
               PUSHONLYMASTER, PUSHUPSTREAM, PUSHUP, PUSHUPSELF, PUSHNOUP, PUSHMATCH, RECROADMAP, RECFORK,
               PUSHSTRAY, PUSHLANE, PUSHLANEMASTER, PUSHSELF, PUSHMAINUP, PUSHSTACK,
-              PUSHLOCAL, PUSHSSH, PUSHNOREMOTE,
+              PUSHLOCAL, PUSHLOCALSTRAY, PUSHSSH, PUSHNOREMOTE,
               PUSHAGENT, PUSHAGENTWT, PUSHAGENTBARE, PUSHAGENTNOTES, PUSHAGENTMYABC, PUSHAGENTMYHEX,
               PUSHAGENTSHORT, PUSHAGENTEIGHT, PUSHAGENTCFG],
              _build_push)
@@ -7704,6 +7717,26 @@ push_case("main, a remote the repo does not have is silent", "upstream main", "a
 push_case("main, no remote in the repo is silent", "origin main", "allow", cwd=PUSHNOREMOTE, silent=True)
 sh("main, git -C into a repo with no remote is silent, from a repo with a network origin",
    VCS + " -C " + slash(PUSHNOREMOTE) + " push origin main", "allow", cwd=PUSHFEAT, silent=True)
+
+# ASK, rules 206 a, 207 a and push-agent-branch, on a local-path origin. A main refspec there is silent, and the
+# refspec after it still decides. The controls ask with no main refspec ahead: HEAD on PUSHLOCALSTRAY (its branch
+# tracks origin/other) is stray, and the agent name on PUSHLOCAL asks the agent rule.
+push_case("local origin, main then HEAD on a branch tracking another name asks stray", "origin main HEAD", "ask",
+          cwd=PUSHLOCALSTRAY, rule=PUSH_STRAY_RULE)
+push_case("local origin, main then the agent name asks the agent rule", "origin main claude/agent-deadbeef01",
+          "ask", cwd=PUSHLOCAL, rule=PUSH_AGENT_RULE)
+push_case("local origin, HEAD on a branch tracking another name asks stray (control)", "origin HEAD", "ask",
+          cwd=PUSHLOCALSTRAY, rule=PUSH_STRAY_RULE)
+push_case("local origin, the agent name alone asks the agent rule (control)", "origin claude/agent-deadbeef01",
+          "ask", cwd=PUSHLOCAL, rule=PUSH_AGENT_RULE)
+# The same two commands on a network origin still ask push-main: the main refspec decides there.
+push_case("network origin, main then HEAD asks push-main", "origin main HEAD", "ask", rule=PUSH_MAIN_RULE)
+push_case("network origin, main then the agent name asks push-main", "origin main claude/agent-deadbeef01", "ask",
+          rule=PUSH_MAIN_RULE)
+# A `git -c remote.origin.url=` override names the remote's URL for the read, so the local origin is a network one.
+sh("main, a local origin made a network remote by git -c remote.origin.url asks push-main",
+   VCS + " -c remote.origin.url=https://example.invalid/r.git push origin main", "ask", PUSH_MAIN_RULE,
+   cwd=PUSHLOCAL)
 
 # SILENT, the false alarms of both rulings. Each is an allow that prints nothing.
 # Inherited and own upstreams: a lane cut from main or master, and a branch that tracks its own name.
