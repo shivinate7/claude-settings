@@ -11,7 +11,7 @@ The SIGTERM case runs merge in a subprocess through HARNESS, which names the sam
 The stub also logs the PR body it finds in the file that CI_JOB_PR_BODY_FILE names (pr_body), so a case reads what merge handed over.
 Temp files: this run's folder (lint/_test_temp.py), removed at exit.
 """
-import atexit, json, os, shutil, signal, subprocess, sys, tempfile, time, unittest, unittest.mock, uuid
+import ast, atexit, json, os, shutil, signal, subprocess, sys, tempfile, time, unittest, unittest.mock, uuid
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -703,6 +703,30 @@ class ReadyChecks(CiJobStub, tm.RecordsEnv):
         runs = [run for run in self.lint_calls() if "--step" in run["argv"]]
         self.assertEqual(len(runs), 1, "the ready checks ran ci-job %d times, want once: %s" % (len(runs), out))
         self.assertEqual(runs[0]["pr_body"], PR_BODY, "the draft step's ready checks did not get the PR body")
+
+
+class BodyFileName(unittest.TestCase):
+    """merge.py's name for the PR body file is the one bin/ci-job reads from its env. Read with ast, so a comment or a message does not count."""
+
+    @staticmethod
+    def env_names_read(source):
+        """-> the names source reads with os.environ.get("NAME") or os.environ["NAME"]."""
+        names = set()
+        for node in ast.walk(ast.parse(source)):
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr == "get" and node.args:
+                target, key = node.func.value, node.args[0]
+            elif isinstance(node, ast.Subscript):
+                target, key = node.value, node.slice
+            else:
+                continue
+            if isinstance(target, ast.Attribute) and target.attr == "environ" and isinstance(key, ast.Constant) and isinstance(key.value, str):
+                names.add(key.value)
+        return names
+
+    def test_bin_ci_job_reads_the_env_name_merge_writes(self):
+        with open(merge.CI_JOB, encoding="utf-8") as f:
+            reads = self.env_names_read(f.read())
+        self.assertIn(merge.BODY_FILE_VAR, reads, "bin/ci-job does not read %s from its env; it reads %s" % (merge.BODY_FILE_VAR, ", ".join(sorted(reads))))
 
 
 class RunFolderSweep(unittest.TestCase):
