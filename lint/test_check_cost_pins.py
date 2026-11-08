@@ -339,6 +339,62 @@ class CostPinTests(unittest.TestCase):
         self.assert_found([row("numbered.md", text, "state/o%d.json" % n, "state/o%d.json" % n)
                            for n in (1, 2, 3, 4)])
 
+    def test_test_names_narrow_swift_and_spec_files_are_pin_candidates(self):
+        # ios/FooTests.swift and web/foo.spec.ts pin the tokens in their sentence, and neither is a file token itself.
+        text = self.decide("narrow.md",
+                           "- **Cost:** Reads `state/s1.json`; `web/foo.spec.ts` proves it.\n"
+                           "- **Cost:** Reads `state/s2.json`; `ios/FooTests.swift` proves it.\n"
+                           "- **Cost:** Reads `state/s3.json`; `web/foo.test.js` proves it.\n"
+                           "- **Cost:** Reads `state/s4.json`; `web/foo.test.mjs` proves it.\n"
+                           "- **Cost:** Each run names `ios/FooTests.swift` and `web/foo.spec.ts` once. "
+                           "It also reads `state/real.json` once.\n")
+        self.put("web/foo.spec.ts", "// spec cases\ns1.json is read\n")
+        self.put("ios/FooTests.swift", "// swift cases\ns2.json is read\n")
+        self.put("web/foo.test.js", "// js cases\ns3.json is read\n")
+        self.put("web/foo.test.mjs", "// mjs cases\ns4.json is read\n")
+        self.assert_found([row("narrow.md", text, "state/real.json", "state/real.json")])
+
+    def test_mid_line_cost_sentence_starts_a_paragraph(self):
+        # A sentence that begins Cost: after an earlier sentence on its line starts a Cost paragraph.
+        # The Cost: field inside a sentence starts none.
+        text = self.decide("mid-line.md",
+                           "Landed 2026-10-30. Cost: reads `state/mx.json` once.\n"
+                           "\n"
+                           "Landed earlier. The Cost: field reads `state/fy.json` once.\n")
+        self.assert_found([row("mid-line.md", text, "state/mx.json", "state/mx.json")])
+
+    def test_eg_and_ie_do_not_end_a_sentence(self):
+        # e.g. and i.e. are abbreviations: each sentence runs on to its real stop.
+        self.decide("abbrev.md",
+                    "- **Cost:** It reads e.g. `state/e1.json` once; not pinned.\n"
+                    "- **Cost:** Not pinned, e.g. `state/e2.json` once.\n"
+                    "- **Cost:** Reads i.e. `state/e3.json` once; unmeasured.\n"
+                    "- **Cost:** Unmeasured, i.e. `state/e4.json` once.\n")
+        self.assert_clean()
+
+    def test_double_backtick_span_is_one_code_span(self):
+        text = self.decide("double.md",
+                           "- **Cost:** It reads ``state/x.json`` and `state/y.json` once.\n"
+                           "- **Cost:** It reads ``state/w.json`` once.\n")
+        self.assert_found([row("double.md", text, "state/x.json", "state/x.json"),
+                           row("double.md", text, "state/y.json", "state/y.json"),
+                           row("double.md", text, "state/w.json", "state/w.json")])
+
+    def test_hash_line_without_a_space_does_not_end_a_cost_paragraph_or_section(self):
+        # A heading is one to six hashes and then a space. #1850 and a seven-hash line are text.
+        text = self.decide("hash.md",
+                           "- **Cost:** It reads `state/h1.json` once.\n"
+                           "#1850 is the issue that prompted it, and it reads `state/h2.json` once.\n"
+                           "\n"
+                           "- **Cost:** It reads `state/h3.json` once.\n"
+                           "####### seven hashes is not a heading, and it reads `state/h4.json` once.\n"
+                           "\n"
+                           "## Cost\n"
+                           "\n"
+                           "It reads `state/h5.json` once.\n"
+                           "#1851 wraps here, and it reads `state/h6.json` once.\n")
+        self.assert_found([row("hash.md", text, "state/h%d.json" % n, "state/h%d.json" % n) for n in range(1, 7)])
+
 
 class CorpusTests(unittest.TestCase):
     """The corpus case: this repo's own records, with no --root. It may stay red until the records that name
