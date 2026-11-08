@@ -688,8 +688,13 @@ def copy_guard_family(dest):
     shutil.copy(os.path.join(source, "git_reads.py"), dest)
 
 
-def write(path, text):
+def write(path, text, lf_bytes=False):
     os.makedirs(os.path.dirname(path), exist_ok=True)
+    if lf_bytes:
+        # Bytes with LF: text mode on Windows writes CR LF, and a fixture must hold the same bytes on every platform.
+        with open(path, "wb") as handle:
+            handle.write(text.encode("utf-8"))
+        return
     with open(path, "w", encoding="utf-8") as handle:
         handle.write(text)
 
@@ -1718,16 +1723,21 @@ def _build_branch():
     # design branch that was never pushed is already refused as the only copy.
     design = layout.layout()["kinds"]["design"]["path"].strip("/")
 
-    def design_branch(name, rel, text):
+    def design_branch(name, rel, text, archive_only=False):
         run_vcs(BRANCHREPO, "checkout", "-q", "-b", name)
-        write(os.path.join(BRANCHREPO, *rel.split("/")), text)
+        write(os.path.join(BRANCHREPO, *rel.split("/")), text, lf_bytes=archive_only)
         run_vcs(BRANCHREPO, "add", rel)
         run_vcs(BRANCHREPO, *IDENT, "commit", "-q", "-m", name + "'s design file")
-        pushed = run_vcs(BRANCHREPO, "push", "-q", "origin", name)
+        # archive_only pushes the tip under archive/<name> alone, so no origin branch holds it.
+        target = name + ":refs/heads/archive/" + name if archive_only else name
+        pushed = run_vcs(BRANCHREPO, "push", "-q", "origin", target)
         if pushed.returncode != 0:
             sys.exit("fixture setup failed in build_fixtures: pushing %s failed. stderr: %s"
                      % (name, pushed.stderr.strip()))
         run_vcs(BRANCHREPO, "checkout", "-q", "main")
+        if archive_only:
+            # The local branch goes too, so the archive is the only ref, local or origin, holding the tip.
+            run_vcs(BRANCHREPO, "branch", "-q", "-D", name)
 
     picked = design + "/picked.html"
     landed = design + "/landed.html"
@@ -1848,10 +1858,16 @@ def _build_branch():
         sys.exit("fixture setup failed in build_fixtures: pushing design-forked failed. stderr: %s"
                  % forked_push.stderr.strip())
     run_vcs(BRANCHREPO, "checkout", "-q", "main")
+    # design-main-held is cut at the same fork, so main's later commit adds its mockup with the same bytes.
+    # Its archive is the only ref that holds the tip, and main holds the file: the control for main's copy.
+    main_held = design + "/main-held.html"
+    design_branch("design-main-held", main_held, "the same bytes on main later\n", archive_only=True)
     write(os.path.join(BRANCHREPO, *untouched.split("/")), "main edits it after the fork\n")
     write(os.path.join(BRANCHREPO, *forked_own.split("/")), "the same bytes on main later\n")
-    run_vcs(BRANCHREPO, "add", untouched, forked_own)
-    run_vcs(BRANCHREPO, *IDENT, "commit", "-q", "-m", "main edits untouched.html and adds forked-own.html")
+    write(os.path.join(BRANCHREPO, *main_held.split("/")), "the same bytes on main later\n", lf_bytes=True)
+    run_vcs(BRANCHREPO, "add", untouched, forked_own, main_held)
+    run_vcs(BRANCHREPO, *IDENT, "commit", "-q", "-m",
+            "main edits untouched.html and adds forked-own.html and main-held.html")
     # unmerged-work is made after main's last move. Then origin/main is an ancestor of it, so a
     # swapped ancestor test reads it as merged and allows the only copy; the rule must still refuse.
     run_vcs(BRANCHREPO, "checkout", "-q", "-b", "unmerged-work")
@@ -2049,6 +2065,47 @@ def _build_branch():
                 rev("origin/archive/design-latin-archived") != rev("design-latin-archived"):
             sys.exit("fixture setup failed in build_fixtures: archive/design-latin-archived is not the tip of "
                      "design-latin-archived")
+
+    # design-sole's tip is held by archive/design-sole alone, so the archive is the only copy of its mockup.
+    # design-twin's tip is held by origin/design-twin as well as by its archive: the other-holder control.
+    sole = design + "/sole.html"
+    design_branch("design-sole", sole, "the only copy, held by its archive alone\n", archive_only=True)
+    twin = design + "/twin.html"
+    design_branch("design-twin", twin, "held by a branch and by its archive\n")
+    twin_archive = run_vcs(BRANCHREPO, "push", "-q", "origin", "design-twin:refs/heads/archive/design-twin")
+    if twin_archive.returncode != 0:
+        sys.exit("fixture setup failed in build_fixtures: archiving design-twin failed. stderr: %s"
+                 % twin_archive.stderr.strip())
+
+    # The archive-only scope, read with git before any case relies on it. A tip's holders are every ref
+    # that contains it, local and remote-tracking alike, read with no pattern.
+    def holders(ref):
+        return set(run_vcs(BRANCHREPO, "for-each-ref", "--contains", ref,
+                           "--format=%(refname)").stdout.split())
+
+    if holders("origin/archive/design-sole") != {"refs/remotes/origin/archive/design-sole"}:
+        sys.exit("fixture setup failed in build_fixtures: a ref other than archive/design-sole holds "
+                 "design-sole's tip, so the archive would not be the only copy")
+    if run_vcs(BRANCHREPO, "ls-remote", "origin", "refs/heads/design-sole").stdout.strip():
+        sys.exit("fixture setup failed in build_fixtures: origin holds a branch named design-sole")
+    if listed("origin/main", sole):
+        sys.exit("fixture setup failed in build_fixtures: origin/main holds design-sole's mockup, so the "
+                 "file would not be a design file main lacks")
+    if "refs/remotes/origin/design-twin" not in holders("origin/archive/design-twin"):
+        sys.exit("fixture setup failed in build_fixtures: origin/design-twin does not hold design-twin's tip")
+    if not listed("origin/main", main_held):
+        sys.exit("fixture setup failed in build_fixtures: origin/main lacks design-main-held's mockup, so "
+                 "main would not hold the file")
+    if rev("origin/main:" + main_held) != rev("origin/archive/design-main-held:" + main_held):
+        sys.exit("fixture setup failed in build_fixtures: origin/main's main-held.html is not the bytes "
+                 "design-main-held holds")
+    if run_vcs(BRANCHREPO, "merge-base", "--is-ancestor", "origin/archive/design-main-held",
+               "origin/main").returncode == 0:
+        sys.exit("fixture setup failed in build_fixtures: design-main-held's tip is an ancestor of "
+                 "origin/main, so the file check would not be reached")
+    if holders("origin/archive/design-main-held") != {"refs/remotes/origin/archive/design-main-held"}:
+        sys.exit("fixture setup failed in build_fixtures: a ref other than archive/design-main-held holds "
+                 "its tip, so main's copy would not be the only other holder")
 
     # v1.0 is a local tag and the name of no branch: no local or origin branch holds it, so the design
     # read finds no tip for the name. A tag is not a branch, so its delete keeps main's verdict.
@@ -3732,6 +3789,16 @@ else:
               NO_LATIN_NAME)
     skip_case("push: a --delete of a design branch whose only mockup has a Latin-1 name, with an archive holding "
               "its tip, allows", NO_LATIN_NAME)
+# AN ARCHIVE IS NOT ITS OWN HOLDER. archive/design-sole is the only ref, local or origin, that holds its mockup's
+# tip. Deleting it removes the only copy, so the archive rule refuses it as it refuses a plain design branch.
+# The controls allow: another origin branch holds the same tip, or main already holds the file.
+sh("push: a --delete of an archive branch that is the only copy of a design file, with no other holder, denies",
+   VCS + " push origin --delete archive/design-sole", "deny", ARCHIVE_RULE, cwd=BRANCHREPO,
+   carries="archive/", lacks=("design-sole",))
+sh("push: a --delete of an archive branch whose tip another origin branch also holds allows",
+   VCS + " push origin --delete archive/design-twin", "allow", cwd=BRANCHREPO)
+sh("push: a --delete of an archive branch whose design file main already holds, with no other holder, allows",
+   VCS + " push origin --delete archive/design-main-held", "allow", cwd=BRANCHREPO)
 # A TAG IS NOT A BRANCH. v1.0 is a local tag and no branch of that name exists, so no tip resolves for
 # it. The design check judges origin's branches only, and a name that is only a tag keeps main's verdict,
 # which allows. Its control is the same no-tip read with no tag of that name: that still asks.
