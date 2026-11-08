@@ -4708,6 +4708,10 @@ class PendingRefusalTests(unittest.TestCase):
 MG_RULE = "building-mistake-names-its-guard"
 MG_DONE = "> **Done** OTHER read the audit"
 MG_INBOX = "I broke my feedback inbox: a sed -i deleted its closing fence, not its last item."
+# The incident's Deviations text. It admits a mistake by the builders, not by "I", so only its guard line is read.
+MG_INCIDENT = ("The builders who merged main did not run the dropped-lines check, so lane-lint failed twice. "
+               "Each time a builder added an empty commit with a `Drops-lines` trailer that marks the dropped "
+               "lines as intended.")
 
 
 def mg_report(deviations, done=MG_DONE, nxt="> **Next** none"):
@@ -4930,6 +4934,54 @@ class MistakeNamesGuardTests(unittest.TestCase):
 
     def test_mg_red_forgot_the_check_before_when_clause_blocks(self):
         self.assert_blocked(mg_report("I forgot the check when the lane was open."))
+
+    # A guard line labels its guard (Guard: or guard —). Between the label and the end of its line it must name a PR
+    # or commit ref, step:<slug> or a debt. The check reads it with or without an admission, in any section.
+    # Red: a guard line with no ref, or a debt that a negator clears, blocks.
+    def test_mg_red_guard_line_incident_habit_blocks(self):
+        self.assert_blocked(mg_report(
+            MG_INCIDENT + " Guard: future merge briefs run `lint/check_silent_undo.py` before the push. "
+            "This is only a brief habit for now, with no step queued yet."))
+
+    def test_mg_red_guard_line_remember_blocks(self):
+        self.assert_blocked(mg_report("Guard: I will remember to run the check before the push."))
+
+    def test_mg_red_guard_line_in_next_blocks(self):
+        self.assert_blocked(mg_report("none", nxt="> **Next** guard: briefs now say to run the check"))
+
+    def test_mg_red_guard_line_negated_debt_blocks(self):
+        self.assert_blocked(mg_report(MG_INBOX + " Guard: briefs will run the check; a debt is not needed."))
+
+    def test_mg_red_guard_line_no_debt_filed_blocks(self):
+        self.assert_blocked(mg_report(MG_INBOX + " No debt was filed."))
+
+    def test_mg_red_guard_line_ref_on_another_line_blocks(self):
+        # The step ref sits on a bullet below the label, so it is not between the label and the end of its line.
+        self.assert_blocked("%s\n> **Deviations** Guard: see the note.\n> - step:x\n> **Next** none" % MG_DONE)
+
+    def test_mg_red_guard_line_lone_quote_blocks(self):
+        # An opening quote with no close opens no quoted span, so the guard line after it is still read.
+        self.assert_blocked(mg_report("Owner said 'no. Guard: see the note."))
+
+    # Green: a guard line that names its ref or debt passes. So does a guard word that is not a label, and a guard
+    # line that is only quoted or fenced.
+    def test_mg_green_guard_line_incident_fixed_form_passes(self):
+        self.assert_allowed(mg_report(MG_INCIDENT + " Guard: step:merge-main-silent-undo-precheck."))
+
+    def test_mg_green_guard_line_pr_ref_passes(self):
+        self.assert_allowed(mg_report("Guard — the push guard refuses it (#2077)."))
+
+    def test_mg_green_guard_line_commit_ref_passes(self):
+        self.assert_allowed(mg_report("Guard: commit 3c2d1d97f"))
+
+    def test_mg_green_guard_line_debt_passes(self):
+        self.assert_allowed(mg_report(MG_INBOX + " Guard: a debt records it."))
+
+    def test_mg_green_guard_line_done_filename_passes(self):
+        self.assert_allowed(mg_report("none", done="> **Done** BUILT guard_merge.py refuses the push (#123)"))
+
+    def test_mg_green_guard_line_backticked_passes(self):
+        self.assert_allowed(mg_report("The brief quoted `Guard: run it later` from the lane."))
 
 
 if __name__ == "__main__":
