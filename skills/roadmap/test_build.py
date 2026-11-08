@@ -2320,6 +2320,19 @@ class SingleBranchOrigin(Fixture):
         self.assertNotIn(code, (0, None), "the build exited 0 though origin could not be asked:\n" + out)
         self.assertFalse(self.out.exists(), "a block was written though origin could not be asked")
 
+    def test_a_git_that_cannot_read_origin_exits_nonzero_and_writes_no_block(self):
+        # Only "No such remote" (git exit 2) means there is no origin. Any other failure to read the remote is not
+        # "no origin": a block baked then would say the repo has no roadmap.
+        _, clone = self.clone_origin("unreadable", "main")
+        self.assert_single_branch(clone)
+        config = clone / ".git" / "config"
+        config.write_text(config.read_text(encoding="utf-8") + "not a config line\n", encoding="utf-8")
+        probe = subprocess.run(["git", "-C", str(clone), "remote", "get-url", "origin"], capture_output=True, text=True)
+        self.assertNotIn(probe.returncode, (0, 2), "git still reads origin, so this is not a failed read: " + probe.stderr)
+        code, out = run_build("--repo", str(clone), "--block", "--out", str(self.out))
+        self.assertNotIn(code, (0, None), "the build exited 0 though git could not read origin, so the block says no roadmap:\n" + out)
+        self.assertFalse(self.out.exists(), "a block was written though git could not read origin")
+
 
 class MockupFiles(UpkeepFixture):
     """The mockup check of the build. Only open steps are judged. A step's note, why or ask that cites an item by its
