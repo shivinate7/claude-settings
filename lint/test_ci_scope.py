@@ -371,6 +371,26 @@ class Scope(unittest.TestCase):
                 self.assertEqual(self.true_set(run([p], existing=[p])), {"code", "shoot"})
         self.assertFlags(run(["lint/test_verdict.py"], existing=["lint/test_verdict.py"]), want_false=["shoot"])
 
+    # The waiting page export suite (skills/waiting-page/test_export_page.py) runs in checks-shoot, which runs only on `shoot`.
+    # It reads these four paths: hooks/question_form.py and hooks/_nowindow.py (through page_check.py), lint/_test_temp.py
+    # (its run folder), and SKILL.md (the steps it reads). Named failure: a PR that changes only one of them leaves `shoot`
+    # off, so the suite is skipped.
+    def test_waiting_page_export_suite_paths_turn_on_shoot(self):
+        for p in ("hooks/question_form.py", "hooks/_nowindow.py", "lint/_test_temp.py", "skills/waiting-page/SKILL.md"):
+            with self.subTest(path=p):
+                self.assertFlags(run([p], existing=[p]), want_true=["shoot"])
+
+    # Control: the same paths keep the flags they set today, and a sibling in the same arm keeps `shoot` off.
+    # Named failure: a fix that moves a path into a new arm, or widens an arm, drops a flag or turns `shoot` on for a sibling.
+    def test_waiting_page_export_paths_keep_their_flags_and_their_siblings_keep_shoot_off(self):
+        for p, flags in (("hooks/question_form.py", ["code", "guard"]), ("hooks/_nowindow.py", ["code", "guard"]),
+                         ("lint/_test_temp.py", ["code"])):
+            with self.subTest(path=p):
+                self.assertFlags(run([p], existing=[p]), want_true=flags)
+        for p in ("hooks/guard.py", "hooks/config_watch.py"):
+            with self.subTest(path=p):
+                self.assertFlags(run([p], existing=[p]), want_false=["shoot"])
+
     # checks-guard and checks-shoot both install actions/playwright-setup, and checks-guard gates on checks_guard
     # alone (checks.yml). An edit to the action must set checks_guard directly, with `shoot` for checks-shoot.
     # Named failure: the action arm sets code and shoot only, so checks-guard skips its install and guard suite.
