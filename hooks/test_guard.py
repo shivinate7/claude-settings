@@ -13848,15 +13848,24 @@ for _name, _command in (
 ):
     sh("builder-test: shell write, %s, is refused" % _name, _command, "deny", rule=BT,
        carries=("test-author",), **DR)
-# Pins, each passing on 1d95bc71b. A `!` or `-not` inverts `-name`, so a find of hooks that holds one
-# reads test_a.py. Each pin is refused, and each mutant that drops the inverter goes red on it.
+# A `!` or `-not` inverts `-name`, so a find of hooks with one reads test_a.py and is refused. A walk that
+# ignored the inverter would read only guard.py and be allowed, which turns each pin red.
 for _name, _command in (
     ("find hooks ! -name 'guard*.py', sed -i", "find hooks ! -name 'guard*.py' | xargs sed -i s/a/b/"),
     ("find hooks -not -name 'guard*.py', sed -i", "find hooks -not -name 'guard*.py' | xargs sed -i s/a/b/"),
 ):
     sh("builder-test: shell write, %s, is refused" % _name, _command, "deny", rule=BT,
        carries=("test-author",), **DR)
-# Pins, each passing on 1d95bc71b. docs holds gen.py and no test, so each walk of it reads product code only.
+# A `!`, `-not` or `--exclude` filter that is read keeps the walk off test_a.py: each case below leaves guard.py,
+# which holds no test, so each is allowed. A walk that ignores the filter counts test_a.py and refuses.
+for _name, _command in (
+    ("find hooks for *.py, -not -name 'test_*', sed -i", "find hooks -name '*.py' -not -name 'test_*' | xargs sed -i s/a/b/"),
+    ("find hooks for *.py, ! -name 'test_*', sed -i", "find hooks -name '*.py' ! -name 'test_*' | xargs sed -i s/a/b/"),
+    ("grep -rl over hooks, --include=*.py and --exclude=test_*, sed -i",
+     "grep -rl old hooks --include='*.py' --exclude='test_*' | xargs sed -i s/a/b/"),
+):
+    sh("builder-test: shell write, %s, is allowed" % _name, _command, "allow", **DR)
+# docs holds gen.py and no test, so each walk of it reads product code only and is allowed.
 DOCS_ABS = slash(os.path.join(DOTROOT, "docs"))
 for _name, _command in (
     ("grep -rl over a brace list of docs twice, sed -i", "grep -rl old {docs,docs} | xargs sed -i s/a/b/"),
