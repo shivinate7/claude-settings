@@ -12294,9 +12294,97 @@ class ReviewFixRules(unittest.TestCase):
         self.assertIn("fix check", why, f"the why does not name the fix check: {why!r}")
         self.assertNotIn("round 1 passed", why, f"the why reads as a passed round: {why!r}")
 
-class ReviewEnv(Env):
+# The stub ci-job: one home (building-one-home-per-capability). merge/test_lane_lint.py runs it for the lane lint, and ReviewEnv runs it by
+# default, so no review-record case reaches the real bin/ci-job. Each run logs its argv, cwd, head, detached flag and the env it saw.
+PASSING = [("PASS", "record slugs"), ("PASS", "ste lint")]
+FAILING = [("PASS", "record slugs"), ("FAIL", "comment narration")]
+UNKNOWN = [("PASS", "record slugs"), ("unknown", "shellcheck")]
+
+STUB = '''import json, os, subprocess, sys, time
+LOG, STEPS, RC, STEP_LOG, SLEEP, PARENT = __LOG__, __STEPS__, __RC__, __STEP_LOG__, __SLEEP__, os.getppid()
+def git(*args):
+    return subprocess.run(["git", *args], capture_output=True, text=True).stdout.strip()
+detached = subprocess.run(["git", "symbolic-ref", "-q", "HEAD"], capture_output=True).returncode != 0
+with open(LOG, "a", encoding="utf-8") as f:
+    print(json.dumps({"argv": sys.argv[1:], "cwd": os.getcwd(), "head": git("rev-parse", "HEAD"), "detached": detached,
+                      "env": {name: os.environ.get(name) for name in ("HOOK_CATALOG_ROOT", "LINT_STUB_SENTINEL")}}), file=f)
+if "--plan" in sys.argv:
+    for state, name in STEPS:
+        print("would run " + name)
+    sys.exit(0)
+end = time.time() + SLEEP  # a lint that runs long: it ends after SLEEP s, or at once when the run that started it is gone
+while time.time() < end and os.getppid() == PARENT:
+    time.sleep(0.05)
+lines = ["%-15s %s: stub step" % (state, name) for state, name in STEPS]
+print("\\n".join(lines))
+if RC == 1:
+    with open(STEP_LOG, "w", encoding="utf-8") as f:
+        f.write("\\n".join(lines) + "\\n")
+    print("log=" + STEP_LOG)  # the last line: the refusal reads it as the failing run's log
+sys.exit(RC)
+'''
+
+
+class CiJobStub:
+    """The stub ci-job, for a class with self.t. Its setUp calls init_stub(). use_ci_job points merge.CI_JOB at a stub that prints
+    `steps` and exits `rc`; lint_calls reads back every run the stub logged, never a plan."""
+
+    def init_stub(self):
+        self.log = os.path.join(self.t, "ci-calls.jsonl")
+        self.stub = os.path.join(self.t, "ci-job-stub.py")
+        self.step_log = os.path.join(self.t, "ci-job-step.log")
+
+    def write_stub(self, steps, rc, sleep=0):
+        """Write the stub ci-job: it prints `steps` ((state, step name) pairs), exits with `rc`, and runs `sleep` s first when it is set."""
+        text = STUB.replace("__STEP_LOG__", repr(self.step_log)).replace("__LOG__", repr(self.log))
+        put(self.stub, text.replace("__STEPS__", repr(steps)).replace("__RC__", repr(rc)).replace("__SLEEP__", repr(sleep)))
+        return self.stub
+
+    def use_ci_job(self, steps, rc, sleep=0):
+        """merge.CI_JOB becomes a stub that prints `steps` ((state, step name) pairs) and exits with `rc`, after `sleep` s when it is set."""
+        self.write_stub(steps, rc, sleep)
+        patch = unittest.mock.patch.object(merge, "CI_JOB", self.stub)
+        patch.start()
+        self.addCleanup(patch.stop)
+
+    def lint_calls(self):
+        """The stub's calls that ran the lint, not the plan."""
+        if not os.path.exists(self.log):
+            return []
+        with open(self.log, encoding="utf-8") as f:
+            calls = [json.loads(line) for line in f if line.strip()]
+        return [c for c in calls if "--plan" not in c["argv"]]
+
+    def clear_lint_log(self):
+        """Forget the runs of an earlier call, so the next assertion counts only its own."""
+        if os.path.exists(self.log):
+            os.remove(self.log)
+
+    def assert_one_lint_run(self, base, head, text=""):
+        """The lint ran once, as `checks --lint --base origin/<base>`, in a detached tree at `head`, and that tree is gone afterwards.
+        -> the run. For a class that is an Env: it reads self.co and self.worktrees(). `text` is the run's output, for the message."""
+        runs = self.lint_calls()
+        self.assertEqual(len(runs), 1, "the lint ran %d times, want once: %s" % (len(runs), text))
+        run = runs[0]
+        self.assertEqual(run["argv"], ["checks", "--lint", "--base", "origin/" + base])
+        self.assertEqual(run["head"], head)
+        self.assertTrue(run["detached"], "the lint ran on a branch, not a detached tree")
+        self.assertNotEqual(run["cwd"], os.path.realpath(self.co), "the lint ran in the lane checkout")
+        self.assertFalse(os.path.exists(run["cwd"]), "the lint tree is still on disk")
+        self.assertFalse(tree_listed(self.co, run["cwd"]), "git still lists the lint tree")
+        self.assertEqual(self.worktrees(), 1)
+        return run
+
+
+class ReviewEnv(CiJobStub, Env):
     """The review-record cases' one home for running merge: a run that returns (rc, stdout, stderr) and reads a usage error's SystemExit as
-    its code, and the check that a usage error came from a parser that knows the flag. No test lives here."""
+    its code, and the check that a usage error came from a parser that knows the flag. No test lives here. The lint that the record runs
+    is a stub that passes by default, so no case here runs the real bin/ci-job; a case that needs another result replaces it with use_ci_job."""
+
+    def setUp(self):
+        super().setUp()
+        self.init_stub()
+        self.use_ci_job(PASSING, 0)
 
     def flags(self, *extra):
         """The review flags, with --head set to the live head of the feature branch, then `extra`."""
