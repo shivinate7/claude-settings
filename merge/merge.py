@@ -3555,7 +3555,7 @@ def main(argv, host=None, lock=None):
                     if found["behind_by"]:
                         problem = f"the fix base {a.fix_check[0][:9]} is {'behind' if not found['ahead_by'] else 'diverged from'} the live head {info['head'][:9]}: it must be an ancestor of it"
                 if not problem and last["fix"] and not a.fix_base_record and max((i for i, *_ in last["rounds"]), default=0) >= REVIEW_LAST_ROUND \
-                        and a.net_value != last["net"]:  # a passing fix keeps the net value round 3 gave (decision hold-unsafe-after-round-3); a chain may not relaunder it
+                        and a.net_value != last["net"]:  # a passing fix keeps the net value the final round gave (decision hold-unsafe-after-round-3); a chain may not relaunder it
                     problem = f"the newest earlier review record is at round {REVIEW_LAST_ROUND} with Net value {last['net']}, and a chained fix check keeps it, so --net-value may not be {a.net_value}"
                 if problem:
                     print(f"merge: --fix-check: {problem}. The reviewed head must be the Head of the newest earlier review record, or differ from it only by record or notes files. " + REVIEW_CITE, file=sys.stderr)
