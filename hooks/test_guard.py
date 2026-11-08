@@ -8712,6 +8712,67 @@ sh("env: heredoc-r3: an unquoted body that runs ls in backticks and names a forc
    "cat > /tmp/n.md <<EOF\nrun `ls` then git push --force later\nEOF", "allow", cwd=NOGIT)
 
 
+# ---- flag-false-alarm: env-file forms that read no file's contents, and the controls. Decision env-file-stays-unread.
+# Each allow row reads no file's contents. The word after a boolean flag is a pattern, a glob that
+# excludes the name reads nothing, a jq or yq word is a key, a folder named with the prefix is only
+# made or entered, and a file type after rg -T names no file. Main refuses each allow row except the
+# rg -T one, which main allows.
+# Each deny row is refused by this guard: the name is a path, a glob that includes it, a loader or
+# in-place write of it, or a folder that a commit or a printer reads. jq, gojq and yq read -C as a
+# colour switch, so the word after it is the program or a file, never a value.
+FLAG_FALSE_ALARM_ALLOW = (
+    "ag -f " + ENV + " src",
+    "ack -f " + ENV,
+    "grep -r --exclude=" + ENV + " foo .",
+    "grep -r --exclude " + ENV + " foo .",
+    "rg -t py " + ENV,
+    "mkdir " + ENV + "s",
+    "cd " + ENV + "s",
+    "jq " + ENV + "ironment f.json",
+    "jq " + ENV + "From f.json",
+    "jq " + ENV + " f.json",
+    "yq " + ENV + "s f.yaml",
+    "yq e " + ENV + "s f.yaml",
+    "jq -C " + ENV + "s f.json",
+    "jq -L dir " + ENV + " f.yaml",
+    "rg -T " + ENV + " K",
+)
+FLAG_FALSE_ALARM_REFUSE = (
+    "cat " + ENV,
+    "jq . " + ENV,
+    "grep x " + ENV,
+    "grep --include=" + ENV + " -r K .",
+    "rg -g " + ENV + " K",
+    "jq --from-file " + ENV,
+    "jq -f " + ENV,
+    "jq --rawfile x " + ENV + " -n .",
+    "ag -f K " + ENV,
+    "ag -t K " + ENV,
+    "rg -tpy K " + ENV,
+    "yq -i .x=1 " + ENV,
+    "yq " + ENV,
+    "yq e " + ENV,
+    "yq -i " + ENV,
+    "yq e -i " + ENV,
+    "yq -i e " + ENV,
+    "jq -L " + ENV + " .",
+    VCS + " add " + ENV + "s",
+    "cat " + ENV + "s",
+    "jq -C . " + ENV + " f.json",
+    "gojq -C . " + ENV + " f.json",
+    "yq -C . " + ENV + " f.yaml",
+    "jq -rC .k " + ENV + " f.json",
+    "jq -C -f " + ENV + " .",
+    "gojq . " + ENV,
+    "yq eval .x " + ENV,
+    "grep --exclude-from " + ENV + " foo .",
+)
+for _cmd in FLAG_FALSE_ALARM_ALLOW:
+    sh("env: flag-false-alarm: allowed, " + _cmd, _cmd, "allow", cwd=NOGIT)
+for _cmd in FLAG_FALSE_ALARM_REFUSE:
+    sh("env: flag-false-alarm: still refused, " + _cmd, _cmd, "deny", "env-file", cwd=NOGIT)
+
+
 def incident_write_strip_case():
     """strip_heredoc_bodies keeps no body line of the incident cat write.
 
