@@ -83,10 +83,13 @@ def sent(target, message, tool_id):
 
 
 def transcript(name, items):
-    """The JSONL transcript of `items` (a record, or a list of them), in this run's folder. Returns its path."""
+    """The JSONL transcript of `items` (one record, a list of them, or a list holding lists), in this run's folder.
+    Returns its path. A bare record is one item: iterating it would walk its keys, so it is wrapped first."""
     folder = os.path.join(RUN_FOLDER, "pick")
     os.makedirs(folder, exist_ok=True)
     path = os.path.join(folder, name + ".jsonl")
+    if isinstance(items, dict):
+        items = [items]
     with open(path, "w", encoding="utf-8") as f:
         for item in items:
             for rec in (item if isinstance(item, list) else [item]):
@@ -225,6 +228,35 @@ def case_newest_frame_decides_passes():
     check(case, got is None, "asked: got %r" % (got,))
 
 
+def case_unreadable_transcript_on_trigger_b_passes():
+    # The inbound trigger cannot be read, so it is unknown: the reply passes, with one stderr line.
+    case = "B: an unreadable transcript on trigger B passes"
+    fn = pick_fn(case)
+    if fn is None:
+        return
+    folder = os.path.join(RUN_FOLDER, "pick", "unreadable")  # a folder: opening it for read fails
+    os.makedirs(folder, exist_ok=True)
+    check(case + ": the transcript path is not a readable file", not os.path.isfile(folder),
+          "the fixture is a readable file")
+    got = send(fn, AGREED, folder)
+    check(case, got is None, "asked: got %r" % (got,))
+
+
+def case_past_rulings_raising_after_trigger_a_asks():
+    # The search that would name the ids fails after trigger A fired: the pick has no verified Checked line, so it asks.
+    case = "A: past_rulings raising after trigger A fires asks"
+    fn = pick_fn(case)
+    if fn is None:
+        return
+    import question_form  # the one past-rulings search (hooks/question_form.py)
+    path = transcript("a-raise", owner_said("Run the lint on the batch."))
+    with mock.patch.object(question_form, "past_rulings", side_effect=RuntimeError("records unreadable")) as past:
+        got = send(fn, PICK, path)
+    check(case + ": past_rulings is called once, after trigger A fired", past.call_count == 1,
+          "called %d time(s)" % past.call_count)
+    check(case, asked(got), "no ask: got %r" % (got,))
+
+
 def case_bold_departs_label_is_a_pick_asks():
     case = "A: a bold Departs from label is a pick too, and asks with no Checked line"
     fn = pick_fn(case)
@@ -290,6 +322,7 @@ CASES = (case_departs_pick_without_checked_asks, case_inbound_pick_without_check
          case_checked_made_up_decision_asks, case_checked_bare_slug_passes,
          case_no_pick_passes_without_past_rulings, case_inbound_pick_from_other_session_passes,
          case_second_send_after_one_reply_passes, case_newest_frame_decides_passes,
+         case_unreadable_transcript_on_trigger_b_passes, case_past_rulings_raising_after_trigger_a_asks,
          case_bold_departs_label_is_a_pick_asks,
          case_guard_asks_on_inbound_pick, case_control_guard_allows_plain_send)
 
