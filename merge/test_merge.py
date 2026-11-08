@@ -13588,7 +13588,9 @@ class ReviewUnreviewedHead(ReviewRoundCheckEnv):
     on the default-branch cut: main's revert of a lane's merge, read through a stacked pull request on a lane branch, must refuse as a dropped lane.
     Case 15 is green on the old code and kills the `h not in on_default` clause of read_lanes' own_out: a stacked pull request that starts at a main
     commit, merges a reviewed lane tip and main, and adds no commit of its own is an integration head. Case 16 is red on the old code: confirm must
-    fetch origin/<default> before the read, or main's newer commit merged into a stacked pull request reads as an unreviewed lane tip."""
+    fetch origin/<default> before the read, or main's newer commit merged into a stacked pull request reads as an unreviewed lane tip.
+    Case 17 is red on f67f637d8 and green on 270ef35bc: an integration head with no commit of its own still owes round 3 for its own Guard or check yes
+    record. Case 5 is its green control."""
 
     ROUND_ONE_FAIL = ("Round 1: reviewer, sonnet, FAIL",)
 
@@ -13840,6 +13842,25 @@ class ReviewUnreviewedHead(ReviewRoundCheckEnv):
         rc, out, _before = self.run_round_check(host, "--confirm")
         self.assertNotIn(f"tip {m[:9]}", out, "the round-3 check reads main's newer commit as an unreviewed lane tip, because the clone's origin/main is older:\n" + out)
         self.assert_allowed(rc, out, host)
+
+    def test_unreviewed_head_integration_pr_own_guard_yes_owes_round_three_is_refused(self):  # case 17
+        # the integration head holds only the merges of two done lane tips, so it adds no commit of its own and is read through its tips. Its own record
+        # is Guard or check yes with round 1 PASS, and no lane tip names its head. The own head owes round 3, as on 270ef35bc, which always checks it
+        tips = lane_batch(self, "agent/lane1", "agent/lane2", from_main=True)
+        feat = self.head("feat")
+        own_text = record_text(n=7, head=feat, guard="yes", rounds=REVIEW_PASS)
+        self.assertNotEqual(record_state(self, own_text, head=feat), "done", "the own head's record is done, so it owes nothing")
+        comments = [round_check_comment(1, 8, tips["agent/lane1"], guard="no", rounds=REVIEW_PASS),
+                    round_check_comment(2, 9, tips["agent/lane2"], guard="no", rounds=REVIEW_PASS),
+                    review_comment(3, 7, own_text)]
+        host = self.batch_host(tips, comments)
+        host.records_default = False  # the scripted records are the only ones: the own head's is Guard or check yes, round 1 PASS
+        self.scope(tips, host)
+        own = sh(self.co, "git", "rev-list", "--no-merges", feat, "^origin/main", f"^{tips['agent/lane1']}", f"^{tips['agent/lane2']}").split()
+        self.assertEqual(own, [], "the integration head adds a commit of its own, so it is not the case:\n" + "\n".join(own))
+        rc, out, before = self.run_round_check(host, "--confirm")
+        self.assert_refused(rc, out, host, before, 7, owed="the integration pull request's own head owes round 3")
+        self.assertIn(f"#7 (head {feat[:9]})", out, "the refusal does not name the own head:\n" + out)
 
 # The report-only model judge at merge. The merge reads each governed Markdown file at head, selects a file whose line
 # cites a changed backing file (lint/stale_cites.py backed_lines), and sends it to decision_watch.invoke_model once. The
