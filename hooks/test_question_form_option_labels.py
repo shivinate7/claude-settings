@@ -162,15 +162,17 @@ def case_fn_letter_is_position():
 # ------------------------------------------------------------------ 1. the page-item write path (wire:)
 
 def write_transcript(name, text):
-    """A transcript of one human message and one assistant message holding `text`, under this run's folder."""
+    """A transcript of one human message, then one assistant message per text (a str, or a list of str), under this
+    run's folder."""
+    texts = [text] if isinstance(text, str) else list(text)
     folder = os.path.join(tcj.ROOT, "label-transcripts")
     os.makedirs(folder, exist_ok=True)
     path = os.path.join(folder, name + ".jsonl")
-    human = {"type": "user", "message": {"role": "user", "content": "Ask the owner."}}
-    assistant = {"type": "assistant", "message": {"role": "assistant",
-                                                    "content": [{"type": "text", "text": text}]}}
+    lines = [{"type": "user", "message": {"role": "user", "content": "Ask the owner."}}]
+    lines += [{"type": "assistant", "message": {"role": "assistant", "content": [{"type": "text", "text": t}]}}
+              for t in texts]
     with open(path, "w", encoding="utf-8") as f:
-        f.write(json.dumps(human) + "\n" + json.dumps(assistant) + "\n")
+        f.write("".join(json.dumps(line) + "\n" for line in lines))
     return path
 
 
@@ -264,6 +266,86 @@ def case_wire_missing_letter_is_allowed():
     wire_allows("control: a chat that writes no line for b is not compared for b", set_write(ITEM), transcript)
 
 
+# ------------------------------------------------------------------ 1b. the cited question the chat asked
+
+GROUP_X, GROUP_Y = "x1-keep", "y2-wait"  # two items asked in one reply
+WAIT_A = "a) Wait a day"
+
+
+def options_with_a(label_a):
+    """OPTIONS with letter a's label set to `label_a`, for a case that changes the first label."""
+    options = copy.deepcopy(OPTIONS)
+    options[0]["label"] = label_a
+    return options
+
+
+def grouped_chat():
+    """One reply that asks two items. x1 writes a) Keep it as is, and y2, cited mid-reply, writes a) Wait a day. Each
+    question's lines run to the next Page item line."""
+    return chat_question((CHAT_A, CHAT_B, "Page item: %s" % GROUP_Y, WAIT_A, CHAT_B), cite=GROUP_X)
+
+
+def case_wire_later_note_does_not_hide_the_question():
+    """A later assistant text that cites the item with no option lines is no question. The earlier question's b still
+    holds, so a write whose b differs from it is refused."""
+    transcript = write_transcript("shadow", [chat_question((CHAT_A, CHAT_B_MISMATCH)),
+                                             "Page item: %s is being written now." % ITEM])
+    wire_refuses("wire: a later note citing the item with no option lines does not hide the earlier question's b",
+                 set_write(ITEM), transcript)
+
+
+def case_fn_cite_mid_line_counts():
+    """A cite at the end of a sentence counts as a cite: the chat asked the item, so its differing b is refused."""
+    text = "Question for the page. Page item: %s\n%s\n%s" % (ITEM, CHAT_A, CHAT_B_MISMATCH)
+    fn_refuse("fn: a cite at the end of a sentence counts, and a differing b is refused",
+              fn_label(ITEM, OPTIONS, text), "b")
+
+
+def case_wire_grouped_first_question_is_allowed():
+    """Control: x1's own a) line is read for x1, so its write with a) Keep it as is is allowed."""
+    transcript = write_transcript("grouped-x1", grouped_chat())
+    wire_allows("control: x1 with a) Keep it as is, in a reply that also asks y2, is allowed",
+                set_write(GROUP_X, options_with_a("Keep it as is")), transcript)
+
+
+def case_wire_grouped_question_reads_its_own_lines():
+    """y2's write with a) Wait a day is allowed: its lines run from its own Page item line, not from x1's."""
+    transcript = write_transcript("grouped-y2", grouped_chat())
+    wire_allows("wire: y2 with a) Wait a day, in a reply that also asks x1, is allowed",
+                set_write(GROUP_Y, options_with_a("Wait a day")), transcript)
+
+
+def case_wire_grouped_question_refuses_the_other_label():
+    """y2's write with a) Keep it as is is refused: that is x1's a) line, not y2's."""
+    transcript = write_transcript("grouped-y2-keep", grouped_chat())
+    wire_refuses("wire: y2 with a) Keep it as is, in a reply that also asks x1, is refused",
+                 set_write(GROUP_Y, options_with_a("Keep it as is")), transcript)
+
+
+def case_wire_unreadable_transcript_is_allowed_and_noted():
+    """Control: a transcript that cannot be read allows the write, and the guard logs one noted line for the rule."""
+    missing = os.path.join(tcj.ROOT, "label-transcripts", "no-such-transcript.jsonl")
+    decision, reason = guard_hook("unreadable", set_write(ITEM), missing)
+    check("control: a missing transcript allows the write", decision == "allow",
+          "want an allow, got %s: %r" % (decision, reason[:200]))
+    path = os.path.join(tcj.ROOT, "label-cfg", "unreadable", "guard.log")
+    rows = []
+    if os.path.exists(path):
+        with open(path, encoding="utf-8") as f:
+            rows = [line.split("\t") for line in f if line.strip()]
+    noted = [row for row in rows if len(row) > 3 and row[2] == "noted" and row[3] == RULE]
+    check("control: a missing transcript logs one noted line for %s" % RULE, len(noted) == 1,
+          "want one noted line, got %r" % (noted,))
+
+
+def case_recommended_a_with_widening_pick_b_stays_refused():
+    """Control, green on the current code. The old name pick is read the same way as recommended (SKILL.md, uniform-pick),
+    so a write whose pick is the widening b is refused even with recommended a: the page stars recommended, and the
+    write is still refused."""
+    widens_refuses("control: recommended a with a widening pick b is refused: the old name pick is read the same way",
+                   decision_with(pick="b", recommended="a"))
+
+
 # ------------------------------------------------------------------ 2. the recommended field (uniform-pick)
 
 def decision_with(**over):
@@ -330,7 +412,11 @@ CASES = (case_fn_equal_labels_pass, case_fn_case_and_spaces_fold, case_fn_prefix
          case_wire_matching_set_is_allowed, case_wire_short_form_is_allowed, case_wire_no_cited_id_is_allowed,
          case_wire_other_item_is_allowed, case_wire_missing_letter_is_allowed,
          case_recommended_naming_widening_is_refused, case_pick_naming_widening_still_refused,
-         case_recommended_plain_passes, case_recommended_is_a_drawn_field, case_pick_is_a_drawn_field)
+         case_recommended_plain_passes, case_recommended_is_a_drawn_field, case_pick_is_a_drawn_field,
+         case_wire_later_note_does_not_hide_the_question, case_fn_cite_mid_line_counts,
+         case_wire_grouped_first_question_is_allowed, case_wire_grouped_question_reads_its_own_lines,
+         case_wire_grouped_question_refuses_the_other_label, case_wire_unreadable_transcript_is_allowed_and_noted,
+         case_recommended_a_with_widening_pick_b_stays_refused)
 FN_CASES = tuple(c for c in CASES if c.__name__.startswith("case_fn_"))
 
 
