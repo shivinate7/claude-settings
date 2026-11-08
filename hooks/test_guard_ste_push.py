@@ -201,12 +201,16 @@ def read_decision(stdout):
         return "unparsed", out[:200]
 
 
-def guard_run(clone, command, case_dir, env=None):
-    """Judge one Bash call from the pushed checkout, under the guard under test."""
+def guard_run(clone, command, case_dir, env=None, transcript=None):
+    """Judge one Bash call from the pushed checkout, under the guard under test. `transcript` is the session
+    transcript the hook call names (transcript_path), when a case needs the session's own record."""
     cfg = os.path.join(case_dir, "cfg")
     os.makedirs(cfg, exist_ok=True)
     spawn_log = os.path.join(case_dir, "spawns.json")
-    payload = json.dumps({"tool_name": "Bash", "tool_input": {"command": command}, "cwd": clone})
+    body = {"tool_name": "Bash", "tool_input": {"command": command}, "cwd": clone}
+    if transcript:
+        body["transcript_path"] = transcript
+    payload = json.dumps(body)
     environ = dict(os.environ)
     for name in ("TMPDIR", "TEMP", "TMP"):
         environ[name] = case_dir
@@ -419,6 +423,58 @@ def record_branch_case(command, main=None):
     return check
 
 
+# The triage proof roadmap-one-writer reads (hooks/guard_merge.py _own_tier_proved): the session's own newest
+# get_session record carries cs-build:triage. The transcript is written here, in the shape hooks/own_session.py
+# reads. hooks/test_guard.py is not imported for it, since that file runs its whole suite on import.
+OWN_TAIL = "7" * 20
+TRIAGE_ENV = {"CLAUDE_CODE_REMOTE_SESSION_ID": "cse_" + OWN_TAIL}
+
+
+def triage_transcript(case_dir):
+    """A transcript whose newest get_session record for this session carries cs-build:triage."""
+    record = json.dumps({"ccr": {"id": "session_" + OWN_TAIL, "title": "triage", "tags": ["cs-build:triage"]}})
+    lines = [
+        {"type": "assistant", "message": {"role": "assistant", "content": [
+            {"type": "tool_use", "id": "g1", "name": "mcp__claude-code-remote__get_session", "input": {}}]}},
+        {"type": "user", "message": {"role": "user", "content": [
+            {"type": "tool_result", "tool_use_id": "g1", "content": record}]}},
+    ]
+    path = os.path.join(case_dir, "triage.jsonl")
+    write(path, "".join(json.dumps(line) + "\n" for line in lines))
+    return path
+
+
+def record_branch_triage_case(command, main=None):
+    """A push to the record branch that roadmap-one-writer allows, because the own record proves the triage
+    tier. The push reaches ste-push, which skips a record branch: the decision is allow and no lint starts. The
+    decision is checked first, so a refusal by an earlier rule cannot pass this case."""
+    def check(case_dir):
+        clone = make_pair(case_dir, dict(MAIN, **(main or {})), BLOAT_NOTES)
+        require_bloat(clone)
+        out = guard_run(clone, command, case_dir, env=TRIAGE_ENV, transcript=triage_transcript(case_dir))
+        if out.error:
+            return out.error
+        if out.decision != "allow":
+            return "decision is %r, want allow: the triage record proves the tier (%s; %s)" % (
+                out.decision, command, out.reason[:120])
+        if lint_starts(out):
+            return "%d lint start(s), want none: ste-push never lints a record branch push (%s)" % (
+                len(lint_starts(out)), command)
+        return None
+    return check
+
+
+def triage_control_case(command):
+    """The same triage proof and the same bloated prose, pushed to a branch that is not the record branch. The
+    proof does not switch the lint off: ste-push lints once and denies."""
+    def check(case_dir):
+        clone = make_pair(case_dir, MAIN, BLOAT_NOTES)
+        require_bloat(clone)
+        out = guard_run(clone, command, case_dir, env=TRIAGE_ENV, transcript=triage_transcript(case_dir))
+        return want_denied(out, command)
+    return check
+
+
 def case_run_folder_sweep(case_dir):
     root = os.path.join(case_dir, "sweep")
     old = os.path.join(root, "111-" + "a" * 32)
@@ -467,6 +523,12 @@ CASES = [
      record_branch_case("git push origin HEAD:roadmap")),
     ("ste-push: a push to the record branch the extras file names starts no lint",
      record_branch_case("git push origin HEAD:records-test", main=EXTRAS)),
+    ("ste-push: a triage session's push of bloated prose to roadmap is allowed, with no lint",
+     record_branch_triage_case("git push origin HEAD:roadmap")),
+    ("ste-push: a triage session's push of bloated prose to the extras record branch is allowed, with no lint",
+     record_branch_triage_case("git push origin HEAD:records-test", main=EXTRAS)),
+    ("ste-push: a triage session's push of the same prose to feature-x is denied after one lint",
+     triage_control_case("git push origin HEAD:feature-x")),
     ("ste-push: a push to a branch that is not the record branch is linted when the extras file names one",
      lambda case_dir: want_denied_case(case_dir, "git push origin HEAD:feature-x", EXTRAS)),
     ("ste-push: --dry-run starts no lint", skip_case("git push --dry-run origin topic")),
