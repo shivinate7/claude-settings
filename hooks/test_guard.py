@@ -2951,7 +2951,7 @@ chained_ask("per-file ask: cd lane && restore f.txt && cd lane && the same resto
             "cd " + slash(GITWT) + " && " + VCS + " restore f.txt && cd " + slash(GITWT) + " && "
             + VCS + " restore f.txt && echo done", cwd=NOGIT)
 
-# HEREDOC BODY WITH A LONE QUOTE, THEN A CD. segment_roots (guard.py ~1228) loses sync when a heredoc
+# HEREDOC BODY WITH A LONE QUOTE, THEN A CD. the cd walk (guard_core _run_dir) loses sync when a heredoc
 # body holds a lone quote, and drops every later `cd`. The cwd is in no checkout, so the cd act does
 # not refuse the cd below; the shared-tree rule reads the folder it moves to, and the restore runs in
 # the shared checkout, so it must deny. A lone quote inside a shell `#` comment does not desync, so the
@@ -2963,7 +2963,7 @@ sh("per-file deny: python heredoc, a lone double quote in the body, then cd shar
    "python3 <<'EOF'\ntotal = \"\nEOF\ncd " + slash(GITMAIN) + " && " + VCS + " restore f.txt",
    "deny", "shared-tree", cwd=NOGIT)
 
-# SYNC LOSS (fixture shape). When segment_roots (guard.py ~1228) loses sync with the segments,
+# SYNC LOSS (fixture shape). When the cd walk (guard_core _run_dir) loses sync with the segments,
 # every later segment is judged as the shared checkout, so a later discard of a dirty file is denied.
 # A cd into the shared checkout is now refused by other-checkout, so each restore names the shared
 # checkout with -C and denies as shared-tree, chained or not.
