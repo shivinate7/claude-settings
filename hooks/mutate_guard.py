@@ -1968,6 +1968,11 @@ MUTATIONS = [
      '        refuse(tool, "deny", "rm-var-unguarded", rm_var_reason(hits), "; ".join(hits))',
      '        pass',
      "guard", 'rm-var: a loop deletes under an unguarded variable'),
+    # ---- substitution reads (debt guard-substitution-in-token): a command inside `$( )` is judged.
+    ("substitution: judge_shell reads only the outer text, so a reset inside a dollar paren passes",
+     '    texts = [stripped, *substitution_commands(raw, stripped)]\n',
+     '    texts = [stripped]\n',
+     "guard", "substitution: shared tree, an assignment from a dollar paren denies"),
     # ---- hand-made-worktree (decision lanes-start-in-tool-worktrees): one mutant per branch.
     ("hand-made-worktree: the judge_shell loop never asks, so no hand-made tree is refused",
      '            matched = hand_made_worktree_hit(segments, number, cwd, ends)\n',

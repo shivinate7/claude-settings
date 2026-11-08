@@ -3232,6 +3232,48 @@ for _name, _command in (
 ):
     sh("guard-command-position: pinned, %s allowed" % _name, _command, "allow", cwd=NOGIT)
 
+# SUBSTITUTION. The shell runs a command inside `$( )` or backticks, in any word, assignment, double-quoted
+# text, commit message or unquoted heredoc body, so each form denies the reset as the plain reset does.
+for _name, _command in (
+    ("an assignment from a dollar paren", "x=$(" + VCS + " reset --hard)"),
+    ("a dollar paren in an echo", "echo $(" + VCS + " reset --hard)"),
+    ("backticks in an echo", "echo `" + VCS + " reset --hard`"),
+    ("backticks in an assignment", "x=`" + VCS + " reset --hard`"),
+    ("a dollar paren in double quotes", 'echo "$(' + VCS + ' reset --hard)"'),
+    ("a dollar paren in a commit message", VCS + ' commit -m "note: $(' + VCS + ' reset --hard)"'),
+    ("a dollar paren after a hash in double quotes", 'echo "# $(' + VCS + ' reset --hard)"'),
+    ("a dollar paren on line 2 of a multi-line double-quoted text",
+     'echo "first line\n$(' + VCS + ' reset --hard)\nlast line"'),
+    ("a dollar paren in an unquoted heredoc body", "cat <<EOF\n$(" + VCS + " reset --hard)\nEOF"),
+):
+    sh("substitution: shared tree, %s denies" % _name, _command, "deny", "shared-tree", cwd=NOGIT)
+# ALLOW controls: a quoted or escaped `$(` is text, a quoted heredoc body is text, and a commit message
+# that names a reset is text. A reader that judges inner text naively would deny each of these.
+for _name, _command in (
+    ("single quotes hold a dollar paren", "echo '$(" + VCS + " reset --hard)'"),
+    ("an escaped dollar sign", "echo \\$(" + VCS + " reset --hard)"),
+    ("single quotes hold a hash and a dollar paren", "echo '# $(" + VCS + " reset --hard)'"),
+    ("a quoted heredoc body holds a dollar paren", "cat <<'EOF'\n$(" + VCS + " reset --hard)\nEOF"),
+    ("a commit message from a quoted heredoc names a reset",
+     VCS + ' commit -m "$(cat <<\'EOF\'\nfix: never run ' + VCS + ' reset --hard here\nEOF\n)"'),
+    ("a commit message in double quotes names a reset", VCS + ' commit -m "never run ' + VCS + ' reset --hard"'),
+):
+    sh("substitution: shared tree, %s allowed" % _name, _command, "allow", cwd=NOGIT)
+# HASH. An unquoted `#` opens a comment only at a word start. After a letter, a slash, a brace, a dollar
+# sign or an escaped space it is text, so the `$( )` that follows still runs. A reader that takes every
+# `#` as a comment lets each of these through.
+for _name, _command in (
+    ("a hash in a dollar brace array length", "echo ${#arr[@]} $(" + VCS + " reset --hard)"),
+    ("a hash after a letter", "echo a#$(" + VCS + " reset --hard)"),
+    ("a dollar hash", "echo $# $(" + VCS + " reset --hard)"),
+    ("a hash in a URL fragment", "curl https://x/#$(" + VCS + " reset --hard)"),
+    ("an escaped space before a hash", "echo a\\ #$(" + VCS + " reset --hard)"),
+):
+    sh("substitution: shared tree, %s denies" % _name, _command, "deny", "shared-tree", cwd=NOGIT)
+# ALLOW control: a hash at a word start is a real comment, so the `$( )` after it is text.
+sh("substitution: shared tree, a hash at a word start allowed", "echo hi #$(" + VCS + " reset --hard)",
+   "allow", cwd=NOGIT)
+
 
 # ============================================================ 1. branch delete / worktree remove/prune
 FAMILY = "branch-worktree"
@@ -3972,6 +4014,21 @@ else:
     skip_case("kill: pkill -P of a parent this session started passes", NO_PS)
     skip_case("kill: pkill -P of a parent this session did not start is refused", NO_PS)
     skip_case("kill: pkill -P of init is refused", NO_PS)
+# SUBSTITUTION, kill. A pkill inside `$( )` or backticks runs, so each form denies as the plain pkill does.
+for _name, _command in (
+    ("a dollar paren in double quotes", 'echo "$(pkill -f foo)"'),
+    ("a dollar paren in an echo", "echo $(pkill -f foo)"),
+    ("a dollar paren with spaces inside", "echo $( pkill -f foo )"),
+    ("an assignment from a dollar paren", "x=$(pkill -f foo)"),
+    ("backticks in an echo", "echo `pkill -f foo`"),
+):
+    sh("substitution: kill, %s denies" % _name, _command, "deny", "machine-wide-kill", cwd=NOGIT)
+# ALLOW controls: a hash opens a comment, so the text after it runs nothing, and an unclosed single
+# quote makes bash refuse to parse the line, so it runs nothing.
+sh("substitution: kill, a dollar paren after a hash comment allowed", "echo hi # $(pkill -f foo)",
+   "allow", cwd=NOGIT)
+sh("substitution: kill, a dollar paren after an unclosed quote allowed", "echo Don't $(pkill -f foo)",
+   "allow", cwd=NOGIT)
 if os.name != "nt":   # Windows has no `ps`: ownership reads unknown, so these allow
     sh("kill: a pid this session did not start", "kill %d" % FOREIGN, "deny", "machine-wide-kill",
        cwd=NOGIT, carries="did not start")
@@ -7114,6 +7171,16 @@ sh("false alarm: a lease to main-fix", VCS + " push --force-with-lease --force-i
 sh("push: a force push inside a loop's do-block still counts",
    "while true; do " + VCS + " push --force; done", "deny", "force-push", cwd=PUSHFEAT,
    carries=REMEDY)
+# SUBSTITUTION, push. A forced push inside `$( )` or double quotes runs, so it takes the verdict and the
+# rule of the plain forced push to the same destination from the same checkout (PUSH_SUBST_PLAIN below).
+PUSH_SUBST_FORCE = VCS + " push --force origin main"
+PUSH_SUBST_VERDICT = "ask"   # the plain forced push's verdict, pinned by the control case below
+sh("substitution: push, the plain forced push to main from a feature branch", PUSH_SUBST_FORCE,
+   PUSH_SUBST_VERDICT, "force-push", cwd=PUSHFEAT)
+sh("substitution: push, an assignment from a dollar paren with a forced push",
+   "x=$(" + PUSH_SUBST_FORCE + ")", PUSH_SUBST_VERDICT, "force-push", cwd=PUSHFEAT)
+sh("substitution: push, a dollar paren in double quotes with a forced push",
+   'echo "$(' + PUSH_SUBST_FORCE + ')"', PUSH_SUBST_VERDICT, "force-push", cwd=PUSHFEAT)
 
 # ASK, owner rulings 206 a. An implied destination (a bare push, HEAD, @, or a
 # colon-less refspec naming the current branch) that lands off the branch's upstream asks, unless the push

@@ -94,7 +94,7 @@
 - guard-split-ignores-backslash: no guard test refuses the \' and \" forms; background_commands counts echo \" & echo b as one command (guard_core, guard.py)
 - guard-split-mutant-needs-git: the root-scope mutant (_git drops -C) is killed only inside a git checkout; CI does (hooks/mutate_guard.py)
 - guard-split-sibling-mutant-case: PR2 needs a case in the in-process load that kills a sibling mutant (hooks/test_guard.py)
-- guard-substitution-in-token: a command inside a token, such as glued $(...), backticks or x=$(...), is not read as a command (guard_core command_indexes)
+- guard-substitution-in-token: open items only. The command_indexes callers (guard_stream, guard_wsl, guard_push_delete, question_form) miss a glued substitution. An inner `cd` is judged against the session root (`echo $(cd /x && git reset --hard)`). Rm after cd reads `stripped` only, so `$(cd x && rm -rf y)` is not read. A `$( )` in a quoted interpreter heredoc body is judged as shell, a possible false alarm. Fix: step:substitution-in-token-callers
 - guard-timing-case-flaky: the 2000-span rm-var case keeps a wall-clock bound that can fail on a busy runner; no check measures the 60 s hook timeout (hooks/test_guard.py)
 - guard-untied-from-rule-map: merge-checks, draft-pr and pointer-head guard rules have no rule-map row, so a guard deleted with its tests passes rule_audit (lint/rule_mechanisms.json) Fix: none — owner decides: main has 72 guard rule ids with no row in lint/rule_mechanisms.json, and rows key on CLAUDE.md anchors (options: a guards section keyed by rule id; a multi-mechanism row; an exempt list)
 - guard-wrapper-lists-closed: an unlisted wrapper such as stdbuf or chrt hides the real command word (guard_core COMMAND_WRAPPERS)

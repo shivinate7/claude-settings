@@ -8,8 +8,8 @@ import re
 
 from guard_core import (
     ASSIGNMENT, DURATION, ENV_PATTERN_COMMANDS, INTERPRETER_HEREDOC, REDIRECT, SHELL_HEREDOC,
-    TIMEOUT_FLAGS_BARE, TIMEOUT_FLAGS_WITH_VALUE, _split_heredocs, _without_message_values,
-    is_powershell, norm, split_segments,
+    POWERSHELL_CALL, TIMEOUT_FLAGS_BARE, TIMEOUT_FLAGS_WITH_VALUE, _split_heredocs,
+    _without_message_values, is_powershell, norm, split_segments,
 )
 
 
@@ -217,6 +217,9 @@ def _substitutions(cmd: str, depth: int = 0, powershell: bool = False, heredoc: 
     `powershell` reads PowerShell's escape: a backtick escapes the next character, as a backslash
     does in bash, and opens no substitution. A backslash is then a plain character. `heredoc`
     reads an unquoted heredoc body: there a quote mark is text, until a substitution opens.
+
+    An unquoted `#` at a word start is a comment to the end of the line: its text stays in the
+    text around it, and opens no quote and no substitution. A heredoc body has no comments.
     """
     escape = "`" if powershell else "\\"
     if depth > ENV_MAX_DEPTH:
@@ -249,6 +252,13 @@ def _substitutions(cmd: str, depth: int = 0, powershell: bool = False, heredoc: 
         if char == escape and quote != "'":
             pieces.append(cmd[i:i + 2])
             i += 2
+            continue
+        if char == "#" and quote == "" and not (heredoc and len(stack) == 1) and (
+                not pieces or pieces[-1] in (" ", "\t", "\n", ";", "|", "&", "(")):   # an escape pair is no boundary
+            end = cmd.find("\n", i)
+            end = n if end < 0 else end
+            pieces.append(cmd[i:end])
+            i = end
             continue
         if heredoc and len(stack) == 1 and char in "'\"":
             pass   # a quote mark in a heredoc body is text
@@ -292,6 +302,28 @@ def _substitutions(cmd: str, depth: int = 0, powershell: bool = False, heredoc: 
         close()
     # the outermost text closed last, so it is last
     return done, False
+
+
+def substitution_commands(raw: str, stripped: str, outer: bool = False):
+    """The texts a shell runs INSIDE the command, each a command of its own: every `$(...)`, backtick
+    and process substitution in `stripped`, plus those in an unquoted heredoc body of `raw`. A quoted
+    shell heredoc body runs nothing and is gone from `stripped`; an interpreter heredoc body stays in
+    `stripped` and is read as shell text, so a `$( )` in it can be a false alarm. With `outer`, the command itself is last, its substitutions read as `x`
+    (`stripped` as it stands when the nest is too deep). A nest too deep to read gives no inner text:
+    the env-file rule refuses it. The one home of this cut: judge_shell and git_env_command_hit call it.
+    """
+    found, too_deep = _substitutions(stripped, powershell=POWERSHELL_CALL[0])
+    inner = [text for text, _in_message in found[:-1]]
+    for quote, body, _ in _split_heredocs(raw)[1]:
+        if not quote:
+            body_found, body_deep = _substitutions(body, heredoc=True)
+            too_deep = too_deep or body_deep
+            inner = [text for text, _in_message in body_found[:-1]] + inner
+    if too_deep:
+        inner = []
+    if outer:
+        return inner + [stripped if too_deep else found[-1][0]]
+    return inner
 
 
 # A word that holds a glob. It is an environment word when it could match any name that
