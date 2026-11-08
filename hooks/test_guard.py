@@ -8784,6 +8784,9 @@ ENVWALK_LARGE = os.path.join(ROOT, "envwalk-large")          # one folder over t
 ENVWALK_BULK = os.path.join(ROOT, "envwalk-bulk")            # a clean repo whose .gitignore lists node_modules, which holds the bulk
 ENVWALK_MODULES_OPEN = os.path.join(ROOT, "envwalk-modules-open")  # the same bulk tree, with no .gitignore line
 ENVWALK_MODULES_ENV = os.path.join(ROOT, "envwalk-modules-env")    # an env file only under node_modules, and a README
+ENVWALK_SUB_CLEAN = os.path.join(ROOT, "envwalk-sub-clean")    # a sub folder with one ordinary file, and no env file
+ENVWALK_TYPE_MD = os.path.join(ROOT, "envwalk-type-md")        # a sub folder with an env file that rg's md type names
+ENVWALK_TYPE_JAVA = os.path.join(ROOT, "envwalk-type-java")    # a sub folder with an env file that rg's java type names
 
 
 def build_envwalk_folders():
@@ -8852,6 +8855,19 @@ def build_envwalk_modules_env():
 
 
 lazy_fixture((ENVWALK_MODULES_ENV,), build_envwalk_modules_env)
+
+
+def build_envwalk_types():
+    # Each folder holds a sub folder and a README. The md and java folders each hold one env-named file, which
+    # the guard's type table misses. The clean folder holds an ordinary file under sub.
+    for folder, leaf, text in ((ENVWALK_SUB_CLEAN, "notes.txt", "notes\n"),
+                               (ENVWALK_TYPE_MD, ENV + ".mdx", "FIXTURE=1\n"),
+                               (ENVWALK_TYPE_JAVA, ENV + ".properties", "FIXTURE=1\n")):
+        write(os.path.join(folder, "sub", leaf), text)
+        write(os.path.join(folder, "README.md"), "sub\n")
+
+
+lazy_fixture((ENVWALK_SUB_CLEAN, ENVWALK_TYPE_MD, ENVWALK_TYPE_JAVA), build_envwalk_types)
 
 # Allowed. A folder named .env (a virtualenv), and text that names it, read no env file.
 for _tool, _cmd in (
@@ -8954,13 +8970,14 @@ for _cmd in (r"ag --hidden -G '\.env[A-Z]*\.md$' foo", r"ag --hidden -G 'env\.pr
 for _cmd in (r"ag --hidden -G '.*a.*b.*c.*d.*e.*f' foo", r"ag --hidden -G '[[:^alpha:]]x' foo"):
     sh("env: ag hidden regex, no sample env name it picks, allowed: " + _cmd, _cmd, "allow", cwd=NOGIT)
 
-# The forms below are safety holes: each reads an env file the guard lets through. Each group pins its controls
+# The safety-hole forms below are refused over a folder that holds an env file. Each group pins its controls
 # too. A control is the same form over a folder with no env file, which must stay allowed, or the same form
 # over a folder that holds one and is refused already, which must stay refused. So a fix that refuses too much
 # goes red on the allowed control.
 
-# rg takes a value after some flags the guard does not list. The guard takes that value for the pattern and
-# the pattern for a folder, so no folder is walked. The env file here is not gitignored, so every form reads it.
+# rg takes a value after some flags. The guard lists each one, so the word after it is no pattern and no path,
+# and the folder is walked. The env file here is not gitignored, so every form reads it. The cases pin that each
+# form is refused over a folder that holds the env file, and allowed over one that holds none.
 _RG_VALUE_FLAG = ("rg --hidden --sort path K", "rg --hidden -j 2 K", "rg --hidden -M 200 K", "rg --hidden -r X K",
                   "rg --hidden --color never K", "rg --hidden -T py K")
 for _cmd in _RG_VALUE_FLAG:
@@ -8984,8 +9001,9 @@ for _cmd in _POSITIVE_GLOB:
 sh("env: walk control, positive glob names no env file, allowed: rg --hidden -g '*.md' K",
    "rg --hidden -g '*.md' K", "allow", cwd=ENVWALK_IGNORED)
 
-# The walk does not see a search behind a wrapper or a subshell, and it does not resolve a folder given as
-# `$(pwd)` or `$PWD`, so the folder is never walked.
+# The walk looks through a subshell paren, `command`, `env` and `nice`, and resolves a folder given as `$(pwd)` or
+# `$PWD` to the cwd, so each form walks the folder. The cases pin that each form is refused over a folder that
+# holds an env file, and allowed over one that holds none.
 _WRAPPED = ("command rg --hidden K", "env X=1 rg --hidden K", "nice rg --hidden K", "(rg --hidden K)",
             'grep -r K "$(pwd)"', 'grep -r K "$PWD"')
 for _cmd in _WRAPPED:
@@ -9013,6 +9031,67 @@ sh("env: quoted brace list stays literal, node_modules walked, refused: " + _quo
    "deny", "env-file", cwd=ENVWALK_MODULES_ENV)
 for _cmd in ("rg --hidden -t py K .", "rg -uu -g '*.py' K ."):
     sh("env: false alarm, type or glob picks no env file, allowed: " + _cmd, _cmd, "allow", cwd=ENVWALK_HELD)
+
+# Walk forms the guard does not see, and one search it refuses without cause. Each group pins its controls.
+
+# GNU grep matches an --exclude glob against the base name of each file a recursive search reads. A glob with
+# a slash matches no base name, so `*/.env` excludes no file, and grep reads sub/.env. The walk refuses the form
+# over a folder that holds sub/.env, and allows it over a folder with no env file.
+_GREP_SLASH_EXCLUDE = 'grep -r --exclude="*/' + ENV + '" SECRET .'
+sh("env: grep walk safety hole, exclude glob with a slash matches no base name, refused: " + _GREP_SLASH_EXCLUDE,
+   _GREP_SLASH_EXCLUDE, "deny", "env-file", cwd=ENVWALK_NESTED)
+sh("env: grep walk control, same exclude over a folder with no env file, allowed: " + _GREP_SLASH_EXCLUDE,
+   _GREP_SLASH_EXCLUDE, "allow", cwd=ENVWALK_SUB_CLEAN)
+
+# rg expands a brace list in a glob, so `{.env,x}` names `.env`, and so does `{*.env,*.json}`. The guard does not
+# expand the list, so it judges the glob as naming no env file. The walk refuses each form over a folder that
+# holds `.env`, and allows it over a folder with no env file.
+_BRACE_GLOBS = ('rg -g "{' + ENV + ',x}" foo', 'rg -g "{*' + ENV + ',*.json}" foo',
+                'rg --hidden -g "{' + ENV + ',x}" foo')
+for _cmd in _BRACE_GLOBS:
+    sh("env: walk safety hole, brace list in a glob names the env file, refused: " + _cmd, _cmd, "deny",
+       "env-file", cwd=ENVWALK_HELD)
+    sh("env: walk control, brace list in a glob, folder has no env file, allowed: " + _cmd, _cmd, "allow",
+       cwd=ENVWALK_CLEAN)
+
+# rg's -g globs follow gitignore rules, where `**/` matches zero folders. So `sub/**/*` names sub/.env, and the
+# search reads it. The guard's match needs a second slash in the name, so it picks no file under sub and allows
+# the search. The walk refuses the form over the folder that holds sub/.env.
+_ZERO_FOLDERS_GLOB = "rg --hidden -g 'sub/**/*' foo"
+sh("env: walk safety hole, glob sub/**/* names sub/.env with no folder between, refused: " + _ZERO_FOLDERS_GLOB,
+   _ZERO_FOLDERS_GLOB, "deny", "env-file", cwd=ENVWALK_NESTED)
+sh("env: walk control, glob sub/**/* over a folder with no env file under sub, allowed: " + _ZERO_FOLDERS_GLOB,
+   _ZERO_FOLDERS_GLOB, "allow", cwd=ENVWALK_SUB_CLEAN)
+
+# rg's md type names *.mdx, and its java type names *.properties. The guard's type table lists neither, so a search
+# with one of those types is judged to read no env file and is allowed. Each tree is refused with no type, which
+# shows that it holds the env file its type should name.
+for _cmd, _cwd, _tree in (("rg --hidden -t md foo", ENVWALK_TYPE_MD, "md"),
+                          ("rg --hidden -t java foo", ENVWALK_TYPE_JAVA, "java")):
+    sh("env: walk safety hole, type glob misses the env file name, refused: " + _cmd, _cmd, "deny", "env-file",
+       cwd=_cwd)
+    sh("env: walk control, type glob, folder has no env file, allowed: " + _cmd, _cmd, "allow",
+       cwd=ENVWALK_SUB_CLEAN)
+    sh("env: walk control, " + _tree + " folder holds the env file, refused with no type: rg --hidden foo .",
+       "rg --hidden foo .", "deny", "env-file", cwd=_cwd)
+
+# rg --files lists names and reads no contents, so the walk skips a search with --files anywhere in its words.
+# Here -e takes --files as the pattern, so the search reads contents and the walk must run. The control shows that
+# a pattern given with -e walks the folder.
+_E_FILES = "rg --hidden -e --files ."
+sh("env: walk safety hole, -e takes --files as the pattern, refused: " + _E_FILES, _E_FILES, "deny", "env-file",
+   cwd=ENVWALK_HELD)
+sh("env: walk control, -e pattern with a folder named, refused: rg --hidden -e foo .", "rg --hidden -e foo .",
+   "deny", "env-file", cwd=ENVWALK_HELD)
+
+# rg -F is a switch, but the guard's flag tables leave it out. A flag in neither table may take a word, so the walk
+# fails closed and also walks the cwd, which holds the env file. src holds none, so the search is allowed. The
+# control shows that the same flag still walks a folder that holds one.
+_F_SWITCH = "rg -F --hidden foo src"
+sh("env: false alarm, rg -F is a switch the flag tables leave out, src holds no env file, allowed: " + _F_SWITCH,
+   _F_SWITCH, "allow", cwd=ENVWALK_HELD)
+sh("env: walk control, rg -F with the folder that holds the env file named, refused: rg -F --hidden foo .",
+   "rg -F --hidden foo .", "deny", "env-file", cwd=ENVWALK_HELD)
 
 
 # Select-String -NotMatch is a switch, so the next word is the pattern. A word after the pattern is a
