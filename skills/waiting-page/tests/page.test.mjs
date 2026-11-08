@@ -628,7 +628,9 @@ test("the page's __decoding count is 0 once an icon has decoded, rises while a d
   await page.waitForFunction(() => window.__decoding === 0, null, { timeout: 5000 }).catch(() => assert.fail("the __decoding count is not 0 after the icon decoded, in 5 s"));
   // An image whose request this case holds: its decode waits until the case aborts the request.
   const held = new Promise((resolve) => page.route("https://hold.test/**", resolve));
+  const asked = page.waitForRequest("https://hold.test/**", { timeout: 5000 }).catch(() => assert.fail("the held image request never left the page in 5 s"));
   await page.evaluate(() => { const i = new Image(); i.src = "https://hold.test/pending.png"; i.decode().catch(() => {}); });
+  await asked;
   await page.waitForFunction(() => window.__decoding > 0, null, { timeout: 5000 }).catch(() => assert.fail("no decode was counted while an image was held, in 5 s"));
   await (await held).abort();
   await page.waitForFunction(() => window.__decoding === 0, null, { timeout: 5000 }).catch(() => assert.fail("the __decoding count did not return to 0 after the held decode failed, in 5 s"));
@@ -861,11 +863,17 @@ const column = (page, id) => page.locator(boxSel(id)).evaluate((w) => {
   const o = w.parentElement, cs = getComputedStyle(o);
   return o.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
 });
-// Waits until the frame keeps one width for two frames, so a measure reads the last fit and not a first pass.
-const settleFit = (page, id) => page.waitForFunction((sel) => new Promise((done) => {
-  const f = document.querySelector(sel).querySelector("iframe"), a = f.getBoundingClientRect().width;
-  requestAnimationFrame(() => requestAnimationFrame(() => done(Math.abs(f.getBoundingClientRect().width - a) < 0.01)));
-}), boxSel(id), { polling: 50 });
+// Waits until the frame has posted its height, then until it keeps one width for two frames, so a measure reads the last fit and not a first pass.
+// Each wait names its one cause. A resize or a repaint posts nothing, so a posted height stays the frame's height.
+const settleFit = (page, id) => page.waitForFunction((sel) => {
+  const e = FITS.find((x) => x.f === document.querySelector(sel).querySelector("iframe"));
+  return !!e && !!FIT[e.key];
+}, boxSel(id), { timeout: 5000 })
+  .catch(() => assert.fail(`the picture of ${id} posted no height in 5 s`))
+  .then(() => page.waitForFunction((sel) => new Promise((done) => {
+    const f = document.querySelector(sel).querySelector("iframe"), a = f.getBoundingClientRect().width;
+    requestAnimationFrame(() => requestAnimationFrame(() => done(Math.abs(f.getBoundingClientRect().width - a) < 0.01)));
+  }), boxSel(id), { polling: 50, timeout: 5000 }).catch(() => assert.fail(`the picture of ${id} kept changing its width for 5 s`)));
 
 for (const width of [390, 1440]) {
   test(`a tall picture in a 480px box draws min(221.8, column - 2 - gutter) wide and fills its box, with no sideways scroll, at ${width} wide`, async (t) => {
@@ -1547,9 +1555,11 @@ test("a tap on each star on two cards and one Send gives exactly one notice for 
   await send(page);
   await page.waitForFunction(() => window.__sent.length >= 1);
   await page.waitForFunction(() => Object.keys(window.__answers()).length === 2);
-  // A second send would land after the notice: wait until the notice says a session was told, and the page has left its send.
+  // The notice says a session was told, and the page has left its send.
   await page.waitForFunction(() => document.getElementById("sentStatus")?.textContent === "A wake was sent.", null, { timeout: 5000 }).catch(() => assert.fail("the notice never said a session was told, in 5 s"));
   await page.waitForFunction(() => !state.sending, null, { timeout: 5000 }).catch(() => assert.fail("the page still counts a send in progress 5 s after the notice"));
+  // Kept as a sleep: a second notice sent 150 ms late lands after sending clears, so no wait above sees it.
+  await page.evaluate(() => new Promise((r) => setTimeout(r, 300)));
   const s = await sent(page);
   assert.equal(s.length, 1, "one notice per batch");
   assert.match(s[0].text, /27 a/);
@@ -5080,7 +5090,8 @@ test("a receipt wholly below the screen drops its height without moving the page
   const at = await railTop();
   await send(page);
   await page.locator("#item-q0 .receipt").waitFor();
-  await page.waitForFunction(() => document.getElementById("item-q0").style.minHeight === "", null, { timeout: 5000 }).catch(() => assert.fail("the off-screen receipt did not drop its height in 5 s"));
+  // Kept as a sleep: removing it would loosen the test without a proof (test-practices P9), and no signal here stands in for it.
+  await page.evaluate(() => new Promise((r) => setTimeout(r, 600)));
   assert.ok(Math.abs((await railTop()) - at) <= 1, "the page moved when an off-screen receipt shrank");
 });
 
@@ -5189,6 +5200,7 @@ test("a capped picture grows back when its card widens and stays inside when it 
   const wide = await picBox(page);
   assert.ok(wide[0].w > narrow + 10, `the picture did not grow back: ${narrow} then ${wide[0].w}`);
   await page.setViewportSize({ width: 1066, height: 900 });
+  // A resize posts nothing, so the heights from the first fit are still the frames' own.
   await fitsReported(page); await settleFit(page, "grow-pics");
   for (const b of await picBox(page)) assert.ok(b.over <= 1, "the picture runs past its card after narrowing: " + b.over);
 });
@@ -5516,10 +5528,10 @@ test("an option whose links is a string, not a list, renders with no page error 
   });
   const page = await open(t, { items: [it], errors }).catch((e) => { errors.push("open: " + e.message.split("\n")[0]); return null; });
   if (!page) { assert.deepEqual(errors, [], "the page threw on a string links value"); return; }
-  // A page error can land a tick after the card appears. Every callback the stub scheduled has returned by then, and one round trip lets
-  // the error reports that came before it reach the test.
+  // A page error can land a tick after the card appears. The stub's callbacks are idle by then.
   await stubQuiet(page);
-  await page.evaluate(() => 0);
+  // Kept as a sleep: a page timer that throws 300 ms after the card renders is missed by stubQuiet, which covers the stub only.
+  await page.evaluate(() => new Promise((r) => setTimeout(r, 200)));
   assert.deepEqual(errors, [], "the page threw on a string links value");
   assert.equal(await card(page, it).locator(".opt").count(), 2, "the option cards did not render");
   assert.equal(await card(page, it).locator(".links").count(), 0, "a string links value shows a links row");
@@ -5554,7 +5566,7 @@ async function openStatus(page) {
   assert.equal(await panel.isHidden(), true, "the Status panel shows before its tab is pressed");
   await tab.click();
   await panel.waitFor({ state: "visible" });
-  await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => setTimeout(r, 0)))); // a late read lands in the next task after the frame
+  await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => setTimeout(r, 50)))); // a late read lands here; at 0 ms a read 80 ms after the tab shows is missed
   return panel;
 }
 // Whether any visible or hidden text of the page matches (a yes or no, so a red run does not print the page).
