@@ -2766,43 +2766,57 @@ CURRENT_BRANCH_RULE = "checkout-b-current-branch"
 REMEDY_IN_WORDS = (("new branch", "new name", "reset"),)
 
 
-def held_deny(name, command, cwd, held_text):
+def held_refuse(name, command, cwd, held_text):
     """One deny case. `held_text` is the text the refusal must not carry: the held branch, or its -B form."""
     sh("same branch: " + name, command, "deny", CURRENT_BRANCH_RULE, cwd=cwd,
        lacks=(held_text, "--ignore-other-worktrees"), carries=REMEDY_IN_WORDS)
 
 
 # (a) the branch the command's own checkout holds, then (b) and (c): a branch a worktree beside it holds.
-held_deny("checkout -B of the branch it is on, from origin, is refused",
+held_refuse("checkout -B of the branch it is on, from origin, is refused",
           VCS + " checkout -B lane-x origin/lane-x", SBCUR, "lane-x")
-held_deny("switch -C of the branch it is on, from origin, is refused",
+held_refuse("switch -C of the branch it is on, from origin, is refused",
           VCS + " switch -C lane-x origin/lane-x", SBCUR, "lane-x")
-held_deny("checkout -B of the branch it is on, with no start point, is refused",
+held_refuse("checkout -B of the branch it is on, with no start point, is refused",
           VCS + " checkout -B lane-x", SBCUR, "lane-x")
-held_deny("switch -C of the branch it is on, with no start point, is refused",
+held_refuse("switch -C of the branch it is on, with no start point, is refused",
           VCS + " switch -C lane-x", SBCUR, "lane-x")
-held_deny("from a folder inside that checkout, it is refused too",
+held_refuse("from a folder inside that checkout, it is refused too",
           "cd sub && " + VCS + " checkout -B lane-x origin/lane-x", SBCUR, "lane-x")
-held_deny("-C names the checkout on that branch, checkout form, from another checkout",
+held_refuse("-C names the checkout on that branch, checkout form, from another checkout",
           VCS + " -C " + slash(SBCUR) + " checkout -B lane-x origin/lane-x", SBOTHER, "lane-x")
-held_deny("-C names the checkout on that branch, switch form, from another checkout",
+held_refuse("-C names the checkout on that branch, switch form, from another checkout",
           VCS + " -C " + slash(SBCUR) + " switch -C lane-x origin/lane-x", SBOTHER, "lane-x")
 # The pointer checkout's reset of main onto origin/main is this same form. It stays allowed there
 # (the pointer cases below pin it). A checkout on main that is NOT the pointer gets no such
 # exemption, so this form is refused here by this rule alone.
-held_deny("checkout -B main onto origin/main is refused in a checkout on main that is not the pointer",
+held_refuse("checkout -B main onto origin/main is refused in a checkout on main that is not the pointer",
           VCS + " checkout -B main origin/main", SBMAIN, "-B main")
 # The linked worktree SBLINK holds lane-q and the primary SBPRIME holds lane-p, in one clone.
-held_deny("a linked worktree: checkout -B of the branch it is on is refused",
+held_refuse("a linked worktree: checkout -B of the branch it is on is refused",
           VCS + " checkout -B lane-q origin/main", SBLINK, "lane-q")
-held_deny("a linked worktree: checkout -B of the branch the primary holds is refused",
+held_refuse("a linked worktree: checkout -B of the branch the primary holds is refused",
           VCS + " checkout -B lane-p origin/main", SBLINK, "lane-p")
-held_deny("a linked worktree: switch -C of the branch the primary holds is refused",
+held_refuse("a linked worktree: switch -C of the branch the primary holds is refused",
           VCS + " switch -C lane-p origin/main", SBLINK, "lane-p")
-held_deny("the primary: checkout -B of the branch the linked worktree holds is refused",
+held_refuse("the primary: checkout -B of the branch the linked worktree holds is refused",
           VCS + " checkout -B lane-q origin/main", SBPRIME, "lane-q")
-held_deny("the primary: switch -C of the branch the linked worktree holds is refused",
+held_refuse("the primary: switch -C of the branch the linked worktree holds is refused",
           VCS + " switch -C lane-q origin/main", SBPRIME, "lane-q")
+# THE FORMS THE PARSE READS. Each form reads its branch by its own arm of forced_branch_names: the
+# spaced and `=` forms of --force-create, and the glued forms of -B and -C. A held name in one form
+# that goes unread lets that reset through, so each form has its own refused case.
+held_refuse("forced form: switch --force-create, spaced, of the branch a linked worktree holds is refused",
+            VCS + " switch --force-create lane-q origin/main", SBPRIME, "lane-q")
+held_refuse("forced form: switch --force-create=, of the branch a linked worktree holds is refused",
+            VCS + " switch --force-create=lane-q origin/main", SBPRIME, "lane-q")
+held_refuse("forced form: checkout -B with the name glued, of the branch a linked worktree holds is refused",
+            VCS + " checkout -Blane-q origin/main", SBPRIME, "lane-q")
+held_refuse("forced form: switch -C with the name glued, of the branch a linked worktree holds is refused",
+            VCS + " switch -Clane-q origin/main", SBPRIME, "lane-q")
+# THE CONTROL for those forms: a --force-create of a name no worktree of the clone holds stays allowed.
+sh("same branch: forced form: switch --force-create of a name no worktree of the clone holds is allowed",
+   VCS + " switch --force-create lane-r origin/main", "allow", cwd=SBPRIME)
 
 # CONTROLS, EACH STAYS ALLOWED. The name is exact; the holder must sit in the same clone; a plain
 # checkout and a `switch -c` of a new name are not the rule's form at all.
