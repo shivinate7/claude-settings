@@ -1,11 +1,11 @@
 {
   "title": "A row one lane deletes from docs/debts/notes.md stays deleted when another lane in the same batch appends next to it",
   "why": "Lane notes-fix-guard-1 (session_013NEJL3G6vFtN2TjNZrMETW), 13:12 CST Nov 8: under `.gitattributes` merge=union for docs/debts/notes.md, a row one lane deletes comes back when another lane in the same batch appends next to it. Proven in a scratch repo by #1920 round 2 (sonnet): lane A deletes the last note, lane B appends after it, and the integration merge revives the row. `check_silent_undo.py --strict --upstream <base> --head integ` exits 0; it catches a revival only when the deletion is already on main. Decision notes-merge-union's text is being corrected to say so and to cite this step.",
-  "note": "Sighting (lane push-head-upstream-name, 13:39 CST Nov 8): the union driver brought deleted lines back into #1852 and #2199 today. Sighting (coordinator 14:45 CST Nov 8, from lane mcp-tools-in-guard-matcher): main holds 9 duplicate note keys in docs/debts/notes.md from union merges (for example handoff-unread, opus-plain-ask). #1687 f4fc22ad9 repairs only its own re-added lines. The 9 duplicates on main need a one-time clean-up, owned here. Sighting (coordinator 14:58 CST Nov 8): on #1471 a union-merged notes file revived rows that batch 65 retired, and the silent-undo check refused it.",
+  "note": "Sighting (lane push-head-upstream-name, 13:39 CST Nov 8): the union driver brought deleted lines back into #1852 and #2199 today. Sighting (coordinator 14:45 CST Nov 8, from lane mcp-tools-in-guard-matcher): main holds 9 duplicate note keys in docs/debts/notes.md from union merges (for example handoff-unread, opus-plain-ask). #1687 f4fc22ad9 repairs only its own re-added lines. The 9 duplicates on main need a one-time clean-up, owned here. Sighting (coordinator 14:58 CST Nov 8): on #1471 a union-merged notes file revived rows that batch 65 retired, and the silent-undo check refused it. Cause (coordinator 15:00 CST Nov 8, from step silent-undo-merge-base): lint/check_silent_undo.py reads the real merge result (`git merge-tree --write-tree upstream head`). The merge=union driver on docs/debts/notes.md (.gitattributes) brings back a note main deleted (git-rm-cached-false-alarm, deleted by batch 65) when a lane edits the next line: the \"union never removes a line one side kept\" cost in decision notes-merge-union. The fix belongs at the merge driver or the revival path, not the check.",
   "phase": "now",
   "owner": "claude-settings",
   "lane": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB) to route",
   "status": "todo",
   "order": 804,
-  "updatedAt": "2026-11-08T14:58:00-06:00"
+  "updatedAt": "2026-11-08T15:02:00-06:00"
 }
