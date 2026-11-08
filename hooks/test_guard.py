@@ -27665,11 +27665,10 @@ for _label, _check in _BRIEF_MARKER_CHECKS:
 
 
 # ---- I: the reviewer's guard marker. A reviewer on Sonnet may run a guard or check diff when its brief carries the line
-# the review record writes, `Guard or check: yes` (rule agent-role-model; owner, 2026-11-07 14:41 CST, page item 359,
-# pick a: Round 1 runs on Sonnet for guard and check diffs; Haiku stays for docs and records). The marker must start a
-# line and match case. It lifts Sonnet on any round, Round 1 included. It lifts no other role and no Opus spawn, and a
-# `no` value, a mid-line marker, a lowercase form or a line inside a fenced block lifts nothing. Its one home is
-# REVIEW_GUARD_MARKER in shared_names, read here through the file's own loader.
+# the review record writes, `Guard or check: yes` (rule agent-role-model). The marker must start a line and match case.
+# It lifts Sonnet on every review pass. It lifts no other role and no Opus spawn, and a `no` value, a mid-line marker,
+# a lowercase form or a line inside a fenced block lifts nothing. Its one home is REVIEW_GUARD_MARKER in shared_names,
+# read here through the file's own loader.
 def review_record_guard_line():
     """The `Guard or check: yes` line merge/merge.py review_body writes for a guard or check change, read from the writer
     so this file holds no copy of the text."""

@@ -2614,10 +2614,10 @@ ROLE_WORD = re.compile(r"[A-Za-z][A-Za-z-]*$")
 ROLE_FIRST_WORD = re.compile(r"\W*([A-Za-z]+)")
 ROLE_PARENTHETICAL = re.compile(r"\([^)]*\)")
 ROLE_DEFAULT = "general-purpose"
-# A reviewer brief with a `Round N of 3` marker, N in ROLE_REVIEWER_FREE_ROUNDS, may run above its row. Round 1 is ruled
-# (owner page item 359 a, 2026-11-07 14:41 CST): it runs above its row only with REVIEW_GUARD_MARKER; never add "1" here.
+# A reviewer brief with a `Round N of 3` marker, N in ROLE_REVIEWER_FREE_ROUNDS, may run above its row. The first round
+# runs above its row only with REVIEW_GUARD_MARKER (page item 359 a); never add "1" to that tuple.
 # A reviewer brief with a line that starts with REVIEW_GUARD_MARKER (a guard or check diff) may run Sonnet on any round,
-# round 1 included, with no `Round N of 3` line (owner, 2026-11-07 14:41 CST, page item 359, pick a); Opus stays refused.
+# the first round included, with no `Round N of 3` line (page item 359, pick a); Opus stays refused.
 # An Explore may run Sonnet, above its Haiku row, or Opus (opus_spawn_hit), only when its brief's first non-blank line carries
 # EXPLORE_AUDIT_MARKER (decision agent-model-cap). Case-sensitive, so lowercase prose does not count. It counts on the first line, with anything ahead of it, as BRIEF_MARKERS says; marker_hits reads it.
 from shared_names import EXPLORE_AUDIT_MARKER, REVIEW_GUARD_MARKER  # noqa: E402  the one home, shared with the spawn judge (hooks/call_judge.py)
