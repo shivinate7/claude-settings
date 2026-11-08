@@ -156,9 +156,11 @@ def failed_reviewed_read(command=REVIEWED_CMD):
     return read_run(command, ["merge: reading pulls from GitHub failed"], rc=2)
 
 
-def failed_idle_read(command=IDLE_CMD):
-    """A `merge --idle-lanes` run whose live file did not read: an unknown row, and no summary line."""
-    return read_run(command, ["unknown (the live read failed)"], rc=1)
+def failed_idle_read(command=IDLE_CMD, finished=None, why="the live read failed"):
+    """A `merge --idle-lanes` run with no summary line: an unknown row (`why`), and, when `finished` names a count, the
+    finished-lanes line after it, as a run with an unread archive list prints it. Exit 1."""
+    lines = ["unknown (%s)" % why] + ([finished_line(finished)] if finished is not None else [])
+    return read_run(command, lines, rc=1)
 
 
 def verdict_reviewed(log_path):
@@ -313,6 +315,17 @@ class BacklogCountTests(BacklogFixture, unittest.TestCase):
         records = [human("wake"), coordinator(), reviewed_read(past=0, none=0), failed_idle_read(),
                    assistant_text(report(backlog(past=0, none=0, lanes=0)))]
         self.names_unknown_for(self.run_stop(records), BACKLOG_FIELDS[2])
+
+    def test_bk_red_a_finished_line_after_an_unread_archive_list_reads_its_count(self):
+        # Catches: the third count is read only from a run that printed its archive summary, so the count a run still prints
+        # after an unread archive list (exit 1, no summary) reads unknown, and a true count of 3 is refused.
+        # The control is the same count from a run with its archive summary, which passes.
+        self.released(self.run_stop([human("wake"), coordinator(), idle_read(lanes=3), assistant_text(report(backlog(lanes=3)))]))
+        unread = [human("wake"), coordinator(), failed_idle_read(finished=3, why="the page items could not be read")]
+        self.released(self.run_stop(unread + [assistant_text(report(backlog(lanes=3)))]),
+                      "a finished count after an unread archive list was not read")
+        records = unread + [assistant_text(report(backlog(lanes=1)))]
+        self.names_value(self.run_stop(records), 3)
 
     def test_bk_red_the_third_count_reads_the_finished_line_not_the_archive_summary(self):
         # Catches: the third count reads the archive list's summary, so a count of the lanes to archive passes as the finished count.
