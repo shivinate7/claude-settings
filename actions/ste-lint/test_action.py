@@ -110,14 +110,17 @@ def make_repo(d, base, change, on_main=False):
     return work
 
 
-def shallow_of(d, work):
-    """A real depth-1 clone of the topic branch, every branch fetched at depth 1: origin/main is present, and the
-    clone holds nothing below its one commit."""
+def clone_of(d, work, depth=None, single=False):
+    """A clone of the topic branch from the remote beside it, with topic pushed first. `depth` 1 makes it shallow: the
+    clone then holds nothing below its one commit. `single` clones the topic branch alone, as a one-branch CI checkout
+    does, so origin/main is never written and a step that reads the base must fetch it. Otherwise every branch is
+    fetched, at that depth, and origin/main is present."""
     git(work, "push", "-q", "origin", "topic")
-    shallow = os.path.join(d, "shallow")
-    git(d, "clone", "-q", "--depth", "1", "--no-single-branch", "--branch", "topic",
-        "file://" + os.path.join(d, "r.git").replace("\\", "/"), shallow)
-    return shallow
+    clone = os.path.join(d, "single" if single else "shallow")
+    git(d, "clone", "-q", *(["--depth", str(depth)] if depth else []),
+        "--single-branch" if single else "--no-single-branch", "--branch", "topic",
+        "file://" + os.path.join(d, "r.git").replace("\\", "/"), clone)
+    return clone
 
 
 def run_step(d, work, env, action_dir=HERE):
@@ -132,28 +135,32 @@ def run_step(d, work, env, action_dir=HERE):
 
 def clone_facts(work, base):
     """What the clone holds before the step runs: whether it is shallow, whether refs/remotes/origin/<base> resolves,
-    and the URL of origin. A case asserts these before its outcome, so a broken fixture cannot pass for the right reason."""
+    whether origin still has the base branch, and the URL of origin. A case asserts these before its outcome, so a
+    broken fixture cannot pass for the right reason."""
     def git_text(*a):
         return subprocess.run(["git", "-C", work, *a], capture_output=True, text=True).stdout.strip()
     ref = subprocess.run(["git", "-C", work, "rev-parse", "--verify", "-q", "refs/remotes/origin/" + base],
                          capture_output=True)
+    remote = subprocess.run(["git", "-C", work, "ls-remote", "--exit-code", "--heads", "origin", base],
+                            capture_output=True)
     return {"shallow": git_text("rev-parse", "--is-shallow-repository") == "true",
             "base_ref": ref.returncode == 0,
+            "remote_base": remote.returncode == 0,
             "origin": git_text("remote", "get-url", "origin")}
 
 
 def run(scope, fail="true", base=BASE_FILES, change=default_change, on_main=False, stubs=None, shallow=False,
-        before=None, proof=None, **over):
+        single=False, before=None, proof=None, **over):
     """Build a bare remote, commit `base` on main, branch to topic (or stay on main when
     on_main), apply `change(work)`, then run the step script. `over` overrides env vars. `stubs`, the keyword
     arguments of stub_tree, runs the step from a scratch tree of stub helpers instead of this repo's. `shallow` runs
-    it in a depth-1 clone (shallow_of). `before(work)` changes the clone before the step runs, for its remote or refs.
-    `proof`, a dict, takes clone_facts of the clone at that point. CI is unset unless `over` sets it, so the CI variable
-    of the machine that runs this file never reaches a case."""
+    it in a depth-1 clone, `single` in a clone of the topic branch alone (clone_of). `before(work)` changes the clone
+    before the step runs, for its remote or refs. `proof`, a dict, takes clone_facts of the clone at that point. CI is
+    unset unless `over` sets it, so the CI variable of the machine that runs this file never reaches a case."""
     with tempfile.TemporaryDirectory(dir=RUN_FOLDER) as d:  # test-temp-standard: the run folder, never the system temp
         work = make_repo(d, base, change, on_main)
-        if shallow:
-            work = shallow_of(d, work)
+        if shallow or single:
+            work = clone_of(d, work, depth=1 if shallow else None, single=single)
         if before is not None:
             before(work)
         env = dict(os.environ, EVENT_NAME="pull_request", BASE_REF="main", DEFAULT_BRANCH="main",
@@ -1126,6 +1133,31 @@ check("fetch base: depth-1 clone, base ref missing: the clone is shallow and ref
       proof.get("shallow") is True and proof.get("base_ref") is False, str(proof))
 check("fetch base: depth-1 clone, base ref missing → base fetched and linted: finding logged, exit 1, no UNKNOWN line",
       rc == 1 and "a.md:5: STE001 " in out and not unknown_lines(out), out)
+
+# A single-branch clone writes only the topic branch's ref, so origin/main is absent from it while origin still holds the
+# base. A fetch with no destination refspec writes FETCH_HEAD alone, so the step must write refs/remotes/origin/<base>
+# to read the range. Each case asserts that shape before its outcome.
+def single_branch_cases(label, shallow, change, stubs, finding):
+    for fail in ("true", "false"):
+        proof = {}
+        rc, out = run("changed", fail, change=change, shallow=shallow, single=True, proof=proof, stubs=stubs)
+        check("fetch base: %s, fail=%s: before the step the clone is %s, origin/main absent, base on the remote"
+              % (label, fail, "shallow" if shallow else "full"),
+              proof.get("shallow") is shallow and proof.get("base_ref") is False and proof.get("remote_base") is True,
+              str(proof))
+        if finding:
+            want = 1 if fail == "true" else 0
+            check("fetch base: %s, a finding on a changed line, fail=%s → finding logged, exit %d, no UNKNOWN line"
+                  % (label, fail, want), rc == want and "a.md:5: STE001 " in out and not unknown_lines(out), out)
+        else:
+            check("fetch base: %s, fail=%s → exit 0, the changed file in scope, no UNKNOWN line" % (label, fail),
+                  rc == 0 and parts(out)["files"] == ["a.md"] and not unknown_lines(out), out)
+
+
+single_branch_cases("depth-1 single-branch clone", True, default_change, {"linter": LINT_STE}, finding=True)
+single_branch_cases("depth-1 single-branch clone, clean change", True, short_change, {}, finding=False)
+single_branch_cases("full single-branch clone, clean change", False, short_change, {}, finding=False)
+
 
 # A depth-1 clone whose remote is gone: the fetch fails, so the step names the failure. CI unset exits 0, CI set exits 1.
 for fail in ("true", "false"):
