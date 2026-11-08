@@ -7,10 +7,12 @@ import fnmatch
 import json
 import os
 import re
+import sys
 
 from guard_core import (
     _absolute, _git, _git_subcommand_index, _segment_git_c_target, basename, cap_safe, command_root, GIT_WORK_TREE_RE,
     dir_before_segment, git_calls, inline_script, inner_commands, resolve_command, resolve_default_base, segment_tokens, split_segments,
+    strip_heredoc_bodies,
 )
 import own_session  # the one home of the own get_session read, small so report_guard imports it too
 from shared_names import BUILD_TAG, LANE_TAG, TOPIC_TAG, lane_head_refs  # the one home of the lane tags and head refs, shared with the roadmap build
@@ -18,7 +20,7 @@ from guard_pointer import (
     pointer_checkout,
 )
 from guard_push_delete import (
-    push_destinations, push_refspecs, push_target, push_text,
+    push_destinations, push_refspecs, push_remote, push_target, push_text,
 )
 
 
@@ -226,6 +228,72 @@ def merge_check_reason(verdict: str, detail: str) -> str:
     if verdict == "batch":
         return MERGE_BATCH_REASON % cap_safe(detail, 160)
     return MERGE_CHECK_REASON % (verdict + (" (" + cap_safe(detail, 160) + ")" if detail else ""))
+
+
+REVIEWED_HEAD_PUSH_REASON = (
+    "Rule (Git, reviewed-head-push): this push lands on the head of an open pull request whose newest review record is "
+    "done and already carries its one fix check, so the merge tool can write no fix check for the new head (decision pr-review-record). "
+    "Remedy: stack the change on a new branch, and open its own pull request."
+)
+
+
+def _sends_nothing(specs, where: str, sha: str) -> bool:
+    """True when every source this push sends (HEAD for a bare push) is the commit `sha`, the pull request's live head."""
+    for source in [s.lstrip("+").partition(":")[0] or "HEAD" for s in specs] or ["HEAD"]:
+        found = _git(where, "rev-parse", "--verify", "-q", source + "^{commit}") if where else None
+        if found is None or found.returncode != 0 or found.stdout.strip() != sha:
+            return False
+    return True
+
+
+def reviewed_head_push_hit(args, where: str, overrides=None, first=False) -> bool:
+    """True when this push writes the head branch of an open pull request whose newest review record is done
+    and already holds its fix check (rule reviewed-head-push). Fails open, the opposite of merge_check: a tool that
+    cannot load, a failed or unreadable read, or any other error is False, with exactly one stderr line naming the rule.
+    The record is read and judged by the merge tool's own `review_comments`, `parse_review` and `review_state`, so no
+    parse or state rule is copied here. Every destination the push names is read, globs and unresolved names skipped: a push
+    of `--all`, `--mirror`, a tag alone, a deletion, or a push whose remote (named, or implied by `push_remote`) is not origin
+    is never judged. When the push is the first command (`first`), a push whose sources all equal a pull request's live head
+    sha sends nothing, and that pull request is not judged. A later push is judged as sending something: local HEAD is read
+    before the commands ahead of it run, so a chained commit would still read as the live head.
+    Reads: none from gh when the push is out of that scope; else one open pull request list, and, when a pull request
+    has the destination as its head, one paged repo-wide issue comment read."""
+    scope = push_refspecs(args)
+    if scope is None:
+        return False
+    try:
+        remote = push_remote(args, where, overrides)
+        if remote is None:
+            raise RuntimeError("the push remote could not be read")
+        if remote != "origin":
+            return False
+        module = merge_module()
+        if module is None:
+            raise RuntimeError("the merge tool could not be loaded")
+        branches = {b for b in push_destinations(args, where, overrides) if b and "*" not in b}
+        if not branches:
+            return False
+        host = module.Host(repo=None, cwd=where or None)
+        with module.shared_deadline(MERGE_READ_TIMEOUT):
+            rows = [d for d in host.pages("pulls", fields={"state": "open"})
+                    if d["head"]["ref"] in branches
+                    and not (first and _sends_nothing(scope[1], where, d["head"]["sha"]))]
+            if not rows:
+                return False
+            since = min(str(d.get("created_at") or "1970-01-01T00:00:00Z") for d in rows)
+            found = host.review_comments(since)
+        for row in rows:
+            n, sha = row["number"], row["head"]["sha"]
+            records = found.get(n, [])
+            rec = module.parse_review(records[-1]) if records else None
+            if (rec and rec["n"] == n and rec["head"] == sha and rec["fix"] is not None
+                    and module.review_state(rec, sha)[0] == "done"):
+                return True
+        return False
+    except (Exception, SystemExit) as e:
+        print("guard: reviewed-head-push could not read the pull request, so the push goes through: "
+              + cap_safe(" ".join(str(e).split()), 160), file=sys.stderr)
+        return False
 
 
 def _merge_config_at(root: str):
@@ -930,9 +998,14 @@ def _push_calls(segment: str, script: str, cwd: str):
     inner = inner_commands(tokens) if tokens else []
     if inner:
         inner_cwd = push_target(segment, script, cwd)[0] or cwd
+        from guard_env import substitution_commands   # imported late: a family reads only the families before it
         for text in inner:
-            for part in split_segments(text):
-                yield from _push_calls(part, text, inner_cwd)
+            # The shell reads the wrapped script as it reads a command: a heredoc body is data, and
+            # each `$( )` or backtick text runs as a command of its own (judge_shell does the same).
+            stripped = strip_heredoc_bodies(text)
+            for each in (stripped, *substitution_commands(text, stripped)):
+                for part in split_segments(each):
+                    yield from _push_calls(part, each, inner_cwd)
 
 
 def record_writer_hit(stripped: str, cwd: str, transcript: str, record_branch_of, read_verb) -> str:
