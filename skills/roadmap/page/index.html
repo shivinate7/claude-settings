@@ -470,6 +470,8 @@ const GLYPH = {
 const glyph = s => `<span class="g">${GLYPH[s]||GLYPH.todo}</span>`;
 /* The stalled band's script sets this. A stalled or paused step is drawn Stalled or Paused, never In progress. */
 let stallKind = () => '';
+/* A stalled or paused step keeps status active, so a count or a mark that reads the status alone calls it In progress. */
+const shownState = s => s.status==='active' && stallKind(s.id) || s.status;
 
 /* ---------- state ---------- */
 let db = null, steps = [], topics = null, cull = null, phases = null, advisor = null;
@@ -550,7 +552,7 @@ function delta(cur,ref,{downGood=true,pctMode=false,neutral=false}={}){
 
 /* ---------- where you are ---------- */
 function renderNow(){
-  const cur=curPhase(), ss=byPhase(cur.k), done=ss.filter(s=>s.status==='done').length, act=ss.filter(s=>s.status==='active').length;
+  const cur=curPhase(), ss=byPhase(cur.k), done=ss.filter(s=>s.status==='done').length, act=ss.filter(s=>shownState(s)==='active').length;
   const tot=steps.length, tdone=steps.filter(s=>s.status==='done').length;
   const active=workOrder(steps.filter(s=>s.status==='active')), nu=nextUp(), off=offTrack();
   const w = n => ss.length ? n/ss.length*100 : 0;
@@ -572,7 +574,7 @@ function renderNow(){
 function renderRail(){
   const cur=curPhase(), shown=shownPhase();
   $('#rail').innerHTML = PH.map(p=>{
-    const ss=byPhase(p.k), d=ss.filter(s=>s.status==='done').length, a=ss.filter(s=>s.status==='active').length, b=ss.filter(s=>s.status==='blocked').length;
+    const ss=byPhase(p.k), d=ss.filter(s=>s.status==='done').length, a=ss.filter(s=>shownState(s)==='active').length, b=ss.filter(s=>s.status==='blocked').length;
     const w=n=>ss.length?n/ss.length*100:0;
     return `<button data-phase="${p.k}" aria-pressed="${p.k===shown}" aria-label="${esc(p.n)}: ${d} of ${ss.length} done${p===cur?', current phase':''}"><div class="nm"><span>${esc(p.n)}${p===cur?'<span class="here" title="Current phase: the first with work left"></span>':''}</span><span class="num">${d}/${ss.length}</span></div>
       <div class="bar">${segs(d,a,b,ss.length)}</div></button>`;
@@ -658,7 +660,7 @@ function defaultPage(list){ const ix=list.findIndex(s=>s.status!=='done'); retur
 
 function renderPhase(){
   const k=shownPhase(), p=PH.find(x=>x.k===k), ss=byPhase(k), cur=curPhase();
-  const open=openList(k), done=doneList(k), d=done.length, a=ss.filter(s=>s.status==='active').length;
+  const open=openList(k), done=doneList(k), d=done.length, a=ss.filter(s=>shownState(s)==='active').length;
   const nextIds = nextUp().map(s=>s.id), size=pageSize();
   const pages=Math.max(1,Math.ceil(open.length/size));
   if(ui.page[k]==null) ui.page[k]=defaultPage(open);
@@ -724,12 +726,12 @@ function burnCard(){
   return `<div class="card"><header><h3>Steps done, running total</h3><span class="lbl"><span class="num">${cum[cum.length-1]}</span> of <span class="num">${steps.length}</span></span></header>
     <div class="burn">${s}</div><div class="legend"><span><span class="dot" style="border-radius:2px"></span> done so far</span><span><span class="dot" style="background:var(--line-2);border-radius:2px"></span> steps changed that day</span></div></div>`;
 }
-const KIND = s => s.status==='done'?'Done':s.status==='active'?'In progress':s.status==='blocked'?'Blocked':'Updated';
+const KIND = s => s.status==='done'?'Done':shownState(s)==='stalled'?'Stalled':shownState(s)==='paused'?'Paused':s.status==='active'?'In progress':s.status==='blocked'?'Blocked':'Updated';
 function feedCard(n=8){
   const recent=steps.filter(s=>when(s.updatedAt)).sort((a,b)=>when(b.updatedAt)-when(a.updatedAt)).slice(0,n);
   if(!recent.length) return '';
   return `<div class="card"><header><h3>Latest changes</h3><span class="lbl">${dayLabel(new Date())}</span></header>
-    <ul class="feed">${recent.map(s=>`<li><span class="when">${fresh(s.updatedAt)?timeLabel(when(s.updatedAt)):ago(s.updatedAt)}</span><span class="what"><span class="kind ${s.status}">${KIND(s)}</span> · <button data-go="${esc(s.id)}"><span class="id">${esc(s.id)}</span> ${esc(s.title)}</button></span></li>`).join('')}</ul>
+    <ul class="feed">${recent.map(s=>`<li><span class="when">${fresh(s.updatedAt)?timeLabel(when(s.updatedAt)):ago(s.updatedAt)}</span><span class="what"><span class="kind ${shownState(s)}">${KIND(s)}</span> · <button data-go="${esc(s.id)}"><span class="id">${esc(s.id)}</span> ${esc(s.title)}</button></span></li>`).join('')}</ul>
     <button class="morelink" data-view-go="log">All changes by day →</button></div>`;
 }
 function renderSide(){
@@ -749,7 +751,7 @@ function renderLog(){
     const all=ev.filter(e=>dayKey(e.d)===g.k), nd=all.filter(e=>e.s.status==='done').length, cont = gi===0 && before===g.k;
     return `<div class="day"><h3><span>${dayLabel(g.d)}${cont?' <span class="lbl">continued</span>':''}</span><span class="lbl">${perDay[g.k]} change${perDay[g.k]===1?'':'s'}${nd?` · <span style="color:var(--good)">${nd} done</span>`:''}</span></h3>
     ${g.list.map(e=>{ const s=e.s;
-      return `<div class="ev ${s.status}"><span class="when">${timeLabel(e.d)}</span>${glyph(s.status)}<div><span class="kind ${s.status}">${KIND(s)}</span> · <button data-go="${esc(s.id)}"><span class="id">${esc(s.id)}</span> <span class="t">${esc(s.title)}</span></button>
+      return `<div class="ev ${s.status}"><span class="when">${timeLabel(e.d)}</span>${glyph(shownState(s))}<div><span class="kind ${shownState(s)}">${KIND(s)}</span> · <button data-go="${esc(s.id)}"><span class="id">${esc(s.id)}</span> <span class="t">${esc(s.title)}</span></button>
         <div class="gist">${esc(firstSentence(s.note)||firstSentence(s.why))}</div></div></div>`; }).join('')}</div>`;
   }).join('')}${pager('log',pg,pages,ev.length,'changes')}</section>
   <p class="lead" style="padding:8px 2px">Each step shows once, on the day it last changed.</p>`;
