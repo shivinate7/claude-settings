@@ -1,0 +1,11 @@
+{
+  "title": "The export check takes the page writer only from the page being exported",
+  "phase": "guards",
+  "status": "todo",
+  "order": 673,
+  "owner": "coordinator",
+  "lane": "",
+  "why": "hooks/feedback_guard.py export_check still takes the page writer from a meta/page get on any page (writer_is with no page test). The coming nfp-inbox-url-order PR narrows the close check and the report guard but not this one, because hooks/test_waiting_export.py case N6b expects a block from another page's writer (lane notes-fix-page (session_013NEJKzjkypcToggneCjJN8), 08:23 CST Nov 8).",
+  "note": "First step: the lane runs the stale-test protocol on N6b (outcomes-stale-decision-protocol): name the record and sentence N6b pins, say whether it is measured, and bring the fix to the owner through triage. Then narrow writer_is to the exported page. Done check: a red test where another page's writer no longer blocks the export check. Build lane. Filed by triage 08:25 CST Nov 8.",
+  "updatedAt": "2026-11-08T08:25:00-06:00"
+}

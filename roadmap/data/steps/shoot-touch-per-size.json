@@ -6,6 +6,6 @@
   "owner": "coordinator",
   "lane": "session_013NEJL3cfg1yrBuezf45D4i",
   "why": "bin/shoot sets no hasTouch per size, and a full-page shot drops it (#2028, review note 10; lane notes-fix-page (session_013NEJKzjkypcToggneCjJN8), 08:12 CST Nov 8). A phone-size shot without touch can hide a touch-only layout defect.",
-  "note": "Done check: a red test where a phone-size shot, full-page included, reports hasTouch true. A check's verdict changes, so this is a build lane. Filed by triage 08:14 CST Nov 8. Started by the coordinator 08:16 CST Nov 8 in lane session_013NEJL3cfg1yrBuezf45D4i. Owner question on page item 423 (shoot-touch-width), 08:24 CST Nov 8: which widths count as touch; the lane builds option a (under 1024 px) meanwhile. Probe fact from the lane: Chromium's full-page capture always drops the touch match, so the lane stitches viewport tiles for touch sizes.",
-  "updatedAt": "2026-11-08T08:20:00-06:00"
+  "note": "Done check: a red test where a phone-size shot, full-page included, reports hasTouch true. A check's verdict changes, so this is a build lane. Filed by triage 08:14 CST Nov 8. Started by the coordinator 08:16 CST Nov 8 in lane session_013NEJL3cfg1yrBuezf45D4i. Owner question on page item 423 (shoot-touch-width), 08:24 CST Nov 8: which widths count as touch; the lane builds option a (under 1024 px) meanwhile. Probe fact from the lane: Chromium's full-page capture always drops the touch match, so the lane stitches viewport tiles for touch sizes. Page item 423 withdrawn 08:29 CST: the coordinator took option a as its own pick at 08:22 CST, process only (rule parallelism-keep-going; the cutoff can be undone). Under 1024 px is touch, with no per-repo override key.",
+  "updatedAt": "2026-11-08T08:25:00-06:00"
 }
