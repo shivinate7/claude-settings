@@ -1674,11 +1674,12 @@ CANNOT_WRITER_RE = re.compile(r"\b(?:I|we)(?:\s+%s)*\s+$" % _ADVERB, re.I)
 _CHECK_WORD = r"(?:tried|ran|returned|refused|denied|failed|errored|returns|refuses|denies|rejects|fails|errors)"
 CANNOT_CHECK_WORD_RE = re.compile(_CHECK_WORD, re.I)
 _BACK = r"(?:sent|came|gave|given|comes|sends|gives|come)\s+back"  # "sent back 403": a status the call answered with
+# An HTTP status: a 4xx or 5xx that no hyphen joins and no unit follows ("450 files" and "a 450-line diff" are sizes).
+_STATUS = r"[45]\d\d\b(?![-\w])(?!\s+(?:lines?|files?|words?|chars?|commits?|bytes?|[km]b|ms)\b)"
 CANNOT_CHECK_RE = re.compile(
     r"`[^`\n]+`|\bmcp__\w+|\b" + _CHECK_WORD + r"\b|\bexit(?: code)? [1-9]"
     r"|(?:\b(?:HTTP(?:/[\d.]+)?|status|returned|answered|code|error|got|with|gave|hit|a|" + _BACK + r")\s+(?:a\s+)?"
-    r"|(?:[(:,;—–]|\s-{1,2})\s*)[45]\d\d\b(?![-\w])"
-    r"(?!\s+(?:lines?|files?|words?|chars?|commits?|bytes?|[km]b|ms)\b)",
+    r"|(?:[(:,;—–]|\s-{1,2})\s*)" + _STATUS,
     re.I)
 # With a failed try of the act in the turn, the line may name its check as a reason instead. A reason is a clause of three
 # words or more with a verb (is, was, not, rejected ...), read only after the phrase: in parentheses, after a colon, a
@@ -1694,7 +1695,7 @@ CANNOT_VERB_RE = re.compile(
 
 
 # "sent back", "came back" or "gave back" before a status is a verb of a reason: "the server sent back 403".
-CANNOT_BACK_STATUS_RE = re.compile(r"\b" + _BACK + r"\s+(?:a\s+)?[45]\d\d\b(?![-\w])", re.I)
+CANNOT_BACK_STATUS_RE = re.compile(r"\b" + _BACK + r"\s+(?:a\s+)?" + _STATUS, re.I)
 # A word in -ed right after one of these is an adjective ("a protected branch"), not a verb.
 CANNOT_DETERMINER_RE = re.compile(r"^(?:a|an|the|this|that|these|those|its|their|his|her|our|my|your)$", re.I)
 
@@ -1955,10 +1956,11 @@ def _script_tries(tokens):
 
 
 def _gh_target(verb, args, branch=""):
-    """The target of a `gh pr <verb>` call, '' when it names none (an empty target is unknown and cancels nothing). A
-    create names no PR, so its target is its --head branch, else `branch` (the branch the same command checked out), else
-    unknown. Any other verb names its PR by number or URL wherever it sits among the flags, else by its first plain
-    argument; a number is qualified by its --repo, so a PR of another repo is another target."""
+    """The target of a `gh pr <verb>` call. A create names no PR, so its target is its --head branch, else `branch` (the
+    branch the same command checked out). Any other verb names its PR by number or URL wherever it sits among the flags,
+    else by its first plain argument; a number is qualified by its --repo, so a PR of another repo is another target. A
+    call that names no target is keyed by its own arguments, tagged so they match no named target: an identical retry is
+    the same call, and a call with other arguments is not. A call with no arguments has the empty target ''."""
     flags = {"--head": "head", "-H": "head", "--repo": "repo", "-R": "repo"}
     named, plain = {}, []
     for k, token in enumerate(args):
@@ -1969,12 +1971,13 @@ def _gh_target(verb, args, branch=""):
             continue
         else:
             plain.append(token)
+    own = "args " + " ".join(args) if args else ""
     if verb == ["create"]:
-        return named.get("head") or branch
+        return named.get("head") or branch or own
     for token in plain:
         if re.fullmatch(r"#?\d+", token) or "/pull/" in token:
             return (named["repo"] + "#" if named.get("repo") and "/pull/" not in token else "") + token.lstrip("#")
-    return (named["repo"] + "#" if named.get("repo") and plain else "") + (plain[0] if plain else "")
+    return (named["repo"] + "#" if named.get("repo") else "") + plain[0] if plain else own
 
 
 def _checked_out(segment):
@@ -1993,7 +1996,7 @@ def _segment_tries(segment, branch=""):
     name table acts), git push, merge, fetch and ls-remote, curl, wget or httpie to github.com, and a command or script
     whose name holds an act word (_script_tries). The key is the
     program, its verb and the target the call names (a PR number, a branch or a URL), so a later success cancels only
-    a failure of the same call. A gh pr call that names no target has an empty one (_gh_target), which cancels nothing;
+    a failure of the same call. A gh pr call that names no target is keyed by its own arguments (_gh_target);
     `branch` is the branch an earlier segment of the same command checked out, the target of a create with no --head.
     A segment with --dry-run is no try."""
     tokens = guard.segment_tokens(segment) or segment.split()
@@ -2072,8 +2075,8 @@ def _call_tries(use, text):
 def failed_tries(records, refused=(), recovered=None):
     """{act: {key, ...}} for each failed tool try in `records`, sidechains skipped. A call failed when its result has
     is_error, an exit code above zero as a shell result reports it, or an HTTP 4xx or 5xx (CANNOT_FAIL_RE). A later call
-    that did not fail cancels the earlier failures of the same act and key (the same program, verb and target, which a gh pr
-    call with no known target lacks); a relay's
+    that did not fail cancels the earlier failures of the same act and key (the same program, verb and target). A gh pr
+    act verb (CANNOT_GH_PR_ACTS) with no arguments has the empty target, which is no identity and cancels nothing; a relay's
     text is no call of its own, so it cancels nothing. A tool in `refused` (the classifier's refusals file) counts as a
     failed try. When `recovered` is a set, each act whose failure a later call cancelled is added to it."""
     uses, tries = {}, {}
@@ -2094,8 +2097,8 @@ def failed_tries(records, refused=(), recovered=None):
                     tries.setdefault(act, set()).add(key)
             elif not _is_relay(use):
                 for act, key in found:
-                    if key[0].startswith("gh pr") and not key[1]:  # an unknown target is no identity: it cancels nothing
-                        continue
+                    if not key[1] and key[0].startswith("gh pr ") and key[0][6:] in CANNOT_GH_PR_ACTS:
+                        continue  # a bare `gh pr merge` or `gh pr create` names no PR: it cancels nothing
                     if key in tries.get(act, ()) and recovered is not None:
                         recovered.add(act)
                     tries.get(act, set()).discard(key)
