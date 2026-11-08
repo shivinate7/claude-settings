@@ -14,11 +14,13 @@
                           Cost per draft-step ready: one ci-job run and one worktree; the run time is unmeasured for a step subset
                           (the 1200 s lint bound applies). No new file but ci-job's own log.
                           On a ready PR a stale records page with no claim to make or resume is refused before any push; only the draft step heals it.
-                          Both the draft step and a ready --confirm (before the lock), and the preview, run the handed-lane check: an integration PR's
-                          body names every handed lane PR (open, newest review record done) on its `Lanes:` line, or on a `Dropped`, `Held` or
-                          `Next batch` line with a reason; one that is not named refuses, nothing pushed, locked or marked ready. Cost, on a draft step
-                          or a ready confirm only: reviewed_read's reads (two list reads, and three gh calls per ready PR with a record), plus one compare
-                          per handed PR against the integration head and one against the base. No new process, file or timer.
+                          The draft step, a ready --confirm (before the lock) and the preview run the handed-lane check. A body with a `Lanes:`
+                          line must name every handed lane PR (open, newest review record done): on that line, or on a `Dropped`, `Held` or
+                          `Next batch` line with a reason; one not named refuses, nothing pushed, locked or marked ready. A body with no `Lanes:`
+                          line makes no gh read: a head that merges lanes (local git, in the worktree the path already opens) refuses.
+                          Cost: with a `Lanes:` line, reviewed_read's reads (two list reads, and three gh calls per ready PR with a record), plus
+                          one compare per handed PR against the integration head and one against the base. Without one, one local `git log`.
+                          No new process, file or timer.
   merge --unlock [branch] remove the merge lock on the branch (default: the default branch). Never checks the holder. A cloud run reads the lock first and skips one already released.
   merge <pr> --review-record --head SHA --kind K --guard yes|no [--round N:ROLE:MODEL:VERDICT ...]
                           [--fix-check HEAD:reviewer:MODEL:PASS|FAIL] [--net-value V]
@@ -2842,6 +2844,11 @@ def preview(root, cfg, cfgrel, n, host, lock, info=None, unknown_ok=""):
     tmp, wt = open_worktree(root, info, base)  # the same tree confirm checks
     try:
         try:
+            handed_local(wt, f"origin/{base}", n, info)
+        except Unnamed as e:  # one greppable line, as for a dropped line; the detail follows
+            say("BLOCKED: " + " ".join(str(e).split()))
+            raise
+        try:
             undo_check(wt, f"origin/{base}", unknown_ok, info.get("body", ""), lambda url: host.cited_run(url), info["head"])
             debt_check(wt, f"origin/{base}", host, info)
             refuse_dropped_lane(wt, f"origin/{base}", info["head"], unknown_ok)
@@ -2929,6 +2936,7 @@ def draft_step(root, cfg, n, host, info):
     if default or checks:  # one worktree, one open_worktree call, on either base
         tmp, wt = open_worktree(root, info, base)
         try:
+            handed_local(wt, f"origin/{base}", n, info)  # before any push or ready check
             if not default:
                 run_ready_checks(wt, n, base, checks)
             else:
@@ -2971,7 +2979,7 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
     base_ref = f"origin/{base}"
     if info["draft"]:  # the records step: no lock, no claim, no wait, never a merge
         return draft_step(root, cfg, n, host, info)
-    counted = handed_check(host, n, host.pr(n))  # a fresh read of the body, before the lock, any claim or any merge
+    counted = handed_check(host, n, info)  # before the lock, any claim or any merge; a body with no Lanes line is read in the worktree, below
     if counted:
         say(counted)
     lock.holder = {"pr": n, "branch": info["branch"], "session": session}
@@ -2995,6 +3003,7 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
             raise Stop(busy + " Nothing was claimed or pushed.")
         branch = info["branch"]
         tmp, wt = open_worktree(root, info, base)
+        handed_local(wt, base_ref, n, info)
         record_lift(lifts, UNDO_FLAG, undo_check(wt, base_ref, unknown_ok, info.get("body", ""), lambda url: host.cited_run(url), info["head"]))
         debt_check(wt, base_ref, host, info)
         record_lift(lifts, UNDO_FLAG, refuse_dropped_lane(wt, base_ref, info["head"], unknown_ok))
@@ -3408,22 +3417,22 @@ def body_lanes(body):
 
 def handed_check(host, n, info):
     """The handed-lane check: the integration PR `n` names every handed lane PR in its body (decision batch-body-names-handed).
+    It applies only when the body has a `Lanes:` line; with none it reads nothing and returns None (handed_local reads the head instead).
     A handed PR is an open PR on the same base whose newest review record reads done (reviewed_read's done set), less `n` and less one whose
-    head the base already holds. The PR is an integration PR when its body has a `Lanes:` line or its head holds a handed head; otherwise the
-    check does not apply and returns None. A handed PR whose head the integration head holds is in the batch and must be on the Lanes line;
-    any other must be on a left-out line with a reason; each PR on the Lanes line must be in the head. A finding raises Unnamed, one line per PR.
+    head the base already holds. One whose head the integration head holds is in the batch and must be on the Lanes line; any other must be
+    on a left-out line with a reason; each PR on the Lanes line must be in the head. A finding raises Unnamed, one line per PR.
     A failed read raises Stop: unknown is never a pass. -> the count line when every handed PR is named.
     Cost: reviewed_read's reads (two list reads and three gh calls per ready PR with a record), one compare per handed PR against the
     integration head and one against the base. No new process, file or timer."""
+    lanes, left = body_lanes(info.get("body") or "")
+    if lanes is None:
+        return None
     base, head = info["base"], info["head"]
     done = reviewed_read(host)
     rows = {d["number"]: d["head"]["sha"] for d in done[2]}
     handed = [m for m in sorted({m for m, b in done[1] if b == base}) if m != n and m in rows and not host.holds_head(rows[m], base)]
     in_batch = {m for m in handed if host.holds_head(rows[m], head)}
-    lanes, left = body_lanes(info.get("body") or "")
-    if lanes is None and not in_batch:
-        return None
-    named = set(lanes or [])
+    named = set(lanes)
     found = {}
     for m in handed:
         if m in in_batch and m not in named:
@@ -3441,6 +3450,22 @@ def handed_check(host, n, info):
         raise Unnamed(f"{named_lines}\nName each in the body of #{n}: on the {BATCH_LANES} line, or on a {'/'.join(BATCH_LEFT_OUT)} line with a reason. "
                       f"Nothing was pushed, marked ready, locked, claimed or merged. {HANDED_CITE}")
     return f"merge: handed-lane check: {len(named)} lanes in the batch, {len(left)} named as left out."
+
+def handed_local(wt, base_ref, n, info):
+    """The handed-lane check for a body with no `Lanes:` line, in the worktree `wt` of the head: local git, no gh read. A head that merges
+    lane tips (read_lanes) is an integration head, so the missing Lanes line refuses. A read that fails raises Stop: unknown is never a pass.
+    A body with a Lanes line is handed_check's. Cost: one `git log`."""
+    if body_lanes(info.get("body") or "")[0] is not None:
+        return
+    try:
+        tips = read_lanes(wt, base_ref, info["head"])[0]
+    except Exception as e:
+        raise Stop(f"the handed-lane check could not read the merge commits of #{n} ({type(e).__name__}: {e}). Unknown is not a pass. "
+                   f"Nothing was pushed, marked ready, locked, claimed or merged. {HANDED_CITE}")
+    if tips:
+        raise Unnamed(f"the head of #{n} merges lanes (tip {', '.join(sorted(t[:9] for t in tips))}) but the body has no {BATCH_LANES} line.\n"
+                      f"Name each lane on a {BATCH_LANES} line, and each handed lane left out on a {'/'.join(BATCH_LEFT_OUT)} line with a reason. "
+                      f"Nothing was pushed, marked ready, locked, claimed or merged. {HANDED_CITE}")
 
 def default_branch(root):
     """The default branch of the checkout `root`: origin/HEAD first, else the repo's default branch as gh reads it (host_default_branch).
