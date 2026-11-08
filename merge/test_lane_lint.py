@@ -705,6 +705,33 @@ class LaneLint(CiJobStub, tm.CloudSession):
         pin, roots, rc, out = self.lint_in_trace_env({"GIT_TRACE2_EVENT": path})
         self.assert_lint_passed_on_real_root(pin, roots, rc, out)
         self.assertTrue(os.path.exists(path) and os.path.getsize(path) > 0, "GIT_TRACE2_EVENT named a path, and no trace was written to it: " + out)
+        # Root discovery and the probe also write to the file, so a count of events proves little. `worktree add` only a git() call runs.
+        self.assertTrue(any(argv[i:i + 2] == ["worktree", "add"] for argv in self.git_argvs(path) for i in range(len(argv) - 1)),
+                        "the trace holds no `git worktree add`, which only a git() call runs, so git() dropped the path-valued trace variable: " + out)
+
+    def test_git_trace_variables_set_to_a_stderr_or_stdout_path_leave_the_git_reads_clean_and_the_lint_passes(self):
+        # A value that names stderr or stdout is an absolute path, so the git helper keeps it, and the trace then joins its combined read.
+        for name in ("GIT_TRACE", "GIT_TRACE2", "GIT_TRACE2_EVENT"):
+            for target in ("/dev/stderr", "/dev/fd/2", "/proc/self/fd/2", "/dev/stdout"):
+                with self.subTest(name=name, target=target):
+                    expect = tm.sh(self.co, "git", "rev-parse", "HEAD")
+                    with unittest.mock.patch.dict(os.environ, {name: target}):
+                        read = merge.git(self.co, "rev-parse", "HEAD")
+                    self.assertEqual(read, (0, expect), "merge.git() read is not the sha alone with %s=%s: %r" % (name, target, read))
+                    self.assert_lint_passed_on_real_root(*self.lint_in_trace_env({name: target}))
+
+    def test_a_git_trace_in_the_environment_leaves_the_branch_read_on_the_branch_alone(self):
+        # The no-selector branch read (Host.pr_number) reads `git rev-parse --abbrev-ref HEAD` stdout only. A trace line on stderr must
+        # not join the branch name, or the read matches no open pull request and merge stops with a false count.
+        branch = tm.sh(self.co, "git", "rev-parse", "--abbrev-ref", "HEAD")
+        host = merge.Host(["checks"], "main", minute=60, now=lambda: 0.0, pause=lambda s: None, cwd=self.co)
+        host.pages = lambda rel, key=None, fields=None: [{"number": 7, "head": {"ref": branch}}]  # the pull request list is not this case's claim
+        with unittest.mock.patch.dict(os.environ, {"GIT_TRACE": "1"}):
+            try:
+                number = host.pr_number(None)
+            except merge.Stop as e:
+                self.fail("the branch read under GIT_TRACE=1 refused, so it read more than the branch: %s" % e)
+        self.assertEqual(number, 7, "the branch read under GIT_TRACE=1 named another pull request")
 
     def test_lint_unknown_ok_does_not_lift_a_failed_unshallow_fetch(self):
         pin = self.make_shallow_lane()
