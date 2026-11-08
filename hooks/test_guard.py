@@ -588,6 +588,9 @@ PUSHLANEMASTER = os.path.join(ROOT, "pushlanemaster")
 PUSHSELF = os.path.join(ROOT, "pushself")
 PUSHMAINUP = os.path.join(ROOT, "pushmainup")  # main itself, tracking origin/main
 PUSHSTACK = os.path.join(ROOT, "pushstack")    # lane/fix cut from origin/lane/base: its upstream is another lane
+# Owner ruling 432 a. PUSHOWNREF is `lane-x`, tracking origin/batch-1, and origin/lane-x exists too. The stray rule
+# reads that ref as a destination already on the remote, so an implied push to its own name is silent there.
+PUSHOWNREF = os.path.join(ROOT, "pushownref")
 # Rule push-main reads the remote a push names (ruling 207 a, judged on its URL). Every push fixture's origin is
 # PUSHREMOTE, a network URL the guard never contacts, so the existing push-main asks keep their meaning.
 # PUSHLOCAL has a local origin (a bare path), PUSHSSH an scp-form origin, and PUSHNOREMOTE no remote at all.
@@ -1936,9 +1939,18 @@ def _build_push():
     run_vcs(PUSHMAINUP, "update-ref", "refs/remotes/origin/main", "HEAD")
     run_vcs(PUSHMAINUP, "branch", "--set-upstream-to=origin/main", "main")
 
+    # Owner ruling 432 a. Its own name is on origin, so the implied pushes to it are silent. Built by git itself.
+    make_repo(PUSHOWNREF, {"base.txt": "base\n"})
+    run_vcs(PUSHOWNREF, "remote", "add", "origin", PUSHREMOTE)
+    run_vcs(PUSHOWNREF, "update-ref", "refs/remotes/origin/batch-1", "HEAD")
+    run_vcs(PUSHOWNREF, "update-ref", "refs/remotes/origin/lane-x", "HEAD")
+    run_vcs(PUSHOWNREF, "checkout", "-q", "-b", "lane-x")
+    run_vcs(PUSHOWNREF, "branch", "--set-upstream-to=origin/batch-1", "lane-x")
+
     for where, upstream in ((PUSHSTRAY, "origin/lane/x"), (PUSHSELF, "origin/feat"),
                             (PUSHLANE, "origin/main"), (PUSHLANEMASTER, "origin/master"),
-                            (PUSHSTACK, "origin/lane/base"), (PUSHMAINUP, "origin/main")):
+                            (PUSHSTACK, "origin/lane/base"), (PUSHMAINUP, "origin/main"),
+                            (PUSHOWNREF, "origin/batch-1")):
         got = run_vcs(where, "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}").stdout.strip()
         if got != upstream:
             sys.exit("fixture setup failed in build_fixtures: %r needs upstream %s, reads %r"
@@ -1951,6 +1963,13 @@ def _build_push():
             or run_vcs(PUSHSTRAY, "config", "--get", "push.default").stdout.strip() != "simple"):
         sys.exit("fixture setup failed in build_fixtures: PUSHSTRAY needs remotes fork and origin "
                  "and push.default simple")
+    # Scope before subject (P7). The stray controls need origin/mylocal absent in PUSHSTRAY, and the ruling 432 a
+    # red rows need origin/lane-x present in PUSHOWNREF. Each is read back, so no case judges a fixture without it.
+    for where, ref, present in ((PUSHSTRAY, "refs/remotes/origin/mylocal", False),
+                                (PUSHOWNREF, "refs/remotes/origin/lane-x", True)):
+        if (run_vcs(where, "rev-parse", "-q", "--verify", ref).returncode == 0) != present:
+            sys.exit("fixture setup failed in build_fixtures: %r needs %s %s"
+                     % (where, ref, "present" if present else "absent"))
 
     # The agent-worktree names and their near misses (rule push-agent-branch). Each reads back its own name
     # in HEAD and no upstream, so a case judges the name it names and nothing inherited.
@@ -2285,7 +2304,7 @@ lazy_fixture([BRANCHREMOTE, BRANCHREPO, BRANCHFALLBACKMAIN, BRANCHFALLBACKMASTER
              _build_branch)
 lazy_fixture([PUSHFEAT, PUSHMAIN, PUSHTRUNK, PUSHTRUNKLOCAL, PUSHNOHEAD, PUSHDETACHED, PUSHSAMETAG, PUSHDANGLING, PUSHNOHEADMAIN,
               PUSHONLYMASTER, PUSHUPSTREAM, PUSHUP, PUSHUPSELF, PUSHNOUP, PUSHMATCH, RECROADMAP, RECFORK,
-              PUSHSTRAY, PUSHLANE, PUSHLANEMASTER, PUSHSELF, PUSHMAINUP, PUSHSTACK,
+              PUSHSTRAY, PUSHLANE, PUSHLANEMASTER, PUSHSELF, PUSHMAINUP, PUSHSTACK, PUSHOWNREF,
               PUSHLOCAL, PUSHSSH, PUSHNOREMOTE,
               PUSHAGENT, PUSHAGENTWT, PUSHAGENTBARE, PUSHAGENTNOTES, PUSHAGENTMYABC, PUSHAGENTMYHEX,
               PUSHAGENTSHORT, PUSHAGENTEIGHT, PUSHAGENTCFG],
@@ -7120,10 +7139,11 @@ sh("push: a force push inside a loop's do-block still counts",
    "while true; do " + VCS + " push --force; done", "deny", "force-push", cwd=PUSHFEAT,
    carries=REMEDY)
 
-# ASK, owner rulings 206 a. An implied destination (a bare push, HEAD, @, or a
-# colon-less refspec naming the current branch) that lands off the branch's upstream asks, unless the push
-# carries -u and names the local branch (the silent cases below). PUSHSTRAY is `mylocal`, whose upstream is
-# origin/lane/x.
+# ASK, owner rulings 206 a and 432 a. An implied destination (a bare push, HEAD, @, or a colon-less refspec
+# naming the current branch) that lands off the branch's upstream asks while the destination is not yet on
+# origin, that is, no refs/remotes/origin/<name> (ruling 432 a). A push with -u that names the local branch is
+# silent (the silent cases below). PUSHSTRAY is `mylocal`, whose upstream is origin/lane/x, and origin/mylocal
+# is absent, so its rows ask.
 push_case("stray branch, HEAD asks", "origin HEAD", "ask", cwd=PUSHSTRAY, rule=PUSH_STRAY_RULE)
 push_case("stray branch, @ asks", "origin @", "ask", cwd=PUSHSTRAY, rule=PUSH_STRAY_RULE)
 push_case("stray branch, the current branch named by its colon-less refspec asks", "origin mylocal", "ask",
@@ -7139,6 +7159,10 @@ push_case("stray branch, a second refspec that names the current branch asks",
           "origin HEAD:push-guard-asks mylocal", "ask", cwd=PUSHSTRAY, rule=PUSH_STRAY_RULE)
 sh("push: stray branch, a bare push under push.default current asks",
    VCS + " -c push.default=current push", "ask", PUSH_STRAY_RULE, cwd=PUSHSTRAY)
+# The remedy names the explicit form with a placeholder only (ruling 432 a). The real branch names of PUSHSTRAY
+# never appear in it.
+sh("push: stray branch, the ask names the explicit form HEAD:<branch>", VCS + " push origin HEAD", "ask",
+   PUSH_STRAY_RULE, cwd=PUSHSTRAY, carries=("HEAD:<branch>",), lacks=("HEAD:mylocal", "HEAD:lane/x"))
 
 # ASK, rule push-agent-branch. A non-forced push whose destination is an agent-worktree name asks, with or
 # without -u. push-stray-branch stays silent on a branch with no upstream, so this rule carries that case. The
@@ -7286,6 +7310,14 @@ sh("push: stacked lane, a bare -u under push.default current writes the local na
    VCS + " -c push.default=current push -u origin", "allow", cwd=PUSHSTACK, silent=True)
 push_case("stray branch, -u with HEAD writes the local name, is silent", "-u origin HEAD", "allow",
           cwd=PUSHSTRAY, silent=True)
+# Owner ruling 432 a. A destination already on origin (refs/remotes/origin/<name>) is no stray. PUSHOWNREF is
+# `lane-x`, tracking origin/batch-1, with origin/lane-x present: each implied push to its own name is silent.
+push_case("own ref on origin, HEAD is silent", "origin HEAD", "allow", cwd=PUSHOWNREF, silent=True)
+push_case("own ref on origin, @ is silent", "origin @", "allow", cwd=PUSHOWNREF, silent=True)
+push_case("own ref on origin, the current name as a colon-less refspec is silent", "origin lane-x", "allow",
+          cwd=PUSHOWNREF, silent=True)
+sh("push: own ref on origin, a bare push under push.default current is silent",
+   VCS + " -c push.default=current push", "allow", cwd=PUSHOWNREF, silent=True)
 # A push that moves no branch: tags are not a branch destination, even on main.
 push_case("--tags on main is silent", "origin --tags", "allow", cwd=PUSHMAIN, silent=True)
 push_case("a tag name on main is silent", "origin v1.0", "allow", cwd=PUSHMAIN, silent=True)
