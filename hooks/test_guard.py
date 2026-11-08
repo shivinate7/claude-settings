@@ -9307,6 +9307,46 @@ sh("env-child form: deny, a process substitution of find -name feeds the env fil
 sh("env-child form: allow, find -name with -print piped to wc -l counts the env file name, reads no contents",
    "find . -name " + ENV + " -print | wc -l", "allow", cwd=NOGIT)
 
+# A find pipe chain that ends in a reader, a while loop that cats each name, or a list file read back by $(cat)
+# reads each listed env file, so each is denied. Each mutant named here turns the case red: the find actions
+# cut to FIND_EXEC_ACTIONS (ENV_FIND_ACTIONS), the filters cut to ("wc",) (ENV_FIND_FILTERS), the name tests
+# cut to ("-name",) (ENV_FIND_NAME_TESTS).
+sh("env-child form: deny, find -name piped to sort then xargs cat reads each listed env file",
+   "find . -name " + ENV + " | sort | xargs cat", "deny", "env-file", cwd=NOGIT)
+sh("env-child form: deny, find -name -print piped to head then xargs cat reads each listed env file",
+   "find . -name " + ENV + " -print | head -1 | xargs cat", "deny", "env-file", cwd=NOGIT)
+sh("env-child form: deny, find -name piped to cut then xargs cat reads each listed env file",
+   "find . -name " + ENV + " | cut -d/ -f2 | xargs cat", "deny", "env-file", cwd=NOGIT)
+sh("env-child form: deny, find -name -print piped to sort then a while loop cat reads each listed env file",
+   "find . -name " + ENV + " -print | sort | while read f; do cat \"$f\"; done", "deny", "env-file",
+   cwd=NOGIT)
+sh("env-child form: deny, find -name written to a list file, then cat of the list, reads the env file",
+   "find . -name " + ENV + " > list && cat $(cat list)", "deny", "env-file", cwd=NOGIT)
+sh("env-child form: deny, find -name -print redirected to a list file writes the env file name to disk",
+   "find . -name " + ENV + " -print > list", "deny", "env-file", cwd=NOGIT)
+
+# Each find action that acts on a match is denied after a name test. The mutant that cuts ENV_FIND_ACTIONS to
+# FIND_EXEC_ACTIONS allows all five.
+for action in ("-delete", "-fprint out", "-fprint0 out", "-fprintf out '%p'", "-fls out"):
+    sh("env-child form: deny, find -name then " + action + " acts on the env file",
+       "find . -name " + ENV + " " + action, "deny", "env-file", cwd=NOGIT)
+
+# A find that lists names into a filter that runs no command is allowed. The mutant that cuts ENV_FIND_FILTERS to
+# ("wc",) denies all eight.
+for filt in ("sort", "uniq", "head -1", "tail -1", "cut -d/ -f2", "tr a b", "nl", "sort | head -1"):
+    sh("env-child form: allow, find -name piped to " + filt + " lists the env file name, reads no contents",
+       "find . -name " + ENV + " | " + filt, "allow", cwd=NOGIT)
+
+# Other name tests list the name too, so they are allowed. The mutant that cuts ENV_FIND_NAME_TESTS to ("-name",)
+# denies all three.
+for test in ("-iname " + ENV, "-path './" + ENV + "'", "-wholename './" + ENV + "'"):
+    sh("env-child form: allow, find " + test + " lists the env file name, reads no contents",
+       "find . " + test, "allow", cwd=NOGIT)
+
+# The env file as the start path is judged as a name word, so it is denied.
+sh("env-child form: deny, find with the env file as its start path refuses",
+   "find " + ENV + " -print", "deny", "env-file", cwd=NOGIT)
+
 for wrapped in (
     "timeout 60 node --env-file=" + ENV + " app.js",
     "verdict npm --env-file=" + ENV + " test",
