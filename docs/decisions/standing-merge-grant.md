@@ -54,7 +54,7 @@ The owner's words, 2026-10-29 16:47 CDT, in web chat:
 - The lock-break path never waits or retries. A rate-limited delete of an expired lock is a network stop, because a late retry could delete another run's fresh lock (owner ruling 2026-10-17).
 - On one head, a run that ran outranks a cancelled run of its name, in either list order (owner ruling 2026-10-13, option a).
 - With no `.github/stamp.json`, the merge tool runs on defaults and names the file once (owner ruling 2026-10-10).
-- Only a proven refusal reverts the claim: a refusal reply with the pull request still OPEN (owner ruling).
+- Only a proven refusal reverts the claim: a refusal reply with the pull request still OPEN (owner ruling, recorded 2026-10-13 20:27 CDT, commit 0eac81809 "Record the merge network-retry ruling"). A read answered HTTP 401 or 403 counts as a proven refusal; any other read that cannot run keeps the claim (coordinator reading, 2026-11-07, not an owner ruling).
 
 Kind: process
 Home: merge/merge.py
