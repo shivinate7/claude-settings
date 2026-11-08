@@ -566,7 +566,12 @@ def _resolve_loops(cmd):
         edits.update((items and _loop_rewrites(words, index, last, head[1], items)) or {})
         index = last + 1
     for at in sorted(edits, reverse=True):
-        cmd = cmd[:spans[at][0]] + edits[at] + cmd[spans[at][1]:]
+        # The segment's own edge white space stays: a same-line `# comment` after the last item keeps its space,
+        # so the shell, and the scan, still read `#` as a comment and the item as its own word.
+        left, right = spans[at]
+        text = cmd[left:right]
+        lead, trail = text[:len(text) - len(text.lstrip())], text[len(text.rstrip()):]
+        cmd = cmd[:left] + lead + edits[at] + trail + cmd[right:]
     return cmd
 
 

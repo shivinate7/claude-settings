@@ -1,6 +1,6 @@
 # A loop variable as a redirect target, or a glob list item, is not judged as the files it names
 
-- **What.** In a `for` body, `> "$f"` keeps the literal reading, so `for f in hooks/guard.py; do echo x > "$f"; done` passes for a coordinator, on main and here. A glob list item is judged as text, so `for f in *.json; do sed -i ... "$f"; done` in the config root misses `settings.json`.
-- **Where.** `_loop_rewrites` and `_loop_items` in `hooks/guard_frozen.py`.
+- **What.** Rule frozen-path misses two loop forms, on main and here. In a `for` body, `> "$f"` keeps the literal reading. `frozen_shell_hit` then judges the text `$f`, which names no frozen path, so `for f in <the config settings file>; do echo x > "$f"; done` passes. A glob list item is judged as text, so `for f in *.json; do sed -i ... "$f"; done` in the config root misses `settings.json`. The settings judge of rule agent-model-cap (`_shell_write_hit` with `is_settings_file` in `hooks/guard.py`) reads the same words and misses the same forms. Rule coordinator-scope refuses the literal `$f`: it reads as a repo path outside the record homes.
+- **Where.** `_loop_rewrites` and `_loop_items` in `hooks/guard_frozen.py`, which `frozen_shell_hit` reads through `_shell_write_hit`.
 - **Decision.** `session-tiers` (tier guards), whose loop bullet names both forms.
-- **Retire.** Read a redirect target after the loop's words, and expand a glob list item against the cwd. Cases `for f in hooks/guard.py; do echo x > "$f"; done` and `for f in *.json; do sed -i ... "$f"; done` deny for a coordinator in `hooks/test_guard.py`.
+- **Retire.** Read a redirect target after the loop's words, and expand a glob list item against the cwd. Cases `for f in <the config settings file>; do echo x > "$f"; done` and `for f in *.json; do sed -i ... "$f"; done` in the config root deny with rule frozen-path in `hooks/test_guard.py`.

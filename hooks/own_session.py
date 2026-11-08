@@ -63,8 +63,10 @@ def own_session_read(transcript, own_id, created=False, applied=False):
     With `applied`, the tags also hold what the session's own set_session_tags calls added since that
     record (or from the start, with no record): a call that names own_id, or whose id list cannot be
     read. A call's `remove` drops only a tag an earlier call in the same pass added since that record,
-    never one the record holds, so a self-remove never loosens the verdict. The record's tags and
-    tagged_after keep their meaning, and the default keeps the shape the callers rely on."""
+    never one the record holds, so a self-remove never loosens the verdict. With `applied`, an own call
+    made after a record call and before its result, as in one assistant message, counts after that
+    record; the default counts it before, so tagged_after stays False. The record's tags keep their
+    meaning, and the default keeps the shape the callers rely on."""
     uses, newest, parent, tagged_after = set(), None, None, False
     added = []  # tags the own set_session_tags calls added since the newest record, in order
     creates = {}  # tool_use id -> (tags, parent) a create_session call set
@@ -106,10 +108,12 @@ def own_session_read(transcript, own_id, created=False, applied=False):
                     if not isinstance(ids, list) or own_id in ids:
                         given = block.get("input") if isinstance(block.get("input"), dict) else {}
                         note_tag_call(given)
-                        # A record call in the same assistant message may have read the tags before or after this
-                        # call ran, so the result must not drop it.
-                        for calls in pending.values():
-                            calls.append(given)
+                        # With `applied`, a record call in the same assistant message may have read the tags before or
+                        # after this call ran, so the result must not drop it. The default keeps the set as not after
+                        # the record that follows it.
+                        if applied:
+                            for calls in pending.values():
+                                calls.append(given)
                 elif block.get("type") == "tool_result" and (block.get("tool_use_id") in uses or block.get("tool_use_id") in creates):
                     body = block.get("content")
                     held = pending.pop(block.get("tool_use_id"), [])
