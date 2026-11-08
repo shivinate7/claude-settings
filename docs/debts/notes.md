@@ -61,7 +61,6 @@
 - fb-inbox-append-race: concurrent ab appends to the feedback inbox on Windows lost 406 of 8000 lines in a stress test (hooks/local_time.py)
 - fixcheck-marker-comment-line: the comment says "first line" where the FIX_CHECK_MARKER row reads the first non-blank line (hooks/shared_names.py:35, PR #2296 round 3)
 - fixcheck-test-header-cite: block B4's header cites item 351 a, not 444 a, and narrates build history (hooks/test_guard.py, PR #2296 round 3)
-- frozen-path-ansi-c-quote: echo ok > $'<frozen path>' is allowed at top level and in bash -c, sh -c and eval; the check does not decode $'...' (hooks/guard.py)
 - guard-exit-7-unprobed: exit 7 under onFailure block was never probed; a timeout was measured to refuse the call (guard wrappers)
 - guard-own-errors-fail-open: guard and rm_prompt_answer exit 0 on their own internal errors (guard scripts)
 - ghlock-no-compare-and-swap: GitHub API has no compare-and-swap; an expiring lock between read and PATCH could overwrite a rival's lock (merge/merge.py GhLock)
