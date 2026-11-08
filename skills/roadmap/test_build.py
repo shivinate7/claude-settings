@@ -65,7 +65,7 @@ TODAY_STUB = """<script>
 </script>
 """
 # sha256 of skills/roadmap/page/index.html outside the build blocks.
-TODAY_TEMPLATE_SHA256 = "46349b7aa677ca2bb0c763d2abba6242be066cb1233e1229f9541df0a9b70697"
+TODAY_TEMPLATE_SHA256 = "892fe2d3b677613a1da99d068ed4570b49a169a915bca5e64aab7a809783abd3"
 BLOCK = re.compile(r"<!-- build:([a-z-]+) -->.*?<!-- /build:\1 -->\n?", re.S)
 
 
