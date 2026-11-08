@@ -16,7 +16,9 @@ The guard rule `commit-leaves-edit-unstaged` asks before a `git commit` when a t
 - A left-out path that a later `git add <paths>` in the same command stages, with a commit after it, is not left behind. That is a deliberate split into two commits, so the earlier commit passes.
 - An add or rm that names a folder, a glob, `.` or a variable is not read, and the commit passes.
 - Any other earlier git call that changes the index (`add -A`, `add .`, `add -u`, `reset`, `restore --staged`) makes the commit pass: its effect is not read.
-- It asks, and the owner's answer decides. An override lifts it.
+- A path that is staged and also has unstaged changes (after `git add -p`) is in the commit, not left out.
+- The staged read turns rename detection off, so a `git mv` out of a folder counts for both folders.
+- It asks, and the owner's answer decides. In a chain, rule `ask-alone` refuses the call, as decision `ask-commands-run-alone` (a command that needs the owner's answer runs alone) holds; the same commit alone asks. An override lifts it.
 
 The ask names the left-out paths, so the reader sees what stays behind. Remedy: `git add <path>` for an edit that belongs in this commit, or commit it on its own.
 
