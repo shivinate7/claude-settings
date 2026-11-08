@@ -82,7 +82,7 @@ parent, or miss a message while busy.
 - On a rotation, in this order. The coordinator tells the session to rotate.
   1. The old session stops watching each page its role owns (the repo's one page, the project's
      waiting page): `ArtifactComments` action `watch` with `on: false` and the page URL. It notes
-     the time, then answers each comment still open at that time on those pages. From step 1 to
+     the time from `~/.claude/bin/now-central --full`, then answers each comment still open at that time on those pages. From step 1 to
      step 5, `writer` in `meta/page` still names the old writer, and no writer watches the page.
      Asks sent then reach the new writer through its step-5 catch-up read and its first-turn read
      of `asks/`.

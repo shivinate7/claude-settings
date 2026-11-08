@@ -1,0 +1,17 @@
+#!/usr/bin/env python3
+# now-central [--full | --iso]: print the time now in US Central, one line. A session reads a time here, never from memory.
+# Bare: `HH:MM CST|CDT`. --full: `YYYY-MM-DD HH:MM CST|CDT`. --iso: `YYYY-MM-DDTHH:MM:SS-06:00` (`-05:00` in DST).
+# Exit 0: the time is printed. 2: any other argument, with usage on stderr.
+# The clock and the DST rule are hooks/local_time.py, the one home of the Central clock.
+import os, sys
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.realpath(__file__))), "hooks"))
+import local_time  # noqa: E402  the one home of the Central clock and its DST rule
+USAGE = "usage: now-central [--full | --iso]"
+FORMS = {"": local_time.central_hhmm, "--full": local_time.central_full, "--iso": local_time.central_iso}
+def main(argv):
+    if len(argv) > 1 or (argv and argv[0] not in FORMS):
+        print(USAGE, file=sys.stderr); return 2
+    print(FORMS[argv[0] if argv else ""](local_time.clock()))
+    return 0
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))
