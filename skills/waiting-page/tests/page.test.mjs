@@ -2761,6 +2761,55 @@ test("answered-folded: pressing the Answered number chip of a sunk card opens th
   assert.equal(await head.getAttribute("aria-expanded"), "true", `the chip for No. ${it.n} did not open the closed Answered section`);
 });
 
+// The closed head's New reply mark reads a seen reply per card (state.replySeen in page.html). A reply the owner has seen (at load, in the open
+// section, or on a card sent on this visit) marks nothing. Only a late reply the owner has not seen marks the closed head.
+const LATER_REPLY_AT = "2026-10-29T09:00:00Z";
+const headMark = (page) => page.locator("#b-answered .newmark").count();
+
+// A Send of an open card that carries a reply: the owner sent it with the reply in view, so the closed head marks nothing for it.
+test("answered-folded: a Send of an open card that carries a reply leaves no New reply mark on the closed Answered head", async (t) => {
+  const it = mk("mark-sent", 1, { added: NEW_ADDED, reply: "Thanks, noted.", replied: REPLIED_AT }), other = mk("mark-sent-open", 2, { added: NEW_ADDED });
+  const page = await open(t, { items: [it, other] }); if (!page) return;
+  await choose(page, it, "b");
+  await send(page);
+  await waitAnswered(page, [it.id]);
+  assert.equal(await sectionOf(page, it), "tier-answered", `the Send did not sink No. ${it.n} to the Answered section`);
+  assert.equal(await headMark(page), 0, `the Send of No. ${it.n}, with its reply in view, drew a New reply mark on the closed Answered head`);
+});
+
+// A reply present at load opens the section. The owner closes it, and the head marks nothing for a reply the section has shown.
+test("answered-folded: a reply present at load opens the Answered section, and closing it leaves no New reply mark on the head", async (t) => {
+  const it = repliedCard();
+  const page = await open(t, { items: [it], answers: answerOf(it, "a", { note: "Kept the red one." }), storage: VISIT }); if (!page) return;
+  assert.equal(await markName(page, it), NEW_MARK, `No. ${it.n} draws no New reply mark on load, so its reply is not new`);
+  const head = page.locator("#b-answered");
+  assert.equal(await head.getAttribute("aria-expanded"), "true", `the reply on No. ${it.n} at load did not open the Answered section`);
+  await head.click();
+  assert.equal(await head.getAttribute("aria-expanded"), "false", "the press did not close the Answered section");
+  assert.equal(await headMark(page), 0, `closing the section drew a New reply mark on the head for the reply on No. ${it.n} that the section had shown`);
+});
+
+// A late reply marks the closed head once. Opening the section sees it and clears the mark, closing leaves no mark, and a second late reply
+// that the owner has not seen marks the closed head again.
+test("answered-folded: a late reply marks the closed Answered head, opening and closing the section clears it, and a second late reply marks it again", async (t) => {
+  const it = mk("mark-late", 1, { added: at(5) }), open1 = mk("mark-late-open", 3, { added: NEW_ADDED });
+  const page = await open(t, { items: [it, open1], answers: answerOf(it, "a", { note: "Kept the red one." }), storage: VISIT }); if (!page) return;
+  const head = page.locator("#b-answered");
+  assert.equal(await head.getAttribute("aria-expanded"), "false", "the Answered section is open on load, with no New reply in it");
+  const replyLate = (replied) => page.evaluate((item) => window.__putItem(item), { ...it, reply: "Thanks, noted.", replied });
+  await replyLate(REPLIED_AT);
+  await card(page, it).locator(".newmark").waitFor({ state: "attached" });
+  assert.equal(await headMark(page), 1, `a late reply on No. ${it.n} did not mark the closed Answered head`);
+  await head.click();
+  assert.equal(await headMark(page), 0, `opening the section left the head's New reply mark, for a reply the section now shows`);
+  await head.click();
+  assert.equal(await head.getAttribute("aria-expanded"), "false", "the press did not close the Answered section again");
+  assert.equal(await headMark(page), 0, `closing the section marked the head again for the reply on No. ${it.n} that the section had shown`);
+  await replyLate(LATER_REPLY_AT);
+  await head.locator(".newmark").waitFor({ state: "attached" });
+  assert.equal(await headMark(page), 1, `a second late reply on No. ${it.n} did not mark the closed Answered head`);
+});
+
 // ---------------------------------------------------------------- answered folded: a Send at the page's end
 
 // A Send of the last open card, with the page scrolled to its end, leaves no blank screen: the pad that holds the view is none, or at most a
@@ -2796,6 +2845,113 @@ for (const [width, height] of PAD_SCREENS) {
     assert.ok(m.padH === 0 || m.blank <= m.vh / 3, `the Send leaves ${Math.round(m.blank)}px of the ${m.vh}px screen blank under the pad`);
   });
 }
+
+// The pad holds the view when a Send shrinks the page and the scroll sits at the page's end or just above it. A card under a third of the screen
+// is one the pad can hold (page.html, the pad's comment). These cases read the pad on the screen: it is over zero, and the cards above the sent
+// card keep their place.
+const padPx = (page) => page.evaluate(() => parseFloat(document.getElementById("viewpad").style.height) || 0);
+const scrollOf = (page) => page.evaluate(() => scrollY);
+const settled = (page) => page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
+// Where the page sits and where the last open card sits, read before a Send: how far above the page's end, the card's top and its height.
+const sendScope = (page, id) => page.evaluate((cid) => {
+  const band = document.querySelector(".hdr").getBoundingClientRect().bottom, c = document.getElementById("item-" + cid).getBoundingClientRect();
+  const open = [...document.querySelectorAll("#list article.card")].filter((x) => !x.closest("#tier-answered")).map((x) => x.id);
+  return { gap: document.documentElement.scrollHeight - innerHeight - scrollY, lastOpen: open[open.length - 1], top: c.top, band, height: c.height, vh: innerHeight };
+}, id);
+const PAD_TALL = { width: 1280, height: 2200 };
+for (const [where, lift] of [["the page's end", 0], ["80px above the page's end", 80]]) {
+  test(`answered-pad: a Send of a card under a third of the screen, at ${where}, engages the pad, and the cards above it hold still`, async (t) => {
+    const opens = [1, 2, 3, 4].map((n) => mk("pad-s-open-" + n, n, { added: NEW_ADDED }));
+    const sunk = [5, 6].map((n) => mk("pad-s-sunk-" + n, n, { added: at(n) }));
+    const last = opens[3], above = opens.slice(0, 3);
+    const page = await open(t, { items: [...opens, ...sunk], answers: { ...answerOf(sunk[0]), ...answerOf(sunk[1]) }, viewport: PAD_TALL }); if (!page) return;
+    // The pick comes first: a label click scrolls the page to its label, which would undo the scroll to the end.
+    await takePick(page, last);
+    await page.evaluate((d) => window.scrollTo(0, document.documentElement.scrollHeight - innerHeight - d), lift);
+    const scope = await sendScope(page, last.id);
+    assert.ok(Math.abs(scope.gap - lift) <= 1, `the page is ${Math.round(scope.gap)}px above its end, not ${lift}px`);
+    assert.equal(scope.lastOpen, "item-" + last.id, `the last open card is ${scope.lastOpen}, not No. ${last.n}`);
+    assert.ok(scope.top >= scope.band && scope.top < scope.vh, `No. ${last.n} does not start in view under the header: top ${Math.round(scope.top)}`);
+    assert.ok(scope.height <= scope.vh / 3, `No. ${last.n} is ${Math.round(scope.height)}px tall, over a third of the ${scope.vh}px screen`);
+    const tops = (ids) => page.evaluate((list) => list.map((id) => document.getElementById("item-" + id).getBoundingClientRect().top), ids);
+    const before = await tops(above.map((c) => c.id));
+    await send(page);
+    await waitAnswered(page, [last.id]);
+    await settled(page);
+    const after = await tops(above.map((c) => c.id));
+    const pad = await padPx(page);
+    assert.ok(pad > 0, `the Send left the pad at ${pad}px: it did not engage, so the page shrank under the reader`);
+    above.forEach((c, i) => assert.ok(Math.abs(after[i] - before[i]) <= 0.5, `No. ${c.n} moved ${Math.round(after[i] - before[i])}px on the Send`));
+  });
+}
+
+// A scroll down with the pad showing moves nothing: the pad keeps the page at its end, so a scroll down cannot pull the view up. The sent card sits
+// 60-100px from the top at 1280 by 800, and each wheel, key or scroll is read as it lands.
+const GB_SCREEN = { width: 1280, height: 800 };
+// Counts the wheel and key events that reach the page, and each scroll that goes back up, so a case waits for its input and reads the drops.
+const watchScroll = (page) => page.evaluate(() => {
+  window.__inputs = 0; window.__drops = 0; let prev = scrollY;
+  addEventListener("wheel", () => { window.__inputs++; }, { passive: true });
+  addEventListener("keydown", () => { window.__inputs++; });
+  addEventListener("scroll", () => { if (scrollY < prev) window.__drops++; prev = scrollY; }, { passive: true });
+});
+// Resolves with scrollY once it has held still for five frames, so a scroll that animates over a few frames is read whole.
+const settleY = (page) => page.evaluate(() => new Promise((done) => {
+  let last = null, still = 0;
+  const frame = () => { if (scrollY === last) { if (++still >= 5) return done(scrollY); } else { last = scrollY; still = 0; } requestAnimationFrame(frame); };
+  requestAnimationFrame(frame);
+}));
+// A page at 1280 by 800 with the pad showing after a Send of the last open card, which sits 80px from the top before the Send.
+const giveBackSend = async (t) => {
+  const opens = [1, 2, 3].map((n) => mk("gb-open-" + n, n, { added: NEW_ADDED }));
+  const sunk = [4, 5].map((n) => mk("gb-sunk-" + n, n, { added: at(n) }));
+  const last = opens[2];
+  const page = await open(t, { items: [...opens, ...sunk], answers: { ...answerOf(sunk[0]), ...answerOf(sunk[1]) }, viewport: GB_SCREEN }); if (!page) return null;
+  await takePick(page, last);
+  await page.evaluate((id) => window.scrollTo(0, scrollY + document.getElementById("item-" + id).getBoundingClientRect().top - 80), last.id);
+  const scope = await sendScope(page, last.id);
+  assert.ok(scope.top >= 60 && scope.top <= 100, `No. ${last.n} is ${Math.round(scope.top)}px from the top, not 60 to 100`);
+  await send(page);
+  await waitAnswered(page, [last.id]);
+  await settled(page);
+  assert.ok((await padPx(page)) > 0, "the Send left no pad to give back");
+  return page;
+};
+for (const [name, act] of [
+  ["a wheel down of 100px", (page) => page.mouse.wheel(0, 100)],
+  ["Space", (page) => page.keyboard.press("Space")],
+  ["PageDown", (page) => page.keyboard.press("PageDown")],
+]) {
+  test(`answered-pad: with the pad showing, ${name} never pulls the page up, at 1280 by 800`, async (t) => {
+    const page = await giveBackSend(t); if (!page) return;
+    await watchScroll(page);
+    await page.evaluate(() => { if (document.activeElement) document.activeElement.blur(); });
+    await page.mouse.move(640, 400);
+    const y0 = await scrollOf(page);
+    await act(page);
+    await page.waitForFunction(() => window.__inputs > 0);
+    const y1 = await settleY(page);
+    assert.equal(await page.evaluate(() => window.__drops), 0, `${name} pulled the page up while the pad showed: its scroll went back`);
+    assert.ok(y1 >= y0, `${name} moved the page from ${y0} to ${y1}, up the page`);
+  });
+}
+
+test("answered-pad: a scroll up gives the pad back step for step, until none is left", async (t) => {
+  const page = await giveBackSend(t); if (!page) return;
+  const h0 = await padPx(page), y0 = await scrollOf(page);
+  assert.ok(h0 >= 40, `the pad is ${h0}px, too little to see a scroll up give it back`);
+  await watchScroll(page);
+  await page.mouse.move(640, 400);
+  await page.mouse.wheel(0, -40);
+  await page.waitForFunction(() => window.__inputs > 0);
+  const y1 = await settleY(page), h1 = await padPx(page);
+  assert.ok(y1 < y0, `a scroll up did not move the page: ${y0} to ${y1}`);
+  assert.ok(Math.abs((h0 - h1) - (y0 - y1)) <= 1, `the pad shrank ${h0 - h1}px for a scroll of ${y0 - y1}px, not step for step`);
+  await page.mouse.wheel(0, -2000);
+  await page.waitForFunction(() => window.__inputs > 1);
+  await settleY(page);
+  assert.equal(await padPx(page), 0, "the pad is not none after a scroll up past it");
+});
 
 // ---------------------------------------------------------------- round 2 looks
 
