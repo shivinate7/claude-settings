@@ -629,6 +629,15 @@ class ScalarOneHome(unittest.TestCase):
     def test_an_empty_quoted_value_is_empty(self):
         self.assertEqual(self.scalar("''"), "")
 
+    def test_a_single_quote_escape_is_one_quote(self):
+        self.assertEqual(self.scalar("'it''s'"), "it's")
+
+    def test_a_double_quote_escape_is_one_quote(self):
+        self.assertEqual(self.scalar('"a\\"b"'), 'a"b')
+
+    def test_a_hash_with_no_space_before_it_is_text(self):  # control: a comment needs a space before its #
+        self.assertEqual(self.scalar("x#y"), "x#y")
+
     def test_ci_job_uses_reads_a_hash_inside_quotes_as_yaml_does(self):
         ci_job = load_ci_job()
         self.assertEqual(ci_job.uses(step("uses step", uses="'a # b'")), "a # b")
@@ -641,6 +650,21 @@ class ScalarOneHome(unittest.TestCase):
         import test_windows_split  # noqa: E402  the split guard, which reads its scalars with the one reader
         self.assertIs(getattr(test_windows_split, "yaml_scalar", None), getattr(workflow_steps, "yaml_scalar", None),
                       "lint/test_windows_split.py keeps its own copy of the scalar reader")
+
+
+class QuotedUsesDisplay(Job):
+    """A step whose uses: is not an action this runner runs prints that value as uses() reads it, so a quoted value with
+    a trailing comment shows without its quotes."""
+
+    def test_a_quoted_action_with_a_trailing_comment_shows_its_value_unquoted(self):
+        rc, lines, out = self.run_job(step("tool", uses="'other/tool@v1' # c"))
+        self.assertIn("(uses: other/tool@v1); CI runs it", out,
+                      "the line shows the quotes, not the value uses() reads:\n" + out)
+
+    def test_the_literal_quoted_code_check_with_a_trailing_comment_is_the_local_action(self):  # control: the action runs
+        rc, lines, out = self.run_job(step("code check", uses="'./actions/code-check' # c"), args=("--base", "origin/main"))
+        self.assertEqual(self.verdicts(lines), ["FAIL"],
+                         "a quoted local action was not run as the repo's own action, which FAILs with no code_check.py:\n" + out)
 
 
 def run_as_yaml_reads_it(step):
@@ -2298,7 +2322,7 @@ class PinnedSettings(Job):
         missing = os.path.join(self.fixture, "no-such-clone")  # the one pin cannot be made, so its step is blocked
         rc, lines, out = self.run_pinned(step("code check", uses=PIN_USES % self.sha_a), local,
                                          args=("--lint", "--base", "origin/main"), clone=missing)
-        self.assertEqual(by_step(lines).get("code check"), "unknown", "precondition: the missing clone must block the pin:\n" + out)
+        self.assertEqual(by_step(lines).get("code check"), "unknown", "precondition: the missing clone must refuse the pin:\n" + out)
         self.assertEqual(by_step(lines).get("local code check"), "PASS",
                          "the local code check printed no verdict, so it never ran beside a blocked remote step:\n" + out)
         self.assertTrue(os.path.isfile(os.path.join(self.root, "local-code-check.txt")),
@@ -2356,7 +2380,7 @@ class PinnedSettings(Job):
         rc, lines, out = self.run_pinned(*self.two_pin_steps(step("local ste lint", uses="$/actions/ste-lint")),
                                          args=("--lint", "--base", "origin/main"), clone=missing, env=pipx_stub_env())
         self.assertEqual(by_step(lines).get("code check"), "unknown",
-                         "precondition: the missing clone must block the pinned steps:\n" + out)
+                         "precondition: the missing clone must refuse the pinned steps:\n" + out)
         self.assertEqual(by_step(lines).get("local ste lint"), "FAIL",
                          "the local ste lint did not run ci-job's ste check under two pins with no clone:\n" + out)
         self.assertEqual(rc, 1, "a FAIL outranks the unknown pinned steps, so --lint must exit 1:\n" + out)
@@ -2371,7 +2395,7 @@ class PinnedSettings(Job):
         rc, lines, out = self.run_pinned(*self.two_pin_steps(step("local zizmor", uses="$/actions/zizmor")),
                                          args=("--lint", "--base", "origin/main"), clone=missing, env=pipx_stub_env())
         self.assertEqual(by_step(lines).get("code check"), "unknown",
-                         "precondition: the missing clone must block the pinned steps:\n" + out)
+                         "precondition: the missing clone must refuse the pinned steps:\n" + out)
         self.assertEqual(by_step(lines).get("local zizmor"), "PASS",
                          "the local zizmor step did not PASS on its own run.sh beside two pins:\n" + out)
         self.assertTrue(os.path.isfile(os.path.join(self.root, "local-zizmor.txt")),
