@@ -482,6 +482,20 @@ class RetireRun(Case):
             self.assertEqual(pairs(found), [("d-prose", "red")], "a green run on the base tip was deferred in merge mode, not judged red")
             self.assertEqual(heads.shas, [], "merge mode read the head's checks run for a cite on the base tip")
 
+    def test_r17_a_cited_run_on_a_sha_this_checkout_does_not_hold_is_unknown(self):
+        # A run the checkout does not hold is unknown: never red, and never deferred to merge, in CI mode or merge mode.
+        self.closed_prose()
+        missing = "f" * 40  # no commit of this fixture has this sha
+        body = "Retire-run: d-prose -- %s\n" % RUN_URL
+        with self.subTest(mode="CI mode (defer)"):
+            found = D.check(self.dir, self.base, head=self.head, pr_body=body, run_state=Runs(("success", missing)), defer=True)
+            self.assertEqual(pairs(found), [("d-prose", "unknown")], "a run on a sha this checkout does not hold was not unknown in CI mode")
+        with self.subTest(mode="merge mode (head_run)"):
+            heads = HeadRuns(("success", HEAD_URL))
+            found = D.check(self.dir, self.base, head=self.head, pr_body=body, run_state=Runs(("success", missing)), head_run=heads)
+            self.assertEqual(pairs(found), [("d-prose", "unknown")], "a run on a sha this checkout does not hold was not unknown in merge mode")
+            self.assertEqual(heads.shas, [], "merge mode read the head's checks run for a sha this checkout does not hold")
+
     def test_r4_an_unreadable_cited_run_is_unknown(self):
         self.closed_prose()
         runs = Runs(RuntimeError("the run read failed: HTTP 502"))
