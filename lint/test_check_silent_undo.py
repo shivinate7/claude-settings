@@ -394,6 +394,47 @@ class PrBodyEscape(unittest.TestCase):
                                      "Summary.\n\n%s\n\nNotes\n---\n%s\n" % (L, F),
                                      "Summary.\n\n%s\n\n%s\n" % (L, F)])  # no rule: not the posting footer
 
+    # The CLI reads the PR body from `--pr-body <text>`, or from env PR_BODY, which CI sets from the pull request body
+    # the way it sets BASE_REF and HEAD_SHA. Each positive case first shows the drop is a finding with no body.
+    def run_cli(self, argv, env=None):
+        """The CLI on this repo as CI runs it (--strict). -> (rc, printed text). The one home is PrintedFindings.run_main."""
+        return PrintedFindings.run_main(self, ["--repo", self.r.dir, "--upstream", "origin/main", "--strict", *argv], "utf-8", env=env)
+
+    def assert_fails_on_app(self, rc, text):
+        self.assertEqual(rc, 1, text)
+        self.assertIn("FAIL: app.txt", text)
+        self.assertNotIn("ALLOWED", text, text)
+
+    def test_the_pr_body_flag_excuses_its_path_on_the_cli(self):
+        rc, text = self.run_cli([])
+        self.assert_fails_on_app(rc, text)  # premise: with no body the drop is a finding
+        rc, text = self.run_cli(["--pr-body", "Summary.\n\n%s\n" % self.LINE])
+        self.assertEqual(rc, 0, "the CLI does not accept --pr-body, so the excuse is never read (exit %s):\n%s" % (rc, text))
+        self.assertIn("ALLOWED app.txt: the owner wants Card back", text)
+
+    def test_the_pr_body_env_excuses_its_path_on_the_cli(self):
+        rc, text = self.run_cli([])
+        self.assert_fails_on_app(rc, text)  # premise: with no body the drop is a finding
+        rc, text = self.run_cli([], env={"PR_BODY": "Summary.\n\n%s\n" % self.LINE})
+        self.assertEqual(rc, 0, "the CLI ignores env PR_BODY: it printed the FAIL and exited %s:\n%s" % (rc, text))
+        self.assertIn("ALLOWED app.txt: the owner wants Card back", text)
+
+    def test_a_pr_body_env_line_without_a_reason_excuses_nothing_on_the_cli(self):  # control
+        for body in ("Summary.\n\nDrops-lines: app.txt\n", "Summary.\n\nDrops-lines: app.txt --\n", "Summary.\n\nDrops-lines: app.txt -- \n"):
+            with self.subTest(body=body):
+                rc, text = self.run_cli([], env={"PR_BODY": body})
+                self.assert_fails_on_app(rc, text)
+
+    def test_a_pr_body_env_line_outside_the_last_paragraph_excuses_nothing_on_the_cli(self):  # control
+        rc, text = self.run_cli([], env={"PR_BODY": "%s\n\nSome closing prose.\n" % self.LINE})
+        self.assert_fails_on_app(rc, text)
+
+    def test_no_pr_body_still_fails_on_the_cli(self):  # control: unset, and empty (what a null body renders as)
+        for env in ({}, {"PR_BODY": ""}):
+            with self.subTest(env=env):
+                rc, text = self.run_cli([], env=env)
+                self.assert_fails_on_app(rc, text)
+
 
 BLOCK = "alpha one\nbeta two\ngamma three\ndelta four\nepsilon five\nzeta six\n"
 
@@ -1665,13 +1706,18 @@ class PrintedFindings(unittest.TestCase):
         r.sh("update-ref", "refs/remotes/origin/main", main)
         return r, merged
 
-    def run_main(self, argv, encoding):
-        """main(argv) with stdout a strict stream of `encoding`. -> (rc, what was printed). A raise is a failure."""
+    def run_main(self, argv, encoding, env=None):
+        """main(argv) with stdout a strict stream of `encoding`, `env` set, and CI, PR_BODY and GITHUB_EVENT_PATH unset
+        (CI sets the last two). -> (rc, what was printed: stdout, then stderr, so an argparse refusal shows). A raise is a failure."""
         out = io.TextIOWrapper(io.BytesIO(), encoding=encoding, errors="strict", newline="\n")
-        with unittest.mock.patch.dict(os.environ), contextlib.redirect_stdout(out):
-            os.environ.pop("CI", None)
+        with unittest.mock.patch.dict(os.environ), contextlib.redirect_stdout(out), contextlib.redirect_stderr(out):
+            for k in ("CI", "PR_BODY", "GITHUB_EVENT_PATH"):
+                os.environ.pop(k, None)
+            os.environ.update(env or {})
             try:
                 rc = C.main(argv)
+            except SystemExit as e:  # argparse refuses an argument the parser does not know
+                rc = e.code
             except Exception as e:  # the traceback is the failure
                 self.fail("main raised %s under %s: %s" % (type(e).__name__, encoding, e))
         out.flush()
