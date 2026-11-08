@@ -5024,13 +5024,19 @@ caseM14() {
   op_move_check "$name" rebase-apply
 }
 
-# caseM15-M17: CHERRY_PICK_HEAD, REVERT_HEAD and MERGE_HEAD, each written with update-ref, the way git names these
+# write_op_head NAME SHA: stop an operation by writing the pseudo-ref NAME into the checkout's git dir, the file git reads
+# for it. Written directly, not with update-ref: macOS git refuses update-ref on MERGE_HEAD ("refusing to update").
+write_op_head() {
+  oh_gd=$(git -C "$co" rev-parse --absolute-git-dir) && printf '%s\n' "$2" > "$oh_gd/$1"
+}
+
+# caseM15-M17: CHERRY_PICK_HEAD, REVERT_HEAD and MERGE_HEAD, each written into the git dir the way git names these
 # pseudo-refs. Each is a clean stop: the tree is clean and HEAD stays detached at old.
 caseM15() {
   name="caseM15: a clean, detached checkout with a cherry-pick in progress is not moved, and the install takes the mirror"
   if ! command -v jq >/dev/null 2>&1; then skip "$name" "jq not found"; return; fi
   move_fixture m15
-  ps_out=$(git -C "$co" update-ref CHERRY_PICK_HEAD "$old" 2>&1) || { bad "$name" "FIXTURE git update-ref CHERRY_PICK_HEAD: $ps_out"; return; }
+  write_op_head CHERRY_PICK_HEAD "$old" || { bad "$name" "FIXTURE could not write CHERRY_PICK_HEAD under the git dir"; return; }
   op_move_check "$name" CHERRY_PICK_HEAD
 }
 
@@ -5038,7 +5044,7 @@ caseM16() {
   name="caseM16: a clean, detached checkout with a revert in progress is not moved, and the install takes the mirror"
   if ! command -v jq >/dev/null 2>&1; then skip "$name" "jq not found"; return; fi
   move_fixture m16
-  ps_out=$(git -C "$co" update-ref REVERT_HEAD "$old" 2>&1) || { bad "$name" "FIXTURE git update-ref REVERT_HEAD: $ps_out"; return; }
+  write_op_head REVERT_HEAD "$old" || { bad "$name" "FIXTURE could not write REVERT_HEAD under the git dir"; return; }
   op_move_check "$name" REVERT_HEAD
 }
 
@@ -5046,7 +5052,7 @@ caseM17() {
   name="caseM17: a clean, detached checkout with a merge in progress is not moved, and the install takes the mirror"
   if ! command -v jq >/dev/null 2>&1; then skip "$name" "jq not found"; return; fi
   move_fixture m17
-  ps_out=$(git -C "$co" update-ref MERGE_HEAD "$old" 2>&1) || { bad "$name" "FIXTURE git update-ref MERGE_HEAD: $ps_out"; return; }
+  write_op_head MERGE_HEAD "$old" || { bad "$name" "FIXTURE could not write MERGE_HEAD under the git dir"; return; }
   op_move_check "$name" MERGE_HEAD
 }
 
