@@ -1090,7 +1090,7 @@ class Stale(unittest.TestCase):
                 self.assertEqual(self.gh_calls(folder), [], "gh was called for a lane item with %s" % label)
 
 
-# Fixtures for the --items cases: a repo, a run that ended completed/failure, and the PR that run gated.
+# Fixtures for the --items cases: a repo, a run that ended completed/failure, and the PR that run checked.
 REPO, RUN, PR = "shivinate7/q_max", "41861801325", 1011
 RUN_ARGV = "run view %s --repo %s --json status,conclusion" % (RUN, REPO)
 

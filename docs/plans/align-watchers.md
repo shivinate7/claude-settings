@@ -17,7 +17,7 @@ This change changes no behaviour. It fixes stale prose in Markdown records and i
 - **Read on main, hooks.** `settings.json` gives every hook row and timeout. Also `hooks/stall_watch.py`,
   `hooks/ci_wake.py`, `hooks/guard_stream.py`, `hooks/guard_core.py`, `hooks/git_reads.py`,
   `hooks/sendmessage_state.py`, `hooks/question_form.py`, `hooks/mutate_shared.py`, `hooks/decision_watch.py`.
-- **Read on main, lint and janitor.** `lint/report_guard.py`, `lint/md_sweep.py`, `lint/ste_gate.py`,
+- **Read on main, lint and janitor.** `lint/report_guard.py`,
   `lint/check_hook_stubs.py`; `janitor/sweep.py`, `janitor/session_end_sweep.py`,
   `janitor/install_launchd.py`, `janitor/install_schtasks.py`, `janitor/GUIDE.md`.
 - **Read on main, other.** `merge/merge.py`; `bin/ci-job`, `bin/verdict`; `mods/decision-watch/hooks/register.mjs`;
@@ -60,7 +60,7 @@ small, M medium, L large).
 |---|---|---|---|---|
 | Stall watcher (`hooks/stall_watch.py --watch-pid`) | The hook rewrites each background Bash call to start one python watcher. The watcher loops every 0.2 s (line 278) and runs `ps` about once a second. It exits 3 after a stall (hook command, line 17). | Replace, cap or keep. Do not delete before Q1 is ruled. | 1 | L |
 | Stall temp files | The hook exits 3 before `rm -f LOG BEAT`. A stalled job leaves `.log` and `.beat` files (line 17). | Remove them on every exit path. | no | S |
-| Stall Stop check (`--stop`) | Prints a message at every Stop while a job is quiet. No dedupe (`stop()`). Debt `stall-message-repeats-every-stop`. | Dedupe per job. Test two Stops with one open job. The record states the repeat now. | no | S |
+| Stall Stop check (`--stop`) | Lists each quiet job once per crossing: at the first Stop after its stall crossed, against the previous Stop (`stop()`, `scan_jobs`). A job that goes quiet again after new output is listed again. | None. Test `each_stale_job_is_listed_once` holds it. | no | - |
 | `wait-pid` (`bin/wait-pid`) | One process per wait. Ownership reads run at start (record `stall-watch`; code unchecked). | Add the cost test. | no | S |
 | `ci_wake` (PostToolUse, Bash and PowerShell) | One python per `gh pr ready`. Timeout 3600 s. Reads runs every 30 s, then gaps up to 120 s (checked: `settings.json`; `hooks/ci_wake.py` header). | Keep as a standing exception with its cost stated, or replace. Q3. | 3 | M |
 | `merge/merge.py` poll loops | Two loops of its own. `retry_net` (line 223) pauses between network retries. `wait_checks` (line 967) pauses through `block` (lines 1223 to 1229): 30 s when a check has an Actions run, else a minute. It also pauses 30 s for a settle read (lines 1017 to 1021). | Share the `gh` call and the pause seam with `ci_wake`. Do not share the loop. | no | M |
@@ -113,8 +113,6 @@ Nothing here is deleted before its owner question is ruled. Each delete names it
 - **`janitor-runs.jsonl`.** `janitor/sweep.py` line 2238 writes it. Its reader is unchecked. Q5.
 - **Loose-process tier in the hook run.** It reports only. The hook sends its output to DEVNULL (line 257).
   So the run has no reader for it. Its scan cost is unchecked. Q4.
-- **`lint/md_sweep.py` and `lint/ste_gate.py`.** Both are exit-0 stubs. Each stays until
-  `lint/check_hook_stubs.py` allows its removal (checked).
 - **Stall watcher.** Q1. Not in this list until ruled.
 
 ## 5. Lanes, smallest first

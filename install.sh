@@ -980,7 +980,7 @@ if [ "$CLOUD" = 1 ]; then
   if command -v jq >/dev/null 2>&1; then
     # merge/cloud_allow.json: the `merge --confirm` and `merge --role` allow rules only a cloud session gets (a local settings.json links to the repo's, which has none).
     # Read from the source checkout, never from main: launch.py's fallback and --dev run the checkout's own merge.py, and
-    # the file landed in the same commit as that merge.py's role gate. A checkout without the file gets no rules.
+    # the file landed in the same commit as that merge.py's role check. A checkout without the file gets no rules.
     ALLOW_FILE="$SRC/merge/cloud_allow.json"
     [ -f "$ALLOW_FILE" ] || ALLOW_FILE=/dev/null   # a source without the file adds no rules
     SRC_SHA=$(git -C "$SRC" rev-parse --short HEAD 2>/dev/null) || SRC_SHA="no git"
