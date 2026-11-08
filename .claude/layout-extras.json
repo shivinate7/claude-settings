@@ -1,14 +1,21 @@
 {
   "artifacts": [
     {"id": "queue", "url": "https://claude.ai/artifact/RddcgXbB6SvTrFZHPmsvFx", "role": "waiting-page", "account": "current"},
-    {"id": "waiting-mockups-v13", "url": "https://claude.ai/artifact/2DodmME3zxVTmi26B3KzBR", "role": "reference", "account": "other", "collections": []},
+    {"id": "waiting-mockups-v13", "url": "https://claude.ai/artifact/2DodmME3zxVTmi26B3KzBR", "role": "reference", "account": "outlook", "collections": []},
     {"id": "c103-brief", "url": "https://claude.ai/artifact/NGf6aaaVp2bF1i3kyhF5HD", "role": "reference", "account": "other", "collections": []},
     {"id": "c127-survey", "url": "https://claude.ai/artifact/K4ixuAMi4ycpBvgm2x4k3H", "role": "reference", "account": "other", "collections": []},
-    {"id": "old-queue", "url": "https://claude.ai/artifact/9PJB2skRSMtCC4XHvzbmB8", "role": "reference", "account": "other", "collections": []},
+    {"id": "old-queue", "url": "https://claude.ai/artifact/9PJB2skRSMtCC4XHvzbmB8", "role": "reference", "account": "outlook", "collections": ["answers", "groups", "items", "meta", "receipts"]},
     {"id": "c52-plan", "url": "https://claude.ai/artifact/U4jM83VeaTVmePCDig78fD", "role": "reference", "account": "other", "collections": []},
     {"id": "roadmap-page", "url": "https://claude.ai/artifact/JGqfvgXBuLqWUm1CX6Bv5h", "role": "reference", "account": "other", "collections": []},
-    {"id": "ios-report", "url": "https://claude.ai/artifact/36CtFQ6CaTszMaxxZvuCXq", "role": "reference", "account": "other", "collections": []},
-    {"id": "mailaudit-page", "url": "https://claude.ai/artifact/FBKSLCBLJsvfNGeePvDz13", "role": "reference", "account": "other", "collections": []}
+    {"id": "ios-report", "url": "https://claude.ai/artifact/36CtFQ6CaTszMaxxZvuCXq", "role": "reference", "account": "outlook", "collections": []},
+    {"id": "mailaudit-page", "url": "https://claude.ai/artifact/FBKSLCBLJsvfNGeePvDz13", "role": "reference", "account": "other", "collections": []},
+    {"id": "roadmap", "url": "https://claude.ai/artifact/R3iCpK91QRjC5he8bwfY7m", "role": "reference", "account": "outlook", "collections": []},
+    {"id": "roadmap-board-options", "url": "https://claude.ai/artifact/38Cu3yZ1vqmFLKZ1tsSxUa", "role": "reference", "account": "outlook", "collections": []},
+    {"id": "waiting-triage", "url": "https://claude.ai/artifact/FukRskG2dnL46mHZVByUDC", "role": "reference", "account": "outlook", "collections": []},
+    {"id": "waiting-page-frame", "url": "https://claude.ai/artifact/1HYd7rvo5GzVpSSCoHX4QF", "role": "reference", "account": "outlook", "collections": []},
+    {"id": "waiting-desk", "url": "https://claude.ai/artifact/KA4nFU4FauQLJgqMdAywVB", "role": "reference", "account": "outlook", "collections": []},
+    {"id": "calm-waiting-page", "url": "https://claude.ai/artifact/73C2uYENSXB5bqgAHuacY1", "role": "reference", "account": "outlook", "collections": []},
+    {"id": "o10-wake-test", "url": "https://claude.ai/artifact/5YrejFue3ocB1PfRNobNsR", "role": "reference", "account": "outlook", "collections": []}
   ],
   "kinds": {
     "actions": {"path": "actions"},
