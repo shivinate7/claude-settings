@@ -2660,6 +2660,14 @@ def _layout_module():
     return layout
 
 
+def _question_form_module():
+    """hooks/question_form.py, told this file's folder, so a stamped copy in guard.d/<id>/ finds the install's
+    lint/ and skills/. The one home of the import."""
+    import question_form
+    question_form.use_hooks_home(_HERE)
+    return question_form
+
+
 def record_branch_of(root):
     """The record branch of the checkout at `root`: lint/layout.py record_branch, else "roadmap" when the
     layout cannot be read."""
@@ -3635,7 +3643,7 @@ from shared_names import DATA_TOOL  # noqa: E402  the one home of the tool name,
 def data_tool_judge(tool_input, cwd=""):
     """((rule, matched), writes): data_tool_hit's verdict and the item writes it judged, for the rule that
     reads the writes again (page-item-design)."""
-    import question_form
+    question_form = _question_form_module()
     return question_form.page_item_hit(tool_input, cwd)
 
 
@@ -3702,7 +3710,7 @@ def page_stale_hit(tool_input, cwd):
     try:
         import contextlib
         import io
-        import question_form
+        question_form = _question_form_module()
         root = question_form.waiting_page_root(tool_input, cwd)
         if not root:
             return None
@@ -3803,7 +3811,7 @@ MOCKUP_HOME_FIX = " (decision mockup-home, a mockup kept off the repo is gone wi
 def mockup_home_hit(writes, tool_input, cwd):
     """(reason, matched) for the first `designs` entry of `writes` with no `file` or a refused one, else None.
     Fails open on any unread state."""
-    import question_form
+    question_form = _question_form_module()
     try:
         root = question_form.waiting_page_root(tool_input, cwd)
         found = question_form.design_file_problems(writes, root) if root else []
@@ -3822,7 +3830,7 @@ def page_design_hit(writes, tool_input, cwd):
     carries both `options` and `designs`: the checker needs the other half, which the write does not hold, so a
     partial update is allowed with one noted line. The pictured items of one call share one deadline. Fails open
     on any unread state."""
-    import question_form
+    question_form = _question_form_module()
     pictured = []
     for op, doc_id, data in question_form.design_writes(writes):
         if op == "update" and not (data.get("options") and data.get("designs")):
@@ -4910,7 +4918,7 @@ def judge(payload) -> None:
     if tool == DATA_TOOL:
         (rule, matched), item_writes = data_tool_judge(tool_input, cwd)
         if rule:
-            import question_form
+            question_form = _question_form_module()
         # One literal refuse() per rule: lint/rule_audit.py reads only string-literal rule ids.
         if rule == "port-question":
             refuse(tool, "deny", "port-question", question_form.PAGE_REASONS["port-question"], matched)
