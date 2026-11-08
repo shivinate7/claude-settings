@@ -1447,10 +1447,10 @@ ROUTE_CITE_RE = re.compile(r"\(route\s+([\w.-]+)\)", re.I)
 MEASURED_RE = re.compile(r"\(measured\b([^)]*)\)", re.I)
 MEASURED_OK_RE = re.compile(r"\s+(\d{4}-\d{2}-\d{2}),\s*\S")
 # "blocked until" and "not available until" wait on another act, so they are a dependency, not a capability.
-# The three "can't" forms the hand-off cite and the cannot-claim check both read; the claim check adds its own phrases.
-_CANT = r"can['’]t|cannot|unable to"
+# The hand-off cite reads the three _clause.CANT_FORMS, the start of the cannot-claim phrases (_clause.CANNOT_FORMS).
 CAPABILITY_RE = re.compile(
-    r"\b(?:%s)\b|\brefuse[sd]?\b|\bdenied\b|\bforbidden\b|\bno access\b" % _CANT
+    r"\b(?:%s)\b|\brefuse[sd]?\b|\bdenied\b|\bforbidden\b|\bno access\b"
+    % "|".join(_clause.form_pattern(form) for form in _clause.CANT_FORMS)
     + r"|\b(?:isn['’]t|not)\s+(?:allowed|permitted)\b|\bunavailable\b|\b403\b"
     r"|\bblocked\b(?!\s+until\b)|\bnot available\b(?!\s+until\b)", re.I)
 CHOICE_RE = re.compile(
