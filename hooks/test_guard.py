@@ -4907,6 +4907,31 @@ sh("git-after-cd: a cd then ; then git -C with a variable folder passes",
    'cd /tmp/w; %s -C "$D" push' % VCS, "allow", cwd=NOGIT)
 sh("git-after-cd: a cd then ; then git -C with a relative folder is refused",
    "cd /tmp/w; %s -C rel push" % VCS, "deny", "git-after-cd", cwd=NOGIT, carries=("&&", "-C"))
+sh("git-after-cd: a cd then ; then git update-ref is refused",
+   "cd /tmp/w; %s update-ref refs/heads/main HEAD" % VCS, "deny", "git-after-cd", cwd=NOGIT,
+   carries=("&&", "-C"))
+sh("git-after-cd: a cd then ; then git rm is refused",
+   "cd /tmp/w; %s rm old.txt" % VCS, "deny", "git-after-cd", cwd=NOGIT, carries=("&&", "-C"))
+sh("git-after-cd: a cd then ; then git mv is refused",
+   "cd /tmp/w; %s mv a.txt b.txt" % VCS, "deny", "git-after-cd", cwd=NOGIT, carries=("&&", "-C"))
+sh("git-after-cd: a cd then ; then git fetch with a src:dst refspec is refused",
+   "cd /tmp/w; %s fetch origin main:main" % VCS, "deny", "git-after-cd", cwd=NOGIT,
+   carries=("&&", "-C"))
+sh("git-after-cd: a cd then ; then git branch -m is refused",
+   "cd /tmp/w; %s branch -m old new" % VCS, "deny", "git-after-cd", cwd=NOGIT, carries=("&&", "-C"))
+sh("git-after-cd: a cd then ; then git branch -M is refused",
+   "cd /tmp/w; %s branch -M main" % VCS, "deny", "git-after-cd", cwd=NOGIT, carries=("&&", "-C"))
+sh("git-after-cd: a cd then ; then git branch -D is refused",
+   "cd /tmp/w; %s branch -D topic" % VCS, "deny", "git-after-cd", cwd=NOGIT, carries=("&&", "-C"))
+sh("git-after-cd: a cd then ; then git branch --delete is refused",
+   "cd /tmp/w; %s branch --delete topic" % VCS, "deny", "git-after-cd", cwd=NOGIT,
+   carries=("&&", "-C"))
+sh("git-after-cd: a cd then ; then a bare git fetch, a read, passes",
+   "cd /tmp/w; %s fetch" % VCS, "allow", cwd=NOGIT)
+sh("git-after-cd: a cd then ; then git push --dry-run passes",
+   "cd /tmp/w; %s push --dry-run" % VCS, "allow", cwd=NOGIT)
+sh("git-after-cd: a cd then ; then git push -n passes",
+   "cd /tmp/w; %s push -n" % VCS, "allow", cwd=NOGIT)
 FAMILY = "kill"  # the family the cases after this section have always run in
 
 sh("playwright: the bare PowerShell read is allowed", "$env:PLAYWRIGHT_BROWSERS_PATH", "allow",
@@ -11287,7 +11312,8 @@ cmk_refuse("a cd into a missing relative folder, then ; add -A and commit, with 
 cmk_allow("a cd into a missing folder, then && add -A and commit, with a triplet tracked in the cwd repo",
           "cd " + slash(CMK_GONE) + " && " + VCS + " add -A && " + VCS + " commit -m x", CMK_CLT)
 # A write after a failed cd joined by `;` is refused in any cwd repo (decision git-after-cd-joins-with-and).
-sh("conflict-markers: a cd into a missing folder, then ; add -A and commit, in a cwd repo whose edit is clean is refused",
+# Ruling: lane brief, coordinator 2026-11-07 16:22 CST.
+sh("git-after-cd: a cd into a missing folder, then ; add -A and commit, in a cwd repo whose edit is clean is refused",
    "cd " + slash(CMK_GONE) + " ; " + VCS + " add -A && " + VCS + " commit -m x", "deny", "git-after-cd",
    cwd=CMK_CL, carries=("&&", "-C"))
 
