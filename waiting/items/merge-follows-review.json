@@ -4,34 +4,35 @@
   "home": "pr-backlog-clear",
   "id": "merge-follows-review",
   "kind": "decision",
+  "multi": true,
   "n": 386,
   "options": [
     {
-      "gain": "Merges keep pace with reviews, finding PRs stop multiplying, and a stall shows in the counts.",
-      "how": "(1) The merge tool builds each batch from PR state: every PR with a done review record on its live head and a lane lint pass. It splits a red batch itself, and builds the next batch while one runs, on top of #1561's ledger. (2) A lane's findings join its next commit, or one follow-up PR per topic. (3) Every runner and coordinator report gives three counts: reviewed PRs waiting past one batch cycle, open PRs with no next act, and finished lanes not archived. A count not read says unknown.",
+      "gain": "The queue drains, and merges keep pace with reviews.",
+      "how": "The merge tool builds each batch from PR state: every PR with a done review record on its live head and a lane lint pass. It splits a red batch itself, and builds the next batch while one runs, on top of #1561's ledger.",
       "key": "a",
-      "label": "All three parts (recommended)",
-      "lose": "Two process changes and one large merge-tool lane. Findings land bundled."
-    },
-    {
-      "gain": "One change, and the queue drains.",
-      "how": "Only part (1) above.",
-      "key": "b",
-      "label": "Part 1 only: the merge tool builds batches",
-      "lose": "New PRs keep piling in."
+      "label": "The merge tool builds each batch (recommended)",
+      "lose": "One large merge-tool lane."
     },
     {
       "gain": "Fewer new PRs at once.",
-      "how": "Only part (2) above.",
+      "how": "A lane's findings join its next commit, or one follow-up PR per topic, not one new lane each.",
+      "key": "b",
+      "label": "Findings ride in their lane (recommended)",
+      "lose": "Findings land bundled, so one red finding holds the others."
+    },
+    {
+      "gain": "A stall shows at once.",
+      "how": "Every runner and coordinator report gives three counts: reviewed PRs waiting past one batch cycle, open PRs with no next act, and finished lanes not archived. A count not read says unknown.",
       "key": "c",
-      "label": "Part 2 only: findings ride in their lane",
-      "lose": "The backlog drains slowly."
+      "label": "Backlog counts in every report (recommended)",
+      "lose": "A few more lines in each report."
     }
   ],
   "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
   "ref": "steps pr-backlog-clear and pr-state-is-on-the-pr; #1561 (the PR ledger)",
   "short": "Merges keep pace with reviews",
   "status": "open",
-  "title": "Make merges keep pace with reviews: which parts?",
-  "why": "The coordinator recommends a: part 1 alone drains the queue but does not slow new PRs, and part 2 alone does not drain it."
+  "title": "Make merges keep pace with reviews: which parts do you want?",
+  "why": "The coordinator recommends all three: part a alone drains the queue but does not slow new PRs, and part b alone does not drain it."
 }
