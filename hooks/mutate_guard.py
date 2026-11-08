@@ -3027,17 +3027,10 @@ def run_mutant(sources, work: str, entry):
         os.makedirs(os.path.join(root, "janitor"), exist_ok=True)
         for name in ("sweep.py", "temp_sweep.py"):
             shutil.copy(os.path.join(HERE, "..", "janitor", name), os.path.join(root, "janitor"))
-        # guard.py reads lint/layout.py from ../lint (_layout_module), which is root/lint for this copy. Without
-        # it the role-model table reads as unread and every role-model arm passes unjudged.
-        shutil.copytree(os.path.join(HERE, "..", "lint"), os.path.join(root, "lint"),
-                        ignore=shutil.ignore_patterns("__pycache__"))
-        # guard_merge.merge_module loads merge/merge.py beside the hooks folder (the home of the review record
-        # marker, and of the merge reads). The mutant's config folder holds no pointer to a clone, so without
-        # this copy the tool reads as unloadable and the rules that read it pass unjudged.
-        os.makedirs(os.path.join(root, "merge"), exist_ok=True)
-        shutil.copy(os.path.join(HERE, "..", "merge", "merge.py"), os.path.join(root, "merge"))
-        os.makedirs(os.path.join(root, "actions", "ci-alarm"), exist_ok=True)  # merge.py reads the alarm events at import
-        shutil.copy(os.path.join(HERE, "..", "actions", "ci-alarm", "events.json"), os.path.join(root, "actions", "ci-alarm"))
+        # guard.py reads lint/layout.py from ../lint (_layout_module), and guard_merge loads merge/merge.py (the
+        # home of the review record marker). The mutant's config folder holds no pointer to a clone, so this
+        # copy lays out lint/, merge/ and the alarm events beside hooks/.
+        mutate_shared.guard_beside(root)
     else:
         copy_path = os.path.join(work, "%s_%s.py" % (stem, mutate_shared.safe_name(label)))
         mutated = sources[target].replace(old, new, 1)
