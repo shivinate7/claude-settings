@@ -13300,6 +13300,16 @@ class ReviewFixBase(ReviewEnv):
                 rc, out, err = self.review_with_base(REVIEW_OLD_HEAD, self.record_host(*comments))
                 self.assert_refused(rc, out, err)
 
+    def test_a_fix_check_with_no_record_for_its_base_names_the_order_record_first_then_push(self):
+        # Control: the base with its record is accepted. With no record for the base, the refusal names the order: the reviewed head's
+        # record is posted before the fix is pushed, so a fix check has a base to start from.
+        clean = record_text(head=REVIEW_OLD_HEAD, rounds=REVIEW_PASS)
+        rc, out, err = self.review_with_base(REVIEW_OLD_HEAD, self.record_host(review_comment(1, 7, clean)))
+        self.assertEqual(rc, 0, "the control base was refused:\n" + out + err)
+        rc, out, err = self.review_with_base(REVIEW_OLD_HEAD, self.record_host())
+        self.assert_refused(rc, out, err)
+        self.assertIn("before the fix is pushed", err, "the refusal does not name the order (record the reviewed head first, then push the fix):\n" + err)
+
     def test_an_older_fix_line_does_not_block_a_base_on_a_newer_record_without_one(self):
         # only the newest earlier record decides, so a fix line on an older record does not refuse a base the newest record names
         older = review_comment(1, 7, record_text(head=self.EARLIER_HEAD, rounds=REVIEW_PASS, fix=(fix_check_line(head=self.OTHER_HEAD),)))
