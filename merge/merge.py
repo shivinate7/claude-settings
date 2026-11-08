@@ -3559,7 +3559,7 @@ def main(argv, host=None, lock=None):
                     if found["behind_by"]:
                         problem = f"the fix base {a.fix_check[0][:9]} is {'behind' if not found['ahead_by'] else 'diverged from'} the live head {info['head'][:9]}: it must be an ancestor of it"
                 final = next((r for r in reversed(earlier) if max((i for i, *_ in r["rounds"]), default=0) >= REVIEW_LAST_ROUND), None)  # the newest earlier record that reached the final round: a short record written before the write step floored it does not hide it
-                if not problem and final:  # a passing fix keeps what the final round gave (decision hold-unsafe-after-round-3), first fix check or chained, or from the --fix-base-record source
+                if not problem and final:  # a passing fix keeps the net value the final round gave (decision hold-unsafe-after-round-3), first fix check or chained, or from the --fix-base-record source. Guard and kind are frozen too, so a relabel cannot drop the net-value test or the round count owed: the lane's reading of that decision, approved by the coordinator, not the owner's words
                     moved = [f"{label} {old}, so {flag} must be {old}, not '{new}'" for label, flag, old, new in (("Net value", "--net-value", final["net"], a.net_value), ("Guard or check", "--guard", final["guard"], a.guard), ("Kind", "--kind", final["kind"], a.kind)) if old != new]
                     if moved:
                         problem = f"the record on head {final['head'][:9]} is at the final round, and a fix check keeps its net value, guard and kind: " + "; ".join(moved)
