@@ -13383,6 +13383,21 @@ sh("builder-test: shell pathlib write to a test under Path.cwd() is refused",
 sh("builder-test: shell open-write to a test under os.getcwd() is refused",
    "python3 - <<'EOF'\nimport os\nopen(os.path.join(os.getcwd(), 'tests', 'x.py'), 'w').write('x')\nEOF",
    "deny", rule=BT, carries=("test-author",), **BR)
+# A sed script is a string, not a path. Its words split at `/` (`"testdata"`, `testing`, `tests`) name no
+# file, so a sed that edits product code stays allowed. The controls pin that a sed on a real test path
+# is still refused, whichever argument holds it.
+sh("builder-test: shell sed -i on hooks/guard.py, a script naming the quoted testdata word, is allowed",
+   "sed -i 's/\"testdata\"/\"x\"/' hooks/guard.py", "allow", **BR)
+sh("builder-test: shell sed -i on hooks/guard.py, a script naming testing, is allowed",
+   "sed -i 's/testing/x/' hooks/guard.py", "allow", **BR)
+sh("builder-test: shell sed -i -e on merge/merge.py, a script naming tests, is allowed",
+   "sed -i -e 's/tests/x/' merge/merge.py", "allow", **BR)
+sh("builder-test: shell sed -i on tests/helper.py is refused",
+   "sed -i 's/a/b/' tests/helper.py", "deny", rule=BT, carries=("test-author",), **BR)
+sh("builder-test: shell sed -i on testing/x.py is refused",
+   "sed -i 's/a/b/' testing/x.py", "deny", rule=BT, carries=("test-author",), **BR)
+sh("builder-test: shell sed -i -e on hooks/guard.py and tests/x.py is refused",
+   "sed -i -e 's/a/b/' hooks/guard.py tests/x.py", "deny", rule=BT, carries=("test-author",), **BR)
 
 # ---- the diff, judged at commit, push and SubagentStop
 FAMILY = "diff"
