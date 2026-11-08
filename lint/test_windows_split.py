@@ -13,7 +13,8 @@ Why not rule_audit.py: it reads step names only. This needs job boundaries and `
 Line-based parse, stdlib only, like rule_audit. Only single-line `run: <cmd>` steps count.
 CHECKS_YML overrides the path (used for red runs on a scratch copy).
 
-CiCoverage also proves every test_*.py, test_*.sh and *.test.ps1 file has a run step.
+CiCoverage also proves every tracked test file has a run step: test_*.py, test_*.sh, test_*.mjs, *.test.mjs,
+*.test.js and *.test.ps1. A file the mod-test collector prints is covered by the step that runs that collector.
 
 SplitJobs does the same for the Linux split (checks, checks-merge-install) and the macOS split (checks-macos, checks-macos-b):
 each suite runs in exactly one job of its split, with its pinned `if:` and `shell:`.
@@ -1551,14 +1552,17 @@ class ModTestStepChecker(unittest.TestCase):
 
 
 # ---- every test file runs in a CI step. A test file that no run step names never fails a pull
-# request, so its red stays invisible: lint/test_check_agent_models.py ran in no step. Failure
-# classes: (a) product, a test file has no run line in checks.yml; (b) test, this parser misreads a
-# run line (a comment, a quote, a block scalar); (c) stale, a test file was renamed or removed and
-# its run line was not. Scope: test_*.py, test_*.sh and *.test.ps1 outside hidden folders.
-# mutate_*.py is not a suite (mutate_shared.py is plumbing), and mods/*/*.test.mjs runs through
-# .github/scripts/mod-tests.sh (the "Mod and map-skill tests" step of three jobs), so neither is listed here.
+# request, so its red stays invisible. Failure classes: (a) product, a test file has no run line in
+# checks.yml; (b) test, this parser misreads a run line (a comment, a quote, a block scalar); (c) stale,
+# a test file was renamed or removed and its run line was not. Scope: the tracked files whose basename
+# matches TEST_FILE. Tracked only, because a file git does not track, or a copy under node_modules, is
+# not a suite CI runs. A `_test_` name is a helper (lint/_test_git.py) and never matches. mutate_*.py is
+# not a suite (mutate_shared.py is plumbing). The mod and map-skill tests are not listed by name: COLLECTOR
+# prints them, and a file it prints counts as covered only when a run step names COLLECTOR, since that
+# step is what runs them.
 REPO = os.path.normpath(os.path.join(HERE, ".."))
-TEST_FILE = re.compile(r"^(?:test_.*\.(?:py|sh)|.*\.test\.ps1)$")
+COLLECTOR = ".github/scripts/mod-tests.sh"
+TEST_FILE = re.compile(r"^(?:test_.*\.(?:py|sh|mjs)|.*\.test\.(?:mjs|js|ps1))$")
 
 
 def strip_comment(text):
@@ -1618,24 +1622,33 @@ def names_path(commands, path):
 
 
 def find_test_files(root):
-    """Repo-relative posix paths of the test files, skipping hidden folders such as .git and .claude.
-    A folder the scan cannot read raises. It must fail the test, never read as holding no tests."""
-    def unreadable(error):
-        raise error
-    found = []
-    for folder, dirs, names in os.walk(root, onerror=unreadable):
-        dirs[:] = [d for d in dirs if not d.startswith(".")]
-        found += [os.path.relpath(os.path.join(folder, n), root).replace(os.sep, "/")
-                  for n in names if TEST_FILE.match(n)]
-    return sorted(found)
+    """Repo-relative posix paths of the tracked test files under `root`, sorted. git lists the paths, so an
+    untracked file is not a test. A folder that is not a git repo fails the read and raises, so it never reads
+    as holding no tests."""
+    listed = subprocess.run(["git", "ls-files", "-z"], cwd=root, check=True, stdout=subprocess.PIPE).stdout
+    paths = [p for p in listed.decode("utf-8").split("\0") if p]
+    return sorted(p for p in paths if TEST_FILE.match(p.split("/")[-1]))
+
+
+def collected_files(root):
+    """The files the collector prints for `list` in `root`, one repo-relative path per line. A nonzero exit raises,
+    so a collector that fails cannot read as an empty list."""
+    run = subprocess.run([shutil.which("bash") or "bash", COLLECTOR, "list"], cwd=root,
+                         stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    if run.returncode != 0:
+        raise RuntimeError("%s list exits %d: %s" % (COLLECTOR, run.returncode, run.stderr.strip()))
+    return [line for line in run.stdout.splitlines() if line]
 
 
 class CiCoverage(unittest.TestCase):
     def test_every_test_file_runs_in_a_ci_step(self):
         with open(CHECKS, encoding="utf-8") as handle:
             commands = run_commands(handle.read())
-        missing = [p for p in find_test_files(REPO) if not names_path(commands, p)]
-        self.assertEqual(missing, [], "no run step in checks.yml names: " + ", ".join(missing))
+        collected = set(collected_files(REPO)) if names_path(commands, COLLECTOR) else set()
+        missing = [p for p in find_test_files(REPO) if p not in collected and not names_path(commands, p)]
+        self.assertEqual(missing, [], "no run step in checks.yml covers: " + ", ".join(missing) + ". "
+                         "Add a run step in .github/workflows/checks.yml, or, for a helper that holds no tests, "
+                         "rename it to _test_<name>.")
 
     def test_a_comment_line_is_not_a_run(self):
         # Rows: a comment line, a trailing comment, and a comment line inside a block. Named failure: a
