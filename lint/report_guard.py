@@ -943,7 +943,8 @@ def departs_problem(text):
 # `step:<slug>` is checked for form only. A guard line ("Guard: ..." or "guard — ...", in any section) must hold a
 # ref, a step or a debt between its label and the end of its line, whether or not an admission was found. A negator
 # clears the word debt only within DEBT_NEGATOR_BEFORE words before it or DEBT_NEGATOR_AFTER words after it, in its
-# clause: "a debt is not needed" names none, and "Debt check-gap filed (not urgent)" names one.
+# clause or, for a label such as "Debt: not needed", in the clause after the label: "a debt is not needed" and
+# "Debt: not needed" name none, and "Debt check-gap filed (not urgent)" names one.
 MISTAKE_FIRST_PERSON_RE = re.compile(r"\bI\b|\b[Mm]y\b")
 # "broke the batch into three lanes" splits a thing and admits nothing: "into" is followed by a count or a
 # parts noun. "broke the build into a red state" still admits. The words between may hold no "by", "when"
@@ -959,6 +960,7 @@ MISTAKE_NEGATOR_RE = re.compile(r"\bnot\b|n't\b|\bnever\b|\bno\b|\bnothing\b", r
 MISTAKE_NEGATOR_GAP = 3
 DEBT_NEGATOR_BEFORE = 3
 DEBT_NEGATOR_AFTER = 2
+DEBT_LABEL_BREAK_RE = re.compile(r"\s*(?::|[\u2014\u2013]|-{1,2}\s)")
 MISTAKE_SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?;])\s+|\n")
 MISTAKE_CLAUSE_SPLIT_RE = re.compile(
     r"[,:;\u2014\u2013]|\s-{1,2}\s|\b(?:because|since|but|while|although)\b", re.I)
@@ -1009,14 +1011,19 @@ def _sentences(text):
 
 def _debt_named(text):
     """True when `text` holds the word debt that no negator near it clears. Words split on whitespace only, so a
-    contraction such as isn't stays one word."""
+    contraction such as isn't stays one word. Each window stops at a clause break, so "No guard yet, debt filed"
+    names a debt. A label break right after the word ("Debt: not needed") is skipped, so its value is read."""
     for sentence in _sentences(text):
-        for clause in MISTAKE_CLAUSE_SPLIT_RE.split(sentence):
-            for debt in MISTAKE_DEBT_RE.finditer(clause):
-                near = clause[:debt.start()].split()[-DEBT_NEGATOR_BEFORE:] + \
-                    clause[debt.end():].split()[:DEBT_NEGATOR_AFTER]
-                if not MISTAKE_NEGATOR_RE.search(" ".join(near)):
-                    return True
+        breaks = [(m.start(), m.end()) for m in MISTAKE_CLAUSE_SPLIT_RE.finditer(sentence)]
+        for debt in MISTAKE_DEBT_RE.finditer(sentence):
+            start = max([end for _, end in breaks if end <= debt.start()], default=0)
+            label = DEBT_LABEL_BREAK_RE.match(sentence, debt.end())
+            after = label.end() if label else debt.end()
+            stop = min([begin for begin, _ in breaks if begin >= after], default=len(sentence))
+            near = sentence[start:debt.start()].split()[-DEBT_NEGATOR_BEFORE:] + \
+                sentence[after:stop].split()[:DEBT_NEGATOR_AFTER]
+            if not MISTAKE_NEGATOR_RE.search(" ".join(near)):
+                return True
     return False
 
 
