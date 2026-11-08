@@ -11,7 +11,7 @@ import { MAP_FORMAT_VERSION, readFormatVersion } from './lib/map-config.mjs';
 
 /**
  * The steps, in order. Each `run` takes one map file's text and answers it in the next version.
- * Steps 4 to 5, 3 to 4 and 2 to 3: no file changes (see their comments).
+ * Steps 5 to 6, 4 to 5, 3 to 4 and 2 to 3: no file changes (see their comments).
  * Step 1 to 2: version 1 map lines carried line references, and a line number goes stale with the next edit.
  * It removes the three forms of them. A reference that was rewritten by hand into other words is not a form it can find.
  * `run` takes the config too: a ":N" goes only after a name whose extension is in `codeExtensions`, so `example.com:3000` stays.
@@ -38,6 +38,9 @@ export const STEPS = [
   { from: 3, run: (text) => text },
   // Version 5 adds the tested-by line and MAP11. A line is optional, so a version 4 map holds none: no file changes, and the step only moves the version.
   { from: 4, run: (text) => text },
+  // Version 6 lets a record name any file: a non-code file that a decision or debt record names needs a map line, with a decisions line and a debts line.
+  // A version 5 map holds none of them, so no file changes: the step only moves the version. The check then asks for the lines the records call for.
+  { from: 5, run: (text) => text },
 ];
 
 const mapFilesOf = (root) => {
