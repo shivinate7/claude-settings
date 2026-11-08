@@ -67,7 +67,10 @@ Shell tools (Bash, PowerShell), in judge_shell order:
   cite-by-id          deny. A commit message or PR body that cites a record by its path.
   lane-by-slug         deny. A commit message or PR text that names a lane by a session number.
                        (lane-by-slug)
-  machine-wide-kill    deny. A kill by name or pattern, or of a pid that is not a descendant of
+  scratchpad-commit-msg-owner  deny. A commit from an agent's call whose -F message file resolves
+                       into any session's scratchpad. `-F -`, `-m`, an orchestrator's call and a file
+                       elsewhere pass. (scratchpad-commit-msg-owner)
+  machine-wide-kill   deny. A kill by name or pattern, or of a pid that is not a descendant of
                        this session. (a-kill-by-pid-needs-an-owned-pid)
   detached-launch      deny. A command that starts a process and detaches it from the session.
   wsl-allow-list       deny. A `wsl` call outside the fixed list of test commands. (wsl-allow-list)
@@ -319,6 +322,7 @@ import difflib
 import importlib
 import importlib.machinery
 import importlib.util
+import itertools
 import json
 import os
 import re
@@ -440,7 +444,7 @@ while True:
         )
         _loading = "guard_rm_var"
         from guard_rm_var import (
-            rm_after_cd_hits, rm_after_cd_reason, rm_var_hits, rm_var_reason,
+            _rm_values, rm_after_cd_hits, rm_after_cd_reason, rm_var_hits, rm_var_reason,
         )
         _loading = "guard_mask_script"
         from guard_mask_script import (
@@ -1398,6 +1402,46 @@ UNREAD_REASON = (
     "Remedy: pass the message inline, or name a file this directory can read. "
     "(decision cite-by-id-refuses-unread-file, an unread message file is refused, not passed)"
 )
+
+
+SCRATCH_MSG_REASON = (
+    "Rule (Git): this commit takes its message from a file in a folder that every agent of the session "
+    "shares, so the file may hold another agent's message and the commit would carry it. "
+    "Remedy: pass your own message with `-F -` and a heredoc, or with `-m`. "
+    "(decision scratchpad-commit-msg-owner, an agent commits the message it wrote itself)"
+)
+
+
+_SCRATCH_EXPANSION = re.compile(r"\$(?:\{(\w+)\}|(\w+))")
+
+
+def scratchpad_commit_file(segments, number: int, cwd: str, ends, scope: str) -> str:
+    """Return the first message file of this commit segment that resolves into any session's
+    scratchpad, else ''. The path alone decides, never the file's text, and a link is judged by the
+    file it resolves to. A relative path is read from the directory the shell is in when the segment
+    runs (`dir_before_segment`, then the call's own `-C`); a name `scope` binds to literals is
+    expanded (`_rm_values`), and any other variable stays as the environment gives it. When that
+    directory cannot be told, only an absolute path is judged."""
+    segment = segments[number]
+    call = git_call_of(segment)
+    if call is None or call[0] != "commit":
+        return ""
+    where = dir_before_segment(segments, number, cwd, ends)
+    tokens = segment_tokens(segment)
+    named = _segment_git_c_target(tokens) if tokens else None
+    if named is not None:
+        where = None if _unexpanded(named) else shell_abs(named, where)
+    values = _rm_values(scope)
+    for name in message_sources(call[1], "commit")[1]:
+        names = sorted({a or b for a, b in _SCRATCH_EXPANSION.findall(name) if values.get(a or b)})
+        picks = list(itertools.product(*(values[n] for n in names)))[:64]
+        for pick in picks or [()]:
+            mapping = dict(zip(names, pick))
+            path = _SCRATCH_EXPANSION.sub(lambda m: mapping.get(m.group(1) or m.group(2), m.group(0)), name)
+            absolute = _absolute(path, where)
+            if os.path.isabs(absolute) and in_any_session_scratchpad(os.path.normpath(absolute)):
+                return name
+    return ""
 
 
 def heredoc_offsets(segments, ends, bodies_kept=True):
@@ -3899,9 +3943,17 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
     # 1d. A commit message or PR body that cites a record by its path.
     cite_where = command_root(stripped, cwd)
     # each segment takes its own bodies: heredoc_offsets counts the headers ahead of it (1c's split)
-    for segment, before in zip(segments, heredoc_offsets(segments, ends, stripped == raw)):
+    number = 0
+
+    def scratchpad_message_file(segment, where):   # the segment at `number`, read with its place in the command
+        return scratchpad_commit_file(segments, number, cwd, ends, stripped)
+
+    for number, (segment, before) in enumerate(zip(segments, heredoc_offsets(segments, ends, stripped == raw))):
         if not segment.strip():
             continue
+        matched = agent and scratchpad_message_file(segment, cite_where)
+        if matched:
+            refuse(tool, "deny", "scratchpad-commit-msg-owner", SCRATCH_MSG_REASON, matched)
         matched = cited_record_path(segment, raw, cite_where, before)
         if matched.startswith(UNREAD_MARK):
             refuse(tool, "deny", "cite-by-id", UNREAD_REASON, matched[len(UNREAD_MARK):])
