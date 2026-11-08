@@ -13410,6 +13410,16 @@ add("builder-test: Edit of .xctestplan that adds skippedTests is refused", "deny
 add("builder-test: Edit of .xctestplan that adds codeCoverage is allowed", "allow", tool="Edit",
     file_path=XCTESTPLAN, new_string='"codeCoverage" : true', **B)
 add("test-author: Edit of .xctestplan is allowed", "allow", tool="Edit", file_path=XCTESTPLAN, **A)
+# A whole-file test config is refused by its path, whatever the content: the runner's own config files.
+for _path, _text in (
+    (".mocharc.yml", "reporter: dot\n"),
+    ("vitest.workspace.ts", "export default []\n"),
+    ("playwright.config.ts", "export default { reporter: 'dot' }\n"),
+    ("karma.conf.js", "module.exports = {}\n"),
+    ("App.xctestplan", '"testExecutionOrdering" : "random"'),
+):
+    add("builder-test: Edit of %s, a whole-file test config, is refused" % _path, "deny", rule=BT,
+        tool="Edit", file_path=_path, new_string=_text, **B)
 
 # ---- a builder's shell write to a test file: a redirect, tee, sed -i, or a python or node script that
 # opens it for write. A read, a write to product code and a recovery are allowed. BR is a builder in a checkout.
@@ -13500,6 +13510,14 @@ sh("builder-test: shell append to package.json passes the shell step", "echo x >
    "allow", **BR)
 sh("builder-test: shell recovery by git restore of pytest.ini is allowed", "git restore pytest.ini",
    "allow", **BR)
+# Three more shell forms that write a whole-file test config: tee, sed -i, and a python heredoc open-write.
+sh("builder-test: shell write of pytest.ini, tee, is refused", "printf '[pytest]\\n' | tee pytest.ini",
+   "deny", rule=BT, carries=("test-author",), **BR)
+sh("builder-test: shell write of pytest.ini, sed -i, is refused", "sed -i s/a/b/ pytest.ini", "deny",
+   rule=BT, carries=("test-author",), **BR)
+sh("builder-test: shell write of pytest.ini, python heredoc open-write, is refused",
+   "python3 - <<'EOF'\nopen('pytest.ini', 'w').write('[pytest]')\nEOF", "deny", rule=BT,
+   carries=("test-author",), **BR)
 
 # Review false alarms: a read whose argument is a mutating word stays allowed, and a name that a
 # heredoc rebinds is read at its new value, so a write to product code after the rebind is allowed.
@@ -13758,6 +13776,33 @@ _repo = diff_repo("b-jest-config-plain", _put("jest.config.js", "module.exports 
                   commit=True, files={**BASE_FILES, "jest.config.js": "module.exports = {verbose: false}\n"})
 sh("builder-diff: commit with a jest.config.js change that disables no test is denied", COMMIT, "deny",
    rule=BDIFF, cwd=_repo, agent_id="bld1", agent_type="builder")
+
+# ---- owned sections of setup.cfg and tox.ini: [tool:pytest], and a [testenv] or [testenv:*] whose body names
+# a test runner. [tox] and a [testenv:lint] that runs flake8 are not owned.
+_owned_tox = diff_repo("b-owned-tox", lambda w: None, files={
+    **BASE_FILES, "setup.cfg": "[tool:pytest]\nminversion = 7.0\n",
+    "tox.ini": "[tox]\nenvlist = py\n\n[testenv]\ncommands = pytest -q\n\n[testenv:lint]\ncommands = flake8 --ignore=E203\n"})
+TOX = dict(B, cwd=_owned_tox)
+add("builder-test: Edit of setup.cfg [tool:pytest] is refused", "deny", rule=BT, tool="Edit",
+    file_path="setup.cfg", old_string="[tool:pytest]\nminversion = 7.0",
+    new_string="[tool:pytest]\nminversion = 8.0", **TOX)
+add("builder-test: Edit of a tox.ini [testenv] that runs pytest is refused", "deny", rule=BT, tool="Edit",
+    file_path="tox.ini", old_string="[testenv]\ncommands = pytest -q",
+    new_string="[testenv]\ncommands = pytest -q -x", **TOX)
+add("builder-test: Edit of a tox.ini [testenv:lint] that runs flake8 is allowed", "allow", tool="Edit",
+    file_path="tox.ini", old_string="commands = flake8 --ignore=E203",
+    new_string="commands = flake8 --ignore=E203 --max-line-length=100", **TOX)
+add("builder-test: Edit of tox.ini [tox] envlist is allowed", "allow", tool="Edit", file_path="tox.ini",
+    old_string="envlist = py", new_string="envlist = py, lint", **TOX)
+# An empty manifest (test-practices P8): the owned jest key is refused; dependencies, not owned, are allowed.
+_empty = diff_repo("b-empty-manifest", lambda w: None, files={**BASE_FILES, "package.json": ""})
+EMPTY = dict(B, cwd=_empty)
+add("builder-test: Edit of an empty package.json that adds a jest key is refused", "deny", rule=BT,
+    tool="Edit", file_path="package.json", old_string="",
+    new_string='{\n  "jest": {\n    "testEnvironment": "node"\n  }\n}\n', **EMPTY)
+add("builder-test: Edit of an empty package.json that adds dependencies is allowed", "allow", tool="Edit",
+    file_path="package.json", old_string="",
+    new_string='{\n  "dependencies": {\n    "a": "1"\n  }\n}\n', **EMPTY)
 _repo = diff_repo("b-reverted", lambda w: (write(os.path.join(w, "tests/test_a.py"), "pass\n"),
                                            write(os.path.join(w, "tests/test_a.py"),
                                                  BASE_FILES["tests/test_a.py"])))
